@@ -764,7 +764,10 @@ export const listCommand = buildListCommand("log", {
       }
 
       const { result, hint } = await withProgress(
-        { message: "Fetching logs...", json: flags.json },
+        {
+          message: `Fetching logs (up to ${flags.limit})...`,
+          json: flags.json,
+        },
         () => executeTraceSingleFetch(org, traceId, flags)
       );
       yield new CommandOutput(result);
@@ -805,7 +808,10 @@ export const listCommand = buildListCommand("log", {
       }
 
       const { result, hint } = await withProgress(
-        { message: "Fetching logs...", json: flags.json },
+        {
+          message: `Fetching logs (up to ${flags.limit})...`,
+          json: flags.json,
+        },
         () => executeSingleFetch(org, project, flags)
       );
       yield new CommandOutput(result);

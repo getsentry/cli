@@ -347,7 +347,10 @@ export async function handleOrgAll<TEntity, TWithOrg>(
   const { config, org, flags, contextKey, cursor } = options;
 
   const response = await withProgress(
-    { message: `Fetching ${config.entityPlural}...`, json: flags.json },
+    {
+      message: `Fetching ${config.entityPlural} (up to ${flags.limit})...`,
+      json: flags.json,
+    },
     () =>
       config.listPaginated(org, {
         cursor,
@@ -408,7 +411,10 @@ export async function handleAutoDetect<TEntity, TWithOrg>(
   } = await resolveOrgsForListing(undefined, cwd);
 
   const allItems = await withProgress(
-    { message: `Fetching ${config.entityPlural}...`, json: flags.json },
+    {
+      message: `Fetching ${config.entityPlural} (up to ${flags.limit})...`,
+      json: flags.json,
+    },
     async () => {
       if (orgsToFetch.length > 0) {
         const results = await Promise.all(
@@ -536,7 +542,10 @@ export async function handleExplicitOrg<TEntity, TWithOrg>(
 ): Promise<ListResult<TWithOrg>> {
   const { config, org, flags, noteOrgScoped = false } = options;
   const items = await withProgress(
-    { message: `Fetching ${config.entityPlural}...`, json: flags.json },
+    {
+      message: `Fetching ${config.entityPlural} (up to ${flags.limit})...`,
+      json: flags.json,
+    },
     () => fetchOrgSafe(config, org)
   );
 
@@ -588,7 +597,10 @@ export async function handleExplicitProject<TEntity, TWithOrg>(
     );
   }
   const raw = await withProgress(
-    { message: `Fetching ${config.entityPlural}...`, json: flags.json },
+    {
+      message: `Fetching ${config.entityPlural} (up to ${flags.limit})...`,
+      json: flags.json,
+    },
     () => listForProject(org, project)
   );
   const items = raw.map((entity) => config.withOrg(entity, org));
@@ -637,7 +649,10 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
 ): Promise<ListResult<TWithOrg>> {
   const { flags, orgAllFallback } = options;
   const { projects: matches, orgs } = await withProgress(
-    { message: `Fetching ${config.entityPlural}...`, json: flags.json },
+    {
+      message: `Fetching ${config.entityPlural} (up to ${flags.limit})...`,
+      json: flags.json,
+    },
     () => findProjectsBySlug(projectSlug)
   );
 

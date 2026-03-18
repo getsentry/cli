@@ -175,7 +175,10 @@ export const logsCommand = buildCommand({
     }
 
     const logs = await withProgress(
-      { message: "Fetching trace logs...", json: flags.json },
+      {
+        message: `Fetching trace logs (up to ${flags.limit})...`,
+        json: flags.json,
+      },
       () =>
         listTraceLogs(org, traceId, {
           statsPeriod: flags.period,

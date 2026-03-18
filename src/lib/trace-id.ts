@@ -5,7 +5,7 @@
  * Used by `trace logs`, `log list`, and `span list` commands.
  */
 
-import { HEX_ID_RE, UUID_DASH_RE, validateHexId } from "./hex-id.js";
+import { HEX_ID_RE, normalizeHexId, validateHexId } from "./hex-id.js";
 
 /**
  * Regex for a valid 32-character hexadecimal trace ID.
@@ -25,11 +25,7 @@ export const TRACE_ID_RE = HEX_ID_RE;
  * @returns `true` if the value would pass {@link validateTraceId}
  */
 export function isTraceId(value: string): boolean {
-  let trimmed = value.trim().toLowerCase();
-  if (UUID_DASH_RE.test(trimmed)) {
-    trimmed = trimmed.replace(/-/g, "");
-  }
-  return HEX_ID_RE.test(trimmed);
+  return HEX_ID_RE.test(normalizeHexId(value));
 }
 
 /**

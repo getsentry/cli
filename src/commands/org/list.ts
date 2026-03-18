@@ -132,7 +132,10 @@ export const listCommand = buildCommand({
     applyFreshFlag(flags);
 
     const orgs = await withProgress(
-      { message: "Fetching organizations...", json: flags.json },
+      {
+        message: `Fetching organizations (up to ${flags.limit})...`,
+        json: flags.json,
+      },
       () => listOrganizationsUncached()
     );
     const limitedOrgs = orgs.slice(0, flags.limit);

@@ -25,6 +25,24 @@ export const UUID_DASH_RE =
 const MAX_DISPLAY_LENGTH = 40;
 
 /**
+ * Normalize a potential hex ID: trim, lowercase, strip UUID dashes.
+ * Does NOT validate — call this before checking {@link HEX_ID_RE}.
+ *
+ * Extracted so that both {@link validateHexId} and non-throwing predicates
+ * (like `isTraceId`) share identical normalization logic.
+ *
+ * @param value - The raw string to normalize
+ * @returns The trimmed, lowercased string with UUID dashes stripped if applicable
+ */
+export function normalizeHexId(value: string): string {
+  let trimmed = value.trim().toLowerCase();
+  if (UUID_DASH_RE.test(trimmed)) {
+    trimmed = trimmed.replace(/-/g, "");
+  }
+  return trimmed;
+}
+
+/**
  * Validate that a string is a 32-character hexadecimal ID.
  * Trims whitespace and normalizes to lowercase before validation.
  *
@@ -44,25 +62,20 @@ const MAX_DISPLAY_LENGTH = 40;
  * @throws {ValidationError} If the format is invalid
  */
 export function validateHexId(value: string, label: string): string {
-  let trimmed = value.trim().toLowerCase();
+  const normalized = normalizeHexId(value);
 
-  // Auto-correct UUID format: strip dashes (8-4-4-4-12 → 32 hex chars)
-  if (UUID_DASH_RE.test(trimmed)) {
-    trimmed = trimmed.replace(/-/g, "");
-  }
-
-  if (!HEX_ID_RE.test(trimmed)) {
+  if (!HEX_ID_RE.test(normalized)) {
     const display =
-      trimmed.length > MAX_DISPLAY_LENGTH
-        ? `${trimmed.slice(0, MAX_DISPLAY_LENGTH - 3)}...`
-        : trimmed;
+      normalized.length > MAX_DISPLAY_LENGTH
+        ? `${normalized.slice(0, MAX_DISPLAY_LENGTH - 3)}...`
+        : normalized;
     throw new ValidationError(
       `Invalid ${label} "${display}". Expected a 32-character hexadecimal string.\n\n` +
         "Example: abc123def456abc123def456abc123de"
     );
   }
 
-  return trimmed;
+  return normalized;
 }
 
 /**

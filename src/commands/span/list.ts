@@ -262,7 +262,7 @@ export const listCommand = buildCommand({
 
     // Fetch spans from EAP endpoint
     const { data: spanItems, nextCursor } = await withProgress(
-      { message: "Fetching spans...", json: flags.json },
+      { message: `Fetching spans (up to ${flags.limit})...`, json: flags.json },
       () =>
         listSpans(org, project, {
           query: apiQuery,
