@@ -301,6 +301,12 @@ export function generateBashCompletion(binaryName: string): string {
         local val_var="$(__${binaryName}_varname "\${cmd}")_$(__${binaryName}_varname "\${subcmd}")_$(__${binaryName}_varname "\${prev#--}")_values"
         if [[ -n "\${!val_var+x}" ]]; then
           COMPREPLY=($(compgen -W "\${!val_var}" -- "\${cur}"))
+        else
+          # Fallback for standalone commands (subcmd is a flag, not a subcommand)
+          local standalone_val_var="$(__${binaryName}_varname "\${cmd}")_$(__${binaryName}_varname "\${prev#--}")_values"
+          if [[ -n "\${!standalone_val_var+x}" ]]; then
+            COMPREPLY=($(compgen -W "\${!standalone_val_var}" -- "\${cur}"))
+          fi
         fi`
     : "";
 
@@ -520,7 +526,9 @@ function __${binaryName}_complete_dynamic
   # commandline -ct: the current token being completed (the partial)
   set -l preceding (commandline -opc)
   set -l current (commandline -ct)
-  ${binaryName} __complete $preceding[2..] $current 2>/dev/null | while read -l line
+  # Quote $current so an empty partial (TAB after space) is passed as ""
+  # instead of being silently dropped by fish's empty-list expansion.
+  ${binaryName} __complete $preceding[2..] "$current" 2>/dev/null | while read -l line
     echo $line
   end
 end
