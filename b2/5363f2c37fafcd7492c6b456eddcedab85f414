@@ -1,0 +1,44 @@
+# Fix CLI-G5: "Error: Directories cannot be read like files"
+
+## Problem
+
+Sentry issue [CLI-G5](https://sentry.sentry.io/issues/7344013745/) — **high priority**, 9 occurrences, 1 user affected. First seen today (2026-03-18).
+
+When a user has `.env` as a **directory** (not a file) in their project — e.g., `/Users/tomer/dev/saas-platform/.env/` — the DSN scanner tries to read it with `Bun.file(path).text()`, which throws `EISDIR`. This error is caught but **not recognized as ignorable**, so it gets reported to Sentry as an unexpected error via `Sentry.captureException()`.
+
+The error occurs in `checkEnvForDsn()` during `findProjectRoot` → DSN auto-detection (the `operation: "checkEnvForDsn"` tag confirms this).
+
+## Root Cause
+
+In `src/lib/dsn/fs-utils.ts`, the `isIgnorableFileError()` function lists `ENOENT`, `EACCES`, and `EPERM` as expected filesystem errors during scanning, but **not `EISDIR`**. A directory named `.env` is a perfectly valid filesystem layout (some projects use `.env/` to organize env files), and should be silently skipped.
+
+## Fix
+
+### File: `src/lib/dsn/fs-utils.ts`
+
+Add `EISDIR` and `ENOTDIR` to `isIgnorableFileError()`:
+
+```typescript
+function isIgnorableFileError(error: unknown): boolean {
+  if (error instanceof Error && "code" in error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "ENOENT" || code === "EACCES" || code === "EPERM" || code === "EISDIR" || code === "ENOTDIR";
+  }
+  return false;
+}
+```
+
+- **`EISDIR`**: Path is a directory, not a file (the reported crash)
+- **`ENOTDIR`**: A path component is not a directory (e.g., `/file.txt/something`) — same category of "path doesn't resolve to a readable file"
+
+This single-line change fixes **all affected call sites** since they all use `handleFileError()` → `isIgnorableFileError()`:
+1. `src/lib/dsn/project-root.ts` line ~330 — `checkEnvForDsn` (the reported crash)
+2. `src/lib/dsn/project-root.ts` line ~231 — `checkEditorConfigRoot`
+3. `src/lib/dsn/scanner.ts` line ~75 — `scanSpecificFiles`
+4. `src/lib/dsn/detector.ts` line ~287 — `verifyFileDsnCache`
+
+## Verification
+
+1. **Run existing tests**: `bun test` — ensure no regressions
+2. **Check for existing tests of `isIgnorableFileError`**: Add a test case for `EISDIR` and `ENOTDIR` error codes
+3. **Manual test**: Create a directory named `.env` in a temp project dir, run `bun run dev -- issue list` from that directory — should not throw or report errors
