@@ -85,12 +85,13 @@ function buildReplacement(
 ): DashboardWidget {
   const mergedQueries = mergeQueries(flags, existing.queries?.[0]);
 
-  // Validate aggregate names if query flags were provided
-  if (flags.query && mergedQueries?.[0]?.aggregates) {
-    validateAggregateNames(
-      mergedQueries[0].aggregates,
-      flags.dataset ?? existing.widgetType
-    );
+  // Validate aggregates when query or dataset changes — prevents broken widgets
+  // (e.g. switching --dataset from discover to spans with discover-only aggregates)
+  const newDataset = flags.dataset ?? existing.widgetType;
+  const aggregatesToValidate =
+    mergedQueries?.[0]?.aggregates ?? existing.queries?.[0]?.aggregates;
+  if ((flags.query || flags.dataset) && aggregatesToValidate) {
+    validateAggregateNames(aggregatesToValidate, newDataset);
   }
 
   const limit = flags.limit !== undefined ? flags.limit : existing.limit;
