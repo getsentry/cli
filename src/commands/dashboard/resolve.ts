@@ -185,7 +185,13 @@ export function buildWidgetFromFlags(opts: {
   validateAggregateNames(aggregates, opts.dataset);
 
   const columns = opts.groupBy ?? [];
-  const orderby = opts.sort ? parseSortExpression(opts.sort) : undefined;
+  // Auto-default orderby to first aggregate descending when group-by is used.
+  // Without this, chart widgets (line/area/bar) with group-by + limit error
+  // because the dashboard can't determine which top N groups to display.
+  let orderby = opts.sort ? parseSortExpression(opts.sort) : undefined;
+  if (columns.length > 0 && !orderby && aggregates.length > 0) {
+    orderby = `-${aggregates[0]}`;
+  }
 
   const raw = {
     title: opts.title,
