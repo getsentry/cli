@@ -4,6 +4,8 @@
  * Source of truth: sentry/src/sentry/models/project.py GETTING_STARTED_DOCS_PLATFORMS
  */
 
+import { levenshtein } from "./fuzzy.js";
+
 /** Full list of valid Sentry platform identifiers (112 from backend + "other"). */
 export const VALID_PLATFORMS = [
   "android",
@@ -215,34 +217,6 @@ function findSwapMatches(invalid: string): string[] {
   }
 
   return results;
-}
-
-function levenshtein(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  const dp = new Map<number, number>();
-  const key = (i: number, j: number) => i * (n + 1) + j;
-  for (let i = 0; i <= m; i++) {
-    dp.set(key(i, 0), i);
-  }
-  for (let j = 0; j <= n; j++) {
-    dp.set(key(0, j), j);
-  }
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost =
-        a[i - 1] === b[j - 1]
-          ? (dp.get(key(i - 1, j - 1)) ?? 0)
-          : 1 +
-            Math.min(
-              dp.get(key(i - 1, j - 1)) ?? 0,
-              dp.get(key(i - 1, j)) ?? 0,
-              dp.get(key(i, j - 1)) ?? 0
-            );
-      dp.set(key(i, j), cost);
-    }
-  }
-  return dp.get(key(m, n)) ?? 0;
 }
 
 function findFuzzyMatches(invalid: string): string[] {

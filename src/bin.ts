@@ -160,10 +160,17 @@ function buildExecutor(): (args: string[]) => Promise<void> {
 const executeCommand = buildExecutor();
 
 async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+
+  // Fast-path: shell completion (no telemetry, no middleware, no upgrade check)
+  if (args[0] === "__complete") {
+    const { handleComplete } = await import("./lib/complete.js");
+    await handleComplete(args.slice(1));
+    return;
+  }
+
   // Clean up old binary from previous Windows upgrade (no-op if file doesn't exist)
   startCleanupOldBinary();
-
-  const args = process.argv.slice(2);
 
   // Apply SENTRY_LOG_LEVEL env var early (lazy read, not at module load time).
   // CLI flags (--log-level, --verbose) are handled by Stricli via

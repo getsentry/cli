@@ -210,6 +210,58 @@ describe("proposeCompletions: Stricli integration", () => {
   });
 });
 
+describe("property: flag extraction", () => {
+  const tree = extractCommandTree();
+
+  test("flags are non-empty arrays of objects with name and brief", () => {
+    for (const group of tree.groups) {
+      for (const sub of group.subcommands) {
+        for (const flag of sub.flags) {
+          expect(flag.name.length).toBeGreaterThan(0);
+          expect(typeof flag.brief).toBe("string");
+        }
+      }
+    }
+  });
+
+  test("no duplicate flag names within a command", () => {
+    for (const group of tree.groups) {
+      for (const sub of group.subcommands) {
+        const names = sub.flags.map((f) => f.name);
+        expect(new Set(names).size).toBe(names.length);
+      }
+    }
+  });
+
+  test("hidden flags are excluded", () => {
+    for (const group of tree.groups) {
+      for (const sub of group.subcommands) {
+        // log-level and verbose are hidden — should not appear
+        const names = sub.flags.map((f) => f.name);
+        expect(names).not.toContain("log-level");
+        expect(names).not.toContain("verbose");
+      }
+    }
+  });
+});
+
+describe("property: dynamic completion callback", () => {
+  test("all three shell scripts contain __complete callback", () => {
+    fcAssert(
+      property(binaryNameArb, (name) => {
+        const bash = generateBashCompletion(name);
+        const zsh = generateZshCompletion(name);
+        const fish = generateFishCompletion(name);
+
+        expect(bash).toContain("__complete");
+        expect(zsh).toContain("__complete");
+        expect(fish).toContain("__complete");
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
 describe("bash completion: real shell simulation", () => {
   test("top-level completion returns all known commands", async () => {
     const tree = extractCommandTree();

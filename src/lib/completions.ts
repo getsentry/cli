@@ -3,11 +3,19 @@
  *
  * Dynamically generates completion scripts from the Stricli route map.
  * When commands are added or removed, completions update automatically.
+ *
+ * Uses a hybrid approach:
+ * - **Static**: command/subcommand names, flag names, enum flag values
+ *   are embedded in the shell script for instant tab completion.
+ * - **Dynamic**: positional arg values (org slugs, project names, aliases)
+ *   are completed by calling `sentry __complete` at runtime, which reads
+ *   the SQLite cache with fuzzy matching.
  */
 
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { routes } from "../app.js";
+import type { FlagDef } from "./introspect.js";
 import type { ShellType } from "./shell.js";
 
 /** Where completions are installed */
@@ -18,36 +26,16 @@ export type CompletionLocation = {
   created: boolean;
 };
 
-/** A command with its description */
-type CommandEntry = { name: string; brief: string };
-
-/** A command group (route map) containing subcommands */
-type CommandGroup = {
-  name: string;
-  brief: string;
-  subcommands: CommandEntry[];
-};
-
-/** Extracted command tree from the Stricli route map */
-type CommandTree = {
-  /** Command groups with subcommands (auth, issue, org, etc.) */
-  groups: CommandGroup[];
-  /** Standalone top-level commands (api, help, version, etc.) */
-  standalone: CommandEntry[];
-};
-
 /**
  * Check if a routing target is a route map (has subcommands).
- *
- * Stricli route maps have an `getAllEntries()` method while commands don't.
+ * Works with untyped Stricli route targets (avoids generic type constraints).
  */
 function isRouteMap(target: unknown): target is {
   getAllEntries: () => readonly {
-    name: Record<string, string>;
-    target: { brief: string };
+    name: { original: string };
+    target: unknown;
     hidden: boolean;
   }[];
-} & {
   brief: string;
 } {
   return (
@@ -58,34 +46,143 @@ function isRouteMap(target: unknown): target is {
 }
 
 /**
+ * Check if a routing target is a command (has parameters with flags).
+ * Works with untyped Stricli route targets.
+ */
+function isCommandTarget(target: unknown): target is {
+  brief: string;
+  parameters: {
+    flags?: Record<string, FlagDef>;
+  };
+} {
+  return (
+    typeof target === "object" &&
+    target !== null &&
+    "parameters" in target &&
+    !("getAllEntries" in target)
+  );
+}
+
+/** Flag metadata for shell completion */
+type FlagEntry = {
+  /** Flag name without `--` prefix (e.g., "limit") */
+  name: string;
+  /** Human-readable description */
+  brief: string;
+  /** For enum flags, the valid values */
+  enumValues?: string[];
+};
+
+/** A command with its description and flags */
+type CommandEntry = {
+  name: string;
+  brief: string;
+  flags: FlagEntry[];
+};
+
+/** A command group (route map) containing subcommands */
+type CommandGroup = {
+  name: string;
+  brief: string;
+  subcommands: CommandEntry[];
+};
+
+/** Extracted command tree from the Stricli route map */
+export type CommandTree = {
+  /** Command groups with subcommands (auth, issue, org, etc.) */
+  groups: CommandGroup[];
+  /** Standalone top-level commands (api, help, version, etc.) */
+  standalone: CommandEntry[];
+};
+
+/**
+ * Extract flags from a Stricli command's parameters.
+ *
+ * Filters out hidden flags (like --log-level, --verbose) and returns
+ * metadata needed for completion.
+ */
+function extractFlagEntries(
+  flags: Record<string, FlagDef> | undefined
+): FlagEntry[] {
+  if (!flags) {
+    return [];
+  }
+
+  return Object.entries(flags)
+    .filter(([, def]) => !def.hidden)
+    .map(([name, def]) => {
+      const entry: FlagEntry = { name, brief: def.brief ?? "" };
+      // Extract enum values if available
+      if (def.kind === "enum" && "values" in def) {
+        const enumDef = def as FlagDef & { values?: readonly string[] };
+        if (enumDef.values) {
+          entry.enumValues = [...enumDef.values];
+        }
+      }
+      return entry;
+    });
+}
+
+/**
+ * Build a CommandEntry from a route target with its name.
+ * Extracts flags if the target is a command.
+ */
+function buildCommandEntry(name: string, target: unknown): CommandEntry {
+  const flags = isCommandTarget(target)
+    ? extractFlagEntries(target.parameters.flags)
+    : [];
+  return {
+    name,
+    brief: (target as { brief: string }).brief,
+    flags,
+  };
+}
+
+/**
+ * Extract subcommands from a route map group.
+ */
+function extractSubcommands(routeMap: {
+  getAllEntries: () => readonly {
+    name: { original: string };
+    target: unknown;
+    hidden: boolean;
+  }[];
+}): CommandEntry[] {
+  const subcommands: CommandEntry[] = [];
+  for (const sub of routeMap.getAllEntries()) {
+    if (!sub.hidden) {
+      subcommands.push(buildCommandEntry(sub.name.original, sub.target));
+    }
+  }
+  return subcommands;
+}
+
+/**
  * Extract the command tree from the Stricli route map.
  *
  * Walks the route map recursively to build a structured command tree
  * that can be used to generate completion scripts for any shell.
+ * Includes flag metadata for each command.
  */
 export function extractCommandTree(): CommandTree {
   const groups: CommandGroup[] = [];
   const standalone: CommandEntry[] = [];
 
   for (const entry of routes.getAllEntries()) {
-    const name = entry.name.original;
     if (entry.hidden) {
       continue;
     }
 
+    const name = entry.name.original;
+
     if (isRouteMap(entry.target)) {
-      const subcommands: CommandEntry[] = [];
-      for (const sub of entry.target.getAllEntries()) {
-        if (!sub.hidden) {
-          subcommands.push({
-            name: sub.name.original,
-            brief: sub.target.brief,
-          });
-        }
-      }
-      groups.push({ name, brief: entry.target.brief, subcommands });
+      groups.push({
+        name,
+        brief: entry.target.brief,
+        subcommands: extractSubcommands(entry.target),
+      });
     } else {
-      standalone.push({ name, brief: entry.target.brief });
+      standalone.push(buildCommandEntry(name, entry.target));
     }
   }
 
@@ -93,31 +190,120 @@ export function extractCommandTree(): CommandTree {
 }
 
 /**
+ * Sanitize a string for use in a shell variable name.
+ * Replaces hyphens and dots with underscores.
+ */
+function shellVarName(s: string): string {
+  return s.replace(/[-. ]/g, "_");
+}
+
+/** Collected flag and enum variable declarations for bash scripts. */
+type BashFlagVars = {
+  flagVarLines: string[];
+  enumVarLines: string[];
+  enumFlagNames: string[];
+};
+
+/**
+ * Collect bash variable lines for a single command's flags and enum values.
+ *
+ * @param prefix - Variable name prefix (e.g., "issue_list" or "api")
+ * @param cmd - The command entry to process
+ * @param out - Accumulator for flag/enum variable lines
+ */
+function collectCommandFlagVars(
+  prefix: string,
+  cmd: CommandEntry,
+  out: BashFlagVars
+): void {
+  if (cmd.flags.length > 0) {
+    const flagNames = cmd.flags.map((f) => `--${f.name}`).join(" ");
+    out.flagVarLines.push(`  local ${prefix}_flags="${flagNames}"`);
+  }
+  for (const flag of cmd.flags) {
+    if (flag.enumValues && flag.enumValues.length > 0) {
+      const varName = `${prefix}_${shellVarName(flag.name)}_values`;
+      out.enumVarLines.push(
+        `  local ${varName}="${flag.enumValues.join(" ")}"`
+      );
+      out.enumFlagNames.push(`--${flag.name}`);
+    }
+  }
+}
+
+/**
+ * Build bash variable declarations for command flags and enum values.
+ *
+ * Extracted from generateBashCompletion to reduce complexity.
+ */
+function buildBashFlagVars(tree: CommandTree): BashFlagVars {
+  const out: BashFlagVars = {
+    flagVarLines: [],
+    enumVarLines: [],
+    enumFlagNames: [],
+  };
+
+  for (const g of tree.groups) {
+    for (const sub of g.subcommands) {
+      const prefix = `${shellVarName(g.name)}_${shellVarName(sub.name)}`;
+      collectCommandFlagVars(prefix, sub, out);
+    }
+  }
+
+  for (const cmd of tree.standalone) {
+    collectCommandFlagVars(shellVarName(cmd.name), cmd, out);
+  }
+
+  return out;
+}
+
+/**
  * Generate bash completion script.
+ *
+ * Includes:
+ * - Static command/subcommand word lists
+ * - Static flag name lists per command
+ * - Static enum values per flag
+ * - Dynamic `sentry __complete` callback for positional values
  */
 export function generateBashCompletion(binaryName: string): string {
-  const { groups, standalone } = extractCommandTree();
+  const tree = extractCommandTree();
+  const { groups, standalone } = tree;
 
   const allTopLevel = [
     ...groups.map((g) => g.name),
     ...standalone.map((s) => s.name),
   ];
 
-  // Build subcommand variables
   const subVars = groups
     .map((g) => {
       const subs = g.subcommands.map((s) => s.name).join(" ");
-      return `  local ${g.name}_commands="${subs}"`;
+      return `  local ${shellVarName(g.name)}_commands="${subs}"`;
     })
     .join("\n");
 
-  // Build case branches for subcommand completion
+  const { flagVarLines, enumVarLines, enumFlagNames } = buildBashFlagVars(tree);
+
   const caseBranches = groups
     .map(
       (g) =>
-        `        ${g.name})\n          COMPREPLY=($(compgen -W "\${${g.name}_commands}" -- "\${cur}"))\n          ;;`
+        `        ${g.name})\n          COMPREPLY=($(compgen -W "\${${shellVarName(g.name)}_commands}" -- "\${cur}"))\n          ;;`
     )
     .join("\n");
+
+  const uniqueEnumFlags = [...new Set(enumFlagNames)];
+  const enumCaseEntries = uniqueEnumFlags.map((f) => `"${f}"`).join("|");
+
+  // Build the enum flag test only if there are any enum flags
+  const enumBranch = enumCaseEntries
+    ? `elif [[ "\${prev}" == @(${enumCaseEntries}) ]]; then
+        # Enum value completion (static)
+        local val_var="\${cmd}_\${subcmd}_\${prev#--}_values"
+        val_var=\${val_var//-/_}
+        if [[ -n "\${!val_var+x}" ]]; then
+          COMPREPLY=($(compgen -W "\${!val_var}" -- "\${cur}"))
+        fi`
+    : "";
 
   return `# bash completion for ${binaryName}
 # Auto-generated from command definitions
@@ -127,6 +313,8 @@ _${binaryName}_completions() {
 
   local commands="${allTopLevel.join(" ")}"
 ${subVars}
+${flagVarLines.join("\n")}
+${enumVarLines.join("\n")}
 
   case "\${COMP_CWORD}" in
     1)
@@ -137,6 +325,38 @@ ${subVars}
 ${caseBranches}
       esac
       ;;
+    *)
+      local cmd="\${COMP_WORDS[1]}"
+      local subcmd="\${COMP_WORDS[2]}"
+
+      if [[ "\${cur}" == --* ]]; then
+        # Flag name completion (static)
+        local cmd_var="\${cmd}_\${subcmd}_flags"
+        cmd_var=\${cmd_var//-/_}
+        if [[ -n "\${!cmd_var+x}" ]]; then
+          COMPREPLY=($(compgen -W "\${!cmd_var}" -- "\${cur}"))
+        else
+          # Try standalone command flags
+          local standalone_var="\${cmd}_flags"
+          standalone_var=\${standalone_var//-/_}
+          if [[ -n "\${!standalone_var+x}" ]]; then
+            COMPREPLY=($(compgen -W "\${!standalone_var}" -- "\${cur}"))
+          fi
+        fi
+      ${enumBranch ? `${enumBranch}\n      ` : ""}else
+        # Dynamic value completion (from cache, with fuzzy matching)
+        # The binary returns only relevant matches (prefix + fuzzy).
+        local IFS=$'\\n'
+        COMPREPLY=($(${binaryName} __complete "\${COMP_WORDS[@]:1}" 2>/dev/null))
+        # Strip tab-separated descriptions (bash doesn't support them)
+        if [[ \${#COMPREPLY[@]} -gt 0 ]]; then
+          local i
+          for i in "\${!COMPREPLY[@]}"; do
+            COMPREPLY[$i]="\${COMPREPLY[$i]%%$'\\t'*}"
+          done
+        fi
+      fi
+      ;;
   esac
 }
 
@@ -146,23 +366,26 @@ complete -F _${binaryName}_completions ${binaryName}
 
 /**
  * Generate zsh completion script.
+ *
+ * Includes static commands/subcommands, flag specs, and a dynamic
+ * completer that calls `sentry __complete` for positional values.
  */
 export function generateZshCompletion(binaryName: string): string {
   const { groups, standalone } = extractCommandTree();
 
   // Build top-level commands array
   const topLevelItems = [
-    ...groups.map((g) => `    '${g.name}:${g.brief}'`),
-    ...standalone.map((s) => `    '${s.name}:${s.brief}'`),
+    ...groups.map((g) => `    '${g.name}:${escapeSingleQuote(g.brief)}'`),
+    ...standalone.map((s) => `    '${s.name}:${escapeSingleQuote(s.brief)}'`),
   ].join("\n");
 
   // Build subcommand arrays
   const subArrays = groups
     .map((g) => {
       const items = g.subcommands
-        .map((s) => `    '${s.name}:${s.brief}'`)
+        .map((s) => `    '${s.name}:${escapeSingleQuote(s.brief)}'`)
         .join("\n");
-      return `  local -a ${g.name}_commands\n  ${g.name}_commands=(\n${items}\n  )`;
+      return `  local -a ${shellVarName(g.name)}_commands\n  ${shellVarName(g.name)}_commands=(\n${items}\n  )`;
     })
     .join("\n\n");
 
@@ -170,13 +393,29 @@ export function generateZshCompletion(binaryName: string): string {
   const caseBranches = groups
     .map(
       (g) =>
-        `        ${g.name})\n          _describe -t commands '${g.name} command' ${g.name}_commands\n          ;;`
+        `        ${g.name})\n          _describe -t commands '${g.name} command' ${shellVarName(g.name)}_commands\n          ;;`
     )
     .join("\n");
 
   return `#compdef ${binaryName}
 # zsh completion for ${binaryName}
 # Auto-generated from command definitions
+
+# Dynamic completer for positional values (org slugs, project names)
+_${binaryName}_dynamic() {
+  local -a completions
+  local line
+  while IFS=$'\\t' read -r value desc; do
+    if [[ -n "$desc" ]]; then
+      completions+=("\${value}:\${desc}")
+    else
+      completions+=("\${value}")
+    fi
+  done < <(${binaryName} __complete \${words[2,-1]} 2>/dev/null)
+  if [[ \${#completions} -gt 0 ]]; then
+    _describe -t values 'value' completions
+  fi
+}
 
 _${binaryName}() {
   local -a commands
@@ -200,6 +439,10 @@ ${subArrays}
 ${caseBranches}
       esac
       ;;
+    args)
+      # Dynamic completion for positional args
+      _${binaryName}_dynamic
+      ;;
   esac
 }
 
@@ -209,6 +452,9 @@ _${binaryName}
 
 /**
  * Generate fish completion script.
+ *
+ * Includes static commands/subcommands and flag completions, plus a
+ * dynamic completer for positional values.
  */
 export function generateFishCompletion(binaryName: string): string {
   const { groups, standalone } = extractCommandTree();
@@ -217,24 +463,35 @@ export function generateFishCompletion(binaryName: string): string {
   const topLevelLines = [
     ...groups.map(
       (g) =>
-        `complete -c ${binaryName} -n "__fish_use_subcommand" -a "${g.name}" -d "${g.brief}"`
+        `complete -c ${binaryName} -n "__fish_use_subcommand" -a "${g.name}" -d "${escapeDblQuote(g.brief)}"`
     ),
     ...standalone.map(
       (s) =>
-        `complete -c ${binaryName} -n "__fish_use_subcommand" -a "${s.name}" -d "${s.brief}"`
+        `complete -c ${binaryName} -n "__fish_use_subcommand" -a "${s.name}" -d "${escapeDblQuote(s.brief)}"`
     ),
   ].join("\n");
 
   // Subcommand completions
   const subLines = groups
     .map((g) => {
-      const lines = g.subcommands
+      const cmdLines = g.subcommands
         .map(
           (s) =>
-            `complete -c ${binaryName} -n "__fish_seen_subcommand_from ${g.name}" -a "${s.name}" -d "${s.brief}"`
+            `complete -c ${binaryName} -n "__fish_seen_subcommand_from ${g.name}" -a "${s.name}" -d "${escapeDblQuote(s.brief)}"`
         )
         .join("\n");
-      return `\n# ${g.name} subcommands\n${lines}`;
+
+      // Flag completions per subcommand
+      const flagLines = g.subcommands
+        .flatMap((s) =>
+          s.flags.map(
+            (f) =>
+              `complete -c ${binaryName} -n "__fish_seen_subcommand_from ${g.name}; and __fish_seen_subcommand_from ${s.name}" -l "${f.name}" -d "${escapeDblQuote(f.brief)}"`
+          )
+        )
+        .join("\n");
+
+      return `\n# ${g.name} subcommands\n${cmdLines}${flagLines ? `\n${flagLines}` : ""}`;
     })
     .join("\n");
 
@@ -244,10 +501,32 @@ export function generateFishCompletion(binaryName: string): string {
 # Disable file completion by default
 complete -c ${binaryName} -f
 
+# Dynamic completion for positional values
+function __${binaryName}_complete_dynamic
+  set -l tokens (commandline -opc)
+  ${binaryName} __complete $tokens[2..] (commandline -ct) 2>/dev/null | while read -l line
+    echo $line
+  end
+end
+
 # Top-level commands
 ${topLevelLines}
 ${subLines}
+
+# Dynamic completions (org slugs, project names)
+complete -c ${binaryName} -n "not __fish_use_subcommand" -a "" -k
+complete -c ${binaryName} -a "(__${binaryName}_complete_dynamic)"
 `;
+}
+
+/** Escape single quotes for zsh completion descriptions. */
+function escapeSingleQuote(s: string): string {
+  return s.replace(/'/g, "'\\''");
+}
+
+/** Escape double quotes and backslashes for fish/bash completion descriptions. */
+function escapeDblQuote(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 /**
