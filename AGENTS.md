@@ -399,19 +399,37 @@ CliError (base)
 ├── AuthError (authentication - reason: 'not_authenticated' | 'expired' | 'invalid')
 ├── ConfigError (configuration - suggestion?)
 ├── ContextError (missing context - resource, command, alternatives)
+├── ResolutionError (value provided but not found - resource, headline, hint, suggestions)
 ├── ValidationError (input validation - field?)
 ├── DeviceFlowError (OAuth flow - code)
 ├── SeerError (Seer AI - reason: 'not_enabled' | 'no_budget' | 'ai_disabled')
 └── UpgradeError (upgrade - reason: 'unknown_method' | 'network_error' | 'execution_failed' | 'version_not_found')
+```
 
-// Usage: throw specific error types
-import { ApiError, AuthError, SeerError } from "../lib/errors.js";
-throw new AuthError("not_authenticated");
-throw new ApiError("Request failed", 404, "Not found");
-throw new SeerError("not_enabled", orgSlug); // Includes actionable URL
+**Choosing between ContextError, ResolutionError, and ValidationError:**
 
-// In commands: let errors propagate to central handler
-// The bin.ts entry point catches and formats all errors consistently
+| Scenario | Error Class | Example |
+|----------|-------------|---------|
+| User **omitted** a required value | `ContextError` | No org/project provided |
+| User **provided** a value that wasn't found | `ResolutionError` | Project 'cli' not found |
+| User input is **malformed** | `ValidationError` | Invalid hex ID format |
+
+**ContextError rules:**
+- `command` must be a **single-line** CLI usage example (e.g., `"sentry org view <slug>"`)
+- Constructor throws if `command` contains `\n` (catches misuse in tests)
+- Pass `alternatives: []` when defaults are irrelevant (e.g., for missing Trace ID, Event ID)
+- Use `" and "` in `resource` for plural grammar: `"Trace ID and span ID"` → "are required"
+
+**CI enforcement:** `bun run check:errors` scans for `ContextError` with multiline commands and `CliError` with ad-hoc "Try:" strings.
+
+```typescript
+// Usage examples
+throw new ContextError("Organization", "sentry org view <org-slug>");
+throw new ContextError("Trace ID", "sentry trace view <trace-id>", []); // no alternatives
+throw new ResolutionError("Project 'cli'", "not found", "sentry issue list <org>/cli", [
+  "No project with this slug found in any accessible organization",
+]);
+throw new ValidationError("Invalid trace ID format", "traceId");
 ```
 
 ### Async Config Functions

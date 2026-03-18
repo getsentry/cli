@@ -30,7 +30,7 @@ import {
   resolveOrgCursor,
   setPaginationCursor,
 } from "../../lib/db/pagination.js";
-import { ContextError, withAuthGuard } from "../../lib/errors.js";
+import { ResolutionError, withAuthGuard } from "../../lib/errors.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
 import {
   CommandOutput,
@@ -512,10 +512,11 @@ export async function handleProjectSearch(
     if (flags.json) {
       return { items: [] };
     }
-    throw new ContextError(
-      "Project",
-      `No project '${projectSlug}' found in any accessible organization.\n\n` +
-        `Try: sentry project list <org>/${projectSlug}`
+    throw new ResolutionError(
+      `Project '${projectSlug}'`,
+      "not found",
+      `sentry project list <org>/${projectSlug}`,
+      ["No project with this slug found in any accessible organization"]
     );
   }
 

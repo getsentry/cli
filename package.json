@@ -74,7 +74,8 @@
     "generate:skill": "bun run script/generate-skill.ts",
     "generate:schema": "bun run script/generate-api-schema.ts",
     "check:skill": "bun run script/check-skill.ts",
-    "check:deps": "bun run script/check-no-deps.ts"
+    "check:deps": "bun run script/check-no-deps.ts",
+    "check:errors": "bun run script/check-error-patterns.ts"
   },
   "type": "module"
 }

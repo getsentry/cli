@@ -23,7 +23,7 @@ import * as defaults from "../../src/lib/db/defaults.js";
 import * as paginationDb from "../../src/lib/db/pagination.js";
 import {
   AuthError,
-  ContextError,
+  ResolutionError,
   ValidationError,
 } from "../../src/lib/errors.js";
 import {
@@ -481,7 +481,7 @@ describe("handleProjectSearch", () => {
     findProjectsBySlugSpy.mockRestore();
   });
 
-  test("throws ContextError when no project found", async () => {
+  test("throws ResolutionError when no project found", async () => {
     findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
     const config = makeConfig();
 
@@ -489,7 +489,7 @@ describe("handleProjectSearch", () => {
       handleProjectSearch(config, "no-such-project", {
         flags: { limit: 10, json: false },
       })
-    ).rejects.toThrow(ContextError);
+    ).rejects.toThrow(ResolutionError);
   });
 
   test("returns empty items when no project found with --json", async () => {
@@ -582,7 +582,7 @@ describe("handleProjectSearch", () => {
     expect(fallback).toHaveBeenCalledWith("acme-corp");
   });
 
-  test("throws ContextError when slug matches an org but no fallback", async () => {
+  test("throws ResolutionError when slug matches an org but no fallback", async () => {
     findProjectsBySlugSpy.mockResolvedValue({
       projects: [],
       orgs: [{ slug: "acme-corp", name: "Acme Corp" }],
@@ -593,7 +593,7 @@ describe("handleProjectSearch", () => {
       handleProjectSearch(config, "acme-corp", {
         flags: { limit: 10, json: false },
       })
-    ).rejects.toThrow(ContextError);
+    ).rejects.toThrow(ResolutionError);
   });
 
   test("includes multi-org note in hint when project found in multiple orgs", async () => {

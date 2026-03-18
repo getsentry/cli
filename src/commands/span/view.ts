@@ -61,12 +61,12 @@ export function parsePositionalArgs(args: string[]): {
   spanIds: string[];
 } {
   if (args.length === 0) {
-    throw new ContextError("Trace ID and span ID", USAGE_HINT);
+    throw new ContextError("Trace ID and span ID", USAGE_HINT, []);
   }
 
   const first = args[0];
   if (first === undefined) {
-    throw new ContextError("Trace ID and span ID", USAGE_HINT);
+    throw new ContextError("Trace ID and span ID", USAGE_HINT, []);
   }
 
   // First arg is trace target (possibly with org/project prefix)

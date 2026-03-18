@@ -44,7 +44,7 @@ import {
 } from "./db/pagination.js";
 import {
   type AuthGuardSuccess,
-  ContextError,
+  ResolutionError,
   ValidationError,
   withAuthGuard,
 } from "./errors.js";
@@ -634,22 +634,26 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
         );
         return orgAllFallback(projectSlug);
       }
-      throw new ContextError(
-        "Project",
-        `'${projectSlug}' is an organization, not a project.\n\n` +
-          `Did you mean: ${config.commandPrefix} ${projectSlug}/`
+      throw new ResolutionError(
+        `'${projectSlug}'`,
+        "is an organization, not a project",
+        `${config.commandPrefix} ${projectSlug}/`,
+        [
+          `List projects: sentry project list ${projectSlug}/`,
+          `Specify a project: ${config.commandPrefix} ${projectSlug}/<project>`,
+        ]
       );
     }
 
     if (flags.json) {
       return { items: [] };
     }
-    // Use "Project" as the resource name (not config.entityName) because the
-    // error is about a project lookup failure, not the entity being listed.
-    throw new ContextError(
-      "Project",
-      `No project '${projectSlug}' found in any accessible organization.\n\n` +
-        `Try: ${config.commandPrefix} <org>/${projectSlug}`
+    // Use ResolutionError — the user provided a project slug but it wasn't found.
+    throw new ResolutionError(
+      `Project '${projectSlug}'`,
+      "not found",
+      `${config.commandPrefix} <org>/${projectSlug}`,
+      ["No project with this slug found in any accessible organization"]
     );
   }
 
