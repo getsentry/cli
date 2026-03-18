@@ -149,9 +149,12 @@ export async function getCachedProjectsForOrg(
   orgSlug: string
 ): Promise<{ projectSlug: string; projectName: string }[]> {
   const db = getDatabase();
+  // Group by project_slug to deduplicate — take the most recently cached name
+  // in case the same project appears under different cache keys with slightly
+  // different names (e.g., after a rename between caching events).
   const rows = db
     .query(
-      "SELECT DISTINCT project_slug, project_name FROM project_cache WHERE org_slug = ?"
+      "SELECT project_slug, project_name FROM project_cache WHERE org_slug = ? GROUP BY project_slug ORDER BY cached_at DESC"
     )
     .all(orgSlug) as Pick<ProjectCacheRow, "project_slug" | "project_name">[];
 

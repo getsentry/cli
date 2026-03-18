@@ -494,6 +494,20 @@ export function generateFishCompletion(binaryName: string): string {
     })
     .join("\n");
 
+  // Flag completions for standalone commands (e.g., `sentry api --method`)
+  const standaloneFlagLines = standalone
+    .filter((cmd) => cmd.flags.length > 0)
+    .map((cmd) => {
+      const flags = cmd.flags
+        .map(
+          (f) =>
+            `complete -c ${binaryName} -n "__fish_seen_subcommand_from ${cmd.name}" -l "${f.name}" -d "${escapeDblQuote(f.brief)}"`
+        )
+        .join("\n");
+      return `\n# ${cmd.name} flags\n${flags}`;
+    })
+    .join("\n");
+
   return `# fish completion for ${binaryName}
 # Auto-generated from command definitions
 
@@ -514,6 +528,7 @@ end
 # Top-level commands
 ${topLevelLines}
 ${subLines}
+${standaloneFlagLines}
 
 # Dynamic completions (org slugs, project names)
 complete -c ${binaryName} -n "not __fish_use_subcommand" -a "" -k
