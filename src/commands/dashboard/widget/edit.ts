@@ -63,9 +63,12 @@ function mergeQueries(
     return; // signal: keep existing
   }
 
+  // Destructure to omit stale `fields` — prepareWidgetQueries will
+  // recompute it from the updated aggregates/columns.
+  const { fields: _staleFields, ...base } = existingQuery ?? {};
   return [
     {
-      ...existingQuery,
+      ...base,
       ...(flags.query && { aggregates: flags.query.map(parseAggregate) }),
       ...(flags.where !== undefined && { conditions: flags.where }),
       ...(flags["group-by"] && { columns: flags["group-by"] }),
@@ -81,7 +84,6 @@ function buildReplacement(
 ): DashboardWidget {
   const mergedQueries = mergeQueries(flags, existing.queries?.[0]);
 
-  const widgetType = flags.dataset ?? existing.widgetType;
   const limit = flags.limit !== undefined ? flags.limit : existing.limit;
 
   const raw: Record<string, unknown> = {
@@ -90,8 +92,12 @@ function buildReplacement(
     queries: mergedQueries ?? existing.queries,
     layout: existing.layout,
   };
-  if (widgetType) {
-    raw.widgetType = widgetType;
+  // Only set widgetType if explicitly provided via --dataset or already on the widget.
+  // Avoids parseWidgetInput defaulting to "spans" for widgets without a widgetType.
+  if (flags.dataset) {
+    raw.widgetType = flags.dataset;
+  } else if (existing.widgetType) {
+    raw.widgetType = existing.widgetType;
   }
   if (limit !== undefined) {
     raw.limit = limit;

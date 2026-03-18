@@ -356,7 +356,11 @@ export const IsFilterValueSchema = z.enum(IS_FILTER_VALUES);
  */
 export function parseAggregate(input: string): string {
   if (input.includes("(")) {
-    return input;
+    // Resolve aliases even in paren form: spm() → epm(), tpm(x) → epm(x)
+    const parenIdx = input.indexOf("(");
+    const fn = input.slice(0, parenIdx);
+    const alias = AGGREGATE_ALIASES[fn];
+    return alias ? `${alias}${input.slice(parenIdx)}` : input;
   }
   const colonIdx = input.indexOf(":");
   if (colonIdx > 0) {
