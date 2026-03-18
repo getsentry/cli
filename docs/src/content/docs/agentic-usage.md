@@ -21,17 +21,22 @@ With this skill, agents can:
 
 - **View issues** - List and inspect Sentry issues from your projects
 - **Inspect events** - Look at specific error events and their details
+- **AI analysis** - Get root cause analysis and fix plans via Seer AI
 - **Browse projects** - List projects and organizations you have access to
+- **Explore the API** - Browse API endpoints with `sentry schema` and make arbitrary requests with `sentry api`
 - **Make API calls** - Execute arbitrary Sentry API requests
 - **Authenticate** - Help you set up CLI authentication
 
 ## How It Works
 
-When you ask your agent about Sentry errors or want to investigate an issue, the agent can use this skill to fetch real data from your Sentry account. For example:
+When you ask your agent about Sentry errors or want to investigate an issue, the agent uses CLI commands to fetch real data from your Sentry account. For example:
 
-- "Show me the latest issues in my project"
-- "What's the stack trace for ISSUE-123?"
-- "List all projects in my organization"
+- "Show me the latest issues in my project" → `sentry issue list`
+- "What's the stack trace for ISSUE-123?" → `sentry issue view ISSUE-123`
+- "List all projects in my organization" → `sentry project list my-org`
+- "What API endpoints exist for releases?" → `sentry schema releases`
+
+The CLI has dedicated commands for most Sentry tasks, so agents should prefer `sentry` commands over constructing raw API calls. The `sentry schema` command provides built-in API exploration, and `sentry api` handles authenticated requests for anything not covered by a dedicated command.
 
 The skill uses your existing CLI authentication, so you'll need to run `sentry auth login` first if you haven't already.
 
