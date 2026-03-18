@@ -1,0 +1,208 @@
+# Fix "Try: ... Or: ..." Error Message Pattern
+
+## Problem Summary
+
+The `ContextError` and `ResolutionError` classes produce structured error messages, but they're misused in ~15 call sites, producing confusing output. Real Sentry issues confirm this affects hundreds of users.
+
+### Worst Examples (from Sentry)
+
+**CLI-7V** (127 events, 35 users) — ContextError misused for resolution failure:
+```
+Error: Project is required.
+
+Specify it using:
+  No project 'patagonai' found in any accessible organization.
+
+Try: sentry project list <org>/patagonai
+
+Or:
+  - Run from a directory with a Sentry-configured project
+  - Set SENTRY_ORG and SENTRY_PROJECT (or SENTRY_DSN) environment variables
+```
+
+**CLI-4A** (21 events, 13 users) — Resolution message concatenated with "is required":
+```
+Error: Project 'AGENT-API' not found is required.
+```
+
+**CLI-EZ** — Grammar + irrelevant alternatives:
+```
+Error: Trace ID and span ID is required.
+Or:
+  - Run from a directory with a Sentry-configured project    ← irrelevant!
+```
+
+---
+
+## Fix Plan
+
+### Fix 1: Grammar in `buildContextMessage` — plural "are required"
+
+**File:** `src/lib/errors.ts` lines 166-184
+
+Detect compound resources (containing " and ") and use "are required" / "Specify them using:".
+
+```typescript
+function buildContextMessage(resource, command, alternatives) {
+  const isPlural = resource.includes(" and ");
+  const lines = [
+    `${resource} ${isPlural ? "are" : "is"} required.`,
+    "",
+    `Specify ${isPlural ? "them" : "it"} using:`,
+    `  ${command}`,
+  ];
+  // ... rest unchanged
+}
+```
+
+### Fix 2: Convert ContextError misuses to ResolutionError (~6 sites)
+
+These sites stuff resolution-failure messages into ContextError's `command` parameter. Convert to `ResolutionError`.
+
+| File | Line | Current | Fix |
+|------|------|---------|-----|
+| `src/lib/org-list.ts` | 637-641 | `ContextError("Project", "'X' is an org...")` | `ResolutionError("'X'", "is an organization, not a project", ...)` |
+| `src/lib/org-list.ts` | 649-653 | `ContextError("Project", "No project 'X' found...\n\nTry: ...")` | `ResolutionError("Project 'X'", "not found", ...)` |
+| `src/commands/project/list.ts` | 515-519 | Same pattern | Same fix |
+| `src/commands/issue/list.ts` | 375-378 | `ContextError("Projects", "No projects found in org 'X'.")` | `ResolutionError("Organization 'X'", "has no projects", ...)` |
+| `src/commands/issue/list.ts` | 903-908 | Multiline note in command | Split: simple `ContextError` + note in alternatives |
+| `src/lib/db/pagination.ts` | 195 | `ContextError("Pagination cursor", "No saved cursor...")` | `ValidationError("No saved cursor for this query. Run without --cursor first.")` |
+
+### Fix 3: `event view` — handle issue URLs gracefully + fix error message
+
+**File:** `src/commands/event/view.ts` lines 115-130
+
+Currently when a user passes an issue URL (has `issueId` but no `eventId`), the error is:
+```
+Event ID in URL (use a URL like /issues/{id}/events/{eventId}/) is required.
+```
+
+**Fix:** When `parseSentryUrl` returns an `issueId` but no `eventId`, use `getLatestEvent(org, issueId)` to fetch the latest event for that issue and proceed normally. Log an info message like: `"Fetching latest event for issue {issueId}..."`
+
+This is a better UX — the user clearly wants to see an event, and we can get one. The `getLatestEvent(orgSlug, issueId)` API already exists in `src/lib/api/events.ts:27`.
+
+```typescript
+// In parsePositionalArgs, replace lines 125-130:
+if (urlParsed.issueId && !urlParsed.eventId) {
+  // Issue URL — we'll fetch the latest event from this issue
+  return {
+    eventId: `latest:${urlParsed.issueId}`,  // sentinel for the caller
+    targetArg: `${urlParsed.org}/`,
+    issueId: urlParsed.issueId,
+  };
+}
+```
+
+The actual latest-event fetch happens in `viewCommand.func()` — when `issueId` is present in the parsed result, call `getLatestEvent(org, issueId)` instead of `getEvent(org, project, eventId)`. This avoids needing a project slug entirely.
+
+### Fix 4: Pass `alternatives: []` for non-context ID resources (~14 sites)
+
+When `ContextError` is thrown for missing positional IDs, the default alternatives about DSN detection are irrelevant. Pass `[]`.
+
+| File | Sites | Resources |
+|------|-------|-----------|
+| `src/lib/trace-target.ts` | 4 | "Trace ID" |
+| `src/commands/log/view.ts` | 4 | "Log ID" |
+| `src/commands/event/view.ts` | 2 | "Event ID" |
+| `src/commands/span/view.ts` | 3 | "Trace ID and span ID", "Span ID" |
+| `src/lib/arg-parsing.ts` | 2 | generic ID label |
+
+### Fix 5: Fix ad-hoc "Try:" patterns (~3 sites)
+
+Convert manual "Try:" in raw CliError to proper `ResolutionError`:
+- `src/commands/project/create.ts` — 2 sites with raw `CliError` + `"Try:\n"`
+- `src/lib/resolve-team.ts:117` — raw `CliError` + `"Try: ..."`
+
+### Fix 6: Runtime assertion + CI check script (prevention)
+
+**GritQL limitation:** Biome's GritQL plugins cannot inspect string _contents_ (e.g., whether a template literal contains `\n` or `Try:`). GritQL operates on AST node structure, not string values within nodes. The existing plugins work because they match AST patterns (`stdout.write($args)`), not string contents. I verified this experimentally — GritQL `contains r"Try:"` and `contains r"\\n"` both fail to match content inside template literals.
+
+**Two-layer prevention approach:**
+
+#### 6a: Runtime assertion in ContextError constructor
+
+Add a dev-time assertion in `ContextError` constructor that validates the `command` parameter doesn't contain newlines (the signature of a misuse — real CLI usage hints are always single-line).
+
+```typescript
+// In ContextError constructor, after super():
+if (command.includes("\n")) {
+  throw new Error(
+    `ContextError command must be a single-line CLI usage hint. ` +
+    `Use ResolutionError for resolution failures. Got: "${command.slice(0, 80)}..."`
+  );
+}
+```
+
+This fires during all test runs (all 55+ existing call sites get validated through tests) and dev mode, catching misuses immediately. Since this is in the constructor of an error class (not hot path), the perf impact is negligible.
+
+#### 6b: CI check script (`script/check-error-patterns.ts`)
+
+Add a script (like existing `check-no-deps.ts` and `check-skill.ts`) that scans source files for known anti-patterns:
+1. `new ContextError(` calls where the 2nd argument span contains `\n` (string concat or template literal with newlines)
+2. Raw `CliError` with `"Try:"` or `"Or:"` in the message (should use `ResolutionError`)
+
+Uses `Bun.Glob` to scan `src/**/*.ts` and a simple regex/AST heuristic on the source text.
+
+**Register in `package.json`:**
+```json
+"check:errors": "bun run script/check-error-patterns.ts"
+```
+
+**Add to CI** in `.github/workflows/ci.yml` alongside existing checks.
+
+#### 6c: JSDoc + AGENTS.md documentation
+
+Add clear JSDoc on `ContextError` and `ResolutionError` explaining when to use which:
+- `ContextError`: user **omitted** a required value; `command` must be a single-line CLI example
+- `ResolutionError`: user **provided** a value but it couldn't be matched
+- `ValidationError`: user input is malformed
+
+Update AGENTS.md error handling section.
+
+---
+
+## Implementation Order
+
+1. `src/lib/errors.ts` — plural grammar fix + runtime assertion in constructor + JSDoc
+2. Convert 6 ContextError misuses to ResolutionError/ValidationError (Fix 2)
+3. Handle issue URLs in event view + use getLatestEvent (Fix 3)
+4. Pass `alternatives: []` at 14 ID-only sites (Fix 4)
+5. Fix 3 ad-hoc "Try:" sites (Fix 5)
+6. Add `script/check-error-patterns.ts` CI check (Fix 6b)
+7. Register `check:errors` in `package.json` and CI workflow
+8. Add/update tests
+9. Update AGENTS.md
+
+## Files Modified
+
+| File | Changes |
+|------|---------|
+| `src/lib/errors.ts` | Plural grammar, runtime assertion, JSDoc |
+| `src/lib/org-list.ts` | 2 ContextError → ResolutionError |
+| `src/commands/project/list.ts` | 1 ContextError → ResolutionError |
+| `src/commands/issue/list.ts` | 2 ContextError fixes |
+| `src/lib/db/pagination.ts` | ContextError → ValidationError |
+| `src/commands/event/view.ts` | Handle issue URLs via getLatestEvent, fix error msg |
+| `src/lib/trace-target.ts` | 4 sites: add `alternatives: []` |
+| `src/commands/log/view.ts` | 4 sites: add `alternatives: []` |
+| `src/commands/event/view.ts` | 2 sites: add `alternatives: []` |
+| `src/commands/span/view.ts` | 3 sites: add `alternatives: []` |
+| `src/lib/arg-parsing.ts` | 2 sites: add `alternatives: []` |
+| `src/commands/project/create.ts` | 2 sites: raw CliError → ResolutionError |
+| `src/lib/resolve-team.ts` | 1 site: raw CliError → ResolutionError |
+| `script/check-error-patterns.ts` | **New** CI check script |
+| `package.json` | Add `check:errors` script |
+| `.github/workflows/ci.yml` | Add `check:errors` step |
+| `AGENTS.md` | Document error class usage guidance |
+
+## Verification
+
+1. `bun run lint` — passes
+2. `bun run typecheck` — passes
+3. `bun test` — all tests pass (runtime assertion validates all existing call sites)
+4. `bun run check:errors` — passes (no flagged patterns remain)
+5. Manual: `bun run dev -- trace view` → "Trace ID is required." with NO irrelevant alternatives
+6. Manual: `bun run dev -- project list nonexistent` → clean ResolutionError format
+7. Manual: `bun run dev -- span view` → "Trace ID and span ID **are** required."
+8. Manual: `bun run dev -- event view https://sentry.io/organizations/my-org/issues/123/` → fetches latest event (not an error)
+9. Regression: intentionally add `new ContextError("X", "bad\nmultiline")` and run tests → assertion fires
