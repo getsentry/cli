@@ -507,60 +507,57 @@ export function assignDefaultLayout(
 
 // ---------------------------------------------------------------------------
 // Server field stripping utilities
+//
+// The Sentry dashboard API returns many extra fields via GET that should NOT
+// be sent back in PUT requests. Using an allowlist approach ensures only
+// fields the API accepts are included, avoiding silent rejection of widgets.
 // ---------------------------------------------------------------------------
 
-/**
- * Server-generated fields on widget queries that must be stripped before PUT.
- * NEVER strip user-controlled fields like conditions, columns, aggregates.
- */
-const QUERY_SERVER_FIELDS = ["id", "widgetId", "dateCreated"] as const;
+/** Extract only the query fields the PUT API accepts */
+function cleanQuery(q: DashboardWidgetQuery): DashboardWidgetQuery {
+  return {
+    name: q.name ?? "",
+    conditions: q.conditions ?? "",
+    columns: q.columns ?? [],
+    aggregates: q.aggregates ?? [],
+    fields: q.fields ?? [],
+    ...(q.fieldAliases && { fieldAliases: q.fieldAliases }),
+    ...(q.orderby && { orderby: q.orderby }),
+  };
+}
 
 /**
- * Server-generated fields on widgets that must be stripped before PUT.
- * CRITICAL: Never strip widgetType, displayType, or layout — these are
- * user-controlled and stripping them causes widgets to reset to defaults.
- */
-const WIDGET_SERVER_FIELDS = ["id", "dashboardId", "dateCreated"] as const;
-
-/**
- * Server-generated fields on widget layout that must be stripped before PUT.
- */
-const LAYOUT_SERVER_FIELDS = ["isResizable"] as const;
-
-/**
- * Strip server-generated fields from a single widget for PUT requests.
+ * Strip server-generated and passthrough fields from a widget for PUT requests.
+ *
+ * Uses an allowlist approach: only includes fields the dashboard PUT API
+ * accepts. The GET response includes many extra fields (description, thresholds,
+ * interval, axisRange, datasetSource, etc.) that cause silent failures if
+ * sent back in PUT.
  *
  * @param widget - Widget object from GET response
- * @returns Widget safe for PUT (widgetType, displayType, layout preserved)
+ * @returns Widget safe for PUT (only API-accepted fields)
  */
 export function stripWidgetServerFields(
   widget: DashboardWidget
 ): DashboardWidget {
-  const cleaned = { ...widget };
+  const cleaned: DashboardWidget = {
+    title: widget.title,
+    displayType: widget.displayType,
+    ...(widget.widgetType && { widgetType: widget.widgetType }),
+    ...(widget.queries && { queries: widget.queries.map(cleanQuery) }),
+    ...(widget.limit !== undefined &&
+      widget.limit !== null && { limit: widget.limit }),
+  };
 
-  // Strip widget-level server fields
-  for (const field of WIDGET_SERVER_FIELDS) {
-    delete (cleaned as Record<string, unknown>)[field];
-  }
-
-  // Strip query-level server fields
-  if (cleaned.queries) {
-    cleaned.queries = cleaned.queries.map((q) => {
-      const cleanedQuery = { ...q };
-      for (const field of QUERY_SERVER_FIELDS) {
-        delete (cleanedQuery as Record<string, unknown>)[field];
-      }
-      return cleanedQuery;
-    });
-  }
-
-  // Strip layout server fields
-  if (cleaned.layout) {
-    const cleanedLayout = { ...cleaned.layout };
-    for (const field of LAYOUT_SERVER_FIELDS) {
-      delete (cleanedLayout as Record<string, unknown>)[field];
-    }
-    cleaned.layout = cleanedLayout;
+  // Preserve layout (x, y, w, h, minH only — not isResizable)
+  if (widget.layout) {
+    cleaned.layout = {
+      x: widget.layout.x,
+      y: widget.layout.y,
+      w: widget.layout.w,
+      h: widget.layout.h,
+      ...(widget.layout.minH !== undefined && { minH: widget.layout.minH }),
+    };
   }
 
   return cleaned;

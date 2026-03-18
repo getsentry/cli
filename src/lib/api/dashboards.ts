@@ -11,6 +11,7 @@ import type {
 } from "../../types/dashboard.js";
 
 import { resolveOrgRegion } from "../region.js";
+import { invalidateCachedResponse } from "../response-cache.js";
 
 import { apiRequestToRegion } from "./infrastructure.js";
 
@@ -88,10 +89,18 @@ export async function updateDashboard(
   body: { title: string; widgets: DashboardWidget[]; projects?: number[] }
 ): Promise<DashboardDetail> {
   const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data } = await apiRequestToRegion<DashboardDetail>(
-    regionUrl,
-    `/organizations/${orgSlug}/dashboards/${dashboardId}/`,
-    { method: "PUT", body }
-  );
+  const path = `/organizations/${orgSlug}/dashboards/${dashboardId}/`;
+  const { data } = await apiRequestToRegion<DashboardDetail>(regionUrl, path, {
+    method: "PUT",
+    body,
+  });
+
+  // Invalidate cached GET for this dashboard so subsequent view commands
+  // return fresh data instead of the pre-mutation cached response.
+  const normalizedBase = regionUrl.endsWith("/")
+    ? regionUrl.slice(0, -1)
+    : regionUrl;
+  await invalidateCachedResponse(`${normalizedBase}/api/0${path}`);
+
   return data;
 }
