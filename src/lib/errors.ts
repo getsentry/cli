@@ -158,8 +158,8 @@ const DEFAULT_CONTEXT_ALTERNATIVES = [
 /**
  * Build the formatted context error message with usage hints.
  *
- * @param resource - What is required (e.g., "Organization")
- * @param command - Usage example command
+ * @param resource - What is required (e.g., "Organization", "Trace ID and span ID")
+ * @param command - Single-line CLI usage example (e.g., "sentry org view <org-slug>")
  * @param alternatives - Alternative ways to provide the context
  * @returns Formatted multi-line error message
  */
@@ -168,10 +168,12 @@ function buildContextMessage(
   command: string,
   alternatives: string[]
 ): string {
+  // Compound resources ("X and Y") need plural grammar
+  const isPlural = resource.includes(" and ");
   const lines = [
-    `${resource} is required.`,
+    `${resource} ${isPlural ? "are" : "is"} required.`,
     "",
-    "Specify it using:",
+    `Specify ${isPlural ? "them" : "it"} using:`,
     `  ${command}`,
   ];
   if (alternatives.length > 0) {
@@ -211,11 +213,17 @@ function buildResolutionMessage(
 /**
  * Missing required context errors (org, project, etc).
  *
- * Provides consistent error formatting with usage hints and alternatives.
+ * Use when the user **omitted** a required value entirely. For cases where the
+ * user **provided** a value that couldn't be matched, use {@link ResolutionError}
+ * instead. For malformed input, use {@link ValidationError}.
  *
- * @param resource - What is required (e.g., "Organization", "Organization and project")
- * @param command - Primary usage example (e.g., "sentry org view <org-slug>")
- * @param alternatives - Alternative ways to resolve (defaults to DSN/project detection hints)
+ * @param resource - What is required (e.g., "Organization", "Organization and project").
+ *   Use " and " to join compound resources — triggers plural grammar ("are required").
+ * @param command - **Single-line** CLI usage example (e.g., "sentry org view <org-slug>").
+ *   Must not contain newlines — multi-line messages indicate a resolution failure
+ *   that should use {@link ResolutionError}.
+ * @param alternatives - Alternative ways to resolve (defaults to DSN/project detection hints).
+ *   Pass `[]` when the defaults are irrelevant (e.g., for missing positional IDs like Trace ID).
  */
 export class ContextError extends CliError {
   readonly resource: string;
@@ -233,6 +241,15 @@ export class ContextError extends CliError {
     this.resource = resource;
     this.command = command;
     this.alternatives = alternatives;
+
+    // Dev-time assertion: command must be a single-line CLI usage example.
+    // Multi-line commands are a sign the caller should use ResolutionError.
+    if (command.includes("\n")) {
+      throw new Error(
+        "ContextError command must be a single-line CLI usage hint. " +
+          `Use ResolutionError for resolution failures. Got: "${command.slice(0, 80)}..."`
+      );
+    }
   }
 
   override format(): string {
@@ -242,11 +259,22 @@ export class ContextError extends CliError {
 }
 
 /**
- * Resolution errors for entities that exist but could not be found or resolved.
+ * Resolution errors for entities that could not be found or resolved.
  *
- * Use this when the user provided a value but it could not be matched — as
- * opposed to {@link ContextError}, which is for when the user omitted a
+ * Use when the user **provided** a value but it couldn't be matched — as
+ * opposed to {@link ContextError}, which is for when the user **omitted** a
  * required value entirely.
+ *
+ * Output format:
+ * ```
+ * Project 'cli' not found.
+ *
+ * Try:
+ *   sentry issue list <org>/cli
+ *
+ * Or:
+ *   - No project with this slug found in any accessible organization
+ * ```
  *
  * @param resource - The entity that failed to resolve (e.g., "Issue 99124558", "Project 'cli'")
  * @param headline - Short phrase describing the failure (e.g., "not found", "is ambiguous", "could not be resolved")

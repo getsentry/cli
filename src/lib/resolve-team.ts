@@ -111,10 +111,11 @@ export async function resolveOrCreateTeam(
         );
       }
       // 403, 5xx, etc. — can't determine if org is wrong or something else
-      throw new CliError(
-        `Could not list teams for org '${orgSlug}' (${error.status}).\n\n` +
-          "The organization may not exist, or you may lack access.\n\n" +
-          `Try: ${options.usageHint} --team <team-slug>`
+      throw new ResolutionError(
+        `Organization '${orgSlug}'`,
+        `could not be accessed (${error.status})`,
+        `${options.usageHint} --team <team-slug>`,
+        ["The organization may not exist, or you may lack access"]
       );
     }
     throw error;
@@ -142,7 +143,6 @@ export async function resolveOrCreateTeam(
   }
 
   // Multiple candidates — user must specify
-  const teamList = candidates.map((t) => `  ${t.slug}`).join("\n");
   const label =
     memberTeams.length > 0
       ? `You belong to ${candidates.length} teams in ${orgSlug}`
@@ -150,7 +150,10 @@ export async function resolveOrCreateTeam(
   throw new ContextError(
     "Team",
     `${options.usageHint} --team ${(candidates[0] as SentryTeam).slug}`,
-    [`${label}. Specify one with --team:\n\n${teamList}`]
+    [
+      `${label}. Specify one with --team`,
+      ...candidates.map((t) => `Available: ${t.slug}`),
+    ]
   );
 }
 

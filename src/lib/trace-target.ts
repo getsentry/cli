@@ -111,12 +111,12 @@ export function parseTraceTarget(
   usageHint: string
 ): ParsedTraceTarget {
   if (args.length === 0) {
-    throw new ContextError("Trace ID", usageHint);
+    throw new ContextError("Trace ID", usageHint, []);
   }
 
   const first = args[0];
   if (first === undefined) {
-    throw new ContextError("Trace ID", usageHint);
+    throw new ContextError("Trace ID", usageHint, []);
   }
 
   // Warn about extra positional args that will be ignored
@@ -165,7 +165,7 @@ export function parseSlashSeparatedTraceTarget(
   const rawTraceId = input.slice(lastSlash + 1);
 
   if (!rawTraceId) {
-    throw new ContextError("Trace ID", usageHint);
+    throw new ContextError("Trace ID", usageHint, []);
   }
 
   const traceId = validateTraceId(rawTraceId);
@@ -193,7 +193,7 @@ export function parseSlashSeparatedTraceTarget(
   const rawProject = prefix.slice(innerSlash + 1);
 
   if (!(rawOrg && rawProject)) {
-    throw new ContextError("Trace ID", usageHint);
+    throw new ContextError("Trace ID", usageHint, []);
   }
 
   const no = normalizeSlug(rawOrg);

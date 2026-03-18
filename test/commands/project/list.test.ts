@@ -39,7 +39,11 @@ import {
   setPaginationCursor,
 } from "../../../src/lib/db/pagination.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
-import { AuthError, ContextError } from "../../../src/lib/errors.js";
+import {
+  AuthError,
+  ResolutionError,
+  ValidationError,
+} from "../../../src/lib/errors.js";
 import type { SentryProject } from "../../../src/types/index.js";
 import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
@@ -254,10 +258,10 @@ describe("resolveOrgCursor", () => {
     ).toBe("1735689600000:100:0");
   });
 
-  test("'last' with no cached cursor throws ContextError", () => {
+  test("'last' with no cached cursor throws ValidationError", () => {
     expect(() =>
       resolveOrgCursor("last", PAGINATION_KEY, "org:sentry")
-    ).toThrow(ContextError);
+    ).toThrow(ValidationError);
     expect(() =>
       resolveOrgCursor("last", PAGINATION_KEY, "org:sentry")
     ).toThrow(/No saved cursor/);
@@ -272,12 +276,12 @@ describe("resolveOrgCursor", () => {
     expect(result).toBe(cursor);
   });
 
-  test("'last' with expired cursor throws ContextError", () => {
+  test("'last' with expired cursor throws ValidationError", () => {
     const contextKey = "org:test-expired";
     setPaginationCursor(PAGINATION_KEY, contextKey, "old-cursor", -1000);
 
     expect(() => resolveOrgCursor("last", PAGINATION_KEY, contextKey)).toThrow(
-      ContextError
+      ValidationError
     );
   });
 });
@@ -645,7 +649,7 @@ describe("handleProjectSearch", () => {
     expect(result.items[0]?.slug).toBe("frontend");
   });
 
-  test("not found throws ContextError", async () => {
+  test("not found throws ResolutionError", async () => {
     // Mock returning orgs but 404 for project lookups
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -675,7 +679,7 @@ describe("handleProjectSearch", () => {
         json: false,
         fresh: false,
       })
-    ).rejects.toThrow(ContextError);
+    ).rejects.toThrow(ResolutionError);
   });
 
   test("not found with --json returns empty items", async () => {

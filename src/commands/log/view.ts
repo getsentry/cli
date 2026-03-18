@@ -87,12 +87,12 @@ export function parsePositionalArgs(args: string[]): {
   suggestion?: string;
 } {
   if (args.length === 0) {
-    throw new ContextError("Log ID", USAGE_HINT);
+    throw new ContextError("Log ID", USAGE_HINT, []);
   }
 
   const first = args[0];
   if (first === undefined) {
-    throw new ContextError("Log ID", USAGE_HINT);
+    throw new ContextError("Log ID", USAGE_HINT, []);
   }
 
   if (args.length === 1) {
@@ -105,7 +105,7 @@ export function parsePositionalArgs(args: string[]): {
     );
     const logIds = splitLogIds(id).map((v) => validateHexId(v, "log ID"));
     if (logIds.length === 0) {
-      throw new ContextError("Log ID", USAGE_HINT);
+      throw new ContextError("Log ID", USAGE_HINT, []);
     }
     return { logIds, targetArg };
   }
@@ -115,7 +115,7 @@ export function parsePositionalArgs(args: string[]): {
   const rawIds = args.slice(1).flatMap(splitLogIds);
   const logIds = rawIds.map((v) => validateHexId(v, "log ID"));
   if (logIds.length === 0) {
-    throw new ContextError("Log ID", USAGE_HINT);
+    throw new ContextError("Log ID", USAGE_HINT, []);
   }
   // Swap detection is not useful here: validateHexId above rejects non-hex
   // log IDs (which include any containing "/"), so detectSwappedViewArgs

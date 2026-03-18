@@ -28,6 +28,7 @@ import {
   ApiError,
   CliError,
   ContextError,
+  ResolutionError,
   withAuthGuard,
 } from "../../lib/errors.js";
 import {
@@ -193,12 +194,11 @@ async function handleCreateProject404(opts: {
     }
 
     if (teams.length > 0) {
-      const teamList = teams.map((t) => `  ${t.slug}`).join("\n");
-      throw new CliError(
-        `Team '${teamSlug}' not found in ${orgSlug}.\n\n` +
-          `Available teams:\n\n${teamList}\n\n` +
-          "Try:\n" +
-          `  sentry project create ${orgSlug}/${name} ${platform} --team <team-slug>`
+      throw new ResolutionError(
+        `Team '${teamSlug}'`,
+        `not found in ${orgSlug}`,
+        `sentry project create ${orgSlug}/${name} ${platform} --team <team-slug>`,
+        [`Available teams: ${teams.map((t) => t.slug).join(", ")}`]
       );
     }
     throw new CliError(
@@ -214,11 +214,14 @@ async function handleCreateProject404(opts: {
   }
 
   // listTeams failed for other reasons (403, 5xx, network) — can't disambiguate
-  throw new CliError(
-    `Failed to create project '${name}' in ${orgSlug}.\n\n` +
-      "The organization or team may not exist, or you may lack access.\n\n" +
-      "Try:\n" +
-      `  sentry project create ${orgSlug}/${name} ${platform} --team <team-slug>`
+  throw new ResolutionError(
+    `Project '${name}' in ${orgSlug}`,
+    "could not be created",
+    `sentry project create ${orgSlug}/${name} ${platform} --team <team-slug>`,
+    [
+      "The organization or team may not exist, or you may lack access",
+      `List teams: sentry team list ${orgSlug}/`,
+    ]
   );
 }
 

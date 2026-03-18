@@ -45,12 +45,11 @@ const USAGE_HINT = "sentry project view <org>/<project>";
  */
 function buildContextError(skippedSelfHosted?: number): ContextError {
   if (skippedSelfHosted) {
-    return new ContextError(
-      "Organization and project",
-      `${USAGE_HINT}\n\n` +
-        `Note: Found ${skippedSelfHosted} DSN(s) that could not be resolved.\n` +
-        "You may not have access to these projects, or specify the target explicitly."
-    );
+    return new ContextError("Organization and project", USAGE_HINT, [
+      "Run from a directory with a Sentry-configured project",
+      "Set SENTRY_ORG and SENTRY_PROJECT (or SENTRY_DSN) environment variables",
+      `Found ${skippedSelfHosted} DSN(s) that could not be resolved — you may not have access to these projects`,
+    ]);
   }
 
   return new ContextError("Organization and project", USAGE_HINT);
@@ -62,11 +61,9 @@ function buildContextError(skippedSelfHosted?: number): ContextError {
  */
 async function handleWebView(resolvedTargets: ResolvedTarget[]): Promise<void> {
   if (resolvedTargets.length > 1) {
-    throw new ContextError(
-      "Single project",
-      `${USAGE_HINT} -w\n\n` +
-        `Found ${resolvedTargets.length} projects. Specify which project to open in browser.`
-    );
+    throw new ContextError("Single project", `${USAGE_HINT} -w`, [
+      `Found ${resolvedTargets.length} projects — specify which project to open in browser`,
+    ]);
   }
 
   const target = resolvedTargets[0];
@@ -253,8 +250,8 @@ export const viewCommand = buildCommand({
       case ProjectSpecificationType.OrgAll:
         throw new ContextError(
           "Specific project",
-          `${USAGE_HINT}\n\n` +
-            "Specify the full org/project target, not just the organization."
+          `sentry project view ${parsed.org}/<project>`,
+          ["Specify the full org/project target, not just the organization"]
         );
 
       case ProjectSpecificationType.AutoDetect: {
