@@ -1,0 +1,48 @@
+# Distributed Tracing for Sentry Backend (Issue #389)
+
+## Status: ✅ Already Implemented
+
+This feature has **already been implemented** in commit `efd776bb` ("feat: add distributed tracing to connect CLI invocations to Sentry backend").
+
+## What Was Done
+
+The issue requested connecting CLI invocations to the Sentry backend project using distributed tracing. The implementation injects `sentry-trace` and `baggage` headers into all outgoing Sentry API requests.
+
+### Files Changed (3 files, 149 insertions, 3 deletions)
+
+#### 1. `src/lib/telemetry.ts`
+- Added `getSentryTracePropagationTargets()` function that builds URL patterns:
+  - `*.sentry.io` (all SaaS regional URLs via regex)
+  - `sentry.io` (bare root domain via regex)
+  - Self-hosted URLs (string match from `SENTRY_HOST`/`SENTRY_URL` env vars, only when non-SaaS)
+- Changed `tracePropagationTargets` from `[]` to `getSentryTracePropagationTargets()`
+
+#### 2. `src/lib/sentry-client.ts`
+- Imported `getTraceData` from `@sentry/bun`
+- Added trace header injection in `prepareHeaders()`:
+  - Calls `getTraceData()` to get current trace context
+  - Sets `sentry-trace` header when available
+  - Sets `baggage` header when available
+  - When telemetry is disabled (`SENTRY_CLI_NO_TELEMETRY=1`), `getTraceData()` returns `{}` so no headers are injected
+
+#### 3. `test/lib/telemetry.test.ts`
+- 6 new tests for `getSentryTracePropagationTargets()`:
+  - Matches SaaS regional URLs (us.sentry.io, de.sentry.io, ingest subdomains)
+  - Matches bare sentry.io
+  - Rejects non-Sentry URLs
+  - Includes self-hosted URL when configured
+  - No string targets by default (only regex)
+  - No duplication when SENTRY_URL is sentry.io
+
+### Design Rationale
+- **Manual injection** (not SDK auto-instrumentation) because Bun's fetch doesn't fire undici diagnostics channels, so the SDK's `nativeNodeFetchIntegration` cannot auto-inject headers
+- **`prepareHeaders()`** is the single bottleneck for all API requests (both `@sentry/api` SDK and raw), making it the ideal injection point
+- **Graceful degradation**: when telemetry is disabled, `getTraceData()` returns empty object, so no trace headers are sent
+
+## Verification
+- ✅ `bun run typecheck` — passes
+- ✅ `bun test test/lib/telemetry.test.ts` — 95 tests pass
+- ✅ All tests pass with 0 failures
+
+## No Further Action Needed
+The implementation is complete and committed.
