@@ -166,7 +166,7 @@ svg:where(.astro-c6vsoqas){color:var(--sl-icon-color);font-size:var(--sl-icon-si
 <li>"List all projects in my organization" → <code dir="auto">sentry project list my-org</code></li>
 <li>"What API endpoints exist for releases?" → <code dir="auto">sentry schema releases</code></li>
 </ul>
-<p>The CLI is self-contained — agents should always use <code dir="auto">sentry</code> commands directly rather than downloading API schemas or making raw HTTP requests. The <code dir="auto">sentry schema</code> command provides built-in API exploration, and <code dir="auto">sentry api</code> handles authenticated requests.</p>
+<p>The CLI has dedicated commands for most Sentry tasks, so agents should prefer <code dir="auto">sentry</code> commands over constructing raw API calls. The <code dir="auto">sentry schema</code> command provides built-in API exploration, and <code dir="auto">sentry api</code> handles authenticated requests for anything not covered by a dedicated command.</p>
 <p>The skill uses your existing CLI authentication, so you'll need to run <code dir="auto">sentry auth login</code> first if you haven't already.</p>
 <h2 id="requirements">Requirements</h2>
 <ul>

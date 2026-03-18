@@ -17,9 +17,9 @@ Best practices and operational guidance for AI coding agents using the Sentry CL
 
 ### Key Principles
 
-- **The CLI is self-contained** — always use `sentry` commands to interact with Sentry. Never download OpenAPI specs, JSON schemas, or raw API documentation from external URLs. The CLI provides all the tools you need.
-- **Use `sentry schema` to explore the API** — if you need to discover API endpoints, run `sentry schema` to browse interactively or `sentry schema <resource>` to search. Do not fetch schema files from GitHub or other sources.
-- **Use `sentry issue view <id>` to investigate issues** — when asked about a specific issue (e.g., `CLI-G5`, `PROJECT-123`), use `sentry issue view` directly. Do not try to construct API calls manually.
+- **Prefer CLI commands over raw API calls** — the CLI has dedicated commands for most tasks. Reach for `sentry issue view`, `sentry issue list`, `sentry trace view`, etc. before constructing API calls manually or fetching external documentation.
+- **Use `sentry schema` to explore the API** — if you need to discover API endpoints, run `sentry schema` to browse interactively or `sentry schema <resource>` to search. This is faster than fetching OpenAPI specs externally.
+- **Use `sentry issue view <id>` to investigate issues** — when asked about a specific issue (e.g., `CLI-G5`, `PROJECT-123`), use `sentry issue view` directly.
 - **Use `--json` for machine-readable output** — pipe through `jq` for filtering. Human-readable output includes formatting that is hard to parse.
 - **The CLI auto-detects org/project** — most commands work without explicit targets by scanning for DSNs in `.env` files and source code.
 
@@ -120,7 +120,7 @@ sentry api /api/0/organizations/my-org/projects/ --method POST --data '{"name":"
 - **Org/project ambiguity**: Auto-detection scans for DSNs in `.env` files and source code. If the project is ambiguous, specify explicitly: `sentry issue list my-org/my-project`.
 - **Confusing `--query` syntax**: The `--query` flag uses Sentry search syntax (e.g., `is:unresolved`, `assigned:me`), not free text search.
 - **Not using `--web`**: View commands support `-w`/`--web` to open the resource in the browser — useful for sharing links.
-- **Downloading API schemas externally**: Never fetch OpenAPI specs or schema files from GitHub. Use `sentry schema` to browse the API and `sentry api` to make requests — the CLI handles authentication and endpoint resolution.
+- **Fetching API schemas instead of using the CLI**: Prefer `sentry schema` to browse the API and `sentry api` to make requests — the CLI handles authentication and endpoint resolution, so there's rarely a need to download OpenAPI specs separately.
 
 ## Prerequisites
 
