@@ -87,7 +87,10 @@ function buildReplacement(
 
   // Validate aggregate names if query flags were provided
   if (flags.query && mergedQueries?.[0]?.aggregates) {
-    validateAggregateNames(mergedQueries[0].aggregates, existing.widgetType);
+    validateAggregateNames(
+      mergedQueries[0].aggregates,
+      flags.dataset ?? existing.widgetType
+    );
   }
 
   const limit = flags.limit !== undefined ? flags.limit : existing.limit;
