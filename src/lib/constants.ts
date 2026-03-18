@@ -11,12 +11,47 @@ export const DEFAULT_SENTRY_HOST = "sentry.io";
 /** Default Sentry SaaS URL (control silo for OAuth and region discovery) */
 export const DEFAULT_SENTRY_URL = `https://${DEFAULT_SENTRY_HOST}`;
 
+/** Matches strings that already start with http:// or https:// */
+const HAS_PROTOCOL_RE = /^https?:\/\//i;
+
+/**
+ * Normalize a URL string by ensuring it has a protocol prefix.
+ *
+ * Users commonly set `SENTRY_HOST=sentry.example.com` without a protocol.
+ * Without normalization, the bare hostname is used as-is in URL construction
+ * (e.g., `sentry.example.com/api/0/...`), producing an invalid URL that
+ * causes `TypeError: Failed to construct 'Request': Invalid URL`.
+ *
+ * @param url - Raw URL string (may or may not have a protocol)
+ * @returns URL with `https://` prepended if no protocol was present, or
+ *   undefined if the input is empty/whitespace
+ * @internal Exported for testing
+ */
+export function normalizeUrl(url: string | undefined): string | undefined {
+  if (!url) {
+    return;
+  }
+  const trimmed = url.trim();
+  if (!trimmed) {
+    return;
+  }
+  // Already has a protocol — return as-is
+  if (HAS_PROTOCOL_RE.test(trimmed)) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
+}
+
 /**
  * Resolve the Sentry instance URL from environment variables.
  * Checks SENTRY_HOST first, then SENTRY_URL, then falls back to undefined.
+ *
+ * Bare hostnames (e.g., `sentry.example.com`) are automatically prefixed
+ * with `https://` to prevent invalid URL construction downstream.
  */
 export function getConfiguredSentryUrl(): string | undefined {
-  return process.env.SENTRY_HOST || process.env.SENTRY_URL || undefined;
+  const raw = process.env.SENTRY_HOST || process.env.SENTRY_URL || undefined;
+  return normalizeUrl(raw);
 }
 
 /** CLI version string, available for help output and other uses */
