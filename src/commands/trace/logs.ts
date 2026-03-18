@@ -59,9 +59,8 @@ function formatTraceLogsHuman(data: TraceLogsData): string {
     return data.emptyMessage ?? "No logs found.";
   }
   const parts = [formatLogTable(data.logs, false)];
-  const hasMore = data.logs.length >= data.limit;
   const countText = `Showing ${data.logs.length} log${data.logs.length === 1 ? "" : "s"} for trace ${data.traceId}.`;
-  const tip = hasMore ? " Use --limit to show more." : "";
+  const tip = data.hasMore ? " Use --limit to show more." : "";
   parts.push(formatFooter(`${countText}${tip}`));
   return parts.join("").trimEnd();
 }
