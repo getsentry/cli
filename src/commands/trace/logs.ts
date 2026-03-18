@@ -47,7 +47,6 @@ type LogLike = {
 type TraceLogsData = {
   logs: LogLike[];
   traceId: string;
-  limit: number;
   hasMore: boolean;
   /** Message shown when no logs found */
   emptyMessage?: string;
@@ -197,7 +196,6 @@ export const logsCommand = buildCommand({
     return yield new CommandOutput({
       logs: chronological,
       traceId,
-      limit: flags.limit,
       hasMore,
       emptyMessage,
     });
