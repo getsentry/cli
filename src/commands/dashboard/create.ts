@@ -263,6 +263,20 @@ export const createCommand = buildCommand({
           `Valid display types: ${DISPLAY_TYPES.join(", ")}`,
         "widget-display"
       );
+    } else if (
+      flags["widget-query"] ||
+      flags["widget-dataset"] ||
+      flags["widget-where"] ||
+      flags["widget-group-by"] ||
+      flags["widget-sort"] ||
+      flags["widget-limit"] !== undefined
+    ) {
+      throw new ValidationError(
+        "Widget flags require --widget-title and --widget-display.\n\n" +
+          "Example:\n" +
+          "  sentry dashboard create 'My Dashboard' --widget-title \"Error Count\" --widget-display big_number --widget-query count",
+        "widget-display"
+      );
     }
 
     const dashboard = await createDashboard(orgSlug, {
