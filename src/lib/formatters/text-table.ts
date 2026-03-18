@@ -57,6 +57,17 @@ export type TextTableOptions = {
   /** Truncate cells to one line with "\u2026" instead of wrapping. @default false */
   truncate?: boolean;
   /**
+   * Hide the header row entirely (omit from rendered output).
+   *
+   * Headers are still used for column width measurement, but the rendered
+   * table starts directly with data rows. Useful for key-value tables where
+   * the markdown source requires empty header cells (`| | |`) to satisfy
+   * table syntax, but the visual output shouldn't show them.
+   *
+   * @default false
+   */
+  hideHeaders?: boolean;
+  /**
    * Show horizontal separator lines between data rows.
    *
    * - `false` (default): no row separators
@@ -94,6 +105,7 @@ export function renderTextTable(
     minWidths = [],
     shrinkable = [],
     truncate = false,
+    hideHeaders = false,
     rowSeparator = false,
   } = options;
 
@@ -139,6 +151,7 @@ export function renderTextTable(
     border,
     cellPadding,
     headerSeparator,
+    hideHeaders,
     rowSeparator,
   });
 }
@@ -512,6 +525,8 @@ type GridParams = {
   border: BorderCharacters;
   cellPadding: number;
   headerSeparator: boolean;
+  /** Skip rendering the header row (allRows[0]) entirely. */
+  hideHeaders: boolean;
   /** Draw separator between data rows. `true` for plain, or ANSI color prefix string. */
   rowSeparator: boolean | string;
 };
@@ -562,6 +577,7 @@ function renderGrid(params: GridParams): string {
     border,
     cellPadding,
     headerSeparator,
+    hideHeaders,
     rowSeparator,
   } = params;
   const lines: string[] = [];
@@ -607,7 +623,11 @@ function renderGrid(params: GridParams): string {
     vert,
   };
 
-  for (let r = 0; r < allRows.length; r++) {
+  // When hideHeaders is set, skip allRows[0] (the header) and its separator.
+  // The header is still included in allRows for column width measurement.
+  const startRow = hideHeaders ? 1 : 0;
+
+  for (let r = startRow; r < allRows.length; r++) {
     const wrappedCells = allRows[r] ?? [];
     lines.push(...renderRowLines(wrappedCells, rowCtx));
 

@@ -66,8 +66,8 @@ function createMockContext(
     ...overrides.env,
   };
 
-  // Force plain output so formatUpgradeResult renders raw markdown tables
-  // (ASCII pipes) instead of Unicode box-drawing characters in TTY mode.
+  // Force plain output so formatUpgradeResult renders raw markdown
+  // instead of ANSI-styled output in TTY mode.
   const origPlain = process.env.SENTRY_PLAIN_OUTPUT;
   process.env.SENTRY_PLAIN_OUTPUT = "1";
 
@@ -281,7 +281,7 @@ describe("sentry cli upgrade", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("| curl |");
+      expect(combined).toContain("Method: curl");
       expect(combined).toContain(CLI_VERSION);
       expect(combined).toContain("You are already on the target version");
     });
@@ -375,7 +375,7 @@ describe("sentry cli upgrade", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("| brew |");
+      expect(combined).toContain("Method: brew");
       expect(combined).toContain("99.99.99");
       expect(combined).toContain("Run 'sentry cli upgrade' to update.");
     });
@@ -512,7 +512,7 @@ describe("sentry cli upgrade — nightly channel", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("| nightly |");
+      expect(combined).toContain("Channel: nightly");
     });
 
     test("'stable' positional sets channel to stable", async () => {
@@ -531,7 +531,7 @@ describe("sentry cli upgrade — nightly channel", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("| stable |");
+      expect(combined).toContain("Channel: stable");
     });
 
     test("without positional, uses persisted channel", async () => {
@@ -550,7 +550,7 @@ describe("sentry cli upgrade — nightly channel", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("| nightly |");
+      expect(combined).toContain("Channel: nightly");
     });
   });
 
@@ -605,7 +605,7 @@ describe("sentry cli upgrade — nightly channel", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("| nightly |");
+      expect(combined).toContain("Channel: nightly");
       expect(combined).toContain(CLI_VERSION);
       expect(combined).toContain("You are already on the target version");
     });
@@ -625,7 +625,7 @@ describe("sentry cli upgrade — nightly channel", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("| nightly |");
+      expect(combined).toContain("Channel: nightly");
       expect(combined).toContain("0.99.0-dev.9999999999");
       expect(combined).toContain("Run 'sentry cli upgrade' to update.");
     });
@@ -741,6 +741,7 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
     expect(setupCall).toBeDefined();
     expect(setupCall).toContain("cli");
     expect(setupCall).toContain("setup");
+    expect(setupCall).toContain("--quiet");
     expect(setupCall).toContain("--method");
     expect(setupCall).toContain("curl");
     expect(setupCall).toContain("--install");

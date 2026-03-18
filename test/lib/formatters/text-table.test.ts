@@ -99,6 +99,45 @@ describe("renderTextTable", () => {
     });
   });
 
+  describe("hideHeaders", () => {
+    test("hideHeaders: true omits the header row from output", () => {
+      const out = renderTextTable(["", ""], [["Key", "Val"]], {
+        hideHeaders: true,
+      });
+      // Data row should be present
+      expect(out).toContain("Key");
+      expect(out).toContain("Val");
+      // Count content lines (between top and bottom border)
+      const lines = out.split("\n").filter((l) => l.includes("\u2502")); // │
+      // With hideHeaders, only the data row should produce content lines
+      expect(lines).toHaveLength(1);
+    });
+
+    test("hideHeaders: true still uses header widths for column measurement", () => {
+      // Headers are wide, data is short — columns should still be sized for headers
+      const withHide = renderTextTable(
+        ["LongHeader1", "LongHeader2"],
+        [["a", "b"]],
+        { hideHeaders: true, maxWidth: 80 }
+      );
+      const withoutHide = renderTextTable(
+        ["LongHeader1", "LongHeader2"],
+        [["a", "b"]],
+        { hideHeaders: false, maxWidth: 80 }
+      );
+      // Both should produce the same column widths (same top border line)
+      const topBorderHide = withHide.split("\n")[0];
+      const topBorderShow = withoutHide.split("\n")[0];
+      expect(topBorderHide).toBe(topBorderShow);
+    });
+
+    test("hideHeaders: false (default) includes header row", () => {
+      const out = renderTextTable(["H1", "H2"], [["d1", "d2"]]);
+      expect(out).toContain("H1");
+      expect(out).toContain("H2");
+    });
+  });
+
   describe("alignment", () => {
     test("right-aligned column pads text on the left", () => {
       const out = renderTextTable(["Amount"], [["42"]], {

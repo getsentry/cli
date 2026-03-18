@@ -2071,8 +2071,8 @@ const ACTION_DESCRIPTIONS: Record<UpgradeResult["action"], string> = {
 /**
  * Format upgrade result as rendered markdown.
  *
- * Produces a concise summary line with the action taken, version info,
- * and any warnings (e.g., PATH shadowing from old package manager install).
+ * Produces a concise summary: action line, compact metadata, and any
+ * warnings (e.g., PATH shadowing from old package manager install).
  * Designed as the `human` formatter for the `cli upgrade` command's
  * {@link OutputConfig}.
  *
@@ -2086,13 +2086,17 @@ export function formatUpgradeResult(data: UpgradeResult): string {
     case "upgraded":
     case "downgraded": {
       const verb = ACTION_DESCRIPTIONS[data.action];
-      const offlineNote = data.offline ? " (offline, from cache)" : "";
-      lines.push(
-        `${colorTag("green", "✓")} ${verb} to ${safeCodeSpan(data.targetVersion)}${escapeMarkdownInline(offlineNote)}`
-      );
-      if (data.currentVersion !== data.targetVersion) {
+      if (data.offline) {
         lines.push(
-          `${escapeMarkdownInline(data.currentVersion)} → ${escapeMarkdownInline(data.targetVersion)}`
+          `${colorTag("green", "✓")} ${verb} to ${safeCodeSpan(data.targetVersion)}${escapeMarkdownInline(" (offline, from cache)")}`
+        );
+      } else if (data.currentVersion !== data.targetVersion) {
+        lines.push(
+          `${colorTag("green", "✓")} ${verb} to ${safeCodeSpan(data.targetVersion)} ${escapeMarkdownInline(`(from ${data.currentVersion})`)}`
+        );
+      } else {
+        lines.push(
+          `${colorTag("green", "✓")} ${verb} to ${safeCodeSpan(data.targetVersion)}`
         );
       }
       break;
@@ -2123,19 +2127,13 @@ export function formatUpgradeResult(data: UpgradeResult): string {
     }
   }
 
-  // Metadata table — renders method, channel, and version info below the
-  // action line so diagnostics go to stdout (via the markdown pipeline)
-  // instead of cluttering stderr with repeated log.info() lines.
-  const kvRows: [string, string][] = [
-    ["Method", escapeMarkdownInline(data.method)],
-    ["Channel", escapeMarkdownInline(data.channel)],
-  ];
-  lines.push("");
-  lines.push(mdKvTable(kvRows));
+  // Compact metadata line instead of a full table — method and channel
+  // are lightweight diagnostics that don't warrant box-drawing borders.
+  const meta = `Method: ${data.method} · Channel: ${data.channel}`;
+  lines.push(`  ${colorTag("muted", escapeMarkdownInline(meta))}`);
 
   // Append warnings with ⚠ markers
   if (data.warnings && data.warnings.length > 0) {
-    lines.push("");
     for (const warning of data.warnings) {
       lines.push(`${colorTag("yellow", "⚠")} ${escapeMarkdownInline(warning)}`);
     }
