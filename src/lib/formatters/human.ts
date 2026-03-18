@@ -11,6 +11,10 @@
 import * as Sentry from "@sentry/bun";
 import prettyMs from "pretty-ms";
 import type {
+  DashboardDetail,
+  DashboardWidget,
+} from "../../types/dashboard.js";
+import type {
   BreadcrumbsEntry,
   ExceptionEntry,
   ExceptionValue,
@@ -2168,8 +2172,8 @@ export function formatDashboardView(result: {
  * Format a widget add result for human-readable output.
  */
 export function formatWidgetAdded(result: {
-  dashboard: { id: string; widgets?: unknown[] };
-  widget: { title: string };
+  dashboard: DashboardDetail;
+  widget: DashboardWidget;
   url: string;
 }): string {
   const widgetCount = result.dashboard.widgets?.length ?? 0;
@@ -2185,7 +2189,7 @@ export function formatWidgetAdded(result: {
  * Format a widget deletion result for human-readable output.
  */
 export function formatWidgetDeleted(result: {
-  dashboard: { id: string; widgets?: unknown[] };
+  dashboard: DashboardDetail;
   widgetTitle: string;
   url: string;
 }): string {
@@ -2202,8 +2206,8 @@ export function formatWidgetDeleted(result: {
  * Format a widget edit result for human-readable output.
  */
 export function formatWidgetEdited(result: {
-  dashboard: { id: string };
-  widget: { title: string };
+  dashboard: DashboardDetail;
+  widget: DashboardWidget;
   url: string;
 }): string {
   const lines: string[] = [

@@ -111,5 +111,6 @@ export const deleteCommand = buildCommand({
       widgetTitle,
       url,
     } as DeleteResult);
+    return { hint: `Dashboard: ${url}` };
   },
 });

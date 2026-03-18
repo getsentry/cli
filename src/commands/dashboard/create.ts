@@ -27,11 +27,8 @@ import {
   type DashboardDetail,
   type DashboardWidget,
   DISPLAY_TYPES,
-  parseAggregate,
-  parseSortExpression,
-  parseWidgetInput,
-  prepareWidgetQueries,
 } from "../../types/dashboard.js";
+import { buildWidgetFromFlags } from "./resolve.js";
 
 type CreateFlags = {
   readonly "widget-title"?: string;
@@ -158,30 +155,16 @@ function buildInlineWidget(flags: CreateFlags): DashboardWidget {
     );
   }
 
-  const aggregates = (flags["widget-query"] ?? ["count"]).map(parseAggregate);
-  const columns = flags["widget-group-by"] ?? [];
-  const orderby = flags["widget-sort"]
-    ? parseSortExpression(flags["widget-sort"])
-    : undefined;
-
-  const rawWidget = {
+  return buildWidgetFromFlags({
     title: flags["widget-title"],
-    displayType: flags["widget-display"] as string,
-    ...(flags["widget-dataset"] && { widgetType: flags["widget-dataset"] }),
-    queries: [
-      {
-        aggregates,
-        columns,
-        conditions: flags["widget-where"] ?? "",
-        ...(orderby && { orderby }),
-        name: "",
-      },
-    ],
-    ...(flags["widget-limit"] !== undefined && {
-      limit: flags["widget-limit"],
-    }),
-  };
-  return prepareWidgetQueries(parseWidgetInput(rawWidget));
+    display: flags["widget-display"] as string,
+    dataset: flags["widget-dataset"],
+    query: flags["widget-query"],
+    where: flags["widget-where"],
+    groupBy: flags["widget-group-by"],
+    sort: flags["widget-sort"],
+    limit: flags["widget-limit"],
+  });
 }
 
 export const createCommand = buildCommand({
@@ -290,5 +273,6 @@ export const createCommand = buildCommand({
     const url = buildDashboardUrl(orgSlug, dashboard.id);
 
     yield new CommandOutput({ ...dashboard, url } as CreateResult);
+    return { hint: `Dashboard: ${url}` };
   },
 });

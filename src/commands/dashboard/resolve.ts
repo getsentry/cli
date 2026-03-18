@@ -13,6 +13,10 @@ import { isAllDigits } from "../../lib/utils.js";
 import {
   type DashboardWidget,
   DISPLAY_TYPES,
+  parseAggregate,
+  parseSortExpression,
+  parseWidgetInput,
+  prepareWidgetQueries,
   WIDGET_TYPES,
 } from "../../types/dashboard.js";
 
@@ -155,6 +159,47 @@ export function resolveWidgetIndex(
     );
   }
   return matchIndex;
+}
+
+/**
+ * Build a widget from user-provided flag values.
+ *
+ * Shared between `dashboard create --widget-*` and `dashboard widget add`.
+ * Parses aggregate shorthand, sort expressions, and validates via Zod schema.
+ *
+ * @param opts - Widget configuration from parsed flags
+ * @returns Validated widget with computed query fields
+ */
+export function buildWidgetFromFlags(opts: {
+  title: string;
+  display: string;
+  dataset?: string;
+  query?: string[];
+  where?: string;
+  groupBy?: string[];
+  sort?: string;
+  limit?: number;
+}): DashboardWidget {
+  const aggregates = (opts.query ?? ["count"]).map(parseAggregate);
+  const columns = opts.groupBy ?? [];
+  const orderby = opts.sort ? parseSortExpression(opts.sort) : undefined;
+
+  const raw = {
+    title: opts.title,
+    displayType: opts.display,
+    ...(opts.dataset && { widgetType: opts.dataset }),
+    queries: [
+      {
+        aggregates,
+        columns,
+        conditions: opts.where ?? "",
+        ...(orderby && { orderby }),
+        name: "",
+      },
+    ],
+    ...(opts.limit !== undefined && { limit: opts.limit }),
+  };
+  return prepareWidgetQueries(parseWidgetInput(raw));
 }
 
 /**

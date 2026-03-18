@@ -240,5 +240,6 @@ export const editCommand = buildCommand({
       widget: replacement,
       url,
     } as EditResult);
+    return { hint: `Dashboard: ${url}` };
   },
 });

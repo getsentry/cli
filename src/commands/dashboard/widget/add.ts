@@ -16,13 +16,10 @@ import {
   assignDefaultLayout,
   type DashboardDetail,
   type DashboardWidget,
-  parseAggregate,
-  parseSortExpression,
-  parseWidgetInput,
   prepareDashboardForUpdate,
-  prepareWidgetQueries,
 } from "../../../types/dashboard.js";
 import {
+  buildWidgetFromFlags,
   parseDashboardPositionalArgs,
   resolveDashboardId,
   resolveOrgFromTarget,
@@ -160,6 +157,10 @@ export const addCommand = buildCommand({
     const { cwd } = this;
 
     const { dashboardArgs, title } = parseAddPositionalArgs(args);
+
+    // Validate enums before any network calls (fail fast)
+    validateWidgetEnums(flags.display, flags.dataset);
+
     const { dashboardRef, targetArg } =
       parseDashboardPositionalArgs(dashboardArgs);
     const parsed = parseOrgProjectArg(targetArg);
@@ -170,28 +171,16 @@ export const addCommand = buildCommand({
     );
     const dashboardId = await resolveDashboardId(orgSlug, dashboardRef);
 
-    validateWidgetEnums(flags.display, flags.dataset);
-
-    const aggregates = (flags.query ?? ["count"]).map(parseAggregate);
-    const columns = flags["group-by"] ?? [];
-    const orderby = flags.sort ? parseSortExpression(flags.sort) : undefined;
-
-    const raw = {
+    let newWidget = buildWidgetFromFlags({
       title,
-      displayType: flags.display,
-      ...(flags.dataset && { widgetType: flags.dataset }),
-      queries: [
-        {
-          aggregates,
-          columns,
-          conditions: flags.where ?? "",
-          ...(orderby && { orderby }),
-          name: "",
-        },
-      ],
-      ...(flags.limit !== undefined && { limit: flags.limit }),
-    };
-    let newWidget = prepareWidgetQueries(parseWidgetInput(raw));
+      display: flags.display,
+      dataset: flags.dataset,
+      query: flags.query,
+      where: flags.where,
+      groupBy: flags["group-by"],
+      sort: flags.sort,
+      limit: flags.limit,
+    });
 
     // GET current dashboard → append widget with auto-layout → PUT
     const current = await getDashboard(orgSlug, dashboardId);
@@ -207,5 +196,6 @@ export const addCommand = buildCommand({
       widget: newWidget,
       url,
     } as AddResult);
+    return { hint: `Dashboard: ${url}` };
   },
 });
