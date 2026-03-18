@@ -1,0 +1,104 @@
+# Plan: Move test temp dirs from `.test-tmp/` to `os.tmpdir()`
+
+## Problem
+The previous fix (2806622a) moved test temp dirs from `$HOME` to a project-local `.test-tmp/` directory. While this stopped polluting `$HOME`, `.test-tmp/` is not the right location — we should use the OS-provided temp directory (`os.tmpdir()` → `/tmp` on Linux, `$TMPDIR` on macOS).
+
+## Approach
+Replace all `resolve(import.meta.dir, "../.test-tmp")` patterns with `os.tmpdir()` + a namespaced subdirectory (`sentry-cli-test/`). Export the constant from `test/helpers.ts` so all consumers share a single definition.
+
+## Files to Change (in order)
+
+### 1. `test/helpers.ts`
+**Export `TEST_TMP_DIR` so other files can import it instead of computing it independently.**
+
+```diff
++import { tmpdir } from "node:os";
+
+-const TEST_TMP_DIR = resolve(import.meta.dir, "../.test-tmp");
+-mkdirSync(TEST_TMP_DIR, { recursive: true });
++export const TEST_TMP_DIR = join(tmpdir(), "sentry-cli-test");
++mkdirSync(TEST_TMP_DIR, { recursive: true });
+```
+
+- Update JSDoc on `createTestConfigDir` (line 27): remove "project-local" wording, say "OS temp directory"
+
+### 2. `test/preload.ts`
+**Compute `TEST_TMP_DIR` independently (can't import from helpers due to load-order). Keep wipe-on-start. Add legacy `$HOME` cleanup.**
+
+```diff
+-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+-import { join, resolve } from "node:path";
++import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
++import { homedir, tmpdir } from "node:os";
++import { join } from "node:path";
+
+-const TEST_TMP_DIR = resolve(import.meta.dir, "../.test-tmp");
++const TEST_TMP_DIR = join(tmpdir(), "sentry-cli-test");
+```
+
+Note: preload.ts can't import from helpers.ts (helpers imports from `src/lib/db/index.js` which would trigger DB setup too early). Both files must compute the same path independently.
+
+Add after the wipe-on-start block (before creating preload dir):
+```typescript
+// One-time migration: clean up old $HOME/.sentry-cli-test-* dirs left by
+// the previous test infrastructure. Safe to remove after a few months.
+try {
+  const home = homedir();
+  for (const entry of readdirSync(home)) {
+    if (entry.startsWith(".sentry-cli-test-")) {
+      rmSync(join(home, entry), { recursive: true, force: true });
+    }
+  }
+} catch {
+  // Ignore — home dir may not be listable in some CI environments
+}
+```
+
+### 3. `test/fixture.ts`
+**Remove dead code and unused imports.**
+
+- Remove the `tmpdir()` function (lines 17–57) — it's dead code, nothing imports it
+- Remove `TEST_TMP_DIR` constant and its `mkdirSync` (lines 11–12) — only used by `tmpdir()`
+- Remove `resolve` from the path import (line 8) — only used by `TEST_TMP_DIR`
+- Update fs import (line 7): keep `mkdirSync` (used in `setAuthToken` line 180), drop `rmSync` and `writeFileSync` (only used inside `tmpdir()`)
+- Drop `resolve` from path import — `join` is sufficient for remaining code
+
+### 4. `test/lib/upgrade.test.ts`
+**Import `TEST_TMP_DIR` from helpers instead of computing it.**
+
+```diff
+-const TEST_TMP_DIR = resolve(import.meta.dir, "../../.test-tmp");
+-mkdirSync(TEST_TMP_DIR, { recursive: true });
++import { TEST_TMP_DIR } from "../helpers.js";
+```
+
+Already imports from `../helpers.js` (line 41), so just add `TEST_TMP_DIR` to that import. Remove `resolve` from path import if no longer needed.
+
+### 5. `test/commands/cli/upgrade.test.ts`
+**Import `TEST_TMP_DIR` from helpers instead of computing it.**
+
+```diff
+-const TEST_TMP_DIR = resolve(import.meta.dir, "../../../.test-tmp");
+-mkdirSync(TEST_TMP_DIR, { recursive: true });
++import { TEST_TMP_DIR } from "../../helpers.js";
+```
+
+Already imports from `../../helpers.js` (line 28), so just add `TEST_TMP_DIR` to that import. Remove `resolve` from path import if no longer needed.
+
+### 6. `.gitignore`
+**Remove the `.test-tmp` entry** (line 20) since temp dirs now go to system tmp.
+
+## Key Design Decisions
+
+- **Namespace**: `sentry-cli-test/` subdirectory within `os.tmpdir()` keeps our test dirs grouped and makes wipe-on-start safe.
+- **Wipe-on-start stays**: `preload.ts` wipes the namespace dir at each `bun test` run to clean crash leftovers.
+- **`$HOME` migration**: One-time cleanup of `$HOME/.sentry-cli-test-*` dirs in preload.ts.
+- **Shared constant**: `TEST_TMP_DIR` exported from `test/helpers.ts`, imported by `fixture.ts` and upgrade tests. `preload.ts` computes it independently (can't import from helpers due to load-order constraint).
+- **Dead code removal**: `fixture.ts`'s `tmpdir()` function is unused and should be removed.
+
+## Verification
+1. `bun run test:unit` — all tests pass
+2. Confirm dirs are created in `$TMPDIR/sentry-cli-test/` during test run (not `.test-tmp/`)
+3. `ls $HOME/.sentry-cli-test-*` — should be gone after first test run
+4. `.test-tmp/` directory should no longer be created
+5. `bun run lint` — no lint errors
