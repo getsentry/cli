@@ -106,9 +106,13 @@ export function renderTextTable(
     minWidths = [],
     shrinkable = [],
     truncate = false,
-    hideHeaders = options.hideHeaders ?? headers.every((h) => h.trim() === ""),
     rowSeparator = false,
   } = options;
+
+  // Auto-detect empty headers when not explicitly set by the caller.
+  // Extracted from destructuring because `??` preserves explicit `false`.
+  const hideHeaders =
+    options.hideHeaders ?? headers.every((h) => h.trim() === "");
 
   const border = BorderChars[borderStyle];
   const colCount = headers.length;
