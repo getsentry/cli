@@ -95,7 +95,12 @@ export function mdTableHeader(cols: readonly string[]): string {
  */
 export function mdRow(cells: readonly string[]): string {
   if (isPlainOutput()) {
-    return `| ${cells.map(stripMarkdownInline).join(" | ")} |\n`;
+    // Strip markdown syntax, then replace literal pipes with box-drawing │
+    // to prevent them from breaking the pipe-delimited table format.
+    const stripped = cells.map((c) =>
+      stripMarkdownInline(c).replace(/\|/g, "\u2502")
+    );
+    return `| ${stripped.join(" | ")} |\n`;
   }
   const out = cells.map((c) =>
     renderInline(marked.lexer(c).flatMap(flattenInline)).replace(
@@ -227,6 +232,10 @@ export function stripMarkdownInline(md: string): string {
   text = text.replace(/_{1,2}([^_]+)_{1,2}/g, "$1");
   // Code spans: `text` → text
   text = text.replace(/`([^`]+)`/g, "$1");
+  // Backslash escapes: \| \< \> \\ \_ \* \[ \] \` → literal character.
+  // escapeMarkdownCell/escapeMarkdownInline add these for the markdown parser;
+  // the TTY path unescapes via marked.lexer(), but plain mode must do it here.
+  text = text.replace(/\\([|<>\\*_`[\]])/g, "$1");
   return text;
 }
 

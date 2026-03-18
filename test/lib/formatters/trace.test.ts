@@ -222,7 +222,8 @@ describe("formatTraceRow (plain mode)", () => {
 
   test("escapes pipe characters in transaction name", () => {
     const row = formatTraceRow(makeTransaction({ transaction: "GET /a|b" }));
-    expect(row).toContain("GET /a\\|b");
+    // Pipe replaced with box-drawing │ so it doesn't break the table
+    expect(row).toContain("GET /a\u2502b");
   });
 
   test("shows 'unknown' for empty transaction", () => {
