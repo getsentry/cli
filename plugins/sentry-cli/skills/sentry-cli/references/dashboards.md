@@ -32,4 +32,14 @@ View a dashboard
 
 Create a dashboard
 
+**Flags:**
+- `--widget-title <value> - Inline widget title`
+- `--widget-display <value> - Inline widget display type (line, bar, table, big_number, ...)`
+- `--widget-dataset <value> - Inline widget dataset (default: spans)`
+- `--widget-query <value>... - Inline widget aggregate (e.g. count, p95:span.duration)`
+- `--widget-where <value> - Inline widget search conditions filter`
+- `--widget-group-by <value>... - Inline widget group-by column (repeatable)`
+- `--widget-sort <value> - Inline widget order by (prefix - for desc)`
+- `--widget-limit <value> - Inline widget result limit`
+
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
