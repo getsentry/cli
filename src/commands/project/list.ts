@@ -395,10 +395,7 @@ export async function handleExplicit(
   flags: ListFlags
 ): Promise<ListResult<ProjectWithOrg>> {
   const projectResult = await withProgress(
-    {
-      message: `Fetching projects (up to ${flags.limit})...`,
-      json: flags.json,
-    },
+    { message: "Fetching project...", json: flags.json },
     () => withAuthGuard(() => getProject(org, projectSlug))
   );
   if (!projectResult.ok) {
