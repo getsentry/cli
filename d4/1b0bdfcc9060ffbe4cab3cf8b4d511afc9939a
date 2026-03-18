@@ -1,0 +1,182 @@
+# Plan: Resolve AGENTS.md conflict on byk/fix/upgrade-output
+
+## Problem
+
+The PR branch has AGENTS.md conflicts with `origin/main`. The branch's intermediate commits deleted the lore-managed "Long-term Knowledge" section, while `origin/main` updated it with different entries. Our fix commit doesn't intentionally modify AGENTS.md.
+
+## Fix
+
+Rebase onto `origin/main`. For the AGENTS.md conflict, take main's version since the lore section is auto-managed.
+
+```bash
+git fetch origin main
+git rebase origin/main
+# On conflict: git checkout --theirs AGENTS.md && git add AGENTS.md && git rebase --continue
+git push --force-with-lease
+# Push updated note
+git push origin refs/notes/commits --force
+```
+
+## Verification
+
+- `git diff origin/main -- AGENTS.md` shows no diff
+- PR shows no conflicts on GitHub
+
+---
+
+# (Previous plan: Clean up `cli upgrade` output + fix systemic empty-header table issue)
+
+The `cli upgrade` output is ugly:
+
+```
+Binary: Installed to /home/byk/.local/bin/sentry
+✓ Upgraded to  0.18.0-dev.1773836960
+0.18.0-dev.1773794950 → 0.18.0-dev.1773836960
+
+╭─────────┬─────────╮
+│         │         │      ← empty header cells
+├─────────┼─────────┤
+│ Method  │ curl    │
+│ Channel │ nightly │
+╰─────────┴─────────╯
+```
+
+**Upgrade-specific issues:**
+1. **Subprocess stdout leaks** — `runSetupOnNewBinary()` spawns `cli setup` with `stdio: "inherit"`, printing "Binary: Installed to ..." before the upgrade command's own `CommandOutput`
+2. **Redundant version arrow** — duplicates info already in the success line
+3. **Overkill metadata table** — box-drawing table for just 2 key-value pairs
+4. **Double space** — "✓ Upgraded to  0.18.0-dev..." from code span rendering
+
+**Systemic issue:** `mdKvTable()` always emits `| | |` as the header row. When rendered by `renderTableToken()` → `renderTextTable()`, this produces an empty header row with box-drawing borders (the `╭───┬───╮ / │   │   │ / ├───┼───┤` pattern). This affects **12 call sites** across the codebase: issue details, org/project view, trace/span/log view, event details, auth status, dashboard view, etc.
+
+## Changes
+
+### 1. Systemic fix: Skip empty header rows in table rendering
+
+**File:** `src/lib/formatters/markdown.ts` — `renderTableToken()`
+
+When all header cells are empty strings (as `mdKvTable` without a heading produces), skip the header row and disable the header separator:
+
+```typescript
+function renderTableToken(table: Tokens.Table): string {
+  const headers = table.header.map((cell) => renderInline(cell.tokens));
+  const rows = table.rows.map((row) =>
+    row.map((cell) => renderInline(cell.tokens))
+  );
+
+  const alignments: Alignment[] = table.align.map((a) => {
+    if (a === "right") return "right";
+    if (a === "center") return "center";
+    return "left";
+  });
+
+  // When all header cells are empty (e.g. from mdKvTable without a heading),
+  // render a headerless table — no empty header row, no separator line.
+  const allHeadersEmpty = headers.every((h) => h.trim() === "");
+  if (allHeadersEmpty && rows.length > 0) {
+    return renderTextTable(rows[0], rows.slice(1), {
+      alignments,
+      headerSeparator: false,
+    });
+  }
+
+  return renderTextTable(headers, rows, { alignments });
+}
+```
+
+This approach treats the first data row as the "header" for column width measurement, but with `headerSeparator: false` it won't render a separator line after it. This gives us a clean borderless-header table for all 12 existing `mdKvTable` call sites.
+
+**Wait** — that's wrong. `renderTextTable` always renders its first arg as the first row. We need a different approach. The cleaner fix: pass the empty headers, but tell `renderTextTable` to skip rendering the header row when it's all empty. Let me reconsider.
+
+**Better approach:** Add a `hideHeaders` option to `renderTextTable`, and have `renderTableToken` detect all-empty headers and set it:
+
+In `text-table.ts`, add `hideHeaders?: boolean` to `TextTableOptions`. In `renderGrid`, when `hideHeaders` is true, skip allRows[0] (the header row) and the header separator entirely.
+
+In `renderTableToken`, detect all-empty headers and pass `hideHeaders: true`.
+
+### 2. Simplify the upgrade human formatter
+
+**File:** `src/lib/formatters/human.ts` — `formatUpgradeResult()`
+
+Replace the `mdKvTable` table with a compact muted metadata line. Remove the redundant version arrow. Fold "from" version into the success line.
+
+**Target output:**
+
+```
+✓ Upgraded to 0.18.0-dev.1773836960 (from 0.18.0-dev.1773794950)
+  Method: curl · Channel: nightly
+```
+
+```
+✓ Already up to date (0.18.0-dev.1773794950)
+  Method: curl · Channel: nightly
+```
+
+```
+Latest: 0.18.0-dev.1773836960 (current: 0.18.0-dev.1773794950)
+  Method: curl · Channel: nightly
+```
+
+Changes:
+- Remove the version arrow line (`currentVersion → targetVersion`)
+- For upgraded/downgraded: include `(from <currentVersion>)` in the success line when versions differ
+- Replace `mdKvTable(kvRows)` with a simple muted inline: `  Method: curl · Channel: nightly`
+- Remove the empty line between action line and metadata
+
+### 3. Suppress `cli setup` subprocess stdout during upgrade
+
+**File:** `src/commands/cli/upgrade.ts` — `runSetupOnNewBinary()`
+
+Add `--quiet` to the args list when spawning `cli setup`:
+
+```typescript
+const args = [
+  "cli",
+  "setup",
+  "--quiet",          // ← suppress "Binary: Installed to..." output
+  "--method",
+  method,
+  "--channel",
+  channel,
+  "--no-modify-path",
+];
+```
+
+The `cli setup` command already supports `--quiet` (defined in setup.ts flags). The upgrade command prints its own success message via `CommandOutput`, making the setup output redundant.
+
+### 4. Update tests
+
+**Files to update:**
+
+- `test/lib/formatters/human.test.ts` — `formatUpgradeResult` tests (lines 743-803)
+  - Update assertions from `| **Method** | curl |` table format to new `Method: curl · Channel: stable` inline format
+
+- `test/lib/formatters/markdown.test.ts` — `mdKvTable` tests (lines 446-473)
+  - Keep mdKvTable tests as-is (it still produces the same markdown)
+  - Add a test for `renderMarkdown()` that verifies KV tables with empty headers render without the empty header row
+
+- `test/lib/formatters/text-table.test.ts` — Add test for `hideHeaders` option
+
+- `test/commands/cli/upgrade.test.ts` — Update spawn args assertion (line 727-734)
+  - Add `expect(setupCall).toContain("--quiet");`
+
+## Files to modify
+
+1. **`src/lib/formatters/text-table.ts`** — Add `hideHeaders` option to `TextTableOptions` and handle in `renderGrid`
+2. **`src/lib/formatters/markdown.ts`** — Detect all-empty headers in `renderTableToken`, pass `hideHeaders: true`
+3. **`src/lib/formatters/human.ts`** — Rewrite `formatUpgradeResult()` with compact output
+4. **`src/commands/cli/upgrade.ts`** — Add `--quiet` to `runSetupOnNewBinary()` args
+5. **`test/lib/formatters/human.test.ts`** — Update `formatUpgradeResult` test assertions
+6. **`test/lib/formatters/text-table.test.ts`** — Add `hideHeaders` test
+7. **`test/lib/formatters/markdown.test.ts`** — Add rendered KV table test
+8. **`test/commands/cli/upgrade.test.ts`** — Assert `--quiet` in spawn args
+
+## Verification
+
+1. `bun run typecheck` — No type errors
+2. `bun test test/lib/formatters/` — Formatter tests pass
+3. `bun test test/commands/cli/upgrade.test.ts` — Upgrade command tests pass
+4. `bun test` — All tests pass
+5. `bun run lint` — Lint clean
+6. Manual: `bun run --env-file=.env.local src/bin.ts cli upgrade --check` to see improved output
+7. Manual: `bun run --env-file=.env.local src/bin.ts auth status` to verify systemic table fix
