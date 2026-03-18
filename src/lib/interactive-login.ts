@@ -12,10 +12,7 @@ import { setupCopyKeyListener } from "./clipboard.js";
 import { getDbPath } from "./db/index.js";
 import { setUserInfo } from "./db/user.js";
 import { formatError } from "./errors.js";
-import {
-  escapeMarkdownInline,
-  renderInlineMarkdown,
-} from "./formatters/markdown.js";
+import { renderInlineMarkdown } from "./formatters/markdown.js";
 import { logger } from "./logger.js";
 import { completeOAuthFlow, performDeviceFlow } from "./oauth.js";
 import { generateQRCode } from "./qrcode.js";
@@ -64,11 +61,9 @@ export function buildDeviceFlowDisplay(
   const lines: string[] = [];
 
   lines.push("");
-  lines.push(
-    renderInlineMarkdown(
-      `  URL:  ${escapeMarkdownInline(verificationUriComplete)}`
-    )
-  );
+  // URL is emitted as plain text (no markdown rendering) so it stays
+  // intact for copy-paste in all output modes including plain/CI.
+  lines.push(`  URL:  ${verificationUriComplete}`);
   lines.push(renderInlineMarkdown(`  Code: \`${userCode}\``));
   lines.push("");
 
