@@ -1,0 +1,192 @@
+# Plan: Make `span list` Dual-Mode + Standardize `--period` Flag
+
+## Problem
+
+1. `sentry span list` requires a trace ID — it only lists spans within a specific trace. Users who want to search spans across an entire project must use `sentry api` with a verbose URL.
+2. `trace list` and `span list` hardcode a 7-day window with no `--period` flag, unlike `issue list`, `log list`, and `trace logs` which already have one.
+
+## Approach
+
+### Part 1: Make `span list` dual-mode (like `log list`)
+
+Make the trace ID **optional**. Disambiguate using `isTraceId()`:
+- **Project mode** (no trace ID): project-wide span listing, following `trace list` pattern
+- **Trace mode** (trace ID provided): existing behavior — filter to that trace
+
+This matches how `log list` already works. The `sentry spans` alias naturally defaults to project-wide search (the more useful mode).
+
+### Part 2: Standardize `--period/-t` flag
+
+Create a shared `LIST_PERIOD_FLAG` constant and add `--period` to:
+- `span list` (new, default `"7d"`)
+- `trace list` (new, default `"7d"`)
+
+Include `period` in pagination context keys so different time windows don't collide cursors.
+
+---
+
+## Files to Modify
+
+### 1. `src/lib/list-command.ts` — Shared period flag
+
+Add shared constants alongside existing `LIST_CURSOR_FLAG`, `FRESH_FLAG`, etc.:
+```typescript
+export const LIST_PERIOD_FLAG = {
+  kind: "parsed" as const,
+  parse: String,
+  brief: 'Time period (e.g., "1h", "24h", "7d", "30d")',
+  default: "7d",
+};
+```
+Add `t: "period"` to `LIST_BASE_ALIASES` (or export `PERIOD_ALIASES` separately if that would break existing commands that already define `t`).
+
+### 2. `src/commands/span/list.ts` — Major rewrite to dual-mode
+
+**Argument parsing** — new `parseSpanListArgs()` function (following `parseLogListArgs()` from `log/list.ts`):
+```
+sentry span list                              → project mode, auto-detect
+sentry span list <org>/<project>              → project mode, explicit
+sentry span list <project>                    → project mode, project-search
+sentry span list <trace-id>                   → trace mode, auto-detect org/project
+sentry span list <org>/<project>/<trace-id>   → trace mode, explicit
+sentry span list <project> <trace-id>         → trace mode, space-separated
+```
+
+Disambiguation: check if the last positional segment is a 32-char hex ID using `isTraceId()`.
+
+**Key changes:**
+- Switch from `buildCommand` to `buildListCommand("span", ...)` for plural alias interception
+- Add `parseSpanListArgs()` returning discriminated union:
+  - `{ mode: "project"; target?: string }`
+  - `{ mode: "trace"; parsed: ParsedTraceTarget }`
+- Project mode: `resolveOrgProjectFromArg()` → `listSpans()` without trace filter
+- Trace mode: `parseTraceTarget()` → `resolveTraceOrgProject()` → `listSpans()` with `trace:{id}` prefix (existing)
+- Add `--period/-t` flag (default `"7d"`)
+- Different pagination keys: `"span-list"` (trace mode) vs `"span-search"` (project mode)
+- Update human output: `"Spans in {org}/{project}:"` (project) vs `"Spans in trace \`{traceId}\`:"` (trace)
+- Update docs/help text to show both modes
+- Export `parseSpanListArgs` for testing
+
+### 3. `src/commands/span/index.ts` — Update docs
+
+Update route map description to mention both modes.
+
+### 4. `src/commands/trace/list.ts` — Add `--period` flag
+
+- Add `period` flag using shared `LIST_PERIOD_FLAG`
+- Add `t: "period"` alias
+- Pass `statsPeriod: flags.period` to `listTransactions()`
+- Include `period` in pagination context key
+
+### 5. `test/commands/span/list.test.ts` — Expand tests
+
+- Add project-mode tests: auto-detect, explicit org/project, project-search
+- Test `--period` flag in both modes
+- Test disambiguation edge cases (32-char hex vs project slug)
+- Verify trace-mode behavior preserved (backwards compat)
+
+### 6. `test/commands/trace/list.test.ts` — Add period flag tests
+
+### 7. SKILL.md — Regenerate (`bun run generate:skill`)
+
+### 8. AGENTS.md — Add knowledge entry for `--period/-t` convention
+
+---
+
+## Implementation Details
+
+### Argument disambiguation (core logic)
+```typescript
+type ParsedSpanListArgs =
+  | { mode: "project"; target?: string }
+  | { mode: "trace"; parsed: ParsedTraceTarget };
+
+export function parseSpanListArgs(args: string[]): ParsedSpanListArgs {
+  if (args.length === 0) return { mode: "project" };
+
+  // Two+ args: check if last arg is a trace ID (space-separated form)
+  if (args.length >= 2) {
+    const last = args.at(-1);
+    if (last && isTraceId(last)) {
+      return { mode: "trace", parsed: parseTraceTarget(args, TRACE_USAGE_HINT) };
+    }
+  }
+
+  // Single arg: check tail segment after last "/"
+  const first = args[0]!;
+  const segments = first.split("/");
+  const tail = segments.at(-1) ?? first;
+  if (isTraceId(tail)) {
+    return { mode: "trace", parsed: parseTraceTarget(args, TRACE_USAGE_HINT) };
+  }
+
+  // Not a trace ID → project target
+  return { mode: "project", target: first };
+}
+```
+
+### func() handler (simplified)
+```typescript
+async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {
+  const parsed = parseSpanListArgs(args);
+
+  if (parsed.mode === "trace") {
+    // Existing trace-scoped behavior
+    const { traceId, org, project } = await resolveTraceOrgProject(parsed.parsed, cwd, TRACE_USAGE_HINT);
+    const query = `trace:${traceId}${flags.query ? ` ${translateSpanQuery(flags.query)}` : ""}`;
+    const { data, nextCursor } = await listSpans(org, project, {
+      query, sort, limit, cursor, statsPeriod: flags.period,
+    });
+    // ... output with "Spans in trace `{traceId}`:" header
+  } else {
+    // New project-wide mode
+    const { org, project } = await resolveOrgProjectFromArg(parsed.target, cwd, "span list");
+    const query = flags.query ? translateSpanQuery(flags.query) : undefined;
+    const { data, nextCursor } = await listSpans(org, project, {
+      query, sort, limit, cursor, statsPeriod: flags.period,
+    });
+    // ... output with "Spans in {org}/{project}:" header
+  }
+}
+```
+
+### Pagination keys
+- Trace mode: `buildPaginationContextKey("span", "${org}/${project}/${traceId}", { sort, q, period })`
+- Project mode: `buildPaginationContextKey("span-search", "${org}/${project}", { sort, q, period })`
+
+### Updated help text
+```
+List spans from a Sentry project, or within a specific trace.
+
+Target patterns (project mode):
+  sentry span list                        # auto-detect from DSN or config
+  sentry span list <org>/<project>        # explicit org and project
+  sentry span list <project>              # find project across all orgs
+
+Trace mode (provide a 32-char trace ID):
+  sentry span list <trace-id>             # auto-detect org/project
+  sentry span list <org>/<project>/<trace-id>  # explicit
+
+Examples:
+  sentry span list                        # List recent spans in project
+  sentry span list -q "op:db"             # Find all DB spans
+  sentry span list -q "duration:>100ms"   # Slow spans
+  sentry span list --period 24h           # Last 24 hours
+  sentry span list <trace-id>             # Spans in a specific trace
+  sentry span list <trace-id> -q "op:db"  # DB spans in a trace
+```
+
+---
+
+## Verification
+
+1. `bun run typecheck`
+2. `bun run lint:fix`
+3. `bun test test/commands/span/list.test.ts` — both modes
+4. `bun test test/commands/trace/list.test.ts` — period flag
+5. `bun test` — all tests pass
+6. `bun run generate:skill && bun run check:skill`
+7. `bun run check:errors`
+8. `bun run dev -- span list --help` — shows both modes
+9. `bun run dev -- span list` — project mode (auto-detect)
+10. `bun run dev -- span list <trace-id>` — trace mode (backwards compat)
