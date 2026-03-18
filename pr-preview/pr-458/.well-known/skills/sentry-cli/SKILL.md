@@ -15,6 +15,13 @@ Help users interact with Sentry from the command line using the `sentry` CLI.
 
 Best practices and operational guidance for AI coding agents using the Sentry CLI.
 
+### Design Principles
+
+The `sentry` CLI follows conventions from well-known tools — if you're familiar with them, that knowledge transfers directly:
+
+- **`gh` (GitHub CLI) conventions**: The `sentry` CLI uses the same `<noun> <verb>` command pattern (e.g., `sentry issue list`, `sentry org view`). Flags follow `gh` conventions: `--json` for machine-readable output, `--fields` to select specific fields, `-w`/`--web` to open in browser, `-q`/`--query` for filtering, `-n`/`--limit` for result count.
+- **`sentry api` mimics `curl`**: The `sentry api` command provides direct API access with a `curl`-like interface — `--method` for HTTP method, `--data` for request body, `--header` for custom headers. It handles authentication automatically. If you know how to call a REST API with `curl`, the same patterns apply.
+
 ### Context Window Tips
 
 - Use `--fields id,title,status` on list commands to reduce output size
