@@ -1,0 +1,52 @@
+# Plan: Fix CLI-G0 — Invalid URL from bare SENTRY_HOST
+
+## Issue Summary
+
+**CLI-G0**: `TypeError: Failed to construct 'Request': Invalid URL "sentry.io/api/0/organizations/"`
+- **Priority**: High | **Events**: 3 | **Users**: 1
+- **Tag**: `is_self_hosted: True`, `command: sentry.issue.list`
+- **Link**: https://sentry.sentry.io/issues/7343383465/
+
+## Root Cause
+
+A user set `SENTRY_HOST=sentry.io` (bare hostname, no `https://` protocol). The `getConfiguredSentryUrl()` function returned the raw value `"sentry.io"`, which was concatenated into API URLs like `sentry.io/api/0/organizations/` — an invalid URL missing the protocol scheme. This caused `fetch()` to throw a `TypeError`.
+
+Secondary effect: `isSentrySaasUrl()` tries `new URL("sentry.io")` which throws, so its catch returns `false`, making `is_self_hosted = true`. The user was likely on SaaS sentry.io, not actually self-hosted.
+
+## Fix Status: Already Implemented (uncommitted)
+
+The fix already exists as **uncommitted changes** in this worktree:
+
+1. **`src/lib/constants.ts`** — Added `normalizeUrl()` that prepends `https://` to bare hostnames, and wired it into `getConfiguredSentryUrl()`. This is the single chokepoint for all env var URL resolution.
+
+2. **`test/lib/constants.test.ts`** — Unit tests covering edge cases (empty, whitespace, bare hostname, with protocol, with port, SENTRY_HOST precedence).
+
+3. **`test/lib/constants.property.test.ts`** — Property-based tests verifying:
+   - Result always has protocol or is undefined
+   - Bare hostnames get `https://` prepended
+   - URLs with protocol are unchanged
+   - Idempotent: `normalizeUrl(normalizeUrl(x)) === normalizeUrl(x)`
+   - Result is always a parseable URL
+
+All 22 tests pass ✅
+
+## What Needs to Happen
+
+Just **commit and push** the existing changes. No additional code changes needed.
+
+### Files to commit:
+- `src/lib/constants.ts` (modified)
+- `test/lib/constants.test.ts` (new)
+- `test/lib/constants.property.test.ts` (new)
+
+### Commit message:
+```
+fix(constants): normalize bare hostnames in SENTRY_HOST/SENTRY_URL (#CLI-G0)
+```
+
+## Verification
+
+1. `bun test test/lib/constants.test.ts test/lib/constants.property.test.ts` — ✅ 22 pass
+2. `bun run typecheck` — should pass
+3. `bun run lint` — should pass
+4. Full test suite: `bun test` — should pass
