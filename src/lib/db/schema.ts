@@ -15,7 +15,7 @@ import type { Database } from "bun:sqlite";
 import { stringifyUnknown } from "../errors.js";
 import { logger } from "../logger.js";
 
-export const CURRENT_SCHEMA_VERSION = 9;
+export const CURRENT_SCHEMA_VERSION = 10;
 
 /** Environment variable to disable auto-repair */
 const NO_AUTO_REPAIR_ENV = "SENTRY_CLI_NO_AUTO_REPAIR";
@@ -167,6 +167,7 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
       org_slug: { type: "TEXT", primaryKey: true },
       org_id: { type: "TEXT", addedInVersion: 8 },
       org_name: { type: "TEXT", addedInVersion: 9 },
+      org_role: { type: "TEXT", addedInVersion: 10 },
       region_url: { type: "TEXT", notNull: true },
       updated_at: {
         type: "INTEGER",
@@ -725,6 +726,11 @@ export function runMigrations(db: Database): void {
   // Migration 8 -> 9: Add org_name column to org_regions for cached org listing
   if (currentVersion < 9) {
     addColumnIfMissing(db, "org_regions", "org_name", "TEXT");
+  }
+
+  // Migration 9 -> 10: Add org_role column to org_regions for cached role lookups
+  if (currentVersion < 10) {
+    addColumnIfMissing(db, "org_regions", "org_role", "TEXT");
   }
 
   if (currentVersion < CURRENT_SCHEMA_VERSION) {

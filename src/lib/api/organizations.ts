@@ -84,6 +84,7 @@ export async function listOrganizations(): Promise<SentryOrganization[]> {
       id: org.id,
       slug: org.slug,
       name: org.name,
+      ...(org.orgRole ? { orgRole: org.orgRole } : {}),
     }));
   }
 
@@ -119,6 +120,7 @@ export async function listOrganizationsUncached(): Promise<
         regionUrl: baseUrl,
         orgId: org.id,
         orgName: org.name,
+        orgRole: (org as Record<string, unknown>).orgRole as string | undefined,
       }))
     );
     return orgs;
@@ -146,6 +148,7 @@ export async function listOrganizationsUncached(): Promise<
     regionUrl: r.regionUrl,
     orgId: r.org.id,
     orgName: r.org.name,
+    orgRole: (r.org as Record<string, unknown>).orgRole as string | undefined,
   }));
   await setOrgRegions(regionEntries);
 

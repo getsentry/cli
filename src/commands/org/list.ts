@@ -18,6 +18,7 @@ import {
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
+import { withProgress } from "../../lib/polling.js";
 import type { SentryOrganization, Writer } from "../../types/index.js";
 
 type ListFlags = {
@@ -130,7 +131,13 @@ export const listCommand = buildCommand({
   async *func(this: SentryContext, flags: ListFlags) {
     applyFreshFlag(flags);
 
-    const orgs = await listOrganizationsUncached();
+    const orgs = await withProgress(
+      {
+        message: `Fetching organizations (up to ${flags.limit})...`,
+        json: flags.json,
+      },
+      () => listOrganizationsUncached()
+    );
     const limitedOrgs = orgs.slice(0, flags.limit);
 
     // Check if user has orgs in multiple regions

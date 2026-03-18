@@ -17,6 +17,7 @@ import {
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
+import { withProgress } from "../../lib/polling.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
 import {
   parseTraceTarget,
@@ -46,7 +47,7 @@ type LogLike = {
 type TraceLogsData = {
   logs: LogLike[];
   traceId: string;
-  limit: number;
+  hasMore: boolean;
   /** Message shown when no logs found */
   emptyMessage?: string;
 };
@@ -57,9 +58,8 @@ function formatTraceLogsHuman(data: TraceLogsData): string {
     return data.emptyMessage ?? "No logs found.";
   }
   const parts = [formatLogTable(data.logs, false)];
-  const hasMore = data.logs.length >= data.limit;
   const countText = `Showing ${data.logs.length} log${data.logs.length === 1 ? "" : "s"} for trace ${data.traceId}.`;
-  const tip = hasMore ? " Use --limit to show more." : "";
+  const tip = data.hasMore ? " Use --limit to show more." : "";
   parts.push(formatFooter(`${countText}${tip}`));
   return parts.join("").trimEnd();
 }
@@ -107,10 +107,11 @@ export const logsCommand = buildCommand({
   output: {
     human: formatTraceLogsHuman,
     jsonTransform: (data: TraceLogsData, fields?: string[]) => {
-      if (fields && fields.length > 0) {
-        return data.logs.map((entry) => filterFields(entry, fields));
-      }
-      return data.logs;
+      const items =
+        fields && fields.length > 0
+          ? data.logs.map((entry) => filterFields(entry, fields))
+          : data.logs;
+      return { data: items, hasMore: data.hasMore };
     },
   },
   parameters: {
@@ -171,14 +172,22 @@ export const logsCommand = buildCommand({
       return;
     }
 
-    const logs = await listTraceLogs(org, traceId, {
-      statsPeriod: flags.period,
-      limit: flags.limit,
-      query: flags.query,
-    });
+    const logs = await withProgress(
+      {
+        message: `Fetching trace logs (up to ${flags.limit})...`,
+        json: flags.json,
+      },
+      () =>
+        listTraceLogs(org, traceId, {
+          statsPeriod: flags.period,
+          limit: flags.limit,
+          query: flags.query,
+        })
+    );
 
     // Reverse to chronological order (API returns newest-first)
     const chronological = [...logs].reverse();
+    const hasMore = chronological.length >= flags.limit;
 
     const emptyMessage =
       `No logs found for trace ${traceId} in the last ${flags.period}.\n\n` +
@@ -187,7 +196,7 @@ export const logsCommand = buildCommand({
     return yield new CommandOutput({
       logs: chronological,
       traceId,
-      limit: flags.limit,
+      hasMore,
       emptyMessage,
     });
   },

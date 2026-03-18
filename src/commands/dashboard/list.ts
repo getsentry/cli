@@ -135,7 +135,10 @@ export const listCommand = buildCommand({
     }
 
     const dashboards = await withProgress(
-      { message: `Fetching dashboards (up to ${flags.limit})...` },
+      {
+        message: `Fetching dashboards (up to ${flags.limit})...`,
+        json: flags.json,
+      },
       () => listDashboards(orgSlug, { perPage: flags.limit })
     );
     const url = buildDashboardsListUrl(orgSlug);

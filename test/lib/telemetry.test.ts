@@ -12,6 +12,7 @@ import * as Sentry from "@sentry/bun";
 import { ApiError, AuthError } from "../../src/lib/errors.js";
 import {
   createTracedDatabase,
+  getSentryTracePropagationTargets,
   initSentry,
   isClientApiError,
   recordApiErrorOnSpan,
@@ -925,5 +926,116 @@ describe("createTracedDatabase", () => {
       // Restore mock
       mockFn.module("node:fs", () => require("node:fs"));
     });
+  });
+});
+
+describe("getSentryTracePropagationTargets", () => {
+  const SENTRY_URL_ENV = "SENTRY_URL";
+  const SENTRY_HOST_ENV = "SENTRY_HOST";
+  let originalSentryUrl: string | undefined;
+  let originalSentryHost: string | undefined;
+
+  beforeEach(() => {
+    originalSentryUrl = process.env[SENTRY_URL_ENV];
+    originalSentryHost = process.env[SENTRY_HOST_ENV];
+    delete process.env[SENTRY_URL_ENV];
+    delete process.env[SENTRY_HOST_ENV];
+  });
+
+  afterEach(() => {
+    if (originalSentryUrl === undefined) {
+      delete process.env[SENTRY_URL_ENV];
+    } else {
+      process.env[SENTRY_URL_ENV] = originalSentryUrl;
+    }
+    if (originalSentryHost === undefined) {
+      delete process.env[SENTRY_HOST_ENV];
+    } else {
+      process.env[SENTRY_HOST_ENV] = originalSentryHost;
+    }
+  });
+
+  test("matches SaaS regional URLs", () => {
+    const targets = getSentryTracePropagationTargets();
+    const regexTargets = targets.filter(
+      (t): t is RegExp => t instanceof RegExp
+    );
+    expect(
+      regexTargets.some((r) => r.test("https://us.sentry.io/api/0/"))
+    ).toBe(true);
+    expect(
+      regexTargets.some((r) => r.test("https://de.sentry.io/api/0/"))
+    ).toBe(true);
+    expect(
+      regexTargets.some((r) =>
+        r.test("https://o1234.ingest.us.sentry.io/api/0/")
+      )
+    ).toBe(true);
+  });
+
+  test("matches bare sentry.io", () => {
+    const targets = getSentryTracePropagationTargets();
+    const regexTargets = targets.filter(
+      (t): t is RegExp => t instanceof RegExp
+    );
+    expect(regexTargets.some((r) => r.test("https://sentry.io/api/0/"))).toBe(
+      true
+    );
+  });
+
+  test("does not match non-sentry URLs", () => {
+    const targets = getSentryTracePropagationTargets();
+    const regexTargets = targets.filter(
+      (t): t is RegExp => t instanceof RegExp
+    );
+    expect(regexTargets.some((r) => r.test("https://example.com/api/0/"))).toBe(
+      false
+    );
+    expect(
+      regexTargets.some((r) => r.test("https://not-sentry.io/api/0/"))
+    ).toBe(false);
+  });
+
+  test("does not match domains beyond sentry.io TLD boundary", () => {
+    const targets = getSentryTracePropagationTargets();
+    const regexTargets = targets.filter(
+      (t): t is RegExp => t instanceof RegExp
+    );
+    // sentry.io.evil.com should NOT match
+    expect(
+      regexTargets.some((r) => r.test("https://sentry.io.evil.com/api/0/"))
+    ).toBe(false);
+    // us.sentry.io.evil.com should NOT match
+    expect(
+      regexTargets.some((r) => r.test("https://us.sentry.io.evil.com/api/0/"))
+    ).toBe(false);
+  });
+
+  test("includes self-hosted URL when configured", () => {
+    process.env[SENTRY_URL_ENV] = "https://sentry.mycompany.com";
+    const targets = getSentryTracePropagationTargets();
+    const stringTargets = targets.filter(
+      (t): t is string => typeof t === "string"
+    );
+    expect(stringTargets).toContain("https://sentry.mycompany.com");
+  });
+
+  test("does not include SaaS URL as string target", () => {
+    // Default (no SENTRY_URL) → only RegExp targets, no string targets
+    const targets = getSentryTracePropagationTargets();
+    const stringTargets = targets.filter(
+      (t): t is string => typeof t === "string"
+    );
+    expect(stringTargets).toHaveLength(0);
+  });
+
+  test("does not duplicate SaaS URL when SENTRY_URL is sentry.io", () => {
+    process.env[SENTRY_URL_ENV] = "https://sentry.io";
+    const targets = getSentryTracePropagationTargets();
+    // SaaS URLs are already covered by regex — no string target should be added
+    const stringTargets = targets.filter(
+      (t): t is string => typeof t === "string"
+    );
+    expect(stringTargets).toHaveLength(0);
   });
 });

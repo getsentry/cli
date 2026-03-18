@@ -23,7 +23,7 @@ import * as defaults from "../../src/lib/db/defaults.js";
 import * as paginationDb from "../../src/lib/db/pagination.js";
 import {
   AuthError,
-  ContextError,
+  ResolutionError,
   ValidationError,
 } from "../../src/lib/errors.js";
 import {
@@ -40,7 +40,28 @@ import {
   type OrgListConfig,
 } from "../../src/lib/org-list.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as polling from "../../src/lib/polling.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as region from "../../src/lib/region.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../src/lib/resolve-target.js";
+
+/**
+ * Bypass the withProgress spinner in all tests — prevents real stderr
+ * timers from piling up during full-suite runs and causing 5s timeouts.
+ */
+let withProgressSpy: ReturnType<typeof spyOn>;
+beforeEach(() => {
+  withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
+    (_opts, fn) =>
+      fn(() => {
+        /* no-op setMessage */
+      })
+  );
+});
+afterEach(() => {
+  withProgressSpy.mockRestore();
+});
 
 type FakeEntity = { id: string; name: string };
 type FakeWithOrg = FakeEntity & { orgSlug: string };
@@ -481,7 +502,7 @@ describe("handleProjectSearch", () => {
     findProjectsBySlugSpy.mockRestore();
   });
 
-  test("throws ContextError when no project found", async () => {
+  test("throws ResolutionError when no project found", async () => {
     findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
     const config = makeConfig();
 
@@ -489,7 +510,7 @@ describe("handleProjectSearch", () => {
       handleProjectSearch(config, "no-such-project", {
         flags: { limit: 10, json: false },
       })
-    ).rejects.toThrow(ContextError);
+    ).rejects.toThrow(ResolutionError);
   });
 
   test("returns empty items when no project found with --json", async () => {
@@ -582,7 +603,7 @@ describe("handleProjectSearch", () => {
     expect(fallback).toHaveBeenCalledWith("acme-corp");
   });
 
-  test("throws ContextError when slug matches an org but no fallback", async () => {
+  test("throws ResolutionError when slug matches an org but no fallback", async () => {
     findProjectsBySlugSpy.mockResolvedValue({
       projects: [],
       orgs: [{ slug: "acme-corp", name: "Acme Corp" }],
@@ -593,7 +614,7 @@ describe("handleProjectSearch", () => {
       handleProjectSearch(config, "acme-corp", {
         flags: { limit: 10, json: false },
       })
-    ).rejects.toThrow(ContextError);
+    ).rejects.toThrow(ResolutionError);
   });
 
   test("includes multi-org note in hint when project found in multiple orgs", async () => {
@@ -625,12 +646,19 @@ describe("dispatchOrgScopedList", () => {
   let resolveAllTargetsSpy: ReturnType<typeof spyOn>;
   let setPaginationCursorSpy: ReturnType<typeof spyOn>;
   let clearPaginationCursorSpy: ReturnType<typeof spyOn>;
+  let resolveEffectiveOrgSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     getDefaultOrganizationSpy = spyOn(defaults, "getDefaultOrganization");
     resolveAllTargetsSpy = spyOn(resolveTarget, "resolveAllTargets");
     setPaginationCursorSpy = spyOn(paginationDb, "setPaginationCursor");
     clearPaginationCursorSpy = spyOn(paginationDb, "clearPaginationCursor");
+    // Prevent resolveEffectiveOrg from making real HTTP calls during
+    // full-suite runs where earlier tests may leave auth state behind.
+    resolveEffectiveOrgSpy = spyOn(
+      region,
+      "resolveEffectiveOrg"
+    ).mockImplementation((org: string) => Promise.resolve(org));
 
     getDefaultOrganizationSpy.mockResolvedValue(null);
     resolveAllTargetsSpy.mockResolvedValue({ targets: [] });
@@ -643,6 +671,7 @@ describe("dispatchOrgScopedList", () => {
     resolveAllTargetsSpy.mockRestore();
     setPaginationCursorSpy.mockRestore();
     clearPaginationCursorSpy.mockRestore();
+    resolveEffectiveOrgSpy.mockRestore();
   });
 
   test("throws ValidationError when --cursor used outside org-all mode", async () => {

@@ -216,7 +216,7 @@ describe("sentry project view", () => {
     // Should show error with usage hint
     const output = result.stderr + result.stdout;
     expect(output).toMatch(/specific project is required/i);
-    expect(output).toContain("sentry project view <org>/<project>");
+    expect(output).toContain(`sentry project view ${TEST_ORG}/<project>`);
   });
 
   test(

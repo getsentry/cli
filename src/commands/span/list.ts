@@ -30,6 +30,7 @@ import {
   FRESH_FLAG,
   LIST_CURSOR_FLAG,
 } from "../../lib/list-command.js";
+import { withProgress } from "../../lib/polling.js";
 import {
   parseTraceTarget,
   resolveTraceOrgProject,
@@ -260,12 +261,16 @@ export const listCommand = buildCommand({
     const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
 
     // Fetch spans from EAP endpoint
-    const { data: spanItems, nextCursor } = await listSpans(org, project, {
-      query: apiQuery,
-      sort: flags.sort,
-      limit: flags.limit,
-      cursor,
-    });
+    const { data: spanItems, nextCursor } = await withProgress(
+      { message: `Fetching spans (up to ${flags.limit})...`, json: flags.json },
+      () =>
+        listSpans(org, project, {
+          query: apiQuery,
+          sort: flags.sort,
+          limit: flags.limit,
+          cursor,
+        })
+    );
 
     // Store or clear pagination cursor
     if (nextCursor) {

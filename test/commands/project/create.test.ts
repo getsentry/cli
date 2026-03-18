@@ -366,10 +366,8 @@ describe("project create", () => {
       .call(context, { json: false, team: "backend" }, "my-app", "node")
       .catch((e: Error) => e);
     expect(err).toBeInstanceOf(CliError);
-    expect(err.message).toContain("Failed to create project");
+    expect(err.message).toContain("could not be created");
     expect(err.message).toContain("may not exist, or you may lack access");
-    // Should NOT say "Organization not found" — we don't know that
-    expect(err.message).not.toContain("not found");
   });
 
   test("rejects invalid platform client-side without API call", async () => {
@@ -584,7 +582,7 @@ describe("project create", () => {
       .call(context, { json: false }, "my-app", "node")
       .catch((e: Error) => e);
     expect(err).toBeInstanceOf(CliError);
-    expect(err.message).toContain("Could not list teams");
+    expect(err.message).toContain("could not be accessed");
     expect(err.message).toContain("403");
     expect(err.message).toContain("may not exist, or you may lack access");
     // Should NOT say "Organization is required" — we don't know that

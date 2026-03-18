@@ -14,6 +14,7 @@ import {
   formatIssueSubtitle,
   formatProjectCreated,
   formatShortId,
+  formatUpgradeResult,
   formatUserIdentity,
   type IssueTableRow,
   type ProjectCreatedResult,
@@ -736,5 +737,68 @@ describe("formatDashboardView", () => {
       })
     );
     expect(result).toContain("No widgets.");
+  });
+});
+
+describe("formatUpgradeResult", () => {
+  // Force plain output so we get raw markdown (no ANSI codes)
+  const origPlain = process.env.SENTRY_PLAIN_OUTPUT;
+  function withPlain(fn: () => void) {
+    process.env.SENTRY_PLAIN_OUTPUT = "1";
+    try {
+      fn();
+    } finally {
+      if (origPlain === undefined) {
+        delete process.env.SENTRY_PLAIN_OUTPUT;
+      } else {
+        process.env.SENTRY_PLAIN_OUTPUT = origPlain;
+      }
+    }
+  }
+
+  test("renders metadata table with method and channel", () => {
+    withPlain(() => {
+      const result = formatUpgradeResult({
+        action: "upgraded",
+        currentVersion: "0.5.0",
+        targetVersion: "0.6.0",
+        channel: "stable",
+        method: "curl",
+        forced: false,
+      });
+      expect(result).toContain("| **Method** | curl |");
+      expect(result).toContain("| **Channel** | stable |");
+    });
+  });
+
+  test("renders nightly channel in metadata table", () => {
+    withPlain(() => {
+      const result = formatUpgradeResult({
+        action: "checked",
+        currentVersion: "0.5.0",
+        targetVersion: "0.6.0-dev.123",
+        channel: "nightly",
+        method: "npm",
+        forced: false,
+      });
+      expect(result).toContain("| **Method** | npm |");
+      expect(result).toContain("| **Channel** | nightly |");
+    });
+  });
+
+  test("up-to-date action includes metadata table", () => {
+    withPlain(() => {
+      const result = formatUpgradeResult({
+        action: "up-to-date",
+        currentVersion: "0.5.0",
+        targetVersion: "0.5.0",
+        channel: "stable",
+        method: "brew",
+        forced: false,
+      });
+      expect(result).toContain("Already up to date");
+      expect(result).toContain("| **Method** | brew |");
+      expect(result).toContain("| **Channel** | stable |");
+    });
   });
 });

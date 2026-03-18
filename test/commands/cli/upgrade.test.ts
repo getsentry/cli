@@ -63,6 +63,11 @@ function createMockContext(
     ...overrides.env,
   };
 
+  // Force plain output so formatUpgradeResult renders raw markdown tables
+  // (ASCII pipes) instead of Unicode box-drawing characters in TTY mode.
+  const origPlain = process.env.SENTRY_PLAIN_OUTPUT;
+  process.env.SENTRY_PLAIN_OUTPUT = "1";
+
   // Capture consola output (routed to process.stderr)
   const origWrite = process.stderr.write.bind(process.stderr);
   process.stderr.write = ((chunk: string | Uint8Array) => {
@@ -123,6 +128,11 @@ function createMockContext(
     errors,
     restore: () => {
       process.stderr.write = origWrite;
+      if (origPlain === undefined) {
+        delete process.env.SENTRY_PLAIN_OUTPUT;
+      } else {
+        process.env.SENTRY_PLAIN_OUTPUT = origPlain;
+      }
     },
   };
 }
@@ -268,9 +278,8 @@ describe("sentry cli upgrade", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("Installation method: curl");
-      expect(combined).toContain(`Current version: ${CLI_VERSION}`);
-      expect(combined).toContain(`Latest version: ${CLI_VERSION}`);
+      expect(combined).toContain("| curl |");
+      expect(combined).toContain(CLI_VERSION);
       expect(combined).toContain("You are already on the target version");
     });
 
@@ -289,7 +298,7 @@ describe("sentry cli upgrade", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("Latest version: 99.99.99");
+      expect(combined).toContain("99.99.99");
       expect(combined).toContain("Run 'sentry cli upgrade' to update.");
     });
 
@@ -308,7 +317,7 @@ describe("sentry cli upgrade", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("Target version: 88.88.88");
+      expect(combined).toContain("88.88.88");
       expect(combined).toContain(
         "Run 'sentry cli upgrade 88.88.88' to update."
       );
@@ -363,8 +372,8 @@ describe("sentry cli upgrade", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("Installation method: brew");
-      expect(combined).toContain("Latest version: 99.99.99");
+      expect(combined).toContain("| brew |");
+      expect(combined).toContain("99.99.99");
       expect(combined).toContain("Run 'sentry cli upgrade' to update.");
     });
   });
@@ -500,7 +509,7 @@ describe("sentry cli upgrade — nightly channel", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("Channel: nightly");
+      expect(combined).toContain("| nightly |");
     });
 
     test("'stable' positional sets channel to stable", async () => {
@@ -519,7 +528,7 @@ describe("sentry cli upgrade — nightly channel", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("Channel: stable");
+      expect(combined).toContain("| stable |");
     });
 
     test("without positional, uses persisted channel", async () => {
@@ -538,7 +547,7 @@ describe("sentry cli upgrade — nightly channel", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("Channel: nightly");
+      expect(combined).toContain("| nightly |");
     });
   });
 
@@ -593,8 +602,8 @@ describe("sentry cli upgrade — nightly channel", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("Channel: nightly");
-      expect(combined).toContain(`Latest version: ${CLI_VERSION}`);
+      expect(combined).toContain("| nightly |");
+      expect(combined).toContain(CLI_VERSION);
       expect(combined).toContain("You are already on the target version");
     });
 
@@ -613,8 +622,8 @@ describe("sentry cli upgrade — nightly channel", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("Channel: nightly");
-      expect(combined).toContain("Latest version: 0.99.0-dev.9999999999");
+      expect(combined).toContain("| nightly |");
+      expect(combined).toContain("0.99.0-dev.9999999999");
       expect(combined).toContain("Run 'sentry cli upgrade' to update.");
     });
   });

@@ -1107,7 +1107,7 @@ export async function resolveOrgProjectTarget(
     case "org-all":
       throw new ContextError(
         "Project",
-        `Please specify a project: sentry ${commandName} ${parsed.org}/<project>`
+        `sentry ${commandName} ${parsed.org}/<project>`
       );
 
     case "project-search": {

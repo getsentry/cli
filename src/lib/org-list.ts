@@ -44,12 +44,13 @@ import {
 } from "./db/pagination.js";
 import {
   type AuthGuardSuccess,
-  ContextError,
+  ResolutionError,
   ValidationError,
   withAuthGuard,
 } from "./errors.js";
 import { filterFields } from "./formatters/json.js";
 import { logger } from "./logger.js";
+import { withProgress } from "./polling.js";
 import { resolveEffectiveOrg } from "./region.js";
 import { resolveOrgsForListing } from "./resolve-target.js";
 
@@ -345,10 +346,17 @@ export async function handleOrgAll<TEntity, TWithOrg>(
 ): Promise<ListResult<TWithOrg>> {
   const { config, org, flags, contextKey, cursor } = options;
 
-  const response = await config.listPaginated(org, {
-    cursor,
-    perPage: flags.limit,
-  });
+  const response = await withProgress(
+    {
+      message: `Fetching ${config.entityPlural} (up to ${flags.limit})...`,
+      json: flags.json,
+    },
+    () =>
+      config.listPaginated(org, {
+        cursor,
+        perPage: flags.limit,
+      })
+  );
 
   const { data: rawItems, nextCursor } = response;
   const items = rawItems.map((entity) => config.withOrg(entity, org));
@@ -402,15 +410,21 @@ export async function handleAutoDetect<TEntity, TWithOrg>(
     skippedSelfHosted,
   } = await resolveOrgsForListing(undefined, cwd);
 
-  let allItems: TWithOrg[];
-  if (orgsToFetch.length > 0) {
-    const results = await Promise.all(
-      orgsToFetch.map((org) => fetchOrgSafe(config, org))
-    );
-    allItems = results.flat();
-  } else {
-    allItems = await fetchAllOrgs(config);
-  }
+  const allItems = await withProgress(
+    {
+      message: `Fetching ${config.entityPlural} (up to ${flags.limit})...`,
+      json: flags.json,
+    },
+    async () => {
+      if (orgsToFetch.length > 0) {
+        const results = await Promise.all(
+          orgsToFetch.map((org) => fetchOrgSafe(config, org))
+        );
+        return results.flat();
+      }
+      return fetchAllOrgs(config);
+    }
+  );
 
   const limitCount =
     orgsToFetch.length > 1 ? flags.limit * orgsToFetch.length : flags.limit;
@@ -527,7 +541,13 @@ export async function handleExplicitOrg<TEntity, TWithOrg>(
   options: ExplicitOrgOptions<TEntity, TWithOrg>
 ): Promise<ListResult<TWithOrg>> {
   const { config, org, flags, noteOrgScoped = false } = options;
-  const items = await fetchOrgSafe(config, org);
+  const items = await withProgress(
+    {
+      message: `Fetching ${config.entityPlural} (up to ${flags.limit})...`,
+      json: flags.json,
+    },
+    () => fetchOrgSafe(config, org)
+  );
 
   const result = buildFetchedItemsResult({
     config,
@@ -576,7 +596,13 @@ export async function handleExplicitProject<TEntity, TWithOrg>(
       "handleExplicitProject called but config.listForProject is not defined"
     );
   }
-  const raw = await listForProject(org, project);
+  const raw = await withProgress(
+    {
+      message: `Fetching ${config.entityPlural} (up to ${flags.limit})...`,
+      json: flags.json,
+    },
+    () => listForProject(org, project)
+  );
   const items = raw.map((entity) => config.withOrg(entity, org));
 
   const result = buildFetchedItemsResult({
@@ -622,7 +648,13 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
   }
 ): Promise<ListResult<TWithOrg>> {
   const { flags, orgAllFallback } = options;
-  const { projects: matches, orgs } = await findProjectsBySlug(projectSlug);
+  const { projects: matches, orgs } = await withProgress(
+    {
+      message: `Fetching ${config.entityPlural} (up to ${flags.limit})...`,
+      json: flags.json,
+    },
+    () => findProjectsBySlug(projectSlug)
+  );
 
   if (matches.length === 0) {
     const matchingOrg = orgs.find((o) => o.slug === projectSlug);
@@ -634,22 +666,26 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
         );
         return orgAllFallback(projectSlug);
       }
-      throw new ContextError(
-        "Project",
-        `'${projectSlug}' is an organization, not a project.\n\n` +
-          `Did you mean: ${config.commandPrefix} ${projectSlug}/`
+      throw new ResolutionError(
+        `'${projectSlug}'`,
+        "is an organization, not a project",
+        `${config.commandPrefix} ${projectSlug}/`,
+        [
+          `List projects: sentry project list ${projectSlug}/`,
+          `Specify a project: ${config.commandPrefix} ${projectSlug}/<project>`,
+        ]
       );
     }
 
     if (flags.json) {
       return { items: [] };
     }
-    // Use "Project" as the resource name (not config.entityName) because the
-    // error is about a project lookup failure, not the entity being listed.
-    throw new ContextError(
-      "Project",
-      `No project '${projectSlug}' found in any accessible organization.\n\n` +
-        `Try: ${config.commandPrefix} <org>/${projectSlug}`
+    // Use ResolutionError — the user provided a project slug but it wasn't found.
+    throw new ResolutionError(
+      `Project '${projectSlug}'`,
+      "not found",
+      `${config.commandPrefix} <org>/${projectSlug}`,
+      ["No project with this slug found in any accessible organization"]
     );
   }
 

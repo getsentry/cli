@@ -372,9 +372,11 @@ async function resolveTargetsFromParsedArg(
       }));
 
       if (targets.length === 0) {
-        throw new ContextError(
-          "Projects",
-          `No projects found in organization '${parsed.org}'.`
+        throw new ResolutionError(
+          `Organization '${parsed.org}'`,
+          "has no accessible projects",
+          `sentry project list ${parsed.org}/`,
+          ["Check that you have access to projects in this organization"]
         );
       }
 
@@ -812,7 +814,7 @@ async function handleOrgAllIssues(
   setContext([org], []);
 
   const { issues, nextCursor } = await withProgress(
-    { message: `Fetching issues (up to ${flags.limit})...` },
+    { message: `Fetching issues (up to ${flags.limit})...`, json: flags.json },
     (setMessage) =>
       fetchOrgAllIssues(org, flags, cursor, (fetched, limit) =>
         setMessage(
@@ -900,12 +902,10 @@ async function handleResolvedTargets(
 
   if (targets.length === 0) {
     if (skippedSelfHosted) {
-      throw new ContextError(
-        "Organization and project",
-        `${USAGE_HINT}\n\n` +
-          `Note: Found ${skippedSelfHosted} DSN(s) that could not be resolved.\n` +
-          "You may not have access to these projects, or you can specify the target explicitly."
-      );
+      throw new ContextError("Organization and project", USAGE_HINT, [
+        `Found ${skippedSelfHosted} DSN(s) that could not be resolved`,
+        "You may not have access to these projects, or you can specify the target explicitly",
+      ]);
     }
     throw new ContextError("Organization and project", USAGE_HINT);
   }
@@ -954,7 +954,7 @@ async function handleResolvedTargets(
       : "Fetching issues";
 
   const { results, hasMore } = await withProgress(
-    { message: `${baseMessage} (up to ${flags.limit})...` },
+    { message: `${baseMessage} (up to ${flags.limit})...`, json: flags.json },
     (setMessage) =>
       fetchWithBudget(
         activeTargets,

@@ -24,6 +24,7 @@ import {
   LIST_CURSOR_FLAG,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
+import { withProgress } from "../../lib/polling.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
 import type { TransactionListItem } from "../../types/index.js";
 
@@ -245,12 +246,19 @@ export const listCommand = buildListCommand("trace", {
     });
     const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
 
-    const { data: traces, nextCursor } = await listTransactions(org, project, {
-      query: flags.query,
-      limit: flags.limit,
-      sort: flags.sort,
-      cursor,
-    });
+    const { data: traces, nextCursor } = await withProgress(
+      {
+        message: `Fetching traces (up to ${flags.limit})...`,
+        json: flags.json,
+      },
+      () =>
+        listTransactions(org, project, {
+          query: flags.query,
+          limit: flags.limit,
+          sort: flags.sort,
+          cursor,
+        })
+    );
 
     // Store or clear pagination cursor
     if (nextCursor) {

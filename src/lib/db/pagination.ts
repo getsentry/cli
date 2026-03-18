@@ -10,7 +10,7 @@
  * flags, used by list commands that support cursor-based pagination.
  */
 
-import { ContextError } from "../errors.js";
+import { ValidationError } from "../errors.js";
 import { getApiBaseUrl } from "../sentry-client.js";
 import { getDatabase } from "./index.js";
 import { runUpsert } from "./utils.js";
@@ -192,9 +192,9 @@ export function resolveOrgCursor(
   if (cursorFlag === "last") {
     const cached = getPaginationCursor(commandKey, contextKey);
     if (!cached) {
-      throw new ContextError(
-        "Pagination cursor",
-        "No saved cursor for this query. Run without --cursor first."
+      throw new ValidationError(
+        "No saved cursor for this query. Run without --cursor first.",
+        "cursor"
       );
     }
     return cached;

@@ -8,6 +8,7 @@ import type { SentryContext } from "../../context.js";
 import {
   findEventAcrossOrgs,
   getEvent,
+  getLatestEvent,
   type ResolvedEvent,
   resolveEventInOrg,
 } from "../../lib/api-client.js";
@@ -79,37 +80,46 @@ function formatEventView(data: EventViewData): string {
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
 
+/** Return type for parsePositionalArgs */
+type ParsedPositionalArgs = {
+  eventId: string;
+  targetArg: string | undefined;
+  /** Issue ID from a Sentry issue URL — triggers latest-event fetch */
+  issueId?: string;
+  /** Warning message if arguments appear to be in the wrong order */
+  warning?: string;
+  /** Suggestion when the user likely meant a different command */
+  suggestion?: string;
+};
+
 /**
  * Parse positional arguments for event view.
  *
  * Handles:
  * - `<event-id>` — event ID only (auto-detect org/project)
  * - `<target> <event-id>` — explicit target + event ID
- * - `<sentry-url>` — extract eventId and org from a Sentry event URL
+ * - `<sentry-event-url>` — extract eventId and org from a Sentry event URL
  *   (e.g., `https://sentry.example.com/organizations/my-org/issues/123/events/abc/`)
+ * - `<sentry-issue-url>` — extract issueId and org; caller fetches latest event
+ *   (e.g., `https://sentry.example.com/organizations/my-org/issues/123/`)
  *
  * For event URLs, the org is returned as `targetArg` in `"{org}/"` format
  * (OrgAll). Since event URLs don't contain a project slug, the caller
- * must fall back to auto-detection for the project. The URL must contain
- * an eventId segment — issue-only URLs are not valid for event view.
+ * must fall back to auto-detection for the project.
+ *
+ * For issue URLs (no eventId segment), the `issueId` field is set so the
+ * caller can fetch the latest event via `getLatestEvent(org, issueId)`.
  *
  * @returns Parsed event ID and optional target arg
  */
-export function parsePositionalArgs(args: string[]): {
-  eventId: string;
-  targetArg: string | undefined;
-  /** Warning message if arguments appear to be in the wrong order */
-  warning?: string;
-  /** Suggestion when the user likely meant a different command */
-  suggestion?: string;
-} {
+export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
   if (args.length === 0) {
-    throw new ContextError("Event ID", USAGE_HINT);
+    throw new ContextError("Event ID", USAGE_HINT, []);
   }
 
   const first = args[0];
   if (first === undefined) {
-    throw new ContextError("Event ID", USAGE_HINT);
+    throw new ContextError("Event ID", USAGE_HINT, []);
   }
 
   // URL detection — extract eventId and org from Sentry event URLs
@@ -122,11 +132,20 @@ export function parsePositionalArgs(args: string[]): {
       // back to auto-detect for the project while keeping the org context.
       return { eventId: urlParsed.eventId, targetArg: `${urlParsed.org}/` };
     }
-    // URL recognized but no eventId — not valid for event view
-    throw new ContextError(
-      "Event ID in URL (use a URL like /issues/{id}/events/{eventId}/)",
-      USAGE_HINT
-    );
+    if (urlParsed.issueId) {
+      // Issue URL without event ID — fetch the latest event for this issue.
+      // Use a placeholder eventId; the caller uses issueId to fetch via getLatestEvent.
+      return {
+        eventId: "latest",
+        targetArg: `${urlParsed.org}/`,
+        issueId: urlParsed.issueId,
+      };
+    }
+    // URL recognized but no eventId or issueId — not useful for event view
+    throw new ContextError("Event ID", USAGE_HINT, [
+      "Pass an event URL: https://sentry.io/organizations/{org}/issues/{id}/events/{eventId}/",
+      "Or an issue URL to view the latest event: https://sentry.io/organizations/{org}/issues/{id}/",
+    ]);
   }
 
   if (args.length === 1) {
@@ -293,6 +312,27 @@ export async function resolveAutoDetectTarget(
   return null;
 }
 
+/**
+ * Fetch the latest event for an issue URL and build the output data.
+ * Extracted from func() to reduce cyclomatic complexity.
+ */
+async function fetchLatestEventData(
+  org: string,
+  issueId: string,
+  spans: number
+): Promise<EventViewData> {
+  const event = await getLatestEvent(org, issueId);
+  const spanTreeResult =
+    spans > 0 ? await getSpanTreeLines(org, event, spans) : undefined;
+
+  const trace =
+    spanTreeResult?.success && spanTreeResult.traceId
+      ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans ?? [] }
+      : null;
+
+  return { event, trace, spanTreeLines: spanTreeResult?.lines };
+}
+
 export const viewCommand = buildCommand({
   docs: {
     brief: "View details of a specific event",
@@ -335,7 +375,7 @@ export const viewCommand = buildCommand({
     const log = logger.withTag("event.view");
 
     // Parse positional args
-    const { eventId, targetArg, warning, suggestion } =
+    const { eventId, targetArg, warning, suggestion, issueId } =
       parsePositionalArgs(args);
     if (warning) {
       log.warn(warning);
@@ -344,6 +384,28 @@ export const viewCommand = buildCommand({
       log.warn(suggestion);
     }
     const parsed = parseOrgProjectArg(targetArg);
+
+    // Issue URL shortcut: fetch the latest event directly via the issue ID.
+    // This bypasses project resolution entirely since getLatestEvent only
+    // needs org + issue ID.
+    if (issueId) {
+      const org = await resolveEffectiveOrg(
+        parsed.type === "org-all" ? parsed.org : ""
+      );
+      log.info(`Fetching latest event for issue ${issueId}...`);
+      const data = await fetchLatestEventData(org, issueId, flags.spans);
+
+      if (flags.web) {
+        await openInBrowser(
+          buildEventSearchUrl(org, data.event.eventID),
+          "event"
+        );
+        return;
+      }
+
+      yield new CommandOutput(data);
+      return { hint: `Showing latest event for issue ${issueId}` };
+    }
 
     const target = await resolveEventTarget({
       parsed,

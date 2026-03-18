@@ -1,6 +1,27 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.17.0
+
+### New Features ✨
+
+- (dashboard) Add dashboard list, view, and create commands by @betegon in [#406](https://github.com/getsentry/cli/pull/406)
+- (upgrade) Add --offline flag and automatic offline fallback by @BYK in [#450](https://github.com/getsentry/cli/pull/450)
+- Add distributed tracing for Sentry backend by @BYK in [#455](https://github.com/getsentry/cli/pull/455)
+- Add project delete command by @MathurAditya724 in [#397](https://github.com/getsentry/cli/pull/397)
+- Add `sentry schema` command for API introspection by @BYK in [#437](https://github.com/getsentry/cli/pull/437)
+
+### Bug Fixes 🐛
+
+- (dsn) Prevent hang during DSN auto-detection in repos with test fixtures by @BYK in [#445](https://github.com/getsentry/cli/pull/445)
+- (formatters) Pad priority labels for consistent TRIAGE column alignment by @MathurAditya724 in [#449](https://github.com/getsentry/cli/pull/449)
+- (upgrade) Remove hard chain depth cap for nightly delta upgrades by @BYK in [#444](https://github.com/getsentry/cli/pull/444)
+- Improve CLI output for auth login and upgrade flows by @BYK in [#454](https://github.com/getsentry/cli/pull/454)
+
+### Internal Changes 🔧
+
+- Cache org listing in listOrganizations + DSN shortcut for issue view by @betegon in [#446](https://github.com/getsentry/cli/pull/446)
+
 ## 0.16.0
 
 ### New Features ✨

@@ -180,6 +180,17 @@ Create a new project
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
+#### `sentry project delete <org/project>`
+
+Delete a project
+
+**Flags:**
+- `-y, --yes - Skip confirmation prompt`
+- `-f, --force - Force deletion without confirmation`
+- `-n, --dry-run - Validate and show what would be deleted without deleting`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
 #### `sentry project list <org/project>`
 
 List projects
@@ -501,6 +512,7 @@ Update the Sentry CLI to the latest version
 **Flags:**
 - `--check - Check for updates without installing`
 - `--force - Force upgrade even if already on the latest version`
+- `--offline - Upgrade using only cached version info and patches (no network)`
 - `--method <value> - Installation method to use (curl, brew, npm, pnpm, bun, yarn)`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
@@ -595,7 +607,7 @@ sentry team list --json
 
 View Sentry logs
 
-#### `sentry log list <org/project>`
+#### `sentry log list <org/project-or-trace-id...>`
 
 List logs from a project
 
@@ -603,7 +615,7 @@ List logs from a project
 - `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
 - `-q, --query <value> - Filter query (Sentry search syntax)`
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
-- `--trace <value> - Filter logs by trace ID (32-character hex string)`
+- `-t, --period <value> - Time period (e.g., "90d", "14d", "24h"). Default: 90d (project mode), 14d (trace mode)`
 - `--fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`

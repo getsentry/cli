@@ -2,16 +2,31 @@
  * Trace ID Validation
  *
  * Re-exports shared hex ID validation specialized for trace IDs.
- * Used by `trace logs` and `log list --trace` commands.
+ * Used by `trace logs`, `log list`, and `span list` commands.
  */
 
-import { HEX_ID_RE, validateHexId } from "./hex-id.js";
+import { HEX_ID_RE, normalizeHexId, validateHexId } from "./hex-id.js";
 
 /**
  * Regex for a valid 32-character hexadecimal trace ID.
  * Alias for `HEX_ID_RE` — both trace IDs and log IDs share the same format.
  */
 export const TRACE_ID_RE = HEX_ID_RE;
+
+/**
+ * Non-throwing check: does the string look like a valid 32-char hex trace ID?
+ *
+ * Handles UUID-dash format (8-4-4-4-12) and whitespace trimming, matching
+ * the same normalization as {@link validateTraceId}. Use this when you need
+ * to disambiguate between a trace ID and another kind of identifier (e.g.,
+ * a project slug) without throwing.
+ *
+ * @param value - The string to test
+ * @returns `true` if the value would pass {@link validateTraceId}
+ */
+export function isTraceId(value: string): boolean {
+  return HEX_ID_RE.test(normalizeHexId(value));
+}
 
 /**
  * Validate that a string looks like a 32-character hex trace ID.

@@ -200,24 +200,13 @@ describe("parsePositionalArgs", () => {
       expect(process.env.SENTRY_URL).toBe("https://sentry.example.com");
     });
 
-    test("issue URL without event ID throws ContextError", () => {
-      expect(() =>
-        parsePositionalArgs([
-          "https://sentry.io/organizations/my-org/issues/32886/",
-        ])
-      ).toThrow(ContextError);
-    });
-
-    test("issue-only URL error mentions event ID", () => {
-      try {
-        parsePositionalArgs([
-          "https://sentry.io/organizations/my-org/issues/32886/",
-        ]);
-        expect.unreachable("Should have thrown");
-      } catch (error) {
-        expect(error).toBeInstanceOf(ContextError);
-        expect((error as ContextError).message).toContain("Event ID");
-      }
+    test("issue URL without event ID returns issueId for latest event fetch", () => {
+      const result = parsePositionalArgs([
+        "https://sentry.io/organizations/my-org/issues/32886/",
+      ]);
+      expect(result.issueId).toBe("32886");
+      expect(result.eventId).toBe("latest");
+      expect(result.targetArg).toBe("my-org/");
     });
 
     test("org-only URL throws ContextError", () => {

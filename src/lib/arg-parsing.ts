@@ -765,7 +765,7 @@ export function parseSlashSeparatedArg(
 
   if (slashIdx === lastSlashIdx) {
     // Exactly one slash: "org/project" without ID
-    throw new ContextError(idLabel, usageHint);
+    throw new ContextError(idLabel, usageHint, []);
   }
 
   // Two+ slashes: split on last "/" → target + id
@@ -773,7 +773,7 @@ export function parseSlashSeparatedArg(
   const id = arg.slice(lastSlashIdx + 1);
 
   if (!id) {
-    throw new ContextError(idLabel, usageHint);
+    throw new ContextError(idLabel, usageHint, []);
   }
 
   // Validate the extracted ID against injection characters.

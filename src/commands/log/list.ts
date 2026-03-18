@@ -3,7 +3,7 @@
  *
  * List and stream logs from Sentry projects.
  * Supports real-time streaming with --follow flag.
- * Supports --trace flag to filter logs by trace ID.
+ * Supports trace ID as a positional argument to filter logs by trace.
  */
 
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
@@ -11,7 +11,7 @@ import * as Sentry from "@sentry/bun";
 import type { SentryContext } from "../../context.js";
 import { listLogs, listTraceLogs } from "../../lib/api-client.js";
 import { validateLimit } from "../../lib/arg-parsing.js";
-import { AuthError, ContextError, stringifyUnknown } from "../../lib/errors.js";
+import { AuthError, stringifyUnknown } from "../../lib/errors.js";
 import {
   buildLogRowCells,
   createLogStreamingTable,
@@ -34,19 +34,23 @@ import {
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
+import { withProgress } from "../../lib/polling.js";
+import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
+import { isTraceId } from "../../lib/trace-id.js";
 import {
-  resolveOrg,
-  resolveOrgProjectFromArg,
-} from "../../lib/resolve-target.js";
-import { validateTraceId } from "../../lib/trace-id.js";
+  type ParsedTraceTarget,
+  parseTraceTarget,
+  resolveTraceOrg,
+  warnIfNormalized,
+} from "../../lib/trace-target.js";
 import { getUpdateNotification } from "../../lib/version-check.js";
 
 type ListFlags = {
   readonly limit: number;
   readonly query?: string;
   readonly follow?: number;
+  readonly period?: string;
   readonly json: boolean;
-  readonly trace?: string;
   readonly fresh: boolean;
   readonly fields?: string[];
 };
@@ -62,6 +66,8 @@ type LogListResult = {
   logs: LogLike[];
   /** Trace ID, present for trace-filtered queries */
   traceId?: string;
+  /** Whether more results are available beyond the limit */
+  hasMore: boolean;
 };
 
 /** Output yielded by log list: either a batch (single-fetch) or an individual item (follow). */
@@ -81,6 +87,12 @@ const DEFAULT_POLL_INTERVAL = 2;
 
 /** Command name used in resolver error messages */
 const COMMAND_NAME = "log list";
+
+/** Usage hint for trace mode error messages */
+const TRACE_USAGE_HINT = "sentry log list [<org>/]<trace-id>";
+
+/** Default time period for trace-logs queries */
+const DEFAULT_TRACE_PERIOD = "14d";
 
 /**
  * Parse --limit flag, delegating range validation to shared utility.
@@ -130,6 +142,78 @@ type FetchResult = {
   hint: string;
 };
 
+// ---------------------------------------------------------------------------
+// Positional argument disambiguation
+// ---------------------------------------------------------------------------
+
+/**
+ * Parsed result from log list positional arguments.
+ *
+ * Discriminated on `mode`:
+ * - `"project"` — standard project-scoped log listing (existing path)
+ * - `"trace"` — trace-filtered log listing via trace-logs endpoint
+ */
+type ParsedLogArgs =
+  | { mode: "project"; target?: string }
+  | { mode: "trace"; parsed: ParsedTraceTarget };
+
+/**
+ * Disambiguate log list positional arguments.
+ *
+ * Detects trace mode by checking whether any argument segment looks like
+ * a 32-char hex trace ID:
+ *
+ * - **Single arg**: checks the tail segment (last part after `/`, or the
+ *   entire arg). `<trace-id>`, `<org>/<trace-id>`, `<org>/<project>/<trace-id>`.
+ * - **Two+ args**: checks the last positional (`<org> <trace-id>` or
+ *   `<org>/<project> <trace-id>` space-separated forms).
+ * - **No match**: treats the argument as a project target.
+ *
+ * When trace mode is detected, delegates to {@link parseTraceTarget} for
+ * full parsing and validation.
+ *
+ * @param args - Positional arguments from CLI
+ * @returns Parsed args with mode discrimination
+ */
+function parseLogListArgs(args: string[]): ParsedLogArgs {
+  if (args.length === 0) {
+    return { mode: "project" };
+  }
+
+  const first = args[0];
+  if (first === undefined) {
+    return { mode: "project" };
+  }
+
+  // Two+ args: check if the last arg is a trace ID (space-separated form)
+  // e.g., `sentry log list my-org abc123...` or `sentry log list my-org/proj abc123...`
+  if (args.length >= 2) {
+    const last = args.at(-1);
+    if (last && isTraceId(last)) {
+      return {
+        mode: "trace",
+        parsed: parseTraceTarget(args, TRACE_USAGE_HINT),
+      };
+    }
+  }
+
+  // Single arg: check the tail segment (last part after `/`, or the entire arg)
+  const lastSlash = first.lastIndexOf("/");
+  const tail = lastSlash === -1 ? first : first.slice(lastSlash + 1);
+
+  if (isTraceId(tail)) {
+    return {
+      mode: "trace",
+      parsed: parseTraceTarget(args, TRACE_USAGE_HINT),
+    };
+  }
+
+  return { mode: "project", target: first };
+}
+
+/** Default time period for project-scoped log queries */
+const DEFAULT_PROJECT_PERIOD = "90d";
+
 /**
  * Execute a single fetch of logs (non-streaming mode).
  *
@@ -141,14 +225,15 @@ async function executeSingleFetch(
   project: string,
   flags: ListFlags
 ): Promise<FetchResult> {
+  const period = flags.period ?? DEFAULT_PROJECT_PERIOD;
   const logs = await listLogs(org, project, {
     query: flags.query,
     limit: flags.limit,
-    statsPeriod: "90d",
+    statsPeriod: period,
   });
 
   if (logs.length === 0) {
-    return { result: { logs: [] }, hint: "No logs found." };
+    return { result: { logs: [], hasMore: false }, hint: "No logs found." };
   }
 
   // Reverse for chronological order (API returns newest first, tail shows oldest first)
@@ -158,7 +243,10 @@ async function executeSingleFetch(
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"}.`;
   const tip = hasMore ? " Use --limit to show more, or -f to follow." : "";
 
-  return { result: { logs: chronological }, hint: `${countText}${tip}` };
+  return {
+    result: { logs: chronological, hasMore },
+    hint: `${countText}${tip}`,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -368,7 +456,11 @@ async function* yieldTraceFollowItems<T extends LogLike>(
   for await (const batch of generator) {
     if (!contextSent && batch.length > 0) {
       // First non-empty batch: yield as LogListResult to set trace context
-      yield new CommandOutput<LogOutput>({ logs: batch, traceId });
+      yield new CommandOutput<LogOutput>({
+        logs: batch,
+        traceId,
+        hasMore: false,
+      });
       contextSent = true;
     } else {
       for (const item of batch) {
@@ -378,11 +470,8 @@ async function* yieldTraceFollowItems<T extends LogLike>(
   }
 }
 
-/** Default time period for trace-logs queries */
-const DEFAULT_TRACE_PERIOD = "14d";
-
 /**
- * Execute a single fetch of trace-filtered logs (non-streaming, --trace mode).
+ * Execute a single fetch of trace-filtered logs (non-streaming, trace mode).
  * Uses the dedicated trace-logs endpoint which is org-scoped.
  *
  * Returns the fetched logs, trace ID, and a human-readable hint.
@@ -393,17 +482,21 @@ async function executeTraceSingleFetch(
   traceId: string,
   flags: ListFlags
 ): Promise<FetchResult> {
+  // Use the explicit period if set, otherwise default to 14d for trace mode.
+  // The flag is optional (no default) so undefined means "not explicitly set".
+  const period = flags.period ?? DEFAULT_TRACE_PERIOD;
+
   const logs = await listTraceLogs(org, traceId, {
     query: flags.query,
     limit: flags.limit,
-    statsPeriod: DEFAULT_TRACE_PERIOD,
+    statsPeriod: period,
   });
 
   if (logs.length === 0) {
     return {
-      result: { logs: [], traceId },
+      result: { logs: [], traceId, hasMore: false },
       hint:
-        `No logs found for trace ${traceId} in the last ${DEFAULT_TRACE_PERIOD}.\n\n` +
+        `No logs found for trace ${traceId} in the last ${period}.\n\n` +
         "Try 'sentry trace logs' for more options (e.g., --period 30d).",
     };
   }
@@ -415,7 +508,7 @@ async function executeTraceSingleFetch(
   const tip = hasMore ? " Use --limit to show more." : "";
 
   return {
-    result: { logs: chronological, traceId },
+    result: { logs: chronological, traceId, hasMore },
     hint: `${countText}${tip}`,
   };
 }
@@ -518,16 +611,18 @@ function createLogRenderer(): HumanRenderer<LogOutput> {
  * Transform log output into the JSON shape.
  *
  * Discriminates between {@link LogListResult} (single-fetch) and bare
- * {@link LogLike} items (follow mode). Single-fetch yields a JSON array;
- * follow mode yields one JSON object per line (JSONL).
+ * {@link LogLike} items (follow mode). Single-fetch yields a JSON envelope
+ * with `data` and `hasMore`; follow mode yields one JSON object per line (JSONL).
  */
 function jsonTransformLogOutput(data: LogOutput, fields?: string[]): unknown {
   if ("logs" in data && Array.isArray((data as LogListResult).logs)) {
-    // Batch (single-fetch): return array
-    const logs = (data as LogListResult).logs;
-    return fields && fields.length > 0
-      ? logs.map((log) => filterFields(log, fields))
-      : logs;
+    // Batch (single-fetch): return envelope with data + hasMore
+    const logList = data as LogListResult;
+    const items =
+      fields && fields.length > 0
+        ? logList.logs.map((log) => filterFields(log, fields))
+        : logList.logs;
+    return { data: items, hasMore: logList.hasMore };
   }
   // Single item (follow mode): return bare object for JSONL
   return fields && fields.length > 0 ? filterFields(data, fields) : data;
@@ -544,16 +639,15 @@ export const listCommand = buildListCommand("log", {
       "  sentry log list <project>     # find project across all orgs\n\n" +
       `${TARGET_PATTERN_NOTE}\n\n` +
       "Trace filtering:\n" +
-      "  When --trace is given, only org resolution is needed (the trace-logs\n" +
-      "  endpoint is org-scoped). The positional target is treated as an org\n" +
-      "  slug, not an org/project pair.\n\n" +
+      "  sentry log list <trace-id>           # Filter by trace (auto-detect org)\n" +
+      "  sentry log list <org>/<trace-id>     # Filter by trace (explicit org)\n\n" +
       "Examples:\n" +
       "  sentry log list                    # List last 100 logs\n" +
       "  sentry log list -f                 # Stream logs (2s poll interval)\n" +
       "  sentry log list -f 5               # Stream logs (5s poll interval)\n" +
       "  sentry log list --limit 50         # Show last 50 logs\n" +
       "  sentry log list -q 'level:error'   # Filter to errors only\n" +
-      "  sentry log list --trace abc123def456abc123def456abc123de  # Filter by trace\n\n" +
+      "  sentry log list abc123def456abc123def456abc123de  # Filter by trace\n\n" +
       "Alias: `sentry logs` → `sentry log list`",
   },
   output: {
@@ -562,15 +656,12 @@ export const listCommand = buildListCommand("log", {
   },
   parameters: {
     positional: {
-      kind: "tuple",
-      parameters: [
-        {
-          placeholder: "org/project",
-          brief: "<org>/<project> or <project> (search)",
-          parse: String,
-          optional: true,
-        },
-      ],
+      kind: "array",
+      parameter: {
+        placeholder: "org/project-or-trace-id",
+        brief: "[<org>/[<project>/]]<trace-id>, <org>/<project>, or <project>",
+        parse: String,
+      },
     },
     flags: {
       limit: {
@@ -592,10 +683,11 @@ export const listCommand = buildListCommand("log", {
         optional: true,
         inferEmpty: true,
       },
-      trace: {
+      period: {
         kind: "parsed",
-        parse: validateTraceId,
-        brief: "Filter logs by trace ID (32-character hex string)",
+        parse: String,
+        brief:
+          'Time period (e.g., "90d", "14d", "24h"). Default: 90d (project mode), 14d (trace mode)',
         optional: true,
       },
       fresh: FRESH_FLAG,
@@ -604,31 +696,26 @@ export const listCommand = buildListCommand("log", {
       n: "limit",
       q: "query",
       f: "follow",
+      t: "period",
     },
   },
-  async *func(this: SentryContext, flags: ListFlags, target?: string) {
+  async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {
     applyFreshFlag(flags);
     const { cwd, setContext } = this;
 
-    if (flags.trace) {
+    const parsed = parseLogListArgs(args);
+
+    if (parsed.mode === "trace") {
       // Trace mode: use the org-scoped trace-logs endpoint.
-      // The positional target is treated as an org slug (not org/project).
-      const resolved = await resolveOrg({
-        org: target,
+      warnIfNormalized(parsed.parsed, "log.list");
+      const { traceId, org } = await resolveTraceOrg(
+        parsed.parsed,
         cwd,
-      });
-      if (!resolved) {
-        throw new ContextError("Organization", "sentry log list --trace <id>", [
-          "Set a default org with 'sentry org list', or specify one explicitly",
-          `Example: sentry log list myorg --trace ${flags.trace}`,
-        ]);
-      }
-      const { org } = resolved;
+        TRACE_USAGE_HINT
+      );
       setContext([org], []);
 
       if (flags.follow) {
-        const traceId = flags.trace;
-
         // Banner (suppressed in JSON mode)
         writeFollowBanner(
           flags.follow ?? DEFAULT_POLL_INTERVAL,
@@ -676,20 +763,21 @@ export const listCommand = buildListCommand("log", {
         return;
       }
 
-      const { result, hint } = await executeTraceSingleFetch(
-        org,
-        flags.trace,
-        flags
+      const { result, hint } = await withProgress(
+        {
+          message: `Fetching logs (up to ${flags.limit})...`,
+          json: flags.json,
+        },
+        () => executeTraceSingleFetch(org, traceId, flags)
       );
       yield new CommandOutput(result);
       return { hint };
     }
 
-    // Standard project-scoped mode — kept in else-like block to avoid
-    // `org` shadowing the trace-mode `org` declaration above.
+    // Standard project-scoped mode
     {
       const { org, project } = await resolveOrgProjectFromArg(
-        target,
+        parsed.target,
         cwd,
         COMMAND_NAME
       );
@@ -719,7 +807,13 @@ export const listCommand = buildListCommand("log", {
         return;
       }
 
-      const { result, hint } = await executeSingleFetch(org, project, flags);
+      const { result, hint } = await withProgress(
+        {
+          message: `Fetching logs (up to ${flags.limit})...`,
+          json: flags.json,
+        },
+        () => executeSingleFetch(org, project, flags)
+      );
       yield new CommandOutput(result);
       return { hint };
     }

@@ -149,6 +149,7 @@ jobs:
       - run: bun run lint
       - run: bun run typecheck
       - run: bun run check:deps
+      - run: bun run check:errors
 
   test-unit:
     name: Unit Tests
