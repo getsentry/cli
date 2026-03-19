@@ -1,0 +1,164 @@
+# Fix CLI-9A: `sentry project list <org-slug>` misinterpreted as project search
+
+## Problem
+
+**Issue**: [CLI-9A](https://sentry.sentry.io/issues/CLI-9A) — 190 occurrences, 98 users, high priority.
+
+When a user runs `sentry project list ftmo`, the CLI classifies "ftmo" as a **project name** (project-search mode) and makes N API calls to `getProject()` across all orgs. When no project matches, it throws a confusing error. The user intended "ftmo" as an **org slug**.
+
+**Root cause**: `project/list.ts` has a custom `handleProjectSearch` that doesn't check if the slug matches an organization — unlike the shared `handleProjectSearch` in `org-list.ts` (used by `team list`, `repo list`) which already has this fallback.
+
+## Design: Centralized org-cache pre-check in `dispatchOrgScopedList`
+
+Instead of patching each command's handler individually, add the org-slug check **inside `dispatchOrgScopedList`** so it runs before any handler (default or custom override). This:
+
+1. **Prevents recurrence** — no handler can forget the check
+2. **Optimizes** — checks SQLite-cached orgs first, avoiding N API calls to `getProject()`
+3. **Respects per-command semantics** — configurable behavior (redirect vs error)
+
+### How it works
+
+Add `orgSlugFallback?: "redirect" | "error"` to `DispatchOptions`.
+
+In `dispatchOrgScopedList`, after cursor validation, when `parsed.type === "project-search"`:
+
+```
+1. getCachedOrganizations() → check if slug matches a cached org
+2. If match found:
+   - "redirect": log warning, convert parsed to { type: "org-all", org: slug }
+                  → falls through to the org-all handler
+   - "error":    throw ResolutionError with helpful suggestions
+3. If no match: fall through to existing handler (which calls findProjectsBySlug,
+   refreshes the cache, and checks again — handles stale cache gracefully)
+```
+
+When `orgSlugFallback` is undefined (the default), no pre-check happens — fully backward compatible.
+
+## Changes
+
+### 1. `src/lib/org-list.ts` — Add pre-check to dispatch
+
+**Add import** for `getCachedOrganizations` from `./db/regions.js`.
+
+**Extend `DispatchOptions`** (line ~822):
+```typescript
+export type DispatchOptions<TEntity = unknown, TWithOrg = unknown> = {
+  // ... existing fields ...
+  /**
+   * Behavior when a project-search slug matches a cached organization.
+   * - "redirect": convert to org-all mode with a warning (e.g., project list)
+   * - "error": throw ResolutionError with suggestions (e.g., issue list)
+   * - undefined: no pre-check; handler decides (backward compatible default)
+   */
+  orgSlugFallback?: "redirect" | "error";
+};
+```
+
+**Add pre-check in `dispatchOrgScopedList`** (line ~880, after cursor validation, before handler dispatch).
+
+Note: `effectiveParsed` is a `ParsedOrgProject` union — the `type === "project-search"` guard narrows it so `.projectSlug` is accessible. Extract it into a local `const slug` for clarity:
+
+```typescript
+// Pre-check: if slug matches a cached org, short-circuit before expensive API calls
+if (effectiveParsed.type === "project-search" && options.orgSlugFallback) {
+  const slug = effectiveParsed.projectSlug;
+  const cached = await getCachedOrganizations();
+  const matchingOrg = cached.find((o) => o.slug === slug);
+  if (matchingOrg) {
+    const meta = isFullConfig(config) ? config : config;
+    if (options.orgSlugFallback === "redirect") {
+      log.warn(
+        `'${slug}' is an organization, not a project. ` +
+          `Listing all ${meta.entityPlural} in '${slug}'.`
+      );
+      effectiveParsed = { type: "org-all", org: matchingOrg.slug };
+    } else {
+      throw new ResolutionError(
+        `'${slug}'`,
+        "is an organization, not a project",
+        `${meta.commandPrefix} ${slug}/`,
+        [
+          `List projects: sentry project list ${slug}/`,
+          `Specify a project: ${meta.commandPrefix} ${slug}/<project>`,
+        ]
+      );
+    }
+  }
+}
+```
+
+### 2. `src/commands/project/list.ts` — Opt in to redirect
+
+In the `dispatchOrgScopedList` call (line ~614), add:
+```typescript
+const result = await dispatchOrgScopedList({
+  config: projectListMeta,
+  cwd,
+  flags,
+  parsed,
+  orgSlugFallback: "redirect",  // ← ADD THIS
+  overrides: { ... },
+});
+```
+
+The custom `handleProjectSearch` in this file still works as a fallback for stale-cache cases (slug isn't cached as org → handler runs → `findProjectsBySlug` → checks again). No changes needed to `handleProjectSearch` itself, though we could also add the `orgs` destructuring there as a belt-and-suspenders measure.
+
+### 3. `src/lib/list-command.ts` — Opt in for `buildOrgListCommand` commands
+
+In `buildOrgListCommand`'s dispatch call (line ~577), add `orgSlugFallback: "redirect"`:
+```typescript
+const result = await dispatchOrgScopedList({
+  config,
+  cwd,
+  flags,
+  parsed,
+  orgSlugFallback: "redirect",  // ← ADD THIS
+});
+```
+
+This gives `team list` and `repo list` the cache optimization too — they already had the org fallback in the shared handler, but now they skip the N API calls.
+
+### 4. `AGENTS.md` — Document the pattern
+
+Add to the "List Command Infrastructure" section:
+```
+When adding a new list command that uses `dispatchOrgScopedList`, always set
+`orgSlugFallback` to declare how bare-slug org matches should be handled:
+- `"redirect"` for commands where listing all entities in the org makes sense
+- `"error"` for commands with custom per-project logic that can't auto-redirect
+```
+
+### Files summary
+
+| File | Change |
+|------|--------|
+| `src/lib/org-list.ts` | Add `orgSlugFallback` to `DispatchOptions`, add pre-check in `dispatchOrgScopedList` |
+| `src/commands/project/list.ts` | Add `orgSlugFallback: "redirect"` to dispatch call |
+| `src/lib/list-command.ts` | Add `orgSlugFallback: "redirect"` to `buildOrgListCommand` dispatch call |
+| `AGENTS.md` | Document the `orgSlugFallback` pattern |
+
+### Files NOT modified
+
+| File | Why |
+|------|-----|
+| `src/commands/issue/list.ts` | Already has its own org check in its custom handler; no `orgSlugFallback` needed (default = no pre-check) |
+| `src/lib/arg-parsing.ts` | `parseOrgProjectArg` classification is correct |
+| `src/commands/project/list.ts` `handleProjectSearch` | The dispatch pre-check handles the common case; the handler is a stale-cache fallback |
+
+## Verification
+
+1. **New unit test** in `test/commands/project/list.test.ts`:
+   - **"bare slug matching cached org auto-redirects to org-all"**: Seed the org cache with `{ slug: "ftmo" }`, mock fetch to 404 on `getProject` but return projects on org-all listing. Call `handleProjectSearch("ftmo", flags)` — but actually, the better test is to exercise the full `dispatchOrgScopedList` path with `orgSlugFallback: "redirect"` to confirm the pre-check fires.
+
+2. **New unit test** in a shared test file (e.g., `test/lib/org-list.test.ts`):
+   - **"orgSlugFallback redirect converts project-search to org-all"**: Seed org cache, call `dispatchOrgScopedList` with `orgSlugFallback: "redirect"` and verify org-all handler is invoked.
+   - **"orgSlugFallback error throws ResolutionError"**: Same setup but with `"error"`.
+   - **"no orgSlugFallback skips pre-check"**: Verify the project-search handler runs when option is omitted.
+
+3. **Existing tests pass**: `bun test test/commands/project/list.test.ts` — the existing "not found throws ResolutionError" test (line 639) still passes because its mock org slug is `"test-org"` and search slug is `"nonexistent"` (no match).
+
+4. **Full test suite**: `bun run test:unit`
+
+5. **Typecheck + lint**: `bun run typecheck && bun run lint`
+
+6. **Manual smoke test**: `bun run dev project list <some-org-slug>` should list projects with a warning.
