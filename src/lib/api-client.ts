@@ -49,6 +49,7 @@ export {
   type IssuesPage,
   listIssuesAllPages,
   listIssuesPaginated,
+  tryGetIssueByShortId,
   updateIssueStatus,
 } from "./api/issues.js";
 export {

@@ -12,12 +12,19 @@ import {
   getIssueInOrg,
   type IssueSort,
   listIssuesPaginated,
+  listOrganizations,
   triggerRootCauseAnalysis,
+  tryGetIssueByShortId,
 } from "../../lib/api-client.js";
 import { type IssueSelector, parseIssueArg } from "../../lib/arg-parsing.js";
 import { getProjectByAlias } from "../../lib/db/project-aliases.js";
 import { detectAllDsns } from "../../lib/dsn/index.js";
-import { ApiError, ContextError, ResolutionError } from "../../lib/errors.js";
+import {
+  ApiError,
+  ContextError,
+  ResolutionError,
+  withAuthGuard,
+} from "../../lib/errors.js";
 import { getProgressMessage } from "../../lib/formatters/seer.js";
 import { expandToFullShortId, isShortSuffix } from "../../lib/issue-id.js";
 import { logger } from "../../lib/logger.js";
@@ -173,7 +180,46 @@ async function resolveProjectSearch(
     return { org: dsnTarget.org, issue };
   }
 
-  // 3. Search for project across all accessible orgs
+  // 3. Fast path: try resolving the short ID directly across all orgs.
+  //    The shortid endpoint validates both project existence and issue existence
+  //    in a single call, eliminating the separate getProject() round-trip.
+  const fullShortId = expandToFullShortId(suffix, projectSlug);
+  const orgs = await listOrganizations();
+
+  const results = await Promise.all(
+    orgs.map((org) =>
+      withAuthGuard(() => tryGetIssueByShortId(org.slug, fullShortId))
+    )
+  );
+
+  const successes: StrictResolvedIssue[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    const org = orgs[i];
+    if (result && org && result.ok && result.value) {
+      successes.push({ org: org.slug, issue: result.value });
+    }
+  }
+
+  if (successes.length === 1 && successes[0]) {
+    return successes[0];
+  }
+
+  if (successes.length > 1) {
+    const orgList = successes.map((s) => s.org).join(", ");
+    throw new ResolutionError(
+      `Project '${projectSlug}'`,
+      "is ambiguous",
+      commandHint,
+      [
+        `Found in: ${orgList}`,
+        `Specify the org: sentry issue ... <org>/${projectSlug}-${suffix}`,
+      ]
+    );
+  }
+
+  // 4. All orgs returned 404 — fall back to findProjectsBySlug for a
+  //    precise error: "project not found" vs "issue not found in project".
   const { projects } = await findProjectsBySlug(projectSlug.toLowerCase());
 
   if (projects.length === 0) {
@@ -198,18 +244,15 @@ async function resolveProjectSearch(
     );
   }
 
-  const project = projects[0];
-  if (!project) {
-    throw new ResolutionError(
-      `Project '${projectSlug}'`,
-      "not found",
-      commandHint
-    );
-  }
-
-  const fullShortId = expandToFullShortId(suffix, project.slug);
-  const issue = await getIssueByShortId(project.orgSlug, fullShortId);
-  return { org: project.orgSlug, issue };
+  // Project exists but issue doesn't
+  throw new ResolutionError(
+    `Issue '${fullShortId}'`,
+    "not found",
+    commandHint,
+    [
+      `Project '${projectSlug}' exists in org '${projects[0]?.orgSlug}', but no issue with short ID '${fullShortId}' was found.`,
+    ]
+  );
 }
 
 /**
