@@ -635,10 +635,14 @@ export function prepareDashboardForUpdate(dashboard: DashboardDetail): {
   title: string;
   widgets: DashboardWidget[];
   projects?: number[];
+  environment?: string[];
+  period?: string | null;
 } {
   return {
     title: dashboard.title,
     widgets: (dashboard.widgets ?? []).map(stripWidgetServerFields),
     projects: dashboard.projects,
+    environment: dashboard.environment,
+    period: dashboard.period,
   };
 }
