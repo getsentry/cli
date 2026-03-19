@@ -113,10 +113,13 @@ function extractSubcommands(routeMap: {
     hidden: boolean;
   }[];
 }): CommandEntry[] {
-  return routeMap
-    .getAllEntries()
-    .filter((sub) => !sub.hidden)
-    .map((sub) => buildCommandEntry(sub.name.original, sub.target));
+  const subcommands: CommandEntry[] = [];
+  for (const sub of routeMap.getAllEntries()) {
+    if (!sub.hidden) {
+      subcommands.push(buildCommandEntry(sub.name.original, sub.target));
+    }
+  }
+  return subcommands;
 }
 
 /**
@@ -154,7 +157,7 @@ export function extractCommandTree(): CommandTree {
 /**
  * Sanitize a string for use in a shell variable name.
  *
- * Uses a whitelist approach — replaces any character that is not a valid
+ * Uses an allowlist approach — replaces any character that is not a valid
  * shell identifier character (`[a-zA-Z0-9_]`) with an underscore.
  * Input comes from Stricli route/flag names (alphanumeric + hyphen),
  * but the whitelist guards against unexpected characters.

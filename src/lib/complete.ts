@@ -155,10 +155,9 @@ export async function completeOrgSlugs(
     return [];
   }
 
-  const slugs = orgs.map((o) => o.slug);
-  const matched = fuzzyMatch(partial, slugs);
-
   const nameMap = new Map(orgs.map((o) => [o.slug, o.name]));
+  const matched = fuzzyMatch(partial, [...nameMap.keys()]);
+
   return matched.map((slug) => ({
     value: `${slug}${suffix}`,
     description: nameMap.get(slug),
