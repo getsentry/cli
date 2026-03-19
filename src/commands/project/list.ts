@@ -58,6 +58,9 @@ import {
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type { SentryProject } from "../../types/index.js";
 
+/** Extended result type with optional title shown above the table. */
+type ProjectListResult = ListResult<ProjectWithOrg> & { title?: string };
+
 /** Command key for pagination cursor storage */
 export const PAGINATION_KEY = "project-list";
 
@@ -538,9 +541,9 @@ export async function handleProjectSearch(
         contextKey,
         cursor: undefined,
       });
-      const note = `'${projectSlug}' is an organization, not a project. Showing all projects in '${projectSlug}'.`;
-      result.header = result.header ? `${note}\n${result.header}` : note;
-      return result;
+      const r = result as ProjectListResult;
+      r.title = `'${projectSlug}' is an organization, not a project. Showing all projects in '${projectSlug}'`;
+      return r;
     }
 
     // JSON mode returns empty array; human mode throws a helpful error
@@ -601,11 +604,16 @@ export const listCommand = buildListCommand("project", {
       "Alias: `sentry projects` → `sentry project list`",
   },
   output: {
-    human: (result: ListResult<ProjectWithOrg>) => {
+    human: (data: ListResult<ProjectWithOrg>) => {
+      const result = data as ProjectListResult;
       if (result.items.length === 0) {
         return result.hint ?? "No projects found.";
       }
-      const parts: string[] = [displayProjectTable(result.items)];
+      const parts: string[] = [];
+      if (result.title) {
+        parts.push(`\n${result.title}\n\n`);
+      }
+      parts.push(displayProjectTable(result.items));
       if (result.header) {
         parts.push(`\n${result.header}`);
       }
