@@ -1,0 +1,147 @@
+# Eliminate redundant `getProject` round-trips in project-search resolution
+
+## Problem
+
+`resolveProjectBySlug()` and `resolveOrgProjectTarget()` both call `findProjectsBySlug()` which internally calls `getProject()` per org — fetching the **full** `SentryProject` object. But both functions **discard** that data and return only `{ org: string, project: string }`. Callers that need the project ID or full project details call `getProject()` a second time.
+
+This is the same class of redundancy that PR #473 fixed for the issue short-ID path.
+
+## Redundant callers (3 confirmed, each saves ~500-800ms)
+
+| Command | File | What happens |
+|---------|------|-------------|
+| `dashboard create` | `src/commands/dashboard/create.ts:97-106` | `resolveProjectBySlug()` → `fetchProjectId()` re-calls `getProject` just to get `.id` |
+| `project delete` | `src/commands/project/delete.ts:244-248` | `resolveOrgProjectTarget()` → `getProject()` re-fetches for display name |
+| `project view` | `src/commands/project/view.ts:103-104` | `resolveProjectBySlug()` → `fetchProjectDetails()` → `getProject()` re-fetches |
+
+## Non-redundant callers (no changes needed)
+
+These use only `{ org, project }` slugs for scoping, then call a **different** API:
+- `event/view.ts`, `log/view.ts`, `init.ts`, `trace/list.ts`, `span/list.ts`, `log/list.ts`
+
+## Root cause
+
+```
+resolveProjectBySlug(slug)
+  → findProjectsBySlug(slug)
+      → listOrganizations() + N × getProject(org, slug)  ← fetches FULL SentryProject
+  → return { org: foundProject.orgSlug, project: foundProject.slug }  ← DISCARDS project data
+```
+
+## Approach: Widen return types to carry project data through
+
+### Step 1: Extend `resolveProjectBySlug()` return type
+
+**File: `src/lib/resolve-target.ts` (lines 954-1010)**
+
+Current signature returns `Promise<{ org: string; project: string }>`.
+
+Change to return the full project too:
+```typescript
+export type ResolvedProjectBySlug = {
+  org: string;
+  project: string;
+  /** Full project data already fetched by findProjectsBySlug — avoids re-fetch */
+  projectData: SentryProject;
+};
+```
+
+At line 1006, change `return { org, project }` to `return { org, project, projectData: foundProject }`.
+
+Existing callers that destructure `{ org, project }` continue to work unchanged.
+
+### Step 2: Extend `resolveOrgProjectTarget()` return type
+
+**File: `src/lib/resolve-target.ts` (lines 1094-1170)**
+
+Add optional `projectData` to `ResolvedOrgProject`:
+```typescript
+export type ResolvedOrgProject = {
+  org: string;
+  project: string;
+  /** Available when resolved via project-search (avoids re-fetch) */
+  projectData?: SentryProject;
+};
+```
+
+In the `project-search` case (line 1150), change to:
+```typescript
+return { org: match.orgSlug, project: match.slug, projectData: match };
+```
+
+Other cases (`explicit`, `auto-detect`) continue returning just `{ org, project }`.
+
+### Step 3: Fix `dashboard/create.ts` — use `projectData.id`
+
+**File: `src/commands/dashboard/create.ts` (lines 97-106)**
+
+```diff
+ case "project-search": {
+   const found = await resolveProjectBySlug(...);
+-  const pid = await fetchProjectId(found.org, found.project);
++  const pid = toNumericId(found.projectData.id);
+   return {
+     orgSlug: found.org,
+     projectIds: pid !== undefined ? [pid] : [],
+   };
+ }
+```
+
+Eliminates 1 HTTP round-trip.
+
+### Step 4: Fix `project/delete.ts` — use `projectData` when available
+
+**File: `src/commands/project/delete.ts` (lines 244-248)**
+
+```diff
+ const { org: orgSlug, project: projectSlug } =
+   await resolveOrgProjectTarget(parsed, cwd, COMMAND_NAME);
+-const project = await getProject(orgSlug, projectSlug);
++// project-search already fetched the project; explicit/auto-detect paths need a fetch
++const resolved = await resolveOrgProjectTarget(parsed, cwd, COMMAND_NAME);
++const project = resolved.projectData ?? await getProject(resolved.org, resolved.project);
+```
+
+Eliminates 1 HTTP round-trip in the project-search path. Explicit path still fetches (needed for validation).
+
+### Step 5: Fix `project/view.ts` — skip re-fetch when data available
+
+**File: `src/commands/project/view.ts` (lines 98-110, 228-240)**
+
+In the `project-search` resolution case, pass `projectData` through to `ResolvedTarget`. Then in `fetchProjectDetails()`:
+
+```diff
+ async function fetchProjectDetails(target: ResolvedTarget): Promise<ProjectWithDsn | null> {
+   const result = await withAuthGuard(async () => {
+     const [project, dsn] = await Promise.all([
+-      getProject(target.org, target.project),
++      target.projectData
++        ? Promise.resolve(target.projectData)
++        : getProject(target.org, target.project),
+       tryGetPrimaryDsn(target.org, target.project),
+     ]);
+     return { project, dsn };
+   });
+```
+
+Requires adding `projectData?: SentryProject` to the `ResolvedTarget` type in the relevant type definition.
+
+Eliminates 1 HTTP round-trip in the project-search path. Other paths still fetch normally.
+
+## Files to modify
+
+| File | Change |
+|------|--------|
+| `src/lib/resolve-target.ts` | Widen `resolveProjectBySlug` + `ResolvedOrgProject` return types |
+| `src/commands/dashboard/create.ts` | Use `projectData.id` instead of `fetchProjectId()` |
+| `src/commands/project/delete.ts` | Use `projectData` instead of re-calling `getProject()` |
+| `src/commands/project/view.ts` | Pass `projectData` through; skip `getProject()` when available |
+
+## Verification
+
+1. `bun run typecheck` — all callers handle the widened return type
+2. `bun run lint` — no complexity regressions
+3. `bun test test/commands/project/` — project view/delete tests pass
+4. `bun test test/commands/dashboard/` — dashboard create tests pass
+5. `bun test test/lib/resolve-target*` — resolution tests pass
+6. Manual: `sentry project view <bare-slug>` — confirm only 1 `getProject` call (not 2)
