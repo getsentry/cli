@@ -1006,10 +1006,13 @@ export async function resolveProjectBySlug(
     );
   }
 
+  // Strip orgSlug (from ProjectWithOrg) so projectData is a clean SentryProject
+  // — prevents leaking the extra field into JSON output when callers spread it.
+  const { orgSlug: _org, ...projectData } = foundProject;
   return {
     org: foundProject.orgSlug,
     project: foundProject.slug,
-    projectData: foundProject,
+    projectData,
   };
 }
 
@@ -1154,7 +1157,12 @@ export async function resolveOrgProjectTarget(
       }
 
       const match = projects[0] as (typeof projects)[number];
-      return { org: match.orgSlug, project: match.slug, projectData: match };
+      const { orgSlug: _org, ...matchData } = match;
+      return {
+        org: match.orgSlug,
+        project: match.slug,
+        projectData: matchData,
+      };
     }
 
     case "auto-detect": {
