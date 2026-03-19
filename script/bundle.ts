@@ -89,7 +89,6 @@ const result = await build({
   entryPoints: ["./src/bin.ts"],
   bundle: true,
   minify: true,
-  alias: {},
   banner: {
     // Check Node.js version (>= 22 required for node:sqlite) and suppress warnings
     js: `#!/usr/bin/env node

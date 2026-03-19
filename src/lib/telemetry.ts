@@ -338,6 +338,14 @@ export function initSentry(
     const isBun = typeof process.versions.bun !== "undefined";
     const runtime = isBun ? "bun" : "node";
 
+    // LightNodeClient hardcodes runtime to { name: 'node' }. Override it so
+    // events carry the correct runtime when running as a compiled Bun binary.
+    const opts = client.getOptions();
+    opts.runtime = {
+      name: runtime,
+      version: isBun ? process.versions.bun : process.version,
+    };
+
     // Tag whether running as bun binary or node (npm package).
     // Kept alongside the SDK's promoted 'runtime' tag for explicit signaling
     // and backward compatibility with existing dashboards/alerts.

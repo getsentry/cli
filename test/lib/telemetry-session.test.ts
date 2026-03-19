@@ -21,13 +21,13 @@ import {
 
 describe("createBeforeExitHandler", () => {
   /**
-   * Create a minimal mock BunClient for testing the beforeExit handler.
+   * Create a minimal mock LightNodeClient for testing the beforeExit handler.
    * Only needs flush() since that's all the handler uses from the client.
    */
-  function createMockClient(): Sentry.BunClient {
+  function createMockClient(): Sentry.LightNodeClient {
     return {
       flush: () => Promise.resolve(true),
-    } as unknown as Sentry.BunClient;
+    } as unknown as Sentry.LightNodeClient;
   }
 
   test("ends OK session on beforeExit", () => {
