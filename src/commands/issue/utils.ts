@@ -133,11 +133,65 @@ async function tryResolveFromAlias(
 }
 
 /**
+ * Fallback for when the fast shortid fan-out found no matches.
+ * Uses findProjectsBySlug to give a precise error ("project not found" vs
+ * "issue not found") and retries the issue lookup on transient failures.
+ */
+async function resolveProjectSearchFallback(
+  projectSlug: string,
+  suffix: string,
+  commandHint: string
+): Promise<StrictResolvedIssue> {
+  const { projects } = await findProjectsBySlug(projectSlug.toLowerCase());
+
+  if (projects.length === 0) {
+    throw new ResolutionError(
+      `Project '${projectSlug}'`,
+      "not found",
+      commandHint,
+      ["No project with this slug found in any accessible organization"]
+    );
+  }
+
+  if (projects.length > 1) {
+    const orgList = projects.map((p) => p.orgSlug).join(", ");
+    throw new ResolutionError(
+      `Project '${projectSlug}'`,
+      "is ambiguous",
+      commandHint,
+      [
+        `Found in: ${orgList}`,
+        `Specify the org: sentry issue ... <org>/${projectSlug}-${suffix}`,
+      ]
+    );
+  }
+
+  // Project exists — retry the issue lookup. The fast path may have failed
+  // due to a transient error (5xx, timeout); retrying here either succeeds
+  // or propagates the real error to the user.
+  const matchedProject = projects[0];
+  const matchedOrg = matchedProject?.orgSlug;
+  if (matchedOrg && matchedProject) {
+    const retryShortId = expandToFullShortId(suffix, matchedProject.slug);
+    const issue = await getIssueByShortId(matchedOrg, retryShortId);
+    return { org: matchedOrg, issue };
+  }
+
+  throw new ResolutionError(
+    `Project '${projectSlug}'`,
+    "not found",
+    commandHint
+  );
+}
+
+/**
  * Resolve project-search type: search for project across orgs, then fetch issue.
  *
  * Resolution order:
  * 1. Try alias cache (fast, local)
- * 2. Search for project across orgs via API
+ * 2. Check DSN detection cache
+ * 3. Try shortid endpoint directly across all orgs (fast path)
+ * 4. Fall back to findProjectsBySlug for precise error messages
  *
  * @param projectSlug - Project slug to search for
  * @param suffix - Issue suffix (uppercase)
@@ -234,48 +288,9 @@ async function resolveProjectSearch(
     }
   }
 
-  // 4. All orgs returned 404 — fall back to findProjectsBySlug for a
-  //    precise error: "project not found" vs "issue not found in project".
-  const { projects } = await findProjectsBySlug(projectSlug.toLowerCase());
-
-  if (projects.length === 0) {
-    throw new ResolutionError(
-      `Project '${projectSlug}'`,
-      "not found",
-      commandHint,
-      ["No project with this slug found in any accessible organization"]
-    );
-  }
-
-  if (projects.length > 1) {
-    const orgList = projects.map((p) => p.orgSlug).join(", ");
-    throw new ResolutionError(
-      `Project '${projectSlug}'`,
-      "is ambiguous",
-      commandHint,
-      [
-        `Found in: ${orgList}`,
-        `Specify the org: sentry issue ... <org>/${projectSlug}-${suffix}`,
-      ]
-    );
-  }
-
-  // Project exists — retry the issue lookup. The fast path may have failed
-  // due to a transient error (5xx, timeout); retrying here either succeeds
-  // or propagates the real error to the user.
-  const matchedProject = projects[0];
-  const matchedOrg = matchedProject?.orgSlug;
-  if (matchedOrg && matchedProject) {
-    const retryShortId = expandToFullShortId(suffix, matchedProject.slug);
-    const issue = await getIssueByShortId(matchedOrg, retryShortId);
-    return { org: matchedOrg, issue };
-  }
-
-  throw new ResolutionError(
-    `Project '${projectSlug}'`,
-    "not found",
-    commandHint
-  );
+  // 4. Fall back to findProjectsBySlug for precise error messages
+  //    and retry the issue lookup (handles transient failures).
+  return resolveProjectSearchFallback(projectSlug, suffix, commandHint);
 }
 
 /**
