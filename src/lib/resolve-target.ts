@@ -691,6 +691,8 @@ export async function resolveAllTargets(
     );
   }
 
+  log.debug("No explicit org/project flags provided, trying env vars");
+
   // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
   const envVars = resolveFromEnvVars();
   if (envVars?.project) {
@@ -706,6 +708,8 @@ export async function resolveAllTargets(
       ],
     };
   }
+
+  log.debug("No SENTRY_ORG/SENTRY_PROJECT env vars, trying config defaults");
 
   // 3. Config defaults
   const defaultOrg = await getDefaultOrganization();
@@ -723,12 +727,23 @@ export async function resolveAllTargets(
     };
   }
 
+  log.debug("No config defaults set, trying DSN auto-detection");
+
   // 4. DSN auto-detection (may find multiple in monorepos)
   const detection = await detectAllDsns(cwd);
 
   if (detection.all.length === 0) {
+    log.debug(
+      "No DSNs found in source code or env files, trying directory name inference"
+    );
     // 5. Fallback: infer from directory name
-    return inferFromDirectoryName(cwd);
+    const result = await inferFromDirectoryName(cwd);
+    if (result.targets.length === 0) {
+      log.debug(
+        "Directory name inference found no matching projects — auto-detection failed"
+      );
+    }
+    return result;
   }
 
   return resolveDetectedDsns(detection);

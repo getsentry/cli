@@ -1,15 +1,17 @@
 /**
- * Node.js Polyfill Tests — Bun.spawn
+ * Node.js Polyfill Tests — Bun.spawn and Bun.Glob
  *
- * Tests the spawn logic used by the Node.js polyfill in script/node-polyfills.ts.
+ * Tests the spawn and glob logic used by the Node.js polyfill in
+ * script/node-polyfills.ts.
  *
  * We can't import the polyfill directly (it overwrites globalThis.Bun and has
- * side effects), so we reproduce the exact spawn implementation and verify its
- * contract: exited promise, stdin piping, env passthrough, and inherit stdio.
+ * side effects), so we reproduce the exact implementation and verify its
+ * contract.
  *
- * Fixes CLI-68: the original polyfill returned no `exited` property, causing
- * `await proc.exited` to resolve to `undefined` and the upgrade command to
- * throw "Setup failed with exit code undefined".
+ * Fixes CLI-68: spawn polyfill returned no `exited` property.
+ * Fixes CLI-7T: Glob polyfill was missing `match()`, causing silent
+ * failures in project-root detection for .NET/Haskell/OCaml/Nim projects
+ * on the Node.js distribution.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -126,5 +128,101 @@ describe("spawn polyfill", () => {
 
     // Should not throw
     expect(() => proc.unref()).not.toThrow();
+  });
+});
+
+/**
+ * Reproduces the exact Glob.match() logic from script/node-polyfills.ts.
+ * Kept in sync manually — if the polyfill changes, update this too.
+ */
+/**
+ * Lazy-loaded picomatch — imported once and cached.
+ * Uses require() to avoid top-level import of an untyped CJS module.
+ */
+let picomatch: any;
+function getPicomatch() {
+  if (!picomatch) {
+    picomatch = require("picomatch");
+  }
+  return picomatch;
+}
+
+class PolyfillGlob {
+  private readonly pattern: string;
+  constructor(pattern: string) {
+    this.pattern = pattern;
+  }
+  match(input: string): boolean {
+    return getPicomatch()(this.pattern, { dot: true })(input);
+  }
+}
+
+describe("Glob polyfill match()", () => {
+  test("matches *.sln pattern", () => {
+    const glob = new PolyfillGlob("*.sln");
+    expect(glob.match("MyProject.sln")).toBe(true);
+    expect(glob.match("foo.sln")).toBe(true);
+    expect(glob.match("foo.txt")).toBe(false);
+    expect(glob.match("sln")).toBe(false);
+    expect(glob.match(".sln")).toBe(true);
+  });
+
+  test("matches *.csproj pattern", () => {
+    const glob = new PolyfillGlob("*.csproj");
+    expect(glob.match("MyApp.csproj")).toBe(true);
+    expect(glob.match("something.csproj")).toBe(true);
+    expect(glob.match("MyApp.fsproj")).toBe(false);
+    expect(glob.match("csproj")).toBe(false);
+  });
+
+  test("matches all LANGUAGE_MARKER_GLOBS patterns", () => {
+    // These are the glob patterns from src/lib/dsn/project-root.ts
+    const patterns = [
+      "*.sln",
+      "*.csproj",
+      "*.fsproj",
+      "*.vbproj",
+      "*.cabal",
+      "*.opam",
+      "*.nimble",
+    ];
+
+    const positives: Record<string, string> = {
+      "*.sln": "MyApp.sln",
+      "*.csproj": "Web.csproj",
+      "*.fsproj": "Lib.fsproj",
+      "*.vbproj": "Old.vbproj",
+      "*.cabal": "mylib.cabal",
+      "*.opam": "parser.opam",
+      "*.nimble": "tool.nimble",
+    };
+
+    for (const pattern of patterns) {
+      const glob = new PolyfillGlob(pattern);
+      const positive = positives[pattern];
+      expect(glob.match(positive!)).toBe(true);
+      // Should not match unrelated extensions
+      expect(glob.match("file.txt")).toBe(false);
+      expect(glob.match("file.js")).toBe(false);
+    }
+  });
+
+  test("does not match directory paths (glob is name-only)", () => {
+    const glob = new PolyfillGlob("*.sln");
+    // picomatch by default doesn't match path separators with *
+    expect(glob.match("dir/MyApp.sln")).toBe(false);
+  });
+
+  test("is consistent with Bun.Glob.match()", () => {
+    const patterns = ["*.sln", "*.csproj", "*.cabal"];
+    const inputs = ["App.sln", "foo.csproj", "bar.cabal", "nope.txt", ""];
+
+    for (const pattern of patterns) {
+      const polyfill = new PolyfillGlob(pattern);
+      const bunGlob = new Bun.Glob(pattern);
+      for (const input of inputs) {
+        expect(polyfill.match(input)).toBe(bunGlob.match(input));
+      }
+    }
   });
 });

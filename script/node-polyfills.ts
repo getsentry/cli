@@ -5,6 +5,7 @@ import { execSync, spawn as nodeSpawn } from "node:child_process";
 import { access, readFile, writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 
+import picomatch from "picomatch";
 import { compare as semverCompare } from "semver";
 import { glob } from "tinyglobby";
 import { uuidv7 } from "uuidv7";
@@ -178,6 +179,19 @@ const BunPolyfill = {
     constructor(pattern: string) {
       this.pattern = pattern;
     }
+
+    /**
+     * Synchronously test whether a string matches the glob pattern.
+     * Mirrors Bun.Glob.match() used by project-root detection for
+     * language marker globs (*.sln, *.csproj, etc.).
+     *
+     * Uses `dot: true` to match Bun.Glob behavior where `*` matches
+     * dotfiles by default (unlike picomatch/minimatch defaults).
+     */
+    match(input: string): boolean {
+      return picomatch(this.pattern, { dot: true })(input);
+    }
+
     async *scan(opts?: { cwd?: string }): AsyncIterable<string> {
       const results = await glob(this.pattern, {
         cwd: opts?.cwd || process.cwd(),
