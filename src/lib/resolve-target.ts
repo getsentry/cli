@@ -15,6 +15,7 @@
 
 import { basename } from "node:path";
 import pLimit from "p-limit";
+import type { SentryProject } from "../types/index.js";
 import {
   findProjectByDsnKey,
   findProjectsByPattern,
@@ -86,6 +87,8 @@ export type ResolvedTarget = {
   detectedFrom?: string;
   /** Package path in monorepo (e.g., "packages/frontend") */
   packagePath?: string;
+  /** Full project data when already fetched (avoids redundant getProject re-fetch) */
+  projectData?: SentryProject;
 };
 
 /**
@@ -947,7 +950,7 @@ export async function resolveOrg(
  * @param projectSlug - Project slug to search for
  * @param usageHint - Usage example shown in error messages
  * @param disambiguationExample - Example command for multi-org disambiguation (e.g., "sentry event view <org>/frontend abc123")
- * @returns Resolved org and project slugs
+ * @returns Resolved org, project slugs, and the full project data (avoids redundant re-fetch)
  * @throws {ContextError} If no project found
  * @throws {ValidationError} If project exists in multiple organizations
  */
@@ -955,7 +958,7 @@ export async function resolveProjectBySlug(
   projectSlug: string,
   usageHint: string,
   disambiguationExample?: string
-): Promise<{ org: string; project: string }> {
+): Promise<{ org: string; project: string; projectData: SentryProject }> {
   const { projects, orgs } = await findProjectsBySlug(projectSlug);
   if (projects.length === 0) {
     // Check if the slug matches an organization — common mistake
@@ -1003,9 +1006,13 @@ export async function resolveProjectBySlug(
     );
   }
 
+  // Strip orgSlug (from ProjectWithOrg) so projectData is a clean SentryProject
+  // — prevents leaking the extra field into JSON output when callers spread it.
+  const { orgSlug: _org, ...projectData } = foundProject;
   return {
     org: foundProject.orgSlug,
     project: foundProject.slug,
+    projectData,
   };
 }
 
@@ -1072,6 +1079,8 @@ export type ResolvedOrgProject = {
   org: string;
   /** Project slug */
   project: string;
+  /** Full project data when resolved via project-search (avoids redundant re-fetch) */
+  projectData?: SentryProject;
 };
 
 /**
@@ -1148,7 +1157,12 @@ export async function resolveOrgProjectTarget(
       }
 
       const match = projects[0] as (typeof projects)[number];
-      return { org: match.orgSlug, project: match.slug };
+      const { orgSlug: _org, ...matchData } = match;
+      return {
+        org: match.orgSlug,
+        project: match.slug,
+        projectData: matchData,
+      };
     }
 
     case "auto-detect": {

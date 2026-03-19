@@ -373,10 +373,11 @@ describe("resolveProjectBySlug", () => {
 
       const result = await resolveProjectBySlug("backend", HINT);
 
-      expect(result).toEqual({
+      expect(result).toMatchObject({
         org: "my-company",
         project: "backend",
       });
+      expect(result.projectData).toBeDefined();
     });
 
     test("uses orgSlug from project result", async () => {
@@ -447,7 +448,8 @@ describe("resolveProjectBySlug", () => {
       });
 
       const result = await resolveProjectBySlug("7275560680", HINT);
-      expect(result).toEqual({ org: "acme", project: "my-frontend" });
+      expect(result).toMatchObject({ org: "acme", project: "my-frontend" });
+      expect(result.projectData).toBeDefined();
     });
   });
 });
