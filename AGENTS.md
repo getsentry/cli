@@ -469,6 +469,7 @@ Key rules when writing overrides:
 - Commands with extra fields (e.g., `stderr`, `setContext`) spread the context and add them: `(ctx) => handle({ ...ctx, flags, stderr, setContext })`. Override `ctx.flags` with the command-specific flags type when needed.
 - `resolveCursor()` must be called **inside** the `org-all` override closure, not before `dispatchOrgScopedList`, so that `--cursor` validation errors fire correctly for non-org-all modes.
 - `handleProjectSearch` errors must use `"Project"` as the `ContextError` resource, not `config.entityName`.
+- Always set `orgSlugMatchBehavior` on `dispatchOrgScopedList` to declare how bare-slug org matches are handled. Use `"redirect"` for commands where listing all entities in the org makes sense (e.g., `project list`, `team list`). Use `"error"` for commands with custom per-project logic that can't auto-redirect (e.g., `issue list`). The pre-check uses cached orgs to avoid N API calls — individual handlers don't need their own org-slug fallback.
 
 3. **Standalone list commands** (e.g., `span list`, `trace list`) that don't use org-scoped dispatch wire pagination directly in `func()`. See the "List Command Pagination" section above for the pattern.
 

@@ -644,6 +644,7 @@ export const listCommand = buildListCommand("project", {
       cwd,
       flags,
       parsed,
+      orgSlugMatchBehavior: "redirect",
       overrides: {
         "auto-detect": (ctx) => handleAutoDetect(ctx.cwd, flags),
         explicit: (ctx) =>
