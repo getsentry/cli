@@ -12,12 +12,20 @@ import {
   getIssueInOrg,
   type IssueSort,
   listIssuesPaginated,
+  listOrganizations,
   triggerRootCauseAnalysis,
+  tryGetIssueByShortId,
 } from "../../lib/api-client.js";
 import { type IssueSelector, parseIssueArg } from "../../lib/arg-parsing.js";
 import { getProjectByAlias } from "../../lib/db/project-aliases.js";
 import { detectAllDsns } from "../../lib/dsn/index.js";
-import { ApiError, ContextError, ResolutionError } from "../../lib/errors.js";
+import {
+  ApiError,
+  type AuthGuardFailure,
+  ContextError,
+  ResolutionError,
+  withAuthGuard,
+} from "../../lib/errors.js";
 import { getProgressMessage } from "../../lib/formatters/seer.js";
 import { expandToFullShortId, isShortSuffix } from "../../lib/issue-id.js";
 import { logger } from "../../lib/logger.js";
@@ -125,11 +133,65 @@ async function tryResolveFromAlias(
 }
 
 /**
+ * Fallback for when the fast shortid fan-out found no matches.
+ * Uses findProjectsBySlug to give a precise error ("project not found" vs
+ * "issue not found") and retries the issue lookup on transient failures.
+ */
+async function resolveProjectSearchFallback(
+  projectSlug: string,
+  suffix: string,
+  commandHint: string
+): Promise<StrictResolvedIssue> {
+  const { projects } = await findProjectsBySlug(projectSlug.toLowerCase());
+
+  if (projects.length === 0) {
+    throw new ResolutionError(
+      `Project '${projectSlug}'`,
+      "not found",
+      commandHint,
+      ["No project with this slug found in any accessible organization"]
+    );
+  }
+
+  if (projects.length > 1) {
+    const orgList = projects.map((p) => p.orgSlug).join(", ");
+    throw new ResolutionError(
+      `Project '${projectSlug}'`,
+      "is ambiguous",
+      commandHint,
+      [
+        `Found in: ${orgList}`,
+        `Specify the org: sentry issue ... <org>/${projectSlug}-${suffix}`,
+      ]
+    );
+  }
+
+  // Project exists — retry the issue lookup. The fast path may have failed
+  // due to a transient error (5xx, timeout); retrying here either succeeds
+  // or propagates the real error to the user.
+  const matchedProject = projects[0];
+  const matchedOrg = matchedProject?.orgSlug;
+  if (matchedOrg && matchedProject) {
+    const retryShortId = expandToFullShortId(suffix, matchedProject.slug);
+    const issue = await getIssueByShortId(matchedOrg, retryShortId);
+    return { org: matchedOrg, issue };
+  }
+
+  throw new ResolutionError(
+    `Project '${projectSlug}'`,
+    "not found",
+    commandHint
+  );
+}
+
+/**
  * Resolve project-search type: search for project across orgs, then fetch issue.
  *
  * Resolution order:
  * 1. Try alias cache (fast, local)
- * 2. Search for project across orgs via API
+ * 2. Check DSN detection cache
+ * 3. Try shortid endpoint directly across all orgs (fast path)
+ * 4. Fall back to findProjectsBySlug for precise error messages
  *
  * @param projectSlug - Project slug to search for
  * @param suffix - Issue suffix (uppercase)
@@ -173,20 +235,33 @@ async function resolveProjectSearch(
     return { org: dsnTarget.org, issue };
   }
 
-  // 3. Search for project across all accessible orgs
-  const { projects } = await findProjectsBySlug(projectSlug.toLowerCase());
+  // 3. Fast path: try resolving the short ID directly across all orgs.
+  //    The shortid endpoint validates both project existence and issue existence
+  //    in a single call, eliminating the separate getProject() round-trip.
+  const fullShortId = expandToFullShortId(suffix, projectSlug);
+  const orgs = await listOrganizations();
 
-  if (projects.length === 0) {
-    throw new ResolutionError(
-      `Project '${projectSlug}'`,
-      "not found",
-      commandHint,
-      ["No project with this slug found in any accessible organization"]
-    );
+  const results = await Promise.all(
+    orgs.map((org) =>
+      withAuthGuard(() => tryGetIssueByShortId(org.slug, fullShortId))
+    )
+  );
+
+  const successes: StrictResolvedIssue[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    const org = orgs[i];
+    if (result && org && result.ok && result.value) {
+      successes.push({ org: org.slug, issue: result.value });
+    }
   }
 
-  if (projects.length > 1) {
-    const orgList = projects.map((p) => p.orgSlug).join(", ");
+  if (successes.length === 1 && successes[0]) {
+    return successes[0];
+  }
+
+  if (successes.length > 1) {
+    const orgList = successes.map((s) => s.org).join(", ");
     throw new ResolutionError(
       `Project '${projectSlug}'`,
       "is ambiguous",
@@ -198,18 +273,24 @@ async function resolveProjectSearch(
     );
   }
 
-  const project = projects[0];
-  if (!project) {
-    throw new ResolutionError(
-      `Project '${projectSlug}'`,
-      "not found",
-      commandHint
-    );
+  // If every org failed with a real error (403, 5xx, network timeout),
+  // surface it instead of falling through to a misleading "not found".
+  // Only throw when ALL results are errors — if some orgs returned clean
+  // 404s ({ok: true, value: null}), fall through to the fallback for a
+  // precise error message.
+  const realErrors = results.filter(
+    (r): r is AuthGuardFailure => r !== undefined && !r.ok
+  );
+  if (realErrors.length === results.length && realErrors.length > 0) {
+    const firstError = realErrors[0]?.error;
+    if (firstError instanceof Error) {
+      throw firstError;
+    }
   }
 
-  const fullShortId = expandToFullShortId(suffix, project.slug);
-  const issue = await getIssueByShortId(project.orgSlug, fullShortId);
-  return { org: project.orgSlug, issue };
+  // 4. Fall back to findProjectsBySlug for precise error messages
+  //    and retry the issue lookup (handles transient failures).
+  return resolveProjectSearchFallback(projectSlug, suffix, commandHint);
 }
 
 /**
