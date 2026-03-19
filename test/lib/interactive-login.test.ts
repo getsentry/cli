@@ -1,13 +1,40 @@
 /**
- * Tests for buildDeviceFlowDisplay — the extracted display logic from the
- * interactive login flow's onUserCode callback.
+ * Tests for interactive login flow.
+ *
+ * - buildDeviceFlowDisplay: extracted display logic (pure function)
+ * - runInteractiveLogin: full OAuth device flow with mocked dependencies
  *
  * Uses SENTRY_PLAIN_OUTPUT=1 to get predictable raw markdown output
  * (no ANSI codes) for string assertions.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { buildDeviceFlowDisplay } from "../../src/lib/interactive-login.js";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as browser from "../../src/lib/browser.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as clipboard from "../../src/lib/clipboard.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as dbInstance from "../../src/lib/db/index.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as dbUser from "../../src/lib/db/user.js";
+import {
+  buildDeviceFlowDisplay,
+  runInteractiveLogin,
+} from "../../src/lib/interactive-login.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as oauth from "../../src/lib/oauth.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as qrcode from "../../src/lib/qrcode.js";
+import type { TokenResponse } from "../../src/types/index.js";
 
 // Force plain output for predictable string matching
 let origPlain: string | undefined;
@@ -82,5 +109,138 @@ describe("buildDeviceFlowDisplay", () => {
     const withoutBrowser = buildDeviceFlowDisplay(CODE, URL, false, false);
     // Without browser: extra copy-hint line + blank line
     expect(withoutBrowser.length).toBeGreaterThan(withBrowser.length);
+  });
+});
+
+describe("runInteractiveLogin", () => {
+  let performDeviceFlowSpy: ReturnType<typeof spyOn>;
+  let completeOAuthFlowSpy: ReturnType<typeof spyOn>;
+  let openBrowserSpy: ReturnType<typeof spyOn>;
+  let generateQRCodeSpy: ReturnType<typeof spyOn>;
+  let setupCopyKeyListenerSpy: ReturnType<typeof spyOn>;
+  let setUserInfoSpy: ReturnType<typeof spyOn>;
+  let getDbPathSpy: ReturnType<typeof spyOn>;
+
+  /** Helper to build a mock TokenResponse with a user whose fields may be null. */
+  function makeTokenResponse(user?: {
+    id: string;
+    name: string | null;
+    email: string | null;
+  }): TokenResponse {
+    return {
+      access_token: "sntrys_test_token",
+      token_type: "Bearer",
+      expires_in: 3600,
+      ...(user ? { user } : {}),
+    };
+  }
+
+  beforeEach(() => {
+    completeOAuthFlowSpy = spyOn(oauth, "completeOAuthFlow").mockResolvedValue(
+      undefined
+    );
+    openBrowserSpy = spyOn(browser, "openBrowser").mockResolvedValue(false);
+    generateQRCodeSpy = spyOn(qrcode, "generateQRCode").mockResolvedValue(
+      "[QR]"
+    );
+    setupCopyKeyListenerSpy = spyOn(
+      clipboard,
+      "setupCopyKeyListener"
+    ).mockReturnValue(() => {
+      // no-op cleanup
+    });
+    setUserInfoSpy = spyOn(dbUser, "setUserInfo").mockReturnValue(undefined);
+    getDbPathSpy = spyOn(dbInstance, "getDbPath").mockReturnValue("/tmp/db");
+  });
+
+  afterEach(() => {
+    performDeviceFlowSpy.mockRestore();
+    completeOAuthFlowSpy.mockRestore();
+    openBrowserSpy.mockRestore();
+    generateQRCodeSpy.mockRestore();
+    setupCopyKeyListenerSpy.mockRestore();
+    setUserInfoSpy.mockRestore();
+    getDbPathSpy.mockRestore();
+  });
+
+  test("null user.name is omitted from result and stored as undefined in setUserInfo", async () => {
+    performDeviceFlowSpy = spyOn(oauth, "performDeviceFlow").mockImplementation(
+      async (callbacks) => {
+        await callbacks.onUserCode(
+          "ABCD",
+          "https://sentry.io/auth/device/",
+          "https://sentry.io/auth/device/?user_code=ABCD"
+        );
+        return makeTokenResponse({
+          id: "48168",
+          name: null,
+          email: "user@example.com",
+        });
+      }
+    );
+
+    const result = await runInteractiveLogin({ timeout: 1000 });
+
+    expect(result).not.toBeNull();
+    expect(result!.user).toBeDefined();
+    // name must be absent from the result object (not present as undefined)
+    expect("name" in result!.user!).toBe(false);
+    expect(result!.user!.email).toBe("user@example.com");
+    expect(result!.user!.id).toBe("48168");
+
+    expect(setUserInfoSpy).toHaveBeenCalledWith({
+      userId: "48168",
+      email: "user@example.com",
+      name: undefined,
+    });
+  });
+
+  test("null user.email is omitted from result", async () => {
+    performDeviceFlowSpy = spyOn(oauth, "performDeviceFlow").mockImplementation(
+      async (callbacks) => {
+        await callbacks.onUserCode(
+          "EFGH",
+          "https://sentry.io/auth/device/",
+          "https://sentry.io/auth/device/?user_code=EFGH"
+        );
+        return makeTokenResponse({
+          id: "123",
+          name: "Jane Doe",
+          email: null,
+        });
+      }
+    );
+
+    const result = await runInteractiveLogin({ timeout: 1000 });
+
+    expect(result).not.toBeNull();
+    expect(result!.user!.name).toBe("Jane Doe");
+    // email must be absent from the result object
+    expect("email" in result!.user!).toBe(false);
+
+    expect(setUserInfoSpy).toHaveBeenCalledWith({
+      userId: "123",
+      email: undefined,
+      name: "Jane Doe",
+    });
+  });
+
+  test("no user in token response: result.user is undefined, setUserInfo not called", async () => {
+    performDeviceFlowSpy = spyOn(oauth, "performDeviceFlow").mockImplementation(
+      async (callbacks) => {
+        await callbacks.onUserCode(
+          "WXYZ",
+          "https://sentry.io/auth/device/",
+          "https://sentry.io/auth/device/?user_code=WXYZ"
+        );
+        return makeTokenResponse(); // no user
+      }
+    );
+
+    const result = await runInteractiveLogin({ timeout: 1000 });
+
+    expect(result).not.toBeNull();
+    expect(result!.user).toBeUndefined();
+    expect(setUserInfoSpy).not.toHaveBeenCalled();
   });
 });

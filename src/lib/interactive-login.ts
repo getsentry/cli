@@ -31,6 +31,23 @@ export type LoginResult = {
   expiresIn?: number;
 };
 
+/**
+ * Build a clean user object for {@link LoginResult}, omitting falsy
+ * fields (null, undefined, empty string) so they don't leak into output.
+ *
+ * Empty-string names/emails are semantically absent for display purposes.
+ */
+export function toLoginUser(user: {
+  id: string;
+  name?: string | null;
+  email?: string | null;
+  username?: string | null;
+}): NonNullable<LoginResult["user"]> {
+  return Object.fromEntries(
+    Object.entries(user).filter(([k, v]) => k === "id" || Boolean(v))
+  ) as NonNullable<LoginResult["user"]>;
+}
+
 /** Options for the interactive login flow */
 export type InteractiveLoginOptions = {
   /** Timeout for OAuth flow in milliseconds (default: 900000 = 15 minutes) */
@@ -163,8 +180,8 @@ export async function runInteractiveLogin(
       try {
         setUserInfo({
           userId: user.id,
-          email: user.email,
-          name: user.name,
+          email: user.email ?? undefined,
+          name: user.name ?? undefined,
         });
       } catch (error) {
         // Report to Sentry but don't block auth - user info is not critical
@@ -178,7 +195,7 @@ export async function runInteractiveLogin(
       expiresIn: tokenResponse.expires_in,
     };
     if (user) {
-      result.user = user;
+      result.user = toLoginUser(user);
     }
     return result;
   } catch (err) {

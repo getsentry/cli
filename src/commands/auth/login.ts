@@ -19,7 +19,10 @@ import {
 } from "../../lib/formatters/human.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import type { LoginResult } from "../../lib/interactive-login.js";
-import { runInteractiveLogin } from "../../lib/interactive-login.js";
+import {
+  runInteractiveLogin,
+  toLoginUser,
+} from "../../lib/interactive-login.js";
 import { logger } from "../../lib/logger.js";
 import { clearResponseCache } from "../../lib/response-cache.js";
 
@@ -173,11 +176,11 @@ export const loginCommand = buildCommand({
         const user = await getCurrentUser();
         setUserInfo({
           userId: user.id,
-          email: user.email,
-          username: user.username,
-          name: user.name,
+          email: user.email ?? undefined,
+          username: user.username ?? undefined,
+          name: user.name ?? undefined,
         });
-        result.user = user;
+        result.user = toLoginUser(user);
       } catch {
         // Non-fatal: user info is supplementary. Token remains stored and valid.
       }
