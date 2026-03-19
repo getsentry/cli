@@ -239,10 +239,8 @@ export async function completeProjectSlugs(
     return [];
   }
 
-  const slugs = projects.map((p) => p.projectSlug);
-  const matched = fuzzyMatch(projectPartial, slugs);
-
   const nameMap = new Map(projects.map((p) => [p.projectSlug, p.projectName]));
+  const matched = fuzzyMatch(projectPartial, Array.from(nameMap.keys()));
 
   return matched.map((slug) => ({
     value: `${orgSlug}/${slug}`,
