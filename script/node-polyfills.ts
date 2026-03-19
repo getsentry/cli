@@ -176,20 +176,23 @@ const BunPolyfill = {
 
   Glob: class BunGlobPolyfill {
     private pattern: string;
+    /** Compiled matcher — created once at construction, reused on every match() call. */
+    private matcher: (input: string) => boolean;
+
     constructor(pattern: string) {
       this.pattern = pattern;
+      // Compile once with dot:true to match Bun.Glob behavior where
+      // `*` matches dotfiles by default (unlike picomatch defaults).
+      this.matcher = picomatch(pattern, { dot: true });
     }
 
     /**
      * Synchronously test whether a string matches the glob pattern.
      * Mirrors Bun.Glob.match() used by project-root detection for
      * language marker globs (*.sln, *.csproj, etc.).
-     *
-     * Uses `dot: true` to match Bun.Glob behavior where `*` matches
-     * dotfiles by default (unlike picomatch/minimatch defaults).
      */
     match(input: string): boolean {
-      return picomatch(this.pattern, { dot: true })(input);
+      return this.matcher(input);
     }
 
     async *scan(opts?: { cwd?: string }): AsyncIterable<string> {

@@ -148,12 +148,12 @@ function getPicomatch() {
 }
 
 class PolyfillGlob {
-  private readonly pattern: string;
+  private readonly matcher: (input: string) => boolean;
   constructor(pattern: string) {
-    this.pattern = pattern;
+    this.matcher = getPicomatch()(pattern, { dot: true });
   }
   match(input: string): boolean {
-    return getPicomatch()(this.pattern, { dot: true })(input);
+    return this.matcher(input);
   }
 }
 
