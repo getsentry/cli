@@ -153,6 +153,8 @@ export class OutputError extends CliError {
 const DEFAULT_CONTEXT_ALTERNATIVES = [
   "Run from a directory with a Sentry-configured project",
   "Set SENTRY_ORG and SENTRY_PROJECT (or SENTRY_DSN) environment variables",
+  "Run 'sentry org list' to find your organization slug",
+  "Run 'sentry project list <org>/' to find project slugs",
 ] as const;
 
 /**
