@@ -232,7 +232,13 @@ async function runCli(cliArgs: string[]): Promise<void> {
 const args = process.argv.slice(2);
 
 if (args[0] === "__complete") {
-  runCompletion(args.slice(1));
+  runCompletion(args.slice(1)).catch(() => {
+    // Completions should never crash — silently return no results
+    process.exitCode = 0;
+  });
 } else {
-  runCli(args);
+  runCli(args).catch((err) => {
+    process.stderr.write(`Fatal: ${err}\n`);
+    process.exitCode = 1;
+  });
 }
