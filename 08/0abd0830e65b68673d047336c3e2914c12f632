@@ -1,0 +1,98 @@
+# Fix: auth login fails with 'Unexpected response from token endpoint' (#468)
+
+## Root Cause
+
+The Sentry API returns `"name": null` in the OAuth token response's `user` object. The Zod schema `TokenResponseSchema` in `src/types/oauth.ts` defines `name: z.string()` which rejects `null` — Zod's `z.string()` only accepts actual strings. This causes `safeParse()` to fail, making `pollForToken()` fall through to the "Unexpected response from token endpoint" error.
+
+**Evidence from issue:** `"user":{"id":"48168","name":null,"email":"..."}`
+**Schema:** `name: z.string()` → rejects `null` → `safeParse` fails → line 188 error fires
+
+## Changes
+
+### 1. `src/types/oauth.ts` — Fix the schema (root cause)
+
+Make `name` nullable. Also make `email` nullable defensively — if `name` can be null, `email` likely can too.
+
+```typescript
+user: z
+  .object({
+    id: z.string(),
+    name: z.string().nullable(),    // was: z.string()
+    email: z.string().nullable(),   // was: z.string()
+  })
+  .passthrough()
+  .optional(),
+```
+
+### 2. `src/types/sentry.ts` — Harden `SentryUserSchema` (defensive)
+
+The `/auth/` endpoint uses `SentryUserSchema` and could return the same `null` name. Change `name` from `.optional()` to `.nullish()` (accepts both `undefined` and `null`).
+
+```typescript
+export const SentryUserSchema = z
+  .object({
+    id: z.string(),
+    email: z.string().optional(),
+    username: z.string().optional(),
+    name: z.string().nullish(),     // was: .optional()
+  })
+  .passthrough();
+```
+
+### 3. `src/lib/interactive-login.ts` — Null→undefined conversion
+
+Two spots where token response user data flows to types expecting `string | undefined`:
+
+**Line ~164-168** (setUserInfo call):
+```typescript
+setUserInfo({
+  userId: user.id,
+  email: user.email ?? undefined,   // add ?? undefined
+  name: user.name ?? undefined,     // add ?? undefined
+});
+```
+
+**Line ~180-182** (LoginResult assignment): Transform user object instead of direct assignment:
+```typescript
+if (user) {
+  result.user = {
+    id: user.id,
+    name: user.name ?? undefined,
+    email: user.email ?? undefined,
+  };
+}
+```
+
+### 4. `src/commands/auth/login.ts` — Same null→undefined conversion
+
+**Line ~174-178** (token-based login path):
+```typescript
+setUserInfo({
+  userId: user.id,
+  email: user.email,
+  username: user.username,
+  name: user.name ?? undefined,     // add ?? undefined
+});
+```
+
+### 5. `src/commands/auth/whoami.ts` — Already correct ✅
+
+Line 62 already has `name: user.name ?? undefined`. No change needed.
+
+## Files Modified
+
+| File | Change |
+|------|--------|
+| `src/types/oauth.ts` | `name`/`email` → `.nullable()` in user schema |
+| `src/types/sentry.ts` | `name` → `.nullish()` in SentryUserSchema |
+| `src/lib/interactive-login.ts` | null→undefined conversions for setUserInfo + LoginResult |
+| `src/commands/auth/login.ts` | null→undefined for setUserInfo |
+
+## Verification
+
+1. `bun run typecheck` — Ensure all type changes propagate cleanly
+2. `bun test test/commands/auth/login.test.ts` — Existing login tests pass
+3. `bun test test/commands/auth/whoami.test.ts` — Whoami tests pass
+4. `bun test test/lib/interactive-login.test.ts` — Interactive login tests pass
+5. `bun run lint` — No lint issues
+6. Add a focused unit test in the oauth/login test that verifies a token response with `name: null` is accepted by `TokenResponseSchema.safeParse()`
