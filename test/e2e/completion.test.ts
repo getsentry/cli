@@ -50,33 +50,14 @@ async function measureCommand(
 }
 
 describe("completion latency", () => {
-  test("completion is faster than a normal command", async () => {
-    // Normal command loads telemetry, Stricli, all commands
-    const normal = await measureCommand(["--version"]);
-
-    // Completion skips all heavy imports
-    const completion = await measureCommand([
-      "__complete",
-      "issue",
-      "list",
-      "",
-    ]);
-
-    expect(normal.exitCode).toBe(0);
-    expect(completion.exitCode).toBe(0);
-
-    // Completion should not be slower than a normal command
-    expect(completion.duration).toBeLessThan(normal.duration);
-  });
-
-  test("completion exits under latency budget", async () => {
+  test("completion exits under 100ms", async () => {
     const result = await measureCommand(["__complete", "issue", "list", ""]);
 
     expect(result.exitCode).toBe(0);
 
-    // 500ms budget — generous for CI (dev is ~60ms, binary ~190ms),
-    // but catches regressions from the pre-fix ~530ms baseline.
-    expect(result.duration).toBeLessThan(500);
+    // 100ms is the UX threshold for "instant" tab completion.
+    // Dev mode measures ~67ms; pre-optimization was ~530ms.
+    expect(result.duration).toBeLessThan(100);
   });
 
   test("completion exits cleanly with no stderr", async () => {
