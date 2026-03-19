@@ -543,9 +543,9 @@ function escapeSingleQuote(s: string): string {
   return s.replace(/'/g, "'\\''");
 }
 
-/** Escape double quotes and backslashes for fish/bash completion descriptions. */
+/** Escape characters special in double-quoted shell strings (bash/fish). */
 function escapeDblQuote(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return s.replace(/\\/g, "\\\\").replace(/\$/g, "\\$").replace(/"/g, '\\"');
 }
 
 /**
