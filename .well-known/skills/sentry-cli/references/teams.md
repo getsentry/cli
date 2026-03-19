@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-teams
-version: 0.18.0
+version: 0.18.1
 description: List teams and repositories in a Sentry organization
 requires:
   bins: ["sentry"]
