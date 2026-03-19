@@ -8,7 +8,7 @@
  * through the SDK function options (baseUrl, fetch, headers).
  */
 
-import { getTraceData } from "@sentry/bun";
+import { getTraceData } from "@sentry/node-core/light";
 import {
   DEFAULT_SENTRY_URL,
   getConfiguredSentryUrl,

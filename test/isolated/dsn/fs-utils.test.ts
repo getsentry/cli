@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
 const captureException = mock();
 
-mock.module("@sentry/bun", () => ({
+mock.module("@sentry/node-core/light", () => ({
   captureException,
   startSpan: (_opts: unknown, fn: () => unknown) => fn(),
 }));

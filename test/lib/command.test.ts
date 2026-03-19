@@ -8,7 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
-import * as Sentry from "@sentry/bun";
+import * as Sentry from "@sentry/node-core/light";
 import {
   buildApplication,
   buildRouteMap,

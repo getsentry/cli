@@ -11,7 +11,7 @@
 
 import { chmodSync, statSync } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
-import * as Sentry from "@sentry/bun";
+import * as Sentry from "@sentry/node-core/light";
 import {
   CLI_VERSION,
   getConfiguredSentryUrl,
@@ -23,7 +23,7 @@ import { attachSentryReporter } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 import { getRealUsername } from "./utils.js";
 
-export type { Span } from "@sentry/bun";
+export type { Span } from "@sentry/core";
 
 /** Re-imported locally because Span is exported via re-export */
 type Span = Sentry.Span;
@@ -149,7 +149,9 @@ export async function withTelemetry<T>(
  *
  * @internal Exported for testing
  */
-export function createBeforeExitHandler(client: Sentry.BunClient): () => void {
+export function createBeforeExitHandler(
+  client: Sentry.LightNodeClient
+): () => void {
   let isFlushing = false;
   return () => {
     if (isFlushing) {
@@ -288,7 +290,9 @@ export function getSentryTracePropagationTargets(): (string | RegExp)[] {
  *
  * @internal Exported for testing
  */
-export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
+export function initSentry(
+  enabled: boolean
+): Sentry.LightNodeClient | undefined {
   const environment = process.env.NODE_ENV ?? "development";
 
   const client = Sentry.init({

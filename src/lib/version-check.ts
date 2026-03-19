@@ -8,7 +8,7 @@
  */
 
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
-import * as Sentry from "@sentry/bun";
+import * as Sentry from "@sentry/node-core/light";
 import { CLI_VERSION } from "./constants.js";
 import { getReleaseChannel } from "./db/release-channel.js";
 import {
