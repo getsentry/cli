@@ -34,8 +34,8 @@ export const TokenResponseSchema = z
     user: z
       .object({
         id: z.string(),
-        name: z.string(),
-        email: z.string(),
+        name: z.string().nullable(),
+        email: z.string().nullable(),
       })
       .passthrough()
       .optional(),

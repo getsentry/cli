@@ -48,6 +48,18 @@ const FEATURE_INFO: Record<string, { label: string; hint: string }> = {
     label: "Source Maps",
     hint: "See original source code in production errors",
   },
+  crons: {
+    label: "Crons",
+    hint: "Monitor scheduled and recurring jobs",
+  },
+  aiMonitoring: {
+    label: "AI Monitoring",
+    hint: "Track AI model calls, latency, and failures",
+  },
+  userFeedback: {
+    label: "User Feedback",
+    hint: "Collect in-app user feedback and reports",
+  },
 };
 
 export function featureLabel(id: string): string {
@@ -66,6 +78,9 @@ const FEATURE_DISPLAY_ORDER = [
   "metrics",
   "profiling",
   "sourceMaps",
+  "crons",
+  "aiMonitoring",
+  "userFeedback",
 ];
 
 /** Sort features into canonical display order for the multi-select prompt. */

@@ -13,14 +13,9 @@
  * Pre-rendered ANSI escape codes embedded in markdown source are preserved
  * — `string-width` correctly treats them as zero-width.
  *
- * ## Output mode resolution (highest → lowest priority)
+ * ## Output mode resolution
  *
- * 1. `SENTRY_PLAIN_OUTPUT=1` → plain (raw CommonMark)
- * 2. `SENTRY_PLAIN_OUTPUT=0` → rendered (force rich, even when piped)
- * 3. `NO_COLOR=1` (or any truthy value) → plain
- * 4. `NO_COLOR=0` (or any falsy value) → rendered
- * 5. `!process.stdout.isTTY` → plain
- * 6. default (TTY, no overrides) → rendered
+ * See {@link isPlainOutput} in `plain-detect.ts` for the full priority chain.
  */
 
 import chalk from "chalk";
@@ -28,61 +23,11 @@ import { highlight as cliHighlight } from "cli-highlight";
 import { marked, type Token, type Tokens } from "marked";
 import stringWidth from "string-width";
 import { COLORS, muted, terminalLink } from "./colors.js";
+import { isPlainOutput, stripAnsi } from "./plain-detect.js";
 import { type Alignment, renderTextTable } from "./text-table.js";
 
-// ──────────────────────────── Environment ─────────────────────────────
-
-/**
- * Returns true if an env var value should be treated as "truthy" for
- * purposes of enabling/disabling output modes.
- *
- * Falsy values: `"0"`, `"false"`, `""` (case-insensitive).
- * Everything else (e.g. `"1"`, `"true"`, `"yes"`) is truthy.
- */
-function isTruthyEnv(val: string): boolean {
-  const normalized = val.toLowerCase().trim();
-  return normalized !== "0" && normalized !== "false" && normalized !== "";
-}
-
-/**
- * Determines whether output should be plain CommonMark markdown (no ANSI).
- *
- * Evaluated fresh on each call so tests can flip env vars between assertions
- * and changes to `process.stdout.isTTY` are picked up immediately.
- *
- * Priority (highest first):
- * 1. `SENTRY_PLAIN_OUTPUT` — explicit project-specific override (custom
- *    semantics: `"0"` / `"false"` / `""` force color on)
- * 2. `NO_COLOR` — follows the no-color.org spec: any **non-empty** value
- *    disables color, regardless of its content (including `"0"` / `"false"`)
- * 3. `FORCE_COLOR` — follows chalk/supports-color convention: `"0"` forces
- *    color off (plain), any other non-empty value (e.g. `"1"`) forces color on.
- * 4. `process.stdout.isTTY` — auto-detect interactive terminal
- */
-export function isPlainOutput(): boolean {
-  const plain = process.env.SENTRY_PLAIN_OUTPUT;
-  if (plain !== undefined) {
-    return isTruthyEnv(plain);
-  }
-
-  // no-color.org spec: presence of a non-empty value disables color.
-  // Unlike SENTRY_PLAIN_OUTPUT, "0" and "false" still mean "disable color".
-  const noColor = process.env.NO_COLOR;
-  if (noColor !== undefined) {
-    return noColor !== "";
-  }
-
-  // FORCE_COLOR follows the chalk/supports-color convention:
-  //   "0" → force disable color (plain output)
-  //   "1"/"2"/"3" or any other non-empty, non-"0" → force enable color
-  // Checked after NO_COLOR so that NO_COLOR always wins if both are set.
-  const forceColor = process.env.FORCE_COLOR;
-  if (forceColor !== undefined && forceColor !== "") {
-    return forceColor === "0";
-  }
-
-  return !process.stdout.isTTY;
-}
+// Re-export isPlainOutput so existing importers don't break
+export { isPlainOutput } from "./plain-detect.js";
 
 // ──────────────────────────── Escape helpers ──────────────────────────
 
@@ -149,14 +94,11 @@ export function mdTableHeader(cols: readonly string[]): string {
  * in rendered mode applies inline styling and replaces `|` with `│`.
  */
 export function mdRow(cells: readonly string[]): string {
-  if (isPlainOutput()) {
-    return `| ${cells.map(stripColorTags).join(" | ")} |\n`;
-  }
+  // Both modes render through the same pipeline; plain mode strips ANSI.
+  // Literal pipes are replaced with box-drawing │ to prevent breaking the
+  // pipe-delimited table format.
   const out = cells.map((c) =>
-    renderInline(marked.lexer(c).flatMap(flattenInline)).replace(
-      /\|/g,
-      "\u2502"
-    )
+    renderInlineMarkdown(c).replace(/\|/g, "\u2502")
   );
   return `| ${out.join(" | ")} |\n`;
 }
@@ -191,10 +133,11 @@ export function mdKvTable(
 }
 
 /**
- * Render a muted horizontal rule.
+ * Render a horizontal rule. Muted (dimmed) in TTY mode, plain in pipes.
  */
 export function divider(width = 80): string {
-  return muted("\u2500".repeat(width));
+  const line = "\u2500".repeat(width);
+  return isPlainOutput() ? line : muted(line);
 }
 
 // ──────────────────────── Inline token rendering ─────────────────────
@@ -320,8 +263,22 @@ function flattenInline(token: Token): Token[] {
 }
 
 /**
+ * Render a code span token.
+ *
+ * Plain mode: raw text without padding so table column widths aren't inflated.
+ * TTY mode: styled with background color and padded spaces for visual weight.
+ */
+function renderCodespan(token: Tokens.Codespan): string {
+  if (isPlainOutput()) {
+    return token.text;
+  }
+  return chalk.bgHex(COLORS.codeBg).hex(COLORS.codeFg)(` ${token.text} `);
+}
+
+/**
  * Render a single inline token to an ANSI string.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: inline token switch is inherently branchy
 function renderOneInline(token: Token): string {
   switch (token.type) {
     case "strong":
@@ -329,9 +286,7 @@ function renderOneInline(token: Token): string {
     case "em":
       return chalk.italic(renderInline((token as Tokens.Em).tokens));
     case "codespan":
-      return chalk.bgHex(COLORS.codeBg).hex(COLORS.codeFg)(
-        ` ${(token as Tokens.Codespan).text} `
-      );
+      return renderCodespan(token as Tokens.Codespan);
     case "link": {
       const link = token as Tokens.Link;
       let linkText = renderInline(link.tokens);
@@ -554,9 +509,6 @@ function renderList(list: Tokens.List, depth = 0): string {
  *
  * Converts marked's `Tokens.Table` into headers + rows + alignments and
  * delegates to `renderTextTable()` for column fitting and box drawing.
- *
- * Empty header rows (e.g. from {@link mdKvTable} without a heading) are
- * auto-hidden by `renderTextTable` — no explicit detection needed here.
  */
 function renderTableToken(table: Tokens.Table): string {
   const headers = table.header.map((cell) => renderInline(cell.tokens));
@@ -580,21 +532,27 @@ function renderTableToken(table: Tokens.Table): string {
 // ──────────────────────── Public API ─────────────────────────────────
 
 /**
- * Render a full markdown document as styled terminal output, or return
- * the raw CommonMark string when in plain mode.
+ * Render a full markdown document as styled terminal output.
  *
- * Uses `marked.lexer()` to tokenize and a custom block/inline renderer
- * for ANSI output. Tables are rendered with Unicode box-drawing borders
- * via the text-table module.
+ * In TTY mode: uses `marked.lexer()` to tokenize and a custom block/inline
+ * renderer for ANSI output. Tables are rendered with Unicode box-drawing
+ * borders via the text-table module.
+ *
+ * In plain mode: parses and renders the same way (preserving structural
+ * formatting — headings, aligned tables, blockquote indentation, lists),
+ * then strips ANSI codes. This produces human-readable output rather than
+ * raw CommonMark source.
  *
  * @param md - Markdown source text
- * @returns Styled terminal string (TTY) or raw CommonMark (non-TTY / plain mode)
+ * @returns Styled terminal string (TTY) or clean plain text (non-TTY / plain mode)
  */
 export function renderMarkdown(md: string): string {
   if (isPlainOutput()) {
-    // Strip color tags so <red>text</red> doesn't leak as literal markup in
-    // piped / CI / redirected output (documented "plain mode" contract).
-    return stripColorTags(md).trimEnd();
+    // Parse and render to get structural formatting (headings, tables, lists),
+    // then strip ANSI codes. This produces human-readable output with aligned
+    // tables and proper heading emphasis, without ANSI escape sequences.
+    const tokens = marked.lexer(md);
+    return stripAnsi(renderBlocks(tokens)).trimEnd();
   }
   const tokens = marked.lexer(md);
   return renderBlocks(tokens).trimEnd();
@@ -602,16 +560,18 @@ export function renderMarkdown(md: string): string {
 
 /**
  * Render inline markdown (bold, code spans, emphasis, links) as styled
- * terminal output, or return the raw markdown string when in plain mode.
+ * terminal output, or return plain text when in plain mode.
+ *
+ * Both modes use the same `marked.lexer()` → `renderInline()` pipeline.
+ * In plain mode, ANSI codes are stripped from the result, producing
+ * clean text. This avoids maintaining a separate regex-based stripping
+ * function that would need to replicate the markdown parser's rules.
  *
  * @param md - Inline markdown text
- * @returns Styled string (TTY) or raw markdown text (non-TTY / plain mode)
+ * @returns Styled string (TTY) or plain text (non-TTY / plain mode)
  */
 export function renderInlineMarkdown(md: string): string {
-  if (isPlainOutput()) {
-    // Strip color tags for the same reason as renderMarkdown.
-    return stripColorTags(md);
-  }
   const tokens = marked.lexer(md);
-  return renderInline(tokens.flatMap(flattenInline));
+  const rendered = renderInline(tokens.flatMap(flattenInline));
+  return isPlainOutput() ? stripAnsi(rendered) : rendered;
 }

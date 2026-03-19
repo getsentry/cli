@@ -5,8 +5,9 @@
  * renders via the `output` config (stdout). For failure paths, `OutputError`
  * triggers `process.exit()` — tests mock it to capture the exit code.
  *
- * Tests run non-TTY so assertions match raw CommonMark (per AGENTS.md).
- * Markdown escapes underscores as `\_`, so assertions use escaped forms.
+ * Tests run non-TTY so plain mode applies: markdown is parsed and ANSI
+ * stripped. Headings render without `###`, underscores are unescaped,
+ * and code spans have backticks stripped.
  */
 
 import { Database } from "bun:sqlite";
@@ -176,8 +177,8 @@ describe("sentry cli fix", () => {
     expect(output).toContain("Found");
     expect(output).toContain("issue(s)");
     expect(output).toContain("Missing column");
-    // Markdown escapes underscores — match escaped form
-    expect(output).toContain("dsn\\_cache.fingerprint");
+    // Plain mode strips markdown escapes — underscores are literal
+    expect(output).toContain("dsn_cache.fingerprint");
     expect(output).toContain("sentry cli fix");
   });
 
@@ -189,8 +190,8 @@ describe("sentry cli fix", () => {
 
     const { output } = await runFix(false);
 
-    // Repair messages from repairSchema use escaped underscores in markdown
-    expect(output).toContain("Added column dsn\\_cache.fingerprint");
+    // Plain mode strips markdown escapes — underscores are literal
+    expect(output).toContain("Added column dsn_cache.fingerprint");
     expect(output).toContain("repaired successfully");
 
     // Verify the column was actually added
@@ -257,7 +258,7 @@ describe("sentry cli fix", () => {
     const { output } = await runFix(true);
 
     // Output is now markdown with section headings
-    expect(output).toContain("### Permissions");
+    expect(output).toContain("Permissions");
     expect(output).toContain("Found 1 issue(s)");
     expect(output).toContain("0444");
     expect(output).toContain("sentry cli fix");
@@ -272,7 +273,7 @@ describe("sentry cli fix", () => {
     chmodSync(dbPath, 0o444);
     const { output, exitCode } = await runFix(false);
 
-    expect(output).toContain("### Permissions");
+    expect(output).toContain("Permissions");
     expect(output).toContain("0444");
     expect(output).toContain("0600");
     expect(output).toContain("repaired successfully");
@@ -291,7 +292,7 @@ describe("sentry cli fix", () => {
     chmodSync(getTestDir(), 0o500);
     const { output } = await runFix(true);
 
-    expect(output).toContain("### Permissions");
+    expect(output).toContain("Permissions");
     expect(output).toContain("issue(s)");
     expect(output).toContain("directory");
     expect(output).toContain(getTestDir());
@@ -306,7 +307,7 @@ describe("sentry cli fix", () => {
     chmodSync(dbPath, 0o444);
     const { output } = await runFix(true);
 
-    expect(output).toContain("### Permissions");
+    expect(output).toContain("Permissions");
     expect(output).toContain("issue(s)");
     // Dry-run uses bullet markers (•), not success markers (✓)
     expect(output).toContain("•");
@@ -334,9 +335,9 @@ describe("sentry cli fix", () => {
     chmodSync(dbPath, 0o444);
     const { output, exitCode } = await runFix(false);
 
-    expect(output).toContain("### Permissions");
+    expect(output).toContain("Permissions");
     expect(output).toContain("Found 1 issue(s)");
-    expect(output).toContain("### Schema");
+    expect(output).toContain("Schema");
     expect(output).toContain("repaired successfully");
     expect(exitCode).toBe(0);
   });
@@ -350,7 +351,7 @@ describe("sentry cli fix", () => {
 
     const { output, exitCode } = await runFix(false);
 
-    expect(output).toContain("### Schema");
+    expect(output).toContain("Schema");
     // After repair, shows the repair message (not the original description)
     expect(output).toContain("Added column");
     expect(output).toContain("repaired successfully");
@@ -369,7 +370,7 @@ describe("sentry cli fix", () => {
     const { output, exitCode } = await runFix(false);
 
     // Schema failure is rendered as an issue with repair details
-    expect(output).toContain("### Schema");
+    expect(output).toContain("Schema");
     expect(output).toContain("Try deleting the database");
     expect(exitCode).toBe(1);
     // Should NOT say "No issues found"
@@ -386,7 +387,7 @@ describe("sentry cli fix", () => {
 
     const { output, exitCode } = await runFix(true);
 
-    expect(output).toContain("### Schema");
+    expect(output).toContain("Schema");
     expect(output).toContain("Try deleting the database");
     expect(exitCode).toBe(1);
   });
@@ -403,9 +404,10 @@ describe("sentry cli fix", () => {
     // The schema catch block should suppress the error message when perm.found > 0
     const { output } = await runFix(true);
 
-    expect(output).toContain("### Permissions");
-    // Should NOT print schema section since permission issues explain it
-    expect(output).not.toContain("### Schema");
+    expect(output).toContain("Permissions");
+    // Should NOT print schema section heading since permission issues explain it.
+    // Use "\nSchema\n" to match the heading line (not "Schema version: 10" data row).
+    expect(output).not.toContain("\nSchema\n");
   });
 
   test("detects and repairs wrong primary key on pagination_cursors (CLI-72)", async () => {
@@ -425,12 +427,12 @@ describe("sentry cli fix", () => {
 
     const { output, exitCode } = await runFix(false);
 
-    expect(output).toContain("### Schema");
+    expect(output).toContain("Schema");
     expect(output).toContain("issue(s)");
     // After repair, shows the repair message instead of the original issue
     expect(output).toContain("Recreated table");
-    // Markdown escapes underscores
-    expect(output).toContain("pagination\\_cursors");
+    // Plain mode strips markdown escapes — underscores are literal
+    expect(output).toContain("pagination_cursors");
     expect(output).toContain("repaired successfully");
     expect(exitCode).toBe(0);
   });
@@ -451,8 +453,8 @@ describe("sentry cli fix", () => {
     const { output } = await runFix(true);
 
     expect(output).toContain("Wrong primary key");
-    // Markdown escapes underscores
-    expect(output).toContain("pagination\\_cursors");
+    // Plain mode strips markdown escapes — underscores are literal
+    expect(output).toContain("pagination_cursors");
     expect(output).toContain("sentry cli fix");
     // Table should still have the wrong PK
     closeDatabase();
@@ -554,7 +556,7 @@ describe("sentry cli fix — ownership detection", () => {
     // Pretend we are uid 9999 — the files appear owned by someone else
     const { output, exitCode } = await runFixWithUid(false, () => 9999);
 
-    expect(output).toContain("### Ownership");
+    expect(output).toContain("Ownership");
     expect(output).toContain("issue(s)");
     // Not uid 0, so we can't chown — expect instructions
     expect(output).toContain("sudo chown");
@@ -568,7 +570,7 @@ describe("sentry cli fix — ownership detection", () => {
 
     const { output, exitCode: code } = await runFixWithUid(true, () => 9999);
 
-    expect(output).toContain("### Ownership");
+    expect(output).toContain("Ownership");
     expect(output).toContain("issue(s)");
     expect(output).toContain("sudo chown");
     // dry-run with non-zero issues still returns exitCode 0 (not fatal)
@@ -665,8 +667,8 @@ describe("sentry cli fix — ownership detection", () => {
 
     const { output } = await runFixWithUid(false, () => 9999);
 
-    expect(output).toContain("### Ownership");
-    expect(output).not.toContain("### Permissions");
+    expect(output).toContain("Ownership");
+    expect(output).not.toContain("Permissions");
 
     chmodSync(dbPath, 0o600);
   });
@@ -679,7 +681,7 @@ describe("sentry cli fix — ownership detection", () => {
 
     const { output } = await runFix(false);
 
-    expect(output).toContain("### Permissions");
+    expect(output).toContain("Permissions");
     expect(output).toContain("issue(s)");
     expect(output.length).toBeGreaterThan(0);
 

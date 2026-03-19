@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-logs
-version: 0.18.0-dev.0
+version: 0.19.0-dev.0
 description: List and stream logs from Sentry projects
 requires:
   bins: ["sentry"]

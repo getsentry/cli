@@ -1,6 +1,30 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.18.0
+
+### New Features ✨
+
+- (span) Make span list dual-mode and add --period flag by @BYK in [#461](https://github.com/getsentry/cli/pull/461)
+- Refactor SKILL.md into modular reference files by @BYK in [#458](https://github.com/getsentry/cli/pull/458)
+
+### Bug Fixes 🐛
+
+- (constants) Normalize bare hostnames in SENTRY_HOST/SENTRY_URL by @BYK in [#467](https://github.com/getsentry/cli/pull/467)
+- (dsn) Treat EISDIR and ENOTDIR as ignorable file errors by @BYK in [#464](https://github.com/getsentry/cli/pull/464)
+- (test) Use os.tmpdir() for test temp directories by @BYK in [#457](https://github.com/getsentry/cli/pull/457)
+- Make piped output human-readable instead of raw CommonMark by @BYK in [#462](https://github.com/getsentry/cli/pull/462)
+- Clean up upgrade output and hide empty table headers by @BYK in [#459](https://github.com/getsentry/cli/pull/459)
+- Improve error messages — fix ContextError/ResolutionError misuse by @BYK in [#456](https://github.com/getsentry/cli/pull/456)
+
+### Documentation 📚
+
+- Add key principles and API schema workflow to agent guidance by @BYK in [#466](https://github.com/getsentry/cli/pull/466)
+
+### Internal Changes 🔧
+
+- (list) Align all list commands to issue list standards by @BYK in [#453](https://github.com/getsentry/cli/pull/453)
+
 ## 0.17.0
 
 ### New Features ✨

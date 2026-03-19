@@ -188,8 +188,22 @@ describe("isPlainOutput", () => {
     });
   });
 
-  describe("FORCE_COLOR (after NO_COLOR, before isTTY)", () => {
-    test("=1 → rich output (forces color)", () => {
+  describe("FORCE_COLOR (only applies on TTY)", () => {
+    test("=1 on TTY → rich output (forces color)", () => {
+      withEnv(
+        {
+          SENTRY_PLAIN_OUTPUT: undefined,
+          NO_COLOR: undefined,
+          FORCE_COLOR: "1",
+        },
+        true,
+        () => {
+          expect(isPlainOutput()).toBe(false);
+        }
+      );
+    });
+
+    test("=1 on non-TTY → plain output (FORCE_COLOR ignored when piped)", () => {
       withEnv(
         {
           SENTRY_PLAIN_OUTPUT: undefined,
@@ -198,12 +212,12 @@ describe("isPlainOutput", () => {
         },
         false,
         () => {
-          expect(isPlainOutput()).toBe(false);
+          expect(isPlainOutput()).toBe(true);
         }
       );
     });
 
-    test("=0 → plain output (forces no color per chalk convention)", () => {
+    test("=0 on TTY → plain output (forces no color per chalk convention)", () => {
       withEnv(
         {
           SENTRY_PLAIN_OUTPUT: undefined,
@@ -282,10 +296,18 @@ describe("isPlainOutput", () => {
 // ---------------------------------------------------------------------------
 
 describe("renderMarkdown", () => {
-  test("plain mode: returns raw markdown trimmed", () => {
+  test("plain mode: parses markdown and strips ANSI (not raw CommonMark)", () => {
     withEnv({ SENTRY_PLAIN_OUTPUT: "1", NO_COLOR: undefined }, false, () => {
       const md = "## Hello\n\n| A | B |\n|---|---|\n| 1 | 2 |\n";
-      expect(renderMarkdown(md)).toBe(md.trimEnd());
+      const result = renderMarkdown(md);
+      // Heading text is present without ### prefix
+      expect(result).toContain("Hello");
+      expect(result).not.toContain("##");
+      // Table data is present in box-drawing format
+      expect(result).toContain("A");
+      expect(result).toContain("B");
+      expect(result).toContain("1");
+      expect(result).toContain("2");
     });
   });
 
@@ -301,7 +323,9 @@ describe("renderMarkdown", () => {
 
   test("plain mode: trailing whitespace is trimmed", () => {
     withEnv({ SENTRY_PLAIN_OUTPUT: "1", NO_COLOR: undefined }, false, () => {
-      expect(renderMarkdown("hello\n\n\n")).toBe("hello");
+      const result = renderMarkdown("hello\n\n\n");
+      expect(result.trimEnd()).toBe(result);
+      expect(result).toContain("hello");
     });
   });
 });
@@ -311,10 +335,10 @@ describe("renderMarkdown", () => {
 // ---------------------------------------------------------------------------
 
 describe("renderInlineMarkdown", () => {
-  test("plain mode: returns input unchanged", () => {
+  test("plain mode: strips markdown syntax", () => {
     withEnv({ SENTRY_PLAIN_OUTPUT: "1", NO_COLOR: undefined }, false, () => {
-      expect(renderInlineMarkdown("`trace-id`")).toBe("`trace-id`");
-      expect(renderInlineMarkdown("**ERROR**")).toBe("**ERROR**");
+      expect(renderInlineMarkdown("`trace-id`")).toBe("trace-id");
+      expect(renderInlineMarkdown("**ERROR**")).toBe("ERROR");
     });
   });
 
@@ -414,10 +438,10 @@ describe("mdTableHeader", () => {
 // ---------------------------------------------------------------------------
 
 describe("mdRow", () => {
-  test("plain mode: returns raw markdown cells", () => {
+  test("plain mode: strips markdown syntax from cells", () => {
     withEnv({ SENTRY_PLAIN_OUTPUT: "1", NO_COLOR: undefined }, true, () => {
       const result = mdRow(["**bold**", "`code`"]);
-      expect(result).toBe("| **bold** | `code` |\n");
+      expect(result).toBe("| bold | code |\n");
     });
   });
 
@@ -431,7 +455,7 @@ describe("mdRow", () => {
     });
   });
 
-  test("produces pipe-delimited format", () => {
+  test("produces pipe-delimited format (plain text cells)", () => {
     withEnv({ SENTRY_PLAIN_OUTPUT: "1", NO_COLOR: undefined }, true, () => {
       const result = mdRow(["a", "b", "c"]);
       expect(result).toBe("| a | b | c |\n");

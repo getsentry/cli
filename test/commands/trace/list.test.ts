@@ -537,4 +537,43 @@ describe("listCommand.func", () => {
     expect(parsed.hasMore).toBe(false);
     expect(parsed.nextCursor).toBeUndefined();
   });
+
+  test("passes statsPeriod to listTransactions when --period is set", async () => {
+    listTransactionsSpy.mockResolvedValue({ data: [] });
+
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      { limit: 20, sort: "date", json: false, period: "24h" },
+      "test-org/test-project"
+    );
+
+    expect(listTransactionsSpy).toHaveBeenCalledWith(
+      "test-org",
+      "test-project",
+      expect.objectContaining({
+        statsPeriod: "24h",
+      })
+    );
+  });
+
+  test("next page hint includes --period when non-default", async () => {
+    listTransactionsSpy.mockResolvedValue({
+      data: sampleTraces,
+      nextCursor: "1735689600:0:0",
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      { limit: 20, sort: "date", json: false, period: "30d" },
+      "test-org/test-project"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("--period 30d");
+    expect(output).toContain("-c last");
+  });
 });

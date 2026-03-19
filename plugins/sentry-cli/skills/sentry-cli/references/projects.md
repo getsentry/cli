@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-projects
-version: 0.18.0-dev.0
+version: 0.19.0-dev.0
 description: Create, list, and manage Sentry projects
 requires:
   bins: ["sentry"]
@@ -34,9 +34,9 @@ List projects
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of projects to list - (default: "30")`
-- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `-p, --platform <value> - Filter by platform (e.g., javascript, python)`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 
 **Examples:**
 

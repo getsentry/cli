@@ -27,7 +27,7 @@
  */
 
 import type { Writer } from "../../types/index.js";
-import { muted } from "./colors.js";
+import { plainSafeMuted } from "./human.js";
 import { formatJson, writeJson } from "./json.js";
 
 // ---------------------------------------------------------------------------
@@ -326,7 +326,7 @@ export function writeOutput<T>(
   stdout.write(`${text}\n`);
 
   if (options.hint) {
-    stdout.write(`\n${muted(options.hint)}\n`);
+    stdout.write(`\n${plainSafeMuted(options.hint)}\n`);
   }
 
   if (options.footer) {
@@ -334,9 +334,9 @@ export function writeOutput<T>(
   }
 }
 
-/** Format footer text (muted, with surrounding newlines). */
+/** Format footer text (muted in TTY, plain when piped, with surrounding newlines). */
 export function formatFooter(text: string): string {
-  return `\n${muted(text)}\n`;
+  return `\n${plainSafeMuted(text)}\n`;
 }
 
 /**

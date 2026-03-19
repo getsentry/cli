@@ -182,6 +182,37 @@ describe("loginCommand.func --token path", () => {
     expect(out).toContain("Jane Doe");
   });
 
+  test("--token: null user.name is converted to undefined in setUserInfo", async () => {
+    isAuthenticatedSpy.mockResolvedValue(false);
+    setAuthTokenSpy.mockResolvedValue(undefined);
+    getUserRegionsSpy.mockResolvedValue([]);
+    getCurrentUserSpy.mockResolvedValue({
+      id: "5",
+      name: null,
+      email: "x@y.com",
+      username: "xuser",
+    });
+    setUserInfoSpy.mockReturnValue(undefined);
+
+    const { context, getStdout } = createContext();
+    await func.call(context, {
+      token: "valid-token",
+      force: false,
+      timeout: 900,
+    });
+
+    expect(setUserInfoSpy).toHaveBeenCalledWith({
+      userId: "5",
+      email: "x@y.com",
+      username: "xuser",
+      name: undefined,
+    });
+    const out = getStdout();
+    expect(out).toContain("Authenticated");
+    // With null name, formatUserIdentity falls back to email
+    expect(out).toContain("x@y.com");
+  });
+
   test("--token: invalid token clears auth and throws AuthError", async () => {
     isAuthenticatedSpy.mockResolvedValue(false);
     setAuthTokenSpy.mockResolvedValue(undefined);

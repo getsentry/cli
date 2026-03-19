@@ -93,33 +93,33 @@ export type WriteTableOptions = {
  * Format items as a table string.
  *
  * Returns the rendered table instead of writing to a stream.
- * In plain/non-TTY mode emits CommonMark; in TTY mode emits a
- * Unicode-bordered table with ANSI styling.
+ * Cell values are markdown strings rendered through {@link renderInlineMarkdown},
+ * which produces ANSI-styled text in TTY mode and clean plain text when piped.
+ * In plain mode, row separator ANSI coloring is stripped to `true` (plain borders).
  */
 export function formatTable<T>(
   items: T[],
   columns: Column<T>[],
   options?: WriteTableOptions
 ): string {
-  if (isPlainOutput()) {
-    return `${buildMarkdownTable(items, columns)}\n`;
-  }
-
   const headers = columns.map((c) => c.header);
+  const alignments: Alignment[] = columns.map((c) => c.align ?? "left");
+  const minWidths = columns.map((c) => c.minWidth ?? 0);
+  const shrinkable = columns.map((c) => c.shrinkable ?? true);
+
   const rows = items.map((item) =>
     columns.map((c) => renderInlineMarkdown(c.value(item)))
   );
-  const alignments: Alignment[] = columns.map((c) => c.align ?? "left");
-
-  const minWidths = columns.map((c) => c.minWidth ?? 0);
-  const shrinkable = columns.map((c) => c.shrinkable ?? true);
 
   return renderTextTable(headers, rows, {
     alignments,
     minWidths,
     shrinkable,
     truncate: options?.truncate,
-    rowSeparator: options?.rowSeparator,
+    // Strip ANSI color from row separators in plain mode
+    rowSeparator: isPlainOutput()
+      ? Boolean(options?.rowSeparator)
+      : options?.rowSeparator,
   });
 }
 

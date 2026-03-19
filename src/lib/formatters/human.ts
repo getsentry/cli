@@ -1052,7 +1052,7 @@ function buildRequestMarkdown(requestEntry: RequestEntry): string {
  * through full `renderMarkdown()`. This helper ensures no raw ANSI escapes
  * leak when `NO_COLOR` is set, output is piped, or `isPlainOutput()` is true.
  */
-function plainSafeMuted(text: string): string {
+export function plainSafeMuted(text: string): string {
   return isPlainOutput() ? text : muted(text);
 }
 

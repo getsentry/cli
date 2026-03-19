@@ -185,7 +185,8 @@ export const initCommand = buildCommand<
       features: {
         kind: "parsed",
         parse: String,
-        brief: "Features to enable: errors,tracing,logs,replay,metrics",
+        brief:
+          "Features to enable: errors,tracing,logs,replay,metrics,profiling,sourcemaps,crons,ai-monitoring,user-feedback",
         variadic: true,
         optional: true,
       },

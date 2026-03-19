@@ -223,8 +223,8 @@ describe("statusCommand.func", () => {
       const { context, getOutput } = createContext();
       await func.call(context, humanFlags);
 
-      // Markdown escapes underscores: SENTRY\_AUTH\_TOKEN
-      expect(getOutput()).toContain("SENTRY\\_AUTH\\_TOKEN");
+      // Plain mode strips markdown escapes: SENTRY_AUTH_TOKEN (not SENTRY\_AUTH\_TOKEN)
+      expect(getOutput()).toContain("SENTRY_AUTH_TOKEN");
       expect(getOutput()).toContain("environment variable");
     });
 
@@ -282,11 +282,11 @@ describe("statusCommand.func", () => {
       const { context, getOutput } = createContext();
       await func.call(context, humanFlags);
 
-      // Markdown escapes underscores: SENTRY\_TOKEN
-      expect(getOutput()).toContain("SENTRY\\_TOKEN");
+      // Plain mode strips markdown escapes: SENTRY_TOKEN (not SENTRY\_TOKEN)
+      expect(getOutput()).toContain("SENTRY_TOKEN");
       expect(getOutput()).toContain("environment variable");
-      // Should NOT say SENTRY_AUTH_TOKEN (escaped form)
-      expect(getOutput()).not.toContain("SENTRY\\_AUTH\\_TOKEN");
+      // Should NOT say SENTRY_AUTH_TOKEN
+      expect(getOutput()).not.toContain("SENTRY_AUTH_TOKEN");
     });
   });
 

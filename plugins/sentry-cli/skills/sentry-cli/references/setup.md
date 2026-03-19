@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-setup
-version: 0.18.0-dev.0
+version: 0.19.0-dev.0
 description: Configure the CLI, install integrations, and manage upgrades
 requires:
   bins: ["sentry"]
@@ -56,7 +56,7 @@ Initialize Sentry in your project
 **Flags:**
 - `-y, --yes - Non-interactive mode (accept defaults)`
 - `--dry-run - Preview changes without applying them`
-- `--features <value>... - Features to enable: errors,tracing,logs,replay,metrics`
+- `--features <value>... - Features to enable: errors,tracing,logs,replay,metrics,profiling,sourcemaps,crons,ai-monitoring,user-feedback`
 - `-t, --team <value> - Team slug to create the project under`
 
 ### `sentry schema <resource...>`

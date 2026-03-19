@@ -227,8 +227,8 @@ describe("formatLogRow (plain mode)", () => {
   test("escapes pipe characters in message", () => {
     const log = createTestLog({ message: "a|b" });
     const result = formatLogRow(log);
-    // Raw pipe in message must be escaped so it doesn't break the table
-    expect(result).toContain("a\\|b");
+    // Pipe in message replaced with box-drawing │ so it doesn't break the table
+    expect(result).toContain("a\u2502b");
   });
 
   test("ends with newline", () => {

@@ -28,18 +28,14 @@ import {
 } from "../../lib/formatters/output.js";
 import type { StreamingTable } from "../../lib/formatters/text-table.js";
 import {
-  applyFreshFlag,
   buildListCommand,
-  FRESH_FLAG,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
 import { withProgress } from "../../lib/polling.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
-import { isTraceId } from "../../lib/trace-id.js";
 import {
-  type ParsedTraceTarget,
-  parseTraceTarget,
+  parseDualModeArgs,
   resolveTraceOrg,
   warnIfNormalized,
 } from "../../lib/trace-target.js";
@@ -147,68 +143,15 @@ type FetchResult = {
 // ---------------------------------------------------------------------------
 
 /**
- * Parsed result from log list positional arguments.
- *
- * Discriminated on `mode`:
- * - `"project"` — standard project-scoped log listing (existing path)
- * - `"trace"` — trace-filtered log listing via trace-logs endpoint
- */
-type ParsedLogArgs =
-  | { mode: "project"; target?: string }
-  | { mode: "trace"; parsed: ParsedTraceTarget };
-
-/**
  * Disambiguate log list positional arguments.
  *
- * Detects trace mode by checking whether any argument segment looks like
- * a 32-char hex trace ID:
- *
- * - **Single arg**: checks the tail segment (last part after `/`, or the
- *   entire arg). `<trace-id>`, `<org>/<trace-id>`, `<org>/<project>/<trace-id>`.
- * - **Two+ args**: checks the last positional (`<org> <trace-id>` or
- *   `<org>/<project> <trace-id>` space-separated forms).
- * - **No match**: treats the argument as a project target.
- *
- * When trace mode is detected, delegates to {@link parseTraceTarget} for
- * full parsing and validation.
- *
- * @param args - Positional arguments from CLI
- * @returns Parsed args with mode discrimination
+ * Thin wrapper around {@link parseDualModeArgs} that binds the
+ * trace-mode usage hint for log list.
  */
-function parseLogListArgs(args: string[]): ParsedLogArgs {
-  if (args.length === 0) {
-    return { mode: "project" };
-  }
-
-  const first = args[0];
-  if (first === undefined) {
-    return { mode: "project" };
-  }
-
-  // Two+ args: check if the last arg is a trace ID (space-separated form)
-  // e.g., `sentry log list my-org abc123...` or `sentry log list my-org/proj abc123...`
-  if (args.length >= 2) {
-    const last = args.at(-1);
-    if (last && isTraceId(last)) {
-      return {
-        mode: "trace",
-        parsed: parseTraceTarget(args, TRACE_USAGE_HINT),
-      };
-    }
-  }
-
-  // Single arg: check the tail segment (last part after `/`, or the entire arg)
-  const lastSlash = first.lastIndexOf("/");
-  const tail = lastSlash === -1 ? first : first.slice(lastSlash + 1);
-
-  if (isTraceId(tail)) {
-    return {
-      mode: "trace",
-      parsed: parseTraceTarget(args, TRACE_USAGE_HINT),
-    };
-  }
-
-  return { mode: "project", target: first };
+function parseLogListArgs(
+  args: string[]
+): ReturnType<typeof parseDualModeArgs> {
+  return parseDualModeArgs(args, TRACE_USAGE_HINT);
 }
 
 /** Default time period for project-scoped log queries */
@@ -628,194 +571,200 @@ function jsonTransformLogOutput(data: LogOutput, fields?: string[]): unknown {
   return fields && fields.length > 0 ? filterFields(data, fields) : data;
 }
 
-export const listCommand = buildListCommand("log", {
-  docs: {
-    brief: "List logs from a project",
-    fullDescription:
-      "List and stream logs from Sentry projects.\n\n" +
-      "Target patterns:\n" +
-      "  sentry log list               # auto-detect from DSN or config\n" +
-      "  sentry log list <org>/<proj>  # explicit org and project\n" +
-      "  sentry log list <project>     # find project across all orgs\n\n" +
-      `${TARGET_PATTERN_NOTE}\n\n` +
-      "Trace filtering:\n" +
-      "  sentry log list <trace-id>           # Filter by trace (auto-detect org)\n" +
-      "  sentry log list <org>/<trace-id>     # Filter by trace (explicit org)\n\n" +
-      "Examples:\n" +
-      "  sentry log list                    # List last 100 logs\n" +
-      "  sentry log list -f                 # Stream logs (2s poll interval)\n" +
-      "  sentry log list -f 5               # Stream logs (5s poll interval)\n" +
-      "  sentry log list --limit 50         # Show last 50 logs\n" +
-      "  sentry log list -q 'level:error'   # Filter to errors only\n" +
-      "  sentry log list abc123def456abc123def456abc123de  # Filter by trace\n\n" +
-      "Alias: `sentry logs` → `sentry log list`",
-  },
-  output: {
-    human: createLogRenderer,
-    jsonTransform: jsonTransformLogOutput,
-  },
-  parameters: {
-    positional: {
-      kind: "array",
-      parameter: {
-        placeholder: "org/project-or-trace-id",
-        brief: "[<org>/[<project>/]]<trace-id>, <org>/<project>, or <project>",
-        parse: String,
+export const listCommand = buildListCommand(
+  "log",
+  {
+    docs: {
+      brief: "List logs from a project",
+      fullDescription:
+        "List and stream logs from Sentry projects.\n\n" +
+        "Target patterns:\n" +
+        "  sentry log list               # auto-detect from DSN or config\n" +
+        "  sentry log list <org>/<proj>  # explicit org and project\n" +
+        "  sentry log list <project>     # find project across all orgs\n\n" +
+        `${TARGET_PATTERN_NOTE}\n\n` +
+        "Trace filtering:\n" +
+        "  sentry log list <trace-id>           # Filter by trace (auto-detect org)\n" +
+        "  sentry log list <org>/<trace-id>     # Filter by trace (explicit org)\n\n" +
+        "Examples:\n" +
+        "  sentry log list                    # List last 100 logs\n" +
+        "  sentry log list -f                 # Stream logs (2s poll interval)\n" +
+        "  sentry log list -f 5               # Stream logs (5s poll interval)\n" +
+        "  sentry log list --limit 50         # Show last 50 logs\n" +
+        "  sentry log list -q 'level:error'   # Filter to errors only\n" +
+        "  sentry log list abc123def456abc123def456abc123de  # Filter by trace\n\n" +
+        "Alias: `sentry logs` → `sentry log list`",
+    },
+    output: {
+      human: createLogRenderer,
+      jsonTransform: jsonTransformLogOutput,
+    },
+    parameters: {
+      positional: {
+        kind: "array",
+        parameter: {
+          placeholder: "org/project-or-trace-id",
+          brief:
+            "[<org>/[<project>/]]<trace-id>, <org>/<project>, or <project>",
+          parse: String,
+        },
+      },
+      flags: {
+        limit: {
+          kind: "parsed",
+          parse: parseLimit,
+          brief: `Number of log entries (${MIN_LIMIT}-${MAX_LIMIT})`,
+          default: String(DEFAULT_LIMIT),
+        },
+        query: {
+          kind: "parsed",
+          parse: String,
+          brief: "Filter query (Sentry search syntax)",
+          optional: true,
+        },
+        follow: {
+          kind: "parsed",
+          parse: parseFollow,
+          brief: "Stream logs (optionally specify poll interval in seconds)",
+          optional: true,
+          inferEmpty: true,
+        },
+        period: {
+          kind: "parsed",
+          parse: String,
+          brief:
+            'Time period (e.g., "90d", "14d", "24h"). Default: 90d (project mode), 14d (trace mode)',
+          optional: true,
+        },
+      },
+      aliases: {
+        n: "limit",
+        q: "query",
+        f: "follow",
+        t: "period",
       },
     },
-    flags: {
-      limit: {
-        kind: "parsed",
-        parse: parseLimit,
-        brief: `Number of log entries (${MIN_LIMIT}-${MAX_LIMIT})`,
-        default: String(DEFAULT_LIMIT),
-      },
-      query: {
-        kind: "parsed",
-        parse: String,
-        brief: "Filter query (Sentry search syntax)",
-        optional: true,
-      },
-      follow: {
-        kind: "parsed",
-        parse: parseFollow,
-        brief: "Stream logs (optionally specify poll interval in seconds)",
-        optional: true,
-        inferEmpty: true,
-      },
-      period: {
-        kind: "parsed",
-        parse: String,
-        brief:
-          'Time period (e.g., "90d", "14d", "24h"). Default: 90d (project mode), 14d (trace mode)',
-        optional: true,
-      },
-      fresh: FRESH_FLAG,
-    },
-    aliases: {
-      n: "limit",
-      q: "query",
-      f: "follow",
-      t: "period",
-    },
-  },
-  async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {
-    applyFreshFlag(flags);
-    const { cwd, setContext } = this;
+    async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {
+      const { cwd, setContext } = this;
 
-    const parsed = parseLogListArgs(args);
+      const parsed = parseLogListArgs(args);
 
-    if (parsed.mode === "trace") {
-      // Trace mode: use the org-scoped trace-logs endpoint.
-      warnIfNormalized(parsed.parsed, "log.list");
-      const { traceId, org } = await resolveTraceOrg(
-        parsed.parsed,
-        cwd,
-        TRACE_USAGE_HINT
-      );
-      setContext([org], []);
-
-      if (flags.follow) {
-        // Banner (suppressed in JSON mode)
-        writeFollowBanner(
-          flags.follow ?? DEFAULT_POLL_INTERVAL,
-          `Streaming logs for trace ${traceId}...`,
-          flags.json
+      if (parsed.mode === "trace") {
+        // Trace mode: use the org-scoped trace-logs endpoint.
+        warnIfNormalized(parsed.parsed, "log.list");
+        const { traceId, org } = await resolveTraceOrg(
+          parsed.parsed,
+          cwd,
+          TRACE_USAGE_HINT
         );
+        setContext([org], []);
 
-        // Track IDs of logs seen without timestamp_precise so they are
-        // shown once but not duplicated on subsequent polls.
-        const seenWithoutTs = new Set<string>();
-        const generator = generateFollowLogs({
-          flags,
-          onDiagnostic: (msg) => logger.warn(msg),
-          fetch: (statsPeriod) =>
-            listTraceLogs(org, traceId, {
-              query: flags.query,
-              limit: flags.limit,
-              statsPeriod,
-            }),
-          extractNew: (logs, lastTs) =>
-            logs.filter((l) => {
-              if (l.timestamp_precise !== undefined) {
-                return l.timestamp_precise > lastTs;
-              }
-              // No precise timestamp — deduplicate by id
-              if (!l.id) {
-                return true; // Can't dedup without id, include it
-              }
-              if (seenWithoutTs.has(l.id)) {
-                return false;
-              }
-              seenWithoutTs.add(l.id);
-              return true;
-            }),
-          onInitialLogs: (logs) => {
-            for (const l of logs) {
-              if (l.timestamp_precise === undefined && l.id) {
+        if (flags.follow) {
+          // Banner (suppressed in JSON mode)
+          writeFollowBanner(
+            flags.follow ?? DEFAULT_POLL_INTERVAL,
+            `Streaming logs for trace ${traceId}...`,
+            flags.json
+          );
+
+          // Track IDs of logs seen without timestamp_precise so they are
+          // shown once but not duplicated on subsequent polls.
+          const seenWithoutTs = new Set<string>();
+          const generator = generateFollowLogs({
+            flags,
+            onDiagnostic: (msg) => logger.warn(msg),
+            fetch: (statsPeriod) =>
+              listTraceLogs(org, traceId, {
+                query: flags.query,
+                limit: flags.limit,
+                statsPeriod,
+              }),
+            extractNew: (logs, lastTs) =>
+              logs.filter((l) => {
+                if (l.timestamp_precise !== undefined) {
+                  return l.timestamp_precise > lastTs;
+                }
+                // No precise timestamp — deduplicate by id
+                if (!l.id) {
+                  return true; // Can't dedup without id, include it
+                }
+                if (seenWithoutTs.has(l.id)) {
+                  return false;
+                }
                 seenWithoutTs.add(l.id);
+                return true;
+              }),
+            onInitialLogs: (logs) => {
+              for (const l of logs) {
+                if (l.timestamp_precise === undefined && l.id) {
+                  seenWithoutTs.add(l.id);
+                }
               }
-            }
+            },
+          });
+
+          yield* yieldTraceFollowItems(generator, traceId);
+          return;
+        }
+
+        const { result, hint } = await withProgress(
+          {
+            message: `Fetching logs (up to ${flags.limit})...`,
+            json: flags.json,
           },
-        });
-
-        yield* yieldTraceFollowItems(generator, traceId);
-        return;
-      }
-
-      const { result, hint } = await withProgress(
-        {
-          message: `Fetching logs (up to ${flags.limit})...`,
-          json: flags.json,
-        },
-        () => executeTraceSingleFetch(org, traceId, flags)
-      );
-      yield new CommandOutput(result);
-      return { hint };
-    }
-
-    // Standard project-scoped mode
-    {
-      const { org, project } = await resolveOrgProjectFromArg(
-        parsed.target,
-        cwd,
-        COMMAND_NAME
-      );
-      setContext([org], [project]);
-
-      if (flags.follow) {
-        writeFollowBanner(
-          flags.follow ?? DEFAULT_POLL_INTERVAL,
-          "Streaming logs...",
-          flags.json
+          () => executeTraceSingleFetch(org, traceId, flags)
         );
-
-        const generator = generateFollowLogs({
-          flags,
-          onDiagnostic: (msg) => logger.warn(msg),
-          fetch: (statsPeriod, afterTimestamp) =>
-            listLogs(org, project, {
-              query: flags.query,
-              limit: flags.limit,
-              statsPeriod,
-              afterTimestamp,
-            }),
-          extractNew: (logs) => logs,
-        });
-
-        yield* yieldFollowItems(generator);
-        return;
+        yield new CommandOutput(result);
+        return { hint };
       }
 
-      const { result, hint } = await withProgress(
-        {
-          message: `Fetching logs (up to ${flags.limit})...`,
-          json: flags.json,
-        },
-        () => executeSingleFetch(org, project, flags)
-      );
-      yield new CommandOutput(result);
-      return { hint };
-    }
+      // Standard project-scoped mode
+      {
+        const { org, project } = await resolveOrgProjectFromArg(
+          parsed.target,
+          cwd,
+          COMMAND_NAME
+        );
+        setContext([org], [project]);
+
+        if (flags.follow) {
+          writeFollowBanner(
+            flags.follow ?? DEFAULT_POLL_INTERVAL,
+            "Streaming logs...",
+            flags.json
+          );
+
+          const generator = generateFollowLogs({
+            flags,
+            onDiagnostic: (msg) => logger.warn(msg),
+            fetch: (statsPeriod, afterTimestamp) =>
+              listLogs(org, project, {
+                query: flags.query,
+                limit: flags.limit,
+                statsPeriod,
+                afterTimestamp,
+              }),
+            extractNew: (logs) => logs,
+          });
+
+          yield* yieldFollowItems(generator);
+          return;
+        }
+
+        const { result, hint } = await withProgress(
+          {
+            message: `Fetching logs (up to ${flags.limit})...`,
+            json: flags.json,
+          },
+          () => executeSingleFetch(org, project, flags)
+        );
+        yield new CommandOutput(result);
+        return { hint };
+      }
+    },
   },
-});
+  {
+    noCursorFlag: true,
+    noFreshAlias: true,
+  }
+);

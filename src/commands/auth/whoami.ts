@@ -57,9 +57,9 @@ export const whoamiCommand = buildCommand({
     try {
       setUserInfo({
         userId: user.id,
-        email: user.email,
-        username: user.username,
-        name: user.name,
+        email: user.email ?? undefined,
+        username: user.username ?? undefined,
+        name: user.name ?? undefined,
       });
     } catch {
       // Cache update failure is non-essential — user identity was already fetched.

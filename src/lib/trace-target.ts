@@ -24,7 +24,7 @@ import {
   resolveOrgAndProject,
   resolveProjectBySlug,
 } from "./resolve-target.js";
-import { validateTraceId } from "./trace-id.js";
+import { isTraceId, validateTraceId } from "./trace-id.js";
 
 /** Match `[<prefix>]<trail>` in usageHint — captures bracket content + trailing placeholder */
 const USAGE_TARGET_RE = /\[.*\]<[^>]+>/;
@@ -396,4 +396,80 @@ export async function resolveTraceOrg(
       throw new ValidationError(`Unexpected target type: ${_exhaustive}`);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Dual-mode argument disambiguation (project vs trace)
+// ---------------------------------------------------------------------------
+
+/**
+ * Result from dual-mode argument disambiguation.
+ *
+ * Used by commands that support both project-scoped listing (no trace ID)
+ * and trace-scoped listing (trace ID provided), like `span list` and
+ * `log list`.
+ *
+ * Discriminated on `mode`:
+ * - `"project"` — no trace ID detected; `target` is the optional org/project arg
+ * - `"trace"` — a 32-char hex trace ID was found; `parsed` contains the full target
+ */
+export type ParsedDualModeArgs =
+  | { mode: "project"; target?: string }
+  | { mode: "trace"; parsed: ParsedTraceTarget };
+
+/**
+ * Disambiguate positional arguments for dual-mode list commands.
+ *
+ * Detects trace mode by checking whether any argument segment looks like
+ * a 32-char hex trace ID via {@link isTraceId}:
+ *
+ * - **No args**: project mode (auto-detect org/project)
+ * - **Two+ args**: checks the last positional. If it's a trace ID → trace
+ *   mode (space-separated form like `<project> <trace-id>`).
+ * - **Single arg**: checks the tail segment (last part after `/`). If it
+ *   looks like a trace ID → trace mode. Otherwise → project target.
+ *
+ * When trace mode is detected, delegates to {@link parseTraceTarget} for
+ * full parsing and validation.
+ *
+ * @param args - Positional arguments from CLI
+ * @param traceUsageHint - Usage hint for trace-mode error messages
+ * @returns Parsed args with mode discrimination
+ */
+export function parseDualModeArgs(
+  args: string[],
+  traceUsageHint: string
+): ParsedDualModeArgs {
+  if (args.length === 0) {
+    return { mode: "project" };
+  }
+
+  const first = args[0];
+  if (first === undefined) {
+    return { mode: "project" };
+  }
+
+  // Two+ args: check if the last arg is a trace ID (space-separated form)
+  if (args.length >= 2) {
+    const last = args.at(-1);
+    if (last && isTraceId(last)) {
+      return {
+        mode: "trace",
+        parsed: parseTraceTarget(args, traceUsageHint),
+      };
+    }
+  }
+
+  // Single arg: check the tail segment (last part after "/", or entire arg)
+  const lastSlash = first.lastIndexOf("/");
+  const tail = lastSlash === -1 ? first : first.slice(lastSlash + 1);
+  if (isTraceId(tail)) {
+    return {
+      mode: "trace",
+      parsed: parseTraceTarget(args, traceUsageHint),
+    };
+  }
+
+  // Not a trace ID → treat as project target
+  return { mode: "project", target: first };
 }
