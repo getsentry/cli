@@ -252,6 +252,31 @@ export async function getIssueByShortId(
 }
 
 /**
+ * Try to get an issue by short ID, returning null on 404.
+ *
+ * Same as {@link getIssueByShortId} but returns null instead of throwing
+ * when the short ID is not found. Useful for parallel fan-out across orgs
+ * where most will 404.
+ *
+ * @param orgSlug - Organization slug
+ * @param shortId - Full short ID (e.g., "CONSUMER-MOBILE-1QNEK")
+ * @returns The resolved issue, or null if not found in this org
+ */
+export async function tryGetIssueByShortId(
+  orgSlug: string,
+  shortId: string
+): Promise<SentryIssue | null> {
+  try {
+    return await getIssueByShortId(orgSlug, shortId);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
  * Update an issue's status.
  */
 export function updateIssueStatus(

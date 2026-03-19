@@ -16,7 +16,7 @@ import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { setCachedProject } from "../../../src/lib/db/project-cache.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
-import { ResolutionError } from "../../../src/lib/errors.js";
+import { ApiError, ResolutionError } from "../../../src/lib/errors.js";
 import { useTestConfigDir } from "../../helpers.js";
 
 describe("buildCommandHint", () => {
@@ -706,6 +706,201 @@ describe("resolveOrgAndIssueId", () => {
         command: "explain",
       })
     ).rejects.toThrow("500");
+  });
+
+  test("fast path: ambiguous when shortid resolves in multiple orgs", async () => {
+    const { clearProjectAliases } = await import(
+      "../../../src/lib/db/project-aliases.js"
+    );
+    await clearProjectAliases();
+
+    await setOrgRegion("org2", DEFAULT_SENTRY_URL);
+
+    const makeShortIdResponse = (orgSlug: string, groupId: string) =>
+      new Response(
+        JSON.stringify({
+          organizationSlug: orgSlug,
+          projectSlug: "shared",
+          groupId,
+          group: {
+            id: groupId,
+            shortId: "SHARED-G",
+            title: "Test Issue",
+            status: "unresolved",
+            platform: "javascript",
+            type: "error",
+            count: "1",
+            userCount: 1,
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("/users/me/regions/")) {
+        return new Response(JSON.stringify({ regions: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (
+        url.includes("/organizations/") &&
+        !url.includes("/projects/") &&
+        !url.includes("/issues/") &&
+        !url.includes("/shortids/")
+      ) {
+        return new Response(
+          JSON.stringify([
+            { id: "1", slug: "org1", name: "Org 1" },
+            { id: "2", slug: "org2", name: "Org 2" },
+          ]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      // Both orgs resolve the shortid — triggers fast-path ambiguity
+      if (url.includes("organizations/org1/shortids/SHARED-G")) {
+        return makeShortIdResponse("org1", "111");
+      }
+      if (url.includes("organizations/org2/shortids/SHARED-G")) {
+        return makeShortIdResponse("org2", "222");
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    await expect(
+      resolveOrgAndIssueId({
+        issueArg: "shared-g",
+        cwd: getConfigDir(),
+        command: "explain",
+      })
+    ).rejects.toThrow("is ambiguous");
+  });
+
+  test("fast path: surfaces 403 when all orgs return forbidden", async () => {
+    const { clearProjectAliases } = await import(
+      "../../../src/lib/db/project-aliases.js"
+    );
+    await clearProjectAliases();
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("/users/me/regions/")) {
+        return new Response(JSON.stringify({ regions: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (
+        url.includes("/organizations/") &&
+        !url.includes("/projects/") &&
+        !url.includes("/issues/") &&
+        !url.includes("/shortids/")
+      ) {
+        return new Response(
+          JSON.stringify([{ id: "1", slug: "my-org", name: "My Org" }]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      // Shortid endpoint returns 403 for all orgs
+      if (url.includes("/shortids/")) {
+        return new Response(
+          JSON.stringify({ detail: "You do not have permission" }),
+          { status: 403 }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const err = await resolveOrgAndIssueId({
+      issueArg: "restricted-g",
+      cwd: getConfigDir(),
+      command: "explain",
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(403);
+  });
+
+  test("fast path: surfaces 500 when all orgs return server error", async () => {
+    const { clearProjectAliases } = await import(
+      "../../../src/lib/db/project-aliases.js"
+    );
+    await clearProjectAliases();
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("/users/me/regions/")) {
+        return new Response(JSON.stringify({ regions: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (
+        url.includes("/organizations/") &&
+        !url.includes("/projects/") &&
+        !url.includes("/issues/") &&
+        !url.includes("/shortids/")
+      ) {
+        return new Response(
+          JSON.stringify([{ id: "1", slug: "my-org", name: "My Org" }]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      // Shortid endpoint returns 500 for all orgs
+      if (url.includes("/shortids/")) {
+        return new Response(
+          JSON.stringify({ detail: "Internal Server Error" }),
+          { status: 500 }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const err = await resolveOrgAndIssueId({
+      issueArg: "broken-g",
+      cwd: getConfigDir(),
+      command: "explain",
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(500);
   });
 });
 
