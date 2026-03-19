@@ -6,8 +6,6 @@
  * the full CLI with telemetry, middleware, and error recovery.
  */
 
-import { disableDbTracing } from "./lib/db/index.js";
-
 // Exit cleanly when downstream pipe consumer closes (e.g., `sentry issue list | head`).
 // EPIPE (errno -32) is normal Unix behavior — not an error. Node.js/Bun ignore SIGPIPE
 // at the process level, so pipe write failures surface as async 'error' events on the
@@ -30,7 +28,8 @@ process.stderr.on("error", handleStreamError);
  * completion engine and SQLite cache modules.
  */
 async function runCompletion(completionArgs: string[]): Promise<void> {
-  disableDbTracing();
+  // Disable telemetry so db/index.ts skips the @sentry/bun lazy-require (~280ms)
+  process.env.SENTRY_CLI_NO_TELEMETRY = "1";
   const { handleComplete } = await import("./lib/complete.js");
   await handleComplete(completionArgs);
 }

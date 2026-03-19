@@ -21,23 +21,6 @@ const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** Probability of running cleanup on write operations */
 const CLEANUP_PROBABILITY = 0.1;
 
-/** When true, skip the Sentry tracing wrapper on the database connection. */
-let tracingDisabled = false;
-
-/**
- * Disable database query tracing for this process.
- *
- * Call before the first `getDatabase()` invocation to avoid loading
- * `@sentry/bun` (~280ms). Used by the `__complete` fast-path where
- * only cached reads are needed and telemetry adds unacceptable latency.
- *
- * Follows the same pattern as {@link disableResponseCache} and
- * {@link disableOrgCache}.
- */
-export function disableDbTracing(): void {
-  tracingDisabled = true;
-}
-
 /** Traced database wrapper (returned by getDatabase) */
 let db: Database | null = null;
 /** Raw database without tracing (used for repair operations) */
@@ -118,8 +101,8 @@ export function getDatabase(): Database {
 
     // Wrap with tracing proxy for automatic query instrumentation.
     // Lazy-require telemetry to avoid top-level import of @sentry/bun (~280ms).
-    // Shell completions disable tracing entirely via disableDbTracing().
-    if (tracingDisabled) {
+    // Shell completions set SENTRY_CLI_NO_TELEMETRY=1 to skip this entirely.
+    if (process.env.SENTRY_CLI_NO_TELEMETRY === "1") {
       db = rawDb;
     } else {
       const { createTracedDatabase } = require("../telemetry.js") as {
