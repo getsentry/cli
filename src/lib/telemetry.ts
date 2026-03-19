@@ -342,6 +342,11 @@ export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
     // Tag whether targeting self-hosted Sentry (not SaaS)
     Sentry.setTag("is_self_hosted", !isSentrySaasUrl(getSentryBaseUrl()));
 
+    // Track TTY vs non-TTY invocations to measure agent/CI usage percentage
+    Sentry.metrics.count("cli.invocation", 1, {
+      attributes: { is_tty: !!process.stdout.isTTY },
+    });
+
     // Wire up consola → Sentry log forwarding now that the client is active
     attachSentryReporter();
 
