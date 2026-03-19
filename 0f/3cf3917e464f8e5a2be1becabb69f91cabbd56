@@ -1,0 +1,141 @@
+# Plan: Fix CLI-7T — `ContextError: Organization and project are required`
+
+## Issue Summary
+
+**CLI-7T** | 185 events | 63 users | HIGH priority | Ongoing since 2026-02-22
+
+When users run `sentry issue list` or `sentry issues` without explicit org/project arguments, the auto-detection cascade fails and throws `ContextError: Organization and project are required.`
+
+### Key observations from telemetry:
+- **100% Node.js runtime** — all events from the npm distribution, zero from Bun binary
+- **46% use `--json`** — strong signal these are AI agents/tool callers
+- Spread across 63 distinct users, many instance IDs, all OS types
+- Present across all recent releases (0.11.0 through 0.18.1)
+
+## Root Cause Analysis
+
+The error is thrown at `src/commands/issue/list.ts:907` inside `handleResolvedTargets()` when `resolveAllTargets()` returns zero targets. The resolution cascade tries 5 sources in order, all of which fail:
+
+1. **Explicit flags** — not provided (user ran bare `sentry issues`)
+2. **Env vars** (`SENTRY_ORG`/`SENTRY_PROJECT`) — not set
+3. **Config defaults** — never configured (`sentry cli setup` not run)
+4. **DSN auto-detection** — no DSN found in code/env files
+5. **Directory name inference** — directory name doesn't match any project
+
+### Contributing Bug: `Bun.Glob.match()` polyfill is missing
+
+The Node.js polyfill (`script/node-polyfills.ts:176-189`) implements `BunGlobPolyfill` with only `scan()` — it's missing `match()`. This causes `anyGlobMatches()` in `src/lib/dsn/project-root.ts:210` to throw a `TypeError`, which is silently swallowed by a bare `catch {}` block.
+
+**Impact:** On Node.js, glob-based language markers (`*.sln`, `*.csproj`, `*.fsproj`, `*.vbproj`, `*.cabal`, `*.opam`, `*.nimble`) are never detected, weakening project root detection for .NET, Haskell, OCaml, and Nim projects.
+
+This is a real bug but **NOT the primary cause** of CLI-7T — the glob markers only apply to a few niche languages. The majority of affected users simply have no DSN in their project or are running from a directory without a Sentry-instrumented project.
+
+## Proposed Fix
+
+### Fix 1: Add `match()` to `BunGlobPolyfill` (Bug Fix) 🔴
+
+**File:** `script/node-polyfills.ts`
+
+Add a synchronous `match(input: string): boolean` method to `BunGlobPolyfill` using the `picomatch` library (already a transitive dependency via `fast-glob`):
+
+```typescript
+Glob: class BunGlobPolyfill {
+    private pattern: string;
+    constructor(pattern: string) {
+        this.pattern = pattern;
+    }
+    match(input: string): boolean {
+        return picomatch(this.pattern)(input);
+    }
+    async *scan(opts?: { cwd?: string }): AsyncIterable<string> {
+        // ... existing implementation
+    }
+},
+```
+
+`picomatch` is already a transitive dependency (via `tinyglobby`, already bundled), so it's safe to import. However, since all current patterns are simple `*.ext` globs, a lightweight implementation without additional imports is also viable:
+
+```typescript
+match(input: string): boolean {
+    // All current patterns are *.ext — optimize for this case
+    if (this.pattern.startsWith('*.')) {
+        return input.endsWith(this.pattern.slice(1));
+    }
+    // Fallback: exact match
+    return input === this.pattern;
+}
+```
+
+**Recommended approach:** Use `picomatch` for correctness (handles future glob patterns), since it's already bundled via `tinyglobby`.
+
+### Fix 2: Add debug logging to `resolveAllTargets()` (Diagnostics) 🟡
+
+**File:** `src/lib/resolve-target.ts`
+
+Add `log.debug()` calls at each fallthrough step in `resolveAllTargets()` so users can debug auto-detection failures with `--verbose`:
+
+```
+[resolve-target] No explicit org/project flags provided
+[resolve-target] No SENTRY_ORG/SENTRY_PROJECT env vars found
+[resolve-target] No config defaults set (run 'sentry cli setup' to configure)
+[resolve-target] DSN auto-detection: found 0 DSNs
+[resolve-target] Directory name inference: no match for 'my-dir'
+[resolve-target] Auto-detection failed: 0 targets resolved
+```
+
+### Fix 3: Improve `ContextError` alternatives for auto-detect (UX) 🟡
+
+**File:** `src/commands/issue/list.ts` (and potentially `src/lib/resolve-target.ts`)
+
+When auto-detection fails, provide more actionable alternatives in the error message. Currently:
+```
+Organization and project are required.
+
+Specify them using:
+  sentry issue list <org>/<project>
+
+Or:
+  - Run from a directory with a Sentry-configured project
+  - Set SENTRY_ORG and SENTRY_PROJECT (or SENTRY_DSN) environment variables
+```
+
+Improved version — add suggestions about setup and org list:
+```
+Organization and project are required.
+
+Specify them using:
+  sentry issue list <org>/<project>
+
+Or:
+  - Run from a directory with a Sentry-configured project
+  - Set SENTRY_ORG and SENTRY_PROJECT (or SENTRY_DSN) environment variables
+  - Run 'sentry org list' to find your organization slug
+  - Run 'sentry project list <org>/' to find project slugs
+```
+
+## Files to Modify
+
+| File | Change |
+|------|--------|
+| `script/node-polyfills.ts` | Add `match()` method to `BunGlobPolyfill` |
+| `src/lib/resolve-target.ts` | Add debug logging to resolution cascade |
+| `src/commands/issue/list.ts` | Improve ContextError alternatives |
+
+## PR #485 (CLI-9A fix) does NOT help CLI-7T
+
+PR #485 added an `orgSlugMatchBehavior` pre-check to `dispatchOrgScopedList` for `project-search` mode — it catches when a bare slug matches a cached org and redirects/errors instead of doing expensive project-search API calls.
+
+**CLI-7T is a different code path entirely.** The event context data confirms `args.count: 1, args.values: [null]` — users pass **no argument at all**. `parseOrgProjectArg(undefined)` returns `{ type: "auto-detect" }`, not `"project-search"`. The `resolveOrgSlugMatch` pre-check only fires for `"project-search"` mode, so PR #485's fix never activates for CLI-7T events.
+
+## What NOT to fix (out of scope)
+
+- **JSON error serialization for `--json` mode** — This is a larger architectural change (the global error handler in `bin.ts` doesn't know about `--json`). Worth tracking as a separate issue.
+- **Interactive prompt for missing context** — Doesn't help the 46% of `--json` callers (agents), and auto-prompting is anti-pattern for CLI tools.
+
+## Verification
+
+1. **Glob polyfill fix:** Add a test in `test/` that verifies `BunGlobPolyfill.match()` works for `*.sln`, `*.csproj` etc. patterns
+2. **Debug logging:** Run `sentry issue list --verbose` from a directory without a Sentry project — verify debug logs show each step attempted
+3. **Error message:** Run `sentry issue list` from a non-project directory — verify improved alternatives are shown
+4. **Existing tests:** `bun test` passes, `bun run typecheck` passes
+5. **npm build test:** Verify the Node polyfill change doesn't break the npm build (`bun run build`)
