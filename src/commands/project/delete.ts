@@ -241,11 +241,13 @@ export const deleteCommand = buildCommand({
       );
     }
 
-    const { org: orgSlug, project: projectSlug } =
-      await resolveOrgProjectTarget(parsed, cwd, COMMAND_NAME);
+    const resolved = await resolveOrgProjectTarget(parsed, cwd, COMMAND_NAME);
+    const { org: orgSlug, project: projectSlug } = resolved;
 
-    // Verify project exists before prompting — also used to display the project name
-    const project = await getProject(orgSlug, projectSlug);
+    // Use already-fetched project data from project-search, or fetch for
+    // explicit/auto-detect paths (also verifies the project exists)
+    const project =
+      resolved.projectData ?? (await getProject(orgSlug, projectSlug));
 
     // Dry-run mode: show what would be deleted without deleting it
     if (flags["dry-run"]) {

@@ -99,9 +99,11 @@ async function fetchProjectDetails(
   target: ResolvedTarget
 ): Promise<ProjectWithDsn | null> {
   const result = await withAuthGuard(async () => {
-    // Fetch project and DSN in parallel
+    // Fetch project (skip if already fetched during resolution) and DSN in parallel
     const [project, dsn] = await Promise.all([
-      getProject(target.org, target.project),
+      target.projectData
+        ? Promise.resolve(target.projectData)
+        : getProject(target.org, target.project),
       tryGetPrimaryDsn(target.org, target.project),
     ]);
     return { project, dsn };
@@ -239,9 +241,11 @@ export const viewCommand = buildCommand({
         );
         resolvedTargets = [
           {
-            ...resolved,
+            org: resolved.org,
+            project: resolved.project,
             orgDisplay: resolved.org,
             projectDisplay: resolved.project,
+            projectData: resolved.projectData,
           },
         ];
         break;

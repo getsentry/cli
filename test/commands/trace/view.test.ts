@@ -158,10 +158,11 @@ describe("resolveProjectBySlug", () => {
 
       const result = await resolveProjectBySlug("backend", HINT);
 
-      expect(result).toEqual({
+      expect(result).toMatchObject({
         org: "my-company",
         project: "backend",
       });
+      expect(result.projectData).toBeDefined();
     });
 
     test("uses orgSlug from project result", async () => {

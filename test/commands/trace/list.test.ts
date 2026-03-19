@@ -146,7 +146,8 @@ describe("resolveOrgProjectFromArg", () => {
       "/tmp",
       "trace list"
     );
-    expect(result).toEqual({ org: "acme", project: "frontend" });
+    expect(result).toMatchObject({ org: "acme", project: "frontend" });
+    expect(result.projectData).toBeDefined();
   });
 
   test("throws when no project found", async () => {

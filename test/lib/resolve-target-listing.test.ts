@@ -165,7 +165,8 @@ describe("resolveOrgProjectTarget", () => {
     const parsed = { type: "project-search" as const, projectSlug: "my-proj" };
 
     const result = await resolveOrgProjectTarget(parsed, CWD, "trace list");
-    expect(result).toEqual({ org: "found-org", project: "my-proj" });
+    expect(result).toMatchObject({ org: "found-org", project: "my-proj" });
+    expect(result.projectData).toBeDefined();
   });
 
   test("throws ResolutionError for project-search when no match", async () => {
@@ -297,7 +298,8 @@ describe("resolveOrgProjectFromArg", () => {
     });
 
     const result = await resolveOrgProjectFromArg("my-proj", CWD, "log list");
-    expect(result).toEqual({ org: "found-org", project: "my-proj" });
+    expect(result).toMatchObject({ org: "found-org", project: "my-proj" });
+    expect(result.projectData).toBeDefined();
   });
 
   test("throws ContextError for 'org/' (org-all) string", async () => {
