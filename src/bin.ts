@@ -2,7 +2,7 @@
  * CLI entry point with fast-path dispatch.
  *
  * Shell completion (`__complete`) is dispatched before any heavy imports
- * to avoid loading `@sentry/bun` (~280ms). All other commands go through
+ * to avoid loading `@sentry/node-core` (~280ms). All other commands go through
  * the full CLI with telemetry, middleware, and error recovery.
  */
 
@@ -23,12 +23,12 @@ process.stderr.on("error", handleStreamError);
 /**
  * Fast-path: shell completion.
  *
- * Dispatched before importing the full CLI to avoid loading @sentry/bun,
+ * Dispatched before importing the full CLI to avoid loading @sentry/node-core,
  * @stricli/core, and other heavy dependencies. Only loads the lightweight
  * completion engine and SQLite cache modules.
  */
 async function runCompletion(completionArgs: string[]): Promise<void> {
-  // Disable telemetry so db/index.ts skips the @sentry/bun lazy-require (~280ms)
+  // Disable telemetry so db/index.ts skips the @sentry/node-core lazy-require (~280ms)
   process.env.SENTRY_CLI_NO_TELEMETRY = "1";
   const { handleComplete } = await import("./lib/complete.js");
   await handleComplete(completionArgs);

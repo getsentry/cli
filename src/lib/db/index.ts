@@ -100,7 +100,7 @@ export function getDatabase(): Database {
     migrateFromJson(rawDb);
 
     // Wrap with tracing proxy for automatic query instrumentation.
-    // Lazy-require telemetry to avoid top-level import of @sentry/bun (~280ms).
+    // Lazy-require telemetry to avoid top-level import of @sentry/node-core (~85ms).
     // Shell completions set SENTRY_CLI_NO_TELEMETRY=1 to skip this entirely.
     if (process.env.SENTRY_CLI_NO_TELEMETRY === "1") {
       db = rawDb;

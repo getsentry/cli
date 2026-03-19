@@ -15,6 +15,7 @@
  *   Exit:   0 on success (even if no completions)
  */
 
+import { queueCompletionTelemetry } from "./db/completion-telemetry.js";
 import { getProjectAliases } from "./db/project-aliases.js";
 import { getCachedProjectsForOrg } from "./db/project-cache.js";
 import { getCachedOrganizations } from "./db/regions.js";
@@ -39,6 +40,8 @@ type Completion = {
  * @param args - The words after `__complete` (COMP_WORDS[1:] from the shell)
  */
 export async function handleComplete(args: string[]): Promise<void> {
+  const startMs = performance.now();
+
   // The last word is the partial being completed (may be empty)
   const partial = args.at(-1) ?? "";
   // All preceding words form the command path context
@@ -61,13 +64,25 @@ export async function handleComplete(args: string[]): Promise<void> {
   if (output) {
     process.stdout.write(`${output}\n`);
   }
+
+  // Queue timing data for the next normal CLI run to emit as Sentry metrics.
+  // Pure SQLite write — no Sentry SDK overhead (~1ms).
+  const cmdPath =
+    precedingWords.length >= 2
+      ? `${precedingWords[0]} ${precedingWords[1]}`
+      : (precedingWords[0] ?? "");
+  queueCompletionTelemetry({
+    commandPath: cmdPath,
+    durationMs: performance.now() - startMs,
+    resultCount: completions.length,
+  });
 }
 
 /**
  * Commands that accept org/project positional args.
  *
  * Hardcoded for fast-path performance — cannot derive from the route map
- * at runtime because `app.ts` imports `@sentry/bun`. A property test in
+ * at runtime because `app.ts` imports `@sentry/node-core`. A property test in
  * `completions.property.test.ts` verifies this set stays in sync.
  *
  * @internal Exported for testing only.

@@ -103,6 +103,21 @@ export async function withTelemetry<T>(
   // Initialize user and instance context
   await initTelemetryContext();
 
+  // Flush deferred completion telemetry (queued during __complete fast-path).
+  // Best-effort: never block CLI execution for telemetry emission.
+  try {
+    const { drainCompletionTelemetry } = await import(
+      "./db/completion-telemetry.js"
+    );
+    for (const entry of drainCompletionTelemetry()) {
+      Sentry.metrics.distribution("completion.duration_ms", entry.durationMs, {
+        attributes: { command_path: entry.commandPath },
+      });
+    }
+  } catch {
+    // Queue flush is non-essential
+  }
+
   try {
     return await Sentry.startSpanManual(
       { name: "cli.command", op: "cli.command", forceTransaction: true },

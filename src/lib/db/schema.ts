@@ -15,7 +15,7 @@ import type { Database } from "bun:sqlite";
 import { stringifyUnknown } from "../errors.js";
 import { logger } from "../logger.js";
 
-export const CURRENT_SCHEMA_VERSION = 10;
+export const CURRENT_SCHEMA_VERSION = 11;
 
 /** Environment variable to disable auto-repair */
 const NO_AUTO_REPAIR_ENV = "SENTRY_CLI_NO_AUTO_REPAIR";
@@ -213,6 +213,25 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
         default: "(unixepoch() * 1000)",
       },
       ttl_expires_at: { type: "INTEGER", notNull: true },
+    },
+  },
+  /**
+   * Queue for deferred completion telemetry.
+   *
+   * Shell completions write timing data here (zero Sentry SDK overhead).
+   * The next normal CLI run flushes entries as Sentry metrics and deletes them.
+   */
+  completion_telemetry_queue: {
+    columns: {
+      id: { type: "INTEGER", primaryKey: true },
+      created_at: {
+        type: "INTEGER",
+        notNull: true,
+        default: "(unixepoch() * 1000)",
+      },
+      command_path: { type: "TEXT", notNull: true },
+      duration_ms: { type: "INTEGER", notNull: true },
+      result_count: { type: "INTEGER", notNull: true },
     },
   },
 };
@@ -731,6 +750,11 @@ export function runMigrations(db: Database): void {
   // Migration 9 -> 10: Add org_role column to org_regions for cached role lookups
   if (currentVersion < 10) {
     addColumnIfMissing(db, "org_regions", "org_role", "TEXT");
+  }
+
+  // Migration 10 -> 11: Add completion_telemetry_queue table
+  if (currentVersion < 11) {
+    db.exec(EXPECTED_TABLES.completion_telemetry_queue as string);
   }
 
   if (currentVersion < CURRENT_SCHEMA_VERSION) {
