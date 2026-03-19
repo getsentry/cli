@@ -41,7 +41,7 @@ export function queueCompletionTelemetry(entry: {
 /**
  * Drain all queued completion telemetry entries.
  *
- * Reads and deletes all entries in a single transaction.
+ * Atomically reads and deletes all entries using `DELETE ... RETURNING`.
  * Called during normal CLI runs inside `withTelemetry()`.
  *
  * @returns The queued entries for emission as Sentry metrics
@@ -49,9 +49,10 @@ export function queueCompletionTelemetry(entry: {
 export function drainCompletionTelemetry(): CompletionTelemetryEntry[] {
   try {
     const db = getDatabase();
+    // Atomic read + delete — no race with concurrent __complete processes
     const rows = db
       .query(
-        "SELECT id, command_path, duration_ms, result_count FROM completion_telemetry_queue ORDER BY id"
+        "DELETE FROM completion_telemetry_queue RETURNING id, command_path, duration_ms, result_count"
       )
       .all() as {
       id: number;
@@ -59,13 +60,6 @@ export function drainCompletionTelemetry(): CompletionTelemetryEntry[] {
       duration_ms: number;
       result_count: number;
     }[];
-
-    if (rows.length === 0) {
-      return [];
-    }
-
-    // Delete all drained entries
-    db.query("DELETE FROM completion_telemetry_queue").run();
 
     return rows.map((row) => ({
       id: row.id,
