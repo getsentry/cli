@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
+  extractCommandTree,
   getCompletionPath,
   getCompletionScript,
   installCompletions,
@@ -36,6 +37,44 @@ describe("completions", () => {
       expect(getCompletionScript("sh")).toBeNull();
       expect(getCompletionScript("ash")).toBeNull();
       expect(getCompletionScript("unknown")).toBeNull();
+    });
+
+    test("bash script includes __complete callback", () => {
+      const script = getCompletionScript("bash");
+      expect(script).toContain("__complete");
+    });
+
+    test("zsh script includes __complete callback", () => {
+      const script = getCompletionScript("zsh");
+      expect(script).toContain("__complete");
+    });
+
+    test("fish script includes __complete callback", () => {
+      const script = getCompletionScript("fish");
+      expect(script).toContain("__complete");
+    });
+
+    test("bash script includes flag completion variables", () => {
+      const script = getCompletionScript("bash");
+      // Should contain flag variables for at least some commands
+      expect(script).toContain("_flags=");
+    });
+  });
+
+  describe("extractCommandTree", () => {
+    test("includes flags for subcommands", () => {
+      const tree = extractCommandTree();
+      // At least one group should have subcommands with flags
+      const hasFlags = tree.groups.some((g) =>
+        g.subcommands.some((s) => s.flags.length > 0)
+      );
+      expect(hasFlags).toBe(true);
+    });
+
+    test("standalone commands include flags", () => {
+      const tree = extractCommandTree();
+      const hasFlags = tree.standalone.some((s) => s.flags.length > 0);
+      expect(hasFlags).toBe(true);
     });
   });
 

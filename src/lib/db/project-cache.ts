@@ -137,6 +137,35 @@ export async function setCachedProjectByDsnKey(
   maybeCleanupCaches();
 }
 
+/**
+ * Get cached project slugs for a specific organization.
+ *
+ * Used by shell completions to suggest projects within a known org.
+ * Matches on `org_slug` (case-sensitive) and deduplicates by project slug.
+ *
+ * @param orgSlug - The organization slug to filter by
+ */
+export async function getCachedProjectsForOrg(
+  orgSlug: string
+): Promise<{ projectSlug: string; projectName: string }[]> {
+  const db = getDatabase();
+  // Use MAX(cached_at) to deterministically pick the most recently cached
+  // project_name when the same project appears under different cache keys
+  // (e.g., both orgId:projectId and dsn:publicKey).
+  // SQLite guarantees that non-aggregated columns come from the row that
+  // produced the MAX/MIN aggregate value.
+  const rows = db
+    .query(
+      "SELECT project_slug, project_name, MAX(cached_at) FROM project_cache WHERE org_slug = ? GROUP BY project_slug"
+    )
+    .all(orgSlug) as Pick<ProjectCacheRow, "project_slug" | "project_name">[];
+
+  return rows.map((row) => ({
+    projectSlug: row.project_slug,
+    projectName: row.project_name,
+  }));
+}
+
 export async function clearProjectCache(): Promise<void> {
   const db = getDatabase();
   db.query("DELETE FROM project_cache").run();

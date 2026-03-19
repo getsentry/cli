@@ -6,7 +6,6 @@
 import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { createTracedDatabase } from "../telemetry.js";
 import { migrateFromJson } from "./migration.js";
 import { initSchema, runMigrations } from "./schema.js";
 
@@ -100,8 +99,17 @@ export function getDatabase(): Database {
     runMigrations(rawDb);
     migrateFromJson(rawDb);
 
-    // Wrap with tracing proxy for automatic query instrumentation
-    db = createTracedDatabase(rawDb);
+    // Wrap with tracing proxy for automatic query instrumentation.
+    // Lazy-require telemetry to avoid top-level import of @sentry/node-core (~85ms).
+    // Shell completions set SENTRY_CLI_NO_TELEMETRY=1 to skip this entirely.
+    if (process.env.SENTRY_CLI_NO_TELEMETRY === "1") {
+      db = rawDb;
+    } else {
+      const { createTracedDatabase } = require("../telemetry.js") as {
+        createTracedDatabase: (d: Database) => Database;
+      };
+      db = createTracedDatabase(rawDb);
+    }
     dbOpenedPath = dbPath;
 
     return db;

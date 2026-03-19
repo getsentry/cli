@@ -9,6 +9,7 @@ import {
   clearProjectCache,
   getCachedProject,
   getCachedProjectByDsnKey,
+  getCachedProjectsForOrg,
   setCachedProject,
   setCachedProjectByDsnKey,
 } from "../../../src/lib/db/project-cache.js";
@@ -346,5 +347,56 @@ describe("cache key uniqueness", () => {
 
     const result = await getCachedProject("123", "456");
     expect(result?.orgSlug).toBe("numeric-org");
+  });
+});
+
+describe("getCachedProjectsForOrg", () => {
+  test("returns empty array when no projects for org", async () => {
+    const result = await getCachedProjectsForOrg("nonexistent-org");
+    expect(result).toEqual([]);
+  });
+
+  test("returns projects only for the specified org", async () => {
+    await setCachedProject("org-1", "project-1", {
+      orgSlug: "alpha-org",
+      orgName: "Alpha",
+      projectSlug: "alpha-project",
+      projectName: "Alpha Project",
+    });
+    await setCachedProject("org-2", "project-2", {
+      orgSlug: "beta-org",
+      orgName: "Beta",
+      projectSlug: "beta-project",
+      projectName: "Beta Project",
+    });
+    await setCachedProject("org-3", "project-3", {
+      orgSlug: "alpha-org",
+      orgName: "Alpha",
+      projectSlug: "alpha-second",
+      projectName: "Alpha Second",
+    });
+
+    const result = await getCachedProjectsForOrg("alpha-org");
+    expect(result).toHaveLength(2);
+    expect(result).toContainEqual({
+      projectSlug: "alpha-project",
+      projectName: "Alpha Project",
+    });
+    expect(result).toContainEqual({
+      projectSlug: "alpha-second",
+      projectName: "Alpha Second",
+    });
+  });
+
+  test("returns empty for wrong org", async () => {
+    await setCachedProject("org-1", "project-1", {
+      orgSlug: "alpha-org",
+      orgName: "Alpha",
+      projectSlug: "alpha-project",
+      projectName: "Alpha Project",
+    });
+
+    const result = await getCachedProjectsForOrg("beta-org");
+    expect(result).toEqual([]);
   });
 });
