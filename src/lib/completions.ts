@@ -419,7 +419,7 @@ ${caseBranches}
           # Standalone command — delegate to dynamic completion
           ;;
       esac
-      ;;&
+      ;|
     args)
       # Dynamic completion for positional args (org slugs, project names)
       # In the args state, $line[1] and $line[2] hold the parsed command
