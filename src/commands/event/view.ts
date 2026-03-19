@@ -229,7 +229,8 @@ export async function resolveEventTarget(
         `sentry event view <org>/${parsed.projectSlug} ${eventId}`
       );
       return {
-        ...resolved,
+        org: resolved.org,
+        project: resolved.project,
         orgDisplay: resolved.org,
         projectDisplay: resolved.project,
       };
