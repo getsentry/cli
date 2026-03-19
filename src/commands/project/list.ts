@@ -44,7 +44,6 @@ import {
   LIST_TARGET_POSITIONAL,
   targetPatternExplanation,
 } from "../../lib/list-command.js";
-import { logger } from "../../lib/logger.js";
 import {
   dispatchOrgScopedList,
   jsonTransformListResult,
@@ -58,8 +57,6 @@ import {
 } from "../../lib/resolve-target.js";
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type { SentryProject } from "../../types/index.js";
-
-const log = logger.withTag("project-list");
 
 /** Command key for pagination cursor storage */
 export const PAGINATION_KEY = "project-list";
@@ -530,21 +527,20 @@ export async function handleProjectSearch(
     // Check if slug matches an org — user likely meant "project list <org>/"
     const matchingOrg = orgs.find((o) => o.slug === projectSlug);
     if (matchingOrg) {
-      log.warn(
-        `'${projectSlug}' is an organization, not a project. ` +
-          `Listing all projects in '${projectSlug}'.`
-      );
       const contextKey = buildContextKey(
         { type: "org-all", org: projectSlug },
         flags,
         getApiBaseUrl()
       );
-      return handleOrgAll({
+      const result = await handleOrgAll({
         org: projectSlug,
         flags,
         contextKey,
         cursor: undefined,
       });
+      const note = `'${projectSlug}' is an organization, not a project. Showing all projects in '${projectSlug}'.`;
+      result.header = result.header ? `${note}\n${result.header}` : note;
+      return result;
     }
 
     // JSON mode returns empty array; human mode throws a helpful error
