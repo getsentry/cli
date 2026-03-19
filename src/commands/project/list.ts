@@ -58,6 +58,9 @@ import {
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type { SentryProject } from "../../types/index.js";
 
+/** Extended result type with optional title shown above the table. */
+type ProjectListResult = ListResult<ProjectWithOrg> & { title?: string };
+
 /** Command key for pagination cursor storage */
 export const PAGINATION_KEY = "project-list";
 
@@ -507,7 +510,7 @@ export async function handleProjectSearch(
   projectSlug: string,
   flags: ListFlags
 ): Promise<ListResult<ProjectWithOrg>> {
-  const { projects } = await withProgress(
+  const { projects, orgs } = await withProgress(
     {
       message: `Fetching projects (up to ${flags.limit})...`,
       json: flags.json,
@@ -523,6 +526,26 @@ export async function handleProjectSearch(
         hint: `No project '${projectSlug}' found matching platform '${flags.platform}'.`,
       };
     }
+
+    // Check if slug matches an org — user likely meant "project list <org>/"
+    const matchingOrg = orgs.find((o) => o.slug === projectSlug);
+    if (matchingOrg) {
+      const contextKey = buildContextKey(
+        { type: "org-all", org: projectSlug },
+        flags,
+        getApiBaseUrl()
+      );
+      const result = await handleOrgAll({
+        org: projectSlug,
+        flags,
+        contextKey,
+        cursor: undefined,
+      });
+      const r = result as ProjectListResult;
+      r.title = `'${projectSlug}' is an organization, not a project. Showing all projects in '${projectSlug}'`;
+      return r;
+    }
+
     // JSON mode returns empty array; human mode throws a helpful error
     if (flags.json) {
       return { items: [] };
@@ -581,11 +604,16 @@ export const listCommand = buildListCommand("project", {
       "Alias: `sentry projects` → `sentry project list`",
   },
   output: {
-    human: (result: ListResult<ProjectWithOrg>) => {
+    human: (data: ListResult<ProjectWithOrg>) => {
+      const result = data as ProjectListResult;
       if (result.items.length === 0) {
         return result.hint ?? "No projects found.";
       }
-      const parts: string[] = [displayProjectTable(result.items)];
+      const parts: string[] = [];
+      if (result.title) {
+        parts.push(`\n${result.title}\n\n`);
+      }
+      parts.push(displayProjectTable(result.items));
       if (result.header) {
         parts.push(`\n${result.header}`);
       }
