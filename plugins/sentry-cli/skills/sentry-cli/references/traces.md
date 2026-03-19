@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-traces
-version: 0.19.0-dev.0
+version: 0.18.1
 description: List and inspect traces and spans for performance analysis
 requires:
   bins: ["sentry"]

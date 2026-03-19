@@ -1,6 +1,17 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.18.1
+
+### Bug Fixes 🐛
+
+- (init) Sync wizard feature metadata with supported flags by @MathurAditya724 in [#471](https://github.com/getsentry/cli/pull/471)
+- Accept nullable user fields in OAuth token response by @BYK in [#470](https://github.com/getsentry/cli/pull/470)
+
+### Internal Changes 🔧
+
+- Regenerate skill files by @github-actions[bot] in [77603fc3](https://github.com/getsentry/cli/commit/77603fc3fc4464a5507d3db55720bc760c524c48)
+
 ## 0.18.0
 
 ### New Features ✨

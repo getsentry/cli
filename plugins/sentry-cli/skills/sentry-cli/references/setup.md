@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-setup
-version: 0.19.0-dev.0
+version: 0.18.1
 description: Configure the CLI, install integrations, and manage upgrades
 requires:
   bins: ["sentry"]
