@@ -21,6 +21,7 @@ import { getProjectByAlias } from "../../lib/db/project-aliases.js";
 import { detectAllDsns } from "../../lib/dsn/index.js";
 import {
   ApiError,
+  type AuthGuardFailure,
   ContextError,
   ResolutionError,
   withAuthGuard,
@@ -218,6 +219,18 @@ async function resolveProjectSearch(
     );
   }
 
+  // If all orgs failed with non-404 errors (e.g., 403, 5xx), surface the
+  // real error instead of falling through to a misleading "not found".
+  if (successes.length === 0) {
+    const realErrors = results.filter(
+      (r): r is AuthGuardFailure => r !== undefined && !r.ok
+    );
+    const firstError = realErrors[0]?.error;
+    if (firstError instanceof ApiError && firstError.status !== 404) {
+      throw firstError;
+    }
+  }
+
   // 4. All orgs returned 404 — fall back to findProjectsBySlug for a
   //    precise error: "project not found" vs "issue not found in project".
   const { projects } = await findProjectsBySlug(projectSlug.toLowerCase());
@@ -244,14 +257,21 @@ async function resolveProjectSearch(
     );
   }
 
-  // Project exists but issue doesn't
+  // Project exists — retry the issue lookup. The fast path may have failed
+  // due to a transient error (5xx, timeout); retrying here either succeeds
+  // or propagates the real error to the user.
+  const matchedProject = projects[0];
+  const matchedOrg = matchedProject?.orgSlug;
+  if (matchedOrg && matchedProject) {
+    const retryShortId = expandToFullShortId(suffix, matchedProject.slug);
+    const issue = await getIssueByShortId(matchedOrg, retryShortId);
+    return { org: matchedOrg, issue };
+  }
+
   throw new ResolutionError(
-    `Issue '${fullShortId}'`,
+    `Project '${projectSlug}'`,
     "not found",
-    commandHint,
-    [
-      `Project '${projectSlug}' exists in org '${projects[0]?.orgSlug}', but no issue with short ID '${fullShortId}' was found.`,
-    ]
+    commandHint
   );
 }
 
