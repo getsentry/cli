@@ -11,7 +11,7 @@
 
 import { chmodSync, statSync } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
-import * as Sentry from "@sentry/bun";
+import * as Sentry from "@sentry/node-core/light";
 import {
   CLI_VERSION,
   getConfiguredSentryUrl,
@@ -23,7 +23,7 @@ import { attachSentryReporter } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 import { getRealUsername } from "./utils.js";
 
-export type { Span } from "@sentry/bun";
+export type { Span } from "@sentry/core";
 
 /** Re-imported locally because Span is exported via re-export */
 type Span = Sentry.Span;
@@ -149,7 +149,9 @@ export async function withTelemetry<T>(
  *
  * @internal Exported for testing
  */
-export function createBeforeExitHandler(client: Sentry.BunClient): () => void {
+export function createBeforeExitHandler(
+  client: Sentry.LightNodeClient
+): () => void {
   let isFlushing = false;
   return () => {
     if (isFlushing) {
@@ -249,6 +251,9 @@ const EXCLUDED_INTEGRATIONS = new Set([
 /** Current beforeExit handler, tracked so it can be replaced on re-init */
 let currentBeforeExitHandler: (() => void) | null = null;
 
+/** Whether the cli.invocation metric has already been emitted this process */
+let invocationCounted = false;
+
 /** Match all SaaS regional URLs (us.sentry.io, de.sentry.io, o1234.ingest.us.sentry.io, etc.) */
 const SENTRY_SAAS_SUBDOMAIN_RE = /^https:\/\/[^/]*\.sentry\.io(\/|$)/;
 
@@ -288,7 +293,9 @@ export function getSentryTracePropagationTargets(): (string | RegExp)[] {
  *
  * @internal Exported for testing
  */
-export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
+export function initSentry(
+  enabled: boolean
+): Sentry.LightNodeClient | undefined {
   const environment = process.env.NODE_ENV ?? "development";
 
   const client = Sentry.init({
@@ -334,6 +341,14 @@ export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
     const isBun = typeof process.versions.bun !== "undefined";
     const runtime = isBun ? "bun" : "node";
 
+    // LightNodeClient hardcodes runtime to { name: 'node' }. Override it so
+    // events carry the correct runtime when running as a compiled Bun binary.
+    const opts = client.getOptions();
+    opts.runtime = {
+      name: runtime,
+      version: isBun ? process.versions.bun : process.version,
+    };
+
     // Tag whether running as bun binary or node (npm package).
     // Kept alongside the SDK's promoted 'runtime' tag for explicit signaling
     // and backward compatibility with existing dashboards/alerts.
@@ -341,6 +356,15 @@ export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
 
     // Tag whether targeting self-hosted Sentry (not SaaS)
     Sentry.setTag("is_self_hosted", !isSentrySaasUrl(getSentryBaseUrl()));
+
+    // Track TTY vs non-TTY invocations to measure agent/CI usage percentage.
+    // Guarded because initSentry is called again on auto-login retry.
+    if (!invocationCounted) {
+      invocationCounted = true;
+      Sentry.metrics.count("cli.invocation", 1, {
+        attributes: { is_tty: !!process.stdout.isTTY },
+      });
+    }
 
     // Wire up consola → Sentry log forwarding now that the client is active
     attachSentryReporter();

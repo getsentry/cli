@@ -16,7 +16,7 @@ import type { Dirent } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
-import * as Sentry from "@sentry/bun";
+import * as Sentry from "@sentry/node-core/light";
 import ignore, { type Ignore } from "ignore";
 import pLimit from "p-limit";
 import { DEFAULT_SENTRY_HOST, getConfiguredSentryUrl } from "../constants.js";

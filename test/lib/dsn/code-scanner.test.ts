@@ -205,7 +205,9 @@ describe("Code Scanner", () => {
     });
 
     test("throws ConfigError when SENTRY_URL is invalid", () => {
-      process.env.SENTRY_URL = "not-a-valid-url";
+      // normalizeUrl prepends https:// to bare strings, so use a value
+      // that remains unparseable even after normalization (https://://)
+      process.env.SENTRY_URL = "://";
       const content = `
         const SAAS_DSN = "https://abc@o123.ingest.sentry.io/456";
       `;

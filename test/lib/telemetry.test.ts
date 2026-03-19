@@ -8,7 +8,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
-import * as Sentry from "@sentry/bun";
+import * as Sentry from "@sentry/node-core/light";
 import { ApiError, AuthError } from "../../src/lib/errors.js";
 import {
   createTracedDatabase,

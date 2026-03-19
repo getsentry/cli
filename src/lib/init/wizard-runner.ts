@@ -9,7 +9,7 @@
 import { randomBytes } from "node:crypto";
 import { cancel, confirm, intro, log, spinner } from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
-import { captureException } from "@sentry/bun";
+import { captureException } from "@sentry/node-core/light";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";

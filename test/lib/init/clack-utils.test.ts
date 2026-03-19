@@ -9,6 +9,7 @@ import {
   abortIfCancelled,
   featureHint,
   featureLabel,
+  sortFeatures,
   WizardCancelledError,
 } from "../../../src/lib/init/clack-utils.js";
 
@@ -49,6 +50,9 @@ describe("featureLabel", () => {
       "Performance Monitoring (Tracing)"
     );
     expect(featureLabel("logs")).toBe("Logging");
+    expect(featureLabel("crons")).toBe("Crons");
+    expect(featureLabel("aiMonitoring")).toBe("AI Monitoring");
+    expect(featureLabel("userFeedback")).toBe("User Feedback");
   });
 
   test("returns id as passthrough for unknown feature", () => {
@@ -60,9 +64,46 @@ describe("featureHint", () => {
   test("returns hint for known feature", () => {
     expect(featureHint("errorMonitoring")).toBe("Error and crash reporting");
     expect(featureHint("sessionReplay")).toBe("Visual replay of user sessions");
+    expect(featureHint("crons")).toBe("Monitor scheduled and recurring jobs");
+    expect(featureHint("aiMonitoring")).toBe(
+      "Track AI model calls, latency, and failures"
+    );
+    expect(featureHint("userFeedback")).toBe(
+      "Collect in-app user feedback and reports"
+    );
   });
 
   test("returns undefined for unknown feature", () => {
     expect(featureHint("unknownFeature")).toBeUndefined();
+  });
+});
+
+describe("sortFeatures", () => {
+  test("orders known features by canonical display order", () => {
+    expect(
+      sortFeatures([
+        "userFeedback",
+        "logs",
+        "errorMonitoring",
+        "sourceMaps",
+        "crons",
+        "aiMonitoring",
+      ])
+    ).toEqual([
+      "errorMonitoring",
+      "logs",
+      "sourceMaps",
+      "crons",
+      "aiMonitoring",
+      "userFeedback",
+    ]);
+  });
+
+  test("keeps unknown features after known ones", () => {
+    expect(sortFeatures(["unknown", "metrics", "another"])).toEqual([
+      "metrics",
+      "unknown",
+      "another",
+    ]);
   });
 });
