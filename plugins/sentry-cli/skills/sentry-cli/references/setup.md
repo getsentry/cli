@@ -56,7 +56,7 @@ Initialize Sentry in your project
 **Flags:**
 - `-y, --yes - Non-interactive mode (accept defaults)`
 - `--dry-run - Preview changes without applying them`
-- `--features <value>... - Features to enable: errors,tracing,logs,replay,metrics`
+- `--features <value>... - Features to enable: errors,tracing,logs,replay,metrics,profiling,sourcemaps,crons,ai-monitoring,user-feedback`
 - `-t, --team <value> - Team slug to create the project under`
 
 ### `sentry schema <resource...>`
