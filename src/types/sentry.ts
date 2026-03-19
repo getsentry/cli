@@ -210,12 +210,20 @@ export type UserRegionsResponse = z.infer<typeof UserRegionsResponseSchema>;
 
 // User
 
+/**
+ * Minimal user schema for the `/auth/` endpoint response.
+ *
+ * All optional fields use `.nullish()` (accepts both `null` and `undefined`)
+ * because the Sentry API can return `null` for any of these.
+ * Note: `@sentry/api` doesn't export types for the `/auth/` endpoint —
+ * it's undocumented, so we define this schema manually.
+ */
 export const SentryUserSchema = z
   .object({
     id: z.string(),
-    email: z.string().optional(),
-    username: z.string().optional(),
-    name: z.string().optional(),
+    email: z.string().nullish(),
+    username: z.string().nullish(),
+    name: z.string().nullish(),
   })
   .passthrough();
 
