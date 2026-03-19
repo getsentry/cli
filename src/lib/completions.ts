@@ -423,7 +423,7 @@ ${caseBranches}
           ;;
       esac
       ;|
-    args)
+    args|subcommand)
       # Dynamic completion for positional args (org slugs, project names)
       # In the args state, $line[1] and $line[2] hold the parsed command
       # and subcommand. Pass them to __complete for context detection.
