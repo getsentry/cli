@@ -206,9 +206,9 @@ export function attachSentryReporter(): void {
 
   try {
     // Dynamic import to avoid pulling in Sentry at module load time.
-    // The reporter is exported from @sentry/bun (via @sentry/node → @sentry/core).
+    // The reporter is exported from @sentry/node-core/light (via @sentry/node → @sentry/core).
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const Sentry = require("@sentry/bun") as {
+    const Sentry = require("@sentry/node-core/light") as {
       createConsolaReporter: (options?: Record<string, unknown>) => {
         log: (logObj: unknown) => void;
       };

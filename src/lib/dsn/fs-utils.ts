@@ -5,7 +5,7 @@
  */
 
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
-import * as Sentry from "@sentry/bun";
+import * as Sentry from "@sentry/node-core/light";
 
 /**
  * Check if an error is an expected file system error that should be silently ignored.

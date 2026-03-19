@@ -1,0 +1,68 @@
+diff --git a/build/cjs/light/index.js b/build/cjs/light/index.js
+index 3dc8ee58043c2b0bd0903b6978dc5d1141862318..fbd6f734753f9441b5df7fbdf5222345ff316299 100644
+--- a/build/cjs/light/index.js
++++ b/build/cjs/light/index.js
+@@ -71,7 +71,6 @@ exports.addBreadcrumb = core.addBreadcrumb;
+ exports.addEventProcessor = core.addEventProcessor;
+ exports.addIntegration = core.addIntegration;
+ exports.captureCheckIn = core.captureCheckIn;
+-exports.captureConsoleIntegration = core.captureConsoleIntegration;
+ exports.captureEvent = core.captureEvent;
+ exports.captureException = core.captureException;
+ exports.captureFeedback = core.captureFeedback;
+@@ -83,12 +82,9 @@ exports.consoleLoggingIntegration = core.consoleLoggingIntegration;
+ exports.continueTrace = core.continueTrace;
+ exports.createConsolaReporter = core.createConsolaReporter;
+ exports.createTransport = core.createTransport;
+-exports.dedupeIntegration = core.dedupeIntegration;
+ exports.endSession = core.endSession;
+ exports.envToBool = core.envToBool;
+ exports.eventFiltersIntegration = core.eventFiltersIntegration;
+-exports.extraErrorDataIntegration = core.extraErrorDataIntegration;
+-exports.featureFlagsIntegration = core.featureFlagsIntegration;
+ exports.flush = core.flush;
+ exports.functionToStringIntegration = core.functionToStringIntegration;
+ exports.getActiveSpan = core.getActiveSpan;
+@@ -101,16 +97,13 @@ exports.getSpanDescendants = core.getSpanDescendants;
+ exports.getSpanStatusFromHttpCode = core.getSpanStatusFromHttpCode;
+ exports.getTraceData = core.getTraceData;
+ exports.getTraceMetaTags = core.getTraceMetaTags;
+-exports.instrumentSupabaseClient = core.instrumentSupabaseClient;
+ exports.isEnabled = core.isEnabled;
+ exports.isInitialized = core.isInitialized;
+ exports.lastEventId = core.lastEventId;
+ exports.linkedErrorsIntegration = core.linkedErrorsIntegration;
+ exports.metrics = core.metrics;
+ exports.parameterize = core.parameterize;
+-exports.profiler = core.profiler;
+ exports.requestDataIntegration = core.requestDataIntegration;
+-exports.rewriteFramesIntegration = core.rewriteFramesIntegration;
+ exports.setContext = core.setContext;
+ exports.setCurrentClient = core.setCurrentClient;
+ exports.setExtra = core.setExtra;
+@@ -128,14 +121,10 @@ exports.startNewTrace = core.startNewTrace;
+ exports.startSession = core.startSession;
+ exports.startSpan = core.startSpan;
+ exports.startSpanManual = core.startSpanManual;
+-exports.supabaseIntegration = core.supabaseIntegration;
+ exports.suppressTracing = core.suppressTracing;
+-exports.trpcMiddleware = core.trpcMiddleware;
+ exports.updateSpanName = core.updateSpanName;
+ exports.withActiveSpan = core.withActiveSpan;
+ exports.withIsolationScope = core.withIsolationScope;
+ exports.withMonitor = core.withMonitor;
+ exports.withScope = core.withScope;
+-exports.wrapMcpServerWithSentry = core.wrapMcpServerWithSentry;
+-exports.zodErrorsIntegration = core.zodErrorsIntegration;
+ //# sourceMappingURL=index.js.map
+diff --git a/build/esm/light/index.js b/build/esm/light/index.js
+index 79f2d5986c15856903201629d4cb4098b376181f..40d485768e926e6865de638b554cd432a61acc44 100644
+--- a/build/esm/light/index.js
++++ b/build/esm/light/index.js
+@@ -26,5 +26,5 @@ export { createMissingInstrumentationContext } from '../utils/createMissingInstr
+ export { makeNodeTransport } from '../transports/http.js';
+ export { cron } from '../cron/index.js';
+ export { NODE_VERSION } from '../nodeVersion.js';
+-export { SDK_VERSION, SEMANTIC_ATTRIBUTE_SENTRY_OP, SEMANTIC_ATTRIBUTE_SENTRY_ORIGIN, SEMANTIC_ATTRIBUTE_SENTRY_SAMPLE_RATE, SEMANTIC_ATTRIBUTE_SENTRY_SOURCE, Scope, addBreadcrumb, addEventProcessor, addIntegration, captureCheckIn, captureConsoleIntegration, captureEvent, captureException, captureFeedback, captureMessage, captureSession, close, consoleIntegration, consoleLoggingIntegration, continueTrace, createConsolaReporter, createTransport, dedupeIntegration, endSession, envToBool, eventFiltersIntegration, extraErrorDataIntegration, featureFlagsIntegration, flush, functionToStringIntegration, getActiveSpan, getClient, getCurrentScope, getGlobalScope, getIsolationScope, getRootSpan, getSpanDescendants, getSpanStatusFromHttpCode, getTraceData, getTraceMetaTags, instrumentSupabaseClient, isEnabled, isInitialized, lastEventId, linkedErrorsIntegration, metrics, parameterize, profiler, requestDataIntegration, rewriteFramesIntegration, setContext, setCurrentClient, setExtra, setExtras, setHttpStatus, setMeasurement, setTag, setTags, setUser, spanToBaggageHeader, spanToJSON, spanToTraceHeader, startInactiveSpan, startNewTrace, startSession, startSpan, startSpanManual, supabaseIntegration, suppressTracing, trpcMiddleware, updateSpanName, withActiveSpan, withIsolationScope, withMonitor, withScope, wrapMcpServerWithSentry, zodErrorsIntegration } from '@sentry/core';
++export { SDK_VERSION, SEMANTIC_ATTRIBUTE_SENTRY_OP, SEMANTIC_ATTRIBUTE_SENTRY_ORIGIN, SEMANTIC_ATTRIBUTE_SENTRY_SAMPLE_RATE, SEMANTIC_ATTRIBUTE_SENTRY_SOURCE, Scope, addBreadcrumb, addEventProcessor, addIntegration, captureCheckIn, captureEvent, captureException, captureFeedback, captureMessage, captureSession, close, consoleIntegration, consoleLoggingIntegration, continueTrace, createConsolaReporter, createTransport, endSession, envToBool, eventFiltersIntegration, flush, functionToStringIntegration, getActiveSpan, getClient, getCurrentScope, getGlobalScope, getIsolationScope, getRootSpan, getSpanDescendants, getSpanStatusFromHttpCode, getTraceData, getTraceMetaTags, isEnabled, isInitialized, lastEventId, linkedErrorsIntegration, metrics, parameterize, requestDataIntegration, setContext, setCurrentClient, setExtra, setExtras, setHttpStatus, setMeasurement, setTag, setTags, setUser, spanToBaggageHeader, spanToJSON, spanToTraceHeader, startInactiveSpan, startNewTrace, startSession, startSpan, startSpanManual, suppressTracing, updateSpanName, withActiveSpan, withIsolationScope, withMonitor, withScope } from '@sentry/core';
+ //# sourceMappingURL=index.js.map

@@ -7,7 +7,7 @@
  */
 
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
-import * as Sentry from "@sentry/bun";
+import * as Sentry from "@sentry/node-core/light";
 import type { z } from "zod";
 
 import { ApiError, AuthError, stringifyUnknown } from "../errors.js";
