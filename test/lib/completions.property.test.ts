@@ -16,11 +16,20 @@ import { proposeCompletions } from "@stricli/core";
 import { constantFrom, assert as fcAssert, property } from "fast-check";
 import { app } from "../../src/app.js";
 import {
+  ORG_ONLY_COMMANDS,
+  ORG_PROJECT_COMMANDS,
+} from "../../src/lib/complete.js";
+import {
   extractCommandTree,
   generateBashCompletion,
   generateFishCompletion,
   generateZshCompletion,
 } from "../../src/lib/completions.js";
+import {
+  isCommand,
+  isRouteMap,
+  type RouteMap,
+} from "../../src/lib/introspect.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
 // -- Arbitraries --
@@ -335,6 +344,85 @@ echo "\${COMPREPLY[*]}"
 
       const expected = group.subcommands.map((s) => s.name).sort();
       expect(completions.sort()).toEqual(expected);
+    }
+  });
+});
+
+describe("complete.ts: command set drift detection", () => {
+  /**
+   * Walk the Stricli route tree and collect all "group subcommand" paths
+   * that have any positional parameter with an org-related placeholder.
+   */
+  function collectOrgCommands(routeMap: RouteMap): Set<string> {
+    const orgCommands = new Set<string>();
+
+    for (const entry of routeMap.getAllEntries()) {
+      if (entry.hidden) continue;
+      const name = entry.name.original;
+
+      if (isRouteMap(entry.target)) {
+        for (const sub of entry.target.getAllEntries()) {
+          if (sub.hidden || !isCommand(sub.target)) continue;
+
+          const pos = sub.target.parameters.positional;
+          if (!pos) continue;
+
+          const placeholder =
+            pos.kind === "tuple"
+              ? pos.parameters.map((p) => p.placeholder ?? "").join(" ")
+              : (pos.parameter?.placeholder ?? "");
+
+          // Any placeholder mentioning "org" suggests the command accepts
+          // an org target — it should be in one of the completion sets.
+          if (/\borg\b/i.test(placeholder) || placeholder === "issue") {
+            orgCommands.add(`${name} ${sub.name.original}`);
+          }
+        }
+      }
+    }
+
+    return orgCommands;
+  }
+
+  const { routes } = require("../../src/app.js") as { routes: RouteMap };
+
+  test("every command in ORG_PROJECT_COMMANDS exists in the route tree", () => {
+    const tree = extractCommandTree();
+    const allPaths = new Set<string>();
+    for (const g of tree.groups) {
+      for (const s of g.subcommands) {
+        allPaths.add(`${g.name} ${s.name}`);
+      }
+    }
+    for (const cmd of ORG_PROJECT_COMMANDS) {
+      expect(allPaths.has(cmd)).toBe(true);
+    }
+  });
+
+  test("every command in ORG_ONLY_COMMANDS exists in the route tree", () => {
+    const tree = extractCommandTree();
+    const allPaths = new Set<string>();
+    for (const g of tree.groups) {
+      for (const s of g.subcommands) {
+        allPaths.add(`${g.name} ${s.name}`);
+      }
+    }
+    for (const cmd of ORG_ONLY_COMMANDS) {
+      expect(allPaths.has(cmd)).toBe(true);
+    }
+  });
+
+  test("org-positional commands are in at least one set", () => {
+    const orgCommands = collectOrgCommands(routes);
+    const combined = new Set([...ORG_PROJECT_COMMANDS, ...ORG_ONLY_COMMANDS]);
+    for (const cmd of orgCommands) {
+      expect(combined.has(cmd)).toBe(true);
+    }
+  });
+
+  test("no commands are in both sets", () => {
+    for (const cmd of ORG_PROJECT_COMMANDS) {
+      expect(ORG_ONLY_COMMANDS.has(cmd)).toBe(false);
     }
   });
 });

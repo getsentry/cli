@@ -15,7 +15,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { routes } from "../app.js";
-import type { FlagDef } from "./introspect.js";
+import { type FlagDef, isCommand, isRouteMap } from "./introspect.js";
 import type { ShellType } from "./shell.js";
 
 /** Where completions are installed */
@@ -25,43 +25,6 @@ export type CompletionLocation = {
   /** Whether the file was created or already existed */
   created: boolean;
 };
-
-/**
- * Check if a routing target is a route map (has subcommands).
- * Works with untyped Stricli route targets (avoids generic type constraints).
- */
-function isRouteMap(target: unknown): target is {
-  getAllEntries: () => readonly {
-    name: { original: string };
-    target: unknown;
-    hidden: boolean;
-  }[];
-  brief: string;
-} {
-  return (
-    typeof target === "object" &&
-    target !== null &&
-    typeof (target as Record<string, unknown>).getAllEntries === "function"
-  );
-}
-
-/**
- * Check if a routing target is a command (has parameters with flags).
- * Works with untyped Stricli route targets.
- */
-function isCommandTarget(target: unknown): target is {
-  brief: string;
-  parameters: {
-    flags?: Record<string, FlagDef>;
-  };
-} {
-  return (
-    typeof target === "object" &&
-    target !== null &&
-    "parameters" in target &&
-    !("getAllEntries" in target)
-  );
-}
 
 /** Flag metadata for shell completion */
 type FlagEntry = {
@@ -108,19 +71,21 @@ function extractFlagEntries(
     return [];
   }
 
-  return Object.entries(flags)
-    .filter(([, def]) => !def.hidden)
-    .map(([name, def]) => {
-      const entry: FlagEntry = { name, brief: def.brief ?? "" };
-      // Extract enum values if available
-      if (def.kind === "enum" && "values" in def) {
-        const enumDef = def as FlagDef & { values?: readonly string[] };
-        if (enumDef.values) {
-          entry.enumValues = [...enumDef.values];
-        }
+  const entries: FlagEntry[] = [];
+  for (const [name, def] of Object.entries(flags)) {
+    if (def.hidden) {
+      continue;
+    }
+    const entry: FlagEntry = { name, brief: def.brief ?? "" };
+    if (def.kind === "enum" && "values" in def) {
+      const enumDef = def as FlagDef & { values?: readonly string[] };
+      if (enumDef.values) {
+        entry.enumValues = [...enumDef.values];
       }
-      return entry;
-    });
+    }
+    entries.push(entry);
+  }
+  return entries;
 }
 
 /**
@@ -128,7 +93,7 @@ function extractFlagEntries(
  * Extracts flags if the target is a command.
  */
 function buildCommandEntry(name: string, target: unknown): CommandEntry {
-  const flags = isCommandTarget(target)
+  const flags = isCommand(target)
     ? extractFlagEntries(target.parameters.flags)
     : [];
   return {
@@ -148,13 +113,10 @@ function extractSubcommands(routeMap: {
     hidden: boolean;
   }[];
 }): CommandEntry[] {
-  const subcommands: CommandEntry[] = [];
-  for (const sub of routeMap.getAllEntries()) {
-    if (!sub.hidden) {
-      subcommands.push(buildCommandEntry(sub.name.original, sub.target));
-    }
-  }
-  return subcommands;
+  return routeMap
+    .getAllEntries()
+    .filter((sub) => !sub.hidden)
+    .map((sub) => buildCommandEntry(sub.name.original, sub.target));
 }
 
 /**
@@ -191,10 +153,14 @@ export function extractCommandTree(): CommandTree {
 
 /**
  * Sanitize a string for use in a shell variable name.
- * Replaces hyphens and dots with underscores.
+ *
+ * Uses a whitelist approach — replaces any character that is not a valid
+ * shell identifier character (`[a-zA-Z0-9_]`) with an underscore.
+ * Input comes from Stricli route/flag names (alphanumeric + hyphen),
+ * but the whitelist guards against unexpected characters.
  */
 function shellVarName(s: string): string {
-  return s.replace(/[-. ]/g, "_");
+  return s.replace(/[^a-zA-Z0-9_]/g, "_");
 }
 
 /** Collected flag and enum variable declarations for bash scripts. */
@@ -314,8 +280,8 @@ export function generateBashCompletion(binaryName: string): string {
 # Auto-generated from command definitions
 
 # Sanitize a string for use as a bash variable name suffix.
-# Matches shellVarName() in completions.ts: replaces hyphens, dots, spaces.
-__${binaryName}_varname() { echo "\${1//[-. ]/_}"; }
+# Mirrors shellVarName() in completions.ts — replaces non-identifier chars.
+__${binaryName}_varname() { echo "\${1//[^a-zA-Z0-9_]/_}"; }
 
 _${binaryName}_completions() {
   local cur prev words cword
@@ -333,6 +299,25 @@ ${enumVarLines.join("\n")}
     2)
       case "\${prev}" in
 ${caseBranches}
+        *)
+          # Standalone command: check for flags at position 2
+          if [[ "\${cur}" == --* ]]; then
+            local standalone_var="$(__${binaryName}_varname "\${prev}")_flags"
+            if [[ -n "\${!standalone_var+x}" ]]; then
+              COMPREPLY=($(compgen -W "\${!standalone_var}" -- "\${cur}"))
+            fi
+          else
+            # Dynamic value completion for standalone commands
+            local IFS=$'\\n'
+            COMPREPLY=($(${binaryName} __complete "\${COMP_WORDS[@]:1}" 2>/dev/null))
+            if [[ \${#COMPREPLY[@]} -gt 0 ]]; then
+              local i
+              for i in "\${!COMPREPLY[@]}"; do
+                COMPREPLY[$i]="\${COMPREPLY[$i]%%$'\\t'*}"
+              done
+            fi
+          fi
+          ;;
       esac
       ;;
     *)
@@ -430,8 +415,11 @@ ${subArrays}
     subcommand)
       case "$line[1]" in
 ${caseBranches}
+        *)
+          # Standalone command — delegate to dynamic completion
+          ;;
       esac
-      ;;
+      ;;&
     args)
       # Dynamic completion for positional args (org slugs, project names)
       # In the args state, $line[1] and $line[2] hold the parsed command

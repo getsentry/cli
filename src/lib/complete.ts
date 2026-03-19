@@ -63,8 +63,16 @@ export async function handleComplete(args: string[]): Promise<void> {
   }
 }
 
-/** Commands that accept org/project positional args. */
-const ORG_PROJECT_COMMANDS = new Set([
+/**
+ * Commands that accept org/project positional args.
+ *
+ * Hardcoded for fast-path performance — cannot derive from the route map
+ * at runtime because `app.ts` imports `@sentry/bun`. A property test in
+ * `completions.property.test.ts` verifies this set stays in sync.
+ *
+ * @internal Exported for testing only.
+ */
+export const ORG_PROJECT_COMMANDS = new Set([
   "issue list",
   "issue view",
   "issue explain",
@@ -84,8 +92,12 @@ const ORG_PROJECT_COMMANDS = new Set([
   "dashboard list",
 ]);
 
-/** Commands that accept only an org slug (no project). */
-const ORG_ONLY_COMMANDS = new Set([
+/**
+ * Commands that accept only an org slug (no project).
+ *
+ * @internal Exported for testing only.
+ */
+export const ORG_ONLY_COMMANDS = new Set([
   "org view",
   "team list",
   "repo list",
@@ -125,18 +137,18 @@ export async function getCompletions(
 }
 
 /**
- * Fuzzy-match cached org slugs and build completions.
+ * Complete organization slugs with fuzzy matching.
  *
- * Shared by both `completeOrgSlugs` (bare slugs) and the slash variant
- * (slugs with trailing `/`). Avoids duplicating the cache query, fuzzy
- * match, and name lookup logic.
+ * Queries the org_regions cache for all known org slugs and matches
+ * them against the partial input.
  *
  * @param partial - Partial org slug to match
- * @param formatValue - Transform a matched slug into the completion value
+ * @param suffix - Appended to each slug (e.g., "/" for org/project mode)
+ * @returns Completions with org names as descriptions
  */
-async function matchOrgSlugs(
+export async function completeOrgSlugs(
   partial: string,
-  formatValue: (slug: string) => string
+  suffix = ""
 ): Promise<Completion[]> {
   const orgs = await getCachedOrganizations();
   if (orgs.length === 0) {
@@ -147,24 +159,10 @@ async function matchOrgSlugs(
   const matched = fuzzyMatch(partial, slugs);
 
   const nameMap = new Map(orgs.map((o) => [o.slug, o.name]));
-
   return matched.map((slug) => ({
-    value: formatValue(slug),
+    value: `${slug}${suffix}`,
     description: nameMap.get(slug),
   }));
-}
-
-/**
- * Complete organization slugs with fuzzy matching.
- *
- * Queries the org_regions cache for all known org slugs and matches
- * them against the partial input.
- *
- * @param partial - Partial org slug to match
- * @returns Completions with org names as descriptions
- */
-export function completeOrgSlugs(partial: string): Promise<Completion[]> {
-  return matchOrgSlugs(partial, (slug) => slug);
 }
 
 /**
@@ -218,7 +216,7 @@ export async function completeOrgSlashProject(
  * `sentry/` so they can continue typing the project name.
  */
 function completeOrgSlugsWithSlash(partial: string): Promise<Completion[]> {
-  return matchOrgSlugs(partial, (slug) => `${slug}/`);
+  return completeOrgSlugs(partial, "/");
 }
 
 /**

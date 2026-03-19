@@ -111,18 +111,28 @@ export type ResolvedPath =
 
 /**
  * Check if a routing target is a RouteMap (has subcommands).
- * RouteMap has getAllEntries(), Command does not.
+ *
+ * Accepts `unknown` so callers (e.g., completions.ts) can use it on raw
+ * Stricli route entries without first narrowing to {@link RouteTarget}.
  */
-export function isRouteMap(target: RouteTarget): target is RouteMap {
-  return "getAllEntries" in target;
+export function isRouteMap(target: unknown): target is RouteMap {
+  return (
+    typeof target === "object" && target !== null && "getAllEntries" in target
+  );
 }
 
 /**
  * Check if a routing target is a Command (has parameters).
- * Commands have parameters but no getAllEntries.
+ *
+ * Accepts `unknown` for the same reason as {@link isRouteMap}.
  */
-export function isCommand(target: RouteTarget): target is Command {
-  return "parameters" in target && !("getAllEntries" in target);
+export function isCommand(target: unknown): target is Command {
+  return (
+    typeof target === "object" &&
+    target !== null &&
+    "parameters" in target &&
+    !("getAllEntries" in target)
+  );
 }
 
 // ---------------------------------------------------------------------------
