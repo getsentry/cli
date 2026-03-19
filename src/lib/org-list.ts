@@ -839,7 +839,62 @@ export type DispatchOptions<TEntity = unknown, TWithOrg = unknown> = {
    * `issue list`) can list those mode types here to bypass the guard.
    */
   allowCursorInModes?: readonly ParsedOrgProject["type"][];
+  /**
+   * Behavior when a project-search slug matches a cached organization.
+   *
+   * Before cursor validation and handler dispatch, the dispatcher checks
+   * whether the bare slug matches a cached org. This prevents commands
+   * from accidentally treating an org slug as a project name.
+   *
+   * - `"redirect"` (default): Convert to org-all mode with a warning log.
+   *   The existing org-all handler runs naturally.
+   * - `"error"`: Throw a {@link ResolutionError} with actionable hints.
+   *   Use this when org-all redirect is inappropriate (e.g., issue list
+   *   has custom per-project query logic that doesn't support org-all).
+   *
+   * Cache-only: if the cache is cold or stale, the check is skipped and
+   * the handler's own org-slug check serves as a safety net.
+   */
+  orgSlugMatchBehavior?: "redirect" | "error";
 };
+
+/**
+ * Pre-check: when a bare slug matches a cached organization, redirect to
+ * org-all mode or throw an error before handler dispatch. This prevents
+ * commands from accidentally treating an org slug as a project name (CLI-9A).
+ *
+ * Cache-only: if the cache is cold or stale, returns the original parsed
+ * value and the handler's own org-slug check serves as a safety net.
+ */
+async function resolveOrgSlugMatch(
+  parsed: ParsedOrgProject & { type: "project-search" },
+  behavior: "redirect" | "error",
+  config: ListCommandMeta
+): Promise<ParsedOrgProject> {
+  const slug = parsed.projectSlug;
+  const { getCachedOrganizations } = await import("./db/regions.js");
+  const cachedOrgs = await getCachedOrganizations();
+  const matchingOrg = cachedOrgs.find((o) => o.slug === slug);
+  if (!matchingOrg) {
+    return parsed;
+  }
+  if (behavior === "error") {
+    throw new ResolutionError(
+      `'${slug}'`,
+      "is an organization, not a project",
+      `${config.commandPrefix} ${slug}/`,
+      [
+        `List projects: sentry project list ${slug}/`,
+        `Specify a project: ${config.commandPrefix} ${slug}/<project>`,
+      ]
+    );
+  }
+  log.warn(
+    `'${slug}' is an organization, not a project. ` +
+      `Listing all ${config.entityPlural} in '${slug}'.`
+  );
+  return { type: "org-all", org: matchingOrg.slug };
+}
 
 /**
  * Validate the cursor flag and dispatch to the correct mode handler.
@@ -859,14 +914,27 @@ export async function dispatchOrgScopedList<TEntity, TWithOrg>(
 ): Promise<ListResult<any>> {
   const { config, cwd, flags, parsed, overrides } = options;
 
+  let effectiveParsed: ParsedOrgProject = parsed;
+
+  if (
+    effectiveParsed.type === "project-search" &&
+    options.orgSlugMatchBehavior
+  ) {
+    effectiveParsed = await resolveOrgSlugMatch(
+      effectiveParsed,
+      options.orgSlugMatchBehavior,
+      config
+    );
+  }
+
   const cursorAllowedModes: readonly ParsedOrgProject["type"][] = [
     "org-all",
     ...(options.allowCursorInModes ?? []),
   ];
-  if (flags.cursor && !cursorAllowedModes.includes(parsed.type)) {
+  if (flags.cursor && !cursorAllowedModes.includes(effectiveParsed.type)) {
     const hint =
-      parsed.type === "project-search"
-        ? `\n\nDid you mean '${config.commandPrefix} ${parsed.projectSlug}/'? ` +
+      effectiveParsed.type === "project-search"
+        ? `\n\nDid you mean '${config.commandPrefix} ${effectiveParsed.projectSlug}/'? ` +
           `A bare name searches for a project — add a trailing slash to list an org's ${config.entityPlural}.`
         : "";
     throw new ValidationError(
@@ -877,11 +945,13 @@ export async function dispatchOrgScopedList<TEntity, TWithOrg>(
     );
   }
 
-  let effectiveParsed: ParsedOrgProject = parsed;
-  if (parsed.type === "explicit" || parsed.type === "org-all") {
-    const effectiveOrg = await resolveEffectiveOrg(parsed.org);
-    if (effectiveOrg !== parsed.org) {
-      effectiveParsed = { ...parsed, org: effectiveOrg };
+  if (
+    effectiveParsed.type === "explicit" ||
+    effectiveParsed.type === "org-all"
+  ) {
+    const effectiveOrg = await resolveEffectiveOrg(effectiveParsed.org);
+    if (effectiveOrg !== effectiveParsed.org) {
+      effectiveParsed = { ...effectiveParsed, org: effectiveOrg };
     }
   }
 

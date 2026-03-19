@@ -579,6 +579,7 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
         cwd,
         flags,
         parsed,
+        orgSlugMatchBehavior: "redirect",
       });
       yield new CommandOutput(result);
       // Only forward hint to the footer when items exist — empty results

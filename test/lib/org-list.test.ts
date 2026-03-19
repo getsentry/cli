@@ -21,6 +21,8 @@ import * as apiClient from "../../src/lib/api-client.js";
 import * as defaults from "../../src/lib/db/defaults.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as paginationDb from "../../src/lib/db/pagination.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as regions from "../../src/lib/db/regions.js";
 import {
   AuthError,
   ResolutionError,
@@ -900,5 +902,172 @@ describe("dispatchOrgScopedList", () => {
     findProjectsBySlugSpy.mockRestore();
     localSetPaginationSpy.mockRestore();
     localClearPaginationSpy.mockRestore();
+  });
+
+  // -------------------------------------------------------------------------
+  // orgSlugMatchBehavior pre-check
+  // -------------------------------------------------------------------------
+
+  describe("orgSlugMatchBehavior", () => {
+    let getCachedOrgsSpy: ReturnType<typeof spyOn>;
+
+    beforeEach(() => {
+      getCachedOrgsSpy = spyOn(
+        regions,
+        "getCachedOrganizations"
+      ).mockResolvedValue([]);
+    });
+
+    afterEach(() => {
+      getCachedOrgsSpy.mockRestore();
+    });
+
+    test("redirect converts project-search to org-all when slug matches cached org", async () => {
+      getCachedOrgsSpy.mockResolvedValue([
+        { slug: "acme-corp", id: "1", name: "Acme Corp" },
+      ]);
+
+      const items: FakeEntity[] = [{ id: "1", name: "Widget A" }];
+      const config = makeConfig({
+        listPaginated: mock(() =>
+          Promise.resolve({ data: items, nextCursor: undefined })
+        ),
+      });
+
+      const result = await dispatchOrgScopedList({
+        config,
+        cwd: "/tmp",
+        flags: { limit: 10, json: true },
+        parsed: { type: "project-search", projectSlug: "acme-corp" },
+        orgSlugMatchBehavior: "redirect",
+      });
+
+      // Should have redirected to org-all → listPaginated called
+      expect(config.listPaginated).toHaveBeenCalled();
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].orgSlug).toBe("acme-corp");
+    });
+
+    test("error throws ResolutionError when slug matches cached org", async () => {
+      getCachedOrgsSpy.mockResolvedValue([
+        { slug: "acme-corp", id: "1", name: "Acme Corp" },
+      ]);
+
+      const config = makeConfig();
+
+      await expect(
+        dispatchOrgScopedList({
+          config,
+          cwd: "/tmp",
+          flags: { limit: 10, json: false },
+          parsed: { type: "project-search", projectSlug: "acme-corp" },
+          orgSlugMatchBehavior: "error",
+        })
+      ).rejects.toThrow(ResolutionError);
+    });
+
+    test("error message includes actionable hints", async () => {
+      getCachedOrgsSpy.mockResolvedValue([
+        { slug: "acme-corp", id: "1", name: "Acme Corp" },
+      ]);
+
+      const config = makeConfig();
+
+      try {
+        await dispatchOrgScopedList({
+          config,
+          cwd: "/tmp",
+          flags: { limit: 10, json: false },
+          parsed: { type: "project-search", projectSlug: "acme-corp" },
+          orgSlugMatchBehavior: "error",
+        });
+        expect.unreachable("should have thrown");
+      } catch (e) {
+        expect(e).toBeInstanceOf(ResolutionError);
+        const err = e as ResolutionError;
+        expect(err.message).toContain("is an organization, not a project");
+        expect(err.message).toContain("acme-corp/");
+      }
+    });
+
+    test("no orgSlugMatchBehavior skips pre-check and calls handler", async () => {
+      getCachedOrgsSpy.mockResolvedValue([
+        { slug: "acme-corp", id: "1", name: "Acme Corp" },
+      ]);
+
+      const handler = mock(() =>
+        Promise.resolve({ items: [] } as ListResult<FakeWithOrg>)
+      );
+
+      await dispatchOrgScopedList({
+        config: META_ONLY,
+        cwd: "/tmp",
+        flags: { limit: 10, json: false },
+        parsed: { type: "project-search", projectSlug: "acme-corp" },
+        overrides: {
+          "auto-detect": handler,
+          explicit: handler,
+          "project-search": handler,
+          "org-all": handler,
+        },
+      });
+
+      // Without orgSlugMatchBehavior, the project-search handler runs
+      expect(handler).toHaveBeenCalledTimes(1);
+      // getCachedOrganizations should NOT have been called
+      expect(getCachedOrgsSpy).not.toHaveBeenCalled();
+    });
+
+    test("redirect with no cache match falls through to project-search handler", async () => {
+      getCachedOrgsSpy.mockResolvedValue([
+        { slug: "other-org", id: "2", name: "Other Org" },
+      ]);
+
+      const handler = mock(() =>
+        Promise.resolve({ items: [] } as ListResult<FakeWithOrg>)
+      );
+
+      await dispatchOrgScopedList({
+        config: META_ONLY,
+        cwd: "/tmp",
+        flags: { limit: 10, json: false },
+        parsed: { type: "project-search", projectSlug: "acme-corp" },
+        orgSlugMatchBehavior: "redirect",
+        overrides: {
+          "auto-detect": handler,
+          explicit: handler,
+          "project-search": handler,
+          "org-all": handler,
+        },
+      });
+
+      // No cache match → project-search handler still called
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    test("redirect with empty cache falls through to project-search handler", async () => {
+      getCachedOrgsSpy.mockResolvedValue([]);
+
+      const handler = mock(() =>
+        Promise.resolve({ items: [] } as ListResult<FakeWithOrg>)
+      );
+
+      await dispatchOrgScopedList({
+        config: META_ONLY,
+        cwd: "/tmp",
+        flags: { limit: 10, json: false },
+        parsed: { type: "project-search", projectSlug: "acme-corp" },
+        orgSlugMatchBehavior: "redirect",
+        overrides: {
+          "auto-detect": handler,
+          explicit: handler,
+          "project-search": handler,
+          "org-all": handler,
+        },
+      });
+
+      // Empty cache → project-search handler still called
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
   });
 });
