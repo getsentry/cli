@@ -546,9 +546,19 @@ function escapeSingleQuote(s: string): string {
   return s.replace(/'/g, "'\\''");
 }
 
-/** Escape characters special in double-quoted shell strings (bash/fish). */
+/**
+ * Escape characters special in double-quoted shell strings.
+ *
+ * Handles bash (`\`, `$`, `"`) and fish (`\`, `$`, `"`, `(`, `)`)
+ * since parentheses trigger command substitution in fish double quotes.
+ */
 function escapeDblQuote(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/\$/g, "\\$").replace(/"/g, '\\"');
+  return s
+    .replace(/\\/g, "\\\\")
+    .replace(/\$/g, "\\$")
+    .replace(/"/g, '\\"')
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
 }
 
 /**
