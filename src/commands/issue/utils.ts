@@ -219,14 +219,17 @@ async function resolveProjectSearch(
     );
   }
 
-  // If all orgs failed with non-404 errors (e.g., 403, 5xx), surface the
-  // real error instead of falling through to a misleading "not found".
-  if (successes.length === 0) {
-    const realErrors = results.filter(
-      (r): r is AuthGuardFailure => r !== undefined && !r.ok
-    );
+  // If every org failed with a real error (403, 5xx, network timeout),
+  // surface it instead of falling through to a misleading "not found".
+  // Only throw when ALL results are errors — if some orgs returned clean
+  // 404s ({ok: true, value: null}), fall through to the fallback for a
+  // precise error message.
+  const realErrors = results.filter(
+    (r): r is AuthGuardFailure => r !== undefined && !r.ok
+  );
+  if (realErrors.length === results.length && realErrors.length > 0) {
     const firstError = realErrors[0]?.error;
-    if (firstError instanceof ApiError && firstError.status !== 404) {
+    if (firstError instanceof Error) {
       throw firstError;
     }
   }
