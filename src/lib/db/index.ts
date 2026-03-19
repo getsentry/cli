@@ -6,7 +6,6 @@
 import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { createTracedDatabase } from "../telemetry.js";
 import { migrateFromJson } from "./migration.js";
 import { initSchema, runMigrations } from "./schema.js";
 
@@ -21,6 +20,23 @@ const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Probability of running cleanup on write operations */
 const CLEANUP_PROBABILITY = 0.1;
+
+/** When true, skip the Sentry tracing wrapper on the database connection. */
+let tracingDisabled = false;
+
+/**
+ * Disable database query tracing for this process.
+ *
+ * Call before the first `getDatabase()` invocation to avoid loading
+ * `@sentry/bun` (~280ms). Used by the `__complete` fast-path where
+ * only cached reads are needed and telemetry adds unacceptable latency.
+ *
+ * Follows the same pattern as {@link disableResponseCache} and
+ * {@link disableOrgCache}.
+ */
+export function disableDbTracing(): void {
+  tracingDisabled = true;
+}
 
 /** Traced database wrapper (returned by getDatabase) */
 let db: Database | null = null;
@@ -100,8 +116,17 @@ export function getDatabase(): Database {
     runMigrations(rawDb);
     migrateFromJson(rawDb);
 
-    // Wrap with tracing proxy for automatic query instrumentation
-    db = createTracedDatabase(rawDb);
+    // Wrap with tracing proxy for automatic query instrumentation.
+    // Lazy-require telemetry to avoid top-level import of @sentry/bun (~280ms).
+    // Shell completions disable tracing entirely via disableDbTracing().
+    if (tracingDisabled) {
+      db = rawDb;
+    } else {
+      const { createTracedDatabase } = require("../telemetry.js") as {
+        createTracedDatabase: (d: Database) => Database;
+      };
+      db = createTracedDatabase(rawDb);
+    }
     dbOpenedPath = dbPath;
 
     return db;
