@@ -148,7 +148,7 @@ function uploadSourcemap(): void {
         "--org sentry",
         "--project cli",
         `--release ${VERSION}`,
-        "--url-prefix '/$bunfs/root/'",
+        '--url-prefix "/$bunfs/root/"',
         `${BUNDLE_JS} ${SOURCEMAP_FILE}`,
       ].join(" "),
       {
