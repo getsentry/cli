@@ -399,6 +399,7 @@ export function resolveCommandPath(
       kind: "group",
       info: {
         ...subResult.info,
+        name: `${parentPrefix} ${subResult.info.name}`,
         commands: subResult.info.commands.map((cmd) => ({
           ...cmd,
           path: prependPrefix(cmd.path),

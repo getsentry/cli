@@ -146,6 +146,28 @@ describe("sentry help --json <group> <command>", () => {
   });
 });
 
+describe("sentry help --json nested routes (dashboard widget)", () => {
+  test("nested group has correct name and commands", async () => {
+    const output = await runHelp(["--json", "dashboard", "widget"]);
+    const parsed = JSON.parse(output);
+
+    expect(parsed).toHaveProperty("name", "dashboard widget");
+    expect(parsed).toHaveProperty("commands");
+    const paths = parsed.commands.map((c: { path: string }) => c.path);
+    expect(paths).toContain("sentry dashboard widget add");
+    expect(paths).toContain("sentry dashboard widget edit");
+    expect(paths).toContain("sentry dashboard widget delete");
+  });
+
+  test("nested command resolves with full path", async () => {
+    const output = await runHelp(["--json", "dashboard", "widget", "add"]);
+    const parsed = JSON.parse(output);
+
+    expect(parsed).toHaveProperty("path", "sentry dashboard widget add");
+    expect(parsed).toHaveProperty("flags");
+  });
+});
+
 describe("introspectCommand error cases", () => {
   // Error cases throw OutputError (which calls process.exit) through the
   // framework, so we test the introspection functions directly here.
