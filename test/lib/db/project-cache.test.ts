@@ -6,6 +6,7 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  cacheProjectsForOrg,
   clearProjectCache,
   getCachedProject,
   getCachedProjectByDsnKey,
@@ -347,6 +348,68 @@ describe("cache key uniqueness", () => {
 
     const result = await getCachedProject("123", "456");
     expect(result?.orgSlug).toBe("numeric-org");
+  });
+});
+
+describe("cacheProjectsForOrg", () => {
+  test("caches multiple projects in one call", async () => {
+    cacheProjectsForOrg("my-org", "My Org", [
+      { id: "1", slug: "frontend", name: "Frontend" },
+      { id: "2", slug: "backend", name: "Backend" },
+      { id: "3", slug: "mobile", name: "Mobile App" },
+    ]);
+
+    const result = await getCachedProjectsForOrg("my-org");
+    expect(result).toHaveLength(3);
+    expect(result).toContainEqual({
+      projectSlug: "frontend",
+      projectName: "Frontend",
+    });
+    expect(result).toContainEqual({
+      projectSlug: "backend",
+      projectName: "Backend",
+    });
+    expect(result).toContainEqual({
+      projectSlug: "mobile",
+      projectName: "Mobile App",
+    });
+  });
+
+  test("is idempotent on repeated calls", async () => {
+    const projects = [
+      { id: "1", slug: "frontend", name: "Frontend" },
+      { id: "2", slug: "backend", name: "Backend" },
+    ];
+
+    cacheProjectsForOrg("my-org", "My Org", projects);
+    cacheProjectsForOrg("my-org", "My Org", projects);
+
+    const result = await getCachedProjectsForOrg("my-org");
+    expect(result).toHaveLength(2);
+  });
+
+  test("empty array is a no-op", async () => {
+    cacheProjectsForOrg("my-org", "My Org", []);
+    const result = await getCachedProjectsForOrg("my-org");
+    expect(result).toEqual([]);
+  });
+
+  test("does not conflict with orgId:projectId cache entries", async () => {
+    await setCachedProject("org-123", "proj-456", {
+      orgSlug: "my-org",
+      orgName: "My Org",
+      projectSlug: "frontend",
+      projectName: "Frontend (by DSN)",
+    });
+
+    cacheProjectsForOrg("my-org", "My Org", [
+      { id: "456", slug: "frontend", name: "Frontend (by list)" },
+    ]);
+
+    // Both entries exist — getCachedProjectsForOrg deduplicates by slug
+    const result = await getCachedProjectsForOrg("my-org");
+    expect(result).toHaveLength(1);
+    expect(result[0]?.projectSlug).toBe("frontend");
   });
 });
 
