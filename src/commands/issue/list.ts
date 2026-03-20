@@ -892,6 +892,58 @@ type ResolvedTargetsOptions = {
   setContext: (orgs: string[], projects: string[]) => void;
 };
 
+/** Default --period value (used to detect user-implicit vs explicit). */
+const DEFAULT_PERIOD = "90d";
+
+/**
+ * Build an enriched error detail for 400 Bad Request responses.
+ *
+ * Appends actionable suggestions so users know what to try next. This is the
+ * most common class of API error in `issue list` (CLI-BM, CLI-7B) — the Sentry
+ * API rejects the request due to query syntax or parameter issues, but the raw
+ * "400 Bad Request" message alone doesn't guide the user to a fix.
+ *
+ * @param originalDetail - The API response detail (may be undefined)
+ * @param flags - Current command flags for context-aware hints
+ * @returns Enhanced detail string with suggestions
+ */
+function build400Detail(
+  originalDetail: string | undefined,
+  flags: Pick<ListFlags, "query" | "period">
+): string {
+  const parts: string[] = [];
+
+  if (originalDetail) {
+    parts.push(originalDetail);
+  }
+
+  const suggestions: string[] = [];
+
+  if (flags.query) {
+    suggestions.push(
+      "Check your --query syntax (Sentry search reference: https://docs.sentry.io/concepts/search/)"
+    );
+  }
+
+  if (!flags.period || flags.period === DEFAULT_PERIOD) {
+    suggestions.push("Try a shorter time range: --period 14d or --period 24h");
+  }
+
+  suggestions.push(
+    "Verify you have access to the target project: sentry project list <org>/"
+  );
+
+  if (suggestions.length > 0) {
+    parts.push("");
+    parts.push("Suggestions:");
+    for (const s of suggestions) {
+      parts.push(`  • ${s}`);
+    }
+  }
+
+  return parts.join("\n");
+}
+
 /**
  * Handle auto-detect, explicit, and project-search modes.
  *
@@ -1039,12 +1091,19 @@ async function handleResolvedTargets(
     const { error: first } = failures[0]!;
     const prefix = `Failed to fetch issues from ${targets.length} project(s)`;
 
-    // Propagate ApiError so telemetry sees the original status code
+    // Propagate ApiError so telemetry sees the original status code.
+    // For 400 errors, append actionable suggestions since the user's query
+    // or parameters are likely malformed. Common causes: invalid Sentry
+    // search syntax, unsupported period for the org's data retention.
     if (first instanceof ApiError) {
+      const detail =
+        first.status === 400
+          ? build400Detail(first.detail, flags)
+          : first.detail;
       throw new ApiError(
         `${prefix}: ${first.message}`,
         first.status,
-        first.detail,
+        detail,
         first.endpoint
       );
     }
