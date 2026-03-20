@@ -9,6 +9,7 @@ import type { SentryContext } from "../../context.js";
 import { buildOrgAwareAliases } from "../../lib/alias.js";
 import {
   API_MAX_PER_PAGE,
+  findProjectsByPattern,
   findProjectsBySlug,
   getProject,
   type IssuesPage,
@@ -314,6 +315,7 @@ type TargetResolutionResult = {
  * - org-all: All projects in specified org
  * - project-search: Find project across all orgs
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: inherent multi-mode target resolution with per-mode error handling
 async function resolveTargetsFromParsedArg(
   parsed: ReturnType<typeof parseOrgProjectArg>,
   cwd: string
@@ -427,11 +429,25 @@ async function resolveTargetsFromParsedArg(
           );
         }
 
+        // Try word-boundary matching to suggest similar projects (CLI-A4, 16 users).
+        // Uses the same findProjectsByPattern used by directory name inference.
+        // Only runs on the error path, so the extra API cost is acceptable.
+        const similar = await findProjectsByPattern(parsed.projectSlug);
+        const suggestions: string[] = [];
+        if (similar.length > 0) {
+          const names = similar
+            .slice(0, 3)
+            .map((p) => `'${p.orgSlug}/${p.slug}'`);
+          suggestions.push(`Similar projects: ${names.join(", ")}`);
+        }
+        suggestions.push(
+          "No project with this slug found in any accessible organization"
+        );
         throw new ResolutionError(
           `Project '${parsed.projectSlug}'`,
           "not found",
-          `sentry issue list <org>/${parsed.projectSlug}`,
-          ["No project with this slug found in any accessible organization"]
+          "sentry project list",
+          suggestions
         );
       }
 
