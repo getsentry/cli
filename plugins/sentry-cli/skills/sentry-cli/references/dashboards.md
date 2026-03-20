@@ -20,6 +20,23 @@ List dashboards
 - `-n, --limit <value> - Maximum number of dashboards to list - (default: "30")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
+**Examples:**
+
+```bash
+# Auto-detect org from config
+sentry dashboard list
+
+# Explicit org
+sentry dashboard list my-org/
+
+# Explicit org and project
+sentry dashboard list my-org/my-project
+
+sentry dashboard list
+
+sentry dashboard list -w
+```
+
 ### `sentry dashboard view <args...>`
 
 View a dashboard
@@ -28,8 +45,44 @@ View a dashboard
 - `-w, --web - Open in browser`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
+**Examples:**
+
+```bash
+# By numeric ID
+sentry dashboard view <id>
+
+# By title
+sentry dashboard view '<title>'
+
+# With explicit org
+sentry dashboard view <org>/ <id>
+
+sentry dashboard view 12345
+
+sentry dashboard view 'Frontend Performance'
+
+sentry dashboard view 12345 -w
+```
+
 ### `sentry dashboard create <args...>`
 
 Create a dashboard
+
+**Examples:**
+
+```bash
+# Auto-detect org
+sentry dashboard create '<title>'
+
+# Explicit org
+sentry dashboard create <org>/ '<title>'
+
+# Explicit org and project
+sentry dashboard create <org>/<project> '<title>'
+
+sentry dashboard create 'Frontend Performance'
+
+sentry dashboard widget add 'Frontend Performance' "Error Count" --display big_number --query count
+```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
