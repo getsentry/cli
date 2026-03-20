@@ -370,6 +370,72 @@ describe("fetchProjectId", () => {
     );
   });
 
+  test("includes similar project suggestions on 404 when projects exist", async () => {
+    await setAuthToken("test-token");
+    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+
+    // Mock: getProject returns 404, but listProjects returns available projects.
+    // The two calls hit different URL patterns.
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // listProjects → GET /api/0/organizations/<org>/projects/
+      if (url.includes("/organizations/test-org/projects")) {
+        return Response.json([
+          { id: "1", slug: "test-project-api", name: "Test Project API" },
+          { id: "2", slug: "test-project-web", name: "Test Project Web" },
+          { id: "3", slug: "unrelated", name: "Unrelated" },
+        ]);
+      }
+
+      // getProject → GET /api/0/projects/<org>/<slug>/ → 404
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    });
+
+    try {
+      await fetchProjectId("test-org", "test-project");
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      // Should include fuzzy-matched similar projects
+      expect(msg).toContain("test-project-api");
+      expect(msg).toContain("test-project-web");
+      // Should not include unrelated projects (Levenshtein distance too high)
+      expect(msg).not.toContain("unrelated");
+      // Should suggest listing projects
+      expect(msg).toContain("sentry project list test-org/");
+    }
+  });
+
+  test("includes project list suggestion even when listProjects fails", async () => {
+    await setAuthToken("test-token");
+    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+
+    // Mock: all requests return 404 (both getProject and listProjects fail)
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify({ detail: "Not found" }), {
+          status: 404,
+        })
+    );
+
+    try {
+      await fetchProjectId("test-org", "test-project");
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      // No similar projects (listProjects also 404'd), but should still
+      // suggest the project list command
+      expect(msg).toContain("sentry project list test-org/");
+      expect(msg).not.toContain("Similar projects:");
+    }
+  });
+
   test("rethrows AuthError when not authenticated", async () => {
     // No auth token set — refreshToken() will throw AuthError
     await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
