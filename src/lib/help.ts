@@ -109,7 +109,7 @@ export async function printCustomHelp(): Promise<string> {
 
   const lines: string[] = [];
 
-  // Banner with gradient
+  // Skip banner for non-TTY to avoid wasting tokens in agent loops
   if (process.stdout.isTTY) {
     lines.push("");
     lines.push(formatBanner());
