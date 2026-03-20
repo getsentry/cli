@@ -1,0 +1,40 @@
+## Implementation Plan
+
+### Problem
+Top-level command typos like `sentry isseu` produce "Command not found" with no
+suggestions. This happens because `defaultCommand: "help"` routes unrecognized
+top-level words to the help command, bypassing Stricli's built-in fuzzy matching.
+Stricli's Damerau-Levenshtein works fine for subcommand and flag typos (e.g.
+`sentry issue lis` → "did you mean list?") but never fires for top-level words.
+
+### Approach
+Add fuzzy matching to `resolveCommandPath()` in `introspect.ts`, which is the
+resolution function used by both `sentry <typo>` (via default help command) and
+`sentry help <typo>` paths.
+
+### Changes
+
+1. **introspect.ts** — `resolveCommandPath()` fuzzy fallback
+   - Import `fuzzyMatch` from `./fuzzy.js`
+   - Add `UnresolvedPath` type: `{ kind: "unresolved"; input: string; suggestions: string[] }`
+   - When top-level entry not found: fuzzy match against visible route names (max 3)
+   - When subcommand not found: fuzzy match against subcommand names (max 3)
+   - Return type: `ResolvedPath | UnresolvedPath | null` (null only for empty paths)
+
+2. **help.ts** — Surface suggestions in output
+   - `HelpJsonResult` error variant: `{ error: string; suggestions?: string[] }`
+   - `introspectCommand()`: handle `kind: "unresolved"`, pass suggestions to error
+   - `formatSuggestionList()`: Oxford-comma grammar (matches Stricli style)
+   - `formatHelpHuman()`: append "Did you mean: X?" when suggestions present
+
+3. **Tests**
+   - Update 2 existing tests: unknown entries now return UnresolvedPath, not null
+   - 3 new resolveCommandPath tests: top-level typo, subcommand typo, no match
+   - 3 new introspectCommand tests: suggestions present, absent
+   - 4 new formatHelpHuman tests: 1/2/3 suggestions, no suggestions
+
+### What was NOT changed (intentionally)
+- Static shell tab-completion: uses shell-native prefix matching (compgen, _describe,
+  fish -a) — this is standard UX and adding fuzzy would require calling __complete
+  for every keystroke, adding latency.
+- Stricli's own fuzzy matching for subcommands/flags: already works, untouched.
