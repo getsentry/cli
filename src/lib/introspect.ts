@@ -374,40 +374,35 @@ export function resolveCommandPath(
     return null;
   }
 
-  // Only support exactly 2 levels deep (group + command).
-  // Extra segments (e.g. ["issue", "list", "extra"]) are rejected.
-  if (rest.length !== 1) {
+  // Recurse into the sub-route map with remaining path segments
+  const subResult = resolveCommandPath(target, rest);
+  if (!subResult) {
     return null;
   }
 
-  // Find the subcommand, with fuzzy fallback
-  const subName = rest[0];
-  if (subName === undefined) {
-    return null;
-  }
-  const visibleSubEntries = target.getAllEntries().filter((e) => !e.hidden);
-  const subEntry = visibleSubEntries.find((e) => e.name.original === subName);
+  // Prepend the parent route segment to all paths in the result
+  const parentPrefix = entry.name.original;
+  const prependPrefix = (path: string) =>
+    path.replace(/^sentry /, `sentry ${parentPrefix} `);
 
-  if (!subEntry) {
-    const subNames = visibleSubEntries.map((e) => e.name.original);
-    return {
-      kind: "unresolved",
-      input: subName,
-      suggestions: fuzzyMatch(subName, subNames, {
-        maxResults: MAX_SUGGESTIONS,
-      }),
-    };
-  }
-
-  if (isCommand(subEntry.target)) {
+  if (subResult.kind === "command") {
     return {
       kind: "command",
-      info: buildCommandInfo(
-        subEntry.target,
-        `sentry ${entry.name.original} ${subEntry.name.original}`
-      ),
+      info: { ...subResult.info, path: prependPrefix(subResult.info.path) },
+    };
+  }
+  if (subResult.kind === "group") {
+    return {
+      kind: "group",
+      info: {
+        ...subResult.info,
+        commands: subResult.info.commands.map((cmd) => ({
+          ...cmd,
+          path: prependPrefix(cmd.path),
+        })),
+      },
     };
   }
 
-  return null;
+  return subResult;
 }
