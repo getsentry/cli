@@ -344,8 +344,13 @@ describe("resolveCommandPath", () => {
     expect(resolveCommandPath(topLevel, [])).toBeNull();
   });
 
-  test("returns null for unknown top-level entry", () => {
-    expect(resolveCommandPath(topLevel, ["nonexistent"])).toBeNull();
+  test("returns unresolved for unknown top-level entry", () => {
+    const result = resolveCommandPath(topLevel, ["nonexistent"]);
+    expect(result).not.toBeNull();
+    expect(result?.kind).toBe("unresolved");
+    if (result?.kind === "unresolved") {
+      expect(result.input).toBe("nonexistent");
+    }
   });
 
   test("resolves route group", () => {
@@ -377,8 +382,13 @@ describe("resolveCommandPath", () => {
     }
   });
 
-  test("returns null for unknown subcommand", () => {
-    expect(resolveCommandPath(topLevel, ["issue", "unknown"])).toBeNull();
+  test("returns unresolved for unknown subcommand", () => {
+    const result = resolveCommandPath(topLevel, ["issue", "unknown"]);
+    expect(result).not.toBeNull();
+    expect(result?.kind).toBe("unresolved");
+    if (result?.kind === "unresolved") {
+      expect(result.input).toBe("unknown");
+    }
   });
 
   test("returns null when navigating deeper into standalone command", () => {
@@ -390,6 +400,34 @@ describe("resolveCommandPath", () => {
     expect(
       resolveCommandPath(topLevel, ["issue", "list", "extra", "more"])
     ).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // Fuzzy suggestions
+  // -------------------------------------------------------------------------
+
+  test("suggests close top-level match for typo", () => {
+    const result = resolveCommandPath(topLevel, ["issu"]);
+    expect(result?.kind).toBe("unresolved");
+    if (result?.kind === "unresolved") {
+      expect(result.suggestions).toContain("issue");
+    }
+  });
+
+  test("suggests close subcommand match for typo", () => {
+    const result = resolveCommandPath(topLevel, ["issue", "lis"]);
+    expect(result?.kind).toBe("unresolved");
+    if (result?.kind === "unresolved") {
+      expect(result.suggestions).toContain("list");
+    }
+  });
+
+  test("returns empty suggestions for completely unrelated input", () => {
+    const result = resolveCommandPath(topLevel, ["xyzfoo123"]);
+    expect(result?.kind).toBe("unresolved");
+    if (result?.kind === "unresolved") {
+      expect(result.suggestions).toEqual([]);
+    }
   });
 });
 
