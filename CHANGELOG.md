@@ -1,6 +1,73 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.19.0
+
+### New Features ✨
+
+#### Dashboard
+
+- Add layout guidance and widget type reference for agents by @betegon in [#521](https://github.com/getsentry/cli/pull/521)
+- Add widget add, edit, and delete commands by @betegon in [#407](https://github.com/getsentry/cli/pull/407)
+
+#### Telemetry
+
+- Include user email in Sentry telemetry context by @BYK in [#513](https://github.com/getsentry/cli/pull/513)
+- Track TTY vs non-TTY invocations via metric by @betegon in [#482](https://github.com/getsentry/cli/pull/482)
+
+#### Other
+
+- (help) Fuzzy "Did you mean?" suggestions for command typos by @BYK in [#516](https://github.com/getsentry/cli/pull/516)
+- (upgrade) Add progress spinners for version check and download phases by @BYK in [#515](https://github.com/getsentry/cli/pull/515)
+- External sourcemap upload for compiled binaries by @BYK in [#518](https://github.com/getsentry/cli/pull/518)
+- Dynamic cache-backed shell completions with fuzzy matching by @BYK in [#465](https://github.com/getsentry/cli/pull/465)
+
+### Bug Fixes 🐛
+
+- (completions) Populate project cache from listProjects by @betegon in [#517](https://github.com/getsentry/cli/pull/517)
+- (help) Hide ASCII banner when stdout is not a TTY by @betegon in [#501](https://github.com/getsentry/cli/pull/501)
+- (json) Flatten view command JSON output for --fields filtering by @BYK in [#495](https://github.com/getsentry/cli/pull/495)
+- (polling) Throw TimeoutError instead of bare Error on timeout by @BYK in [#503](https://github.com/getsentry/cli/pull/503)
+- (project) Fallback to org listing when bare slug matches an organization by @betegon in [#475](https://github.com/getsentry/cli/pull/475)
+- (setup) Auto-configure zsh fpath for shell completions by @betegon in [#509](https://github.com/getsentry/cli/pull/509)
+- (skill) Include widget subcommands in generated skill files by @betegon in [#519](https://github.com/getsentry/cli/pull/519)
+- Isolate multiregion 403 tests from env-var auth tokens by @BYK in [#514](https://github.com/getsentry/cli/pull/514)
+- Only mention token scopes in 403 errors for env-var tokens by @BYK in [#512](https://github.com/getsentry/cli/pull/512)
+- Suggest similar projects on project-search miss (CLI-A4) by @BYK in [#511](https://github.com/getsentry/cli/pull/511)
+- Preserve ApiError type in Seer handler + suggest trial start command (CLI-N, CLI-1D/BW/98) by @BYK in [#510](https://github.com/getsentry/cli/pull/510)
+- Add 403 scope guidance to issue list error handling (CLI-97) by @BYK in [#508](https://github.com/getsentry/cli/pull/508)
+- Propagate 403 from multi-region fan-out instead of returning empty list (CLI-89) by @BYK in [#507](https://github.com/getsentry/cli/pull/507)
+- Lowercase project slug in URL-parsed issue short IDs (CLI-C8 follow-up) by @BYK in [#506](https://github.com/getsentry/cli/pull/506)
+- Handle EIO stream errors gracefully in bin.ts by @BYK in [#505](https://github.com/getsentry/cli/pull/505)
+- Use fuzzyMatch for similar project suggestions and add tests (CLI-C0) by @BYK in [#504](https://github.com/getsentry/cli/pull/504)
+- Use resolved org in numeric issue ID 404 hint (CLI-BT) by @BYK in [#502](https://github.com/getsentry/cli/pull/502)
+- Include API endpoint in error messages for better diagnostics (CLI-BS) by @BYK in [#500](https://github.com/getsentry/cli/pull/500)
+- Enrich 403 on org listing with token scope guidance (CLI-89) by @BYK in [#498](https://github.com/getsentry/cli/pull/498)
+- Add 400 suggestions to org-all issue list path (CLI-BY) by @BYK in [#497](https://github.com/getsentry/cli/pull/497)
+- Lowercase project slug in issue arg parsing (CLI-C8) by @BYK in [#496](https://github.com/getsentry/cli/pull/496)
+- Enrich short ID 404 with org context and suggestions (CLI-A1) by @BYK in [#494](https://github.com/getsentry/cli/pull/494)
+- Suggest similar projects when project not found in org (CLI-C0) by @BYK in [#493](https://github.com/getsentry/cli/pull/493)
+- Event 404 hint should suggest different project, not repeat failing command by @BYK in [#492](https://github.com/getsentry/cli/pull/492)
+- Enrich event 404 errors with retention and format suggestions (CLI-6F) by @BYK in [#491](https://github.com/getsentry/cli/pull/491)
+- Add actionable suggestions for 400 Bad Request on issue list (CLI-BM, CLI-7B) by @BYK in [#489](https://github.com/getsentry/cli/pull/489)
+- Detect issue short IDs passed to issue list (CLI-C3) by @BYK in [#488](https://github.com/getsentry/cli/pull/488)
+- Add Glob.match() polyfill + improve auto-detect diagnostics (CLI-7T) by @BYK in [#487](https://github.com/getsentry/cli/pull/487)
+- Add org-slug pre-check to dispatchOrgScopedList (CLI-9A) by @BYK in [#485](https://github.com/getsentry/cli/pull/485)
+
+### Documentation 📚
+
+- (dashboard) Add documentation for dashboard and widget commands by @betegon in [#520](https://github.com/getsentry/cli/pull/520)
+
+### Internal Changes 🔧
+
+- (init) Run org detection in background during preamble by @MathurAditya724 in [#443](https://github.com/getsentry/cli/pull/443)
+- (issue) Skip getProject round-trip in project-search resolution by @betegon in [#473](https://github.com/getsentry/cli/pull/473)
+- (resolve) Carry project data through resolution to eliminate redundant getProject calls by @BYK in [#486](https://github.com/getsentry/cli/pull/486)
+- (telemetry) Convert is_tty metric to span tag by @betegon in [#499](https://github.com/getsentry/cli/pull/499)
+- HTTP latency optimizations — diagnostics, cache warming, concurrency limits by @BYK in [#490](https://github.com/getsentry/cli/pull/490)
+- Switch from @sentry/bun to @sentry/node-core/light (~170ms startup savings) by @BYK in [#474](https://github.com/getsentry/cli/pull/474)
+- Regenerate skill files by @github-actions[bot] in [b7b240ec](https://github.com/getsentry/cli/commit/b7b240ece3c2b1617b00f4be2cac3fcba6248143)
+
 ## 0.18.1
 
 ### Bug Fixes 🐛
