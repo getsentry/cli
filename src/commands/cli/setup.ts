@@ -202,7 +202,9 @@ async function handleZshFpath(
       lines.push(`      Restart your shell or run: source ${shell.configFile}`);
     } else if (result.manualCommand) {
       lines.push(`Completions: ${result.message}`);
-      lines.push(`      Add manually to .zshrc: ${result.manualCommand}`);
+      lines.push(
+        `      Add manually to ${shell.configFile}: ${result.manualCommand}`
+      );
     }
   } else if (isNewInstall) {
     lines.push(`      Add to your .zshrc: ${getFpathCommand(completionDir)}`);
