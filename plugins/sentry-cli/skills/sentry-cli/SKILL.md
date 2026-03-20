@@ -226,6 +226,9 @@ Manage Sentry dashboards
 - `sentry dashboard list <org/project>` — List dashboards
 - `sentry dashboard view <args...>` — View a dashboard
 - `sentry dashboard create <args...>` — Create a dashboard
+- `sentry dashboard widget add <args...>` — Add a widget to a dashboard
+- `sentry dashboard widget edit <args...>` — Edit a widget in a dashboard
+- `sentry dashboard widget delete <args...>` — Delete a widget from a dashboard
 
 → Full flags and examples: `references/dashboards.md`
 

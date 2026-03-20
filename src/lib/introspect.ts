@@ -250,6 +250,11 @@ export function extractRouteGroupCommands(
       const path = `sentry ${routeName} ${subEntry.name.original}`;
       const examples = docExamples.get(path) ?? [];
       commands.push(buildCommandInfo(subTarget, path, examples));
+    } else if (isRouteMap(subTarget)) {
+      const nestedPrefix = `${routeName} ${subEntry.name.original}`;
+      commands.push(
+        ...extractRouteGroupCommands(subTarget, nestedPrefix, docExamples)
+      );
     }
   }
 
