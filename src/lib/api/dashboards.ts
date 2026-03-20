@@ -86,7 +86,13 @@ export async function createDashboard(
 export async function updateDashboard(
   orgSlug: string,
   dashboardId: string,
-  body: { title: string; widgets: DashboardWidget[]; projects?: number[] }
+  body: {
+    title: string;
+    widgets: DashboardWidget[];
+    projects?: number[];
+    environment?: string[];
+    period?: string | null;
+  }
 ): Promise<DashboardDetail> {
   const regionUrl = await resolveOrgRegion(orgSlug);
   const path = `/organizations/${orgSlug}/dashboards/${dashboardId}/`;
