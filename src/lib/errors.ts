@@ -61,6 +61,9 @@ export class ApiError extends CliError {
 
   override format(): string {
     let msg = this.message;
+    if (this.endpoint) {
+      msg += `\n  Endpoint: ${this.endpoint}`;
+    }
     if (this.detail && this.detail !== this.message) {
       msg += `\n  ${this.detail}`;
     }
