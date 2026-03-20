@@ -24,6 +24,7 @@ import { resolveOrg } from "../resolve-target.js";
 type OrgResult = ResolvedOrg | null;
 
 let orgPromise: Promise<OrgResult> | undefined;
+let warmedCwd: string | undefined;
 
 /**
  * Kick off background DSN scanning + env var / config checks.
@@ -33,16 +34,22 @@ let orgPromise: Promise<OrgResult> | undefined;
  */
 export function warmOrgDetection(cwd: string): void {
   if (!orgPromise) {
+    warmedCwd = cwd;
     orgPromise = resolveOrg({ cwd }).catch(() => null);
   }
 }
 
 /**
  * Resolve the org, using the prefetched result if available.
- * Falls back to a live call when {@link warmOrgDetection} was not called.
+ *
+ * Returns the cached background result only when `cwd` matches the
+ * directory that was passed to {@link warmOrgDetection}.  If `cwd`
+ * differs (or warming was never called), falls back to a live
+ * `resolveOrg()` call so callers always get results for the correct
+ * working directory.
  */
 export function resolveOrgPrefetched(cwd: string): Promise<OrgResult> {
-  if (orgPromise) {
+  if (orgPromise && cwd === warmedCwd) {
     return orgPromise;
   }
   return resolveOrg({ cwd }).catch(() => null);
@@ -53,4 +60,5 @@ export function resolveOrgPrefetched(cwd: string): Promise<OrgResult> {
  */
 export function resetPrefetch(): void {
   orgPromise = undefined;
+  warmedCwd = undefined;
 }
