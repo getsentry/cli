@@ -47,6 +47,7 @@ import {
   ValidationError,
   withAuthGuard,
 } from "./errors.js";
+import { fuzzyMatch } from "./fuzzy.js";
 import { logger } from "./logger.js";
 import { resolveEffectiveOrg } from "./region.js";
 import { isAllDigits } from "./utils.js";
@@ -555,9 +556,10 @@ function resolveFromEnvVars(): {
 /**
  * Find project slugs in the org that are similar to the given slug.
  *
- * Uses case-insensitive prefix/substring matching — lightweight and
- * sufficient for the most common typo patterns (wrong casing, partial
- * slug, extra/missing hyphens). Falls back gracefully on API errors
+ * Delegates to the shared {@link fuzzyMatch} utility which provides
+ * exact, prefix, substring, and Levenshtein distance matching — so
+ * typos like "senry" → "sentry" are caught in addition to simple
+ * prefix/substring matches. Falls back gracefully on API errors
  * since this is a best-effort hint, not a critical path.
  *
  * @param org - Organization slug to search in
@@ -570,27 +572,8 @@ async function findSimilarProjects(
 ): Promise<string[]> {
   try {
     const projects = await listProjects(org);
-    const lower = slug.toLowerCase();
-
-    // Score each project: exact-case-insensitive > prefix > substring > none
-    const scored = projects
-      .map((p) => {
-        const pLower = p.slug.toLowerCase();
-        if (pLower === lower) {
-          return { slug: p.slug, score: 3 };
-        }
-        if (pLower.startsWith(lower) || lower.startsWith(pLower)) {
-          return { slug: p.slug, score: 2 };
-        }
-        if (pLower.includes(lower) || lower.includes(pLower)) {
-          return { slug: p.slug, score: 1 };
-        }
-        return { slug: p.slug, score: 0 };
-      })
-      .filter((s) => s.score > 0)
-      .sort((a, b) => b.score - a.score);
-
-    return scored.slice(0, 3).map((s) => s.slug);
+    const slugs = projects.map((p) => p.slug);
+    return fuzzyMatch(slug, slugs, { maxResults: 3 });
   } catch {
     // Best-effort — don't let listing failures block the error message
     return [];
@@ -618,18 +601,20 @@ export async function fetchProjectId(
       projectResult.error.status === 404
     ) {
       const similar = await findSimilarProjects(org, project);
-      const suggestions = [
-        `Check the project slug at https://sentry.io/organizations/${org}/projects/`,
-      ];
+      const suggestions: string[] = [];
       if (similar.length > 0) {
-        suggestions.unshift(
+        suggestions.push(
           `Similar projects: ${similar.map((s) => `'${s}'`).join(", ")}`
         );
       }
+      suggestions.push(
+        `List available projects: sentry project list ${org}/`,
+        `Check the project slug at https://sentry.io/organizations/${org}/projects/`
+      );
       throw new ResolutionError(
         `Project '${project}'`,
         `not found in organization '${org}'`,
-        `sentry issue list ${org}/<project>`,
+        `sentry project list ${org}/`,
         suggestions
       );
     }
