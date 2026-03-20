@@ -1,0 +1,120 @@
+# HTTP Connection & Latency Optimization Plan
+
+## Current State (Investigation Summary)
+
+### Transport Layer — Already Good ✅
+- **HTTP/2**: ✅ Bun negotiates HTTP/2 via ALPN. Verified: 20 concurrent requests to `us.sentry.io` complete in ~258ms (same wall time as 1 request) — HTTP/2 multiplexing is active.
+- **Keep-Alive**: ✅ Implicit Bun default. Sequential: cold=178ms, warm=~125ms — connection reuse works.
+- **Singleton fetch**: A single `cachedFetch` instance reused across all API calls.
+- **SDK switch**: `@sentry/bun` → `@sentry/node-core/light` already landed (#474), saving ~170ms startup.
+
+### Recent Performance Improvements Already Merged
+- **#473** `perf(issue): skip getProject round-trip in project-search resolution` — eliminates 1 serial HTTP call (~780ms) from `issue view <project-suffix>` by fanning out `tryGetIssueByShortId()` directly across orgs.
+- **#474** `perf: switch to @sentry/node-core/light` — ~170ms startup savings.
+- **#475** `fix(project): fallback to org listing when bare slug matches org` — smarter resolution, fewer error-and-retry cycles.
+- **#485** `fix: org-slug pre-check in dispatchOrgScopedList` — uses SQLite-cached orgs to short-circuit the expensive N×`getProject()` fan-out when a bare slug is an org, not a project. O(1) cache lookup instead of N API calls.
+- **#486** `perf(resolve): carry project data through resolution` — `resolveProjectBySlug()` now returns `projectData: SentryProject` alongside slugs, so downstream commands (`project/view`, `project/delete`, `dashboard/create`) skip the redundant second `getProject()` call (~500-800ms each).
+
+### Where Latency Actually Lives
+
+The HTTP transport (HTTP/2, keep-alive, multiplexing) is **not the bottleneck**. The real latency is in **sequential resolution chains** — waterfall patterns where each API call depends on the previous one's result. However, the recent PRs have already tackled the most impactful serial chains:
+
+| Command | Serial Round-Trips (before #473/#486) | After | Wall Time (cold) |
+|---------|--------------------------------------|-------|-------------------|
+| `issue list` (auto-detect, cold) | 4-5 | 4-5 (unchanged) | ~2-3s |
+| `issue view <project-suffix>` | 6 | 5 (#473) | ~2.5s |
+| `project view <slug>` (project-search) | 3 | 2 (#486) | ~1.5s |
+| `project list <org-slug>` (mistyped) | N+1 | 1 (#485, cache hit) | ~0.1s |
+| `issue explain` | 3 + N polling | 3 + N polling | ~3s + polling |
+
+### Caching Status
+- **Filesystem response cache** (RFC 7234): stable=5min, volatile=60s, immutable=24hr
+- **SQLite caches**: regions, projects, DSNs, project roots, org list (#485 uses this)
+- **In-memory promise cache**: `regionCache` for org→region dedup
+- Warm runs are fast. Slowness is felt on cold cache, after expiry, or different CWDs.
+
+## Recommended Optimizations
+
+### 1. Add verbose HTTP timing diagnostics (Low effort, high insight)
+
+Add `consola.debug`-level logging in the authenticated fetch showing:
+- Request method + URL path
+- Time to response (ms)
+- Whether served from cache
+- Retry count if > 0
+
+This lets us (and users) diagnose slow commands with `--verbose` or `SENTRY_LOG_LEVEL=debug`.
+
+**Files**: `src/lib/sentry-client.ts`
+
+### 2. Warm region + org cache after login (Low effort, medium impact)
+
+After successful `auth login`, proactively call `listOrganizationsUncached()` to populate the region + org SQLite cache. This eliminates the cold-start penalty on the very first command after login (which is the most common "it feels slow" moment).
+
+Currently `login.ts` already calls `getCurrentUser()` post-login. Adding org list warming is a natural extension.
+
+**Files**: `src/commands/auth/login.ts`
+
+### 3. Add concurrency limits to unbounded `Promise.all()` fan-outs (Medium effort, medium impact)
+
+Several fan-out patterns are unbounded — fine for 2-3 orgs, problematic for enterprise users with 10+:
+
+| Function | File | Current | Proposed |
+|----------|------|---------|----------|
+| `findProjectsBySlug()` | `api/projects.ts` | Unbounded `Promise.all` | `p-limit(5)` |
+| `findProjectsByPattern()` | `api/projects.ts` | Unbounded `Promise.all` | `p-limit(5)` |
+| `findEventAcrossOrgs()` | `api/events.ts` | Unbounded `Promise.allSettled` | `p-limit(5)` |
+| `findProjectByDsnKey()` | `api/projects.ts` | Unbounded `Promise.all` | `p-limit(5)` |
+| `resolveProjectSearch()` | `commands/issue/utils.ts` | Unbounded `Promise.all` (new in #473) | `p-limit(5)` |
+
+`p-limit` is already a dependency (used in `resolve-target.ts` and `code-scanner.ts`).
+
+**Files**: `src/lib/api/projects.ts`, `src/lib/api/events.ts`, `src/commands/issue/utils.ts`
+
+### 4. Optimize `resolveEffectiveOrg()` for numeric org IDs (Medium effort, high impact)
+
+When a DSN contains a numeric org ID, `resolveEffectiveOrg()` currently:
+1. Checks SQLite cache (fast)
+2. On miss: calls `listOrganizationsUncached()` — full fan-out to all regions (1+N requests)
+3. Re-checks cache
+
+This is heavy for a single org lookup. With #485's `getCachedOrganizations()` now available, we could check the SQLite org cache first. But the cache may be cold on the very first command. Optimize by trying `retrieveAnOrganization(orgId)` directly first, falling back to full list only on 404. This saves 1+N requests in the cold-cache path.
+
+**Files**: `src/lib/region.ts`
+
+## Non-Recommended Changes
+
+- **Explicit HTTP/2 session management** via `node:http2` — Not needed. Bun already negotiates HTTP/2 and multiplexes. Manual management adds complexity for no gain.
+- **Custom connection pool tuning** — Not needed. Bun defaults handle our 2-20 concurrent request patterns well.
+- **Switching to undici** — Not needed. Bun's fetch is efficient, supports HTTP/2 multiplexing.
+- **Request batching/GraphQL** — Sentry API doesn't support request batching. Would require server-side changes.
+- **Overlapping event + trace fetch in `issue view`** — The trace fetch depends on `traceId` from the event body; savings would be ~130ms for significant complexity. Defer unless profiling shows this is a top bottleneck.
+
+## Implementation Order
+
+1. **Diagnostics** (#1) — Add verbose HTTP timing so we can measure before/after
+2. **Post-login cache warming** (#2) — Quick win for the most visible cold-start
+3. **Concurrency limits** (#3) — Safety net for enterprise users with many orgs
+4. **Numeric org resolution** (#4) — Reduce cold-start waterfall depth
+
+## Files to Modify
+
+| File | Change |
+|------|--------|
+| `src/lib/sentry-client.ts` | Add timing diagnostics at debug log level |
+| `src/commands/auth/login.ts` | Warm org list cache after successful login |
+| `src/lib/api/projects.ts` | Add `p-limit(5)` to `findProjectsBySlug()`, `findProjectsByPattern()`, `findProjectByDsnKey()` |
+| `src/lib/api/events.ts` | Add `p-limit(5)` to `findEventAcrossOrgs()` |
+| `src/commands/issue/utils.ts` | Add `p-limit(5)` to `resolveProjectSearch()` fan-out |
+| `src/lib/region.ts` | Try direct org lookup before full `listOrganizationsUncached()` fan-out |
+
+Note: `src/lib/resolve-target.ts` was already updated in #486 to carry `projectData` through resolution. No further changes needed there.
+
+## Verification
+
+1. `bun run typecheck` — clean
+2. `bun run lint` — clean
+3. `bun test` — all pass
+4. `SENTRY_LOG_LEVEL=debug bun run dev issue list` — verify timing diagnostics appear in stderr
+5. Manual: `rm -rf ~/.sentry/cache/ && time bun run dev issue list` — measure cold-start improvement
+6. Manual: `bun run dev auth login` then immediately `time bun run dev issue list` — verify cache warming
