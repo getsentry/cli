@@ -168,9 +168,11 @@ export async function listOrganizationsUncached(): Promise<
   // instead of returning an empty list (CLI-89 follow-up).
   const flatResults: { org: SentryOrganization; regionUrl: string }[] = [];
   let lastScopeError: ApiError | undefined;
+  let hasSuccessfulRegion = false;
 
   for (const result of settled) {
     if (result.status === "fulfilled") {
+      hasSuccessfulRegion = true;
       flatResults.push(...result.value);
     } else if (
       result.reason instanceof ApiError &&
@@ -180,8 +182,10 @@ export async function listOrganizationsUncached(): Promise<
     }
   }
 
-  // All regions returned 403 — the token lacks org:read scope globally
-  if (flatResults.length === 0 && lastScopeError) {
+  // All regions rejected with 403 — the token lacks org:read scope globally.
+  // A fulfilled-but-empty region (200 OK, no memberships) is still a success,
+  // so we only throw when no region succeeded at all.
+  if (!hasSuccessfulRegion && lastScopeError) {
     throw lastScopeError;
   }
   const orgs = flatResults.map((r) => r.org);
