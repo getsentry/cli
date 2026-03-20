@@ -10,7 +10,7 @@ import type {
   RootCause,
   SolutionArtifact,
 } from "../../types/seer.js";
-import { SeerError } from "../errors.js";
+import { ApiError, SeerError } from "../errors.js";
 import { cyan } from "./colors.js";
 import { escapeMarkdownInline, renderMarkdown } from "./markdown.js";
 
@@ -195,12 +195,17 @@ export function createSeerError(
 }
 
 /**
- * Convert an API error to a Seer-specific error or a generic error.
+ * Convert an API error to a Seer-specific error or an ApiError.
+ *
+ * Returns a SeerError for known Seer issues (402/403 with specific detail),
+ * or preserves the error as an ApiError for other failures. Previously
+ * returned a plain Error which lost the status code and endpoint — causing
+ * CLI-N (84 users) where unrecognized 403s became untyped errors.
  *
  * @param status - HTTP status code
  * @param detail - Error detail from API
  * @param orgSlug - Organization slug for constructing settings URLs
- * @returns SeerError for Seer-specific errors, or a generic Error for other API errors
+ * @returns SeerError for Seer-specific errors, or ApiError for other API errors
  */
 export function handleSeerApiError(
   status: number,
@@ -211,7 +216,7 @@ export function handleSeerApiError(
   if (seerError) {
     return seerError;
   }
-  return new Error(formatAutofixError(status, detail));
+  return new ApiError(formatAutofixError(status, detail), status, detail);
 }
 
 /**

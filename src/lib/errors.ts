@@ -404,11 +404,14 @@ export class SeerError extends CliError {
   }
 
   override format(): string {
-    // Soften trial hint — we can't check availability synchronously,
-    // so use "check" language rather than "start" to avoid misleading
-    // users whose trial is already expired
-    const trialHint =
-      "\n\nYou may be eligible for a free trial:\n  sentry trial list";
+    // When org slug is known, suggest the direct trial start command.
+    // The interactive trial prompt in bin.ts handles TTY users; this
+    // message is the fallback for non-interactive contexts (AI agents, CI)
+    // where the prompt can't fire — hence the direct command suggestion
+    // (CLI-1D/BW/98, 237 users combined).
+    const trialHint = this.orgSlug
+      ? `\n\nStart a free trial:\n  sentry trial start seer ${this.orgSlug}`
+      : "\n\nYou may be eligible for a free trial:\n  sentry trial list";
 
     // When org slug is known, provide direct URLs to settings
     if (this.orgSlug) {
