@@ -830,6 +830,9 @@ mock.module("./some-module", () => ({
 <!-- lore:019cb8c2-d7b5-780c-8a9f-d20001bc198f -->
 * **Install script: BSD sed and awk JSON parsing breaks OCI digest extraction**: The install script parses OCI manifests with awk (no jq). Key trap: BSD sed \`\n\` is literal, not newline. Fix: single awk pass tracking last-seen \`"digest"\`, printing when \`"org.opencontainers.image.title"\` matches target. The config digest (\`sha256:44136fa...\`) is a 2-byte \`{}\` blob — downloading it instead of the real binary causes \`gunzip: unexpected end of file\`.
 
+<!-- lore:019d0b04-ccec-7bd2-a5ca-732e7064cc1a -->
+* **Multi-region fan-out: distinguish all-403 from empty orgs with hasSuccessfulRegion flag**: The multi-region org listing fan-out (\`listOrganizationsUncached\` in \`src/lib/api/organizations.ts\`) uses \`Promise.allSettled\` to collect results from all regions. When checking whether to propagate a 403 error, don't use \`flatResults.length === 0\` alone — a region returning 200 OK with zero orgs pushes nothing into \`flatResults\`, making it look like all regions failed. Track a separate \`hasSuccessfulRegion\` boolean set on any \`"fulfilled"\` settlement. Only re-throw the 403 \`ApiError\` when \`!hasSuccessfulRegion && lastScopeError\` — this correctly distinguishes "all regions returned 403" from "some regions had no orgs."
+
 <!-- lore:019c969a-1c90-7041-88a8-4e4d9a51ebed -->
 * **Multiple mockFetch calls replace each other — use unified mocks for multi-endpoint tests**: Bun test mocking gotchas: (1) \`mockFetch()\` replaces \`globalThis.fetch\` — calling it twice replaces the first mock. Use a single unified fetch mock dispatching by URL pattern. (2) \`mock.module()\` pollutes the module registry for ALL subsequent test files. Tests using it must live in \`test/isolated/\` and run via \`test:isolated\`. This also causes \`delta-upgrade.test.ts\` to fail when run alongside \`test/isolated/delta-upgrade.test.ts\` — the isolated test's \`mock.module()\` replaces \`CLI\_VERSION\` for all subsequent files. (3) For \`Bun.spawn\`, use direct property assignment in \`beforeEach\`/\`afterEach\`.
 
@@ -837,6 +840,9 @@ mock.module("./some-module", () => ({
 * **useTestConfigDir without isolateProjectRoot causes DSN scanning of repo tree**: \`useTestConfigDir()\` creates temp dirs under \`.test-tmp/\` in the repo tree. Without \`{ isolateProjectRoot: true }\`, \`findProjectRoot\` walks up and finds the repo's \`.git\`, causing DSN detection to scan real source code and trigger network calls against test mocks (timeouts). Always pass \`isolateProjectRoot: true\` when tests exercise \`resolveOrg\`, \`detectDsn\`, or \`findProjectRoot\`.
 
 ### Pattern
+
+<!-- lore:019d0b04-ccf7-7e74-a049-2ca6b8faa85f -->
+* **Cursor Bugbot review comments: fix valid bugs before merging**: Cursor Bugbot sometimes catches real logic bugs in PRs (not just style). In CLI-89, Bugbot identified that \`flatResults.length === 0\` was an incorrect proxy for "all regions failed" since fulfilled-but-empty regions are indistinguishable from rejected ones. Always read Bugbot's full comment body (via \`gh api repos/OWNER/REPO/pulls/NUM/comments\`) and fix valid findings before merging. Bugbot comments include a \`BUGBOT\_BUG\_ID\` HTML comment for tracking.
 
 <!-- lore:019c972c-9f11-7c0d-96ce-3f8cc2641175 -->
 * **Org-scoped SDK calls follow getOrgSdkConfig + unwrapResult pattern**: All org-scoped API calls in src/lib/api-client.ts: (1) call \`getOrgSdkConfig(orgSlug)\` for regional URL + SDK config, (2) spread into SDK function: \`{ ...config, path: { organization\_id\_or\_slug: orgSlug, ... } }\`, (3) pass to \`unwrapResult(result, errorContext)\`. Shared helpers \`resolveAllTargets\`/\`resolveOrgAndProject\` must NOT call \`fetchProjectId\` — commands that need it enrich targets themselves.

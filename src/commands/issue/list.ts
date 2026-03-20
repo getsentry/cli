@@ -841,17 +841,7 @@ async function handleOrgAllIssues(
         )
     );
   } catch (error) {
-    // Enrich 400 errors with the same suggestions as handleResolvedTargets
-    // (CLI-BY, 23 users). The org-all path was missing these hints.
-    if (error instanceof ApiError && error.status === 400) {
-      throw new ApiError(
-        error.message,
-        error.status,
-        build400Detail(error.detail, flags),
-        error.endpoint
-      );
-    }
-    throw error;
+    throw enrichIssueListError(error, flags);
   }
   const { issues, nextCursor } = issuesResult;
 
@@ -963,6 +953,63 @@ function build400Detail(
 
   // ApiError.format() prepends "\n  " only before the first line of detail.
   // Indent continuation lines to maintain alignment with the first line.
+  return lines.join("\n  ");
+}
+
+/**
+ * Enrich an API error from issue listing with actionable suggestions.
+ *
+ * Handles both 400 (query/parameter) and 403 (permission) errors.
+ * Re-throws non-ApiError and unhandled statuses unchanged.
+ */
+function enrichIssueListError(
+  error: unknown,
+  flags: Pick<ListFlags, "query" | "period">
+): never {
+  if (error instanceof ApiError) {
+    if (error.status === 400) {
+      throw new ApiError(
+        error.message,
+        error.status,
+        build400Detail(error.detail, flags),
+        error.endpoint
+      );
+    }
+    if (error.status === 403) {
+      throw new ApiError(
+        error.message,
+        error.status,
+        build403Detail(error.detail),
+        error.endpoint
+      );
+    }
+  }
+  throw error;
+}
+
+/**
+ * Build an enriched error detail for 403 Forbidden responses.
+ *
+ * Suggests checking token scopes and project membership — the most common
+ * causes of 403 on the issues endpoint (CLI-97, 41 users).
+ *
+ * @param originalDetail - The API response detail (may be undefined)
+ * @returns Enhanced detail string with suggestions
+ */
+function build403Detail(originalDetail: string | undefined): string {
+  const lines: string[] = [];
+
+  if (originalDetail) {
+    lines.push(originalDetail, "");
+  }
+
+  lines.push(
+    "Suggestions:",
+    "  • Your auth token may lack the required scopes (org:read, project:read)",
+    "  • Re-authenticate with: sentry auth login",
+    "  • Verify project membership: sentry project list <org>/"
+  );
+
   return lines.join("\n  ");
 }
 
@@ -1118,10 +1165,12 @@ async function handleResolvedTargets(
     // or parameters are likely malformed. Common causes: invalid Sentry
     // search syntax, unsupported period for the org's data retention.
     if (first instanceof ApiError) {
-      const detail =
-        first.status === 400
-          ? build400Detail(first.detail, flags)
-          : first.detail;
+      let detail = first.detail;
+      if (first.status === 400) {
+        detail = build400Detail(first.detail, flags);
+      } else if (first.status === 403) {
+        detail = build403Detail(first.detail);
+      }
       throw new ApiError(
         `${prefix}: ${first.message}`,
         first.status,
@@ -1130,7 +1179,7 @@ async function handleResolvedTargets(
       );
     }
 
-    throw new Error(`${prefix}.\n${first.message}`);
+    throw new Error(`${prefix}: ${first.message}`);
   }
 
   const isMultiProject = validResults.length > 1;
