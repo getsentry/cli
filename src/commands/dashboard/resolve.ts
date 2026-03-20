@@ -10,6 +10,27 @@ import type { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import { isAllDigits } from "../../lib/utils.js";
+import {
+  type DashboardWidget,
+  DISPLAY_TYPES,
+  parseAggregate,
+  parseSortExpression,
+  parseWidgetInput,
+  prepareWidgetQueries,
+  validateAggregateNames,
+  WIDGET_TYPES,
+} from "../../types/dashboard.js";
+
+/** Shared widget query flags used by `add` and `edit` commands */
+export type WidgetQueryFlags = {
+  readonly display?: string;
+  readonly dataset?: string;
+  readonly query?: string[];
+  readonly where?: string;
+  readonly "group-by"?: string[];
+  readonly sort?: string;
+  readonly limit?: number;
+};
 
 /**
  * Resolve org slug from a parsed org/project target argument.
@@ -118,4 +139,115 @@ export async function resolveDashboardId(
   }
 
   return match.id;
+}
+
+/**
+ * Resolve widget index from --index or --title flags.
+ *
+ * @param widgets - Array of widgets in the dashboard
+ * @param index - Explicit 0-based widget index
+ * @param title - Widget title to match
+ * @returns Resolved widget index
+ */
+export function resolveWidgetIndex(
+  widgets: DashboardWidget[],
+  index: number | undefined,
+  title: string | undefined
+): number {
+  if (index !== undefined) {
+    if (index < 0 || index >= widgets.length) {
+      throw new ValidationError(
+        `Widget index ${index} out of range (dashboard has ${widgets.length} widgets).`,
+        "index"
+      );
+    }
+    return index;
+  }
+  const lowerTitle = (title ?? "").toLowerCase();
+  const matchIndex = widgets.findIndex(
+    (w) => w.title.toLowerCase() === lowerTitle
+  );
+  if (matchIndex === -1) {
+    throw new ValidationError(
+      `No widget with title '${title}' found in dashboard.`,
+      "title"
+    );
+  }
+  return matchIndex;
+}
+
+/**
+ * Build a widget from user-provided flag values.
+ *
+ * Shared between `dashboard widget add` and `dashboard widget edit`.
+ * Parses aggregate shorthand, sort expressions, and validates via Zod schema.
+ *
+ * @param opts - Widget configuration from parsed flags
+ * @returns Validated widget with computed query fields
+ */
+export function buildWidgetFromFlags(opts: {
+  title: string;
+  display: string;
+  dataset?: string;
+  query?: string[];
+  where?: string;
+  groupBy?: string[];
+  sort?: string;
+  limit?: number;
+}): DashboardWidget {
+  const aggregates = (opts.query ?? ["count"]).map(parseAggregate);
+  validateAggregateNames(aggregates, opts.dataset);
+
+  const columns = opts.groupBy ?? [];
+  // Auto-default orderby to first aggregate descending when group-by is used.
+  // Without this, chart widgets (line/area/bar) with group-by + limit error
+  // because the dashboard can't determine which top N groups to display.
+  let orderby = opts.sort ? parseSortExpression(opts.sort) : undefined;
+  if (columns.length > 0 && !orderby && aggregates.length > 0) {
+    orderby = `-${aggregates[0]}`;
+  }
+
+  const raw = {
+    title: opts.title,
+    displayType: opts.display,
+    ...(opts.dataset && { widgetType: opts.dataset }),
+    queries: [
+      {
+        aggregates,
+        columns,
+        conditions: opts.where ?? "",
+        ...(orderby && { orderby }),
+        name: "",
+      },
+    ],
+    ...(opts.limit !== undefined && { limit: opts.limit }),
+  };
+  return prepareWidgetQueries(parseWidgetInput(raw));
+}
+
+/**
+ * Validate --display and --dataset flag values against known enums.
+ *
+ * @param display - Display type flag value
+ * @param dataset - Dataset flag value
+ */
+export function validateWidgetEnums(display?: string, dataset?: string): void {
+  if (
+    display &&
+    !DISPLAY_TYPES.includes(display as (typeof DISPLAY_TYPES)[number])
+  ) {
+    throw new ValidationError(
+      `Invalid --display value "${display}".\nValid display types: ${DISPLAY_TYPES.join(", ")}`,
+      "display"
+    );
+  }
+  if (
+    dataset &&
+    !WIDGET_TYPES.includes(dataset as (typeof WIDGET_TYPES)[number])
+  ) {
+    throw new ValidationError(
+      `Invalid --dataset value "${dataset}".\nValid datasets: ${WIDGET_TYPES.join(", ")}`,
+      "dataset"
+    );
+  }
 }

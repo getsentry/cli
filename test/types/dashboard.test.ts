@@ -23,6 +23,7 @@ import {
   prepareWidgetQueries,
   SPAN_AGGREGATE_FUNCTIONS,
   SpanAggregateFunctionSchema,
+  stripWidgetServerFields,
   WIDGET_TYPES,
   type WidgetType,
 } from "../../src/types/dashboard.js";
@@ -114,11 +115,12 @@ describe("SPAN_AGGREGATE_FUNCTIONS", () => {
     }
   });
 
-  test("contains rate functions and aliases", () => {
+  test("contains rate functions (canonical only, no aliases)", () => {
     expect(SPAN_AGGREGATE_FUNCTIONS).toContain("eps");
     expect(SPAN_AGGREGATE_FUNCTIONS).toContain("epm");
-    expect(SPAN_AGGREGATE_FUNCTIONS).toContain("sps");
-    expect(SPAN_AGGREGATE_FUNCTIONS).toContain("spm");
+    // sps/spm are aliases resolved in parseAggregate(), not canonical functions
+    expect(SPAN_AGGREGATE_FUNCTIONS).not.toContain("sps");
+    expect(SPAN_AGGREGATE_FUNCTIONS).not.toContain("spm");
   });
 
   test("zod schema validates known functions", () => {
@@ -597,5 +599,78 @@ describe("assignDefaultLayout", () => {
     // Should be placed after the existing widget, not overlapping
     expect(result.layout!.x).toBe(2);
     expect(result.layout!.y).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// stripWidgetServerFields
+// ---------------------------------------------------------------------------
+
+describe("stripWidgetServerFields", () => {
+  test("strips id, dashboardId, dateCreated from widget", () => {
+    const widget: DashboardWidget = {
+      id: "100",
+      dashboardId: "42",
+      dateCreated: "2026-01-01T00:00:00Z",
+      title: "Test",
+      displayType: "line",
+      widgetType: "spans",
+    };
+    const result = stripWidgetServerFields(widget);
+    expect(result).not.toHaveProperty("id");
+    expect(result).not.toHaveProperty("dashboardId");
+    expect(result).not.toHaveProperty("dateCreated");
+    expect(result.title).toBe("Test");
+    expect(result.displayType).toBe("line");
+    expect(result.widgetType).toBe("spans");
+  });
+
+  test("strips server fields from queries", () => {
+    const widget: DashboardWidget = {
+      title: "Test",
+      displayType: "line",
+      queries: [
+        {
+          id: "q1",
+          widgetId: "w1",
+          dateCreated: "2026-01-01T00:00:00Z",
+          aggregates: ["count()"],
+          conditions: "",
+          name: "Query 1",
+        },
+      ],
+    };
+    const result = stripWidgetServerFields(widget);
+    const query = result.queries![0]!;
+    expect(query).not.toHaveProperty("id");
+    expect(query).not.toHaveProperty("widgetId");
+    expect(query).not.toHaveProperty("dateCreated");
+    expect(query.aggregates).toEqual(["count()"]);
+  });
+
+  test("strips isResizable from layout", () => {
+    const widget: DashboardWidget = {
+      title: "Test",
+      displayType: "line",
+      layout: { x: 0, y: 0, w: 3, h: 2, isResizable: true },
+    };
+    const result = stripWidgetServerFields(widget);
+    expect(result.layout).not.toHaveProperty("isResizable");
+    expect(result.layout!.x).toBe(0);
+    expect(result.layout!.w).toBe(3);
+  });
+
+  test("preserves widgetType, displayType, and layout", () => {
+    const widget: DashboardWidget = {
+      id: "100",
+      title: "Test",
+      displayType: "bar",
+      widgetType: "spans",
+      layout: { x: 1, y: 2, w: 3, h: 4 },
+    };
+    const result = stripWidgetServerFields(widget);
+    expect(result.displayType).toBe("bar");
+    expect(result.widgetType).toBe("spans");
+    expect(result.layout).toEqual({ x: 1, y: 2, w: 3, h: 4 });
   });
 });

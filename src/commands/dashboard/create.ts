@@ -138,7 +138,9 @@ export const createCommand = buildCommand({
       "Examples:\n" +
       "  sentry dashboard create 'My Dashboard'\n" +
       "  sentry dashboard create my-org/ 'My Dashboard'\n" +
-      "  sentry dashboard create my-org/my-project 'My Dashboard'",
+      "  sentry dashboard create my-org/my-project 'My Dashboard'\n\n" +
+      "Add widgets after creation with:\n" +
+      '  sentry dashboard widget add <dashboard> "My Widget" --display line --query count',
   },
   output: {
     human: formatDashboardCreated,
@@ -162,10 +164,12 @@ export const createCommand = buildCommand({
 
     const dashboard = await createDashboard(orgSlug, {
       title,
+      widgets: [],
       projects: projectIds.length > 0 ? projectIds : undefined,
     });
     const url = buildDashboardUrl(orgSlug, dashboard.id);
 
     yield new CommandOutput({ ...dashboard, url } as CreateResult);
+    return { hint: `Dashboard: ${url}` };
   },
 });

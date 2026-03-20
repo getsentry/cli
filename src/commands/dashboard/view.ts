@@ -16,6 +16,7 @@ import {
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
+import { withProgress } from "../../lib/polling.js";
 import { buildDashboardUrl } from "../../lib/sentry-urls.js";
 import type { DashboardDetail } from "../../types/dashboard.js";
 import {
@@ -87,8 +88,12 @@ export const viewCommand = buildCommand({
       return;
     }
 
-    const dashboard = await getDashboard(orgSlug, dashboardId);
+    const dashboard = await withProgress(
+      { message: "Fetching dashboard...", json: flags.json },
+      () => getDashboard(orgSlug, dashboardId)
+    );
 
     yield new CommandOutput({ ...dashboard, url } as ViewResult);
+    return { hint: `Dashboard: ${url}` };
   },
 });

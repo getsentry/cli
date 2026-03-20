@@ -23,6 +23,7 @@ export {
   createDashboard,
   getDashboard,
   listDashboards,
+  updateDashboard,
 } from "./api/dashboards.js";
 export {
   findEventAcrossOrgs,

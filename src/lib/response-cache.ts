@@ -556,6 +556,23 @@ async function writeResponseToCache(
 }
 
 /**
+ * Invalidate the cached GET response for a specific URL.
+ *
+ * Used by mutation commands (PUT/POST/DELETE) that change server state,
+ * so subsequent GET commands don't serve stale data.
+ *
+ * @param url - Full URL of the GET endpoint to invalidate
+ */
+export async function invalidateCachedResponse(url: string): Promise<void> {
+  try {
+    const key = buildCacheKey("GET", url);
+    await rm(cacheFilePath(key), { force: true });
+  } catch {
+    // Best-effort — ignore if file doesn't exist or can't be deleted
+  }
+}
+
+/**
  * Remove all cached responses.
  * Called on `auth logout` and `auth login` since cached data is tied to the user.
  */

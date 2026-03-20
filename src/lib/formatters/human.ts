@@ -11,6 +11,10 @@
 import * as Sentry from "@sentry/node-core/light";
 import prettyMs from "pretty-ms";
 import type {
+  DashboardDetail,
+  DashboardWidget,
+} from "../../types/dashboard.js";
+import type {
   BreadcrumbsEntry,
   ExceptionEntry,
   ExceptionValue,
@@ -2220,5 +2224,55 @@ export function formatDashboardView(result: {
     lines.push("No widgets.");
   }
 
+  return renderMarkdown(lines.join("\n"));
+}
+
+/**
+ * Format a widget add result for human-readable output.
+ */
+export function formatWidgetAdded(result: {
+  dashboard: DashboardDetail;
+  widget: DashboardWidget;
+  url: string;
+}): string {
+  const widgetCount = result.dashboard.widgets?.length ?? 0;
+  const lines: string[] = [
+    `Added widget '${escapeMarkdownInline(result.widget.title)}' to dashboard (now ${widgetCount} widgets)`,
+    "",
+    `URL: ${result.url}`,
+  ];
+  return renderMarkdown(lines.join("\n"));
+}
+
+/**
+ * Format a widget deletion result for human-readable output.
+ */
+export function formatWidgetDeleted(result: {
+  dashboard: DashboardDetail;
+  widgetTitle: string;
+  url: string;
+}): string {
+  const widgetCount = result.dashboard.widgets?.length ?? 0;
+  const lines: string[] = [
+    `Removed widget '${escapeMarkdownInline(result.widgetTitle)}' from dashboard (now ${widgetCount} widgets)`,
+    "",
+    `URL: ${result.url}`,
+  ];
+  return renderMarkdown(lines.join("\n"));
+}
+
+/**
+ * Format a widget edit result for human-readable output.
+ */
+export function formatWidgetEdited(result: {
+  dashboard: DashboardDetail;
+  widget: DashboardWidget;
+  url: string;
+}): string {
+  const lines: string[] = [
+    `Updated widget '${escapeMarkdownInline(result.widget.title)}' in dashboard ${result.dashboard.id}`,
+    "",
+    `URL: ${result.url}`,
+  ];
   return renderMarkdown(lines.join("\n"));
 }

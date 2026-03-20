@@ -90,6 +90,7 @@ describe("dashboard create", () => {
 
     expect(createDashboardSpy).toHaveBeenCalledWith("acme-corp", {
       title: "My Dashboard",
+      widgets: [],
       projects: undefined,
     });
   });
@@ -134,6 +135,7 @@ describe("dashboard create", () => {
 
     expect(createDashboardSpy).toHaveBeenCalledWith("my-org", {
       title: "My Dashboard",
+      widgets: [],
       projects: undefined,
     });
   });
