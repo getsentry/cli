@@ -431,7 +431,7 @@ describe("parseIssueArg", () => {
       expect(parseIssueArg("o1081365/CLI-G")).toEqual({
         type: "explicit",
         org: "o1081365",
-        project: "CLI",
+        project: "cli",
         suffix: "G",
       });
     });

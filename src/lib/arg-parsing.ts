@@ -670,7 +670,8 @@ function parseAfterSlash(
     }
 
     // "my-org/cli-G" or "sentry/spotlight-electron-4Y"
-    return { type: "explicit", org, project, suffix };
+    // Lowercase the project slug — Sentry slugs are always lowercase.
+    return { type: "explicit", org, project: project.toLowerCase(), suffix };
   }
 
   // "my-org/G" → explicit org + suffix only (no dash in rest)
@@ -724,7 +725,14 @@ function parseWithDash(arg: string): ParsedIssueArg {
   }
 
   // "cli-G" or "spotlight-electron-4Y"
-  return { type: "project-search", projectSlug, suffix };
+  // Lowercase the project slug since Sentry slugs are always lowercase.
+  // Users often type short IDs in uppercase (e.g., "EASI-API-3Y4") which
+  // produces an uppercase project slug that would fail API lookups (CLI-C8).
+  return {
+    type: "project-search",
+    projectSlug: projectSlug.toLowerCase(),
+    suffix,
+  };
 }
 
 /**
