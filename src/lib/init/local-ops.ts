@@ -9,7 +9,12 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { isCancel, select } from "@clack/prompts";
-import { createProject, getProject, tryGetPrimaryDsn } from "../api-client.js";
+import {
+  createProject,
+  getProject,
+  listOrganizations,
+  tryGetPrimaryDsn,
+} from "../api-client.js";
 import { ApiError } from "../errors.js";
 import { resolveOrCreateTeam } from "../resolve-team.js";
 import { buildProjectUrl } from "../sentry-urls.js";
@@ -19,7 +24,7 @@ import {
   MAX_FILE_BYTES,
   MAX_OUTPUT_BYTES,
 } from "./constants.js";
-import { listOrgsPrefetched, resolveOrgPrefetched } from "./prefetch.js";
+import { resolveOrgPrefetched } from "./prefetch.js";
 import type {
   ApplyPatchsetPayload,
   CreateSentryProjectPayload,
@@ -654,10 +659,13 @@ function applyPatchset(
  * Resolve the org slug from local config, env vars, or by listing the user's
  * organizations from the API as a fallback.
  *
- * Uses the prefetch-aware helpers from `./prefetch.ts` — if
- * {@link warmOrgDetection} was called earlier (by `init.ts`), the results are
- * already cached and this function returns near-instantly.  Otherwise it falls
- * back to live calls transparently.
+ * DSN scanning uses the prefetch-aware helper from `./prefetch.ts` — if
+ * {@link warmOrgDetection} was called earlier (by `init.ts`), the result is
+ * already cached and returns near-instantly.
+ *
+ * `listOrganizations()` uses SQLite caching for near-instant warm lookups
+ * (populated after `sentry login` or the first API call), so it does not
+ * need background prefetching.
  *
  * @returns The org slug on success, or a {@link LocalOpResult} error to return early.
  */
@@ -670,8 +678,8 @@ async function resolveOrgSlug(
     return resolved.org;
   }
 
-  // Fallback: list user's organizations from API (prefetch-aware)
-  const orgs = await listOrgsPrefetched();
+  // Fallback: list user's organizations (SQLite-cached after login/first call)
+  const orgs = await listOrganizations();
   if (orgs.length === 0) {
     return {
       ok: false,
