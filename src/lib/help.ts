@@ -109,10 +109,12 @@ export async function printCustomHelp(): Promise<string> {
 
   const lines: string[] = [];
 
-  // Banner with gradient
-  lines.push("");
-  lines.push(formatBanner());
-  lines.push("");
+  // Banner with gradient (only in interactive terminals)
+  if (process.stdout.isTTY) {
+    lines.push("");
+    lines.push(formatBanner());
+    lines.push("");
+  }
 
   // Tagline
   lines.push(`  ${TAGLINE}`);
