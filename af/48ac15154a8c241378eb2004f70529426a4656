@@ -1,0 +1,70 @@
+# Investigation: Sentry Issue CLI-J0
+
+## Issue Summary
+
+**Issue**: `CLI-J0` — `Error: Operation timed out after 6 minutes. Try again or check the issue in Sentry web UI.`
+**Status**: Unresolved (new), High priority
+**First/Last Seen**: 2026-03-20T04:47:58Z (single occurrence)
+**Culprit**: `poll(sentry.dist:bin)` in `src/lib/polling.ts`
+**User**: 1 affected user (running `sentry@0.18.1` via pnpm)
+**Permalink**: https://sentry.sentry.io/issues/7350074690/
+
+## Root Cause Analysis
+
+The error occurs when a user runs `sentry issue explain` — the Seer AI root cause analysis polling loop exceeds its 6-minute timeout.
+
+### Call Stack (source-mapped)
+1. `bin.ts:139` → `runCommand()` — CLI entry point
+2. `telemetry.ts:107` → `withTelemetry()` — Wraps command execution
+3. `command.ts:437` → Stricli command wrapper — Drives the generator
+4. **`explain.ts:92`** → `ensureRootCauseAnalysis()` — The command that triggered it
+5. **`utils.ts:594`** → `pollAutofixState()` — Delegates to generic poll
+6. **`polling.ts:101`** → `poll()` — **Throws `new Error(timeoutMessage)` at line 101**
+
+### What Happened
+1. User ran `sentry issue explain <some-issue-id>` (or via an alias)
+2. `ensureRootCauseAnalysis()` checked for existing analysis — none found (or it was in ERROR state)
+3. Triggered `triggerRootCauseAnalysis()` to start a new Seer analysis
+4. Started polling `getAutofixState()` every 1 second for up to 6 minutes
+5. The Seer backend never returned a terminal status (`COMPLETED`, `ERROR`, `WAITING_FOR_USER_RESPONSE`) within the 6-minute window
+6. The `while (Date.now() - startTime < timeoutMs)` loop in `poll()` expired
+7. `throw new Error(timeoutMessage)` at `polling.ts:101` — this is a **handled** error (`mechanism.handled: true`)
+
+### Key Observation
+This is **not a bug in the CLI code** — it's a real-world timeout where the Seer AI backend took longer than 6 minutes to complete its analysis. The timeout is a deliberate safeguard (set at `DEFAULT_TIMEOUT_MS = 360_000` in `polling.ts:20`).
+
+## Possible Improvements
+
+If we wanted to reduce the likelihood of this timeout or improve the user experience:
+
+### 1. Increase the timeout (simple, not recommended)
+- Change `DEFAULT_TIMEOUT_MS` — but 6 minutes is already generous for a CLI blocking operation
+
+### 2. Better error handling — wrap in `CliError` instead of bare `Error`
+- **File**: `src/lib/polling.ts:101`
+- Currently throws `new Error(timeoutMessage)` — a bare Error, not a `CliError` subclass
+- Should throw a more structured error (e.g., a new `TimeoutError` or use existing error classes) so the CLI error handler can provide better UX (e.g., link to the Sentry issue page, suggest `--force` retry)
+
+### 3. Non-blocking "fire and forget" mode
+- Add a `--no-wait` flag to `sentry issue explain` that triggers the analysis and exits immediately, telling the user to check back later
+- Would avoid the timeout entirely for slow analyses
+
+### 4. Resume polling
+- If the analysis was triggered but timed out, the next `sentry issue explain` call could detect the in-progress analysis and resume polling instead of triggering a new one (this already works partially — `ensureRootCauseAnalysis` checks for existing state)
+
+## Recommended Fix
+
+The most impactful improvement is **#2** — converting the bare `Error` to a proper `CliError` subclass with actionable hints. Currently the timeout produces a generic error message. A structured error could:
+- Include a link to the issue in the Sentry web UI
+- Suggest running the command again (the analysis may complete in the background)
+- Suggest using `--force` if the analysis seems stuck
+
+### Files to Modify
+- `src/lib/polling.ts` — Change `throw new Error(timeoutMessage)` to throw a new `TimeoutError` or `CliError` subclass
+- `src/lib/errors.ts` — Add `TimeoutError` class (or reuse existing pattern)
+- `src/commands/issue/utils.ts` — Pass issue URL/context to the timeout error for better hints
+
+## Verification
+- Run `bun test --filter "poll"` to check existing polling tests
+- Run `bun run typecheck` to verify types
+- Run `bun run lint` to check formatting
