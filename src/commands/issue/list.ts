@@ -911,10 +911,10 @@ function build400Detail(
   originalDetail: string | undefined,
   flags: Pick<ListFlags, "query" | "period">
 ): string {
-  const parts: string[] = [];
+  const lines: string[] = [];
 
   if (originalDetail) {
-    parts.push(originalDetail);
+    lines.push(originalDetail);
   }
 
   const suggestions: string[] = [];
@@ -933,15 +933,18 @@ function build400Detail(
     "Verify you have access to the target project: sentry project list <org>/"
   );
 
-  if (suggestions.length > 0) {
-    parts.push("");
-    parts.push("Suggestions:");
-    for (const s of suggestions) {
-      parts.push(`  • ${s}`);
-    }
+  // Only add the separator when there's a detail line preceding the suggestions
+  if (lines.length > 0) {
+    lines.push("");
+  }
+  lines.push("Suggestions:");
+  for (const s of suggestions) {
+    lines.push(`  • ${s}`);
   }
 
-  return parts.join("\n");
+  // ApiError.format() prepends "\n  " only before the first line of detail.
+  // Indent continuation lines to maintain alignment with the first line.
+  return lines.join("\n  ");
 }
 
 /**
