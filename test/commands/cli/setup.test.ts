@@ -350,7 +350,7 @@ describe("sentry cli setup", () => {
     // Should still show "Installed to" but not "Added ... to fpath"
     const output = getOutput();
     expect(output).toContain("Completions: Installed to");
-    expect(output).not.toContain("Added sentry completions to fpath");
+    expect(output).not.toContain("Added sentry fpath in");
   });
 
   test("handles GitHub Actions PATH when GITHUB_ACTIONS is set", async () => {

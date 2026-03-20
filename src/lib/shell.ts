@@ -171,14 +171,6 @@ export function isInPath(
 }
 
 /**
- * Add a directory to PATH in a shell config file.
- *
- * @param configFile - Path to the config file
- * @param directory - Directory to add to PATH
- * @param shellType - The shell type (for correct syntax)
- * @returns Result of the modification attempt
- */
-/**
  * Append a shell config line to a config file with idempotency.
  *
  * Shared implementation for `addToPath` and `addToFpath`. Handles file
