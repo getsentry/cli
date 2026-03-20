@@ -281,12 +281,17 @@ function formatGroupHuman(group: RouteInfo): string {
     return lines.join("\n");
   }
 
-  const maxName = Math.max(
-    ...group.commands.map((c) => (c.path.split(" ").at(-1) ?? "").length)
-  );
+  // Strip "sentry <group> " prefix to get subcommand name.
+  // For nested routes like "sentry dashboard widget add", this yields "widget add".
+  const prefix = `sentry ${group.name} `;
+  const subName = (cmd: CommandInfo) =>
+    cmd.path.startsWith(prefix)
+      ? cmd.path.slice(prefix.length)
+      : (cmd.path.split(" ").at(-1) ?? "");
+
+  const maxName = Math.max(...group.commands.map((c) => subName(c).length));
   for (const cmd of group.commands) {
-    const name = cmd.path.split(" ").at(-1) ?? "";
-    lines.push(`    ${name.padEnd(maxName + 2)}${cmd.brief}`);
+    lines.push(`    ${subName(cmd).padEnd(maxName + 2)}${cmd.brief}`);
   }
 
   return lines.join("\n");
