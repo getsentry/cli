@@ -433,6 +433,33 @@ export class SeerError extends CliError {
   }
 }
 
+/**
+ * Timeout errors for long-running polling operations.
+ *
+ * Use when a polling loop exceeds its time budget. Provides structured
+ * hints so the user knows the operation may still complete in the background.
+ *
+ * @param message - What timed out (e.g., "Operation timed out after 6 minutes.")
+ * @param hint - Actionable suggestion (e.g., "Run the command again — the analysis may finish in the background.")
+ */
+export class TimeoutError extends CliError {
+  readonly hint?: string;
+
+  constructor(message: string, hint?: string) {
+    super(message);
+    this.name = "TimeoutError";
+    this.hint = hint;
+  }
+
+  override format(): string {
+    let msg = this.message;
+    if (this.hint) {
+      msg += `\n\n${this.hint}`;
+    }
+    return msg;
+  }
+}
+
 // Error Utilities
 
 /**

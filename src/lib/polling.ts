@@ -5,6 +5,7 @@
  * Used by commands that need to wait for async operations to complete.
  */
 
+import { TimeoutError } from "./errors.js";
 import {
   formatProgressLine,
   truncateProgressMessage,
@@ -37,6 +38,8 @@ export type PollOptions<T> = {
   timeoutMs?: number;
   /** Custom timeout message */
   timeoutMessage?: string;
+  /** Actionable hint appended to the TimeoutError (e.g., "Run the command again…") */
+  timeoutHint?: string;
   /** Initial progress message */
   initialMessage?: string;
 };
@@ -51,7 +54,7 @@ export type PollOptions<T> = {
  * @typeParam T - The type of state being polled
  * @param options - Polling configuration
  * @returns The final state when shouldStop returns true
- * @throws {Error} When timeout is reached before shouldStop returns true
+ * @throws {TimeoutError} When timeout is reached before shouldStop returns true
  *
  * @example
  * ```typescript
@@ -74,6 +77,7 @@ export async function poll<T>(options: PollOptions<T>): Promise<T> {
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     timeoutMessage = "Operation timed out after 6 minutes. Try again or check the Sentry web UI.",
+    timeoutHint,
     initialMessage = "Waiting for operation to start...",
   } = options;
 
@@ -98,7 +102,7 @@ export async function poll<T>(options: PollOptions<T>): Promise<T> {
       await Bun.sleep(pollIntervalMs);
     }
 
-    throw new Error(timeoutMessage);
+    throw new TimeoutError(timeoutMessage, timeoutHint);
   } finally {
     spinner?.stop();
     if (!json) {

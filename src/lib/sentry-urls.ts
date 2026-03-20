@@ -89,6 +89,20 @@ export function buildProjectUrl(orgSlug: string, projectSlug: string): string {
 }
 
 /**
+ * Build URL to view an issue in Sentry.
+ *
+ * @param orgSlug - Organization slug
+ * @param issueId - Numeric issue ID
+ * @returns Full URL to the issue detail page
+ */
+export function buildIssueUrl(orgSlug: string, issueId: string): string {
+  if (isSaaS()) {
+    return `${getOrgBaseUrl(orgSlug)}/issues/${issueId}/`;
+  }
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/issues/${issueId}/`;
+}
+
+/**
  * Build URL to search for an event in Sentry.
  * Uses the issues search with event.id filter.
  *

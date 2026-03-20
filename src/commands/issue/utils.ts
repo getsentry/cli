@@ -39,6 +39,7 @@ import {
   resolveOrgAndProject,
 } from "../../lib/resolve-target.js";
 import { parseSentryUrl } from "../../lib/sentry-url-parser.js";
+import { buildIssueUrl } from "../../lib/sentry-urls.js";
 import { isAllDigits } from "../../lib/utils.js";
 import type { SentryIssue } from "../../types/index.js";
 import { type AutofixState, isTerminalStatus } from "../../types/seer.js";
@@ -730,6 +731,12 @@ export async function pollAutofixState(
     stopOnWaitingForUser = false,
   } = options;
 
+  const issueUrl = buildIssueUrl(orgSlug, issueId);
+  const timeoutHint =
+    "The analysis may still complete in the background.\n" +
+    `  View in Sentry: ${issueUrl}\n` +
+    `  Or retry:       sentry issue explain ${issueId}`;
+
   return await poll<AutofixState>({
     fetchState: () => getAutofixState(orgSlug, issueId),
     shouldStop: (state) => shouldStopPolling(state, stopOnWaitingForUser),
@@ -738,6 +745,7 @@ export async function pollAutofixState(
     pollIntervalMs,
     timeoutMs,
     timeoutMessage,
+    timeoutHint,
     initialMessage: "Waiting for analysis to start...",
   });
 }

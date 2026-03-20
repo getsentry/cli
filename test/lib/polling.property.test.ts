@@ -13,6 +13,7 @@ import {
   integer,
   nat,
 } from "fast-check";
+import { TimeoutError } from "../../src/lib/errors.js";
 import { poll } from "../../src/lib/polling.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
@@ -70,14 +71,14 @@ describe("poll properties", () => {
     );
   });
 
-  test("throws timeout error when shouldStop never returns true", async () => {
+  test("throws TimeoutError when shouldStop never returns true", async () => {
     await fcAssert(
       asyncProperty(nat(50), async (stateValue) => {
         const timeoutMs = 50; // Very short timeout for testing
         const customMessage = `Custom timeout: ${stateValue}`;
 
-        await expect(
-          poll({
+        try {
+          await poll({
             fetchState: async () => ({ value: stateValue }),
             shouldStop: () => false, // Never stop
             getProgressMessage: () => "Testing...",
@@ -85,11 +86,38 @@ describe("poll properties", () => {
             pollIntervalMs: 10,
             timeoutMs,
             timeoutMessage: customMessage,
-          })
-        ).rejects.toThrow(customMessage);
+          });
+          // Should not reach here
+          expect.unreachable("Expected TimeoutError to be thrown");
+        } catch (error) {
+          expect(error).toBeInstanceOf(TimeoutError);
+          expect((error as TimeoutError).message).toBe(customMessage);
+        }
       }),
       { numRuns: Math.min(DEFAULT_NUM_RUNS, 20) } // Fewer runs since timeout tests are slow
     );
+  });
+
+  test("TimeoutError includes hint when provided", async () => {
+    const customHint = "Try running the command again.";
+
+    try {
+      await poll({
+        fetchState: async () => ({ value: 1 }),
+        shouldStop: () => false,
+        getProgressMessage: () => "Testing...",
+        json: true,
+        pollIntervalMs: 10,
+        timeoutMs: 50,
+        timeoutHint: customHint,
+      });
+      expect.unreachable("Expected TimeoutError to be thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(TimeoutError);
+      const te = error as TimeoutError;
+      expect(te.hint).toBe(customHint);
+      expect(te.format()).toContain(customHint);
+    }
   });
 
   test("fetchState call count is bounded by timeout/interval", async () => {
@@ -200,7 +228,7 @@ describe("poll properties", () => {
 
 describe("poll edge cases", () => {
   test("handles immediate timeout (timeoutMs = 0)", async () => {
-    // With 0 timeout, should throw immediately or after first fetch
+    // With 0 timeout, should throw TimeoutError immediately or after first fetch
     await expect(
       poll({
         fetchState: async () => ({ value: 1 }),
@@ -210,7 +238,7 @@ describe("poll edge cases", () => {
         pollIntervalMs: 10,
         timeoutMs: 0,
       })
-    ).rejects.toThrow();
+    ).rejects.toBeInstanceOf(TimeoutError);
   });
 
   test("handles fetchState throwing errors", async () => {
