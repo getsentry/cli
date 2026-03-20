@@ -67,10 +67,10 @@ export const typesCommand = buildCommand({
       "and aggregate functions.\n\n" +
       "Sentry dashboards use a 6-column grid. When adding widgets, aim to fill " +
       "complete rows (widths should sum to 6).\n\n" +
-      "Display types are categorized as:\n" +
-      "  common       — general-purpose (big_number, line, area, bar, table)\n" +
-      "  specialized  — for specific use cases (stacked_area, top_n, categorical_bar, text)\n" +
-      "  internal     — Sentry-internal, rarely used directly\n\n" +
+      "Display types (width × height):\n" +
+      "  common:      big_number (2×1), line (3×2), area (3×2), bar (3×2), table (6×2)\n" +
+      "  specialized: stacked_area (3×2), top_n (3×2), categorical_bar (3×2), text (3×2)\n" +
+      "  internal:    details, wheel, rage_and_dead_clicks, server_tree, agents_traces_table (3×2)\n\n" +
       "Examples:\n" +
       "  sentry dashboard widget types\n" +
       "  sentry dashboard widget types --json",
