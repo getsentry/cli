@@ -623,6 +623,9 @@ type PollAutofixOptions = {
   timeoutMs?: number;
   /** Custom timeout error message */
   timeoutMessage?: string;
+  /** Actionable hint appended to the TimeoutError (e.g., "Run the command again…").
+   *  When omitted, defaults to a hint with the Sentry issue URL. */
+  timeoutHint?: string;
   /** Stop polling when status is WAITING_FOR_USER_RESPONSE (default: false) */
   stopOnWaitingForUser?: boolean;
 };
@@ -728,14 +731,16 @@ export async function pollAutofixState(
     pollIntervalMs,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     timeoutMessage = "Operation timed out after 6 minutes. Try again or check the issue in Sentry web UI.",
+    timeoutHint,
     stopOnWaitingForUser = false,
   } = options;
 
   const issueUrl = buildIssueUrl(orgSlug, issueId);
-  const timeoutHint =
+  const hint =
+    timeoutHint ??
     "The analysis may still complete in the background.\n" +
-    `  View in Sentry: ${issueUrl}\n` +
-    `  Or retry:       sentry issue explain ${issueId}`;
+      `  View in Sentry: ${issueUrl}\n` +
+      `  Or retry:       sentry issue explain ${issueId}`;
 
   return await poll<AutofixState>({
     fetchState: () => getAutofixState(orgSlug, issueId),
@@ -745,7 +750,7 @@ export async function pollAutofixState(
     pollIntervalMs,
     timeoutMs,
     timeoutMessage,
-    timeoutHint,
+    timeoutHint: hint,
     initialMessage: "Waiting for analysis to start...",
   });
 }

@@ -247,6 +247,9 @@ export const planCommand = buildCommand({
         json: flags.json,
         timeoutMessage:
           "Plan creation timed out after 6 minutes. Try again or check the issue in Sentry web UI.",
+        timeoutHint:
+          "The plan may still be generated in the background.\n" +
+          `  Or retry: sentry issue plan ${issueArg}`,
       });
 
       // Handle errors
