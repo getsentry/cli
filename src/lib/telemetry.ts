@@ -42,8 +42,7 @@ async function initTelemetryContext(): Promise<void> {
     const instanceId = getInstanceId();
 
     if (user) {
-      // Only send user ID - email/username are PII
-      Sentry.setUser({ id: user.userId });
+      Sentry.setUser({ id: user.userId, email: user.email });
     }
 
     if (instanceId) {

@@ -808,6 +808,9 @@ mock.module("./some-module", () => ({
 <!-- lore:019ce0bb-f35d-7380-b661-8dc56f9938cf -->
 * **Seer trial prompt uses middleware layering in bin.ts error handling chain**: The CLI's error recovery middlewares in \`bin.ts\` are layered: \`main() → executeWithAutoAuth() → executeWithSeerTrialPrompt() → runCommand()\`. Seer trial prompts (for \`no\_budget\`/\`not\_enabled\` errors) are caught by the inner wrapper; auth errors bubble up to the outer wrapper. After successful auth login retry, the retry also goes through \`executeWithSeerTrialPrompt\` (not \`runCommand\` directly) so the full middleware chain applies. Trial check API: \`GET /api/0/customers/{org}/\` → \`productTrials\[]\` (prefer \`seerUsers\`, fallback \`seerAutofix\`). Start trial: \`PUT /api/0/customers/{org}/product-trial/\`. The \`/customers/\` endpoint is getsentry SaaS-only; self-hosted 404s gracefully. \`ai\_disabled\` errors are excluded (admin's explicit choice). \`startSeerTrial\` accepts \`category\` from the trial object — don't hardcode it.
 
+<!-- lore:019d0682-eb25-77f7-ad72-02247adc597c -->
+* **Sentry SDK uses @sentry/node-core/light instead of @sentry/bun to avoid OTel overhead**: The CLI uses \`@sentry/node-core/light\` instead of \`@sentry/bun\` to avoid loading the full OpenTelemetry stack (~150ms, 24MB). \`@sentry/core\` barrel is patched via \`bun patch\` to remove ~32 unused exports saving ~13ms. Key gotcha: \`LightNodeClient\` constructor hardcodes \`runtime: { name: 'node' }\` AFTER spreading user options, so passing \`runtime\` in \`Sentry.init()\` is silently overwritten. Fix: patch \`client.getOptions().runtime\` post-init (returns mutable ref). The CLI does this in \`telemetry.ts\` to report \`bun\` runtime when running as binary. Trade-offs: transport falls back to Node's \`http\` module instead of native \`fetch\`. Upstream issues: getsentry/sentry-javascript#19885 and #19886.
+
 ### Decision
 
 <!-- lore:019c99d5-69f2-74eb-8c86-411f8512801d -->
