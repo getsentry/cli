@@ -399,10 +399,7 @@ async function resolveTargetsFromParsedArg(
           `'${parsed.projectSlug}'`,
           "looks like an issue short ID, not a project slug",
           `sentry issue view ${parsed.projectSlug}`,
-          [
-            `To view this issue: sentry issue view ${parsed.projectSlug}`,
-            "To list issues in a project: sentry issue list <org>/<project>",
-          ]
+          ["To list issues in a project: sentry issue list <org>/<project>"]
         );
       }
 
