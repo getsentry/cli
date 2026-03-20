@@ -10,7 +10,7 @@ import {
   type ParsedOrgProject,
   parseOrgProjectArg,
 } from "../../lib/arg-parsing.js";
-import { buildCommand, numberParser } from "../../lib/command.js";
+import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { formatDashboardCreated } from "../../lib/formatters/human.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
@@ -22,23 +22,9 @@ import {
   toNumericId,
 } from "../../lib/resolve-target.js";
 import { buildDashboardUrl } from "../../lib/sentry-urls.js";
-import {
-  assignDefaultLayout,
-  type DashboardDetail,
-  type DashboardWidget,
-  DISPLAY_TYPES,
-} from "../../types/dashboard.js";
-import { buildWidgetFromFlags, validateWidgetEnums } from "./resolve.js";
+import type { DashboardDetail } from "../../types/dashboard.js";
 
 type CreateFlags = {
-  readonly "widget-title"?: string;
-  readonly "widget-display"?: string;
-  readonly "widget-dataset"?: string;
-  readonly "widget-query"?: string[];
-  readonly "widget-where"?: string;
-  readonly "widget-group-by"?: string[];
-  readonly "widget-sort"?: string;
-  readonly "widget-limit"?: number;
   readonly json: boolean;
   readonly fields?: string[];
 };
@@ -144,29 +130,6 @@ async function resolveDashboardTarget(
   }
 }
 
-/** Build an inline widget from --widget-* flags */
-function buildInlineWidget(flags: CreateFlags): DashboardWidget {
-  if (!flags["widget-title"]) {
-    throw new ValidationError(
-      "Missing --widget-title. Both --widget-title and --widget-display are required for inline widgets.\n\n" +
-        "Example:\n" +
-        "  sentry dashboard create 'My Dashboard' --widget-title \"Error Count\" --widget-display big_number --widget-query count",
-      "widget-title"
-    );
-  }
-
-  return buildWidgetFromFlags({
-    title: flags["widget-title"],
-    display: flags["widget-display"] as string,
-    dataset: flags["widget-dataset"],
-    query: flags["widget-query"],
-    where: flags["widget-where"],
-    groupBy: flags["widget-group-by"],
-    sort: flags["widget-sort"],
-    limit: flags["widget-limit"],
-  });
-}
-
 export const createCommand = buildCommand({
   docs: {
     brief: "Create a dashboard",
@@ -176,9 +139,8 @@ export const createCommand = buildCommand({
       "  sentry dashboard create 'My Dashboard'\n" +
       "  sentry dashboard create my-org/ 'My Dashboard'\n" +
       "  sentry dashboard create my-org/my-project 'My Dashboard'\n\n" +
-      "With an inline widget:\n" +
-      "  sentry dashboard create 'My Dashboard' \\\n" +
-      '    --widget-title "Error Count" --widget-display big_number --widget-query count',
+      "Add widgets after creation with:\n" +
+      '  sentry dashboard widget add <dashboard> "My Widget" --display line --query count',
   },
   output: {
     human: formatDashboardCreated,
@@ -191,98 +153,18 @@ export const createCommand = buildCommand({
         parse: String,
       },
     },
-    flags: {
-      "widget-title": {
-        kind: "parsed",
-        parse: String,
-        brief: "Inline widget title",
-        optional: true,
-      },
-      "widget-display": {
-        kind: "parsed",
-        parse: String,
-        brief: "Inline widget display type (line, bar, table, big_number, ...)",
-        optional: true,
-      },
-      "widget-dataset": {
-        kind: "parsed",
-        parse: String,
-        brief: "Inline widget dataset (default: spans)",
-        optional: true,
-      },
-      "widget-query": {
-        kind: "parsed",
-        parse: String,
-        brief: "Inline widget aggregate (e.g. count, p95:span.duration)",
-        variadic: true,
-        optional: true,
-      },
-      "widget-where": {
-        kind: "parsed",
-        parse: String,
-        brief: "Inline widget search conditions filter",
-        optional: true,
-      },
-      "widget-group-by": {
-        kind: "parsed",
-        parse: String,
-        brief: "Inline widget group-by column (repeatable)",
-        variadic: true,
-        optional: true,
-      },
-      "widget-sort": {
-        kind: "parsed",
-        parse: String,
-        brief: "Inline widget order by (prefix - for desc)",
-        optional: true,
-      },
-      "widget-limit": {
-        kind: "parsed",
-        parse: numberParser,
-        brief: "Inline widget result limit",
-        optional: true,
-      },
-    },
+    flags: {},
   },
-  async *func(this: SentryContext, flags: CreateFlags, ...args: string[]) {
+  async *func(this: SentryContext, _flags: CreateFlags, ...args: string[]) {
     const { cwd } = this;
 
     const { title, targetArg } = parsePositionalArgs(args);
     const parsed = parseOrgProjectArg(targetArg);
     const { orgSlug, projectIds } = await resolveDashboardTarget(parsed, cwd);
 
-    const widgets: DashboardWidget[] = [];
-    if (flags["widget-display"]) {
-      validateWidgetEnums(flags["widget-display"], flags["widget-dataset"]);
-      const validated = buildInlineWidget(flags);
-      widgets.push(assignDefaultLayout(validated, widgets));
-    } else if (flags["widget-title"]) {
-      throw new ValidationError(
-        "Missing --widget-display. Both --widget-title and --widget-display are required for inline widgets.\n\n" +
-          "Example:\n" +
-          "  sentry dashboard create 'My Dashboard' --widget-title \"Error Count\" --widget-display big_number --widget-query count\n\n" +
-          `Valid display types: ${DISPLAY_TYPES.join(", ")}`,
-        "widget-display"
-      );
-    } else if (
-      flags["widget-query"] ||
-      flags["widget-dataset"] ||
-      flags["widget-where"] ||
-      flags["widget-group-by"] ||
-      flags["widget-sort"] ||
-      flags["widget-limit"] !== undefined
-    ) {
-      throw new ValidationError(
-        "Widget flags require --widget-title and --widget-display.\n\n" +
-          "Example:\n" +
-          "  sentry dashboard create 'My Dashboard' --widget-title \"Error Count\" --widget-display big_number --widget-query count",
-        "widget-display"
-      );
-    }
-
     const dashboard = await createDashboard(orgSlug, {
       title,
-      widgets,
+      widgets: [],
       projects: projectIds.length > 0 ? projectIds : undefined,
     });
     const url = buildDashboardUrl(orgSlug, dashboard.id);

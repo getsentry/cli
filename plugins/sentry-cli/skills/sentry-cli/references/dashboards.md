@@ -1,7 +1,7 @@
 ---
 name: sentry-cli-dashboards
 version: 0.19.0-dev.0
-description: List, view, and create Sentry dashboards
+description: List, view, create, and manage Sentry dashboards and widgets
 requires:
   bins: ["sentry"]
   auth: true
@@ -32,14 +32,41 @@ View a dashboard
 
 Create a dashboard
 
+### `sentry dashboard widget add [<org/project>] <dashboard> <title>`
+
+Add a widget to a dashboard
+
 **Flags:**
-- `--widget-title <value> - Inline widget title`
-- `--widget-display <value> - Inline widget display type (line, bar, table, big_number, ...)`
-- `--widget-dataset <value> - Inline widget dataset (default: spans)`
-- `--widget-query <value>... - Inline widget aggregate (e.g. count, p95:span.duration)`
-- `--widget-where <value> - Inline widget search conditions filter`
-- `--widget-group-by <value>... - Inline widget group-by column (repeatable)`
-- `--widget-sort <value> - Inline widget order by (prefix - for desc)`
-- `--widget-limit <value> - Inline widget result limit`
+- `-d, --display <value> - Display type (line, bar, table, big_number, ...)`
+- `--dataset <value> - Widget dataset (default: spans)`
+- `-q, --query <value>... - Aggregate expression (e.g. count, p95:span.duration)`
+- `-w, --where <value> - Search conditions filter`
+- `-g, --group-by <value>... - Group-by column (repeatable)`
+- `-s, --sort <value> - Order by (prefix - for desc)`
+- `-n, --limit <value> - Result limit`
+
+### `sentry dashboard widget edit [<org/project>] <dashboard>`
+
+Edit a widget in a dashboard
+
+**Flags:**
+- `--index <value> - Widget index (1-based)`
+- `--title <value> - Match widget by title`
+- `--new-title <value> - New widget title`
+- `-d, --display <value> - Display type`
+- `--dataset <value> - Widget dataset`
+- `-q, --query <value>... - Aggregate expression`
+- `-w, --where <value> - Search conditions filter`
+- `-g, --group-by <value>... - Group-by column`
+- `-s, --sort <value> - Order by`
+- `-n, --limit <value> - Result limit`
+
+### `sentry dashboard widget delete [<org/project>] <dashboard>`
+
+Delete a widget from a dashboard
+
+**Flags:**
+- `--index <value> - Widget index (1-based)`
+- `--title <value> - Match widget by title`
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

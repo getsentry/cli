@@ -21,6 +21,17 @@ import {
   WIDGET_TYPES,
 } from "../../types/dashboard.js";
 
+/** Shared widget query flags used by `add` and `edit` commands */
+export type WidgetQueryFlags = {
+  readonly display?: string;
+  readonly dataset?: string;
+  readonly query?: string[];
+  readonly where?: string;
+  readonly "group-by"?: string[];
+  readonly sort?: string;
+  readonly limit?: number;
+};
+
 /**
  * Resolve org slug from a parsed org/project target argument.
  *
@@ -168,7 +179,7 @@ export function resolveWidgetIndex(
 /**
  * Build a widget from user-provided flag values.
  *
- * Shared between `dashboard create --widget-*` and `dashboard widget add`.
+ * Shared between `dashboard widget add` and `dashboard widget edit`.
  * Parses aggregate shorthand, sort expressions, and validates via Zod schema.
  *
  * @param opts - Widget configuration from parsed flags

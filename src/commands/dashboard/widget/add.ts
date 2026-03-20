@@ -24,16 +24,11 @@ import {
   resolveDashboardId,
   resolveOrgFromTarget,
   validateWidgetEnums,
+  type WidgetQueryFlags,
 } from "../resolve.js";
 
-type AddFlags = {
+type AddFlags = WidgetQueryFlags & {
   readonly display: string;
-  readonly dataset?: string;
-  readonly query?: string[];
-  readonly where?: string;
-  readonly "group-by"?: string[];
-  readonly sort?: string;
-  readonly limit?: number;
   readonly json: boolean;
   readonly fields?: string[];
 };
@@ -58,6 +53,13 @@ function parseAddPositionalArgs(args: string[]): {
         "Example:\n" +
         '  sentry dashboard widget add <dashboard> "My Widget" --display line --query count',
       "title"
+    );
+  }
+  if (args.length > 3) {
+    throw new ValidationError(
+      `Too many positional arguments (got ${args.length}, expected at most 3).\n\n` +
+        "Usage: sentry dashboard widget add [<org/project>] <dashboard> <title>",
+      "positional"
     );
   }
 

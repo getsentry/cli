@@ -29,18 +29,12 @@ import {
   resolveOrgFromTarget,
   resolveWidgetIndex,
   validateWidgetEnums,
+  type WidgetQueryFlags,
 } from "../resolve.js";
 
-type EditFlags = {
+type EditFlags = WidgetQueryFlags & {
   readonly index?: number;
   readonly title?: string;
-  readonly display?: string;
-  readonly dataset?: string;
-  readonly query?: string[];
-  readonly where?: string;
-  readonly "group-by"?: string[];
-  readonly sort?: string;
-  readonly limit?: number;
   readonly "new-title"?: string;
   readonly json: boolean;
   readonly fields?: string[];

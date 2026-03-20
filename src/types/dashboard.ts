@@ -467,7 +467,9 @@ export function prepareWidgetQueries(widget: DashboardWidget): DashboardWidget {
     queries: widget.queries.map((q) => ({
       ...q,
       conditions: q.conditions ?? "",
-      fields: q.fields ?? [...(q.columns ?? []), ...(q.aggregates ?? [])],
+      fields: q.fields?.length
+        ? q.fields
+        : [...(q.columns ?? []), ...(q.aggregates ?? [])],
     })),
   };
 }
