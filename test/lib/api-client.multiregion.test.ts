@@ -18,6 +18,7 @@ import {
   getAllOrgRegions,
   setOrgRegion,
 } from "../../src/lib/db/regions.js";
+import { ApiError } from "../../src/lib/errors.js";
 import { useTestConfigDir } from "../helpers.js";
 
 useTestConfigDir("test-multiregion-");
@@ -189,6 +190,29 @@ describe("listOrganizationsInRegion", () => {
     expect(capturedUrl).toContain("/api/0/organizations/");
     expect(orgs).toHaveLength(2);
     expect(orgs[0].slug).toBe("us-org-1");
+  });
+
+  test("enriches 403 error with token scope guidance", async () => {
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ detail: "You do not have permission" }), {
+        status: 403,
+        statusText: "Forbidden",
+        headers: { "Content-Type": "application/json" },
+      });
+
+    try {
+      await listOrganizationsInRegion("https://us.sentry.io");
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      const apiErr = error as ApiError;
+      expect(apiErr.status).toBe(403);
+      // Should include the original detail
+      expect(apiErr.detail).toContain("You do not have permission");
+      // Should include scope guidance
+      expect(apiErr.detail).toContain("org:read");
+      expect(apiErr.detail).toContain("sentry auth login");
+    }
   });
 
   test("handles region with trailing slash", async () => {
@@ -495,6 +519,79 @@ describe("listOrganizations (fan-out)", () => {
     );
     // Org without links should fall back to region URL
     expect(cachedRegions.get("org-without-links")).toBe("https://us.sentry.io");
+  });
+
+  test("propagates 403 error when all regions return 403", async () => {
+    globalThis.fetch = createMultiRegionMockFetch({
+      controlSilo: (req) => {
+        if (req.url.includes("/users/me/regions/")) {
+          return new Response(
+            JSON.stringify({
+              regions: [
+                { name: "us", url: "https://us.sentry.io" },
+                { name: "de", url: "https://de.sentry.io" },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      },
+      usRegion: () =>
+        new Response(JSON.stringify({ detail: "You do not have permission" }), {
+          status: 403,
+          statusText: "Forbidden",
+        }),
+      euRegion: () =>
+        new Response(JSON.stringify({ detail: "You do not have permission" }), {
+          status: 403,
+          statusText: "Forbidden",
+        }),
+    });
+
+    try {
+      await listOrganizations();
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      const apiErr = error as ApiError;
+      expect(apiErr.status).toBe(403);
+      expect(apiErr.detail).toContain("org:read");
+    }
+  });
+
+  test("returns partial results when some regions return 403", async () => {
+    globalThis.fetch = createMultiRegionMockFetch({
+      controlSilo: (req) => {
+        if (req.url.includes("/users/me/regions/")) {
+          return new Response(
+            JSON.stringify({
+              regions: [
+                { name: "us", url: "https://us.sentry.io" },
+                { name: "de", url: "https://de.sentry.io" },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      },
+      usRegion: () =>
+        new Response(
+          JSON.stringify([{ id: "1", slug: "us-org", name: "US Org" }]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        ),
+      euRegion: () =>
+        new Response(JSON.stringify({ detail: "You do not have permission" }), {
+          status: 403,
+          statusText: "Forbidden",
+        }),
+    });
+
+    // Should return the successful region's orgs, not throw
+    const orgs = await listOrganizations();
+    expect(orgs).toHaveLength(1);
+    expect(orgs[0]!.slug).toBe("us-org");
   });
 });
 

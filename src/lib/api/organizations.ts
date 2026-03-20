@@ -151,21 +151,43 @@ export async function listOrganizationsUncached(): Promise<
     return orgs;
   }
 
-  const results = await Promise.all(
+  const settled = await Promise.allSettled(
     regions.map(async (region) => {
-      try {
-        const orgs = await listOrganizationsInRegion(region.url);
-        return orgs.map((org) => ({
-          org,
-          regionUrl: org.links?.regionUrl ?? region.url,
-        }));
-      } catch {
-        return [];
-      }
+      const orgs = await listOrganizationsInRegion(region.url);
+      return orgs.map((org) => ({
+        org,
+        regionUrl: org.links?.regionUrl ?? region.url,
+      }));
     })
   );
 
-  const flatResults = results.flat();
+  // Collect successful results while tracking 403 errors.
+  // Transient failures (network, 5xx) are swallowed — they don't affect other
+  // regions. But 403 errors indicate a token scope problem that affects ALL
+  // regions, so if every region failed with 403 we re-throw the enriched error
+  // instead of returning an empty list (CLI-89 follow-up).
+  const flatResults: { org: SentryOrganization; regionUrl: string }[] = [];
+  let lastScopeError: ApiError | undefined;
+  let hasSuccessfulRegion = false;
+
+  for (const result of settled) {
+    if (result.status === "fulfilled") {
+      hasSuccessfulRegion = true;
+      flatResults.push(...result.value);
+    } else if (
+      result.reason instanceof ApiError &&
+      result.reason.status === 403
+    ) {
+      lastScopeError = result.reason;
+    }
+  }
+
+  // All regions rejected with 403 — the token lacks org:read scope globally.
+  // A fulfilled-but-empty region (200 OK, no memberships) is still a success,
+  // so we only throw when no region succeeded at all.
+  if (!hasSuccessfulRegion && lastScopeError) {
+    throw lastScopeError;
+  }
   const orgs = flatResults.map((r) => r.org);
 
   const regionEntries = flatResults.map((r) => ({
