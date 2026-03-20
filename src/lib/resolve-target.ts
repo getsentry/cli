@@ -608,7 +608,6 @@ export async function fetchProjectId(
         );
       }
       suggestions.push(
-        `List available projects: sentry project list ${org}/`,
         `Check the project slug at https://sentry.io/organizations/${org}/projects/`
       );
       throw new ResolutionError(
