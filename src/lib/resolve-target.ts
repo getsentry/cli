@@ -21,6 +21,7 @@ import {
   findProjectsByPattern,
   findProjectsBySlug,
   getProject,
+  listProjects,
 } from "./api-client.js";
 import { type ParsedOrgProject, parseOrgProjectArg } from "./arg-parsing.js";
 import { getDefaultOrganization, getDefaultProject } from "./db/defaults.js";
@@ -552,11 +553,59 @@ function resolveFromEnvVars(): {
 }
 
 /**
+ * Find project slugs in the org that are similar to the given slug.
+ *
+ * Uses case-insensitive prefix/substring matching — lightweight and
+ * sufficient for the most common typo patterns (wrong casing, partial
+ * slug, extra/missing hyphens). Falls back gracefully on API errors
+ * since this is a best-effort hint, not a critical path.
+ *
+ * @param org - Organization slug to search in
+ * @param slug - The project slug that wasn't found
+ * @returns Up to 3 similar project slugs, or empty array on error
+ */
+async function findSimilarProjects(
+  org: string,
+  slug: string
+): Promise<string[]> {
+  try {
+    const projects = await listProjects(org);
+    const lower = slug.toLowerCase();
+
+    // Score each project: exact-case-insensitive > prefix > substring > none
+    const scored = projects
+      .map((p) => {
+        const pLower = p.slug.toLowerCase();
+        if (pLower === lower) {
+          return { slug: p.slug, score: 3 };
+        }
+        if (pLower.startsWith(lower) || lower.startsWith(pLower)) {
+          return { slug: p.slug, score: 2 };
+        }
+        if (pLower.includes(lower) || lower.includes(pLower)) {
+          return { slug: p.slug, score: 1 };
+        }
+        return { slug: p.slug, score: 0 };
+      })
+      .filter((s) => s.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    return scored.slice(0, 3).map((s) => s.slug);
+  } catch {
+    // Best-effort — don't let listing failures block the error message
+    return [];
+  }
+}
+
+/**
  * Fetch the numeric project ID for an explicit org/project pair.
  *
  * Throws on auth errors and 404s (user-actionable). Returns undefined
  * for transient failures (network, 500s) so the command can still
  * attempt slug-based querying as a fallback.
+ *
+ * On 404, attempts to list similar projects in the org to help the
+ * user find the correct slug (CLI-C0, 36 users).
  */
 export async function fetchProjectId(
   org: string,
@@ -568,13 +617,20 @@ export async function fetchProjectId(
       projectResult.error instanceof ApiError &&
       projectResult.error.status === 404
     ) {
+      const similar = await findSimilarProjects(org, project);
+      const suggestions = [
+        `Check the project slug at https://sentry.io/organizations/${org}/projects/`,
+      ];
+      if (similar.length > 0) {
+        suggestions.unshift(
+          `Similar projects: ${similar.map((s) => `'${s}'`).join(", ")}`
+        );
+      }
       throw new ResolutionError(
         `Project '${project}'`,
         `not found in organization '${org}'`,
         `sentry issue list ${org}/<project>`,
-        [
-          `Check the project slug at https://sentry.io/organizations/${org}/projects/`,
-        ]
+        suggestions
       );
     }
     return;
