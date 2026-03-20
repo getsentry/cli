@@ -16,7 +16,10 @@ import {
   listIssuesPaginated,
   listProjects,
 } from "../../lib/api-client.js";
-import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
+import {
+  looksLikeIssueShortId,
+  parseOrgProjectArg,
+} from "../../lib/arg-parsing.js";
 import {
   buildPaginationContextKey,
   clearPaginationCursor,
@@ -387,6 +390,19 @@ async function resolveTargetsFromParsedArg(
     }
 
     case "project-search": {
+      // Detect when user passes an issue short ID instead of a project slug.
+      // Short IDs like "CONVERSATION-SVC-F" or "CLI-BM" are all-uppercase
+      // with a dash-separated suffix — a pattern that never occurs in project
+      // slugs (which are always lowercase).
+      if (looksLikeIssueShortId(parsed.projectSlug)) {
+        throw new ResolutionError(
+          `'${parsed.projectSlug}'`,
+          "looks like an issue short ID, not a project slug",
+          `sentry issue view ${parsed.projectSlug}`,
+          ["To list issues in a project: sentry issue list <org>/<project>"]
+        );
+      }
+
       // Find project across all orgs
       const { projects: matches, orgs } = await findProjectsBySlug(
         parsed.projectSlug
