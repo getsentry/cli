@@ -1,0 +1,326 @@
+---
+name: sentry-cli
+version: 0.19.0-dev.0
+description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
+requires:
+  bins: ["sentry"]
+  auth: true
+---
+
+# Sentry CLI Usage Guide
+
+Help users interact with Sentry from the command line using the `sentry` CLI.
+
+## Agent Guidance
+
+Best practices and operational guidance for AI coding agents using the Sentry CLI.
+
+### Key Principles
+
+- **Prefer CLI commands over raw API calls** — the CLI has dedicated commands for most tasks. Reach for `sentry issue view`, `sentry issue list`, `sentry trace view`, etc. before constructing API calls manually or fetching external documentation.
+- **Use `sentry schema` to explore the API** — if you need to discover API endpoints, run `sentry schema` to browse interactively or `sentry schema <resource>` to search. This is faster than fetching OpenAPI specs externally.
+- **Use `sentry issue view <id>` to investigate issues** — when asked about a specific issue (e.g., `CLI-G5`, `PROJECT-123`), use `sentry issue view` directly.
+- **Use `--json` for machine-readable output** — pipe through `jq` for filtering. Human-readable output includes formatting that is hard to parse.
+- **The CLI auto-detects org/project** — most commands work without explicit targets by scanning for DSNs in `.env` files and source code.
+
+### Design Principles
+
+The `sentry` CLI follows conventions from well-known tools — if you're familiar with them, that knowledge transfers directly:
+
+- **`gh` (GitHub CLI) conventions**: The `sentry` CLI uses the same `<noun> <verb>` command pattern (e.g., `sentry issue list`, `sentry org view`). Flags follow `gh` conventions: `--json` for machine-readable output, `--fields` to select specific fields, `-w`/`--web` to open in browser, `-q`/`--query` for filtering, `-n`/`--limit` for result count.
+- **`sentry api` mimics `curl`**: The `sentry api` command provides direct API access with a `curl`-like interface — `--method` for HTTP method, `--data` for request body, `--header` for custom headers. It handles authentication automatically. If you know how to call a REST API with `curl`, the same patterns apply.
+
+### Context Window Tips
+
+- Use `--fields id,title,status` on list commands to reduce output size
+- Use `--json` when piping output between commands or processing programmatically
+- Use `--limit` to cap the number of results (default is usually 10–100)
+- Prefer `sentry issue view PROJECT-123` over listing and filtering manually
+- Use `sentry api` for endpoints not covered by dedicated commands
+
+### Safety Rules
+
+- Always confirm with the user before running destructive commands: `project delete`, `trial start`
+- Verify the org/project context is correct before mutations — use `sentry auth status` to check defaults
+- Never store or log authentication tokens — use `sentry auth login` and let the CLI manage credentials
+- When in doubt about the target org/project, use explicit `<org>/<project>` arguments instead of auto-detection
+
+### Workflow Patterns
+
+#### Investigate an Issue
+
+```bash
+# 1. Find the issue
+sentry issue list my-org/my-project --query "is:unresolved" --limit 5
+
+# 2. Get details
+sentry issue view PROJECT-123
+
+# 3. Get AI root cause analysis
+sentry issue explain PROJECT-123
+
+# 4. Get a fix plan
+sentry issue plan PROJECT-123
+```
+
+#### Explore Traces and Performance
+
+```bash
+# 1. List recent traces
+sentry trace list my-org/my-project --limit 5
+
+# 2. View a specific trace with span tree
+sentry trace view my-org/my-project/abc123def456...
+
+# 3. View spans for a trace
+sentry span list my-org/my-project/abc123def456...
+
+# 4. View logs associated with a trace
+sentry trace logs my-org/abc123def456...
+```
+
+#### Stream Logs
+
+```bash
+# Stream logs in real-time
+sentry log list my-org/my-project --follow
+
+# Filter logs by severity
+sentry log list my-org/my-project --query "severity:error"
+```
+
+#### Explore the API Schema
+
+```bash
+# Browse all API resource categories
+sentry schema
+
+# Search for endpoints related to a resource
+sentry schema issues
+
+# Get details about a specific endpoint
+sentry schema "GET /api/0/organizations/{organization_id_or_slug}/issues/"
+```
+
+#### Arbitrary API Access
+
+```bash
+# GET request (default)
+sentry api /api/0/organizations/my-org/
+
+# POST request with data
+sentry api /api/0/organizations/my-org/projects/ --method POST --data '{"name":"new-project","platform":"python"}'
+```
+
+### Common Mistakes
+
+- **Wrong issue ID format**: Use `PROJECT-123` (short ID), not the numeric ID `123456789`. The short ID includes the project prefix.
+- **Forgetting authentication**: Run `sentry auth login` before any other command. Check with `sentry auth status`.
+- **Missing `--json` for piping**: Human-readable output includes formatting. Use `--json` when parsing output programmatically.
+- **Org/project ambiguity**: Auto-detection scans for DSNs in `.env` files and source code. If the project is ambiguous, specify explicitly: `sentry issue list my-org/my-project`.
+- **Confusing `--query` syntax**: The `--query` flag uses Sentry search syntax (e.g., `is:unresolved`, `assigned:me`), not free text search.
+- **Not using `--web`**: View commands support `-w`/`--web` to open the resource in the browser — useful for sharing links.
+- **Fetching API schemas instead of using the CLI**: Prefer `sentry schema` to browse the API and `sentry api` to make requests — the CLI handles authentication and endpoint resolution, so there's rarely a need to download OpenAPI specs separately.
+
+## Prerequisites
+
+The CLI must be installed and authenticated before use.
+
+### Installation
+
+```bash
+curl https://cli.sentry.dev/install -fsS | bash
+curl https://cli.sentry.dev/install -fsS | bash -s -- --version nightly
+brew install getsentry/tools/sentry
+
+# Or install via npm/pnpm/bun
+npm install -g sentry
+```
+
+### Authentication
+
+```bash
+sentry auth login
+sentry auth login --token YOUR_SENTRY_API_TOKEN
+sentry auth status
+sentry auth logout
+```
+
+## Command Reference
+
+### Auth
+
+Authenticate with Sentry
+
+- `sentry auth login` — Authenticate with Sentry
+- `sentry auth logout` — Log out of Sentry
+- `sentry auth refresh` — Refresh your authentication token
+- `sentry auth status` — View authentication status
+- `sentry auth token` — Print the stored authentication token
+- `sentry auth whoami` — Show the currently authenticated user
+
+→ Full flags and examples: `references/auth.md`
+
+### Org
+
+Work with Sentry organizations
+
+- `sentry org list` — List organizations
+- `sentry org view <org>` — View details of an organization
+
+→ Full flags and examples: `references/organizations.md`
+
+### Project
+
+Work with Sentry projects
+
+- `sentry project create <name> <platform>` — Create a new project
+- `sentry project delete <org/project>` — Delete a project
+- `sentry project list <org/project>` — List projects
+- `sentry project view <org/project>` — View details of a project
+
+→ Full flags and examples: `references/projects.md`
+
+### Issue
+
+Manage Sentry issues
+
+- `sentry issue list <org/project>` — List issues in a project
+- `sentry issue explain <issue>` — Analyze an issue's root cause using Seer AI
+- `sentry issue plan <issue>` — Generate a solution plan using Seer AI
+- `sentry issue view <issue>` — View details of a specific issue
+
+→ Full flags and examples: `references/issues.md`
+
+### Event
+
+View Sentry events
+
+- `sentry event view <args...>` — View details of a specific event
+
+→ Full flags and examples: `references/events.md`
+
+### Api
+
+Make an authenticated API request
+
+- `sentry api <endpoint>` — Make an authenticated API request
+
+→ Full flags and examples: `references/api.md`
+
+### Cli
+
+CLI-related commands
+
+- `sentry cli feedback <message...>` — Send feedback about the CLI
+- `sentry cli fix` — Diagnose and repair CLI database issues
+- `sentry cli setup` — Configure shell integration
+- `sentry cli upgrade <version>` — Update the Sentry CLI to the latest version
+
+→ Full flags and examples: `references/setup.md`
+
+### Dashboard
+
+Manage Sentry dashboards
+
+- `sentry dashboard list <org/project>` — List dashboards
+- `sentry dashboard view <args...>` — View a dashboard
+- `sentry dashboard create <args...>` — Create a dashboard
+
+→ Full flags and examples: `references/dashboards.md`
+
+### Repo
+
+Work with Sentry repositories
+
+- `sentry repo list <org/project>` — List repositories
+
+→ Full flags and examples: `references/teams.md`
+
+### Team
+
+Work with Sentry teams
+
+- `sentry team list <org/project>` — List teams
+
+→ Full flags and examples: `references/teams.md`
+
+### Log
+
+View Sentry logs
+
+- `sentry log list <org/project-or-trace-id...>` — List logs from a project
+- `sentry log view <args...>` — View details of one or more log entries
+
+→ Full flags and examples: `references/logs.md`
+
+### Span
+
+List and view spans in projects or traces
+
+- `sentry span list <org/project/trace-id...>` — List spans in a project or trace
+- `sentry span view <trace-id/span-id...>` — View details of specific spans
+
+→ Full flags and examples: `references/traces.md`
+
+### Trace
+
+View distributed traces
+
+- `sentry trace list <org/project>` — List recent traces in a project
+- `sentry trace view <org/project/trace-id...>` — View details of a specific trace
+- `sentry trace logs <org/trace-id...>` — View logs associated with a trace
+
+→ Full flags and examples: `references/traces.md`
+
+### Trial
+
+Manage product trials
+
+- `sentry trial list <org>` — List product trials
+- `sentry trial start <name> <org>` — Start a product trial
+
+→ Full flags and examples: `references/trials.md`
+
+### Init
+
+Initialize Sentry in your project
+
+- `sentry init <target> <directory>` — Initialize Sentry in your project
+
+→ Full flags and examples: `references/setup.md`
+
+### Schema
+
+Browse the Sentry API schema
+
+- `sentry schema <resource...>` — Browse the Sentry API schema
+
+→ Full flags and examples: `references/setup.md`
+
+## Global Options
+
+All commands support the following global options:
+
+- `--help` - Show help for the command
+- `--version` - Show CLI version
+- `--log-level <level>` - Set log verbosity (`error`, `warn`, `log`, `info`, `debug`, `trace`). Overrides `SENTRY_LOG_LEVEL`
+- `--verbose` - Shorthand for `--log-level debug`
+
+## Output Formats
+
+### JSON Output
+
+Most list and view commands support `--json` flag for JSON output, making it easy to integrate with other tools:
+
+```bash
+sentry org list --json | jq '.[] | .slug'
+```
+
+### Opening in Browser
+
+View commands support `-w` or `--web` flag to open the resource in your browser:
+
+```bash
+sentry issue view PROJ-123 -w
+```
