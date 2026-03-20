@@ -22,6 +22,7 @@ import type { SentryContext } from "../context.js";
 import { looksLikePath, parseOrgProjectArg } from "../lib/arg-parsing.js";
 import { buildCommand } from "../lib/command.js";
 import { ContextError } from "../lib/errors.js";
+import { warmOrgDetection } from "../lib/init/prefetch.js";
 import { runWizard } from "../lib/init/wizard-runner.js";
 import { validateResourceId } from "../lib/input-validation.js";
 import { logger } from "../lib/logger.js";
@@ -229,7 +230,15 @@ export const initCommand = buildCommand<
     const { org: explicitOrg, project: explicitProject } =
       await resolveTarget(targetArg);
 
-    // 5. Run the wizard
+    // 5. Start background org detection when org is not yet known.
+    //    The prefetch runs concurrently with the preamble, the wizard startup,
+    //    and all early suspend/resume rounds — by the time the wizard needs the
+    //    org (inside createSentryProject), the result is already cached.
+    if (!explicitOrg) {
+      warmOrgDetection(targetDir);
+    }
+
+    // 6. Run the wizard
     await runWizard({
       directory: targetDir,
       yes: flags.yes,

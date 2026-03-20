@@ -11,6 +11,9 @@ import path from "node:path";
 import { initCommand } from "../../src/commands/init.js";
 import { ContextError } from "../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as prefetchNs from "../../src/lib/init/prefetch.js";
+import { resetPrefetch } from "../../src/lib/init/prefetch.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as wizardRunner from "../../src/lib/init/wizard-runner.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as resolveTarget from "../../src/lib/resolve-target.js";
@@ -19,6 +22,7 @@ import * as resolveTarget from "../../src/lib/resolve-target.js";
 let capturedArgs: Record<string, unknown> | undefined;
 let runWizardSpy: ReturnType<typeof spyOn>;
 let resolveProjectSpy: ReturnType<typeof spyOn>;
+let warmSpy: ReturnType<typeof spyOn>;
 
 const func = (await initCommand.loader()) as unknown as (
   this: {
@@ -45,6 +49,7 @@ const DEFAULT_FLAGS = { yes: true, "dry-run": false } as const;
 
 beforeEach(() => {
   capturedArgs = undefined;
+  resetPrefetch();
   runWizardSpy = spyOn(wizardRunner, "runWizard").mockImplementation(
     (args: Record<string, unknown>) => {
       capturedArgs = args;
@@ -59,11 +64,19 @@ beforeEach(() => {
     org: "resolved-org",
     project: slug,
   }));
+  // Spy on warmOrgDetection to verify it's called/skipped appropriately.
+  // The mock prevents real DSN scans and API calls from the background.
+  warmSpy = spyOn(prefetchNs, "warmOrgDetection").mockImplementation(
+    // biome-ignore lint/suspicious/noEmptyBlockStatements: intentional no-op mock
+    () => {}
+  );
 });
 
 afterEach(() => {
   runWizardSpy.mockRestore();
   resolveProjectSpy.mockRestore();
+  warmSpy.mockRestore();
+  resetPrefetch();
 });
 
 describe("init command func", () => {
@@ -322,6 +335,50 @@ describe("init command func", () => {
       expect(capturedArgs?.org).toBe("acme");
       expect(capturedArgs?.project).toBe("my-app");
       expect(capturedArgs?.team).toBe("backend");
+    });
+  });
+
+  // ── Background org detection ──────────────────────────────────────────
+
+  describe("background org detection", () => {
+    test("warms prefetch when org is not explicit", async () => {
+      const ctx = makeContext();
+      await func.call(ctx, DEFAULT_FLAGS);
+      expect(warmSpy).toHaveBeenCalledTimes(1);
+      expect(warmSpy).toHaveBeenCalledWith("/projects/app");
+    });
+
+    test("skips prefetch when org is explicit", async () => {
+      const ctx = makeContext();
+      await func.call(ctx, DEFAULT_FLAGS, "acme/my-app");
+      expect(warmSpy).not.toHaveBeenCalled();
+    });
+
+    test("skips prefetch when org-only is explicit", async () => {
+      const ctx = makeContext();
+      await func.call(ctx, DEFAULT_FLAGS, "acme/");
+      expect(warmSpy).not.toHaveBeenCalled();
+    });
+
+    test("skips prefetch for bare slug (project-search resolves org)", async () => {
+      const ctx = makeContext();
+      await func.call(ctx, DEFAULT_FLAGS, "my-app");
+      // resolveProjectBySlug returns { org: "resolved-org" } → org is known
+      expect(warmSpy).not.toHaveBeenCalled();
+    });
+
+    test("warms prefetch for path-only arg", async () => {
+      const ctx = makeContext();
+      await func.call(ctx, DEFAULT_FLAGS, "./subdir");
+      expect(warmSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test("warms prefetch with resolved directory path", async () => {
+      const ctx = makeContext("/projects/app");
+      await func.call(ctx, DEFAULT_FLAGS, "./subdir");
+      expect(warmSpy).toHaveBeenCalledWith(
+        path.resolve("/projects/app", "./subdir")
+      );
     });
   });
 });

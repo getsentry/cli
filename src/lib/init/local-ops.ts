@@ -16,7 +16,6 @@ import {
   tryGetPrimaryDsn,
 } from "../api-client.js";
 import { ApiError } from "../errors.js";
-import { resolveOrg } from "../resolve-target.js";
 import { resolveOrCreateTeam } from "../resolve-team.js";
 import { buildProjectUrl } from "../sentry-urls.js";
 import { slugify } from "../utils.js";
@@ -25,6 +24,7 @@ import {
   MAX_FILE_BYTES,
   MAX_OUTPUT_BYTES,
 } from "./constants.js";
+import { resolveOrgPrefetched } from "./prefetch.js";
 import type {
   ApplyPatchsetPayload,
   CreateSentryProjectPayload,
@@ -658,18 +658,27 @@ function applyPatchset(
 /**
  * Resolve the org slug from local config, env vars, or by listing the user's
  * organizations from the API as a fallback.
- * Returns the slug on success, or a LocalOpResult error to return early.
+ *
+ * DSN scanning uses the prefetch-aware helper from `./prefetch.ts` — if
+ * {@link warmOrgDetection} was called earlier (by `init.ts`), the result is
+ * already cached and returns near-instantly.
+ *
+ * `listOrganizations()` uses SQLite caching for near-instant warm lookups
+ * (populated after `sentry login` or the first API call), so it does not
+ * need background prefetching.
+ *
+ * @returns The org slug on success, or a {@link LocalOpResult} error to return early.
  */
 async function resolveOrgSlug(
   cwd: string,
   yes: boolean
 ): Promise<string | LocalOpResult> {
-  const resolved = await resolveOrg({ cwd });
+  const resolved = await resolveOrgPrefetched(cwd);
   if (resolved) {
     return resolved.org;
   }
 
-  // Fallback: list user's organizations from API
+  // Fallback: list user's organizations (SQLite-cached after login/first call)
   const orgs = await listOrganizations();
   if (orgs.length === 0) {
     return {
