@@ -21,6 +21,8 @@ import type {
   SentryProject,
 } from "../../types/index.js";
 
+import { cacheProjectsForOrg } from "../db/project-cache.js";
+import { getCachedOrganizations } from "../db/regions.js";
 import { type AuthGuardSuccess, withAuthGuard } from "../errors.js";
 import { logger } from "../logger.js";
 import { getApiBaseUrl } from "../sentry-client.js";
@@ -79,6 +81,16 @@ export async function listProjects(orgSlug: string): Promise<SentryProject[]> {
           "Results may be incomplete for this organization."
       );
     }
+  }
+
+  // Populate project cache for shell completions (best-effort).
+  // Mirrors how listOrganizations() calls setOrgRegions().
+  try {
+    const orgs = await getCachedOrganizations();
+    const orgName = orgs.find((o) => o.slug === orgSlug)?.name ?? orgSlug;
+    cacheProjectsForOrg(orgSlug, orgName, allResults);
+  } catch {
+    // Cache population is best-effort — never fail the command
   }
 
   return allResults;

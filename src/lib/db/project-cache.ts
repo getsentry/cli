@@ -166,6 +166,52 @@ export async function getCachedProjectsForOrg(
   }));
 }
 
+/**
+ * Batch-cache projects for an organization.
+ *
+ * Called from `listProjects()` at the API layer so every command that
+ * lists projects (project list, findProjectsByPattern, etc.) automatically
+ * seeds the completion cache. Follows the `setOrgRegions()` pattern.
+ *
+ * @param orgSlug - Organization slug
+ * @param orgName - Organization display name
+ * @param projects - Projects to cache (id, slug, name from SentryProject)
+ */
+export function cacheProjectsForOrg(
+  orgSlug: string,
+  orgName: string,
+  projects: Array<{ id: string; slug: string; name: string }>
+): void {
+  if (projects.length === 0) {
+    return;
+  }
+
+  const db = getDatabase();
+  const now = Date.now();
+
+  db.transaction(() => {
+    for (const p of projects) {
+      runUpsert(
+        db,
+        "project_cache",
+        {
+          cache_key: `list:${orgSlug}/${p.slug}`,
+          org_slug: orgSlug,
+          org_name: orgName,
+          project_slug: p.slug,
+          project_name: p.name,
+          project_id: p.id,
+          cached_at: now,
+          last_accessed: now,
+        },
+        ["cache_key"]
+      );
+    }
+  })();
+
+  maybeCleanupCaches();
+}
+
 export async function clearProjectCache(): Promise<void> {
   const db = getDatabase();
   db.query("DELETE FROM project_cache").run();
