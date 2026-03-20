@@ -19,7 +19,7 @@ export const dashboardRoute = buildRouteMap({
       "  list     List dashboards\n" +
       "  view     View a dashboard\n" +
       "  create   Create a dashboard\n" +
-      "  widget   Manage dashboard widgets (add, edit, delete)",
+      "  widget   Manage dashboard widgets (add, edit, delete, types)",
     hideRoute: {},
   },
 });

@@ -10,6 +10,7 @@
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
 import prettyMs from "pretty-ms";
+import type { WidgetTypesResult } from "../../commands/dashboard/widget/types.js";
 import type {
   DashboardDetail,
   DashboardWidget,
@@ -2275,4 +2276,67 @@ export function formatWidgetEdited(result: {
     `URL: ${result.url}`,
   ];
   return renderMarkdown(lines.join("\n"));
+}
+
+/**
+ * Format widget types info for human-readable output.
+ */
+export function formatWidgetTypes(result: WidgetTypesResult): string {
+  const parts: string[] = [];
+  const buffer: Writer = { write: (s) => parts.push(s) };
+
+  // Grid header
+  parts.push(renderMarkdown(`**Grid:** ${result.grid.columns} columns`));
+  parts.push("\n");
+
+  // Display types table
+  type DisplayRow = WidgetTypesResult["displayTypes"][number];
+  const dtColumns: Column<DisplayRow>[] = [
+    { header: "DISPLAY TYPE", value: (r) => r.name },
+    { header: "WIDTH:", value: (r) => String(r.defaultWidth), align: "right" },
+    {
+      header: "HEIGHT:",
+      value: (r) => String(r.defaultHeight),
+      align: "right",
+    },
+    { header: "CATEGORY", value: (r) => r.category },
+  ];
+  writeTable(buffer, result.displayTypes, dtColumns);
+
+  parts.push("\n");
+
+  // Datasets table
+  type DatasetRow = WidgetTypesResult["datasets"][number];
+  const dsColumns: Column<DatasetRow>[] = [
+    { header: "DATASET", value: (r) => r.name },
+    { header: "DEFAULT", value: (r) => (r.isDefault ? "✓" : "") },
+  ];
+  writeTable(buffer, result.datasets, dsColumns);
+
+  parts.push("\n");
+
+  // Aggregate functions
+  const aggLines: string[] = [];
+  aggLines.push(
+    `**Aggregates (spans):** ${result.aggregateFunctions.spans.join(", ")}`
+  );
+
+  const spanSet = new Set(result.aggregateFunctions.spans);
+  const discoverOnly = result.aggregateFunctions.discover.filter(
+    (f) => !spanSet.has(f)
+  );
+  if (discoverOnly.length > 0) {
+    aggLines.push(`**Aggregates (discover):** + ${discoverOnly.join(", ")}`);
+  }
+
+  const aliasEntries = Object.entries(result.aggregateAliases);
+  if (aliasEntries.length > 0) {
+    aggLines.push(
+      `**Aliases:** ${aliasEntries.map(([k, v]) => `${k} → ${v}`).join(", ")}`
+    );
+  }
+
+  parts.push(renderMarkdown(aggLines.join("\n")));
+
+  return parts.join("").trimEnd();
 }

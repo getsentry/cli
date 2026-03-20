@@ -105,7 +105,8 @@ export const addCommand = buildCommand({
       display: {
         kind: "parsed",
         parse: String,
-        brief: "Display type (line, bar, table, big_number, ...)",
+        brief:
+          "Display type (big_number, line, area, bar, table, stacked_area, top_n, text, ...)",
       },
       dataset: {
         kind: "parsed",
