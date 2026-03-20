@@ -1,0 +1,96 @@
+# Investigation: Sentry Issue CLI-H2 — `EIO: i/o error, read`
+
+## Issue Summary
+
+| Field | Value |
+|-------|-------|
+| Issue | [CLI-H2](https://sentry.sentry.io/issues/7347407245/) |
+| Error | `Error: EIO: i/o error, read` |
+| Level | **fatal** (unhandled) |
+| Mechanism | `auto.node.onuncaughtexception` |
+| Command | `sentry.auth.login` |
+| Flags | `--token [REDACTED]`, `--timeout 900` |
+| Environment | macOS 26.3.1, Bun 1.3.9, CLI v0.18.0, **self-hosted** |
+| User | id:1 (Zhengzhou, China) |
+| Events | 1 occurrence on 2026-03-19 |
+
+## Key Observations
+
+1. **No stack trace** — The error has zero stack frames, which is common for low-level I/O errors re-thrown from event handlers in Bun.
+2. **Unhandled exception mechanism** — `auto.node.onuncaughtexception` means the error escaped ALL async try-catch chains. This can only happen via `throw` inside a synchronous event handler.
+3. **Self-hosted instance** — `is_self_hosted: True` suggests potentially virtualized or remote storage where EIO is more common.
+4. **Error says "read"** — `"EIO: i/o error, read"` is a POSIX errno from a failed read syscall at the kernel level.
+
+## Root Cause Analysis
+
+### Most Likely: `process.stdout`/`stderr` error handler in `bin.ts`
+
+**File: `src/bin.ts` (lines 13-18)**
+
+The stream error handler only special-cases `EPIPE` and re-throws everything else:
+```typescript
+function handleStreamError(err: NodeJS.ErrnoException): void {
+  if (err.code === "EPIPE") {
+    process.exit(0);
+  }
+  throw err;  // ← EIO thrown here becomes uncaught exception
+}
+```
+
+When `stdout`/`stderr` emits an `'error'` event with `code: 'EIO'`, this `throw` inside a synchronous event handler becomes an **uncaught exception** that cannot be caught by any `async/await` chain — matching the `auto.node.onuncaughtexception` mechanism exactly.
+
+### Alternative: SQLite database open in `db/index.ts`
+
+During `getDatabase()`, `new Database(dbPath)` reads the SQLite file header. An EIO here throws a raw Error from Bun's SQLite. While there's a try-catch around it, the error could escape in specific timing scenarios during telemetry initialization.
+
+### Why there's no stack trace
+
+Bun strips stack traces from re-thrown low-level I/O errors, especially when:
+- The original error comes from a libuv/kernel callback
+- It's re-thrown inside an event handler
+- The Bun runtime converts POSIX errnos to JS Error objects without preserving the throw site
+
+## Proposed Fix
+
+### 1. Handle EIO in stream error handler (`src/bin.ts`)
+
+```typescript
+function handleStreamError(err: NodeJS.ErrnoException): void {
+  if (err.code === "EPIPE" || err.code === "EIO") {
+    process.exit(0);
+  }
+  throw err;
+}
+```
+
+EIO on stdout/stderr is non-recoverable (the terminal/pipe is broken). Exit cleanly like EPIPE.
+
+### 2. (Optional) Harden SQLite open (`src/lib/db/index.ts`)
+
+Add EIO handling during database initialization — retry once or degrade to in-memory DB with a warning.
+
+### 3. (Optional) Guard Sentry SDK init (`src/lib/telemetry.ts`)
+
+Ensure `initSentry()` never lets SDK initialization errors escape as uncaught exceptions.
+
+## Files to Modify
+
+| File | Change |
+|------|--------|
+| `src/bin.ts` | Add `EIO` to stream error handler allowlist |
+| `src/lib/db/index.ts` | (optional) Catch EIO during `new Database()` |
+| `src/lib/telemetry.ts` | (optional) Guard `Sentry.init()` |
+
+## Verification
+
+```bash
+# Run the auth login command to verify no regressions
+bun run dev -- auth status
+
+# Run existing tests
+bun run test:unit
+bun test test/commands/auth/
+
+# The EIO error is hardware/environment-dependent and can't be easily reproduced
+# in CI, but the fix is defensive and won't affect normal operation
+```
