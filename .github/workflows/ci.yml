@@ -225,6 +225,8 @@ jobs:
       - name: Build
         env:
           SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
+          # Sourcemap upload to Sentry (non-fatal, skipped when token is absent)
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           # Set on main/release branches so build.ts runs binpunch + creates .gz
           RELEASE_BUILD: ${{ github.event_name != 'pull_request' && '1' || '' }}
         run: bun run build --target ${{ matrix.target }}
