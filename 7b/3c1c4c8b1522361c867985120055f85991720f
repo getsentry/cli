@@ -1,0 +1,23 @@
+## Implementation Plan
+
+### Problem
+The `sentry cli upgrade` command has two long-running phases with no visual
+feedback: version resolution (1-3s network call) and binary download (2-30s).
+Every other data-fetching command already uses `withProgress` spinners.
+
+### Approach
+Add two `withProgress` spinners covering the silent phases. The setup phase
+(`runSetupOnNewBinary`) is intentionally NOT wrapped since it spawns a child
+process with `stdio: 'inherit'`.
+
+### Changes
+1. Add `json?: boolean` to `UpgradeFlags` — access the injected flag to
+   suppress spinners in JSON mode.
+2. Wrap `resolveTargetWithFallback()` with `withProgress('Checking for updates...')`
+   in `func()`.
+3. Wrap `executeUpgrade()` with `withProgress('Downloading {target}...')` inside
+   `executeStandardUpgrade` — only the download phase, not the setup phase.
+4. Same spinner treatment for `migrateToStandaloneForNightly`.
+5. Demote `log.info('Upgrading/Downgrading to ...')` to `log.debug()` — the
+   spinner message replaces it as primary visual indicator.
+6. Update test assertions from old consola messages to new spinner messages.
