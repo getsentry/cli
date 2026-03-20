@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-issues
-version: 0.18.1
+version: 0.19.0
 description: List, view, and analyze Sentry issues with AI
 requires:
   bins: ["sentry"]
