@@ -195,7 +195,7 @@ svg:where(.astro-c6vsoqas){color:var(--sl-icon-color);font-size:var(--sl-icon-si
 </div></div><div class="ec-line"><div class="code"><span style="--0:#808890"># POST request with data</span></div></div><div class="ec-line"><div class="code"><span style="--0:#B392F0">sentry</span><span style="--0:#E1E4E8"> </span><span style="--0:#9ECBFF">api</span><span style="--0:#E1E4E8"> </span><span style="--0:#9ECBFF">/api/0/organizations/my-org/projects/</span><span style="--0:#E1E4E8"> </span><span style="--0:#79B8FF">--method</span><span style="--0:#E1E4E8"> </span><span style="--0:#9ECBFF">POST</span><span style="--0:#E1E4E8"> </span><span style="--0:#79B8FF">--data</span><span style="--0:#E1E4E8"> </span><span style="--0:#9ECBFF">'{"name":"new-project","platform":"python"}'</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="sentry api /api/0/organizations/my-org/sentry api /api/0/organizations/my-org/projects/ --method POST --data &#x27;{&#x22;name&#x22;:&#x22;new-project&#x22;,&#x22;platform&#x22;:&#x22;python&#x22;}&#x27;"><div></div></button></div></figure></div>
 <h2 id="dashboard-layout">Dashboard Layout</h2>
 <p>Sentry dashboards use a <strong>6-column grid</strong>. When adding widgets, aim to fill complete rows (widths should sum to 6).</p>
-<p>Default widget sizes by display type:</p>
+<p>Display types with default sizes:</p>
 
 
 
@@ -237,10 +237,77 @@ svg:where(.astro-c6vsoqas){color:var(--sl-icon-color);font-size:var(--sl-icon-si
 
 
 
-<table><thead><tr><th>Display Type</th><th>Width</th><th>Height</th><th>Notes</th></tr></thead><tbody><tr><td><code dir="auto">big_number</code></td><td>2</td><td>1</td><td>Compact KPI — place 3 per row (2+2+2=6)</td></tr><tr><td><code dir="auto">line</code></td><td>3</td><td>2</td><td>Half-width chart — place 2 per row (3+3=6)</td></tr><tr><td><code dir="auto">area</code></td><td>3</td><td>2</td><td>Half-width chart — place 2 per row</td></tr><tr><td><code dir="auto">bar</code></td><td>3</td><td>2</td><td>Half-width chart — place 2 per row</td></tr><tr><td><code dir="auto">table</code></td><td>6</td><td>2</td><td>Full-width — always takes its own row</td></tr></tbody></table>
-<p>Common display types for general dashboards: <code dir="auto">big_number</code>, <code dir="auto">line</code>, <code dir="auto">area</code>, <code dir="auto">bar</code>, <code dir="auto">table</code>.</p>
-<p>Specialized types (only use when specifically requested): <code dir="auto">stacked_area</code>, <code dir="auto">top_n</code>, <code dir="auto">categorical_bar</code>, <code dir="auto">text</code>.</p>
-<p>Internal types (avoid unless user explicitly asks): <code dir="auto">details</code>, <code dir="auto">wheel</code>, <code dir="auto">rage_and_dead_clicks</code>, <code dir="auto">server_tree</code>, <code dir="auto">agents_traces_table</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Display Type</th><th>Width</th><th>Height</th><th>Category</th><th>Notes</th></tr></thead><tbody><tr><td><code dir="auto">big_number</code></td><td>2</td><td>1</td><td>common</td><td>Compact KPI — place 3 per row (2+2+2=6)</td></tr><tr><td><code dir="auto">line</code></td><td>3</td><td>2</td><td>common</td><td>Half-width chart — place 2 per row (3+3=6)</td></tr><tr><td><code dir="auto">area</code></td><td>3</td><td>2</td><td>common</td><td>Half-width chart — place 2 per row</td></tr><tr><td><code dir="auto">bar</code></td><td>3</td><td>2</td><td>common</td><td>Half-width chart — place 2 per row</td></tr><tr><td><code dir="auto">table</code></td><td>6</td><td>2</td><td>common</td><td>Full-width — always takes its own row</td></tr><tr><td><code dir="auto">stacked_area</code></td><td>3</td><td>2</td><td>specialized</td><td>Stacked area chart</td></tr><tr><td><code dir="auto">top_n</code></td><td>3</td><td>2</td><td>specialized</td><td>Top N ranked list</td></tr><tr><td><code dir="auto">categorical_bar</code></td><td>3</td><td>2</td><td>specialized</td><td>Categorical bar chart</td></tr><tr><td><code dir="auto">text</code></td><td>3</td><td>2</td><td>specialized</td><td>Static text/markdown widget</td></tr><tr><td><code dir="auto">details</code></td><td>3</td><td>2</td><td>internal</td><td>Detail view</td></tr><tr><td><code dir="auto">wheel</code></td><td>3</td><td>2</td><td>internal</td><td>Pie/wheel chart</td></tr><tr><td><code dir="auto">rage_and_dead_clicks</code></td><td>3</td><td>2</td><td>internal</td><td>Rage/dead click visualization</td></tr><tr><td><code dir="auto">server_tree</code></td><td>3</td><td>2</td><td>internal</td><td>Hierarchical tree display</td></tr><tr><td><code dir="auto">agents_traces_table</code></td><td>3</td><td>2</td><td>internal</td><td>Agents traces table</td></tr></tbody></table>
+<p>Use <strong>common</strong> types for general dashboards. Use <strong>specialized</strong> only when specifically requested. Avoid <strong>internal</strong> types unless the user explicitly asks.</p>
 <p>Available datasets: <code dir="auto">spans</code> (default, covers most use cases), <code dir="auto">discover</code>, <code dir="auto">issue</code>, <code dir="auto">error-events</code>, <code dir="auto">transaction-like</code>, <code dir="auto">metrics</code>, <code dir="auto">logs</code>.</p>
 <p>Run <code dir="auto">sentry dashboard widget types --json</code> for the full machine-readable list including aggregate functions.</p>
 <p><strong>Row-filling examples:</strong></p>
