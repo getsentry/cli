@@ -24,6 +24,7 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ApiError, ContextError, ResolutionError } from "../../lib/errors.js";
 import { formatEventDetails } from "../../lib/formatters/index.js";
+import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
@@ -77,6 +78,27 @@ function formatEventView(data: EventViewData): string {
   return parts.join("\n");
 }
 
+/**
+ * Transform event view data for JSON output.
+ *
+ * Flattens the event as the primary object so that `--fields eventID,title`
+ * works directly on event properties. The `trace` enrichment data is
+ * attached as a nested key, accessible via `--fields trace.traceId`.
+ *
+ * Without this transform, `--fields eventID` would return `{}` because
+ * the raw yield shape is `{ event, trace }` and `eventID` lives inside `event`.
+ */
+function jsonTransformEventView(
+  data: EventViewData,
+  fields?: string[]
+): unknown {
+  const { event, trace } = data;
+  const result: Record<string, unknown> = { ...event, trace };
+  if (fields && fields.length > 0) {
+    return filterFields(result, fields);
+  }
+  return result;
+}
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
 
@@ -387,7 +409,7 @@ export const viewCommand = buildCommand({
   },
   output: {
     human: formatEventView,
-    jsonExclude: ["spanTreeLines"],
+    jsonTransform: jsonTransformEventView,
   },
   parameters: {
     positional: {
