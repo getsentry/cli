@@ -363,11 +363,11 @@ async function fetchEventWithContext(
       throw new ResolutionError(
         `Event '${eventId}'`,
         `not found in ${org}/${project}`,
-        `sentry event view ${org}/${project} ${eventId}`,
+        `sentry event view ${org}/<project> ${eventId}`,
         [
           "The event may have been deleted due to data retention policies",
           "Verify the event ID is a 32-character hex string (e.g., a1b2c3d4...)",
-          `Check if the event belongs to a different project: sentry event view ${org}/ ${eventId}`,
+          `Search across all projects in the org: sentry event view ${org}/ ${eventId}`,
         ]
       );
     }
