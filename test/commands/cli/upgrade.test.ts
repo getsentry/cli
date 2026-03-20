@@ -731,7 +731,9 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
     await run(app, ["cli", "upgrade", "--method", "curl"], context);
 
     const combined = getOutput();
-    expect(combined).toContain("Upgrading to 99.99.99...");
+    // Spinner progress messages written to stderr
+    expect(combined).toContain("Checking for updates");
+    expect(combined).toContain("Downloading 99.99.99");
     expect(combined).toContain("Upgraded to");
     expect(combined).toContain("99.99.99");
 
@@ -855,8 +857,8 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
     const combined = getOutput();
     // With --force, should NOT show "Already up to date"
     expect(combined).not.toContain("Already up to date");
-    // Should proceed to upgrade and succeed
-    expect(combined).toContain(`Upgrading to ${CLI_VERSION}...`);
+    // Should proceed to download and succeed (spinner messages on stderr)
+    expect(combined).toContain(`Downloading ${CLI_VERSION}`);
     expect(combined).toContain("Upgraded to");
     expect(combined).toContain(CLI_VERSION);
   });

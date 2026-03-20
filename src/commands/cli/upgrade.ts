@@ -34,6 +34,7 @@ import { UpgradeError } from "../../lib/errors.js";
 import { formatUpgradeResult } from "../../lib/formatters/human.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
+import { withProgress } from "../../lib/polling.js";
 import {
   detectInstallationMethod,
   executeUpgrade,
@@ -82,6 +83,8 @@ type UpgradeFlags = {
   readonly force: boolean;
   readonly offline: boolean;
   readonly method?: InstallationMethod;
+  /** Injected by buildCommand output wrapper — suppresses spinners */
+  readonly json?: boolean;
 };
 
 /**
@@ -419,19 +422,18 @@ async function executeStandardUpgrade(opts: {
   target: string;
   execPath: string;
   offline?: boolean;
+  json?: boolean;
 }): Promise<void> {
-  const { method, channel, versionArg, target, execPath, offline } = opts;
+  const { method, channel, versionArg, target, execPath, offline, json } = opts;
 
   // Use the rolling "nightly" tag only when upgrading to latest nightly
   // (no specific version was requested). A specific version arg always
   // uses its own tag so the correct release is downloaded.
   const downloadTag =
     channel === "nightly" && !versionArg ? NIGHTLY_TAG : undefined;
-  const downloadResult = await executeUpgrade(
-    method,
-    target,
-    downloadTag,
-    offline
+  const downloadResult = await withProgress(
+    { message: `Downloading ${target}...`, json },
+    async () => executeUpgrade(method, target, downloadTag, offline)
   );
 
   // Run setup on the new binary to update completions, agent skills,
@@ -485,7 +487,8 @@ async function executeStandardUpgrade(opts: {
 async function migrateToStandaloneForNightly(
   method: InstallationMethod,
   target: string,
-  versionArg: string | undefined
+  versionArg: string | undefined,
+  json?: boolean
 ): Promise<string[]> {
   log.info("Nightly builds are only available as standalone binaries.");
   log.info("Migrating to standalone installation...");
@@ -493,7 +496,10 @@ async function migrateToStandaloneForNightly(
   // Use the rolling "nightly" tag for latest nightly; use the specific version
   // tag if the user requested a pinned version.
   const downloadTag = versionArg ? undefined : NIGHTLY_TAG;
-  const downloadResult = await executeUpgrade("curl", target, downloadTag);
+  const downloadResult = await withProgress(
+    { message: `Downloading ${target}...`, json },
+    async () => executeUpgrade("curl", target, downloadTag)
+  );
   if (!downloadResult) {
     throw new UpgradeError(
       "execution_failed",
@@ -643,13 +649,18 @@ export const upgradeCommand = buildCommand({
     log.debug(`Installation method: ${method}`);
     log.debug(`Current version: ${CLI_VERSION}`);
 
-    const resolved = await resolveTargetWithFallback({
-      resolveOpts: { method, channel, versionArg, channelChanged, flags },
-      versionArg,
-      offline: flags.offline,
-      method,
-      persistChannelFn: () => persistChannel(channel, channelChanged, version),
-    });
+    const resolved = await withProgress(
+      { message: "Checking for updates...", json: flags.json },
+      async () =>
+        resolveTargetWithFallback({
+          resolveOpts: { method, channel, versionArg, channelChanged, flags },
+          versionArg,
+          offline: flags.offline,
+          method,
+          persistChannelFn: () =>
+            persistChannel(channel, channelChanged, version),
+        })
+    );
     if (resolved.kind === "done") {
       return yield new CommandOutput(resolved.result);
     }
@@ -684,7 +695,7 @@ export const upgradeCommand = buildCommand({
       } satisfies UpgradeResult);
     }
     const downgrade = isDowngrade(CLI_VERSION, target);
-    log.info(`${downgrade ? "Downgrading" : "Upgrading"} to ${target}...`);
+    log.debug(`${downgrade ? "Downgrading" : "Upgrading"} to ${target}`);
 
     // Nightly is GitHub-only. If the current install method is not curl,
     // migrate to a standalone binary first then return — the migration
@@ -693,7 +704,8 @@ export const upgradeCommand = buildCommand({
       const warnings = await migrateToStandaloneForNightly(
         method,
         target,
-        versionArg
+        versionArg,
+        flags.json
       );
       yield new CommandOutput({
         action: downgrade ? "downgraded" : "upgraded",
@@ -714,6 +726,7 @@ export const upgradeCommand = buildCommand({
       target,
       execPath: this.process.execPath,
       offline,
+      json: flags.json,
     });
 
     yield new CommandOutput({
