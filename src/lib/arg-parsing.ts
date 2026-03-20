@@ -400,7 +400,13 @@ function issueArgFromUrl(parsed: ParsedSentryUrl): ParsedIssueArg | null {
     const project = issueId.slice(0, dashIdx);
     const suffix = issueId.slice(dashIdx + 1).toUpperCase();
     if (project && suffix) {
-      return { type: "explicit", org: parsed.org, project, suffix };
+      // Lowercase project slug — Sentry slugs are always lowercase.
+      return {
+        type: "explicit",
+        org: parsed.org,
+        project: project.toLowerCase(),
+        suffix,
+      };
     }
   }
 

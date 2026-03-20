@@ -345,18 +345,18 @@ describe("parseIssueArg", () => {
       });
     });
 
-    test("issue URL with short ID returns explicit", () => {
+    test("issue URL with short ID returns explicit with lowercase project", () => {
       expect(
         parseIssueArg("https://sentry.io/organizations/my-org/issues/CLI-G/")
       ).toEqual({
         type: "explicit",
         org: "my-org",
-        project: "CLI",
+        project: "cli",
         suffix: "G",
       });
     });
 
-    test("issue URL with multi-part short ID returns explicit", () => {
+    test("issue URL with multi-part short ID returns explicit with lowercase project", () => {
       expect(
         parseIssueArg(
           "https://sentry.io/organizations/my-org/issues/SPOTLIGHT-ELECTRON-4Y/"
@@ -364,7 +364,7 @@ describe("parseIssueArg", () => {
       ).toEqual({
         type: "explicit",
         org: "my-org",
-        project: "SPOTLIGHT-ELECTRON",
+        project: "spotlight-electron",
         suffix: "4Y",
       });
     });
