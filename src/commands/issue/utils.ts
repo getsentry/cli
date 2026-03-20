@@ -4,6 +4,7 @@
  * Common functionality used by explain, plan, view, and other issue commands.
  */
 
+import pLimit from "p-limit";
 import {
   findProjectsBySlug,
   getAutofixState,
@@ -13,6 +14,7 @@ import {
   type IssueSort,
   listIssuesPaginated,
   listOrganizations,
+  ORG_FANOUT_CONCURRENCY,
   triggerRootCauseAnalysis,
   tryGetIssueByShortId,
 } from "../../lib/api-client.js";
@@ -238,12 +240,16 @@ async function resolveProjectSearch(
   // 3. Fast path: try resolving the short ID directly across all orgs.
   //    The shortid endpoint validates both project existence and issue existence
   //    in a single call, eliminating the separate getProject() round-trip.
+  //    Concurrency-limited to avoid overwhelming the API for enterprise users.
   const fullShortId = expandToFullShortId(suffix, projectSlug);
   const orgs = await listOrganizations();
 
+  const limit = pLimit(ORG_FANOUT_CONCURRENCY);
   const results = await Promise.all(
     orgs.map((org) =>
-      withAuthGuard(() => tryGetIssueByShortId(org.slug, fullShortId))
+      limit(() =>
+        withAuthGuard(() => tryGetIssueByShortId(org.slug, fullShortId))
+      )
     )
   );
 
