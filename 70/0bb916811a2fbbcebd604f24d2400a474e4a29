@@ -1,0 +1,45 @@
+# Add user email to Sentry telemetry
+
+## Goal
+Include the user's email alongside their user ID in Sentry telemetry data via `Sentry.setUser()`.
+
+## Context
+Currently, `initTelemetryContext()` in `src/lib/telemetry.ts` (line 46) only sends the user ID:
+```ts
+Sentry.setUser({ id: user.userId });
+```
+The `UserInfo` type from `src/lib/db/user.ts` already stores `email`, `username`, and `name` — they're just not being passed to Sentry.
+
+## Changes
+
+### 1. `src/lib/telemetry.ts` — Add email to `Sentry.setUser()`
+
+**File:** `src/lib/telemetry.ts`
+**Location:** Line 44-47 in `initTelemetryContext()`
+
+**Before:**
+```ts
+if (user) {
+  // Only send user ID - email/username are PII
+  Sentry.setUser({ id: user.userId });
+}
+```
+
+**After:**
+```ts
+if (user) {
+  Sentry.setUser({ id: user.userId, email: user.email });
+}
+```
+
+This removes the outdated PII comment and passes the email (which may be `undefined` — `Sentry.setUser` ignores undefined fields).
+
+## Why this is safe
+- `user.email` is already stored in the local SQLite DB (set during login/whoami from the Sentry API `/auth/` endpoint)
+- The email is the user's own Sentry account email — it's first-party data, not end-user PII
+- `Sentry.setUser()` already accepts an `email` property in its type definition
+- When `email` is `undefined` (e.g., minimal user info stored with only userId), Sentry ignores the field
+
+## No test changes needed
+- The existing telemetry tests don't mock `Sentry.setUser` to assert specific fields
+- The `getUserInfo()` function already returns `email` — this change just passes it through
