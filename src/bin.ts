@@ -6,12 +6,16 @@
  * the full CLI with telemetry, middleware, and error recovery.
  */
 
-// Exit cleanly when downstream pipe consumer closes (e.g., `sentry issue list | head`).
-// EPIPE (errno -32) is normal Unix behavior — not an error. Node.js/Bun ignore SIGPIPE
-// at the process level, so pipe write failures surface as async 'error' events on the
-// stream. Without this handler they become uncaught exceptions.
+// Exit cleanly on non-recoverable stream I/O errors.
+// - EPIPE (errno -32): downstream pipe consumer closed (e.g., `sentry issue list | head`).
+//   Normal Unix behavior — not an error. Node.js/Bun ignore SIGPIPE at the process level,
+//   so pipe write failures surface as async 'error' events on the stream.
+// - EIO (errno -5): low-level I/O failure on the stream fd (e.g., terminal device driver
+//   error, broken PTY, disk I/O failure on redirected output). Non-recoverable — the
+//   stream is unusable. Seen in CLI-H2 on self-hosted macOS with virtualized storage.
+// Without this handler these errors become uncaught exceptions.
 function handleStreamError(err: NodeJS.ErrnoException): void {
-  if (err.code === "EPIPE") {
+  if (err.code === "EPIPE" || err.code === "EIO") {
     process.exit(0);
   }
   throw err;
