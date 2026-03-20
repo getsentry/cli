@@ -15,6 +15,7 @@ import {
   isPlainOutput,
   muted,
 } from "../../lib/formatters/index.js";
+import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
@@ -84,6 +85,30 @@ function formatIssueView(data: IssueViewData): string {
   return parts.join("\n");
 }
 
+/**
+ * Transform issue view data for JSON output.
+ *
+ * Flattens the issue as the primary object so that `--fields shortId,title`
+ * works directly on issue properties. The `event` and `trace` enrichment
+ * data are attached as nested keys, accessible via `--fields event.id`
+ * or `--fields trace.traceId`.
+ *
+ * Without this transform, `--fields shortId` would return `{}` because
+ * the raw yield shape is `{ issue, event, trace }` and `shortId` lives
+ * inside `issue`.
+ */
+function jsonTransformIssueView(
+  data: IssueViewData,
+  fields?: string[]
+): unknown {
+  const { issue, event, trace } = data;
+  const result: Record<string, unknown> = { ...issue, event, trace };
+  if (fields && fields.length > 0) {
+    return filterFields(result, fields);
+  }
+  return result;
+}
+
 export const viewCommand = buildCommand({
   docs: {
     brief: "View details of a specific issue",
@@ -104,7 +129,7 @@ export const viewCommand = buildCommand({
   },
   output: {
     human: formatIssueView,
-    jsonExclude: ["spanTreeLines"],
+    jsonTransform: jsonTransformIssueView,
   },
   parameters: {
     positional: issueIdPositional,

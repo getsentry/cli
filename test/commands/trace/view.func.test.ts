@@ -159,9 +159,9 @@ describe("viewCommand.func", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
-    expect(parsed).toHaveProperty("summary");
+    expect(parsed).toHaveProperty("traceId");
     expect(parsed).toHaveProperty("spans");
-    expect(parsed.summary.traceId).toBe("aaaa1111bbbb2222cccc3333dddd4444");
+    expect(parsed.traceId).toBe("aaaa1111bbbb2222cccc3333dddd4444");
     expect(parsed.spans).toHaveLength(1);
   });
 

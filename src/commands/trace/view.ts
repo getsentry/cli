@@ -19,6 +19,7 @@ import {
   formatSimpleSpanTree,
   formatTraceSummary,
 } from "../../lib/formatters/index.js";
+import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
@@ -117,6 +118,28 @@ export function formatTraceView(data: TraceViewData): string {
   return parts.join("\n");
 }
 
+/**
+ * Transform trace view data for JSON output.
+ *
+ * Flattens the summary as the primary object so that `--fields traceId,duration`
+ * works directly on summary properties. The raw `spans` array is preserved as
+ * a nested key, accessible via `--fields spans`.
+ *
+ * Without this transform, `--fields traceId` would return `{}` because
+ * the raw yield shape is `{ summary, spans }` and `traceId` lives inside `summary`.
+ */
+function jsonTransformTraceView(
+  data: TraceViewData,
+  fields?: string[]
+): unknown {
+  const { summary, spans } = data;
+  const result: Record<string, unknown> = { ...summary, spans };
+  if (fields && fields.length > 0) {
+    return filterFields(result, fields);
+  }
+  return result;
+}
+
 export const viewCommand = buildCommand({
   docs: {
     brief: "View details of a specific trace",
@@ -130,7 +153,7 @@ export const viewCommand = buildCommand({
   },
   output: {
     human: formatTraceView,
-    jsonExclude: ["spanTreeLines"],
+    jsonTransform: jsonTransformTraceView,
   },
   parameters: {
     positional: {

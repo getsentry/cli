@@ -175,7 +175,8 @@ describe("sentry trace view", () => {
 
     expect(result.exitCode).toBe(0);
     const data = JSON.parse(result.stdout);
-    expect(data).toHaveProperty("summary");
+    // jsonTransform flattens summary to top level (no wrapper)
+    expect(data).toHaveProperty("traceId");
     expect(data).toHaveProperty("spans");
   });
 
