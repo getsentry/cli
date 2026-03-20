@@ -30,7 +30,7 @@
  *     bin.js.map          (sourcemap, uploaded to Sentry then deleted)
  */
 
-import { execFileSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 import { processBinary } from "binpunch";
@@ -133,41 +133,16 @@ function uploadSourcemap(): void {
 
   console.log(`  Uploading sourcemap to Sentry (release: ${VERSION})...`);
 
-  // Use execFileSync with argument arrays to avoid shell quoting issues.
-  // The /$bunfs/root/ prefix contains a $ which POSIX shells would expand
-  // inside double quotes, and single quotes break on Windows cmd.exe.
-  // Bypassing the shell entirely sidesteps both problems.
-  const sentryCliPath = "node_modules/.bin/sentry-cli";
-
+  // Single quotes prevent $bunfs shell expansion on POSIX (CI is always Linux).
   try {
-    // Step 1: Inject debug IDs (adds runtime snippet + comment to JS, records in map)
-    execFileSync(sentryCliPath, ["sourcemaps", "inject", "dist-bin/"], {
+    // Inject debug IDs into JS + map, then upload with /$bunfs/root/ prefix
+    // to match Bun's compiled binary stack trace paths.
+    execSync("npx @sentry/cli sourcemaps inject dist-bin/", {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env },
     });
-
-    // Step 2: Upload with /$bunfs/root/ prefix to match Bun's compiled binary
-    // stack trace paths. Includes both JS (for source context) and map.
-    execFileSync(
-      sentryCliPath,
-      [
-        "sourcemaps",
-        "upload",
-        "--org",
-        "sentry",
-        "--project",
-        "cli",
-        "--release",
-        VERSION,
-        "--url-prefix",
-        "/$bunfs/root/",
-        BUNDLE_JS,
-        SOURCEMAP_FILE,
-      ],
-      {
-        stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env },
-      }
+    execSync(
+      `npx @sentry/cli sourcemaps upload --org sentry --project cli --release ${VERSION} --url-prefix '/$bunfs/root/' ${BUNDLE_JS} ${SOURCEMAP_FILE}`,
+      { stdio: ["pipe", "pipe", "pipe"] }
     );
     console.log("    -> Sourcemap uploaded to Sentry");
   } catch (error) {
