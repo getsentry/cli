@@ -69,18 +69,19 @@ export async function listOrganizationsInRegion(
     // lacks the org:read scope — either it's an internal integration token
     // with limited scopes, or a self-hosted token without the right permissions.
     if (error instanceof ApiError && error.status === 403) {
+      const lines: string[] = [];
+      if (error.detail) {
+        lines.push(error.detail, "");
+      }
+      lines.push(
+        "Your auth token may lack the required 'org:read' scope.",
+        "Re-authenticate with: sentry auth login",
+        "Or check token scopes at: https://sentry.io/settings/auth-tokens/"
+      );
       throw new ApiError(
         error.message,
         error.status,
-        [
-          error.detail,
-          "",
-          "Your auth token may lack the required 'org:read' scope.",
-          "Re-authenticate with: sentry auth login",
-          "Or check token scopes at: https://sentry.io/settings/auth-tokens/",
-        ]
-          .filter(Boolean)
-          .join("\n  "),
+        lines.join("\n  "),
         error.endpoint
       );
     }
