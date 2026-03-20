@@ -479,10 +479,10 @@ export function prepareWidgetQueries(widget: DashboardWidget): DashboardWidget {
 // ---------------------------------------------------------------------------
 
 /** Sentry dashboard grid column count */
-export const GRID_COLUMNS = 6;
+const GRID_COLUMNS = 6;
 
 /** Default widget dimensions by displayType */
-export const DEFAULT_WIDGET_SIZE: Partial<
+const DEFAULT_WIDGET_SIZE: Partial<
   Record<DisplayType, { w: number; h: number; minH: number }>
 > = {
   big_number: { w: 2, h: 1, minH: 1 },
@@ -491,7 +491,7 @@ export const DEFAULT_WIDGET_SIZE: Partial<
   bar: { w: 3, h: 2, minH: 2 },
   table: { w: 6, h: 2, minH: 2 },
 };
-export const FALLBACK_SIZE = { w: 3, h: 2, minH: 2 };
+const FALLBACK_SIZE = { w: 3, h: 2, minH: 2 };
 
 /** Build a set of occupied grid cells and the max bottom edge from existing layouts. */
 function buildOccupiedGrid(widgets: DashboardWidget[]): {

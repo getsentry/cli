@@ -323,25 +323,3 @@ sentry dashboard widget delete 'My Dashboard' --title 'Error Count'
 # Delete by index
 sentry dashboard widget delete 12345 --index 2
 ```
-
-### `sentry dashboard widget types`
-
-Show available widget display types with default grid sizes, datasets, and aggregate functions.
-
-Sentry dashboards use a 6-column grid. This command helps you understand the available options and how widgets fit into the layout.
-
-```bash
-# Human-readable table
-sentry dashboard widget types
-
-# Machine-readable JSON (recommended for agents)
-sentry dashboard widget types --json
-```
-
-Display types are categorized as:
-
-| Category | Types | When to use |
-|----------|-------|------------|
-| common | `big_number`, `line`, `area`, `bar`, `table` | General-purpose dashboards |
-| specialized | `stacked_area`, `top_n`, `categorical_bar`, `text` | Specific use cases |
-| internal | `details`, `wheel`, `rage_and_dead_clicks`, `server_tree`, `agents_traces_table` | Sentry-internal, rarely used directly |

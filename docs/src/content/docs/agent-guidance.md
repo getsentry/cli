@@ -129,7 +129,7 @@ Use **common** types for general dashboards. Use **specialized** only when speci
 
 Available datasets: `spans` (default, covers most use cases), `discover`, `issue`, `error-events`, `transaction-like`, `metrics`, `logs`.
 
-Run `sentry dashboard widget types --json` for the full machine-readable list including aggregate functions.
+Run `sentry dashboard widget --help` for the full list including aggregate functions.
 
 **Row-filling examples:**
 

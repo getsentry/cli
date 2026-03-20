@@ -122,8 +122,4 @@ Delete a widget from a dashboard
 - `-i, --index <value> - Widget index (0-based)`
 - `-t, --title <value> - Widget title to match`
 
-### `sentry dashboard widget types <args...>`
-
-Show available widget display types and layout info
-
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
