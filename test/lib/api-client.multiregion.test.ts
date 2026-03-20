@@ -192,7 +192,7 @@ describe("listOrganizationsInRegion", () => {
     expect(orgs[0].slug).toBe("us-org-1");
   });
 
-  test("enriches 403 error with token scope guidance", async () => {
+  test("enriches 403 error with re-auth guidance for OAuth users", async () => {
     globalThis.fetch = async () =>
       new Response(JSON.stringify({ detail: "You do not have permission" }), {
         status: 403,
@@ -209,9 +209,9 @@ describe("listOrganizationsInRegion", () => {
       expect(apiErr.status).toBe(403);
       // Should include the original detail
       expect(apiErr.detail).toContain("You do not have permission");
-      // Should include scope guidance
-      expect(apiErr.detail).toContain("org:read");
+      // OAuth users: suggest re-auth (not token scopes)
       expect(apiErr.detail).toContain("sentry auth login");
+      expect(apiErr.detail).not.toContain("org:read");
     }
   });
 
@@ -556,7 +556,8 @@ describe("listOrganizations (fan-out)", () => {
       expect(error).toBeInstanceOf(ApiError);
       const apiErr = error as ApiError;
       expect(apiErr.status).toBe(403);
-      expect(apiErr.detail).toContain("org:read");
+      // OAuth users: re-auth guidance (no scope hint)
+      expect(apiErr.detail).toContain("sentry auth login");
     }
   });
 

@@ -16,6 +16,7 @@ import {
   UserRegionsResponseSchema,
 } from "../../types/index.js";
 
+import { getActiveEnvVarName, isEnvTokenActive } from "../db/auth.js";
 import { ApiError, withAuthGuard } from "../errors.js";
 import {
   getApiBaseUrl,
@@ -64,20 +65,25 @@ export async function listOrganizationsInRegion(
     const data = unwrapResult(result, "Failed to list organizations");
     return data as unknown as SentryOrganization[];
   } catch (error) {
-    // Enrich 403 errors with token scope guidance (CLI-89, 24 users).
-    // A 403 from the organizations endpoint usually means the auth token
-    // lacks the org:read scope — either it's an internal integration token
-    // with limited scopes, or a self-hosted token without the right permissions.
+    // Enrich 403 errors with contextual guidance (CLI-89, 24 users).
+    // Only mention token scopes when using a custom env-var token —
+    // the regular `sentry auth login` OAuth flow always grants org:read.
     if (error instanceof ApiError && error.status === 403) {
       const lines: string[] = [];
       if (error.detail) {
         lines.push(error.detail, "");
       }
-      lines.push(
-        "Your auth token may lack the required 'org:read' scope.",
-        "Re-authenticate with: sentry auth login",
-        "Or check token scopes at: https://sentry.io/settings/auth-tokens/"
-      );
+      if (isEnvTokenActive()) {
+        lines.push(
+          `Your ${getActiveEnvVarName()} token may lack the required 'org:read' scope.`,
+          "Check token scopes at: https://sentry.io/settings/auth-tokens/"
+        );
+      } else {
+        lines.push(
+          "You may not have access to this organization.",
+          "Re-authenticate with: sentry auth login"
+        );
+      }
       throw new ApiError(
         error.message,
         error.status,

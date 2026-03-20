@@ -21,6 +21,7 @@ import {
   looksLikeIssueShortId,
   parseOrgProjectArg,
 } from "../../lib/arg-parsing.js";
+import { getActiveEnvVarName, isEnvTokenActive } from "../../lib/db/auth.js";
 import {
   buildPaginationContextKey,
   clearPaginationCursor,
@@ -1006,8 +1007,9 @@ function enrichIssueListError(
 /**
  * Build an enriched error detail for 403 Forbidden responses.
  *
- * Suggests checking token scopes and project membership — the most common
- * causes of 403 on the issues endpoint (CLI-97, 41 users).
+ * Only mentions token scopes when using a custom env-var token
+ * (SENTRY_AUTH_TOKEN / SENTRY_TOKEN) since the regular `sentry auth login`
+ * OAuth flow always grants the required scopes.
  *
  * @param originalDetail - The API response detail (may be undefined)
  * @returns Enhanced detail string with suggestions
@@ -1019,12 +1021,18 @@ function build403Detail(originalDetail: string | undefined): string {
     lines.push(originalDetail, "");
   }
 
-  lines.push(
-    "Suggestions:",
-    "  • Your auth token may lack the required scopes (org:read, project:read)",
-    "  • Re-authenticate with: sentry auth login",
-    "  • Verify project membership: sentry project list <org>/"
-  );
+  lines.push("Suggestions:");
+
+  if (isEnvTokenActive()) {
+    lines.push(
+      `  • Your ${getActiveEnvVarName()} token may lack the required scopes (org:read, project:read)`,
+      "  • Check token scopes at: https://sentry.io/settings/auth-tokens/"
+    );
+  } else {
+    lines.push("  • Re-authenticate with: sentry auth login");
+  }
+
+  lines.push("  • Verify project membership: sentry project list <org>/");
 
   return lines.join("\n  ");
 }
