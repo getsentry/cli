@@ -156,7 +156,8 @@ export const editCommand = buildCommand({
       display: {
         kind: "parsed",
         parse: String,
-        brief: "Display type (line, bar, table, big_number, ...)",
+        brief:
+          "Display type (big_number, line, area, bar, table, stacked_area, top_n, text, categorical_bar, details, wheel, rage_and_dead_clicks, server_tree, agents_traces_table)",
         optional: true,
       },
       dataset: {
