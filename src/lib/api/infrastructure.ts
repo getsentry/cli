@@ -296,7 +296,8 @@ export async function apiRequestToRegion<T>(
     throw new ApiError(
       `API request failed: ${response.status} ${response.statusText}`,
       response.status,
-      detail
+      detail,
+      endpoint
     );
   }
 
