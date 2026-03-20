@@ -174,3 +174,68 @@ describe("introspectCommand error cases", () => {
     expect(result).toHaveProperty("error");
   });
 });
+
+describe("introspectCommand fuzzy suggestions", () => {
+  test("top-level typo includes suggestions", async () => {
+    const { introspectCommand } = await import("../../src/lib/help.js");
+    const result = introspectCommand(["isseu"]);
+    expect(result).toHaveProperty("error");
+    if ("error" in result) {
+      expect(result.error).toContain("isseu");
+      expect(result.suggestions).toContain("issue");
+    }
+  });
+
+  test("subcommand typo includes suggestions", async () => {
+    const { introspectCommand } = await import("../../src/lib/help.js");
+    const result = introspectCommand(["issue", "lis"]);
+    expect(result).toHaveProperty("error");
+    if ("error" in result) {
+      expect(result.suggestions).toContain("list");
+    }
+  });
+
+  test("completely unrelated input has no suggestions", async () => {
+    const { introspectCommand } = await import("../../src/lib/help.js");
+    const result = introspectCommand(["xyzfoo123456"]);
+    expect(result).toHaveProperty("error");
+    if ("error" in result) {
+      expect(result.suggestions).toBeUndefined();
+    }
+  });
+});
+
+describe("formatHelpHuman with suggestions", () => {
+  test("renders 'Did you mean' with single suggestion", async () => {
+    const { formatHelpHuman } = await import("../../src/lib/help.js");
+    const output = formatHelpHuman({
+      error: "Command not found: isseu",
+      suggestions: ["issue"],
+    });
+    expect(output).toContain("Did you mean: issue?");
+  });
+
+  test("renders 'Did you mean' with multiple suggestions", async () => {
+    const { formatHelpHuman } = await import("../../src/lib/help.js");
+    const output = formatHelpHuman({
+      error: "Command not found: trc",
+      suggestions: ["trace", "trial"],
+    });
+    expect(output).toContain("Did you mean: trace or trial?");
+  });
+
+  test("renders three suggestions with Oxford comma", async () => {
+    const { formatHelpHuman } = await import("../../src/lib/help.js");
+    const output = formatHelpHuman({
+      error: "Command not found: x",
+      suggestions: ["alpha", "beta", "gamma"],
+    });
+    expect(output).toContain("Did you mean: alpha, beta, or gamma?");
+  });
+
+  test("no 'Did you mean' when suggestions are absent", async () => {
+    const { formatHelpHuman } = await import("../../src/lib/help.js");
+    const output = formatHelpHuman({ error: "Command not found: xyz123" });
+    expect(output).not.toContain("Did you mean");
+  });
+});

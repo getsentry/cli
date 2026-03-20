@@ -152,7 +152,7 @@ export type HelpJsonResult =
   | ({ routes: RouteInfo[] } & { _banner?: string })
   | CommandInfo
   | RouteInfo
-  | { error: string };
+  | { error: string; suggestions?: string[] };
 
 /**
  * Introspect the full command tree.
@@ -166,17 +166,46 @@ export function introspectAllCommands(): { routes: RouteInfo[] } {
 /**
  * Introspect a specific command or group.
  * Returns the resolved command/group info, or an error object
- * if the path doesn't resolve.
+ * with optional fuzzy suggestions if the path doesn't resolve.
  */
 export function introspectCommand(
   commandPath: string[]
-): CommandInfo | RouteInfo | { error: string } {
+): CommandInfo | RouteInfo | { error: string; suggestions?: string[] } {
   const routeMap = routes as unknown as RouteMap;
   const resolved = resolveCommandPath(routeMap, commandPath);
   if (!resolved) {
     return { error: `Command not found: ${commandPath.join(" ")}` };
   }
+  if (resolved.kind === "unresolved") {
+    const { suggestions } = resolved;
+    return {
+      error: `Command not found: ${commandPath.join(" ")}`,
+      suggestions: suggestions.length > 0 ? suggestions : undefined,
+    };
+  }
   return resolved.info;
+}
+
+// ---------------------------------------------------------------------------
+// Suggestion Formatting
+// ---------------------------------------------------------------------------
+
+/**
+ * Join suggestion strings with Oxford-comma grammar.
+ *
+ * Matches Stricli's "did you mean" style:
+ * - 1 item: `"issue"`
+ * - 2 items: `"issue or trace"`
+ * - 3 items: `"issue, trace, or auth"`
+ */
+function formatSuggestionList(items: string[]): string {
+  if (items.length <= 1) {
+    return items.join("");
+  }
+  if (items.length === 2) {
+    return `${items[0]} or ${items[1]}`;
+  }
+  return `${items.slice(0, -1).join(", ")}, or ${items.at(-1)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -288,8 +317,12 @@ export function formatHelpHuman(data: HelpJsonResult): string {
     return formatCommandHuman(data as CommandInfo);
   }
 
-  // Error
+  // Error (with optional fuzzy suggestions)
   if ("error" in data) {
+    const { suggestions } = data;
+    if (suggestions && suggestions.length > 0) {
+      return `Error: ${data.error}\n\nDid you mean: ${formatSuggestionList(suggestions)}?`;
+    }
     return `Error: ${data.error}`;
   }
 

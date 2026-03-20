@@ -10,6 +10,8 @@
  * for introspection and documentation generation.
  */
 
+import { fuzzyMatch } from "./fuzzy.js";
+
 // ---------------------------------------------------------------------------
 // Stricli Runtime Types (simplified for introspection)
 // ---------------------------------------------------------------------------
@@ -104,6 +106,19 @@ export type RouteInfo = {
 export type ResolvedPath =
   | { kind: "command"; info: CommandInfo }
   | { kind: "group"; info: RouteInfo };
+
+/**
+ * Returned when a path segment fails to match any route.
+ * Includes fuzzy-matched suggestions (up to 3) from the available
+ * routes at the level where matching failed.
+ */
+export type UnresolvedPath = {
+  kind: "unresolved";
+  /** The input segment that didn't match any route */
+  input: string;
+  /** Fuzzy-matched suggestions from available route names */
+  suggestions: string[];
+};
 
 // ---------------------------------------------------------------------------
 // Type Guards
@@ -279,6 +294,9 @@ export function extractAllRoutes(routeMap: RouteMap): RouteInfo[] {
   return result;
 }
 
+/** Maximum number of fuzzy suggestions to include in an UnresolvedPath. */
+const MAX_SUGGESTIONS = 3;
+
 /**
  * Resolve a command path through the route tree.
  *
@@ -287,27 +305,40 @@ export function extractAllRoutes(routeMap: RouteMap): RouteInfo[] {
  *   or the command if it's a standalone command
  * - Two segments (e.g. ["issue", "list"]) → returns the specific subcommand
  *
+ * When a segment doesn't match, returns an {@link UnresolvedPath} with
+ * fuzzy-matched suggestions from the available routes at that level.
+ *
  * @param routeMap - Top-level Stricli route map
  * @param path - Command path segments (e.g. ["issue", "list"])
- * @returns Resolved command or group info, or null if not found
+ * @returns Resolved command/group, unresolved with suggestions, or null for empty paths
  */
 export function resolveCommandPath(
   routeMap: RouteMap,
   path: string[]
-): ResolvedPath | null {
+): ResolvedPath | UnresolvedPath | null {
   if (path.length === 0) {
     return null;
   }
 
-  const [first, ...rest] = path;
+  const first = path[0];
+  const rest = path.slice(1);
 
-  // Find the top-level entry matching the first segment
-  const entry = routeMap
-    .getAllEntries()
-    .find((e) => e.name.original === first && !e.hidden);
+  // length === 0 is handled above; this guard helps TS narrow the type
+  if (first === undefined) {
+    return null;
+  }
+
+  // Collect visible entries once — used for both exact match and fuzzy fallback
+  const visibleEntries = routeMap.getAllEntries().filter((e) => !e.hidden);
+  const entry = visibleEntries.find((e) => e.name.original === first);
 
   if (!entry) {
-    return null;
+    const names = visibleEntries.map((e) => e.name.original);
+    return {
+      kind: "unresolved",
+      input: first,
+      suggestions: fuzzyMatch(first, names, { maxResults: MAX_SUGGESTIONS }),
+    };
   }
 
   const target = entry.target;
@@ -344,14 +375,23 @@ export function resolveCommandPath(
     return null;
   }
 
-  // Find the subcommand
+  // Find the subcommand, with fuzzy fallback
   const subName = rest[0];
-  const subEntry = target
-    .getAllEntries()
-    .find((e) => e.name.original === subName && !e.hidden);
+  if (subName === undefined) {
+    return null;
+  }
+  const visibleSubEntries = target.getAllEntries().filter((e) => !e.hidden);
+  const subEntry = visibleSubEntries.find((e) => e.name.original === subName);
 
   if (!subEntry) {
-    return null;
+    const subNames = visibleSubEntries.map((e) => e.name.original);
+    return {
+      kind: "unresolved",
+      input: subName,
+      suggestions: fuzzyMatch(subName, subNames, {
+        maxResults: MAX_SUGGESTIONS,
+      }),
+    };
   }
 
   if (isCommand(subEntry.target)) {
