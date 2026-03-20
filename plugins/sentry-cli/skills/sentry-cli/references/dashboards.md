@@ -90,7 +90,7 @@ sentry dashboard widget add 'Frontend Performance' "Error Count" --display big_n
 Add a widget to a dashboard
 
 **Flags:**
-- `-d, --display <value> - Display type (line, bar, table, big_number, ...)`
+- `-d, --display <value> - Display type (big_number, line, area, bar, table, stacked_area, top_n, text, ...)`
 - `--dataset <value> - Widget dataset (default: spans)`
 - `-q, --query <value>... - Aggregate expression (e.g. count, p95:span.duration)`
 - `-w, --where <value> - Search conditions filter (e.g. is:unresolved)`
@@ -106,7 +106,7 @@ Edit a widget in a dashboard
 - `-i, --index <value> - Widget index (0-based)`
 - `-t, --title <value> - Widget title to match`
 - `--new-title <value> - New widget title`
-- `-d, --display <value> - Display type (line, bar, table, big_number, ...)`
+- `-d, --display <value> - Display type (big_number, line, area, bar, table, stacked_area, top_n, text, ...)`
 - `--dataset <value> - Widget dataset (default: spans)`
 - `-q, --query <value>... - Aggregate expression (e.g. count, p95:span.duration)`
 - `-w, --where <value> - Search conditions filter (e.g. is:unresolved)`
@@ -121,5 +121,9 @@ Delete a widget from a dashboard
 **Flags:**
 - `-i, --index <value> - Widget index (0-based)`
 - `-t, --title <value> - Widget title to match`
+
+### `sentry dashboard widget types <args...>`
+
+Show available widget display types and layout info
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
