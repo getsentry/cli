@@ -23,10 +23,20 @@ import { useTestConfigDir } from "../helpers.js";
 
 useTestConfigDir("test-multiregion-");
 let originalFetch: typeof globalThis.fetch;
+let savedAuthToken: string | undefined;
+let savedSentryToken: string | undefined;
 
 beforeEach(async () => {
   // Save original fetch
   originalFetch = globalThis.fetch;
+
+  // Isolate from env-var auth tokens so isEnvTokenActive() returns false.
+  // Without this, tests for 403 enrichment would flake when CI sets
+  // SENTRY_AUTH_TOKEN (the error message changes based on token source).
+  savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
+  savedSentryToken = process.env.SENTRY_TOKEN;
+  delete process.env.SENTRY_AUTH_TOKEN;
+  delete process.env.SENTRY_TOKEN;
 
   // Set up auth token (manual token, no refresh)
   await setAuthToken("test-token");
@@ -38,6 +48,14 @@ beforeEach(async () => {
 afterEach(() => {
   // Restore original fetch
   globalThis.fetch = originalFetch;
+
+  // Restore env vars
+  if (savedAuthToken !== undefined) {
+    process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
+  }
+  if (savedSentryToken !== undefined) {
+    process.env.SENTRY_TOKEN = savedSentryToken;
+  }
 });
 
 /**
