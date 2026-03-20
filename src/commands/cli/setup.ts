@@ -200,8 +200,8 @@ async function handleZshFpath(
     if (result.modified) {
       lines.push(`Completions: ${result.message}`);
       lines.push(`      Restart your shell or run: source ${shell.configFile}`);
-    }
-    if (result.manualCommand) {
+    } else if (result.manualCommand) {
+      lines.push(`Completions: ${result.message}`);
       lines.push(`      Add manually to .zshrc: ${result.manualCommand}`);
     }
   } else if (isNewInstall) {
