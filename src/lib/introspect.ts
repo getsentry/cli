@@ -299,6 +299,9 @@ export function extractAllRoutes(routeMap: RouteMap): RouteInfo[] {
   return result;
 }
 
+/** Matches the "sentry " prefix at the start of a command path. */
+const SENTRY_PREFIX_RE = /^sentry /;
+
 /** Maximum number of fuzzy suggestions to include in an UnresolvedPath. */
 const MAX_SUGGESTIONS = 3;
 
@@ -382,8 +385,8 @@ export function resolveCommandPath(
 
   // Prepend the parent route segment to all paths in the result
   const parentPrefix = entry.name.original;
-  const prependPrefix = (path: string) =>
-    path.replace(/^sentry /, `sentry ${parentPrefix} `);
+  const prependPrefix = (p: string) =>
+    p.replace(SENTRY_PREFIX_RE, `sentry ${parentPrefix} `);
 
   if (subResult.kind === "command") {
     return {
