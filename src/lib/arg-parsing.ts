@@ -617,6 +617,9 @@ function parseMultiSlashIssueArg(
     );
   }
 
+  // Lowercase project slug — Sentry slugs are always lowercase.
+  const normalizedProject = project.toLowerCase();
+
   // Remainder with dash: "org/project/PROJ-G" — split remainder on last dash
   if (remainder.includes("-")) {
     const lastDash = remainder.lastIndexOf("-");
@@ -626,14 +629,19 @@ function parseMultiSlashIssueArg(
       return {
         type: "explicit",
         org,
-        project,
+        project: normalizedProject,
         suffix: `${subProject}-${suffix}`.toUpperCase(),
       };
     }
   }
 
   // "org/project/101149101" or "org/project/G" — treat remainder as suffix
-  return { type: "explicit", org, project, suffix: remainder.toUpperCase() };
+  return {
+    type: "explicit",
+    org,
+    project: normalizedProject,
+    suffix: remainder.toUpperCase(),
+  };
 }
 
 function parseAfterSlash(
