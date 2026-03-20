@@ -826,15 +826,34 @@ async function handleOrgAllIssues(
 
   setContext([org], []);
 
-  const { issues, nextCursor } = await withProgress(
-    { message: `Fetching issues (up to ${flags.limit})...`, json: flags.json },
-    (setMessage) =>
-      fetchOrgAllIssues(org, flags, cursor, (fetched, limit) =>
-        setMessage(
-          `Fetching issues, ${fetched} and counting (up to ${limit})...`
+  let issuesResult: IssuesPage;
+  try {
+    issuesResult = await withProgress(
+      {
+        message: `Fetching issues (up to ${flags.limit})...`,
+        json: flags.json,
+      },
+      (setMessage) =>
+        fetchOrgAllIssues(org, flags, cursor, (fetched, limit) =>
+          setMessage(
+            `Fetching issues, ${fetched} and counting (up to ${limit})...`
+          )
         )
-      )
-  );
+    );
+  } catch (error) {
+    // Enrich 400 errors with the same suggestions as handleResolvedTargets
+    // (CLI-BY, 23 users). The org-all path was missing these hints.
+    if (error instanceof ApiError && error.status === 400) {
+      throw new ApiError(
+        error.message,
+        error.status,
+        build400Detail(error.detail, flags),
+        error.endpoint
+      );
+    }
+    throw error;
+  }
+  const { issues, nextCursor } = issuesResult;
 
   if (nextCursor) {
     setPaginationCursor(PAGINATION_KEY, contextKey, nextCursor);
