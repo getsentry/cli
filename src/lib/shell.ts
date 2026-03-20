@@ -245,6 +245,84 @@ export async function addToPath(
 }
 
 /**
+ * Generate the fpath command for zsh completion directory.
+ */
+export function getFpathCommand(directory: string): string {
+  return `fpath=("${directory}" $fpath)`;
+}
+
+/**
+ * Add a directory to zsh's fpath in a shell config file.
+ *
+ * Mirrors `addToPath` — reads the config file, checks idempotency,
+ * and appends `fpath=("dir" $fpath)` if not already present.
+ *
+ * @param configFile - Path to the zsh config file (e.g. ~/.zshrc)
+ * @param directory - Directory to add to fpath
+ * @returns Result of the modification attempt
+ */
+export async function addToFpath(
+  configFile: string,
+  directory: string
+): Promise<PathModificationResult> {
+  const fpathCommand = getFpathCommand(directory);
+
+  const file = Bun.file(configFile);
+  const exists = await file.exists();
+
+  if (!exists) {
+    try {
+      await Bun.write(configFile, `# sentry\n${fpathCommand}\n`);
+      return {
+        modified: true,
+        configFile,
+        message: `Created ${configFile} with fpath configuration`,
+        manualCommand: null,
+      };
+    } catch {
+      return {
+        modified: false,
+        configFile: null,
+        message: `Could not create ${configFile}`,
+        manualCommand: fpathCommand,
+      };
+    }
+  }
+
+  const content = await file.text();
+
+  if (content.includes(fpathCommand) || content.includes(`"${directory}"`)) {
+    return {
+      modified: false,
+      configFile,
+      message: `fpath already configured in ${configFile}`,
+      manualCommand: null,
+    };
+  }
+
+  try {
+    const newContent = content.endsWith("\n")
+      ? `${content}\n# sentry\n${fpathCommand}\n`
+      : `${content}\n\n# sentry\n${fpathCommand}\n`;
+
+    await Bun.write(configFile, newContent);
+    return {
+      modified: true,
+      configFile,
+      message: `Added sentry completions to fpath in ${configFile}`,
+      manualCommand: null,
+    };
+  } catch {
+    return {
+      modified: false,
+      configFile: null,
+      message: `Could not write to ${configFile}`,
+      manualCommand: fpathCommand,
+    };
+  }
+}
+
+/**
  * Add to GitHub Actions PATH if running in CI.
  */
 export async function addToGitHubPath(

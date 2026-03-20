@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
+  addToFpath,
   addToGitHubPath,
   addToPath,
   detectShell,
@@ -189,6 +190,103 @@ describe("shell utilities", () => {
       expect(result.modified).toBe(false);
       expect(result.manualCommand).toBe(
         'export PATH="/home/user/.sentry/bin:$PATH"'
+      );
+    });
+  });
+
+  describe("addToFpath", () => {
+    let testDir: string;
+
+    beforeEach(() => {
+      testDir = join(
+        "/tmp",
+        `shell-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      );
+      mkdirSync(testDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(testDir, { recursive: true, force: true });
+    });
+
+    test("creates config file if it doesn't exist", async () => {
+      const configFile = join(testDir, ".zshrc");
+      const result = await addToFpath(
+        configFile,
+        "/home/user/.local/share/zsh/site-functions"
+      );
+
+      expect(result.modified).toBe(true);
+      expect(result.configFile).toBe(configFile);
+
+      const content = await Bun.file(configFile).text();
+      expect(content).toContain(
+        'fpath=("/home/user/.local/share/zsh/site-functions" $fpath)'
+      );
+    });
+
+    test("appends to existing config file", async () => {
+      const configFile = join(testDir, ".zshrc");
+      writeFileSync(configFile, "# existing content\n");
+
+      const result = await addToFpath(
+        configFile,
+        "/home/user/.local/share/zsh/site-functions"
+      );
+
+      expect(result.modified).toBe(true);
+
+      const content = await Bun.file(configFile).text();
+      expect(content).toContain("# existing content");
+      expect(content).toContain("# sentry");
+      expect(content).toContain(
+        'fpath=("/home/user/.local/share/zsh/site-functions" $fpath)'
+      );
+    });
+
+    test("skips if already configured", async () => {
+      const configFile = join(testDir, ".zshrc");
+      writeFileSync(
+        configFile,
+        '# sentry\nfpath=("/home/user/.local/share/zsh/site-functions" $fpath)\n'
+      );
+
+      const result = await addToFpath(
+        configFile,
+        "/home/user/.local/share/zsh/site-functions"
+      );
+
+      expect(result.modified).toBe(false);
+      expect(result.message).toContain("already configured");
+    });
+
+    test("appends newline separator when file doesn't end with newline", async () => {
+      const configFile = join(testDir, ".zshrc");
+      writeFileSync(configFile, "# existing content without newline");
+
+      const result = await addToFpath(
+        configFile,
+        "/home/user/.local/share/zsh/site-functions"
+      );
+
+      expect(result.modified).toBe(true);
+
+      const content = await Bun.file(configFile).text();
+      expect(content).toContain(
+        "# existing content without newline\n\n# sentry\n"
+      );
+    });
+
+    test("returns manualCommand when config file cannot be created", async () => {
+      const configFile = "/dev/null/impossible/path/.zshrc";
+      const result = await addToFpath(
+        configFile,
+        "/home/user/.local/share/zsh/site-functions"
+      );
+
+      expect(result.modified).toBe(false);
+      expect(result.manualCommand).toBe(
+        'fpath=("/home/user/.local/share/zsh/site-functions" $fpath)'
       );
     });
   });

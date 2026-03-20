@@ -291,7 +291,10 @@ describe("sentry cli setup", () => {
     expect(getOutput()).toContain("Completions:");
   });
 
-  test("shows zsh fpath hint for zsh completions", async () => {
+  test("adds fpath to .zshrc for zsh completions", async () => {
+    const zshrc = join(testDir, ".zshrc");
+    writeFileSync(zshrc, "# existing zshrc\n");
+
     const { context, getOutput, restore } = createMockContext({
       homeDir: testDir,
       execPath: join(testDir, "bin", "sentry"),
@@ -308,7 +311,46 @@ describe("sentry cli setup", () => {
       context
     );
 
-    expect(getOutput()).toContain("fpath=");
+    expect(getOutput()).toContain("fpath");
+    expect(getOutput()).toContain("Completions:");
+
+    // Verify .zshrc was actually modified
+    const content = await Bun.file(zshrc).text();
+    expect(content).toContain("fpath=");
+    expect(content).toContain("site-functions");
+  });
+
+  test("skips fpath modification when already configured in .zshrc", async () => {
+    const zshrc = join(testDir, ".zshrc");
+    const completionDir = join(
+      testDir,
+      ".local",
+      "share",
+      "zsh",
+      "site-functions"
+    );
+    writeFileSync(zshrc, `# existing\nfpath=("${completionDir}" $fpath)\n`);
+
+    const { context, getOutput, restore } = createMockContext({
+      homeDir: testDir,
+      execPath: join(testDir, "bin", "sentry"),
+      env: {
+        PATH: `/usr/bin:${join(testDir, "bin")}:/bin`,
+        SHELL: "/bin/zsh",
+      },
+    });
+    restoreStderr = restore;
+
+    await run(
+      app,
+      ["cli", "setup", "--no-modify-path", "--no-agent-skills"],
+      context
+    );
+
+    // Should still show "Installed to" but not "Added ... to fpath"
+    const output = getOutput();
+    expect(output).toContain("Completions: Installed to");
+    expect(output).not.toContain("Added sentry completions to fpath");
   });
 
   test("handles GitHub Actions PATH when GITHUB_ACTIONS is set", async () => {

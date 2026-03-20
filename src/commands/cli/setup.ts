@@ -30,9 +30,11 @@ import {
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import {
+  addToFpath,
   addToGitHubPath,
   addToPath,
   detectShell,
+  getFpathCommand,
   getPathCommand,
   isBashAvailable,
   isInPath,
@@ -181,6 +183,35 @@ async function tryBashCompletionFallback(
 }
 
 /**
+ * Ensure the zsh completion directory is in fpath.
+ *
+ * Runs even on updates so existing installs get fpath configured (one-time migration).
+ * Returns status messages for the user.
+ */
+async function handleZshFpath(
+  shell: ShellInfo,
+  completionDir: string,
+  isNewInstall: boolean
+): Promise<string[]> {
+  const lines: string[] = [];
+
+  if (shell.configFile) {
+    const result = await addToFpath(shell.configFile, completionDir);
+    if (result.modified) {
+      lines.push(`Completions: ${result.message}`);
+      lines.push(`      Restart your shell or run: source ${shell.configFile}`);
+    }
+    if (result.manualCommand) {
+      lines.push(`      Add manually to .zshrc: ${result.manualCommand}`);
+    }
+  } else if (isNewInstall) {
+    lines.push(`      Add to your .zshrc: ${getFpathCommand(completionDir)}`);
+  }
+
+  return lines;
+}
+
+/**
  * Handle shell completion installation.
  *
  * For unsupported shells (xonsh, nushell, etc.), falls back to installing
@@ -200,20 +231,19 @@ async function handleCompletions(
   const location = await installCompletions(shell.type, homeDir, xdgDataHome);
 
   if (location) {
-    // Silently updated — no need to tell the user on every upgrade
-    if (!location.created) {
-      return [];
-    }
+    const lines: string[] = [];
 
-    const lines = [`Completions: Installed to ${location.path}`];
-
-    // Zsh may need fpath hint
     if (shell.type === "zsh") {
       const completionDir = dirname(location.path);
       lines.push(
-        `      You may need to add to .zshrc: fpath=(${completionDir} $fpath)`
+        ...(await handleZshFpath(shell, completionDir, location.created))
       );
     }
+
+    if (location.created) {
+      lines.unshift(`Completions: Installed to ${location.path}`);
+    }
+
     return lines;
   }
 
