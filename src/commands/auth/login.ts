@@ -1,6 +1,10 @@
 import { isatty } from "node:tty";
 import type { SentryContext } from "../../context.js";
-import { getCurrentUser, getUserRegions } from "../../lib/api-client.js";
+import {
+  getCurrentUser,
+  getUserRegions,
+  listOrganizationsUncached,
+} from "../../lib/api-client.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
 import {
   clearAuth,
@@ -185,6 +189,9 @@ export const loginCommand = buildCommand({
         // Non-fatal: user info is supplementary. Token remains stored and valid.
       }
 
+      // Warm the org + region cache so the first real command is fast.
+      // Fire-and-forget — login already succeeded, caching is best-effort.
+      warmOrgCache();
       return yield new CommandOutput(result);
     }
 
@@ -194,6 +201,9 @@ export const loginCommand = buildCommand({
     });
 
     if (result) {
+      // Warm the org + region cache so the first real command is fast.
+      // Fire-and-forget — login already succeeded, caching is best-effort.
+      warmOrgCache();
       yield new CommandOutput(result);
     } else {
       // Error already displayed by runInteractiveLogin
@@ -201,3 +211,19 @@ export const loginCommand = buildCommand({
     }
   },
 });
+
+/**
+ * Pre-populate the org + region SQLite cache in the background.
+ *
+ * Called after successful authentication so that the first real command
+ * doesn't pay the cold-start cost of `getUserRegions()` + fan-out to
+ * each region's org list endpoint (~800ms on a typical SaaS account).
+ *
+ * Failures are silently ignored — the cache will be populated lazily
+ * on the next command that needs it.
+ */
+function warmOrgCache(): void {
+  listOrganizationsUncached().catch(() => {
+    // Best-effort: cache warming failure doesn't affect the login result
+  });
+}

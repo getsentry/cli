@@ -12,6 +12,8 @@ import {
   retrieveAProject,
 } from "@sentry/api";
 
+import pLimit from "p-limit";
+
 import type {
   ProjectKey,
   Region,
@@ -29,6 +31,7 @@ import {
   apiRequestToRegion,
   getOrgSdkConfig,
   MAX_PAGINATION_PAGES,
+  ORG_FANOUT_CONCURRENCY,
   type PaginatedResponse,
   unwrapPaginatedResult,
   unwrapResult,
@@ -207,23 +210,28 @@ export async function findProjectsBySlug(
   // the expensive getUserRegions() + listOrganizationsInRegion() fan-out.
   const orgs = await listOrganizations();
 
-  // Direct lookup in parallel — one API call per org instead of paginating all projects
+  // Direct lookup with concurrency limit — one API call per org instead of
+  // paginating all projects. p-limit prevents overwhelming the API for users
+  // with many organizations.
+  const limit = pLimit(ORG_FANOUT_CONCURRENCY);
   const searchResults = await Promise.all(
     orgs.map((org) =>
-      withAuthGuard(async () => {
-        const project = await getProject(org.slug, projectSlug);
-        // The API accepts project_id_or_slug, so a numeric input could
-        // resolve by ID instead of slug. When the input is all digits,
-        // accept the match (the user passed a numeric project ID).
-        // For non-numeric inputs, verify the slug actually matches to
-        // avoid false positives from coincidental ID collisions.
-        // Note: Sentry enforces that project slugs must start with a letter,
-        // so an all-digits input can only ever be a numeric ID, never a slug.
-        if (!isNumericId && project.slug !== projectSlug) {
-          return null;
-        }
-        return { ...project, orgSlug: org.slug };
-      })
+      limit(() =>
+        withAuthGuard(async () => {
+          const project = await getProject(org.slug, projectSlug);
+          // The API accepts project_id_or_slug, so a numeric input could
+          // resolve by ID instead of slug. When the input is all digits,
+          // accept the match (the user passed a numeric project ID).
+          // For non-numeric inputs, verify the slug actually matches to
+          // avoid false positives from coincidental ID collisions.
+          // Note: Sentry enforces that project slugs must start with a letter,
+          // so an all-digits input can only ever be a numeric ID, never a slug.
+          if (!isNumericId && project.slug !== projectSlug) {
+            return null;
+          }
+          return { ...project, orgSlug: org.slug };
+        })
+      )
     )
   );
 
@@ -285,14 +293,17 @@ export async function findProjectsByPattern(
 ): Promise<ProjectWithOrg[]> {
   const orgs = await listOrganizations();
 
+  const limit = pLimit(ORG_FANOUT_CONCURRENCY);
   const searchResults = await Promise.all(
     orgs.map((org) =>
-      withAuthGuard(async () => {
-        const projects = await listProjects(org.slug);
-        return projects
-          .filter((p) => matchesWordBoundary(pattern, p.slug))
-          .map((p) => ({ ...p, orgSlug: org.slug }));
-      })
+      limit(() =>
+        withAuthGuard(async () => {
+          const projects = await listProjects(org.slug);
+          return projects
+            .filter((p) => matchesWordBoundary(pattern, p.slug))
+            .map((p) => ({ ...p, orgSlug: org.slug }));
+        })
+      )
     )
   );
 
@@ -328,19 +339,22 @@ export async function findProjectByDsnKey(
     return projects[0] ?? null;
   }
 
+  const limit = pLimit(ORG_FANOUT_CONCURRENCY);
   const results = await Promise.all(
-    regions.map(async (region) => {
-      try {
-        const { data } = await apiRequestToRegion<SentryProject[]>(
-          region.url,
-          "/projects/",
-          { params: { query: `dsn:${publicKey}` } }
-        );
-        return data;
-      } catch {
-        return [];
-      }
-    })
+    regions.map((region) =>
+      limit(async () => {
+        try {
+          const { data } = await apiRequestToRegion<SentryProject[]>(
+            region.url,
+            "/projects/",
+            { params: { query: `dsn:${publicKey}` } }
+          );
+          return data;
+        } catch {
+          return [];
+        }
+      })
+    )
   );
 
   for (const projects of results) {

@@ -195,6 +195,15 @@ export const MAX_PAGINATION_PAGES = Math.max(
 export const API_MAX_PER_PAGE = 100;
 
 /**
+ * Maximum concurrent API requests when fanning out across organizations or regions.
+ *
+ * Limits parallel calls (e.g., `getProject()` per org, `resolveEventInOrg()` per org,
+ * DSN key search per region) to prevent overwhelming the API for enterprise users
+ * with many organizations. For typical users with 1-5 orgs this has no effect.
+ */
+export const ORG_FANOUT_CONCURRENCY = 5;
+
+/**
  * Paginated API response with cursor metadata.
  * More pages exist when `nextCursor` is defined.
  */

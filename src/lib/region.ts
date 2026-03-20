@@ -145,12 +145,19 @@ async function resolveOrgFromCache(
  * When users or AI agents extract org identifiers from DSN hosts
  * (e.g., `o1081365` from `o1081365.ingest.us.sentry.io`), the `o`-prefixed
  * form isn't recognized by the Sentry API. This function resolves the
- * identifier using the locally cached org list:
+ * identifier using two strategies:
  *
- * 1. Check local cache (slug or DSN numeric ID) → return resolved slug
- * 2. If cache miss, refresh the org list from the API (one fan-out call)
- *    and retry the local cache lookup
- * 3. Fall back to returning the original slug for downstream error handling
+ * **Normal slugs** (e.g., `acme-corp`):
+ * 1. Check local cache → return slug
+ * 2. Try `resolveOrgRegion(orgSlug)` — single API call to fetch org details
+ *    and populate the region cache. If it succeeds, the slug is valid.
+ * 3. Fall back to the original slug for downstream error handling
+ *
+ * **DSN numeric IDs** (e.g., `o1081365`):
+ * 1. Check local cache for numeric ID → slug mapping
+ * 2. Refresh the full org list from the API (fan-out to all regions)
+ *    to populate the numeric-ID-to-slug mapping
+ * 3. Retry cache lookup, fall back to original slug
  *
  * @param orgSlug - Raw org identifier from user input
  * @returns The org slug to use for API calls (may be normalized)
@@ -162,10 +169,27 @@ export async function resolveEffectiveOrg(orgSlug: string): Promise<string> {
     return fromCache;
   }
 
-  // Cache is cold or identifier is unknown — refresh the org list from API.
+  // Check if the identifier is a DSN-style numeric ID (e.g., `o1081365`).
+  // These need the full org list fan-out because we must map numeric ID → slug.
+  const numericId = stripDsnOrgPrefix(orgSlug);
+  const isDsnNumericId = numericId !== orgSlug;
+
+  if (!isDsnNumericId) {
+    // Normal slug: try a single resolveOrgRegion() call (1 API request)
+    // instead of the heavy listOrganizationsUncached() fan-out (1+N requests).
+    // If it succeeds, the slug is valid and the region is now cached.
+    try {
+      await resolveOrgRegion(orgSlug);
+      return orgSlug;
+    } catch {
+      // Org not found or auth error — fall through to return the original
+      // slug. The downstream API call will produce a relevant error.
+      return orgSlug;
+    }
+  }
+
+  // DSN numeric ID: refresh the full org list to populate ID → slug mapping.
   // listOrganizationsUncached() populates org_regions with slug, region, org_id, and name.
-  // Any error (auth failure, network error, etc.) falls back to the original
-  // slug; the downstream API call will produce a relevant error if needed.
   try {
     const { listOrganizationsUncached } = await import("./api-client.js");
     await listOrganizationsUncached();

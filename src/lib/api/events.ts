@@ -9,12 +9,17 @@ import {
   retrieveAnIssueEvent,
   resolveAnEventId as sdkResolveAnEventId,
 } from "@sentry/api";
+import pLimit from "p-limit";
 
 import type { SentryEvent } from "../../types/index.js";
 
 import { ApiError, AuthError } from "../errors.js";
 
-import { getOrgSdkConfig, unwrapResult } from "./infrastructure.js";
+import {
+  getOrgSdkConfig,
+  ORG_FANOUT_CONCURRENCY,
+  unwrapResult,
+} from "./infrastructure.js";
 import { listOrganizations } from "./organizations.js";
 
 /**
@@ -124,8 +129,9 @@ export async function findEventAcrossOrgs(
 ): Promise<ResolvedEvent | null> {
   const orgs = await listOrganizations();
 
+  const limit = pLimit(ORG_FANOUT_CONCURRENCY);
   const results = await Promise.allSettled(
-    orgs.map((org) => resolveEventInOrg(org.slug, eventId))
+    orgs.map((org) => limit(() => resolveEventInOrg(org.slug, eventId)))
   );
 
   // First pass: return the first successful match

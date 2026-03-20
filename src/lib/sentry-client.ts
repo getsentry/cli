@@ -15,8 +15,11 @@ import {
   getUserAgent,
 } from "./constants.js";
 import { getAuthToken, isEnvTokenActive, refreshToken } from "./db/auth.js";
+import { logger } from "./logger.js";
 import { getCachedResponse, storeCachedResponse } from "./response-cache.js";
 import { withHttpSpan } from "./telemetry.js";
+
+const log = logger.withTag("http");
 
 /** Request timeout in milliseconds */
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -316,7 +319,11 @@ async function fetchWithRetry(
       throw result.error;
     }
 
-    await Bun.sleep(backoffDelay(attempt));
+    const delay = backoffDelay(attempt);
+    log.debug(
+      `${method} ${new URL(fullUrl).pathname} → retry ${attempt + 1}/${MAX_RETRIES} after ${delay}ms`
+    );
+    await Bun.sleep(delay);
   }
 
   // Unreachable: the last attempt always returns 'done' or 'throw'
@@ -356,6 +363,7 @@ function createAuthenticatedFetch(): (
 
     return withHttpSpan(method, urlPath, async () => {
       const fullUrl = extractFullUrl(input);
+      const startTime = performance.now();
 
       // Check cache before auth/retry for GET requests.
       // Uses current token (no refresh) so lookups are fast but Vary-correct.
@@ -365,10 +373,17 @@ function createAuthenticatedFetch(): (
         authHeaders(getAuthToken())
       );
       if (cached) {
+        log.debug(
+          `${method} ${urlPath} → ${cached.status} (cache hit, ${(performance.now() - startTime).toFixed(0)}ms)`
+        );
         return cached;
       }
 
-      return await fetchWithRetry(input, init, method, fullUrl);
+      const response = await fetchWithRetry(input, init, method, fullUrl);
+      log.debug(
+        `${method} ${urlPath} → ${response.status} (${(performance.now() - startTime).toFixed(0)}ms)`
+      );
+      return response;
     });
   };
 }
