@@ -237,7 +237,27 @@ export async function getIssueByShortId(
     },
   });
 
-  const data = unwrapResult(result, "Failed to resolve short ID");
+  let data: ReturnType<typeof unwrapResult>;
+  try {
+    data = unwrapResult(result, "Failed to resolve short ID");
+  } catch (error) {
+    // Enrich 404 errors with actionable context. The generic
+    // "Failed to resolve short ID: 404 Not Found" is the most common
+    // issue view error (CLI-A1, 27 users). Callers like
+    // tryGetIssueByShortId still catch ApiError by status code.
+    if (error instanceof ApiError && error.status === 404) {
+      throw new ApiError(
+        `Short ID '${normalizedShortId}' not found in organization '${orgSlug}'`,
+        404,
+        [
+          "The issue may have been deleted or merged",
+          `Verify the short ID and org: sentry issue view ${orgSlug}/${normalizedShortId}`,
+          `List issues in this org: sentry issue list ${orgSlug}/`,
+        ].join("\n  ")
+      );
+    }
+    throw error;
+  }
 
   // resolveAShortId returns a ShortIdLookupResponse with a group (issue)
   const resolved = data as unknown as { group?: SentryIssue };
