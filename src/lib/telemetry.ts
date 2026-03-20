@@ -249,9 +249,6 @@ const EXCLUDED_INTEGRATIONS = new Set([
 /** Current beforeExit handler, tracked so it can be replaced on re-init */
 let currentBeforeExitHandler: (() => void) | null = null;
 
-/** Whether the cli.invocation metric has already been emitted this process */
-let invocationCounted = false;
-
 /** Match all SaaS regional URLs (us.sentry.io, de.sentry.io, o1234.ingest.us.sentry.io, etc.) */
 const SENTRY_SAAS_SUBDOMAIN_RE = /^https:\/\/[^/]*\.sentry\.io(\/|$)/;
 
@@ -345,14 +342,8 @@ export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
     // Tag whether targeting self-hosted Sentry (not SaaS)
     Sentry.setTag("is_self_hosted", !isSentrySaasUrl(getSentryBaseUrl()));
 
-    // Track TTY vs non-TTY invocations to measure agent/CI usage percentage.
-    // Guarded because initSentry is called again on auto-login retry.
-    if (!invocationCounted) {
-      invocationCounted = true;
-      Sentry.metrics.count("cli.invocation", 1, {
-        attributes: { is_tty: !!process.stdout.isTTY },
-      });
-    }
+    // Tag whether running in an interactive terminal or agent/CI environment
+    Sentry.setTag("is_tty", !!process.stdout.isTTY);
 
     // Wire up consola → Sentry log forwarding now that the client is active
     attachSentryReporter();
