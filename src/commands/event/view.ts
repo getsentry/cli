@@ -22,7 +22,7 @@ import {
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError, ResolutionError } from "../../lib/errors.js";
+import { ApiError, ContextError, ResolutionError } from "../../lib/errors.js";
 import { formatEventDetails } from "../../lib/formatters/index.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
@@ -334,6 +334,47 @@ async function fetchLatestEventData(
   return { event, trace, spanTreeLines: spanTreeResult?.lines };
 }
 
+/**
+ * Fetch an event, enriching 404 errors with actionable suggestions.
+ *
+ * The generic "Failed to get event: 404 Not Found" is the most common
+ * event view failure (CLI-6F, 54 users). This wrapper adds context about
+ * data retention, ID format, and cross-project lookup.
+ *
+ * @param prefetchedEvent - Already-resolved event (from cross-org lookup), or null
+ * @param org - Organization slug
+ * @param project - Project slug
+ * @param eventId - Event ID being looked up
+ * @returns The event data
+ */
+async function fetchEventWithContext(
+  prefetchedEvent: import("../../types/index.js").SentryEvent | null,
+  org: string,
+  project: string,
+  eventId: string
+): Promise<import("../../types/index.js").SentryEvent> {
+  if (prefetchedEvent) {
+    return prefetchedEvent;
+  }
+  try {
+    return await getEvent(org, project, eventId);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      throw new ResolutionError(
+        `Event '${eventId}'`,
+        `not found in ${org}/${project}`,
+        `sentry event view ${org}/${project} <event-id>`,
+        [
+          "The event may have been deleted due to data retention policies",
+          "Verify the event ID is a 32-character hex string (e.g., a1b2c3d4...)",
+          `Check if the event belongs to a different project: sentry event view ${org}/ <event-id>`,
+        ]
+      );
+    }
+    throw error;
+  }
+}
+
 export const viewCommand = buildCommand({
   docs: {
     brief: "View details of a specific event",
@@ -425,9 +466,12 @@ export const viewCommand = buildCommand({
 
     // Use the pre-fetched event when cross-project resolution already fetched it,
     // avoiding a redundant API call.
-    const event =
-      target.prefetchedEvent ??
-      (await getEvent(target.org, target.project, eventId));
+    const event = await fetchEventWithContext(
+      target.prefetchedEvent ?? null,
+      target.org,
+      target.project,
+      eventId
+    );
 
     // Fetch span tree data (for both JSON and human output)
     // Skip when spans=0 (disabled via --spans no or --spans 0)
