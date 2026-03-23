@@ -56,6 +56,21 @@ describe("buildCommandHint", () => {
       "sentry issue explain <org>/@most_frequent"
     );
   });
+
+  test("shows as-is when input already contains a slash (CLI-8C)", () => {
+    // org/numeric — don't add another <org>/ prefix
+    expect(buildCommandHint("view", "saber-ut/103103195")).toBe(
+      "sentry issue view saber-ut/103103195"
+    );
+    // org/project-suffix — already has full context
+    expect(buildCommandHint("view", "sentry/cli-G")).toBe(
+      "sentry issue view sentry/cli-G"
+    );
+    // org/project/suffix — three-level path, show as-is
+    expect(buildCommandHint("explain", "sentry/cli/CLI-A1")).toBe(
+      "sentry issue explain sentry/cli/CLI-A1"
+    );
+  });
 });
 
 const getConfigDir = useTestConfigDir("test-issue-utils-", {

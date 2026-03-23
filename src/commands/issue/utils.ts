@@ -63,6 +63,7 @@ export const issueIdPositional = {
  * Build a command hint string for error messages.
  *
  * Returns context-aware hints based on the issue ID format:
+ * - Already contains `/` (e.g., "saber-ut/103103195") → show as-is (already has context)
  * - Numeric ID (e.g., "123456789") → suggest `<org>/123456789`
  * - Suffix only (e.g., "G") → suggest `<project>-G`
  * - Has dash (e.g., "cli-G") → suggest `<org>/cli-G`
@@ -74,6 +75,10 @@ export function buildCommandHint(command: string, issueId: string): string {
   // Selectors already include the @ prefix and are self-contained
   if (issueId.startsWith("@")) {
     return `sentry issue ${command} <org>/${issueId}`;
+  }
+  // Input already contains org/project context — show as-is to avoid double-prefixing
+  if (issueId.includes("/")) {
+    return `sentry issue ${command} ${issueId}`;
   }
   // Numeric IDs always need org context - can't be combined with project
   if (isAllDigits(issueId)) {
