@@ -104,6 +104,48 @@ function jsonTransformEventView(
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
 
+/**
+ * Parse a single positional arg for event view, handling issue short ID
+ * detection both in bare form ("BRUNCHIE-APP-29") and org-prefixed form
+ * ("figma/FULLSCREEN-2RN").
+ *
+ * Must run before `parseSlashSeparatedArg` because that function throws
+ * ContextError for single-slash args like "org/SHORT-ID", which looks like
+ * "org/project" with a missing event ID.
+ */
+function parseSingleArg(arg: string): ParsedPositionalArgs {
+  // Detect "org/SHORT-ID" pattern before parseSlashSeparatedArg.
+  // e.g., "figma/FULLSCREEN-2RN" → auto-redirect to that issue's latest event.
+  const slashIdx = arg.indexOf("/");
+  if (slashIdx !== -1 && arg.indexOf("/", slashIdx + 1) === -1) {
+    const afterSlash = arg.slice(slashIdx + 1);
+    if (afterSlash && looksLikeIssueShortId(afterSlash)) {
+      return {
+        eventId: "latest",
+        targetArg: arg.slice(0, slashIdx),
+        issueShortId: afterSlash,
+      };
+    }
+  }
+
+  const { id: eventId, targetArg } = parseSlashSeparatedArg(
+    arg,
+    "Event ID",
+    USAGE_HINT
+  );
+
+  // Detect bare issue short ID passed as event ID (e.g., "BRUNCHIE-APP-29").
+  if (!targetArg && looksLikeIssueShortId(eventId)) {
+    return {
+      eventId: "latest",
+      targetArg: undefined,
+      issueShortId: eventId,
+    };
+  }
+
+  return { eventId, targetArg };
+}
+
 /** Return type for parsePositionalArgs */
 type ParsedPositionalArgs = {
   eventId: string;
@@ -175,24 +217,7 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
   }
 
   if (args.length === 1) {
-    const { id: eventId, targetArg } = parseSlashSeparatedArg(
-      first,
-      "Event ID",
-      USAGE_HINT
-    );
-
-    // Detect issue short ID passed as event ID (e.g., "BRUNCHIE-APP-29").
-    // When a single arg matches the issue short ID pattern, the user likely
-    // wanted `sentry issue view`. Auto-redirect to show the latest event.
-    if (!targetArg && looksLikeIssueShortId(eventId)) {
-      return {
-        eventId: "latest",
-        targetArg: undefined,
-        issueShortId: eventId,
-      };
-    }
-
-    return { eventId, targetArg };
+    return parseSingleArg(first);
   }
 
   const second = args[1];

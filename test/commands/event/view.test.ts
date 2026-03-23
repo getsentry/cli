@@ -81,6 +81,28 @@ describe("parsePositionalArgs", () => {
       expect(result.eventId).toBe("my-project");
       expect(result.issueShortId).toBeUndefined();
     });
+
+    test("detects org/ISSUE-SHORT-ID pattern (CLI-9K)", () => {
+      const result = parsePositionalArgs(["figma/FULLSCREEN-2RN"]);
+      expect(result.eventId).toBe("latest");
+      expect(result.targetArg).toBe("figma");
+      expect(result.issueShortId).toBe("FULLSCREEN-2RN");
+    });
+
+    test("detects org/CLI-G pattern", () => {
+      const result = parsePositionalArgs(["sentry/CLI-G"]);
+      expect(result.eventId).toBe("latest");
+      expect(result.targetArg).toBe("sentry");
+      expect(result.issueShortId).toBe("CLI-G");
+    });
+
+    test("does not detect org/lowercase-slug as issue short ID", () => {
+      // "my-org/my-project" is a normal org/project target, not an issue short ID.
+      // parseSlashSeparatedArg will throw ContextError as expected.
+      expect(() => parsePositionalArgs(["my-org/my-project"])).toThrow(
+        "Event ID"
+      );
+    });
   });
 
   describe("two arguments (target + event ID)", () => {
