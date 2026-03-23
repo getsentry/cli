@@ -204,7 +204,7 @@ export const viewCommand = buildCommand({
   },
   async *func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
-    const { cwd, setContext } = this;
+    const { cwd } = this;
     const log = logger.withTag("trace.view");
 
     // Pre-process: detect swapped args and issue short IDs
@@ -219,7 +219,6 @@ export const viewCommand = buildCommand({
 
     let traceId: string;
     let org: string;
-    let project: string;
 
     if (issueShortId) {
       // Auto-recover: user passed an issue short ID instead of a trace ID.
@@ -247,10 +246,6 @@ export const viewCommand = buildCommand({
         );
       }
       traceId = eventTraceId;
-      // Use the project from the issue's metadata if available.
-      // SentryIssue extends Partial<SdkIssueDetail> so `project` is optional.
-      project = issue.project?.slug ?? "unknown";
-      setContext([org], [project]);
     } else {
       // Normal flow: parse and resolve org/project/trace-id
       const parsed = parseTraceTarget(correctedArgs, USAGE_HINT);
@@ -258,8 +253,6 @@ export const viewCommand = buildCommand({
       const resolved = await resolveTraceOrgProject(parsed, cwd, USAGE_HINT);
       traceId = resolved.traceId;
       org = resolved.org;
-      project = resolved.project;
-      setContext([org], [project]);
     }
 
     if (flags.web) {

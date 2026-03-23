@@ -34,9 +34,6 @@ async function runHelp(args: string[]): Promise<string> {
       },
     },
     stdin: process.stdin,
-    setContext() {
-      // no-op for tests
-    },
   };
 
   await run(app, ["help", ...args], mockContext);

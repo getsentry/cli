@@ -148,9 +148,6 @@ describe("listCommand.func (trace mode)", () => {
           }),
         },
         cwd: "/tmp/test-project",
-        setContext: mock((_orgs: string[], _projects: string[]) => {
-          /* no-op */
-        }),
       },
       getStdout: () => stdoutChunks.join(""),
     };
@@ -413,9 +410,6 @@ describe("listCommand.func (project mode)", () => {
           }),
         },
         cwd: "/tmp/test-project",
-        setContext: mock((_orgs: string[], _projects: string[]) => {
-          /* no-op */
-        }),
       },
       getStdout: () => stdoutChunks.join(""),
     };

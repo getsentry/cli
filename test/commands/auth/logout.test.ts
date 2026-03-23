@@ -44,9 +44,6 @@ function createContext() {
         }),
       },
       cwd: "/tmp",
-      setContext: mock((_k: string, _v: unknown) => {
-        /* no-op */
-      }),
     },
     getOutput: () => stdoutChunks.join(""),
   };

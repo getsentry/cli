@@ -9,6 +9,7 @@ import { listDashboards } from "../../lib/api-client.js";
 import type { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
+import { setOrgProjectContext } from "../../lib/telemetry.js";
 import { isAllDigits } from "../../lib/utils.js";
 import {
   type DashboardWidget,
@@ -52,9 +53,11 @@ export async function resolveOrgFromTarget(
   switch (parsed.type) {
     case "explicit":
     case "org-all":
+      setOrgProjectContext([parsed.org], []);
       return parsed.org;
     case "project-search":
     case "auto-detect": {
+      // resolveOrg already sets telemetry context
       const resolved = await resolveOrg({ cwd });
       if (!resolved) {
         throw new ContextError("Organization", usageHint);

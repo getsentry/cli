@@ -232,7 +232,7 @@ export const listCommand = buildListCommand("trace", {
     },
   },
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
-    const { cwd, setContext } = this;
+    const { cwd } = this;
 
     // Resolve org/project from positional arg, config, or DSN auto-detection
     const { org, project } = await resolveOrgProjectFromArg(
@@ -240,8 +240,6 @@ export const listCommand = buildListCommand("trace", {
       cwd,
       COMMAND_NAME
     );
-    setContext([org], [project]);
-
     // Build context key and resolve cursor for pagination
     const contextKey = buildPaginationContextKey("trace", `${org}/${project}`, {
       sort: flags.sort,

@@ -819,7 +819,6 @@ async function fetchOrgAllIssues(
 type OrgAllIssuesOptions = {
   org: string;
   flags: ListFlags;
-  setContext: (orgs: string[], projects: string[]) => void;
 };
 
 /**
@@ -832,7 +831,7 @@ type OrgAllIssuesOptions = {
 async function handleOrgAllIssues(
   options: OrgAllIssuesOptions
 ): Promise<IssueListResult> {
-  const { org, flags, setContext } = options;
+  const { org, flags } = options;
   // Encode sort + query in context key so cursors from different searches don't collide.
   const contextKey = buildPaginationContextKey("org", org, {
     sort: flags.sort,
@@ -840,8 +839,6 @@ async function handleOrgAllIssues(
     q: flags.query,
   });
   const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
-
-  setContext([org], []);
 
   let issuesResult: IssuesPage;
   try {
@@ -915,7 +912,6 @@ type ResolvedTargetsOptions = {
   parsed: ReturnType<typeof parseOrgProjectArg>;
   flags: ListFlags;
   cwd: string;
-  setContext: (orgs: string[], projects: string[]) => void;
 };
 
 /** Default --period value (used to detect user-implicit vs explicit). */
@@ -1049,14 +1045,10 @@ function build403Detail(originalDetail: string | undefined): string {
 async function handleResolvedTargets(
   options: ResolvedTargetsOptions
 ): Promise<IssueListResult> {
-  const { parsed, flags, cwd, setContext } = options;
+  const { parsed, flags, cwd } = options;
 
   const { targets, footer, skippedSelfHosted, detectedDsns } =
     await resolveTargetsFromParsedArg(parsed, cwd);
-
-  const orgs = [...new Set(targets.map((t) => t.org))];
-  const projects = [...new Set(targets.map((t) => t.project))];
-  setContext(orgs, projects);
 
   if (targets.length === 0) {
     if (skippedSelfHosted) {
@@ -1479,7 +1471,7 @@ export const listCommand = buildListCommand("issue", {
     },
   },
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
-    const { cwd, setContext } = this;
+    const { cwd } = this;
 
     const parsed = parseOrgProjectArg(target);
 
@@ -1502,7 +1494,6 @@ export const listCommand = buildListCommand("issue", {
       handleResolvedTargets({
         ...ctx,
         flags,
-        setContext,
       });
 
     const result = (await dispatchOrgScopedList({
@@ -1521,7 +1512,6 @@ export const listCommand = buildListCommand("issue", {
           handleOrgAllIssues({
             org: ctx.parsed.org,
             flags,
-            setContext,
           }),
       },
     })) as IssueListResult;

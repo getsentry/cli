@@ -59,9 +59,6 @@ function createMockContext() {
       stdout: { write: stdoutWrite },
       stderr: { write: mock(() => true) },
       cwd: "/tmp",
-      setContext: mock(() => {
-        // no-op for test
-      }),
     },
     stdoutWrite,
   };

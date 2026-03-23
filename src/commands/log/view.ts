@@ -349,7 +349,7 @@ export const viewCommand = buildCommand({
   },
   async *func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
-    const { cwd, setContext } = this;
+    const { cwd } = this;
     const cmdLog = logger.withTag("log.view");
 
     // Parse positional args
@@ -364,9 +364,6 @@ export const viewCommand = buildCommand({
     if (!target) {
       throw new ContextError("Organization and project", USAGE_HINT);
     }
-
-    // Set telemetry context
-    setContext([target.org], [target.project]);
 
     if (flags.web) {
       await handleWebOpen(target.org, logIds);

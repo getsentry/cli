@@ -146,7 +146,7 @@ export const viewCommand = buildCommand({
   },
   async *func(this: SentryContext, flags: ViewFlags, issueArg: string) {
     applyFreshFlag(flags);
-    const { cwd, setContext } = this;
+    const { cwd } = this;
 
     // Resolve issue using shared resolution logic
     const { org: orgSlug, issue } = await resolveIssue({
@@ -154,12 +154,6 @@ export const viewCommand = buildCommand({
       cwd,
       command: "view",
     });
-
-    // Set telemetry context
-    setContext(
-      orgSlug ? [orgSlug] : [],
-      issue.project?.slug ? [issue.project.slug] : []
-    );
 
     if (flags.web) {
       await openInBrowser(issue.permalink, "issue");
