@@ -1,6 +1,41 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.20.0
+
+### New Features ✨
+
+- (install) Support SENTRY_VERSION env var for version pinning by @BYK in [#537](https://github.com/getsentry/cli/pull/537)
+
+### Bug Fixes 🐛
+
+#### Event
+
+- Detect org/ISSUE-SHORT-ID in event view single-arg path (CLI-9K) by @BYK in [#529](https://github.com/getsentry/cli/pull/529)
+- Auto-redirect issue short IDs in event view (CLI-JR) by @BYK in [#524](https://github.com/getsentry/cli/pull/524)
+
+#### Other
+
+- (api) Strip api/0/ prefix and exclude NodeSystemError integration (CLI-K1) by @BYK in [#523](https://github.com/getsentry/cli/pull/523)
+- (dashboard) Add missing datasets to agent guidance by @betegon in [#522](https://github.com/getsentry/cli/pull/522)
+- (docs) Overscroll popup — curl command + click-to-copy by @betegon in [#531](https://github.com/getsentry/cli/pull/531)
+- (init) Resolve numeric org ID from DSN and prompt when Sentry already configured by @betegon in [#532](https://github.com/getsentry/cli/pull/532)
+- (polling) Move spinner from stderr to stdout to prevent consola collision by @BYK in [#533](https://github.com/getsentry/cli/pull/533)
+- (telemetry) Set sentry.org tag in issue explain and plan commands by @BYK in [#534](https://github.com/getsentry/cli/pull/534)
+- Handle invalid URLs gracefully in response cache (CLI-GC) by @BYK in [#528](https://github.com/getsentry/cli/pull/528)
+- Avoid double-prefixing in buildCommandHint for slashed args (CLI-8C) by @BYK in [#527](https://github.com/getsentry/cli/pull/527)
+- Handle full short IDs and numeric IDs in multi-slash issue args (CLI-KC, CLI-B6) by @BYK in [#526](https://github.com/getsentry/cli/pull/526)
+- Auto-recovery for wrong entity types across commands (CLI-G6, CLI-K6, CLI-JR) by @BYK in [#525](https://github.com/getsentry/cli/pull/525)
+
+### Documentation 📚
+
+- (init) Add documentation and experimental notice for sentry init by @betegon in [#530](https://github.com/getsentry/cli/pull/530)
+
+### Internal Changes 🔧
+
+- (telemetry) Centralize sentry.org/project tags in resolution functions by @BYK in [#538](https://github.com/getsentry/cli/pull/538)
+- Regenerate skill files by @github-actions[bot] in [22b5281d](https://github.com/getsentry/cli/commit/22b5281de8f7833b2a2a5d0f3b771aff0daab2ec)
+
 ## 0.19.0
 
 ### New Features ✨
