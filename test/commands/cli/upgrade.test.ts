@@ -66,17 +66,26 @@ function createMockContext(
     ...overrides.env,
   };
 
-  // Force plain output so formatUpgradeResult renders raw markdown
-  // instead of ANSI-styled output in TTY mode.
+  // Force rich output so the spinner (which uses isPlainOutput() to decide
+  // whether to render) is not suppressed in non-TTY test environments.
+  // The formatUpgradeResult output will contain ANSI codes, but test
+  // assertions use toContain() which matches through them.
   const origPlain = process.env.SENTRY_PLAIN_OUTPUT;
-  process.env.SENTRY_PLAIN_OUTPUT = "1";
+  process.env.SENTRY_PLAIN_OUTPUT = "0";
 
   // Capture consola output (routed to process.stderr)
-  const origWrite = process.stderr.write.bind(process.stderr);
+  const origStderrWrite = process.stderr.write.bind(process.stderr);
   process.stderr.write = ((chunk: string | Uint8Array) => {
     stderrChunks.push(String(chunk));
     return true;
   }) as typeof process.stderr.write;
+
+  // Capture spinner output (routed to process.stdout)
+  const origStdoutWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    stdoutChunks.push(String(chunk));
+    return true;
+  }) as typeof process.stdout.write;
 
   const stdoutWriter = {
     write: (s: string) => {
@@ -130,7 +139,8 @@ function createMockContext(
     getOutput: () => stderrChunks.join("") + stdoutChunks.join(""),
     errors,
     restore: () => {
-      process.stderr.write = origWrite;
+      process.stderr.write = origStderrWrite;
+      process.stdout.write = origStdoutWrite;
       if (origPlain === undefined) {
         delete process.env.SENTRY_PLAIN_OUTPUT;
       } else {
@@ -731,7 +741,7 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
     await run(app, ["cli", "upgrade", "--method", "curl"], context);
 
     const combined = getOutput();
-    // Spinner progress messages written to stderr
+    // Spinner progress messages written to stdout
     expect(combined).toContain("Checking for updates");
     expect(combined).toContain("Downloading 99.99.99");
     expect(combined).toContain("Upgraded to");
@@ -857,7 +867,7 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
     const combined = getOutput();
     // With --force, should NOT show "Already up to date"
     expect(combined).not.toContain("Already up to date");
-    // Should proceed to download and succeed (spinner messages on stderr)
+    // Should proceed to download and succeed (spinner messages on stdout)
     expect(combined).toContain(`Downloading ${CLI_VERSION}`);
     expect(combined).toContain("Upgraded to");
     expect(combined).toContain(CLI_VERSION);

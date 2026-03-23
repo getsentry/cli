@@ -1058,16 +1058,20 @@ describe("pollAutofixState", () => {
     expect(fetchCount).toBe(2);
   });
 
-  test("writes progress to stderr when not in JSON mode", async () => {
-    let stderrOutput = "";
+  test("writes progress to stdout when not in JSON mode", async () => {
+    let stdoutOutput = "";
     let fetchCount = 0;
 
-    // Spy on process.stderr.write to capture spinner output
-    const origWrite = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((chunk: string | Uint8Array) => {
-      stderrOutput += String(chunk);
+    // Force rich output so the spinner isn't suppressed in non-TTY test env
+    const origPlain = process.env.SENTRY_PLAIN_OUTPUT;
+    process.env.SENTRY_PLAIN_OUTPUT = "0";
+
+    // Spy on process.stdout.write to capture spinner output
+    const origWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      stdoutOutput += String(chunk);
       return true;
-    }) as typeof process.stderr.write;
+    }) as typeof process.stdout.write;
 
     try {
       // Return PROCESSING first to allow animation interval to fire,
@@ -1127,9 +1131,14 @@ describe("pollAutofixState", () => {
         pollIntervalMs: 100, // Allow animation interval (80ms) to fire
       });
 
-      expect(stderrOutput).toContain("Analyzing");
+      expect(stdoutOutput).toContain("Analyzing");
     } finally {
-      process.stderr.write = origWrite;
+      process.stdout.write = origWrite;
+      if (origPlain === undefined) {
+        delete process.env.SENTRY_PLAIN_OUTPUT;
+      } else {
+        process.env.SENTRY_PLAIN_OUTPUT = origPlain;
+      }
     }
   });
 
@@ -1505,16 +1514,20 @@ describe("ensureRootCauseAnalysis", () => {
     expect(triggerCalled).toBe(true); // Should trigger even though state exists
   });
 
-  test("writes progress messages to stderr when not in JSON mode", async () => {
-    let stderrOutput = "";
+  test("writes progress messages to stdout when not in JSON mode", async () => {
+    let stdoutOutput = "";
     let triggerCalled = false;
 
-    // Spy on process.stderr.write to capture logger output
-    const origWrite = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((chunk: string | Uint8Array) => {
-      stderrOutput += String(chunk);
+    // Force rich output so the spinner isn't suppressed in non-TTY test env
+    const origPlain = process.env.SENTRY_PLAIN_OUTPUT;
+    process.env.SENTRY_PLAIN_OUTPUT = "0";
+
+    // Spy on process.stdout.write to capture spinner output
+    const origWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      stdoutOutput += String(chunk);
       return true;
-    }) as typeof process.stderr.write;
+    }) as typeof process.stdout.write;
 
     try {
       // @ts-expect-error - partial mock
@@ -1566,11 +1579,15 @@ describe("ensureRootCauseAnalysis", () => {
         json: false, // Not JSON mode, should output progress
       });
 
-      // The logger.info() messages go through consola and the poll spinner
-      // writes directly to stderr — check for the spinner's initial message
-      expect(stderrOutput).toContain("Waiting for analysis");
+      // The poll spinner writes to stdout — check for the spinner's initial message
+      expect(stdoutOutput).toContain("Waiting for analysis");
     } finally {
-      process.stderr.write = origWrite;
+      process.stdout.write = origWrite;
+      if (origPlain === undefined) {
+        delete process.env.SENTRY_PLAIN_OUTPUT;
+      } else {
+        process.env.SENTRY_PLAIN_OUTPUT = origPlain;
+      }
     }
   });
 });
