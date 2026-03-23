@@ -1,0 +1,57 @@
+# Fix: Spinner collides with consola log messages during upgrade
+
+## Problem
+
+When running `sentry cli upgrade`, the spinner and a `log.info()` message collide on the same line:
+
+```
+⠹ Downloading 0.20.0-dev.1774273283...ℹ Applied delta patch (74.9 KB downloaded)
+```
+
+The spinner writes to stderr via `\r\x1b[K` + braille frames. Consola also writes to stderr (both `stdout` and `stderr` are configured to `process.stderr` in `logger.ts`). When `log.info()` fires inside a `withProgress` callback, it appends directly after the spinner text on the same stderr line.
+
+## Approach: Move spinner to stdout
+
+Move the spinner animation from `process.stderr` to `process.stdout`. Since consola is configured to write exclusively to stderr, the two streams won't collide. The spinner is already suppressed in `--json` mode, so JSON output is unaffected.
+
+Additionally, suppress the spinner when stdout is not interactive (piped/redirected) using `isPlainOutput()`, matching the existing plain-output detection used elsewhere in the codebase.
+
+### Why this is safe
+
+1. **JSON mode**: Spinner is already suppressed when `options.json` is true — no contamination of `--json` output
+2. **Piped stdout**: Adding an `isPlainOutput()` guard suppresses the spinner when stdout is piped, preventing ANSI escape codes in pipe consumers
+3. **No setTimeout race**: Between `spinner.stop()` and the next synchronous `stdout.write()` (command output), no pending timer callback can fire — JS is single-threaded and timers only fire between async boundaries
+4. **Temporal separation**: The spinner is always stopped and its line cleared before the generator yields `CommandOutput`, which is when `buildCommand` writes to stdout
+5. **`poll()` caller**: Also benefits from the fix — its `\n` after the spinner should go to stdout too
+
+## Files to modify
+
+### `src/lib/polling.ts`
+This is the only file that needs changes.
+
+1. **Import `isPlainOutput`** from `./formatters/plain-detect.js`
+
+2. **`startSpinner()`** (line 120–147):
+   - Change `process.stderr.write(...)` → `process.stdout.write(...)` (line 133)
+   - Update JSDoc to say stdout instead of stderr
+
+3. **`withProgress()`** (line 192–211):
+   - Add `isPlainOutput()` suppression alongside the existing `options.json` check — when either is true, skip the spinner
+   - Change cleanup `process.stderr.write("\r\x1b[K")` → `process.stdout.write("\r\x1b[K")` (line 209)
+   - Update JSDoc to say stdout instead of stderr
+
+4. **`poll()`** (line 71–112):
+   - Change cleanup `process.stderr.write("\n")` → `process.stdout.write("\n")` (line 109)
+
+### No other files need changes
+
+All ~21 `withProgress` callers and the `poll` caller pass through the same `startSpinner` → cleanup path. The stream change is centralized in `polling.ts`.
+
+## Verification
+
+1. Run `sentry cli upgrade` on nightly channel — spinner should clear cleanly, `log.info("Applied delta patch...")` should appear on its own line (on stderr, separate from the spinner on stdout)
+2. Run `sentry issue list` — spinner should still appear and clear properly
+3. Run `sentry issue list --json` — no spinner output
+4. Run `sentry issue list | cat` — no spinner output (piped stdout → `isPlainOutput()` returns true)
+5. Run `sentry issue explain ISSUE-ID` — poll() spinner should still work
+6. Run existing tests: `bun test test/lib/polling.test.ts` (if exists) and `bun test test/commands/cli/upgrade.test.ts`
