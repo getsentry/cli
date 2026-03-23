@@ -334,9 +334,9 @@ Manage product trials
 
 ### Init
 
-Initialize Sentry in your project
+Initialize Sentry in your project (experimental)
 
-- `sentry init <target> <directory>` — Initialize Sentry in your project
+- `sentry init <target> <directory>` — Initialize Sentry in your project (experimental)
 
 → Full flags and examples: `references/setup.md`
 
