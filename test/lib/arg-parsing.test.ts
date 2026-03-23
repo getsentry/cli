@@ -464,30 +464,74 @@ describe("parseIssueArg", () => {
 
   // Multi-slash issue args (org/project/suffix)
   describe("multi-slash issue args", () => {
-    test("org/project/suffix returns explicit with project and suffix", () => {
+    test("org/project/numeric returns explicit-org-numeric", () => {
       expect(parseIssueArg("org/project/101149101")).toEqual({
-        type: "explicit",
+        type: "explicit-org-numeric",
         org: "org",
-        project: "project",
-        suffix: "101149101",
+        numericId: "101149101",
       });
     });
 
-    test("org/project/numeric returns explicit with numeric suffix", () => {
+    test("org/project/short-numeric returns explicit-org-numeric", () => {
       expect(parseIssueArg("org/project/123456")).toEqual({
-        type: "explicit",
+        type: "explicit-org-numeric",
         org: "org",
-        project: "project",
-        suffix: "123456",
+        numericId: "123456",
       });
     });
 
-    test("org/project/PROJ-G returns explicit with combined suffix", () => {
+    test("org/project/PROJ-G where PROJ ≠ project returns explicit with combined suffix", () => {
       expect(parseIssueArg("org/project/PROJ-G")).toEqual({
         type: "explicit",
         org: "org",
         project: "project",
         suffix: "PROJ-G",
+      });
+    });
+
+    test("org/project/PROJECT-G where prefix matches project strips prefix (CLI-KC)", () => {
+      expect(parseIssueArg("sentry/cli/CLI-A1")).toEqual({
+        type: "explicit",
+        org: "sentry",
+        project: "cli",
+        suffix: "A1",
+      });
+    });
+
+    test("org/project/PROJECT-suffix is case-insensitive on prefix match", () => {
+      expect(parseIssueArg("sentry/cli/cli-b6")).toEqual({
+        type: "explicit",
+        org: "sentry",
+        project: "cli",
+        suffix: "B6",
+      });
+    });
+
+    test("compound project slug with matching full short ID (CLI-KC)", () => {
+      expect(
+        parseIssueArg("org/spotlight-electron/SPOTLIGHT-ELECTRON-4Y")
+      ).toEqual({
+        type: "explicit",
+        org: "org",
+        project: "spotlight-electron",
+        suffix: "4Y",
+      });
+    });
+
+    test("org/project/numeric-id returns explicit-org-numeric (CLI-B6)", () => {
+      expect(parseIssueArg("fever/cashless/6918259357")).toEqual({
+        type: "explicit-org-numeric",
+        org: "fever",
+        numericId: "6918259357",
+      });
+    });
+
+    test("org/project/G returns explicit with suffix", () => {
+      expect(parseIssueArg("org/project/G")).toEqual({
+        type: "explicit",
+        org: "org",
+        project: "project",
+        suffix: "G",
       });
     });
 

@@ -607,6 +607,11 @@ export type ParsedIssueArg =
  *
  * Splits `rest` on its first `/` to extract the project slug and a remainder
  * that is treated as the issue reference (suffix, numeric ID, or short ID).
+ *
+ * Handles three remainder formats:
+ * - Pure digits → numeric issue ID (project context is redundant)
+ * - Full short ID whose prefix matches the project → extract just the suffix
+ * - Anything else → treat entire remainder as the suffix
  */
 function parseMultiSlashIssueArg(
   arg: string,
@@ -626,22 +631,44 @@ function parseMultiSlashIssueArg(
   // Lowercase project slug — Sentry slugs are always lowercase.
   const normalizedProject = project.toLowerCase();
 
-  // Remainder with dash: "org/project/PROJ-G" — split remainder on last dash
+  // Pure numeric remainder: "org/project/123456789" → org + numeric ID.
+  // Project context is redundant for numeric IDs — Sentry resolves them globally.
+  if (isAllDigits(remainder)) {
+    return { type: "explicit-org-numeric", org, numericId: remainder };
+  }
+
+  // Remainder with dash: could be a full short ID like "CLI-A1" or "SPOTLIGHT-ELECTRON-4Y"
   if (remainder.includes("-")) {
     const lastDash = remainder.lastIndexOf("-");
-    const subProject = remainder.slice(0, lastDash);
+    const prefix = remainder.slice(0, lastDash);
     const suffix = remainder.slice(lastDash + 1).toUpperCase();
-    if (subProject && suffix) {
+
+    if (prefix && suffix) {
+      // Check if the prefix matches the project slug (case-insensitive).
+      // If so, the remainder is already a full short ID — use only the suffix.
+      // e.g., "sentry/cli/CLI-A1" → prefix "CLI" matches project "cli" → suffix "A1"
+      // e.g., "org/spotlight-electron/SPOTLIGHT-ELECTRON-4Y" → prefix matches → suffix "4Y"
+      if (prefix.toLowerCase() === normalizedProject) {
+        return {
+          type: "explicit",
+          org,
+          project: normalizedProject,
+          suffix,
+        };
+      }
+
+      // Prefix doesn't match project — treat entire remainder as the suffix.
+      // e.g., "org/project/SUBPROJ-G" where SUBPROJ ≠ project
       return {
         type: "explicit",
         org,
         project: normalizedProject,
-        suffix: `${subProject}-${suffix}`.toUpperCase(),
+        suffix: `${prefix}-${suffix}`.toUpperCase(),
       };
     }
   }
 
-  // "org/project/101149101" or "org/project/G" — treat remainder as suffix
+  // No dash: "org/project/G" — treat remainder as suffix
   return {
     type: "explicit",
     org,
