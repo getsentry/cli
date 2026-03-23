@@ -1,0 +1,68 @@
+# Make Codecoverage Check Not Required for Craft Publishing
+
+## Problem
+
+Codecov status checks (`codecov/project` and `codecov/patch`) can block Craft publishing on `main` and `release/**` branches.
+
+## Constraints
+
+- `getsentry/codecov-action` has no `informational` **input** — it's only configurable via the YAML config file
+- The action reads config from `codecov.yml` (among other paths)
+- No per-branch config support in the action itself
+
+## Requirements
+
+| Context | `project` | `patch` |
+|---------|-----------|---------|
+| `main` / `release/**` | informational | informational |
+| PRs | informational | **blocking** |
+
+## Implementation
+
+### 1. Update `codecov.yml`
+
+Add coverage status config. This is the default (PR) behavior: `project` informational, `patch` blocking.
+
+```yaml
+comment: true
+config:
+  files: changed
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: false
+```
+
+### 2. Update `.github/workflows/ci.yml` — `test-unit` job
+
+Add a one-line `sed` step before the codecov action that flips `patch.informational` to `true` on push events:
+
+```yaml
+      - name: Make coverage checks informational on release branches
+        if: github.event_name == 'push'
+        run: sed -i 's/informational: false/informational: true/' codecov.yml
+```
+
+This precision-edits the single `false` → `true` value. Since `project` is already `informational: true`, the only `false` in the file is `patch`'s.
+
+## Files to Modify
+
+1. **`codecov.yml`** — Add `coverage.status` section
+2. **`.github/workflows/ci.yml`** — Add one `sed` step before the codecov action in `test-unit`
+
+## Behavior Matrix
+
+| Context | `codecov/project` | `codecov/patch` |
+|---------|-------------------|-----------------|
+| PR | informational | **blocking** |
+| `main` / `release/**` push | informational | informational |
+
+## Verification
+
+1. On a PR: `codecov/patch` should be a blocking check, `codecov/project` informational
+2. On push to `main`: both checks should be informational
+3. Craft publish should no longer be blocked by coverage checks
