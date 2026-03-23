@@ -139,8 +139,9 @@ export const initCommand = buildCommand<
   SentryContext
 >({
   docs: {
-    brief: "Initialize Sentry in your project",
+    brief: "Initialize Sentry in your project (experimental)",
     fullDescription:
+      "EXPERIMENTAL: This command may modify your source files.\n\n" +
       "Runs the Sentry setup wizard to detect your project's framework, " +
       "install the SDK, and configure Sentry.\n\n" +
       "Supports org/project syntax and a directory positional. Path-like\n" +
