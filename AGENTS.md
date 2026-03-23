@@ -433,6 +433,33 @@ throw new ResolutionError("Project 'cli'", "not found", "sentry issue list <org>
 throw new ValidationError("Invalid trace ID format", "traceId");
 ```
 
+### Auto-Recovery for Wrong Entity Types
+
+When a user provides the wrong type of identifier (e.g., an issue short ID
+where a trace ID is expected), commands should **auto-recover** when the
+user's intent is unambiguous:
+
+1. **Detect** the actual entity type using helpers like `looksLikeIssueShortId()`,
+   `SPAN_ID_RE`, `HEX_ID_RE`, or non-hex character checks.
+2. **Resolve** the input to the correct type (e.g., issue → latest event → trace ID).
+3. **Warn** via `log.warn()` explaining what happened.
+4. **Show** the result with a return `hint` nudging toward the correct command.
+
+When recovery is **ambiguous or impossible**, keep the existing error but add
+entity-aware suggestions (e.g., "This looks like a span ID").
+
+**Detection helpers:**
+- `looksLikeIssueShortId(value)` — uppercase dash-separated (e.g., `CLI-G5`)
+- `SPAN_ID_RE.test(value)` — 16-char hex (span ID)
+- `HEX_ID_RE.test(value)` — 32-char hex (trace/event/log ID)
+- `/[^0-9a-f]/.test(normalized)` — non-hex characters → likely a slug/name
+
+**Reference implementations:**
+- `event/view.ts` — issue short ID → latest event redirect
+- `span/view.ts` — `traceId/spanId` slash format → auto-split
+- `trace/view.ts` — issue short ID → issue's trace redirect
+- `hex-id.ts` — entity-aware error hints in `validateHexId`/`validateSpanId`
+
 ### Async Config Functions
 
 All config operations are async. Always await:

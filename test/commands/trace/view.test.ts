@@ -38,15 +38,36 @@ describe("preProcessArgs", () => {
     expect(result.warning).toContain("reversed");
   });
 
-  test("detects issue short ID and suggests issue view", () => {
+  test("detects issue short ID and suggests issue view (two args)", () => {
     const result = preProcessArgs(["CAM-82X", VALID_TRACE_ID]);
     expect(result.correctedArgs).toEqual(["CAM-82X", VALID_TRACE_ID]);
     expect(result.suggestion).toContain("sentry issue view CAM-82X");
+    expect(result.issueShortId).toBeUndefined();
+  });
+
+  test("detects single-arg issue short ID for auto-recovery", () => {
+    const result = preProcessArgs(["CLI-G5"]);
+    expect(result.correctedArgs).toEqual(["CLI-G5"]);
+    expect(result.issueShortId).toBe("CLI-G5");
+    expect(result.suggestion).toBeUndefined();
+    expect(result.warning).toBeUndefined();
+  });
+
+  test("detects multi-segment issue short ID for auto-recovery", () => {
+    const result = preProcessArgs(["SPOTLIGHT-ELECTRON-4D"]);
+    expect(result.correctedArgs).toEqual(["SPOTLIGHT-ELECTRON-4D"]);
+    expect(result.issueShortId).toBe("SPOTLIGHT-ELECTRON-4D");
+  });
+
+  test("does not set issueShortId for single-arg trace ID", () => {
+    const result = preProcessArgs([VALID_TRACE_ID]);
+    expect(result.issueShortId).toBeUndefined();
   });
 
   test("returns empty args unchanged", () => {
     const result = preProcessArgs([]);
     expect(result.correctedArgs).toEqual([]);
+    expect(result.issueShortId).toBeUndefined();
   });
 });
 

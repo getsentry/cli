@@ -85,8 +85,11 @@ describe("formatTraceView", () => {
 
 describe("viewCommand.func", () => {
   let getDetailedTraceSpy: ReturnType<typeof spyOn>;
+  let getIssueByShortIdSpy: ReturnType<typeof spyOn>;
+  let getLatestEventSpy: ReturnType<typeof spyOn>;
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
   let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
+  let resolveOrgSpy: ReturnType<typeof spyOn>;
   let openInBrowserSpy: ReturnType<typeof spyOn>;
 
   const sampleSpans: TraceSpan[] = [
@@ -131,8 +134,11 @@ describe("viewCommand.func", () => {
 
   beforeEach(async () => {
     getDetailedTraceSpy = spyOn(apiClient, "getDetailedTrace");
+    getIssueByShortIdSpy = spyOn(apiClient, "getIssueByShortId");
+    getLatestEventSpy = spyOn(apiClient, "getLatestEvent");
     findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
     resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
+    resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
     openInBrowserSpy = spyOn(browser, "openInBrowser");
     await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
     await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
@@ -140,8 +146,11 @@ describe("viewCommand.func", () => {
 
   afterEach(() => {
     getDetailedTraceSpy.mockRestore();
+    getIssueByShortIdSpy.mockRestore();
+    getLatestEventSpy.mockRestore();
     findProjectsBySlugSpy.mockRestore();
     resolveOrgAndProjectSpy.mockRestore();
+    resolveOrgSpy.mockRestore();
     openInBrowserSpy.mockRestore();
   });
 
@@ -379,5 +388,70 @@ describe("viewCommand.func", () => {
 
     // The suggestion path fires (looksLikeIssueShortId("CAM-82X") → true)
     expect(getDetailedTraceSpy).toHaveBeenCalled();
+  });
+
+  test("auto-recovers single-arg issue short ID to trace view", async () => {
+    const traceIdFromEvent = "eeee1111ffff2222aaaa3333bbbb4444";
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
+    getIssueByShortIdSpy.mockResolvedValue({
+      id: "12345",
+      shortId: "CLI-G5",
+      title: "Test issue",
+      project: { slug: "test-project" },
+    });
+    getLatestEventSpy.mockResolvedValue({
+      eventID: "event-abc123",
+      contexts: { trace: { trace_id: traceIdFromEvent } },
+    });
+    getDetailedTraceSpy.mockResolvedValue(sampleSpans);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(context, { json: true, web: false, spans: 100 }, "CLI-G5");
+
+    expect(resolveOrgSpy).toHaveBeenCalled();
+    expect(getIssueByShortIdSpy).toHaveBeenCalledWith("test-org", "CLI-G5");
+    expect(getLatestEventSpy).toHaveBeenCalledWith("test-org", "12345");
+    expect(getDetailedTraceSpy).toHaveBeenCalledWith(
+      "test-org",
+      traceIdFromEvent,
+      expect.any(Number)
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed).toHaveProperty("traceId");
+  });
+
+  test("auto-recovery throws ValidationError when event has no trace context", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
+    getIssueByShortIdSpy.mockResolvedValue({
+      id: "12345",
+      shortId: "CLI-G5",
+      title: "Test issue",
+      project: { slug: "test-project" },
+    });
+    getLatestEventSpy.mockResolvedValue({
+      eventID: "event-abc123",
+      contexts: {},
+    });
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+
+    await expect(
+      func.call(context, { json: false, web: false, spans: 100 }, "CLI-G5")
+    ).rejects.toThrow(ValidationError);
+  });
+
+  test("auto-recovery throws ContextError when no org resolved", async () => {
+    resolveOrgSpy.mockResolvedValue(null);
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+
+    await expect(
+      func.call(context, { json: false, web: false, spans: 100 }, "CLI-G5")
+    ).rejects.toThrow(ContextError);
   });
 });

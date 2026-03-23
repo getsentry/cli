@@ -115,6 +115,67 @@ describe("parsePositionalArgs", () => {
     });
   });
 
+  describe("auto-split traceId/spanId single-arg format", () => {
+    test("auto-splits traceId/spanId single-arg format", () => {
+      const result = parsePositionalArgs([
+        "aaaa1111bbbb2222cccc3333dddd4444/a1b2c3d4e5f67890",
+      ]);
+      expect(result.traceTarget.traceId).toBe(
+        "aaaa1111bbbb2222cccc3333dddd4444"
+      );
+      expect(result.traceTarget.type).toBe("auto-detect");
+      expect(result.spanIds).toEqual(["a1b2c3d4e5f67890"]);
+    });
+
+    test("auto-splits with uppercase hex IDs", () => {
+      const result = parsePositionalArgs([
+        "AAAA1111BBBB2222CCCC3333DDDD4444/A1B2C3D4E5F67890",
+      ]);
+      expect(result.traceTarget.traceId).toBe(
+        "aaaa1111bbbb2222cccc3333dddd4444"
+      );
+      expect(result.spanIds).toEqual(["a1b2c3d4e5f67890"]);
+    });
+
+    test("does not auto-split org/traceId format (two args)", () => {
+      // org/traceId has a non-hex org slug, so it shouldn't trigger the auto-split
+      const result = parsePositionalArgs([
+        "my-org/aaaa1111bbbb2222cccc3333dddd4444",
+        "a1b2c3d4e5f67890",
+      ]);
+      expect(result.traceTarget.traceId).toBe(
+        "aaaa1111bbbb2222cccc3333dddd4444"
+      );
+      expect(result.spanIds).toEqual(["a1b2c3d4e5f67890"]);
+    });
+
+    test("does not auto-split when left is not a valid trace ID", () => {
+      // "not-hex" on left side → falls through to normal parsing which throws
+      expect(() =>
+        parsePositionalArgs(["not-a-hex-id/a1b2c3d4e5f67890"])
+      ).toThrow();
+    });
+
+    test("does not auto-split when right is not a valid span ID", () => {
+      // Right side is 32-char (trace ID, not span ID) → falls through to normal parsing
+      expect(() =>
+        parsePositionalArgs([
+          "aaaa1111bbbb2222cccc3333dddd4444/bbbb2222cccc3333dddd4444eeee5555",
+        ])
+      ).toThrow();
+    });
+
+    test("does not auto-split with multiple slashes", () => {
+      // org/project/traceId format — should parse normally as explicit target
+      const result = parsePositionalArgs([
+        `my-org/my-project/${VALID_TRACE_ID}`,
+        VALID_SPAN_ID,
+      ]);
+      expect(result.traceTarget.type).toBe("explicit");
+      expect(result.traceTarget.traceId).toBe(VALID_TRACE_ID);
+    });
+  });
+
   describe("error cases", () => {
     test("throws ContextError for empty args", () => {
       expect(() => parsePositionalArgs([])).toThrow(ContextError);

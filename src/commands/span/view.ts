@@ -18,7 +18,12 @@ import {
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { computeSpanDurationMs } from "../../lib/formatters/time-utils.js";
-import { validateSpanId } from "../../lib/hex-id.js";
+import {
+  HEX_ID_RE,
+  normalizeHexId,
+  SPAN_ID_RE,
+  validateSpanId,
+} from "../../lib/hex-id.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -67,6 +72,34 @@ export function parsePositionalArgs(args: string[]): {
   const first = args[0];
   if (first === undefined) {
     throw new ContextError("Trace ID and span ID", USAGE_HINT, []);
+  }
+
+  // Auto-detect traceId/spanId single-arg format (e.g., "abc.../a1b2c3d4e5f67890").
+  // When a single arg contains exactly one slash separating a 32-char hex trace ID
+  // from a 16-char hex span ID, the user clearly intended to pass both IDs.
+  // Without this check, parseSlashSeparatedTraceTarget treats the span ID as a
+  // trace ID and fails validation (CLI-G6).
+  if (args.length === 1) {
+    const slashIdx = first.indexOf("/");
+    if (slashIdx !== -1 && first.indexOf("/", slashIdx + 1) === -1) {
+      // Exactly one slash — check if it's traceId/spanId format
+      const left = normalizeHexId(first.slice(0, slashIdx));
+      const right = first
+        .slice(slashIdx + 1)
+        .trim()
+        .toLowerCase()
+        .replace(/-/g, "");
+      if (HEX_ID_RE.test(left) && SPAN_ID_RE.test(right)) {
+        log.warn(
+          `Interpreting '${first}' as <trace-id>/<span-id>. ` +
+            `Use separate arguments: sentry span view ${left} ${right}`
+        );
+        return {
+          traceTarget: { type: "auto-detect" as const, traceId: left },
+          spanIds: [right],
+        };
+      }
+    }
   }
 
   // First arg is trace target (possibly with org/project prefix)

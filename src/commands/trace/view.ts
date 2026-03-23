@@ -5,7 +5,11 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { getDetailedTrace } from "../../lib/api-client.js";
+import {
+  getDetailedTrace,
+  getIssueByShortId,
+  getLatestEvent,
+} from "../../lib/api-client.js";
 import {
   detectSwappedViewArgs,
   looksLikeIssueShortId,
@@ -13,7 +17,7 @@ import {
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { ValidationError } from "../../lib/errors.js";
+import { ContextError, ValidationError } from "../../lib/errors.js";
 import {
   computeTraceSummary,
   formatSimpleSpanTree,
@@ -27,6 +31,7 @@ import {
   FRESH_FLAG,
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
+import { resolveOrg } from "../../lib/resolve-target.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
 import {
   parseTraceTarget,
@@ -48,9 +53,12 @@ const USAGE_HINT = "sentry trace view [<org>/<project>/]<trace-id>";
 /**
  * Detect UX issues in raw positional args before trace-target parsing.
  *
+ * - **Single-arg issue short ID**: first arg looks like `CAM-82X` with no
+ *   second arg → sets `issueShortId` for auto-recovery (resolve issue → trace).
  * - **Swapped args**: user typed `<trace-id> <org>/<project>` instead of
  *   `<org>/<project> <trace-id>`. If detected, swaps them silently and warns.
- * - **Issue short ID**: first arg looks like `CAM-82X` — suggests `sentry issue view`.
+ * - **Two-arg issue short ID**: first arg looks like `CAM-82X` with a second
+ *   arg → suggests `sentry issue view` (ambiguous intent, no auto-recovery).
  *
  * Returns corrected args and optional warnings to emit.
  *
@@ -60,14 +68,32 @@ export function preProcessArgs(args: string[]): {
   correctedArgs: string[];
   warning?: string;
   suggestion?: string;
+  /** Issue short ID detected for auto-recovery (single-arg only) */
+  issueShortId?: string;
 } {
-  if (args.length < 2) {
+  if (args.length === 0) {
     return { correctedArgs: args };
   }
 
   const first = args[0];
+  if (!first) {
+    return { correctedArgs: args };
+  }
+
+  // Single-arg issue short ID → auto-recover by resolving issue → trace
+  if (args.length === 1 && looksLikeIssueShortId(first)) {
+    return {
+      correctedArgs: args,
+      issueShortId: first,
+    };
+  }
+
+  if (args.length < 2) {
+    return { correctedArgs: args };
+  }
+
   const second = args[1];
-  if (!(first && second)) {
+  if (!second) {
     return { correctedArgs: args };
   }
 
@@ -81,7 +107,7 @@ export function preProcessArgs(args: string[]): {
     };
   }
 
-  // Detect issue short ID passed as first arg
+  // Detect issue short ID passed as first arg (two-arg case — ambiguous)
   const suggestion = looksLikeIssueShortId(first)
     ? `Did you mean: sentry issue view ${first}`
     : undefined;
@@ -182,7 +208,8 @@ export const viewCommand = buildCommand({
     const log = logger.withTag("trace.view");
 
     // Pre-process: detect swapped args and issue short IDs
-    const { correctedArgs, warning, suggestion } = preProcessArgs(args);
+    const { correctedArgs, warning, suggestion, issueShortId } =
+      preProcessArgs(args);
     if (warning) {
       log.warn(warning);
     }
@@ -190,17 +217,50 @@ export const viewCommand = buildCommand({
       log.warn(suggestion);
     }
 
-    // Parse and resolve org/project/trace-id
-    const parsed = parseTraceTarget(correctedArgs, USAGE_HINT);
-    warnIfNormalized(parsed, "trace.view");
-    const { traceId, org, project } = await resolveTraceOrgProject(
-      parsed,
-      cwd,
-      USAGE_HINT
-    );
+    let traceId: string;
+    let org: string;
+    let project: string;
 
-    // Set telemetry context
-    setContext([org], [project]);
+    if (issueShortId) {
+      // Auto-recover: user passed an issue short ID instead of a trace ID.
+      // Resolve the issue → get its latest event → extract trace ID.
+      log.warn(
+        `'${issueShortId}' is an issue short ID, not a trace ID. Looking up the issue's trace.`
+      );
+
+      const resolved = await resolveOrg({ cwd });
+      if (!resolved) {
+        throw new ContextError(
+          "Organization",
+          `sentry issue view ${issueShortId}`
+        );
+      }
+      org = resolved.org;
+
+      const issue = await getIssueByShortId(org, issueShortId);
+      const event = await getLatestEvent(org, issue.id);
+      const eventTraceId = event?.contexts?.trace?.trace_id;
+      if (!eventTraceId) {
+        throw new ValidationError(
+          `Could not find a trace for issue '${issueShortId}'. The latest event has no trace context.\n\n` +
+            `Try: sentry issue view ${issueShortId}`
+        );
+      }
+      traceId = eventTraceId;
+      // Use the project from the issue's metadata if available.
+      // SentryIssue extends Partial<SdkIssueDetail> so `project` is optional.
+      project = issue.project?.slug ?? "unknown";
+      setContext([org], [project]);
+    } else {
+      // Normal flow: parse and resolve org/project/trace-id
+      const parsed = parseTraceTarget(correctedArgs, USAGE_HINT);
+      warnIfNormalized(parsed, "trace.view");
+      const resolved = await resolveTraceOrgProject(parsed, cwd, USAGE_HINT);
+      traceId = resolved.traceId;
+      org = resolved.org;
+      project = resolved.project;
+      setContext([org], [project]);
+    }
 
     if (flags.web) {
       await openInBrowser(buildTraceUrl(org, traceId), "trace");
