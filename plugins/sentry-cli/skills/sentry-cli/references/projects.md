@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-projects
-version: 0.20.0
+version: 0.21.0-dev.0
 description: Create, list, and manage Sentry projects
 requires:
   bins: ["sentry"]
