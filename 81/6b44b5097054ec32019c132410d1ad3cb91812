@@ -1,0 +1,73 @@
+# Plan: Create Seer Upsell Dashboard via CLI
+
+## Goal
+
+Create a Sentry dashboard in the `sentry` org (where CLI telemetry goes to `sentry/cli` project) that shows a table of user emails and org names for "Seer requires a paid plan" and similar SeerError events. This is for the marketing team to identify upsell targets.
+
+## Context
+
+- **Telemetry project**: `sentry` org → `cli` project (DSN: `o1.ingest.us.sentry.io/4510776311808000`)
+- **Confirmed SeerError issues exist**: CLI-98 and others with titles like "SeerError: Seer requires a paid plan."
+- **Available data on SeerError events**:
+  - `user.email` — user's email (added in commit `ec7d4a9e`)
+  - `sentry.org` tag — the target org slug that hit the Seer paywall
+  - `command` tag — which command failed (`issue.explain`, `issue.plan`)
+  - Exception type: `SeerError` — filterable via `error.type:SeerError` in Discover
+- **Dataset**: `error-events` (these are captured exceptions)
+- **CLI version**: `0.20.0-dev` with `dashboard widget add` command available
+
+## No code changes needed
+
+This is purely an operational task — create a dashboard using existing CLI commands.
+
+## Steps (4 CLI commands)
+
+### 1. Create an empty dashboard
+
+```bash
+sentry dashboard create sentry/ 'Seer Upsell Leads'
+```
+
+### 2. Add a KPI widget — Total Seer Paywall Errors (2-wide)
+
+```bash
+sentry dashboard widget add sentry/ 'Seer Upsell Leads' "Total Seer Errors" \
+  --display big_number \
+  --dataset error-events \
+  --query count \
+  --where 'error.type:SeerError'
+```
+
+### 3. Add the main table widget — User Emails & Org Names (6-wide, full row)
+
+```bash
+sentry dashboard widget add sentry/ 'Seer Upsell Leads' "Users Hitting Seer Paywall" \
+  --display table \
+  --dataset error-events \
+  --query count \
+  --group-by user.email \
+  --group-by sentry.org \
+  --where 'error.type:SeerError' \
+  --sort -count \
+  --limit 10
+```
+
+### 4. Share the dashboard link
+
+```bash
+sentry dashboard view sentry/ 'Seer Upsell Leads' --web
+```
+
+## Key decisions
+
+- **Filter**: `error.type:SeerError` captures all 3 SeerError reasons (paid plan, not enabled, AI disabled) — simpler than message-based matching and won't break if wording changes
+- **Dataset**: `error-events` — SeerErrors are captured exceptions, not spans/transactions
+- **Columns**: `user.email` (who) + `sentry.org` tag (which customer org) + `count()` (frequency)
+- **Sort**: `-count` to surface highest-frequency hitters first
+- **Auto-layout**: `big_number` defaults to 2×1, `table` defaults to 6×2 — they'll stack nicely (KPI on row 1, table fills row 2)
+
+## Verification
+
+1. Run `sentry dashboard view sentry/ 'Seer Upsell Leads'` to confirm both widgets are present
+2. Open with `--web` flag to verify the table shows user.email and sentry.org columns in the browser
+3. Confirm data is populating (SeerError events exist — CLI-98 confirmed)
