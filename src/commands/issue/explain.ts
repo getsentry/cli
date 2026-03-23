@@ -74,7 +74,7 @@ export const explainCommand = buildCommand({
   },
   async *func(this: SentryContext, flags: ExplainFlags, issueArg: string) {
     applyFreshFlag(flags);
-    const { cwd } = this;
+    const { cwd, setContext } = this;
 
     // Declare org outside try block so it's accessible in catch for error messages
     let resolvedOrg: string | undefined;
@@ -87,6 +87,9 @@ export const explainCommand = buildCommand({
         command: "explain",
       });
       resolvedOrg = org;
+
+      // Set telemetry context so SeerError events carry the org tag
+      setContext([org], []);
 
       // Ensure root cause analysis exists (triggers if needed)
       const state = await ensureRootCauseAnalysis({
