@@ -675,7 +675,19 @@ async function resolveOrgSlug(
 ): Promise<string | LocalOpResult> {
   const resolved = await resolveOrgPrefetched(cwd);
   if (resolved) {
-    return resolved.org;
+    // If the detected org is a raw numeric ID (extracted from a DSN), try to
+    // resolve it to a real slug. Numeric IDs can fail for write operations like
+    // project/team creation, and may belong to a different Sentry account.
+    if (/^\d+$/.test(resolved.org)) {
+      const { getOrgByNumericId } = await import("../db/regions.js");
+      const match = await getOrgByNumericId(resolved.org);
+      if (match) {
+        return match.slug;
+      }
+      // Cache miss — fall through to listOrganizations() for proper selection
+    } else {
+      return resolved.org;
+    }
   }
 
   // Fallback: list user's organizations (SQLite-cached after login/first call)
