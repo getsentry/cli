@@ -87,7 +87,16 @@ export function normalizeEndpoint(endpoint: string): string {
   validateEndpoint(endpoint);
 
   // Remove leading slash if present (rawApiRequest handles the base URL)
-  const trimmed = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
+  let trimmed = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
+
+  // Strip api/0/ prefix if user accidentally included it — the base URL
+  // already includes /api/0/, so keeping it would produce a doubled path
+  // like /api/0/api/0/... (see CLI-K1).
+  // Also strip bare "api/0" to maintain idempotency: without this,
+  // "api/0" → "api/0/" → "" which breaks f(f(x)) === f(x).
+  if (trimmed.startsWith("api/0/") || trimmed === "api/0") {
+    trimmed = trimmed.slice(trimmed.startsWith("api/0/") ? 6 : 5);
+  }
 
   // Split path and query string
   const queryIndex = trimmed.indexOf("?");

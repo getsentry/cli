@@ -260,6 +260,7 @@ const EXCLUDED_INTEGRATIONS = new Set([
   "ContextLines", // Reads source files - we rely on uploaded sourcemaps instead
   "LocalVariables", // Captures local variables - adds significant overhead
   "Modules", // Lists all loaded modules - unnecessary for CLI telemetry
+  "NodeSystemError", // Uses util.getSystemErrorMap() which Bun does not implement (CLI-K1)
 ]);
 
 /** Current beforeExit handler, tracked so it can be replaced on re-init */

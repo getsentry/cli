@@ -55,6 +55,45 @@ describe("normalizeEndpoint edge cases", () => {
   });
 });
 
+describe("normalizeEndpoint: api/0/ prefix stripping (CLI-K1)", () => {
+  test("strips api/0/ prefix to avoid doubled path", () => {
+    expect(normalizeEndpoint("api/0/projects/my-org/my-project/")).toBe(
+      "projects/my-org/my-project/"
+    );
+  });
+
+  test("strips /api/0/ prefix with leading slash", () => {
+    expect(normalizeEndpoint("/api/0/projects/my-org/my-project/")).toBe(
+      "projects/my-org/my-project/"
+    );
+  });
+
+  test("strips api/0/ prefix and adds trailing slash", () => {
+    expect(normalizeEndpoint("api/0/organizations/my-org/issues")).toBe(
+      "organizations/my-org/issues/"
+    );
+  });
+
+  test("strips api/0/ prefix with query string", () => {
+    expect(
+      normalizeEndpoint(
+        "api/0/projects/my-org/my-proj/environments/?visibility=visible"
+      )
+    ).toBe("projects/my-org/my-proj/environments/?visibility=visible");
+  });
+
+  test("strips bare api/0 for idempotency", () => {
+    // "api/0" → "/" so that normalizing twice is stable
+    expect(normalizeEndpoint("api/0")).toBe("/");
+  });
+
+  test("does not strip partial api/ prefix", () => {
+    expect(normalizeEndpoint("api/1/organizations/")).toBe(
+      "api/1/organizations/"
+    );
+  });
+});
+
 describe("normalizeEndpoint: path traversal hardening (#350)", () => {
   test("rejects bare .. traversal", () => {
     expect(() => normalizeEndpoint("..")).toThrow(/path traversal/);

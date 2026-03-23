@@ -211,6 +211,31 @@ describe("normalizeEndpoint properties", () => {
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
+
+  test("api/0/ prefix is always stripped (CLI-K1)", async () => {
+    await fcAssert(
+      property(simplePathArb, (path) => {
+        const withPrefix = `api/0/${path}`;
+        const withoutPrefix = path;
+
+        const resultWith = normalizeEndpoint(withPrefix);
+        const resultWithout = normalizeEndpoint(withoutPrefix);
+
+        expect(resultWith).toBe(resultWithout);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("result never starts with api/0/ (CLI-K1)", async () => {
+    await fcAssert(
+      property(endpointArb, (endpoint) => {
+        const result = normalizeEndpoint(endpoint);
+        expect(result.startsWith("api/0/")).toBe(false);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
 });
 
 describe("parseMethod properties", () => {
