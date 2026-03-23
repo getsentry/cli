@@ -177,8 +177,7 @@ The CLI must be installed and authenticated before use.
 
 ```bash
 curl https://cli.sentry.dev/install -fsS | bash
-SENTRY_VERSION=nightly curl https://cli.sentry.dev/install -fsS | bash
-brew install getsentry/tools/sentry
+curl https://cli.sentry.dev/install -fsS | bash -s -- --version nightly
 
 # Or install via npm/pnpm/bun
 npm install -g sentry
