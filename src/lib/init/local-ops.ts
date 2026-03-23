@@ -744,6 +744,54 @@ async function tryGetExistingProject(
   }
 }
 
+/**
+ * Detect an existing Sentry project by looking for a DSN in the project.
+ *
+ * Returns org and project slugs when the DSN's project can be resolved —
+ * either from the local cache or via API (when the org is accessible).
+ * Returns null when no DSN is found or the org belongs to a different account.
+ */
+async function detectExistingProject(cwd: string): Promise<{
+  orgSlug: string;
+  projectSlug: string;
+} | null> {
+  const { detectDsn } = await import("../dsn/index.js");
+  const dsn = await detectDsn(cwd);
+  if (!dsn?.publicKey) return null;
+
+  // Check public-key cache first (no API call if previously resolved)
+  const { getCachedProjectByDsnKey } = await import("../db/project-cache.js");
+  const cached = await getCachedProjectByDsnKey(dsn.publicKey);
+  if (cached) {
+    return { orgSlug: cached.orgSlug, projectSlug: cached.projectSlug };
+  }
+
+  // Cache miss — try API (only succeeds if user has access to the org)
+  try {
+    const { findProjectByDsnKey } = await import("../api-client.js");
+    const project = await findProjectByDsnKey(dsn.publicKey);
+    if (project?.organization?.slug && project.slug) {
+      const { setCachedProjectByDsnKey } = await import(
+        "../db/project-cache.js"
+      );
+      await setCachedProjectByDsnKey(dsn.publicKey, {
+        orgSlug: project.organization.slug,
+        orgName: project.organization.name ?? project.organization.slug,
+        projectSlug: project.slug,
+        projectName: project.name,
+        projectId: project.id,
+      });
+      return {
+        orgSlug: project.organization.slug,
+        projectSlug: project.slug,
+      };
+    }
+  } catch {
+    // Org inaccessible (different account) or network error — fall through
+  }
+  return null;
+}
+
 async function createSentryProject(
   payload: CreateSentryProjectPayload,
   options: WizardOptions
@@ -771,6 +819,48 @@ async function createSentryProject(
         url: "(dry-run)",
       },
     };
+  }
+
+  // When no explicit org/project provided, check if Sentry is already set up
+  if (!options.org && !options.project) {
+    const existing = await detectExistingProject(payload.cwd);
+    if (existing) {
+      if (options.yes) {
+        // Non-interactive: auto-use existing project
+        const result = await tryGetExistingProject(
+          existing.orgSlug,
+          existing.projectSlug
+        );
+        if (result) return result;
+      } else {
+        const choice = await select({
+          message: "Found an existing Sentry project in this codebase.",
+          options: [
+            {
+              value: "existing" as const,
+              label: `Use existing project (${existing.orgSlug}/${existing.projectSlug})`,
+              hint: "Sentry is already configured here",
+            },
+            {
+              value: "create" as const,
+              label: "Create a new Sentry project",
+            },
+          ],
+        });
+        if (isCancel(choice)) {
+          return { ok: false, error: "Cancelled." };
+        }
+        if (choice === "existing") {
+          const result = await tryGetExistingProject(
+            existing.orgSlug,
+            existing.projectSlug
+          );
+          if (result) return result;
+          // Project deleted or inaccessible — fall through to creation
+        }
+        // choice === "create": fall through to normal org resolution + creation
+      }
+    }
   }
 
   try {

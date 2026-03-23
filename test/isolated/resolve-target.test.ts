@@ -53,6 +53,7 @@ const mockGetProject = mock(() =>
 );
 const mockFindProjectByDsnKey = mock(() => Promise.resolve(null));
 const mockFindProjectsByPattern = mock(() => Promise.resolve([]));
+const mockGetOrgByNumericId = mock(() => Promise.resolve(undefined));
 
 // Mock all dependency modules
 mock.module("../../src/lib/db/defaults.js", () => ({
@@ -91,6 +92,10 @@ mock.module("../../src/lib/api-client.js", () => ({
   findProjectsByPattern: mockFindProjectsByPattern,
 }));
 
+mock.module("../../src/lib/db/regions.js", () => ({
+  getOrgByNumericId: mockGetOrgByNumericId,
+}));
+
 import { ContextError } from "../../src/lib/errors.js";
 // Now import the module under test (after mocks are set up)
 import {
@@ -118,6 +123,7 @@ function resetAllMocks() {
   mockGetProject.mockReset();
   mockFindProjectByDsnKey.mockReset();
   mockFindProjectsByPattern.mockReset();
+  mockGetOrgByNumericId.mockReset();
 
   // Set sensible defaults
   mockGetDefaultOrganization.mockResolvedValue(null);
@@ -139,6 +145,7 @@ function resetAllMocks() {
   mockGetCachedProject.mockResolvedValue(null);
   mockGetCachedProjectByDsnKey.mockResolvedValue(null);
   mockGetCachedDsn.mockResolvedValue(null);
+  mockGetOrgByNumericId.mockResolvedValue(undefined);
   mockFindProjectsByPattern.mockResolvedValue([]);
 }
 
@@ -198,7 +205,7 @@ describe("resolveOrg", () => {
     expect(mockDetectDsn).toHaveBeenCalled();
   });
 
-  test("returns numeric orgId when DSN detected but no cache", async () => {
+  test("returns null when DSN detected but no project/org cache", async () => {
     mockGetDefaultOrganization.mockResolvedValue(null);
     mockDetectDsn.mockResolvedValue({
       raw: "https://abc@o123.ingest.sentry.io/456",
@@ -210,11 +217,35 @@ describe("resolveOrg", () => {
       source: "env",
     });
     mockGetCachedProject.mockResolvedValue(null);
+    mockGetOrgByNumericId.mockResolvedValue(undefined);
+
+    const result = await resolveOrg({ cwd: "/test" });
+
+    expect(result).toBeNull();
+  });
+
+  test("resolves org slug from regions cache when project cache misses", async () => {
+    mockGetDefaultOrganization.mockResolvedValue(null);
+    mockDetectDsn.mockResolvedValue({
+      raw: "https://abc@o123.ingest.sentry.io/456",
+      protocol: "https",
+      publicKey: "abc",
+      host: "o123.ingest.sentry.io",
+      projectId: "456",
+      orgId: "123",
+      source: "env",
+    });
+    mockGetCachedProject.mockResolvedValue(null);
+    mockGetOrgByNumericId.mockResolvedValue({
+      slug: "my-org",
+      regionUrl: "https://sentry.io",
+    });
 
     const result = await resolveOrg({ cwd: "/test" });
 
     expect(result).not.toBeNull();
-    expect(result?.org).toBe("123");
+    expect(result?.org).toBe("my-org");
+    expect(mockGetOrgByNumericId).toHaveBeenCalledWith("123");
   });
 
   test("returns null when no org found from any source", async () => {

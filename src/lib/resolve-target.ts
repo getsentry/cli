@@ -231,11 +231,18 @@ export async function resolveOrgFromDsn(
     }
   }
 
-  // Fall back to numeric org ID (API accepts both slug and numeric ID)
-  return {
-    org: dsn.orgId,
-    detectedFrom,
-  };
+  // Check org regions cache for a slug mapped to this numeric ID.
+  // The cache is populated by `sentry auth login` and `org list`.
+  const { getOrgByNumericId } = await import("./db/regions.js");
+  const orgMatch = await getOrgByNumericId(dsn.orgId);
+  if (orgMatch) {
+    return { org: orgMatch.slug, detectedFrom };
+  }
+
+  // Can't resolve to slug (empty cache or org belongs to a different account).
+  // Return null so the caller falls through to listOrganizations() for proper
+  // interactive org selection instead of passing a raw numeric ID to the API.
+  return null;
 }
 
 /**
