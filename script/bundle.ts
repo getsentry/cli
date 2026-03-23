@@ -4,7 +4,8 @@
  *
  * Creates a single-file Node.js bundle using esbuild.
  * Injects Bun polyfills for Node.js compatibility.
- * Uploads source maps to Sentry when SENTRY_AUTH_TOKEN is available.
+ * Handles debug ID injection and sourcemap upload natively — no
+ * external `@sentry/cli` binary needed.
  *
  * Usage:
  *   bun run script/bundle.ts
@@ -12,9 +13,11 @@
  * Output:
  *   dist/bin.cjs - Minified, single-file bundle for npm
  */
-import { sentryEsbuildPlugin } from "@sentry/esbuild-plugin";
+import { unlink } from "node:fs/promises";
 import { build, type Plugin } from "esbuild";
 import pkg from "../package.json";
+import { uploadSourcemaps } from "../src/lib/api/sourcemaps.js";
+import { injectDebugId } from "./debug-id.js";
 
 const VERSION = pkg.version;
 const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
@@ -33,17 +36,15 @@ if (!SENTRY_CLIENT_ID) {
 const BUN_SQLITE_FILTER = /^bun:sqlite$/;
 const ANY_FILTER = /.*/;
 
-// Plugin to replace bun:sqlite with our node:sqlite polyfill
+/** Plugin to replace bun:sqlite with our node:sqlite polyfill. */
 const bunSqlitePlugin: Plugin = {
   name: "bun-sqlite-polyfill",
   setup(pluginBuild) {
-    // Intercept imports of "bun:sqlite" and redirect to our polyfill
     pluginBuild.onResolve({ filter: BUN_SQLITE_FILTER }, () => ({
       path: "bun:sqlite",
       namespace: "bun-sqlite-polyfill",
     }));
 
-    // Provide the polyfill content
     pluginBuild.onLoad(
       { filter: ANY_FILTER, namespace: "bun-sqlite-polyfill" },
       () => ({
@@ -59,28 +60,118 @@ const bunSqlitePlugin: Plugin = {
   },
 };
 
-// Configure Sentry plugin for source map uploads (production builds only)
+type InjectedFile = { jsPath: string; mapPath: string; debugId: string };
+
+/** Inject debug IDs into JS outputs and their companion sourcemaps. */
+async function injectDebugIdsForOutputs(
+  jsFiles: string[]
+): Promise<InjectedFile[]> {
+  const injected: InjectedFile[] = [];
+  for (const jsPath of jsFiles) {
+    const mapPath = `${jsPath}.map`;
+    try {
+      const { debugId } = await injectDebugId(jsPath, mapPath);
+      injected.push({ jsPath, mapPath, debugId });
+      console.log(`  Debug ID injected: ${debugId}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `  Warning: Debug ID injection failed for ${jsPath}: ${msg}`
+      );
+    }
+  }
+  return injected;
+}
+
+/** Upload injected sourcemaps to Sentry via the chunk-upload protocol. */
+async function uploadInjectedSourcemaps(
+  injected: InjectedFile[]
+): Promise<void> {
+  try {
+    console.log("  Uploading sourcemaps to Sentry...");
+    await uploadSourcemaps({
+      org: "sentry",
+      project: "cli",
+      release: VERSION,
+      files: injected.flatMap(({ jsPath, mapPath, debugId }) => {
+        const jsName = jsPath.split("/").pop() ?? "bin.cjs";
+        const mapName = mapPath.split("/").pop() ?? "bin.cjs.map";
+        return [
+          {
+            path: jsPath,
+            debugId,
+            type: "minified_source" as const,
+            url: `~/${jsName}`,
+            sourcemapFilename: mapName,
+          },
+          {
+            path: mapPath,
+            debugId,
+            type: "source_map" as const,
+            url: `~/${mapName}`,
+          },
+        ];
+      }),
+    });
+    console.log("  Sourcemaps uploaded to Sentry");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`  Warning: Sourcemap upload failed: ${msg}`);
+  }
+}
+
+/**
+ * esbuild plugin that injects debug IDs and uploads sourcemaps to Sentry.
+ *
+ * Runs after esbuild finishes bundling (onEnd hook):
+ * 1. Injects debug IDs into each JS output + its companion .map
+ * 2. Uploads all artifacts to Sentry via the chunk-upload protocol
+ * 3. Deletes .map files after upload (they shouldn't ship to users)
+ *
+ * Replaces `@sentry/esbuild-plugin` with zero external dependencies.
+ */
+const sentrySourcemapPlugin: Plugin = {
+  name: "sentry-sourcemap",
+  setup(pluginBuild) {
+    pluginBuild.onEnd(async (buildResult) => {
+      const outputs = Object.keys(buildResult.metafile?.outputs ?? {});
+      const jsFiles = outputs.filter(
+        (p) => p.endsWith(".cjs") || (p.endsWith(".js") && !p.endsWith(".map"))
+      );
+
+      if (jsFiles.length === 0) {
+        return;
+      }
+
+      const injected = await injectDebugIdsForOutputs(jsFiles);
+      if (injected.length === 0) {
+        return;
+      }
+
+      if (!process.env.SENTRY_AUTH_TOKEN) {
+        return;
+      }
+
+      await uploadInjectedSourcemaps(injected);
+
+      // Delete .map files after upload — they shouldn't ship to users
+      for (const { mapPath } of injected) {
+        try {
+          await unlink(mapPath);
+        } catch {
+          // Ignore — file might already be gone
+        }
+      }
+    });
+  },
+};
+
+// Configure plugins
 const plugins: Plugin[] = [bunSqlitePlugin];
 
 if (process.env.SENTRY_AUTH_TOKEN) {
   console.log("  Sentry auth token found, source maps will be uploaded");
-  plugins.push(
-    sentryEsbuildPlugin({
-      org: "sentry",
-      project: "cli",
-      authToken: process.env.SENTRY_AUTH_TOKEN,
-      release: {
-        name: VERSION,
-      },
-      sourcemaps: {
-        filesToDeleteAfterUpload: ["dist/**/*.map"],
-      },
-      // Don't fail the build if source map upload fails
-      errorHandler: (err) => {
-        console.warn("  Warning: Source map upload failed:", err.message);
-      },
-    })
-  );
+  plugins.push(sentrySourcemapPlugin);
 } else {
   console.log("  No SENTRY_AUTH_TOKEN, skipping source map upload");
 }
