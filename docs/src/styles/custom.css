@@ -1826,6 +1826,7 @@ summary[id="starlight__on-this-page--mobile"] .caret {
   font-size: 0.85em;
   color: #a78bfa;
   cursor: pointer;
+  pointer-events: auto;
 }
 
 .overscroll-message code:hover {
