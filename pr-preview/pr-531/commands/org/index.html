@@ -28,10 +28,11 @@
                 document.body.appendChild(overscrollEl);
                 var codeEl = overscrollEl.querySelector('.overscroll-copy-cmd');
                 codeEl.addEventListener('click', function() {
+                  if (!navigator.clipboard) return;
                   navigator.clipboard.writeText(command).then(function() {
                     codeEl.textContent = 'copied!';
                     setTimeout(function() { codeEl.textContent = command; }, 1500);
-                  });
+                  }).catch(function() {});
                 });
               }
               
