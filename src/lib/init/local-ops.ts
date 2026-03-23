@@ -867,16 +867,16 @@ async function createSentryProject(
     };
   }
 
-  // When no explicit org/project provided, check if Sentry is already set up
-  if (!(options.org || options.project)) {
-    const result = await promptForExistingProject(payload.cwd, options.yes);
-    if (result) {
-      return result;
-    }
-  }
-
   try {
-    // 1. Resolve org — skip interactive resolution if explicitly provided via CLI arg
+    // 1. When no explicit org/project provided, check if Sentry is already set up
+    if (!(options.org || options.project)) {
+      const result = await promptForExistingProject(payload.cwd, options.yes);
+      if (result) {
+        return result;
+      }
+    }
+
+    // 2. Resolve org — skip interactive resolution if explicitly provided via CLI arg
     let orgSlug: string;
     if (options.org) {
       orgSlug = options.org;
@@ -888,7 +888,7 @@ async function createSentryProject(
       orgSlug = orgResult;
     }
 
-    // 2. If both org and project were provided, check if the project already exists.
+    // 3. If both org and project were provided, check if the project already exists.
     //    This avoids a 409 Conflict from the create API when re-running init on an
     //    existing Sentry project (e.g., bare slug resolved via resolveProjectBySlug).
     if (options.org && options.project) {
@@ -898,23 +898,23 @@ async function createSentryProject(
       }
     }
 
-    // 3. Resolve or create team
+    // 4. Resolve or create team
     const team = await resolveOrCreateTeam(orgSlug, {
       team: options.team,
       autoCreateSlug: slug,
       usageHint: "sentry init",
     });
 
-    // 4. Create project
+    // 5. Create project
     const project = await createProject(orgSlug, team.slug, {
       name,
       platform,
     });
 
-    // 5. Get DSN (best-effort)
+    // 6. Get DSN (best-effort)
     const dsn = await tryGetPrimaryDsn(orgSlug, project.slug);
 
-    // 6. Build URL
+    // 7. Build URL
     const url = buildProjectUrl(orgSlug, project.slug);
 
     return {
