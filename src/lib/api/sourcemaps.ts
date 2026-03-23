@@ -222,21 +222,24 @@ export async function hashChunks(
   chunkSize: number
 ): Promise<{ chunks: ChunkInfo[]; overallChecksum: string }> {
   const fh = await open(zipPath, "r");
-  const fileSize = (await stat(zipPath)).size;
-  const chunks: ChunkInfo[] = [];
-  const overallHasher = createHash("sha1");
+  try {
+    const fileSize = (await stat(zipPath)).size;
+    const chunks: ChunkInfo[] = [];
+    const overallHasher = createHash("sha1");
 
-  for (let offset = 0; offset < fileSize; offset += chunkSize) {
-    const size = Math.min(chunkSize, fileSize - offset);
-    const buf = Buffer.alloc(size);
-    await fh.read(buf, 0, size, offset);
-    const sha1 = createHash("sha1").update(buf).digest("hex");
-    overallHasher.update(buf);
-    chunks.push({ sha1, offset, size });
+    for (let offset = 0; offset < fileSize; offset += chunkSize) {
+      const size = Math.min(chunkSize, fileSize - offset);
+      const buf = Buffer.alloc(size);
+      await fh.read(buf, 0, size, offset);
+      const sha1 = createHash("sha1").update(buf).digest("hex");
+      overallHasher.update(buf);
+      chunks.push({ sha1, offset, size });
+    }
+
+    return { chunks, overallChecksum: overallHasher.digest("hex") };
+  } finally {
+    await fh.close();
   }
-
-  await fh.close();
-  return { chunks, overallChecksum: overallHasher.digest("hex") };
 }
 
 /**
