@@ -94,7 +94,11 @@ export function normalizeEndpoint(endpoint: string): string {
   // like /api/0/api/0/... (see CLI-K1).
   // Also strip bare "api/0" to maintain idempotency: without this,
   // "api/0" → "api/0/" → "" which breaks f(f(x)) === f(x).
-  if (trimmed.startsWith("api/0/") || trimmed === "api/0") {
+  if (
+    trimmed.startsWith("api/0/") ||
+    trimmed.startsWith("api/0?") ||
+    trimmed === "api/0"
+  ) {
     trimmed = trimmed.slice(trimmed.startsWith("api/0/") ? 6 : 5);
   }
 
