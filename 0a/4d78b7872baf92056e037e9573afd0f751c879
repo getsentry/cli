@@ -1,0 +1,76 @@
+# Investigation: Sentry Issue CLI-K1
+
+## Issue Summary
+
+**`CLI-K1`**: `TypeError: _o.getSystemErrorMap is not a function`
+- **Status**: Unresolved (New), High Priority
+- **Release**: 0.19.0 | **Runtime**: Bun 1.3.9
+- **User**: Self-hosted Sentry instance (`sentry.infra.natcar.ru`)
+- **Command**: `sentry api /api/0/projects/natcar/dpn-recommendations/environments/`
+- **Link**: https://sentry.sentry.io/issues/7355494310/
+
+## Root Causes (Two Bugs)
+
+### Bug 1: Double `/api/0/` Prefix (Primary)
+
+The user ran:
+```
+sentry api /api/0/projects/natcar/dpn-recommendations/environments/
+```
+
+The span tree shows the actual URL requested was:
+```
+GET /api/0/api/0/projects/natcar/dpn-recommendations/environments/
+```
+
+**Why**: `normalizeEndpoint()` in `src/commands/api.ts:85-104` only strips leading `/`, then the URL gets constructed as `${baseUrl}/api/0/${normalizedEndpoint}` in three places:
+- `src/commands/api.ts:883` (resolveRequestUrl)
+- `src/lib/api/infrastructure.ts:271` (apiRequestToRegion)
+- `src/lib/api/infrastructure.ts:374` (rawApiRequest)
+
+The docs say "do not include the prefix" (line 1061), but there's **no enforcement**. The user including `/api/0/` results in a malformed double-prefixed URL.
+
+### Bug 2: `getSystemErrorMap` Missing in Bun (Secondary)
+
+`util.getSystemErrorMap()` is a Node.js API (v16+) that **Bun does not implement**. The Sentry SDK (`@sentry/node-core/light`) calls it during error event processing. The stack trace shows:
+```
+ze_ → processEvent → Zb → Cp → kp → _prepareEvent → _processEvent → _captureEvent
+```
+
+These are minified Sentry SDK internal functions that run during event capture. The SDK was likely trying to report the API error from the double-prefixed URL and crashed while enriching the error event with system error information.
+
+This is an **error-in-the-error-handler** — the original error (malformed URL / HTTP failure) triggered the SDK to capture an event, and the SDK itself crashed during event processing.
+
+## Recommended Fixes
+
+### Fix 1: Strip `api/0/` prefix in `normalizeEndpoint()` (High Priority)
+
+**File**: `src/commands/api.ts`
+
+Add prefix stripping after the leading `/` removal:
+```typescript
+export function normalizeEndpoint(endpoint: string): string {
+  validateEndpoint(endpoint);
+  let trimmed = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
+
+  // Strip api/0/ prefix if user accidentally included it
+  if (trimmed.startsWith("api/0/")) {
+    trimmed = trimmed.slice(6); // "api/0/".length === 6
+  }
+
+  // ...rest unchanged
+}
+```
+
+### Fix 2: Polyfill `getSystemErrorMap` for Bun (Medium Priority)
+
+The Sentry SDK should not crash the CLI. Options:
+1. **Polyfill**: Add `globalThis` or `node:util` shim for `getSystemErrorMap` before SDK init
+2. **Bun upstream**: File issue with Bun to implement `util.getSystemErrorMap`
+3. **Sentry SDK upstream**: Report to `@sentry/node-core` that it should handle missing `getSystemErrorMap` gracefully
+
+## Verification
+
+- Run `bun test --filter "normalizeEndpoint"` after fix
+- Manual test: `bun run dev -- api /api/0/organizations/` should NOT produce double prefix
+- Add property test for `normalizeEndpoint` covering `api/0/` prefix variants
