@@ -338,9 +338,13 @@ async function uploadArtifactBundle(opts: {
       missingChunks.map((chunk) =>
         limit(async () => {
           const chunkFh = await open(tmpZipPath, "r");
-          const buf = Buffer.alloc(chunk.size);
-          await chunkFh.read(buf, 0, chunk.size, chunk.offset);
-          await chunkFh.close();
+          let buf: Buffer;
+          try {
+            buf = Buffer.alloc(chunk.size);
+            await chunkFh.read(buf, 0, chunk.size, chunk.offset);
+          } finally {
+            await chunkFh.close();
+          }
 
           const payload = useGzip ? await gzipAsync(buf) : buf;
           const fieldName = useGzip ? "file_gzip" : "file";

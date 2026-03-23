@@ -166,14 +166,15 @@ const sentrySourcemapPlugin: Plugin = {
   },
 };
 
-// Configure plugins
-const plugins: Plugin[] = [bunSqlitePlugin];
+// Always inject debug IDs (even without auth token); upload is gated inside the plugin
+const plugins: Plugin[] = [bunSqlitePlugin, sentrySourcemapPlugin];
 
 if (process.env.SENTRY_AUTH_TOKEN) {
   console.log("  Sentry auth token found, source maps will be uploaded");
-  plugins.push(sentrySourcemapPlugin);
 } else {
-  console.log("  No SENTRY_AUTH_TOKEN, skipping source map upload");
+  console.log(
+    "  No SENTRY_AUTH_TOKEN, debug IDs will be injected but source maps will not be uploaded"
+  );
 }
 
 const result = await build({
