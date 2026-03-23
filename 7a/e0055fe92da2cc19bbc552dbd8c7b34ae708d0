@@ -1,0 +1,87 @@
+# Plan: Add `SENTRY_VERSION` env var to install script + docs
+
+## Summary
+
+Add `SENTRY_VERSION` environment variable support to the `install` script so users can pin a version via env var (useful for CI/CD, Dockerfiles, and automation). Update the docs to document it, especially for nightly installs.
+
+## Files to Modify
+
+1. **`/install`** — The curl install script (276 lines)
+2. **`/docs/src/content/docs/getting-started.mdx`** — Installation docs
+3. **`/docs/src/content/docs/configuration.md`** — Environment variables reference
+
+## Changes
+
+### 1. `install` script
+
+**a) Read `SENTRY_VERSION` env var as a default for `requested_version`** (line 100)
+
+Change:
+```bash
+requested_version=""
+```
+To:
+```bash
+requested_version="${SENTRY_VERSION:-}"
+```
+
+This means `SENTRY_VERSION` is used as the default, but `--version` flag still overrides it (since the flag parsing sets `requested_version` when present).
+
+**b) Update the `usage()` function** (lines 77–97)
+
+Add `SENTRY_VERSION` to the Environment Variables section:
+```
+Environment Variables:
+    SENTRY_INSTALL_DIR      Override the installation directory
+    SENTRY_VERSION          Install a specific version (e.g., 0.2.0, nightly)
+```
+
+Add an example:
+```
+    SENTRY_VERSION=nightly curl -fsSL https://cli.sentry.dev/install | bash
+```
+
+### 2. `docs/src/content/docs/getting-started.mdx`
+
+After the existing nightly install example (line 21), add a note about `SENTRY_VERSION`:
+
+```mdx
+You can also use the `SENTRY_VERSION` environment variable to pin a version,
+which is especially useful in CI/CD pipelines and Dockerfiles:
+
+```bash
+# Pin to a specific stable version
+SENTRY_VERSION=0.2.0 curl https://cli.sentry.dev/install -fsS | bash
+
+# Pin to nightly
+SENTRY_VERSION=nightly curl https://cli.sentry.dev/install -fsS | bash
+```
+
+The `--version` flag takes precedence over `SENTRY_VERSION` if both are set.
+```
+
+### 3. `docs/src/content/docs/configuration.md`
+
+Add a new `### SENTRY_VERSION` section after the install-related env vars (after `SENTRY_CONFIG_DIR`, before `SENTRY_PLAIN_OUTPUT` — or grouped with install-related vars). Since this is specifically for the install script (not the CLI runtime), add it with a note:
+
+```md
+### `SENTRY_VERSION`
+
+Pin a specific version for the [install script](./getting-started/#install-script). Accepts a version number (e.g., `0.2.0`) or `nightly`. The `--version` flag takes precedence if both are set.
+
+```bash
+SENTRY_VERSION=nightly curl https://cli.sentry.dev/install -fsS | bash
+```
+
+This is useful for CI/CD pipelines and Dockerfiles where you want reproducible installations without inline flags.
+```
+
+## Verification
+
+1. **Read the modified install script** and verify:
+   - `SENTRY_VERSION=0.2.0 bash install` would set `requested_version=0.2.0`
+   - `SENTRY_VERSION=0.2.0 bash install --version 0.3.0` would use `0.3.0` (flag wins)
+   - `bash install` with no env var still defaults to latest stable
+   - `SENTRY_VERSION=nightly bash install` triggers the nightly/GHCR path
+2. **Verify docs build**: `cd docs && bun run build` (or equivalent) to check no MDX syntax errors
+3. **Run linter**: `bun run lint` to check for any formatting issues in changed files
