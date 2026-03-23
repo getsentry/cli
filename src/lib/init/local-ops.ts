@@ -776,35 +776,14 @@ async function detectExistingProject(cwd: string): Promise<{
     return null;
   }
 
-  // Check public-key cache first (no API call if previously resolved)
-  const { getCachedProjectByDsnKey } = await import("../db/project-cache.js");
-  const cached = await getCachedProjectByDsnKey(dsn.publicKey);
-  if (cached) {
-    return { orgSlug: cached.orgSlug, projectSlug: cached.projectSlug };
-  }
-
-  // Cache miss — try API (only succeeds if user has access to the org)
   try {
-    const { findProjectByDsnKey } = await import("../api-client.js");
-    const project = await findProjectByDsnKey(dsn.publicKey);
-    if (project?.organization?.slug && project.slug) {
-      const { setCachedProjectByDsnKey } = await import(
-        "../db/project-cache.js"
-      );
-      await setCachedProjectByDsnKey(dsn.publicKey, {
-        orgSlug: project.organization.slug,
-        orgName: project.organization.name ?? project.organization.slug,
-        projectSlug: project.slug,
-        projectName: project.name,
-        projectId: project.id,
-      });
-      return {
-        orgSlug: project.organization.slug,
-        projectSlug: project.slug,
-      };
+    const { resolveDsnByPublicKey } = await import("../resolve-target.js");
+    const resolved = await resolveDsnByPublicKey(dsn);
+    if (resolved) {
+      return { orgSlug: resolved.org, projectSlug: resolved.project };
     }
   } catch {
-    // Org inaccessible (different account) or network error — fall through
+    // Auth error or network error — org inaccessible, fall through to creation
   }
   return null;
 }

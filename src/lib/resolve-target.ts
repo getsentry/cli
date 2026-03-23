@@ -245,7 +245,7 @@ export async function resolveOrgFromDsn(
  * @param dsn - Detected DSN (must have publicKey)
  * @returns Resolved target or null if resolution failed
  */
-async function resolveDsnByPublicKey(
+export async function resolveDsnByPublicKey(
   dsn: DetectedDsn
 ): Promise<ResolvedTarget | null> {
   const detectedFrom = getDsnSourceDescription(dsn);
