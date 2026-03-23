@@ -1169,9 +1169,13 @@ export const apiCommand = buildCommand({
 
     const normalizedEndpoint = normalizeEndpoint(endpoint);
 
-    // Warn if the user included the /api/0/ prefix (CLI-K1)
-    const bare = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
-    if (bare.startsWith("api/0/") || bare === "api/0") {
+    // Detect whether normalizeEndpoint stripped the api/0/ prefix (CLI-K1).
+    // normalizeEndpoint only adds at most 1 char (trailing slash), so if the
+    // normalized result is shorter than the raw input, the prefix was stripped.
+    const rawLen = endpoint.startsWith("/")
+      ? endpoint.length - 1
+      : endpoint.length;
+    if (normalizedEndpoint.length < rawLen) {
       log.warn(
         "Endpoint includes the /api/0/ prefix which is added automatically — stripping it to avoid a doubled path"
       );
