@@ -287,7 +287,9 @@ function patchNodeSystemErrorIntegration(
 
   integration.processEvent = (...args) => {
     try {
-      return original(...args);
+      const result = original(...args);
+      // Handle both sync throws and async rejections
+      return Promise.resolve(result).catch(() => args[0]);
     } catch {
       // getSystemErrorMap is not available — skip enrichment, keep the event
       return args[0];
