@@ -1,0 +1,33 @@
+## Implementation Plan: Auto-redirect issue short IDs in event view
+
+### Problem
+Users typing `sentry event view BRUNCHIE-APP-29` (an issue short ID) get
+ResolutionError because the CLI interprets it as a hex event ID. Observed
+in Sentry issues CLI-JR, CLI-J6 and 59 similar ResolutionError issues.
+
+### Approach
+Two-layer detection:
+1. **Proactive** (single-arg): In parsePositionalArgs, when a single arg
+   matches looksLikeIssueShortId (uppercase pattern like PROJECT-SUFFIX),
+   set issueShortId field to trigger the latest-event fetch path.
+2. **Reactive** (two-arg 404): In fetchEventWithContext, when a 404 occurs
+   and eventId matches the issue short ID pattern, prepend a suggestion
+   to try `sentry issue view` in the error message.
+
+### Key Design Decisions
+- Use existing looksLikeIssueShortId (strict uppercase) to avoid false
+  positives on project slugs like "my-project"
+- Resolve issue via getIssueByShortId then fetch latest event with numeric ID
+  (getLatestEvent requires Number(issueId), so short IDs need resolution first)
+- Refactored inline issueId handling into resolveIssueShortcut helper to keep
+  func() cyclomatic complexity under the limit
+- Org resolution for short ID path uses resolveOrg (DSN/env/config cascade)
+
+### Files Modified
+- src/commands/event/view.ts: +140/-20 lines
+- test/commands/event/view.test.ts: +19 lines (3 new tests)
+
+### Verification
+- typecheck, lint, check:errors, check:skill all pass
+- 50/50 event view tests pass (47 existing + 3 new)
+- 2 pre-existing upgradeCommand failures on main (mock pollution)
