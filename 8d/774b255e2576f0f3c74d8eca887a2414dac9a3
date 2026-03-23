@@ -1,0 +1,147 @@
+# Plan: Centralize `setOrgProjectContext` in Resolution Functions
+
+## Problem
+
+~15 commands manually call `setContext([org], [project])` after resolution; ~15 more (dashboard/*, event/view, project/*, trial/*, org/view, team/*, repo/*) resolve org/project but forget to call it. Telemetry tags (`sentry.org`, `sentry.project`) are missing on error events for those commands.
+
+## Approach
+
+Move `setOrgProjectContext` calls into the shared resolution functions (resolve-target.ts, trace-target.ts, org-list.ts, dashboard/resolve.ts). Then remove all manual `this.setContext()` calls from commands and the `setContext` property from `SentryContext`.
+
+**Why resolution functions?** Every command funnels through one of ~7 resolution functions. The `buildCommand` wrapper has no knowledge of org/project. Resolution functions are the natural choke point.
+
+**No circular dependencies.** `telemetry.ts` has no imports from resolution modules.
+
+---
+
+## Part 1: Add `setOrgProjectContext` to Resolution Functions
+
+### 1a. `src/lib/resolve-target.ts`
+
+**Import:** Add `import { setOrgProjectContext } from "./telemetry.js";`
+
+**6 functions to instrument:**
+
+| Function (line) | Success returns | Pattern |
+|-----------------|----------------|---------|
+| `resolveOrgAndProject()` (882) | 5 non-null + 1 null | `setOrgProjectContext([org], [project])` before each non-null return |
+| `resolveOrg()` (968) | 4 non-null + 1 null | `setOrgProjectContext([org], [])` before each non-null return |
+| `resolveAllTargets()` (710) | 5 returns | `setOrgProjectContext([...new Set(targets.map(t=>t.org))], [...new Set(targets.map(t=>t.project))])` before returns with non-empty targets |
+| `resolveOrgProjectTarget()` (1158) | 3 success: explicit, project-search, auto-detect | `setOrgProjectContext([org], [project])` in explicit + project-search; auto-detect already calls `resolveOrgAndProject()` but add call for consistency |
+| `resolveProjectBySlug()` (1012) | 1 success | `setOrgProjectContext([org], [project])` before return |
+| `resolveOrgsForListing()` (1097) | 4 returns | `setOrgProjectContext(orgs, [])` when `orgs.length > 0` |
+
+### 1b. `src/lib/trace-target.ts`
+
+**Import:** Add `import { setOrgProjectContext } from "./telemetry.js";`
+
+| Function (line) | Success returns | Pattern |
+|-----------------|----------------|---------|
+| `resolveTraceOrgProject()` (286) | 3: explicit, project-search, auto-detect | `setOrgProjectContext([org], [project])` before each return |
+| `resolveTraceOrg()` (362) | 4: explicit, org-scoped, project-search, auto-detect | `setOrgProjectContext([org], [])` before each return |
+
+### 1c. `src/lib/org-list.ts`
+
+**Import:** Add `import { setOrgProjectContext } from "./telemetry.js";`
+
+In `dispatchOrgScopedList()` (line 911), after effective org resolution (~line 958), before handler dispatch:
+
+```typescript
+if (effectiveParsed.type === "explicit") {
+  setOrgProjectContext([effectiveParsed.org], [effectiveParsed.project]);
+} else if (effectiveParsed.type === "org-all") {
+  setOrgProjectContext([effectiveParsed.org], []);
+}
+// project-search and auto-detect: covered by resolution calls inside handlers
+```
+
+### 1d. `src/commands/dashboard/resolve.ts`
+
+**Import:** Add `import { setOrgProjectContext } from "../../lib/telemetry.js";`
+
+In `resolveOrgFromTarget()` (line 47), `explicit`/`org-all` cases return `parsed.org` directly (don't go through `resolveOrg()`):
+
+```typescript
+case "explicit":
+case "org-all":
+  setOrgProjectContext([parsed.org], []);
+  return parsed.org;
+```
+
+The `project-search`/`auto-detect` cases call `resolveOrg()` which is already instrumented.
+
+---
+
+## Part 2: Remove Manual `setContext` Calls from Commands
+
+Remove all `setContext` destructuring and calls from these 12 command files:
+
+| File | What to remove |
+|------|---------------|
+| `src/commands/issue/explain.ts` | `const { cwd, setContext } = this` → `const { cwd } = this`; remove `setContext([org], [])` call |
+| `src/commands/issue/plan.ts` | Same pattern as explain.ts |
+| `src/commands/issue/view.ts` | Remove `setContext` destructuring and call |
+| `src/commands/issue/list.ts` | Remove `setContext` from type defs, destructuring, option passing, and calls (~8 references) |
+| `src/commands/log/view.ts` | Remove `setContext` destructuring and call |
+| `src/commands/log/list.ts` | Remove `setContext` destructuring and 2 calls |
+| `src/commands/span/list.ts` | Remove from `ModeContext` type, destructuring, 2 `ctx.setContext()` calls, and `modeCtx` construction |
+| `src/commands/span/view.ts` | Remove `setContext` destructuring and call |
+| `src/commands/trace/logs.ts` | Remove `setContext` destructuring and call |
+| `src/commands/trace/list.ts` | Remove `setContext` destructuring and call |
+| `src/commands/trace/view.ts` | Remove `setContext` destructuring and 2 calls |
+
+---
+
+## Part 3: Remove `setContext` from `SentryContext`
+
+### `src/context.ts`
+
+1. Remove `setContext` from the `SentryContext` interface (line 33)
+2. Remove `setContext: setOrgProjectContext` from `buildContext` (line 55)
+3. Remove `setOrgProjectContext` from the import (line 9) — keep `setCommandSpanName` and `Span`
+
+### `src/lib/org-list.ts` (comment update)
+
+Update the JSDoc comment at line 219 that mentions `setContext`:
+```
+- * Commands that need additional fields (e.g. `setContext`, `stderr`) can
++ * Commands that need additional fields (e.g. `stderr`) can
+```
+
+---
+
+## Error Path Behavior
+
+- **Partial success** (org resolved, project fails): `resolveOrg()` sets the org tag before project resolution throws — org tag survives on the error event.
+- **Complete failure** (no org found): No tags set — correct.
+- **Explicit but nonexistent project**: Tags are set before any downstream API call (e.g., `fetchProjectId`), so error events carry the user-typed org/project for debugging.
+
+---
+
+## Estimated Changes
+
+| Category | Files | Lines |
+|----------|-------|-------|
+| Add setOrgProjectContext to resolution | 4 files | ~43 lines added |
+| Remove manual setContext from commands | 12 files | ~40 lines removed |
+| Remove from SentryContext | 1 file | ~5 lines removed |
+| **Net** | **17 files** | **~-2 lines** |
+
+---
+
+## Verification
+
+1. `bun run typecheck` — ensures no remaining references to removed `setContext`
+2. `bun run lint` — clean
+3. `bun test` — all pass (`setOrgProjectContext` is a no-op when Sentry is uninitialized)
+4. `bun run check:skill` — passes (no command signature changes)
+5. `bun run check:errors` — passes
+6. **Grep verification** — zero remaining `setContext` references in commands:
+   ```bash
+   # Should return 0 results (excluding comments/imports):
+   grep -rn "setContext" src/commands/ --include="*.ts" | grep -v "^\s*//" | grep -v "import"
+   # Resolution functions should have calls:
+   grep -c "setOrgProjectContext" src/lib/resolve-target.ts   # expect ~19
+   grep -c "setOrgProjectContext" src/lib/trace-target.ts     # expect ~8
+   ```
+7. **Manual smoke test**: Run `sentry dashboard list` with telemetry on and verify `sentry.org` tag appears.
