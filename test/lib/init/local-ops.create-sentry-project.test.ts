@@ -10,6 +10,12 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as clack from "@clack/prompts";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as apiClient from "../../../src/lib/api-client.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as dbRegions from "../../../src/lib/db/regions.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as projectCache from "../../../src/lib/db/project-cache.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as dsnIndex from "../../../src/lib/dsn/index.js";
 import { handleLocalOp } from "../../../src/lib/init/local-ops.js";
 import type {
   CreateSentryProjectPayload,
@@ -64,6 +70,12 @@ describe("create-sentry-project", () => {
   let buildProjectUrlSpy: ReturnType<typeof spyOn>;
   let selectSpy: ReturnType<typeof spyOn>;
   let isCancelSpy: ReturnType<typeof spyOn>;
+  let getOrgByNumericIdSpy: ReturnType<typeof spyOn>;
+  let detectDsnSpy: ReturnType<typeof spyOn>;
+  let getCachedProjectByDsnKeySpy: ReturnType<typeof spyOn>;
+  let setCachedProjectByDsnKeySpy: ReturnType<typeof spyOn>;
+  let findProjectByDsnKeySpy: ReturnType<typeof spyOn>;
+  let getProjectSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
@@ -76,6 +88,13 @@ describe("create-sentry-project", () => {
     isCancelSpy = spyOn(clack, "isCancel").mockImplementation(
       (v: unknown) => v === Symbol.for("cancel")
     );
+    // New spies — default to no-op so existing tests are unaffected
+    getOrgByNumericIdSpy = spyOn(dbRegions, "getOrgByNumericId").mockResolvedValue(undefined);
+    detectDsnSpy = spyOn(dsnIndex, "detectDsn").mockResolvedValue(null);
+    getCachedProjectByDsnKeySpy = spyOn(projectCache, "getCachedProjectByDsnKey").mockResolvedValue(undefined);
+    setCachedProjectByDsnKeySpy = spyOn(projectCache, "setCachedProjectByDsnKey").mockResolvedValue(undefined);
+    findProjectByDsnKeySpy = spyOn(apiClient, "findProjectByDsnKey").mockResolvedValue(null);
+    getProjectSpy = spyOn(apiClient, "getProject");
   });
 
   afterEach(() => {
@@ -87,6 +106,12 @@ describe("create-sentry-project", () => {
     buildProjectUrlSpy.mockRestore();
     selectSpy.mockRestore();
     isCancelSpy.mockRestore();
+    getOrgByNumericIdSpy.mockRestore();
+    detectDsnSpy.mockRestore();
+    getCachedProjectByDsnKeySpy.mockRestore();
+    setCachedProjectByDsnKeySpy.mockRestore();
+    findProjectByDsnKeySpy.mockRestore();
+    getProjectSpy.mockRestore();
   });
 
   function mockDownstreamSuccess(orgSlug: string) {
@@ -240,5 +265,196 @@ describe("create-sentry-project", () => {
     expect(result.ok).toBe(true);
     const data = result.data as { dsn: string };
     expect(data.dsn).toBe("");
+  });
+
+  describe("resolveOrgSlug — numeric org ID from DSN", () => {
+    test("numeric ID + cache hit → resolved to slug for project creation", async () => {
+      resolveOrgSpy.mockResolvedValue({ org: "4507492088676352" });
+      getOrgByNumericIdSpy.mockResolvedValue({
+        slug: "acme-corp",
+        regionUrl: "https://us.sentry.io",
+      });
+      mockDownstreamSuccess("acme-corp");
+
+      const result = await handleLocalOp(makePayload(), makeOptions());
+
+      expect(result.ok).toBe(true);
+      const data = result.data as { orgSlug: string };
+      expect(data.orgSlug).toBe("acme-corp");
+      expect(getOrgByNumericIdSpy).toHaveBeenCalledWith("4507492088676352");
+    });
+
+    test("numeric ID + cache miss → falls through to single org in listOrganizations", async () => {
+      resolveOrgSpy.mockResolvedValue({ org: "4507492088676352" });
+      getOrgByNumericIdSpy.mockResolvedValue(undefined);
+      listOrgsSpy.mockResolvedValue([
+        { id: "1", slug: "solo-org", name: "Solo Org" },
+      ]);
+      mockDownstreamSuccess("solo-org");
+
+      const result = await handleLocalOp(makePayload(), makeOptions());
+
+      expect(result.ok).toBe(true);
+      const data = result.data as { orgSlug: string };
+      expect(data.orgSlug).toBe("solo-org");
+    });
+
+    test("numeric ID + cache miss + multiple orgs + --yes → error with org list", async () => {
+      resolveOrgSpy.mockResolvedValue({ org: "4507492088676352" });
+      getOrgByNumericIdSpy.mockResolvedValue(undefined);
+      listOrgsSpy.mockResolvedValue([
+        { id: "1", slug: "org-a", name: "Org A" },
+        { id: "2", slug: "org-b", name: "Org B" },
+      ]);
+
+      const result = await handleLocalOp(
+        makePayload(),
+        makeOptions({ yes: true })
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain("Multiple organizations found");
+      expect(createProjectSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("detectExistingProject — existing DSN prompt", () => {
+    function mockExistingProject(orgSlug: string, projectSlug: string) {
+      detectDsnSpy.mockResolvedValue({
+        publicKey: "test-key-abc",
+        protocol: "https",
+        host: `o123.ingest.sentry.io`,
+        projectId: "42",
+        raw: `https://test-key-abc@o123.ingest.sentry.io/42`,
+        source: "env_file" as const,
+      });
+      getCachedProjectByDsnKeySpy.mockResolvedValue({
+        orgSlug,
+        orgName: orgSlug,
+        projectSlug,
+        projectName: projectSlug,
+        projectId: "42",
+        cachedAt: Date.now(),
+      });
+      getProjectSpy.mockResolvedValue({ ...sampleProject, slug: projectSlug });
+      tryGetPrimaryDsnSpy.mockResolvedValue("https://abc@o1.ingest.sentry.io/42");
+      buildProjectUrlSpy.mockReturnValue(
+        `https://sentry.io/settings/${orgSlug}/projects/${projectSlug}/`
+      );
+    }
+
+    test("no DSN found → no prompt, proceeds with normal creation", async () => {
+      detectDsnSpy.mockResolvedValue(null);
+      resolveOrgSpy.mockResolvedValue({ org: "acme-corp" });
+      mockDownstreamSuccess("acme-corp");
+
+      const result = await handleLocalOp(makePayload(), makeOptions());
+
+      expect(result.ok).toBe(true);
+      expect(selectSpy).not.toHaveBeenCalled();
+      expect(createProjectSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test("DSN found + --yes flag → auto-uses existing project without prompt", async () => {
+      mockExistingProject("acme-corp", "my-app");
+
+      const result = await handleLocalOp(
+        makePayload(),
+        makeOptions({ yes: true })
+      );
+
+      expect(result.ok).toBe(true);
+      const data = result.data as { orgSlug: string; projectSlug: string };
+      expect(data.orgSlug).toBe("acme-corp");
+      expect(data.projectSlug).toBe("my-app");
+      expect(selectSpy).not.toHaveBeenCalled();
+      expect(createProjectSpy).not.toHaveBeenCalled();
+    });
+
+    test("DSN found + pick 'existing' → returns existing project details", async () => {
+      mockExistingProject("acme-corp", "my-app");
+      selectSpy.mockResolvedValue("existing");
+
+      const result = await handleLocalOp(makePayload(), makeOptions());
+
+      expect(result.ok).toBe(true);
+      const data = result.data as { orgSlug: string; projectSlug: string };
+      expect(data.orgSlug).toBe("acme-corp");
+      expect(data.projectSlug).toBe("my-app");
+      expect(createProjectSpy).not.toHaveBeenCalled();
+    });
+
+    test("DSN found + pick 'create' → proceeds with normal project creation", async () => {
+      mockExistingProject("acme-corp", "my-app");
+      selectSpy.mockResolvedValue("create");
+      resolveOrgSpy.mockResolvedValue({ org: "acme-corp" });
+      mockDownstreamSuccess("acme-corp");
+
+      const result = await handleLocalOp(makePayload(), makeOptions());
+
+      expect(result.ok).toBe(true);
+      expect(createProjectSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test("DSN found + cancel select → ok:false with cancelled error", async () => {
+      mockExistingProject("acme-corp", "my-app");
+      selectSpy.mockResolvedValue(Symbol.for("cancel"));
+
+      const result = await handleLocalOp(makePayload(), makeOptions());
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain("Cancelled");
+      expect(createProjectSpy).not.toHaveBeenCalled();
+    });
+
+    test("DSN found + API lookup (cache miss) → caches project and prompts user", async () => {
+      detectDsnSpy.mockResolvedValue({
+        publicKey: "test-key-abc",
+        protocol: "https",
+        host: "o123.ingest.sentry.io",
+        projectId: "42",
+        raw: "https://test-key-abc@o123.ingest.sentry.io/42",
+        source: "env_file" as const,
+      });
+      getCachedProjectByDsnKeySpy.mockResolvedValue(undefined); // cache miss
+      findProjectByDsnKeySpy.mockResolvedValue({
+        ...sampleProject,
+        organization: { id: "1", slug: "acme-corp", name: "Acme Corp" },
+      });
+      setCachedProjectByDsnKeySpy.mockResolvedValue(undefined);
+      selectSpy.mockResolvedValue("existing");
+      getProjectSpy.mockResolvedValue(sampleProject);
+      tryGetPrimaryDsnSpy.mockResolvedValue("https://abc@o1.ingest.sentry.io/42");
+      buildProjectUrlSpy.mockReturnValue(
+        "https://sentry.io/settings/acme-corp/projects/my-app/"
+      );
+
+      const result = await handleLocalOp(makePayload(), makeOptions());
+
+      expect(result.ok).toBe(true);
+      expect(setCachedProjectByDsnKeySpy).toHaveBeenCalledTimes(1);
+      expect(createProjectSpy).not.toHaveBeenCalled();
+    });
+
+    test("DSN found + API throws (inaccessible org) → no prompt, normal creation", async () => {
+      detectDsnSpy.mockResolvedValue({
+        publicKey: "test-key-abc",
+        protocol: "https",
+        host: "o999.ingest.sentry.io",
+        projectId: "99",
+        raw: "https://test-key-abc@o999.ingest.sentry.io/99",
+        source: "env_file" as const,
+      });
+      getCachedProjectByDsnKeySpy.mockResolvedValue(undefined);
+      findProjectByDsnKeySpy.mockRejectedValue(new Error("403 Forbidden"));
+      resolveOrgSpy.mockResolvedValue({ org: "acme-corp" });
+      mockDownstreamSuccess("acme-corp");
+
+      const result = await handleLocalOp(makePayload(), makeOptions());
+
+      expect(result.ok).toBe(true);
+      expect(selectSpy).not.toHaveBeenCalled();
+      expect(createProjectSpy).toHaveBeenCalledTimes(1);
+    });
   });
 });
