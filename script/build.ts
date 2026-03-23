@@ -36,6 +36,7 @@ import { gzip } from "node:zlib";
 import { processBinary } from "binpunch";
 import { $ } from "bun";
 import pkg from "../package.json";
+import { injectDebugId } from "./debug-id.js";
 
 const gzipAsync = promisify(gzip);
 
@@ -117,15 +118,28 @@ async function bundleJs(): Promise<boolean> {
 }
 
 /**
- * Upload the sourcemap to Sentry for server-side stack trace resolution.
+ * Inject debug IDs and upload sourcemap to Sentry.
  *
- * Uses @sentry/cli's `sourcemaps upload` command. The sourcemap is associated
- * with the release version so Sentry matches it against incoming error events.
+ * Debug ID injection is done natively (no external binary).
+ * Upload still uses @sentry/cli temporarily — will be replaced with
+ * a native API-based upload in a follow-up PR.
  *
  * Requires SENTRY_AUTH_TOKEN environment variable. Skips gracefully when
  * not available (local builds, PR checks).
  */
-function uploadSourcemap(): void {
+async function injectAndUploadSourcemap(): Promise<void> {
+  // Always inject debug IDs (even without auth token) so local builds
+  // get debug IDs for development/testing purposes.
+  console.log("  Injecting debug IDs...");
+  try {
+    const { debugId } = await injectDebugId(BUNDLE_JS, SOURCEMAP_FILE);
+    console.log(`    -> Debug ID: ${debugId}`);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.warn(`    Warning: Debug ID injection failed: ${msg}`);
+    return;
+  }
+
   if (!process.env.SENTRY_AUTH_TOKEN) {
     console.log("  No SENTRY_AUTH_TOKEN, skipping sourcemap upload");
     return;
@@ -135,11 +149,8 @@ function uploadSourcemap(): void {
 
   // Single quotes prevent $bunfs shell expansion on POSIX (CI is always Linux).
   try {
-    // Inject debug IDs into JS + map, then upload with /$bunfs/root/ prefix
-    // to match Bun's compiled binary stack trace paths.
-    execSync("npx @sentry/cli sourcemaps inject dist-bin/", {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    // Upload with /$bunfs/root/ prefix to match Bun's compiled binary
+    // stack trace paths. Debug IDs are already injected above.
     execSync(
       `npx @sentry/cli sourcemaps upload --org sentry --project cli --release ${VERSION} --url-prefix '/$bunfs/root/' ${BUNDLE_JS} ${SOURCEMAP_FILE}`,
       { stdio: ["pipe", "pipe", "pipe"] }
@@ -294,8 +305,8 @@ async function build(): Promise<void> {
     process.exit(1);
   }
 
-  // Upload sourcemap to Sentry before compiling (non-fatal on failure)
-  await uploadSourcemap();
+  // Inject debug IDs and upload sourcemap to Sentry before compiling (non-fatal on failure)
+  await injectAndUploadSourcemap();
 
   console.log("");
 
