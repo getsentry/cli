@@ -11,9 +11,9 @@ import * as clack from "@clack/prompts";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as apiClient from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as dbRegions from "../../../src/lib/db/regions.js";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as projectCache from "../../../src/lib/db/project-cache.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as dbRegions from "../../../src/lib/db/regions.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as dsnIndex from "../../../src/lib/dsn/index.js";
 import { handleLocalOp } from "../../../src/lib/init/local-ops.js";
@@ -89,11 +89,23 @@ describe("create-sentry-project", () => {
       (v: unknown) => v === Symbol.for("cancel")
     );
     // New spies — default to no-op so existing tests are unaffected
-    getOrgByNumericIdSpy = spyOn(dbRegions, "getOrgByNumericId").mockResolvedValue(undefined);
+    getOrgByNumericIdSpy = spyOn(
+      dbRegions,
+      "getOrgByNumericId"
+    ).mockResolvedValue(undefined);
     detectDsnSpy = spyOn(dsnIndex, "detectDsn").mockResolvedValue(null);
-    getCachedProjectByDsnKeySpy = spyOn(projectCache, "getCachedProjectByDsnKey").mockResolvedValue(undefined);
-    setCachedProjectByDsnKeySpy = spyOn(projectCache, "setCachedProjectByDsnKey").mockResolvedValue(undefined);
-    findProjectByDsnKeySpy = spyOn(apiClient, "findProjectByDsnKey").mockResolvedValue(null);
+    getCachedProjectByDsnKeySpy = spyOn(
+      projectCache,
+      "getCachedProjectByDsnKey"
+    ).mockResolvedValue(undefined);
+    setCachedProjectByDsnKeySpy = spyOn(
+      projectCache,
+      "setCachedProjectByDsnKey"
+    ).mockResolvedValue(undefined);
+    findProjectByDsnKeySpy = spyOn(
+      apiClient,
+      "findProjectByDsnKey"
+    ).mockResolvedValue(null);
     getProjectSpy = spyOn(apiClient, "getProject");
   });
 
@@ -323,9 +335,9 @@ describe("create-sentry-project", () => {
       detectDsnSpy.mockResolvedValue({
         publicKey: "test-key-abc",
         protocol: "https",
-        host: `o123.ingest.sentry.io`,
+        host: "o123.ingest.sentry.io",
         projectId: "42",
-        raw: `https://test-key-abc@o123.ingest.sentry.io/42`,
+        raw: "https://test-key-abc@o123.ingest.sentry.io/42",
         source: "env_file" as const,
       });
       getCachedProjectByDsnKeySpy.mockResolvedValue({
@@ -337,7 +349,9 @@ describe("create-sentry-project", () => {
         cachedAt: Date.now(),
       });
       getProjectSpy.mockResolvedValue({ ...sampleProject, slug: projectSlug });
-      tryGetPrimaryDsnSpy.mockResolvedValue("https://abc@o1.ingest.sentry.io/42");
+      tryGetPrimaryDsnSpy.mockResolvedValue(
+        "https://abc@o1.ingest.sentry.io/42"
+      );
       buildProjectUrlSpy.mockReturnValue(
         `https://sentry.io/settings/${orgSlug}/projects/${projectSlug}/`
       );
@@ -424,7 +438,9 @@ describe("create-sentry-project", () => {
       setCachedProjectByDsnKeySpy.mockResolvedValue(undefined);
       selectSpy.mockResolvedValue("existing");
       getProjectSpy.mockResolvedValue(sampleProject);
-      tryGetPrimaryDsnSpy.mockResolvedValue("https://abc@o1.ingest.sentry.io/42");
+      tryGetPrimaryDsnSpy.mockResolvedValue(
+        "https://abc@o1.ingest.sentry.io/42"
+      );
       buildProjectUrlSpy.mockReturnValue(
         "https://sentry.io/settings/acme-corp/projects/my-app/"
       );

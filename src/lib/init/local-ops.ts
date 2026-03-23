@@ -38,6 +38,9 @@ import type {
   WizardOptions,
 } from "./types.js";
 
+/** Matches a bare numeric org ID extracted from a DSN (e.g. "4507492088676352"). */
+const NUMERIC_ORG_ID_RE = /^\d+$/;
+
 /** Whitespace characters used for JSON indentation. */
 const Indenter = {
   SPACE: " ",
@@ -678,7 +681,7 @@ async function resolveOrgSlug(
     // If the detected org is a raw numeric ID (extracted from a DSN), try to
     // resolve it to a real slug. Numeric IDs can fail for write operations like
     // project/team creation, and may belong to a different Sentry account.
-    if (/^\d+$/.test(resolved.org)) {
+    if (NUMERIC_ORG_ID_RE.test(resolved.org)) {
       const { getOrgByNumericId } = await import("../db/regions.js");
       const match = await getOrgByNumericId(resolved.org);
       if (match) {
@@ -769,7 +772,9 @@ async function detectExistingProject(cwd: string): Promise<{
 } | null> {
   const { detectDsn } = await import("../dsn/index.js");
   const dsn = await detectDsn(cwd);
-  if (!dsn?.publicKey) return null;
+  if (!dsn?.publicKey) {
+    return null;
+  }
 
   // Check public-key cache first (no API call if previously resolved)
   const { getCachedProjectByDsnKey } = await import("../db/project-cache.js");
@@ -804,6 +809,56 @@ async function detectExistingProject(cwd: string): Promise<{
   return null;
 }
 
+/**
+ * When no explicit org/project is provided, check for an existing Sentry setup
+ * and either auto-select it (--yes) or prompt the user interactively.
+ *
+ * Returns a LocalOpResult to return early, or null to proceed with creation.
+ */
+async function promptForExistingProject(
+  cwd: string,
+  yes: boolean
+): Promise<LocalOpResult | null> {
+  const existing = await detectExistingProject(cwd);
+  if (!existing) {
+    return null;
+  }
+
+  if (yes) {
+    return tryGetExistingProject(existing.orgSlug, existing.projectSlug);
+  }
+
+  const choice = await select({
+    message: "Found an existing Sentry project in this codebase.",
+    options: [
+      {
+        value: "existing" as const,
+        label: `Use existing project (${existing.orgSlug}/${existing.projectSlug})`,
+        hint: "Sentry is already configured here",
+      },
+      {
+        value: "create" as const,
+        label: "Create a new Sentry project",
+      },
+    ],
+  });
+  if (isCancel(choice)) {
+    return { ok: false, error: "Cancelled." };
+  }
+  if (choice === "existing") {
+    const result = await tryGetExistingProject(
+      existing.orgSlug,
+      existing.projectSlug
+    );
+    if (result) {
+      return result;
+    }
+    // Project deleted or inaccessible — fall through to creation
+  }
+  return null;
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: wizard orchestration requires sequential branching
 async function createSentryProject(
   payload: CreateSentryProjectPayload,
   options: WizardOptions
@@ -834,44 +889,10 @@ async function createSentryProject(
   }
 
   // When no explicit org/project provided, check if Sentry is already set up
-  if (!options.org && !options.project) {
-    const existing = await detectExistingProject(payload.cwd);
-    if (existing) {
-      if (options.yes) {
-        // Non-interactive: auto-use existing project
-        const result = await tryGetExistingProject(
-          existing.orgSlug,
-          existing.projectSlug
-        );
-        if (result) return result;
-      } else {
-        const choice = await select({
-          message: "Found an existing Sentry project in this codebase.",
-          options: [
-            {
-              value: "existing" as const,
-              label: `Use existing project (${existing.orgSlug}/${existing.projectSlug})`,
-              hint: "Sentry is already configured here",
-            },
-            {
-              value: "create" as const,
-              label: "Create a new Sentry project",
-            },
-          ],
-        });
-        if (isCancel(choice)) {
-          return { ok: false, error: "Cancelled." };
-        }
-        if (choice === "existing") {
-          const result = await tryGetExistingProject(
-            existing.orgSlug,
-            existing.projectSlug
-          );
-          if (result) return result;
-          // Project deleted or inaccessible — fall through to creation
-        }
-        // choice === "create": fall through to normal org resolution + creation
-      }
+  if (!(options.org || options.project)) {
+    const result = await promptForExistingProject(payload.cwd, options.yes);
+    if (result) {
+      return result;
     }
   }
 
