@@ -195,17 +195,23 @@ export async function buildArtifactBundle(
 
   // Stream ZIP entries to disk
   const zip = await ZipWriter.create(outputPath);
-  await zip.addEntry("manifest.json", Buffer.from(manifest, "utf-8"));
+  try {
+    await zip.addEntry("manifest.json", Buffer.from(manifest, "utf-8"));
 
-  for (const file of files) {
-    const bundlePath = file.url.startsWith("~/")
-      ? `_/_/${file.url.slice(2)}`
-      : `_/${file.url}`;
-    const content = await readFile(file.path);
-    await zip.addEntry(bundlePath, content);
+    for (const file of files) {
+      const bundlePath = file.url.startsWith("~/")
+        ? `_/_/${file.url.slice(2)}`
+        : `_/${file.url}`;
+      const content = await readFile(file.path);
+      await zip.addEntry(bundlePath, content);
+    }
+
+    await zip.finalize();
+  } catch (error) {
+    // Close handle without finalizing on entry write failure
+    await zip.close();
+    throw error;
   }
-
-  await zip.finalize();
 }
 
 /**
@@ -257,11 +263,10 @@ export async function uploadSourcemaps(options: UploadOptions): Promise<void> {
   // Step 1: Get chunk upload configuration
   const serverOptions = await getChunkUploadOptions(org);
 
-  // Step 2: Build artifact bundle ZIP to a temp file
+  // Step 2: Build artifact bundle ZIP to a temp file, then upload
   const tmpZipPath = join(tmpdir(), `sentry-artifact-bundle-${Date.now()}.zip`);
-  await buildArtifactBundle(tmpZipPath, files, { org, project, release });
-
   try {
+    await buildArtifactBundle(tmpZipPath, files, { org, project, release });
     await uploadArtifactBundle({
       tmpZipPath,
       org,

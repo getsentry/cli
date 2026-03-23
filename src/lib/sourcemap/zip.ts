@@ -102,6 +102,19 @@ export class ZipWriter {
   }
 
   /**
+   * Close the underlying file handle without finalizing the archive.
+   *
+   * Use for error cleanup when {@link addEntry} fails partway through.
+   * The resulting file will be incomplete, but the handle won't leak.
+   * Safe to call multiple times — subsequent calls are no-ops.
+   */
+  async close(): Promise<void> {
+    await this.fh.close().catch(() => {
+      // Already closed — ignore
+    });
+  }
+
+  /**
    * Add a file entry to the archive.
    *
    * The data is compressed with raw DEFLATE and written to disk
@@ -164,58 +177,61 @@ export class ZipWriter {
    * After this call the writer instance must not be reused.
    */
   async finalize(): Promise<void> {
-    const centralDirOffset = this.offset;
+    try {
+      const centralDirOffset = this.offset;
 
-    for (const entry of this.entries) {
-      const rec = Buffer.alloc(CENTRAL_HEADER_FIXED_SIZE);
-      rec.writeUInt32LE(CENTRAL_DIR_HEADER_SIG, 0);
-      rec.writeUInt16LE(ZIP_VERSION, 4);
-      rec.writeUInt16LE(ZIP_VERSION, 6);
-      // General purpose bit flag — 0
-      rec.writeUInt16LE(0, 8);
-      rec.writeUInt16LE(entry.method, 10);
-      // Last mod time and date — 0
-      rec.writeUInt16LE(0, 12);
-      rec.writeUInt16LE(0, 14);
-      // biome-ignore lint/suspicious/noBitwiseOperators: coerce signed CRC-32 to unsigned for writeUInt32LE
-      rec.writeUInt32LE(entry.crc >>> 0, 16);
-      rec.writeUInt32LE(entry.compressedSize, 20);
-      rec.writeUInt32LE(entry.uncompressedSize, 24);
-      rec.writeUInt16LE(entry.name.length, 28);
-      // Extra field length — 0
-      rec.writeUInt16LE(0, 30);
-      // File comment length — 0
-      rec.writeUInt16LE(0, 32);
-      // Disk number start — 0
-      rec.writeUInt16LE(0, 34);
-      // Internal file attributes — 0
-      rec.writeUInt16LE(0, 36);
-      // External file attributes — 0
-      rec.writeUInt32LE(0, 38);
-      rec.writeUInt32LE(entry.localHeaderOffset, 42);
+      for (const entry of this.entries) {
+        const rec = Buffer.alloc(CENTRAL_HEADER_FIXED_SIZE);
+        rec.writeUInt32LE(CENTRAL_DIR_HEADER_SIG, 0);
+        rec.writeUInt16LE(ZIP_VERSION, 4);
+        rec.writeUInt16LE(ZIP_VERSION, 6);
+        // General purpose bit flag — 0
+        rec.writeUInt16LE(0, 8);
+        rec.writeUInt16LE(entry.method, 10);
+        // Last mod time and date — 0
+        rec.writeUInt16LE(0, 12);
+        rec.writeUInt16LE(0, 14);
+        // biome-ignore lint/suspicious/noBitwiseOperators: coerce signed CRC-32 to unsigned for writeUInt32LE
+        rec.writeUInt32LE(entry.crc >>> 0, 16);
+        rec.writeUInt32LE(entry.compressedSize, 20);
+        rec.writeUInt32LE(entry.uncompressedSize, 24);
+        rec.writeUInt16LE(entry.name.length, 28);
+        // Extra field length — 0
+        rec.writeUInt16LE(0, 30);
+        // File comment length — 0
+        rec.writeUInt16LE(0, 32);
+        // Disk number start — 0
+        rec.writeUInt16LE(0, 34);
+        // Internal file attributes — 0
+        rec.writeUInt16LE(0, 36);
+        // External file attributes — 0
+        rec.writeUInt32LE(0, 38);
+        rec.writeUInt32LE(entry.localHeaderOffset, 42);
 
-      await this.fh.write(rec, 0, rec.length);
-      await this.fh.write(entry.name, 0, entry.name.length);
+        await this.fh.write(rec, 0, rec.length);
+        await this.fh.write(entry.name, 0, entry.name.length);
 
-      this.offset += CENTRAL_HEADER_FIXED_SIZE + entry.name.length;
+        this.offset += CENTRAL_HEADER_FIXED_SIZE + entry.name.length;
+      }
+
+      const centralDirSize = this.offset - centralDirOffset;
+
+      const eocd = Buffer.alloc(EOCD_SIZE);
+      eocd.writeUInt32LE(EOCD_SIG, 0);
+      // Disk number — 0
+      eocd.writeUInt16LE(0, 4);
+      // Disk number with central directory — 0
+      eocd.writeUInt16LE(0, 6);
+      eocd.writeUInt16LE(this.entries.length, 8);
+      eocd.writeUInt16LE(this.entries.length, 10);
+      eocd.writeUInt32LE(centralDirSize, 12);
+      eocd.writeUInt32LE(centralDirOffset, 16);
+      // ZIP file comment length — 0
+      eocd.writeUInt16LE(0, 20);
+
+      await this.fh.write(eocd, 0, eocd.length);
+    } finally {
+      await this.fh.close();
     }
-
-    const centralDirSize = this.offset - centralDirOffset;
-
-    const eocd = Buffer.alloc(EOCD_SIZE);
-    eocd.writeUInt32LE(EOCD_SIG, 0);
-    // Disk number — 0
-    eocd.writeUInt16LE(0, 4);
-    // Disk number with central directory — 0
-    eocd.writeUInt16LE(0, 6);
-    eocd.writeUInt16LE(this.entries.length, 8);
-    eocd.writeUInt16LE(this.entries.length, 10);
-    eocd.writeUInt32LE(centralDirSize, 12);
-    eocd.writeUInt32LE(centralDirOffset, 16);
-    // ZIP file comment length — 0
-    eocd.writeUInt16LE(0, 20);
-
-    await this.fh.write(eocd, 0, eocd.length);
-    await this.fh.close();
   }
 }
