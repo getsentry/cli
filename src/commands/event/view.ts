@@ -120,9 +120,11 @@ function parseSingleArg(arg: string): ParsedPositionalArgs {
   if (slashIdx !== -1 && arg.indexOf("/", slashIdx + 1) === -1) {
     const afterSlash = arg.slice(slashIdx + 1);
     if (afterSlash && looksLikeIssueShortId(afterSlash)) {
+      // Use "org/" (trailing slash) to signal OrgAll mode so downstream
+      // parseOrgProjectArg interprets this as an org, not a project search.
       return {
         eventId: "latest",
-        targetArg: arg.slice(0, slashIdx),
+        targetArg: `${arg.slice(0, slashIdx)}/`,
         issueShortId: afterSlash,
       };
     }
@@ -511,14 +513,18 @@ async function resolveIssueShortcut(
   }
 
   // Issue short ID auto-redirect: user passed an issue short ID
-  // (e.g., "BRUNCHIE-APP-29") instead of a hex event ID. Resolve
-  // the issue and show its latest event.
+  // (e.g., "BRUNCHIE-APP-29" or "figma/FULLSCREEN-2RN") instead of a hex
+  // event ID. Resolve the issue and show its latest event.
   if (issueShortId) {
     log.warn(
       `'${issueShortId}' is an issue short ID, not an event ID. Showing the latest event.`
     );
 
-    const resolved = await resolveOrg({ cwd });
+    // Use the explicit org from the parsed target if available (e.g.,
+    // "figma/" → org-all with org "figma"), otherwise fall back to
+    // auto-detection via DSN/env/config.
+    const explicitOrg = parsed.type === "org-all" ? parsed.org : undefined;
+    const resolved = await resolveOrg({ org: explicitOrg, cwd });
     if (!resolved) {
       throw new ContextError(
         "Organization",

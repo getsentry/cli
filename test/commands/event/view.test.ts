@@ -85,14 +85,15 @@ describe("parsePositionalArgs", () => {
     test("detects org/ISSUE-SHORT-ID pattern (CLI-9K)", () => {
       const result = parsePositionalArgs(["figma/FULLSCREEN-2RN"]);
       expect(result.eventId).toBe("latest");
-      expect(result.targetArg).toBe("figma");
+      // Trailing slash signals OrgAll mode so downstream resolves org correctly
+      expect(result.targetArg).toBe("figma/");
       expect(result.issueShortId).toBe("FULLSCREEN-2RN");
     });
 
     test("detects org/CLI-G pattern", () => {
       const result = parsePositionalArgs(["sentry/CLI-G"]);
       expect(result.eventId).toBe("latest");
-      expect(result.targetArg).toBe("sentry");
+      expect(result.targetArg).toBe("sentry/");
       expect(result.issueShortId).toBe("CLI-G");
     });
 
