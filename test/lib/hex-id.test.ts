@@ -13,7 +13,7 @@
 import { describe, expect, test } from "bun:test";
 import { array, constantFrom, assert as fcAssert, property } from "fast-check";
 import { ValidationError } from "../../src/lib/errors.js";
-import { validateHexId } from "../../src/lib/hex-id.js";
+import { validateHexId, validateSpanId } from "../../src/lib/hex-id.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
 const HEX_CHARS = "0123456789abcdefABCDEF".split("");
@@ -111,6 +111,43 @@ describe("validateHexId", () => {
     }
   });
 
+  test("error hints span ID when 16-char hex is passed as trace ID", () => {
+    try {
+      validateHexId("a1b2c3d4e5f67890", "trace ID");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      const msg = (error as ValidationError).message;
+      expect(msg).toContain("trace ID");
+      expect(msg).toContain("looks like a span ID");
+      expect(msg).toContain("sentry span view");
+    }
+  });
+
+  test("error hints non-hex input when slug is passed as trace ID", () => {
+    try {
+      validateHexId("my-project", "trace ID");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      const msg = (error as ValidationError).message;
+      expect(msg).toContain("doesn't look like a hex ID");
+      expect(msg).toContain("project");
+    }
+  });
+
+  test("no extra hint for random-length hex (not a span ID)", () => {
+    try {
+      validateHexId("abc123", "log ID");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      const msg = (error as ValidationError).message;
+      expect(msg).not.toContain("span ID");
+      expect(msg).not.toContain("project");
+    }
+  });
+
   test("throws for newline-separated IDs (not a single valid ID)", () => {
     const multiLine = `${VALID_ID}\n${"bbbb1111cccc2222dddd3333eeee4444"}`;
     expect(() => validateHexId(multiLine, "test ID")).toThrow(ValidationError);
@@ -157,6 +194,40 @@ describe("validateHexId", () => {
     expect(() =>
       validateHexId("aaaa-1111bbbb-2222cccc-3333dddd-4444", "test ID")
     ).toThrow(ValidationError);
+  });
+});
+
+describe("validateSpanId", () => {
+  test("returns the span ID for valid input", () => {
+    expect(validateSpanId("a1b2c3d4e5f67890")).toBe("a1b2c3d4e5f67890");
+  });
+
+  test("normalizes to lowercase", () => {
+    expect(validateSpanId("A1B2C3D4E5F67890")).toBe("a1b2c3d4e5f67890");
+  });
+
+  test("throws for 32-char hex with trace ID hint", () => {
+    try {
+      validateSpanId("aaaa1111bbbb2222cccc3333dddd4444");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      const msg = (error as ValidationError).message;
+      expect(msg).toContain("span ID");
+      expect(msg).toContain("looks like a trace ID");
+    }
+  });
+
+  test("throws for short hex without trace ID hint", () => {
+    try {
+      validateSpanId("abc123");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      const msg = (error as ValidationError).message;
+      expect(msg).toContain("span ID");
+      expect(msg).not.toContain("trace ID");
+    }
   });
 });
 

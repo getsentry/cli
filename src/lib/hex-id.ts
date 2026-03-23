@@ -24,6 +24,9 @@ export const UUID_DASH_RE =
 /** Max display length for invalid IDs in error messages before truncation */
 const MAX_DISPLAY_LENGTH = 40;
 
+/** Matches any character that is NOT a lowercase hex digit (used for slug detection in error hints) */
+const NON_HEX_RE = /[^0-9a-f]/;
+
 /**
  * Normalize a potential hex ID: trim, lowercase, strip UUID dashes.
  * Does NOT validate — call this before checking {@link HEX_ID_RE}.
@@ -69,10 +72,25 @@ export function validateHexId(value: string, label: string): string {
       normalized.length > MAX_DISPLAY_LENGTH
         ? `${normalized.slice(0, MAX_DISPLAY_LENGTH - 3)}...`
         : normalized;
-    throw new ValidationError(
+
+    let message =
       `Invalid ${label} "${display}". Expected a 32-character hexadecimal string.\n\n` +
-        "Example: abc123def456abc123def456abc123de"
-    );
+      "Example: abc123def456abc123def456abc123de";
+
+    // Detect common misidentified entity types and add helpful hints
+    if (SPAN_ID_RE.test(normalized)) {
+      // 16-char hex looks like a span ID
+      message +=
+        "\n\nThis looks like a span ID (16 characters). " +
+        `If you have the trace ID, try: sentry span view <trace-id> ${display}`;
+    } else if (NON_HEX_RE.test(normalized)) {
+      // Contains non-hex characters — likely a slug or name
+      message +=
+        `\n\nThis doesn't look like a hex ID. If this is a project, ` +
+        `specify it before the ID: <org>/<project> <${label}>`;
+    }
+
+    throw new ValidationError(message);
   }
 
   return normalized;
@@ -97,10 +115,18 @@ export function validateSpanId(value: string): string {
       trimmed.length > MAX_DISPLAY_LENGTH
         ? `${trimmed.slice(0, MAX_DISPLAY_LENGTH - 3)}...`
         : trimmed;
-    throw new ValidationError(
+
+    let message =
       `Invalid span ID "${display}". Expected a 16-character hexadecimal string.\n\n` +
-        "Example: a1b2c3d4e5f67890"
-    );
+      "Example: a1b2c3d4e5f67890";
+
+    // Detect 32-char hex (trace/log ID) passed as span ID
+    if (HEX_ID_RE.test(trimmed)) {
+      message +=
+        "\n\nThis looks like a trace ID (32 characters), not a span ID.";
+    }
+
+    throw new ValidationError(message);
   }
 
   return trimmed;
