@@ -1,6 +1,6 @@
 ---
 name: sentry-cli
-version: 0.19.0
+version: 0.20.0
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 requires:
   bins: ["sentry"]
@@ -137,7 +137,7 @@ Display types with default sizes:
 
 Use **common** types for general dashboards. Use **specialized** only when specifically requested. Avoid **internal** types unless the user explicitly asks.
 
-Available datasets: `spans` (default, covers most use cases), `discover`, `issue`, `error-events`, `transaction-like`, `metrics`, `logs`.
+Available datasets: `spans` (default, covers most use cases), `discover`, `issue`, `error-events`, `transaction-like`, `metrics`, `logs`, `tracemetrics`, `preprod-app-size`.
 
 Run `sentry dashboard widget --help` for the full list including aggregate functions.
 
@@ -178,7 +178,6 @@ The CLI must be installed and authenticated before use.
 ```bash
 curl https://cli.sentry.dev/install -fsS | bash
 curl https://cli.sentry.dev/install -fsS | bash -s -- --version nightly
-brew install getsentry/tools/sentry
 
 # Or install via npm/pnpm/bun
 npm install -g sentry
@@ -334,9 +333,9 @@ Manage product trials
 
 ### Init
 
-Initialize Sentry in your project
+Initialize Sentry in your project (experimental)
 
-- `sentry init <target> <directory>` — Initialize Sentry in your project
+- `sentry init <target> <directory>` — Initialize Sentry in your project (experimental)
 
 → Full flags and examples: `references/setup.md`
 
