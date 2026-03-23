@@ -1,0 +1,106 @@
+# Fix Node 20 Deprecation Warnings in GitHub Actions
+
+## Problem
+13 warnings on CI run https://github.com/getsentry/cli/actions/runs/23457533348 — all are "Node.js 20 actions are deprecated". GitHub will force Node.js 24 starting June 2, 2026.
+
+## Unique Deprecated Actions (from warnings)
+
+| Action | Current Version | Upgrade To | Node Runtime |
+|--------|----------------|------------|-------------|
+| `actions/checkout` | `@v4` (10 places in ci.yml, generate-skill.yml, docs-preview.yml) | `@v6` | node24 |
+| `actions/cache` | `@v4` (7 places) | `@v5` | node24 |
+| `actions/upload-artifact` | `@v4` (4 places) | `@v7` | node24 |
+| `actions/download-artifact` | `@v4` (3 places) | `@v8` | node24 |
+| `actions/setup-node` | `@v4` (2 places) | `@v6` | node24 |
+| `actions/create-github-app-token` | `@v2.2.1` (2 places) | `@v3` | node24 |
+| `dorny/paths-filter` | SHA `de90cc6...` (v3.0.2) | `@v4` | node24 |
+| `getsentry/codecov-action` | `@main` | **Cannot fix here** — the action itself uses `node20` in its `action.yml` | node20 |
+
+## Notes
+- `release.yml` already uses `actions/checkout@v6` — no change needed there
+- `oven-sh/setup-bun@v2` already resolves to v2.2.0 with node24 — no change needed
+- `rossjrw/pr-preview-action@v1` is a composite action (shell-based) — no Node runtime concern
+- `getsentry/codecov-action@main` uses `node20` in its own `action.yml` — needs a fix in that separate repo, not here
+- `changelog-preview.yml` uses a reusable workflow from `getsentry/craft` — no direct action references to update
+
+## Changes
+
+### File: `.github/workflows/ci.yml`
+
+| Line | Current | New |
+|------|---------|-----|
+| 35 | `actions/checkout@v4` | `actions/checkout@v6` |
+| 36 | `dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2` | `dorny/paths-filter@v4` |
+| 97 | `actions/create-github-app-token@v2.2.1` | `actions/create-github-app-token@v3` |
+| 101 | `actions/checkout@v4` | `actions/checkout@v6` |
+| 106 | `actions/cache@v4` | `actions/cache@v5` |
+| 139 | `actions/checkout@v4` | `actions/checkout@v6` |
+| 141 | `actions/cache@v4` | `actions/cache@v5` |
+| 165 | `actions/checkout@v4` | `actions/checkout@v6` |
+| 167 | `actions/cache@v4` | `actions/cache@v5` |
+| 196 | `actions/checkout@v4` | `actions/checkout@v6` |
+| 198 | `actions/cache@v4` | `actions/cache@v5` |
+| 243 | `actions/upload-artifact@v4` | `actions/upload-artifact@v7` |
+| 252 | `actions/upload-artifact@v4` | `actions/upload-artifact@v7` |
+| 265 | `actions/download-artifact@v4` | `actions/download-artifact@v8` |
+| 271 | `actions/download-artifact@v4` | `actions/download-artifact@v8` |
+| 407 | `actions/checkout@v4` | `actions/checkout@v6` |
+| 409 | `actions/cache@v4` | `actions/cache@v5` |
+| 417 | `actions/download-artifact@v4` | `actions/download-artifact@v8` |
+| 440 | `actions/checkout@v4` | `actions/checkout@v6` |
+| 442 | `actions/setup-node@v4` | `actions/setup-node@v6` |
+| 445 | `actions/cache@v4` | `actions/cache@v5` |
+| 462 | `actions/upload-artifact@v4` | `actions/upload-artifact@v7` |
+| 471 | `actions/checkout@v4` | `actions/checkout@v6` |
+| 484 | `actions/upload-artifact@v4` | `actions/upload-artifact@v7` |
+
+### File: `.github/workflows/release.yml`
+
+| Line | Current | New |
+|------|---------|-----|
+| 25 | `actions/create-github-app-token@v2.2.1` | `actions/create-github-app-token@v3` |
+| 34 | `actions/setup-node@v4` | `actions/setup-node@v6` |
+
+(Line 29 `actions/checkout@v6` is already correct)
+
+### File: `.github/workflows/generate-skill.yml`
+
+| Line | Current | New |
+|------|---------|-----|
+| 19 | `actions/checkout@v4` | `actions/checkout@v6` |
+| 25 | `actions/cache@v4` | `actions/cache@v5` |
+
+### File: `.github/workflows/docs-preview.yml`
+
+| Line | Current | New |
+|------|---------|-----|
+| 17 | `actions/checkout@v4` | `actions/checkout@v6` |
+
+### Files NOT changed
+- `.github/workflows/cleanup-nightlies.yml` — uses no Node-based actions (only shell `run:` steps)
+- `.github/workflows/changelog-preview.yml` — only uses reusable workflow reference
+
+## Breaking Changes Review
+
+- **`actions/upload-artifact@v7`**: Adds `archive` input (default `true`). Our usage doesn't set it, so behavior is unchanged.
+- **`actions/download-artifact@v8`**: Defaults `digest-mismatch` to `error`. This is stricter but desirable for our CI (catches corrupted artifacts).
+- **`actions/create-github-app-token@v3`**: Requires Runner v2.327.1+. GitHub-hosted runners already meet this.
+- **`dorny/paths-filter@v4`**: Node 24 upgrade, no input changes.
+- **`actions/setup-node@v6`**: Limits automatic caching to npm only (breaking from v5 which added auto-cache for all managers). We don't use automatic caching — we use `actions/cache` separately.
+
+## Fix: Revert AGENTS.md
+
+The cherry-pick resolved the AGENTS.md conflict with `--theirs`, which replaced the current lore-managed content with an older version. This needs to be reverted.
+
+Steps:
+1. Restore AGENTS.md to the version from `origin/main` (HEAD~1)
+2. Amend the commit to exclude AGENTS.md changes
+3. Force-push
+
+## Verification
+
+After pushing the changes:
+1. The CI run should complete without any "Node.js 20 actions are deprecated" warnings (except possibly `getsentry/codecov-action@main` which is out of scope)
+2. All jobs should pass — no functional changes, only version bumps
+3. Artifacts should still upload/download correctly (same inputs used)
+4. AGENTS.md should be identical to the version on `main`
