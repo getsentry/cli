@@ -94,9 +94,6 @@ export function normalizeEndpoint(endpoint: string): string {
   // like /api/0/api/0/... (see CLI-K1).
   // Also strip bare "api/0" to maintain idempotency.
   if (trimmed.startsWith("api/0/") || trimmed === "api/0") {
-    log.warn(
-      "Endpoint includes the /api/0/ prefix which is added automatically — stripping it to avoid a doubled path"
-    );
     trimmed = trimmed.slice(trimmed.startsWith("api/0/") ? 6 : 5);
   }
 
@@ -1171,6 +1168,14 @@ export const apiCommand = buildCommand({
     const { stdin } = this;
 
     const normalizedEndpoint = normalizeEndpoint(endpoint);
+
+    // Warn if the user included the /api/0/ prefix (CLI-K1)
+    const bare = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
+    if (bare.startsWith("api/0/") || bare === "api/0") {
+      log.warn(
+        "Endpoint includes the /api/0/ prefix which is added automatically — stripping it to avoid a doubled path"
+      );
+    }
     const { body, params } = await resolveBody(flags, stdin);
 
     const headers =
