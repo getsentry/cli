@@ -15,7 +15,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { open, readFile, stat } from "node:fs/promises";
+import { open, readFile, stat, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -215,26 +215,28 @@ export async function buildArtifactBundle(
  *
  * @param zipPath - Path to the ZIP file
  * @param chunkSize - Size of each chunk in bytes
- * @returns Array of chunk metadata (sha1, offset, size)
+ * @returns Per-chunk metadata and an overall SHA-1 checksum of the entire file
  */
 export async function hashChunks(
   zipPath: string,
   chunkSize: number
-): Promise<ChunkInfo[]> {
+): Promise<{ chunks: ChunkInfo[]; overallChecksum: string }> {
   const fh = await open(zipPath, "r");
   const fileSize = (await stat(zipPath)).size;
   const chunks: ChunkInfo[] = [];
+  const overallHasher = createHash("sha1");
 
   for (let offset = 0; offset < fileSize; offset += chunkSize) {
     const size = Math.min(chunkSize, fileSize - offset);
     const buf = Buffer.alloc(size);
     await fh.read(buf, 0, size, offset);
     const sha1 = createHash("sha1").update(buf).digest("hex");
+    overallHasher.update(buf);
     chunks.push({ sha1, offset, size });
   }
 
   await fh.close();
-  return chunks;
+  return { chunks, overallChecksum: overallHasher.digest("hex") };
 }
 
 /**
@@ -256,28 +258,49 @@ export async function uploadSourcemaps(options: UploadOptions): Promise<void> {
   const tmpZipPath = join(tmpdir(), `sentry-artifact-bundle-${Date.now()}.zip`);
   await buildArtifactBundle(tmpZipPath, files, { org, project, release });
 
-  // Step 3: Split into chunks and hash
-  const chunks = await hashChunks(tmpZipPath, serverOptions.chunkSize);
-
-  // Compute overall file checksum
-  const fh = await open(tmpZipPath, "r");
-  const fileSize = (await stat(tmpZipPath)).size;
-  const overallHasher = createHash("sha1");
-  for (let offset = 0; offset < fileSize; offset += serverOptions.chunkSize) {
-    const size = Math.min(serverOptions.chunkSize, fileSize - offset);
-    const buf = Buffer.alloc(size);
-    await fh.read(buf, 0, size, offset);
-    overallHasher.update(buf);
+  try {
+    await uploadArtifactBundle({
+      tmpZipPath,
+      org,
+      project,
+      release,
+      serverOptions,
+    });
+  } finally {
+    // Always clean up the temp file
+    await unlink(tmpZipPath).catch(() => {
+      // Best-effort cleanup — OS temp directory will eventually purge it
+    });
   }
-  await fh.close();
-  const overallChecksum = overallHasher.digest("hex");
+}
+
+/**
+ * Upload an already-built artifact bundle ZIP to Sentry.
+ *
+ * Handles steps 3–6 of the upload protocol: chunk + hash → assemble →
+ * upload missing → poll. Separated from {@link uploadSourcemaps} to keep
+ * the try/finally cleanup boundary clean.
+ */
+async function uploadArtifactBundle(opts: {
+  tmpZipPath: string;
+  org: string;
+  project: string;
+  release: string | undefined;
+  serverOptions: ChunkServerOptions;
+}): Promise<void> {
+  const { tmpZipPath, org, project, release, serverOptions } = opts;
+  // Step 3: Split into chunks, hash each chunk + compute overall checksum
+  const { chunks, overallChecksum } = await hashChunks(
+    tmpZipPath,
+    serverOptions.chunkSize
+  );
 
   const regionUrl = await resolveOrgRegion(org);
 
   // Step 4: Request assembly — server tells us which chunks it needs
   const assembleBody = {
     checksum: overallChecksum,
-    chunks: chunks.map((c) => c.sha1),
+    chunks: chunks.map((c: ChunkInfo) => c.sha1),
     projects: [project],
     ...(release ? { version: release } : {}),
   };
