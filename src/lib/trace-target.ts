@@ -24,6 +24,7 @@ import {
   resolveOrgAndProject,
   resolveProjectBySlug,
 } from "./resolve-target.js";
+import { setOrgProjectContext } from "./telemetry.js";
 import { isTraceId, validateTraceId } from "./trace-id.js";
 
 /** Match `[<prefix>]<trail>` in usageHint — captures bracket content + trailing placeholder */
@@ -290,6 +291,7 @@ export async function resolveTraceOrgProject(
 ): Promise<ResolvedTraceOrgProject> {
   switch (parsed.type) {
     case "explicit":
+      setOrgProjectContext([parsed.org], [parsed.project]);
       return {
         traceId: parsed.traceId,
         org: parsed.org,
@@ -297,6 +299,7 @@ export async function resolveTraceOrgProject(
       };
 
     case "project-search":
+      // resolveProjectBySlug (called inside) already sets telemetry context
       return resolveProjectSearchTarget(parsed, usageHint);
 
     case "org-scoped":
@@ -306,6 +309,7 @@ export async function resolveTraceOrgProject(
       ]);
 
     case "auto-detect": {
+      // resolveOrgAndProject already sets telemetry context
       const resolved = await resolveOrgAndProject({
         cwd,
         usageHint,
@@ -366,13 +370,16 @@ export async function resolveTraceOrg(
 ): Promise<ResolvedTraceOrg> {
   switch (parsed.type) {
     case "explicit":
+      setOrgProjectContext([parsed.org], []);
       return { traceId: parsed.traceId, org: parsed.org };
 
     case "org-scoped":
+      setOrgProjectContext([parsed.org], []);
       return { traceId: parsed.traceId, org: parsed.org };
 
     case "project-search": {
       // Bare slug in org-only context → treat as org slug
+      // resolveOrg already sets telemetry context
       const resolved = await resolveOrg({ org: parsed.projectSlug, cwd });
       if (!resolved) {
         throw new ContextError("Organization", usageHint, [
@@ -384,6 +391,7 @@ export async function resolveTraceOrg(
     }
 
     case "auto-detect": {
+      // resolveOrg already sets telemetry context
       const resolved = await resolveOrg({ cwd });
       if (!resolved) {
         throw new ContextError("Organization", usageHint);

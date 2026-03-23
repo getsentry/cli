@@ -8,11 +8,7 @@
 import { homedir } from "node:os";
 import type { CommandContext } from "@stricli/core";
 import { getConfigDir } from "./lib/db/index.js";
-import {
-  type Span,
-  setCommandSpanName,
-  setOrgProjectContext,
-} from "./lib/telemetry.js";
+import { type Span, setCommandSpanName } from "./lib/telemetry.js";
 import type { Writer } from "./types/index.js";
 
 export interface SentryContext extends CommandContext {
@@ -24,13 +20,6 @@ export interface SentryContext extends CommandContext {
   readonly stdout: Writer;
   readonly stderr: Writer;
   readonly stdin: NodeJS.ReadStream & { fd: 0 };
-  /**
-   * Set organization and project context for telemetry.
-   * Call this after resolving the target org/project to enable
-   * filtering by org/project in Sentry.
-   * Accepts arrays to support multi-project commands.
-   */
-  readonly setContext: (orgs: string[], projects: string[]) => void;
 }
 
 /**
@@ -52,7 +41,6 @@ export function buildContext(process: NodeJS.Process, span?: Span) {
     stdout: process.stdout,
     stderr: process.stderr,
     stdin: process.stdin,
-    setContext: setOrgProjectContext,
   };
 
   return {

@@ -72,9 +72,6 @@ function createContext() {
       }),
     },
     cwd: "/tmp",
-    setContext: mock((_k: string, _v: unknown) => {
-      // no-op
-    }),
   };
   const getStdout = () => stdoutChunks.join("");
   return { context, getStdout };

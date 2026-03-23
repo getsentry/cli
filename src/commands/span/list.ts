@@ -239,7 +239,6 @@ function jsonTransformSpanList(data: SpanListData, fields?: string[]): unknown {
 type ModeContext = {
   cwd: string;
   flags: ListFlags;
-  setContext: (orgs: string[], projects: string[]) => void;
 };
 
 /**
@@ -259,8 +258,6 @@ async function handleTraceMode(
     cwd,
     TRACE_USAGE_HINT
   );
-  ctx.setContext([org], [project]);
-
   const queryParts = [`trace:${traceId}`];
   if (flags.query) {
     queryParts.push(translateSpanQuery(flags.query));
@@ -324,8 +321,6 @@ async function handleProjectMode(
     cwd,
     COMMAND_NAME
   );
-  ctx.setContext([org], [project]);
-
   const apiQuery = flags.query ? translateSpanQuery(flags.query) : undefined;
 
   const contextKey = buildPaginationContextKey(
@@ -447,9 +442,9 @@ export const listCommand = buildListCommand("span", {
     },
   },
   async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {
-    const { cwd, setContext } = this;
+    const { cwd } = this;
     const parsed = parseSpanListArgs(args);
-    const modeCtx: ModeContext = { cwd, flags, setContext };
+    const modeCtx: ModeContext = { cwd, flags };
 
     const { output, hint } =
       parsed.mode === "trace"

@@ -31,6 +31,7 @@ import {
   resolveProjectBySlug,
 } from "../../lib/resolve-target.js";
 import { buildLogsUrl } from "../../lib/sentry-urls.js";
+import { setOrgProjectContext } from "../../lib/telemetry.js";
 import type { DetailedSentryLog } from "../../types/index.js";
 
 const log = logger.withTag("log-view");
@@ -154,6 +155,7 @@ async function resolveTarget(
 ): Promise<ResolvedLogTarget | null> {
   switch (parsed.type) {
     case "explicit":
+      setOrgProjectContext([parsed.org], [parsed.project]);
       return { org: parsed.org, project: parsed.project };
 
     case "project-search": {
@@ -349,7 +351,7 @@ export const viewCommand = buildCommand({
   },
   async *func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
-    const { cwd, setContext } = this;
+    const { cwd } = this;
     const cmdLog = logger.withTag("log.view");
 
     // Parse positional args
@@ -364,9 +366,6 @@ export const viewCommand = buildCommand({
     if (!target) {
       throw new ContextError("Organization and project", USAGE_HINT);
     }
-
-    // Set telemetry context
-    setContext([target.org], [target.project]);
 
     if (flags.web) {
       await handleWebOpen(target.org, logIds);

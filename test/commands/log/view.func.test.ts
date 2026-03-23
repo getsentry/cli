@@ -59,9 +59,6 @@ function createMockContext() {
       stdout: { write: stdoutWrite },
       stderr: { write: mock(() => true) },
       cwd: "/tmp",
-      setContext: mock(() => {
-        // no-op for test
-      }),
     },
     stdoutWrite,
   };
@@ -312,24 +309,6 @@ describe("viewCommand.func", () => {
         expect(error).toBeInstanceOf(ContextError);
         expect((error as ContextError).message).toContain("Specific project");
       }
-    });
-
-    test("sets telemetry context with resolved org and project", async () => {
-      getLogsSpy.mockResolvedValue([makeSampleLog(ID1)]);
-
-      const { context } = createMockContext();
-      const func = await viewCommand.loader();
-      await func.call(
-        context,
-        { json: true, web: false },
-        "test-org/test-proj",
-        ID1
-      );
-
-      expect(context.setContext).toHaveBeenCalledWith(
-        ["test-org"],
-        ["test-proj"]
-      );
     });
 
     test("auto-detect resolves org/project and fetches logs", async () => {

@@ -74,9 +74,6 @@ function createMockContext() {
     context: {
       stdout: { write: stdoutWrite },
       cwd: "/tmp",
-      setContext: mock(() => {
-        /* no-op for test */
-      }),
     },
     stdoutWrite,
   };
@@ -338,21 +335,6 @@ describe("logsCommand.func", () => {
           TRACE_ID
         )
       ).rejects.toThrow(ContextError);
-    });
-
-    test("calls setContext with resolved org and empty project array", async () => {
-      listTraceLogsSpy.mockResolvedValue([]);
-      resolveOrgSpy.mockResolvedValue({ org: ORG });
-
-      const { context } = createMockContext();
-      const func = await logsCommand.loader();
-      await func.call(
-        context,
-        { json: true, web: false, period: "14d", limit: 100 },
-        TRACE_ID
-      );
-
-      expect(context.setContext).toHaveBeenCalledWith([ORG], []);
     });
   });
 

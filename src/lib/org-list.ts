@@ -53,6 +53,7 @@ import { logger } from "./logger.js";
 import { withProgress } from "./polling.js";
 import { resolveEffectiveOrg } from "./region.js";
 import { resolveOrgsForListing } from "./resolve-target.js";
+import { setOrgProjectContext } from "./telemetry.js";
 
 const log = logger.withTag("org-list");
 
@@ -216,7 +217,7 @@ export type ParsedVariant<T extends ParsedOrgProject["type"]> = Extract<
  *
  * Contains the correctly-narrowed parsed variant plus shared I/O and flags,
  * so handlers don't need to close over these values from their parent scope.
- * Commands that need additional fields (e.g. `setContext`, `stderr`) can
+ * Commands that need additional fields (e.g. `stderr`) can
  * spread the context and add their own: `(ctx) => handle({ ...ctx, extra })`.
  */
 export type HandlerContext<
@@ -953,6 +954,10 @@ export async function dispatchOrgScopedList<TEntity, TWithOrg>(
     if (effectiveOrg !== effectiveParsed.org) {
       effectiveParsed = { ...effectiveParsed, org: effectiveOrg };
     }
+    setOrgProjectContext(
+      [effectiveOrg],
+      effectiveParsed.type === "explicit" ? [effectiveParsed.project] : []
+    );
   }
 
   const defaults = buildDefaultHandlers(config);

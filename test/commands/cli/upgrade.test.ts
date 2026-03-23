@@ -124,9 +124,6 @@ function createMockContext(
       },
     },
     stdin: process.stdin,
-    setContext: () => {
-      // no-op for tests
-    },
     setFlags: () => {
       // no-op for tests
     },

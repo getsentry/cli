@@ -93,9 +93,6 @@ function createMockContext(
       write: mock((_s: string) => true),
     },
     stdin: process.stdin,
-    setContext: () => {
-      // no-op for tests
-    },
     setFlags: () => {
       // no-op for tests
     },

@@ -22,6 +22,7 @@ import {
   toNumericId,
 } from "../../lib/resolve-target.js";
 import { buildDashboardUrl } from "../../lib/sentry-urls.js";
+import { setOrgProjectContext } from "../../lib/telemetry.js";
 import type { DashboardDetail } from "../../types/dashboard.js";
 
 type CreateFlags = {
@@ -85,6 +86,7 @@ async function resolveDashboardTarget(
 ): Promise<ResolvedDashboardTarget> {
   switch (parsed.type) {
     case "explicit": {
+      setOrgProjectContext([parsed.org], [parsed.project]);
       const pid = await fetchProjectId(parsed.org, parsed.project);
       return {
         orgSlug: parsed.org,
@@ -92,6 +94,7 @@ async function resolveDashboardTarget(
       };
     }
     case "org-all":
+      setOrgProjectContext([parsed.org], []);
       return { orgSlug: parsed.org, projectIds: [] };
 
     case "project-search": {

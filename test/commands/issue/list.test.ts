@@ -82,9 +82,6 @@ function createContext() {
     stdout,
     stderr,
     cwd: getConfigDir(),
-    setContext: () => {
-      // Intentionally empty — telemetry context not needed in tests
-    },
   };
 
   return { context, stdout, stderr };
@@ -492,9 +489,6 @@ describe("issue list: org-all mode (cursor pagination)", () => {
         stdout: { write: stdoutWrite },
         stderr: { write: stderrWrite },
         cwd: "/tmp",
-        setContext: mock(() => {
-          // no-op for test
-        }),
       },
       stdoutWrite,
       stderrWrite,

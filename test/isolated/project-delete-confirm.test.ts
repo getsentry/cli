@@ -102,8 +102,6 @@ function createMockContext() {
       stdout: { write: stdoutWrite },
       stderr: { write: mock(() => true) },
       cwd: "/tmp",
-      // biome-ignore lint/suspicious/noEmptyBlockStatements: no-op mock
-      setContext: mock(() => {}),
     },
     stdoutWrite,
   };
