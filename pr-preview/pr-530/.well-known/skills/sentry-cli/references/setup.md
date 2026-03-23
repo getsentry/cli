@@ -11,7 +11,7 @@ requires:
 
 CLI-related commands
 
-Initialize Sentry in your project
+Initialize Sentry in your project (experimental)
 
 Browse the Sentry API schema
 
@@ -51,7 +51,7 @@ Update the Sentry CLI to the latest version
 
 ### `sentry init <target> <directory>`
 
-Initialize Sentry in your project
+Initialize Sentry in your project (experimental)
 
 **Flags:**
 - `-y, --yes - Non-interactive mode (accept defaults)`
