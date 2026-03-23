@@ -71,6 +71,16 @@ Override the directory where the CLI stores its database (credentials, caches, d
 export SENTRY_CONFIG_DIR=/path/to/config
 ```
 
+### `SENTRY_VERSION`
+
+Pin a specific version for the [install script](./getting-started/#install-script). Accepts a version number (e.g., `0.19.0`) or `nightly`. The `--version` flag takes precedence if both are set.
+
+```bash
+SENTRY_VERSION=nightly curl https://cli.sentry.dev/install -fsS | bash
+```
+
+This is useful in CI/CD pipelines and Dockerfiles where you want reproducible installations without inline flags.
+
 ### `SENTRY_PLAIN_OUTPUT`
 
 Force plain text output (no colors or ANSI formatting). Takes precedence over `NO_COLOR`.

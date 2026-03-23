@@ -88,16 +88,18 @@ Options:
 
 Environment Variables:
     SENTRY_INSTALL_DIR      Override the installation directory
+    SENTRY_VERSION          Install a specific version (e.g., 0.19.0, nightly)
 
 Examples:
     curl -fsSL https://cli.sentry.dev/install | bash
     curl -fsSL https://cli.sentry.dev/install | bash -s -- --version nightly
-    curl -fsSL https://cli.sentry.dev/install | bash -s -- --version 0.2.0
+    curl -fsSL https://cli.sentry.dev/install | bash -s -- --version 0.19.0
+    SENTRY_VERSION=nightly curl -fsSL https://cli.sentry.dev/install | bash
     SENTRY_INSTALL_DIR=~/.local/bin curl -fsSL https://cli.sentry.dev/install | bash
 EOF
 }
 
-requested_version=""
+requested_version="${SENTRY_VERSION:-}"
 no_modify_path=false
 no_completions=false
 while [[ $# -gt 0 ]]; do
