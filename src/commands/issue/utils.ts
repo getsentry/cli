@@ -40,6 +40,7 @@ import {
 } from "../../lib/resolve-target.js";
 import { parseSentryUrl } from "../../lib/sentry-url-parser.js";
 import { buildIssueUrl } from "../../lib/sentry-urls.js";
+import { setOrgProjectContext } from "../../lib/telemetry.js";
 import { isAllDigits } from "../../lib/utils.js";
 import type { SentryIssue } from "../../types/index.js";
 import { type AutofixState, isTerminalStatus } from "../../types/seer.js";
@@ -530,16 +531,20 @@ export async function resolveIssue(
   const parsed = parseIssueArg(issueArg);
   const commandHint = buildCommandHint(command, issueArg);
 
+  let result: ResolvedIssueResult;
+
   switch (parsed.type) {
     case "numeric":
-      return resolveNumericIssue(parsed.id, cwd, command);
+      result = await resolveNumericIssue(parsed.id, cwd, command);
+      break;
 
     case "explicit": {
       // Full context: org + project + suffix
       const org = await resolveEffectiveOrg(parsed.org);
       const fullShortId = expandToFullShortId(parsed.suffix, parsed.project);
       const issue = await getIssueByShortId(org, fullShortId);
-      return { org, issue };
+      result = { org, issue };
+      break;
     }
 
     case "explicit-org-numeric": {
@@ -547,7 +552,7 @@ export async function resolveIssue(
       const org = await resolveEffectiveOrg(parsed.org);
       try {
         const issue = await getIssueInOrg(org, parsed.numericId);
-        return { org, issue };
+        result = { org, issue };
       } catch (err) {
         if (err instanceof ApiError && err.status === 404) {
           throw new ResolutionError(
@@ -562,30 +567,40 @@ export async function resolveIssue(
         }
         throw err;
       }
+      break;
     }
 
     case "explicit-org-suffix": {
       // Org + suffix only - ambiguous without project, always errors
       const org = await resolveEffectiveOrg(parsed.org);
-      return resolveExplicitOrgSuffix(org, parsed.suffix, commandHint);
+      result = await resolveExplicitOrgSuffix(org, parsed.suffix, commandHint);
+      break;
     }
 
     case "project-search":
       // Project slug + suffix - search across orgs
-      return resolveProjectSearch(
+      result = await resolveProjectSearch(
         parsed.projectSlug,
         parsed.suffix,
         cwd,
         commandHint
       );
+      break;
 
     case "suffix-only":
       // Just suffix - need DSN for org and project
-      return resolveSuffixOnly(parsed.suffix, cwd, commandHint);
+      result = await resolveSuffixOnly(parsed.suffix, cwd, commandHint);
+      break;
 
     case "selector":
       // Magic @ selector - fetch top issue by sort criteria
-      return resolveSelector(parsed.selector, parsed.org, cwd, commandHint);
+      result = await resolveSelector(
+        parsed.selector,
+        parsed.org,
+        cwd,
+        commandHint
+      );
+      break;
 
     default: {
       // Exhaustive check - this should never be reached
@@ -595,6 +610,16 @@ export async function resolveIssue(
       );
     }
   }
+
+  // Set telemetry context from the resolved result
+  if (result.org) {
+    setOrgProjectContext(
+      [result.org],
+      result.issue.project?.slug ? [result.issue.project.slug] : []
+    );
+  }
+
+  return result;
 }
 
 /**

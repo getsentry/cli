@@ -271,9 +271,6 @@ describe("viewCommand.func", () => {
           }),
         },
         cwd: "/tmp/test-project",
-        setContext: mock((_orgs: string[], _projects: string[]) => {
-          /* no-op */
-        }),
       },
       getStdout: () => stdoutChunks.join(""),
     };

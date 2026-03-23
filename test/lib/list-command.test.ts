@@ -69,9 +69,6 @@ function createContext() {
       stdout: { write },
       stderr: { write: mock((_chunk: string) => true) },
       cwd: "/tmp",
-      setContext: mock(() => {
-        // no-op for test
-      }),
     },
     write,
   };

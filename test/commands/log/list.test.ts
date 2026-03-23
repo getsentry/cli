@@ -112,9 +112,6 @@ function createMockContext() {
       stdout: { write: stdoutWrite },
       stderr: { write: stderrWrite },
       cwd: "/tmp",
-      setContext: mock(() => {
-        // no-op for test
-      }),
     },
     stdoutWrite,
     stderrWrite,
@@ -372,17 +369,6 @@ describe("listCommand.func — standard mode", () => {
     });
   });
 
-  test("calls setContext with resolved org and project", async () => {
-    listLogsSpy.mockResolvedValue([]);
-    resolveOrgProjectSpy.mockResolvedValue({ org: ORG, project: PROJECT });
-
-    const { context } = createMockContext();
-    const func = await listCommand.loader();
-    await func.call(context, BATCH_FLAGS, `${ORG}/${PROJECT}`);
-
-    expect(context.setContext).toHaveBeenCalledWith([ORG], [PROJECT]);
-  });
-
   test("hasMore is true when results match limit", async () => {
     listLogsSpy.mockResolvedValue(sampleLogs);
     resolveOrgProjectSpy.mockResolvedValue({ org: ORG, project: PROJECT });
@@ -539,17 +525,6 @@ describe("listCommand.func — trace mode", () => {
       limit: 50,
       statsPeriod: "14d",
     });
-  });
-
-  test("calls setContext with org and empty project array", async () => {
-    listTraceLogsSpy.mockResolvedValue([]);
-    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
-
-    const { context } = createMockContext();
-    const func = await listCommand.loader();
-    await func.call(context, BATCH_FLAGS, TRACE_ID);
-
-    expect(context.setContext).toHaveBeenCalledWith([ORG], []);
   });
 
   test("uses positional org/trace-id to resolve trace org", async () => {

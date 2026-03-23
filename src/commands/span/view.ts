@@ -265,20 +265,18 @@ export const viewCommand = buildCommand({
   },
   async *func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
-    const { cwd, setContext } = this;
+    const { cwd } = this;
 
     // Parse positional args: first is trace target, rest are span IDs
     const { traceTarget, spanIds } = parsePositionalArgs(args);
     warnIfNormalized(traceTarget, "span.view");
 
     // Resolve org/project
-    const { traceId, org, project } = await resolveTraceOrgProject(
+    const { traceId, org } = await resolveTraceOrgProject(
       traceTarget,
       cwd,
       USAGE_HINT
     );
-    setContext([org], [project]);
-
     // Fetch trace data (single fetch for all span lookups)
     const timestamp = Math.floor(Date.now() / 1000);
     const spans = await getDetailedTrace(org, traceId, timestamp);

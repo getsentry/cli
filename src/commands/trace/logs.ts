@@ -159,14 +159,12 @@ export const logsCommand = buildCommand({
   },
   async *func(this: SentryContext, flags: LogsFlags, ...args: string[]) {
     applyFreshFlag(flags);
-    const { cwd, setContext } = this;
+    const { cwd } = this;
 
     // Parse and resolve org/trace-id
     const parsed = parseTraceTarget(args, USAGE_HINT);
     warnIfNormalized(parsed, "trace.logs");
     const { traceId, org } = await resolveTraceOrg(parsed, cwd, USAGE_HINT);
-    setContext([org], []);
-
     if (flags.web) {
       await openInBrowser(buildTraceUrl(org, traceId), "trace");
       return;

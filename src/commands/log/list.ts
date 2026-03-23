@@ -645,7 +645,7 @@ export const listCommand = buildListCommand(
       },
     },
     async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {
-      const { cwd, setContext } = this;
+      const { cwd } = this;
 
       const parsed = parseLogListArgs(args);
 
@@ -657,8 +657,6 @@ export const listCommand = buildListCommand(
           cwd,
           TRACE_USAGE_HINT
         );
-        setContext([org], []);
-
         if (flags.follow) {
           // Banner (suppressed in JSON mode)
           writeFollowBanner(
@@ -725,8 +723,6 @@ export const listCommand = buildListCommand(
           cwd,
           COMMAND_NAME
         );
-        setContext([org], [project]);
-
         if (flags.follow) {
           writeFollowBanner(
             flags.follow ?? DEFAULT_POLL_INTERVAL,

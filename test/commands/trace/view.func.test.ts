@@ -124,9 +124,6 @@ describe("viewCommand.func", () => {
         stdout: { write: stdoutWrite },
         stderr: { write: mock(() => true) },
         cwd: "/tmp",
-        setContext: mock(() => {
-          // no-op for test
-        }),
       },
       stdoutWrite,
     };
@@ -295,21 +292,6 @@ describe("viewCommand.func", () => {
     ).rejects.toThrow(ContextError);
   });
 
-  test("calls setContext with resolved org and project", async () => {
-    getDetailedTraceSpy.mockResolvedValue(sampleSpans);
-
-    const { context } = createMockContext();
-    const func = await viewCommand.loader();
-    await func.call(
-      context,
-      { json: true, web: false, spans: 100 },
-      "my-org/my-project",
-      "aaaa1111bbbb2222cccc3333dddd4444"
-    );
-
-    expect(context.setContext).toHaveBeenCalledWith(["my-org"], ["my-project"]);
-  });
-
   test("resolves project search target", async () => {
     findProjectsBySlugSpy.mockResolvedValue({
       projects: [
@@ -329,7 +311,6 @@ describe("viewCommand.func", () => {
     );
 
     expect(findProjectsBySlugSpy).toHaveBeenCalledWith("frontend");
-    expect(context.setContext).toHaveBeenCalledWith(["acme"], ["frontend"]);
   });
 
   test("logs warning when args appear swapped", async () => {

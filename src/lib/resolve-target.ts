@@ -50,9 +50,21 @@ import {
 import { fuzzyMatch } from "./fuzzy.js";
 import { logger } from "./logger.js";
 import { resolveEffectiveOrg } from "./region.js";
+import { setOrgProjectContext } from "./telemetry.js";
 import { isAllDigits } from "./utils.js";
 
 const log = logger.withTag("resolve-target");
+
+/**
+ * Set telemetry context from a resolved target and return it.
+ * Eliminates boilerplate — every resolution function can call this on success.
+ */
+function withTelemetryContext<T extends { org: string; project?: string }>(
+  result: T
+): T {
+  setOrgProjectContext([result.org], result.project ? [result.project] : []);
+  return result;
+}
 
 /**
  * Convert a string or numeric ID to a positive integer, or `undefined` if the
@@ -714,6 +726,7 @@ export async function resolveAllTargets(
 
   // 1. CLI flags take priority (both must be provided together)
   if (org && project) {
+    setOrgProjectContext([org], [project]);
     return {
       targets: [
         {
@@ -739,6 +752,7 @@ export async function resolveAllTargets(
   // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
   const envVars = resolveFromEnvVars();
   if (envVars?.project) {
+    setOrgProjectContext([envVars.org], [envVars.project]);
     return {
       targets: [
         {
@@ -758,6 +772,7 @@ export async function resolveAllTargets(
   const defaultOrg = await getDefaultOrganization();
   const defaultProject = await getDefaultProject();
   if (defaultOrg && defaultProject) {
+    setOrgProjectContext([defaultOrg], [defaultProject]);
     return {
       targets: [
         {
@@ -785,6 +800,10 @@ export async function resolveAllTargets(
       log.debug(
         "Directory name inference found no matching projects — auto-detection failed"
       );
+    } else {
+      const uniqueOrgs = [...new Set(result.targets.map((t) => t.org))];
+      const uniqueProjects = [...new Set(result.targets.map((t) => t.project))];
+      setOrgProjectContext(uniqueOrgs, uniqueProjects);
     }
     return result;
   }
@@ -857,6 +876,11 @@ async function resolveDetectedDsns(
   const footer =
     targets.length > 1 ? formatMultipleProjectsFooter(targets) : undefined;
 
+  // Set telemetry context for all resolved targets
+  const uniqueOrgs = [...new Set(targets.map((t) => t.org))];
+  const uniqueProjects = [...new Set(targets.map((t) => t.project))];
+  setOrgProjectContext(uniqueOrgs, uniqueProjects);
+
   return {
     targets,
     footer,
@@ -886,12 +910,12 @@ export async function resolveOrgAndProject(
 
   // 1. CLI flags take priority (both must be provided together)
   if (org && project) {
-    return {
+    return withTelemetryContext({
       org,
       project,
       orgDisplay: org,
       projectDisplay: project,
-    };
+    });
   }
 
   // Error if only one flag is provided
@@ -905,32 +929,32 @@ export async function resolveOrgAndProject(
   // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
   const envVars = resolveFromEnvVars();
   if (envVars?.project) {
-    return {
+    return withTelemetryContext({
       org: envVars.org,
       project: envVars.project,
       orgDisplay: envVars.org,
       projectDisplay: envVars.project,
       detectedFrom: envVars.detectedFrom,
-    };
+    });
   }
 
   // 3. Config defaults
   const defaultOrg = await getDefaultOrganization();
   const defaultProject = await getDefaultProject();
   if (defaultOrg && defaultProject) {
-    return {
+    return withTelemetryContext({
       org: defaultOrg,
       project: defaultProject,
       orgDisplay: defaultOrg,
       projectDisplay: defaultProject,
-    };
+    });
   }
 
   // 4. DSN auto-detection
   try {
     const dsnResult = await resolveFromDsn(cwd);
     if (dsnResult) {
-      return dsnResult;
+      return withTelemetryContext(dsnResult);
     }
   } catch {
     // Fall through to directory inference
@@ -944,13 +968,13 @@ export async function resolveOrgAndProject(
   }
 
   // If multiple matches, note it in detectedFrom
-  return {
+  return withTelemetryContext({
     ...first,
     detectedFrom:
       inferred.targets.length > 1
         ? `${first.detectedFrom} (1 of ${inferred.targets.length} matches)`
         : first.detectedFrom,
-  };
+  });
 }
 
 /**
@@ -972,24 +996,31 @@ export async function resolveOrg(
 
   // 1. CLI flag takes priority
   if (org) {
+    setOrgProjectContext([org], []);
     return { org };
   }
 
   // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
   const envVars = resolveFromEnvVars();
   if (envVars) {
+    setOrgProjectContext([envVars.org], []);
     return { org: envVars.org, detectedFrom: envVars.detectedFrom };
   }
 
   // 3. Config defaults
   const defaultOrg = await getDefaultOrganization();
   if (defaultOrg) {
+    setOrgProjectContext([defaultOrg], []);
     return { org: defaultOrg };
   }
 
   // 4. DSN auto-detection
   try {
-    return await resolveOrgFromDsn(cwd);
+    const result = await resolveOrgFromDsn(cwd);
+    if (result) {
+      setOrgProjectContext([result.org], []);
+    }
+    return result;
   } catch {
     return null;
   }
@@ -1064,11 +1095,11 @@ export async function resolveProjectBySlug(
   // Strip orgSlug (from ProjectWithOrg) so projectData is a clean SentryProject
   // — prevents leaking the extra field into JSON output when callers spread it.
   const { orgSlug: _org, ...projectData } = foundProject;
-  return {
+  return withTelemetryContext({
     org: foundProject.orgSlug,
     project: foundProject.slug,
     projectData,
-  };
+  });
 }
 
 /** Result of resolving organizations to fetch from for listing commands */
@@ -1099,17 +1130,20 @@ export async function resolveOrgsForListing(
   cwd: string
 ): Promise<OrgListResolution> {
   if (orgFlag) {
+    setOrgProjectContext([orgFlag], []);
     return { orgs: [orgFlag] };
   }
 
   // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
   const envVars = resolveFromEnvVars();
   if (envVars) {
+    setOrgProjectContext([envVars.org], []);
     return { orgs: [envVars.org] };
   }
 
   const defaultOrg = await getDefaultOrganization();
   if (defaultOrg) {
+    setOrgProjectContext([defaultOrg], []);
     return { orgs: [defaultOrg] };
   }
 
@@ -1120,6 +1154,7 @@ export async function resolveOrgsForListing(
       const uniqueOrgs = [
         ...new Set(targets.map((t: ResolvedTarget) => t.org)),
       ];
+      setOrgProjectContext(uniqueOrgs, []);
       return { orgs: uniqueOrgs, footer, skippedSelfHosted };
     }
     return { orgs: [], skippedSelfHosted };
@@ -1165,7 +1200,7 @@ export async function resolveOrgProjectTarget(
   switch (parsed.type) {
     case "explicit": {
       const org = await resolveEffectiveOrg(parsed.org);
-      return { org, project: parsed.project };
+      return withTelemetryContext({ org, project: parsed.project });
     }
 
     case "org-all":
@@ -1213,14 +1248,15 @@ export async function resolveOrgProjectTarget(
 
       const match = projects[0] as (typeof projects)[number];
       const { orgSlug: _org, ...matchData } = match;
-      return {
+      return withTelemetryContext({
         org: match.orgSlug,
         project: match.slug,
         projectData: matchData,
-      };
+      });
     }
 
     case "auto-detect": {
+      // resolveOrgAndProject already sets telemetry context
       const resolved = await resolveOrgAndProject({
         cwd,
         usageHint,

@@ -251,9 +251,6 @@ describe("listCommand.func", () => {
         stdout: { write: stdoutWrite },
         stderr: { write: mock(() => true) },
         cwd: "/tmp",
-        setContext: mock(() => {
-          // no-op for test
-        }),
       },
       stdoutWrite,
     };
@@ -388,20 +385,6 @@ describe("listCommand.func", () => {
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Showing 1 trace.");
     expect(output).not.toContain("Showing 1 traces.");
-  });
-
-  test("calls setContext with resolved org and project", async () => {
-    listTransactionsSpy.mockResolvedValue({ data: [] });
-
-    const { context } = createMockContext();
-    const func = await listCommand.loader();
-    await func.call(
-      context,
-      { limit: 20, sort: "date", json: false },
-      "my-org/my-project"
-    );
-
-    expect(context.setContext).toHaveBeenCalledWith(["my-org"], ["my-project"]);
   });
 
   test("passes query, limit, sort, and cursor to listTransactions", async () => {
