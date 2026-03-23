@@ -8,6 +8,7 @@ import type { SentryContext } from "../../context.js";
 import {
   findEventAcrossOrgs,
   getEvent,
+  getIssueByShortId,
   getLatestEvent,
   type ResolvedEvent,
   resolveEventInOrg,
@@ -34,6 +35,7 @@ import {
 import { logger } from "../../lib/logger.js";
 import { resolveEffectiveOrg } from "../../lib/region.js";
 import {
+  resolveOrg,
   resolveOrgAndProject,
   resolveProjectBySlug,
 } from "../../lib/resolve-target.js";
@@ -108,6 +110,8 @@ type ParsedPositionalArgs = {
   targetArg: string | undefined;
   /** Issue ID from a Sentry issue URL — triggers latest-event fetch */
   issueId?: string;
+  /** Issue short ID detected from positional args (e.g., "BRUNCHIE-APP-29") */
+  issueShortId?: string;
   /** Warning message if arguments appear to be in the wrong order */
   warning?: string;
   /** Suggestion when the user likely meant a different command */
@@ -176,6 +180,18 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
       "Event ID",
       USAGE_HINT
     );
+
+    // Detect issue short ID passed as event ID (e.g., "BRUNCHIE-APP-29").
+    // When a single arg matches the issue short ID pattern, the user likely
+    // wanted `sentry issue view`. Auto-redirect to show the latest event.
+    if (!targetArg && looksLikeIssueShortId(eventId)) {
+      return {
+        eventId: "latest",
+        targetArg: undefined,
+        issueShortId: eventId,
+      };
+    }
+
     return { eventId, targetArg };
   }
 
@@ -382,19 +398,122 @@ async function fetchEventWithContext(
     return await getEvent(org, project, eventId);
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) {
+      const suggestions = [
+        "The event may have been deleted due to data retention policies",
+        "Verify the event ID is a 32-character hex string (e.g., a1b2c3d4...)",
+        `Search across all projects in the org: sentry event view ${org}/ ${eventId}`,
+      ];
+
+      // Nudge the user when the event ID looks like an issue short ID
+      if (looksLikeIssueShortId(eventId)) {
+        suggestions.unshift(
+          `This looks like an issue short ID. Try: sentry issue view ${eventId}`
+        );
+      }
+
       throw new ResolutionError(
         `Event '${eventId}'`,
         `not found in ${org}/${project}`,
         `sentry event view ${org}/<project> ${eventId}`,
-        [
-          "The event may have been deleted due to data retention policies",
-          "Verify the event ID is a 32-character hex string (e.g., a1b2c3d4...)",
-          `Search across all projects in the org: sentry event view ${org}/ ${eventId}`,
-        ]
+        suggestions
       );
     }
     throw error;
   }
+}
+
+/**
+ * Resolve an issue short ID and fetch its latest event.
+ *
+ * Used when the user passes an issue short ID (e.g., "BRUNCHIE-APP-29")
+ * to `event view` instead of a hex event ID. We auto-detect this and
+ * show the latest event for the issue, with a warning nudging them
+ * toward `sentry issue view`.
+ *
+ * @param issueShortId - Issue short ID (e.g., "BRUNCHIE-APP-29")
+ * @param org - Organization slug
+ * @param spans - Span tree depth
+ */
+async function resolveIssueShortIdEvent(
+  issueShortId: string,
+  org: string,
+  spans: number
+): Promise<EventViewData> {
+  const issue = await getIssueByShortId(org, issueShortId);
+  return fetchLatestEventData(org, issue.id, spans);
+}
+
+/** Result from an issue-based shortcut (URL or short ID) */
+type IssueShortcutResult = {
+  org: string;
+  data: EventViewData;
+  hint: string;
+};
+
+/** Options for resolving issue-based shortcuts */
+type IssueShortcutOptions = {
+  parsed: ReturnType<typeof parseOrgProjectArg>;
+  issueId: string | undefined;
+  issueShortId: string | undefined;
+  cwd: string;
+  spans: number;
+};
+
+/**
+ * Handle issue-based shortcuts: issue URLs and issue short IDs.
+ *
+ * Both paths resolve an issue and fetch its latest event. Extracted from
+ * func() to reduce cyclomatic complexity.
+ *
+ * @returns Result with org, data, and hint — or null if not an issue shortcut
+ */
+async function resolveIssueShortcut(
+  options: IssueShortcutOptions
+): Promise<IssueShortcutResult | null> {
+  const { parsed, issueId, issueShortId, cwd, spans } = options;
+  const log = logger.withTag("event.view");
+
+  // Issue URL shortcut: fetch the latest event directly via the issue ID.
+  // This bypasses project resolution entirely since getLatestEvent only
+  // needs org + issue ID.
+  if (issueId) {
+    const org = await resolveEffectiveOrg(
+      parsed.type === "org-all" ? parsed.org : ""
+    );
+    log.info(`Fetching latest event for issue ${issueId}...`);
+    const data = await fetchLatestEventData(org, issueId, spans);
+    return { org, data, hint: `Showing latest event for issue ${issueId}` };
+  }
+
+  // Issue short ID auto-redirect: user passed an issue short ID
+  // (e.g., "BRUNCHIE-APP-29") instead of a hex event ID. Resolve
+  // the issue and show its latest event.
+  if (issueShortId) {
+    log.warn(
+      `'${issueShortId}' is an issue short ID, not an event ID. Showing the latest event.`
+    );
+
+    const resolved = await resolveOrg({ cwd });
+    if (!resolved) {
+      throw new ContextError(
+        "Organization",
+        `sentry issue view ${issueShortId}`
+      );
+    }
+
+    const data = await resolveIssueShortIdEvent(
+      issueShortId,
+      resolved.org,
+      spans
+    );
+    return {
+      org: resolved.org,
+      data,
+      hint: `Tip: Use 'sentry issue view ${issueShortId}' to view the full issue`,
+    };
+  }
+
+  return null;
 }
 
 export const viewCommand = buildCommand({
@@ -439,7 +558,7 @@ export const viewCommand = buildCommand({
     const log = logger.withTag("event.view");
 
     // Parse positional args
-    const { eventId, targetArg, warning, suggestion, issueId } =
+    const { eventId, targetArg, warning, suggestion, issueId, issueShortId } =
       parsePositionalArgs(args);
     if (warning) {
       log.warn(warning);
@@ -449,26 +568,28 @@ export const viewCommand = buildCommand({
     }
     const parsed = parseOrgProjectArg(targetArg);
 
-    // Issue URL shortcut: fetch the latest event directly via the issue ID.
-    // This bypasses project resolution entirely since getLatestEvent only
-    // needs org + issue ID.
-    if (issueId) {
-      const org = await resolveEffectiveOrg(
-        parsed.type === "org-all" ? parsed.org : ""
-      );
-      log.info(`Fetching latest event for issue ${issueId}...`);
-      const data = await fetchLatestEventData(org, issueId, flags.spans);
-
+    // Handle issue-based shortcuts (issue URLs and short IDs) before
+    // normal event resolution. Both paths fetch the latest event.
+    const issueShortcut = await resolveIssueShortcut({
+      parsed,
+      issueId,
+      issueShortId,
+      cwd,
+      spans: flags.spans,
+    });
+    if (issueShortcut) {
       if (flags.web) {
         await openInBrowser(
-          buildEventSearchUrl(org, data.event.eventID),
+          buildEventSearchUrl(
+            issueShortcut.org,
+            issueShortcut.data.event.eventID
+          ),
           "event"
         );
         return;
       }
-
-      yield new CommandOutput(data);
-      return { hint: `Showing latest event for issue ${issueId}` };
+      yield new CommandOutput(issueShortcut.data);
+      return { hint: issueShortcut.hint };
     }
 
     const target = await resolveEventTarget({

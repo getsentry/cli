@@ -62,6 +62,25 @@ describe("parsePositionalArgs", () => {
       expect(result.eventId).toBe("abc");
       expect(result.targetArg).toBeUndefined();
     });
+
+    test("detects issue short ID and sets issueShortId", () => {
+      const result = parsePositionalArgs(["BRUNCHIE-APP-29"]);
+      expect(result.eventId).toBe("latest");
+      expect(result.targetArg).toBeUndefined();
+      expect(result.issueShortId).toBe("BRUNCHIE-APP-29");
+    });
+
+    test("detects short issue ID like CLI-G", () => {
+      const result = parsePositionalArgs(["CLI-G"]);
+      expect(result.eventId).toBe("latest");
+      expect(result.issueShortId).toBe("CLI-G");
+    });
+
+    test("does not detect lowercase slug as issue short ID", () => {
+      const result = parsePositionalArgs(["my-project"]);
+      expect(result.eventId).toBe("my-project");
+      expect(result.issueShortId).toBeUndefined();
+    });
   });
 
   describe("two arguments (target + event ID)", () => {
