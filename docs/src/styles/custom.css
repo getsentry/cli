@@ -1825,6 +1825,11 @@ summary[id="starlight__on-this-page--mobile"] .caret {
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.85em;
   color: #a78bfa;
+  cursor: pointer;
+}
+
+.overscroll-message code:hover {
+  background: rgba(255, 255, 255, 0.18);
 }
 
 @media (max-width: 640px) {

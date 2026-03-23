@@ -81,10 +81,18 @@ export default defineConfig({
               
               function createOverscrollMessage() {
                 if (!isLandingPage()) return;
+                var command = 'curl https://cli.sentry.dev/install -fsS | bash';
                 overscrollEl = document.createElement('div');
                 overscrollEl.className = 'overscroll-message';
-                overscrollEl.innerHTML = '<span>You made it to the end. Might as well give it a try → <code>npx sentry@latest</code></span>';
+                overscrollEl.innerHTML = '<span>You made it to the end. Might as well give it a try → <code class="overscroll-copy-cmd" title="Click to copy">' + command + '</code></span>';
                 document.body.appendChild(overscrollEl);
+                var codeEl = overscrollEl.querySelector('.overscroll-copy-cmd');
+                codeEl.addEventListener('click', function() {
+                  navigator.clipboard.writeText(command).then(function() {
+                    codeEl.textContent = 'copied!';
+                    setTimeout(function() { codeEl.textContent = command; }, 1500);
+                  });
+                });
               }
               
               function updateOverscroll(distance) {
