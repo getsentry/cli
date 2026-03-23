@@ -32,8 +32,8 @@ jobs:
       build-targets: ${{ steps.targets.outputs.matrix }}
       nightly-version: ${{ steps.nightly.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
@@ -94,16 +94,16 @@ jobs:
         id: token
         # Fork PRs don't have access to secrets, so this step is skipped
         if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
-        uses: actions/create-github-app-token@v2.2.1
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ vars.SENTRY_RELEASE_BOT_CLIENT_ID }}
           private-key: ${{ secrets.SENTRY_RELEASE_BOT_PRIVATE_KEY }}
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           token: ${{ steps.token.outputs.token || github.token }}
           ref: ${{ github.head_ref || github.ref_name }}
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         id: cache
         with:
           path: node_modules
@@ -136,9 +136,9 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         id: cache
         with:
           path: node_modules
@@ -162,9 +162,9 @@ jobs:
       pull-requests: write
       statuses: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         id: cache
         with:
           path: node_modules
@@ -193,9 +193,9 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.build-targets) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         id: cache
         with:
           path: node_modules
@@ -240,7 +240,7 @@ jobs:
             ./dist-bin/sentry-${{ matrix.target }} --help
           fi
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sentry-${{ matrix.target }}
           path: |
@@ -249,7 +249,7 @@ jobs:
 
       - name: Upload compressed artifact
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sentry-${{ matrix.target }}-gz
           path: dist-bin/*.gz
@@ -262,14 +262,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download compressed artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: sentry-*-gz
           path: artifacts
           merge-multiple: true
 
       - name: Download uncompressed artifacts (for patch generation)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: sentry-*
           path: binaries
@@ -404,9 +404,9 @@ jobs:
     needs: [build-binary]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         id: cache
         with:
           path: node_modules
@@ -414,7 +414,7 @@ jobs:
       - if: steps.cache.outputs.cache-hit != 'true'
         run: bun install --frozen-lockfile
       - name: Download Linux binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: sentry-linux-x64
           path: dist-bin
@@ -437,12 +437,12 @@ jobs:
       matrix:
         node: ["22", "24"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         id: cache
         with:
           path: node_modules
@@ -459,7 +459,7 @@ jobs:
       - run: npm pack
       - name: Upload artifact
         if: matrix.node == '22'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: npm-package
           path: "*.tgz"
@@ -469,7 +469,7 @@ jobs:
     needs: [lint]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
       - name: Build Docs
         working-directory: docs
@@ -481,7 +481,7 @@ jobs:
           cp .nojekyll docs/dist/
           cd docs/dist && zip -r ../../gh-pages.zip .
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gh-pages
           path: gh-pages.zip

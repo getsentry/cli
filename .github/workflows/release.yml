@@ -22,7 +22,7 @@ jobs:
     steps:
     - name: Get auth token
       id: token
-      uses: actions/create-github-app-token@v2.2.1
+      uses: actions/create-github-app-token@v3
       with:
         app-id: ${{ vars.SENTRY_RELEASE_BOT_CLIENT_ID }}
         private-key: ${{ secrets.SENTRY_RELEASE_BOT_PRIVATE_KEY }}
@@ -31,7 +31,7 @@ jobs:
         token: ${{ steps.token.outputs.token }}
         fetch-depth: 0
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       with:
         node-version: 22
     - name: Prepare release
