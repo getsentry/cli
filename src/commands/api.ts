@@ -92,12 +92,8 @@ export function normalizeEndpoint(endpoint: string): string {
   // Strip api/0/ prefix if user accidentally included it — the base URL
   // already includes /api/0/, so keeping it would produce a doubled path
   // like /api/0/api/0/... (see CLI-K1).
-  // Handles: "api/0/path", "api/0" (bare), and "api/0?query" (query without slash).
-  if (
-    trimmed.startsWith("api/0/") ||
-    trimmed.startsWith("api/0?") ||
-    trimmed === "api/0"
-  ) {
+  // Also strip bare "api/0" to maintain idempotency.
+  if (trimmed.startsWith("api/0/") || trimmed === "api/0") {
     log.warn(
       "Endpoint includes the /api/0/ prefix which is added automatically — stripping it to avoid a doubled path"
     );

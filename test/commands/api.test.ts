@@ -87,18 +87,6 @@ describe("normalizeEndpoint: api/0/ prefix stripping (CLI-K1)", () => {
     expect(normalizeEndpoint("api/0")).toBe("/");
   });
 
-  test("strips api/0 followed directly by query string", () => {
-    // After stripping "api/0", the remaining "?query=test" gets a trailing
-    // slash on the (empty) path portion → "/?query=test"
-    expect(normalizeEndpoint("api/0?query=test")).toBe("/?query=test");
-  });
-
-  test("strips /api/0 followed directly by query string", () => {
-    expect(normalizeEndpoint("/api/0?query=test&page=2")).toBe(
-      "/?query=test&page=2"
-    );
-  });
-
   test("does not strip partial api/ prefix", () => {
     expect(normalizeEndpoint("api/1/organizations/")).toBe(
       "api/1/organizations/"
