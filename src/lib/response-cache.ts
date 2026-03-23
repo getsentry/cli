@@ -123,6 +123,7 @@ export function buildCacheKey(method: string, url: string): string {
  * Normalize method + URL into a stable string for cache key derivation.
  * Sorts query params alphabetically for deterministic key generation.
  *
+ * @throws {TypeError} If the URL cannot be parsed
  * @internal Exported for testing
  */
 export function normalizeUrl(method: string, url: string): string {
@@ -367,7 +368,15 @@ export async function getCachedResponse(
     return;
   }
 
-  const key = buildCacheKey(method, url);
+  let key: string;
+  try {
+    key = buildCacheKey(method, url);
+  } catch {
+    // Malformed URL (e.g., self-hosted with bad base URL) — skip cache lookup.
+    // The request will proceed without caching; fetch() itself will surface
+    // the real error if the URL is truly broken.
+    return;
+  }
 
   return await withCacheSpan(
     url,
@@ -467,7 +476,13 @@ export async function storeCachedResponse(
     return;
   }
 
-  const key = buildCacheKey(method, url);
+  let key: string;
+  try {
+    key = buildCacheKey(method, url);
+  } catch {
+    // Malformed URL — skip caching this response
+    return;
+  }
 
   try {
     await withCacheSpan(
