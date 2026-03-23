@@ -6,6 +6,7 @@
  */
 
 import { TimeoutError } from "./errors.js";
+import { isPlainOutput } from "./formatters/plain-detect.js";
 import {
   formatProgressLine,
   truncateProgressMessage,
@@ -82,7 +83,8 @@ export async function poll<T>(options: PollOptions<T>): Promise<T> {
   } = options;
 
   const startTime = Date.now();
-  const spinner = json ? null : startSpinner(initialMessage);
+  const suppress = json || isPlainOutput();
+  const spinner = suppress ? null : startSpinner(initialMessage);
 
   try {
     while (Date.now() - startTime < timeoutMs) {
@@ -105,17 +107,21 @@ export async function poll<T>(options: PollOptions<T>): Promise<T> {
     throw new TimeoutError(timeoutMessage, timeoutHint);
   } finally {
     spinner?.stop();
-    if (!json) {
-      process.stderr.write("\n");
+    if (!suppress) {
+      process.stdout.write("\n");
     }
   }
 }
 
 /**
- * Start an animated spinner that writes progress to stderr.
+ * Start an animated spinner that writes progress to stdout.
+ *
+ * Uses stdout so the spinner doesn't collide with consola log messages
+ * on stderr. The spinner is erased before command output is written,
+ * and is suppressed entirely in JSON mode and when stdout is not a TTY.
  *
  * Returns a controller with `setMessage` to update the displayed text
- * and `stop` to halt the animation. Writes directly to `process.stderr`.
+ * and `stop` to halt the animation.
  */
 function startSpinner(initialMessage: string): {
   setMessage: (msg: string) => void;
@@ -130,7 +136,7 @@ function startSpinner(initialMessage: string): {
       return;
     }
     const display = truncateProgressMessage(currentMessage);
-    process.stderr.write(`\r\x1b[K${formatProgressLine(display, tick)}`);
+    process.stdout.write(`\r\x1b[K${formatProgressLine(display, tick)}`);
     tick += 1;
     setTimeout(scheduleFrame, ANIMATION_INTERVAL_MS).unref();
   };
@@ -158,15 +164,15 @@ export type WithProgressOptions = {
 };
 
 /**
- * Run an async operation with an animated spinner on stderr.
+ * Run an async operation with an animated spinner on stdout.
  *
  * The spinner uses the same braille frames as the Seer polling spinner,
  * giving a consistent look across all CLI commands. Progress output goes
- * to stderr, so it never contaminates stdout (safe to use alongside JSON output).
+ * to stdout so it doesn't collide with consola log messages on stderr.
  *
- * When `options.json` is true the spinner is suppressed entirely, matching
- * the behaviour of {@link poll}. This avoids noisy ANSI escape sequences on
- * stderr when agents or CI pipelines consume `--json` output.
+ * The spinner is suppressed when:
+ * - `options.json` is true (JSON mode — no ANSI noise for agents/CI)
+ * - stdout is not a TTY / plain output mode is active (piped output)
  *
  * The callback receives a `setMessage` function to update the displayed
  * message as work progresses (e.g. to show page counts during pagination).
@@ -193,10 +199,10 @@ export async function withProgress<T>(
   options: WithProgressOptions,
   fn: (setMessage: (msg: string) => void) => Promise<T>
 ): Promise<T> {
-  if (options.json) {
-    // JSON mode: skip the spinner entirely, pass a no-op setMessage
+  if (options.json || isPlainOutput()) {
+    // JSON mode or non-TTY: skip the spinner entirely, pass a no-op setMessage
     return fn(() => {
-      /* spinner suppressed in JSON mode */
+      /* spinner suppressed */
     });
   }
 
@@ -206,6 +212,6 @@ export async function withProgress<T>(
     return await fn(spinner.setMessage);
   } finally {
     spinner.stop();
-    process.stderr.write("\r\x1b[K");
+    process.stdout.write("\r\x1b[K");
   }
 }
