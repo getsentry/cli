@@ -25,6 +25,8 @@ import { getRealUsername } from "./utils.js";
 
 export type { Span } from "@sentry/core";
 
+import type { Integration } from "@sentry/core";
+
 /** Re-imported locally because Span is exported via re-export */
 type Span = Sentry.Span;
 
@@ -260,8 +262,40 @@ const EXCLUDED_INTEGRATIONS = new Set([
   "ContextLines", // Reads source files - we rely on uploaded sourcemaps instead
   "LocalVariables", // Captures local variables - adds significant overhead
   "Modules", // Lists all loaded modules - unnecessary for CLI telemetry
-  "NodeSystemError", // Uses util.getSystemErrorMap() which Bun does not implement (CLI-K1)
 ]);
+
+/**
+ * Patch the NodeSystemError integration's processEvent to catch missing
+ * `util.getSystemErrorMap()` on Bun. Without this, the SDK crashes during
+ * event processing instead of sending the error report (CLI-K1).
+ *
+ * We wrap rather than exclude the integration so that on runtimes (or future
+ * Bun versions) that implement `getSystemErrorMap`, system error context is
+ * still attached.
+ */
+function patchNodeSystemErrorIntegration(
+  integration: Integration
+): Integration {
+  if (integration.name !== "NodeSystemError") {
+    return integration;
+  }
+
+  const original = integration.processEvent?.bind(integration);
+  if (!original) {
+    return integration;
+  }
+
+  integration.processEvent = (...args) => {
+    try {
+      return original(...args);
+    } catch {
+      // getSystemErrorMap is not available — skip enrichment, keep the event
+      return args[0];
+    }
+  };
+
+  return integration;
+}
 
 /** Current beforeExit handler, tracked so it can be replaced on re-init */
 let currentBeforeExitHandler: (() => void) | null = null;
@@ -316,9 +350,9 @@ export function initSentry(
     // Keep default integrations but filter out ones that add overhead without benefit
     // Important: Don't use defaultIntegrations: false as it may break debug ID support
     integrations: (defaults) =>
-      defaults.filter(
-        (integration) => !EXCLUDED_INTEGRATIONS.has(integration.name)
-      ),
+      defaults
+        .filter((integration) => !EXCLUDED_INTEGRATIONS.has(integration.name))
+        .map(patchNodeSystemErrorIntegration),
     environment,
     // Enable Sentry structured logs for non-exception telemetry (e.g., unexpected input warnings)
     enableLogs: true,
