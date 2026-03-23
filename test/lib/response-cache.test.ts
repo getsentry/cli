@@ -12,6 +12,7 @@ import {
   buildCacheKey,
   clearResponseCache,
   getCachedResponse,
+  normalizeUrl,
   resetCacheState,
   storeCachedResponse,
 } from "../../src/lib/response-cache.js";
@@ -264,6 +265,37 @@ describe("cache bypass", () => {
 });
 
 // ---------------------------------------------------------------------------
+// normalizeUrl
+// ---------------------------------------------------------------------------
+
+describe("normalizeUrl", () => {
+  test("sorts query params alphabetically", () => {
+    const result = normalizeUrl(
+      "GET",
+      "https://sentry.io/api/0/issues/?b=2&a=1"
+    );
+    expect(result).toBe("GET|https://sentry.io/api/0/issues/?a=1&b=2");
+  });
+
+  test("uppercases the method", () => {
+    const result = normalizeUrl("get", "https://sentry.io/api/0/issues/");
+    expect(result).toMatch(/^GET\|/);
+  });
+
+  test("throws on invalid URLs", () => {
+    expect(() => normalizeUrl("GET", "not-a-valid-url")).toThrow();
+  });
+
+  test("handles self-hosted URLs with unusual schemes", () => {
+    const result = normalizeUrl(
+      "GET",
+      "https://sentry.mycompany.internal/api/0/issues/"
+    );
+    expect(result).toBe("GET|https://sentry.mycompany.internal/api/0/issues/");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // buildCacheKey
 // ---------------------------------------------------------------------------
 
@@ -283,6 +315,27 @@ describe("buildCacheKey", () => {
     const getKey = buildCacheKey("GET", TEST_URL);
     const postKey = buildCacheKey("POST", TEST_URL);
     expect(getKey).not.toBe(postKey);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Invalid URL handling (CLI-GC)
+// ---------------------------------------------------------------------------
+
+describe("invalid URL handling", () => {
+  test("getCachedResponse skips cache for malformed URLs", async () => {
+    const result = await getCachedResponse("GET", "not-a-valid-url", {});
+    expect(result).toBeUndefined();
+  });
+
+  test("storeCachedResponse skips cache for malformed URLs", async () => {
+    // Should not throw — just silently skip
+    await storeCachedResponse(
+      "GET",
+      "not-a-valid-url",
+      {},
+      mockResponse({ ok: true })
+    );
   });
 });
 
