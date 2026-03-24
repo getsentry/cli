@@ -1,17 +1,17 @@
 ---
-name: sentry-cli-sourcemap
+name: sentry-cli-sourcemaps
 version: 0.21.0-dev.0
-description: Sentry CLI sourcemap commands
+description: Sentry CLI sourcemaps commands
 requires:
   bins: ["sentry"]
   auth: true
 ---
 
-# sourcemap Commands
+# sourcemaps Commands
 
 Manage sourcemaps
 
-### `sentry sourcemap inject <directory>`
+### `sentry sourcemaps inject <directory>`
 
 Inject debug IDs into JavaScript files and sourcemaps
 
@@ -19,7 +19,7 @@ Inject debug IDs into JavaScript files and sourcemaps
 - `--ext <value> - Comma-separated file extensions to process (default: .js,.cjs,.mjs)`
 - `--dry-run - Show what would be modified without writing`
 
-### `sentry sourcemap upload <directory>`
+### `sentry sourcemaps upload <directory>`
 
 Upload sourcemaps to Sentry
 
