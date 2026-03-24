@@ -276,6 +276,24 @@ const parsed = parseOrgProjectArg(targetArg);
 
 Reference: `span/list.ts`, `trace/view.ts`, `event/view.ts`
 
+### Target Resolution Convention
+
+The `<target>` positional follows a 4-mode convention via `parseOrgProjectArg()`:
+
+| Input | Mode | Meaning | Example |
+|-------|------|---------|---------|
+| *(empty)* | `auto-detect` | Resolve from DSN/env/config/directory | `sentry issue list` |
+| `org/project` | `explicit` | Both org and project specified | `sentry issue list sentry/cli` |
+| `org/` | `org-all` | Org specified (trailing slash required) | `sentry issue list sentry/` |
+| `slug` | `project-search` | Search for project across all orgs | `sentry issue list cli` |
+
+**Bare slug disambiguation:** A bare slug is **always** `project-search` first — NOT checked against org names at parse time. The org check is secondary and command-specific:
+
+- **List commands** with `orgSlugMatchBehavior` pre-check cached orgs before project search. `"redirect"` silently treats matches as `org-all`; `"error"` throws with trailing-slash hint.
+- **Other commands** (init, view, explain) treat bare slugs purely as project search — no org pre-check.
+- **Safety net:** If project search finds nothing, `handleProjectSearch()` checks if the slug matches an org and suggests adding a trailing slash.
+- **`init` special case:** A bare slug that doesn't match an existing project is treated as the **name for a new project** to create.
+
 ### Markdown Rendering
 
 All non-trivial human output must use the markdown rendering pipeline:
@@ -829,24 +847,6 @@ mock.module("./some-module", () => ({
 
 ### Architecture
 
-<!-- lore:019d0b16-9777-7579-aa15-caf6603a34f5 -->
-* **defaultCommand:help blocks Stricli fuzzy matching for top-level typos**: Stricli's \`defaultCommand: "help"\` in \`app.ts\` routes unrecognized top-level words to the help command, bypassing Stricli's built-in Damerau-Levenshtein fuzzy matching. Fixed: \`resolveCommandPath()\` in \`introspect.ts\` now returns an \`UnresolvedPath\` (with \`kind: "unresolved"\`, \`input\`, and \`suggestions\`) when a path segment doesn't match. It calls \`fuzzyMatch()\` from \`fuzzy.ts\` to produce up to 3 suggestions. \`introspectCommand()\` and \`formatHelpHuman()\` in \`help.ts\` surface these as "Did you mean: X?" messages. Both top-level (\`sentry isseu\`) and subcommand (\`sentry help issue lis\`) typos now get suggestions. JSON output includes a \`suggestions\` array in the error variant.
-
-<!-- lore:019cafbb-24ad-75a3-b037-5efbe6a1e85d -->
-* **DSN org prefix normalization in arg-parsing.ts**: Sentry DSN hosts encode org IDs as \`oNNNNN\` (e.g., \`o1081365.ingest.us.sentry.io\`). The Sentry API rejects the \`o\`-prefixed form. \`stripDsnOrgPrefix()\` in \`src/lib/arg-parsing.ts\` uses \`/^o(\d+)$/\` to strip the prefix — safe for slugs like \`organic\`. Applied in \`parseOrgProjectArg()\` and \`parseWithSlash()\`, covering all API call paths consuming \`parsed.org\`.
-
-<!-- lore:019cb38b-e327-7ec5-8fb0-9e635b2bac48 -->
-* **GHCR versioned nightly tags for delta upgrade support**: GHCR nightly distribution uses three tag types: \`:nightly\` (rolling), \`:nightly-\<version>\` (immutable), \`:patch-\<version>\` (delta manifest). Delta patches use zig-bsdiff TRDIFF10 (zstd-compressed), ~50KB vs ~29MB full. Client bspatch via \`Bun.zstdDecompressSync()\`. N-1 patches only, full download fallback, SHA-256 verify, 60% size threshold. npm/Node excluded. Test mocks: use \`mockGhcrNightlyVersion()\` helper.
-
-<!-- lore:a1f33ceb-6116-4d29-b6d0-0dc9678e4341 -->
-* **Issue list auto-pagination beyond API's 100-item cap**: Sentry API silently caps \`limit\` at 100 per request. \`listIssuesAllPages()\` auto-paginates using Link headers, bounded by MAX\_PAGINATION\_PAGES (50). \`API\_MAX\_PER\_PAGE\` constant is shared across all paginated consumers. \`--limit\` means total results everywhere (max 1000, default 25). Org-all mode uses \`fetchOrgAllIssues()\`; explicit \`--cursor\` does single-page fetch to preserve cursor chain.
-
-<!-- lore:019d0846-17b2-7c58-9201-f5d2e255dcb0 -->
-* **resolveProjectBySlug carries full projectData to avoid redundant getProject calls**: \`resolveProjectBySlug()\` returns \`{ org, project, projectData: SentryProject }\` — the full project object from \`findProjectsBySlug()\`. \`ResolvedOrgProject\` and \`ResolvedTarget\` have optional \`projectData?\` (populated only in project-search path, not explicit/auto-detect). Downstream commands (\`project/view\`, \`project/delete\`, \`dashboard/create\`) use \`projectData\` when available to skip redundant \`getProject()\` API calls (~500-800ms savings). Pattern: \`resolved.projectData ?? await getProject(org, project)\` for callers that need both paths.
-
-<!-- lore:019cb950-9b7b-731a-9832-b7f6cfb6a6a2 -->
-* **Self-hosted OAuth device flow requires Sentry 26.1.0+ and SENTRY\_CLIENT\_ID**: Self-hosted OAuth device flow requires Sentry 26.1.0+ and both \`SENTRY\_URL\` and \`SENTRY\_CLIENT\_ID\` env vars. Users must create a public OAuth app in Settings → Developer Settings. The client ID is NOT optional for self-hosted. Fallback for older instances: \`sentry auth login --token\`. \`getSentryUrl()\` and \`getClientId()\` in \`src/lib/oauth.ts\` read lazily (not at module load) so URL parsing from arguments can set \`SENTRY\_URL\` after import.
-
 <!-- lore:019ce2be-39f1-7ad9-a4c5-4506b62f689c -->
 * **api-client.ts split into domain modules under src/lib/api/**: The original monolithic \`src/lib/api-client.ts\` (1,977 lines) was split into 12 focused domain modules under \`src/lib/api/\`: infrastructure.ts (shared helpers, types, raw requests), organizations.ts, projects.ts, teams.ts, repositories.ts, issues.ts, events.ts, traces.ts, logs.ts, seer.ts, trials.ts, users.ts. The original \`api-client.ts\` was converted to a ~100-line barrel re-export file preserving all existing import paths. The \`biome.jsonc\` override for \`noBarrelFile\` already includes \`api-client.ts\`. When adding new API functions, place them in the appropriate domain module under \`src/lib/api/\`, not in the barrel file.
 
@@ -871,49 +871,59 @@ mock.module("./some-module", () => ({
 <!-- lore:019ce0bb-f35d-7380-b661-8dc56f9938cf -->
 * **Seer trial prompt uses middleware layering in bin.ts error handling chain**: Error recovery middlewares in \`bin.ts\` are layered: \`main() → executeWithAutoAuth() → executeWithSeerTrialPrompt() → runCommand()\`. Seer trial prompts (for \`no\_budget\`/\`not\_enabled\`) caught by inner wrapper; auth errors bubble to outer. Auth retry goes through full chain. Trial API: \`GET /api/0/customers/{org}/\` → \`productTrials\[]\` (prefer \`seerUsers\`, fallback \`seerAutofix\`). Start: \`PUT /api/0/customers/{org}/product-trial/\`. SaaS-only; self-hosted 404s gracefully. \`ai\_disabled\` excluded. \`startSeerTrial\` accepts \`category\` from trial object — don't hardcode.
 
-<!-- lore:019d0b16-977c-7e49-b06d-523b7782692f -->
-* **Sentry CLI fuzzy matching coverage map across subsystems**: Fuzzy matching exists in: (1) Stricli built-in Damerau-Levenshtein for subcommand/flag typos within known route groups, (2) custom \`fuzzyMatch()\` in \`complete.ts\` for dynamic tab-completion using Levenshtein+prefix+contains scoring, (3) custom \`levenshtein()\` in \`platforms.ts\` for platform name suggestions, (4) plural alias detection in \`app.ts\`, (5) \`resolveCommandPath()\` in \`introspect.ts\` uses \`fuzzyMatch()\` from \`fuzzy.ts\` for top-level and subcommand typos — covering both \`sentry \<typo>\` and \`sentry help \<typo>\`. Static shell tab-completion uses shell-native prefix matching (compgen/\`\_describe\`/fish \`-a\`).
+<!-- lore:019d1f97-563d-72f0-80a9-accaa6d9b282 -->
+* **SQLite DB functions are synchronous — async signatures are historical artifacts**: All \`src/lib/db/\` functions do synchronous SQLite operations (both \`bun:sqlite\` and the \`node:sqlite\` polyfill's \`DatabaseSync\` are sync). Many functions still have \`async\` signatures — this is a historical artifact from PR #89 which migrated config storage from JSON files (using async \`Bun.file().text()\` / \`Bun.write()\`) to SQLite. The function signatures were preserved to minimize diff size and never cleaned up. These can safely be converted to synchronous. Exceptions that ARE legitimately async: \`clearAuth()\` (cache dir cleanup), \`getCachedDetection()\`/\`getCachedProjectRoot()\`/\`setCachedProjectRoot()\` (stat for mtime), \`refreshToken()\`/\`performTokenRefresh()\` (HTTP calls).
 
-<!-- lore:019ca9c3-989c-7c8d-bcd0-9f308fd2c3d7 -->
-* **Sentry CLI markdown-first formatting pipeline replaces ad-hoc ANSI**: Formatters build CommonMark strings; \`renderMarkdown()\` renders to ANSI for TTY or raw markdown for non-TTY. Key helpers: \`colorTag()\`, \`mdKvTable()\`, \`mdRow()\`, \`mdTableHeader()\` (\`:\` suffix = right-aligned), \`renderTextTable()\`. \`isPlainOutput()\` checks \`SENTRY\_PLAIN\_OUTPUT\` > \`NO\_COLOR\` > \`!isTTY\`. Batch path: \`formatXxxTable()\`. Streaming path: \`StreamingTable\` (TTY) or raw markdown rows (plain). Both share \`buildXxxRowCells()\`.
+### Decision
 
-<!-- lore:019cd2b7-bb98-730e-a0d3-ec25bfa6cf4c -->
-* **Sentry issue stats field: time-series controlled by groupStatsPeriod**: The \`stats\` field on issues is \`{ '24h': \[\[ts, count], ...] }\`. Key depends on \`groupStatsPeriod\` param (\`""\`, \`"14d"\`, \`"24h"\`, \`"auto"\`). \`statsPeriod\` controls time window; \`groupStatsPeriod\` controls stats key. \*\*Critical\*\*: \`count\` is period-scoped — \`lifetime.count\` is the true lifetime total. Issue list table uses \`groupStatsPeriod: 'auto'\` for sparkline data. Column order: SHORT ID, ISSUE, SEEN, AGE, TREND, EVENTS, USERS, TRIAGE. TREND auto-hidden when terminal < 100 cols. \`--compact\` tri-state: explicit overrides; \`undefined\` triggers \`shouldAutoCompact(rowCount)\` — compact if \`3N + 3 > termHeight\`, false for non-TTY. Height is \`3N + 3\` (not \`3N + 4\`) because last data row has no trailing separator.
+<!-- lore:019c99d5-69f2-74eb-8c86-411f8512801d -->
+* **Raw markdown output for non-interactive terminals, rendered for TTY**: Markdown-first output pipeline: custom renderer in \`src/lib/formatters/markdown.ts\` walks \`marked\` tokens to produce ANSI-styled output. Commands build CommonMark using helpers (\`mdKvTable()\`, \`mdRow()\`, \`colorTag()\`, \`escapeMarkdownCell()\`, \`safeCodeSpan()\`) and pass through \`renderMarkdown()\`. \`isPlainOutput()\` precedence: \`SENTRY\_PLAIN\_OUTPUT\` > \`NO\_COLOR\` > \`FORCE\_COLOR\` > \`!isTTY\`. \`--json\` always outputs JSON. Colors defined in \`COLORS\` object in \`colors.ts\`. Tests run non-TTY so assertions match raw CommonMark; use \`stripAnsi()\` helper for rendered-mode assertions.
 
-<!-- lore:019ca9c3-98a2-7a81-9db7-d36c2e71237c -->
-* **Sentry trace-logs API is org-scoped, not project-scoped**: The Sentry trace-logs endpoint (\`/organizations/{org}/trace-logs/\`) is org-scoped, so \`trace logs\` uses \`resolveOrg()\` not \`resolveOrgAndProject()\`. The endpoint is PRIVATE in Sentry source, excluded from the public OpenAPI schema — \`@sentry/api\` has no generated types. The hand-written \`TraceLogSchema\` in \`src/types/sentry.ts\` is required until Sentry makes it public.
-
-<!-- lore:019cbf3f-6dc2-727d-8dca-228555e9603f -->
-* **withAuthGuard returns discriminated Result type, not fallback+onError**: \`withAuthGuard\<T>(fn)\` in \`src/lib/errors.ts\` returns a discriminated Result: \`{ ok: true, value: T } | { ok: false, error: unknown }\`. AuthErrors always re-throw (triggers bin.ts auto-login). All other errors are captured. Callers inspect \`result.ok\` to degrade gracefully. Used across 12+ files.
-
-<!-- lore:019d082a-c40e-77b5-9374-ee993205ac79 -->
-* **Sentry SDK switched from @sentry/bun to @sentry/node-core/light**: The CLI switched from \`@sentry/bun\` to \`@sentry/node-core/light\` (PR #474) to eliminate the OpenTelemetry dependency tree (~170ms startup savings). All imports use \`@sentry/node-core/light\` not \`@sentry/bun\`. \`LightNodeClient\` replaces \`BunClient\` in telemetry.ts. \`Span\` type exports from \`@sentry/core\`. The \`@sentry/core\` barrel is patched to remove ~32 unused exports (AI tracing, MCP server, Supabase, feature flags). Light mode is labeled experimental but safe because SDK versions are pinned exactly (not caret). \`makeNodeTransport\` works fine in Bun. The \`cli.runtime\` tag still distinguishes Bun vs Node at runtime.
+<!-- lore:00166785-609d-4ab5-911e-ee205d17b90c -->
+* **whoami should be separate from auth status command**: The \`sentry auth whoami\` command should be a dedicated command separate from \`sentry auth status\`. They serve different purposes: \`status\` shows everything about auth state (token, expiry, defaults, org verification), while \`whoami\` just shows user identity (name, email, username, ID) by fetching live from \`/auth/\` endpoint. \`sentry whoami\` should be a top-level alias (like \`sentry issues\` → \`sentry issue list\`). \`whoami\` should support \`--json\` for machine consumption and be lightweight — no credential verification, no defaults listing.
 
 ### Gotcha
 
-<!-- lore:019d1d4b-19fa-7d78-a01a-4c375f425834 -->
-* **Chalk needs chalk.level=3 for ANSI output in tests**: In Bun tests, stdout is piped (not a TTY), so chalk's color level defaults to 0 and produces no ANSI escape codes — even with \`SENTRY\_PLAIN\_OUTPUT=0\`. Setting \`FORCE\_COLOR=1\` env var works but the project convention is to set \`chalk.level = 3\` at the top of test files that need to assert on ANSI output. The project's \`isPlainOutput()\` and chalk's color detection are independent systems: \`isPlainOutput()\` checks \`SENTRY\_PLAIN\_OUTPUT\`/\`NO\_COLOR\`/TTY, while chalk checks \`FORCE\_COLOR\`/TTY separately.
+<!-- lore:019c8ab6-d119-7365-9359-98ecf464b704 -->
+* **@sentry/api SDK passes Request object to custom fetch — headers lost on Node.js**: @sentry/api SDK calls \`\_fetch(request)\` with no init object. In \`authenticatedFetch\`, \`init\` is undefined so \`prepareHeaders\` creates empty headers — on Node.js this strips Content-Type (HTTP 415). Fix: fall back to \`input.headers\` when \`init\` is undefined. Use \`unwrapPaginatedResult\` (not \`unwrapResult\`) to access the Response's Link header for pagination. \`per\_page\` is not in SDK types; cast query to pass it at runtime.
 
-<!-- lore:019d1bca-b5c1-7e19-b8cc-74b6f32f3487 -->
-* **issue explain/plan commands never set sentry.org telemetry tag**: The \`issue explain\` and \`issue plan\` commands were missing \`setContext(\[org], \[])\` calls after \`resolveOrgAndIssueId()\`, so \`sentry.org\` and \`sentry.project\` tags were never set on SeerError events. Fixed in commit 816b44b5 on branch \`fix/seer-org-telemetry-tag\` — both commands now destructure \`setContext\` from \`this\` and call it immediately after resolving the org, before any Seer API call. The \`issue view\` and \`issue list\` commands already had this call. Pattern: always call \`setContext()\` right after org resolution, before any API call that might throw, so error events carry the org tag.
+<!-- lore:019c9e98-7af4-7e25-95f4-fc06f7abf564 -->
+* **Bun binary build requires SENTRY\_CLIENT\_ID env var**: The build script (\`script/bundle.ts\`) requires \`SENTRY\_CLIENT\_ID\` environment variable and exits with code 1 if missing. When building locally, use \`bun run --env-file=.env.local build\` or set the env var explicitly. The binary build (\`bun run build\`) also needs it. Without it you get: \`Error: SENTRY\_CLIENT\_ID environment variable is required.\`
 
-<!-- lore:019d1d4b-1a07-7d8a-b8ec-69fcf1440922 -->
-* **LSP auto-organize imports can silently remove new imports**: When editing TypeScript files in this project, the LSP's auto-organize-imports feature can silently remove import lines that were just added if the imported symbols aren't yet referenced in the file. This happens when you add an import in one edit and the usage in a subsequent edit — the LSP runs between edits and strips the "unused" import. Fix: always add the import and its first usage in the same edit operation, or verify imports survived after each edit by grepping the file.
+<!-- lore:019c9776-e3dd-7632-88b8-358a19506218 -->
+* **GitHub immutable releases prevent rolling nightly tag pattern**: getsentry/cli has immutable GitHub releases — assets can't be modified and tags can NEVER be reused. Nightly builds publish to GHCR with versioned tags like \`nightly-0.14.0-dev.1772661724\`, not GitHub Releases or npm. \`fetchManifest()\` throws \`UpgradeError("network\_error")\` for both network failures and non-200 — callers must check message for HTTP 404/403. Craft with no \`preReleaseCommand\` silently skips \`bump-version.sh\` if only target is \`github\`.
 
-<!-- lore:019d082a-c419-7c99-9259-eacd10d2bcbd -->
-* **project list bare-slug org fallback requires custom handleProjectSearch**: The \`project list\` command has a custom \`handleProjectSearch\` override (not the shared one from \`org-list.ts\`). When a user types \`sentry project list acme-corp\` where \`acme-corp\` is an org slug (not a project), the custom handler must check if the bare slug matches an organization and fall back to listing that org's projects. The shared \`handleProjectSearch\` in \`org-list.ts\` already does this, but custom overrides in individual commands can miss it, causing a confusing \`ResolutionError\` (PR #475 fix).
+<!-- lore:019cb8c2-d7b5-780c-8a9f-d20001bc198f -->
+* **Install script: BSD sed and awk JSON parsing breaks OCI digest extraction**: The install script parses OCI manifests with awk (no jq). Key trap: BSD sed \`\n\` is literal, not newline. Fix: single awk pass tracking last-seen \`"digest"\`, printing when \`"org.opencontainers.image.title"\` matches target. The config digest (\`sha256:44136fa...\`) is a 2-byte \`{}\` blob — downloading it instead of the real binary causes \`gunzip: unexpected end of file\`.
 
-<!-- lore:019d1d4b-19e6-7aea-a3d8-3f76bcdd2209 -->
-* **Zero runtime dependencies enforced by test**: The project has a test in \`test/package.test.ts\` that asserts \`pkg.dependencies\` is empty — all packages must be devDependencies. The CLI is distributed as a compiled Bun binary, so runtime deps are bundled at build time. Adding a package to \`dependencies\` instead of \`devDependencies\` will fail CI. When adding a new package like \`@sentry/sqlish\`, use \`bun add --dev\` not \`bun add\`.
+<!-- lore:019d0b04-ccec-7bd2-a5ca-732e7064cc1a -->
+* **Multi-region fan-out: distinguish all-403 from empty orgs with hasSuccessfulRegion flag**: In \`listOrganizationsUncached\` (\`src/lib/api/organizations.ts\`), \`Promise.allSettled\` collects multi-region results. Don't use \`flatResults.length === 0\` to detect all-regions-failed — a region returning 200 OK with zero orgs pushes nothing into \`flatResults\`. Track a \`hasSuccessfulRegion\` boolean on any \`"fulfilled"\` settlement. Only re-throw 403 \`ApiError\` when \`!hasSuccessfulRegion && lastScopeError\`.
+
+<!-- lore:019c969a-1c90-7041-88a8-4e4d9a51ebed -->
+* **Multiple mockFetch calls replace each other — use unified mocks for multi-endpoint tests**: Bun test mocking gotchas: (1) \`mockFetch()\` replaces \`globalThis.fetch\` — calling it twice replaces the first mock. Use a single unified fetch mock dispatching by URL pattern. (2) \`mock.module()\` pollutes the module registry for ALL subsequent test files. Tests using it must live in \`test/isolated/\` and run via \`test:isolated\`. This also causes \`delta-upgrade.test.ts\` to fail when run alongside \`test/isolated/delta-upgrade.test.ts\` — the isolated test's \`mock.module()\` replaces \`CLI\_VERSION\` for all subsequent files. (3) For \`Bun.spawn\`, use direct property assignment in \`beforeEach\`/\`afterEach\`.
+
+<!-- lore:019c9741-d78e-73b1-87c2-e360ef6c7475 -->
+* **useTestConfigDir without isolateProjectRoot causes DSN scanning of repo tree**: \`useTestConfigDir()\` creates temp dirs under \`.test-tmp/\` in the repo tree. Without \`{ isolateProjectRoot: true }\`, \`findProjectRoot\` walks up and finds the repo's \`.git\`, causing DSN detection to scan real source code and trigger network calls against test mocks (timeouts). Always pass \`isolateProjectRoot: true\` when tests exercise \`resolveOrg\`, \`detectDsn\`, or \`findProjectRoot\`.
 
 ### Pattern
 
-<!-- lore:019d1f98-3bed-7f36-ae7e-34a529709097 -->
-* **@sentry/api SDK blocks query params on issue detail endpoints**: The \`retrieveAnIssue\` and \`resolveAShortId\` SDK functions have \`query?: never\` in their TypeScript types, preventing callers from passing \`collapse\` or other query parameters. The Sentry backend DOES accept \`collapse\` on these endpoints (same Django view base class as the list endpoint), but the OpenAPI spec omits it. The CLI works around this by using raw \`apiRequestToRegion()\` instead of the SDK for \`getIssueInOrg\` and \`getIssueByShortId\`. Upstream issue filed at https://github.com/getsentry/sentry-api-schema/issues/63. If the schema is fixed, these functions can switch back to the SDK.
+<!-- lore:019d0b36-5da2-750c-b26f-630a2927bd79 -->
+* **findProjectsByPattern as fuzzy fallback for exact slug misses**: When \`findProjectsBySlug\` returns empty (no exact match), use \`findProjectsByPattern\` as a fallback to suggest similar projects. \`findProjectsByPattern\` does bidirectional word-boundary matching (\`matchesWordBoundary\`) against all projects in all orgs — the same logic used for directory name inference. In the \`project-search\` handler, call it after the exact miss, format matches as \`\<org>/\<slug>\` suggestions in the \`ResolutionError\`. This avoids a dead-end error for typos like 'patagonai' when 'patagon-ai' exists. Note: \`findProjectsByPattern\` makes additional API calls (lists all projects per org), so only call it on the failure path.
 
-<!-- lore:019d1bca-b5c9-7e1a-bfe4-d5c0545176ee -->
-* **Dashboard widget layout uses 6-column grid with x,y,w,h**: Sentry dashboards use a 6-column grid with \`{x, y, w, h, minH}\` layout. Default big\_number is \`w=2, h=1\`; to center it use \`w=4, x=1\`. Tables default to \`w=6, h=2\`. The \`dashboard widget edit\` command only handles query/display/title — use \`sentry api\` with PUT to \`/api/0/organizations/{org}/dashboards/{id}/\` for layout, default period, environment, and project changes. The PUT payload must include the full \`widgets\` array. Widget queries need both \`fields\` (all columns + aggregates) and \`columns\` (non-aggregate columns only) arrays. Use \`user.display\` instead of \`user.email\` for user columns — it auto-selects the best available identifier.
+* **Target argument 4-mode parsing convention (project-search-first)**: \`parseOrgProjectArg()\` in \`src/lib/arg-parsing.ts\` returns a 4-mode discriminated union: \`auto-detect\` (empty), \`explicit\` (\`org/project\`), \`org-all\` (\`org/\` trailing slash), \`project-search\` (bare slug). Bare slugs are ALWAYS \`project-search\` first. The "is this an org?" check is secondary: list commands with \`orgSlugMatchBehavior\` pre-check cached orgs (\`redirect\` or \`error\` mode), and \`handleProjectSearch()\` has a safety net checking orgs after project search fails. Non-list commands (init, view) treat bare slugs purely as project search with no org pre-check. For \`init\`, unmatched bare slugs become new project names. Key files: \`src/lib/arg-parsing.ts\` (parsing), \`src/lib/org-list.ts\` (dispatch + org pre-check), \`src/lib/resolve-target.ts\` (resolution cascade).
 
-<!-- lore:019d082a-c415-7685-b6f0-e303d95eb4a0 -->
-* **Issue resolution fan-out uses unbounded Promise.all across orgs**: \`resolveProjectSearch()\` in \`src/commands/issue/utils.ts\` fans out \`tryGetIssueByShortId\` across ALL orgs via \`Promise.all\`. Pattern: expand short ID, list all orgs, fire lookups in parallel, collect successes. Exactly one success → use it; multiple → ambiguity error; all fail → fall back to \`resolveProjectSearchFallback()\`. All org fan-out concurrency is controlled by \`ORG\_FANOUT\_CONCURRENCY\` (exported from \`src/lib/api/infrastructure.ts\`, re-exported via \`api-client.ts\`). This single constant is used in \`events.ts\`, \`projects.ts\`, \`issue/utils.ts\`, and any future fan-out sites. Never define a local concurrency limit for org fan-out — always import the shared constant.
+<!-- lore:019c972c-9f11-7c0d-96ce-3f8cc2641175 -->
+* **Org-scoped SDK calls follow getOrgSdkConfig + unwrapResult pattern**: All org-scoped API calls in src/lib/api-client.ts: (1) call \`getOrgSdkConfig(orgSlug)\` for regional URL + SDK config, (2) spread into SDK function: \`{ ...config, path: { organization\_id\_or\_slug: orgSlug, ... } }\`, (3) pass to \`unwrapResult(result, errorContext)\`. Shared helpers \`resolveAllTargets\`/\`resolveOrgAndProject\` must NOT call \`fetchProjectId\` — commands that need it enrich targets themselves.
+
+<!-- lore:5ac4e219-ea1f-41cb-8e97-7e946f5848c0 -->
+* **PR workflow: wait for Seer and Cursor BugBot before resolving**: CI includes Seer Code Review and Cursor Bugbot as advisory checks (~2-3 min, only on ready-for-review PRs). Workflow: push → wait for all CI (including npm build) → check inline review comments from Seer/BugBot → fix valid findings → repeat. Bugbot sometimes catches real logic bugs, not just style — always review before merging. Use \`gh pr checks \<PR> --watch\` to monitor. Fetch comments via \`gh api repos/OWNER/REPO/pulls/NUM/comments\`.
+
+<!-- lore:019cb162-d3ad-7b05-ab4f-f87892d517a6 -->
+* **Shared pagination infrastructure: buildPaginationContextKey and parseCursorFlag**: List commands with cursor pagination use \`buildPaginationContextKey(type, identifier, flags)\` for composite context keys and \`parseCursorFlag(value)\` accepting \`"last"\` magic value. Critical: \`resolveCursor()\` must be called inside the \`org-all\` override closure, not before \`dispatchOrgScopedList\` — otherwise cursor validation errors fire before the correct mode-specific error.
+
+<!-- lore:019cbd5f-ec35-7e2d-8386-6d3a67adf0cf -->
+* **Telemetry instrumentation pattern: withTracingSpan + captureException for handled errors**: For graceful-fallback operations, use \`withTracingSpan\` from \`src/lib/telemetry.ts\` for child spans and \`captureException\` from \`@sentry/bun\` (named import — Biome forbids namespace imports) with \`level: 'warning'\` for non-fatal errors. \`withTracingSpan\` uses \`onlyIfParent: true\` — no-op without active transaction. User-visible fallbacks use \`log.warn()\` not \`log.debug()\`. Several commands bypass telemetry by importing \`buildCommand\` from \`@stricli/core\` directly instead of \`../../lib/command.js\` (trace/list, trace/view, log/view, api.ts, help.ts).
+
+<!-- lore:019cc43d-e651-7154-a88e-1309c4a2a2b6 -->
+* **Testing Stricli command func() bodies via spyOn mocking**: To unit-test a Stricli command's \`func()\` body: (1) \`const func = await cmd.loader()\`, (2) \`func.call(mockContext, flags, ...args)\` with mock \`stdout\`, \`stderr\`, \`cwd\`, \`setContext\`. (3) \`spyOn\` namespace imports to mock dependencies (e.g., \`spyOn(apiClient, 'getLogs')\`). The \`loader()\` return type union causes \`.call()\` LSP errors — these are false positives that pass \`tsc --noEmit\`. When API functions are renamed (e.g., \`getLog\` → \`getLogs\`), update both spy target name AND mock return shape (single → array). Slug normalization (\`normalizeSlug\`) replaces underscores with dashes but does NOT lowercase — test assertions must match original casing (e.g., \`'CAM-82X'\` not \`'cam-82x'\`).
 <!-- End lore-managed section -->
