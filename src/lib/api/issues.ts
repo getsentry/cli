@@ -5,24 +5,21 @@
  */
 
 import type { ListAnOrganizationSissuesData } from "@sentry/api";
-import {
-  listAnOrganization_sIssues,
-  resolveAShortId,
-  retrieveAnIssue,
-} from "@sentry/api";
+import { listAnOrganization_sIssues } from "@sentry/api";
 
 import type { SentryIssue } from "../../types/index.js";
 
 import { ApiError } from "../errors.js";
+import { resolveOrgRegion } from "../region.js";
 
 import {
   API_MAX_PER_PAGE,
   apiRequest,
+  apiRequestToRegion,
   getOrgSdkConfig,
   MAX_PAGINATION_PAGES,
   type PaginatedResponse,
   unwrapPaginatedResult,
-  unwrapResult,
 } from "./infrastructure.js";
 
 /**
@@ -73,6 +70,24 @@ export function buildIssueListCollapse(options: {
   }
   return collapse;
 }
+
+/**
+ * Collapse fields for single-issue detail endpoints.
+ *
+ * The CLI never displays stats (sparkline time-series), lifetime (aggregate
+ * sub-object), filtered (filtered counts), or unhandled (unhandled sub-object)
+ * in detail views (`issue view`, `issue explain`, `issue plan`).
+ * Collapsing these skips expensive Snuba queries, saving 100-300ms per request.
+ *
+ * Note: `count`, `userCount`, `firstSeen`, `lastSeen` are top-level fields
+ * and remain unaffected by collapsing.
+ */
+export const ISSUE_DETAIL_COLLAPSE: IssueCollapseField[] = [
+  "stats",
+  "lifetime",
+  "filtered",
+  "unhandled",
+];
 
 /**
  * List issues for a project with pagination control.
@@ -237,58 +252,80 @@ export async function listIssuesAllPages(
  *
  * Uses the legacy unscoped endpoint — no org context or region routing.
  * Prefer {@link getIssueInOrg} when the org slug is known.
+ *
+ * @param issueId - Numeric issue ID
+ * @param options - Optional collapse fields to skip expensive backend queries
  */
-export function getIssue(issueId: string): Promise<SentryIssue> {
-  // The @sentry/api SDK's retrieveAnIssue requires org slug in path,
-  // but the legacy endpoint /issues/{id}/ works without org context.
-  // Use raw request for backward compatibility.
-  return apiRequest<SentryIssue>(`/issues/${issueId}/`);
+export function getIssue(
+  issueId: string,
+  options?: { collapse?: IssueCollapseField[] }
+): Promise<SentryIssue> {
+  return apiRequest<SentryIssue>(`/issues/${issueId}/`, {
+    params: options?.collapse ? { collapse: options.collapse } : undefined,
+  });
 }
 
 /**
  * Get a specific issue by numeric ID, scoped to an organization.
  *
- * Uses the org-scoped SDK endpoint with region-aware routing.
+ * Uses the org-scoped endpoint with region-aware routing.
  * Preferred over {@link getIssue} when the org slug is available.
+ *
+ * Uses raw `apiRequestToRegion` instead of the SDK's `retrieveAnIssue`
+ * because the SDK types declare `query?: never`, blocking `collapse`
+ * and other query parameters. See: https://github.com/getsentry/sentry-api-schema/issues/63
  *
  * @param orgSlug - Organization slug (used for region routing)
  * @param issueId - Numeric issue ID
+ * @param options - Optional collapse fields to skip expensive backend queries
  */
 export async function getIssueInOrg(
   orgSlug: string,
-  issueId: string
+  issueId: string,
+  options?: { collapse?: IssueCollapseField[] }
 ): Promise<SentryIssue> {
-  const config = await getOrgSdkConfig(orgSlug);
-  const result = await retrieveAnIssue({
-    ...config,
-    path: { organization_id_or_slug: orgSlug, issue_id: issueId },
-  });
-  return unwrapResult(result, "Failed to get issue") as unknown as SentryIssue;
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<SentryIssue>(
+    regionUrl,
+    `/organizations/${orgSlug}/issues/${issueId}/`,
+    {
+      params: options?.collapse ? { collapse: options.collapse } : undefined,
+    }
+  );
+  return data;
 }
 
 /**
  * Get an issue by short ID (e.g., SPOTLIGHT-ELECTRON-4D).
  * Requires organization context to resolve the short ID.
  * Uses region-aware routing for multi-region support.
+ *
+ * Uses raw `apiRequestToRegion` instead of the SDK's `resolveAShortId`
+ * because the SDK types declare `query?: never`, blocking `collapse`
+ * and other query parameters. See: https://github.com/getsentry/sentry-api-schema/
+ *
+ * @param orgSlug - Organization slug
+ * @param shortId - Short ID (e.g., "CLI-G5", "SPOTLIGHT-ELECTRON-4D")
+ * @param options - Optional collapse fields to skip expensive backend queries
  */
 export async function getIssueByShortId(
   orgSlug: string,
-  shortId: string
+  shortId: string,
+  options?: { collapse?: IssueCollapseField[] }
 ): Promise<SentryIssue> {
   const normalizedShortId = shortId.toUpperCase();
-  const config = await getOrgSdkConfig(orgSlug);
+  const regionUrl = await resolveOrgRegion(orgSlug);
 
-  const result = await resolveAShortId({
-    ...config,
-    path: {
-      organization_id_or_slug: orgSlug,
-      issue_id: normalizedShortId,
-    },
-  });
-
-  let data: ReturnType<typeof unwrapResult>;
+  let data: { group?: SentryIssue };
   try {
-    data = unwrapResult(result, "Failed to resolve short ID");
+    const result = await apiRequestToRegion<{ group?: SentryIssue }>(
+      regionUrl,
+      `/organizations/${orgSlug}/shortids/${normalizedShortId}/`,
+      {
+        params: options?.collapse ? { collapse: options.collapse } : undefined,
+      }
+    );
+    data = result.data;
   } catch (error) {
     // Enrich 404 errors with actionable context. The generic
     // "Failed to resolve short ID: 404 Not Found" is the most common
@@ -308,16 +345,14 @@ export async function getIssueByShortId(
     throw error;
   }
 
-  // resolveAShortId returns a ShortIdLookupResponse with a group (issue)
-  const resolved = data as unknown as { group?: SentryIssue };
-  if (!resolved.group) {
+  if (!data.group) {
     throw new ApiError(
       `Short ID ${normalizedShortId} resolved but no issue group returned`,
       404,
       "Issue not found"
     );
   }
-  return resolved.group;
+  return data.group;
 }
 
 /**
@@ -333,10 +368,11 @@ export async function getIssueByShortId(
  */
 export async function tryGetIssueByShortId(
   orgSlug: string,
-  shortId: string
+  shortId: string,
+  options?: { collapse?: IssueCollapseField[] }
 ): Promise<SentryIssue | null> {
   try {
-    return await getIssueByShortId(orgSlug, shortId);
+    return await getIssueByShortId(orgSlug, shortId, options);
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) {
       return null;

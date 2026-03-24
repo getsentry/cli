@@ -11,6 +11,7 @@ import {
   getIssue,
   getIssueByShortId,
   getIssueInOrg,
+  ISSUE_DETAIL_COLLAPSE,
   type IssueSort,
   listIssuesPaginated,
   listOrganizations,
@@ -137,7 +138,9 @@ async function tryResolveFromAlias(
   }
 
   const resolvedShortId = expandToFullShortId(suffix, projectEntry.projectSlug);
-  const issue = await getIssueByShortId(projectEntry.orgSlug, resolvedShortId);
+  const issue = await getIssueByShortId(projectEntry.orgSlug, resolvedShortId, {
+    collapse: ISSUE_DETAIL_COLLAPSE,
+  });
   return { org: projectEntry.orgSlug, issue };
 }
 
@@ -182,7 +185,9 @@ async function resolveProjectSearchFallback(
   const matchedOrg = matchedProject?.orgSlug;
   if (matchedOrg && matchedProject) {
     const retryShortId = expandToFullShortId(suffix, matchedProject.slug);
-    const issue = await getIssueByShortId(matchedOrg, retryShortId);
+    const issue = await getIssueByShortId(matchedOrg, retryShortId, {
+      collapse: ISSUE_DETAIL_COLLAPSE,
+    });
     return { org: matchedOrg, issue };
   }
 
@@ -240,7 +245,9 @@ async function resolveProjectSearch(
     dsnTarget.project.toLowerCase() === projectSlug.toLowerCase()
   ) {
     const fullShortId = expandToFullShortId(suffix, dsnTarget.project);
-    const issue = await getIssueByShortId(dsnTarget.org, fullShortId);
+    const issue = await getIssueByShortId(dsnTarget.org, fullShortId, {
+      collapse: ISSUE_DETAIL_COLLAPSE,
+    });
     return { org: dsnTarget.org, issue };
   }
 
@@ -255,7 +262,11 @@ async function resolveProjectSearch(
   const results = await Promise.all(
     orgs.map((org) =>
       limit(() =>
-        withAuthGuard(() => tryGetIssueByShortId(org.slug, fullShortId))
+        withAuthGuard(() =>
+          tryGetIssueByShortId(org.slug, fullShortId, {
+            collapse: ISSUE_DETAIL_COLLAPSE,
+          })
+        )
       )
     )
   );
@@ -327,7 +338,9 @@ async function resolveSuffixOnly(
     );
   }
   const fullShortId = expandToFullShortId(suffix, target.project);
-  const issue = await getIssueByShortId(target.org, fullShortId);
+  const issue = await getIssueByShortId(target.org, fullShortId, {
+    collapse: ISSUE_DETAIL_COLLAPSE,
+  });
   return { org: target.org, issue };
 }
 
@@ -413,11 +426,13 @@ async function resolveSelector(
   const sort = SELECTOR_SORT_MAP[selector];
   const label = SELECTOR_LABELS[selector];
 
-  // Fetch just the top issue with the appropriate sort
+  // Fetch just the top issue with the appropriate sort.
+  // Collapse all non-essential fields since we only need the issue identity.
   const { data: issues } = await listIssuesPaginated(orgSlug, "", {
     sort,
     perPage: 1,
     query: "is:unresolved",
+    collapse: ISSUE_DETAIL_COLLAPSE,
   });
 
   const issue = issues[0];
@@ -483,8 +498,10 @@ async function resolveNumericIssue(
   const resolvedOrg = await resolveOrg({ cwd });
   try {
     const issue = resolvedOrg
-      ? await getIssueInOrg(resolvedOrg.org, id)
-      : await getIssue(id);
+      ? await getIssueInOrg(resolvedOrg.org, id, {
+          collapse: ISSUE_DETAIL_COLLAPSE,
+        })
+      : await getIssue(id, { collapse: ISSUE_DETAIL_COLLAPSE });
     // Extract org from the response permalink as a fallback so that callers
     // like resolveOrgAndIssueId (used by explain/plan) get the org slug even
     // when no org context was available before the fetch.
@@ -542,7 +559,9 @@ export async function resolveIssue(
       // Full context: org + project + suffix
       const org = await resolveEffectiveOrg(parsed.org);
       const fullShortId = expandToFullShortId(parsed.suffix, parsed.project);
-      const issue = await getIssueByShortId(org, fullShortId);
+      const issue = await getIssueByShortId(org, fullShortId, {
+        collapse: ISSUE_DETAIL_COLLAPSE,
+      });
       result = { org, issue };
       break;
     }
@@ -551,7 +570,9 @@ export async function resolveIssue(
       // Org + numeric ID — use org-scoped endpoint for proper region routing.
       const org = await resolveEffectiveOrg(parsed.org);
       try {
-        const issue = await getIssueInOrg(org, parsed.numericId);
+        const issue = await getIssueInOrg(org, parsed.numericId, {
+          collapse: ISSUE_DETAIL_COLLAPSE,
+        });
         result = { org, issue };
       } catch (err) {
         if (err instanceof ApiError && err.status === 404) {
