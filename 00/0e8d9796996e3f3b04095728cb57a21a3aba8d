@@ -1,0 +1,411 @@
+# Plan: Simplify and DRY Up Database Layer
+
+## Summary
+
+Five targeted refactors to reduce code duplication in `src/lib/db/`. Each change is independently testable and doesn't alter behavior. One additional item (snake_case mappers) was investigated and deemed not worth abstracting.
+
+**Total estimated savings: ~100 lines of duplicated code removed, ~50 files touched.**
+
+---
+
+## Change 1: Metadata Key-Value Helpers (Highest Impact)
+
+**Problem:** Three files (`install-info.ts`, `version-check.ts`, `release-channel.ts`) use the `metadata` table with repeated one-row-at-a-time queries. `install-info.ts` is worst: 4 individual SELECTs to read, 4 individual UPSERTs to write, 4 individual DELETEs to clear.
+
+**Solution:** Add three helpers to `src/lib/db/utils.ts`:
+
+```typescript
+/** Read multiple metadata keys in a single query. */
+function getMetadata(db: QueryRunner, keys: string[]): Map<string, string>
+
+/** Write multiple metadata key-value pairs in a single transaction. */
+function setMetadata(db: QueryRunner, entries: Record<string, string>): void
+
+/** Delete multiple metadata keys in a single query. */
+function clearMetadata(db: QueryRunner, keys: string[]): void
+```
+
+**Implementation details:**
+- Extend `QueryRunner` interface to add the methods needed by metadata helpers:
+  ```typescript
+  type QueryRunner = {
+    query(sql: string): {
+      run(...values: SqlValue[]): void;
+      all(...values: SqlValue[]): Record<string, SqlValue>[];
+    };
+    transaction<T>(fn: () => T): () => T;
+  };
+  ```
+- `getMetadata`: `SELECT key, value FROM metadata WHERE key IN (?, ?, ...)` with `.all()`, return a `Map`
+- `setMetadata`: Loop `runUpsert` calls inside `db.transaction(() => { ... })()`
+- `clearMetadata`: `DELETE FROM metadata WHERE key IN (?, ?, ...)` with `.run()`
+- Since SQLite `IN` clause has a limit of ~999 params and we never exceed ~4 keys, no batching needed
+
+**Files modified:**
+- `src/lib/db/utils.ts` — Add 3 helpers (~30 lines)
+- `src/lib/db/install-info.ts` — Replace 4 SELECTs → 1 `getMetadata`, 4 UPSERTs → 1 `setMetadata`, 4 DELETEs → 1 `clearMetadata` (~40 lines saved)
+- `src/lib/db/version-check.ts` — Replace 2 SELECTs → 1 `getMetadata`, 2 UPSERTs → 1 `setMetadata`, 1 multi-key DELETE → 1 `clearMetadata` (~15 lines saved)
+- `src/lib/db/release-channel.ts` — Minor: single-key, keep as-is or optionally use helper (marginal benefit)
+
+**Estimated savings:** ~45 net lines removed
+
+**Tests to verify:**
+```bash
+bun test test/lib/db/utils.test.ts          # New helper unit tests
+bun test test/lib/db/install-info.test.ts    # Existing tests pass
+bun test test/lib/db/release-channel.test.ts # Existing tests pass
+bun test test/lib/db/model-based.test.ts     # Version check model tests
+```
+
+---
+
+## Change 2: Shared `touchCacheEntry` Helper
+
+**Problem:** Three files have near-identical private `touchCacheEntry` functions:
+
+```typescript
+// dsn-cache.ts
+function touchCacheEntry(directory: string): void {
+  const db = getDatabase();
+  db.query("UPDATE dsn_cache SET last_accessed = ? WHERE directory = ?").run(Date.now(), directory);
+}
+
+// project-cache.ts
+function touchCacheEntry(cacheKey: string): void {
+  const db = getDatabase();
+  db.query("UPDATE project_cache SET last_accessed = ? WHERE cache_key = ?").run(Date.now(), cacheKey);
+}
+```
+
+**Solution:** Add to `src/lib/db/utils.ts`:
+
+```typescript
+/** Update `last_accessed` timestamp for a cache entry. Calls getDatabase() internally. */
+function touchCacheEntry(table: string, keyColumn: string, keyValue: string): void
+```
+
+This calls `getDatabase()` internally (unlike `runUpsert` which takes `db`), since callers often don't need the db handle for anything else in their touch path. This makes call sites simpler: `touchCacheEntry("dsn_cache", "directory", dir)`.
+
+**Files modified:**
+- `src/lib/db/utils.ts` — Add 1 helper (~6 lines), add import for `getDatabase`
+- `src/lib/db/dsn-cache.ts` — Replace private function with shared helper (~5 lines saved)
+- `src/lib/db/project-cache.ts` — Replace private function with shared helper (~5 lines saved)
+
+Note: `project-aliases.ts` has a different touch pattern (global update without WHERE, plus per-alias update) so it doesn't use this helper.
+
+**Estimated savings:** ~10 net lines removed
+
+**Tests to verify:**
+```bash
+bun test test/lib/db/dsn-cache.test.ts
+bun test test/lib/db/dsn-cache.model-based.test.ts
+bun test test/lib/db/project-cache.test.ts
+bun test test/lib/db/utils.test.ts
+```
+
+---
+
+## Change 3: Replace Manual Transaction in `project-aliases.ts`
+
+**Problem:** `setProjectAliases` uses `db.exec("BEGIN TRANSACTION")` / `db.exec("COMMIT")` / `db.exec("ROLLBACK")` manually, unlike every other file in the codebase which uses `db.transaction()()`.
+
+**Solution:** Replace with `db.transaction()()`:
+
+```typescript
+// Before:
+db.exec("BEGIN TRANSACTION");
+try {
+  db.query("DELETE FROM project_aliases").run();
+  // ...inserts...
+  db.exec("COMMIT");
+} catch (error) {
+  db.exec("ROLLBACK");
+  throw error;
+}
+
+// After:
+db.transaction(() => {
+  db.query("DELETE FROM project_aliases").run();
+  // ...inserts...
+})();
+```
+
+**Files modified:**
+- `src/lib/db/project-aliases.ts` — Replace manual transaction (~5 lines saved)
+
+**Estimated savings:** ~5 lines removed
+
+**Tests to verify:**
+```bash
+bun test test/lib/db/model-based.test.ts  # Alias commands in model-based tests
+```
+
+---
+
+## Change 4: Deduplicate `project-cache.ts` Get/Set Pairs
+
+**Problem:** `getCachedProject` and `getCachedProjectByDsnKey` are identical except for key generation. Same for `setCachedProject` and `setCachedProjectByDsnKey`. Each pair duplicates ~20 lines.
+
+**Solution:** Extract private helpers that take a pre-computed key:
+
+```typescript
+// Private implementation
+function getByKey(key: string): CachedProject | undefined { ... }
+function setByKey(key: string, info: Omit<CachedProject, "cachedAt">): void { ... }
+
+// Public API stays the same
+export async function getCachedProject(orgId, projectId) {
+  return getByKey(projectCacheKey(orgId, projectId));
+}
+export async function getCachedProjectByDsnKey(publicKey) {
+  return getByKey(dsnCacheKey(publicKey));
+}
+```
+
+**Files modified:**
+- `src/lib/db/project-cache.ts` — Extract 2 private helpers, simplify 4 public functions (~20 lines saved)
+
+**Estimated savings:** ~20 net lines removed
+
+**Tests to verify:**
+```bash
+bun test test/lib/db/dsn-cache.model-based.test.ts  # Tests project cache too
+bun test test/lib/db/project-cache.test.ts
+```
+
+---
+
+## Change 5: Remove `async` from Synchronous DB Functions
+
+**Problem:** 28 exported functions across 6 files are marked `async` despite doing purely synchronous SQLite operations. The biome config has `useAwait: "off"` for `src/lib/db/**` with a comment "SQLite operations are sync but we keep async signatures for API compatibility." This is misleading — callers treat these as async when they're not, adding unnecessary microtask overhead and obscuring the actual execution model.
+
+**Safety:** No caller uses `.then()` or `Promise.all()` on these functions. All call sites use `await`, which is a no-op on non-Promise values, meaning removing `await` is optional for correctness but good for clarity.
+
+**Functions to de-async (28 total):**
+
+| File | Functions | Count |
+|------|-----------|-------|
+| `defaults.ts` | `getDefaultOrganization`, `getDefaultProject`, `setDefaults` | 3 |
+| `regions.ts` | `getOrgRegion`, `getOrgByNumericId`, `setOrgRegion`, `setOrgRegions`, `clearOrgRegions`, `getAllOrgRegions`, `getCachedOrganizations`, `getCachedOrgRole` | 8 (skip getCachedOrgRole? no, it's sync) |
+| `project-aliases.ts` | `setProjectAliases`, `getProjectAliases`, `getProjectByAlias`, `clearProjectAliases` | 4 |
+| `project-cache.ts` | `getCachedProject`, `setCachedProject`, `getCachedProjectByDsnKey`, `setCachedProjectByDsnKey`, `getCachedProjectsForOrg`, `clearProjectCache` | 6 |
+| `dsn-cache.ts` | `getCachedDsn`, `setCachedDsn`, `updateCachedResolution`, `clearDsnCache`, `setCachedDetection` | 5 |
+| `auth.ts` | `isAuthenticated` | 1 |
+
+**Functions that MUST stay `async`** (they `await` real async operations):
+- `auth.ts`: `clearAuth` (awaits `clearResponseCache()`), `performTokenRefresh`, `refreshToken`
+- `dsn-cache.ts`: `getCachedDetection` (awaits stat validation), `validateDirMtime`, `validateFileMtime`, `validateSourceMtimes`, `validateDirMtimes`
+- `project-root-cache.ts`: `getCachedProjectRoot`, `setCachedProjectRoot` (await `stat()`)
+
+**Call site changes:**
+- ~46 `await` removals across 19 files in `src/`
+- ~326 `await` removals across 27 files in `test/`
+- Each change is mechanical: `await fn()` → `fn()`, and `Promise<T>` → `T` in return types
+
+**Biome config update:**
+Remove the `src/lib/db/**` override for `useAwait: "off"` since the remaining async functions genuinely await.
+
+**Execution approach:** Do this in batches by DB module file:
+1. `defaults.ts` + callers (smallest, 3 functions, ~8 call sites)
+2. `project-aliases.ts` + callers (4 functions, ~6 call sites)
+3. `project-cache.ts` + callers (6 functions, ~18 call sites)
+4. `regions.ts` + callers (8 functions, ~14 call sites)
+5. `dsn-cache.ts` + callers (5 functions, partial — keep getCachedDetection async)
+6. `auth.ts: isAuthenticated` + callers (1 function, ~5 call sites)
+
+**Tests to verify** (after each batch):
+```bash
+bun run typecheck    # Catches any Promise<T> / T mismatches
+bun test             # Full suite
+```
+
+---
+
+## Change 6: Snake-case to camelCase Row Mapping — NOT RECOMMENDED
+
+**Analysis:** Each DB module manually maps between `snake_case` SQL column names and `camelCase` TypeScript types. However, the mappings are NOT uniform:
+- `regions.ts`: `org_slug` → `slug` (abbreviated)
+- `project-cache.ts`: `org_slug` → `orgSlug` (standard camelCase)
+- `user.ts`: includes `null` → `undefined` coercion selectively
+
+A generic mapper would need per-field configuration (column name → field name + nullable handling), which is more indirection than the existing inline code with no real savings. **Skip.**
+
+---
+
+## Change 7: GritQL Lint Rules to Enforce New Patterns
+
+**Problem:** Without enforcement, new code can bypass the helpers and reintroduce raw SQL patterns. The project already has GritQL plugins for other patterns (no stdout.write in commands, no process.stdout).
+
+**Solution:** Add 3 GritQL lint rules to `lint-rules/` and register them in `biome.jsonc`:
+
+### Rule 1: `lint-rules/no-raw-metadata-queries.grit`
+
+Bans raw `SELECT value FROM metadata` and `DELETE FROM metadata` queries, and direct `runUpsert` on the metadata table. Exempts `utils.ts` (defines the helpers) and `migration.ts` (schema bootstrapping).
+
+```grit
+file($name, $body) where {
+  $name <: not r".*utils\.ts$",
+  $name <: not r".*migration\.ts$",
+  $body <: contains or {
+    `$db.query($sql)` as $match where {
+      $sql <: or { r".*SELECT value FROM metadata.*", r".*DELETE FROM metadata.*" }
+    },
+    `runUpsert($db, "metadata", $data, $keys)` as $match
+  },
+  register_diagnostic(span=$match, message="Use getMetadata/setMetadata/clearMetadata from db/utils.js instead of raw metadata queries.")
+}
+```
+
+### Rule 2: `lint-rules/no-manual-transactions.grit`
+
+Bans `db.exec("BEGIN TRANSACTION")`, `db.exec("COMMIT")`, `db.exec("ROLLBACK")`. Exempts `migration.ts`.
+
+```grit
+file($name, $body) where {
+  $name <: not r".*migration\.ts$",
+  $body <: contains `$db.exec($sql)` as $match where {
+    $sql <: or { r".*BEGIN.*", r".*COMMIT.*", r".*ROLLBACK.*" }
+  },
+  register_diagnostic(span=$match, message="Use db.transaction()() instead of manual BEGIN/COMMIT/ROLLBACK.")
+}
+```
+
+### Rule 3: `lint-rules/no-inline-touch-cache.grit`
+
+Bans inline `UPDATE ... SET last_accessed` queries. Exempts `utils.ts` (defines the shared helper).
+
+```grit
+file($name, $body) where {
+  $name <: not r".*utils\.ts$",
+  $body <: contains `$db.query($sql).run($args)` as $match where {
+    $sql <: r".*UPDATE .* SET last_accessed.*"
+  },
+  register_diagnostic(span=$match, message="Use touchCacheEntry() from db/utils.js instead of inline last_accessed UPDATE.")
+}
+```
+
+**Biome config update (`biome.jsonc`):**
+```jsonc
+"plugins": [
+  "./lint-rules/no-stdout-write-in-commands.grit",
+  "./lint-rules/no-process-stdout-in-commands.grit",
+  "./lint-rules/no-raw-metadata-queries.grit",      // NEW
+  "./lint-rules/no-manual-transactions.grit",        // NEW
+  "./lint-rules/no-inline-touch-cache.grit"          // NEW
+]
+```
+
+**Files created:**
+- `lint-rules/no-raw-metadata-queries.grit`
+- `lint-rules/no-manual-transactions.grit`
+- `lint-rules/no-inline-touch-cache.grit`
+
+**Files modified:**
+- `biome.jsonc` — Add 3 plugins
+
+**Note:** The `project-aliases.ts` global touch (`UPDATE project_aliases SET last_accessed = ?` without WHERE) is intentionally different from the per-key helper. After Change 2/3 are applied, the remaining global touch (line 19) should get a `// biome-ignore` suppression comment.
+
+**Tests to verify:**
+```bash
+bun run lint                          # All 3 new rules fire on pre-refactor code
+# After refactoring, rules should pass clean
+```
+
+---
+
+## Change 8: Update AGENTS.md Documentation
+
+**Problem:** AGENTS.md documents the SQL Utilities section with only `upsert`/`runUpsert`. It also has a stale "Async Config Functions" section that says "All config operations are async. Always await."
+
+**Solution:** Update three sections:
+
+### 8a. Expand "SQL Utilities" section (line 369)
+
+Replace the current section with expanded documentation covering all helpers:
+
+```markdown
+### SQL Utilities
+
+Use helpers from `src/lib/db/utils.ts` to reduce SQL boilerplate:
+
+```typescript
+import { upsert, runUpsert, getMetadata, setMetadata, clearMetadata, touchCacheEntry } from "../db/utils.js";
+
+// UPSERT (insert or update on conflict)
+runUpsert(db, "table", { id: 1, name: "foo" }, ["id"]);
+
+// With excludeFromUpdate (columns only set on INSERT)
+const { sql, values } = upsert("users", { id: 1, name: "Bob", created_at: now }, ["id"], {
+  excludeFromUpdate: ["created_at"],
+});
+
+// METADATA table helpers (for key-value config in the metadata table)
+const values = getMetadata(db, [KEY_A, KEY_B]);   // SELECT ... WHERE key IN (...)
+setMetadata(db, { [KEY_A]: "val1", [KEY_B]: "val2" }); // Batch upsert in transaction
+clearMetadata(db, [KEY_A, KEY_B]);                 // DELETE ... WHERE key IN (...)
+
+// Cache entry touch (update last_accessed timestamp)
+touchCacheEntry("dsn_cache", "directory", directoryPath);
+```
+
+**Enforced by lint:** GritQL rules ban raw metadata queries, inline `last_accessed` UPDATEs,
+and manual `BEGIN`/`COMMIT`/`ROLLBACK` transactions outside `utils.ts` and `migration.ts`.
+```
+
+### 8b. Update "Async Config Functions" section (line 463)
+
+Update to reflect that DB functions are synchronous:
+
+```markdown
+### DB and Config Function Signatures
+
+Database operations in `src/lib/db/` are **synchronous** (SQLite is synchronous in Bun).
+Functions that only do SQLite work return values directly — no `async`/`await` needed:
+
+```typescript
+const org = getDefaultOrganization();  // returns string | undefined
+const info = getUserInfo();            // returns UserInfo | undefined
+setDefaults("my-org", "my-project");   // returns void
+```
+
+Exceptions that ARE async (they do file I/O or network calls):
+- `clearAuth()` — awaits cache directory cleanup
+- `getCachedDetection()`, `getCachedProjectRoot()`, `setCachedProjectRoot()` — await `stat()` for mtime validation
+- `refreshToken()`, `performTokenRefresh()` — await HTTP calls
+
+Auth token access is always synchronous:
+```typescript
+const token = getAuthToken();
+await setAuthToken(token, expiresIn);  // sync but called with await for historical reasons — harmless
+```
+```
+
+### 8c. Remove stale biome override comment
+
+After Change 5 removes `async`, the `useAwait: "off"` override for `src/lib/db/**` should be removed from `biome.jsonc` (or updated to only apply to the files that still have async functions).
+
+**Files modified:**
+- `AGENTS.md` — Update "SQL Utilities" section, update "Async Config Functions" section
+- `biome.jsonc` — Remove or narrow the `src/lib/db/**` useAwait override
+
+---
+
+## Execution Order
+
+1. **Change 1** (metadata helpers) — largest DRYness impact, self-contained
+2. **Change 2** (touchCacheEntry) — small, adds to utils.ts
+3. **Change 3** (project-aliases transaction) — trivial one-file fix
+4. **Change 4** (project-cache dedup) — one-file refactor
+5. **Change 7** (GritQL lint rules) — add enforcement rules; they'll initially fire on the pre-refactored code as validation, then pass clean after changes 1-4
+6. **Change 5** (de-async) — large but mechanical; benefits from earlier changes being stable
+7. **Change 8** (AGENTS.md + biome config) — documentation goes last once implementation is settled
+
+## Verification
+
+After all changes:
+```bash
+bun run typecheck                    # Type safety
+bun run lint                         # Lint compliance (including new GritQL rules)
+bun test test/lib/db/               # All DB tests
+bun test                             # Full test suite
+```
