@@ -44,9 +44,11 @@ export {
   rawApiRequest,
 } from "./api/infrastructure.js";
 export {
+  buildIssueListCollapse,
   getIssue,
   getIssueByShortId,
   getIssueInOrg,
+  type IssueCollapseField,
   type IssueSort,
   type IssuesPage,
   listIssuesAllPages,

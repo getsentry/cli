@@ -979,3 +979,140 @@ describe("issue list: compound cursor resume", () => {
     expect(output.data.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Collapse parameter optimization tests
+// ---------------------------------------------------------------------------
+
+describe("issue list: collapse parameter optimization", () => {
+  let listIssuesPaginatedSpy: ReturnType<typeof spyOn>;
+  let setPaginationCursorSpy: ReturnType<typeof spyOn>;
+  let clearPaginationCursorSpy: ReturnType<typeof spyOn>;
+
+  const sampleIssue = {
+    id: "1",
+    shortId: "PROJ-1",
+    title: "Test Error",
+    status: "unresolved",
+    platform: "javascript",
+    type: "error",
+    count: "5",
+    userCount: 2,
+    lastSeen: "2025-01-01T00:00:00Z",
+    firstSeen: "2025-01-01T00:00:00Z",
+    level: "error",
+    project: { slug: "test-proj" },
+  };
+
+  function createOrgAllContext() {
+    const stdoutWrite = mock(() => true);
+    const stderrWrite = mock(() => true);
+    return {
+      context: {
+        stdout: { write: stdoutWrite },
+        stderr: { write: stderrWrite },
+        cwd: "/tmp",
+      },
+      stdoutWrite,
+    };
+  }
+
+  beforeEach(async () => {
+    listIssuesPaginatedSpy = spyOn(apiClient, "listIssuesPaginated");
+    setPaginationCursorSpy = spyOn(
+      paginationDb,
+      "setPaginationCursor"
+    ).mockReturnValue(undefined);
+    clearPaginationCursorSpy = spyOn(
+      paginationDb,
+      "clearPaginationCursor"
+    ).mockReturnValue(undefined);
+
+    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+  });
+
+  afterEach(() => {
+    listIssuesPaginatedSpy.mockRestore();
+    setPaginationCursorSpy.mockRestore();
+    clearPaginationCursorSpy.mockRestore();
+  });
+
+  test("always collapses filtered, lifetime, unhandled in org-all mode", async () => {
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [sampleIssue],
+      nextCursor: undefined,
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      { limit: 10, sort: "date", json: false },
+      "my-org/"
+    );
+
+    expect(listIssuesPaginatedSpy).toHaveBeenCalled();
+    const callArgs = listIssuesPaginatedSpy.mock.calls[0];
+    const options = callArgs?.[2] as Record<string, unknown> | undefined;
+    const collapse = options?.collapse as string[];
+    expect(collapse).toContain("filtered");
+    expect(collapse).toContain("lifetime");
+    expect(collapse).toContain("unhandled");
+  });
+
+  test("collapses stats in JSON mode", async () => {
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [sampleIssue],
+      nextCursor: undefined,
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      { limit: 10, sort: "date", json: true },
+      "my-org/"
+    );
+
+    expect(listIssuesPaginatedSpy).toHaveBeenCalled();
+    const callArgs = listIssuesPaginatedSpy.mock.calls[0];
+    const options = callArgs?.[2] as Record<string, unknown> | undefined;
+    const collapse = options?.collapse as string[];
+    expect(collapse).toContain("stats");
+  });
+
+  test("omits groupStatsPeriod when stats are collapsed (JSON mode)", async () => {
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [sampleIssue],
+      nextCursor: undefined,
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      { limit: 10, sort: "date", json: true },
+      "my-org/"
+    );
+
+    expect(listIssuesPaginatedSpy).toHaveBeenCalled();
+    const callArgs = listIssuesPaginatedSpy.mock.calls[0];
+    const options = callArgs?.[2] as Record<string, unknown> | undefined;
+    expect(options?.groupStatsPeriod).toBeUndefined();
+  });
+});

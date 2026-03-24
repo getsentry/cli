@@ -34,6 +34,47 @@ export type IssueSort = NonNullable<
 >;
 
 /**
+ * Collapse options for issue listing, derived from the @sentry/api SDK types.
+ * Each value tells the server to skip computing that data field, avoiding
+ * expensive Snuba/ClickHouse queries on the backend.
+ *
+ * - `'stats'` — time-series event counts (sparkline data)
+ * - `'lifetime'` — lifetime aggregate counts (count, userCount, firstSeen)
+ * - `'filtered'` — filtered aggregate counts
+ * - `'unhandled'` — unhandled event flag computation
+ * - `'base'` — base group fields (rarely useful to collapse)
+ */
+export type IssueCollapseField = NonNullable<
+  NonNullable<ListAnOrganizationSissuesData["query"]>["collapse"]
+>[number];
+
+/**
+ * Build the `collapse` parameter for issue list API calls.
+ *
+ * Always collapses fields the CLI never consumes in issue list:
+ * `filtered`, `lifetime`, `unhandled`. Conditionally collapses `stats`
+ * when sparklines won't be rendered (narrow terminal, non-TTY, or JSON).
+ *
+ * Matches the Sentry web UI's optimization: the initial page load sends
+ * `collapse=stats,unhandled` to skip expensive Snuba queries, fetching
+ * stats in a follow-up request only when needed.
+ *
+ * @param options - Context for determining what to collapse
+ * @param options.shouldCollapseStats - Whether stats data can be skipped
+ *   (true when sparklines won't be shown: narrow terminal, non-TTY, --json)
+ * @returns Array of fields to collapse
+ */
+export function buildIssueListCollapse(options: {
+  shouldCollapseStats: boolean;
+}): IssueCollapseField[] {
+  const collapse: IssueCollapseField[] = ["filtered", "lifetime", "unhandled"];
+  if (options.shouldCollapseStats) {
+    collapse.push("stats");
+  }
+  return collapse;
+}
+
+/**
  * List issues for a project with pagination control.
  *
  * Uses the @sentry/api SDK's `listAnOrganization_sIssues` for type-safe
@@ -59,6 +100,9 @@ export async function listIssuesPaginated(
     projectId?: number;
     /** Controls the time resolution of inline stats data. "auto" adapts to statsPeriod. */
     groupStatsPeriod?: "" | "14d" | "24h" | "auto";
+    /** Fields to collapse (omit) from the response for performance.
+     *  @see {@link buildIssueListCollapse} */
+    collapse?: IssueCollapseField[];
   } = {}
 ): Promise<PaginatedResponse<SentryIssue[]>> {
   // When we have a numeric project ID, use the `project` query param (Array<number>)
@@ -86,6 +130,7 @@ export async function listIssuesPaginated(
       sort: options.sort,
       statsPeriod: options.statsPeriod,
       groupStatsPeriod: options.groupStatsPeriod,
+      collapse: options.collapse,
     },
   });
 
@@ -138,6 +183,9 @@ export async function listIssuesAllPages(
     startCursor?: string;
     /** Called after each page is fetched. Useful for progress indicators. */
     onPage?: (fetched: number, limit: number) => void;
+    /** Fields to collapse (omit) from the response for performance.
+     *  @see {@link buildIssueListCollapse} */
+    collapse?: IssueCollapseField[];
   }
 ): Promise<IssuesPage> {
   if (options.limit < 1) {
@@ -161,6 +209,7 @@ export async function listIssuesAllPages(
       statsPeriod: options.statsPeriod,
       projectId: options.projectId,
       groupStatsPeriod: options.groupStatsPeriod,
+      collapse: options.collapse,
     });
 
     allResults.push(...response.data);

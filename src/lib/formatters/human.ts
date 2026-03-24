@@ -360,7 +360,22 @@ function computeAliasShorthand(shortId: string, projectAlias?: string): string {
 // Issue Table Helpers
 
 /** Minimum terminal width to show the TREND sparkline column. */
-const TREND_MIN_TERM_WIDTH = 100;
+export const TREND_MIN_TERM_WIDTH = 100;
+
+/**
+ * Whether the TREND sparkline column will be rendered in the issue table.
+ *
+ * Returns `true` when the terminal is wide enough (≥ {@link TREND_MIN_TERM_WIDTH}).
+ * Non-TTY output defaults to 80 columns, which is below the threshold.
+ *
+ * Used by the issue list command to decide whether to request stats data
+ * from the API — when TREND won't be shown, stats can be collapsed to
+ * save 200-500ms per request.
+ */
+export function willShowTrend(): boolean {
+  const termWidth = process.stdout.columns || 80;
+  return termWidth >= TREND_MIN_TERM_WIDTH;
+}
 
 /** Lines per issue row in non-compact mode (2-line content + separator). */
 const LINES_PER_DEFAULT_ROW = 3;

@@ -9,9 +9,11 @@ import type { SentryContext } from "../../context.js";
 import { buildOrgAwareAliases } from "../../lib/alias.js";
 import {
   API_MAX_PER_PAGE,
+  buildIssueListCollapse,
   findProjectsByPattern,
   findProjectsBySlug,
   getProject,
+  type IssueCollapseField,
   type IssuesPage,
   listIssuesAllPages,
   listIssuesPaginated,
@@ -44,6 +46,7 @@ import {
 import {
   type IssueTableRow,
   shouldAutoCompact,
+  willShowTrend,
   writeIssueTable,
 } from "../../lib/formatters/index.js";
 import {
@@ -132,6 +135,48 @@ const USAGE_HINT = "sentry issue list <org>/<project>";
  * Auto-pagination can theoretically fetch more, but 1000 keeps responses reasonable.
  */
 const MAX_LIMIT = 1000;
+
+/** Options returned by {@link buildListApiOptions}. */
+type ListApiOptions = {
+  /** Fields to collapse (omit) from the API response for performance. */
+  collapse: IssueCollapseField[];
+  /** Stats period resolution — undefined when stats are collapsed. */
+  groupStatsPeriod: "" | "14d" | "24h" | "auto" | undefined;
+};
+
+/**
+ * Determine whether stats data should be collapsed (skipped) in the API request.
+ *
+ * Stats power the TREND sparkline column, which is only shown when:
+ * 1. Output is human (not `--json`) — JSON consumers don't render sparklines
+ * 2. Terminal is wide enough — narrow terminals and non-TTY hide TREND
+ *
+ * Collapsing stats avoids expensive Snuba/ClickHouse aggregation queries,
+ * saving 200-500ms per API request.
+ *
+ * @see {@link willShowTrend} for the terminal width threshold logic
+ */
+function shouldCollapseStats(json: boolean): boolean {
+  if (json) {
+    return true;
+  }
+  return !willShowTrend();
+}
+
+/**
+ * Build the collapse and groupStatsPeriod options for issue list API calls.
+ *
+ * When stats are collapsed, groupStatsPeriod is omitted (undefined) since
+ * the server won't compute stats anyway. This avoids wasted server-side
+ * processing and makes the request intent explicit.
+ */
+function buildListApiOptions(json: boolean): ListApiOptions {
+  const collapseStats = shouldCollapseStats(json);
+  return {
+    collapse: buildIssueListCollapse({ shouldCollapseStats: collapseStats }),
+    groupStatsPeriod: collapseStats ? undefined : "auto",
+  };
+}
 
 /**
  * Resolve the effective compact mode from the flag tri-state and issue count.
@@ -502,13 +547,21 @@ async function fetchIssuesForTarget(
     /** Resume from this cursor (Phase 2 redistribution or next-page resume). */
     startCursor?: string;
     onPage?: (fetched: number, limit: number) => void;
+    /** Pre-computed API performance options. @see {@link buildListApiOptions} */
+    collapse?: IssueCollapseField[];
+    /** Stats period resolution — undefined when stats are collapsed. */
+    groupStatsPeriod?: "" | "14d" | "24h" | "auto";
   }
 ): Promise<FetchResult> {
   const result = await withAuthGuard(async () => {
     const { issues, nextCursor } = await listIssuesAllPages(
       target.org,
       target.project,
-      { ...options, projectId: target.projectId, groupStatsPeriod: "auto" }
+      {
+        ...options,
+        projectId: target.projectId,
+        groupStatsPeriod: options.groupStatsPeriod ?? "auto",
+      }
     );
     return { target, issues, hasMore: !!nextCursor, nextCursor };
   });
@@ -578,6 +631,10 @@ type BudgetFetchOptions = {
   statsPeriod?: string;
   /** Per-target cursors from a previous page (compound cursor resume). */
   startCursors?: Map<string, string>;
+  /** Pre-computed collapse fields for API performance. @see {@link buildListApiOptions} */
+  collapse?: IssueCollapseField[];
+  /** Stats period resolution — undefined when stats are collapsed. */
+  groupStatsPeriod?: "" | "14d" | "24h" | "auto";
 };
 
 /**
@@ -792,10 +849,12 @@ function nextPageHint(org: string, flags: ListFlags): string {
  */
 async function fetchOrgAllIssues(
   org: string,
-  flags: Pick<ListFlags, "query" | "limit" | "sort" | "period">,
+  flags: Pick<ListFlags, "query" | "limit" | "sort" | "period" | "json">,
   cursor: string | undefined,
   onPage?: (fetched: number, limit: number) => void
 ): Promise<IssuesPage> {
+  const apiOpts = buildListApiOptions(flags.json);
+
   // When resuming with --cursor, fetch a single page so the cursor chain stays intact.
   if (cursor) {
     const perPage = Math.min(flags.limit, API_MAX_PER_PAGE);
@@ -805,7 +864,8 @@ async function fetchOrgAllIssues(
       perPage,
       sort: flags.sort,
       statsPeriod: flags.period,
-      groupStatsPeriod: "auto",
+      groupStatsPeriod: apiOpts.groupStatsPeriod,
+      collapse: apiOpts.collapse,
     });
     return { issues: response.data, nextCursor: response.nextCursor };
   }
@@ -816,7 +876,8 @@ async function fetchOrgAllIssues(
     limit: flags.limit,
     sort: flags.sort,
     statsPeriod: flags.period,
-    groupStatsPeriod: "auto",
+    groupStatsPeriod: apiOpts.groupStatsPeriod,
+    collapse: apiOpts.collapse,
     onPage,
   });
   return { issues, nextCursor };
@@ -1110,6 +1171,8 @@ async function handleResolvedTargets(
       ? `Fetching issues from ${targetCount} projects`
       : "Fetching issues";
 
+  const apiOpts = buildListApiOptions(flags.json);
+
   const { results, hasMore } = await withProgress(
     { message: `${baseMessage} (up to ${flags.limit})...`, json: flags.json },
     (setMessage) =>
@@ -1121,6 +1184,8 @@ async function handleResolvedTargets(
           sort: flags.sort,
           statsPeriod: flags.period,
           startCursors,
+          collapse: apiOpts.collapse,
+          groupStatsPeriod: apiOpts.groupStatsPeriod,
         },
         (fetched) => {
           setMessage(
