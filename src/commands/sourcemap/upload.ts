@@ -6,7 +6,7 @@
  * env vars, config defaults) — no slash-separated arg parsing needed.
  */
 
-import { relative, resolve } from "node:path";
+import { basename, relative, resolve } from "node:path";
 import type { SentryContext } from "../../context.js";
 import {
   type ArtifactFile,
@@ -126,9 +126,13 @@ export const uploadCommand = buildCommand({
     const resolvedDir = resolve(dir);
     const artifactFiles: ArtifactFile[] = filesWithDebugIds.flatMap(
       ({ jsPath, mapPath, debugId }) => {
-        const jsRelative = relative(resolvedDir, jsPath);
-        const mapRelative = relative(resolvedDir, mapPath);
-        const mapBasename = mapPath.split("/").pop() ?? "bundle.js.map";
+        // Normalize to forward slashes for URLs (handles Windows backslashes)
+        const jsRelative = relative(resolvedDir, jsPath).replaceAll("\\", "/");
+        const mapRelative = relative(resolvedDir, mapPath).replaceAll(
+          "\\",
+          "/"
+        );
+        const mapBasename = basename(mapPath);
         return [
           {
             path: jsPath,
