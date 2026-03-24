@@ -607,8 +607,7 @@ export function writeIssueTable(
   options?: { compact?: boolean }
 ): void {
   const compact = options?.compact ?? false;
-  const termWidth = process.stdout.columns || 80;
-  const showTrend = termWidth >= TREND_MIN_TERM_WIDTH;
+  const showTrend = willShowTrend();
 
   const columns: Column<IssueTableRow>[] = [
     // SHORT ID — primary identifier (+ alias), never shrink
