@@ -269,7 +269,7 @@ describe("init command func", () => {
         ],
       }));
       const ctx = makeContext();
-      expect(func.call(ctx, DEFAULT_FLAGS, "my-app")).rejects.toThrow(
+      await expect(func.call(ctx, DEFAULT_FLAGS, "my-app")).rejects.toThrow(
         ValidationError
       );
     });
