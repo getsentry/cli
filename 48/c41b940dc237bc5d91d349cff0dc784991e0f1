@@ -1,0 +1,9 @@
+## Additional Changes (latest amend)
+
+- Per-bar colors from SERIES_PALETTE for categorical and horizontal bars
+- PLAIN_FILLS (█, ▓, ▒, ░) for plain/no-color mode bar distinction
+- Stacked time-series bars use fill chars in plain mode
+- Color-keyed legend (■/fill markers) replaces letter keys (A:, B:, C:)
+- Y-axis gutter width fix: considers widest of all 3 tick labels (max, mid, 0)
+  to prevent bar overflow when mid-point label is wider (e.g., 3.5K vs 7K)
+- Freed 1 footer line (no letter-keys row) → taller bars
