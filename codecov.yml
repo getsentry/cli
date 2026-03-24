@@ -6,6 +6,3 @@ coverage:
     project:
       default:
         informational: true
-    patch:
-      default:
-        informational: false
