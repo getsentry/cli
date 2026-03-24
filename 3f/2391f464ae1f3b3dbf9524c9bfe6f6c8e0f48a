@@ -1,0 +1,21 @@
+# Plan: Upgrade Bun to 1.3.11
+
+## Summary
+Bump the Bun version from 1.3.9 to 1.3.11. There is a single version pin in the project.
+
+## Changes
+
+### 1. `package.json` (line 56)
+Change `"packageManager": "bun@1.3.9"` → `"packageManager": "bun@1.3.11"`
+
+This single change propagates to all CI workflows since they use `oven-sh/setup-bun@v2` without an explicit `bun-version`, auto-detecting from `packageManager`.
+
+### 2. Regenerate lockfile
+Run `bun install` to update `bun.lock` with the new version.
+
+## Verification
+1. `bun --version` → should report `1.3.11`
+2. `bun install` → clean install with no errors
+3. `bun run typecheck` → passes
+4. `bun test` → passes
+5. `bun run lint` → passes
