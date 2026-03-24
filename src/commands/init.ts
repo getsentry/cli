@@ -19,11 +19,7 @@
 
 import path from "node:path";
 import type { SentryContext } from "../context.js";
-import {
-  looksLikePath,
-  normalizeSlug,
-  parseOrgProjectArg,
-} from "../lib/arg-parsing.js";
+import { looksLikePath, parseOrgProjectArg } from "../lib/arg-parsing.js";
 import { buildCommand } from "../lib/command.js";
 import { ContextError } from "../lib/errors.js";
 import { warmOrgDetection } from "../lib/init/prefetch.js";
@@ -43,7 +39,6 @@ type InitFlags = {
   readonly "dry-run": boolean;
   readonly features?: string[];
   readonly team?: string;
-  readonly org?: string;
 };
 
 /**
@@ -149,16 +144,14 @@ export const initCommand = buildCommand<
       "EXPERIMENTAL: This command may modify your source files.\n\n" +
       "Runs the Sentry setup wizard to detect your project's framework, " +
       "install the SDK, and configure Sentry.\n\n" +
-      "Supports org/project syntax and a directory positional. Path-like\n" +
-      "arguments (starting with . / ~) are treated as the directory;\n" +
-      "everything else is treated as the target.\n\n" +
+      "The first positional is <org-slug>/<project-slug> or just <org-slug>/\n" +
+      "Path-like arguments (starting with . / ~) are treated as the directory.\n\n" +
       "Examples:\n" +
-      "  sentry init\n" +
-      "  sentry init acme/\n" +
-      "  sentry init acme/my-app\n" +
-      "  sentry init my-app\n" +
-      "  sentry init acme/my-app ./my-project\n" +
-      "  sentry init ./my-project",
+      "  sentry init                               auto-detect org and project\n" +
+      "  sentry init my-org/                       specify org, auto-detect project\n" +
+      "  sentry init my-org/my-project             specify org and project\n" +
+      "  sentry init my-org/my-project ./subdir    specify org, project, and directory\n" +
+      "  sentry init ./subdir                      specify directory, auto-detect the rest",
   },
   parameters: {
     positional: {
@@ -203,12 +196,6 @@ export const initCommand = buildCommand<
         brief: "Team slug to create the project under",
         optional: true,
       },
-      org: {
-        kind: "parsed",
-        parse: String,
-        brief: "Org slug to create the project under",
-        optional: true,
-      },
     },
     aliases: {
       y: "yes",
@@ -242,36 +229,22 @@ export const initCommand = buildCommand<
     const { org: explicitOrg, project: explicitProject } =
       await resolveTarget(targetArg);
 
-    // 5. Merge --org flag with target-derived org.
-    //    --org is an alternative to the positional <org>/ syntax.
-    //    Normalize underscores → dashes to match how the positional target is parsed.
-    const orgFlag = flags.org ? normalizeSlug(flags.org).slug : undefined;
-    if (orgFlag) {
-      validateResourceId(orgFlag, "organization slug");
-    }
-    if (orgFlag && explicitOrg && orgFlag !== explicitOrg) {
-      throw new ContextError("Arguments", USAGE_HINT, [
-        `--org "${orgFlag}" conflicts with target org "${explicitOrg}"`,
-      ]);
-    }
-    const resolvedOrg = explicitOrg ?? orgFlag;
-
-    // 6. Start background org detection when org is not yet known.
+    // 5. Start background org detection when org is not yet known.
     //    The prefetch runs concurrently with the preamble, the wizard startup,
     //    and all early suspend/resume rounds — by the time the wizard needs the
     //    org (inside createSentryProject), the result is already cached.
-    if (!resolvedOrg) {
+    if (!explicitOrg) {
       warmOrgDetection(targetDir);
     }
 
-    // 7. Run the wizard
+    // 6. Run the wizard
     await runWizard({
       directory: targetDir,
       yes: flags.yes,
       dryRun: flags["dry-run"],
       features: featuresList,
       team: flags.team,
-      org: resolvedOrg,
+      org: explicitOrg,
       project: explicitProject,
     });
   },
