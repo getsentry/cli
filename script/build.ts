@@ -30,12 +30,13 @@
  *     bin.js.map          (sourcemap, uploaded to Sentry then deleted)
  */
 
-import { execSync } from "node:child_process";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 import { processBinary } from "binpunch";
 import { $ } from "bun";
 import pkg from "../package.json";
+import { uploadSourcemaps } from "../src/lib/api/sourcemaps.js";
+import { injectDebugId } from "./debug-id.js";
 
 const gzipAsync = promisify(gzip);
 
@@ -117,15 +118,29 @@ async function bundleJs(): Promise<boolean> {
 }
 
 /**
- * Upload the sourcemap to Sentry for server-side stack trace resolution.
+ * Inject debug IDs and upload sourcemap to Sentry.
  *
- * Uses @sentry/cli's `sourcemaps upload` command. The sourcemap is associated
- * with the release version so Sentry matches it against incoming error events.
+ * Both injection and upload are done natively — no external binary needed.
+ * Uses the chunk-upload + assemble protocol for reliable artifact delivery.
  *
- * Requires SENTRY_AUTH_TOKEN environment variable. Skips gracefully when
- * not available (local builds, PR checks).
+ * Requires SENTRY_AUTH_TOKEN environment variable for upload. Debug ID
+ * injection always runs (even without auth token) so local builds get
+ * debug IDs for development/testing.
  */
-function uploadSourcemap(): void {
+async function injectAndUploadSourcemap(): Promise<void> {
+  // Always inject debug IDs (even without auth token) so local builds
+  // get debug IDs for development/testing purposes.
+  console.log("  Injecting debug IDs...");
+  let debugId: string;
+  try {
+    ({ debugId } = await injectDebugId(BUNDLE_JS, SOURCEMAP_FILE));
+    console.log(`    -> Debug ID: ${debugId}`);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.warn(`    Warning: Debug ID injection failed: ${msg}`);
+    return;
+  }
+
   if (!process.env.SENTRY_AUTH_TOKEN) {
     console.log("  No SENTRY_AUTH_TOKEN, skipping sourcemap upload");
     return;
@@ -133,17 +148,31 @@ function uploadSourcemap(): void {
 
   console.log(`  Uploading sourcemap to Sentry (release: ${VERSION})...`);
 
-  // Single quotes prevent $bunfs shell expansion on POSIX (CI is always Linux).
   try {
-    // Inject debug IDs into JS + map, then upload with /$bunfs/root/ prefix
-    // to match Bun's compiled binary stack trace paths.
-    execSync("npx @sentry/cli sourcemaps inject dist-bin/", {
-      stdio: ["pipe", "pipe", "pipe"],
+    const urlPrefix = "~/$bunfs/root/";
+    const jsBasename = BUNDLE_JS.split("/").pop() ?? "bin.js";
+    const mapBasename = SOURCEMAP_FILE.split("/").pop() ?? "bin.js.map";
+
+    await uploadSourcemaps({
+      org: "sentry",
+      project: "cli",
+      release: VERSION,
+      files: [
+        {
+          path: BUNDLE_JS,
+          debugId,
+          type: "minified_source",
+          url: `${urlPrefix}${jsBasename}`,
+          sourcemapFilename: mapBasename,
+        },
+        {
+          path: SOURCEMAP_FILE,
+          debugId,
+          type: "source_map",
+          url: `${urlPrefix}${mapBasename}`,
+        },
+      ],
     });
-    execSync(
-      `npx @sentry/cli sourcemaps upload --org sentry --project cli --release ${VERSION} --url-prefix '/$bunfs/root/' ${BUNDLE_JS} ${SOURCEMAP_FILE}`,
-      { stdio: ["pipe", "pipe", "pipe"] }
-    );
     console.log("    -> Sourcemap uploaded to Sentry");
   } catch (error) {
     // Non-fatal: don't fail the build if upload fails
@@ -294,8 +323,8 @@ async function build(): Promise<void> {
     process.exit(1);
   }
 
-  // Upload sourcemap to Sentry before compiling (non-fatal on failure)
-  await uploadSourcemap();
+  // Inject debug IDs and upload sourcemap to Sentry before compiling (non-fatal on failure)
+  await injectAndUploadSourcemap();
 
   console.log("");
 

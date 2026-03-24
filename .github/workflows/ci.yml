@@ -179,15 +179,12 @@ jobs:
         run: bun run test:isolated --coverage --coverage-reporter=lcov --coverage-dir=coverage-isolated
       - name: Merge Coverage Reports
         run: bun run script/merge-lcov.ts coverage/lcov.info coverage-isolated/lcov.info > coverage/merged.lcov
-      - name: Make coverage checks informational on release branches
-        if: github.event_name == 'push'
-        run: |
-          sed -i 's/informational: false/informational: true/' codecov.yml
       - name: Coverage Report
         uses: getsentry/codecov-action@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           files: ./coverage/merged.lcov
+          informational-patch: ${{ github.event_name == 'push' }}
 
   build-binary:
     name: Build Binary (${{ matrix.target }})
