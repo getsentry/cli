@@ -39,6 +39,7 @@ type InitFlags = {
   readonly "dry-run": boolean;
   readonly features?: string[];
   readonly team?: string;
+  readonly org?: string;
 };
 
 /**
@@ -198,6 +199,12 @@ export const initCommand = buildCommand<
         brief: "Team slug to create the project under",
         optional: true,
       },
+      org: {
+        kind: "parsed",
+        parse: String,
+        brief: "Org slug to create the project under",
+        optional: true,
+      },
     },
     aliases: {
       y: "yes",
@@ -231,22 +238,34 @@ export const initCommand = buildCommand<
     const { org: explicitOrg, project: explicitProject } =
       await resolveTarget(targetArg);
 
-    // 5. Start background org detection when org is not yet known.
+    // 5. Merge --org flag with target-derived org.
+    //    --org is an alternative to the positional <org>/ syntax.
+    if (flags.org) {
+      validateResourceId(flags.org, "organization slug");
+    }
+    if (flags.org && explicitOrg && flags.org !== explicitOrg) {
+      throw new ContextError("Arguments", USAGE_HINT, [
+        `--org "${flags.org}" conflicts with target org "${explicitOrg}"`,
+      ]);
+    }
+    const resolvedOrg = explicitOrg ?? flags.org;
+
+    // 6. Start background org detection when org is not yet known.
     //    The prefetch runs concurrently with the preamble, the wizard startup,
     //    and all early suspend/resume rounds — by the time the wizard needs the
     //    org (inside createSentryProject), the result is already cached.
-    if (!explicitOrg) {
+    if (!resolvedOrg) {
       warmOrgDetection(targetDir);
     }
 
-    // 6. Run the wizard
+    // 7. Run the wizard
     await runWizard({
       directory: targetDir,
       yes: flags.yes,
       dryRun: flags["dry-run"],
       features: featuresList,
       team: flags.team,
-      org: explicitOrg,
+      org: resolvedOrg,
       project: explicitProject,
     });
   },
