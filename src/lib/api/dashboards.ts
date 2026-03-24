@@ -1,19 +1,37 @@
 /**
  * Dashboard API functions
  *
- * CRUD operations for Sentry dashboards.
+ * CRUD operations for Sentry dashboards, plus widget data
+ * query functions for rendering dashboard widgets with actual data.
  */
 
-import type {
-  DashboardDetail,
-  DashboardListItem,
-  DashboardWidget,
-} from "../../types/dashboard.js";
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
+import * as Sentry from "@sentry/node-core/light";
 
+import {
+  type DashboardDetail,
+  type DashboardListItem,
+  type DashboardWidget,
+  type ErrorResult,
+  type EventsStatsSeries,
+  EventsStatsSeriesSchema,
+  EventsTableResponseSchema,
+  mapWidgetTypeToDataset,
+  type ScalarResult,
+  TABLE_DISPLAY_TYPES,
+  type TableResult,
+  TIMESERIES_DISPLAY_TYPES,
+  type TimeseriesResult,
+  type WidgetDataResult,
+} from "../../types/dashboard.js";
+import { stringifyUnknown } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
 import { invalidateCachedResponse } from "../response-cache.js";
 
-import { apiRequestToRegion } from "./infrastructure.js";
+import {
+  apiRequestToRegion,
+  ORG_FANOUT_CONCURRENCY,
+} from "./infrastructure.js";
 
 /**
  * List dashboards in an organization.
@@ -109,4 +127,344 @@ export async function updateDashboard(
   await invalidateCachedResponse(`${normalizedBase}/api/0${path}`);
 
   return data;
+}
+
+// ---------------------------------------------------------------------------
+// Widget data queries
+// ---------------------------------------------------------------------------
+
+/** Options for querying widget data */
+type WidgetQueryOptions = {
+  /** Override the dashboard's time period (e.g., "24h", "7d") */
+  period?: string;
+  /** Filter by environment(s) — from dashboard.environment */
+  environment?: string[];
+  /** Filter by project ID(s) — from dashboard.projects */
+  project?: number[];
+};
+
+/**
+ * Parse an events-stats response into a normalized timeseries result.
+ *
+ * The events-stats API returns different shapes:
+ * - **Simple** (no grouping): `{ data: [...], meta: {...} }` — a single series
+ * - **Grouped** (topEvents > 0): `{ "group-label": { data: [...] }, ... }` — one series per group
+ *
+ * @param raw - Raw JSON response from events-stats
+ * @param yAxis - The aggregate function name(s) used as label(s)
+ */
+function parseEventsStatsResponse(
+  raw: unknown,
+  yAxis: string[]
+): TimeseriesResult {
+  const series: TimeseriesResult["series"] = [];
+
+  // Try parsing as a single series first (simple query, no grouping)
+  const singleResult = EventsStatsSeriesSchema.safeParse(raw);
+  if (singleResult.success) {
+    for (const axis of yAxis) {
+      series.push({
+        label: axis,
+        values: extractTimeseriesValues(singleResult.data),
+        unit: singleResult.data.meta?.units?.[axis] ?? null,
+      });
+    }
+    return { type: "timeseries", series };
+  }
+
+  // Grouped response: record of group-label → series
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const entries = Object.entries(raw as Record<string, unknown>).filter(
+      ([, v]) => v && typeof v === "object" && "data" in (v as object)
+    );
+
+    // Sort by order field if present
+    entries.sort((a, b) => {
+      const aOrder = (a[1] as { order?: number }).order ?? 0;
+      const bOrder = (b[1] as { order?: number }).order ?? 0;
+      return aOrder - bOrder;
+    });
+
+    for (const [groupLabel, groupData] of entries) {
+      const parsed = EventsStatsSeriesSchema.safeParse(groupData);
+      if (parsed.success) {
+        series.push({
+          label: groupLabel,
+          values: extractTimeseriesValues(parsed.data),
+          unit: parsed.data.meta?.units?.[yAxis[0] ?? ""] ?? null,
+        });
+      }
+    }
+  }
+
+  return { type: "timeseries", series };
+}
+
+/** Extract {timestamp, value} pairs from an events-stats series. */
+function extractTimeseriesValues(
+  series: EventsStatsSeries
+): { timestamp: number; value: number }[] {
+  return series.data.map(([timestamp, counts]) => ({
+    timestamp,
+    value: counts[0]?.count ?? 0,
+  }));
+}
+
+/**
+ * Query time-series data for a chart widget.
+ *
+ * Calls `GET /organizations/{org}/events-stats/` with params derived
+ * from the widget's queries (aggregates, conditions, columns for grouping).
+ *
+ * @param regionUrl - Region base URL
+ * @param orgSlug - Organization slug
+ * @param widget - Dashboard widget definition
+ * @param statsPeriod - Time period (e.g., "24h")
+ * @param options - Additional query options
+ */
+/** Common params for widget query functions */
+type WidgetQueryParams = {
+  regionUrl: string;
+  orgSlug: string;
+  widget: DashboardWidget;
+  statsPeriod: string;
+  options?: WidgetQueryOptions;
+};
+
+async function queryWidgetTimeseries(
+  params: WidgetQueryParams
+): Promise<TimeseriesResult> {
+  const { regionUrl, orgSlug, widget, statsPeriod, options = {} } = params;
+  const allSeries: TimeseriesResult["series"] = [];
+
+  for (const query of widget.queries ?? []) {
+    const aggregates = query.aggregates ?? [];
+    const columns = query.columns ?? [];
+    const hasGroupBy = columns.length > 0;
+    const dataset = mapWidgetTypeToDataset(widget.widgetType);
+
+    const reqParams: Record<string, string | string[] | number | undefined> = {
+      yAxis: aggregates,
+      query: query.conditions || undefined,
+      dataset: dataset ?? undefined,
+      statsPeriod,
+      environment: options.environment,
+      project: options.project?.map(String),
+    };
+
+    // Group-by columns enable topEvents mode
+    if (hasGroupBy) {
+      reqParams.field = columns;
+      reqParams.topEvents = widget.limit ?? 5;
+      // Sort by the aggregate to get the actual top N groups.
+      // The sort param is only supported on the spans dataset —
+      // errors/discover endpoints reject it with 400.
+      if (dataset === "spans") {
+        reqParams.sort = query.orderby ?? `-${aggregates[0] ?? "count()"}`;
+      }
+    }
+
+    const { data: raw } = await apiRequestToRegion<unknown>(
+      regionUrl,
+      `/organizations/${orgSlug}/events-stats/`,
+      { params: reqParams }
+    );
+
+    const parsed = parseEventsStatsResponse(raw, aggregates);
+    allSeries.push(...parsed.series);
+  }
+
+  return { type: "timeseries", series: allSeries };
+}
+
+/**
+ * Query tabular data for a table or big_number widget.
+ *
+ * Calls `GET /organizations/{org}/events/` with params derived
+ * from the widget's query (fields, conditions, sort, limit).
+ *
+ * @param regionUrl - Region base URL
+ * @param orgSlug - Organization slug
+ * @param widget - Dashboard widget definition
+ * @param statsPeriod - Time period (e.g., "24h")
+ * @param options - Additional query options
+ */
+async function queryWidgetTable(
+  params: WidgetQueryParams
+): Promise<TableResult> {
+  const { regionUrl, orgSlug, widget, statsPeriod, options = {} } = params;
+  const query = widget.queries?.[0];
+  const fields = query?.fields ?? [
+    ...(query?.columns ?? []),
+    ...(query?.aggregates ?? []),
+  ];
+  const dataset = mapWidgetTypeToDataset(widget.widgetType);
+
+  const { data } = await apiRequestToRegion(
+    regionUrl,
+    `/organizations/${orgSlug}/events/`,
+    {
+      params: {
+        field: fields,
+        query: query?.conditions || undefined,
+        dataset: dataset ?? undefined,
+        statsPeriod,
+        sort: query?.orderby || undefined,
+        per_page: widget.limit ?? 10,
+        environment: options.environment,
+        project: options.project?.map(String),
+      },
+      schema: EventsTableResponseSchema,
+    }
+  );
+
+  const meta = data.meta;
+  const columns = fields.map((name) => ({
+    name,
+    type: meta?.fields?.[name],
+    unit: meta?.units?.[name],
+  }));
+
+  return { type: "table", columns, rows: data.data };
+}
+
+/**
+ * Dispatch a widget data query to the appropriate endpoint.
+ *
+ * Routes by display type:
+ * - Chart types (line, area, bar) → events-stats (timeseries)
+ * - Table types (table, top_n) → events (tabular)
+ * - big_number → events with per_page=1, wrapped as scalar
+ * - Others → unsupported
+ *
+ * Catches errors and returns `{ type: "error" }` so one failing widget
+ * doesn't break the entire dashboard render.
+ */
+async function queryWidgetData(
+  params: WidgetQueryParams
+): Promise<WidgetDataResult> {
+  const { widget } = params;
+  const dataset = mapWidgetTypeToDataset(widget.widgetType);
+  if (!dataset) {
+    return {
+      type: "unsupported",
+      reason: `Widget type '${widget.widgetType ?? "unknown"}' is not yet supported`,
+    };
+  }
+
+  try {
+    // Chart types → timeseries
+    if (TIMESERIES_DISPLAY_TYPES.has(widget.displayType)) {
+      return await queryWidgetTimeseries(params);
+    }
+
+    // big_number → single scalar value
+    if (widget.displayType === "big_number") {
+      const tableResult = await queryWidgetTable({
+        ...params,
+        widget: { ...widget, limit: 1 },
+      });
+      const row = tableResult.rows[0];
+      const firstColumn = tableResult.columns[0];
+      const value = row && firstColumn ? Number(row[firstColumn.name] ?? 0) : 0;
+      return {
+        type: "scalar",
+        value: Number.isFinite(value) ? value : 0,
+        unit: firstColumn?.unit,
+      } satisfies ScalarResult;
+    }
+
+    // Table types → tabular
+    if (TABLE_DISPLAY_TYPES.has(widget.displayType)) {
+      return await queryWidgetTable(params);
+    }
+
+    return {
+      type: "unsupported",
+      reason: `Display type '${widget.displayType}' is not yet supported`,
+    };
+  } catch (error) {
+    Sentry.captureException(error);
+    return {
+      type: "error",
+      message: stringifyUnknown(error),
+    } satisfies ErrorResult;
+  }
+}
+
+/**
+ * Query data for all widgets in a dashboard in parallel.
+ *
+ * Uses a concurrency limit to avoid overwhelming the API.
+ * Failed queries produce `{ type: "error" }` results rather than
+ * throwing, so the dashboard can still render partial data.
+ *
+ * @param regionUrl - Region base URL
+ * @param orgSlug - Organization slug
+ * @param dashboard - Full dashboard detail with widgets
+ * @param options - Query options (period override, environment filter)
+ * @returns Map of widget index → query result
+ */
+/** Collect settled results from a batch into the results map. */
+function collectBatchResults(
+  batchResults: PromiseSettledResult<WidgetDataResult>[],
+  startIndex: number,
+  results: Map<number, WidgetDataResult>
+): void {
+  for (let j = 0; j < batchResults.length; j++) {
+    const result = batchResults[j];
+    const idx = startIndex + j;
+    if (result?.status === "fulfilled") {
+      results.set(idx, result.value);
+    } else {
+      results.set(idx, {
+        type: "error",
+        message: result?.reason
+          ? stringifyUnknown(result.reason)
+          : "Unknown error",
+      });
+    }
+  }
+}
+
+export async function queryAllWidgets(
+  regionUrl: string,
+  orgSlug: string,
+  dashboard: DashboardDetail,
+  options: WidgetQueryOptions = {}
+): Promise<Map<number, WidgetDataResult>> {
+  const widgets = dashboard.widgets ?? [];
+  const statsPeriod = options.period ?? dashboard.period ?? "24h";
+
+  // Merge dashboard-level filters with caller overrides
+  const mergedOptions: WidgetQueryOptions = {
+    ...options,
+    environment: options.environment ?? dashboard.environment ?? undefined,
+    project: options.project ?? dashboard.projects ?? undefined,
+  };
+
+  const results = new Map<number, WidgetDataResult>();
+  if (widgets.length === 0) {
+    return results;
+  }
+
+  // Process in batches to respect concurrency limit
+  const batchSize = ORG_FANOUT_CONCURRENCY;
+  for (let i = 0; i < widgets.length; i += batchSize) {
+    const batch = widgets.slice(i, i + batchSize);
+    const batchResults = await Promise.allSettled(
+      batch.map((widget) =>
+        queryWidgetData({
+          regionUrl,
+          orgSlug,
+          widget,
+          statsPeriod,
+          options: mergedOptions,
+        })
+      )
+    );
+    collectBatchResults(batchResults, i, results);
+  }
+
+  return results;
 }

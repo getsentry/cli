@@ -44,6 +44,8 @@ View a dashboard
 **Flags:**
 - `-w, --web - Open in browser`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+- `-r, --refresh <value> - Auto-refresh interval in seconds (default: 60, min: 10)`
+- `-t, --period <value> - Time period override (e.g., "24h", "7d", "14d")`
 
 **Examples:**
 

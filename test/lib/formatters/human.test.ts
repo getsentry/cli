@@ -10,7 +10,6 @@ import { describe, expect, test } from "bun:test";
 import {
   extractStatsPoints,
   formatDashboardCreated,
-  formatDashboardView,
   formatIssueSubtitle,
   formatProjectCreated,
   formatShortId,
@@ -707,43 +706,6 @@ describe("formatDashboardCreated", () => {
     );
     expect(result).toContain("Dash");
     expect(result).toContain("special");
-  });
-});
-
-describe("formatDashboardView", () => {
-  test("with widgets shows widget table headers", () => {
-    const result = stripAnsi(
-      formatDashboardView({
-        id: "42",
-        title: "My Dashboard",
-        url: "https://acme.sentry.io/dashboard/42/",
-        widgets: [
-          {
-            title: "Error Count",
-            displayType: "big_number",
-            widgetType: "spans",
-            layout: { x: 0, y: 0, w: 2, h: 1 },
-          },
-        ],
-      })
-    );
-    expect(result).toContain("TITLE");
-    expect(result).toContain("DISPLAY");
-    expect(result).toContain("TYPE");
-    expect(result).toContain("LAYOUT");
-    expect(result).toContain("Error Count");
-  });
-
-  test("without widgets shows 'No widgets.'", () => {
-    const result = stripAnsi(
-      formatDashboardView({
-        id: "42",
-        title: "Empty Dashboard",
-        url: "https://acme.sentry.io/dashboard/42/",
-        widgets: [],
-      })
-    );
-    expect(result).toContain("No widgets.");
   });
 });
 

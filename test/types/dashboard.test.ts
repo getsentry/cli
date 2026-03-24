@@ -15,8 +15,12 @@ import {
   DISPLAY_TYPES,
   DiscoverAggregateFunctionSchema,
   type DisplayType,
+  EventsStatsDataPointSchema,
+  EventsStatsSeriesSchema,
+  EventsTableResponseSchema,
   IS_FILTER_VALUES,
   IsFilterValueSchema,
+  mapWidgetTypeToDataset,
   parseAggregate,
   parseSortExpression,
   parseWidgetInput,
@@ -24,6 +28,8 @@ import {
   SPAN_AGGREGATE_FUNCTIONS,
   SpanAggregateFunctionSchema,
   stripWidgetServerFields,
+  TABLE_DISPLAY_TYPES,
+  TIMESERIES_DISPLAY_TYPES,
   WIDGET_TYPES,
   type WidgetType,
 } from "../../src/types/dashboard.js";
@@ -672,5 +678,115 @@ describe("stripWidgetServerFields", () => {
     expect(result.displayType).toBe("bar");
     expect(result.widgetType).toBe("spans");
     expect(result.layout).toEqual({ x: 1, y: 2, w: 3, h: 4 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Widget data query types
+// ---------------------------------------------------------------------------
+
+describe("EventsStatsDataPointSchema", () => {
+  test("parses valid data point", () => {
+    const result = EventsStatsDataPointSchema.safeParse([
+      1_700_000_000,
+      [{ count: 42 }],
+    ]);
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects invalid data point", () => {
+    const result = EventsStatsDataPointSchema.safeParse([
+      "not-a-number",
+      [{ count: 42 }],
+    ]);
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("EventsStatsSeriesSchema", () => {
+  test("parses simple series", () => {
+    const result = EventsStatsSeriesSchema.safeParse({
+      data: [
+        [1_700_000_000, [{ count: 10 }]],
+        [1_700_003_600, [{ count: 20 }]],
+      ],
+      start: "2024-01-01T00:00:00Z",
+      end: "2024-01-02T00:00:00Z",
+      meta: {
+        fields: { "count()": "integer" },
+        units: { "count()": null },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("parses series with optional fields missing", () => {
+    const result = EventsStatsSeriesSchema.safeParse({
+      data: [[1_700_000_000, [{ count: 5 }]]],
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("EventsTableResponseSchema", () => {
+  test("parses table response", () => {
+    const result = EventsTableResponseSchema.safeParse({
+      data: [
+        { endpoint: "/api/users", "count()": 100 },
+        { endpoint: "/api/orders", "count()": 50 },
+      ],
+      meta: {
+        fields: { endpoint: "string", "count()": "integer" },
+        units: { endpoint: null, "count()": null },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("parses empty table response", () => {
+    const result = EventsTableResponseSchema.safeParse({
+      data: [],
+      meta: { fields: {}, units: {} },
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("mapWidgetTypeToDataset", () => {
+  test("maps known widget types", () => {
+    expect(mapWidgetTypeToDataset("spans")).toBe("spans");
+    expect(mapWidgetTypeToDataset("discover")).toBe("discover");
+    expect(mapWidgetTypeToDataset("error-events")).toBe("errors");
+    expect(mapWidgetTypeToDataset("transaction-like")).toBe("transactions");
+    expect(mapWidgetTypeToDataset("logs")).toBe("logs");
+  });
+
+  test("returns null for unsupported widget types", () => {
+    expect(mapWidgetTypeToDataset("issue")).toBeNull();
+    expect(mapWidgetTypeToDataset("metrics")).toBeNull();
+    expect(mapWidgetTypeToDataset("tracemetrics")).toBeNull();
+    expect(mapWidgetTypeToDataset("preprod-app-size")).toBeNull();
+  });
+
+  test("returns null for undefined", () => {
+    expect(mapWidgetTypeToDataset(undefined)).toBeNull();
+  });
+});
+
+describe("display type sets", () => {
+  test("TIMESERIES_DISPLAY_TYPES contains chart types", () => {
+    expect(TIMESERIES_DISPLAY_TYPES.has("line")).toBe(true);
+    expect(TIMESERIES_DISPLAY_TYPES.has("area")).toBe(true);
+    expect(TIMESERIES_DISPLAY_TYPES.has("stacked_area")).toBe(true);
+    expect(TIMESERIES_DISPLAY_TYPES.has("bar")).toBe(true);
+    expect(TIMESERIES_DISPLAY_TYPES.has("categorical_bar")).toBe(true);
+    expect(TIMESERIES_DISPLAY_TYPES.has("table")).toBe(false);
+    expect(TIMESERIES_DISPLAY_TYPES.has("big_number")).toBe(false);
+  });
+
+  test("TABLE_DISPLAY_TYPES contains table types", () => {
+    expect(TABLE_DISPLAY_TYPES.has("table")).toBe(true);
+    expect(TABLE_DISPLAY_TYPES.has("top_n")).toBe(true);
+    expect(TABLE_DISPLAY_TYPES.has("line")).toBe(false);
   });
 });

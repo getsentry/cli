@@ -39,7 +39,8 @@ const DEFAULT_WIDTH = 8;
  * @param targetLen - Desired output length (must be >= 1)
  * @returns Downsampled values with length <= targetLen
  */
-function downsample(values: number[], targetLen: number): number[] {
+/** Downsample an array of values to a target length by averaging buckets. */
+export function downsample(values: number[], targetLen: number): number[] {
   if (values.length <= targetLen) {
     return values;
   }
