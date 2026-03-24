@@ -1,0 +1,128 @@
+# SQL Colorization for DB Span Descriptions
+
+Add `@sentry/sqlish` to syntax-highlight SQL in all DB span rendering paths.
+
+## Dependency
+
+```bash
+# Move from dependencies → devDependencies (zero runtime deps enforced by test)
+bun remove @sentry/sqlish && bun add --dev @sentry/sqlish
+```
+
+## New File: `src/lib/formatters/sql.ts`
+
+Three exports:
+
+| Export | Purpose |
+|--------|---------|
+| `isDbSpanOp(op?: string): boolean` | Returns `true` when `op` starts with `"db"` |
+| `colorizeSql(sql: string): string` | Inline ANSI colorization — returns plain text when `isPlainOutput()` |
+| `formatSqlBlock(sql: string): string` | Pretty-printed + colorized multi-line SQL. **Falls back to plain single-line** when `isPlainOutput()` (non-TTY, `NO_COLOR`, piped). |
+
+### Token → Color Mapping
+
+| Token Type | Color | Rationale |
+|------------|-------|-----------|
+| `Keyword` | `cyan()` | Matches the existing `codeFg` (#79B8FF) feel; stands out without being loud |
+| `Parameter` | `magenta()` | Visually distinct for placeholders like `%s`, `$1`, `?` |
+| `CollapsedColumns` | `muted()` | De-emphasized — not actual SQL |
+| `LeftParenthesis` / `RightParenthesis` | `muted()` | Structural, don't need emphasis |
+| `GenericToken` | no color (default terminal fg) | Table names, column names, literals, operators |
+| `Whitespace` | as-is | Spaces stay spaces |
+
+### Implementation Notes
+
+- Walk tokens recursively (`content` can be `string | Token | Token[]`).
+- `colorizeSql`: join token outputs on a single line (normalize whitespace to single spaces).
+- `formatSqlBlock`: use `@sentry/sqlish`'s `string(tokens)` for structure (newlines at `SELECT`, `FROM`, `WHERE`, etc.), then colorize each token. When `isPlainOutput()`, return the raw SQL string unchanged (no ANSI, no reformatting).
+
+## Changes to Existing Files
+
+### `src/lib/formatters/trace.ts`
+
+**Path 1 — Span list table** (`SPAN_TABLE_COLUMNS`, ~line 411):
+```diff
+-value: (s) => escapeMarkdownCell(s.description || "(no description)"),
++value: (s) => {
++  const desc = s.description || "(no description)";
++  return escapeMarkdownCell(isDbSpanOp(s.op) ? colorizeSql(desc) : desc);
++},
+```
+ANSI codes survive `escapeMarkdownCell` → `renderInlineMarkdown` → `string-width` truncation (all ANSI-aware per table.ts docs).
+
+**Path 2 — Span view detail** (`buildSpanKvRows`, ~line 455–458):
+Keep description row as inline-colorized text. Add a dedicated formatted SQL section in `formatSpanDetails` (~line 510–524):
+```diff
+ export function formatSpanDetails(span, ancestors, traceId) {
+   const kvRows = buildSpanKvRows(span, traceId);
+   const md = `## Span \`${span.span_id}\`\n\n${mdKvTable(kvRows)}\n`;
+   let output = renderMarkdown(md);
++
++  const op = span.op || span["transaction.op"];
++  const desc = span.description || span.transaction;
++  if (desc && isDbSpanOp(op)) {
++    output += formatSqlBlock(desc);
++  }
+
+   if (ancestors.length > 0) {
+     output += formatAncestorChain(ancestors);
+   }
+   return output;
+ }
+```
+`formatSqlBlock` returns a section like:
+```
+─── Query ───
+
+SELECT id, name
+FROM users
+WHERE id = %s
+```
+When `isPlainOutput()`, it returns the raw compact SQL (no ANSI, no reformatting) — safe for piping/machine consumption.
+
+**Path 4 — Ancestor chain** (`formatAncestorChain`, ~line 496):
+```diff
+-`${indent}${colorTag("muted", aOp)} — ${escapeMarkdownInline(aDesc)} ...`
++const colorizedDesc = isDbSpanOp(aOp) ? colorizeSql(aDesc) : aDesc;
++`${indent}${colorTag("muted", aOp)} — ${escapeMarkdownInline(colorizedDesc)} ...`
+```
+
+### `src/lib/formatters/human.ts`
+
+**Path 3 — Span tree** (`formatSpanSimple`, ~line 1080):
+```diff
+-let line = `${prefix}${branch} ${plainSafeMuted(op)} — ${desc}`;
++const colorizedDesc = isDbSpanOp(op) ? colorizeSql(desc) : desc;
++let line = `${prefix}${branch} ${plainSafeMuted(op)} — ${colorizedDesc}`;
+```
+`colorizeSql` already respects `isPlainOutput()` — returns plain text in non-TTY, so this is consistent with the `plainSafeMuted` pattern used in tree output.
+
+## Tests
+
+### `test/lib/formatters/sql.test.ts` (unit)
+- `isDbSpanOp`: true for `"db"`, `"db.query"`, `"db.sql.query"`; false for `"http.client"`, `undefined`
+- `colorizeSql`: returns unmodified text in plain mode (`SENTRY_PLAIN_OUTPUT=1`)
+- `colorizeSql`: returns string with ANSI codes in TTY mode for SQL with keywords
+- `formatSqlBlock`: returns multi-line with ANSI in TTY mode; returns compact single-line with no ANSI in non-TTY
+- Token coverage: keywords, parameters, parentheses, collapsed columns, generic tokens
+
+### `test/lib/formatters/sql.property.test.ts` (property-based)
+- **Round-trip invariant**: `stripAnsi(colorizeSql(sql))` preserves all original tokens (no content lost)
+- **Plain mode invariant**: with `SENTRY_PLAIN_OUTPUT=1`, `colorizeSql(sql) === sql` (identity)
+- **Idempotent strip**: `stripAnsi(colorizeSql(sql)) === stripAnsi(colorizeSql(stripAnsi(colorizeSql(sql))))`
+- Arbitrary: random SQL-ish strings combining keywords, identifiers, parameters, parens
+
+## Verification
+
+```bash
+bun add @sentry/sqlish                          # install dep
+bun run typecheck                                # types pass
+bun run lint:fix                                 # formatting
+bun test test/lib/formatters/sql.test.ts         # unit tests
+bun test test/lib/formatters/sql.property.test.ts # property tests
+bun test                                         # full suite — no regressions
+bun run build                                    # binary builds
+# Manual: bun run dev -- span list <org>/<project> -q "op:db" — see colored SQL in table
+# Manual: bun run dev -- span view <org>/<project>/<span-id> — see pretty-printed query block
+# Manual: bun run dev -- span list ... | cat — piped output has no ANSI, no multi-line SQL
+```
