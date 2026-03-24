@@ -1,18 +1,4 @@
 #!/usr/bin/env bun
-/**
- * Bundle script for npm package
- *
- * Creates a single-file Node.js bundle using esbuild.
- * Injects Bun polyfills for Node.js compatibility.
- * Handles debug ID injection and sourcemap upload natively — no
- * external `@sentry/cli` binary needed.
- *
- * Usage:
- *   bun run script/bundle.ts
- *
- * Output:
- *   dist/bin.cjs - Minified, single-file bundle for npm
- */
 import { unlink } from "node:fs/promises";
 import { build, type Plugin } from "esbuild";
 import pkg from "../package.json";
@@ -62,6 +48,17 @@ const bunSqlitePlugin: Plugin = {
 
 type InjectedFile = { jsPath: string; mapPath: string; debugId: string };
 
+/** Delete .map files after a successful upload — they shouldn't ship to users. */
+async function deleteMapFiles(injected: InjectedFile[]): Promise<void> {
+  for (const { mapPath } of injected) {
+    try {
+      await unlink(mapPath);
+    } catch {
+      // Ignore — file might already be gone
+    }
+  }
+}
+
 /** Inject debug IDs into JS outputs and their companion sourcemaps. */
 async function injectDebugIdsForOutputs(
   jsFiles: string[]
@@ -83,10 +80,14 @@ async function injectDebugIdsForOutputs(
   return injected;
 }
 
-/** Upload injected sourcemaps to Sentry via the chunk-upload protocol. */
+/**
+ * Upload injected sourcemaps to Sentry via the chunk-upload protocol.
+ *
+ * @returns `true` if upload succeeded, `false` if it failed (non-fatal).
+ */
 async function uploadInjectedSourcemaps(
   injected: InjectedFile[]
-): Promise<void> {
+): Promise<boolean> {
   try {
     console.log("  Uploading sourcemaps to Sentry...");
     await uploadSourcemaps({
@@ -114,9 +115,11 @@ async function uploadInjectedSourcemaps(
       }),
     });
     console.log("  Sourcemaps uploaded to Sentry");
+    return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`  Warning: Sourcemap upload failed: ${msg}`);
+    return false;
   }
 }
 
@@ -152,15 +155,12 @@ const sentrySourcemapPlugin: Plugin = {
         return;
       }
 
-      await uploadInjectedSourcemaps(injected);
+      const uploaded = await uploadInjectedSourcemaps(injected);
 
-      // Delete .map files after upload — they shouldn't ship to users
-      for (const { mapPath } of injected) {
-        try {
-          await unlink(mapPath);
-        } catch {
-          // Ignore — file might already be gone
-        }
+      // Only delete .map files after a successful upload — preserving
+      // them on failure allows retrying without a full rebuild.
+      if (uploaded) {
+        await deleteMapFiles(injected);
       }
     });
   },
