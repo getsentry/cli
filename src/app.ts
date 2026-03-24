@@ -27,6 +27,7 @@ import { listCommand as projectListCommand } from "./commands/project/list.js";
 import { repoRoute } from "./commands/repo/index.js";
 import { listCommand as repoListCommand } from "./commands/repo/list.js";
 import { schemaCommand } from "./commands/schema.js";
+import { sourcemapRoute } from "./commands/sourcemap/index.js";
 import { spanRoute } from "./commands/span/index.js";
 import { listCommand as spanListCommand } from "./commands/span/list.js";
 import { teamRoute } from "./commands/team/index.js";
@@ -56,6 +57,7 @@ const PLURAL_TO_SINGULAR: Record<string, string> = {
   repos: "repo",
   teams: "team",
   logs: "log",
+  sourcemaps: "sourcemap",
   spans: "span",
   traces: "trace",
   trials: "trial",
@@ -75,6 +77,7 @@ export const routes = buildRouteMap({
     issue: issueRoute,
     event: eventRoute,
     log: logRoute,
+    sourcemap: sourcemapRoute,
     span: spanRoute,
     trace: traceRoute,
     trial: trialRoute,

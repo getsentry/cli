@@ -303,6 +303,15 @@ View Sentry logs
 
 → Full flags and examples: `references/logs.md`
 
+### Sourcemap
+
+Manage sourcemaps
+
+- `sentry sourcemap inject <directory>` — Inject debug IDs into JavaScript files and sourcemaps
+- `sentry sourcemap upload <org/project/directory>` — Upload sourcemaps to Sentry
+
+→ Full flags and examples: `references/sourcemap.md`
+
 ### Span
 
 List and view spans in projects or traces

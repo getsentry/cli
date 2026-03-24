@@ -63,10 +63,12 @@
       // api-client.ts is a barrel that re-exports from src/lib/api/ domain modules
       // to preserve the existing import path for all consumers
       // markdown.ts re-exports isPlainOutput from plain-detect.ts for backward compat
+      // script/debug-id.ts re-exports from src/lib/sourcemap/debug-id.ts for build scripts
       "includes": [
         "src/lib/db/index.ts",
         "src/lib/api-client.ts",
-        "src/lib/formatters/markdown.ts"
+        "src/lib/formatters/markdown.ts",
+        "script/debug-id.ts"
       ],
       "linter": {
         "rules": {
