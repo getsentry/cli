@@ -19,7 +19,11 @@
 
 import path from "node:path";
 import type { SentryContext } from "../context.js";
-import { looksLikePath, parseOrgProjectArg } from "../lib/arg-parsing.js";
+import {
+  looksLikePath,
+  normalizeSlug,
+  parseOrgProjectArg,
+} from "../lib/arg-parsing.js";
 import { buildCommand } from "../lib/command.js";
 import { ContextError } from "../lib/errors.js";
 import { warmOrgDetection } from "../lib/init/prefetch.js";
@@ -240,15 +244,17 @@ export const initCommand = buildCommand<
 
     // 5. Merge --org flag with target-derived org.
     //    --org is an alternative to the positional <org>/ syntax.
-    if (flags.org) {
-      validateResourceId(flags.org, "organization slug");
+    //    Normalize underscores → dashes to match how the positional target is parsed.
+    const orgFlag = flags.org ? normalizeSlug(flags.org).slug : undefined;
+    if (orgFlag) {
+      validateResourceId(orgFlag, "organization slug");
     }
-    if (flags.org && explicitOrg && flags.org !== explicitOrg) {
+    if (orgFlag && explicitOrg && orgFlag !== explicitOrg) {
       throw new ContextError("Arguments", USAGE_HINT, [
-        `--org "${flags.org}" conflicts with target org "${explicitOrg}"`,
+        `--org "${orgFlag}" conflicts with target org "${explicitOrg}"`,
       ]);
     }
-    const resolvedOrg = explicitOrg ?? flags.org;
+    const resolvedOrg = explicitOrg ?? orgFlag;
 
     // 6. Start background org detection when org is not yet known.
     //    The prefetch runs concurrently with the preamble, the wizard startup,
