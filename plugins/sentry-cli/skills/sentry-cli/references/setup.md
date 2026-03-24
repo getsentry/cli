@@ -58,6 +58,7 @@ Initialize Sentry in your project (experimental)
 - `--dry-run - Preview changes without applying them`
 - `--features <value>... - Features to enable: errors,tracing,logs,replay,metrics,profiling,sourcemaps,crons,ai-monitoring,user-feedback`
 - `-t, --team <value> - Team slug to create the project under`
+- `--org <value> - Org slug to create the project under`
 
 ### `sentry schema <resource...>`
 
