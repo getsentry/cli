@@ -5,9 +5,12 @@
  * then injects Sentry debug IDs into each pair.
  */
 
-import { readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { injectDebugId } from "./debug-id.js";
+
+/** Regex to detect an existing debug ID in a JS file. */
+const EXISTING_DEBUGID_RE = /\/\/# debugId=([0-9a-fA-F-]{36})/;
 
 /** Default JavaScript file extensions to scan. */
 const DEFAULT_EXTENSIONS = new Set([".js", ".cjs", ".mjs"]);
@@ -55,7 +58,12 @@ export async function injectDirectory(
   const results: InjectResult[] = [];
   for (const { jsPath, mapPath } of filePairs) {
     if (options.dryRun) {
-      results.push({ jsPath, mapPath, injected: false, debugId: "(dry run)" });
+      // Check if file already has a debug ID without modifying it
+      const js = await readFile(jsPath, "utf-8");
+      const existing = js.match(EXISTING_DEBUGID_RE);
+      const wouldInject = !existing;
+      const id = existing?.[1] ?? "(pending)";
+      results.push({ jsPath, mapPath, injected: wouldInject, debugId: id });
       continue;
     }
     const { debugId, wasInjected } = await injectDebugId(jsPath, mapPath);

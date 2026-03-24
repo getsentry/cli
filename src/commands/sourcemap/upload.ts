@@ -104,11 +104,10 @@ export const uploadCommand = buildCommand({
     }
     const { org, project } = resolved;
 
-    // Discover files with debug IDs (also injects any missing ones)
+    // Discover and inject debug IDs into JS + sourcemap pairs
     const results = await injectDirectory(dir);
-    const filesWithDebugIds = results.filter((r) => r.debugId !== "(dry run)");
 
-    if (filesWithDebugIds.length === 0) {
+    if (results.length === 0) {
       yield new CommandOutput<UploadCommandResult>({
         org,
         project,
@@ -124,7 +123,7 @@ export const uploadCommand = buildCommand({
 
     // Build artifact file list with paths relative to the upload directory
     const resolvedDir = resolve(dir);
-    const artifactFiles: ArtifactFile[] = filesWithDebugIds.flatMap(
+    const artifactFiles: ArtifactFile[] = results.flatMap(
       ({ jsPath, mapPath, debugId }) => {
         // Normalize to forward slashes for URLs (handles Windows backslashes)
         const jsRelative = relative(resolvedDir, jsPath).replaceAll("\\", "/");
@@ -162,7 +161,7 @@ export const uploadCommand = buildCommand({
       org,
       project,
       release: flags.release,
-      filesUploaded: filesWithDebugIds.length,
+      filesUploaded: results.length,
     });
   },
 });
