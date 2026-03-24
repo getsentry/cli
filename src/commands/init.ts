@@ -11,7 +11,7 @@
  *   sentry init ./subdir              — dir = subdir, auto-detect org
  *   sentry init acme/                 — explicit org, dir = cwd
  *   sentry init acme/my-app           — explicit org + project, dir = cwd
- *   sentry init my-app                — search for project across orgs
+ *   sentry init my-app                — use existing or create new project
  *   sentry init acme/ ./subdir        — explicit org, dir = subdir
  *   sentry init acme/my-app ./subdir  — explicit org + project, dir = subdir
  *   sentry init ./subdir acme/        — swapped, auto-correct with warning
@@ -19,14 +19,14 @@
 
 import path from "node:path";
 import type { SentryContext } from "../context.js";
+import { findProjectsBySlug } from "../lib/api/projects.js";
 import { looksLikePath, parseOrgProjectArg } from "../lib/arg-parsing.js";
 import { buildCommand } from "../lib/command.js";
-import { ContextError } from "../lib/errors.js";
+import { ContextError, ValidationError } from "../lib/errors.js";
 import { warmOrgDetection } from "../lib/init/prefetch.js";
 import { runWizard } from "../lib/init/wizard-runner.js";
 import { validateResourceId } from "../lib/input-validation.js";
 import { logger } from "../lib/logger.js";
-import { resolveProjectBySlug } from "../lib/resolve-target.js";
 
 const log = logger.withTag("init");
 
@@ -96,8 +96,10 @@ function classifyArgs(
 /**
  * Resolve the parsed org/project target into explicit org and project values.
  *
- * For `project-search` (bare slug), calls {@link resolveProjectBySlug} to search
- * across all accessible orgs and determine both org and project from the match.
+ * For `project-search` (bare slug), searches for an existing project first.
+ * If not found, treats the slug as a **new project name** to create —
+ * org will be resolved later by the wizard's `resolveOrgSlug()`.
+ * If the slug matches an org name, treats it as org-only (like `slug/`).
  */
 async function resolveTarget(targetArg: string | undefined): Promise<{
   org: string | undefined;
@@ -115,14 +117,42 @@ async function resolveTarget(targetArg: string | undefined): Promise<{
       validateResourceId(parsed.org, "organization slug");
       return { org: parsed.org, project: undefined };
     case "project-search": {
-      // Bare slug — search for a project with this name across all orgs.
-      // resolveProjectBySlug handles not-found, ambiguity, and org-name-collision errors.
-      const resolved = await resolveProjectBySlug(
-        parsed.projectSlug,
-        USAGE_HINT,
-        `sentry init ${parsed.projectSlug}/ (if '${parsed.projectSlug}' is an org)`
+      // Bare slug — could be an existing project name or a new project name.
+      // Search for an existing project first, then fall back to treating as
+      // the name for a new project to create.
+      const { projects, orgs } = await findProjectsBySlug(parsed.projectSlug);
+
+      // Multiple matches — disambiguation error
+      if (projects.length > 1) {
+        const first = projects[0];
+        const orgList = projects
+          .map((p) => `  ${p.orgSlug}/${p.slug}`)
+          .join("\n");
+        throw new ValidationError(
+          `Project "${parsed.projectSlug}" exists in multiple organizations.\n\n` +
+            `Specify the organization:\n${orgList}\n\n` +
+            `Example: sentry init ${first?.orgSlug ?? "<org>"}/${parsed.projectSlug}`
+        );
+      }
+
+      // Exactly one match — use it (wizard handles existing-project flow)
+      const [match] = projects;
+      if (match) {
+        return { org: match.orgSlug, project: match.slug };
+      }
+
+      // No project found — is the slug an org name?
+      const isOrg = orgs.some((o) => o.slug === parsed.projectSlug);
+      if (isOrg) {
+        return { org: parsed.projectSlug, project: undefined };
+      }
+
+      // Truly not found — treat as the name for a new project to create.
+      // Org will be resolved later by the wizard via resolveOrgSlug().
+      log.info(
+        `No existing project "${parsed.projectSlug}" found — will create a new project with this name.`
       );
-      return { org: resolved.org, project: resolved.project };
+      return { org: undefined, project: parsed.projectSlug };
     }
     case "auto-detect":
       return { org: undefined, project: undefined };
@@ -227,7 +257,8 @@ export const initCommand = buildCommand<
 
     // 4. Resolve target → org + project
     //    Validation of user-provided slugs happens inside resolveTarget.
-    //    API-resolved values (from resolveProjectBySlug) are already valid.
+    //    For bare slugs, if no existing project is found, the slug becomes
+    //    the name for a new project (org resolved later by the wizard).
     const { org: explicitOrg, project: explicitProject } =
       await resolveTarget(targetArg);
 

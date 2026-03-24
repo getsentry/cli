@@ -1,27 +1,34 @@
 /**
  * Tests for the `sentry init` command entry point.
  *
- * Uses spyOn on the wizard-runner and resolve-target namespaces to
- * capture runWizard calls and mock resolveProjectBySlug without
+ * Uses spyOn on the wizard-runner and projects API namespaces to
+ * capture runWizard calls and mock findProjectsBySlug without
  * mock.module (which leaks across test files).
  */
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import path from "node:path";
 import { initCommand } from "../../src/commands/init.js";
-import { ContextError } from "../../src/lib/errors.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as projectsApi from "../../src/lib/api/projects.js";
+import { ContextError, ValidationError } from "../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as prefetchNs from "../../src/lib/init/prefetch.js";
 import { resetPrefetch } from "../../src/lib/init/prefetch.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as wizardRunner from "../../src/lib/init/wizard-runner.js";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as resolveTarget from "../../src/lib/resolve-target.js";
 
-// ── Spy setup ─────────────────────────────────────────────────────────────
+/** Minimal org shape for mock returns */
+const MOCK_ORG = { id: "1", slug: "resolved-org", name: "Resolved Org" };
+
+/** Minimal project-with-org shape for mock returns */
+function mockProject(slug: string, orgSlug = "resolved-org") {
+  return { slug, orgSlug, id: "123", name: slug };
+}
+
 let capturedArgs: Record<string, unknown> | undefined;
 let runWizardSpy: ReturnType<typeof spyOn>;
-let resolveProjectSpy: ReturnType<typeof spyOn>;
+let findProjectsSpy: ReturnType<typeof spyOn>;
 let warmSpy: ReturnType<typeof spyOn>;
 
 const func = (await initCommand.loader()) as unknown as (
@@ -56,14 +63,13 @@ beforeEach(() => {
       return Promise.resolve();
     }
   );
-  // Default: mock resolveProjectBySlug to return a match
-  resolveProjectSpy = spyOn(
-    resolveTarget,
-    "resolveProjectBySlug"
-  ).mockImplementation(async (slug: string) => ({
-    org: "resolved-org",
-    project: slug,
-  }));
+  // Default: mock findProjectsBySlug to return a single project match
+  findProjectsSpy = spyOn(projectsApi, "findProjectsBySlug").mockImplementation(
+    async (slug: string) => ({
+      projects: [mockProject(slug)],
+      orgs: [MOCK_ORG],
+    })
+  );
   // Spy on warmOrgDetection to verify it's called/skipped appropriately.
   // The mock prevents real DSN scans and API calls from the background.
   warmSpy = spyOn(prefetchNs, "warmOrgDetection").mockImplementation(
@@ -74,7 +80,7 @@ beforeEach(() => {
 
 afterEach(() => {
   runWizardSpy.mockRestore();
-  resolveProjectSpy.mockRestore();
+  findProjectsSpy.mockRestore();
   warmSpy.mockRestore();
   resetPrefetch();
 });
@@ -221,17 +227,51 @@ describe("init command func", () => {
       expect(capturedArgs?.directory).toBe("/projects/app");
     });
 
-    test("bare slug resolves project via resolveProjectBySlug", async () => {
+    test("bare slug found → uses existing project", async () => {
       const ctx = makeContext("/projects/app");
       await func.call(ctx, DEFAULT_FLAGS, "my-app");
-      expect(resolveProjectSpy).toHaveBeenCalledWith(
-        "my-app",
-        expect.any(String),
-        expect.any(String)
-      );
+      expect(findProjectsSpy).toHaveBeenCalledWith("my-app");
       expect(capturedArgs?.org).toBe("resolved-org");
       expect(capturedArgs?.project).toBe("my-app");
       expect(capturedArgs?.directory).toBe("/projects/app");
+    });
+
+    test("bare slug not found → passes as new project name", async () => {
+      findProjectsSpy.mockImplementation(async () => ({
+        projects: [],
+        orgs: [MOCK_ORG],
+      }));
+      const ctx = makeContext("/projects/app");
+      await func.call(ctx, DEFAULT_FLAGS, "new-app");
+      expect(capturedArgs?.org).toBeUndefined();
+      expect(capturedArgs?.project).toBe("new-app");
+      expect(capturedArgs?.directory).toBe("/projects/app");
+    });
+
+    test("bare slug matches org name → treated as org-only", async () => {
+      const orgSlug = "acme-corp";
+      findProjectsSpy.mockImplementation(async () => ({
+        projects: [],
+        orgs: [{ id: "2", slug: orgSlug, name: "Acme Corp" }],
+      }));
+      const ctx = makeContext("/projects/app");
+      await func.call(ctx, DEFAULT_FLAGS, orgSlug);
+      expect(capturedArgs?.org).toBe(orgSlug);
+      expect(capturedArgs?.project).toBeUndefined();
+    });
+
+    test("bare slug in multiple orgs → throws ValidationError", async () => {
+      findProjectsSpy.mockImplementation(async (slug: string) => ({
+        projects: [mockProject(slug, "org-a"), mockProject(slug, "org-b")],
+        orgs: [
+          { id: "1", slug: "org-a", name: "Org A" },
+          { id: "2", slug: "org-b", name: "Org B" },
+        ],
+      }));
+      const ctx = makeContext();
+      await expect(func.call(ctx, DEFAULT_FLAGS, "my-app")).rejects.toThrow(
+        ValidationError
+      );
     });
   });
 
@@ -261,7 +301,7 @@ describe("init command func", () => {
     test("bare slug + path", async () => {
       const ctx = makeContext("/projects/app");
       await func.call(ctx, DEFAULT_FLAGS, "my-app", "./subdir");
-      expect(resolveProjectSpy).toHaveBeenCalled();
+      expect(findProjectsSpy).toHaveBeenCalled();
       expect(capturedArgs?.org).toBe("resolved-org");
       expect(capturedArgs?.project).toBe("my-app");
       expect(capturedArgs?.directory).toBe(
@@ -360,11 +400,23 @@ describe("init command func", () => {
       expect(warmSpy).not.toHaveBeenCalled();
     });
 
-    test("skips prefetch for bare slug (project-search resolves org)", async () => {
+    test("skips prefetch for bare slug when project found", async () => {
       const ctx = makeContext();
       await func.call(ctx, DEFAULT_FLAGS, "my-app");
-      // resolveProjectBySlug returns { org: "resolved-org" } → org is known
+      // findProjectsBySlug returns a match → org is known, no prefetch needed
       expect(warmSpy).not.toHaveBeenCalled();
+    });
+
+    test("warms prefetch for bare slug when project not found", async () => {
+      findProjectsSpy.mockImplementation(async () => ({
+        projects: [],
+        orgs: [MOCK_ORG],
+      }));
+      const ctx = makeContext("/projects/app");
+      await func.call(ctx, DEFAULT_FLAGS, "new-app");
+      // No project found → org is undefined → prefetch warms
+      expect(warmSpy).toHaveBeenCalledTimes(1);
+      expect(warmSpy).toHaveBeenCalledWith("/projects/app");
     });
 
     test("warms prefetch for path-only arg", async () => {
