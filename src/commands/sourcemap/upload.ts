@@ -52,7 +52,7 @@ export const uploadCommand = buildCommand({
     fullDescription:
       "Upload JavaScript sourcemaps and source files to Sentry using " +
       "debug-ID-based matching.\n\n" +
-      "Files must have debug IDs injected first (via `sentry sourcemap inject`).\n" +
+      "Automatically injects debug IDs into any files that don't already have them.\n" +
       "Org/project are auto-detected from DSN, env vars, or config defaults.\n\n" +
       "Usage:\n" +
       "  sentry sourcemap upload ./dist\n" +

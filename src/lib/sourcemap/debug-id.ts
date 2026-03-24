@@ -18,7 +18,8 @@ import { readFile, writeFile } from "node:fs/promises";
 const DEBUGID_COMMENT_PREFIX = "//# debugId=";
 
 /** Regex to extract an existing debug ID from a JS file. */
-const EXISTING_DEBUGID_RE = /\/\/# debugId=([0-9a-fA-F-]{36})/;
+/** Regex to extract an existing debug ID from a JS file. @internal */
+export const EXISTING_DEBUGID_RE = /\/\/# debugId=([0-9a-fA-F-]{36})/;
 
 /**
  * Generate a deterministic debug ID (UUID v4 format) from content.

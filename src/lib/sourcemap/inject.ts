@@ -7,10 +7,7 @@
 
 import { readdir, readFile, stat } from "node:fs/promises";
 import { extname, join } from "node:path";
-import { injectDebugId } from "./debug-id.js";
-
-/** Regex to detect an existing debug ID in a JS file. */
-const EXISTING_DEBUGID_RE = /\/\/# debugId=([0-9a-fA-F-]{36})/;
+import { EXISTING_DEBUGID_RE, injectDebugId } from "./debug-id.js";
 
 /** Default JavaScript file extensions to scan. */
 const DEFAULT_EXTENSIONS = new Set([".js", ".cjs", ".mjs"]);
