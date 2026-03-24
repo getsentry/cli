@@ -39,19 +39,6 @@ afterEach(() => {
   }
 });
 
-afterEach(() => {
-  if (originalPlainOutput !== undefined) {
-    process.env.SENTRY_PLAIN_OUTPUT = originalPlainOutput;
-  } else {
-    delete process.env.SENTRY_PLAIN_OUTPUT;
-  }
-  if (originalNoColor !== undefined) {
-    process.env.NO_COLOR = originalNoColor;
-  } else {
-    delete process.env.NO_COLOR;
-  }
-});
-
 describe("isDbSpanOp", () => {
   test('returns true for "db"', () => {
     expect(isDbSpanOp("db")).toBe(true);
