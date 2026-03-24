@@ -329,6 +329,16 @@ async function uploadArtifactBundle(opts: {
     return;
   }
 
+  // Fail fast on server-side assembly error
+  if (firstAssemble.state === "error") {
+    throw new ApiError(
+      "Artifact bundle assembly failed",
+      500,
+      firstAssemble.detail ?? "Unknown error",
+      assembleEndpoint
+    );
+  }
+
   // Step 5: Upload missing chunks in parallel
   const missingSet = new Set(firstAssemble.missingChunks ?? []);
   const missingChunks = chunks.filter((c) => missingSet.has(c.sha1));
