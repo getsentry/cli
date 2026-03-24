@@ -876,6 +876,7 @@ mock.module("./some-module", () => ({
 
 <!-- lore:019ca9c3-989c-7c8d-bcd0-9f308fd2c3d7 -->
 * **Sentry CLI markdown-first formatting pipeline replaces ad-hoc ANSI**: Formatters build CommonMark strings; \`renderMarkdown()\` renders to ANSI for TTY or raw markdown for non-TTY. Key helpers: \`colorTag()\`, \`mdKvTable()\`, \`mdRow()\`, \`mdTableHeader()\` (\`:\` suffix = right-aligned), \`renderTextTable()\`. \`isPlainOutput()\` checks \`SENTRY\_PLAIN\_OUTPUT\` > \`NO\_COLOR\` > \`!isTTY\`. Batch path: \`formatXxxTable()\`. Streaming path: \`StreamingTable\` (TTY) or raw markdown rows (plain). Both share \`buildXxxRowCells()\`.
+
 <!-- lore:019cd2b7-bb98-730e-a0d3-ec25bfa6cf4c -->
 * **Sentry issue stats field: time-series controlled by groupStatsPeriod**: The \`stats\` field on issues is \`{ '24h': \[\[ts, count], ...] }\`. Key depends on \`groupStatsPeriod\` param (\`""\`, \`"14d"\`, \`"24h"\`, \`"auto"\`). \`statsPeriod\` controls time window; \`groupStatsPeriod\` controls stats key. \*\*Critical\*\*: \`count\` is period-scoped — \`lifetime.count\` is the true lifetime total. Issue list table uses \`groupStatsPeriod: 'auto'\` for sparkline data. Column order: SHORT ID, ISSUE, SEEN, AGE, TREND, EVENTS, USERS, TRIAGE. TREND auto-hidden when terminal < 100 cols. \`--compact\` tri-state: explicit overrides; \`undefined\` triggers \`shouldAutoCompact(rowCount)\` — compact if \`3N + 3 > termHeight\`, false for non-TTY. Height is \`3N + 3\` (not \`3N + 4\`) because last data row has no trailing separator.
 
