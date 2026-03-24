@@ -116,6 +116,17 @@ const ASSEMBLE_POLL_INTERVAL_MS = 1000;
 /** Maximum time to wait for assembly. */
 const ASSEMBLE_MAX_WAIT_MS = 300_000;
 
+// ── Helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Convert a `~`-prefixed URL to the bundle path used inside the ZIP.
+ *
+ * `"~/foo/bar.js"` → `"_/_/foo/bar.js"`, other URLs get `"_/"` prefix.
+ */
+function urlToBundlePath(url: string): string {
+  return url.startsWith("~/") ? `_/_/${url.slice(2)}` : `_/${url}`;
+}
+
 // ── API Functions ───────────────────────────────────────────────────
 
 /**
@@ -162,11 +173,7 @@ export async function buildArtifactBundle(
   > = {};
 
   for (const file of files) {
-    // Convert URL to bundle path: ~/foo/bar.js → _/_/foo/bar.js
-    const bundlePath = file.url.startsWith("~/")
-      ? `_/_/${file.url.slice(2)}`
-      : `_/${file.url}`;
-
+    const bundlePath = urlToBundlePath(file.url);
     const headers: Record<string, string> = {
       "debug-id": file.debugId,
     };
@@ -194,9 +201,7 @@ export async function buildArtifactBundle(
     await zip.addEntry("manifest.json", Buffer.from(manifest, "utf-8"));
 
     for (const file of files) {
-      const bundlePath = file.url.startsWith("~/")
-        ? `_/_/${file.url.slice(2)}`
-        : `_/${file.url}`;
+      const bundlePath = urlToBundlePath(file.url);
       const content = await readFile(file.path);
       await zip.addEntry(bundlePath, content);
     }

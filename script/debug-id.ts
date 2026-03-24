@@ -100,9 +100,12 @@ export async function injectDebugId(
   let newJs: string;
   if (jsContent.startsWith("#!")) {
     const newlineIdx = jsContent.indexOf("\n");
-    const hashbang = jsContent.slice(0, newlineIdx + 1);
-    const rest = jsContent.slice(newlineIdx + 1);
-    newJs = `${hashbang}${snippet}\n${rest}`;
+    // Handle hashbang without trailing newline (entire file is the #! line)
+    const splitAt = newlineIdx === -1 ? jsContent.length : newlineIdx + 1;
+    const hashbang = jsContent.slice(0, splitAt);
+    const rest = jsContent.slice(splitAt);
+    const sep = newlineIdx === -1 ? "\n" : "";
+    newJs = `${hashbang}${sep}${snippet}\n${rest}`;
   } else {
     newJs = `${snippet}\n${jsContent}`;
   }
