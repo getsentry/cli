@@ -1,0 +1,84 @@
+# Plan: Optimize `issue list` with `collapse` parameter
+
+## Summary
+
+The Sentry web UI optimizes issue list loading by sending `collapse=stats,unhandled` to `/organizations/{org}/issues/`, skipping expensive Snuba/ClickHouse queries. The CLI currently requests everything, adding **200-500ms per API request**. This change adds `collapse` parameter support to skip unused data.
+
+**Note:** The Discover endpoint (`/events/?dataset=errors`) cannot replace `issue list` — issues are aggregations above events that only the Issues API provides. The performance win comes from the `collapse` query parameter on the same endpoint.
+
+## What the CLI actually uses from SentryIssue
+
+| Column | Field | Source |
+|--------|-------|--------|
+| SHORT ID | `shortId` | base (PG) |
+| ISSUE | `title`, `metadata` | base (PG) |
+| SEEN | `lastSeen` | base (PG) |
+| AGE | `firstSeen` | base (PG) |
+| TREND | `stats` (sparkline) + `substatus` | **stats (Snuba)** + base |
+| EVENTS | `count` | base (period-scoped, NOT `lifetime`) |
+| USERS | `userCount` | base (period-scoped, NOT `lifetime`) |
+| TRIAGE | `priority`, `seerFixabilityScore` | base (PG) |
+
+**Never consumed by issue list:** `lifetime`, `filtered`, `unhandled` (isUnhandled only used in `issue view`)
+
+## Collapse Strategy
+
+| Scenario | collapse | groupStatsPeriod | Savings |
+|----------|----------|-----------------|---------|
+| Human, wide terminal (≥100 cols) | `[filtered, lifetime, unhandled]` | `"auto"` | ~200ms |
+| Human, narrow terminal (<100 cols) | `[filtered, lifetime, unhandled, stats]` | omitted | ~400ms |
+| Human, non-TTY (piped) | `[filtered, lifetime, unhandled, stats]` | omitted | ~400ms |
+| JSON (`--json`) | `[filtered, lifetime, unhandled, stats]` | omitted | ~400ms |
+
+Stats are only needed for the TREND sparkline column, shown when `process.stdout.columns >= 100`.
+
+## Files to Modify
+
+### 1. `src/lib/api/issues.ts` (~25 new, ~6 modified lines)
+
+- Extract `IssueCollapseField` type from SDK types (compile-time safety)
+- Add `buildIssueListCollapse({ shouldCollapseStats })` pure function
+- Add `collapse?: IssueCollapseField[]` to `listIssuesPaginated()` options (line 50-62), pass to SDK query (line 78-89)
+- Add `collapse?: IssueCollapseField[]` to `listIssuesAllPages()` options (line 128-141), pass through to `listIssuesPaginated` (line 156-164)
+
+### 2. `src/lib/api-client.ts` (~2 lines)
+
+- Re-export `IssueCollapseField` and `buildIssueListCollapse` from barrel
+
+### 3. `src/lib/formatters/human.ts` (~1 line)
+
+- Export `TREND_MIN_TERM_WIDTH` constant (currently private, line 362-363) so `list.ts` can import it to keep the threshold in one place
+
+### 4. `src/commands/issue/list.ts` (~30 new, ~15 modified lines)
+
+Add two helper functions:
+- `shouldCollapseStats(json: boolean): boolean` — true when JSON mode, narrow terminal, or non-TTY
+- `buildListApiOptions(json: boolean)` — returns `{ collapse, groupStatsPeriod }` computed together
+
+Modify three API call sites:
+- **`fetchIssuesForTarget()`** (line 495-524): Add `collapse` and `groupStatsPeriod` to options type, pass through to `listIssuesAllPages`
+- **`BudgetFetchOptions`** (line 574-581): Add `collapse` and `groupStatsPeriod` fields
+- **`fetchOrgAllIssues()`** (line 793-823): Widen `flags` Pick to include `json`, call `buildListApiOptions(flags.json)`, pass to both cursor and non-cursor paths
+- **`handleResolvedTargets()`**: Compute `apiOpts` once, pass to `fetchWithBudget`
+- **`handleOrgAllIssues()`**: `flags.json` already available via `ListFlags`
+
+### 5. Tests
+
+**`test/lib/api/issues.test.ts`** (new or append ~25 lines)
+- `buildIssueListCollapse` always includes filtered/lifetime/unhandled
+- stats presence controlled by `shouldCollapseStats` flag
+- never includes `base`
+
+**`test/commands/issue/list.test.ts`** (append ~60 lines)
+- Verify `collapse` reaches `listIssuesPaginated` via spyOn in org-all mode
+- Verify stats collapsed when `json=true`
+- Verify `groupStatsPeriod` omitted when stats collapsed
+- Verify stats preserved on wide terminal in human mode
+
+## Verification
+
+1. `bun run typecheck` — types flow correctly through the chain
+2. `bun run lint:fix` — no biome violations
+3. `bun test test/lib/api/ test/commands/issue/` — all tests pass
+4. `bun run generate:skill && bun run check:skill` — SKILL.md stays current
+5. Manual: `bun run dev -- issue list <org>/ --json` with `SENTRY_LOG_LEVEL=debug` to confirm `collapse` param in request URL
