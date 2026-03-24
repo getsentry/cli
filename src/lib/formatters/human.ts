@@ -42,6 +42,7 @@ import {
   safeCodeSpan,
 } from "./markdown.js";
 import { sparkline } from "./sparkline.js";
+import { colorizeSql, isDbSpanOp } from "./sql.js";
 import { type Column, writeTable } from "./table.js";
 import { computeSpanDurationMs, formatRelativeTime } from "./time-utils.js";
 
@@ -1077,7 +1078,8 @@ function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
   const branch = isLast ? "└─" : "├─";
   const childPrefix = prefix + (isLast ? "   " : "│  ");
 
-  let line = `${prefix}${branch} ${plainSafeMuted(op)} — ${desc}`;
+  const colorizedDesc = isDbSpanOp(op) ? colorizeSql(desc) : desc;
+  let line = `${prefix}${branch} ${plainSafeMuted(op)} — ${colorizedDesc}`;
 
   const durationMs = computeSpanDurationMs(span);
   if (durationMs !== undefined) {

@@ -13,6 +13,7 @@
     "@sentry/api": "^0.54.0",
     "@sentry/esbuild-plugin": "^2.23.0",
     "@sentry/node-core": "10.44.0",
+    "@sentry/sqlish": "^1.0.0",
     "@stricli/auto-complete": "^1.2.4",
     "@stricli/core": "^1.2.4",
     "@types/bun": "latest",

@@ -20,6 +20,7 @@ import {
   renderInlineMarkdown,
   renderMarkdown,
 } from "./markdown.js";
+import { colorizeSql, formatSqlBlock, isDbSpanOp } from "./sql.js";
 import { type Column, formatTable } from "./table.js";
 import { renderTextTable } from "./text-table.js";
 import { computeSpanDurationMs, formatRelativeTime } from "./time-utils.js";
@@ -408,7 +409,10 @@ const SPAN_TABLE_COLUMNS: Column<FlatSpan>[] = [
   },
   {
     header: "Description",
-    value: (s) => escapeMarkdownCell(s.description || "(no description)"),
+    value: (s) => {
+      const desc = s.description || "(no description)";
+      return escapeMarkdownCell(isDbSpanOp(s.op) ? colorizeSql(desc) : desc);
+    },
     truncate: true,
   },
   {
@@ -492,8 +496,9 @@ function formatAncestorChain(ancestors: TraceSpan[]): string {
     const indent = "  ".repeat(i);
     const aOp = a.op || a["transaction.op"] || "unknown";
     const aDesc = a.description || a.transaction || "(no description)";
+    const colorizedDesc = isDbSpanOp(aOp) ? colorizeSql(aDesc) : aDesc;
     lines.push(
-      `${indent}${colorTag("muted", aOp)} — ${escapeMarkdownInline(aDesc)} ${colorTag("muted", `(${a.span_id})`)}`
+      `${indent}${colorTag("muted", aOp)} — ${escapeMarkdownInline(colorizedDesc)} ${colorTag("muted", `(${a.span_id})`)}`
     );
   }
   return `${renderMarkdown(lines.join("\n"))}\n`;
@@ -515,6 +520,12 @@ export function formatSpanDetails(
   const kvRows = buildSpanKvRows(span, traceId);
   const md = `## Span \`${span.span_id}\`\n\n${mdKvTable(kvRows)}\n`;
   let output = renderMarkdown(md);
+
+  const op = span.op || span["transaction.op"];
+  const desc = span.description || span.transaction;
+  if (desc && isDbSpanOp(op)) {
+    output += formatSqlBlock(desc);
+  }
 
   if (ancestors.length > 0) {
     output += formatAncestorChain(ancestors);
