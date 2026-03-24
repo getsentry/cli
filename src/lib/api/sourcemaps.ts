@@ -96,11 +96,6 @@ export type UploadOptions = {
   release?: string;
   /** Files to upload (must already have debug IDs injected). */
   files: ArtifactFile[];
-  /**
-   * Auth token for the Sentry API. If not provided, uses the
-   * authenticated fetch from the CLI's auth system.
-   */
-  authToken?: string;
 };
 
 /** Chunk metadata after splitting the ZIP for upload. */
