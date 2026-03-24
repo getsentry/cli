@@ -120,6 +120,24 @@ describe("issues.ts", () => {
       expect(result.id).toBe("12345");
       expect(result.title).toBe("Test Issue");
     });
+
+    test("passes collapse query params when provided", async () => {
+      const issue = mockIssue();
+      globalThis.fetch = mockFetch(async (input, init) => {
+        const req = new Request(input!, init);
+        const url = new URL(req.url);
+        expect(url.searchParams.getAll("collapse")).toEqual([
+          "stats",
+          "lifetime",
+        ]);
+        return new Response(JSON.stringify(issue), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+
+      await getIssue("12345", { collapse: ["stats", "lifetime"] });
+    });
   });
 
   describe("getIssueInOrg", () => {
@@ -136,6 +154,27 @@ describe("issues.ts", () => {
 
       const result = await getIssueInOrg("test-org", "12345");
       expect(result.id).toBe("12345");
+    });
+
+    test("passes collapse query params when provided", async () => {
+      const issue = mockIssue();
+      globalThis.fetch = mockFetch(async (input, init) => {
+        const req = new Request(input!, init);
+        const url = new URL(req.url);
+        expect(url.pathname).toContain("/organizations/test-org/issues/12345/");
+        expect(url.searchParams.getAll("collapse")).toEqual([
+          "stats",
+          "filtered",
+        ]);
+        return new Response(JSON.stringify(issue), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+
+      await getIssueInOrg("test-org", "12345", {
+        collapse: ["stats", "filtered"],
+      });
     });
   });
 
@@ -155,6 +194,29 @@ describe("issues.ts", () => {
       expect(result.shortId).toBe("TEST-1");
     });
 
+    test("passes collapse query params when provided", async () => {
+      const issue = mockIssue({ shortId: "TEST-1" });
+      globalThis.fetch = mockFetch(async (input, init) => {
+        const req = new Request(input!, init);
+        const url = new URL(req.url);
+        expect(url.pathname).toContain("/shortids/TEST-1/");
+        expect(url.searchParams.getAll("collapse")).toEqual([
+          "stats",
+          "lifetime",
+          "filtered",
+          "unhandled",
+        ]);
+        return new Response(JSON.stringify({ group: issue }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+
+      await getIssueByShortId("test-org", "test-1", {
+        collapse: ["stats", "lifetime", "filtered", "unhandled"],
+      });
+    });
+
     test("throws ApiError 404 when group is missing", async () => {
       globalThis.fetch = mockFetch(
         async () =>
@@ -170,6 +232,27 @@ describe("issues.ts", () => {
       } catch (error) {
         expect(error).toBeInstanceOf(ApiError);
         expect((error as ApiError).status).toBe(404);
+      }
+    });
+
+    test("enriches 404 errors with actionable hints", async () => {
+      globalThis.fetch = mockFetch(
+        async () =>
+          new Response(JSON.stringify({ detail: "Not Found" }), {
+            status: 404,
+            headers: { "Content-Type": "application/json" },
+          })
+      );
+
+      try {
+        await getIssueByShortId("test-org", "CLI-G5");
+        expect(true).toBe(false); // Should not reach
+      } catch (error) {
+        expect(error).toBeInstanceOf(ApiError);
+        const apiErr = error as ApiError;
+        expect(apiErr.status).toBe(404);
+        expect(apiErr.message).toContain("CLI-G5");
+        expect(apiErr.message).toContain("test-org");
       }
     });
   });
