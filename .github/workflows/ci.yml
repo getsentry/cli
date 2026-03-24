@@ -400,6 +400,15 @@ jobs:
 
           echo "Pushed patch manifest: patch-${VERSION} (from ${PREV_VERSION})"
 
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Notify Linear nightly release
+        uses: linear/linear-release-action@v0
+        with:
+          access_key: ${{ secrets.LINEAR_NIGHTLY_RELEASE_KEY }}
+          version: ${{ needs.changes.outputs.nightly-version }}
+
   test-e2e:
     name: E2E Tests
     needs: [build-binary]

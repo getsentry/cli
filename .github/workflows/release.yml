@@ -42,3 +42,8 @@ jobs:
         version: ${{ inputs.version }}
         force: ${{ inputs.force }}
         merge_target: ${{ inputs.merge_target }}
+    - name: Notify Linear release
+      if: success()
+      uses: linear/linear-release-action@v0
+      with:
+        access_key: ${{ secrets.LINEAR_STABLE_RELEASE_KEY }}
