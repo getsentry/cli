@@ -1,0 +1,211 @@
+# Plan: Add `collapse` to Issue Detail API Calls
+
+## Goal
+Save 100-300ms per issue fetch by telling the Sentry API to skip computing `stats` (24h/30d time-series from Snuba) and other fields the CLI never uses in single-issue views.
+
+## Why This Works
+- **`issue view` human output** uses `count`, `userCount`, `firstSeen`, `lastSeen` — all top-level fields NOT inside `stats`. The `stats` field (sparkline time-series) is **never displayed** in detail view.
+- **`issue explain/plan`** only need the numeric issue ID for Seer — no issue data displayed at all.
+- **`issue list`** already has conditional collapse logic via `buildIssueListCollapse()` — no changes needed.
+- **JSON output** loses only the `stats` object. `count`/`userCount`/`firstSeen`/`lastSeen` remain. Acceptable since `issue list --json` already omits stats.
+
+## Problem: SDK Types Block Query Params
+The `@sentry/api` SDK's `retrieveAnIssue` and `resolveAShortId` both have `query?: never` in TypeScript types — can't pass `collapse`. The solution: switch these two functions from SDK calls to raw `apiRequestToRegion()` (same infra used by `getIssue()`, `apiRequest()`, etc.).
+
+## Files to Modify
+
+| File | Change |
+|------|--------|
+| `src/lib/api/issues.ts` | Add `ISSUE_DETAIL_COLLAPSE` constant; add optional `collapse` param to `getIssue`, `getIssueInOrg`, `getIssueByShortId`, `tryGetIssueByShortId`; switch `getIssueInOrg` + `getIssueByShortId` from SDK to `apiRequestToRegion` |
+| `src/commands/issue/utils.ts` | Import `ISSUE_DETAIL_COLLAPSE`; pass it to all ~9 issue fetch call sites |
+| `src/lib/api-client.ts` | Export `ISSUE_DETAIL_COLLAPSE` from barrel |
+| `test/lib/api-client.coverage.test.ts` | Update tests to verify `collapse` params in URLs |
+| `test/lib/issue-collapse.property.test.ts` | Add test for `ISSUE_DETAIL_COLLAPSE` constant |
+
+## Implementation Steps
+
+### Step 1: `src/lib/api/issues.ts` — Add constant + modify functions
+
+**New constant** (after `buildIssueListCollapse`):
+```typescript
+/**
+ * Collapse fields for single-issue detail endpoints.
+ *
+ * The CLI never displays stats (sparkline), lifetime (aggregate sub-object),
+ * filtered (filtered counts), or unhandled (unhandled sub-object) in detail
+ * views. Collapsing skips expensive Snuba queries, saving 100-300ms.
+ */
+export const ISSUE_DETAIL_COLLAPSE: IssueCollapseField[] = [
+  "stats", "lifetime", "filtered", "unhandled",
+];
+```
+
+**Modify `getIssue`** — add optional `collapse` param:
+```typescript
+export function getIssue(
+  issueId: string,
+  options?: { collapse?: IssueCollapseField[] }
+): Promise<SentryIssue> {
+  return apiRequest<SentryIssue>(`/issues/${issueId}/`, {
+    params: options?.collapse ? { collapse: options.collapse } : undefined,
+  });
+}
+```
+
+**Modify `getIssueInOrg`** — switch from SDK `retrieveAnIssue` to `apiRequestToRegion`:
+```typescript
+export async function getIssueInOrg(
+  orgSlug: string,
+  issueId: string,
+  options?: { collapse?: IssueCollapseField[] }
+): Promise<SentryIssue> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<SentryIssue>(
+    regionUrl,
+    `/organizations/${orgSlug}/issues/${issueId}/`,
+    { params: options?.collapse ? { collapse: options.collapse } : undefined }
+  );
+  return data;
+}
+```
+
+**Modify `getIssueByShortId`** — switch from SDK `resolveAShortId` to `apiRequestToRegion`:
+```typescript
+export async function getIssueByShortId(
+  orgSlug: string,
+  shortId: string,
+  options?: { collapse?: IssueCollapseField[] }
+): Promise<SentryIssue> {
+  const normalizedShortId = shortId.toUpperCase();
+  const regionUrl = await resolveOrgRegion(orgSlug);
+
+  let data: { group?: SentryIssue };
+  try {
+    const result = await apiRequestToRegion<{ group?: SentryIssue }>(
+      regionUrl,
+      `/organizations/${orgSlug}/shortids/${normalizedShortId}/`,
+      { params: options?.collapse ? { collapse: options.collapse } : undefined }
+    );
+    data = result.data;
+  } catch (error) {
+    // Preserve existing 404 enrichment logic (same as current)
+    if (error instanceof ApiError && error.status === 404) {
+      throw new ApiError(
+        `Short ID '${normalizedShortId}' not found in organization '${orgSlug}'`,
+        404,
+        [...existing hints...].join("\n  ")
+      );
+    }
+    throw error;
+  }
+
+  if (!data.group) {
+    throw new ApiError(
+      `Short ID ${normalizedShortId} resolved but no issue group returned`,
+      404, "Issue not found"
+    );
+  }
+  return data.group;
+}
+```
+
+**Modify `tryGetIssueByShortId`** — pass through options:
+```typescript
+export async function tryGetIssueByShortId(
+  orgSlug: string,
+  shortId: string,
+  options?: { collapse?: IssueCollapseField[] }
+): Promise<SentryIssue | null> {
+  try {
+    return await getIssueByShortId(orgSlug, shortId, options);
+  } catch (error) { ... }
+}
+```
+
+**Update imports:**
+- Add: `apiRequestToRegion` from `./infrastructure.js`
+- Add: `resolveOrgRegion` from `../region.js`
+- Remove: `resolveAShortId`, `retrieveAnIssue` from `@sentry/api`
+- Remove: `unwrapResult` from `./infrastructure.js` (only used by the two functions being switched; `listIssuesPaginated` uses `unwrapPaginatedResult`)
+
+### Step 2: `src/commands/issue/utils.ts` — Pass collapse to all call sites
+
+Add to imports:
+```typescript
+import { ISSUE_DETAIL_COLLAPSE, ... } from "../../lib/api-client.js";
+```
+
+Update ~9 call sites — each gets `{ collapse: ISSUE_DETAIL_COLLAPSE }`:
+1. `tryResolveFromAlias` → `getIssueByShortId(org, shortId, { collapse: ISSUE_DETAIL_COLLAPSE })`
+2. `resolveProjectSearchFallback` → `getIssueByShortId(matchedOrg, retryShortId, { collapse: ISSUE_DETAIL_COLLAPSE })`
+3. `resolveProjectSearch` DSN path → `getIssueByShortId(dsnTarget.org, fullShortId, { collapse: ISSUE_DETAIL_COLLAPSE })`
+4. `resolveProjectSearch` fan-out → `tryGetIssueByShortId(org.slug, fullShortId, { collapse: ISSUE_DETAIL_COLLAPSE })`
+5. `resolveSuffixOnly` → `getIssueByShortId(target.org, fullShortId, { collapse: ISSUE_DETAIL_COLLAPSE })`
+6. `resolveIssue` "explicit" case → `getIssueByShortId(org, fullShortId, { collapse: ISSUE_DETAIL_COLLAPSE })`
+7. `resolveIssue` "explicit-org-numeric" case → `getIssueInOrg(org, parsed.numericId, { collapse: ISSUE_DETAIL_COLLAPSE })`
+8. `resolveNumericIssue` → `getIssueInOrg(resolvedOrg.org, id, { collapse: ISSUE_DETAIL_COLLAPSE })` and `getIssue(id, { collapse: ISSUE_DETAIL_COLLAPSE })`
+9. `resolveSelector` → `listIssuesPaginated(orgSlug, "", { sort, perPage: 1, query: "is:unresolved", collapse: ISSUE_DETAIL_COLLAPSE })`
+
+### Step 3: `src/lib/api-client.ts` — Export new constant
+
+Add `ISSUE_DETAIL_COLLAPSE` to the issues.js barrel export.
+
+### Step 4: Update tests
+
+**`test/lib/api-client.coverage.test.ts`:**
+- `getIssue` test: add assertion that collapse params appear in URL when provided
+- `getIssueInOrg` test: already asserts URL contains `/organizations/test-org/issues/12345/` — should still pass. Add collapse param assertion.
+- `getIssueByShortId` test: already asserts URL contains `/shortids/TEST-1/` — should still pass. Add collapse param assertion.
+- Add new tests for each function called without collapse (backward compat).
+
+**`test/lib/issue-collapse.property.test.ts`:**
+- Add simple unit test asserting `ISSUE_DETAIL_COLLAPSE` contains exactly `["stats", "lifetime", "filtered", "unhandled"]` and never `"base"`.
+
+## Risk Assessment
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| `shortids` endpoint ignores `collapse` param | None — API ignores unknown query params | Harmless; savings only from endpoints that support it |
+| JSON `stats` field missing from `issue view --json` | Low — undocumented field, `issue list --json` already omits | `count`/`userCount` remain; acceptable |
+| SDK → raw request regression | Low — existing tests assert on URLs and response shapes | Tests mock `globalThis.fetch` which works identically for both |
+| `unwrapResult` removal from issues.ts | None — only used by the two functions being switched | Verify with grep before removing |
+
+## Verification
+
+```bash
+bun test test/lib/api-client.coverage.test.ts  # Updated issue tests pass
+bun test test/lib/issue-collapse.property.test.ts  # Collapse constant tests
+bun test test/commands/issue/utils.test.ts  # Issue resolution tests
+bun test  # Full suite
+bun run typecheck  # Type checking
+bun run lint  # Lint
+bun run check:skill  # SKILL.md (no command param changes)
+```
+
+Manual (if auth configured):
+```bash
+bun run dev -- issue view <issue-id>  # Human output unchanged
+bun run dev -- issue view <issue-id> --json | jq '.stats // "absent"'  # Should show "absent"
+bun run dev -- issue explain <issue-id>  # Should work unchanged
+```
+
+## Additional: AGENTS.md Knowledge Entry
+
+Add a new `### Gotcha` entry to the `## Long-term Knowledge` section in `AGENTS.md`:
+
+```
+* **@sentry/api SDK blocks query params on issue detail endpoints**: The `retrieveAnIssue` and `resolveAShortId` SDK functions have `query?: never` in their TypeScript types, preventing callers from passing `collapse` or other query parameters. The Sentry backend DOES accept `collapse` on these endpoints (same Django view base class as the list endpoint), but the OpenAPI spec omits it. The CLI works around this by using raw `apiRequestToRegion()` instead of the SDK for `getIssueInOrg` and `getIssueByShortId`. Upstream issue: https://github.com/getsentry/sentry-api-schema/issues/XXX (fill in after filing). If the schema is fixed, these functions can switch back to the SDK.
+```
+
+(The issue URL placeholder `XXX` gets filled in after the upstream issue is filed.)
+
+## Follow-up: Upstream Issue
+
+File an issue at https://github.com/getsentry/sentry-api-schema/ requesting that the OpenAPI spec for `retrieveAnIssue` (`GET /api/0/organizations/{org}/issues/{issue_id}/`) and `resolveAShortId` (`GET /api/0/organizations/{org}/shortids/{short_id}/`) declare the `collapse` query parameter (same type as on `listAnOrganizationSissues`). This would let SDK consumers pass `collapse` without switching to raw requests.
+
+Key points for the issue:
+- Both endpoints accept `collapse` at the server level (same Django view base class as the list endpoint)
+- The OpenAPI spec has `query?: never` for both, so the generated `@sentry/api` SDK blocks query params
+- The list endpoint (`listAnOrganizationSissues`) already declares `collapse` with values: `stats`, `lifetime`, `filtered`, `unhandled`, `base`
+- The Sentry web UI already skips stats on issue detail to save 100-300ms
+- SDK consumers currently must drop down to raw HTTP requests to pass `collapse` on detail endpoints
