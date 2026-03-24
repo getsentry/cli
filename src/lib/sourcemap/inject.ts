@@ -58,9 +58,8 @@ export async function injectDirectory(
       results.push({ jsPath, mapPath, injected: false, debugId: "(dry run)" });
       continue;
     }
-    const { debugId } = await injectDebugId(jsPath, mapPath);
-    // injectDebugId is idempotent — if already present it returns existing ID
-    results.push({ jsPath, mapPath, injected: true, debugId });
+    const { debugId, wasInjected } = await injectDebugId(jsPath, mapPath);
+    results.push({ jsPath, mapPath, injected: wasInjected, debugId });
   }
   return results;
 }

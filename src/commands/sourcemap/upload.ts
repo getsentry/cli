@@ -1,7 +1,9 @@
 /**
- * sentry sourcemap upload [org/project/]<dir>
+ * sentry sourcemap upload <dir>
  *
  * Upload sourcemaps to Sentry using debug-ID-based matching.
+ * Org/project are resolved via the standard cascade (DSN auto-detection,
+ * env vars, config defaults) — no slash-separated arg parsing needed.
  */
 
 import type { SentryContext } from "../../context.js";
@@ -9,10 +11,6 @@ import {
   type ArtifactFile,
   uploadSourcemaps,
 } from "../../lib/api/sourcemaps.js";
-import {
-  parseOrgProjectArg,
-  parseSlashSeparatedArg,
-} from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
 import { mdKvTable, renderMarkdown } from "../../lib/formatters/markdown.js";
@@ -22,9 +20,13 @@ import { injectDirectory } from "../../lib/sourcemap/inject.js";
 
 /** Result type for the upload command. */
 type UploadCommandResult = {
+  /** Organization slug. */
   org: string;
+  /** Project slug. */
   project: string;
+  /** Release version, if provided. */
   release?: string;
+  /** Number of file pairs uploaded. */
   filesUploaded: number;
 };
 
@@ -41,7 +43,7 @@ function formatUploadResult(data: UploadCommandResult): string {
   return renderMarkdown(mdKvTable(rows));
 }
 
-const USAGE_HINT = "sentry sourcemap upload [<org>/<project>/]<directory>";
+const USAGE_HINT = "sentry sourcemap upload <directory>";
 
 export const uploadCommand = buildCommand({
   docs: {
@@ -49,10 +51,10 @@ export const uploadCommand = buildCommand({
     fullDescription:
       "Upload JavaScript sourcemaps and source files to Sentry using " +
       "debug-ID-based matching.\n\n" +
-      "Files must have debug IDs injected first (via `sentry sourcemap inject`).\n\n" +
+      "Files must have debug IDs injected first (via `sentry sourcemap inject`).\n" +
+      "Org/project are auto-detected from DSN, env vars, or config defaults.\n\n" +
       "Usage:\n" +
       "  sentry sourcemap upload ./dist\n" +
-      "  sentry sourcemap upload my-org/my-project/./dist\n" +
       "  sentry sourcemap upload ./dist --release 1.0.0\n" +
       "  sentry sourcemap upload ./dist --url-prefix '~/static/js/'",
   },
@@ -64,10 +66,9 @@ export const uploadCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
-          brief:
-            "Directory containing sourcemaps (optionally prefixed with org/project/)",
+          brief: "Directory containing sourcemaps",
           parse: String,
-          placeholder: "org/project/directory",
+          placeholder: "directory",
         },
       ],
     },
@@ -90,41 +91,23 @@ export const uploadCommand = buildCommand({
   async *func(
     this: SentryContext,
     flags: { release?: string; "url-prefix"?: string },
-    target: string
+    dir: string
   ) {
-    // Parse org/project from the target argument
-    const { id: dir, targetArg } = parseSlashSeparatedArg(
-      target,
-      "Directory",
-      USAGE_HINT
-    );
-    const parsed = parseOrgProjectArg(targetArg);
-
-    let org: string;
-    let project: string;
-
-    if (parsed.type === "explicit") {
-      org = parsed.org;
-      project = parsed.project;
-    } else {
-      const resolved = await resolveOrgAndProject({
-        cwd: this.cwd,
-        usageHint: USAGE_HINT,
-      });
-      if (!resolved) {
-        throw new ContextError("Organization and project", USAGE_HINT);
-      }
-      org = resolved.org;
-      project = resolved.project;
+    // Resolve org/project via the standard cascade
+    const resolved = await resolveOrgAndProject({
+      cwd: this.cwd,
+      usageHint: USAGE_HINT,
+    });
+    if (!resolved) {
+      throw new ContextError("Organization and project", USAGE_HINT);
     }
+    const { org, project } = resolved;
 
-    // Discover files with debug IDs
+    // Discover files with debug IDs (also injects any missing ones)
     const results = await injectDirectory(dir);
-    const injectedFiles = results.filter(
-      (r) => r.injected || r.debugId !== "(dry run)"
-    );
+    const filesWithDebugIds = results.filter((r) => r.debugId !== "(dry run)");
 
-    if (injectedFiles.length === 0) {
+    if (filesWithDebugIds.length === 0) {
       yield new CommandOutput<UploadCommandResult>({
         org,
         project,
@@ -132,14 +115,14 @@ export const uploadCommand = buildCommand({
         filesUploaded: 0,
       });
       return {
-        hint: "No files with debug IDs found. Run `sentry sourcemap inject` first.",
+        hint: "No JS + sourcemap pairs found. Run `sentry sourcemap inject` first.",
       };
     }
 
     const urlPrefix = flags["url-prefix"] ?? "~/";
 
     // Build artifact file list
-    const artifactFiles: ArtifactFile[] = injectedFiles.flatMap(
+    const artifactFiles: ArtifactFile[] = filesWithDebugIds.flatMap(
       ({ jsPath, mapPath, debugId }) => {
         const jsName = jsPath.split("/").pop() ?? "bundle.js";
         const mapName = mapPath.split("/").pop() ?? "bundle.js.map";
@@ -172,7 +155,7 @@ export const uploadCommand = buildCommand({
       org,
       project,
       release: flags.release,
-      filesUploaded: injectedFiles.length,
+      filesUploaded: filesWithDebugIds.length,
     });
   },
 });

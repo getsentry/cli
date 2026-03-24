@@ -57,7 +57,7 @@ const PLURAL_TO_SINGULAR: Record<string, string> = {
   repos: "repo",
   teams: "team",
   logs: "log",
-  sourcemaps: "sourcemap",
+
   spans: "span",
   traces: "trace",
   trials: "trial",
@@ -78,6 +78,7 @@ export const routes = buildRouteMap({
     event: eventRoute,
     log: logRoute,
     sourcemap: sourcemapRoute,
+    sourcemaps: sourcemapRoute,
     span: spanRoute,
     trace: traceRoute,
     trial: trialRoute,

@@ -74,12 +74,12 @@ export function getDebugIdSnippet(debugId: string): string {
  *
  * @param jsPath - Path to the JavaScript file
  * @param mapPath - Path to the companion `.map` file
- * @returns The debug ID that was injected (or already present)
+ * @returns The debug ID and whether it was newly injected
  */
 export async function injectDebugId(
   jsPath: string,
   mapPath: string
-): Promise<{ debugId: string }> {
+): Promise<{ debugId: string; wasInjected: boolean }> {
   const [jsContent, mapContent] = await Promise.all([
     readFile(jsPath, "utf-8"),
     readFile(mapPath, "utf-8"),
@@ -88,7 +88,7 @@ export async function injectDebugId(
   // Idempotent: if the JS file already has a debug ID, extract and return it
   const existingMatch = jsContent.match(EXISTING_DEBUGID_RE);
   if (existingMatch?.[1]) {
-    return { debugId: existingMatch[1] };
+    return { debugId: existingMatch[1], wasInjected: false };
   }
 
   // Generate debug ID from the sourcemap content (deterministic)
@@ -132,5 +132,5 @@ export async function injectDebugId(
     writeFile(mapPath, JSON.stringify(map)),
   ]);
 
-  return { debugId };
+  return { debugId, wasInjected: true };
 }
