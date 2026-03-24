@@ -114,6 +114,7 @@ export const routes = buildRouteMap({
       spans: true,
       traces: true,
       trials: true,
+      sourcemaps: true,
       whoami: true,
     },
   },

@@ -6,6 +6,7 @@
  * env vars, config defaults) — no slash-separated arg parsing needed.
  */
 
+import { relative, resolve } from "node:path";
 import type { SentryContext } from "../../context.js";
 import {
   type ArtifactFile,
@@ -121,24 +122,26 @@ export const uploadCommand = buildCommand({
 
     const urlPrefix = flags["url-prefix"] ?? "~/";
 
-    // Build artifact file list
+    // Build artifact file list with paths relative to the upload directory
+    const resolvedDir = resolve(dir);
     const artifactFiles: ArtifactFile[] = filesWithDebugIds.flatMap(
       ({ jsPath, mapPath, debugId }) => {
-        const jsName = jsPath.split("/").pop() ?? "bundle.js";
-        const mapName = mapPath.split("/").pop() ?? "bundle.js.map";
+        const jsRelative = relative(resolvedDir, jsPath);
+        const mapRelative = relative(resolvedDir, mapPath);
+        const mapBasename = mapPath.split("/").pop() ?? "bundle.js.map";
         return [
           {
             path: jsPath,
             debugId,
             type: "minified_source" as const,
-            url: `${urlPrefix}${jsName}`,
-            sourcemapFilename: mapName,
+            url: `${urlPrefix}${jsRelative}`,
+            sourcemapFilename: mapBasename,
           },
           {
             path: mapPath,
             debugId,
             type: "source_map" as const,
-            url: `${urlPrefix}${mapName}`,
+            url: `${urlPrefix}${mapRelative}`,
           },
         ];
       }
