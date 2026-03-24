@@ -312,15 +312,6 @@ Manage sourcemaps
 
 → Full flags and examples: `references/sourcemap.md`
 
-### Sourcemaps
-
-Manage sourcemaps
-
-- `sentry sourcemaps inject <directory>` — Inject debug IDs into JavaScript files and sourcemaps
-- `sentry sourcemaps upload <directory>` — Upload sourcemaps to Sentry
-
-→ Full flags and examples: `references/sourcemaps.md`
-
 ### Span
 
 List and view spans in projects or traces
