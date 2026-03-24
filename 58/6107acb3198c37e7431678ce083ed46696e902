@@ -1,0 +1,71 @@
+# Dashboard Chart Rendering — Implementation Plan
+
+## Overview
+
+Rich terminal chart rendering for `sentry dashboard view`, transforming
+Sentry dashboard widget data into ASCII/Unicode visualizations that fit
+the terminal width.
+
+## Key Design Decisions
+
+### Big Number Fonts
+- 4-tier auto-scaling: XL (7×7) → LG (5×5) → SM (3×3) → single-line
+- Font selection based on available width AND content height
+- Vertical centering with ceil() bias (content sits slightly lower,
+  looks better because title border draws the eye upward)
+- Glyph fonts support digits 0-9 plus K and M suffixes
+
+### Bar Charts — Color & Fill
+- Color mode: SERIES_PALETTE (6 colors: magenta, cyan, yellow, green,
+  blue, red) assigned per bar/series. "Other" always muted gray.
+- Plain mode: PLAIN_FILLS (█, ▓, ▒) descending density fills.
+  "Other" always gets ░ (lightest).
+- Both categorical and stacked time-series bars use this system.
+- Horizontal bars also use per-series colors.
+- Legend markers: colored ■ in color mode, fill char in plain mode.
+
+### Categorical Bar Labels
+- Two-mode system after iterating through 3 approaches:
+  1. ❌ Vertical text (one char per line) — unreadable kerning
+  2. ❌ Horizontal wrapped text — unreadable for long labels
+  3. ✅ Direct labels for short (fit barWidth) + letter-keyed legend for long
+
+### Y-Axis
+- formatTickLabel() using Intl.NumberFormat compact notation (321K, 1.5M)
+- 3 tick positions: top (max), middle (max/2), bottom (0)
+- Gutter width calculated dynamically from formatted max value
+
+### Time-Axis
+- Format adapts to span: <2d → HH:MM, 2-30d → MM/DD, >30d → Mon DD
+- ┬ tick marks on axis line connecting to labels below
+- Labels evenly spaced, clamped to prevent right-edge overflow
+- Timestamps preserved through aggregation and downsampling pipelines
+
+### Multi-Series Stacked Bars
+- aggregateTimeseriesValues sums all series per time bucket
+- renderStackedTimeBarRows pre-computes cumulative heights per column
+- buildStackedColumn walks segments to assign correct color/fill per row
+- buildSeriesLegend shows colored ■ / fill-char markers with labels
+- Single-series widgets use the simpler single-color renderer
+
+### Layout
+- Framebuffer grid compositing matching Sentry's x/y/w/h widget layout
+- Dynamic terminal width via process.stdout.columns (min 80, fallback 100)
+- "Other" excluded from bar chart scale normalization to prevent
+  dominating all real bars
+
+## Iteration History
+
+1. Started with sparklines and basic number display
+2. Added framebuffer grid, proper data parsing, env/project filters
+3. Added rounded borders, bar legends, adaptive big numbers
+4. Added vertical bars, sorted categories, Y-axis ticks
+5. Added large (5×5) then XL (7×7) big number fonts
+6. Added compact Y-axis tick labels (formatTickLabel)
+7. Tried vertical text labels above bars — too unreadable (kerning)
+8. Tried horizontal wrapped text above bars — still unreadable for long labels
+9. Settled on two-mode: direct labels for short, letter+legend for long
+10. Added time-axis labels with ┬ tick marks
+11. Added bottom axis lines on all charts
+12. Added multi-series aggregation and stacked multi-color bars
+13. Added per-bar colors (SERIES_PALETTE) and plain-mode fills (PLAIN_FILLS)
