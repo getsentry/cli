@@ -205,7 +205,7 @@ describe("listCommand.func — explicit org/project", () => {
 
   beforeEach(async () => {
     listProjectTeamsSpy = spyOn(apiClient, "listProjectTeams");
-    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
@@ -248,7 +248,7 @@ describe("listCommand.func — auto-detect mode", () => {
     getDefaultOrganizationSpy = spyOn(defaults, "getDefaultOrganization");
     resolveAllTargetsSpy = spyOn(resolveTarget, "resolveAllTargets");
 
-    getDefaultOrganizationSpy.mockResolvedValue(null);
+    getDefaultOrganizationSpy.mockReturnValue(null);
     resolveAllTargetsSpy.mockResolvedValue({ targets: [] });
   });
 
@@ -260,7 +260,7 @@ describe("listCommand.func — auto-detect mode", () => {
   });
 
   test("uses default organization when no org provided", async () => {
-    getDefaultOrganizationSpy.mockResolvedValue("default-org");
+    getDefaultOrganizationSpy.mockReturnValue("default-org");
     listTeamsSpy.mockResolvedValue(sampleTeams);
 
     const { context } = createMockContext();
@@ -298,7 +298,7 @@ describe("listCommand.func — auto-detect mode", () => {
   });
 
   test("outputs JSON in auto-detect mode", async () => {
-    getDefaultOrganizationSpy.mockResolvedValue("auto-org");
+    getDefaultOrganizationSpy.mockReturnValue("auto-org");
     listTeamsSpy.mockResolvedValue(sampleTeams);
 
     const { context, stdoutWrite } = createMockContext();
@@ -312,7 +312,7 @@ describe("listCommand.func — auto-detect mode", () => {
   });
 
   test("shows 'No teams found' in auto-detect when empty and single org", async () => {
-    getDefaultOrganizationSpy.mockResolvedValue("empty-org");
+    getDefaultOrganizationSpy.mockReturnValue("empty-org");
     listTeamsSpy.mockResolvedValue([]);
 
     const { context, stdoutWrite } = createMockContext();
@@ -350,7 +350,7 @@ describe("listCommand.func — org-all mode (cursor pagination)", () => {
 
     setPaginationCursorSpy.mockReturnValue(undefined);
     clearPaginationCursorSpy.mockReturnValue(undefined);
-    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {

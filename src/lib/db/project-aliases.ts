@@ -4,6 +4,7 @@
 
 import type { ProjectAliasEntry } from "../../types/index.js";
 import { getDatabase, maybeCleanupCaches } from "./index.js";
+import { touchCacheEntry } from "./utils.js";
 
 type ProjectAliasRow = {
   alias: string;
@@ -16,20 +17,19 @@ type ProjectAliasRow = {
 
 function touchAliasEntries(): void {
   const db = getDatabase();
+  // biome-ignore lint/plugin: global touch — updates ALL rows, not a single keyed entry
   db.query("UPDATE project_aliases SET last_accessed = ?").run(Date.now());
 }
 
 /** Set project aliases, replacing all existing ones. */
-export async function setProjectAliases(
+export function setProjectAliases(
   aliases: Record<string, ProjectAliasEntry>,
   dsnFingerprint?: string
-): Promise<void> {
+): void {
   const db = getDatabase();
   const now = Date.now();
 
-  db.exec("BEGIN TRANSACTION");
-
-  try {
+  db.transaction(() => {
     db.query("DELETE FROM project_aliases").run();
 
     const insertStmt = db.query(`
@@ -48,19 +48,14 @@ export async function setProjectAliases(
         now
       );
     }
-
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  })();
 
   maybeCleanupCaches();
 }
 
-export async function getProjectAliases(): Promise<
-  Record<string, ProjectAliasEntry> | undefined
-> {
+export function getProjectAliases():
+  | Record<string, ProjectAliasEntry>
+  | undefined {
   const db = getDatabase();
 
   const rows = db
@@ -85,10 +80,10 @@ export async function getProjectAliases(): Promise<
 }
 
 /** Get project by alias. Validates DSN fingerprint if both current and cached are present. */
-export async function getProjectByAlias(
+export function getProjectByAlias(
   alias: string,
   currentFingerprint?: string
-): Promise<ProjectAliasEntry | undefined> {
+): ProjectAliasEntry | undefined {
   const db = getDatabase();
 
   const row = db
@@ -108,10 +103,7 @@ export async function getProjectByAlias(
     return;
   }
 
-  db.query("UPDATE project_aliases SET last_accessed = ? WHERE alias = ?").run(
-    Date.now(),
-    alias.toLowerCase()
-  );
+  touchCacheEntry("project_aliases", "alias", alias.toLowerCase());
 
   return {
     orgSlug: row.org_slug,
@@ -119,7 +111,7 @@ export async function getProjectByAlias(
   };
 }
 
-export async function clearProjectAliases(): Promise<void> {
+export function clearProjectAliases(): void {
   const db = getDatabase();
   db.query("DELETE FROM project_aliases").run();
 }

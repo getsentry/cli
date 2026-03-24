@@ -104,9 +104,9 @@ function collectTokenInfo(
 /**
  * Collect default org/project into the data structure.
  */
-async function collectDefaults(): Promise<AuthStatusData["defaults"]> {
-  const org = await getDefaultOrganization();
-  const project = await getDefaultProject();
+function collectDefaults(): AuthStatusData["defaults"] {
+  const org = getDefaultOrganization();
+  const project = getDefaultProject();
 
   if (!(org || project)) {
     return;
@@ -160,7 +160,7 @@ export const statusCommand = buildCommand({
     applyFreshFlag(flags);
 
     const auth = getAuthConfig();
-    const authenticated = await isAuthenticated();
+    const authenticated = isAuthenticated();
     const fromEnv = auth ? isEnvSource(auth.source) : false;
 
     if (!authenticated) {
@@ -186,7 +186,7 @@ export const statusCommand = buildCommand({
       configPath: fromEnv ? undefined : getDbPath(),
       user,
       token: collectTokenInfo(auth, flags["show-token"]),
-      defaults: await collectDefaults(),
+      defaults: collectDefaults(),
       verification: await verifyCredentials(),
     };
 

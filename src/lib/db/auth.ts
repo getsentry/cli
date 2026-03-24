@@ -173,8 +173,8 @@ export async function clearAuth(): Promise<void> {
   }
 }
 
-export async function isAuthenticated(): Promise<boolean> {
-  const token = await getAuthToken();
+export function isAuthenticated(): boolean {
+  const token = getAuthToken();
   return !!token;
 }
 

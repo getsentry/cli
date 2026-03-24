@@ -35,7 +35,7 @@ async function seedOrgs(
     orgId: o.slug,
     orgName: o.name,
   }));
-  await setOrgRegions(entries);
+  setOrgRegions(entries);
 }
 
 async function seedProjects(
@@ -48,7 +48,7 @@ async function seedProjects(
   }[]
 ): Promise<void> {
   for (const p of projects) {
-    await setCachedProject(p.orgId, p.projectId, {
+    setCachedProject(p.orgId, p.projectId, {
       orgSlug: p.orgSlug,
       orgName: p.orgSlug,
       projectSlug: p.projectSlug,
@@ -61,20 +61,20 @@ async function seedProjects(
 
 describe("getCompletions: context detection", () => {
   test("returns empty for unknown commands", async () => {
-    const result = await getCompletions(["unknown", "cmd"], "");
+    const result = getCompletions(["unknown", "cmd"], "");
     expect(result).toEqual([]);
   });
 
   test("returns org/project completions for issue list", async () => {
     await seedOrgs([{ slug: "my-org", name: "My Organization" }]);
-    const result = await getCompletions(["issue", "list"], "");
+    const result = getCompletions(["issue", "list"], "");
     expect(result.length).toBeGreaterThan(0);
     expect(result[0].value).toBe("my-org/");
   });
 
   test("returns org-only completions for org view", async () => {
     await seedOrgs([{ slug: "my-org", name: "My Organization" }]);
-    const result = await getCompletions(["org", "view"], "");
+    const result = getCompletions(["org", "view"], "");
     expect(result.length).toBeGreaterThan(0);
     expect(result[0].value).toBe("my-org"); // no trailing slash
   });
@@ -82,26 +82,26 @@ describe("getCompletions: context detection", () => {
   test("still provides completions after boolean flags", async () => {
     await seedOrgs([{ slug: "my-org", name: "My Organization" }]);
     // After --verbose (a boolean flag), completions should still work
-    const result = await getCompletions(["issue", "list", "--verbose"], "");
+    const result = getCompletions(["issue", "list", "--verbose"], "");
     expect(result.length).toBeGreaterThan(0);
   });
 
   test("returns org/project completions for project list", async () => {
     await seedOrgs([{ slug: "test-org", name: "Test" }]);
-    const result = await getCompletions(["project", "list"], "test");
+    const result = getCompletions(["project", "list"], "test");
     expect(result.some((c) => c.value === "test-org/")).toBe(true);
   });
 
   test("returns org-only completions for team list", async () => {
     await seedOrgs([{ slug: "acme", name: "Acme Inc" }]);
-    const result = await getCompletions(["team", "list"], "");
+    const result = getCompletions(["team", "list"], "");
     expect(result.some((c) => c.value === "acme")).toBe(true);
   });
 });
 
 describe("completeOrgSlugs", () => {
   test("returns empty when no orgs cached", async () => {
-    const result = await completeOrgSlugs("");
+    const result = completeOrgSlugs("");
     expect(result).toEqual([]);
   });
 
@@ -110,7 +110,7 @@ describe("completeOrgSlugs", () => {
       { slug: "alpha", name: "Alpha Org" },
       { slug: "beta", name: "Beta Org" },
     ]);
-    const result = await completeOrgSlugs("");
+    const result = completeOrgSlugs("");
     expect(result).toHaveLength(2);
     expect(result.map((c) => c.value).sort()).toEqual(["alpha", "beta"]);
   });
@@ -120,7 +120,7 @@ describe("completeOrgSlugs", () => {
       { slug: "sentry", name: "Sentry" },
       { slug: "other", name: "Other" },
     ]);
-    const result = await completeOrgSlugs("sen");
+    const result = completeOrgSlugs("sen");
     expect(result).toHaveLength(1);
     expect(result[0].value).toBe("sentry");
     expect(result[0].description).toBe("Sentry");
@@ -132,7 +132,7 @@ describe("completeOrgSlugs", () => {
       { slug: "other", name: "Other" },
     ]);
     // "senry" → "sentry" (distance 1, within threshold)
-    const result = await completeOrgSlugs("senry");
+    const result = completeOrgSlugs("senry");
     expect(result.some((c) => c.value === "sentry")).toBe(true);
   });
 });
@@ -140,7 +140,7 @@ describe("completeOrgSlugs", () => {
 describe("completeOrgSlashProject", () => {
   test("no slash returns org slugs with trailing slash + aliases", async () => {
     await seedOrgs([{ slug: "my-org", name: "My Org" }]);
-    const result = await completeOrgSlashProject("");
+    const result = completeOrgSlashProject("");
     expect(result.some((c) => c.value === "my-org/")).toBe(true);
   });
 
@@ -163,7 +163,7 @@ describe("completeOrgSlashProject", () => {
       },
     ]);
 
-    const result = await completeOrgSlashProject("my-org/");
+    const result = completeOrgSlashProject("my-org/");
     expect(result.map((c) => c.value).sort()).toEqual([
       "my-org/backend",
       "my-org/frontend",
@@ -183,14 +183,14 @@ describe("completeOrgSlashProject", () => {
     ]);
 
     // "senry/" has a typo in the org — should fuzzy-resolve to "sentry"
-    const result = await completeOrgSlashProject("senry/");
+    const result = completeOrgSlashProject("senry/");
     expect(result).toHaveLength(1);
     expect(result[0].value).toBe("sentry/cli");
   });
 
   test("with unresolvable org slug before slash returns empty", async () => {
     await seedOrgs([{ slug: "sentry", name: "Sentry" }]);
-    const result = await completeOrgSlashProject("zzzzzzz/");
+    const result = completeOrgSlashProject("zzzzzzz/");
     expect(result).toEqual([]);
   });
 
@@ -213,7 +213,7 @@ describe("completeOrgSlashProject", () => {
       },
     ]);
 
-    const result = await completeOrgSlashProject("my-org/fro");
+    const result = completeOrgSlashProject("my-org/fro");
     expect(result).toHaveLength(1);
     expect(result[0].value).toBe("my-org/frontend");
   });
@@ -221,7 +221,7 @@ describe("completeOrgSlashProject", () => {
 
 describe("completeProjectSlugs", () => {
   test("returns empty when no projects cached for org", async () => {
-    const result = await completeProjectSlugs("", "nonexistent");
+    const result = completeProjectSlugs("", "nonexistent");
     expect(result).toEqual([]);
   });
 
@@ -243,7 +243,7 @@ describe("completeProjectSlugs", () => {
       },
     ]);
 
-    const result = await completeProjectSlugs("we", "my-org");
+    const result = completeProjectSlugs("we", "my-org");
     expect(result).toHaveLength(1);
     expect(result[0].value).toBe("my-org/web");
     expect(result[0].description).toBe("Web App");
@@ -252,12 +252,12 @@ describe("completeProjectSlugs", () => {
 
 describe("completeAliases", () => {
   test("returns empty when no aliases exist", async () => {
-    const result = await completeAliases("");
+    const result = completeAliases("");
     expect(result).toEqual([]);
   });
 
   test("returns matching aliases", async () => {
-    await setProjectAliases(
+    setProjectAliases(
       {
         a: { orgSlug: "my-org", projectSlug: "frontend" },
         b: { orgSlug: "my-org", projectSlug: "backend" },
@@ -265,7 +265,7 @@ describe("completeAliases", () => {
       "fingerprint"
     );
 
-    const result = await completeAliases("");
+    const result = completeAliases("");
     expect(result).toHaveLength(2);
 
     const aCompletion = result.find((c) => c.value === "a");
@@ -274,7 +274,7 @@ describe("completeAliases", () => {
   });
 
   test("filters aliases by prefix (exact match ranks first)", async () => {
-    await setProjectAliases(
+    setProjectAliases(
       {
         a: { orgSlug: "org", projectSlug: "proj-a" },
         b: { orgSlug: "org", projectSlug: "proj-b" },
@@ -283,7 +283,7 @@ describe("completeAliases", () => {
       "fingerprint"
     );
 
-    const result = await completeAliases("a");
+    const result = completeAliases("a");
     // "a" is exact match, "abc" is prefix match, "b" is fuzzy match
     expect(result[0].value).toBe("a"); // exact match first
     expect(result.some((c) => c.value === "abc")).toBe(true); // prefix match

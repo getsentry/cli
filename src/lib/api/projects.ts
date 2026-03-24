@@ -86,7 +86,7 @@ export async function listProjects(orgSlug: string): Promise<SentryProject[]> {
   // Populate project cache for shell completions (best-effort).
   // Mirrors how listOrganizations() calls setOrgRegions().
   try {
-    const orgs = await getCachedOrganizations();
+    const orgs = getCachedOrganizations();
     const orgName = orgs.find((o) => o.slug === orgSlug)?.name ?? orgSlug;
     cacheProjectsForOrg(orgSlug, orgName, allResults);
   } catch {

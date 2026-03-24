@@ -38,7 +38,7 @@ export const logoutCommand = buildCommand({
     flags: {},
   },
   async *func(this: SentryContext) {
-    if (!(await isAuthenticated())) {
+    if (!isAuthenticated()) {
       return yield new CommandOutput({
         loggedOut: false,
         message: "Not currently authenticated.",

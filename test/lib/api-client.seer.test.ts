@@ -24,7 +24,7 @@ beforeEach(async () => {
   // Set up auth token (manual token, no refresh)
   await setAuthToken("test-token");
   // Pre-populate region cache to avoid region resolution API calls
-  await setOrgRegion("test-org", "https://sentry.io");
+  setOrgRegion("test-org", "https://sentry.io");
 });
 
 afterEach(() => {

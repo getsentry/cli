@@ -4,7 +4,7 @@
 
 import type { CachedProject } from "../../types/index.js";
 import { getDatabase, maybeCleanupCaches } from "./index.js";
-import { runUpsert } from "./utils.js";
+import { runUpsert, touchCacheEntry } from "./utils.js";
 
 type ProjectCacheRow = {
   cache_key: string;
@@ -36,20 +36,9 @@ function rowToCachedProject(row: ProjectCacheRow): CachedProject {
   };
 }
 
-function touchCacheEntry(cacheKey: string): void {
+/** Shared get implementation — looks up by pre-computed cache key. */
+function getByKey(key: string): CachedProject | undefined {
   const db = getDatabase();
-  db.query(
-    "UPDATE project_cache SET last_accessed = ? WHERE cache_key = ?"
-  ).run(Date.now(), cacheKey);
-}
-
-export async function getCachedProject(
-  orgId: string,
-  projectId: string
-): Promise<CachedProject | undefined> {
-  const db = getDatabase();
-  const key = projectCacheKey(orgId, projectId);
-
   const row = db
     .query("SELECT * FROM project_cache WHERE cache_key = ?")
     .get(key) as ProjectCacheRow | undefined;
@@ -58,83 +47,62 @@ export async function getCachedProject(
     return;
   }
 
-  touchCacheEntry(key);
+  touchCacheEntry("project_cache", "cache_key", key);
   return rowToCachedProject(row);
 }
 
-export async function setCachedProject(
+/** Shared set implementation — writes by pre-computed cache key. */
+function setByKey(key: string, info: Omit<CachedProject, "cachedAt">): void {
+  const db = getDatabase();
+  const now = Date.now();
+
+  runUpsert(
+    db,
+    "project_cache",
+    {
+      cache_key: key,
+      org_slug: info.orgSlug,
+      org_name: info.orgName,
+      project_slug: info.projectSlug,
+      project_name: info.projectName,
+      project_id: info.projectId ?? null,
+      cached_at: now,
+      last_accessed: now,
+    },
+    ["cache_key"]
+  );
+
+  maybeCleanupCaches();
+}
+
+export function getCachedProject(
+  orgId: string,
+  projectId: string
+): CachedProject | undefined {
+  return getByKey(projectCacheKey(orgId, projectId));
+}
+
+export function setCachedProject(
   orgId: string,
   projectId: string,
   info: Omit<CachedProject, "cachedAt">
-): Promise<void> {
-  const db = getDatabase();
-  const key = projectCacheKey(orgId, projectId);
-  const now = Date.now();
-
-  runUpsert(
-    db,
-    "project_cache",
-    {
-      cache_key: key,
-      org_slug: info.orgSlug,
-      org_name: info.orgName,
-      project_slug: info.projectSlug,
-      project_name: info.projectName,
-      project_id: info.projectId ?? null,
-      cached_at: now,
-      last_accessed: now,
-    },
-    ["cache_key"]
-  );
-
-  maybeCleanupCaches();
+): void {
+  setByKey(projectCacheKey(orgId, projectId), info);
 }
 
 /** Get cached project by DSN public key (for self-hosted or SaaS DSNs without org ID). */
-export async function getCachedProjectByDsnKey(
+export function getCachedProjectByDsnKey(
   publicKey: string
-): Promise<CachedProject | undefined> {
-  const db = getDatabase();
-  const key = dsnCacheKey(publicKey);
-
-  const row = db
-    .query("SELECT * FROM project_cache WHERE cache_key = ?")
-    .get(key) as ProjectCacheRow | undefined;
-
-  if (!row) {
-    return;
-  }
-
-  touchCacheEntry(key);
-  return rowToCachedProject(row);
+): CachedProject | undefined {
+  return getByKey(dsnCacheKey(publicKey));
 }
 
 /** Cache project by DSN public key (for self-hosted or SaaS DSNs without org ID). */
-export async function setCachedProjectByDsnKey(
+export function setCachedProjectByDsnKey(
   publicKey: string,
   info: Omit<CachedProject, "cachedAt">
-): Promise<void> {
-  const db = getDatabase();
-  const key = dsnCacheKey(publicKey);
-  const now = Date.now();
-
-  runUpsert(
-    db,
-    "project_cache",
-    {
-      cache_key: key,
-      org_slug: info.orgSlug,
-      org_name: info.orgName,
-      project_slug: info.projectSlug,
-      project_name: info.projectName,
-      project_id: info.projectId ?? null,
-      cached_at: now,
-      last_accessed: now,
-    },
-    ["cache_key"]
-  );
-
-  maybeCleanupCaches();
+): void {
+  setByKey(dsnCacheKey(publicKey), info);
 }
 
 /**
@@ -145,9 +113,9 @@ export async function setCachedProjectByDsnKey(
  *
  * @param orgSlug - The organization slug to filter by
  */
-export async function getCachedProjectsForOrg(
+export function getCachedProjectsForOrg(
   orgSlug: string
-): Promise<{ projectSlug: string; projectName: string }[]> {
+): { projectSlug: string; projectName: string }[] {
   const db = getDatabase();
   // Use MAX(cached_at) to deterministically pick the most recently cached
   // project_name when the same project appears under different cache keys
@@ -212,7 +180,7 @@ export function cacheProjectsForOrg(
   maybeCleanupCaches();
 }
 
-export async function clearProjectCache(): Promise<void> {
+export function clearProjectCache(): void {
   const db = getDatabase();
   db.query("DELETE FROM project_cache").run();
 }

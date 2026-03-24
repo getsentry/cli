@@ -833,7 +833,7 @@ describe("findProjectsBySlug", () => {
 
     // Seed org_regions cache with full org data (slug, id, name, region)
     // so listOrganizations() returns from cache without HTTP calls.
-    await setOrgRegions([
+    setOrgRegions([
       {
         slug: "acme",
         regionUrl: DEFAULT_SENTRY_URL,
@@ -1091,7 +1091,7 @@ describe("findEventAcrossOrgs", () => {
 
 describe("listTeamsPaginated", () => {
   beforeEach(async () => {
-    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   test("returns teams and nextCursor from Link header", async () => {
@@ -1168,7 +1168,7 @@ describe("listTeamsPaginated", () => {
 
 describe("listRepositoriesPaginated", () => {
   beforeEach(async () => {
-    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   test("returns repos and nextCursor from Link header", async () => {
@@ -1225,7 +1225,7 @@ describe("listRepositoriesPaginated", () => {
 
 describe("listIssuesPaginated", () => {
   beforeEach(async () => {
-    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   test("returns issues and nextCursor from Link header", async () => {
@@ -1418,7 +1418,7 @@ describe("listTransactions", () => {
   };
 
   beforeEach(async () => {
-    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   test("returns data and nextCursor from Link header", async () => {
@@ -1555,7 +1555,7 @@ describe("listTraceLogs", () => {
   };
 
   beforeEach(async () => {
-    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   test("returns trace log entries", async () => {
@@ -1734,7 +1734,7 @@ describe("getLogs", () => {
   }
 
   beforeEach(async () => {
-    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   test("returns matching log entries", async () => {

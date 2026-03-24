@@ -342,7 +342,7 @@ describe("fetchProjectId", () => {
 
   test("returns numeric project ID on success", async () => {
     await setAuthToken("test-token");
-    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
       if (req.url.includes("/api/0/projects/test-org/test-project/")) {
@@ -357,7 +357,7 @@ describe("fetchProjectId", () => {
 
   test("throws ResolutionError on 404", async () => {
     await setAuthToken("test-token");
-    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
     globalThis.fetch = mockFetch(
       async () =>
         new Response(JSON.stringify({ detail: "Not found" }), {
@@ -372,7 +372,7 @@ describe("fetchProjectId", () => {
 
   test("includes similar project suggestions on 404 when projects exist", async () => {
     await setAuthToken("test-token");
-    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
 
     // Mock: getProject returns 404, but listProjects returns available projects.
     // The two calls hit different URL patterns.
@@ -413,7 +413,7 @@ describe("fetchProjectId", () => {
 
   test("includes project list suggestion even when listProjects fails", async () => {
     await setAuthToken("test-token");
-    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
 
     // Mock: all requests return 404 (both getProject and listProjects fail)
     globalThis.fetch = mockFetch(
@@ -438,7 +438,7 @@ describe("fetchProjectId", () => {
 
   test("rethrows AuthError when not authenticated", async () => {
     // No auth token set — refreshToken() will throw AuthError
-    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
 
     expect(fetchProjectId("test-org", "test-project")).rejects.toThrow(
       AuthError
@@ -447,7 +447,7 @@ describe("fetchProjectId", () => {
 
   test("returns undefined on transient server error", async () => {
     await setAuthToken("test-token");
-    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
     globalThis.fetch = mockFetch(
       async () =>
         new Response(JSON.stringify({ detail: "Internal error" }), {

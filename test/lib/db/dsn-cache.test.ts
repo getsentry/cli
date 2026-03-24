@@ -44,12 +44,12 @@ afterEach(() => {
 
 describe("getCachedDsn", () => {
   test("returns undefined when no cache entry exists", async () => {
-    const result = await getCachedDsn("/nonexistent/path");
+    const result = getCachedDsn("/nonexistent/path");
     expect(result).toBeUndefined();
   });
 
   test("returns cached entry when it exists", async () => {
-    await setCachedDsn(testProjectDir, {
+    setCachedDsn(testProjectDir, {
       dsn: "https://abc@o123.ingest.sentry.io/456",
       projectId: "456",
       orgId: "123",
@@ -57,7 +57,7 @@ describe("getCachedDsn", () => {
       sourcePath: ".env",
     });
 
-    const result = await getCachedDsn(testProjectDir);
+    const result = getCachedDsn(testProjectDir);
     expect(result?.dsn).toBe("https://abc@o123.ingest.sentry.io/456");
     expect(result?.projectId).toBe("456");
     expect(result?.orgId).toBe("123");
@@ -68,7 +68,7 @@ describe("getCachedDsn", () => {
 
 describe("setCachedDsn", () => {
   test("stores DSN cache entry", async () => {
-    await setCachedDsn(testProjectDir, {
+    setCachedDsn(testProjectDir, {
       dsn: "https://key@o999.ingest.sentry.io/111",
       projectId: "111",
       orgId: "999",
@@ -76,25 +76,25 @@ describe("setCachedDsn", () => {
       sourcePath: "src/index.ts",
     });
 
-    const result = await getCachedDsn(testProjectDir);
+    const result = getCachedDsn(testProjectDir);
     expect(result?.dsn).toBe("https://key@o999.ingest.sentry.io/111");
     expect(result?.projectId).toBe("111");
   });
 
   test("overwrites existing cache entry", async () => {
-    await setCachedDsn(testProjectDir, {
+    setCachedDsn(testProjectDir, {
       dsn: "https://first@o1.ingest.sentry.io/1",
       projectId: "1",
       source: "env",
     });
 
-    await setCachedDsn(testProjectDir, {
+    setCachedDsn(testProjectDir, {
       dsn: "https://second@o2.ingest.sentry.io/2",
       projectId: "2",
       source: "code",
     });
 
-    const result = await getCachedDsn(testProjectDir);
+    const result = getCachedDsn(testProjectDir);
     expect(result?.dsn).toBe("https://second@o2.ingest.sentry.io/2");
     expect(result?.projectId).toBe("2");
   });
@@ -102,20 +102,20 @@ describe("setCachedDsn", () => {
 
 describe("updateCachedResolution", () => {
   test("updates resolved org/project info", async () => {
-    await setCachedDsn(testProjectDir, {
+    setCachedDsn(testProjectDir, {
       dsn: "https://abc@o123.ingest.sentry.io/456",
       projectId: "456",
       source: "env",
     });
 
-    await updateCachedResolution(testProjectDir, {
+    updateCachedResolution(testProjectDir, {
       orgSlug: "my-org",
       orgName: "My Organization",
       projectSlug: "my-project",
       projectName: "My Project",
     });
 
-    const result = await getCachedDsn(testProjectDir);
+    const result = getCachedDsn(testProjectDir);
     expect(result?.resolved?.orgSlug).toBe("my-org");
     expect(result?.resolved?.orgName).toBe("My Organization");
     expect(result?.resolved?.projectSlug).toBe("my-project");
@@ -124,7 +124,7 @@ describe("updateCachedResolution", () => {
 
   test("does nothing if cache entry does not exist", async () => {
     // Should not throw
-    await updateCachedResolution("/nonexistent", {
+    updateCachedResolution("/nonexistent", {
       orgSlug: "org",
       orgName: "Org",
       projectSlug: "project",
@@ -135,15 +135,15 @@ describe("updateCachedResolution", () => {
 
 describe("clearDsnCache", () => {
   test("removes specific directory cache", async () => {
-    await setCachedDsn(testProjectDir, {
+    setCachedDsn(testProjectDir, {
       dsn: "https://abc@o123.ingest.sentry.io/456",
       projectId: "456",
       source: "env",
     });
 
-    await clearDsnCache(testProjectDir);
+    clearDsnCache(testProjectDir);
 
-    const result = await getCachedDsn(testProjectDir);
+    const result = getCachedDsn(testProjectDir);
     expect(result).toBeUndefined();
   });
 
@@ -153,21 +153,21 @@ describe("clearDsnCache", () => {
     mkdirSync(dir1);
     mkdirSync(dir2);
 
-    await setCachedDsn(dir1, {
+    setCachedDsn(dir1, {
       dsn: "https://a@o1.ingest.sentry.io/1",
       projectId: "1",
       source: "env",
     });
-    await setCachedDsn(dir2, {
+    setCachedDsn(dir2, {
       dsn: "https://b@o2.ingest.sentry.io/2",
       projectId: "2",
       source: "code",
     });
 
-    await clearDsnCache();
+    clearDsnCache();
 
-    expect(await getCachedDsn(dir1)).toBeUndefined();
-    expect(await getCachedDsn(dir2)).toBeUndefined();
+    expect(getCachedDsn(dir1)).toBeUndefined();
+    expect(getCachedDsn(dir2)).toBeUndefined();
   });
 });
 
@@ -189,7 +189,7 @@ const createTestDsn = (overrides: Partial<DetectedDsn> = {}): DetectedDsn => ({
 
 describe("disableDsnCache / enableDsnCache", () => {
   test("getCachedDsn returns undefined when cache is disabled", async () => {
-    await setCachedDsn(testProjectDir, {
+    setCachedDsn(testProjectDir, {
       dsn: "https://abc@o123.ingest.sentry.io/456",
       projectId: "456",
       orgId: "123",
@@ -197,14 +197,14 @@ describe("disableDsnCache / enableDsnCache", () => {
     });
 
     // Verify it exists before disabling
-    expect(await getCachedDsn(testProjectDir)).toBeDefined();
+    expect(getCachedDsn(testProjectDir)).toBeDefined();
 
     disableDsnCache();
-    expect(await getCachedDsn(testProjectDir)).toBeUndefined();
+    expect(getCachedDsn(testProjectDir)).toBeUndefined();
 
     // Re-enable and verify it's still there
     enableDsnCache();
-    expect(await getCachedDsn(testProjectDir)).toBeDefined();
+    expect(getCachedDsn(testProjectDir)).toBeDefined();
   });
 
   test("getCachedDetection returns undefined when cache is disabled", async () => {
@@ -216,7 +216,7 @@ describe("disableDsnCache / enableDsnCache", () => {
     const rootStats = await stat(testProjectDir);
     const rootDirMtime = Math.floor(rootStats.mtimeMs);
 
-    await setCachedDetection(testProjectDir, {
+    setCachedDetection(testProjectDir, {
       fingerprint: "test-fp",
       allDsns: [testDsn],
       sourceMtimes,
@@ -238,18 +238,18 @@ describe("disableDsnCache / enableDsnCache", () => {
     disableDsnCache();
 
     // Write while disabled
-    await setCachedDsn(testProjectDir, {
+    setCachedDsn(testProjectDir, {
       dsn: "https://abc@o123.ingest.sentry.io/456",
       projectId: "456",
       source: "code",
     });
 
     // Can't read while disabled
-    expect(await getCachedDsn(testProjectDir)).toBeUndefined();
+    expect(getCachedDsn(testProjectDir)).toBeUndefined();
 
     // Re-enable and verify the write persisted
     enableDsnCache();
-    const result = await getCachedDsn(testProjectDir);
+    const result = getCachedDsn(testProjectDir);
     expect(result?.dsn).toBe("https://abc@o123.ingest.sentry.io/456");
   });
 });
@@ -275,7 +275,7 @@ describe("getCachedDetection", () => {
     const rootStats = await stat(testProjectDir);
     const rootDirMtime = Math.floor(rootStats.mtimeMs);
 
-    await setCachedDetection(testProjectDir, {
+    setCachedDetection(testProjectDir, {
       fingerprint: "test-fingerprint",
       allDsns: [testDsn],
       sourceMtimes,
@@ -300,7 +300,7 @@ describe("getCachedDetection", () => {
     const rootStats = await stat(testProjectDir);
     const rootDirMtime = Math.floor(rootStats.mtimeMs);
 
-    await setCachedDetection(testProjectDir, {
+    setCachedDetection(testProjectDir, {
       fingerprint: "test-fingerprint",
       allDsns: [testDsn],
       sourceMtimes,
@@ -334,7 +334,7 @@ describe("getCachedDetection", () => {
     const rootStats = await stat(testProjectDir);
     const rootDirMtime = Math.floor(rootStats.mtimeMs);
 
-    await setCachedDetection(testProjectDir, {
+    setCachedDetection(testProjectDir, {
       fingerprint: "test-fingerprint",
       allDsns: [testDsn],
       sourceMtimes,
@@ -361,7 +361,7 @@ describe("getCachedDetection", () => {
     const rootStats = await stat(testProjectDir);
     const rootDirMtime = Math.floor(rootStats.mtimeMs);
 
-    await setCachedDetection(testProjectDir, {
+    setCachedDetection(testProjectDir, {
       fingerprint: "test-fingerprint",
       allDsns: [testDsn],
       sourceMtimes,
@@ -395,7 +395,7 @@ describe("getCachedDetection", () => {
     const srcDirMtime = Math.floor(srcStats.mtimeMs);
 
     // Store cache with tracked src/ directory mtime
-    await setCachedDetection(testProjectDir, {
+    setCachedDetection(testProjectDir, {
       fingerprint: "test-fingerprint",
       allDsns: [testDsn],
       sourceMtimes,
@@ -431,7 +431,7 @@ describe("setCachedDetection", () => {
     const rootStats = await stat(testProjectDir);
     const rootDirMtime = Math.floor(rootStats.mtimeMs);
 
-    await setCachedDetection(testProjectDir, {
+    setCachedDetection(testProjectDir, {
       fingerprint: "fp-123",
       allDsns: [testDsn],
       sourceMtimes,
@@ -456,7 +456,7 @@ describe("setCachedDetection", () => {
     const rootStats = await stat(testProjectDir);
     const rootDirMtime = Math.floor(rootStats.mtimeMs);
 
-    await setCachedDetection(testProjectDir, {
+    setCachedDetection(testProjectDir, {
       fingerprint: "fp-multi",
       allDsns: [dsn1, dsn2],
       sourceMtimes,
@@ -473,7 +473,7 @@ describe("setCachedDetection", () => {
     const rootStats = await stat(testProjectDir);
     const rootDirMtime = Math.floor(rootStats.mtimeMs);
 
-    await setCachedDetection(testProjectDir, {
+    setCachedDetection(testProjectDir, {
       fingerprint: "fp-empty",
       allDsns: [],
       sourceMtimes: {},
@@ -497,7 +497,7 @@ describe("setCachedDetection", () => {
     const rootStats = await stat(testProjectDir);
     const rootDirMtime = Math.floor(rootStats.mtimeMs);
 
-    await setCachedDetection(testProjectDir, {
+    setCachedDetection(testProjectDir, {
       fingerprint: "fp-first",
       allDsns: [dsn1],
       sourceMtimes,
@@ -505,7 +505,7 @@ describe("setCachedDetection", () => {
       rootDirMtime,
     });
 
-    await setCachedDetection(testProjectDir, {
+    setCachedDetection(testProjectDir, {
       fingerprint: "fp-second",
       allDsns: [dsn2],
       sourceMtimes,

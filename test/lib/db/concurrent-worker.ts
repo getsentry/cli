@@ -52,7 +52,7 @@ async function writeDsn(): Promise<WorkerResult> {
   const directory = `/test/project-${workerId}`;
   const dsn = `https://key${workerId}@sentry.io/123${workerId}`;
 
-  await setCachedDsn(directory, {
+  setCachedDsn(directory, {
     dsn,
     projectId: `123${workerId}`,
     orgId: "456",
@@ -60,7 +60,7 @@ async function writeDsn(): Promise<WorkerResult> {
   });
 
   // Verify write
-  const cached = await getCachedDsn(directory);
+  const cached = getCachedDsn(directory);
   if (cached?.dsn !== dsn) {
     return {
       workerId,
@@ -82,7 +82,7 @@ async function writeProject(): Promise<WorkerResult> {
   const orgId = "org-456";
   const projectId = `proj-${workerId}`;
 
-  await setCachedProject(orgId, projectId, {
+  setCachedProject(orgId, projectId, {
     orgSlug: "test-org",
     orgName: "Test Org",
     projectSlug: `project-${workerId}`,
@@ -90,7 +90,7 @@ async function writeProject(): Promise<WorkerResult> {
   });
 
   // Verify write
-  const cached = await getCachedProject(orgId, projectId);
+  const cached = getCachedProject(orgId, projectId);
   if (cached?.projectSlug !== `project-${workerId}`) {
     return {
       workerId,
@@ -117,13 +117,13 @@ async function readWrite(): Promise<WorkerResult> {
     const directory = `/test/worker-${workerId}-iter-${i}`;
     const dsn = `https://key${workerId}${i}@sentry.io/${workerId}${i}`;
 
-    await setCachedDsn(directory, {
+    setCachedDsn(directory, {
       dsn,
       projectId: `${workerId}${i}`,
       source: "env-file",
     });
 
-    const cached = await getCachedDsn(directory);
+    const cached = getCachedDsn(directory);
     if (cached?.dsn !== dsn) {
       return {
         workerId,

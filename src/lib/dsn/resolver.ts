@@ -43,7 +43,7 @@ export async function resolveProject(
   }
 
   // Check cache for resolution
-  const cached = await getCachedDsn(cwd);
+  const cached = getCachedDsn(cwd);
   if (cached?.resolved && cached.dsn === dsn.raw) {
     return {
       ...cached.resolved,
@@ -70,7 +70,7 @@ export async function resolveProject(
       projectName: project.name,
     };
 
-    await updateCachedResolution(cwd, resolved);
+    updateCachedResolution(cwd, resolved);
 
     return {
       ...resolved,
@@ -82,7 +82,7 @@ export async function resolveProject(
   const resolved = await fetchProjectInfo(dsn.orgId, dsn.projectId);
 
   // Update cache with resolution
-  await updateCachedResolution(cwd, resolved);
+  updateCachedResolution(cwd, resolved);
 
   return {
     ...resolved,

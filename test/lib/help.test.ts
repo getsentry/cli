@@ -39,17 +39,17 @@ describe("printCustomHelp", () => {
   useTestConfigDir("help-test-");
 
   test("returns non-empty string", async () => {
-    const output = await printCustomHelp();
+    const output = printCustomHelp();
     expect(output.length).toBeGreaterThan(0);
   });
 
   test("output contains the tagline", async () => {
-    const output = stripAnsi(await printCustomHelp());
+    const output = stripAnsi(printCustomHelp());
     expect(output).toContain("The command-line interface for Sentry");
   });
 
   test("output contains registered commands", async () => {
-    const output = stripAnsi(await printCustomHelp());
+    const output = stripAnsi(printCustomHelp());
 
     // Should include at least some core commands from routes
     expect(output).toContain("sentry");
@@ -60,13 +60,13 @@ describe("printCustomHelp", () => {
   });
 
   test("output contains docs URL", async () => {
-    const output = stripAnsi(await printCustomHelp());
+    const output = stripAnsi(printCustomHelp());
     expect(output).toContain("cli.sentry.dev");
   });
 
   test("shows login example when not authenticated", async () => {
     // useTestConfigDir provides a clean env with no auth token
-    const output = stripAnsi(await printCustomHelp());
+    const output = stripAnsi(printCustomHelp());
     expect(output).toContain("sentry auth login");
   });
 });

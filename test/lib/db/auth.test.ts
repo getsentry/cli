@@ -76,11 +76,11 @@ describe("env var auth: getAuthConfig shape", () => {
 describe("env var auth: isAuthenticated", () => {
   test("returns true when env var is set", async () => {
     process.env.SENTRY_AUTH_TOKEN = "test_token";
-    expect(await isAuthenticated()).toBe(true);
+    expect(isAuthenticated()).toBe(true);
   });
 
   test("returns false when nothing is set", async () => {
-    expect(await isAuthenticated()).toBe(false);
+    expect(isAuthenticated()).toBe(false);
   });
 });
 

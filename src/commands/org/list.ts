@@ -141,7 +141,7 @@ export const listCommand = buildCommand({
     const limitedOrgs = orgs.slice(0, flags.limit);
 
     // Check if user has orgs in multiple regions
-    const orgRegions = await getAllOrgRegions();
+    const orgRegions = getAllOrgRegions();
     const uniqueRegions = new Set(orgRegions.values());
     const showRegion = uniqueRegions.size > 1;
 

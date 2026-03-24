@@ -22,8 +22,8 @@ import { formatMultipleProjectsFooter } from "../../src/lib/dsn/errors.js";
 // ============================================================================
 
 // Mock functions we'll control in tests
-const mockGetDefaultOrganization = mock(() => Promise.resolve(null));
-const mockGetDefaultProject = mock(() => Promise.resolve(null));
+const mockGetDefaultOrganization = mock(() => null);
+const mockGetDefaultProject = mock(() => null);
 const mockDetectDsn = mock(() => Promise.resolve(null));
 const mockDetectAllDsns = mock(() =>
   Promise.resolve({
@@ -42,12 +42,18 @@ const mockFindProjectRoot = mock(() =>
 const mockGetDsnSourceDescription = mock(
   () => "SENTRY_DSN environment variable"
 );
-const mockGetCachedProject = mock(() => Promise.resolve(null));
-const mockSetCachedProject = mock(() => Promise.resolve());
-const mockGetCachedProjectByDsnKey = mock(() => Promise.resolve(null));
-const mockSetCachedProjectByDsnKey = mock(() => Promise.resolve());
-const mockGetCachedDsn = mock(() => Promise.resolve(null));
-const mockSetCachedDsn = mock(() => Promise.resolve());
+const mockGetCachedProject = mock(() => null);
+const mockSetCachedProject = mock(() => {
+  /* no-op */
+});
+const mockGetCachedProjectByDsnKey = mock(() => null);
+const mockSetCachedProjectByDsnKey = mock(() => {
+  /* no-op */
+});
+const mockGetCachedDsn = mock(() => null);
+const mockSetCachedDsn = mock(() => {
+  /* no-op */
+});
 const mockGetProject = mock(() =>
   Promise.resolve({ slug: "test", name: "Test" })
 );
@@ -120,8 +126,8 @@ function resetAllMocks() {
   mockFindProjectsByPattern.mockReset();
 
   // Set sensible defaults
-  mockGetDefaultOrganization.mockResolvedValue(null);
-  mockGetDefaultProject.mockResolvedValue(null);
+  mockGetDefaultOrganization.mockReturnValue(null);
+  mockGetDefaultProject.mockReturnValue(null);
   mockDetectDsn.mockResolvedValue(null);
   mockDetectAllDsns.mockResolvedValue({
     primary: null,
@@ -136,9 +142,9 @@ function resetAllMocks() {
   mockGetDsnSourceDescription.mockReturnValue(
     "SENTRY_DSN environment variable"
   );
-  mockGetCachedProject.mockResolvedValue(null);
-  mockGetCachedProjectByDsnKey.mockResolvedValue(null);
-  mockGetCachedDsn.mockResolvedValue(null);
+  mockGetCachedProject.mockReturnValue(null);
+  mockGetCachedProjectByDsnKey.mockReturnValue(null);
+  mockGetCachedDsn.mockReturnValue(null);
   mockFindProjectsByPattern.mockResolvedValue([]);
 }
 
@@ -162,7 +168,7 @@ describe("resolveOrg", () => {
   });
 
   test("returns org from config defaults when no CLI flag", async () => {
-    mockGetDefaultOrganization.mockResolvedValue("default-org");
+    mockGetDefaultOrganization.mockReturnValue("default-org");
 
     const result = await resolveOrg({ cwd: "/test" });
 
@@ -173,7 +179,7 @@ describe("resolveOrg", () => {
   });
 
   test("falls back to DSN detection when no flag or defaults", async () => {
-    mockGetDefaultOrganization.mockResolvedValue(null);
+    mockGetDefaultOrganization.mockReturnValue(null);
     mockDetectDsn.mockResolvedValue({
       raw: "https://abc@o123.ingest.sentry.io/456",
       protocol: "https",
@@ -183,7 +189,7 @@ describe("resolveOrg", () => {
       orgId: "123",
       source: "env",
     });
-    mockGetCachedProject.mockResolvedValue({
+    mockGetCachedProject.mockReturnValue({
       orgSlug: "cached-org",
       orgName: "Cached Organization",
       projectSlug: "project",
@@ -199,7 +205,7 @@ describe("resolveOrg", () => {
   });
 
   test("returns numeric orgId when DSN detected but no cache", async () => {
-    mockGetDefaultOrganization.mockResolvedValue(null);
+    mockGetDefaultOrganization.mockReturnValue(null);
     mockDetectDsn.mockResolvedValue({
       raw: "https://abc@o123.ingest.sentry.io/456",
       protocol: "https",
@@ -209,7 +215,7 @@ describe("resolveOrg", () => {
       orgId: "123",
       source: "env",
     });
-    mockGetCachedProject.mockResolvedValue(null);
+    mockGetCachedProject.mockReturnValue(null);
 
     const result = await resolveOrg({ cwd: "/test" });
 
@@ -218,7 +224,7 @@ describe("resolveOrg", () => {
   });
 
   test("returns null when no org found from any source", async () => {
-    mockGetDefaultOrganization.mockResolvedValue(null);
+    mockGetDefaultOrganization.mockReturnValue(null);
     mockDetectDsn.mockResolvedValue(null);
 
     const result = await resolveOrg({ cwd: "/test" });
@@ -227,7 +233,7 @@ describe("resolveOrg", () => {
   });
 
   test("returns null when DSN has no orgId", async () => {
-    mockGetDefaultOrganization.mockResolvedValue(null);
+    mockGetDefaultOrganization.mockReturnValue(null);
     mockDetectDsn.mockResolvedValue({
       raw: "https://abc@sentry.io/456",
       protocol: "https",
@@ -244,7 +250,7 @@ describe("resolveOrg", () => {
   });
 
   test("returns null when DSN detection throws", async () => {
-    mockGetDefaultOrganization.mockResolvedValue(null);
+    mockGetDefaultOrganization.mockReturnValue(null);
     mockDetectDsn.mockRejectedValue(new Error("Detection failed"));
 
     const result = await resolveOrg({ cwd: "/test" });
@@ -311,7 +317,7 @@ describe("resolveFromDsn", () => {
       source: "env",
       sourcePath: "/test/.env",
     });
-    mockGetCachedProject.mockResolvedValue({
+    mockGetCachedProject.mockReturnValue({
       orgSlug: "cached-org",
       orgName: "Cached Organization",
       projectSlug: "cached-project",
@@ -339,7 +345,7 @@ describe("resolveFromDsn", () => {
       source: "env",
       sourcePath: "/test/.env",
     });
-    mockGetCachedProject.mockResolvedValue(null);
+    mockGetCachedProject.mockReturnValue(null);
     mockGetProject.mockResolvedValue({
       id: "456",
       slug: "fetched-project",
@@ -371,7 +377,7 @@ describe("resolveFromDsn", () => {
       orgId: "123",
       source: "env",
     });
-    mockGetCachedProject.mockResolvedValue(null);
+    mockGetCachedProject.mockReturnValue(null);
     mockGetProject.mockResolvedValue({
       id: "456",
       slug: "project",
@@ -428,8 +434,8 @@ describe("resolveOrgAndProject", () => {
   });
 
   test("returns target from config defaults when no flags", async () => {
-    mockGetDefaultOrganization.mockResolvedValue("default-org");
-    mockGetDefaultProject.mockResolvedValue("default-project");
+    mockGetDefaultOrganization.mockReturnValue("default-org");
+    mockGetDefaultProject.mockReturnValue("default-project");
 
     const result = await resolveOrgAndProject({ cwd: "/test" });
 
@@ -441,8 +447,8 @@ describe("resolveOrgAndProject", () => {
   });
 
   test("falls back to DSN detection when no flags or defaults", async () => {
-    mockGetDefaultOrganization.mockResolvedValue(null);
-    mockGetDefaultProject.mockResolvedValue(null);
+    mockGetDefaultOrganization.mockReturnValue(null);
+    mockGetDefaultProject.mockReturnValue(null);
     mockDetectDsn.mockResolvedValue({
       raw: "https://abc@o123.ingest.sentry.io/456",
       protocol: "https",
@@ -452,7 +458,7 @@ describe("resolveOrgAndProject", () => {
       orgId: "123",
       source: "env",
     });
-    mockGetCachedProject.mockResolvedValue({
+    mockGetCachedProject.mockReturnValue({
       orgSlug: "dsn-org",
       orgName: "DSN Org",
       projectSlug: "dsn-project",
@@ -467,8 +473,8 @@ describe("resolveOrgAndProject", () => {
   });
 
   test("falls back to directory inference when DSN detection fails", async () => {
-    mockGetDefaultOrganization.mockResolvedValue(null);
-    mockGetDefaultProject.mockResolvedValue(null);
+    mockGetDefaultOrganization.mockReturnValue(null);
+    mockGetDefaultProject.mockReturnValue(null);
     mockDetectDsn.mockResolvedValue(null);
     mockFindProjectRoot.mockResolvedValue({
       projectRoot: "/home/user/my-project",
@@ -492,8 +498,8 @@ describe("resolveOrgAndProject", () => {
   });
 
   test("returns null when no resolution method succeeds", async () => {
-    mockGetDefaultOrganization.mockResolvedValue(null);
-    mockGetDefaultProject.mockResolvedValue(null);
+    mockGetDefaultOrganization.mockReturnValue(null);
+    mockGetDefaultProject.mockReturnValue(null);
     mockDetectDsn.mockResolvedValue(null);
     // Short directory name that won't match
     mockFindProjectRoot.mockResolvedValue({
@@ -536,8 +542,8 @@ describe("resolveAllTargets", () => {
   });
 
   test("returns single target from config defaults", async () => {
-    mockGetDefaultOrganization.mockResolvedValue("default-org");
-    mockGetDefaultProject.mockResolvedValue("default-project");
+    mockGetDefaultOrganization.mockReturnValue("default-org");
+    mockGetDefaultProject.mockReturnValue("default-project");
 
     const result = await resolveAllTargets({ cwd: "/test" });
 
@@ -547,8 +553,8 @@ describe("resolveAllTargets", () => {
   });
 
   test("resolves multiple DSNs in monorepo", async () => {
-    mockGetDefaultOrganization.mockResolvedValue(null);
-    mockGetDefaultProject.mockResolvedValue(null);
+    mockGetDefaultOrganization.mockReturnValue(null);
+    mockGetDefaultProject.mockReturnValue(null);
     mockDetectAllDsns.mockResolvedValue({
       primary: {
         raw: "https://abc@o123.ingest.sentry.io/456",
@@ -586,13 +592,13 @@ describe("resolveAllTargets", () => {
       fingerprint: "abc-def",
     });
     mockGetCachedProject
-      .mockResolvedValueOnce({
+      .mockReturnValueOnce({
         orgSlug: "my-org",
         orgName: "My Org",
         projectSlug: "frontend",
         projectName: "Frontend",
       })
-      .mockResolvedValueOnce({
+      .mockReturnValueOnce({
         orgSlug: "my-org",
         orgName: "My Org",
         projectSlug: "backend",
@@ -612,8 +618,8 @@ describe("resolveAllTargets", () => {
   });
 
   test("deduplicates targets with same org+project", async () => {
-    mockGetDefaultOrganization.mockResolvedValue(null);
-    mockGetDefaultProject.mockResolvedValue(null);
+    mockGetDefaultOrganization.mockReturnValue(null);
+    mockGetDefaultProject.mockReturnValue(null);
     mockDetectAllDsns.mockResolvedValue({
       primary: {
         raw: "https://abc@o123.ingest.sentry.io/456",
@@ -650,7 +656,7 @@ describe("resolveAllTargets", () => {
       hasMultiple: true,
       fingerprint: "abc-abc",
     });
-    mockGetCachedProject.mockResolvedValue({
+    mockGetCachedProject.mockReturnValue({
       orgSlug: "my-org",
       orgName: "My Org",
       projectSlug: "my-project",
@@ -664,8 +670,8 @@ describe("resolveAllTargets", () => {
   });
 
   test("falls back to directory inference when no DSNs detected", async () => {
-    mockGetDefaultOrganization.mockResolvedValue(null);
-    mockGetDefaultProject.mockResolvedValue(null);
+    mockGetDefaultOrganization.mockReturnValue(null);
+    mockGetDefaultProject.mockReturnValue(null);
     mockDetectAllDsns.mockResolvedValue({
       primary: null,
       all: [],
@@ -694,8 +700,8 @@ describe("resolveAllTargets", () => {
   });
 
   test("returns empty targets when all DSN resolutions fail", async () => {
-    mockGetDefaultOrganization.mockResolvedValue(null);
-    mockGetDefaultProject.mockResolvedValue(null);
+    mockGetDefaultOrganization.mockReturnValue(null);
+    mockGetDefaultProject.mockReturnValue(null);
     mockDetectAllDsns.mockResolvedValue({
       primary: {
         raw: "https://abc@o123.ingest.sentry.io/456",
@@ -720,7 +726,7 @@ describe("resolveAllTargets", () => {
       hasMultiple: false,
       fingerprint: "",
     });
-    mockGetCachedProject.mockResolvedValue(null);
+    mockGetCachedProject.mockReturnValue(null);
     // getProject returns null (project not found)
     mockGetProject.mockResolvedValue(null);
     mockFindProjectRoot.mockResolvedValue({
@@ -843,8 +849,8 @@ describe("env var resolution: SENTRY_ORG + SENTRY_PROJECT", () => {
   test("resolveOrgAndProject: env vars beat config defaults", async () => {
     process.env.SENTRY_ORG = "env-org";
     process.env.SENTRY_PROJECT = "env-project";
-    mockGetDefaultOrganization.mockResolvedValue("default-org");
-    mockGetDefaultProject.mockResolvedValue("default-project");
+    mockGetDefaultOrganization.mockReturnValue("default-org");
+    mockGetDefaultProject.mockReturnValue("default-project");
 
     const result = await resolveOrgAndProject({ cwd: "/test" });
 
@@ -881,8 +887,8 @@ describe("env var resolution: SENTRY_ORG + SENTRY_PROJECT", () => {
   test("resolveAllTargets: env vars beat config defaults", async () => {
     process.env.SENTRY_ORG = "env-org";
     process.env.SENTRY_PROJECT = "env-project";
-    mockGetDefaultOrganization.mockResolvedValue("default-org");
-    mockGetDefaultProject.mockResolvedValue("default-project");
+    mockGetDefaultOrganization.mockReturnValue("default-org");
+    mockGetDefaultProject.mockReturnValue("default-project");
 
     const result = await resolveAllTargets({ cwd: "/test" });
 

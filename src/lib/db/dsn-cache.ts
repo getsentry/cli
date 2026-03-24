@@ -14,7 +14,7 @@ import type {
   ResolvedProjectInfo,
 } from "../dsn/types.js";
 import { getDatabase, maybeCleanupCaches } from "./index.js";
-import { runUpsert } from "./utils.js";
+import { runUpsert, touchCacheEntry } from "./utils.js";
 
 /** Cache TTL in milliseconds (24 hours) */
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -129,17 +129,7 @@ function rowToCachedDsnEntry(row: DsnCacheRow): CachedDsnEntry {
   return entry;
 }
 
-function touchCacheEntry(directory: string): void {
-  const db = getDatabase();
-  db.query("UPDATE dsn_cache SET last_accessed = ? WHERE directory = ?").run(
-    Date.now(),
-    directory
-  );
-}
-
-export async function getCachedDsn(
-  directory: string
-): Promise<CachedDsnEntry | undefined> {
+export function getCachedDsn(directory: string): CachedDsnEntry | undefined {
   if (dsnCacheDisabled) {
     return;
   }
@@ -154,14 +144,14 @@ export async function getCachedDsn(
     return;
   }
 
-  touchCacheEntry(directory);
+  touchCacheEntry("dsn_cache", "directory", directory);
   return rowToCachedDsnEntry(row);
 }
 
-export async function setCachedDsn(
+export function setCachedDsn(
   directory: string,
   entry: Omit<CachedDsnEntry, "cachedAt">
-): Promise<void> {
+): void {
   const db = getDatabase();
   const now = Date.now();
 
@@ -193,10 +183,10 @@ export async function setCachedDsn(
 }
 
 /** Update resolved org/project info after API resolution. */
-export async function updateCachedResolution(
+export function updateCachedResolution(
   directory: string,
   resolved: ResolvedProjectInfo
-): Promise<void> {
+): void {
   const db = getDatabase();
 
   const exists = db
@@ -224,7 +214,7 @@ export async function updateCachedResolution(
   );
 }
 
-export async function clearDsnCache(directory?: string): Promise<void> {
+export function clearDsnCache(directory?: string): void {
   const db = getDatabase();
 
   if (directory) {
@@ -383,7 +373,7 @@ export async function getCachedDetection(
   }
 
   // Cache is valid - update last access time
-  touchCacheEntry(projectRoot);
+  touchCacheEntry("dsn_cache", "directory", projectRoot);
 
   // Parse and return cached detection
   const allDsns = JSON.parse(row.all_dsns_json) as DetectedDsn[];
@@ -407,10 +397,10 @@ export async function getCachedDetection(
  * @param projectRoot - Project root directory
  * @param entry - Detection result to cache
  */
-export async function setCachedDetection(
+export function setCachedDetection(
   projectRoot: string,
   entry: DetectionCacheEntry
-): Promise<void> {
+): void {
   const db = getDatabase();
   const now = Date.now();
 

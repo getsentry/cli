@@ -113,7 +113,7 @@ describe("loginCommand.func --token path", () => {
   });
 
   test("already authenticated (non-TTY, no --force): prints re-auth message with --force hint", async () => {
-    isAuthenticatedSpy.mockResolvedValue(true);
+    isAuthenticatedSpy.mockReturnValue(true);
 
     const { context } = createContext();
     await func.call(context, { force: false, timeout: 900 });
@@ -123,7 +123,7 @@ describe("loginCommand.func --token path", () => {
   });
 
   test("already authenticated (env token SENTRY_AUTH_TOKEN): tells user to unset specific var", async () => {
-    isAuthenticatedSpy.mockResolvedValue(true);
+    isAuthenticatedSpy.mockReturnValue(true);
     isEnvTokenActiveSpy.mockReturnValue(true);
     // Need to also spy on getAuthConfig for the specific env var name
     const getAuthConfigSpy = spyOn(dbAuth, "getAuthConfig");
@@ -140,7 +140,7 @@ describe("loginCommand.func --token path", () => {
   });
 
   test("already authenticated (env token SENTRY_TOKEN): shows specific var name", async () => {
-    isAuthenticatedSpy.mockResolvedValue(true);
+    isAuthenticatedSpy.mockReturnValue(true);
     isEnvTokenActiveSpy.mockReturnValue(true);
     // Set env var directly — getActiveEnvVarName() reads env vars via getEnvToken()
     process.env.SENTRY_TOKEN = "sntrys_token_456";
@@ -153,8 +153,8 @@ describe("loginCommand.func --token path", () => {
   });
 
   test("--token: stores token, fetches user, writes success", async () => {
-    isAuthenticatedSpy.mockResolvedValue(false);
-    setAuthTokenSpy.mockResolvedValue(undefined);
+    isAuthenticatedSpy.mockReturnValue(false);
+    setAuthTokenSpy.mockReturnValue(undefined);
     getUserRegionsSpy.mockResolvedValue([]);
     getCurrentUserSpy.mockResolvedValue(SAMPLE_USER);
     setUserInfoSpy.mockReturnValue(undefined);
@@ -180,8 +180,8 @@ describe("loginCommand.func --token path", () => {
   });
 
   test("--token: null user.name is converted to undefined in setUserInfo", async () => {
-    isAuthenticatedSpy.mockResolvedValue(false);
-    setAuthTokenSpy.mockResolvedValue(undefined);
+    isAuthenticatedSpy.mockReturnValue(false);
+    setAuthTokenSpy.mockReturnValue(undefined);
     getUserRegionsSpy.mockResolvedValue([]);
     getCurrentUserSpy.mockResolvedValue({
       id: "5",
@@ -211,8 +211,8 @@ describe("loginCommand.func --token path", () => {
   });
 
   test("--token: invalid token clears auth and throws AuthError", async () => {
-    isAuthenticatedSpy.mockResolvedValue(false);
-    setAuthTokenSpy.mockResolvedValue(undefined);
+    isAuthenticatedSpy.mockReturnValue(false);
+    setAuthTokenSpy.mockReturnValue(undefined);
     getUserRegionsSpy.mockRejectedValue(new Error("401 Unauthorized"));
     clearAuthSpy.mockResolvedValue(undefined);
 
@@ -226,8 +226,8 @@ describe("loginCommand.func --token path", () => {
   });
 
   test("--token: shows 'Logged in as' when user info fetch succeeds", async () => {
-    isAuthenticatedSpy.mockResolvedValue(false);
-    setAuthTokenSpy.mockResolvedValue(undefined);
+    isAuthenticatedSpy.mockReturnValue(false);
+    setAuthTokenSpy.mockReturnValue(undefined);
     getUserRegionsSpy.mockResolvedValue([]);
     getCurrentUserSpy.mockResolvedValue({ id: "5", email: "only@email.com" });
     setUserInfoSpy.mockReturnValue(undefined);
@@ -244,8 +244,8 @@ describe("loginCommand.func --token path", () => {
   });
 
   test("--token: login succeeds even when getCurrentUser() fails transiently", async () => {
-    isAuthenticatedSpy.mockResolvedValue(false);
-    setAuthTokenSpy.mockResolvedValue(undefined);
+    isAuthenticatedSpy.mockReturnValue(false);
+    setAuthTokenSpy.mockReturnValue(undefined);
     getUserRegionsSpy.mockResolvedValue([]);
     getCurrentUserSpy.mockRejectedValue(new Error("Network error"));
 
@@ -267,7 +267,7 @@ describe("loginCommand.func --token path", () => {
   });
 
   test("no token: falls through to interactive login", async () => {
-    isAuthenticatedSpy.mockResolvedValue(false);
+    isAuthenticatedSpy.mockReturnValue(false);
     runInteractiveLoginSpy.mockResolvedValue({
       method: "oauth",
       configPath: "/tmp/db",
@@ -281,7 +281,7 @@ describe("loginCommand.func --token path", () => {
   });
 
   test("--force when authenticated: clears auth and proceeds to interactive login", async () => {
-    isAuthenticatedSpy.mockResolvedValue(true);
+    isAuthenticatedSpy.mockReturnValue(true);
     clearAuthSpy.mockResolvedValue(undefined);
     runInteractiveLoginSpy.mockResolvedValue({
       method: "oauth",
@@ -296,9 +296,9 @@ describe("loginCommand.func --token path", () => {
   });
 
   test("--force --token when authenticated: clears auth and proceeds to token login", async () => {
-    isAuthenticatedSpy.mockResolvedValue(true);
+    isAuthenticatedSpy.mockReturnValue(true);
     clearAuthSpy.mockResolvedValue(undefined);
-    setAuthTokenSpy.mockResolvedValue(undefined);
+    setAuthTokenSpy.mockReturnValue(undefined);
     getUserRegionsSpy.mockResolvedValue([]);
     getCurrentUserSpy.mockResolvedValue(SAMPLE_USER);
     setUserInfoSpy.mockReturnValue(undefined);
@@ -316,7 +316,7 @@ describe("loginCommand.func --token path", () => {
   });
 
   test("--force with env token: still blocks (env var case unchanged)", async () => {
-    isAuthenticatedSpy.mockResolvedValue(true);
+    isAuthenticatedSpy.mockReturnValue(true);
     isEnvTokenActiveSpy.mockReturnValue(true);
 
     const { context } = createContext();

@@ -5,6 +5,8 @@
 
 import type { SQLQueryBindings } from "bun:sqlite";
 
+import { getDatabase } from "./index.js";
+
 /** Valid SQLite binding value (matches bun:sqlite's SQLQueryBindings) */
 export type SqlValue = SQLQueryBindings;
 
@@ -91,8 +93,14 @@ export function upsert<T extends Record<string, SqlValue>>(
   return { sql, values };
 }
 
-/** Minimal db interface needed for query execution */
-type QueryRunner = { query(sql: string): { run(...values: SqlValue[]): void } };
+/** Minimal db interface needed for query execution and metadata helpers */
+type QueryRunner = {
+  query(sql: string): {
+    run(...values: SqlValue[]): void;
+    all(...values: SqlValue[]): Record<string, SqlValue>[];
+  };
+  transaction<T>(fn: () => T): () => T;
+};
 
 /**
  * Execute an UPSERT statement directly on the database.
@@ -116,4 +124,102 @@ export function runUpsert<T extends Record<string, SqlValue>>(
 ): void {
   const { sql, values } = upsert(table, data, conflictColumns);
   db.query(sql).run(...values);
+}
+
+// ---------------------------------------------------------------------------
+// Metadata table helpers
+// ---------------------------------------------------------------------------
+
+type MetadataRow = { key: string; value: string };
+
+/**
+ * Read multiple values from the `metadata` key-value table in a single query.
+ *
+ * @param db - Database instance
+ * @param keys - The metadata keys to read
+ * @returns Map of key → value for keys that exist. Missing keys are omitted.
+ *
+ * @example
+ * const m = getMetadata(db, ["install.method", "install.path"]);
+ * const method = m.get("install.method"); // string | undefined
+ */
+export function getMetadata(
+  db: QueryRunner,
+  keys: string[]
+): Map<string, string> {
+  if (keys.length === 0) {
+    return new Map();
+  }
+  const placeholders = keys.map(() => "?").join(", ");
+  const rows = db
+    .query(`SELECT key, value FROM metadata WHERE key IN (${placeholders})`)
+    .all(...keys) as MetadataRow[];
+  return new Map(rows.map((r) => [r.key, r.value]));
+}
+
+/**
+ * Write multiple key-value pairs to the `metadata` table in a single transaction.
+ *
+ * @param db - Database instance
+ * @param entries - Object mapping metadata keys to string values
+ *
+ * @example
+ * setMetadata(db, { "install.method": "binary", "install.path": "/usr/bin/sentry" });
+ */
+export function setMetadata(
+  db: QueryRunner,
+  entries: Record<string, string>
+): void {
+  const pairs = Object.entries(entries);
+  if (pairs.length === 0) {
+    return;
+  }
+  db.transaction(() => {
+    for (const [key, value] of pairs) {
+      runUpsert(db, "metadata", { key, value }, ["key"]);
+    }
+  })();
+}
+
+/**
+ * Delete multiple keys from the `metadata` table in a single query.
+ *
+ * @param db - Database instance
+ * @param keys - The metadata keys to delete
+ *
+ * @example
+ * clearMetadata(db, ["install.method", "install.path", "install.version"]);
+ */
+export function clearMetadata(db: QueryRunner, keys: string[]): void {
+  if (keys.length === 0) {
+    return;
+  }
+  const placeholders = keys.map(() => "?").join(", ");
+  db.query(`DELETE FROM metadata WHERE key IN (${placeholders})`).run(...keys);
+}
+
+// ---------------------------------------------------------------------------
+// Cache entry helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Update the `last_accessed` timestamp for a cache entry.
+ *
+ * Shared helper to avoid duplicating the same UPDATE pattern in every
+ * cache module. Calls `getDatabase()` internally.
+ *
+ * @param table - Cache table name (e.g., "dsn_cache", "project_cache")
+ * @param keyColumn - Name of the primary key column (e.g., "directory", "cache_key")
+ * @param keyValue - The key value identifying the row to touch
+ */
+export function touchCacheEntry(
+  table: string,
+  keyColumn: string,
+  keyValue: string
+): void {
+  const db = getDatabase();
+  db.query(`UPDATE ${table} SET last_accessed = ? WHERE ${keyColumn} = ?`).run(
+    Date.now(),
+    keyValue
+  );
 }

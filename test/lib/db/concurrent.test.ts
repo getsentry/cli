@@ -115,7 +115,7 @@ describe("concurrent database access", () => {
 
     for (let i = 0; i < workerCount; i++) {
       const directory = `/test/project-${i}`;
-      const cached = await getCachedDsn(directory);
+      const cached = getCachedDsn(directory);
       expect(cached).toBeDefined();
       expect(cached?.dsn).toBe(`https://key${i}@sentry.io/123${i}`);
     }
@@ -137,7 +137,7 @@ describe("concurrent database access", () => {
     process.env[CONFIG_DIR_ENV_VAR] = getConfigDir();
 
     for (let i = 0; i < workerCount; i++) {
-      const cached = await getCachedProject("org-456", `proj-${i}`);
+      const cached = getCachedProject("org-456", `proj-${i}`);
       expect(cached).toBeDefined();
       expect(cached?.projectSlug).toBe(`project-${i}`);
     }
@@ -161,7 +161,7 @@ describe("concurrent database access", () => {
     for (let w = 0; w < workerCount; w++) {
       for (let i = 0; i < 5; i++) {
         const directory = `/test/worker-${w}-iter-${i}`;
-        const cached = await getCachedDsn(directory);
+        const cached = getCachedDsn(directory);
         expect(cached).toBeDefined();
         expect(cached?.dsn).toBe(`https://key${w}${i}@sentry.io/${w}${i}`);
       }

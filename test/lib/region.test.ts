@@ -114,7 +114,7 @@ describe("isMultiRegionEnabled", () => {
 
 describe("resolveOrgRegion", () => {
   test("returns cached region when available", async () => {
-    await setOrgRegion("cached-org", "https://de.sentry.io");
+    setOrgRegion("cached-org", "https://de.sentry.io");
 
     const regionUrl = await resolveOrgRegion("cached-org");
     expect(regionUrl).toBe("https://de.sentry.io");
@@ -125,7 +125,7 @@ describe("resolveOrgRegion", () => {
     const { getOrgRegion } = await import("../../src/lib/db/regions.js");
 
     // Verify org is not in cache
-    const before = await getOrgRegion("new-org");
+    const before = getOrgRegion("new-org");
     expect(before).toBeUndefined();
 
     // Mock fetch to return org with regionUrl
@@ -161,7 +161,7 @@ describe("resolveOrgRegion", () => {
       expect(regionUrl).toBe("https://de.sentry.io");
 
       // Should have cached the region
-      const after = await getOrgRegion("new-org");
+      const after = getOrgRegion("new-org");
       expect(after).toBe("https://de.sentry.io");
     } finally {
       globalThis.fetch = originalFetch;
@@ -237,7 +237,7 @@ describe("resolveOrgRegion", () => {
 
   test("uses cached region on subsequent calls", async () => {
     // Pre-populate cache (simulating what happens after a successful API fetch)
-    await setOrgRegion("cached-org-2", "https://de.sentry.io");
+    setOrgRegion("cached-org-2", "https://de.sentry.io");
 
     // First call should use cache
     const regionUrl1 = await resolveOrgRegion("cached-org-2");
@@ -250,8 +250,8 @@ describe("resolveOrgRegion", () => {
 
   test("cache survives across multiple resolve calls", async () => {
     // Populate cache with multiple orgs
-    await setOrgRegion("org-a", "https://us.sentry.io");
-    await setOrgRegion("org-b", "https://de.sentry.io");
+    setOrgRegion("org-a", "https://us.sentry.io");
+    setOrgRegion("org-b", "https://de.sentry.io");
 
     // Resolve in different order
     expect(await resolveOrgRegion("org-b")).toBe("https://de.sentry.io");

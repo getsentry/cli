@@ -137,8 +137,8 @@ describe("viewCommand.func", () => {
     resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
     resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
     openInBrowserSpy = spyOn(browser, "openInBrowser");
-    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
-    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
@@ -356,7 +356,7 @@ describe("viewCommand.func", () => {
       orgs: [],
     });
     getDetailedTraceSpy.mockResolvedValue(sampleSpans);
-    await setOrgRegion("cam-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("cam-org", DEFAULT_SENTRY_URL);
 
     const { context } = createMockContext();
     const func = await viewCommand.loader();

@@ -64,7 +64,7 @@ export function resolveOrgRegion(orgSlug: string): Promise<string> {
  */
 async function resolveOrgRegionUncached(orgSlug: string): Promise<string> {
   // 1. Check SQLite cache first
-  const cached = await getOrgRegion(orgSlug);
+  const cached = getOrgRegion(orgSlug);
   if (cached) {
     return cached;
   }
@@ -88,7 +88,7 @@ async function resolveOrgRegionUncached(orgSlug: string): Promise<string> {
     const regionUrl = response.data?.links?.regionUrl ?? baseUrl;
 
     // Cache for future use
-    await setOrgRegion(orgSlug, regionUrl);
+    setOrgRegion(orgSlug, regionUrl);
 
     return regionUrl;
   });
@@ -120,11 +120,9 @@ export function isMultiRegionEnabled(): boolean {
  * @param orgSlug - Raw org identifier (may be a slug or `oNNNNN` DSN form)
  * @returns The resolved slug if found in cache, `undefined` on cache miss
  */
-async function resolveOrgFromCache(
-  orgSlug: string
-): Promise<string | undefined> {
+function resolveOrgFromCache(orgSlug: string): string | undefined {
   // Check if slug is directly cached
-  const cached = await getOrgRegion(orgSlug);
+  const cached = getOrgRegion(orgSlug);
   if (cached) {
     return orgSlug;
   }
@@ -132,7 +130,7 @@ async function resolveOrgFromCache(
   // Try DSN-style numeric ID lookup (e.g., `o1081365` → `1081365` → slug)
   const numericId = stripDsnOrgPrefix(orgSlug);
   if (numericId !== orgSlug) {
-    const match = await getOrgByNumericId(numericId);
+    const match = getOrgByNumericId(numericId);
     if (match) {
       return match.slug;
     }
@@ -164,7 +162,7 @@ async function resolveOrgFromCache(
  */
 export async function resolveEffectiveOrg(orgSlug: string): Promise<string> {
   // First attempt: use local cache
-  const fromCache = await resolveOrgFromCache(orgSlug);
+  const fromCache = resolveOrgFromCache(orgSlug);
   if (fromCache) {
     return fromCache;
   }
@@ -198,6 +196,6 @@ export async function resolveEffectiveOrg(orgSlug: string): Promise<string> {
   }
 
   // Retry after refresh
-  const afterRefresh = await resolveOrgFromCache(orgSlug);
+  const afterRefresh = resolveOrgFromCache(orgSlug);
   return afterRefresh ?? orgSlug;
 }

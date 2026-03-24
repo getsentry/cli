@@ -46,7 +46,7 @@ export const whoamiCommand = buildCommand({
   async *func(this: SentryContext, flags: WhoamiFlags) {
     applyFreshFlag(flags);
 
-    if (!(await isAuthenticated())) {
+    if (!isAuthenticated()) {
       throw new AuthError("not_authenticated");
     }
 

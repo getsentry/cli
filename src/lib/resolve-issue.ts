@@ -62,7 +62,7 @@ async function resolveAliasSuffix(
   // Detect DSNs to get fingerprint for validation
   const detection = await detectAllDsns(cwd);
   const fingerprint = detection.fingerprint;
-  const projectEntry = await getProjectByAlias(alias, fingerprint);
+  const projectEntry = getProjectByAlias(alias, fingerprint);
 
   if (!projectEntry) {
     return null;

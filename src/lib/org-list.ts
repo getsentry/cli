@@ -874,7 +874,7 @@ async function resolveOrgSlugMatch(
 ): Promise<ParsedOrgProject> {
   const slug = parsed.projectSlug;
   const { getCachedOrganizations } = await import("./db/regions.js");
-  const cachedOrgs = await getCachedOrganizations();
+  const cachedOrgs = getCachedOrganizations();
   const matchingOrg = cachedOrgs.find((o) => o.slug === slug);
   if (!matchingOrg) {
     return parsed;

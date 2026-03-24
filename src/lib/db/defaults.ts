@@ -11,7 +11,7 @@ type DefaultsRow = {
   updated_at: number;
 };
 
-export async function getDefaultOrganization(): Promise<string | undefined> {
+export function getDefaultOrganization(): string | undefined {
   const db = getDatabase();
   const row = db
     .query("SELECT organization FROM defaults WHERE id = 1")
@@ -20,7 +20,7 @@ export async function getDefaultOrganization(): Promise<string | undefined> {
   return row?.organization ?? undefined;
 }
 
-export async function getDefaultProject(): Promise<string | undefined> {
+export function getDefaultProject(): string | undefined {
   const db = getDatabase();
   const row = db.query("SELECT project FROM defaults WHERE id = 1").get() as
     | Pick<DefaultsRow, "project">
@@ -35,10 +35,10 @@ export async function getDefaultProject(): Promise<string | undefined> {
  * @param organization - undefined = keep existing, null = clear, string = set new value
  * @param project - undefined = keep existing, null = clear, string = set new value
  */
-export async function setDefaults(
+export function setDefaults(
   organization?: string | null,
   project?: string | null
-): Promise<void> {
+): void {
   const db = getDatabase();
   const now = Date.now();
 

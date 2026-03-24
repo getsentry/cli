@@ -93,7 +93,7 @@ describe("resolveOrgProjectFromArg", () => {
     findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
     resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
     // Pre-populate org cache so resolveEffectiveOrg hits the fast path
-    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {

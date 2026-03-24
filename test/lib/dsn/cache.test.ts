@@ -18,13 +18,13 @@ useTestConfigDir("test-dsn-cache-");
 describe("DSN Cache", () => {
   describe("getCachedDsn", () => {
     test("returns undefined when no cache exists", async () => {
-      const result = await getCachedDsn("/some/path");
+      const result = getCachedDsn("/some/path");
       expect(result).toBeUndefined();
     });
 
     test("returns cached entry when it exists", async () => {
       const testDir = "/test/directory";
-      await setCachedDsn(testDir, {
+      setCachedDsn(testDir, {
         dsn: "https://key@o123.ingest.sentry.io/456",
         projectId: "456",
         orgId: "123",
@@ -32,7 +32,7 @@ describe("DSN Cache", () => {
         sourcePath: ".env.local",
       });
 
-      const result = await getCachedDsn(testDir);
+      const result = getCachedDsn(testDir);
 
       expect(result).toBeDefined();
       expect(result?.dsn).toBe("https://key@o123.ingest.sentry.io/456");
@@ -46,7 +46,7 @@ describe("DSN Cache", () => {
     test("creates new cache entry", async () => {
       const testDir = "/new/directory";
 
-      await setCachedDsn(testDir, {
+      setCachedDsn(testDir, {
         dsn: "https://abc@o789.ingest.sentry.io/111",
         projectId: "111",
         orgId: "789",
@@ -54,7 +54,7 @@ describe("DSN Cache", () => {
         sourcePath: "src/config.ts",
       });
 
-      const cached = await getCachedDsn(testDir);
+      const cached = getCachedDsn(testDir);
       expect(cached?.dsn).toBe("https://abc@o789.ingest.sentry.io/111");
       expect(cached?.sourcePath).toBe("src/config.ts");
     });
@@ -62,21 +62,21 @@ describe("DSN Cache", () => {
     test("updates existing cache entry", async () => {
       const testDir = "/update/test";
 
-      await setCachedDsn(testDir, {
+      setCachedDsn(testDir, {
         dsn: "https://old@o1.ingest.sentry.io/1",
         projectId: "1",
         orgId: "1",
         source: "env_file",
       });
 
-      await setCachedDsn(testDir, {
+      setCachedDsn(testDir, {
         dsn: "https://new@o2.ingest.sentry.io/2",
         projectId: "2",
         orgId: "2",
         source: "code",
       });
 
-      const cached = await getCachedDsn(testDir);
+      const cached = getCachedDsn(testDir);
       expect(cached?.dsn).toBe("https://new@o2.ingest.sentry.io/2");
       expect(cached?.projectId).toBe("2");
     });
@@ -85,14 +85,14 @@ describe("DSN Cache", () => {
       const testDir = "/timestamp/test";
       const before = Date.now();
 
-      await setCachedDsn(testDir, {
+      setCachedDsn(testDir, {
         dsn: "https://key@o1.ingest.sentry.io/1",
         projectId: "1",
         source: "env",
       });
 
       const after = Date.now();
-      const cached = await getCachedDsn(testDir);
+      const cached = getCachedDsn(testDir);
 
       expect(cached?.cachedAt).toBeGreaterThanOrEqual(before);
       expect(cached?.cachedAt).toBeLessThanOrEqual(after);
@@ -103,35 +103,35 @@ describe("DSN Cache", () => {
     test("adds resolved info to existing cache entry", async () => {
       const testDir = "/resolve/test";
 
-      await setCachedDsn(testDir, {
+      setCachedDsn(testDir, {
         dsn: "https://key@o123.ingest.sentry.io/456",
         projectId: "456",
         orgId: "123",
         source: "env_file",
       });
 
-      await updateCachedResolution(testDir, {
+      updateCachedResolution(testDir, {
         orgSlug: "my-org",
         orgName: "My Organization",
         projectSlug: "my-project",
         projectName: "My Project",
       });
 
-      const cached = await getCachedDsn(testDir);
+      const cached = getCachedDsn(testDir);
       expect(cached?.resolved).toBeDefined();
       expect(cached?.resolved?.orgSlug).toBe("my-org");
       expect(cached?.resolved?.projectName).toBe("My Project");
     });
 
     test("does nothing when no cache entry exists", async () => {
-      await updateCachedResolution("/nonexistent", {
+      updateCachedResolution("/nonexistent", {
         orgSlug: "test",
         orgName: "Test",
         projectSlug: "test",
         projectName: "Test",
       });
 
-      const cached = await getCachedDsn("/nonexistent");
+      const cached = getCachedDsn("/nonexistent");
       expect(cached).toBeUndefined();
     });
   });
@@ -141,39 +141,39 @@ describe("DSN Cache", () => {
       const dir1 = "/dir1";
       const dir2 = "/dir2";
 
-      await setCachedDsn(dir1, {
+      setCachedDsn(dir1, {
         dsn: "https://a@o1.ingest.sentry.io/1",
         projectId: "1",
         source: "env",
       });
-      await setCachedDsn(dir2, {
+      setCachedDsn(dir2, {
         dsn: "https://b@o2.ingest.sentry.io/2",
         projectId: "2",
         source: "env",
       });
 
-      await clearDsnCache(dir1);
+      clearDsnCache(dir1);
 
-      expect(await getCachedDsn(dir1)).toBeUndefined();
-      expect(await getCachedDsn(dir2)).toBeDefined();
+      expect(getCachedDsn(dir1)).toBeUndefined();
+      expect(getCachedDsn(dir2)).toBeDefined();
     });
 
     test("clears all cache when no directory specified", async () => {
-      await setCachedDsn("/dir1", {
+      setCachedDsn("/dir1", {
         dsn: "https://a@o1.ingest.sentry.io/1",
         projectId: "1",
         source: "env",
       });
-      await setCachedDsn("/dir2", {
+      setCachedDsn("/dir2", {
         dsn: "https://b@o2.ingest.sentry.io/2",
         projectId: "2",
         source: "env",
       });
 
-      await clearDsnCache();
+      clearDsnCache();
 
-      expect(await getCachedDsn("/dir1")).toBeUndefined();
-      expect(await getCachedDsn("/dir2")).toBeUndefined();
+      expect(getCachedDsn("/dir1")).toBeUndefined();
+      expect(getCachedDsn("/dir2")).toBeUndefined();
     });
   });
 });

@@ -203,7 +203,7 @@ type OrgResolution = {
  */
 async function resolveOrgsForAutoDetect(cwd: string): Promise<OrgResolution> {
   // 1. Check config defaults
-  const defaultOrg = await getDefaultOrganization();
+  const defaultOrg = getDefaultOrganization();
   if (defaultOrg) {
     return { orgs: [defaultOrg] };
   }

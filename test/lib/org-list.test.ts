@@ -662,7 +662,7 @@ describe("dispatchOrgScopedList", () => {
       "resolveEffectiveOrg"
     ).mockImplementation((org: string) => Promise.resolve(org));
 
-    getDefaultOrganizationSpy.mockResolvedValue(null);
+    getDefaultOrganizationSpy.mockReturnValue(null);
     resolveAllTargetsSpy.mockResolvedValue({ targets: [] });
     setPaginationCursorSpy.mockReturnValue(undefined);
     clearPaginationCursorSpy.mockReturnValue(undefined);
@@ -915,7 +915,7 @@ describe("dispatchOrgScopedList", () => {
       getCachedOrgsSpy = spyOn(
         regions,
         "getCachedOrganizations"
-      ).mockResolvedValue([]);
+      ).mockReturnValue([]);
     });
 
     afterEach(() => {
@@ -923,7 +923,7 @@ describe("dispatchOrgScopedList", () => {
     });
 
     test("redirect converts project-search to org-all when slug matches cached org", async () => {
-      getCachedOrgsSpy.mockResolvedValue([
+      getCachedOrgsSpy.mockReturnValue([
         { slug: "acme-corp", id: "1", name: "Acme Corp" },
       ]);
 
@@ -949,7 +949,7 @@ describe("dispatchOrgScopedList", () => {
     });
 
     test("error throws ResolutionError when slug matches cached org", async () => {
-      getCachedOrgsSpy.mockResolvedValue([
+      getCachedOrgsSpy.mockReturnValue([
         { slug: "acme-corp", id: "1", name: "Acme Corp" },
       ]);
 
@@ -967,7 +967,7 @@ describe("dispatchOrgScopedList", () => {
     });
 
     test("error message includes actionable hints", async () => {
-      getCachedOrgsSpy.mockResolvedValue([
+      getCachedOrgsSpy.mockReturnValue([
         { slug: "acme-corp", id: "1", name: "Acme Corp" },
       ]);
 
@@ -991,7 +991,7 @@ describe("dispatchOrgScopedList", () => {
     });
 
     test("no orgSlugMatchBehavior skips pre-check and calls handler", async () => {
-      getCachedOrgsSpy.mockResolvedValue([
+      getCachedOrgsSpy.mockReturnValue([
         { slug: "acme-corp", id: "1", name: "Acme Corp" },
       ]);
 
@@ -1019,7 +1019,7 @@ describe("dispatchOrgScopedList", () => {
     });
 
     test("redirect with no cache match falls through to project-search handler", async () => {
-      getCachedOrgsSpy.mockResolvedValue([
+      getCachedOrgsSpy.mockReturnValue([
         { slug: "other-org", id: "2", name: "Other Org" },
       ]);
 
@@ -1046,7 +1046,7 @@ describe("dispatchOrgScopedList", () => {
     });
 
     test("redirect with empty cache falls through to project-search handler", async () => {
-      getCachedOrgsSpy.mockResolvedValue([]);
+      getCachedOrgsSpy.mockReturnValue([]);
 
       const handler = mock(() =>
         Promise.resolve({ items: [] } as ListResult<FakeWithOrg>)

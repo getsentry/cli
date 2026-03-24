@@ -103,8 +103,8 @@ function formatCommands(commands: HelpCommand[]): string {
  * Build the custom branded help output string.
  * Shows a contextual example based on authentication status.
  */
-export async function printCustomHelp(): Promise<string> {
-  const loggedIn = await isAuthenticated();
+export function printCustomHelp(): string {
+  const loggedIn = isAuthenticated();
   const example = loggedIn ? EXAMPLE_LOGGED_IN : EXAMPLE_LOGGED_OUT;
 
   const lines: string[] = [];

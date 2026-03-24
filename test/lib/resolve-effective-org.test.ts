@@ -23,11 +23,11 @@ useTestConfigDir("resolve-effective-org-");
 
 describe("getOrgByNumericId", () => {
   test("returns slug and regionUrl when org_id matches", async () => {
-    await setOrgRegions([
+    setOrgRegions([
       { slug: "my-org", regionUrl: "https://us.sentry.io", orgId: "1081365" },
     ]);
 
-    const result = await getOrgByNumericId("1081365");
+    const result = getOrgByNumericId("1081365");
     expect(result).toEqual({
       slug: "my-org",
       regionUrl: "https://us.sentry.io",
@@ -35,29 +35,29 @@ describe("getOrgByNumericId", () => {
   });
 
   test("returns undefined when no org_id matches", async () => {
-    await setOrgRegions([
+    setOrgRegions([
       { slug: "my-org", regionUrl: "https://us.sentry.io", orgId: "1081365" },
     ]);
 
-    const result = await getOrgByNumericId("9999999");
+    const result = getOrgByNumericId("9999999");
     expect(result).toBeUndefined();
   });
 
   test("returns undefined when org_id column is null", async () => {
-    await setOrgRegion("my-org", "https://us.sentry.io");
+    setOrgRegion("my-org", "https://us.sentry.io");
 
-    const result = await getOrgByNumericId("1081365");
+    const result = getOrgByNumericId("1081365");
     expect(result).toBeUndefined();
   });
 
   test("returns correct org when multiple orgs exist", async () => {
-    await setOrgRegions([
+    setOrgRegions([
       { slug: "org-a", regionUrl: "https://us.sentry.io", orgId: "111" },
       { slug: "org-b", regionUrl: "https://de.sentry.io", orgId: "222" },
       { slug: "org-c", regionUrl: "https://us.sentry.io", orgId: "333" },
     ]);
 
-    const result = await getOrgByNumericId("222");
+    const result = getOrgByNumericId("222");
     expect(result).toEqual({
       slug: "org-b",
       regionUrl: "https://de.sentry.io",
@@ -69,47 +69,45 @@ describe("getOrgByNumericId", () => {
 
 describe("setOrgRegions with orgId", () => {
   test("stores org_id and allows lookup by numeric ID", async () => {
-    await setOrgRegions([
+    setOrgRegions([
       { slug: "acme", regionUrl: "https://us.sentry.io", orgId: "42" },
     ]);
 
-    const region = await getOrgRegion("acme");
+    const region = getOrgRegion("acme");
     expect(region).toBe("https://us.sentry.io");
 
-    const byId = await getOrgByNumericId("42");
+    const byId = getOrgByNumericId("42");
     expect(byId).toEqual({ slug: "acme", regionUrl: "https://us.sentry.io" });
   });
 
   test("handles entries without orgId", async () => {
-    await setOrgRegions([
-      { slug: "no-id-org", regionUrl: "https://de.sentry.io" },
-    ]);
+    setOrgRegions([{ slug: "no-id-org", regionUrl: "https://de.sentry.io" }]);
 
-    const region = await getOrgRegion("no-id-org");
+    const region = getOrgRegion("no-id-org");
     expect(region).toBe("https://de.sentry.io");
 
-    const byId = await getOrgByNumericId("no-id-org");
+    const byId = getOrgByNumericId("no-id-org");
     expect(byId).toBeUndefined();
   });
 
   test("upserts update region on slug conflict", async () => {
-    await setOrgRegions([
+    setOrgRegions([
       { slug: "my-org", regionUrl: "https://us.sentry.io", orgId: "100" },
     ]);
 
-    await setOrgRegions([
+    setOrgRegions([
       { slug: "my-org", regionUrl: "https://de.sentry.io", orgId: "100" },
     ]);
 
-    const region = await getOrgRegion("my-org");
+    const region = getOrgRegion("my-org");
     expect(region).toBe("https://de.sentry.io");
 
-    const byId = await getOrgByNumericId("100");
+    const byId = getOrgByNumericId("100");
     expect(byId?.slug).toBe("my-org");
   });
 
   test("empty entries array is a no-op", async () => {
-    await setOrgRegions([]);
+    setOrgRegions([]);
   });
 });
 
@@ -117,14 +115,14 @@ describe("setOrgRegions with orgId", () => {
 
 describe("resolveEffectiveOrg", () => {
   test("returns orgSlug when slug is already cached", async () => {
-    await setOrgRegion("my-org", "https://us.sentry.io");
+    setOrgRegion("my-org", "https://us.sentry.io");
 
     const result = await resolveEffectiveOrg("my-org");
     expect(result).toBe("my-org");
   });
 
   test("resolves DSN-style org via cached numeric ID", async () => {
-    await setOrgRegions([
+    setOrgRegions([
       {
         slug: "acme-corp",
         regionUrl: "https://us.sentry.io",
@@ -137,7 +135,7 @@ describe("resolveEffectiveOrg", () => {
   });
 
   test("resolves another DSN org ID pattern", async () => {
-    await setOrgRegions([
+    setOrgRegions([
       { slug: "test-org", regionUrl: "https://de.sentry.io", orgId: "42" },
     ]);
 
@@ -146,7 +144,7 @@ describe("resolveEffectiveOrg", () => {
   });
 
   test("resolves large numeric ID", async () => {
-    await setOrgRegions([
+    setOrgRegions([
       {
         slug: "big-org",
         regionUrl: "https://us.sentry.io",

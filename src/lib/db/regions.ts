@@ -53,9 +53,7 @@ export type OrgRegionEntry = {
  * @param orgSlug - The organization slug
  * @returns The region URL if cached, undefined otherwise
  */
-export async function getOrgRegion(
-  orgSlug: string
-): Promise<string | undefined> {
+export function getOrgRegion(orgSlug: string): string | undefined {
   const db = getDatabase();
   const row = db
     .query(`SELECT region_url FROM ${TABLE} WHERE org_slug = ?`)
@@ -73,9 +71,9 @@ export async function getOrgRegion(
  * @param numericId - The bare numeric org ID (without "o" prefix)
  * @returns The org slug and region URL if found, undefined otherwise
  */
-export async function getOrgByNumericId(
+export function getOrgByNumericId(
   numericId: string
-): Promise<{ slug: string; regionUrl: string } | undefined> {
+): { slug: string; regionUrl: string } | undefined {
   const db = getDatabase();
   const row = db
     .query(`SELECT org_slug, region_url FROM ${TABLE} WHERE org_id = ?`)
@@ -95,10 +93,7 @@ export async function getOrgByNumericId(
  * @param orgSlug - The organization slug
  * @param regionUrl - The region URL (e.g., https://us.sentry.io)
  */
-export async function setOrgRegion(
-  orgSlug: string,
-  regionUrl: string
-): Promise<void> {
+export function setOrgRegion(orgSlug: string, regionUrl: string): void {
   const db = getDatabase();
   const now = Date.now();
 
@@ -119,7 +114,7 @@ export async function setOrgRegion(
  *
  * @param entries - Array of org region entries
  */
-export async function setOrgRegions(entries: OrgRegionEntry[]): Promise<void> {
+export function setOrgRegions(entries: OrgRegionEntry[]): void {
   if (entries.length === 0) {
     return;
   }
@@ -152,7 +147,7 @@ export async function setOrgRegions(entries: OrgRegionEntry[]): Promise<void> {
  * Clear all cached organization regions.
  * Should be called when the user logs out.
  */
-export async function clearOrgRegions(): Promise<void> {
+export function clearOrgRegions(): void {
   const db = getDatabase();
   db.query(`DELETE FROM ${TABLE}`).run();
 }
@@ -163,7 +158,7 @@ export async function clearOrgRegions(): Promise<void> {
  *
  * @returns Map of org slug to region URL
  */
-export async function getAllOrgRegions(): Promise<Map<string, string>> {
+export function getAllOrgRegions(): Map<string, string> {
   const db = getDatabase();
   const rows = db
     .query(`SELECT org_slug, region_url FROM ${TABLE}`)
@@ -202,7 +197,7 @@ const ORG_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
  *
  * @returns Array of cached org entries, or empty if cache is cold/stale/disabled/incomplete
  */
-export async function getCachedOrganizations(): Promise<CachedOrg[]> {
+export function getCachedOrganizations(): CachedOrg[] {
   if (orgCacheDisabled) {
     return [];
   }
@@ -236,9 +231,7 @@ export async function getCachedOrganizations(): Promise<CachedOrg[]> {
  * @param orgSlug - The organization slug
  * @returns The user's role (e.g., "member", "admin", "owner"), or undefined if not cached
  */
-export async function getCachedOrgRole(
-  orgSlug: string
-): Promise<string | undefined> {
+export function getCachedOrgRole(orgSlug: string): string | undefined {
   const db = getDatabase();
   const cutoff = Date.now() - ORG_CACHE_TTL_MS;
   const row = db

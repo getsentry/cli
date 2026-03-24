@@ -82,8 +82,8 @@ describe("statusCommand.func", () => {
 
     // Defaults that most tests override
     getUserInfoSpy.mockReturnValue(null);
-    getDefaultOrgSpy.mockResolvedValue(null);
-    getDefaultProjectSpy.mockResolvedValue(null);
+    getDefaultOrgSpy.mockReturnValue(null);
+    getDefaultProjectSpy.mockReturnValue(null);
     getDbPathSpy.mockReturnValue("/fake/db/path");
     listOrgsSpy.mockResolvedValue([]);
 
@@ -108,7 +108,7 @@ describe("statusCommand.func", () => {
   describe("not authenticated", () => {
     test("throws AuthError with skipAutoAuth when not authenticated", async () => {
       getAuthConfigSpy.mockReturnValue(undefined);
-      isAuthenticatedSpy.mockResolvedValue(false);
+      isAuthenticatedSpy.mockReturnValue(false);
 
       const { context } = createContext();
 
@@ -130,7 +130,7 @@ describe("statusCommand.func", () => {
         expiresAt: Date.now() + 3_600_000,
         refreshToken: "refresh_xyz",
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
 
       const { context, getOutput } = createContext();
       await func.call(context, humanFlags);
@@ -143,7 +143,7 @@ describe("statusCommand.func", () => {
         token: "sntrys_abc123def456",
         source: "oauth",
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
 
       const { context, getOutput } = createContext();
       await func.call(context, humanFlags);
@@ -158,7 +158,7 @@ describe("statusCommand.func", () => {
         source: "oauth",
         expiresAt: Date.now() + 3_600_000,
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
 
       const { context, getOutput } = createContext();
       await func.call(context, humanFlags);
@@ -172,7 +172,7 @@ describe("statusCommand.func", () => {
         source: "oauth",
         refreshToken: "refresh_xyz",
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
 
       const { context, getOutput } = createContext();
       await func.call(context, humanFlags);
@@ -186,7 +186,7 @@ describe("statusCommand.func", () => {
         token: "sntrys_abc123def456",
         source: "oauth",
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
 
       const { context, getOutput } = createContext();
       await func.call(context, humanFlags);
@@ -202,7 +202,7 @@ describe("statusCommand.func", () => {
         token: "sntrys_env_token_123",
         source: "env:SENTRY_AUTH_TOKEN",
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
 
       const { context, getOutput } = createContext();
       await func.call(context, humanFlags);
@@ -215,7 +215,7 @@ describe("statusCommand.func", () => {
         token: "sntrys_env_token_123",
         source: "env:SENTRY_AUTH_TOKEN",
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
 
       const { context, getOutput } = createContext();
       await func.call(context, humanFlags);
@@ -230,7 +230,7 @@ describe("statusCommand.func", () => {
         token: "sntrys_env_token_123",
         source: "env:SENTRY_AUTH_TOKEN",
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
 
       const { context, getOutput } = createContext();
       await func.call(context, humanFlags);
@@ -244,7 +244,7 @@ describe("statusCommand.func", () => {
         token: "sntrys_env_token_123_long_enough",
         source: "env:SENTRY_AUTH_TOKEN",
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
 
       const { context, getOutput } = createContext();
       await func.call(context, humanFlags);
@@ -259,7 +259,7 @@ describe("statusCommand.func", () => {
         token: "sntrys_env_token_123_long_enough",
         source: "env:SENTRY_AUTH_TOKEN",
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
 
       const { context, getOutput } = createContext();
       await func.call(context, { ...humanFlags, "show-token": true });
@@ -274,7 +274,7 @@ describe("statusCommand.func", () => {
         token: "sntrys_token_456",
         source: "env:SENTRY_TOKEN",
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
 
       const { context, getOutput } = createContext();
       await func.call(context, humanFlags);
@@ -293,7 +293,7 @@ describe("statusCommand.func", () => {
         token: "sntrys_abc",
         source: "oauth",
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
       listOrgsSpy.mockRejectedValue(new Error("Network error"));
 
       const { context, getOutput } = createContext();
@@ -307,7 +307,7 @@ describe("statusCommand.func", () => {
         token: "sntrys_abc",
         source: "oauth",
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
       listOrgsSpy.mockResolvedValue([{ name: "My Org", slug: "my-org" }]);
 
       const { context, getOutput } = createContext();
@@ -325,9 +325,9 @@ describe("statusCommand.func", () => {
         token: "sntrys_abc",
         source: "oauth",
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
-      getDefaultOrgSpy.mockResolvedValue("my-org");
-      getDefaultProjectSpy.mockResolvedValue("my-project");
+      isAuthenticatedSpy.mockReturnValue(true);
+      getDefaultOrgSpy.mockReturnValue("my-org");
+      getDefaultProjectSpy.mockReturnValue("my-project");
 
       const { context, getOutput } = createContext();
       await func.call(context, humanFlags);
@@ -342,7 +342,7 @@ describe("statusCommand.func", () => {
         token: "sntrys_abc",
         source: "oauth",
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
 
       const { context, getOutput } = createContext();
       await func.call(context, humanFlags);
@@ -357,7 +357,7 @@ describe("statusCommand.func", () => {
         token: "sntrys_abc",
         source: "oauth",
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
       getUserInfoSpy.mockReturnValue({
         name: "Jane Doe",
         email: "jane@example.com",
@@ -379,14 +379,14 @@ describe("statusCommand.func", () => {
         expiresAt: Date.now() + 3_600_000,
         refreshToken: "refresh_xyz",
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
       getUserInfoSpy.mockReturnValue({
         name: "Jane Doe",
         email: "jane@example.com",
         username: "janedoe",
       });
-      getDefaultOrgSpy.mockResolvedValue("my-org");
-      getDefaultProjectSpy.mockResolvedValue("my-project");
+      getDefaultOrgSpy.mockReturnValue("my-org");
+      getDefaultProjectSpy.mockReturnValue("my-project");
       listOrgsSpy.mockResolvedValue([{ name: "My Org", slug: "my-org" }]);
 
       const { context, getOutput } = createContext();
@@ -410,7 +410,7 @@ describe("statusCommand.func", () => {
         token: "sntrys_abc123def456",
         source: "oauth",
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
 
       const { context, getOutput } = createContext();
       await func.call(context, jsonFlags);
@@ -425,7 +425,7 @@ describe("statusCommand.func", () => {
         token: "sntrys_abc",
         source: "oauth",
       });
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
       listOrgsSpy.mockRejectedValue(new Error("Network error"));
 
       const { context, getOutput } = createContext();

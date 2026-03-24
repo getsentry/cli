@@ -83,10 +83,10 @@ beforeEach(async () => {
   originalFetch = globalThis.fetch;
   await setAuthToken("test-token");
   // Pre-populate region cache for orgs used in tests to avoid region resolution API calls
-  await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
-  await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
-  await setOrgRegion("cached-org", DEFAULT_SENTRY_URL);
-  await setOrgRegion("org1", DEFAULT_SENTRY_URL);
+  setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+  setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+  setOrgRegion("cached-org", DEFAULT_SENTRY_URL);
+  setOrgRegion("org1", DEFAULT_SENTRY_URL);
 });
 
 afterEach(() => {
@@ -269,7 +269,7 @@ describe("resolveOrgAndIssueId", () => {
     const { setProjectAliases } = await import(
       "../../../src/lib/db/project-aliases.js"
     );
-    await setProjectAliases(
+    setProjectAliases(
       {
         f: { orgSlug: "cached-org", projectSlug: "frontend" },
         b: { orgSlug: "cached-org", projectSlug: "backend" },
@@ -369,7 +369,7 @@ describe("resolveOrgAndIssueId", () => {
 
   test("resolves short suffix format (e.g., 'G') using project context from defaults", async () => {
     const { setDefaults } = await import("../../../src/lib/db/defaults.js");
-    await setDefaults("my-org", "my-project");
+    setDefaults("my-org", "my-project");
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -420,7 +420,7 @@ describe("resolveOrgAndIssueId", () => {
     const { clearAuth } = await import("../../../src/lib/db/auth.js");
     const { setDefaults } = await import("../../../src/lib/db/defaults.js");
     await clearAuth();
-    await setDefaults(undefined, undefined);
+    setDefaults(undefined, undefined);
 
     await expect(
       resolveOrgAndIssueId({
@@ -435,7 +435,7 @@ describe("resolveOrgAndIssueId", () => {
     const { clearProjectAliases } = await import(
       "../../../src/lib/db/project-aliases.js"
     );
-    await clearProjectAliases();
+    clearProjectAliases();
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -525,7 +525,7 @@ describe("resolveOrgAndIssueId", () => {
     const { clearProjectAliases } = await import(
       "../../../src/lib/db/project-aliases.js"
     );
-    await clearProjectAliases();
+    clearProjectAliases();
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -601,9 +601,9 @@ describe("resolveOrgAndIssueId", () => {
     const { clearProjectAliases } = await import(
       "../../../src/lib/db/project-aliases.js"
     );
-    await clearProjectAliases();
+    clearProjectAliases();
 
-    await setOrgRegion("org2", DEFAULT_SENTRY_URL);
+    setOrgRegion("org2", DEFAULT_SENTRY_URL);
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -685,7 +685,7 @@ describe("resolveOrgAndIssueId", () => {
 
   test("short suffix auth error (401) propagates", async () => {
     const { setDefaults } = await import("../../../src/lib/db/defaults.js");
-    await setDefaults("my-org", "my-project");
+    setDefaults("my-org", "my-project");
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async () =>
@@ -705,7 +705,7 @@ describe("resolveOrgAndIssueId", () => {
 
   test("short suffix server error (500) propagates", async () => {
     const { setDefaults } = await import("../../../src/lib/db/defaults.js");
-    await setDefaults("my-org", "my-project");
+    setDefaults("my-org", "my-project");
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async () =>
@@ -727,9 +727,9 @@ describe("resolveOrgAndIssueId", () => {
     const { clearProjectAliases } = await import(
       "../../../src/lib/db/project-aliases.js"
     );
-    await clearProjectAliases();
+    clearProjectAliases();
 
-    await setOrgRegion("org2", DEFAULT_SENTRY_URL);
+    setOrgRegion("org2", DEFAULT_SENTRY_URL);
 
     const makeShortIdResponse = (orgSlug: string, groupId: string) =>
       new Response(
@@ -810,7 +810,7 @@ describe("resolveOrgAndIssueId", () => {
     const { clearProjectAliases } = await import(
       "../../../src/lib/db/project-aliases.js"
     );
-    await clearProjectAliases();
+    clearProjectAliases();
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -866,7 +866,7 @@ describe("resolveOrgAndIssueId", () => {
     const { clearProjectAliases } = await import(
       "../../../src/lib/db/project-aliases.js"
     );
-    await clearProjectAliases();
+    clearProjectAliases();
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1595,7 +1595,7 @@ describe("ensureRootCauseAnalysis", () => {
 describe("resolveOrgAndIssueId: magic @ selectors", () => {
   test("resolves @latest to the most recent unresolved issue", async () => {
     const { setDefaults } = await import("../../../src/lib/db/defaults.js");
-    await setDefaults("test-org", undefined);
+    setDefaults("test-org", undefined);
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1644,7 +1644,7 @@ describe("resolveOrgAndIssueId: magic @ selectors", () => {
 
   test("resolves @most_frequent to the highest frequency issue", async () => {
     const { setDefaults } = await import("../../../src/lib/db/defaults.js");
-    await setDefaults("test-org", undefined);
+    setDefaults("test-org", undefined);
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1738,7 +1738,7 @@ describe("resolveOrgAndIssueId: magic @ selectors", () => {
 
   test("throws ResolutionError when no unresolved issues found", async () => {
     const { setDefaults } = await import("../../../src/lib/db/defaults.js");
-    await setDefaults("test-org", undefined);
+    setDefaults("test-org", undefined);
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1774,7 +1774,7 @@ describe("resolveOrgAndIssueId: magic @ selectors", () => {
     const { clearAuth } = await import("../../../src/lib/db/auth.js");
     const { setDefaults } = await import("../../../src/lib/db/defaults.js");
     await clearAuth();
-    await setDefaults(undefined, undefined);
+    setDefaults(undefined, undefined);
 
     await expect(
       resolveOrgAndIssueId({
@@ -1796,7 +1796,7 @@ describe("resolveIssue: numeric 404 error handling", () => {
   beforeEach(async () => {
     savedFetch = globalThis.fetch;
     await setAuthToken("test-token");
-    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
@@ -1896,10 +1896,10 @@ describe("resolveIssue: project-search DSN shortcut", () => {
   beforeEach(async () => {
     dsnOriginalFetch = globalThis.fetch;
     await setAuthToken("test-token");
-    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("my-org", DEFAULT_SENTRY_URL);
     // Seed project cache so resolveFromDsn resolves without any API call.
     // orgId is "123" (DSN parser strips the "o" prefix from o123.ingest.*)
-    await setCachedProject("123", "456", {
+    setCachedProject("123", "456", {
       orgSlug: "my-org",
       orgName: "My Org",
       projectSlug: "my-project",

@@ -282,7 +282,7 @@ describe("create-sentry-project", () => {
   describe("resolveOrgSlug — numeric org ID from DSN", () => {
     test("numeric ID + cache hit → resolved to slug for project creation", async () => {
       resolveOrgSpy.mockResolvedValue({ org: "4507492088676352" });
-      getOrgByNumericIdSpy.mockResolvedValue({
+      getOrgByNumericIdSpy.mockReturnValue({
         slug: "acme-corp",
         regionUrl: "https://us.sentry.io",
       });
@@ -298,7 +298,7 @@ describe("create-sentry-project", () => {
 
     test("numeric ID + cache miss → falls through to single org in listOrganizations", async () => {
       resolveOrgSpy.mockResolvedValue({ org: "4507492088676352" });
-      getOrgByNumericIdSpy.mockResolvedValue(undefined);
+      getOrgByNumericIdSpy.mockReturnValue(undefined);
       listOrgsSpy.mockResolvedValue([
         { id: "1", slug: "solo-org", name: "Solo Org" },
       ]);
@@ -313,7 +313,7 @@ describe("create-sentry-project", () => {
 
     test("numeric ID + cache miss + multiple orgs + --yes → error with org list", async () => {
       resolveOrgSpy.mockResolvedValue({ org: "4507492088676352" });
-      getOrgByNumericIdSpy.mockResolvedValue(undefined);
+      getOrgByNumericIdSpy.mockReturnValue(undefined);
       listOrgsSpy.mockResolvedValue([
         { id: "1", slug: "org-a", name: "Org A" },
         { id: "2", slug: "org-b", name: "Org B" },
@@ -340,7 +340,7 @@ describe("create-sentry-project", () => {
         raw: "https://test-key-abc@o123.ingest.sentry.io/42",
         source: "env_file" as const,
       });
-      getCachedProjectByDsnKeySpy.mockResolvedValue({
+      getCachedProjectByDsnKeySpy.mockReturnValue({
         orgSlug,
         orgName: orgSlug,
         projectSlug,
@@ -430,12 +430,12 @@ describe("create-sentry-project", () => {
         raw: "https://test-key-abc@o123.ingest.sentry.io/42",
         source: "env_file" as const,
       });
-      getCachedProjectByDsnKeySpy.mockResolvedValue(undefined); // cache miss
+      getCachedProjectByDsnKeySpy.mockReturnValue(undefined); // cache miss
       findProjectByDsnKeySpy.mockResolvedValue({
         ...sampleProject,
         organization: { id: "1", slug: "acme-corp", name: "Acme Corp" },
       });
-      setCachedProjectByDsnKeySpy.mockResolvedValue(undefined);
+      setCachedProjectByDsnKeySpy.mockReturnValue(undefined);
       selectSpy.mockResolvedValue("existing");
       getProjectSpy.mockResolvedValue(sampleProject);
       tryGetPrimaryDsnSpy.mockResolvedValue(
@@ -461,7 +461,7 @@ describe("create-sentry-project", () => {
         raw: "https://test-key-abc@o999.ingest.sentry.io/99",
         source: "env_file" as const,
       });
-      getCachedProjectByDsnKeySpy.mockResolvedValue(undefined);
+      getCachedProjectByDsnKeySpy.mockReturnValue(undefined);
       findProjectByDsnKeySpy.mockRejectedValue(new Error("403 Forbidden"));
       resolveOrgSpy.mockResolvedValue({ org: "acme-corp" });
       mockDownstreamSuccess("acme-corp");

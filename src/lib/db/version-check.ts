@@ -6,10 +6,12 @@
  */
 
 import { getDatabase } from "./index.js";
-import { runUpsert } from "./utils.js";
+import { clearMetadata, getMetadata, setMetadata } from "./utils.js";
 
 const KEY_LAST_CHECKED = "version_check.last_checked";
 const KEY_LATEST_VERSION = "version_check.latest_version";
+
+const ALL_KEYS = [KEY_LAST_CHECKED, KEY_LATEST_VERSION];
 
 export type VersionCheckInfo = {
   /** Unix timestamp (ms) of last check, or null if never checked */
@@ -23,18 +25,14 @@ export type VersionCheckInfo = {
  */
 export function getVersionCheckInfo(): VersionCheckInfo {
   const db = getDatabase();
+  const m = getMetadata(db, ALL_KEYS);
 
-  const lastCheckedRow = db
-    .query("SELECT value FROM metadata WHERE key = ?")
-    .get(KEY_LAST_CHECKED) as { value: string } | undefined;
-
-  const latestVersionRow = db
-    .query("SELECT value FROM metadata WHERE key = ?")
-    .get(KEY_LATEST_VERSION) as { value: string } | undefined;
+  const lastChecked = m.get(KEY_LAST_CHECKED);
+  const latestVersion = m.get(KEY_LATEST_VERSION);
 
   return {
-    lastChecked: lastCheckedRow ? Number(lastCheckedRow.value) : null,
-    latestVersion: latestVersionRow?.value ?? null,
+    lastChecked: lastChecked ? Number(lastChecked) : null,
+    latestVersion: latestVersion ?? null,
   };
 }
 
@@ -48,10 +46,7 @@ export function getVersionCheckInfo(): VersionCheckInfo {
  */
 export function clearVersionCheckCache(): void {
   const db = getDatabase();
-  db.query("DELETE FROM metadata WHERE key = ? OR key = ?").run(
-    KEY_LAST_CHECKED,
-    KEY_LATEST_VERSION
-  );
+  clearMetadata(db, ALL_KEYS);
 }
 
 /**
@@ -60,12 +55,8 @@ export function clearVersionCheckCache(): void {
  */
 export function setVersionCheckInfo(latestVersion: string): void {
   const db = getDatabase();
-  const now = Date.now();
-
-  runUpsert(db, "metadata", { key: KEY_LAST_CHECKED, value: String(now) }, [
-    "key",
-  ]);
-  runUpsert(db, "metadata", { key: KEY_LATEST_VERSION, value: latestVersion }, [
-    "key",
-  ]);
+  setMetadata(db, {
+    [KEY_LAST_CHECKED]: String(Date.now()),
+    [KEY_LATEST_VERSION]: latestVersion,
+  });
 }

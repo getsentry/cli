@@ -368,26 +368,34 @@ if (result.success) {
 
 ### SQL Utilities
 
-Use the `upsert()` helper from `src/lib/db/utils.ts` to reduce SQL boilerplate:
+Use helpers from `src/lib/db/utils.ts` to reduce SQL boilerplate:
 
 ```typescript
-import { upsert, runUpsert } from "../db/utils.js";
+import { upsert, runUpsert, getMetadata, setMetadata, clearMetadata, touchCacheEntry } from "../db/utils.js";
 
-// Generate UPSERT statement
-const { sql, values } = upsert("table", { id: 1, name: "foo" }, ["id"]);
-db.query(sql).run(...values);
-
-// Or use convenience wrapper
+// UPSERT (insert or update on conflict)
 runUpsert(db, "table", { id: 1, name: "foo" }, ["id"]);
 
-// Exclude columns from update
+// With excludeFromUpdate (columns only set on INSERT)
 const { sql, values } = upsert(
   "users",
   { id: 1, name: "Bob", created_at: now },
   ["id"],
   { excludeFromUpdate: ["created_at"] }
 );
+db.query(sql).run(...values);
+
+// METADATA table helpers (for key-value config in the metadata table)
+const m = getMetadata(db, [KEY_A, KEY_B]);              // SELECT ... WHERE key IN (...)
+setMetadata(db, { [KEY_A]: "val1", [KEY_B]: "val2" });  // Batch upsert in transaction
+clearMetadata(db, [KEY_A, KEY_B]);                       // DELETE ... WHERE key IN (...)
+
+// Cache entry touch (update last_accessed timestamp)
+touchCacheEntry("dsn_cache", "directory", directoryPath);
 ```
+
+**Enforced by lint:** GritQL rules ban raw metadata queries, inline `last_accessed` UPDATEs,
+and manual `BEGIN`/`COMMIT`/`ROLLBACK` transactions outside `utils.ts` and `migration.ts`.
 
 ### Error Handling
 
@@ -460,15 +468,22 @@ entity-aware suggestions (e.g., "This looks like a span ID").
 - `trace/view.ts` — issue short ID → issue's trace redirect
 - `hex-id.ts` — entity-aware error hints in `validateHexId`/`validateSpanId`
 
-### Async Config Functions
+### DB and Config Function Signatures
 
-All config operations are async. Always await:
+Database operations in `src/lib/db/` are **synchronous** (SQLite is synchronous in Bun).
+Functions that only do SQLite work return values directly — no `async`/`await` needed:
 
 ```typescript
-const token = await getAuthToken();
-const isAuth = await isAuthenticated();
-await setAuthToken(token, expiresIn);
+const org = getDefaultOrganization();  // returns string | undefined
+const info = getUserInfo();            // returns UserInfo | undefined
+setDefaults("my-org", "my-project");   // returns void
+const token = getAuthToken();          // returns string | undefined
 ```
+
+Exceptions that ARE async (they do file I/O or network calls):
+- `clearAuth()` — awaits cache directory cleanup
+- `getCachedDetection()`, `getCachedProjectRoot()`, `setCachedProjectRoot()` — await `stat()` for mtime validation
+- `refreshToken()`, `performTokenRefresh()` — await HTTP calls
 
 ### Imports
 
@@ -831,6 +846,30 @@ mock.module("./some-module", () => ({
 
 <!-- lore:019cb950-9b7b-731a-9832-b7f6cfb6a6a2 -->
 * **Self-hosted OAuth device flow requires Sentry 26.1.0+ and SENTRY\_CLIENT\_ID**: Self-hosted OAuth device flow requires Sentry 26.1.0+ and both \`SENTRY\_URL\` and \`SENTRY\_CLIENT\_ID\` env vars. Users must create a public OAuth app in Settings → Developer Settings. The client ID is NOT optional for self-hosted. Fallback for older instances: \`sentry auth login --token\`. \`getSentryUrl()\` and \`getClientId()\` in \`src/lib/oauth.ts\` read lazily (not at module load) so URL parsing from arguments can set \`SENTRY\_URL\` after import.
+
+<!-- lore:019ce2be-39f1-7ad9-a4c5-4506b62f689c -->
+* **api-client.ts split into domain modules under src/lib/api/**: The original monolithic \`src/lib/api-client.ts\` (1,977 lines) was split into 12 focused domain modules under \`src/lib/api/\`: infrastructure.ts (shared helpers, types, raw requests), organizations.ts, projects.ts, teams.ts, repositories.ts, issues.ts, events.ts, traces.ts, logs.ts, seer.ts, trials.ts, users.ts. The original \`api-client.ts\` was converted to a ~100-line barrel re-export file preserving all existing import paths. The \`biome.jsonc\` override for \`noBarrelFile\` already includes \`api-client.ts\`. When adding new API functions, place them in the appropriate domain module under \`src/lib/api/\`, not in the barrel file.
+
+<!-- lore:019d0b69-1430-74f0-8e9a-426a5c7b321d -->
+* **Bun compiled binary sourcemap options and size impact**: Binary build (\`script/build.ts\`) uses two steps: (1) \`Bun.build()\` produces \`dist-bin/bin.js\` + \`.map\` with \`sourcemap: "linked"\` and minification. (2) \`Bun.build()\` with \`compile: true\` produces native binary — no sourcemap embedded. Bun's compiled binaries use \`/$bunfs/root/bin.js\` as the virtual path in stack traces. Sourcemap upload must use \`--url-prefix '/$bunfs/root/'\` so Sentry can match frames. The upload runs \`sentry-cli sourcemaps inject dist-bin/\` first (adds debug IDs), then uploads both JS and map. Bun's compile step strips comments (including \`//# debugId=\`), but debug ID matching still works via the injected runtime snippet + URL prefix matching. Size: +0.04 MB gzipped vs +2.30 MB for inline sourcemaps. Without \`SENTRY\_AUTH\_TOKEN\`, upload is skipped gracefully.
+
+<!-- lore:019cb8ea-c6f0-75d8-bda7-e32b4e217f92 -->
+* **CLI telemetry DSN is public write-only — safe to embed in install script**: The CLI's Sentry DSN (\`SENTRY\_CLI\_DSN\` in \`src/lib/constants.ts\`) is a public write-only ingest key already baked into every binary. Safe to hardcode in install scripts. Opt-out: \`SENTRY\_CLI\_NO\_TELEMETRY=1\`.
+
+<!-- lore:019c978a-18b5-7a0d-a55f-b72f7789bdac -->
+* **cli.sentry.dev is served from gh-pages branch via GitHub Pages**: \`cli.sentry.dev\` is served from gh-pages branch via GitHub Pages. Craft's gh-pages target runs \`git rm -r -f .\` before extracting docs — persist extra files via \`postReleaseCommand\` in \`.craft.yml\`. Install script supports \`--channel nightly\`, downloading from the \`nightly\` release tag directly. version.json is only used by upgrade/version-check flow.
+
+<!-- lore:019cbe93-19b8-7776-9705-20bbde226599 -->
+* **Nightly delta upgrade buildNightlyPatchGraph fetches ALL patch tags — O(N) HTTP calls**: Delta upgrade in \`src/lib/delta-upgrade.ts\` supports stable (GitHub Releases) and nightly (GHCR) channels. \`filterAndSortChainTags\` filters \`patch-\*\` tags by version range using \`Bun.semver.order()\`. GHCR uses \`fetchWithRetry\` (10s timeout + 1 retry; blobs 30s) with optional \`signal?: AbortSignal\` combined via \`AbortSignal.any()\`. \`isExternalAbort(error, signal)\` skips retries for external aborts — critical for background prefetch. Patches cached to \`~/.sentry/patch-cache/\` (file-based, 7-day TTL). \`loadCachedChain\` stitches patches for multi-hop offline upgrades.
+
+<!-- lore:2c3eb7ab-1341-4392-89fd-d81095cfe9c4 -->
+* **npm bundle requires Node.js >= 22 due to node:sqlite polyfill**: The npm package (dist/bin.cjs) requires Node.js >= 22 because the bun:sqlite polyfill uses \`node:sqlite\`. A runtime version guard in the esbuild banner catches this early. When writing esbuild banner strings in TS template literals, double-escape: \`\\\\\\\n\` in TS → \`\\\n\` in output → newline at runtime. Single \`\\\n\` produces a literal newline inside a JS string, causing SyntaxError.
+
+<!-- lore:019c972c-9f0f-75cd-9e24-9bdbb1ac03d6 -->
+* **Numeric issue ID resolution returns org:undefined despite API success**: Numeric issue ID resolution in \`resolveNumericIssue()\`: (1) try DSN/env/config for org, (2) if found use \`getIssueInOrg(org, id)\` with region routing, (3) else fall back to unscoped \`getIssue(id)\`, (4) extract org from \`issue.permalink\` via \`parseSentryUrl\` as final fallback. \`parseSentryUrl\` handles path-based (\`/organizations/{org}/...\`) and subdomain-style URLs. \`matchSubdomainOrg()\` filters region subdomains by requiring slug length > 2. Self-hosted uses path-based only.
+
+<!-- lore:019ce0bb-f35d-7380-b661-8dc56f9938cf -->
+* **Seer trial prompt uses middleware layering in bin.ts error handling chain**: Error recovery middlewares in \`bin.ts\` are layered: \`main() → executeWithAutoAuth() → executeWithSeerTrialPrompt() → runCommand()\`. Seer trial prompts (for \`no\_budget\`/\`not\_enabled\`) caught by inner wrapper; auth errors bubble to outer. Auth retry goes through full chain. Trial API: \`GET /api/0/customers/{org}/\` → \`productTrials\[]\` (prefer \`seerUsers\`, fallback \`seerAutofix\`). Start: \`PUT /api/0/customers/{org}/product-trial/\`. SaaS-only; self-hosted 404s gracefully. \`ai\_disabled\` excluded. \`startSeerTrial\` accepts \`category\` from trial object — don't hardcode.
 
 <!-- lore:019d0b16-977c-7e49-b06d-523b7782692f -->
 * **Sentry CLI fuzzy matching coverage map across subsystems**: Fuzzy matching exists in: (1) Stricli built-in Damerau-Levenshtein for subcommand/flag typos within known route groups, (2) custom \`fuzzyMatch()\` in \`complete.ts\` for dynamic tab-completion using Levenshtein+prefix+contains scoring, (3) custom \`levenshtein()\` in \`platforms.ts\` for platform name suggestions, (4) plural alias detection in \`app.ts\`, (5) \`resolveCommandPath()\` in \`introspect.ts\` uses \`fuzzyMatch()\` from \`fuzzy.ts\` for top-level and subcommand typos — covering both \`sentry \<typo>\` and \`sentry help \<typo>\`. Static shell tab-completion uses shell-native prefix matching (compgen/\`\_describe\`/fish \`-a\`).

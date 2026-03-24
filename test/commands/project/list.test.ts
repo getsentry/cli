@@ -366,7 +366,7 @@ describe("handleExplicit", () => {
   beforeEach(async () => {
     originalFetch = globalThis.fetch;
     await setAuthToken("test-token");
-    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
@@ -436,7 +436,7 @@ describe("handleOrgAll", () => {
   beforeEach(async () => {
     originalFetch = globalThis.fetch;
     await setAuthToken("test-token");
-    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
@@ -616,7 +616,7 @@ describe("handleProjectSearch", () => {
   beforeEach(async () => {
     originalFetch = globalThis.fetch;
     await setAuthToken("test-token");
-    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
@@ -726,8 +726,8 @@ describe("handleProjectSearch", () => {
   });
 
   test("respects --limit flag", async () => {
-    await setOrgRegion("org-a", DEFAULT_SENTRY_URL);
-    await setOrgRegion("org-b", DEFAULT_SENTRY_URL);
+    setOrgRegion("org-a", DEFAULT_SENTRY_URL);
+    setOrgRegion("org-b", DEFAULT_SENTRY_URL);
 
     const project: SentryProject = {
       id: "1",
@@ -781,8 +781,8 @@ describe("handleProjectSearch", () => {
   });
 
   test("--limit also applies to result items", async () => {
-    await setOrgRegion("org-a", DEFAULT_SENTRY_URL);
-    await setOrgRegion("org-b", DEFAULT_SENTRY_URL);
+    setOrgRegion("org-a", DEFAULT_SENTRY_URL);
+    setOrgRegion("org-b", DEFAULT_SENTRY_URL);
 
     const project: SentryProject = {
       id: "1",
@@ -881,7 +881,7 @@ describe("fetchOrgProjects", () => {
   beforeEach(async () => {
     originalFetch = globalThis.fetch;
     await setAuthToken("test-token");
-    await setOrgRegion("myorg", DEFAULT_SENTRY_URL);
+    setOrgRegion("myorg", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
@@ -911,7 +911,7 @@ describe("fetchOrgProjectsSafe", () => {
   beforeEach(async () => {
     originalFetch = globalThis.fetch;
     await setAuthToken("test-token");
-    await setOrgRegion("myorg", DEFAULT_SENTRY_URL);
+    setOrgRegion("myorg", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
@@ -948,7 +948,7 @@ describe("fetchAllOrgProjects", () => {
   beforeEach(async () => {
     originalFetch = globalThis.fetch;
     await setAuthToken("test-token");
-    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
@@ -1007,8 +1007,8 @@ describe("fetchAllOrgProjects", () => {
       return new Response("Not found", { status: 404 });
     };
 
-    await setOrgRegion("org1", DEFAULT_SENTRY_URL);
-    await setOrgRegion("org2", DEFAULT_SENTRY_URL);
+    setOrgRegion("org1", DEFAULT_SENTRY_URL);
+    setOrgRegion("org2", DEFAULT_SENTRY_URL);
 
     const result = await fetchAllOrgProjects();
     // Only org1's projects should be returned
@@ -1022,7 +1022,7 @@ describe("handleAutoDetect", () => {
   beforeEach(async () => {
     originalFetch = globalThis.fetch;
     await setAuthToken("test-token");
-    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
@@ -1120,7 +1120,7 @@ describe("handleAutoDetect", () => {
 
   test("fast path: uses single-page fetch for single org without platform filter", async () => {
     // Set default org to trigger single-org resolution
-    await setDefaults("test-org");
+    setDefaults("test-org");
     globalThis.fetch = mockProjectFetch(sampleProjects);
 
     const result = await handleAutoDetect("/tmp/test-project", {
@@ -1135,7 +1135,7 @@ describe("handleAutoDetect", () => {
   });
 
   test("fast path: shows truncation message when server has more results", async () => {
-    await setDefaults("test-org");
+    setDefaults("test-org");
     globalThis.fetch = mockProjectFetch(sampleProjects, {
       hasMore: true,
       nextCursor: "1735689600000:0:0",
@@ -1153,7 +1153,7 @@ describe("handleAutoDetect", () => {
   });
 
   test("fast path: includes hasMore and jsonExtra hint when server has more results", async () => {
-    await setDefaults("test-org");
+    setDefaults("test-org");
     globalThis.fetch = mockProjectFetch(sampleProjects, {
       hasMore: true,
       nextCursor: "1735689600000:0:0",
@@ -1174,7 +1174,7 @@ describe("handleAutoDetect", () => {
   });
 
   test("fast path: non-auth API errors return empty results instead of throwing", async () => {
-    await setDefaults("test-org");
+    setDefaults("test-org");
     // Mock returns 403 for projects endpoint (stale org, no access)
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1198,7 +1198,7 @@ describe("handleAutoDetect", () => {
   });
 
   test("fast path: AuthError still propagates", async () => {
-    await setDefaults("test-org");
+    setDefaults("test-org");
     // Clear auth so getAuthToken() throws AuthError before any fetch
     await clearAuth();
 
@@ -1213,7 +1213,7 @@ describe("handleAutoDetect", () => {
 
   test("slow path: uses full fetch when platform filter is active", async () => {
     // Set default org — but platform filter forces slow path
-    await setDefaults("test-org");
+    setDefaults("test-org");
     globalThis.fetch = mockProjectFetch(sampleProjects);
 
     const result = await handleAutoDetect("/tmp/test-project", {

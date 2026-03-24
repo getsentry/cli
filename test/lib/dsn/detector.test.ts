@@ -28,7 +28,7 @@ describe("DSN Detector (New Module)", () => {
     mkdirSync(testDir, { recursive: true });
     mkdirSync(join(testDir, ".git"), { recursive: true });
     // Clear any cached DSN for the test directory
-    await clearDsnCache(testDir);
+    clearDsnCache(testDir);
     // Clear SENTRY_DSN env var
     delete process.env.SENTRY_DSN;
   });
@@ -47,7 +47,7 @@ describe("DSN Detector (New Module)", () => {
       expect(result1?.raw).toBe(dsn);
 
       // Check cache was created
-      const cached = await getCachedDsn(testDir);
+      const cached = getCachedDsn(testDir);
       expect(cached).toBeDefined();
       expect(cached?.dsn).toBe(dsn);
       expect(cached?.source).toBe("env_file");
@@ -76,7 +76,7 @@ describe("DSN Detector (New Module)", () => {
       expect(result2?.raw).toBe(dsn2);
 
       // Cache should be updated
-      const cached = await getCachedDsn(testDir);
+      const cached = getCachedDsn(testDir);
       expect(cached?.dsn).toBe(dsn2);
     });
 
@@ -160,7 +160,7 @@ describe("DSN Detector (New Module)", () => {
       expect(result1?.source).toBe("env");
 
       // Verify it's cached
-      const cached = await getCachedDsn(testDir);
+      const cached = getCachedDsn(testDir);
       expect(cached?.dsn).toBe(envVarDsn);
       expect(cached?.source).toBe("env");
 
@@ -176,7 +176,7 @@ describe("DSN Detector (New Module)", () => {
       expect(result3?.source).toBe("env");
 
       // Cache should be updated
-      const updatedCache = await getCachedDsn(testDir);
+      const updatedCache = getCachedDsn(testDir);
       expect(updatedCache?.dsn).toBe(changedDsn);
     });
 
@@ -191,7 +191,7 @@ describe("DSN Detector (New Module)", () => {
       expect(result1?.source).toBe("env");
 
       // Verify it's cached
-      const cached = await getCachedDsn(testDir);
+      const cached = getCachedDsn(testDir);
       expect(cached?.source).toBe("env");
 
       // Now add a code DSN (higher priority)
@@ -208,7 +208,7 @@ describe("DSN Detector (New Module)", () => {
       expect(result2?.source).toBe("code");
 
       // Cache should be updated to code DSN
-      const updatedCache = await getCachedDsn(testDir);
+      const updatedCache = getCachedDsn(testDir);
       expect(updatedCache?.dsn).toBe(codeDsn);
       expect(updatedCache?.source).toBe("code");
     });

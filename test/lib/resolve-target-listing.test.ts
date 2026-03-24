@@ -36,7 +36,7 @@ describe("resolveOrgsForListing", () => {
     getDefaultOrganizationSpy = spyOn(defaults, "getDefaultOrganization");
     resolveAllTargetsSpy = spyOn(resolveTargetModule, "resolveAllTargets");
 
-    getDefaultOrganizationSpy.mockResolvedValue(null);
+    getDefaultOrganizationSpy.mockReturnValue(null);
     resolveAllTargetsSpy.mockResolvedValue({ targets: [] });
   });
 
@@ -53,7 +53,7 @@ describe("resolveOrgsForListing", () => {
   });
 
   test("returns default org when no orgFlag and default exists", async () => {
-    getDefaultOrganizationSpy.mockResolvedValue("default-org");
+    getDefaultOrganizationSpy.mockReturnValue("default-org");
 
     const result = await resolveOrgsForListing(undefined, CWD);
     expect(result.orgs).toEqual(["default-org"]);
@@ -274,7 +274,7 @@ describe("resolveOrgProjectFromArg", () => {
       resolveTargetModule,
       "resolveOrgAndProject"
     );
-    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {

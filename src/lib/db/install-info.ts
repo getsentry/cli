@@ -8,12 +8,14 @@
 
 import type { InstallationMethod } from "../upgrade.js";
 import { getDatabase } from "./index.js";
-import { runUpsert } from "./utils.js";
+import { clearMetadata, getMetadata, setMetadata } from "./utils.js";
 
 const KEY_METHOD = "install.method";
 const KEY_PATH = "install.path";
 const KEY_VERSION = "install.version";
 const KEY_RECORDED_AT = "install.recorded_at";
+
+const ALL_KEYS = [KEY_METHOD, KEY_PATH, KEY_VERSION, KEY_RECORDED_AT];
 
 export type StoredInstallInfo = {
   /** How the CLI was installed */
@@ -33,33 +35,18 @@ export type StoredInstallInfo = {
  */
 export function getInstallInfo(): StoredInstallInfo | null {
   const db = getDatabase();
+  const m = getMetadata(db, ALL_KEYS);
 
-  const methodRow = db
-    .query("SELECT value FROM metadata WHERE key = ?")
-    .get(KEY_METHOD) as { value: string } | undefined;
-
-  // If no method is stored, we have no install info
-  if (!methodRow) {
+  const method = m.get(KEY_METHOD);
+  if (!method) {
     return null;
   }
 
-  const pathRow = db
-    .query("SELECT value FROM metadata WHERE key = ?")
-    .get(KEY_PATH) as { value: string } | undefined;
-
-  const versionRow = db
-    .query("SELECT value FROM metadata WHERE key = ?")
-    .get(KEY_VERSION) as { value: string } | undefined;
-
-  const recordedAtRow = db
-    .query("SELECT value FROM metadata WHERE key = ?")
-    .get(KEY_RECORDED_AT) as { value: string } | undefined;
-
   return {
-    method: methodRow.value as InstallationMethod,
-    path: pathRow?.value ?? "",
-    version: versionRow?.value ?? "",
-    recordedAt: recordedAtRow ? Number(recordedAtRow.value) : 0,
+    method: method as InstallationMethod,
+    path: m.get(KEY_PATH) ?? "",
+    version: m.get(KEY_VERSION) ?? "",
+    recordedAt: m.has(KEY_RECORDED_AT) ? Number(m.get(KEY_RECORDED_AT)) : 0,
   };
 }
 
@@ -72,14 +59,12 @@ export function setInstallInfo(
   info: Omit<StoredInstallInfo, "recordedAt">
 ): void {
   const db = getDatabase();
-  const now = Date.now();
-
-  runUpsert(db, "metadata", { key: KEY_METHOD, value: info.method }, ["key"]);
-  runUpsert(db, "metadata", { key: KEY_PATH, value: info.path }, ["key"]);
-  runUpsert(db, "metadata", { key: KEY_VERSION, value: info.version }, ["key"]);
-  runUpsert(db, "metadata", { key: KEY_RECORDED_AT, value: String(now) }, [
-    "key",
-  ]);
+  setMetadata(db, {
+    [KEY_METHOD]: info.method,
+    [KEY_PATH]: info.path,
+    [KEY_VERSION]: info.version,
+    [KEY_RECORDED_AT]: String(Date.now()),
+  });
 }
 
 /**
@@ -88,9 +73,5 @@ export function setInstallInfo(
  */
 export function clearInstallInfo(): void {
   const db = getDatabase();
-
-  db.query("DELETE FROM metadata WHERE key = ?").run(KEY_METHOD);
-  db.query("DELETE FROM metadata WHERE key = ?").run(KEY_PATH);
-  db.query("DELETE FROM metadata WHERE key = ?").run(KEY_VERSION);
-  db.query("DELETE FROM metadata WHERE key = ?").run(KEY_RECORDED_AT);
+  clearMetadata(db, ALL_KEYS);
 }

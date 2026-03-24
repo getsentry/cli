@@ -171,7 +171,7 @@ export async function resolveFromDsn(
   const detectedFrom = getDsnSourceDescription(dsn);
 
   // Check cache first
-  const cached = await getCachedProject(dsn.orgId, dsn.projectId);
+  const cached = getCachedProject(dsn.orgId, dsn.projectId);
   if (cached) {
     return {
       org: cached.orgSlug,
@@ -187,7 +187,7 @@ export async function resolveFromDsn(
   const projectInfo = await getProject(dsn.orgId, dsn.projectId);
 
   if (projectInfo.organization) {
-    await setCachedProject(dsn.orgId, dsn.projectId, {
+    setCachedProject(dsn.orgId, dsn.projectId, {
       orgSlug: projectInfo.organization.slug,
       orgName: projectInfo.organization.name,
       projectSlug: projectInfo.slug,
@@ -234,7 +234,7 @@ export async function resolveOrgFromDsn(
 
   // Check cache for org slug (only if we have both org and project IDs)
   if (dsn.projectId) {
-    const cached = await getCachedProject(dsn.orgId, dsn.projectId);
+    const cached = getCachedProject(dsn.orgId, dsn.projectId);
     if (cached) {
       return {
         org: cached.orgSlug,
@@ -263,7 +263,7 @@ export async function resolveDsnByPublicKey(
   const detectedFrom = getDsnSourceDescription(dsn);
 
   // Check cache first (keyed by publicKey for DSNs without orgId)
-  const cached = await getCachedProjectByDsnKey(dsn.publicKey);
+  const cached = getCachedProjectByDsnKey(dsn.publicKey);
   if (cached) {
     return {
       org: cached.orgSlug,
@@ -285,7 +285,7 @@ export async function resolveDsnByPublicKey(
     }
 
     if (projectInfo.organization) {
-      await setCachedProjectByDsnKey(dsn.publicKey, {
+      setCachedProjectByDsnKey(dsn.publicKey, {
         orgSlug: projectInfo.organization.slug,
         orgName: projectInfo.organization.name,
         projectSlug: projectInfo.slug,
@@ -336,7 +336,7 @@ async function resolveDsnToTarget(
   const detectedFrom = getDsnSourceDescription(dsn);
 
   // Check cache first
-  const cached = await getCachedProject(orgId, dsnProjectId);
+  const cached = getCachedProject(orgId, dsnProjectId);
   if (cached) {
     return {
       org: cached.orgSlug,
@@ -354,7 +354,7 @@ async function resolveDsnToTarget(
     const projectInfo = await getProject(orgId, dsnProjectId);
 
     if (projectInfo.organization) {
-      await setCachedProject(orgId, dsnProjectId, {
+      setCachedProject(orgId, dsnProjectId, {
         orgSlug: projectInfo.organization.slug,
         orgName: projectInfo.organization.name,
         projectSlug: projectInfo.slug,
@@ -427,7 +427,7 @@ async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
   }
 
   // Check cache first (reuse DSN cache with source: "inferred")
-  const cached = await getCachedDsn(projectRoot);
+  const cached = getCachedDsn(projectRoot);
   if (cached?.source === "inferred") {
     const detectedFrom = `directory name "${dirName}"`;
 
@@ -488,7 +488,7 @@ async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
       projectName: m.name,
     }));
 
-    await setCachedDsn(projectRoot, {
+    setCachedDsn(projectRoot, {
       dsn: "", // No DSN for inferred
       projectId: primary.id,
       source: "inferred",
@@ -769,8 +769,8 @@ export async function resolveAllTargets(
   log.debug("No SENTRY_ORG/SENTRY_PROJECT env vars, trying config defaults");
 
   // 3. Config defaults
-  const defaultOrg = await getDefaultOrganization();
-  const defaultProject = await getDefaultProject();
+  const defaultOrg = getDefaultOrganization();
+  const defaultProject = getDefaultProject();
   if (defaultOrg && defaultProject) {
     setOrgProjectContext([defaultOrg], [defaultProject]);
     return {
@@ -939,8 +939,8 @@ export async function resolveOrgAndProject(
   }
 
   // 3. Config defaults
-  const defaultOrg = await getDefaultOrganization();
-  const defaultProject = await getDefaultProject();
+  const defaultOrg = getDefaultOrganization();
+  const defaultProject = getDefaultProject();
   if (defaultOrg && defaultProject) {
     return withTelemetryContext({
       org: defaultOrg,
@@ -1008,7 +1008,7 @@ export async function resolveOrg(
   }
 
   // 3. Config defaults
-  const defaultOrg = await getDefaultOrganization();
+  const defaultOrg = getDefaultOrganization();
   if (defaultOrg) {
     setOrgProjectContext([defaultOrg], []);
     return { org: defaultOrg };
@@ -1141,7 +1141,7 @@ export async function resolveOrgsForListing(
     return { orgs: [envVars.org] };
   }
 
-  const defaultOrg = await getDefaultOrganization();
+  const defaultOrg = getDefaultOrganization();
   if (defaultOrg) {
     setOrgProjectContext([defaultOrg], []);
     return { orgs: [defaultOrg] };

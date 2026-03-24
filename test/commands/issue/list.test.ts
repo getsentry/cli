@@ -54,8 +54,8 @@ beforeEach(async () => {
   originalFetch = globalThis.fetch;
   func = (await listCommand.loader()) as unknown as ListFunc;
   await setAuthToken("test-token");
-  await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
-  await setDefaults("test-org", "test-project");
+  setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+  setDefaults("test-org", "test-project");
 });
 
 afterEach(() => {
@@ -301,8 +301,8 @@ describe("issue list: partial failure handling", () => {
   //   3. listIssues(org, slug) → GET /api/0/organizations/{org}/issues/?query=project:{slug}
 
   test("JSON output includes error info on partial failures", async () => {
-    await setOrgRegion("org-one", DEFAULT_SENTRY_URL);
-    await setOrgRegion("org-two", DEFAULT_SENTRY_URL);
+    setOrgRegion("org-one", DEFAULT_SENTRY_URL);
+    setOrgRegion("org-two", DEFAULT_SENTRY_URL);
 
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
@@ -372,8 +372,8 @@ describe("issue list: partial failure handling", () => {
   });
 
   test("stderr warning on partial failures in human output", async () => {
-    await setOrgRegion("org-one", DEFAULT_SENTRY_URL);
-    await setOrgRegion("org-two", DEFAULT_SENTRY_URL);
+    setOrgRegion("org-one", DEFAULT_SENTRY_URL);
+    setOrgRegion("org-two", DEFAULT_SENTRY_URL);
 
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
@@ -520,7 +520,7 @@ describe("issue list: org-all mode (cursor pagination)", () => {
     clearPaginationCursorSpy.mockReturnValue(undefined);
 
     // Pre-populate org cache so resolveEffectiveOrg hits the fast path
-    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
@@ -783,8 +783,8 @@ describe("issue list: Phase 2 budget redistribution", () => {
   //   Phase 2: fetch 2 more from org-one via cursor resume.
 
   test("redistributes surplus to expandable targets", async () => {
-    await setOrgRegion("org-one", DEFAULT_SENTRY_URL);
-    await setOrgRegion("org-two", DEFAULT_SENTRY_URL);
+    setOrgRegion("org-one", DEFAULT_SENTRY_URL);
+    setOrgRegion("org-two", DEFAULT_SENTRY_URL);
 
     const issue = (id: string) => ({
       id,
@@ -897,7 +897,7 @@ describe("issue list: compound cursor resume", () => {
   // decodes compound cursor, skips exhausted targets, fetches from active ones.
 
   test("resumes from compound cursor, skipping exhausted targets", async () => {
-    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
 
     // Pre-store a compound cursor in the DB: 2 targets, second exhausted
     const { setPaginationCursor } = await import(

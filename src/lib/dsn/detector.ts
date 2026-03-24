@@ -67,7 +67,7 @@ export async function detectDsn(cwd: string): Promise<DetectedDsn | null> {
   const { projectRoot } = await findProjectRoot(cwd);
 
   // 2. Check cache for project root (fast path)
-  const cached = await getCachedDsn(projectRoot);
+  const cached = getCachedDsn(projectRoot);
 
   if (cached) {
     const verified = await verifyCachedDsn(projectRoot, cached);
@@ -75,7 +75,7 @@ export async function detectDsn(cwd: string): Promise<DetectedDsn | null> {
       // Check if DSN changed
       if (verified.raw !== cached.dsn) {
         // DSN changed - update cache
-        await setCachedDsn(projectRoot, {
+        setCachedDsn(projectRoot, {
           dsn: verified.raw,
           projectId: verified.projectId,
           orgId: verified.orgId,
@@ -99,7 +99,7 @@ export async function detectDsn(cwd: string): Promise<DetectedDsn | null> {
 
   if (detected) {
     // Cache for next time (without resolved info yet)
-    await setCachedDsn(projectRoot, {
+    setCachedDsn(projectRoot, {
       dsn: detected.raw,
       projectId: detected.projectId,
       orgId: detected.orgId,
@@ -211,7 +211,7 @@ export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
   }
 
   // Store in cache
-  await setCachedDetection(projectRoot, {
+  setCachedDetection(projectRoot, {
     fingerprint,
     allDsns,
     sourceMtimes: allSourceMtimes,

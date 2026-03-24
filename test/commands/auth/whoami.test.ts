@@ -85,7 +85,7 @@ describe("whoamiCommand.func", () => {
 
   describe("unauthenticated", () => {
     test("throws AuthError(not_authenticated) when no token stored", async () => {
-      isAuthenticatedSpy.mockResolvedValue(false);
+      isAuthenticatedSpy.mockReturnValue(false);
 
       const { context } = createContext();
 
@@ -97,7 +97,7 @@ describe("whoamiCommand.func", () => {
     });
 
     test("does not call setUserInfo when not authenticated", async () => {
-      isAuthenticatedSpy.mockResolvedValue(false);
+      isAuthenticatedSpy.mockReturnValue(false);
 
       const { context } = createContext();
 
@@ -113,7 +113,7 @@ describe("whoamiCommand.func", () => {
 
   describe("human output", () => {
     test("displays name and email for full user", async () => {
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
       getCurrentUserSpy.mockResolvedValue(FULL_USER);
       setUserInfoSpy.mockReturnValue(undefined);
 
@@ -126,7 +126,7 @@ describe("whoamiCommand.func", () => {
     });
 
     test("falls back to email when no name", async () => {
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
       getCurrentUserSpy.mockResolvedValue(EMAIL_ONLY_USER);
       setUserInfoSpy.mockReturnValue(undefined);
 
@@ -137,7 +137,7 @@ describe("whoamiCommand.func", () => {
     });
 
     test("falls back to user ID when no name or email", async () => {
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
       getCurrentUserSpy.mockResolvedValue(ID_ONLY_USER);
       setUserInfoSpy.mockReturnValue(undefined);
 
@@ -148,7 +148,7 @@ describe("whoamiCommand.func", () => {
     });
 
     test("updates DB cache with fetched user info", async () => {
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
       getCurrentUserSpy.mockResolvedValue(FULL_USER);
       setUserInfoSpy.mockReturnValue(undefined);
 
@@ -164,7 +164,7 @@ describe("whoamiCommand.func", () => {
     });
 
     test("still displays identity when DB cache write fails", async () => {
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
       getCurrentUserSpy.mockResolvedValue(FULL_USER);
       setUserInfoSpy.mockImplementation(() => {
         throw new Error("read-only filesystem");
@@ -180,7 +180,7 @@ describe("whoamiCommand.func", () => {
 
   describe("--json output", () => {
     test("outputs valid JSON with all fields", async () => {
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
       getCurrentUserSpy.mockResolvedValue(FULL_USER);
       setUserInfoSpy.mockReturnValue(undefined);
 
@@ -195,7 +195,7 @@ describe("whoamiCommand.func", () => {
     });
 
     test("omits missing optional fields from output", async () => {
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
       getCurrentUserSpy.mockResolvedValue(ID_ONLY_USER);
       setUserInfoSpy.mockReturnValue(undefined);
 
@@ -212,7 +212,7 @@ describe("whoamiCommand.func", () => {
     });
 
     test("still updates DB cache when --json is used", async () => {
-      isAuthenticatedSpy.mockResolvedValue(true);
+      isAuthenticatedSpy.mockReturnValue(true);
       getCurrentUserSpy.mockResolvedValue(FULL_USER);
       setUserInfoSpy.mockReturnValue(undefined);
 

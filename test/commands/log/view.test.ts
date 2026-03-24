@@ -435,7 +435,7 @@ describe("viewCommand.func", () => {
     getLogsSpy = spyOn(apiClient, "getLogs");
     findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
     openInBrowserSpy = spyOn(browser, "openInBrowser");
-    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
@@ -461,7 +461,7 @@ describe("viewCommand.func", () => {
 
   test("logs normalized slug warning when underscores present", async () => {
     getLogsSpy.mockResolvedValue([sampleLog]);
-    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
 
     const { context } = createMockContext();
     const func = await viewCommand.loader();
@@ -484,7 +484,7 @@ describe("viewCommand.func", () => {
       orgs: [],
     });
     getLogsSpy.mockResolvedValue([sampleLog]);
-    await setOrgRegion("acme", DEFAULT_SENTRY_URL);
+    setOrgRegion("acme", DEFAULT_SENTRY_URL);
 
     const { context } = createMockContext();
     const func = await viewCommand.loader();
@@ -508,7 +508,7 @@ describe("viewCommand.func", () => {
       orgs: [],
     });
     getLogsSpy.mockResolvedValue([sampleLog]);
-    await setOrgRegion("cam-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("cam-org", DEFAULT_SENTRY_URL);
 
     const { context } = createMockContext();
     const func = await viewCommand.loader();

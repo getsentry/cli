@@ -162,7 +162,7 @@ class SetCachedDsnCommand implements AsyncCommand<CacheModel, RealCache> {
   async run(model: CacheModel, _real: RealCache): Promise<void> {
     const { directory, dsn, projectId, orgId, source, sourcePath } = this.entry;
 
-    await setCachedDsn(directory, {
+    setCachedDsn(directory, {
       dsn,
       projectId,
       orgId,
@@ -194,7 +194,7 @@ class GetCachedDsnCommand implements AsyncCommand<CacheModel, RealCache> {
   check = () => true;
 
   async run(model: CacheModel, _real: RealCache): Promise<void> {
-    const realEntry = await getCachedDsn(this.directory);
+    const realEntry = getCachedDsn(this.directory);
     const modelEntry = model.dsnCache.entries.get(this.directory);
 
     if (modelEntry) {
@@ -229,7 +229,7 @@ class UpdateCachedResolutionCommand
   check = () => true;
 
   async run(model: CacheModel, _real: RealCache): Promise<void> {
-    await updateCachedResolution(this.directory, this.resolved);
+    updateCachedResolution(this.directory, this.resolved);
 
     // Only updates if entry exists
     const existing = model.dsnCache.entries.get(this.directory);
@@ -253,7 +253,7 @@ class ClearDsnCacheCommand implements AsyncCommand<CacheModel, RealCache> {
   check = () => true;
 
   async run(model: CacheModel, _real: RealCache): Promise<void> {
-    await clearDsnCache(this.directory);
+    clearDsnCache(this.directory);
 
     if (this.directory) {
       model.dsnCache.entries.delete(this.directory);
@@ -288,7 +288,7 @@ class SetCachedProjectCommand implements AsyncCommand<CacheModel, RealCache> {
 
   async run(model: CacheModel, _real: RealCache): Promise<void> {
     const { orgId, projectId, info } = this.input;
-    await setCachedProject(orgId, projectId, info);
+    setCachedProject(orgId, projectId, info);
 
     const key = `${orgId}:${projectId}`;
     model.projectCache.entries.set(key, info);
@@ -315,7 +315,7 @@ class GetCachedProjectCommand implements AsyncCommand<CacheModel, RealCache> {
 
   async run(model: CacheModel, _real: RealCache): Promise<void> {
     const { orgId, projectId } = this.lookup;
-    const realEntry = await getCachedProject(orgId, projectId);
+    const realEntry = getCachedProject(orgId, projectId);
     const key = `${orgId}:${projectId}`;
     const modelEntry = model.projectCache.entries.get(key);
 
@@ -353,7 +353,7 @@ class SetCachedProjectByDsnKeyCommand
 
   async run(model: CacheModel, _real: RealCache): Promise<void> {
     const { publicKey, info } = this.input;
-    await setCachedProjectByDsnKey(publicKey, info);
+    setCachedProjectByDsnKey(publicKey, info);
 
     const key = `dsn:${publicKey}`;
     model.projectCache.entries.set(key, info);
@@ -376,7 +376,7 @@ class GetCachedProjectByDsnKeyCommand
   check = () => true;
 
   async run(model: CacheModel, _real: RealCache): Promise<void> {
-    const realEntry = await getCachedProjectByDsnKey(this.publicKey);
+    const realEntry = getCachedProjectByDsnKey(this.publicKey);
     const key = `dsn:${this.publicKey}`;
     const modelEntry = model.projectCache.entries.get(key);
 
@@ -400,7 +400,7 @@ class ClearProjectCacheCommand implements AsyncCommand<CacheModel, RealCache> {
   check = () => true;
 
   async run(model: CacheModel, _real: RealCache): Promise<void> {
-    await clearProjectCache();
+    clearProjectCache();
     model.projectCache.entries.clear();
   }
 
@@ -514,10 +514,10 @@ describe("model-based: DSN and project cache", () => {
           const cleanup = createIsolatedDbContext();
           try {
             // Try to update resolution for non-existent entry
-            await updateCachedResolution(directory, resolved);
+            updateCachedResolution(directory, resolved);
 
             // Entry should still not exist
-            const entry = await getCachedDsn(directory);
+            const entry = getCachedDsn(directory);
             expect(entry).toBeUndefined();
           } finally {
             cleanup();
@@ -539,15 +539,15 @@ describe("model-based: DSN and project cache", () => {
           const cleanup = createIsolatedDbContext();
           try {
             // Set up two entries
-            await setCachedDsn(dir1, { dsn, projectId, source });
-            await setCachedDsn(dir2, { dsn, projectId, source });
+            setCachedDsn(dir1, { dsn, projectId, source });
+            setCachedDsn(dir2, { dsn, projectId, source });
 
             // Clear only dir1
-            await clearDsnCache(dir1);
+            clearDsnCache(dir1);
 
             // dir1 should be gone, dir2 should still exist
-            expect(await getCachedDsn(dir1)).toBeUndefined();
-            expect(await getCachedDsn(dir2)).toBeDefined();
+            expect(getCachedDsn(dir1)).toBeUndefined();
+            expect(getCachedDsn(dir2)).toBeDefined();
           } finally {
             cleanup();
           }
@@ -565,14 +565,14 @@ describe("model-based: DSN and project cache", () => {
           const cleanup = createIsolatedDbContext();
           try {
             // Set by org:project
-            await setCachedProject(orgId, projectId, info);
+            setCachedProject(orgId, projectId, info);
 
             // Getting by DSN key should return undefined
-            const byDsnKey = await getCachedProjectByDsnKey(publicKey);
+            const byDsnKey = getCachedProjectByDsnKey(publicKey);
             expect(byDsnKey).toBeUndefined();
 
             // Getting by org:project should return the entry
-            const byOrgProject = await getCachedProject(orgId, projectId);
+            const byOrgProject = getCachedProject(orgId, projectId);
             expect(byOrgProject).toBeDefined();
           } finally {
             cleanup();

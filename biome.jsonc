@@ -3,7 +3,10 @@
   "extends": ["ultracite/core"],
   "plugins": [
     "./lint-rules/no-stdout-write-in-commands.grit",
-    "./lint-rules/no-process-stdout-in-commands.grit"
+    "./lint-rules/no-process-stdout-in-commands.grit",
+    "./lint-rules/no-raw-metadata-queries.grit",
+    "./lint-rules/no-manual-transactions.grit",
+    "./lint-rules/no-inline-touch-cache.grit"
   ],
   "files": {
     "includes": ["!docs", "!test/init-eval/templates"]
@@ -48,8 +51,13 @@
       }
     },
     {
-      // SQLite operations are sync but we keep async signatures for API compatibility
-      "includes": ["src/lib/db/**/*.ts"],
+      // A few DB modules still have genuinely async functions (stat() for mtime validation,
+      // clearResponseCache for auth cleanup). The useAwait rule is off for these specific files.
+      "includes": [
+        "src/lib/db/dsn-cache.ts",
+        "src/lib/db/project-root-cache.ts",
+        "src/lib/db/auth.ts"
+      ],
       "linter": {
         "rules": {
           "suspicious": {

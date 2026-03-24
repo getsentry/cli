@@ -10,7 +10,7 @@
  */
 
 import { getDatabase } from "./index.js";
-import { runUpsert } from "./utils.js";
+import { getMetadata, setMetadata } from "./utils.js";
 import { clearVersionCheckCache } from "./version-check.js";
 
 const KEY = "release_channel";
@@ -25,11 +25,9 @@ export type ReleaseChannel = "stable" | "nightly";
  */
 export function getReleaseChannel(): ReleaseChannel {
   const db = getDatabase();
-  const row = db.query("SELECT value FROM metadata WHERE key = ?").get(KEY) as
-    | { value: string }
-    | undefined;
+  const m = getMetadata(db, [KEY]);
 
-  if (row?.value === "nightly") {
+  if (m.get(KEY) === "nightly") {
     return "nightly";
   }
   return "stable";
@@ -47,7 +45,7 @@ export function getReleaseChannel(): ReleaseChannel {
 export function setReleaseChannel(channel: ReleaseChannel): void {
   const db = getDatabase();
   const current = getReleaseChannel();
-  runUpsert(db, "metadata", { key: KEY, value: channel }, ["key"]);
+  setMetadata(db, { [KEY]: channel });
   if (channel !== current) {
     clearVersionCheckCache();
   }

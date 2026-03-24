@@ -39,7 +39,7 @@ type Completion = {
  *
  * @param args - The words after `__complete` (COMP_WORDS[1:] from the shell)
  */
-export async function handleComplete(args: string[]): Promise<void> {
+export function handleComplete(args: string[]): void {
   const startMs = performance.now();
 
   // The last word is the partial being completed (may be empty)
@@ -50,7 +50,7 @@ export async function handleComplete(args: string[]): Promise<void> {
   let completions: Completion[];
 
   try {
-    completions = await getCompletions(precedingWords, partial);
+    completions = getCompletions(precedingWords, partial);
   } catch {
     // Graceful degradation — if DB fails, return no completions
     completions = [];
@@ -129,10 +129,10 @@ export const ORG_ONLY_COMMANDS = new Set([
  * @param precedingWords - Words before the partial (determines context)
  * @param partial - The current partial word being completed
  */
-export async function getCompletions(
+export function getCompletions(
   precedingWords: string[],
   partial: string
-): Promise<Completion[]> {
+): Completion[] {
   // Build the command path from preceding words (e.g., "issue list")
   const cmdPath =
     precedingWords.length >= 2
@@ -140,11 +140,11 @@ export async function getCompletions(
       : "";
 
   if (ORG_PROJECT_COMMANDS.has(cmdPath)) {
-    return await completeOrgSlashProject(partial);
+    return completeOrgSlashProject(partial);
   }
 
   if (ORG_ONLY_COMMANDS.has(cmdPath)) {
-    return await completeOrgSlugs(partial);
+    return completeOrgSlugs(partial);
   }
 
   // Not a known command path — no dynamic completions
@@ -161,11 +161,8 @@ export async function getCompletions(
  * @param suffix - Appended to each slug (e.g., "/" for org/project mode)
  * @returns Completions with org names as descriptions
  */
-export async function completeOrgSlugs(
-  partial: string,
-  suffix = ""
-): Promise<Completion[]> {
-  const orgs = await getCachedOrganizations();
+export function completeOrgSlugs(partial: string, suffix = ""): Completion[] {
+  const orgs = getCachedOrganizations();
   if (orgs.length === 0) {
     return [];
   }
@@ -191,17 +188,13 @@ export async function completeOrgSlugs(
  * @param partial - The partial input (e.g., "", "sen", "sentry/", "sentry/cl")
  * @returns Completions for org or org/project values
  */
-export async function completeOrgSlashProject(
-  partial: string
-): Promise<Completion[]> {
+export function completeOrgSlashProject(partial: string): Completion[] {
   const slashIdx = partial.indexOf("/");
 
   if (slashIdx === -1) {
     // No slash — suggest org slugs (with trailing slash) + aliases
-    const [orgCompletions, aliasCompletions] = await Promise.all([
-      completeOrgSlugsWithSlash(partial),
-      completeAliases(partial),
-    ]);
+    const orgCompletions = completeOrgSlugsWithSlash(partial);
+    const aliasCompletions = completeAliases(partial);
     return [...orgCompletions, ...aliasCompletions];
   }
 
@@ -215,7 +208,7 @@ export async function completeOrgSlashProject(
     return [];
   }
 
-  const resolvedOrg = await fuzzyResolveOrg(orgPart);
+  const resolvedOrg = fuzzyResolveOrg(orgPart);
   if (!resolvedOrg) {
     return [];
   }
@@ -229,7 +222,7 @@ export async function completeOrgSlashProject(
  * When the user types `sentry issue list sen<TAB>`, we want to suggest
  * `sentry/` so they can continue typing the project name.
  */
-function completeOrgSlugsWithSlash(partial: string): Promise<Completion[]> {
+function completeOrgSlugsWithSlash(partial: string): Completion[] {
   return completeOrgSlugs(partial, "/");
 }
 
@@ -244,11 +237,11 @@ function completeOrgSlugsWithSlash(partial: string): Promise<Completion[]> {
  * @param projectPartial - Partial project slug to match
  * @param orgSlug - The org to find projects for
  */
-export async function completeProjectSlugs(
+export function completeProjectSlugs(
   projectPartial: string,
   orgSlug: string
-): Promise<Completion[]> {
-  const projects = await getCachedProjectsForOrg(orgSlug);
+): Completion[] {
+  const projects = getCachedProjectsForOrg(orgSlug);
 
   if (projects.length === 0) {
     return [];
@@ -273,8 +266,8 @@ export async function completeProjectSlugs(
  * @param orgPart - The potentially misspelled org slug
  * @returns The resolved org slug, or undefined if no match
  */
-async function fuzzyResolveOrg(orgPart: string): Promise<string | undefined> {
-  const orgs = await getCachedOrganizations();
+function fuzzyResolveOrg(orgPart: string): string | undefined {
+  const orgs = getCachedOrganizations();
   if (orgs.length === 0) {
     return;
   }
@@ -290,8 +283,8 @@ async function fuzzyResolveOrg(orgPart: string): Promise<string | undefined> {
  * Aliases are short identifiers that resolve to org/project pairs.
  * They are shown alongside org slug completions.
  */
-export async function completeAliases(partial: string): Promise<Completion[]> {
-  const aliases = await getProjectAliases();
+export function completeAliases(partial: string): Completion[] {
+  const aliases = getProjectAliases();
   if (!aliases) {
     return [];
   }

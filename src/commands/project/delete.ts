@@ -104,7 +104,7 @@ async function buildPermissionError(
   // Try the org cache first (populated by listOrganizations), then fall back
   // to a fresh API call. The cache avoids an extra HTTP round-trip when the
   // org listing has already been fetched during this session.
-  let orgRole = await getCachedOrgRole(orgSlug);
+  let orgRole = getCachedOrgRole(orgSlug);
   if (!orgRole) {
     try {
       const org = await getOrganization(orgSlug);

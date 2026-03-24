@@ -42,7 +42,7 @@ beforeEach(async () => {
   await setAuthToken("test-token");
 
   // Clear any existing region cache
-  await clearOrgRegions();
+  clearOrgRegions();
 });
 
 afterEach(() => {
@@ -401,7 +401,7 @@ describe("listOrganizations (fan-out)", () => {
     await listOrganizations();
 
     // Verify region cache was populated
-    const cachedRegions = await getAllOrgRegions();
+    const cachedRegions = getAllOrgRegions();
     expect(cachedRegions.size).toBe(2);
     expect(cachedRegions.get("acme-us")).toBe("https://us.sentry.io");
     expect(cachedRegions.get("acme-eu")).toBe("https://de.sentry.io");
@@ -530,7 +530,7 @@ describe("listOrganizations (fan-out)", () => {
     await listOrganizations();
 
     // Check cached regions
-    const cachedRegions = await getAllOrgRegions();
+    const cachedRegions = getAllOrgRegions();
     // Org with links should use its regionUrl
     expect(cachedRegions.get("org-with-links")).toBe(
       "https://custom.sentry.io"
@@ -809,7 +809,7 @@ describe("findProjectByDsnKey (multi-region)", () => {
 describe("org-scoped requests use region cache", () => {
   test("routes request to cached region URL", async () => {
     // Pre-populate region cache
-    await setOrgRegion("cached-org", "https://de.sentry.io");
+    setOrgRegion("cached-org", "https://de.sentry.io");
 
     let capturedUrl: string | undefined;
 

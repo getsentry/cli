@@ -1280,9 +1280,9 @@ async function handleResolvedTargets(
 
   if (isMultiProject) {
     const fingerprint = createDsnFingerprint(detectedDsns ?? []);
-    await setProjectAliases(entries, fingerprint);
+    setProjectAliases(entries, fingerprint);
   } else {
-    await clearProjectAliases();
+    clearProjectAliases();
   }
 
   const allIssuesWithOptions = attachFormatOptions(

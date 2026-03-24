@@ -507,7 +507,7 @@ describe("resolveEventTarget", () => {
     findEventAcrossOrgsSpy = spyOn(apiClient, "findEventAcrossOrgs");
     resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
     resolveProjectBySlugSpy = spyOn(resolveTarget, "resolveProjectBySlug");
-    await setOrgRegion("acme", DEFAULT_SENTRY_URL);
+    setOrgRegion("acme", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
@@ -753,7 +753,7 @@ describe("viewCommand.func", () => {
     getSpanTreeLinesSpy = spyOn(spanTree, "getSpanTreeLines");
     openInBrowserSpy = spyOn(browser, "openInBrowser");
     resolveProjectBySlugSpy = spyOn(resolveTarget, "resolveProjectBySlug");
-    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
@@ -827,7 +827,7 @@ describe("viewCommand.func", () => {
       traceId: null,
       success: false,
     });
-    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
 
     const { context } = createMockContext();
     const func = await viewCommand.loader();

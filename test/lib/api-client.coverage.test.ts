@@ -52,7 +52,7 @@ let originalFetch: typeof globalThis.fetch;
 beforeEach(async () => {
   originalFetch = globalThis.fetch;
   await setAuthToken("test-token");
-  await setOrgRegion("test-org", "https://sentry.io");
+  setOrgRegion("test-org", "https://sentry.io");
 });
 
 afterEach(() => {

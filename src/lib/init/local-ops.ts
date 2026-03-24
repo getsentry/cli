@@ -683,7 +683,7 @@ async function resolveOrgSlug(
     // project/team creation, and may belong to a different Sentry account.
     if (NUMERIC_ORG_ID_RE.test(resolved.org)) {
       const { getOrgByNumericId } = await import("../db/regions.js");
-      const match = await getOrgByNumericId(resolved.org);
+      const match = getOrgByNumericId(resolved.org);
       if (match) {
         return match.slug;
       }

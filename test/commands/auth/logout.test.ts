@@ -79,7 +79,7 @@ describe("logoutCommand.func", () => {
   });
 
   test("not authenticated: returns loggedOut false with message", async () => {
-    isAuthenticatedSpy.mockResolvedValue(false);
+    isAuthenticatedSpy.mockReturnValue(false);
     const { context, getOutput } = createContext();
 
     await func.call(context, {});
@@ -89,7 +89,7 @@ describe("logoutCommand.func", () => {
   });
 
   test("OAuth token: clears auth and writes success to stdout", async () => {
-    isAuthenticatedSpy.mockResolvedValue(true);
+    isAuthenticatedSpy.mockReturnValue(true);
     isEnvTokenActiveSpy.mockReturnValue(false);
     const { context, getOutput } = createContext();
 
@@ -101,7 +101,7 @@ describe("logoutCommand.func", () => {
   });
 
   test("env token (SENTRY_AUTH_TOKEN): throws AuthError with env var message", async () => {
-    isAuthenticatedSpy.mockResolvedValue(true);
+    isAuthenticatedSpy.mockReturnValue(true);
     isEnvTokenActiveSpy.mockReturnValue(true);
     getAuthConfigSpy.mockReturnValue({
       token: "sntrys_env_123",
@@ -123,7 +123,7 @@ describe("logoutCommand.func", () => {
   });
 
   test("env token (SENTRY_TOKEN): shows correct env var name in error", async () => {
-    isAuthenticatedSpy.mockResolvedValue(true);
+    isAuthenticatedSpy.mockReturnValue(true);
     isEnvTokenActiveSpy.mockReturnValue(true);
     // Set env var directly — getActiveEnvVarName() reads env vars via getEnvToken()
     process.env.SENTRY_TOKEN = "sntrys_token_456";
@@ -143,7 +143,7 @@ describe("logoutCommand.func", () => {
   });
 
   test("env token: error message includes env var from getActiveEnvVarName", async () => {
-    isAuthenticatedSpy.mockResolvedValue(true);
+    isAuthenticatedSpy.mockReturnValue(true);
     isEnvTokenActiveSpy.mockReturnValue(true);
     // Simulate edge case: source doesn't start with "env:" prefix
     getAuthConfigSpy.mockReturnValue({

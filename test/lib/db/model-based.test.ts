@@ -256,7 +256,7 @@ class IsAuthenticatedCommand implements AsyncCommand<DbModel, RealDb> {
   check = () => true;
 
   async run(model: DbModel, _real: RealDb): Promise<void> {
-    const realResult = await isAuthenticated();
+    const realResult = isAuthenticated();
 
     // Env vars take priority
     const envToken = model.envAuthToken ?? model.envSentryToken;
@@ -366,7 +366,7 @@ class SetOrgRegionCommand implements AsyncCommand<DbModel, RealDb> {
   check = () => true;
 
   async run(model: DbModel, _real: RealDb): Promise<void> {
-    await setOrgRegion(this.orgSlug, this.regionUrl);
+    setOrgRegion(this.orgSlug, this.regionUrl);
     model.regions.set(this.orgSlug, this.regionUrl);
   }
 
@@ -385,7 +385,7 @@ class GetOrgRegionCommand implements AsyncCommand<DbModel, RealDb> {
   check = () => true;
 
   async run(model: DbModel, _real: RealDb): Promise<void> {
-    const realRegion = await getOrgRegion(this.orgSlug);
+    const realRegion = getOrgRegion(this.orgSlug);
     const expectedRegion = model.regions.get(this.orgSlug);
 
     expect(realRegion).toBe(expectedRegion);
@@ -406,7 +406,7 @@ class SetOrgRegionsCommand implements AsyncCommand<DbModel, RealDb> {
   check = () => true;
 
   async run(model: DbModel, _real: RealDb): Promise<void> {
-    await setOrgRegions(
+    setOrgRegions(
       this.entries.map(([slug, regionUrl]) => ({ slug, regionUrl }))
     );
 
@@ -424,7 +424,7 @@ class GetAllOrgRegionsCommand implements AsyncCommand<DbModel, RealDb> {
   check = () => true;
 
   async run(model: DbModel, _real: RealDb): Promise<void> {
-    const realRegions = await getAllOrgRegions();
+    const realRegions = getAllOrgRegions();
 
     expect(realRegions.size).toBe(model.regions.size);
 
@@ -440,7 +440,7 @@ class ClearOrgRegionsCommand implements AsyncCommand<DbModel, RealDb> {
   check = () => true;
 
   async run(model: DbModel, _real: RealDb): Promise<void> {
-    await clearOrgRegions();
+    clearOrgRegions();
     model.regions.clear();
   }
 
@@ -464,7 +464,7 @@ class SetProjectAliasesCommand implements AsyncCommand<DbModel, RealDb> {
   check = () => true;
 
   async run(model: DbModel, _real: RealDb): Promise<void> {
-    await setProjectAliases(this.aliases, this.fingerprint);
+    setProjectAliases(this.aliases, this.fingerprint);
 
     // Clear and replace all aliases (this is the documented behavior)
     model.aliases.entries.clear();
@@ -489,7 +489,7 @@ class GetProjectAliasesCommand implements AsyncCommand<DbModel, RealDb> {
   check = () => true;
 
   async run(model: DbModel, _real: RealDb): Promise<void> {
-    const realAliases = await getProjectAliases();
+    const realAliases = getProjectAliases();
 
     if (model.aliases.entries.size === 0) {
       expect(realAliases).toBeUndefined();
@@ -518,10 +518,7 @@ class GetProjectByAliasCommand implements AsyncCommand<DbModel, RealDb> {
   check = () => true;
 
   async run(model: DbModel, _real: RealDb): Promise<void> {
-    const realProject = await getProjectByAlias(
-      this.alias,
-      this.currentFingerprint
-    );
+    const realProject = getProjectByAlias(this.alias, this.currentFingerprint);
 
     // Lookup is case-insensitive
     const modelEntry = model.aliases.entries.get(this.alias.toLowerCase());
@@ -557,7 +554,7 @@ class ClearProjectAliasesCommand implements AsyncCommand<DbModel, RealDb> {
   check = () => true;
 
   async run(model: DbModel, _real: RealDb): Promise<void> {
-    await clearProjectAliases();
+    clearProjectAliases();
     model.aliases.entries.clear();
     model.aliases.fingerprint = null;
   }
@@ -807,12 +804,12 @@ describe("model-based: database layer", () => {
           try {
             // Set up auth and some regions
             setAuthToken("test-token");
-            await setOrgRegions(
+            setOrgRegions(
               entries.map(([slug, regionUrl]) => ({ slug, regionUrl }))
             );
 
             // Verify regions were set (use unique count since setOrgRegions uses upsert)
-            const regionsBefore = await getAllOrgRegions();
+            const regionsBefore = getAllOrgRegions();
             const uniqueOrgSlugs = new Set(entries.map(([org]) => org));
             expect(regionsBefore.size).toBe(uniqueOrgSlugs.size);
 
@@ -820,7 +817,7 @@ describe("model-based: database layer", () => {
             await clearAuth();
 
             // Verify regions were also cleared (this is the invariant!)
-            const regionsAfter = await getAllOrgRegions();
+            const regionsAfter = getAllOrgRegions();
             expect(regionsAfter.size).toBe(0);
           } finally {
             cleanup();
@@ -871,16 +868,16 @@ describe("model-based: database layer", () => {
           const cleanup = createIsolatedDbContext();
           try {
             // Set alias (stored lowercase)
-            await setProjectAliases({
+            setProjectAliases({
               [alias]: { orgSlug: org, projectSlug: project },
             });
 
             // Lookup with uppercase
-            const upper = await getProjectByAlias(alias.toUpperCase());
+            const upper = getProjectByAlias(alias.toUpperCase());
             // Lookup with lowercase
-            const lower = await getProjectByAlias(alias.toLowerCase());
+            const lower = getProjectByAlias(alias.toLowerCase());
             // Lookup with original
-            const original = await getProjectByAlias(alias);
+            const original = getProjectByAlias(alias);
 
             // All should return the same result
             expect(upper).toEqual(lower);
@@ -941,17 +938,17 @@ describe("model-based: database layer", () => {
         const cleanup = createIsolatedDbContext();
         try {
           // Set alias with fingerprint 1
-          await setProjectAliases(
+          setProjectAliases(
             { [alias]: { orgSlug: org, projectSlug: project } },
             fp1
           );
 
           // Lookup with fingerprint 2 should fail
-          const result = await getProjectByAlias(alias, fp2);
+          const result = getProjectByAlias(alias, fp2);
           expect(result).toBeUndefined();
 
           // Lookup with matching fingerprint should succeed
-          const matchingResult = await getProjectByAlias(alias, fp1);
+          const matchingResult = getProjectByAlias(alias, fp1);
           expect(matchingResult?.orgSlug).toBe(org);
         } finally {
           cleanup();
@@ -981,7 +978,7 @@ describe("model-based: database layer", () => {
             for (const [a, o, p] of first) {
               aliases1[a] = { orgSlug: o, projectSlug: p };
             }
-            await setProjectAliases(aliases1);
+            setProjectAliases(aliases1);
 
             // Set second batch (should replace all)
             const aliases2: Record<
@@ -991,10 +988,10 @@ describe("model-based: database layer", () => {
             for (const [a, o, p] of second) {
               aliases2[a] = { orgSlug: o, projectSlug: p };
             }
-            await setProjectAliases(aliases2);
+            setProjectAliases(aliases2);
 
             // Only second batch should exist
-            const result = await getProjectAliases();
+            const result = getProjectAliases();
             expect(result).toBeDefined();
             expect(Object.keys(result!).length).toBe(
               Object.keys(aliases2).length

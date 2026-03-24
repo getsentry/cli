@@ -109,7 +109,7 @@ export async function listOrganizationsInRegion(
 export async function listOrganizations(): Promise<SentryOrganization[]> {
   const { getCachedOrganizations } = await import("../db/regions.js");
 
-  const cached = await getCachedOrganizations();
+  const cached = getCachedOrganizations();
   if (cached.length > 0) {
     return cached.map((org) => ({
       id: org.id,
@@ -145,7 +145,7 @@ export async function listOrganizationsUncached(): Promise<
     // Fall back to default API for self-hosted instances
     const orgs = await listOrganizationsInRegion(getApiBaseUrl());
     const baseUrl = getApiBaseUrl();
-    await setOrgRegions(
+    setOrgRegions(
       orgs.map((org) => ({
         slug: org.slug,
         regionUrl: baseUrl,
@@ -203,7 +203,7 @@ export async function listOrganizationsUncached(): Promise<
     orgName: r.org.name,
     orgRole: (r.org as Record<string, unknown>).orgRole as string | undefined,
   }));
-  await setOrgRegions(regionEntries);
+  setOrgRegions(regionEntries);
 
   return orgs;
 }

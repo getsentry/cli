@@ -142,7 +142,7 @@ describe("login re-authentication interactive prompt", () => {
   });
 
   test("shows prompt with user identity when authenticated on TTY", async () => {
-    isAuthenticatedSpy.mockResolvedValue(true);
+    isAuthenticatedSpy.mockReturnValue(true);
     getUserInfoSpy.mockReturnValue({
       userId: "42",
       name: "Jane Doe",
@@ -161,7 +161,7 @@ describe("login re-authentication interactive prompt", () => {
   });
 
   test("shows 'current user' fallback when no cached user info", async () => {
-    isAuthenticatedSpy.mockResolvedValue(true);
+    isAuthenticatedSpy.mockReturnValue(true);
     getUserInfoSpy.mockReturnValue(undefined);
     mockPrompt.mockResolvedValue(true);
 
@@ -174,7 +174,7 @@ describe("login re-authentication interactive prompt", () => {
   });
 
   test("confirm: clears auth and proceeds to login", async () => {
-    isAuthenticatedSpy.mockResolvedValue(true);
+    isAuthenticatedSpy.mockReturnValue(true);
     getUserInfoSpy.mockReturnValue(undefined);
     mockPrompt.mockResolvedValue(true);
 
@@ -186,7 +186,7 @@ describe("login re-authentication interactive prompt", () => {
   });
 
   test("decline: returns without re-auth", async () => {
-    isAuthenticatedSpy.mockResolvedValue(true);
+    isAuthenticatedSpy.mockReturnValue(true);
     getUserInfoSpy.mockReturnValue(undefined);
     mockPrompt.mockResolvedValue(false);
 
@@ -199,7 +199,7 @@ describe("login re-authentication interactive prompt", () => {
   });
 
   test("cancel (Ctrl+C): returns without re-auth", async () => {
-    isAuthenticatedSpy.mockResolvedValue(true);
+    isAuthenticatedSpy.mockReturnValue(true);
     getUserInfoSpy.mockReturnValue(undefined);
     // consola returns Symbol(clack:cancel) on Ctrl+C — truthy but not `true`.
     mockPrompt.mockResolvedValue(Symbol("clack:cancel") as unknown as boolean);
@@ -213,7 +213,7 @@ describe("login re-authentication interactive prompt", () => {
   });
 
   test("--force skips prompt even on TTY", async () => {
-    isAuthenticatedSpy.mockResolvedValue(true);
+    isAuthenticatedSpy.mockReturnValue(true);
     getUserInfoSpy.mockReturnValue(undefined);
 
     const context = createMockContext();
@@ -225,7 +225,7 @@ describe("login re-authentication interactive prompt", () => {
   });
 
   test("confirm + --token: clears auth and re-authenticates with token", async () => {
-    isAuthenticatedSpy.mockResolvedValue(true);
+    isAuthenticatedSpy.mockReturnValue(true);
     getUserInfoSpy.mockReturnValue(undefined);
     mockPrompt.mockResolvedValue(true);
 
