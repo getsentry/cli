@@ -560,7 +560,7 @@ async function fetchIssuesForTarget(
       {
         ...options,
         projectId: target.projectId,
-        groupStatsPeriod: options.groupStatsPeriod,
+        groupStatsPeriod: options.groupStatsPeriod ?? "auto",
       }
     );
     return { target, issues, hasMore: !!nextCursor, nextCursor };
