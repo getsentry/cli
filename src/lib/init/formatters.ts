@@ -4,7 +4,7 @@
  * Format wizard results and errors for terminal display using clack.
  */
 
-import { cancel, log, note, outro } from "@clack/prompts";
+import { log, note, outro } from "@clack/prompts";
 import { terminalLink } from "../formatters/colors.js";
 import { featureLabel } from "./clack-utils.js";
 import {
@@ -109,6 +109,4 @@ export function formatError(result: WorkflowRunResult): void {
   if (docsUrl) {
     log.info(`Docs: ${terminalLink(docsUrl)}`);
   }
-
-  cancel("Setup failed");
 }

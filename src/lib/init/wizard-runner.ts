@@ -26,6 +26,7 @@ import {
   VERIFY_CHANGES_STEP,
   WORKFLOW_ID,
 } from "./constants.js";
+import { offerDebugReport, type DebugReportContext } from "./debug-report.js";
 import { formatError, formatResult } from "./formatters.js";
 import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
@@ -120,6 +121,23 @@ async function handleSuspendedStep(
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function buildDebugCtx(
+  error: string,
+  traceId: string,
+  directory: string,
+  dirListing: ReturnType<typeof precomputeDirListing>,
+  result?: WorkflowRunResult
+): DebugReportContext {
+  return {
+    error,
+    traceId,
+    directory,
+    dirListing,
+    platform: result?.result?.platform,
+    exitCode: result?.result?.exitCode,
+  };
 }
 
 function assertWorkflowResult(raw: unknown): WorkflowRunResult {
@@ -280,10 +298,11 @@ export async function runWizard(options: WizardOptions): Promise<void> {
   spin.start("Scanning project...");
   spinState.running = true;
 
+  const dirListing = precomputeDirListing(directory);
+
   let run: Awaited<ReturnType<typeof workflow.createRun>>;
   let result: WorkflowRunResult;
   try {
-    const dirListing = precomputeDirListing(directory);
     spin.message("Connecting to wizard...");
     run = await workflow.createRun();
     result = assertWorkflowResult(
@@ -300,6 +319,10 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     spin.stop("Connection failed", 1);
     spinState.running = false;
     log.error(errorMessage(err));
+    await offerDebugReport(
+      buildDebugCtx(errorMessage(err), tracingOptions.traceId, directory, dirListing),
+      options
+    );
     cancel("Setup failed");
     process.exitCode = 1;
     return;
@@ -317,7 +340,12 @@ export async function runWizard(options: WizardOptions): Promise<void> {
       if (!extracted) {
         spin.stop("Error", 1);
         spinState.running = false;
-        log.error(`No suspend payload found for step "${stepId}"`);
+        const missingPayloadMsg = `No suspend payload found for step "${stepId}"`;
+        log.error(missingPayloadMsg);
+        await offerDebugReport(
+          buildDebugCtx(missingPayloadMsg, tracingOptions.traceId, directory, dirListing, result),
+          options
+        );
         cancel("Setup failed");
         process.exitCode = 1;
         return;
@@ -360,19 +388,37 @@ export async function runWizard(options: WizardOptions): Promise<void> {
       spinState.running = false;
     }
     log.error(errorMessage(err));
+    await offerDebugReport(
+      buildDebugCtx(errorMessage(err), tracingOptions.traceId, directory, dirListing),
+      options
+    );
     cancel("Setup failed");
     process.exitCode = 1;
     return;
   }
 
-  handleFinalResult(result, spin, spinState);
+  const hadError = handleFinalResult(result, spin, spinState);
+  if (hadError) {
+    await offerDebugReport(
+      buildDebugCtx(
+        result.error ?? result.result?.message ?? "Wizard failed with an unknown error",
+        tracingOptions.traceId,
+        directory,
+        dirListing,
+        result
+      ),
+      options
+    );
+    cancel("Setup failed");
+    process.exitCode = 1;
+  }
 }
 
 function handleFinalResult(
   result: WorkflowRunResult,
   spin: Spinner,
   spinState: SpinState
-): void {
+): boolean {
   const hasError = result.status !== "success" || result.result?.exitCode;
 
   if (hasError) {
@@ -381,14 +427,15 @@ function handleFinalResult(
       spinState.running = false;
     }
     formatError(result);
-    process.exitCode = 1;
-  } else {
-    if (spinState.running) {
-      spin.stop("Done");
-      spinState.running = false;
-    }
-    formatResult(result);
+    return true;
   }
+
+  if (spinState.running) {
+    spin.stop("Done");
+    spinState.running = false;
+  }
+  formatResult(result);
+  return false;
 }
 
 function extractSuspendPayload(
