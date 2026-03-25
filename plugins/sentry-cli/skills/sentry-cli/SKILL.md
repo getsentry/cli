@@ -269,7 +269,7 @@ CLI-related commands
 
 Manage Sentry dashboards
 
-- `sentry dashboard list <args...>` — List dashboards
+- `sentry dashboard list <org/title-filter...>` — List dashboards
 - `sentry dashboard view <args...>` — View a dashboard
 - `sentry dashboard create <args...>` — Create a dashboard
 - `sentry dashboard widget add <args...>` — Add a widget to a dashboard

@@ -11,7 +11,7 @@ requires:
 
 Manage Sentry dashboards
 
-### `sentry dashboard list <args...>`
+### `sentry dashboard list <org/title-filter...>`
 
 List dashboards
 

@@ -60,9 +60,7 @@ type DashboardListResult = {
   allTitles?: string[];
 };
 
-// ---------------------------------------------------------------------------
 // Extended cursor encoding
-// ---------------------------------------------------------------------------
 
 /**
  * Encode a cursor with an optional dashboard-ID bookmark for mid-page resume.
@@ -110,9 +108,7 @@ export function decodeCursor(cursor: string): {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Human output
-// ---------------------------------------------------------------------------
 
 /**
  * Format dashboard list for human-readable terminal output.
@@ -162,9 +158,7 @@ function formatDashboardListHuman(result: DashboardListResult): string {
   return parts.join("").trimEnd();
 }
 
-// ---------------------------------------------------------------------------
 // JSON transform
-// ---------------------------------------------------------------------------
 
 /**
  * Transform dashboard list result for JSON output.
@@ -191,9 +185,7 @@ function jsonTransformDashboardList(
   return envelope;
 }
 
-// ---------------------------------------------------------------------------
 // Fetch with pagination + optional client-side glob filter
-// ---------------------------------------------------------------------------
 
 /** Result of the paginated fetch loop */
 type FetchResult = {
@@ -326,9 +318,7 @@ async function fetchDashboards(
   return { dashboards: results, cursorToStore, allTitles };
 }
 
-// ---------------------------------------------------------------------------
 // Command
-// ---------------------------------------------------------------------------
 
 export const listCommand = buildListCommand("dashboard", {
   docs: {
@@ -356,6 +346,7 @@ export const listCommand = buildListCommand("dashboard", {
     positional: {
       kind: "array",
       parameter: {
+        placeholder: "org/title-filter",
         brief: "[<org/project>] [<name-glob>]",
         parse: String,
       },
