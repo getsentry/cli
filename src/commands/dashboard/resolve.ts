@@ -126,7 +126,10 @@ export async function resolveDashboardId(
 
   const dashboards = await listDashboards(orgSlug);
   const lowerRef = ref.toLowerCase();
-  const match = dashboards.find((d) => d.title.toLowerCase() === lowerRef);
+  // Match by ID/slug first (e.g. "default-overview"), then fall back to title
+  const match =
+    dashboards.find((d) => d.id.toLowerCase() === lowerRef) ??
+    dashboards.find((d) => d.title.toLowerCase() === lowerRef);
 
   if (!match) {
     const available = dashboards
@@ -136,8 +139,8 @@ export async function resolveDashboardId(
     const suffix =
       dashboards.length > 5 ? `\n  ... and ${dashboards.length - 5} more` : "";
     throw new ValidationError(
-      `No dashboard with title '${ref}' found in '${orgSlug}'.\n\n` +
-        `Available dashboards:\n${available}${suffix}`
+      `No dashboard matching '${ref}' found in '${orgSlug}'.\n\n` +
+        `Available dashboards (ID  Title):\n${available}${suffix}`
     );
   }
 
