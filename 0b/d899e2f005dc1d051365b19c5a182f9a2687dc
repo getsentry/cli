@@ -1,0 +1,207 @@
+# Plan: Bidirectional Cursor Pagination (`-c next` / `-c prev`)
+
+## Summary
+Replace `--cursor last` with `--cursor next` / `--cursor prev`. Use a **cursor stack** in the DB for correct bidirectional navigation (including dashboard list's mid-page bookmarks). Codify norms in AGENTS.md and add a CI check.
+
+## Prerequisites
+Rebase onto `origin/main` to pick up dashboard list pagination (#560).
+
+## Key Design Decision: Cursor Stack
+
+### Why not two columns (`cursor` + `prev_cursor`)?
+
+Two columns only support **depth-1** backward navigation. Trace the failure:
+
+```
+Page 1 → store cursor=A, prev=null
+Page 2 → store cursor=B, prev="" (page 1 = start)
+Page 3 → store cursor=C, prev=A (page 2 starts at A)
+  -c prev → resolves A → re-fetches page 2 ✓
+  -c prev again → need "" (page 1) but DB now has prev=A from page 3's state ✗
+```
+
+After re-fetching page 2, the DB has stale `prev` from the forward direction. Going `next → next → next → prev → prev` (a common scan pattern) fails at the second `prev`.
+
+For **dashboard list with glob filtering**, it's even worse: mid-page bookmarks mean the API's `rel="previous"` cursor doesn't match client page boundaries — items would shift or duplicate.
+
+### Solution: Cursor Stack
+
+Store a JSON array of page-start cursors + a page index:
+
+```
+stack = ["", "S2|261", "S4|462"]   // "" = page 1 (no cursor)
+index = 1                           // currently viewing page 2
+```
+
+- `-c next`: increment index, fetch with `stack[index]`, append new cursor
+- `-c prev`: decrement index, fetch with `stack[index]`, refresh next cursor
+- Works for ALL commands (simple and complex) — unified approach
+- No need to extract `rel="previous"` from API Link headers at all
+
+---
+
+## Changes (in dependency order)
+
+### 1. `parseCursorFlag` — accept new keywords
+**File:** `src/lib/list-command.ts`
+
+- Accept `"next"`, `"prev"` / `"previous"`, `"first"` (reset to page 1)
+- Keep `"last"` as silent alias for `"next"` (it's a well-known keyword, no reason to break muscle memory)
+- Update `LIST_CURSOR_FLAG.brief`
+
+### 2. DB schema — replace cursor column with stack
+**File:** `src/lib/db/schema.ts`
+
+- Bump `CURRENT_SCHEMA_VERSION` 11 → 12
+- DROP and recreate `pagination_cursors` table with new schema:
+  - `command_key TEXT NOT NULL`
+  - `context TEXT NOT NULL`
+  - `cursor_stack TEXT NOT NULL` (JSON array of page-start cursors)
+  - `page_index INTEGER NOT NULL DEFAULT 0`
+  - `expires_at INTEGER NOT NULL`
+  - `PRIMARY KEY (command_key, context)`
+- Old `cursor` column is gone — no backward compat needed (cursors are ephemeral, 5-min TTL)
+
+### 3. `pagination.ts` — stack-based storage & resolution
+**File:** `src/lib/db/pagination.ts`
+
+Replace the current get/set/clear/resolve functions with stack-aware versions:
+
+```typescript
+/**
+ * Resolve a --cursor flag value to an API cursor string.
+ * - "next"/"last": read stack[index+1], error if no next page stored
+ * - "prev"/"previous": read stack[index-1], error if on first page
+ * - "first": return undefined (start from beginning)
+ * - raw string: passthrough (power user)
+ */
+function advancePaginationState(commandKey, contextKey, direction, nextCursor?): void;
+
+/** Clear all pagination state for a command+context. */
+function clearPaginationState(commandKey, contextKey): void;
+
+/**
+ * Resolve a --cursor flag value to an API cursor string.
+ * - "next"/"last": read stack[index+1], error if no next page stored
+ * - "prev"/"previous": read stack[index-1], error if on first page
+ * - "first": return undefined (start from beginning)
+ * - raw string: passthrough (power user)
+ */
+function resolveCursor(cursorFlag, commandKey, contextKey): {
+  cursor: string | undefined;
+  direction: CursorDirection;
+};
+```
+
+No backward compat needed — the migration DROPs and recreates the table. Cursors are ephemeral (5-min TTL) so nothing of value is lost.
+
+### 4. `ListResult` + JSON envelope — add `prevCursor`
+**File:** `src/lib/org-list.ts`
+
+- Add `prevCursor?: string | null` to `ListResult<T>` (derived from stack: `stack[index-1]` exists → has prev)
+- Add `hasPrev?: boolean` for human hints
+- `jsonTransformListResult()`: include `prevCursor` in JSON envelope
+- `handleOrgAll()`: call `advancePaginationState` instead of `setPaginationCursor`/`clearPaginationCursor`
+- Refactor hint builder for bidirectional:
+  - Both: `Navigate: -c prev | -c next`
+  - Only next: `Next page: -c next`
+  - Only prev: `Previous page: -c prev`
+
+### 5. API modules — NO changes needed
+Since we're using the cursor stack (not `rel="previous"`), `parseLinkHeader` and `PaginatedResponse` stay unchanged. Each API function continues returning only `{ data, nextCursor }`. The stack tracks backward navigation at the DB layer.
+
+### 6. All list commands — update to stack API
+Each command needs:
+- Replace `setPaginationCursor`/`clearPaginationCursor` with `advancePaginationState`
+- Replace `resolveOrgCursor` with `resolveCursor`
+- Update hint strings: `-c last` → `-c next`, add `-c prev` when available
+- Include `prevCursor`/`hasPrev` in output
+
+**Files:**
+- `src/commands/trace/list.ts`
+- `src/commands/span/list.ts`
+- `src/commands/issue/list.ts` (compound cursors: each position in the compound cursor array follows the same stack logic)
+- `src/commands/project/list.ts`
+- `src/commands/team/list.ts`
+- `src/commands/repo/list.ts`
+- `src/commands/dashboard/list.ts` (extended cursors with `|`-delimited bookmarks stored as stack entries — the stack treats them as opaque strings)
+- `src/lib/org-list.ts` (shared `handleOrgAll`)
+
+### 7. Issue list compound cursors
+**File:** `src/commands/issue/list.ts`
+
+The compound cursor (`"cursor1|cursor2|cursor3"`) is treated as a single opaque string in the cursor stack. The stack stores these compound strings at each index. `encodeCompoundCursor` / `decodeCompoundCursor` remain unchanged — they operate on the string AFTER it's resolved from the stack.
+
+### 8. Dashboard list extended cursors
+**File:** `src/commands/dashboard/list.ts`
+
+Same principle: extended cursors (`"serverCursor|afterId"`) are opaque strings in the stack. `encodeCursor`/`decodeCursor` operate on the resolved string. The stack correctly handles backward navigation through mid-page bookmarks because each page's start cursor (including bookmark) is preserved in the stack array.
+
+Example:
+```
+stack = ["", "S2|261", "S4|462"]
+index = 2  (on page 3)
+-c prev → index=1, cursor="S2|261" → reproduces page 2 exactly ✓
+-c prev → index=0, cursor="" → reproduces page 1 exactly ✓
+```
+
+---
+
+## Codification (Point 2)
+
+### 9. AGENTS.md updates
+Update the "List Command Pagination" section:
+- Replace `-c last` references with `-c next` / `-c prev`
+- Document the cursor stack model
+- Add rule: "All list commands MUST support bidirectional pagination. Use `resolveCursor` + `advancePaginationState` from `src/lib/db/pagination.ts`."
+- Add rule: "Hint strings MUST show `-c prev` when a previous page exists and `-c next` when a next page exists."
+
+### 10. Shared helper enforcement
+Ensure `buildListCommand` and `buildOrgListCommand` produce correct bidirectional hints automatically:
+- `buildListCommand` already auto-injects `--cursor` flag — ensure the injected brief mentions `next`/`prev`
+- `handleOrgAll` already generates hints — update to show both directions
+- New commands using these helpers get bidirectional pagination with zero extra code
+
+### 11. Tests
+
+**Update existing tests:**
+- `test/lib/db/pagination.test.ts` or model-based — stack storage, direction resolution
+- `test/lib/api-client.property.test.ts` — no changes needed (parseLinkHeader unchanged)
+- `test/commands/trace/list.test.ts` — hint text, JSON envelope
+- `test/commands/span/list.test.ts` — hint text
+- `test/commands/issue/list.test.ts` — compound cursor stack
+- `test/commands/issue/list.property.test.ts` — compound cursor roundtrips
+- `test/commands/team/list.test.ts` — hint text
+- `test/commands/repo/list.test.ts` — hint text
+- `test/commands/project/list.test.ts` — hint text
+- `test/commands/dashboard/list.test.ts` — extended cursor stack, hint text
+
+**New tests:**
+- `parseCursorFlag` accepting `"next"`, `"prev"`, `"previous"`, `"first"`, `"last"` (alias for `"next"`)
+- `resolveCursor` with stack lookup for each direction
+- `advancePaginationState` stack manipulation (push, truncate on back-then-forward)
+- `-c prev` on first page → `ValidationError`
+- `-c next` with no stored next → `ValidationError`
+- Stack property tests: arbitrary sequences of next/prev maintain correct state
+
+### 12. Regenerate SKILL.md
+Run `bun run generate:skill` after flag/doc changes.
+
+---
+
+## Execution Order
+1. Rebase onto `origin/main`
+2. Steps 1–3: parseCursorFlag, DB schema, pagination.ts stack logic
+3. Step 4: ListResult + org-list.ts shared hints
+4. Steps 6–8: all list commands (trace, span, issue, project, team, repo, dashboard)
+5. Steps 9–10: AGENTS.md + shared helper enforcement
+6. Step 11: tests
+7. Step 12: regenerate SKILL.md
+
+## Verification
+1. `bun run typecheck` — no type errors
+2. `bun test` — all tests pass
+3. `bun run lint` — no lint errors
+4. `bun run check:skill` — SKILL.md up to date
+5. `bun run check:errors` — no error pattern violations
+6. Manual smoke test: `bun run dev -- trace list <org>/<project> -c next` then `-c prev`
