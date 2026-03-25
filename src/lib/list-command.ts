@@ -155,12 +155,29 @@ export function applyFreshFlag(flags: { readonly fresh: boolean }): void {
 const ALL_DIGITS_RE = /^\d+$/;
 
 /**
+ * Navigation keywords accepted by `--cursor`.
+ *
+ * - `"next"` / `"last"` — advance to the next page
+ * - `"prev"` / `"previous"` — go back to the previous page
+ * - `"first"` — jump back to the first page
+ *
+ * `"last"` is a silent alias for `"next"` preserved for muscle-memory compat.
+ */
+export const CURSOR_KEYWORDS = new Set([
+  "next",
+  "last",
+  "prev",
+  "previous",
+  "first",
+]);
+
+/**
  * Parse and validate a `--cursor` flag value.
  *
- * Accepts the magic `"last"` keyword (resume from stored cursor) and opaque
- * Sentry cursor strings (e.g. `"1735689600:0:0"`). Rejects bare integers
- * early — they are never valid cursors and would produce a cryptic 400 from
- * the API.
+ * Accepts navigation keywords (`"next"`, `"prev"`, `"previous"`, `"first"`,
+ * `"last"`) and opaque Sentry cursor strings (e.g. `"1735689600:0:0"`).
+ * Rejects bare integers early — they are never valid cursors and would
+ * produce a cryptic 400 from the API.
  *
  * Shared by {@link LIST_CURSOR_FLAG} and commands that define their own
  * cursor flag with a custom `brief`.
@@ -168,12 +185,12 @@ const ALL_DIGITS_RE = /^\d+$/;
  * @throws Error when value is a bare integer
  */
 export function parseCursorFlag(value: string): string {
-  if (value === "last") {
+  if (CURSOR_KEYWORDS.has(value)) {
     return value;
   }
   if (ALL_DIGITS_RE.test(value)) {
     throw new Error(
-      `'${value}' is not a valid cursor. Cursors look like "1735689600:0:0". Use "last" to continue from the previous page.`
+      `'${value}' is not a valid cursor. Cursors look like "1735689600:0:0". Use "next" / "prev" to navigate pages.`
     );
   }
   return value;
@@ -182,13 +199,14 @@ export function parseCursorFlag(value: string): string {
 /**
  * The `--cursor` / `-c` flag shared by all list commands.
  *
- * Accepts an opaque cursor string or the special value `"last"` to continue
- * from the previous page. Only meaningful in `<org>/` (org-all) mode.
+ * Accepts navigation keywords (`next`, `prev`, `first`, `last`) or an
+ * opaque cursor string for power users. Only meaningful in `<org>/`
+ * (org-all) mode by default.
  */
 export const LIST_CURSOR_FLAG = {
   kind: "parsed" as const,
   parse: parseCursorFlag,
-  brief: 'Pagination cursor (use "last" to continue from previous page)',
+  brief: 'Navigate pages: "next", "prev", "first" (or raw cursor string)',
   optional: true as const,
 };
 

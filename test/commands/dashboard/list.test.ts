@@ -109,8 +109,8 @@ describe("dashboard list command", () => {
   let resolveOrgSpy: ReturnType<typeof spyOn>;
   let openInBrowserSpy: ReturnType<typeof spyOn>;
   let withProgressSpy: ReturnType<typeof spyOn>;
-  let setPaginationCursorSpy: ReturnType<typeof spyOn>;
-  let clearPaginationCursorSpy: ReturnType<typeof spyOn>;
+  let advancePaginationStateSpy: ReturnType<typeof spyOn>;
+  let hasPreviousPageSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     listDashboardsPaginatedSpy = spyOn(apiClient, "listDashboardsPaginated");
@@ -125,11 +125,13 @@ describe("dashboard list command", () => {
           /* no-op setMessage */
         })
     );
-    setPaginationCursorSpy = spyOn(paginationDb, "setPaginationCursor");
-    clearPaginationCursorSpy = spyOn(paginationDb, "clearPaginationCursor");
-
-    setPaginationCursorSpy.mockReturnValue(undefined);
-    clearPaginationCursorSpy.mockReturnValue(undefined);
+    advancePaginationStateSpy = spyOn(
+      paginationDb,
+      "advancePaginationState"
+    ).mockReturnValue(undefined);
+    hasPreviousPageSpy = spyOn(paginationDb, "hasPreviousPage").mockReturnValue(
+      false
+    );
   });
 
   afterEach(() => {
@@ -137,8 +139,8 @@ describe("dashboard list command", () => {
     resolveOrgSpy.mockRestore();
     openInBrowserSpy.mockRestore();
     withProgressSpy.mockRestore();
-    setPaginationCursorSpy.mockRestore();
-    clearPaginationCursorSpy.mockRestore();
+    advancePaginationStateSpy.mockRestore();
+    hasPreviousPageSpy.mockRestore();
   });
 
   // -------------------------------------------------------------------------
@@ -278,7 +280,7 @@ describe("dashboard list command", () => {
     expect(parsed.nextCursor).toBeDefined();
   });
 
-  test("hint includes -c last when more pages available", async () => {
+  test("hint includes -c next when more pages available", async () => {
     resolveOrgSpy.mockResolvedValue({ org: "test-org" });
     listDashboardsPaginatedSpy.mockResolvedValue({
       data: [DASHBOARD_A, DASHBOARD_B],
@@ -290,7 +292,7 @@ describe("dashboard list command", () => {
     await func.call(context, defaultFlags({ limit: 2 }));
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("-c last");
+    expect(output).toContain("-c next");
   });
 
   test("hasMore is false when API returns no nextCursor", async () => {

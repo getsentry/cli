@@ -37,10 +37,11 @@ import {
 } from "./api-client.js";
 import type { ParsedOrgProject } from "./arg-parsing.js";
 import {
+  advancePaginationState,
   buildOrgContextKey,
-  clearPaginationCursor,
-  resolveOrgCursor,
-  setPaginationCursor,
+  type CursorDirection,
+  hasPreviousPage,
+  resolveCursor,
 } from "./db/pagination.js";
 import {
   type AuthGuardSuccess,
@@ -71,6 +72,8 @@ export type ListResult<T> = {
   items: T[];
   /** Whether more pages are available */
   hasMore?: boolean;
+  /** Whether a previous page exists (for bidirectional hint generation) */
+  hasPrev?: boolean;
   /** Cursor for fetching the next page (only in paginated modes) */
   nextCursor?: string | null;
   /** Human-readable hint lines (tips, warnings, notes). Suppressed in JSON mode. */
@@ -114,6 +117,9 @@ export function jsonTransformListResult<T>(
       result.nextCursor !== ""
     ) {
       envelope.nextCursor = result.nextCursor;
+    }
+    if (result.hasPrev) {
+      envelope.hasPrev = true;
     }
     if (result.errors && result.errors.length > 0) {
       envelope.errors = result.errors;
@@ -305,9 +311,24 @@ export async function fetchAllOrgs<TEntity, TWithOrg>(
   return results.flat();
 }
 
-/** Formats the "next page" hint used in org-all output. */
-function nextPageHint(commandPrefix: string, org: string): string {
-  return `${commandPrefix} ${org}/ -c last`;
+/** Formats bidirectional pagination hints for org-all output. */
+function paginationHint(
+  commandPrefix: string,
+  org: string,
+  hasPrev: boolean,
+  hasNext: boolean
+): string {
+  const base = `${commandPrefix} ${org}/`;
+  if (hasPrev && hasNext) {
+    return `Navigate: ${base} -c prev | ${base} -c next`;
+  }
+  if (hasNext) {
+    return `Next page: ${base} -c next`;
+  }
+  if (hasPrev) {
+    return `Previous page: ${base} -c prev`;
+  }
+  return "";
 }
 
 /** Options for {@link handleOrgAll}. */
@@ -317,6 +338,7 @@ type OrgAllOptions<TEntity, TWithOrg> = {
   flags: BaseListFlags;
   contextKey: string;
   cursor: string | undefined;
+  direction: CursorDirection;
 };
 
 /**
@@ -332,20 +354,27 @@ function runOrgAll<TEntity, TWithOrg>(
   flags: BaseListFlags
 ): Promise<ListResult<TWithOrg>> {
   const contextKey = buildOrgContextKey(org);
-  return handleOrgAll({ config, org, flags, contextKey, cursor: undefined });
+  return handleOrgAll({
+    config,
+    org,
+    flags,
+    contextKey,
+    cursor: undefined,
+    direction: "next",
+  });
 }
 
 /**
  * Handle org-all mode: cursor-paginated listing for a single org.
  *
  * Returns a {@link ListResult} with items, pagination state, and human hints.
- * Cursor side effects (setPaginationCursor/clearPaginationCursor) are performed
+ * Cursor side effects (advancePaginationState/clearPaginationState) are performed
  * inside the handler so callers don't need to manage them.
  */
 export async function handleOrgAll<TEntity, TWithOrg>(
   options: OrgAllOptions<TEntity, TWithOrg>
 ): Promise<ListResult<TWithOrg>> {
-  const { config, org, flags, contextKey, cursor } = options;
+  const { config, org, flags, contextKey, cursor, direction } = options;
 
   const response = await withProgress(
     {
@@ -363,25 +392,29 @@ export async function handleOrgAll<TEntity, TWithOrg>(
   const items = rawItems.map((entity) => config.withOrg(entity, org));
   const hasMore = !!nextCursor;
 
-  if (nextCursor) {
-    setPaginationCursor(config.paginationKey, contextKey, nextCursor);
-  } else {
-    clearPaginationCursor(config.paginationKey, contextKey);
-  }
+  advancePaginationState(
+    config.paginationKey,
+    contextKey,
+    direction,
+    nextCursor ?? undefined
+  );
+  const hasPrev = hasPreviousPage(config.paginationKey, contextKey);
 
   // Empty results use hint (rendered by human formatter directly).
   // Non-empty results use header (rendered inline after the table).
   let hint: string | undefined;
   let header: string | undefined;
 
+  const navHint = paginationHint(config.commandPrefix, org, hasPrev, hasMore);
+
   if (items.length === 0) {
-    if (hasMore) {
-      hint = `No ${config.entityPlural} on this page. Try the next page: ${nextPageHint(config.commandPrefix, org)}`;
+    if (navHint) {
+      hint = `No ${config.entityPlural} on this page. ${navHint}`;
     } else {
       hint = `No ${config.entityPlural} found in organization '${org}'.`;
     }
-  } else if (hasMore) {
-    header = `Showing ${items.length} ${config.entityPlural} (more available)\nNext page: ${nextPageHint(config.commandPrefix, org)}`;
+  } else if (navHint) {
+    header = `Showing ${items.length} ${config.entityPlural} (more available)\n${navHint}`;
   } else {
     header = `Showing ${items.length} ${config.entityPlural}`;
   }
@@ -389,6 +422,7 @@ export async function handleOrgAll<TEntity, TWithOrg>(
   return {
     items,
     hasMore,
+    hasPrev,
     nextCursor: nextCursor ?? null,
     hint,
     header,
@@ -504,11 +538,11 @@ function buildFetchedItemsResult<TEntity, TWithOrg>(
 
   const hintParts: string[] = [];
   if (items.length > limited.length) {
-    const paginationHint = orgSlugForHint
+    const paginateTip = orgSlugForHint
       ? ` Use '${config.commandPrefix} ${orgSlugForHint}/' for paginated results.`
       : "";
     hintParts.push(
-      `Showing ${limited.length} of ${items.length} ${config.entityPlural}.${paginationHint}`
+      `Showing ${limited.length} of ${items.length} ${config.entityPlural}.${paginateTip}`
     );
   } else {
     hintParts.push(`Showing ${limited.length} ${config.entityPlural}`);
@@ -803,7 +837,7 @@ function buildDefaultHandlers<TEntity, TWithOrg>(
 
     "org-all": (ctx) => {
       const contextKey = buildOrgContextKey(ctx.parsed.org);
-      const cursor = resolveOrgCursor(
+      const { cursor, direction } = resolveCursor(
         ctx.flags.cursor,
         config.paginationKey,
         contextKey
@@ -814,6 +848,7 @@ function buildDefaultHandlers<TEntity, TWithOrg>(
         flags: ctx.flags,
         contextKey,
         cursor,
+        direction,
       });
     },
   };

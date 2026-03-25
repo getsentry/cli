@@ -25,9 +25,14 @@ import {
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as paginationDb from "../../../src/lib/db/pagination.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 
 const VALID_TRACE_ID = "aaaa1111bbbb2222cccc3333dddd4444";
+
+// Reference paginationDb early to prevent import stripping by auto-organize
+const _paginationDbRef = paginationDb;
 
 // Note: parseTraceTarget parsing tests are in test/lib/trace-target.test.ts
 
@@ -132,6 +137,9 @@ describe("listCommand.func (trace mode)", () => {
   let func: ListFunc;
   let listSpansSpy: ReturnType<typeof spyOn>;
   let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
+  let resolveCursorSpy: ReturnType<typeof spyOn>;
+  let advancePaginationStateSpy: ReturnType<typeof spyOn>;
+  let hasPreviousPageSpy: ReturnType<typeof spyOn>;
 
   function createContext() {
     const stdoutChunks: string[] = [];
@@ -161,11 +169,25 @@ describe("listCommand.func (trace mode)", () => {
       org: "test-org",
       project: "test-project",
     });
+    resolveCursorSpy = spyOn(paginationDb, "resolveCursor").mockReturnValue({
+      cursor: undefined,
+      direction: "next" as const,
+    });
+    advancePaginationStateSpy = spyOn(
+      paginationDb,
+      "advancePaginationState"
+    ).mockReturnValue(undefined);
+    hasPreviousPageSpy = spyOn(paginationDb, "hasPreviousPage").mockReturnValue(
+      false
+    );
   });
 
   afterEach(() => {
     listSpansSpy.mockRestore();
     resolveOrgAndProjectSpy.mockRestore();
+    resolveCursorSpy.mockRestore();
+    advancePaginationStateSpy.mockRestore();
+    hasPreviousPageSpy.mockRestore();
   });
 
   test("calls listSpans with trace ID in query", async () => {
@@ -262,6 +284,10 @@ describe("listCommand.func (trace mode)", () => {
   });
 
   test("passes cursor to API when --cursor is set", async () => {
+    resolveCursorSpy.mockReturnValue({
+      cursor: "1735689600:0:0",
+      direction: "next" as const,
+    });
     listSpansSpy.mockResolvedValue({
       data: [
         {
@@ -330,7 +356,7 @@ describe("listCommand.func (trace mode)", () => {
     expect(parsed.nextCursor).toBe("1735689600:0:1");
   });
 
-  test("hint shows -c last when more pages available", async () => {
+  test("hint shows -c next when more pages available", async () => {
     listSpansSpy.mockResolvedValue({
       data: [
         {
@@ -357,7 +383,7 @@ describe("listCommand.func (trace mode)", () => {
     );
 
     const output = getStdout();
-    expect(output).toContain("-c last");
+    expect(output).toContain("-c next");
   });
 
   test("passes statsPeriod to listSpans", async () => {
@@ -394,6 +420,9 @@ describe("listCommand.func (project mode)", () => {
   let func: ListFunc;
   let listSpansSpy: ReturnType<typeof spyOn>;
   let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
+  let resolveCursorSpy: ReturnType<typeof spyOn>;
+  let advancePaginationStateSpy: ReturnType<typeof spyOn>;
+  let hasPreviousPageSpy: ReturnType<typeof spyOn>;
 
   function createContext() {
     const stdoutChunks: string[] = [];
@@ -423,11 +452,25 @@ describe("listCommand.func (project mode)", () => {
       org: "test-org",
       project: "test-project",
     });
+    resolveCursorSpy = spyOn(paginationDb, "resolveCursor").mockReturnValue({
+      cursor: undefined,
+      direction: "next" as const,
+    });
+    advancePaginationStateSpy = spyOn(
+      paginationDb,
+      "advancePaginationState"
+    ).mockReturnValue(undefined);
+    hasPreviousPageSpy = spyOn(paginationDb, "hasPreviousPage").mockReturnValue(
+      false
+    );
   });
 
   afterEach(() => {
     listSpansSpy.mockRestore();
     resolveOrgAndProjectSpy.mockRestore();
+    resolveCursorSpy.mockRestore();
+    advancePaginationStateSpy.mockRestore();
+    hasPreviousPageSpy.mockRestore();
   });
 
   test("calls listSpans without trace filter when no trace ID given", async () => {
@@ -626,7 +669,7 @@ describe("listCommand.func (project mode)", () => {
     expect(output).toContain("No spans matched the query.");
   });
 
-  test("hint shows -c last with project target when more pages available", async () => {
+  test("hint shows -c next with project target when more pages available", async () => {
     listSpansSpy.mockResolvedValue({
       data: [
         {
@@ -653,7 +696,7 @@ describe("listCommand.func (project mode)", () => {
     );
 
     const output = getStdout();
-    expect(output).toContain("-c last");
+    expect(output).toContain("-c next");
     expect(output).toContain("sentry span list my-org/my-project");
     // Should NOT contain a trace ID in the next-page hint
     expect(output).not.toContain(VALID_TRACE_ID);

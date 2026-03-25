@@ -290,13 +290,14 @@ Reference: `formatters/trace.ts` (`formatAncestorChain`), `formatters/human.ts` 
 
 ### List Command Pagination
 
-All list commands with API pagination MUST use the shared cursor infrastructure:
+All list commands with API pagination MUST use the shared cursor-stack
+infrastructure for **bidirectional** pagination (`-c next` / `-c prev`):
 
 ```typescript
 import { LIST_CURSOR_FLAG } from "../../lib/list-command.js";
 import {
-  buildPaginationContextKey, resolveOrgCursor,
-  setPaginationCursor, clearPaginationCursor,
+  buildPaginationContextKey, resolveCursor,
+  advancePaginationState, hasPreviousPage,
 } from "../../lib/db/pagination.js";
 
 export const PAGINATION_KEY = "my-entity-list";
@@ -309,13 +310,23 @@ aliases: { c: "cursor" },
 const contextKey = buildPaginationContextKey("entity", `${org}/${project}`, {
   sort: flags.sort, q: flags.query,
 });
-const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
+const { cursor, direction } = resolveCursor(flags.cursor, PAGINATION_KEY, contextKey);
 const { data, nextCursor } = await listEntities(org, project, { cursor, ... });
-if (nextCursor) setPaginationCursor(PAGINATION_KEY, contextKey, nextCursor);
-else clearPaginationCursor(PAGINATION_KEY, contextKey);
+advancePaginationState(PAGINATION_KEY, contextKey, direction, nextCursor);
+const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
+const hasMore = !!nextCursor;
 ```
 
-Show `-c last` in the hint footer when more pages are available. Include `nextCursor` in the JSON envelope.
+**Cursor stack model:** The DB stores a JSON array of page-start cursors
+plus a page index. Each entry is an opaque string — plain API cursors,
+compound cursors (issue list), or extended cursors with mid-page bookmarks
+(dashboard list). `-c next` increments the index, `-c prev` decrements it,
+`-c first` resets to 0. The stack truncates on back-then-forward to avoid
+stale entries. `"last"` is a silent alias for `"next"`.
+
+**Hint rules:** Show `-c prev` when `hasPreviousPage()` returns true.
+Show `-c next` when `hasMore` is true. Include both `nextCursor` and
+`hasPrev` in the JSON envelope.
 
 Reference template: `trace/list.ts`, `span/list.ts`
 
@@ -837,6 +848,9 @@ mock.module("./some-module", () => ({
 
 <!-- lore:019ca9c3-989c-7c8d-bcd0-9f308fd2c3d7 -->
 * **Sentry CLI markdown-first formatting pipeline replaces ad-hoc ANSI**: Formatters build CommonMark strings; \`renderMarkdown()\` renders to ANSI for TTY or raw markdown for non-TTY. Key helpers: \`colorTag()\`, \`mdKvTable()\`, \`mdRow()\`, \`mdTableHeader()\` (\`:\` suffix = right-aligned), \`renderTextTable()\`. \`isPlainOutput()\` checks \`SENTRY\_PLAIN\_OUTPUT\` > \`NO\_COLOR\` > \`!isTTY\`. Batch path: \`formatXxxTable()\`. Streaming path: \`StreamingTable\` (TTY) or raw markdown rows (plain). Both share \`buildXxxRowCells()\`.
+
+<!-- lore:019c9f9c-40ee-76b5-b98d-acf1e5867ebc -->
+* **Issue list global limit with fair per-project distribution and representation guarantees**: \`issue list --limit\` is a global total across all detected projects. \`fetchWithBudget\` Phase 1 divides evenly, Phase 2 redistributes surplus via cursor resume. \`trimWithProjectGuarantee\` ensures at least 1 issue per project before filling remaining slots. JSON output wraps in \`{ data, hasMore }\` with optional \`errors\` array. Compound cursor (pipe-separated) enables \`-c next\` for multi-target pagination, keyed by sorted target fingerprint.
 
 <!-- lore:019cd2b7-bb98-730e-a0d3-ec25bfa6cf4c -->
 * **Sentry issue stats field: time-series controlled by groupStatsPeriod**: The \`stats\` field on issues is \`{ '24h': \[\[ts, count], ...] }\`. Key depends on \`groupStatsPeriod\` param (\`""\`, \`"14d"\`, \`"24h"\`, \`"auto"\`). \`statsPeriod\` controls time window; \`groupStatsPeriod\` controls stats key. \*\*Critical\*\*: \`count\` is period-scoped — \`lifetime.count\` is the true lifetime total. Issue list table uses \`groupStatsPeriod: 'auto'\` for sparkline data. Column order: SHORT ID, ISSUE, SEEN, AGE, TREND, EVENTS, USERS, TRIAGE. TREND auto-hidden when terminal < 100 cols. \`--compact\` tri-state: explicit overrides; \`undefined\` triggers \`shouldAutoCompact(rowCount)\` — compact if \`3N + 3 > termHeight\`, false for non-TTY. Height is \`3N + 3\` (not \`3N + 4\`) because last data row has no trailing separator.

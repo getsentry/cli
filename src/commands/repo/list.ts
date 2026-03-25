@@ -61,7 +61,8 @@ const docs: OrgListCommandDocs = {
     "  sentry repo list <org>/<proj>  # list repos in org (project context)\n" +
     "  sentry repo list <org>         # list repos in org\n\n" +
     "Pagination:\n" +
-    "  sentry repo list <org>/ -c last  # continue from last page\n\n" +
+    "  sentry repo list <org>/ -c next  # fetch next page\n" +
+    "  sentry repo list <org>/ -c prev  # fetch previous page\n\n" +
     "Examples:\n" +
     "  sentry repo list              # auto-detect or list all\n" +
     "  sentry repo list my-org/      # list repositories in my-org (paginated)\n" +

@@ -1,16 +1,19 @@
 /**
- * Pagination cursor storage for `--cursor last` support.
+ * Pagination cursor stack for bidirectional `--cursor next` / `--cursor prev` support.
  *
- * Stores the most recent "next page" cursor for each (command, context) pair,
- * using a composite primary key so different contexts (e.g., different orgs)
- * maintain independent cursors.
+ * Stores a JSON array of page-start cursors ("cursor stack") plus a page index
+ * for each (command, context) pair. This enables arbitrary forward/backward
+ * navigation through paginated results.
+ *
+ * Each entry in the stack is an opaque cursor string — it may be a plain
+ * Sentry API cursor, a compound cursor (issue list), or an extended cursor
+ * with mid-page bookmarks (dashboard list). The stack treats them all equally.
+ *
  * Cursors expire after a short TTL to prevent stale pagination.
- *
- * Also exports shared helpers for building context keys and resolving cursor
- * flags, used by list commands that support cursor-based pagination.
  */
 
 import { ValidationError } from "../errors.js";
+import { CURSOR_KEYWORDS } from "../list-command.js";
 import { getApiBaseUrl } from "../sentry-client.js";
 import { getDatabase } from "./index.js";
 import { runUpsert } from "./utils.js";
@@ -18,58 +21,85 @@ import { runUpsert } from "./utils.js";
 /** Default TTL for stored cursors: 5 minutes */
 const CURSOR_TTL_MS = 5 * 60 * 1000;
 
+/** Direction derived from a `--cursor` flag value. */
+export type CursorDirection = "next" | "prev" | "first";
+
+/** Internal row shape from the pagination_cursors table. */
 type PaginationCursorRow = {
   command_key: string;
-  cursor: string;
   context: string;
+  cursor_stack: string;
+  page_index: number;
   expires_at: number;
 };
 
 /**
- * Get a stored pagination cursor if it exists and hasn't expired.
+ * Pagination state for a (command, context) pair.
  *
- * @param commandKey - Command identifier (e.g., "project-list")
- * @param context - Serialized query context for lookup
- * @returns The stored cursor string, or undefined if not found/expired
+ * The `stack` array contains one entry per visited page:
+ * - `stack[0]` = `""` (first page, no cursor)
+ * - `stack[1]` = cursor for page 2
+ * - `stack[N]` = cursor for page N+1
+ *
+ * `index` is the page the user is currently viewing (0-based).
  */
-export function getPaginationCursor(
+export type PaginationState = {
+  /** Array of page-start cursors. Index 0 is always `""` (first page). */
+  stack: string[];
+  /** Index of the currently viewed page (0-based). */
+  index: number;
+};
+
+// ---------------------------------------------------------------------------
+// Stack read / write
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the current pagination state from the DB.
+ *
+ * Returns `undefined` if no state exists or the stored state has expired.
+ *
+ * @param commandKey - Command identifier (e.g., "trace-list")
+ * @param contextKey - Serialized query context
+ */
+export function getPaginationState(
   commandKey: string,
-  context: string
-): string | undefined {
+  contextKey: string
+): PaginationState | undefined {
   const db = getDatabase();
   const row = db
     .query(
-      "SELECT cursor, expires_at FROM pagination_cursors WHERE command_key = ? AND context = ?"
+      "SELECT cursor_stack, page_index, expires_at FROM pagination_cursors WHERE command_key = ? AND context = ?"
     )
-    .get(commandKey, context) as PaginationCursorRow | undefined;
+    .get(commandKey, contextKey) as PaginationCursorRow | undefined;
 
   if (!row) {
     return;
   }
 
-  // Check expiry
   if (row.expires_at <= Date.now()) {
     db.query(
       "DELETE FROM pagination_cursors WHERE command_key = ? AND context = ?"
-    ).run(commandKey, context);
+    ).run(commandKey, contextKey);
     return;
   }
 
-  return row.cursor;
+  const stack = JSON.parse(row.cursor_stack) as string[];
+  return { stack, index: row.page_index };
 }
 
 /**
- * Store a pagination cursor for later retrieval via `--cursor last`.
+ * Write pagination state to the DB, refreshing the TTL.
  *
- * @param commandKey - Command identifier (e.g., "project-list")
- * @param context - Serialized query context for lookup
- * @param cursor - The cursor string to store
+ * @param commandKey - Command identifier
+ * @param contextKey - Serialized query context
+ * @param state - The pagination state to persist
  * @param ttlMs - Time-to-live in milliseconds (default: 5 minutes)
  */
-export function setPaginationCursor(
+function savePaginationState(
   commandKey: string,
-  context: string,
-  cursor: string,
+  contextKey: string,
+  state: PaginationState,
   ttlMs = CURSOR_TTL_MS
 ): void {
   const db = getDatabase();
@@ -78,30 +108,215 @@ export function setPaginationCursor(
     "pagination_cursors",
     {
       command_key: commandKey,
-      context,
-      cursor,
+      context: contextKey,
+      cursor_stack: JSON.stringify(state.stack),
+      page_index: state.index,
       expires_at: Date.now() + ttlMs,
     },
     ["command_key", "context"]
   );
 }
 
+// ---------------------------------------------------------------------------
+// Cursor resolution + state advance
+// ---------------------------------------------------------------------------
+
 /**
- * Remove the stored pagination cursor for a command and context.
- * Called when a non-paginated result is displayed (no more pages).
+ * Result from resolving a `--cursor` flag value.
  *
- * @param commandKey - Command identifier (e.g., "project-list")
- * @param context - Serialized query context to clear
+ * `cursor` is `undefined` when the resolved page is the first page (no API
+ * cursor needed). `direction` indicates which navigation keyword was used
+ * (or `"next"` for raw cursor passthrough).
  */
-export function clearPaginationCursor(
+export type ResolvedCursor = {
+  /** API cursor string, or `undefined` for the first page. */
+  cursor: string | undefined;
+  /** Navigation direction that was resolved. */
+  direction: CursorDirection;
+};
+
+/**
+ * Resolve a `--cursor` flag value to an API cursor and navigation direction.
+ *
+ * Keyword resolution:
+ * - `"next"` / `"last"` — advance to the next stored page
+ * - `"prev"` / `"previous"` — go back to the previous page
+ * - `"first"` — jump back to the first page
+ * - raw string — passthrough (power user: treated as "next" direction)
+ * - `undefined` — no flag provided (first page, fresh start)
+ *
+ * @param cursorFlag - Raw value of `--cursor` (undefined if not set)
+ * @param commandKey - Command identifier for cursor storage
+ * @param contextKey - Serialized query context for cursor storage
+ * @returns Resolved cursor and direction
+ * @throws ValidationError when navigation is impossible (e.g., prev on first page)
+ */
+export function resolveCursor(
+  cursorFlag: string | undefined,
   commandKey: string,
-  context: string
+  contextKey: string
+): ResolvedCursor {
+  if (!cursorFlag) {
+    return { cursor: undefined, direction: "next" };
+  }
+
+  // Raw cursor passthrough (power user)
+  if (!CURSOR_KEYWORDS.has(cursorFlag)) {
+    return { cursor: cursorFlag, direction: "next" };
+  }
+
+  const state = getPaginationState(commandKey, contextKey);
+
+  // "first" — jump to the beginning regardless of state
+  if (cursorFlag === "first") {
+    return { cursor: undefined, direction: "first" };
+  }
+
+  // "next" / "last" — advance one page
+  if (cursorFlag === "next" || cursorFlag === "last") {
+    if (!state || state.index + 1 >= state.stack.length) {
+      throw new ValidationError(
+        "No next page saved for this query. Run without --cursor first.",
+        "cursor"
+      );
+    }
+    const nextCursor = state.stack[state.index + 1] as string;
+    return {
+      cursor: nextCursor === "" ? undefined : nextCursor,
+      direction: "next",
+    };
+  }
+
+  // "prev" / "previous" — go back one page
+  if (!state || state.index <= 0) {
+    throw new ValidationError(
+      "Already on the first page — cannot go back further.",
+      "cursor"
+    );
+  }
+  const prevCursor = state.stack[state.index - 1] as string;
+  return {
+    cursor: prevCursor === "" ? undefined : prevCursor,
+    direction: "prev",
+  };
+}
+
+/**
+ * Update the cursor stack after a page has been fetched and displayed.
+ *
+ * Call this after every successful fetch to keep the stack in sync:
+ *
+ * - **Forward (`"next"`)**: increment index, store `nextCursor` at index+1.
+ *   Truncates any entries beyond index+1 (handles back-then-forward correctly).
+ * - **Backward (`"prev"`)**: decrement index. `nextCursor` refreshes the
+ *   entry at index+1 (in case the data shifted since we last visited).
+ * - **First (`"first"`)**: reset index to 0, store `nextCursor` at index 1.
+ *   Truncates everything else.
+ * - **Fresh start** (no prior state): initialise stack as `["", nextCursor]`
+ *   at index 0.
+ *
+ * When `nextCursor` is `undefined` (last page), the stack is truncated to
+ * `index + 1` entries so `-c next` correctly errors with "no next page".
+ *
+ * @param commandKey - Command identifier
+ * @param contextKey - Serialized query context
+ * @param direction - Which direction the user navigated
+ * @param nextCursor - Cursor for the page after the one just displayed (undefined if last page)
+ */
+export function advancePaginationState(
+  commandKey: string,
+  contextKey: string,
+  direction: CursorDirection,
+  nextCursor: string | undefined
+): void {
+  const state = getPaginationState(commandKey, contextKey);
+
+  if (!state) {
+    // First page ever — initialise the stack
+    const stack = nextCursor ? ["", nextCursor] : [""];
+    savePaginationState(commandKey, contextKey, { stack, index: 0 });
+    return;
+  }
+
+  switch (direction) {
+    case "next": {
+      const newIndex = state.index + 1;
+      // Truncate anything beyond the new position (back-then-forward scenario)
+      const stack = state.stack.slice(0, newIndex + 1);
+      if (nextCursor) {
+        stack[newIndex + 1] = nextCursor;
+      }
+      savePaginationState(commandKey, contextKey, {
+        stack,
+        index: newIndex,
+      });
+      break;
+    }
+
+    case "prev": {
+      const newIndex = Math.max(0, state.index - 1);
+      // Refresh the "next" entry from this position in case data shifted
+      const stack = [...state.stack];
+      if (nextCursor) {
+        stack[newIndex + 1] = nextCursor;
+      }
+      // Truncate beyond newIndex + 2 to keep only the immediate next
+      savePaginationState(commandKey, contextKey, {
+        stack: stack.slice(0, nextCursor ? newIndex + 2 : newIndex + 1),
+        index: newIndex,
+      });
+      break;
+    }
+
+    case "first": {
+      const stack = nextCursor ? ["", nextCursor] : [""];
+      savePaginationState(commandKey, contextKey, { stack, index: 0 });
+      break;
+    }
+
+    default:
+      break;
+  }
+}
+
+/**
+ * Remove all stored pagination state for a command and context.
+ *
+ * Called when results are empty or the listing context has changed.
+ *
+ * @param commandKey - Command identifier
+ * @param contextKey - Serialized query context to clear
+ */
+export function clearPaginationState(
+  commandKey: string,
+  contextKey: string
 ): void {
   const db = getDatabase();
   db.query(
     "DELETE FROM pagination_cursors WHERE command_key = ? AND context = ?"
-  ).run(commandKey, context);
+  ).run(commandKey, contextKey);
 }
+
+/**
+ * Check whether a previous page exists in the stored pagination state.
+ *
+ * Used by commands to decide whether to show the `-c prev` hint.
+ *
+ * @param commandKey - Command identifier
+ * @param contextKey - Serialized query context
+ * @returns `true` if the current page index > 0
+ */
+export function hasPreviousPage(
+  commandKey: string,
+  contextKey: string
+): boolean {
+  const state = getPaginationState(commandKey, contextKey);
+  return !!state && state.index > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Context key builders (unchanged)
+// ---------------------------------------------------------------------------
 
 /**
  * Escape a user-provided value for safe inclusion in a context key.
@@ -167,37 +382,4 @@ export function buildPaginationContextKey(
  */
 export function buildOrgContextKey(org: string): string {
   return buildPaginationContextKey("org", org);
-}
-
-/**
- * Resolve the cursor value from a `--cursor` flag.
- *
- * Handles the magic `"last"` value by looking up the cached cursor for the
- * given context key. Throws a {@link ContextError} if `"last"` is requested
- * but no cursor has been cached yet.
- *
- * @param cursorFlag - Raw value of the `--cursor` flag (undefined if not set)
- * @param commandKey - Command identifier used for cursor storage
- * @param contextKey - Serialized query context used for cursor storage
- * @returns Resolved cursor string, or `undefined` if no cursor was specified
- */
-export function resolveOrgCursor(
-  cursorFlag: string | undefined,
-  commandKey: string,
-  contextKey: string
-): string | undefined {
-  if (!cursorFlag) {
-    return;
-  }
-  if (cursorFlag === "last") {
-    const cached = getPaginationCursor(commandKey, contextKey);
-    if (!cached) {
-      throw new ValidationError(
-        "No saved cursor for this query. Run without --cursor first.",
-        "cursor"
-      );
-    }
-    return cached;
-  }
-  return cursorFlag;
 }

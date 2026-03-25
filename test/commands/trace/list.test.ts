@@ -23,11 +23,16 @@ import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 import * as apiClient from "../../../src/lib/api-client.js";
 import { validateLimit } from "../../../src/lib/arg-parsing.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as paginationDb from "../../../src/lib/db/pagination.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import { ContextError, ResolutionError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { TransactionListItem } from "../../../src/types/sentry.js";
+
+// Reference paginationDb early to prevent import stripping by auto-organize
+const _paginationDbRef = paginationDb;
 
 // ============================================================================
 // validateLimit (shared utility from arg-parsing.ts)
@@ -224,6 +229,9 @@ describe("listCommand.func", () => {
   let listTransactionsSpy: ReturnType<typeof spyOn>;
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
   let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
+  let resolveCursorSpy: ReturnType<typeof spyOn>;
+  let advancePaginationStateSpy: ReturnType<typeof spyOn>;
+  let hasPreviousPageSpy: ReturnType<typeof spyOn>;
 
   const sampleTraces: TransactionListItem[] = [
     {
@@ -260,12 +268,26 @@ describe("listCommand.func", () => {
     listTransactionsSpy = spyOn(apiClient, "listTransactions");
     findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
     resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
+    resolveCursorSpy = spyOn(paginationDb, "resolveCursor").mockReturnValue({
+      cursor: undefined,
+      direction: "next" as const,
+    });
+    advancePaginationStateSpy = spyOn(
+      paginationDb,
+      "advancePaginationState"
+    ).mockReturnValue(undefined);
+    hasPreviousPageSpy = spyOn(paginationDb, "hasPreviousPage").mockReturnValue(
+      false
+    );
   });
 
   afterEach(() => {
     listTransactionsSpy.mockRestore();
     findProjectsBySlugSpy.mockRestore();
     resolveOrgAndProjectSpy.mockRestore();
+    resolveCursorSpy.mockRestore();
+    advancePaginationStateSpy.mockRestore();
+    hasPreviousPageSpy.mockRestore();
   });
 
   test("outputs JSON with data array when --json flag is set", async () => {
@@ -275,13 +297,14 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: true },
+      { limit: 20, sort: "date", json: true, period: "7d" },
       "test-org/test-project"
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
     expect(parsed.hasMore).toBe(false);
+    expect(parsed.hasPrev).toBe(false);
     expect(Array.isArray(parsed.data)).toBe(true);
     expect(parsed.data).toHaveLength(2);
     expect(parsed.data[0].transaction).toBe("GET /api/users");
@@ -294,12 +317,16 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: true },
+      { limit: 20, sort: "date", json: true, period: "7d" },
       "test-org/test-project"
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(JSON.parse(output)).toEqual({ data: [], hasMore: false });
+    expect(JSON.parse(output)).toEqual({
+      data: [],
+      hasMore: false,
+      hasPrev: false,
+    });
   });
 
   test("writes 'No traces found.' when empty without --json", async () => {
@@ -309,7 +336,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: false },
+      { limit: 20, sort: "date", json: false, period: "7d" },
       "test-org/test-project"
     );
 
@@ -324,7 +351,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: false },
+      { limit: 20, sort: "date", json: false, period: "7d" },
       "test-org/test-project"
     );
 
@@ -346,13 +373,13 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 2, sort: "date", json: false },
+      { limit: 2, sort: "date", json: false, period: "7d" },
       "test-org/test-project"
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Next page:");
-    expect(output).toContain("-c last");
+    expect(output).toContain("-c next");
   });
 
   test("shows trace view tip when no nextCursor", async () => {
@@ -362,7 +389,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 100, sort: "date", json: false },
+      { limit: 100, sort: "date", json: false, period: "7d" },
       "test-org/test-project"
     );
 
@@ -378,7 +405,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: false },
+      { limit: 20, sort: "date", json: false, period: "7d" },
       "test-org/test-project"
     );
 
@@ -394,7 +421,13 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 50, sort: "duration", json: false, query: "transaction:GET" },
+      {
+        limit: 50,
+        sort: "duration",
+        json: false,
+        query: "transaction:GET",
+        period: "7d",
+      },
       "test-org/test-project"
     );
 
@@ -406,6 +439,7 @@ describe("listCommand.func", () => {
         limit: 50,
         sort: "duration",
         cursor: undefined,
+        statsPeriod: "7d",
       }
     );
   });
@@ -420,13 +454,14 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: true },
+      { limit: 20, sort: "date", json: true, period: "7d" },
       "test-org/test-project"
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
     expect(parsed.hasMore).toBe(true);
+    expect(parsed.hasPrev).toBe(false);
     expect(parsed.nextCursor).toBe("1735689600:0:0");
     expect(Array.isArray(parsed.data)).toBe(true);
     expect(parsed.data).toHaveLength(2);
@@ -442,13 +477,13 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "duration", json: false },
+      { limit: 20, sort: "duration", json: false, period: "7d" },
       "test-org/test-project"
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Next page:");
-    expect(output).toContain("-c last");
+    expect(output).toContain("-c next");
     expect(output).toContain("--sort duration");
   });
 
@@ -459,7 +494,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: false },
+      { limit: 20, sort: "date", json: false, period: "7d" },
       "test-org/test-project"
     );
 
@@ -477,13 +512,13 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: false },
+      { limit: 20, sort: "date", json: false, period: "7d" },
       "test-org/test-project"
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("No traces on this page");
-    expect(output).toContain("-c last");
+    expect(output).toContain("-c next");
   });
 
   test("next page hint includes query flag when --query is set", async () => {
@@ -496,13 +531,19 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: false, query: "transaction:POST" },
+      {
+        limit: 20,
+        sort: "date",
+        json: false,
+        query: "transaction:POST",
+        period: "7d",
+      },
       "test-org/test-project"
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain('-q "transaction:POST"');
-    expect(output).toContain("-c last");
+    expect(output).toContain("-c next");
   });
 
   test("JSON output with no nextCursor has hasMore false", async () => {
@@ -512,13 +553,14 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: true },
+      { limit: 20, sort: "date", json: true, period: "7d" },
       "test-org/test-project"
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
     expect(parsed.hasMore).toBe(false);
+    expect(parsed.hasPrev).toBe(false);
     expect(parsed.nextCursor).toBeUndefined();
   });
 
@@ -558,6 +600,6 @@ describe("listCommand.func", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("--period 30d");
-    expect(output).toContain("-c last");
+    expect(output).toContain("-c next");
   });
 });

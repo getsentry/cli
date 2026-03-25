@@ -25,10 +25,11 @@ import {
 } from "../../lib/arg-parsing.js";
 import { getDefaultOrganization } from "../../lib/db/defaults.js";
 import {
-  clearPaginationCursor,
+  advancePaginationState,
+  type CursorDirection,
   escapeContextKeyValue,
-  resolveOrgCursor,
-  setPaginationCursor,
+  hasPreviousPage,
+  resolveCursor,
 } from "../../lib/db/pagination.js";
 import { ResolutionError, withAuthGuard } from "../../lib/errors.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
@@ -427,12 +428,28 @@ export type OrgAllOptions = {
   flags: ListFlags;
   contextKey: string;
   cursor: string | undefined;
+  direction: CursorDirection;
 };
 
-/** Build the CLI hint for fetching the next page, preserving active flags. */
-function nextPageHint(org: string, platform?: string): string {
-  const base = `sentry project list ${org}/ -c last`;
-  return platform ? `${base} --platform ${platform}` : base;
+/** Build a bidirectional pagination hint, preserving active flags. */
+function paginationHint(
+  org: string,
+  hasPrev: boolean,
+  hasNext: boolean,
+  platform?: string
+): string {
+  const base = `sentry project list ${org}/`;
+  const suffix = platform ? ` --platform ${platform}` : "";
+  if (hasPrev && hasNext) {
+    return `Navigate: ${base} -c prev${suffix} | ${base} -c next${suffix}`;
+  }
+  if (hasNext) {
+    return `Next page: ${base} -c next${suffix}`;
+  }
+  if (hasPrev) {
+    return `Previous page: ${base} -c prev${suffix}`;
+  }
+  return "";
 }
 
 /**
@@ -442,7 +459,7 @@ function nextPageHint(org: string, platform?: string): string {
 export async function handleOrgAll(
   options: OrgAllOptions
 ): Promise<ListResult<ProjectWithOrg>> {
-  const { org, flags, contextKey, cursor } = options;
+  const { org, flags, contextKey, cursor, direction } = options;
   const response: PaginatedResponse<SentryProject[]> = await withProgress(
     {
       message: `Fetching projects (up to ${flags.limit})...`,
@@ -464,38 +481,42 @@ export async function handleOrgAll(
 
   const hasMore = !!response.nextCursor;
 
-  // Update cursor cache for `--cursor last` support
-  if (response.nextCursor) {
-    setPaginationCursor(PAGINATION_KEY, contextKey, response.nextCursor);
-  } else {
-    clearPaginationCursor(PAGINATION_KEY, contextKey);
-  }
+  // Update cursor stack for bidirectional navigation
+  advancePaginationState(
+    PAGINATION_KEY,
+    contextKey,
+    direction,
+    response.nextCursor ?? undefined
+  );
+  const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
 
   let hint: string | undefined;
   let header: string | undefined;
 
+  const navHint = paginationHint(org, hasPrev, hasMore, flags.platform);
+
   if (filtered.length === 0) {
-    if (hasMore) {
-      hint = `No matching projects on this page. Try the next page: ${nextPageHint(org, flags.platform)}`;
+    if (navHint) {
+      hint = `No matching projects on this page. ${navHint}`;
     } else if (flags.platform) {
       hint = `No projects matching platform '${flags.platform}' in organization '${org}'.`;
     } else {
       hint = `No projects found in organization '${org}'.`;
     }
   } else {
-    header = hasMore
-      ? `Showing ${filtered.length} projects (more available)`
-      : `Showing ${filtered.length} projects`;
-    if (hasMore) {
-      hint = `Next page: ${nextPageHint(org, flags.platform)}`;
+    if (navHint) {
+      header = `Showing ${filtered.length} projects (more available)\n${navHint}`;
+    } else {
+      header = `Showing ${filtered.length} projects`;
     }
     const tip = "Tip: Use 'sentry project view <org>/<project>' for details";
-    hint = hint ? `${hint}\n${tip}` : tip;
+    hint = tip;
   }
 
   return {
     items: filtered,
     hasMore,
+    hasPrev,
     nextCursor: response.nextCursor ?? null,
     header,
     hint,
@@ -540,6 +561,7 @@ export async function handleProjectSearch(
         flags,
         contextKey,
         cursor: undefined,
+        direction: "next",
       });
       const r = result as ProjectListResult;
       r.title = `'${projectSlug}' is an organization, not a project. Showing all projects in '${projectSlug}'`;
@@ -595,7 +617,8 @@ export const listCommand = buildListCommand("project", {
       "  sentry project list <project>      # find project across all orgs\n\n" +
       `${targetPatternExplanation("Cursor pagination (--cursor) requires the <org>/ form.")}\n\n` +
       "Pagination:\n" +
-      "  sentry project list <org>/ -c last      # continue from last page\n" +
+      "  sentry project list <org>/ -c next      # next page\n" +
+      "  sentry project list <org>/ -c prev      # previous page\n" +
       "  sentry project list <org>/ -c <cursor>  # resume at specific cursor\n\n" +
       "Filtering and output:\n" +
       "  sentry project list --platform javascript  # filter by platform\n" +
@@ -657,7 +680,7 @@ export const listCommand = buildListCommand("project", {
             flags,
             getApiBaseUrl()
           );
-          const cursor = resolveOrgCursor(
+          const { cursor, direction } = resolveCursor(
             flags.cursor,
             PAGINATION_KEY,
             contextKey
@@ -667,6 +690,7 @@ export const listCommand = buildListCommand("project", {
             flags,
             contextKey,
             cursor,
+            direction,
           });
         },
         "project-search": (ctx) =>

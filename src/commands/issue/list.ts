@@ -25,11 +25,11 @@ import {
 } from "../../lib/arg-parsing.js";
 import { getActiveEnvVarName, isEnvTokenActive } from "../../lib/db/auth.js";
 import {
+  advancePaginationState,
   buildPaginationContextKey,
-  clearPaginationCursor,
   escapeContextKeyValue,
-  resolveOrgCursor,
-  setPaginationCursor,
+  hasPreviousPage,
+  resolveCursor,
 } from "../../lib/db/pagination.js";
 import {
   clearProjectAliases,
@@ -646,7 +646,7 @@ type BudgetFetchOptions = {
  *    the surplus among those expandable targets and fetch one more page each.
  *
  * Targets with a `startCursor` in `options.startCursors` resume from that cursor
- * instead of starting fresh — used for compound cursor pagination (−c last).
+ * instead of starting fresh — used for compound cursor pagination (−c next / −c prev).
  *
  * @param targets - Resolved org/project targets to fetch from
  * @param options - Query + budget options
@@ -827,7 +827,7 @@ function buildMultiTargetContextKey(
 
 /** Build the CLI hint for fetching the next page, preserving active flags. */
 function nextPageHint(org: string, flags: ListFlags): string {
-  const base = `sentry issue list ${org}/ -c last`;
+  const base = `sentry issue list ${org}/ -c next`;
   const parts: string[] = [];
   if (flags.sort !== "date") {
     parts.push(`--sort ${flags.sort}`);
@@ -906,7 +906,11 @@ async function handleOrgAllIssues(
     period: flags.period ?? "90d",
     q: flags.query,
   });
-  const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
+  const { cursor, direction } = resolveCursor(
+    flags.cursor,
+    PAGINATION_KEY,
+    contextKey
+  );
 
   let issuesResult: IssuesPage;
   try {
@@ -927,13 +931,10 @@ async function handleOrgAllIssues(
   }
   const { issues, nextCursor } = issuesResult;
 
-  if (nextCursor) {
-    setPaginationCursor(PAGINATION_KEY, contextKey, nextCursor);
-  } else {
-    clearPaginationCursor(PAGINATION_KEY, contextKey);
-  }
+  advancePaginationState(PAGINATION_KEY, contextKey, direction, nextCursor);
 
   const hasMore = !!nextCursor;
+  const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
 
   if (issues.length === 0) {
     const hint = hasMore
@@ -963,10 +964,14 @@ async function handleOrgAllIssues(
   } else {
     hintParts.push(`Showing ${issues.length} issues`);
   }
+  if (hasPrev) {
+    hintParts.push("Previous page: -c prev");
+  }
 
   return {
     items: issues,
     hasMore,
+    hasPrev,
     nextCursor,
     hint: hintParts.join("\n"),
     displayRows,
@@ -1107,7 +1112,7 @@ function build403Detail(originalDetail: string | undefined): string {
  * All three share the same flow: resolve targets → fetch issues within the
  * global limit budget → merge → trim with project guarantee → display.
  * Cursor pagination uses a compound cursor (one cursor per project, encoded
- * as a JSON string) so `-c last` works across multi-target results.
+ * as a pipe-separated string) so `-c next` / `-c prev` works across multi-target results.
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: inherent multi-target resolution, compound cursor, error handling, and display logic
 async function handleResolvedTargets(
@@ -1137,24 +1142,22 @@ async function handleResolvedTargets(
   const sortedTargetKeys = targets.map((t) => `${t.org}/${t.project}`).sort();
   const startCursors = new Map<string, string>();
   const exhaustedTargets = new Set<string>();
-  if (flags.cursor) {
-    const rawCursor = resolveOrgCursor(
-      flags.cursor,
-      PAGINATION_KEY,
-      contextKey
-    );
-    if (rawCursor) {
-      const decoded = decodeCompoundCursor(rawCursor);
-      for (let i = 0; i < decoded.length && i < sortedTargetKeys.length; i++) {
-        const cursor = decoded[i];
-        // biome-ignore lint/style/noNonNullAssertion: i is within bounds
-        const key = sortedTargetKeys[i]!;
-        if (cursor) {
-          startCursors.set(key, cursor);
-        } else {
-          // null = project was exhausted on previous page — skip it entirely
-          exhaustedTargets.add(key);
-        }
+  const { cursor: rawCursor, direction } = resolveCursor(
+    flags.cursor,
+    PAGINATION_KEY,
+    contextKey
+  );
+  if (rawCursor) {
+    const decoded = decodeCompoundCursor(rawCursor);
+    for (let i = 0; i < decoded.length && i < sortedTargetKeys.length; i++) {
+      const cursor = decoded[i];
+      // biome-ignore lint/style/noNonNullAssertion: i is within bounds
+      const key = sortedTargetKeys[i]!;
+      if (cursor) {
+        startCursors.set(key, cursor);
+      } else {
+        // null = project was exhausted on previous page — skip it entirely
+        exhaustedTargets.add(key);
       }
     }
   }
@@ -1195,7 +1198,7 @@ async function handleResolvedTargets(
       )
   );
 
-  // Store compound cursor so `-c last` can resume from each project's position.
+  // Store compound cursor so `-c next` can resume from each project's position.
   // Cursors are stored in the same sorted order as buildMultiTargetContextKey.
   const cursorValues: (string | null)[] = sortedTargetKeys.map((key) => {
     // Exhausted targets from previous page stay exhausted
@@ -1213,21 +1216,22 @@ async function handleResolvedTargets(
       return result.data.nextCursor ?? null;
     }
     // Target failed this fetch — preserve the cursor it was given so the next
-    // `-c last` retries from the same position rather than skipping it entirely.
+    // `-c next` retries from the same position rather than skipping it entirely.
     // If no start cursor was given (first-page failure), null means not retried
-    // via cursor; the user can run without -c last to restart all projects.
+    // via cursor; the user can run without -c next to restart all projects.
     return startCursors.get(key) ?? null;
   });
   const hasAnyCursor = cursorValues.some((c) => c !== null);
-  if (hasAnyCursor) {
-    setPaginationCursor(
-      PAGINATION_KEY,
-      contextKey,
-      encodeCompoundCursor(cursorValues)
-    );
-  } else {
-    clearPaginationCursor(PAGINATION_KEY, contextKey);
-  }
+  const compoundNextCursor = hasAnyCursor
+    ? encodeCompoundCursor(cursorValues)
+    : undefined;
+  advancePaginationState(
+    PAGINATION_KEY,
+    contextKey,
+    direction,
+    compoundNextCursor
+  );
+  const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
 
   const validResults: IssueListFetchResult[] = [];
   const failures: { target: ResolvedTarget; error: Error }[] = [];
@@ -1355,17 +1359,22 @@ async function handleResolvedTargets(
       actionParts.push(`-n ${higherLimit}`);
     }
     if (canPaginate) {
-      actionParts.push("-c last");
+      actionParts.push("-c next");
     }
     // Only set the hint when there is at least one actionable option
     if (actionParts.length > 0) {
       moreHint = `More issues available — use ${actionParts.join(" or ")} for more.`;
     }
   }
+  if (hasPrev) {
+    const prevPart = "Previous page: -c prev";
+    moreHint = moreHint ? `${moreHint}\n${prevPart}` : prevPart;
+  }
 
   return {
     items: allIssues,
     hasMore: hasMoreToShow,
+    hasPrev,
     errors,
     displayRows: issuesWithOptions,
     title,
@@ -1494,7 +1503,7 @@ export const listCommand = buildListCommand("issue", {
       "The --limit flag specifies the total number of issues to display (max 1000). " +
       "When multiple projects are detected, the limit is distributed evenly across them. " +
       "Projects with fewer issues than their share give their surplus to others. " +
-      "Use --cursor / -c last to paginate through larger result sets.\n\n" +
+      "Use --cursor / -c next / -c prev to paginate through larger result sets.\n\n" +
       "By default, only issues with activity in the last 90 days are shown. " +
       "Use --period to adjust (e.g. --period 24h, --period 14d).\n\n" +
       "Alias: `sentry issues` → `sentry issue list`",
@@ -1526,7 +1535,7 @@ export const listCommand = buildListCommand("issue", {
         kind: "parsed",
         parse: parseCursorFlag,
         brief:
-          'Pagination cursor for <org>/ or multi-target modes (use "last" to continue)',
+          'Pagination cursor (use "next" for next page, "prev" for previous)',
         optional: true,
       },
       compact: {

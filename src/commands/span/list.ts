@@ -15,10 +15,10 @@ import type { SpanSortValue } from "../../lib/api/traces.js";
 import { listSpans } from "../../lib/api-client.js";
 import { validateLimit } from "../../lib/arg-parsing.js";
 import {
+  advancePaginationState,
   buildPaginationContextKey,
-  clearPaginationCursor,
-  resolveOrgCursor,
-  setPaginationCursor,
+  hasPreviousPage,
+  resolveCursor,
 } from "../../lib/db/pagination.js";
 import {
   type FlatSpan,
@@ -150,7 +150,20 @@ function traceNextPageHint(
   flags: Pick<ListFlags, "sort" | "query" | "period">
 ): string {
   return appendFlagHints(
-    `sentry span list ${org}/${project}/${traceId} -c last`,
+    `sentry span list ${org}/${project}/${traceId} -c next`,
+    flags
+  );
+}
+
+/** Build the CLI hint for fetching the previous page in trace mode. */
+function tracePrevPageHint(
+  org: string,
+  project: string,
+  traceId: string,
+  flags: Pick<ListFlags, "sort" | "query" | "period">
+): string {
+  return appendFlagHints(
+    `sentry span list ${org}/${project}/${traceId} -c prev`,
     flags
   );
 }
@@ -161,7 +174,16 @@ function projectNextPageHint(
   project: string,
   flags: Pick<ListFlags, "sort" | "query" | "period">
 ): string {
-  return appendFlagHints(`sentry span list ${org}/${project} -c last`, flags);
+  return appendFlagHints(`sentry span list ${org}/${project} -c next`, flags);
+}
+
+/** Build the CLI hint for fetching the previous page in project mode. */
+function projectPrevPageHint(
+  org: string,
+  project: string,
+  flags: Pick<ListFlags, "sort" | "query" | "period">
+): string {
+  return appendFlagHints(`sentry span list ${org}/${project} -c prev`, flags);
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +196,8 @@ type SpanListData = {
   flatSpans: FlatSpan[];
   /** Whether more results are available beyond the limit */
   hasMore: boolean;
+  /** Whether a previous page exists (for bidirectional hints) */
+  hasPrev?: boolean;
   /** Opaque cursor for fetching the next page (null/undefined when no more) */
   nextCursor?: string | null;
   /** The trace ID being queried (only in trace mode) */
@@ -220,6 +244,7 @@ function jsonTransformSpanList(data: SpanListData, fields?: string[]): unknown {
   const envelope: Record<string, unknown> = {
     data: items,
     hasMore: data.hasMore,
+    hasPrev: !!data.hasPrev,
   };
   if (
     data.nextCursor !== null &&
@@ -269,7 +294,11 @@ async function handleTraceMode(
     `${org}/${project}/${traceId}`,
     { sort: flags.sort, q: flags.query, period: flags.period }
   );
-  const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
+  const { cursor, direction } = resolveCursor(
+    flags.cursor,
+    PAGINATION_KEY,
+    contextKey
+  );
 
   const { data: spanItems, nextCursor } = await withProgress(
     { message: `Fetching spans (up to ${flags.limit})...`, json: flags.json },
@@ -283,11 +312,9 @@ async function handleTraceMode(
       })
   );
 
-  if (nextCursor) {
-    setPaginationCursor(PAGINATION_KEY, contextKey, nextCursor);
-  } else {
-    clearPaginationCursor(PAGINATION_KEY, contextKey);
-  }
+  // Update pagination state (handles both advance and truncation)
+  advancePaginationState(PAGINATION_KEY, contextKey, direction, nextCursor);
+  const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
 
   const flatSpans = spanItems.map(spanListItemToFlatSpan);
   const hasMore = !!nextCursor;
@@ -297,12 +324,21 @@ async function handleTraceMode(
     hint = `Try the next page: ${traceNextPageHint(org, project, traceId, flags)}`;
   } else if (flatSpans.length > 0) {
     const countText = `Showing ${flatSpans.length} span${flatSpans.length === 1 ? "" : "s"}.`;
-    hint = hasMore
-      ? `${countText} Next page: ${traceNextPageHint(org, project, traceId, flags)}`
-      : `${countText} Use 'sentry span view ${traceId} <span-id>' to view span details.`;
+    if (hasMore && hasPrev) {
+      hint = `${countText} Prev: ${tracePrevPageHint(org, project, traceId, flags)} | Next: ${traceNextPageHint(org, project, traceId, flags)}`;
+    } else if (hasMore) {
+      hint = `${countText} Next page: ${traceNextPageHint(org, project, traceId, flags)}`;
+    } else if (hasPrev) {
+      hint = `${countText} Prev: ${tracePrevPageHint(org, project, traceId, flags)}`;
+    } else {
+      hint = `${countText} Use 'sentry span view ${traceId} <span-id>' to view span details.`;
+    }
   }
 
-  return { output: { flatSpans, hasMore, nextCursor, traceId }, hint };
+  return {
+    output: { flatSpans, hasMore, hasPrev, nextCursor, traceId },
+    hint,
+  };
 }
 
 /**
@@ -328,7 +364,7 @@ async function handleProjectMode(
     `${org}/${project}`,
     { sort: flags.sort, q: flags.query, period: flags.period }
   );
-  const cursor = resolveOrgCursor(
+  const { cursor, direction } = resolveCursor(
     flags.cursor,
     PROJECT_PAGINATION_KEY,
     contextKey
@@ -346,11 +382,14 @@ async function handleProjectMode(
       })
   );
 
-  if (nextCursor) {
-    setPaginationCursor(PROJECT_PAGINATION_KEY, contextKey, nextCursor);
-  } else {
-    clearPaginationCursor(PROJECT_PAGINATION_KEY, contextKey);
-  }
+  // Update pagination state (handles both advance and truncation)
+  advancePaginationState(
+    PROJECT_PAGINATION_KEY,
+    contextKey,
+    direction,
+    nextCursor
+  );
+  const hasPrev = hasPreviousPage(PROJECT_PAGINATION_KEY, contextKey);
 
   const flatSpans = spanItems.map(spanListItemToFlatSpan);
   const hasMore = !!nextCursor;
@@ -360,12 +399,21 @@ async function handleProjectMode(
     hint = `Try the next page: ${projectNextPageHint(org, project, flags)}`;
   } else if (flatSpans.length > 0) {
     const countText = `Showing ${flatSpans.length} span${flatSpans.length === 1 ? "" : "s"}.`;
-    hint = hasMore
-      ? `${countText} Next page: ${projectNextPageHint(org, project, flags)}`
-      : `${countText} Use 'sentry span view <trace-id> <span-id>' to view span details.`;
+    if (hasMore && hasPrev) {
+      hint = `${countText} Prev: ${projectPrevPageHint(org, project, flags)} | Next: ${projectNextPageHint(org, project, flags)}`;
+    } else if (hasMore) {
+      hint = `${countText} Next page: ${projectNextPageHint(org, project, flags)}`;
+    } else if (hasPrev) {
+      hint = `${countText} Prev: ${projectPrevPageHint(org, project, flags)}`;
+    } else {
+      hint = `${countText} Use 'sentry span view <trace-id> <span-id>' to view span details.`;
+    }
   }
 
-  return { output: { flatSpans, hasMore, nextCursor, org, project }, hint };
+  return {
+    output: { flatSpans, hasMore, hasPrev, nextCursor, org, project },
+    hint,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -387,8 +435,9 @@ export const listCommand = buildListCommand("span", {
       "  sentry span list <org>/<project>/<trace-id>      # explicit\n" +
       "  sentry span list <project> <trace-id>            # find project + trace\n\n" +
       "Pagination:\n" +
-      "  sentry span list -c last                # fetch next page (project mode)\n" +
-      "  sentry span list <trace-id> -c last     # fetch next page (trace mode)\n\n" +
+      "  sentry span list -c next                # fetch next page (project mode)\n" +
+      "  sentry span list -c prev                # fetch previous page\n" +
+      "  sentry span list <trace-id> -c next     # fetch next page (trace mode)\n\n" +
       "Examples:\n" +
       "  sentry span list                        # List recent spans in project\n" +
       '  sentry span list -q "op:db"             # Find all DB spans\n' +
