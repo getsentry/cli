@@ -37,7 +37,8 @@ import {
   numberParser as stricliNumberParser,
 } from "@stricli/core";
 import type { Writer } from "../types/index.js";
-import { OutputError } from "./errors.js";
+import { CliError, OutputError } from "./errors.js";
+import { warning } from "./formatters/colors.js";
 import { parseFieldsList } from "./formatters/json.js";
 import {
   ClearScreen,
@@ -393,6 +394,56 @@ export function buildCommand<
     }
   }
 
+  /**
+   * When a command throws a {@link CliError} and a positional arg was
+   * `"help"`, the user likely intended `--help`. Show the command's
+   * help instead of the confusing error.
+   *
+   * Only fires as **error recovery** — if the command succeeds with a
+   * legitimate value like a project named "help", this never runs.
+   *
+   * Catches all {@link CliError} subtypes (AuthError, ResolutionError,
+   * ValidationError, ContextError, etc.) because any failure with "help"
+   * as input strongly signals the user wanted `--help`. For example,
+   * `sentry issue list help` may throw AuthError (not logged in) before
+   * ever reaching project resolution.
+   *
+   * {@link OutputError} is excluded — it carries legitimate data to render
+   * (the "HTTP 404 body" pattern) and must fall through to `handleOutputError`.
+   *
+   * @returns `true` if help was shown and the error was recovered
+   */
+  async function maybeRecoverWithHelp(
+    err: unknown,
+    stdout: Writer,
+    ctx: { commandPrefix?: readonly string[]; stderr: Writer },
+    args: unknown[]
+  ): Promise<boolean> {
+    if (!(err instanceof CliError) || err instanceof OutputError) {
+      return false;
+    }
+    if (args.length === 0 || !args.some((a) => a === "help")) {
+      return false;
+    }
+    if (!ctx.commandPrefix) {
+      return false;
+    }
+    const pathSegments = ctx.commandPrefix.slice(1); // strip "sentry" prefix
+    // Dynamic import to avoid circular: command.ts → help.ts → app.ts → commands → command.ts
+    const { introspectCommand, formatHelpHuman } = await import("./help.js");
+    const result = introspectCommand(pathSegments);
+    if ("error" in result) {
+      return false;
+    }
+    ctx.stderr.write(
+      warning(
+        `Tip: use --help for help (e.g., sentry ${pathSegments.join(" ")} --help)\n\n`
+      )
+    );
+    stdout.write(`${formatHelpHuman(result)}\n`);
+    return true;
+  }
+
   // Wrap func to intercept logging flags, capture telemetry, then call original.
   // The wrapper is an async function that iterates the generator returned by func.
   const wrappedFunc = async function (
@@ -468,6 +519,23 @@ export function buildCommand<
       if (!cleanFlags.json) {
         writeFinalization(stdout, undefined, false, renderer);
       }
+
+      // If a positional arg was "help" and the command failed with a
+      // resolution/validation error, the user likely meant --help.
+      // Show help as recovery instead of the confusing error.
+      const recovered = await maybeRecoverWithHelp(
+        err,
+        stdout,
+        this as unknown as {
+          commandPrefix?: readonly string[];
+          stderr: Writer;
+        },
+        args
+      );
+      if (recovered) {
+        return;
+      }
+
       handleOutputError(err);
     }
   };
