@@ -1,0 +1,81 @@
+# Fix CLI-MK: Dashboard resolution fails on non-numeric IDs
+
+## Issue
+**Sentry Issue**: CLI-MK
+**Error**: `ValidationError: No dashboard with title 'default-overview' found in 'pictrix'.`
+**Irony**: The error message itself lists `default-overview  General` as an available dashboard.
+
+## Root Cause
+
+In `src/commands/dashboard/resolve.ts`, `resolveDashboardId()` handles dashboard references in two ways:
+1. **All-digits** (line 123): Treated as a numeric ID, returned directly
+2. **Everything else** (line 129): Matched only against `d.title` (case-insensitive)
+
+Sentry's built-in dashboard has `id: "default-overview"` and `title: "General"`. The user passed `default-overview` — which is the dashboard's **ID/slug**, not its title. Since it's not all-digits, the code tries title matching, fails, and throws.
+
+The error message format `${d.id}  ${d.title}` further confuses things — the user sees their input listed and thinks it should have matched.
+
+## Fix
+
+In `src/commands/dashboard/resolve.ts`, `resolveDashboardId()` function (lines 119-145):
+
+### Change 1: Match by ID/slug in addition to title
+
+Replace the single title match (line 129):
+```typescript
+const match = dashboards.find((d) => d.title.toLowerCase() === lowerRef);
+```
+
+With an ID-first match, falling back to title:
+```typescript
+// Match by ID/slug first (e.g. "default-overview"), then fall back to title
+const match =
+  dashboards.find((d) => d.id.toLowerCase() === lowerRef) ??
+  dashboards.find((d) => d.title.toLowerCase() === lowerRef);
+```
+
+### Change 2: Improve error message clarity
+
+Replace (lines 138-141):
+```typescript
+throw new ValidationError(
+  `No dashboard with title '${ref}' found in '${orgSlug}'.\n\n` +
+    `Available dashboards:\n${available}${suffix}`
+);
+```
+
+With:
+```typescript
+throw new ValidationError(
+  `No dashboard matching '${ref}' found in '${orgSlug}'.\n\n` +
+    `Available dashboards (ID  Title):\n${available}${suffix}`
+);
+```
+
+- Changed "with title" to "matching" since we now match both ID and title
+- Added column labels "(ID  Title)" so users understand the listing format
+
+## Testing
+
+Add a test case in the dashboard resolve test file for slug-based resolution:
+- Mock `listDashboards` to return `[{ id: "default-overview", title: "General" }]`
+- Assert `resolveDashboardId(org, "default-overview")` returns `"default-overview"` (matched by ID)
+- Assert `resolveDashboardId(org, "General")` returns `"default-overview"` (matched by title)
+- Assert `resolveDashboardId(org, "nonexistent")` throws with improved error message
+
+## Commit message
+
+```
+fix(dashboard): resolve dashboard by ID/slug in addition to title
+
+Fixes CLI-MK
+
+resolveDashboardId() only matched non-numeric references against
+dashboard titles. Sentry's built-in dashboard has id "default-overview"
+but title "General", so `sentry dashboard view default-overview` threw
+a ValidationError despite listing the dashboard as available.
+
+Now matches against d.id first, then falls back to d.title. Also
+improves the error message to label the ID/Title columns and says
+"matching" instead of "with title".
+```
