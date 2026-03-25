@@ -23,6 +23,7 @@ import { filterFields } from "../../lib/formatters/json.js";
 import { colorTag, escapeMarkdownCell } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
+import { fuzzyMatch } from "../../lib/fuzzy.js";
 import {
   buildListCommand,
   buildListLimitFlag,
@@ -185,6 +186,8 @@ function jsonTransformDashboardList(
 type FetchResult = {
   dashboards: DashboardListItem[];
   cursorToStore: string | undefined;
+  /** All dashboard titles seen during fetch (for fuzzy suggestions when filter matches nothing) */
+  allTitles: string[];
 };
 
 /** Result of processing a single page of dashboards */
@@ -262,6 +265,7 @@ async function fetchDashboards(
 ): Promise<FetchResult> {
   let { serverCursor, afterId } = opts;
   const results: DashboardListItem[] = [];
+  const allTitles: string[] = [];
   let cursorToStore: string | undefined;
 
   for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
@@ -269,6 +273,13 @@ async function fetchDashboards(
       perPage: opts.perPage,
       cursor: serverCursor,
     });
+
+    // Collect all titles for fuzzy suggestions when filtering matches nothing
+    if (opts.glob) {
+      for (const item of data) {
+        allTitles.push(item.title);
+      }
+    }
 
     const pageResult = processPage(data, results, {
       limit: opts.limit,
@@ -295,7 +306,7 @@ async function fetchDashboards(
     serverCursor = nextCursor;
   }
 
-  return { dashboards: results, cursorToStore };
+  return { dashboards: results, cursorToStore, allTitles };
 }
 
 // ---------------------------------------------------------------------------
@@ -377,7 +388,11 @@ export const listCommand = buildListCommand("dashboard", {
       ? API_MAX_PER_PAGE
       : Math.min(flags.limit, API_MAX_PER_PAGE);
 
-    const { dashboards: results, cursorToStore } = await withProgress(
+    const {
+      dashboards: results,
+      cursorToStore,
+      allTitles,
+    } = await withProgress(
       {
         message: `Fetching dashboards${titleFilter ? ` matching '${titleFilter}'` : ""} (up to ${flags.limit})...`,
         json: flags.json,
@@ -411,7 +426,13 @@ export const listCommand = buildListCommand("dashboard", {
 
     // Build footer hint
     let hint: string | undefined;
-    if (results.length === 0) {
+    if (results.length === 0 && titleFilter && allTitles.length > 0) {
+      // Filter matched nothing — suggest similar titles via fuzzy matching
+      const similar = fuzzyMatch(titleFilter, allTitles, { maxResults: 5 });
+      if (similar.length > 0) {
+        hint = `No dashboards matching '${titleFilter}'. Did you mean:\n${similar.map((t) => `  • ${t}`).join("\n")}`;
+      }
+    } else if (results.length === 0) {
       hint = undefined;
     } else if (hasMore) {
       hint = `Showing ${results.length} dashboard(s). Next page: sentry dashboard list ${orgSlug}/ -c last\nDashboards: ${url}`;
