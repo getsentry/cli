@@ -1,0 +1,72 @@
+# Plan: Fix CLI-MH — `@latest` selector misinterpreted as project slug
+
+## Issue Summary
+
+**Sentry Issue**: [CLI-MH](https://sentry.sentry.io/issues/7361340621/) — `ResolutionError: Project '@latest' not found.`
+
+A user ran `sentry issues @latest` (alias for `sentry issue list @latest`). The `@latest` magic selector is recognized by `parseIssueArg()` (used in `issue view`, `explain`, `plan`) but **not** by `parseOrgProjectArg()` (used in `issue list` and all list commands). Since `@` is not in the forbidden character set, `@latest` passes validation and enters `project-search` mode, leading to the confusing "Project '@latest' not found" error.
+
+**User**: syazwan, installed via pnpm (`sentry@0.20.0`)
+**Command tag**: `sentry.issues` (confirms `sentry issues @latest`)
+**Occurrences**: 1
+
+## Root Cause
+
+`parseOrgProjectArg()` in `src/lib/arg-parsing.ts:492-525` has no awareness of `@`-prefixed selectors:
+1. `"@latest"` has no `/` → enters bare-slug branch (line 509)
+2. `validateResourceId("@latest", "project slug")` **passes** — `RESOURCE_ID_FORBIDDEN` is `/[?#%\s]/`, which doesn't include `@`
+3. Returns `{ type: "project-search", projectSlug: "@latest" }`
+4. Eventually `findProjectsBySlug("@latest")` finds nothing → `ResolutionError`
+
+## Fix
+
+### Approach: Detect `@` selectors in `parseOrgProjectArg()` and throw a helpful error
+
+Add an early check in `parseOrgProjectArg()` before the bare-slug branch. If the input starts with `@` and matches a known selector, throw a `ValidationError` redirecting the user to the correct command. If it starts with `@` but isn't a known selector, still reject it — `@` is never valid in Sentry slugs.
+
+### Files to Modify
+
+1. **`src/lib/arg-parsing.ts`** — Add `@` selector detection in `parseOrgProjectArg()`
+
+   In the bare-slug branch (line 509-517), before `validateResourceId`:
+   ```typescript
+   } else {
+     // Check for @-selectors (e.g., @latest, @most_frequent) which belong to
+     // issue view/explain/plan, not list commands that expect org/project targets.
+     if (trimmed.startsWith("@")) {
+       const selector = parseSelector(trimmed);
+       if (selector) {
+         throw new ValidationError(
+           `'${trimmed}' is an issue selector, not a project target.\n` +
+           `  Use: sentry issue view ${trimmed}`,
+           "target"
+         );
+       }
+       // @ is never valid in Sentry slugs — reject even unknown @-prefixed values
+       throw new ValidationError(
+         `Invalid project slug: '${trimmed}' starts with '@'.\n` +
+         "  Sentry slugs contain only letters, numbers, hyphens, and underscores.",
+         "target"
+       );
+     }
+     validateResourceId(trimmed, "project slug");
+     // ... rest unchanged
+   }
+   ```
+
+2. **`src/lib/input-validation.ts`** (optional, lower priority) — Consider adding `@` to `RESOURCE_ID_FORBIDDEN` for defense-in-depth. However, this would break `parseIssueArg()` which relies on `validateResourceId` not rejecting `@` (see line 866). So this may not be worth it — the fix in `parseOrgProjectArg()` is sufficient.
+
+### Files for Tests
+
+3. **`test/lib/arg-parsing.property.test.ts`** or **`test/lib/arg-parsing.test.ts`** — Add test cases:
+   - `parseOrgProjectArg("@latest")` throws `ValidationError` with helpful message
+   - `parseOrgProjectArg("@most_frequent")` throws `ValidationError`
+   - `parseOrgProjectArg("@unknown")` throws `ValidationError` (unknown @ prefix)
+   - `parseOrgProjectArg("sentry/@latest")` — verify this path (has `/` so goes through `parseSlashOrgProject`, separate flow)
+
+## Verification
+
+1. `bun test test/lib/arg-parsing` — Run existing + new arg-parsing tests
+2. `bun run typecheck` — Verify no type errors
+3. `bun run lint` — Check code style
+4. Manual test: `bun run dev -- issues @latest` should show the helpful validation error instead of "Project '@latest' not found"
