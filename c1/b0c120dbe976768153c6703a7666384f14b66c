@@ -1,0 +1,57 @@
+# Investigation: CLI-MP — `ResolutionError: Project "JAVASCRIPT-NUXT-52" not found`
+
+## Status: ✅ Already Fixed
+
+The fix was committed in `ca57b15e` — `fix(event-view): auto-redirect issue short IDs in two-arg form (CLI-MP)`.
+
+## Issue Summary
+
+- **Issue:** [CLI-MP](https://sentry.sentry.io/issues/7362570024/)
+- **Error:** `ResolutionError: Project "JAVASCRIPT-NUXT-52" not found.`
+- **Command:** `sentry event view JAVASCRIPT-NUXT-52 <event-id>` (with `--json --fields --spans 3`)
+- **Environment:** Node.js 22.20.0, CLI v0.20.0, non-TTY (AI agent context)
+- **Severity:** High priority, 1 occurrence
+
+## Root Cause
+
+A **control flow asymmetry** in `parsePositionalArgs()` in `src/commands/event/view.ts` between the 1-arg and 2-arg parsing paths:
+
+| Path | Input | Behavior | Result |
+|------|-------|----------|--------|
+| **1-arg** | `["JAVASCRIPT-NUXT-52"]` | `looksLikeIssueShortId` → sets `issueShortId` → fetches latest event | ✅ Works |
+| **2-arg** (old) | `["JAVASCRIPT-NUXT-52", "<event-id>"]` | `looksLikeIssueShortId` → only sets `suggestion` string (no redirect) → treats first arg as project slug | ❌ Fails with `ResolutionError` |
+
+The 2-arg path treated the issue short ID as a project slug for `project-search` mode, which fails because:
+1. Issue short IDs are **uppercase** (`JAVASCRIPT-NUXT-52`); project slugs are always **lowercase**
+2. The short ID includes the issue number suffix — it's not a valid project slug
+
+## Fix Applied (commit `ca57b15e`)
+
+Changed the 2-arg path to **auto-redirect** to the issue shortcut path (same as 1-arg behavior):
+
+```diff
+-  const suggestion = looksLikeIssueShortId(first)
+-    ? `Did you mean: sentry issue view ${first}`
+-    : undefined;
+-  return { eventId: second, targetArg: first, suggestion };
++  if (looksLikeIssueShortId(first)) {
++    return {
++      eventId: "latest",
++      targetArg: undefined,
++      issueShortId: first,
++      warning: `'${first}' is an issue short ID, not a project slug. Ignoring second argument '${second}'.`,
++    };
++  }
++  return { eventId: second, targetArg: first };
+```
+
+## Files Changed
+- `src/commands/event/view.ts` — Fixed 2-arg path in `parsePositionalArgs`
+- `test/commands/event/view.test.ts` — Added tests for new 2-arg short ID detection
+
+## Verification
+- All 55 tests in `test/commands/event/view.test.ts` pass ✅
+- The warning log confirms detection: `'CAM-82X' is an issue short ID, not a project slug. Ignoring second argument '95fd7f5a'.`
+
+## No Further Action Required
+The fix is committed and tests pass. It will ship in the next release.
