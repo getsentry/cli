@@ -143,7 +143,7 @@ export type ResolvedCursor = {
  * - `"prev"` / `"previous"` — go back to the previous page
  * - `"first"` — jump back to the first page
  * - raw string — passthrough (power user: treated as "next" direction)
- * - `undefined` — no flag provided (first page, fresh start)
+ * - `undefined` — no flag provided (first page, fresh start → resets state)
  *
  * @param cursorFlag - Raw value of `--cursor` (undefined if not set)
  * @param commandKey - Command identifier for cursor storage
@@ -157,7 +157,9 @@ export function resolveCursor(
   contextKey: string
 ): ResolvedCursor {
   if (!cursorFlag) {
-    return { cursor: undefined, direction: "next" };
+    // No --cursor flag → fresh start. Use "first" so advancePaginationState
+    // resets the index to 0 instead of incrementing stale state within TTL.
+    return { cursor: undefined, direction: "first" };
   }
 
   // Raw cursor passthrough (power user)

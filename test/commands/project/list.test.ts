@@ -233,10 +233,10 @@ describe("filterByPlatform", () => {
 });
 
 describe("resolveCursor", () => {
-  test("undefined cursor returns undefined with direction 'next'", () => {
+  test("undefined cursor returns undefined with direction 'first'", () => {
     const result = resolveCursor(undefined, PAGINATION_KEY, "org:sentry");
     expect(result.cursor).toBeUndefined();
-    expect(result.direction).toBe("next");
+    expect(result.direction).toBe("first");
   });
 
   test("explicit cursor value is passed through with direction 'next'", () => {

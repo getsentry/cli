@@ -504,8 +504,10 @@ export async function handleOrgAll(
       hint = `No projects found in organization '${org}'.`;
     }
   } else {
-    if (navHint) {
+    if (hasMore) {
       header = `Showing ${filtered.length} projects (more available)\n${navHint}`;
+    } else if (navHint) {
+      header = `Showing ${filtered.length} projects\n${navHint}`;
     } else {
       header = `Showing ${filtered.length} projects`;
     }
@@ -561,7 +563,7 @@ export async function handleProjectSearch(
         flags,
         contextKey,
         cursor: undefined,
-        direction: "next",
+        direction: "first",
       });
       const r = result as ProjectListResult;
       r.title = `'${projectSlug}' is an organization, not a project. Showing all projects in '${projectSlug}'`;

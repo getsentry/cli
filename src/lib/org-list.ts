@@ -360,7 +360,7 @@ function runOrgAll<TEntity, TWithOrg>(
     flags,
     contextKey,
     cursor: undefined,
-    direction: "next",
+    direction: "first",
   });
 }
 
@@ -413,8 +413,11 @@ export async function handleOrgAll<TEntity, TWithOrg>(
     } else {
       hint = `No ${config.entityPlural} found in organization '${org}'.`;
     }
-  } else if (navHint) {
+  } else if (hasMore) {
     header = `Showing ${items.length} ${config.entityPlural} (more available)\n${navHint}`;
+  } else if (navHint) {
+    // Last page but previous pages exist — show count + nav hint without "more available"
+    header = `Showing ${items.length} ${config.entityPlural}\n${navHint}`;
   } else {
     header = `Showing ${items.length} ${config.entityPlural}`;
   }

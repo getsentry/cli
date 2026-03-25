@@ -514,12 +514,12 @@ describe("model-based: pagination cursor stack", () => {
     }
   });
 
-  test("resolveCursor: undefined flag returns first page", () => {
+  test("resolveCursor: undefined flag returns first page with 'first' direction", () => {
     const cleanup = createIsolatedDbContext();
     try {
       const resolved = resolveCursor(undefined, CMD_KEY, CTX_KEY);
       expect(resolved.cursor).toBeUndefined();
-      expect(resolved.direction).toBe("next");
+      expect(resolved.direction).toBe("first");
     } finally {
       cleanup();
     }
