@@ -119,9 +119,16 @@ export function decodeCursor(cursor: string): {
 function formatDashboardListHuman(result: DashboardListResult): string {
   if (result.dashboards.length === 0) {
     if (result.titleFilter && result.allTitles && result.allTitles.length > 0) {
-      const similar = fuzzyMatch(result.titleFilter, result.allTitles, {
-        maxResults: 5,
-      });
+      // Strip glob metacharacters before fuzzy matching so '*', '?', '['
+      // don't inflate Levenshtein distances (e.g. "Error*" → "Error").
+      const stripped = result.titleFilter.replace(/[*?[\]]/g, "");
+      const similar = fuzzyMatch(
+        stripped || result.titleFilter,
+        result.allTitles,
+        {
+          maxResults: 5,
+        }
+      );
       if (similar.length > 0) {
         return `No dashboards matching '${result.titleFilter}'. Did you mean:\n${similar.map((t) => `  • ${t}`).join("\n")}`;
       }
