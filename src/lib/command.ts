@@ -534,10 +534,10 @@ export function buildCommand<
       : undefined;
 
     // OutputError handler: render data through the output system, then
-    // exit with the error's code. Stricli overwrites process.exitCode = 0
-    // after successful returns, so process.exit() is the only way to
-    // preserve a non-zero code. This lives in the framework — commands
-    // simply `throw new OutputError(data)`.
+    // re-throw so the exit code propagates. Stricli's
+    // exceptionWhileRunningCommand intercepts OutputError and re-throws
+    // it without formatting, so both bin.ts and index.ts can set
+    // exitCode from the caught error.
     const handleOutputError = (err: unknown): never => {
       if (err instanceof OutputError && outputConfig) {
         // Only render if there's actual data to show
@@ -549,7 +549,7 @@ export function buildCommand<
             renderer
           );
         }
-        process.exit(err.exitCode);
+        throw err;
       }
       throw err;
     };

@@ -41,6 +41,7 @@ import {
   AuthError,
   CliError,
   getExitCode,
+  OutputError,
   stringifyUnknown,
 } from "./lib/errors.js";
 import { error as errorColor, warning } from "./lib/formatters/colors.js";
@@ -151,6 +152,12 @@ const customText: ApplicationText = {
     return text_en.exceptionWhileParsingArguments(exc, ansiColor);
   },
   exceptionWhileRunningCommand: (exc: unknown, ansiColor: boolean): string => {
+    // OutputError: data was already rendered to stdout — just re-throw
+    // so the exit code propagates without Stricli printing an error message.
+    if (exc instanceof OutputError) {
+      throw exc;
+    }
+
     // Re-throw AuthError for auto-login flow in bin.ts
     // Don't capture to Sentry - it's an expected state (user not logged in or token expired), not an error
     // Note: skipAutoAuth is checked in bin.ts, not here — all auth errors must escape Sentry capture

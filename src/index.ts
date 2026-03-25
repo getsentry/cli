@@ -98,6 +98,7 @@ export class SentryError extends Error {
  */
 function sentry(...input: string[]): Promise<unknown>;
 function sentry(...input: [...string[], SentryOptions]): Promise<unknown>;
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: library entry orchestrates env isolation, output capture, telemetry, and error conversion in one function
 async function sentry(...input: (string | SentryOptions)[]): Promise<unknown> {
   // Detect trailing options object
   let args: string[];
@@ -157,22 +158,51 @@ async function sentry(...input: (string | SentryOptions)[]): Promise<unknown> {
     const { buildContext } = await import("./context.js");
     const { withTelemetry } = await import("./lib/telemetry.js");
 
-    await withTelemetry(
-      // biome-ignore lint/suspicious/noExplicitAny: fakeProcess duck-types the process interface
-      async (span) => run(app, args, buildContext(fakeProcess as any, span)),
-      { libraryMode: true }
-    );
-
-    // Flush telemetry (no beforeExit handler in library mode)
-    try {
-      const Sentry = await import("@sentry/node-core/light");
-      const client = Sentry.getClient();
-      if (client) {
-        await client.flush(3000);
+    /** Flush Sentry telemetry (no beforeExit handler in library mode). */
+    async function flushTelemetry(): Promise<void> {
+      try {
+        const Sentry = await import("@sentry/node-core/light");
+        const client = Sentry.getClient();
+        if (client) {
+          await client.flush(3000);
+        }
+      } catch {
+        // Telemetry flush is non-critical
       }
-    } catch {
-      // Telemetry flush is non-critical
     }
+
+    try {
+      await withTelemetry(
+        // biome-ignore lint/suspicious/noExplicitAny: fakeProcess duck-types the process interface
+        async (span) => run(app, args, buildContext(fakeProcess as any, span)),
+        { libraryMode: true }
+      );
+    } catch (thrown) {
+      // Flush telemetry before converting the error — ensures error events
+      // captured by withTelemetry are sent even on the failure path.
+      await flushTelemetry();
+
+      // Stricli catches command errors and writes them to stderr + sets exitCode.
+      // But some errors (AuthError, OutputError) are re-thrown through Stricli.
+      // Convert any that escape into SentryError for a consistent library API.
+      const stderrStr = stderrChunks.join("");
+      // Prefer the thrown error's exitCode (CliError subclasses carry it),
+      // then fakeProcess.exitCode (set by Stricli), then default to 1.
+      const thrownCode =
+        thrown instanceof Error && "exitCode" in thrown
+          ? (thrown as { exitCode: number }).exitCode
+          : 0;
+      const exitCode = thrownCode || fakeProcess.exitCode || 1;
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences use ESC (0x1b)
+      const ANSI_RE = /\x1b\[[0-9;]*m/g;
+      const message =
+        stderrStr.replace(ANSI_RE, "").trim() ||
+        (thrown instanceof Error ? thrown.message : String(thrown));
+      throw new SentryError(message, exitCode, stderrStr);
+    }
+
+    // Flush telemetry on the success path too
+    await flushTelemetry();
 
     const stderrStr = stderrChunks.join("");
     const stdoutStr = stdoutChunks.join("");

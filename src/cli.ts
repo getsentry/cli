@@ -112,7 +112,7 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   const { ExitCode, run } = await import("@stricli/core");
   const { app } = await import("./app.js");
   const { buildContext } = await import("./context.js");
-  const { AuthError, formatError, getExitCode } = await import(
+  const { AuthError, OutputError, formatError, getExitCode } = await import(
     "./lib/errors.js"
   );
   const { error, warning } = await import("./lib/formatters/colors.js");
@@ -372,6 +372,12 @@ export async function runCli(cliArgs: string[]): Promise<void> {
       await executor(helpArgs);
     }
   } catch (err) {
+    // OutputError: data was already rendered to stdout by the command wrapper.
+    // Just set exitCode silently — no stderr message needed.
+    if (err instanceof OutputError) {
+      process.exitCode = err.exitCode;
+      return;
+    }
     process.stderr.write(`${error("Error:")} ${formatError(err)}\n`);
     process.exitCode = getExitCode(err);
     return;

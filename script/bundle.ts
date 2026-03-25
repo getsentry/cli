@@ -207,7 +207,7 @@ const result = await build({
 // Write the CLI bin wrapper (tiny — shebang + version check + dispatch)
 const BIN_WRAPPER = `#!/usr/bin/env node
 if(parseInt(process.versions.node)<22){console.error("Error: sentry requires Node.js 22 or later (found "+process.version+").\\n\\nEither upgrade Node.js, or install the standalone binary instead:\\n  curl -fsSL https://cli.sentry.dev/install | bash\\n");process.exit(1)}
-require('./index.cjs')._cli().catch(()=>{});
+require('./index.cjs')._cli().catch(()=>{process.exitCode=1});
 `;
 await Bun.write("./dist/bin.cjs", BIN_WRAPPER);
 
