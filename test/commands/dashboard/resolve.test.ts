@@ -92,7 +92,45 @@ describe("resolveDashboardId", () => {
     expect(id).toBe("10");
   });
 
-  test("no match throws ValidationError with available dashboards", async () => {
+  test("ID/slug match returns matching dashboard ID", async () => {
+    listDashboardsSpy.mockResolvedValue([
+      { id: "default-overview", title: "General" },
+      { id: "20", title: "Performance" },
+    ]);
+
+    const id = await resolveDashboardId("test-org", "default-overview");
+    expect(id).toBe("default-overview");
+  });
+
+  test("ID match is case-insensitive", async () => {
+    listDashboardsSpy.mockResolvedValue([
+      { id: "default-overview", title: "General" },
+    ]);
+
+    const id = await resolveDashboardId("test-org", "Default-Overview");
+    expect(id).toBe("default-overview");
+  });
+
+  test("ID match takes priority over title match", async () => {
+    listDashboardsSpy.mockResolvedValue([
+      { id: "perf", title: "Performance Dashboard" },
+      { id: "30", title: "perf" },
+    ]);
+
+    const id = await resolveDashboardId("test-org", "perf");
+    expect(id).toBe("perf");
+  });
+
+  test("title match still works when no ID matches", async () => {
+    listDashboardsSpy.mockResolvedValue([
+      { id: "default-overview", title: "General" },
+    ]);
+
+    const id = await resolveDashboardId("test-org", "General");
+    expect(id).toBe("default-overview");
+  });
+
+  test("no match throws ValidationError with improved error message", async () => {
     listDashboardsSpy.mockResolvedValue([
       { id: "10", title: "Errors Overview" },
       { id: "20", title: "Performance" },
@@ -105,6 +143,8 @@ describe("resolveDashboardId", () => {
       expect(error).toBeInstanceOf(ValidationError);
       const message = (error as ValidationError).message;
       expect(message).toContain("Missing Dashboard");
+      expect(message).toContain("matching");
+      expect(message).toContain("(ID  Title)");
       expect(message).toContain("Errors Overview");
       expect(message).toContain("Performance");
     }
