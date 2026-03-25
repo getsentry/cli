@@ -145,12 +145,15 @@ export function parseDashboardListArgs(args: string[]): {
     return { targetArg: undefined, titleFilter: undefined };
   }
   if (args.length >= 2) {
-    // Two args: first is always the target, second is always the filter.
+    // First arg is the target, remaining args are joined as the filter.
+    // This handles unquoted multi-word titles: `my-org/ CLI Health` arrives
+    // as ["my-org/", "CLI", "Health"] and becomes filter "CLI Health".
     // Normalize bare org slug to org/ format so parseOrgProjectArg treats
     // it as org-all (dashboards are org-scoped, project is irrelevant).
     const raw = args[0] as string;
     const target = raw.includes("/") ? raw : `${raw}/`;
-    return { targetArg: target, titleFilter: args[1] as string };
+    const titleFilter = args.slice(1).join(" ");
+    return { targetArg: target, titleFilter };
   }
   // 1 arg: if it contains "/" it may be a target, or an org/project/name combo.
   // Without "/" it's always a title filter (dashboards are org-scoped).

@@ -130,6 +130,18 @@ describe("parseDashboardListArgs", () => {
     expect(result.titleFilter).toBe("*API*");
   });
 
+  test("multi-word unquoted filter: remaining args joined with spaces", () => {
+    const result = parseDashboardListArgs(["sentry/cli", "CLI", "Health"]);
+    expect(result.targetArg).toBe("sentry/cli");
+    expect(result.titleFilter).toBe("CLI Health");
+  });
+
+  test("multi-word unquoted filter with bare org", () => {
+    const result = parseDashboardListArgs(["my-org", "Error", "Overview"]);
+    expect(result.targetArg).toBe("my-org/");
+    expect(result.titleFilter).toBe("Error Overview");
+  });
+
   test("single arg org/project/name splits into target + filter", () => {
     const result = parseDashboardListArgs(["sentry/cli/CLI"]);
     expect(result.targetArg).toBe("sentry/cli");
