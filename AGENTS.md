@@ -317,27 +317,7 @@ else clearPaginationCursor(PAGINATION_KEY, contextKey);
 
 Show `-c last` in the hint footer when more pages are available. Include `nextCursor` in the JSON envelope.
 
-**Auto-pagination for large limits:**
-
-When `--limit` exceeds `API_MAX_PER_PAGE` (100), list commands MUST transparently
-fetch multiple pages to fill the requested limit. Cap `perPage` at
-`Math.min(flags.limit, API_MAX_PER_PAGE)` and loop until `results.length >= limit`
-or pages are exhausted. This matches the `listIssuesAllPages` pattern.
-
-```typescript
-const perPage = Math.min(flags.limit, API_MAX_PER_PAGE);
-for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
-  const { data, nextCursor } = await listPaginated(org, { perPage, cursor });
-  results.push(...data);
-  if (results.length >= flags.limit || !nextCursor) break;
-  cursor = nextCursor;
-}
-```
-
-Never pass a `per_page` value larger than `API_MAX_PER_PAGE` to the API — the
-server silently caps it, causing the command to return fewer items than requested.
-
-Reference template: `trace/list.ts`, `span/list.ts`, `dashboard/list.ts`
+Reference template: `trace/list.ts`, `span/list.ts`
 
 ### ID Validation
 
@@ -452,14 +432,6 @@ throw new ResolutionError("Project 'cli'", "not found", "sentry issue list <org>
 ]);
 throw new ValidationError("Invalid trace ID format", "traceId");
 ```
-
-**Fuzzy suggestions in resolution errors:**
-
-When a user-provided name/title doesn't match any entity, use `fuzzyMatch()` from
-`src/lib/fuzzy.ts` to suggest similar candidates instead of listing all entities
-(which can be overwhelming). Show at most 5 fuzzy matches.
-
-Reference: `resolveDashboardId()` in `src/commands/dashboard/resolve.ts`.
 
 ### Auto-Recovery for Wrong Entity Types
 
@@ -842,89 +814,73 @@ mock.module("./some-module", () => ({
 
 ### Architecture
 
-<!-- lore:365e4299-37cf-48e0-8f2e-8503d4a249dd -->
-* **API client wraps all errors as CliError subclasses — no raw exceptions escape**: The API client (src/lib/api-client.ts) wraps ALL errors as CliError subclasses (ApiError or AuthError) — no raw exceptions escape. Commands don't need try-catch for error display; the central handler in app.ts formats CliError cleanly. Only add try-catch when a command needs to handle errors specially (e.g., login continuing despite user-info fetch failure).
+<!-- lore:019d0b16-9777-7579-aa15-caf6603a34f5 -->
+* **defaultCommand:help blocks Stricli fuzzy matching for top-level typos**: Stricli's \`defaultCommand: "help"\` in \`app.ts\` routes unrecognized top-level words to the help command, bypassing Stricli's built-in Damerau-Levenshtein fuzzy matching. Fixed: \`resolveCommandPath()\` in \`introspect.ts\` now returns an \`UnresolvedPath\` (with \`kind: "unresolved"\`, \`input\`, and \`suggestions\`) when a path segment doesn't match. It calls \`fuzzyMatch()\` from \`fuzzy.ts\` to produce up to 3 suggestions. \`introspectCommand()\` and \`formatHelpHuman()\` in \`help.ts\` surface these as "Did you mean: X?" messages. Both top-level (\`sentry isseu\`) and subcommand (\`sentry help issue lis\`) typos now get suggestions. JSON output includes a \`suggestions\` array in the error variant.
 
-<!-- lore:019d0804-a0cc-7e78-b3bc-d3d790b2d0f2 -->
-* **Completion fast-path skips Sentry SDK via SENTRY\_CLI\_NO\_TELEMETRY and SQLite telemetry queue**: Shell completions (\`\_\_complete\`) set \`SENTRY\_CLI\_NO\_TELEMETRY=1\` in \`bin.ts\` before any imports, which causes \`db/index.ts\` to skip the \`createTracedDatabase\` wrapper (lazy \`require\` of telemetry.ts). This avoids loading \`@sentry/node-core/light\` (~85ms). Completion timing is recorded to \`completion\_telemetry\_queue\` SQLite table via \`queueCompletionTelemetry()\` (~1ms overhead). During normal CLI runs, \`withTelemetry()\` calls \`drainCompletionTelemetry()\` which uses \`DELETE FROM ... RETURNING\` for atomic read+delete, then emits each entry as \`Sentry.metrics.distribution("completion.duration\_ms", ...)\`. Schema version 11 added this table. The fast-path achieves ~60ms dev / ~140ms CI, with a 200ms e2e test budget.
+<!-- lore:019cafbb-24ad-75a3-b037-5efbe6a1e85d -->
+* **DSN org prefix normalization in arg-parsing.ts**: Sentry DSN hosts encode org IDs as \`oNNNNN\` (e.g., \`o1081365.ingest.us.sentry.io\`). The Sentry API rejects the \`o\`-prefixed form. \`stripDsnOrgPrefix()\` in \`src/lib/arg-parsing.ts\` uses \`/^o(\d+)$/\` to strip the prefix — safe for slugs like \`organic\`. Applied in \`parseOrgProjectArg()\` and \`parseWithSlash()\`, covering all API call paths consuming \`parsed.org\`.
 
-<!-- lore:019c8b60-d221-718a-823b-7c2c6e4ca1d5 -->
-* **Sentry API: events require org+project, issues have legacy global endpoint**: Sentry API scoping: Events require org+project in URL path (\`/projects/{org}/{project}/events/{id}/\`). Issues use legacy global endpoint (\`/api/0/issues/{id}/\`) without org context. Traces need only org (\`/organizations/{org}/trace/{traceId}/\`). Two-step lookup for events: fetch issue → extract org/project from response → fetch event. Cross-project event search possible via Discover endpoint \`/organizations/{org}/events/\` with \`query=id:{eventId}\`.
+<!-- lore:019cb38b-e327-7ec5-8fb0-9e635b2bac48 -->
+* **GHCR versioned nightly tags for delta upgrade support**: GHCR nightly distribution uses three tag types: \`:nightly\` (rolling), \`:nightly-\<version>\` (immutable), \`:patch-\<version>\` (delta manifest). Delta patches use zig-bsdiff TRDIFF10 (zstd-compressed), ~50KB vs ~29MB full. Client bspatch via \`Bun.zstdDecompressSync()\`. N-1 patches only, full download fallback, SHA-256 verify, 60% size threshold. npm/Node excluded. Test mocks: use \`mockGhcrNightlyVersion()\` helper.
 
-<!-- lore:019cb6ab-ab98-7a9c-a25f-e154a5adbbe1 -->
-* **Sentry CLI authenticated fetch architecture with response caching**: \`createAuthenticatedFetch()\` wraps fetch with auth, 30s timeout, retry (max 2), 401 refresh, and span tracing. Response caching integrates BEFORE auth/retry via \`http-cache-semantics\` (RFC 7234) with filesystem storage at \`~/.sentry/cache/responses/\`. URL-based fallback TTL tiers: immutable (24hr), stable (5min), volatile (60s), no-cache (0). Only GET 2xx cached. \`--fresh\` and \`SENTRY\_NO\_CACHE=1\` bypass cache. Cache cleared on login/logout. \`hasServerCacheDirectives(policy)\` distinguishes \`max-age=0\` from missing headers.
+<!-- lore:a1f33ceb-6116-4d29-b6d0-0dc9678e4341 -->
+* **Issue list auto-pagination beyond API's 100-item cap**: Sentry API silently caps \`limit\` at 100 per request. \`listIssuesAllPages()\` auto-paginates using Link headers, bounded by MAX\_PAGINATION\_PAGES (50). \`API\_MAX\_PER\_PAGE\` constant is shared across all paginated consumers. \`--limit\` means total results everywhere (max 1000, default 25). Org-all mode uses \`fetchOrgAllIssues()\`; explicit \`--cursor\` does single-page fetch to preserve cursor chain.
 
-<!-- lore:019c8c72-b871-7d5e-a1a4-5214359a5a77 -->
-* **Sentry CLI has two distribution channels with different runtimes**: Sentry CLI ships two ways: (1) Standalone binary via \`Bun.build()\` with \`compile: true\`. (2) npm package via esbuild producing CJS \`dist/bin.cjs\` for Node 22+, with Bun API polyfills from \`script/node-polyfills.ts\`. \`Bun.$\` has NO polyfill — use \`execSync\` instead. \`require()\` in ESM is safe (Bun native, esbuild resolves at bundle time). As of PR #474, SDK is \`@sentry/node-core/light\` (not \`@sentry/bun\`), reducing import cost from ~218ms to ~85ms.
+<!-- lore:019d0846-17b2-7c58-9201-f5d2e255dcb0 -->
+* **resolveProjectBySlug carries full projectData to avoid redundant getProject calls**: \`resolveProjectBySlug()\` returns \`{ org, project, projectData: SentryProject }\` — the full project object from \`findProjectsBySlug()\`. \`ResolvedOrgProject\` and \`ResolvedTarget\` have optional \`projectData?\` (populated only in project-search path, not explicit/auto-detect). Downstream commands (\`project/view\`, \`project/delete\`, \`dashboard/create\`) use \`projectData\` when available to skip redundant \`getProject()\` API calls (~500-800ms savings). Pattern: \`resolved.projectData ?? await getProject(org, project)\` for callers that need both paths.
 
-<!-- lore:019c8b60-d21a-7d44-8a88-729f74ec7e02 -->
-* **Sentry CLI resolve-target cascade has 5 priority levels with env var support**: Resolve-target cascade (src/lib/resolve-target.ts) has 5 priority levels: (1) Explicit CLI flags, (2) SENTRY\_ORG/SENTRY\_PROJECT env vars, (3) SQLite config defaults, (4) DSN auto-detection, (5) Directory name inference. SENTRY\_PROJECT supports combo notation \`org/project\` — when used, SENTRY\_ORG is ignored. If combo parse fails (e.g. \`org/\`), the entire value is discarded. The \`resolveFromEnvVars()\` helper is injected into all four resolution functions.
+<!-- lore:019cb950-9b7b-731a-9832-b7f6cfb6a6a2 -->
+* **Self-hosted OAuth device flow requires Sentry 26.1.0+ and SENTRY\_CLIENT\_ID**: Self-hosted OAuth device flow requires Sentry 26.1.0+ and both \`SENTRY\_URL\` and \`SENTRY\_CLIENT\_ID\` env vars. Users must create a public OAuth app in Settings → Developer Settings. The client ID is NOT optional for self-hosted. Fallback for older instances: \`sentry auth login --token\`. \`getSentryUrl()\` and \`getClientId()\` in \`src/lib/oauth.ts\` read lazily (not at module load) so URL parsing from arguments can set \`SENTRY\_URL\` after import.
 
-### Decision
+<!-- lore:019d0b16-977c-7e49-b06d-523b7782692f -->
+* **Sentry CLI fuzzy matching coverage map across subsystems**: Fuzzy matching exists in: (1) Stricli built-in Damerau-Levenshtein for subcommand/flag typos within known route groups, (2) custom \`fuzzyMatch()\` in \`complete.ts\` for dynamic tab-completion using Levenshtein+prefix+contains scoring, (3) custom \`levenshtein()\` in \`platforms.ts\` for platform name suggestions, (4) plural alias detection in \`app.ts\`, (5) \`resolveCommandPath()\` in \`introspect.ts\` uses \`fuzzyMatch()\` from \`fuzzy.ts\` for top-level and subcommand typos — covering both \`sentry \<typo>\` and \`sentry help \<typo>\`. Static shell tab-completion uses shell-native prefix matching (compgen/\`\_describe\`/fish \`-a\`).
 
-<!-- lore:019c9f9c-40ee-76b5-b98d-acf1e5867ebc -->
-* **Issue list global limit with fair per-project distribution and representation guarantees**: \`issue list --limit\` is a global total across all detected projects. \`fetchWithBudget\` Phase 1 divides evenly, Phase 2 redistributes surplus via cursor resume. \`trimWithProjectGuarantee\` ensures at least 1 issue per project before filling remaining slots. JSON output wraps in \`{ data, hasMore }\` with optional \`errors\` array. Compound cursor (pipe-separated) enables \`-c last\` for multi-target pagination, keyed by sorted target fingerprint.
+<!-- lore:019ca9c3-989c-7c8d-bcd0-9f308fd2c3d7 -->
+* **Sentry CLI markdown-first formatting pipeline replaces ad-hoc ANSI**: Formatters build CommonMark strings; \`renderMarkdown()\` renders to ANSI for TTY or raw markdown for non-TTY. Key helpers: \`colorTag()\`, \`mdKvTable()\`, \`mdRow()\`, \`mdTableHeader()\` (\`:\` suffix = right-aligned), \`renderTextTable()\`. \`isPlainOutput()\` checks \`SENTRY\_PLAIN\_OUTPUT\` > \`NO\_COLOR\` > \`!isTTY\`. Batch path: \`formatXxxTable()\`. Streaming path: \`StreamingTable\` (TTY) or raw markdown rows (plain). Both share \`buildXxxRowCells()\`.
 
-<!-- lore:019c8f05-c86f-7b46-babc-5e4faebff2e9 -->
-* **Sentry CLI config dir should stay at ~/.sentry/, not move to XDG**: Config dir stays at \`~/.sentry/\` (not XDG). The readonly DB errors on macOS are from \`sudo brew install\` creating root-owned files. Fixes: (1) bestEffort() makes setup steps non-fatal, (2) tryRepairReadonly() detects root-owned files and prints \`sudo chown\` instructions, (3) \`sentry cli fix\` handles ownership repair. Ownership must be checked BEFORE permissions — root-owned files cause chmod to EPERM.
+<!-- lore:019cd2b7-bb98-730e-a0d3-ec25bfa6cf4c -->
+* **Sentry issue stats field: time-series controlled by groupStatsPeriod**: The \`stats\` field on issues is \`{ '24h': \[\[ts, count], ...] }\`. Key depends on \`groupStatsPeriod\` param (\`""\`, \`"14d"\`, \`"24h"\`, \`"auto"\`). \`statsPeriod\` controls time window; \`groupStatsPeriod\` controls stats key. \*\*Critical\*\*: \`count\` is period-scoped — \`lifetime.count\` is the true lifetime total. Issue list table uses \`groupStatsPeriod: 'auto'\` for sparkline data. Column order: SHORT ID, ISSUE, SEEN, AGE, TREND, EVENTS, USERS, TRIAGE. TREND auto-hidden when terminal < 100 cols. \`--compact\` tri-state: explicit overrides; \`undefined\` triggers \`shouldAutoCompact(rowCount)\` — compact if \`3N + 3 > termHeight\`, false for non-TTY. Height is \`3N + 3\` (not \`3N + 4\`) because last data row has no trailing separator.
+
+<!-- lore:019ca9c3-98a2-7a81-9db7-d36c2e71237c -->
+* **Sentry trace-logs API is org-scoped, not project-scoped**: The Sentry trace-logs endpoint (\`/organizations/{org}/trace-logs/\`) is org-scoped, so \`trace logs\` uses \`resolveOrg()\` not \`resolveOrgAndProject()\`. The endpoint is PRIVATE in Sentry source, excluded from the public OpenAPI schema — \`@sentry/api\` has no generated types. The hand-written \`TraceLogSchema\` in \`src/types/sentry.ts\` is required until Sentry makes it public.
+
+<!-- lore:019cbf3f-6dc2-727d-8dca-228555e9603f -->
+* **withAuthGuard returns discriminated Result type, not fallback+onError**: \`withAuthGuard\<T>(fn)\` in \`src/lib/errors.ts\` returns a discriminated Result: \`{ ok: true, value: T } | { ok: false, error: unknown }\`. AuthErrors always re-throw (triggers bin.ts auto-login). All other errors are captured. Callers inspect \`result.ok\` to degrade gracefully. Used across 12+ files.
 
 ### Gotcha
 
-<!-- lore:019d2548-3e95-7673-8e9b-47811077388a -->
-* **Biome noExcessiveCognitiveComplexity max 15 requires extracting helpers from command handlers**: Biome enforces \`noExcessiveCognitiveComplexity\` with max 15. Stricli \`func()\` handlers that contain fetch loops, pagination, conditional logic, and output formatting easily exceed this. Fix: extract inner loops and multi-branch logic into standalone helper functions (e.g., \`fetchDashboards()\` separate from the command's \`func()\`). This also improves testability per the existing pattern of extracting logic from \`func()\` handlers. When a function still exceeds 15 after one extraction, split further — e.g., extract page-processing logic from the fetch loop into its own function.
+<!-- lore:019c9994-d161-783e-8b3e-79457cd62f42 -->
+* **Biome lint: Response.redirect() required, nested ternaries forbidden**: Biome lint rules that frequently trip up this codebase: (1) \`useResponseRedirect\`: use \`Response.redirect(url, status)\` not \`new Response\`. (2) \`noNestedTernary\`: use \`if/else\`. (3) \`noComputedPropertyAccess\`: use \`obj.property\` not \`obj\["property"]\`. (4) Max cognitive complexity 15 per function — extract helpers to stay under.
 
-<!-- lore:019d2548-3ea0-7802-8390-aac4749d6ca6 -->
-* **Biome prefers .at(-1) over arr\[arr.length - 1] indexing**: Biome's \`useAtIndex\` rule flags \`arr\[arr.length - 1]\` patterns. Use \`arr.at(-1)\` instead. This applies throughout the codebase — the lint check will fail CI otherwise.
+<!-- lore:019c8c31-f52f-7230-9252-cceb907f3e87 -->
+* **Bugbot flags defensive null-checks as dead code — keep them with JSDoc justification**: Cursor Bugbot and Sentry Seer repeatedly flag two false positives: (1) defensive null-checks as "dead code" — keep them with JSDoc explaining why the guard exists for future safety, especially when removing would require \`!\` assertions banned by \`noNonNullAssertion\`. (2) stderr spinner output during \`--json\` mode — always a false positive since progress goes to stderr, JSON to stdout. Reply explaining the rationale and resolve.
 
-<!-- lore:019d2548-3ea3-7a9b-b5bb-13bf595fd509 -->
-* **Biome requires block statements — no single-line if/break/return**: Biome's \`useBlockStatements\` rule rejects braceless control flow like \`if (match) return match.id;\` or \`if (!nextCursor) break;\`. Always wrap in braces: \`if (match) { return match.id; }\`. Similarly, nested ternaries are banned (\`noNestedTernary\`) — use if/else chains or extract into a variable with sequential assignments.
+<!-- lore:019cc3e6-0cdd-7a53-9eb7-a284a3b4eb78 -->
+* **Bun mock.module for node:tty requires default export and class stubs**: Bun testing gotchas: (1) \`mock.module()\` for CJS built-ins requires a \`default\` re-export plus all named exports. Missing any causes \`SyntaxError: Export named 'X' not found\`. Always check the real module's full export list. (2) \`Bun.mmap()\` always opens with PROT\_WRITE — macOS SIGKILL on signed Mach-O, Linux ETXTBSY. Fix: use \`new Uint8Array(await Bun.file(path).arrayBuffer())\` in bspatch.ts. (3) Wrap \`Bun.which()\` with optional \`pathEnv\` param for deterministic testing without mocks.
 
-<!-- lore:019c8ee1-affd-7198-8d01-54aa164cde35 -->
-* **brew is not in VALID\_METHODS but Homebrew formula passes --method brew**: Homebrew install: \`isHomebrewInstall()\` detects via Cellar realpath (checked before stored install info). Upgrade command tells users \`brew upgrade getsentry/tools/sentry\`. Formula runs \`sentry cli setup --method brew --no-modify-path\` as post\_install. Version pinning throws 'unsupported\_operation'. Uses .gz artifacts. Tap at getsentry/tools.
-
-<!-- lore:70319dc2-556d-4e30-9562-e51d1b68cf45 -->
-* **Bun mock.module() leaks globally across test files in same process**: Bun's mock.module() replaces modules globally and leaks across test files in the same process. Solution: tests using mock.module() must run in a separate \`bun test\` invocation. In package.json, use \`bun run test:unit && bun run test:isolated\` instead of \`bun test\`. The \`test/isolated/\` directory exists for these tests. This was the root cause of ~100 test failures (getsentry/cli#258).
-
-<!-- lore:019cb8cc-bfa8-7dd8-8ec7-77c974fd7985 -->
-* **Making clearAuth() async breaks model-based tests — use non-async Promise\<void> return instead**: Making \`clearAuth()\` \`async\` breaks fast-check model-based tests — real async yields (macrotasks) during \`asyncModelRun\` cause \`createIsolatedDbContext\` cleanup to interleave. Fix: keep non-async, return \`clearResponseCache().catch(...)\` directly. Model-based tests should NOT await it. Also: model-based tests need explicit timeouts (e.g., \`30\_000\`) — Bun's default 5s causes false failures during shrinking.
-
-<!-- lore:a28c4f2a-e2b6-4f24-9663-a85461bc6412 -->
-* **Multiregion mock must include all control silo API routes**: When changing which Sentry API endpoint a function uses, mock routes must be updated in BOTH \`test/mocks/routes.ts\` (single-region) AND \`test/mocks/multiregion.ts\` \`createControlSiloRoutes()\`. Missing the multiregion mock causes 404s in multi-region test scenarios.
-
-<!-- lore:ce43057f-2eff-461f-b49b-fb9ebaadff9d -->
-* **Sentry /users/me/ endpoint returns 403 for OAuth tokens — use /auth/ instead**: The Sentry \`/users/me/\` endpoint returns 403 for OAuth tokens. Use \`/auth/\` instead — it works with ALL token types and lives on the control silo. In the CLI, \`getControlSiloUrl()\` handles routing correctly. \`SentryUserSchema\` (with \`.passthrough()\`) handles the \`/auth/\` response since it only requires \`id\`.
-
-<!-- lore:019d1d28-b6d7-7d6d-afd4-02d2354b27fd -->
-* **Sentry chunk upload API returns camelCase not snake\_case**: The Sentry chunk upload options endpoint (\`/api/0/organizations/{org}/chunk-upload/\`) returns camelCase keys (\`chunkSize\`, \`chunksPerRequest\`, \`maxRequestSize\`, \`hashAlgorithm\`), NOT snake\_case. Zod schemas for these responses should use camelCase field names. This is an exception to the typical Sentry API convention of snake\_case. Verified by direct API query. The \`AssembleResponse\` also uses camelCase (\`missingChunks\`).
-
-<!-- lore:019ce2c5-c9b0-7151-9579-5273c0397203 -->
-* **Stricli command context uses this.stdout not this.process.stdout**: In Stricli command \`func()\` handlers, use \`this.stdout\` and \`this.stderr\` directly — NOT \`this.process.stdout\`. The \`SentryContext\` interface has both \`process\` and \`stdout\`/\`stderr\` as separate top-level properties. Test mock contexts typically provide \`stdout\` but not a full \`process\` object, so \`this.process.stdout\` causes \`TypeError: undefined is not an object\` at runtime in tests even though TypeScript doesn't flag it.
-
-<!-- lore:019c8bbe-bc63-7b5e-a4e0-de7e968dcacb -->
-* **Stricli defaultCommand blends default command flags into route completions**: When a Stricli route map has \`defaultCommand\` set, requesting completions for that route (e.g. \`\["issues", ""]\`) returns both the subcommand names AND the default command's flags/positional completions. This means completion tests that compare against \`extractCommandTree()\` subcommand lists will fail for groups with defaultCommand, since the actual completions include extra entries like \`--limit\`, \`--query\`, etc. Solution: track \`hasDefaultCommand\` in the command tree and skip strict subcommand-matching assertions for those groups.
-
-<!-- lore:019d2548-3ea7-7822-be37-528e7710490f -->
-* **Upgrade command tests are flaky when run in full suite due to test ordering**: The \`upgradeCommand.func\` tests in \`test/commands/cli/upgrade.test.ts\` sometimes fail when run as part of the full \`bun run test:unit\` suite but pass consistently in isolation (\`bun test test/commands/cli/upgrade.test.ts\`). This is a test-ordering/state-leak issue, not a code bug. Don't chase these failures when your changes are unrelated to the upgrade command.
+<!-- lore:019d0846-17bd-7ff3-a6d7-09b59b69a8fe -->
+* **Use toMatchObject not toEqual when testing resolution results with optional fields**: When \`resolveProjectBySlug()\` or \`resolveOrgProjectTarget()\` adds optional fields (like \`projectData\`) to the return type, tests using \`expect(result).toEqual({ org, project })\` fail because \`toEqual\` requires exact match. Use \`toMatchObject({ org, project })\` instead — it checks the specified subset without failing on extra properties. This affects tests across \`event/view\`, \`log/view\`, \`trace/view\`, and \`trace/list\` test files.
 
 ### Pattern
 
-<!-- lore:019cb100-4630-79ac-8a13-185ea3d7bbb7 -->
-* **Extract logic from Stricli func() handlers into standalone functions for testability**: Stricli command \`func()\` handlers are hard to unit test because they require full command context setup. To boost coverage, extract flag validation and body-building logic into standalone exported functions (e.g., \`resolveBody()\` extracted from the \`api\` command's \`func()\`). This moved ~20 lines of mutual-exclusivity checks and flag routing from an untestable handler into a directly testable pure function. Property-based tests on the extracted function drove patch coverage from 78% to 97%. The general pattern: keep \`func()\` as a thin orchestrator that calls exported helpers. This also keeps biome complexity under the limit (max 15).
+<!-- lore:dbd63348-2049-42b3-bb99-d6a3d64369c7 -->
+* **Branch naming and commit message conventions for Sentry CLI**: Branch naming: \`feat/\<short-description>\` or \`fix/\<issue-number>-\<short-description>\` (e.g., \`feat/ghcr-nightly-distribution\`, \`fix/268-limit-auto-pagination\`). Commit message format: \`type(scope): description (#issue)\` (e.g., \`fix(issue-list): auto-paginate --limit beyond 100 (#268)\`, \`feat(nightly): distribute via GHCR instead of GitHub Releases\`). Types seen: fix, refactor, meta, release, feat. PRs are created as drafts via \`gh pr create --draft\`. Implementation plans are attached to commits via \`git notes add\` rather than in PR body or commit message.
 
-<!-- lore:d441d9e5-3638-4b5a-8148-f88c349b8979 -->
-* **Non-essential DB cache writes should be guarded with try-catch**: Non-essential DB cache writes (e.g., \`setUserInfo()\` in whoami.ts and login.ts) must be wrapped in try-catch. If the DB is broken, the cache write shouldn't crash the command when its primary operation already succeeded. In login.ts specifically, \`getCurrentUser()\` failure after token save must not block authentication — wrap in try-catch, log warning to stderr, let login succeed. This differs from \`getUserRegions()\` failure which should \`clearAuth()\` and fail hard (indicates invalid token).
+<!-- lore:019cc3e6-0cf5-720d-beb7-97c9c9901295 -->
+* **Codecov patch coverage only counts test:unit and test:isolated, not E2E**: CI coverage merges \`test:unit\` (\`test/lib test/commands test/types --coverage\`) and \`test:isolated\` (\`test/isolated --coverage\`) into \`coverage/merged.lcov\`. E2E tests (\`test/e2e\`) are NOT included in coverage reports. So func tests that spy on exports (e.g., \`spyOn(apiClient, 'getLogs')\`) give zero coverage to the mocked function's body. To cover \`api-client.ts\` function bodies in unit tests, mock \`globalThis.fetch\` + \`setOrgRegion()\` + \`setAuthToken()\` and call the real function.
 
-<!-- lore:019ce2c5-c9a8-7219-bdb8-154ead871d27 -->
-* **Stricli buildCommand output config injects json flag into func params**: When a Stricli command uses \`output: { json: true, human: formatFn }\`, the framework injects \`--json\` and \`--fields\` flags automatically. The \`func\` handler receives these as its first parameter. Type it explicitly (e.g., \`flags: { json?: boolean }\`) rather than \`\_flags: unknown\` to access the json flag for conditional behavior (e.g., skipping interactive output in JSON mode). The \`human\` formatter runs on the returned \`data\` for non-JSON output. Commands that produce interactive side effects (browser prompts, QR codes) should check \`flags.json\` and skip them when true.
+<!-- lore:019d25ab-8a2d-72cd-9abd-5e896b025e95 -->
+* **Help-as-positional recovery uses error-path, not pre-execution interception**: Two layers of help-as-positional recovery exist: (1) \*\*Leaf commands\*\* (\`sentry issue list help\`): \`maybeRecoverWithHelp\` in \`buildCommand\` wrapper (\`command.ts\`) fires in the catch block after any \`CliError\`. Checks \`args.some(a => a === 'help')\` — \`-h\` is NOT checked because Stricli natively intercepts \`-h\` during routing before \`func\` runs. Requires \`commandPrefix\` on context; dynamic-imports \`help.js\` to avoid circular deps. (2) \*\*Route groups\*\* (\`sentry dashboard help\`): Stricli's route scanner fails with "No command registered for \`help\`" (exit 251) before any command \`func\` runs. This must be intercepted in \`bin.ts\` via argv rewriting (similar to \`interceptSubcommand\` for plural aliases), not inside command handlers. Stricli writes directly to stderr and returns \`ExitCode.UnknownCommand\`.
 
-<!-- lore:019d1d28-b6ce-7257-be10-df456e2f9470 -->
-* **ZipWriter and file handle cleanup: always use try/finally with close()**: ZipWriter in \`src/lib/sourcemap/zip.ts\` has a \`close()\` method for error cleanup and \`finalize()\` uses try/finally to ensure \`fh.close()\` runs even if central directory writes fail. Callers (like \`buildArtifactBundle\`) must wrap ZipWriter usage in try/catch and call \`zip.close()\` in the catch path. The \`finalize()\` method handles its own cleanup internally. Pattern: create zip → try { add entries + finalize } catch { zip.close(); throw }. This prevents file handle leaks when entry writes or finalization fail partway through.
+<!-- lore:019c90f5-913b-7995-8bac-84289cf5d6d9 -->
+* **Pagination contextKey must include all query-varying parameters with escaping**: Pagination \`contextKey\` must encode every query-varying parameter (sort, query, period) with \`escapeContextKeyValue()\` (replaces \`|\` with \`%7C\`). Always provide a fallback before escaping since \`flags.period\` may be \`undefined\` in tests despite having a default: \`flags.period ? escapeContextKeyValue(flags.period) : "90d"\`.
 
-### Preference
+<!-- lore:019c8a8a-64ee-703c-8c1e-ed32ae8a90a7 -->
+* **PR review workflow: reply, resolve, amend, force-push**: PR review workflow: (1) Read unresolved threads via GraphQL, (2) make code changes, (3) run lint+typecheck+tests, (4) create a SEPARATE commit per review round (not amend) for incremental review, (5) push normally, (6) reply to comments via REST API, (7) resolve threads via GraphQL \`resolveReviewThread\`. Only amend+force-push when user explicitly asks or pre-commit hook modified files.
 
-<!-- lore:019d0804-a0eb-7ed5-aec9-d4f35af2fded -->
-* **Code style: Array.from() over spread for iterators, allowlist not whitelist**: User prefers \`Array.from(map.keys())\` over \`\[...map.keys()]\` for converting iterators to arrays (avoids intermediate spread). Use "allowlist" terminology instead of "whitelist" in comments and variable names. When a reviewer asks "Why not .filter() here?" — it may be a question, not a change request; the \`for..of\` loop may be intentionally more efficient. Confirm intent before changing.
+<!-- lore:019cdd9b-330a-784f-9487-0abf7b80be3c -->
+* **Stricli optional boolean flags produce tri-state (true/false/undefined)**: Stricli boolean flags with \`optional: true\` (no \`default\`) produce \`boolean | undefined\` in the flags type. \`--flag\` → \`true\`, \`--no-flag\` → \`false\`, omitted → \`undefined\`. This enables auto-detect patterns: explicit user choice overrides, \`undefined\` triggers heuristic. Used by \`--compact\` on issue list. The flag type must be \`readonly field?: boolean\` (not \`readonly field: boolean\`). This differs from \`default: false\` which always produces a defined boolean.
 
-<!-- lore:019cb3e6-da61-7dfe-83c2-17fe3257bece -->
-* **PR workflow: address review comments, resolve threads, wait for CI**: User's PR workflow after creation: (1) Wait for CI checks to pass, (2) Check for unresolved review comments via \`gh api\` for PR review comments, (3) Fix issues in follow-up commits (not amends), (4) Reply to the comment thread explaining the fix, (5) Resolve the thread programmatically via \`gh api graphql\` with \`resolveReviewThread\` mutation, (6) Push and wait for CI again, (7) Final sweep for any remaining unresolved comments. Use \`git notes add\` to attach implementation plans to commits. Branch naming: \`fix/descriptive-slug\` or \`feat/descriptive-slug\`.
+<!-- lore:019cc325-d322-7e6e-86cc-93010b71abee -->
+* **Testing Stricli command func() bodies via spyOn mocking**: Stricli/Bun test patterns: (1) Command func tests: \`const func = await cmd.loader()\`, then \`func.call(mockContext, flags, ...args)\`. \`loader()\` return type union causes LSP errors — false positives that pass \`tsc\`. File naming: \`\*.func.test.ts\`. (2) ESM prevents \`vi.spyOn\` on Node built-in exports. Workaround: test subclass that overrides the method calling the built-in. (3) Follow-mode uses \`setTimeout\`-based scheduling; test with \`interceptSigint()\` helper. \`Bun.sleep()\` has no AbortSignal so \`setTimeout\`/\`clearTimeout\` required.
 <!-- End lore-managed section -->

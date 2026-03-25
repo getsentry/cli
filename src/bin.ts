@@ -43,6 +43,61 @@ async function runCompletion(completionArgs: string[]): Promise<void> {
 }
 
 /**
+ * Flags whose values must never be sent to telemetry.
+ * Superset of `SENSITIVE_FLAGS` in `telemetry.ts` — includes `auth-token`
+ * because raw argv may use either form before Stricli parses to camelCase.
+ */
+const SENSITIVE_ARGV_FLAGS = new Set(["token", "auth-token"]);
+
+/**
+ * Check whether an argv token is a sensitive flag that needs value redaction.
+ * Returns `"eq"` for `--flag=value` form, `"next"` for `--flag <value>` form,
+ * or `null` if the token is not sensitive.
+ */
+function sensitiveArgvFlag(token: string): "eq" | "next" | null {
+  if (!token.startsWith("--")) {
+    return null;
+  }
+  const eqIdx = token.indexOf("=");
+  if (eqIdx !== -1) {
+    const name = token.slice(2, eqIdx).toLowerCase();
+    return SENSITIVE_ARGV_FLAGS.has(name) ? "eq" : null;
+  }
+  const name = token.slice(2).toLowerCase();
+  return SENSITIVE_ARGV_FLAGS.has(name) ? "next" : null;
+}
+
+/**
+ * Redact sensitive values from argv before sending to telemetry.
+ *
+ * When a token matches `--<flag>` or `--<flag>=value` for a sensitive
+ * flag name, the value (next positional token or `=value` portion) is
+ * replaced with `[REDACTED]`.
+ */
+function redactArgv(argv: string[]): string[] {
+  const redacted: string[] = [];
+  let skipNext = false;
+  for (const token of argv) {
+    if (skipNext) {
+      redacted.push("[REDACTED]");
+      skipNext = false;
+      continue;
+    }
+    const kind = sensitiveArgvFlag(token);
+    if (kind === "eq") {
+      const eqIdx = token.indexOf("=");
+      redacted.push(`${token.slice(0, eqIdx + 1)}[REDACTED]`);
+    } else if (kind === "next") {
+      redacted.push(token);
+      skipNext = true;
+    } else {
+      redacted.push(token);
+    }
+  }
+  return redacted;
+}
+
+/**
  * Error-recovery middleware for the CLI.
  *
  * Each middleware wraps command execution and may intercept specific errors
@@ -192,7 +247,12 @@ async function runCli(cliArgs: string[]): Promise<void> {
         // runCli recovers this by retrying as `sentry help <group...>`
         argv.at(-1) !== "help"
       ) {
-        await reportUnknownCommand(argv);
+        // Best-effort: telemetry must never crash the CLI
+        try {
+          await reportUnknownCommand(argv);
+        } catch {
+          // Silently ignore telemetry failures
+        }
       }
     });
   }
@@ -233,10 +293,11 @@ async function runCli(cliArgs: string[]): Promise<void> {
     const { routes } = await import("./app.js");
     const { getDefaultOrganization } = await import("./lib/db/defaults.js");
 
-    // Walk the route tree to find which token failed and get suggestions
+    // Strip flags so resolveCommandPath only sees command path segments
+    const pathSegments = argv.filter((t) => !t.startsWith("-"));
     const resolved = resolveCommandPath(
       routes as unknown as Parameters<typeof resolveCommandPath>[0],
-      argv
+      pathSegments
     );
     const unknownToken =
       resolved?.kind === "unresolved" ? resolved.input : (argv.at(-1) ?? "");
@@ -247,6 +308,9 @@ async function runCli(cliArgs: string[]): Promise<void> {
     const fromArgv = extractOrgProjectFromArgv(argv);
     const org = fromArgv.org ?? getDefaultOrganization() ?? undefined;
 
+    // Redact sensitive flags (e.g., --token) before sending to Sentry
+    const safeArgv = redactArgv(argv);
+
     Sentry.setTag("command", "unknown");
     if (org) {
       Sentry.setTag("sentry.org", org);
@@ -255,14 +319,17 @@ async function runCli(cliArgs: string[]): Promise<void> {
       Sentry.setTag("sentry.project", fromArgv.project);
     }
     Sentry.setContext("unknown_command", {
-      argv,
+      argv: safeArgv,
       unknown_token: unknownToken,
       suggestions,
       arg_count: argv.length,
       org: org ?? null,
       project: fromArgv.project ?? null,
     });
-    Sentry.captureMessage(`Unknown command: ${unknownToken}`, "warning");
+    // Fixed message string so all unknown commands group into one Sentry
+    // issue. The per-event detail (which token, suggestions) lives in the
+    // structured context above and is queryable via Discover.
+    Sentry.captureMessage("unknown_command", "info");
   }
 
   /** Build the command executor by composing error-recovery middlewares. */
