@@ -123,9 +123,13 @@ export function parseDashboardPositionalArgs(args: string[]): {
  * Handles:
  * - (empty) — auto-detect org, no filter
  * - `<org/>` or `<org/project>` — target, no filter
- * - `'Error*'` or `'*API*'` — auto-detect org, glob filter (contains glob chars)
- * - `'My Dashboard'` — auto-detect org, title filter (contains spaces)
+ * - `'CLI'` or `'Error*'` or `'*API*'` — auto-detect org, title filter
  * - `<org/> 'Error*'` or `<org> 'Error*'` — target + glob filter
+ *
+ * A single arg without `/` is always treated as a title filter, not a
+ * project-search target. Dashboards are org-scoped so project-search
+ * doesn't apply — `resolveOrgFromTarget` ignores the slug anyway.
+ * To specify an org, use `org/` or pass two args: `org 'filter'`.
  *
  * When two args are provided and the first is a bare slug (no `/`), it is
  * normalized to `slug/` so `parseOrgProjectArg` treats it as an org-all target.
@@ -148,34 +152,14 @@ export function parseDashboardListArgs(args: string[]): {
     const target = raw.includes("/") ? raw : `${raw}/`;
     return { targetArg: target, titleFilter: args[1] as string };
   }
-  // 1 arg: disambiguate
+  // 1 arg: if it contains "/" it's a target (org/project), otherwise it's
+  // always a title filter. Dashboards are org-scoped so bare slugs like
+  // "CLI" or "Performance" make no sense as project-search targets here.
   const arg = args[0] as string;
   if (arg.includes("/")) {
     return { targetArg: arg, titleFilter: undefined };
   }
-  if (looksLikeTitleFilter(arg)) {
-    return { targetArg: undefined, titleFilter: arg };
-  }
-  return { targetArg: arg, titleFilter: undefined };
-}
-
-/** Matches glob metacharacters that indicate a title filter pattern. */
-const GLOB_CHARS_RE = /[*?[]/;
-
-/**
- * Detect if a string looks like a dashboard title filter rather than a project slug.
- *
- * Glob characters (`*`, `?`, `[`) indicate a filter pattern.
- * Spaces indicate a dashboard title (slugs use dashes, not spaces).
- */
-function looksLikeTitleFilter(s: string): boolean {
-  if (GLOB_CHARS_RE.test(s)) {
-    return true;
-  }
-  if (s.includes(" ")) {
-    return true;
-  }
-  return false;
+  return { targetArg: undefined, titleFilter: arg };
 }
 
 /**

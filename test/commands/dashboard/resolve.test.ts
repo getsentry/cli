@@ -106,10 +106,10 @@ describe("parseDashboardListArgs", () => {
     expect(result.titleFilter).toBe("[abc]");
   });
 
-  test("single bare slug is target (backward compat)", () => {
+  test("single bare word is title filter (dashboards are org-scoped)", () => {
     const result = parseDashboardListArgs(["performance"]);
-    expect(result.targetArg).toBe("performance");
-    expect(result.titleFilter).toBeUndefined();
+    expect(result.targetArg).toBeUndefined();
+    expect(result.titleFilter).toBe("performance");
   });
 
   test("two args with trailing slash target and glob filter", () => {
