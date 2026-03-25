@@ -152,14 +152,44 @@ export function parseDashboardListArgs(args: string[]): {
     const target = raw.includes("/") ? raw : `${raw}/`;
     return { targetArg: target, titleFilter: args[1] as string };
   }
-  // 1 arg: if it contains "/" it's a target (org/project), otherwise it's
-  // always a title filter. Dashboards are org-scoped so bare slugs like
-  // "CLI" or "Performance" make no sense as project-search targets here.
+  // 1 arg: if it contains "/" it may be a target, or an org/project/name combo.
+  // Without "/" it's always a title filter (dashboards are org-scoped).
   const arg = args[0] as string;
   if (arg.includes("/")) {
-    return { targetArg: arg, titleFilter: undefined };
+    return splitOrgProjectName(arg);
   }
   return { targetArg: undefined, titleFilter: arg };
+}
+
+/**
+ * Split a slash-containing single arg into target and optional title filter.
+ *
+ * - `org/` or `org/project` (≤1 slash) → target only, no filter
+ * - `org/project/name` (2+ slashes) → target is `org/project`, filter is the rest
+ *
+ * This lets users type `sentry dashboard list my-org/my-project/CLI` as a
+ * single arg instead of requiring two separate args.
+ */
+function splitOrgProjectName(arg: string): {
+  targetArg: string | undefined;
+  titleFilter: string | undefined;
+} {
+  const firstSlash = arg.indexOf("/");
+  const secondSlash = arg.indexOf("/", firstSlash + 1);
+
+  if (secondSlash === -1) {
+    // Only one slash: "org/" or "org/project" — target only
+    return { targetArg: arg, titleFilter: undefined };
+  }
+
+  // Two+ slashes: split into target + name filter
+  const target = arg.slice(0, secondSlash);
+  const name = arg.slice(secondSlash + 1);
+  if (!name) {
+    // Trailing slash after project: "org/project/" → target only
+    return { targetArg: arg, titleFilter: undefined };
+  }
+  return { targetArg: target, titleFilter: name };
 }
 
 /**

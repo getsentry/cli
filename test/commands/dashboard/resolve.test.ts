@@ -129,6 +129,36 @@ describe("parseDashboardListArgs", () => {
     expect(result.targetArg).toBe("my-org/my-project");
     expect(result.titleFilter).toBe("*API*");
   });
+
+  test("single arg org/project/name splits into target + filter", () => {
+    const result = parseDashboardListArgs(["sentry/cli/CLI"]);
+    expect(result.targetArg).toBe("sentry/cli");
+    expect(result.titleFilter).toBe("CLI");
+  });
+
+  test("single arg org/project/name with spaces in name", () => {
+    const result = parseDashboardListArgs(["sentry/cli/My Dashboard"]);
+    expect(result.targetArg).toBe("sentry/cli");
+    expect(result.titleFilter).toBe("My Dashboard");
+  });
+
+  test("single arg org/ is target only (one slash, trailing)", () => {
+    const result = parseDashboardListArgs(["my-org/"]);
+    expect(result.targetArg).toBe("my-org/");
+    expect(result.titleFilter).toBeUndefined();
+  });
+
+  test("single arg org/project is target only (one slash)", () => {
+    const result = parseDashboardListArgs(["my-org/my-project"]);
+    expect(result.targetArg).toBe("my-org/my-project");
+    expect(result.titleFilter).toBeUndefined();
+  });
+
+  test("single arg org/project/ is target only (trailing slash after project)", () => {
+    const result = parseDashboardListArgs(["my-org/my-project/"]);
+    expect(result.targetArg).toBe("my-org/my-project/");
+    expect(result.titleFilter).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
