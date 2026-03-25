@@ -1,0 +1,622 @@
+# Plan: Tier 1 Library Export
+
+## Consumer API
+
+```typescript
+import sentry from "sentry";
+
+// Variadic args — just like typing the CLI command
+const issues = await sentry("issue", "list", "-l", "5");
+// → { data: [...], hasMore: true, nextCursor: "..." }
+
+// Explicit auth token (optional — auto-fills from SENTRY_AUTH_TOKEN env var)
+const orgs = await sentry("org", "list", { token: "sntrys_..." });
+
+// Custom working directory (for DSN detection, project root)
+const issues = await sentry("issue", "list", { cwd: "/path/to/project" });
+
+// Text output (human-readable string instead of parsed JSON)
+const text = await sentry("issue", "list", { text: true });
+// → "ID       TITLE         STATUS\n..."
+
+// Commands without JSON support return trimmed string
+const version = await sentry("--version");
+// → "sentry 0.21.0"
+
+// Errors are thrown
+try {
+  await sentry("issue", "view", "NONEXISTENT-1");
+} catch (err) {
+  // err instanceof SentryError
+  // err.exitCode === 1
+  // err.stderr === "Error: Issue not found..."
+}
+```
+
+### Type signature
+
+```typescript
+export interface SentryOptions {
+  /** Auth token. Auto-filled from SENTRY_AUTH_TOKEN / SENTRY_TOKEN env vars. */
+  token?: string;
+  /** Return human-readable text instead of parsed JSON. */
+  text?: boolean;
+  /** Working directory (affects DSN detection, project root). Defaults to process.cwd(). */
+  cwd?: string;
+}
+
+export class SentryError extends Error {
+  exitCode: number;
+  stderr: string;
+}
+
+// Overloads for good autocomplete
+export default function sentry(...args: string[]): Promise<unknown>;
+export default function sentry(...args: [...string[], SentryOptions]): Promise<unknown>;
+```
+
+---
+
+## Build Architecture (Single Bundle)
+
+**Constraint**: npm package size must not increase.
+
+### Current state
+```
+npm package:
+  dist/bin.cjs     ← esbuild bundles src/bin.ts (CLI-only)
+
+bun compile:
+  dist-bin/sentry-*  ← Bun.build bundles src/bin.ts (native binary)
+```
+
+### New state
+```
+npm package:
+  dist/index.cjs   ← esbuild bundles src/index.ts (library + CLI internals)
+  dist/bin.cjs     ← tiny ~200 byte wrapper: shebang + require('./index.cjs')._cli()
+  dist/index.d.cts ← type declarations (~30 lines)
+
+bun compile:
+  dist-bin/sentry-*  ← Bun.build bundles src/bin.ts (unchanged pipeline)
+```
+
+**Size impact**: `dist/index.cjs` replaces the old `dist/bin.cjs` — same code, same size (the library entry adds ~100 lines of source, negligible after minification). The tiny bin wrapper + type declarations add ~2 KB total.
+
+**Sourcemaps**: Each build (esbuild and Bun.build) gets its own debug ID via `injectDebugId`. Both sourcemaps are uploaded to Sentry. Debug IDs handle deduplication — frames from the Node.js bundle match one sourcemap, frames from the Bun binary match the other.
+
+### Source file changes
+
+Extract CLI runner from `bin.ts` so both entry points share it:
+
+```
+src/
+├── index.ts     ← NEW: library API + re-exports _cli (esbuild entry for npm)
+├── cli.ts       ← NEW: extracted CLI runner (dispatch, middleware, telemetry)
+├── bin.ts       ← SIMPLIFIED: thin wrapper, imports/calls cli.ts (bun compile entry)
+├── app.ts       # unchanged
+├── context.ts   # unchanged
+└── lib/         # unchanged (except env.ts + process.env ports)
+```
+
+**`src/cli.ts`** — Extracted CLI runner. Contains the completion fast-path, full CLI runner with middleware (auto-auth, seer trial), and the dispatch logic. Exported as functions, no top-level execution.
+
+**`src/bin.ts`** — Simplified to ~15 lines. Sets up stream error handlers (EPIPE/EIO), imports `startCli()` from `cli.ts`, calls it. Only used by `bun compile`.
+
+**`src/index.ts`** — Library entry point. Exports `sentry()` (default + named), `SentryError`, `SentryOptions`. Also exports `_cli` from `cli.ts` for the npm bin wrapper.
+
+---
+
+## 1. Env Registry — `src/lib/env.ts` (NEW)
+
+Replace all direct `process.env` reads with a registry. CLI mode never calls `setEnv()` so it defaults to `process.env`. Library mode sets a merged env that never touches the consumer's `process.env`.
+
+```typescript
+let _env: NodeJS.ProcessEnv = process.env;
+
+/** Get the active environment. Library mode overrides this; CLI uses process.env. */
+export function getEnv(): NodeJS.ProcessEnv {
+  return _env;
+}
+
+/** Set the active environment for this invocation. */
+export function setEnv(env: NodeJS.ProcessEnv): void {
+  _env = env;
+}
+```
+
+### Files to port (`process.env` → `getEnv()`)
+
+Each change is mechanical: add `import { getEnv } from "../env.js"` and replace `process.env.X` with `getEnv().X`. Reads of `process.stdout.isTTY` etc. stay on `process` (real terminal, not config).
+
+| # | File | Env var(s) |
+|---|------|-----------|
+| 1 | `src/lib/db/index.ts` | `SENTRY_CONFIG_DIR`, `SENTRY_CLI_NO_TELEMETRY` |
+| 2 | `src/lib/db/auth.ts` | `SENTRY_AUTH_TOKEN`, `SENTRY_TOKEN` |
+| 3 | `src/lib/db/schema.ts` | `SENTRY_CLI_NO_AUTO_REPAIR` |
+| 4 | `src/lib/constants.ts` | `SENTRY_HOST`, `SENTRY_URL` |
+| 5 | `src/lib/oauth.ts` | `SENTRY_CLIENT_ID` |
+| 6 | `src/lib/resolve-target.ts` | `SENTRY_PROJECT`, `SENTRY_ORG` |
+| 7 | `src/lib/telemetry.ts` | `SENTRY_CLI_NO_TELEMETRY`, `NODE_ENV` |
+| 8 | `src/lib/logger.ts` | `SENTRY_LOG_LEVEL` |
+| 9 | `src/lib/response-cache.ts` | `SENTRY_NO_CACHE` |
+| 10 | `src/lib/api/infrastructure.ts` | `SENTRY_MAX_PAGINATION_PAGES` |
+| 11 | `src/lib/formatters/plain-detect.ts` | `SENTRY_PLAIN_OUTPUT`, `NO_COLOR`, `FORCE_COLOR` |
+| 12 | `src/lib/dsn/env.ts` | `SENTRY_DSN` |
+| 13 | `src/lib/version-check.ts` | `SENTRY_CLI_NO_UPDATE_CHECK` |
+| 14 | `src/lib/sentry-url-parser.ts` | **WRITES** `SENTRY_HOST`, `SENTRY_URL` → write to `getEnv()` instead |
+
+~14 files, ~20 individual substitutions. All mechanical.
+
+---
+
+## 2. Zero-Copy Object Return — `src/lib/formatters/output.ts`
+
+Avoid the `JSON.stringify()` → stdout buffer → `JSON.parse()` round-trip in library mode. The transformed object already exists in memory at the `renderCommandOutput` call site — we intercept it before serialization.
+
+**Duck-typed `captureObject` on the Writer:**
+
+In `renderCommandOutput`, after building the final object (post-`jsonTransform` / `jsonExclude` / `filterFields`), check if the Writer has a `captureObject` method. If so, pass the object directly. If not, serialize as usual (CLI path unchanged).
+
+```typescript
+// In renderCommandOutput (output.ts), replacing the JSON write path:
+if (ctx.json) {
+  const result = config.jsonTransform
+    ? config.jsonTransform(data, ctx.fields)
+    : applyExclusions(data, config.jsonExclude);
+  const filtered = ctx.fields ? filterFields(result, ctx.fields) : result;
+
+  if ("captureObject" in stdout && typeof (stdout as any).captureObject === "function") {
+    (stdout as any).captureObject(filtered);
+  } else {
+    writeJson(stdout, filtered);
+  }
+}
+```
+
+The library creates a Writer with this method:
+```typescript
+let capturedResult: unknown;
+const stdout: Writer = {
+  write: (s) => { stdoutChunks.push(s); },
+  captureObject: (obj: unknown) => { capturedResult = obj; },
+};
+```
+
+And retrieves it after execution (before attempting `JSON.parse`):
+```typescript
+if (capturedResult !== undefined) return capturedResult; // zero-copy!
+// Fallback for commands without renderCommandOutput (help, --version):
+if (!stdoutStr.trim()) return undefined;
+try { return JSON.parse(stdoutStr); } catch { return stdoutStr.trim(); }
+```
+
+**What this avoids:**
+- `JSON.stringify()` + 2-space indentation (~ms for large issue lists)
+- String concatenation in the Writer buffer
+- `JSON.parse()` in the library
+- All temporary string allocations
+
+**CLI mode is completely unaffected** — `process.stdout` doesn't have `captureObject`, so the `in` check fails and the existing `writeJson` path runs.
+
+---
+
+## 3. JSON-by-Default via `SENTRY_OUTPUT_FORMAT` — `src/lib/command.ts`
+
+Add env-based JSON override in `wrappedFunc`, after `cleanRawFlags` (around line 408):
+
+```typescript
+// Environment-based JSON mode (set by library entry point)
+if (outputConfig && !cleanFlags.json) {
+  const env = (this as unknown as { env?: NodeJS.ProcessEnv }).env;
+  if (env?.SENTRY_OUTPUT_FORMAT === "json") {
+    cleanFlags.json = true;
+  }
+}
+```
+
+~5-line addition. Only checked when the command has an `output` config (i.e., supports JSON). Commands without JSON support (help, version) are unaffected.
+
+---
+
+## 3. Library-Safe Telemetry — `src/lib/telemetry.ts`
+
+Add `libraryMode` parameter to `initSentry` and `withTelemetry`.
+
+When `libraryMode: true`:
+- **Remove** all process-listener integrations: `OnUncaughtException`, `OnUnhandledRejection`, `ProcessSession`
+- **Remove** HTTP trace propagation: `Http`, `NodeFetch` (would add headers to consumer's requests)
+- **Remove** `FunctionToString` (wraps `Function.prototype.toString`)
+- **Remove** `ChildProcess`, `NodeContext` (unnecessary for library)
+- **Disable** `enableLogs: false` (uses `beforeExit` internally)
+- **Disable** `sendClientReports: false` (uses `setInterval` internally)
+- **Skip** `process.on("beforeExit")` handler registration
+
+**Keep**: `eventFiltersIntegration`, `linkedErrorsIntegration` (both pure, no globals).
+
+Only unavoidable global: `globalThis.__SENTRY__[SDK_VERSION]` — namespaced, won't collide.
+
+Library entry calls `client.flush(3000)` manually after command completion.
+
+```typescript
+export function initSentry(
+  enabled: boolean,
+  options?: { libraryMode?: boolean },
+): Sentry.LightNodeClient | undefined { ... }
+
+export async function withTelemetry<T>(
+  callback: (span: Span | undefined) => T | Promise<T>,
+  options?: { libraryMode?: boolean },
+): Promise<T> { ... }
+```
+
+---
+
+## 4. Library Entry Point — `src/index.ts` (NEW)
+
+```typescript
+import { getEnv, setEnv } from "./lib/env.js";
+import type { Writer } from "./types/index.js";
+
+export interface SentryOptions {
+  /** Auth token. Auto-filled from SENTRY_AUTH_TOKEN / SENTRY_TOKEN env vars. */
+  token?: string;
+  /** Return human-readable text instead of parsed JSON. */
+  text?: boolean;
+  /** Working directory (affects DSN detection, project root). Defaults to process.cwd(). */
+  cwd?: string;
+}
+
+export class SentryError extends Error {
+  exitCode: number;
+  stderr: string;
+
+  constructor(message: string, exitCode: number, stderr: string) {
+    super(message);
+    this.name = "SentryError";
+    this.exitCode = exitCode;
+    this.stderr = stderr;
+  }
+}
+
+function sentry(...input: string[]): Promise<unknown>;
+function sentry(...input: [...string[], SentryOptions]): Promise<unknown>;
+async function sentry(...input: (string | SentryOptions)[]): Promise<unknown> {
+  // Detect trailing options object
+  let args: string[];
+  let options: SentryOptions | undefined;
+  const last = input[input.length - 1];
+  if (typeof last === "object" && last !== null) {
+    options = last as SentryOptions;
+    args = input.slice(0, -1) as string[];
+  } else {
+    args = input as string[];
+  }
+
+  // Build isolated env — inherits consumer's process.env, never mutates it
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  if (options?.token) {
+    env.SENTRY_AUTH_TOKEN = options.token;
+  }
+  if (!options?.text) {
+    env.SENTRY_OUTPUT_FORMAT = "json";
+  }
+
+  const cwd = options?.cwd ?? process.cwd();
+
+  setEnv(env);
+
+  try {
+    // Capture output
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+    let capturedResult: unknown;
+    const stdout: Writer & { captureObject?: (obj: unknown) => void } = {
+      write: (s) => { stdoutChunks.push(s); },
+      captureObject: (obj) => { capturedResult = obj; }, // zero-copy from renderCommandOutput
+    };
+    const stderr: Writer = { write: (s) => { stderrChunks.push(s); } };
+
+    const fakeProcess = {
+      stdout, stderr,
+      stdin: process.stdin,
+      env,
+      cwd: () => cwd,
+      exitCode: 0,
+    };
+
+    // Dynamic imports — heavy deps only load on first call
+    const { run } = await import("@stricli/core");
+    const { app } = await import("./app.js");
+    const { buildContext } = await import("./context.js");
+    const { withTelemetry } = await import("./lib/telemetry.js");
+
+    await withTelemetry(
+      async (span) => run(app, args, buildContext(fakeProcess as any, span)),
+      { libraryMode: true },
+    );
+
+    // Flush telemetry (no beforeExit handler in library mode)
+    try {
+      const Sentry = await import("@sentry/node-core/light");
+      const client = Sentry.getClient();
+      if (client) await client.flush(3000);
+    } catch { /* non-critical */ }
+
+    const stderrStr = stderrChunks.join("");
+    const stdoutStr = stdoutChunks.join("");
+
+    // Non-zero exit → throw
+    if (fakeProcess.exitCode !== 0) {
+      const message = stderrStr.replace(/\x1b\[[0-9;]*m/g, "").trim()
+        || `Command failed with exit code ${fakeProcess.exitCode}`;
+      throw new SentryError(message, fakeProcess.exitCode, stderrStr);
+    }
+
+    // Return captured object (zero-copy) or fall back to stdout parsing
+    if (capturedResult !== undefined) return capturedResult;
+    if (!stdoutStr.trim()) return undefined;
+    try {
+      return JSON.parse(stdoutStr);
+    } catch {
+      return stdoutStr.trim();
+    }
+  } finally {
+    setEnv(process.env);
+  }
+}
+
+export { sentry };
+export default sentry;
+
+// CLI runner — internal, used by dist/bin.cjs wrapper
+export { startCli as _cli } from "./cli.js";
+```
+
+**Key behaviors:**
+- **Env isolation**: Builds `{ ...process.env }` copy, sets `token` and `SENTRY_OUTPUT_FORMAT` on it. Consumer's `process.env` is never mutated.
+- **Token auto-fill**: If `token` option is not provided, `SENTRY_AUTH_TOKEN` / `SENTRY_TOKEN` from the consumer's `process.env` carry through automatically (they're in the copied env). Explicit `token` option overrides.
+- **Variadic args**: Last-arg object detection. `sentry("issue", "list")` and `sentry("issue", "list", { token: "..." })` both work.
+- **JSON by default**: `SENTRY_OUTPUT_FORMAT=json` set unless `text: true`.
+- **Zero-copy return**: Data commands return the in-memory object directly via `captureObject` on the Writer — no `JSON.stringify` → `JSON.parse` round-trip. Falls back to stdout parsing for non-JSON commands (help, --version).
+- **Error as exception**: Non-zero exit → `SentryError` with cleaned message and raw stderr.
+- **Successful stderr discarded**: Hints/tips are irrelevant for library consumers.
+- **Dynamic imports**: Same pattern as `bin.ts` — `import sentry from "sentry"` is fast; heavy deps load on first invocation.
+
+---
+
+## 5. CLI Runner Extraction — `src/cli.ts` (NEW) + `src/bin.ts` (SIMPLIFIED)
+
+### `src/cli.ts`
+Extracted from `bin.ts`. Contains:
+- `runCompletion(args)` — shell completion fast path
+- `runCli(args)` — full CLI with middleware (auto-auth, seer trial), telemetry, version check
+- `startCli()` — top-level dispatch (completion vs full CLI, error handling)
+
+All functions exported, no top-level execution.
+
+### `src/bin.ts` (simplified to ~15 lines)
+```typescript
+import { startCli } from "./cli.js";
+
+// Stream error handlers — CLI-specific (library uses captured Writers)
+function handleStreamError(err: NodeJS.ErrnoException): void {
+  if (err.code === "EPIPE") process.exit(0);
+  if (err.code === "EIO") process.exit(1);
+  throw err;
+}
+process.stdout.on("error", handleStreamError);
+process.stderr.on("error", handleStreamError);
+
+startCli().catch(() => {});
+```
+
+Only used by `bun compile` pipeline. The npm path goes through `dist/bin.cjs` → `_cli()`.
+
+---
+
+## 6. Build Changes — `script/bundle.ts`
+
+Change the esbuild entry point from `src/bin.ts` to `src/index.ts`. Remove the shebang banner (it moves to the bin wrapper).
+
+```diff
+ const result = await build({
+-  entryPoints: ["./src/bin.ts"],
++  entryPoints: ["./src/index.ts"],
+   bundle: true,
+   minify: true,
+-  banner: {
+-    js: `#!/usr/bin/env node
+-if(parseInt(process.versions.node)<22){...}
+-{let e=process.emit;...}`,
+-  },
++  banner: {
++    // Warning suppression only — shebang + version check move to dist/bin.cjs
++    js: `{let e=process.emit;process.emit=function(n,...a){return n==="warning"?!1:e.apply(this,[n,...a])}}`,
++  },
+   sourcemap: true,
+   platform: "node",
+   target: "node22",
+   format: "cjs",
+-  outfile: "./dist/bin.cjs",
++  outfile: "./dist/index.cjs",
+   // ... rest unchanged
+ });
+```
+
+After the build, write the bin wrapper and type declarations:
+
+```typescript
+// Tiny CLI wrapper — shebang + Node.js version check + dispatch
+const BIN_WRAPPER = `#!/usr/bin/env node
+if(parseInt(process.versions.node)<22){console.error("Error: sentry requires Node.js 22 or later (found "+process.version+").\\n\\nEither upgrade Node.js, or install the standalone binary instead:\\n  curl -fsSL https://cli.sentry.dev/install | bash\\n");process.exit(1)}
+require('./index.cjs')._cli().catch(()=>{});
+`;
+await Bun.write("./dist/bin.cjs", BIN_WRAPPER);
+
+// Type declarations
+await Bun.write("./dist/index.d.cts", TYPE_DECLARATIONS);
+```
+
+Update the sourcemap plugin's metafile path to look for `dist/index.cjs` instead of `dist/bin.cjs`.
+
+---
+
+## 7. Package.json Changes
+
+```jsonc
+{
+  "main": "./dist/index.cjs",
+  "types": "./dist/index.d.cts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.cts",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.cjs"
+    }
+  },
+  "bin": { "sentry": "./dist/bin.cjs" },  // points to the tiny wrapper
+  "files": [
+    "dist/bin.cjs",
+    "dist/index.cjs",
+    "dist/index.d.cts"
+  ]
+}
+```
+
+---
+
+## 8. Documentation
+
+### README.md — New `## Library Usage` section
+
+Insert between "Configuration" and "Development" (before the `---` divider at line 86):
+
+```markdown
+## Library Usage
+
+Use Sentry CLI programmatically in Node.js (≥22) or Bun without spawning a subprocess:
+
+\```typescript
+import sentry from "sentry";
+
+// Returns parsed JSON — same as `sentry issue list --json`
+const issues = await sentry("issue", "list", "-l", "5");
+
+// Explicit auth token (auto-fills from SENTRY_AUTH_TOKEN env var)
+const orgs = await sentry("org", "list", { token: "sntrys_..." });
+
+// Human-readable text output
+const text = await sentry("issue", "list", { text: true });
+
+// Errors are thrown as SentryError with .exitCode and .stderr
+try {
+  await sentry("issue", "view", "NONEXISTENT-1");
+} catch (err) {
+  console.error(err.exitCode, err.stderr);
+}
+\```
+
+Options (all optional):
+- `token` — Auth token. Falls back to `SENTRY_AUTH_TOKEN` / `SENTRY_TOKEN` env vars.
+- `text` — Return human-readable string instead of parsed JSON.
+- `cwd` — Working directory for DSN auto-detection. Defaults to `process.cwd()`.
+```
+
+### Docs site — New `docs/src/content/docs/library-usage.md`
+
+Full documentation page covering:
+- Installation (`npm install sentry`)
+- Basic usage with code examples
+- Options reference (token, text, cwd)
+- Error handling (SentryError)
+- Auth (token option vs env vars vs stored tokens)
+- JSON output format (explain what shape commands return)
+- Comparison with subprocess approach
+- Limitations (not concurrent-safe, Node.js ≥22)
+
+### Docs site — Sidebar update in `docs/astro.config.mjs`
+
+Add to the "Getting Started" section after "Configuration":
+
+```javascript
+{
+  label: "Getting Started",
+  items: [
+    { label: "Introduction", slug: "" },
+    { label: "Installation", slug: "getting-started" },
+    { label: "Self-Hosted", slug: "self-hosted" },
+    { label: "Configuration", slug: "configuration" },
+    { label: "Library Usage", slug: "library-usage" },  // NEW
+  ],
+},
+```
+
+---
+
+## 9. Test Plan
+
+### `test/lib/env.test.ts` — Env registry
+- `getEnv()` defaults to `process.env`
+- `setEnv()` switches the active env
+- Restoring via `setEnv(process.env)` works
+- Mutations to the registry don't affect `process.env`
+
+### `test/lib/index.test.ts` — Library entry point
+
+| Test | Verifies |
+|------|----------|
+| `sentry("--version")` returns version string | Basic invocation, string return for non-JSON command |
+| `sentry("help")` returns help text string | Multi-line text return |
+| `sentry("nonexistent")` throws `SentryError` | Error handling |
+| `SentryError` has `.exitCode` and `.stderr` | Error shape |
+| Thrown error `.message` has no ANSI codes | ANSI stripping |
+| `sentry("issue", "list")` without auth → `SentryError` | Auth errors become exceptions |
+| `sentry("org", "list", { token: "bad" })` → error | Token option plumbed through |
+| Token auto-fills from `SENTRY_AUTH_TOKEN` env var | Env var fallback works |
+| `sentry("issue", "list", { cwd: "/tmp" })` | Custom cwd plumbed through |
+| `process.env` unchanged after successful call | No env pollution |
+| `process.env` unchanged after failed call | Finally block works |
+| `{ text: true }` returns string, not parsed object | Text mode |
+| Default mode (no `text`) returns parsed object for data commands | JSON default |
+| Returned object is reference-equal to command output (no serialize) | Zero-copy path |
+
+### Existing tests
+All existing tests pass unmodified — `getEnv()` defaults to `process.env`, so `useTestConfigDir()` (which sets `process.env.SENTRY_CONFIG_DIR`) continues to work.
+
+---
+
+## Files Summary
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `src/lib/env.ts` | **Create** | Env registry (`getEnv()`/`setEnv()`) |
+| `src/index.ts` | **Create** | Library entry point + `_cli` re-export |
+| `src/cli.ts` | **Create** | Extracted CLI runner (from `bin.ts`) |
+| `src/bin.ts` | **Simplify** | Thin wrapper for bun compile (~15 lines) |
+| `src/lib/formatters/output.ts` | **Modify** | Add `captureObject` duck-type check in `renderCommandOutput` |
+| `src/lib/command.ts` | **Modify** | Add `SENTRY_OUTPUT_FORMAT` check (~5 lines) |
+| `src/lib/telemetry.ts` | **Modify** | Add `libraryMode` for safe integrations |
+| `script/bundle.ts` | **Modify** | Entry point → `src/index.ts`, write bin wrapper + types |
+| `package.json` | **Modify** | Add `exports`, `main`, `types`, update `files` |
+| ~14 files in `src/lib/` | **Modify** | Mechanical `process.env` → `getEnv()` |
+| `README.md` | **Modify** | Add Library Usage section |
+| `docs/src/content/docs/library-usage.md` | **Create** | Full library documentation page |
+| `docs/astro.config.mjs` | **Modify** | Add Library Usage to sidebar |
+| `test/lib/env.test.ts` | **Create** | Env registry tests |
+| `test/lib/index.test.ts` | **Create** | Library entry point tests |
+
+---
+
+## Verification
+
+1. `bun run typecheck` — all files type-check
+2. `bun test` — existing tests pass unchanged
+3. `bun test test/lib/env.test.ts test/lib/index.test.ts` — new tests pass
+4. `bun run bundle` — produces `dist/index.cjs` + `dist/bin.cjs` + `dist/index.d.cts`
+5. `node dist/bin.cjs --version` — CLI works via wrapper
+6. `node -e "const sentry = require('./dist/index.cjs').default; sentry('--version').then(console.log)"` — library works
+7. `ls -la dist/` — verify total size ≈ old `dist/bin.cjs` size
+8. `bun run build --single` — bun compile still works (unchanged pipeline)
+9. `bun run lint:fix` — clean
+10. Check docs site builds: `cd docs && bun run build`
