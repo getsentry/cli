@@ -1,54 +1,147 @@
 /**
  * sentry dashboard view
  *
- * View details of a specific dashboard.
+ * View a dashboard with rendered widget data (sparklines, tables, big numbers).
+ * Supports --refresh for auto-refreshing live display.
  */
 
 import type { SentryContext } from "../../context.js";
-import { getDashboard } from "../../lib/api-client.js";
+import { getDashboard, queryAllWidgets } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { formatDashboardView } from "../../lib/formatters/human.js";
-import { CommandOutput } from "../../lib/formatters/output.js";
+import type { DashboardViewData } from "../../lib/formatters/dashboard.js";
+import { createDashboardViewRenderer } from "../../lib/formatters/dashboard.js";
+import { ClearScreen, CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
+import { logger } from "../../lib/logger.js";
 import { withProgress } from "../../lib/polling.js";
+import { resolveOrgRegion } from "../../lib/region.js";
 import { buildDashboardUrl } from "../../lib/sentry-urls.js";
-import type { DashboardDetail } from "../../types/dashboard.js";
+import type {
+  DashboardWidget,
+  WidgetDataResult,
+} from "../../types/dashboard.js";
 import {
   parseDashboardPositionalArgs,
   resolveDashboardId,
   resolveOrgFromTarget,
 } from "./resolve.js";
 
+/** Default auto-refresh interval in seconds */
+const DEFAULT_REFRESH_INTERVAL = 60;
+
+/** Minimum auto-refresh interval in seconds (avoid rate limiting) */
+const MIN_REFRESH_INTERVAL = 10;
+
 type ViewFlags = {
   readonly web: boolean;
   readonly fresh: boolean;
+  readonly refresh?: number;
+  readonly period?: string;
   readonly json: boolean;
   readonly fields?: string[];
 };
 
-type ViewResult = DashboardDetail & { url: string };
+/**
+ * Parse --refresh flag value.
+ * Supports: -r (empty string → 60s default), -r 30 (explicit interval in seconds)
+ */
+function parseRefresh(value: string): number {
+  if (value === "") {
+    return DEFAULT_REFRESH_INTERVAL;
+  }
+  const num = Number.parseInt(value, 10);
+  if (Number.isNaN(num) || num < MIN_REFRESH_INTERVAL) {
+    throw new Error(
+      `--refresh interval must be at least ${MIN_REFRESH_INTERVAL} seconds`
+    );
+  }
+  return num;
+}
+
+/**
+ * Sleep that resolves early when an AbortSignal fires.
+ * Resolves (not rejects) on abort for clean generator shutdown.
+ */
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * Build the DashboardViewData from a dashboard and its widget query results.
+ */
+function buildViewData(
+  dashboard: {
+    id: string;
+    title: string;
+    dateCreated?: string;
+    environment?: string[];
+  },
+  widgetResults: Map<number, WidgetDataResult>,
+  widgets: DashboardWidget[],
+  opts: { period: string; url: string }
+): DashboardViewData {
+  return {
+    id: dashboard.id,
+    title: dashboard.title,
+    period: opts.period,
+    fetchedAt: new Date().toISOString(),
+    url: opts.url,
+    dateCreated: dashboard.dateCreated,
+    environment: dashboard.environment,
+    widgets: widgets.map((w, i) => ({
+      title: w.title,
+      displayType: w.displayType,
+      widgetType: w.widgetType,
+      layout: w.layout,
+      queries: w.queries,
+      data: widgetResults.get(i) ?? {
+        type: "error" as const,
+        message: "No data returned",
+      },
+    })),
+  };
+}
 
 export const viewCommand = buildCommand({
   docs: {
     brief: "View a dashboard",
     fullDescription:
-      "View details of a specific Sentry dashboard.\n\n" +
+      "View a Sentry dashboard with rendered widget data.\n\n" +
+      "Fetches actual data for each widget and displays sparkline charts,\n" +
+      "tables, and big numbers in the terminal.\n\n" +
       "The dashboard can be specified by numeric ID or title.\n\n" +
       "Examples:\n" +
       "  sentry dashboard view 12345\n" +
       "  sentry dashboard view 'My Dashboard'\n" +
       "  sentry dashboard view my-org/ 12345\n" +
       "  sentry dashboard view 12345 --json\n" +
+      "  sentry dashboard view 12345 --period 7d\n" +
+      "  sentry dashboard view 12345 -r\n" +
+      "  sentry dashboard view 12345 -r 30\n" +
       "  sentry dashboard view 12345 --web",
   },
   output: {
-    human: formatDashboardView,
+    human: createDashboardViewRenderer,
   },
   parameters: {
     positional: {
@@ -65,8 +158,21 @@ export const viewCommand = buildCommand({
         default: false,
       },
       fresh: FRESH_FLAG,
+      refresh: {
+        kind: "parsed",
+        parse: parseRefresh,
+        brief: "Auto-refresh interval in seconds (default: 60, min: 10)",
+        optional: true,
+        inferEmpty: true,
+      },
+      period: {
+        kind: "parsed",
+        parse: String,
+        brief: 'Time period override (e.g., "24h", "7d", "14d")',
+        optional: true,
+      },
     },
-    aliases: { ...FRESH_ALIASES, w: "web" },
+    aliases: { ...FRESH_ALIASES, w: "web", r: "refresh", t: "period" },
   },
   async *func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
@@ -80,7 +186,6 @@ export const viewCommand = buildCommand({
       "sentry dashboard view <org>/ <id>"
     );
     const dashboardId = await resolveDashboardId(orgSlug, dashboardRef);
-
     const url = buildDashboardUrl(orgSlug, dashboardId);
 
     if (flags.web) {
@@ -88,12 +193,70 @@ export const viewCommand = buildCommand({
       return;
     }
 
+    // Fetch the dashboard definition (widget structure)
     const dashboard = await withProgress(
       { message: "Fetching dashboard...", json: flags.json },
       () => getDashboard(orgSlug, dashboardId)
     );
 
-    yield new CommandOutput({ ...dashboard, url } as ViewResult);
+    const regionUrl = await resolveOrgRegion(orgSlug);
+    const period = flags.period ?? dashboard.period ?? "24h";
+    const widgets = dashboard.widgets ?? [];
+
+    if (flags.refresh !== undefined) {
+      // ── Refresh mode: poll and re-render ──
+      const interval = flags.refresh;
+      if (!flags.json) {
+        logger.info(
+          `Auto-refreshing dashboard every ${interval}s. Press Ctrl+C to stop.`
+        );
+      }
+
+      const controller = new AbortController();
+      const stop = () => controller.abort();
+      process.once("SIGINT", stop);
+
+      let isFirstRender = true;
+
+      try {
+        while (!controller.signal.aborted) {
+          const widgetData = await queryAllWidgets(
+            regionUrl,
+            orgSlug,
+            dashboard,
+            { period }
+          );
+
+          // Build output data before clearing so clear→render is instantaneous
+          const viewData = buildViewData(dashboard, widgetData, widgets, {
+            period,
+            url,
+          });
+
+          if (!isFirstRender) {
+            yield new ClearScreen();
+          }
+          isFirstRender = false;
+
+          yield new CommandOutput(viewData);
+
+          await abortableSleep(interval * 1000, controller.signal);
+        }
+      } finally {
+        process.removeListener("SIGINT", stop);
+      }
+      return;
+    }
+
+    // ── Single fetch mode ──
+    const widgetData = await withProgress(
+      { message: "Querying widget data...", json: flags.json },
+      () => queryAllWidgets(regionUrl, orgSlug, dashboard, { period })
+    );
+
+    yield new CommandOutput(
+      buildViewData(dashboard, widgetData, widgets, { period, url })
+    );
     return { hint: `Dashboard: ${url}` };
   },
 });

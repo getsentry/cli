@@ -648,3 +648,165 @@ export function prepareDashboardForUpdate(dashboard: DashboardDetail): {
     period: dashboard.period,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Widget data query types
+//
+// Types for responses from the events-stats and events API endpoints
+// used to fetch actual widget data for dashboard rendering.
+// ---------------------------------------------------------------------------
+
+/**
+ * Single data point from the events-stats API.
+ * Format: [timestamp_epoch_seconds, [{count: value}]]
+ */
+export const EventsStatsDataPointSchema = z.tuple([
+  z.number(),
+  z.array(z.object({ count: z.number() })),
+]);
+
+export type EventsStatsDataPoint = z.infer<typeof EventsStatsDataPointSchema>;
+
+/**
+ * A single time-series from events-stats.
+ *
+ * In simple queries this is the top-level response.
+ * In grouped queries (`topEvents > 0`) each group key maps to one of these.
+ */
+export const EventsStatsSeriesSchema = z
+  .object({
+    data: z.array(EventsStatsDataPointSchema),
+    order: z.number().optional(),
+    start: z.union([z.string(), z.number()]).optional(),
+    end: z.union([z.string(), z.number()]).optional(),
+    meta: z
+      .object({
+        fields: z.record(z.string()).optional(),
+        units: z.record(z.string().nullable()).optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+export type EventsStatsSeries = z.infer<typeof EventsStatsSeriesSchema>;
+
+/**
+ * Response from `GET /organizations/{org}/events/` (table format).
+ *
+ * Used by table, big_number, and top_n widget types.
+ */
+export const EventsTableResponseSchema = z.object({
+  data: z.array(z.record(z.unknown())),
+  meta: z
+    .object({
+      fields: z.record(z.string()).optional(),
+      units: z.record(z.string().nullable()).optional(),
+    })
+    .optional(),
+});
+
+export type EventsTableResponse = z.infer<typeof EventsTableResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// Widget data result types — discriminated union for all widget outputs
+// ---------------------------------------------------------------------------
+
+/** Time-series data for chart widgets (line, area, bar) */
+export type TimeseriesResult = {
+  type: "timeseries";
+  series: {
+    label: string;
+    values: { timestamp: number; value: number }[];
+    unit?: string | null;
+  }[];
+};
+
+/** Tabular data for table and top_n widgets */
+export type TableResult = {
+  type: "table";
+  columns: { name: string; type?: string; unit?: string | null }[];
+  rows: Record<string, unknown>[];
+};
+
+/** Single scalar value for big_number widgets */
+export type ScalarResult = {
+  type: "scalar";
+  value: number;
+  previousValue?: number;
+  unit?: string | null;
+};
+
+/** Widget type not supported for data fetching */
+export type UnsupportedResult = {
+  type: "unsupported";
+  reason: string;
+};
+
+/** Widget query failed */
+export type ErrorResult = {
+  type: "error";
+  message: string;
+};
+
+/**
+ * Result of querying a widget's data.
+ *
+ * Discriminated on `type` to determine how to render:
+ * - `timeseries` → sparkline charts
+ * - `table` → text table
+ * - `scalar` → big number display
+ * - `unsupported` → placeholder message
+ * - `error` → error message
+ */
+export type WidgetDataResult =
+  | TimeseriesResult
+  | TableResult
+  | ScalarResult
+  | UnsupportedResult
+  | ErrorResult;
+
+// ---------------------------------------------------------------------------
+// Dataset mapping
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps widget types to API dataset parameter values.
+ *
+ * Widget types that don't map to a dataset (issue, metrics, etc.)
+ * return null and are rendered as "unsupported".
+ */
+const WIDGET_TYPE_TO_DATASET: Record<string, string> = {
+  spans: "spans",
+  discover: "discover",
+  "error-events": "errors",
+  "transaction-like": "transactions",
+  logs: "logs",
+};
+
+/**
+ * Map a widget's `widgetType` to the API `dataset` parameter.
+ *
+ * @param widgetType - The widget's dataset type (e.g., "spans", "discover")
+ * @returns The API dataset string, or null if the type isn't queryable
+ */
+export function mapWidgetTypeToDataset(
+  widgetType: string | undefined
+): string | null {
+  if (!widgetType) {
+    return null;
+  }
+  return WIDGET_TYPE_TO_DATASET[widgetType] ?? null;
+}
+
+/** Display types that use time-series data (events-stats endpoint) */
+export const TIMESERIES_DISPLAY_TYPES = new Set([
+  "line",
+  "area",
+  "stacked_area",
+  "bar",
+  "categorical_bar",
+]);
+
+/** Display types that use tabular data (events endpoint) */
+export const TABLE_DISPLAY_TYPES = new Set(["table", "top_n"]);
