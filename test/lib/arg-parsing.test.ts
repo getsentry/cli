@@ -251,6 +251,66 @@ describe("parseOrgProjectArg", () => {
       expect(stderrOutput).not.toContain("Normalized slug");
     });
   });
+
+  describe("@-selector rejection", () => {
+    test("@latest throws with redirect to issue view", () => {
+      expect(() => parseOrgProjectArg("@latest")).toThrow(
+        "is an issue selector, not a project slug"
+      );
+      expect(() => parseOrgProjectArg("@latest")).toThrow(
+        "sentry issue view @latest"
+      );
+    });
+
+    test("@most_frequent throws with redirect to issue view", () => {
+      expect(() => parseOrgProjectArg("@most_frequent")).toThrow(
+        "is an issue selector, not a project slug"
+      );
+      expect(() => parseOrgProjectArg("@most_frequent")).toThrow(
+        "sentry issue view @most_frequent"
+      );
+    });
+
+    test("case-insensitive selector variants are rejected", () => {
+      expect(() => parseOrgProjectArg("@Latest")).toThrow(
+        "is an issue selector"
+      );
+      expect(() => parseOrgProjectArg("@LATEST")).toThrow(
+        "is an issue selector"
+      );
+      expect(() => parseOrgProjectArg("@mostFrequent")).toThrow(
+        "is an issue selector"
+      );
+    });
+
+    test("unknown @-prefixed value throws as invalid slug", () => {
+      expect(() => parseOrgProjectArg("@unknown")).toThrow("starts with '@'");
+    });
+
+    test("/@latest (leading slash) throws with redirect", () => {
+      expect(() => parseOrgProjectArg("/@latest")).toThrow(
+        "is an issue selector"
+      );
+    });
+
+    test("sentry/@latest (org/selector) throws with redirect", () => {
+      expect(() => parseOrgProjectArg("sentry/@latest")).toThrow(
+        "is an issue selector"
+      );
+    });
+
+    test("@latest/project (selector as org) throws", () => {
+      expect(() => parseOrgProjectArg("@latest/cli")).toThrow(
+        "is an issue selector, not an organization slug"
+      );
+    });
+
+    test("@unknown/project (unknown @ as org) throws", () => {
+      expect(() => parseOrgProjectArg("@unknown/cli")).toThrow(
+        "starts with '@'"
+      );
+    });
+  });
 });
 
 describe("parseIssueArg", () => {

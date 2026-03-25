@@ -419,6 +419,39 @@ function issueArgFromUrl(parsed: ParsedSentryUrl): ParsedIssueArg | null {
 }
 
 /**
+ * Reject `@`-prefixed values in org/project positions.
+ *
+ * `@latest` and `@most_frequent` are issue selectors supported by
+ * `parseIssueArg()` (for `issue view`, `explain`, `plan`). They are not
+ * valid project slugs. This guard provides a helpful redirect instead of
+ * the confusing "Project '@latest' not found" resolution error.
+ *
+ * Unknown `@`-prefixed values are also rejected — `@` is never valid in
+ * Sentry slugs.
+ */
+function rejectAtSelector(value: string, label: string): void {
+  if (!value.startsWith("@")) {
+    return;
+  }
+
+  const selector = parseSelector(value);
+  if (selector) {
+    const article = "aeiouAEIOU".includes(label.charAt(0)) ? "an" : "a";
+    throw new ValidationError(
+      `'${value}' is an issue selector, not ${article} ${label}.\n` +
+        `  Use: sentry issue view ${value}`,
+      label
+    );
+  }
+
+  throw new ValidationError(
+    `Invalid ${label}: '${value}' starts with '@'.\n` +
+      "  Slugs contain only letters, numbers, hyphens, and underscores.",
+    label
+  );
+}
+
+/**
  * Parse a slash-delimited `org/project` string into a {@link ParsedOrgProject}.
  * Applies {@link normalizeSlug} to both components and validates against
  * URL injection characters.
@@ -435,6 +468,7 @@ function parseSlashOrgProject(input: string): ParsedOrgProject {
         'Invalid format: "/" requires a project slug (e.g., "/cli")'
       );
     }
+    rejectAtSelector(rawProject, "project slug");
     validateResourceId(rawProject, "project slug");
     const np = normalizeSlug(rawProject);
     return {
@@ -444,6 +478,7 @@ function parseSlashOrgProject(input: string): ParsedOrgProject {
     };
   }
 
+  rejectAtSelector(rawOrg, "organization slug");
   validateResourceId(rawOrg, "organization slug");
   const no = normalizeSlug(rawOrg);
 
@@ -457,6 +492,7 @@ function parseSlashOrgProject(input: string): ParsedOrgProject {
   }
 
   // "sentry/cli" → explicit org and project
+  rejectAtSelector(rawProject, "project slug");
   validateResourceId(rawProject, "project slug");
   const np = normalizeSlug(rawProject);
   const normalized = no.normalized || np.normalized;
@@ -508,6 +544,7 @@ export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
     parsed = parseSlashOrgProject(trimmed);
   } else {
     // No slash → search for project across all orgs
+    rejectAtSelector(trimmed, "project slug");
     validateResourceId(trimmed, "project slug");
     const np = normalizeSlug(trimmed);
     parsed = {
