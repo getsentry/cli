@@ -124,6 +124,27 @@ describe("parsePositionalArgs", () => {
       expect(result.targetArg).toBe("my-org/");
       expect(result.eventId).toBe("abc123def456");
     });
+
+    test("auto-redirects issue short ID in first arg to issueShortId (CLI-MP)", () => {
+      // "JAVASCRIPT-NUXT-52" matches looksLikeIssueShortId → redirect to issue's
+      // latest event instead of treating it as a project slug (which would fail).
+      const result = parsePositionalArgs([
+        "JAVASCRIPT-NUXT-52",
+        "abc123def456",
+      ]);
+      expect(result.issueShortId).toBe("JAVASCRIPT-NUXT-52");
+      expect(result.eventId).toBe("latest");
+      expect(result.targetArg).toBeUndefined();
+      expect(result.warning).toContain("issue short ID");
+    });
+
+    test("auto-redirects simple issue short ID like CAM-82X", () => {
+      const result = parsePositionalArgs(["CAM-82X", "95fd7f5a"]);
+      expect(result.issueShortId).toBe("CAM-82X");
+      expect(result.eventId).toBe("latest");
+      expect(result.targetArg).toBeUndefined();
+      expect(result.warning).toContain("issue short ID");
+    });
   });
 
   describe("error cases", () => {
@@ -787,15 +808,20 @@ describe("viewCommand.func", () => {
     expect(getEventSpy).toHaveBeenCalled();
   });
 
-  test("logs suggestion when first arg looks like issue short ID", async () => {
-    // "CAM-82X" as first arg matches issue short ID pattern.
-    // parsePositionalArgs treats it as targetArg, "95fd7f5a" as eventId.
-    // parseOrgProjectArg("CAM-82X") → project-search, so we mock resolveProjectBySlug.
-    resolveProjectBySlugSpy.mockResolvedValue({
+  test("auto-redirects issue short ID in two-arg form via issueShortId path", async () => {
+    // "CAM-82X" as first arg matches looksLikeIssueShortId → sets issueShortId,
+    // NOT targetArg. The resolveIssueShortcut path fetches the latest event.
+    const resolveOrgSpy = spyOn(resolveTarget, "resolveOrg").mockResolvedValue({
       org: "cam-org",
-      project: "cam-project",
     });
-    getEventSpy.mockResolvedValue(sampleEvent);
+    const getIssueByShortIdSpy = spyOn(
+      apiClient,
+      "getIssueByShortId"
+    ).mockResolvedValue({ id: "999", shortId: "CAM-82X" } as never);
+    const getLatestEventSpy = spyOn(
+      apiClient,
+      "getLatestEvent"
+    ).mockResolvedValue(sampleEvent);
     getSpanTreeLinesSpy.mockResolvedValue({
       lines: [],
       spans: null,
@@ -805,8 +831,7 @@ describe("viewCommand.func", () => {
 
     const { context } = createMockContext();
     const func = await viewCommand.loader();
-    // First arg "CAM-82X" has no slash, second "95fd7f5a" has no slash
-    // → no swap warning, but looksLikeIssueShortId("CAM-82X") fires → suggestion
+    // First arg "CAM-82X" is an issue short ID, second arg "95fd7f5a" is ignored
     await func.call(
       context,
       { json: true, web: false, spans: 0 },
@@ -814,9 +839,15 @@ describe("viewCommand.func", () => {
       "95fd7f5a"
     );
 
-    // The suggestion path (line 339-340) should be exercised
-    expect(resolveProjectBySlugSpy).toHaveBeenCalled();
-    expect(getEventSpy).toHaveBeenCalled();
+    // Should NOT go through resolveProjectBySlug (the old buggy path)
+    expect(resolveProjectBySlugSpy).not.toHaveBeenCalled();
+    // Should resolve via issue short ID path
+    expect(getIssueByShortIdSpy).toHaveBeenCalledWith("cam-org", "CAM-82X");
+    expect(getLatestEventSpy).toHaveBeenCalled();
+
+    resolveOrgSpy.mockRestore();
+    getIssueByShortIdSpy.mockRestore();
+    getLatestEventSpy.mockRestore();
   });
 
   test("logs normalized slug warning when underscores present", async () => {

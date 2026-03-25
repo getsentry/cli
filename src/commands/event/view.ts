@@ -234,13 +234,21 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
     return { eventId: first, targetArg: second, warning: swapWarning };
   }
 
-  // Detect issue short ID passed as first arg (e.g., "CAM-82X 95fd7f5a")
-  const suggestion = looksLikeIssueShortId(first)
-    ? `Did you mean: sentry issue view ${first}`
-    : undefined;
+  // Detect issue short ID passed as first arg (e.g., "CAM-82X 95fd7f5a").
+  // Auto-redirect to the issue's latest event instead of treating the short
+  // ID as a project slug (which would fail — slugs are lowercase, short IDs
+  // are uppercase). The second arg is ignored since we fetch the latest event.
+  if (looksLikeIssueShortId(first)) {
+    return {
+      eventId: "latest",
+      targetArg: undefined,
+      issueShortId: first,
+      warning: `'${first}' is an issue short ID, not a project slug. Ignoring second argument '${second}'.`,
+    };
+  }
 
   // Two or more args - first is target, second is event ID
-  return { eventId: second, targetArg: first, suggestion };
+  return { eventId: second, targetArg: first };
 }
 
 /**
