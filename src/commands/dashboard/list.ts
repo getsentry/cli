@@ -378,8 +378,10 @@ export const listCommand = buildListCommand("dashboard", {
     }
 
     // Resolve pagination cursor (handles "last" magic value)
+    // Lowercase the filter in the context key to match the case-insensitive
+    // glob matching — 'Error*' and 'error*' produce identical results.
     const contextKey = buildPaginationContextKey("dashboard", orgSlug, {
-      ...(titleFilter && { q: titleFilter }),
+      ...(titleFilter && { q: titleFilter.toLowerCase() }),
     });
     const rawCursor = resolveOrgCursor(
       flags.cursor,
