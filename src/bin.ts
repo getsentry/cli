@@ -179,9 +179,90 @@ async function runCli(cliArgs: string[]): Promise<void> {
 
   /** Run CLI command with telemetry wrapper */
   async function runCommand(argv: string[]): Promise<void> {
-    await withTelemetry(async (span) =>
-      run(app, argv, buildContext(process, span))
+    await withTelemetry(async (span) => {
+      await run(app, argv, buildContext(process, span));
+
+      // Stricli handles unknown subcommands internally — it writes to
+      // stderr and sets exitCode without throwing. Report to Sentry so
+      // we can track typo/confusion patterns and improve suggestions.
+      if (
+        (process.exitCode === ExitCode.UnknownCommand ||
+          process.exitCode === (ExitCode.UnknownCommand + 256) % 256) &&
+        // Skip when the unknown token is "help" — the outer code in
+        // runCli recovers this by retrying as `sentry help <group...>`
+        argv.at(-1) !== "help"
+      ) {
+        await reportUnknownCommand(argv);
+      }
+    });
+  }
+
+  /**
+   * Extract org/project from raw argv by scanning for `org/project` tokens.
+   *
+   * Commands accept `org/project` or `org/` as positional targets.
+   * Since Stricli failed at route resolution, args are unparsed — we
+   * scan for the first slash-containing, non-flag token.
+   */
+  function extractOrgProjectFromArgv(argv: string[]): {
+    org?: string;
+    project?: string;
+  } {
+    for (const token of argv) {
+      if (token.startsWith("-") || !token.includes("/")) {
+        continue;
+      }
+      const slashIdx = token.indexOf("/");
+      const org = token.slice(0, slashIdx) || undefined;
+      const project = token.slice(slashIdx + 1) || undefined;
+      return { org, project };
+    }
+    return {};
+  }
+
+  /**
+   * Report an unknown subcommand to Sentry with rich context.
+   *
+   * Called when Stricli's route scanner rejects an unrecognized token
+   * (e.g., `sentry issue helpp`). Uses the introspection system to find
+   * fuzzy matches and extracts org/project context from the raw argv.
+   */
+  async function reportUnknownCommand(argv: string[]): Promise<void> {
+    const Sentry = await import("@sentry/node-core/light");
+    const { resolveCommandPath } = await import("./lib/introspect.js");
+    const { routes } = await import("./app.js");
+    const { getDefaultOrganization } = await import("./lib/db/defaults.js");
+
+    // Walk the route tree to find which token failed and get suggestions
+    const resolved = resolveCommandPath(
+      routes as unknown as Parameters<typeof resolveCommandPath>[0],
+      argv
     );
+    const unknownToken =
+      resolved?.kind === "unresolved" ? resolved.input : (argv.at(-1) ?? "");
+    const suggestions =
+      resolved?.kind === "unresolved" ? resolved.suggestions : [];
+
+    // Extract org/project from argv, fall back to default org from SQLite
+    const fromArgv = extractOrgProjectFromArgv(argv);
+    const org = fromArgv.org ?? getDefaultOrganization() ?? undefined;
+
+    Sentry.setTag("command", "unknown");
+    if (org) {
+      Sentry.setTag("sentry.org", org);
+    }
+    if (fromArgv.project) {
+      Sentry.setTag("sentry.project", fromArgv.project);
+    }
+    Sentry.setContext("unknown_command", {
+      argv,
+      unknown_token: unknownToken,
+      suggestions,
+      arg_count: argv.length,
+      org: org ?? null,
+      project: fromArgv.project ?? null,
+    });
+    Sentry.captureMessage(`Unknown command: ${unknownToken}`, "warning");
   }
 
   /** Build the command executor by composing error-recovery middlewares. */
