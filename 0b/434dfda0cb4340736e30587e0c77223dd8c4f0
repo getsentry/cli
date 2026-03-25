@@ -1,0 +1,429 @@
+# Plan: Dashboard List Pagination & Glob Filtering + org/project Docs
+
+## Summary
+
+1. Add cursor-based pagination to `dashboard list` using the existing pagination helpers (`buildListCommand`, `buildPaginationContextKey`, `resolveOrgCursor`, `setPaginationCursor`/`clearPaginationCursor`).
+2. Add a positional **name** field that supports glob filtering (e.g., `'Error*'`, `'*API*'`).
+3. Update `dashboard view` examples to document the `org/project <name>` pattern (already functional, just undocumented).
+
+## Branch
+
+Create `feat/dashboard-list-pagination` off `origin/main`.
+
+---
+
+## Detailed Changes
+
+### 1. API Layer — `src/lib/api/dashboards.ts`
+
+**Add `listDashboardsPaginated()`** — mirrors the `listIssuesPaginated` pattern:
+
+```typescript
+export async function listDashboardsPaginated(
+  orgSlug: string,
+  options: { perPage?: number; cursor?: string } = {}
+): Promise<PaginatedResponse<DashboardListItem[]>> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data, headers } = await apiRequestToRegion<DashboardListItem[]>(
+    regionUrl, `/organizations/${orgSlug}/dashboards/`,
+    { params: { per_page: options.perPage, cursor: options.cursor } }
+  );
+  const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
+  return { data, nextCursor };
+}
+```
+
+Import `parseLinkHeader`, `PaginatedResponse`, `API_MAX_PER_PAGE`, `MAX_PAGINATION_PAGES` from `infrastructure.ts`.
+
+**Remove `listDashboards()`** — it only returns the first page, silently dropping results past page 1. Replace all callers with `listDashboardsPaginated`.
+
+**Barrel re-export** in `src/lib/api-client.ts`: replace `listDashboards` with `listDashboardsPaginated`.
+
+### 1b. Update `resolveDashboardId()` — `src/commands/dashboard/resolve.ts`
+
+Currently calls `listDashboards()` to fetch all dashboards and do a title search. Replace with paginated search that stops early on match, and use `fuzzyMatch()` from `src/lib/fuzzy.ts` for error suggestions:
+
+```typescript
+import { fuzzyMatch } from "../../lib/fuzzy.js";
+
+export async function resolveDashboardId(orgSlug: string, ref: string): Promise<string> {
+  if (isAllDigits(ref)) return ref;
+
+  const lowerRef = ref.toLowerCase();
+  const allTitles: string[] = [];
+  const titleToId = new Map<string, string>();
+  let cursor: string | undefined;
+
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
+    const { data, nextCursor } = await listDashboardsPaginated(orgSlug, {
+      perPage: API_MAX_PER_PAGE, cursor,
+    });
+    const match = data.find(d => d.title.toLowerCase() === lowerRef);
+    if (match) return match.id;
+
+    for (const d of data) {
+      allTitles.push(d.title);
+      titleToId.set(d.title, d.id);
+    }
+    if (!nextCursor) break;
+    cursor = nextCursor;
+  }
+
+  // No match — use fuzzy search for suggestions
+  const similar = fuzzyMatch(ref, allTitles, { maxResults: 5 });
+  const suggestions = similar.map(t => `  ${titleToId.get(t)}  ${t}`).join("\n");
+  const hint = similar.length > 0
+    ? `\n\nDid you mean:\n${suggestions}`
+    : allTitles.length > 0
+      ? `\n\nThe org has ${allTitles.length} dashboard(s) but none matched.`
+      : "\n\nNo dashboards found in this organization.";
+
+  throw new ValidationError(
+    `No dashboard with title '${ref}' found in '${orgSlug}'.${hint}`
+  );
+}
+```
+
+Finds the match as early as possible (often page 1). Only fetches all pages when there's no match (to build fuzzy suggestions). Uses existing `fuzzyMatch()` which ranks by exact → prefix → substring → Levenshtein distance.
+
+### 2. Dashboard List Command — `src/commands/dashboard/list.ts`
+
+**Switch from `buildCommand` to `buildListCommand("dashboard", ...)`:**
+- Auto-injects `--cursor`/`-c` and `--fresh`/`-f` flags (remove manual `FRESH_FLAG`/`FRESH_ALIASES`)
+- Handles `applyFreshFlag` automatically
+
+**Change positional from `kind: "tuple"` to `kind: "array"`:**
+```typescript
+positional: {
+  kind: "array",
+  parameter: {
+    brief: "[<org/project>] [<name-glob>]",
+    parse: String,
+  },
+},
+```
+
+**Add `parseDashboardListArgs(args)` function** in `resolve.ts`:
+```typescript
+export function parseDashboardListArgs(args: string[]): {
+  targetArg: string | undefined;
+  titleFilter: string | undefined;
+} {
+  if (args.length === 0) return { targetArg: undefined, titleFilter: undefined };
+  if (args.length >= 2) {
+    // Two args: first is always the target, second is always the filter.
+    // Normalize bare org slug to org/ format so parseOrgProjectArg treats
+    // it as org-all (dashboards are org-scoped, project is irrelevant).
+    // This supports: `sentry dashboard list my-org 'Error*'`
+    const target = args[0].includes("/") ? args[0] : `${args[0]}/`;
+    return { targetArg: target, titleFilter: args[1] };
+  }
+  // 1 arg: disambiguate
+  const arg = args[0];
+  if (arg.includes("/")) return { targetArg: arg, titleFilter: undefined };
+  if (looksLikeTitleFilter(arg)) return { targetArg: undefined, titleFilter: arg };
+  return { targetArg: arg, titleFilter: undefined }; // bare slug (backward compat)
+}
+
+/** Detect if a string looks like a title filter vs. a project slug */
+function looksLikeTitleFilter(s: string): boolean {
+  // Glob characters → definitely a filter
+  if (/[*?\[]/.test(s)) return true;
+  // Contains spaces → title, not a slug (slugs use dashes)
+  if (s.includes(" ")) return true;
+  return false;
+}
+```
+
+**Key insight:** When 2 args are provided, a bare first arg like `my-org` is always the org slug (since the second arg is the name filter). We auto-append `/` to normalize it to `org/` format. This lets `parseOrgProjectArg` produce `org-all` mode, which `resolveOrgFromTarget` handles by returning the org directly. This gives us:
+- `sentry dashboard list my-org 'Error*'` → target=`my-org/`, filter=`Error*`
+- `sentry dashboard list my-org/ 'Error*'` → target=`my-org/`, filter=`Error*`
+- `sentry dashboard list my-org/my-project 'Error*'` → target=`my-org/my-project`, filter=`Error*`
+
+**Extended cursor format** to support mid-page resume:
+
+Server cursors look like `1735689600000:0:0`. We extend with `|afterId` when the filter fills `--limit` partway through a server page. The `afterId` is the **dashboard ID** of the last item we processed — a stable marker that survives insertions/deletions between requests:
+
+- `1735689600000:0:0` — standard, resume from next server page
+- `1735689600000:0:0|42` — resume mid-page: re-fetch this server page, skip items up to and including dashboard ID `42`
+- `|42` — resume mid-page on the first page (no server cursor)
+
+```typescript
+/** Encode a cursor with optional dashboard-ID bookmark for mid-page resume. */
+function encodeCursor(serverCursor: string | undefined, afterId?: string): string | undefined {
+  if (afterId) return `${serverCursor ?? ""}|${afterId}`;
+  return serverCursor;
+}
+
+/** Decode an extended cursor into server cursor + resume-after ID. */
+function decodeCursor(cursor: string): { serverCursor: string | undefined; afterId: string | undefined } {
+  const pipeIdx = cursor.lastIndexOf("|");
+  if (pipeIdx === -1) return { serverCursor: cursor || undefined, afterId: undefined };
+  const afterId = cursor.slice(pipeIdx + 1);
+  const serverPart = cursor.slice(0, pipeIdx);
+  return { serverCursor: serverPart || undefined, afterId: afterId || undefined };
+}
+```
+
+**Single code path in `func()`:**
+
+```typescript
+const contextKey = buildPaginationContextKey("dashboard", orgSlug)
+const rawCursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey)
+let { serverCursor, afterId } = decodeCursor(rawCursor ?? "");
+const glob = titleFilter ? new Bun.Glob(titleFilter.toLowerCase()) : undefined;
+
+// Always cap perPage at API_MAX_PER_PAGE (server silently caps anyway).
+// When filtering, use max page size to minimize round trips.
+// When not filtering, use the smaller of limit and max to avoid over-fetching.
+const perPage = glob
+  ? API_MAX_PER_PAGE
+  : Math.min(flags.limit, API_MAX_PER_PAGE);
+
+const results: DashboardListItem[] = [];
+let cursorToStore: string | undefined;
+
+for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
+  const { data, nextCursor } = await listDashboardsPaginated(orgSlug, {
+    perPage, cursor: serverCursor,
+  });
+
+  // When resuming mid-page, skip items up to and including afterId
+  let skipping = !!afterId;
+  const resumeAfterId = afterId;
+  afterId = undefined; // only applies to first iteration
+
+  for (const item of data) {
+    if (skipping) {
+      if (item.id === resumeAfterId) skipping = false;
+      continue;  // skip this item either way (it was already shown)
+    }
+    if (!glob || glob.match(item.title.toLowerCase())) {
+      results.push(item);
+      if (results.length >= flags.limit) {
+        // Filled limit — bookmark where we stopped
+        cursorToStore = encodeCursor(serverCursor, item.id);
+        break;
+      }
+    }
+  }
+
+  // If we stopped mid-page but consumed the very last item,
+  // the real resume point is the next server page
+  if (results.length >= flags.limit && cursorToStore === encodeCursor(serverCursor, data[data.length - 1]?.id)) {
+    cursorToStore = nextCursor;
+  }
+
+  if (results.length >= flags.limit) break;
+  if (!nextCursor) { cursorToStore = undefined; break; }
+  serverCursor = nextCursor;
+}
+
+if (cursorToStore) setPaginationCursor(PAGINATION_KEY, contextKey, cursorToStore);
+else clearPaginationCursor(PAGINATION_KEY, contextKey);
+
+const hasMore = !!cursorToStore;
+```
+
+**How it works:**
+- **No filter, limit ≤ page size:** Single fetch, standard pagination. Loop runs once.
+- **No filter, limit > page size:** Auto-paginates across multiple server pages (e.g., `--limit 200` fetches 2 pages of 100). Same `listIssuesAllPages` pattern used by `issue list`.
+- **With filter, limit filled mid-page:** Stores `serverCursor|dashboardId`. On `-c last`, re-fetches same page, scans for that ID, resumes from the item after it.
+- **With filter, limit filled at page boundary:** Last item was last on page → stores plain `nextCursor`. Standard resume.
+- **With filter, pages exhausted before filling:** Clears cursor. `hasMore = false`.
+- **Dashboard deleted between requests:** If the bookmarked ID is gone from the re-fetched page, `skipping` stays true and the entire page is skipped. We'd resume from the next server page — losing at most one page of potential matches. Acceptable edge case for dashboards.
+
+**Update result type:**
+```typescript
+type DashboardListResult = {
+  dashboards: DashboardListItem[];
+  orgSlug: string;
+  hasMore: boolean;
+  nextCursor?: string;
+};
+```
+
+**Update JSON transform** — paginated envelope:
+```typescript
+jsonTransform: (result, fields?) => ({
+  data: fields ? result.dashboards.map(d => filterFields(d, fields)) : result.dashboards,
+  hasMore: result.hasMore,
+  ...(result.nextCursor && { nextCursor: result.nextCursor }),
+})
+```
+
+**Update human formatter:**
+- Show count: `"Showing N dashboard(s)."`
+- When `hasMore`: hint footer includes `"Next page: sentry dashboard list [org/] -c last"`
+
+**Update examples in `fullDescription`:**
+```
+  sentry dashboard list                     # auto-detect org
+  sentry dashboard list my-org/             # explicit org
+  sentry dashboard list my-org/my-project   # org from explicit project
+  sentry dashboard list 'Error*'            # filter by title glob
+  sentry dashboard list my-org '*API*'      # bare org + filter
+  sentry dashboard list my-org/ '*API*'     # org/ + filter
+  sentry dashboard list -c last             # next page
+  sentry dashboard list --json              # JSON with pagination envelope
+```
+
+### 3. Dashboard Resolve — `src/commands/dashboard/resolve.ts`
+
+Add `parseDashboardListArgs()` and `looksLikeTitleFilter()` here (alongside existing `parseDashboardPositionalArgs()`).
+
+### 4. Dashboard Positional Parsing — `parseDashboardPositionalArgs` in `resolve.ts`
+
+**Bug fix:** When 2 args are passed and the first is a bare slug (no `/`), `parseDashboardPositionalArgs` passes it through to `parseOrgProjectArg` which produces `project-search` mode, and `resolveOrgFromTarget` silently ignores it (falls through to auto-detect). Apply the same normalization as `parseDashboardListArgs`: if the target has no `/`, append `/` to treat it as an org slug.
+
+```typescript
+export function parseDashboardPositionalArgs(args: string[]): {
+  dashboardRef: string;
+  targetArg: string | undefined;
+} {
+  if (args.length === 0) {
+    throw new ValidationError("Dashboard ID or title is required.", "dashboard");
+  }
+  if (args.length === 1) {
+    return { dashboardRef: args[0], targetArg: undefined };
+  }
+  // Normalize bare org slug → org/ (dashboards are org-scoped)
+  const target = args[0].includes("/") ? args[0] : `${args[0]}/`;
+  return { dashboardRef: args[1], targetArg: target };
+}
+```
+
+This fixes `sentry dashboard view my-org 'My Dashboard'`, `sentry dashboard widget add my-org ...`, etc.
+
+### 5. Dashboard View — `src/commands/dashboard/view.ts`
+
+**Docs-only change** — update `fullDescription` examples to show bare org + `org/project` patterns:
+```
+  sentry dashboard view my-org 12345
+  sentry dashboard view my-org 'My Dashboard'
+  sentry dashboard view my-org/my-project 12345
+```
+
+These work via the updated `parseDashboardPositionalArgs` → `parseOrgProjectArg`.
+
+### 6. AGENTS.md — Codify auto-pagination rule
+
+Add to the **List Command Pagination** section, after the existing cursor infrastructure pattern:
+
+```markdown
+**Auto-pagination for large limits:**
+
+When `--limit` exceeds `API_MAX_PER_PAGE` (100), list commands MUST transparently
+fetch multiple pages to fill the requested limit. Cap `perPage` at
+`Math.min(flags.limit, API_MAX_PER_PAGE)` and loop until `results.length >= limit`
+or pages are exhausted. This matches the `listIssuesAllPages` pattern.
+
+```typescript
+const perPage = Math.min(flags.limit, API_MAX_PER_PAGE);
+for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
+  const { data, nextCursor } = await listPaginated(org, { perPage, cursor });
+  results.push(...data);
+  if (results.length >= flags.limit || !nextCursor) break;
+  cursor = nextCursor;
+}
+```
+
+Never pass a `per_page` value larger than `API_MAX_PER_PAGE` to the API — the
+server silently caps it, causing the command to return fewer items than requested.
+```
+
+Also add to the **Error Handling** section's `ResolutionError` guidance:
+
+```markdown
+**Fuzzy suggestions in resolution errors:**
+
+When a user-provided name/title doesn't match any entity, use `fuzzyMatch()` from
+`src/lib/fuzzy.ts` to suggest similar candidates instead of listing all entities
+(which can be overwhelming). Show at most 5 fuzzy matches.
+
+Reference: `resolveDashboardId()` in `src/commands/dashboard/resolve.ts`.
+```
+
+### 7. Tests — `test/commands/dashboard/list.test.ts`
+
+**Update existing tests:**
+- Update `ListFlags` type to include `cursor?: string`
+- Update func calls: change `func.call(ctx, flags, target)` to `func.call(ctx, flags, ...args)` for array positional
+- Update mock setup for `listDashboardsPaginated` where needed
+
+**New pagination tests:**
+- `--cursor` passes cursor to API, JSON envelope has `{ data, hasMore, nextCursor }`
+- `-c last` resolves stored cursor
+- Hint shows `-c last` when `hasMore` is true
+- No hint when exhausted
+- Auto-pagination: `--limit 200` fetches 2 pages when API returns 100 per page
+- Extended cursor: `encodeCursor('1:0:0', '42')` → `'1:0:0|42'`
+- Extended cursor: `encodeCursor('1:0:0')` → `'1:0:0'`
+- Extended cursor: `encodeCursor(undefined, '42')` → `'|42'`
+- Extended cursor: `decodeCursor('1:0:0|42')` → `{ serverCursor: '1:0:0', afterId: '42' }`
+- Extended cursor: `decodeCursor('1:0:0')` → `{ serverCursor: '1:0:0', afterId: undefined }`
+- Extended cursor: `decodeCursor('|42')` → `{ serverCursor: undefined, afterId: '42' }`
+- Mid-page resume: filter with limit=2, page has 5 items with 3 matches → returns 2, cursor bookmarks last shown ID
+- Mid-page resume: `-c last` re-fetches same page, skips past bookmarked ID, continues
+
+**New glob filter tests:**
+- `'Error*'` single-arg filter: filters fetched page, returns matching items
+- `my-org/ '*API*'` two-arg: explicit org + filter
+- `my-org '*API*'` two-arg: bare org + filter (auto-appended `/`)
+- Case-insensitive matching works
+- `--cursor` + name filter work together (pagination then filter)
+- No matches → `"No dashboards found."`
+
+### 7. Tests — `test/commands/dashboard/resolve.test.ts`
+
+**Update `resolveDashboardId` tests:**
+- Title not found → error shows fuzzy suggestions (not full listing)
+- `'Eror Overview'` → suggests `'Errors Overview'` (Levenshtein)
+- `'perf'` → suggests `'Performance'` (prefix/substring match)
+- No dashboards at all → error says "No dashboards found"
+
+**Update existing `parseDashboardPositionalArgs` tests:**
+- `['my-org', '12345']` → target=`my-org/` (auto-appended `/`), dashboardRef=`12345`
+- `['my-org/', '12345']` → target=`my-org/`, dashboardRef=`12345` (unchanged)
+- `['my-org/my-project', '12345']` → target=`my-org/my-project`, dashboardRef=`12345` (unchanged)
+
+**Add tests for `parseDashboardListArgs`:**
+- `[]` → both undefined
+- `['my-org/']` → target=`my-org/`, filter=undefined
+- `['Error*']` → target=undefined, filter=`Error*` (glob chars)
+- `['My Dashboard']` → target=undefined, filter=`My Dashboard` (has space)
+- `['performance']` → target=`performance`, filter=undefined (bare slug, backward compat)
+- `['my-org/', 'Error*']` → target=`my-org/`, filter=`Error*`
+- `['my-org', 'Error*']` → target=`my-org/` (auto-appended `/`), filter=`Error*`
+- `['my-org/my-project', '*API*']` → target=`my-org/my-project`, filter=`*API*`
+
+---
+
+## File Summary
+
+| File | Change |
+|------|--------|
+| `src/lib/api/dashboards.ts` | Add `listDashboardsPaginated()` |
+| `src/lib/api-client.ts` | Re-export `listDashboardsPaginated` |
+| `src/commands/dashboard/resolve.ts` | Add `parseDashboardListArgs()`, `looksLikeTitleFilter()`; fix `parseDashboardPositionalArgs` bare-org normalization; fuzzy suggestions in `resolveDashboardId` |
+| `AGENTS.md` | Add auto-pagination rule to List Command Pagination; add fuzzy suggestion guidance to Error Handling |
+| `src/commands/dashboard/list.ts` | Switch to `buildListCommand`, array positional, pagination + glob filter |
+| `src/commands/dashboard/view.ts` | Update `fullDescription` examples only |
+| `test/commands/dashboard/list.test.ts` | Add pagination & filter tests, update existing tests |
+| `test/commands/dashboard/resolve.test.ts` | Add `parseDashboardListArgs` tests |
+
+---
+
+## Verification — All Passed ✅
+
+1. ✅ `bun run typecheck` — no errors (only pre-existing sql.ts module)
+2. ✅ `bun run lint` — no new warnings
+3. ✅ `bun test test/commands/dashboard/list.test.ts` — 24 pass
+4. ✅ `bun test test/commands/dashboard/resolve.test.ts` — 24 pass
+5. ✅ `bun run test:unit` — 4237 pass, 2 fail (pre-existing upgrade test flake)
+6. ✅ `bun run generate:skill && bun run check:skill` — up to date
+7. ✅ `bun run check:errors` — no anti-patterns
+
+## Remaining
+
+- Commit all changes and push
