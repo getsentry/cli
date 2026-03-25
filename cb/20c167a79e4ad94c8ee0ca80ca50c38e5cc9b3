@@ -1,0 +1,26 @@
+# Plan: Intercept `help` as positional arg → show command help
+
+**Issue**: CLI-MN — User typed `sentry log list help` intending `--help`. The word `"help"` was parsed as a project slug, causing `ResolutionError: Project 'help' not found`.
+
+## Approach: Error recovery in `buildCommand` wrapper
+
+When a command throws any `CliError` and a positional arg was `"help"` or `"-h"`, recover by showing the command's help via the introspection system instead of the confusing error.
+
+Key insight: this fires as **error recovery only** — if a command successfully resolves a legitimate value like a project named "help", the recovery never runs.
+
+### Why error recovery (not pre-execution interception)
+
+- `"help"` is a perfectly valid project/dashboard/org name
+- Pre-execution interception would block legitimate uses
+- Error recovery only fires when the command actually fails
+- Catches all failure modes (AuthError, ResolutionError, ValidationError, ContextError)
+
+### Implementation
+
+1. **`src/context.ts`**: Store `commandPrefix` on `SentryContext` (set by Stricli's `forCommand`)
+2. **`src/lib/command.ts`**: Add `maybeRecoverWithHelp()` in the catch block that:
+   - Checks if the error is a `CliError` (base class for all CLI errors)
+   - Checks if any positional arg was `"help"` or `"-h"`
+   - Uses `introspectCommand()` + `formatHelpHuman()` to render help
+   - Prints a yellow `Tip: use --help` hint on stderr
+   - Returns `true` to suppress the original error
