@@ -450,7 +450,8 @@ export const listCommand = buildListCommand("dashboard", {
     if (results.length === 0) {
       hint = undefined;
     } else if (hasMore) {
-      hint = `Showing ${results.length} dashboard(s). Next page: sentry dashboard list ${orgSlug}/ -c last\nDashboards: ${url}`;
+      const filterArg = titleFilter ? ` '${titleFilter}'` : "";
+      hint = `Showing ${results.length} dashboard(s). Next page: sentry dashboard list ${orgSlug}/${filterArg} -c last\nDashboards: ${url}`;
     } else {
       hint = `Showing ${results.length} dashboard(s).\nDashboards: ${url}`;
     }
