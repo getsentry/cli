@@ -1,0 +1,74 @@
+# Fix: Timeseries bar chart only fills half the widget width
+
+## Problem
+
+The `sentry dashboard view` Errors widget renders bars that only occupy a fraction of the chart width, while the time axis spans the full width. This makes the chart look "half-way" — bars bunch up on the left, with empty space on the right.
+
+## Root Cause
+
+In `src/lib/formatters/dashboard.ts`, the timeseries bar renderers (`renderTimeBarRows` and `renderStackedTimeBarRows`) always render **1 character per data bucket**, regardless of available chart width.
+
+The Sentry API typically returns 24-96 data points for a 24h period (e.g., 24 for 1h buckets, 48 for 30min). But `chartWidth` can be 50-90+ characters. When `numBuckets < chartWidth`, bars fill only `numBuckets/chartWidth` of the width (e.g., 24/50 = 48%), while `buildTimeAxis` draws the axis line at the full `chartWidth`.
+
+**The categorical bar renderer (`renderVerticalBarsContent`) already handles this correctly** — it calculates `barWidth = Math.max(1, Math.floor(chartWidth / numItems))` and repeats each bar character `barWidth` times. The timeseries renderers are missing this same logic.
+
+## Fix
+
+### File: `src/lib/formatters/dashboard.ts`
+
+#### 1. `renderTimeseriesBarsContent` — pass `chartWidth` to bar renderers
+
+Add `chartWidth` to the opts passed to both `renderStackedTimeBarRows` and `renderTimeBarRows`:
+
+```typescript
+// Line ~930: stacked case
+lines.push(
+  ...renderStackedTimeBarRows(stackedSeries, {
+    maxVal,
+    barHeight,
+    gutterWidth: gutterW,
+    chartWidth,          // ADD
+  })
+);
+
+// Line ~939: single-series case
+lines.push(
+  ...renderTimeBarRows(sampled, {
+    maxVal,
+    barHeight,
+    gutterWidth: gutterW,
+    chartWidth,          // ADD
+  })
+);
+```
+
+#### 2. `renderTimeBarRows` — scale single-series bars to fill width
+
+- Add `chartWidth` to the opts type
+- Calculate `barWidth = Math.max(1, Math.floor(chartWidth / sampled.length))`
+- Change the bar column rendering from `colorFn(buildTimeseriesBarColumn(h, row))` to `colorFn(buildTimeseriesBarColumn(h, row).repeat(barWidth))`
+
+#### 3. `renderStackedTimeBarRows` — scale stacked bars to fill width
+
+- Add `chartWidth` to the opts type
+- Calculate `barWidth = Math.max(1, Math.floor(chartWidth / numBuckets))`
+- Pass `barWidth` to `buildStackedColumn`
+
+#### 4. `buildStackedColumn` — accept and use `barWidth`
+
+- Add `barWidth: number` parameter
+- Repeat the bar character `barWidth` times **before** applying chalk color:
+  - Plain: `fill.repeat(barWidth)` or `ch.repeat(barWidth)`
+  - Color: `chalk.hex(color)(ch.repeat(barWidth))`
+  - Empty: `" ".repeat(barWidth)`
+
+## Verification
+
+1. **Run existing tests**: `bun test test/lib/formatters/dashboard.test.ts` — ensure no regressions
+2. **Run full test suite**: `bun test`
+3. **Manual visual test**: `bun run dev -- dashboard view <dashboard-id>` — verify bars fill the full widget width and time axis labels align
+4. **Edge cases to check**:
+   - Widget with few data points (e.g., 5 buckets) — bars should be wide
+   - Widget with many data points (>= chartWidth) — bars should be 1 char each (same as before)
+   - Multi-series (6 series Errors widget) — stacked colors fill full width
+   - Single-series widget — bars fill full width
