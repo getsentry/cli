@@ -317,7 +317,27 @@ else clearPaginationCursor(PAGINATION_KEY, contextKey);
 
 Show `-c last` in the hint footer when more pages are available. Include `nextCursor` in the JSON envelope.
 
-Reference template: `trace/list.ts`, `span/list.ts`
+**Auto-pagination for large limits:**
+
+When `--limit` exceeds `API_MAX_PER_PAGE` (100), list commands MUST transparently
+fetch multiple pages to fill the requested limit. Cap `perPage` at
+`Math.min(flags.limit, API_MAX_PER_PAGE)` and loop until `results.length >= limit`
+or pages are exhausted. This matches the `listIssuesAllPages` pattern.
+
+```typescript
+const perPage = Math.min(flags.limit, API_MAX_PER_PAGE);
+for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
+  const { data, nextCursor } = await listPaginated(org, { perPage, cursor });
+  results.push(...data);
+  if (results.length >= flags.limit || !nextCursor) break;
+  cursor = nextCursor;
+}
+```
+
+Never pass a `per_page` value larger than `API_MAX_PER_PAGE` to the API — the
+server silently caps it, causing the command to return fewer items than requested.
+
+Reference template: `trace/list.ts`, `span/list.ts`, `dashboard/list.ts`
 
 ### ID Validation
 
@@ -432,6 +452,14 @@ throw new ResolutionError("Project 'cli'", "not found", "sentry issue list <org>
 ]);
 throw new ValidationError("Invalid trace ID format", "traceId");
 ```
+
+**Fuzzy suggestions in resolution errors:**
+
+When a user-provided name/title doesn't match any entity, use `fuzzyMatch()` from
+`src/lib/fuzzy.ts` to suggest similar candidates instead of listing all entities
+(which can be overwhelming). Show at most 5 fuzzy matches.
+
+Reference: `resolveDashboardId()` in `src/commands/dashboard/resolve.ts`.
 
 ### Auto-Recovery for Wrong Entity Types
 

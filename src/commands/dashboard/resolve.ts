@@ -5,9 +5,14 @@
  * ID resolution from numeric IDs or title strings.
  */
 
-import { listDashboards } from "../../lib/api-client.js";
+import { MAX_PAGINATION_PAGES } from "../../lib/api/infrastructure.js";
+import {
+  API_MAX_PER_PAGE,
+  listDashboardsPaginated,
+} from "../../lib/api-client.js";
 import type { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
+import { fuzzyMatch } from "../../lib/fuzzy.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import { isAllDigits } from "../../lib/utils.js";
@@ -80,8 +85,11 @@ export async function resolveOrgFromTarget(
  * - `<id-or-title>` — single arg (auto-detect org)
  * - `<target> <id-or-title>` — explicit target + dashboard ref
  *
+ * When two args are provided and the first is a bare slug (no `/`), it is
+ * normalized to `slug/` so `parseOrgProjectArg` treats it as an org-all
+ * target. Dashboards are org-scoped so the project component is irrelevant.
+ *
  * @param args - Raw positional arguments
- * @param usageHint - Error message label (e.g. "Dashboard ID or title")
  * @returns Dashboard reference string and optional target arg
  */
 export function parseDashboardPositionalArgs(args: string[]): {
@@ -100,17 +108,83 @@ export function parseDashboardPositionalArgs(args: string[]): {
       targetArg: undefined,
     };
   }
+  // Normalize bare org slug → org/ (dashboards are org-scoped)
+  const raw = args[0] as string;
+  const target = raw.includes("/") ? raw : `${raw}/`;
   return {
     dashboardRef: args[1] as string,
-    targetArg: args[0] as string,
+    targetArg: target,
   };
+}
+
+/**
+ * Parse dashboard list positional args into a target and optional title filter.
+ *
+ * Handles:
+ * - (empty) — auto-detect org, no filter
+ * - `<org/>` or `<org/project>` — target, no filter
+ * - `'Error*'` or `'*API*'` — auto-detect org, glob filter (contains glob chars)
+ * - `'My Dashboard'` — auto-detect org, title filter (contains spaces)
+ * - `<org/> 'Error*'` or `<org> 'Error*'` — target + glob filter
+ *
+ * When two args are provided and the first is a bare slug (no `/`), it is
+ * normalized to `slug/` so `parseOrgProjectArg` treats it as an org-all target.
+ *
+ * @param args - Raw positional arguments
+ * @returns Target arg for org resolution and optional title filter glob
+ */
+export function parseDashboardListArgs(args: string[]): {
+  targetArg: string | undefined;
+  titleFilter: string | undefined;
+} {
+  if (args.length === 0) {
+    return { targetArg: undefined, titleFilter: undefined };
+  }
+  if (args.length >= 2) {
+    // Two args: first is always the target, second is always the filter.
+    // Normalize bare org slug to org/ format so parseOrgProjectArg treats
+    // it as org-all (dashboards are org-scoped, project is irrelevant).
+    const raw = args[0] as string;
+    const target = raw.includes("/") ? raw : `${raw}/`;
+    return { targetArg: target, titleFilter: args[1] as string };
+  }
+  // 1 arg: disambiguate
+  const arg = args[0] as string;
+  if (arg.includes("/")) {
+    return { targetArg: arg, titleFilter: undefined };
+  }
+  if (looksLikeTitleFilter(arg)) {
+    return { targetArg: undefined, titleFilter: arg };
+  }
+  return { targetArg: arg, titleFilter: undefined };
+}
+
+/** Matches glob metacharacters that indicate a title filter pattern. */
+const GLOB_CHARS_RE = /[*?[]/;
+
+/**
+ * Detect if a string looks like a dashboard title filter rather than a project slug.
+ *
+ * Glob characters (`*`, `?`, `[`) indicate a filter pattern.
+ * Spaces indicate a dashboard title (slugs use dashes, not spaces).
+ */
+function looksLikeTitleFilter(s: string): boolean {
+  if (GLOB_CHARS_RE.test(s)) {
+    return true;
+  }
+  if (s.includes(" ")) {
+    return true;
+  }
+  return false;
 }
 
 /**
  * Resolve a dashboard reference (numeric ID or title) to a numeric ID string.
  *
- * If the reference is all digits, returns it directly. Otherwise, lists
- * dashboards in the org and finds a case-insensitive title match.
+ * If the reference is all digits, returns it directly. Otherwise, paginates
+ * through all dashboards searching for a case-insensitive title match.
+ * Stops early on first match. On failure, uses fuzzy matching to suggest
+ * similar dashboard titles.
  *
  * @param orgSlug - Organization slug
  * @param ref - Dashboard reference (numeric ID or title)
@@ -124,27 +198,51 @@ export async function resolveDashboardId(
     return ref;
   }
 
-  const dashboards = await listDashboards(orgSlug);
   const lowerRef = ref.toLowerCase();
-  // Match by ID/slug first (e.g. "default-overview"), then fall back to title
-  const match =
-    dashboards.find((d) => d.id.toLowerCase() === lowerRef) ??
-    dashboards.find((d) => d.title.toLowerCase() === lowerRef);
+  const allTitles: string[] = [];
+  const titleToId = new Map<string, string>();
+  let cursor: string | undefined;
 
-  if (!match) {
-    const available = dashboards
-      .slice(0, 5)
-      .map((d) => `  ${d.id}  ${d.title}`)
-      .join("\n");
-    const suffix =
-      dashboards.length > 5 ? `\n  ... and ${dashboards.length - 5} more` : "";
-    throw new ValidationError(
-      `No dashboard matching '${ref}' found in '${orgSlug}'.\n\n` +
-        `Available dashboards (ID  Title):\n${available}${suffix}`
-    );
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
+    const { data, nextCursor } = await listDashboardsPaginated(orgSlug, {
+      perPage: API_MAX_PER_PAGE,
+      cursor,
+    });
+    // Match by ID/slug first (e.g. "default-overview"), then fall back to title
+    const match =
+      data.find((d) => d.id.toLowerCase() === lowerRef) ??
+      data.find((d) => d.title.toLowerCase() === lowerRef);
+    if (match) {
+      return match.id;
+    }
+
+    for (const d of data) {
+      allTitles.push(d.title);
+      titleToId.set(d.title, d.id);
+    }
+    if (!nextCursor) {
+      break;
+    }
+    cursor = nextCursor;
   }
 
-  return match.id;
+  // No match — use fuzzy search for suggestions
+  const similar = fuzzyMatch(ref, allTitles, { maxResults: 5 });
+  const suggestions = similar
+    .map((t) => `  ${titleToId.get(t)}  ${t}`)
+    .join("\n");
+  let hint: string;
+  if (similar.length > 0) {
+    hint = `\n\nDid you mean:\n${suggestions}`;
+  } else if (allTitles.length > 0) {
+    hint = `\n\nThe org has ${allTitles.length} dashboard(s) but none matched.`;
+  } else {
+    hint = "\n\nNo dashboards found in this organization.";
+  }
+
+  throw new ValidationError(
+    `No dashboard with title '${ref}' found in '${orgSlug}'.${hint}`
+  );
 }
 
 /**

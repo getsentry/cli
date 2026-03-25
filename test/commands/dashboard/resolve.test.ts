@@ -7,6 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
+  parseDashboardListArgs,
   parseDashboardPositionalArgs,
   resolveDashboardId,
   resolveOrgFromTarget,
@@ -50,6 +51,84 @@ describe("parseDashboardPositionalArgs", () => {
     expect(result.dashboardRef).toBe("My Dashboard");
     expect(result.targetArg).toBe("my-org/");
   });
+
+  test("two args with bare org slug auto-appends /", () => {
+    const result = parseDashboardPositionalArgs(["my-org", "12345"]);
+    expect(result.dashboardRef).toBe("12345");
+    expect(result.targetArg).toBe("my-org/");
+  });
+
+  test("two args with org/project is unchanged", () => {
+    const result = parseDashboardPositionalArgs(["my-org/my-project", "12345"]);
+    expect(result.dashboardRef).toBe("12345");
+    expect(result.targetArg).toBe("my-org/my-project");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseDashboardListArgs
+// ---------------------------------------------------------------------------
+
+describe("parseDashboardListArgs", () => {
+  test("empty args returns undefined for both", () => {
+    const result = parseDashboardListArgs([]);
+    expect(result.targetArg).toBeUndefined();
+    expect(result.titleFilter).toBeUndefined();
+  });
+
+  test("single arg with trailing slash is target", () => {
+    const result = parseDashboardListArgs(["my-org/"]);
+    expect(result.targetArg).toBe("my-org/");
+    expect(result.titleFilter).toBeUndefined();
+  });
+
+  test("single arg with glob * is title filter", () => {
+    const result = parseDashboardListArgs(["Error*"]);
+    expect(result.targetArg).toBeUndefined();
+    expect(result.titleFilter).toBe("Error*");
+  });
+
+  test("single arg with space is title filter", () => {
+    const result = parseDashboardListArgs(["My Dashboard"]);
+    expect(result.targetArg).toBeUndefined();
+    expect(result.titleFilter).toBe("My Dashboard");
+  });
+
+  test("single arg with glob ? is title filter", () => {
+    const result = parseDashboardListArgs(["?something"]);
+    expect(result.targetArg).toBeUndefined();
+    expect(result.titleFilter).toBe("?something");
+  });
+
+  test("single arg with glob [ is title filter", () => {
+    const result = parseDashboardListArgs(["[abc]"]);
+    expect(result.targetArg).toBeUndefined();
+    expect(result.titleFilter).toBe("[abc]");
+  });
+
+  test("single bare slug is target (backward compat)", () => {
+    const result = parseDashboardListArgs(["performance"]);
+    expect(result.targetArg).toBe("performance");
+    expect(result.titleFilter).toBeUndefined();
+  });
+
+  test("two args with trailing slash target and glob filter", () => {
+    const result = parseDashboardListArgs(["my-org/", "Error*"]);
+    expect(result.targetArg).toBe("my-org/");
+    expect(result.titleFilter).toBe("Error*");
+  });
+
+  test("two args with bare org slug auto-appends /", () => {
+    const result = parseDashboardListArgs(["my-org", "Error*"]);
+    expect(result.targetArg).toBe("my-org/");
+    expect(result.titleFilter).toBe("Error*");
+  });
+
+  test("two args with org/project and glob filter", () => {
+    const result = parseDashboardListArgs(["my-org/my-project", "*API*"]);
+    expect(result.targetArg).toBe("my-org/my-project");
+    expect(result.titleFilter).toBe("*API*");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -57,84 +136,99 @@ describe("parseDashboardPositionalArgs", () => {
 // ---------------------------------------------------------------------------
 
 describe("resolveDashboardId", () => {
-  let listDashboardsSpy: ReturnType<typeof spyOn>;
+  let listDashboardsPaginatedSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    listDashboardsSpy = spyOn(apiClient, "listDashboards");
+    listDashboardsPaginatedSpy = spyOn(apiClient, "listDashboardsPaginated");
   });
 
   afterEach(() => {
-    listDashboardsSpy.mockRestore();
+    listDashboardsPaginatedSpy.mockRestore();
   });
 
   test("numeric string returns directly without API call", async () => {
     const id = await resolveDashboardId("test-org", "42");
     expect(id).toBe("42");
-    expect(listDashboardsSpy).not.toHaveBeenCalled();
+    expect(listDashboardsPaginatedSpy).not.toHaveBeenCalled();
   });
 
   test("title match returns matching dashboard ID", async () => {
-    listDashboardsSpy.mockResolvedValue([
-      { id: "10", title: "Errors Overview" },
-      { id: "20", title: "Performance" },
-    ]);
+    listDashboardsPaginatedSpy.mockResolvedValue({
+      data: [
+        { id: "10", title: "Errors Overview" },
+        { id: "20", title: "Performance" },
+      ],
+      nextCursor: undefined,
+    });
 
     const id = await resolveDashboardId("test-org", "Performance");
     expect(id).toBe("20");
   });
 
   test("title match is case-insensitive", async () => {
-    listDashboardsSpy.mockResolvedValue([
-      { id: "10", title: "Errors Overview" },
-    ]);
+    listDashboardsPaginatedSpy.mockResolvedValue({
+      data: [{ id: "10", title: "Errors Overview" }],
+      nextCursor: undefined,
+    });
 
     const id = await resolveDashboardId("test-org", "errors overview");
     expect(id).toBe("10");
   });
 
   test("ID/slug match returns matching dashboard ID", async () => {
-    listDashboardsSpy.mockResolvedValue([
-      { id: "default-overview", title: "General" },
-      { id: "20", title: "Performance" },
-    ]);
+    listDashboardsPaginatedSpy.mockResolvedValue({
+      data: [
+        { id: "default-overview", title: "General" },
+        { id: "20", title: "Performance" },
+      ],
+      nextCursor: undefined,
+    });
 
     const id = await resolveDashboardId("test-org", "default-overview");
     expect(id).toBe("default-overview");
   });
 
   test("ID match is case-insensitive", async () => {
-    listDashboardsSpy.mockResolvedValue([
-      { id: "default-overview", title: "General" },
-    ]);
+    listDashboardsPaginatedSpy.mockResolvedValue({
+      data: [{ id: "default-overview", title: "General" }],
+      nextCursor: undefined,
+    });
 
     const id = await resolveDashboardId("test-org", "Default-Overview");
     expect(id).toBe("default-overview");
   });
 
   test("ID match takes priority over title match", async () => {
-    listDashboardsSpy.mockResolvedValue([
-      { id: "perf", title: "Performance Dashboard" },
-      { id: "30", title: "perf" },
-    ]);
+    listDashboardsPaginatedSpy.mockResolvedValue({
+      data: [
+        { id: "perf", title: "Performance Dashboard" },
+        { id: "30", title: "perf" },
+      ],
+      nextCursor: undefined,
+    });
 
     const id = await resolveDashboardId("test-org", "perf");
     expect(id).toBe("perf");
   });
 
   test("title match still works when no ID matches", async () => {
-    listDashboardsSpy.mockResolvedValue([
-      { id: "default-overview", title: "General" },
-    ]);
+    listDashboardsPaginatedSpy.mockResolvedValue({
+      data: [{ id: "default-overview", title: "General" }],
+      nextCursor: undefined,
+    });
 
     const id = await resolveDashboardId("test-org", "General");
     expect(id).toBe("default-overview");
   });
 
-  test("no match throws ValidationError with improved error message", async () => {
-    listDashboardsSpy.mockResolvedValue([
-      { id: "10", title: "Errors Overview" },
-      { id: "20", title: "Performance" },
-    ]);
+  test("no match throws ValidationError with fuzzy suggestions", async () => {
+    listDashboardsPaginatedSpy.mockResolvedValue({
+      data: [
+        { id: "10", title: "Errors Overview" },
+        { id: "20", title: "Performance" },
+      ],
+      nextCursor: undefined,
+    });
 
     try {
       await resolveDashboardId("test-org", "Missing Dashboard");
@@ -143,10 +237,44 @@ describe("resolveDashboardId", () => {
       expect(error).toBeInstanceOf(ValidationError);
       const message = (error as ValidationError).message;
       expect(message).toContain("Missing Dashboard");
-      expect(message).toContain("matching");
-      expect(message).toContain("(ID  Title)");
+    }
+  });
+
+  test("title not found shows fuzzy suggestions for close misspelling", async () => {
+    listDashboardsPaginatedSpy.mockResolvedValue({
+      data: [
+        { id: "10", title: "Errors Overview" },
+        { id: "20", title: "Performance" },
+      ],
+      nextCursor: undefined,
+    });
+
+    try {
+      await resolveDashboardId("test-org", "Eror Overview");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      const message = (error as ValidationError).message;
+      expect(message).toContain("Eror Overview");
+      expect(message).toContain("Did you mean");
       expect(message).toContain("Errors Overview");
-      expect(message).toContain("Performance");
+    }
+  });
+
+  test("no dashboards at all shows empty org message", async () => {
+    listDashboardsPaginatedSpy.mockResolvedValue({
+      data: [],
+      nextCursor: undefined,
+    });
+
+    try {
+      await resolveDashboardId("test-org", "My Dashboard");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      const message = (error as ValidationError).message;
+      expect(message).toContain("My Dashboard");
+      expect(message).toContain("No dashboards found in this organization.");
     }
   });
 });

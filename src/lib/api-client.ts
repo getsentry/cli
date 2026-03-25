@@ -22,7 +22,7 @@
 export {
   createDashboard,
   getDashboard,
-  listDashboards,
+  listDashboardsPaginated,
   queryAllWidgets,
   updateDashboard,
 } from "./api/dashboards.js";
