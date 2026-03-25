@@ -181,6 +181,21 @@ export class CommandOutput<T> {
 }
 
 /**
+ * Yield token that tells the `buildCommand` wrapper to clear the terminal.
+ *
+ * On interactive terminals (TTY, non-plain), writes ANSI escape codes
+ * to move the cursor home and clear the screen. On piped/plain output
+ * or in JSON mode, the token is silently ignored.
+ *
+ * Use before re-yielding `CommandOutput` in refresh/polling loops
+ * so the new output replaces the old in-place rather than appending.
+ */
+export class ClearScreen {
+  /** Brand field for instanceof checks — never read, just exists. */
+  readonly _brand = "ClearScreen" as const;
+}
+
+/**
  * Return type for command generators.
  *
  * Carries metadata that applies to the entire command invocation — not to
@@ -210,6 +225,8 @@ type RenderContext = {
   json: boolean;
   /** Pre-parsed `--fields` value */
   fields?: string[];
+  /** ANSI prefix to prepend to the output (e.g., clear-screen escape) */
+  clearPrefix?: string;
 };
 
 /**
@@ -297,7 +314,8 @@ export function renderCommandOutput(
 
   const text = renderer.render(data);
   if (text) {
-    stdout.write(`${text}\n`);
+    const prefix = ctx.clearPrefix ?? "";
+    stdout.write(`${prefix}${text}\n`);
   }
 }
 

@@ -40,6 +40,7 @@ import type { Writer } from "../types/index.js";
 import { OutputError } from "./errors.js";
 import { parseFieldsList } from "./formatters/json.js";
 import {
+  ClearScreen,
   CommandOutput,
   type CommandReturn,
   type HumanRenderer,
@@ -48,6 +49,7 @@ import {
   resolveRenderer,
   writeFooter,
 } from "./formatters/output.js";
+import { isPlainOutput } from "./formatters/plain-detect.js";
 import {
   LOG_LEVEL_NAMES,
   type LogLevelName,
@@ -310,6 +312,9 @@ export function buildCommand<
    * If the yielded value is a {@link CommandOutput}, render it via
    * the output config. Void/undefined/Error/other values are ignored.
    */
+  /** Pending clear-screen — set by ClearScreen token, consumed by next render. */
+  let pendingClear = false;
+
   function handleYieldedValue(
     stdout: Writer,
     value: unknown,
@@ -317,6 +322,14 @@ export function buildCommand<
     // biome-ignore lint/suspicious/noExplicitAny: Renderer type mirrors erased OutputConfig<T>
     renderer?: HumanRenderer<any>
   ): void {
+    // ClearScreen token: defer until next render to avoid flash
+    if (value instanceof ClearScreen) {
+      if (!(isPlainOutput() || flags.json)) {
+        pendingClear = true;
+      }
+      return;
+    }
+
     if (!(outputConfig && renderer && value instanceof CommandOutput)) {
       return;
     }
@@ -324,7 +337,9 @@ export function buildCommand<
     renderCommandOutput(stdout, value.data, outputConfig, renderer, {
       json: Boolean(flags.json),
       fields: flags.fields as string[] | undefined,
+      clearPrefix: pendingClear ? "\x1b[H\x1b[J" : undefined,
     });
+    pendingClear = false;
   }
 
   /**
@@ -397,6 +412,9 @@ export function buildCommand<
     }
 
     const stdout = (this as unknown as { stdout: Writer }).stdout;
+
+    // Reset per-invocation state
+    pendingClear = false;
 
     // Resolve the human renderer once per invocation. Factory creates
     // fresh per-invocation state for streaming commands.
