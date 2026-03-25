@@ -20,6 +20,14 @@ export interface SentryContext extends CommandContext {
   readonly stdout: Writer;
   readonly stderr: Writer;
   readonly stdin: NodeJS.ReadStream & { fd: 0 };
+  /**
+   * Command path segments set by Stricli's `forCommand` callback.
+   *
+   * Contains the full prefix including the program name, e.g.,
+   * `["sentry", "issue", "list"]`. Used by `buildCommand` to show
+   * help when a user passes `help` as a positional argument.
+   */
+  readonly commandPrefix?: readonly string[];
 }
 
 /**
@@ -47,7 +55,7 @@ export function buildContext(process: NodeJS.Process, span?: Span) {
     ...baseContext,
     forCommand: ({ prefix }: { prefix: readonly string[] }): SentryContext => {
       setCommandSpanName(span, prefix.join("."));
-      return baseContext;
+      return { ...baseContext, commandPrefix: prefix };
     },
   };
 }

@@ -70,13 +70,13 @@ type ErrorMiddleware = (
  */
 async function runCli(cliArgs: string[]): Promise<void> {
   const { isatty } = await import("node:tty");
-  const { run } = await import("@stricli/core");
+  const { ExitCode, run } = await import("@stricli/core");
   const { app } = await import("./app.js");
   const { buildContext } = await import("./context.js");
   const { AuthError, formatError, getExitCode } = await import(
     "./lib/errors.js"
   );
-  const { error } = await import("./lib/formatters/colors.js");
+  const { error, warning } = await import("./lib/formatters/colors.js");
   const { runInteractiveLogin } = await import("./lib/interactive-login.js");
   const { getEnvLogLevel, setLogLevel } = await import("./lib/logger.js");
   const { isTrialEligible, promptAndStartTrial } = await import(
@@ -215,6 +215,30 @@ async function runCli(cliArgs: string[]): Promise<void> {
 
   try {
     await executor(cliArgs);
+
+    // When Stricli can't match a subcommand in a route group (e.g.,
+    // `sentry dashboard help`), it writes "No command registered for `help`"
+    // to stderr and sets exitCode to UnknownCommand. If the unrecognized
+    // token was "help", retry as `sentry help <group...>` which routes to
+    // the custom help command with proper introspection output.
+    // Check both raw (-5) and unsigned (251) forms because Node.js keeps
+    // the raw value while Bun converts to unsigned byte.
+    if (
+      (process.exitCode === ExitCode.UnknownCommand ||
+        process.exitCode === (ExitCode.UnknownCommand + 256) % 256) &&
+      cliArgs.length >= 2 &&
+      cliArgs.at(-1) === "help" &&
+      cliArgs[0] !== "help"
+    ) {
+      process.exitCode = 0;
+      const helpArgs = ["help", ...cliArgs.slice(0, -1)];
+      process.stderr.write(
+        warning(
+          `Tip: use --help for help (e.g., sentry ${cliArgs.slice(0, -1).join(" ")} --help)\n`
+        )
+      );
+      await executor(helpArgs);
+    }
   } catch (err) {
     process.stderr.write(`${error("Error:")} ${formatError(err)}\n`);
     process.exitCode = getExitCode(err);
