@@ -931,6 +931,7 @@ function renderTimeseriesBarsContent(
         maxVal,
         barHeight,
         gutterWidth: gutterW,
+        chartWidth,
       })
     );
   } else {
@@ -940,6 +941,7 @@ function renderTimeseriesBarsContent(
         maxVal,
         barHeight,
         gutterWidth: gutterW,
+        chartWidth,
       })
     );
   }
@@ -1056,14 +1058,25 @@ function buildTimeseriesBarColumn(
 /** Render time-series bar rows with smooth fractional block tops and Y-axis. */
 function renderTimeBarRows(
   sampled: number[],
-  opts: { maxVal: number; barHeight: number; gutterWidth: number }
+  opts: {
+    maxVal: number;
+    barHeight: number;
+    gutterWidth: number;
+    chartWidth: number;
+  }
 ): string[] {
-  const { maxVal, barHeight, gutterWidth } = opts;
+  const { maxVal, barHeight, gutterWidth, chartWidth } = opts;
   const plain = isPlainOutput();
   const colorFn = plain
     ? (s: string) => s
     : (s: string) => chalk.hex(COLORS.magenta)(s);
   const rows: string[] = [];
+
+  // Scale bar width so bars fill the full chart area
+  const barWidth = Math.max(
+    1,
+    Math.floor(chartWidth / Math.max(1, sampled.length))
+  );
 
   // Pre-compute fractional heights for each column
   const heights = sampled.map((v) => (v / maxVal) * barHeight);
@@ -1075,7 +1088,9 @@ function renderTimeBarRows(
       maxVal,
       gutterWidth,
     });
-    const parts = heights.map((h) => colorFn(buildTimeseriesBarColumn(h, row)));
+    const parts = heights.map((h) =>
+      colorFn(buildTimeseriesBarColumn(h, row).repeat(barWidth))
+    );
     rows.push(`${yAxis}${parts.join("")}`);
   }
 
@@ -1138,11 +1153,22 @@ function seriesFill(label: string, index: number): string {
  */
 function renderStackedTimeBarRows(
   stackedSeries: { label: string; values: number[] }[],
-  opts: { maxVal: number; barHeight: number; gutterWidth: number }
+  opts: {
+    maxVal: number;
+    barHeight: number;
+    gutterWidth: number;
+    chartWidth: number;
+  }
 ): string[] {
-  const { maxVal, barHeight, gutterWidth } = opts;
+  const { maxVal, barHeight, gutterWidth, chartWidth } = opts;
   const plain = isPlainOutput();
   const numBuckets = stackedSeries[0]?.values.length ?? 0;
+
+  // Scale bar width so bars fill the full chart area
+  const barWidth = Math.max(
+    1,
+    Math.floor(chartWidth / Math.max(1, numBuckets))
+  );
 
   // Pre-compute cumulative heights per column, bottom-up
   const stackedHeights: {
@@ -1178,7 +1204,12 @@ function renderStackedTimeBarRows(
     });
     const parts: string[] = [];
     for (let col = 0; col < numBuckets; col += 1) {
-      const ch = buildStackedColumn(stackedHeights[col] ?? [], row, plain);
+      const ch = buildStackedColumn(
+        stackedHeights[col] ?? [],
+        row,
+        plain,
+        barWidth
+      );
       parts.push(ch);
     }
     rows.push(`${yAxis}${parts.join("")}`);
@@ -1186,11 +1217,18 @@ function renderStackedTimeBarRows(
   return rows;
 }
 
-/** Build a single character for a stacked bar column at a given row. */
+/**
+ * Build characters for a stacked bar column at a given row.
+ *
+ * Returns `barWidth` characters (possibly wrapped in a single ANSI color
+ * escape) so that each data bucket fills its proportional share of the
+ * chart width.
+ */
 function buildStackedColumn(
   segments: { bottom: number; top: number; label: string; seriesIdx: number }[],
   row: number,
-  plain: boolean
+  plain: boolean,
+  barWidth: number
 ): string {
   // Walk segments top-down to find which series fills this row
   for (let s = segments.length - 1; s >= 0; s -= 1) {
@@ -1209,11 +1247,14 @@ function buildStackedColumn(
     if (plain) {
       // In plain mode, use the series fill character for full blocks
       // but keep fractional blocks as-is for smooth tops
-      return ch === "█" ? seriesFill(seg.label, seg.seriesIdx) : ch;
+      const fill = ch === "█" ? seriesFill(seg.label, seg.seriesIdx) : ch;
+      return fill.repeat(barWidth);
     }
-    return chalk.hex(seriesColor(seg.label, seg.seriesIdx))(ch);
+    return chalk.hex(seriesColor(seg.label, seg.seriesIdx))(
+      ch.repeat(barWidth)
+    );
   }
-  return " ";
+  return " ".repeat(barWidth);
 }
 
 /**
