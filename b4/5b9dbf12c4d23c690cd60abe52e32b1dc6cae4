@@ -1,0 +1,128 @@
+# Plan: Intercept `help` as positional arg → show command help
+
+**Issue**: CLI-MN — User typed `sentry log list help` intending `--help`. The word `"help"` was parsed as a project slug, causing `ResolutionError: Project 'help' not found`.
+
+## Approach: Intercept in `buildCommand` wrapper
+
+Detect `help` or `-h` in positional args inside `buildCommand`'s `wrappedFunc`, then use the existing introspection system to show proper help output. Since every command goes through `buildCommand`, this covers all commands universally.
+
+### Why `buildCommand` (not argv rewrite in `bin.ts`)
+
+- **Universal**: Every command uses `buildCommand` — zero per-command changes needed
+- **Context-aware**: Inside `wrappedFunc`, we know which command is running (via prefix)
+- **Proper help output**: Uses existing `introspectCommand()` + `formatHelpHuman()` — same output as `sentry help <command>`
+- **No Stricli internal coupling**: Uses our own introspection, not Stricli's `formatHelp()`
+
+## Implementation
+
+### Step 1: Store command prefix on `SentryContext` (`src/context.ts`)
+
+`forCommand` already receives `prefix` from Stricli but only passes it to telemetry. Store it on the context so `buildCommand` can access it:
+
+```typescript
+export interface SentryContext extends CommandContext {
+  // ... existing fields ...
+  /** Command path segments set by Stricli's forCommand (e.g., ["sentry", "issue", "list"]) */
+  readonly commandPrefix?: readonly string[];
+}
+
+export function buildContext(process: NodeJS.Process, span?: Span) {
+  const baseContext: SentryContext = {
+    // ... existing fields (unchanged) ...
+  };
+
+  return {
+    ...baseContext,
+    forCommand: ({ prefix }: { prefix: readonly string[] }): SentryContext => {
+      setCommandSpanName(span, prefix.join("."));
+      return { ...baseContext, commandPrefix: prefix };  // <-- NEW: pass prefix through
+    },
+  };
+}
+```
+
+### Step 2: Detect and handle `help` in `buildCommand` (`src/lib/command.ts`)
+
+Add a check at the top of `wrappedFunc`, after logging flags are applied but before calling `originalFunc`:
+
+```typescript
+// Inside wrappedFunc, after applyLoggingFlags() and cleanRawFlags():
+
+// Detect "help" or "-h" passed as a positional argument.
+// Users intuitively type `sentry issue list help` expecting help output.
+// Stricli only recognizes --help as a flag, so bare "help" flows through
+// as a positional and causes confusing errors (e.g., "Project 'help' not found").
+if (args.length > 0 && args.some((a) => a === "help" || a === "-h")) {
+  const ctx = this as unknown as { commandPrefix?: readonly string[]; stderr: Writer };
+  if (ctx.commandPrefix) {
+    const pathSegments = ctx.commandPrefix.slice(1); // strip "sentry" prefix
+    const { introspectCommand, formatHelpHuman } = await import("./help.js");
+    const result = introspectCommand(pathSegments);
+    if (!("error" in result)) {
+      ctx.stderr.write(
+        warning('Tip: use --help for help (e.g., sentry ' + pathSegments.join(" ") + ' --help)\n\n')
+      );
+      stdout.write(formatHelpHuman(result) + "\n");
+      process.exit(0);
+    }
+  }
+}
+```
+
+Key details:
+- **Dynamic import** of `help.js` — avoids circular dependency (`command.ts` → `help.ts` → `app.ts` → commands → `command.ts`)
+- **`warning()` hint on stderr** — yellow text matching `interceptSubcommand` style
+- **`process.exit(0)`** — success exit code, consistent with existing `OutputError` pattern in same function
+- **Only string args checked** — `args.some(a => a === "help")` naturally skips non-string parsed values
+- **`commandPrefix.slice(1)`** — strips the program name ("sentry") since `introspectCommand` expects just the command path
+
+### Step 3: Import `warning` in `command.ts`
+
+Add import for `warning` from `./formatters/colors.js` (already used in `list-command.ts`).
+
+## Files to modify
+
+| File | Change |
+|------|--------|
+| `src/context.ts` | Add `commandPrefix` to `SentryContext` interface; set it in `forCommand` |
+| `src/lib/command.ts` | Add help-as-positional detection in `wrappedFunc`; import `warning` |
+
+## Files to add
+
+| File | Purpose |
+|------|---------|
+| `test/lib/help-positional.test.ts` | Unit tests for the help-as-positional interception |
+
+## Test cases
+
+1. **`sentry log list help`** → shows help for `log list` + yellow hint
+2. **`sentry issue list help`** → shows help for `issue list` + yellow hint
+3. **`sentry trace view help`** → shows help for `trace view` + yellow hint
+4. **`sentry issue help`** → shows help for `issue` group + yellow hint (via `interceptSubcommand` which already handles this case — `help` is not a subcommand of `issue`, so it passes through to `func`, where our new detection catches it)
+5. **`sentry help`** → unchanged (custom help command — `help` is a route, not a positional)
+6. **`sentry help issue list`** → unchanged (custom help command introspects path)
+7. **`sentry issue list --help`** → unchanged (Stricli intercepts `--help` at route scanner level, before `func`)
+8. **`sentry log list -h`** → shows help for `log list` + yellow hint (Stricli would normally intercept `-h`, but since it's a positional after route resolution, it reaches `func`)
+
+### Edge case: `-h` as positional
+
+When Stricli's route scanner processes `["log", "list", "-h"]`:
+1. `log` → matches route → descend
+2. `list` → matches command → `target = listCommand`
+3. `-h` → **Stricli intercepts this** (`helpRequested = true`) → shows Stricli's built-in help
+
+So `-h` actually **never reaches** `func` as a positional — Stricli catches it first. Our detection for `-h` is a safety net that rarely fires (only if Stricli's behavior changes). `help` however is NOT intercepted by Stricli — it's a plain word that flows through as a positional arg.
+
+## Verification
+
+1. `bun run typecheck` — no type errors
+2. `bun run lint:fix` — no lint violations
+3. `bun test test/lib/help-positional.test.ts` — new tests pass
+4. `bun test` — all existing tests pass
+5. Manual verification:
+   - `bun run dev -- log list help` → shows help for `log list` with hint
+   - `bun run dev -- issue list help` → shows help for `issue list` with hint
+   - `bun run dev -- trace view help` → shows help for `trace view` with hint
+   - `bun run dev -- help` → shows branded help (unchanged)
+   - `bun run dev -- help issue list` → shows help for `issue list` (unchanged)
+   - `bun run dev -- issue list --help` → Stricli built-in help (unchanged)
