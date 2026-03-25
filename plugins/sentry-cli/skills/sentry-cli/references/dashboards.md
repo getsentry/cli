@@ -11,7 +11,7 @@ requires:
 
 Manage Sentry dashboards
 
-### `sentry dashboard list <org/project>`
+### `sentry dashboard list <org/title-filter...>`
 
 List dashboards
 
@@ -19,6 +19,7 @@ List dashboards
 - `-w, --web - Open in browser`
 - `-n, --limit <value> - Maximum number of dashboards to list - (default: "30")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 
 **Examples:**
 

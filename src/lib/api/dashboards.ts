@@ -31,26 +31,32 @@ import { invalidateCachedResponse } from "../response-cache.js";
 import {
   apiRequestToRegion,
   ORG_FANOUT_CONCURRENCY,
+  type PaginatedResponse,
+  parseLinkHeader,
 } from "./infrastructure.js";
 
 /**
- * List dashboards in an organization.
+ * List dashboards in an organization with cursor-based pagination.
+ *
+ * Returns both the dashboard list items and pagination metadata so callers
+ * can iterate through pages. Use `cursor` to resume from a previous page.
  *
  * @param orgSlug - Organization slug
- * @param options - Optional pagination parameters
- * @returns Array of dashboard list items
+ * @param options - Pagination parameters (perPage, cursor)
+ * @returns Paginated response with dashboard list items and optional next cursor
  */
-export async function listDashboards(
+export async function listDashboardsPaginated(
   orgSlug: string,
-  options: { perPage?: number } = {}
-): Promise<DashboardListItem[]> {
+  options: { perPage?: number; cursor?: string } = {}
+): Promise<PaginatedResponse<DashboardListItem[]>> {
   const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data } = await apiRequestToRegion<DashboardListItem[]>(
+  const { data, headers } = await apiRequestToRegion<DashboardListItem[]>(
     regionUrl,
     `/organizations/${orgSlug}/dashboards/`,
-    { params: { per_page: options.perPage } }
+    { params: { per_page: options.perPage, cursor: options.cursor } }
   );
-  return data;
+  const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
+  return { data, nextCursor };
 }
 
 /**
