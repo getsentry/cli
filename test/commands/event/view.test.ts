@@ -741,7 +741,7 @@ describe("resolveAutoDetectTarget", () => {
 });
 
 // ============================================================================
-// viewCommand.func() — coverage for warning, suggestion, and normalized paths
+// viewCommand.func() — coverage for warning and normalized paths
 // ============================================================================
 
 describe("viewCommand.func", () => {

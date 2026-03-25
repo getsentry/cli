@@ -158,8 +158,6 @@ type ParsedPositionalArgs = {
   issueShortId?: string;
   /** Warning message if arguments appear to be in the wrong order */
   warning?: string;
-  /** Suggestion when the user likely meant a different command */
-  suggestion?: string;
 };
 
 /**
@@ -597,13 +595,10 @@ export const viewCommand = buildCommand({
     const log = logger.withTag("event.view");
 
     // Parse positional args
-    const { eventId, targetArg, warning, suggestion, issueId, issueShortId } =
+    const { eventId, targetArg, warning, issueId, issueShortId } =
       parsePositionalArgs(args);
     if (warning) {
       log.warn(warning);
-    }
-    if (suggestion) {
-      log.warn(suggestion);
     }
     const parsed = parseOrgProjectArg(targetArg);
 
