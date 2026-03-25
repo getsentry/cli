@@ -141,23 +141,29 @@ export function parseDashboardListArgs(args: string[]): {
   targetArg: string | undefined;
   titleFilter: string | undefined;
 } {
-  if (args.length === 0) {
+  // buildListCommand's interceptSubcommand may replace args[0] with undefined
+  // when the first positional matches a subcommand name (e.g. "view", "create").
+  // Filter those out so we don't crash on .includes("/").
+  const filtered = args.filter(
+    (a): a is string => a !== null && a !== undefined && a !== ""
+  );
+  if (filtered.length === 0) {
     return { targetArg: undefined, titleFilter: undefined };
   }
-  if (args.length >= 2) {
+  if (filtered.length >= 2) {
     // First arg is the target, remaining args are joined as the filter.
     // This handles unquoted multi-word titles: `my-org/ CLI Health` arrives
     // as ["my-org/", "CLI", "Health"] and becomes filter "CLI Health".
     // Normalize bare org slug to org/ format so parseOrgProjectArg treats
     // it as org-all (dashboards are org-scoped, project is irrelevant).
-    const raw = args[0] as string;
+    const raw = filtered[0] as string;
     const target = raw.includes("/") ? raw : `${raw}/`;
-    const titleFilter = args.slice(1).join(" ");
+    const titleFilter = filtered.slice(1).join(" ");
     return { targetArg: target, titleFilter };
   }
   // 1 arg: if it contains "/" it may be a target, or an org/project/name combo.
   // Without "/" it's always a title filter (dashboards are org-scoped).
-  const arg = args[0] as string;
+  const arg = filtered[0] as string;
   if (arg.includes("/")) {
     return splitOrgProjectName(arg);
   }

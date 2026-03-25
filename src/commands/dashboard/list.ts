@@ -230,15 +230,19 @@ function processPage(
     glob: InstanceType<typeof Bun.Glob> | undefined;
   }
 ): PageResult {
-  let skipping = !!opts.afterId;
-
-  for (const item of data) {
-    if (skipping) {
-      if (item.id === opts.afterId) {
-        skipping = false;
-      }
-      continue;
+  // When resuming mid-page, find the afterId and skip everything up to and
+  // including it. If the afterId was deleted between requests, fall through
+  // and process the entire page from the start (no results lost).
+  let startIdx = 0;
+  if (opts.afterId) {
+    const afterPos = data.findIndex((d) => d.id === opts.afterId);
+    if (afterPos !== -1) {
+      startIdx = afterPos + 1;
     }
+  }
+
+  for (let i = startIdx; i < data.length; i++) {
+    const item = data[i] as DashboardListItem;
     if (!opts.glob || opts.glob.match(item.title.toLowerCase())) {
       results.push(item);
       if (results.length >= opts.limit) {
@@ -383,7 +387,9 @@ export const listCommand = buildListCommand("dashboard", {
     }
 
     // Resolve pagination cursor (handles "last" magic value)
-    const contextKey = buildPaginationContextKey("dashboard", orgSlug);
+    const contextKey = buildPaginationContextKey("dashboard", orgSlug, {
+      ...(titleFilter && { q: titleFilter }),
+    });
     const rawCursor = resolveOrgCursor(
       flags.cursor,
       PAGINATION_KEY,
