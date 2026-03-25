@@ -83,6 +83,35 @@ For detailed documentation, visit [cli.sentry.dev](https://cli.sentry.dev).
 
 Credentials are stored in `~/.sentry/` with restricted permissions (mode 600).
 
+## Library Usage
+
+Use Sentry CLI programmatically in Node.js (≥22) or Bun without spawning a subprocess:
+
+```typescript
+import sentry from "sentry";
+
+// Returns parsed JSON — same as `sentry issue list --json`
+const issues = await sentry("issue", "list", "-l", "5");
+
+// Explicit auth token (auto-fills from SENTRY_AUTH_TOKEN env var)
+const orgs = await sentry("org", "list", { token: "sntrys_..." });
+
+// Human-readable text output
+const text = await sentry("issue", "list", { text: true });
+
+// Errors are thrown as SentryError with .exitCode and .stderr
+try {
+  await sentry("issue", "view", "NONEXISTENT-1");
+} catch (err) {
+  console.error(err.exitCode, err.stderr);
+}
+```
+
+Options (all optional):
+- `token` — Auth token. Falls back to `SENTRY_AUTH_TOKEN` / `SENTRY_TOKEN` env vars.
+- `text` — Return human-readable string instead of parsed JSON.
+- `cwd` — Working directory for DSN auto-detection. Defaults to `process.cwd()`.
+
 ---
 
 ## Development

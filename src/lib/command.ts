@@ -497,6 +497,7 @@ export function buildCommand<
 
   // Wrap func to intercept logging flags, capture telemetry, then call original.
   // The wrapper is an async function that iterates the generator returned by func.
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Central framework wrapper — flag cleanup, env-based JSON, output rendering, and error handling are all tightly coupled.
   const wrappedFunc = async function (
     this: CONTEXT,
     flags: Record<string, unknown>,
@@ -511,6 +512,14 @@ export function buildCommand<
     setFlagContext(cleanFlags);
     if (args.length > 0) {
       setArgsContext(args);
+    }
+
+    // Environment-based JSON mode (used by library entry point)
+    if (outputConfig && !cleanFlags.json) {
+      const env = (this as unknown as { env?: NodeJS.ProcessEnv }).env;
+      if (env?.SENTRY_OUTPUT_FORMAT === "json") {
+        cleanFlags.json = true;
+      }
     }
 
     const stdout = (this as unknown as { stdout: Writer }).stdout;

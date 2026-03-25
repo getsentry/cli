@@ -178,20 +178,17 @@ if (process.env.SENTRY_AUTH_TOKEN) {
 }
 
 const result = await build({
-  entryPoints: ["./src/bin.ts"],
+  entryPoints: ["./src/index.ts"],
   bundle: true,
   minify: true,
   banner: {
-    // Check Node.js version (>= 22 required for node:sqlite) and suppress warnings
-    js: `#!/usr/bin/env node
-if(parseInt(process.versions.node)<22){console.error("Error: sentry requires Node.js 22 or later (found "+process.version+").\\n\\nEither upgrade Node.js, or install the standalone binary instead:\\n  curl -fsSL https://cli.sentry.dev/install | bash\\n");process.exit(1)}
-{let e=process.emit;process.emit=function(n,...a){return n==="warning"?!1:e.apply(this,[n,...a])}}`,
+    js: `{let e=process.emit;process.emit=function(n,...a){return n==="warning"?!1:e.apply(this,[n,...a])}}`,
   },
   sourcemap: true,
   platform: "node",
   target: "node22",
   format: "cjs",
-  outfile: "./dist/bin.cjs",
+  outfile: "./dist/index.cjs",
   // Inject Bun polyfills and import.meta.url shim for CJS compatibility
   inject: ["./script/node-polyfills.ts", "./script/import-meta-url.js"],
   define: {
@@ -207,11 +204,45 @@ if(parseInt(process.versions.node)<22){console.error("Error: sentry requires Nod
   plugins,
 });
 
+// Write the CLI bin wrapper (tiny — shebang + version check + dispatch)
+const BIN_WRAPPER = `#!/usr/bin/env node
+if(parseInt(process.versions.node)<22){console.error("Error: sentry requires Node.js 22 or later (found "+process.version+").\\n\\nEither upgrade Node.js, or install the standalone binary instead:\\n  curl -fsSL https://cli.sentry.dev/install | bash\\n");process.exit(1)}
+require('./index.cjs')._cli().catch(()=>{});
+`;
+await Bun.write("./dist/bin.cjs", BIN_WRAPPER);
+
+// Write TypeScript declarations for the library API
+const TYPE_DECLARATIONS = `export type SentryOptions = {
+  /** Auth token. Auto-filled from SENTRY_AUTH_TOKEN / SENTRY_TOKEN env vars. */
+  token?: string;
+  /** Return human-readable text instead of parsed JSON. */
+  text?: boolean;
+  /** Working directory (affects DSN detection, project root). Defaults to process.cwd(). */
+  cwd?: string;
+};
+
+export declare class SentryError extends Error {
+  readonly exitCode: number;
+  readonly stderr: string;
+  constructor(message: string, exitCode: number, stderr: string);
+}
+
+export declare function sentry(...args: string[]): Promise<unknown>;
+export declare function sentry(...args: [...string[], SentryOptions]): Promise<unknown>;
+
+export { sentry };
+export default sentry;
+`;
+await Bun.write("./dist/index.d.cts", TYPE_DECLARATIONS);
+
+console.log("  -> dist/bin.cjs (CLI wrapper)");
+console.log("  -> dist/index.d.cts (type declarations)");
+
 // Calculate bundle size (only the main bundle, not source maps)
-const bundleOutput = result.metafile?.outputs["dist/bin.cjs"];
+const bundleOutput = result.metafile?.outputs["dist/index.cjs"];
 const bundleSize = bundleOutput?.bytes ?? 0;
 const bundleSizeKB = (bundleSize / 1024).toFixed(1);
 
-console.log(`\n  -> dist/bin.cjs (${bundleSizeKB} KB)`);
+console.log(`\n  -> dist/index.cjs (${bundleSizeKB} KB)`);
 console.log(`\n${"=".repeat(40)}`);
 console.log("Bundle complete!");

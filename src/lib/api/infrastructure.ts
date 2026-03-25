@@ -10,6 +10,7 @@
 import * as Sentry from "@sentry/node-core/light";
 import type { z } from "zod";
 
+import { getEnv } from "../env.js";
 import { ApiError, AuthError, stringifyUnknown } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
 import {
@@ -196,7 +197,7 @@ function extractLinkAttr(segment: string, attr: string): string | undefined {
  */
 export const MAX_PAGINATION_PAGES = Math.max(
   1,
-  Number(process.env.SENTRY_MAX_PAGINATION_PAGES) || 50
+  Number(getEnv().SENTRY_MAX_PAGINATION_PAGES) || 50
 );
 
 /**

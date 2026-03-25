@@ -2,6 +2,7 @@
  * Authentication credential storage (single-row table pattern).
  */
 
+import { getEnv } from "../env.js";
 import { clearResponseCache } from "../response-cache.js";
 import { withDbSpan } from "../telemetry.js";
 import { getDatabase } from "./index.js";
@@ -41,11 +42,11 @@ export type AuthConfig = {
  * Empty or whitespace-only values are treated as unset.
  */
 function getEnvToken(): { token: string; source: AuthSource } | undefined {
-  const authToken = process.env.SENTRY_AUTH_TOKEN?.trim();
+  const authToken = getEnv().SENTRY_AUTH_TOKEN?.trim();
   if (authToken) {
     return { token: authToken, source: "env:SENTRY_AUTH_TOKEN" };
   }
-  const sentryToken = process.env.SENTRY_TOKEN?.trim();
+  const sentryToken = getEnv().SENTRY_TOKEN?.trim();
   if (sentryToken) {
     return { token: sentryToken, source: "env:SENTRY_TOKEN" };
   }

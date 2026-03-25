@@ -46,12 +46,23 @@
   "bin": {
     "sentry": "./dist/bin.cjs"
   },
+  "main": "./dist/index.cjs",
+  "types": "./dist/index.d.cts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.cts",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.cjs"
+    }
+  },
   "description": "Sentry CLI - A command-line interface for using Sentry built by robots and humans for robots and humans",
   "engines": {
     "node": ">=22"
   },
   "files": [
-    "dist/bin.cjs"
+    "dist/bin.cjs",
+    "dist/index.cjs",
+    "dist/index.d.cts"
   ],
   "license": "FSL-1.1-Apache-2.0",
   "packageManager": "bun@1.3.11",

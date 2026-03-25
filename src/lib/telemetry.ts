@@ -18,6 +18,7 @@ import {
   SENTRY_CLI_DSN,
 } from "./constants.js";
 import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
+import { getEnv } from "./env.js";
 import { ApiError, AuthError } from "./errors.js";
 import { attachSentryReporter } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
@@ -91,10 +92,11 @@ export function markSessionCrashed(): void {
  * @returns The result of the callback
  */
 export async function withTelemetry<T>(
-  callback: (span: Span | undefined) => T | Promise<T>
+  callback: (span: Span | undefined) => T | Promise<T>,
+  options?: { libraryMode?: boolean }
 ): Promise<T> {
-  const enabled = process.env.SENTRY_CLI_NO_TELEMETRY !== "1";
-  const client = initSentry(enabled);
+  const enabled = getEnv().SENTRY_CLI_NO_TELEMETRY !== "1";
+  const client = initSentry(enabled, options);
   if (!client?.getOptions().enabled) {
     return callback(undefined);
   }
@@ -263,6 +265,25 @@ const EXCLUDED_INTEGRATIONS = new Set([
 ]);
 
 /**
+ * Integrations to exclude in library mode.
+ *
+ * Extends {@link EXCLUDED_INTEGRATIONS} with integrations that register
+ * global process listeners, monkey-patch builtins, or monitor child
+ * processes — all of which would pollute the host application's runtime.
+ */
+const LIBRARY_EXCLUDED_INTEGRATIONS = new Set([
+  ...EXCLUDED_INTEGRATIONS,
+  "OnUncaughtException", // process.on('uncaughtException')
+  "OnUnhandledRejection", // process.on('unhandledRejection')
+  "ProcessSession", // process.on('beforeExit')
+  "Http", // diagnostics_channel + trace headers
+  "NodeFetch", // diagnostics_channel + trace headers
+  "FunctionToString", // wraps Function.prototype.toString
+  "ChildProcess", // monitors child processes
+  "NodeContext", // reads OS info
+]);
+
+/**
  * Check whether `util.getSystemErrorMap` exists at setup time.
  * Bun does not implement this Node.js API, which the SDK's NodeSystemError
  * integration uses in its `processEvent` hook. When missing, the hook crashes
@@ -318,14 +339,21 @@ export function getSentryTracePropagationTargets(): (string | RegExp)[] {
  * Initialize Sentry for telemetry.
  *
  * @param enabled - Whether telemetry is enabled
+ * @param options - Optional configuration
+ * @param options.libraryMode - When true, strips all global-polluting
+ *   integrations (process listeners, HTTP trace headers, Function.prototype
+ *   patches) and disables logs/client reports to avoid timers and beforeExit
+ *   handlers. The caller is responsible for calling `client.flush()` manually.
  * @returns The Sentry client, or undefined if initialization failed
  *
  * @internal Exported for testing
  */
 export function initSentry(
-  enabled: boolean
+  enabled: boolean,
+  options?: { libraryMode?: boolean }
 ): Sentry.LightNodeClient | undefined {
-  const environment = process.env.NODE_ENV ?? "development";
+  const libraryMode = options?.libraryMode ?? false;
+  const environment = getEnv().NODE_ENV ?? "development";
 
   const client = Sentry.init({
     dsn: SENTRY_CLI_DSN,
@@ -333,15 +361,23 @@ export function initSentry(
     // Keep default integrations but filter out ones that add overhead without benefit.
     // Important: Don't use defaultIntegrations: false as it may break debug ID support.
     // NodeSystemError is excluded on runtimes missing util.getSystemErrorMap (Bun) — CLI-K1.
-    integrations: (defaults) =>
-      defaults.filter(
+    // Library mode uses the extended exclusion set to avoid polluting the host process.
+    integrations: (defaults) => {
+      const excluded = libraryMode
+        ? LIBRARY_EXCLUDED_INTEGRATIONS
+        : EXCLUDED_INTEGRATIONS;
+      return defaults.filter(
         (integration) =>
-          !EXCLUDED_INTEGRATIONS.has(integration.name) &&
+          !excluded.has(integration.name) &&
           (integration.name !== "NodeSystemError" || hasGetSystemErrorMap)
-      ),
+      );
+    },
     environment,
-    // Enable Sentry structured logs for non-exception telemetry (e.g., unexpected input warnings)
-    enableLogs: true,
+    // Enable Sentry structured logs for non-exception telemetry (e.g., unexpected input warnings).
+    // Disabled in library mode — logs use timers/beforeExit that pollute the host process.
+    enableLogs: !libraryMode,
+    // Disable client reports in library mode — they use timers/beforeExit.
+    ...(libraryMode && { sendClientReports: false }),
     // Sample all events for CLI telemetry (low volume)
     tracesSampleRate: 1,
     sampleRate: 1,
@@ -403,14 +439,19 @@ export function initSentry(
     // paths that bypass withTelemetry's try/catch.
     // Ref: https://nodejs.org/api/process.html#event-beforeexit
     //
+    // Skipped in library mode — the host owns the process lifecycle.
+    // The library entry point calls client.flush() manually after completion.
+    //
     // Replace previous handler on re-init (e.g., auto-login retry calls
     // withTelemetry → initSentry twice) to avoid duplicate handlers with
     // independent re-entry guards and stale client references.
-    if (currentBeforeExitHandler) {
-      process.removeListener("beforeExit", currentBeforeExitHandler);
+    if (!libraryMode) {
+      if (currentBeforeExitHandler) {
+        process.removeListener("beforeExit", currentBeforeExitHandler);
+      }
+      currentBeforeExitHandler = createBeforeExitHandler(client);
+      process.on("beforeExit", currentBeforeExitHandler);
     }
-    currentBeforeExitHandler = createBeforeExitHandler(client);
-    process.on("beforeExit", currentBeforeExitHandler);
   }
 
   return client;

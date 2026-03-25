@@ -58,6 +58,7 @@
 
 import type { ConsolaInstance } from "consola";
 import { createConsola } from "consola";
+import { getEnv } from "./env.js";
 
 /**
  * Environment variable name for controlling CLI log verbosity.
@@ -121,7 +122,7 @@ export function parseLogLevel(name: string): number {
  * @returns consola numeric level, or null if not set
  */
 export function getEnvLogLevel(): number | null {
-  const envLevel = process.env[LOG_LEVEL_ENV_VAR];
+  const envLevel = getEnv()[LOG_LEVEL_ENV_VAR];
   if (envLevel) {
     return parseLogLevel(envLevel);
   }

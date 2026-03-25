@@ -9,6 +9,7 @@
  */
 
 import { DEFAULT_SENTRY_HOST } from "./constants.js";
+import { getEnv } from "./env.js";
 import { isSentrySaasUrl } from "./sentry-urls.js";
 
 /**
@@ -189,15 +190,16 @@ export function parseSentryUrl(input: string): ParsedSentryUrl | null {
  * @param baseUrl - The scheme + host extracted from the URL (e.g., "https://sentry.example.com")
  */
 export function applySentryUrlContext(baseUrl: string): void {
+  const env = getEnv();
   if (isSentrySaasUrl(baseUrl)) {
     // Clear any self-hosted URL so API calls fall back to default SaaS routing.
     // Without this, a stale SENTRY_HOST/SENTRY_URL would route SaaS requests to the wrong host.
-    // biome-ignore lint/performance/noDelete: process.env requires delete to truly unset; assignment coerces to string in Node.js
-    delete process.env.SENTRY_HOST;
-    // biome-ignore lint/performance/noDelete: process.env requires delete to truly unset; assignment coerces to string in Node.js
-    delete process.env.SENTRY_URL;
+    // biome-ignore lint/performance/noDelete: env registry requires delete to truly unset; assignment coerces to string in Node.js
+    delete env.SENTRY_HOST;
+    // biome-ignore lint/performance/noDelete: env registry requires delete to truly unset; assignment coerces to string in Node.js
+    delete env.SENTRY_URL;
     return;
   }
-  process.env.SENTRY_HOST = baseUrl;
-  process.env.SENTRY_URL = baseUrl;
+  env.SENTRY_HOST = baseUrl;
+  env.SENTRY_URL = baseUrl;
 }

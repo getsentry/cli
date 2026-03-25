@@ -29,7 +29,28 @@
 import type { ZodType } from "zod";
 import type { Writer } from "../../types/index.js";
 import { plainSafeMuted } from "./human.js";
-import { formatJson, writeJson } from "./json.js";
+import { filterFields, formatJson, writeJson } from "./json.js";
+
+// ---------------------------------------------------------------------------
+// Zero-copy object capture (library mode)
+// ---------------------------------------------------------------------------
+
+/**
+ * Duck-type check for a Writer that supports zero-copy object capture.
+ *
+ * In library mode the stdout Writer implements `captureObject(obj)` so
+ * the framework can hand off the final JSON object without serializing
+ * it to a string. The CLI's real stdout (process.stdout) doesn't have
+ * this method, so the check returns false and the existing serialize
+ * path runs unchanged.
+ */
+function hasCaptureObject(
+  writer: Writer
+): writer is Writer & { captureObject(obj: unknown): void } {
+  return (
+    typeof (writer as Record<string, unknown>).captureObject === "function"
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Shared option types
@@ -277,17 +298,18 @@ function applyJsonExclude(
 }
 
 /**
- * Write a JSON-transformed value to stdout.
+ * Write a final JSON object to stdout.
  *
- * `undefined` suppresses the chunk entirely (e.g. streaming text-only
- * chunks in JSON mode). All other values are serialized as a single
- * JSON line.
+ * When the writer supports zero-copy capture (library mode), the object
+ * is handed off directly without serialization. Otherwise it is
+ * JSON-stringified and written as a single line.
  */
-function writeTransformedJson(stdout: Writer, transformed: unknown): void {
-  if (transformed === undefined) {
+function emitJsonObject(stdout: Writer, obj: unknown): void {
+  if (hasCaptureObject(stdout)) {
+    stdout.captureObject(obj);
     return;
   }
-  stdout.write(`${formatJson(transformed)}\n`);
+  stdout.write(`${formatJson(obj)}\n`);
 }
 
 /**
@@ -318,10 +340,20 @@ export function renderCommandOutput(
 ): void {
   if (ctx.json) {
     if (config.jsonTransform) {
-      writeTransformedJson(stdout, config.jsonTransform(data, ctx.fields));
+      const transformed = config.jsonTransform(data, ctx.fields);
+      if (transformed === undefined) {
+        return;
+      }
+      emitJsonObject(stdout, transformed);
       return;
     }
-    writeJson(stdout, applyJsonExclude(data, config.jsonExclude), ctx.fields);
+
+    const excluded = applyJsonExclude(data, config.jsonExclude);
+    const final =
+      ctx.fields && ctx.fields.length > 0
+        ? filterFields(excluded, ctx.fields)
+        : excluded;
+    emitJsonObject(stdout, final);
     return;
   }
 

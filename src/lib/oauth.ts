@@ -13,6 +13,7 @@ import {
 } from "../types/index.js";
 import { DEFAULT_SENTRY_URL, getConfiguredSentryUrl } from "./constants.js";
 import { setAuthToken } from "./db/auth.js";
+import { getEnv } from "./env.js";
 import { ApiError, AuthError, ConfigError, DeviceFlowError } from "./errors.js";
 import { withHttpSpan } from "./telemetry.js";
 
@@ -33,7 +34,7 @@ function getSentryUrl(): string {
  * Build-time: Injected via Bun.build({ define: { SENTRY_CLIENT_ID: "..." } })
  * Runtime: Can be overridden via SENTRY_CLIENT_ID env var (for self-hosted)
  *
- * Read at call time (not module load time) so tests can set process.env.SENTRY_CLIENT_ID
+ * Read at call time (not module load time) so tests can override SENTRY_CLIENT_ID
  * after module initialization.
  *
  * @see script/build.ts
@@ -41,7 +42,7 @@ function getSentryUrl(): string {
 declare const SENTRY_CLIENT_ID_BUILD: string | undefined;
 function getClientId(): string {
   return (
-    process.env.SENTRY_CLIENT_ID ??
+    getEnv().SENTRY_CLIENT_ID ??
     (typeof SENTRY_CLIENT_ID_BUILD !== "undefined"
       ? SENTRY_CLIENT_ID_BUILD
       : "")
