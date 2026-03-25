@@ -54,6 +54,10 @@ type DashboardListResult = {
   orgSlug: string;
   hasMore: boolean;
   nextCursor?: string;
+  /** The title filter used (for empty-state messaging) */
+  titleFilter?: string;
+  /** All titles seen during fetch (for fuzzy suggestions on empty filter results) */
+  allTitles?: string[];
 };
 
 // ---------------------------------------------------------------------------
@@ -118,6 +122,15 @@ export function decodeCursor(cursor: string): {
  */
 function formatDashboardListHuman(result: DashboardListResult): string {
   if (result.dashboards.length === 0) {
+    if (result.titleFilter && result.allTitles && result.allTitles.length > 0) {
+      const similar = fuzzyMatch(result.titleFilter, result.allTitles, {
+        maxResults: 5,
+      });
+      if (similar.length > 0) {
+        return `No dashboards matching '${result.titleFilter}'. Did you mean:\n${similar.map((t) => `  • ${t}`).join("\n")}`;
+      }
+      return `No dashboards matching '${result.titleFilter}'.`;
+    }
     return "No dashboards found.";
   }
 
@@ -422,17 +435,13 @@ export const listCommand = buildListCommand("dashboard", {
       orgSlug,
       hasMore,
       nextCursor: cursorToStore,
+      titleFilter,
+      allTitles,
     } satisfies DashboardListResult);
 
     // Build footer hint
     let hint: string | undefined;
-    if (results.length === 0 && titleFilter && allTitles.length > 0) {
-      // Filter matched nothing — suggest similar titles via fuzzy matching
-      const similar = fuzzyMatch(titleFilter, allTitles, { maxResults: 5 });
-      if (similar.length > 0) {
-        hint = `No dashboards matching '${titleFilter}'. Did you mean:\n${similar.map((t) => `  • ${t}`).join("\n")}`;
-      }
-    } else if (results.length === 0) {
+    if (results.length === 0) {
       hint = undefined;
     } else if (hasMore) {
       hint = `Showing ${results.length} dashboard(s). Next page: sentry dashboard list ${orgSlug}/ -c last\nDashboards: ${url}`;

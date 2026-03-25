@@ -396,7 +396,7 @@ describe("dashboard list command", () => {
     expect(parsed.data[0].title).toBe("Errors Overview");
   });
 
-  test("glob filter with no matches shows empty state", async () => {
+  test("glob filter with no matches shows filter-aware message", async () => {
     resolveOrgSpy.mockResolvedValue({ org: "test-org" });
     listDashboardsPaginatedSpy.mockResolvedValue({
       data: [DASHBOARD_A, DASHBOARD_B, DASHBOARD_C],
@@ -408,7 +408,24 @@ describe("dashboard list command", () => {
     await func.call(context, defaultFlags(), "NoMatch*");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("No dashboards found.");
+    expect(output).toContain("No dashboards matching 'NoMatch*'.");
+  });
+
+  test("glob filter with no matches shows fuzzy suggestions for close input", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
+    listDashboardsPaginatedSpy.mockResolvedValue({
+      data: [DASHBOARD_A, DASHBOARD_B, DASHBOARD_C],
+      nextCursor: undefined,
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    // "Perf" is a prefix of "Performance" → fuzzy match finds it
+    await func.call(context, defaultFlags(), "Perf");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("Did you mean:");
+    expect(output).toContain("Performance");
   });
 
   // -------------------------------------------------------------------------
