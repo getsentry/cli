@@ -245,6 +245,32 @@ describe("dashboard widget edit", () => {
     expect(err.message).toContain('"preprod-app-size" dataset supports');
   });
 
+  test("allows --dataset change on widget with untracked display type (text)", async () => {
+    // text, wheel, rage_and_dead_clicks, agents_traces_table bypass Sentry's dataset system
+    // entirely — they should not be cross-validated against a dataset.
+    getDashboardSpy.mockResolvedValueOnce({
+      ...sampleDashboard,
+      widgets: [
+        {
+          title: "Notes",
+          displayType: "text",
+          widgetType: "spans",
+          queries: [],
+          layout: { x: 0, y: 0, w: 3, h: 2 },
+        },
+      ],
+    });
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    // Should not throw — "text" is untracked, no dataset constraint applies
+    await func.call(
+      context,
+      { json: false, index: 0, dataset: "discover" },
+      "123"
+    );
+    expect(updateDashboardSpy).toHaveBeenCalled();
+  });
+
   test("validates aggregates against new dataset when --dataset changes", async () => {
     const { context } = createMockContext();
     const func = await editCommand.loader();

@@ -317,6 +317,14 @@ export const DiscoverAggregateFunctionSchema = z.enum(
  * stacked_area is included for datasets that support timeseries (not in Sentry's UI picker
  * but accepted by the API and handled by the CLI's query engine).
  * details and server_tree are spans-only internal display types.
+ *
+ * Four display types are intentionally absent from this map — they bypass Sentry's standard
+ * dataset query system and carry no dataset constraints:
+ *   text                 — renders markdown; no dataset or query involved; user-editable
+ *   wheel                — Web Vitals ring chart; prebuilt dashboards only, not user-editable
+ *   rage_and_dead_clicks — rage/dead click viz; prebuilt only, fetches its own data
+ *   agents_traces_table  — AI agent traces; prebuilt only, fetches its own data
+ * Source: static/app/views/dashboards/utils.tsx (widgetFetchesOwnData / isWidgetEditable)
  */
 export const DATASET_SUPPORTED_DISPLAY_TYPES = {
   issue: ["table", "area", "line", "bar"],

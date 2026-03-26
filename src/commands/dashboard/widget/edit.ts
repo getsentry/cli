@@ -13,6 +13,7 @@ import { formatWidgetEdited } from "../../../lib/formatters/human.js";
 import { CommandOutput } from "../../../lib/formatters/output.js";
 import { buildDashboardUrl } from "../../../lib/sentry-urls.js";
 import {
+  DATASET_SUPPORTED_DISPLAY_TYPES,
   type DashboardDetail,
   type DashboardWidget,
   type DashboardWidgetQuery,
@@ -73,6 +74,7 @@ function mergeQueries(
 }
 
 /** Build the replacement widget object by merging flags over existing */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: merging + validating widget flags requires several conditional branches
 function buildReplacement(
   flags: EditFlags,
   existing: DashboardWidget
@@ -96,8 +98,21 @@ function buildReplacement(
   // Re-validate after merging with existing values. validateWidgetEnums only
   // checks the cross-constraint when both args are provided, so it misses
   // e.g. `--dataset preprod-app-size` on a widget that's already `table`.
+  //
+  // Scope: only cross-validate when effectiveDisplay is a tracked type (present in
+  // DATASET_SUPPORTED_DISPLAY_TYPES). Untracked types — text, wheel, rage_and_dead_clicks,
+  // agents_traces_table — bypass Sentry's dataset system entirely and have no constraints.
+  // Validating them against a dataset would always fail, blocking legitimate edits like
+  // changing --dataset on a text widget.
   if (flags.display || flags.dataset) {
-    validateWidgetEnums(effectiveDisplay, effectiveDataset);
+    const isTrackedDisplay = Object.values(
+      DATASET_SUPPORTED_DISPLAY_TYPES
+    ).some((types) =>
+      (types as readonly string[]).includes(effectiveDisplay ?? "")
+    );
+    if (flags.display || isTrackedDisplay) {
+      validateWidgetEnums(effectiveDisplay, effectiveDataset);
+    }
   }
 
   const raw: Record<string, unknown> = {
