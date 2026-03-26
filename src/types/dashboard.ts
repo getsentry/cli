@@ -299,6 +299,15 @@ export const DiscoverAggregateFunctionSchema = z.enum(
 );
 
 /**
+ * Display types supported by the "issue" dataset.
+ *
+ * The issue dataset is backed by Sentry's Issues API, not the events pipeline,
+ * so it only renders correctly as a table. Other display types (big_number,
+ * line, bar, etc.) produce invalid or empty widgets in the Sentry UI.
+ */
+export const ISSUE_DATASET_DISPLAY_TYPES = ["table"] as const;
+
+/**
  * Valid `is:` filter values for issue search conditions (--where flag).
  * Only valid when widgetType is "issue". Other datasets don't support `is:`.
  *

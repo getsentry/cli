@@ -19,6 +19,7 @@ import { isAllDigits } from "../../lib/utils.js";
 import {
   type DashboardWidget,
   DISPLAY_TYPES,
+  ISSUE_DATASET_DISPLAY_TYPES,
   parseAggregate,
   parseSortExpression,
   parseWidgetInput,
@@ -378,6 +379,18 @@ export function validateWidgetEnums(display?: string, dataset?: string): void {
     throw new ValidationError(
       `Invalid --dataset value "${dataset}".\nValid datasets: ${WIDGET_TYPES.join(", ")}`,
       "dataset"
+    );
+  }
+  if (
+    dataset === "issue" &&
+    display &&
+    !ISSUE_DATASET_DISPLAY_TYPES.includes(
+      display as (typeof ISSUE_DATASET_DISPLAY_TYPES)[number]
+    )
+  ) {
+    throw new ValidationError(
+      `The "issue" dataset only supports ${ISSUE_DATASET_DISPLAY_TYPES.join(", ")} display. Got: "${display}".`,
+      "display"
     );
   }
 }

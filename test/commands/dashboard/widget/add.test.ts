@@ -196,6 +196,22 @@ describe("dashboard widget add", () => {
     expect(err.message).toContain("Invalid --display");
   });
 
+  test("throws ValidationError when big_number is used with issue dataset", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+
+    const err = await func
+      .call(
+        context,
+        { json: false, display: "big_number", dataset: "issue" },
+        "123",
+        "Unresolved Issues"
+      )
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain('"issue" dataset only supports');
+  });
+
   test("throws ValidationError for invalid aggregate function", async () => {
     const { context } = createMockContext();
     const func = await addCommand.loader();
