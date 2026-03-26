@@ -300,6 +300,24 @@ export const DiscoverAggregateFunctionSchema = z.enum(
 );
 
 /**
+ * Display types supported by the "issue" dataset.
+ *
+ * Source: sentry/static/app/views/dashboards/datasetConfig/issues.tsx
+ *   supportedDisplayTypes: [TABLE, AREA, LINE, BAR]
+ *
+ * TABLE uses issue fields (issue, title, assignee, status…).
+ * AREA/LINE/BAR render timeseries of new_issues / resolved_issues.
+ *
+ * Not supported: big_number, top_n, stacked_area, categorical_bar, and internal types.
+ */
+export const ISSUE_DATASET_DISPLAY_TYPES = [
+  "table",
+  "area",
+  "line",
+  "bar",
+] as const;
+
+/**
  * Valid `is:` filter values for issue search conditions (--where flag).
  * Only valid when widgetType is "issue". Other datasets don't support `is:`.
  *

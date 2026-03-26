@@ -19,6 +19,7 @@ import { isAllDigits } from "../../lib/utils.js";
 import {
   type DashboardWidget,
   DISPLAY_TYPES,
+  ISSUE_DATASET_DISPLAY_TYPES,
   parseAggregate,
   parseSortExpression,
   parseWidgetInput,
@@ -325,10 +326,11 @@ export function buildWidgetFromFlags(opts: {
   const aggregates = (opts.query ?? ["count"]).map(parseAggregate);
   validateAggregateNames(aggregates, opts.dataset);
 
-  // The issue dataset requires at least one column (group-by) to produce a
-  // visible table — without it, the Sentry UI shows "Columns: None".
-  // Default to ["issue"] so a bare `--dataset issue --display table` just works.
-  const columns = opts.groupBy ?? (opts.dataset === "issue" ? ["issue"] : []);
+  // Issue table widgets need at least one column or the Sentry UI shows "Columns: None".
+  // Default to ["issue"] for table display only — timeseries (line/area/bar) don't use columns.
+  const columns =
+    opts.groupBy ??
+    (opts.dataset === "issue" && opts.display === "table" ? ["issue"] : []);
   // Auto-default orderby to first aggregate descending when group-by is used.
   // Without this, chart widgets (line/area/bar) with group-by + limit error
   // because the dashboard can't determine which top N groups to display.
@@ -378,6 +380,18 @@ export function validateWidgetEnums(display?: string, dataset?: string): void {
     throw new ValidationError(
       `Invalid --dataset value "${dataset}".\nValid datasets: ${WIDGET_TYPES.join(", ")}`,
       "dataset"
+    );
+  }
+  if (
+    dataset === "issue" &&
+    display &&
+    !ISSUE_DATASET_DISPLAY_TYPES.includes(
+      display as (typeof ISSUE_DATASET_DISPLAY_TYPES)[number]
+    )
+  ) {
+    throw new ValidationError(
+      `The "issue" dataset supports: ${ISSUE_DATASET_DISPLAY_TYPES.join(", ")}. Got: "${display}".`,
+      "display"
     );
   }
 }

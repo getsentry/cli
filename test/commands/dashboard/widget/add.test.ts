@@ -212,6 +212,53 @@ describe("dashboard widget add", () => {
     expect(err.message).toContain("Unknown aggregate function");
   });
 
+  test("throws ValidationError for big_number with issue dataset", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+
+    const err = await func
+      .call(
+        context,
+        { json: false, display: "big_number", dataset: "issue" },
+        "123",
+        "Unresolved Count"
+      )
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain('"issue" dataset supports');
+  });
+
+  test("allows line/area/bar with issue dataset", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+
+    for (const display of ["line", "area", "bar"]) {
+      updateDashboardSpy.mockClear();
+      await func.call(
+        context,
+        { json: false, display, dataset: "issue" },
+        "123",
+        "Issues Over Time"
+      );
+      expect(updateDashboardSpy).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  test("issue line dataset does not default columns", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      { json: false, display: "line", dataset: "issue" },
+      "123",
+      "Issues Over Time"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.queries[0].columns).toEqual([]);
+  });
+
   test("issue dataset defaults columns to ['issue'] and orderby to -count()", async () => {
     const { context } = createMockContext();
     const func = await addCommand.loader();
