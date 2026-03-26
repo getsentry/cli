@@ -149,6 +149,93 @@ type WidgetQueryOptions = {
   project?: number[];
 };
 
+// ---------------------------------------------------------------------------
+// Optimal interval computation
+// ---------------------------------------------------------------------------
+
+/** Sentry dashboard grid columns (must match formatter GRID_COLS). */
+const GRID_COLS = 6;
+
+/** Overhead subtracted from widget column width to get chart area. */
+const CHART_WIDTH_OVERHEAD = 12;
+
+/** Minimum terminal width — mirrors formatter MIN_TERM_WIDTH. */
+const MIN_TERM_WIDTH = 80;
+
+const PERIOD_UNITS: Record<string, number> = {
+  s: 1,
+  m: 60,
+  h: 3600,
+  d: 86_400,
+  w: 604_800,
+};
+
+const PERIOD_RE = /^(\d+)([smhdw])$/;
+
+/** Parse a Sentry period string (e.g., "24h", "7d") into seconds. */
+function periodToSeconds(period: string): number | undefined {
+  const match = PERIOD_RE.exec(period);
+  if (!match) {
+    return;
+  }
+  const value = Number(match[1]);
+  const unit = PERIOD_UNITS[match[2] ?? ""];
+  if (!unit) {
+    return;
+  }
+  return value * unit;
+}
+
+/**
+ * Valid Sentry API interval values, ascending.
+ * The API accepts these specific bucket sizes for events-stats.
+ */
+const VALID_INTERVALS = ["1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d"];
+
+/**
+ * Compute the optimal API interval for a timeseries widget.
+ *
+ * Derives the ideal bucket size from the time period and estimated chart
+ * width in terminal columns. Picks the largest valid Sentry interval that
+ * produces at least `chartWidth` data points, ensuring barWidth stays at 1.
+ */
+function computeOptimalInterval(
+  statsPeriod: string,
+  widget: DashboardWidget
+): string | undefined {
+  const totalSeconds = periodToSeconds(statsPeriod);
+  if (!totalSeconds) {
+    return widget.interval;
+  }
+
+  // Estimate chart width from widget layout and terminal size
+  const termWidth = Math.max(
+    MIN_TERM_WIDTH,
+    process.stdout.columns || MIN_TERM_WIDTH
+  );
+  const layoutW = widget.layout?.w ?? GRID_COLS;
+  const chartWidth =
+    Math.floor((layoutW / GRID_COLS) * termWidth) - CHART_WIDTH_OVERHEAD;
+
+  if (chartWidth <= 0) {
+    return widget.interval;
+  }
+
+  // Ideal seconds per bucket: period / chartWidth
+  const idealSeconds = totalSeconds / chartWidth;
+
+  // Pick the largest valid interval <= idealSeconds (so we get enough points)
+  let best: string | undefined;
+  for (const iv of VALID_INTERVALS) {
+    const ivSeconds = periodToSeconds(iv);
+    if (ivSeconds && ivSeconds <= idealSeconds) {
+      best = iv;
+    }
+  }
+
+  return best ?? VALID_INTERVALS[0];
+}
+
 /**
  * Parse an events-stats response into a normalized timeseries result.
  *
@@ -254,6 +341,7 @@ async function queryWidgetTimeseries(
       query: query.conditions || undefined,
       dataset: dataset ?? undefined,
       statsPeriod,
+      interval: computeOptimalInterval(statsPeriod, widget),
       environment: options.environment,
       project: options.project?.map(String),
     };
