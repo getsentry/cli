@@ -110,6 +110,7 @@ export {
   ProductTrialSchema,
   RegionSchema,
   RepositoryProviderSchema,
+  SentryIssueSchema,
   SentryLogSchema,
   SentryRepositorySchema,
   SentryTeamSchema,

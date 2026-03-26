@@ -26,6 +26,7 @@
  * `formatHuman` — there is no divergent-data path.
  */
 
+import type { ZodType } from "zod";
 import type { Writer } from "../../types/index.js";
 import { plainSafeMuted } from "./human.js";
 import { formatJson, writeJson } from "./json.js";
@@ -158,6 +159,18 @@ export type OutputConfig<T> = {
    * When `jsonTransform` is set, `jsonExclude` is ignored.
    */
   jsonTransform?: (data: T, fields?: string[]) => unknown;
+  /**
+   * Zod schema describing the shape of JSON output (after transform/exclude).
+   *
+   * For list commands with {@link jsonTransform}, this should describe the
+   * **item** type (what `--fields` operates on), not the envelope.
+   *
+   * Used for:
+   * - `--help` output: appends available JSON fields to the command description
+   * - `sentry help <cmd>`: structured field documentation
+   * - `generate-skill.ts`: SKILL.md field tables for AI agents
+   */
+  schema?: ZodType;
 };
 
 /**
@@ -317,6 +330,133 @@ export function renderCommandOutput(
     const prefix = ctx.clearPrefix ?? "";
     stdout.write(`${prefix}${text}\n`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Schema introspection
+// ---------------------------------------------------------------------------
+
+/**
+ * Field metadata extracted from a Zod schema for documentation.
+ *
+ * Populated by {@link extractSchemaFields} and consumed by:
+ * - `introspect.ts` → `CommandInfo.jsonFields`
+ * - `help.ts` → human help output
+ * - `generate-skill.ts` → SKILL.md field tables
+ */
+export type SchemaFieldInfo = {
+  /** Field name (top-level key in the JSON object) */
+  name: string;
+  /** Human-readable type string (e.g. "string", "number", "object", "string | null") */
+  type: string;
+  /** Description from `z.describe()` */
+  description?: string;
+  /** Whether the field is optional in the schema */
+  optional: boolean;
+};
+
+/**
+ * Map a Zod type's internal `typeName` to a human-readable string.
+ *
+ * Unwraps wrapper types (Optional, Nullable, Default) and builds a
+ * composite type string (e.g. "string | null" for ZodNullable<ZodString>).
+ */
+function zodTypeToString(schema: ZodType): { type: string; optional: boolean } {
+  const def = (schema as { _def?: { typeName?: string; innerType?: ZodType } })
+    ._def;
+  if (!def?.typeName) {
+    return { type: "unknown", optional: false };
+  }
+
+  // Unwrap wrapper types recursively
+  if (def.typeName === "ZodOptional" && def.innerType) {
+    const inner = zodTypeToString(def.innerType);
+    return { type: inner.type, optional: true };
+  }
+  if (def.typeName === "ZodNullable" && def.innerType) {
+    const inner = zodTypeToString(def.innerType);
+    const nullableType = inner.type.includes(" | null")
+      ? inner.type
+      : `${inner.type} | null`;
+    return { type: nullableType, optional: inner.optional };
+  }
+  if (def.typeName === "ZodDefault" && def.innerType) {
+    return zodTypeToString(def.innerType);
+  }
+
+  const TYPE_MAP: Record<string, string> = {
+    ZodString: "string",
+    ZodNumber: "number",
+    ZodBoolean: "boolean",
+    ZodObject: "object",
+    ZodArray: "array",
+    ZodUnknown: "unknown",
+    ZodAny: "any",
+    ZodEnum: "string",
+  };
+
+  return { type: TYPE_MAP[def.typeName] ?? "unknown", optional: false };
+}
+
+/**
+ * Extract field metadata from a Zod object schema.
+ *
+ * Returns an array of {@link SchemaFieldInfo} describing each top-level
+ * field's name, type, description, and optionality. Returns an empty
+ * array for non-object schemas.
+ *
+ * @param schema - A Zod schema (typically `z.object({...})`)
+ */
+export function extractSchemaFields(schema: ZodType): SchemaFieldInfo[] {
+  const def = (
+    schema as {
+      _def?: { typeName?: string };
+      shape?: Record<string, ZodType>;
+    }
+  )._def;
+
+  if (def?.typeName !== "ZodObject") {
+    return [];
+  }
+
+  const shape = (schema as { shape?: Record<string, ZodType> }).shape;
+  if (!shape) {
+    return [];
+  }
+
+  return Object.entries(shape).map(([name, fieldSchema]) => {
+    const { type, optional } = zodTypeToString(fieldSchema);
+    const fieldDef = (fieldSchema as { description?: string }).description;
+    return {
+      name,
+      type,
+      description: fieldDef,
+      optional,
+    };
+  });
+}
+
+/**
+ * Format schema fields as a help text block for `--help` output.
+ *
+ * Produces a compact field list like:
+ * ```
+ * JSON fields (use --json --fields to select):
+ *   id (string) — Numeric issue ID
+ *   count (string, optional) — Total event count
+ * ```
+ */
+export function formatSchemaForHelp(fields: SchemaFieldInfo[]): string {
+  if (fields.length === 0) {
+    return "";
+  }
+  const lines = ["JSON fields (use --json --fields to select):"];
+  for (const field of fields) {
+    const optStr = field.optional ? ", optional" : "";
+    const desc = field.description ? ` — ${field.description}` : "";
+    lines.push(`  ${field.name} (${field.type}${optStr})${desc}`);
+  }
+  return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------

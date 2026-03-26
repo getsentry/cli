@@ -496,6 +496,22 @@ function generateFullCommandDoc(cmd: CommandInfo): string {
     }
   }
 
+  if (cmd.jsonFields && cmd.jsonFields.length > 0) {
+    lines.push("");
+    lines.push(
+      "**JSON Fields** (use `--json --fields` to select specific fields):"
+    );
+    lines.push("");
+    lines.push("| Field | Type | Description |");
+    lines.push("|-------|------|-------------|");
+    for (const field of cmd.jsonFields) {
+      // Escape pipe characters to avoid breaking the markdown table structure
+      const safeType = field.type.replaceAll("|", "\\|");
+      const safeDesc = (field.description ?? "").replaceAll("|", "\\|");
+      lines.push(`| \`${field.name}\` | ${safeType} | ${safeDesc} |`);
+    }
+  }
+
   if (cmd.examples.length > 0) {
     lines.push("");
     lines.push("**Examples:**");

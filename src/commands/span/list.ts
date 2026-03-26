@@ -44,6 +44,7 @@ import {
   resolveTraceOrgProject,
   warnIfNormalized,
 } from "../../lib/trace-target.js";
+import { SpanListItemSchema } from "../../types/index.js";
 
 type ListFlags = {
   readonly limit: number;
@@ -454,6 +455,7 @@ export const listCommand = buildListCommand("span", {
   output: {
     human: formatSpanListHuman,
     jsonTransform: jsonTransformSpanList,
+    schema: SpanListItemSchema,
   },
   parameters: {
     positional: {

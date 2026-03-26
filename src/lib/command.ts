@@ -44,6 +44,8 @@ import {
   ClearScreen,
   CommandOutput,
   type CommandReturn,
+  extractSchemaFields,
+  formatSchemaForHelp,
   type HumanRenderer,
   type OutputConfig,
   renderCommandOutput,
@@ -267,6 +269,52 @@ export function applyLoggingFlags(
  *   plus an optional `output` mode
  * @returns A fully-wrapped Stricli Command
  */
+
+/**
+ * Build the `--fields` flag definition, enriched with available field names
+ * when a schema is registered on the output config.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: OutputConfig type is erased at the builder level
+function buildFieldsFlag(outputConfig?: OutputConfig<any>) {
+  if (!outputConfig?.schema) {
+    return FIELDS_FLAG;
+  }
+  const schemaFields = extractSchemaFields(outputConfig.schema);
+  if (schemaFields.length === 0) {
+    return FIELDS_FLAG;
+  }
+  const fieldNames = schemaFields.map((f) => f.name).join(", ");
+  return {
+    ...FIELDS_FLAG,
+    brief: `${FIELDS_FLAG.brief}. Available: ${fieldNames}`,
+  };
+}
+
+/**
+ * Enrich command docs with a JSON fields section when a schema is registered.
+ * Appends available field names and types to `fullDescription` so they appear
+ * in Stricli's `--help` output.
+ */
+function enrichDocsWithSchema(
+  docs: CommandDocumentation,
+  // biome-ignore lint/suspicious/noExplicitAny: OutputConfig type is erased at the builder level
+  outputConfig?: OutputConfig<any>
+): CommandDocumentation {
+  if (!outputConfig?.schema) {
+    return docs;
+  }
+  const schemaFields = extractSchemaFields(outputConfig.schema);
+  if (schemaFields.length === 0) {
+    return docs;
+  }
+  const jsonFieldsDoc = formatSchemaForHelp(schemaFields);
+  const baseFull = docs.fullDescription ?? docs.brief;
+  return {
+    ...docs,
+    fullDescription: `${baseFull}\n\n${jsonFieldsDoc}`,
+  };
+}
+
 export function buildCommand<
   const FLAGS extends BaseFlags = NonNullable<unknown>,
   const ARGS extends BaseArgs = [],
@@ -303,9 +351,12 @@ export function buildCommand<
     if (!commandOwnsJson) {
       mergedFlags.json = JSON_FLAG;
     }
-    // --fields is always injected (no command defines its own)
-    mergedFlags.fields = FIELDS_FLAG;
+    mergedFlags.fields = buildFieldsFlag(outputConfig);
   }
+
+  // Enrich fullDescription with JSON fields when schema is registered.
+  // This makes field info visible in Stricli's --help output.
+  const enrichedDocs = enrichDocsWithSchema(builderArgs.docs, outputConfig);
 
   const mergedParams = { ...existingParams, flags: mergedFlags };
 
@@ -545,9 +596,20 @@ export function buildCommand<
   // hidden flags) and `func` (wrapping with telemetry/output logic),
   // which breaks the original FLAGS/ARGS type alignment that Stricli's
   // `CommandBuilderArguments` enforces via `NoInfer`.
-  return stricliCommand({
+  const cmd = stricliCommand({
     ...builderArgs,
+    docs: enrichedDocs,
     parameters: mergedParams,
     func: wrappedFunc,
   } as unknown as StricliBuilderArgs<CONTEXT>);
+
+  // Attach the JSON schema to the built command as a non-standard property.
+  // introspect.ts reads this to populate CommandInfo.jsonFields for help
+  // output and SKILL.md generation.
+  if (outputConfig?.schema) {
+    (cmd as unknown as Record<string, unknown>).__jsonSchema =
+      outputConfig.schema;
+  }
+
+  return cmd;
 }

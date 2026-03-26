@@ -23,7 +23,11 @@ import {
   getTrialStatus,
   type TrialStatus,
 } from "../../lib/trials.js";
-import type { CustomerTrialInfo, Writer } from "../../types/index.js";
+import {
+  type CustomerTrialInfo,
+  ProductTrialSchema,
+  type Writer,
+} from "../../types/index.js";
 
 type ListFlags = {
   readonly json: boolean;
@@ -207,6 +211,7 @@ export const listCommand = buildCommand({
   output: {
     human: formatTrialListHuman,
     jsonExclude: ["displayName"],
+    schema: ProductTrialSchema,
   },
   parameters: {
     positional: {
