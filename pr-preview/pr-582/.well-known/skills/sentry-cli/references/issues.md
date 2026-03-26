@@ -34,8 +34,8 @@ List issues in a project
 | `culprit` | string | Culprit string |
 | `count` | string | Total event count |
 | `userCount` | number | Number of affected users |
-| `firstSeen` | string | null | First occurrence (ISO 8601) |
-| `lastSeen` | string | null | Most recent occurrence (ISO 8601) |
+| `firstSeen` | string \| null | First occurrence (ISO 8601) |
+| `lastSeen` | string \| null | Most recent occurrence (ISO 8601) |
 | `level` | string | Severity level |
 | `status` | string | Issue status |
 | `priority` | string | Triage priority |
@@ -43,10 +43,10 @@ List issues in a project
 | `permalink` | string | URL to the issue in Sentry |
 | `project` | object | Project info |
 | `metadata` | object | Issue metadata |
-| `assignedTo` | unknown | null | Assigned user or team |
-| `substatus` | string | null | Issue substatus |
+| `assignedTo` | unknown \| null | Assigned user or team |
+| `substatus` | string \| null | Issue substatus |
 | `isUnhandled` | boolean | Whether the issue is unhandled |
-| `seerFixabilityScore` | number | null | Seer AI fixability score (0-1) |
+| `seerFixabilityScore` | number \| null | Seer AI fixability score (0-1) |
 
 **Examples:**
 

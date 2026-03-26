@@ -30,13 +30,13 @@ List spans in a project or trace
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | string | Span ID |
-| `parent_span` | string | null | Parent span ID |
-| `span.op` | string | null | Span operation (e.g. http.client, db) |
-| `description` | string | null | Span description |
-| `span.duration` | number | null | Duration (ms) |
+| `parent_span` | string \| null | Parent span ID |
+| `span.op` | string \| null | Span operation (e.g. http.client, db) |
+| `description` | string \| null | Span description |
+| `span.duration` | number \| null | Duration (ms) |
 | `timestamp` | string | Timestamp (ISO 8601) |
 | `project` | string | Project slug |
-| `transaction` | string | null | Transaction name |
+| `transaction` | string \| null | Transaction name |
 | `trace` | string | Trace ID |
 
 ### `sentry span view <trace-id/span-id...>`

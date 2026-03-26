@@ -28,13 +28,13 @@ List repositories
 |-------|------|-------------|
 | `id` | string | Repository ID |
 | `name` | string | Repository name |
-| `url` | string | null | Repository URL |
+| `url` | string \| null | Repository URL |
 | `provider` | object | Version control provider |
 | `status` | string | Integration status |
 | `dateCreated` | string | Creation date (ISO 8601) |
 | `integrationId` | string | Integration ID |
-| `externalSlug` | string | null | External slug (e.g. org/repo) |
-| `externalId` | string | null | External ID |
+| `externalSlug` | string \| null | External slug (e.g. org/repo) |
+| `externalId` | string \| null | External ID |
 
 ### `sentry team list <org/project>`
 
@@ -54,7 +54,7 @@ List teams
 | `name` | string | Team name |
 | `dateCreated` | string | Creation date (ISO 8601) |
 | `isMember` | boolean | Whether you are a member |
-| `teamRole` | string | null | Your role in the team |
+| `teamRole` | string \| null | Your role in the team |
 | `memberCount` | number | Number of members |
 
 **Examples:**
