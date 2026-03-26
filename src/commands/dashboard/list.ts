@@ -27,6 +27,7 @@ import { fuzzyMatch } from "../../lib/fuzzy.js";
 import {
   buildListCommand,
   buildListLimitFlag,
+  paginationHint,
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
 import {
@@ -338,18 +339,13 @@ function buildHint(
   orgSlug: string
 ): string | undefined {
   const filterArg = result.titleFilter ? ` '${result.titleFilter}'` : "";
-  const navParts: string[] = [];
-  if (result.hasMore) {
-    navParts.push(
-      `Next: sentry dashboard list ${orgSlug}/${filterArg} -c next`
-    );
-  }
-  if (result.hasPrev) {
-    navParts.push(
-      `Prev: sentry dashboard list ${orgSlug}/${filterArg} -c prev`
-    );
-  }
-  const nav = navParts.length > 0 ? ` ${navParts.join(" | ")}` : "";
+  const navRaw = paginationHint({
+    hasPrev: !!result.hasPrev,
+    hasMore: !!result.hasMore,
+    prevHint: `sentry dashboard list ${orgSlug}/${filterArg} -c prev`,
+    nextHint: `sentry dashboard list ${orgSlug}/${filterArg} -c next`,
+  });
+  const nav = navRaw ? ` ${navRaw}` : "";
   const url = buildDashboardsListUrl(orgSlug);
 
   if (result.dashboards.length === 0) {

@@ -43,6 +43,7 @@ import {
   buildListLimitFlag,
   LIST_BASE_ALIASES,
   LIST_TARGET_POSITIONAL,
+  paginationHint,
   targetPatternExplanation,
 } from "../../lib/list-command.js";
 import {
@@ -431,27 +432,6 @@ export type OrgAllOptions = {
   direction: CursorDirection;
 };
 
-/** Build a bidirectional pagination hint, preserving active flags. */
-function paginationHint(
-  org: string,
-  hasPrev: boolean,
-  hasNext: boolean,
-  platform?: string
-): string {
-  const base = `sentry project list ${org}/`;
-  const suffix = platform ? ` --platform ${platform}` : "";
-  if (hasPrev && hasNext) {
-    return `Navigate: ${base} -c prev${suffix} | ${base} -c next${suffix}`;
-  }
-  if (hasNext) {
-    return `Next page: ${base} -c next${suffix}`;
-  }
-  if (hasPrev) {
-    return `Previous page: ${base} -c prev${suffix}`;
-  }
-  return "";
-}
-
 /**
  * Handle org-all mode (e.g., sentry/).
  * Uses cursor pagination for efficient page-by-page listing.
@@ -493,7 +473,14 @@ export async function handleOrgAll(
   let hint: string | undefined;
   let header: string | undefined;
 
-  const navHint = paginationHint(org, hasPrev, hasMore, flags.platform);
+  const base = `sentry project list ${org}/`;
+  const suffix = flags.platform ? ` --platform ${flags.platform}` : "";
+  const navHint = paginationHint({
+    hasPrev,
+    hasMore,
+    prevHint: `${base} -c prev${suffix}`,
+    nextHint: `${base} -c next${suffix}`,
+  });
 
   if (filtered.length === 0) {
     if (navHint) {

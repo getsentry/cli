@@ -50,6 +50,7 @@ import {
   withAuthGuard,
 } from "./errors.js";
 import { filterFields } from "./formatters/json.js";
+import { paginationHint } from "./list-command.js";
 import { logger } from "./logger.js";
 import { withProgress } from "./polling.js";
 import { resolveEffectiveOrg } from "./region.js";
@@ -309,26 +310,6 @@ export async function fetchAllOrgs<TEntity, TWithOrg>(
   return results.flat();
 }
 
-/** Formats bidirectional pagination hints for org-all output. */
-function paginationHint(
-  commandPrefix: string,
-  org: string,
-  hasPrev: boolean,
-  hasNext: boolean
-): string {
-  const base = `${commandPrefix} ${org}/`;
-  if (hasPrev && hasNext) {
-    return `Navigate: ${base} -c prev | ${base} -c next`;
-  }
-  if (hasNext) {
-    return `Next page: ${base} -c next`;
-  }
-  if (hasPrev) {
-    return `Previous page: ${base} -c prev`;
-  }
-  return "";
-}
-
 /** Options for {@link handleOrgAll}. */
 type OrgAllOptions<TEntity, TWithOrg> = {
   config: OrgListConfig<TEntity, TWithOrg>;
@@ -403,7 +384,13 @@ export async function handleOrgAll<TEntity, TWithOrg>(
   let hint: string | undefined;
   let header: string | undefined;
 
-  const navHint = paginationHint(config.commandPrefix, org, hasPrev, hasMore);
+  const base = `${config.commandPrefix} ${org}/`;
+  const navHint = paginationHint({
+    hasPrev,
+    hasMore,
+    prevHint: `${base} -c prev`,
+    nextHint: `${base} -c next`,
+  });
 
   if (items.length === 0) {
     if (navHint) {

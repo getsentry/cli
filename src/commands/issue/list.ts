@@ -58,6 +58,7 @@ import {
   buildListLimitFlag,
   LIST_BASE_ALIASES,
   LIST_TARGET_POSITIONAL,
+  paginationHint,
   parseCursorFlag,
   targetPatternExplanation,
 } from "../../lib/list-command.js";
@@ -945,17 +946,15 @@ async function handleOrgAllIssues(
   const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
 
   if (issues.length === 0) {
-    const navParts: string[] = [];
-    if (hasPrev) {
-      navParts.push(`Prev: ${prevPageHint(org, flags)}`);
-    }
-    if (hasMore) {
-      navParts.push(`Next: ${nextPageHint(org, flags)}`);
-    }
-    const hint =
-      navParts.length > 0
-        ? `No issues on this page. ${navParts.join(" | ")}`
-        : `No issues found in organization '${org}'.`;
+    const nav = paginationHint({
+      hasPrev,
+      hasMore,
+      prevHint: prevPageHint(org, flags),
+      nextHint: nextPageHint(org, flags),
+    });
+    const hint = nav
+      ? `No issues on this page. ${nav}`
+      : `No issues found in organization '${org}'.`;
     return { items: [], hasMore, hasPrev, nextCursor, hint };
   }
 

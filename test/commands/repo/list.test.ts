@@ -428,7 +428,7 @@ describe("listCommand.func — org-all mode (cursor pagination)", () => {
     // check for substrings that fit within a single row
     expect(output).toContain("getsentry/sentr");
     expect(output).toContain("more available");
-    expect(output).toContain("Next page:");
+    expect(output).toContain("Next:");
     expect(output).toContain("-c next");
   });
 
@@ -444,7 +444,7 @@ describe("listCommand.func — org-all mode (cursor pagination)", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Showing 2 repositories");
-    expect(output).not.toContain("Next page:");
+    expect(output).not.toContain("Next:");
   });
 
   test("human output 'No repositories found' when empty and no cursor", async () => {

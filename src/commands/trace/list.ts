@@ -20,6 +20,7 @@ import {
   buildListCommand,
   LIST_PERIOD_FLAG,
   PERIOD_ALIASES,
+  paginationHint,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
@@ -115,24 +116,6 @@ function prevPageHint(
   flags: Pick<ListFlags, "sort" | "query" | "period">
 ): string {
   return appendTraceFlags(`sentry trace list ${org}/${project} -c prev`, flags);
-}
-
-/** Build a combined nav hint string from prev/next hints. */
-function buildNavHint(opts: {
-  hasMore: boolean;
-  hasPrev: boolean;
-  org: string;
-  project: string;
-  flags: Pick<ListFlags, "sort" | "query" | "period">;
-}): string {
-  const parts: string[] = [];
-  if (opts.hasPrev) {
-    parts.push(`Prev: ${prevPageHint(opts.org, opts.project, opts.flags)}`);
-  }
-  if (opts.hasMore) {
-    parts.push(`Next: ${nextPageHint(opts.org, opts.project, opts.flags)}`);
-  }
-  return parts.join(" | ");
 }
 
 /**
@@ -311,7 +294,12 @@ export const listCommand = buildListCommand("trace", {
     const hasMore = !!nextCursor;
 
     // Build footer hint based on result state
-    const nav = buildNavHint({ hasMore, hasPrev, org, project, flags });
+    const nav = paginationHint({
+      hasMore,
+      hasPrev,
+      prevHint: prevPageHint(org, project, flags),
+      nextHint: nextPageHint(org, project, flags),
+    });
     let hint: string | undefined;
     if (traces.length === 0 && nav) {
       hint = `No traces on this page. ${nav}`;

@@ -33,6 +33,7 @@ import {
   buildListCommand,
   LIST_PERIOD_FLAG,
   PERIOD_ALIASES,
+  paginationHint,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
@@ -319,14 +320,12 @@ async function handleTraceMode(
   const flatSpans = spanItems.map(spanListItemToFlatSpan);
   const hasMore = !!nextCursor;
 
-  const navParts: string[] = [];
-  if (hasPrev) {
-    navParts.push(`Prev: ${tracePrevPageHint(org, project, traceId, flags)}`);
-  }
-  if (hasMore) {
-    navParts.push(`Next: ${traceNextPageHint(org, project, traceId, flags)}`);
-  }
-  const nav = navParts.join(" | ");
+  const nav = paginationHint({
+    hasPrev,
+    hasMore,
+    prevHint: tracePrevPageHint(org, project, traceId, flags),
+    nextHint: traceNextPageHint(org, project, traceId, flags),
+  });
 
   let hint: string | undefined;
   if (flatSpans.length === 0 && nav) {
@@ -397,14 +396,12 @@ async function handleProjectMode(
   const flatSpans = spanItems.map(spanListItemToFlatSpan);
   const hasMore = !!nextCursor;
 
-  const navParts: string[] = [];
-  if (hasPrev) {
-    navParts.push(`Prev: ${projectPrevPageHint(org, project, flags)}`);
-  }
-  if (hasMore) {
-    navParts.push(`Next: ${projectNextPageHint(org, project, flags)}`);
-  }
-  const nav = navParts.join(" | ");
+  const nav = paginationHint({
+    hasPrev,
+    hasMore,
+    prevHint: projectPrevPageHint(org, project, flags),
+    nextHint: projectNextPageHint(org, project, flags),
+  });
 
   let hint: string | undefined;
   if (flatSpans.length === 0 && nav) {

@@ -211,6 +211,44 @@ export const LIST_CURSOR_FLAG = {
 };
 
 /**
+ * Build a bidirectional pagination hint string from next/prev command hints.
+ *
+ * Combines a "Prev" and/or "Next" hint into a single line, returning an
+ * empty string when neither direction is available. Commands supply their
+ * own fully-formed hint strings (including flag suffixes) via `nextHint`
+ * and `prevHint`.
+ *
+ * @param opts - Pagination state and pre-built hint strings
+ * @returns Combined hint string, or `""` if no navigation is possible
+ *
+ * @example
+ * ```ts
+ * const nav = paginationHint({
+ *   hasPrev: true,
+ *   hasMore: true,
+ *   prevHint: "sentry trace list my-org/my-proj -c prev",
+ *   nextHint: "sentry trace list my-org/my-proj -c next",
+ * });
+ * // → "Prev: sentry trace list my-org/my-proj -c prev | Next: sentry trace list my-org/my-proj -c next"
+ * ```
+ */
+export function paginationHint(opts: {
+  hasPrev: boolean;
+  hasMore: boolean;
+  prevHint: string;
+  nextHint: string;
+}): string {
+  const parts: string[] = [];
+  if (opts.hasPrev) {
+    parts.push(`Prev: ${opts.prevHint}`);
+  }
+  if (opts.hasMore) {
+    parts.push(`Next: ${opts.nextHint}`);
+  }
+  return parts.join(" | ");
+}
+
+/**
  * Build the `--limit` / `-n` flag for a list command.
  *
  * @param entityPlural - Plural entity name used in the brief (e.g. "teams")

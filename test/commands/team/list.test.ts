@@ -408,7 +408,7 @@ describe("listCommand.func — org-all mode (cursor pagination)", () => {
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("backend");
     expect(output).toContain("more available");
-    expect(output).toContain("Next page:");
+    expect(output).toContain("Next:");
     expect(output).toContain("-c next");
   });
 
@@ -424,7 +424,7 @@ describe("listCommand.func — org-all mode (cursor pagination)", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Showing 2 teams");
-    expect(output).not.toContain("Next page:");
+    expect(output).not.toContain("Next:");
   });
 
   test("human output 'No teams found' when empty and no cursor", async () => {
