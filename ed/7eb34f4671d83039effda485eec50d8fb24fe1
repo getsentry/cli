@@ -1,0 +1,312 @@
+# Plan: Implement issue #566 — Zod schema registration on OutputConfig for typed JSON output
+
+## Problem
+
+Agents don't know what fields `sentry issue list --json` returns (`count`, `userCount`, `firstSeen`, `lastSeen`, etc.) because:
+1. The `--fields` flag description is generic ("Comma-separated fields...")
+2. `--help` doesn't list available JSON fields
+3. SKILL.md only shows `--fields id,title,status` with no field enumeration
+
+This causes agents to fall back to raw `sentry api` calls.
+
+## Approach
+
+Per issue #566, add an optional `schema` field to `OutputConfig<T>` accepting a Zod schema that describes the JSON output. Use this schema to:
+1. **Enrich `--help`** — Append available JSON fields to the command's `fullDescription`
+2. **Enrich the `--fields` flag** — List available field names in the flag's brief
+3. **Expose via introspection** — `sentry help <cmd>` and `generate-skill.ts` surface field info
+4. **Document the issue list** — Create a `SentryIssueSchema` with key fields
+
+The schema describes what consumers receive AFTER `jsonTransform`/`jsonExclude`. For list commands, it describes the **item** type (not the envelope), since `--fields` operates on items.
+
+## File Changes
+
+### 1. `src/lib/formatters/output.ts` — Add `schema` to OutputConfig
+
+Add a `schema` field and a helper to extract field metadata from Zod schemas:
+
+```typescript
+import type { z } from "zod";
+
+export type OutputConfig<T> = {
+  human: HumanOutput<T>;
+  jsonExclude?: ReadonlyArray<keyof T & string>;
+  jsonTransform?: (data: T, fields?: string[]) => unknown;
+  /**
+   * Zod schema describing JSON output shape (after transform/exclude).
+   *
+   * For list commands with jsonTransform, this should describe the **item**
+   * type (what --fields operates on), not the envelope.
+   *
+   * Used for:
+   * - --help output: lists available JSON fields
+   * - sentry help <cmd>: structured field documentation
+   * - generate-skill.ts: SKILL.md field tables
+   */
+  schema?: z.ZodType;
+};
+
+/** Field metadata extracted from a Zod schema */
+export type SchemaFieldInfo = {
+  name: string;
+  type: string;         // "string", "number", "boolean", "object", "array", "string | null"
+  description?: string; // from z.describe()
+  optional: boolean;
+};
+
+/**
+ * Extract field metadata from a Zod object schema.
+ * Returns empty array for non-object schemas.
+ */
+export function extractSchemaFields(schema: z.ZodType): SchemaFieldInfo[] { ... }
+```
+
+The `extractSchemaFields` function walks `schema._def` to:
+- Handle `ZodObject`: iterate `shape` entries
+- Unwrap `ZodOptional`/`ZodNullable`/`ZodDefault` to get the inner type
+- Map Zod type names to human-readable strings
+- Read `.description` from each field
+
+### 2. `src/lib/command.ts` — Enrich flags and fullDescription from schema
+
+In `buildCommand`, when `output.schema` is present:
+
+**a) Enrich the `--fields` flag brief** with available field names:
+
+```typescript
+if (outputConfig?.schema) {
+  const fields = extractSchemaFields(outputConfig.schema);
+  const fieldNames = fields.map(f => f.name).join(", ");
+  mergedFlags.fields = {
+    ...FIELDS_FLAG,
+    brief: `${FIELDS_FLAG.brief}. Available: ${fieldNames}`,
+  };
+}
+```
+
+**b) Append JSON fields section to `fullDescription`** so Stricli's `--help` shows it:
+
+```typescript
+if (outputConfig?.schema) {
+  const fields = extractSchemaFields(outputConfig.schema);
+  const jsonFieldsDoc = formatSchemaForHelp(fields);
+  const baseFull = builderArgs.docs.fullDescription ?? builderArgs.docs.brief;
+  builderArgs = {
+    ...builderArgs,
+    docs: {
+      ...builderArgs.docs,
+      fullDescription: `${baseFull}\n\n${jsonFieldsDoc}`,
+    },
+  };
+}
+```
+
+`formatSchemaForHelp(fields)` produces something like:
+```
+JSON fields (use --json --fields to select):
+  id (string) — Numeric issue ID
+  shortId (string) — Human-readable short ID
+  title (string) — Issue title
+  count (string) — Total event count
+  userCount (number) — Affected users
+  firstSeen (string) — First occurrence (ISO 8601)
+  lastSeen (string) — Most recent occurrence (ISO 8601)
+  ...
+```
+
+### 3. `src/lib/introspect.ts` — Expose schema fields in CommandInfo
+
+Extend `CommandInfo` to include schema fields:
+
+```typescript
+export type CommandInfo = {
+  path: string;
+  brief: string;
+  fullDescription?: string;
+  flags: FlagInfo[];
+  positional: string;
+  aliases: Record<string, string>;
+  examples: string[];
+  /** JSON output field metadata (from OutputConfig.schema) */
+  jsonFields?: SchemaFieldInfo[];
+};
+```
+
+The `CommandInfo` type already has `fullDescription` which would include the appended JSON fields text. But we also want structured `jsonFields` for `sentry help --json` and `generate-skill.ts`.
+
+To extract schema from commands: the simplified `Command` type in introspect.ts needs to account for the `output?.schema` property. Add to the `Command` interface:
+
+```typescript
+interface Command {
+  parameters?: { flags?: Record<string, FlagDef>; positional?: PositionalParams };
+  brief: string;
+  fullDescription?: string;
+  /** Output config (from buildCommand wrapper — only accessible after build) */
+  output?: { schema?: import("zod").ZodType };
+}
+```
+
+**Problem**: Stricli's built command doesn't expose `output` — it's consumed by `buildCommand` and not passed through to the Stricli command object.
+
+**Solution**: Store schemas in a module-level registry in `command.ts`, keyed by command path. `buildCommand` registers the schema when present. `introspect.ts` reads from the registry.
+
+```typescript
+// command.ts
+const schemaRegistry = new Map<string, z.ZodType>();
+
+export function getRegisteredSchema(commandPath: string): z.ZodType | undefined {
+  return schemaRegistry.get(commandPath);
+}
+
+// In buildCommand, after building:
+if (outputConfig?.schema) {
+  // Need the command path — can derive from docs.brief or use an explicit key
+  // Actually, we don't have the path at build time. Better approach: store on command object.
+}
+```
+
+**Better approach**: Attach the schema directly to the Stricli command object as a non-standard property:
+
+```typescript
+// In buildCommand:
+const cmd = stricliCommand({ ... });
+if (outputConfig?.schema) {
+  (cmd as any).__jsonSchema = outputConfig.schema;
+}
+return cmd;
+```
+
+Then in `introspect.ts`, `buildCommandInfo` reads `cmd.__jsonSchema` and calls `extractSchemaFields` to populate `jsonFields`.
+
+### 4. `src/types/sentry.ts` — Create `SentryIssueSchema`
+
+Create a Zod schema for the key SentryIssue fields that appear in `--json` output. This uses `.describe()` on each field for help text:
+
+```typescript
+export const SentryIssueSchema = z.object({
+  id: z.string().describe("Numeric issue ID"),
+  shortId: z.string().describe("Human-readable short ID (e.g. PROJ-ABC)"),
+  title: z.string().describe("Issue title"),
+  culprit: z.string().optional().describe("Culprit string"),
+  count: z.string().optional().describe("Total event count"),
+  userCount: z.number().optional().describe("Number of affected users"),
+  firstSeen: z.string().nullable().optional().describe("First occurrence (ISO 8601)"),
+  lastSeen: z.string().nullable().optional().describe("Most recent occurrence (ISO 8601)"),
+  level: z.string().optional().describe("Severity level"),
+  status: z.string().optional().describe("Issue status"),
+  priority: z.string().optional().describe("Triage priority"),
+  platform: z.string().optional().describe("Platform"),
+  permalink: z.string().optional().describe("URL to the issue in Sentry"),
+  project: z.object({
+    id: z.string(),
+    name: z.string(),
+    slug: z.string(),
+  }).optional().describe("Project info"),
+  metadata: z.object({
+    type: z.string().optional(),
+    value: z.string().optional(),
+    filename: z.string().optional(),
+    function: z.string().optional(),
+  }).optional().describe("Issue metadata"),
+  assignedTo: z.unknown().nullable().optional().describe("Assigned user or team"),
+  substatus: z.string().nullable().optional().describe("Issue substatus"),
+  isUnhandled: z.boolean().optional().describe("Whether the issue is unhandled"),
+  seerFixabilityScore: z.number().nullable().optional().describe("Seer AI fixability score (0-1)"),
+});
+```
+
+### 5. `src/commands/issue/list.ts` — Register schema
+
+```typescript
+import { SentryIssueSchema } from "../../types/sentry.js";
+
+// In the buildCommand call:
+output: {
+  human: () => createIssueTableRenderer(flags),
+  schema: SentryIssueSchema,
+  jsonTransform: jsonTransformListResult,
+},
+```
+
+### 6. `src/commands/help.ts` — Show JSON fields in `sentry help <cmd>`
+
+The `formatHelpHuman` function already renders `CommandInfo`. Extend it to render `jsonFields` when present:
+
+```typescript
+if (info.jsonFields?.length) {
+  lines.push("");
+  lines.push("**JSON Fields** (use `--json --fields` to select):");
+  lines.push("");
+  for (const field of info.jsonFields) {
+    const opt = field.optional ? "?" : "";
+    const desc = field.description ? ` — ${field.description}` : "";
+    lines.push(`  ${field.name}${opt} (${field.type})${desc}`);
+  }
+}
+```
+
+### 7. `script/generate-skill.ts` — Include JSON fields in reference docs
+
+In `generateFullCommandDoc(cmd)`, after flags and before examples, add a JSON fields section when `cmd.jsonFields` is present:
+
+```typescript
+if (cmd.jsonFields?.length) {
+  lines.push("");
+  lines.push("**JSON Fields** (use `--json --fields` to select):");
+  lines.push("");
+  lines.push("| Field | Type | Description |");
+  lines.push("|-------|------|-------------|");
+  for (const field of cmd.jsonFields) {
+    const desc = field.description ?? "";
+    lines.push(`| \`${field.name}\` | ${field.type} | ${desc} |`);
+  }
+}
+```
+
+### 8. `docs/src/content/docs/agent-guidance.md` — Update tips
+
+Update the Context Window Tips `--fields` example:
+```
+- Use `--json --fields` to select specific fields and reduce output. Example: `sentry issue list --json --fields shortId,title,count,userCount,lastSeen`. Run `<command> --help` to see available fields.
+```
+
+Add Common Mistakes entry:
+```
+- **Using `sentry api` when CLI commands suffice**: `sentry issue list --json` includes `count`, `userCount`, `firstSeen`, `lastSeen`, `priority` at the top level. Use `--fields` to select. Run `--help` to see all available fields.
+```
+
+### 9. Register schemas on other key commands (stretch)
+
+Apply the same pattern to other commands that have existing Zod schemas:
+- `team list` → `SentryTeamSchema`
+- `repo list` → `SentryRepositorySchema`
+- `trace list` → `TransactionListItemSchema`
+- `span list` → `SpanListItemSchema`
+- `log list` → `SentryLogSchema`
+- `trial list` → `ProductTrialSchema`
+
+## Files Modified
+
+| File | Change |
+|------|--------|
+| `src/lib/formatters/output.ts` | Add `schema` to `OutputConfig<T>`, add `SchemaFieldInfo` type, add `extractSchemaFields()` |
+| `src/lib/command.ts` | Enrich `--fields` brief and `fullDescription` from schema, attach schema to command |
+| `src/lib/introspect.ts` | Add `jsonFields` to `CommandInfo`, extract from command's `__jsonSchema` |
+| `src/types/sentry.ts` | Add `SentryIssueSchema` |
+| `src/commands/issue/list.ts` | Register `SentryIssueSchema` on output config |
+| `src/commands/help.ts` | Render `jsonFields` in human help output |
+| `script/generate-skill.ts` | Render `jsonFields` as table in reference docs |
+| `docs/src/content/docs/agent-guidance.md` | Update tips and common mistakes |
+| `plugins/sentry-cli/skills/sentry-cli/*` | Auto-regenerated |
+
+## Verification
+
+1. `bun run typecheck` — types compile
+2. `bun test` — all tests pass
+3. `bun run dev -- issue list --help` — shows JSON fields section in help output
+4. `bun run dev -- issue list --help` — `--fields` flag brief lists available field names
+5. `bun run dev -- help issue list` — shows JSON fields section
+6. `bun run dev -- help issue list --json` — includes `jsonFields` array in output
+7. `bun run generate:skill` && `bun run check:skill` — SKILL.md regenerated, check passes
+8. Inspect `plugins/sentry-cli/skills/sentry-cli/references/issues.md` — JSON fields table present
+9. `bun run lint` — no lint errors
