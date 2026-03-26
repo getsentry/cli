@@ -302,17 +302,17 @@ export const DiscoverAggregateFunctionSchema = z.enum(
 /**
  * Valid display types per widget dataset.
  *
- * Source: sentry/static/app/views/dashboards/datasetConfig/ @ a42668e
+ * Source: sentry/static/app/views/dashboards/datasetConfig/ @ a42668e87cc8a0b7410ac2acecee6074c52f376f
  * Each entry mirrors `supportedDisplayTypes` from the corresponding config:
  *
- *   issues.tsx         https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/issues.tsx#L90-L95
- *   spans.tsx          https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/spans.tsx#L287-L297
- *   errors.tsx         https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/errors.tsx#L115-L123
- *   transactions.tsx   https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/transactions.tsx#L76-L84
- *   releases.tsx       https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/releases.tsx#L90-L98
- *   logs.tsx           https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/logs.tsx#L201-L209
- *   traceMetrics.tsx   https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/traceMetrics.tsx#L285-L291
- *   mobileAppSize.tsx  https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/mobileAppSize.tsx#L255
+ *   issues.tsx         https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/issues.tsx#L90-L95
+ *   spans.tsx          https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/spans.tsx#L287-L297
+ *   errors.tsx         https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/errors.tsx#L115-L123
+ *   transactions.tsx   https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/transactions.tsx#L76-L84
+ *   releases.tsx       https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/releases.tsx#L90-L98
+ *   logs.tsx           https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/logs.tsx#L201-L209
+ *   traceMetrics.tsx   https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/traceMetrics.tsx#L285-L291
+ *   mobileAppSize.tsx  https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/mobileAppSize.tsx#L255
  *
  * stacked_area is included for datasets that support timeseries (not in Sentry's UI picker
  * but accepted by the API and handled by the CLI's query engine).
