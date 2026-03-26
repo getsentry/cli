@@ -506,6 +506,7 @@ type IssueShortcutResult = {
 /** Options for resolving issue-based shortcuts */
 type IssueShortcutOptions = {
   parsed: ReturnType<typeof parseOrgProjectArg>;
+  eventId: string;
   issueId: string | undefined;
   issueShortId: string | undefined;
   cwd: string;
@@ -523,7 +524,7 @@ type IssueShortcutOptions = {
 async function resolveIssueShortcut(
   options: IssueShortcutOptions
 ): Promise<IssueShortcutResult | null> {
-  const { parsed, issueId, issueShortId, cwd, spans } = options;
+  const { parsed, eventId, issueId, issueShortId, cwd, spans } = options;
   const log = logger.withTag("event.view");
 
   // Issue URL shortcut: fetch the latest event directly via the issue ID.
@@ -539,13 +540,9 @@ async function resolveIssueShortcut(
   }
 
   // Issue short ID auto-redirect: user passed an issue short ID
-  // (e.g., "BRUNCHIE-APP-29" or "figma/FULLSCREEN-2RN") instead of a hex
-  // event ID. Resolve the issue and show its latest event.
+  // (e.g., "BRUNCHIE-APP-29" or "CLI-G5/abc123...") instead of or
+  // alongside a hex event ID. Resolve the issue to get org/project.
   if (issueShortId) {
-    log.warn(
-      `'${issueShortId}' is an issue short ID, not an event ID. Showing the latest event.`
-    );
-
     // Use the explicit org from the parsed target if available (e.g.,
     // "figma/" → org-all with org "figma"), otherwise fall back to
     // auto-detection via DSN/env/config.
@@ -558,6 +555,25 @@ async function resolveIssueShortcut(
       );
     }
 
+    // When the user specified a specific event ID (SHORT-ID/EVENT-ID),
+    // resolve the issue to get the project, then fetch the specific event.
+    if (eventId !== "latest") {
+      const issue = await getIssueByShortId(resolved.org, issueShortId);
+      const issueProject = issue.project?.slug;
+      if (issueProject) {
+        const event = await getEvent(resolved.org, issueProject, eventId);
+        const data: EventViewData = { event, trace: null };
+        return {
+          org: resolved.org,
+          data,
+          hint: `Viewing event ${eventId} for issue ${issueShortId}`,
+        };
+      }
+    }
+
+    log.warn(
+      `'${issueShortId}' is an issue short ID, not an event ID. Showing the latest event.`
+    );
     const data = await resolveIssueShortIdEvent(
       issueShortId,
       resolved.org,
@@ -623,9 +639,11 @@ export const viewCommand = buildCommand({
     const parsed = parseOrgProjectArg(targetArg);
 
     // Handle issue-based shortcuts (issue URLs and short IDs) before
-    // normal event resolution. Both paths fetch the latest event.
+    // normal event resolution. When eventId is "latest", fetches the
+    // latest event; otherwise fetches the specific event.
     const issueShortcut = await resolveIssueShortcut({
       parsed,
+      eventId,
       issueId,
       issueShortId,
       cwd,
