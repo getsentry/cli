@@ -462,10 +462,11 @@ async function resolveTargetsFromParsedArg(
 
       if (matches.length === 0) {
         // Check if the slug matches an organization — common mistake.
-        // Unlike simpler list commands that auto-redirect via orgAllFallback,
-        // issue list has custom per-project query logic (query rewriting,
-        // budget redistribution) that doesn't support org-all mode here.
-        // Throwing with actionable hints is the correct behavior.
+        // The orgSlugMatchBehavior: "redirect" pre-check handles this for
+        // cached orgs (hot path). This is the cold-cache fallback: org
+        // isn't cached yet, so the pre-check couldn't fire. We throw a
+        // ResolutionError with a hint — after this command, the org will
+        // be cached and future runs will auto-redirect.
         const isOrg = orgs.some((o) => o.slug === parsed.projectSlug);
         if (isOrg) {
           throw new ResolutionError(
@@ -1601,6 +1602,10 @@ export const listCommand = buildListCommand("issue", {
       cwd,
       flags,
       parsed,
+      // When a bare slug matches a cached org, silently redirect to org-all
+      // mode instead of erroring (CLI-MC, 17 users). The user typed an org
+      // slug — their intent is clear, and org-all handles it correctly.
+      orgSlugMatchBehavior: "redirect",
       // Multi-target modes (auto-detect, explicit, project-search) handle
       // compound cursor pagination themselves via handleResolvedTargets.
       allowCursorInModes: ["auto-detect", "explicit", "project-search"],
