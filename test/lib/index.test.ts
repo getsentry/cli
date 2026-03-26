@@ -1,25 +1,28 @@
 import { describe, expect, test } from "bun:test";
-import sentry from "../../src/index.js";
+import createSentrySDK, { SentryError } from "../../src/index.js";
 
-describe("sentry() library function", () => {
-  test("returns version string for --version", async () => {
-    const result = await sentry("--version");
+describe("createSentrySDK() library API", () => {
+  test("sdk.run returns version string for --version", async () => {
+    const sdk = createSentrySDK();
+    const result = await sdk.run("--version");
     expect(typeof result).toBe("string");
     // Version output is a semver string like "0.0.0-dev" or "0.21.0"
     expect(result as string).toMatch(/\d+\.\d+\.\d+/);
   });
 
-  test("returns parsed object for help command in JSON mode", async () => {
-    const result = await sentry("help");
+  test("sdk.run returns parsed object for help command in JSON mode", async () => {
+    const sdk = createSentrySDK();
+    const result = await sdk.run("help");
     // help --json returns a parsed object with routes
     expect(typeof result).toBe("object");
     expect(result).toHaveProperty("routes");
   });
 
-  test("throws when auth is required but missing", async () => {
+  test("sdk.run throws when auth is required but missing", async () => {
+    const sdk = createSentrySDK();
     try {
       // issue list requires auth — with no token and isolated config, it should fail
-      await sentry("issue", "list");
+      await sdk.run("issue", "list");
       expect.unreachable("Should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(Error);
@@ -29,8 +32,9 @@ describe("sentry() library function", () => {
   });
 
   test("process.env is unchanged after successful call", async () => {
+    const sdk = createSentrySDK();
     const envBefore = { ...process.env };
-    await sentry("--version");
+    await sdk.run("--version");
     // Check that no new SENTRY_OUTPUT_FORMAT key leaked
     expect(process.env.SENTRY_OUTPUT_FORMAT).toBe(
       envBefore.SENTRY_OUTPUT_FORMAT
@@ -39,9 +43,10 @@ describe("sentry() library function", () => {
   });
 
   test("process.env is unchanged after failed call", async () => {
+    const sdk = createSentrySDK();
     const envBefore = { ...process.env };
     try {
-      await sentry("issue", "list");
+      await sdk.run("issue", "list");
     } catch {
       // expected
     }
@@ -51,13 +56,69 @@ describe("sentry() library function", () => {
   });
 
   test("{ text: true } returns string for help command", async () => {
-    const result = await sentry("help", { text: true });
+    const sdk = createSentrySDK({ text: true });
+    const result = await sdk.run("help");
     expect(typeof result).toBe("string");
     expect(result as string).toContain("sentry");
   });
 
   test("accepts cwd option without error", async () => {
-    const result = await sentry("--version", { cwd: "/tmp" });
+    const sdk = createSentrySDK({ cwd: "/tmp" });
+    const result = await sdk.run("--version");
     expect(typeof result).toBe("string");
+  });
+
+  test("nested namespaces (dashboard.widget)", () => {
+    const sdk = createSentrySDK();
+    expect(sdk.dashboard.widget).toBeDefined();
+    expect(typeof sdk.dashboard.widget.add).toBe("function");
+  });
+
+  test(
+    "token option is plumbed through",
+    async () => {
+      const sdk = createSentrySDK({ token: "invalid-token" });
+      try {
+        await sdk.org.list();
+        expect.unreachable("Should have thrown");
+      } catch (err) {
+        expect(err).toBeInstanceOf(SentryError);
+      }
+    },
+    { timeout: 15_000 }
+  );
+
+  test("sdk.run rejects streaming flag --follow", async () => {
+    const sdk = createSentrySDK();
+    try {
+      await sdk.run("log", "list", "--follow");
+      expect.unreachable("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(SentryError);
+      expect((err as SentryError).message).toContain("--follow");
+      expect((err as SentryError).message).toContain("not supported");
+    }
+  });
+
+  test("sdk.run rejects streaming flag --refresh", async () => {
+    const sdk = createSentrySDK();
+    try {
+      await sdk.run("issue", "list", "--refresh");
+      expect.unreachable("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(SentryError);
+      expect((err as SentryError).message).toContain("--refresh");
+    }
+  });
+
+  test("sdk.run rejects streaming short flag -f", async () => {
+    const sdk = createSentrySDK();
+    try {
+      await sdk.run("log", "list", "-f");
+      expect.unreachable("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(SentryError);
+      expect((err as SentryError).message).toContain("-f");
+    }
   });
 });

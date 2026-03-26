@@ -54,6 +54,8 @@ docs/.astro
 
 # Generated files (rebuilt at build time)
 src/generated/
+src/sdk.generated.ts
+src/sdk.generated.d.cts
 
 # OpenCode
 .opencode/

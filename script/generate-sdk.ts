@@ -2,156 +2,28 @@
 /**
  * Generate typed SDK methods from the Stricli command tree.
  *
- * Walks the route tree via introspection, extracts flag definitions,
- * and generates src/sdk.generated.ts with typed parameter interfaces
- * and method implementations that call invokeCommand() directly.
+ * Walks the ENTIRE route tree via introspection, extracts flag definitions
+ * and JSON schemas, and generates src/sdk.generated.ts with typed parameter
+ * interfaces and method implementations that call invokeCommand() directly.
+ *
+ * Zero manual config — all commands are auto-discovered.
  *
  * Run: bun run generate:sdk
  */
 
 import { routes } from "../src/app.js";
+import { extractSchemaFields } from "../src/lib/formatters/output.js";
 import {
   type Command,
   type FlagDef,
   isCommand,
+  isRouteMap,
+  type RouteMap,
 } from "../src/lib/introspect.js";
 
 // ---------------------------------------------------------------------------
-// SDK Command Configuration
+// Configuration
 // ---------------------------------------------------------------------------
-
-/**
- * Positional argument handling config.
- * - `null` — no positional arg
- * - `{ name, required? }` — single named positional
- * - `{ format, params }` — composite positional (e.g., "{org}/{project}")
- */
-type PositionalConfig =
-  | null
-  | { name: string; required?: boolean }
-  | { format: string; params: string[] };
-
-/** Configuration for a single SDK command. */
-type SDKCommandConfig = {
-  /** CLI command path segments */
-  path: string[];
-  /** SDK namespace (e.g., "organizations") */
-  namespace: string;
-  /** SDK method name (e.g., "list") */
-  method: string;
-  /** TypeScript return type string */
-  returnType: string;
-  /** How to handle positional args */
-  positional: PositionalConfig;
-  /** Extra type imports needed for the return type */
-  typeImports?: string[];
-};
-
-const SDK_COMMANDS: SDKCommandConfig[] = [
-  // Organizations
-  {
-    path: ["org", "list"],
-    namespace: "organizations",
-    method: "list",
-    returnType: "SentryOrganization[]",
-    positional: null,
-    typeImports: ["SentryOrganization"],
-  },
-  {
-    path: ["org", "view"],
-    namespace: "organizations",
-    method: "get",
-    returnType: "SentryOrganization",
-    positional: { name: "org", required: false },
-    typeImports: ["SentryOrganization"],
-  },
-  // Projects
-  {
-    path: ["project", "list"],
-    namespace: "projects",
-    method: "list",
-    returnType:
-      "{ data: SentryProject[]; hasMore: boolean; nextCursor?: string }",
-    positional: { name: "target", required: false },
-    typeImports: ["SentryProject"],
-  },
-  {
-    path: ["project", "view"],
-    namespace: "projects",
-    method: "get",
-    returnType: "SentryProject[]",
-    positional: { name: "target", required: false },
-    typeImports: ["SentryProject"],
-  },
-  // Issues
-  {
-    path: ["issue", "list"],
-    namespace: "issues",
-    method: "list",
-    returnType:
-      "{ data: SentryIssue[]; hasMore: boolean; nextCursor?: string }",
-    positional: {
-      format: "{org}/{project}",
-      params: ["org", "project"],
-    },
-    typeImports: ["SentryIssue"],
-  },
-  {
-    path: ["issue", "view"],
-    namespace: "issues",
-    method: "get",
-    returnType: "SentryIssue & { event: SentryEvent | null }",
-    positional: { name: "issueId", required: true },
-    typeImports: ["SentryIssue", "SentryEvent"],
-  },
-  // Events
-  {
-    path: ["event", "view"],
-    namespace: "events",
-    method: "get",
-    returnType: "SentryEvent",
-    positional: { name: "eventId", required: true },
-    typeImports: ["SentryEvent"],
-  },
-  // Traces
-  {
-    path: ["trace", "list"],
-    namespace: "traces",
-    method: "list",
-    returnType:
-      "{ data: TransactionListItem[]; hasMore: boolean; nextCursor?: string }",
-    positional: { name: "target", required: false },
-    typeImports: ["TransactionListItem"],
-  },
-  {
-    path: ["trace", "view"],
-    namespace: "traces",
-    method: "get",
-    returnType:
-      "{ traceId: string; duration: number; spanCount: number; spans: TraceSpan[] }",
-    positional: { name: "traceId", required: true },
-    typeImports: ["TraceSpan"],
-  },
-  // Spans
-  {
-    path: ["span", "list"],
-    namespace: "spans",
-    method: "list",
-    returnType:
-      "{ data: SpanListItem[]; hasMore: boolean; nextCursor?: string }",
-    positional: { name: "target", required: false },
-    typeImports: ["SpanListItem"],
-  },
-  // Teams
-  {
-    path: ["team", "list"],
-    namespace: "teams",
-    method: "list",
-    returnType: "{ data: SentryTeam[]; hasMore: boolean; nextCursor?: string }",
-    positional: { name: "target", required: false },
-    typeImports: ["SentryTeam"],
-  },
-];
 
 /** Flags that are internal to the CLI framework — never exposed as SDK params */
 const INTERNAL_FLAGS = new Set([
@@ -162,35 +34,28 @@ const INTERNAL_FLAGS = new Set([
   "log-level",
   "verbose",
   "fields",
+  // Streaming flags produce infinite output — not supported in library mode
+  "refresh",
+  "follow",
 ]);
 
+/** Regex for stripping angle-bracket/ellipsis decorators from placeholder names */
+const PLACEHOLDER_CLEAN_RE = /[<>.]/g;
+
+/** Regex to check if a name is a valid unquoted TS identifier */
+const VALID_IDENT_RE = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/;
+
 // ---------------------------------------------------------------------------
-// Introspection
+// Types
 // ---------------------------------------------------------------------------
 
-/**
- * Resolve a command from the route tree by path.
- *
- * Uses Stricli's `getRoutingTargetForInput` which exists on the runtime
- * RouteMap objects but isn't in our simplified introspect.ts types.
- */
-function resolveCommandFromRoutes(path: string[]): Command {
-  // biome-ignore lint/suspicious/noExplicitAny: Stricli runtime route objects have getRoutingTargetForInput
-  let target: any = routes;
-  for (const segment of path) {
-    if (!target || typeof target.getRoutingTargetForInput !== "function") {
-      throw new Error(`Expected route map at ${segment}`);
-    }
-    target = target.getRoutingTargetForInput(segment);
-    if (!target) {
-      throw new Error(`Command not found: ${path.join(" ")}`);
-    }
-  }
-  if (!isCommand(target)) {
-    throw new Error(`Not a command: ${path.join(" ")}`);
-  }
-  return target as Command;
-}
+/** Discovered command with its route path and metadata. */
+type DiscoveredCommand = {
+  /** Route path segments (e.g., ["org", "list"]) */
+  path: string[];
+  /** The Stricli command object */
+  command: Command;
+};
 
 /** Extracted SDK flag info. */
 type SdkFlagInfo = {
@@ -202,6 +67,41 @@ type SdkFlagInfo = {
   brief?: string;
   values?: string[];
 };
+
+// ---------------------------------------------------------------------------
+// Route Tree Walking
+// ---------------------------------------------------------------------------
+
+/**
+ * Recursively discover all visible commands in the route tree.
+ * Skips hidden routes (plural aliases, internal commands).
+ */
+function discoverCommands(
+  target: RouteMap | Command,
+  pathPrefix: string[]
+): DiscoveredCommand[] {
+  if (isCommand(target)) {
+    return [{ path: pathPrefix, command: target }];
+  }
+
+  if (!isRouteMap(target)) {
+    return [];
+  }
+
+  const results: DiscoveredCommand[] = [];
+  for (const entry of target.getAllEntries()) {
+    if (entry.hidden) {
+      continue;
+    }
+    const childPath = [...pathPrefix, entry.name.original];
+    results.push(...discoverCommands(entry.target, childPath));
+  }
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// Flag Extraction
+// ---------------------------------------------------------------------------
 
 /** Infer the TypeScript type for a single flag definition. */
 function inferFlagType(def: FlagDef): {
@@ -271,27 +171,157 @@ function extractSdkFlags(command: Command): SdkFlagInfo[] {
 }
 
 // ---------------------------------------------------------------------------
-// Code Generation
+// Positional Handling
 // ---------------------------------------------------------------------------
 
+/**
+ * Derive positional parameter info from the command's positional placeholder.
+ *
+ * - No positional → null
+ * - Single or compound placeholder → { name, variadic: false }
+ * - Variadic (e.g., "<args...>") → { name, variadic: true }
+ */
+type PositionalInfo =
+  | null
+  | { name: string; variadic: false }
+  | { name: string; variadic: true };
+
+function derivePositional(command: Command): PositionalInfo {
+  const params = command.parameters?.positional;
+  if (!params) {
+    return null;
+  }
+
+  if (params.kind === "array") {
+    const raw = params.parameter.placeholder ?? "args";
+    const name = raw.replace(PLACEHOLDER_CLEAN_RE, "");
+    return { name, variadic: true };
+  }
+
+  if (params.kind === "tuple" && params.parameters.length > 0) {
+    // For tuple positionals, combine all placeholders into a single string param.
+    // The command's internal parser handles splitting (e.g., "org/project/trace-id").
+    const placeholders = params.parameters.map(
+      (p, i) => p.placeholder ?? `arg${i}`
+    );
+    const name = placeholders.join("/").replace(PLACEHOLDER_CLEAN_RE, "");
+    return { name, variadic: false };
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Return Type Generation from __jsonSchema
+// ---------------------------------------------------------------------------
+
+/** Map schema field type strings to TypeScript types. */
+function mapSchemaType(schemaType: string): string {
+  // Handle union types like "string | null"
+  if (schemaType.includes(" | ")) {
+    return schemaType
+      .split(" | ")
+      .map((t) => mapSchemaType(t.trim()))
+      .join(" | ");
+  }
+  switch (schemaType) {
+    case "string":
+      return "string";
+    case "number":
+      return "number";
+    case "boolean":
+      return "boolean";
+    case "object":
+      return "Record<string, unknown>";
+    case "array":
+      return "unknown[]";
+    case "null":
+      return "null";
+    default:
+      return "unknown";
+  }
+}
+
+/** Check if a name needs quoting as a TS property (contains dots, dashes, etc.) */
+function needsQuoting(name: string): boolean {
+  return !VALID_IDENT_RE.test(name);
+}
+
+/** Format a field name as a valid TS property key. */
+function formatPropertyName(name: string, opt: string): string {
+  if (needsQuoting(name)) {
+    return `"${name}"${opt}`;
+  }
+  return `${name}${opt}`;
+}
+
+/**
+ * Generate a TypeScript type string from a command's __jsonSchema.
+ * Returns null if no schema is attached.
+ */
+function generateReturnType(
+  command: Command,
+  typeName: string
+): { typeDef: string; typeName: string } | null {
+  // biome-ignore lint/suspicious/noExplicitAny: __jsonSchema is a non-standard property
+  const schema = (command as any).__jsonSchema;
+  if (!schema) {
+    return null;
+  }
+
+  const fields = extractSchemaFields(schema);
+  if (fields.length === 0) {
+    return null;
+  }
+
+  const fieldLines = fields.map((f) => {
+    const opt = f.optional ? "?" : "";
+    const desc = f.description ? `  /** ${f.description} */\n` : "";
+    const prop = formatPropertyName(f.name, opt);
+    return `${desc}  ${prop}: ${mapSchemaType(f.type)};`;
+  });
+
+  const typeDef = `export type ${typeName} = {\n${fieldLines.join("\n")}\n};`;
+  return { typeDef, typeName };
+}
+
+// ---------------------------------------------------------------------------
+// Code Generation Helpers
+// ---------------------------------------------------------------------------
+
+/** Capitalize a string, converting kebab-case to PascalCase ("auth-token" → "AuthToken"). */
+function capitalize(s: string): string {
+  return s.replace(/(^|-)([a-z])/g, (_, _sep, c: string) => c.toUpperCase());
+}
+
+/** Regex for converting kebab-case to camelCase */
+const KEBAB_TO_CAMEL_RE = /-([a-z])/g;
+
+/** Regex for converting slash-separated to camelCase */
+const SLASH_TO_CAMEL_RE = /\/([a-z])/g;
+
+function camelCase(s: string): string {
+  return s
+    .replace(SLASH_TO_CAMEL_RE, (_, c) => c.toUpperCase())
+    .replace(KEBAB_TO_CAMEL_RE, (_, c) => c.toUpperCase());
+}
+
+/** Build a PascalCase type name from path segments (e.g., ["org", "list"] → "OrgList") */
+function buildTypeName(path: string[]): string {
+  return path.map(capitalize).join("");
+}
+
+/** Generate the params interface for a command. */
 function generateParamsInterface(
-  config: SDKCommandConfig,
+  path: string[],
+  positional: PositionalInfo,
   flags: SdkFlagInfo[]
-): { name: string; code: string } {
-  const interfaceName = `${capitalize(config.namespace)}${capitalize(config.method)}Params`;
+): { name: string; code: string } | null {
   const lines: string[] = [];
 
-  if (config.positional) {
-    if ("format" in config.positional) {
-      for (const param of config.positional.params) {
-        lines.push(`  /** ${capitalize(param)} slug */`);
-        lines.push(`  ${param}: string;`);
-      }
-    } else {
-      const req = config.positional.required ? "" : "?";
-      lines.push(`  /** ${capitalize(config.positional.name)} identifier */`);
-      lines.push(`  ${config.positional.name}${req}: string;`);
-    }
+  if (positional && !positional.variadic) {
+    lines.push("  /** Positional argument */");
+    lines.push(`  ${camelCase(positional.name)}?: string;`);
   }
 
   for (const flag of flags) {
@@ -302,13 +332,21 @@ function generateParamsInterface(
     lines.push(`  ${camelCase(flag.name)}${opt}: ${flag.tsType};`);
   }
 
+  if (lines.length === 0) {
+    return null;
+  }
+
+  const interfaceName = `${buildTypeName(path)}Params`;
   const code = `export type ${interfaceName} = {\n${lines.join("\n")}\n};`;
   return { name: interfaceName, code };
 }
 
+/** Generate the method body (invoke call) for a command. */
 function generateMethodBody(
-  config: SDKCommandConfig,
-  flags: SdkFlagInfo[]
+  path: string[],
+  positional: PositionalInfo,
+  flags: SdkFlagInfo[],
+  returnType: string
 ): string {
   const flagEntries = flags.map((f) => {
     const camel = camelCase(f.name);
@@ -319,117 +357,248 @@ function generateMethodBody(
   });
 
   let positionalExpr = "[]";
-  if (config.positional) {
-    if ("format" in config.positional) {
-      const template = config.positional.format.replace(
-        /\{(\w+)\}/g,
-        (_, p) => `\${params.${p}}`
-      );
-      positionalExpr = `[\`${template}\`]`;
-    } else if (config.positional.required) {
-      positionalExpr = `[params.${config.positional.name}]`;
+  if (positional) {
+    if (positional.variadic) {
+      positionalExpr = "positional";
     } else {
-      positionalExpr = `params?.${config.positional.name} ? [params.${config.positional.name}] : []`;
+      const camel = camelCase(positional.name);
+      positionalExpr = `params?.${camel} ? [params.${camel}] : []`;
     }
   }
 
   const flagObj =
     flagEntries.length > 0 ? `{ ${flagEntries.join(", ")} }` : "{}";
 
-  return `invoke<${config.returnType}>(${JSON.stringify(config.path)}, ${flagObj}, ${positionalExpr})`;
+  return `invoke<${returnType}>(${JSON.stringify(path)}, ${flagObj}, ${positionalExpr})`;
 }
 
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
+// ---------------------------------------------------------------------------
+// Namespace Tree Building
+// ---------------------------------------------------------------------------
+
+/**
+ * A node in the namespace tree. Leaf nodes have a method implementation,
+ * branch nodes contain child namespaces.
+ */
+type NamespaceNode = {
+  methods: Map<string, string>; // method name → generated code
+  typeDecls: Map<string, string>; // method name → type declaration
+  children: Map<string, NamespaceNode>;
+};
+
+function createNamespaceNode(): NamespaceNode {
+  return { methods: new Map(), typeDecls: new Map(), children: new Map() };
 }
 
-function camelCase(s: string): string {
-  return s.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-}
-
-/** Check if all positional params are optional for a given config. */
-function isAllOptional(config: SDKCommandConfig): boolean {
-  if (!config.positional) {
-    return true;
+/**
+ * Insert a command's method and type declaration into the namespace tree.
+ * Path ["org", "list"] → root.children["org"].methods["list"]
+ * Path ["dashboard", "widget", "add"] → root.children["dashboard"].children["widget"].methods["add"]
+ */
+function insertMethod(
+  tree: NamespaceNode,
+  path: string[],
+  methodCode: string,
+  typeDecl: string
+): void {
+  let node = tree;
+  const namespaceParts = path.slice(0, -1);
+  const leafName = path.at(-1);
+  if (!leafName) {
+    return;
   }
-  if ("format" in config.positional) {
-    return false;
+
+  for (const part of namespaceParts) {
+    let child = node.children.get(part);
+    if (!child) {
+      child = createNamespaceNode();
+      node.children.set(part, child);
+    }
+    node = child;
   }
-  return !config.positional.required;
+
+  node.methods.set(leafName, methodCode);
+  node.typeDecls.set(leafName, typeDecl);
+}
+
+/** Render a namespace node as TypeScript code (recursive). */
+function renderNamespaceNode(node: NamespaceNode, indent: string): string {
+  const parts: string[] = [];
+
+  // Render methods
+  for (const [, code] of node.methods) {
+    parts.push(code);
+  }
+
+  // Render child namespaces
+  for (const [name, child] of node.children) {
+    const childBody = renderNamespaceNode(child, `${indent}  `);
+    parts.push(`${indent}${name}: {\n${childBody}\n${indent}},`);
+  }
+
+  return parts.join("\n");
+}
+
+/** Render a namespace node as a TypeScript type declaration (recursive). */
+function renderNamespaceTypeNode(node: NamespaceNode, indent: string): string {
+  const parts: string[] = [];
+
+  // Render type declarations for methods
+  for (const [, decl] of node.typeDecls) {
+    parts.push(decl);
+  }
+
+  // Render child namespaces as nested object types
+  for (const [name, child] of node.children) {
+    const childBody = renderNamespaceTypeNode(child, `${indent}  `);
+    parts.push(`${indent}${name}: {\n${childBody}\n${indent}};`);
+  }
+
+  return parts.join("\n");
 }
 
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
-const typeImports = new Set<string>();
+const allCommands = discoverCommands(routes as unknown as RouteMap, []);
+console.log(`Discovered ${allCommands.length} commands`);
+
 const paramInterfaces: string[] = [];
-const namespaces = new Map<string, string[]>();
+const returnTypes: string[] = [];
+const root = createNamespaceNode();
 
-for (const config of SDK_COMMANDS) {
-  const command = resolveCommandFromRoutes(config.path);
+for (const { path, command } of allCommands) {
   const flags = extractSdkFlags(command);
+  const positional = derivePositional(command);
 
-  const params = generateParamsInterface(config, flags);
-  paramInterfaces.push(params.code);
-
-  const allOptional = isAllOptional(config);
-  const paramsArg = allOptional
-    ? `params?: ${params.name}`
-    : `params: ${params.name}`;
-
-  const body = generateMethodBody(config, flags);
-  const brief = command.brief || `${config.method} ${config.namespace}`;
-  const methodCode = `    /** ${brief} */\n    ${config.method}: (${paramsArg}): Promise<${config.returnType}> =>\n      ${body},`;
-
-  if (!namespaces.has(config.namespace)) {
-    namespaces.set(config.namespace, []);
-  }
-  const methods = namespaces.get(config.namespace);
-  if (methods) {
-    methods.push(methodCode);
+  // Generate return type from schema
+  const schemaTypeName = `${buildTypeName(path)}Result`;
+  const returnTypeInfo = generateReturnType(command, schemaTypeName);
+  const returnType = returnTypeInfo ? returnTypeInfo.typeName : "unknown";
+  if (returnTypeInfo) {
+    returnTypes.push(returnTypeInfo.typeDef);
   }
 
-  for (const t of config.typeImports ?? []) {
-    typeImports.add(t);
+  // Generate params interface
+  const params = generateParamsInterface(path, positional, flags);
+  if (params) {
+    paramInterfaces.push(params.code);
   }
+
+  // Determine method signature
+  const hasRequiredFlags = flags.some((f) => !f.optional);
+  const hasVariadicPositional = positional?.variadic === true;
+
+  let paramsArg: string;
+  let body: string;
+
+  if (hasVariadicPositional) {
+    // Variadic: (params: XParams, ...positional: string[]) or (params?: XParams, ...positional: string[])
+    // Required flags make params required even with variadic positionals
+    const paramsOpt = hasRequiredFlags ? "" : "?";
+    paramsArg = params
+      ? `params${paramsOpt}: ${params.name}, ...positional: string[]`
+      : "...positional: string[]";
+    body = generateMethodBody(path, positional, flags, returnType);
+  } else if (params) {
+    const paramsRequired = hasRequiredFlags;
+    paramsArg = paramsRequired
+      ? `params: ${params.name}`
+      : `params?: ${params.name}`;
+    body = generateMethodBody(path, positional, flags, returnType);
+  } else {
+    body = generateMethodBody(path, positional, flags, returnType);
+    paramsArg = "";
+  }
+
+  const brief = command.brief || path.join(" ");
+  const methodName = path.at(-1) ?? path[0];
+  const indent = "    ".repeat(path.length - 1);
+  const sig = paramsArg ? `(${paramsArg})` : "()";
+  const methodCode = [
+    `${indent}    /** ${brief} */`,
+    `${indent}    ${methodName}: ${sig}: Promise<${returnType}> =>`,
+    `${indent}      ${body},`,
+  ].join("\n");
+
+  // Type declaration: method signature without implementation
+  const typeDecl = [
+    `${indent}    /** ${brief} */`,
+    `${indent}    ${methodName}${sig}: Promise<${returnType}>;`,
+  ].join("\n");
+
+  insertMethod(root, path, methodCode, typeDecl);
 }
 
 // Build output
-const output = `// Auto-generated by script/generate-sdk.ts — DO NOT EDIT
-// Run \`bun run generate:sdk\` to regenerate.
-
-import type { buildInvoker } from "./lib/sdk-invoke.js";
-import type {
-  ${Array.from(typeImports).sort().join(",\n  ")},
-} from "./types/index.js";
-
-// --- Parameter types ---
-
-${paramInterfaces.join("\n\n")}
-
-// --- SDK factory ---
-
-/** Invoke function type from sdk-invoke.ts */
-type Invoke = ReturnType<typeof buildInvoker>;
-
-/**
- * Create the typed SDK method tree.
- * Called by createSentrySDK() with a bound invoker.
- * @internal
- */
-export function createSDKMethods(invoke: Invoke) {
-  return {
-${Array.from(namespaces.entries())
-  .map(([ns, methods]) => `    ${ns}: {\n${methods.join("\n")}\n    },`)
-  .join("\n")}
-  };
-}
-
-/** Return type of createSDKMethods — the typed SDK interface. */
-export type SentrySDK = ReturnType<typeof createSDKMethods>;
-`;
+const output = [
+  "// Auto-generated by script/generate-sdk.ts — DO NOT EDIT",
+  "// Run `bun run generate:sdk` to regenerate.",
+  "",
+  'import type { buildInvoker } from "./lib/sdk-invoke.js";',
+  "",
+  "// --- Return types (derived from __jsonSchema) ---",
+  "",
+  returnTypes.length > 0
+    ? returnTypes.join("\n\n")
+    : "// No commands have registered schemas yet.",
+  "",
+  "// --- Parameter types ---",
+  "",
+  paramInterfaces.length > 0
+    ? paramInterfaces.join("\n\n")
+    : "// No commands have parameters.",
+  "",
+  "// --- SDK factory ---",
+  "",
+  "/** Invoke function type from sdk-invoke.ts */",
+  "type Invoke = ReturnType<typeof buildInvoker>;",
+  "",
+  "/**",
+  " * Create the typed SDK method tree.",
+  " * Called by createSentrySDK() with a bound invoker.",
+  " * @internal",
+  " */",
+  "export function createSDKMethods(invoke: Invoke) {",
+  "  return {",
+  renderNamespaceNode(root, "    "),
+  "  };",
+  "}",
+  "",
+  "/** Return type of createSDKMethods — the typed SDK interface. */",
+  "export type SentrySDK = ReturnType<typeof createSDKMethods>;",
+  "",
+].join("\n");
 
 const outPath = "./src/sdk.generated.ts";
 await Bun.write(outPath, output);
 console.log(`Generated ${outPath}`);
+
+// Build standalone type declarations (.d.cts) for the npm bundle.
+// Contains only type exports — no runtime imports or implementations.
+const dtsOutput = [
+  "// Auto-generated by script/generate-sdk.ts — DO NOT EDIT",
+  "// Run `bun run generate:sdk` to regenerate.",
+  "",
+  "// --- Return types (derived from __jsonSchema) ---",
+  "",
+  returnTypes.length > 0
+    ? returnTypes.join("\n\n")
+    : "// No commands have registered schemas yet.",
+  "",
+  "// --- Parameter types ---",
+  "",
+  paramInterfaces.length > 0
+    ? paramInterfaces.join("\n\n")
+    : "// No commands have parameters.",
+  "",
+  "// --- SDK type ---",
+  "",
+  `export type SentrySDK = {\n${renderNamespaceTypeNode(root, "  ")}\n};`,
+  "",
+].join("\n");
+
+const dtsPath = "./src/sdk.generated.d.cts";
+await Bun.write(dtsPath, dtsOutput);
+console.log(`Generated ${dtsPath}`);

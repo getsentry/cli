@@ -3,16 +3,52 @@
  *
  * Resolves commands from the Stricli route tree and calls their wrapped
  * handler functions directly — no string parsing, no route scanning.
- * Shares env isolation, telemetry, and error wrapping with `sentry()`.
+ *
+ * Also provides `buildRunner()` — the variadic `run()` escape hatch
+ * that accepts CLI argument strings and routes them through Stricli.
+ *
+ * Both `buildInvoker` and `buildRunner` share the same env isolation,
+ * telemetry, zero-copy capture, and error wrapping guarantees via the
+ * `executeWithCapture` helper.
  *
  * @module
  */
 
 import { homedir } from "node:os";
-import type { SentryOptions } from "../index.js";
-import { SentryError } from "../index.js";
+import type { Span } from "@sentry/core";
 import type { Writer } from "../types/index.js";
 import { setEnv } from "./env.js";
+import { SentryError, type SentryOptions } from "./sdk-types.js";
+
+/** Flags that trigger infinite streaming — not supported in library mode. */
+const STREAMING_FLAGS = new Set(["--refresh", "--follow", "-f"]);
+
+/**
+ * Build an isolated env from options, inheriting the consumer's process.env.
+ * Sets auth token, host URL, default org/project, and output format.
+ */
+function buildIsolatedEnv(
+  options?: SentryOptions,
+  jsonByDefault = true
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  if (options?.token) {
+    env.SENTRY_AUTH_TOKEN = options.token;
+  }
+  if (options?.url) {
+    env.SENTRY_HOST = options.url;
+  }
+  if (options?.org) {
+    env.SENTRY_ORG = options.org;
+  }
+  if (options?.project) {
+    env.SENTRY_PROJECT = options.project;
+  }
+  if (jsonByDefault && !options?.text) {
+    env.SENTRY_OUTPUT_FORMAT = "json";
+  }
+  return env;
+}
 
 /** Type alias for command handler functions loaded from Stricli's route tree. */
 type CommandHandler = (...args: unknown[]) => unknown;
@@ -76,6 +112,7 @@ function buildSdkError(
   const message =
     stderrStr.replace(ANSI_RE, "").trim() ||
     (thrown instanceof Error ? thrown.message : undefined) ||
+    (thrown !== undefined ? String(thrown) : undefined) ||
     `Command failed with exit code ${exitCode}`;
   return new SentryError(message, exitCode, stderrStr);
 }
@@ -104,21 +141,19 @@ function parseOutput<T>(capturedResult: unknown, stdoutChunks: string[]): T {
   }
 }
 
-/** Build output capture writers and a SentryContext-compatible context object. */
-async function buildCaptureContext(
-  env: NodeJS.ProcessEnv,
-  cwd: string
-): Promise<{
+/** Captured output state from a command execution. */
+type CaptureContext = {
+  /** SentryContext-compatible object for direct command invocation. */
   context: {
     process: {
-      stdout: Writer & { captureObject?: (obj: unknown) => void };
+      stdout: Writer;
       stderr: Writer;
       stdin: NodeJS.ReadStream & { fd: 0 };
       env: NodeJS.ProcessEnv;
       cwd: () => string;
       exitCode: number;
     };
-    stdout: Writer & { captureObject?: (obj: unknown) => void };
+    stdout: Writer;
     stderr: Writer;
     stdin: NodeJS.ReadStream & { fd: 0 };
     env: NodeJS.ProcessEnv;
@@ -129,17 +164,23 @@ async function buildCaptureContext(
   stdoutChunks: string[];
   stderrChunks: string[];
   getCapturedResult: () => unknown;
-}> {
+};
+
+/** Build output capture writers and a SentryContext-compatible context object. */
+async function buildCaptureContext(
+  env: NodeJS.ProcessEnv,
+  cwd: string
+): Promise<CaptureContext> {
   const stdoutChunks: string[] = [];
   const stderrChunks: string[] = [];
-  let capturedResult: unknown;
+  const capturedResults: unknown[] = [];
 
-  const stdout: Writer & { captureObject?: (obj: unknown) => void } = {
+  const stdout: Writer = {
     write: (s: string) => {
       stdoutChunks.push(s);
     },
     captureObject: (obj: unknown) => {
-      capturedResult = obj;
+      capturedResults.push(obj);
     },
   };
   const stderr: Writer = {
@@ -172,15 +213,83 @@ async function buildCaptureContext(
     context,
     stdoutChunks,
     stderrChunks,
-    getCapturedResult: () => capturedResult,
+    getCapturedResult: () => {
+      if (capturedResults.length === 0) {
+        return;
+      }
+      return capturedResults.length === 1
+        ? capturedResults[0]
+        : capturedResults;
+    },
   };
+}
+
+/**
+ * Core execution wrapper shared by buildInvoker and buildRunner.
+ *
+ * Handles env isolation, capture context, telemetry, error wrapping,
+ * and output parsing. Both public factories become thin wrappers that
+ * only provide the executor callback.
+ */
+async function executeWithCapture<T>(
+  options: SentryOptions | undefined,
+  executor: (
+    captureCtx: CaptureContext,
+    span: Span | undefined
+  ) => Promise<void>
+): Promise<T> {
+  const env = buildIsolatedEnv(options);
+  const cwd = options?.cwd ?? process.cwd();
+  setEnv(env);
+
+  try {
+    const captureCtx = await buildCaptureContext(env, cwd);
+    const { withTelemetry } = await import("./telemetry.js");
+
+    try {
+      await withTelemetry(async (span) => executor(captureCtx, span), {
+        libraryMode: true,
+      });
+    } catch (thrown) {
+      await flushTelemetry();
+
+      // OutputError: data was already rendered (captured) before the throw.
+      // Return it despite the non-zero exit code — this is the "HTTP 404 body"
+      // pattern where the data is useful even though the operation "failed".
+      const captured = captureCtx.getCapturedResult();
+      if (captured !== undefined) {
+        return captured as T;
+      }
+
+      const exitCode =
+        extractExitCode(thrown) || captureCtx.context.process.exitCode || 1;
+      throw buildSdkError(captureCtx.stderrChunks, exitCode, thrown);
+    }
+
+    await flushTelemetry();
+
+    // Check exit code (Stricli sets it without throwing for some errors)
+    if (captureCtx.context.process.exitCode !== 0) {
+      throw buildSdkError(
+        captureCtx.stderrChunks,
+        captureCtx.context.process.exitCode
+      );
+    }
+
+    return parseOutput<T>(
+      captureCtx.getCapturedResult(),
+      captureCtx.stdoutChunks
+    );
+  } finally {
+    setEnv(process.env);
+  }
 }
 
 /**
  * Build an invoker function bound to the given options.
  *
  * The invoker handles env isolation, context building, telemetry,
- * zero-copy capture, and error wrapping — the same guarantees as `sentry()`.
+ * zero-copy capture, and error wrapping — used by the typed SDK methods.
  */
 export function buildInvoker(options?: SentryOptions) {
   return async function invokeCommand<T>(
@@ -188,65 +297,50 @@ export function buildInvoker(options?: SentryOptions) {
     flags: Record<string, unknown>,
     positionalArgs: string[]
   ): Promise<T> {
-    // Build isolated env (same as sentry())
-    const env: NodeJS.ProcessEnv = { ...process.env };
-    if (options?.token) {
-      env.SENTRY_AUTH_TOKEN = options.token;
-    }
-    env.SENTRY_OUTPUT_FORMAT = "json";
-
-    const cwd = options?.cwd ?? process.cwd();
-    setEnv(env);
-
-    try {
-      const { context, stdoutChunks, stderrChunks, getCapturedResult } =
-        await buildCaptureContext(env, cwd);
-
+    return await executeWithCapture<T>(options, async (ctx, span) => {
       const func = await resolveCommand(commandPath);
-      const { withTelemetry, setCommandSpanName } = await import(
-        "./telemetry.js"
-      );
+      if (span) {
+        const { setCommandSpanName } = await import("./telemetry.js");
+        setCommandSpanName(span, commandPath.join("."));
+      }
+      await func.call(ctx.context, { ...flags, json: true }, ...positionalArgs);
+    });
+  };
+}
 
-      try {
-        await withTelemetry(
-          async (span) => {
-            if (span) {
-              setCommandSpanName(span, commandPath.join("."));
-            }
-            await func.call(
-              context,
-              { ...flags, json: true },
-              ...positionalArgs
-            );
-          },
-          { libraryMode: true }
+/**
+ * Build a runner function bound to the given options.
+ *
+ * The runner accepts variadic CLI argument strings and routes them
+ * through Stricli — the escape hatch for commands not covered by
+ * typed SDK methods (or for passing raw CLI flags).
+ *
+ * Returns parsed JSON by default, or trimmed text for commands
+ * without JSON support.
+ *
+ * @throws {SentryError} When a streaming flag (`--refresh`, `--follow`, `-f`)
+ *   is passed — streaming is not supported in library mode.
+ */
+export function buildRunner(options?: SentryOptions) {
+  return async function run(...args: string[]): Promise<unknown> {
+    // Reject streaming flags — they produce infinite output unsuitable for library mode
+    for (const arg of args) {
+      if (STREAMING_FLAGS.has(arg)) {
+        throw new SentryError(
+          `Streaming flag "${arg}" is not supported in library mode. Use the CLI directly for streaming commands.`,
+          1,
+          ""
         );
-      } catch (thrown) {
-        await flushTelemetry();
-
-        // OutputError: data was already rendered (captured) before the throw.
-        // Return it despite the non-zero exit code — this is the "HTTP 404 body"
-        // pattern where the data is useful even though the operation "failed".
-        const captured = getCapturedResult();
-        if (captured !== undefined) {
-          return captured as T;
-        }
-
-        const exitCode =
-          extractExitCode(thrown) || context.process.exitCode || 1;
-        throw buildSdkError(stderrChunks, exitCode, thrown);
       }
-
-      await flushTelemetry();
-
-      // Check exit code (Stricli sets it without throwing for some errors)
-      if (context.process.exitCode !== 0) {
-        throw buildSdkError(stderrChunks, context.process.exitCode);
-      }
-
-      return parseOutput<T>(getCapturedResult(), stdoutChunks);
-    } finally {
-      setEnv(process.env);
     }
+
+    return await executeWithCapture<unknown>(options, async (ctx, span) => {
+      const { run: stricliRun } = await import("@stricli/core");
+      const { app } = await import("../app.js");
+      const { buildContext } = await import("../context.js");
+      // biome-ignore lint/suspicious/noExplicitAny: fakeProcess duck-types the process interface
+      const process_ = ctx.context.process as any;
+      await stricliRun(app, args, buildContext(process_, span));
+    });
   };
 }

@@ -28,23 +28,6 @@ import { filterFields, formatJson } from "./json.js";
 // Zero-copy object capture (library mode)
 // ---------------------------------------------------------------------------
 
-/**
- * Duck-type check for a Writer that supports zero-copy object capture.
- *
- * In library mode the stdout Writer implements `captureObject(obj)` so
- * the framework can hand off the final JSON object without serializing
- * it to a string. The CLI's real stdout (process.stdout) doesn't have
- * this method, so the check returns false and the existing serialize
- * path runs unchanged.
- */
-function hasCaptureObject(
-  writer: Writer
-): writer is Writer & { captureObject(obj: unknown): void } {
-  return (
-    typeof (writer as Record<string, unknown>).captureObject === "function"
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Output config (declared on buildCommand)
 // ---------------------------------------------------------------------------
@@ -275,7 +258,7 @@ function applyJsonExclude(
  * JSON-stringified and written as a single line.
  */
 function emitJsonObject(stdout: Writer, obj: unknown): void {
-  if (hasCaptureObject(stdout)) {
+  if (stdout.captureObject) {
     stdout.captureObject(obj);
     return;
   }

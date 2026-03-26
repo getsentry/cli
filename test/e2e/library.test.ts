@@ -2,7 +2,7 @@
  * Library Mode Smoke Tests
  *
  * Verifies the npm bundle works correctly when imported as a library.
- * Tests the variadic sentry() API and the typed createSentrySDK() API.
+ * Tests the createSentrySDK() API and the run() escape hatch.
  *
  * These tests run the bundled dist/index.cjs via Node.js subprocesses
  * to verify the real npm package behavior (not source imports).
@@ -132,7 +132,7 @@ describe("library mode (bundled)", () => {
 
   // --- Library exports ---
 
-  test("exports sentry as default", async () => {
+  test("exports createSentrySDK as default", async () => {
     const { stdout } = await runNodeScriptOk(`
       const mod = require('./dist/index.cjs');
       console.log(typeof mod.default);
@@ -140,15 +140,7 @@ describe("library mode (bundled)", () => {
     expect(stdout.trim()).toBe("function");
   });
 
-  test("exports sentry as named export", async () => {
-    const { stdout } = await runNodeScriptOk(`
-      const { sentry } = require('./dist/index.cjs');
-      console.log(typeof sentry);
-    `);
-    expect(stdout.trim()).toBe("function");
-  });
-
-  test("exports createSentrySDK", async () => {
+  test("exports createSentrySDK as named export", async () => {
     const { stdout } = await runNodeScriptOk(`
       const { createSentrySDK } = require('./dist/index.cjs');
       console.log(typeof createSentrySDK);
@@ -164,12 +156,13 @@ describe("library mode (bundled)", () => {
     expect(stdout.trim()).toBe("function");
   });
 
-  // --- Variadic API ---
+  // --- run() escape hatch ---
 
-  test("sentry('--version') returns version string", async () => {
+  test("sdk.run('--version') returns version string", async () => {
     const { stdout } = await runNodeScriptOk(`
-      const sentry = require('./dist/index.cjs').default;
-      sentry('--version').then(r => {
+      const { createSentrySDK } = require('./dist/index.cjs');
+      const sdk = createSentrySDK();
+      sdk.run('--version').then(r => {
         console.log(JSON.stringify({ type: typeof r, value: r }));
       }).catch(e => {
         console.log(JSON.stringify({ error: e.message }));
@@ -181,11 +174,12 @@ describe("library mode (bundled)", () => {
     expect(result.value).toMatch(/\d+\.\d+/);
   });
 
-  test("sentry() does not pollute process.env", async () => {
+  test("sdk.run() does not pollute process.env", async () => {
     const { stdout } = await runNodeScriptOk(`
-      const sentry = require('./dist/index.cjs').default;
+      const { createSentrySDK } = require('./dist/index.cjs');
+      const sdk = createSentrySDK();
       const before = process.env.SENTRY_OUTPUT_FORMAT;
-      sentry('--version').then(() => {
+      sdk.run('--version').then(() => {
         const after = process.env.SENTRY_OUTPUT_FORMAT;
         console.log(JSON.stringify({ before, after, same: before === after }));
       }).catch(() => {
@@ -197,10 +191,11 @@ describe("library mode (bundled)", () => {
     expect(result.same).toBe(true);
   });
 
-  test("sentry() throws SentryError on auth failure", async () => {
+  test("sdk.run() throws SentryError on auth failure", async () => {
     const { stdout } = await runNodeScriptOk(`
-      const { default: sentry, SentryError } = require('./dist/index.cjs');
-      sentry('org', 'list').then(() => {
+      const { createSentrySDK, SentryError } = require('./dist/index.cjs');
+      const sdk = createSentrySDK();
+      sdk.run('org', 'list').then(() => {
         console.log(JSON.stringify({ error: false }));
       }).catch(e => {
         console.log(JSON.stringify({
@@ -225,26 +220,28 @@ describe("library mode (bundled)", () => {
       const { createSentrySDK } = require('./dist/index.cjs');
       const sdk = createSentrySDK();
       console.log(JSON.stringify({
-        hasOrgs: typeof sdk.organizations === 'object',
-        hasIssues: typeof sdk.issues === 'object',
-        hasProjects: typeof sdk.projects === 'object',
-        orgListFn: typeof sdk.organizations.list === 'function',
-        issueListFn: typeof sdk.issues.list === 'function',
+        hasOrg: typeof sdk.org === 'object',
+        hasIssue: typeof sdk.issue === 'object',
+        hasProject: typeof sdk.project === 'object',
+        orgListFn: typeof sdk.org.list === 'function',
+        issueListFn: typeof sdk.issue.list === 'function',
+        hasRun: typeof sdk.run === 'function',
       }));
     `);
     const result = JSON.parse(stdout.trim());
-    expect(result.hasOrgs).toBe(true);
-    expect(result.hasIssues).toBe(true);
-    expect(result.hasProjects).toBe(true);
+    expect(result.hasOrg).toBe(true);
+    expect(result.hasIssue).toBe(true);
+    expect(result.hasProject).toBe(true);
     expect(result.orgListFn).toBe(true);
     expect(result.issueListFn).toBe(true);
+    expect(result.hasRun).toBe(true);
   });
 
   test("SDK throws SentryError on auth failure", async () => {
     const { stdout } = await runNodeScriptOk(`
       const { createSentrySDK, SentryError } = require('./dist/index.cjs');
       const sdk = createSentrySDK();
-      sdk.organizations.list().then(() => {
+      sdk.org.list().then(() => {
         console.log(JSON.stringify({ error: false }));
       }).catch(e => {
         console.log(JSON.stringify({
@@ -260,18 +257,17 @@ describe("library mode (bundled)", () => {
 
   // --- Type declarations ---
 
-  test("type declarations contain sentry function", async () => {
-    const content = await Bun.file(TYPES_PATH).text();
-    expect(content).toContain("export declare function sentry");
-    expect(content).toContain("export default sentry");
-  });
-
-  test("type declarations contain SentrySDK", async () => {
+  test("type declarations contain createSentrySDK", async () => {
     const content = await Bun.file(TYPES_PATH).text();
     expect(content).toContain("createSentrySDK");
     expect(content).toContain("SentrySDK");
-    expect(content).toContain("organizations");
-    expect(content).toContain("issues");
+  });
+
+  test("type declarations contain SDK namespaces", async () => {
+    const content = await Bun.file(TYPES_PATH).text();
+    // CLI route names (not plural)
+    expect(content).toContain("org:");
+    expect(content).toContain("issue:");
   });
 
   test("type declarations contain SentryError", async () => {

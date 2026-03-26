@@ -88,43 +88,32 @@ Credentials are stored in `~/.sentry/` with restricted permissions (mode 600).
 Use Sentry CLI programmatically in Node.js (≥22) or Bun without spawning a subprocess:
 
 ```typescript
-import sentry from "sentry";
+import createSentrySDK from "sentry";
 
-// Returns parsed JSON — same as `sentry issue list --json`
-const issues = await sentry("issue", "list", "-l", "5");
+const sdk = createSentrySDK({ token: "sntrys_..." });
 
-// Explicit auth token (auto-fills from SENTRY_AUTH_TOKEN env var)
-const orgs = await sentry("org", "list", { token: "sntrys_..." });
+// Typed methods for every CLI command
+const orgs = await sdk.org.list();
+const issues = await sdk.issue.list({ orgProject: "acme/frontend", limit: 5 });
+const issue = await sdk.issue.view({ issue: "ACME-123" });
 
-// Human-readable text output
-const text = await sentry("issue", "list", { text: true });
+// Nested commands
+await sdk.dashboard.widget.add({ display: "line", query: "count" }, "my-org/my-dashboard");
 
-// Errors are thrown as SentryError with .exitCode and .stderr
-try {
-  await sentry("issue", "view", "NONEXISTENT-1");
-} catch (err) {
-  console.error(err.exitCode, err.stderr);
-}
+// Escape hatch for any CLI command
+const version = await sdk.run("--version");
+const text = await sdk.run("issue", "list", "-l", "5");
 ```
 
 Options (all optional):
 - `token` — Auth token. Falls back to `SENTRY_AUTH_TOKEN` / `SENTRY_TOKEN` env vars.
-- `text` — Return human-readable string instead of parsed JSON.
+- `url` — Sentry instance URL for self-hosted (e.g., `"sentry.example.com"`).
+- `org` — Default organization slug (avoids passing it on every call).
+- `project` — Default project slug.
+- `text` — Return human-readable string instead of parsed JSON (affects `run()` only).
 - `cwd` — Working directory for DSN auto-detection. Defaults to `process.cwd()`.
 
-### Typed SDK
-
-For a more structured API with named parameters and typed returns:
-
-```typescript
-import { createSentrySDK } from "sentry";
-
-const sdk = createSentrySDK({ token: "sntrys_..." });
-
-const orgs = await sdk.organizations.list();
-const issues = await sdk.issues.list({ org: "acme", project: "frontend", limit: 5 });
-const issue = await sdk.issues.get({ issueId: "ACME-123" });
-```
+Errors are thrown as `SentryError` with `.exitCode` and `.stderr`.
 
 ---
 
