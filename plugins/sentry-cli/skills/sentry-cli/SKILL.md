@@ -157,6 +157,10 @@ sentry dashboard widget add <dashboard> "Latency Over Time" --display line --que
 sentry dashboard widget add <dashboard> "Top Endpoints" --display table \
   --query count --query p95:span.duration \
   --group-by transaction --sort -count --limit 10
+
+# Top Issues table — issue dataset defaults to --group-by issue automatically
+sentry dashboard widget add <dashboard> "Top Issues" --display table \
+  --dataset issue --sort -count --limit 10
 ```
 
 ### Common Mistakes

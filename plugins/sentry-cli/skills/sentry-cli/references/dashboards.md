@@ -101,6 +101,26 @@ Add a widget to a dashboard
 - `-s, --sort <value> - Order by (prefix - for desc, e.g. -count)`
 - `-n, --limit <value> - Result limit`
 
+**Examples:**
+
+```bash
+# Spans dataset table — top endpoints by p95 and count
+sentry dashboard widget add <dashboard> "Top Endpoints" --display table \
+  --query count --query p95:span.duration \
+  --group-by transaction --sort -count --limit 10
+
+# Issue dataset table — columns default to "issue" automatically
+sentry dashboard widget add <dashboard> "Top Issues" --display table \
+  --dataset issue --sort -count --limit 10
+
+# KPI big number
+sentry dashboard widget add <dashboard> "Error Count" --display big_number --query count
+
+# Line chart with filter
+sentry dashboard widget add <dashboard> "5xx Errors" --display line \
+  --query count --where "http.status_code:>=500"
+```
+
 ### `sentry dashboard widget edit <args...>`
 
 Edit a widget in a dashboard
