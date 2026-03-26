@@ -1335,7 +1335,7 @@ async function handleResolvedTargets(
 
   if (issuesWithOptions.length === 0) {
     const hint = footer ? `No issues found.\n\n${footer}` : "No issues found.";
-    return { items: [], hint, hasMore: false, errors };
+    return { items: [], hint, hasMore: false, hasPrev, errors };
   }
 
   const title =
