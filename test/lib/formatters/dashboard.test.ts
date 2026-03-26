@@ -595,6 +595,70 @@ describe("formatDashboardWithData", () => {
       const output = formatDashboardWithData(data);
       expect(output).toContain("(no data)");
     });
+
+    test("bar chart fills full widget width (no trailing gap)", () => {
+      // Create enough data points that bars should fill the chart area.
+      // With a tall widget (h=3), the renderer uses bar mode (not sparkline).
+      const values = Array.from({ length: 20 }, (_, i) => ({
+        timestamp: 1_700_000_000 + i * 3600,
+        value: 10 + (i % 5) * 10,
+      }));
+      const data = makeDashboardData({
+        widgets: [
+          makeWidget({
+            displayType: "bar",
+            layout: { x: 0, y: 0, w: 2, h: 3 },
+            data: makeTimeseriesData({
+              series: [{ label: "count()", values }],
+            }),
+          }),
+        ],
+      });
+      const output = formatDashboardWithData(data);
+      // The bars should contain block characters
+      expect(output).toContain("█");
+      // Should have Y-axis tick marks
+      expect(output).toContain("┤");
+    });
+
+    test("stacked bar chart renders with multiple series", () => {
+      const timestamps = Array.from({ length: 10 }, (_, i) => ({
+        timestamp: 1_700_000_000 + i * 3600,
+        value: 0,
+      }));
+      const data = makeDashboardData({
+        widgets: [
+          makeWidget({
+            displayType: "bar",
+            layout: { x: 0, y: 0, w: 2, h: 3 },
+            data: makeTimeseriesData({
+              series: [
+                {
+                  label: "series-a",
+                  values: timestamps.map((t, i) => ({
+                    ...t,
+                    value: 10 + i * 5,
+                  })),
+                },
+                {
+                  label: "series-b",
+                  values: timestamps.map((t, i) => ({
+                    ...t,
+                    value: 5 + i * 2,
+                  })),
+                },
+              ],
+            }),
+          }),
+        ],
+      });
+      const output = formatDashboardWithData(data);
+      // Should render bar blocks
+      expect(output).toContain("█");
+      // Legend for multi-series
+      expect(output).toContain("series-a");
+      expect(output).toContain("series-b");
+    });
   });
 
   describe("bar widget (rendered mode colors)", () => {
@@ -700,6 +764,136 @@ describe("formatDashboardWithData", () => {
       });
       const output = formatDashboardWithData(data);
       expect(output).toContain("(no data)");
+    });
+
+    test("right-aligns numeric columns", () => {
+      const data = makeDashboardData({
+        widgets: [
+          makeWidget({
+            displayType: "table",
+            data: makeTableData({
+              columns: [
+                { name: "endpoint", type: "string" },
+                { name: "count", type: "integer" },
+              ],
+              rows: [
+                { endpoint: "/api/a", count: 100 },
+                { endpoint: "/api/b", count: 5 },
+              ],
+            }),
+          }),
+        ],
+      });
+      const output = formatDashboardWithData(data);
+      // Numeric column header and values should appear
+      expect(output).toContain("COUNT");
+      expect(output).toContain("100");
+      expect(output).toContain("5");
+      // Separator line with ─ should be present
+      expect(output).toContain("\u2500");
+    });
+
+    test("uses compact numbers when columns overflow", () => {
+      const data = makeDashboardData({
+        widgets: [
+          makeWidget({
+            displayType: "table",
+            // Very narrow widget
+            layout: { x: 0, y: 0, w: 1, h: 2 },
+            data: makeTableData({
+              columns: [
+                { name: "very_long_column_name_here", type: "string" },
+                { name: "another_long_column_count", type: "integer" },
+              ],
+              rows: [
+                {
+                  very_long_column_name_here: "long-value-text-here",
+                  another_long_column_count: 1_500_000,
+                },
+              ],
+            }),
+          }),
+        ],
+      });
+      const output = formatDashboardWithData(data);
+      // Should use compact notation (1.5M instead of 1,500,000)
+      expect(output).toContain("1.5M");
+    });
+
+    test("truncates long cell values with ellipsis", () => {
+      const data = makeDashboardData({
+        widgets: [
+          makeWidget({
+            displayType: "table",
+            layout: { x: 0, y: 0, w: 1, h: 2 },
+            data: makeTableData({
+              columns: [
+                { name: "name", type: "string" },
+                { name: "very_long_description_column", type: "string" },
+              ],
+              rows: [
+                {
+                  name: "short",
+                  very_long_description_column:
+                    "this is a very long description that should be truncated",
+                },
+              ],
+            }),
+          }),
+        ],
+      });
+      const output = formatDashboardWithData(data);
+      // Should contain ellipsis from truncation
+      expect(output).toContain("\u2026");
+    });
+
+    test("expands last column to fill widget width", () => {
+      const data = makeDashboardData({
+        widgets: [
+          makeWidget({
+            displayType: "table",
+            // Full-width widget
+            layout: { x: 0, y: 0, w: 6, h: 2 },
+            data: makeTableData({
+              columns: [{ name: "id" }, { name: "val" }],
+              rows: [{ id: "a", val: 1 }],
+            }),
+          }),
+        ],
+      });
+      const output = formatDashboardWithData(data);
+      expect(output).toContain("ID");
+      expect(output).toContain("VAL");
+    });
+
+    test("formats number units correctly", () => {
+      const data = makeDashboardData({
+        widgets: [
+          makeWidget({
+            displayType: "table",
+            data: makeTableData({
+              columns: [
+                { name: "endpoint" },
+                { name: "duration", unit: "millisecond" },
+                { name: "size", unit: "byte" },
+                { name: "latency", unit: "second" },
+              ],
+              rows: [
+                {
+                  endpoint: "/api",
+                  duration: 250,
+                  size: 1024,
+                  latency: 3,
+                },
+              ],
+            }),
+          }),
+        ],
+      });
+      const output = formatDashboardWithData(data);
+      expect(output).toContain("250ms");
+      expect(output).toContain("1,024B");
+      expect(output).toContain("3s");
     });
   });
 

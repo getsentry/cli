@@ -19,7 +19,7 @@ import type {
   WidgetDataResult,
 } from "../../types/dashboard.js";
 import { COLORS, muted, terminalLink } from "./colors.js";
-import { escapeMarkdownCell, mdRow, mdTableHeader } from "./markdown.js";
+
 import type { HumanRenderer } from "./output.js";
 import { isPlainOutput } from "./plain-detect.js";
 import { downsample, sparkline } from "./sparkline.js";
@@ -372,8 +372,8 @@ function formatBigNumberValue(value: number): string {
   return Math.round(value).toString();
 }
 
-function formatWithUnit(value: number, unit?: string | null): string {
-  const formatted = formatNumber(value);
+/** Append unit suffix to a pre-formatted number string. */
+function appendUnitSuffix(formatted: string, unit?: string | null): string {
   if (!unit || unit === "none" || unit === "null") {
     return formatted;
   }
@@ -387,6 +387,15 @@ function formatWithUnit(value: number, unit?: string | null): string {
     return `${formatted}B`;
   }
   return `${formatted} ${unit}`;
+}
+
+function formatWithUnit(value: number, unit?: string | null): string {
+  return appendUnitSuffix(formatNumber(value), unit);
+}
+
+/** Format a number with unit using compact notation (K/M/B). */
+function formatCompactWithUnit(value: number, unit?: string | null): string {
+  return appendUnitSuffix(compactFormatter.format(Math.round(value)), unit);
 }
 
 // ---------------------------------------------------------------------------
@@ -778,18 +787,90 @@ function buildColorLegend(
   return parts.join("  ");
 }
 
-/** Render table content (no title/border). */
-function renderTableContent(data: TableResult): string[] {
+/** Gap (in columns) between table columns. */
+const TABLE_COL_GAP = 2;
+
+/** Measure the max visual width of each column across headers and rows. */
+function measureTableColWidths(
+  headers: string[],
+  cellRows: string[][]
+): number[] {
+  return headers.map((h, i) => {
+    let maxW = stringWidth(h);
+    for (const row of cellRows) {
+      maxW = Math.max(maxW, stringWidth(row[i] ?? ""));
+    }
+    return maxW;
+  });
+}
+
+/**
+ * Rewrite numeric cells in-place using compact notation (10,000 → 10K).
+ * Only touches columns whose raw value is a number.
+ */
+function compactifyTableNumbers(cellRows: string[][], data: TableResult): void {
+  for (let ri = 0; ri < data.rows.length; ri++) {
+    const row = cellRows[ri];
+    if (!row) {
+      continue;
+    }
+    for (let ci = 0; ci < data.columns.length; ci++) {
+      const col = data.columns[ci];
+      if (!col) {
+        continue;
+      }
+      const val = data.rows[ri]?.[col.name];
+      if (typeof val === "number") {
+        row[ci] = formatCompactWithUnit(val, col.unit);
+      }
+    }
+  }
+}
+
+/** Fit a cell to its column width, padding or truncating with "\u2026". */
+function fitTableCell(text: string, width: number, right: boolean): string {
+  const w = stringWidth(text);
+  if (w <= width) {
+    const pad = " ".repeat(width - w);
+    return right ? pad + text : text + pad;
+  }
+  // Truncate: walk chars to fit width - 1, then append "\u2026"
+  let result = "";
+  let used = 0;
+  for (const ch of text) {
+    const cw = stringWidth(ch);
+    if (used + cw + 1 > width) {
+      break;
+    }
+    result += ch;
+    used += cw;
+  }
+  result += "\u2026";
+  used = stringWidth(result);
+  const remaining = Math.max(0, width - used);
+  return right
+    ? " ".repeat(remaining) + result
+    : result + " ".repeat(remaining);
+}
+
+/**
+ * Render table content as aligned text columns (no title/border).
+ *
+ * Produces one line per header/separator/row. Column widths are sized to
+ * fit content, compacted and shrunk if they exceed `innerWidth`, then
+ * expanded to fill remaining space. Numeric columns are right-aligned.
+ */
+function renderTableContent(data: TableResult, innerWidth: number): string[] {
   if (data.rows.length === 0) {
     return [noDataLine()];
   }
 
-  const lines: string[] = [];
+  const plain = isPlainOutput();
   const headers = data.columns.map((c) => c.name.toUpperCase());
-  lines.push(mdTableHeader(headers));
 
-  for (const row of data.rows) {
-    const cells = data.columns.map((col) => {
+  // Build plain text cell values
+  const cellRows: string[][] = data.rows.map((row) =>
+    data.columns.map((col) => {
       const val = row[col.name];
       if (val === null || val === undefined) {
         return "";
@@ -797,11 +878,70 @@ function renderTableContent(data: TableResult): string[] {
       if (typeof val === "number") {
         return formatWithUnit(val, col.unit);
       }
-      return escapeMarkdownCell(String(val));
-    });
-    lines.push(mdRow(cells).trimEnd());
+      return String(val);
+    })
+  );
+
+  // Detect right-aligned (numeric) columns
+  const rightAlign = data.columns.map(
+    (col, ci) =>
+      cellRows.length > 0 &&
+      cellRows.every((_, ri) => {
+        const v = cellRows[ri]?.[ci] ?? "";
+        return v === "" || typeof data.rows[ri]?.[col.name] === "number";
+      })
+  );
+
+  const colWidths = measureTableColWidths(headers, cellRows);
+  const totalGap = TABLE_COL_GAP * Math.max(0, colWidths.length - 1);
+
+  // When columns overflow, try compact number formatting before shrinking
+  if (colWidths.reduce((s, w) => s + w, 0) + totalGap > innerWidth) {
+    compactifyTableNumbers(cellRows, data);
+    const remeasured = measureTableColWidths(headers, cellRows);
+    for (let i = 0; i < colWidths.length; i++) {
+      colWidths[i] = remeasured[i] ?? 0;
+    }
   }
-  return lines;
+
+  // Shrink columns proportionally if still exceeds innerWidth
+  const totalNatural = colWidths.reduce((s, w) => s + w, 0) + totalGap;
+  if (totalNatural > innerWidth && colWidths.length > 0) {
+    const available = Math.max(colWidths.length * 3, innerWidth - totalGap);
+    const scale = available / colWidths.reduce((s, w) => s + w, 0);
+    for (let i = 0; i < colWidths.length; i++) {
+      colWidths[i] = Math.max(3, Math.floor((colWidths[i] ?? 0) * scale));
+    }
+  }
+
+  // Expand last column to fill remaining widget width
+  const totalUsed = colWidths.reduce((s, w) => s + w, 0) + totalGap;
+  if (totalUsed < innerWidth && colWidths.length > 0) {
+    const lastIdx = colWidths.length - 1;
+    colWidths[lastIdx] = (colWidths[lastIdx] ?? 0) + (innerWidth - totalUsed);
+  }
+
+  const gap = " ".repeat(TABLE_COL_GAP);
+
+  const headerLine = headers
+    .map((h, i) => fitTableCell(h, colWidths[i] ?? 3, rightAlign[i] ?? false))
+    .join(gap);
+
+  const sepLine = colWidths.map((w) => "\u2500".repeat(w)).join(gap);
+
+  const dataLines = cellRows.map((row) =>
+    row
+      .map((cell, i) =>
+        fitTableCell(cell, colWidths[i] ?? 3, rightAlign[i] ?? false)
+      )
+      .join(gap)
+  );
+
+  return [
+    plain ? headerLine : chalk.bold(headerLine),
+    plain ? sepLine : muted(sepLine),
+    ...dataLines,
+  ];
 }
 
 /** Center lines vertically, returning a padded array. */
@@ -1072,11 +1212,14 @@ function renderTimeBarRows(
     : (s: string) => chalk.hex(COLORS.magenta)(s);
   const rows: string[] = [];
 
-  // Scale bar width so bars fill the full chart area
+  // Scale bar width so bars fill the full chart area.
+  // Distribute the floor-division remainder across the first N bars
+  // so the total rendered width exactly equals chartWidth.
   const barWidth = Math.max(
     1,
     Math.floor(chartWidth / Math.max(1, sampled.length))
   );
+  const barRemainder = chartWidth - barWidth * sampled.length;
 
   // Pre-compute fractional heights for each column
   const heights = sampled.map((v) => (v / maxVal) * barHeight);
@@ -1088,9 +1231,10 @@ function renderTimeBarRows(
       maxVal,
       gutterWidth,
     });
-    const parts = heights.map((h) =>
-      colorFn(buildTimeseriesBarColumn(h, row).repeat(barWidth))
-    );
+    const parts = heights.map((h, col) => {
+      const w = barWidth + (col < barRemainder ? 1 : 0);
+      return colorFn(buildTimeseriesBarColumn(h, row).repeat(w));
+    });
     rows.push(`${yAxis}${parts.join("")}`);
   }
 
@@ -1164,11 +1308,13 @@ function renderStackedTimeBarRows(
   const plain = isPlainOutput();
   const numBuckets = stackedSeries[0]?.values.length ?? 0;
 
-  // Scale bar width so bars fill the full chart area
+  // Scale bar width so bars fill the full chart area.
+  // Distribute the floor-division remainder across the first N bars.
   const barWidth = Math.max(
     1,
     Math.floor(chartWidth / Math.max(1, numBuckets))
   );
+  const barRemainder = chartWidth - barWidth * numBuckets;
 
   // Pre-compute cumulative heights per column, bottom-up
   const stackedHeights: {
@@ -1204,12 +1350,8 @@ function renderStackedTimeBarRows(
     });
     const parts: string[] = [];
     for (let col = 0; col < numBuckets; col += 1) {
-      const ch = buildStackedColumn(
-        stackedHeights[col] ?? [],
-        row,
-        plain,
-        barWidth
-      );
+      const w = barWidth + (col < barRemainder ? 1 : 0);
+      const ch = buildStackedColumn(stackedHeights[col] ?? [], row, plain, w);
       parts.push(ch);
     }
     rows.push(`${yAxis}${parts.join("")}`);
@@ -1426,7 +1568,7 @@ function renderContentLines(opts: {
       return renderTimeseriesContent(data, innerWidth);
 
     case "table":
-      return renderTableContent(data);
+      return renderTableContent(data, innerWidth);
 
     case "scalar":
       return renderBigNumberContent(data, { innerWidth, contentHeight });
