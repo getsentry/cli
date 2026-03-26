@@ -200,8 +200,7 @@ async function executeSingleFetch(
   }
 
   // API returns newest first. Reverse only when user wants oldest-first.
-  const ordered =
-    flags.sort === "oldest" ? [...logs].reverse() : logs;
+  const ordered = flags.sort === "oldest" ? [...logs].reverse() : logs;
 
   const hasMore = logs.length >= flags.limit;
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"}.`;
@@ -465,8 +464,7 @@ async function executeTraceSingleFetch(
     };
   }
 
-  const ordered =
-    flags.sort === "oldest" ? [...logs].reverse() : logs;
+  const ordered = flags.sort === "oldest" ? [...logs].reverse() : logs;
 
   const hasMore = logs.length >= flags.limit;
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"} for trace ${traceId}.`;

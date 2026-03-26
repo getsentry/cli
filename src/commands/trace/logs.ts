@@ -209,8 +209,7 @@ export const logsCommand = buildCommand({
     );
 
     // API returns newest-first. Reverse only when user wants oldest-first.
-    const ordered =
-      flags.sort === "oldest" ? [...logs].reverse() : logs;
+    const ordered = flags.sort === "oldest" ? [...logs].reverse() : logs;
     const hasMore = ordered.length >= flags.limit;
 
     const emptyMessage =
