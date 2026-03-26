@@ -36,7 +36,7 @@ List projects
 - `-n, --limit <value> - Maximum number of projects to list - (default: "30")`
 - `-p, --platform <value> - Filter by platform (e.g., javascript, python)`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
+- `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
 **Examples:**
 
