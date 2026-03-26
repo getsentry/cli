@@ -826,8 +826,8 @@ function buildMultiTargetContextKey(
 }
 
 /** Build the CLI hint for fetching the next page, preserving active flags. */
-function nextPageHint(org: string, flags: ListFlags): string {
-  const base = `sentry issue list ${org}/ -c next`;
+/** Append active non-default issue list flags to a base command string. */
+function appendIssueFlags(base: string, flags: ListFlags): string {
   const parts: string[] = [];
   if (flags.sort !== "date") {
     parts.push(`--sort ${flags.sort}`);
@@ -839,6 +839,14 @@ function nextPageHint(org: string, flags: ListFlags): string {
     parts.push(`-t ${flags.period}`);
   }
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
+}
+
+function nextPageHint(org: string, flags: ListFlags): string {
+  return appendIssueFlags(`sentry issue list ${org}/ -c next`, flags);
+}
+
+function prevPageHint(org: string, flags: ListFlags): string {
+  return appendIssueFlags(`sentry issue list ${org}/ -c prev`, flags);
 }
 
 /**
@@ -937,9 +945,17 @@ async function handleOrgAllIssues(
   const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
 
   if (issues.length === 0) {
-    const hint = hasMore
-      ? `No issues on this page. Try the next page: ${nextPageHint(org, flags)}`
-      : `No issues found in organization '${org}'.`;
+    const navParts: string[] = [];
+    if (hasPrev) {
+      navParts.push(`Prev: ${prevPageHint(org, flags)}`);
+    }
+    if (hasMore) {
+      navParts.push(`Next: ${nextPageHint(org, flags)}`);
+    }
+    const hint =
+      navParts.length > 0
+        ? `No issues on this page. ${navParts.join(" | ")}`
+        : `No issues found in organization '${org}'.`;
     return { items: [], hasMore, hasPrev, nextCursor, hint };
   }
 
