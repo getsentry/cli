@@ -397,22 +397,22 @@ async function handleProjectMode(
   const flatSpans = spanItems.map(spanListItemToFlatSpan);
   const hasMore = !!nextCursor;
 
-  const navParts2: string[] = [];
+  const navParts: string[] = [];
   if (hasPrev) {
-    navParts2.push(`Prev: ${projectPrevPageHint(org, project, flags)}`);
+    navParts.push(`Prev: ${projectPrevPageHint(org, project, flags)}`);
   }
   if (hasMore) {
-    navParts2.push(`Next: ${projectNextPageHint(org, project, flags)}`);
+    navParts.push(`Next: ${projectNextPageHint(org, project, flags)}`);
   }
-  const nav2 = navParts2.join(" | ");
+  const nav = navParts.join(" | ");
 
   let hint: string | undefined;
-  if (flatSpans.length === 0 && nav2) {
-    hint = `No spans on this page. ${nav2}`;
+  if (flatSpans.length === 0 && nav) {
+    hint = `No spans on this page. ${nav}`;
   } else if (flatSpans.length > 0) {
     const countText = `Showing ${flatSpans.length} span${flatSpans.length === 1 ? "" : "s"}.`;
-    hint = nav2
-      ? `${countText} ${nav2}`
+    hint = nav
+      ? `${countText} ${nav}`
       : `${countText} Use 'sentry span view <trace-id> <span-id>' to view span details.`;
   }
 
