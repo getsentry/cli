@@ -337,23 +337,26 @@ function buildHint(
   result: DashboardListResult,
   orgSlug: string
 ): string | undefined {
-  if (result.dashboards.length === 0) {
-    return;
-  }
   const filterArg = result.titleFilter ? ` '${result.titleFilter}'` : "";
   const navParts: string[] = [];
   if (result.hasMore) {
     navParts.push(
-      `Next page: sentry dashboard list ${orgSlug}/${filterArg} -c next`
+      `Next: sentry dashboard list ${orgSlug}/${filterArg} -c next`
     );
   }
   if (result.hasPrev) {
     navParts.push(
-      `Prev page: sentry dashboard list ${orgSlug}/${filterArg} -c prev`
+      `Prev: sentry dashboard list ${orgSlug}/${filterArg} -c prev`
     );
   }
   const nav = navParts.length > 0 ? ` ${navParts.join(" | ")}` : "";
   const url = buildDashboardsListUrl(orgSlug);
+
+  if (result.dashboards.length === 0) {
+    // Empty results — show nav hint if prev/next exist, otherwise nothing
+    return nav ? `No dashboards found.${nav}` : undefined;
+  }
+
   return `Showing ${result.dashboards.length} dashboard(s).${nav}\nDashboards: ${url}`;
 }
 

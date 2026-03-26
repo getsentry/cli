@@ -319,20 +319,23 @@ async function handleTraceMode(
   const flatSpans = spanItems.map(spanListItemToFlatSpan);
   const hasMore = !!nextCursor;
 
+  const navParts: string[] = [];
+  if (hasPrev) {
+    navParts.push(`Prev: ${tracePrevPageHint(org, project, traceId, flags)}`);
+  }
+  if (hasMore) {
+    navParts.push(`Next: ${traceNextPageHint(org, project, traceId, flags)}`);
+  }
+  const nav = navParts.join(" | ");
+
   let hint: string | undefined;
-  if (flatSpans.length === 0 && hasMore) {
-    hint = `Try the next page: ${traceNextPageHint(org, project, traceId, flags)}`;
+  if (flatSpans.length === 0 && nav) {
+    hint = `No spans on this page. ${nav}`;
   } else if (flatSpans.length > 0) {
     const countText = `Showing ${flatSpans.length} span${flatSpans.length === 1 ? "" : "s"}.`;
-    if (hasMore && hasPrev) {
-      hint = `${countText} Prev: ${tracePrevPageHint(org, project, traceId, flags)} | Next: ${traceNextPageHint(org, project, traceId, flags)}`;
-    } else if (hasMore) {
-      hint = `${countText} Next page: ${traceNextPageHint(org, project, traceId, flags)}`;
-    } else if (hasPrev) {
-      hint = `${countText} Prev: ${tracePrevPageHint(org, project, traceId, flags)}`;
-    } else {
-      hint = `${countText} Use 'sentry span view ${traceId} <span-id>' to view span details.`;
-    }
+    hint = nav
+      ? `${countText} ${nav}`
+      : `${countText} Use 'sentry span view ${traceId} <span-id>' to view span details.`;
   }
 
   return {
@@ -394,20 +397,23 @@ async function handleProjectMode(
   const flatSpans = spanItems.map(spanListItemToFlatSpan);
   const hasMore = !!nextCursor;
 
+  const navParts2: string[] = [];
+  if (hasPrev) {
+    navParts2.push(`Prev: ${projectPrevPageHint(org, project, flags)}`);
+  }
+  if (hasMore) {
+    navParts2.push(`Next: ${projectNextPageHint(org, project, flags)}`);
+  }
+  const nav2 = navParts2.join(" | ");
+
   let hint: string | undefined;
-  if (flatSpans.length === 0 && hasMore) {
-    hint = `Try the next page: ${projectNextPageHint(org, project, flags)}`;
+  if (flatSpans.length === 0 && nav2) {
+    hint = `No spans on this page. ${nav2}`;
   } else if (flatSpans.length > 0) {
     const countText = `Showing ${flatSpans.length} span${flatSpans.length === 1 ? "" : "s"}.`;
-    if (hasMore && hasPrev) {
-      hint = `${countText} Prev: ${projectPrevPageHint(org, project, flags)} | Next: ${projectNextPageHint(org, project, flags)}`;
-    } else if (hasMore) {
-      hint = `${countText} Next page: ${projectNextPageHint(org, project, flags)}`;
-    } else if (hasPrev) {
-      hint = `${countText} Prev: ${projectPrevPageHint(org, project, flags)}`;
-    } else {
-      hint = `${countText} Use 'sentry span view <trace-id> <span-id>' to view span details.`;
-    }
+    hint = nav2
+      ? `${countText} ${nav2}`
+      : `${countText} Use 'sentry span view <trace-id> <span-id>' to view span details.`;
   }
 
   return {

@@ -378,7 +378,7 @@ describe("listCommand.func", () => {
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("Next page:");
+    expect(output).toContain("Next:");
     expect(output).toContain("-c next");
   });
 
@@ -394,7 +394,7 @@ describe("listCommand.func", () => {
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).not.toContain("Next page:");
+    expect(output).not.toContain("Next:");
     expect(output).toContain("sentry trace view");
   });
 
@@ -482,7 +482,7 @@ describe("listCommand.func", () => {
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("Next page:");
+    expect(output).toContain("Next:");
     expect(output).toContain("-c next");
     expect(output).toContain("--sort duration");
   });

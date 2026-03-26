@@ -117,6 +117,24 @@ function prevPageHint(
   return appendTraceFlags(`sentry trace list ${org}/${project} -c prev`, flags);
 }
 
+/** Build a combined nav hint string from prev/next hints. */
+function buildNavHint(opts: {
+  hasMore: boolean;
+  hasPrev: boolean;
+  org: string;
+  project: string;
+  flags: Pick<ListFlags, "sort" | "query" | "period">;
+}): string {
+  const parts: string[] = [];
+  if (opts.hasPrev) {
+    parts.push(`Prev: ${prevPageHint(opts.org, opts.project, opts.flags)}`);
+  }
+  if (opts.hasMore) {
+    parts.push(`Next: ${nextPageHint(opts.org, opts.project, opts.flags)}`);
+  }
+  return parts.join(" | ");
+}
+
 /**
  * Parse --limit flag, delegating range validation to shared utility.
  */
@@ -293,20 +311,15 @@ export const listCommand = buildListCommand("trace", {
     const hasMore = !!nextCursor;
 
     // Build footer hint based on result state
+    const nav = buildNavHint({ hasMore, hasPrev, org, project, flags });
     let hint: string | undefined;
-    if (traces.length === 0 && hasMore) {
-      hint = `Try the next page: ${nextPageHint(org, project, flags)}`;
+    if (traces.length === 0 && nav) {
+      hint = `No traces on this page. ${nav}`;
     } else if (traces.length > 0) {
       const countText = `Showing ${traces.length} trace${traces.length === 1 ? "" : "s"}.`;
-      if (hasMore && hasPrev) {
-        hint = `${countText} Prev: ${prevPageHint(org, project, flags)} | Next: ${nextPageHint(org, project, flags)}`;
-      } else if (hasMore) {
-        hint = `${countText} Next page: ${nextPageHint(org, project, flags)}`;
-      } else if (hasPrev) {
-        hint = `${countText} Prev: ${prevPageHint(org, project, flags)}`;
-      } else {
-        hint = `${countText} Use 'sentry trace view <TRACE_ID>' to view the full span tree.`;
-      }
+      hint = nav
+        ? `${countText} ${nav}`
+        : `${countText} Use 'sentry trace view <TRACE_ID>' to view the full span tree.`;
     }
 
     yield new CommandOutput({
