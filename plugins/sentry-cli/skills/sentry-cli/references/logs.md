@@ -19,8 +19,8 @@ List logs from a project
 - `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
 - `-q, --query <value> - Filter query (Sentry search syntax)`
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
-- `-t, --period <value> - Time period (e.g., "30d", "14d", "24h"). Default: 30d (project mode), 14d (trace mode)`
-- `-s, --sort <value> - Sort order: "newest" (default) or "oldest" - (default: "newest")`
+- `-t, --period <value> - Time period (e.g., "30d", "14d", "24h"). Default: 30d (project mode), 14d (trace mode). Log retention is 30 days.`
+- `-s, --sort <value> - Sort order: "newest" (default) or "oldest"`
 - `--fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
 **Examples:**
