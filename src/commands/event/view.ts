@@ -405,6 +405,29 @@ export async function resolveAutoDetectTarget(
 }
 
 /**
+ * Build {@link EventViewData} from a pre-fetched event, optionally
+ * including span tree data. Shared by all event-fetch paths so the
+ * span-tree assembly logic lives in one place.
+ *
+ * @param org - Organization slug (needed for span tree API call)
+ * @param event - Already-fetched event
+ * @param spans - Span tree depth (0 = skip)
+ */
+async function buildEventViewData(
+  org: string,
+  event: SentryEvent,
+  spans: number
+): Promise<EventViewData> {
+  const spanTreeResult =
+    spans > 0 ? await getSpanTreeLines(org, event, spans) : undefined;
+  const trace =
+    spanTreeResult?.success && spanTreeResult.traceId
+      ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans ?? [] }
+      : null;
+  return { event, trace, spanTreeLines: spanTreeResult?.lines };
+}
+
+/**
  * Fetch the latest event for an issue URL and build the output data.
  * Extracted from func() to reduce cyclomatic complexity.
  */
@@ -414,15 +437,7 @@ async function fetchLatestEventData(
   spans: number
 ): Promise<EventViewData> {
   const event = await getLatestEvent(org, issueId);
-  const spanTreeResult =
-    spans > 0 ? await getSpanTreeLines(org, event, spans) : undefined;
-
-  const trace =
-    spanTreeResult?.success && spanTreeResult.traceId
-      ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans ?? [] }
-      : null;
-
-  return { event, trace, spanTreeLines: spanTreeResult?.lines };
+  return buildEventViewData(org, event, spans);
 }
 
 /**
@@ -517,26 +532,6 @@ async function resolveIssueShortIdEvent(
   return fetchLatestEventData(org, issue.id, spans);
 }
 
-/**
- * Fetch a specific event by ID (not latest) and build full EventViewData
- * including optional span tree. Used by the SHORT-ID/EVENT-ID path.
- */
-async function fetchSpecificEventData(
-  org: string,
-  project: string,
-  eventId: string,
-  spans: number
-): Promise<EventViewData> {
-  const event = await getEvent(org, project, eventId);
-  const spanTreeResult =
-    spans > 0 ? await getSpanTreeLines(org, event, spans) : undefined;
-  const trace =
-    spanTreeResult?.success && spanTreeResult.traceId
-      ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans ?? [] }
-      : null;
-  return { event, trace, spanTreeLines: spanTreeResult?.lines };
-}
-
 /** Result from an issue-based shortcut (URL or short ID) */
 type IssueShortcutResult = {
   org: string;
@@ -609,12 +604,8 @@ async function resolveIssueShortcut(
           ["Specify the project explicitly to view this event"]
         );
       }
-      const data = await fetchSpecificEventData(
-        resolved.org,
-        issueProject,
-        eventId,
-        spans
-      );
+      const event = await getEvent(resolved.org, issueProject, eventId);
+      const data = await buildEventViewData(resolved.org, event, spans);
       return {
         org: resolved.org,
         data,
@@ -739,22 +730,9 @@ export const viewCommand = buildCommand({
       eventId
     );
 
-    // Fetch span tree data (for both JSON and human output)
-    // Skip when spans=0 (disabled via --spans no or --spans 0)
-    const spanTreeResult =
-      flags.spans > 0
-        ? await getSpanTreeLines(target.org, event, flags.spans)
-        : undefined;
+    const viewData = await buildEventViewData(target.org, event, flags.spans);
 
-    const trace = spanTreeResult?.success
-      ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
-      : null;
-
-    yield new CommandOutput({
-      event,
-      trace,
-      spanTreeLines: spanTreeResult?.lines,
-    });
+    yield new CommandOutput(viewData);
     return {
       hint: target.detectedFrom
         ? `Detected from ${target.detectedFrom}`
