@@ -9,7 +9,7 @@
 import { randomBytes } from "node:crypto";
 import { cancel, confirm, intro, log, spinner } from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
-import { captureException } from "@sentry/node-core/light";
+import { captureException, getTraceData } from "@sentry/node-core/light";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
@@ -271,6 +271,19 @@ export async function runWizard(options: WizardOptions): Promise<void> {
   const client = new MastraClient({
     baseUrl: MASTRA_API_URL,
     headers: token ? { Authorization: `Bearer ${token}` } : {},
+    fetch: ((url, init) => {
+      const traceData = getTraceData();
+      return fetch(url, {
+        ...init,
+        headers: {
+          ...(init?.headers as Record<string, string> | undefined),
+          ...(traceData["sentry-trace"] && {
+            "sentry-trace": traceData["sentry-trace"],
+          }),
+          ...(traceData.baggage && { baggage: traceData.baggage }),
+        },
+      });
+    }) as typeof fetch,
   });
   const workflow = client.getWorkflow(WORKFLOW_ID);
 
