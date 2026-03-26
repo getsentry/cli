@@ -289,12 +289,11 @@ describe("listCommand.func — standard mode", () => {
     expect(parsed.data[2]["sentry.item_id"]).toBe("item001");
   });
 
-  test("outputs JSON in oldest-first order with sort=oldest", async () => {
-    const newestFirst = [...sampleLogs].reverse();
-    listLogsSpy.mockResolvedValue(newestFirst);
+  test("passes sort=oldest to API when requested", async () => {
+    listLogsSpy.mockResolvedValue(sampleLogs);
     resolveOrgProjectSpy.mockResolvedValue({ org: ORG, project: PROJECT });
 
-    const { context, stdoutWrite } = createMockContext();
+    const { context } = createMockContext();
     const func = await listCommand.loader();
     await func.call(
       context,
@@ -302,11 +301,12 @@ describe("listCommand.func — standard mode", () => {
       `${ORG}/${PROJECT}`
     );
 
-    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    const parsed = JSON.parse(output);
-    // sort=oldest reverses to chronological order
-    expect(parsed.data[0]["sentry.item_id"]).toBe("item001");
-    expect(parsed.data[2]["sentry.item_id"]).toBe("item003");
+    // sort=oldest is passed to API for server-side sorting
+    expect(listLogsSpy).toHaveBeenCalledWith(
+      ORG,
+      PROJECT,
+      expect.objectContaining({ sort: "oldest" })
+    );
   });
 
   test("shows 'No logs found' for empty result (human mode)", async () => {
@@ -388,6 +388,7 @@ describe("listCommand.func — standard mode", () => {
       query: "level:error",
       limit: 50,
       statsPeriod: "30d",
+      sort: "newest",
     });
   });
 
@@ -539,7 +540,7 @@ describe("listCommand.func — trace mode", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { json: false, limit: 50, query: "level:error" },
+      { json: false, limit: 50, query: "level:error", sort: "newest" },
       TRACE_ID
     );
 
@@ -547,6 +548,7 @@ describe("listCommand.func — trace mode", () => {
       query: "level:error",
       limit: 50,
       statsPeriod: "14d",
+      sort: "newest",
     });
   });
 
@@ -700,6 +702,7 @@ describe("listCommand.func — period flag", () => {
       query: undefined,
       limit: 100,
       statsPeriod: "14d",
+      sort: "newest",
     });
   });
 
@@ -716,6 +719,7 @@ describe("listCommand.func — period flag", () => {
       query: undefined,
       limit: 100,
       statsPeriod: "30d",
+      sort: "newest",
     });
   });
 });

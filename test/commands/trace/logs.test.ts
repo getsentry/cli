@@ -368,6 +368,7 @@ describe("logsCommand.func", () => {
         statsPeriod: "7d",
         limit: 50,
         query: "level:error",
+        sort: "newest",
       });
     });
 
@@ -387,6 +388,7 @@ describe("logsCommand.func", () => {
         statsPeriod: "14d",
         limit: 100,
         query: undefined,
+        sort: "newest",
       });
     });
   });
@@ -413,13 +415,11 @@ describe("logsCommand.func", () => {
   });
 
   describe("sort ordering", () => {
-    test("default sort=newest preserves API order (newest first)", async () => {
-      // API returns newest first: log003, log002, log001
-      const newestFirst = [...sampleLogs].reverse();
-      listTraceLogsSpy.mockResolvedValue(newestFirst);
+    test("default sort=newest passes sort to API", async () => {
+      listTraceLogsSpy.mockResolvedValue(sampleLogs);
       resolveOrgSpy.mockResolvedValue({ org: ORG });
 
-      const { context, stdoutWrite } = createMockContext();
+      const { context } = createMockContext();
       const func = await logsCommand.loader();
       await func.call(
         context,
@@ -427,15 +427,30 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = collectMockOutput(stdoutWrite);
-      // All three messages should appear in the output
-      const reqIdx = output.indexOf("Request received");
-      const slowIdx = output.indexOf("Slow query detected");
-      const dbIdx = output.indexOf("Database connection failed");
+      expect(listTraceLogsSpy).toHaveBeenCalledWith(
+        ORG,
+        TRACE_ID,
+        expect.objectContaining({ sort: "newest" })
+      );
+    });
 
-      // Default sort=newest: newest (Database connection failed) appears before oldest
-      expect(dbIdx).toBeLessThan(reqIdx);
-      expect(dbIdx).toBeLessThan(slowIdx);
+    test("sort=oldest passes sort to API for server-side ordering", async () => {
+      listTraceLogsSpy.mockResolvedValue(sampleLogs);
+      resolveOrgSpy.mockResolvedValue({ org: ORG });
+
+      const { context } = createMockContext();
+      const func = await logsCommand.loader();
+      await func.call(
+        context,
+        { json: false, web: false, period: "14d", limit: 100, sort: "oldest" },
+        TRACE_ID
+      );
+
+      expect(listTraceLogsSpy).toHaveBeenCalledWith(
+        ORG,
+        TRACE_ID,
+        expect.objectContaining({ sort: "oldest" })
+      );
     });
   });
 });

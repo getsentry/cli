@@ -9,12 +9,12 @@
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
 import type { SentryContext } from "../../context.js";
-import { listLogs, listTraceLogs } from "../../lib/api-client.js";
 import {
-  parseSort,
-  type SortDirection,
-  validateLimit,
-} from "../../lib/arg-parsing.js";
+  type LogSortDirection,
+  listLogs,
+  listTraceLogs,
+} from "../../lib/api-client.js";
+import { parseLogSort, validateLimit } from "../../lib/arg-parsing.js";
 import { AuthError, stringifyUnknown } from "../../lib/errors.js";
 import {
   buildLogRowCells,
@@ -50,7 +50,7 @@ type ListFlags = {
   readonly query?: string;
   readonly follow?: number;
   readonly period?: string;
-  readonly sort: SortDirection;
+  readonly sort: LogSortDirection;
   readonly json: boolean;
   readonly fresh: boolean;
   readonly fields?: string[];
@@ -180,21 +180,19 @@ async function executeSingleFetch(
     query: flags.query,
     limit: flags.limit,
     statsPeriod: period,
+    sort: flags.sort,
   });
 
   if (logs.length === 0) {
     return { result: { logs: [], hasMore: false }, hint: "No logs found." };
   }
 
-  // API returns newest first. Reverse only when user wants oldest-first.
-  const ordered = flags.sort === "oldest" ? [...logs].reverse() : logs;
-
   const hasMore = logs.length >= flags.limit;
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"}.`;
   const tip = hasMore ? " Use --limit to show more, or -f to follow." : "";
 
   return {
-    result: { logs: ordered, hasMore },
+    result: { logs, hasMore },
     hint: `${countText}${tip}`,
   };
 }
@@ -440,6 +438,7 @@ async function executeTraceSingleFetch(
     query: flags.query,
     limit: flags.limit,
     statsPeriod: period,
+    sort: flags.sort,
   });
 
   if (logs.length === 0) {
@@ -451,14 +450,12 @@ async function executeTraceSingleFetch(
     };
   }
 
-  const ordered = flags.sort === "oldest" ? [...logs].reverse() : logs;
-
   const hasMore = logs.length >= flags.limit;
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"} for trace ${traceId}.`;
   const tip = hasMore ? " Use --limit to show more." : "";
 
   return {
-    result: { logs: ordered, traceId, hasMore },
+    result: { logs, traceId, hasMore },
     hint: `${countText}${tip}`,
   };
 }
@@ -645,7 +642,7 @@ export const listCommand = buildListCommand(
         },
         sort: {
           kind: "parsed",
-          parse: parseSort,
+          parse: parseLogSort,
           brief: 'Sort order: "newest" (default) or "oldest"',
           default: "newest",
         },

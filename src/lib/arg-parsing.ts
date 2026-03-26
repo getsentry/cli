@@ -6,6 +6,7 @@
  * project list) and single-item commands (issue view, explain, plan).
  */
 
+import type { LogSortDirection } from "./api/logs.js";
 import { ContextError, ValidationError } from "./errors.js";
 import { validateResourceId } from "./input-validation.js";
 import { logger } from "./logger.js";
@@ -262,23 +263,25 @@ export function validateLimit(value: string, min = 1, max = 1000): number {
 }
 
 // ---------------------------------------------------------------------------
-// Sort direction parsing (shared by log list, trace logs)
+// Log sort direction parsing (shared by log list, trace logs)
 // ---------------------------------------------------------------------------
 
-/** Sort direction for log output */
-export type SortDirection = "newest" | "oldest";
-
-const VALID_SORT_DIRECTIONS: readonly SortDirection[] = ["newest", "oldest"];
+const VALID_LOG_SORT_DIRECTIONS: readonly LogSortDirection[] = [
+  "newest",
+  "oldest",
+];
 
 /**
- * Parse --sort flag value.
+ * Parse --sort flag value for log commands.
  * @throws Error if value is not "newest" or "oldest"
  */
-export function parseSort(value: string): SortDirection {
-  if (!VALID_SORT_DIRECTIONS.includes(value as SortDirection)) {
-    throw new Error(`--sort must be "newest" or "oldest", got "${value}"`);
+export function parseLogSort(value: string): LogSortDirection {
+  if (!VALID_LOG_SORT_DIRECTIONS.includes(value as LogSortDirection)) {
+    throw new Error(
+      `Invalid sort value. Must be one of: ${VALID_LOG_SORT_DIRECTIONS.join(", ")}`
+    );
   }
-  return value as SortDirection;
+  return value as LogSortDirection;
 }
 
 /** Default span depth when no value is provided */
