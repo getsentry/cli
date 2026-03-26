@@ -412,13 +412,18 @@ async function fetchLatestEventData(
  * event view failure (CLI-6F, 54 users). This wrapper adds context about
  * data retention, ID format, and cross-project lookup.
  *
+ * When the project-scoped fetch returns 404, automatically tries the
+ * org-wide eventids resolution endpoint as a fallback. This handles the
+ * common case where DSN auto-detection or config defaults resolve to
+ * the wrong project within the correct org (CLI-KW, 9 users).
+ *
  * @param prefetchedEvent - Already-resolved event (from cross-org lookup), or null
  * @param org - Organization slug
  * @param project - Project slug
  * @param eventId - Event ID being looked up
  * @returns The event data
  */
-async function fetchEventWithContext(
+export async function fetchEventWithContext(
   prefetchedEvent: SentryEvent | null,
   org: string,
   project: string,
@@ -431,10 +436,26 @@ async function fetchEventWithContext(
     return await getEvent(org, project, eventId);
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) {
+      // Auto-fallback: try cross-project lookup within the same org.
+      // Handles wrong-project resolution from DSN auto-detect or config defaults.
+      // Wrapped in try-catch so that fallback failures (500s, network errors)
+      // don't mask the helpful ResolutionError with suggestions.
+      try {
+        const resolved = await resolveEventInOrg(org, eventId);
+        if (resolved) {
+          logger.warn(
+            `Event not found in ${org}/${project}, but found in ${resolved.org}/${resolved.project}.`
+          );
+          return resolved.event;
+        }
+      } catch {
+        // Fallback failed (network, 500, etc.) — continue to suggestions
+      }
+
       const suggestions = [
         "The event may have been deleted due to data retention policies",
         "Verify the event ID is a 32-character hex string (e.g., a1b2c3d4...)",
-        `Search across all projects in the org: sentry event view ${org}/ ${eventId}`,
+        `The event was not found in any project in '${org}'`,
       ];
 
       // Nudge the user when the event ID looks like an issue short ID
