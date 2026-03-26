@@ -1,0 +1,149 @@
+# Fix broken table widget in `dashboard view`
+
+## Problem
+
+The table widgets ("Top Users", "Top Orgs", "By Country") in `dashboard view` render raw markdown pipe syntax (`| HEADER | HEADER |`, `| --- | --- |`, `| val | val |`) instead of properly formatted aligned text.
+
+**Root cause**: `renderTableContent()` at `src/lib/formatters/dashboard.ts:782-805` uses `mdTableHeader()` and `mdRow()` from `markdown.ts` to produce CommonMark pipe table syntax. These raw strings are placed directly into the widget border box via `wrapInBorder()` without ever being passed through `renderMarkdown()`. The result is literal pipe characters visible in the terminal.
+
+Additionally, `mdTableHeader()` returns a string with an embedded `\n` (header + separator as one string), which gets treated as a single line by `buildBorderedLine()`, further corrupting the display.
+
+## Fix
+
+### 1. Rewrite `renderTableContent()` (dashboard.ts:782-805)
+
+Replace the markdown pipe table approach with direct aligned-text rendering:
+
+- Accept `innerWidth` parameter (already available at call site)
+- Build plain text cell values from structured data (headers + rows)
+- Measure natural column widths using `stringWidth` (already imported)
+- Shrink columns proportionally if total exceeds `innerWidth`
+- Right-align numeric columns (detect via checking if all row values for a column are numbers)
+- Render each row as space-padded columns with a 2-char gap
+- Add a thin separator line (`─`) between header and data
+- Style header with `chalk.bold()` and separator with `muted()` in non-plain mode
+
+New implementation:
+
+```typescript
+const TABLE_COL_GAP = 2;
+
+function renderTableContent(data: TableResult, innerWidth: number): string[] {
+  if (data.rows.length === 0) {
+    return [noDataLine()];
+  }
+
+  const plain = isPlainOutput();
+  const headers = data.columns.map((c) => c.name.toUpperCase());
+
+  // Build plain text cell values
+  const cellRows: string[][] = data.rows.map((row) =>
+    data.columns.map((col) => {
+      const val = row[col.name];
+      if (val === null || val === undefined) return "";
+      if (typeof val === "number") return formatWithUnit(val, col.unit);
+      return String(val);
+    })
+  );
+
+  // Detect right-aligned (numeric) columns
+  const rightAlign = data.columns.map((col, _i) =>
+    cellRows.length > 0 &&
+    cellRows.every((row, ri) => {
+      const v = row[_i] ?? "";
+      return v === "" || typeof data.rows[ri]?.[col.name] === "number";
+    })
+  );
+
+  // Measure natural column widths
+  const colWidths = headers.map((h, i) => {
+    let maxW = stringWidth(h);
+    for (const row of cellRows) {
+      maxW = Math.max(maxW, stringWidth(row[i] ?? ""));
+    }
+    return maxW;
+  });
+
+  // Shrink columns proportionally if total exceeds innerWidth
+  const totalGap = TABLE_COL_GAP * Math.max(0, colWidths.length - 1);
+  const totalNatural = colWidths.reduce((s, w) => s + w, 0) + totalGap;
+  if (totalNatural > innerWidth && colWidths.length > 0) {
+    const available = Math.max(colWidths.length * 3, innerWidth - totalGap);
+    const scale = available / colWidths.reduce((s, w) => s + w, 0);
+    for (let i = 0; i < colWidths.length; i++) {
+      colWidths[i] = Math.max(3, Math.floor((colWidths[i] ?? 0) * scale));
+    }
+  }
+
+  const gap = " ".repeat(TABLE_COL_GAP);
+
+  /** Fit a cell to column width, padding or truncating with "…" */
+  const fitCell = (text: string, width: number, right: boolean): string => {
+    const w = stringWidth(text);
+    if (w <= width) {
+      const pad = " ".repeat(width - w);
+      return right ? pad + text : text + pad;
+    }
+    // Truncate: walk chars, append "…"
+    let result = "";
+    let used = 0;
+    for (const ch of text) {
+      const cw = stringWidth(ch);
+      if (used + cw + 1 > width) break;
+      result += ch;
+      used += cw;
+    }
+    result += "\u2026";
+    used = stringWidth(result);
+    const remaining = Math.max(0, width - used);
+    return right ? " ".repeat(remaining) + result : result + " ".repeat(remaining);
+  };
+
+  const headerLine = headers
+    .map((h, i) => fitCell(h, colWidths[i] ?? 3, false))
+    .join(gap);
+
+  const sepLine = colWidths.map((w) => "\u2500".repeat(w)).join(gap);
+
+  const dataLines = cellRows.map((row) =>
+    row
+      .map((cell, i) => fitCell(cell, colWidths[i] ?? 3, rightAlign[i] ?? false))
+      .join(gap)
+  );
+
+  return [
+    plain ? headerLine : chalk.bold(headerLine),
+    plain ? sepLine : muted(sepLine),
+    ...dataLines,
+  ];
+}
+```
+
+### 2. Update call site (dashboard.ts:1428-1429)
+
+Pass `innerWidth` to `renderTableContent`:
+
+```typescript
+// Before:
+case "table":
+  return renderTableContent(data);
+
+// After:
+case "table":
+  return renderTableContent(data, innerWidth);
+```
+
+### 3. Remove unused imports (dashboard.ts:22)
+
+```typescript
+// Before:
+import { escapeMarkdownCell, mdRow, mdTableHeader } from "./markdown.js";
+
+// After: Remove this entire import line (nothing else in the file uses these)
+```
+
+### 4. Verify
+
+- Run `bun test test/lib/formatters/dashboard.test.ts` — existing tests check for content presence (headers, cell values) and should pass without changes
+- Run `bun run typecheck` to verify no type errors
+- Run `bun run lint` to check for style issues
