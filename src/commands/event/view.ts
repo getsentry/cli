@@ -27,6 +27,7 @@ import { ApiError, ContextError, ResolutionError } from "../../lib/errors.js";
 import { formatEventDetails } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
+import { HEX_ID_RE, normalizeHexId } from "../../lib/hex-id.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -114,18 +115,37 @@ const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
  * "org/project" with a missing event ID.
  */
 function parseSingleArg(arg: string): ParsedPositionalArgs {
-  // Detect "org/SHORT-ID" pattern before parseSlashSeparatedArg.
-  // e.g., "figma/FULLSCREEN-2RN" → auto-redirect to that issue's latest event.
+  // Detect "org/SHORT-ID" and "SHORT-ID/EVENT-ID" patterns before
+  // parseSlashSeparatedArg, which throws ContextError for single-slash args.
   const slashIdx = arg.indexOf("/");
   if (slashIdx !== -1 && arg.indexOf("/", slashIdx + 1) === -1) {
+    const beforeSlash = arg.slice(0, slashIdx);
     const afterSlash = arg.slice(slashIdx + 1);
+
+    // "org/SHORT-ID" → auto-redirect to that issue's latest event.
+    // e.g., "figma/FULLSCREEN-2RN"
     if (afterSlash && looksLikeIssueShortId(afterSlash)) {
       // Use "org/" (trailing slash) to signal OrgAll mode so downstream
       // parseOrgProjectArg interprets this as an org, not a project search.
       return {
         eventId: "latest",
-        targetArg: `${arg.slice(0, slashIdx)}/`,
+        targetArg: `${beforeSlash}/`,
         issueShortId: afterSlash,
+      };
+    }
+
+    // "SHORT-ID/EVENT-ID" → view a specific event identified by issue short ID.
+    // e.g., "CLI-G5/abc123def456abc123def456abc123de"
+    if (
+      beforeSlash &&
+      looksLikeIssueShortId(beforeSlash) &&
+      afterSlash &&
+      HEX_ID_RE.test(normalizeHexId(afterSlash))
+    ) {
+      return {
+        eventId: normalizeHexId(afterSlash),
+        targetArg: undefined,
+        issueShortId: beforeSlash,
       };
     }
   }
