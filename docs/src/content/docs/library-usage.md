@@ -23,6 +23,64 @@ const issues = await sentry("issue", "list", "-l", "5");
 console.log(issues.data); // Array of issue objects
 ```
 
+## Typed SDK
+
+For structured access with named parameters and TypeScript types, use `createSentrySDK`:
+
+```typescript
+import { createSentrySDK } from "sentry";
+
+const sdk = createSentrySDK({ token: "sntrys_..." });
+```
+
+### Organizations
+
+```typescript
+const orgs = await sdk.organizations.list();
+const org = await sdk.organizations.get("acme");
+```
+
+### Projects
+
+```typescript
+const projects = await sdk.projects.list({ target: "acme/" });
+const project = await sdk.projects.get({ target: "acme/frontend" });
+```
+
+### Issues
+
+```typescript
+const issues = await sdk.issues.list({
+  org: "acme",
+  project: "frontend",
+  limit: 10,
+  query: "is:unresolved",
+  sort: "date",
+});
+
+const issue = await sdk.issues.get({ issueId: "ACME-123" });
+```
+
+### Events, Traces, Spans
+
+```typescript
+const event = await sdk.events.get({ eventId: "abc123..." });
+
+const traces = await sdk.traces.list({ target: "acme/frontend" });
+const trace = await sdk.traces.get({ traceId: "abc123..." });
+
+const spans = await sdk.spans.list({ target: "acme/frontend" });
+```
+
+### Teams
+
+```typescript
+const teams = await sdk.teams.list({ target: "acme/" });
+```
+
+The typed SDK invokes command handlers directly — bypassing CLI string parsing
+for zero overhead beyond the command's own logic.
+
 ## Authentication
 
 The `token` option provides an auth token for the current invocation. When

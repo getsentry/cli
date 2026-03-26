@@ -112,6 +112,20 @@ Options (all optional):
 - `text` — Return human-readable string instead of parsed JSON.
 - `cwd` — Working directory for DSN auto-detection. Defaults to `process.cwd()`.
 
+### Typed SDK
+
+For a more structured API with named parameters and typed returns:
+
+```typescript
+import { createSentrySDK } from "sentry";
+
+const sdk = createSentrySDK({ token: "sntrys_..." });
+
+const orgs = await sdk.organizations.list();
+const issues = await sdk.issues.list({ org: "acme", project: "frontend", limit: 5 });
+const issue = await sdk.issues.get({ issueId: "ACME-123" });
+```
+
 ---
 
 ## Development

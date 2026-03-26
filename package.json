@@ -84,6 +84,7 @@
     "test:isolated": "bun test --timeout 15000 test/isolated",
     "test:e2e": "bun test --timeout 15000 test/e2e",
     "test:init-eval": "bun test test/init-eval --timeout 600000 --concurrency 6",
+    "generate:sdk": "bun run script/generate-sdk.ts",
     "generate:skill": "bun run script/generate-skill.ts",
     "generate:schema": "bun run script/generate-api-schema.ts",
     "generate:command-docs": "bun run script/generate-command-docs.ts",

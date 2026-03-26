@@ -232,6 +232,36 @@ export declare function sentry(...args: [...string[], SentryOptions]): Promise<u
 
 export { sentry };
 export default sentry;
+
+export declare function createSentrySDK(options?: SentryOptions): SentrySDK;
+
+export type SentrySDK = {
+  organizations: {
+    list(params?: { limit?: number }): Promise<unknown>;
+    get(params?: { org?: string }): Promise<unknown>;
+  };
+  projects: {
+    list(params?: { target?: string; limit?: number }): Promise<unknown>;
+    get(params?: { target?: string }): Promise<unknown>;
+  };
+  issues: {
+    list(params: { org: string; project: string; limit?: number; query?: string }): Promise<unknown>;
+    get(params: { issueId: string }): Promise<unknown>;
+  };
+  events: {
+    get(params: { eventId: string }): Promise<unknown>;
+  };
+  traces: {
+    list(params?: { target?: string; limit?: number }): Promise<unknown>;
+    get(params: { traceId: string }): Promise<unknown>;
+  };
+  spans: {
+    list(params?: { target?: string; limit?: number }): Promise<unknown>;
+  };
+  teams: {
+    list(params?: { target?: string; limit?: number }): Promise<unknown>;
+  };
+};
 `;
 await Bun.write("./dist/index.d.cts", TYPE_DECLARATIONS);
 

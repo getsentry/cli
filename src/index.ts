@@ -18,6 +18,8 @@
  */
 
 import { setEnv } from "./lib/env.js";
+import { buildInvoker } from "./lib/sdk-invoke.js";
+import { createSDKMethods } from "./sdk.generated.js";
 import type { Writer } from "./types/index.js";
 
 /** Options for programmatic CLI invocation. */
@@ -238,6 +240,25 @@ async function sentry(...input: (string | SentryOptions)[]): Promise<unknown> {
 export { sentry };
 export default sentry;
 
+// Typed SDK — direct command invocation with named parameters
+export type { SentrySDK } from "./sdk.generated.js";
+
+/**
+ * Create a typed SDK client with named methods for common operations.
+ *
+ * Each method bypasses Stricli's string dispatch and invokes the command
+ * handler directly with pre-built flags — no parsing overhead.
+ *
+ * @example
+ * ```typescript
+ * const sdk = createSentrySDK({ token: "sntrys_..." });
+ * const issues = await sdk.issues.list({ org: "acme", project: "frontend" });
+ * ```
+ */
+export function createSentrySDK(options?: SentryOptions) {
+  return createSDKMethods(buildInvoker(options));
+}
+
 // CLI runner — internal, used by dist/bin.cjs wrapper
-// biome-ignore lint/performance/noBarrelFile: library entry point must re-export both API and CLI runner
+// biome-ignore lint/performance/noBarrelFile: library entry point must re-export both API, SDK, and CLI runner
 export { startCli as _cli } from "./cli.js";
