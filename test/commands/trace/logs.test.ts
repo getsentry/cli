@@ -331,7 +331,13 @@ describe("logsCommand.func", () => {
       await expect(
         func.call(
           context,
-          { json: false, web: false, period: "14d", limit: 100, sort: "newest" },
+          {
+            json: false,
+            web: false,
+            period: "14d",
+            limit: 100,
+            sort: "newest",
+          },
           TRACE_ID
         )
       ).rejects.toThrow(ContextError);

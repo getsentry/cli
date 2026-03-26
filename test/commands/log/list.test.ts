@@ -690,7 +690,11 @@ describe("listCommand.func — period flag", () => {
   test("trace mode uses 14d default when period is omitted", async () => {
     const { context } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: true, limit: 100, sort: "newest" }, TRACE_ID);
+    await func.call(
+      context,
+      { json: true, limit: 100, sort: "newest" },
+      TRACE_ID
+    );
 
     expect(listTraceLogsSpy).toHaveBeenCalledWith(ORG, TRACE_ID, {
       query: undefined,
