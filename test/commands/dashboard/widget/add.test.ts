@@ -212,6 +212,43 @@ describe("dashboard widget add", () => {
     expect(err.message).toContain("Unknown aggregate function");
   });
 
+  test("issue dataset defaults columns to ['issue'] and orderby to -count()", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      { json: false, display: "table", dataset: "issue" },
+      "123",
+      "Top Issues"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.queries[0].columns).toEqual(["issue"]);
+    expect(addedWidget.queries[0].fields).toContain("issue");
+    expect(addedWidget.queries[0].orderby).toBe("-count()");
+  });
+
+  test("issue dataset respects explicit --group-by over default", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "table",
+        dataset: "issue",
+        "group-by": ["project"],
+      },
+      "123",
+      "Issues by Project"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.queries[0].columns).toEqual(["project"]);
+  });
+
   test("auto-defaults orderby when group-by + limit provided", async () => {
     const { context } = createMockContext();
     const func = await addCommand.loader();

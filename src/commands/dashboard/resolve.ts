@@ -325,7 +325,10 @@ export function buildWidgetFromFlags(opts: {
   const aggregates = (opts.query ?? ["count"]).map(parseAggregate);
   validateAggregateNames(aggregates, opts.dataset);
 
-  const columns = opts.groupBy ?? [];
+  // The issue dataset requires at least one column (group-by) to produce a
+  // visible table — without it, the Sentry UI shows "Columns: None".
+  // Default to ["issue"] so a bare `--dataset issue --display table` just works.
+  const columns = opts.groupBy ?? (opts.dataset === "issue" ? ["issue"] : []);
   // Auto-default orderby to first aggregate descending when group-by is used.
   // Without this, chart widgets (line/area/bar) with group-by + limit error
   // because the dashboard can't determine which top N groups to display.
