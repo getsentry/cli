@@ -580,19 +580,25 @@ async function resolveIssueShortcut(
     if (eventId !== "latest") {
       const issue = await getIssueByShortId(resolved.org, issueShortId);
       const issueProject = issue.project?.slug;
-      if (issueProject) {
-        const data = await fetchSpecificEventData(
-          resolved.org,
-          issueProject,
-          eventId,
-          spans
+      if (!issueProject) {
+        throw new ResolutionError(
+          `Issue '${issueShortId}'`,
+          "has no associated project",
+          `sentry event view <org>/<project> ${eventId}`,
+          ["Specify the project explicitly to view this event"]
         );
-        return {
-          org: resolved.org,
-          data,
-          hint: `Viewing event ${eventId} for issue ${issueShortId}`,
-        };
       }
+      const data = await fetchSpecificEventData(
+        resolved.org,
+        issueProject,
+        eventId,
+        spans
+      );
+      return {
+        org: resolved.org,
+        data,
+        hint: `Viewing event ${eventId} for issue ${issueShortId}`,
+      };
     }
 
     log.warn(
