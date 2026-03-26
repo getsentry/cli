@@ -12,14 +12,15 @@ const baseUrl = import.meta.env.BASE_URL;
 const base = baseUrl.endsWith('/') ? baseUrl : baseUrl + '/';
 ---
 
-<div class="header sl-flex">
+<div class:list={["header", "sl-flex", { "header-homepage": isHomepage }]}>
   <div class="sl-flex header-left">
     <SiteTitle {...Astro.props} />
   </div>
   
   <div class="sl-flex header-right">
     {!isHomepage && <Search {...Astro.props} />}
-    <a href={`${base}getting-started/`} class="header-nav-link">Docs</a>
+    {isHomepage && <a href={`${base}getting-started/`} class="header-nav-link">Docs</a>}
+    {!isHomepage && <span class="header-nav-link header-nav-active">Docs</span>}
     <SocialIcons {...Astro.props} />
   </div>
 </div>
@@ -31,9 +32,12 @@ const base = baseUrl.endsWith('/') ? baseUrl : baseUrl + '/';
     align-items: center;
     height: 100%;
     width: 100%;
+    padding: 0;
+  }
+
+  .header-homepage {
     max-width: var(--sl-content-width);
     margin: 0 auto;
-    padding: 0;
   }
 
   .header-left {
@@ -61,5 +65,14 @@ const base = baseUrl.endsWith('/') ? baseUrl : baseUrl + '/';
   .header-nav-link:hover {
     opacity: 1;
     background: rgba(255, 255, 255, 0.1);
+  }
+
+  .header-nav-active {
+    opacity: 1;
+    cursor: default;
+  }
+
+  .header-nav-active:hover {
+    background: none;
   }
 </style>
