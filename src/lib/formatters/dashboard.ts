@@ -372,8 +372,8 @@ function formatBigNumberValue(value: number): string {
   return Math.round(value).toString();
 }
 
-function formatWithUnit(value: number, unit?: string | null): string {
-  const formatted = formatNumber(value);
+/** Append unit suffix to a pre-formatted number string. */
+function appendUnitSuffix(formatted: string, unit?: string | null): string {
   if (!unit || unit === "none" || unit === "null") {
     return formatted;
   }
@@ -389,22 +389,13 @@ function formatWithUnit(value: number, unit?: string | null): string {
   return `${formatted} ${unit}`;
 }
 
+function formatWithUnit(value: number, unit?: string | null): string {
+  return appendUnitSuffix(formatNumber(value), unit);
+}
+
 /** Format a number with unit using compact notation (K/M/B). */
 function formatCompactWithUnit(value: number, unit?: string | null): string {
-  const formatted = compactFormatter.format(Math.round(value));
-  if (!unit || unit === "none" || unit === "null") {
-    return formatted;
-  }
-  if (unit === "millisecond") {
-    return `${formatted}ms`;
-  }
-  if (unit === "second") {
-    return `${formatted}s`;
-  }
-  if (unit === "byte") {
-    return `${formatted}B`;
-  }
-  return `${formatted} ${unit}`;
+  return appendUnitSuffix(compactFormatter.format(Math.round(value)), unit);
 }
 
 // ---------------------------------------------------------------------------

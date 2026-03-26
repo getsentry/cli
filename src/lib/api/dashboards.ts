@@ -162,6 +162,9 @@ const CHART_WIDTH_OVERHEAD = 12;
 /** Minimum terminal width — mirrors formatter MIN_TERM_WIDTH. */
 const MIN_TERM_WIDTH = 80;
 
+/** Fallback terminal width for non-TTY — mirrors formatter DEFAULT_TERM_WIDTH. */
+const DEFAULT_TERM_WIDTH = 100;
+
 const PERIOD_UNITS: Record<string, number> = {
   s: 1,
   m: 60,
@@ -208,10 +211,11 @@ export function computeOptimalInterval(
     return widget.interval;
   }
 
-  // Estimate chart width from widget layout and terminal size
+  // Estimate chart width from widget layout and terminal size.
+  // Use DEFAULT_TERM_WIDTH as fallback for non-TTY (matches formatter).
   const termWidth = Math.max(
     MIN_TERM_WIDTH,
-    process.stdout.columns || MIN_TERM_WIDTH
+    process.stdout.columns || DEFAULT_TERM_WIDTH
   );
   const layoutW = widget.layout?.w ?? GRID_COLS;
   const chartWidth =
