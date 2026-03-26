@@ -23,6 +23,17 @@ List logs from a project
 - `-s, --sort <value> - Sort order: "newest" (default) or "oldest" - (default: "newest")`
 - `--fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
+**JSON Fields** (use `--json --fields` to select specific fields):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sentry.item_id` | string | Unique log entry ID |
+| `timestamp` | string | Log timestamp (ISO 8601) |
+| `timestamp_precise` | number | Nanosecond-precision timestamp |
+| `message` | string \| null | Log message |
+| `severity` | string \| null | Severity level (error, warning, info, debug) |
+| `trace` | string \| null | Trace ID for correlation |
+
 **Examples:**
 
 ```bash

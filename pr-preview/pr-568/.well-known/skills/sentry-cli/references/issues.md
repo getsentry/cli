@@ -24,6 +24,30 @@ List issues in a project
 - `--compact - Single-line rows for compact output (auto-detects if omitted)`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
+**JSON Fields** (use `--json --fields` to select specific fields):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Numeric issue ID |
+| `shortId` | string | Human-readable short ID (e.g. PROJ-ABC) |
+| `title` | string | Issue title |
+| `culprit` | string | Culprit string |
+| `count` | string | Total event count |
+| `userCount` | number | Number of affected users |
+| `firstSeen` | string \| null | First occurrence (ISO 8601) |
+| `lastSeen` | string \| null | Most recent occurrence (ISO 8601) |
+| `level` | string | Severity level |
+| `status` | string | Issue status |
+| `priority` | string | Triage priority |
+| `platform` | string | Platform |
+| `permalink` | string | URL to the issue in Sentry |
+| `project` | object | Project info |
+| `metadata` | object | Issue metadata |
+| `assignedTo` | unknown \| null | Assigned user or team |
+| `substatus` | string \| null | Issue substatus |
+| `isUnhandled` | boolean | Whether the issue is unhandled |
+| `seerFixabilityScore` | number \| null | Seer AI fixability score (0-1) |
+
 **Examples:**
 
 ```bash
