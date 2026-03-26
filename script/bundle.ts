@@ -22,6 +22,22 @@ if (!SENTRY_CLIENT_ID) {
 const BUN_SQLITE_FILTER = /^bun:sqlite$/;
 const ANY_FILTER = /.*/;
 
+// Regex patterns for SDK type extraction
+/** Matches `export type FooParams = { ... };` blocks (multiline via dotAll) */
+const EXPORTED_TYPE_BLOCK_RE = /^export type \w+Params = \{[^}]*\};/gms;
+
+/** Matches method lines: `name: (params): Promise<T> =>` */
+const SDK_METHOD_RE = /^(\s+)(\w+): \(([^)]*)\): (Promise<.+>)\s*=>$/;
+
+/** Matches namespace opening: `  name: {` */
+const SDK_NAMESPACE_RE = /^\s+\w+: \{$/;
+
+/** Matches invoke call bodies to strip from output */
+const SDK_INVOKE_RE = /^\s+invoke/;
+
+/** Matches trailing comma before closing brace in method tree */
+const TRAILING_COMMA_BRACE_RE = /},?$/;
+
 /** Plugin to replace bun:sqlite with our node:sqlite polyfill. */
 const bunSqlitePlugin: Plugin = {
   name: "bun-sqlite-polyfill",
@@ -47,6 +63,102 @@ const bunSqlitePlugin: Plugin = {
 };
 
 type InjectedFile = { jsPath: string; mapPath: string; debugId: string };
+
+/** Count net brace depth change in a line (`{` = +1, `}` = -1). */
+function countBraces(line: string): number {
+  let delta = 0;
+  for (const ch of line) {
+    if (ch === "{") {
+      delta += 1;
+    }
+    if (ch === "}") {
+      delta -= 1;
+    }
+  }
+  return delta;
+}
+
+/**
+ * Extract the method tree lines from `createSDKMethods` function body.
+ * Returns lines between `return {` and the closing `}` of the function,
+ * excluding the `return {` line itself.
+ */
+function extractMethodTreeLines(lines: string[]): string[] {
+  const methodLines: string[] = [];
+  let inMethodTree = false;
+  let depth = 0;
+
+  for (const line of lines) {
+    if (line.includes("export function createSDKMethods")) {
+      inMethodTree = true;
+      depth = 0;
+      continue;
+    }
+    if (!inMethodTree) {
+      continue;
+    }
+
+    depth += countBraces(line);
+
+    if (depth <= 0) {
+      break;
+    }
+    if (line.trim() === "return {") {
+      continue;
+    }
+
+    methodLines.push(line);
+  }
+
+  return methodLines;
+}
+
+/** Transform a method implementation line into a type declaration line. */
+function transformMethodLine(line: string): string | null {
+  const methodMatch = SDK_METHOD_RE.exec(line);
+  if (methodMatch) {
+    const [, indent, name, params, returnType] = methodMatch;
+    return `${indent}${name}(${params}): ${returnType};`;
+  }
+  if (SDK_NAMESPACE_RE.test(line)) {
+    return line;
+  }
+  if (line.trim().startsWith("}")) {
+    return line.replace(TRAILING_COMMA_BRACE_RE, "};");
+  }
+  // JSDoc comments
+  if (line.trim().startsWith("/**") || line.trim().startsWith("*")) {
+    return line;
+  }
+  // Invoke call bodies — skip
+  if (SDK_INVOKE_RE.test(line)) {
+    return null;
+  }
+  return line;
+}
+
+/**
+ * Extract parameter types and SentrySDK type from the generated SDK source.
+ *
+ * Parses `sdk.generated.ts` to produce standalone `.d.cts`-safe type declarations:
+ * 1. All `export type XxxParams = { ... };` blocks (extracted verbatim)
+ * 2. The `SentrySDK` type built from `createSDKMethods` return shape
+ *    (method implementations → type signatures, invoke bodies stripped)
+ */
+function extractSdkTypes(source: string): string {
+  const paramTypes = [...source.matchAll(EXPORTED_TYPE_BLOCK_RE)].map(
+    (m) => m[0]
+  );
+
+  const methodLines = extractMethodTreeLines(source.split("\n"));
+  const sdkBody = methodLines
+    .map(transformMethodLine)
+    .filter((l): l is string => l !== null)
+    .join("\n");
+
+  const sdkType = `export type SentrySDK = {\n${sdkBody}\n};`;
+  return `${paramTypes.join("\n\n")}\n\n${sdkType}`;
+}
 
 /** Delete .map files after a successful upload — they shouldn't ship to users. */
 async function deleteMapFiles(injected: InjectedFile[]): Promise<void> {
@@ -181,9 +293,8 @@ const result = await build({
   entryPoints: ["./src/index.ts"],
   bundle: true,
   minify: true,
-  banner: {
-    js: `{let e=process.emit;process.emit=function(n,...a){return n==="warning"?!1:e.apply(this,[n,...a])}}`,
-  },
+  // No banner — warning suppression moved to dist/bin.cjs (CLI-only).
+  // The library bundle must not suppress the host application's warnings.
   sourcemap: true,
   platform: "node",
   target: "node22",
@@ -207,12 +318,14 @@ const result = await build({
 // Write the CLI bin wrapper (tiny — shebang + version check + dispatch)
 const BIN_WRAPPER = `#!/usr/bin/env node
 if(parseInt(process.versions.node)<22){console.error("Error: sentry requires Node.js 22 or later (found "+process.version+").\\n\\nEither upgrade Node.js, or install the standalone binary instead:\\n  curl -fsSL https://cli.sentry.dev/install | bash\\n");process.exit(1)}
+{let e=process.emit;process.emit=function(n,...a){return n==="warning"?!1:e.apply(this,[n,...a])}}
 require('./index.cjs')._cli().catch(()=>{process.exitCode=1});
 `;
 await Bun.write("./dist/bin.cjs", BIN_WRAPPER);
 
-// Write TypeScript declarations for the library API
-const TYPE_DECLARATIONS = `export type SentryOptions = {
+// Write TypeScript declarations for the library API.
+// The SentrySDK type is derived from sdk.generated.ts to stay in sync.
+const CORE_DECLARATIONS = `export type SentryOptions = {
   /** Auth token. Auto-filled from SENTRY_AUTH_TOKEN / SENTRY_TOKEN env vars. */
   token?: string;
   /** Return human-readable text instead of parsed JSON. */
@@ -234,35 +347,14 @@ export { sentry };
 export default sentry;
 
 export declare function createSentrySDK(options?: SentryOptions): SentrySDK;
-
-export type SentrySDK = {
-  organizations: {
-    list(params?: { limit?: number }): Promise<unknown>;
-    get(params?: { org?: string }): Promise<unknown>;
-  };
-  projects: {
-    list(params?: { target?: string; limit?: number }): Promise<unknown>;
-    get(params?: { target?: string }): Promise<unknown>;
-  };
-  issues: {
-    list(params: { org: string; project: string; limit?: number; query?: string }): Promise<unknown>;
-    get(params: { issueId: string }): Promise<unknown>;
-  };
-  events: {
-    get(params: { eventId: string }): Promise<unknown>;
-  };
-  traces: {
-    list(params?: { target?: string; limit?: number }): Promise<unknown>;
-    get(params: { traceId: string }): Promise<unknown>;
-  };
-  spans: {
-    list(params?: { target?: string; limit?: number }): Promise<unknown>;
-  };
-  teams: {
-    list(params?: { target?: string; limit?: number }): Promise<unknown>;
-  };
-};
 `;
+
+// Extract parameter types and SentrySDK type from sdk.generated.ts.
+// This keeps the bundled .d.cts in sync with the generated SDK automatically.
+const sdkSource = await Bun.file("./src/sdk.generated.ts").text();
+const sdkTypes = extractSdkTypes(sdkSource);
+
+const TYPE_DECLARATIONS = `${CORE_DECLARATIONS}\n${sdkTypes}\n`;
 await Bun.write("./dist/index.d.cts", TYPE_DECLARATIONS);
 
 console.log("  -> dist/bin.cjs (CLI wrapper)");
