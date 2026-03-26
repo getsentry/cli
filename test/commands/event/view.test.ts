@@ -67,14 +67,14 @@ describe("parsePositionalArgs", () => {
 
     test("detects issue short ID and sets issueShortId", () => {
       const result = parsePositionalArgs(["BRUNCHIE-APP-29"]);
-      expect(result.eventId).toBe("latest");
+      expect(result.eventId).toBe("@latest");
       expect(result.targetArg).toBeUndefined();
       expect(result.issueShortId).toBe("BRUNCHIE-APP-29");
     });
 
     test("detects short issue ID like CLI-G", () => {
       const result = parsePositionalArgs(["CLI-G"]);
-      expect(result.eventId).toBe("latest");
+      expect(result.eventId).toBe("@latest");
       expect(result.issueShortId).toBe("CLI-G");
     });
 
@@ -86,7 +86,7 @@ describe("parsePositionalArgs", () => {
 
     test("detects org/ISSUE-SHORT-ID pattern (CLI-9K)", () => {
       const result = parsePositionalArgs(["figma/FULLSCREEN-2RN"]);
-      expect(result.eventId).toBe("latest");
+      expect(result.eventId).toBe("@latest");
       // Trailing slash signals OrgAll mode so downstream resolves org correctly
       expect(result.targetArg).toBe("figma/");
       expect(result.issueShortId).toBe("FULLSCREEN-2RN");
@@ -94,7 +94,7 @@ describe("parsePositionalArgs", () => {
 
     test("detects org/CLI-G pattern", () => {
       const result = parsePositionalArgs(["sentry/CLI-G"]);
-      expect(result.eventId).toBe("latest");
+      expect(result.eventId).toBe("@latest");
       expect(result.targetArg).toBe("sentry/");
       expect(result.issueShortId).toBe("CLI-G");
     });
@@ -128,7 +128,7 @@ describe("parsePositionalArgs", () => {
     test("org/SHORT-ID takes precedence over SHORT-ID/EVENT-ID", () => {
       // "figma/FULLSCREEN-2RN" → org + issue, not issue + event
       const result = parsePositionalArgs(["figma/FULLSCREEN-2RN"]);
-      expect(result.eventId).toBe("latest");
+      expect(result.eventId).toBe("@latest");
       expect(result.targetArg).toBe("figma/");
       expect(result.issueShortId).toBe("FULLSCREEN-2RN");
     });
@@ -169,7 +169,7 @@ describe("parsePositionalArgs", () => {
         "abc123def456",
       ]);
       expect(result.issueShortId).toBe("JAVASCRIPT-NUXT-52");
-      expect(result.eventId).toBe("latest");
+      expect(result.eventId).toBe("@latest");
       expect(result.targetArg).toBeUndefined();
       expect(result.warning).toContain("issue short ID");
     });
@@ -177,7 +177,7 @@ describe("parsePositionalArgs", () => {
     test("auto-redirects simple issue short ID like CAM-82X", () => {
       const result = parsePositionalArgs(["CAM-82X", "95fd7f5a"]);
       expect(result.issueShortId).toBe("CAM-82X");
-      expect(result.eventId).toBe("latest");
+      expect(result.eventId).toBe("@latest");
       expect(result.targetArg).toBeUndefined();
       expect(result.warning).toContain("issue short ID");
     });
@@ -304,7 +304,7 @@ describe("parsePositionalArgs", () => {
         "https://sentry.io/organizations/my-org/issues/32886/",
       ]);
       expect(result.issueId).toBe("32886");
-      expect(result.eventId).toBe("latest");
+      expect(result.eventId).toBe("@latest");
       expect(result.targetArg).toBe("my-org/");
     });
 
