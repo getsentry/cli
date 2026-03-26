@@ -131,7 +131,7 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: true, web: false, period: "14d", limit: 100 },
+        { json: true, web: false, period: "14d", limit: 100, sort: "newest" },
         TRACE_ID
       );
 
@@ -141,8 +141,8 @@ describe("logsCommand.func", () => {
       expect(parsed).toHaveProperty("hasMore");
       expect(Array.isArray(parsed.data)).toBe(true);
       expect(parsed.data).toHaveLength(3);
-      // formatTraceLogs reverses to chronological order for JSON output
-      expect(parsed.data[0].id).toBe("log003");
+      // Default sort=newest preserves API return order
+      expect(parsed.data[0].id).toBe("log001");
       expect(parsed.hasMore).toBe(false);
     });
 
@@ -154,7 +154,7 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: true, web: false, period: "14d", limit: 100 },
+        { json: true, web: false, period: "14d", limit: 100, sort: "newest" },
         TRACE_ID
       );
 
@@ -173,7 +173,7 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: false, web: false, period: "14d", limit: 100 },
+        { json: false, web: false, period: "14d", limit: 100, sort: "newest" },
         TRACE_ID
       );
 
@@ -190,7 +190,7 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: false, web: false, period: "30d", limit: 100 },
+        { json: false, web: false, period: "30d", limit: 100, sort: "newest" },
         TRACE_ID
       );
 
@@ -206,7 +206,7 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: false, web: false, period: "14d", limit: 100 },
+        { json: false, web: false, period: "14d", limit: 100, sort: "newest" },
         TRACE_ID
       );
 
@@ -224,7 +224,7 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: false, web: false, period: "14d", limit: 100 },
+        { json: false, web: false, period: "14d", limit: 100, sort: "newest" },
         TRACE_ID
       );
 
@@ -241,7 +241,7 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: false, web: false, period: "14d", limit: 100 },
+        { json: false, web: false, period: "14d", limit: 100, sort: "newest" },
         TRACE_ID
       );
 
@@ -259,7 +259,7 @@ describe("logsCommand.func", () => {
       await func.call(
         context,
         // limit equals number of returned logs → hasMore = true
-        { json: false, web: false, period: "14d", limit: 3 },
+        { json: false, web: false, period: "14d", limit: 3, sort: "newest" },
         TRACE_ID
       );
 
@@ -275,7 +275,7 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: false, web: false, period: "14d", limit: 100 },
+        { json: false, web: false, period: "14d", limit: 100, sort: "newest" },
         TRACE_ID
       );
 
@@ -293,7 +293,7 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: true, web: false, period: "14d", limit: 100 },
+        { json: true, web: false, period: "14d", limit: 100, sort: "newest" },
         ORG,
         TRACE_ID
       );
@@ -312,7 +312,7 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: true, web: false, period: "14d", limit: 100 },
+        { json: true, web: false, period: "14d", limit: 100, sort: "newest" },
         TRACE_ID
       );
 
@@ -331,7 +331,7 @@ describe("logsCommand.func", () => {
       await expect(
         func.call(
           context,
-          { json: false, web: false, period: "14d", limit: 100 },
+          { json: false, web: false, period: "14d", limit: 100, sort: "newest" },
           TRACE_ID
         )
       ).rejects.toThrow(ContextError);
@@ -353,6 +353,7 @@ describe("logsCommand.func", () => {
           period: "7d",
           limit: 50,
           query: "level:error",
+          sort: "newest",
         },
         TRACE_ID
       );
@@ -372,7 +373,7 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: false, web: false, period: "14d", limit: 100 },
+        { json: false, web: false, period: "14d", limit: 100, sort: "newest" },
         TRACE_ID
       );
 
@@ -394,7 +395,7 @@ describe("logsCommand.func", () => {
       try {
         await func.call(
           context,
-          { json: false, web: true, period: "14d", limit: 100 },
+          { json: false, web: true, period: "14d", limit: 100, sort: "newest" },
           TRACE_ID
         );
       } catch {
@@ -405,8 +406,8 @@ describe("logsCommand.func", () => {
     });
   });
 
-  describe("chronological ordering", () => {
-    test("reverses API order (API returns newest-first, display is oldest-first)", async () => {
+  describe("sort ordering", () => {
+    test("default sort=newest preserves API order (newest first)", async () => {
       // API returns newest first: log003, log002, log001
       const newestFirst = [...sampleLogs].reverse();
       listTraceLogsSpy.mockResolvedValue(newestFirst);
@@ -416,7 +417,7 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: false, web: false, period: "14d", limit: 100 },
+        { json: false, web: false, period: "14d", limit: 100, sort: "newest" },
         TRACE_ID
       );
 
@@ -426,9 +427,9 @@ describe("logsCommand.func", () => {
       const slowIdx = output.indexOf("Slow query detected");
       const dbIdx = output.indexOf("Database connection failed");
 
-      // After reversal, oldest (Request received) should appear before newest
-      expect(reqIdx).toBeLessThan(dbIdx);
-      expect(slowIdx).toBeLessThan(dbIdx);
+      // Default sort=newest: newest (Database connection failed) appears before oldest
+      expect(dbIdx).toBeLessThan(reqIdx);
+      expect(dbIdx).toBeLessThan(slowIdx);
     });
   });
 });

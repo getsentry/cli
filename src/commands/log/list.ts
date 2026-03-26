@@ -41,11 +41,15 @@ import {
 } from "../../lib/trace-target.js";
 import { getUpdateNotification } from "../../lib/version-check.js";
 
+/** Sort direction for log output */
+type SortDirection = "newest" | "oldest";
+
 type ListFlags = {
   readonly limit: number;
   readonly query?: string;
   readonly follow?: number;
   readonly period?: string;
+  readonly sort: SortDirection;
   readonly json: boolean;
   readonly fresh: boolean;
   readonly fields?: string[];
@@ -95,6 +99,20 @@ const DEFAULT_TRACE_PERIOD = "14d";
  */
 function parseLimit(value: string): number {
   return validateLimit(value, MIN_LIMIT, MAX_LIMIT);
+}
+
+/** Valid sort direction values */
+const VALID_SORT_DIRECTIONS: readonly SortDirection[] = ["newest", "oldest"];
+
+/**
+ * Parse --sort flag value.
+ * @throws Error if value is not "newest" or "oldest"
+ */
+function parseSort(value: string): SortDirection {
+  if (!VALID_SORT_DIRECTIONS.includes(value as SortDirection)) {
+    throw new Error(`--sort must be "newest" or "oldest", got "${value}"`);
+  }
+  return value as SortDirection;
 }
 
 /**
@@ -154,8 +172,10 @@ function parseLogListArgs(
   return parseDualModeArgs(args, TRACE_USAGE_HINT);
 }
 
-/** Default time period for project-scoped log queries */
-const DEFAULT_PROJECT_PERIOD = "90d";
+/** Default time period for project-scoped log queries.
+ * Log retention is 30 days (https://docs.sentry.io/security-legal-pii/security/data-retention-periods/).
+ * Periods >30d hit a degraded API path that returns stale/incomplete data. */
+const DEFAULT_PROJECT_PERIOD = "30d";
 
 /**
  * Execute a single fetch of logs (non-streaming mode).
@@ -179,15 +199,16 @@ async function executeSingleFetch(
     return { result: { logs: [], hasMore: false }, hint: "No logs found." };
   }
 
-  // Reverse for chronological order (API returns newest first, tail shows oldest first)
-  const chronological = [...logs].reverse();
+  // API returns newest first. Reverse only when user wants oldest-first.
+  const ordered =
+    flags.sort === "oldest" ? [...logs].reverse() : logs;
 
   const hasMore = logs.length >= flags.limit;
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"}.`;
   const tip = hasMore ? " Use --limit to show more, or -f to follow." : "";
 
   return {
-    result: { logs: chronological, hasMore },
+    result: { logs: ordered, hasMore },
     hint: `${countText}${tip}`,
   };
 }
@@ -444,14 +465,15 @@ async function executeTraceSingleFetch(
     };
   }
 
-  const chronological = [...logs].reverse();
+  const ordered =
+    flags.sort === "oldest" ? [...logs].reverse() : logs;
 
   const hasMore = logs.length >= flags.limit;
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"} for trace ${traceId}.`;
   const tip = hasMore ? " Use --limit to show more." : "";
 
   return {
-    result: { logs: chronological, traceId, hasMore },
+    result: { logs: ordered, traceId, hasMore },
     hint: `${countText}${tip}`,
   };
 }
@@ -633,8 +655,14 @@ export const listCommand = buildListCommand(
           kind: "parsed",
           parse: String,
           brief:
-            'Time period (e.g., "90d", "14d", "24h"). Default: 90d (project mode), 14d (trace mode)',
+            'Time period (e.g., "30d", "14d", "24h"). Default: 30d (project mode), 14d (trace mode)',
           optional: true,
+        },
+        sort: {
+          kind: "parsed",
+          parse: parseSort,
+          brief: 'Sort order: "newest" (default) or "oldest"',
+          default: "newest",
         },
       },
       aliases: {
@@ -642,6 +670,7 @@ export const listCommand = buildListCommand(
         q: "query",
         f: "follow",
         t: "period",
+        s: "sort",
       },
     },
     async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {

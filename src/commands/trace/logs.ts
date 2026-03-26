@@ -25,12 +25,16 @@ import {
   warnIfNormalized,
 } from "../../lib/trace-target.js";
 
+/** Sort direction for log output */
+type SortDirection = "newest" | "oldest";
+
 type LogsFlags = {
   readonly json: boolean;
   readonly web: boolean;
   readonly period: string;
   readonly limit: number;
   readonly query?: string;
+  readonly sort: SortDirection;
   readonly fresh: boolean;
   readonly fields?: string[];
 };
@@ -85,6 +89,20 @@ const USAGE_HINT = "sentry trace logs [<org>/]<trace-id>";
  */
 function parseLimit(value: string): number {
   return validateLimit(value, 1, MAX_LIMIT);
+}
+
+/** Valid sort direction values */
+const VALID_SORT_DIRECTIONS: readonly SortDirection[] = ["newest", "oldest"];
+
+/**
+ * Parse --sort flag value.
+ * @throws Error if value is not "newest" or "oldest"
+ */
+function parseSort(value: string): SortDirection {
+  if (!VALID_SORT_DIRECTIONS.includes(value as SortDirection)) {
+    throw new Error(`--sort must be "newest" or "oldest", got "${value}"`);
+  }
+  return value as SortDirection;
 }
 
 export const logsCommand = buildCommand({
@@ -147,6 +165,12 @@ export const logsCommand = buildCommand({
         brief: "Additional filter query (Sentry search syntax)",
         optional: true,
       },
+      sort: {
+        kind: "parsed",
+        parse: parseSort,
+        brief: 'Sort order: "newest" (default) or "oldest"',
+        default: "newest",
+      },
       fresh: FRESH_FLAG,
     },
     aliases: {
@@ -155,6 +179,7 @@ export const logsCommand = buildCommand({
       t: "period",
       n: "limit",
       q: "query",
+      s: "sort",
     },
   },
   async *func(this: SentryContext, flags: LogsFlags, ...args: string[]) {
@@ -183,16 +208,17 @@ export const logsCommand = buildCommand({
         })
     );
 
-    // Reverse to chronological order (API returns newest-first)
-    const chronological = [...logs].reverse();
-    const hasMore = chronological.length >= flags.limit;
+    // API returns newest-first. Reverse only when user wants oldest-first.
+    const ordered =
+      flags.sort === "oldest" ? [...logs].reverse() : logs;
+    const hasMore = ordered.length >= flags.limit;
 
     const emptyMessage =
       `No logs found for trace ${traceId} in the last ${flags.period}.\n\n` +
       `Try a longer period: sentry trace logs --period 30d ${traceId}`;
 
     return yield new CommandOutput({
-      logs: chronological,
+      logs: ordered,
       traceId,
       hasMore,
       emptyMessage,

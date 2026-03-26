@@ -83,7 +83,7 @@ export async function listLogs(
       project: isNumericProject ? [Number(projectSlug)] : undefined,
       query: fullQuery || undefined,
       per_page: options.limit || API_MAX_PER_PAGE,
-      statsPeriod: options.statsPeriod ?? "7d",
+      statsPeriod: options.statsPeriod ?? "14d",
       sort: "-timestamp",
     },
   });

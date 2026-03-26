@@ -135,12 +135,14 @@ function mockWithProgress(
 const BATCH_FLAGS = {
   json: true,
   limit: 100,
+  sort: "newest",
 } as const;
 
 /** Human-mode flags for non-follow batch mode (period omitted = use mode default) */
 const HUMAN_FLAGS = {
   json: false,
   limit: 100,
+  sort: "newest",
 } as const;
 
 /** Sample project-scoped logs (SentryLog) */
@@ -270,7 +272,7 @@ describe("listCommand.func — standard mode", () => {
     expect(parsed.data).toHaveLength(3);
   });
 
-  test("outputs JSON in chronological order (oldest first)", async () => {
+  test("outputs JSON in newest-first order by default", async () => {
     // API returns newest first: item003, item002, item001
     const newestFirst = [...sampleLogs].reverse();
     listLogsSpy.mockResolvedValue(newestFirst);
@@ -282,7 +284,27 @@ describe("listCommand.func — standard mode", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
-    // After reversal, oldest should be first
+    // Default sort=newest preserves API order (newest first)
+    expect(parsed.data[0]["sentry.item_id"]).toBe("item003");
+    expect(parsed.data[2]["sentry.item_id"]).toBe("item001");
+  });
+
+  test("outputs JSON in oldest-first order with sort=oldest", async () => {
+    const newestFirst = [...sampleLogs].reverse();
+    listLogsSpy.mockResolvedValue(newestFirst);
+    resolveOrgProjectSpy.mockResolvedValue({ org: ORG, project: PROJECT });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      { ...BATCH_FLAGS, sort: "oldest" },
+      `${ORG}/${PROJECT}`
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    // sort=oldest reverses to chronological order
     expect(parsed.data[0]["sentry.item_id"]).toBe("item001");
     expect(parsed.data[2]["sentry.item_id"]).toBe("item003");
   });
@@ -358,14 +380,14 @@ describe("listCommand.func — standard mode", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { json: false, limit: 50, query: "level:error" },
+      { json: false, limit: 50, query: "level:error", sort: "newest" },
       `${ORG}/${PROJECT}`
     );
 
     expect(listLogsSpy).toHaveBeenCalledWith(ORG, PROJECT, {
       query: "level:error",
       limit: 50,
-      statsPeriod: "90d",
+      statsPeriod: "30d",
     });
   });
 
@@ -441,7 +463,7 @@ describe("listCommand.func — trace mode", () => {
     expect(parsed.data).toHaveLength(3);
   });
 
-  test("outputs JSON in chronological order (oldest first)", async () => {
+  test("outputs JSON in newest-first order by default (trace mode)", async () => {
     const newestFirst = [...sampleTraceLogs].reverse();
     listTraceLogsSpy.mockResolvedValue(newestFirst);
     resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
@@ -452,8 +474,9 @@ describe("listCommand.func — trace mode", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
-    expect(parsed.data[0].id).toBe("log001");
-    expect(parsed.data[2].id).toBe("log003");
+    // Default sort=newest preserves API order (newest first)
+    expect(parsed.data[0].id).toBe("log003");
+    expect(parsed.data[2].id).toBe("log001");
   });
 
   test("shows empty-trace message in human mode", async () => {
@@ -667,7 +690,7 @@ describe("listCommand.func — period flag", () => {
   test("trace mode uses 14d default when period is omitted", async () => {
     const { context } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: true, limit: 100 }, TRACE_ID);
+    await func.call(context, { json: true, limit: 100, sort: "newest" }, TRACE_ID);
 
     expect(listTraceLogsSpy).toHaveBeenCalledWith(ORG, TRACE_ID, {
       query: undefined,
@@ -681,7 +704,7 @@ describe("listCommand.func — period flag", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { json: true, limit: 100, period: "30d" },
+      { json: true, limit: 100, period: "30d", sort: "newest" },
       TRACE_ID
     );
 
@@ -817,6 +840,7 @@ describe("listCommand.func — follow mode (standard)", () => {
     json: false,
     limit: 100,
     follow: 1,
+    sort: "newest",
   } as const;
 
   test("writes initial logs then resolves on SIGINT", async () => {
@@ -1108,6 +1132,7 @@ describe("listCommand.func — follow mode (trace)", () => {
     json: false,
     limit: 100,
     follow: 1,
+    sort: "newest",
   } as const;
 
   test("writes initial trace logs then resolves on SIGINT", async () => {
