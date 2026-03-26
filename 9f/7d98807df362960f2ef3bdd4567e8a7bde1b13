@@ -147,3 +147,55 @@ import { escapeMarkdownCell, mdRow, mdTableHeader } from "./markdown.js";
 - Run `bun test test/lib/formatters/dashboard.test.ts` — existing tests check for content presence (headers, cell values) and should pass without changes
 - Run `bun run typecheck` to verify no type errors
 - Run `bun run lint` to check for style issues
+
+# Fix: timeseries bar charts cut off last bars
+
+## Problem
+
+The last 2+ bars of every timeseries bar chart are missing. Root cause: `Math.floor(chartWidth / sampled.length)` truncates `barWidth`, so `barWidth * sampled.length < chartWidth`. The bars collectively don't fill the chart area, but the X-axis extends the full width, making the right side look empty.
+
+**File**: `src/lib/formatters/dashboard.ts`
+
+## Fix: distribute remainder across bars (Bresenham-style)
+
+### 1. Single-series bars (`renderTimeBarRows`, lines 1224-1243)
+
+Compute `remainder = chartWidth - barWidth * sampled.length`. The first `remainder` bars get width `barWidth + 1`, the rest get `barWidth`.
+
+```typescript
+// Line 1228, after barWidth:
+const remainder = chartWidth - barWidth * sampled.length;
+
+// Line 1240-1241, change:
+const parts = heights.map((h) =>
+  colorFn(buildTimeseriesBarColumn(h, row).repeat(barWidth))
+);
+// To:
+const parts = heights.map((h, col) => {
+  const w = barWidth + (col < remainder ? 1 : 0);
+  return colorFn(buildTimeseriesBarColumn(h, row).repeat(w));
+});
+```
+
+### 2. Stacked bars (`renderStackedTimeBarRows`, lines 1316-1364)
+
+Same pattern — compute remainder after `barWidth`, pass per-column width to `buildStackedColumn`.
+
+```typescript
+// Line 1320, after barWidth:
+const remainder = chartWidth - barWidth * numBuckets;
+
+// Line 1355-1362, change buildStackedColumn call:
+const w = barWidth + (col < remainder ? 1 : 0);
+const ch = buildStackedColumn(stackedHeights[col] ?? [], row, plain, w);
+```
+
+### 3. Check `buildStackedColumn` signature
+
+Verify it already accepts `barWidth` as a parameter — it does (line ~1370), so passing `w` instead works directly.
+
+## Verify
+
+- `bun test test/lib/formatters/dashboard.test.ts`
+- `bun run typecheck`
+- Visual: `bun dev dashboard view CLI -t 24h` — bars should fill to the right edge
