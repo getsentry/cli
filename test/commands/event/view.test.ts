@@ -15,6 +15,7 @@ import {
   test,
 } from "bun:test";
 import {
+  fetchEventWithContext,
   parsePositionalArgs,
   resolveAutoDetectTarget,
   resolveEventTarget,
@@ -30,6 +31,7 @@ import * as browser from "../../../src/lib/browser.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import {
+  ApiError,
   ContextError,
   ResolutionError,
   ValidationError,
@@ -873,5 +875,95 @@ describe("viewCommand.func", () => {
     // parseOrgProjectArg normalizes "test_org/test_proj" → "test-org/test-proj"
     // and sets normalized=true, triggering the warning path (line 343-345)
     expect(getEventSpy).toHaveBeenCalled();
+  });
+});
+
+describe("fetchEventWithContext", () => {
+  const mockEvent: SentryEvent = {
+    eventID: "abc123def456abc123def456abc123de",
+    id: "abc123def456abc123def456abc123de",
+    groupID: "123",
+    context: {},
+    contexts: {},
+    entries: [],
+    tags: [],
+    dateCreated: "2026-01-01T00:00:00Z",
+    dateReceived: "2026-01-01T00:00:00Z",
+  } as unknown as SentryEvent;
+
+  afterEach(() => {
+    mock.restore();
+  });
+
+  test("returns prefetched event without making API calls", async () => {
+    const getEventSpy = spyOn(apiClient, "getEvent");
+    const result = await fetchEventWithContext(
+      mockEvent,
+      "my-org",
+      "my-project",
+      "abc123"
+    );
+    expect(result).toBe(mockEvent);
+    expect(getEventSpy).not.toHaveBeenCalled();
+  });
+
+  test("fetches event from project-scoped endpoint", async () => {
+    const getEventSpy = spyOn(apiClient, "getEvent").mockResolvedValue(
+      mockEvent
+    );
+    const result = await fetchEventWithContext(
+      null,
+      "my-org",
+      "my-project",
+      "abc123"
+    );
+    expect(result).toBe(mockEvent);
+    expect(getEventSpy).toHaveBeenCalledWith("my-org", "my-project", "abc123");
+  });
+
+  test("falls back to org-wide search on 404 and finds event", async () => {
+    spyOn(apiClient, "getEvent").mockRejectedValue(
+      new ApiError("Not found", 404)
+    );
+    const resolvedEvent = {
+      ...mockEvent,
+      eventID: "found-in-other-project",
+    } as unknown as SentryEvent;
+    spyOn(apiClient, "resolveEventInOrg").mockResolvedValue({
+      org: "my-org",
+      project: "other-project",
+      event: resolvedEvent,
+    });
+
+    const result = await fetchEventWithContext(
+      null,
+      "my-org",
+      "my-project",
+      "abc123"
+    );
+    expect(result).toBe(resolvedEvent);
+  });
+
+  test("throws ResolutionError when both project-scoped and org-wide fail", async () => {
+    spyOn(apiClient, "getEvent").mockRejectedValue(
+      new ApiError("Not found", 404)
+    );
+    spyOn(apiClient, "resolveEventInOrg").mockResolvedValue(null);
+
+    await expect(
+      fetchEventWithContext(null, "my-org", "my-project", "abc123")
+    ).rejects.toThrow(ResolutionError);
+  });
+
+  test("propagates non-404 errors without fallback", async () => {
+    spyOn(apiClient, "getEvent").mockRejectedValue(
+      new ApiError("Server error", 500)
+    );
+    const resolveEventSpy = spyOn(apiClient, "resolveEventInOrg");
+
+    await expect(
+      fetchEventWithContext(null, "my-org", "my-project", "abc123")
+    ).rejects.toThrow("Server error");
+    expect(resolveEventSpy).not.toHaveBeenCalled();
   });
 });
