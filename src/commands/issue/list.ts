@@ -1385,7 +1385,8 @@ async function handleResolvedTargets(
     }
   }
   if (hasPrev) {
-    const prevPart = "Previous page: -c prev";
+    // Multi-target mode: no single org to build a full command hint, so use bare flag
+    const prevPart = "Prev: -c prev";
     moreHint = moreHint ? `${moreHint}\n${prevPart}` : prevPart;
   }
 
