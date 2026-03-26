@@ -47,7 +47,7 @@ export function throwApiError(
     throw new ApiError(
       `${context}: Network error`,
       0,
-      `Unable to reach Sentry API. Cause: ${cause}\n\nCheck your internet connection and try again.`
+      `Unable to reach Sentry API. Cause: ${cause}\n\n  Check your internet connection and try again.`
     );
   }
 
