@@ -483,10 +483,13 @@ export async function handleOrgAll(
   });
 
   if (filtered.length === 0) {
+    const platformCtx = flags.platform
+      ? ` matching platform '${flags.platform}'`
+      : "";
     if (navHint) {
-      hint = `No matching projects on this page. ${navHint}`;
+      hint = `No${platformCtx} projects on this page. ${navHint}`;
     } else if (flags.platform) {
-      hint = `No projects matching platform '${flags.platform}' in organization '${org}'.`;
+      hint = `No projects${platformCtx} in organization '${org}'.`;
     } else {
       hint = `No projects found in organization '${org}'.`;
     }

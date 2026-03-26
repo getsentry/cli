@@ -836,7 +836,7 @@ function appendIssueFlags(base: string, flags: ListFlags): string {
   if (flags.query) {
     parts.push(`-q "${flags.query}"`);
   }
-  if (flags.period !== "90d") {
+  if (flags.period && flags.period !== "90d") {
     parts.push(`-t ${flags.period}`);
   }
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
@@ -970,17 +970,20 @@ async function handleOrgAllIssues(
     },
   }));
 
+  const nav = paginationHint({
+    hasPrev,
+    hasMore,
+    prevHint: prevPageHint(org, flags),
+    nextHint: nextPageHint(org, flags),
+  });
   const hintParts: string[] = [];
   if (hasMore) {
-    hintParts.push(
-      `Showing ${issues.length} issues (more available)`,
-      `Next page: ${nextPageHint(org, flags)}`
-    );
+    hintParts.push(`Showing ${issues.length} issues (more available)`);
   } else {
     hintParts.push(`Showing ${issues.length} issues`);
   }
-  if (hasPrev) {
-    hintParts.push("Previous page: -c prev");
+  if (nav) {
+    hintParts.push(nav);
   }
 
   return {

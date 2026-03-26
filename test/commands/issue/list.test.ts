@@ -639,7 +639,7 @@ describe("issue list: org-all mode (cursor pagination)", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("more available");
-    expect(output).toContain("Next page:");
+    expect(output).toContain("Next:");
     expect(output).toContain("-c next");
   });
 

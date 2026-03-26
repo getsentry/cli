@@ -571,7 +571,7 @@ describe("handleOrgAll", () => {
     });
 
     expect(result.items).toHaveLength(0);
-    expect(result.hint).toContain("No matching projects on this page");
+    expect(result.hint).toContain("projects on this page");
     expect(result.hint).toContain("-c next");
     expect(result.hint).toContain("--platform rust");
   });
