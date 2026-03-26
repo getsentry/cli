@@ -9,6 +9,7 @@
 import { z } from "zod";
 
 import { ValidationError } from "../lib/errors.js";
+import { logger } from "../lib/logger.js";
 
 // ---------------------------------------------------------------------------
 // Widget type and display type enums
@@ -442,10 +443,13 @@ const MAX_LIMITS: Partial<Record<string, number>> = {
  * Prepare widget queries for the Sentry API.
  * Auto-computes `fields` from columns + aggregates.
  * Defaults `conditions` to "" when missing.
- * Enforces per-display-type limit maximums.
+ * Clamps per-display-type limits to their maximums with a warning.
  */
-export function prepareWidgetQueries(widget: DashboardWidget): DashboardWidget {
-  // Enforce limit maximums
+export function prepareWidgetQueries(
+  inputWidget: DashboardWidget
+): DashboardWidget {
+  let widget = inputWidget;
+  // Clamp to per-display-type limit maximums
   const maxLimit = MAX_LIMITS[widget.displayType];
   if (
     maxLimit !== undefined &&
@@ -453,10 +457,10 @@ export function prepareWidgetQueries(widget: DashboardWidget): DashboardWidget {
     widget.limit !== null &&
     widget.limit > maxLimit
   ) {
-    throw new ValidationError(
-      `The maximum limit for ${widget.displayType} widgets is ${maxLimit}. Got: ${widget.limit}.`,
-      "limit"
+    logger.warn(
+      `${widget.displayType} widgets support a maximum of ${maxLimit} rows. Clamping --limit from ${widget.limit} to ${maxLimit}.`
     );
+    widget = { ...widget, limit: maxLimit };
   }
 
   if (!widget.queries) {

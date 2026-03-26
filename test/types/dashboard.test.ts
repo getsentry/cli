@@ -521,24 +521,26 @@ describe("prepareWidgetQueries", () => {
     expect(widget.queries?.[0]?.conditions).toBe("");
   });
 
-  test("throws for table widget with limit exceeding max", () => {
-    expect(() =>
-      prepareWidgetQueries({
-        title: "Test",
-        displayType: "table",
-        limit: 25,
-      })
-    ).toThrow(/maximum limit for table widgets is 10/);
+  test("clamps table widget limit to max and warns", () => {
+    const widget = prepareWidgetQueries({
+      title: "Test",
+      displayType: "table",
+      limit: 25,
+    });
+    expect(widget.limit).toBe(10);
+    expect(widget.title).toBe("Test");
+    expect(widget.displayType).toBe("table");
   });
 
-  test("throws for bar widget with limit exceeding max", () => {
-    expect(() =>
-      prepareWidgetQueries({
-        title: "Test",
-        displayType: "bar",
-        limit: 15,
-      })
-    ).toThrow(/maximum limit for bar widgets is 10/);
+  test("clamps bar widget limit to max and warns", () => {
+    const widget = prepareWidgetQueries({
+      title: "Test",
+      displayType: "bar",
+      limit: 15,
+    });
+    expect(widget.limit).toBe(10);
+    expect(widget.title).toBe("Test");
+    expect(widget.displayType).toBe("bar");
   });
 
   test("accepts table widget with limit within max", () => {
