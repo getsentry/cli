@@ -49,7 +49,11 @@ type ListLogsOptions = {
   query?: string;
   /** Maximum number of log entries to return */
   limit?: number;
-  /** Time period for logs (e.g., "90d", "10m") */
+  /**
+   * Time period for logs (e.g., "30d", "14d", "10m").
+   * Defaults to "30d" — the maximum log retention period.
+   * Periods >30d hit a degraded API path returning stale/incomplete data.
+   */
   statsPeriod?: string;
   /** Sort direction: "newest" (default) or "oldest" */
   sort?: LogSortDirection;
@@ -93,7 +97,7 @@ export async function listLogs(
       project: isNumericProject ? [Number(projectSlug)] : undefined,
       query: fullQuery || undefined,
       per_page: options.limit || API_MAX_PER_PAGE,
-      statsPeriod: options.statsPeriod ?? "14d",
+      statsPeriod: options.statsPeriod ?? "30d",
       sort: toApiSort(options.sort),
     },
   });
