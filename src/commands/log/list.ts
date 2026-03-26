@@ -15,7 +15,11 @@ import {
   listTraceLogs,
 } from "../../lib/api-client.js";
 import { parseLogSort, validateLimit } from "../../lib/arg-parsing.js";
-import { AuthError, stringifyUnknown } from "../../lib/errors.js";
+import {
+  AuthError,
+  stringifyUnknown,
+  ValidationError,
+} from "../../lib/errors.js";
 import {
   buildLogRowCells,
   createLogStreamingTable,
@@ -656,6 +660,13 @@ export const listCommand = buildListCommand(
       },
     },
     async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {
+      if (flags.follow && flags.sort === "oldest") {
+        throw new ValidationError(
+          '--sort "oldest" cannot be used with --follow. Follow mode streams new logs as they arrive.',
+          "sort"
+        );
+      }
+
       const { cwd } = this;
 
       const parsed = parseLogListArgs(args);

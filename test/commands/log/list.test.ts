@@ -30,7 +30,11 @@ import {
 import { listCommand } from "../../../src/commands/log/list.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
-import { AuthError, ContextError } from "../../../src/lib/errors.js";
+import {
+  AuthError,
+  ContextError,
+  ValidationError,
+} from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as formatters from "../../../src/lib/formatters/index.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
@@ -813,6 +817,42 @@ function collectProcessStderr(
     })
     .join("");
 }
+
+// ============================================================================
+// Flag validation
+// ============================================================================
+
+describe("listCommand.func — flag validation", () => {
+  test("rejects --sort oldest with --follow", async () => {
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await expect(
+      func.call(
+        context,
+        { json: false, limit: 100, follow: 2, sort: "oldest" },
+        "my-org/my-project"
+      )
+    ).rejects.toThrow(ValidationError);
+  });
+
+  test("allows --sort newest with --follow", async () => {
+    // Should not throw ValidationError — the error (if any) comes from
+    // downstream resolution, not flag validation.
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await expect(
+      func.call(
+        context,
+        { json: false, limit: 100, follow: 2, sort: "newest" },
+        "my-org/my-project"
+      )
+    ).rejects.not.toThrow(ValidationError);
+  });
+});
+
+// ============================================================================
+// Follow mode — standard (project-scoped)
+// ============================================================================
 
 describe("listCommand.func — follow mode (standard)", () => {
   let listLogsSpy: ReturnType<typeof spyOn>;
