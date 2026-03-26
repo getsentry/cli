@@ -328,6 +328,46 @@ stale entries. `"last"` is a silent alias for `"next"`.
 Show `-c next` when `hasMore` is true. Include both `nextCursor` and
 `hasPrev` in the JSON envelope.
 
+**Navigation hint generation:** Use `paginationHint()` from
+`src/lib/list-command.ts` to build bidirectional navigation strings.
+Pass it pre-built `prevHint`/`nextHint` command strings and it returns
+the combined `"Prev: X | Next: Y"` string (or single-direction, or `""`).
+Do NOT assemble `navParts` arrays manually — the shared helper ensures
+consistent formatting across all list commands.
+
+```typescript
+import { paginationHint } from "../../lib/list-command.js";
+
+const nav = paginationHint({
+  hasPrev,
+  hasMore,
+  prevHint: `sentry entity list ${org}/ -c prev`,
+  nextHint: `sentry entity list ${org}/ -c next`,
+});
+if (items.length === 0 && nav) {
+  hint = `No entities on this page. ${nav}`;
+} else if (hasMore) {
+  header = `Showing ${items.length} entities (more available)\n${nav}`;
+} else if (nav) {
+  header = `Showing ${items.length} entities\n${nav}`;
+}
+```
+
+**Three abstraction levels for list commands** (prefer the highest level
+that fits your use case):
+
+1. **`buildOrgListCommand`** (team/repo list) — Fully automatic. Pagination
+   hints, cursor management, JSON envelope, and human formatting are all
+   handled internally. New simple org-scoped list commands should use this.
+
+2. **`dispatchOrgScopedList` with overrides** (project/issue list) — Automatic
+   for most modes; custom `"org-all"` override calls `resolveCursor` +
+   `advancePaginationState` + `paginationHint` manually.
+
+3. **`buildListCommand` with manual pagination** (trace/span/dashboard list) —
+   Command manages its own pagination loop. Must call `resolveCursor`,
+   `advancePaginationState`, `hasPreviousPage`, and `paginationHint` directly.
+
 **Auto-pagination for large limits:**
 
 When `--limit` exceeds `API_MAX_PER_PAGE` (100), list commands MUST transparently
