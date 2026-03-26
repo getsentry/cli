@@ -438,18 +438,24 @@ export async function fetchEventWithContext(
     if (error instanceof ApiError && error.status === 404) {
       // Auto-fallback: try cross-project lookup within the same org.
       // Handles wrong-project resolution from DSN auto-detect or config defaults.
-      const resolved = await resolveEventInOrg(org, eventId);
-      if (resolved) {
-        logger.warn(
-          `Event not found in ${org}/${project}, but found in ${resolved.org}/${resolved.project}.`
-        );
-        return resolved.event;
+      // Wrapped in try-catch so that fallback failures (500s, network errors)
+      // don't mask the helpful ResolutionError with suggestions.
+      try {
+        const resolved = await resolveEventInOrg(org, eventId);
+        if (resolved) {
+          logger.warn(
+            `Event not found in ${org}/${project}, but found in ${resolved.org}/${resolved.project}.`
+          );
+          return resolved.event;
+        }
+      } catch {
+        // Fallback failed (network, 500, etc.) — continue to suggestions
       }
 
       const suggestions = [
         "The event may have been deleted due to data retention policies",
         "Verify the event ID is a 32-character hex string (e.g., a1b2c3d4...)",
-        `Search across all projects in the org: sentry event view ${org}/ ${eventId}`,
+        `The event was not found in any project in '${org}'`,
       ];
 
       // Nudge the user when the event ID looks like an issue short ID
