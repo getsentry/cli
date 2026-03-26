@@ -26,12 +26,12 @@ List logs from a project
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `sentry.item_id` | string |  |
-| `timestamp` | string |  |
-| `timestamp_precise` | number |  |
-| `message` | string | null |  |
-| `severity` | string | null |  |
-| `trace` | string | null |  |
+| `sentry.item_id` | string | Unique log entry ID |
+| `timestamp` | string | Log timestamp (ISO 8601) |
+| `timestamp_precise` | number | Nanosecond-precision timestamp |
+| `message` | string | null | Log message |
+| `severity` | string | null | Severity level (error, warning, info, debug) |
+| `trace` | string | null | Trace ID for correlation |
 
 **Examples:**
 

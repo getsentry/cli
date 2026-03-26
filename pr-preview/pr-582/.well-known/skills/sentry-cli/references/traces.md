@@ -29,15 +29,15 @@ List spans in a project or trace
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | string |  |
-| `parent_span` | string | null |  |
-| `span.op` | string | null |  |
-| `description` | string | null |  |
-| `span.duration` | number | null |  |
-| `timestamp` | string |  |
-| `project` | string |  |
-| `transaction` | string | null |  |
-| `trace` | string |  |
+| `id` | string | Span ID |
+| `parent_span` | string | null | Parent span ID |
+| `span.op` | string | null | Span operation (e.g. http.client, db) |
+| `description` | string | null | Span description |
+| `span.duration` | number | null | Duration (ms) |
+| `timestamp` | string | Timestamp (ISO 8601) |
+| `project` | string | Project slug |
+| `transaction` | string | null | Transaction name |
+| `trace` | string | Trace ID |
 
 ### `sentry span view <trace-id/span-id...>`
 
@@ -63,12 +63,12 @@ List recent traces in a project
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `trace` | string |  |
-| `id` | string |  |
-| `transaction` | string |  |
-| `timestamp` | string |  |
-| `transaction.duration` | number |  |
-| `project` | string |  |
+| `trace` | string | Trace ID |
+| `id` | string | Event ID |
+| `transaction` | string | Transaction name |
+| `timestamp` | string | Timestamp (ISO 8601) |
+| `transaction.duration` | number | Duration (ms) |
+| `project` | string | Project slug |
 
 ### `sentry trace view <org/project/trace-id...>`
 

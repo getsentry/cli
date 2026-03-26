@@ -26,15 +26,15 @@ List repositories
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | string |  |
-| `name` | string |  |
-| `url` | string | null |  |
-| `provider` | object |  |
-| `status` | string |  |
-| `dateCreated` | string |  |
-| `integrationId` | string |  |
-| `externalSlug` | string | null |  |
-| `externalId` | string | null |  |
+| `id` | string | Repository ID |
+| `name` | string | Repository name |
+| `url` | string | null | Repository URL |
+| `provider` | object | Version control provider |
+| `status` | string | Integration status |
+| `dateCreated` | string | Creation date (ISO 8601) |
+| `integrationId` | string | Integration ID |
+| `externalSlug` | string | null | External slug (e.g. org/repo) |
+| `externalId` | string | null | External ID |
 
 ### `sentry team list <org/project>`
 
@@ -49,13 +49,13 @@ List teams
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | string |  |
-| `slug` | string |  |
-| `name` | string |  |
-| `dateCreated` | string |  |
-| `isMember` | boolean |  |
-| `teamRole` | string | null |  |
-| `memberCount` | number |  |
+| `id` | string | Team ID |
+| `slug` | string | Team slug |
+| `name` | string | Team name |
+| `dateCreated` | string | Creation date (ISO 8601) |
+| `isMember` | boolean | Whether you are a member |
+| `teamRole` | string | null | Your role in the team |
+| `memberCount` | number | Number of members |
 
 **Examples:**
 

@@ -19,12 +19,12 @@ List product trials
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `category` | string |  |
-| `startDate` | string | null |  |
-| `endDate` | string | null |  |
-| `reasonCode` | number |  |
-| `isStarted` | boolean |  |
-| `lengthDays` | number | null |  |
+| `category` | string | Trial category (e.g. seerUsers, seerAutofix) |
+| `startDate` | string | null | Start date (ISO 8601) |
+| `endDate` | string | null | End date (ISO 8601) |
+| `reasonCode` | number | Reason code |
+| `isStarted` | boolean | Whether the trial has started |
+| `lengthDays` | number | null | Trial duration in days |
 
 ### `sentry trial start <name> <org>`
 
