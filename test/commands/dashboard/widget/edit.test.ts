@@ -182,6 +182,69 @@ describe("dashboard widget edit", () => {
     expect(edited.queries[0].columns).toEqual(["span.description"]);
   });
 
+  test("throws ValidationError when --dataset change produces invalid combo with existing display", async () => {
+    // existing widget is displayType: "big_number" (spans), user changes only --dataset to "issue"
+    // → effective combo is big_number + issue, which is invalid
+    getDashboardSpy.mockResolvedValueOnce({
+      ...sampleDashboard,
+      widgets: [
+        {
+          title: "Count",
+          displayType: "big_number",
+          widgetType: "spans",
+          queries: [
+            {
+              name: "",
+              conditions: "",
+              columns: [],
+              aggregates: ["count()"],
+              fields: ["count()"],
+            },
+          ],
+          layout: { x: 0, y: 0, w: 2, h: 1 },
+        },
+      ],
+    });
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    const err = await func
+      .call(context, { json: false, index: 0, dataset: "issue" }, "123")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain('"issue" dataset supports');
+  });
+
+  test("throws ValidationError when --display change produces invalid combo with existing dataset", async () => {
+    // existing widget is displayType: "line" + widgetType: "preprod-app-size", user changes only --display to "table"
+    getDashboardSpy.mockResolvedValueOnce({
+      ...sampleDashboard,
+      widgets: [
+        {
+          title: "App Size",
+          displayType: "line",
+          widgetType: "preprod-app-size",
+          queries: [
+            {
+              name: "",
+              conditions: "",
+              columns: [],
+              aggregates: ["max(install_size)"],
+              fields: ["max(install_size)"],
+            },
+          ],
+          layout: { x: 0, y: 0, w: 4, h: 2 },
+        },
+      ],
+    });
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    const err = await func
+      .call(context, { json: false, index: 0, display: "table" }, "123")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain('"preprod-app-size" dataset supports');
+  });
+
   test("validates aggregates against new dataset when --dataset changes", async () => {
     const { context } = createMockContext();
     const func = await editCommand.loader();
