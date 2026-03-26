@@ -168,6 +168,8 @@ sentry dashboard widget add <dashboard> "Top Endpoints" --display table \
 - **Confusing `--query` syntax**: The `--query` flag uses Sentry search syntax (e.g., `is:unresolved`, `assigned:me`), not free text search.
 - **Not using `--web`**: View commands support `-w`/`--web` to open the resource in the browser — useful for sharing links.
 - **Fetching API schemas instead of using the CLI**: Prefer `sentry schema` to browse the API and `sentry api` to make requests — the CLI handles authentication and endpoint resolution, so there's rarely a need to download OpenAPI specs separately.
+- **Each dataset restricts which display types are valid**: Using an unsupported combination errors immediately. Key constraints: `issue` → table/line/area/bar; `tracemetrics` → no table/top_n; `preprod-app-size` → line only; `details`/`server_tree` → spans only.
+- **`--dataset issue` column default is table-only**: For `line`/`area`/`bar`, columns are not auto-populated — the timeseries uses `new_issues`/`resolved_issues` fields instead.
 
 ## Prerequisites
 
