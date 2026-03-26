@@ -172,6 +172,8 @@ sentry dashboard widget add <dashboard> "Top Issues" --display table \
 - **Confusing `--query` syntax**: The `--query` flag uses Sentry search syntax (e.g., `is:unresolved`, `assigned:me`), not free text search.
 - **Not using `--web`**: View commands support `-w`/`--web` to open the resource in the browser — useful for sharing links.
 - **Fetching API schemas instead of using the CLI**: Prefer `sentry schema` to browse the API and `sentry api` to make requests — the CLI handles authentication and endpoint resolution, so there's rarely a need to download OpenAPI specs separately.
+- **`--dataset issue` only supports `--display table`**: Using `big_number`, `line`, `bar`, etc. with the issue dataset will error. For issue counts, use `--display table --dataset issue`.
+- **`--dataset issue` columns default automatically**: No `--group-by` needed — the CLI defaults to `--group-by issue` so the table renders correctly in Sentry.
 
 ## Prerequisites
 
