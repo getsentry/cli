@@ -22,6 +22,20 @@ List repositories
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
+**JSON Fields** (use `--json --fields` to select specific fields):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Repository ID |
+| `name` | string | Repository name |
+| `url` | string \| null | Repository URL |
+| `provider` | object | Version control provider |
+| `status` | string | Integration status |
+| `dateCreated` | string | Creation date (ISO 8601) |
+| `integrationId` | string | Integration ID |
+| `externalSlug` | string \| null | External slug (e.g. org/repo) |
+| `externalId` | string \| null | External ID |
+
 ### `sentry team list <org/project>`
 
 List teams
@@ -30,6 +44,18 @@ List teams
 - `-n, --limit <value> - Maximum number of teams to list - (default: "30")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
+
+**JSON Fields** (use `--json --fields` to select specific fields):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Team ID |
+| `slug` | string | Team slug |
+| `name` | string | Team name |
+| `dateCreated` | string | Creation date (ISO 8601) |
+| `isMember` | boolean | Whether you are a member |
+| `teamRole` | string \| null | Your role in the team |
+| `memberCount` | number | Number of members |
 
 **Examples:**
 
