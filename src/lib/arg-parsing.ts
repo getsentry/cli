@@ -261,6 +261,26 @@ export function validateLimit(value: string, min = 1, max = 1000): number {
   return num;
 }
 
+// ---------------------------------------------------------------------------
+// Sort direction parsing (shared by log list, trace logs)
+// ---------------------------------------------------------------------------
+
+/** Sort direction for log output */
+export type SortDirection = "newest" | "oldest";
+
+const VALID_SORT_DIRECTIONS: readonly SortDirection[] = ["newest", "oldest"];
+
+/**
+ * Parse --sort flag value.
+ * @throws Error if value is not "newest" or "oldest"
+ */
+export function parseSort(value: string): SortDirection {
+  if (!VALID_SORT_DIRECTIONS.includes(value as SortDirection)) {
+    throw new Error(`--sort must be "newest" or "oldest", got "${value}"`);
+  }
+  return value as SortDirection;
+}
+
 /** Default span depth when no value is provided */
 const DEFAULT_SPAN_DEPTH = 3;
 

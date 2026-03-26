@@ -10,7 +10,11 @@
 import * as Sentry from "@sentry/node-core/light";
 import type { SentryContext } from "../../context.js";
 import { listLogs, listTraceLogs } from "../../lib/api-client.js";
-import { validateLimit } from "../../lib/arg-parsing.js";
+import {
+  parseSort,
+  type SortDirection,
+  validateLimit,
+} from "../../lib/arg-parsing.js";
 import { AuthError, stringifyUnknown } from "../../lib/errors.js";
 import {
   buildLogRowCells,
@@ -40,9 +44,6 @@ import {
   warnIfNormalized,
 } from "../../lib/trace-target.js";
 import { getUpdateNotification } from "../../lib/version-check.js";
-
-/** Sort direction for log output */
-type SortDirection = "newest" | "oldest";
 
 type ListFlags = {
   readonly limit: number;
@@ -99,20 +100,6 @@ const DEFAULT_TRACE_PERIOD = "14d";
  */
 function parseLimit(value: string): number {
   return validateLimit(value, MIN_LIMIT, MAX_LIMIT);
-}
-
-/** Valid sort direction values */
-const VALID_SORT_DIRECTIONS: readonly SortDirection[] = ["newest", "oldest"];
-
-/**
- * Parse --sort flag value.
- * @throws Error if value is not "newest" or "oldest"
- */
-function parseSort(value: string): SortDirection {
-  if (!VALID_SORT_DIRECTIONS.includes(value as SortDirection)) {
-    throw new Error(`--sort must be "newest" or "oldest", got "${value}"`);
-  }
-  return value as SortDirection;
 }
 
 /**

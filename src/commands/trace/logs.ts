@@ -6,7 +6,11 @@
 
 import type { SentryContext } from "../../context.js";
 import { listTraceLogs } from "../../lib/api-client.js";
-import { validateLimit } from "../../lib/arg-parsing.js";
+import {
+  parseSort,
+  type SortDirection,
+  validateLimit,
+} from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { filterFields } from "../../lib/formatters/json.js";
@@ -24,9 +28,6 @@ import {
   resolveTraceOrg,
   warnIfNormalized,
 } from "../../lib/trace-target.js";
-
-/** Sort direction for log output */
-type SortDirection = "newest" | "oldest";
 
 type LogsFlags = {
   readonly json: boolean;
@@ -89,20 +90,6 @@ const USAGE_HINT = "sentry trace logs [<org>/]<trace-id>";
  */
 function parseLimit(value: string): number {
   return validateLimit(value, 1, MAX_LIMIT);
-}
-
-/** Valid sort direction values */
-const VALID_SORT_DIRECTIONS: readonly SortDirection[] = ["newest", "oldest"];
-
-/**
- * Parse --sort flag value.
- * @throws Error if value is not "newest" or "oldest"
- */
-function parseSort(value: string): SortDirection {
-  if (!VALID_SORT_DIRECTIONS.includes(value as SortDirection)) {
-    throw new Error(`--sort must be "newest" or "oldest", got "${value}"`);
-  }
-  return value as SortDirection;
 }
 
 export const logsCommand = buildCommand({
