@@ -15,6 +15,17 @@ Manage product trials
 
 List product trials
 
+**JSON Fields** (use `--json --fields` to select specific fields):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `category` | string | Trial category (e.g. seerUsers, seerAutofix) |
+| `startDate` | string \| null | Start date (ISO 8601) |
+| `endDate` | string \| null | End date (ISO 8601) |
+| `reasonCode` | number | Reason code |
+| `isStarted` | boolean | Whether the trial has started |
+| `lengthDays` | number \| null | Trial duration in days |
+
 ### `sentry trial start <name> <org>`
 
 Start a product trial

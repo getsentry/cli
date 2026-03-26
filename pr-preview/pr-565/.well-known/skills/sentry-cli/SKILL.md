@@ -32,7 +32,7 @@ The `sentry` CLI follows conventions from well-known tools — if you're familia
 
 ### Context Window Tips
 
-- Use `--fields id,title,status` on list commands to reduce output size
+- Use `--json --fields` to select specific fields and reduce output size. Run `<command> --help` to see available fields. Example: `sentry issue list --json --fields shortId,title,count,userCount,lastSeen`
 - Use `--json` when piping output between commands or processing programmatically
 - Use `--limit` to cap the number of results (default is usually 10–100)
 - Prefer `sentry issue view PROJECT-123` over listing and filtering manually
@@ -168,6 +168,7 @@ sentry dashboard widget add <dashboard> "Top Endpoints" --display table \
 - **Confusing `--query` syntax**: The `--query` flag uses Sentry search syntax (e.g., `is:unresolved`, `assigned:me`), not free text search.
 - **Not using `--web`**: View commands support `-w`/`--web` to open the resource in the browser — useful for sharing links.
 - **Fetching API schemas instead of using the CLI**: Prefer `sentry schema` to browse the API and `sentry api` to make requests — the CLI handles authentication and endpoint resolution, so there's rarely a need to download OpenAPI specs separately.
+- **Using `sentry api` when CLI commands suffice**: `sentry issue list --json` already includes `count`, `userCount`, `firstSeen`, `lastSeen`, `priority`, and other fields at the top level. Use `--fields` to select specific fields. Run `--help` to see all available fields. Only fall back to `sentry api` for data the CLI doesn't expose.
 
 ## Prerequisites
 

@@ -25,6 +25,20 @@ List spans in a project or trace
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
+**JSON Fields** (use `--json --fields` to select specific fields):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Span ID |
+| `parent_span` | string \| null | Parent span ID |
+| `span.op` | string \| null | Span operation (e.g. http.client, db) |
+| `description` | string \| null | Span description |
+| `span.duration` | number \| null | Duration (ms) |
+| `timestamp` | string | Timestamp (ISO 8601) |
+| `project` | string | Project slug |
+| `transaction` | string \| null | Transaction name |
+| `trace` | string | Trace ID |
+
 ### `sentry span view <trace-id/span-id...>`
 
 View details of specific spans
@@ -44,6 +58,17 @@ List recent traces in a project
 - `-t, --period <value> - Time period (e.g., "1h", "24h", "7d", "30d") - (default: "7d")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
+
+**JSON Fields** (use `--json --fields` to select specific fields):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `trace` | string | Trace ID |
+| `id` | string | Event ID |
+| `transaction` | string | Transaction name |
+| `timestamp` | string | Timestamp (ISO 8601) |
+| `transaction.duration` | number | Duration (ms) |
+| `project` | string | Project slug |
 
 ### `sentry trace view <org/project/trace-id...>`
 

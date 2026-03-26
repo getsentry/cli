@@ -168,7 +168,7 @@ svg:where(.astro-c6vsoqas){color:var(--sl-icon-color);font-size:var(--sl-icon-si
 </ul>
 <h2 id="context-window-tips">Context Window Tips</h2>
 <ul>
-<li>Use <code dir="auto">--fields id,title,status</code> on list commands to reduce output size</li>
+<li>Use <code dir="auto">--json --fields</code> to select specific fields and reduce output size. Run <code dir="auto">&#x3C;command> --help</code> to see available fields. Example: <code dir="auto">sentry issue list --json --fields shortId,title,count,userCount,lastSeen</code></li>
 <li>Use <code dir="auto">--json</code> when piping output between commands or processing programmatically</li>
 <li>Use <code dir="auto">--limit</code> to cap the number of results (default is usually 10–100)</li>
 <li>Prefer <code dir="auto">sentry issue view PROJECT-123</code> over listing and filtering manually</li>
@@ -332,4 +332,5 @@ svg:where(.astro-c6vsoqas){color:var(--sl-icon-color);font-size:var(--sl-icon-si
 <li><strong>Confusing <code dir="auto">--query</code> syntax</strong>: The <code dir="auto">--query</code> flag uses Sentry search syntax (e.g., <code dir="auto">is:unresolved</code>, <code dir="auto">assigned:me</code>), not free text search.</li>
 <li><strong>Not using <code dir="auto">--web</code></strong>: View commands support <code dir="auto">-w</code>/<code dir="auto">--web</code> to open the resource in the browser — useful for sharing links.</li>
 <li><strong>Fetching API schemas instead of using the CLI</strong>: Prefer <code dir="auto">sentry schema</code> to browse the API and <code dir="auto">sentry api</code> to make requests — the CLI handles authentication and endpoint resolution, so there's rarely a need to download OpenAPI specs separately.</li>
+<li><strong>Using <code dir="auto">sentry api</code> when CLI commands suffice</strong>: <code dir="auto">sentry issue list --json</code> already includes <code dir="auto">count</code>, <code dir="auto">userCount</code>, <code dir="auto">firstSeen</code>, <code dir="auto">lastSeen</code>, <code dir="auto">priority</code>, and other fields at the top level. Use <code dir="auto">--fields</code> to select specific fields. Run <code dir="auto">--help</code> to see all available fields. Only fall back to <code dir="auto">sentry api</code> for data the CLI doesn't expose.</li>
 </ul> </div> <footer class="sl-flex astro-3yyafb3n"> <div class="meta sl-flex astro-3yyafb3n">   </div> <div class="pagination-links print:hidden astro-u2l5gyhi" dir="ltr">   </div>   </footer>  </div> </div>   </main> </div> </div>  </div> </div>  </body></html>

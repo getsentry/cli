@@ -22,6 +22,17 @@ List logs from a project
 - `-t, --period <value> - Time period (e.g., "90d", "14d", "24h"). Default: 90d (project mode), 14d (trace mode)`
 - `--fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
+**JSON Fields** (use `--json --fields` to select specific fields):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sentry.item_id` | string | Unique log entry ID |
+| `timestamp` | string | Log timestamp (ISO 8601) |
+| `timestamp_precise` | number | Nanosecond-precision timestamp |
+| `message` | string \| null | Log message |
+| `severity` | string \| null | Severity level (error, warning, info, debug) |
+| `trace` | string \| null | Trace ID for correlation |
+
 **Examples:**
 
 ```bash
