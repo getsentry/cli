@@ -300,6 +300,101 @@ export const DiscoverAggregateFunctionSchema = z.enum(
 );
 
 /**
+ * Valid display types per widget dataset.
+ *
+ * Source: sentry/static/app/views/dashboards/datasetConfig/ @ a42668e87cc8a0b7410ac2acecee6074c52f376f
+ * Each entry mirrors `supportedDisplayTypes` from the corresponding config:
+ *
+ *   issues.tsx         https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/issues.tsx#L90-L95
+ *   spans.tsx          https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/spans.tsx#L287-L297
+ *   errors.tsx         https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/errors.tsx#L115-L123
+ *   transactions.tsx   https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/transactions.tsx#L76-L84
+ *   releases.tsx       https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/releases.tsx#L90-L98
+ *   logs.tsx           https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/logs.tsx#L201-L209
+ *   traceMetrics.tsx   https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/traceMetrics.tsx#L285-L291
+ *   mobileAppSize.tsx  https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/mobileAppSize.tsx#L255
+ *
+ * stacked_area is included for datasets that support timeseries (not in Sentry's UI picker
+ * but accepted by the API and handled by the CLI's query engine).
+ * details and server_tree are spans-only internal display types.
+ *
+ * Four display types are intentionally absent from this map — they bypass Sentry's standard
+ * dataset query system and carry no dataset constraints:
+ *   text                 — renders markdown; no dataset or query involved; user-editable
+ *   wheel                — Web Vitals ring chart; prebuilt dashboards only, not user-editable
+ *   rage_and_dead_clicks — rage/dead click viz; prebuilt only, fetches its own data
+ *   agents_traces_table  — AI agent traces; prebuilt only, fetches its own data
+ * Source: static/app/views/dashboards/utils.tsx (widgetFetchesOwnData / isWidgetEditable)
+ */
+export const DATASET_SUPPORTED_DISPLAY_TYPES = {
+  issue: ["table", "area", "line", "bar"],
+  spans: [
+    "area",
+    "bar",
+    "big_number",
+    "categorical_bar",
+    "line",
+    "stacked_area",
+    "table",
+    "top_n",
+    "details",
+    "server_tree",
+  ],
+  "error-events": [
+    "area",
+    "bar",
+    "big_number",
+    "categorical_bar",
+    "line",
+    "stacked_area",
+    "table",
+    "top_n",
+  ],
+  "transaction-like": [
+    "area",
+    "bar",
+    "big_number",
+    "categorical_bar",
+    "line",
+    "stacked_area",
+    "table",
+    "top_n",
+  ],
+  metrics: [
+    "area",
+    "bar",
+    "big_number",
+    "categorical_bar",
+    "line",
+    "stacked_area",
+    "table",
+    "top_n",
+  ],
+  logs: [
+    "area",
+    "bar",
+    "big_number",
+    "categorical_bar",
+    "line",
+    "stacked_area",
+    "table",
+    "top_n",
+  ],
+  discover: [
+    "area",
+    "bar",
+    "big_number",
+    "categorical_bar",
+    "line",
+    "stacked_area",
+    "table",
+    "top_n",
+  ],
+  tracemetrics: ["area", "bar", "big_number", "categorical_bar", "line"],
+  "preprod-app-size": ["line"],
+} as const satisfies Record<WidgetType, readonly string[]>;
+
+/**
  * Valid `is:` filter values for issue search conditions (--where flag).
  * Only valid when widgetType is "issue". Other datasets don't support `is:`.
  *

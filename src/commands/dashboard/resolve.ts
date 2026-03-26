@@ -17,6 +17,7 @@ import { resolveOrg } from "../../lib/resolve-target.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import { isAllDigits } from "../../lib/utils.js";
 import {
+  DATASET_SUPPORTED_DISPLAY_TYPES,
   type DashboardWidget,
   DISPLAY_TYPES,
   parseAggregate,
@@ -25,6 +26,7 @@ import {
   prepareWidgetQueries,
   validateAggregateNames,
   WIDGET_TYPES,
+  type WidgetType,
 } from "../../types/dashboard.js";
 
 /** Shared widget query flags used by `add` and `edit` commands */
@@ -325,10 +327,11 @@ export function buildWidgetFromFlags(opts: {
   const aggregates = (opts.query ?? ["count"]).map(parseAggregate);
   validateAggregateNames(aggregates, opts.dataset);
 
-  // The issue dataset requires at least one column (group-by) to produce a
-  // visible table — without it, the Sentry UI shows "Columns: None".
-  // Default to ["issue"] so a bare `--dataset issue --display table` just works.
-  const columns = opts.groupBy ?? (opts.dataset === "issue" ? ["issue"] : []);
+  // Issue table widgets need at least one column or the Sentry UI shows "Columns: None".
+  // Default to ["issue"] for table display only — timeseries (line/area/bar) don't use columns.
+  const columns =
+    opts.groupBy ??
+    (opts.dataset === "issue" && opts.display === "table" ? ["issue"] : []);
   // Auto-default orderby to first aggregate descending when group-by is used.
   // Without this, chart widgets (line/area/bar) with group-by + limit error
   // because the dashboard can't determine which top N groups to display.
@@ -379,5 +382,21 @@ export function validateWidgetEnums(display?: string, dataset?: string): void {
       `Invalid --dataset value "${dataset}".\nValid datasets: ${WIDGET_TYPES.join(", ")}`,
       "dataset"
     );
+  }
+  if (display && dataset) {
+    // Untracked display types (text, wheel, rage_and_dead_clicks, agents_traces_table)
+    // bypass Sentry's dataset query system entirely — no dataset constraint applies.
+    const isTrackedDisplay = Object.values(
+      DATASET_SUPPORTED_DISPLAY_TYPES
+    ).some((types) => (types as readonly string[]).includes(display));
+    if (isTrackedDisplay) {
+      const supported = DATASET_SUPPORTED_DISPLAY_TYPES[dataset as WidgetType];
+      if (supported && !(supported as readonly string[]).includes(display)) {
+        throw new ValidationError(
+          `The "${dataset}" dataset supports: ${supported.join(", ")}. Got: "${display}".`,
+          "display"
+        );
+      }
+    }
   }
 }

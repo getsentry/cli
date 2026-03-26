@@ -90,9 +90,20 @@ function buildReplacement(
 
   const limit = flags.limit !== undefined ? flags.limit : existing.limit;
 
+  const effectiveDisplay = flags.display ?? existing.displayType;
+  const effectiveDataset = flags.dataset ?? existing.widgetType;
+
+  // Re-validate after merging with existing values. validateWidgetEnums only
+  // checks the cross-constraint when both args are provided, so it misses
+  // e.g. `--dataset preprod-app-size` on a widget that's already `table`.
+  // validateWidgetEnums itself skips untracked display types (text, wheel, etc.).
+  if (flags.display || flags.dataset) {
+    validateWidgetEnums(effectiveDisplay, effectiveDataset);
+  }
+
   const raw: Record<string, unknown> = {
     title: flags["new-title"] ?? existing.title,
-    displayType: flags.display ?? existing.displayType,
+    displayType: effectiveDisplay,
     queries: mergedQueries ?? existing.queries,
     layout: existing.layout,
   };
