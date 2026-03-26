@@ -99,6 +99,40 @@ describe("parsePositionalArgs", () => {
       expect(result.issueShortId).toBe("CLI-G");
     });
 
+    test("detects SHORT-ID/EVENT-ID pattern (CLI-HV)", () => {
+      const result = parsePositionalArgs([
+        "CLI-G5/abc123def456abc123def456abc123de",
+      ]);
+      expect(result.eventId).toBe("abc123def456abc123def456abc123de");
+      expect(result.targetArg).toBeUndefined();
+      expect(result.issueShortId).toBe("CLI-G5");
+    });
+
+    test("detects multi-dash SHORT-ID/EVENT-ID pattern", () => {
+      const result = parsePositionalArgs([
+        "PHP-SYMFONY-HY/7388f6a62b7d436ab77bb5365f97a1ac",
+      ]);
+      expect(result.eventId).toBe("7388f6a62b7d436ab77bb5365f97a1ac");
+      expect(result.targetArg).toBeUndefined();
+      expect(result.issueShortId).toBe("PHP-SYMFONY-HY");
+    });
+
+    test("normalizes UUID-format event ID in SHORT-ID/EVENT-ID", () => {
+      const result = parsePositionalArgs([
+        "CLI-G5/7388f6a6-2b7d-436a-b77b-b5365f97a1ac",
+      ]);
+      expect(result.eventId).toBe("7388f6a62b7d436ab77bb5365f97a1ac");
+      expect(result.issueShortId).toBe("CLI-G5");
+    });
+
+    test("org/SHORT-ID takes precedence over SHORT-ID/EVENT-ID", () => {
+      // "figma/FULLSCREEN-2RN" → org + issue, not issue + event
+      const result = parsePositionalArgs(["figma/FULLSCREEN-2RN"]);
+      expect(result.eventId).toBe("latest");
+      expect(result.targetArg).toBe("figma/");
+      expect(result.issueShortId).toBe("FULLSCREEN-2RN");
+    });
+
     test("does not detect org/lowercase-slug as issue short ID", () => {
       // "my-org/my-project" is a normal org/project target, not an issue short ID.
       // parseSlashSeparatedArg will throw ContextError as expected.

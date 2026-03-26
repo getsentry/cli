@@ -27,6 +27,7 @@ import { ApiError, ContextError, ResolutionError } from "../../lib/errors.js";
 import { formatEventDetails } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
+import { HEX_ID_RE, normalizeHexId } from "../../lib/hex-id.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -114,18 +115,37 @@ const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
  * "org/project" with a missing event ID.
  */
 function parseSingleArg(arg: string): ParsedPositionalArgs {
-  // Detect "org/SHORT-ID" pattern before parseSlashSeparatedArg.
-  // e.g., "figma/FULLSCREEN-2RN" → auto-redirect to that issue's latest event.
+  // Detect "org/SHORT-ID" and "SHORT-ID/EVENT-ID" patterns before
+  // parseSlashSeparatedArg, which throws ContextError for single-slash args.
   const slashIdx = arg.indexOf("/");
   if (slashIdx !== -1 && arg.indexOf("/", slashIdx + 1) === -1) {
+    const beforeSlash = arg.slice(0, slashIdx);
     const afterSlash = arg.slice(slashIdx + 1);
+
+    // "org/SHORT-ID" → auto-redirect to that issue's latest event.
+    // e.g., "figma/FULLSCREEN-2RN"
     if (afterSlash && looksLikeIssueShortId(afterSlash)) {
       // Use "org/" (trailing slash) to signal OrgAll mode so downstream
       // parseOrgProjectArg interprets this as an org, not a project search.
       return {
         eventId: "latest",
-        targetArg: `${arg.slice(0, slashIdx)}/`,
+        targetArg: `${beforeSlash}/`,
         issueShortId: afterSlash,
+      };
+    }
+
+    // "SHORT-ID/EVENT-ID" → view a specific event identified by issue short ID.
+    // e.g., "CLI-G5/abc123def456abc123def456abc123de"
+    if (
+      beforeSlash &&
+      looksLikeIssueShortId(beforeSlash) &&
+      afterSlash &&
+      HEX_ID_RE.test(normalizeHexId(afterSlash))
+    ) {
+      return {
+        eventId: normalizeHexId(afterSlash),
+        targetArg: undefined,
+        issueShortId: beforeSlash,
       };
     }
   }
@@ -497,6 +517,26 @@ async function resolveIssueShortIdEvent(
   return fetchLatestEventData(org, issue.id, spans);
 }
 
+/**
+ * Fetch a specific event by ID (not latest) and build full EventViewData
+ * including optional span tree. Used by the SHORT-ID/EVENT-ID path.
+ */
+async function fetchSpecificEventData(
+  org: string,
+  project: string,
+  eventId: string,
+  spans: number
+): Promise<EventViewData> {
+  const event = await getEvent(org, project, eventId);
+  const spanTreeResult =
+    spans > 0 ? await getSpanTreeLines(org, event, spans) : undefined;
+  const trace =
+    spanTreeResult?.success && spanTreeResult.traceId
+      ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans ?? [] }
+      : null;
+  return { event, trace, spanTreeLines: spanTreeResult?.lines };
+}
+
 /** Result from an issue-based shortcut (URL or short ID) */
 type IssueShortcutResult = {
   org: string;
@@ -507,6 +547,7 @@ type IssueShortcutResult = {
 /** Options for resolving issue-based shortcuts */
 type IssueShortcutOptions = {
   parsed: ReturnType<typeof parseOrgProjectArg>;
+  eventId: string;
   issueId: string | undefined;
   issueShortId: string | undefined;
   cwd: string;
@@ -524,7 +565,7 @@ type IssueShortcutOptions = {
 async function resolveIssueShortcut(
   options: IssueShortcutOptions
 ): Promise<IssueShortcutResult | null> {
-  const { parsed, issueId, issueShortId, cwd, spans } = options;
+  const { parsed, eventId, issueId, issueShortId, cwd, spans } = options;
   const log = logger.withTag("event.view");
 
   // Issue URL shortcut: fetch the latest event directly via the issue ID.
@@ -540,13 +581,9 @@ async function resolveIssueShortcut(
   }
 
   // Issue short ID auto-redirect: user passed an issue short ID
-  // (e.g., "BRUNCHIE-APP-29" or "figma/FULLSCREEN-2RN") instead of a hex
-  // event ID. Resolve the issue and show its latest event.
+  // (e.g., "BRUNCHIE-APP-29" or "CLI-G5/abc123...") instead of or
+  // alongside a hex event ID. Resolve the issue to get org/project.
   if (issueShortId) {
-    log.warn(
-      `'${issueShortId}' is an issue short ID, not an event ID. Showing the latest event.`
-    );
-
     // Use the explicit org from the parsed target if available (e.g.,
     // "figma/" → org-all with org "figma"), otherwise fall back to
     // auto-detection via DSN/env/config.
@@ -559,6 +596,35 @@ async function resolveIssueShortcut(
       );
     }
 
+    // When the user specified a specific event ID (SHORT-ID/EVENT-ID),
+    // resolve the issue to get the project, then fetch the specific event.
+    if (eventId !== "latest") {
+      const issue = await getIssueByShortId(resolved.org, issueShortId);
+      const issueProject = issue.project?.slug;
+      if (!issueProject) {
+        throw new ResolutionError(
+          `Issue '${issueShortId}'`,
+          "has no associated project",
+          `sentry event view <org>/<project> ${eventId}`,
+          ["Specify the project explicitly to view this event"]
+        );
+      }
+      const data = await fetchSpecificEventData(
+        resolved.org,
+        issueProject,
+        eventId,
+        spans
+      );
+      return {
+        org: resolved.org,
+        data,
+        hint: `Viewing event ${eventId} for issue ${issueShortId}`,
+      };
+    }
+
+    log.warn(
+      `'${issueShortId}' is an issue short ID, not an event ID. Showing the latest event.`
+    );
     const data = await resolveIssueShortIdEvent(
       issueShortId,
       resolved.org,
@@ -624,9 +690,11 @@ export const viewCommand = buildCommand({
     const parsed = parseOrgProjectArg(targetArg);
 
     // Handle issue-based shortcuts (issue URLs and short IDs) before
-    // normal event resolution. Both paths fetch the latest event.
+    // normal event resolution. When eventId is "latest", fetches the
+    // latest event; otherwise fetches the specific event.
     const issueShortcut = await resolveIssueShortcut({
       parsed,
+      eventId,
       issueId,
       issueShortId,
       cwd,
