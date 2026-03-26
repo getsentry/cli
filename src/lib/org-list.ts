@@ -118,9 +118,7 @@ export function jsonTransformListResult<T>(
     ) {
       envelope.nextCursor = result.nextCursor;
     }
-    if (result.hasPrev) {
-      envelope.hasPrev = true;
-    }
+    envelope.hasPrev = !!result.hasPrev;
     if (result.errors && result.errors.length > 0) {
       envelope.errors = result.errors;
     }

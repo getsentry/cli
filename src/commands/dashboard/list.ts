@@ -186,10 +186,8 @@ function jsonTransformDashboardList(
   const envelope: Record<string, unknown> = {
     data: items,
     hasMore: result.hasMore,
+    hasPrev: !!result.hasPrev,
   };
-  if (result.hasPrev) {
-    envelope.hasPrev = true;
-  }
   if (result.nextCursor) {
     envelope.nextCursor = result.nextCursor;
   }

@@ -940,7 +940,7 @@ async function handleOrgAllIssues(
     const hint = hasMore
       ? `No issues on this page. Try the next page: ${nextPageHint(org, flags)}`
       : `No issues found in organization '${org}'.`;
-    return { items: [], hasMore, nextCursor, hint };
+    return { items: [], hasMore, hasPrev, nextCursor, hint };
   }
 
   // isMultiProject=true: org-all shows issues from every project, so the ALIAS

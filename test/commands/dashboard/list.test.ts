@@ -181,7 +181,7 @@ describe("dashboard list command", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
-    expect(parsed).toEqual({ data: [], hasMore: false });
+    expect(parsed).toEqual({ data: [], hasMore: false, hasPrev: false });
   });
 
   // -------------------------------------------------------------------------
