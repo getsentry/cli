@@ -60,6 +60,7 @@ export {
 } from "./api/issues.js";
 export {
   getLogs,
+  type LogSortDirection,
   listLogs,
   listTraceLogs,
 } from "./api/logs.js";

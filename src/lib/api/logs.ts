@@ -26,6 +26,14 @@ import {
   unwrapResult,
 } from "./infrastructure.js";
 
+/** Sort direction for log queries: newest-first or oldest-first. */
+export type LogSortDirection = "newest" | "oldest";
+
+/** Map CLI sort direction to Sentry API sort parameter. */
+function toApiSort(sort: LogSortDirection | undefined): string {
+  return sort === "oldest" ? "timestamp" : "-timestamp";
+}
+
 /** Fields to request from the logs API */
 const LOG_FIELDS = [
   "sentry.item_id",
@@ -41,8 +49,14 @@ type ListLogsOptions = {
   query?: string;
   /** Maximum number of log entries to return */
   limit?: number;
-  /** Time period for logs (e.g., "90d", "10m") */
+  /**
+   * Time period for logs (e.g., "30d", "14d", "10m").
+   * Defaults to "30d" — the maximum log retention period.
+   * Periods >30d hit a degraded API path returning stale/incomplete data.
+   */
   statsPeriod?: string;
+  /** Sort direction: "newest" (default) or "oldest" */
+  sort?: LogSortDirection;
   /** Only return logs after this timestamp_precise value (for streaming) */
   afterTimestamp?: number;
 };
@@ -83,8 +97,8 @@ export async function listLogs(
       project: isNumericProject ? [Number(projectSlug)] : undefined,
       query: fullQuery || undefined,
       per_page: options.limit || API_MAX_PER_PAGE,
-      statsPeriod: options.statsPeriod ?? "7d",
-      sort: "-timestamp",
+      statsPeriod: options.statsPeriod ?? "30d",
+      sort: toApiSort(options.sort),
     },
   });
 
@@ -193,6 +207,8 @@ type ListTraceLogsOptions = {
    * logs exist for the trace. Defaults to "14d".
    */
   statsPeriod?: string;
+  /** Sort direction: "newest" (default) or "oldest" */
+  sort?: LogSortDirection;
 };
 
 /**
@@ -208,8 +224,8 @@ type ListTraceLogsOptions = {
  *
  * @param orgSlug - Organization slug
  * @param traceId - The 32-character hex trace ID
- * @param options - Optional query/limit/statsPeriod overrides
- * @returns Array of trace log entries, ordered newest-first
+ * @param options - Optional query/limit/statsPeriod/sort overrides
+ * @returns Array of trace log entries
  */
 export async function listTraceLogs(
   orgSlug: string,
@@ -227,7 +243,7 @@ export async function listTraceLogs(
         statsPeriod: options.statsPeriod ?? "14d",
         per_page: options.limit ?? API_MAX_PER_PAGE,
         query: options.query,
-        sort: "-timestamp",
+        sort: toApiSort(options.sort),
       },
       schema: TraceLogsResponseSchema,
     }

@@ -5,8 +5,8 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { listTraceLogs } from "../../lib/api-client.js";
-import { validateLimit } from "../../lib/arg-parsing.js";
+import { type LogSortDirection, listTraceLogs } from "../../lib/api-client.js";
+import { parseLogSort, validateLimit } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { filterFields } from "../../lib/formatters/json.js";
@@ -31,6 +31,7 @@ type LogsFlags = {
   readonly period: string;
   readonly limit: number;
   readonly query?: string;
+  readonly sort: LogSortDirection;
   readonly fresh: boolean;
   readonly fields?: string[];
 };
@@ -147,6 +148,12 @@ export const logsCommand = buildCommand({
         brief: "Additional filter query (Sentry search syntax)",
         optional: true,
       },
+      sort: {
+        kind: "parsed",
+        parse: parseLogSort,
+        brief: 'Sort order: "newest" (default) or "oldest"',
+        default: "newest",
+      },
       fresh: FRESH_FLAG,
     },
     aliases: {
@@ -155,6 +162,7 @@ export const logsCommand = buildCommand({
       t: "period",
       n: "limit",
       q: "query",
+      s: "sort",
     },
   },
   async *func(this: SentryContext, flags: LogsFlags, ...args: string[]) {
@@ -180,19 +188,18 @@ export const logsCommand = buildCommand({
           statsPeriod: flags.period,
           limit: flags.limit,
           query: flags.query,
+          sort: flags.sort,
         })
     );
 
-    // Reverse to chronological order (API returns newest-first)
-    const chronological = [...logs].reverse();
-    const hasMore = chronological.length >= flags.limit;
+    const hasMore = logs.length >= flags.limit;
 
     const emptyMessage =
       `No logs found for trace ${traceId} in the last ${flags.period}.\n\n` +
       `Try a longer period: sentry trace logs --period 30d ${traceId}`;
 
     return yield new CommandOutput({
-      logs: chronological,
+      logs,
       traceId,
       hasMore,
       emptyMessage,

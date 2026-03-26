@@ -36,6 +36,8 @@ sentry log list <project>
 | `-n, --limit <n>` | Number of log entries to show (1-1000, default: 100) |
 | `-q, --query <query>` | Filter query (Sentry search syntax) |
 | `-f, --follow [interval]` | Stream logs in real-time (optional: poll interval in seconds, default: 2) |
+| `-t, --period <period>` | Time period (e.g., "30d", "14d", "24h"). Default: 30d. Log retention is 30 days. |
+| `-s, --sort <order>` | Sort order: "newest" (default) or "oldest" |
 | `--json` | Output as JSON |
 
 **Examples:**

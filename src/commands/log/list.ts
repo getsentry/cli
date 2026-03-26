@@ -9,9 +9,17 @@
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
 import type { SentryContext } from "../../context.js";
-import { listLogs, listTraceLogs } from "../../lib/api-client.js";
-import { validateLimit } from "../../lib/arg-parsing.js";
-import { AuthError, stringifyUnknown } from "../../lib/errors.js";
+import {
+  type LogSortDirection,
+  listLogs,
+  listTraceLogs,
+} from "../../lib/api-client.js";
+import { parseLogSort, validateLimit } from "../../lib/arg-parsing.js";
+import {
+  AuthError,
+  stringifyUnknown,
+  ValidationError,
+} from "../../lib/errors.js";
 import {
   buildLogRowCells,
   createLogStreamingTable,
@@ -47,6 +55,7 @@ type ListFlags = {
   readonly query?: string;
   readonly follow?: number;
   readonly period?: string;
+  readonly sort: LogSortDirection;
   readonly json: boolean;
   readonly fresh: boolean;
   readonly fields?: string[];
@@ -155,8 +164,10 @@ function parseLogListArgs(
   return parseDualModeArgs(args, TRACE_USAGE_HINT);
 }
 
-/** Default time period for project-scoped log queries */
-const DEFAULT_PROJECT_PERIOD = "90d";
+/** Default time period for project-scoped log queries.
+ * Log retention is 30 days (https://docs.sentry.io/security-legal-pii/security/data-retention-periods/).
+ * Periods >30d hit a degraded API path that returns stale/incomplete data. */
+const DEFAULT_PROJECT_PERIOD = "30d";
 
 /**
  * Execute a single fetch of logs (non-streaming mode).
@@ -174,21 +185,19 @@ async function executeSingleFetch(
     query: flags.query,
     limit: flags.limit,
     statsPeriod: period,
+    sort: flags.sort,
   });
 
   if (logs.length === 0) {
     return { result: { logs: [], hasMore: false }, hint: "No logs found." };
   }
 
-  // Reverse for chronological order (API returns newest first, tail shows oldest first)
-  const chronological = [...logs].reverse();
-
   const hasMore = logs.length >= flags.limit;
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"}.`;
   const tip = hasMore ? " Use --limit to show more, or -f to follow." : "";
 
   return {
-    result: { logs: chronological, hasMore },
+    result: { logs, hasMore },
     hint: `${countText}${tip}`,
   };
 }
@@ -434,6 +443,7 @@ async function executeTraceSingleFetch(
     query: flags.query,
     limit: flags.limit,
     statsPeriod: period,
+    sort: flags.sort,
   });
 
   if (logs.length === 0) {
@@ -445,14 +455,12 @@ async function executeTraceSingleFetch(
     };
   }
 
-  const chronological = [...logs].reverse();
-
   const hasMore = logs.length >= flags.limit;
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"} for trace ${traceId}.`;
   const tip = hasMore ? " Use --limit to show more." : "";
 
   return {
-    result: { logs: chronological, traceId, hasMore },
+    result: { logs, traceId, hasMore },
     hint: `${countText}${tip}`,
   };
 }
@@ -635,8 +643,14 @@ export const listCommand = buildListCommand(
           kind: "parsed",
           parse: String,
           brief:
-            'Time period (e.g., "90d", "14d", "24h"). Default: 90d (project mode), 14d (trace mode)',
+            'Time period (e.g., "30d", "14d", "24h"). Default: 30d (project mode), 14d (trace mode)',
           optional: true,
+        },
+        sort: {
+          kind: "parsed",
+          parse: parseLogSort,
+          brief: 'Sort order: "newest" (default) or "oldest"',
+          default: "newest",
         },
       },
       aliases: {
@@ -644,9 +658,17 @@ export const listCommand = buildListCommand(
         q: "query",
         f: "follow",
         t: "period",
+        s: "sort",
       },
     },
     async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {
+      if (flags.follow && flags.sort === "oldest") {
+        throw new ValidationError(
+          '--sort "oldest" cannot be used with --follow. Follow mode streams new logs as they arrive.',
+          "sort"
+        );
+      }
+
       const { cwd } = this;
 
       const parsed = parseLogListArgs(args);
