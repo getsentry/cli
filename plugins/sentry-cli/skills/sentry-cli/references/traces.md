@@ -23,7 +23,7 @@ List spans in a project or trace
 - `-s, --sort <value> - Sort order: date, duration - (default: "date")`
 - `-t, --period <value> - Time period (e.g., "1h", "24h", "7d", "30d") - (default: "7d")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
+- `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
 ### `sentry span view <trace-id/span-id...>`
 
@@ -43,7 +43,7 @@ List recent traces in a project
 - `-s, --sort <value> - Sort by: date, duration - (default: "date")`
 - `-t, --period <value> - Time period (e.g., "1h", "24h", "7d", "30d") - (default: "7d")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
+- `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
 ### `sentry trace view <org/project/trace-id...>`
 

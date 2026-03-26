@@ -14,10 +14,10 @@ import {
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import {
+  advancePaginationState,
   buildPaginationContextKey,
-  clearPaginationCursor,
-  resolveOrgCursor,
-  setPaginationCursor,
+  hasPreviousPage,
+  resolveCursor,
 } from "../../lib/db/pagination.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { colorTag, escapeMarkdownCell } from "../../lib/formatters/markdown.js";
@@ -27,6 +27,7 @@ import { fuzzyMatch } from "../../lib/fuzzy.js";
 import {
   buildListCommand,
   buildListLimitFlag,
+  paginationHint,
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
 import {
@@ -53,6 +54,7 @@ type DashboardListResult = {
   dashboards: DashboardListItem[];
   orgSlug: string;
   hasMore: boolean;
+  hasPrev?: boolean;
   nextCursor?: string;
   /** The title filter used (for empty-state messaging) */
   titleFilter?: string;
@@ -185,6 +187,7 @@ function jsonTransformDashboardList(
   const envelope: Record<string, unknown> = {
     data: items,
     hasMore: result.hasMore,
+    hasPrev: !!result.hasPrev,
   };
   if (result.nextCursor) {
     envelope.nextCursor = result.nextCursor;
@@ -325,6 +328,34 @@ async function fetchDashboards(
   return { dashboards: results, cursorToStore, allTitles };
 }
 
+/**
+ * Build the footer hint for the dashboard list command.
+ *
+ * Shows pagination navigation hints (`-c next` / `-c prev`) when applicable,
+ * plus a link to the dashboards page in Sentry.
+ */
+function buildHint(
+  result: DashboardListResult,
+  orgSlug: string
+): string | undefined {
+  const filterArg = result.titleFilter ? ` '${result.titleFilter}'` : "";
+  const navRaw = paginationHint({
+    hasPrev: !!result.hasPrev,
+    hasMore: !!result.hasMore,
+    prevHint: `sentry dashboard list ${orgSlug}/${filterArg} -c prev`,
+    nextHint: `sentry dashboard list ${orgSlug}/${filterArg} -c next`,
+  });
+  const nav = navRaw ? ` ${navRaw}` : "";
+  const url = buildDashboardsListUrl(orgSlug);
+
+  if (result.dashboards.length === 0) {
+    // Empty results — show nav hint if prev/next exist, otherwise nothing
+    return nav ? `No dashboards found.${nav}` : undefined;
+  }
+
+  return `Showing ${result.dashboards.length} dashboard(s).${nav}\nDashboards: ${url}`;
+}
+
 // Command
 
 export const listCommand = buildListCommand("dashboard", {
@@ -341,7 +372,8 @@ export const listCommand = buildListCommand("dashboard", {
       "  sentry dashboard list 'Error*'            # filter by title glob\n" +
       "  sentry dashboard list my-org '*API*'      # bare org + filter\n" +
       "  sentry dashboard list my-org/ '*API*'     # org/ + filter\n" +
-      "  sentry dashboard list -c last             # next page\n" +
+      "  sentry dashboard list -c next             # next page\n" +
+      "  sentry dashboard list -c prev             # previous page\n" +
       "  sentry dashboard list --json              # JSON with pagination envelope\n" +
       "  sentry dashboard list --web",
   },
@@ -384,13 +416,13 @@ export const listCommand = buildListCommand("dashboard", {
       return;
     }
 
-    // Resolve pagination cursor (handles "last" magic value)
+    // Resolve pagination cursor (handles "next"/"prev"/"first" keywords)
     // Lowercase the filter in the context key to match the case-insensitive
     // glob matching — 'Error*' and 'error*' produce identical results.
     const contextKey = buildPaginationContextKey("dashboard", orgSlug, {
       ...(titleFilter && { q: titleFilter.toLowerCase() }),
     });
-    const rawCursor = resolveOrgCursor(
+    const { cursor: rawCursor, direction } = resolveCursor(
       flags.cursor,
       PAGINATION_KEY,
       contextKey
@@ -426,35 +458,28 @@ export const listCommand = buildListCommand("dashboard", {
         })
     );
 
-    // Store or clear pagination cursor
-    if (cursorToStore) {
-      setPaginationCursor(PAGINATION_KEY, contextKey, cursorToStore);
-    } else {
-      clearPaginationCursor(PAGINATION_KEY, contextKey);
-    }
+    // Advance the pagination cursor stack
+    advancePaginationState(
+      PAGINATION_KEY,
+      contextKey,
+      direction,
+      cursorToStore
+    );
 
     const hasMore = !!cursorToStore;
-    const url = buildDashboardsListUrl(orgSlug);
+    const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
 
-    yield new CommandOutput({
+    const outputData: DashboardListResult = {
       dashboards: results,
       orgSlug,
       hasMore,
+      hasPrev: hasPrev || undefined,
       nextCursor: cursorToStore,
       titleFilter,
       allTitles,
-    } satisfies DashboardListResult);
+    };
+    yield new CommandOutput(outputData);
 
-    // Build footer hint
-    let hint: string | undefined;
-    if (results.length === 0) {
-      hint = undefined;
-    } else if (hasMore) {
-      const filterArg = titleFilter ? ` '${titleFilter}'` : "";
-      hint = `Showing ${results.length} dashboard(s). Next page: sentry dashboard list ${orgSlug}/${filterArg} -c last\nDashboards: ${url}`;
-    } else {
-      hint = `Showing ${results.length} dashboard(s).\nDashboards: ${url}`;
-    }
-    return { hint };
+    return { hint: buildHint(outputData, orgSlug) };
   },
 });

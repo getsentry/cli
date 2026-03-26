@@ -1,9 +1,17 @@
 /**
- * Model-Based Tests for Pagination Cursor Storage
+ * Model-Based Tests for Pagination Cursor Stack
  *
- * Uses fast-check to generate random sequences of get/set/clear operations
- * and verifies behavior against a simplified model, including TTL expiry
- * and composite primary key semantics.
+ * Uses fast-check to generate random sequences of advance/clear/resolve
+ * operations and verifies behavior against a simplified model of the
+ * stack-based pagination system.
+ *
+ * Invariants tested:
+ * - Stack grows on "next", shrinks (truncates) on back-then-forward
+ * - Index tracks current page position
+ * - hasPreviousPage reflects index > 0
+ * - resolveCursor resolves keywords to correct stack entries or throws
+ * - clearPaginationState removes all state
+ * - Expired state is treated as absent
  */
 
 // biome-ignore-all lint/suspicious/noMisplacedAssertion: Model-based testing uses expect() inside command classes, not directly in test() functions. This is the standard fast-check pattern for stateful testing.
@@ -16,183 +24,278 @@ import {
   commands,
   constantFrom,
   assert as fcAssert,
-  integer,
   property,
   tuple,
 } from "fast-check";
 import {
-  clearPaginationCursor,
-  getPaginationCursor,
-  setPaginationCursor,
+  advancePaginationState,
+  clearPaginationState,
+  getPaginationState,
+  hasPreviousPage,
+  resolveCursor,
 } from "../../../src/lib/db/pagination.js";
 import {
   createIsolatedDbContext,
   DEFAULT_NUM_RUNS,
 } from "../../model-based/helpers.js";
 
+// ---------------------------------------------------------------------------
+// Model
+// ---------------------------------------------------------------------------
+
 /**
- * Model representing expected pagination cursor state.
- * Maps composite key `${commandKey}::${context}` to cursor info.
+ * Model representing expected pagination state for a single (command, context) pair.
+ *
+ * We track only one pair in the model since the composite-key independence
+ * is tested separately with property-based tests below.
  */
 type PaginationModel = {
-  cursors: Map<string, { cursor: string; expiresAt: number }>;
+  /** Current cursor stack, or null if no state exists. */
+  stack: string[] | null;
+  /** Current page index (0-based), or null if no state. */
+  index: number | null;
 };
 
-/** Real system (we use module functions directly) */
 type RealDb = Record<string, never>;
 
-/** Composite key for the model */
-function compositeKey(commandKey: string, context: string): string {
-  return `${commandKey}::${context}`;
-}
+/** Fixed keys used throughout the model-based test. */
+const CMD_KEY = "test-list";
+const CTX_KEY = "org:test|sort:date";
 
-/** Create initial empty model */
 function createEmptyModel(): PaginationModel {
-  return { cursors: new Map() };
+  return { stack: null, index: null };
 }
 
-// Command classes
+// ---------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------
 
-class SetPaginationCursorCommand
-  implements AsyncCommand<PaginationModel, RealDb>
-{
-  readonly commandKey: string;
-  readonly context: string;
-  readonly cursor: string;
-  readonly ttlMs: number;
+/**
+ * Advance with direction "next" and an optional nextCursor.
+ * Models both initial setup (no prior state) and forward navigation.
+ */
+class AdvanceNextCommand implements AsyncCommand<PaginationModel, RealDb> {
+  readonly nextCursor: string | undefined;
 
-  constructor(
-    commandKey: string,
-    context: string,
-    cursor: string,
-    ttlMs: number
-  ) {
-    this.commandKey = commandKey;
-    this.context = context;
-    this.cursor = cursor;
-    this.ttlMs = ttlMs;
+  constructor(nextCursor: string | undefined) {
+    this.nextCursor = nextCursor;
   }
 
-  check = () => true;
-
-  async run(model: PaginationModel, _real: RealDb): Promise<void> {
-    const now = Date.now();
-    setPaginationCursor(this.commandKey, this.context, this.cursor, this.ttlMs);
-
-    const key = compositeKey(this.commandKey, this.context);
-    model.cursors.set(key, {
-      cursor: this.cursor,
-      expiresAt: now + this.ttlMs,
-    });
-  }
-
-  toString(): string {
-    return `setPaginationCursor("${this.commandKey}", "${this.context}", "${this.cursor}", ${this.ttlMs})`;
-  }
-}
-
-class GetPaginationCursorCommand
-  implements AsyncCommand<PaginationModel, RealDb>
-{
-  readonly commandKey: string;
-  readonly context: string;
-
-  constructor(commandKey: string, context: string) {
-    this.commandKey = commandKey;
-    this.context = context;
-  }
-
-  check = () => true;
-
-  async run(model: PaginationModel, _real: RealDb): Promise<void> {
-    const realCursor = getPaginationCursor(this.commandKey, this.context);
-    const key = compositeKey(this.commandKey, this.context);
-    const entry = model.cursors.get(key);
-
-    if (!entry) {
-      expect(realCursor).toBeUndefined();
-      return;
+  /**
+   * When state already exists, only advance "next" if there's a stored next
+   * cursor at index+1. This matches real usage: commands call resolveCursor
+   * before advancing, which throws if no next page exists.
+   *
+   * When no state exists (first page), always allow — this initialises the stack.
+   */
+  check(model: PaginationModel): boolean {
+    if (model.stack === null) {
+      return true;
     }
+    // Can advance if the next slot in the stack is populated
+    return model.index !== null && model.index + 1 < model.stack.length;
+  }
 
-    const now = Date.now();
-    if (entry.expiresAt <= now) {
-      // Expired — real system should return undefined and delete the row
-      expect(realCursor).toBeUndefined();
-      model.cursors.delete(key);
+  async run(model: PaginationModel, _real: RealDb): Promise<void> {
+    advancePaginationState(CMD_KEY, CTX_KEY, "next", this.nextCursor);
+
+    if (model.stack === null) {
+      // First page: initialise
+      model.stack = this.nextCursor ? ["", this.nextCursor] : [""];
+      model.index = 0;
     } else {
-      expect(realCursor).toBe(entry.cursor);
+      const newIndex = model.index! + 1;
+      // Truncate beyond new position (back-then-forward)
+      const stack = model.stack.slice(0, newIndex + 1);
+      if (this.nextCursor) {
+        stack[newIndex + 1] = this.nextCursor;
+      }
+      model.stack = stack;
+      model.index = newIndex;
     }
+
+    // Verify real state matches model
+    const real = getPaginationState(CMD_KEY, CTX_KEY);
+    expect(real).toBeDefined();
+    expect(real!.stack).toEqual(model.stack);
+    expect(real!.index).toBe(model.index!);
   }
 
   toString(): string {
-    return `getPaginationCursor("${this.commandKey}", "${this.context}")`;
+    return `advance("next", ${this.nextCursor ? `"${this.nextCursor}"` : "undefined"})`;
   }
 }
 
-class ClearPaginationCursorCommand
-  implements AsyncCommand<PaginationModel, RealDb>
-{
-  readonly commandKey: string;
-  readonly context: string;
+/**
+ * Advance with direction "prev".
+ * Only valid when state exists and index > 0.
+ */
+class AdvancePrevCommand implements AsyncCommand<PaginationModel, RealDb> {
+  readonly nextCursor: string | undefined;
 
-  constructor(commandKey: string, context: string) {
-    this.commandKey = commandKey;
-    this.context = context;
+  constructor(nextCursor: string | undefined) {
+    this.nextCursor = nextCursor;
   }
 
+  /** Only run when we can actually go back. */
+  check(model: PaginationModel): boolean {
+    return model.stack !== null && model.index !== null && model.index > 0;
+  }
+
+  async run(model: PaginationModel, _real: RealDb): Promise<void> {
+    advancePaginationState(CMD_KEY, CTX_KEY, "prev", this.nextCursor);
+
+    const newIndex = Math.max(0, model.index! - 1);
+    const stack = [...model.stack!];
+    if (this.nextCursor) {
+      stack[newIndex + 1] = this.nextCursor;
+    }
+    // Truncate beyond newIndex + 2 (or newIndex + 1 if no nextCursor)
+    model.stack = stack.slice(0, this.nextCursor ? newIndex + 2 : newIndex + 1);
+    model.index = newIndex;
+
+    const real = getPaginationState(CMD_KEY, CTX_KEY);
+    expect(real).toBeDefined();
+    expect(real!.stack).toEqual(model.stack);
+    expect(real!.index).toBe(model.index);
+  }
+
+  toString(): string {
+    return `advance("prev", ${this.nextCursor ? `"${this.nextCursor}"` : "undefined"})`;
+  }
+}
+
+/**
+ * Advance with direction "first".
+ * Only valid when state exists.
+ */
+class AdvanceFirstCommand implements AsyncCommand<PaginationModel, RealDb> {
+  readonly nextCursor: string | undefined;
+
+  constructor(nextCursor: string | undefined) {
+    this.nextCursor = nextCursor;
+  }
+
+  check(model: PaginationModel): boolean {
+    return model.stack !== null;
+  }
+
+  async run(model: PaginationModel, _real: RealDb): Promise<void> {
+    advancePaginationState(CMD_KEY, CTX_KEY, "first", this.nextCursor);
+
+    model.stack = this.nextCursor ? ["", this.nextCursor] : [""];
+    model.index = 0;
+
+    const real = getPaginationState(CMD_KEY, CTX_KEY);
+    expect(real).toBeDefined();
+    expect(real!.stack).toEqual(model.stack);
+    expect(real!.index).toBe(model.index);
+  }
+
+  toString(): string {
+    return `advance("first", ${this.nextCursor ? `"${this.nextCursor}"` : "undefined"})`;
+  }
+}
+
+/** Clear pagination state. */
+class ClearCommand implements AsyncCommand<PaginationModel, RealDb> {
   check = () => true;
 
   async run(model: PaginationModel, _real: RealDb): Promise<void> {
-    clearPaginationCursor(this.commandKey, this.context);
-    const key = compositeKey(this.commandKey, this.context);
-    model.cursors.delete(key);
+    clearPaginationState(CMD_KEY, CTX_KEY);
+
+    model.stack = null;
+    model.index = null;
+
+    expect(getPaginationState(CMD_KEY, CTX_KEY)).toBeUndefined();
   }
 
-  toString(): string {
-    return `clearPaginationCursor("${this.commandKey}", "${this.context}")`;
-  }
+  toString = () => "clear()";
 }
 
-// Arbitraries
+/** Verify getPaginationState matches model. */
+class GetStateCommand implements AsyncCommand<PaginationModel, RealDb> {
+  check = () => true;
 
-const commandKeyArb = constantFrom("project-list", "issue-list", "log-list");
-const contextArb = constantFrom(
-  "org:sentry",
-  "org:acme",
-  "org:getsentry",
-  "auto",
-  "org:sentry|platform:python"
-);
+  async run(model: PaginationModel, _real: RealDb): Promise<void> {
+    const real = getPaginationState(CMD_KEY, CTX_KEY);
+
+    if (model.stack === null) {
+      expect(real).toBeUndefined();
+    } else {
+      expect(real).toBeDefined();
+      expect(real!.stack).toEqual(model.stack);
+      expect(real!.index).toBe(model.index!);
+    }
+  }
+
+  toString = () => "getState()";
+}
+
+/** Verify hasPreviousPage matches model. */
+class HasPrevCommand implements AsyncCommand<PaginationModel, RealDb> {
+  check = () => true;
+
+  async run(model: PaginationModel, _real: RealDb): Promise<void> {
+    const real = hasPreviousPage(CMD_KEY, CTX_KEY);
+    const expected =
+      model.stack !== null && model.index !== null && model.index > 0;
+    expect(real).toBe(expected);
+  }
+
+  toString = () => "hasPreviousPage()";
+}
+
+// ---------------------------------------------------------------------------
+// Arbitraries
+// ---------------------------------------------------------------------------
+
 const cursorArb = constantFrom(
   "1735689600000:0:0",
   "1735689600000:100:0",
   "1735689600000:200:0",
+  "1735689600000:300:0",
   "9999999999999:50:1"
 );
 
-/** TTL that won't expire during test (5 minutes) */
-const longTtlArb = integer({ min: 60_000, max: 300_000 });
-
-// Command arbitraries
-
-const setCmdArb = tuple(commandKeyArb, contextArb, cursorArb, longTtlArb).map(
-  ([ck, ctx, cur, ttl]) => new SetPaginationCursorCommand(ck, ctx, cur, ttl)
+const optionalCursorArb = constantFrom(
+  "1735689600000:0:0",
+  "1735689600000:100:0",
+  "1735689600000:200:0",
+  undefined
 );
 
-const getCmdArb = tuple(commandKeyArb, contextArb).map(
-  ([ck, ctx]) => new GetPaginationCursorCommand(ck, ctx)
+const advanceNextCmdArb = optionalCursorArb.map(
+  (cur) => new AdvanceNextCommand(cur)
 );
 
-const clearCmdArb = tuple(commandKeyArb, contextArb).map(
-  ([ck, ctx]) => new ClearPaginationCursorCommand(ck, ctx)
+const advancePrevCmdArb = optionalCursorArb.map(
+  (cur) => new AdvancePrevCommand(cur)
 );
 
-const allCommands = [setCmdArb, getCmdArb, clearCmdArb];
+const advanceFirstCmdArb = optionalCursorArb.map(
+  (cur) => new AdvanceFirstCommand(cur)
+);
 
+const clearCmdArb = constantFrom(new ClearCommand());
+const getStateCmdArb = constantFrom(new GetStateCommand());
+const hasPrevCmdArb = constantFrom(new HasPrevCommand());
+
+const allCommands = [
+  advanceNextCmdArb,
+  advancePrevCmdArb,
+  advanceFirstCmdArb,
+  clearCmdArb,
+  getStateCmdArb,
+  hasPrevCmdArb,
+];
+
+// ---------------------------------------------------------------------------
 // Tests
+// ---------------------------------------------------------------------------
 
-describe("model-based: pagination cursor storage", () => {
-  test("random sequences of pagination operations maintain consistency", async () => {
+describe("model-based: pagination cursor stack", () => {
+  test("random sequences of stack operations maintain consistency", async () => {
     await fcAssert(
       asyncProperty(commands(allCommands, { size: "+1" }), async (cmds) => {
         const cleanup = createIsolatedDbContext();
@@ -212,137 +315,295 @@ describe("model-based: pagination cursor storage", () => {
 
   test("composite key: different contexts are independent", () => {
     fcAssert(
-      property(
-        tuple(commandKeyArb, cursorArb, cursorArb),
-        ([commandKey, cursor1, cursor2]) => {
-          const cleanup = createIsolatedDbContext();
-          try {
-            const ctx1 = "org:sentry";
-            const ctx2 = "org:acme";
+      property(tuple(cursorArb, cursorArb), ([cursor1, cursor2]) => {
+        const cleanup = createIsolatedDbContext();
+        try {
+          const ctx1 = "org:sentry";
+          const ctx2 = "org:acme";
 
-            // Set cursors for two different contexts
-            setPaginationCursor(commandKey, ctx1, cursor1, 300_000);
-            setPaginationCursor(commandKey, ctx2, cursor2, 300_000);
+          // Advance in two different contexts
+          advancePaginationState(CMD_KEY, ctx1, "next", cursor1);
+          advancePaginationState(CMD_KEY, ctx2, "next", cursor2);
 
-            // Each returns its own cursor
-            expect(getPaginationCursor(commandKey, ctx1)).toBe(cursor1);
-            expect(getPaginationCursor(commandKey, ctx2)).toBe(cursor2);
+          const state1 = getPaginationState(CMD_KEY, ctx1);
+          const state2 = getPaginationState(CMD_KEY, ctx2);
 
-            // Clear one, the other remains
-            clearPaginationCursor(commandKey, ctx1);
-            expect(getPaginationCursor(commandKey, ctx1)).toBeUndefined();
-            expect(getPaginationCursor(commandKey, ctx2)).toBe(cursor2);
-          } finally {
-            cleanup();
-          }
+          expect(state1).toBeDefined();
+          expect(state2).toBeDefined();
+          expect(state1!.stack).toEqual(["", cursor1]);
+          expect(state2!.stack).toEqual(["", cursor2]);
+
+          // Clear one, the other remains
+          clearPaginationState(CMD_KEY, ctx1);
+          expect(getPaginationState(CMD_KEY, ctx1)).toBeUndefined();
+          expect(getPaginationState(CMD_KEY, ctx2)).toBeDefined();
+        } finally {
+          cleanup();
         }
-      ),
+      }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
   test("composite key: different command keys are independent", () => {
     fcAssert(
-      property(
-        tuple(contextArb, cursorArb, cursorArb),
-        ([context, cursor1, cursor2]) => {
-          const cleanup = createIsolatedDbContext();
-          try {
-            const cmd1 = "project-list";
-            const cmd2 = "issue-list";
+      property(tuple(cursorArb, cursorArb), ([cursor1, cursor2]) => {
+        const cleanup = createIsolatedDbContext();
+        try {
+          const ctx = "org:sentry";
+          const cmd1 = "project-list";
+          const cmd2 = "issue-list";
 
-            setPaginationCursor(cmd1, context, cursor1, 300_000);
-            setPaginationCursor(cmd2, context, cursor2, 300_000);
+          advancePaginationState(cmd1, ctx, "next", cursor1);
+          advancePaginationState(cmd2, ctx, "next", cursor2);
 
-            expect(getPaginationCursor(cmd1, context)).toBe(cursor1);
-            expect(getPaginationCursor(cmd2, context)).toBe(cursor2);
+          const state1 = getPaginationState(cmd1, ctx);
+          const state2 = getPaginationState(cmd2, ctx);
 
-            clearPaginationCursor(cmd1, context);
-            expect(getPaginationCursor(cmd1, context)).toBeUndefined();
-            expect(getPaginationCursor(cmd2, context)).toBe(cursor2);
-          } finally {
-            cleanup();
-          }
+          expect(state1!.stack).toEqual(["", cursor1]);
+          expect(state2!.stack).toEqual(["", cursor2]);
+
+          clearPaginationState(cmd1, ctx);
+          expect(getPaginationState(cmd1, ctx)).toBeUndefined();
+          expect(getPaginationState(cmd2, ctx)).toBeDefined();
+        } finally {
+          cleanup();
         }
-      ),
+      }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("expired cursors return undefined and are deleted", () => {
-    fcAssert(
-      property(
-        tuple(commandKeyArb, contextArb, cursorArb),
-        ([commandKey, context, cursor]) => {
-          const cleanup = createIsolatedDbContext();
-          try {
-            // Set with immediately-expired TTL
-            setPaginationCursor(commandKey, context, cursor, -1000);
+  test("forward then backward navigation preserves stack correctly", () => {
+    const cleanup = createIsolatedDbContext();
+    try {
+      // Page 1 (initial)
+      advancePaginationState(CMD_KEY, CTX_KEY, "next", "cursor-p2");
+      let state = getPaginationState(CMD_KEY, CTX_KEY);
+      expect(state).toEqual({ stack: ["", "cursor-p2"], index: 0 });
+      expect(hasPreviousPage(CMD_KEY, CTX_KEY)).toBe(false);
 
-            // Should return undefined
-            const result = getPaginationCursor(commandKey, context);
-            expect(result).toBeUndefined();
+      // Page 2 (advance next)
+      advancePaginationState(CMD_KEY, CTX_KEY, "next", "cursor-p3");
+      state = getPaginationState(CMD_KEY, CTX_KEY);
+      expect(state).toEqual({
+        stack: ["", "cursor-p2", "cursor-p3"],
+        index: 1,
+      });
+      expect(hasPreviousPage(CMD_KEY, CTX_KEY)).toBe(true);
 
-            // Second get should also return undefined (row was deleted on first get)
-            const result2 = getPaginationCursor(commandKey, context);
-            expect(result2).toBeUndefined();
-          } finally {
-            cleanup();
-          }
-        }
-      ),
-      { numRuns: DEFAULT_NUM_RUNS }
-    );
+      // Page 3 (advance next)
+      advancePaginationState(CMD_KEY, CTX_KEY, "next", "cursor-p4");
+      state = getPaginationState(CMD_KEY, CTX_KEY);
+      expect(state).toEqual({
+        stack: ["", "cursor-p2", "cursor-p3", "cursor-p4"],
+        index: 2,
+      });
+
+      // Go back to page 2
+      advancePaginationState(CMD_KEY, CTX_KEY, "prev", "cursor-p3-refreshed");
+      state = getPaginationState(CMD_KEY, CTX_KEY);
+      expect(state!.index).toBe(1);
+      expect(hasPreviousPage(CMD_KEY, CTX_KEY)).toBe(true);
+
+      // Go back to page 1
+      advancePaginationState(CMD_KEY, CTX_KEY, "prev", "cursor-p2-refreshed");
+      state = getPaginationState(CMD_KEY, CTX_KEY);
+      expect(state!.index).toBe(0);
+      expect(hasPreviousPage(CMD_KEY, CTX_KEY)).toBe(false);
+    } finally {
+      cleanup();
+    }
   });
 
-  test("upsert: setting same key twice updates the cursor", () => {
-    fcAssert(
-      property(
-        tuple(commandKeyArb, contextArb, cursorArb, cursorArb),
-        ([commandKey, context, cursor1, cursor2]) => {
-          const cleanup = createIsolatedDbContext();
-          try {
-            setPaginationCursor(commandKey, context, cursor1, 300_000);
-            expect(getPaginationCursor(commandKey, context)).toBe(cursor1);
+  test("back-then-forward truncates stale entries", () => {
+    const cleanup = createIsolatedDbContext();
+    try {
+      // Build up a 4-page stack
+      advancePaginationState(CMD_KEY, CTX_KEY, "next", "c2");
+      advancePaginationState(CMD_KEY, CTX_KEY, "next", "c3");
+      advancePaginationState(CMD_KEY, CTX_KEY, "next", "c4");
+      // Now on page 3, stack: ["", "c2", "c3", "c4"]
 
-            setPaginationCursor(commandKey, context, cursor2, 300_000);
-            expect(getPaginationCursor(commandKey, context)).toBe(cursor2);
-          } finally {
-            cleanup();
-          }
+      // Go back to page 2
+      advancePaginationState(CMD_KEY, CTX_KEY, "prev", "c3-new");
+
+      // Go forward from page 2 with a new cursor — should truncate c4
+      advancePaginationState(CMD_KEY, CTX_KEY, "next", "c4-new");
+      const state = getPaginationState(CMD_KEY, CTX_KEY);
+      expect(state!.index).toBe(2);
+      // Old c4 should be gone, replaced by c4-new
+      expect(state!.stack).toEqual(["", "c2", "c3-new", "c4-new"]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("resolveCursor: 'next' returns next stack entry", () => {
+    const cleanup = createIsolatedDbContext();
+    try {
+      // Set up state with a next page available
+      advancePaginationState(CMD_KEY, CTX_KEY, "next", "cursor-p2");
+      // Now on page 0 with stack ["", "cursor-p2"]
+
+      const resolved = resolveCursor("next", CMD_KEY, CTX_KEY);
+      expect(resolved.cursor).toBe("cursor-p2");
+      expect(resolved.direction).toBe("next");
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("resolveCursor: 'next' throws when no next page", () => {
+    const cleanup = createIsolatedDbContext();
+    try {
+      // Set up state on last page (no next cursor)
+      advancePaginationState(CMD_KEY, CTX_KEY, "next", undefined);
+
+      expect(() => resolveCursor("next", CMD_KEY, CTX_KEY)).toThrow(
+        /No next page/i
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("resolveCursor: 'prev' returns previous stack entry", () => {
+    const cleanup = createIsolatedDbContext();
+    try {
+      // Navigate to page 2
+      advancePaginationState(CMD_KEY, CTX_KEY, "next", "cursor-p2");
+      advancePaginationState(CMD_KEY, CTX_KEY, "next", "cursor-p3");
+      // Now on page 1
+
+      const resolved = resolveCursor("prev", CMD_KEY, CTX_KEY);
+      // stack[0] is "" (first page) → cursor should be undefined
+      expect(resolved.cursor).toBeUndefined();
+      expect(resolved.direction).toBe("prev");
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("resolveCursor: 'prev' throws when on first page", () => {
+    const cleanup = createIsolatedDbContext();
+    try {
+      advancePaginationState(CMD_KEY, CTX_KEY, "next", "cursor-p2");
+      // On page 0
+
+      expect(() => resolveCursor("prev", CMD_KEY, CTX_KEY)).toThrow(
+        /first page/i
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("resolveCursor: 'first' always returns undefined cursor", () => {
+    const cleanup = createIsolatedDbContext();
+    try {
+      // Navigate forward a few pages
+      advancePaginationState(CMD_KEY, CTX_KEY, "next", "cursor-p2");
+      advancePaginationState(CMD_KEY, CTX_KEY, "next", "cursor-p3");
+
+      const resolved = resolveCursor("first", CMD_KEY, CTX_KEY);
+      expect(resolved.cursor).toBeUndefined();
+      expect(resolved.direction).toBe("first");
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("resolveCursor: undefined flag returns first page with 'first' direction", () => {
+    const cleanup = createIsolatedDbContext();
+    try {
+      const resolved = resolveCursor(undefined, CMD_KEY, CTX_KEY);
+      expect(resolved.cursor).toBeUndefined();
+      expect(resolved.direction).toBe("first");
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("resolveCursor: raw cursor string is passed through", () => {
+    const cleanup = createIsolatedDbContext();
+    try {
+      const resolved = resolveCursor("1735689600000:100:0", CMD_KEY, CTX_KEY);
+      expect(resolved.cursor).toBe("1735689600000:100:0");
+      expect(resolved.direction).toBe("next");
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("expired state returns undefined", () => {
+    fcAssert(
+      property(cursorArb, (cursor) => {
+        const cleanup = createIsolatedDbContext();
+        try {
+          // Advance to create state, then manually expire it via direct DB write
+          advancePaginationState(CMD_KEY, CTX_KEY, "next", cursor);
+
+          // Verify state exists
+          expect(getPaginationState(CMD_KEY, CTX_KEY)).toBeDefined();
+
+          // Expire it by writing directly to DB with past timestamp
+          const { getDatabase } = require("../../../src/lib/db/index.js");
+          const db = getDatabase();
+          db.query(
+            "UPDATE pagination_cursors SET expires_at = ? WHERE command_key = ? AND context = ?"
+          ).run(Date.now() - 1000, CMD_KEY, CTX_KEY);
+
+          // Should return undefined
+          expect(getPaginationState(CMD_KEY, CTX_KEY)).toBeUndefined();
+
+          // Row should be deleted after the expired read
+          expect(getPaginationState(CMD_KEY, CTX_KEY)).toBeUndefined();
+        } finally {
+          cleanup();
         }
-      ),
+      }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
   test("get on empty table returns undefined", () => {
-    fcAssert(
-      property(tuple(commandKeyArb, contextArb), ([commandKey, context]) => {
-        const cleanup = createIsolatedDbContext();
-        try {
-          expect(getPaginationCursor(commandKey, context)).toBeUndefined();
-        } finally {
-          cleanup();
-        }
-      }),
-      { numRuns: DEFAULT_NUM_RUNS }
-    );
+    const cleanup = createIsolatedDbContext();
+    try {
+      expect(getPaginationState(CMD_KEY, CTX_KEY)).toBeUndefined();
+    } finally {
+      cleanup();
+    }
   });
 
   test("clear on non-existent key is a no-op", () => {
-    fcAssert(
-      property(tuple(commandKeyArb, contextArb), ([commandKey, context]) => {
-        const cleanup = createIsolatedDbContext();
-        try {
-          // Should not throw
-          clearPaginationCursor(commandKey, context);
-          expect(getPaginationCursor(commandKey, context)).toBeUndefined();
-        } finally {
-          cleanup();
-        }
-      }),
-      { numRuns: DEFAULT_NUM_RUNS }
-    );
+    const cleanup = createIsolatedDbContext();
+    try {
+      // Should not throw
+      clearPaginationState(CMD_KEY, CTX_KEY);
+      expect(getPaginationState(CMD_KEY, CTX_KEY)).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("advance 'first' resets index to 0", () => {
+    const cleanup = createIsolatedDbContext();
+    try {
+      // Navigate forward
+      advancePaginationState(CMD_KEY, CTX_KEY, "next", "c2");
+      advancePaginationState(CMD_KEY, CTX_KEY, "next", "c3");
+      advancePaginationState(CMD_KEY, CTX_KEY, "next", "c4");
+      expect(getPaginationState(CMD_KEY, CTX_KEY)!.index).toBe(2);
+
+      // Jump to first
+      advancePaginationState(CMD_KEY, CTX_KEY, "first", "c2-new");
+      const state = getPaginationState(CMD_KEY, CTX_KEY);
+      expect(state!.index).toBe(0);
+      expect(state!.stack).toEqual(["", "c2-new"]);
+      expect(hasPreviousPage(CMD_KEY, CTX_KEY)).toBe(false);
+    } finally {
+      cleanup();
+    }
   });
 });

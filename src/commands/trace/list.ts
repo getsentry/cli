@@ -8,10 +8,10 @@ import type { SentryContext } from "../../context.js";
 import { listTransactions } from "../../lib/api-client.js";
 import { validateLimit } from "../../lib/arg-parsing.js";
 import {
+  advancePaginationState,
   buildPaginationContextKey,
-  clearPaginationCursor,
-  resolveOrgCursor,
-  setPaginationCursor,
+  hasPreviousPage,
+  resolveCursor,
 } from "../../lib/db/pagination.js";
 import { formatTraceTable } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
@@ -20,6 +20,7 @@ import {
   buildListCommand,
   LIST_PERIOD_FLAG,
   PERIOD_ALIASES,
+  paginationHint,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
@@ -50,6 +51,8 @@ type TraceListResult = {
   traces: TransactionListItem[];
   /** Whether more pages are available */
   hasMore: boolean;
+  /** Whether a previous page exists (for bidirectional hints) */
+  hasPrev?: boolean;
   /** Opaque cursor for fetching the next page (null/undefined when no more) */
   nextCursor?: string | null;
   /** Org slug (used by human formatter for display and next-page hint) */
@@ -79,13 +82,11 @@ export const PAGINATION_KEY = "trace-list";
 /** Default time period for trace queries */
 const DEFAULT_PERIOD = "7d";
 
-/** Build the CLI hint for fetching the next page, preserving active flags. */
-function nextPageHint(
-  org: string,
-  project: string,
+/** Append active non-default flags to a base command string. */
+function appendTraceFlags(
+  base: string,
   flags: Pick<ListFlags, "sort" | "query" | "period">
 ): string {
-  const base = `sentry trace list ${org}/${project} -c last`;
   const parts: string[] = [];
   if (flags.sort !== "date") {
     parts.push(`--sort ${flags.sort}`);
@@ -97,6 +98,24 @@ function nextPageHint(
     parts.push(`--period ${flags.period}`);
   }
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
+}
+
+/** Build the CLI hint for fetching the next page, preserving active flags. */
+function nextPageHint(
+  org: string,
+  project: string,
+  flags: Pick<ListFlags, "sort" | "query" | "period">
+): string {
+  return appendTraceFlags(`sentry trace list ${org}/${project} -c next`, flags);
+}
+
+/** Build the CLI hint for fetching the previous page, preserving active flags. */
+function prevPageHint(
+  org: string,
+  project: string,
+  flags: Pick<ListFlags, "sort" | "query" | "period">
+): string {
+  return appendTraceFlags(`sentry trace list ${org}/${project} -c prev`, flags);
 }
 
 /**
@@ -158,6 +177,7 @@ function jsonTransformTraceList(
   const envelope: Record<string, unknown> = {
     data: items,
     hasMore: result.hasMore,
+    hasPrev: !!result.hasPrev,
   };
   if (
     result.nextCursor !== null &&
@@ -246,7 +266,11 @@ export const listCommand = buildListCommand("trace", {
       q: flags.query,
       period: flags.period,
     });
-    const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
+    const { cursor, direction } = resolveCursor(
+      flags.cursor,
+      PAGINATION_KEY,
+      contextKey
+    );
 
     const { data: traces, nextCursor } = await withProgress(
       {
@@ -263,27 +287,37 @@ export const listCommand = buildListCommand("trace", {
         })
     );
 
-    // Store or clear pagination cursor
-    if (nextCursor) {
-      setPaginationCursor(PAGINATION_KEY, contextKey, nextCursor);
-    } else {
-      clearPaginationCursor(PAGINATION_KEY, contextKey);
-    }
+    // Update pagination state (handles both advance and truncation)
+    advancePaginationState(PAGINATION_KEY, contextKey, direction, nextCursor);
+    const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
 
     const hasMore = !!nextCursor;
 
     // Build footer hint based on result state
+    const nav = paginationHint({
+      hasMore,
+      hasPrev,
+      prevHint: prevPageHint(org, project, flags),
+      nextHint: nextPageHint(org, project, flags),
+    });
     let hint: string | undefined;
-    if (traces.length === 0 && hasMore) {
-      hint = `Try the next page: ${nextPageHint(org, project, flags)}`;
+    if (traces.length === 0 && nav) {
+      hint = `No traces on this page. ${nav}`;
     } else if (traces.length > 0) {
       const countText = `Showing ${traces.length} trace${traces.length === 1 ? "" : "s"}.`;
-      hint = hasMore
-        ? `${countText} Next page: ${nextPageHint(org, project, flags)}`
+      hint = nav
+        ? `${countText} ${nav}`
         : `${countText} Use 'sentry trace view <TRACE_ID>' to view the full span tree.`;
     }
 
-    yield new CommandOutput({ traces, hasMore, nextCursor, org, project });
+    yield new CommandOutput({
+      traces,
+      hasMore,
+      hasPrev,
+      nextCursor,
+      org,
+      project,
+    });
     return { hint };
   },
 });

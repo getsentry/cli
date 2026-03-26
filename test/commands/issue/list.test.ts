@@ -478,8 +478,7 @@ describe("issue list: partial failure handling", () => {
 describe("issue list: org-all mode (cursor pagination)", () => {
   let listIssuesPaginatedSpy: ReturnType<typeof spyOn>;
   let getPaginationCursorSpy: ReturnType<typeof spyOn>;
-  let setPaginationCursorSpy: ReturnType<typeof spyOn>;
-  let clearPaginationCursorSpy: ReturnType<typeof spyOn>;
+  let advancePaginationStateSpy: ReturnType<typeof spyOn>;
 
   function createOrgAllContext() {
     const stdoutWrite = mock(() => true);
@@ -512,12 +511,10 @@ describe("issue list: org-all mode (cursor pagination)", () => {
 
   beforeEach(async () => {
     listIssuesPaginatedSpy = spyOn(apiClient, "listIssuesPaginated");
-    getPaginationCursorSpy = spyOn(paginationDb, "getPaginationCursor");
-    setPaginationCursorSpy = spyOn(paginationDb, "setPaginationCursor");
-    clearPaginationCursorSpy = spyOn(paginationDb, "clearPaginationCursor");
+    getPaginationCursorSpy = spyOn(paginationDb, "getPaginationState");
+    advancePaginationStateSpy = spyOn(paginationDb, "advancePaginationState");
 
-    setPaginationCursorSpy.mockReturnValue(undefined);
-    clearPaginationCursorSpy.mockReturnValue(undefined);
+    advancePaginationStateSpy.mockReturnValue(undefined);
 
     // Pre-populate org cache so resolveEffectiveOrg hits the fast path
     setOrgRegion("my-org", DEFAULT_SENTRY_URL);
@@ -526,8 +523,7 @@ describe("issue list: org-all mode (cursor pagination)", () => {
   afterEach(() => {
     listIssuesPaginatedSpy.mockRestore();
     getPaginationCursorSpy.mockRestore();
-    setPaginationCursorSpy.mockRestore();
-    clearPaginationCursorSpy.mockRestore();
+    advancePaginationStateSpy.mockRestore();
   });
 
   test("--cursor is accepted in multi-target (explicit) mode", async () => {
@@ -593,7 +589,7 @@ describe("issue list: org-all mode (cursor pagination)", () => {
     const parsed = JSON.parse(output);
     expect(parsed).toHaveProperty("data");
     expect(parsed).toHaveProperty("hasMore", false);
-    expect(clearPaginationCursorSpy).toHaveBeenCalled();
+    expect(advancePaginationStateSpy).toHaveBeenCalled();
   });
 
   test("returns paginated JSON with hasMore=true when nextCursor present", async () => {
@@ -619,7 +615,7 @@ describe("issue list: org-all mode (cursor pagination)", () => {
     const parsed = JSON.parse(output);
     expect(parsed).toHaveProperty("hasMore", true);
     expect(parsed).toHaveProperty("nextCursor", "cursor:xyz:1");
-    expect(setPaginationCursorSpy).toHaveBeenCalled();
+    expect(advancePaginationStateSpy).toHaveBeenCalled();
   });
 
   test("human output shows next page hint when hasMore", async () => {
@@ -643,8 +639,8 @@ describe("issue list: org-all mode (cursor pagination)", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("more available");
-    expect(output).toContain("Next page:");
-    expect(output).toContain("-c last");
+    expect(output).toContain("Next:");
+    expect(output).toContain("-c next");
   });
 
   test("human output 'No issues found' when empty org-all", async () => {
@@ -671,7 +667,12 @@ describe("issue list: org-all mode (cursor pagination)", () => {
   });
 
   test("resolves 'last' cursor from cache in org-all mode", async () => {
-    getPaginationCursorSpy.mockReturnValue("cached:cursor:789");
+    // The new stack-based pagination stores a PaginationState with stack + index.
+    // "last" (alias for "next") reads stack[index+1] as the cursor.
+    getPaginationCursorSpy.mockReturnValue({
+      stack: ["", "cached:cursor:789"],
+      index: 0,
+    });
     listIssuesPaginatedSpy.mockResolvedValue({
       data: [sampleIssue],
       nextCursor: undefined,
@@ -697,8 +698,8 @@ describe("issue list: org-all mode (cursor pagination)", () => {
     );
   });
 
-  test("throws ContextError when 'last' cursor not in cache", async () => {
-    getPaginationCursorSpy.mockReturnValue(null);
+  test("throws ValidationError when 'last' cursor not in cache", async () => {
+    getPaginationCursorSpy.mockReturnValue(undefined);
 
     const orgAllFunc = (await listCommand.loader()) as unknown as (
       this: unknown,
@@ -714,7 +715,7 @@ describe("issue list: org-all mode (cursor pagination)", () => {
         { limit: 10, sort: "date", json: false, cursor: "last" },
         "my-org/"
       )
-    ).rejects.toThrow("No saved cursor");
+    ).rejects.toThrow("No next page saved");
   });
 
   test("uses explicit cursor string in org-all mode", async () => {
@@ -899,8 +900,10 @@ describe("issue list: compound cursor resume", () => {
   test("resumes from compound cursor, skipping exhausted targets", async () => {
     setOrgRegion("test-org", DEFAULT_SENTRY_URL);
 
-    // Pre-store a compound cursor in the DB: 2 targets, second exhausted
-    const { setPaginationCursor } = await import(
+    // Pre-store a compound cursor in the DB using the stack-based pagination API.
+    // advancePaginationState("first", nextCursor) creates { stack: ["", nextCursor], index: 0 },
+    // so resolveCursor("last"/next) reads stack[1] = "resume-cursor:0:0".
+    const { advancePaginationState } = await import(
       "../../../src/lib/db/pagination.js"
     );
     const { getApiBaseUrl } = await import("../../../src/lib/sentry-client.js");
@@ -912,8 +915,13 @@ describe("issue list: compound cursor resume", () => {
     // Build the context key matching buildMultiTargetContextKey for a single target
     const fingerprint = "test-org/proj-a";
     const contextKey = `host:${host}|type:multi:${fingerprint}|sort:date|period:${escapeContextKeyValue("90d")}`;
-    // Compound cursor: single target with active cursor
-    setPaginationCursor(PAGINATION_KEY, contextKey, "resume-cursor:0:0", 300);
+    // Set up pagination state so "last"/"next" resolves to "resume-cursor:0:0"
+    advancePaginationState(
+      PAGINATION_KEY,
+      contextKey,
+      "first",
+      "resume-cursor:0:0"
+    );
 
     const issue = (id: string, proj: string) => ({
       id,
@@ -986,8 +994,7 @@ describe("issue list: compound cursor resume", () => {
 
 describe("issue list: collapse parameter optimization", () => {
   let listIssuesPaginatedSpy: ReturnType<typeof spyOn>;
-  let setPaginationCursorSpy: ReturnType<typeof spyOn>;
-  let clearPaginationCursorSpy: ReturnType<typeof spyOn>;
+  let advancePaginationStateSpy: ReturnType<typeof spyOn>;
 
   const sampleIssue = {
     id: "1",
@@ -1019,13 +1026,9 @@ describe("issue list: collapse parameter optimization", () => {
 
   beforeEach(async () => {
     listIssuesPaginatedSpy = spyOn(apiClient, "listIssuesPaginated");
-    setPaginationCursorSpy = spyOn(
+    advancePaginationStateSpy = spyOn(
       paginationDb,
-      "setPaginationCursor"
-    ).mockReturnValue(undefined);
-    clearPaginationCursorSpy = spyOn(
-      paginationDb,
-      "clearPaginationCursor"
+      "advancePaginationState"
     ).mockReturnValue(undefined);
 
     await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
@@ -1033,8 +1036,7 @@ describe("issue list: collapse parameter optimization", () => {
 
   afterEach(() => {
     listIssuesPaginatedSpy.mockRestore();
-    setPaginationCursorSpy.mockRestore();
-    clearPaginationCursorSpy.mockRestore();
+    advancePaginationStateSpy.mockRestore();
   });
 
   test("always collapses filtered, lifetime, unhandled in org-all mode", async () => {

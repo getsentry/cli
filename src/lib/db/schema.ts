@@ -15,7 +15,7 @@ import type { Database } from "bun:sqlite";
 import { stringifyUnknown } from "../errors.js";
 import { logger } from "../logger.js";
 
-export const CURRENT_SCHEMA_VERSION = 11;
+export const CURRENT_SCHEMA_VERSION = 12;
 
 /** Environment variable to disable auto-repair */
 const NO_AUTO_REPAIR_ENV = "SENTRY_CLI_NO_AUTO_REPAIR";
@@ -151,7 +151,8 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
     columns: {
       command_key: { type: "TEXT", notNull: true },
       context: { type: "TEXT", notNull: true },
-      cursor: { type: "TEXT", notNull: true },
+      cursor_stack: { type: "TEXT", notNull: true },
+      page_index: { type: "INTEGER", notNull: true, default: "0" },
       expires_at: { type: "INTEGER", notNull: true },
     },
     compositePrimaryKey: ["command_key", "context"],
@@ -755,6 +756,17 @@ export function runMigrations(db: Database): void {
   // Migration 10 -> 11: Add completion_telemetry_queue table
   if (currentVersion < 11) {
     db.exec(EXPECTED_TABLES.completion_telemetry_queue as string);
+  }
+
+  // Migration 11 -> 12: Replace pagination_cursors with cursor-stack schema.
+  // The old table stored a single cursor string; the new schema stores a JSON
+  // array (cursor_stack) + page_index for bidirectional navigation.
+  // Cursors are ephemeral (5-min TTL), so DROP + CREATE loses nothing.
+  if (currentVersion < 12) {
+    if (tableExists(db, "pagination_cursors")) {
+      db.exec("DROP TABLE pagination_cursors");
+    }
+    db.exec(EXPECTED_TABLES.pagination_cursors as string);
   }
 
   if (currentVersion < CURRENT_SCHEMA_VERSION) {

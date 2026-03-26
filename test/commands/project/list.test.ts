@@ -33,9 +33,9 @@ import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { clearAuth, setAuthToken } from "../../../src/lib/db/auth.js";
 import { setDefaults } from "../../../src/lib/db/defaults.js";
 import {
-  getPaginationCursor,
-  resolveOrgCursor,
-  setPaginationCursor,
+  advancePaginationState,
+  getPaginationState,
+  resolveCursor,
 } from "../../../src/lib/db/pagination.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import {
@@ -232,44 +232,61 @@ describe("filterByPlatform", () => {
   });
 });
 
-describe("resolveOrgCursor", () => {
-  test("undefined cursor returns undefined", () => {
-    expect(
-      resolveOrgCursor(undefined, PAGINATION_KEY, "org:sentry")
-    ).toBeUndefined();
+describe("resolveCursor", () => {
+  test("undefined cursor returns undefined with direction 'first'", () => {
+    const result = resolveCursor(undefined, PAGINATION_KEY, "org:sentry");
+    expect(result.cursor).toBeUndefined();
+    expect(result.direction).toBe("first");
   });
 
-  test("explicit cursor value is passed through", () => {
-    expect(
-      resolveOrgCursor("1735689600000:100:0", PAGINATION_KEY, "org:sentry")
-    ).toBe("1735689600000:100:0");
+  test("explicit cursor value is passed through with direction 'next'", () => {
+    const result = resolveCursor(
+      "1735689600000:100:0",
+      PAGINATION_KEY,
+      "org:sentry"
+    );
+    expect(result.cursor).toBe("1735689600000:100:0");
+    expect(result.direction).toBe("next");
   });
 
-  test("'last' with no cached cursor throws ValidationError", () => {
-    expect(() =>
-      resolveOrgCursor("last", PAGINATION_KEY, "org:sentry")
-    ).toThrow(ValidationError);
-    expect(() =>
-      resolveOrgCursor("last", PAGINATION_KEY, "org:sentry")
-    ).toThrow(/No saved cursor/);
-  });
-
-  test("'last' with cached cursor returns the cached value", () => {
-    const cursor = "1735689600000:100:0";
-    const contextKey = "org:test-resolve";
-    setPaginationCursor(PAGINATION_KEY, contextKey, cursor, 300_000);
-
-    const result = resolveOrgCursor("last", PAGINATION_KEY, contextKey);
-    expect(result).toBe(cursor);
-  });
-
-  test("'last' with expired cursor throws ValidationError", () => {
-    const contextKey = "org:test-expired";
-    setPaginationCursor(PAGINATION_KEY, contextKey, "old-cursor", -1000);
-
-    expect(() => resolveOrgCursor("last", PAGINATION_KEY, contextKey)).toThrow(
+  test("'next' with no saved state throws ValidationError", () => {
+    expect(() => resolveCursor("next", PAGINATION_KEY, "org:sentry")).toThrow(
       ValidationError
     );
+    expect(() => resolveCursor("next", PAGINATION_KEY, "org:sentry")).toThrow(
+      /No next page/
+    );
+  });
+
+  test("'next' with saved state returns the next cursor", () => {
+    const cursor = "1735689600000:100:0";
+    const contextKey = "org:test-resolve";
+    // Simulate having visited page 0 with a next cursor at index 1
+    advancePaginationState(PAGINATION_KEY, contextKey, "next", cursor);
+
+    // Now "next" should return that cursor (advancing from index 0 to 1)
+    const result = resolveCursor("next", PAGINATION_KEY, contextKey);
+    expect(result.cursor).toBe(cursor);
+    expect(result.direction).toBe("next");
+  });
+
+  test("'prev' on first page throws ValidationError", () => {
+    const contextKey = "org:test-prev-first";
+    // Simulate being on the first page
+    advancePaginationState(PAGINATION_KEY, contextKey, "next", "some-cursor");
+
+    expect(() => resolveCursor("prev", PAGINATION_KEY, contextKey)).toThrow(
+      ValidationError
+    );
+    expect(() => resolveCursor("prev", PAGINATION_KEY, contextKey)).toThrow(
+      /first page/
+    );
+  });
+
+  test("'first' returns undefined cursor with direction 'first'", () => {
+    const result = resolveCursor("first", PAGINATION_KEY, "org:sentry");
+    expect(result.cursor).toBeUndefined();
+    expect(result.direction).toBe("first");
   });
 });
 
@@ -451,6 +468,7 @@ describe("handleOrgAll", () => {
       flags: { limit: 30, json: false, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
+      direction: "next",
     });
 
     expect(result.items).toHaveLength(2);
@@ -470,6 +488,7 @@ describe("handleOrgAll", () => {
       flags: { limit: 30, json: true, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
+      direction: "next",
     });
 
     expect(result.hasMore).toBe(true);
@@ -485,13 +504,14 @@ describe("handleOrgAll", () => {
       flags: { limit: 30, json: true, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
+      direction: "next",
     });
 
     expect(result.hasMore).toBe(false);
     expect(result.items).toHaveLength(2);
   });
 
-  test("hasMore saves cursor for --cursor last", async () => {
+  test("hasMore advances pagination state with next cursor", async () => {
     globalThis.fetch = mockProjectFetch(sampleProjects, {
       hasMore: true,
       nextCursor: "1735689600000:100:0",
@@ -502,18 +522,21 @@ describe("handleOrgAll", () => {
       flags: { limit: 30, json: false, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
+      direction: "next",
     });
 
-    const cached = getPaginationCursor(PAGINATION_KEY, "type:org:test-org");
-    expect(cached).toBe("1735689600000:100:0");
+    const state = getPaginationState(PAGINATION_KEY, "type:org:test-org");
+    expect(state).toBeDefined();
+    expect(state!.stack).toContain("1735689600000:100:0");
   });
 
-  test("no hasMore clears cached cursor", async () => {
-    setPaginationCursor(
+  test("no hasMore truncates pagination stack", async () => {
+    // Seed some state first
+    advancePaginationState(
       PAGINATION_KEY,
       "type:org:test-org",
-      "old-cursor",
-      300_000
+      "next",
+      "old-cursor"
     );
 
     globalThis.fetch = mockProjectFetch(sampleProjects);
@@ -523,10 +546,14 @@ describe("handleOrgAll", () => {
       flags: { limit: 30, json: false, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
+      direction: "first",
     });
 
-    const cached = getPaginationCursor(PAGINATION_KEY, "type:org:test-org");
-    expect(cached).toBeUndefined();
+    const state = getPaginationState(PAGINATION_KEY, "type:org:test-org");
+    // After fetching the first page with no nextCursor, stack should be [""]
+    expect(state).toBeDefined();
+    expect(state!.stack).toEqual([""]);
+    expect(state!.index).toBe(0);
   });
 
   test("empty page with hasMore suggests next page", async () => {
@@ -540,11 +567,12 @@ describe("handleOrgAll", () => {
       flags: { limit: 30, json: false, platform: "rust", fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
+      direction: "next",
     });
 
     expect(result.items).toHaveLength(0);
-    expect(result.hint).toContain("No matching projects on this page");
-    expect(result.hint).toContain("-c last");
+    expect(result.hint).toContain("projects on this page");
+    expect(result.hint).toContain("-c next");
     expect(result.hint).toContain("--platform rust");
   });
 
@@ -556,6 +584,7 @@ describe("handleOrgAll", () => {
       flags: { limit: 30, json: false, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
+      direction: "next",
     });
 
     expect(result.items).toHaveLength(0);
@@ -570,6 +599,7 @@ describe("handleOrgAll", () => {
       flags: { limit: 30, json: false, platform: "rust", fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
+      direction: "next",
     });
 
     expect(result.hint).toContain("matching platform 'rust'");
@@ -587,14 +617,15 @@ describe("handleOrgAll", () => {
       flags: { limit: 30, json: false, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
+      direction: "next",
     });
 
     expect(result.header).toContain("more available");
-    expect(result.hint).toContain("-c last");
+    expect(result.header).toContain("-c next");
     expect(result.hint).not.toContain("--platform");
   });
 
-  test("hasMore with platform includes --platform in hint", async () => {
+  test("hasMore with platform includes --platform in header", async () => {
     globalThis.fetch = mockProjectFetch(sampleProjects, {
       hasMore: true,
       nextCursor: "1735689600000:100:0",
@@ -605,10 +636,11 @@ describe("handleOrgAll", () => {
       flags: { limit: 30, json: false, platform: "python", fresh: false },
       contextKey: "type:org:test-org:platform:python",
       cursor: undefined,
+      direction: "next",
     });
 
-    expect(result.hint).toContain("--platform python");
-    expect(result.hint).toContain("-c last");
+    expect(result.header).toContain("--platform python");
+    expect(result.header).toContain("-c next");
   });
 });
 

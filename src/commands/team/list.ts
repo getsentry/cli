@@ -65,7 +65,8 @@ const docs: OrgListCommandDocs = {
     "  sentry team list <org>/<proj>  # list teams in org (project context)\n" +
     "  sentry team list <org>         # list teams in org\n\n" +
     "Pagination:\n" +
-    "  sentry team list <org>/ -c last  # continue from last page\n\n" +
+    "  sentry team list <org>/ -c next  # fetch next page\n" +
+    "  sentry team list <org>/ -c prev  # fetch previous page\n\n" +
     "Examples:\n" +
     "  sentry team list              # auto-detect or list all\n" +
     "  sentry team list my-org/      # list teams in my-org (paginated)\n" +

@@ -222,19 +222,22 @@ describe("fetchAllOrgs", () => {
 // ---------------------------------------------------------------------------
 
 describe("handleOrgAll", () => {
-  let setPaginationCursorSpy: ReturnType<typeof spyOn>;
-  let clearPaginationCursorSpy: ReturnType<typeof spyOn>;
+  let advancePaginationStateSpy: ReturnType<typeof spyOn>;
+  let hasPreviousPageSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    setPaginationCursorSpy = spyOn(paginationDb, "setPaginationCursor");
-    clearPaginationCursorSpy = spyOn(paginationDb, "clearPaginationCursor");
-    setPaginationCursorSpy.mockReturnValue(undefined);
-    clearPaginationCursorSpy.mockReturnValue(undefined);
+    advancePaginationStateSpy = spyOn(
+      paginationDb,
+      "advancePaginationState"
+    ).mockReturnValue(undefined);
+    hasPreviousPageSpy = spyOn(paginationDb, "hasPreviousPage").mockReturnValue(
+      false
+    );
   });
 
   afterEach(() => {
-    setPaginationCursorSpy.mockRestore();
-    clearPaginationCursorSpy.mockRestore();
+    advancePaginationStateSpy.mockRestore();
+    hasPreviousPageSpy.mockRestore();
   });
 
   test("returns ListResult with hasMore=true and nextCursor", async () => {
@@ -251,6 +254,7 @@ describe("handleOrgAll", () => {
       flags: { limit: 10, json: true },
       contextKey: "key",
       cursor: undefined,
+      direction: "next",
     });
 
     expect(result.hasMore).toBe(true);
@@ -275,6 +279,7 @@ describe("handleOrgAll", () => {
       flags: { limit: 10, json: true },
       contextKey: "key",
       cursor: undefined,
+      direction: "next",
     });
 
     expect(result.hasMore).toBe(false);
@@ -295,6 +300,7 @@ describe("handleOrgAll", () => {
       flags: { limit: 10, json: false },
       contextKey: "key",
       cursor: undefined,
+      direction: "next",
     });
 
     expect(result.items).toHaveLength(0);
@@ -314,13 +320,14 @@ describe("handleOrgAll", () => {
       flags: { limit: 10, json: false },
       contextKey: "key",
       cursor: undefined,
+      direction: "next",
     });
 
     expect(result.header).toContain("more available");
-    expect(result.header).toContain("sentry widget list my-org/ -c last");
+    expect(result.header).toContain("sentry widget list my-org/ -c next");
   });
 
-  test("sets pagination cursor when nextCursor present", async () => {
+  test("calls advancePaginationState when nextCursor present", async () => {
     const config = makeConfig({
       listPaginated: mock(() =>
         Promise.resolve({
@@ -336,16 +343,18 @@ describe("handleOrgAll", () => {
       flags: { limit: 10, json: false },
       contextKey: "ctx",
       cursor: undefined,
+      direction: "next",
     });
 
-    expect(setPaginationCursorSpy).toHaveBeenCalledWith(
+    expect(advancePaginationStateSpy).toHaveBeenCalledWith(
       "test-list",
       "ctx",
+      "next",
       "cursor:abc"
     );
   });
 
-  test("clears pagination cursor when no nextCursor", async () => {
+  test("calls advancePaginationState with undefined when no nextCursor", async () => {
     const config = makeConfig({
       listPaginated: mock(() =>
         Promise.resolve({
@@ -361,9 +370,15 @@ describe("handleOrgAll", () => {
       flags: { limit: 10, json: false },
       contextKey: "ctx",
       cursor: undefined,
+      direction: "next",
     });
 
-    expect(clearPaginationCursorSpy).toHaveBeenCalledWith("test-list", "ctx");
+    expect(advancePaginationStateSpy).toHaveBeenCalledWith(
+      "test-list",
+      "ctx",
+      "next",
+      undefined
+    );
   });
 });
 
@@ -646,15 +661,25 @@ describe("handleProjectSearch", () => {
 describe("dispatchOrgScopedList", () => {
   let getDefaultOrganizationSpy: ReturnType<typeof spyOn>;
   let resolveAllTargetsSpy: ReturnType<typeof spyOn>;
-  let setPaginationCursorSpy: ReturnType<typeof spyOn>;
-  let clearPaginationCursorSpy: ReturnType<typeof spyOn>;
+  let advancePaginationStateSpy: ReturnType<typeof spyOn>;
+  let hasPreviousPageSpy: ReturnType<typeof spyOn>;
+  let resolveCursorSpy: ReturnType<typeof spyOn>;
   let resolveEffectiveOrgSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     getDefaultOrganizationSpy = spyOn(defaults, "getDefaultOrganization");
     resolveAllTargetsSpy = spyOn(resolveTarget, "resolveAllTargets");
-    setPaginationCursorSpy = spyOn(paginationDb, "setPaginationCursor");
-    clearPaginationCursorSpy = spyOn(paginationDb, "clearPaginationCursor");
+    advancePaginationStateSpy = spyOn(
+      paginationDb,
+      "advancePaginationState"
+    ).mockReturnValue(undefined);
+    hasPreviousPageSpy = spyOn(paginationDb, "hasPreviousPage").mockReturnValue(
+      false
+    );
+    resolveCursorSpy = spyOn(paginationDb, "resolveCursor").mockReturnValue({
+      cursor: undefined,
+      direction: "next" as const,
+    });
     // Prevent resolveEffectiveOrg from making real HTTP calls during
     // full-suite runs where earlier tests may leave auth state behind.
     resolveEffectiveOrgSpy = spyOn(
@@ -664,15 +689,14 @@ describe("dispatchOrgScopedList", () => {
 
     getDefaultOrganizationSpy.mockReturnValue(null);
     resolveAllTargetsSpy.mockResolvedValue({ targets: [] });
-    setPaginationCursorSpy.mockReturnValue(undefined);
-    clearPaginationCursorSpy.mockReturnValue(undefined);
   });
 
   afterEach(() => {
     getDefaultOrganizationSpy.mockRestore();
     resolveAllTargetsSpy.mockRestore();
-    setPaginationCursorSpy.mockRestore();
-    clearPaginationCursorSpy.mockRestore();
+    advancePaginationStateSpy.mockRestore();
+    hasPreviousPageSpy.mockRestore();
+    resolveCursorSpy.mockRestore();
     resolveEffectiveOrgSpy.mockRestore();
   });
 
@@ -865,13 +889,14 @@ describe("dispatchOrgScopedList", () => {
     // full OrgListConfig, and the slug matches an org (no projects found), the
     // handler calls runOrgAll as the orgAllFallback.
     const findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
-    const localSetPaginationSpy = spyOn(paginationDb, "setPaginationCursor");
-    const localClearPaginationSpy = spyOn(
+    const localAdvanceSpy = spyOn(
       paginationDb,
-      "clearPaginationCursor"
-    );
-    localSetPaginationSpy.mockReturnValue(undefined);
-    localClearPaginationSpy.mockReturnValue(undefined);
+      "advancePaginationState"
+    ).mockReturnValue(undefined);
+    const localHasPrevSpy = spyOn(
+      paginationDb,
+      "hasPreviousPage"
+    ).mockReturnValue(false);
 
     findProjectsBySlugSpy.mockResolvedValue({
       projects: [],
@@ -900,8 +925,8 @@ describe("dispatchOrgScopedList", () => {
     expect(result.items[0].name).toBe("Widget A");
 
     findProjectsBySlugSpy.mockRestore();
-    localSetPaginationSpy.mockRestore();
-    localClearPaginationSpy.mockRestore();
+    localAdvanceSpy.mockRestore();
+    localHasPrevSpy.mockRestore();
   });
 
   // -------------------------------------------------------------------------

@@ -39,8 +39,8 @@ import {
   setAuthToken,
 } from "../../../src/lib/db/auth.js";
 import {
-  getPaginationCursor,
-  setPaginationCursor,
+  advancePaginationState,
+  getPaginationState,
 } from "../../../src/lib/db/pagination.js";
 import {
   clearProjectAliases,
@@ -833,24 +833,25 @@ describe("model-based: database layer", () => {
       asyncProperty(tuple(slugArb, slugArb), async ([commandKey, context]) => {
         const cleanup = createIsolatedDbContext();
         try {
-          // Set up auth and a pagination cursor
+          // Set up auth and a pagination cursor stack
           setAuthToken("test-token");
-          setPaginationCursor(
+          advancePaginationState(
             commandKey,
             context,
-            "1735689600000:100:0",
-            300_000
+            "next",
+            "1735689600000:100:0"
           );
 
-          // Verify cursor was stored
-          const before = getPaginationCursor(commandKey, context);
-          expect(before).toBe("1735689600000:100:0");
+          // Verify state was stored
+          const before = getPaginationState(commandKey, context);
+          expect(before).toBeDefined();
+          expect(before!.stack).toEqual(["", "1735689600000:100:0"]);
 
           // Clear auth
           await clearAuth();
 
-          // Verify pagination cursor was also cleared (this is the invariant!)
-          const after = getPaginationCursor(commandKey, context);
+          // Verify pagination state was also cleared (this is the invariant!)
+          const after = getPaginationState(commandKey, context);
           expect(after).toBeUndefined();
         } finally {
           cleanup();

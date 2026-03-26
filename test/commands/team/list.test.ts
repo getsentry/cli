@@ -3,7 +3,7 @@
  *
  * Tests for the team list command in src/commands/team/list.ts.
  * Covers all four target modes (auto-detect, explicit, project-search, org-all)
- * plus cursor pagination, --cursor last, and error paths.
+ * plus cursor pagination, --cursor next/prev, and error paths.
  */
 
 import {
@@ -338,26 +338,26 @@ describe("listCommand.func — auto-detect mode", () => {
 
 describe("listCommand.func — org-all mode (cursor pagination)", () => {
   let listTeamsPaginatedSpy: ReturnType<typeof spyOn>;
-  let getPaginationCursorSpy: ReturnType<typeof spyOn>;
-  let setPaginationCursorSpy: ReturnType<typeof spyOn>;
-  let clearPaginationCursorSpy: ReturnType<typeof spyOn>;
+  let advancePaginationStateSpy: ReturnType<typeof spyOn>;
+  let hasPreviousPageSpy: ReturnType<typeof spyOn>;
+  let resolveCursorSpy: ReturnType<typeof spyOn>;
 
   beforeEach(async () => {
     listTeamsPaginatedSpy = spyOn(apiClient, "listTeamsPaginated");
-    getPaginationCursorSpy = spyOn(paginationDb, "getPaginationCursor");
-    setPaginationCursorSpy = spyOn(paginationDb, "setPaginationCursor");
-    clearPaginationCursorSpy = spyOn(paginationDb, "clearPaginationCursor");
+    advancePaginationStateSpy = spyOn(paginationDb, "advancePaginationState");
+    hasPreviousPageSpy = spyOn(paginationDb, "hasPreviousPage");
+    resolveCursorSpy = spyOn(paginationDb, "resolveCursor");
 
-    setPaginationCursorSpy.mockReturnValue(undefined);
-    clearPaginationCursorSpy.mockReturnValue(undefined);
+    advancePaginationStateSpy.mockReturnValue(undefined);
+    hasPreviousPageSpy.mockReturnValue(false);
     setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
     listTeamsPaginatedSpy.mockRestore();
-    getPaginationCursorSpy.mockRestore();
-    setPaginationCursorSpy.mockRestore();
-    clearPaginationCursorSpy.mockRestore();
+    advancePaginationStateSpy.mockRestore();
+    hasPreviousPageSpy.mockRestore();
+    resolveCursorSpy.mockRestore();
   });
 
   test("returns paginated JSON with hasMore=false when no nextCursor", async () => {
@@ -375,7 +375,7 @@ describe("listCommand.func — org-all mode (cursor pagination)", () => {
     expect(parsed).toHaveProperty("data");
     expect(parsed).toHaveProperty("hasMore", false);
     expect(parsed.data).toHaveLength(2);
-    expect(clearPaginationCursorSpy).toHaveBeenCalled();
+    expect(advancePaginationStateSpy).toHaveBeenCalled();
   });
 
   test("returns paginated JSON with hasMore=true and nextCursor when more pages", async () => {
@@ -392,7 +392,7 @@ describe("listCommand.func — org-all mode (cursor pagination)", () => {
     const parsed = JSON.parse(output);
     expect(parsed).toHaveProperty("hasMore", true);
     expect(parsed).toHaveProperty("nextCursor", "cursor:abc:123");
-    expect(setPaginationCursorSpy).toHaveBeenCalled();
+    expect(advancePaginationStateSpy).toHaveBeenCalled();
   });
 
   test("human output shows table and next page hint when hasMore", async () => {
@@ -408,8 +408,8 @@ describe("listCommand.func — org-all mode (cursor pagination)", () => {
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("backend");
     expect(output).toContain("more available");
-    expect(output).toContain("Next page:");
-    expect(output).toContain("-c last");
+    expect(output).toContain("Next:");
+    expect(output).toContain("-c next");
   });
 
   test("human output shows count without next-page hint when no more", async () => {
@@ -424,7 +424,7 @@ describe("listCommand.func — org-all mode (cursor pagination)", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Showing 2 teams");
-    expect(output).not.toContain("Next page:");
+    expect(output).not.toContain("Next:");
   });
 
   test("human output 'No teams found' when empty and no cursor", async () => {
@@ -442,6 +442,10 @@ describe("listCommand.func — org-all mode (cursor pagination)", () => {
   });
 
   test("uses explicit cursor string when provided", async () => {
+    resolveCursorSpy.mockReturnValue({
+      cursor: "explicit:cursor:value",
+      direction: "next",
+    });
     listTeamsPaginatedSpy.mockResolvedValue({
       data: sampleTeams,
       nextCursor: undefined,
@@ -461,8 +465,11 @@ describe("listCommand.func — org-all mode (cursor pagination)", () => {
     );
   });
 
-  test("resolves 'last' cursor from cache", async () => {
-    getPaginationCursorSpy.mockReturnValue("cached:cursor:456");
+  test("resolves '-c next' cursor from cache", async () => {
+    resolveCursorSpy.mockReturnValue({
+      cursor: "cached:cursor:456",
+      direction: "next",
+    });
     listTeamsPaginatedSpy.mockResolvedValue({
       data: sampleTeams,
       nextCursor: undefined,
@@ -472,7 +479,7 @@ describe("listCommand.func — org-all mode (cursor pagination)", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 25, json: false, cursor: "last" },
+      { limit: 25, json: false, cursor: "next" },
       "my-org/"
     );
 
@@ -482,15 +489,20 @@ describe("listCommand.func — org-all mode (cursor pagination)", () => {
     );
   });
 
-  test("throws ContextError when 'last' cursor not in cache", async () => {
-    getPaginationCursorSpy.mockReturnValue(null);
+  test("throws ValidationError when '-c next' has no saved state", async () => {
+    resolveCursorSpy.mockImplementation(() => {
+      throw new ValidationError(
+        "No next page saved for this query. Run without --cursor first.",
+        "cursor"
+      );
+    });
 
     const { context } = createMockContext();
     const func = await listCommand.loader();
 
     await expect(
-      func.call(context, { limit: 25, json: false, cursor: "last" }, "my-org/")
-    ).rejects.toThrow("No saved cursor");
+      func.call(context, { limit: 25, json: false, cursor: "next" }, "my-org/")
+    ).rejects.toThrow("No next page saved");
   });
 
   test("throws ValidationError when --cursor used outside org-all mode", async () => {
