@@ -22,6 +22,31 @@ List repositories
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
+**Examples:**
+
+```bash
+# Auto-detect from DSN or config
+sentry repo list
+
+# Explicit org
+sentry repo list <org>/
+
+# Org inferred from project context
+sentry repo list <org>/<project>
+
+# Bare org slug
+sentry repo list <org>
+
+# List repositories (auto-detect org)
+sentry repo list
+
+# List repos in a specific org with pagination
+sentry repo list my-org/ -c next
+
+# Output as JSON
+sentry repo list --json
+```
+
 ### `sentry team list <org/project>`
 
 List teams
