@@ -23,7 +23,11 @@ import {
   getProject,
   listProjects,
 } from "./api-client.js";
-import { type ParsedOrgProject, parseOrgProjectArg } from "./arg-parsing.js";
+import {
+  looksLikeIssueShortId,
+  type ParsedOrgProject,
+  parseOrgProjectArg,
+} from "./arg-parsing.js";
 import { getDefaultOrganization, getDefaultProject } from "./db/defaults.js";
 import { getCachedDsn, setCachedDsn } from "./db/dsn-cache.js";
 import {
@@ -1292,4 +1296,203 @@ export function resolveOrgProjectFromArg(
   commandName: string
 ): Promise<ResolvedOrgProject> {
   return resolveOrgProjectTarget(parseOrgProjectArg(target), cwd, commandName);
+}
+
+// ---------------------------------------------------------------------------
+// Multi-target resolution — shared between project-scoped list commands
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of resolving targets from a parsed org/project argument.
+ * Mirrors the shape used by issue list and alert issue list commands.
+ */
+export type MultiTargetResolutionResult = {
+  targets: ResolvedTarget[];
+  footer?: string;
+  skippedSelfHosted?: number;
+  detectedDsns?: DetectedDsn[];
+};
+
+/** Options for {@link resolveTargetsFromParsedArg}. */
+export type ResolveTargetsOptions = {
+  /** Current working directory, for DSN auto-detection. */
+  cwd: string;
+  /** Usage hint shown in error messages (e.g. "sentry issue list <org>/<project>"). */
+  usageHint: string;
+  /**
+   * Auto-detect mode only: enrich targets that lack a numeric `projectId` by
+   * fetching from the project API. Useful when env-var / config-default paths
+   * do not carry IDs (needed for issue list query filters, not needed for alert list).
+   */
+  enrichProjectIds?: boolean;
+  /**
+   * Project-search mode only: reject inputs that look like issue short IDs
+   * (e.g. "CLI-123") before attempting cross-org project search.
+   */
+  checkIssueShortId?: boolean;
+};
+
+/**
+ * Resolve one or more {@link ResolvedTarget}s from a parsed org/project argument.
+ *
+ * Handles all four target modes:
+ * - **auto-detect** — DSN detection / config defaults (may resolve multiple projects)
+ * - **explicit** — single `org/project` target
+ * - **org-all** — all projects in the specified org (trailing slash required)
+ * - **project-search** — find a project by slug across all accessible orgs
+ *
+ * This is the canonical shared implementation used by project-scoped list commands
+ * (issue list, alert issue list, …). Pass `opts.enrichProjectIds` or
+ * `opts.checkIssueShortId` to enable command-specific behaviour.
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: inherent multi-mode target resolution with per-mode error handling
+export async function resolveTargetsFromParsedArg(
+  parsed: ReturnType<typeof parseOrgProjectArg>,
+  opts: ResolveTargetsOptions
+): Promise<MultiTargetResolutionResult> {
+  const { cwd, usageHint, enrichProjectIds, checkIssueShortId } = opts;
+
+  switch (parsed.type) {
+    case "auto-detect": {
+      const result = await resolveAllTargets({ cwd, usageHint });
+      if (enrichProjectIds) {
+        result.targets = await Promise.all(
+          result.targets.map(async (t) => {
+            if (t.projectId !== undefined) {
+              return t;
+            }
+            try {
+              const info = await getProject(t.org, t.project);
+              const id = toNumericId(info.id);
+              return id !== undefined ? { ...t, projectId: id } : t;
+            } catch {
+              return t;
+            }
+          })
+        );
+      }
+      return result;
+    }
+
+    case "explicit": {
+      const projectId = await fetchProjectId(parsed.org, parsed.project);
+      return {
+        targets: [
+          {
+            org: parsed.org,
+            project: parsed.project,
+            projectId,
+            orgDisplay: parsed.org,
+            projectDisplay: parsed.project,
+          },
+        ],
+      };
+    }
+
+    case "org-all": {
+      const projects = await listProjects(parsed.org);
+      const targets: ResolvedTarget[] = projects.map((p) => ({
+        org: parsed.org,
+        project: p.slug,
+        projectId: toNumericId(p.id),
+        orgDisplay: parsed.org,
+        projectDisplay: p.name,
+      }));
+
+      if (targets.length === 0) {
+        throw new ResolutionError(
+          `Organization '${parsed.org}'`,
+          "has no accessible projects",
+          `sentry project list ${parsed.org}/`,
+          ["Check that you have access to projects in this organization"]
+        );
+      }
+
+      return {
+        targets,
+        footer:
+          targets.length > 1
+            ? `Showing results from ${targets.length} projects in ${parsed.org}`
+            : undefined,
+      };
+    }
+
+    case "project-search": {
+      if (checkIssueShortId && looksLikeIssueShortId(parsed.projectSlug)) {
+        throw new ResolutionError(
+          `'${parsed.projectSlug}'`,
+          "looks like an issue short ID, not a project slug",
+          `sentry issue view ${parsed.projectSlug}`,
+          ["To list issues in a project: sentry issue list <org>/<project>"]
+        );
+      }
+
+      const { projects: matches, orgs } = await findProjectsBySlug(
+        parsed.projectSlug
+      );
+
+      if (matches.length === 0) {
+        const isOrg = orgs.some((o) => o.slug === parsed.projectSlug);
+        if (isOrg) {
+          // Derive the base command from the usage hint (strip trailing placeholder).
+          // e.g. "sentry issue list <org>/<project>" → "sentry issue list"
+          const prefix = usageHint.split(" <")[0];
+          throw new ResolutionError(
+            `'${parsed.projectSlug}'`,
+            "is an organization, not a project",
+            `${prefix} ${parsed.projectSlug}/`,
+            [
+              `List projects: sentry project list ${parsed.projectSlug}/`,
+              `Specify a project: ${prefix} ${parsed.projectSlug}/<project>`,
+            ]
+          );
+        }
+
+        const similar = await findProjectsByPattern(parsed.projectSlug);
+        const suggestions: string[] = [];
+        if (similar.length > 0) {
+          const names = similar
+            .slice(0, 3)
+            .map((p) => `'${p.orgSlug}/${p.slug}'`);
+          suggestions.push(`Similar projects: ${names.join(", ")}`);
+        }
+        suggestions.push(
+          "No project with this slug found in any accessible organization"
+        );
+        throw new ResolutionError(
+          `Project '${parsed.projectSlug}'`,
+          "not found",
+          "sentry project list",
+          suggestions
+        );
+      }
+
+      const targets: ResolvedTarget[] = matches.map((m) => ({
+        org: m.orgSlug,
+        project: m.slug,
+        projectId: toNumericId(m.id),
+        orgDisplay: m.orgSlug,
+        projectDisplay: m.name,
+      }));
+
+      const uniqueOrgs = [...new Set(targets.map((t) => t.org))];
+      const uniqueProjects = [...new Set(targets.map((t) => t.project))];
+      setOrgProjectContext(uniqueOrgs, uniqueProjects);
+
+      return {
+        targets,
+        footer:
+          matches.length > 1
+            ? `Found '${parsed.projectSlug}' in ${matches.length} organizations`
+            : undefined,
+      };
+    }
+
+    default: {
+      const _exhaustive: never = parsed;
+      throw new Error(
+        `Unexpected parsed type: ${(_exhaustive as { type: string }).type}`
+      );
+    }
+  }
 }

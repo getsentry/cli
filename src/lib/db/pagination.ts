@@ -14,6 +14,7 @@
 
 import { ValidationError } from "../errors.js";
 import { CURSOR_KEYWORDS } from "../list-command.js";
+import type { ResolvedTarget } from "../resolve-target.js";
 import { getApiBaseUrl } from "../sentry-client.js";
 import { getDatabase } from "./index.js";
 import { runUpsert } from "./utils.js";
@@ -384,4 +385,78 @@ export function buildPaginationContextKey(
  */
 export function buildOrgContextKey(org: string): string {
   return buildPaginationContextKey("org", org);
+}
+
+// ---------------------------------------------------------------------------
+// Compound cursor utilities — shared between multi-project list commands
+// ---------------------------------------------------------------------------
+
+/** Separator for compound cursor entries (pipe — not present in Sentry cursors). */
+export const CURSOR_SEP = "|";
+
+/**
+ * Encode per-target cursors as a pipe-separated string for storage.
+ *
+ * The position of each entry matches the **sorted** target order encoded in
+ * the context key fingerprint, so we only need to store the cursor values —
+ * no org/project metadata is needed in the cursor string itself.
+ *
+ * Empty string = project exhausted (no more pages).
+ *
+ * @example "1735689600:0:0||1735689601:0:0" — 3 targets, middle one exhausted
+ */
+export function encodeCompoundCursor(cursors: (string | null)[]): string {
+  return cursors.map((c) => c ?? "").join(CURSOR_SEP);
+}
+
+/**
+ * Decode a compound cursor string back to an array of per-target cursors.
+ *
+ * Returns `null` for exhausted entries (empty segments) and `string` for active
+ * cursors. Returns an empty array if `raw` is empty or looks like a legacy
+ * JSON cursor (starts with `[`), causing a fresh start.
+ */
+export function decodeCompoundCursor(raw: string): (string | null)[] {
+  // Guard against legacy JSON compound cursors or corrupted data
+  if (!raw || raw.startsWith("[")) {
+    return [];
+  }
+  return raw.split(CURSOR_SEP).map((s) => (s === "" ? null : s));
+}
+
+/**
+ * Build a compound cursor context key encoding the full target set and optional
+ * query filters so a cursor from one search is never reused for a different search.
+ *
+ * @param targets - Resolved org/project targets (sorted internally by key)
+ * @param filters - Optional filter parameters for commands that have them
+ *   (sort, query, period). When provided they are appended so cursors are
+ *   isolated per unique query.
+ */
+export function buildMultiTargetContextKey(
+  targets: ResolvedTarget[],
+  filters?: { sort?: string; query?: string; period?: string }
+): string {
+  const host = getApiBaseUrl();
+  const targetFingerprint = targets
+    .map((t) => escapeContextKeyValue(`${t.org}/${t.project}`))
+    .sort()
+    .join(",");
+  const base = `host:${host}|type:multi:${targetFingerprint}`;
+  if (!filters) {
+    return base;
+  }
+  const escapedPeriod = escapeContextKeyValue(filters.period ?? "90d");
+  const escapedSort = filters.sort
+    ? escapeContextKeyValue(filters.sort)
+    : undefined;
+  const escapedQuery = filters.query
+    ? escapeContextKeyValue(filters.query)
+    : undefined;
+  return (
+    `${base}` +
+    (escapedSort ? `|sort:${escapedSort}` : "") +
+    `|period:${escapedPeriod}` +
+    (escapedQuery ? `|q:${escapedQuery}` : "")
+  );
 }
