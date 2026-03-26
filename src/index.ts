@@ -184,6 +184,13 @@ async function sentry(...input: (string | SentryOptions)[]): Promise<unknown> {
       // captured by withTelemetry are sent even on the failure path.
       await flushTelemetry();
 
+      // OutputError: data was already rendered (captured) before the throw.
+      // Return it despite the non-zero exit code — this is the "HTTP 404 body"
+      // pattern where the data is useful even though the operation "failed".
+      if (capturedResult !== undefined) {
+        return capturedResult;
+      }
+
       // Stricli catches command errors and writes them to stderr + sets exitCode.
       // But some errors (AuthError, OutputError) are re-thrown through Stricli.
       // Convert any that escape into SentryError for a consistent library API.

@@ -223,6 +223,15 @@ export function buildInvoker(options?: SentryOptions) {
         );
       } catch (thrown) {
         await flushTelemetry();
+
+        // OutputError: data was already rendered (captured) before the throw.
+        // Return it despite the non-zero exit code — this is the "HTTP 404 body"
+        // pattern where the data is useful even though the operation "failed".
+        const captured = getCapturedResult();
+        if (captured !== undefined) {
+          return captured as T;
+        }
+
         const exitCode =
           extractExitCode(thrown) || context.process.exitCode || 1;
         throw buildSdkError(stderrChunks, exitCode, thrown);
