@@ -300,22 +300,91 @@ export const DiscoverAggregateFunctionSchema = z.enum(
 );
 
 /**
- * Display types supported by the "issue" dataset.
+ * Valid display types per widget dataset.
  *
- * Source: sentry/static/app/views/dashboards/datasetConfig/issues.tsx
- *   supportedDisplayTypes: [TABLE, AREA, LINE, BAR]
+ * Source: sentry/static/app/views/dashboards/datasetConfig/ @ a42668e
+ * Each entry mirrors `supportedDisplayTypes` from the corresponding config:
  *
- * TABLE uses issue fields (issue, title, assignee, status…).
- * AREA/LINE/BAR render timeseries of new_issues / resolved_issues.
+ *   issues.tsx         https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/issues.tsx#L90-L95
+ *   spans.tsx          https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/spans.tsx#L287-L297
+ *   errors.tsx         https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/errors.tsx#L115-L123
+ *   transactions.tsx   https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/transactions.tsx#L76-L84
+ *   releases.tsx       https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/releases.tsx#L90-L98
+ *   logs.tsx           https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/logs.tsx#L201-L209
+ *   traceMetrics.tsx   https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/traceMetrics.tsx#L285-L291
+ *   mobileAppSize.tsx  https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/mobileAppSize.tsx#L255
  *
- * Not supported: big_number, top_n, stacked_area, categorical_bar, and internal types.
+ * stacked_area is included for datasets that support timeseries (not in Sentry's UI picker
+ * but accepted by the API and handled by the CLI's query engine).
+ * details and server_tree are spans-only internal display types.
  */
-export const ISSUE_DATASET_DISPLAY_TYPES = [
-  "table",
-  "area",
-  "line",
-  "bar",
-] as const;
+export const DATASET_SUPPORTED_DISPLAY_TYPES = {
+  issue: ["table", "area", "line", "bar"],
+  spans: [
+    "area",
+    "bar",
+    "big_number",
+    "categorical_bar",
+    "line",
+    "stacked_area",
+    "table",
+    "top_n",
+    "details",
+    "server_tree",
+  ],
+  "error-events": [
+    "area",
+    "bar",
+    "big_number",
+    "categorical_bar",
+    "line",
+    "stacked_area",
+    "table",
+    "top_n",
+  ],
+  "transaction-like": [
+    "area",
+    "bar",
+    "big_number",
+    "categorical_bar",
+    "line",
+    "stacked_area",
+    "table",
+    "top_n",
+  ],
+  metrics: [
+    "area",
+    "bar",
+    "big_number",
+    "categorical_bar",
+    "line",
+    "stacked_area",
+    "table",
+    "top_n",
+  ],
+  logs: [
+    "area",
+    "bar",
+    "big_number",
+    "categorical_bar",
+    "line",
+    "stacked_area",
+    "table",
+    "top_n",
+  ],
+  discover: [
+    "area",
+    "bar",
+    "big_number",
+    "categorical_bar",
+    "line",
+    "stacked_area",
+    "table",
+    "top_n",
+  ],
+  tracemetrics: ["area", "bar", "big_number", "categorical_bar", "line"],
+  "preprod-app-size": ["line"],
+} as const satisfies Record<WidgetType, readonly string[]>;
 
 /**
  * Valid `is:` filter values for issue search conditions (--where flag).

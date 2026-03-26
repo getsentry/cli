@@ -17,15 +17,16 @@ import { resolveOrg } from "../../lib/resolve-target.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import { isAllDigits } from "../../lib/utils.js";
 import {
+  DATASET_SUPPORTED_DISPLAY_TYPES,
   type DashboardWidget,
   DISPLAY_TYPES,
-  ISSUE_DATASET_DISPLAY_TYPES,
   parseAggregate,
   parseSortExpression,
   parseWidgetInput,
   prepareWidgetQueries,
   validateAggregateNames,
   WIDGET_TYPES,
+  type WidgetType,
 } from "../../types/dashboard.js";
 
 /** Shared widget query flags used by `add` and `edit` commands */
@@ -382,16 +383,13 @@ export function validateWidgetEnums(display?: string, dataset?: string): void {
       "dataset"
     );
   }
-  if (
-    dataset === "issue" &&
-    display &&
-    !ISSUE_DATASET_DISPLAY_TYPES.includes(
-      display as (typeof ISSUE_DATASET_DISPLAY_TYPES)[number]
-    )
-  ) {
-    throw new ValidationError(
-      `The "issue" dataset supports: ${ISSUE_DATASET_DISPLAY_TYPES.join(", ")}. Got: "${display}".`,
-      "display"
-    );
+  if (display && dataset) {
+    const supported = DATASET_SUPPORTED_DISPLAY_TYPES[dataset as WidgetType];
+    if (supported && !(supported as readonly string[]).includes(display)) {
+      throw new ValidationError(
+        `The "${dataset}" dataset supports: ${supported.join(", ")}. Got: "${display}".`,
+        "display"
+      );
+    }
   }
 }

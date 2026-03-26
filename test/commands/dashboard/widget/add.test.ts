@@ -296,6 +296,81 @@ describe("dashboard widget add", () => {
     expect(addedWidget.queries[0].columns).toEqual(["project"]);
   });
 
+  // preprod-app-size: line only
+  // https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/mobileAppSize.tsx#L255
+  test("throws ValidationError for table with preprod-app-size dataset", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    const err = await func
+      .call(
+        context,
+        { json: false, display: "table", dataset: "preprod-app-size" },
+        "123",
+        "App Size"
+      )
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain('"preprod-app-size" dataset supports');
+  });
+
+  test("allows line with preprod-app-size dataset", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      { json: false, display: "line", dataset: "preprod-app-size" },
+      "123",
+      "App Size"
+    );
+    expect(updateDashboardSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // tracemetrics: no table or top_n
+  // https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/traceMetrics.tsx#L285-L291
+  test("throws ValidationError for table with tracemetrics dataset", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    const err = await func
+      .call(
+        context,
+        { json: false, display: "table", dataset: "tracemetrics" },
+        "123",
+        "Trace Metrics"
+      )
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain('"tracemetrics" dataset supports');
+  });
+
+  // spans: only dataset supporting details and server_tree
+  // https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/spans.tsx#L287-L297
+  test("allows details display with spans dataset", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      { json: false, display: "details", dataset: "spans" },
+      "123",
+      "Span Details"
+    );
+    expect(updateDashboardSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("throws ValidationError for details display with non-spans dataset", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    const err = await func
+      .call(
+        context,
+        { json: false, display: "details", dataset: "logs" },
+        "123",
+        "Details"
+      )
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain('"logs" dataset supports');
+  });
+
   test("auto-defaults orderby when group-by + limit provided", async () => {
     const { context } = createMockContext();
     const func = await addCommand.loader();
