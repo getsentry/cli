@@ -609,6 +609,7 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
       human: (result: ListResult<TWithOrg>) => formatListHuman(result, config),
       jsonTransform: (result: ListResult<TWithOrg>, fields?: string[]) =>
         jsonTransformListResult(result, fields),
+      schema: config.schema,
     } satisfies OutputConfig<ListResult<TWithOrg>>,
     parameters: {
       positional: LIST_TARGET_POSITIONAL,

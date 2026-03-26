@@ -10,6 +10,10 @@
  * for introspection and documentation generation.
  */
 
+import {
+  extractSchemaFields,
+  type SchemaFieldInfo,
+} from "./formatters/output.js";
 import { fuzzyMatch } from "./fuzzy.js";
 
 // ---------------------------------------------------------------------------
@@ -42,6 +46,12 @@ export type Command = {
     flags?: Record<string, FlagDef>;
     aliases?: Record<string, string>;
   };
+  /**
+   * JSON output schema attached by `buildCommand` when `output.schema` is set.
+   * Non-standard property — Stricli doesn't know about it, but introspection
+   * reads it to populate {@link CommandInfo.jsonFields}.
+   */
+  __jsonSchema?: import("zod").ZodType;
 };
 
 /** Positional parameter definitions — either fixed-length tuple or variadic array */
@@ -79,6 +89,8 @@ export type CommandInfo = {
   positional: string;
   aliases: Record<string, string>;
   examples: string[];
+  /** JSON output field metadata extracted from `OutputConfig.schema` */
+  jsonFields?: SchemaFieldInfo[];
 };
 
 /** Extracted metadata for a single flag */
@@ -215,6 +227,10 @@ export function buildCommandInfo(
   path: string,
   examples: string[] = []
 ): CommandInfo {
+  const jsonFields = cmd.__jsonSchema
+    ? extractSchemaFields(cmd.__jsonSchema)
+    : undefined;
+
   return {
     path,
     brief: cmd.brief,
@@ -223,6 +239,7 @@ export function buildCommandInfo(
     positional: getPositionalString(cmd.parameters.positional),
     aliases: cmd.parameters.aliases ?? {},
     examples,
+    jsonFields: jsonFields?.length ? jsonFields : undefined,
   };
 }
 

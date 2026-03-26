@@ -209,6 +209,13 @@ export type OrgListConfig<TEntity, TWithOrg> = ListCommandMeta & {
    *   project's parent org.
    */
   listForProject?: (orgSlug: string, projectSlug: string) => Promise<TEntity[]>;
+
+  /**
+   * Zod schema describing the JSON output shape of each list item.
+   * Forwarded to `OutputConfig.schema` by `buildOrgListCommand` so
+   * `--help`, `sentry help`, and SKILL.md can document available fields.
+   */
+  schema?: import("zod").ZodType;
 };
 
 /** Extract a specific variant from the {@link ParsedOrgProject} union by its `type` discriminant. */

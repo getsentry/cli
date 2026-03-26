@@ -262,6 +262,16 @@ function formatCommandHuman(cmd: CommandInfo): string {
     }
   }
 
+  if (cmd.jsonFields && cmd.jsonFields.length > 0) {
+    lines.push("");
+    lines.push("  JSON fields (use --json --fields to select):");
+    for (const field of cmd.jsonFields) {
+      const optStr = field.optional ? ", optional" : "";
+      const desc = field.description ? ` — ${field.description}` : "";
+      lines.push(`    ${field.name} (${field.type}${optStr})${desc}`);
+    }
+  }
+
   return lines.join("\n");
 }
 

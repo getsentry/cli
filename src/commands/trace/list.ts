@@ -25,7 +25,10 @@ import {
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
-import type { TransactionListItem } from "../../types/index.js";
+import {
+  type TransactionListItem,
+  TransactionListItemSchema,
+} from "../../types/index.js";
 
 type ListFlags = {
   readonly limit: number;
@@ -210,6 +213,7 @@ export const listCommand = buildListCommand("trace", {
   output: {
     human: formatTraceListHuman,
     jsonTransform: jsonTransformTraceList,
+    schema: TransactionListItemSchema,
   },
   parameters: {
     positional: {

@@ -79,10 +79,11 @@ import {
 } from "../../lib/resolve-target.js";
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
-import type {
-  ProjectAliasEntry,
-  SentryIssue,
-  Writer,
+import {
+  type ProjectAliasEntry,
+  type SentryIssue,
+  SentryIssueSchema,
+  type Writer,
 } from "../../types/index.js";
 
 /** Command key for pagination cursor storage */
@@ -1502,6 +1503,7 @@ const jsonTransformIssueList = jsonTransformListResult;
 const issueListOutput: OutputConfig<IssueListResult> = {
   human: formatIssueListHuman,
   jsonTransform: jsonTransformIssueList,
+  schema: SentryIssueSchema,
 };
 
 // ---------------------------------------------------------------------------

@@ -21,7 +21,10 @@ import {
   type OrgListCommandDocs,
 } from "../../lib/list-command.js";
 import type { OrgListConfig } from "../../lib/org-list.js";
-import type { SentryRepository } from "../../types/index.js";
+import {
+  type SentryRepository,
+  SentryRepositorySchema,
+} from "../../types/index.js";
 
 /** Command key for pagination cursor storage */
 export const PAGINATION_KEY = "repo-list";
@@ -49,6 +52,7 @@ const repoListConfig: OrgListConfig<SentryRepository, RepositoryWithOrg> = {
   withOrg: (repo, orgSlug) => ({ ...repo, orgSlug }),
   displayTable: (repos: RepositoryWithOrg[]) =>
     formatTable(repos, REPO_COLUMNS),
+  schema: SentryRepositorySchema,
 };
 
 const docs: OrgListCommandDocs = {

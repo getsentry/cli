@@ -121,6 +121,75 @@ export type SentryIssue = Omit<Partial<SdkIssueDetail>, "metadata"> & {
   seerFixabilityScore?: number | null;
 };
 
+/**
+ * Zod schema describing the key fields of a {@link SentryIssue} for JSON output.
+ *
+ * This is a documentation-oriented schema — it describes the commonly-available
+ * fields that appear in `--json` output, used by the help system and SKILL.md
+ * generation to inform agents and users about available `--fields` selections.
+ *
+ * Not a validation schema — the actual API response may include additional
+ * SDK-derived fields not listed here. Fields listed as optional may still be
+ * present in most responses; optionality reflects the TypeScript type.
+ */
+export const SentryIssueSchema = z
+  .object({
+    id: z.string().describe("Numeric issue ID"),
+    shortId: z.string().describe("Human-readable short ID (e.g. PROJ-ABC)"),
+    title: z.string().describe("Issue title"),
+    culprit: z.string().optional().describe("Culprit string"),
+    count: z.string().optional().describe("Total event count"),
+    userCount: z.number().optional().describe("Number of affected users"),
+    firstSeen: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("First occurrence (ISO 8601)"),
+    lastSeen: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Most recent occurrence (ISO 8601)"),
+    level: z.string().optional().describe("Severity level"),
+    status: z.string().optional().describe("Issue status"),
+    priority: z.string().optional().describe("Triage priority"),
+    platform: z.string().optional().describe("Platform"),
+    permalink: z.string().optional().describe("URL to the issue in Sentry"),
+    project: z
+      .object({
+        id: z.string(),
+        name: z.string(),
+        slug: z.string(),
+      })
+      .optional()
+      .describe("Project info"),
+    metadata: z
+      .object({
+        type: z.string().optional(),
+        value: z.string().optional(),
+        filename: z.string().optional(),
+        function: z.string().optional(),
+      })
+      .optional()
+      .describe("Issue metadata"),
+    assignedTo: z
+      .unknown()
+      .nullable()
+      .optional()
+      .describe("Assigned user or team"),
+    substatus: z.string().nullable().optional().describe("Issue substatus"),
+    isUnhandled: z
+      .boolean()
+      .optional()
+      .describe("Whether the issue is unhandled"),
+    seerFixabilityScore: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Seer AI fixability score (0-1)"),
+  })
+  .describe("Sentry issue");
+
 // Event
 
 /**
@@ -485,19 +554,29 @@ export type RequestEntry = {
 export const SentryLogSchema = z
   .object({
     /** Unique identifier for deduplication */
-    "sentry.item_id": z.string(),
+    "sentry.item_id": z.string().describe("Unique log entry ID"),
     /** ISO timestamp of the log entry */
-    timestamp: z.string(),
+    timestamp: z.string().describe("Log timestamp (ISO 8601)"),
     /** Nanosecond-precision timestamp for accurate ordering and filtering.
      * Coerced from string because the API may return large integers as strings
      * to avoid precision loss beyond Number.MAX_SAFE_INTEGER. */
-    timestamp_precise: z.coerce.number(),
+    timestamp_precise: z.coerce
+      .number()
+      .describe("Nanosecond-precision timestamp"),
     /** Log message content */
-    message: z.string().nullable().optional(),
+    message: z.string().nullable().optional().describe("Log message"),
     /** Log severity level (error, warning, info, debug, etc.) */
-    severity: z.string().nullable().optional(),
+    severity: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Severity level (error, warning, info, debug)"),
     /** Trace ID for correlation with traces */
-    trace: z.string().nullable().optional(),
+    trace: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Trace ID for correlation"),
   })
   .passthrough();
 
@@ -646,17 +725,17 @@ export type TraceLogsResponse = z.infer<typeof TraceLogsResponseSchema>;
 export const TransactionListItemSchema = z
   .object({
     /** Trace ID this transaction belongs to */
-    trace: z.string(),
+    trace: z.string().describe("Trace ID"),
     /** Event ID of the transaction */
-    id: z.string(),
+    id: z.string().describe("Event ID"),
     /** Transaction name (e.g., "GET /api/users") */
-    transaction: z.string(),
+    transaction: z.string().describe("Transaction name"),
     /** ISO timestamp of the transaction */
-    timestamp: z.string(),
+    timestamp: z.string().describe("Timestamp (ISO 8601)"),
     /** Transaction duration in milliseconds */
-    "transaction.duration": z.number(),
+    "transaction.duration": z.number().describe("Duration (ms)"),
     /** Project slug */
-    project: z.string(),
+    project: z.string().describe("Project slug"),
   })
   .passthrough();
 
@@ -678,15 +757,19 @@ export type TransactionsResponse = z.infer<typeof TransactionsResponseSchema>;
 /** A single span item from the EAP spans search endpoint */
 export const SpanListItemSchema = z
   .object({
-    id: z.string(),
-    parent_span: z.string().nullable().optional(),
-    "span.op": z.string().nullable().optional(),
-    description: z.string().nullable().optional(),
-    "span.duration": z.number().nullable().optional(),
-    timestamp: z.string(),
-    project: z.string(),
-    transaction: z.string().nullable().optional(),
-    trace: z.string(),
+    id: z.string().describe("Span ID"),
+    parent_span: z.string().nullable().optional().describe("Parent span ID"),
+    "span.op": z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Span operation (e.g. http.client, db)"),
+    description: z.string().nullable().optional().describe("Span description"),
+    "span.duration": z.number().nullable().optional().describe("Duration (ms)"),
+    timestamp: z.string().describe("Timestamp (ISO 8601)"),
+    project: z.string().describe("Project slug"),
+    transaction: z.string().nullable().optional().describe("Transaction name"),
+    trace: z.string().describe("Trace ID"),
   })
   .passthrough();
 
@@ -719,16 +802,20 @@ export type RepositoryProvider = z.infer<typeof RepositoryProviderSchema>;
 export const SentryRepositorySchema = z
   .object({
     // Core identifiers (required)
-    id: z.string(),
-    name: z.string(),
-    url: z.string().nullable(),
-    provider: RepositoryProviderSchema,
-    status: z.string(),
+    id: z.string().describe("Repository ID"),
+    name: z.string().describe("Repository name"),
+    url: z.string().nullable().describe("Repository URL"),
+    provider: RepositoryProviderSchema.describe("Version control provider"),
+    status: z.string().describe("Integration status"),
     // Optional metadata
-    dateCreated: z.string().optional(),
-    integrationId: z.string().optional(),
-    externalSlug: z.string().nullable().optional(),
-    externalId: z.string().nullable().optional(),
+    dateCreated: z.string().optional().describe("Creation date (ISO 8601)"),
+    integrationId: z.string().optional().describe("Integration ID"),
+    externalSlug: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("External slug (e.g. org/repo)"),
+    externalId: z.string().nullable().optional().describe("External ID"),
   })
   .passthrough();
 
@@ -740,14 +827,18 @@ export type SentryRepository = z.infer<typeof SentryRepositorySchema>;
 export const SentryTeamSchema = z
   .object({
     // Core identifiers (required)
-    id: z.string(),
-    slug: z.string(),
-    name: z.string(),
+    id: z.string().describe("Team ID"),
+    slug: z.string().describe("Team slug"),
+    name: z.string().describe("Team name"),
     // Optional metadata
-    dateCreated: z.string().optional(),
-    isMember: z.boolean().optional(),
-    teamRole: z.string().nullable().optional(),
-    memberCount: z.number().optional(),
+    dateCreated: z.string().optional().describe("Creation date (ISO 8601)"),
+    isMember: z.boolean().optional().describe("Whether you are a member"),
+    teamRole: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Your role in the team"),
+    memberCount: z.number().optional().describe("Number of members"),
   })
   .passthrough();
 
@@ -758,17 +849,17 @@ export type SentryTeam = z.infer<typeof SentryTeamSchema>;
 /** A product trial from the customer endpoint */
 export const ProductTrialSchema = z.object({
   /** Trial category (e.g., "seerUsers", "seerAutofix") */
-  category: z.string(),
+  category: z.string().describe("Trial category (e.g. seerUsers, seerAutofix)"),
   /** ISO date when the trial started, null if not started */
-  startDate: z.string().nullable(),
+  startDate: z.string().nullable().describe("Start date (ISO 8601)"),
   /** ISO date when the trial ends, null if not started */
-  endDate: z.string().nullable(),
+  endDate: z.string().nullable().describe("End date (ISO 8601)"),
   /** Reason code for the trial */
-  reasonCode: z.number(),
+  reasonCode: z.number().describe("Reason code"),
   /** Whether the trial has been activated */
-  isStarted: z.boolean(),
+  isStarted: z.boolean().describe("Whether the trial has started"),
   /** Duration of the trial in days, null if unknown */
-  lengthDays: z.number().nullable(),
+  lengthDays: z.number().nullable().describe("Trial duration in days"),
 });
 
 export type ProductTrial = z.infer<typeof ProductTrialSchema>;

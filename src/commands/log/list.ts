@@ -40,6 +40,7 @@ import {
   warnIfNormalized,
 } from "../../lib/trace-target.js";
 import { getUpdateNotification } from "../../lib/version-check.js";
+import { SentryLogSchema } from "../../types/index.js";
 
 type ListFlags = {
   readonly limit: number;
@@ -598,6 +599,7 @@ export const listCommand = buildListCommand(
     output: {
       human: createLogRenderer,
       jsonTransform: jsonTransformLogOutput,
+      schema: SentryLogSchema,
     },
     parameters: {
       positional: {
