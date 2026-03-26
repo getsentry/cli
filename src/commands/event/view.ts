@@ -496,6 +496,26 @@ async function resolveIssueShortIdEvent(
   return fetchLatestEventData(org, issue.id, spans);
 }
 
+/**
+ * Fetch a specific event by ID (not latest) and build full EventViewData
+ * including optional span tree. Used by the SHORT-ID/EVENT-ID path.
+ */
+async function fetchSpecificEventData(
+  org: string,
+  project: string,
+  eventId: string,
+  spans: number
+): Promise<EventViewData> {
+  const event = await getEvent(org, project, eventId);
+  const spanTreeResult =
+    spans > 0 ? await getSpanTreeLines(org, event, spans) : undefined;
+  const trace =
+    spanTreeResult?.success && spanTreeResult.traceId
+      ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans ?? [] }
+      : null;
+  return { event, trace, spanTreeLines: spanTreeResult?.lines };
+}
+
 /** Result from an issue-based shortcut (URL or short ID) */
 type IssueShortcutResult = {
   org: string;
@@ -561,8 +581,12 @@ async function resolveIssueShortcut(
       const issue = await getIssueByShortId(resolved.org, issueShortId);
       const issueProject = issue.project?.slug;
       if (issueProject) {
-        const event = await getEvent(resolved.org, issueProject, eventId);
-        const data: EventViewData = { event, trace: null };
+        const data = await fetchSpecificEventData(
+          resolved.org,
+          issueProject,
+          eventId,
+          spans
+        );
         return {
           org: resolved.org,
           data,
