@@ -271,6 +271,16 @@ describe("dashboard widget edit", () => {
     expect(updateDashboardSpy).toHaveBeenCalled();
   });
 
+  test("allows --display change to untracked display type (text)", async () => {
+    // Changing --display to an untracked type should also skip cross-validation.
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    // sampleDashboard widget[0] is displayType: "big_number", widgetType: "spans"
+    // Changing to "text" should not throw even though "text" isn't in spans' supported types.
+    await func.call(context, { json: false, index: 0, display: "text" }, "123");
+    expect(updateDashboardSpy).toHaveBeenCalled();
+  });
+
   test("validates aggregates against new dataset when --dataset changes", async () => {
     const { context } = createMockContext();
     const func = await editCommand.loader();

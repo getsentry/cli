@@ -105,12 +105,16 @@ function buildReplacement(
   // Validating them against a dataset would always fail, blocking legitimate edits like
   // changing --dataset on a text widget.
   if (flags.display || flags.dataset) {
+    // Only cross-validate when effectiveDisplay is a tracked type (present in
+    // DATASET_SUPPORTED_DISPLAY_TYPES). Untracked types — text, wheel,
+    // rage_and_dead_clicks, agents_traces_table — bypass Sentry's dataset system
+    // entirely, so any dataset is valid with them regardless of which flag triggered this.
     const isTrackedDisplay = Object.values(
       DATASET_SUPPORTED_DISPLAY_TYPES
     ).some((types) =>
       (types as readonly string[]).includes(effectiveDisplay ?? "")
     );
-    if (flags.display || isTrackedDisplay) {
+    if (isTrackedDisplay) {
       validateWidgetEnums(effectiveDisplay, effectiveDataset);
     }
   }
