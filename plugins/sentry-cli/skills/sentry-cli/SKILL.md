@@ -157,6 +157,12 @@ sentry dashboard widget add <dashboard> "Latency Over Time" --display line --que
 sentry dashboard widget add <dashboard> "Top Endpoints" --display table \
   --query count --query p95:span.duration \
   --group-by transaction --sort -count --limit 10
+
+# Issue dataset: table (columns default to "issue" automatically) or timeseries
+sentry dashboard widget add <dashboard> "Top Issues" --display table \
+  --dataset issue --sort -count --limit 10
+sentry dashboard widget add <dashboard> "New Issues Over Time" --display line \
+  --dataset issue
 ```
 
 ### Common Mistakes
@@ -168,6 +174,8 @@ sentry dashboard widget add <dashboard> "Top Endpoints" --display table \
 - **Confusing `--query` syntax**: The `--query` flag uses Sentry search syntax (e.g., `is:unresolved`, `assigned:me`), not free text search.
 - **Not using `--web`**: View commands support `-w`/`--web` to open the resource in the browser — useful for sharing links.
 - **Fetching API schemas instead of using the CLI**: Prefer `sentry schema` to browse the API and `sentry api` to make requests — the CLI handles authentication and endpoint resolution, so there's rarely a need to download OpenAPI specs separately.
+- **`--dataset issue` only supports `table`, `line`, `area`, `bar`**: Using `big_number` or other types will error. For issue counts, use `--display table --dataset issue` (columns default to `issue` automatically).
+- **`--dataset issue` column default is table-only**: For `line`/`area`/`bar`, columns are not auto-populated — the timeseries uses `new_issues`/`resolved_issues` fields instead.
 
 ## Prerequisites
 

@@ -101,6 +101,28 @@ Add a widget to a dashboard
 - `-s, --sort <value> - Order by (prefix - for desc, e.g. -count)`
 - `-n, --limit <value> - Result limit`
 
+**Issue dataset notes:** Only `table`, `line`, `area`, `bar` are valid with `--dataset issue`. For table, columns default to `issue` automatically. For timeseries (line/area/bar), the data is `new_issues`/`resolved_issues`.
+
+**Examples:**
+
+```bash
+# Spans table — top endpoints
+sentry dashboard widget add <dashboard> "Top Endpoints" --display table \
+  --query count --query p95:span.duration \
+  --group-by transaction --sort -count --limit 10
+
+# Issue table — top issues by count (columns default to "issue" automatically)
+sentry dashboard widget add <dashboard> "Top Issues" --display table \
+  --dataset issue --sort -count --limit 10
+
+# Issue timeseries — new issues over time
+sentry dashboard widget add <dashboard> "New Issues Over Time" --display line \
+  --dataset issue
+
+# KPI
+sentry dashboard widget add <dashboard> "Error Count" --display big_number --query count
+```
+
 ### `sentry dashboard widget edit <args...>`
 
 Edit a widget in a dashboard
