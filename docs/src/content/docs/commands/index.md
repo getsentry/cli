@@ -17,6 +17,13 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | [`issue`](./issue/) | Issue tracking |
 | [`event`](./event/) | Event inspection |
 | [`log`](./log/) | Log viewing and streaming |
+| [`trace`](./trace/) | Distributed trace inspection |
+| [`span`](./span/) | Span listing and details |
+| [`dashboard`](./dashboard/) | Dashboard management |
+| [`sourcemap`](./sourcemap/) | Sourcemap injection and upload |
+| [`repo`](./repo/) | Repository listing |
+| [`trial`](./trial/) | Product trial management |
+| [`schema`](./schema/) | API schema browsing |
 | [`api`](./api/) | Direct API access |
 
 ## Global Options
