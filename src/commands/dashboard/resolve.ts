@@ -384,12 +384,19 @@ export function validateWidgetEnums(display?: string, dataset?: string): void {
     );
   }
   if (display && dataset) {
-    const supported = DATASET_SUPPORTED_DISPLAY_TYPES[dataset as WidgetType];
-    if (supported && !(supported as readonly string[]).includes(display)) {
-      throw new ValidationError(
-        `The "${dataset}" dataset supports: ${supported.join(", ")}. Got: "${display}".`,
-        "display"
-      );
+    // Untracked display types (text, wheel, rage_and_dead_clicks, agents_traces_table)
+    // bypass Sentry's dataset query system entirely — no dataset constraint applies.
+    const isTrackedDisplay = Object.values(
+      DATASET_SUPPORTED_DISPLAY_TYPES
+    ).some((types) => (types as readonly string[]).includes(display));
+    if (isTrackedDisplay) {
+      const supported = DATASET_SUPPORTED_DISPLAY_TYPES[dataset as WidgetType];
+      if (supported && !(supported as readonly string[]).includes(display)) {
+        throw new ValidationError(
+          `The "${dataset}" dataset supports: ${supported.join(", ")}. Got: "${display}".`,
+          "display"
+        );
+      }
     }
   }
 }
