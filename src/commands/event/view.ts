@@ -106,6 +106,12 @@ function jsonTransformEventView(
 const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
 
 /**
+ * Sentinel eventId for "fetch the latest event for this issue."
+ * Uses the @-prefix convention from {@link IssueSelector} magic selectors.
+ */
+const LATEST_EVENT_SENTINEL = "@latest";
+
+/**
  * Parse a single positional arg for event view, handling issue short ID
  * detection both in bare form ("BRUNCHIE-APP-29") and org-prefixed form
  * ("figma/FULLSCREEN-2RN").
@@ -128,7 +134,7 @@ function parseSingleArg(arg: string): ParsedPositionalArgs {
       // Use "org/" (trailing slash) to signal OrgAll mode so downstream
       // parseOrgProjectArg interprets this as an org, not a project search.
       return {
-        eventId: "latest",
+        eventId: LATEST_EVENT_SENTINEL,
         targetArg: `${beforeSlash}/`,
         issueShortId: afterSlash,
       };
@@ -159,7 +165,7 @@ function parseSingleArg(arg: string): ParsedPositionalArgs {
   // Detect bare issue short ID passed as event ID (e.g., "BRUNCHIE-APP-29").
   if (!targetArg && looksLikeIssueShortId(eventId)) {
     return {
-      eventId: "latest",
+      eventId: LATEST_EVENT_SENTINEL,
       targetArg: undefined,
       issueShortId: eventId,
     };
@@ -222,9 +228,9 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
     }
     if (urlParsed.issueId) {
       // Issue URL without event ID — fetch the latest event for this issue.
-      // Use a placeholder eventId; the caller uses issueId to fetch via getLatestEvent.
+      // The caller uses issueId to fetch via getLatestEvent.
       return {
-        eventId: "latest",
+        eventId: LATEST_EVENT_SENTINEL,
         targetArg: `${urlParsed.org}/`,
         issueId: urlParsed.issueId,
       };
@@ -258,7 +264,7 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
   // are uppercase). The second arg is ignored since we fetch the latest event.
   if (looksLikeIssueShortId(first)) {
     return {
-      eventId: "latest",
+      eventId: LATEST_EVENT_SENTINEL,
       targetArg: undefined,
       issueShortId: first,
       warning: `'${first}' is an issue short ID, not a project slug. Ignoring second argument '${second}'.`,
@@ -593,7 +599,7 @@ async function resolveIssueShortcut(
 
     // When the user specified a specific event ID (SHORT-ID/EVENT-ID),
     // resolve the issue to get the project, then fetch the specific event.
-    if (eventId !== "latest") {
+    if (eventId !== LATEST_EVENT_SENTINEL) {
       const issue = await getIssueByShortId(resolved.org, issueShortId);
       const issueProject = issue.project?.slug;
       if (!issueProject) {
@@ -681,8 +687,8 @@ export const viewCommand = buildCommand({
     const parsed = parseOrgProjectArg(targetArg);
 
     // Handle issue-based shortcuts (issue URLs and short IDs) before
-    // normal event resolution. When eventId is "latest", fetches the
-    // latest event; otherwise fetches the specific event.
+    // normal event resolution. When eventId is LATEST_EVENT_SENTINEL,
+    // fetches the latest event; otherwise fetches the specific event.
     const issueShortcut = await resolveIssueShortcut({
       parsed,
       eventId,
