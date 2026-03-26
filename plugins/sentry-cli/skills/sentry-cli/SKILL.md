@@ -254,6 +254,15 @@ Make an authenticated API request
 
 → Full flags and examples: `references/api.md`
 
+### Alert
+
+Manage Sentry alert rules
+
+- `sentry alert issues list <org/project>` — List issue alert rules
+- `sentry alert metrics list <org/>` — List metric alert rules
+
+→ Full flags and examples: `references/alert.md`
+
 ### Cli
 
 CLI-related commands
