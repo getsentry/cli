@@ -40,13 +40,24 @@ export function throwApiError(
   response: Response | undefined,
   context: string
 ): never {
-  const status = response?.status ?? 0;
+  // Network-level failure: no HTTP response received (DNS, timeout, ECONNREFUSED, etc.)
+  if (!response) {
+    const cause =
+      error instanceof Error ? error.message : stringifyUnknown(error);
+    throw new ApiError(
+      `${context}: Network error`,
+      0,
+      `Unable to reach Sentry API. Cause: ${cause}\n\nCheck your internet connection and try again.`
+    );
+  }
+
+  const status = response.status;
   const detail =
     error && typeof error === "object" && "detail" in error
       ? stringifyUnknown((error as { detail: unknown }).detail)
       : stringifyUnknown(error);
   throw new ApiError(
-    `${context}: ${status} ${response?.statusText ?? "Unknown"}`,
+    `${context}: ${status} ${response.statusText ?? "Unknown"}`,
     status,
     detail
   );
