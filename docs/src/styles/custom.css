@@ -62,6 +62,26 @@ body {
   background: var(--sl-color-bg);
 }
 
+/* Strip all focus side effects — only our outline should show */
+:focus {
+  outline: none !important;
+  background-color: inherit !important;
+}
+
+/* Re-add purple outline for keyboard focus */
+:focus-visible {
+  outline: 2px solid rgba(139, 92, 246, 0.5) !important;
+  outline-offset: 2px !important;
+  border-radius: 4px;
+}
+
+/* Skip to content link — visible on any focus (keyboard only element) */
+a[href="#_top"]:focus {
+  background: rgba(139, 92, 246, 0.9) !important;
+  color: #fff !important;
+  outline: none !important;
+}
+
 /* Subtle background gradient */
 .sl-layout::before {
   content: "";
@@ -1059,7 +1079,7 @@ code {
 /* Header */
 .expressive-code .header {
   background: rgba(255, 255, 255, 0.03) !important;
-  padding: 0.7rem 1rem !important;
+  padding: 0.35rem 1rem !important;
   border: none !important;
 }
 
@@ -1248,6 +1268,13 @@ code {
 
 .expressive-code .copy button:hover {
   color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.expressive-code .copy button:focus-visible {
+  color: rgba(255, 255, 255, 0.8) !important;
+  outline: 2px solid rgba(139, 92, 246, 0.5) !important;
+  outline-offset: 2px !important;
+  border-radius: 4px !important;
 }
 
 /* Hide the default div background effect */
@@ -1569,7 +1596,7 @@ starlight-toc nav h2 {
 
 nav.sidebar a {
   color: rgba(255, 255, 255, 0.75);
-  transition: all 0.15s ease;
+  transition: color 0.15s ease, background 0.15s ease;
   padding: 0.5rem 0.75rem;
   border-radius: 6px;
   margin: 1px 0;
@@ -1577,13 +1604,12 @@ nav.sidebar a {
 
 nav.sidebar a:hover {
   color: #fff;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(139, 92, 246, 0.1);
 }
 
 nav.sidebar a[aria-current="page"] {
   color: #fff;
   background: rgba(139, 92, 246, 0.2);
-  border-left: 2px solid var(--sl-color-accent);
 }
 
 /* Sidebar group labels - "GETTING STARTED", "COMMANDS", etc. */

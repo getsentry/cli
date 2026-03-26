@@ -40,7 +40,7 @@ const id = `pm-${Math.random().toString(36).substr(2, 9)}`;
     overflow: hidden;
     margin: 1rem 0;
     background: rgba(255, 255, 255, 0.04);
-    padding: 0.5rem;
+    padding: 0 0.5rem 0.5rem;
   }
 
   .pm-header {
@@ -56,7 +56,7 @@ const id = `pm-${Math.random().toString(36).substr(2, 9)}`;
   }
 
   .pm-tab {
-    padding: 0.5rem 0.75rem;
+    padding: 0.35rem 0.75rem;
     font-size: 0.8rem;
     font-weight: 500;
     color: rgba(255, 255, 255, 0.4);
@@ -87,9 +87,9 @@ const id = `pm-${Math.random().toString(36).substr(2, 9)}`;
   }
 
   .pm-copy {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
     background: none;
     border: none;
     color: rgba(255, 255, 255, 0.4);
@@ -102,12 +102,23 @@ const id = `pm-${Math.random().toString(36).substr(2, 9)}`;
     color: rgba(255, 255, 255, 0.8);
   }
 
+  .pm-copy:focus-visible {
+    color: rgba(255, 255, 255, 0.8);
+    outline: 2px solid rgba(139, 92, 246, 0.5);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
   .pm-copied {
+    position: absolute;
+    right: 100%;
+    margin-right: 0.5rem;
     font-size: 0.75rem;
     color: #22c55e;
     opacity: 0;
     transform: translateY(0.25rem);
     transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out;
+    white-space: nowrap;
   }
 
   .pm-copy.copied .pm-copied {
