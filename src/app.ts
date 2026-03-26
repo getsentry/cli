@@ -8,6 +8,7 @@ import {
   UnexpectedPositionalError,
 } from "@stricli/core";
 import { apiCommand } from "./commands/api.js";
+import { alertRoute } from "./commands/alert/index.js";
 import { authRoute } from "./commands/auth/index.js";
 import { whoamiCommand } from "./commands/auth/whoami.js";
 import { cliRoute } from "./commands/cli/index.js";
@@ -67,6 +68,7 @@ const PLURAL_TO_SINGULAR: Record<string, string> = {
 export const routes = buildRouteMap({
   routes: {
     help: helpCommand,
+    alert: alertRoute,
     auth: authRoute,
     cli: cliRoute,
     dashboard: dashboardRoute,
