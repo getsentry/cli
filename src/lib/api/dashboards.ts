@@ -173,7 +173,7 @@ const PERIOD_UNITS: Record<string, number> = {
 const PERIOD_RE = /^(\d+)([smhdw])$/;
 
 /** Parse a Sentry period string (e.g., "24h", "7d") into seconds. */
-function periodToSeconds(period: string): number | undefined {
+export function periodToSeconds(period: string): number | undefined {
   const match = PERIOD_RE.exec(period);
   if (!match) {
     return;
@@ -199,7 +199,7 @@ const VALID_INTERVALS = ["1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d"];
  * width in terminal columns. Picks the largest valid Sentry interval that
  * produces at least `chartWidth` data points, ensuring barWidth stays at 1.
  */
-function computeOptimalInterval(
+export function computeOptimalInterval(
   statsPeriod: string,
   widget: DashboardWidget
 ): string | undefined {
