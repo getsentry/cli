@@ -6,7 +6,7 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { buildOrgAwareAliases } from "../../lib/alias.js";
+import { buildProjectAliasMap } from "../../lib/alias.js";
 import {
   API_MAX_PER_PAGE,
   buildIssueListCollapse,
@@ -60,21 +60,19 @@ import {
 import { logger } from "../../lib/logger.js";
 import {
   dispatchOrgScopedList,
+  type FetchResult as FetchResultOf,
   jsonTransformListResult,
   type ListCommandMeta,
   type ListResult,
   type ModeHandler,
+  trimWithGroupGuarantee,
 } from "../../lib/org-list.js";
 import { withProgress } from "../../lib/polling.js";
 import {
   type ResolvedTarget,
   resolveTargetsFromParsedArg,
 } from "../../lib/resolve-target.js";
-import type {
-  ProjectAliasEntry,
-  SentryIssue,
-  Writer,
-} from "../../types/index.js";
+import type { SentryIssue, Writer } from "../../types/index.js";
 
 /** Command key for pagination cursor storage */
 export const PAGINATION_KEY = "issue-list";
@@ -227,49 +225,6 @@ function formatListFooter(mode: "single" | "multi" | "none"): string {
   nextCursor?: string;
 };
 
-/** Result of building project aliases */
-/** @internal */ export type AliasMapResult = {
-  aliasMap: Map<string, string>;
-  entries: Record<string, ProjectAliasEntry>;
-};
-
-/**
- * Build project alias map using shortest unique prefix of project slug.
- * Handles cross-org slug collisions by prefixing with org abbreviation.
- * Strips common word prefix before computing unique prefixes for cleaner aliases.
- *
- * Single org examples:
- *   spotlight-electron, spotlight-website, spotlight → e, w, s
- *   frontend, functions, backend → fr, fu, b
- *
- * Cross-org collision example:
- *   org1/dashboard, org2/dashboard → o1/d, o2/d
- */
-function buildProjectAliasMap(results: IssueListFetchResult[]): AliasMapResult {
-  const entries: Record<string, ProjectAliasEntry> = {};
-
-  // Build org-aware aliases that handle cross-org collisions
-  const pairs = results.map((r) => ({
-    org: r.target.org,
-    project: r.target.project,
-  }));
-  const { aliasMap } = buildOrgAwareAliases(pairs);
-
-  // Build entries record for storage
-  for (const result of results) {
-    const key = `${result.target.org}/${result.target.project}`;
-    const alias = aliasMap.get(key);
-    if (alias) {
-      entries[alias] = {
-        orgSlug: result.target.org,
-        projectSlug: result.target.project,
-      };
-    }
-  }
-
-  return { aliasMap, entries };
-}
-
 /**
  * Attach formatting options to each issue based on alias map.
  *
@@ -333,9 +288,7 @@ function getComparator(
   }
 }
 
-type FetchResult =
-  | { success: true; data: IssueListFetchResult }
-  | { success: false; error: Error };
+type FetchResult = FetchResultOf<IssueListFetchResult>;
 
 /**
  * Fetch issues for a single target project.
@@ -526,52 +479,18 @@ async function fetchWithBudget(
 }
 
 /**
- * Trim an array of issues to the global limit while guaranteeing at least one
- * issue per project (when possible).
- *
- * Algorithm:
- * 1. Walk the globally-sorted list, taking the first issue from each unseen
- *    project until `limit` slots are filled or all projects are represented.
- * 2. Fill remaining slots from the top of the sorted list, skipping already-
- *    selected issues.
- * 3. Return the final set in original sorted order.
- *
- * When there are more projects than the limit, the projects whose first issue
- * ranks highest in the sorted order get representation.
- *
- * @param issues - Globally sorted array (input order is preserved in output)
- * @param limit - Maximum number of issues to return
- * @returns Trimmed array in the same sorted order
+ * Trim issues to the global limit while guaranteeing at least one issue per
+ * project. Thin wrapper around {@link trimWithGroupGuarantee} for `IssueTableRow`.
  */
 function trimWithProjectGuarantee(
   issues: IssueTableRow[],
   limit: number
 ): IssueTableRow[] {
-  if (issues.length <= limit) {
-    return issues;
-  }
-
-  const seenProjects = new Set<string>();
-  const guaranteed = new Set<number>();
-
-  // Pass 1: pick one representative per project from the sorted list
-  for (let i = 0; i < issues.length && guaranteed.size < limit; i++) {
-    // biome-ignore lint/style/noNonNullAssertion: i is within bounds
-    const projectKey = `${issues[i]!.orgSlug}/${issues[i]!.formatOptions.projectSlug ?? ""}`;
-    if (!seenProjects.has(projectKey)) {
-      seenProjects.add(projectKey);
-      guaranteed.add(i);
-    }
-  }
-
-  // Pass 2: fill remaining budget from the top of the sorted list
-  const selected = new Set<number>(guaranteed);
-  for (let i = 0; i < issues.length && selected.size < limit; i++) {
-    selected.add(i);
-  }
-
-  // Return in original sorted order
-  return issues.filter((_, i) => selected.has(i));
+  return trimWithGroupGuarantee(
+    issues,
+    limit,
+    (r) => `${r.orgSlug}/${r.formatOptions.projectSlug ?? ""}`
+  );
 }
 
 /** Build the CLI hint for fetching the next page, preserving active flags. */

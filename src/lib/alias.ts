@@ -5,6 +5,9 @@
  * Used by issue list to create short identifiers like "e" for "spotlight-electron".
  */
 
+import type { ResolvedTarget } from "./resolve-target.js";
+import type { ProjectAliasEntry } from "../types/index.js";
+
 /**
  * Find the common word prefix shared by strings that have word boundaries.
  * Word boundaries are hyphens or underscores.
@@ -319,4 +322,54 @@ export function buildOrgAwareAliases(
   }
 
   return { aliasMap };
+}
+
+// ---------------------------------------------------------------------------
+// Project alias map — shared by list commands that resolve multiple targets
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of {@link buildProjectAliasMap}: a lookup map plus the entry record
+ * used to persist aliases to the database for `sentry issue view <ALIAS>`.
+ */
+export type AliasMapResult = {
+  /** Map from "org/project" composite key to alias string */
+  aliasMap: Map<string, string>;
+  /** Alias → `{ orgSlug, projectSlug }` entries for DB storage */
+  entries: Record<string, ProjectAliasEntry>;
+};
+
+/**
+ * Build a project alias map and DB entry record from a list of fetch results.
+ *
+ * Uses {@link buildOrgAwareAliases} to compute the shortest unique prefix for
+ * each project slug, handling cross-org collisions with an org abbreviation
+ * prefix. The returned `aliasMap` is keyed by `"org/project"` composite key;
+ * `entries` is suitable for passing to `setProjectAliases`.
+ *
+ * @param results - Fetch results that each carry a {@link ResolvedTarget}
+ * @returns Alias map and DB entries
+ */
+export function buildProjectAliasMap<T extends { target: ResolvedTarget }>(
+  results: T[]
+): AliasMapResult {
+  const entries: Record<string, ProjectAliasEntry> = {};
+  const pairs = results.map((r) => ({
+    org: r.target.org,
+    project: r.target.project,
+  }));
+  const { aliasMap } = buildOrgAwareAliases(pairs);
+
+  for (const result of results) {
+    const key = `${result.target.org}/${result.target.project}`;
+    const alias = aliasMap.get(key);
+    if (alias) {
+      entries[alias] = {
+        orgSlug: result.target.org,
+        projectSlug: result.target.project,
+      };
+    }
+  }
+
+  return { aliasMap, entries };
 }

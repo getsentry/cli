@@ -11,7 +11,7 @@
  */
 
 import type { SentryContext } from "../../../context.js";
-import { buildOrgAwareAliases } from "../../../lib/alias.js";
+import { buildProjectAliasMap } from "../../../lib/alias.js";
 import type { IssueAlertRule } from "../../../lib/api/alerts.js";
 import { MAX_PAGINATION_PAGES } from "../../../lib/api/infrastructure.js";
 import {
@@ -52,10 +52,12 @@ import {
 import { logger } from "../../../lib/logger.js";
 import {
   dispatchOrgScopedList,
+  type FetchResult as FetchResultOf,
   jsonTransformListResult,
   type ListCommandMeta,
   type ListResult,
   type ModeHandler,
+  trimWithGroupGuarantee,
 } from "../../../lib/org-list.js";
 import { withProgress } from "../../../lib/polling.js";
 import {
@@ -91,15 +93,7 @@ type AlertRuleListFetchResult = {
 };
 
 /** Success/failure wrapper for per-target fetches */
-type FetchResult =
-  | { success: true; data: AlertRuleListFetchResult }
-  | { success: false; error: Error };
-
-/** Result of building project aliases */
-type AliasMapResult = {
-  aliasMap: Map<string, string>;
-  entries: Record<string, ProjectAliasEntry>;
-};
+type FetchResult = FetchResultOf<AlertRuleListFetchResult>;
 
 /** Display row carrying per-rule project context for the human formatter. */
 type AlertRuleRow = { rule: IssueAlertRule; target: ResolvedTarget };
@@ -290,33 +284,6 @@ async function fetchWithBudget(
 }
 
 /**
- * Build project alias map using shortest unique prefix of project slug.
- */
-function buildProjectAliasMap(
-  results: AlertRuleListFetchResult[]
-): AliasMapResult {
-  const entries: Record<string, ProjectAliasEntry> = {};
-  const pairs = results.map((r) => ({
-    org: r.target.org,
-    project: r.target.project,
-  }));
-  const { aliasMap } = buildOrgAwareAliases(pairs);
-
-  for (const result of results) {
-    const key = `${result.target.org}/${result.target.project}`;
-    const alias = aliasMap.get(key);
-    if (alias) {
-      entries[alias] = {
-        orgSlug: result.target.org,
-        projectSlug: result.target.project,
-      };
-    }
-  }
-
-  return { aliasMap, entries };
-}
-
-/**
  * Trim display rows to the global limit while guaranteeing at least one row
  * per project (when possible).
  */
@@ -324,28 +291,11 @@ function trimWithProjectGuarantee(
   rows: AlertRuleRow[],
   limit: number
 ): AlertRuleRow[] {
-  if (rows.length <= limit) {
-    return rows;
-  }
-
-  const seenProjects = new Set<string>();
-  const guaranteed = new Set<number>();
-
-  for (let i = 0; i < rows.length && guaranteed.size < limit; i++) {
-    // biome-ignore lint/style/noNonNullAssertion: i is within bounds
-    const projectKey = `${rows[i]!.target.org}/${rows[i]!.target.project}`;
-    if (!seenProjects.has(projectKey)) {
-      seenProjects.add(projectKey);
-      guaranteed.add(i);
-    }
-  }
-
-  const selected = new Set<number>(guaranteed);
-  for (let i = 0; i < rows.length && selected.size < limit; i++) {
-    selected.add(i);
-  }
-
-  return rows.filter((_, i) => selected.has(i));
+  return trimWithGroupGuarantee(
+    rows,
+    limit,
+    (r) => `${r.target.org}/${r.target.project}`
+  );
 }
 
 // ---------------------------------------------------------------------------

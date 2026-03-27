@@ -460,3 +460,26 @@ export function buildMultiTargetContextKey(
     (escapedQuery ? `|q:${escapedQuery}` : "")
   );
 }
+
+/**
+ * Build a compound context key for multi-org pagination cursor storage.
+ *
+ * Analogous to {@link buildMultiTargetContextKey} but keyed by org slugs
+ * rather than org/project pairs. Used by metric alert rules and other
+ * org-scoped commands that may fetch from multiple orgs simultaneously.
+ *
+ * Cursors from different org sets or queries are never mixed because the
+ * context key encodes both.
+ *
+ * @param orgs - Organization slugs (sorted internally)
+ * @param query - Optional client-side name filter; included so cursors from
+ *   different filter values don't collide
+ * @returns Composite context key string
+ */
+export function buildMultiOrgContextKey(
+  orgs: string[],
+  query: string | undefined
+): string {
+  const sortedOrgs = [...orgs].sort().map(escapeContextKeyValue).join(",");
+  return buildPaginationContextKey("multi-org", sortedOrgs, { q: query });
+}

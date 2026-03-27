@@ -21,11 +21,10 @@ import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { openInBrowser } from "../../../lib/browser.js";
 import {
   advancePaginationState,
-  buildPaginationContextKey,
+  buildMultiOrgContextKey,
   CURSOR_SEP,
   decodeCompoundCursor,
   encodeCompoundCursor,
-  escapeContextKeyValue,
   hasPreviousPage,
   resolveCursor,
 } from "../../../lib/db/pagination.js";
@@ -47,10 +46,12 @@ import {
 import { logger } from "../../../lib/logger.js";
 import {
   dispatchOrgScopedList,
+  type FetchResult as FetchResultOf,
   jsonTransformListResult,
   type ListCommandMeta,
   type ListResult,
   type ModeHandler,
+  trimWithGroupGuarantee,
 } from "../../../lib/org-list.js";
 import { withProgress } from "../../../lib/polling.js";
 import {
@@ -86,9 +87,7 @@ type MetricRuleFetchResult = {
 };
 
 /** Success/failure wrapper for per-org fetches */
-type FetchResult =
-  | { success: true; data: MetricRuleFetchResult }
-  | { success: false; error: Error };
+type FetchResult = FetchResultOf<MetricRuleFetchResult>;
 
 /** Display row carrying per-rule org context for the human formatter. */
 type MetricAlertRow = { rule: MetricAlertRule; orgSlug: string };
@@ -275,41 +274,7 @@ function trimWithOrgGuarantee(
   rows: MetricAlertRow[],
   limit: number
 ): MetricAlertRow[] {
-  if (rows.length <= limit) {
-    return rows;
-  }
-
-  const seenOrgs = new Set<string>();
-  const guaranteed = new Set<number>();
-
-  for (let i = 0; i < rows.length && guaranteed.size < limit; i++) {
-    // biome-ignore lint/style/noNonNullAssertion: i is within bounds
-    if (!seenOrgs.has(rows[i]!.orgSlug)) {
-      // biome-ignore lint/style/noNonNullAssertion: i is within bounds
-      seenOrgs.add(rows[i]!.orgSlug);
-      guaranteed.add(i);
-    }
-  }
-
-  const selected = new Set<number>(guaranteed);
-  for (let i = 0; i < rows.length && selected.size < limit; i++) {
-    selected.add(i);
-  }
-
-  return rows.filter((_, i) => selected.has(i));
-}
-
-/**
- * Build a compound context key for multi-org pagination.
- * Encodes the sorted org set and optional query so cursors from different
- * searches are never reused.
- */
-function buildMultiOrgContextKey(
-  orgs: string[],
-  query: string | undefined
-): string {
-  const sortedOrgs = [...orgs].sort().map(escapeContextKeyValue).join(",");
-  return buildPaginationContextKey("multi-org", sortedOrgs, { q: query });
+  return trimWithGroupGuarantee(rows, limit, (r) => r.orgSlug);
 }
 
 // ---------------------------------------------------------------------------
