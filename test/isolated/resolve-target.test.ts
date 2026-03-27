@@ -59,6 +59,10 @@ const mockGetProject = mock(() =>
 );
 const mockFindProjectByDsnKey = mock(() => Promise.resolve(null));
 const mockFindProjectsByPattern = mock(() => Promise.resolve([]));
+const mockListOrganizationsUncached = mock(() => Promise.resolve([]));
+const mockGetOrgByNumericId = mock(
+  () => undefined as { slug: string; regionUrl: string } | undefined
+);
 
 // Mock all dependency modules
 mock.module("../../src/lib/db/defaults.js", () => ({
@@ -91,10 +95,38 @@ mock.module("../../src/lib/db/dsn-cache.js", () => ({
   setCachedDsn: mockSetCachedDsn,
 }));
 
+mock.module("../../src/lib/db/regions.js", () => ({
+  getOrgByNumericId: mockGetOrgByNumericId,
+  getOrgRegion: mock(() => {
+    /* returns undefined */
+  }),
+  setOrgRegion: mock(() => {
+    /* no-op */
+  }),
+  setOrgRegions: mock(() => {
+    /* no-op */
+  }),
+  clearOrgRegions: mock(() => {
+    /* no-op */
+  }),
+  getAllOrgRegions: mock(() => new Map()),
+  getCachedOrganizations: mock(() => []),
+  getCachedOrgRole: mock(() => {
+    /* returns undefined */
+  }),
+  disableOrgCache: mock(() => {
+    /* no-op */
+  }),
+  enableOrgCache: mock(() => {
+    /* no-op */
+  }),
+}));
+
 mock.module("../../src/lib/api-client.js", () => ({
   getProject: mockGetProject,
   findProjectByDsnKey: mockFindProjectByDsnKey,
   findProjectsByPattern: mockFindProjectsByPattern,
+  listOrganizationsUncached: mockListOrganizationsUncached,
 }));
 
 import { ContextError } from "../../src/lib/errors.js";
@@ -124,6 +156,8 @@ function resetAllMocks() {
   mockGetProject.mockReset();
   mockFindProjectByDsnKey.mockReset();
   mockFindProjectsByPattern.mockReset();
+  mockListOrganizationsUncached.mockReset();
+  mockGetOrgByNumericId.mockReset();
 
   // Set sensible defaults
   mockGetDefaultOrganization.mockReturnValue(null);
@@ -146,6 +180,8 @@ function resetAllMocks() {
   mockGetCachedProjectByDsnKey.mockReturnValue(null);
   mockGetCachedDsn.mockReturnValue(null);
   mockFindProjectsByPattern.mockResolvedValue([]);
+  mockListOrganizationsUncached.mockResolvedValue([]);
+  mockGetOrgByNumericId.mockReturnValue(undefined);
 }
 
 // ============================================================================
@@ -221,6 +257,88 @@ describe("resolveOrg", () => {
 
     expect(result).not.toBeNull();
     expect(result?.org).toBe("123");
+  });
+
+  test("normalizes numeric orgId to slug via DB cache", async () => {
+    mockGetDefaultOrganization.mockReturnValue(null);
+    mockDetectDsn.mockResolvedValue({
+      raw: "https://abc@o1169445.ingest.us.sentry.io/456",
+      protocol: "https",
+      publicKey: "abc",
+      host: "o1169445.ingest.us.sentry.io",
+      projectId: "456",
+      orgId: "1169445",
+      source: "env",
+    });
+    mockGetCachedProject.mockReturnValue(null);
+    mockGetOrgByNumericId.mockReturnValue({
+      slug: "my-org",
+      regionUrl: "https://us.sentry.io",
+    });
+
+    const result = await resolveOrg({ cwd: "/test" });
+
+    expect(result).not.toBeNull();
+    expect(result?.org).toBe("my-org");
+    expect(mockGetOrgByNumericId).toHaveBeenCalledWith("1169445");
+  });
+
+  test("normalizes numeric orgId via API when DB cache misses", async () => {
+    mockGetDefaultOrganization.mockReturnValue(null);
+    mockDetectDsn.mockResolvedValue({
+      raw: "https://abc@o1169445.ingest.us.sentry.io/456",
+      protocol: "https",
+      publicKey: "abc",
+      host: "o1169445.ingest.us.sentry.io",
+      projectId: "456",
+      orgId: "1169445",
+      source: "env",
+    });
+    mockGetCachedProject.mockReturnValue(null);
+
+    // First call returns undefined (cache miss), second call returns slug
+    // (after listOrganizationsUncached populates the cache)
+    let callCount = 0;
+    mockGetOrgByNumericId.mockImplementation(() => {
+      callCount += 1;
+      if (callCount >= 2) {
+        return { slug: "my-org", regionUrl: "https://us.sentry.io" };
+      }
+      return;
+    });
+    mockListOrganizationsUncached.mockResolvedValue([]);
+
+    const result = await resolveOrg({ cwd: "/test" });
+
+    expect(result).not.toBeNull();
+    expect(result?.org).toBe("my-org");
+    expect(mockListOrganizationsUncached).toHaveBeenCalled();
+  });
+
+  test("skips normalization for non-numeric org slug from DSN cache", async () => {
+    mockGetDefaultOrganization.mockReturnValue(null);
+    mockDetectDsn.mockResolvedValue({
+      raw: "https://abc@o123.ingest.sentry.io/456",
+      protocol: "https",
+      publicKey: "abc",
+      host: "o123.ingest.sentry.io",
+      projectId: "456",
+      orgId: "123",
+      source: "env",
+    });
+    mockGetCachedProject.mockReturnValue({
+      orgSlug: "cached-org",
+      orgName: "Cached Organization",
+      projectSlug: "project",
+      projectName: "Project",
+    });
+
+    const result = await resolveOrg({ cwd: "/test" });
+
+    expect(result).not.toBeNull();
+    expect(result?.org).toBe("cached-org");
+    // getOrgByNumericId should not be called because "cached-org" is not all digits
+    expect(mockGetOrgByNumericId).not.toHaveBeenCalled();
   });
 
   test("returns null when no org found from any source", async () => {

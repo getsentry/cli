@@ -13,6 +13,7 @@ import {
 import type { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { fuzzyMatch } from "../../lib/fuzzy.js";
+import { resolveEffectiveOrg } from "../../lib/region.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import { isAllDigits } from "../../lib/utils.js";
@@ -59,9 +60,11 @@ export async function resolveOrgFromTarget(
 ): Promise<string> {
   switch (parsed.type) {
     case "explicit":
-    case "org-all":
-      setOrgProjectContext([parsed.org], []);
-      return parsed.org;
+    case "org-all": {
+      const org = await resolveEffectiveOrg(parsed.org);
+      setOrgProjectContext([org], []);
+      return org;
+    }
     case "project-search":
     case "auto-detect": {
       // resolveOrg already sets telemetry context
