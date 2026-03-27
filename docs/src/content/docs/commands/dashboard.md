@@ -76,6 +76,10 @@ Add a widget to a dashboard
 | `-g, --group-by <group-by>...` | Group-by column (repeatable) |
 | `-s, --sort <sort>` | Order by (prefix - for desc, e.g. -count) |
 | `-n, --limit <limit>` | Result limit |
+| `--x <x>` | Grid column position (0-based, 0–5) |
+| `--y <y>` | Grid row position (0-based) |
+| `--width <width>` | Widget width in grid columns (1–6) |
+| `--height <height>` | Widget height in grid rows (min 1) |
 
 ### `sentry dashboard widget edit <org/project/dashboard...>`
 
@@ -101,6 +105,10 @@ Edit a widget in a dashboard
 | `-g, --group-by <group-by>...` | Group-by column (repeatable) |
 | `-s, --sort <sort>` | Order by (prefix - for desc, e.g. -count) |
 | `-n, --limit <limit>` | Result limit |
+| `--x <x>` | Grid column position (0-based, 0–5) |
+| `--y <y>` | Grid row position (0-based) |
+| `--width <width>` | Widget width in grid columns (1–6) |
+| `--height <height>` | Widget height in grid rows (min 1) |
 
 ### `sentry dashboard widget delete <org/project/dashboard...>`
 
