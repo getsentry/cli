@@ -15,43 +15,19 @@ Manage product trials
 
 List product trials
 
-**Examples:**
+**JSON Fields** (use `--json --fields` to select specific fields):
 
-```bash
-# Auto-detect org
-sentry trial list
-
-# Explicit org
-sentry trial list <org>
-
-# List all trials for the current org
-sentry trial list
-
-# List trials for a specific org
-sentry trial list my-org
-
-# Machine-readable output
-sentry trial list --json
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| `category` | string | Trial category (e.g. seerUsers, seerAutofix) |
+| `startDate` | string \| null | Start date (ISO 8601) |
+| `endDate` | string \| null | End date (ISO 8601) |
+| `reasonCode` | number | Reason code |
+| `isStarted` | boolean | Whether the trial has started |
+| `lengthDays` | number \| null | Trial duration in days |
 
 ### `sentry trial start <name> <org>`
 
 Start a product trial
-
-**Examples:**
-
-```bash
-sentry trial start <name>
-sentry trial start <name> <org>
-
-# Start a Seer trial
-sentry trial start seer
-
-# Start a trial for a specific org
-sentry trial start replays my-org
-
-# Start a Business plan trial (opens browser)
-sentry trial start plan
-```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

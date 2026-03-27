@@ -22,30 +22,19 @@ List repositories
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
-**Examples:**
+**JSON Fields** (use `--json --fields` to select specific fields):
 
-```bash
-# Auto-detect from DSN or config
-sentry repo list
-
-# Explicit org
-sentry repo list <org>/
-
-# Org inferred from project context
-sentry repo list <org>/<project>
-
-# Bare org slug
-sentry repo list <org>
-
-# List repositories (auto-detect org)
-sentry repo list
-
-# List repos in a specific org with pagination
-sentry repo list my-org/ -c next
-
-# Output as JSON
-sentry repo list --json
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Repository ID |
+| `name` | string | Repository name |
+| `url` | string \| null | Repository URL |
+| `provider` | object | Version control provider |
+| `status` | string | Integration status |
+| `dateCreated` | string | Creation date (ISO 8601) |
+| `integrationId` | string | Integration ID |
+| `externalSlug` | string \| null | External slug (e.g. org/repo) |
+| `externalId` | string \| null | External ID |
 
 ### `sentry team list <org/project>`
 
@@ -56,19 +45,16 @@ List teams
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
-**Examples:**
+**JSON Fields** (use `--json --fields` to select specific fields):
 
-```bash
-# Auto-detect organization or list all
-sentry team list
-
-# List teams in a specific organization
-sentry team list <org-slug>
-
-# Limit results
-sentry team list --limit 10
-
-sentry team list --json
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Team ID |
+| `slug` | string | Team slug |
+| `name` | string | Team name |
+| `dateCreated` | string | Creation date (ISO 8601) |
+| `isMember` | boolean | Whether you are a member |
+| `teamRole` | string \| null | Your role in the team |
+| `memberCount` | number | Number of members |
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
