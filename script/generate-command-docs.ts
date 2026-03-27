@@ -29,12 +29,7 @@ import type {
   RouteInfo,
   RouteMap,
 } from "../src/lib/introspect.js";
-import {
-  buildCommandInfo,
-  extractRouteGroupCommands,
-  isCommand,
-  isRouteMap,
-} from "../src/lib/introspect.js";
+import { extractAllRoutes } from "../src/lib/introspect.js";
 
 const DOCS_DIR = "docs/src/content/docs/commands";
 const INDEX_PATH = `${DOCS_DIR}/index.md`;
@@ -60,37 +55,6 @@ const GLOBAL_FLAG_NAMES = new Set([
 
 /** Routes that don't need their own documentation page */
 const SKIP_ROUTES = new Set(["help"]);
-
-// ---------------------------------------------------------------------------
-// Route Introspection
-// ---------------------------------------------------------------------------
-
-/** Walk the route tree and extract metadata for all visible routes */
-function extractVisibleRoutes(topRouteMap: RouteMap): RouteInfo[] {
-  const result: RouteInfo[] = [];
-  for (const entry of topRouteMap.getAllEntries()) {
-    if (entry.hidden || SKIP_ROUTES.has(entry.name.original)) {
-      continue;
-    }
-    const routeName = entry.name.original;
-    const target = entry.target;
-    if (isRouteMap(target)) {
-      result.push({
-        name: routeName,
-        brief: target.brief,
-        commands: extractRouteGroupCommands(target, routeName),
-      });
-    } else if (isCommand(target)) {
-      const path = `sentry ${routeName}`;
-      result.push({
-        name: routeName,
-        brief: target.brief,
-        commands: [buildCommandInfo(target, path)],
-      });
-    }
-  }
-  return result;
-}
 
 // ---------------------------------------------------------------------------
 // Markdown Formatting
@@ -368,7 +332,9 @@ async function readIndexCustomContent(): Promise<string> {
 // ---------------------------------------------------------------------------
 
 const routeMap = routes as unknown as RouteMap;
-const routeInfos = extractVisibleRoutes(routeMap);
+const routeInfos = extractAllRoutes(routeMap).filter(
+  (r) => !SKIP_ROUTES.has(r.name)
+);
 
 const generatedFiles: string[] = [];
 
