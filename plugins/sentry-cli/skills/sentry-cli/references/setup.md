@@ -19,12 +19,28 @@ Browse the Sentry API schema
 
 Send feedback about the CLI
 
+**Examples:**
+
+```bash
+# Send positive feedback
+sentry cli feedback i love this tool
+
+# Report an issue
+sentry cli feedback the issue view is confusing
+```
+
 ### `sentry cli fix`
 
 Diagnose and repair CLI database issues
 
 **Flags:**
 - `--dry-run - Show what would be fixed without making changes`
+
+**Examples:**
+
+```bash
+sentry cli fix
+```
 
 ### `sentry cli setup`
 
@@ -68,14 +84,6 @@ sentry cli upgrade nightly
 
 # Switch back to stable
 sentry cli upgrade stable
-
-# Send positive feedback
-sentry cli feedback i love this tool
-
-# Report an issue
-sentry cli feedback the issue view is confusing
-
-sentry cli fix
 ```
 
 ### `sentry init <target> <directory>`

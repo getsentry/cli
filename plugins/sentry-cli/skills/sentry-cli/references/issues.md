@@ -48,6 +48,28 @@ List issues in a project
 | `isUnhandled` | boolean | Whether the issue is unhandled |
 | `seerFixabilityScore` | number \| null | Seer AI fixability score (0-1) |
 
+**Examples:**
+
+```bash
+# List issues in a specific project
+sentry issue list my-org/frontend
+
+# All projects in an org
+sentry issue list my-org/
+
+# Search for a project across organizations
+sentry issue list frontend
+
+# Show only unresolved issues
+sentry issue list my-org/frontend --query "is:unresolved"
+
+# Show resolved issues
+sentry issue list my-org/frontend --query "is:resolved"
+
+# Sort by frequency
+sentry issue list my-org/frontend --sort freq --limit 20
+```
+
 ### `sentry issue explain <issue>`
 
 Analyze an issue's root cause using Seer AI
@@ -55,6 +77,25 @@ Analyze an issue's root cause using Seer AI
 **Flags:**
 - `--force - Force new analysis even if one exists`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+
+**Examples:**
+
+```bash
+# Analyze root cause (may take a few minutes for new issues)
+sentry issue explain 123456789
+
+# By short ID with org prefix
+sentry issue explain my-org/MYPROJECT-ABC
+
+# Force a fresh analysis
+sentry issue explain 123456789 --force
+
+# Generate a fix plan (requires explain to be run first)
+sentry issue plan 123456789
+
+# Specify which root cause to plan for
+sentry issue plan 123456789 --cause 0
+```
 
 ### `sentry issue plan <issue>`
 
@@ -77,43 +118,10 @@ View details of a specific issue
 **Examples:**
 
 ```bash
-# List issues in a specific project
-sentry issue list my-org/frontend
-
-# All projects in an org
-sentry issue list my-org/
-
-# Search for a project across organizations
-sentry issue list frontend
-
-# Show only unresolved issues
-sentry issue list my-org/frontend --query "is:unresolved"
-
-# Show resolved issues
-sentry issue list my-org/frontend --query "is:resolved"
-
-# Sort by frequency
-sentry issue list my-org/frontend --sort freq --limit 20
-
 sentry issue view FRONT-ABC
 
 # Open in browser
 sentry issue view FRONT-ABC -w
-
-# Analyze root cause (may take a few minutes for new issues)
-sentry issue explain 123456789
-
-# By short ID with org prefix
-sentry issue explain my-org/MYPROJECT-ABC
-
-# Force a fresh analysis
-sentry issue explain 123456789 --force
-
-# Generate a fix plan (requires explain to be run first)
-sentry issue plan 123456789
-
-# Specify which root cause to plan for
-sentry issue plan 123456789 --cause 0
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

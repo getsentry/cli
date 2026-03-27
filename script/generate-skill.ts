@@ -20,6 +20,8 @@
  */
 
 import { rmSync } from "node:fs";
+import type { Token } from "marked";
+import { marked } from "marked";
 import { routes } from "../src/app.js";
 import type {
   CommandInfo,
@@ -329,42 +331,10 @@ sentry auth status
 }
 
 /**
- * Regex to match command sections in docs (### `sentry ...`).
- * Captures the command path (e.g., "sentry issue list") while allowing
- * optional positional placeholders before the closing backtick
- * (e.g., `sentry issue list <org/project>`).
- *
- * Uses `[^\s<]+` instead of `\S+` so the capture stops at `<`
- * (the start of positional placeholders like `<org/project>`).
+ * Regex to extract the command path from a heading like `` `sentry issue list <org/project>` ``.
+ * Captures the words between `sentry` and the first `<` or closing backtick.
  */
-const COMMAND_SECTION_REGEX =
-  /###\s+`(sentry(?:\s+[^\s<]+){1,3})[^`]*`\s*\n([\s\S]*?)(?=###\s+`|$)/g;
-
-/**
- * Extract examples from `### \`sentry ...\`` command sections in markdown.
- * Returns a map of command path → code block contents.
- */
-function extractSectionExamples(docContent: string): Map<string, string[]> {
-  const examples = new Map<string, string[]>();
-  const commandPattern = new RegExp(
-    COMMAND_SECTION_REGEX.source,
-    COMMAND_SECTION_REGEX.flags
-  );
-  let match = commandPattern.exec(docContent);
-  while (match !== null) {
-    const commandPath = match[1];
-    const sectionContent = match[2];
-    const codeBlocks = extractCodeBlocks(sectionContent, "bash");
-    // Always register the command path so extractLooseExamples can
-    // match custom-section code blocks to specific subcommands.
-    examples.set(
-      commandPath,
-      codeBlocks.map((b) => b.code)
-    );
-    match = commandPattern.exec(docContent);
-  }
-  return examples;
-}
+const CMD_HEADING_RE = /^`sentry\s+(.*?)\s*(?:<[^>]*>.*)?`$/;
 
 /** Append a code block to a map entry, creating the array if needed */
 function appendExample(
@@ -378,56 +348,84 @@ function appendExample(
 }
 
 /**
- * Find the first command path that appears in a code block's content.
- * Returns undefined if no match is found.
+ * Collect all command paths from `### \`sentry ...\`` headings in a token list.
+ * Initializes each path with an empty array in the examples map.
  */
-function matchCommandPath(code: string, paths: string[]): string | undefined {
-  return paths.find((p) => code.includes(p));
-}
-
-/**
- * Scan all bash code blocks in a document and match them to commands
- * by looking for `sentry <group> <subcommand>` in the code content.
- *
- * Handles the case where examples live in a separate custom section
- * (below a GENERATED:END marker) rather than inline within command
- * reference headings.
- */
-function extractLooseExamples(
-  docContent: string,
-  commandGroup: string,
-  existing: Map<string, string[]>
-): void {
-  const commandPaths = Array.from(existing.keys());
-  const allBashBlocks = extractCodeBlocks(docContent, "bash");
-
-  if (commandPaths.length === 0) {
-    const prefix = `sentry ${commandGroup}`;
-    for (const block of allBashBlocks) {
-      if (block.code.includes(prefix)) {
-        appendExample(existing, prefix, block.code);
-      }
-    }
-    return;
-  }
-
-  const capturedCode = new Set(Array.from(existing.values()).flat());
-  for (const block of allBashBlocks) {
-    if (capturedCode.has(block.code)) {
+function collectCommandPaths(
+  tokens: Token[],
+  examples: Map<string, string[]>
+): string[] {
+  const paths: string[] = [];
+  for (const token of tokens) {
+    if (token.type !== "heading" || token.depth !== 3) {
       continue;
     }
-    const matched = matchCommandPath(block.code, commandPaths);
-    if (matched) {
-      appendExample(existing, matched, block.code);
+    const m = CMD_HEADING_RE.exec(token.text);
+    if (m) {
+      const cmdPath = `sentry ${m[1]}`;
+      paths.push(cmdPath);
+      if (!examples.has(cmdPath)) {
+        examples.set(cmdPath, []);
+      }
+    }
+  }
+  return paths;
+}
+
+/** Find the best command path match for a loose code block by content */
+function matchCodeToCommand(
+  code: string,
+  commandPaths: string[],
+  groupFallback: string
+): string | undefined {
+  return (
+    commandPaths.find((p) => code.includes(p)) ??
+    (code.includes(groupFallback) ? groupFallback : undefined)
+  );
+}
+
+/**
+ * Walk tokens sequentially and associate each bash code block with
+ * the appropriate command path — either by heading context or content matching.
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential token walk with type narrowing
+function associateCodeBlocks(
+  tokens: Token[],
+  commandPaths: string[],
+  commandGroup: string,
+  examples: Map<string, string[]>
+): void {
+  const groupFallback = `sentry ${commandGroup}`;
+  let currentCmd: string | null = null;
+
+  for (const token of tokens) {
+    if (token.type === "heading" && token.depth === 3) {
+      const m = CMD_HEADING_RE.exec(token.text);
+      currentCmd = m ? `sentry ${m[1]}` : null;
+    }
+    if (token.type !== "code" || token.lang !== "bash") {
+      continue;
+    }
+    const code = token.text.trim();
+    if (currentCmd && examples.has(currentCmd)) {
+      appendExample(examples, currentCmd, code);
+    } else {
+      const target = matchCodeToCommand(code, commandPaths, groupFallback);
+      if (target) {
+        appendExample(examples, target, code);
+      }
     }
   }
 }
 
 /**
- * Load examples for a specific command group from docs.
+ * Load examples for a specific command group from docs using the `marked`
+ * AST parser. Walks the token tree to find command headings and associate
+ * bash code blocks with each command.
  *
- * Uses two strategies: (1) extract bash blocks from `### \`sentry ...\``
- * sections, (2) scan loose bash blocks and match by command path in content.
+ * Handles both auto-generated reference sections (`### \`sentry ...\`` headings)
+ * and hand-written custom sections (`## Examples` with descriptive headings)
+ * by matching code blocks to commands via heading context or content analysis.
  */
 async function loadCommandExamples(
   commandGroup: string
@@ -436,8 +434,11 @@ async function loadCommandExamples(
   if (!docContent) {
     return new Map();
   }
-  const examples = extractSectionExamples(docContent);
-  extractLooseExamples(docContent, commandGroup, examples);
+
+  const tokens = marked.lexer(docContent);
+  const examples = new Map<string, string[]>();
+  const commandPaths = collectCommandPaths(tokens, examples);
+  associateCodeBlocks(tokens, commandPaths, commandGroup, examples);
   return examples;
 }
 

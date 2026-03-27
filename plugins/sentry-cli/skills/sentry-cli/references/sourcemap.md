@@ -19,14 +19,6 @@ Inject debug IDs into JavaScript files and sourcemaps
 - `--ext <value> - Comma-separated file extensions to process (default: .js,.cjs,.mjs)`
 - `--dry-run - Show what would be modified without writing`
 
-### `sentry sourcemap upload <directory>`
-
-Upload sourcemaps to Sentry
-
-**Flags:**
-- `--release <value> - Release version to associate with the upload`
-- `--url-prefix <value> - URL prefix for uploaded files (default: ~/) - (default: "~/")`
-
 **Examples:**
 
 ```bash
@@ -38,7 +30,19 @@ sentry sourcemap inject ./dist --dry-run
 
 # Only process specific extensions
 sentry sourcemap inject ./build --ext .js,.mjs
+```
 
+### `sentry sourcemap upload <directory>`
+
+Upload sourcemaps to Sentry
+
+**Flags:**
+- `--release <value> - Release version to associate with the upload`
+- `--url-prefix <value> - URL prefix for uploaded files (default: ~/) - (default: "~/")`
+
+**Examples:**
+
+```bash
 # Upload sourcemaps from dist/
 sentry sourcemap upload ./dist
 

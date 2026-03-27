@@ -21,6 +21,19 @@ List dashboards
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
+**Examples:**
+
+```bash
+# List all dashboards
+sentry dashboard list
+
+# Filter by name pattern
+sentry dashboard list "Backend*"
+
+# Open dashboard list in browser
+sentry dashboard list -w
+```
+
 ### `sentry dashboard view <org/project/dashboard...>`
 
 View a dashboard
@@ -31,9 +44,31 @@ View a dashboard
 - `-r, --refresh <value> - Auto-refresh interval in seconds (default: 60, min: 10)`
 - `-t, --period <value> - Time period override (e.g., "24h", "7d", "14d")`
 
+**Examples:**
+
+```bash
+# View by title
+sentry dashboard view 'Frontend Performance'
+
+# View by ID
+sentry dashboard view 12345
+
+# Auto-refresh every 30 seconds
+sentry dashboard view "Backend Performance" --refresh 30
+
+# Open in browser
+sentry dashboard view 12345 -w
+```
+
 ### `sentry dashboard create <org/project/title...>`
 
 Create a dashboard
+
+**Examples:**
+
+```bash
+sentry dashboard create 'Frontend Performance'
+```
 
 ### `sentry dashboard widget add <org/project/dashboard/title...>`
 
@@ -48,56 +83,9 @@ Add a widget to a dashboard
 - `-s, --sort <value> - Order by (prefix - for desc, e.g. -count)`
 - `-n, --limit <value> - Result limit`
 
-### `sentry dashboard widget edit <org/project/dashboard...>`
-
-Edit a widget in a dashboard
-
-**Flags:**
-- `-i, --index <value> - Widget index (0-based)`
-- `-t, --title <value> - Widget title to match`
-- `--new-title <value> - New widget title`
-- `-d, --display <value> - Display type (big_number, line, area, bar, table, stacked_area, top_n, text, categorical_bar, details, wheel, rage_and_dead_clicks, server_tree, agents_traces_table)`
-- `--dataset <value> - Widget dataset (default: spans)`
-- `-q, --query <value>... - Aggregate expression (e.g. count, p95:span.duration)`
-- `-w, --where <value> - Search conditions filter (e.g. is:unresolved)`
-- `-g, --group-by <value>... - Group-by column (repeatable)`
-- `-s, --sort <value> - Order by (prefix - for desc, e.g. -count)`
-- `-n, --limit <value> - Result limit`
-
-### `sentry dashboard widget delete <org/project/dashboard...>`
-
-Delete a widget from a dashboard
-
-**Flags:**
-- `-i, --index <value> - Widget index (0-based)`
-- `-t, --title <value> - Widget title to match`
-
 **Examples:**
 
 ```bash
-# List all dashboards
-sentry dashboard list
-
-# Filter by name pattern
-sentry dashboard list "Backend*"
-
-# Open dashboard list in browser
-sentry dashboard list -w
-
-# View by title
-sentry dashboard view 'Frontend Performance'
-
-# View by ID
-sentry dashboard view 12345
-
-# Auto-refresh every 30 seconds
-sentry dashboard view "Backend Performance" --refresh 30
-
-# Open in browser
-sentry dashboard view 12345 -w
-
-sentry dashboard create 'Frontend Performance'
-
 # Simple counter widget
 sentry dashboard widget add 'My Dashboard' "Error Count" \
   --display big_number --query count
@@ -118,7 +106,27 @@ sentry dashboard widget add 'My Dashboard' "Slow Requests" \
   --display bar --query p95:span.duration \
   --where "span.op:http.client" \
   --group-by span.description
+```
 
+### `sentry dashboard widget edit <org/project/dashboard...>`
+
+Edit a widget in a dashboard
+
+**Flags:**
+- `-i, --index <value> - Widget index (0-based)`
+- `-t, --title <value> - Widget title to match`
+- `--new-title <value> - New widget title`
+- `-d, --display <value> - Display type (big_number, line, area, bar, table, stacked_area, top_n, text, categorical_bar, details, wheel, rage_and_dead_clicks, server_tree, agents_traces_table)`
+- `--dataset <value> - Widget dataset (default: spans)`
+- `-q, --query <value>... - Aggregate expression (e.g. count, p95:span.duration)`
+- `-w, --where <value> - Search conditions filter (e.g. is:unresolved)`
+- `-g, --group-by <value>... - Group-by column (repeatable)`
+- `-s, --sort <value> - Order by (prefix - for desc, e.g. -count)`
+- `-n, --limit <value> - Result limit`
+
+**Examples:**
+
+```bash
 # Change display type
 sentry dashboard widget edit 12345 --title 'Error Count' --display bar
 
@@ -127,7 +135,19 @@ sentry dashboard widget edit 'My Dashboard' --index 0 --new-title 'Total Errors'
 
 # Change the query
 sentry dashboard widget edit 12345 --title 'Error Rate' --query p95:span.duration
+```
 
+### `sentry dashboard widget delete <org/project/dashboard...>`
+
+Delete a widget from a dashboard
+
+**Flags:**
+- `-i, --index <value> - Widget index (0-based)`
+- `-t, --title <value> - Widget title to match`
+
+**Examples:**
+
+```bash
 # Delete by title
 sentry dashboard widget delete 'My Dashboard' --title 'Error Count'
 
