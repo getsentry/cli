@@ -352,7 +352,7 @@ describe("statusCommand.func", () => {
   });
 
   describe("user info", () => {
-    test("shows user identity when available", async () => {
+    test("shows user identity when available for OAuth", async () => {
       getAuthConfigSpy.mockReturnValue({
         token: "sntrys_abc",
         source: "oauth",
@@ -368,6 +368,64 @@ describe("statusCommand.func", () => {
 
       expect(getOutput()).toContain("User");
       expect(getOutput()).toContain("Jane Doe");
+    });
+
+    test("skips cached user info for env var tokens", async () => {
+      getAuthConfigSpy.mockReturnValue({
+        token: "sntrys_env_token_123",
+        source: "env:SENTRY_AUTH_TOKEN",
+      });
+      isAuthenticatedSpy.mockReturnValue(true);
+      getUserInfoSpy.mockReturnValue({
+        userId: "12345",
+        name: "Stale User",
+        email: "stale@example.com",
+        username: "staleuser",
+      });
+
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
+
+      expect(getOutput()).not.toContain("Stale User");
+      expect(getOutput()).not.toContain("stale@example.com");
+    });
+
+    test("JSON user field is undefined for env var tokens even with cached user info", async () => {
+      getAuthConfigSpy.mockReturnValue({
+        token: "sntrys_env_token_123",
+        source: "env:SENTRY_AUTH_TOKEN",
+      });
+      isAuthenticatedSpy.mockReturnValue(true);
+      getUserInfoSpy.mockReturnValue({
+        userId: "12345",
+        name: "Stale User",
+        email: "stale@example.com",
+      });
+
+      const { context, getOutput } = createContext();
+      await func.call(context, jsonFlags);
+
+      const parsed = JSON.parse(getOutput());
+      expect(parsed.user).toBeUndefined();
+    });
+
+    test("does not skip cached user info for SENTRY_TOKEN env var either", async () => {
+      getAuthConfigSpy.mockReturnValue({
+        token: "sntrys_token_456",
+        source: "env:SENTRY_TOKEN",
+      });
+      isAuthenticatedSpy.mockReturnValue(true);
+      getUserInfoSpy.mockReturnValue({
+        userId: "99",
+        name: "Old User",
+        email: "old@example.com",
+      });
+
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
+
+      expect(getOutput()).not.toContain("Old User");
+      expect(getOutput()).not.toContain("old@example.com");
     });
   });
 
