@@ -485,6 +485,102 @@ describe("runWizard", () => {
       expect(payload.operation).toBe("list-dir");
     });
 
+    test("uses detail field for spinner message when present", async () => {
+      mockStartResult = {
+        status: "suspended",
+        suspended: [["install-deps"]],
+        steps: {
+          "install-deps": {
+            suspendPayload: {
+              type: "local-op",
+              operation: "run-commands",
+              detail: "npm install @sentry/nextjs @sentry/profiling-node",
+              cwd: "/app",
+              params: {
+                commands: ["npm install @sentry/nextjs @sentry/profiling-node"],
+              },
+            },
+          },
+        },
+      };
+      mockResumeResults = [{ status: "success" }];
+
+      await runWizard(makeOptions());
+
+      expect(spinnerMock.message).toHaveBeenCalledWith(
+        "npm install @sentry/nextjs @sentry/profiling-node"
+      );
+    });
+
+    test("falls back to generic message when detail is absent", async () => {
+      mockStartResult = {
+        status: "suspended",
+        suspended: [["install-deps"]],
+        steps: {
+          "install-deps": {
+            suspendPayload: {
+              type: "local-op",
+              operation: "run-commands",
+              cwd: "/app",
+              params: { commands: ["npm install @sentry/nextjs"] },
+            },
+          },
+        },
+      };
+      mockResumeResults = [{ status: "success" }];
+
+      await runWizard(makeOptions());
+
+      expect(spinnerMock.message).toHaveBeenCalledWith(
+        "Installing dependencies (run-commands)..."
+      );
+    });
+
+    test("truncates detail message when terminal is narrow", async () => {
+      const origColumns = process.stdout.columns;
+      Object.defineProperty(process.stdout, "columns", {
+        value: 40,
+        configurable: true,
+      });
+
+      const longDetail =
+        "npm install @sentry/nextjs @sentry/profiling-node @sentry/browser";
+      mockStartResult = {
+        status: "suspended",
+        suspended: [["install-deps"]],
+        steps: {
+          "install-deps": {
+            suspendPayload: {
+              type: "local-op",
+              operation: "run-commands",
+              detail: longDetail,
+              cwd: "/app",
+              params: { commands: [longDetail] },
+            },
+          },
+        },
+      };
+      mockResumeResults = [{ status: "success" }];
+
+      try {
+        await runWizard(makeOptions());
+
+        // 40 columns - 4 reserved = 36 max, truncated with "…"
+        const call = spinnerMock.message.mock.calls.find((c: string[]) =>
+          c[0]?.includes("npm install")
+        ) as string[] | undefined;
+        expect(call).toBeDefined();
+        const msg = call?.[0] ?? "";
+        expect(msg.length).toBeLessThanOrEqual(36);
+        expect(msg.endsWith("…")).toBe(true);
+      } finally {
+        Object.defineProperty(process.stdout, "columns", {
+          value: origColumns,
+          configurable: true,
+        });
+      }
+    });
+
     test("dispatches interactive payload to handleInteractive", async () => {
       mockStartResult = {
         status: "suspended",
