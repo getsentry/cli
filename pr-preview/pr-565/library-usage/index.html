@@ -232,7 +232,25 @@ omitted, it falls back to environment variables and stored credentials:</p>
 
 
 
-<table><thead><tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">token</code></td><td><code dir="auto">string</code></td><td>Auto-detected</td><td>Auth token for this invocation</td></tr><tr><td><code dir="auto">text</code></td><td><code dir="auto">boolean</code></td><td><code dir="auto">false</code></td><td>Return human-readable text instead of parsed JSON (<code dir="auto">run()</code> only)</td></tr><tr><td><code dir="auto">cwd</code></td><td><code dir="auto">string</code></td><td><code dir="auto">process.cwd()</code></td><td>Working directory for DSN auto-detection</td></tr></tbody></table>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">token</code></td><td><code dir="auto">string</code></td><td>Auto-detected</td><td>Auth token for this invocation</td></tr><tr><td><code dir="auto">url</code></td><td><code dir="auto">string</code></td><td><code dir="auto">sentry.io</code></td><td>Sentry instance URL for self-hosted</td></tr><tr><td><code dir="auto">org</code></td><td><code dir="auto">string</code></td><td>Auto-detected</td><td>Default organization slug</td></tr><tr><td><code dir="auto">project</code></td><td><code dir="auto">string</code></td><td>Auto-detected</td><td>Default project slug</td></tr><tr><td><code dir="auto">text</code></td><td><code dir="auto">boolean</code></td><td><code dir="auto">false</code></td><td>Return human-readable text instead of parsed JSON (<code dir="auto">run()</code> only)</td></tr><tr><td><code dir="auto">cwd</code></td><td><code dir="auto">string</code></td><td><code dir="auto">process.cwd()</code></td><td>Working directory for DSN auto-detection</td></tr></tbody></table>
 <h2 id="return-values">Return Values</h2>
 <p>Typed SDK methods return <strong>parsed JavaScript objects</strong> with zero serialization
 overhead (via zero-copy capture). The <code dir="auto">run()</code> escape hatch returns parsed JSON
