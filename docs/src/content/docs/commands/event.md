@@ -32,11 +32,11 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 ## Examples
 
 ```bash
-sentry event view abc123def456
+sentry event view abc123def456abc123def456abc12345
 ```
 
 ```
-Event: abc123def456
+Event: abc123def456abc123def456abc12345
 Issue: FRONT-ABC
 Timestamp: 2024-01-20 14:22:00
 
@@ -59,7 +59,7 @@ Context:
 
 ```bash
 # Open in browser
-sentry event view abc123def456 -w
+sentry event view abc123def456abc123def456abc12345 -w
 ```
 
 ## Finding Event IDs

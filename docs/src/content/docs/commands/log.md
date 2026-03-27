@@ -140,7 +140,7 @@ sentry log view 968c763c740cfda8b6728f27fb9e9b01 -w
 
 Log IDs can be found:
 
-1. In the output of `sentry log list` (shown as trace IDs in brackets)
+1. In the output of `sentry log list` (the ID column)
 2. In the Sentry UI when viewing log entries
 3. In the `sentry.item_id` field of JSON output
 
@@ -149,7 +149,7 @@ Log IDs can be found:
 Use `--json` for machine-readable output:
 
 ```bash
-sentry log list --json | jq '.[] | select(.level == "error")'
+sentry log list --json | jq '.data[] | select(.severity == "error")'
 ```
 
 In streaming mode with `--json`, each log entry is output as a separate JSON object (newline-delimited JSON), making it suitable for piping to other tools.

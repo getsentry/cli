@@ -60,7 +60,7 @@ sentry init acme/my-app
 sentry init acme/ --team backend
 
 # Enable specific features
-sentry init --features profiling,replays
+sentry init --features profiling,replay
 ```
 
 ## Target Syntax
