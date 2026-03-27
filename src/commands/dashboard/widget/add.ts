@@ -20,6 +20,7 @@ import {
 } from "../../../types/dashboard.js";
 import {
   buildWidgetFromFlags,
+  enrichDashboardError,
   parseDashboardPositionalArgs,
   resolveDashboardId,
   resolveOrgFromTarget,
@@ -187,12 +188,25 @@ export const addCommand = buildCommand({
     });
 
     // GET current dashboard → append widget with auto-layout → PUT
-    const current = await getDashboard(orgSlug, dashboardId);
+    const current = await getDashboard(orgSlug, dashboardId).catch(
+      (error: unknown) =>
+        enrichDashboardError(error, { orgSlug, dashboardId, operation: "view" })
+    );
     const updateBody = prepareDashboardForUpdate(current);
     newWidget = assignDefaultLayout(newWidget, updateBody.widgets);
     updateBody.widgets.push(newWidget);
 
-    const updated = await updateDashboard(orgSlug, dashboardId, updateBody);
+    const updated = await updateDashboard(
+      orgSlug,
+      dashboardId,
+      updateBody
+    ).catch((error: unknown) =>
+      enrichDashboardError(error, {
+        orgSlug,
+        dashboardId,
+        operation: "update",
+      })
+    );
     const url = buildDashboardUrl(orgSlug, dashboardId);
 
     yield new CommandOutput({

@@ -17,6 +17,7 @@ import {
   prepareDashboardForUpdate,
 } from "../../../types/dashboard.js";
 import {
+  enrichDashboardError,
   parseDashboardPositionalArgs,
   resolveDashboardId,
   resolveOrgFromTarget,
@@ -95,7 +96,10 @@ export const deleteCommand = buildCommand({
     const dashboardId = await resolveDashboardId(orgSlug, dashboardRef);
 
     // GET current dashboard → find widget → splice → PUT
-    const current = await getDashboard(orgSlug, dashboardId);
+    const current = await getDashboard(orgSlug, dashboardId).catch(
+      (error: unknown) =>
+        enrichDashboardError(error, { orgSlug, dashboardId, operation: "view" })
+    );
     const widgets = current.widgets ?? [];
 
     const widgetIndex = resolveWidgetIndex(widgets, flags.index, flags.title);
@@ -104,7 +108,17 @@ export const deleteCommand = buildCommand({
     const updateBody = prepareDashboardForUpdate(current);
     updateBody.widgets.splice(widgetIndex, 1);
 
-    const updated = await updateDashboard(orgSlug, dashboardId, updateBody);
+    const updated = await updateDashboard(
+      orgSlug,
+      dashboardId,
+      updateBody
+    ).catch((error: unknown) =>
+      enrichDashboardError(error, {
+        orgSlug,
+        dashboardId,
+        operation: "update",
+      })
+    );
     const url = buildDashboardUrl(orgSlug, dashboardId);
 
     yield new CommandOutput({

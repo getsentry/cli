@@ -7,6 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
+  enrichDashboardError,
   parseDashboardListArgs,
   parseDashboardPositionalArgs,
   resolveDashboardId,
@@ -15,7 +16,12 @@ import {
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { parseOrgProjectArg } from "../../../src/lib/arg-parsing.js";
-import { ContextError, ValidationError } from "../../../src/lib/errors.js";
+import {
+  ApiError,
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 
@@ -354,5 +360,151 @@ describe("resolveOrgFromTarget", () => {
     await expect(
       resolveOrgFromTarget(parsed, "/tmp", "sentry dashboard view")
     ).rejects.toThrow(ContextError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// enrichDashboardError
+// ---------------------------------------------------------------------------
+
+describe("enrichDashboardError", () => {
+  test("re-throws non-ApiError unchanged", () => {
+    const original = new Error("network failure");
+    expect(() =>
+      enrichDashboardError(original, { orgSlug: "my-org", operation: "list" })
+    ).toThrow(original);
+  });
+
+  test("re-throws ApiError with unhandled status unchanged", () => {
+    const original = new ApiError("rate limited", 429, "Too many requests");
+    expect(() =>
+      enrichDashboardError(original, { orgSlug: "my-org", operation: "list" })
+    ).toThrow(ApiError);
+    try {
+      enrichDashboardError(original, { orgSlug: "my-org", operation: "list" });
+    } catch (error) {
+      expect(error).toBe(original);
+    }
+  });
+
+  // -- 404 errors --
+
+  test("404 on list throws ResolutionError mentioning org", () => {
+    const apiErr = new ApiError("Not Found", 404);
+    try {
+      enrichDashboardError(apiErr, { orgSlug: "my-org", operation: "list" });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      expect(msg).toContain("'my-org'");
+      expect(msg).toContain("not found");
+      expect(msg).toContain("sentry dashboard list");
+      expect(msg).toContain("sentry org list");
+    }
+  });
+
+  test("404 on view with dashboardId throws ResolutionError for dashboard", () => {
+    const apiErr = new ApiError("Not Found", 404);
+    try {
+      enrichDashboardError(apiErr, {
+        orgSlug: "my-org",
+        dashboardId: "12345",
+        operation: "view",
+      });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      expect(msg).toContain("Dashboard 12345");
+      expect(msg).toContain("'my-org'");
+      expect(msg).toContain("not found");
+      expect(msg).toContain("sentry dashboard list");
+    }
+  });
+
+  test("404 on create without dashboardId throws ResolutionError for org", () => {
+    const apiErr = new ApiError("Not Found", 404);
+    try {
+      enrichDashboardError(apiErr, { orgSlug: "bad-org", operation: "create" });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      expect(msg).toContain("'bad-org'");
+      expect(msg).toContain("not found");
+    }
+  });
+
+  // -- 403 errors --
+
+  test("403 with dashboardId throws ResolutionError for dashboard access", () => {
+    const apiErr = new ApiError("Forbidden", 403, "No permission");
+    try {
+      enrichDashboardError(apiErr, {
+        orgSlug: "my-org",
+        dashboardId: "99",
+        operation: "view",
+      });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      expect(msg).toContain("Dashboard 99");
+      expect(msg).toContain("access denied");
+      expect(msg).toContain("No permission");
+    }
+  });
+
+  test("403 without dashboardId throws ResolutionError for org dashboards", () => {
+    const apiErr = new ApiError("Forbidden", 403);
+    try {
+      enrichDashboardError(apiErr, { orgSlug: "my-org", operation: "list" });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      expect(msg).toContain("Dashboards in 'my-org'");
+      expect(msg).toContain("access denied");
+    }
+  });
+
+  test("403 includes default detail when API provides none", () => {
+    const apiErr = new ApiError("Forbidden", 403);
+    try {
+      enrichDashboardError(apiErr, { orgSlug: "my-org", operation: "list" });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      expect(msg).toContain("You do not have permission.");
+    }
+  });
+
+  // -- 400 errors --
+
+  test("400 on update throws enriched ApiError with dashboard context", () => {
+    const apiErr = new ApiError("Bad Request", 400, "Invalid widget config");
+    try {
+      enrichDashboardError(apiErr, {
+        orgSlug: "my-org",
+        dashboardId: "42",
+        operation: "update",
+      });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      const msg = (error as ApiError).message;
+      expect(msg).toContain("Dashboard update failed");
+      expect(msg).toContain("'my-org'");
+      expect((error as ApiError).detail).toContain("Invalid widget config");
+    }
+  });
+
+  test("400 on non-update operation re-throws unchanged", () => {
+    const apiErr = new ApiError("Bad Request", 400, "some detail");
+    expect(() =>
+      enrichDashboardError(apiErr, { orgSlug: "my-org", operation: "list" })
+    ).toThrow(apiErr);
   });
 });

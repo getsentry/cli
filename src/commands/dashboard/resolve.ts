@@ -11,7 +11,12 @@ import {
   listDashboardsPaginated,
 } from "../../lib/api-client.js";
 import type { parseOrgProjectArg } from "../../lib/arg-parsing.js";
-import { ContextError, ValidationError } from "../../lib/errors.js";
+import {
+  ApiError,
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "../../lib/errors.js";
 import { fuzzyMatch } from "../../lib/fuzzy.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
@@ -232,7 +237,9 @@ export async function resolveDashboardId(
     const { data, nextCursor } = await listDashboardsPaginated(orgSlug, {
       perPage: API_MAX_PER_PAGE,
       cursor,
-    });
+    }).catch((error: unknown) =>
+      enrichDashboardError(error, { orgSlug, operation: "list" })
+    );
     // Match by ID/slug first (e.g. "default-overview"), then fall back to title
     const match =
       data.find((d) => d.id.toLowerCase() === lowerRef) ??
@@ -356,6 +363,115 @@ export function buildWidgetFromFlags(opts: {
     ...(opts.limit !== undefined && { limit: opts.limit }),
   };
   return prepareWidgetQueries(parseWidgetInput(raw));
+}
+
+/** Context for enriching dashboard API errors with actionable messages */
+export type DashboardErrorContext = {
+  /** Organization slug (when known) */
+  orgSlug?: string;
+  /** Dashboard ID (when known) */
+  dashboardId?: string;
+  /** The operation being performed, for error messages */
+  operation: "list" | "view" | "create" | "update";
+};
+
+/** Build an enriched error for a 404 response on a dashboard API call */
+function build404Error(ctx: DashboardErrorContext, org: string): never {
+  if (ctx.operation === "list") {
+    throw new ResolutionError(
+      `Organization ${org}`,
+      "not found or has no dashboards",
+      "sentry dashboard list <org>/",
+      [
+        "Verify the organization slug with: sentry org list",
+        "Check that you have access to the organization",
+      ]
+    );
+  }
+  const listHint = `sentry dashboard list ${ctx.orgSlug ?? "<org>"}/`;
+  if (ctx.dashboardId) {
+    throw new ResolutionError(
+      `Dashboard ${ctx.dashboardId} in ${org}`,
+      "not found",
+      listHint,
+      [
+        "The dashboard may have been deleted",
+        "Check the dashboard ID or title with: sentry dashboard list",
+      ]
+    );
+  }
+  // Generic 404 for create or other operations
+  throw new ResolutionError(
+    `Organization ${org}`,
+    "not found",
+    "sentry org list",
+    ["Verify the organization slug and your access"]
+  );
+}
+
+/** Build an enriched error for a 403 response on a dashboard API call */
+function build403Error(
+  ctx: DashboardErrorContext,
+  org: string,
+  detail: string | undefined
+): never {
+  const message = detail ?? "You do not have permission.";
+  if (ctx.dashboardId) {
+    throw new ResolutionError(
+      `Dashboard ${ctx.dashboardId} in ${org}`,
+      "access denied",
+      `sentry dashboard list ${ctx.orgSlug ?? "<org>"}/`,
+      [message, "Check your organization membership and role"]
+    );
+  }
+  throw new ResolutionError(
+    `Dashboards in ${org}`,
+    "access denied",
+    "sentry org list",
+    [message, "Check your organization membership and role"]
+  );
+}
+
+/**
+ * Enrich an API error from a dashboard command with actionable suggestions.
+ *
+ * Catches 404, 403, and 400 errors and converts them to `ResolutionError`
+ * or enriched `ApiError` instances with hints about what to try next.
+ * Re-throws non-`ApiError` and unhandled statuses unchanged.
+ *
+ * @param error - The caught error
+ * @param ctx - Context about the operation for building error messages
+ */
+export function enrichDashboardError(
+  error: unknown,
+  ctx: DashboardErrorContext
+): never {
+  if (!(error instanceof ApiError)) {
+    throw error;
+  }
+
+  const org = ctx.orgSlug ? `'${ctx.orgSlug}'` : "this organization";
+
+  if (error.status === 404) {
+    build404Error(ctx, org);
+  }
+
+  if (error.status === 403) {
+    build403Error(ctx, org, error.detail);
+  }
+
+  // 400 on update — likely invalid widget config; preserve API detail
+  if (error.status === 400 && ctx.operation === "update") {
+    throw new ApiError(
+      `Dashboard update failed in ${org}`,
+      error.status,
+      error.detail ??
+        "The API rejected the request. Check widget configuration.",
+      error.endpoint
+    );
+  }
+
+  throw error;
 }
 
 /**
