@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-setup
-version: 0.20.0
+version: 0.21.0
 description: Configure the CLI, install integrations, and manage upgrades
 requires:
   bins: ["sentry"]
@@ -19,12 +19,28 @@ Browse the Sentry API schema
 
 Send feedback about the CLI
 
+**Examples:**
+
+```bash
+# Send positive feedback
+sentry cli feedback i love this tool
+
+# Report an issue
+sentry cli feedback the issue view is confusing
+```
+
 ### `sentry cli fix`
 
 Diagnose and repair CLI database issues
 
 **Flags:**
 - `--dry-run - Show what would be fixed without making changes`
+
+**Examples:**
+
+```bash
+sentry cli fix
+```
 
 ### `sentry cli setup`
 
@@ -49,6 +65,27 @@ Update the Sentry CLI to the latest version
 - `--offline - Upgrade using only cached version info and patches (no network)`
 - `--method <value> - Installation method to use (curl, brew, npm, pnpm, bun, yarn)`
 
+**Examples:**
+
+```bash
+sentry cli upgrade --check
+
+# Upgrade to latest stable
+sentry cli upgrade
+
+# Upgrade to a specific version
+sentry cli upgrade 0.5.0
+
+# Force re-download
+sentry cli upgrade --force
+
+# Switch to nightly builds
+sentry cli upgrade nightly
+
+# Switch back to stable
+sentry cli upgrade stable
+```
+
 ### `sentry init <target> <directory>`
 
 Initialize Sentry in your project (experimental)
@@ -59,6 +96,34 @@ Initialize Sentry in your project (experimental)
 - `--features <value>... - Features to enable: errors,tracing,logs,replay,metrics,profiling,sourcemaps,crons,ai-monitoring,user-feedback`
 - `-t, --team <value> - Team slug to create the project under`
 
+**Examples:**
+
+```bash
+# Interactive setup
+sentry init
+
+# Non-interactive with auto-yes
+sentry init -y
+
+# Dry run to preview changes
+sentry init --dry-run
+
+# Target a subdirectory
+sentry init ./my-app
+
+# Use a specific org (auto-detect project)
+sentry init acme/
+
+# Use a specific org and project
+sentry init acme/my-app
+
+# Assign a team when creating a new project
+sentry init acme/ --team backend
+
+# Enable specific features
+sentry init --features profiling,replay
+```
+
 ### `sentry schema <resource...>`
 
 Browse the Sentry API schema
@@ -66,5 +131,24 @@ Browse the Sentry API schema
 **Flags:**
 - `--all - Show all endpoints in a flat list`
 - `-q, --search <value> - Search endpoints by keyword`
+
+**Examples:**
+
+```bash
+# List all API resources
+sentry schema
+
+# Browse issue endpoints
+sentry schema issues
+
+# View details for a specific operation
+sentry schema issues list
+
+# Search for monitoring-related endpoints
+sentry schema --search monitor
+
+# Flat list of every endpoint
+sentry schema --all
+```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

@@ -1,6 +1,6 @@
 ---
 name: sentry-cli
-version: 0.20.0
+version: 0.21.0
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 requires:
   bins: ["sentry"]
@@ -32,7 +32,7 @@ The `sentry` CLI follows conventions from well-known tools — if you're familia
 
 ### Context Window Tips
 
-- Use `--fields id,title,status` on list commands to reduce output size
+- Use `--json --fields` to select specific fields and reduce output size. Run `<command> --help` to see available fields. Example: `sentry issue list --json --fields shortId,title,count,userCount,lastSeen`
 - Use `--json` when piping output between commands or processing programmatically
 - Use `--limit` to cap the number of results (default is usually 10–100)
 - Prefer `sentry issue view PROJECT-123` over listing and filtering manually
@@ -168,6 +168,7 @@ sentry dashboard widget add <dashboard> "Top Endpoints" --display table \
 - **Confusing `--query` syntax**: The `--query` flag uses Sentry search syntax (e.g., `is:unresolved`, `assigned:me`), not free text search.
 - **Not using `--web`**: View commands support `-w`/`--web` to open the resource in the browser — useful for sharing links.
 - **Fetching API schemas instead of using the CLI**: Prefer `sentry schema` to browse the API and `sentry api` to make requests — the CLI handles authentication and endpoint resolution, so there's rarely a need to download OpenAPI specs separately.
+- **Using `sentry api` when CLI commands suffice**: `sentry issue list --json` already includes `count`, `userCount`, `firstSeen`, `lastSeen`, `priority`, and other fields at the top level. Use `--fields` to select specific fields. Run `--help` to see all available fields. Only fall back to `sentry api` for data the CLI doesn't expose.
 
 ## Prerequisites
 
@@ -242,7 +243,7 @@ Manage Sentry issues
 
 View Sentry events
 
-- `sentry event view <args...>` — View details of a specific event
+- `sentry event view <org/project/event-id...>` — View details of a specific event
 
 → Full flags and examples: `references/events.md`
 
@@ -269,12 +270,12 @@ CLI-related commands
 
 Manage Sentry dashboards
 
-- `sentry dashboard list <org/project>` — List dashboards
-- `sentry dashboard view <args...>` — View a dashboard
-- `sentry dashboard create <args...>` — Create a dashboard
-- `sentry dashboard widget add <args...>` — Add a widget to a dashboard
-- `sentry dashboard widget edit <args...>` — Edit a widget in a dashboard
-- `sentry dashboard widget delete <args...>` — Delete a widget from a dashboard
+- `sentry dashboard list <org/title-filter...>` — List dashboards
+- `sentry dashboard view <org/project/dashboard...>` — View a dashboard
+- `sentry dashboard create <org/project/title...>` — Create a dashboard
+- `sentry dashboard widget add <org/project/dashboard/title...>` — Add a widget to a dashboard
+- `sentry dashboard widget edit <org/project/dashboard...>` — Edit a widget in a dashboard
+- `sentry dashboard widget delete <org/project/dashboard...>` — Delete a widget from a dashboard
 
 → Full flags and examples: `references/dashboards.md`
 
@@ -299,9 +300,18 @@ Work with Sentry teams
 View Sentry logs
 
 - `sentry log list <org/project-or-trace-id...>` — List logs from a project
-- `sentry log view <args...>` — View details of one or more log entries
+- `sentry log view <org/project/log-id...>` — View details of one or more log entries
 
 → Full flags and examples: `references/logs.md`
+
+### Sourcemap
+
+Manage sourcemaps
+
+- `sentry sourcemap inject <directory>` — Inject debug IDs into JavaScript files and sourcemaps
+- `sentry sourcemap upload <directory>` — Upload sourcemaps to Sentry
+
+→ Full flags and examples: `references/sourcemap.md`
 
 ### Span
 
