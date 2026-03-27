@@ -24,6 +24,7 @@ import {
   validateAggregateNames,
 } from "../../../types/dashboard.js";
 import {
+  enrichDashboardError,
   parseDashboardPositionalArgs,
   resolveDashboardId,
   resolveOrgFromTarget,
@@ -246,7 +247,10 @@ export const editCommand = buildCommand({
     const dashboardId = await resolveDashboardId(orgSlug, dashboardRef);
 
     // GET current dashboard → find widget → merge changes → PUT
-    const current = await getDashboard(orgSlug, dashboardId);
+    const current = await getDashboard(orgSlug, dashboardId).catch(
+      (error: unknown) =>
+        enrichDashboardError(error, { orgSlug, dashboardId, operation: "view" })
+    );
     const widgets = current.widgets ?? [];
     const widgetIndex = resolveWidgetIndex(widgets, flags.index, flags.title);
 
@@ -255,7 +259,17 @@ export const editCommand = buildCommand({
     const replacement = buildReplacement(flags, existing);
     updateBody.widgets[widgetIndex] = replacement;
 
-    const updated = await updateDashboard(orgSlug, dashboardId, updateBody);
+    const updated = await updateDashboard(
+      orgSlug,
+      dashboardId,
+      updateBody
+    ).catch((error: unknown) =>
+      enrichDashboardError(error, {
+        orgSlug,
+        dashboardId,
+        operation: "update",
+      })
+    );
     const url = buildDashboardUrl(orgSlug, dashboardId);
 
     yield new CommandOutput({

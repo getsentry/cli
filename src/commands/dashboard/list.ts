@@ -36,7 +36,11 @@ import {
 } from "../../lib/sentry-urls.js";
 import type { DashboardListItem } from "../../types/dashboard.js";
 import type { Writer } from "../../types/index.js";
-import { parseDashboardListArgs, resolveOrgFromTarget } from "./resolve.js";
+import {
+  enrichDashboardError,
+  parseDashboardListArgs,
+  resolveOrgFromTarget,
+} from "./resolve.js";
 
 /** Command key for pagination cursor storage */
 export const PAGINATION_KEY = "dashboard-list";
@@ -456,6 +460,8 @@ export const listCommand = buildListCommand("dashboard", {
           afterId,
           glob,
         })
+    ).catch((error: unknown) =>
+      enrichDashboardError(error, { orgSlug, operation: "list" })
     );
 
     // Advance the pagination cursor stack
