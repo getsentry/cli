@@ -1,0 +1,131 @@
+# Fix: Dashboard list/view fail with numeric org ID from DSN (#447)
+
+## Problem
+`sentry dashboard list` and `sentry dashboard view` fail with 404/403 when org is auto-detected from DSN, because `resolveOrgFromDsn()` returns a bare numeric org ID (e.g., `"1169445"`) when the project cache is cold. The dashboard API rejects numeric IDs.
+
+## Root Cause
+- `resolveOrgFromDsn()` (`src/lib/resolve-target.ts:225-251`) checks the project cache for a slug, but falls back to the raw numeric org ID from the DSN host when the cache is cold.
+- `resolveOrg()` (`src/lib/resolve-target.ts:992-1027`) passes this through unchanged.
+- Dashboard `list`/`view` call `resolveOrgFromTarget` → `resolveOrg` → `resolveOrgFromDsn`, receiving the numeric ID.
+- Dashboard `create` uses `resolveAllTargets` which does a full project API lookup, getting the correct slug.
+
+## Key Constraint
+`resolveEffectiveOrg()` in `region.ts` does NOT handle bare numeric IDs — it only handles `o`-prefixed DSN forms (e.g., `o1081365`). The DSN parser strips the `o` prefix, so `resolveOrgFromDsn` returns bare `"1169445"`, not `"o1169445"`.
+
+## Fix: Normalize numeric org IDs in `resolveOrg`
+
+Fix `resolveOrg()` in `src/lib/resolve-target.ts` to detect and resolve bare numeric org IDs returned by the DSN fallback path. This fixes ALL `resolveOrg` consumers (dashboards, traces, events, issues, etc.).
+
+### Changes
+
+#### 1. `src/lib/resolve-target.ts` — Add `normalizeNumericOrg` helper + update `resolveOrg`
+
+Add a private helper function that mirrors the pattern in `local-ops.ts:678-694`:
+
+```typescript
+/**
+ * Normalize a bare numeric org ID to an org slug.
+ *
+ * When the project cache is cold, resolveOrgFromDsn returns the raw numeric
+ * org ID from the DSN host (e.g., "1169445"). Many API endpoints reject
+ * numeric IDs. This resolves them:
+ * 1. Local DB cache lookup (getOrgByNumericId — fast, no API call)
+ * 2. API call via resolveOrgRegion (single request, caches result)
+ * 3. Falls back to original ID if resolution fails
+ */
+async function normalizeNumericOrg(orgId: string): Promise<string> {
+  if (!isAllDigits(orgId)) {
+    return orgId;
+  }
+
+  // Fast path: check local DB cache for numeric ID → slug mapping
+  const cached = getOrgByNumericId(orgId);
+  if (cached) {
+    return cached.slug;
+  }
+
+  // Slow path: fetch org list to populate numeric ID → slug mapping.
+  // resolveEffectiveOrg doesn't handle bare numeric IDs (only o-prefixed),
+  // so we do a targeted refresh via listOrganizationsUncached().
+  try {
+    const { listOrganizationsUncached } = await import("./api-client.js");
+    await listOrganizationsUncached();
+  } catch {
+    return orgId;
+  }
+
+  // Retry cache after refresh
+  const afterRefresh = getOrgByNumericId(orgId);
+  return afterRefresh?.slug ?? orgId;
+}
+```
+
+Update `resolveOrg` step 4 (DSN auto-detection):
+
+```typescript
+// 4. DSN auto-detection
+try {
+  const result = await resolveOrgFromDsn(cwd);
+  if (result) {
+    const org = await normalizeNumericOrg(result.org);
+    setOrgProjectContext([org], []);
+    return { org, detectedFrom: result.detectedFrom };
+  }
+  return result;
+} catch {
+  return null;
+}
+```
+
+New import needed:
+```typescript
+import { getOrgByNumericId } from "./db/regions.js";
+```
+
+(`isAllDigits` is already imported at line 54.)
+
+#### 2. `src/commands/dashboard/resolve.ts` — Normalize explicit/org-all org
+
+The `explicit`/`org-all` cases pass through `parsed.org` directly. When a user passes a DSN-extracted org via arg (e.g., `sentry dashboard list 1169445/`), this also breaks. Apply `resolveEffectiveOrg` here (matching the pattern in `resolveOrgProjectTarget` at `resolve-target.ts:1201`):
+
+```typescript
+case "explicit":
+case "org-all": {
+  const org = await resolveEffectiveOrg(parsed.org);
+  setOrgProjectContext([org], []);
+  return org;
+}
+```
+
+New import: `import { resolveEffectiveOrg } from "../../lib/region.js";`
+
+Note: `resolveEffectiveOrg` handles `o`-prefixed IDs (from user input like `o1169445/`). Bare numeric IDs from user input (like `1169445/`) go through the "normal slug" path in `resolveEffectiveOrg` which does `resolveOrgRegion("1169445")` — the Sentry API accepts `organization_id_or_slug`, so this works.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/lib/resolve-target.ts` | Add `normalizeNumericOrg()`, update `resolveOrg()` DSN path, add `getOrgByNumericId` import |
+| `src/commands/dashboard/resolve.ts` | Normalize explicit/org-all org via `resolveEffectiveOrg` |
+
+### Test Strategy
+
+1. **Unit test in `test/lib/resolve-target.test.ts`**: Test `resolveOrg` with mocked `resolveOrgFromDsn` returning numeric ID:
+   - Cache hit: `getOrgByNumericId` returns slug → `resolveOrg` returns slug
+   - Cache miss + API success: `listOrganizationsUncached` populates cache → `resolveOrg` returns slug
+   - Cache miss + API failure: `resolveOrg` returns numeric ID (graceful degradation)
+   - Non-numeric org: returned unchanged (no normalization)
+
+2. **Unit test in `test/commands/dashboard/resolve.test.ts`**: Test `resolveOrgFromTarget` with explicit numeric org, verify `resolveEffectiveOrg` is called.
+
+3. **Run existing test suites**: `bun test test/lib/resolve-target.test.ts test/commands/dashboard/`
+
+### Verification
+
+```bash
+bun run typecheck
+bun run lint
+bun test test/lib/resolve-target.test.ts
+bun test test/commands/dashboard/
+bun run test:unit
+```
