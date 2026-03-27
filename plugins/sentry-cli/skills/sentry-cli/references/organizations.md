@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-organizations
-version: 0.22.0-dev.0
+version: 0.22.0
 description: List and view Sentry organizations
 requires:
   bins: ["sentry"]
