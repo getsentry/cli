@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-dashboards
-version: 0.21.0
+version: 0.22.0
 description: List, view, and create Sentry dashboards
 requires:
   bins: ["sentry"]
@@ -82,6 +82,10 @@ Add a widget to a dashboard
 - `-g, --group-by <value>... - Group-by column (repeatable)`
 - `-s, --sort <value> - Order by (prefix - for desc, e.g. -count)`
 - `-n, --limit <value> - Result limit`
+- `--x <value> - Grid column position (0-based, 0–5)`
+- `--y <value> - Grid row position (0-based)`
+- `--width <value> - Widget width in grid columns (1–6)`
+- `--height <value> - Widget height in grid rows (min 1)`
 
 **Examples:**
 
@@ -123,6 +127,10 @@ Edit a widget in a dashboard
 - `-g, --group-by <value>... - Group-by column (repeatable)`
 - `-s, --sort <value> - Order by (prefix - for desc, e.g. -count)`
 - `-n, --limit <value> - Result limit`
+- `--x <value> - Grid column position (0-based, 0–5)`
+- `--y <value> - Grid row position (0-based)`
+- `--width <value> - Widget width in grid columns (1–6)`
+- `--height <value> - Widget height in grid rows (min 1)`
 
 **Examples:**
 
