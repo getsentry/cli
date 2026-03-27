@@ -1,0 +1,242 @@
+# Plan: Show Changelog Summary During CLI Upgrade (#421)
+
+## Summary
+
+Add inline changelog summaries to `sentry cli upgrade` output. When upgrading from version A to B, display a flat summary of new features, bug fixes, and performance improvements across the entire version delta. Uses `marked.lexer()` for AST-based section extraction and `renderMarkdown()` for output. Dynamically clamps entry count to ~1.3x terminal height. Zero added latency — fetch runs in parallel with binary download.
+
+## Feasibility: Fully feasible
+
+- GitHub Releases API returns `body` with structured release notes — currently discarded by `fetchRecentReleases()`
+- `marked` (v15) is already a dependency — provides full AST lexer for section extraction
+- `renderMarkdown()` handles all ANSI styling, plain mode, tables, lists
+- Nightly versions encode commit timestamps (`X.Y.Z-dev.<unix-seconds>`) — enables timestamp-based commit listing via GitHub Commits API with zero CI changes
+- Parallel fetch adds zero latency to the upgrade flow
+
+## Files to Modify
+
+| File | Change |
+|------|--------|
+| `src/lib/delta-upgrade.ts:146-149` | Add `body?: string` to `GitHubRelease` type |
+| **New:** `src/lib/release-notes.ts` | AST-based release notes parser & aggregation (~200 lines) |
+| `src/commands/cli/upgrade.ts:62-79` | Add `changelog?: ChangelogSummary` to `UpgradeResult` |
+| `src/commands/cli/upgrade.ts` (func body) | Wire parallel changelog fetch alongside binary download |
+| `src/lib/formatters/human.ts:2102-2163` | Extend `formatUpgradeResult()` with changelog rendering |
+| **New:** `test/lib/release-notes.property.test.ts` | Property-based tests for parser |
+| **New:** `test/lib/release-notes.test.ts` | Unit tests for aggregation, edge cases |
+| Existing formatter tests | Extend for changelog rendering |
+
+## Implementation Steps
+
+### Step 1: Extend `GitHubRelease` type
+
+In `src/lib/delta-upgrade.ts:146-149`, add `body?: string` to the existing type. The API response already includes this field — TypeScript just discards it because the type lacks it. Zero runtime change.
+
+### Step 2: Create `src/lib/release-notes.ts`
+
+**Core approach:** Use `marked.lexer(body)` to parse release body markdown into an AST token array. Walk tokens to extract heading-delimited sections, keeping only features/fixes/performance. Return structured data that can be re-serialized as filtered markdown for rendering.
+
+**Types:**
+```typescript
+import type { Token, Tokens } from "marked";
+
+type ChangeCategory = "features" | "fixes" | "performance";
+
+/** A section from a release body (e.g., "New Features" with its list items) */
+type ChangeSection = {
+  category: ChangeCategory;
+  /** Tokens belonging to this section (lists, paragraphs, subheadings) */
+  tokens: Token[];
+};
+
+/** Aggregated changelog across the full version delta */
+type ChangelogSummary = {
+  fromVersion: string;
+  toVersion: string;
+  /** Sections grouped by category, flattened across all releases */
+  sections: ChangeSection[];
+  /** Total number of list items across all sections (for clamping decisions) */
+  totalItems: number;
+  /** Whether items were truncated to fit terminal height */
+  truncated: boolean;
+  /** Original item count before truncation */
+  originalCount: number;
+};
+```
+
+**Functions:**
+
+1. **`extractSections(body: string): ChangeSection[]`**
+   - Calls `marked.lexer(body)` to get the AST token array
+   - Walks tokens linearly, splitting on `heading` tokens (depth 3, i.e. `###`)
+   - Maps heading text to category: `"New Features"` → `"features"`, `"Bug Fixes"` → `"fixes"`, `"Performance"` → `"performance"` (case-insensitive, ignoring emoji suffixes)
+   - Skips sections that don't match (Internal Changes, Documentation, etc.)
+   - Collects all tokens between matched headings into `ChangeSection.tokens`
+   - These tokens include `####` subheadings (scope groups like "Dashboard", "Issue") and `list` tokens with the actual entries
+
+2. **`countListItems(tokens: Token[]): number`**
+   - Counts total list items across all `list` tokens in an array (recursive for nested lists)
+   - Used for truncation decisions
+
+3. **`truncateSection(section: ChangeSection, maxItems: number): { section: ChangeSection; remaining: number }`**
+   - Truncates list tokens within a section to `maxItems` total
+   - Returns the truncated section and how many items remain
+
+4. **`buildChangelogSummary(releases: GitHubRelease[], fromVersion, toVersion, maxItems?): ChangelogSummary | null`**
+   - Filters releases in version range (exclusive `fromVersion`, inclusive `toVersion`) using `Bun.semver.order`
+   - Calls `extractSections()` on each release body
+   - Merges same-category sections across releases (features + features, fixes + fixes, etc.)
+   - If `maxItems` provided, truncates across sections proportionally
+   - Returns `null` if no releases found or all bodies are empty/have no matching sections
+
+5. **`parseCommitMessages(commits: Array<{commit: {message: string}}>): ChangeSection[]`**
+   - For nightly: parses conventional commit messages
+   - Groups `feat:` → features, `fix:` → fixes, `perf:` → performance
+   - Constructs synthetic markdown list tokens for each group
+   - Filters out `docs:`, `refactor:`, `chore:`, `test:`, `meta:`, `ci:`
+   - Skips commits with `#skip-changelog` in body
+
+6. **`fetchStableChangelog(fromVersion, toVersion, maxItems?): Promise<ChangelogSummary | null>`**
+   - Calls `fetchRecentReleases()` from `delta-upgrade.ts`
+   - Passes to `buildChangelogSummary()`
+
+7. **`fetchNightlyChangelog(fromVersion, toVersion, maxItems?): Promise<ChangelogSummary | null>`**
+   - Parses unix timestamps from version strings (`X.Y.Z-dev.<seconds>`)
+   - Calls `GET /repos/getsentry/cli/commits?sha=main&since={from_iso}&until={to_iso}`
+   - Passes response to `parseCommitMessages()`, then builds summary
+
+8. **`fetchChangelog(channel, fromVersion, toVersion, maxItems?): Promise<ChangelogSummary | null>`**
+   - Dispatches to stable or nightly based on channel
+   - Wraps in try/catch, returns `null` on any error
+
+### Step 3: Add `changelog` to `UpgradeResult`
+
+In `src/commands/cli/upgrade.ts:62-79`, add optional `changelog?: ChangelogSummary` field. JSON output picks it up automatically via `buildCommand` wrapper.
+
+### Step 4: Wire parallel fetch in the upgrade command
+
+In the command's `func()` body:
+
+**Compute `maxItems` from terminal height:**
+```typescript
+const termHeight = process.stdout.rows;
+// Budget: ~1.3x terminal height for the changelog section
+// Subtract ~6 lines for the upgrade status/metadata header
+const maxItems = termHeight
+  ? Math.max(5, Math.floor(termHeight * 1.3) - 6)
+  : 30; // sensible default for non-TTY
+```
+
+**Parallel fetch:**
+- **Upgrade/downgrade path:** Start `fetchChangelog(channel, currentVersion, target, maxItems).catch(() => null)` in parallel with binary download, await after download completes
+- **`--check` mode:** Fetch changelog when versions differ (lightweight — single API call)
+- **`--offline` mode:** Skip (`changelog: undefined`)
+- **"up-to-date" result:** Skip — no version range
+
+### Step 5: Extend `formatUpgradeResult` in human.ts
+
+After the existing status/metadata/warnings output, render the changelog.
+
+**Approach:** Reconstruct filtered markdown from the `ChangeSection` tokens and pass through `renderMarkdown()`. This ensures the output uses the same rendering pipeline as everything else — headings, lists, bold, links all render consistently.
+
+```typescript
+function formatChangelog(changelog: ChangelogSummary): string {
+  const lines: string[] = [];
+  lines.push("### What's new\n");
+
+  const CATEGORY_HEADERS: Record<ChangeCategory, string> = {
+    features: "#### New Features ✨",
+    fixes: "#### Bug Fixes 🐛",
+    performance: "#### Performance ⚡",
+  };
+
+  for (const section of changelog.sections) {
+    lines.push(CATEGORY_HEADERS[section.category]);
+    // Re-serialize the section's tokens back to markdown
+    // (subheadings become ##### scope, lists become - items)
+    lines.push(tokensToMarkdown(section.tokens));
+  }
+
+  if (changelog.truncated) {
+    const more = changelog.originalCount - changelog.totalItems;
+    lines.push(`\n<muted>...and ${more} more changes</muted>`);
+  }
+
+  return renderMarkdown(lines.join("\n"));
+}
+```
+
+**`tokensToMarkdown(tokens: Token[]): string`** — Helper that reconstructs markdown source from AST tokens. For our use case this is straightforward since we only have headings (scope groups) and lists (entries):
+- `heading` (depth 4) → `#### text`
+- `list` → `- item text` per list item
+- Other tokens → `token.raw` (fallback to original text)
+
+This approach means the changelog output gets the full rendering treatment: bold cyan headings, bullet points, code spans, links — all consistent with the rest of the CLI's output.
+
+### Step 6: Tests
+
+**Property-based tests** (`test/lib/release-notes.property.test.ts`):
+- `extractSections`: internal changes / docs sections never appear in output
+- `extractSections`: output categories are always valid (`"features" | "fixes" | "performance"`)
+- `extractSections`: empty body → empty array
+- `countListItems`: count is always ≥ 0 and matches actual list item count
+- `parseCommitMessages`: only `feat:`, `fix:`, `perf:` pass through
+- `parseCommitMessages`: `#skip-changelog` commits always filtered
+- `buildChangelogSummary`: totalItems ≤ maxItems when maxItems is set
+- Nightly version timestamp extraction: round-trip (encode → extract → matches)
+
+Arbitraries: Generate random release bodies following the known format using `fast-check` string composition (### headers with emoji, #### scopes, - list items, ` by @author in [#N]()` suffixes).
+
+**Unit tests** (`test/lib/release-notes.test.ts`):
+- `extractSections` with real release body fixture (from the 0.21.0 release)
+- Version range filtering in `buildChangelogSummary`
+- Truncation behavior with small `maxItems`
+- Multi-release merging (same categories consolidated)
+- Returns `null` for empty/missing bodies
+- Nightly timestamp parsing from version strings
+- Conventional commit message parsing edge cases
+
+**Formatter tests** (extend existing):
+- `formatUpgradeResult` renders "What's new" section when changelog present
+- No changelog section when undefined or empty
+- Truncation message with correct remaining count
+- Output passes through `renderMarkdown()` (contains ANSI or is plain)
+
+### Step 7: Regenerate SKILL.md
+
+Run `bun run generate:skill` since `UpgradeResult` shape changes.
+
+## Key Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Section extraction | `marked.lexer()` AST walk | Already a dependency; structured parsing instead of fragile regex |
+| Output rendering | `renderMarkdown()` on reconstructed markdown | Consistent styling (headings, lists, links, code spans) with rest of CLI |
+| Terminal height clamping | `maxItems = termHeight * 1.3 - 6` | Shows more than one screen but not overwhelming; 30 default for non-TTY |
+| Flat delta | Merge same-category sections across releases | Users care about total delta, not which release introduced each change |
+| Token preservation | Store `Token[]` in `ChangeSection` | Avoids lossy string conversion; enables both re-serialization and counting |
+| Nightly support | Timestamp-based GitHub Commits API | No CI changes needed; conventional commits provide structure |
+| Categories kept | features, fixes, performance only | Internal changes, docs, refactoring filtered as not user-relevant |
+
+## Edge Cases
+
+| Scenario | Behavior |
+|----------|----------|
+| Offline mode | Skip changelog entirely |
+| GitHub rate limited / network error | Return null, upgrade proceeds silently |
+| >12 stable releases spanned | Show changes from most recent 12 (rare; ~3 months of releases) |
+| Nightly with large commit range | GitHub Commits API returns up to 250 per page; sufficient |
+| Downgrade | Show changelog with "being reverted" note |
+| All entries filtered out (only internal changes) | No "What's new" section shown |
+| Non-TTY / piped output | Use 30-item default; `renderMarkdown()` handles plain mode |
+| `--json` mode | `changelog` field included with structured sections |
+| Very small terminal (e.g., 10 rows) | `maxItems` floors at 5 to always show something |
+
+## Verification
+
+1. `bun run typecheck`
+2. `bun test test/lib/release-notes.test.ts test/lib/release-notes.property.test.ts`
+3. `bun run lint`
+4. `bun run generate:skill && bun run check:skill`
+5. `bun run dev -- cli upgrade --check` (shows changelog preview)
+6. `bun run dev -- cli upgrade --check --json` (verify JSON includes changelog)
+7. `bun test` (full suite)
