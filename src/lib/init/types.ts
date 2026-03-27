@@ -144,6 +144,8 @@ export type MultiSelectPayload = {
   kind: "multi-select";
   prompt: string;
   availableFeatures?: string[];
+  /** Features recommended by the server based on project analysis. */
+  recommendedFeatures?: string[];
   options?: string[];
 };
 
