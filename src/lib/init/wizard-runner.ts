@@ -58,6 +58,19 @@ function nextPhase(
   return names[Math.min(phase - 1, names.length - 1)] ?? "done";
 }
 
+/**
+ * Truncate a spinner message to fit within the terminal width.
+ * Leaves room for the spinner character and padding.
+ */
+function truncateForTerminal(message: string): string {
+  // Reserve space for spinner (2 chars) + some padding
+  const maxWidth = (process.stdout.columns || 80) - 4;
+  if (message.length <= maxWidth) {
+    return message;
+  }
+  return `${message.slice(0, maxWidth - 1)}…`;
+}
+
 async function handleSuspendedStep(
   ctx: StepContext,
   stepPhases: Map<string, number>,
@@ -70,7 +83,7 @@ async function handleSuspendedStep(
     const message = payload.detail
       ? payload.detail
       : `${label} (${payload.operation})...`;
-    spin.message(message);
+    spin.message(truncateForTerminal(message));
 
     const localResult = await handleLocalOp(payload, options);
 
