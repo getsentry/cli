@@ -1,0 +1,98 @@
+# Plan: Add layout/position flags to `dashboard widget edit`
+
+**Issue**: https://github.com/getsentry/cli/issues/540
+
+## Status: Still Relevant
+
+The issue is **confirmed still relevant** as of `origin/main` (`8c2f8b37`). The `dashboard widget edit` command has no flags for widget layout/position. The type infrastructure (`DashboardWidgetLayout` with `x`, `y`, `w`, `h`) and API support are already in place — only the CLI flags are missing.
+
+## Current State
+
+- **`src/commands/dashboard/widget/edit.ts`**: `buildReplacement()` hardcodes `layout: existing.layout` — always preserves existing layout, never modifies it.
+- **`src/types/dashboard.ts`**: `DashboardWidgetLayoutSchema` defines `{ x, y, w, h, minH?, isResizable? }`. Grid is 6 columns (`GRID_COLUMNS = 6`). Default sizes per display type exist in `DEFAULT_WIDGET_SIZE`.
+- **`src/lib/api/dashboards.ts`**: `updateDashboard()` PUT already sends `layout` when present.
+- **`stripWidgetServerFields()`**: Already preserves layout fields (`x`, `y`, `w`, `h`, `minH`) and strips `isResizable`.
+
+## Implementation Plan
+
+### 1. Add layout flags to `widget edit` command
+
+**File**: `src/commands/dashboard/widget/edit.ts`
+
+Add four new optional flags:
+- `--x` (parsed, Number) — Grid column position (0-based, 0-5)
+- `--y` (parsed, Number) — Grid row position (0-based)
+- `--width` / alias `--w` (parsed, Number) — Widget width in grid units (1-6)
+- `--height` / alias `--h` (parsed, Number) — Widget height in grid units (min 1)
+
+Note: `--w` and `--h` cannot be direct flag names since `-w` is already used for `--where` and `-h` is typically help. Use `--width`/`--height` as flag names with no short aliases (or pick unused letters).
+
+### 2. Update `buildReplacement()` to merge layout
+
+In `buildReplacement()`, change from:
+```typescript
+layout: existing.layout,
+```
+to:
+```typescript
+layout: {
+  ...(existing.layout ?? {}),
+  ...(flags.x !== undefined && { x: flags.x }),
+  ...(flags.y !== undefined && { y: flags.y }),
+  ...(flags.width !== undefined && { w: flags.width }),
+  ...(flags.height !== undefined && { h: flags.height }),
+},
+```
+
+This allows partial layout overrides — e.g., change only `x` while preserving `y`, `w`, `h`.
+
+### 3. Add validation
+
+- `x` must be 0–5 (GRID_COLUMNS - 1)
+- `x + width` must be ≤ 6 (GRID_COLUMNS)
+- `width` must be 1–6
+- `height` must be ≥ 1
+- `y` must be ≥ 0
+
+Throw `ValidationError` for out-of-range values.
+
+### 4. Update `widget add` command similarly
+
+**File**: `src/commands/dashboard/widget/add.ts`
+
+The `widget add` command currently uses `assignDefaultLayout()` for auto-placement. Add the same layout flags so users can explicitly position new widgets instead of relying on auto-placement. If any layout flag is provided, skip `assignDefaultLayout()` and use the explicit values (with defaults from `DEFAULT_WIDGET_SIZE` for any unspecified dimension).
+
+### 5. Update formatter
+
+**File**: `src/lib/formatters/human.ts`
+
+Update `formatWidgetEdited` (and `formatWidgetAdded` if applicable) to show layout info when it was changed. Add a row like `| Position | (2, 0) 3×2 |` to the output table.
+
+### 6. Regenerate SKILL.md
+
+Run `bun run generate:skill` after changing command parameters.
+
+### 7. Add tests
+
+**File**: `test/commands/dashboard/widget/edit.test.ts` (create or extend)
+
+- Test that layout flags are correctly merged into the widget
+- Test partial layout overrides (e.g., only `--x` provided)
+- Test validation errors for out-of-range values
+- Test that omitting layout flags preserves existing layout (regression)
+
+## Files to Modify
+
+1. `src/commands/dashboard/widget/edit.ts` — Add flags + merge logic
+2. `src/commands/dashboard/widget/add.ts` — Add same layout flags
+3. `src/lib/formatters/human.ts` — Show layout in output
+4. `test/commands/dashboard/widget/edit.test.ts` — Tests
+5. SKILL.md — Regenerated via script
+
+## Verification
+
+1. `bun run typecheck` — Ensure no type errors
+2. `bun test test/commands/dashboard/widget/edit.test.ts` — Run widget edit tests
+3. `bun test` — Full test suite
+4. `bun run lint` — Lint check
+5. `bun run generate:skill && bun run check:skill` — SKILL.md is up to date
