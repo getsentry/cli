@@ -328,19 +328,24 @@ sentry auth status
 \`\`\``;
 }
 
-/** Regex to match command sections in docs (### `sentry ...`) */
+/**
+ * Regex to match command sections in docs (### `sentry ...`).
+ * Captures the command path (e.g., "sentry issue list") while allowing
+ * optional positional placeholders before the closing backtick
+ * (e.g., `sentry issue list <org/project>`).
+ *
+ * Uses `[^\s<]+` instead of `\S+` so the capture stops at `<`
+ * (the start of positional placeholders like `<org/project>`).
+ */
 const COMMAND_SECTION_REGEX =
-  /###\s+`(sentry\s+\S+(?:\s+\S+)?)`\s*\n([\s\S]*?)(?=###\s+`|$)/g;
+  /###\s+`(sentry(?:\s+[^\s<]+){1,3})[^`]*`\s*\n([\s\S]*?)(?=###\s+`|$)/g;
 
-/** Load examples for a specific command from docs */
-async function loadCommandExamples(
-  commandGroup: string
-): Promise<Map<string, string[]>> {
-  const docContent = await loadDoc(`commands/${commandGroup}.md`);
+/**
+ * Extract examples from `### \`sentry ...\`` command sections in markdown.
+ * Returns a map of command path → code block contents.
+ */
+function extractSectionExamples(docContent: string): Map<string, string[]> {
   const examples = new Map<string, string[]>();
-  if (!docContent) {
-    return examples;
-  }
   const commandPattern = new RegExp(
     COMMAND_SECTION_REGEX.source,
     COMMAND_SECTION_REGEX.flags
@@ -350,14 +355,89 @@ async function loadCommandExamples(
     const commandPath = match[1];
     const sectionContent = match[2];
     const codeBlocks = extractCodeBlocks(sectionContent, "bash");
-    if (codeBlocks.length > 0) {
-      examples.set(
-        commandPath,
-        codeBlocks.map((b) => b.code)
-      );
-    }
+    // Always register the command path so extractLooseExamples can
+    // match custom-section code blocks to specific subcommands.
+    examples.set(
+      commandPath,
+      codeBlocks.map((b) => b.code)
+    );
     match = commandPattern.exec(docContent);
   }
+  return examples;
+}
+
+/** Append a code block to a map entry, creating the array if needed */
+function appendExample(
+  map: Map<string, string[]>,
+  key: string,
+  code: string
+): void {
+  const list = map.get(key) ?? [];
+  list.push(code);
+  map.set(key, list);
+}
+
+/**
+ * Find the first command path that appears in a code block's content.
+ * Returns undefined if no match is found.
+ */
+function matchCommandPath(code: string, paths: string[]): string | undefined {
+  return paths.find((p) => code.includes(p));
+}
+
+/**
+ * Scan all bash code blocks in a document and match them to commands
+ * by looking for `sentry <group> <subcommand>` in the code content.
+ *
+ * Handles the case where examples live in a separate custom section
+ * (below a GENERATED:END marker) rather than inline within command
+ * reference headings.
+ */
+function extractLooseExamples(
+  docContent: string,
+  commandGroup: string,
+  existing: Map<string, string[]>
+): void {
+  const commandPaths = Array.from(existing.keys());
+  const allBashBlocks = extractCodeBlocks(docContent, "bash");
+
+  if (commandPaths.length === 0) {
+    const prefix = `sentry ${commandGroup}`;
+    for (const block of allBashBlocks) {
+      if (block.code.includes(prefix)) {
+        appendExample(existing, prefix, block.code);
+      }
+    }
+    return;
+  }
+
+  const capturedCode = new Set(Array.from(existing.values()).flat());
+  for (const block of allBashBlocks) {
+    if (capturedCode.has(block.code)) {
+      continue;
+    }
+    const matched = matchCommandPath(block.code, commandPaths);
+    if (matched) {
+      appendExample(existing, matched, block.code);
+    }
+  }
+}
+
+/**
+ * Load examples for a specific command group from docs.
+ *
+ * Uses two strategies: (1) extract bash blocks from `### \`sentry ...\``
+ * sections, (2) scan loose bash blocks and match by command path in content.
+ */
+async function loadCommandExamples(
+  commandGroup: string
+): Promise<Map<string, string[]>> {
+  const docContent = await loadDoc(`commands/${commandGroup}.md`);
+  if (!docContent) {
+    return new Map();
+  }
+  const examples = extractSectionExamples(docContent);
+  extractLooseExamples(docContent, commandGroup, examples);
   return examples;
 }
 

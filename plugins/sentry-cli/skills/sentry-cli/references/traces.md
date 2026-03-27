@@ -47,6 +47,34 @@ View details of specific spans
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
+**Examples:**
+
+```bash
+# List recent spans in the current project
+sentry span list
+
+# Find all DB spans
+sentry span list -q "op:db"
+
+# Slow spans in the last 24 hours
+sentry span list -q "duration:>100ms" --period 24h
+
+# List spans within a specific trace
+sentry span list abc123def456abc123def456abc12345
+
+# Paginate through results
+sentry span list -c next
+
+# View a single span
+sentry span view abc123def456abc123def456abc12345 a1b2c3d4e5f67890
+
+# View multiple spans at once
+sentry span view abc123def456abc123def456abc12345 a1b2c3d4e5f67890 b2c3d4e5f6789012
+
+# With explicit org/project
+sentry span view my-org/backend/abc123def456abc123def456abc12345 a1b2c3d4e5f67890
+```
+
 ### `sentry trace list <org/project>`
 
 List recent traces in a project
@@ -90,5 +118,39 @@ View logs associated with a trace
 - `-q, --query <value> - Additional filter query (Sentry search syntax)`
 - `-s, --sort <value> - Sort order: "newest" (default) or "oldest" - (default: "newest")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+
+**Examples:**
+
+```bash
+# List last 20 traces (default)
+sentry trace list
+
+# Sort by slowest first
+sentry trace list --sort duration
+
+# Filter by transaction name, last 24 hours
+sentry trace list -q "transaction:GET /api/users" --period 24h
+
+# Paginate through results
+sentry trace list my-org/backend -c next
+
+# View trace details with span tree
+sentry trace view abc123def456abc123def456abc12345
+
+# Open trace in browser
+sentry trace view abc123def456abc123def456abc12345 -w
+
+# Auto-recover from an issue short ID
+sentry trace view PROJ-123
+
+# View logs for a trace
+sentry trace logs abc123def456abc123def456abc12345
+
+# Search with a longer time window
+sentry trace logs --period 30d abc123def456abc123def456abc12345
+
+# Filter logs within a trace
+sentry trace logs -q 'level:error' abc123def456abc123def456abc12345
+```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

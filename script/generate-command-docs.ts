@@ -248,41 +248,16 @@ function capitalize(s: string): string {
 // Index Table Generation
 // ---------------------------------------------------------------------------
 
-/** Route display order for the commands index table */
-const INDEX_ORDER = [
-  "auth",
-  "cli",
-  "org",
-  "project",
-  "team",
-  "issue",
-  "event",
-  "log",
-  "trace",
-  "span",
-  "dashboard",
-  "sourcemap",
-  "repo",
-  "trial",
-  "init",
-  "schema",
-  "api",
-];
-
-/** Generate the commands table for index.md */
+/**
+ * Generate the commands table for index.md.
+ * Uses the route order from extractAllRoutes() (which preserves the
+ * insertion order from app.ts's buildRouteMap) — no manual constant needed.
+ */
 function generateCommandsTable(allRoutes: RouteInfo[]): string {
-  const sorted = [...allRoutes].sort((a, b) => {
-    const aIdx = INDEX_ORDER.indexOf(a.name);
-    const bIdx = INDEX_ORDER.indexOf(b.name);
-    const aOrder = aIdx === -1 ? 999 : aIdx;
-    const bOrder = bIdx === -1 ? 999 : bIdx;
-    return aOrder - bOrder;
-  });
-
   const lines: string[] = [];
   lines.push("| Command | Description |");
   lines.push("|---------|-------------|");
-  for (const route of sorted) {
+  for (const route of allRoutes) {
     lines.push(`| [\`${route.name}\`](./${route.name}/) | ${route.brief} |`);
   }
   return lines.join("\n");

@@ -27,4 +27,20 @@ View details of an organization
 - `-w, --web - Open in browser`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
+**Examples:**
+
+```bash
+# List organizations
+sentry org list
+
+# View organization details
+sentry org view my-org
+
+# Open in browser
+sentry org view my-org -w
+
+# JSON output
+sentry org list --json
+```
+
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

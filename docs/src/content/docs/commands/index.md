@@ -11,21 +11,21 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 |---------|-------------|
 | [`auth`](./auth/) | Authenticate with Sentry |
 | [`cli`](./cli/) | CLI-related commands |
+| [`dashboard`](./dashboard/) | Manage Sentry dashboards |
 | [`org`](./org/) | Work with Sentry organizations |
 | [`project`](./project/) | Work with Sentry projects |
+| [`repo`](./repo/) | Work with Sentry repositories |
 | [`team`](./team/) | Work with Sentry teams |
 | [`issue`](./issue/) | Manage Sentry issues |
 | [`event`](./event/) | View Sentry events |
 | [`log`](./log/) | View Sentry logs |
-| [`trace`](./trace/) | View distributed traces |
-| [`span`](./span/) | List and view spans in projects or traces |
-| [`dashboard`](./dashboard/) | Manage Sentry dashboards |
 | [`sourcemap`](./sourcemap/) | Manage sourcemaps |
-| [`repo`](./repo/) | Work with Sentry repositories |
+| [`span`](./span/) | List and view spans in projects or traces |
+| [`trace`](./trace/) | View distributed traces |
 | [`trial`](./trial/) | Manage product trials |
 | [`init`](./init/) | Initialize Sentry in your project (experimental) |
-| [`schema`](./schema/) | Browse the Sentry API schema |
 | [`api`](./api/) | Make an authenticated API request |
+| [`schema`](./schema/) | Browse the Sentry API schema |
 
 <!-- GENERATED:END -->
 
