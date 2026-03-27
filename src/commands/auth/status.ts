@@ -170,15 +170,20 @@ export const statusCommand = buildCommand({
       });
     }
 
-    // Build the user info
-    const userInfo = getUserInfo();
-    const user = userInfo
-      ? {
-          name: userInfo.name,
-          email: userInfo.email,
-          username: userInfo.username,
-        }
-      : undefined;
+    // Env var tokens may belong to a different user/instance than the cached
+    // user_info (populated by a prior login or whoami). Skip the cache for env
+    // sources to avoid displaying stale identity.
+    let user: AuthStatusData["user"];
+    if (!fromEnv) {
+      const userInfo = getUserInfo();
+      user = userInfo
+        ? {
+            name: userInfo.name,
+            email: userInfo.email,
+            username: userInfo.username,
+          }
+        : undefined;
+    }
 
     const data: AuthStatusData = {
       authenticated: true,
@@ -190,6 +195,12 @@ export const statusCommand = buildCommand({
       verification: await verifyCredentials(),
     };
 
-    return yield new CommandOutput(data);
+    yield new CommandOutput(data);
+
+    if (fromEnv) {
+      return {
+        hint: "Run `sentry auth whoami` to see which user this token belongs to",
+      };
+    }
   },
 });
