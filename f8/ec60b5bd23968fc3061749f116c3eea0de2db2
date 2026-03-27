@@ -1,0 +1,79 @@
+# Plan: Fix dashboard error messages (Issue #448)
+
+## Status: Still Relevant
+
+Issue #448 is **still relevant**. All dashboard commands let raw `ApiError` messages bubble up to the global handler without any dashboard-specific guidance. Other commands in the CLI (issue list, event view, project create/delete) demonstrate the pattern of catching `ApiError` and converting to `ContextError`/`ResolutionError` with actionable suggestions.
+
+## Scope
+
+7 files have API calls without error handling:
+- `src/commands/dashboard/list.ts` — `listDashboardsPaginated` call
+- `src/commands/dashboard/view.ts` — `getDashboard` call
+- `src/commands/dashboard/resolve.ts` — `listDashboardsPaginated` call inside `resolveDashboardId()`
+- `src/commands/dashboard/create.ts` — `createDashboard` call
+- `src/commands/dashboard/widget/add.ts` — `getDashboard` + `updateDashboard`
+- `src/commands/dashboard/widget/edit.ts` — `getDashboard` + `updateDashboard`
+- `src/commands/dashboard/widget/delete.ts` — `getDashboard` + `updateDashboard`
+
+## Implementation
+
+### Step 1: Create shared error enrichment helper
+
+Add a `enrichDashboardError()` function in `src/commands/dashboard/resolve.ts` (or a new `src/commands/dashboard/errors.ts`) following the pattern from `enrichIssueListError()` in `src/commands/issue/list.ts` and `buildDeletionError()` in `src/commands/project/delete.ts`.
+
+The helper should catch `ApiError` and convert based on status:
+
+| Status | Scenario | Enriched Error |
+|--------|----------|----------------|
+| 404 on list | Org doesn't exist | `ResolutionError`: "Organization '{org}' not found. Try: `sentry dashboard list <org>/`" |
+| 404 on getDashboard | Dashboard not found | `ResolutionError`: "Dashboard {id} not found in '{org}'. Try: `sentry dashboard list <org>/`" |
+| 403 | No permission | `ResolutionError`: "No access to dashboards in '{org}'. Verify org membership or token scopes." |
+| 400 on update | Invalid widget config | `ValidationError` with the API's detail message + a suggestion |
+
+Re-throw non-matching `ApiError` and any non-`ApiError` unchanged.
+
+### Step 2: Wrap API calls in each command
+
+For each of the 7 files listed above, wrap the API call(s) in try-catch and route `ApiError` through the shared enrichment helper. The pattern:
+
+```typescript
+try {
+  const data = await apiCall(...);
+} catch (error) {
+  throw enrichDashboardError(error, { orgSlug, dashboardId });
+}
+```
+
+### Step 3: Handle resolve.ts separately
+
+`resolveDashboardId()` already handles the "title not found" case with `ValidationError`. Add try-catch around the `listDashboardsPaginated` call to handle 404/403 at the org level, before the title-matching logic runs.
+
+### Step 4: Tests
+
+Add unit tests for the enrichment helper covering each status code mapping. Add/update command tests to verify enriched error messages appear for simulated 404/403/400 responses.
+
+## Files to modify
+
+- `src/commands/dashboard/resolve.ts` — add `enrichDashboardError()` helper
+- `src/commands/dashboard/list.ts` — wrap API call
+- `src/commands/dashboard/view.ts` — wrap API call
+- `src/commands/dashboard/create.ts` — wrap API call
+- `src/commands/dashboard/widget/add.ts` — wrap API calls
+- `src/commands/dashboard/widget/edit.ts` — wrap API calls
+- `src/commands/dashboard/widget/delete.ts` — wrap API calls
+- `test/commands/dashboard/` — add error handling tests
+
+## Reference patterns
+
+- `src/commands/issue/list.ts:1071-1094` — `enrichIssueListError()`
+- `src/commands/project/delete.ts:100-136` — `buildDeletionError()`
+- `src/commands/event/view.ts:476-500` — 404 fallback + `ResolutionError`
+
+## Verification
+
+1. `bun run typecheck` — passes
+2. `bun run lint` — passes
+3. `bun test` — all tests pass
+4. `bun run check:errors` — no violations
+5. Manual: `bun run dev dashboard list nonexistent-org/` shows enriched error
+6. Manual: `bun run dev dashboard view <org>/ 999999` shows enriched error
