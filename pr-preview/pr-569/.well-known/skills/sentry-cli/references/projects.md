@@ -46,4 +46,20 @@ View details of a project
 - `-w, --web - Open in browser`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
+**Examples:**
+
+```bash
+# List all projects in an org
+sentry project list my-org/
+
+# Filter by platform
+sentry project list my-org/ --platform javascript
+
+# View project details
+sentry project view my-org/frontend
+
+# Open project in browser
+sentry project view my-org/frontend -w
+```
+
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
