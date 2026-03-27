@@ -578,7 +578,7 @@ export function prepareWidgetQueries(
 // ---------------------------------------------------------------------------
 
 /** Sentry dashboard grid column count */
-const GRID_COLUMNS = 6;
+export const GRID_COLUMNS = 6;
 
 /** Default widget dimensions by displayType */
 const DEFAULT_WIDGET_SIZE: Partial<
@@ -664,6 +664,81 @@ export function assignDefaultLayout(
 
   // No gap found — place below everything
   return { ...widget, layout: { x: 0, y: maxY, w, h, minH } };
+}
+
+// ---------------------------------------------------------------------------
+// Layout validation
+// ---------------------------------------------------------------------------
+
+/** Shared layout flags accepted by widget add and edit commands */
+export type WidgetLayoutFlags = {
+  readonly x?: number;
+  readonly y?: number;
+  readonly width?: number;
+  readonly height?: number;
+};
+
+/** Assert a layout value is a non-negative integer within an optional upper bound */
+function assertLayoutInt(
+  value: number,
+  flag: string,
+  min: number,
+  max?: number
+): void {
+  if (!Number.isInteger(value) || value < min) {
+    throw new ValidationError(
+      `--${flag} must be ${min === 0 ? "a non-negative" : "a positive"} integer (got ${value}).`,
+      flag
+    );
+  }
+  if (max !== undefined && value > max) {
+    throw new ValidationError(
+      `--${flag} must be ${min}–${max} (dashboard grid is ${GRID_COLUMNS} columns wide).`,
+      flag
+    );
+  }
+}
+
+/**
+ * Validate layout flag values against the 6-column dashboard grid.
+ *
+ * Checks that position and size values are within the valid range and
+ * that the widget fits within the grid columns. Validates each provided
+ * flag independently, and cross-validates x + width when both are known.
+ *
+ * @param flags - Layout flags from the command
+ * @param existing - Existing widget layout (used for cross-validation when only one dimension is provided)
+ */
+export function validateWidgetLayout(
+  flags: WidgetLayoutFlags,
+  existing?: DashboardWidgetLayout
+): void {
+  if (flags.x !== undefined) {
+    assertLayoutInt(flags.x, "x", 0, GRID_COLUMNS - 1);
+  }
+  if (flags.y !== undefined) {
+    assertLayoutInt(flags.y, "y", 0);
+  }
+  if (flags.width !== undefined) {
+    assertLayoutInt(flags.width, "width", 1, GRID_COLUMNS);
+  }
+  if (flags.height !== undefined) {
+    assertLayoutInt(flags.height, "height", 1);
+  }
+
+  // Cross-validate x + width doesn't overflow the grid
+  const effectiveX = flags.x ?? existing?.x;
+  const effectiveW = flags.width ?? existing?.w;
+  if (
+    effectiveX !== undefined &&
+    effectiveW !== undefined &&
+    effectiveX + effectiveW > GRID_COLUMNS
+  ) {
+    throw new ValidationError(
+      `Widget overflows the grid: x(${effectiveX}) + width(${effectiveW}) = ${effectiveX + effectiveW}, but the grid is ${GRID_COLUMNS} columns wide.`,
+      "x"
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

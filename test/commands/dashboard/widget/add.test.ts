@@ -371,6 +371,89 @@ describe("dashboard widget add", () => {
     expect(err.message).toContain('"logs" dataset supports');
   });
 
+  // -------------------------------------------------------------------------
+  // Layout flag tests
+  // -------------------------------------------------------------------------
+
+  test("uses explicit layout when --x --y --width --height provided", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "line",
+        query: ["count"],
+        x: 0,
+        y: 5,
+        width: 6,
+        height: 3,
+      },
+      "123",
+      "Full Width Widget"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.layout.x).toBe(0);
+    expect(addedWidget.layout.y).toBe(5);
+    expect(addedWidget.layout.w).toBe(6);
+    expect(addedWidget.layout.h).toBe(3);
+  });
+
+  test("partial layout flags override auto-layout defaults", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "big_number",
+        query: ["count"],
+        x: 4,
+      },
+      "123",
+      "Positioned Counter"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    // x overridden, other values from auto-layout defaults for big_number (w:2, h:1)
+    expect(addedWidget.layout.x).toBe(4);
+    expect(addedWidget.layout.w).toBe(2);
+    expect(addedWidget.layout.h).toBe(1);
+  });
+
+  test("throws ValidationError for width > 6", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    const err = await func
+      .call(
+        context,
+        { json: false, display: "line", query: ["count"], width: 7 },
+        "123",
+        "Too Wide"
+      )
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain("--width");
+  });
+
+  test("throws ValidationError for negative y", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    const err = await func
+      .call(
+        context,
+        { json: false, display: "line", query: ["count"], y: -1 },
+        "123",
+        "Bad Y"
+      )
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain("--y");
+  });
+
   test("auto-defaults orderby when group-by + limit provided", async () => {
     const { context } = createMockContext();
     const func = await addCommand.loader();
