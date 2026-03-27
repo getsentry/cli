@@ -97,6 +97,7 @@ export const addCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
+        placeholder: "org/project/dashboard/title",
         brief: "[<org/project>] <dashboard> <title>",
         parse: String,
       },

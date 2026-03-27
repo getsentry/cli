@@ -68,16 +68,79 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-```bash
-# Check for updates
-sentry cli upgrade --check
+### Check for updates
 
-# Upgrade to the latest version
+```bash
+sentry cli upgrade --check
+```
+
+```
+Installation method: curl
+Current version: 0.4.0
+Channel: stable
+Latest version: 0.5.0
+
+Run 'sentry cli upgrade' to update.
+```
+
+### Upgrade
+
+```bash
+# Upgrade to latest stable
 sentry cli upgrade
 
-# Send feedback
-sentry cli feedback "Great CLI!"
+# Upgrade to a specific version
+sentry cli upgrade 0.5.0
 
-# Fix configuration issues
+# Force re-download
+sentry cli upgrade --force
+```
+
+### Release Channels
+
+```bash
+# Switch to nightly builds
+sentry cli upgrade nightly
+
+# Switch back to stable
+sentry cli upgrade stable
+```
+
+After switching, bare `sentry cli upgrade` will continue tracking that channel.
+
+| Channel | Description |
+|---------|-------------|
+| `stable` | Latest stable release (default) |
+| `nightly` | Built from `main`, updated on every commit |
+
+### Installation Detection
+
+The CLI detects how it was installed and uses the appropriate upgrade method:
+
+| Method | Detection |
+|--------|-----------|
+| curl | Binary in `~/.sentry/bin` (installed via cli.sentry.dev) |
+| brew | Binary in a Homebrew Cellar (`brew install getsentry/tools/sentry`) |
+| npm | Globally installed via `npm install -g sentry` |
+| pnpm | Globally installed via `pnpm add -g sentry` |
+| bun | Globally installed via `bun install -g sentry` |
+
+Nightly builds are only available as standalone binaries (via the curl install method). Switching to nightly from a package manager install will automatically migrate to a standalone binary.
+
+### Send feedback
+
+```bash
+# Send positive feedback
+sentry cli feedback i love this tool
+
+# Report an issue
+sentry cli feedback the issue view is confusing
+```
+
+Feedback is sent via Sentry's telemetry system. If telemetry is disabled (`SENTRY_CLI_NO_TELEMETRY=1`), feedback cannot be sent.
+
+### Fix configuration issues
+
+```bash
 sentry cli fix
 ```

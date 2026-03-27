@@ -7,7 +7,7 @@ View Sentry events
 
 ## Commands
 
-### `sentry event view <args...>`
+### `sentry event view <org/project/event-id...>`
 
 View details of a specific event
 
@@ -15,7 +15,7 @@ View details of a specific event
 
 | Argument | Description |
 |----------|-------------|
-| `<args...>` | [&lt;org&gt;/&lt;project&gt;] &lt;event-id&gt; - Target (optional) and event ID (required) (optional) |
+| `<org/project/event-id...>` | [&lt;org&gt;/&lt;project&gt;] &lt;event-id&gt; - Target (optional) and event ID (required) (optional) |
 
 **Options:**
 
@@ -51,6 +51,15 @@ Tags:
   os: Windows 10
   environment: production
   release: 1.2.3
+
+Context:
+  url: https://example.com/app
+  user_id: 12345
+```
+
+```bash
+# Open in browser
+sentry event view abc123def456 -w
 ```
 
 ## Finding Event IDs

@@ -86,15 +86,34 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 ## Examples
 
 ```bash
-# List all projects
+# List all projects in an org
 sentry project list my-org/
+```
 
+```
+ORG         SLUG           PLATFORM      TEAM
+my-org      frontend       javascript    web-team
+my-org      backend        python        api-team
+my-org      mobile-ios     cocoa         mobile-team
+```
+
+```bash
 # Filter by platform
 sentry project list my-org/ --platform javascript
 
 # View project details
 sentry project view my-org/frontend
+```
 
+```
+Project: frontend
+Organization: my-org
+Platform: javascript
+Team: web-team
+DSN: https://abc123@sentry.io/123456
+```
+
+```bash
 # Open project in browser
 sentry project view my-org/frontend -w
 ```

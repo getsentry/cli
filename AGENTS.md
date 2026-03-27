@@ -403,11 +403,11 @@ All normalize to lowercase. Throw `ValidationError` on invalid input.
 
 Use `"date"` for timestamp-based sort (not `"time"`). Export sort types from the API layer (e.g., `SpanSortValue` from `api/traces.ts`), import in commands. This matches `issue list`, `trace list`, and `span list`.
 
-### SKILL.md
+### SKILL.md and Command Docs
 
-- Run `bun run generate:skill` after changing any command parameters, flags, or docs.
-- CI check `bun run check:skill` will fail if SKILL.md is stale.
-- Positional `placeholder` values must be descriptive: `"org/project/trace-id"` not `"args"`.
+- Run `bun run generate:skill` and `bun run generate:command-docs` after changing any command parameters, flags, or docs.
+- CI checks `bun run check:skill` and `bun run check:command-docs` will fail if generated files are stale.
+- Positional `placeholder` values must be descriptive: `"org/project/trace-id"` not `"args"`. **Never** use `"args"` as a placeholder — it produces useless `<args...>` in documentation. Use slash-separated entity names that describe what the user passes (e.g., `"org/project/dashboard"`, `"org/project/event-id"`).
 
 ### Zod Schemas for Validation
 
@@ -903,10 +903,10 @@ mock.module("./some-module", () => ({
 * **Sentry API: events require org+project, issues have legacy global endpoint**: Sentry API scoping: Events require org+project in URL path (\`/projects/{org}/{project}/events/{id}/\`). Issues use legacy global endpoint (\`/api/0/issues/{id}/\`) without org context. Traces need only org (\`/organizations/{org}/trace/{traceId}/\`). Two-step lookup for events: fetch issue → extract org/project from response → fetch event. Cross-project event search possible via Discover endpoint \`/organizations/{org}/events/\` with \`query=id:{eventId}\`.
 
 <!-- lore:019cb6ab-ab98-7a9c-a25f-e154a5adbbe1 -->
-* **Sentry CLI authenticated fetch architecture with response caching**: \`createAuthenticatedFetch()\` wraps fetch with auth, 30s timeout, retry (max 2), 401 refresh, and span tracing. Response caching via \`http-cache-semantics\` (RFC 7234) with filesystem storage at \`~/.sentry/cache/responses/\`. Fallback TTL tiers: immutable (24hr), stable (5min), volatile (60s), no-cache (0). Only GET 2xx cached. \`--fresh\` and \`SENTRY\_NO\_CACHE=1\` bypass. Cache cleared on login/logout. \`hasServerCacheDirectives(policy)\` distinguishes \`max-age=0\` from missing headers.
+* **Sentry CLI authenticated fetch architecture with response caching**: \`createAuthenticatedFetch()\` wraps fetch with auth headers, 30s timeout, retry (max 2), 401 token refresh, and span tracing. Response caching via \`http-cache-semantics\` (RFC 7234) stored at \`~/.sentry/cache/responses/\`. Fallback TTL tiers: immutable (24hr), stable (5min), volatile (60s), no-cache (0). Only GET 2xx cached. \`--fresh\` and \`SENTRY\_NO\_CACHE=1\` bypass cache. Cache cleared on login/logout.
 
 <!-- lore:019c8c72-b871-7d5e-a1a4-5214359a5a77 -->
-* **Sentry CLI has two distribution channels with different runtimes**: Sentry CLI ships two ways: (1) Standalone binary via \`Bun.build()\` with \`compile: true\`. (2) npm package via esbuild producing CJS \`dist/bin.cjs\` for Node 22+, with Bun API polyfills from \`script/node-polyfills.ts\`. \`Bun.$\` has NO polyfill — use \`execSync\` instead. \`require()\` in ESM is safe (Bun native, esbuild resolves at bundle time). As of PR #474, SDK is \`@sentry/node-core/light\` (not \`@sentry/bun\`), reducing import cost from ~218ms to ~85ms.
+* **Sentry CLI has two distribution channels with different runtimes**: Sentry CLI ships two ways: (1) Standalone binary via \`Bun.build()\` with \`compile: true\`. (2) npm package via esbuild producing CJS \`dist/bin.cjs\` for Node 22+, with Bun API polyfills from \`script/node-polyfills.ts\`. \`Bun.$\` has NO polyfill — use \`execSync\` instead. SDK is \`@sentry/node-core/light\` (not \`@sentry/bun\`).
 
 <!-- lore:019c8b60-d21a-7d44-8a88-729f74ec7e02 -->
 * **Sentry CLI resolve-target cascade has 5 priority levels with env var support**: Resolve-target cascade (src/lib/resolve-target.ts) has 5 priority levels: (1) Explicit CLI flags, (2) SENTRY\_ORG/SENTRY\_PROJECT env vars, (3) SQLite config defaults, (4) DSN auto-detection, (5) Directory name inference. SENTRY\_PROJECT supports combo notation \`org/project\` — when used, SENTRY\_ORG is ignored. If combo parse fails (e.g. \`org/\`), the entire value is discarded. The \`resolveFromEnvVars()\` helper is injected into all four resolution functions.
@@ -922,13 +922,7 @@ mock.module("./some-module", () => ({
 ### Gotcha
 
 <!-- lore:019d2548-3e95-7673-8e9b-47811077388a -->
-* **Biome noExcessiveCognitiveComplexity max 15 requires extracting helpers from command handlers**: Biome enforces \`noExcessiveCognitiveComplexity\` with max 15. Stricli \`func()\` handlers easily exceed this with fetch loops, pagination, and conditionals. Fix: extract logic into standalone helper functions — this also improves testability since \`func()\` handlers require full context setup. Keep \`func()\` as a thin orchestrator calling exported helpers. Property-based tests on extracted functions drove coverage from 78% to 97%. Split further if a helper still exceeds 15.
-
-<!-- lore:019d2548-3ea0-7802-8390-aac4749d6ca6 -->
-* **Biome prefers .at(-1) over arr\[arr.length - 1] indexing**: Biome's \`useAtIndex\` rule flags \`arr\[arr.length - 1]\` patterns. Use \`arr.at(-1)\` instead. This applies throughout the codebase — the lint check will fail CI otherwise.
-
-<!-- lore:019d2548-3ea3-7a9b-b5bb-13bf595fd509 -->
-* **Biome requires block statements — no single-line if/break/return**: Biome's \`useBlockStatements\` rule rejects braceless control flow like \`if (match) return match.id;\` or \`if (!nextCursor) break;\`. Always wrap in braces: \`if (match) { return match.id; }\`. Similarly, nested ternaries are banned (\`noNestedTernary\`) — use if/else chains or extract into a variable with sequential assignments.
+* **Biome noExcessiveCognitiveComplexity max 15 requires extracting helpers from command handlers**: Biome lint rules that frequently trip developers in this codebase: (1) \`noExcessiveCognitiveComplexity\` max 15 — extract helpers from Stricli \`func()\` handlers to stay under limit; improves testability too. (2) \`useBlockStatements\` — always use braces, no braceless \`if/return/break\`. Nested ternaries banned (\`noNestedTernary\`) — use if/else or sequential assignments. (3) \`useAtIndex\` — use \`arr.at(-1)\` not \`arr\[arr.length - 1]\`. (4) \`noStaticOnlyClass\` — use branded instances instead of static-only classes.
 
 <!-- lore:019c8ee1-affd-7198-8d01-54aa164cde35 -->
 * **brew is not in VALID\_METHODS but Homebrew formula passes --method brew**: Homebrew install: \`isHomebrewInstall()\` detects via Cellar realpath (checked before stored install info). Upgrade command tells users \`brew upgrade getsentry/tools/sentry\`. Formula runs \`sentry cli setup --method brew --no-modify-path\` as post\_install. Version pinning throws 'unsupported\_operation'. Uses .gz artifacts. Tap at getsentry/tools.
@@ -963,7 +957,7 @@ mock.module("./some-module", () => ({
 * **Non-essential DB cache writes should be guarded with try-catch**: Non-essential DB cache writes (e.g., \`setUserInfo()\`) must be wrapped in try-catch so a broken DB doesn't crash a command whose primary operation succeeded. In login.ts, \`getCurrentUser()\` failure after token save must not block auth — log warning, continue. Exception: \`getUserRegions()\` failure should \`clearAuth()\` and fail hard (indicates invalid token).
 
 <!-- lore:019d2c91-bc3d-7be6-ac74-ce926182526d -->
-* **Sentry CLI command docs are auto-generated from Stricli route tree with CI freshness check**: Command reference docs in \`docs/src/content/docs/commands/\*.md\` are auto-generated by \`script/generate-command-docs.ts\` using Stricli route tree introspection (\`src/lib/introspect.ts\`). Content between \`\<!-- GENERATED:START -->\` and \`\<!-- GENERATED:END -->\` markers is regenerated; hand-written examples go below the end marker. Run \`bun run generate:command-docs\` after changing command parameters/flags/docs. CI check \`bun run check:command-docs\` fails if docs are stale (runs in same job as \`check:skill\`). The \`cli/\` subdirectory was flattened into a single \`cli.md\`. Skill reference files under \`plugins/sentry-cli/\` are also regenerated separately via \`generate:skill\`.
+* **Sentry CLI command docs are auto-generated from Stricli route tree with CI freshness check**: Command docs in \`docs/src/content/docs/commands/\*.md\` and SKILL.md are auto-generated from Stricli route tree introspection (\`src/lib/introspect.ts\`). Content between \`\<!-- GENERATED:START/END -->\` markers is regenerated; hand-written examples go below. Run \`bun run generate:command-docs\` and \`bun run generate:skill\` after changing command parameters/flags/docs. CI checks \`check:command-docs\` and \`check:skill\` fail if stale.
 
 <!-- lore:019ce2c5-c9a8-7219-bdb8-154ead871d27 -->
 * **Stricli buildCommand output config injects json flag into func params**: When a Stricli command uses \`output: { json: true, human: formatFn }\`, \`--json\` and \`--fields\` flags are auto-injected. The \`func\` handler receives these in its first parameter — type explicitly (e.g., \`flags: { json?: boolean }\`) to access them. Commands with interactive side effects (browser prompts, QR codes) should check \`flags.json\` and skip them when true.

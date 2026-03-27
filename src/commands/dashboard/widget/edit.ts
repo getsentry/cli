@@ -141,6 +141,7 @@ export const editCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
+        placeholder: "org/project/dashboard",
         brief: "[<org/project>] <dashboard-id-or-title>",
         parse: String,
       },

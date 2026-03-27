@@ -64,16 +64,51 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
+### OAuth login (recommended)
+
 ```bash
-# OAuth login (recommended)
 sentry auth login
+```
 
-# Login with an API token
+1. A URL and device code will be displayed
+2. Open the URL in your browser
+3. Enter the code when prompted
+4. Authorize the application
+5. The CLI automatically receives your token
+
+### Token login
+
+```bash
 sentry auth login --token YOUR_SENTRY_API_TOKEN
+```
 
-# Check auth status
+### Self-hosted Sentry
+
+```bash
+SENTRY_URL=https://sentry.example.com sentry auth login
+```
+
+For token-based auth with self-hosted:
+
+```bash
+SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
+```
+
+See [Self-Hosted Sentry](../self-hosted/) for details.
+
+### Check auth status
+
+```bash
 sentry auth status
+```
 
+```
+Authenticated as: username
+Organization: my-org
+Token expires: 2024-12-31
+```
+
+```bash
 # Show the raw token
 sentry auth status --show-token
 
@@ -83,4 +118,14 @@ sentry auth whoami
 
 ## Credential Storage
 
-Auth tokens are stored securely in a local SQLite database at `~/.sentry/config.db`.
+Auth tokens are stored in a SQLite database at `~/.sentry/config.db` with restricted file permissions.
+
+## Environment Variable Precedence
+
+The CLI checks for auth tokens in the following order, using the first one found:
+
+1. `SENTRY_AUTH_TOKEN` environment variable (legacy)
+2. `SENTRY_TOKEN` environment variable
+3. The stored token in the SQLite database
+
+When a token comes from an environment variable, the CLI skips expiry checks and automatic refresh.

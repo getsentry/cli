@@ -37,22 +37,60 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
+### GET requests
+
 ```bash
-# GET request (default)
+# List organizations
 sentry api /api/0/organizations/
 
-# POST with JSON body
-sentry api /api/0/organizations/my-org/issues/ -X POST -d '{"status": "resolved"}'
+# Get a specific issue
+sentry api /api/0/issues/123456789/
+```
 
-# Pass individual fields (auto-encoded as JSON body)
-sentry api /api/0/projects/my-org/my-project/ -X PUT -F name=new-name
+### POST requests
 
+```bash
+# Create a release
+sentry api /api/0/organizations/my-org/releases/ \
+  -X POST -F version=1.0.0
+
+# With inline JSON body
+sentry api /api/0/organizations/my-org/issues/ \
+  -X POST -d '{"status": "resolved"}'
+```
+
+### PUT requests
+
+```bash
+# Update an issue status
+sentry api /issues/123456789/ \
+  -X PUT -F status=resolved
+
+# Assign an issue
+sentry api /issues/123456789/ \
+  -X PUT --field assignedTo="user@example.com"
+```
+
+### DELETE requests
+
+```bash
+sentry api /projects/my-org/my-project/ -X DELETE
+```
+
+### Advanced usage
+
+```bash
 # Add custom headers
 sentry api /api/0/organizations/ -H "X-Custom: value"
 
 # Read body from a file
-sentry api /api/0/projects/my-org/my-project/releases/ -X POST -i release.json
+sentry api /api/0/projects/my-org/my-project/releases/ -X POST --input release.json
+
+# Verbose mode (shows full HTTP request/response)
+sentry api /api/0/organizations/ --verbose
 
 # Preview the request without sending
 sentry api /api/0/organizations/ --dry-run
 ```
+
+For full API documentation, see the [Sentry API Reference](https://docs.sentry.io/api/).

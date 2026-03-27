@@ -34,7 +34,7 @@ List logs from a project
 | `severity` | string \| null | Severity level (error, warning, info, debug) |
 | `trace` | string \| null | Trace ID for correlation |
 
-### `sentry log view <args...>`
+### `sentry log view <org/project/log-id...>`
 
 View details of one or more log entries
 

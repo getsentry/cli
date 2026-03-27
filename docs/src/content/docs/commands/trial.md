@@ -38,6 +38,9 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 # List all trials for the current org
 sentry trial list
 
+# List trials for a specific org
+sentry trial list my-org
+
 # Start a Seer trial
 sentry trial start seer
 

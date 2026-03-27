@@ -93,6 +93,12 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 ```bash
 # List issues in a specific project
 sentry issue list my-org/frontend
+
+# All projects in an org
+sentry issue list my-org/
+
+# Search for a project across organizations
+sentry issue list frontend
 ```
 
 ```
@@ -135,12 +141,33 @@ Latest event:
   URL: https://example.com/app
 ```
 
-### Seer AI Requirements
+```bash
+# Open in browser
+sentry issue view FRONT-ABC -w
+```
 
-The `explain` and `plan` commands require:
+### Explain and plan with Seer AI
+
+```bash
+# Analyze root cause (may take a few minutes for new issues)
+sentry issue explain 123456789
+
+# By short ID with org prefix
+sentry issue explain my-org/MYPROJECT-ABC
+
+# Force a fresh analysis
+sentry issue explain 123456789 --force
+
+# Generate a fix plan (requires explain to be run first)
+sentry issue plan 123456789
+
+# Specify which root cause to plan for
+sentry issue plan 123456789 --cause 0
+```
+
+**Requirements:**
 
 - Seer AI enabled for your organization
 - GitHub integration configured with repository access
 - Code mappings set up to link stack frames to source files
-
-Root cause analysis must be completed (`sentry issue explain`) before generating a plan (`sentry issue plan`).
+- Root cause analysis must be completed (`sentry issue explain`) before generating a plan

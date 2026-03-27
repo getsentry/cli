@@ -65,6 +65,9 @@ sentry span list -q "duration:>100ms" --period 24h
 
 # List spans within a specific trace
 sentry span list abc123def456abc123def456abc12345
+
+# Paginate through results
+sentry span list -c next
 ```
 
 ### View spans
