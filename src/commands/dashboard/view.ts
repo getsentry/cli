@@ -219,6 +219,13 @@ export const viewCommand = buildCommand({
       const stop = () => controller.abort();
       process.once("SIGINT", stop);
 
+      // Library mode: honor external abort signal (e.g., consumer break)
+      const externalSignal = (this.process as { abortSignal?: AbortSignal })
+        ?.abortSignal;
+      if (externalSignal) {
+        externalSignal.addEventListener("abort", stop, { once: true });
+      }
+
       let isFirstRender = true;
 
       try {

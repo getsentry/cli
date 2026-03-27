@@ -88,37 +88,22 @@ describe("createSentrySDK() library API", () => {
     { timeout: 15_000 }
   );
 
-  test("sdk.run rejects streaming flag --follow", async () => {
+  test("sdk.run returns AsyncIterable for streaming flag --follow", () => {
     const sdk = createSentrySDK();
-    try {
-      await sdk.run("log", "list", "--follow");
-      expect.unreachable("Should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(SentryError);
-      expect((err as SentryError).message).toContain("--follow");
-      expect((err as SentryError).message).toContain("not supported");
-    }
+    const result = sdk.run("log", "list", "--follow");
+    // Streaming flags return an AsyncIterable, not a Promise
+    expect(Symbol.asyncIterator in (result as object)).toBe(true);
   });
 
-  test("sdk.run rejects streaming flag --refresh", async () => {
+  test("sdk.run returns AsyncIterable for streaming flag --refresh", () => {
     const sdk = createSentrySDK();
-    try {
-      await sdk.run("issue", "list", "--refresh");
-      expect.unreachable("Should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(SentryError);
-      expect((err as SentryError).message).toContain("--refresh");
-    }
+    const result = sdk.run("issue", "list", "--refresh");
+    expect(Symbol.asyncIterator in (result as object)).toBe(true);
   });
 
-  test("sdk.run rejects streaming short flag -f", async () => {
+  test("sdk.run returns AsyncIterable for streaming short flag -f", () => {
     const sdk = createSentrySDK();
-    try {
-      await sdk.run("log", "list", "-f");
-      expect.unreachable("Should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(SentryError);
-      expect((err as SentryError).message).toContain("-f");
-    }
+    const result = sdk.run("log", "list", "-f");
+    expect(Symbol.asyncIterator in (result as object)).toBe(true);
   });
 });

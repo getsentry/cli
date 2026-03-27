@@ -226,6 +226,14 @@ const CORE_DECLARATIONS = `export type SentryOptions = {
   text?: boolean;
   /** Working directory (affects DSN detection, project root). Defaults to process.cwd(). */
   cwd?: string;
+  /** AbortSignal to cancel streaming commands (e.g. log list --follow). */
+  signal?: AbortSignal;
+};
+
+export type AsyncChannel<T> = AsyncIterable<T> & {
+  push(value: T): void;
+  close(): void;
+  error(err: Error): void;
 };
 
 export declare class SentryError extends Error {
@@ -235,8 +243,8 @@ export declare class SentryError extends Error {
 }
 
 export declare function createSentrySDK(options?: SentryOptions): SentrySDK & {
-  /** Run an arbitrary CLI command (escape hatch). */
-  run(...args: string[]): Promise<unknown>;
+  /** Run an arbitrary CLI command (escape hatch). Streaming flags return AsyncIterable. */
+  run(...args: string[]): Promise<unknown> | AsyncIterable<unknown>;
 };
 
 export default createSentrySDK;

@@ -34,10 +34,10 @@ const INTERNAL_FLAGS = new Set([
   "log-level",
   "verbose",
   "fields",
-  // Streaming flags produce infinite output — not supported in library mode
-  "refresh",
-  "follow",
 ]);
+
+/** Flags that trigger streaming mode — included in params but change return type */
+const STREAMING_FLAGS = new Set(["refresh", "follow"]);
 
 /** Regex for stripping angle-bracket/ellipsis decorators from placeholder names */
 const PLACEHOLDER_CLEAN_RE = /[<>.]/g;
@@ -341,13 +341,12 @@ function generateParamsInterface(
   return { name: interfaceName, code };
 }
 
-/** Generate the method body (invoke call) for a command. */
-function generateMethodBody(
+/** Build the flag object expression and positional expression for an invoke call. */
+function buildInvokeArgs(
   path: string[],
   positional: PositionalInfo,
-  flags: SdkFlagInfo[],
-  returnType: string
-): string {
+  flags: SdkFlagInfo[]
+): { flagObj: string; positionalExpr: string; pathStr: string } {
   const flagEntries = flags.map((f) => {
     const camel = camelCase(f.name);
     if (f.name !== camel) {
@@ -368,8 +367,65 @@ function generateMethodBody(
 
   const flagObj =
     flagEntries.length > 0 ? `{ ${flagEntries.join(", ")} }` : "{}";
+  const pathStr = JSON.stringify(path);
 
-  return `invoke<${returnType}>(${JSON.stringify(path)}, ${flagObj}, ${positionalExpr})`;
+  return { flagObj, positionalExpr, pathStr };
+}
+
+/**
+ * Generate the method body (invoke call) for a non-streaming command.
+ * Uses `as Promise<T>` to narrow the invoke union return type, since
+ * non-streaming calls never pass `meta.streaming` and always return a Promise.
+ */
+function generateMethodBody(
+  path: string[],
+  positional: PositionalInfo,
+  flags: SdkFlagInfo[],
+  returnType: string
+): string {
+  const { flagObj, positionalExpr, pathStr } = buildInvokeArgs(
+    path,
+    positional,
+    flags
+  );
+  return `invoke<${returnType}>(${pathStr}, ${flagObj}, ${positionalExpr}) as Promise<${returnType}>`;
+}
+
+/** Options for generating a streaming method body. */
+type StreamingMethodOpts = {
+  path: string[];
+  positional: PositionalInfo;
+  flags: SdkFlagInfo[];
+  returnType: string;
+  streamingFlagNames: string[];
+  indent: string;
+};
+
+/**
+ * Generate the method body for a streaming-capable command.
+ *
+ * Detects at runtime whether any streaming flag is present and passes
+ * `{ streaming: true }` to the invoker when it is.
+ */
+function generateStreamingMethodBody(opts: StreamingMethodOpts): string {
+  const { flagObj, positionalExpr, pathStr } = buildInvokeArgs(
+    opts.path,
+    opts.positional,
+    opts.flags
+  );
+
+  // Build the streaming condition: params?.follow !== undefined || params?.refresh !== undefined
+  const conditions = opts.streamingFlagNames
+    .map((name) => `params?.${camelCase(name)} !== undefined`)
+    .join(" || ");
+
+  const lines = [
+    "{",
+    `${opts.indent}    const streaming = ${conditions};`,
+    `${opts.indent}    return invoke<${opts.returnType}>(${pathStr}, ${flagObj}, ${positionalExpr}, { streaming });`,
+    `${opts.indent}  }`,
+  ];
+  return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -472,6 +528,12 @@ for (const { path, command } of allCommands) {
   const flags = extractSdkFlags(command);
   const positional = derivePositional(command);
 
+  // Detect streaming-capable commands
+  const streamingFlagNames = flags
+    .filter((f) => STREAMING_FLAGS.has(f.name))
+    .map((f) => f.name);
+  const isStreaming = streamingFlagNames.length > 0;
+
   // Generate return type from schema
   const schemaTypeName = `${buildTypeName(path)}Result`;
   const returnTypeInfo = generateReturnType(command, schemaTypeName);
@@ -493,6 +555,10 @@ for (const { path, command } of allCommands) {
   let paramsArg: string;
   let body: string;
 
+  const brief = command.brief || path.join(" ");
+  const methodName = path.at(-1) ?? path[0];
+  const indent = "    ".repeat(path.length - 1);
+
   if (hasVariadicPositional) {
     // Variadic: (params: XParams, ...positional: string[]) or (params?: XParams, ...positional: string[])
     // Required flags make params required even with variadic positionals
@@ -500,33 +566,76 @@ for (const { path, command } of allCommands) {
     paramsArg = params
       ? `params${paramsOpt}: ${params.name}, ...positional: string[]`
       : "...positional: string[]";
-    body = generateMethodBody(path, positional, flags, returnType);
+    body = isStreaming
+      ? generateStreamingMethodBody({
+          path,
+          positional,
+          flags,
+          returnType,
+          streamingFlagNames,
+          indent,
+        })
+      : generateMethodBody(path, positional, flags, returnType);
   } else if (params) {
     const paramsRequired = hasRequiredFlags;
     paramsArg = paramsRequired
       ? `params: ${params.name}`
       : `params?: ${params.name}`;
-    body = generateMethodBody(path, positional, flags, returnType);
+    body = isStreaming
+      ? generateStreamingMethodBody({
+          path,
+          positional,
+          flags,
+          returnType,
+          streamingFlagNames,
+          indent,
+        })
+      : generateMethodBody(path, positional, flags, returnType);
   } else {
     body = generateMethodBody(path, positional, flags, returnType);
     paramsArg = "";
   }
 
-  const brief = command.brief || path.join(" ");
-  const methodName = path.at(-1) ?? path[0];
-  const indent = "    ".repeat(path.length - 1);
   const sig = paramsArg ? `(${paramsArg})` : "()";
-  const methodCode = [
-    `${indent}    /** ${brief} */`,
-    `${indent}    ${methodName}: ${sig}: Promise<${returnType}> =>`,
-    `${indent}      ${body},`,
-  ].join("\n");
 
-  // Type declaration: method signature without implementation
-  const typeDecl = [
-    `${indent}    /** ${brief} */`,
-    `${indent}    ${methodName}${sig}: Promise<${returnType}>;`,
-  ].join("\n");
+  let methodCode: string;
+  let typeDecl: string;
+
+  if (isStreaming) {
+    // Streaming commands use a function body (not arrow expression)
+    // because they need runtime streaming detection
+    methodCode = [
+      `${indent}    /** ${brief} */`,
+      `${indent}    ${methodName}: ${sig} => ${body},`,
+    ].join("\n");
+
+    // Type declaration: callable interface with overloaded signatures
+    const streamingFlagTypes = streamingFlagNames.map((name) => {
+      const flag = flags.find((f) => f.name === name);
+      return `${camelCase(name)}: ${flag?.tsType ?? "string"}`;
+    });
+    const streamingConstraint = streamingFlagTypes.join("; ");
+
+    typeDecl = [
+      `${indent}    /** ${brief} */`,
+      `${indent}    ${methodName}: {`,
+      `${indent}      (params: ${params?.name ?? "Record<string, never>"} & { ${streamingConstraint} }): AsyncIterable<unknown>;`,
+      `${indent}      ${sig}: Promise<${returnType}>;`,
+      `${indent}    };`,
+    ].join("\n");
+  } else {
+    methodCode = [
+      `${indent}    /** ${brief} */`,
+      `${indent}    ${methodName}: ${sig}: Promise<${returnType}> =>`,
+      `${indent}      ${body},`,
+    ].join("\n");
+
+    // Type declaration: method signature without implementation
+    typeDecl = [
+      `${indent}    /** ${brief} */`,
+      `${indent}    ${methodName}${sig}: Promise<${returnType}>;`,
+    ].join("\n");
+  }
 
   insertMethod(root, path, methodCode, typeDecl);
 }

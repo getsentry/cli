@@ -151,6 +151,7 @@ const sdk = createSentrySDK({ token: "...", text: true, cwd: "/my/project" });
 | `project` | `string` | Auto-detected | Default project slug |
 | `text` | `boolean` | `false` | Return human-readable text instead of parsed JSON (`run()` only) |
 | `cwd` | `string` | `process.cwd()` | Working directory for DSN auto-detection |
+| `signal` | `AbortSignal` | — | Abort signal for cancelling streaming commands |
 
 ## Return Values
 
@@ -217,7 +218,49 @@ Calls should be sequential (awaited one at a time).
 - **Node.js >= 22** (required for `node:sqlite`)
 - Or **Bun** (any recent version)
 
-:::caution
-Streaming flags (`--refresh`, `--follow`) are not supported in library mode
-and will throw a `SentryError`. Use the CLI binary directly for live-streaming commands.
+## Streaming Commands
+
+Two commands support real-time streaming: `log list --follow` and `dashboard view --refresh`.
+When using streaming flags, methods return an `AsyncIterable` instead of a `Promise`:
+
+```typescript
+const sdk = createSentrySDK({ token: "sntrys_..." });
+
+// Stream logs as they arrive (polls every 5 seconds)
+for await (const log of sdk.log.list({ follow: "5", orgProject: "acme/backend" })) {
+  console.log(log);
+}
+
+// Auto-refresh dashboard (polls every 30 seconds)
+for await (const snapshot of sdk.run("dashboard", "view", "123", "--refresh", "30")) {
+  console.log(snapshot);
+}
+
+// Stop streaming by breaking out of the loop
+for await (const log of sdk.log.list({ follow: "2" })) {
+  if (someCondition) break; // Streaming stops immediately
+}
+```
+
+### Cancellation
+
+`break` in a `for await...of` loop immediately signals the streaming command to stop.
+You can also pass an `AbortSignal` via `SentryOptions` for programmatic cancellation:
+
+```typescript
+const controller = new AbortController();
+const sdk = createSentrySDK({ token: "...", signal: controller.signal });
+
+// Cancel after 30 seconds
+setTimeout(() => controller.abort(), 30_000);
+
+for await (const log of sdk.log.list({ follow: "5" })) {
+  console.log(log);
+}
+// Loop exits when signal fires
+```
+
+:::note
+Concurrent streaming calls are not supported. Each streaming invocation
+uses an isolated environment — only one can be active at a time.
 :::
