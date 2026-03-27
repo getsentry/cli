@@ -485,6 +485,57 @@ describe("runWizard", () => {
       expect(payload.operation).toBe("list-dir");
     });
 
+    test("uses detail field for spinner message when present", async () => {
+      mockStartResult = {
+        status: "suspended",
+        suspended: [["install-deps"]],
+        steps: {
+          "install-deps": {
+            suspendPayload: {
+              type: "local-op",
+              operation: "run-commands",
+              detail: "npm install @sentry/nextjs @sentry/profiling-node",
+              cwd: "/app",
+              params: {
+                commands: ["npm install @sentry/nextjs @sentry/profiling-node"],
+              },
+            },
+          },
+        },
+      };
+      mockResumeResults = [{ status: "success" }];
+
+      await runWizard(makeOptions());
+
+      expect(spinnerMock.message).toHaveBeenCalledWith(
+        "npm install @sentry/nextjs @sentry/profiling-node"
+      );
+    });
+
+    test("falls back to generic message when detail is absent", async () => {
+      mockStartResult = {
+        status: "suspended",
+        suspended: [["install-deps"]],
+        steps: {
+          "install-deps": {
+            suspendPayload: {
+              type: "local-op",
+              operation: "run-commands",
+              cwd: "/app",
+              params: { commands: ["npm install @sentry/nextjs"] },
+            },
+          },
+        },
+      };
+      mockResumeResults = [{ status: "success" }];
+
+      await runWizard(makeOptions());
+
+      expect(spinnerMock.message).toHaveBeenCalledWith(
+        "Installing dependencies (run-commands)..."
+      );
+    });
+
     test("dispatches interactive payload to handleInteractive", async () => {
       mockStartResult = {
         status: "suspended",

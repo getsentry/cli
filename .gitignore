@@ -57,3 +57,4 @@ src/generated/
 
 # OpenCode
 .opencode/
+opencode.json*

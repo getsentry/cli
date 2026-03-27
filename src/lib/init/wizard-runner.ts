@@ -67,8 +67,10 @@ async function handleSuspendedStep(
   const label = STEP_LABELS[stepId] ?? stepId;
 
   if (payload.type === "local-op") {
-    const detail = payload.operation ? ` (${payload.operation})` : "";
-    spin.message(`${label}${detail}...`);
+    const message = payload.detail
+      ? payload.detail
+      : `${label} (${payload.operation})...`;
+    spin.message(message);
 
     const localResult = await handleLocalOp(payload, options);
 

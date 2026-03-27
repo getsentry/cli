@@ -30,6 +30,8 @@ export type LocalOpPayload =
 export type ListDirPayload = {
   type: "local-op";
   operation: "list-dir";
+  /** Human-readable spinner hint from the server (≤ 120 chars, sensitive values redacted). */
+  detail?: string;
   cwd: string;
   params: {
     path: string;
@@ -42,6 +44,8 @@ export type ListDirPayload = {
 export type ReadFilesPayload = {
   type: "local-op";
   operation: "read-files";
+  /** Human-readable spinner hint from the server (≤ 120 chars, sensitive values redacted). */
+  detail?: string;
   cwd: string;
   params: {
     paths: string[];
@@ -52,6 +56,8 @@ export type ReadFilesPayload = {
 export type FileExistsBatchPayload = {
   type: "local-op";
   operation: "file-exists-batch";
+  /** Human-readable spinner hint from the server (≤ 120 chars, sensitive values redacted). */
+  detail?: string;
   cwd: string;
   params: {
     paths: string[];
@@ -61,6 +67,8 @@ export type FileExistsBatchPayload = {
 export type RunCommandsPayload = {
   type: "local-op";
   operation: "run-commands";
+  /** Human-readable spinner hint from the server (≤ 120 chars, sensitive values redacted). */
+  detail?: string;
   cwd: string;
   params: {
     commands: string[];
@@ -71,6 +79,8 @@ export type RunCommandsPayload = {
 export type ApplyPatchsetPayload = {
   type: "local-op";
   operation: "apply-patchset";
+  /** Human-readable spinner hint from the server (≤ 120 chars, sensitive values redacted). */
+  detail?: string;
   cwd: string;
   params: {
     patches: Array<{
@@ -84,6 +94,8 @@ export type ApplyPatchsetPayload = {
 export type CreateSentryProjectPayload = {
   type: "local-op";
   operation: "create-sentry-project";
+  /** Human-readable spinner hint from the server (≤ 120 chars, sensitive values redacted). */
+  detail?: string;
   cwd: string;
   params: {
     name: string;
