@@ -21,7 +21,6 @@ import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { openInBrowser } from "../../../lib/browser.js";
 import {
   advancePaginationState,
-  buildOrgContextKey,
   buildPaginationContextKey,
   CURSOR_SEP,
   decodeCompoundCursor,
@@ -42,7 +41,6 @@ import {
   buildListLimitFlag,
   LIST_BASE_ALIASES,
   LIST_TARGET_POSITIONAL,
-  paginationHint,
   parseCursorFlag,
   targetPatternExplanation,
 } from "../../../lib/list-command.js";
@@ -519,85 +517,6 @@ async function handleResolvedOrgs(
   };
 }
 
-/**
- * Handle org-all mode: cursor-paginated listing of all metric alert rules in an org.
- *
- * Metric alerts are org-scoped, so this uses a single org-level cursor (not
- * compound) with full bidirectional navigation.
- */
-async function handleOrgAllMetricAlerts(
-  org: string,
-  flags: ListFlags
-): Promise<MetricAlertListResult> {
-  const contextKey = buildOrgContextKey(org);
-  const { cursor: startCursor, direction } = resolveCursor(
-    flags.cursor,
-    PAGINATION_KEY,
-    contextKey
-  );
-
-  const fetchResult = await withProgress(
-    { message: `Fetching metric alert rules for ${org}...`, json: flags.json },
-    () => fetchRulesForOrg(org, { limit: flags.limit, startCursor })
-  );
-
-  if (!fetchResult.success) {
-    throw fetchResult.error;
-  }
-
-  const { rules, nextCursor } = fetchResult.data;
-
-  advancePaginationState(PAGINATION_KEY, contextKey, direction, nextCursor);
-  const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
-
-  const filteredRows: MetricAlertRow[] = flags.query
-    ? rules
-        .filter((rule) =>
-          rule.name.toLowerCase().includes(flags.query?.toLowerCase() ?? "")
-        )
-        .map((rule) => ({ rule, orgSlug: org }))
-    : rules.map((rule) => ({ rule, orgSlug: org }));
-
-  const nav = paginationHint({
-    hasPrev,
-    hasMore: !!nextCursor,
-    prevHint: `sentry alert metrics list ${org}/ -c prev`,
-    nextHint: `sentry alert metrics list ${org}/ -c next`,
-  });
-
-  if (filteredRows.length === 0) {
-    const hintParts: string[] = [`No metric alert rules found in '${org}'.`];
-    if (nav) {
-      hintParts.push(nav);
-    }
-    return {
-      items: [],
-      hasMore: !!nextCursor,
-      hasPrev,
-      hint: hintParts.join("\n"),
-    };
-  }
-
-  const hintParts: string[] = [
-    `Showing ${filteredRows.length} rule(s)${nextCursor ? " (more available)" : ""}.`,
-    `Metric alerts: ${buildMetricAlertsUrl(org)}`,
-  ];
-  if (nav) {
-    hintParts.push(nav);
-  }
-
-  return {
-    items: filteredRows.map((r) => r.rule),
-    displayRows: filteredRows,
-    hasMore: !!nextCursor,
-    hasPrev,
-    nextCursor,
-    title: `Metric alert rules in ${org}`,
-    footerMode: "single",
-    hint: hintParts.join("\n"),
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Human output
 // ---------------------------------------------------------------------------
@@ -739,13 +658,18 @@ export const listCommand = buildListCommand("alert", {
       flags,
       parsed,
       orgSlugMatchBehavior: "redirect",
-      // Multi-org modes handle compound cursor pagination via handleResolvedOrgs
-      allowCursorInModes: ["auto-detect", "explicit", "project-search"],
+      // All modes use per-org fetching with compound cursor support
+      allowCursorInModes: [
+        "auto-detect",
+        "explicit",
+        "project-search",
+        "org-all",
+      ],
       overrides: {
         "auto-detect": resolveAndHandle,
         explicit: resolveAndHandle,
         "project-search": resolveAndHandle,
-        "org-all": (ctx) => handleOrgAllMetricAlerts(ctx.parsed.org, flags),
+        "org-all": resolveAndHandle,
       },
     })) as MetricAlertListResult;
 
