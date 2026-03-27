@@ -228,6 +228,10 @@ export const addCommand = buildCommand({
     );
     const updateBody = prepareDashboardForUpdate(current);
 
+    // Always run auto-layout first to get default position and dimensions,
+    // then override with any explicit user flags.
+    newWidget = assignDefaultLayout(newWidget, updateBody.widgets);
+
     const hasExplicitLayout =
       flags.x !== undefined ||
       flags.y !== undefined ||
@@ -235,9 +239,6 @@ export const addCommand = buildCommand({
       flags.height !== undefined;
 
     if (hasExplicitLayout) {
-      // Use auto-layout as the base for any unspecified dimensions, then
-      // override with the user's explicit values.
-      newWidget = assignDefaultLayout(newWidget, updateBody.widgets);
       const baseLayout = newWidget.layout ?? FALLBACK_LAYOUT;
       newWidget = {
         ...newWidget,
@@ -249,8 +250,13 @@ export const addCommand = buildCommand({
           ...(flags.height !== undefined && { h: flags.height }),
         },
       };
-    } else {
-      newWidget = assignDefaultLayout(newWidget, updateBody.widgets);
+      // Re-validate the merged layout to catch cross-dimensional overflow
+      // (e.g., --x 5 on a table widget with auto-width 6 → 5+6=11 > 6)
+      const finalLayout = newWidget.layout ?? baseLayout;
+      validateWidgetLayout(
+        { x: finalLayout.x, width: finalLayout.w },
+        finalLayout
+      );
     }
 
     updateBody.widgets.push(newWidget);

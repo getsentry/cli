@@ -439,6 +439,22 @@ describe("dashboard widget add", () => {
     expect(err.message).toContain("--width");
   });
 
+  test("throws ValidationError when --x overflows with auto-layout default width", async () => {
+    // table display defaults to w=6, so --x 1 would produce x=1 + w=6 = 7 > 6
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    const err = await func
+      .call(
+        context,
+        { json: false, display: "table", query: ["count"], x: 1 },
+        "123",
+        "Wide Table"
+      )
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain("overflows the grid");
+  });
+
   test("throws ValidationError for negative y", async () => {
     const { context } = createMockContext();
     const func = await addCommand.loader();
