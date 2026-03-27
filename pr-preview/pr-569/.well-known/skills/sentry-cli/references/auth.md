@@ -53,13 +53,14 @@ Show the currently authenticated user
 **Examples:**
 
 ```bash
-# OAuth login (recommended)
 sentry auth login
 
-# Login with an API token
 sentry auth login --token YOUR_SENTRY_API_TOKEN
 
-# Check auth status
+SENTRY_URL=https://sentry.example.com sentry auth login
+
+SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
+
 sentry auth status
 
 # Show the raw token

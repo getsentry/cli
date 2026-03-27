@@ -11,7 +11,7 @@ requires:
 
 View Sentry events
 
-### `sentry event view <args...>`
+### `sentry event view <org/project/event-id...>`
 
 View details of a specific event
 

@@ -21,7 +21,7 @@ List dashboards
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
-### `sentry dashboard view <args...>`
+### `sentry dashboard view <org/project/dashboard...>`
 
 View a dashboard
 
@@ -31,11 +31,11 @@ View a dashboard
 - `-r, --refresh <value> - Auto-refresh interval in seconds (default: 60, min: 10)`
 - `-t, --period <value> - Time period override (e.g., "24h", "7d", "14d")`
 
-### `sentry dashboard create <args...>`
+### `sentry dashboard create <org/project/title...>`
 
 Create a dashboard
 
-### `sentry dashboard widget add <args...>`
+### `sentry dashboard widget add <org/project/dashboard/title...>`
 
 Add a widget to a dashboard
 
@@ -48,7 +48,7 @@ Add a widget to a dashboard
 - `-s, --sort <value> - Order by (prefix - for desc, e.g. -count)`
 - `-n, --limit <value> - Result limit`
 
-### `sentry dashboard widget edit <args...>`
+### `sentry dashboard widget edit <org/project/dashboard...>`
 
 Edit a widget in a dashboard
 
@@ -64,7 +64,7 @@ Edit a widget in a dashboard
 - `-s, --sort <value> - Order by (prefix - for desc, e.g. -count)`
 - `-n, --limit <value> - Result limit`
 
-### `sentry dashboard widget delete <args...>`
+### `sentry dashboard widget delete <org/project/dashboard...>`
 
 Delete a widget from a dashboard
 
