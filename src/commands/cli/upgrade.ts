@@ -36,6 +36,10 @@ import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import { withProgress } from "../../lib/polling.js";
 import {
+  type ChangelogSummary,
+  fetchChangelog,
+} from "../../lib/release-notes.js";
+import {
   detectInstallationMethod,
   executeUpgrade,
   fetchLatestVersion,
@@ -76,6 +80,8 @@ export type UpgradeResult = {
   offline?: boolean;
   /** Warnings to display (e.g., PATH shadowing from old package manager install) */
   warnings?: string[];
+  /** Changelog summary for the version range. Absent for offline or on fetch failure. */
+  changelog?: ChangelogSummary;
 };
 
 type UpgradeFlags = {
@@ -592,6 +598,50 @@ function persistChannel(
   }
 }
 
+/**
+ * Start a best-effort changelog fetch in parallel with the binary download.
+ *
+ * Returns a promise that resolves to the changelog or undefined. Never
+ * throws — errors are swallowed so the upgrade is not blocked.
+ */
+function startChangelogFetch(
+  channel: ReleaseChannel,
+  currentVersion: string,
+  targetVersion: string,
+  offline: boolean
+): Promise<ChangelogSummary | undefined> {
+  if (offline || currentVersion === targetVersion) {
+    return Promise.resolve(undefined);
+  }
+  return fetchChangelog({
+    channel,
+    fromVersion: currentVersion,
+    toVersion: targetVersion,
+  })
+    .then((result) => result ?? undefined)
+    .catch(() => undefined as undefined);
+}
+
+/**
+ * Build a check-only result with optional changelog, ready to yield.
+ */
+async function buildCheckResultWithChangelog(opts: {
+  target: string;
+  versionArg: string | undefined;
+  method: InstallationMethod;
+  channel: ReleaseChannel;
+  flags: UpgradeFlags;
+  offline: boolean;
+  changelogPromise: Promise<ChangelogSummary | undefined>;
+}): Promise<UpgradeResult> {
+  const result = buildCheckResult(opts);
+  if (opts.offline) {
+    result.offline = true;
+  }
+  result.changelog = await opts.changelogPromise;
+  return result;
+}
+
 export const upgradeCommand = buildCommand({
   docs: {
     brief: "Update the Sentry CLI to the latest version",
@@ -672,25 +722,48 @@ export const upgradeCommand = buildCommand({
             persistChannel(channel, channelChanged, version),
         })
     );
+    // Early exit for check-only (online) and up-to-date results.
     if (resolved.kind === "done") {
-      return yield new CommandOutput(resolved.result);
+      const result = resolved.result;
+      // For --check with a version diff, fetch changelog before returning.
+      if (
+        result.action === "checked" &&
+        result.currentVersion !== result.targetVersion
+      ) {
+        result.changelog = await startChangelogFetch(
+          channel,
+          CLI_VERSION,
+          result.targetVersion,
+          false
+        );
+      }
+      return yield new CommandOutput(result);
     }
 
     const { target, offline } = resolved;
 
-    // --check with offline just reports the cached version
+    // Start changelog fetch early — it runs in parallel with the download.
+    const changelogPromise = startChangelogFetch(
+      channel,
+      CLI_VERSION,
+      target,
+      offline
+    );
+
+    // --check with offline fallback: resolveTargetWithFallback returns
+    // kind: "target" for offline check, so guard against actual upgrade.
     if (flags.check) {
-      const checkResult = buildCheckResult({
-        target,
-        versionArg,
-        method,
-        channel,
-        flags,
-      });
-      if (offline) {
-        checkResult.offline = true;
-      }
-      return yield new CommandOutput(checkResult);
+      return yield new CommandOutput(
+        await buildCheckResultWithChangelog({
+          target,
+          versionArg,
+          method,
+          channel,
+          flags,
+          offline,
+          changelogPromise,
+        })
+      );
     }
 
     // Skip if already on target — unless forced or switching channels
@@ -708,38 +781,30 @@ export const upgradeCommand = buildCommand({
     const downgrade = isDowngrade(CLI_VERSION, target);
     log.debug(`${downgrade ? "Downgrading" : "Upgrading"} to ${target}`);
 
-    // Nightly is GitHub-only. If the current install method is not curl,
-    // migrate to a standalone binary first then return — the migration
-    // handles setup internally.
+    // Perform the actual upgrade
+    let warnings: string[] | undefined;
     if (channel === "nightly" && method !== "curl") {
-      const warnings = await migrateToStandaloneForNightly(
+      // Nightly is GitHub-only. If the current install method is not curl,
+      // migrate to a standalone binary — the migration handles setup internally.
+      warnings = await migrateToStandaloneForNightly(
         method,
         target,
         versionArg,
         flags.json
       );
-      yield new CommandOutput({
-        action: downgrade ? "downgraded" : "upgraded",
-        currentVersion: CLI_VERSION,
-        targetVersion: target,
-        channel,
+    } else {
+      await executeStandardUpgrade({
         method,
-        forced: flags.force,
-        warnings,
-      } satisfies UpgradeResult);
-      return;
+        channel,
+        versionArg,
+        target,
+        execPath: this.process.execPath,
+        offline,
+        json: flags.json,
+      });
     }
 
-    await executeStandardUpgrade({
-      method,
-      channel,
-      versionArg,
-      target,
-      execPath: this.process.execPath,
-      offline,
-      json: flags.json,
-    });
-
+    const changelog = await changelogPromise;
     yield new CommandOutput({
       action: downgrade ? "downgraded" : "upgraded",
       currentVersion: CLI_VERSION,
@@ -748,6 +813,8 @@ export const upgradeCommand = buildCommand({
       method,
       forced: flags.force,
       offline: offline || undefined,
+      warnings,
+      changelog,
     } satisfies UpgradeResult);
     return;
   },

@@ -2080,6 +2080,101 @@ export function formatFixResult(data: FixResult): string {
 /** Structured upgrade result (imported from the command module) */
 type UpgradeResult = import("../../commands/cli/upgrade.js").UpgradeResult;
 
+/** Category → markdown heading for changelog sections */
+type ChangeCategory = import("../release-notes.js").ChangeCategory;
+
+/** Heading text for each changelog category */
+const CATEGORY_HEADINGS: Record<ChangeCategory, string> = {
+  features: "#### New Features ✨",
+  fixes: "#### Bug Fixes 🐛",
+  performance: "#### Performance ⚡",
+};
+
+/**
+ * Max terminal height multiplier for changelog clamping.
+ *
+ * When the total rendered changelog would exceed this fraction of the
+ * terminal height, items are truncated to keep output scannable.
+ */
+const CHANGELOG_HEIGHT_FACTOR = 1.3;
+
+/** Lines consumed by the upgrade status header/metadata above the changelog */
+const CHANGELOG_HEADER_OVERHEAD = 6;
+
+/** Minimum rendered changelog lines to show even on tiny terminals */
+const MIN_CHANGELOG_LINES = 5;
+
+/** Default max rendered lines for non-TTY output (no terminal height available) */
+const DEFAULT_MAX_CHANGELOG_LINES = 30;
+
+/**
+ * Compute the maximum number of changelog lines based on terminal height.
+ *
+ * Uses ~1.3x the terminal height minus header overhead. Returns a generous
+ * default for non-TTY output where terminal height is unknown.
+ */
+function getMaxChangelogLines(): number {
+  // process.stdout.rows is allowed in formatters (not in command files)
+  const termHeight = process.stdout.rows;
+  if (!termHeight) {
+    return DEFAULT_MAX_CHANGELOG_LINES;
+  }
+  return Math.max(
+    MIN_CHANGELOG_LINES,
+    Math.floor(termHeight * CHANGELOG_HEIGHT_FACTOR) - CHANGELOG_HEADER_OVERHEAD
+  );
+}
+
+/**
+ * Format the changelog section as markdown for rendering.
+ *
+ * Re-serializes the filtered section markdown with category headings so
+ * that `renderMarkdown()` applies consistent heading/list styling.
+ * Clamps the rendered output to fit ~1.3x the terminal height.
+ *
+ * @param data - Upgrade result with changelog
+ * @returns Rendered changelog string, or empty string if no changelog
+ */
+function formatChangelog(data: UpgradeResult): string {
+  if (!data.changelog || data.changelog.sections.length === 0) {
+    return "";
+  }
+
+  const { changelog } = data;
+  const lines: string[] = ["", "### What's new", ""];
+
+  for (const section of changelog.sections) {
+    lines.push(CATEGORY_HEADINGS[section.category]);
+    lines.push(section.markdown);
+  }
+
+  if (changelog.truncated) {
+    const more = changelog.originalCount - changelog.totalItems;
+    lines.push(
+      `<muted>...and ${more} more changes — https://github.com/getsentry/cli/releases</muted>`
+    );
+  }
+
+  // Render through the markdown pipeline, then clamp to terminal height
+  const rendered = renderMarkdown(lines.join("\n"));
+  const renderedLines = rendered.split("\n");
+  const maxLines = getMaxChangelogLines();
+
+  if (renderedLines.length <= maxLines) {
+    return rendered;
+  }
+
+  // Truncate and add a "more" indicator
+  const clamped = renderedLines.slice(0, maxLines);
+  const remaining = changelog.originalCount - changelog.totalItems;
+  const moreText =
+    remaining > 0
+      ? "...and more — https://github.com/getsentry/cli/releases"
+      : "...truncated — https://github.com/getsentry/cli/releases";
+  clamped.push(isPlainOutput() ? moreText : muted(moreText));
+  return clamped.join("\n");
+}
+
 /** Action descriptions for human-readable output */
 const ACTION_DESCRIPTIONS: Record<UpgradeResult["action"], string> = {
   upgraded: "Upgraded",
@@ -2159,7 +2254,15 @@ export function formatUpgradeResult(data: UpgradeResult): string {
     }
   }
 
-  return renderMarkdown(lines.join("\n"));
+  const result = renderMarkdown(lines.join("\n"));
+
+  // Append changelog if available
+  const changelogOutput = formatChangelog(data);
+  if (changelogOutput) {
+    return `${result}\n${changelogOutput}`;
+  }
+
+  return result;
 }
 
 // Dashboard formatters
