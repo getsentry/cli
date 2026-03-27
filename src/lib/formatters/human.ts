@@ -2191,9 +2191,12 @@ export function formatWidgetAdded(result: {
   const widgetCount = result.dashboard.widgets?.length ?? 0;
   const lines: string[] = [
     `Added widget '${escapeMarkdownInline(result.widget.title)}' to dashboard (now ${widgetCount} widgets)`,
-    "",
-    `URL: ${result.url}`,
   ];
+  const layoutLine = formatWidgetLayoutLine(result.widget);
+  if (layoutLine) {
+    lines.push("", layoutLine);
+  }
+  lines.push("", `URL: ${result.url}`);
   return renderMarkdown(lines.join("\n"));
 }
 
@@ -2215,6 +2218,18 @@ export function formatWidgetDeleted(result: {
 }
 
 /**
+ * Format widget layout as a compact "position (x,y) size w×h" string.
+ * Returns empty string if the widget has no layout.
+ */
+function formatWidgetLayoutLine(widget: DashboardWidget): string {
+  if (!widget.layout) {
+    return "";
+  }
+  const { x, y, w, h } = widget.layout;
+  return `Layout: position (${x},${y}), size ${w}×${h}`;
+}
+
+/**
  * Format a widget edit result for human-readable output.
  */
 export function formatWidgetEdited(result: {
@@ -2224,8 +2239,11 @@ export function formatWidgetEdited(result: {
 }): string {
   const lines: string[] = [
     `Updated widget '${escapeMarkdownInline(result.widget.title)}' in dashboard ${result.dashboard.id}`,
-    "",
-    `URL: ${result.url}`,
   ];
+  const layoutLine = formatWidgetLayoutLine(result.widget);
+  if (layoutLine) {
+    lines.push("", layoutLine);
+  }
+  lines.push("", `URL: ${result.url}`);
   return renderMarkdown(lines.join("\n"));
 }

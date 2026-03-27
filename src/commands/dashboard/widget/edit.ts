@@ -16,12 +16,15 @@ import {
   type DashboardDetail,
   type DashboardWidget,
   type DashboardWidgetQuery,
+  FALLBACK_LAYOUT,
   parseAggregate,
   parseSortExpression,
   parseWidgetInput,
   prepareDashboardForUpdate,
   prepareWidgetQueries,
   validateAggregateNames,
+  validateWidgetLayout,
+  type WidgetLayoutFlags,
 } from "../../../types/dashboard.js";
 import {
   enrichDashboardError,
@@ -33,13 +36,14 @@ import {
   type WidgetQueryFlags,
 } from "../resolve.js";
 
-type EditFlags = WidgetQueryFlags & {
-  readonly index?: number;
-  readonly title?: string;
-  readonly "new-title"?: string;
-  readonly json: boolean;
-  readonly fields?: string[];
-};
+type EditFlags = WidgetQueryFlags &
+  WidgetLayoutFlags & {
+    readonly index?: number;
+    readonly title?: string;
+    readonly "new-title"?: string;
+    readonly json: boolean;
+    readonly fields?: string[];
+  };
 
 type EditResult = {
   dashboard: DashboardDetail;
@@ -71,6 +75,30 @@ function mergeQueries(
       ...(flags.sort && { orderby: parseSortExpression(flags.sort) }),
     },
   ];
+}
+
+/** Merge layout flags over existing layout, returning the result or the existing layout unchanged */
+function mergeLayout(
+  flags: WidgetLayoutFlags,
+  existing: DashboardWidget
+): DashboardWidget["layout"] {
+  const hasChange =
+    flags.x !== undefined ||
+    flags.y !== undefined ||
+    flags.width !== undefined ||
+    flags.height !== undefined;
+
+  if (!hasChange) {
+    return existing.layout;
+  }
+
+  return {
+    ...(existing.layout ?? FALLBACK_LAYOUT),
+    ...(flags.x !== undefined && { x: flags.x }),
+    ...(flags.y !== undefined && { y: flags.y }),
+    ...(flags.width !== undefined && { w: flags.width }),
+    ...(flags.height !== undefined && { h: flags.height }),
+  };
 }
 
 /** Build the replacement widget object by merging flags over existing */
@@ -106,7 +134,7 @@ function buildReplacement(
     title: flags["new-title"] ?? existing.title,
     displayType: effectiveDisplay,
     queries: mergedQueries ?? existing.queries,
-    layout: existing.layout,
+    layout: mergeLayout(flags, existing),
   };
   // Only set widgetType if explicitly provided via --dataset or already on the widget.
   // Avoids parseWidgetInput defaulting to "spans" for widgets without a widgetType.
@@ -130,10 +158,13 @@ export const editCommand = buildCommand({
       "The dashboard can be specified by numeric ID or title.\n" +
       "Identify the widget by --index (0-based) or --title.\n" +
       "Only provided flags are changed — omitted values are preserved.\n\n" +
+      "Layout flags (--x, --y, --width, --height) control widget position\n" +
+      "and size in the 6-column dashboard grid.\n\n" +
       "Examples:\n" +
       "  sentry dashboard widget edit 12345 --title 'Error Rate' --display bar\n" +
       "  sentry dashboard widget edit 'My Dashboard' --index 0 --query p95:span.duration\n" +
-      "  sentry dashboard widget edit 12345 --title 'Old Name' --new-title 'New Name'",
+      "  sentry dashboard widget edit 12345 --title 'Old Name' --new-title 'New Name'\n" +
+      "  sentry dashboard widget edit 12345 --index 0 --x 0 --y 0 --width 6 --height 2",
   },
   output: {
     human: formatWidgetEdited,
@@ -211,6 +242,30 @@ export const editCommand = buildCommand({
         brief: "Result limit",
         optional: true,
       },
+      x: {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Grid column position (0-based, 0–5)",
+        optional: true,
+      },
+      y: {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Grid row position (0-based)",
+        optional: true,
+      },
+      width: {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Widget width in grid columns (1–6)",
+        optional: true,
+      },
+      height: {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Widget height in grid rows (min 1)",
+        optional: true,
+      },
     },
     aliases: {
       i: "index",
@@ -256,7 +311,22 @@ export const editCommand = buildCommand({
 
     const updateBody = prepareDashboardForUpdate(current);
     const existing = updateBody.widgets[widgetIndex] as DashboardWidget;
+
+    // Validate individual layout flag ranges early (catches --x -1, --width 7, etc.)
+    validateWidgetLayout(flags, existing.layout);
+
     const replacement = buildReplacement(flags, existing);
+
+    // Re-validate the final merged layout when the existing widget had no layout
+    // and FALLBACK_LAYOUT was used — the early check couldn't cross-validate
+    // because the fallback dimensions weren't known yet.
+    if (replacement.layout && !existing.layout) {
+      validateWidgetLayout(
+        { x: replacement.layout.x, width: replacement.layout.w },
+        replacement.layout
+      );
+    }
+
     updateBody.widgets[widgetIndex] = replacement;
 
     const updated = await updateDashboard(

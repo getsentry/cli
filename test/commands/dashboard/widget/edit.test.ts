@@ -281,6 +281,112 @@ describe("dashboard widget edit", () => {
     expect(updateDashboardSpy).toHaveBeenCalled();
   });
 
+  // -------------------------------------------------------------------------
+  // Layout flag tests
+  // -------------------------------------------------------------------------
+
+  test("applies --x and --y layout flags to existing widget", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    await func.call(context, { json: false, index: 0, x: 4, y: 3 }, "123");
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const edited = body.widgets[0];
+    expect(edited.layout.x).toBe(4);
+    expect(edited.layout.y).toBe(3);
+    // Width and height preserved from original
+    expect(edited.layout.w).toBe(2);
+    expect(edited.layout.h).toBe(1);
+  });
+
+  test("applies --width and --height layout flags", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    await func.call(
+      context,
+      { json: false, index: 1, x: 0, width: 6, height: 4 },
+      "123"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const edited = body.widgets[1];
+    expect(edited.layout.w).toBe(6);
+    expect(edited.layout.h).toBe(4);
+    expect(edited.layout.x).toBe(0);
+    expect(edited.layout.y).toBe(0);
+  });
+
+  test("preserves existing layout when no layout flags provided", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    await func.call(context, { json: false, index: 0, display: "line" }, "123");
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const edited = body.widgets[0];
+    expect(edited.layout).toEqual({ x: 0, y: 0, w: 2, h: 1 });
+  });
+
+  test("throws ValidationError for x out of range", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    const err = await func
+      .call(context, { json: false, index: 0, x: 6 }, "123")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain("--x");
+  });
+
+  test("throws ValidationError for negative width", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    const err = await func
+      .call(context, { json: false, index: 0, width: 0 }, "123")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain("--width");
+  });
+
+  test("throws ValidationError when --x overflows with fallback width on layoutless widget", async () => {
+    // Widget without layout uses FALLBACK_LAYOUT (w=3), so --x 4 → 4+3=7 > 6
+    getDashboardSpy.mockResolvedValueOnce({
+      ...sampleDashboard,
+      widgets: [
+        {
+          title: "No Layout Widget",
+          displayType: "line",
+          widgetType: "spans",
+          queries: [
+            {
+              name: "",
+              conditions: "",
+              columns: [],
+              aggregates: ["count()"],
+              fields: ["count()"],
+            },
+          ],
+          // no layout field
+        },
+      ],
+    });
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    const err = await func
+      .call(context, { json: false, index: 0, x: 4 }, "123")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain("overflows the grid");
+  });
+
+  test("throws ValidationError when x + width overflows grid", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    const err = await func
+      .call(context, { json: false, index: 0, x: 4, width: 4 }, "123")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain("overflows the grid");
+  });
+
   test("validates aggregates against new dataset when --dataset changes", async () => {
     const { context } = createMockContext();
     const func = await editCommand.loader();

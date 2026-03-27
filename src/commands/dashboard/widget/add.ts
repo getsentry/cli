@@ -16,7 +16,10 @@ import {
   assignDefaultLayout,
   type DashboardDetail,
   type DashboardWidget,
+  FALLBACK_LAYOUT,
   prepareDashboardForUpdate,
+  validateWidgetLayout,
+  type WidgetLayoutFlags,
 } from "../../../types/dashboard.js";
 import {
   buildWidgetFromFlags,
@@ -28,11 +31,12 @@ import {
   type WidgetQueryFlags,
 } from "../resolve.js";
 
-type AddFlags = WidgetQueryFlags & {
-  readonly display: string;
-  readonly json: boolean;
-  readonly fields?: string[];
-};
+type AddFlags = WidgetQueryFlags &
+  WidgetLayoutFlags & {
+    readonly display: string;
+    readonly json: boolean;
+    readonly fields?: string[];
+  };
 
 type AddResult = {
   dashboard: DashboardDetail;
@@ -89,7 +93,9 @@ export const addCommand = buildCommand({
       "  count()        → count()         (parens passthrough)\n\n" +
       "Sort shorthand (--sort flag):\n" +
       "  count          → count()         (ascending)\n" +
-      "  -count         → -count()        (descending)",
+      "  -count         → -count()        (descending)\n\n" +
+      "Layout flags (--x, --y, --width, --height) control widget position\n" +
+      "and size in the 6-column dashboard grid. Omitted values use auto-layout.",
   },
   output: {
     human: formatWidgetAdded,
@@ -148,6 +154,30 @@ export const addCommand = buildCommand({
         brief: "Result limit",
         optional: true,
       },
+      x: {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Grid column position (0-based, 0–5)",
+        optional: true,
+      },
+      y: {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Grid row position (0-based)",
+        optional: true,
+      },
+      width: {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Widget width in grid columns (1–6)",
+        optional: true,
+      },
+      height: {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Widget height in grid rows (min 1)",
+        optional: true,
+      },
     },
     aliases: {
       d: "display",
@@ -187,13 +217,48 @@ export const addCommand = buildCommand({
       limit: flags.limit,
     });
 
-    // GET current dashboard → append widget with auto-layout → PUT
+    // Validate individual layout flag ranges before any network calls
+    // (catches --x -1, --width 7, etc. early without needing the dashboard)
+    validateWidgetLayout(flags);
+
+    // GET current dashboard → append widget with layout → PUT
     const current = await getDashboard(orgSlug, dashboardId).catch(
       (error: unknown) =>
         enrichDashboardError(error, { orgSlug, dashboardId, operation: "view" })
     );
     const updateBody = prepareDashboardForUpdate(current);
+
+    // Always run auto-layout first to get default position and dimensions,
+    // then override with any explicit user flags.
     newWidget = assignDefaultLayout(newWidget, updateBody.widgets);
+
+    const hasExplicitLayout =
+      flags.x !== undefined ||
+      flags.y !== undefined ||
+      flags.width !== undefined ||
+      flags.height !== undefined;
+
+    if (hasExplicitLayout) {
+      const baseLayout = newWidget.layout ?? FALLBACK_LAYOUT;
+      newWidget = {
+        ...newWidget,
+        layout: {
+          ...baseLayout,
+          ...(flags.x !== undefined && { x: flags.x }),
+          ...(flags.y !== undefined && { y: flags.y }),
+          ...(flags.width !== undefined && { w: flags.width }),
+          ...(flags.height !== undefined && { h: flags.height }),
+        },
+      };
+      // Re-validate the merged layout to catch cross-dimensional overflow
+      // (e.g., --x 5 on a table widget with auto-width 6 → 5+6=11 > 6)
+      const finalLayout = newWidget.layout ?? baseLayout;
+      validateWidgetLayout(
+        { x: finalLayout.x, width: finalLayout.w },
+        finalLayout
+      );
+    }
+
     updateBody.widgets.push(newWidget);
 
     const updated = await updateDashboard(
