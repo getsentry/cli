@@ -26,7 +26,6 @@ import {
   resolveCursor,
 } from "../../../lib/db/pagination.js";
 import { ContextError } from "../../../lib/errors.js";
-import { filterFields } from "../../../lib/formatters/json.js";
 import {
   colorTag,
   escapeMarkdownCell,
@@ -36,11 +35,14 @@ import { type Column, writeTable } from "../../../lib/formatters/table.js";
 import {
   buildListCommand,
   buildListLimitFlag,
+  LIST_BASE_ALIASES,
+  LIST_TARGET_POSITIONAL,
   paginationHint,
   targetPatternExplanation,
 } from "../../../lib/list-command.js";
 import {
   dispatchOrgScopedList,
+  jsonTransformListResult,
   type ListCommandMeta,
   type ListResult,
 } from "../../../lib/org-list.js";
@@ -61,11 +63,18 @@ type ListFlags = {
   readonly cursor?: string;
   readonly json: boolean;
   readonly fields?: string[];
+  readonly query?: string;
 };
 
-type MetricAlertWithOrg = {
-  rule: MetricAlertRule;
-  orgSlug: string;
+/** Display row carrying per-rule org context for the human formatter. */
+type MetricAlertRow = { rule: MetricAlertRule; orgSlug: string };
+
+/**
+ * Extended result type: raw rules in `items` (for JSON), display rows in
+ * `displayRows` (for human output). Mirrors the IssueListResult pattern.
+ */
+type MetricAlertListResult = ListResult<MetricAlertRule> & {
+  displayRows?: MetricAlertRow[];
 };
 
 const metricAlertListMeta: ListCommandMeta = {
@@ -82,8 +91,6 @@ const metricAlertListMeta: ListCommandMeta = {
 /**
  * Fetch metric alert rules for one org starting from an optional cursor,
  * fetching multiple API pages until `limit` is reached or no more pages exist.
- *
- * Returns the rules collected and a cursor pointing to the next page (if any).
  */
 async function fetchMetricRulesPage(
   orgSlug: string,
@@ -114,19 +121,15 @@ async function fetchMetricRulesPage(
   return { rules };
 }
 
-// ---------------------------------------------------------------------------
-// Mode handlers
-// ---------------------------------------------------------------------------
-
 /**
- * Fetch from multiple orgs in parallel and combine results (no cursor).
+ * Fetch metric alert rules from multiple orgs in parallel and combine.
  * Used by auto-detect and project-search modes.
  */
 async function fetchFromOrgs(
   orgs: string[],
   limit: number,
   json: boolean
-): Promise<MetricAlertWithOrg[]> {
+): Promise<MetricAlertRow[]> {
   const results = await withProgress(
     {
       message:
@@ -146,10 +149,26 @@ async function fetchFromOrgs(
   return results.flat().slice(0, limit);
 }
 
-async function handleAutoDetectMetrics(
+/** Client-side name filter applied after fetch (API has no query param). */
+function applyQueryFilter(
+  rows: MetricAlertRow[],
+  query: string | undefined
+): MetricAlertRow[] {
+  if (!query) {
+    return rows;
+  }
+  const q = query.toLowerCase();
+  return rows.filter((r) => r.rule.name.toLowerCase().includes(q));
+}
+
+// ---------------------------------------------------------------------------
+// Mode handlers
+// ---------------------------------------------------------------------------
+
+async function handleAutoDetectMetricAlerts(
   cwd: string,
   flags: ListFlags
-): Promise<ListResult<MetricAlertWithOrg>> {
+): Promise<MetricAlertListResult> {
   const { targets, footer } = await withProgress(
     { message: "Resolving targets...", json: flags.json },
     () =>
@@ -162,29 +181,42 @@ async function handleAutoDetectMetrics(
     throw new ContextError("Organization", USAGE_HINT);
   }
   const uniqueOrgs = [...new Set(targets.map((t) => t.org))];
-  const items = await fetchFromOrgs(uniqueOrgs, flags.limit, flags.json);
-  return { items, hasMore: false, hint: footer };
+  const displayRows = applyQueryFilter(
+    await fetchFromOrgs(uniqueOrgs, flags.limit, flags.json),
+    flags.query
+  );
+  return {
+    items: displayRows.map((r) => r.rule),
+    displayRows,
+    hasMore: false,
+    hint: footer,
+  };
 }
 
-async function handleExplicitMetrics(
+async function handleExplicitMetricAlerts(
   org: string,
   flags: ListFlags
-): Promise<ListResult<MetricAlertWithOrg>> {
+): Promise<MetricAlertListResult> {
   const { rules } = await withProgress(
     { message: `Fetching metric alert rules for ${org}...`, json: flags.json },
     () => fetchMetricRulesPage(org, { limit: flags.limit })
   );
+  const displayRows = applyQueryFilter(
+    rules.map((rule) => ({ rule, orgSlug: org })),
+    flags.query
+  );
   return {
-    items: rules.map((rule) => ({ rule, orgSlug: org })),
+    items: displayRows.map((r) => r.rule),
+    displayRows,
     hasMore: false,
     hint: `Metric alerts: ${buildMetricAlertsUrl(org)}`,
   };
 }
 
-async function handleOrgAllMetrics(
+async function handleOrgAllMetricAlerts(
   org: string,
   flags: ListFlags
-): Promise<ListResult<MetricAlertWithOrg>> {
+): Promise<MetricAlertListResult> {
   const contextKey = buildOrgContextKey(org);
   const { cursor: startCursor, direction } = resolveCursor(
     flags.cursor,
@@ -200,7 +232,11 @@ async function handleOrgAllMetrics(
   advancePaginationState(PAGINATION_KEY, contextKey, direction, nextCursor);
   const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
 
-  const items = rules.map((rule) => ({ rule, orgSlug: org }));
+  const displayRows = applyQueryFilter(
+    rules.map((rule) => ({ rule, orgSlug: org })),
+    flags.query
+  );
+
   const nav = paginationHint({
     hasPrev,
     hasMore: !!nextCursor,
@@ -209,11 +245,11 @@ async function handleOrgAllMetrics(
   });
 
   const hintParts: string[] = [];
-  if (items.length === 0) {
+  if (displayRows.length === 0) {
     hintParts.push(`No metric alert rules found in '${org}'.`);
   } else {
     hintParts.push(
-      `Showing ${items.length} rule(s)${nextCursor ? " (more available)" : ""}.`
+      `Showing ${displayRows.length} rule(s)${nextCursor ? " (more available)" : ""}.`
     );
     hintParts.push(`Metric alerts: ${buildMetricAlertsUrl(org)}`);
   }
@@ -222,7 +258,8 @@ async function handleOrgAllMetrics(
   }
 
   return {
-    items,
+    items: displayRows.map((r) => r.rule),
+    displayRows,
     hasMore: !!nextCursor,
     hasPrev,
     nextCursor,
@@ -230,11 +267,11 @@ async function handleOrgAllMetrics(
   };
 }
 
-async function handleProjectSearchMetrics(
+async function handleProjectSearchMetricAlerts(
   projectSlug: string,
   cwd: string,
   flags: ListFlags
-): Promise<ListResult<MetricAlertWithOrg>> {
+): Promise<MetricAlertListResult> {
   const { targets } = await withProgress(
     { message: `Searching for project '${projectSlug}'...`, json: flags.json },
     () =>
@@ -244,8 +281,11 @@ async function handleProjectSearchMetrics(
       )
   );
   const uniqueOrgs = [...new Set(targets.map((t) => t.org))];
-  const items = await fetchFromOrgs(uniqueOrgs, flags.limit, flags.json);
-  return { items, hasMore: false };
+  const displayRows = applyQueryFilter(
+    await fetchFromOrgs(uniqueOrgs, flags.limit, flags.json),
+    flags.query
+  );
+  return { items: displayRows.map((r) => r.rule), displayRows, hasMore: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -259,14 +299,13 @@ function formatMetricStatus(status: number): string {
     : colorTag("muted", "disabled");
 }
 
-function formatMetricAlertListHuman(
-  result: ListResult<MetricAlertWithOrg>
-): string {
+function formatMetricAlertListHuman(result: MetricAlertListResult): string {
   if (result.items.length === 0) {
     return result.hint ?? "No metric alert rules found.";
   }
 
-  const uniqueOrgs = new Set(result.items.map((r) => r.orgSlug));
+  const rows = result.displayRows ?? [];
+  const uniqueOrgs = new Set(rows.map((r) => r.orgSlug));
   const isMultiOrg = uniqueOrgs.size > 1;
 
   type Row = {
@@ -280,7 +319,7 @@ function formatMetricAlertListHuman(
     status: string;
   };
 
-  const rows: Row[] = result.items.map(({ rule: r, orgSlug }) => ({
+  const tableRows: Row[] = rows.map(({ rule: r, orgSlug }) => ({
     id: r.id,
     name: escapeMarkdownCell(r.name),
     ...(isMultiOrg && { org: orgSlug }),
@@ -304,34 +343,9 @@ function formatMetricAlertListHuman(
 
   const parts: string[] = [];
   const buffer: Writer = { write: (s) => parts.push(s) };
-  writeTable(buffer, rows, columns);
+  writeTable(buffer, tableRows, columns);
 
   return parts.join("").trimEnd();
-}
-
-// ---------------------------------------------------------------------------
-// JSON transform
-// ---------------------------------------------------------------------------
-
-function jsonTransformMetricAlertList(
-  result: ListResult<MetricAlertWithOrg>,
-  fields?: string[]
-): unknown {
-  const rules = result.items.map(({ rule }) => rule);
-  const items =
-    fields && fields.length > 0
-      ? rules.map((r) => filterFields(r, fields))
-      : rules;
-
-  const envelope: Record<string, unknown> = {
-    data: items,
-    hasMore: !!result.hasMore,
-    hasPrev: !!result.hasPrev,
-  };
-  if (result.nextCursor) {
-    envelope.nextCursor = result.nextCursor;
-  }
-  return envelope;
 }
 
 // ---------------------------------------------------------------------------
@@ -346,7 +360,7 @@ export const listCommand = buildListCommand("alert", {
       "Metric alerts trigger notifications when a metric query crosses a threshold.\n\n" +
       "Target patterns:\n" +
       "  sentry alert metrics list                     # auto-detect from DSN or config\n" +
-      "  sentry alert metrics list <org>/              # explicit org\n" +
+      "  sentry alert metrics list <org>/              # explicit org (paginated)\n" +
       "  sentry alert metrics list <org>/<project>     # explicit org (project ignored)\n" +
       "  sentry alert metrics list <project>           # find project across all orgs\n\n" +
       `${targetPatternExplanation()}\n\n` +
@@ -354,21 +368,10 @@ export const listCommand = buildListCommand("alert", {
   },
   output: {
     human: formatMetricAlertListHuman,
-    jsonTransform: jsonTransformMetricAlertList,
+    jsonTransform: jsonTransformListResult,
   },
   parameters: {
-    positional: {
-      kind: "tuple",
-      parameters: [
-        {
-          placeholder: "org/",
-          brief:
-            "<org>/ (explicit), <org>/<project>, <project> (search), or omit to auto-detect",
-          parse: String,
-          optional: true,
-        },
-      ],
-    },
+    positional: LIST_TARGET_POSITIONAL,
     flags: {
       web: {
         kind: "boolean",
@@ -376,8 +379,14 @@ export const listCommand = buildListCommand("alert", {
         default: false,
       },
       limit: buildListLimitFlag("metric alert rules"),
+      query: {
+        kind: "parsed",
+        parse: String,
+        brief: "Filter rules by name",
+        optional: true,
+      },
     },
-    aliases: { w: "web", n: "limit" },
+    aliases: { ...LIST_BASE_ALIASES, w: "web", q: "query" },
   },
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
     const { cwd } = this;
@@ -402,13 +411,17 @@ export const listCommand = buildListCommand("alert", {
       parsed,
       orgSlugMatchBehavior: "redirect",
       overrides: {
-        "auto-detect": (ctx) => handleAutoDetectMetrics(ctx.cwd, flags),
-        explicit: (ctx) => handleExplicitMetrics(ctx.parsed.org, flags),
-        "org-all": (ctx) => handleOrgAllMetrics(ctx.parsed.org, flags),
+        "auto-detect": (ctx) => handleAutoDetectMetricAlerts(ctx.cwd, flags),
+        explicit: (ctx) => handleExplicitMetricAlerts(ctx.parsed.org, flags),
+        "org-all": (ctx) => handleOrgAllMetricAlerts(ctx.parsed.org, flags),
         "project-search": (ctx) =>
-          handleProjectSearchMetrics(ctx.parsed.projectSlug, ctx.cwd, flags),
+          handleProjectSearchMetricAlerts(
+            ctx.parsed.projectSlug,
+            ctx.cwd,
+            flags
+          ),
       },
-    })) as ListResult<MetricAlertWithOrg>;
+    })) as MetricAlertListResult;
 
     yield new CommandOutput(result);
     return { hint: result.hint };

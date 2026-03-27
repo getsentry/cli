@@ -20,7 +20,6 @@ import {
 import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { openInBrowser } from "../../../lib/browser.js";
 import { ContextError } from "../../../lib/errors.js";
-import { filterFields } from "../../../lib/formatters/json.js";
 import {
   colorTag,
   escapeMarkdownCell,
@@ -30,10 +29,13 @@ import { type Column, writeTable } from "../../../lib/formatters/table.js";
 import {
   buildListCommand,
   buildListLimitFlag,
+  LIST_BASE_ALIASES,
+  LIST_TARGET_POSITIONAL,
   targetPatternExplanation,
 } from "../../../lib/list-command.js";
 import {
   dispatchOrgScopedList,
+  jsonTransformListResult,
   type ListCommandMeta,
   type ListResult,
 } from "../../../lib/org-list.js";
@@ -57,11 +59,18 @@ type ListFlags = {
   readonly cursor?: string;
   readonly json: boolean;
   readonly fields?: string[];
+  readonly query?: string;
 };
 
-type AlertRuleWithTarget = {
-  rule: IssueAlertRule;
-  target: ResolvedTarget;
+/** Display row carrying per-rule project context for the human formatter. */
+type AlertRuleRow = { rule: IssueAlertRule; target: ResolvedTarget };
+
+/**
+ * Extended result type: raw rules in `items` (for JSON), display rows in
+ * `displayRows` (for human output). Mirrors the IssueListResult pattern.
+ */
+type IssueAlertListResult = ListResult<IssueAlertRule> & {
+  displayRows?: AlertRuleRow[];
 };
 
 const issueAlertListMeta: ListCommandMeta = {
@@ -119,7 +128,7 @@ async function fetchFromTargets(
   targets: ResolvedTarget[],
   limit: number,
   json: boolean
-): Promise<AlertRuleWithTarget[]> {
+): Promise<AlertRuleRow[]> {
   const perTargetLimit = Math.max(limit, Math.ceil(limit / targets.length) * 2);
   const results = await withProgress(
     {
@@ -140,6 +149,18 @@ async function fetchFromTargets(
   return results.flat().slice(0, limit);
 }
 
+/** Client-side name filter applied after fetch (API has no query param). */
+function applyQueryFilter(
+  rows: AlertRuleRow[],
+  query: string | undefined
+): AlertRuleRow[] {
+  if (!query) {
+    return rows;
+  }
+  const q = query.toLowerCase();
+  return rows.filter((r) => r.rule.name.toLowerCase().includes(q));
+}
+
 // ---------------------------------------------------------------------------
 // Mode handlers
 // ---------------------------------------------------------------------------
@@ -147,7 +168,7 @@ async function fetchFromTargets(
 async function handleAutoDetectIssueAlerts(
   cwd: string,
   flags: ListFlags
-): Promise<ListResult<AlertRuleWithTarget>> {
+): Promise<IssueAlertListResult> {
   const { targets, footer } = await withProgress(
     { message: "Resolving targets...", json: flags.json },
     () =>
@@ -159,15 +180,23 @@ async function handleAutoDetectIssueAlerts(
   if (targets.length === 0) {
     throw new ContextError("Organization and project", USAGE_HINT);
   }
-  const items = await fetchFromTargets(targets, flags.limit, flags.json);
-  return { items, hasMore: false, hint: footer };
+  const displayRows = applyQueryFilter(
+    await fetchFromTargets(targets, flags.limit, flags.json),
+    flags.query
+  );
+  return {
+    items: displayRows.map((r) => r.rule),
+    displayRows,
+    hasMore: false,
+    hint: footer,
+  };
 }
 
 async function handleExplicitIssueAlerts(
   org: string,
   project: string,
   flags: ListFlags
-): Promise<ListResult<AlertRuleWithTarget>> {
+): Promise<IssueAlertListResult> {
   const target: ResolvedTarget = {
     org,
     project,
@@ -181,8 +210,13 @@ async function handleExplicitIssueAlerts(
     },
     () => fetchIssueRulesForTarget(target, flags.limit)
   );
+  const displayRows = applyQueryFilter(
+    rules.map((rule) => ({ rule, target })),
+    flags.query
+  );
   return {
-    items: rules.map((rule) => ({ rule, target })),
+    items: displayRows.map((r) => r.rule),
+    displayRows,
     hasMore: false,
     hint: `Alert rules: ${buildIssueAlertsUrl(org, project)}`,
   };
@@ -191,7 +225,7 @@ async function handleExplicitIssueAlerts(
 async function handleOrgAllIssueAlerts(
   org: string,
   flags: ListFlags
-): Promise<ListResult<AlertRuleWithTarget>> {
+): Promise<IssueAlertListResult> {
   // org-all: list all projects in the org, then fetch alerts for each
   const { targets } = await withProgress(
     { message: `Listing projects in ${org}...`, json: flags.json },
@@ -201,9 +235,13 @@ async function handleOrgAllIssueAlerts(
         { cwd: "", usageHint: USAGE_HINT }
       )
   );
-  const items = await fetchFromTargets(targets, flags.limit, flags.json);
+  const displayRows = applyQueryFilter(
+    await fetchFromTargets(targets, flags.limit, flags.json),
+    flags.query
+  );
   return {
-    items,
+    items: displayRows.map((r) => r.rule),
+    displayRows,
     hasMore: false,
     hint:
       targets.length > 1
@@ -216,7 +254,7 @@ async function handleProjectSearchIssueAlerts(
   projectSlug: string,
   cwd: string,
   flags: ListFlags
-): Promise<ListResult<AlertRuleWithTarget>> {
+): Promise<IssueAlertListResult> {
   const { targets } = await withProgress(
     { message: `Searching for project '${projectSlug}'...`, json: flags.json },
     () =>
@@ -225,23 +263,25 @@ async function handleProjectSearchIssueAlerts(
         { cwd, usageHint: USAGE_HINT }
       )
   );
-  const items = await fetchFromTargets(targets, flags.limit, flags.json);
-  return { items, hasMore: false };
+  const displayRows = applyQueryFilter(
+    await fetchFromTargets(targets, flags.limit, flags.json),
+    flags.query
+  );
+  return { items: displayRows.map((r) => r.rule), displayRows, hasMore: false };
 }
 
 // ---------------------------------------------------------------------------
 // Human output
 // ---------------------------------------------------------------------------
 
-function formatIssueAlertListHuman(
-  result: ListResult<AlertRuleWithTarget>
-): string {
+function formatIssueAlertListHuman(result: IssueAlertListResult): string {
   if (result.items.length === 0) {
     return result.hint ?? "No issue alert rules found.";
   }
 
+  const rows = result.displayRows ?? [];
   const uniqueProjects = new Set(
-    result.items.map((r) => `${r.target.org}/${r.target.project}`)
+    rows.map((r) => `${r.target.org}/${r.target.project}`)
   );
   const isMultiProject = uniqueProjects.size > 1;
 
@@ -255,7 +295,7 @@ function formatIssueAlertListHuman(
     status: string;
   };
 
-  const rows: Row[] = result.items.map(({ rule: r, target }) => ({
+  const tableRows: Row[] = rows.map(({ rule: r, target }) => ({
     id: r.id,
     name: escapeMarkdownCell(r.name),
     ...(isMultiProject && {
@@ -284,34 +324,9 @@ function formatIssueAlertListHuman(
 
   const parts: string[] = [];
   const buffer: Writer = { write: (s) => parts.push(s) };
-  writeTable(buffer, rows, columns);
+  writeTable(buffer, tableRows, columns);
 
   return parts.join("").trimEnd();
-}
-
-// ---------------------------------------------------------------------------
-// JSON transform
-// ---------------------------------------------------------------------------
-
-function jsonTransformIssueAlertList(
-  result: ListResult<AlertRuleWithTarget>,
-  fields?: string[]
-): unknown {
-  const rules = result.items.map(({ rule }) => rule);
-  const items =
-    fields && fields.length > 0
-      ? rules.map((r) => filterFields(r, fields))
-      : rules;
-
-  const envelope: Record<string, unknown> = {
-    data: items,
-    hasMore: !!result.hasMore,
-    hasPrev: !!result.hasPrev,
-  };
-  if (result.nextCursor) {
-    envelope.nextCursor = result.nextCursor;
-  }
-  return envelope;
 }
 
 // ---------------------------------------------------------------------------
@@ -334,21 +349,10 @@ export const listCommand = buildListCommand("alert", {
   },
   output: {
     human: formatIssueAlertListHuman,
-    jsonTransform: jsonTransformIssueAlertList,
+    jsonTransform: jsonTransformListResult,
   },
   parameters: {
-    positional: {
-      kind: "tuple",
-      parameters: [
-        {
-          placeholder: "org/project",
-          brief:
-            "<org>/<project>, <org>/ (all), <project> (search), or omit to auto-detect",
-          parse: String,
-          optional: true,
-        },
-      ],
-    },
+    positional: LIST_TARGET_POSITIONAL,
     flags: {
       web: {
         kind: "boolean",
@@ -356,8 +360,14 @@ export const listCommand = buildListCommand("alert", {
         default: false,
       },
       limit: buildListLimitFlag("issue alert rules"),
+      query: {
+        kind: "parsed",
+        parse: String,
+        brief: "Filter rules by name",
+        optional: true,
+      },
     },
-    aliases: { w: "web", n: "limit" },
+    aliases: { ...LIST_BASE_ALIASES, w: "web", q: "query" },
   },
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
     const { cwd } = this;
@@ -390,7 +400,7 @@ export const listCommand = buildListCommand("alert", {
             flags
           ),
       },
-    })) as ListResult<AlertRuleWithTarget>;
+    })) as IssueAlertListResult;
 
     yield new CommandOutput(result);
     return { hint: result.hint };

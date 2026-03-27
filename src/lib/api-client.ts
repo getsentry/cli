@@ -22,8 +22,8 @@
 export {
   type IssueAlertRule,
   listIssueAlertsPaginated,
-  type MetricAlertRule,
   listMetricAlertsPaginated,
+  type MetricAlertRule,
 } from "./api/alerts.js";
 export {
   createDashboard,
