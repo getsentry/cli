@@ -39,14 +39,6 @@ List spans in a project or trace
 | `transaction` | string \| null | Transaction name |
 | `trace` | string | Trace ID |
 
-### `sentry span view <trace-id/span-id...>`
-
-View details of specific spans
-
-**Flags:**
-- `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-
 **Examples:**
 
 ```bash
@@ -64,7 +56,19 @@ sentry span list abc123def456abc123def456abc12345
 
 # Paginate through results
 sentry span list -c next
+```
 
+### `sentry span view <trace-id/span-id...>`
+
+View details of specific spans
+
+**Flags:**
+- `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
+- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+
+**Examples:**
+
+```bash
 # View a single span
 sentry span view abc123def456abc123def456abc12345 a1b2c3d4e5f67890
 
@@ -98,6 +102,22 @@ List recent traces in a project
 | `transaction.duration` | number | Duration (ms) |
 | `project` | string | Project slug |
 
+**Examples:**
+
+```bash
+# List last 20 traces (default)
+sentry trace list
+
+# Sort by slowest first
+sentry trace list --sort duration
+
+# Filter by transaction name, last 24 hours
+sentry trace list -q "transaction:GET /api/users" --period 24h
+
+# Paginate through results
+sentry trace list my-org/backend -c next
+```
+
 ### `sentry trace view <org/project/trace-id...>`
 
 View details of a specific trace
@@ -106,6 +126,19 @@ View details of a specific trace
 - `-w, --web - Open in browser`
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+
+**Examples:**
+
+```bash
+# View trace details with span tree
+sentry trace view abc123def456abc123def456abc12345
+
+# Open trace in browser
+sentry trace view abc123def456abc123def456abc12345 -w
+
+# Auto-recover from an issue short ID
+sentry trace view PROJ-123
+```
 
 ### `sentry trace logs <org/trace-id...>`
 
@@ -122,27 +155,6 @@ View logs associated with a trace
 **Examples:**
 
 ```bash
-# List last 20 traces (default)
-sentry trace list
-
-# Sort by slowest first
-sentry trace list --sort duration
-
-# Filter by transaction name, last 24 hours
-sentry trace list -q "transaction:GET /api/users" --period 24h
-
-# Paginate through results
-sentry trace list my-org/backend -c next
-
-# View trace details with span tree
-sentry trace view abc123def456abc123def456abc12345
-
-# Open trace in browser
-sentry trace view abc123def456abc123def456abc12345 -w
-
-# Auto-recover from an issue short ID
-sentry trace view PROJ-123
-
 # View logs for a trace
 sentry trace logs abc123def456abc123def456abc12345
 
