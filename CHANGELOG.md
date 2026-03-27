@@ -1,6 +1,31 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.22.0
+
+### New Features ✨
+
+- (dashboard) Add layout/position flags to widget edit and add commands by @BYK in [#591](https://github.com/getsentry/cli/pull/591)
+- (init) Surface server-provided detail in spinner messages by @MathurAditya724 in [#588](https://github.com/getsentry/cli/pull/588)
+- AsyncIterable streaming support for library SDK by @BYK in [#586](https://github.com/getsentry/cli/pull/586)
+
+### Bug Fixes 🐛
+
+#### Dashboard
+
+- Normalize numeric org IDs from DSN auto-detection by @BYK in [#593](https://github.com/getsentry/cli/pull/593)
+- Show actionable error messages instead of raw API errors by @BYK in [#592](https://github.com/getsentry/cli/pull/592)
+
+#### Other
+
+- (auth) Skip stale cached user info for env var tokens in `auth status` by @BYK in [#589](https://github.com/getsentry/cli/pull/589)
+- (upgrade) Move delta patch log.info outside spinner callback by @BYK in [#590](https://github.com/getsentry/cli/pull/590)
+
+### Internal Changes 🔧
+
+- Remove upstream issue templates for Sentry SDK light exports by @MathurAditya724 in [#596](https://github.com/getsentry/cli/pull/596)
+- Regenerate skill files and command docs by @github-actions[bot] in [0276f760](https://github.com/getsentry/cli/commit/0276f760f0d5b9596b8208a1066156eb935c04cb)
+
 ## 0.21.0
 
 ### New Features ✨
