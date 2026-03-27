@@ -288,10 +288,33 @@ type ResolvedOrgsOptions = {
 };
 
 /**
- * Handle auto-detect, explicit, and project-search modes.
+ * Resolve the org slug(s) for a metric alert listing.
  *
- * All three share the same flow: resolve targets → deduplicate to unique orgs
- * → fetch within budget → compound cursor per org → display.
+ * Metric alerts are org-scoped — no project enumeration is needed.
+ * `explicit` and `org-all` give us the org directly from the parsed arg.
+ * `auto-detect` and `project-search` need full target resolution (DSN
+ * detection / cross-org project search) to discover the org(s).
+ */
+async function resolveOrgs(
+  parsed: ReturnType<typeof parseOrgProjectArg>,
+  cwd: string
+): Promise<{ orgs: string[]; footer?: string }> {
+  if (parsed.type === "explicit" || parsed.type === "org-all") {
+    return { orgs: [parsed.org] };
+  }
+  const { targets, footer } = await resolveTargetsFromParsedArg(parsed, {
+    cwd,
+    usageHint: USAGE_HINT,
+  });
+  return {
+    orgs: [...new Set(targets.map((t: ResolvedTarget) => t.org))],
+    footer,
+  };
+}
+
+/**
+ * Handle all four modes: resolve orgs → fetch within budget → compound cursor
+ * per org → display.
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: inherent multi-org resolution, compound cursor, error handling, and display logic
 async function handleResolvedOrgs(
@@ -299,16 +322,13 @@ async function handleResolvedOrgs(
 ): Promise<MetricAlertListResult> {
   const { parsed, flags, cwd } = options;
 
-  const { targets, footer } = await resolveTargetsFromParsedArg(parsed, {
-    cwd,
-    usageHint: USAGE_HINT,
-  });
+  const { orgs: resolved, footer } = await resolveOrgs(parsed, cwd);
 
-  if (targets.length === 0) {
+  if (resolved.length === 0) {
     throw new ContextError("Organization", USAGE_HINT);
   }
 
-  const uniqueOrgs = [...new Set(targets.map((t: ResolvedTarget) => t.org))];
+  const uniqueOrgs = [...new Set(resolved)];
 
   const contextKey = buildMultiOrgContextKey(uniqueOrgs, flags.query);
   const sortedOrgKeys = [...uniqueOrgs].sort();
