@@ -15,8 +15,8 @@ Initialize Sentry in your project (experimental)
 
 | Argument | Description |
 |----------|-------------|
-| `<target>` | &lt;org&gt;/&lt;project&gt;, &lt;org&gt;/, &lt;project&gt;, or a directory path (optional) |
-| `<directory>` | Project directory (default: current directory) (optional) |
+| `<target>` | &lt;org&gt;/&lt;project&gt;, &lt;org&gt;/, &lt;project&gt;, or a directory path |
+| `<directory>` | Project directory (default: current directory) |
 
 **Options:**
 

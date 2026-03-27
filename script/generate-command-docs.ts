@@ -124,8 +124,7 @@ function formatPositionalsTable(positionals: PositionalInfo[]): string {
   lines.push("|----------|-------------|");
   for (const p of positionals) {
     const placeholder = `\`<${p.placeholder}>\``;
-    const suffix = p.optional ? " (optional)" : "";
-    lines.push(`| ${placeholder} | ${escapeAngleBrackets(p.brief)}${suffix} |`);
+    lines.push(`| ${placeholder} | ${escapeAngleBrackets(p.brief)} |`);
   }
   return lines.join("\n");
 }

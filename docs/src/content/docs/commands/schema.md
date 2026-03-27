@@ -15,7 +15,7 @@ Browse the Sentry API schema
 
 | Argument | Description |
 |----------|-------------|
-| `<resource...>` | Resource name and optional operation (optional) |
+| `<resource...>` | Resource name and optional operation |
 
 **Options:**
 

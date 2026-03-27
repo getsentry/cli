@@ -15,8 +15,8 @@ Create a new project
 
 | Argument | Description |
 |----------|-------------|
-| `<name>` | Project name (supports org/name syntax) (optional) |
-| `<platform>` | Project platform (e.g., node, python, javascript-nextjs) (optional) |
+| `<name>` | Project name (supports org/name syntax) |
+| `<platform>` | Project platform (e.g., node, python, javascript-nextjs) |
 
 **Options:**
 
@@ -51,7 +51,7 @@ List projects
 
 | Argument | Description |
 |----------|-------------|
-| `<org/project>` | &lt;org&gt;/ (all projects), &lt;org&gt;/&lt;project&gt;, or &lt;project&gt; (search) (optional) |
+| `<org/project>` | &lt;org&gt;/ (all projects), &lt;org&gt;/&lt;project&gt;, or &lt;project&gt; (search) |
 
 **Options:**
 
@@ -70,7 +70,7 @@ View details of a project
 
 | Argument | Description |
 |----------|-------------|
-| `<org/project>` | &lt;org&gt;/&lt;project&gt;, &lt;project&gt; (search), or omit for auto-detect (optional) |
+| `<org/project>` | &lt;org&gt;/&lt;project&gt;, &lt;project&gt; (search), or omit for auto-detect |
 
 **Options:**
 

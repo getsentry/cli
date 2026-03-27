@@ -15,7 +15,7 @@ Send feedback about the CLI
 
 | Argument | Description |
 |----------|-------------|
-| `<message...>` | Your feedback message (optional) |
+| `<message...>` | Your feedback message |
 
 ### `sentry cli fix`
 
@@ -51,7 +51,7 @@ Update the Sentry CLI to the latest version
 
 | Argument | Description |
 |----------|-------------|
-| `<version>` | Specific version (e.g. 0.5.0), or "nightly"/"stable" to switch channel; omit to update within current channel (optional) |
+| `<version>` | Specific version (e.g. 0.5.0), or "nightly"/"stable" to switch channel; omit to update within current channel |
 
 **Options:**
 

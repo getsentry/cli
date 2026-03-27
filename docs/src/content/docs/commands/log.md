@@ -15,7 +15,7 @@ List logs from a project
 
 | Argument | Description |
 |----------|-------------|
-| `<org/project-or-trace-id...>` | [&lt;org&gt;/[&lt;project&gt;/]]&lt;trace-id&gt;, &lt;org&gt;/&lt;project&gt;, or &lt;project&gt; (optional) |
+| `<org/project-or-trace-id...>` | [&lt;org&gt;/[&lt;project&gt;/]]&lt;trace-id&gt;, &lt;org&gt;/&lt;project&gt;, or &lt;project&gt; |
 
 **Options:**
 
@@ -36,7 +36,7 @@ View details of one or more log entries
 
 | Argument | Description |
 |----------|-------------|
-| `<org/project/log-id...>` | [&lt;org&gt;/&lt;project&gt;] &lt;log-id&gt; [&lt;log-id&gt;...] - Target (optional) and one or more log IDs (optional) |
+| `<org/project/log-id...>` | [&lt;org&gt;/&lt;project&gt;] &lt;log-id&gt; [&lt;log-id&gt;...] - Target (optional) and one or more log IDs |
 
 **Options:**
 

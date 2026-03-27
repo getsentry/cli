@@ -15,7 +15,7 @@ List issues in a project
 
 | Argument | Description |
 |----------|-------------|
-| `<org/project>` | &lt;org&gt;/ (all projects), &lt;org&gt;/&lt;project&gt;, or &lt;project&gt; (search) (optional) |
+| `<org/project>` | &lt;org&gt;/ (all projects), &lt;org&gt;/&lt;project&gt;, or &lt;project&gt; (search) |
 
 **Options:**
 

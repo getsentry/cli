@@ -26,7 +26,7 @@ View details of an organization
 
 | Argument | Description |
 |----------|-------------|
-| `<org>` | Organization slug (optional if auto-detected) (optional) |
+| `<org>` | Organization slug (optional if auto-detected) |
 
 **Options:**
 

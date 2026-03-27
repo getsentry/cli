@@ -15,7 +15,7 @@ List spans in a project or trace
 
 | Argument | Description |
 |----------|-------------|
-| `<org/project/trace-id...>` | [&lt;org&gt;/&lt;project&gt;] or [&lt;org&gt;/&lt;project&gt;/]&lt;trace-id&gt; (optional) |
+| `<org/project/trace-id...>` | [&lt;org&gt;/&lt;project&gt;] or [&lt;org&gt;/&lt;project&gt;/]&lt;trace-id&gt; |
 
 **Options:**
 
@@ -36,7 +36,7 @@ View details of specific spans
 
 | Argument | Description |
 |----------|-------------|
-| `<trace-id/span-id...>` | [&lt;org&gt;/&lt;project&gt;/]&lt;trace-id&gt; &lt;span-id&gt; [&lt;span-id&gt;...] - Trace ID and one or more span IDs (optional) |
+| `<trace-id/span-id...>` | [&lt;org&gt;/&lt;project&gt;/]&lt;trace-id&gt; &lt;span-id&gt; [&lt;span-id&gt;...] - Trace ID and one or more span IDs |
 
 **Options:**
 

@@ -15,7 +15,7 @@ List product trials
 
 | Argument | Description |
 |----------|-------------|
-| `<org>` | Organization slug (auto-detected if omitted) (optional) |
+| `<org>` | Organization slug (auto-detected if omitted) |
 
 ### `sentry trial start <name> <org>`
 
@@ -26,7 +26,7 @@ Start a product trial
 | Argument | Description |
 |----------|-------------|
 | `<name>` | Trial name (seer, replays, performance, spans, profiling, logs, monitors, uptime, plan) |
-| `<org>` | Organization slug (auto-detected if omitted) (optional) |
+| `<org>` | Organization slug (auto-detected if omitted) |
 
 All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
 

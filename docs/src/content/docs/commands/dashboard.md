@@ -15,7 +15,7 @@ List dashboards
 
 | Argument | Description |
 |----------|-------------|
-| `<org/title-filter...>` | [&lt;org/project&gt;] [&lt;name-glob&gt;] (optional) |
+| `<org/title-filter...>` | [&lt;org/project&gt;] [&lt;name-glob&gt;] |
 
 **Options:**
 
@@ -34,7 +34,7 @@ View a dashboard
 
 | Argument | Description |
 |----------|-------------|
-| `<org/project/dashboard...>` | [&lt;org/project&gt;] &lt;dashboard-id-or-title&gt; (optional) |
+| `<org/project/dashboard...>` | [&lt;org/project&gt;] &lt;dashboard-id-or-title&gt; |
 
 **Options:**
 
@@ -53,7 +53,7 @@ Create a dashboard
 
 | Argument | Description |
 |----------|-------------|
-| `<org/project/title...>` | [&lt;org/project&gt;] &lt;title&gt; (optional) |
+| `<org/project/title...>` | [&lt;org/project&gt;] &lt;title&gt; |
 
 ### `sentry dashboard widget add <org/project/dashboard/title...>`
 
@@ -63,7 +63,7 @@ Add a widget to a dashboard
 
 | Argument | Description |
 |----------|-------------|
-| `<org/project/dashboard/title...>` | [&lt;org/project&gt;] &lt;dashboard&gt; &lt;title&gt; (optional) |
+| `<org/project/dashboard/title...>` | [&lt;org/project&gt;] &lt;dashboard&gt; &lt;title&gt; |
 
 **Options:**
 
@@ -85,7 +85,7 @@ Edit a widget in a dashboard
 
 | Argument | Description |
 |----------|-------------|
-| `<org/project/dashboard...>` | [&lt;org/project&gt;] &lt;dashboard-id-or-title&gt; (optional) |
+| `<org/project/dashboard...>` | [&lt;org/project&gt;] &lt;dashboard-id-or-title&gt; |
 
 **Options:**
 
@@ -110,7 +110,7 @@ Delete a widget from a dashboard
 
 | Argument | Description |
 |----------|-------------|
-| `<org/project/dashboard...>` | [&lt;org/project&gt;] &lt;dashboard-id-or-title&gt; (optional) |
+| `<org/project/dashboard...>` | [&lt;org/project&gt;] &lt;dashboard-id-or-title&gt; |
 
 **Options:**
 

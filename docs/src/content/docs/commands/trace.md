@@ -15,7 +15,7 @@ List recent traces in a project
 
 | Argument | Description |
 |----------|-------------|
-| `<org/project>` | &lt;org&gt;/&lt;project&gt; or &lt;project&gt; (search) (optional) |
+| `<org/project>` | &lt;org&gt;/&lt;project&gt; or &lt;project&gt; (search) |
 
 **Options:**
 
@@ -36,7 +36,7 @@ View details of a specific trace
 
 | Argument | Description |
 |----------|-------------|
-| `<org/project/trace-id...>` | [&lt;org&gt;/&lt;project&gt;/]&lt;trace-id&gt; - Target (optional) and trace ID (required) (optional) |
+| `<org/project/trace-id...>` | [&lt;org&gt;/&lt;project&gt;/]&lt;trace-id&gt; - Target (optional) and trace ID (required) |
 
 **Options:**
 
@@ -54,7 +54,7 @@ View logs associated with a trace
 
 | Argument | Description |
 |----------|-------------|
-| `<org/trace-id...>` | [&lt;org&gt;/]&lt;trace-id&gt; - Optional org and required trace ID (optional) |
+| `<org/trace-id...>` | [&lt;org&gt;/]&lt;trace-id&gt; - Optional org and required trace ID |
 
 **Options:**
 

@@ -15,7 +15,7 @@ View details of a specific event
 
 | Argument | Description |
 |----------|-------------|
-| `<org/project/event-id...>` | [&lt;org&gt;/&lt;project&gt;] &lt;event-id&gt; - Target (optional) and event ID (required) (optional) |
+| `<org/project/event-id...>` | [&lt;org&gt;/&lt;project&gt;] &lt;event-id&gt; - Target (optional) and event ID (required) |
 
 **Options:**
 
