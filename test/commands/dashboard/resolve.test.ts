@@ -23,6 +23,8 @@ import {
   ValidationError,
 } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as region from "../../../src/lib/region.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 
 // ---------------------------------------------------------------------------
@@ -333,16 +335,23 @@ describe("resolveDashboardId", () => {
 
 describe("resolveOrgFromTarget", () => {
   let resolveOrgSpy: ReturnType<typeof spyOn>;
+  let resolveEffectiveOrgSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
+    // Default: resolveEffectiveOrg returns the input unchanged
+    resolveEffectiveOrgSpy = spyOn(
+      region,
+      "resolveEffectiveOrg"
+    ).mockImplementation((slug: string) => Promise.resolve(slug));
   });
 
   afterEach(() => {
     resolveOrgSpy.mockRestore();
+    resolveEffectiveOrgSpy.mockRestore();
   });
 
-  test("explicit type returns org directly", async () => {
+  test("explicit type normalizes org via resolveEffectiveOrg", async () => {
     const parsed = parseOrgProjectArg("my-org/my-project");
     const org = await resolveOrgFromTarget(
       parsed,
@@ -350,7 +359,20 @@ describe("resolveOrgFromTarget", () => {
       "sentry dashboard view"
     );
     expect(org).toBe("my-org");
+    expect(resolveEffectiveOrgSpy).toHaveBeenCalledWith("my-org");
     expect(resolveOrgSpy).not.toHaveBeenCalled();
+  });
+
+  test("explicit type with o-prefixed numeric ID resolves to slug", async () => {
+    resolveEffectiveOrgSpy.mockResolvedValue("my-org");
+    const parsed = parseOrgProjectArg("o1169445/my-project");
+    const org = await resolveOrgFromTarget(
+      parsed,
+      "/tmp",
+      "sentry dashboard list"
+    );
+    expect(org).toBe("my-org");
+    expect(resolveEffectiveOrgSpy).toHaveBeenCalledWith("o1169445");
   });
 
   test("auto-detect with null resolveOrg throws ContextError", async () => {
@@ -360,6 +382,18 @@ describe("resolveOrgFromTarget", () => {
     await expect(
       resolveOrgFromTarget(parsed, "/tmp", "sentry dashboard view")
     ).rejects.toThrow(ContextError);
+  });
+
+  test("auto-detect delegates to resolveOrg", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "detected-org" });
+    const parsed = parseOrgProjectArg(undefined);
+    const org = await resolveOrgFromTarget(
+      parsed,
+      "/tmp",
+      "sentry dashboard list"
+    );
+    expect(org).toBe("detected-org");
+    expect(resolveOrgSpy).toHaveBeenCalled();
   });
 });
 

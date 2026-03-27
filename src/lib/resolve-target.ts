@@ -32,6 +32,7 @@ import {
   setCachedProject,
   setCachedProjectByDsnKey,
 } from "./db/project-cache.js";
+import { getOrgByNumericId } from "./db/regions.js";
 import type { DetectedDsn, DsnDetectionResult } from "./dsn/index.js";
 import {
   detectAllDsns,
@@ -249,6 +250,48 @@ export async function resolveOrgFromDsn(
     org: dsn.orgId,
     detectedFrom,
   };
+}
+
+/**
+ * Normalize a bare numeric org ID to an org slug.
+ *
+ * When the project cache is cold, resolveOrgFromDsn returns the raw numeric
+ * org ID from the DSN host (e.g., "1169445"). Many API endpoints reject
+ * numeric IDs (dashboards return 404/403). This resolves them:
+ *
+ * 1. Local DB cache lookup (getOrgByNumericId — fast, no API call)
+ * 2. Refresh org list via listOrganizationsUncached to populate mapping
+ * 3. Falls back to original ID if resolution fails
+ *
+ * Non-numeric identifiers (already slugs) are returned unchanged.
+ *
+ * @param orgId - Raw org identifier from DSN (numeric ID or slug)
+ * @returns Org slug for API calls
+ */
+async function normalizeNumericOrg(orgId: string): Promise<string> {
+  if (!isAllDigits(orgId)) {
+    return orgId;
+  }
+
+  // Fast path: check local DB cache for numeric ID → slug mapping
+  const cached = getOrgByNumericId(orgId);
+  if (cached) {
+    return cached.slug;
+  }
+
+  // Slow path: fetch org list to populate numeric ID → slug mapping.
+  // resolveEffectiveOrg doesn't handle bare numeric IDs (only o-prefixed),
+  // so we do a targeted refresh via listOrganizationsUncached().
+  try {
+    const { listOrganizationsUncached } = await import("./api-client.js");
+    await listOrganizationsUncached();
+  } catch {
+    return orgId;
+  }
+
+  // Retry cache after refresh
+  const afterRefresh = getOrgByNumericId(orgId);
+  return afterRefresh?.slug ?? orgId;
 }
 
 /**
@@ -1019,7 +1062,12 @@ export async function resolveOrg(
   try {
     const result = await resolveOrgFromDsn(cwd);
     if (result) {
-      setOrgProjectContext([result.org], []);
+      // resolveOrgFromDsn may return a bare numeric org ID when the project
+      // cache is cold. Normalize to a slug so API endpoints that reject
+      // numeric IDs (e.g., dashboards) work correctly.
+      const resolvedOrg = await normalizeNumericOrg(result.org);
+      setOrgProjectContext([resolvedOrg], []);
+      return { org: resolvedOrg, detectedFrom: result.detectedFrom };
     }
     return result;
   } catch {
