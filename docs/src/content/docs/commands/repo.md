@@ -3,45 +3,33 @@ title: repo
 description: Repo commands for the Sentry CLI
 ---
 
-List repositories connected to a Sentry organization.
+Work with Sentry repositories
 
 ## Commands
 
-### `sentry repo list`
+### `sentry repo list <org/project>`
 
-List repositories in an organization.
-
-```bash
-# Auto-detect from DSN or config
-sentry repo list
-
-# Explicit org
-sentry repo list <org>/
-
-# Org inferred from project context
-sentry repo list <org>/<project>
-
-# Bare org slug
-sentry repo list <org>
-```
+List repositories
 
 **Arguments:**
 
 | Argument | Description |
 |----------|-------------|
-| `<org>/` | Organization slug (trailing slash enables pagination) |
-| `<org>/<project>` | Organization and project (lists repos for that org) |
-| `<org>` | Bare organization slug |
+| `<org/project>` | &lt;org&gt;/ (all projects), &lt;org&gt;/&lt;project&gt;, or &lt;project&gt; (search) (optional) |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `-n, --limit <n>` | Number of repositories to show |
-| `-c, --cursor <dir>` | Pagination cursor (`next` or `prev`) |
-| `--json` | Output as JSON |
+| `-n, --limit <limit>` | Maximum number of repositories to list (default: "30") |
+| `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
+| `-c, --cursor <cursor>` | Navigate pages: "next", "prev", "first" (or raw cursor string) |
 
-**Examples:**
+All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
+
+<!-- GENERATED:END -->
+
+## Examples
 
 ```bash
 # List repositories (auto-detect org)

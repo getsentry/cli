@@ -38,19 +38,6 @@ List projects
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
-**Examples:**
-
-```bash
-# List all projects
-sentry project list
-
-# List projects in a specific organization
-sentry project list <org-slug>
-
-# Filter by platform
-sentry project list --platform javascript
-```
-
 ### `sentry project view <org/project>`
 
 View details of a project
@@ -58,22 +45,5 @@ View details of a project
 **Flags:**
 - `-w, --web - Open in browser`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-
-**Examples:**
-
-```bash
-# Auto-detect from DSN or config
-sentry project view
-
-# Explicit org and project
-sentry project view <org>/<project>
-
-# Find project across all orgs
-sentry project view <project>
-
-sentry project view my-org/frontend
-
-sentry project view my-org/frontend -w
-```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

@@ -3,60 +3,41 @@ title: team
 description: Team commands for the Sentry CLI
 ---
 
-Manage Sentry teams.
+Work with Sentry teams
 
 ## Commands
 
-### `sentry team list`
+### `sentry team list <org/project>`
 
-List teams in an organization.
-
-```bash
-# Auto-detect organization or list all
-sentry team list
-
-# List teams in a specific organization
-sentry team list <org-slug>
-
-# Limit results
-sentry team list --limit 10
-```
+List teams
 
 **Arguments:**
 
 | Argument | Description |
 |----------|-------------|
-| `[org-slug]` | Optional organization slug to filter by |
+| `<org/project>` | &lt;org&gt;/ (all projects), &lt;org&gt;/&lt;project&gt;, or &lt;project&gt; (search) (optional) |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `-n, --limit <number>` | Maximum number of teams to list (default: 30) |
-| `--json` | Output as JSON |
+| `-n, --limit <limit>` | Maximum number of teams to list (default: "30") |
+| `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
+| `-c, --cursor <cursor>` | Navigate pages: "next", "prev", "first" (or raw cursor string) |
 
-**Example output:**
+All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
 
-```
-ORG         SLUG        NAME              MEMBERS
-my-org      backend     Backend Team            8
-my-org      frontend    Frontend Team           5
-my-org      mobile      Mobile Team             3
-```
+<!-- GENERATED:END -->
 
-**JSON output:**
+## Examples
 
 ```bash
-sentry team list --json
-```
+# List teams
+sentry team list my-org/
 
-```json
-[
-  {
-    "id": "100",
-    "slug": "backend",
-    "name": "Backend Team",
-    "memberCount": 8
-  }
-]
+# Paginate through teams
+sentry team list my-org/ -c next
+
+# Output as JSON
+sentry team list --json
 ```

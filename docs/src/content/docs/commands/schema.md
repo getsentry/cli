@@ -1,42 +1,34 @@
 ---
 title: schema
-description: Schema commands for the Sentry CLI
+description: Schema command for the Sentry CLI
 ---
 
-Browse and search the Sentry API schema. Shows available resources, operations, and endpoint details.
+Browse the Sentry API schema
 
 ## Usage
 
-```bash
-# List all API resources
-sentry schema
+### `sentry schema <resource...>`
 
-# Show endpoints for a resource
-sentry schema <resource>
-
-# Show details for a specific endpoint
-sentry schema <resource> <operation>
-
-# Glob-match resources
-sentry schema monitor*
-```
+Browse the Sentry API schema
 
 **Arguments:**
 
 | Argument | Description |
 |----------|-------------|
-| `<resource>` | Resource name (e.g., `issues`, `projects`). Supports glob patterns. |
-| `<operation>` | Operation name within a resource (e.g., `list`, `create`) |
+| `<resource...>` | Resource name and optional operation (optional) |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
 | `--all` | Show all endpoints in a flat list |
-| `-q, --search <query>` | Search endpoints by keyword |
-| `--json` | Output as JSON |
+| `-q, --search <search>` | Search endpoints by keyword |
 
-**Examples:**
+All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
+
+<!-- GENERATED:END -->
+
+## Examples
 
 ```bash
 # List all API resources

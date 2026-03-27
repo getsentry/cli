@@ -21,23 +21,6 @@ List dashboards
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
-**Examples:**
-
-```bash
-# Auto-detect org from config
-sentry dashboard list
-
-# Explicit org
-sentry dashboard list my-org/
-
-# Explicit org and project
-sentry dashboard list my-org/my-project
-
-sentry dashboard list
-
-sentry dashboard list -w
-```
-
 ### `sentry dashboard view <args...>`
 
 View a dashboard
@@ -48,45 +31,9 @@ View a dashboard
 - `-r, --refresh <value> - Auto-refresh interval in seconds (default: 60, min: 10)`
 - `-t, --period <value> - Time period override (e.g., "24h", "7d", "14d")`
 
-**Examples:**
-
-```bash
-# By numeric ID
-sentry dashboard view <id>
-
-# By title
-sentry dashboard view '<title>'
-
-# With explicit org
-sentry dashboard view <org>/ <id>
-
-sentry dashboard view 12345
-
-sentry dashboard view 'Frontend Performance'
-
-sentry dashboard view 12345 -w
-```
-
 ### `sentry dashboard create <args...>`
 
 Create a dashboard
-
-**Examples:**
-
-```bash
-# Auto-detect org
-sentry dashboard create '<title>'
-
-# Explicit org
-sentry dashboard create <org>/ '<title>'
-
-# Explicit org and project
-sentry dashboard create <org>/<project> '<title>'
-
-sentry dashboard create 'Frontend Performance'
-
-sentry dashboard widget add 'Frontend Performance' "Error Count" --display big_number --query count
-```
 
 ### `sentry dashboard widget add <args...>`
 

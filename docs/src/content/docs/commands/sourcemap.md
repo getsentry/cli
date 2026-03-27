@@ -3,17 +3,13 @@ title: sourcemap
 description: Sourcemap commands for the Sentry CLI
 ---
 
-Inject debug IDs and upload sourcemaps to Sentry for readable stack traces.
+Manage sourcemaps
 
 ## Commands
 
-### `sentry sourcemap inject`
+### `sentry sourcemap inject <directory>`
 
-Inject Sentry debug IDs into JavaScript files and their companion sourcemaps.
-
-```bash
-sentry sourcemap inject <directory>
-```
+Inject debug IDs into JavaScript files and sourcemaps
 
 **Arguments:**
 
@@ -25,12 +21,33 @@ sentry sourcemap inject <directory>
 
 | Option | Description |
 |--------|-------------|
-| `--ext <extensions>` | Comma-separated file extensions to process (default: `.js,.cjs,.mjs`) |
+| `--ext <ext>` | Comma-separated file extensions to process (default: .js,.cjs,.mjs) |
 | `--dry-run` | Show what would be modified without writing |
 
-The injection is idempotent -- files that already have debug IDs are skipped.
+### `sentry sourcemap upload <directory>`
 
-**Examples:**
+Upload sourcemaps to Sentry
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<directory>` | Directory containing sourcemaps |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--release <release>` | Release version to associate with the upload |
+| `--url-prefix <url-prefix>` | URL prefix for uploaded files (default: ~/) |
+
+All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
+
+<!-- GENERATED:END -->
+
+## Examples
+
+### Inject debug IDs
 
 ```bash
 # Inject debug IDs into all JS files in dist/
@@ -43,30 +60,7 @@ sentry sourcemap inject ./dist --dry-run
 sentry sourcemap inject ./build --ext .js,.mjs
 ```
 
-### `sentry sourcemap upload`
-
-Upload JavaScript sourcemaps to Sentry using debug-ID-based matching.
-
-```bash
-sentry sourcemap upload <directory>
-```
-
-Automatically injects debug IDs into any files that don't already have them. Org and project are auto-detected from DSN, env vars, or config defaults.
-
-**Arguments:**
-
-| Argument | Description |
-|----------|-------------|
-| `<directory>` | Directory containing sourcemaps |
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--release <version>` | Release version to associate with the upload |
-| `--url-prefix <prefix>` | URL prefix for uploaded files (default: `~/`) |
-
-**Examples:**
+### Upload sourcemaps
 
 ```bash
 # Upload sourcemaps from dist/

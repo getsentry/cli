@@ -1,6 +1,6 @@
 ---
-title: Commands Overview
-description: Overview of all Sentry CLI commands
+title: Commands
+description: Available commands in the Sentry CLI
 ---
 
 The Sentry CLI provides commands for interacting with various Sentry resources.
@@ -9,22 +9,25 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 
 | Command | Description |
 |---------|-------------|
-| [`auth`](./auth/) | Authentication management |
-| [`cli`](./cli/) | CLI-related commands (feedback, upgrade) |
-| [`org`](./org/) | Organization operations |
-| [`project`](./project/) | Project operations |
-| [`team`](./team/) | Team operations |
-| [`issue`](./issue/) | Issue tracking |
-| [`event`](./event/) | Event inspection |
-| [`log`](./log/) | Log viewing and streaming |
-| [`trace`](./trace/) | Distributed trace inspection |
-| [`span`](./span/) | Span listing and details |
-| [`dashboard`](./dashboard/) | Dashboard management |
-| [`sourcemap`](./sourcemap/) | Sourcemap injection and upload |
-| [`repo`](./repo/) | Repository listing |
-| [`trial`](./trial/) | Product trial management |
-| [`schema`](./schema/) | API schema browsing |
-| [`api`](./api/) | Direct API access |
+| [`auth`](./auth/) | Authenticate with Sentry |
+| [`cli`](./cli/) | CLI-related commands |
+| [`org`](./org/) | Work with Sentry organizations |
+| [`project`](./project/) | Work with Sentry projects |
+| [`team`](./team/) | Work with Sentry teams |
+| [`issue`](./issue/) | Manage Sentry issues |
+| [`event`](./event/) | View Sentry events |
+| [`log`](./log/) | View Sentry logs |
+| [`trace`](./trace/) | View distributed traces |
+| [`span`](./span/) | List and view spans in projects or traces |
+| [`dashboard`](./dashboard/) | Manage Sentry dashboards |
+| [`sourcemap`](./sourcemap/) | Manage sourcemaps |
+| [`repo`](./repo/) | Work with Sentry repositories |
+| [`trial`](./trial/) | Manage product trials |
+| [`init`](./init/) | Initialize Sentry in your project (experimental) |
+| [`schema`](./schema/) | Browse the Sentry API schema |
+| [`api`](./api/) | Make an authenticated API request |
+
+<!-- GENERATED:END -->
 
 ## Global Options
 

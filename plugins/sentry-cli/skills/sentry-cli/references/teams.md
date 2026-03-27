@@ -57,19 +57,4 @@ List teams
 | `teamRole` | string \| null | Your role in the team |
 | `memberCount` | number | Number of members |
 
-**Examples:**
-
-```bash
-# Auto-detect organization or list all
-sentry team list
-
-# List teams in a specific organization
-sentry team list <org-slug>
-
-# Limit results
-sentry team list --limit 10
-
-sentry team list --json
-```
-
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

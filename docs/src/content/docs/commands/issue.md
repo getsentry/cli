@@ -3,46 +3,92 @@ title: issue
 description: Issue commands for the Sentry CLI
 ---
 
-Track and manage Sentry issues.
+Manage Sentry issues
 
 ## Commands
 
-### `sentry issue list`
+### `sentry issue list <org/project>`
 
-List issues in a project.
-
-```bash
-# Explicit org and project
-sentry issue list <org>/<project>
-
-# All projects in an organization
-sentry issue list <org>/
-
-# Search for project across all accessible orgs
-sentry issue list <project>
-
-# Auto-detect from DSN or config
-sentry issue list
-```
+List issues in a project
 
 **Arguments:**
 
 | Argument | Description |
 |----------|-------------|
-| `<org>/<project>` | Explicit organization and project (e.g., `my-org/frontend`) |
-| `<org>/` | All projects in the specified organization |
-| `<project>` | Search for project by name across all accessible organizations |
+| `<org/project>` | &lt;org&gt;/ (all projects), &lt;org&gt;/&lt;project&gt;, or &lt;project&gt; (search) (optional) |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `--query <query>` | Search query (Sentry search syntax) |
-| `--sort <sort>` | Sort by: date, new, freq, user (default: date) |
-| `--limit <n>` | Maximum number of issues to return (default: 10) |
-| `--json` | Output as JSON |
+| `-q, --query <query>` | Search query (Sentry search syntax) |
+| `-n, --limit <limit>` | Maximum number of issues to list (default: "25") |
+| `-s, --sort <sort>` | Sort by: date, new, freq, user (default: "date") |
+| `-t, --period <period>` | Time period for issue activity (e.g. 24h, 14d, 90d) (default: "90d") |
+| `-c, --cursor <cursor>` | Pagination cursor (use "next" for next page, "prev" for previous) |
+| `--compact` | Single-line rows for compact output (auto-detects if omitted) |
+| `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 
-**Examples:**
+### `sentry issue explain <issue>`
+
+Analyze an issue's root cause using Seer AI
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<issue>` | Issue: @latest, @most_frequent, &lt;org&gt;/ID, &lt;project&gt;-suffix, ID, or suffix |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--force` | Force new analysis even if one exists |
+| `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
+
+### `sentry issue plan <issue>`
+
+Generate a solution plan using Seer AI
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<issue>` | Issue: @latest, @most_frequent, &lt;org&gt;/ID, &lt;project&gt;-suffix, ID, or suffix |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--cause <cause>` | Root cause ID to plan (required if multiple causes exist) |
+| `--force` | Force new plan even if one exists |
+| `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
+
+### `sentry issue view <issue>`
+
+View details of a specific issue
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<issue>` | Issue: @latest, @most_frequent, &lt;org&gt;/ID, &lt;project&gt;-suffix, ID, or suffix |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-w, --web` | Open in browser |
+| `--spans <spans>` | Span tree depth limit (number, "all" for unlimited, "no" to disable) (default: "3") |
+| `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
+
+All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
+
+<!-- GENERATED:END -->
+
+## Examples
+
+### List issues
 
 ```bash
 # List issues in a specific project
@@ -55,30 +101,6 @@ ID            SHORT ID    TITLE                           COUNT   USERS
 987654321     FRONT-DEF   ReferenceError: x is not de...  456     89
 ```
 
-**List issues from all projects in an org:**
-
-```bash
-sentry issue list my-org/
-```
-
-**Search for a project across organizations:**
-
-```bash
-sentry issue list frontend
-```
-
-**With search query:**
-
-```bash
-sentry issue list my-org/frontend --query "TypeError"
-```
-
-**Sort by frequency:**
-
-```bash
-sentry issue list my-org/frontend --sort freq --limit 20
-```
-
 **Filter by status:**
 
 ```bash
@@ -88,36 +110,11 @@ sentry issue list my-org/frontend --query "is:unresolved"
 # Show resolved issues
 sentry issue list my-org/frontend --query "is:resolved"
 
-# Combine with other search terms
-sentry issue list my-org/frontend --query "is:unresolved TypeError"
+# Sort by frequency
+sentry issue list my-org/frontend --sort freq --limit 20
 ```
 
-### `sentry issue view`
-
-View details of a specific issue.
-
-```bash
-# By issue ID
-sentry issue view <issue-id>
-
-# By short ID
-sentry issue view <short-id>
-```
-
-**Arguments:**
-
-| Argument | Description |
-|----------|-------------|
-| `<issue-id>` | The issue ID (numeric) or short ID (e.g., PROJ-ABC) |
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `-w, --web` | Open in browser |
-| `--json` | Output as JSON |
-
-**Example:**
+### View an issue
 
 ```bash
 sentry issue view FRONT-ABC
@@ -138,103 +135,12 @@ Latest event:
   URL: https://example.com/app
 ```
 
-**Open in browser:**
+### Seer AI Requirements
 
-```bash
-sentry issue view FRONT-ABC -w
-```
-
-### `sentry issue explain`
-
-Analyze an issue's root cause using Seer AI.
-
-```bash
-sentry issue explain <issue-id>
-```
-
-This command analyzes the issue and provides:
-- Identified root causes
-- Reproduction steps
-- Relevant code locations
-
-The analysis may take a few minutes for new issues.
-
-**Arguments:**
-
-| Argument | Description |
-|----------|-------------|
-| `<issue-id>` | The issue ID (numeric), short ID (e.g., PROJ-ABC), or short suffix |
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--force` | Force new analysis even if one already exists |
-| `--json` | Output as JSON |
-
-**Examples:**
-
-```bash
-# By numeric issue ID
-sentry issue explain 123456789
-
-# By short ID with org prefix
-sentry issue explain my-org/MYPROJECT-ABC
-
-# By project-suffix format
-sentry issue explain myproject-G
-
-# Force a fresh analysis
-sentry issue explain 123456789 --force
-```
-
-**Requirements:**
+The `explain` and `plan` commands require:
 
 - Seer AI enabled for your organization
 - GitHub integration configured with repository access
 - Code mappings set up to link stack frames to source files
 
-### `sentry issue plan`
-
-Generate a solution plan for a Sentry issue using Seer AI.
-
-```bash
-sentry issue plan <issue-id>
-```
-
-This command requires that `sentry issue explain` has been run first to identify the root cause. It generates a solution plan with specific implementation steps to fix the issue.
-
-**Arguments:**
-
-| Argument | Description |
-|----------|-------------|
-| `<issue-id>` | The issue ID (numeric), short ID (e.g., PROJ-ABC), or short suffix |
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--cause <n>` | Root cause ID to plan (required if multiple causes were identified) |
-| `--json` | Output as JSON |
-
-**Examples:**
-
-```bash
-# After running explain, create a plan
-sentry issue plan 123456789
-
-# Specify which root cause to plan for (if multiple were found)
-sentry issue plan 123456789 --cause 0
-
-# By short ID with org prefix
-sentry issue plan my-org/MYPROJECT-ABC --cause 1
-
-# By project-suffix format
-sentry issue plan myproject-G --cause 0
-```
-
-**Requirements:**
-
-- Root cause analysis must be completed first (`sentry issue explain`)
-- GitHub integration configured for your organization
-- Code mappings set up for your project
+Root cause analysis must be completed (`sentry issue explain`) before generating a plan (`sentry issue plan`).

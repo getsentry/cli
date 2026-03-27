@@ -3,44 +3,77 @@ title: trace
 description: Trace commands for the Sentry CLI
 ---
 
-Inspect and browse distributed traces from Sentry projects.
+View distributed traces
 
 ## Commands
 
-### `sentry trace list`
+### `sentry trace list <org/project>`
 
-List recent traces in a project.
-
-```bash
-# Auto-detect from DSN or config
-sentry trace list
-
-# Explicit org and project
-sentry trace list <org>/<project>
-
-# Search for project across all accessible orgs
-sentry trace list <project>
-```
+List recent traces in a project
 
 **Arguments:**
 
 | Argument | Description |
 |----------|-------------|
-| `<org>/<project>` | Explicit organization and project (e.g., `my-org/backend`) |
-| `<project>` | Search for project by name across all accessible organizations |
+| `<org/project>` | &lt;org&gt;/&lt;project&gt; or &lt;project&gt; (search) (optional) |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `-n, --limit <n>` | Number of traces to show (1-1000, default: 20) |
+| `-n, --limit <limit>` | Number of traces (1-1000) (default: "20") |
 | `-q, --query <query>` | Search query (Sentry search syntax) |
-| `-s, --sort <field>` | Sort by: `date`, `duration` (default: `date`) |
-| `--period <period>` | Time period (e.g., `24h`, `7d`, `14d`; default: `7d`) |
-| `-c, --cursor <dir>` | Pagination cursor (`next` or `prev`) |
-| `--json` | Output as JSON |
+| `-s, --sort <sort>` | Sort by: date, duration (default: "date") |
+| `-t, --period <period>` | Time period (e.g., "1h", "24h", "7d", "30d") (default: "7d") |
+| `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
+| `-c, --cursor <cursor>` | Navigate pages: "next", "prev", "first" (or raw cursor string) |
 
-**Examples:**
+### `sentry trace view <org/project/trace-id...>`
+
+View details of a specific trace
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<org/project/trace-id...>` | [&lt;org&gt;/&lt;project&gt;/]&lt;trace-id&gt; - Target (optional) and trace ID (required) (optional) |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-w, --web` | Open in browser |
+| `--spans <spans>` | Span tree depth limit (number, "all" for unlimited, "no" to disable) (default: "3") |
+| `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
+
+### `sentry trace logs <org/trace-id...>`
+
+View logs associated with a trace
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<org/trace-id...>` | [&lt;org&gt;/]&lt;trace-id&gt; - Optional org and required trace ID (optional) |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-w, --web` | Open trace in browser |
+| `-t, --period <period>` | Time period to search (e.g., "14d", "7d", "24h"). Default: 14d (default: "14d") |
+| `-n, --limit <limit>` | Number of log entries (<=1000) (default: "100") |
+| `-q, --query <query>` | Additional filter query (Sentry search syntax) |
+| `-s, --sort <sort>` | Sort order: "newest" (default) or "oldest" (default: "newest") |
+| `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
+
+All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
+
+<!-- GENERATED:END -->
+
+## Examples
+
+### List traces
 
 ```bash
 # List last 20 traces (default)
@@ -56,37 +89,7 @@ sentry trace list -q "transaction:GET /api/users" --period 24h
 sentry trace list my-org/backend -c next
 ```
 
-### `sentry trace view`
-
-View details of a specific trace, including a span tree.
-
-```bash
-# Auto-detect org from DSN or config
-sentry trace view <trace-id>
-
-# Explicit org and project
-sentry trace view <org>/<project>/<trace-id>
-
-# Search for project across all accessible orgs
-sentry trace view <project> <trace-id>
-```
-
-**Arguments:**
-
-| Argument | Description |
-|----------|-------------|
-| `<trace-id>` | The 32-character hexadecimal trace ID |
-| `<org>/<project>/<trace-id>` | Explicit organization, project, and trace ID |
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `-w, --web` | Open in browser |
-| `--spans <depth>` | Span tree depth limit (number, `all` for unlimited, `no` to disable) |
-| `--json` | Output as JSON |
-
-**Examples:**
+### View a trace
 
 ```bash
 # View trace details with span tree
@@ -99,36 +102,7 @@ sentry trace view abc123def456abc123def456abc12345 -w
 sentry trace view PROJ-123
 ```
 
-### `sentry trace logs`
-
-View logs associated with a specific trace.
-
-```bash
-# Auto-detect org
-sentry trace logs <trace-id>
-
-# Explicit org
-sentry trace logs <org>/<trace-id>
-```
-
-**Arguments:**
-
-| Argument | Description |
-|----------|-------------|
-| `<trace-id>` | The 32-character hexadecimal trace ID |
-| `<org>/<trace-id>` | Explicit organization and trace ID |
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `-w, --web` | Open trace in browser |
-| `-t, --period <period>` | Time period to search (e.g., `14d`, `7d`, `24h`; default: `14d`) |
-| `-n, --limit <n>` | Number of log entries (max 1000, default: 100) |
-| `-q, --query <query>` | Additional filter query (Sentry search syntax) |
-| `--json` | Output as JSON |
-
-**Examples:**
+### View trace logs
 
 ```bash
 # View logs for a trace

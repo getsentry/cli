@@ -3,68 +3,41 @@ title: trial
 description: Trial commands for the Sentry CLI
 ---
 
-View and start product trials for a Sentry organization.
+Manage product trials
 
 ## Commands
 
-### `sentry trial list`
+### `sentry trial list <org>`
 
-List product trials for an organization, including available, active, and expired trials.
-
-```bash
-# Auto-detect org
-sentry trial list
-
-# Explicit org
-sentry trial list <org>
-```
+List product trials
 
 **Arguments:**
 
 | Argument | Description |
 |----------|-------------|
-| `<org>` | Organization slug (auto-detected if omitted) |
+| `<org>` | Organization slug (auto-detected if omitted) (optional) |
 
-**Options:**
+### `sentry trial start <name> <org>`
 
-| Option | Description |
-|--------|-------------|
-| `--json` | Output as JSON |
+Start a product trial
 
-**Examples:**
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<name>` | Trial name (seer, replays, performance, spans, profiling, logs, monitors, uptime, plan) |
+| `<org>` | Organization slug (auto-detected if omitted) (optional) |
+
+All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
+
+<!-- GENERATED:END -->
+
+## Examples
 
 ```bash
 # List all trials for the current org
 sentry trial list
 
-# List trials for a specific org
-sentry trial list my-org
-
-# Machine-readable output
-sentry trial list --json
-```
-
-### `sentry trial start`
-
-Start a product trial for an organization.
-
-```bash
-sentry trial start <name>
-sentry trial start <name> <org>
-```
-
-**Arguments:**
-
-| Argument | Description |
-|----------|-------------|
-| `<name>` | Trial name (e.g., `seer`, `replays`, `profiling`, `plan`) |
-| `<org>` | Organization slug (auto-detected if omitted) |
-
-Use `plan` to start a Business plan trial (opens the billing page in a browser).
-
-**Examples:**
-
-```bash
 # Start a Seer trial
 sentry trial start seer
 

@@ -3,32 +3,33 @@ title: event
 description: Event commands for the Sentry CLI
 ---
 
-Inspect Sentry events.
+View Sentry events
 
 ## Commands
 
-### `sentry event view`
+### `sentry event view <args...>`
 
-View details of a specific event.
-
-```bash
-sentry event view <event-id>
-```
+View details of a specific event
 
 **Arguments:**
 
 | Argument | Description |
 |----------|-------------|
-| `<event-id>` | The event ID |
+| `<args...>` | [&lt;org&gt;/&lt;project&gt;] &lt;event-id&gt; - Target (optional) and event ID (required) (optional) |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
 | `-w, --web` | Open in browser |
-| `--json` | Output as JSON |
+| `--spans <spans>` | Span tree depth limit (number, "all" for unlimited, "no" to disable) (default: "3") |
+| `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 
-**Example:**
+All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
+
+<!-- GENERATED:END -->
+
+## Examples
 
 ```bash
 sentry event view abc123def456
@@ -50,16 +51,6 @@ Tags:
   os: Windows 10
   environment: production
   release: 1.2.3
-
-Context:
-  url: https://example.com/app
-  user_id: 12345
-```
-
-**Open in browser:**
-
-```bash
-sentry event view abc123def456 -w
 ```
 
 ## Finding Event IDs

@@ -3,46 +3,55 @@ title: span
 description: Span commands for the Sentry CLI
 ---
 
-List and inspect spans from Sentry projects or within specific traces.
+List and view spans in projects or traces
 
 ## Commands
 
-### `sentry span list`
+### `sentry span list <org/project/trace-id...>`
 
-List spans in a project or within a specific trace.
-
-```bash
-# Project mode — list spans across the project
-sentry span list
-sentry span list <org>/<project>
-sentry span list <project>
-
-# Trace mode — list spans within a specific trace
-sentry span list <trace-id>
-sentry span list <org>/<project>/<trace-id>
-sentry span list <project> <trace-id>
-```
+List spans in a project or trace
 
 **Arguments:**
 
 | Argument | Description |
 |----------|-------------|
-| `<org>/<project>` | Explicit organization and project (project mode) |
-| `<project>` | Search for project by name across all accessible organizations |
-| `<trace-id>` | 32-character hex trace ID to list spans within (trace mode) |
+| `<org/project/trace-id...>` | [&lt;org&gt;/&lt;project&gt;] or [&lt;org&gt;/&lt;project&gt;/]&lt;trace-id&gt; (optional) |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `-n, --limit <n>` | Number of spans (max 1000, default: 25) |
-| `-q, --query <query>` | Filter spans (e.g., `"op:db"`, `"duration:>100ms"`) |
-| `-s, --sort <field>` | Sort order: `date`, `duration` (default: `date`) |
-| `--period <period>` | Time period (e.g., `24h`, `7d`; default: `7d`) |
-| `-c, --cursor <dir>` | Pagination cursor (`next` or `prev`) |
-| `--json` | Output as JSON |
+| `-n, --limit <limit>` | Number of spans (<=1000) (default: "25") |
+| `-q, --query <query>` | Filter spans (e.g., "op:db", "duration:>100ms", "project:backend") |
+| `-s, --sort <sort>` | Sort order: date, duration (default: "date") |
+| `-t, --period <period>` | Time period (e.g., "1h", "24h", "7d", "30d") (default: "7d") |
+| `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
+| `-c, --cursor <cursor>` | Navigate pages: "next", "prev", "first" (or raw cursor string) |
 
-**Examples:**
+### `sentry span view <trace-id/span-id...>`
+
+View details of specific spans
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<trace-id/span-id...>` | [&lt;org&gt;/&lt;project&gt;/]&lt;trace-id&gt; &lt;span-id&gt; [&lt;span-id&gt;...] - Trace ID and one or more span IDs (optional) |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--spans <spans>` | Span tree depth limit (number, "all" for unlimited, "no" to disable) (default: "3") |
+| `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
+
+All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
+
+<!-- GENERATED:END -->
+
+## Examples
+
+### List spans
 
 ```bash
 # List recent spans in the current project
@@ -56,36 +65,9 @@ sentry span list -q "duration:>100ms" --period 24h
 
 # List spans within a specific trace
 sentry span list abc123def456abc123def456abc12345
-
-# Paginate through results
-sentry span list -c next
 ```
 
-### `sentry span view`
-
-View detailed information about one or more spans within a trace.
-
-```bash
-sentry span view <trace-id> <span-id>
-sentry span view <org>/<project>/<trace-id> <span-id>
-sentry span view <trace-id> <span-id> <span-id>
-```
-
-**Arguments:**
-
-| Argument | Description |
-|----------|-------------|
-| `<trace-id>` | The 32-character hexadecimal trace ID (optionally prefixed with `<org>/<project>/`) |
-| `<span-id>` | One or more 16-character hexadecimal span IDs |
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--spans <depth>` | Span tree depth limit (number, `all` for unlimited, `no` to disable) |
-| `--json` | Output as JSON |
-
-**Examples:**
+### View spans
 
 ```bash
 # View a single span

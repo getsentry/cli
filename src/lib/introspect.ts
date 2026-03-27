@@ -63,6 +63,14 @@ export type PositionalParams =
 export type PositionalParam = {
   brief?: string;
   placeholder?: string;
+  optional?: boolean;
+};
+
+/** Extracted metadata for a single positional argument */
+export type PositionalInfo = {
+  placeholder: string;
+  brief: string;
+  optional: boolean;
 };
 
 /** Flag definition as stored in Stricli's command parameters */
@@ -87,6 +95,8 @@ export type CommandInfo = {
   fullDescription?: string;
   flags: FlagInfo[];
   positional: string;
+  /** Structured positional parameter metadata for documentation generation */
+  positionals: PositionalInfo[];
   aliases: Record<string, string>;
   examples: string[];
   /** JSON output field metadata extracted from `OutputConfig.schema` */
@@ -192,6 +202,44 @@ export function getPositionalString(params?: PositionalParams): string {
 }
 
 /**
+ * Extract structured positional parameter metadata from a command.
+ *
+ * Returns one entry per positional, with placeholder, brief, and whether
+ * the parameter is optional. Used by documentation generators to build
+ * argument tables.
+ *
+ * @param params - Stricli positional parameter definition
+ * @returns Array of positional info objects
+ */
+export function extractPositionals(
+  params?: PositionalParams
+): PositionalInfo[] {
+  if (!params) {
+    return [];
+  }
+
+  if (params.kind === "tuple") {
+    return params.parameters.map((p, i) => ({
+      placeholder: p.placeholder ?? `arg${i}`,
+      brief: p.brief ?? "",
+      optional: p.optional ?? false,
+    }));
+  }
+
+  if (params.kind === "array") {
+    return [
+      {
+        placeholder: `${params.parameter.placeholder ?? "args"}...`,
+        brief: params.parameter.brief ?? "",
+        optional: true,
+      },
+    ];
+  }
+
+  return [];
+}
+
+/**
  * Extract flag metadata from a command's flag definitions.
  *
  * @param flags - Raw Stricli flag definitions
@@ -237,6 +285,7 @@ export function buildCommandInfo(
     fullDescription: cmd.fullDescription,
     flags: extractFlags(cmd.parameters.flags),
     positional: getPositionalString(cmd.parameters.positional),
+    positionals: extractPositionals(cmd.parameters.positional),
     aliases: cmd.parameters.aliases ?? {},
     examples,
     jsonFields: jsonFields?.length ? jsonFields : undefined,
