@@ -436,6 +436,11 @@ async function executeStandardUpgrade(opts: {
     async () => executeUpgrade(method, target, downloadTag, offline)
   );
 
+  if (downloadResult?.patchBytes) {
+    const kb = (downloadResult.patchBytes / 1024).toFixed(1);
+    log.info(`Applied delta patch (${kb} KB downloaded)`);
+  }
+
   // Run setup on the new binary to update completions, agent skills,
   // and record installation metadata.
   if (downloadResult) {
@@ -500,6 +505,12 @@ async function migrateToStandaloneForNightly(
     { message: `Downloading ${target}...`, json },
     async () => executeUpgrade("curl", target, downloadTag)
   );
+
+  if (downloadResult?.patchBytes) {
+    const kb = (downloadResult.patchBytes / 1024).toFixed(1);
+    log.info(`Applied delta patch (${kb} KB downloaded)`);
+  }
+
   if (!downloadResult) {
     throw new UpgradeError(
       "execution_failed",

@@ -461,6 +461,8 @@ export type DownloadResult = {
   tempBinaryPath: string;
   /** Path to the lock file held during download (caller must release after child exits) */
   lockPath: string;
+  /** Size of delta patch in bytes, when delta upgrade was used instead of full download */
+  patchBytes?: number;
 };
 
 /**
@@ -634,9 +636,9 @@ export async function downloadBinaryToTemp(
     // Try delta upgrade first — downloads tiny patches instead of full binary.
     // Falls back to full download on any failure (missing patches, hash mismatch, etc.)
     const deltaResult = await tryDeltaUpgrade(version, tempPath, offline);
+    let patchBytes: number | undefined;
     if (deltaResult) {
-      const kb = (deltaResult.patchBytes / 1024).toFixed(1);
-      log.info(`Applied delta patch (${kb} KB downloaded)`);
+      patchBytes = deltaResult.patchBytes;
     } else if (offline) {
       throw new UpgradeError(
         "network_error",
@@ -658,7 +660,7 @@ export async function downloadBinaryToTemp(
       chmodSync(tempPath, 0o755);
     }
 
-    return { tempBinaryPath: tempPath, lockPath };
+    return { tempBinaryPath: tempPath, lockPath, patchBytes };
   } catch (error) {
     releaseLock(lockPath);
     throw error;
