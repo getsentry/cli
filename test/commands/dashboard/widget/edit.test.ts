@@ -346,6 +346,37 @@ describe("dashboard widget edit", () => {
     expect(err.message).toContain("--width");
   });
 
+  test("throws ValidationError when --x overflows with fallback width on layoutless widget", async () => {
+    // Widget without layout uses FALLBACK_LAYOUT (w=3), so --x 4 → 4+3=7 > 6
+    getDashboardSpy.mockResolvedValueOnce({
+      ...sampleDashboard,
+      widgets: [
+        {
+          title: "No Layout Widget",
+          displayType: "line",
+          widgetType: "spans",
+          queries: [
+            {
+              name: "",
+              conditions: "",
+              columns: [],
+              aggregates: ["count()"],
+              fields: ["count()"],
+            },
+          ],
+          // no layout field
+        },
+      ],
+    });
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    const err = await func
+      .call(context, { json: false, index: 0, x: 4 }, "123")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain("overflows the grid");
+  });
+
   test("throws ValidationError when x + width overflows grid", async () => {
     const { context } = createMockContext();
     const func = await editCommand.loader();

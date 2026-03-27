@@ -312,10 +312,21 @@ export const editCommand = buildCommand({
     const updateBody = prepareDashboardForUpdate(current);
     const existing = updateBody.widgets[widgetIndex] as DashboardWidget;
 
-    // Validate layout flags against the 6-column grid before building replacement
+    // Validate individual layout flag ranges early (catches --x -1, --width 7, etc.)
     validateWidgetLayout(flags, existing.layout);
 
     const replacement = buildReplacement(flags, existing);
+
+    // Re-validate the final merged layout when the existing widget had no layout
+    // and FALLBACK_LAYOUT was used — the early check couldn't cross-validate
+    // because the fallback dimensions weren't known yet.
+    if (replacement.layout && !existing.layout) {
+      validateWidgetLayout(
+        { x: replacement.layout.x, width: replacement.layout.w },
+        replacement.layout
+      );
+    }
+
     updateBody.widgets[widgetIndex] = replacement;
 
     const updated = await updateDashboard(
