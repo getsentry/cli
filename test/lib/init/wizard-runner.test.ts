@@ -562,20 +562,23 @@ describe("runWizard", () => {
       };
       mockResumeResults = [{ status: "success" }];
 
-      await runWizard(makeOptions());
+      try {
+        await runWizard(makeOptions());
 
-      Object.defineProperty(process.stdout, "columns", {
-        value: origColumns,
-        configurable: true,
-      });
-
-      // 40 columns - 4 reserved = 36 max, truncated with "…"
-      const call = spinnerMock.message.mock.calls.find((c: string[]) =>
-        c[0]?.includes("npm install")
-      );
-      expect(call).toBeDefined();
-      expect(call[0].length).toBeLessThanOrEqual(36);
-      expect(call[0].endsWith("…")).toBe(true);
+        // 40 columns - 4 reserved = 36 max, truncated with "…"
+        const call = spinnerMock.message.mock.calls.find((c: string[]) =>
+          c[0]?.includes("npm install")
+        ) as string[] | undefined;
+        expect(call).toBeDefined();
+        const msg = call?.[0] ?? "";
+        expect(msg.length).toBeLessThanOrEqual(36);
+        expect(msg.endsWith("…")).toBe(true);
+      } finally {
+        Object.defineProperty(process.stdout, "columns", {
+          value: origColumns,
+          configurable: true,
+        });
+      }
     });
 
     test("dispatches interactive payload to handleInteractive", async () => {
