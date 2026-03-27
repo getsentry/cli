@@ -333,7 +333,7 @@ export const viewCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
-        placeholder: "args",
+        placeholder: "org/project/log-id",
         brief:
           "[<org>/<project>] <log-id> [<log-id>...] - Target (optional) and one or more log IDs",
         parse: String,

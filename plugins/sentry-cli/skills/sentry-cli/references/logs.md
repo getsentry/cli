@@ -37,23 +37,8 @@ List logs from a project
 **Examples:**
 
 ```bash
-# Auto-detect from DSN or config
-sentry log list
-
-# Explicit org and project
-sentry log list <org>/<project>
-
-# Search for project across all accessible orgs
-sentry log list <project>
-
 # List last 100 logs (default)
 sentry log list
-
-# Stream with default 2-second poll interval
-sentry log list -f
-
-# Stream with custom 5-second poll interval
-sentry log list -f 5
 
 # Show only error logs
 sentry log list -q 'level:error'
@@ -61,17 +46,22 @@ sentry log list -q 'level:error'
 # Filter by message content
 sentry log list -q 'database'
 
-# Show last 50 logs
+# Limit results
 sentry log list --limit 50
 
-# Show last 500 logs
-sentry log list -n 500
+# Stream with default 2-second poll interval
+sentry log list -f
+
+# Stream with custom 5-second poll interval
+sentry log list -f 5
 
 # Stream error logs from a specific project
 sentry log list my-org/backend -f -q 'level:error'
+
+sentry log list --json | jq '.data[] | select(.severity == "error")'
 ```
 
-### `sentry log view <args...>`
+### `sentry log view <org/project/log-id...>`
 
 View details of one or more log entries
 
@@ -82,22 +72,13 @@ View details of one or more log entries
 **Examples:**
 
 ```bash
-# Auto-detect from DSN or config
-sentry log view <log-id>
-
-# Explicit org and project
-sentry log view <org>/<project> <log-id>
-
-# Search for project across all accessible orgs
-sentry log view <project> <log-id>
-
 sentry log view 968c763c740cfda8b6728f27fb9e9b01
 
-sentry log view 968c763c740cfda8b6728f27fb9e9b01 -w
-
+# With explicit project
 sentry log view my-org/backend 968c763c740cfda8b6728f27fb9e9b01
 
-sentry log list --json | jq '.[] | select(.level == "error")'
+# Open in browser
+sentry log view 968c763c740cfda8b6728f27fb9e9b01 -w
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

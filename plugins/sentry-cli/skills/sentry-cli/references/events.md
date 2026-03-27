@@ -11,7 +11,7 @@ requires:
 
 View Sentry events
 
-### `sentry event view <args...>`
+### `sentry event view <org/project/event-id...>`
 
 View details of a specific event
 
@@ -23,11 +23,10 @@ View details of a specific event
 **Examples:**
 
 ```bash
-sentry event view <event-id>
+sentry event view abc123def456abc123def456abc12345
 
-sentry event view abc123def456
-
-sentry event view abc123def456 -w
+# Open in browser
+sentry event view abc123def456abc123def456abc12345 -w
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

@@ -3,39 +3,92 @@ title: project
 description: Project commands for the Sentry CLI
 ---
 
-Manage Sentry projects.
+Work with Sentry projects
 
 ## Commands
 
-### `sentry project list`
+### `sentry project create <name> <platform>`
 
-List projects you have access to.
-
-```bash
-# List all projects
-sentry project list
-
-# List projects in a specific organization
-sentry project list <org-slug>
-
-# Filter by platform
-sentry project list --platform javascript
-```
+Create a new project
 
 **Arguments:**
 
 | Argument | Description |
 |----------|-------------|
-| `[org-slug]` | Optional organization slug to filter by |
+| `<name>` | Project name (supports org/name syntax) |
+| `<platform>` | Project platform (e.g., node, python, javascript-nextjs) |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `--platform <platform>` | Filter by platform (e.g., javascript, python) |
-| `--json` | Output as JSON |
+| `-t, --team <team>` | Team to create the project under |
+| `-n, --dry-run` | Validate inputs and show what would be created without creating it |
 
-**Example output:**
+### `sentry project delete <org/project>`
+
+Delete a project
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<org/project>` | &lt;org&gt;/&lt;project&gt; or &lt;project&gt; (search across orgs) |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-y, --yes` | Skip confirmation prompt |
+| `-f, --force` | Force deletion without confirmation |
+| `-n, --dry-run` | Validate and show what would be deleted without deleting |
+
+### `sentry project list <org/project>`
+
+List projects
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<org/project>` | &lt;org&gt;/ (all projects), &lt;org&gt;/&lt;project&gt;, or &lt;project&gt; (search) |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-n, --limit <limit>` | Maximum number of projects to list (default: "30") |
+| `-p, --platform <platform>` | Filter by platform (e.g., javascript, python) |
+| `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
+| `-c, --cursor <cursor>` | Navigate pages: "next", "prev", "first" (or raw cursor string) |
+
+### `sentry project view <org/project>`
+
+View details of a project
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<org/project>` | &lt;org&gt;/&lt;project&gt;, &lt;project&gt; (search), or omit for auto-detect |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-w, --web` | Open in browser |
+| `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
+
+All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
+
+<!-- GENERATED:END -->
+
+## Examples
+
+```bash
+# List all projects in an org
+sentry project list my-org/
+```
 
 ```
 ORG         SLUG           PLATFORM      TEAM
@@ -44,37 +97,11 @@ my-org      backend        python        api-team
 my-org      mobile-ios     cocoa         mobile-team
 ```
 
-### `sentry project view`
-
-View details of a specific project.
-
 ```bash
-# Auto-detect from DSN or config
-sentry project view
+# Filter by platform
+sentry project list my-org/ --platform javascript
 
-# Explicit org and project
-sentry project view <org>/<project>
-
-# Find project across all orgs
-sentry project view <project>
-```
-
-**Arguments:**
-
-| Argument | Description |
-|----------|-------------|
-| `[target]` | Optional: `<org>/<project>`, `<project>`, or omit for auto-detect |
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `-w, --web` | Open in browser |
-| `--json` | Output as JSON |
-
-**Example:**
-
-```bash
+# View project details
 sentry project view my-org/frontend
 ```
 
@@ -86,8 +113,7 @@ Team: web-team
 DSN: https://abc123@sentry.io/123456
 ```
 
-**Open in browser:**
-
 ```bash
+# Open project in browser
 sentry project view my-org/frontend -w
 ```

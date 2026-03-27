@@ -74,16 +74,52 @@ for (const path of committedFiles.keys()) {
   }
 }
 
-if (staleFiles.length === 0) {
+// Check that every reference file contains at least one **Examples:** section.
+// This catches cases where doc pages are missing bash code blocks that the
+// skill generator needs to populate examples for AI agents.
+const missingExamples: string[] = [];
+for (const [path, content] of newFiles) {
+  if (!path.startsWith("references/")) {
+    continue;
+  }
+  if (!content.includes("**Examples:**")) {
+    missingExamples.push(path);
+  }
+}
+
+const issues: string[] = [];
+
+if (staleFiles.length > 0) {
+  issues.push("Skill files are out of date:");
+  for (const file of staleFiles) {
+    issues.push(`  - ${file}`);
+  }
+  issues.push("");
+  issues.push("Run 'bun run generate:skill' locally and commit the changes.");
+}
+
+if (missingExamples.length > 0) {
+  if (issues.length > 0) {
+    issues.push("");
+  }
+  issues.push("Skill reference files missing examples:");
+  for (const file of missingExamples) {
+    issues.push(`  - ${file}`);
+  }
+  issues.push("");
+  issues.push(
+    "Add bash code blocks to the matching docs/src/content/docs/commands/ pages"
+  );
+  issues.push("and re-run 'bun run generate:skill' to populate examples.");
+}
+
+if (issues.length === 0) {
   console.log("✓ All skill files are up to date");
   process.exit(0);
 }
 
-console.error("✗ Skill files are out of date:");
-for (const file of staleFiles) {
-  console.error(`  - ${file}`);
+for (const line of issues) {
+  console.error(line.startsWith("  ") ? line : `✗ ${line}`);
 }
-console.error("");
-console.error("Run 'bun run generate:skill' locally and commit the changes.");
 
 process.exit(1);

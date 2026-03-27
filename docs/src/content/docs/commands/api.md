@@ -1,114 +1,98 @@
 ---
 title: api
-description: Direct API access for the Sentry CLI
+description: API command for the Sentry CLI
 ---
 
-Make direct API calls to Sentry's REST API.
+Make an authenticated API request
 
-## Commands
+## Usage
 
-### `sentry api`
+### `sentry api <endpoint>`
 
-Execute an API request.
-
-```bash
-sentry api <endpoint> [options]
-```
+Make an authenticated API request
 
 **Arguments:**
 
 | Argument | Description |
 |----------|-------------|
-| `<endpoint>` | API endpoint path (e.g., `/organizations/`) |
+| `<endpoint>` | API endpoint relative to /api/0/ (e.g., organizations/) |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `--method <method>` | HTTP method (GET, POST, PUT, DELETE). Default: GET |
-| `--field <key=value>` | Add a field to the request body (can be used multiple times) |
-| `--header <key:value>` | Add a custom header (can be used multiple times) |
-| `--include` | Include response headers in output |
-| `--paginate` | Automatically paginate through all results |
+| `-X, --method <method>` | The HTTP method for the request (default: "GET") |
+| `-d, --data <data>` | Inline JSON body for the request (like curl -d) |
+| `-F, --field <field>...` | Add a typed parameter (key=value, key[sub]=value, key[]=value) |
+| `-f, --raw-field <raw-field>...` | Add a string parameter without JSON parsing |
+| `-H, --header <header>...` | Add a HTTP request header in key:value format |
+| `--input <input>` | The file to use as body for the HTTP request (use "-" to read from standard input) |
+| `--silent` | Do not print the response body |
+| `--verbose` | Include full HTTP request and response in the output |
+| `-n, --dry-run` | Show the resolved request without sending it |
+
+All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
+
+<!-- GENERATED:END -->
 
 ## Examples
 
-### GET Request
+Endpoints are relative to `/api/0/` — the prefix is added automatically.
+
+### GET requests
 
 ```bash
 # List organizations
-sentry api /organizations/
+sentry api organizations/
 
-# Get a specific organization
-sentry api /organizations/my-org/
-
-# Get project details
-sentry api /projects/my-org/my-project/
+# Get a specific issue
+sentry api issues/123456789/
 ```
 
-### POST Request
+### POST requests
 
 ```bash
-# Create a new project
-sentry api /teams/my-org/my-team/projects/ \
-  --method POST \
-  --field name="New Project" \
-  --field platform=javascript
+# Create a release
+sentry api organizations/my-org/releases/ \
+  -X POST -F version=1.0.0
+
+# With inline JSON body
+sentry api issues/123456789/ \
+  -X POST -d '{"status": "resolved"}'
 ```
 
-### PUT Request
+### PUT requests
 
 ```bash
 # Update an issue status
-sentry api /issues/123456789/ \
-  --method PUT \
-  --field status=resolved
+sentry api issues/123456789/ \
+  -X PUT -F status=resolved
 
 # Assign an issue
-sentry api /issues/123456789/ \
-  --method PUT \
-  --field assignedTo="user@example.com"
+sentry api issues/123456789/ \
+  -X PUT --field assignedTo="user@example.com"
 ```
 
-### DELETE Request
+### DELETE requests
 
 ```bash
-# Delete a project
-sentry api /projects/my-org/my-project/ \
-  --method DELETE
+sentry api projects/my-org/my-project/ -X DELETE
 ```
 
-### With Headers
+### Advanced usage
 
 ```bash
-sentry api /organizations/ \
-  --header "X-Custom-Header:value"
+# Add custom headers
+sentry api organizations/ -H "X-Custom: value"
+
+# Read body from a file
+sentry api projects/my-org/my-project/releases/ -X POST --input release.json
+
+# Verbose mode (shows full HTTP request/response)
+sentry api organizations/ --verbose
+
+# Preview the request without sending
+sentry api organizations/ --dry-run
 ```
-
-### Verbose Mode
-
-```bash
-sentry api /organizations/ --verbose
-```
-
-Request and response metadata is logged to stderr:
-
-```
-> GET /api/0/organizations/
->
-< HTTP 200
-< content-type: application/json
-<
-[{"slug": "my-org", ...}]
-```
-
-### Pagination
-
-```bash
-# Get all issues (automatically follows pagination)
-sentry api /projects/my-org/my-project/issues/ --paginate
-```
-
-## API Documentation
 
 For full API documentation, see the [Sentry API Reference](https://docs.sentry.io/api/).

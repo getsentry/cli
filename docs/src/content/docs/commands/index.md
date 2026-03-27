@@ -1,6 +1,6 @@
 ---
-title: Commands Overview
-description: Overview of all Sentry CLI commands
+title: Commands
+description: Available commands in the Sentry CLI
 ---
 
 The Sentry CLI provides commands for interacting with various Sentry resources.
@@ -9,15 +9,25 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 
 | Command | Description |
 |---------|-------------|
-| [`auth`](./auth/) | Authentication management |
-| [`cli`](./cli/) | CLI-related commands (feedback, upgrade) |
-| [`org`](./org/) | Organization operations |
-| [`project`](./project/) | Project operations |
-| [`team`](./team/) | Team operations |
-| [`issue`](./issue/) | Issue tracking |
-| [`event`](./event/) | Event inspection |
-| [`log`](./log/) | Log viewing and streaming |
-| [`api`](./api/) | Direct API access |
+| [`auth`](./auth/) | Authenticate with Sentry |
+| [`cli`](./cli/) | CLI-related commands |
+| [`dashboard`](./dashboard/) | Manage Sentry dashboards |
+| [`org`](./org/) | Work with Sentry organizations |
+| [`project`](./project/) | Work with Sentry projects |
+| [`repo`](./repo/) | Work with Sentry repositories |
+| [`team`](./team/) | Work with Sentry teams |
+| [`issue`](./issue/) | Manage Sentry issues |
+| [`event`](./event/) | View Sentry events |
+| [`log`](./log/) | View Sentry logs |
+| [`sourcemap`](./sourcemap/) | Manage sourcemaps |
+| [`span`](./span/) | List and view spans in projects or traces |
+| [`trace`](./trace/) | View distributed traces |
+| [`trial`](./trial/) | Manage product trials |
+| [`init`](./init/) | Initialize Sentry in your project (experimental) |
+| [`api`](./api/) | Make an authenticated API request |
+| [`schema`](./schema/) | Browse the Sentry API schema |
+
+<!-- GENERATED:END -->
 
 ## Global Options
 

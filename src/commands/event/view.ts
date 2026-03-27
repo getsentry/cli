@@ -655,7 +655,7 @@ export const viewCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
-        placeholder: "args",
+        placeholder: "org/project/event-id",
         brief:
           "[<org>/<project>] <event-id> - Target (optional) and event ID (required)",
         parse: String,

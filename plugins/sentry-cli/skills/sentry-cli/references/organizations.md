@@ -19,14 +19,6 @@ List organizations
 - `-n, --limit <value> - Maximum number of organizations to list - (default: "30")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
-**Examples:**
-
-```bash
-sentry org list
-
-sentry org list --json
-```
-
 ### `sentry org view <org>`
 
 View details of an organization
@@ -38,11 +30,17 @@ View details of an organization
 **Examples:**
 
 ```bash
-sentry org view <org-slug>
+# List organizations
+sentry org list
 
+# View organization details
 sentry org view my-org
 
+# Open in browser
 sentry org view my-org -w
+
+# JSON output
+sentry org list --json
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

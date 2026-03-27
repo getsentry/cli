@@ -54,6 +54,7 @@ export const deleteCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
+        placeholder: "org/project/dashboard",
         brief: "[<org/project>] <dashboard-id-or-title>",
         parse: String,
       },

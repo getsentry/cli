@@ -152,6 +152,7 @@ export const createCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
+        placeholder: "org/project/title",
         brief: "[<org/project>] <title>",
         parse: String,
       },

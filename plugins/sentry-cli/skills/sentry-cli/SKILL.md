@@ -243,7 +243,7 @@ Manage Sentry issues
 
 View Sentry events
 
-- `sentry event view <args...>` — View details of a specific event
+- `sentry event view <org/project/event-id...>` — View details of a specific event
 
 → Full flags and examples: `references/events.md`
 
@@ -271,11 +271,11 @@ CLI-related commands
 Manage Sentry dashboards
 
 - `sentry dashboard list <org/title-filter...>` — List dashboards
-- `sentry dashboard view <args...>` — View a dashboard
-- `sentry dashboard create <args...>` — Create a dashboard
-- `sentry dashboard widget add <args...>` — Add a widget to a dashboard
-- `sentry dashboard widget edit <args...>` — Edit a widget in a dashboard
-- `sentry dashboard widget delete <args...>` — Delete a widget from a dashboard
+- `sentry dashboard view <org/project/dashboard...>` — View a dashboard
+- `sentry dashboard create <org/project/title...>` — Create a dashboard
+- `sentry dashboard widget add <org/project/dashboard/title...>` — Add a widget to a dashboard
+- `sentry dashboard widget edit <org/project/dashboard...>` — Edit a widget in a dashboard
+- `sentry dashboard widget delete <org/project/dashboard...>` — Delete a widget from a dashboard
 
 → Full flags and examples: `references/dashboards.md`
 
@@ -300,7 +300,7 @@ Work with Sentry teams
 View Sentry logs
 
 - `sentry log list <org/project-or-trace-id...>` — List logs from a project
-- `sentry log view <args...>` — View details of one or more log entries
+- `sentry log view <org/project/log-id...>` — View details of one or more log entries
 
 → Full flags and examples: `references/logs.md`
 
