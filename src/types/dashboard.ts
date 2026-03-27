@@ -592,6 +592,17 @@ const DEFAULT_WIDGET_SIZE: Partial<
 };
 const FALLBACK_SIZE = { w: 3, h: 2, minH: 2 };
 
+/**
+ * Fallback layout for widgets without an existing layout.
+ * Used when merging explicit layout flags over a widget that has no layout set.
+ * Position defaults to origin (0,0) with standard 3×2 dimensions.
+ */
+export const FALLBACK_LAYOUT: DashboardWidgetLayout = {
+  x: 0,
+  y: 0,
+  ...FALLBACK_SIZE,
+};
+
 /** Build a set of occupied grid cells and the max bottom edge from existing layouts. */
 function buildOccupiedGrid(widgets: DashboardWidget[]): {
   occupied: Set<string>;

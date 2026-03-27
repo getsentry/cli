@@ -16,6 +16,7 @@ import {
   type DashboardDetail,
   type DashboardWidget,
   type DashboardWidgetQuery,
+  FALLBACK_LAYOUT,
   parseAggregate,
   parseSortExpression,
   parseWidgetInput,
@@ -92,7 +93,7 @@ function mergeLayout(
   }
 
   return {
-    ...(existing.layout ?? { x: 0, y: 0, w: 3, h: 2 }),
+    ...(existing.layout ?? FALLBACK_LAYOUT),
     ...(flags.x !== undefined && { x: flags.x }),
     ...(flags.y !== undefined && { y: flags.y }),
     ...(flags.width !== undefined && { w: flags.width }),

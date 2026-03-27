@@ -16,6 +16,7 @@ import {
   assignDefaultLayout,
   type DashboardDetail,
   type DashboardWidget,
+  FALLBACK_LAYOUT,
   prepareDashboardForUpdate,
   validateWidgetLayout,
   type WidgetLayoutFlags,
@@ -237,13 +238,7 @@ export const addCommand = buildCommand({
       // Use auto-layout as the base for any unspecified dimensions, then
       // override with the user's explicit values.
       newWidget = assignDefaultLayout(newWidget, updateBody.widgets);
-      const baseLayout = newWidget.layout ?? {
-        x: 0,
-        y: 0,
-        w: 3,
-        h: 2,
-        minH: 2,
-      };
+      const baseLayout = newWidget.layout ?? FALLBACK_LAYOUT;
       newWidget = {
         ...newWidget,
         layout: {
