@@ -1,0 +1,75 @@
+# Fix: Spinner and log.info output collide on same line during upgrade
+
+## Problem
+
+When running `sentry cli upgrade`, the "Applied delta patch (X KB downloaded)" info message appears on the same line as the spinner text without a line break:
+
+```
+⠋ Downloading 0.22.0-dev.1774609033...ℹ Applied delta patch (13.6 KB downloaded)
+```
+
+## Root Cause
+
+In `src/lib/upgrade.ts:639`, `log.info(...)` is called **inside** the `withProgress` callback (via `downloadBinaryToTemp` → `executeUpgrade`). The spinner writes to stdout using `\r\x1b[K` without a trailing newline, so the cursor sits at the end of the spinner text. Consola's info message (written to stderr, which shares the same terminal) appends right after, on the same line.
+
+The spinner cleanup (`\r\x1b[K`) in `withProgress`'s `finally` block only runs **after** the callback returns — too late.
+
+## Fix
+
+Move the `log.info` out of `downloadBinaryToTemp` and into the callers, **after** `withProgress` completes (spinner already cleared).
+
+### Files to modify
+
+1. **`src/lib/upgrade.ts`** (lines 459-464, 636-639)
+   - Add optional `patchBytes?: number` field to `DownloadResult` type
+   - In `downloadBinaryToTemp`: instead of `log.info(...)`, set `patchBytes` on the returned result
+   - Remove the `log.info` call at line 639
+
+2. **`src/commands/cli/upgrade.ts`** (two call sites)
+   - **`executeStandardUpgrade`** (~line 437): After `withProgress` returns, check `downloadResult?.patchBytes` and call `log.info(...)`
+   - **`migrateToStandaloneForNightly`** (~line 502): Same — after `withProgress` returns, check and log
+
+### Concrete changes
+
+**`src/lib/upgrade.ts`** — `DownloadResult` type:
+```typescript
+export type DownloadResult = {
+  tempBinaryPath: string;
+  lockPath: string;
+  /** Size of delta patch in bytes, when delta upgrade was used */
+  patchBytes?: number;
+};
+```
+
+**`src/lib/upgrade.ts`** — `downloadBinaryToTemp` (lines 636-639):
+```typescript
+// Before:
+const deltaResult = await tryDeltaUpgrade(version, tempPath, offline);
+if (deltaResult) {
+  const kb = (deltaResult.patchBytes / 1024).toFixed(1);
+  log.info(`Applied delta patch (${kb} KB downloaded)`);
+}
+
+// After:
+const deltaResult = await tryDeltaUpgrade(version, tempPath, offline);
+let patchBytes: number | undefined;
+if (deltaResult) {
+  patchBytes = deltaResult.patchBytes;
+}
+// ... later in the return:
+return { tempBinaryPath: tempPath, lockPath, patchBytes };
+```
+
+**`src/commands/cli/upgrade.ts`** — after each `withProgress` call:
+```typescript
+if (downloadResult?.patchBytes) {
+  const kb = (downloadResult.patchBytes / 1024).toFixed(1);
+  log.info(`Applied delta patch (${kb} KB downloaded)`);
+}
+```
+
+## Verification
+
+1. `bun run typecheck`
+2. `bun test --filter upgrade`
+3. Manual: `bun run dev -- cli upgrade` — info message should appear on its own line
