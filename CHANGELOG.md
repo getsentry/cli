@@ -1,6 +1,81 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.21.0
+
+### New Features ✨
+
+#### Dashboard
+
+- Add pagination and glob filtering to dashboard list by @BYK in [#560](https://github.com/getsentry/cli/pull/560)
+- Add a full chart rendering engine for `sentry dashboard view` that transforms widget data into rich terminal visualizations. by @BYK in [#555](https://github.com/getsentry/cli/pull/555)
+
+#### Init
+
+- Propagate sentry-trace headers to wizard API calls by @betegon in [#567](https://github.com/getsentry/cli/pull/567)
+- Treat bare slug as new project name when not found by @BYK in [#554](https://github.com/getsentry/cli/pull/554)
+
+#### Other
+
+- (formatters) Colorize SQL in DB span descriptions by @BYK in [#546](https://github.com/getsentry/cli/pull/546)
+- (output) Add Zod schema registration to OutputConfig for self-documenting JSON fields by @BYK in [#582](https://github.com/getsentry/cli/pull/582)
+- (telemetry) Report unknown commands to Sentry by @BYK in [#563](https://github.com/getsentry/cli/pull/563)
+- Expose CLI as a programmatic library by @BYK in [#565](https://github.com/getsentry/cli/pull/565)
+- Bidirectional cursor pagination (-c next / -c prev) by @BYK in [#564](https://github.com/getsentry/cli/pull/564)
+- Add `sentry sourcemap inject` and `sentry sourcemap upload` commands by @BYK in [#547](https://github.com/getsentry/cli/pull/547)
+- Native debug ID injection and sourcemap upload by @BYK in [#543](https://github.com/getsentry/cli/pull/543)
+
+### Bug Fixes 🐛
+
+#### Dashboard
+
+- Fix table widget rendering and timeseries bar chart width by @BYK in [#584](https://github.com/getsentry/cli/pull/584)
+- Validate display types against all datasets by @betegon in [#577](https://github.com/getsentry/cli/pull/577)
+- Auto-clamp widget limit instead of erroring by @BYK in [#573](https://github.com/getsentry/cli/pull/573)
+- Default issue dataset table columns to ["issue"] by @betegon in [#570](https://github.com/getsentry/cli/pull/570)
+- Scale timeseries bar width to fill chart area by @BYK in [#562](https://github.com/getsentry/cli/pull/562)
+- Resolve dashboard by ID/slug in addition to title by @BYK in [#559](https://github.com/getsentry/cli/pull/559)
+
+#### Event
+
+- Detect SHORT-ID/EVENT-ID format in event view by @BYK in [#574](https://github.com/getsentry/cli/pull/574)
+- Auto-fallback to org-wide search when event 404s in project by @BYK in [#575](https://github.com/getsentry/cli/pull/575)
+
+#### Other
+
+- (api) Show meaningful message for network errors instead of '0 Unknown' by @BYK in [#572](https://github.com/getsentry/cli/pull/572)
+- (event-view) Auto-redirect issue short IDs in two-arg form (CLI-MP) by @BYK in [#558](https://github.com/getsentry/cli/pull/558)
+- (help) Show help when user passes `help` as positional arg by @BYK in [#561](https://github.com/getsentry/cli/pull/561)
+- (issue) Auto-redirect bare org slug to org-all mode in issue list by @BYK in [#576](https://github.com/getsentry/cli/pull/576)
+- (log) Use 30d default period and show newest logs first by @sergical in [#568](https://github.com/getsentry/cli/pull/568)
+- Reject @-selectors in parseOrgProjectArg with helpful redirect by @BYK in [#557](https://github.com/getsentry/cli/pull/557)
+
+### Documentation 📚
+
+- Add missing command pages for trace, span, sourcemap, repo, trial, schema by @sergical in [#569](https://github.com/getsentry/cli/pull/569)
+
+### Internal Changes 🔧
+
+#### Coverage
+
+- Use informational-patch input instead of sed hack by @BYK in [#544](https://github.com/getsentry/cli/pull/544)
+- Make checks informational on release branches by @BYK in [#541](https://github.com/getsentry/cli/pull/541)
+
+#### Event
+
+- Replace "latest" magic string with @latest sentinel constant by @BYK in [#583](https://github.com/getsentry/cli/pull/583)
+- Deduplicate span tree building into shared helper by @BYK in [#581](https://github.com/getsentry/cli/pull/581)
+
+#### Other
+
+- (api) Collapse stats on issue detail endpoints to save 100-300ms by @BYK in [#551](https://github.com/getsentry/cli/pull/551)
+- (ci) Upgrade GitHub Actions to Node 24 runtime by @BYK in [#542](https://github.com/getsentry/cli/pull/542)
+- (db) DRY up database layer with shared helpers and lint enforcement by @BYK in [#550](https://github.com/getsentry/cli/pull/550)
+- (docs) Polish sidebar, header, focus, and code block UX by @sergical in [#580](https://github.com/getsentry/cli/pull/580)
+- (issue-list) Use collapse parameter to skip unused Snuba queries by @BYK in [#545](https://github.com/getsentry/cli/pull/545)
+- Bump Bun from 1.3.9 to 1.3.11 by @BYK in [#552](https://github.com/getsentry/cli/pull/552)
+- Regenerate skill files by @github-actions[bot] in [ec1ffe28](https://github.com/getsentry/cli/commit/ec1ffe2810eb5054ac7aa81ba9dac7bfccedb1fd)
+
 ## 0.20.0
 
 ### New Features ✨
