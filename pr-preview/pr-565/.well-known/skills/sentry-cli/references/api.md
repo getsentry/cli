@@ -29,44 +29,41 @@ Make an authenticated API request
 **Examples:**
 
 ```bash
-sentry api <endpoint> [options]
-
 # List organizations
-sentry api /organizations/
+sentry api organizations/
 
-# Get a specific organization
-sentry api /organizations/my-org/
+# Get a specific issue
+sentry api issues/123456789/
 
-# Get project details
-sentry api /projects/my-org/my-project/
+# Create a release
+sentry api organizations/my-org/releases/ \
+  -X POST -F version=1.0.0
 
-# Create a new project
-sentry api /teams/my-org/my-team/projects/ \
-  --method POST \
-  --field name="New Project" \
-  --field platform=javascript
+# With inline JSON body
+sentry api issues/123456789/ \
+  -X POST -d '{"status": "resolved"}'
 
 # Update an issue status
-sentry api /issues/123456789/ \
-  --method PUT \
-  --field status=resolved
+sentry api issues/123456789/ \
+  -X PUT -F status=resolved
 
 # Assign an issue
-sentry api /issues/123456789/ \
-  --method PUT \
-  --field assignedTo="user@example.com"
+sentry api issues/123456789/ \
+  -X PUT --field assignedTo="user@example.com"
 
-# Delete a project
-sentry api /projects/my-org/my-project/ \
-  --method DELETE
+sentry api projects/my-org/my-project/ -X DELETE
 
-sentry api /organizations/ \
-  --header "X-Custom-Header:value"
+# Add custom headers
+sentry api organizations/ -H "X-Custom: value"
 
-sentry api /organizations/ --verbose
+# Read body from a file
+sentry api projects/my-org/my-project/releases/ -X POST --input release.json
 
-# Get all issues (automatically follows pagination)
-sentry api /projects/my-org/my-project/issues/ --paginate
+# Verbose mode (shows full HTTP request/response)
+sentry api organizations/ --verbose
+
+# Preview the request without sending
+sentry api organizations/ --dry-run
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

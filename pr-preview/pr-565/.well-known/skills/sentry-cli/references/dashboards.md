@@ -24,21 +24,17 @@ List dashboards
 **Examples:**
 
 ```bash
-# Auto-detect org from config
+# List all dashboards
 sentry dashboard list
 
-# Explicit org
-sentry dashboard list my-org/
+# Filter by name pattern
+sentry dashboard list "Backend*"
 
-# Explicit org and project
-sentry dashboard list my-org/my-project
-
-sentry dashboard list
-
+# Open dashboard list in browser
 sentry dashboard list -w
 ```
 
-### `sentry dashboard view <args...>`
+### `sentry dashboard view <org/project/dashboard...>`
 
 View a dashboard
 
@@ -51,44 +47,30 @@ View a dashboard
 **Examples:**
 
 ```bash
-# By numeric ID
-sentry dashboard view <id>
-
-# By title
-sentry dashboard view '<title>'
-
-# With explicit org
-sentry dashboard view <org>/ <id>
-
-sentry dashboard view 12345
-
+# View by title
 sentry dashboard view 'Frontend Performance'
 
+# View by ID
+sentry dashboard view 12345
+
+# Auto-refresh every 30 seconds
+sentry dashboard view "Backend Performance" --refresh 30
+
+# Open in browser
 sentry dashboard view 12345 -w
 ```
 
-### `sentry dashboard create <args...>`
+### `sentry dashboard create <org/project/title...>`
 
 Create a dashboard
 
 **Examples:**
 
 ```bash
-# Auto-detect org
-sentry dashboard create '<title>'
-
-# Explicit org
-sentry dashboard create <org>/ '<title>'
-
-# Explicit org and project
-sentry dashboard create <org>/<project> '<title>'
-
 sentry dashboard create 'Frontend Performance'
-
-sentry dashboard widget add 'Frontend Performance' "Error Count" --display big_number --query count
 ```
 
-### `sentry dashboard widget add <args...>`
+### `sentry dashboard widget add <org/project/dashboard/title...>`
 
 Add a widget to a dashboard
 
@@ -101,7 +83,32 @@ Add a widget to a dashboard
 - `-s, --sort <value> - Order by (prefix - for desc, e.g. -count)`
 - `-n, --limit <value> - Result limit`
 
-### `sentry dashboard widget edit <args...>`
+**Examples:**
+
+```bash
+# Simple counter widget
+sentry dashboard widget add 'My Dashboard' "Error Count" \
+  --display big_number --query count
+
+# Line chart with group-by
+sentry dashboard widget add 'My Dashboard' "Errors by Browser" \
+  --display line --query count --group-by browser.name
+
+# Table with multiple aggregates, sorted descending
+sentry dashboard widget add 'My Dashboard' "Top Endpoints" \
+  --display table \
+  --query count --query p95:span.duration \
+  --group-by transaction \
+  --sort -count --limit 10
+
+# With search filter
+sentry dashboard widget add 'My Dashboard' "Slow Requests" \
+  --display bar --query p95:span.duration \
+  --where "span.op:http.client" \
+  --group-by span.description
+```
+
+### `sentry dashboard widget edit <org/project/dashboard...>`
 
 Edit a widget in a dashboard
 
@@ -117,12 +124,35 @@ Edit a widget in a dashboard
 - `-s, --sort <value> - Order by (prefix - for desc, e.g. -count)`
 - `-n, --limit <value> - Result limit`
 
-### `sentry dashboard widget delete <args...>`
+**Examples:**
+
+```bash
+# Change display type
+sentry dashboard widget edit 12345 --title 'Error Count' --display bar
+
+# Rename a widget
+sentry dashboard widget edit 'My Dashboard' --index 0 --new-title 'Total Errors'
+
+# Change the query
+sentry dashboard widget edit 12345 --title 'Error Rate' --query p95:span.duration
+```
+
+### `sentry dashboard widget delete <org/project/dashboard...>`
 
 Delete a widget from a dashboard
 
 **Flags:**
 - `-i, --index <value> - Widget index (0-based)`
 - `-t, --title <value> - Widget title to match`
+
+**Examples:**
+
+```bash
+# Delete by title
+sentry dashboard widget delete 'My Dashboard' --title 'Error Count'
+
+# Delete by index
+sentry dashboard widget delete 12345 --index 2
+```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

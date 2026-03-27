@@ -51,28 +51,14 @@ List issues in a project
 **Examples:**
 
 ```bash
-# Explicit org and project
-sentry issue list <org>/<project>
-
-# All projects in an organization
-sentry issue list <org>/
-
-# Search for project across all accessible orgs
-sentry issue list <project>
-
-# Auto-detect from DSN or config
-sentry issue list
-
 # List issues in a specific project
 sentry issue list my-org/frontend
 
+# All projects in an org
 sentry issue list my-org/
 
+# Search for a project across organizations
 sentry issue list frontend
-
-sentry issue list my-org/frontend --query "TypeError"
-
-sentry issue list my-org/frontend --sort freq --limit 20
 
 # Show only unresolved issues
 sentry issue list my-org/frontend --query "is:unresolved"
@@ -80,8 +66,8 @@ sentry issue list my-org/frontend --query "is:unresolved"
 # Show resolved issues
 sentry issue list my-org/frontend --query "is:resolved"
 
-# Combine with other search terms
-sentry issue list my-org/frontend --query "is:unresolved TypeError"
+# Sort by frequency
+sentry issue list my-org/frontend --sort freq --limit 20
 ```
 
 ### `sentry issue explain <issue>`
@@ -95,19 +81,20 @@ Analyze an issue's root cause using Seer AI
 **Examples:**
 
 ```bash
-sentry issue explain <issue-id>
-
-# By numeric issue ID
+# Analyze root cause (may take a few minutes for new issues)
 sentry issue explain 123456789
 
 # By short ID with org prefix
 sentry issue explain my-org/MYPROJECT-ABC
 
-# By project-suffix format
-sentry issue explain myproject-G
-
 # Force a fresh analysis
 sentry issue explain 123456789 --force
+
+# Generate a fix plan (requires explain to be run first)
+sentry issue plan 123456789
+
+# Specify which root cause to plan for
+sentry issue plan 123456789 --cause 0
 ```
 
 ### `sentry issue plan <issue>`
@@ -118,24 +105,6 @@ Generate a solution plan using Seer AI
 - `--cause <value> - Root cause ID to plan (required if multiple causes exist)`
 - `--force - Force new plan even if one exists`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-
-**Examples:**
-
-```bash
-sentry issue plan <issue-id>
-
-# After running explain, create a plan
-sentry issue plan 123456789
-
-# Specify which root cause to plan for (if multiple were found)
-sentry issue plan 123456789 --cause 0
-
-# By short ID with org prefix
-sentry issue plan my-org/MYPROJECT-ABC --cause 1
-
-# By project-suffix format
-sentry issue plan myproject-G --cause 0
-```
 
 ### `sentry issue view <issue>`
 
@@ -149,14 +118,9 @@ View details of a specific issue
 **Examples:**
 
 ```bash
-# By issue ID
-sentry issue view <issue-id>
-
-# By short ID
-sentry issue view <short-id>
-
 sentry issue view FRONT-ABC
 
+# Open in browser
 sentry issue view FRONT-ABC -w
 ```
 

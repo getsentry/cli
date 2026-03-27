@@ -38,19 +38,6 @@ List projects
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
-**Examples:**
-
-```bash
-# List all projects
-sentry project list
-
-# List projects in a specific organization
-sentry project list <org-slug>
-
-# Filter by platform
-sentry project list --platform javascript
-```
-
 ### `sentry project view <org/project>`
 
 View details of a project
@@ -62,17 +49,16 @@ View details of a project
 **Examples:**
 
 ```bash
-# Auto-detect from DSN or config
-sentry project view
+# List all projects in an org
+sentry project list my-org/
 
-# Explicit org and project
-sentry project view <org>/<project>
+# Filter by platform
+sentry project list my-org/ --platform javascript
 
-# Find project across all orgs
-sentry project view <project>
-
+# View project details
 sentry project view my-org/frontend
 
+# Open project in browser
 sentry project view my-org/frontend -w
 ```
 

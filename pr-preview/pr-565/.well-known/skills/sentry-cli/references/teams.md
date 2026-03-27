@@ -36,6 +36,19 @@ List repositories
 | `externalSlug` | string \| null | External slug (e.g. org/repo) |
 | `externalId` | string \| null | External ID |
 
+**Examples:**
+
+```bash
+# List repositories (auto-detect org)
+sentry repo list
+
+# List repos in a specific org with pagination
+sentry repo list my-org/ -c next
+
+# Output as JSON
+sentry repo list --json
+```
+
 ### `sentry team list <org/project>`
 
 List teams
@@ -60,15 +73,13 @@ List teams
 **Examples:**
 
 ```bash
-# Auto-detect organization or list all
-sentry team list
+# List teams
+sentry team list my-org/
 
-# List teams in a specific organization
-sentry team list <org-slug>
+# Paginate through teams
+sentry team list my-org/ -c next
 
-# Limit results
-sentry team list --limit 10
-
+# Output as JSON
 sentry team list --json
 ```
 
