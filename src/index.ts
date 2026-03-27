@@ -25,6 +25,7 @@
 import { buildInvoker, buildRunner } from "./lib/sdk-invoke.js";
 import { createSDKMethods } from "./sdk.generated.js";
 
+export type { AsyncChannel } from "./lib/async-channel.js";
 // Re-export public types and error class from the shared module.
 // These re-exports exist to break a circular dependency between
 // index.ts ↔ sdk-invoke.ts. SentryError and SentryOptions live

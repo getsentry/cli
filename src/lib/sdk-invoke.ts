@@ -17,11 +17,17 @@
 import { homedir } from "node:os";
 import type { Span } from "@sentry/core";
 import type { Writer } from "../types/index.js";
+import { type AsyncChannel, createAsyncChannel } from "./async-channel.js";
 import { setEnv } from "./env.js";
 import { SentryError, type SentryOptions } from "./sdk-types.js";
 
-/** Flags that trigger infinite streaming — not supported in library mode. */
-const STREAMING_FLAGS = new Set(["--refresh", "--follow", "-f"]);
+/** CLI flag names/aliases that trigger infinite streaming output. */
+const STREAMING_FLAG_NAMES = new Set(["--refresh", "--follow", "-f"]);
+
+/** Check if CLI args contain any streaming flag. */
+function hasStreamingFlag(args: string[]): boolean {
+  return args.some((arg) => STREAMING_FLAG_NAMES.has(arg));
+}
 
 /**
  * Build an isolated env from options, inheriting the consumer's process.env.
@@ -166,22 +172,37 @@ type CaptureContext = {
   getCapturedResult: () => unknown;
 };
 
+/** Options for building a capture context. */
+type CaptureOptions = {
+  /** When set, captureObject pushes to this channel instead of accumulating. */
+  channel?: AsyncChannel<unknown>;
+  /** When set, placed on the fake process for streaming commands to honor. */
+  abortSignal?: AbortSignal;
+};
+
 /** Build output capture writers and a SentryContext-compatible context object. */
 async function buildCaptureContext(
   env: NodeJS.ProcessEnv,
-  cwd: string
+  cwd: string,
+  opts?: CaptureOptions
 ): Promise<CaptureContext> {
   const stdoutChunks: string[] = [];
   const stderrChunks: string[] = [];
   const capturedResults: unknown[] = [];
 
+  const captureObject = opts?.channel
+    ? (obj: unknown) => {
+        opts.channel?.push(obj);
+      }
+    : (obj: unknown) => {
+        capturedResults.push(obj);
+      };
+
   const stdout: Writer = {
     write: (s: string) => {
       stdoutChunks.push(s);
     },
-    captureObject: (obj: unknown) => {
-      capturedResults.push(obj);
-    },
+    captureObject,
   };
   const stderr: Writer = {
     write: (s: string) => {
@@ -191,15 +212,22 @@ async function buildCaptureContext(
 
   const { getConfigDir } = await import("./db/index.js");
 
+  // biome-ignore lint/suspicious/noExplicitAny: abortSignal is an internal extension to the fake process
+  const fakeProcess: any = {
+    stdout,
+    stderr,
+    stdin: process.stdin,
+    env,
+    cwd: () => cwd,
+    exitCode: 0,
+  };
+
+  if (opts?.abortSignal) {
+    fakeProcess.abortSignal = opts.abortSignal;
+  }
+
   const context = {
-    process: {
-      stdout,
-      stderr,
-      stdin: process.stdin,
-      env,
-      cwd: () => cwd,
-      exitCode: 0,
-    },
+    process: fakeProcess,
     stdout,
     stderr,
     stdin: process.stdin,
@@ -286,18 +314,118 @@ async function executeWithCapture<T>(
 }
 
 /**
+ * Streaming execution wrapper — runs the command in the background and
+ * returns an AsyncChannel that yields values as they arrive.
+ *
+ * An AbortController is created per call. Consumer `break` (iterator return)
+ * and `SentryOptions.signal` both cascade to the controller. The abort signal
+ * is placed on the fake process so streaming commands can honor it.
+ */
+function executeWithStream<T>(
+  options: SentryOptions | undefined,
+  executor: (
+    captureCtx: CaptureContext,
+    span: Span | undefined
+  ) => Promise<void>
+): AsyncChannel<T> {
+  const controller = new AbortController();
+
+  // Cascade external signal to our controller
+  if (options?.signal) {
+    if (options.signal.aborted) {
+      controller.abort();
+    } else {
+      options.signal.addEventListener("abort", () => controller.abort(), {
+        once: true,
+      });
+    }
+  }
+
+  const channel = createAsyncChannel<T>({
+    onReturn: () => controller.abort(),
+  });
+
+  // Fire-and-forget — command runs in background
+  (async () => {
+    const env = buildIsolatedEnv(options);
+    const cwd = options?.cwd ?? process.cwd();
+    setEnv(env);
+
+    let captureCtx: CaptureContext | undefined;
+    try {
+      captureCtx = await buildCaptureContext(env, cwd, {
+        channel: channel as AsyncChannel<unknown>,
+        abortSignal: controller.signal,
+      });
+
+      const { withTelemetry } = await import("./telemetry.js");
+
+      // biome-ignore lint/style/noNonNullAssertion: captureCtx is assigned on the line above
+      await withTelemetry(async (span) => executor(captureCtx!, span), {
+        libraryMode: true,
+      });
+
+      // Check exit code — Stricli sets it without throwing for some errors
+      if (captureCtx.context.process.exitCode !== 0) {
+        channel.error(
+          buildSdkError(
+            captureCtx.stderrChunks,
+            captureCtx.context.process.exitCode
+          )
+        );
+      } else {
+        channel.close();
+      }
+    } catch (thrown) {
+      const stderrChunks = captureCtx?.stderrChunks ?? [];
+      const exitCode =
+        extractExitCode(thrown) || captureCtx?.context.process.exitCode || 1;
+      const err =
+        thrown instanceof SentryError
+          ? thrown
+          : buildSdkError(stderrChunks, exitCode, thrown);
+      channel.error(err);
+    } finally {
+      await flushTelemetry();
+      setEnv(process.env);
+    }
+  })();
+
+  return channel;
+}
+
+/**
  * Build an invoker function bound to the given options.
  *
  * The invoker handles env isolation, context building, telemetry,
  * zero-copy capture, and error wrapping — used by the typed SDK methods.
+ *
+ * When `meta.streaming` is true, returns an AsyncIterable that yields
+ * values as the command produces them (for `--follow`/`--refresh` commands).
  */
 export function buildInvoker(options?: SentryOptions) {
-  return async function invokeCommand<T>(
+  return function invokeCommand<T>(
     commandPath: string[],
     flags: Record<string, unknown>,
-    positionalArgs: string[]
-  ): Promise<T> {
-    return await executeWithCapture<T>(options, async (ctx, span) => {
+    positionalArgs: string[],
+    meta?: { streaming?: boolean }
+  ): Promise<T> | AsyncIterable<T> {
+    if (meta?.streaming) {
+      return executeWithStream<T>(options, async (ctx, span) => {
+        const func = await resolveCommand(commandPath);
+        if (span) {
+          const { setCommandSpanName } = await import("./telemetry.js");
+          setCommandSpanName(span, commandPath.join("."));
+        }
+        await func.call(
+          ctx.context,
+          { ...flags, json: true },
+          ...positionalArgs
+        );
+      });
+    }
+
+    return executeWithCapture<T>(options, async (ctx, span) => {
       const func = await resolveCommand(commandPath);
       if (span) {
         const { setCommandSpanName } = await import("./telemetry.js");
@@ -316,25 +444,25 @@ export function buildInvoker(options?: SentryOptions) {
  * typed SDK methods (or for passing raw CLI flags).
  *
  * Returns parsed JSON by default, or trimmed text for commands
- * without JSON support.
- *
- * @throws {SentryError} When a streaming flag (`--refresh`, `--follow`, `-f`)
- *   is passed — streaming is not supported in library mode.
+ * without JSON support. When streaming flags are detected, returns
+ * an AsyncIterable instead.
  */
 export function buildRunner(options?: SentryOptions) {
-  return async function run(...args: string[]): Promise<unknown> {
-    // Reject streaming flags — they produce infinite output unsuitable for library mode
-    for (const arg of args) {
-      if (STREAMING_FLAGS.has(arg)) {
-        throw new SentryError(
-          `Streaming flag "${arg}" is not supported in library mode. Use the CLI directly for streaming commands.`,
-          1,
-          ""
-        );
-      }
+  return function run(
+    ...args: string[]
+  ): Promise<unknown> | AsyncIterable<unknown> {
+    if (hasStreamingFlag(args)) {
+      return executeWithStream<unknown>(options, async (ctx, span) => {
+        const { run: stricliRun } = await import("@stricli/core");
+        const { app } = await import("../app.js");
+        const { buildContext } = await import("../context.js");
+        // biome-ignore lint/suspicious/noExplicitAny: fakeProcess duck-types the process interface
+        const process_ = ctx.context.process as any;
+        await stricliRun(app, args, buildContext(process_, span));
+      });
     }
 
-    return await executeWithCapture<unknown>(options, async (ctx, span) => {
+    return executeWithCapture<unknown>(options, async (ctx, span) => {
       const { run: stricliRun } = await import("@stricli/core");
       const { app } = await import("../app.js");
       const { buildContext } = await import("../context.js");

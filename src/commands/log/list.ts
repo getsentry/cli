@@ -256,6 +256,11 @@ type FollowGeneratorConfig<T extends LogLike> = {
    * Use this to seed dedup state (e.g., tracking seen log IDs).
    */
   onInitialLogs?: (logs: T[]) => void;
+  /**
+   * External abort signal (library mode). When aborted, the follow
+   * generator stops on the next poll cycle. Complements SIGINT handling.
+   */
+  abortSignal?: AbortSignal;
 };
 
 /** Find the highest timestamp_precise in a batch, or undefined if none have it. */
@@ -343,10 +348,15 @@ async function* generateFollowLogs<T extends LogLike>(
   // timestamp_precise is nanoseconds; Date.now() is milliseconds → convert
   let lastTimestamp = Date.now() * 1_000_000;
 
-  // AbortController for clean SIGINT handling
+  // AbortController for clean SIGINT handling + library mode abort
   const controller = new AbortController();
   const stop = () => controller.abort();
   process.once("SIGINT", stop);
+
+  // Library mode: honor external abort signal (e.g., consumer break)
+  if (config.abortSignal) {
+    config.abortSignal.addEventListener("abort", stop, { once: true });
+  }
 
   try {
     // Initial fetch
@@ -695,6 +705,8 @@ export const listCommand = buildListCommand(
           const generator = generateFollowLogs({
             flags,
             onDiagnostic: (msg) => logger.warn(msg),
+            abortSignal: (this.process as { abortSignal?: AbortSignal })
+              ?.abortSignal,
             fetch: (statsPeriod) =>
               listTraceLogs(org, traceId, {
                 query: flags.query,
@@ -757,6 +769,8 @@ export const listCommand = buildListCommand(
           const generator = generateFollowLogs({
             flags,
             onDiagnostic: (msg) => logger.warn(msg),
+            abortSignal: (this.process as { abortSignal?: AbortSignal })
+              ?.abortSignal,
             fetch: (statsPeriod, afterTimestamp) =>
               listLogs(org, project, {
                 query: flags.query,

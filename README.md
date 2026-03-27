@@ -112,6 +112,9 @@ Options (all optional):
 - `project` — Default project slug.
 - `text` — Return human-readable string instead of parsed JSON (affects `run()` only).
 - `cwd` — Working directory for DSN auto-detection. Defaults to `process.cwd()`.
+- `signal` — `AbortSignal` to cancel streaming commands (`--follow`, `--refresh`).
+
+Streaming commands return `AsyncIterable` — use `for await...of` and `break` to stop.
 
 Errors are thrown as `SentryError` with `.exitCode` and `.stderr`.
 

@@ -893,6 +893,9 @@ mock.module("./some-module", () => ({
 
 ### Architecture
 
+<!-- lore:019d2d10-671c-77d8-9dbc-c32d1604dcf7 -->
+* **AsyncIterable streaming for SDK implemented via AsyncChannel push/pull pattern**: \`src/lib/async-channel.ts\` provides a dual-queue channel: producer calls \`push()\`/\`close()\`/\`error()\`, consumer iterates via \`for await...of\`. \`break\` triggers \`onReturn\` callback for cleanup. \`executeWithStream()\` in \`sdk-invoke.ts\` runs the command in background, pipes \`captureObject\` calls to the channel, and returns the channel immediately. Streaming detection: \`hasStreamingFlag()\` checks for \`--refresh\`/\`--follow\`/\`-f\`. \`buildInvoker\` accepts \`meta.streaming\` flag; \`buildRunner\` auto-detects from args. Abort wiring: \`AbortController\` created per stream, signal placed on fake \`process.abortSignal\`, \`channel.onReturn\` calls \`controller.abort()\`. Both \`log/list.ts\` and \`dashboard/view.ts\` check \`this.process?.abortSignal\` alongside SIGINT. Codegen generates callable interface overloads for streaming commands.
+
 <!-- lore:019cbeba-e4d3-748c-ad50-fe3c3d5c0a0d -->
 * **Auth token env var override pattern: SENTRY\_AUTH\_TOKEN > SENTRY\_TOKEN > SQLite**: Auth in \`src/lib/db/auth.ts\` follows layered precedence: \`SENTRY\_AUTH\_TOKEN\` > \`SENTRY\_TOKEN\` > SQLite OAuth token. \`getEnvToken()\` trims env vars (empty/whitespace = unset). \`AuthSource\` tracks provenance. \`ENV\_SOURCE\_PREFIX = "env:"\` — use \`.length\` not hardcoded 4. Env tokens bypass refresh/expiry. \`isEnvTokenActive()\` guards auth commands. Logout must NOT clear stored auth when env token active. These functions stay in \`db/auth.ts\` despite not touching DB because they're tightly coupled with token retrieval.
 

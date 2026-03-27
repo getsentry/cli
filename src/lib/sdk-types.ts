@@ -46,6 +46,14 @@ export type SentryOptions = {
    * Defaults to `process.cwd()`.
    */
   cwd?: string;
+
+  /**
+   * Abort signal for cancelling streaming commands.
+   * When aborted, streaming iterables stop on the next poll cycle.
+   * Consumer `break` in `for await...of` also triggers abort automatically.
+   * Has no effect on non-streaming (Promise-based) commands.
+   */
+  signal?: AbortSignal;
 };
 
 /**
