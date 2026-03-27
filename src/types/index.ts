@@ -133,4 +133,9 @@ export {
  */
 export type Writer = {
   write(data: string): void;
+  /**
+   * Zero-copy object capture for library mode.
+   * When set, JSON objects are passed directly instead of serialized.
+   */
+  captureObject?: (obj: unknown) => void;
 };

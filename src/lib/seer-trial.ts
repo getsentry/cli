@@ -4,7 +4,7 @@
  * Interactive flow to check for and start a Seer product trial
  * when a Seer command fails due to budget/enablement errors.
  *
- * Called from bin.ts when a SeerError is caught. Checks trial availability
+ * Called from cli.ts when a SeerError is caught. Checks trial availability
  * via the customer API, prompts the user for confirmation, and starts the
  * trial if accepted. All failures degrade gracefully — the original error
  * is re-thrown by the caller if this function returns false.

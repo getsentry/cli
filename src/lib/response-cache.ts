@@ -28,6 +28,7 @@ import CachePolicy from "http-cache-semantics";
 import pLimit from "p-limit";
 
 import { getConfigDir } from "./db/index.js";
+import { getEnv } from "./env.js";
 import { withCacheSpan } from "./telemetry.js";
 
 // ---------------------------------------------------------------------------
@@ -336,7 +337,7 @@ export function resetCacheState(): void {
  * - `SENTRY_NO_CACHE=1` environment variable is set
  */
 export function isCacheDisabled(): boolean {
-  return cacheDisabledFlag || process.env.SENTRY_NO_CACHE === "1";
+  return cacheDisabledFlag || getEnv().SENTRY_NO_CACHE === "1";
 }
 
 // ---------------------------------------------------------------------------

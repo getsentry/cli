@@ -3,7 +3,9 @@
  */
 import { execSync, spawn as nodeSpawn } from "node:child_process";
 import { access, readFile, writeFile } from "node:fs/promises";
-import { DatabaseSync } from "node:sqlite";
+// node:sqlite is imported lazily inside NodeDatabasePolyfill to avoid
+// crashing on Node.js versions without node:sqlite support when the
+// bundle is loaded as a library (the consumer may never use SQLite).
 
 import picomatch from "picomatch";
 import { compare as semverCompare } from "semver";
@@ -16,11 +18,19 @@ declare global {
 
 type SqliteValue = string | number | bigint | null | Uint8Array;
 
+/** Lazy-loaded node:sqlite DatabaseSync constructor. */
+function getNodeSqlite(): typeof import("node:sqlite").DatabaseSync {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require("node:sqlite").DatabaseSync;
+}
+
 /** Wraps node:sqlite StatementSync to match bun:sqlite query() API. */
 class NodeStatementPolyfill {
-  private readonly stmt: ReturnType<DatabaseSync["prepare"]>;
+  // biome-ignore lint/suspicious/noExplicitAny: node:sqlite types loaded lazily
+  private readonly stmt: any;
 
-  constructor(stmt: ReturnType<DatabaseSync["prepare"]>) {
+  // biome-ignore lint/suspicious/noExplicitAny: node:sqlite types loaded lazily
+  constructor(stmt: any) {
     this.stmt = stmt;
   }
 
@@ -39,11 +49,13 @@ class NodeStatementPolyfill {
 
 /** Wraps node:sqlite DatabaseSync to match bun:sqlite Database API. */
 class NodeDatabasePolyfill {
-  private readonly db: DatabaseSync;
+  // biome-ignore lint/suspicious/noExplicitAny: node:sqlite types loaded lazily
+  private readonly db: any;
 
   constructor(path: string) {
     // SQLite configuration (busy_timeout, foreign_keys, WAL mode) is applied
     // via PRAGMA statements in src/lib/db/index.ts after construction
+    const DatabaseSync = getNodeSqlite();
     this.db = new DatabaseSync(path);
   }
 

@@ -19,6 +19,7 @@ import {
   prefetchNightlyPatches,
   prefetchStablePatches,
 } from "./delta-upgrade.js";
+import { getEnv } from "./env.js";
 import { cyan, muted } from "./formatters/colors.js";
 import { cleanupPatchCache } from "./patch-cache.js";
 import { fetchLatestFromGitHub, fetchLatestNightlyVersion } from "./upgrade.js";
@@ -224,7 +225,7 @@ function getUpdateNotificationImpl(): string | null {
  * Checked at runtime to support test isolation.
  */
 function isUpdateCheckDisabled(): boolean {
-  return process.env.SENTRY_CLI_NO_UPDATE_CHECK === "1";
+  return getEnv().SENTRY_CLI_NO_UPDATE_CHECK === "1";
 }
 
 /**

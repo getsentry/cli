@@ -67,12 +67,14 @@
       }
     },
     {
+      // src/index.ts is the library entry point — re-exports SentryError, SentryOptions, SentrySDK
       // db/index.ts exports db connection utilities - not a barrel file but triggers the rule
       // api-client.ts is a barrel that re-exports from src/lib/api/ domain modules
       // to preserve the existing import path for all consumers
       // markdown.ts re-exports isPlainOutput from plain-detect.ts for backward compat
       // script/debug-id.ts re-exports from src/lib/sourcemap/debug-id.ts for build scripts
       "includes": [
+        "src/index.ts",
         "src/lib/db/index.ts",
         "src/lib/api-client.ts",
         "src/lib/formatters/markdown.ts",

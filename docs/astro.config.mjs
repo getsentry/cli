@@ -199,6 +199,7 @@ export default defineConfig({
             { label: "Installation", slug: "getting-started" },
             { label: "Self-Hosted", slug: "self-hosted" },
             { label: "Configuration", slug: "configuration" },
+            { label: "Library Usage", slug: "library-usage" },
           ],
         },
         {

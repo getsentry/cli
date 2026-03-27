@@ -40,6 +40,7 @@ import {
   formatMultipleProjectsFooter,
   getDsnSourceDescription,
 } from "./dsn/index.js";
+import { getEnv } from "./env.js";
 import {
   ApiError,
   ContextError,
@@ -530,7 +531,7 @@ function resolveFromEnvVars(): {
   project?: string;
   detectedFrom: string;
 } | null {
-  const rawProject = process.env.SENTRY_PROJECT?.trim();
+  const rawProject = getEnv().SENTRY_PROJECT?.trim();
 
   // SENTRY_PROJECT=org/project combo takes priority.
   // If the value contains a slash it is always treated as combo notation;
@@ -544,11 +545,11 @@ function resolveFromEnvVars(): {
       return { org, project, detectedFrom: "SENTRY_PROJECT env var" };
     }
     // Malformed combo — fall through without using rawProject as a slug
-    const envOrg = process.env.SENTRY_ORG?.trim();
+    const envOrg = getEnv().SENTRY_ORG?.trim();
     return envOrg ? { org: envOrg, detectedFrom: "SENTRY_ORG env var" } : null;
   }
 
-  const envOrg = process.env.SENTRY_ORG?.trim();
+  const envOrg = getEnv().SENTRY_ORG?.trim();
 
   if (envOrg && rawProject) {
     return {

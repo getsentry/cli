@@ -497,6 +497,7 @@ export function buildCommand<
 
   // Wrap func to intercept logging flags, capture telemetry, then call original.
   // The wrapper is an async function that iterates the generator returned by func.
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Central framework wrapper — flag cleanup, env-based JSON, output rendering, and error handling are all tightly coupled.
   const wrappedFunc = async function (
     this: CONTEXT,
     flags: Record<string, unknown>,
@@ -513,6 +514,14 @@ export function buildCommand<
       setArgsContext(args);
     }
 
+    // Environment-based JSON mode (used by library entry point)
+    if (outputConfig && !cleanFlags.json) {
+      const env = (this as unknown as { env?: NodeJS.ProcessEnv }).env;
+      if (env?.SENTRY_OUTPUT_FORMAT === "json") {
+        cleanFlags.json = true;
+      }
+    }
+
     const stdout = (this as unknown as { stdout: Writer }).stdout;
 
     // Reset per-invocation state
@@ -525,10 +534,10 @@ export function buildCommand<
       : undefined;
 
     // OutputError handler: render data through the output system, then
-    // exit with the error's code. Stricli overwrites process.exitCode = 0
-    // after successful returns, so process.exit() is the only way to
-    // preserve a non-zero code. This lives in the framework — commands
-    // simply `throw new OutputError(data)`.
+    // re-throw so the exit code propagates. Stricli's
+    // exceptionWhileRunningCommand intercepts OutputError and re-throws
+    // it without formatting, so both bin.ts and index.ts can set
+    // exitCode from the caught error.
     const handleOutputError = (err: unknown): never => {
       if (err instanceof OutputError && outputConfig) {
         // Only render if there's actual data to show
@@ -540,7 +549,7 @@ export function buildCommand<
             renderer
           );
         }
-        process.exit(err.exitCode);
+        throw err;
       }
       throw err;
     };

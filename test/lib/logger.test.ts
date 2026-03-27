@@ -158,7 +158,7 @@ describe("setLogLevel", () => {
 
   test("propagates to children created before level change", () => {
     // Simulate the real-world scenario: module-level child created at default level,
-    // then setLogLevel called later by bin.ts
+    // then setLogLevel called later by cli.ts
     const moduleChild = logger.withTag("upgrade");
     expect(moduleChild.level).toBe(originalLevel);
 

@@ -12,6 +12,7 @@
  */
 
 import type { Database } from "bun:sqlite";
+import { getEnv } from "../env.js";
 import { stringifyUnknown } from "../errors.js";
 import { logger } from "../logger.js";
 
@@ -608,7 +609,7 @@ export function tryRepairAndRetry<T>(
   error: unknown
 ): RepairAttemptResult<T> {
   // Skip repair if disabled via environment variable
-  if (process.env[NO_AUTO_REPAIR_ENV] === "1") {
+  if (getEnv()[NO_AUTO_REPAIR_ENV] === "1") {
     return { attempted: false };
   }
 

@@ -14,6 +14,7 @@ import {
   buildRouteMap,
   type CommandContext,
   run,
+  text_en,
 } from "@stricli/core";
 import {
   applyLoggingFlags,
@@ -1278,9 +1279,6 @@ describe("buildCommand return-based output", () => {
   });
 
   test("OutputError renders data and exits with error code", async () => {
-    let exitCalledWith: number | undefined;
-    const originalExit = process.exit;
-
     const command = buildCommand<
       { json: boolean; fields?: string[] },
       [],
@@ -1301,37 +1299,34 @@ describe("buildCommand return-based output", () => {
       routes: { test: command },
       docs: { brief: "Test app" },
     });
-    const app = buildApplication(routeMap, { name: "test" });
+    // Re-throw OutputError from Stricli's error handler (matches production app.ts)
+    const app = buildApplication(routeMap, {
+      name: "test",
+      localization: {
+        loadText: () => ({
+          ...text_en,
+          exceptionWhileRunningCommand: (exc: unknown) => {
+            if (exc instanceof OutputError) throw exc;
+            return text_en.exceptionWhileRunningCommand(exc, false);
+          },
+        }),
+      },
+    });
     const ctx = createTestContext();
 
-    // Mock process.exit — must throw to prevent fall-through since
-    // the real process.exit() is typed as `never`
-    class MockExit extends Error {
-      code: number;
-      constructor(code: number) {
-        super(`process.exit(${code})`);
-        this.code = code;
-      }
-    }
-    process.exit = ((code?: number) => {
-      exitCalledWith = code;
-      throw new MockExit(code ?? 0);
-    }) as typeof process.exit;
-
+    // OutputError is now thrown (not process.exit) — catch it
     try {
       await run(app, ["test"], ctx as TestContext);
-    } finally {
-      process.exit = originalExit;
+      expect.unreachable("Expected OutputError to be thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(OutputError);
+      expect((err as OutputError).exitCode).toBe(1);
     }
-    expect(exitCalledWith).toBe(1);
-    // Output was rendered BEFORE exit
+    // Output was rendered BEFORE the throw
     expect(ctx.output.join("")).toContain("Error: not found");
   });
 
   test("OutputError renders JSON in --json mode", async () => {
-    let exitCalledWith: number | undefined;
-    const originalExit = process.exit;
-
     const command = buildCommand<
       { json: boolean; fields?: string[] },
       [],
@@ -1352,27 +1347,29 @@ describe("buildCommand return-based output", () => {
       routes: { test: command },
       docs: { brief: "Test app" },
     });
-    const app = buildApplication(routeMap, { name: "test" });
+    // Re-throw OutputError from Stricli's error handler (matches production app.ts)
+    const app = buildApplication(routeMap, {
+      name: "test",
+      localization: {
+        loadText: () => ({
+          ...text_en,
+          exceptionWhileRunningCommand: (exc: unknown) => {
+            if (exc instanceof OutputError) throw exc;
+            return text_en.exceptionWhileRunningCommand(exc, false);
+          },
+        }),
+      },
+    });
     const ctx = createTestContext();
 
-    class MockExit extends Error {
-      code: number;
-      constructor(code: number) {
-        super(`process.exit(${code})`);
-        this.code = code;
-      }
-    }
-    process.exit = ((code?: number) => {
-      exitCalledWith = code;
-      throw new MockExit(code ?? 0);
-    }) as typeof process.exit;
-
+    // OutputError is now thrown (not process.exit) — catch it
     try {
       await run(app, ["test", "--json"], ctx as TestContext);
-    } finally {
-      process.exit = originalExit;
+      expect.unreachable("Expected OutputError to be thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(OutputError);
+      expect((err as OutputError).exitCode).toBe(1);
     }
-    expect(exitCalledWith).toBe(1);
     const jsonOutput = JSON.parse(ctx.output.join(""));
     expect(jsonOutput).toEqual({ error: "not found" });
   });

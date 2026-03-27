@@ -2,6 +2,8 @@
  * Runtime constants for the CLI.
  */
 
+import { getEnv } from "./env.js";
+
 /** Build-time constant injected by esbuild/bun */
 declare const SENTRY_CLI_VERSION: string | undefined;
 
@@ -50,7 +52,7 @@ export function normalizeUrl(url: string | undefined): string | undefined {
  * with `https://` to prevent invalid URL construction downstream.
  */
 export function getConfiguredSentryUrl(): string | undefined {
-  const raw = process.env.SENTRY_HOST || process.env.SENTRY_URL || undefined;
+  const raw = getEnv().SENTRY_HOST || getEnv().SENTRY_URL || undefined;
   return normalizeUrl(raw);
 }
 

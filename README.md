@@ -83,6 +83,38 @@ For detailed documentation, visit [cli.sentry.dev](https://cli.sentry.dev).
 
 Credentials are stored in `~/.sentry/` with restricted permissions (mode 600).
 
+## Library Usage
+
+Use Sentry CLI programmatically in Node.js (≥22) or Bun without spawning a subprocess:
+
+```typescript
+import createSentrySDK from "sentry";
+
+const sdk = createSentrySDK({ token: "sntrys_..." });
+
+// Typed methods for every CLI command
+const orgs = await sdk.org.list();
+const issues = await sdk.issue.list({ orgProject: "acme/frontend", limit: 5 });
+const issue = await sdk.issue.view({ issue: "ACME-123" });
+
+// Nested commands
+await sdk.dashboard.widget.add({ display: "line", query: "count" }, "my-org/my-dashboard");
+
+// Escape hatch for any CLI command
+const version = await sdk.run("--version");
+const text = await sdk.run("issue", "list", "-l", "5");
+```
+
+Options (all optional):
+- `token` — Auth token. Falls back to `SENTRY_AUTH_TOKEN` / `SENTRY_TOKEN` env vars.
+- `url` — Sentry instance URL for self-hosted (e.g., `"sentry.example.com"`).
+- `org` — Default organization slug (avoids passing it on every call).
+- `project` — Default project slug.
+- `text` — Return human-readable string instead of parsed JSON (affects `run()` only).
+- `cwd` — Working directory for DSN auto-detection. Defaults to `process.cwd()`.
+
+Errors are thrown as `SentryError` with `.exitCode` and `.stderr`.
+
 ---
 
 ## Development

@@ -4,58 +4,32 @@
  * Handles the common pattern of JSON vs human-readable output
  * that appears in most CLI commands.
  *
- * Two usage modes:
+ * Declare formatting in {@link OutputConfig} on `buildCommand`, then
+ * yield data from the generator:
+ * ```ts
+ * buildCommand({
+ *   output: { human: formatUser },
+ *   async *func() { yield new CommandOutput(data); },
+ * })
+ * ```
+ * The wrapper reads `json`/`fields` from flags and applies formatting
+ * automatically. Generators return `{ hint }` for footer text.
  *
- * 1. **Imperative** — call {@link writeOutput} directly from the command:
- *    ```ts
- *    writeOutput(stdout, data, { json, formatHuman, hint });
- *    ```
- *
- * 2. **Yield-based** — declare formatting in {@link OutputConfig} on
- *    `buildCommand`, then yield data from the generator:
- *    ```ts
- *    buildCommand({
- *      output: { human: formatUser },
- *      async *func() { yield new CommandOutput(data); },
- *    })
- *    ```
- *    The wrapper reads `json`/`fields` from flags and applies formatting
- *    automatically. Generators return `{ hint }` for footer text.
- *
- * Both modes serialize the same data object to JSON and pass it to
- * `formatHuman` — there is no divergent-data path.
+ * The same data object is serialized to JSON and passed to the human
+ * formatter — there is no divergent-data path.
  */
 
 import type { ZodType } from "zod";
 import type { Writer } from "../../types/index.js";
 import { plainSafeMuted } from "./human.js";
-import { formatJson, writeJson } from "./json.js";
+import { filterFields, formatJson } from "./json.js";
 
 // ---------------------------------------------------------------------------
-// Shared option types
+// Zero-copy object capture (library mode)
 // ---------------------------------------------------------------------------
 
-/**
- * Options for {@link writeOutput} when JSON and human data share the same type.
- *
- * Most commands fetch data and then either serialize it to JSON or format it
- * for the terminal — use this form when the same object works for both paths.
- */
-type WriteOutputOptions<T> = {
-  /** Output JSON format instead of human-readable */
-  json: boolean;
-  /** Pre-parsed field paths to include in JSON output (from `--fields`) */
-  fields?: string[];
-  /** Function to format data as a rendered string */
-  formatHuman: (data: T) => string;
-  /** Short hint appended after human output (suppressed in JSON mode) */
-  hint?: string;
-  /** Footer hint shown after human output (suppressed in JSON mode) */
-  footer?: string;
-};
-
 // ---------------------------------------------------------------------------
-// Return-based output config (declared on buildCommand)
+// Output config (declared on buildCommand)
 // ---------------------------------------------------------------------------
 
 /**
@@ -277,17 +251,18 @@ function applyJsonExclude(
 }
 
 /**
- * Write a JSON-transformed value to stdout.
+ * Write a final JSON object to stdout.
  *
- * `undefined` suppresses the chunk entirely (e.g. streaming text-only
- * chunks in JSON mode). All other values are serialized as a single
- * JSON line.
+ * When the writer supports zero-copy capture (library mode), the object
+ * is handed off directly without serialization. Otherwise it is
+ * JSON-stringified and written as a single line.
  */
-function writeTransformedJson(stdout: Writer, transformed: unknown): void {
-  if (transformed === undefined) {
+function emitJsonObject(stdout: Writer, obj: unknown): void {
+  if (stdout.captureObject) {
+    stdout.captureObject(obj);
     return;
   }
-  stdout.write(`${formatJson(transformed)}\n`);
+  stdout.write(`${formatJson(obj)}\n`);
 }
 
 /**
@@ -318,10 +293,20 @@ export function renderCommandOutput(
 ): void {
   if (ctx.json) {
     if (config.jsonTransform) {
-      writeTransformedJson(stdout, config.jsonTransform(data, ctx.fields));
+      const transformed = config.jsonTransform(data, ctx.fields);
+      if (transformed === undefined) {
+        return;
+      }
+      emitJsonObject(stdout, transformed);
       return;
     }
-    writeJson(stdout, applyJsonExclude(data, config.jsonExclude), ctx.fields);
+
+    const excluded = applyJsonExclude(data, config.jsonExclude);
+    const final =
+      ctx.fields && ctx.fields.length > 0
+        ? filterFields(excluded, ctx.fields)
+        : excluded;
+    emitJsonObject(stdout, final);
     return;
   }
 
@@ -457,39 +442,6 @@ export function formatSchemaForHelp(fields: SchemaFieldInfo[]): string {
     lines.push(`  ${field.name} (${field.type}${optStr})${desc}`);
   }
   return lines.join("\n");
-}
-
-// ---------------------------------------------------------------------------
-// Imperative output
-// ---------------------------------------------------------------------------
-
-/**
- * Write formatted output to stdout based on output format.
- *
- * Handles the common JSON-vs-human pattern used across commands:
- * - JSON mode: serialize data with optional field filtering
- * - Human mode: call `formatHuman`, then optionally print `hint` and `footer`
- */
-export function writeOutput<T>(
-  stdout: Writer,
-  data: T,
-  options: WriteOutputOptions<T>
-): void {
-  if (options.json) {
-    writeJson(stdout, data, options.fields);
-    return;
-  }
-
-  const text = options.formatHuman(data);
-  stdout.write(`${text}\n`);
-
-  if (options.hint) {
-    stdout.write(`\n${plainSafeMuted(options.hint)}\n`);
-  }
-
-  if (options.footer) {
-    writeFooter(stdout, options.footer);
-  }
 }
 
 /** Format footer text (muted in TTY, plain when piped, with surrounding newlines). */

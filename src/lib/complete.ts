@@ -33,7 +33,7 @@ type Completion = {
 /**
  * Main entry point for `sentry __complete`.
  *
- * Called from the bin.ts fast-path. Parses the shell words to determine
+ * Called from the cli.ts fast-path. Parses the shell words to determine
  * what kind of completion is needed, queries the cache, and writes
  * results to stdout.
  *
