@@ -310,23 +310,6 @@ async function readCustomContent(filePath: string): Promise<string> {
   }
 }
 
-/**
- * Read existing index.md and extract content after the commands table.
- * Preserves Global Options, JSON Output, and Opening in Browser sections.
- */
-async function readIndexCustomContent(): Promise<string> {
-  try {
-    const content = await Bun.file(INDEX_PATH).text();
-    const markerIndex = content.indexOf(GENERATED_END_MARKER);
-    if (markerIndex === -1) {
-      return "";
-    }
-    return content.slice(markerIndex + GENERATED_END_MARKER.length);
-  } catch {
-    return "";
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -359,7 +342,7 @@ for (const route of routeInfos) {
 }
 
 // Update commands/index.md
-const indexCustomContent = await readIndexCustomContent();
+const indexCustomContent = await readCustomContent(INDEX_PATH);
 const indexLines: string[] = [];
 indexLines.push("---");
 indexLines.push("title: Commands");
