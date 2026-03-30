@@ -21,6 +21,11 @@ const INDEX_JSON_PATH = "docs/public/.well-known/skills/index.json";
 /**
  * Read all .md files under the skill directory + the index.json.
  * Returns a map of relative path → content.
+ *
+ * Note: src/generated/skill-content.ts is NOT checked here because it is
+ * gitignored (regenerated at build time). The markdown files and index.json
+ * are the committed artifacts; if they are in sync, skill-content.ts will
+ * also be correct since the generator produces both in the same run.
  */
 async function readAllSkillFiles(): Promise<Map<string, string>> {
   const files = new Map<string, string>();

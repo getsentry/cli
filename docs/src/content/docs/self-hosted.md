@@ -44,7 +44,7 @@ export SENTRY_CLIENT_ID=your-client-id
 If your instance is on an older version or you prefer not to create an OAuth application, you can use an API token instead:
 
 1. Go to **Settings → Developer Settings → Personal Tokens** in your Sentry instance (or visit `https://sentry.example.com/settings/account/api/auth-tokens/new-token/`)
-2. Create a new token with the following scopes: `project:read`, `project:write`, `org:read`, `event:read`, `event:write`, `member:read`, `team:read`
+2. Create a new token with the following scopes: `project:read`, `project:write`, `project:admin`, `org:read`, `event:read`, `event:write`, `member:read`, `team:read`
 3. Pass it to the CLI:
 
 ```bash

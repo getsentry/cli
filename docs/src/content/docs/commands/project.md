@@ -117,3 +117,26 @@ DSN: https://abc123@sentry.io/123456
 # Open project in browser
 sentry project view my-org/frontend -w
 ```
+
+### Create a project
+
+```bash
+# Create a new project
+sentry project create my-new-app javascript-nextjs
+
+# Create under a specific org and team
+sentry project create my-org/my-new-app python --team backend-team
+
+# Preview without creating
+sentry project create my-new-app node --dry-run
+```
+
+### Delete a project
+
+```bash
+# Delete a project (will prompt for confirmation)
+sentry project delete my-org/old-project
+
+# Delete without confirmation
+sentry project delete my-org/old-project --yes
+```

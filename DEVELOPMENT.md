@@ -59,7 +59,7 @@ When creating your Sentry OAuth application:
 
 - **Redirect URI**: Not required for device flow
 - **Scopes**: The CLI requests these scopes:
-  - `project:read`, `project:write`
+  - `project:read`, `project:write`, `project:admin`
   - `org:read`
   - `event:read`, `event:write`
   - `member:read`

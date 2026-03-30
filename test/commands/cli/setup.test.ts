@@ -811,12 +811,8 @@ describe("sentry cli setup", () => {
       expect(getOutput()).not.toContain("Agent skills:");
     });
 
-    test("does not break setup on network failure", async () => {
+    test("installs embedded skill files when Claude Code is detected", async () => {
       mkdirSync(join(testDir, ".claude"), { recursive: true });
-
-      mockFetch(async () => {
-        throw new Error("Network error");
-      });
 
       const { context, getOutput, restore } = createMockContext({
         homeDir: testDir,
@@ -834,8 +830,8 @@ describe("sentry cli setup", () => {
         context
       );
 
-      // Setup should still complete without errors (no output without --install)
-      expect(getOutput()).not.toContain("Agent skills:");
+      // Skill files are embedded at build time, so installation should succeed
+      expect(getOutput()).toContain("Agent skills:");
     });
 
     test("bestEffort catches errors from steps and setup still completes", async () => {

@@ -7,6 +7,20 @@ The Sentry CLI can be configured through environment variables and a local datab
 
 ## Environment Variables
 
+### `SENTRY_AUTH_TOKEN`
+
+Authentication token for the Sentry API. This is the primary way to authenticate in CI/CD pipelines and scripts where interactive login is not possible.
+
+```bash
+export SENTRY_AUTH_TOKEN=sntrys_YOUR_TOKEN_HERE
+```
+
+You can create auth tokens in your [Sentry account settings](https://sentry.io/settings/account/api/auth-tokens/). When set, this takes precedence over any stored OAuth token from `sentry auth login`.
+
+### `SENTRY_TOKEN`
+
+Legacy alias for `SENTRY_AUTH_TOKEN`. If both are set, `SENTRY_AUTH_TOKEN` takes precedence.
+
 ### `SENTRY_HOST`
 
 Base URL of your Sentry instance. **Only needed for [self-hosted Sentry](./self-hosted/).** SaaS users (sentry.io) should not set this.
@@ -123,6 +137,22 @@ Disable the automatic update check that runs periodically in the background.
 
 ```bash
 export SENTRY_CLI_NO_UPDATE_CHECK=1
+```
+
+### `SENTRY_INSTALL_DIR`
+
+Override the directory where the CLI binary is installed. Used by the install script and `sentry cli upgrade` to control the binary location.
+
+```bash
+export SENTRY_INSTALL_DIR=/usr/local/bin
+```
+
+### `SENTRY_NO_CACHE`
+
+Disable API response caching. When set, the CLI will not cache API responses and will always make fresh requests.
+
+```bash
+export SENTRY_NO_CACHE=1
 ```
 
 ## Global Options

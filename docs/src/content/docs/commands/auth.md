@@ -96,6 +96,24 @@ SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
 
 See [Self-Hosted Sentry](../self-hosted/) for details.
 
+### Logout
+
+```bash
+sentry auth logout
+```
+
+### Refresh token
+
+```bash
+sentry auth refresh
+```
+
+### Print stored token
+
+```bash
+sentry auth token
+```
+
 ### Check auth status
 
 ```bash
@@ -118,14 +136,14 @@ sentry auth whoami
 
 ## Credential Storage
 
-Auth tokens are stored in a SQLite database at `~/.sentry/config.db` with restricted file permissions.
+Auth tokens are stored in a SQLite database at `~/.sentry/cli.db` with restricted file permissions.
 
 ## Environment Variable Precedence
 
 The CLI checks for auth tokens in the following order, using the first one found:
 
-1. `SENTRY_AUTH_TOKEN` environment variable (legacy)
-2. `SENTRY_TOKEN` environment variable
-3. The stored token in the SQLite database
+1. `SENTRY_AUTH_TOKEN` environment variable
+2. `SENTRY_TOKEN` environment variable (legacy alias)
+3. The stored OAuth token in the SQLite database
 
 When a token comes from an environment variable, the CLI skips expiry checks and automatic refresh.
