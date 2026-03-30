@@ -224,6 +224,15 @@ export function validateCommand(command: string): string | undefined {
     return `Blocked command: disallowed executable "${executable}" — "${command}"`;
   }
 
+  // Layer 4: Block interactive Sentry setup CLIs. These require a TTY to
+  // prompt the user and will always fail when run non-interactively.
+  // `sentry init` is itself the replacement for @sentry/wizard — it should
+  // never need to invoke the old wizard as a subprocess.
+  const tokens = command.split(WHITESPACE_RE);
+  if (tokens.some((t) => t.includes("@sentry/wizard"))) {
+    return `Blocked command: "@sentry/wizard" is an interactive CLI that requires a TTY. Use a direct package manager install command instead (e.g. "npm install @sentry/nextjs") — "${command}"`;
+  }
+
   return;
 }
 
