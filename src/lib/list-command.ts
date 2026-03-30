@@ -326,6 +326,8 @@ let _subcommandsByRoute: Map<string, Set<string>> | undefined;
  */
 function getSubcommandsForRoute(routeName: string): Set<string> {
   if (!_subcommandsByRoute) {
+    _subcommandsByRoute = new Map();
+
     const { routes } = require("../app.js") as {
       routes: {
         getAllEntries: () => readonly {
@@ -335,7 +337,6 @@ function getSubcommandsForRoute(routeName: string): Set<string> {
       };
     };
 
-    const map = new Map<string, Set<string>>();
     for (const entry of routes.getAllEntries()) {
       const target = entry.target as unknown as Record<string, unknown>;
       if (typeof target?.getAllEntries === "function") {
@@ -348,10 +349,9 @@ function getSubcommandsForRoute(routeName: string): Set<string> {
         for (const child of children) {
           names.add(child.name.original);
         }
-        map.set(entry.name.original, names);
+        _subcommandsByRoute.set(entry.name.original, names);
       }
     }
-    _subcommandsByRoute = map;
   }
 
   return _subcommandsByRoute.get(routeName) ?? new Set();
