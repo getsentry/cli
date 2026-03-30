@@ -84,7 +84,15 @@ export function getPaginationState(
     return;
   }
 
-  const stack = JSON.parse(row.cursor_stack) as string[];
+  let stack: string[];
+  try {
+    stack = JSON.parse(row.cursor_stack) as string[];
+  } catch {
+    db.query(
+      "DELETE FROM pagination_cursors WHERE command_key = ? AND context = ?"
+    ).run(commandKey, contextKey);
+    return;
+  }
   return { stack, index: row.page_index };
 }
 
