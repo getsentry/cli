@@ -1,0 +1,127 @@
+# Fix spinner freeze during `sentry cli upgrade`
+
+## Problem
+
+The spinner next to "Downloading" freezes intermittently because
+`applyPatch()` in `src/lib/bspatch.ts:345-349` blocks the event loop
+with a byte-by-byte diff loop processing millions of bytes. The spinner
+runs via `setTimeout` at 50ms intervals (`src/lib/polling.ts:141`), so
+any synchronous work exceeding ~40ms causes a visible stutter.
+
+## Changes
+
+### 1. Periodic yielding in `applyPatch()` — `src/lib/bspatch.ts`
+
+Add amortized time-check yielding inside the inner diff byte loop
+(lines 345-349). `applyPatch()` is already `async`, so no signature
+changes are needed anywhere in the call chain.
+
+Add constants and a `lastYield` timestamp before the outer control loop,
+then check inside the inner loop:
+
+```typescript
+const FRAME_BUDGET_MS = 40; // 25fps, under spinner's 50ms interval
+const CHECK_MASK = 0xFFF;   // check clock every 4096 bytes
+
+// ... existing setup ...
+
+let lastYield = performance.now();
+
+try {
+  for (/* existing control loop */) {
+    // ... existing parsing ...
+
+    if (readDiffBy > 0) {
+      const diffChunk = await diffReader.read(readDiffBy);
+      const outputChunk = new Uint8Array(readDiffBy);
+
+      for (let i = 0; i < readDiffBy; i++) {
+        outputChunk[i] =
+          ((oldFile[oldpos + i] ?? 0) + (diffChunk[i] ?? 0)) % 256;
+
+        // Yield periodically so the spinner can animate
+        if ((i & CHECK_MASK) === 0 && i > 0) {
+          const now = performance.now();
+          if (now - lastYield >= FRAME_BUDGET_MS) {
+            await Bun.sleep(0);
+            lastYield = performance.now();
+          }
+        }
+      }
+
+      // ... rest unchanged ...
+    }
+
+    // ... extra chunk + seek unchanged ...
+  }
+}
+```
+
+### 2. AsyncLocalStorage progress context — `src/lib/polling.ts`
+
+Add an `AsyncLocalStorage`-based progress context so any function in the
+async call chain can update the spinner message without parameter threading.
+
+At the top of the file, add:
+
+```typescript
+import { AsyncLocalStorage } from "node:async_hooks";
+
+const progressStorage = new AsyncLocalStorage<(msg: string) => void>();
+
+/**
+ * Update the active spinner message from anywhere in the async call chain.
+ * No-op if no spinner is active (no store, JSON mode, non-TTY).
+ */
+export function setProgressMessage(msg: string): void {
+  progressStorage.getStore()?.(msg);
+}
+```
+
+In `withProgress()`, wrap the callback invocation in `progressStorage.run()`:
+
+```typescript
+// Current (line 212):
+return await fn(spinner.setMessage);
+
+// Change to:
+return await progressStorage.run(spinner.setMessage, () =>
+  fn(spinner.setMessage)
+);
+```
+
+The no-op branch (JSON/plain mode, line 202-206) also needs wrapping to
+keep the store consistent — wrap with a no-op function or skip (either
+works since `getStore()` returning `undefined` is already handled).
+
+### 3. Progress message in patch loop — `src/lib/delta-upgrade.ts`
+
+In `applyPatchesSequentially()` (line 1130), add a single line inside
+the `for` loop to update the spinner:
+
+```typescript
+import { setProgressMessage } from "./polling.js";
+
+// Inside the for loop, before the withTracing call:
+setProgressMessage(
+  `Applying patch ${i + 1}/${chain.patches.length}...`
+);
+```
+
+No signature changes to any function in the call chain.
+
+## Files modified
+
+| File | Change |
+|------|--------|
+| `src/lib/bspatch.ts` | Add yield logic in inner byte loop |
+| `src/lib/polling.ts` | Add `AsyncLocalStorage` + `setProgressMessage()` export, wrap `withProgress` callback in `progressStorage.run()` |
+| `src/lib/delta-upgrade.ts` | Import `setProgressMessage`, call it in `applyPatchesSequentially` loop |
+
+## Verification
+
+1. `bun run typecheck` — no signature changes, should pass cleanly
+2. `bun test test/lib/bspatch.test.ts` — existing patch tests still produce correct output
+3. `bun test test/e2e/delta-upgrade.test.ts` — e2e delta tests still pass
+4. `bun run lint` — check for lint issues
+5. `bun run test:unit` — full unit test suite
