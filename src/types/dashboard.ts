@@ -19,23 +19,43 @@ import { logger } from "../lib/logger.js";
 // ---------------------------------------------------------------------------
 
 /**
- * Valid widget types (dataset selectors).
+ * Widget types (dataset selectors) the API still accepts for creation.
  *
  * Source: sentry/src/sentry/models/dashboard_widget.py DashboardWidgetTypes.TYPES
  */
 export const WIDGET_TYPES = [
-  "discover",
   "issue",
   "metrics",
   "error-events",
-  "transaction-like",
   "spans",
   "logs",
   "tracemetrics",
   "preprod-app-size",
 ] as const;
 
-export type WidgetType = (typeof WIDGET_TYPES)[number];
+/**
+ * Deprecated widget types rejected by the Sentry Dashboard API.
+ *
+ * - `discover` → use `error-events` for errors or `spans` for everything else
+ * - `transaction-like` → use `spans` with `is_transaction:true` filter
+ */
+export const DEPRECATED_WIDGET_TYPES = [
+  "discover",
+  "transaction-like",
+] as const;
+
+export type DeprecatedWidgetType = (typeof DEPRECATED_WIDGET_TYPES)[number];
+
+/**
+ * All widget types including deprecated — used for parsing server responses
+ * where existing dashboards may still reference old types.
+ */
+export const ALL_WIDGET_TYPES = [
+  ...WIDGET_TYPES,
+  ...DEPRECATED_WIDGET_TYPES,
+] as const;
+
+export type WidgetType = (typeof ALL_WIDGET_TYPES)[number];
 
 /** Default widgetType — the modern spans dataset covers most use cases */
 export const DEFAULT_WIDGET_TYPE: WidgetType = "spans";
@@ -168,12 +188,17 @@ export type DashboardDetail = z.infer<typeof DashboardDetailSchema>;
  * Defaults widgetType to "spans" when not provided.
  *
  * Use DashboardWidgetSchema (permissive) for parsing server responses.
+ *
+ * Accepts ALL_WIDGET_TYPES (including deprecated) so that editing existing
+ * widgets with deprecated types (e.g., "discover") doesn't fail validation.
+ * CLI-level rejection of deprecated types for new widgets is handled by
+ * validateWidgetEnums() in resolve.ts.
  */
 export const DashboardWidgetInputSchema = z
   .object({
     title: z.string(),
     displayType: z.enum(DISPLAY_TYPES),
-    widgetType: z.enum(WIDGET_TYPES).default(DEFAULT_WIDGET_TYPE),
+    widgetType: z.enum(ALL_WIDGET_TYPES).default(DEFAULT_WIDGET_TYPE),
     interval: z.string().optional(),
     queries: z.array(DashboardWidgetQuerySchema).optional(),
     layout: DashboardWidgetLayoutSchema.optional(),
