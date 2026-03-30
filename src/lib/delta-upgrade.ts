@@ -39,6 +39,7 @@ import {
 } from "./ghcr.js";
 import { logger } from "./logger.js";
 import { loadCachedChain, savePatchesToCache } from "./patch-cache.js";
+import { setProgressMessage } from "./polling.js";
 import { withTracing, withTracingSpan } from "./telemetry.js";
 
 /** Scoped logger for delta upgrade operations */
@@ -1134,6 +1135,7 @@ async function applyPatchesSequentially(
       if (!patch) {
         throw new Error(`Missing patch at index ${i}`);
       }
+      setProgressMessage(`Applying patch ${i + 1}/${chain.patches.length}...`);
       const isLast = i === chain.patches.length - 1;
       const intermediate = i % 2 === 0 ? intermediateA : intermediateB;
       const outputPath = isLast ? destPath : intermediate;
