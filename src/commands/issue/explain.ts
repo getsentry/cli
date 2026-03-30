@@ -6,21 +6,18 @@
 
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
-import { ApiError } from "../../lib/errors.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
-import {
-  formatRootCauseList,
-  handleSeerApiError,
-} from "../../lib/formatters/seer.js";
+import { formatRootCauseList } from "../../lib/formatters/seer.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
-import { classifySeerError, recordSeerOutcome } from "../../lib/telemetry.js";
+import { recordSeerOutcome } from "../../lib/telemetry.js";
 import { extractRootCauses } from "../../types/seer.js";
 import {
   ensureRootCauseAnalysis,
+  handleSeerCommandError,
   issueIdPositional,
   resolveOrgAndIssueId,
 } from "./utils.js";
@@ -113,22 +110,7 @@ export const explainCommand = buildCommand({
       recordSeerOutcome("success");
       return { hint: `To create a plan, run: sentry issue plan ${issueArg}` };
     } catch (error) {
-      if (!recorded) {
-        // Handle API errors with friendly messages
-        if (error instanceof ApiError) {
-          const mapped = handleSeerApiError(
-            error.status,
-            error.detail,
-            resolvedOrg
-          );
-          recordSeerOutcome(classifySeerError(mapped));
-          throw mapped;
-        }
-        recordSeerOutcome(classifySeerError(error));
-      } else if (error instanceof ApiError) {
-        throw handleSeerApiError(error.status, error.detail, resolvedOrg);
-      }
-      throw error;
+      handleSeerCommandError(error, recorded, resolvedOrg);
     }
   },
 });

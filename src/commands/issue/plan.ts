@@ -8,19 +8,16 @@
 import type { SentryContext } from "../../context.js";
 import { triggerSolutionPlanning } from "../../lib/api-client.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
-import { ApiError, ValidationError } from "../../lib/errors.js";
+import { ValidationError } from "../../lib/errors.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
-import {
-  formatSolution,
-  handleSeerApiError,
-} from "../../lib/formatters/seer.js";
+import { formatSolution } from "../../lib/formatters/seer.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
-import { classifySeerError, recordSeerOutcome } from "../../lib/telemetry.js";
+import { recordSeerOutcome } from "../../lib/telemetry.js";
 import {
   type AutofixState,
   extractRootCauses,
@@ -30,6 +27,7 @@ import {
 } from "../../types/seer.js";
 import {
   ensureRootCauseAnalysis,
+  handleSeerCommandError,
   issueIdPositional,
   pollAutofixState,
   resolveOrgAndIssueId,
@@ -124,40 +122,6 @@ function buildPlanData(state: AutofixState): PlanData {
     status: state.status,
     solution: solution?.data ?? null,
   };
-}
-
-/**
- * Handle errors in Seer commands with outcome recording.
- *
- * Records the Seer outcome if not already recorded, maps API errors to
- * Seer-specific errors, and re-throws. Extracted from the catch block to
- * keep command function complexity under the Biome limit.
- *
- * @param error - The caught error
- * @param recorded - Whether outcome was already recorded before the error
- * @param resolvedOrg - Org slug for Seer error messages
- * @returns never — always throws
- */
-function handleSeerCommandError(
-  error: unknown,
-  recorded: boolean,
-  resolvedOrg: string | undefined
-): never {
-  if (!recorded) {
-    if (error instanceof ApiError) {
-      const mapped = handleSeerApiError(
-        error.status,
-        error.detail,
-        resolvedOrg
-      );
-      recordSeerOutcome(classifySeerError(mapped));
-      throw mapped;
-    }
-    recordSeerOutcome(classifySeerError(error));
-  } else if (error instanceof ApiError) {
-    throw handleSeerApiError(error.status, error.detail, resolvedOrg);
-  }
-  throw error;
 }
 
 export const planCommand = buildCommand({
