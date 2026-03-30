@@ -8,10 +8,12 @@
 import { describe, expect, test } from "bun:test";
 import { ValidationError } from "../../src/lib/errors.js";
 import {
+  ALL_WIDGET_TYPES,
   assignDefaultLayout,
   type DashboardWidget,
   DashboardWidgetInputSchema,
   DEFAULT_WIDGET_TYPE,
+  DEPRECATED_WIDGET_TYPES,
   DISCOVER_AGGREGATE_FUNCTIONS,
   DISPLAY_TYPES,
   DiscoverAggregateFunctionSchema,
@@ -49,7 +51,13 @@ describe("WIDGET_TYPES", () => {
     expect(DEFAULT_WIDGET_TYPE).toBe("spans");
   });
 
-  test("contains all expected dataset types", () => {
+  test("excludes deprecated types", () => {
+    for (const t of DEPRECATED_WIDGET_TYPES) {
+      expect(WIDGET_TYPES).not.toContain(t);
+    }
+  });
+
+  test("ALL_WIDGET_TYPES includes both active and deprecated", () => {
     const expected: WidgetType[] = [
       "discover",
       "issue",
@@ -62,7 +70,7 @@ describe("WIDGET_TYPES", () => {
       "preprod-app-size",
     ];
     for (const t of expected) {
-      expect(WIDGET_TYPES).toContain(t);
+      expect(ALL_WIDGET_TYPES).toContain(t);
     }
   });
 });

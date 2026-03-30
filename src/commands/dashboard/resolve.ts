@@ -477,8 +477,19 @@ export function enrichDashboardError(
   throw error;
 }
 
+/** Migration hints for deprecated dataset names */
+const DEPRECATED_DATASET_HINTS: Record<string, string> = {
+  discover:
+    'The "discover" dataset is deprecated. Use "error-events" for errors or "spans" for transactions/spans.',
+  "transaction-like":
+    'The "transaction-like" dataset is deprecated. Use "spans" with --where "is_transaction:true" instead.',
+};
+
 /**
  * Validate --display and --dataset flag values against known enums.
+ *
+ * Rejects deprecated datasets (`discover`, `transaction-like`) with
+ * actionable migration hints before making any API calls.
  *
  * @param display - Display type flag value
  * @param dataset - Dataset flag value
@@ -493,14 +504,18 @@ export function validateWidgetEnums(display?: string, dataset?: string): void {
       "display"
     );
   }
-  if (
-    dataset &&
-    !WIDGET_TYPES.includes(dataset as (typeof WIDGET_TYPES)[number])
-  ) {
-    throw new ValidationError(
-      `Invalid --dataset value "${dataset}".\nValid datasets: ${WIDGET_TYPES.join(", ")}`,
-      "dataset"
-    );
+  if (dataset) {
+    // Check for deprecated datasets first — give a specific migration hint
+    const deprecationHint = DEPRECATED_DATASET_HINTS[dataset];
+    if (deprecationHint) {
+      throw new ValidationError(deprecationHint, "dataset");
+    }
+    if (!WIDGET_TYPES.includes(dataset as (typeof WIDGET_TYPES)[number])) {
+      throw new ValidationError(
+        `Invalid --dataset value "${dataset}".\nValid datasets: ${WIDGET_TYPES.join(", ")}`,
+        "dataset"
+      );
+    }
   }
   if (display && dataset) {
     // Untracked display types (text, wheel, rage_and_dead_clicks, agents_traces_table)

@@ -19,6 +19,7 @@ import {
   FALLBACK_LAYOUT,
   prepareDashboardForUpdate,
   validateWidgetLayout,
+  WIDGET_TYPES,
   type WidgetLayoutFlags,
 } from "../../../types/dashboard.js";
 import {
@@ -119,8 +120,7 @@ export const addCommand = buildCommand({
       dataset: {
         kind: "parsed",
         parse: String,
-        brief:
-          'Widget dataset (default: spans). Do NOT use "discover" or "transaction-like" — both are deprecated. Use "spans" with --where "is_transaction:true" to query transactions',
+        brief: `Widget dataset: ${WIDGET_TYPES.join(", ")} (default: spans)`,
         optional: true,
       },
       query: {

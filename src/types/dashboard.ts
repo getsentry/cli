@@ -19,23 +19,43 @@ import { logger } from "../lib/logger.js";
 // ---------------------------------------------------------------------------
 
 /**
- * Valid widget types (dataset selectors).
+ * Widget types (dataset selectors) the API still accepts for creation.
  *
  * Source: sentry/src/sentry/models/dashboard_widget.py DashboardWidgetTypes.TYPES
  */
 export const WIDGET_TYPES = [
-  "discover",
   "issue",
   "metrics",
   "error-events",
-  "transaction-like",
   "spans",
   "logs",
   "tracemetrics",
   "preprod-app-size",
 ] as const;
 
-export type WidgetType = (typeof WIDGET_TYPES)[number];
+/**
+ * Deprecated widget types rejected by the Sentry Dashboard API.
+ *
+ * - `discover` → use `error-events` for errors or `spans` for everything else
+ * - `transaction-like` → use `spans` with `is_transaction:true` filter
+ */
+export const DEPRECATED_WIDGET_TYPES = [
+  "discover",
+  "transaction-like",
+] as const;
+
+export type DeprecatedWidgetType = (typeof DEPRECATED_WIDGET_TYPES)[number];
+
+/**
+ * All widget types including deprecated — used for parsing server responses
+ * where existing dashboards may still reference old types.
+ */
+export const ALL_WIDGET_TYPES = [
+  ...WIDGET_TYPES,
+  ...DEPRECATED_WIDGET_TYPES,
+] as const;
+
+export type WidgetType = (typeof ALL_WIDGET_TYPES)[number];
 
 /** Default widgetType — the modern spans dataset covers most use cases */
 export const DEFAULT_WIDGET_TYPE: WidgetType = "spans";
