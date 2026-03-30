@@ -76,7 +76,7 @@ Add a widget to a dashboard
 
 **Flags:**
 - `-d, --display <value> - Display type (big_number, line, area, bar, table, stacked_area, top_n, text, categorical_bar, details, wheel, rage_and_dead_clicks, server_tree, agents_traces_table)`
-- `--dataset <value> - Widget dataset (default: spans). Do NOT use "discover" or "transaction-like" — both are deprecated. Use "spans" with --where "is_transaction:true" to query transactions`
+- `--dataset <value> - Widget dataset: issue, metrics, error-events, spans, logs, tracemetrics, preprod-app-size (default: spans)`
 - `-q, --query <value>... - Aggregate expression (e.g. count, p95:span.duration)`
 - `-w, --where <value> - Search conditions filter (e.g. is:unresolved)`
 - `-g, --group-by <value>... - Group-by column (repeatable). Requires --limit`
@@ -121,7 +121,7 @@ Edit a widget in a dashboard
 - `-t, --title <value> - Widget title to match`
 - `--new-title <value> - New widget title`
 - `-d, --display <value> - Display type (big_number, line, area, bar, table, stacked_area, top_n, text, categorical_bar, details, wheel, rage_and_dead_clicks, server_tree, agents_traces_table)`
-- `--dataset <value> - Widget dataset (default: spans)`
+- `--dataset <value> - Widget dataset: issue, metrics, error-events, spans, logs, tracemetrics, preprod-app-size (default: spans)`
 - `-q, --query <value>... - Aggregate expression (e.g. count, p95:span.duration)`
 - `-w, --where <value> - Search conditions filter (e.g. is:unresolved)`
 - `-g, --group-by <value>... - Group-by column (repeatable)`
