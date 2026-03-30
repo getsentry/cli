@@ -130,7 +130,7 @@ Use **common** types for general dashboards. Use **specialized** only when speci
 
 **Dataset selection:**
 
-Use the default `spans` dataset for most widgets — it covers spans, and transactions when filtered with `is_transaction:true`. Do NOT use `discover` or `transaction-like` — the Sentry Dashboard API rejects both as deprecated.
+Use the default `spans` dataset for most widgets — it covers spans, and transactions when filtered with `is_transaction:true`.
 
 | Dataset | Use for | Notes |
 |---|---|---|
@@ -184,6 +184,6 @@ sentry dashboard widget add <dashboard> "Transaction Count" \
 - **Not using `--web`**: View commands support `-w`/`--web` to open the resource in the browser — useful for sharing links.
 - **Fetching API schemas instead of using the CLI**: Prefer `sentry schema` to browse the API and `sentry api` to make requests — the CLI handles authentication and endpoint resolution, so there's rarely a need to download OpenAPI specs separately.
 - **Using `sentry api` when CLI commands suffice**: `sentry issue list --json` already includes `shortId`, `title`, `priority`, `level`, `status`, `permalink`, and other fields at the top level. Some fields like `count`, `userCount`, `firstSeen`, and `lastSeen` may be null depending on the issue. Use `--fields` to select specific fields and `--help` to see all available fields. Only fall back to `sentry api` for data the CLI doesn't expose.
-- **Using deprecated dashboard datasets**: Do NOT use `--dataset discover` or `--dataset transaction-like` — the API rejects both. Use the default `spans` dataset. To query transactions, add `--where "is_transaction:true"`.
+- **Using deprecated dashboard datasets**: `--dataset discover` and `--dataset transaction-like` are rejected — the CLI validates against accepted datasets. Use the default `spans` dataset. To query transactions, add `--where "is_transaction:true"`.
 - **Forgetting `--limit` with `--group-by`**: Dashboard widgets with `--group-by` require `--limit` — the API will reject the widget without it. Table widgets cap at 10 rows.
 - **`--sort` with leading dash**: `--sort -count` is misinterpreted as the `-c` flag alias. Use `--sort="-count"` (with `=`) instead.
