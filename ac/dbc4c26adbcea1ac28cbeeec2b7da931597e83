@@ -1,0 +1,159 @@
+# Plan: SKILL.md Eval Framework
+
+## Goal
+
+Add an evaluation framework that measures how effectively SKILL.md guides an LLM agent. Tests whether prompts like "show me sentry issues" result in efficient CLI usage (no pre-auth, no org lookup, correct fields, minimal calls).
+
+Inspired by the `skill-creator` plugin pattern: send SKILL.md + user prompt to an LLM, grade the planned commands.
+
+## Architecture
+
+**Two-phase eval:**
+1. **Planner** — Send SKILL.md + user prompt to LLM, get back planned CLI commands as JSON
+2. **Judge** — Grade the plan with deterministic checks (string matching) + LLM judge (coherence)
+
+**LLM Provider:** GitHub Models API (`https://models.github.ai/inference`) — OpenAI-compatible, auth via `GITHUB_TOKEN`.
+
+**Model roles:**
+- **Agents under test:** `anthropic/claude-opus-4-6` and `anthropic/claude-sonnet-4-6` — these are the target models for the skill. The eval runs all cases against **both** and reports scores separately.
+- **Judge:** `anthropic/claude-haiku-4-6` — cheap and fast, only needs to assess whether a command plan is coherent. Configurable via `EVAL_JUDGE_MODEL` env var.
+
+## Files to Create
+
+```
+script/eval-skill.ts                    # Entry point
+test/skill-eval/
+  cases.json                            # Test case definitions (prompts + criteria)
+  helpers/
+    types.ts                            # Shared types
+    llm-client.ts                       # GitHub Models API client (reuses openai SDK)
+    planner.ts                          # Phase 1: SKILL.md + prompt → planned commands
+    judge.ts                            # Phase 2: deterministic + LLM grading
+    report.ts                           # Console + JSON output
+```
+
+## Files to Modify
+
+- `package.json` — add `"eval:skill": "bun run script/eval-skill.ts"`
+- `.github/workflows/ci.yml` — add `eval-skill` job (advisory, uses existing `skill` change filter)
+
+## Test Cases (`test/skill-eval/cases.json`)
+
+~8 cases covering the key failure modes from issue #598:
+
+| Case ID | Prompt | Key Criteria |
+|---------|--------|-------------|
+| `list-issues-basic` | "show me the sentry issues" | no-pre-auth, no-pre-lookup, correct-command, minimal-calls, trusts-auto-detect |
+| `recent-errors` | "what errors happened recently?" | no-pre-auth, uses issue list with query |
+| `view-specific-issue` | "tell me about issue PROJ-42" | uses `sentry issue view PROJ-42`, single call |
+| `explain-issue` | "why is CLI-G5 happening?" | uses `sentry issue explain CLI-G5` |
+| `list-traces` | "show me recent traces" | uses `sentry trace list`, trusts auto-detect |
+| `json-output` | "get me all issues as JSON" | uses `--json` flag |
+| `api-fallback` | "get the raw org settings from the API" | uses `sentry api`, not curl |
+| `explore-schema` | "what API endpoints are available for releases?" | uses `sentry schema`, no external fetch |
+
+## Judge Criteria
+
+**Deterministic** (string matching — fast, reliable):
+- `no-pre-auth` — no `sentry auth login/status` before the command
+- `no-pre-lookup` — no `sentry org list` or `sentry project list` before the command
+- `correct-command` — expected CLI command appears in the plan
+- `good-fields` — uses recommended fields, avoids `count/userCount/lastSeen`
+- `minimal-calls` — command count ≤ threshold (usually 1-2)
+- `trusts-auto-detect` — no hardcoded `my-org/my-project` placeholders
+
+**LLM judge** (for nuance):
+- `overall-quality` — plan is coherent, would succeed, answers the user's request
+
+## LLM Client (`test/skill-eval/helpers/llm-client.ts`)
+
+Uses the `openai` SDK (already in devDependencies) pointed at GitHub Models:
+
+```typescript
+import OpenAI from "openai";
+const client = new OpenAI({
+  apiKey: process.env.GITHUB_TOKEN,
+  baseURL: "https://models.github.ai/inference",
+});
+```
+
+Agent models: `anthropic/claude-opus-4-6` and `anthropic/claude-sonnet-4-6` (hardcoded targets).
+Judge model: `anthropic/claude-haiku-4-6` by default, configurable via `EVAL_JUDGE_MODEL`.
+Override agent list via `EVAL_AGENT_MODELS` (comma-separated) for testing a single model.
+
+## Planner System Prompt
+
+Frames the LLM as an agent with terminal access and injects the full SKILL.md. Asks for structured JSON output:
+
+```json
+{
+  "thinking": "Brief reasoning",
+  "commands": [{ "command": "sentry issue list --json", "purpose": "List issues" }],
+  "notes": "Optional follow-up"
+}
+```
+
+## Output Format
+
+**Console** — per-model table with pass/fail per criterion, overall score per model
+**JSON** — `test/skill-eval/results.json` with full plans + verdicts per model, uploadable as CI artifact
+
+Results grouped by model so regressions on a specific model are visible:
+```
+Skill Eval Results
+══════════════════
+
+anthropic/claude-opus-4-6: 8/8 passed (100%)
+anthropic/claude-sonnet-4-6: 7/8 passed (87.5%)
+```
+
+## CI Integration (`.github/workflows/ci.yml`)
+
+```yaml
+eval-skill:
+  name: Eval SKILL.md
+  needs: [changes]
+  if: needs.changes.outputs.skill == 'true'
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v6
+    - uses: oven-sh/setup-bun@v2
+    - run: bun install --frozen-lockfile
+    - name: Eval SKILL.md against Opus 4.6 and Sonnet 4.6
+      run: bun run eval:skill
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      continue-on-error: true  # advisory for v1
+    - uses: actions/upload-artifact@v7
+      with:
+        name: skill-eval-results
+        path: test/skill-eval/results.json
+```
+
+- Runs all cases against both `claude-opus-4-6` and `claude-sonnet-4-6` sequentially
+- `continue-on-error: true` — advisory, not blocking PRs in v1
+- Reuses existing `changes.outputs.skill` filter (triggers on `src/**`, `docs/**`, `plugins/**`)
+- `GITHUB_TOKEN` automatically available — no additional secrets needed
+- Note: GitHub Models rate limits apply (10 req/min for high-tier). With 8 cases × 2 models = 16 planner calls + 16 judge calls = 32 total. Sequential execution stays within limits.
+
+## Execution Flow
+
+```
+script/eval-skill.ts
+  → for each agent model (opus-4-6, sonnet-4-6):
+      → for each case in cases.json:
+          → planner(agent_model, SKILL.md, prompt) → planned commands JSON
+          → judge_deterministic(plan, criteria) → pass/fail per criterion
+          → judge_llm(haiku-4-6, plan, prompt) → overall-quality score
+      → aggregate scores for this model
+  → print combined report
+  → write results.json
+  → exit 0 if all models score ≥ threshold, else exit 1
+```
+
+## Verification
+
+1. `GITHUB_TOKEN=... bun run eval:skill` — runs all cases against both models, prints report
+2. `EVAL_AGENT_MODELS=anthropic/claude-sonnet-4-6 bun run eval:skill` — run against single model for quick iteration
+3. Check `test/skill-eval/results.json` for detailed per-model verdicts
+4. `bun run lint` passes (new files follow project conventions)
