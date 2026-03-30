@@ -144,3 +144,16 @@ Feedback is sent via Sentry's telemetry system. If telemetry is disabled (`SENTR
 ```bash
 sentry cli fix
 ```
+
+### Configure shell integration
+
+```bash
+# Run full setup (PATH, completions, agent skills)
+sentry cli setup
+
+# Skip agent skill installation
+sentry cli setup --no-agent-skills
+
+# Skip PATH and completion modifications
+sentry cli setup --no-modify-path --no-completions
+```

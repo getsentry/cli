@@ -19,6 +19,19 @@ Create a new project
 - `-t, --team <value> - Team to create the project under`
 - `-n, --dry-run - Validate inputs and show what would be created without creating it`
 
+**Examples:**
+
+```bash
+# Create a new project
+sentry project create my-new-app javascript-nextjs
+
+# Create under a specific org and team
+sentry project create my-org/my-new-app python --team backend-team
+
+# Preview without creating
+sentry project create my-new-app node --dry-run
+```
+
 ### `sentry project delete <org/project>`
 
 Delete a project
@@ -27,6 +40,16 @@ Delete a project
 - `-y, --yes - Skip confirmation prompt`
 - `-f, --force - Force deletion without confirmation`
 - `-n, --dry-run - Validate and show what would be deleted without deleting`
+
+**Examples:**
+
+```bash
+# Delete a project (will prompt for confirmation)
+sentry project delete my-org/old-project
+
+# Delete without confirmation
+sentry project delete my-org/old-project --yes
+```
 
 ### `sentry project list <org/project>`
 

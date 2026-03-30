@@ -286,7 +286,7 @@ async function handleCompletions(
  * runs (e.g. after upgrade) silently update without printing.
  */
 async function handleAgentSkills(homeDir: string, emit: Logger) {
-  const location = await installAgentSkills(homeDir, CLI_VERSION);
+  const location = await installAgentSkills(homeDir);
 
   if (location?.created) {
     emit(`Agent skills: Installed to ${location.path}`);

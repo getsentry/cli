@@ -19,7 +19,7 @@
 ### Install Script (Recommended)
 
 ```bash
-curl -fsSL https://cli.sentry.dev/install | bash
+curl https://cli.sentry.dev/install -fsS | bash
 ```
 
 ### Homebrew
@@ -72,10 +72,18 @@ sentry issue plan PROJ-ABC
 |---------|-------------|
 | `sentry auth` | Login, logout, check authentication status |
 | `sentry org` | List and view organizations |
-| `sentry project` | List and view projects |
+| `sentry project` | List, view, create, and delete projects |
 | `sentry issue` | List, view, explain, and plan issues |
 | `sentry event` | View event details |
+| `sentry trace` | List and view distributed traces |
+| `sentry span` | List and view spans |
+| `sentry log` | List and view logs (with streaming) |
+| `sentry dashboard` | List, view, and create dashboards with widgets |
+| `sentry sourcemap` | Inject debug IDs and upload sourcemaps |
+| `sentry init` | Initialize Sentry in your project |
+| `sentry schema` | Browse the Sentry API schema |
 | `sentry api` | Make direct API requests |
+| `sentry cli` | Upgrade, setup, fix, and send feedback |
 
 For detailed documentation, visit [cli.sentry.dev](https://cli.sentry.dev).
 
