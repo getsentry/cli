@@ -2141,38 +2141,48 @@ function formatChangelog(data: UpgradeResult): string {
   }
 
   const { changelog } = data;
-  const lines: string[] = ["", "### What's new", ""];
+  const mdLines: string[] = ["### What's new ✨", ""];
 
   for (const section of changelog.sections) {
-    lines.push(CATEGORY_HEADINGS[section.category]);
-    lines.push(section.markdown);
+    // Skip sections whose markdown is empty after whitespace trimming
+    if (!section.markdown.trim()) {
+      continue;
+    }
+    mdLines.push(CATEGORY_HEADINGS[section.category]);
+    mdLines.push(section.markdown);
+  }
+
+  // Nothing to show after filtering empty sections
+  if (mdLines.length <= 2) {
+    return "";
   }
 
   if (changelog.truncated) {
     const more = changelog.originalCount - changelog.totalItems;
-    lines.push(
+    mdLines.push(
       `<muted>...and ${more} more changes — https://github.com/getsentry/cli/releases</muted>`
     );
   }
 
-  // Render through the markdown pipeline, then clamp to terminal height
-  const rendered = renderMarkdown(lines.join("\n"));
-  const renderedLines = rendered.split("\n");
-  const maxLines = getMaxChangelogLines();
+  // Render through the markdown pipeline
+  const rendered = renderMarkdown(mdLines.join("\n"));
 
-  if (renderedLines.length <= maxLines) {
-    return rendered;
+  // Indent all lines by 2 spaces so the changelog visually nests under
+  // the upgrade status header, then clamp to terminal height.
+  const indented = rendered
+    .split("\n")
+    .map((line) => (line ? `  ${line}` : line));
+
+  const maxLines = getMaxChangelogLines();
+  if (indented.length > maxLines) {
+    const clamped = indented.slice(0, maxLines);
+    const moreText =
+      "  ...and more — https://github.com/getsentry/cli/releases";
+    clamped.push(isPlainOutput() ? moreText : muted(moreText));
+    return `\n${clamped.join("\n")}\n`;
   }
 
-  // Truncate and add a "more" indicator
-  const clamped = renderedLines.slice(0, maxLines);
-  const remaining = changelog.originalCount - changelog.totalItems;
-  const moreText =
-    remaining > 0
-      ? "...and more — https://github.com/getsentry/cli/releases"
-      : "...truncated — https://github.com/getsentry/cli/releases";
-  clamped.push(isPlainOutput() ? moreText : muted(moreText));
-  return clamped.join("\n");
+  return `\n${indented.join("\n")}\n`;
 }
 
 /** Action descriptions for human-readable output */
