@@ -672,7 +672,7 @@ function applyPatchset(
  *
  * @returns The org slug on success, or a {@link LocalOpResult} error to return early.
  */
-async function resolveOrgSlug(
+export async function resolveOrgSlug(
   cwd: string,
   yes: boolean
 ): Promise<string | LocalOpResult> {
@@ -766,7 +766,7 @@ async function tryGetExistingProject(
  * either from the local cache or via API (when the org is accessible).
  * Returns null when no DSN is found or the org belongs to a different account.
  */
-async function detectExistingProject(cwd: string): Promise<{
+export async function detectExistingProject(cwd: string): Promise<{
   orgSlug: string;
   projectSlug: string;
 } | null> {
