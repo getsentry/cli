@@ -326,31 +326,38 @@ let _subcommandsByRoute: Map<string, Set<string>> | undefined;
  */
 function getSubcommandsForRoute(routeName: string): Set<string> {
   if (!_subcommandsByRoute) {
-    _subcommandsByRoute = new Map();
-
-    const { routes } = require("../app.js") as {
-      routes: {
-        getAllEntries: () => readonly {
-          name: { original: string };
-          target: unknown;
-        }[];
-      };
-    };
-
-    for (const entry of routes.getAllEntries()) {
-      const target = entry.target as unknown as Record<string, unknown>;
-      if (typeof target?.getAllEntries === "function") {
-        const children = (
-          target.getAllEntries as () => readonly {
+    try {
+      const { routes } = require("../app.js") as {
+        routes: {
+          getAllEntries: () => readonly {
             name: { original: string };
-          }[]
-        )();
-        const names = new Set<string>();
-        for (const child of children) {
-          names.add(child.name.original);
+            target: unknown;
+          }[];
+        };
+      };
+
+      const map = new Map<string, Set<string>>();
+      for (const entry of routes.getAllEntries()) {
+        const target = entry.target as unknown as Record<string, unknown>;
+        if (typeof target?.getAllEntries === "function") {
+          const children = (
+            target.getAllEntries as () => readonly {
+              name: { original: string };
+            }[]
+          )();
+          const names = new Set<string>();
+          for (const child of children) {
+            names.add(child.name.original);
+          }
+          map.set(entry.name.original, names);
         }
-        _subcommandsByRoute.set(entry.name.original, names);
       }
+      _subcommandsByRoute = map;
+    } catch {
+      // Route tree may fail to load if optional generated files (e.g.
+      // api-schema.json) are missing. Return empty set — subcommand
+      // interception is a UX nicety, not critical functionality.
+      return new Set();
     }
   }
 
