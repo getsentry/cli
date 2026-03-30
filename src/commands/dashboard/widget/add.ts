@@ -119,7 +119,8 @@ export const addCommand = buildCommand({
       dataset: {
         kind: "parsed",
         parse: String,
-        brief: "Widget dataset (default: spans)",
+        brief:
+          'Widget dataset (default: spans). Do NOT use "discover" or "transaction-like" — both are deprecated. Use "spans" with --where "is_transaction:true" to query transactions',
         optional: true,
       },
       query: {
@@ -138,20 +139,22 @@ export const addCommand = buildCommand({
       "group-by": {
         kind: "parsed",
         parse: String,
-        brief: "Group-by column (repeatable)",
+        brief: "Group-by column (repeatable). Requires --limit",
         variadic: true,
         optional: true,
       },
       sort: {
         kind: "parsed",
         parse: String,
-        brief: "Order by (prefix - for desc, e.g. -count)",
+        brief:
+          'Order by (prefix - for desc). Use --sort="-count" (with =) to avoid flag alias conflicts',
         optional: true,
       },
       limit: {
         kind: "parsed",
         parse: numberParser,
-        brief: "Result limit",
+        brief:
+          "Result limit. Required when using --group-by. Table widgets cap at 10 rows",
         optional: true,
       },
       x: {

@@ -138,7 +138,23 @@ Display types with default sizes:
 
 Use **common** types for general dashboards. Use **specialized** only when specifically requested. Avoid **internal** types unless the user explicitly asks.
 
-Available datasets: `spans` (default, covers most use cases), `discover`, `issue`, `error-events`, `transaction-like`, `metrics`, `logs`, `tracemetrics`, `preprod-app-size`.
+**Dataset selection:**
+
+Use the default `spans` dataset for most widgets — it covers spans, and transactions when filtered with `is_transaction:true`. Do NOT use `discover` or `transaction-like` — the Sentry Dashboard API rejects both as deprecated.
+
+| Dataset | Use for | Notes |
+|---|---|---|
+| `spans` (default) | Spans, transactions (with `is_transaction:true`) | Preferred for most widgets |
+| `issue` | Issue-based widgets (issue list, status counts) | Use `table` display |
+| `error-events` | Error events only | Replaces deprecated `discover` for errors |
+| `metrics` | Custom metrics | |
+| `logs` | Log-based widgets | |
+
+**Widget constraints:**
+
+- `--group-by` **requires** `--limit` — the API will reject the widget without it
+- Table widgets cap at **10 rows** max — `--limit` values above 10 are clamped
+- `--sort -count` — the leading `-` can be misinterpreted as a flag. Use `--sort="-count"` (with `=`) to avoid flag alias conflicts
 
 Run `sentry dashboard widget --help` for the full list including aggregate functions.
 
@@ -157,7 +173,15 @@ sentry dashboard widget add <dashboard> "Latency Over Time" --display line --que
 # Full-width table (6 = 6)
 sentry dashboard widget add <dashboard> "Top Endpoints" --display table \
   --query count --query p95:span.duration \
-  --group-by transaction --sort -count --limit 10
+  --group-by transaction --sort="-count" --limit 10
+
+# Line chart grouped by tag (--group-by requires --limit)
+sentry dashboard widget add <dashboard> "Errors by Browser" \
+  --display line --query count --group-by browser.name --limit 10
+
+# Querying transactions (not just spans) — add is_transaction:true
+sentry dashboard widget add <dashboard> "Transaction Count" \
+  --display big_number --query count --where "is_transaction:true"
 ```
 
 ### Common Mistakes
@@ -170,6 +194,9 @@ sentry dashboard widget add <dashboard> "Top Endpoints" --display table \
 - **Not using `--web`**: View commands support `-w`/`--web` to open the resource in the browser — useful for sharing links.
 - **Fetching API schemas instead of using the CLI**: Prefer `sentry schema` to browse the API and `sentry api` to make requests — the CLI handles authentication and endpoint resolution, so there's rarely a need to download OpenAPI specs separately.
 - **Using `sentry api` when CLI commands suffice**: `sentry issue list --json` already includes `shortId`, `title`, `priority`, `level`, `status`, `permalink`, and other fields at the top level. Some fields like `count`, `userCount`, `firstSeen`, and `lastSeen` may be null depending on the issue. Use `--fields` to select specific fields and `--help` to see all available fields. Only fall back to `sentry api` for data the CLI doesn't expose.
+- **Using deprecated dashboard datasets**: Do NOT use `--dataset discover` or `--dataset transaction-like` — the API rejects both. Use the default `spans` dataset. To query transactions, add `--where "is_transaction:true"`.
+- **Forgetting `--limit` with `--group-by`**: Dashboard widgets with `--group-by` require `--limit` — the API will reject the widget without it. Table widgets cap at 10 rows.
+- **`--sort` with leading dash**: `--sort -count` is misinterpreted as the `-c` flag alias. Use `--sort="-count"` (with `=`) instead.
 
 ## Prerequisites
 

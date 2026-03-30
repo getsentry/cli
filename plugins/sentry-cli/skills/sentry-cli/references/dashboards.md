@@ -76,12 +76,12 @@ Add a widget to a dashboard
 
 **Flags:**
 - `-d, --display <value> - Display type (big_number, line, area, bar, table, stacked_area, top_n, text, categorical_bar, details, wheel, rage_and_dead_clicks, server_tree, agents_traces_table)`
-- `--dataset <value> - Widget dataset (default: spans)`
+- `--dataset <value> - Widget dataset (default: spans). Do NOT use "discover" or "transaction-like" — both are deprecated. Use "spans" with --where "is_transaction:true" to query transactions`
 - `-q, --query <value>... - Aggregate expression (e.g. count, p95:span.duration)`
 - `-w, --where <value> - Search conditions filter (e.g. is:unresolved)`
-- `-g, --group-by <value>... - Group-by column (repeatable)`
-- `-s, --sort <value> - Order by (prefix - for desc, e.g. -count)`
-- `-n, --limit <value> - Result limit`
+- `-g, --group-by <value>... - Group-by column (repeatable). Requires --limit`
+- `-s, --sort <value> - Order by (prefix - for desc). Use --sort="-count" (with =) to avoid flag alias conflicts`
+- `-n, --limit <value> - Result limit. Required when using --group-by. Table widgets cap at 10 rows`
 - `--x <value> - Grid column position (0-based, 0–5)`
 - `--y <value> - Grid row position (0-based)`
 - `--width <value> - Widget width in grid columns (1–6)`
