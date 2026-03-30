@@ -55,6 +55,19 @@ Configure shell integration
 - `--no-agent-skills - Skip agent skill installation for AI coding assistants`
 - `--quiet - Suppress output (for scripted usage)`
 
+**Examples:**
+
+```bash
+# Run full setup (PATH, completions, agent skills)
+sentry cli setup
+
+# Skip agent skill installation
+sentry cli setup --no-agent-skills
+
+# Skip PATH and completion modifications
+sentry cli setup --no-modify-path --no-completions
+```
+
 ### `sentry cli upgrade <version>`
 
 Update the Sentry CLI to the latest version
