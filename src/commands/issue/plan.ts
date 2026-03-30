@@ -8,18 +8,16 @@
 import type { SentryContext } from "../../context.js";
 import { triggerSolutionPlanning } from "../../lib/api-client.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
-import { ApiError, ValidationError } from "../../lib/errors.js";
+import { ValidationError } from "../../lib/errors.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
-import {
-  formatSolution,
-  handleSeerApiError,
-} from "../../lib/formatters/seer.js";
+import { formatSolution } from "../../lib/formatters/seer.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
+import { recordSeerOutcome } from "../../lib/telemetry.js";
 import {
   type AutofixState,
   extractRootCauses,
@@ -29,6 +27,7 @@ import {
 } from "../../types/seer.js";
 import {
   ensureRootCauseAnalysis,
+  handleSeerCommandError,
   issueIdPositional,
   pollAutofixState,
   resolveOrgAndIssueId,
@@ -41,23 +40,6 @@ type PlanFlags = {
   readonly fresh: boolean;
   readonly fields?: string[];
 };
-
-/**
- * Validate that the autofix state has root causes identified.
- *
- * @param state - Current autofix state (already ensured to exist)
- * @returns Array of root causes
- * @throws {ValidationError} If no root causes found
- */
-function validateRootCauses(state: AutofixState): RootCause[] {
-  const causes = extractRootCauses(state);
-  if (causes.length === 0) {
-    throw new ValidationError(
-      "No root causes identified. Cannot create a plan without a root cause."
-    );
-  }
-  return causes;
-}
 
 /**
  * Validate and resolve the cause selection for solution planning.
@@ -195,8 +177,8 @@ export const planCommand = buildCommand({
     applyFreshFlag(flags);
     const { cwd } = this;
 
-    // Declare org outside try block so it's accessible in catch for error messages
     let resolvedOrg: string | undefined;
+    let recorded = false;
 
     try {
       // Resolve org and issue ID
@@ -214,8 +196,16 @@ export const planCommand = buildCommand({
         json: flags.json,
       });
 
-      // Validate we have root causes
-      const causes = validateRootCauses(state);
+      // Validate we have root causes — record no_solution before throwing
+      // so the dashboard tracks this as a missing-data case, not a generic error
+      const causes = extractRootCauses(state);
+      if (causes.length === 0) {
+        recorded = true;
+        recordSeerOutcome("no_solution");
+        throw new ValidationError(
+          "No root causes identified. Cannot create a plan without a root cause."
+        );
+      }
 
       // Validate cause selection
       const causeId = validateCauseSelection(causes, flags.cause, issueArg);
@@ -225,7 +215,10 @@ export const planCommand = buildCommand({
       if (!flags.force) {
         const existingSolution = extractSolution(state);
         if (existingSolution) {
-          return yield new CommandOutput(buildPlanData(state));
+          yield new CommandOutput(buildPlanData(state));
+          recorded = true;
+          recordSeerOutcome("success");
+          return;
         }
       }
 
@@ -240,7 +233,7 @@ export const planCommand = buildCommand({
 
       await triggerSolutionPlanning(org, numericId, state.run_id);
 
-      // Poll until PR is created
+      // Poll until plan is created
       const finalState = await pollAutofixState({
         orgSlug: org,
         issueId: numericId,
@@ -252,24 +245,28 @@ export const planCommand = buildCommand({
           `  Or retry: sentry issue plan ${issueArg}`,
       });
 
-      // Handle errors
+      // Handle terminal error states
       if (finalState.status === "ERROR") {
+        recorded = true;
+        recordSeerOutcome("error");
         throw new Error(
           "Plan creation failed. Check the Sentry web UI for details."
         );
       }
 
       if (finalState.status === "CANCELLED") {
+        recorded = true;
+        recordSeerOutcome("error");
         throw new Error("Plan creation was cancelled.");
       }
 
-      return yield new CommandOutput(buildPlanData(finalState));
+      const planData = buildPlanData(finalState);
+      yield new CommandOutput(planData);
+      recorded = true;
+      recordSeerOutcome(planData.solution ? "success" : "no_solution");
+      return;
     } catch (error) {
-      // Handle API errors with friendly messages
-      if (error instanceof ApiError) {
-        throw handleSeerApiError(error.status, error.detail, resolvedOrg);
-      }
-      throw error;
+      handleSeerCommandError(error, recorded, resolvedOrg);
     }
   },
 });
