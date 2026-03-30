@@ -486,6 +486,23 @@ const DEPRECATED_DATASET_HINTS: Record<string, string> = {
 };
 
 /**
+ * Reject deprecated or unknown dataset values with actionable hints.
+ * Extracted to keep validateWidgetEnums under the complexity limit.
+ */
+function rejectInvalidDataset(dataset: string): void {
+  const deprecationHint = DEPRECATED_DATASET_HINTS[dataset];
+  if (deprecationHint) {
+    throw new ValidationError(deprecationHint, "dataset");
+  }
+  if (!WIDGET_TYPES.includes(dataset as (typeof WIDGET_TYPES)[number])) {
+    throw new ValidationError(
+      `Invalid --dataset value "${dataset}".\nValid datasets: ${WIDGET_TYPES.join(", ")}`,
+      "dataset"
+    );
+  }
+}
+
+/**
  * Validate --display and --dataset flag values against known enums.
  *
  * Rejects deprecated datasets (`discover`, `transaction-like`) with
@@ -493,8 +510,15 @@ const DEPRECATED_DATASET_HINTS: Record<string, string> = {
  *
  * @param display - Display type flag value
  * @param dataset - Dataset flag value
+ * @param options.skipDeprecatedCheck - Skip the deprecated dataset check.
+ *   Used by `widget edit` when the dataset comes from the existing widget
+ *   rather than from explicit `--dataset` input.
  */
-export function validateWidgetEnums(display?: string, dataset?: string): void {
+export function validateWidgetEnums(
+  display?: string,
+  dataset?: string,
+  options?: { skipDeprecatedCheck?: boolean }
+): void {
   if (
     display &&
     !DISPLAY_TYPES.includes(display as (typeof DISPLAY_TYPES)[number])
@@ -504,18 +528,8 @@ export function validateWidgetEnums(display?: string, dataset?: string): void {
       "display"
     );
   }
-  if (dataset) {
-    // Check for deprecated datasets first — give a specific migration hint
-    const deprecationHint = DEPRECATED_DATASET_HINTS[dataset];
-    if (deprecationHint) {
-      throw new ValidationError(deprecationHint, "dataset");
-    }
-    if (!WIDGET_TYPES.includes(dataset as (typeof WIDGET_TYPES)[number])) {
-      throw new ValidationError(
-        `Invalid --dataset value "${dataset}".\nValid datasets: ${WIDGET_TYPES.join(", ")}`,
-        "dataset"
-      );
-    }
+  if (dataset && !options?.skipDeprecatedCheck) {
+    rejectInvalidDataset(dataset);
   }
   if (display && dataset) {
     // Untracked display types (text, wheel, rage_and_dead_clicks, agents_traces_table)

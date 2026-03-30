@@ -123,12 +123,16 @@ function buildReplacement(
   const effectiveDisplay = flags.display ?? existing.displayType;
   const effectiveDataset = flags.dataset ?? existing.widgetType;
 
-  // Re-validate after merging with existing values. validateWidgetEnums only
-  // checks the cross-constraint when both args are provided, so it misses
-  // e.g. `--dataset preprod-app-size` on a widget that's already `table`.
-  // validateWidgetEnums itself skips untracked display types (text, wheel, etc.).
+  // Validate user-provided --dataset against deprecated types.
+  // Only check flags.dataset (not effectiveDataset) so editing a widget with
+  // a deprecated widgetType (e.g., "discover") doesn't trigger the deprecation
+  // check when the user isn't changing datasets.
+  // Cross-validate display×dataset using effective values so that --display
+  // changes that conflict with the existing dataset are still caught.
   if (flags.display || flags.dataset) {
-    validateWidgetEnums(effectiveDisplay, effectiveDataset);
+    validateWidgetEnums(effectiveDisplay, effectiveDataset, {
+      skipDeprecatedCheck: !flags.dataset,
+    });
   }
 
   const raw: Record<string, unknown> = {
