@@ -44,6 +44,7 @@ import {
   resolveOrgSlug,
 } from "./local-ops.js";
 import type {
+  LocalOpResult,
   SuspendPayload,
   WizardOptions,
   WorkflowRunResult,
@@ -331,7 +332,17 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
 
   // Resolve org before spinner so no prompt appears while spinner is running.
   if (!options.org) {
-    const orgResult = await resolveOrgSlug(directory, yes);
+    let orgResult: string | LocalOpResult;
+    try {
+      orgResult = await resolveOrgSlug(directory, yes);
+    } catch (err) {
+      if (err instanceof WizardCancelledError) {
+        cancel("Setup cancelled.");
+        process.exitCode = 0;
+        return;
+      }
+      throw err;
+    }
     if (typeof orgResult !== "string") {
       log.error(orgResult.error ?? "Failed to resolve organization.");
       cancel("Setup failed.");

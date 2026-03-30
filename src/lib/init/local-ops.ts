@@ -19,6 +19,7 @@ import { ApiError } from "../errors.js";
 import { resolveOrCreateTeam } from "../resolve-team.js";
 import { buildProjectUrl } from "../sentry-urls.js";
 import { slugify } from "../utils.js";
+import { WizardCancelledError } from "./clack-utils.js";
 import {
   DEFAULT_COMMAND_TIMEOUT_MS,
   MAX_FILE_BYTES,
@@ -722,7 +723,7 @@ export async function resolveOrgSlug(
     })),
   });
   if (isCancel(selected)) {
-    return { ok: false, error: "Organization selection cancelled." };
+    throw new WizardCancelledError();
   }
   return selected;
 }
