@@ -17,6 +17,7 @@ import {
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
+import { classifySeerError, recordSeerOutcome } from "../../lib/telemetry.js";
 import { extractRootCauses } from "../../types/seer.js";
 import {
   ensureRootCauseAnalysis,
@@ -76,8 +77,8 @@ export const explainCommand = buildCommand({
     applyFreshFlag(flags);
     const { cwd } = this;
 
-    // Declare org outside try block so it's accessible in catch for error messages
     let resolvedOrg: string | undefined;
+    let recorded = false;
 
     try {
       // Resolve org and issue ID
@@ -99,6 +100,8 @@ export const explainCommand = buildCommand({
       // Extract root causes from steps
       const causes = extractRootCauses(state);
       if (causes.length === 0) {
+        recorded = true;
+        recordSeerOutcome("no_solution");
         throw new Error(
           "Analysis completed but no root causes found. " +
             "The issue may not have enough context for root cause analysis."
@@ -106,10 +109,23 @@ export const explainCommand = buildCommand({
       }
 
       yield new CommandOutput(causes);
+      recorded = true;
+      recordSeerOutcome("success");
       return { hint: `To create a plan, run: sentry issue plan ${issueArg}` };
     } catch (error) {
-      // Handle API errors with friendly messages
-      if (error instanceof ApiError) {
+      if (!recorded) {
+        // Handle API errors with friendly messages
+        if (error instanceof ApiError) {
+          const mapped = handleSeerApiError(
+            error.status,
+            error.detail,
+            resolvedOrg
+          );
+          recordSeerOutcome(classifySeerError(mapped));
+          throw mapped;
+        }
+        recordSeerOutcome(classifySeerError(error));
+      } else if (error instanceof ApiError) {
         throw handleSeerApiError(error.status, error.detail, resolvedOrg);
       }
       throw error;

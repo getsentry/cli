@@ -20,6 +20,7 @@ import {
   FRESH_FLAG,
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
+import { classifySeerError, recordSeerOutcome } from "../../lib/telemetry.js";
 import {
   type AutofixState,
   extractRootCauses,
@@ -142,6 +143,40 @@ function buildPlanData(state: AutofixState): PlanData {
   };
 }
 
+/**
+ * Handle errors in Seer commands with outcome recording.
+ *
+ * Records the Seer outcome if not already recorded, maps API errors to
+ * Seer-specific errors, and re-throws. Extracted from the catch block to
+ * keep command function complexity under the Biome limit.
+ *
+ * @param error - The caught error
+ * @param recorded - Whether outcome was already recorded before the error
+ * @param resolvedOrg - Org slug for Seer error messages
+ * @returns never — always throws
+ */
+function handleSeerCommandError(
+  error: unknown,
+  recorded: boolean,
+  resolvedOrg: string | undefined
+): never {
+  if (!recorded) {
+    if (error instanceof ApiError) {
+      const mapped = handleSeerApiError(
+        error.status,
+        error.detail,
+        resolvedOrg
+      );
+      recordSeerOutcome(classifySeerError(mapped));
+      throw mapped;
+    }
+    recordSeerOutcome(classifySeerError(error));
+  } else if (error instanceof ApiError) {
+    throw handleSeerApiError(error.status, error.detail, resolvedOrg);
+  }
+  throw error;
+}
+
 export const planCommand = buildCommand({
   docs: {
     brief: "Generate a solution plan using Seer AI",
@@ -195,8 +230,8 @@ export const planCommand = buildCommand({
     applyFreshFlag(flags);
     const { cwd } = this;
 
-    // Declare org outside try block so it's accessible in catch for error messages
     let resolvedOrg: string | undefined;
+    let recorded = false;
 
     try {
       // Resolve org and issue ID
@@ -225,7 +260,10 @@ export const planCommand = buildCommand({
       if (!flags.force) {
         const existingSolution = extractSolution(state);
         if (existingSolution) {
-          return yield new CommandOutput(buildPlanData(state));
+          yield new CommandOutput(buildPlanData(state));
+          recorded = true;
+          recordSeerOutcome("success");
+          return;
         }
       }
 
@@ -240,7 +278,7 @@ export const planCommand = buildCommand({
 
       await triggerSolutionPlanning(org, numericId, state.run_id);
 
-      // Poll until PR is created
+      // Poll until plan is created
       const finalState = await pollAutofixState({
         orgSlug: org,
         issueId: numericId,
@@ -252,24 +290,28 @@ export const planCommand = buildCommand({
           `  Or retry: sentry issue plan ${issueArg}`,
       });
 
-      // Handle errors
+      // Handle terminal error states
       if (finalState.status === "ERROR") {
+        recorded = true;
+        recordSeerOutcome("error");
         throw new Error(
           "Plan creation failed. Check the Sentry web UI for details."
         );
       }
 
       if (finalState.status === "CANCELLED") {
+        recorded = true;
+        recordSeerOutcome("error");
         throw new Error("Plan creation was cancelled.");
       }
 
-      return yield new CommandOutput(buildPlanData(finalState));
+      const planData = buildPlanData(finalState);
+      yield new CommandOutput(planData);
+      recorded = true;
+      recordSeerOutcome(planData.solution ? "success" : "no_solution");
+      return;
     } catch (error) {
-      // Handle API errors with friendly messages
-      if (error instanceof ApiError) {
-        throw handleSeerApiError(error.status, error.detail, resolvedOrg);
-      }
-      throw error;
+      handleSeerCommandError(error, recorded, resolvedOrg);
     }
   },
 });
