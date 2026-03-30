@@ -188,12 +188,17 @@ export type DashboardDetail = z.infer<typeof DashboardDetailSchema>;
  * Defaults widgetType to "spans" when not provided.
  *
  * Use DashboardWidgetSchema (permissive) for parsing server responses.
+ *
+ * Accepts ALL_WIDGET_TYPES (including deprecated) so that editing existing
+ * widgets with deprecated types (e.g., "discover") doesn't fail validation.
+ * CLI-level rejection of deprecated types for new widgets is handled by
+ * validateWidgetEnums() in resolve.ts.
  */
 export const DashboardWidgetInputSchema = z
   .object({
     title: z.string(),
     displayType: z.enum(DISPLAY_TYPES),
-    widgetType: z.enum(WIDGET_TYPES).default(DEFAULT_WIDGET_TYPE),
+    widgetType: z.enum(ALL_WIDGET_TYPES).default(DEFAULT_WIDGET_TYPE),
     interval: z.string().optional(),
     queries: z.array(DashboardWidgetQuerySchema).optional(),
     layout: DashboardWidgetLayoutSchema.optional(),
