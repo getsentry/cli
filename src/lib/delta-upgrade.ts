@@ -146,6 +146,8 @@ export type GitHubAsset = {
 export type GitHubRelease = {
   tag_name: string;
   assets: GitHubAsset[];
+  /** Markdown release notes body. May be empty or absent for pre-releases. */
+  body?: string;
 };
 
 /**
