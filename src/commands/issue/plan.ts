@@ -44,23 +44,6 @@ type PlanFlags = {
 };
 
 /**
- * Validate that the autofix state has root causes identified.
- *
- * @param state - Current autofix state (already ensured to exist)
- * @returns Array of root causes
- * @throws {ValidationError} If no root causes found
- */
-function validateRootCauses(state: AutofixState): RootCause[] {
-  const causes = extractRootCauses(state);
-  if (causes.length === 0) {
-    throw new ValidationError(
-      "No root causes identified. Cannot create a plan without a root cause."
-    );
-  }
-  return causes;
-}
-
-/**
  * Validate and resolve the cause selection for solution planning.
  *
  * @param causes - Array of available root causes
@@ -249,8 +232,16 @@ export const planCommand = buildCommand({
         json: flags.json,
       });
 
-      // Validate we have root causes
-      const causes = validateRootCauses(state);
+      // Validate we have root causes — record no_solution before throwing
+      // so the dashboard tracks this as a missing-data case, not a generic error
+      const causes = extractRootCauses(state);
+      if (causes.length === 0) {
+        recorded = true;
+        recordSeerOutcome("no_solution");
+        throw new ValidationError(
+          "No root causes identified. Cannot create a plan without a root cause."
+        );
+      }
 
       // Validate cause selection
       const causeId = validateCauseSelection(causes, flags.cause, issueArg);
