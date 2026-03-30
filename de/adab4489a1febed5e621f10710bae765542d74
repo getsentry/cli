@@ -1,0 +1,133 @@
+# Fix: MRI queries silently succeed but render as Internal Error
+
+**Issue:** https://github.com/getsentry/cli/issues/539
+
+## Problem
+
+When using `--dataset metrics` with MRI-style query syntax (e.g. `avg(g:custom/node.runtime.mem.rss@byte)`), the widget is created successfully but displays as "Internal Error" in the dashboard UI. The CLI accepts the input without error.
+
+**Root cause:** `parseAggregate` sees the `(` in `avg(g:custom/...)` and passes it through unchanged. `validateAggregateNames` then extracts `avg` which is a valid function name. The MRI argument (`g:custom/node.runtime.mem.rss@byte`) is never validated. The `metrics` dataset maps to `null` in `WIDGET_TYPE_TO_DATASET` (not queryable), but there's no check preventing this.
+
+## Research: Existing MRI Parser
+
+The canonical MRI parser lives in Python at `sentry/src/sentry/snuba/metrics/naming_layer/mri.py`. There is **no TypeScript/JavaScript parser** in the Sentry frontend — it works with separate `name`/`type`/`unit` fields instead.
+
+The Python parser is trivial — a single regex + dataclass:
+```python
+MRI_SCHEMA_REGEX = re.compile(r"^(?P<entity>[^:]+):(?P<namespace>[^/]+)/(?P<name>[^@]+)@(?P<unit>.+)$")
+
+@dataclass
+class ParsedMRI:
+    entity: str    # type: "c", "d", "g", "s", "e", or multi-char like "dist"
+    namespace: str # "sessions", "transactions", "spans", "custom"
+    name: str      # metric name
+    unit: str      # "none", "millisecond", "byte", etc.
+```
+
+Key design choice from the canonical parser: the regex is **permissive** — `entity` is `[^:]+` (accepts multi-char values like `"dist"`), not restricted to `[cdgse]`. Type-letter validation happens downstream in lookup tables, not in the parser.
+
+**Decision: Roll our own** — it's a 5-line port of the Python regex. No dependency needed.
+
+## Solution
+
+Add MRI syntax detection to `validateAggregateNames` in `src/types/dashboard.ts`. When detected, throw a `ValidationError` with guidance on the correct `--dataset tracemetrics` format.
+
+## Changes
+
+### 1. `src/types/dashboard.ts` — Add MRI detection and rejection
+
+Add these functions/constants after `extractFunctionName` (around line 479):
+
+#### `extractAggregateArg(aggregate: string): string`
+Extract the argument from a parsed aggregate: `"avg(g:custom/foo@b)"` → `"g:custom/foo@b"`
+
+#### `MRI_RE` (const, not exported)
+Port of the canonical Sentry MRI regex, using the same permissive `[^:]+` entity pattern:
+```typescript
+const MRI_RE = /^(?<entity>[^:]+):(?<namespace>[^/]+)\/(?<name>[^@]+)@(?<unit>.+)$/;
+```
+
+#### `ParsedMri` type (exported)
+```typescript
+export type ParsedMri = { entity: string; namespace: string; name: string; unit: string };
+```
+
+#### `parseMri(input: string): ParsedMri | null` (exported)
+Port of Sentry's `parse_mri`. Apply `MRI_RE`, return named groups or null.
+
+#### `MRI_ENTITY_TYPE_NAMES: Record<string, string>` (const)
+Maps known MRI entity codes to tracemetrics type names:
+```typescript
+{ c: "counter", d: "distribution", g: "gauge", s: "set", e: "extracted" }
+```
+Used for building the suggestion. Falls back to raw entity string for unknown codes.
+
+#### `rejectMriQueries(aggregates: string[], dataset?: string): void`
+Iterate aggregates, extract args via `extractAggregateArg`, run `parseMri()`. If MRI found:
+- Build a suggestion: `fn(value,<metric_name>,<type_name>,<unit>)` e.g. `avg(value,node.runtime.mem.rss,gauge,byte)`
+- Include dataset guidance: suggest `--dataset tracemetrics` if current dataset isn't already `tracemetrics`
+- Throw `ValidationError` with field `"query"`
+
+Error message format:
+```
+MRI query syntax is not supported for dashboard widgets: "avg(g:custom/node.runtime.mem.rss@byte)".
+
+Use the tracemetrics query format instead:
+  --query 'avg(value,node.runtime.mem.rss,gauge,byte)'
+Use --dataset tracemetrics instead of --dataset metrics.
+
+Tracemetrics format: fn(value,<metric_name>,<type>,<unit>)
+```
+
+#### Modify `validateAggregateNames`
+Add `rejectMriQueries(aggregates, dataset)` as the **first line** inside the function body, before the function-name validation loop. This catches MRI syntax early since it passes function-name validation (e.g. "avg" is valid).
+
+Update the JSDoc to mention MRI rejection.
+
+### 2. `test/types/dashboard.test.ts` — Add MRI validation tests
+
+Add a new `describe("parseMri", ...)` block and a new `describe("MRI query rejection", ...)` block:
+
+#### `parseMri` tests:
+- Parses standard MRI: `g:custom/node.runtime.mem.rss@byte` → `{ entity: "g", namespace: "custom", name: "node.runtime.mem.rss", unit: "byte" }`
+- Parses all single-letter types: c, d, g, s, e
+- Parses multi-char entity (matches canonical Python behavior): `dist:my_namespace/foo@none` → `{ entity: "dist", ... }`
+- Handles units with slashes: `d:transactions/measurements.disk_io@byte/second`
+- Returns null for non-MRI strings: `span.duration`, `count()`, `value,name,gauge,byte`
+- Returns null for partial MRI (missing unit): `g:custom/foo`
+- Returns null for empty string
+- Returns null for malformed separators: `d@transactions/foo`, `:transactions/foo@none`
+
+#### `validateAggregateNames` MRI rejection tests:
+- Throws ValidationError for `avg(g:custom/node.runtime.mem.rss@byte)` with `--dataset metrics`
+- Throws ValidationError for MRI with `--dataset spans` (default)
+- Error message contains tracemetrics format suggestion
+- Error message contains `--dataset tracemetrics` suggestion when dataset is `metrics`
+- Error message omits dataset switch suggestion when dataset is already `tracemetrics`
+- Does NOT throw for valid non-MRI queries: `avg(span.duration)`, `count()`, `p95(span.self_time)`
+- Does NOT throw for tracemetrics format: `avg(value,node.runtime.mem.rss,gauge,byte)`
+
+### 3. `test/commands/dashboard/widget/add.test.ts` — Integration test
+
+Add a test that the full `addCommand` flow rejects MRI queries:
+- Call `addCommand` with `--dataset metrics --query 'avg(g:custom/node.runtime.mem.rss@byte)'`
+- Assert `ValidationError` is thrown
+- Assert error message mentions `tracemetrics`
+
+### 4. No changes needed to:
+- `src/commands/dashboard/resolve.ts` — validation flows through `buildWidgetFromFlags` → `validateAggregateNames`
+- `src/commands/dashboard/widget/add.ts` — calls `validateWidgetEnums` then `buildWidgetFromFlags`
+- `src/commands/dashboard/widget/edit.ts` — same flow
+
+## Validation
+
+```bash
+bun test test/types/dashboard.test.ts
+bun test test/commands/dashboard/widget/add.test.ts
+bun run typecheck
+bun run lint
+```
+
+## Import additions
+
+In `test/types/dashboard.test.ts`, add `parseMri` and `validateAggregateNames` to imports from `../../src/types/dashboard.js`.
