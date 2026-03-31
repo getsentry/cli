@@ -37,7 +37,8 @@ import {
   numberParser as stricliNumberParser,
 } from "@stricli/core";
 import type { Writer } from "../types/index.js";
-import { CliError, OutputError } from "./errors.js";
+import { isAuthenticated } from "./db/auth.js";
+import { AuthError, CliError, OutputError } from "./errors.js";
 import { warning } from "./formatters/colors.js";
 import { parseFieldsList } from "./formatters/json.js";
 import {
@@ -150,6 +151,17 @@ type LocalCommandBuilderArguments<
    */
   // biome-ignore lint/suspicious/noExplicitAny: Variance erasure — OutputConfig<T>.human is contravariant in T, but the builder erases T because it doesn't know the output type. Using `any` allows commands to declare OutputConfig<SpecificType> while the wrapper handles it generically.
   readonly output?: OutputConfig<any>;
+  /**
+   * Whether the command requires authentication. Defaults to `true`.
+   *
+   * When `true` (the default), the command throws `AuthError("not_authenticated")`
+   * before executing if no valid token is found in the DB or env vars. The
+   * auto-auth middleware in `cli.ts` catches this and triggers the login flow.
+   *
+   * Set to `false` for commands that intentionally work without a token
+   * (e.g. `auth login`, `auth logout`, `auth status`, `help`, `cli upgrade`).
+   */
+  readonly auth?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -252,6 +264,9 @@ export function applyLoggingFlags(
  * 4. Captures flag values and positional arguments as Sentry telemetry context
  * 5. When `output` has an {@link OutputConfig}, injects `--json` and `--fields`
  *    flags, pre-parses `--fields`, and auto-renders the command's `{ data }` return
+ * 6. Enforces authentication by default — throws `AuthError("not_authenticated")`
+ *    before the command runs if no valid token exists. Opt out with `auth: false`
+ *    for commands that intentionally work without a token (e.g. `auth login`, `help`)
  *
  * When a command already defines its own `verbose` flag (e.g. the `api` command
  * uses `--verbose` for HTTP request/response output), the injected `VERBOSE_FLAG`
@@ -324,6 +339,7 @@ export function buildCommand<
 ): Command<CONTEXT> {
   const originalFunc = builderArgs.func;
   const outputConfig = builderArgs.output;
+  const requiresAuth = builderArgs.auth !== false;
 
   // Merge logging flags into the command's flag definitions.
   // Quoted keys produce kebab-case CLI flags: "log-level" → --log-level
@@ -553,6 +569,10 @@ export function buildCommand<
       }
       throw err;
     };
+
+    if (requiresAuth && !isAuthenticated()) {
+      throw new AuthError("not_authenticated");
+    }
 
     // Iterate the generator using manual .next() instead of for-await-of
     // so we can capture the return value (done: true result). The return

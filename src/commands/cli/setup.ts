@@ -428,6 +428,7 @@ async function runConfigurationSteps(opts: ConfigStepOptions) {
 }
 
 export const setupCommand = buildCommand({
+  auth: false,
   docs: {
     brief: "Configure shell integration",
     fullDescription:

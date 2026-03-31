@@ -643,6 +643,7 @@ async function buildCheckResultWithChangelog(opts: {
 }
 
 export const upgradeCommand = buildCommand({
+  auth: false,
   docs: {
     brief: "Update the Sentry CLI to the latest version",
     fullDescription:
