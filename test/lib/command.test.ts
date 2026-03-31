@@ -76,6 +76,7 @@ describe("buildCommand", () => {
   test("builds a valid command object", () => {
     const command = buildCommand({
       docs: { brief: "Test command" },
+      auth: false,
       parameters: {
         flags: {
           verbose: { kind: "boolean", brief: "Verbose", default: false },
@@ -91,6 +92,7 @@ describe("buildCommand", () => {
   test("handles commands with empty parameters", () => {
     const command = buildCommand({
       docs: { brief: "Simple command" },
+      auth: false,
       parameters: {},
       async *func() {
         // no-op
@@ -128,6 +130,7 @@ describe("buildCommand telemetry integration", () => {
       TestContext
     >({
       docs: { brief: "Test" },
+      auth: false,
       parameters: {
         flags: {
           verbose: { kind: "boolean", brief: "Verbose", default: false },
@@ -168,6 +171,7 @@ describe("buildCommand telemetry integration", () => {
   test("skips false boolean flags in telemetry", async () => {
     const command = buildCommand<{ json: boolean }, [], TestContext>({
       docs: { brief: "Test" },
+      auth: false,
       parameters: {
         flags: {
           json: { kind: "boolean", brief: "JSON output", default: false },
@@ -199,6 +203,7 @@ describe("buildCommand telemetry integration", () => {
 
     const command = buildCommand<Record<string, never>, [string], TestContext>({
       docs: { brief: "Test" },
+      auth: false,
       parameters: {
         positional: {
           kind: "tuple",
@@ -236,6 +241,7 @@ describe("buildCommand telemetry integration", () => {
 
     const command = buildCommand<Record<string, never>, [], TestContext>({
       docs: { brief: "Test" },
+      auth: false,
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
       async *func(this: TestContext) {
@@ -261,6 +267,7 @@ describe("buildCommand telemetry integration", () => {
 
     const command = buildCommand<{ delay: number }, [], TestContext>({
       docs: { brief: "Test" },
+      auth: false,
       parameters: {
         flags: {
           delay: {
@@ -371,6 +378,7 @@ describe("buildCommand", () => {
   test("builds a valid command object", () => {
     const command = buildCommand({
       docs: { brief: "Test command" },
+      auth: false,
       parameters: {
         flags: {
           json: { kind: "boolean", brief: "JSON output", default: false },
@@ -388,6 +396,7 @@ describe("buildCommand", () => {
 
     const command = buildCommand<{ json: boolean }, [], TestContext>({
       docs: { brief: "Test" },
+      auth: false,
       parameters: {
         flags: {
           json: { kind: "boolean", brief: "JSON output", default: false },
@@ -499,6 +508,7 @@ describe("buildCommand", () => {
 
     const command = buildCommand<{ limit: number }, [], TestContext>({
       docs: { brief: "Test" },
+      auth: false,
       parameters: {
         flags: {
           limit: {
@@ -547,6 +557,7 @@ describe("buildCommand", () => {
         TestContext
       >({
         docs: { brief: "Test" },
+        auth: false,
         parameters: {
           flags: {
             verbose: {
@@ -603,6 +614,7 @@ describe("buildCommand", () => {
     try {
       const command = buildCommand<{ verbose: boolean }, [], TestContext>({
         docs: { brief: "Test" },
+        auth: false,
         parameters: {
           flags: {
             verbose: {
@@ -674,6 +686,7 @@ describe("buildCommand output config", () => {
       TestContext
     >({
       docs: { brief: "Test" },
+      auth: false,
       output: { human: () => "unused" },
       parameters: {
         flags: {
@@ -717,6 +730,7 @@ describe("buildCommand output config", () => {
       TestContext
     >({
       docs: { brief: "Test" },
+      auth: false,
       output: { human: () => "unused" },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
@@ -756,6 +770,7 @@ describe("buildCommand output config", () => {
       TestContext
     >({
       docs: { brief: "Test" },
+      auth: false,
       output: { human: () => "unused" },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
@@ -794,6 +809,7 @@ describe("buildCommand output config", () => {
       TestContext
     >({
       docs: { brief: "Test" },
+      auth: false,
       output: { human: () => "unused" },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
@@ -858,6 +874,7 @@ describe("buildCommand output config", () => {
       TestContext
     >({
       docs: { brief: "Test" },
+      auth: false,
       output: { human: () => "unused" },
       parameters: {
         flags: {
@@ -901,6 +918,7 @@ describe("buildCommand output config", () => {
       TestContext
     >({
       docs: { brief: "Test" },
+      auth: false,
       output: { human: () => "unused" },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
@@ -942,6 +960,7 @@ describe("buildCommand output config", () => {
       TestContext
     >({
       docs: { brief: "Test" },
+      auth: false,
       output: { human: () => "unused" },
       parameters: {
         flags: {
@@ -996,6 +1015,7 @@ describe("buildCommand return-based output", () => {
       TestContext
     >({
       docs: { brief: "Test" },
+      auth: false,
       output: {
         human: (d: { name: string; role: string }) => `${d.name} (${d.role})`,
       },
@@ -1024,6 +1044,7 @@ describe("buildCommand return-based output", () => {
       TestContext
     >({
       docs: { brief: "Test" },
+      auth: false,
       output: {
         human: (d: { name: string; role: string }) => `${d.name} (${d.role})`,
       },
@@ -1053,6 +1074,7 @@ describe("buildCommand return-based output", () => {
       TestContext
     >({
       docs: { brief: "Test" },
+      auth: false,
       output: {
         human: (d: { id: number; name: string; role: string }) => `${d.name}`,
       },
@@ -1084,6 +1106,7 @@ describe("buildCommand return-based output", () => {
     const makeCommand = () =>
       buildCommand<{ json: boolean; fields?: string[] }, [], TestContext>({
         docs: { brief: "Test" },
+        auth: false,
         output: {
           human: (d: { value: number }) => `Value: ${d.value}`,
         },
@@ -1131,6 +1154,7 @@ describe("buildCommand return-based output", () => {
       TestContext
     >({
       docs: { brief: "Test" },
+      auth: false,
       output: {
         human: () => "unused",
       },
@@ -1188,6 +1212,7 @@ describe("buildCommand return-based output", () => {
       TestContext
     >({
       docs: { brief: "Test" },
+      auth: false,
       output: {
         human: (d: { name: string }) => `Hello, ${d.name}!`,
       },
@@ -1218,6 +1243,7 @@ describe("buildCommand return-based output", () => {
       TestContext
     >({
       docs: { brief: "Test" },
+      auth: false,
       output: {
         human: (d: Array<{ id: number }>) => d.map(((x) => x.id).join(", ")),
       },
@@ -1247,6 +1273,7 @@ describe("buildCommand return-based output", () => {
     const makeCommand = () =>
       buildCommand<{ json: boolean; fields?: string[] }, [], TestContext>({
         docs: { brief: "Test" },
+        auth: false,
         output: {
           human: (d: { org: string }) => `Org: ${d.org}`,
         },
@@ -1285,6 +1312,7 @@ describe("buildCommand return-based output", () => {
       TestContext
     >({
       docs: { brief: "Test" },
+      auth: false,
       output: {
         human: (d: { error: string }) => `Error: ${d.error}`,
       },
@@ -1333,6 +1361,7 @@ describe("buildCommand return-based output", () => {
       TestContext
     >({
       docs: { brief: "Test" },
+      auth: false,
       output: {
         human: (d: { error: string }) => `Error: ${d.error}`,
       },

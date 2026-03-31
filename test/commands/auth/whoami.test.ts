@@ -84,6 +84,26 @@ describe("whoamiCommand.func", () => {
   });
 
   describe("unauthenticated", () => {
+    let getAuthConfigSpy: ReturnType<typeof spyOn>;
+    let savedAuthToken: string | undefined;
+
+    beforeEach(() => {
+      // Clear env token and mock getAuthConfig so buildCommand's auth guard
+      // sees no credentials — this tests the unauthenticated path end-to-end.
+      savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
+      delete process.env.SENTRY_AUTH_TOKEN;
+      getAuthConfigSpy = spyOn(dbAuth, "getAuthConfig").mockReturnValue(
+        undefined
+      );
+    });
+
+    afterEach(() => {
+      getAuthConfigSpy.mockRestore();
+      if (savedAuthToken !== undefined) {
+        process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
+      }
+    });
+
     test("throws AuthError(not_authenticated) when no token stored", async () => {
       isAuthenticatedSpy.mockReturnValue(false);
 

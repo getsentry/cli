@@ -121,6 +121,22 @@ function setupWorkflowSpy() {
   return { mockWorkflow };
 }
 
+// ── Auth env override ───────────────────────────────────────────────────────
+// Clear the preload SENTRY_AUTH_TOKEN so runWizard's internal isAuthenticated
+// check uses the mocked getAuthToken. Without this, the env token passes auth
+// and runWizard tries to resolve orgs via real API calls, whose retry timers
+// keep the event loop alive and prevent the process from exiting.
+let savedAuthToken: string | undefined;
+beforeEach(() => {
+  savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
+  delete process.env.SENTRY_AUTH_TOKEN;
+});
+afterEach(() => {
+  if (savedAuthToken !== undefined) {
+    process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
+  }
+});
+
 // ── Setup / Teardown ────────────────────────────────────────────────────────
 
 beforeEach(() => {
@@ -149,8 +165,14 @@ beforeEach(() => {
   // git spy — default: pass all checks
   checkGitStatusSpy = spyOn(git, "checkGitStatus").mockResolvedValue(true);
 
-  // dep spies
+  // dep spies — mock the full auth surface so runWizard sees valid auth
+  // without hitting real APIs (env token is cleared above).
   getAuthTokenSpy = spyOn(auth, "getAuthToken").mockReturnValue("fake-token");
+  spyOn(auth, "getAuthConfig").mockReturnValue({
+    token: "fake-token",
+    source: "oauth" as const,
+  });
+  spyOn(auth, "isAuthenticated").mockReturnValue(true);
   formatBannerSpy = spyOn(banner, "formatBanner").mockReturnValue("BANNER");
   formatResultSpy = spyOn(fmt, "formatResult").mockImplementation(noop);
   formatErrorSpy = spyOn(fmt, "formatError").mockImplementation(noop);

@@ -275,7 +275,7 @@ const LIBRARY_EXCLUDED_INTEGRATIONS = new Set([
   ...EXCLUDED_INTEGRATIONS,
   "OnUncaughtException", // process.on('uncaughtException')
   "OnUnhandledRejection", // process.on('unhandledRejection')
-  "ProcessSession", // process.on('beforeExit')
+  "ProcessSession", // process.on('beforeExit') — anonymous handler, no cleanup
   "Http", // diagnostics_channel + trace headers
   "NodeFetch", // diagnostics_channel + trace headers
   "FunctionToString", // wraps Function.prototype.toString
@@ -355,13 +355,11 @@ export function initSentry(
   const libraryMode = options?.libraryMode ?? false;
   const environment = getEnv().NODE_ENV ?? "development";
 
-  // Close the previous client before re-initializing. LightNodeClient registers
-  // process.on('beforeExit', ...) listeners for client-report and log flushing
-  // via startClientReportTracking() and enableLogs. These are only removed by
-  // calling client.close(). Without this, re-initializing (e.g. initSentry(false)
-  // in test afterEach) accumulates stale listeners that keep the event loop alive
-  // after all tests complete, preventing the bun process from exiting.
-  // close(0) removes the listeners synchronously; we don't need to await the flush.
+  // Close the previous client to clean up its internal timers and beforeExit
+  // handlers (client report flusher interval, log flush listener). Without
+  // this, re-initializing the SDK (e.g., in tests) leaks setInterval handles
+  // that keep the event loop alive and prevent the process from exiting.
+  // close(0) removes listeners synchronously; we don't need to await the flush.
   Sentry.getClient()?.close(0);
 
   const client = Sentry.init({
@@ -383,10 +381,12 @@ export function initSentry(
     },
     environment,
     // Enable Sentry structured logs for non-exception telemetry (e.g., unexpected input warnings).
-    // Disabled in library mode — logs use timers/beforeExit that pollute the host process.
-    enableLogs: !libraryMode,
-    // Disable client reports in library mode — they use timers/beforeExit.
-    ...(libraryMode && { sendClientReports: false }),
+    // Disabled when telemetry is off or in library mode — the SDK registers
+    // beforeExit handlers for log flushing that keep the event loop alive.
+    enableLogs: enabled && !libraryMode,
+    // Disable client reports when telemetry is off or in library mode — the SDK
+    // registers a setInterval + beforeExit handler that keep the event loop alive.
+    ...((libraryMode || !enabled) && { sendClientReports: false }),
     // Sample all events for CLI telemetry (low volume)
     tracesSampleRate: 1,
     sampleRate: 1,
@@ -414,12 +414,7 @@ export function initSentry(
     },
   });
 
-  // Always remove the previous handler on re-init. The removal must happen
-  // unconditionally — not only when enabled=true — so that calling
-  // initSentry(false) to disable telemetry (e.g. in test afterEach) actually
-  // cleans up the handler registered by a prior initSentry(true) call.
-  // Without this, the stale handler keeps the event loop alive after all tests
-  // finish, preventing the process from exiting.
+  // Always remove our own previous handler on re-init.
   if (currentBeforeExitHandler) {
     process.removeListener("beforeExit", currentBeforeExitHandler);
     currentBeforeExitHandler = null;
