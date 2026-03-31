@@ -312,12 +312,15 @@ describe("getCachedDetection", () => {
     const before = await getCachedDetection(testProjectDir);
     expect(before).toBeDefined();
 
-    // Wait a moment and modify the source file
-    await Bun.sleep(10);
+    // Modify the source file and explicitly bump its mtime to guarantee a change
+    // (don't rely on sleep — mtime resolution on Linux CI can be coarser than the delay)
+    const { utimes } = await import("node:fs/promises");
     writeFileSync(
       join(testProjectDir, "src/app.ts"),
       'const DSN = "https://changed@o123.ingest.sentry.io/789";'
     );
+    const futureSrcMtime = new Date(sourceMtimes["src/app.ts"] + 5000);
+    await utimes(join(testProjectDir, "src/app.ts"), futureSrcMtime, futureSrcMtime);
 
     // Cache should be invalidated
     const after = await getCachedDetection(testProjectDir);
@@ -373,9 +376,11 @@ describe("getCachedDetection", () => {
     const before = await getCachedDetection(testProjectDir);
     expect(before).toBeDefined();
 
-    // Wait and add a new file to change directory mtime
-    await Bun.sleep(10);
+    // Add a new file and explicitly bump dir mtime to guarantee a change
+    const { utimes } = await import("node:fs/promises");
     writeFileSync(join(testProjectDir, "new-file.txt"), "test");
+    const futureRootMtime = new Date(rootDirMtime + 5000);
+    await utimes(testProjectDir, futureRootMtime, futureRootMtime);
 
     // Cache should be invalidated
     const after = await getCachedDetection(testProjectDir);
@@ -407,12 +412,14 @@ describe("getCachedDetection", () => {
     const before = await getCachedDetection(testProjectDir);
     expect(before).toBeDefined();
 
-    // Wait and add a new file to src/ to change its mtime
-    await Bun.sleep(10);
+    // Add a new file to src/ and explicitly bump its mtime to guarantee a change
+    const { utimes } = await import("node:fs/promises");
     writeFileSync(
       join(testProjectDir, "src/new-config.ts"),
       "export default {}"
     );
+    const futureSrcDirMtime = new Date(srcDirMtime + 5000);
+    await utimes(join(testProjectDir, "src"), futureSrcDirMtime, futureSrcDirMtime);
 
     // Cache should be invalidated because src/ mtime changed
     const after = await getCachedDetection(testProjectDir);
