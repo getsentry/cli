@@ -96,7 +96,11 @@ async function bundleJs(): Promise<boolean> {
       "process.env.NODE_ENV": JSON.stringify("production"),
     },
     sourcemap: "external",
-    minify: true,
+    // Identifier minification causes name collisions in the `marked` library's
+    // token walker — renderInline gets the same minified name as an unrelated
+    // object, crashing `auth status` and other markdown-rendering paths.
+    // Whitespace + syntax minification still reduces size significantly.
+    minify: { whitespace: true, syntax: true, identifiers: false },
     target: "bun",
   });
 
