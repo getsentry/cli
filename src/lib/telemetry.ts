@@ -355,6 +355,22 @@ export function initSentry(
   const libraryMode = options?.libraryMode ?? false;
   const environment = getEnv().NODE_ENV ?? "development";
 
+  // Close the previous client to clean up its internal timers and beforeExit
+  // handlers (client report flusher interval, log flush listener). Without
+  // this, re-initializing the SDK (e.g., in tests) leaks setInterval handles
+  // that keep the event loop alive and prevent the process from exiting.
+  const previousClient = Sentry.getClient();
+  if (previousClient) {
+    previousClient.close(0);
+  }
+
+  // Snapshot beforeExit listeners so we can detect any new ones added by
+  // Sentry.init() — particularly the anonymous handler from the
+  // ProcessSession integration, which registers via setupOnce and has no
+  // cleanup mechanism. We remove SDK-added listeners after init and manage
+  // our own beforeExit handler explicitly (see below).
+  const listenersBefore = new Set(process.rawListeners("beforeExit"));
+
   const client = Sentry.init({
     dsn: SENTRY_CLI_DSN,
     enabled,
@@ -405,12 +421,23 @@ export function initSentry(
     },
   });
 
-  // Always remove the previous handler on re-init. The removal must happen
-  // unconditionally — not only when enabled=true — so that calling
-  // initSentry(false) to disable telemetry (e.g. in test afterEach) actually
-  // cleans up the handler registered by a prior initSentry(true) call.
-  // Without this, the stale handler keeps the event loop alive after all tests
-  // finish, preventing the process from exiting.
+  // Remove all beforeExit listeners added by Sentry.init(). This covers:
+  //  - ProcessSession integration (anonymous handler, setupOnce, no cleanup)
+  //  - Client report flusher (_clientReportOnExitFlushListener)
+  //  - Log flusher (_logOnExitFlushListener)
+  // We manage our own beforeExit handler explicitly below and don't need
+  // the SDK's handlers — they keep the event loop alive in tests and on
+  // re-initialization (e.g., auto-auth retry).
+  for (const listener of process.rawListeners("beforeExit")) {
+    if (!listenersBefore.has(listener)) {
+      process.removeListener(
+        "beforeExit",
+        listener as (...args: unknown[]) => void
+      );
+    }
+  }
+
+  // Always remove our own previous handler on re-init.
   if (currentBeforeExitHandler) {
     process.removeListener("beforeExit", currentBeforeExitHandler);
     currentBeforeExitHandler = null;
