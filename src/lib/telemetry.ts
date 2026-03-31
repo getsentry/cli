@@ -355,6 +355,15 @@ export function initSentry(
   const libraryMode = options?.libraryMode ?? false;
   const environment = getEnv().NODE_ENV ?? "development";
 
+  // Close the previous client before re-initializing. LightNodeClient registers
+  // process.on('beforeExit', ...) listeners for client-report and log flushing
+  // via startClientReportTracking() and enableLogs. These are only removed by
+  // calling client.close(). Without this, re-initializing (e.g. initSentry(false)
+  // in test afterEach) accumulates stale listeners that keep the event loop alive
+  // after all tests complete, preventing the bun process from exiting.
+  // close(0) removes the listeners synchronously; we don't need to await the flush.
+  Sentry.getClient()?.close(0);
+
   const client = Sentry.init({
     dsn: SENTRY_CLI_DSN,
     enabled,
