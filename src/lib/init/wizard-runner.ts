@@ -358,8 +358,8 @@ async function resolvePreSpinnerOptions(
   // Bare slug case: user ran `sentry init my-app` (project set, org not originally
   // provided). Org was just resolved above. Check if this named project already
   // exists in the resolved org and prompt the user — must happen before the spinner.
-  if (opts.project && !options.org && opts.org) {
-    const slug = slugify(opts.project);
+  if (options.project && !options.org && opts.org) {
+    const slug = slugify(options.project);
     const resolvedOrg = opts.org;
     if (slug) {
       try {
