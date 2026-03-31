@@ -341,7 +341,10 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
         process.exitCode = 0;
         return;
       }
-      throw err;
+      log.error(errorMessage(err));
+      cancel("Setup failed.");
+      process.exitCode = 1;
+      return;
     }
     if (typeof orgResult !== "string") {
       log.error(orgResult.error ?? "Failed to resolve organization.");
