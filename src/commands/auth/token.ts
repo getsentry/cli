@@ -8,6 +8,7 @@
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { getAuthToken } from "../../lib/db/auth.js";
+import { AuthError } from "../../lib/errors.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 
 export const tokenCommand = buildCommand({
@@ -22,7 +23,10 @@ export const tokenCommand = buildCommand({
   output: { human: (token: string) => token },
   // biome-ignore lint/suspicious/useAwait: sync body but async generator required by buildCommand
   async *func(this: SentryContext) {
-    // biome-ignore lint/style/noNonNullAssertion: auth guard in buildCommand ensures token exists
-    return yield new CommandOutput(getAuthToken()!);
+    const token = getAuthToken();
+    if (!token) {
+      throw new AuthError("not_authenticated");
+    }
+    return yield new CommandOutput(token);
   },
 });
