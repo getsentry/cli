@@ -30,6 +30,8 @@ import {
 import { listCommand } from "../../../src/commands/log/list.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as dbAuth from "../../../src/lib/db/auth.js";
 import {
   AuthError,
   ContextError,
@@ -45,8 +47,6 @@ import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import * as traceTarget from "../../../src/lib/trace-target.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as versionCheck from "../../../src/lib/version-check.js";
-// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
-import * as dbAuth from "../../../src/lib/db/auth.js";
 import type { SentryLog, TraceLog } from "../../../src/types/sentry.js";
 
 // ============================================================================
