@@ -405,6 +405,17 @@ export function initSentry(
     },
   });
 
+  // Always remove the previous handler on re-init. The removal must happen
+  // unconditionally — not only when enabled=true — so that calling
+  // initSentry(false) to disable telemetry (e.g. in test afterEach) actually
+  // cleans up the handler registered by a prior initSentry(true) call.
+  // Without this, the stale handler keeps the event loop alive after all tests
+  // finish, preventing the process from exiting.
+  if (currentBeforeExitHandler) {
+    process.removeListener("beforeExit", currentBeforeExitHandler);
+    currentBeforeExitHandler = null;
+  }
+
   if (client?.getOptions().enabled) {
     const isBun = typeof process.versions.bun !== "undefined";
     const runtime = isBun ? "bun" : "node";
@@ -442,13 +453,7 @@ export function initSentry(
     // Skipped in library mode — the host owns the process lifecycle.
     // The library entry point calls client.flush() manually after completion.
     //
-    // Replace previous handler on re-init (e.g., auto-login retry calls
-    // withTelemetry → initSentry twice) to avoid duplicate handlers with
-    // independent re-entry guards and stale client references.
     if (!libraryMode) {
-      if (currentBeforeExitHandler) {
-        process.removeListener("beforeExit", currentBeforeExitHandler);
-      }
       currentBeforeExitHandler = createBeforeExitHandler(client);
       process.on("beforeExit", currentBeforeExitHandler);
     }
