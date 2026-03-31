@@ -7,13 +7,22 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { cancel, confirm, intro, log, spinner } from "@clack/prompts";
+import {
+  cancel,
+  confirm,
+  intro,
+  isCancel,
+  log,
+  select,
+  spinner,
+} from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 import { captureException, getTraceData } from "@sentry/node-core/light";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
 import { terminalLink } from "../formatters/colors.js";
+import { slugify } from "../utils.js";
 import {
   abortIfCancelled,
   STEP_LABELS,
@@ -29,8 +38,15 @@ import {
 import { formatError, formatResult } from "./formatters.js";
 import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
-import { handleLocalOp, precomputeDirListing } from "./local-ops.js";
+import {
+  detectExistingProject,
+  handleLocalOp,
+  precomputeDirListing,
+  resolveOrgSlug,
+  tryGetExistingProject,
+} from "./local-ops.js";
 import type {
+  LocalOpResult,
   SuspendPayload,
   WizardOptions,
   WorkflowRunResult,
@@ -258,8 +274,138 @@ async function preamble(
   return true;
 }
 
-export async function runWizard(options: WizardOptions): Promise<void> {
-  const { directory, yes, dryRun, features } = options;
+/**
+ * Resolve org and detect an existing Sentry project before the spinner starts.
+ *
+ * Clack requires all interactive prompts to complete before any spinner/task
+ * begins — the spinner's setInterval writes output below an active prompt if
+ * interleaved. This function surfaces all interactive decisions upfront.
+ *
+ * @returns Updated options with org and project resolved, or `null` to abort.
+ *          When `null` is returned, `process.exitCode` is already set.
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard pre-flight branches are inherently nested
+async function resolvePreSpinnerOptions(
+  options: WizardOptions
+): Promise<WizardOptions | null> {
+  const { directory, yes } = options;
+  let opts = options;
+
+  if (!(opts.org || opts.project)) {
+    let existing: Awaited<ReturnType<typeof detectExistingProject>> = null;
+    try {
+      existing = await detectExistingProject(directory);
+    } catch {
+      // Filesystem error (e.g. permission denied) — treat as no existing project
+    }
+    if (existing) {
+      if (yes) {
+        opts = {
+          ...opts,
+          org: existing.orgSlug,
+          project: existing.projectSlug,
+        };
+      } else {
+        const choice = await select({
+          message: "Found an existing Sentry project in this codebase.",
+          options: [
+            {
+              value: "existing" as const,
+              label: `Use existing project (${existing.orgSlug}/${existing.projectSlug})`,
+              hint: "Sentry is already configured here",
+            },
+            {
+              value: "create" as const,
+              label: "Create a new Sentry project",
+            },
+          ],
+        });
+        if (isCancel(choice)) {
+          cancel("Setup cancelled.");
+          process.exitCode = 0;
+          return null;
+        }
+        if (choice === "existing") {
+          opts = {
+            ...opts,
+            org: existing.orgSlug,
+            project: existing.projectSlug,
+          };
+        }
+      }
+    }
+  }
+
+  if (!opts.org) {
+    let orgResult: string | LocalOpResult;
+    try {
+      orgResult = await resolveOrgSlug(directory, yes);
+    } catch (err) {
+      if (err instanceof WizardCancelledError) {
+        cancel("Setup cancelled.");
+        process.exitCode = 0;
+        return null;
+      }
+      log.error(errorMessage(err));
+      cancel("Setup failed.");
+      process.exitCode = 1;
+      return null;
+    }
+    if (typeof orgResult !== "string") {
+      log.error(orgResult.error ?? "Failed to resolve organization.");
+      cancel("Setup failed.");
+      process.exitCode = 1;
+      return null;
+    }
+    opts = { ...opts, org: orgResult };
+  }
+
+  // Bare slug case: user ran `sentry init my-app` (project set, org not originally
+  // provided). Org was just resolved above. Check if this named project already
+  // exists in the resolved org and prompt the user — must happen before the spinner.
+  if (options.project && !options.org && opts.org) {
+    const slug = slugify(options.project);
+    const resolvedOrg = opts.org;
+    if (slug) {
+      try {
+        const existing = await tryGetExistingProject(resolvedOrg, slug);
+        if (existing && !yes) {
+          const choice = await select({
+            message: `Found existing project '${slug}' in ${resolvedOrg}.`,
+            options: [
+              {
+                value: "existing" as const,
+                label: `Use existing (${resolvedOrg}/${slug})`,
+                hint: "Already configured",
+              },
+              {
+                value: "create" as const,
+                label: "Create a new project",
+                hint: "Wizard will detect the project name from your codebase",
+              },
+            ],
+          });
+          if (isCancel(choice)) {
+            cancel("Setup cancelled.");
+            process.exitCode = 0;
+            return null;
+          }
+          if (choice === "create") {
+            // Clear project so the wizard auto-detects the name from the codebase
+            opts = { ...opts, project: undefined };
+          }
+        }
+      } catch {
+        // API error checking for existing project — proceed and let createSentryProject handle it
+      }
+    }
+  }
+
+  return opts;
+}
+
+export async function runWizard(initialOptions: WizardOptions): Promise<void> {
+  const { directory, yes, dryRun, features } = initialOptions;
 
   if (!(await preamble(directory, yes, dryRun))) {
     return;
@@ -269,6 +415,11 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     "This wizard uses AI to analyze your project and configure Sentry." +
       `\nFor manual setup: ${terminalLink(SENTRY_DOCS_URL)}`
   );
+
+  const options = await resolvePreSpinnerOptions(initialOptions);
+  if (!options) {
+    return;
+  }
 
   const tracingOptions = {
     traceId: randomBytes(16).toString("hex"),
