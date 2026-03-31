@@ -292,7 +292,12 @@ async function resolvePreSpinnerOptions(
   let opts = options;
 
   if (!(opts.org || opts.project)) {
-    const existing = await detectExistingProject(directory);
+    let existing: Awaited<ReturnType<typeof detectExistingProject>> = null;
+    try {
+      existing = await detectExistingProject(directory);
+    } catch {
+      // Filesystem error (e.g. permission denied) — treat as no existing project
+    }
     if (existing) {
       if (yes) {
         opts = {
