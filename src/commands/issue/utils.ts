@@ -29,10 +29,7 @@ import {
   ResolutionError,
   withAuthGuard,
 } from "../../lib/errors.js";
-import {
-  getProgressMessage,
-  handleSeerApiError,
-} from "../../lib/formatters/seer.js";
+import { getProgressMessage } from "../../lib/formatters/seer.js";
 import { expandToFullShortId, isShortSuffix } from "../../lib/issue-id.js";
 import { logger } from "../../lib/logger.js";
 import { poll } from "../../lib/polling.js";
@@ -44,11 +41,7 @@ import {
 } from "../../lib/resolve-target.js";
 import { parseSentryUrl } from "../../lib/sentry-url-parser.js";
 import { buildIssueUrl } from "../../lib/sentry-urls.js";
-import {
-  classifySeerError,
-  recordSeerOutcome,
-  setOrgProjectContext,
-} from "../../lib/telemetry.js";
+import { setOrgProjectContext } from "../../lib/telemetry.js";
 import { isAllDigits } from "../../lib/utils.js";
 import type { SentryIssue } from "../../types/index.js";
 import { type AutofixState, isTerminalStatus } from "../../types/seer.js";
@@ -813,38 +806,4 @@ export async function pollAutofixState(
     timeoutHint: hint,
     initialMessage: "Waiting for analysis to start...",
   });
-}
-
-/**
- * Handle errors in Seer commands with outcome recording.
- *
- * Records the Seer outcome if not already recorded, maps API errors to
- * Seer-specific errors, and re-throws. Shared between explain and plan
- * commands to keep outcome classification consistent.
- *
- * @param error - The caught error
- * @param recorded - Whether outcome was already recorded before the error
- * @param resolvedOrg - Org slug for Seer error messages
- * @returns never — always throws
- */
-export function handleSeerCommandError(
-  error: unknown,
-  recorded: boolean,
-  resolvedOrg: string | undefined
-): never {
-  if (!recorded) {
-    if (error instanceof ApiError) {
-      const mapped = handleSeerApiError(
-        error.status,
-        error.detail,
-        resolvedOrg
-      );
-      recordSeerOutcome(classifySeerError(mapped));
-      throw mapped;
-    }
-    recordSeerOutcome(classifySeerError(error));
-  } else if (error instanceof ApiError) {
-    throw handleSeerApiError(error.status, error.detail, resolvedOrg);
-  }
-  throw error;
 }

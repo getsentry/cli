@@ -1,0 +1,97 @@
+name: Eval SKILL.md (Fork PRs)
+
+on:
+  pull_request_target:
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+  statuses: write
+  pull-requests: write
+
+jobs:
+  remove-labels-on-sync:
+    name: Reset eval labels
+    if: github.event.action == 'synchronize'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove eval labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR=${{ github.event.number }}
+          REPO=${{ github.repository }}
+          gh api "repos/$REPO/issues/$PR/labels/eval-skill" -X DELETE 2>/dev/null || true
+          gh api "repos/$REPO/issues/$PR/labels/eval-skill-passed" -X DELETE 2>/dev/null || true
+
+  eval:
+    name: Run skill eval
+    if: >-
+      github.event.action == 'labeled'
+      && github.event.label.name == 'eval-skill'
+      && github.event.pull_request.head.repo.fork == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/cache@v5
+        id: cache
+        with:
+          path: node_modules
+          key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Eval SKILL.md
+        id: eval
+        run: bun run eval:skill
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        continue-on-error: true
+
+      - name: Post commit status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA="${{ github.event.pull_request.head.sha }}"
+          if [[ "${{ steps.eval.outcome }}" == "success" ]]; then
+            STATE="success"
+            DESC="Skill eval passed"
+          else
+            STATE="failure"
+            DESC="Skill eval failed"
+          fi
+          gh api "repos/${{ github.repository }}/statuses/$SHA" \
+            -f state="$STATE" \
+            -f context="eval-skill/fork" \
+            -f description="$DESC"
+
+      - name: Remove eval-skill label
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/issues/${{ github.event.number }}/labels/eval-skill" \
+            -X DELETE 2>/dev/null || true
+
+      # Use the SENTRY_RELEASE_BOT app token to add the label — app tokens
+      # can trigger workflow runs, unlike GITHUB_TOKEN (recursion protection).
+      - name: Get app token
+        id: token
+        if: steps.eval.outcome == 'success'
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.SENTRY_RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.SENTRY_RELEASE_BOT_PRIVATE_KEY }}
+
+      - name: Add eval-skill-passed label (triggers main CI re-run)
+        if: steps.eval.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/issues/${{ github.event.number }}/labels" \
+            --input - <<< '{"labels":["eval-skill-passed"]}'

@@ -76,12 +76,12 @@ Add a widget to a dashboard
 
 **Flags:**
 - `-d, --display <value> - Display type (big_number, line, area, bar, table, stacked_area, top_n, text, categorical_bar, details, wheel, rage_and_dead_clicks, server_tree, agents_traces_table)`
-- `--dataset <value> - Widget dataset: issue, metrics, error-events, spans, logs, tracemetrics, preprod-app-size (default: spans)`
+- `--dataset <value> - Widget dataset (default: spans)`
 - `-q, --query <value>... - Aggregate expression (e.g. count, p95:span.duration)`
 - `-w, --where <value> - Search conditions filter (e.g. is:unresolved)`
-- `-g, --group-by <value>... - Group-by column (repeatable). Requires --limit`
-- `-s, --sort <value> - Order by (prefix - for desc). Use --sort="-count" (with =) to avoid flag alias conflicts`
-- `-n, --limit <value> - Result limit. Required when using --group-by. Table widgets cap at 10 rows`
+- `-g, --group-by <value>... - Group-by column (repeatable)`
+- `-s, --sort <value> - Order by (prefix - for desc, e.g. -count)`
+- `-n, --limit <value> - Result limit`
 - `--x <value> - Grid column position (0-based, 0–5)`
 - `--y <value> - Grid row position (0-based)`
 - `--width <value> - Widget width in grid columns (1–6)`
@@ -121,7 +121,7 @@ Edit a widget in a dashboard
 - `-t, --title <value> - Widget title to match`
 - `--new-title <value> - New widget title`
 - `-d, --display <value> - Display type (big_number, line, area, bar, table, stacked_area, top_n, text, categorical_bar, details, wheel, rage_and_dead_clicks, server_tree, agents_traces_table)`
-- `--dataset <value> - Widget dataset: issue, metrics, error-events, spans, logs, tracemetrics, preprod-app-size (default: spans)`
+- `--dataset <value> - Widget dataset (default: spans)`
 - `-q, --query <value>... - Aggregate expression (e.g. count, p95:span.duration)`
 - `-w, --where <value> - Search conditions filter (e.g. is:unresolved)`
 - `-g, --group-by <value>... - Group-by column (repeatable)`

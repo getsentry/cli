@@ -24,7 +24,6 @@ import {
   prepareWidgetQueries,
   validateAggregateNames,
   validateWidgetLayout,
-  WIDGET_TYPES,
   type WidgetLayoutFlags,
 } from "../../../types/dashboard.js";
 import {
@@ -123,16 +122,12 @@ function buildReplacement(
   const effectiveDisplay = flags.display ?? existing.displayType;
   const effectiveDataset = flags.dataset ?? existing.widgetType;
 
-  // Validate user-provided --dataset against deprecated types.
-  // Only check flags.dataset (not effectiveDataset) so editing a widget with
-  // a deprecated widgetType (e.g., "discover") doesn't trigger the deprecation
-  // check when the user isn't changing datasets.
-  // Cross-validate display×dataset using effective values so that --display
-  // changes that conflict with the existing dataset are still caught.
+  // Re-validate after merging with existing values. validateWidgetEnums only
+  // checks the cross-constraint when both args are provided, so it misses
+  // e.g. `--dataset preprod-app-size` on a widget that's already `table`.
+  // validateWidgetEnums itself skips untracked display types (text, wheel, etc.).
   if (flags.display || flags.dataset) {
-    validateWidgetEnums(effectiveDisplay, effectiveDataset, {
-      skipDeprecatedCheck: !flags.dataset,
-    });
+    validateWidgetEnums(effectiveDisplay, effectiveDataset);
   }
 
   const raw: Record<string, unknown> = {
@@ -212,7 +207,7 @@ export const editCommand = buildCommand({
       dataset: {
         kind: "parsed",
         parse: String,
-        brief: `Widget dataset: ${WIDGET_TYPES.join(", ")} (default: spans)`,
+        brief: "Widget dataset (default: spans)",
         optional: true,
       },
       query: {

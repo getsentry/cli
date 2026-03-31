@@ -19,43 +19,23 @@ import { logger } from "../lib/logger.js";
 // ---------------------------------------------------------------------------
 
 /**
- * Widget types (dataset selectors) the API still accepts for creation.
+ * Valid widget types (dataset selectors).
  *
  * Source: sentry/src/sentry/models/dashboard_widget.py DashboardWidgetTypes.TYPES
  */
 export const WIDGET_TYPES = [
+  "discover",
   "issue",
   "metrics",
   "error-events",
+  "transaction-like",
   "spans",
   "logs",
   "tracemetrics",
   "preprod-app-size",
 ] as const;
 
-/**
- * Deprecated widget types rejected by the Sentry Dashboard API.
- *
- * - `discover` → use `error-events` for errors or `spans` for everything else
- * - `transaction-like` → use `spans` with `is_transaction:true` filter
- */
-export const DEPRECATED_WIDGET_TYPES = [
-  "discover",
-  "transaction-like",
-] as const;
-
-export type DeprecatedWidgetType = (typeof DEPRECATED_WIDGET_TYPES)[number];
-
-/**
- * All widget types including deprecated — used for parsing server responses
- * where existing dashboards may still reference old types.
- */
-export const ALL_WIDGET_TYPES = [
-  ...WIDGET_TYPES,
-  ...DEPRECATED_WIDGET_TYPES,
-] as const;
-
-export type WidgetType = (typeof ALL_WIDGET_TYPES)[number];
+export type WidgetType = (typeof WIDGET_TYPES)[number];
 
 /** Default widgetType — the modern spans dataset covers most use cases */
 export const DEFAULT_WIDGET_TYPE: WidgetType = "spans";
@@ -188,17 +168,12 @@ export type DashboardDetail = z.infer<typeof DashboardDetailSchema>;
  * Defaults widgetType to "spans" when not provided.
  *
  * Use DashboardWidgetSchema (permissive) for parsing server responses.
- *
- * Accepts ALL_WIDGET_TYPES (including deprecated) so that editing existing
- * widgets with deprecated types (e.g., "discover") doesn't fail validation.
- * CLI-level rejection of deprecated types for new widgets is handled by
- * validateWidgetEnums() in resolve.ts.
  */
 export const DashboardWidgetInputSchema = z
   .object({
     title: z.string(),
     displayType: z.enum(DISPLAY_TYPES),
-    widgetType: z.enum(ALL_WIDGET_TYPES).default(DEFAULT_WIDGET_TYPE),
+    widgetType: z.enum(WIDGET_TYPES).default(DEFAULT_WIDGET_TYPE),
     interval: z.string().optional(),
     queries: z.array(DashboardWidgetQuerySchema).optional(),
     layout: DashboardWidgetLayoutSchema.optional(),
@@ -504,125 +479,7 @@ function extractFunctionName(aggregate: string): string {
 }
 
 /**
- * Extract the argument from a parsed aggregate string.
- *   "count()"              → ""
- *   "p95(span.duration)"   → "span.duration"
- *   "avg(g:custom/foo@b)"  → "g:custom/foo@b"
- */
-function extractAggregateArg(aggregate: string): string {
-  const openIdx = aggregate.indexOf("(");
-  const closeIdx = aggregate.lastIndexOf(")");
-  if (openIdx < 0 || closeIdx <= openIdx) {
-    return "";
-  }
-  return aggregate.slice(openIdx + 1, closeIdx);
-}
-
-// ---------------------------------------------------------------------------
-// MRI (Metric Resource Identifier) detection
-//
-// Port of Sentry's canonical Python parser:
-//   sentry/src/sentry/snuba/metrics/naming_layer/mri.py
-//
-// MRI format: <entity>:<namespace>/<name>@<unit>
-//   entity: "c" (counter), "d" (distribution), "g" (gauge), "s" (set),
-//           "e" (extracted), or multi-char like "dist"
-//   namespace: "sessions", "transactions", "spans", "custom", etc.
-//   name: metric name, e.g. "duration", "measurements.fcp"
-//   unit: "none", "millisecond", "byte", "byte/second", etc.
-// ---------------------------------------------------------------------------
-
-/**
- * Regex matching the MRI schema format.
- *
- * Uses the same permissive `[^:]+` entity pattern as the canonical Python parser
- * so it catches multi-char entity codes like "dist" in addition to the standard
- * single-letter codes (c, d, g, s, e).
- */
-const MRI_RE =
-  /^(?<entity>[^:]+):(?<namespace>[^/]+)\/(?<name>[^@]+)@(?<unit>.+)$/;
-
-/** Parsed components of an MRI string */
-export type ParsedMri = {
-  /** Entity type code (e.g. "c", "d", "g", "s", "e", or "dist") */
-  entity: string;
-  /** Metric namespace (e.g. "custom", "sessions", "transactions") */
-  namespace: string;
-  /** Metric name (e.g. "duration", "node.runtime.mem.rss") */
-  name: string;
-  /** Metric unit (e.g. "byte", "millisecond", "none") */
-  unit: string;
-};
-
-/**
- * Parse an MRI (Metric Resource Identifier) string into its components.
- *
- * Port of Sentry's `parse_mri` from `sentry/snuba/metrics/naming_layer/mri.py`.
- *
- * @returns Parsed MRI components, or null if the input doesn't match MRI format
- */
-export function parseMri(input: string): ParsedMri | null {
-  const match = MRI_RE.exec(input);
-  if (!match?.groups) {
-    return null;
-  }
-  const { entity, namespace, name, unit } = match.groups;
-  if (!(entity && namespace && name && unit)) {
-    return null;
-  }
-  return { entity, namespace, name, unit };
-}
-
-/** Maps known MRI entity codes to human-readable tracemetrics type names */
-const MRI_ENTITY_TYPE_NAMES: Record<string, string> = {
-  c: "counter",
-  d: "distribution",
-  g: "gauge",
-  s: "set",
-  e: "extracted",
-};
-
-/**
- * Check aggregates for MRI syntax and throw a ValidationError with guidance
- * on using `--dataset tracemetrics` with the correct query format.
- *
- * MRI queries like `avg(g:custom/node.runtime.mem.rss@byte)` pass function-name
- * validation (since "avg" is valid) but produce widgets that render as
- * "Internal Error" in the Sentry dashboard UI.
- *
- * @param aggregates - Parsed aggregate strings to check
- * @param dataset - Current dataset flag value (for context in error message)
- */
-function rejectMriQueries(aggregates: string[], dataset?: string): void {
-  for (const agg of aggregates) {
-    const arg = extractAggregateArg(agg);
-    const mri = parseMri(arg);
-    if (!mri) {
-      continue;
-    }
-
-    const fn = extractFunctionName(agg);
-    const typeName = MRI_ENTITY_TYPE_NAMES[mri.entity] ?? mri.entity;
-    const suggestion = `${fn}(value,${mri.name},${typeName},${mri.unit})`;
-    const datasetNote =
-      dataset === "tracemetrics"
-        ? ""
-        : `\nUse --dataset tracemetrics instead of --dataset ${dataset ?? "spans"}.`;
-
-    throw new ValidationError(
-      `MRI query syntax is not supported for dashboard widgets: "${agg}".\n\n` +
-        "Use the tracemetrics query format instead:\n" +
-        `  --query '${suggestion}'${datasetNote}\n\n` +
-        "Tracemetrics format: fn(value,<metric_name>,<type>,<unit>)",
-      "query"
-    );
-  }
-}
-
-/**
  * Validate that all aggregate function names in a list are known.
- * Also rejects MRI (Metric Resource Identifier) syntax with guidance
- * on the correct tracemetrics query format.
  * Throws a ValidationError listing valid functions if any are invalid.
  *
  * @param aggregates - Parsed aggregate strings (e.g. ["count()", "p95(span.duration)"])
@@ -632,10 +489,6 @@ export function validateAggregateNames(
   aggregates: string[],
   dataset?: string
 ): void {
-  // Detect MRI syntax early — it passes function-name validation (e.g. "avg" is valid)
-  // but produces widgets that render as "Internal Error" in the dashboard UI.
-  rejectMriQueries(aggregates, dataset);
-
   const validFunctions: readonly string[] =
     dataset === "discover" || dataset === "error-events"
       ? DISCOVER_AGGREGATE_FUNCTIONS

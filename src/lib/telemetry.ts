@@ -19,7 +19,7 @@ import {
 } from "./constants.js";
 import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
 import { getEnv } from "./env.js";
-import { ApiError, AuthError, CliError, TimeoutError } from "./errors.js";
+import { ApiError, AuthError } from "./errors.js";
 import { attachSentryReporter } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 import { getRealUsername } from "./utils.js";
@@ -1109,77 +1109,4 @@ export function withCacheSpan<T>(
       }
     }
   );
-}
-
-// Seer Command Telemetry
-
-/**
- * Possible outcomes for Seer AI commands.
- *
- * Set as the `seer.outcome` tag on the `cli.command` span so Discover
- * can slice Seer command executions by result category.
- */
-export type SeerOutcome =
-  | "success"
-  | "timeout"
-  | "no_budget"
-  | "not_enabled"
-  | "ai_disabled"
-  | "no_solution"
-  | "api_error"
-  | "error";
-
-/**
- * Record the outcome of a Seer AI command as a span tag.
- *
- * Sets `seer.outcome` on the current scope so it lands on the
- * `cli.command` transaction span. Since tracesSampleRate is 1,
- * every execution is captured — no separate metrics needed.
- *
- * Call exactly once per command execution.
- *
- * @param outcome - What happened (success, timeout, no_budget, etc.)
- */
-export function recordSeerOutcome(outcome: SeerOutcome): void {
-  Sentry.setTag("seer.outcome", outcome);
-}
-
-/**
- * Classify an error into a SeerOutcome.
- *
- * Maps known error types to their corresponding outcome values:
- * - SeerError → matches `.reason` (no_budget, not_enabled, ai_disabled)
- * - TimeoutError → "timeout"
- * - ApiError → "api_error"
- * - Everything else → "error"
- *
- * @param error - The caught error
- * @returns The corresponding SeerOutcome
- */
-export function classifySeerError(error: unknown): SeerOutcome {
-  // SeerError extends CliError and has .reason: SeerErrorReason
-  if (
-    error instanceof CliError &&
-    "reason" in error &&
-    typeof error.reason === "string"
-  ) {
-    const reason = error.reason as string;
-    if (
-      reason === "no_budget" ||
-      reason === "not_enabled" ||
-      reason === "ai_disabled"
-    ) {
-      return reason;
-    }
-  }
-
-  if (error instanceof TimeoutError) {
-    return "timeout";
-  }
-
-  if (error instanceof ApiError) {
-    return "api_error";
-  }
-
-  return "error";
 }

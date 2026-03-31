@@ -18,6 +18,7 @@ coverage-isolated
 
 # test artifacts
 *.junit.xml
+test/skill-eval/results.json
 
 # logs
 logs

@@ -5,33 +5,12 @@
  * Used by commands that need to wait for async operations to complete.
  */
 
-import { AsyncLocalStorage } from "node:async_hooks";
 import { TimeoutError } from "./errors.js";
 import { isPlainOutput } from "./formatters/plain-detect.js";
 import {
   formatProgressLine,
   truncateProgressMessage,
 } from "./formatters/seer.js";
-
-/**
- * Async-propagated progress context.
- *
- * Stores the active spinner's `setMessage` callback so any function in the
- * async call chain can update the spinner text without explicit parameter
- * threading — the same pattern Sentry SDK / OpenTelemetry use for span
- * propagation. When no spinner is active, `getStore()` returns `undefined`
- * and {@link setProgressMessage} becomes a no-op.
- */
-const progressStorage = new AsyncLocalStorage<(msg: string) => void>();
-
-/**
- * Update the active spinner message from anywhere in the async call chain.
- * No-op when no spinner is active (JSON mode, non-TTY, or outside
- * {@link withProgress}).
- */
-export function setProgressMessage(msg: string): void {
-  progressStorage.getStore()?.(msg);
-}
 
 /** Default polling interval in milliseconds */
 const DEFAULT_POLL_INTERVAL_MS = 1000;
@@ -230,9 +209,7 @@ export async function withProgress<T>(
   const spinner = startSpinner(options.message);
 
   try {
-    return await progressStorage.run(spinner.setMessage, () =>
-      fn(spinner.setMessage)
-    );
+    return await fn(spinner.setMessage);
   } finally {
     spinner.stop();
     process.stdout.write("\r\x1b[K");

@@ -88,6 +88,7 @@
     "generate:skill": "bun run script/generate-skill.ts",
     "generate:schema": "bun run script/generate-api-schema.ts",
     "generate:command-docs": "bun run script/generate-command-docs.ts",
+    "eval:skill": "bun run script/eval-skill.ts",
     "check:skill": "bun run script/check-skill.ts",
     "check:command-docs": "bun run script/check-command-docs.ts",
     "check:deps": "bun run script/check-no-deps.ts",

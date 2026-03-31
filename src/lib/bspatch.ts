@@ -38,12 +38,6 @@ import { join } from "node:path";
 /** TRDIFF10 header magic bytes */
 const TRDIFF10_MAGIC = "TRDIFF10";
 
-/** Yield to the event loop every ~40ms so the spinner stays responsive (25fps, under the 50ms spinner interval) */
-const FRAME_BUDGET_MS = 40;
-
-/** Only call performance.now() every 4096 bytes to amortize the cost */
-const YIELD_CHECK_INTERVAL = 4096;
-
 /** Header size in bytes (magic + 3 × i64) */
 const HEADER_SIZE = 32;
 
@@ -283,41 +277,6 @@ async function loadOldBinary(oldPath: string): Promise<OldFileHandle> {
   }
 }
 
-/** Arguments for {@link addDiffBytesWithYield} */
-type DiffYieldArgs = {
-  output: Uint8Array;
-  oldFile: Uint8Array;
-  diffChunk: Uint8Array;
-  oldpos: number;
-  lastYield: number;
-};
-
-/**
- * Add diff bytes to old file bytes with wrapping unsigned addition, yielding
- * to the event loop periodically so the spinner stays responsive.
- *
- * Checks `performance.now()` every {@link YIELD_CHECK_INTERVAL} bytes and
- * yields when the elapsed time exceeds {@link FRAME_BUDGET_MS}. Returns the
- * updated `lastYield` timestamp for the caller to carry across calls.
- */
-async function addDiffBytesWithYield(args: DiffYieldArgs): Promise<number> {
-  const { output, oldFile, diffChunk, oldpos } = args;
-  let yieldTs = args.lastYield;
-
-  for (let i = 0; i < output.length; i++) {
-    output[i] = ((oldFile[oldpos + i] ?? 0) + (diffChunk[i] ?? 0)) % 256;
-
-    if (i > 0 && i % YIELD_CHECK_INTERVAL === 0) {
-      const now = performance.now();
-      if (now - yieldTs >= FRAME_BUDGET_MS) {
-        await Bun.sleep(0);
-        yieldTs = performance.now();
-      }
-    }
-  }
-  return yieldTs;
-}
-
 /**
  * Apply a TRDIFF10 binary patch with streaming I/O for minimal memory usage.
  *
@@ -366,7 +325,6 @@ export async function applyPatch(
 
   let oldpos = 0;
   let newpos = 0;
-  let lastYield = performance.now();
 
   try {
     // Process control entries: each is 3 × i64 = 24 bytes
@@ -384,13 +342,11 @@ export async function applyPatch(
         const diffChunk = await diffReader.read(readDiffBy);
         const outputChunk = new Uint8Array(readDiffBy);
 
-        lastYield = await addDiffBytesWithYield({
-          output: outputChunk,
-          oldFile,
-          diffChunk,
-          oldpos,
-          lastYield,
-        });
+        for (let i = 0; i < readDiffBy; i++) {
+          // Wrapping unsigned byte addition, matching zig-bsdiff's @addWithOverflow
+          outputChunk[i] =
+            ((oldFile[oldpos + i] ?? 0) + (diffChunk[i] ?? 0)) % 256;
+        }
 
         writer.write(outputChunk);
         hasher.update(outputChunk);
