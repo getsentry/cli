@@ -48,6 +48,9 @@ function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
     directory: "/tmp/test",
     yes: true,
     dryRun: false,
+    // Provide org to skip resolveOrgSlug which makes API calls to listOrganizations.
+    // The wizard tests focus on workflow logic, not org resolution.
+    org: "test-org",
     ...overrides,
   };
 }

@@ -856,7 +856,14 @@ describe("listCommand.func — flag validation", () => {
 
   test("allows --sort newest with --follow", async () => {
     // Should not throw ValidationError — the error (if any) comes from
-    // downstream resolution, not flag validation.
+    // downstream resolution, not flag validation. Mock resolution to reject
+    // with a non-ValidationError so we can verify flag validation passed.
+    const resolveOrgProjectSpy = spyOn(
+      resolveTarget,
+      "resolveOrgProjectFromArg"
+    ).mockRejectedValueOnce(
+      new ContextError("Organization", "sentry log list")
+    );
     const { context } = createMockContext();
     const func = await listCommand.loader();
     await expect(
@@ -866,6 +873,7 @@ describe("listCommand.func — flag validation", () => {
         "my-org/my-project"
       )
     ).rejects.not.toThrow(ValidationError);
+    resolveOrgProjectSpy.mockRestore();
   });
 });
 
