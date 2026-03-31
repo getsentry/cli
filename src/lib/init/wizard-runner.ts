@@ -375,7 +375,8 @@ async function resolvePreSpinnerOptions(
               },
               {
                 value: "create" as const,
-                label: "Create a new project with this name",
+                label: "Create a new project",
+                hint: "Wizard will detect the project name from your codebase",
               },
             ],
           });
