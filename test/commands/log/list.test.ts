@@ -30,6 +30,8 @@ import {
 import { listCommand } from "../../../src/commands/log/list.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as dbAuth from "../../../src/lib/db/auth.js";
 import {
   AuthError,
   ContextError,
@@ -236,6 +238,23 @@ const newerLogs: SentryLog[] = [
     trace: "aaaa1111bbbb2222cccc3333dddd4444",
   },
 ];
+
+// ============================================================================
+// Auth setup — mock getAuthConfig for all tests (auth guard added in #611)
+// ============================================================================
+
+let getAuthConfigSpy: ReturnType<typeof spyOn>;
+
+beforeEach(() => {
+  getAuthConfigSpy = spyOn(dbAuth, "getAuthConfig").mockReturnValue({
+    token: "sntrys_test",
+    source: "oauth" as const,
+  });
+});
+
+afterEach(() => {
+  getAuthConfigSpy.mockRestore();
+});
 
 // ============================================================================
 // Standard mode (project-scoped, no trace-id positional)
@@ -837,7 +856,14 @@ describe("listCommand.func — flag validation", () => {
 
   test("allows --sort newest with --follow", async () => {
     // Should not throw ValidationError — the error (if any) comes from
-    // downstream resolution, not flag validation.
+    // downstream resolution, not flag validation. Mock resolution to reject
+    // with a non-ValidationError so we can verify flag validation passed.
+    const resolveOrgProjectSpy = spyOn(
+      resolveTarget,
+      "resolveOrgProjectFromArg"
+    ).mockRejectedValueOnce(
+      new ContextError("Organization", "sentry log list")
+    );
     const { context } = createMockContext();
     const func = await listCommand.loader();
     await expect(
@@ -847,6 +873,7 @@ describe("listCommand.func — flag validation", () => {
         "my-org/my-project"
       )
     ).rejects.not.toThrow(ValidationError);
+    resolveOrgProjectSpy.mockRestore();
   });
 });
 

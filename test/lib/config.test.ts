@@ -4,7 +4,7 @@
  * Integration tests for SQLite-based config storage.
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -46,6 +46,17 @@ import { useTestConfigDir } from "../helpers.js";
  * the env var in afterEach (never deleting it).
  */
 const getConfigDir = useTestConfigDir("test-config-");
+
+let savedAuthToken: string | undefined;
+beforeEach(() => {
+  savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
+  delete process.env.SENTRY_AUTH_TOKEN;
+});
+afterEach(() => {
+  if (savedAuthToken !== undefined) {
+    process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
+  }
+});
 
 describe("auth token management", () => {
   test("setAuthToken stores token", async () => {

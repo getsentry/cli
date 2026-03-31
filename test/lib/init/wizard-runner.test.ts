@@ -48,6 +48,7 @@ function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
     directory: "/tmp/test",
     yes: true,
     dryRun: false,
+    org: "test-org",
     ...overrides,
   };
 }
@@ -69,6 +70,8 @@ let checkGitStatusSpy: ReturnType<typeof spyOn>;
 
 // deps
 let getAuthTokenSpy: ReturnType<typeof spyOn>;
+let getAuthConfigSpy: ReturnType<typeof spyOn>;
+let isAuthenticatedSpy: ReturnType<typeof spyOn>;
 let formatBannerSpy: ReturnType<typeof spyOn>;
 let formatResultSpy: ReturnType<typeof spyOn>;
 let formatErrorSpy: ReturnType<typeof spyOn>;
@@ -123,6 +126,17 @@ function setupWorkflowSpy() {
 
 // ── Setup / Teardown ────────────────────────────────────────────────────────
 
+let savedAuthToken: string | undefined;
+beforeEach(() => {
+  savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
+  delete process.env.SENTRY_AUTH_TOKEN;
+});
+afterEach(() => {
+  if (savedAuthToken !== undefined) {
+    process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
+  }
+});
+
 beforeEach(() => {
   mockStartResult = { status: "success" };
   mockResumeResults = [];
@@ -151,6 +165,11 @@ beforeEach(() => {
 
   // dep spies
   getAuthTokenSpy = spyOn(auth, "getAuthToken").mockReturnValue("fake-token");
+  getAuthConfigSpy = spyOn(auth, "getAuthConfig").mockReturnValue({
+    token: "fake-token",
+    source: "oauth" as const,
+  });
+  isAuthenticatedSpy = spyOn(auth, "isAuthenticated").mockReturnValue(true);
   formatBannerSpy = spyOn(banner, "formatBanner").mockReturnValue("BANNER");
   formatResultSpy = spyOn(fmt, "formatResult").mockImplementation(noop);
   formatErrorSpy = spyOn(fmt, "formatError").mockImplementation(noop);
@@ -186,6 +205,8 @@ afterEach(() => {
 
   checkGitStatusSpy.mockRestore();
   getAuthTokenSpy.mockRestore();
+  getAuthConfigSpy.mockRestore();
+  isAuthenticatedSpy.mockRestore();
   formatBannerSpy.mockRestore();
   formatResultSpy.mockRestore();
   formatErrorSpy.mockRestore();

@@ -898,6 +898,8 @@ describe("model-based: database layer", () => {
     fcAssert(
       property(tokenArb, (token) => {
         const cleanup = createIsolatedDbContext();
+        const savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
+        delete process.env.SENTRY_AUTH_TOKEN;
         try {
           // Set token that expires immediately (negative expiresIn)
           setAuthToken(token, -1);
@@ -910,6 +912,9 @@ describe("model-based: database layer", () => {
           const config = getAuthConfig();
           expect(config?.token).toBe(token);
         } finally {
+          if (savedAuthToken !== undefined) {
+            process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
+          }
           cleanup();
         }
       }),
