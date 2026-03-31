@@ -272,30 +272,29 @@ async function preamble(
   return true;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: wizard orchestration requires sequential branching
-export async function runWizard(initialOptions: WizardOptions): Promise<void> {
-  const { directory, yes, dryRun, features } = initialOptions;
+/**
+ * Resolve org and detect an existing Sentry project before the spinner starts.
+ *
+ * Clack requires all interactive prompts to complete before any spinner/task
+ * begins — the spinner's setInterval writes output below an active prompt if
+ * interleaved. This function surfaces all interactive decisions upfront.
+ *
+ * @returns Updated options with org and project resolved, or `null` to abort.
+ *          When `null` is returned, `process.exitCode` is already set.
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard pre-flight branches are inherently nested
+async function resolvePreSpinnerOptions(
+  options: WizardOptions
+): Promise<WizardOptions | null> {
+  const { directory, yes } = options;
+  let opts = options;
 
-  if (!(await preamble(directory, yes, dryRun))) {
-    return;
-  }
-
-  log.info(
-    "This wizard uses AI to analyze your project and configure Sentry." +
-      `\nFor manual setup: ${terminalLink(SENTRY_DOCS_URL)}`
-  );
-
-  // --- Prompt phase (must complete before the spinner starts) ---
-  // Clack's design: all interactive prompts before tasks/spinner.
-  let options = initialOptions;
-
-  // Check for an existing Sentry project when user hasn't specified org/project.
-  if (!(options.org || options.project)) {
+  if (!(opts.org || opts.project)) {
     const existing = await detectExistingProject(directory);
     if (existing) {
       if (yes) {
-        options = {
-          ...options,
+        opts = {
+          ...opts,
           org: existing.orgSlug,
           project: existing.projectSlug,
         };
@@ -317,11 +316,11 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
         if (isCancel(choice)) {
           cancel("Setup cancelled.");
           process.exitCode = 0;
-          return;
+          return null;
         }
         if (choice === "existing") {
-          options = {
-            ...options,
+          opts = {
+            ...opts,
             org: existing.orgSlug,
             project: existing.projectSlug,
           };
@@ -330,8 +329,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     }
   }
 
-  // Resolve org before spinner so no prompt appears while spinner is running.
-  if (!options.org) {
+  if (!opts.org) {
     let orgResult: string | LocalOpResult;
     try {
       orgResult = await resolveOrgSlug(directory, yes);
@@ -339,22 +337,41 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       if (err instanceof WizardCancelledError) {
         cancel("Setup cancelled.");
         process.exitCode = 0;
-        return;
+        return null;
       }
       log.error(errorMessage(err));
       cancel("Setup failed.");
       process.exitCode = 1;
-      return;
+      return null;
     }
     if (typeof orgResult !== "string") {
       log.error(orgResult.error ?? "Failed to resolve organization.");
       cancel("Setup failed.");
       process.exitCode = 1;
-      return;
+      return null;
     }
-    options = { ...options, org: orgResult };
+    opts = { ...opts, org: orgResult };
   }
-  // --- End prompt phase ---
+
+  return opts;
+}
+
+export async function runWizard(initialOptions: WizardOptions): Promise<void> {
+  const { directory, yes, dryRun, features } = initialOptions;
+
+  if (!(await preamble(directory, yes, dryRun))) {
+    return;
+  }
+
+  log.info(
+    "This wizard uses AI to analyze your project and configure Sentry." +
+      `\nFor manual setup: ${terminalLink(SENTRY_DOCS_URL)}`
+  );
+
+  const options = await resolvePreSpinnerOptions(initialOptions);
+  if (!options) {
+    return;
+  }
 
   const tracingOptions = {
     traceId: randomBytes(16).toString("hex"),
