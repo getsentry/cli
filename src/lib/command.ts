@@ -570,14 +570,19 @@ export function buildCommand<
       throw err;
     };
 
-    if (requiresAuth && !isAuthenticated()) {
-      throw new AuthError("not_authenticated");
-    }
-
     // Iterate the generator using manual .next() instead of for-await-of
     // so we can capture the return value (done: true result). The return
     // value carries the final `hint` — for-await-of discards it.
+    //
+    // Auth guard is inside the try block so that maybeRecoverWithHelp can
+    // intercept the AuthError when "help" appears as a positional arg (e.g.
+    // `sentry issue list help`). Without this, the auth prompt would fire
+    // before the help-recovery path could show the command's help text.
     try {
+      if (requiresAuth && !isAuthenticated()) {
+        throw new AuthError("not_authenticated");
+      }
+
       const generator = originalFunc.call(
         this,
         cleanFlags as FLAGS,

@@ -464,6 +464,7 @@ export function buildListCommand<
     readonly func: ListCommandFunction<FLAGS, ARGS, CONTEXT>;
     // biome-ignore lint/suspicious/noExplicitAny: OutputConfig is generic but type is erased at the builder level
     readonly output?: OutputConfig<any>;
+    readonly auth?: boolean;
   },
   options?: ListCommandOptions
 ): Command<CONTEXT> {
