@@ -1,6 +1,40 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.23.0
+
+### New Features ✨
+
+- (auth) Enforce auth by default in buildCommand by @betegon in [#611](https://github.com/getsentry/cli/pull/611)
+- (skill) Add eval framework to measure SKILL.md effectiveness by @BYK in [#602](https://github.com/getsentry/cli/pull/602)
+- (telemetry) Add seer.outcome span tag for Seer command metrics by @BYK in [#609](https://github.com/getsentry/cli/pull/609)
+- (upgrade) Show changelog summary during CLI upgrade by @BYK in [#594](https://github.com/getsentry/cli/pull/594)
+
+### Bug Fixes 🐛
+
+#### Upgrade
+
+- Prevent spinner freeze during delta patch application by @BYK in [#608](https://github.com/getsentry/cli/pull/608)
+- Indent changelog, add emoji to heading, hide empty sections by @BYK in [#604](https://github.com/getsentry/cli/pull/604)
+
+#### Other
+
+- (build) Disable identifier minification to fix marked crash by @betegon in [#617](https://github.com/getsentry/cli/pull/617)
+- (dashboard) Reject MRI queries with actionable tracemetrics guidance by @BYK in [#601](https://github.com/getsentry/cli/pull/601)
+- (init) Prompt/spinner ordering by @betegon in [#610](https://github.com/getsentry/cli/pull/610)
+- (skill) Avoid unnecessary auth, reinforce auto-detection, fix field examples by @BYK in [#599](https://github.com/getsentry/cli/pull/599)
+- (test) Fix CI hang, auth guard tests, and PR #610 test rewrite by @betegon in [#616](https://github.com/getsentry/cli/pull/616)
+- 2 bug fixes — subcommand crash, negative span depth, pagination JSON parse by @cursor in [#607](https://github.com/getsentry/cli/pull/607)
+
+### Documentation 📚
+
+- (skill) Document dashboard widget constraints and deprecated datasets by @BYK in [#605](https://github.com/getsentry/cli/pull/605)
+- Fix documentation gaps and embed skill files at build time by @cursor in [#606](https://github.com/getsentry/cli/pull/606)
+
+### Internal Changes 🔧
+
+- Regenerate skill files and command docs by @github-actions[bot] in [664362ca](https://github.com/getsentry/cli/commit/664362cab8a999b0f96bb62b9cfd648db846b0b5)
+
 ## 0.22.0
 
 ### New Features ✨
