@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-auth
-version: 0.22.0
+version: 0.23.0
 description: Authenticate with Sentry via OAuth or API tokens
 requires:
   bins: ["sentry"]
@@ -36,12 +36,24 @@ SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
 
 Log out of Sentry
 
+**Examples:**
+
+```bash
+sentry auth logout
+```
+
 ### `sentry auth refresh`
 
 Refresh your authentication token
 
 **Flags:**
 - `--force - Force refresh even if token is still valid`
+
+**Examples:**
+
+```bash
+sentry auth refresh
+```
 
 ### `sentry auth status`
 
@@ -66,6 +78,12 @@ sentry auth whoami
 ### `sentry auth token`
 
 Print the stored authentication token
+
+**Examples:**
+
+```bash
+sentry auth token
+```
 
 ### `sentry auth whoami`
 
