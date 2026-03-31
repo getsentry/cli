@@ -304,6 +304,13 @@ const hasGetSystemErrorMap = (() => {
 /** Current beforeExit handler, tracked so it can be replaced on re-init */
 let currentBeforeExitHandler: (() => void) | null = null;
 
+/**
+ * Listeners that existed on `process.beforeExit` before the first `initSentry`
+ * call. Used to distinguish SDK-added handlers from application/test handlers.
+ */
+// biome-ignore lint/complexity/noBannedTypes: rawListeners returns Function[]
+let preInitListeners: Set<Function> | null = null;
+
 /** Match all SaaS regional URLs (us.sentry.io, de.sentry.io, o1234.ingest.us.sentry.io, etc.) */
 const SENTRY_SAAS_SUBDOMAIN_RE = /^https:\/\/[^/]*\.sentry\.io(\/|$)/;
 
@@ -362,12 +369,14 @@ export function initSentry(
   // close(0) removes listeners synchronously; we don't need to await the flush.
   Sentry.getClient()?.close(0);
 
-  // Snapshot beforeExit listeners so we can detect any new ones added by
-  // Sentry.init() — particularly the anonymous handler from the
-  // ProcessSession integration, which registers via setupOnce and has no
-  // cleanup mechanism. We remove SDK-added listeners after init and manage
-  // our own beforeExit handler explicitly (see below).
-  const listenersBefore = new Set(process.rawListeners("beforeExit"));
+  // Snapshot beforeExit listeners that existed before the first initSentry call.
+  // These are non-SDK listeners (e.g., from the app or test framework) that must
+  // be preserved. All others — including the ProcessSession handler (registered
+  // via setupOnce on the first Sentry.init(), never cleaned up by close()) and
+  // any client-internal handlers — will be removed after init.
+  if (!preInitListeners) {
+    preInitListeners = new Set(process.rawListeners("beforeExit"));
+  }
 
   const client = Sentry.init({
     dsn: SENTRY_CLI_DSN,
@@ -427,7 +436,7 @@ export function initSentry(
   // the SDK's handlers — they keep the event loop alive in tests and on
   // re-initialization (e.g., auto-auth retry).
   for (const listener of process.rawListeners("beforeExit")) {
-    if (!listenersBefore.has(listener)) {
+    if (!preInitListeners?.has(listener)) {
       process.removeListener(
         "beforeExit",
         listener as (...args: unknown[]) => void
