@@ -45,6 +45,8 @@ import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import * as traceTarget from "../../../src/lib/trace-target.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as versionCheck from "../../../src/lib/version-check.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as dbAuth from "../../../src/lib/db/auth.js";
 import type { SentryLog, TraceLog } from "../../../src/types/sentry.js";
 
 // ============================================================================
@@ -236,6 +238,23 @@ const newerLogs: SentryLog[] = [
     trace: "aaaa1111bbbb2222cccc3333dddd4444",
   },
 ];
+
+// ============================================================================
+// Auth setup — mock getAuthConfig for all tests (auth guard added in #611)
+// ============================================================================
+
+let getAuthConfigSpy: ReturnType<typeof spyOn>;
+
+beforeEach(() => {
+  getAuthConfigSpy = spyOn(dbAuth, "getAuthConfig").mockReturnValue({
+    token: "sntrys_test",
+    source: "config",
+  });
+});
+
+afterEach(() => {
+  getAuthConfigSpy.mockRestore();
+});
 
 // ============================================================================
 // Standard mode (project-scoped, no trace-id positional)
