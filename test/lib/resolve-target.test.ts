@@ -438,11 +438,20 @@ describe("fetchProjectId", () => {
 
   test("rethrows AuthError when not authenticated", async () => {
     // No auth token set — refreshToken() will throw AuthError
+    // Clear preload env token so there's truly no auth
+    const saved = process.env.SENTRY_AUTH_TOKEN;
+    delete process.env.SENTRY_AUTH_TOKEN;
     setOrgRegion("test-org", DEFAULT_SENTRY_URL);
 
-    expect(fetchProjectId("test-org", "test-project")).rejects.toThrow(
-      AuthError
-    );
+    try {
+      await expect(fetchProjectId("test-org", "test-project")).rejects.toThrow(
+        AuthError
+      );
+    } finally {
+      if (saved !== undefined) {
+        process.env.SENTRY_AUTH_TOKEN = saved;
+      }
+    }
   });
 
   test("returns undefined on transient server error", async () => {
