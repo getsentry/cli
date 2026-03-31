@@ -212,29 +212,6 @@ describe("dashboard widget add", () => {
     expect(err.message).toContain("Unknown aggregate function");
   });
 
-  test("throws ValidationError for MRI query syntax", async () => {
-    const { context } = createMockContext();
-    const func = await addCommand.loader();
-
-    const err = await func
-      .call(
-        context,
-        {
-          json: false,
-          display: "line",
-          dataset: "metrics",
-          query: ["avg(g:custom/node.runtime.mem.rss@byte)"],
-        },
-        "123",
-        "Memory Usage"
-      )
-      .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toContain("MRI query syntax is not supported");
-    expect(err.message).toContain("tracemetrics");
-    expect(err.message).toContain("avg(value,node.runtime.mem.rss,gauge,byte)");
-  });
-
   test("throws ValidationError for big_number with issue dataset", async () => {
     const { context } = createMockContext();
     const func = await addCommand.loader();

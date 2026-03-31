@@ -8,12 +8,10 @@
 import { describe, expect, test } from "bun:test";
 import { ValidationError } from "../../src/lib/errors.js";
 import {
-  ALL_WIDGET_TYPES,
   assignDefaultLayout,
   type DashboardWidget,
   DashboardWidgetInputSchema,
   DEFAULT_WIDGET_TYPE,
-  DEPRECATED_WIDGET_TYPES,
   DISCOVER_AGGREGATE_FUNCTIONS,
   DISPLAY_TYPES,
   DiscoverAggregateFunctionSchema,
@@ -26,7 +24,6 @@ import {
   IsFilterValueSchema,
   mapWidgetTypeToDataset,
   parseAggregate,
-  parseMri,
   parseSortExpression,
   parseWidgetInput,
   prepareWidgetQueries,
@@ -35,7 +32,6 @@ import {
   stripWidgetServerFields,
   TABLE_DISPLAY_TYPES,
   TIMESERIES_DISPLAY_TYPES,
-  validateAggregateNames,
   validateWidgetLayout,
   WIDGET_TYPES,
   type WidgetType,
@@ -51,13 +47,7 @@ describe("WIDGET_TYPES", () => {
     expect(DEFAULT_WIDGET_TYPE).toBe("spans");
   });
 
-  test("excludes deprecated types", () => {
-    for (const t of DEPRECATED_WIDGET_TYPES) {
-      expect(WIDGET_TYPES).not.toContain(t);
-    }
-  });
-
-  test("ALL_WIDGET_TYPES includes both active and deprecated", () => {
+  test("contains all expected dataset types", () => {
     const expected: WidgetType[] = [
       "discover",
       "issue",
@@ -70,7 +60,7 @@ describe("WIDGET_TYPES", () => {
       "preprod-app-size",
     ];
     for (const t of expected) {
-      expect(ALL_WIDGET_TYPES).toContain(t);
+      expect(WIDGET_TYPES).toContain(t);
     }
   });
 });
@@ -887,176 +877,5 @@ describe("display type sets", () => {
     expect(TABLE_DISPLAY_TYPES.has("table")).toBe(true);
     expect(TABLE_DISPLAY_TYPES.has("top_n")).toBe(true);
     expect(TABLE_DISPLAY_TYPES.has("line")).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// parseMri
-// ---------------------------------------------------------------------------
-
-describe("parseMri", () => {
-  test("parses standard gauge MRI", () => {
-    expect(parseMri("g:custom/node.runtime.mem.rss@byte")).toEqual({
-      entity: "g",
-      namespace: "custom",
-      name: "node.runtime.mem.rss",
-      unit: "byte",
-    });
-  });
-
-  test("parses counter MRI", () => {
-    expect(parseMri("c:transactions/measurements.db_calls@none")).toEqual({
-      entity: "c",
-      namespace: "transactions",
-      name: "measurements.db_calls",
-      unit: "none",
-    });
-  });
-
-  test("parses distribution MRI", () => {
-    expect(
-      parseMri("d:transactions/measurements.stall_longest_time@millisecond")
-    ).toEqual({
-      entity: "d",
-      namespace: "transactions",
-      name: "measurements.stall_longest_time",
-      unit: "millisecond",
-    });
-  });
-
-  test("parses set MRI", () => {
-    expect(parseMri("s:sessions/error@none")).toEqual({
-      entity: "s",
-      namespace: "sessions",
-      name: "error",
-      unit: "none",
-    });
-  });
-
-  test("parses extracted MRI", () => {
-    expect(parseMri("e:spans/duration@millisecond")).toEqual({
-      entity: "e",
-      namespace: "spans",
-      name: "duration",
-      unit: "millisecond",
-    });
-  });
-
-  test("parses multi-char entity (matches canonical Python behavior)", () => {
-    expect(parseMri("dist:my_namespace/foo@none")).toEqual({
-      entity: "dist",
-      namespace: "my_namespace",
-      name: "foo",
-      unit: "none",
-    });
-  });
-
-  test("handles units with slashes", () => {
-    expect(parseMri("d:transactions/measurements.disk_io@byte/second")).toEqual(
-      {
-        entity: "d",
-        namespace: "transactions",
-        name: "measurements.disk_io",
-        unit: "byte/second",
-      }
-    );
-  });
-
-  test("returns null for non-MRI strings", () => {
-    expect(parseMri("span.duration")).toBeNull();
-    expect(parseMri("count()")).toBeNull();
-    expect(parseMri("value,name,gauge,byte")).toBeNull();
-  });
-
-  test("returns null for partial MRI (missing unit)", () => {
-    expect(parseMri("g:custom/foo")).toBeNull();
-  });
-
-  test("returns null for empty string", () => {
-    expect(parseMri("")).toBeNull();
-  });
-
-  test("returns null for malformed separators", () => {
-    expect(parseMri("d@transactions/foo")).toBeNull();
-    expect(parseMri(":transactions/foo@none")).toBeNull();
-    expect(parseMri("d/transactions@foo:none")).toBeNull();
-    expect(parseMri(":/@")).toBeNull();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// validateAggregateNames — MRI rejection
-// ---------------------------------------------------------------------------
-
-describe("validateAggregateNames MRI rejection", () => {
-  test("throws ValidationError for MRI query with metrics dataset", () => {
-    expect(() =>
-      validateAggregateNames(
-        ["avg(g:custom/node.runtime.mem.rss@byte)"],
-        "metrics"
-      )
-    ).toThrow(ValidationError);
-  });
-
-  test("throws ValidationError for MRI query with spans dataset", () => {
-    expect(() =>
-      validateAggregateNames(["avg(g:custom/node.runtime.mem.rss@byte)"])
-    ).toThrow(ValidationError);
-  });
-
-  test("error message contains tracemetrics format suggestion", () => {
-    try {
-      validateAggregateNames(
-        ["avg(g:custom/node.runtime.mem.rss@byte)"],
-        "metrics"
-      );
-      expect.unreachable("Should have thrown");
-    } catch (error) {
-      expect(error).toBeInstanceOf(ValidationError);
-      const msg = (error as ValidationError).message;
-      expect(msg).toContain("avg(value,node.runtime.mem.rss,gauge,byte)");
-      expect(msg).toContain("tracemetrics");
-    }
-  });
-
-  test("error message suggests --dataset tracemetrics when dataset is metrics", () => {
-    try {
-      validateAggregateNames(
-        ["avg(g:custom/node.runtime.mem.rss@byte)"],
-        "metrics"
-      );
-      expect.unreachable("Should have thrown");
-    } catch (error) {
-      const msg = (error as ValidationError).message;
-      expect(msg).toContain(
-        "Use --dataset tracemetrics instead of --dataset metrics"
-      );
-    }
-  });
-
-  test("error message omits dataset switch when already tracemetrics", () => {
-    try {
-      validateAggregateNames(
-        ["avg(g:custom/node.runtime.mem.rss@byte)"],
-        "tracemetrics"
-      );
-      expect.unreachable("Should have thrown");
-    } catch (error) {
-      const msg = (error as ValidationError).message;
-      expect(msg).not.toContain("Use --dataset tracemetrics instead");
-    }
-  });
-
-  test("does not throw for valid non-MRI queries", () => {
-    expect(() => validateAggregateNames(["avg(span.duration)"])).not.toThrow();
-    expect(() => validateAggregateNames(["count()"])).not.toThrow();
-    expect(() => validateAggregateNames(["p95(span.self_time)"])).not.toThrow();
-  });
-
-  test("does not throw for tracemetrics format query", () => {
-    // tracemetrics format: fn(value,name,type,unit) — not MRI
-    expect(() =>
-      validateAggregateNames(["avg(value,node.runtime.mem.rss,gauge,byte)"])
-    ).not.toThrow();
   });
 });

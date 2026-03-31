@@ -315,7 +315,7 @@ export function parseSpanDepth(input: string): number {
     return 0;
   }
   const n = Number(input);
-  if (Number.isNaN(n) || n < 0) {
+  if (Number.isNaN(n)) {
     return DEFAULT_SPAN_DEPTH;
   }
   return n;

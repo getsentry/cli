@@ -6,18 +6,20 @@
 
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
+import { ApiError } from "../../lib/errors.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
-import { formatRootCauseList } from "../../lib/formatters/seer.js";
+import {
+  formatRootCauseList,
+  handleSeerApiError,
+} from "../../lib/formatters/seer.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
-import { recordSeerOutcome } from "../../lib/telemetry.js";
 import { extractRootCauses } from "../../types/seer.js";
 import {
   ensureRootCauseAnalysis,
-  handleSeerCommandError,
   issueIdPositional,
   resolveOrgAndIssueId,
 } from "./utils.js";
@@ -74,8 +76,8 @@ export const explainCommand = buildCommand({
     applyFreshFlag(flags);
     const { cwd } = this;
 
+    // Declare org outside try block so it's accessible in catch for error messages
     let resolvedOrg: string | undefined;
-    let recorded = false;
 
     try {
       // Resolve org and issue ID
@@ -97,8 +99,6 @@ export const explainCommand = buildCommand({
       // Extract root causes from steps
       const causes = extractRootCauses(state);
       if (causes.length === 0) {
-        recorded = true;
-        recordSeerOutcome("no_solution");
         throw new Error(
           "Analysis completed but no root causes found. " +
             "The issue may not have enough context for root cause analysis."
@@ -106,11 +106,13 @@ export const explainCommand = buildCommand({
       }
 
       yield new CommandOutput(causes);
-      recorded = true;
-      recordSeerOutcome("success");
       return { hint: `To create a plan, run: sentry issue plan ${issueArg}` };
     } catch (error) {
-      handleSeerCommandError(error, recorded, resolvedOrg);
+      // Handle API errors with friendly messages
+      if (error instanceof ApiError) {
+        throw handleSeerApiError(error.status, error.detail, resolvedOrg);
+      }
+      throw error;
     }
   },
 });

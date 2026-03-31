@@ -19,7 +19,6 @@ import {
   FALLBACK_LAYOUT,
   prepareDashboardForUpdate,
   validateWidgetLayout,
-  WIDGET_TYPES,
   type WidgetLayoutFlags,
 } from "../../../types/dashboard.js";
 import {
@@ -120,7 +119,7 @@ export const addCommand = buildCommand({
       dataset: {
         kind: "parsed",
         parse: String,
-        brief: `Widget dataset: ${WIDGET_TYPES.join(", ")} (default: spans)`,
+        brief: "Widget dataset (default: spans)",
         optional: true,
       },
       query: {
@@ -139,22 +138,20 @@ export const addCommand = buildCommand({
       "group-by": {
         kind: "parsed",
         parse: String,
-        brief: "Group-by column (repeatable). Requires --limit",
+        brief: "Group-by column (repeatable)",
         variadic: true,
         optional: true,
       },
       sort: {
         kind: "parsed",
         parse: String,
-        brief:
-          'Order by (prefix - for desc). Use --sort="-count" (with =) to avoid flag alias conflicts',
+        brief: "Order by (prefix - for desc, e.g. -count)",
         optional: true,
       },
       limit: {
         kind: "parsed",
         parse: numberParser,
-        brief:
-          "Result limit. Required when using --group-by. Table widgets cap at 10 rows",
+        brief: "Result limit",
         optional: true,
       },
       x: {
