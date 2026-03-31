@@ -262,6 +262,10 @@ const EXCLUDED_INTEGRATIONS = new Set([
   "ContextLines", // Reads source files - we rely on uploaded sourcemaps instead
   "LocalVariables", // Captures local variables - adds significant overhead
   "Modules", // Lists all loaded modules - unnecessary for CLI telemetry
+  // ProcessSession registers an anonymous beforeExit handler via setupOnce
+  // that has no cleanup mechanism. For a short-lived CLI process this is
+  // unnecessary and it prevents the Bun test runner from exiting.
+  "ProcessSession",
 ]);
 
 /**
@@ -275,7 +279,6 @@ const LIBRARY_EXCLUDED_INTEGRATIONS = new Set([
   ...EXCLUDED_INTEGRATIONS,
   "OnUncaughtException", // process.on('uncaughtException')
   "OnUnhandledRejection", // process.on('unhandledRejection')
-  "ProcessSession", // process.on('beforeExit')
   "Http", // diagnostics_channel + trace headers
   "NodeFetch", // diagnostics_channel + trace headers
   "FunctionToString", // wraps Function.prototype.toString
@@ -303,13 +306,6 @@ const hasGetSystemErrorMap = (() => {
 
 /** Current beforeExit handler, tracked so it can be replaced on re-init */
 let currentBeforeExitHandler: (() => void) | null = null;
-
-/**
- * Listeners that existed on `process.beforeExit` before the first `initSentry`
- * call. Used to distinguish SDK-added handlers from application/test handlers.
- */
-// biome-ignore lint/complexity/noBannedTypes: rawListeners returns Function[]
-let preInitListeners: Set<Function> | null = null;
 
 /** Match all SaaS regional URLs (us.sentry.io, de.sentry.io, o1234.ingest.us.sentry.io, etc.) */
 const SENTRY_SAAS_SUBDOMAIN_RE = /^https:\/\/[^/]*\.sentry\.io(\/|$)/;
@@ -369,15 +365,6 @@ export function initSentry(
   // close(0) removes listeners synchronously; we don't need to await the flush.
   Sentry.getClient()?.close(0);
 
-  // Snapshot beforeExit listeners that existed before the first initSentry call.
-  // These are non-SDK listeners (e.g., from the app or test framework) that must
-  // be preserved. All others — including the ProcessSession handler (registered
-  // via setupOnce on the first Sentry.init(), never cleaned up by close()) and
-  // any client-internal handlers — will be removed after init.
-  if (!preInitListeners) {
-    preInitListeners = new Set(process.rawListeners("beforeExit"));
-  }
-
   const client = Sentry.init({
     dsn: SENTRY_CLI_DSN,
     enabled,
@@ -397,10 +384,12 @@ export function initSentry(
     },
     environment,
     // Enable Sentry structured logs for non-exception telemetry (e.g., unexpected input warnings).
-    // Disabled in library mode — logs use timers/beforeExit that pollute the host process.
-    enableLogs: !libraryMode,
-    // Disable client reports in library mode — they use timers/beforeExit.
-    ...(libraryMode && { sendClientReports: false }),
+    // Disabled when telemetry is off or in library mode — the SDK registers
+    // beforeExit handlers for log flushing that keep the event loop alive.
+    enableLogs: enabled && !libraryMode,
+    // Disable client reports when telemetry is off or in library mode — the SDK
+    // registers a setInterval + beforeExit handler that keep the event loop alive.
+    ...((libraryMode || !enabled) && { sendClientReports: false }),
     // Sample all events for CLI telemetry (low volume)
     tracesSampleRate: 1,
     sampleRate: 1,
@@ -427,22 +416,6 @@ export function initSentry(
       return event;
     },
   });
-
-  // Remove all beforeExit listeners added by Sentry.init(). This covers:
-  //  - ProcessSession integration (anonymous handler, setupOnce, no cleanup)
-  //  - Client report flusher (_clientReportOnExitFlushListener)
-  //  - Log flusher (_logOnExitFlushListener)
-  // We manage our own beforeExit handler explicitly below and don't need
-  // the SDK's handlers — they keep the event loop alive in tests and on
-  // re-initialization (e.g., auto-auth retry).
-  for (const listener of process.rawListeners("beforeExit")) {
-    if (!preInitListeners?.has(listener)) {
-      process.removeListener(
-        "beforeExit",
-        listener as (...args: unknown[]) => void
-      );
-    }
-  }
 
   // Always remove our own previous handler on re-init.
   if (currentBeforeExitHandler) {
