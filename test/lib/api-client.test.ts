@@ -108,6 +108,17 @@ describe("401 retry behavior", () => {
   // Note: These tests use rawApiRequest which goes to control silo (sentry.io)
   // and supports 401 retry with token refresh.
 
+  let savedAuthToken: string | undefined;
+  beforeEach(() => {
+    savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
+    delete process.env.SENTRY_AUTH_TOKEN;
+  });
+  afterEach(() => {
+    if (savedAuthToken !== undefined) {
+      process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
+    }
+  });
+
   test("retries request with new token on 401 response", async () => {
     const requests: RequestLog[] = [];
 

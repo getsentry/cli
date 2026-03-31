@@ -114,6 +114,8 @@ export function createE2EContext(
     run: (args: string[]) =>
       runCli(args, {
         env: {
+          SENTRY_AUTH_TOKEN: "",
+          SENTRY_TOKEN: "",
           [CONFIG_DIR_ENV_VAR]: configDir,
           SENTRY_URL: serverUrl,
           SENTRY_CLI_NO_TELEMETRY: "1",

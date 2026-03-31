@@ -5,7 +5,15 @@
  */
 
 import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as Sentry from "@sentry/node-core/light";
@@ -29,6 +37,23 @@ import {
   withTracing,
   withTracingSpan,
 } from "../../src/lib/telemetry.js";
+
+// Snapshot beforeExit listeners before any test calls initSentry(true).
+// The ProcessSession integration registers an anonymous handler via setupOnce
+// that has no cleanup mechanism. After all tests, we remove any listeners
+// that weren't present before to prevent the Bun test runner from hanging.
+const preTestListeners = new Set(process.rawListeners("beforeExit"));
+
+afterAll(() => {
+  for (const listener of process.rawListeners("beforeExit")) {
+    if (!preTestListeners.has(listener)) {
+      process.removeListener(
+        "beforeExit",
+        listener as (...args: unknown[]) => void
+      );
+    }
+  }
+});
 
 describe("initSentry", () => {
   test("returns client with enabled=false when disabled", () => {

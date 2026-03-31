@@ -75,6 +75,7 @@ function createTestContext() {
 describe("buildCommand", () => {
   test("builds a valid command object", () => {
     const command = buildCommand({
+      auth: false,
       docs: { brief: "Test command" },
       parameters: {
         flags: {
@@ -90,6 +91,7 @@ describe("buildCommand", () => {
 
   test("handles commands with empty parameters", () => {
     const command = buildCommand({
+      auth: false,
       docs: { brief: "Simple command" },
       parameters: {},
       async *func() {
@@ -127,6 +129,7 @@ describe("buildCommand telemetry integration", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       parameters: {
         flags: {
@@ -167,6 +170,7 @@ describe("buildCommand telemetry integration", () => {
 
   test("skips false boolean flags in telemetry", async () => {
     const command = buildCommand<{ json: boolean }, [], TestContext>({
+      auth: false,
       docs: { brief: "Test" },
       parameters: {
         flags: {
@@ -198,6 +202,7 @@ describe("buildCommand telemetry integration", () => {
     let calledArgs: unknown = null;
 
     const command = buildCommand<Record<string, never>, [string], TestContext>({
+      auth: false,
       docs: { brief: "Test" },
       parameters: {
         positional: {
@@ -235,6 +240,7 @@ describe("buildCommand telemetry integration", () => {
     let capturedStdout = false;
 
     const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
       docs: { brief: "Test" },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
@@ -260,6 +266,7 @@ describe("buildCommand telemetry integration", () => {
     let executed = false;
 
     const command = buildCommand<{ delay: number }, [], TestContext>({
+      auth: false,
       docs: { brief: "Test" },
       parameters: {
         flags: {
@@ -370,6 +377,7 @@ describe("applyLoggingFlags", () => {
 describe("buildCommand", () => {
   test("builds a valid command object", () => {
     const command = buildCommand({
+      auth: false,
       docs: { brief: "Test command" },
       parameters: {
         flags: {
@@ -387,6 +395,7 @@ describe("buildCommand", () => {
     let calledFlags: Record<string, unknown> | null = null;
 
     const command = buildCommand<{ json: boolean }, [], TestContext>({
+      auth: false,
       docs: { brief: "Test" },
       parameters: {
         flags: {
@@ -420,6 +429,7 @@ describe("buildCommand", () => {
     const originalLevel = logger.level;
     try {
       const command = buildCommand<Record<string, never>, [], TestContext>({
+        auth: false,
         docs: { brief: "Test" },
         parameters: {},
         async *func() {
@@ -446,6 +456,7 @@ describe("buildCommand", () => {
     const originalLevel = logger.level;
     try {
       const command = buildCommand<Record<string, never>, [], TestContext>({
+        auth: false,
         docs: { brief: "Test" },
         parameters: {},
         async *func() {
@@ -472,6 +483,7 @@ describe("buildCommand", () => {
     const originalLevel = logger.level;
     try {
       const command = buildCommand<Record<string, never>, [], TestContext>({
+        auth: false,
         docs: { brief: "Test" },
         parameters: {},
         async *func() {
@@ -498,6 +510,7 @@ describe("buildCommand", () => {
     let receivedFlags: Record<string, unknown> | null = null;
 
     const command = buildCommand<{ limit: number }, [], TestContext>({
+      auth: false,
       docs: { brief: "Test" },
       parameters: {
         flags: {
@@ -546,6 +559,7 @@ describe("buildCommand", () => {
         [],
         TestContext
       >({
+        auth: false,
         docs: { brief: "Test" },
         parameters: {
           flags: {
@@ -602,6 +616,7 @@ describe("buildCommand", () => {
 
     try {
       const command = buildCommand<{ verbose: boolean }, [], TestContext>({
+        auth: false,
         docs: { brief: "Test" },
         parameters: {
           flags: {
@@ -673,6 +688,7 @@ describe("buildCommand output config", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: { human: () => "unused" },
       parameters: {
@@ -716,6 +732,7 @@ describe("buildCommand output config", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: { human: () => "unused" },
       parameters: {},
@@ -755,6 +772,7 @@ describe("buildCommand output config", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: { human: () => "unused" },
       parameters: {},
@@ -793,6 +811,7 @@ describe("buildCommand output config", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: { human: () => "unused" },
       parameters: {},
@@ -824,6 +843,7 @@ describe("buildCommand output config", () => {
 
     // Command WITHOUT output config — --json should be rejected by Stricli
     const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
       docs: { brief: "Test" },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
@@ -857,6 +877,7 @@ describe("buildCommand output config", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: { human: () => "unused" },
       parameters: {
@@ -900,6 +921,7 @@ describe("buildCommand output config", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: { human: () => "unused" },
       parameters: {},
@@ -941,6 +963,7 @@ describe("buildCommand output config", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: { human: () => "unused" },
       parameters: {
@@ -995,6 +1018,7 @@ describe("buildCommand return-based output", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: {
         human: (d: { name: string; role: string }) => `${d.name} (${d.role})`,
@@ -1023,6 +1047,7 @@ describe("buildCommand return-based output", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: {
         human: (d: { name: string; role: string }) => `${d.name} (${d.role})`,
@@ -1052,6 +1077,7 @@ describe("buildCommand return-based output", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: {
         human: (d: { id: number; name: string; role: string }) => `${d.name}`,
@@ -1083,6 +1109,7 @@ describe("buildCommand return-based output", () => {
   test("shows hint in human mode, suppresses in JSON mode", async () => {
     const makeCommand = () =>
       buildCommand<{ json: boolean; fields?: string[] }, [], TestContext>({
+        auth: false,
         docs: { brief: "Test" },
         output: {
           human: (d: { value: number }) => `Value: ${d.value}`,
@@ -1130,6 +1157,7 @@ describe("buildCommand return-based output", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: {
         human: () => "unused",
@@ -1158,6 +1186,7 @@ describe("buildCommand return-based output", () => {
 
   test("data return is ignored without output config", async () => {
     const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
       docs: { brief: "Test" },
       // Deliberately no output config
       parameters: {},
@@ -1187,6 +1216,7 @@ describe("buildCommand return-based output", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: {
         human: (d: { name: string }) => `Hello, ${d.name}!`,
@@ -1217,6 +1247,7 @@ describe("buildCommand return-based output", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: {
         human: (d: Array<{ id: number }>) => d.map(((x) => x.id).join(", ")),
@@ -1246,6 +1277,7 @@ describe("buildCommand return-based output", () => {
   test("hint shown in human mode only", async () => {
     const makeCommand = () =>
       buildCommand<{ json: boolean; fields?: string[] }, [], TestContext>({
+        auth: false,
         docs: { brief: "Test" },
         output: {
           human: (d: { org: string }) => `Org: ${d.org}`,
@@ -1284,6 +1316,7 @@ describe("buildCommand return-based output", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: {
         human: (d: { error: string }) => `Error: ${d.error}`,
@@ -1332,6 +1365,7 @@ describe("buildCommand return-based output", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: {
         human: (d: { error: string }) => `Error: ${d.error}`,
