@@ -54,9 +54,14 @@ describe("getCachedProjectRoot", () => {
     const before = await getCachedProjectRoot(testProjectDir);
     expect(before).toBeDefined();
 
-    // Wait a moment and add a new file to change directory mtime
-    await Bun.sleep(10);
+    // Add a new file and explicitly bump dir mtime to guarantee a change
+    // (don't rely on sleep — mtime resolution on Linux CI can be coarser than the delay)
+    const { stat: statDir, utimes } = await import("node:fs/promises");
+    const dirStats = await statDir(testProjectDir);
+    const cachedMtime = Math.floor(dirStats.mtimeMs);
     writeFileSync(join(testProjectDir, "new-file.txt"), "test");
+    const futureMtime = new Date(cachedMtime + 5000);
+    await utimes(testProjectDir, futureMtime, futureMtime);
 
     // Cache should be invalidated
     const after = await getCachedProjectRoot(testProjectDir);
