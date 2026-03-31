@@ -31,10 +31,13 @@ import { ContextError, ValidationError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { TraceSpan } from "../../../src/types/sentry.js";
+import { useAuthMock } from "../../helpers.js";
 
 // ============================================================================
 // formatTraceView
 // ============================================================================
+
+useAuthMock();
 
 describe("formatTraceView", () => {
   const mockSummary = {

@@ -969,17 +969,8 @@ describe("fetchOrgProjectsSafe", () => {
   test("propagates AuthError when not authenticated", async () => {
     // Clear auth token so the API client throws AuthError before making any request
     await clearAuth();
-    // Also clear env token — preload sets a fake one for the auth guard
-    const savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
-    delete process.env.SENTRY_AUTH_TOKEN;
 
-    try {
-      await expect(fetchOrgProjectsSafe("myorg")).rejects.toThrow(AuthError);
-    } finally {
-      if (savedAuthToken !== undefined) {
-        process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
-      }
-    }
+    await expect(fetchOrgProjectsSafe("myorg")).rejects.toThrow(AuthError);
   });
 });
 
@@ -1242,23 +1233,14 @@ describe("handleAutoDetect", () => {
     setDefaults("test-org");
     // Clear auth so getAuthToken() throws AuthError before any fetch
     await clearAuth();
-    // Also clear env token — preload sets a fake one for the auth guard
-    const savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
-    delete process.env.SENTRY_AUTH_TOKEN;
 
-    try {
-      await expect(
-        handleAutoDetect("/tmp/test-project", {
-          limit: 30,
-          json: true,
-          fresh: false,
-        })
-      ).rejects.toThrow(AuthError);
-    } finally {
-      if (savedAuthToken !== undefined) {
-        process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
-      }
-    }
+    await expect(
+      handleAutoDetect("/tmp/test-project", {
+        limit: 30,
+        json: true,
+        fresh: false,
+      })
+    ).rejects.toThrow(AuthError);
   });
 
   test("slow path: uses full fetch when platform filter is active", async () => {

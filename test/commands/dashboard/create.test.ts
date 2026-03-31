@@ -22,6 +22,7 @@ import { ContextError, ValidationError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { DashboardDetail } from "../../../src/types/dashboard.js";
+import { useAuthMock } from "../../helpers.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -53,6 +54,8 @@ const sampleDashboard: DashboardDetail = {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+useAuthMock();
 
 describe("dashboard create", () => {
   let createDashboardSpy: ReturnType<typeof spyOn>;

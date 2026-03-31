@@ -14,6 +14,9 @@ import {
 import type { OrgListConfig } from "../../src/lib/org-list.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as orgListModule from "../../src/lib/org-list.js";
+import { useAuthMock } from "../helpers.js";
+
+useAuthMock();
 
 describe("parseCursorFlag", () => {
   test("passes through 'last' keyword", () => {

@@ -24,6 +24,7 @@ import { AuthError, ContextError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { ProjectKey, SentryProject } from "../../../src/types/sentry.js";
+import { useAuthMock } from "../../helpers.js";
 
 const sampleProject: SentryProject = {
   id: "42",
@@ -54,6 +55,8 @@ function createMockContext() {
     stdoutWrite,
   };
 }
+
+useAuthMock();
 
 describe("viewCommand.func", () => {
   let getProjectSpy: ReturnType<typeof spyOn>;

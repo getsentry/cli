@@ -32,11 +32,14 @@ import {
 } from "../../../src/lib/errors.js";
 import { resolveProjectBySlug } from "../../../src/lib/resolve-target.js";
 import type { DetailedSentryLog } from "../../../src/types/index.js";
+import { useAuthMock } from "../../helpers.js";
 
 /** A valid 32-char hex log ID for tests */
 const ID1 = "968c763c740cfda8b6728f27fb9e9b01";
 const ID2 = "aaaa1111bbbb2222cccc3333dddd4444";
 const ID3 = "1234567890abcdef1234567890abcdef";
+
+useAuthMock();
 
 describe("parsePositionalArgs", () => {
   describe("single argument (log ID only)", () => {

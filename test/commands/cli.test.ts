@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { feedbackCommand } from "../../src/commands/cli/feedback.js";
 import type { UpgradeResult } from "../../src/commands/cli/upgrade.js";
 import { upgradeCommand } from "../../src/commands/cli/upgrade.js";
+import { useAuthMock } from "../helpers.js";
 
 /**
  * Create a mock context with a process.stderr.write spy for capturing
@@ -61,6 +62,8 @@ function createMockContext(overrides: Partial<{ execPath: string }> = {}): {
     },
   };
 }
+
+useAuthMock();
 
 describe("feedbackCommand.func", () => {
   test("throws ValidationError for empty message", async () => {

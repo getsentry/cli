@@ -61,20 +61,6 @@ const sampleProject: SentryProject = {
   dateCreated: "2026-03-04T00:00:00Z",
 };
 
-// Clear the preload SENTRY_AUTH_TOKEN so isAuthenticated() / getAuthConfig()
-// use the DB path. Without this, the env token causes handleLocalOp to skip
-// the "Not authenticated" branch and hit unexpected code paths.
-let savedAuthToken: string | undefined;
-beforeEach(() => {
-  savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
-  delete process.env.SENTRY_AUTH_TOKEN;
-});
-afterEach(() => {
-  if (savedAuthToken !== undefined) {
-    process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
-  }
-});
-
 describe("create-sentry-project", () => {
   let resolveOrgSpy: ReturnType<typeof spyOn>;
   let listOrgsSpy: ReturnType<typeof spyOn>;

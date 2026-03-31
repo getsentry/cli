@@ -36,6 +36,7 @@ import * as polling from "../../../src/lib/polling.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { DashboardListItem } from "../../../src/types/dashboard.js";
+import { useAuthMock } from "../../helpers.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -103,6 +104,8 @@ const DASHBOARD_C: DashboardListItem = {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+useAuthMock();
 
 describe("dashboard list command", () => {
   let listDashboardsPaginatedSpy: ReturnType<typeof spyOn>;

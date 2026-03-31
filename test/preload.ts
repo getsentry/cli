@@ -93,12 +93,6 @@ delete process.env.SENTRY_HOST;
 delete process.env.SENTRY_ORG;
 delete process.env.SENTRY_PROJECT;
 
-// Set a fake auth token so buildCommand's auth guard passes in tests.
-// Real API calls are blocked by the global fetch mock below.
-// Tests that specifically verify unauthenticated behavior (e.g., auth status)
-// mock getAuthConfig to return undefined.
-process.env.SENTRY_AUTH_TOKEN = "sntrys_test-token-for-unit-tests_000000";
-
 // Disable telemetry and background update checks in tests
 // This prevents Sentry SDK from keeping the process alive and making external calls
 process.env.SENTRY_CLI_NO_TELEMETRY = "1";

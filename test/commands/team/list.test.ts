@@ -28,6 +28,7 @@ import { ValidationError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { SentryTeam } from "../../../src/types/sentry.js";
+import { useAuthMock } from "../../helpers.js";
 
 // Sample test data
 const sampleTeams: SentryTeam[] = [
@@ -64,6 +65,8 @@ function createMockContext(cwd = "/tmp") {
     stderrWrite,
   };
 }
+
+useAuthMock();
 
 describe("listCommand.func — project-search (bare slug)", () => {
   let listProjectTeamsSpy: ReturnType<typeof spyOn>;

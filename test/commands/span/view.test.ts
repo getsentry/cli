@@ -24,10 +24,13 @@ import { ContextError, ValidationError } from "../../../src/lib/errors.js";
 import { validateSpanId } from "../../../src/lib/hex-id.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
+import { useAuthMock } from "../../helpers.js";
 
 const VALID_TRACE_ID = "aaaa1111bbbb2222cccc3333dddd4444";
 const VALID_SPAN_ID = "a1b2c3d4e5f67890";
 const VALID_SPAN_ID_2 = "1234567890abcdef";
+
+useAuthMock();
 
 describe("validateSpanId", () => {
   test("accepts valid 16-char lowercase hex", () => {

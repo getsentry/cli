@@ -48,6 +48,7 @@ import * as traceTarget from "../../../src/lib/trace-target.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as versionCheck from "../../../src/lib/version-check.js";
 import type { SentryLog, TraceLog } from "../../../src/types/sentry.js";
+import { useAuthMock } from "../../helpers.js";
 
 // ============================================================================
 // Helpers
@@ -259,6 +260,8 @@ afterEach(() => {
 // ============================================================================
 // Standard mode (project-scoped, no trace-id positional)
 // ============================================================================
+
+useAuthMock();
 
 describe("listCommand.func — standard mode", () => {
   let listLogsSpy: ReturnType<typeof spyOn>;

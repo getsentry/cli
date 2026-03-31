@@ -28,6 +28,7 @@ import * as apiClient from "../../../src/lib/api-client.js";
 import * as paginationDb from "../../../src/lib/db/pagination.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
+import { useAuthMock } from "../../helpers.js";
 
 const VALID_TRACE_ID = "aaaa1111bbbb2222cccc3333dddd4444";
 
@@ -39,6 +40,8 @@ const _paginationDbRef = paginationDb;
 // ============================================================================
 // parseSort
 // ============================================================================
+
+useAuthMock();
 
 describe("parseSort", () => {
   test("accepts 'date'", () => {

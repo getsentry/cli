@@ -29,6 +29,7 @@ import type {
   CustomerTrialInfo,
   ProductTrial,
 } from "../../../src/types/index.js";
+import { useAuthMock } from "../../helpers.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -64,6 +65,8 @@ const MOCK_TRIAL: ProductTrial = {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+useAuthMock();
 
 describe("trial start command", () => {
   let getProductTrialsSpy: ReturnType<typeof spyOn>;

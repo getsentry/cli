@@ -42,6 +42,9 @@ import { resolveProjectBySlug } from "../../../src/lib/resolve-target.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as spanTree from "../../../src/lib/span-tree.js";
 import type { SentryEvent } from "../../../src/types/index.js";
+import { useAuthMock } from "../../helpers.js";
+
+useAuthMock();
 
 describe("parsePositionalArgs", () => {
   describe("single argument (event ID only)", () => {

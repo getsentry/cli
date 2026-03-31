@@ -27,6 +27,7 @@ import {
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { SentryProject, SentryTeam } from "../../../src/types/index.js";
+import { useAuthMock } from "../../helpers.js";
 
 const sampleTeam: SentryTeam = {
   id: "1",
@@ -63,6 +64,8 @@ function createMockContext() {
     stdoutWrite,
   };
 }
+
+useAuthMock();
 
 describe("project create", () => {
   let listTeamsSpy: ReturnType<typeof spyOn>;

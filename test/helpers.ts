@@ -4,10 +4,12 @@
  * Shared utilities for test setup and teardown.
  */
 
-import { afterEach, beforeEach } from "bun:test";
+import { afterEach, beforeEach, spyOn } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as dbAuth from "../src/lib/db/auth.js";
 import { CONFIG_DIR_ENV_VAR, closeDatabase } from "../src/lib/db/index.js";
 
 // biome-ignore lint/performance/noBarrelFile: re-exporting a single constant, not a barrel
@@ -125,4 +127,32 @@ export function useTestConfigDir(
   });
 
   return () => dir;
+}
+
+/**
+ * Mock getAuthConfig so buildCommand's auth guard passes.
+ *
+ * The auth guard (added in #611) calls getAuthConfig() before every command.
+ * Tests that invoke command functions need auth to be present. This helper
+ * registers beforeEach/afterEach hooks that mock getAuthConfig to return
+ * a valid config.
+ *
+ * Tests that need to verify unauthenticated behavior can override the mock
+ * inside a describe block.
+ *
+ * Must be called at module scope or inside a describe() block.
+ */
+export function useAuthMock(): void {
+  let spy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    spy = spyOn(dbAuth, "getAuthConfig").mockReturnValue({
+      token: "sntrys_test",
+      source: "config",
+    });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
 }

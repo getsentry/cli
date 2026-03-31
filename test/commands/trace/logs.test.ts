@@ -29,6 +29,7 @@ import * as polling from "../../../src/lib/polling.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { TraceLog } from "../../../src/types/sentry.js";
+import { useAuthMock } from "../../helpers.js";
 
 // Note: parseTraceTarget parsing tests are in test/lib/trace-target.test.ts
 
@@ -98,6 +99,8 @@ function collectMockOutput(
     })
     .join("");
 }
+
+useAuthMock();
 
 describe("logsCommand.func", () => {
   let listTraceLogsSpy: ReturnType<typeof spyOn>;

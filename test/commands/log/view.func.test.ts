@@ -24,6 +24,7 @@ import { ContextError, ValidationError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { DetailedSentryLog } from "../../../src/types/sentry.js";
+import { useAuthMock } from "../../helpers.js";
 
 const ID1 = "aaaa1111bbbb2222cccc3333dddd4444";
 const ID2 = "1111222233334444555566667777aaaa";
@@ -63,6 +64,8 @@ function createMockContext() {
     stdoutWrite,
   };
 }
+
+useAuthMock();
 
 describe("viewCommand.func", () => {
   let getLogsSpy: ReturnType<typeof spyOn>;

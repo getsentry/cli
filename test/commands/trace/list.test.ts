@@ -30,6 +30,7 @@ import { ContextError, ResolutionError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { TransactionListItem } from "../../../src/types/sentry.js";
+import { useAuthMock } from "../../helpers.js";
 
 // Reference paginationDb early to prevent import stripping by auto-organize
 const _paginationDbRef = paginationDb;
@@ -37,6 +38,8 @@ const _paginationDbRef = paginationDb;
 // ============================================================================
 // validateLimit (shared utility from arg-parsing.ts)
 // ============================================================================
+
+useAuthMock();
 
 describe("validateLimit", () => {
   test("returns number for valid value", () => {
