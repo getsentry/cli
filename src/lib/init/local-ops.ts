@@ -733,7 +733,7 @@ export async function resolveOrgSlug(
  * LocalOpResult if the project exists, or null if it doesn't (404).
  * Other errors are left to propagate.
  */
-async function tryGetExistingProject(
+export async function tryGetExistingProject(
   orgSlug: string,
   projectSlug: string
 ): Promise<LocalOpResult | null> {
@@ -789,56 +789,6 @@ export async function detectExistingProject(cwd: string): Promise<{
   return null;
 }
 
-/**
- * When no explicit org/project is provided, check for an existing Sentry setup
- * and either auto-select it (--yes) or prompt the user interactively.
- *
- * Returns a LocalOpResult to return early, or null to proceed with creation.
- */
-async function promptForExistingProject(
-  cwd: string,
-  yes: boolean
-): Promise<LocalOpResult | null> {
-  const existing = await detectExistingProject(cwd);
-  if (!existing) {
-    return null;
-  }
-
-  if (yes) {
-    return tryGetExistingProject(existing.orgSlug, existing.projectSlug);
-  }
-
-  const choice = await select({
-    message: "Found an existing Sentry project in this codebase.",
-    options: [
-      {
-        value: "existing" as const,
-        label: `Use existing project (${existing.orgSlug}/${existing.projectSlug})`,
-        hint: "Sentry is already configured here",
-      },
-      {
-        value: "create" as const,
-        label: "Create a new Sentry project",
-      },
-    ],
-  });
-  if (isCancel(choice)) {
-    return { ok: false, error: "Cancelled." };
-  }
-  if (choice === "existing") {
-    const result = await tryGetExistingProject(
-      existing.orgSlug,
-      existing.projectSlug
-    );
-    if (result) {
-      return result;
-    }
-    // Project deleted or inaccessible — fall through to creation
-  }
-  return null;
-}
-
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: wizard orchestration requires sequential branching
 async function createSentryProject(
   payload: CreateSentryProjectPayload,
   options: WizardOptions
@@ -868,64 +818,20 @@ async function createSentryProject(
     };
   }
 
+  // org is always set by resolvePreSpinnerOptions before this runs
+  if (!options.org) {
+    return {
+      ok: false,
+      error: "Internal error: org not resolved before createSentryProject.",
+    };
+  }
+
   try {
-    // 1. When no explicit org/project provided, check if Sentry is already set up
-    if (!(options.org || options.project)) {
-      const result = await promptForExistingProject(payload.cwd, options.yes);
-      if (result) {
-        return result;
-      }
-    }
+    const orgSlug = options.org;
 
-    // 2. Resolve org — skip interactive resolution if explicitly provided via CLI arg
-    let orgSlug: string;
-    if (options.org) {
-      orgSlug = options.org;
-    } else {
-      const orgResult = await resolveOrgSlug(payload.cwd, options.yes);
-      if (typeof orgResult !== "string") {
-        return orgResult;
-      }
-      orgSlug = orgResult;
-    }
-
-    // 2.5 Bare slug → project name: check if it already exists in the resolved org.
-    //     When a bare slug was passed (options.project set, options.org unset),
-    //     org was auto-resolved above. Verify the project doesn't already exist
-    //     and prompt the user if it does.
-    if (options.project && !options.org) {
-      const existing = await tryGetExistingProject(orgSlug, slug);
-      if (existing) {
-        if (options.yes) {
-          return existing;
-        }
-        const choice = await select({
-          message: `Found existing project '${slug}' in ${orgSlug}.`,
-          options: [
-            {
-              value: "existing" as const,
-              label: `Use existing (${orgSlug}/${slug})`,
-              hint: "Already configured",
-            },
-            {
-              value: "create" as const,
-              label: "Create a new project with this name",
-            },
-          ],
-        });
-        if (isCancel(choice)) {
-          return { ok: false, error: "Cancelled." };
-        }
-        if (choice === "existing") {
-          return existing;
-        }
-        // Fall through to create a new project
-      }
-    }
-
-    // 3. If both org and project were provided explicitly, check if the project
-    //    already exists. This avoids a 409 Conflict from the create API when
-    //    re-running init on an existing Sentry project.
+    // If both org and project are set, check if the project already exists.
+    // This avoids a 409 Conflict when re-running init on an existing project
+    // (e.g. `sentry init acme/my-app` run twice).
     if (options.org && options.project) {
       const existing = await tryGetExistingProject(orgSlug, slug);
       if (existing) {

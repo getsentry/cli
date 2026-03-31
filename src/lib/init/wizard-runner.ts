@@ -22,6 +22,7 @@ import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
 import { terminalLink } from "../formatters/colors.js";
+import { slugify } from "../utils.js";
 import {
   abortIfCancelled,
   STEP_LABELS,
@@ -42,6 +43,7 @@ import {
   handleLocalOp,
   precomputeDirListing,
   resolveOrgSlug,
+  tryGetExistingProject,
 } from "./local-ops.js";
 import type {
   LocalOpResult,
@@ -351,6 +353,46 @@ async function resolvePreSpinnerOptions(
       return null;
     }
     opts = { ...opts, org: orgResult };
+  }
+
+  // Bare slug case: user ran `sentry init my-app` (project set, org not originally
+  // provided). Org was just resolved above. Check if this named project already
+  // exists in the resolved org and prompt the user — must happen before the spinner.
+  if (opts.project && !options.org && opts.org) {
+    const slug = slugify(opts.project);
+    const resolvedOrg = opts.org;
+    if (slug) {
+      try {
+        const existing = await tryGetExistingProject(resolvedOrg, slug);
+        if (existing && !yes) {
+          const choice = await select({
+            message: `Found existing project '${slug}' in ${resolvedOrg}.`,
+            options: [
+              {
+                value: "existing" as const,
+                label: `Use existing (${resolvedOrg}/${slug})`,
+                hint: "Already configured",
+              },
+              {
+                value: "create" as const,
+                label: "Create a new project with this name",
+              },
+            ],
+          });
+          if (isCancel(choice)) {
+            cancel("Setup cancelled.");
+            process.exitCode = 0;
+            return null;
+          }
+          if (choice === "create") {
+            // Clear project so the wizard auto-detects the name from the codebase
+            opts = { ...opts, project: undefined };
+          }
+        }
+      } catch {
+        // API error checking for existing project — proceed and let createSentryProject handle it
+      }
+    }
   }
 
   return opts;
