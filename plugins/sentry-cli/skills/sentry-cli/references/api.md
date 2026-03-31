@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-api
-version: 0.23.0
+version: 0.24.0-dev.0
 description: Make arbitrary Sentry API requests
 requires:
   bins: ["sentry"]
