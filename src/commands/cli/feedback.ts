@@ -25,6 +25,7 @@ export type FeedbackResult = {
 };
 
 export const feedbackCommand = buildCommand({
+  auth: false,
   docs: {
     brief: "Send feedback about the CLI",
     fullDescription:

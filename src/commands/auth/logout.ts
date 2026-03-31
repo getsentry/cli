@@ -28,6 +28,7 @@ export type LogoutResult = {
 };
 
 export const logoutCommand = buildCommand({
+  auth: false,
   docs: {
     brief: "Log out of Sentry",
     fullDescription:

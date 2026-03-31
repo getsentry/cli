@@ -39,6 +39,7 @@ function formatRefreshResult(data: RefreshOutput): string {
 }
 
 export const refreshCommand = buildCommand({
+  auth: false,
   docs: {
     brief: "Refresh your authentication token",
     fullDescription: `

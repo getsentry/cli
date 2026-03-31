@@ -138,6 +138,7 @@ async function verifyCredentials(): Promise<AuthStatusData["verification"]> {
 }
 
 export const statusCommand = buildCommand({
+  auth: false,
   docs: {
     brief: "View authentication status",
     fullDescription:
