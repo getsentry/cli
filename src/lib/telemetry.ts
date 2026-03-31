@@ -359,10 +359,8 @@ export function initSentry(
   // handlers (client report flusher interval, log flush listener). Without
   // this, re-initializing the SDK (e.g., in tests) leaks setInterval handles
   // that keep the event loop alive and prevent the process from exiting.
-  const previousClient = Sentry.getClient();
-  if (previousClient) {
-    previousClient.close(0);
-  }
+  // close(0) removes listeners synchronously; we don't need to await the flush.
+  Sentry.getClient()?.close(0);
 
   // Snapshot beforeExit listeners so we can detect any new ones added by
   // Sentry.init() — particularly the anonymous handler from the
