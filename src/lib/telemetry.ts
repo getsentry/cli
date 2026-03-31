@@ -262,10 +262,6 @@ const EXCLUDED_INTEGRATIONS = new Set([
   "ContextLines", // Reads source files - we rely on uploaded sourcemaps instead
   "LocalVariables", // Captures local variables - adds significant overhead
   "Modules", // Lists all loaded modules - unnecessary for CLI telemetry
-  // ProcessSession registers an anonymous beforeExit handler via setupOnce
-  // that has no cleanup mechanism. For a short-lived CLI process this is
-  // unnecessary and it prevents the Bun test runner from exiting.
-  "ProcessSession",
 ]);
 
 /**
@@ -279,6 +275,7 @@ const LIBRARY_EXCLUDED_INTEGRATIONS = new Set([
   ...EXCLUDED_INTEGRATIONS,
   "OnUncaughtException", // process.on('uncaughtException')
   "OnUnhandledRejection", // process.on('unhandledRejection')
+  "ProcessSession", // process.on('beforeExit') — anonymous handler, no cleanup
   "Http", // diagnostics_channel + trace headers
   "NodeFetch", // diagnostics_channel + trace headers
   "FunctionToString", // wraps Function.prototype.toString
