@@ -27,7 +27,6 @@ export const tokenCommand = buildCommand({
     if (!token) {
       throw new AuthError("not_authenticated");
     }
-
     return yield new CommandOutput(token);
   },
 });

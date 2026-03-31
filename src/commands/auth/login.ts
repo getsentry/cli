@@ -107,6 +107,7 @@ async function handleExistingAuth(force: boolean): Promise<boolean> {
 }
 
 export const loginCommand = buildCommand({
+  auth: false,
   docs: {
     brief: "Authenticate with Sentry",
     fullDescription:
