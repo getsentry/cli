@@ -126,6 +126,9 @@ describe("logoutCommand.func", () => {
     isAuthenticatedSpy.mockReturnValue(true);
     isEnvTokenActiveSpy.mockReturnValue(true);
     // Set env var directly — getActiveEnvVarName() reads env vars via getEnvToken()
+    // Clear SENTRY_AUTH_TOKEN so SENTRY_TOKEN takes priority
+    const savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
+    delete process.env.SENTRY_AUTH_TOKEN;
     process.env.SENTRY_TOKEN = "sntrys_token_456";
     const { context } = createContext();
 
@@ -138,6 +141,9 @@ describe("logoutCommand.func", () => {
       expect(msg).toContain("SENTRY_TOKEN");
     } finally {
       delete process.env.SENTRY_TOKEN;
+      if (savedAuthToken !== undefined) {
+        process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
+      }
     }
     expect(clearAuthSpy).not.toHaveBeenCalled();
   });
