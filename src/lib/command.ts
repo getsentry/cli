@@ -37,7 +37,7 @@ import {
   numberParser as stricliNumberParser,
 } from "@stricli/core";
 import type { Writer } from "../types/index.js";
-import { isAuthenticated } from "./db/auth.js";
+import { getAuthConfig } from "./db/auth.js";
 import { AuthError, CliError, OutputError } from "./errors.js";
 import { warning } from "./formatters/colors.js";
 import { parseFieldsList } from "./formatters/json.js";
@@ -155,8 +155,10 @@ type LocalCommandBuilderArguments<
    * Whether the command requires authentication. Defaults to `true`.
    *
    * When `true` (the default), the command throws `AuthError("not_authenticated")`
-   * before executing if no valid token is found in the DB or env vars. The
-   * auto-auth middleware in `cli.ts` catches this and triggers the login flow.
+   * before executing if no credentials exist at all (no token or refresh token
+   * in the DB or env vars). Expired tokens with a valid refresh token pass the
+   * guard — the API client handles silent refresh. The auto-auth middleware in
+   * `cli.ts` catches the error and triggers the login flow.
    *
    * Set to `false` for commands that intentionally work without a token
    * (e.g. `auth login`, `auth logout`, `auth status`, `help`, `cli upgrade`).
@@ -265,7 +267,8 @@ export function applyLoggingFlags(
  * 5. When `output` has an {@link OutputConfig}, injects `--json` and `--fields`
  *    flags, pre-parses `--fields`, and auto-renders the command's `{ data }` return
  * 6. Enforces authentication by default — throws `AuthError("not_authenticated")`
- *    before the command runs if no valid token exists. Opt out with `auth: false`
+ *    before the command runs if no credentials exist at all (expired tokens with
+ *    a refresh token pass through so the API client can silently refresh). Opt out with `auth: false`
  *    for commands that intentionally work without a token (e.g. `auth login`, `help`)
  *
  * When a command already defines its own `verbose` flag (e.g. the `api` command
@@ -579,7 +582,7 @@ export function buildCommand<
     // `sentry issue list help`). Without this, the auth prompt would fire
     // before the help-recovery path could show the command's help text.
     try {
-      if (requiresAuth && !isAuthenticated()) {
+      if (requiresAuth && !getAuthConfig()) {
         throw new AuthError("not_authenticated");
       }
 
