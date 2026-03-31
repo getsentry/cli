@@ -320,7 +320,11 @@ describe("getCachedDetection", () => {
       'const DSN = "https://changed@o123.ingest.sentry.io/789";'
     );
     const futureSrcMtime = new Date(sourceMtimes["src/app.ts"] + 5000);
-    await utimes(join(testProjectDir, "src/app.ts"), futureSrcMtime, futureSrcMtime);
+    await utimes(
+      join(testProjectDir, "src/app.ts"),
+      futureSrcMtime,
+      futureSrcMtime
+    );
 
     // Cache should be invalidated
     const after = await getCachedDetection(testProjectDir);
@@ -419,7 +423,11 @@ describe("getCachedDetection", () => {
       "export default {}"
     );
     const futureSrcDirMtime = new Date(srcDirMtime + 5000);
-    await utimes(join(testProjectDir, "src"), futureSrcDirMtime, futureSrcDirMtime);
+    await utimes(
+      join(testProjectDir, "src"),
+      futureSrcDirMtime,
+      futureSrcDirMtime
+    );
 
     // Cache should be invalidated because src/ mtime changed
     const after = await getCachedDetection(testProjectDir);
