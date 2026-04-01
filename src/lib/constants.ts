@@ -61,6 +61,28 @@ export const CLI_VERSION =
   typeof SENTRY_CLI_VERSION !== "undefined" ? SENTRY_CLI_VERSION : "0.0.0-dev";
 
 /**
+ * Derive the telemetry environment from the build-injected version string.
+ *
+ * - `"0.0.0-dev"` (no build injection) → `"development"`
+ * - `"X.Y.Z-dev.<timestamp>"` (nightly CI build) → `"nightly"`
+ * - `"X.Y.Z"` (stable release) → `"production"`
+ *
+ * This replaces the previous `process.env.NODE_ENV` approach which broke
+ * when the `getEnv()` indirection was introduced — esbuild's `define` can
+ * only replace literal `process.env.NODE_ENV`, not dynamic property accesses
+ * like `getEnv().NODE_ENV`.
+ */
+export function getCliEnvironment(version: string = CLI_VERSION): string {
+  if (version === "0.0.0-dev") {
+    return "development";
+  }
+  if (version.includes("-dev.")) {
+    return "nightly";
+  }
+  return "production";
+}
+
+/**
  * Generate the User-Agent string for API requests.
  * Format: sentry-cli/<version> (<os>-<arch>) <runtime>/<version>
  *

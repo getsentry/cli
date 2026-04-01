@@ -14,6 +14,7 @@ import { chmodSync, statSync } from "node:fs";
 import * as Sentry from "@sentry/node-core/light";
 import {
   CLI_VERSION,
+  getCliEnvironment,
   getConfiguredSentryUrl,
   SENTRY_CLI_DSN,
 } from "./constants.js";
@@ -354,7 +355,7 @@ export function initSentry(
   options?: { libraryMode?: boolean }
 ): Sentry.LightNodeClient | undefined {
   const libraryMode = options?.libraryMode ?? false;
-  const environment = getEnv().NODE_ENV ?? "development";
+  const environment = getCliEnvironment();
 
   // Close the previous client to clean up its internal timers and beforeExit
   // handlers (client report flusher interval, log flush listener). Without

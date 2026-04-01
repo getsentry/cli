@@ -67,11 +67,10 @@ describe("initSentry", () => {
     expect(client?.getOptions().enabled).toBe(true);
   });
 
-  test("uses process.env.NODE_ENV for environment", () => {
+  test("derives environment from CLI_VERSION via getCliEnvironment()", () => {
     const client = initSentry(true);
-    expect(client?.getOptions().environment).toBe(
-      process.env.NODE_ENV ?? "development"
-    );
+    // In test/dev mode, CLI_VERSION is "0.0.0-dev" → "development"
+    expect(client?.getOptions().environment).toBe("development");
   });
 
   test("uses 0.0.0-dev version when SENTRY_CLI_VERSION is not defined", () => {
