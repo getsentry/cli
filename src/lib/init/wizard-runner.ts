@@ -18,10 +18,12 @@ import {
 } from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 import { captureException, getTraceData } from "@sentry/node-core/light";
+import { listTeams } from "../api-client.js";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
 import { terminalLink } from "../formatters/colors.js";
+import type { SentryTeam } from "../types/index.js";
 import { slugify } from "../utils.js";
 import {
   abortIfCancelled,
@@ -38,7 +40,6 @@ import {
 import { formatError, formatResult } from "./formatters.js";
 import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
-import { listTeams } from "../api-client.js";
 import {
   detectExistingProject,
   handleLocalOp,
@@ -412,12 +413,12 @@ async function resolvePreSpinnerOptions(
         const candidates = memberTeams.length > 0 ? memberTeams : teams;
 
         if (candidates.length === 1) {
-          opts = { ...opts, team: candidates[0]!.slug };
+          opts = { ...opts, team: (candidates[0] as SentryTeam).slug };
         } else if (yes) {
-          opts = { ...opts, team: candidates[0]!.slug };
+          opts = { ...opts, team: (candidates[0] as SentryTeam).slug };
         } else {
           const selected = await select({
-            message: `Which team should own this project?`,
+            message: "Which team should own this project?",
             options: candidates.map((t) => ({
               value: t.slug,
               label: t.slug,
