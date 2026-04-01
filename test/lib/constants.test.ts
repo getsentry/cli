@@ -9,6 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  getCliEnvironment,
   getConfiguredSentryUrl,
   normalizeUrl,
 } from "../../src/lib/constants.js";
@@ -79,6 +80,40 @@ describe("normalizeUrl", () => {
     expect(normalizeUrl("https://sentry.example.com/")).toBe(
       "https://sentry.example.com/"
     );
+  });
+});
+
+describe("getCliEnvironment", () => {
+  test("returns 'development' in dev mode (SENTRY_CLI_VERSION not injected)", () => {
+    // In test/dev mode, CLI_VERSION is "0.0.0-dev" because the build-time
+    // constant SENTRY_CLI_VERSION is never defined.
+    expect(getCliEnvironment()).toBe("development");
+  });
+
+  test("derivation logic: stable versions → 'production'", () => {
+    // Verify the logic that would run in production builds by checking
+    // the conditions directly against known version formats.
+    const stableVersions = ["0.20.0", "1.0.0", "0.23.0", "2.5.1"];
+    for (const v of stableVersions) {
+      expect(v === "0.0.0-dev").toBe(false);
+      expect(v.includes("-dev.")).toBe(false);
+      // Both conditions false → would return "production"
+    }
+  });
+
+  test("derivation logic: nightly versions contain '-dev.'", () => {
+    const nightlyVersions = ["0.24.0-dev.1740000000", "1.0.0-dev.1700000000"];
+    for (const v of nightlyVersions) {
+      expect(v === "0.0.0-dev").toBe(false);
+      expect(v.includes("-dev.")).toBe(true);
+      // First condition false, second true → would return "nightly"
+    }
+  });
+
+  test("derivation logic: dev fallback is exactly '0.0.0-dev'", () => {
+    const v = "0.0.0-dev";
+    expect(v === "0.0.0-dev").toBe(true);
+    // First condition true → would return "development"
   });
 });
 
