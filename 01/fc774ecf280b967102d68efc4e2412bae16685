@@ -1,0 +1,27 @@
+# Plan: Remove "What's new" header from changelog output
+
+## Change
+
+In `src/lib/formatters/human.ts`, line 2144, the `formatChangelog()` function builds a markdown array starting with:
+
+```typescript
+const lines: string[] = ["", "### What's new", ""];
+```
+
+Change this to:
+
+```typescript
+const lines: string[] = [""];
+```
+
+This removes the `### What's new` heading and the blank line after it, but keeps the leading empty string which produces a blank line at the top for readability (separating the changelog from the upgrade status line above it).
+
+## File to modify
+
+- `src/lib/formatters/human.ts` — line 2144 only
+
+## Verification
+
+1. Run `bun run typecheck` — no type changes involved, should pass.
+2. Run `bun test` — no tests reference "What's new" or `formatChangelog` directly, so existing tests should pass unchanged.
+3. Manual: run `bun run dev -- cli upgrade --check` (if a new version is available) to visually confirm the changelog renders without the heading but with a blank line separating it from the status line.
