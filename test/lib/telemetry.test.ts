@@ -17,7 +17,7 @@ import {
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as Sentry from "@sentry/node-core/light";
-import { ApiError, AuthError } from "../../src/lib/errors.js";
+import { ApiError, AuthError, OutputError } from "../../src/lib/errors.js";
 import {
   createTracedDatabase,
   getSentryTracePropagationTargets,
@@ -207,6 +207,30 @@ describe("withTelemetry", () => {
     test("returns result through enabled SDK path", async () => {
       const result = await withTelemetry(() => 42);
       expect(result).toBe(42);
+    });
+
+    test("does not capture OutputError (intentional exit-code mechanism)", async () => {
+      const captureSpy = spyOn(Sentry, "captureException");
+      const error = new OutputError(null);
+      await expect(
+        withTelemetry(() => {
+          throw error;
+        })
+      ).rejects.toThrow(error);
+      expect(captureSpy).not.toHaveBeenCalled();
+      captureSpy.mockRestore();
+    });
+
+    test("does not capture OutputError with data", async () => {
+      const captureSpy = spyOn(Sentry, "captureException");
+      const error = new OutputError({ error: "not found" });
+      await expect(
+        withTelemetry(() => {
+          throw error;
+        })
+      ).rejects.toThrow(error);
+      expect(captureSpy).not.toHaveBeenCalled();
+      captureSpy.mockRestore();
     });
   });
 });
