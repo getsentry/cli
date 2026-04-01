@@ -72,11 +72,11 @@ export const CLI_VERSION =
  * only replace literal `process.env.NODE_ENV`, not dynamic property accesses
  * like `getEnv().NODE_ENV`.
  */
-export function getCliEnvironment(): string {
-  if (CLI_VERSION === "0.0.0-dev") {
+export function getCliEnvironment(version: string = CLI_VERSION): string {
+  if (version === "0.0.0-dev") {
     return "development";
   }
-  if (CLI_VERSION.includes("-dev.")) {
+  if (version.includes("-dev.")) {
     return "nightly";
   }
   return "production";

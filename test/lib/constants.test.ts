@@ -84,36 +84,24 @@ describe("normalizeUrl", () => {
 });
 
 describe("getCliEnvironment", () => {
-  test("returns 'development' in dev mode (SENTRY_CLI_VERSION not injected)", () => {
-    // In test/dev mode, CLI_VERSION is "0.0.0-dev" because the build-time
-    // constant SENTRY_CLI_VERSION is never defined.
+  test("returns 'development' in dev mode (no build injection)", () => {
+    // CLI_VERSION is "0.0.0-dev" when SENTRY_CLI_VERSION is not injected
     expect(getCliEnvironment()).toBe("development");
   });
 
-  test("derivation logic: stable versions → 'production'", () => {
-    // Verify the logic that would run in production builds by checking
-    // the conditions directly against known version formats.
-    const stableVersions = ["0.20.0", "1.0.0", "0.23.0", "2.5.1"];
-    for (const v of stableVersions) {
-      expect(v === "0.0.0-dev").toBe(false);
-      expect(v.includes("-dev.")).toBe(false);
-      // Both conditions false → would return "production"
-    }
+  test("returns 'development' for '0.0.0-dev'", () => {
+    expect(getCliEnvironment("0.0.0-dev")).toBe("development");
   });
 
-  test("derivation logic: nightly versions contain '-dev.'", () => {
-    const nightlyVersions = ["0.24.0-dev.1740000000", "1.0.0-dev.1700000000"];
-    for (const v of nightlyVersions) {
-      expect(v === "0.0.0-dev").toBe(false);
-      expect(v.includes("-dev.")).toBe(true);
-      // First condition false, second true → would return "nightly"
-    }
+  test("returns 'nightly' for nightly versions", () => {
+    expect(getCliEnvironment("0.24.0-dev.1740000000")).toBe("nightly");
+    expect(getCliEnvironment("1.0.0-dev.1700000000")).toBe("nightly");
   });
 
-  test("derivation logic: dev fallback is exactly '0.0.0-dev'", () => {
-    const v = "0.0.0-dev";
-    expect(v === "0.0.0-dev").toBe(true);
-    // First condition true → would return "development"
+  test("returns 'production' for stable versions", () => {
+    expect(getCliEnvironment("0.20.0")).toBe("production");
+    expect(getCliEnvironment("1.0.0")).toBe("production");
+    expect(getCliEnvironment("0.23.0")).toBe("production");
   });
 });
 
