@@ -38,6 +38,7 @@ import {
 import { formatError, formatResult } from "./formatters.js";
 import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
+import { listTeams } from "../api-client.js";
 import {
   detectExistingProject,
   handleLocalOp,
@@ -398,6 +399,41 @@ async function resolvePreSpinnerOptions(
       } catch {
         // API error checking for existing project — proceed and let createSentryProject handle it
       }
+    }
+  }
+
+  // Resolve team upfront when the org has multiple teams.
+  // This avoids a failure minutes later during project creation.
+  if (!opts.team && opts.org) {
+    try {
+      const teams = await listTeams(opts.org);
+      if (teams.length > 1) {
+        const memberTeams = teams.filter((t) => t.isMember === true);
+        const candidates = memberTeams.length > 0 ? memberTeams : teams;
+
+        if (candidates.length === 1) {
+          opts = { ...opts, team: candidates[0]!.slug };
+        } else if (yes) {
+          opts = { ...opts, team: candidates[0]!.slug };
+        } else {
+          const selected = await select({
+            message: `Which team should own this project?`,
+            options: candidates.map((t) => ({
+              value: t.slug,
+              label: t.slug,
+              hint: t.name !== t.slug ? t.name : undefined,
+            })),
+          });
+          if (isCancel(selected)) {
+            cancel("Setup cancelled.");
+            process.exitCode = 0;
+            return null;
+          }
+          opts = { ...opts, team: selected };
+        }
+      }
+    } catch {
+      // Best-effort — let resolveOrCreateTeam handle it later
     }
   }
 
