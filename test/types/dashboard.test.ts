@@ -31,9 +31,11 @@ import {
   SpanAggregateFunctionSchema,
   stripWidgetServerFields,
   TABLE_DISPLAY_TYPES,
+  type TextResult,
   TIMESERIES_DISPLAY_TYPES,
   validateWidgetLayout,
   WIDGET_TYPES,
+  type WidgetDataResult,
   type WidgetType,
 } from "../../src/types/dashboard.js";
 
@@ -877,5 +879,31 @@ describe("display type sets", () => {
     expect(TABLE_DISPLAY_TYPES.has("table")).toBe(true);
     expect(TABLE_DISPLAY_TYPES.has("top_n")).toBe(true);
     expect(TABLE_DISPLAY_TYPES.has("line")).toBe(false);
+  });
+});
+
+describe("TextResult", () => {
+  test("satisfies WidgetDataResult discriminated union", () => {
+    const result: WidgetDataResult = {
+      type: "text",
+      content: "# Hello",
+    } satisfies TextResult;
+    expect(result.type).toBe("text");
+  });
+
+  test("is included in WidgetDataResult union", () => {
+    const results: WidgetDataResult[] = [
+      { type: "timeseries", series: [] },
+      { type: "table", columns: [], rows: [] },
+      { type: "scalar", value: 42 },
+      { type: "text", content: "some markdown" },
+      { type: "unsupported", reason: "not supported" },
+      { type: "error", message: "failed" },
+    ];
+    const textResult = results.find((r) => r.type === "text");
+    expect(textResult).toBeDefined();
+    if (textResult?.type === "text") {
+      expect(textResult.content).toBe("some markdown");
+    }
   });
 });

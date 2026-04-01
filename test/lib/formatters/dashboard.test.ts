@@ -33,6 +33,7 @@ import type {
   ErrorResult,
   ScalarResult,
   TableResult,
+  TextResult,
   TimeseriesResult,
   UnsupportedResult,
 } from "../../../src/types/dashboard.js";
@@ -180,6 +181,14 @@ function makeScalarData(overrides: Partial<ScalarResult> = {}): ScalarResult {
   return {
     type: "scalar",
     value: 1247,
+    ...overrides,
+  };
+}
+
+function makeTextData(overrides: Partial<TextResult> = {}): TextResult {
+  return {
+    type: "text",
+    content: "# Notes\nSome **important** text here.",
     ...overrides,
   };
 }
@@ -1033,6 +1042,55 @@ describe("formatDashboardWithData", () => {
       const output = formatDashboardWithData(data);
       expect(output).toContain("Broken Widget");
       expect(output).toContain("query failed: Query timeout exceeded");
+    });
+  });
+
+  describe("text widget", () => {
+    test("renders markdown content", () => {
+      const data = makeDashboardData({
+        widgets: [
+          makeWidget({
+            title: "Notes",
+            displayType: "text",
+            data: makeTextData({
+              content: "# Hello\nSome **bold** text",
+            }),
+          }),
+        ],
+      });
+      const output = formatDashboardWithData(data);
+      expect(output).toContain("Notes");
+      expect(output).toContain("Hello");
+      expect(output).toContain("bold");
+    });
+
+    test("renders empty placeholder for missing content", () => {
+      const data = makeDashboardData({
+        widgets: [
+          makeWidget({
+            title: "Empty Notes",
+            displayType: "text",
+            data: makeTextData({ content: "" }),
+          }),
+        ],
+      });
+      const output = formatDashboardWithData(data);
+      expect(output).toContain("Empty Notes");
+      expect(output).toContain("(empty)");
+    });
+
+    test("renders empty placeholder for whitespace-only content", () => {
+      const data = makeDashboardData({
+        widgets: [
+          makeWidget({
+            title: "Whitespace Notes",
+            displayType: "text",
+            data: makeTextData({ content: "   \n  " }),
+          }),
+        ],
+      });
+      const output = formatDashboardWithData(data);
+      expect(output).toContain("(empty)");
     });
   });
 

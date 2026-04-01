@@ -922,6 +922,12 @@ export type ScalarResult = {
   unit?: string | null;
 };
 
+/** Markdown text content for text widgets (no API query — content from widget.description) */
+export type TextResult = {
+  type: "text";
+  content: string;
+};
+
 /** Widget type not supported for data fetching */
 export type UnsupportedResult = {
   type: "unsupported";
@@ -941,6 +947,7 @@ export type ErrorResult = {
  * - `timeseries` → sparkline charts
  * - `table` → text table
  * - `scalar` → big number display
+ * - `text` → rendered markdown content
  * - `unsupported` → placeholder message
  * - `error` → error message
  */
@@ -948,6 +955,7 @@ export type WidgetDataResult =
   | TimeseriesResult
   | TableResult
   | ScalarResult
+  | TextResult
   | UnsupportedResult
   | ErrorResult;
 

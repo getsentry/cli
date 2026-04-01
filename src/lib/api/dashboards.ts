@@ -20,6 +20,7 @@ import {
   type ScalarResult,
   TABLE_DISPLAY_TYPES,
   type TableResult,
+  type TextResult,
   TIMESERIES_DISPLAY_TYPES,
   type TimeseriesResult,
   type WidgetDataResult,
@@ -442,6 +443,16 @@ async function queryWidgetData(
   params: WidgetQueryParams
 ): Promise<WidgetDataResult> {
   const { widget } = params;
+
+  // Text widgets carry markdown in `description`, no API query needed
+  if (widget.displayType === "text") {
+    const description = (widget as Record<string, unknown>).description;
+    return {
+      type: "text",
+      content: typeof description === "string" ? description : "",
+    } satisfies TextResult;
+  }
+
   const dataset = mapWidgetTypeToDataset(widget.widgetType);
   if (!dataset) {
     return {
