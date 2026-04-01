@@ -9,7 +9,7 @@
         "@biomejs/biome": "2.3.8",
         "@clack/prompts": "^0.11.0",
         "@mastra/client-js": "^1.4.0",
-        "@sentry/api": "^0.54.0",
+        "@sentry/api": "^0.94.0",
         "@sentry/node-core": "10.47.0",
         "@sentry/sqlish": "^1.0.0",
         "@stricli/auto-complete": "^1.2.4",
@@ -174,7 +174,7 @@
 
     "@opentelemetry/semantic-conventions": ["@opentelemetry/semantic-conventions@1.39.0", "", {}, "sha512-R5R9tb2AXs2IRLNKLBJDynhkfmx7mX0vi8NkhZb3gUkPWHn6HXk5J8iQ/dql0U3ApfWym4kXXmBDRGO+oeOfjg=="],
 
-    "@sentry/api": ["@sentry/api@0.54.0", "", {}, "sha512-ZBvp9Q95WDr2CCEsjUH3hEhm2rCfV8Mta5s7Y+ksXbR6VGmCPtY2Wkm5ISIcb/yYP/HhdQmPg4mYPtYpEti4yQ=="],
+    "@sentry/api": ["@sentry/api@0.94.0", "", {}, "sha512-RWgINgWFUOe3ai5YS7qVQijme8AM0XF4Dv92xe2zLEJ8kDLfh+a8BUGeW7Uf/miVrLGA/d1i2O52f00YiG7xbw=="],
 
     "@sentry/core": ["@sentry/core@10.47.0", "", {}, "sha512-nsYRAx3EWezDut+Zl+UwwP07thh9uY7CfSAi2whTdcJl5hu1nSp2z8bba7Vq/MGbNLnazkd3A+GITBEML924JA=="],
 
