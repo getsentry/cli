@@ -7,7 +7,7 @@
  * Binaries are uploaded to GitHub Releases.
  *
  * Uses a two-step build to produce external sourcemaps for Sentry:
- * 1. Bundle TS → single minified JS + external .map (Bun.build, no compile)
+ * 1. Bundle TS → single minified JS + external .map (esbuild)
  * 2. Compile JS → native binary per platform (Bun.build with compile)
  * 3. Upload .map to Sentry for server-side stack trace resolution
  *
@@ -30,10 +30,12 @@
  *     bin.js.map          (sourcemap, uploaded to Sentry then deleted)
  */
 
+import { mkdirSync } from "node:fs";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 import { processBinary } from "binpunch";
 import { $ } from "bun";
+import { build as esbuild } from "esbuild";
 import pkg from "../package.json";
 import { uploadSourcemaps } from "../src/lib/api/sourcemaps.js";
 import { injectDebugId } from "./debug-id.js";
@@ -78,7 +80,13 @@ const SOURCEMAP_FILE = "dist-bin/bin.js.map";
 
 /**
  * Step 1: Bundle TypeScript sources into a single minified JS file
- * with an external sourcemap.
+ * with an external sourcemap using esbuild.
+ *
+ * Uses esbuild instead of Bun's bundler to avoid Bun's identifier
+ * minification bug (oven-sh/bun#14585 — name collisions in minified
+ * output). esbuild's minifier is more mature and produces correct
+ * identifier mangling plus rich sourcemaps (27k+ names vs Bun's
+ * empty names array).
  *
  * This runs once and is shared by all compile targets. The sourcemap
  * is uploaded to Sentry (never shipped to users) for server-side
@@ -87,38 +95,46 @@ const SOURCEMAP_FILE = "dist-bin/bin.js.map";
 async function bundleJs(): Promise<boolean> {
   console.log("  Step 1: Bundling TypeScript → JS + sourcemap...");
 
-  const result = await Bun.build({
-    entrypoints: ["./src/bin.ts"],
-    outdir: "dist-bin",
-    define: {
-      SENTRY_CLI_VERSION: JSON.stringify(VERSION),
-      SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
-      "process.env.NODE_ENV": JSON.stringify("production"),
-    },
-    sourcemap: "external",
-    // Identifier minification causes name collisions in the `marked` library's
-    // token walker — renderInline gets the same minified name as an unrelated
-    // object, crashing `auth status` and other markdown-rendering paths.
-    // Whitespace + syntax minification still reduces size significantly.
-    minify: { whitespace: true, syntax: true, identifiers: false },
-    target: "bun",
-  });
+  try {
+    const result = await esbuild({
+      entryPoints: ["./src/bin.ts"],
+      bundle: true,
+      outfile: BUNDLE_JS,
+      platform: "node",
+      target: "esnext",
+      format: "esm",
+      external: ["bun:*"],
+      sourcemap: "external",
+      minify: true,
+      metafile: true,
+      define: {
+        SENTRY_CLI_VERSION: JSON.stringify(VERSION),
+        SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
+        "process.env.NODE_ENV": JSON.stringify("production"),
+      },
+    });
 
-  if (!result.success) {
+    const output = result.metafile?.outputs[BUNDLE_JS];
+    const jsSize = (
+      (output?.bytes ?? (await Bun.file(BUNDLE_JS).size)) /
+      1024 /
+      1024
+    ).toFixed(2);
+    const mapSize = (
+      (await Bun.file(SOURCEMAP_FILE).size) /
+      1024 /
+      1024
+    ).toFixed(2);
+    console.log(`    -> ${BUNDLE_JS} (${jsSize} MB)`);
+    console.log(`    -> ${SOURCEMAP_FILE} (${mapSize} MB, for Sentry upload)`);
+    return true;
+  } catch (error) {
     console.error("  Failed to bundle JS:");
-    for (const log of result.logs) {
-      console.error(`    ${log}`);
-    }
+    console.error(
+      `    ${error instanceof Error ? error.message : String(error)}`
+    );
     return false;
   }
-
-  const jsSize = ((await Bun.file(BUNDLE_JS).size) / 1024 / 1024).toFixed(2);
-  const mapSize = ((await Bun.file(SOURCEMAP_FILE).size) / 1024 / 1024).toFixed(
-    2
-  );
-  console.log(`    -> ${BUNDLE_JS} (${jsSize} MB)`);
-  console.log(`    -> ${SOURCEMAP_FILE} (${mapSize} MB, for Sentry upload)`);
-  return true;
 }
 
 /**
@@ -316,8 +332,9 @@ async function build(): Promise<void> {
     console.log(`\nBuilding for ${targets.length} targets`);
   }
 
-  // Clean output directory
+  // Clean and recreate output directory (esbuild requires it to exist)
   await $`rm -rf dist-bin`;
+  mkdirSync("dist-bin", { recursive: true });
 
   console.log("");
 
