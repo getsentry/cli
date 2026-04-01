@@ -13,6 +13,8 @@ export const spanRoute = buildRouteMap({
     list: listCommand,
     view: viewCommand,
   },
+  defaultCommand: "view",
+  aliases: { show: "view" },
   docs: {
     brief: "List and view spans in projects or traces",
     fullDescription:

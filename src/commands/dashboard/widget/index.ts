@@ -9,6 +9,7 @@ export const widgetRoute = buildRouteMap({
     edit: editCommand,
     delete: deleteCommand,
   },
+  aliases: { remove: "delete" },
   docs: {
     brief: "Manage dashboard widgets",
     fullDescription:

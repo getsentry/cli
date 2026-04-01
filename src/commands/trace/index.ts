@@ -15,6 +15,8 @@ export const traceRoute = buildRouteMap({
     view: viewCommand,
     logs: logsCommand,
   },
+  defaultCommand: "view",
+  aliases: { show: "view" },
   docs: {
     brief: "View distributed traces",
     fullDescription:

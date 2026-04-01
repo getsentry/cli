@@ -5,6 +5,8 @@ export const eventRoute = buildRouteMap({
   routes: {
     view: viewCommand,
   },
+  defaultCommand: "view",
+  aliases: { show: "view" },
   docs: {
     brief: "View Sentry events",
     fullDescription:

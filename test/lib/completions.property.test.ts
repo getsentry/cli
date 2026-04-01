@@ -177,8 +177,26 @@ describe("property: binary name parametrization", () => {
 describe("proposeCompletions: Stricli integration", () => {
   const tree = extractCommandTree();
 
-  test("subcommands match extractCommandTree for each group", async () => {
+  // Route groups with defaultCommand set don't propose subcommand names
+  // through proposeCompletions — Stricli treats the empty string as a
+  // potential positional arg for the default command and proposes flags
+  // instead. These groups are tested separately below.
+  const groupsWithDefaultCommand = new Set([
+    "issue",
+    "event",
+    "org",
+    "project",
+    "dashboard",
+    "trace",
+    "span",
+    "log",
+  ]);
+
+  test("subcommands match extractCommandTree for each group without defaultCommand", async () => {
     for (const group of tree.groups) {
+      if (groupsWithDefaultCommand.has(group.name)) {
+        continue;
+      }
       const completions = await proposeCompletions(
         app,
         [group.name, ""],
@@ -190,9 +208,31 @@ describe("proposeCompletions: Stricli integration", () => {
     }
   });
 
+  test("groups with defaultCommand propose flags for the default view command", async () => {
+    for (const group of tree.groups) {
+      if (!groupsWithDefaultCommand.has(group.name)) {
+        continue;
+      }
+      const completions = await proposeCompletions(
+        app,
+        [group.name, ""],
+        completionContext
+      );
+      const actual = completions.map((c) => c.completion);
+      // With defaultCommand: "view", Stricli proposes flags for the view
+      // command rather than subcommand names. Verify it returns flags.
+      for (const completion of actual) {
+        expect(completion.startsWith("--")).toBe(true);
+      }
+    }
+  });
+
   test("partial prefix filters subcommands correctly", async () => {
     for (const group of tree.groups) {
-      if (group.subcommands.length === 0) {
+      if (
+        group.subcommands.length === 0 ||
+        groupsWithDefaultCommand.has(group.name)
+      ) {
         continue;
       }
       // Pick the first subcommand's first character as prefix

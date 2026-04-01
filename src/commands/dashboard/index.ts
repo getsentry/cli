@@ -11,6 +11,8 @@ export const dashboardRoute = buildRouteMap({
     create: createCommand,
     widget: widgetRoute,
   },
+  defaultCommand: "view",
+  aliases: { show: "view" },
   docs: {
     brief: "Manage Sentry dashboards",
     fullDescription:

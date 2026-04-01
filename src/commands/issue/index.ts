@@ -11,6 +11,8 @@ export const issueRoute = buildRouteMap({
     plan: planCommand,
     view: viewCommand,
   },
+  defaultCommand: "view",
+  aliases: { show: "view" },
   docs: {
     brief: "Manage Sentry issues",
     fullDescription:
