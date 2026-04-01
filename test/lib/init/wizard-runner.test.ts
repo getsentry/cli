@@ -26,6 +26,8 @@ import * as banner from "../../../src/lib/banner.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as auth from "../../../src/lib/db/auth.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as userDb from "../../../src/lib/db/user.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as fmt from "../../../src/lib/init/formatters.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as git from "../../../src/lib/init/git.js";
@@ -38,6 +40,8 @@ import type {
   WorkflowRunResult,
 } from "../../../src/lib/init/types.js";
 import { runWizard } from "../../../src/lib/init/wizard-runner.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as sentryUrls from "../../../src/lib/sentry-urls.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -82,6 +86,9 @@ let handleLocalOpSpy: ReturnType<typeof spyOn>;
 let precomputeDirListingSpy: ReturnType<typeof spyOn>;
 let handleInteractiveSpy: ReturnType<typeof spyOn>;
 let listTeamsSpy: ReturnType<typeof spyOn>;
+let createTeamSpy: ReturnType<typeof spyOn>;
+let getUserInfoSpy: ReturnType<typeof spyOn>;
+let getSentryBaseUrlSpy: ReturnType<typeof spyOn>;
 
 // MastraClient
 let getWorkflowSpy: ReturnType<typeof spyOn>;
@@ -189,6 +196,20 @@ beforeEach(() => {
     action: "continue",
   });
   listTeamsSpy = spyOn(apiClient, "listTeams").mockResolvedValue([]);
+  createTeamSpy = spyOn(apiClient, "createTeam").mockResolvedValue({
+    id: "1",
+    slug: "test-team",
+    name: "test-team",
+    isMember: true,
+  });
+  getUserInfoSpy = spyOn(userDb, "getUserInfo").mockReturnValue({
+    userId: "1",
+    username: "testuser",
+    name: "Test User",
+  });
+  getSentryBaseUrlSpy = spyOn(sentryUrls, "getSentryBaseUrl").mockReturnValue(
+    "https://sentry.io"
+  );
 
   // stderr spy (suppress banner output)
   stderrSpy = spyOn(process.stderr, "write").mockImplementation(
@@ -221,6 +242,9 @@ afterEach(() => {
   precomputeDirListingSpy.mockRestore();
   handleInteractiveSpy.mockRestore();
   listTeamsSpy.mockRestore();
+  createTeamSpy.mockRestore();
+  getUserInfoSpy.mockRestore();
+  getSentryBaseUrlSpy.mockRestore();
 
   stderrSpy.mockRestore();
   getWorkflowSpy.mockRestore();

@@ -19,11 +19,13 @@ import {
 import { MastraClient } from "@mastra/client-js";
 import { captureException, getTraceData } from "@sentry/node-core/light";
 import type { SentryTeam } from "../../types/index.js";
-import { listTeams } from "../api-client.js";
+import { createTeam, listTeams } from "../api-client.js";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
+import { getUserInfo } from "../db/user.js";
 import { terminalLink } from "../formatters/colors.js";
+import { getSentryBaseUrl } from "../sentry-urls.js";
 import { slugify } from "../utils.js";
 import {
   abortIfCancelled,
@@ -286,6 +288,16 @@ async function preamble(
  * @returns Updated options with org and project resolved, or `null` to abort.
  *          When `null` is returned, `process.exitCode` is already set.
  */
+/**
+ * Derive a team slug for auto-creation when the org has no teams.
+ * Uses the user's username (from login cache), falling back to the org slug.
+ */
+function deriveTeamSlug(orgSlug: string): string {
+  const user = getUserInfo();
+  const raw = user?.username || orgSlug;
+  return slugify(raw) || "default";
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard pre-flight branches are inherently nested
 async function resolvePreSpinnerOptions(
   options: WizardOptions
@@ -403,12 +415,31 @@ async function resolvePreSpinnerOptions(
     }
   }
 
-  // Resolve team upfront when the org has multiple teams.
-  // This avoids a failure minutes later during project creation.
+  // Resolve team upfront so failures surface before the AI workflow starts.
   if (!opts.team && opts.org) {
     try {
       const teams = await listTeams(opts.org);
-      if (teams.length > 1) {
+
+      if (teams.length === 0) {
+        // New org with no teams — auto-create one
+        const teamSlug = deriveTeamSlug(opts.org);
+        try {
+          const created = await createTeam(opts.org, teamSlug);
+          opts = { ...opts, team: created.slug };
+        } catch {
+          const teamsUrl = `${getSentryBaseUrl()}/settings/${opts.org}/teams/`;
+          log.error(
+            "No teams in your organization.\n" +
+              `Create one at ${terminalLink(teamsUrl)} and run sentry init again.`
+          );
+          cancel("Setup failed.");
+          process.exitCode = 1;
+          return null;
+        }
+      } else if (teams.length === 1) {
+        opts = { ...opts, team: (teams[0] as SentryTeam).slug };
+      } else {
+        // Multiple teams — prefer teams the user belongs to
         const memberTeams = teams.filter((t) => t.isMember === true);
         const candidates = memberTeams.length > 0 ? memberTeams : teams;
 
