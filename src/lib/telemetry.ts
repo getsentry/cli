@@ -115,6 +115,11 @@ export async function withTelemetry<T>(
       Sentry.metrics.distribution("completion.duration_ms", entry.durationMs, {
         attributes: { command_path: entry.commandPath },
       });
+      Sentry.metrics.distribution(
+        "completion.result_count",
+        entry.resultCount,
+        { attributes: { command_path: entry.commandPath } }
+      );
     }
   } catch {
     // Queue flush is non-essential

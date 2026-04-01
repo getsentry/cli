@@ -60,7 +60,7 @@ import {
   parseLogLevel,
   setLogLevel,
 } from "./logger.js";
-import { setArgsContext, setFlagContext } from "./telemetry.js";
+import { setArgsContext, setFlagContext, withTracing } from "./telemetry.js";
 
 /**
  * Parse a string input as a number.
@@ -586,20 +586,29 @@ export function buildCommand<
         throw new AuthError("not_authenticated");
       }
 
-      const generator = originalFunc.call(
-        this,
-        cleanFlags as FLAGS,
-        ...(args as unknown as ARGS)
+      // Execution phase: core command logic, API calls, org/project resolution
+      const returned = await withTracing(
+        "exec",
+        "cli.command.exec",
+        async () => {
+          const generator = originalFunc.call(
+            this,
+            cleanFlags as FLAGS,
+            ...(args as unknown as ARGS)
+          );
+          let result = await generator.next();
+          while (!result.done) {
+            handleYieldedValue(stdout, result.value, cleanFlags, renderer);
+            result = await generator.next();
+          }
+          return result.value as CommandReturn | undefined;
+        }
       );
-      let result = await generator.next();
-      while (!result.done) {
-        handleYieldedValue(stdout, result.value, cleanFlags, renderer);
-        result = await generator.next();
-      }
 
-      // Generator completed successfully — finalize with hint.
-      const returned = result.value as CommandReturn | undefined;
-      writeFinalization(stdout, returned?.hint, cleanFlags.json, renderer);
+      // Render phase: output finalization
+      await withTracing("render", "cli.command.render", () => {
+        writeFinalization(stdout, returned?.hint, cleanFlags.json, renderer);
+      });
     } catch (err) {
       // Finalize before error handling to close streaming state
       // (e.g., table footer). No hint since the generator didn't
