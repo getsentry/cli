@@ -23,7 +23,6 @@ import { createTeam, listTeams } from "../api-client.js";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
-import { getUserInfo } from "../db/user.js";
 import { terminalLink } from "../formatters/colors.js";
 import { getSentryBaseUrl } from "../sentry-urls.js";
 import { slugify } from "../utils.js";
@@ -290,12 +289,9 @@ async function preamble(
  */
 /**
  * Derive a team slug for auto-creation when the org has no teams.
- * Uses the user's username (from login cache), falling back to the org slug.
  */
-function deriveTeamSlug(orgSlug: string): string {
-  const user = getUserInfo();
-  const raw = user?.username || orgSlug;
-  return slugify(raw) || "default";
+function deriveTeamSlug(): string {
+  return "default";
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard pre-flight branches are inherently nested
@@ -422,7 +418,7 @@ async function resolvePreSpinnerOptions(
 
       if (teams.length === 0) {
         // New org with no teams — auto-create one
-        const teamSlug = deriveTeamSlug(opts.org);
+        const teamSlug = deriveTeamSlug();
         try {
           const created = await createTeam(opts.org, teamSlug);
           opts = { ...opts, team: created.slug };
