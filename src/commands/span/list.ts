@@ -57,17 +57,32 @@ type ListFlags = {
   readonly fields?: string[];
 };
 
-/** Maps output field names to their API field equivalents in SPAN_FIELDS */
-const OUTPUT_TO_API_FIELD: Record<string, string> = {
-  span_id: "id",
-  parent_span_id: "parent_span",
-  op: "span.op",
-  duration_ms: "span.duration",
-  start_timestamp: "timestamp",
-  project_slug: "project",
-  description: "description",
-  transaction: "transaction",
-};
+/**
+ * All field names already covered by the default SPAN_FIELDS request —
+ * both the raw API names (e.g., `id`, `span.op`) and their output-side
+ * aliases (e.g., `span_id`, `op`) produced by `spanListItemToFlatSpan`.
+ * Any `--fields` value NOT in this set is treated as a custom attribute
+ * and forwarded to the API as an extra `field` parameter.
+ */
+const KNOWN_SPAN_FIELDS = new Set([
+  // API names (in SPAN_FIELDS)
+  "id",
+  "parent_span",
+  "span.op",
+  "description",
+  "span.duration",
+  "timestamp",
+  "project",
+  "transaction",
+  "trace",
+  // Output aliases (from spanListItemToFlatSpan)
+  "span_id",
+  "parent_span_id",
+  "op",
+  "duration_ms",
+  "start_timestamp",
+  "project_slug",
+]);
 
 /** Field group aliases that expand to curated field sets */
 const FIELD_GROUP_ALIASES: Record<string, string[]> = {
@@ -83,8 +98,7 @@ const FIELD_GROUP_ALIASES: Record<string, string[]> = {
  * Extract field names from --fields that need additional API requests.
  *
  * Expands group aliases (e.g., `gen_ai` → four OTEL attribute fields) and
- * filters out known standard output names and their API equivalents so only
- * truly extra API fields are returned.
+ * filters out names already covered by the default SPAN_FIELDS request.
  *
  * @param fields - Raw --fields values from the CLI
  * @returns Deduplicated extra API field names, or undefined if none are needed
@@ -96,22 +110,24 @@ function extractExtraApiFields(
     return;
   }
 
-  const expanded: string[] = [];
+  const expanded = new Set<string>();
   for (const f of fields) {
     const alias = FIELD_GROUP_ALIASES[f];
     if (alias) {
-      expanded.push(...alias);
+      for (const a of alias) {
+        expanded.add(a);
+      }
     } else {
-      expanded.push(f);
+      expanded.add(f);
     }
   }
 
-  const knownOutputNames = new Set(Object.keys(OUTPUT_TO_API_FIELD));
-  const knownApiNames = new Set(Object.values(OUTPUT_TO_API_FIELD));
-  const extra = expanded.filter(
-    (f) => !(knownOutputNames.has(f) || knownApiNames.has(f))
-  );
-  return extra.length > 0 ? [...new Set(extra)] : undefined;
+  // Remove anything already requested by SPAN_FIELDS or its output aliases
+  for (const known of KNOWN_SPAN_FIELDS) {
+    expanded.delete(known);
+  }
+
+  return expanded.size > 0 ? Array.from(expanded) : undefined;
 }
 
 /** Accepted values for the --sort flag (matches trace list) */

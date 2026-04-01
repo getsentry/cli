@@ -27,6 +27,46 @@ import {
 // Trace item (span) detail types
 // ---------------------------------------------------------------------------
 
+/**
+ * Attribute names from the trace-items detail endpoint that duplicate
+ * fields already shown in the standard span output (KV table, JSON core
+ * fields) or are EAP storage internals with no diagnostic value.
+ *
+ * Shared between `span view` (JSON `data` dict) and `formatSpanDetails`
+ * (human KV rows) to keep filtering consistent.
+ */
+export const REDUNDANT_DETAIL_ATTRS = new Set([
+  // Timing / storage internals
+  "precise.start_ts",
+  "precise.finish_ts",
+  "received",
+  "hash",
+  "project_id",
+  "client_sample_rate",
+  "server_sample_rate",
+  // Already shown in standard span fields
+  "is_transaction",
+  "span.duration",
+  "span.self_time",
+  "span.op",
+  "span.name",
+  "span.description",
+  "span.category",
+  "parent_span",
+  "transaction",
+  "transaction.op",
+  "transaction.event_id",
+  "transaction.span_id",
+  "trace",
+  "trace.status",
+  "segment.name",
+  "origin",
+  "platform",
+  "sdk.name",
+  "sdk.version",
+  "environment",
+]);
+
 /** A single attribute returned by the trace-items detail endpoint */
 export type TraceItemAttribute = {
   name: string;
@@ -258,7 +298,7 @@ export async function listSpans(
   const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
 
   const fields = options.extraFields?.length
-    ? [...SPAN_FIELDS, ...options.extraFields]
+    ? SPAN_FIELDS.concat(options.extraFields)
     : SPAN_FIELDS;
 
   const regionUrl = await resolveOrgRegion(orgSlug);

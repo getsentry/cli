@@ -8,7 +8,11 @@ import pLimit from "p-limit";
 
 import type { SentryContext } from "../../context.js";
 import type { TraceItemDetail } from "../../lib/api-client.js";
-import { getDetailedTrace, getSpanDetails } from "../../lib/api-client.js";
+import {
+  getDetailedTrace,
+  getSpanDetails,
+  REDUNDANT_DETAIL_ATTRS,
+} from "../../lib/api-client.js";
 import { spansFlag } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
@@ -45,67 +49,21 @@ const log = logger.withTag("span.view");
 const SPAN_DETAIL_CONCURRENCY = 5;
 
 /**
- * Internal/low-value attribute names to exclude from human output.
- * These are EAP storage internals that clutter the display without
- * adding diagnostic value. They remain accessible via `--json --fields data`.
- */
-const INTERNAL_ATTRS = new Set([
-  "precise.start_ts",
-  "precise.finish_ts",
-  "received",
-  "hash",
-  "project_id",
-  "client_sample_rate",
-  "server_sample_rate",
-  "is_transaction",
-  "span.duration",
-  "span.self_time",
-  "span.op",
-  "span.name",
-  "span.description",
-  "span.category",
-  "parent_span",
-  "transaction",
-  "transaction.op",
-  "transaction.event_id",
-  "transaction.span_id",
-  "trace",
-  "trace.status",
-  "segment.name",
-  "origin",
-  "platform",
-  "sdk.name",
-  "sdk.version",
-  "user",
-  "user.ip",
-  "user.geo.city",
-  "user.geo.country_code",
-  "user.geo.region",
-  "user.geo.subdivision",
-  "user.geo.subregion",
-  "environment",
-]);
-
-/**
  * Convert a trace-items attribute array into a key-value dict,
- * optionally filtering out internal attributes.
+ * filtering out attributes already shown in the standard span fields
+ * and EAP storage internals (tags[], precise timestamps, etc.).
  */
 function attributesToDict(
-  attributes: TraceItemDetail["attributes"],
-  filterInternal: boolean
+  attributes: TraceItemDetail["attributes"]
 ): Record<string, unknown> {
-  const dict: Record<string, unknown> = {};
-  for (const attr of attributes) {
-    if (filterInternal && INTERNAL_ATTRS.has(attr.name)) {
-      continue;
-    }
-    // Skip tags[] wrapper attributes — these are internal index keys
-    if (attr.name.startsWith("tags[")) {
-      continue;
-    }
-    dict[attr.name] = attr.value;
-  }
-  return dict;
+  return Object.fromEntries(
+    attributes
+      .filter(
+        (a) =>
+          !(REDUNDANT_DETAIL_ATTRS.has(a.name) || a.name.startsWith("tags["))
+      )
+      .map((a) => [a.name, a.value])
+  );
 }
 
 type ViewFlags = {
@@ -265,7 +223,7 @@ function buildJsonResults(
     // Merge full attribute data from the trace-items endpoint
     const detail = details?.get(r.spanId);
     if (detail) {
-      const data = attributesToDict(detail.attributes, true);
+      const data = attributesToDict(detail.attributes);
       if (Object.keys(data).length > 0) {
         base.data = data;
       }
@@ -332,23 +290,19 @@ async function fetchSpanDetails(
   const limit = pLimit(SPAN_DETAIL_CONCURRENCY);
   const details = new Map<string, TraceItemDetail>();
 
-  await Promise.all(
-    results.map((r) =>
-      limit(async () => {
-        try {
-          const detail = await getSpanDetails(
-            org,
-            r.span.project_slug || project,
-            r.spanId,
-            traceId
-          );
-          details.set(r.spanId, detail);
-        } catch {
-          log.warn(`Could not fetch details for span ${r.spanId}`);
-        }
-      })
-    )
-  );
+  await limit.map(results, async (r) => {
+    try {
+      const detail = await getSpanDetails(
+        org,
+        r.span.project_slug || project,
+        r.spanId,
+        traceId
+      );
+      details.set(r.spanId, detail);
+    } catch {
+      log.warn(`Could not fetch details for span ${r.spanId}`);
+    }
+  });
 
   return details;
 }

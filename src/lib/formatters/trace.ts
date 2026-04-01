@@ -11,6 +11,7 @@ import type {
   TransactionListItem,
 } from "../../types/index.js";
 import type { TraceItemDetail } from "../api/traces.js";
+import { REDUNDANT_DETAIL_ATTRS } from "../api/traces.js";
 import {
   colorTag,
   escapeMarkdownCell,
@@ -594,49 +595,15 @@ export function formatSpanDetails(
 const MAX_DISPLAY_ATTRS = 10;
 
 /**
- * Attribute names that duplicate fields already shown in `buildSpanKvRows`
- * or are EAP storage internals with no diagnostic value.
- */
-const HIDDEN_HUMAN_ATTRS = new Set([
-  "precise.start_ts",
-  "precise.finish_ts",
-  "received",
-  "hash",
-  "project_id",
-  "client_sample_rate",
-  "server_sample_rate",
-  "is_transaction",
-  "span.duration",
-  "span.self_time",
-  "span.op",
-  "span.name",
-  "span.description",
-  "span.category",
-  "parent_span",
-  "transaction",
-  "transaction.op",
-  "transaction.event_id",
-  "transaction.span_id",
-  "trace",
-  "trace.status",
-  "segment.name",
-  "origin",
-  "platform",
-  "sdk.name",
-  "sdk.version",
-  "environment",
-]);
-
-/**
  * Append notable custom attributes from a TraceItemDetail to KV rows.
- * Filters out internal/storage attributes and truncates after a limit.
+ * Filters out redundant/internal attributes and truncates after a limit.
  */
 function appendAttributeRows(
   kvRows: [string, string][],
   detail: TraceItemDetail
 ): void {
   const attrs = detail.attributes.filter(
-    (a) => !(HIDDEN_HUMAN_ATTRS.has(a.name) || a.name.startsWith("tags["))
+    (a) => !(REDUNDANT_DETAIL_ATTRS.has(a.name) || a.name.startsWith("tags["))
   );
   if (attrs.length === 0) {
     return;
