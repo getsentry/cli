@@ -15,8 +15,6 @@
 import type { Dirent } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
-// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
-import * as Sentry from "@sentry/node-core/light";
 import ignore, { type Ignore } from "ignore";
 import pLimit from "p-limit";
 import { DEFAULT_SENTRY_HOST, getConfiguredSentryUrl } from "../constants.js";
@@ -689,9 +687,6 @@ function scanDirectory(
       const { files, dirMtimes } = collectResult;
 
       span.setAttribute("dsn.files_collected", files.length);
-      Sentry.metrics.distribution("dsn.files_collected", files.length, {
-        attributes: { stop_on_first: stopOnFirst },
-      });
 
       if (files.length === 0) {
         return { dsns: [], sourceMtimes: {}, dirMtimes };
@@ -707,13 +702,6 @@ function scanDirectory(
       span.setAttributes({
         "dsn.files_scanned": filesScanned,
         "dsn.dsns_found": results.size,
-      });
-
-      Sentry.metrics.distribution("dsn.files_scanned", filesScanned, {
-        attributes: { stop_on_first: stopOnFirst },
-      });
-      Sentry.metrics.distribution("dsn.dsns_found", results.size, {
-        attributes: { stop_on_first: stopOnFirst },
       });
 
       return { dsns: [...results.values()], sourceMtimes, dirMtimes };

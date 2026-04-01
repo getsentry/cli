@@ -115,6 +115,11 @@ export async function withTelemetry<T>(
       Sentry.metrics.distribution("completion.duration_ms", entry.durationMs, {
         attributes: { command_path: entry.commandPath },
       });
+      Sentry.metrics.distribution(
+        "completion.result_count",
+        entry.resultCount,
+        { attributes: { command_path: entry.commandPath } }
+      );
     }
   } catch {
     // Queue flush is non-essential
@@ -608,6 +613,28 @@ export function setArgsContext(args: readonly unknown[]): void {
     ),
     count: args.length,
   });
+}
+
+/**
+ * Set phase timing attributes on the active span.
+ *
+ * Records how long each phase of command execution took, enabling
+ * dashboard breakdown of pre-command (flag parsing, context setup),
+ * execution (core logic + API calls), and render (output formatting) phases.
+ *
+ * @param phases - Timing data for each command phase in milliseconds
+ */
+export function setPhaseTimingAttributes(phases: {
+  preMs: number;
+  execMs: number;
+  renderMs: number;
+}): void {
+  const span = Sentry.getActiveSpan();
+  if (span) {
+    span.setAttribute("phase.pre_ms", Math.round(phases.preMs));
+    span.setAttribute("phase.exec_ms", Math.round(phases.execMs));
+    span.setAttribute("phase.render_ms", Math.round(phases.renderMs));
+  }
 }
 
 /**

@@ -52,7 +52,7 @@ import {
 import { fuzzyMatch } from "./fuzzy.js";
 import { logger } from "./logger.js";
 import { resolveEffectiveOrg } from "./region.js";
-import { setOrgProjectContext } from "./telemetry.js";
+import { setOrgProjectContext, withTracingSpan } from "./telemetry.js";
 import { isAllDigits } from "./utils.js";
 
 const log = logger.withTag("resolve-target");
@@ -766,93 +766,111 @@ async function resolveDsnsWithTimeout(
 export async function resolveAllTargets(
   options: ResolveOptions
 ): Promise<ResolvedTargets> {
-  const { org, project, cwd } = options;
+  return await withTracingSpan(
+    "resolveAllTargets",
+    "resolve",
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Priority-based resolution cascade requires sequential checks.
+    async (span) => {
+      const { org, project, cwd } = options;
 
-  // 1. CLI flags take priority (both must be provided together)
-  if (org && project) {
-    setOrgProjectContext([org], [project]);
-    return {
-      targets: [
-        {
-          org,
-          project,
-          orgDisplay: org,
-          projectDisplay: project,
-        },
-      ],
-    };
-  }
+      // 1. CLI flags take priority (both must be provided together)
+      if (org && project) {
+        span.setAttribute("resolve.method", "flags");
+        setOrgProjectContext([org], [project]);
+        return {
+          targets: [
+            {
+              org,
+              project,
+              orgDisplay: org,
+              projectDisplay: project,
+            },
+          ],
+        };
+      }
 
-  // Error if only one flag is provided
-  if (org || project) {
-    throw new ContextError(
-      "Organization and project",
-      options.usageHint ?? "sentry <command> <org>/<project>"
-    );
-  }
+      // Error if only one flag is provided
+      if (org || project) {
+        throw new ContextError(
+          "Organization and project",
+          options.usageHint ?? "sentry <command> <org>/<project>"
+        );
+      }
 
-  log.debug("No explicit org/project flags provided, trying env vars");
+      log.debug("No explicit org/project flags provided, trying env vars");
 
-  // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
-  const envVars = resolveFromEnvVars();
-  if (envVars?.project) {
-    setOrgProjectContext([envVars.org], [envVars.project]);
-    return {
-      targets: [
-        {
-          org: envVars.org,
-          project: envVars.project,
-          orgDisplay: envVars.org,
-          projectDisplay: envVars.project,
-          detectedFrom: envVars.detectedFrom,
-        },
-      ],
-    };
-  }
+      // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
+      const envVars = resolveFromEnvVars();
+      if (envVars?.project) {
+        span.setAttribute("resolve.method", "env_vars");
+        setOrgProjectContext([envVars.org], [envVars.project]);
+        return {
+          targets: [
+            {
+              org: envVars.org,
+              project: envVars.project,
+              orgDisplay: envVars.org,
+              projectDisplay: envVars.project,
+              detectedFrom: envVars.detectedFrom,
+            },
+          ],
+        };
+      }
 
-  log.debug("No SENTRY_ORG/SENTRY_PROJECT env vars, trying config defaults");
-
-  // 3. Config defaults
-  const defaultOrg = getDefaultOrganization();
-  const defaultProject = getDefaultProject();
-  if (defaultOrg && defaultProject) {
-    setOrgProjectContext([defaultOrg], [defaultProject]);
-    return {
-      targets: [
-        {
-          org: defaultOrg,
-          project: defaultProject,
-          orgDisplay: defaultOrg,
-          projectDisplay: defaultProject,
-        },
-      ],
-    };
-  }
-
-  log.debug("No config defaults set, trying DSN auto-detection");
-
-  // 4. DSN auto-detection (may find multiple in monorepos)
-  const detection = await detectAllDsns(cwd);
-
-  if (detection.all.length === 0) {
-    log.debug(
-      "No DSNs found in source code or env files, trying directory name inference"
-    );
-    // 5. Fallback: infer from directory name
-    const result = await inferFromDirectoryName(cwd);
-    if (result.targets.length === 0) {
       log.debug(
-        "Directory name inference found no matching projects — auto-detection failed"
+        "No SENTRY_ORG/SENTRY_PROJECT env vars, trying config defaults"
       );
-    } else {
-      const uniqueOrgs = [...new Set(result.targets.map((t) => t.org))];
-      const uniqueProjects = [...new Set(result.targets.map((t) => t.project))];
-      setOrgProjectContext(uniqueOrgs, uniqueProjects);
-    }
-    return result;
-  }
 
-  return resolveDetectedDsns(detection);
+      // 3. Config defaults
+      const defaultOrg = getDefaultOrganization();
+      const defaultProject = getDefaultProject();
+      if (defaultOrg && defaultProject) {
+        span.setAttribute("resolve.method", "defaults");
+        setOrgProjectContext([defaultOrg], [defaultProject]);
+        return {
+          targets: [
+            {
+              org: defaultOrg,
+              project: defaultProject,
+              orgDisplay: defaultOrg,
+              projectDisplay: defaultProject,
+            },
+          ],
+        };
+      }
+
+      log.debug("No config defaults set, trying DSN auto-detection");
+
+      // 4. DSN auto-detection (may find multiple in monorepos)
+      const detection = await detectAllDsns(cwd);
+
+      if (detection.all.length === 0) {
+        log.debug(
+          "No DSNs found in source code or env files, trying directory name inference"
+        );
+        // 5. Fallback: infer from directory name
+        const result = await inferFromDirectoryName(cwd);
+        if (result.targets.length === 0) {
+          span.setAttribute("resolve.method", "none");
+          log.debug(
+            "Directory name inference found no matching projects — auto-detection failed"
+          );
+        } else {
+          span.setAttribute("resolve.method", "inference");
+          const uniqueOrgs = [...new Set(result.targets.map((t) => t.org))];
+          const uniqueProjects = [
+            ...new Set(result.targets.map((t) => t.project)),
+          ];
+          setOrgProjectContext(uniqueOrgs, uniqueProjects);
+        }
+        return result;
+      }
+
+      span.setAttribute("resolve.method", "dsn");
+      return resolveDetectedDsns(detection);
+    },
+    { "resolve.mode": "multi" }
+  );
 }
 
 /**
@@ -950,75 +968,93 @@ async function resolveDetectedDsns(
 export async function resolveOrgAndProject(
   options: ResolveOptions
 ): Promise<ResolvedTarget | null> {
-  const { org, project, cwd } = options;
+  return await withTracingSpan(
+    "resolveOrgAndProject",
+    "resolve",
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Priority-based resolution cascade requires sequential checks.
+    async (span) => {
+      const { org, project, cwd } = options;
 
-  // 1. CLI flags take priority (both must be provided together)
-  if (org && project) {
-    return withTelemetryContext({
-      org,
-      project,
-      orgDisplay: org,
-      projectDisplay: project,
-    });
-  }
+      // 1. CLI flags take priority (both must be provided together)
+      if (org && project) {
+        span.setAttribute("resolve.method", "flags");
+        return withTelemetryContext({
+          org,
+          project,
+          orgDisplay: org,
+          projectDisplay: project,
+        });
+      }
 
-  // Error if only one flag is provided
-  if (org || project) {
-    throw new ContextError(
-      "Organization and project",
-      options.usageHint ?? "sentry <command> <org>/<project>"
-    );
-  }
+      // Error if only one flag is provided
+      if (org || project) {
+        throw new ContextError(
+          "Organization and project",
+          options.usageHint ?? "sentry <command> <org>/<project>"
+        );
+      }
 
-  // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
-  const envVars = resolveFromEnvVars();
-  if (envVars?.project) {
-    return withTelemetryContext({
-      org: envVars.org,
-      project: envVars.project,
-      orgDisplay: envVars.org,
-      projectDisplay: envVars.project,
-      detectedFrom: envVars.detectedFrom,
-    });
-  }
+      // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
+      const envVars = resolveFromEnvVars();
+      if (envVars?.project) {
+        span.setAttribute("resolve.method", "env_vars");
+        return withTelemetryContext({
+          org: envVars.org,
+          project: envVars.project,
+          orgDisplay: envVars.org,
+          projectDisplay: envVars.project,
+          detectedFrom: envVars.detectedFrom,
+        });
+      }
 
-  // 3. Config defaults
-  const defaultOrg = getDefaultOrganization();
-  const defaultProject = getDefaultProject();
-  if (defaultOrg && defaultProject) {
-    return withTelemetryContext({
-      org: defaultOrg,
-      project: defaultProject,
-      orgDisplay: defaultOrg,
-      projectDisplay: defaultProject,
-    });
-  }
+      // 3. Config defaults
+      const defaultOrg = getDefaultOrganization();
+      const defaultProject = getDefaultProject();
+      if (defaultOrg && defaultProject) {
+        span.setAttribute("resolve.method", "defaults");
+        return withTelemetryContext({
+          org: defaultOrg,
+          project: defaultProject,
+          orgDisplay: defaultOrg,
+          projectDisplay: defaultProject,
+        });
+      }
 
-  // 4. DSN auto-detection
-  try {
-    const dsnResult = await resolveFromDsn(cwd);
-    if (dsnResult) {
-      return withTelemetryContext(dsnResult);
-    }
-  } catch {
-    // Fall through to directory inference
-  }
+      // 4. DSN auto-detection
+      try {
+        const dsnResult = await resolveFromDsn(cwd);
+        if (dsnResult) {
+          span.setAttribute("resolve.method", "dsn");
+          span.setAttribute(
+            "resolve.cache_hit",
+            dsnResult.detectedFrom?.includes("cached") ?? false
+          );
+          return withTelemetryContext(dsnResult);
+        }
+      } catch {
+        // Fall through to directory inference
+      }
 
-  // 5. Fallback: infer from directory name
-  const inferred = await inferFromDirectoryName(cwd);
-  const [first] = inferred.targets;
-  if (!first) {
-    return null;
-  }
+      // 5. Fallback: infer from directory name
+      const inferred = await inferFromDirectoryName(cwd);
+      const [first] = inferred.targets;
+      if (!first) {
+        span.setAttribute("resolve.method", "none");
+        return null;
+      }
 
-  // If multiple matches, note it in detectedFrom
-  return withTelemetryContext({
-    ...first,
-    detectedFrom:
-      inferred.targets.length > 1
-        ? `${first.detectedFrom} (1 of ${inferred.targets.length} matches)`
-        : first.detectedFrom,
-  });
+      span.setAttribute("resolve.method", "inference");
+      // If multiple matches, note it in detectedFrom
+      return withTelemetryContext({
+        ...first,
+        detectedFrom:
+          inferred.targets.length > 1
+            ? `${first.detectedFrom} (1 of ${inferred.targets.length} matches)`
+            : first.detectedFrom,
+      });
+    },
+    { "resolve.mode": "single" }
+  );
 }
 
 /**

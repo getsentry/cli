@@ -10,6 +10,7 @@
 
 import { opendir } from "node:fs/promises";
 import { join } from "node:path";
+import { withTracingSpan } from "../telemetry.js";
 import { createDetectedDsn } from "./parser.js";
 import { scanSpecificFiles } from "./scanner.js";
 import type { DetectedDsn } from "./types.js";
@@ -99,17 +100,25 @@ export const extractDsnFromEnvFile = extractDsnFromEnvContent;
 export async function detectFromEnvFiles(
   cwd: string
 ): Promise<DetectedDsn | null> {
-  const { dsns } = await scanSpecificFiles(cwd, [...ENV_FILES], {
-    stopOnFirst: true,
-    processFile: (_relativePath, content) => {
-      const dsn = extractDsnFromEnvContent(content);
-      return dsn ? { dsn } : null;
-    },
-    createDsn: (raw, relativePath) =>
-      createDetectedDsn(raw, "env_file", relativePath),
-  });
+  return await withTracingSpan(
+    "detectFromEnvFiles",
+    "dsn.detect.env",
+    async (span) => {
+      const { dsns } = await scanSpecificFiles(cwd, [...ENV_FILES], {
+        stopOnFirst: true,
+        processFile: (_relativePath, content) => {
+          const dsn = extractDsnFromEnvContent(content);
+          return dsn ? { dsn } : null;
+        },
+        createDsn: (raw, relativePath) =>
+          createDetectedDsn(raw, "env_file", relativePath),
+      });
 
-  return dsns[0] ?? null;
+      span.setAttribute("dsn.env_files_checked", ENV_FILES.length);
+      span.setAttribute("dsn.env_dsn_found", dsns.length > 0);
+      return dsns[0] ?? null;
+    }
+  );
 }
 
 /**
@@ -125,33 +134,38 @@ export async function detectFromEnvFiles(
 export async function detectFromAllEnvFiles(
   cwd: string
 ): Promise<EnvFileScanResult> {
-  const allDsns: DetectedDsn[] = [];
-  const allMtimes: Record<string, number> = {};
+  return await withTracingSpan(
+    "detectFromAllEnvFiles",
+    "dsn.detect.env",
+    async (span) => {
+      const allDsns: DetectedDsn[] = [];
+      const allMtimes: Record<string, number> = {};
 
-  // 1. Check root .env files (all of them, not just first)
-  const { dsns: rootDsns, sourceMtimes: rootMtimes } = await scanSpecificFiles(
-    cwd,
-    [...ENV_FILES],
-    {
-      stopOnFirst: false,
-      processFile: (_relativePath, content) => {
-        const dsn = extractDsnFromEnvContent(content);
-        return dsn ? { dsn } : null;
-      },
-      createDsn: (raw, relativePath) =>
-        createDetectedDsn(raw, "env_file", relativePath),
+      // 1. Check root .env files (all of them, not just first)
+      const { dsns: rootDsns, sourceMtimes: rootMtimes } =
+        await scanSpecificFiles(cwd, [...ENV_FILES], {
+          stopOnFirst: false,
+          processFile: (_relativePath, content) => {
+            const dsn = extractDsnFromEnvContent(content);
+            return dsn ? { dsn } : null;
+          },
+          createDsn: (raw, relativePath) =>
+            createDetectedDsn(raw, "env_file", relativePath),
+        });
+      allDsns.push(...rootDsns);
+      Object.assign(allMtimes, rootMtimes);
+
+      // 2. Check monorepo package directories
+      const { dsns: monorepoDsns, sourceMtimes: monorepoMtimes } =
+        await detectFromMonorepoEnvFiles(cwd);
+      allDsns.push(...monorepoDsns);
+      Object.assign(allMtimes, monorepoMtimes);
+
+      span.setAttribute("dsn.env_files_checked", Object.keys(allMtimes).length);
+      span.setAttribute("dsn.env_dsn_found", allDsns.length > 0);
+      return { dsns: allDsns, sourceMtimes: allMtimes };
     }
   );
-  allDsns.push(...rootDsns);
-  Object.assign(allMtimes, rootMtimes);
-
-  // 2. Check monorepo package directories
-  const { dsns: monorepoDsns, sourceMtimes: monorepoMtimes } =
-    await detectFromMonorepoEnvFiles(cwd);
-  allDsns.push(...monorepoDsns);
-  Object.assign(allMtimes, monorepoMtimes);
-
-  return { dsns: allDsns, sourceMtimes: allMtimes };
 }
 
 /**
