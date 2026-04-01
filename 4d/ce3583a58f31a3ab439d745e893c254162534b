@@ -1,0 +1,48 @@
+# Plan: Improve `formatDuration` to use days/weeks
+
+## Problem
+`formatDuration()` in `src/lib/formatters/human.ts` only goes up to hours+minutes, producing awkward output like "580 hours and 16 minutes remaining" for token expiry. Sentry tokens typically last ~30 days, so this should display as days or weeks.
+
+## Change
+
+### Modify `formatDuration()` in `src/lib/formatters/human.ts` (line 1603)
+
+Add days and weeks tiers to the existing cascade. The function currently goes: minutes → hours+minutes. Change to: minutes → hours+minutes → days+hours → weeks+days.
+
+**Logic:**
+- < 60 min → `"X minutes"`
+- < 24 hours → `"X hours and Y minutes"` (same as today)
+- < 7 days → `"X days and Y hours"` (new)
+- >= 7 days → `"X weeks and Y days"` (new)
+
+Omit the smaller unit when it's zero (e.g., "3 days" not "3 days and 0 hours"), same pattern as the existing hours+minutes logic. Handle singular/plural consistently.
+
+**Examples:**
+- 580 hours → `"24 days and 4 hours"`
+- 168 hours → `"7 days"` → actually `"1 week"`
+- 14 days → `"2 weeks"`
+- 25 days → `"3 weeks and 4 days"`
+- 47 hours → `"1 day and 23 hours"`
+
+### Update tests in `test/lib/formatters/human.utils.test.ts` (line 187)
+
+- Update existing unit tests (existing ones for minutes/hours remain valid)
+- Add new unit tests for day and week tiers
+- Update property test regex to include `day|week` in the match pattern
+- Update property test `max` from `86_400` (1 day) to cover multi-week ranges
+
+## Files to modify
+1. `src/lib/formatters/human.ts` — `formatDuration()` function (lines 1603-1618)
+2. `test/lib/formatters/human.utils.test.ts` — `formatDuration` test block (lines 187-229)
+
+## Callers (no changes needed — all benefit automatically)
+- `formatExpiration()` in `human.ts:1634` — auth status "remaining" display
+- `auth/login.ts:48` — "Token expires in: ..."
+- `auth/refresh.ts:37-38` — "Expires in ..." / "expires in ..."
+
+## Verification
+```bash
+bun test test/lib/formatters/human.utils.test.ts
+bun run typecheck
+bun run lint
+```
