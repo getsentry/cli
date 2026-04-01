@@ -10,17 +10,32 @@ import type { Writer } from "../../types/index.js";
 /**
  * Get a nested value from an object using a dot-notated path.
  *
+ * First checks for the path as a literal property name (e.g.,
+ * `"gen_ai.usage.input_tokens"` as a flat key), then falls back to
+ * dot-separated nested traversal (e.g., `"contexts.trace.traceId"`).
+ * This ensures custom span attributes with dotted names are found.
+ *
  * Returns `{ found: true, value }` when the path resolves, even if the
  * leaf value is `undefined` or `null`. Returns `{ found: false }` when
  * any intermediate segment is not an object (or is missing).
  *
  * @param obj - Source object to traverse
- * @param path - Dot-separated key path (e.g. `"contexts.trace.traceId"`)
+ * @param path - Key path: literal property name or dot-separated nesting
  */
 function getNestedValue(
   obj: unknown,
   path: string
 ): { found: true; value: unknown } | { found: false } {
+  if (obj === null || obj === undefined || typeof obj !== "object") {
+    return { found: false };
+  }
+
+  // Fast path: literal property name (handles dotted keys like "gen_ai.usage.input_tokens")
+  if (Object.hasOwn(obj, path)) {
+    return { found: true, value: (obj as Record<string, unknown>)[path] };
+  }
+
+  // Fall back to dot-separated nested traversal
   let current: unknown = obj;
   for (const segment of path.split(".")) {
     if (
@@ -41,15 +56,25 @@ function getNestedValue(
 /**
  * Set a nested value in an object, creating intermediate objects as needed.
  *
+ * When `literalKey` is true, the path is used as a literal property name
+ * (no dot splitting). This preserves dotted attribute names like
+ * `"gen_ai.usage.input_tokens"` as flat keys in the output.
+ *
  * @param target - Target object to write into (mutated in place)
- * @param path - Dot-separated key path
+ * @param path - Key path: literal name or dot-separated nesting
  * @param value - Value to set at the leaf
+ * @param literalKey - When true, skip dot splitting
  */
 function setNestedValue(
   target: Record<string, unknown>,
   path: string,
-  value: unknown
+  value: unknown,
+  literalKey = false
 ): void {
+  if (literalKey) {
+    target[path] = value;
+    return;
+  }
   const segments = path.split(".");
   let current: Record<string, unknown> = target;
   for (let i = 0; i < segments.length - 1; i++) {
@@ -104,7 +129,11 @@ export function filterFields<T>(data: T, fields: string[]): Partial<T> {
   for (const field of fields) {
     const lookup = getNestedValue(data, field);
     if (lookup.found) {
-      setNestedValue(result, field, lookup.value);
+      // Use literal key when the field name exists as a direct property
+      // (e.g., "gen_ai.usage.input_tokens" as a flat key)
+      const isLiteral =
+        typeof data === "object" && data !== null && Object.hasOwn(data, field);
+      setNestedValue(result, field, lookup.value, isLiteral);
     }
   }
 
