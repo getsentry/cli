@@ -20,30 +20,6 @@ List releases
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
-**JSON Fields** (use `--json --fields` to select specific fields):
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | number |  |
-| `version` | string |  |
-| `shortVersion` | string |  |
-| `status` | string |  |
-| `dateCreated` | string |  |
-| `dateReleased` | string \| null |  |
-| `dateStarted` | string \| null |  |
-| `firstEvent` | string \| null |  |
-| `lastEvent` | string \| null |  |
-| `ref` | string \| null |  |
-| `url` | string \| null |  |
-| `commitCount` | number |  |
-| `deployCount` | number |  |
-| `authors` | array |  |
-| `projects` | array |  |
-| `lastDeploy` | object \| null |  |
-| `newGroups` | number |  |
-| `owner` | unknown \| null |  |
-| `versionInfo` | object |  |
-
 ### `sentry release view <org/version...>`
 
 View release details
