@@ -1038,7 +1038,6 @@ export async function resolveBody(
 
 // Command Definition
 
-/** Log outgoing request details in `> ` curl-verbose style. */
 /**
  * Record API error attributes on the active telemetry span.
  *
@@ -1061,6 +1060,7 @@ function recordApiErrorAttributes(
   }
 }
 
+/** Log outgoing request details in `> ` curl-verbose style. */
 function logRequest(
   method: string,
   endpoint: string,
