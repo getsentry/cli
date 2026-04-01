@@ -1,0 +1,366 @@
+# Plan: Address AI Agent Field Report Feedback
+
+## Summary
+
+Address 4 workstreams from the AI agent usage field report:
+1. Skill/docs improvements for flag naming confusion (items 1-3, 7)
+2. Custom span attribute access (item 4 — critical)
+3. Dataset name validation + documentation (item 5)
+4. Filter zero-valued measurements from trace/span view output (item 6 mitigation)
+
+---
+
+## Verified API Capabilities
+
+Confirmed via real API calls:
+
+| Endpoint | What it does | Custom attributes? |
+|---|---|---|
+| `GET /organizations/{org}/trace/{traceId}/?additional_attributes=X&additional_attributes=Y` | Trace tree with named extra attrs | **Yes** — must enumerate attribute names as query params |
+| `GET /projects/{org}/{project}/trace-items/{itemId}/?trace_id={traceId}&item_type=spans` | Single span full detail | **Yes** — returns ALL attributes automatically, no enumeration needed |
+| `GET /organizations/{org}/events/?dataset=spans&field=X&field=Y` | Span list/search | **Yes** — must enumerate field names |
+| `GET /organizations/{org}/trace-items/attributes/?itemType=spans` | Discover available attribute keys | N/A — returns attribute names for column picker |
+
+Key insight: The trace detail endpoint already supports `additional_attributes` — we just weren't passing the query parameter.
+
+---
+
+## Workstream 1: Skill/Docs + `--since` Alias (Items 1-3)
+
+### Problem
+AI agents repeatedly try non-existent flags: `--since` (should be `--period`), `--project` (should be positional), `--trace` on `span list` (should be positional).
+
+### 1A: Add `--since` as alias for `--period`
+
+The most natural flag name for time filtering. Add it as an alias on all commands that have `--period`.
+
+**Files to modify:**
+- `src/commands/trace/list.ts` — add `since: "period"` to aliases
+- `src/commands/span/list.ts` — add `since: "period"` to aliases
+- Any other commands with a `period` flag (check `LIST_PERIOD_FLAG` usage)
+
+### 1B: Reinforce correct patterns in agent guidance
+
+**File:** `docs/src/content/docs/agent-guidance.md` — add positive examples to "Common Mistakes" section, framed as "how to do it right":
+
+```markdown
+### Time filtering
+Use `--period` (alias `-t` or `--since`) to filter by time window:
+  sentry trace list --period 1h
+  sentry span list --since 24h
+  sentry span list -t 7d
+
+### Scoping to an org or project
+Org and project are positional arguments following `gh` CLI conventions:
+  sentry trace list my-org/my-project
+  sentry issue list my-org/my-project
+  sentry span list my-org/my-project/abc123def456...
+
+### Listing spans in a trace
+Pass the trace ID as a positional argument:
+  sentry span list abc123def456...
+  sentry span list my-org/my-project/abc123def456...
+```
+
+### Verification
+- `bun run generate:skill && bun run check:skill`
+- `bun test test/commands/trace/ test/commands/span/` (alias works)
+
+---
+
+## Workstream 2: Custom Span Attribute Access (Item 4 — CRITICAL)
+
+Three complementary changes targeting different commands:
+
+### 2A: `span view` — Use trace-items detail endpoint for ALL attributes
+
+**Problem**: `span view` uses `/trace/{traceId}/` and cherry-picks 12 fields, dropping custom attributes.
+
+**Solution**: For each requested span ID, make a supplementary call to `GET /projects/{org}/{project}/trace-items/{spanId}/?trace_id={traceId}&item_type=spans` which returns ALL attributes automatically. This is what the Sentry frontend does.
+
+#### Files to modify
+
+**`src/lib/api/traces.ts`** — Add new API function:
+
+```typescript
+/** Response shape from the trace-items detail endpoint */
+type TraceItemAttribute = {
+  name: string;
+  type: "str" | "int" | "float" | "bool";
+  value: string | number | boolean;
+};
+
+type TraceItemDetail = {
+  itemId: string;
+  timestamp: string;
+  attributes: TraceItemAttribute[];
+  meta: Record<string, unknown>;
+  links: unknown;
+};
+
+/**
+ * Fetch full attribute details for a single span.
+ * Uses the trace-items detail endpoint which returns ALL attributes.
+ */
+export async function getSpanDetails(
+  orgSlug: string,
+  projectSlug: string,
+  spanId: string,
+  traceId: string
+): Promise<TraceItemDetail> { ... }
+```
+
+**`src/commands/span/view.ts`** — After finding spans in the trace tree, fetch full details:
+
+- After `getDetailedTrace()` finds the span in the tree (for structure/ancestors/children), call `getSpanDetails()` for each requested span ID
+- Fetch details for all requested spans **in parallel** using p-limit (e.g., concurrency 5) to avoid sequential waterfall while respecting API rate limits. The command already accepts multiple span IDs (`sentry span view <trace-id> <span-id1> <span-id2>`), so this matters.
+- Merge the flat attribute list into the JSON output as a `data` dict: `{ [attr.name]: attr.value }`
+- For human output, show notable attributes in the KV table (skip internal ones like `precise.start_ts`, `received`, `hash`)
+
+**`buildJsonResults()`** changes — add an `attributes` or `data` dict:
+
+```typescript
+function buildJsonResults(results: SpanResult[], traceId: string, details?: Map<string, TraceItemDetail>): unknown[] {
+  return results.map((r) => {
+    const base = { /* existing 12 fields */ };
+    const detail = details?.get(r.spanId);
+    if (detail) {
+      // Convert attribute array to dict, filtering internal attrs
+      base.data = Object.fromEntries(
+        detail.attributes
+          .filter(a => !INTERNAL_ATTRS.has(a.name))
+          .map(a => [a.name, a.value])
+      );
+    }
+    return base;
+  });
+}
+```
+
+Internal attributes to filter from display (but keep in `--json` output via `--fields data`):
+`precise.start_ts`, `precise.finish_ts`, `received`, `hash`, `project_id`, `client_sample_rate`, `server_sample_rate`
+
+### 2B: `trace view` — Pass `--fields` as `additional_attributes` query param
+
+**Problem**: `trace view` always gets `additional_attributes: {}` because we never pass the query parameter.
+
+**Solution**: When `--fields` includes names not in the standard trace view output, pass them as `additional_attributes` query params to the trace detail endpoint.
+
+#### Files to modify
+
+**`src/lib/api/traces.ts`** — Extend `getDetailedTrace()`:
+
+```typescript
+export async function getDetailedTrace(
+  orgSlug: string,
+  traceId: string,
+  timestamp: number,
+  additionalAttributes?: string[]  // NEW
+): Promise<TraceSpan[]> {
+  // ...
+  params: {
+    timestamp,
+    limit: 10_000,
+    project: -1,
+    additional_attributes: additionalAttributes,  // NEW — array → repeated query params
+  },
+}
+```
+
+**`src/types/sentry.ts`** — Widen `TraceSpan` to include the response fields we now know exist:
+
+```typescript
+export type TraceSpan = {
+  // ... existing fields ...
+  name?: string;
+  event_type?: string;
+  is_transaction?: boolean;
+  transaction_id?: string;
+  sdk_name?: string;
+  profile_id?: string;
+  profiler_id?: string;
+  measurements?: Record<string, number>;
+  additional_attributes?: Record<string, unknown>;
+  errors?: unknown[];
+  occurrences?: unknown[];
+};
+```
+
+**`src/commands/trace/view.ts`** — Read `--fields` and extract custom attribute names:
+
+```typescript
+// In func():
+const requestedFields = (flags as Record<string, unknown>).fields as string[] | undefined;
+const extraAttrs = extractExtraAttributes(requestedFields); // field group expansion + standard field filtering
+// Pass to getDetailedTrace()
+const spans = await getDetailedTrace(org, traceId, timestamp, extraAttrs);
+```
+
+**`jsonTransformTraceView()`** — Include `additional_attributes` in the JSON output. Since `TraceSpan` now types this field, it flows through automatically when present.
+
+**Human output** — Show non-empty `additional_attributes` in the trace summary when present.
+
+### 2C: `span list` — `--fields` drives API field selection
+
+**Problem**: `span list` hardcodes 9 fields; `--fields` only filters client-side.
+
+**Solution**: When `--fields` includes names not in the standard output set, request them as additional `field` params from the events API.
+
+#### Files to modify
+
+**`src/lib/api/traces.ts`** — Add `extraFields` to `ListSpansOptions`:
+
+```typescript
+type ListSpansOptions = {
+  // ... existing ...
+  extraFields?: string[];
+};
+
+export async function listSpans(...) {
+  const fields = options.extraFields?.length
+    ? [...SPAN_FIELDS, ...options.extraFields]
+    : SPAN_FIELDS;
+  // Use `fields` instead of `SPAN_FIELDS` in params
+}
+```
+
+**`src/lib/formatters/trace.ts`**:
+
+- Widen `FlatSpan` with index signature: `[key: string]: unknown`
+- Update `spanListItemToFlatSpan(item, extraFieldNames?)` to forward extra fields from passthrough schema
+- Update `formatSpanTable(spans, extraColumns?)` to render extra columns in human output
+
+**`src/commands/span/list.ts`**:
+
+- Add output→API field mapping constant and `extractExtraApiFields()` helper
+- Read `fields` from cleaned flags, extract custom field names
+- Thread through to `listSpans()` and `spanListItemToFlatSpan()`
+- Extend `SpanListData` with `extraAttributes?: string[]` for column headers
+
+#### Field name mapping (output name → API name, used to detect "already requested"):
+
+| Output name | API name |
+|---|---|
+| `span_id` | `id` |
+| `parent_span_id` | `parent_span` |
+| `op` | `span.op` |
+| `description` | `description` |
+| `duration_ms` | `span.duration` |
+| `start_timestamp` | `timestamp` |
+| `project_slug` | `project` |
+| `transaction` | `transaction` |
+
+Any `--fields` value not in this mapping → extra API field, requested and included in output.
+
+#### Field group aliases
+
+Support shorthand names that expand to curated field sets:
+
+```typescript
+const FIELD_GROUP_ALIASES: Record<string, string[]> = {
+  "gen_ai": [
+    "gen_ai.usage.input_tokens",
+    "gen_ai.usage.output_tokens",
+    "gen_ai.request.model",
+    "gen_ai.system",
+  ],
+};
+```
+
+Usage: `sentry span list <trace-id> --json --fields span_id,op,gen_ai`
+
+### Verification (all of Workstream 2)
+- `bun test test/commands/span/ test/commands/trace/ test/lib/formatters/trace.test.ts test/lib/api/traces.test.ts`
+- `bun run typecheck && bun run lint`
+- Manual: `sentry span view <trace-id> <span-id> --json` → verify `data` dict with attributes
+- Manual: `sentry trace view <trace-id> --json --fields browser.name` → verify `additional_attributes` populated
+- Manual: `sentry span list <trace-id> --json --fields span_id,op,gen_ai.usage.input_tokens` → verify custom column
+
+---
+
+## Workstream 3: Dataset Documentation + Validation (Item 5)
+
+### Problem
+Users try invalid dataset names (e.g., `spansIndexed`) and get unhelpful "Internal error" from the Sentry server. The CLI should document valid names and validate datasets where our own commands accept them.
+
+### Approach
+- Do NOT snoop into `sentry api` URLs — that command is a raw passthrough like `gh api`
+- Document valid dataset names in agent guidance and human-facing docs
+- Add a shared constant for valid events API datasets
+- Validate in any CLI commands that accept a dataset parameter (dashboards already does this via `WIDGET_TYPES`)
+
+### Files to modify
+
+**`src/lib/api/datasets.ts`** (new) — Shared constant for the events API:
+
+```typescript
+/** Valid dataset names for the Sentry Events/Explore API */
+export const EVENTS_API_DATASETS = ["spans", "transactions", "logs", "errors", "discover"] as const;
+export type EventsApiDataset = (typeof EVENTS_API_DATASETS)[number];
+```
+
+**`docs/src/content/docs/agent-guidance.md`** — Add to the guidance section about API access:
+
+```markdown
+### Dataset names for the Events API
+When querying the Events API (directly or via `sentry api`), valid dataset
+values are: `spans`, `transactions`, `logs`, `errors`, `discover`.
+Common mistake: `spansIndexed` is not valid — use `spans`.
+```
+
+**`docs/src/content/docs/commands/api.md`** — Add a note about valid dataset names in the examples/tips section.
+
+**Audit existing commands** — Check if any commands besides dashboards accept user-specified dataset values. Dashboard widget commands already validate via `WIDGET_TYPES` in `resolve.ts`. If `EVENTS_API_DATASETS` and `WIDGET_TYPES` should share a source of truth, refactor to use the shared constant.
+
+### Verification
+- `bun run generate:skill && bun run check:skill`
+
+---
+
+## Workstream 4: Filter Zero-Valued Measurements (Item 6 Mitigation)
+
+### Problem
+Every span in `trace view --json` includes zero-valued web vitals measurements. Confirmed these come from the Sentry API — the trace detail endpoint always includes the hardcoded measurement columns. Non-browser spans have all zeros.
+
+### Solution
+Filter out all-zero measurements in the JSON output. Non-zero measurements (like on the root `pageload` span) are preserved.
+
+### Files to modify
+
+**`src/commands/trace/view.ts`** and **`src/commands/span/view.ts`** — In the JSON transform, filter measurements:
+
+```typescript
+// When including measurements in output:
+if (span.measurements) {
+  const nonZero = Object.fromEntries(
+    Object.entries(span.measurements).filter(([, v]) => v !== 0)
+  );
+  if (Object.keys(nonZero).length > 0) {
+    result.measurements = nonZero;
+  }
+}
+```
+
+This reduces JSON size by ~40% for typical traces and eliminates the "bogus web vitals" noise.
+
+### Verification
+- `bun test test/commands/trace/view.func.test.ts test/commands/span/view.func.test.ts`
+
+---
+
+## Execution Order
+
+1. **Workstream 1** (skill/docs + `--since` alias) — smallest, unblocks items 1-3
+2. **Workstream 2A** (span view trace-items) — highest impact single change
+3. **Workstream 2B** (trace view additional_attributes) — leverages same API discovery
+4. **Workstream 2C** (span list --fields) — completes the custom attribute story
+5. **Workstream 3** (dataset docs + shared constant) — independent, lower priority
+6. **Workstream 4** (measurement filtering) — cosmetic cleanup
+
+## Full Test Command
+
+```bash
+bun run typecheck && bun run lint
+bun test test/commands/span/ test/commands/trace/ test/lib/formatters/trace.test.ts test/lib/api/traces.test.ts test/commands/api.test.ts
+bun run generate:skill && bun run check:skill
+```
