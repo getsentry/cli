@@ -422,7 +422,10 @@ async function resolvePreSpinnerOptions(
         try {
           const created = await createTeam(opts.org, teamSlug);
           opts = { ...opts, team: created.slug };
-        } catch {
+        } catch (err) {
+          captureException(err, {
+            extra: { orgSlug: opts.org, teamSlug, context: "auto-create team" },
+          });
           const teamsUrl = `${getSentryBaseUrl()}/settings/${opts.org}/teams/`;
           log.error(
             "No teams in your organization.\n" +
@@ -460,8 +463,10 @@ async function resolvePreSpinnerOptions(
           opts = { ...opts, team: selected };
         }
       }
-    } catch {
-      // Best-effort — let resolveOrCreateTeam handle it later
+    } catch (err) {
+      captureException(err, {
+        extra: { orgSlug: opts.org, context: "early team resolution" },
+      });
     }
   }
 
