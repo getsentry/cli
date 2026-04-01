@@ -5,6 +5,7 @@
     "type": "git",
     "url": "git+https://github.com/getsentry/cli.git"
   },
+  "main": "./dist/index.cjs",
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@biomejs/biome": "2.3.8",
@@ -43,17 +44,15 @@
     "wrap-ansi": "^10.0.0",
     "zod": "^3.24.0"
   },
-  "bin": {
-    "sentry": "./dist/bin.cjs"
-  },
-  "main": "./dist/index.cjs",
-  "types": "./dist/index.d.cts",
   "exports": {
     ".": {
       "types": "./dist/index.d.cts",
       "require": "./dist/index.cjs",
       "default": "./dist/index.cjs"
     }
+  },
+  "bin": {
+    "sentry": "./dist/bin.cjs"
   },
   "description": "Sentry CLI - A command-line interface for using Sentry built by robots and humans for robots and humans",
   "engines": {
@@ -94,5 +93,6 @@
     "check:deps": "bun run script/check-no-deps.ts",
     "check:errors": "bun run script/check-error-patterns.ts"
   },
-  "type": "module"
+  "type": "module",
+  "types": "./dist/index.d.cts"
 }

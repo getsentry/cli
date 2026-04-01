@@ -313,6 +313,22 @@ Manage Sentry dashboards
 
 → Full flags and examples: `references/dashboards.md`
 
+### Release
+
+Work with Sentry releases
+
+- `sentry release list <org/project>` — List releases
+- `sentry release view <org/version...>` — View release details
+- `sentry release create <org/version...>` — Create a release
+- `sentry release finalize <org/version...>` — Finalize a release
+- `sentry release delete <org/version...>` — Delete a release
+- `sentry release deploy <org/version environment name...>` — Create a deploy for a release
+- `sentry release deploys <org/version...>` — List deploys for a release
+- `sentry release set-commits <org/version...>` — Set commits for a release
+- `sentry release propose-version` — Propose a release version
+
+→ Full flags and examples: `references/release.md`
+
 ### Repo
 
 Work with Sentry repositories

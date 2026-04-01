@@ -1,0 +1,35 @@
+name: Sentry Release
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  finalize:
+    name: Finalize Sentry Release
+    runs-on: ubuntu-latest
+    # Skip pre-releases (nightlies, dev versions)
+    if: "!github.event.release.prerelease"
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      # Tag names are bare semver (e.g., "0.24.0", no "v" prefix),
+      # matching both the npm package version and Sentry release version.
+      VERSION: ${{ github.event.release.tag_name }}
+    steps:
+      - name: Install CLI
+        run: npm install -g "sentry@${VERSION}"
+
+      - name: Create release
+        run: sentry release create "sentry/${VERSION}" --project cli
+
+      - name: Set commits
+        continue-on-error: true
+        run: sentry release set-commits "sentry/${VERSION}" --auto
+
+      - name: Finalize release
+        run: sentry release finalize "sentry/${VERSION}"
+
+      - name: Create deploy
+        run: sentry release deploy "sentry/${VERSION}" production
