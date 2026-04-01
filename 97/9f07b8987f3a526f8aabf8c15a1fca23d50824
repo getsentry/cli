@@ -1,0 +1,101 @@
+# Fix: Telemetry environment tag broken since v0.21.0
+
+## Root Cause
+
+In commit `154d87b7` (v0.21.0 — "expose CLI as a programmatic library"), all `process.env.*` reads were migrated to `getEnv().*` for library/CLI isolation. This broke the Sentry telemetry `environment` tag.
+
+**Before (v0.20.0):**
+```typescript
+// telemetry.ts line 335 (old)
+const environment = process.env.NODE_ENV ?? "development";
+```
+
+**After (v0.21.0+):**
+```typescript
+// telemetry.ts line 357 (current)
+const environment = getEnv().NODE_ENV ?? "development";
+```
+
+**Why this breaks:** The build scripts (`script/build.ts:113`, `script/bundle.ts:196`) use esbuild's `define` to replace `process.env.NODE_ENV` with `"production"` at build time:
+```typescript
+define: {
+  "process.env.NODE_ENV": JSON.stringify("production"),
+}
+```
+
+esbuild's `define` performs **literal text replacement**. It replaces `process.env.NODE_ENV` but cannot replace `getEnv().NODE_ENV` — a dynamic method call followed by a property access is opaque to the bundler.
+
+**Result:** All production builds since v0.21.0 report `environment: "development"` instead of `"production"`. The Sentry dashboard (filtered on `environment: production` by default) only shows data from v0.20.0 users.
+
+## Impact
+
+- **Growth stall**: Users on v0.21.0+ are invisible on the production-filtered dashboard
+- **Version adoption stuck on 0.20.0**: Only 0.20.0 reports `environment: production`
+- **Affected versions**: 0.21.0, 0.22.0, 0.23.0, all nightlies since the change
+
+## Fix
+
+Derive the environment from `CLI_VERSION` instead of relying on esbuild's `process.env.NODE_ENV` replacement. This is more robust — it works regardless of how the env is accessed, needs no build script changes, and provides a correct three-way environment split.
+
+### Files to modify
+
+**`src/lib/constants.ts`** — Add environment derivation:
+```typescript
+/**
+ * Derive telemetry environment from the build-injected version string.
+ *
+ * - "0.0.0-dev" (no build injection) → "development"
+ * - "X.Y.Z-dev.<timestamp>" (nightly CI build) → "nightly"
+ * - "X.Y.Z" (stable release) → "production"
+ *
+ * This replaces the previous process.env.NODE_ENV approach which broke
+ * when the getEnv() indirection was introduced (esbuild's define cannot
+ * replace dynamic property accesses like getEnv().NODE_ENV).
+ */
+export function getCliEnvironment(): string {
+  if (CLI_VERSION === "0.0.0-dev") return "development";
+  if (CLI_VERSION.includes("-dev.")) return "nightly";
+  return "production";
+}
+```
+
+**`src/lib/telemetry.ts:357`** — Use the new function:
+```typescript
+// Before:
+const environment = getEnv().NODE_ENV ?? "development";
+
+// After:
+const environment = getCliEnvironment();
+```
+
+Also update the import to include `getCliEnvironment`.
+
+**`script/build.ts:113`** and **`script/bundle.ts:196`** — Remove the now-unnecessary `process.env.NODE_ENV` define (optional cleanup, not strictly required since the telemetry code no longer reads it):
+```typescript
+// Remove this line from the define block:
+"process.env.NODE_ENV": JSON.stringify("production"),
+```
+
+> **Note:** Removing the `process.env.NODE_ENV` define is optional. Other code may still rely on it (e.g., third-party libraries that check `process.env.NODE_ENV`). Keep it if any bundled dependency uses it; remove only if confirmed safe.
+
+### Tests
+
+Add a unit test in `test/lib/telemetry.test.ts` (or a new file if none exists) to verify the environment derivation:
+
+```typescript
+describe("getCliEnvironment", () => {
+  test("returns 'development' for dev version", () => { ... });
+  test("returns 'nightly' for nightly version", () => { ... });
+  test("returns 'production' for stable version", () => { ... });
+});
+```
+
+Since `CLI_VERSION` is a module-level constant, test `getCliEnvironment` by testing the function's logic directly (possibly by extracting it to accept a version parameter for testability).
+
+## Verification
+
+1. `bun run typecheck` — no type errors
+2. `bun run lint` — no lint errors
+3. `bun run test:unit` — all tests pass
+4. Manual smoke test: `bun run dev -- issue list --json 2>/dev/null | head -1` still works
+5. Verify the build output: `SENTRY_CLIENT_ID=test bun run build --single` then inspect the bundled JS to confirm environment is no longer derived from `getEnv().NODE_ENV`
