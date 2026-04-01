@@ -2164,7 +2164,7 @@ function formatChangelog(data: UpgradeResult): string {
   }
 
   const { changelog } = data;
-  const lines: string[] = ["", "### What's new", ""];
+  const lines: string[] = [""];
 
   for (const section of changelog.sections) {
     lines.push(CATEGORY_HEADINGS[section.category]);
