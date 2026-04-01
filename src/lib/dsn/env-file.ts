@@ -24,6 +24,8 @@ export type EnvFileScanResult = {
   dsns: DetectedDsn[];
   /** Map of source file paths to their mtimes (only files containing DSNs) */
   sourceMtimes: Record<string, number>;
+  /** Number of package directories scanned for env files (monorepo scan only) */
+  packagesScanned?: number;
 };
 
 /**
@@ -156,12 +158,17 @@ export async function detectFromAllEnvFiles(
       Object.assign(allMtimes, rootMtimes);
 
       // 2. Check monorepo package directories
-      const { dsns: monorepoDsns, sourceMtimes: monorepoMtimes } =
-        await detectFromMonorepoEnvFiles(cwd);
+      const {
+        dsns: monorepoDsns,
+        sourceMtimes: monorepoMtimes,
+        packagesScanned = 0,
+      } = await detectFromMonorepoEnvFiles(cwd);
       allDsns.push(...monorepoDsns);
       Object.assign(allMtimes, monorepoMtimes);
 
-      span.setAttribute("dsn.env_files_checked", ENV_FILES.length);
+      // Root checks ENV_FILES.length names; each monorepo package also checks ENV_FILES.length
+      const filesChecked = ENV_FILES.length * (1 + packagesScanned);
+      span.setAttribute("dsn.env_files_checked", filesChecked);
       span.setAttribute("dsn.env_dsn_found", allDsns.length > 0);
       return { dsns: allDsns, sourceMtimes: allMtimes };
     }
@@ -182,6 +189,7 @@ export async function detectFromMonorepoEnvFiles(
 ): Promise<EnvFileScanResult> {
   const dsns: DetectedDsn[] = [];
   const sourceMtimes: Record<string, number> = {};
+  let packagesScanned = 0;
 
   for (const monorepoRoot of MONOREPO_ROOTS) {
     const rootDir = join(cwd, monorepoRoot);
@@ -202,6 +210,7 @@ export async function detectFromMonorepoEnvFiles(
           continue;
         }
 
+        packagesScanned += 1;
         const pkgDir = join(rootDir, entry.name);
         const packagePath = `${monorepoRoot}/${entry.name}`;
 
@@ -216,7 +225,7 @@ export async function detectFromMonorepoEnvFiles(
     }
   }
 
-  return { dsns, sourceMtimes };
+  return { dsns, sourceMtimes, packagesScanned };
 }
 
 /** Result of detecting DSN in a single package */
