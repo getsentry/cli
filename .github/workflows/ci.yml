@@ -570,6 +570,11 @@ jobs:
             if [ "$tag" = "nightly-${VERSION}" ]; then break; fi
             PREV_TAG="$tag"
           done
+
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous nightly tag found, skipping patch push"
+            exit 0
+          fi
           PREV_VERSION="${PREV_TAG#nightly-}"
 
           cd patches
