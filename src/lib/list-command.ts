@@ -299,7 +299,7 @@ export const LIST_PERIOD_FLAG = {
  * Exported separately from `LIST_BASE_ALIASES` because not all list commands
  * need a period flag, and some commands already use `-t` for other purposes.
  */
-export const PERIOD_ALIASES = { t: "period" } as const;
+export const PERIOD_ALIASES = { t: "period", since: "period" } as const;
 
 /**
  * Alias map shared by all list commands.

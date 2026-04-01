@@ -57,6 +57,63 @@ type ListFlags = {
   readonly fields?: string[];
 };
 
+/** Maps output field names to their API field equivalents in SPAN_FIELDS */
+const OUTPUT_TO_API_FIELD: Record<string, string> = {
+  span_id: "id",
+  parent_span_id: "parent_span",
+  op: "span.op",
+  duration_ms: "span.duration",
+  start_timestamp: "timestamp",
+  project_slug: "project",
+  description: "description",
+  transaction: "transaction",
+};
+
+/** Field group aliases that expand to curated field sets */
+const FIELD_GROUP_ALIASES: Record<string, string[]> = {
+  gen_ai: [
+    "gen_ai.usage.input_tokens",
+    "gen_ai.usage.output_tokens",
+    "gen_ai.request.model",
+    "gen_ai.system",
+  ],
+};
+
+/**
+ * Extract field names from --fields that need additional API requests.
+ *
+ * Expands group aliases (e.g., `gen_ai` → four OTEL attribute fields) and
+ * filters out known standard output names and their API equivalents so only
+ * truly extra API fields are returned.
+ *
+ * @param fields - Raw --fields values from the CLI
+ * @returns Deduplicated extra API field names, or undefined if none are needed
+ */
+function extractExtraApiFields(
+  fields: string[] | undefined
+): string[] | undefined {
+  if (!fields?.length) {
+    return;
+  }
+
+  const expanded: string[] = [];
+  for (const f of fields) {
+    const alias = FIELD_GROUP_ALIASES[f];
+    if (alias) {
+      expanded.push(...alias);
+    } else {
+      expanded.push(f);
+    }
+  }
+
+  const knownOutputNames = new Set(Object.keys(OUTPUT_TO_API_FIELD));
+  const knownApiNames = new Set(Object.values(OUTPUT_TO_API_FIELD));
+  const extra = expanded.filter(
+    (f) => !(knownOutputNames.has(f) || knownApiNames.has(f))
+  );
+  return extra.length > 0 ? [...new Set(extra)] : undefined;
+}
+
 /** Accepted values for the --sort flag (matches trace list) */
 const VALID_SORT_VALUES: SpanSortValue[] = ["date", "duration"];
 
@@ -208,6 +265,8 @@ type SpanListData = {
   org?: string;
   /** Project slug for project-mode header */
   project?: string;
+  /** Extra attribute names from --fields for human table columns */
+  extraAttributes?: string[];
 };
 
 /**
@@ -215,6 +274,8 @@ type SpanListData = {
  *
  * Uses `renderMarkdown()` for the header and `formatSpanTable()` for the table,
  * ensuring proper rendering in both TTY and plain output modes.
+ * When extra attributes are present (from --fields API expansion), they are
+ * appended as additional table columns.
  */
 function formatSpanListHuman(data: SpanListData): string {
   if (data.flatSpans.length === 0) {
@@ -228,7 +289,7 @@ function formatSpanListHuman(data: SpanListData): string {
   } else {
     parts.push(`Spans in ${data.org}/${data.project}:\n\n`);
   }
-  parts.push(formatSpanTable(data.flatSpans));
+  parts.push(formatSpanTable(data.flatSpans, data.extraAttributes));
   return parts.join("\n");
 }
 
@@ -266,6 +327,8 @@ function jsonTransformSpanList(data: SpanListData, fields?: string[]): unknown {
 type ModeContext = {
   cwd: string;
   flags: ListFlags;
+  /** Extra API field names derived from --fields (undefined when none needed) */
+  extraApiFields?: string[];
 };
 
 /**
@@ -278,7 +341,7 @@ async function handleTraceMode(
   parsed: ParsedTraceTarget,
   ctx: ModeContext
 ): Promise<{ output: SpanListData; hint?: string }> {
-  const { flags, cwd } = ctx;
+  const { flags, cwd, extraApiFields } = ctx;
   warnIfNormalized(parsed, "span.list");
   const { traceId, org, project } = await resolveTraceOrgProject(
     parsed,
@@ -311,6 +374,7 @@ async function handleTraceMode(
         limit: flags.limit,
         cursor,
         statsPeriod: flags.period,
+        extraFields: extraApiFields,
       })
   );
 
@@ -318,7 +382,9 @@ async function handleTraceMode(
   advancePaginationState(PAGINATION_KEY, contextKey, direction, nextCursor);
   const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
 
-  const flatSpans = spanItems.map(spanListItemToFlatSpan);
+  const flatSpans = spanItems.map((item) =>
+    spanListItemToFlatSpan(item, extraApiFields)
+  );
   const hasMore = !!nextCursor;
 
   const nav = paginationHint({
@@ -339,7 +405,14 @@ async function handleTraceMode(
   }
 
   return {
-    output: { flatSpans, hasMore, hasPrev, nextCursor, traceId },
+    output: {
+      flatSpans,
+      hasMore,
+      hasPrev,
+      nextCursor,
+      traceId,
+      extraAttributes: extraApiFields,
+    },
     hint,
   };
 }
@@ -354,7 +427,7 @@ async function handleProjectMode(
   target: string | undefined,
   ctx: ModeContext
 ): Promise<{ output: SpanListData; hint?: string }> {
-  const { flags, cwd } = ctx;
+  const { flags, cwd, extraApiFields } = ctx;
   const { org, project } = await resolveOrgProjectFromArg(
     target,
     cwd,
@@ -382,6 +455,7 @@ async function handleProjectMode(
         limit: flags.limit,
         cursor,
         statsPeriod: flags.period,
+        extraFields: extraApiFields,
       })
   );
 
@@ -394,7 +468,9 @@ async function handleProjectMode(
   );
   const hasPrev = hasPreviousPage(PROJECT_PAGINATION_KEY, contextKey);
 
-  const flatSpans = spanItems.map(spanListItemToFlatSpan);
+  const flatSpans = spanItems.map((item) =>
+    spanListItemToFlatSpan(item, extraApiFields)
+  );
   const hasMore = !!nextCursor;
 
   const nav = paginationHint({
@@ -415,7 +491,15 @@ async function handleProjectMode(
   }
 
   return {
-    output: { flatSpans, hasMore, hasPrev, nextCursor, org, project },
+    output: {
+      flatSpans,
+      hasMore,
+      hasPrev,
+      nextCursor,
+      org,
+      project,
+      extraAttributes: extraApiFields,
+    },
     hint,
   };
 }
@@ -498,7 +582,8 @@ export const listCommand = buildListCommand("span", {
   async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {
     const { cwd } = this;
     const parsed = parseSpanListArgs(args);
-    const modeCtx: ModeContext = { cwd, flags };
+    const extraApiFields = extractExtraApiFields(flags.fields);
+    const modeCtx: ModeContext = { cwd, flags, extraApiFields };
 
     const { output, hint } =
       parsed.mode === "trace"

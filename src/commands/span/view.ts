@@ -4,8 +4,11 @@
  * View detailed information about one or more spans within a trace.
  */
 
+import pLimit from "p-limit";
+
 import type { SentryContext } from "../../context.js";
-import { getDetailedTrace } from "../../lib/api-client.js";
+import type { TraceItemDetail } from "../../lib/api-client.js";
+import { getDetailedTrace, getSpanDetails } from "../../lib/api-client.js";
 import { spansFlag } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
@@ -37,6 +40,73 @@ import {
 } from "../../lib/trace-target.js";
 
 const log = logger.withTag("span.view");
+
+/** Concurrency limit for parallel span detail fetches */
+const SPAN_DETAIL_CONCURRENCY = 5;
+
+/**
+ * Internal/low-value attribute names to exclude from human output.
+ * These are EAP storage internals that clutter the display without
+ * adding diagnostic value. They remain accessible via `--json --fields data`.
+ */
+const INTERNAL_ATTRS = new Set([
+  "precise.start_ts",
+  "precise.finish_ts",
+  "received",
+  "hash",
+  "project_id",
+  "client_sample_rate",
+  "server_sample_rate",
+  "is_transaction",
+  "span.duration",
+  "span.self_time",
+  "span.op",
+  "span.name",
+  "span.description",
+  "span.category",
+  "parent_span",
+  "transaction",
+  "transaction.op",
+  "transaction.event_id",
+  "transaction.span_id",
+  "trace",
+  "trace.status",
+  "segment.name",
+  "origin",
+  "platform",
+  "sdk.name",
+  "sdk.version",
+  "user",
+  "user.ip",
+  "user.geo.city",
+  "user.geo.country_code",
+  "user.geo.region",
+  "user.geo.subdivision",
+  "user.geo.subregion",
+  "environment",
+]);
+
+/**
+ * Convert a trace-items attribute array into a key-value dict,
+ * optionally filtering out internal attributes.
+ */
+function attributesToDict(
+  attributes: TraceItemDetail["attributes"],
+  filterInternal: boolean
+): Record<string, unknown> {
+  const dict: Record<string, unknown> = {};
+  for (const attr of attributes) {
+    if (filterInternal && INTERNAL_ATTRS.has(attr.name)) {
+      continue;
+    }
+    // Skip tags[] wrapper attributes — these are internal index keys
+    if (attr.name.startsWith("tags[")) {
+      continue;
+    }
+    dict[attr.name] = attr.value;
+  }
+  return dict;
+}
 
 type ViewFlags = {
   readonly json: boolean;
@@ -151,42 +221,67 @@ type SpanViewData = {
   traceId: string;
   /** Maximum child tree depth to display (from --spans flag) */
   spansDepth: number;
+  /** Full attribute details per span ID (from trace-items endpoint) */
+  details?: Map<string, TraceItemDetail>;
 };
 
 /**
  * Serialize span results for JSON output.
+ *
+ * When `details` is provided (from the trace-items endpoint), each span
+ * gains a `data` dict containing all custom attributes. Internal/storage
+ * attributes are filtered out for readability.
  */
-function buildJsonResults(results: SpanResult[], traceId: string): unknown[] {
-  return results.map((r) => ({
-    span_id: r.span.span_id,
-    parent_span_id: r.span.parent_span_id,
-    trace_id: traceId,
-    op: r.span.op || r.span["transaction.op"],
-    description: r.span.description || r.span.transaction,
-    start_timestamp: r.span.start_timestamp,
-    end_timestamp: r.span.end_timestamp || r.span.timestamp,
-    duration: computeSpanDurationMs(r.span),
-    project_slug: r.span.project_slug,
-    transaction: r.span.transaction,
-    depth: r.depth,
-    ancestors: r.ancestors.map((a) => ({
-      span_id: a.span_id,
-      op: a.op || a["transaction.op"],
-      description: a.description || a.transaction,
-    })),
-    children: (r.span.children ?? []).map((c) => ({
-      span_id: c.span_id,
-      op: c.op || c["transaction.op"],
-      description: c.description || c.transaction,
-    })),
-  }));
+function buildJsonResults(
+  results: SpanResult[],
+  traceId: string,
+  details?: Map<string, TraceItemDetail>
+): unknown[] {
+  return results.map((r) => {
+    const base: Record<string, unknown> = {
+      span_id: r.span.span_id,
+      parent_span_id: r.span.parent_span_id,
+      trace_id: traceId,
+      op: r.span.op || r.span["transaction.op"],
+      description: r.span.description || r.span.transaction,
+      start_timestamp: r.span.start_timestamp,
+      end_timestamp: r.span.end_timestamp || r.span.timestamp,
+      duration: computeSpanDurationMs(r.span),
+      project_slug: r.span.project_slug,
+      transaction: r.span.transaction,
+      depth: r.depth,
+      ancestors: r.ancestors.map((a) => ({
+        span_id: a.span_id,
+        op: a.op || a["transaction.op"],
+        description: a.description || a.transaction,
+      })),
+      children: (r.span.children ?? []).map((c) => ({
+        span_id: c.span_id,
+        op: c.op || c["transaction.op"],
+        description: c.description || c.transaction,
+      })),
+    };
+
+    // Merge full attribute data from the trace-items endpoint
+    const detail = details?.get(r.spanId);
+    if (detail) {
+      const data = attributesToDict(detail.attributes, true);
+      if (Object.keys(data).length > 0) {
+        base.data = data;
+      }
+    }
+
+    return base;
+  });
 }
 
 /**
  * Format span view data for human-readable terminal output.
  *
  * Renders each span's details (KV table + ancestor chain) and optionally
- * shows the child span tree. Multiple spans are separated by `---`.
+ * shows the child span tree. When attribute details are available, notable
+ * custom attributes are appended after the standard fields.
+ * Multiple spans are separated by `---`.
  */
 function formatSpanViewHuman(data: SpanViewData): string {
   const parts: string[] = [];
@@ -198,7 +293,12 @@ function formatSpanViewHuman(data: SpanViewData): string {
     if (!result) {
       continue;
     }
-    parts.push(formatSpanDetails(result.span, result.ancestors, data.traceId));
+
+    // Standard span details (KV table + ancestor chain)
+    const detail = data.details?.get(result.spanId);
+    parts.push(
+      formatSpanDetails(result.span, result.ancestors, data.traceId, detail)
+    );
 
     // Show child tree if --spans > 0 and the span has children
     const children = result.span.children ?? [];
@@ -217,11 +317,48 @@ function formatSpanViewHuman(data: SpanViewData): string {
 }
 
 /**
+ * Fetch full attribute details for found spans in parallel.
+ *
+ * Uses p-limit to cap concurrency and avoid overwhelming the API.
+ * Failures for individual spans are logged as warnings — the command
+ * still returns the basic span data from the trace tree.
+ */
+async function fetchSpanDetails(
+  results: SpanResult[],
+  org: string,
+  project: string,
+  traceId: string
+): Promise<Map<string, TraceItemDetail>> {
+  const limit = pLimit(SPAN_DETAIL_CONCURRENCY);
+  const details = new Map<string, TraceItemDetail>();
+
+  await Promise.all(
+    results.map((r) =>
+      limit(async () => {
+        try {
+          const detail = await getSpanDetails(
+            org,
+            r.span.project_slug || project,
+            r.spanId,
+            traceId
+          );
+          details.set(r.spanId, detail);
+        } catch {
+          log.warn(`Could not fetch details for span ${r.spanId}`);
+        }
+      })
+    )
+  );
+
+  return details;
+}
+
+/**
  * Transform span view data for JSON output.
  * Applies `--fields` filtering per element.
  */
 function jsonTransformSpanView(data: SpanViewData, fields?: string[]): unknown {
-  const mapped = buildJsonResults(data.results, data.traceId);
+  const mapped = buildJsonResults(data.results, data.traceId, data.details);
   if (fields && fields.length > 0) {
     return mapped.map((item) => filterFields(item, fields));
   }
@@ -272,7 +409,7 @@ export const viewCommand = buildCommand({
     warnIfNormalized(traceTarget, "span.view");
 
     // Resolve org/project
-    const { traceId, org } = await resolveTraceOrgProject(
+    const { traceId, org, project } = await resolveTraceOrgProject(
       traceTarget,
       cwd,
       USAGE_HINT
@@ -316,6 +453,15 @@ export const viewCommand = buildCommand({
 
     warnMissingIds(spanIds, foundIds);
 
-    yield new CommandOutput({ results, traceId, spansDepth: flags.spans });
+    // Fetch full attribute details for each found span in parallel.
+    // Uses the trace-items detail endpoint which returns ALL attributes.
+    const details = await fetchSpanDetails(results, org, project, traceId);
+
+    yield new CommandOutput({
+      results,
+      traceId,
+      spansDepth: flags.spans,
+      details,
+    });
   },
 });

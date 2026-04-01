@@ -95,4 +95,8 @@ sentry api organizations/ --verbose
 sentry api organizations/ --dry-run
 ```
 
+### Dataset Names
+
+When querying the Events API (`/events/` endpoint), use valid dataset values: `spans`, `transactions`, `logs`, `errors`, `discover`. Note: `spansIndexed` is not valid — use `spans` instead.
+
 For full API documentation, see the [Sentry API Reference](https://docs.sentry.io/api/).

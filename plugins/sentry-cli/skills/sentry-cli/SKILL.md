@@ -160,6 +160,41 @@ sentry dashboard widget add <dashboard> "Top Endpoints" --display table \
   --group-by transaction --sort -count --limit 10
 ```
 
+### Quick Reference
+
+#### Time filtering
+
+Use `--period` (aliases: `-t`, `--since`) to filter by time window:
+
+```bash
+sentry trace list --period 1h
+sentry span list --since 24h
+sentry span list -t 7d
+```
+
+#### Scoping to an org or project
+
+Org and project are positional arguments following `gh` CLI conventions:
+
+```bash
+sentry trace list my-org/my-project
+sentry issue list my-org/my-project
+sentry span list my-org/my-project/abc123def456...
+```
+
+#### Listing spans in a trace
+
+Pass the trace ID as a positional argument to `span list`:
+
+```bash
+sentry span list abc123def456...
+sentry span list my-org/my-project/abc123def456...
+```
+
+#### Dataset names for the Events API
+
+When querying the Events API (directly or via `sentry api`), valid dataset values are: `spans`, `transactions`, `logs`, `errors`, `discover`. Common mistake: `spansIndexed` is not valid — use `spans`.
+
 ### Common Mistakes
 
 - **Wrong issue ID format**: Use `PROJECT-123` (short ID), not the numeric ID `123456789`. The short ID includes the project prefix.
