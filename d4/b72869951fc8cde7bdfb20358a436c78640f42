@@ -1,0 +1,261 @@
+# Plan: `sentry release` Command Group & CI Release Finalization
+
+Ref: https://github.com/getsentry/cli/issues/600 (gap analysis — releases are the #1 critical gap)
+
+## Summary
+
+Add a full `sentry release` command group (list, view, create, finalize, delete, deploy, set-commits, propose-version) and a CI post-release step that creates, finalizes, and deploys Sentry releases with auto-commit association.
+
+## Current State
+
+- Build scripts upload sourcemaps tagged with a release version but never create/finalize a Sentry release object
+- No `release` command group or API module exists
+- The `@sentry/api` SDK already provides all needed release endpoints
+- `.craft.yml` `postReleaseCommand` only bumps the dev version
+
+---
+
+## Phase 1: Types — `src/types/sentry.ts`
+
+Add Zod schemas and inferred types:
+
+- **`SentryReleaseSchema`** — Full release detail: `version`, `shortVersion`, `status`, `dateCreated`, `dateReleased`, `firstEvent`, `lastEvent`, `ref`, `url`, `commitCount`, `deployCount`, `authors`, `projects` (array of `{id, slug, name}`), `lastDeploy`, `newGroups`, `versionInfo`. Use `.passthrough()`.
+- **`SentryDeploySchema`** — Deploy detail: `id`, `environment`, `name`, `url`, `dateStarted`, `dateFinished`. Use `.passthrough()`.
+- Re-export from `src/types/index.ts`
+
+## Phase 2: API Module — `src/lib/api/releases.ts` (new file)
+
+Follow `src/lib/api/repositories.ts` pattern. Import SDK functions from `@sentry/api`:
+
+| Function | SDK Function | Notes |
+|----------|-------------|-------|
+| `listReleasesPaginated(org, {cursor, perPage, query, sort})` | `listAnOrganization_sReleases` | Returns `PaginatedResponse<SentryRelease[]>` |
+| `getRelease(org, version)` | `retrieveAnOrganization_sRelease` | URL-encode version |
+| `createRelease(org, {version, projects, ref, url, dateReleased})` | `createANewReleaseForAnOrganization` | |
+| `updateRelease(org, version, body)` | `updateAnOrganization_sRelease` | |
+| `finalizeRelease(org, version)` | Wraps `updateRelease` with `{dateReleased: now}` | Convenience |
+| `deleteRelease(org, version)` | `deleteAnOrganization_sRelease` | |
+| `listDeploys(org, version)` | `listARelease_sDeploys` | |
+| `createDeploy(org, version, {environment, name, url})` | `createADeploy` | |
+| `setCommitsAuto(org, version)` | `apiRequestToRegion` (raw) | Body: `{refs: [{repository: "auto", commit: "auto"}]}` — not in OpenAPI spec, requires raw request |
+| `setCommitsLocal(org, version, commits)` | `updateAnOrganization_sRelease` | Body: `{commits: [{id, repository?, ...}]}` — pass pre-parsed git log data |
+
+**Version encoding**: The `@sentry/api` SDK should handle path encoding. Verify with `@` character; fall back to `apiRequestToRegion` with manual `encodeURIComponent` if needed.
+
+### Git helpers: `src/lib/git.ts` (new file)
+
+Needed for `set-commits --local` and `propose-version`. Uses `simple-git` (same library Craft uses — type-safe, async, with parsed responses for log, rev-parse, remotes).
+
+**New dependency**: `bun add simple-git`
+
+```typescript
+import { simpleGit } from "simple-git";
+
+const git = simpleGit(cwd);
+```
+
+Functions wrapping `simple-git`:
+- `getHeadCommit(cwd)` → `string` — `git.revparse(["HEAD"])`, trimmed
+- `isShallowRepository(cwd)` → `boolean` — `git.revparse(["--is-shallow-repository"])`
+- `getCommitLog(cwd, opts?: {from?: string, depth?: number})` → typed `LogResult` — `git.log({from, to: "HEAD", maxCount: depth})`. Returns parsed `{hash, message, author_name, author_email, date}[]` via simple-git's built-in `ListLogLine` type.
+- `getRepositoryName(cwd)` → `string | undefined` — `git.getRemotes(true)` → find "origin" → parse URL to `owner/repo` format. simple-git returns typed `RemoteWithRefs[]`.
+
+Add barrel re-exports in `src/lib/api-client.ts`.
+
+## Phase 3: Commands — `src/commands/release/` (new directory)
+
+### Shared helper: `src/commands/release/parse.ts`
+
+`parseReleaseArg(arg, usageHint)` → `{version, orgSlug?}`. Splits on first `/` only when the prefix is a valid slug (lowercase alphanum + hyphens). This is needed because versions can contain `@`, `/`, `+` etc.
+
+### Command files
+
+| Command | File | Positional | Key Flags | Notes |
+|---------|------|-----------|-----------|-------|
+| `release list` | `list.ts` | `[org/]` (optional target) | `--limit`, `--cursor`/`-c`, `--query`/`-q` | Use `dispatchOrgScopedList` or `buildOrgListCommand`. Table: VERSION, STATUS, CREATED, RELEASED, COMMITS, DEPLOYS |
+| `release view` | `view.ts` | `[org/]<version>` | `--json` | `mdKvTable` detail view |
+| `release create` | `create.ts` | `[org/]<version>` | `--project`/`-p` (repeated), `--finalize`, `--ref`, `--url` | If `--finalize`, set `dateReleased` in create body |
+| `release finalize` | `finalize.ts` | `[org/]<version>` | `--json` | Wraps `finalizeRelease()` |
+| `release delete` | `delete.ts` | `[org/]<version>` | `--yes`/`-y` | Confirmation prompt (type version), like `project delete` |
+| `release deploy` | `deploy.ts` | `[org/]<version> <environment> [name]` | `--url`, `--started`, `--finished` | Environment is required → positional. Deploy name is optional → positional (2nd). Only timestamps and URL stay as flags since they're optional metadata. Example: `sentry release deploy my-org/1.0.0 production "Deploy #42"` |
+| `release set-commits` | `set-commits.ts` | `[org/]<version>` | `--auto`, `--local`, `--initial-depth` (default 20), `--commit` | `--auto` uses repo integration; `--local` shells out to git log. Default is `--auto`. Detect missing integration → helpful error |
+| `release propose-version` | `propose-version.ts` | (none) | `--json` | Trivial: `git rev-parse HEAD`. Useful in CI for `sentry release create $(sentry release propose-version)` |
+
+**Positional-first principle**: Required inputs that identify _what_ to act on are always positional. Flags are only for behavioral modifiers (`--yes`, `--finalize`, `--auto`) and optional metadata (`--url`, `--started`). This matches the CLI's existing conventions (see `trace view`, `project delete`, `dashboard create`).
+
+### `set-commits --local` detail
+
+When `--local` is passed:
+1. Call `getHeadCommit()` for the current HEAD SHA
+2. Call `getCommitLog(undefined, flags.initialDepth)` to get recent commits
+3. Call `getRepositoryName()` to get the repo identifier
+4. POST to update release with `{commits: [{id, message, author_name, author_email, timestamp, repository}]}`
+
+Edge cases:
+- Shallow clones: warn and suggest `--initial-depth` or `git fetch --unshallow`
+- No git repo: throw `ValidationError` with helpful message
+- No remote configured: omit `repository` field (Sentry can still accept commits without it)
+
+### Route map: `src/commands/release/index.ts`
+
+Register all 9 subcommands via `buildRouteMap`.
+
+### App registration: `src/app.ts`
+
+- Import `releaseRoute` and `listCommand as releaseListCommand`
+- Add `release: releaseRoute` to routes
+- Add `releases: releaseListCommand` (hidden plural alias)
+- Add `releases: "release"` to `PLURAL_TO_SINGULAR`
+
+## Phase 4: Human Output — `src/lib/formatters/human.ts`
+
+- `formatReleaseDetails(release)` — `mdKvTable` with version, status (Finalized/Unreleased colorTag), dates, ref, commits, deploys, projects, last deploy
+- `formatReleaseDeleted(result)` — Confirmation message
+- `formatDeployCreated(deploy)` — `mdKvTable` with environment, name, url, timestamps
+- `formatProposedVersion(sha)` — Just the SHA string (for piping: `sentry release create $(sentry release propose-version)`)
+- Release list table columns for the list command
+
+## Phase 5: CI Integration
+
+### Script: `script/finalize-release.ts` (new file)
+
+```
+#!/usr/bin/env node
+Steps:
+1. Read version from package.json (or CLI arg)
+2. Skip if no SENTRY_AUTH_TOKEN
+3. Create release (idempotent — handle 208/409)
+4. Set commits auto (non-fatal — warn on failure, integration may not exist)
+5. Finalize release
+6. Create deploy for 'production' environment
+```
+
+Org hardcoded to `"sentry"`, project to `"cli"`.
+
+### `.craft.yml` change
+
+```yaml
+# Run finalize BEFORE version bump so package.json still has the release version
+postReleaseCommand: >-
+  node --experimental-strip-types script/finalize-release.ts &&
+  node --experimental-strip-types script/bump-version.ts --post
+```
+
+**Critical ordering**: `finalize-release.ts` must run before `bump-version.ts --post` because the post-release bump changes `package.json` to the next dev version. The finalize script reads the release version from `package.json`.
+
+### `package.json`
+
+Add script: `"finalize-release": "bun run script/finalize-release.ts"`
+
+## Phase 6: Testing
+
+### Testing patterns (from existing codebase)
+
+- **Command tests**: Use `spyOn` on namespace imports (`import * as apiClient`), not mock servers
+- **Mock context**: `{ stdout: { write: mock() }, stderr: { write: mock() }, cwd: "/tmp" }`
+- **Call pattern**: `const func = await cmd.loader(); await func.call(ctx, flags, ...args)`
+- **Output assertion**: `stdoutWrite.mock.calls.map(c => c[0]).join("")`
+- **Spy lifecycle**: Create in `beforeEach`, `.mockRestore()` in `afterEach`
+- **Config isolation**: Use `useTestConfigDir()` from `test/helpers.ts`
+- **Property tests**: `fcAssert(property(arb, (input) => { ... }), { numRuns: DEFAULT_NUM_RUNS })`
+
+### Test files
+
+| Test File | Type | What |
+|-----------|------|------|
+| `test/lib/release-parse.property.test.ts` | Property | `parseReleaseArg`: org/version splitting, `@` in versions, empty input errors |
+| `test/lib/git.property.test.ts` | Property | `parseRemoteUrl`: HTTPS/SSH round-trips, `.git` suffix stripping |
+| `test/commands/release/view.test.ts` | Unit | spyOn `getRelease` + `resolveOrg`, verify human + JSON output |
+| `test/commands/release/create.test.ts` | Unit | `--finalize` sets dateReleased, `--project` passes projects array |
+| `test/commands/release/finalize.test.ts` | Unit | spyOn `finalizeRelease`, verify call |
+| `test/commands/release/deploy.test.ts` | Unit | Positional env + name parsing, flag passthrough |
+| `test/commands/release/propose-version.test.ts` | Unit | spyOn `getHeadCommit`, verify SHA output |
+
+### Shared test fixtures
+
+```typescript
+// test/commands/release/fixtures.ts
+const SAMPLE_RELEASE: SentryRelease = {
+  id: 1,
+  version: "1.0.0",
+  shortVersion: "1.0.0",
+  dateCreated: "2025-01-01T00:00:00Z",
+  dateReleased: null,
+  commitCount: 5,
+  deployCount: 1,
+  projects: [{ id: 1, slug: "my-project", name: "My Project" }],
+  ...
+};
+
+const SAMPLE_DEPLOY: SentryDeploy = {
+  id: "1",
+  environment: "production",
+  dateStarted: null,
+  dateFinished: "2025-01-01T00:00:00Z",
+  name: null,
+  url: null,
+};
+```
+
+## Phase 7: Finalization
+
+1. `bun run generate:skill` — regenerate SKILL.md
+2. `bun run lint:fix` — auto-fix formatting
+3. `bun run typecheck` — verify types
+4. `bun test` — run all tests
+
+---
+
+## Files to Create (17)
+
+- `src/lib/api/releases.ts`
+- `src/lib/git.ts` — Git helpers for set-commits --local and propose-version
+- `src/commands/release/index.ts`
+- `src/commands/release/parse.ts`
+- `src/commands/release/list.ts`
+- `src/commands/release/view.ts`
+- `src/commands/release/create.ts`
+- `src/commands/release/finalize.ts`
+- `src/commands/release/delete.ts`
+- `src/commands/release/deploy.ts`
+- `src/commands/release/set-commits.ts`
+- `src/commands/release/propose-version.ts`
+- `script/finalize-release.ts`
+- `test/lib/release-parse.property.test.ts`
+- `test/lib/git.test.ts` — Git helper unit tests (mock simple-git)
+- `test/lib/api/releases.test.ts`
+- `test/commands/release/` (multiple test files)
+
+## Files to Edit (5)
+
+- `src/types/sentry.ts` — Add `SentryReleaseSchema`, `SentryDeploySchema`
+- `src/types/index.ts` — Re-export new types
+- `src/lib/api-client.ts` — Barrel re-exports for releases module
+- `src/app.ts` — Register release route + plural alias
+- `src/lib/formatters/human.ts` — Add release/deploy formatters
+- `.craft.yml` — Chain `finalize-release.ts` in `postReleaseCommand`
+- `package.json` — Add `finalize-release` script
+
+## Implementation Order
+
+1. Types (`sentry.ts`, `index.ts`)
+2. API module (`releases.ts`) + barrel (`api-client.ts`)
+3. Git helpers (`src/lib/git.ts`)
+4. Arg parser (`release/parse.ts`)
+5. Commands (list → view → create → finalize → delete → deploy → set-commits → propose-version → index.ts)
+6. Formatters (`human.ts`)
+7. App registration (`app.ts`)
+8. CI script (`finalize-release.ts`) + `.craft.yml` + `package.json`
+9. Tests
+10. `generate:skill`, `lint:fix`, `typecheck`, `test`
+
+## Verification
+
+```bash
+bun run typecheck          # Types compile
+bun run lint:fix           # Code style
+bun test                   # All tests pass
+bun run check:skill        # SKILL.md up-to-date (after generate:skill)
+bun run dev -- release --help   # Commands appear
+bun run dev -- release list     # Smoke test (requires auth)
+```
