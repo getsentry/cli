@@ -1,0 +1,151 @@
+# Upgrade Sentry SDK to 10.47.0 + Enable Runtime Metrics
+
+## Summary
+
+Upgrade `@sentry/node-core` from `10.44.0` to `10.47.0` and enable runtime metrics collection using the new `nodeRuntimeMetricsIntegration`.
+
+## Key Decision: Which Integration to Use
+
+**Use `nodeRuntimeMetricsIntegration` from `@sentry/node-core/light`** (not `bunRuntimeMetricsIntegration` from `@sentry/bun`).
+
+Rationale:
+- `nodeRuntimeMetricsIntegration` is already exported from `@sentry/node-core/light` in v10.47.0 (via `common-exports.ts`)
+- No new dependency needed (the project doesn't use `@sentry/bun`)
+- The integration handles Bun gracefully: `monitorEventLoopDelay` is wrapped in try/catch (degrades to no event loop delay metrics), and all other APIs (`process.cpuUsage()`, `process.memoryUsage()`, `performance.eventLoopUtilization()`) are available in Bun
+- Metric prefix will be `node.runtime.*` — accurate for the npm/Node distribution and acceptable for the Bun binary (consistent across both runtimes)
+- Collection interval: **5 seconds** (default 30s is too long for a CLI where most commands complete in <10s)
+
+## Implementation Steps
+
+### Step 1: Update `package.json`
+
+**File:** `package.json`
+
+1. Bump `@sentry/node-core` version: `"10.44.0"` → `"10.47.0"`
+2. Update `patchedDependencies` keys to reference new version:
+   - `"@sentry/core@10.44.0"` → `"@sentry/core@10.47.0"`
+   - `"@sentry/node-core@10.44.0"` → `"@sentry/node-core@10.47.0"`
+   - Update patch file paths accordingly
+
+### Step 2: Regenerate Tree-Shaking Patches
+
+The existing patches are purely subtractive — they strip unused re-exports to reduce bundle size. They're tightly coupled to the exact line layout of v10.44.0 and won't apply to v10.47.0.
+
+**Process:**
+1. Temporarily remove patch references from `patchedDependencies`
+2. Run `bun install` to get clean v10.47.0 installed
+3. Compare old patch contents against new v10.47.0 index files to identify the same exports to strip
+
+**`@sentry/core@10.47.0` patch** — strip from `build/cjs/index.js` and `build/esm/index.js`:
+- AI providers: Vercel AI, OpenAI, Anthropic, Google GenAI, LangChain, LangGraph (and provider skip utils)
+- Integrations: `captureConsoleIntegration`, `dedupeIntegration`, `extraErrorDataIntegration`, `rewriteFramesIntegration`, `supabaseIntegration`, `zodErrorsIntegration`, `featureFlagsIntegration`, `growthbookIntegration`, `conversationIdIntegration`, `moduleMetadataIntegration`, `thirdPartyErrorFilterIntegration`, `wrapMcpServerWithSentry`
+- Other: `profiler`, `instrumentFetchRequest`, `trpcMiddleware`, `startIdleSpan`, `TRACING_DEFAULTS`, `instrumentPostgresJsSql`, feature flag internals
+
+**MUST PRESERVE in core patch:**
+- `_INTERNAL_safeUnref` (from `utils/timer.js`) — required by `nodeRuntimeMetricsIntegration`
+- `_INTERNAL_safeDateNow` — also required by `nodeRuntimeMetricsIntegration`
+
+**`@sentry/node-core@10.47.0` patch** — strip from `build/cjs/light/index.js` and `build/esm/light/index.js`:
+- Same re-exports as before: `captureConsoleIntegration`, `dedupeIntegration`, `extraErrorDataIntegration`, `featureFlagsIntegration`, `instrumentSupabaseClient`, `profiler`, `rewriteFramesIntegration`, `supabaseIntegration`, `trpcMiddleware`, `wrapMcpServerWithSentry`, `zodErrorsIntegration`
+
+**MUST PRESERVE in node-core patch:**
+- `nodeRuntimeMetricsIntegration` — this is a native node-core export (not a core re-export), so it's naturally in a different section and won't be touched
+
+4. Generate patches via `bun patch` or manual diff
+5. Delete old patch files: `patches/@sentry%2Fcore@10.44.0.patch`, `patches/@sentry%2Fnode-core@10.44.0.patch`
+6. Save new patches: `patches/@sentry%2Fcore@10.47.0.patch`, `patches/@sentry%2Fnode-core@10.47.0.patch`
+7. Re-add patch references to `patchedDependencies` and run `bun install`
+
+### Step 3: Enable Runtime Metrics in Telemetry Init
+
+**File:** `src/lib/telemetry.ts`
+
+Modify the `integrations` callback in `initSentry()` (around line 372-381) to add `nodeRuntimeMetricsIntegration` after filtering defaults:
+
+```typescript
+integrations: (defaults) => {
+  const excluded = libraryMode
+    ? LIBRARY_EXCLUDED_INTEGRATIONS
+    : EXCLUDED_INTEGRATIONS;
+  const filtered = defaults.filter(
+    (integration) =>
+      !excluded.has(integration.name) &&
+      (integration.name !== "NodeSystemError" || hasGetSystemErrorMap)
+  );
+
+  // Collect runtime metrics (CPU, memory, event loop) for non-library mode.
+  // Uses nodeRuntimeMetricsIntegration which degrades gracefully on Bun:
+  // monitorEventLoopDelay is try/caught, all other APIs are Bun-compatible.
+  // 5s interval for CLI — most commands complete in <10s.
+  if (!libraryMode) {
+    filtered.push(
+      Sentry.nodeRuntimeMetricsIntegration({ collectionIntervalMs: 5_000 })
+    );
+  }
+
+  return filtered;
+},
+```
+
+Also add `"NodeRuntimeMetrics"` to `LIBRARY_EXCLUDED_INTEGRATIONS` (line 274-284) as a safety measure in case it becomes a default integration in the future:
+
+```typescript
+const LIBRARY_EXCLUDED_INTEGRATIONS = new Set([
+  ...EXCLUDED_INTEGRATIONS,
+  "OnUncaughtException",
+  "OnUnhandledRejection",
+  "ProcessSession",
+  "Http",
+  "NodeFetch",
+  "FunctionToString",
+  "ChildProcess",
+  "NodeContext",
+  "NodeRuntimeMetrics", // Runtime metrics timer would keep host event loop alive
+]);
+```
+
+### Step 4: Install and Lock
+
+```bash
+bun install
+```
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `package.json` | Bump version + update patchedDependencies keys |
+| `bun.lock` | Auto-updated by bun install |
+| `patches/@sentry%2Fcore@10.44.0.patch` | **Delete** |
+| `patches/@sentry%2Fnode-core@10.44.0.patch` | **Delete** |
+| `patches/@sentry%2Fcore@10.47.0.patch` | **New** — regenerated tree-shaking patch |
+| `patches/@sentry%2Fnode-core@10.47.0.patch` | **New** — regenerated tree-shaking patch |
+| `src/lib/telemetry.ts` | Add runtime metrics integration + library exclusion |
+
+## Verification
+
+```bash
+bun run typecheck          # Types OK with new SDK version
+bun run lint               # No lint issues
+bun run lint:fix           # Auto-fix if needed
+bun run test:unit          # Unit tests pass
+bun run test:e2e           # E2E tests pass (if applicable)
+
+# Verify runtime metrics integration loads:
+bun run --env-file=.env.local src/bin.ts issue list
+# Should not crash; runtime metrics are silently collected
+
+# Verify the integration is exported from patched build:
+bun -e "import S from '@sentry/node-core/light'; console.log(typeof S.nodeRuntimeMetricsIntegration)"
+# Should print: function
+```
+
+## Risks
+
+| Risk | Mitigation |
+|------|------------|
+| Patches don't apply cleanly to 10.47.0 | Regenerate fresh — patches are purely subtractive |
+| `_INTERNAL_safeUnref` stripped by core patch | Verify it's preserved (it's in a different section than stripped exports) |
+| `monitorEventLoopDelay` unavailable in Bun | Built-in try/catch in the integration — degrades gracefully |
+| 5s timer overhead | Negligible; timer is unref'd so it won't keep process alive |
+| Breaking changes in 10.45-10.47 | Check release notes for 10.45.0, 10.46.0, 10.47.0 for any breaking changes |
