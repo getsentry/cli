@@ -113,6 +113,9 @@ function buildViewData(
       title: w.title,
       displayType: w.displayType,
       widgetType: w.widgetType,
+      description: (w as Record<string, unknown>).description as
+        | string
+        | undefined,
       layout: w.layout,
       queries: w.queries,
       data: widgetResults.get(i) ?? {

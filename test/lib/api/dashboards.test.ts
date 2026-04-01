@@ -1,16 +1,20 @@
 /**
  * Dashboard API helper tests
  *
- * Tests for periodToSeconds and computeOptimalInterval from
- * src/lib/api/dashboards.ts.
+ * Tests for periodToSeconds, computeOptimalInterval, and queryAllWidgets
+ * from src/lib/api/dashboards.ts.
  */
 
 import { describe, expect, test } from "bun:test";
 import {
   computeOptimalInterval,
   periodToSeconds,
+  queryAllWidgets,
 } from "../../../src/lib/api/dashboards.js";
-import type { DashboardWidget } from "../../../src/types/dashboard.js";
+import type {
+  DashboardDetail,
+  DashboardWidget,
+} from "../../../src/types/dashboard.js";
 
 // ---------------------------------------------------------------------------
 // periodToSeconds
@@ -136,5 +140,75 @@ describe("computeOptimalInterval", () => {
     // 1h / ~40 cols ≈ 90s → should pick "1m" (finest available)
     const result = computeOptimalInterval("1h", makeWidget(2));
     expect(result).toBe("1m");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// queryAllWidgets — text widget handling
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a minimal DashboardDetail with the given widgets.
+ *
+ * Text widgets carry markdown in `description` (a passthrough field not in
+ * the typed schema), so widgets are cast via `as any`.
+ */
+function makeDashboard(widgets: Record<string, unknown>[]): DashboardDetail {
+  return { id: "1", title: "Test Dashboard", widgets } as DashboardDetail;
+}
+
+describe("queryAllWidgets", () => {
+  // Text widgets return immediately — no API call, no mocking needed.
+  // regionUrl and orgSlug are unused for text widgets.
+  const UNUSED_URL = "https://unused.example.com";
+  const UNUSED_ORG = "unused-org";
+
+  test("returns TextResult for text widget with description", async () => {
+    const dashboard = makeDashboard([
+      { title: "Notes", displayType: "text", description: "# Hello\n**bold**" },
+    ]);
+
+    const results = await queryAllWidgets(UNUSED_URL, UNUSED_ORG, dashboard);
+
+    expect(results.size).toBe(1);
+    expect(results.get(0)).toEqual({
+      type: "text",
+      content: "# Hello\n**bold**",
+    });
+  });
+
+  test("returns TextResult with empty content when description is missing", async () => {
+    const dashboard = makeDashboard([
+      { title: "Empty Notes", displayType: "text" },
+    ]);
+
+    const results = await queryAllWidgets(UNUSED_URL, UNUSED_ORG, dashboard);
+
+    expect(results.get(0)).toEqual({ type: "text", content: "" });
+  });
+
+  test("returns TextResult with empty content for non-string description", async () => {
+    const dashboard = makeDashboard([
+      { title: "Bad Description", displayType: "text", description: 42 },
+    ]);
+
+    const results = await queryAllWidgets(UNUSED_URL, UNUSED_ORG, dashboard);
+
+    expect(results.get(0)).toEqual({ type: "text", content: "" });
+  });
+
+  test("handles multiple text widgets in a single dashboard", async () => {
+    const dashboard = makeDashboard([
+      { title: "Notes 1", displayType: "text", description: "First" },
+      { title: "Notes 2", displayType: "text", description: "Second" },
+      { title: "Notes 3", displayType: "text", description: "Third" },
+    ]);
+
+    const results = await queryAllWidgets(UNUSED_URL, UNUSED_ORG, dashboard);
+
+    expect(results.size).toBe(3);
+    expect(results.get(0)).toEqual({ type: "text", content: "First" });
+    expect(results.get(1)).toEqual({ type: "text", content: "Second" });
+    expect(results.get(2)).toEqual({ type: "text", content: "Third" });
   });
 });

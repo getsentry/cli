@@ -10,6 +10,7 @@
 
 import chalk from "chalk";
 import stringWidth from "string-width";
+import wrapAnsi from "wrap-ansi";
 
 import type {
   DashboardWidgetQuery,
@@ -19,6 +20,7 @@ import type {
   WidgetDataResult,
 } from "../../types/dashboard.js";
 import { COLORS, muted, terminalLink } from "./colors.js";
+import { renderMarkdown } from "./markdown.js";
 
 import type { HumanRenderer } from "./output.js";
 import { isPlainOutput } from "./plain-detect.js";
@@ -45,6 +47,8 @@ export type DashboardViewWidget = {
   title: string;
   displayType: string;
   widgetType?: string;
+  /** Markdown content for text widgets (from API passthrough field) */
+  description?: string;
   layout?: { x: number; y: number; w: number; h: number };
   queries?: DashboardWidgetQuery[];
   data: WidgetDataResult;
@@ -1537,6 +1541,26 @@ function buildTimeAxis(opts: {
   return [plain ? axisStr : muted(axisStr), plain ? labelStr : muted(labelStr)];
 }
 
+/**
+ * Render text widget markdown content as terminal lines.
+ *
+ * Pipeline: markdown → renderMarkdown() (ANSI-styled) → wrap-ansi
+ * (width-constrained) → split into lines. Empty/missing content renders
+ * as a muted placeholder.
+ */
+function renderTextContent(content: string, innerWidth: number): string[] {
+  if (!content.trim()) {
+    return [isPlainOutput() ? "(empty)" : muted("(empty)")];
+  }
+
+  const rendered = renderMarkdown(content);
+  const wrapped = wrapAnsi(rendered, innerWidth, {
+    hard: true,
+    trim: false,
+  });
+  return wrapped.split("\n");
+}
+
 /** Render placeholder content for unsupported/error widgets (no title/border). */
 function renderPlaceholderContent(message: string): string[] {
   return [isPlainOutput() ? `(${message})` : muted(`(${message})`)];
@@ -1572,6 +1596,9 @@ function renderContentLines(opts: {
 
     case "scalar":
       return renderBigNumberContent(data, { innerWidth, contentHeight });
+
+    case "text":
+      return renderTextContent(data.content, innerWidth);
 
     case "unsupported":
       return renderPlaceholderContent(data.reason);
