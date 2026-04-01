@@ -5,6 +5,8 @@
  * Similar to 'gh api' for GitHub.
  */
 
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
+import * as Sentry from "@sentry/node-core/light";
 import type { SentryContext } from "../context.js";
 import { buildSearchParams, rawApiRequest } from "../lib/api-client.js";
 import { buildCommand } from "../lib/command.js";
@@ -1037,6 +1039,28 @@ export async function resolveBody(
 // Command Definition
 
 /** Log outgoing request details in `> ` curl-verbose style. */
+/**
+ * Record API error attributes on the active telemetry span.
+ *
+ * Since `OutputError` is excluded from `Sentry.captureException` (it signals
+ * an intentional non-zero exit, not a CLI bug), these span attributes are the
+ * only telemetry signal for `sentry api` HTTP errors. They're queryable in
+ * Discover via `api_error.status`, matching the pattern used by
+ * `recordApiErrorOnSpan` for `ApiError`-based errors in other commands.
+ */
+function recordApiErrorAttributes(
+  status: number,
+  endpoint: string,
+  method: string
+): void {
+  const span = Sentry.getActiveSpan();
+  if (span) {
+    span.setAttribute("api_error.status", status);
+    span.setAttribute("api_error.endpoint", endpoint);
+    span.setAttribute("api_error.method", method);
+  }
+}
+
 function logRequest(
   method: string,
   endpoint: string,
@@ -1215,6 +1239,17 @@ export const apiCommand = buildCommand({
 
     if (verbose) {
       logResponse(response);
+    }
+
+    // Record API error attributes on the active span for Discover queryability.
+    // OutputError is excluded from Sentry.captureException (it's an intentional
+    // non-zero exit, not a bug), so span attributes are the only telemetry signal.
+    if (isError) {
+      recordApiErrorAttributes(
+        response.status,
+        normalizedEndpoint,
+        flags.method
+      );
     }
 
     // Silent mode — no output, just exit code

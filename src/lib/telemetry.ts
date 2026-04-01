@@ -20,7 +20,7 @@ import {
 } from "./constants.js";
 import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
 import { getEnv } from "./env.js";
-import { ApiError, AuthError } from "./errors.js";
+import { ApiError, AuthError, OutputError } from "./errors.js";
 import { attachSentryReporter } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 import { getRealUsername } from "./utils.js";
@@ -145,7 +145,12 @@ export async function withTelemetry<T>(
       (e.reason === "not_authenticated" || e.reason === "expired");
     // 4xx API errors are user errors (wrong ID, no access), not CLI bugs.
     // They're recorded as span attributes above for volume-spike detection.
-    if (!(isExpectedAuthState || isClientApiError(e))) {
+    // OutputError is an intentional non-zero exit (e.g., `sentry api` got a
+    // 4xx/5xx response) — not a CLI bug. Error details are recorded as span
+    // attributes by the command itself.
+    if (
+      !(isExpectedAuthState || isClientApiError(e) || e instanceof OutputError)
+    ) {
       Sentry.captureException(e);
       markSessionCrashed();
     }
