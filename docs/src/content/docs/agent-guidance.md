@@ -154,11 +154,11 @@ sentry dashboard widget add <dashboard> "Top Endpoints" --display table \
 
 ### Time filtering
 
-Use `--period` (aliases: `-t`, `--since`) to filter by time window:
+Use `--period` (alias: `-t`) to filter by time window:
 
 ```bash
 sentry trace list --period 1h
-sentry span list --since 24h
+sentry span list --period 24h
 sentry span list -t 7d
 ```
 
