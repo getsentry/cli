@@ -405,6 +405,7 @@ jobs:
           echo "HAS_PREV=true" >> "$GITHUB_ENV"
           echo "Previous release: ${PREV_TAG}"
 
+          shopt -s nullglob
           mkdir -p old-binaries
           for gz in new-binaries/*.gz; do
             name=$(basename "${gz%.gz}")
