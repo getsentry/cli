@@ -59,6 +59,7 @@ const SCOPES = [
   "event:write",
   "member:read",
   "team:read",
+  "team:write",
 ].join(" ");
 
 type DeviceFlowCallbacks = {
