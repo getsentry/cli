@@ -410,30 +410,28 @@ async function resolvePreSpinnerOptions(
       const teams = await listTeams(opts.org);
       if (teams.length > 1) {
         const memberTeams = teams.filter((t) => t.isMember === true);
+        const candidates = memberTeams.length > 0 ? memberTeams : teams;
 
-        if (memberTeams.length === 1) {
-          opts = { ...opts, team: (memberTeams[0] as SentryTeam).slug };
-        } else if (memberTeams.length > 1) {
-          if (yes) {
-            opts = { ...opts, team: (memberTeams[0] as SentryTeam).slug };
-          } else {
-            const selected = await select({
-              message: "Which team should own this project?",
-              options: memberTeams.map((t) => ({
-                value: t.slug,
-                label: t.slug,
-                hint: t.name !== t.slug ? t.name : undefined,
-              })),
-            });
-            if (isCancel(selected)) {
-              cancel("Setup cancelled.");
-              process.exitCode = 0;
-              return null;
-            }
-            opts = { ...opts, team: selected };
+        if (candidates.length === 1) {
+          opts = { ...opts, team: (candidates[0] as SentryTeam).slug };
+        } else if (yes) {
+          opts = { ...opts, team: (candidates[0] as SentryTeam).slug };
+        } else {
+          const selected = await select({
+            message: "Which team should own this project?",
+            options: candidates.map((t) => ({
+              value: t.slug,
+              label: t.slug,
+              hint: t.name !== t.slug ? t.name : undefined,
+            })),
+          });
+          if (isCancel(selected)) {
+            cancel("Setup cancelled.");
+            process.exitCode = 0;
+            return null;
           }
+          opts = { ...opts, team: selected };
         }
-        // If no member teams, skip — resolveOrCreateTeam will handle it later
       }
     } catch {
       // Best-effort — let resolveOrCreateTeam handle it later
