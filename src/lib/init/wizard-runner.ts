@@ -278,6 +278,13 @@ async function preamble(
 }
 
 /**
+ * Derive a team slug for auto-creation when the org has no teams.
+ */
+function deriveTeamSlug(): string {
+  return "default";
+}
+
+/**
  * Resolve org and detect an existing Sentry project before the spinner starts.
  *
  * Clack requires all interactive prompts to complete before any spinner/task
@@ -287,13 +294,6 @@ async function preamble(
  * @returns Updated options with org and project resolved, or `null` to abort.
  *          When `null` is returned, `process.exitCode` is already set.
  */
-/**
- * Derive a team slug for auto-creation when the org has no teams.
- */
-function deriveTeamSlug(): string {
-  return "default";
-}
-
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard pre-flight branches are inherently nested
 async function resolvePreSpinnerOptions(
   options: WizardOptions
