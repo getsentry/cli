@@ -680,6 +680,16 @@ describe("FIELDS_FLAG", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildCommand output config", () => {
+  let originalLevel: number;
+
+  beforeEach(() => {
+    originalLevel = logger.level;
+  });
+
+  afterEach(() => {
+    setLogLevel(originalLevel);
+  });
+
   test("injects --json flag when output: 'json'", async () => {
     let receivedFlags: Record<string, unknown> | null = null;
 
