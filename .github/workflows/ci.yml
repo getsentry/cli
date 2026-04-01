@@ -347,7 +347,9 @@ jobs:
       - name: Download current binaries
         uses: actions/download-artifact@v8
         with:
-          pattern: sentry-*
+          # Use sentry-*-* to match platform binaries (sentry-linux-x64, etc.)
+          # and their -gz variants, but not sentry-patches
+          pattern: sentry-*-*
           path: new-binaries
           merge-multiple: true
 
@@ -484,7 +486,9 @@ jobs:
       - name: Download uncompressed artifacts (for SHA-256 computation)
         uses: actions/download-artifact@v8
         with:
-          pattern: sentry-*
+          # Use sentry-*-* to match platform binaries (sentry-linux-x64, etc.)
+          # but not sentry-patches (which is downloaded separately)
+          pattern: sentry-*-*
           path: binaries
           merge-multiple: true
 
