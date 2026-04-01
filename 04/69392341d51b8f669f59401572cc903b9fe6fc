@@ -1,0 +1,510 @@
+# Plan: Unified Delta Patch Generation for Both Channels
+
+## Problem
+
+Stable releases have no delta patches — the client code is ready but no CI generates them. Nightly patches work but the generation logic is inlined in `publish-nightly`, creating duplication if we add a separate stable path.
+
+## Solution
+
+Extract patch generation into a shared `generate-patches` job in `ci.yml` that runs on both `main` and `release/**` branches. The old-binary source switches by branch:
+- **`main`** → previous nightly from GHCR
+- **`release/**`** → previous stable release from GitHub Releases
+
+Patches are always uploaded as workflow artifacts (`sentry-patches`). For releases, craft picks them up. For nightlies, `publish-nightly` downloads the artifacts and pushes them to GHCR as before.
+
+## File to modify: `.github/workflows/ci.yml`
+
+### Change 1: Add `generate-patches` job (after `build-binary`, before `publish-nightly`)
+
+```yaml
+generate-patches:
+  name: Generate Delta Patches
+  needs: [changes, build-binary]
+  # Only on main (nightlies) and release branches (stable) — skip PRs
+  if: github.event_name != 'pull_request'
+  runs-on: ubuntu-latest
+  continue-on-error: true
+  steps:
+    - name: Install ORAS CLI
+      # Only needed on main (to fetch previous nightly from GHCR)
+      if: github.ref == 'refs/heads/main'
+      run: |
+        VERSION=1.2.3
+        EXPECTED_SHA256="b4efc97a91f471f323f193ea4b4d63d8ff443ca3aab514151a30751330852827"
+        TARBALL="oras_${VERSION}_linux_amd64.tar.gz"
+        curl -sfLo "$TARBALL" "https://github.com/oras-project/oras/releases/download/v${VERSION}/${TARBALL}"
+        echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
+        tar -xz -C /usr/local/bin oras < "$TARBALL"
+        rm "$TARBALL"
+
+    - name: Install zig-bsdiff
+      run: |
+        VERSION=0.1.19
+        EXPECTED_SHA256="9f1ac75a133ee09883ad2096a86d57791513de5fc6f262dfadee8dcee94a71b9"
+        TARBALL="zig-bsdiff-linux-x64.tar.gz"
+        curl -sfLo "$TARBALL" "https://github.com/blackboardsh/zig-bsdiff/releases/download/v${VERSION}/${TARBALL}"
+        echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
+        tar -xz -C /usr/local/bin < "$TARBALL"
+        rm "$TARBALL"
+
+    - name: Download current binaries
+      uses: actions/download-artifact@v8
+      with:
+        pattern: sentry-*
+        path: new-binaries
+        merge-multiple: true
+
+    - name: Download previous nightly binaries (main)
+      if: github.ref == 'refs/heads/main'
+      run: |
+        VERSION="${{ needs.changes.outputs.nightly-version }}"
+        REPO="ghcr.io/getsentry/cli"
+
+        echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
+
+        # Find previous nightly tag
+        TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-' | sort -V || echo "")
+        PREV_TAG=""
+        for tag in $TAGS; do
+          # Current tag may not exist yet (publish-nightly runs in parallel),
+          # but that's fine — we want the latest existing nightly tag
+          if [ "$tag" = "nightly-${VERSION}" ]; then
+            break
+          fi
+          PREV_TAG="$tag"
+        done
+
+        if [ -z "$PREV_TAG" ]; then
+          echo "No previous versioned nightly found, skipping patches"
+          exit 0
+        fi
+        echo "HAS_PREV=true" >> "$GITHUB_ENV"
+        echo "Previous nightly: ${PREV_TAG}"
+
+        # Download and decompress previous nightly binaries
+        mkdir -p old-binaries
+        PREV_MANIFEST_JSON=$(oras manifest fetch "${REPO}:${PREV_TAG}")
+        echo "$PREV_MANIFEST_JSON" | jq -r '.layers[] | select(.annotations["org.opencontainers.image.title"] | endswith(".gz")) | .annotations["org.opencontainers.image.title"] + " " + .digest' | while read -r filename digest; do
+          basename="${filename%.gz}"
+          echo "  Downloading previous ${basename}..."
+          oras blob fetch "${REPO}@${digest}" --output "old-binaries/${filename}"
+          gunzip -f "old-binaries/${filename}"
+        done
+
+    - name: Download previous release binaries (release/**)
+      if: startsWith(github.ref, 'refs/heads/release/')
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        PREV_TAG=$(gh api "repos/${{ github.repository }}/releases?per_page=5" \
+          --jq '[.[] | select(.prerelease == false and .draft == false)] | .[0].tag_name // empty')
+
+        if [ -z "$PREV_TAG" ]; then
+          echo "No previous stable release found — skipping patch generation"
+          exit 0
+        fi
+        echo "HAS_PREV=true" >> "$GITHUB_ENV"
+        echo "Previous release: ${PREV_TAG}"
+
+        mkdir -p old-binaries
+        for gz in new-binaries/*.gz; do
+          name=$(basename "${gz%.gz}")
+          echo "  Downloading ${name}.gz from ${PREV_TAG}..."
+          gh release download "${PREV_TAG}" \
+            --repo "${{ github.repository }}" \
+            --pattern "${name}.gz" \
+            --dir old-binaries || echo "  Warning: not found, skipping"
+        done
+        gunzip old-binaries/*.gz 2>/dev/null || true
+
+    - name: Generate delta patches
+      if: env.HAS_PREV == 'true'
+      run: |
+        mkdir -p patches
+        GENERATED=0
+
+        for new_binary in new-binaries/sentry-*; do
+          name=$(basename "$new_binary")
+          case "$name" in *.gz) continue ;; esac
+
+          old_binary="old-binaries/${name}"
+          [ -f "$old_binary" ] || continue
+
+          echo "Generating patch: ${name}.patch"
+          bsdiff "$old_binary" "$new_binary" "patches/${name}.patch" --use-zstd
+
+          patch_size=$(stat --printf='%s' "patches/${name}.patch")
+          new_size=$(stat --printf='%s' "$new_binary")
+          ratio=$(awk "BEGIN { printf \"%.1f\", ($patch_size / $new_size) * 100 }")
+          echo "  ${patch_size} bytes (${ratio}% of binary)"
+          GENERATED=$((GENERATED + 1))
+        done
+
+        echo "Generated ${GENERATED} patches"
+
+    - name: Upload patch artifacts
+      if: env.HAS_PREV == 'true'
+      uses: actions/upload-artifact@v7
+      with:
+        name: sentry-patches
+        path: patches/*.patch
+```
+
+### Change 2: Slim down `publish-nightly` — remove inline patch generation
+
+Remove from `publish-nightly`:
+- The "Install zig-bsdiff" step (lines 293-301) — moved to `generate-patches`
+- The "Download uncompressed artifacts" step (lines 276-281) — no longer needed
+- The entire "Generate and push delta patches" step (lines 327-405)
+
+Add to `publish-nightly`:
+- `generate-patches` to the `needs` list
+- A new step to download `sentry-patches` artifact and push to GHCR
+
+The slimmed `publish-nightly` becomes:
+
+```yaml
+publish-nightly:
+  name: Publish Nightly to GHCR
+  if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+  needs: [changes, build-binary, generate-patches]
+  runs-on: ubuntu-latest
+  steps:
+    - name: Download compressed artifacts
+      uses: actions/download-artifact@v8
+      with:
+        pattern: sentry-*-gz
+        path: artifacts
+        merge-multiple: true
+
+    - name: Download uncompressed artifacts (for SHA-256 computation)
+      uses: actions/download-artifact@v8
+      with:
+        pattern: sentry-*
+        path: binaries
+        merge-multiple: true
+
+    - name: Install ORAS CLI
+      run: |
+        VERSION=1.2.3
+        EXPECTED_SHA256="b4efc97a91f471f323f193ea4b4d63d8ff443ca3aab514151a30751330852827"
+        TARBALL="oras_${VERSION}_linux_amd64.tar.gz"
+        curl -sfLo "$TARBALL" "https://github.com/oras-project/oras/releases/download/v${VERSION}/${TARBALL}"
+        echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
+        tar -xz -C /usr/local/bin oras < "$TARBALL"
+        rm "$TARBALL"
+
+    - name: Log in to GHCR
+      run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
+
+    - name: Push to GHCR
+      working-directory: artifacts
+      run: |
+        VERSION="${{ needs.changes.outputs.nightly-version }}"
+        oras push ghcr.io/getsentry/cli:nightly \
+          --artifact-type application/vnd.sentry.cli.nightly \
+          --annotation "org.opencontainers.image.source=https://github.com/getsentry/cli" \
+          --annotation "version=${VERSION}" \
+          *.gz
+
+    - name: Tag versioned nightly
+      run: |
+        VERSION="${{ needs.changes.outputs.nightly-version }}"
+        oras tag ghcr.io/getsentry/cli:nightly "nightly-${VERSION}"
+
+    - name: Push delta patches to GHCR
+      continue-on-error: true
+      run: |
+        VERSION="${{ needs.changes.outputs.nightly-version }}"
+        REPO="ghcr.io/getsentry/cli"
+
+        # Download patches generated by generate-patches job
+        mkdir -p patches
+        # Try to download — may not exist if generate-patches was skipped/failed
+        if ! gh api "repos/${{ github.repository }}/actions/artifacts" > /dev/null 2>&1; then
+          echo "No patches available, skipping GHCR push"
+          exit 0
+        fi
+
+        # Use actions/download-artifact to get patches
+        # (This won't work inline — need the action. Use a different approach.)
+
+        # Check if patches directory has files
+        if [ ! -d patches ] || [ -z "$(ls patches/*.patch 2>/dev/null)" ]; then
+          echo "No patches found, skipping GHCR push"
+          exit 0
+        fi
+
+        # Compute SHA-256 annotations from new binaries
+        ANNOTATIONS=""
+        PATCH_FILES=""
+        for patch_file in patches/*.patch; do
+          basename=$(basename "$patch_file" .patch)
+          new_binary="binaries/${basename}"
+          if [ -f "$new_binary" ]; then
+            sha256=$(sha256sum "$new_binary" | cut -d' ' -f1)
+            ANNOTATIONS="${ANNOTATIONS} --annotation sha256-${basename}=${sha256}"
+          fi
+          PATCH_FILES="${PATCH_FILES} ${basename}.patch"
+        done
+
+        # Find from-version by listing GHCR tags
+        TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-' | sort -V || echo "")
+        PREV_TAG=""
+        for tag in $TAGS; do
+          if [ "$tag" = "nightly-${VERSION}" ]; then break; fi
+          PREV_TAG="$tag"
+        done
+        PREV_VERSION="${PREV_TAG#nightly-}"
+
+        cd patches
+        eval oras push "${REPO}:patch-${VERSION}" \
+          --artifact-type application/vnd.sentry.cli.patch \
+          --annotation "from-version=${PREV_VERSION}" \
+          ${ANNOTATIONS} \
+          ${PATCH_FILES}
+
+        echo "Pushed patch manifest: patch-${VERSION} (from ${PREV_VERSION})"
+```
+
+Wait — there's a problem. You can't use `actions/download-artifact` inside a `run:` block. It needs to be a separate step. Let me reconsider.
+
+Actually the cleanest approach: add a `download-artifact` step for `sentry-patches` at the top of `publish-nightly`, then the GHCR push step just reads from that directory. Let me revise.
+
+### Change 2 (revised): `publish-nightly` downloads patches from artifact, pushes to GHCR
+
+Remove from `publish-nightly`:
+- "Install zig-bsdiff" step (lines 293-301)
+- The entire "Generate and push delta patches" step (lines 327-405)
+
+Keep: "Download uncompressed artifacts" (still needed for SHA-256 computation in the GHCR patch push)
+
+Add to `publish-nightly`:
+- `generate-patches` in `needs`
+- New step: download `sentry-patches` artifact
+- New step: push patches to GHCR (simplified — no bsdiff, just oras push)
+
+```yaml
+publish-nightly:
+  name: Publish Nightly to GHCR
+  if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+  needs: [changes, build-binary, generate-patches]
+  runs-on: ubuntu-latest
+  steps:
+    - name: Download compressed artifacts
+      uses: actions/download-artifact@v8
+      with:
+        pattern: sentry-*-gz
+        path: artifacts
+        merge-multiple: true
+
+    - name: Download uncompressed artifacts (for SHA-256 computation)
+      uses: actions/download-artifact@v8
+      with:
+        pattern: sentry-*
+        path: binaries
+        merge-multiple: true
+
+    - name: Download patch artifacts
+      uses: actions/download-artifact@v8
+      continue-on-error: true
+      id: download-patches
+      with:
+        name: sentry-patches
+        path: patches
+
+    - name: Install ORAS CLI
+      run: |
+        VERSION=1.2.3
+        EXPECTED_SHA256="b4efc97a91f471f323f193ea4b4d63d8ff443ca3aab514151a30751330852827"
+        TARBALL="oras_${VERSION}_linux_amd64.tar.gz"
+        curl -sfLo "$TARBALL" "https://github.com/oras-project/oras/releases/download/v${VERSION}/${TARBALL}"
+        echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
+        tar -xz -C /usr/local/bin oras < "$TARBALL"
+        rm "$TARBALL"
+
+    - name: Log in to GHCR
+      run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
+
+    - name: Push binaries to GHCR
+      working-directory: artifacts
+      run: |
+        VERSION="${{ needs.changes.outputs.nightly-version }}"
+        oras push ghcr.io/getsentry/cli:nightly \
+          --artifact-type application/vnd.sentry.cli.nightly \
+          --annotation "org.opencontainers.image.source=https://github.com/getsentry/cli" \
+          --annotation "version=${VERSION}" \
+          *.gz
+
+    - name: Tag versioned nightly
+      run: |
+        VERSION="${{ needs.changes.outputs.nightly-version }}"
+        oras tag ghcr.io/getsentry/cli:nightly "nightly-${VERSION}"
+
+    - name: Push delta patches to GHCR
+      if: steps.download-patches.outcome == 'success'
+      continue-on-error: true
+      run: |
+        VERSION="${{ needs.changes.outputs.nightly-version }}"
+        REPO="ghcr.io/getsentry/cli"
+
+        # Compute SHA-256 annotations and collect patch files
+        ANNOTATIONS=""
+        PATCH_FILES=""
+        for patch_file in patches/*.patch; do
+          basename_patch=$(basename "$patch_file" .patch)
+          new_binary="binaries/${basename_patch}"
+          if [ -f "$new_binary" ]; then
+            sha256=$(sha256sum "$new_binary" | cut -d' ' -f1)
+            ANNOTATIONS="${ANNOTATIONS} --annotation sha256-${basename_patch}=${sha256}"
+          fi
+          PATCH_FILES="${PATCH_FILES} $(basename "$patch_file")"
+        done
+
+        if [ -z "$PATCH_FILES" ]; then
+          echo "No patches to push"
+          exit 0
+        fi
+
+        # Find from-version
+        TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-' | sort -V || echo "")
+        PREV_TAG=""
+        for tag in $TAGS; do
+          if [ "$tag" = "nightly-${VERSION}" ]; then break; fi
+          PREV_TAG="$tag"
+        done
+        PREV_VERSION="${PREV_TAG#nightly-}"
+
+        cd patches
+        eval oras push "${REPO}:patch-${VERSION}" \
+          --artifact-type application/vnd.sentry.cli.patch \
+          --annotation "from-version=${PREV_VERSION}" \
+          ${ANNOTATIONS} \
+          ${PATCH_FILES}
+
+        echo "Pushed patch manifest: patch-${VERSION} (from ${PREV_VERSION})"
+```
+
+### Change 3: Update `ci-status` job
+
+Line 497: add `generate-patches` to `needs`:
+```yaml
+needs: [changes, check-skill, build-binary, build-npm, build-docs, test-e2e, publish-nightly, generate-patches]
+```
+
+Line 505: add `${{ needs.generate-patches.result }}` to the results string. Since `generate-patches` uses `continue-on-error: true` and is skipped on PRs, it should be treated like `publish-nightly`.
+
+### No other files change
+
+| File | Change |
+|------|--------|
+| `.github/workflows/ci.yml` | Add `generate-patches` job, refactor `publish-nightly`, update `ci-status` |
+| `.craft.yml` | **No changes** — `/^sentry-.*$/` already matches `sentry-patches` |
+| `src/lib/delta-upgrade.ts` | **No changes** |
+
+## Job dependency graph
+
+```
+              changes
+                |
+     ┌──────┬──┴──┬──────────┐
+     v      v     v          v
+   lint  build-*  ...    check-skill
+     |      |
+     v      v
+  test-*  build-binary ──────────────────────┐
+     |      |                                |
+     v      ├───────────────┐                v
+  test-e2e  v               v           build-npm
+         generate-patches  publish-nightly
+            |                  |
+            └──────────────────┘
+                    |
+                    v
+                ci-status
+```
+
+- `generate-patches` depends on `changes` + `build-binary`
+- `publish-nightly` depends on `changes` + `build-binary` + `generate-patches`
+- Both feed into `ci-status`
+
+## How each channel works end-to-end
+
+### Stable (release/** branch)
+1. Craft pushes to `release/X.Y.Z` → CI triggers
+2. `build-binary` produces binaries for all 5 platforms
+3. `generate-patches` runs:
+   - Downloads new binaries from workflow artifacts
+   - Downloads previous release binaries from GitHub Releases via `gh release download`
+   - Generates TRDIFF10 patches, uploads as `sentry-patches` artifact
+4. Craft picks up `sentry-patches` (matches `/^sentry-.*$/`), uploads `.patch` files to GitHub Release
+5. Client's `extractStableChain()` finds `.patch` assets → delta upgrade works
+
+### Nightly (main branch)
+1. Push to main → CI triggers
+2. `build-binary` produces binaries for all 5 platforms
+3. `generate-patches` runs:
+   - Downloads new binaries from workflow artifacts
+   - Downloads previous nightly binaries from GHCR (via ORAS, using `nightly-*` tags)
+   - Generates TRDIFF10 patches, uploads as `sentry-patches` artifact
+4. `publish-nightly` runs (depends on `generate-patches`):
+   - Pushes `.gz` binaries to GHCR as before
+   - Tags `nightly-<version>`
+   - Downloads `sentry-patches` artifact → pushes `:patch-<version>` manifest to GHCR
+5. Client's `resolveNightlyChain()` fetches patches from GHCR → delta upgrade works
+
+## Change 4: File a GitHub issue on patch generation failure
+
+Add a final step to `generate-patches` that creates a GitHub issue when any earlier step fails. `if: failure()` fires correctly within a job even with job-level `continue-on-error: true`.
+
+```yaml
+      - name: File issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE="Delta patch generation failed"
+          BODY="The \`generate-patches\` job failed on [\`${GITHUB_REF_NAME}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}).
+
+          **Branch:** \`${GITHUB_REF_NAME}\`
+          **Commit:** ${GITHUB_SHA}
+          **Run:** ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          # Check for existing open issue with same title to avoid duplicates
+          EXISTING=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$TITLE" --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            echo "Issue #${EXISTING} already open, adding comment"
+            gh issue comment "$EXISTING" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY"
+          fi
+```
+
+Also add `issues: write` to the workflow-level `permissions` block (line 14-16), since only `contents: read` and `packages: write` are currently granted.
+
+```yaml
+permissions:
+  contents: read
+  issues: write
+  packages: write
+```
+
+## Edge cases
+
+| Scenario | Handling |
+|----------|----------|
+| First-ever release | No previous tag → `HAS_PREV` not set → patch steps skipped |
+| First nightly | No previous `nightly-*` tag → same |
+| Platform added/removed | Per-platform guard, missing old binary skipped |
+| `generate-patches` fails | `continue-on-error: true` → downstream jobs proceed; issue filed |
+| Patches unavailable for `publish-nightly` | `download-artifact` step uses `continue-on-error`, GHCR push gated on outcome |
+| PR builds | `generate-patches` skipped (`if: github.event_name != 'pull_request'`) |
+| Duplicate failure issues | Checks for existing open issue with same title; adds comment instead of creating duplicate |
+
+## Verification
+
+1. Push to a non-release/non-main branch → confirm `generate-patches` is skipped
+2. Create a `release/test-patches` branch → verify `sentry-patches` artifact appears
+3. On a main push → verify `generate-patches` produces artifacts AND `publish-nightly` pushes patches to GHCR
+4. After a real release → check `.patch` files in release assets
+5. Run `sentry cli upgrade` from a previous version → confirm delta path is used
