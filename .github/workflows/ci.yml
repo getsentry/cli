@@ -541,6 +541,7 @@ jobs:
           REPO="ghcr.io/getsentry/cli"
 
           # Compute SHA-256 annotations from new binaries and collect patch files
+          shopt -s nullglob
           ANNOTATIONS=""
           PATCH_FILES=""
           for patch_file in patches/*.patch; do
