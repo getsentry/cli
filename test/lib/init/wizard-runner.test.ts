@@ -20,6 +20,8 @@ import {
 import * as clack from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as apiClient from "../../../src/lib/api-client.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as banner from "../../../src/lib/banner.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as auth from "../../../src/lib/db/auth.js";
@@ -63,6 +65,7 @@ let logInfoSpy: ReturnType<typeof spyOn>;
 let logWarnSpy: ReturnType<typeof spyOn>;
 let logErrorSpy: ReturnType<typeof spyOn>;
 let cancelSpy: ReturnType<typeof spyOn>;
+let selectSpy: ReturnType<typeof spyOn>;
 let spinnerSpy: ReturnType<typeof spyOn>;
 
 // git
@@ -78,6 +81,7 @@ let formatErrorSpy: ReturnType<typeof spyOn>;
 let handleLocalOpSpy: ReturnType<typeof spyOn>;
 let precomputeDirListingSpy: ReturnType<typeof spyOn>;
 let handleInteractiveSpy: ReturnType<typeof spyOn>;
+let listTeamsSpy: ReturnType<typeof spyOn>;
 
 // MastraClient
 let getWorkflowSpy: ReturnType<typeof spyOn>;
@@ -153,6 +157,7 @@ beforeEach(() => {
   logWarnSpy = spyOn(clack.log, "warn").mockImplementation(noop);
   logErrorSpy = spyOn(clack.log, "error").mockImplementation(noop);
   cancelSpy = spyOn(clack, "cancel").mockImplementation(noop);
+  selectSpy = spyOn(clack, "select").mockResolvedValue("test-team");
   spinnerSpy = spyOn(clack, "spinner").mockReturnValue(spinnerMock as any);
 
   // Reset spinner mock call counts
@@ -183,6 +188,7 @@ beforeEach(() => {
   handleInteractiveSpy = spyOn(inter, "handleInteractive").mockResolvedValue({
     action: "continue",
   });
+  listTeamsSpy = spyOn(apiClient, "listTeams").mockResolvedValue([]);
 
   // stderr spy (suppress banner output)
   stderrSpy = spyOn(process.stderr, "write").mockImplementation(
@@ -201,6 +207,7 @@ afterEach(() => {
   logWarnSpy.mockRestore();
   logErrorSpy.mockRestore();
   cancelSpy.mockRestore();
+  selectSpy.mockRestore();
   spinnerSpy.mockRestore();
 
   checkGitStatusSpy.mockRestore();
@@ -213,6 +220,7 @@ afterEach(() => {
   handleLocalOpSpy.mockRestore();
   precomputeDirListingSpy.mockRestore();
   handleInteractiveSpy.mockRestore();
+  listTeamsSpy.mockRestore();
 
   stderrSpy.mockRestore();
   getWorkflowSpy.mockRestore();
