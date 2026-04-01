@@ -375,6 +375,16 @@ describe("applyLoggingFlags", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildCommand", () => {
+  let originalLevel: number;
+
+  beforeEach(() => {
+    originalLevel = logger.level;
+  });
+
+  afterEach(() => {
+    setLogLevel(originalLevel);
+  });
+
   test("builds a valid command object", () => {
     const command = buildCommand({
       auth: false,
@@ -426,84 +436,69 @@ describe("buildCommand", () => {
   });
 
   test("--verbose sets logger to debug level", async () => {
-    const originalLevel = logger.level;
-    try {
-      const command = buildCommand<Record<string, never>, [], TestContext>({
-        auth: false,
-        docs: { brief: "Test" },
-        parameters: {},
-        async *func() {
-          // no-op
-        },
-      });
+    const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {},
+      async *func() {
+        // no-op
+      },
+    });
 
-      const routeMap = buildRouteMap({
-        routes: { test: command },
-        docs: { brief: "Test app" },
-      });
-      const app = buildApplication(routeMap, { name: "test" });
-      const ctx = createTestContext();
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
 
-      await run(app, ["test", "--verbose"], ctx as TestContext);
+    await run(app, ["test", "--verbose"], ctx as TestContext);
 
-      expect(logger.level).toBe(4); // debug
-    } finally {
-      setLogLevel(originalLevel);
-    }
+    expect(logger.level).toBe(4); // debug
   });
 
   test("--log-level sets logger to specified level", async () => {
-    const originalLevel = logger.level;
-    try {
-      const command = buildCommand<Record<string, never>, [], TestContext>({
-        auth: false,
-        docs: { brief: "Test" },
-        parameters: {},
-        async *func() {
-          // no-op
-        },
-      });
+    const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {},
+      async *func() {
+        // no-op
+      },
+    });
 
-      const routeMap = buildRouteMap({
-        routes: { test: command },
-        docs: { brief: "Test app" },
-      });
-      const app = buildApplication(routeMap, { name: "test" });
-      const ctx = createTestContext();
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
 
-      await run(app, ["test", "--log-level", "trace"], ctx as TestContext);
+    await run(app, ["test", "--log-level", "trace"], ctx as TestContext);
 
-      expect(logger.level).toBe(5); // trace
-    } finally {
-      setLogLevel(originalLevel);
-    }
+    expect(logger.level).toBe(5); // trace
   });
 
   test("--log-level=value (equals form) works", async () => {
-    const originalLevel = logger.level;
-    try {
-      const command = buildCommand<Record<string, never>, [], TestContext>({
-        auth: false,
-        docs: { brief: "Test" },
-        parameters: {},
-        async *func() {
-          // no-op
-        },
-      });
+    const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {},
+      async *func() {
+        // no-op
+      },
+    });
 
-      const routeMap = buildRouteMap({
-        routes: { test: command },
-        docs: { brief: "Test app" },
-      });
-      const app = buildApplication(routeMap, { name: "test" });
-      const ctx = createTestContext();
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
 
-      await run(app, ["test", "--log-level=error"], ctx as TestContext);
+    await run(app, ["test", "--log-level=error"], ctx as TestContext);
 
-      expect(logger.level).toBe(0); // error
-    } finally {
-      setLogLevel(originalLevel);
-    }
+    expect(logger.level).toBe(0); // error
   });
 
   test("strips logging flags from func's flags parameter", async () => {
@@ -549,103 +544,92 @@ describe("buildCommand", () => {
   });
 
   test("preserves command's own --verbose flag when already defined", async () => {
-    const originalLevel = logger.level;
     let receivedFlags: Record<string, unknown> | null = null;
 
-    try {
-      // Simulates the api command: defines its own --verbose with HTTP semantics
-      const command = buildCommand<
-        { verbose: boolean; silent: boolean },
-        [],
-        TestContext
-      >({
-        auth: false,
-        docs: { brief: "Test" },
-        parameters: {
-          flags: {
-            verbose: {
-              kind: "boolean",
-              brief: "Show HTTP details",
-              default: false,
-            },
-            silent: {
-              kind: "boolean",
-              brief: "Suppress output",
-              default: false,
-            },
+    // Simulates the api command: defines its own --verbose with HTTP semantics
+    const command = buildCommand<
+      { verbose: boolean; silent: boolean },
+      [],
+      TestContext
+    >({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {
+        flags: {
+          verbose: {
+            kind: "boolean",
+            brief: "Show HTTP details",
+            default: false,
+          },
+          silent: {
+            kind: "boolean",
+            brief: "Suppress output",
+            default: false,
           },
         },
-        // biome-ignore lint/correctness/useYield: test command — no output to yield
-        async *func(
-          this: TestContext,
-          flags: { verbose: boolean; silent: boolean }
-        ) {
-          receivedFlags = flags as unknown as Record<string, unknown>;
-        },
-      });
+      },
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(
+        this: TestContext,
+        flags: { verbose: boolean; silent: boolean }
+      ) {
+        receivedFlags = flags as unknown as Record<string, unknown>;
+      },
+    });
 
-      const routeMap = buildRouteMap({
-        routes: { test: command },
-        docs: { brief: "Test app" },
-      });
-      const app = buildApplication(routeMap, { name: "test" });
-      const ctx = createTestContext();
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
 
-      await run(
-        app,
-        ["test", "--verbose", "--log-level", "trace"],
-        ctx as TestContext
-      );
+    await run(
+      app,
+      ["test", "--verbose", "--log-level", "trace"],
+      ctx as TestContext
+    );
 
-      // Command's own --verbose is passed through (not stripped)
-      expect(receivedFlags).toBeDefined();
-      expect(receivedFlags!.verbose).toBe(true);
-      expect(receivedFlags!.silent).toBe(false);
-      // --log-level is always stripped (it's ours)
-      expect(receivedFlags!["log-level"]).toBeUndefined();
-      // --verbose also sets debug-level logging as a side-effect
-      // but --log-level=trace takes priority
-      expect(logger.level).toBe(5); // trace
-    } finally {
-      setLogLevel(originalLevel);
-    }
+    // Command's own --verbose is passed through (not stripped)
+    expect(receivedFlags).toBeDefined();
+    expect(receivedFlags!.verbose).toBe(true);
+    expect(receivedFlags!.silent).toBe(false);
+    // --log-level is always stripped (it's ours)
+    expect(receivedFlags!["log-level"]).toBeUndefined();
+    // --verbose also sets debug-level logging as a side-effect
+    // but --log-level=trace takes priority
+    expect(logger.level).toBe(5); // trace
   });
 
   test("command's own --verbose sets debug log level as side-effect", async () => {
-    const originalLevel = logger.level;
-
-    try {
-      const command = buildCommand<{ verbose: boolean }, [], TestContext>({
-        auth: false,
-        docs: { brief: "Test" },
-        parameters: {
-          flags: {
-            verbose: {
-              kind: "boolean",
-              brief: "Show HTTP details",
-              default: false,
-            },
+    const command = buildCommand<{ verbose: boolean }, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {
+        flags: {
+          verbose: {
+            kind: "boolean",
+            brief: "Show HTTP details",
+            default: false,
           },
         },
-        async *func() {
-          // no-op
-        },
-      });
+      },
+      async *func() {
+        // no-op
+      },
+    });
 
-      const routeMap = buildRouteMap({
-        routes: { test: command },
-        docs: { brief: "Test app" },
-      });
-      const app = buildApplication(routeMap, { name: "test" });
-      const ctx = createTestContext();
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
 
-      await run(app, ["test", "--verbose"], ctx as TestContext);
+    await run(app, ["test", "--verbose"], ctx as TestContext);
 
-      // Even though verbose is command-owned, it triggers debug-level logging
-      expect(logger.level).toBe(4); // debug
-    } finally {
-      setLogLevel(originalLevel);
-    }
+    // Even though verbose is command-owned, it triggers debug-level logging
+    expect(logger.level).toBe(4); // debug
   });
 });
 
@@ -680,6 +664,16 @@ describe("FIELDS_FLAG", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildCommand output config", () => {
+  let originalLevel: number;
+
+  beforeEach(() => {
+    originalLevel = logger.level;
+  });
+
+  afterEach(() => {
+    setLogLevel(originalLevel);
+  });
+
   test("injects --json flag when output: 'json'", async () => {
     let receivedFlags: Record<string, unknown> | null = null;
 

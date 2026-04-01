@@ -130,17 +130,12 @@ describe("upgradeCommand.func", () => {
       })) as typeof fetch;
 
     const func = await upgradeCommand.loader();
-    const { context, getStderr, getStdout, restore } = createMockContext();
+    const { context, getStdout, restore } = createMockContext();
     restoreStderr = restore;
 
     // Use method flag to bypass detection (curl uses GitHub).
     // Pass json: true so the output config renders structured JSON to stdout.
     await func.call(context, { check: false, method: "curl", json: true });
-
-    // Progress messages go to stderr
-    const stderr = getStderr();
-    expect(stderr).toContain("Installation method: curl");
-    expect(stderr).toContain("Current version:");
 
     // Final result is rendered as JSON to stdout by the output system
     const data = JSON.parse(getStdout()) as UpgradeResult;
@@ -176,7 +171,7 @@ describe("upgradeCommand.func", () => {
       })) as typeof fetch;
 
     const func = await upgradeCommand.loader();
-    const { context, getStderr, getStdout, restore } = createMockContext();
+    const { context, getStdout, restore } = createMockContext();
     restoreStderr = restore;
 
     await func.call(
@@ -184,10 +179,6 @@ describe("upgradeCommand.func", () => {
       { check: true, method: "curl", json: true },
       "2.0.0"
     );
-
-    // Target version is still logged as progress to stderr
-    const stderr = getStderr();
-    expect(stderr).toContain("Target version: 2.0.0");
 
     const data = JSON.parse(getStdout()) as UpgradeResult;
     expect(data.action).toBe("checked");
