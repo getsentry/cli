@@ -1025,10 +1025,6 @@ export async function resolveOrgAndProject(
         const dsnResult = await resolveFromDsn(cwd);
         if (dsnResult) {
           span.setAttribute("resolve.method", "dsn");
-          span.setAttribute(
-            "resolve.cache_hit",
-            dsnResult.detectedFrom?.includes("cached") ?? false
-          );
           return withTelemetryContext(dsnResult);
         }
       } catch {

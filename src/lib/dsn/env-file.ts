@@ -161,7 +161,7 @@ export async function detectFromAllEnvFiles(
       allDsns.push(...monorepoDsns);
       Object.assign(allMtimes, monorepoMtimes);
 
-      span.setAttribute("dsn.env_files_checked", Object.keys(allMtimes).length);
+      span.setAttribute("dsn.env_files_checked", ENV_FILES.length);
       span.setAttribute("dsn.env_dsn_found", allDsns.length > 0);
       return { dsns: allDsns, sourceMtimes: allMtimes };
     }
