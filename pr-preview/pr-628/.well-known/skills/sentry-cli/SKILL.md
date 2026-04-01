@@ -325,6 +325,7 @@ Work with Sentry releases
 - `sentry release finalize <org/version...>` — Finalize a release
 - `sentry release delete <org/version...>` — Delete a release
 - `sentry release deploy <org/version environment name...>` — Create a deploy for a release
+- `sentry release deploys <org/version...>` — List deploys for a release
 - `sentry release set-commits <org/version...>` — Set commits for a release
 - `sentry release propose-version` — Propose a release version
 

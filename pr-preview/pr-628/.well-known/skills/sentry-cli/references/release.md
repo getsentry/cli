@@ -56,7 +56,7 @@ View release details
 Create a release
 
 **Flags:**
-- `-p, --project <value> - Associate with a project (can be repeated)`
+- `-p, --project <value> - Associate with project(s), comma-separated`
 - `--finalize - Immediately finalize the release (set dateReleased)`
 - `--ref <value> - Git ref (branch or tag name)`
 - `--url <value> - URL to the release source`
@@ -64,6 +64,10 @@ Create a release
 ### `sentry release finalize <org/version...>`
 
 Finalize a release
+
+**Flags:**
+- `--released <value> - Custom release timestamp (ISO 8601). Defaults to now.`
+- `--url <value> - URL for the release`
 
 ### `sentry release delete <org/version...>`
 
@@ -80,6 +84,11 @@ Create a deploy for a release
 - `--url <value> - URL for the deploy`
 - `--started <value> - Deploy start time (ISO 8601)`
 - `--finished <value> - Deploy finish time (ISO 8601)`
+- `-t, --time <value> - Deploy duration in seconds (sets started = now - time, finished = now)`
+
+### `sentry release deploys <org/version...>`
+
+List deploys for a release
 
 ### `sentry release set-commits <org/version...>`
 
@@ -88,6 +97,7 @@ Set commits for a release
 **Flags:**
 - `--auto - Use repository integration to auto-discover commits (default)`
 - `--local - Read commits from local git history`
+- `--clear - Clear all commits from the release`
 - `--initial-depth <value> - Number of commits to read with --local - (default: "20")`
 
 ### `sentry release propose-version`
