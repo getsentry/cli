@@ -18,12 +18,12 @@ import {
 } from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 import { captureException, getTraceData } from "@sentry/node-core/light";
+import type { SentryTeam } from "../../types/index.js";
 import { listTeams } from "../api-client.js";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
 import { terminalLink } from "../formatters/colors.js";
-import type { SentryTeam } from "../types/index.js";
 import { slugify } from "../utils.js";
 import {
   abortIfCancelled,
