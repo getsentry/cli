@@ -1,0 +1,212 @@
+# Fix CLI-Q3: Improve Unknown Command Experience
+
+## Problem
+
+Sentry issue [CLI-Q3](https://sentry.sentry.io/issues/7368412482/) — 183 events, 85 users, escalating. Users run commands that don't exist and get unhelpful errors. Analysis of ~100 events reveals clear patterns.
+
+## Top Patterns from Telemetry
+
+| Pattern | Frequency | Fix |
+|---------|-----------|-----|
+| `issue events <id>` | ~20 events | Synonym suggestion + file GH issue for new command |
+| `issue get/show/details/info` | ~15 events | `show` alias for `view` |
+| `issue resolve/update` | ~8 events | Synonym suggestion → `sentry api` |
+| `event list` | ~6 events | Synonym suggestion + file GH issue for new command |
+| `issue <bare-id>` | ~5 events | `defaultCommand: "view"` on all route maps |
+| Old sentry-cli commands | ~5 events | Synonym suggestion |
+| `dashboard show` | ~3 events | `show` alias |
+| Typos | ~3 events | Already handled by Stricli |
+
+## Changes (4 areas)
+
+### 1. Add `defaultCommand: "view"` to ALL route maps with a `view` subcommand
+
+Add `defaultCommand: "view"` consistently to all 8 route groups so `sentry issue CLI-G5` routes to `sentry issue view CLI-G5` in a single Stricli pass.
+
+**Files to modify:**
+
+| File | Route |
+|------|-------|
+| `src/commands/issue/index.ts` | `issueRoute` |
+| `src/commands/event/index.ts` | `eventRoute` |
+| `src/commands/org/index.ts` | `orgRoute` |
+| `src/commands/project/index.ts` | `projectRoute` |
+| `src/commands/dashboard/index.ts` | `dashboardRoute` |
+| `src/commands/trace/index.ts` | `traceRoute` |
+| `src/commands/span/index.ts` | `spanRoute` |
+| `src/commands/log/index.ts` | `logRoute` |
+
+**Three edge cases to patch in `src/app.ts`** (all use the same argv inspection pattern):
+
+#### Case A: No args (`sentry issue`)
+
+With `defaultCommand`, Stricli routes to `view` with no positional → `UnsatisfiedPositionalError`. Patch in `exceptionWhileParsingArguments`:
+
+```typescript
+if (exc instanceof UnsatisfiedPositionalError) {
+  const args = process.argv.slice(2);
+  const nonFlags = args.filter((t) => !t.startsWith("-"));
+  if (nonFlags.length <= 1 && nonFlags[0] && nonFlags[0] in ROUTES_WITH_DEFAULT_VIEW) {
+    const route = nonFlags[0];
+    const msg = `Usage: sentry ${route} <command> [args]\nRun "sentry ${route} --help" to see available commands`;
+    return ansiColor ? warning(msg) : msg;
+  }
+}
+```
+
+`sentry issue --help` is unaffected — Stricli processes `--help` before `defaultCommand`.
+
+#### Case B: Multi-arg synonym (`sentry issue events CLI-AB`)
+
+For tuple-positional commands (issue, org, project), `events` fills the single positional slot, then `CLI-AB` triggers `UnexpectedPositionalError`. Patch in `exceptionWhileParsingArguments`:
+
+```typescript
+if (exc instanceof UnexpectedPositionalError) {
+  // ... existing plural alias check ...
+
+  // Check if the user typed a known synonym after a route group
+  // e.g., "sentry issue events CLI-AB" → suggest alternative
+  const suggestion = getSynonymSuggestionFromArgv();
+  if (suggestion) {
+    const hint = ansiColor ? warning(`\nTip: ${suggestion}`) : `\nTip: ${suggestion}`;
+    return `${text_en.exceptionWhileParsingArguments(exc, ansiColor)}${hint}`;
+  }
+}
+```
+
+For array-positional commands (trace, span, log, dashboard, event), all tokens are silently consumed. These fall through to Case C.
+
+#### Case C: Single-arg synonym (`sentry issue events`) or array-swallowed synonym (`sentry trace events abc123`)
+
+The command runs but fails at the domain level (e.g., `ResolutionError: Issue 'events' not found`). Patch in `exceptionWhileRunningCommand`, before the existing `CliError` formatting:
+
+```typescript
+if (exc instanceof CliError) {
+  const suggestion = getSynonymSuggestionFromArgv();
+  if (suggestion) {
+    const prefix = ansiColor ? errorColor("Error:") : "Error:";
+    const hint = ansiColor ? warning(`Tip: ${suggestion}`) : `Tip: ${suggestion}`;
+    return `${prefix} ${exc.format()}\n${hint}`;
+  }
+  // ... existing CliError formatting ...
+}
+```
+
+**Shared helper `getSynonymSuggestionFromArgv()`** (in `src/app.ts` or imported from `src/lib/command-suggestions.ts`):
+- Read `process.argv.slice(2)`, strip flags
+- If `nonFlags[0]` is a known route group AND `nonFlags[1]` exists AND `getCommandSuggestion(nonFlags[0], nonFlags[1])` returns a match → return the suggestion string
+- Otherwise return `undefined`
+
+### 2. Add `show` as alias for `view` on every route map
+
+Use Stricli's native `aliases` property. Same 8 files as section 1, add:
+```typescript
+aliases: { show: "view" },
+```
+
+Also add `remove` alias for `delete` on:
+- `src/commands/dashboard/widget/index.ts` — `aliases: { remove: "delete" }`
+- `src/commands/project/index.ts` — `aliases: { show: "view", remove: "delete" }`
+
+### 3. Create synonym suggestion registry
+
+**NEW file: `src/lib/command-suggestions.ts`**
+
+Static `Map<string, CommandSuggestion>` keyed by `"routeContext/unknownToken"`:
+
+| Key | Suggestion |
+|-----|-----------|
+| `issue/events` | `sentry issue view <issue-id>` — "To see events for an issue, view the issue details" |
+| `issue/resolve` | `sentry api .../issues/{id}/ --method PUT --data '{"status":"resolved"}'` |
+| `issue/update`, `issue/set-status`, `issue/close`, `issue/ignore`, `issue/assign` | Similar API suggestions |
+| `issue/comment` | API suggestion for commenting |
+| `issue/details`, `issue/info`, `issue/get` | `sentry issue view <issue-id>` |
+| `event/list`, `event/events` | `sentry issue view <issue-id>` — "Events are scoped to issues" |
+| `cli/info` | `sentry auth status` |
+| `cli/send-event` | `sentry api .../store/ --method POST` |
+| `cli/issues` | `sentry issue list` |
+| `cli/logs` | `sentry log list` |
+| `dashboard/default-overview` | `sentry dashboard list` |
+| `widget/remove` | Already covered by alias, but kept as fallback |
+
+Note: `issue/get`, `issue/show`, `issue/details`, `issue/info` entries serve as fallback — the `show` alias handles `show`, but `get`/`details`/`info` still need the map. With `defaultCommand: "view"`, these will be caught in Case C (the command runs, tries to resolve "get" as an issue ID, fails).
+
+**Also modify `src/app.ts`:**
+- Override `noCommandRegisteredForInput` for synonym suggestions on routes WITHOUT `defaultCommand` (e.g., `cli`, `sourcemap`). With `defaultCommand` on the 8 view-routes, `noCommandRegisteredForInput` won't fire for those — but it still fires for `cli/info`, `cli/issues`, etc.
+- The ANSI wrapping fix: Stricli wraps in bold-red, our hint resets before `warning()`:
+  ```typescript
+  ansiColor ? `\n\x1B[39m\x1B[22m${warning(`Tip: ${hint}`)}` : `\nTip: ${hint}`
+  ```
+
+### 4. File GitHub issues for `issue events` and `event list`
+
+**Issue 1: `sentry issue events <issue-id>`**
+- API: `GET /api/0/organizations/{org}/issues/{issue_id}/events/`
+- New `listIssueEvents` in `src/lib/api/events.ts` (paginated)
+- New command `src/commands/issue/events.ts`
+- Register as `events` in `issueRoute`
+- Cursor-stack pagination (`-c next`/`-c prev`)
+- Reuse event formatting from `formatEventDetails`
+
+**Issue 2: `sentry event list` + `events` alias**
+- API: `GET /api/0/organizations/{org}/projects/{project}/events/`
+- New `src/commands/event/list.ts`
+- Add `list` to `eventRoute`
+- Add `events: eventListCommand` + hide in `src/app.ts`
+- Add `events: "event"` to `PLURAL_TO_SINGULAR`
+
+## Implementation Order
+
+1. Add `defaultCommand: "view"` + `aliases: { show: "view" }` to all 8 route map files
+2. Add `aliases: { remove: "delete" }` to widget and project routes
+3. Create `src/lib/command-suggestions.ts` — synonym registry + `getSynonymSuggestionFromArgv` helper
+4. Modify `src/app.ts`:
+   - Import `UnsatisfiedPositionalError` from `@stricli/core`
+   - Extend `exceptionWhileParsingArguments` for Cases A + B
+   - Extend `exceptionWhileRunningCommand` for Case C
+   - Override `noCommandRegisteredForInput` for routes without `defaultCommand`
+5. Create `test/lib/command-suggestions.test.ts`
+6. File GitHub issue for `issue events` command
+7. File GitHub issue for `event list` + `events` alias
+8. Run `bun run generate:skill`
+
+## Verification
+
+```bash
+# Unit tests
+bun test test/lib/command-suggestions.test.ts
+
+# Full test suite + typecheck + lint
+bun test && bun run typecheck && bun run lint
+
+# Skill file
+bun run generate:skill && bun run check:skill
+
+# Manual smoke tests — defaultCommand (bare ID routes to view)
+bun run dev -- issue CLI-G5              # Routes to issue view CLI-G5
+bun run dev -- issue 7272481184          # Routes to issue view 7272481184
+bun run dev -- issue @latest             # Routes to issue view @latest
+bun run dev -- trace abc123def456...     # Routes to trace view <id>
+bun run dev -- event abc123def456...     # Routes to event view <id>
+
+# Manual smoke tests — aliases
+bun run dev -- issue show CLI-G5         # Routes to issue view CLI-G5
+bun run dev -- dashboard show 619299     # Routes to dashboard view
+bun run dev -- dashboard widget remove   # Routes to widget delete
+
+# Manual smoke tests — no-args (Case A)
+bun run dev -- issue                     # Shows "Usage: sentry issue <command>..."
+bun run dev -- issue --help              # Shows full route map help
+
+# Manual smoke tests — multi-arg synonym (Case B)
+bun run dev -- issue events CLI-AB       # Error + "Tip: sentry issue view <issue-id>"
+bun run dev -- issue resolve BACKEND-H   # Error + "Tip: sentry api ..."
+
+# Manual smoke tests — single-arg synonym (Case C)
+bun run dev -- issue events              # ResolutionError + "Tip: ..."
+bun run dev -- issue get                 # ResolutionError + "Tip: sentry issue view ..."
+
+# Manual smoke tests — noCommandRegisteredForInput (non-defaultCommand routes)
+bun run dev -- cli info                  # "No command for 'info'" + "Tip: sentry auth status"
+bun run dev -- cli issues                # "No command for 'issues'" + "Tip: sentry issue list"
+```
