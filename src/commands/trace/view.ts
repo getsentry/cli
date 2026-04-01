@@ -39,6 +39,7 @@ import {
   resolveTraceOrgProject,
   warnIfNormalized,
 } from "../../lib/trace-target.js";
+import type { TraceSpan } from "../../types/index.js";
 
 type ViewFlags = {
   readonly json: boolean;
@@ -50,6 +51,46 @@ type ViewFlags = {
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry trace view [<org>/<project>/]<trace-id>";
+
+/**
+ * Standard field names in trace view output (summary keys + "spans").
+ *
+ * When `--fields` includes names beyond these, the extras are forwarded
+ * to the API as `additional_attributes` so the server populates them on
+ * each span.
+ */
+const STANDARD_TRACE_VIEW_FIELDS = new Set([
+  "traceId",
+  "duration",
+  "spanCount",
+  "projects",
+  "rootTransaction",
+  "rootOp",
+  "startTimestamp",
+  "spans",
+  "spanTreeLines",
+]);
+
+/**
+ * Extract non-standard field names from `--fields` to pass as
+ * `additional_attributes` to the trace detail API.
+ *
+ * Standard fields (summary keys, "spans") are filtered out because
+ * they are already present in the response. Only extra names that
+ * correspond to span attributes need to be requested from the API.
+ *
+ * @param fields - Parsed `--fields` value (may be undefined)
+ * @returns Attribute names to request, or undefined when none are needed
+ */
+export function extractAdditionalAttributes(
+  fields: string[] | undefined
+): string[] | undefined {
+  if (!fields || fields.length === 0) {
+    return;
+  }
+  const extra = fields.filter((f) => !STANDARD_TRACE_VIEW_FIELDS.has(f));
+  return extra.length > 0 ? extra : undefined;
+}
 
 /**
  * Detect UX issues in raw positional args before trace-target parsing.
@@ -128,9 +169,31 @@ export type TraceViewData = {
 };
 
 /**
+ * Count spans in the tree that have non-empty `additional_attributes`.
+ * Walks the nested children structure recursively.
+ */
+function countSpansWithAdditionalAttrs(spans: unknown[]): number {
+  let count = 0;
+  for (const raw of spans) {
+    const span = raw as TraceSpan;
+    const attrs = span.additional_attributes;
+    if (attrs && Object.keys(attrs).length > 0) {
+      count += 1;
+    }
+    if (span.children) {
+      count += countSpansWithAdditionalAttrs(span.children);
+    }
+  }
+  return count;
+}
+
+/**
  * Format trace view data for human-readable terminal output.
  *
  * Renders trace summary and optional span tree.
+ * When spans carry `additional_attributes` (requested via `--fields`),
+ * a note is appended indicating how many spans have extra data.
+ *
  * @internal Exported for testing
  */
 export function formatTraceView(data: TraceViewData): string {
@@ -142,7 +205,47 @@ export function formatTraceView(data: TraceViewData): string {
     parts.push(data.spanTreeLines.join("\n"));
   }
 
+  const attrsCount = countSpansWithAdditionalAttrs(data.spans);
+  if (attrsCount > 0) {
+    const spanWord = attrsCount === 1 ? "span has" : "spans have";
+    parts.push(
+      `\n${attrsCount} ${spanWord} additional attributes. Use --json to see them.`
+    );
+  }
+
   return parts.join("\n");
+}
+
+/**
+ * Return a copy of the span with zero-valued measurements removed.
+ *
+ * The Sentry trace detail API returns `measurements` on every span with
+ * zero-valued web vitals (CLS, FCP, INP, LCP, TTFB, etc.) even for
+ * non-browser spans. This adds ~40% noise to JSON output. This helper
+ * strips entries where the value is exactly `0`, and omits the
+ * `measurements` field entirely when all values are zero. Non-zero
+ * measurements (e.g., on root `pageload` spans) are preserved.
+ *
+ * Processes children recursively so the entire span tree is cleaned.
+ */
+function filterSpanMeasurements(span: TraceSpan): TraceSpan {
+  const { measurements, children, ...rest } = span;
+
+  let cleanedMeasurements: Record<string, number> | undefined;
+  if (measurements) {
+    const nonZero = Object.fromEntries(
+      Object.entries(measurements).filter(([, v]) => v !== 0)
+    );
+    if (Object.keys(nonZero).length > 0) {
+      cleanedMeasurements = nonZero;
+    }
+  }
+
+  return {
+    ...rest,
+    ...(cleanedMeasurements ? { measurements: cleanedMeasurements } : {}),
+    ...(children ? { children: children.map(filterSpanMeasurements) } : {}),
+  };
 }
 
 /**
@@ -154,13 +257,17 @@ export function formatTraceView(data: TraceViewData): string {
  *
  * Without this transform, `--fields traceId` would return `{}` because
  * the raw yield shape is `{ summary, spans }` and `traceId` lives inside `summary`.
+ *
+ * Zero-valued measurements are filtered from each span to reduce noise
+ * from the API (which returns zero web vitals on non-browser spans).
  */
 function jsonTransformTraceView(
   data: TraceViewData,
   fields?: string[]
 ): unknown {
   const { summary, spans } = data;
-  const result: Record<string, unknown> = { ...summary, spans };
+  const cleanedSpans = (spans as TraceSpan[]).map(filterSpanMeasurements);
+  const result: Record<string, unknown> = { ...summary, spans: cleanedSpans };
   if (fields && fields.length > 0) {
     return filterFields(result, fields);
   }
@@ -265,10 +372,19 @@ export const viewCommand = buildCommand({
       return;
     }
 
+    // Forward non-standard --fields as additional_attributes so the
+    // trace API populates them on each span for JSON consumers.
+    const additionalAttributes = extractAdditionalAttributes(flags.fields);
+
     // The trace API requires a timestamp to help locate the trace data.
     // Use current time - the API will search around this timestamp.
     const timestamp = Math.floor(Date.now() / 1000);
-    const spans = await getDetailedTrace(org, traceId, timestamp);
+    const spans = await getDetailedTrace(
+      org,
+      traceId,
+      timestamp,
+      additionalAttributes
+    );
 
     if (spans.length === 0) {
       throw new ValidationError(

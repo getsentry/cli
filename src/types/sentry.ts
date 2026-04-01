@@ -432,6 +432,28 @@ export type TraceSpan = {
   event_id?: string;
   /** Nested child spans */
   children?: TraceSpan[];
+  /** Span name (often same as op) */
+  name?: string;
+  /** Always "span" for EAP spans */
+  event_type?: string;
+  /** Whether this span is a transaction boundary */
+  is_transaction?: boolean;
+  /** Transaction event ID */
+  transaction_id?: string;
+  /** SDK that produced this span */
+  sdk_name?: string;
+  /** Profile ID (empty string when not profiled) */
+  profile_id?: string;
+  /** Profiler ID (empty string when not profiled) */
+  profiler_id?: string;
+  /** Web vitals and performance measurements (keyed by measurement name) */
+  measurements?: Record<string, number>;
+  /** Extra attributes requested via `additional_attributes` query param */
+  additional_attributes?: Record<string, unknown>;
+  /** Error issues attached to this span */
+  errors?: unknown[];
+  /** Performance issue occurrences on this span */
+  occurrences?: unknown[];
 };
 
 // Stack Frame & Exception Entry

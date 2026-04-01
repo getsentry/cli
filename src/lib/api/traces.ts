@@ -23,6 +23,66 @@ import {
   parseLinkHeader,
 } from "./infrastructure.js";
 
+// ---------------------------------------------------------------------------
+// Trace item (span) detail types
+// ---------------------------------------------------------------------------
+
+/**
+ * Attribute names from the trace-items detail endpoint that duplicate
+ * fields already shown in the standard span output (KV table, JSON core
+ * fields) or are EAP storage internals with no diagnostic value.
+ *
+ * Shared between `span view` (JSON `data` dict) and `formatSpanDetails`
+ * (human KV rows) to keep filtering consistent.
+ */
+export const REDUNDANT_DETAIL_ATTRS = new Set([
+  // Timing / storage internals
+  "precise.start_ts",
+  "precise.finish_ts",
+  "received",
+  "hash",
+  "project_id",
+  "client_sample_rate",
+  "server_sample_rate",
+  // Already shown in standard span fields
+  "is_transaction",
+  "span.duration",
+  "span.self_time",
+  "span.op",
+  "span.name",
+  "span.description",
+  "span.category",
+  "parent_span",
+  "transaction",
+  "transaction.op",
+  "transaction.event_id",
+  "transaction.span_id",
+  "trace",
+  "trace.status",
+  "segment.name",
+  "origin",
+  "platform",
+  "sdk.name",
+  "sdk.version",
+  "environment",
+]);
+
+/** A single attribute returned by the trace-items detail endpoint */
+export type TraceItemAttribute = {
+  name: string;
+  type: "str" | "int" | "float" | "bool";
+  value: string | number | boolean;
+};
+
+/** Response from GET /projects/{org}/{project}/trace-items/{itemId}/ */
+export type TraceItemDetail = {
+  itemId: string;
+  timestamp: string;
+  attributes: TraceItemAttribute[];
+  meta: Record<string, unknown>;
+  links: unknown;
+};
+
 /**
  * Get detailed trace with nested children structure.
  * This is an internal endpoint not covered by the public API.
@@ -31,12 +91,15 @@ import {
  * @param orgSlug - Organization slug
  * @param traceId - The trace ID (from event.contexts.trace.trace_id)
  * @param timestamp - Unix timestamp (seconds) from the event's dateCreated
+ * @param additionalAttributes - Extra attribute names to include on each span
+ *   (passed as repeated `additional_attributes` query params to the API)
  * @returns Array of root spans with nested children
  */
 export async function getDetailedTrace(
   orgSlug: string,
   traceId: string,
-  timestamp: number
+  timestamp: number,
+  additionalAttributes?: string[]
 ): Promise<TraceSpan[]> {
   const regionUrl = await resolveOrgRegion(orgSlug);
 
@@ -48,10 +111,45 @@ export async function getDetailedTrace(
         timestamp,
         limit: 10_000,
         project: -1,
+        additional_attributes: additionalAttributes,
       },
     }
   );
   return data.map(normalizeTraceSpan);
+}
+
+/**
+ * Fetch full attribute details for a single span.
+ *
+ * Uses the trace-items detail endpoint which returns ALL span attributes
+ * without requiring the caller to enumerate them. This is the same endpoint
+ * the Sentry frontend uses in the span detail sidebar.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @param spanId - The 16-char hex span ID
+ * @param traceId - The parent trace ID (required for lookup)
+ * @returns Full span detail with all attributes
+ */
+export async function getSpanDetails(
+  orgSlug: string,
+  projectSlug: string,
+  spanId: string,
+  traceId: string
+): Promise<TraceItemDetail> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+
+  const { data } = await apiRequestToRegion<TraceItemDetail>(
+    regionUrl,
+    `/projects/${orgSlug}/${projectSlug}/trace-items/${spanId}/`,
+    {
+      params: {
+        trace_id: traceId,
+        item_type: "spans",
+      },
+    }
+  );
+  return data;
 }
 
 /**
@@ -177,6 +275,8 @@ type ListSpansOptions = {
   statsPeriod?: string;
   /** Pagination cursor to resume from a previous page */
   cursor?: string;
+  /** Additional field names to request from the API beyond SPAN_FIELDS */
+  extraFields?: string[];
 };
 
 /**
@@ -197,6 +297,10 @@ export async function listSpans(
   const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
   const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
 
+  const fields = options.extraFields?.length
+    ? SPAN_FIELDS.concat(options.extraFields)
+    : SPAN_FIELDS;
+
   const regionUrl = await resolveOrgRegion(orgSlug);
 
   const { data: response, headers } = await apiRequestToRegion<SpansResponse>(
@@ -205,7 +309,7 @@ export async function listSpans(
     {
       params: {
         dataset: "spans",
-        field: SPAN_FIELDS,
+        field: fields,
         project: isNumericProject ? projectSlug : undefined,
         query: fullQuery || undefined,
         per_page: options.limit || 10,

@@ -95,4 +95,8 @@ sentry api organizations/ --verbose
 sentry api organizations/ --dry-run
 ```
 
+### Dataset Names
+
+When querying the Events API (`/events/` endpoint), valid dataset values are: `spans`, `transactions`, `logs`, `errors`, `discover`.
+
 For full API documentation, see the [Sentry API Reference](https://docs.sentry.io/api/).

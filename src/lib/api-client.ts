@@ -102,11 +102,14 @@ export {
   listTeams,
   listTeamsPaginated,
 } from "./api/teams.js";
+export type { TraceItemAttribute, TraceItemDetail } from "./api/traces.js";
 export {
   getDetailedTrace,
+  getSpanDetails,
   listSpans,
   listTransactions,
   normalizeTraceSpan,
+  REDUNDANT_DETAIL_ATTRS,
 } from "./api/traces.js";
 export {
   getCustomerTrialInfo,

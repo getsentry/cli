@@ -396,7 +396,8 @@ describe("viewCommand.func", () => {
     expect(getDetailedTraceSpy).toHaveBeenCalledWith(
       "test-org",
       traceIdFromEvent,
-      expect.any(Number)
+      expect.any(Number),
+      undefined
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
