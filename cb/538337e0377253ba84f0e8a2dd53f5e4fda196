@@ -1,0 +1,87 @@
+# Plan: Render text widget markdown content in `dashboard view`
+
+## Problem
+
+Text widgets in Sentry dashboards store markdown in `widget.description` (a passthrough field from the API). The CLI currently shows them as "(Display type 'text' is not yet supported)" because `queryWidgetData()` has no handling for `displayType === "text"` — they fall through to `UnsupportedResult`.
+
+## Approach
+
+Text widgets are unique: they don't query any API dataset — the content is entirely in the widget definition's `description` field. We add a new `TextResult` data type, intercept text widgets before any API query, and render their markdown content using the existing `renderMarkdown()` pipeline with `wrap-ansi` for width-constraining.
+
+## Changes
+
+### 1. `src/types/dashboard.ts` — Add `TextResult` type
+
+- Add `TextResult = { type: "text"; content: string }` after `ScalarResult` (~line 923)
+- Add `TextResult` to the `WidgetDataResult` union (~line 947)
+
+### 2. `src/lib/api/dashboards.ts` — Early return for text widgets
+
+In `queryWidgetData()` (~line 441), add check **before** `mapWidgetTypeToDataset()`:
+
+```typescript
+if (widget.displayType === "text") {
+  const description = (widget as Record<string, unknown>).description;
+  return {
+    type: "text",
+    content: typeof description === "string" ? description : "",
+  };
+}
+```
+
+No API call is made — the data is local to the widget object.
+
+### 3. `src/commands/dashboard/view.ts` — Pass `description` through
+
+In `buildViewData()` (~line 112), add `description` to widget mapping:
+
+```typescript
+description: (w as Record<string, unknown>).description as string | undefined,
+```
+
+This ensures `description` appears in JSON output as widget metadata.
+
+### 4. `src/lib/formatters/dashboard.ts` — Render text content
+
+- Add `description?: string` to `DashboardViewWidget` type (~line 44)
+- Add `renderTextContent(content, innerWidth)` function:
+  - `renderMarkdown(content)` → ANSI string
+  - `wrapAnsi(rendered, innerWidth, { hard: true, trim: false })` → width-constrained
+  - Split on `\n` → `string[]`
+  - Empty/missing content → `"(empty)"` placeholder
+- Add `case "text":` to `renderContentLines()` switch (~line 1559)
+- Add imports: `wrapAnsi` from `wrap-ansi`, `renderMarkdown` from `./markdown.js`
+
+### 5. Tests
+
+- **`test/lib/api/dashboards.test.ts`** — Test `queryAllWidgets` returns `TextResult` for text widgets (with and without `description`)
+- **`test/lib/formatters/dashboard.test.ts`** — Test text widget renders markdown; test empty content shows placeholder
+- **`test/types/dashboard.test.ts`** — Type conformance test for `TextResult`
+
+### 6. Post-change tasks
+
+- Run `bun run generate:skill` (SKILL.md regeneration per AGENTS.md)
+- Run `bun run lint:fix`
+
+## Files Modified
+
+| File | Change |
+|------|--------|
+| `src/types/dashboard.ts` | Add `TextResult`, update `WidgetDataResult` union |
+| `src/lib/api/dashboards.ts` | Early return for text widgets in `queryWidgetData` |
+| `src/commands/dashboard/view.ts` | Pass `description` in `buildViewData` |
+| `src/lib/formatters/dashboard.ts` | Add type field, renderer, switch case |
+| `test/lib/api/dashboards.test.ts` | Text widget query tests |
+| `test/lib/formatters/dashboard.test.ts` | Text widget rendering tests |
+| `test/types/dashboard.test.ts` | Type conformance test |
+
+## Verification
+
+```bash
+bun test test/lib/api/dashboards.test.ts
+bun test test/lib/formatters/dashboard.test.ts
+bun test test/types/dashboard.test.ts
+bun run typecheck
+bun run lint
+bun run test:unit
+```
