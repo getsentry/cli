@@ -11,7 +11,7 @@
     "@clack/prompts": "^0.11.0",
     "@mastra/client-js": "^1.4.0",
     "@sentry/api": "^0.54.0",
-    "@sentry/node-core": "10.44.0",
+    "@sentry/node-core": "10.47.0",
     "@sentry/sqlish": "^1.0.0",
     "@stricli/auto-complete": "^1.2.4",
     "@stricli/core": "^1.2.4",
@@ -68,8 +68,8 @@
   "packageManager": "bun@1.3.11",
   "patchedDependencies": {
     "@stricli/core@1.2.5": "patches/@stricli%2Fcore@1.2.5.patch",
-    "@sentry/core@10.44.0": "patches/@sentry%2Fcore@10.44.0.patch",
-    "@sentry/node-core@10.44.0": "patches/@sentry%2Fnode-core@10.44.0.patch"
+    "@sentry/node-core@10.47.0": "patches/@sentry%2Fnode-core@10.47.0.patch",
+    "@sentry/core@10.47.0": "patches/@sentry%2Fcore@10.47.0.patch"
   },
   "scripts": {
     "dev": "bun run generate:schema && bun run generate:skill && bun run generate:sdk && bun run src/bin.ts",

@@ -281,6 +281,7 @@ const LIBRARY_EXCLUDED_INTEGRATIONS = new Set([
   "FunctionToString", // wraps Function.prototype.toString
   "ChildProcess", // monitors child processes
   "NodeContext", // reads OS info
+  "NodeRuntimeMetrics", // runtime metrics timer would keep host event loop alive
 ]);
 
 /**
@@ -373,11 +374,23 @@ export function initSentry(
       const excluded = libraryMode
         ? LIBRARY_EXCLUDED_INTEGRATIONS
         : EXCLUDED_INTEGRATIONS;
-      return defaults.filter(
+      const filtered = defaults.filter(
         (integration) =>
           !excluded.has(integration.name) &&
           (integration.name !== "NodeSystemError" || hasGetSystemErrorMap)
       );
+
+      // Collect runtime metrics (CPU, memory, event loop) for non-library mode.
+      // Uses nodeRuntimeMetricsIntegration which degrades gracefully on Bun:
+      // monitorEventLoopDelay is try/caught, all other APIs are Bun-compatible.
+      // 5s interval for CLI — most commands complete in <10s.
+      if (!libraryMode) {
+        filtered.push(
+          Sentry.nodeRuntimeMetricsIntegration({ collectionIntervalMs: 5000 })
+        );
+      }
+
+      return filtered;
     },
     environment,
     // Enable Sentry structured logs for non-exception telemetry (e.g., unexpected input warnings).

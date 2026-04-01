@@ -1,5 +1,5 @@
 diff --git a/build/cjs/index.js b/build/cjs/index.js
-index e837f15f6011d73b8f4422a865ed9016a431fe8c..fb9f1fae1ebf20a15177be67883d9436516579db 100644
+index 4279e197dd925416199d59ade26c9016098c690d..9a748e27598dbc9c4bb3d314431da0185b444fa4 100644
 --- a/build/cjs/index.js
 +++ b/build/cjs/index.js
 @@ -2,7 +2,6 @@ Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' });
@@ -64,7 +64,7 @@ index e837f15f6011d73b8f4422a865ed9016a431fe8c..fb9f1fae1ebf20a15177be67883d9436
  const aggregateErrors = require('./utils/aggregate-errors.js');
  const breadcrumbLogLevel = require('./utils/breadcrumb-log-level.js');
  const browser = require('./utils/browser.js');
-@@ -145,8 +113,6 @@ const randomSafeContext = require('./utils/randomSafeContext.js');
+@@ -146,8 +114,6 @@ const timer = require('./utils/timer.js');
  exports.registerSpanErrorInstrumentation = errors.registerSpanErrorInstrumentation;
  exports.getCapturedScopesOnSpan = utils$1.getCapturedScopesOnSpan;
  exports.setCapturedScopesOnSpan = utils$1.setCapturedScopesOnSpan;
@@ -73,7 +73,7 @@ index e837f15f6011d73b8f4422a865ed9016a431fe8c..fb9f1fae1ebf20a15177be67883d9436
  exports.SentrySpan = sentrySpan.SentrySpan;
  exports.SentryNonRecordingSpan = sentryNonRecordingSpan.SentryNonRecordingSpan;
  exports.SPAN_STATUS_ERROR = spanstatus.SPAN_STATUS_ERROR;
-@@ -243,9 +209,6 @@ exports.addIntegration = integration.addIntegration;
+@@ -248,9 +214,6 @@ exports.addIntegration = integration.addIntegration;
  exports.defineIntegration = integration.defineIntegration;
  exports.getIntegrationsToSetup = integration.getIntegrationsToSetup;
  exports.installedIntegrations = integration.installedIntegrations;
@@ -83,7 +83,7 @@ index e837f15f6011d73b8f4422a865ed9016a431fe8c..fb9f1fae1ebf20a15177be67883d9436
  exports.envToBool = envToBool.envToBool;
  exports.applyScopeDataToEvent = scopeData.applyScopeDataToEvent;
  exports.getCombinedScopeData = scopeData.getCombinedScopeData;
-@@ -292,25 +255,8 @@ exports.functionToStringIntegration = functiontostring.functionToStringIntegrati
+@@ -297,25 +260,8 @@ exports.functionToStringIntegration = functiontostring.functionToStringIntegrati
  exports.eventFiltersIntegration = eventFilters.eventFiltersIntegration;
  exports.inboundFiltersIntegration = eventFilters.inboundFiltersIntegration;
  exports.linkedErrorsIntegration = linkederrors.linkedErrorsIntegration;
@@ -109,7 +109,7 @@ index e837f15f6011d73b8f4422a865ed9016a431fe8c..fb9f1fae1ebf20a15177be67883d9436
  exports.captureFeedback = feedback.captureFeedback;
  exports._INTERNAL_captureLog = internal._INTERNAL_captureLog;
  exports._INTERNAL_captureSerializedLog = internal._INTERNAL_captureSerializedLog;
-@@ -322,26 +268,6 @@ exports._INTERNAL_captureSerializedMetric = internal$1._INTERNAL_captureSerializ
+@@ -327,26 +273,6 @@ exports._INTERNAL_captureSerializedMetric = internal$1._INTERNAL_captureSerializ
  exports._INTERNAL_flushMetricsBuffer = internal$1._INTERNAL_flushMetricsBuffer;
  exports.metrics = publicApi$1;
  exports.createConsolaReporter = consola.createConsolaReporter;
@@ -137,7 +137,7 @@ index e837f15f6011d73b8f4422a865ed9016a431fe8c..fb9f1fae1ebf20a15177be67883d9436
  exports.getBreadcrumbLogLevelFromHttpStatusCode = breadcrumbLogLevel.getBreadcrumbLogLevelFromHttpStatusCode;
  exports.getComponentName = browser.getComponentName;
 diff --git a/build/esm/index.js b/build/esm/index.js
-index 97e2892d453f28fe5153301a7d4fb7d323751f51..aa653d27d8f1d19addf2785e5f6db9514a01434d 100644
+index bd9434588ddc563f500c40b981643fdbd01b1137..f474118512f89d83ea1621a632ce5d609f8f6811 100644
 --- a/build/esm/index.js
 +++ b/build/esm/index.js
 @@ -1,6 +1,5 @@
