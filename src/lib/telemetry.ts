@@ -616,28 +616,6 @@ export function setArgsContext(args: readonly unknown[]): void {
 }
 
 /**
- * Set phase timing attributes on the active span.
- *
- * Records how long each phase of command execution took, enabling
- * dashboard breakdown of pre-command (flag parsing, context setup),
- * execution (core logic + API calls), and render (output formatting) phases.
- *
- * @param phases - Timing data for each command phase in milliseconds
- */
-export function setPhaseTimingAttributes(phases: {
-  preMs: number;
-  execMs: number;
-  renderMs: number;
-}): void {
-  const span = Sentry.getActiveSpan();
-  if (span) {
-    span.setAttribute("phase.pre_ms", Math.round(phases.preMs));
-    span.setAttribute("phase.exec_ms", Math.round(phases.execMs));
-    span.setAttribute("phase.render_ms", Math.round(phases.renderMs));
-  }
-}
-
-/**
  * Wrap an operation with a Sentry span for tracing.
  *
  * Creates a child span under the current active span to track

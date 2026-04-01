@@ -60,11 +60,7 @@ import {
   parseLogLevel,
   setLogLevel,
 } from "./logger.js";
-import {
-  setArgsContext,
-  setFlagContext,
-  setPhaseTimingAttributes,
-} from "./telemetry.js";
+import { setArgsContext, setFlagContext, withTracing } from "./telemetry.js";
 
 /**
  * Parse a string input as a number.
@@ -526,8 +522,6 @@ export function buildCommand<
     flags: Record<string, unknown>,
     ...args: unknown[]
   ) {
-    const phaseStart = performance.now();
-
     applyLoggingFlags(
       flags[LOG_LEVEL_KEY] as LogLevelName | undefined,
       flags.verbose as boolean
@@ -579,9 +573,6 @@ export function buildCommand<
       throw err;
     };
 
-    // End of pre-command phase (flag parsing, context setup)
-    const preEnd = performance.now();
-
     // Iterate the generator using manual .next() instead of for-await-of
     // so we can capture the return value (done: true result). The return
     // value carries the final `hint` — for-await-of discards it.
@@ -595,30 +586,28 @@ export function buildCommand<
         throw new AuthError("not_authenticated");
       }
 
-      const generator = originalFunc.call(
-        this,
-        cleanFlags as FLAGS,
-        ...(args as unknown as ARGS)
+      // Execution phase: core command logic, API calls, org/project resolution
+      const returned = await withTracing(
+        "exec",
+        "cli.command.exec",
+        async () => {
+          const generator = originalFunc.call(
+            this,
+            cleanFlags as FLAGS,
+            ...(args as unknown as ARGS)
+          );
+          let result = await generator.next();
+          while (!result.done) {
+            handleYieldedValue(stdout, result.value, cleanFlags, renderer);
+            result = await generator.next();
+          }
+          return result.value as CommandReturn | undefined;
+        }
       );
-      let result = await generator.next();
-      while (!result.done) {
-        handleYieldedValue(stdout, result.value, cleanFlags, renderer);
-        result = await generator.next();
-      }
 
-      // End of execution phase (core command logic + API calls)
-      const execEnd = performance.now();
-
-      // Generator completed successfully — finalize with hint.
-      const returned = result.value as CommandReturn | undefined;
-      writeFinalization(stdout, returned?.hint, cleanFlags.json, renderer);
-
-      // Record phase timing on the active span
-      const renderEnd = performance.now();
-      setPhaseTimingAttributes({
-        preMs: preEnd - phaseStart,
-        execMs: execEnd - preEnd,
-        renderMs: renderEnd - execEnd,
+      // Render phase: output finalization
+      await withTracing("render", "cli.command.render", () => {
+        writeFinalization(stdout, returned?.hint, cleanFlags.json, renderer);
       });
     } catch (err) {
       // Finalize before error handling to close streaming state
