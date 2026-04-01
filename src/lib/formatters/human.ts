@@ -1600,21 +1600,44 @@ export function maskToken(token: string): string {
  * @param seconds - Duration in seconds
  * @returns Human-readable duration (e.g., "5 minutes", "2 hours", "1 hour and 30 minutes")
  */
+/** Format a count with its unit, handling singular/plural */
+function pluralUnit(count: number, unit: string): string {
+  return `${count} ${unit}${count !== 1 ? "s" : ""}`;
+}
+
+/** Format a major + minor unit pair, omitting minor when zero */
+function durationPair(
+  major: number,
+  majorUnit: string,
+  minor: number,
+  minorUnit: string
+): string {
+  if (minor === 0) {
+    return pluralUnit(major, majorUnit);
+  }
+  return `${pluralUnit(major, majorUnit)} and ${pluralUnit(minor, minorUnit)}`;
+}
+
 export function formatDuration(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
 
   if (minutes < 60) {
-    return `${minutes} minute${minutes !== 1 ? "s" : ""}`;
+    return pluralUnit(minutes, "minute");
   }
 
   const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
 
-  if (remainingMinutes === 0) {
-    return `${hours} hour${hours !== 1 ? "s" : ""}`;
+  if (hours < 24) {
+    return durationPair(hours, "hour", minutes % 60, "minute");
   }
 
-  return `${hours} hour${hours !== 1 ? "s" : ""} and ${remainingMinutes} minute${remainingMinutes !== 1 ? "s" : ""}`;
+  const days = Math.floor(hours / 24);
+
+  if (days < 7) {
+    return durationPair(days, "day", hours % 24, "hour");
+  }
+
+  return durationPair(Math.floor(days / 7), "week", days % 7, "day");
 }
 
 /**
