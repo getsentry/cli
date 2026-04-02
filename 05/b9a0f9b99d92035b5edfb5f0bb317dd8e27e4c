@@ -1,0 +1,41 @@
+# Plan: Add newlines around changelog in upgrade output
+
+## Problem
+
+The `sentry cli upgrade` output lacks visual separation between the status/metadata block and the changelog section. Currently the output looks:
+
+```
+✓ Upgraded to  0.24.0-dev.1775146118  (from 0.24.0-dev.1775088345)
+  Method: curl · Channel: nightly
+New Features ✨
+...
+```
+
+The user wants a blank line **before** and **after** the changelog for better readability.
+
+## File to Modify
+
+`src/lib/formatters/human.ts` — line 2285
+
+## Change
+
+**Current code (line 2285):**
+```typescript
+    return `${result}\n${changelogOutput}`;
+```
+
+**New code:**
+```typescript
+    return `${result}\n\n${changelogOutput}\n`;
+```
+
+- The first extra `\n` adds a blank line between the status block and the changelog heading.
+- The trailing `\n` adds a blank line after the changelog.
+
+Note: `formatChangelog()` already starts its `lines` array with `[""]` (line 2167), which produces a leading newline in its output. Combined with the current single `\n` join, the result is two consecutive newlines — but `renderMarkdown()` normalizes these, resulting in no visible blank line. Adding an explicit extra `\n` at the join point ensures the blank line survives rendering. The trailing `\n` is outside the rendered block so it is preserved as-is.
+
+## Verification
+
+1. `bun run typecheck` — ensure no type errors
+2. `bun test --filter "upgrade"` — run existing upgrade tests
+3. Manual check: `bun run dev cli upgrade --dry-run` or inspect the formatter output
