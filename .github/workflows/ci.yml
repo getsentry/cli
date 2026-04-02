@@ -152,6 +152,8 @@ jobs:
           fi
       - name: Check fork eval status
         if: steps.detect-fork.outputs.is_fork == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           SHA="${{ github.event.pull_request.head.sha }}"
           STATUS=$(gh api "repos/${{ github.repository }}/commits/$SHA/statuses" \
@@ -390,6 +392,8 @@ jobs:
 
       - name: Download previous release binaries (release/**)
         if: startsWith(github.ref, 'refs/heads/release/')
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           PREV_TAG=$(gh api "repos/${{ github.repository }}/releases?per_page=5" \
             --jq '[.[] | select(.prerelease == false and .draft == false)] | .[0].tag_name // empty')
@@ -447,6 +451,8 @@ jobs:
 
       - name: File issue on failure
         if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           TITLE="Delta patch generation failed"
           BODY="The \`generate-patches\` job failed on [\`${GITHUB_REF_NAME}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}).
