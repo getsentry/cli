@@ -169,8 +169,10 @@ export const setCommitsCommand = buildCommand({
     brief: "Set commits for a release",
     fullDescription:
       "Associate commits with a release.\n\n" +
-      "Use --auto to let Sentry discover commits via your repository integration,\n" +
-      "or --local to read commits from the local git history.\n\n" +
+      "Use --auto to let Sentry discover commits via your repository integration\n" +
+      "(requires a local git checkout — matches the origin remote against Sentry repos),\n" +
+      "or --local to read commits from the local git history.\n" +
+      "With no flag, tries --auto first and falls back to --local on failure.\n\n" +
       "Examples:\n" +
       "  sentry release set-commits 1.0.0 --auto\n" +
       "  sentry release set-commits my-org/1.0.0 --local\n" +
@@ -193,7 +195,8 @@ export const setCommitsCommand = buildCommand({
     flags: {
       auto: {
         kind: "boolean",
-        brief: "Use repository integration to auto-discover commits",
+        brief:
+          "Auto-discover commits via repository integration (needs local git checkout)",
         default: false,
       },
       local: {

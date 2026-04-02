@@ -118,7 +118,7 @@ describe("setCommitsAuto", () => {
     expect(requests).toHaveLength(2);
   });
 
-  test("throws when org has no repositories", async () => {
+  test("throws ApiError when org has no repositories", async () => {
     globalThis.fetch = mockFetch(
       async () =>
         new Response(JSON.stringify([]), {
@@ -130,5 +130,60 @@ describe("setCommitsAuto", () => {
     await expect(setCommitsAuto("test-org", "1.0.0", "/tmp")).rejects.toThrow(
       /No repository integrations/
     );
+  });
+
+  test("throws ValidationError when no repo matches local remote", async () => {
+    const otherRepo = { ...SAMPLE_REPO, name: "getsentry/sentry" };
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify([otherRepo]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+
+    await expect(setCommitsAuto("test-org", "1.0.0", "/tmp")).rejects.toThrow(
+      /No Sentry repository matching/
+    );
+  });
+
+  test("paginates through multiple pages to find matching repo", async () => {
+    const withCommits = { ...SAMPLE_RELEASE, commitCount: 3 };
+    const otherRepo = { ...SAMPLE_REPO, id: "2", name: "getsentry/sentry" };
+    let repoRequestCount = 0;
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input!, init);
+
+      if (req.url.includes("/repos/")) {
+        repoRequestCount += 1;
+        if (repoRequestCount === 1) {
+          // First page: different repo, with a next cursor
+          return new Response(JSON.stringify([otherRepo]), {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+              Link: '<https://us.sentry.io/api/0/next/>; rel="next"; results="true"; cursor="page2:0:0"',
+            },
+          });
+        }
+        // Second page: the matching repo, no next cursor
+        return new Response(JSON.stringify([SAMPLE_REPO]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // PUT refs on the release
+      return new Response(JSON.stringify(withCommits), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const release = await setCommitsAuto("test-org", "1.0.0", "/tmp");
+
+    expect(release.commitCount).toBe(3);
+    expect(repoRequestCount).toBe(2);
   });
 });
