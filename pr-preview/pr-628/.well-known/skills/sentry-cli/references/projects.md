@@ -17,7 +17,7 @@ Create a new project
 
 **Flags:**
 - `-t, --team <value> - Team to create the project under`
-- `-n, --dry-run - Validate inputs and show what would be created without creating it`
+- `-n, --dry-run - Show what would happen without making changes`
 
 **Examples:**
 
@@ -38,8 +38,8 @@ Delete a project
 
 **Flags:**
 - `-y, --yes - Skip confirmation prompt`
-- `-f, --force - Force deletion without confirmation`
-- `-n, --dry-run - Validate and show what would be deleted without deleting`
+- `-f, --force - Force the operation without confirmation`
+- `-n, --dry-run - Show what would happen without making changes`
 
 **Examples:**
 

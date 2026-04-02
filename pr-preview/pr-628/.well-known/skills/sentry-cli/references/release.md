@@ -36,6 +36,7 @@ Create a release
 - `--finalize - Immediately finalize the release (set dateReleased)`
 - `--ref <value> - Git ref (branch or tag name)`
 - `--url <value> - URL to the release source`
+- `-n, --dry-run - Show what would happen without making changes`
 
 ### `sentry release finalize <org/version...>`
 
@@ -51,6 +52,8 @@ Delete a release
 
 **Flags:**
 - `-y, --yes - Skip confirmation prompt`
+- `-f, --force - Force the operation without confirmation`
+- `-n, --dry-run - Show what would happen without making changes`
 
 ### `sentry release deploy <org/version environment name...>`
 

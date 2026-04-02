@@ -152,6 +152,9 @@ Delete a widget from a dashboard
 **Flags:**
 - `-i, --index <value> - Widget index (0-based)`
 - `-t, --title <value> - Widget title to match`
+- `-y, --yes - Skip confirmation prompt`
+- `-f, --force - Force the operation without confirmation`
+- `-n, --dry-run - Show what would happen without making changes`
 
 **Examples:**
 
