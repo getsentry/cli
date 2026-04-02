@@ -142,6 +142,13 @@ async function setCommitsDefault(
       );
       return setCommitsFromLocal(org, version, cwd, depth);
     }
+    if (error instanceof ValidationError) {
+      log.warn(
+        `Auto-discovery failed: ${error.message}. ` +
+          "Falling back to local git history."
+      );
+      return setCommitsFromLocal(org, version, cwd, depth);
+    }
     throw error;
   }
 }

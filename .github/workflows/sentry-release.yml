@@ -27,7 +27,7 @@ jobs:
       # matching both the npm package version and Sentry release version.
       VERSION: ${{ github.event.release.tag_name || inputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
