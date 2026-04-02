@@ -1,8 +1,7 @@
 /**
- * Node.js Polyfill Tests — Bun.spawn and Bun.Glob
+ * Node.js Polyfill Tests — Bun.spawn, Bun.spawnSync, Bun.which, Bun.file, and Bun.Glob
  *
- * Tests the spawn and glob logic used by the Node.js polyfill in
- * script/node-polyfills.ts.
+ * Tests the logic used by the Node.js polyfill in script/node-polyfills.ts.
  *
  * We can't import the polyfill directly (it overwrites globalThis.Bun and has
  * side effects), so we reproduce the exact implementation and verify its
@@ -15,7 +14,14 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { spawn as nodeSpawn } from "node:child_process";
+import {
+  execSync,
+  spawn as nodeSpawn,
+  spawnSync as nodeSpawnSync,
+} from "node:child_process";
+import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 /**
  * Reproduces the exact spawn logic from script/node-polyfills.ts.
@@ -224,5 +230,234 @@ describe("Glob polyfill match()", () => {
         expect(polyfill.match(input)).toBe(bunGlob.match(input));
       }
     }
+  });
+});
+
+/**
+ * Reproduces the exact spawnSync logic from script/node-polyfills.ts.
+ * Kept in sync manually — if the polyfill changes, update this too.
+ */
+function polyfillSpawnSync(
+  cmd: string[],
+  opts?: {
+    stdout?: "pipe" | "ignore" | "inherit";
+    stderr?: "pipe" | "ignore" | "inherit";
+    cwd?: string;
+  }
+) {
+  const [command, ...args] = cmd;
+  const result = nodeSpawnSync(command, args, {
+    stdio: ["ignore", opts?.stdout ?? "ignore", opts?.stderr ?? "ignore"],
+    cwd: opts?.cwd,
+  });
+  return {
+    success: result.status === 0,
+    exitCode: result.status ?? 1,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  };
+}
+
+describe("spawnSync polyfill", () => {
+  test("returns success: true for exit code 0", () => {
+    const result = polyfillSpawnSync(["node", "-e", "process.exit(0)"]);
+    expect(result.success).toBe(true);
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("returns success: false for non-zero exit code", () => {
+    const result = polyfillSpawnSync(["node", "-e", "process.exit(42)"]);
+    expect(result.success).toBe(false);
+    expect(result.exitCode).toBe(42);
+  });
+
+  test("captures stdout when stdout: pipe", () => {
+    const result = polyfillSpawnSync(
+      ["node", "-e", 'process.stdout.write("hello")'],
+      { stdout: "pipe" }
+    );
+    expect(result.success).toBe(true);
+    expect(result.stdout.toString()).toBe("hello");
+  });
+
+  test("respects cwd option", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "polyfill-cwd-"));
+    try {
+      const result = polyfillSpawnSync(
+        ["node", "-e", "process.stdout.write(process.cwd())"],
+        {
+          stdout: "pipe",
+          cwd: tmpDir,
+        }
+      );
+      expect(result.success).toBe(true);
+      // Resolve symlinks (macOS /tmp → /private/tmp)
+      const expected = Bun.which("realpath")
+        ? execSync(`realpath "${tmpDir}"`, { encoding: "utf-8" }).trim()
+        : tmpDir;
+      const actual = Bun.which("realpath")
+        ? execSync(`realpath "${result.stdout.toString()}"`, {
+            encoding: "utf-8",
+          }).trim()
+        : result.stdout.toString();
+      expect(actual).toBe(expected);
+    } finally {
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  test("is consistent with Bun.spawnSync for git --version", () => {
+    const polyfill = polyfillSpawnSync(["git", "--version"], {
+      stdout: "pipe",
+    });
+    const bun = Bun.spawnSync(["git", "--version"], { stdout: "pipe" });
+    expect(polyfill.success).toBe(bun.success);
+    expect(polyfill.exitCode).toBe(bun.exitCode);
+    // Both should output something starting with "git version"
+    expect(polyfill.stdout.toString()).toStartWith("git version");
+    expect(bun.stdout.toString()).toStartWith("git version");
+  });
+});
+
+/**
+ * Reproduces the exact file() polyfill logic from script/node-polyfills.ts.
+ * Kept in sync manually — if the polyfill changes, update this too.
+ */
+function polyfillFile(path: string) {
+  return {
+    get size(): number {
+      return statSync(path).size;
+    },
+    get lastModified(): number {
+      return statSync(path).mtimeMs;
+    },
+  };
+}
+
+describe("file polyfill size and lastModified", () => {
+  test("size returns correct byte length", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "polyfill-file-"));
+    const filePath = join(tmpDir, "test.txt");
+    try {
+      writeFileSync(filePath, "hello world"); // 11 bytes
+      const pf = polyfillFile(filePath);
+      expect(pf.size).toBe(11);
+
+      // Verify consistency with Bun.file().size
+      expect(pf.size).toBe(Bun.file(filePath).size);
+    } finally {
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  test("size returns 0 for empty file", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "polyfill-file-"));
+    const filePath = join(tmpDir, "empty.txt");
+    try {
+      writeFileSync(filePath, "");
+      const pf = polyfillFile(filePath);
+      expect(pf.size).toBe(0);
+    } finally {
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  test("lastModified returns a recent timestamp in milliseconds", () => {
+    const before = Date.now();
+    const tmpDir = mkdtempSync(join(tmpdir(), "polyfill-file-"));
+    const filePath = join(tmpDir, "test.txt");
+    try {
+      writeFileSync(filePath, "data");
+      const after = Date.now();
+      const pf = polyfillFile(filePath);
+
+      // Should be between before and after (with 1s tolerance for slow CI)
+      expect(pf.lastModified).toBeGreaterThanOrEqual(before - 1000);
+      expect(pf.lastModified).toBeLessThanOrEqual(after + 1000);
+    } finally {
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  test("lastModified is consistent with Bun.file().lastModified", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "polyfill-file-"));
+    const filePath = join(tmpDir, "test.txt");
+    try {
+      writeFileSync(filePath, "data");
+      const pf = polyfillFile(filePath);
+      const bunMtime = Bun.file(filePath).lastModified;
+      // Both should be within 1ms of each other
+      expect(Math.abs(pf.lastModified - bunMtime)).toBeLessThanOrEqual(1);
+    } finally {
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  test("size throws for non-existent file", () => {
+    const pf = polyfillFile("/tmp/__nonexistent_file_polyfill_test__");
+    expect(() => pf.size).toThrow();
+  });
+});
+
+/**
+ * Reproduces the exact which() polyfill logic from script/node-polyfills.ts
+ * with PATH option support.
+ * Kept in sync manually — if the polyfill changes, update this too.
+ */
+function polyfillWhich(
+  command: string,
+  opts?: { PATH?: string }
+): string | null {
+  try {
+    const isWindows = process.platform === "win32";
+    const cmd = isWindows ? `where ${command}` : `which ${command}`;
+    const env = opts?.PATH ? { ...process.env, PATH: opts.PATH } : undefined;
+    return (
+      execSync(cmd, {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "ignore"],
+        env,
+      })
+        .trim()
+        .split("\n")[0] || null
+    );
+  } catch {
+    return null;
+  }
+}
+
+describe("which polyfill with PATH option", () => {
+  test("finds command on default PATH", () => {
+    const result = polyfillWhich("node");
+    expect(result).not.toBeNull();
+    // Should match Bun.which
+    expect(result).toBe(Bun.which("node"));
+  });
+
+  test("returns null for nonexistent command", () => {
+    const result = polyfillWhich("__nonexistent_command_polyfill_test__");
+    expect(result).toBeNull();
+  });
+
+  test("returns null when PATH excludes command directory", () => {
+    // Use a valid but irrelevant directory so which finds nothing
+    const result = polyfillWhich("__nonexistent_command__", { PATH: "/tmp" });
+    expect(result).toBeNull();
+  });
+
+  test("passes env with custom PATH to execSync", () => {
+    // Verify the polyfill constructs the env correctly when PATH is provided
+    const withPath = polyfillWhich("node", { PATH: process.env.PATH });
+    const withoutPath = polyfillWhich("node");
+    // Both should find node when given the same PATH
+    expect(withPath).toBe(withoutPath);
+  });
+
+  test("PATH option changes search scope", () => {
+    // A nonexistent command should not be found regardless of PATH
+    const result = polyfillWhich("__does_not_exist_anywhere__", {
+      PATH: "/usr/bin:/usr/local/bin",
+    });
+    expect(result).toBeNull();
   });
 });

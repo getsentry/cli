@@ -31,7 +31,7 @@ function getSentryUrl(): string {
 /**
  * OAuth client ID
  *
- * Build-time: Injected via Bun.build({ define: { SENTRY_CLIENT_ID: "..." } })
+ * Build-time: Injected via esbuild define: { SENTRY_CLIENT_ID_BUILD: "..." }
  * Runtime: Can be overridden via SENTRY_CLIENT_ID env var (for self-hosted)
  *
  * Read at call time (not module load time) so tests can override SENTRY_CLIENT_ID
