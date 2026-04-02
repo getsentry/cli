@@ -317,15 +317,6 @@ export function resolveWidgetIndex(
 }
 
 /**
- * Build a widget from user-provided flag values.
- *
- * Shared between `dashboard widget add` and `dashboard widget edit`.
- * Parses aggregate shorthand, sort expressions, and validates via Zod schema.
- *
- * @param opts - Widget configuration from parsed flags
- * @returns Validated widget with computed query fields
- */
-/**
  * Validate that a sort expression references an aggregate present in the query.
  * The Sentry API returns 400 when the sort field isn't in the widget's aggregates.
  *
@@ -421,6 +412,15 @@ function warnUnknownAggregateFields(
   }
 }
 
+/**
+ * Build a widget from user-provided flag values.
+ *
+ * Shared between `dashboard widget add` and `dashboard widget edit`.
+ * Parses aggregate shorthand, sort expressions, and validates via Zod schema.
+ *
+ * @param opts - Widget configuration from parsed flags
+ * @returns Validated widget with computed query fields
+ */
 export function buildWidgetFromFlags(opts: {
   title: string;
   display: string;

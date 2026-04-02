@@ -137,7 +137,10 @@ function validateQueryConstraints(
   mergedQueries: DashboardWidgetQuery[] | undefined,
   limit: number | null | undefined
 ): void {
-  if (flags["group-by"] || flags.query) {
+  // Only validate when user explicitly passes --group-by, not when merely
+  // changing --query on an existing grouped widget (which may have auto-defaulted
+  // columns like ["issue"] with no limit)
+  if (flags["group-by"]) {
     const columns =
       mergedQueries?.[0]?.columns ?? existing.queries?.[0]?.columns ?? [];
     validateGroupByRequiresLimit(columns, limit ?? undefined);
