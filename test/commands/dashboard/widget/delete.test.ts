@@ -113,7 +113,7 @@ describe("dashboard widget delete", () => {
   test("deletes widget by index", async () => {
     const { context } = createMockContext();
     const func = await deleteCommand.loader();
-    await func.call(context, { json: false, index: 0 }, "123");
+    await func.call(context, { json: false, yes: true, index: 0 }, "123");
 
     expect(getDashboardSpy).toHaveBeenCalledWith("acme-corp", "123");
     expect(updateDashboardSpy).toHaveBeenCalledWith(
@@ -134,7 +134,11 @@ describe("dashboard widget delete", () => {
   test("deletes widget by title", async () => {
     const { context } = createMockContext();
     const func = await deleteCommand.loader();
-    await func.call(context, { json: false, title: "Slow Spans" }, "123");
+    await func.call(
+      context,
+      { json: false, yes: true, title: "Slow Spans" },
+      "123"
+    );
 
     const body = updateDashboardSpy.mock.calls[0]?.[2];
     expect(body.widgets.length).toBe(1);
@@ -146,7 +150,7 @@ describe("dashboard widget delete", () => {
     const func = await deleteCommand.loader();
 
     const err = await func
-      .call(context, { json: false }, "123")
+      .call(context, { json: false, yes: true }, "123")
       .catch((e: Error) => e);
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.message).toContain("--index or --title");
@@ -157,7 +161,7 @@ describe("dashboard widget delete", () => {
     const func = await deleteCommand.loader();
 
     const err = await func
-      .call(context, { json: false, index: 99 }, "123")
+      .call(context, { json: false, yes: true, index: 99 }, "123")
       .catch((e: Error) => e);
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.message).toContain("out of range");
@@ -166,7 +170,7 @@ describe("dashboard widget delete", () => {
   test("human output contains 'Removed widget' and title", async () => {
     const { context, stdoutWrite } = createMockContext();
     const func = await deleteCommand.loader();
-    await func.call(context, { json: false, index: 0 }, "123");
+    await func.call(context, { json: false, yes: true, index: 0 }, "123");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Removed widget");

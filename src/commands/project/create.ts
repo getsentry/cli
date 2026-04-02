@@ -40,6 +40,7 @@ import { CommandOutput } from "../../lib/formatters/output.js";
 import { buildMarkdownTable, type Column } from "../../lib/formatters/table.js";
 import { renderTextTable } from "../../lib/formatters/text-table.js";
 import { logger } from "../../lib/logger.js";
+import { DRY_RUN_ALIASES, DRY_RUN_FLAG } from "../../lib/mutate-command.js";
 import {
   COMMON_PLATFORMS,
   isValidPlatform,
@@ -312,14 +313,9 @@ export const createCommand = buildCommand({
         brief: "Team to create the project under",
         optional: true,
       },
-      "dry-run": {
-        kind: "boolean",
-        brief:
-          "Validate inputs and show what would be created without creating it",
-        default: false,
-      },
+      "dry-run": DRY_RUN_FLAG,
     },
-    aliases: { t: "team", n: "dry-run" },
+    aliases: { ...DRY_RUN_ALIASES, t: "team" },
   },
   async *func(
     this: SentryContext,

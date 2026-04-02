@@ -2328,13 +2328,23 @@ export function formatWidgetAdded(result: {
 
 /**
  * Format a widget deletion result for human-readable output.
+ * Supports dry-run mode — shows what would be removed without removing it.
  */
 export function formatWidgetDeleted(result: {
   dashboard: DashboardDetail;
   widgetTitle: string;
   url: string;
+  dryRun?: boolean;
 }): string {
   const widgetCount = result.dashboard.widgets?.length ?? 0;
+  if (result.dryRun) {
+    const lines: string[] = [
+      `Would remove widget '${escapeMarkdownInline(result.widgetTitle)}' from dashboard (currently ${widgetCount} widgets)`,
+      "",
+      `URL: ${result.url}`,
+    ];
+    return renderMarkdown(lines.join("\n"));
+  }
   const lines: string[] = [
     `Removed widget '${escapeMarkdownInline(result.widgetTitle)}' from dashboard (now ${widgetCount} widgets)`,
     "",

@@ -288,6 +288,50 @@ All non-trivial human output must use the markdown rendering pipeline:
 
 Reference: `formatters/trace.ts` (`formatAncestorChain`), `formatters/human.ts` (`plainSafeMuted`)
 
+### Create & Delete Command Standards
+
+Mutation (create/delete) commands use shared infrastructure from `src/lib/mutate-command.ts`,
+paralleling `list-command.ts` for list commands.
+
+**Delete commands** MUST use `buildDeleteCommand()` instead of `buildCommand()`. It:
+1. Auto-injects `--yes`, `--force`, `--dry-run` flags with `-y`, `-f`, `-n` aliases
+2. Runs a non-interactive safety guard before `func()` — refuses to proceed if
+   stdin is not a TTY and `--yes`/`--force` was not passed (dry-run bypasses)
+3. Options to skip specific injections (`noForceFlag`, `noDryRunFlag`, `noNonInteractiveGuard`)
+
+```typescript
+import { buildDeleteCommand, confirmByTyping, isConfirmationBypassed, requireExplicitTarget } from "../../lib/mutate-command.js";
+
+export const deleteCommand = buildDeleteCommand({
+  // Same args as buildCommand — flags/aliases auto-injected
+  async *func(this: SentryContext, flags, target) {
+    requireExplicitTarget(parsed, "Entity", "sentry entity delete <target>");
+    if (flags["dry-run"]) { yield preview; return; }
+    if (!isConfirmationBypassed(flags)) {
+      if (!await confirmByTyping(expected, promptMessage)) return;
+    }
+    await doDelete();
+  },
+});
+```
+
+**Create commands** import `DRY_RUN_FLAG` and `DRY_RUN_ALIASES` for consistent dry-run support:
+
+```typescript
+import { DRY_RUN_FLAG, DRY_RUN_ALIASES } from "../../lib/mutate-command.js";
+
+// In parameters:
+flags: { "dry-run": DRY_RUN_FLAG, team: { ... } },
+aliases: { ...DRY_RUN_ALIASES, t: "team" },
+```
+
+**Key utilities** in `mutate-command.ts`:
+- `isConfirmationBypassed(flags)` — true if `--yes` or `--force` is set
+- `guardNonInteractive(flags)` — throws in non-interactive mode without `--yes`
+- `confirmByTyping(expected, message)` — type-out confirmation prompt
+- `requireExplicitTarget(parsed, entityType, usage)` — blocks auto-detect for safety
+- `DESTRUCTIVE_FLAGS` / `DESTRUCTIVE_ALIASES` — spreadable bundles for manual use
+
 ### List Command Pagination
 
 All list commands with API pagination MUST use the shared cursor-stack
