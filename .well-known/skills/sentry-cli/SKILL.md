@@ -1,6 +1,6 @@
 ---
 name: sentry-cli
-version: 0.23.0
+version: 0.24.0
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 requires:
   bins: ["sentry"]
@@ -138,9 +138,7 @@ Display types with default sizes:
 
 Use **common** types for general dashboards. Use **specialized** only when specifically requested. Avoid **internal** types unless the user explicitly asks.
 
-Available datasets: `spans` (default, covers most use cases), `discover`, `issue`, `error-events`, `transaction-like`, `metrics`, `logs`, `tracemetrics`, `preprod-app-size`.
-
-Run `sentry dashboard widget --help` for the full list including aggregate functions.
+Available datasets: `spans` (default), `tracemetrics`, `discover`, `issue`, `error-events`, `logs`. Run `sentry dashboard widget --help` for dataset descriptions, query formats, and examples.
 
 **Row-filling examples:**
 
@@ -159,6 +157,41 @@ sentry dashboard widget add <dashboard> "Top Endpoints" --display table \
   --query count --query p95:span.duration \
   --group-by transaction --sort -count --limit 10
 ```
+
+### Quick Reference
+
+#### Time filtering
+
+Use `--period` (alias: `-t`) to filter by time window:
+
+```bash
+sentry trace list --period 1h
+sentry span list --period 24h
+sentry span list -t 7d
+```
+
+#### Scoping to an org or project
+
+Org and project are positional arguments following `gh` CLI conventions:
+
+```bash
+sentry trace list my-org/my-project
+sentry issue list my-org/my-project
+sentry span list my-org/my-project/abc123def456...
+```
+
+#### Listing spans in a trace
+
+Pass the trace ID as a positional argument to `span list`:
+
+```bash
+sentry span list abc123def456...
+sentry span list my-org/my-project/abc123def456...
+```
+
+#### Dataset names for the Events API
+
+When querying the Events API (directly or via `sentry api`), valid dataset values are: `spans`, `transactions`, `logs`, `errors`, `discover`.
 
 ### Common Mistakes
 
@@ -279,6 +312,22 @@ Manage Sentry dashboards
 - `sentry dashboard widget delete <org/project/dashboard...>` — Delete a widget from a dashboard
 
 → Full flags and examples: `references/dashboards.md`
+
+### Release
+
+Work with Sentry releases
+
+- `sentry release list <org/project>` — List releases
+- `sentry release view <org/version...>` — View release details
+- `sentry release create <org/version...>` — Create a release
+- `sentry release finalize <org/version...>` — Finalize a release
+- `sentry release delete <org/version...>` — Delete a release
+- `sentry release deploy <org/version environment name...>` — Create a deploy for a release
+- `sentry release deploys <org/version...>` — List deploys for a release
+- `sentry release set-commits <org/version...>` — Set commits for a release
+- `sentry release propose-version` — Propose a release version
+
+→ Full flags and examples: `references/release.md`
 
 ### Repo
 

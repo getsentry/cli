@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-dashboards
-version: 0.23.0
+version: 0.24.0
 description: List, view, and create Sentry dashboards
 requires:
   bins: ["sentry"]
@@ -152,6 +152,9 @@ Delete a widget from a dashboard
 **Flags:**
 - `-i, --index <value> - Widget index (0-based)`
 - `-t, --title <value> - Widget title to match`
+- `-y, --yes - Skip confirmation prompt`
+- `-f, --force - Force the operation without confirmation`
+- `-n, --dry-run - Show what would happen without making changes`
 
 **Examples:**
 
