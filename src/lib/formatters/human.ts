@@ -2282,7 +2282,7 @@ export function formatUpgradeResult(data: UpgradeResult): string {
   // Append changelog if available
   const changelogOutput = formatChangelog(data);
   if (changelogOutput) {
-    return `${result}\n${changelogOutput}`;
+    return `${result}\n\n${changelogOutput}\n`;
   }
 
   return result;
