@@ -1,0 +1,79 @@
+# Audit: Build-Time Replacement Issues Similar to PR #627
+
+## Context
+
+PR #627 fixed a bug where esbuild's `define` replacement for `process.env.NODE_ENV` silently broke when code was refactored to access it via `getEnv().NODE_ENV` — esbuild can only replace the **literal token** `process.env.NODE_ENV`, not dynamic property accesses through indirection functions.
+
+## Finding: No Remaining `define` Replacement Bugs
+
+**The codebase is clean of PR #627-class issues.** All three esbuild `define` keys are handled correctly:
+
+| Define Key | Consumed In | Access Pattern | Status |
+|---|---|---|---|
+| `SENTRY_CLI_VERSION` | `src/lib/constants.ts:61` | Bare identifier + `typeof` guard | Safe |
+| `SENTRY_CLIENT_ID_BUILD` | `src/lib/oauth.ts:46-47` | Bare identifier + `typeof` guard | Safe |
+| `process.env.NODE_ENV` | Third-party libs only | No direct usage in `src/` | Safe |
+
+Key evidence:
+- **Zero `getEnv().NODE_ENV` calls exist** — the old broken pattern was fully removed
+- Both custom constants are confined to a single file each, accessed as bare identifiers
+- All 21 `getEnv()` call sites access runtime-only env vars (SENTRY_ORG, SENTRY_AUTH_TOKEN, etc.) that have no `define` entry
+- Both build pipelines (`build.ts` and `bundle.ts`) have identical `define` configs for the shared keys
+- The fix is well-documented in `constants.ts:70-73` with a comment explaining why `getCliEnvironment()` replaced the old approach
+
+## Related Finding: npm Polyfill Gaps (Silent Build Failures)
+
+While not `define` replacement issues, these are the same class of problem — **silent failures in the build/bundle pipeline** where code works on Bun but silently breaks on the npm/Node.js distribution:
+
+### HIGH severity (reachable from normal npm usage)
+
+1. **`Bun.file().size` / `.lastModified` not polyfilled** — `script/node-polyfills.ts` returns `{ exists(), text(), json() }` but DSN detection reads `.size` and `.lastModified`:
+   - `src/lib/dsn/code-scanner.ts:528` — `file.size > MAX_FILE_SIZE` → `undefined > N` → always `false` (size guard bypassed)
+   - `src/lib/dsn/code-scanner.ts:548` — `file.lastModified` → `undefined` (cache invalidation broken)
+   - `src/lib/dsn/scanner.ts:83` — same `.lastModified` issue
+   - `src/lib/db/dsn-cache.ts:260` — same
+
+2. **`Bun.spawnSync()` not polyfilled** — `src/lib/init/git.ts:14,25` uses it for git status checks in `sentry init`. Would crash with `TypeError` on npm.
+
+3. **`Bun.which(cmd, opts)` options ignored** — Polyfill accepts only 1 arg. `src/lib/shell.ts:321` passes `{ PATH: pathEnv }` which is silently ignored.
+
+### LOW severity (only reachable from curl upgrade path, not npm)
+
+Issues #3-#10 from the exploration: `Bun.file().writer()`, `.arrayBuffer()`, `Bun.zstdDecompressSync()`, `Bun.CryptoHasher`, `Bun.mmap()`, `Bun.write(path, BunFile)`, `Bun.spawnSync()`, `DecompressionStream("zstd")` — all in `bspatch.ts`, `upgrade.ts`, `binary.ts`. These only trigger on the curl upgrade code path which should never execute on npm installs.
+
+### Documentation issue
+
+- `src/lib/oauth.ts:34` — JSDoc says `define: { SENTRY_CLIENT_ID: "..." }` but the actual key is `SENTRY_CLIENT_ID_BUILD`
+
+## Recommended Actions
+
+### No action needed for `define` replacement
+The codebase is properly protected against PR #627-class regressions.
+
+### Fix npm polyfill gaps (if desired)
+
+1. **Add `size` and `lastModified` to `Bun.file()` polyfill** in `script/node-polyfills.ts`:
+   ```typescript
+   // In the file() return object, add:
+   get size() { return statSync(path).size; },
+   get lastModified() { return statSync(path).mtimeMs; },
+   ```
+
+2. **Add `Bun.spawnSync()` polyfill** in `script/node-polyfills.ts`:
+   ```typescript
+   spawnSync(cmd, opts) {
+     const result = spawnSync(cmd[0], cmd.slice(1), { ...opts });
+     return { exitCode: result.status, stdout: result.stdout, stderr: result.stderr };
+   }
+   ```
+
+3. **Add `PATH` option support to `Bun.which()` polyfill**
+
+4. **Fix JSDoc** in `src/lib/oauth.ts:34`: `SENTRY_CLIENT_ID` → `SENTRY_CLIENT_ID_BUILD`
+
+### Verification
+
+- `bun test` — existing tests pass
+- `bun run typecheck` — no type errors
+- `bun run lint` — no lint errors
+- `bun run bundle && node dist/bin.cjs --help` — npm bundle works
