@@ -18,6 +18,7 @@ import {
   ValidationError,
 } from "../../lib/errors.js";
 import { fuzzyMatch } from "../../lib/fuzzy.js";
+import { logger } from "../../lib/logger.js";
 import { resolveEffectiveOrg } from "../../lib/region.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
@@ -368,6 +369,58 @@ export function validateGroupByRequiresLimit(
   }
 }
 
+const log = logger.withTag("dashboard");
+
+/**
+ * Known aggregatable fields for the spans dataset.
+ *
+ * Span attributes (e.g., dsn.files_collected, resolve.method) are key-value
+ * metadata and cannot be used as aggregate fields — only in --where or --group-by.
+ * This set covers built-in numeric fields that support aggregation.
+ * Measurements (http.*, cache.*, etc.) are project-specific and may not be
+ * exhaustive — we warn instead of error for unknown fields.
+ */
+const KNOWN_SPAN_AGGREGATE_FIELDS = new Set([
+  "span.duration",
+  "span.self_time",
+  "http.response_content_length",
+  "http.decoded_response_content_length",
+  "http.response_transfer_size",
+  "cache.item_size",
+]);
+
+/**
+ * Warn when an aggregate argument looks like a span attribute rather than
+ * an aggregatable field. No-arg functions (count(), epm()) are fine.
+ * Only checks for the spans dataset.
+ */
+function warnUnknownAggregateFields(
+  aggregates: string[],
+  dataset: string | undefined
+): void {
+  if (dataset && dataset !== "spans") {
+    return;
+  }
+  for (const agg of aggregates) {
+    const parenIdx = agg.indexOf("(");
+    if (parenIdx < 0) {
+      continue;
+    }
+    const inner = agg.slice(parenIdx + 1, -1);
+    // No-arg functions like count(), epm() have empty inner — skip
+    if (!inner) {
+      continue;
+    }
+    if (!KNOWN_SPAN_AGGREGATE_FIELDS.has(inner)) {
+      log.warn(
+        `Aggregate field "${inner}" in "${agg}" is not a known aggregatable span field. ` +
+          "Span attributes (custom tags) cannot be aggregated — use them in --where or --group-by instead. " +
+          `Known fields: ${[...KNOWN_SPAN_AGGREGATE_FIELDS].join(", ")}`
+      );
+    }
+  }
+}
+
 export function buildWidgetFromFlags(opts: {
   title: string;
   display: string;
@@ -380,6 +433,7 @@ export function buildWidgetFromFlags(opts: {
 }): DashboardWidget {
   const aggregates = (opts.query ?? ["count"]).map(parseAggregate);
   validateAggregateNames(aggregates, opts.dataset);
+  warnUnknownAggregateFields(aggregates, opts.dataset);
 
   // Issue table widgets need at least one column or the Sentry UI shows "Columns: None".
   // Default to ["issue"] for table display only — timeseries (line/area/bar) don't use columns.
