@@ -16,14 +16,19 @@ import {
   updateAnOrganization_sRelease,
 } from "@sentry/api";
 
+import { ApiError, ValidationError } from "../errors.js";
+import { getHeadCommit, getRepositoryName } from "../git.js";
 import { resolveOrgRegion } from "../region.js";
 import {
+  API_MAX_PER_PAGE,
   apiRequestToRegion,
   getOrgSdkConfig,
+  MAX_PAGINATION_PAGES,
   type PaginatedResponse,
   unwrapPaginatedResult,
   unwrapResult,
 } from "./infrastructure.js";
+import { listRepositoriesPaginated } from "./repositories.js";
 
 // We cast through `unknown` to bridge the gap between the SDK's internal
 // return types and the public response types — the shapes are compatible
@@ -269,32 +274,80 @@ export async function createReleaseDeploy(
 /**
  * Set commits on a release using auto-discovery mode.
  *
- * This uses the internal API format `refs: [{repository: "auto", commit: "auto"}]`
- * which is not part of the OpenAPI spec, so we use apiRequestToRegion directly.
+ * Lists the org's repositories from the Sentry API, matches against the
+ * local git remote URL to find the corresponding Sentry repo, then sends
+ * a refs payload with the HEAD commit SHA. This is the equivalent of the
+ * reference sentry-cli's `--auto` mode.
  *
- * Requires a GitHub/GitLab/Bitbucket integration configured in Sentry.
+ * Requires a GitHub/GitLab/Bitbucket integration configured in Sentry
+ * AND a local git repository whose origin remote matches a Sentry repo.
  *
  * @param orgSlug - Organization slug
  * @param version - Release version
+ * @param cwd - Working directory to discover git remote and HEAD from
  * @returns Updated release detail with commit count
+ * @throws {ApiError} When the org has no repository integrations (400)
+ * @throws {ValidationError} When local git remote is missing or doesn't match any Sentry repo
  */
 export async function setCommitsAuto(
   orgSlug: string,
-  version: string
+  version: string,
+  cwd?: string
 ): Promise<OrgReleaseResponse> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const encodedVersion = encodeURIComponent(version);
-  const { data } = await apiRequestToRegion<OrgReleaseResponse>(
-    regionUrl,
-    `organizations/${orgSlug}/releases/${encodedVersion}/`,
-    {
-      method: "PUT",
-      body: {
-        refs: [{ repository: "auto", commit: "auto" }],
-      },
+  const localRepo = getRepositoryName(cwd);
+  if (!localRepo) {
+    throw new ValidationError(
+      "Could not determine repository name from local git remote.",
+      "repository"
+    );
+  }
+
+  // Paginate through org repos to find one matching the local git remote.
+  // Stops as soon as a match is found to avoid unnecessary API calls.
+  const localRepoLower = localRepo.toLowerCase();
+  let cursor: string | undefined;
+  let foundAnyRepos = false;
+
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
+    const result = await listRepositoriesPaginated(orgSlug, {
+      cursor,
+      perPage: API_MAX_PER_PAGE,
+    });
+
+    if (result.data.length > 0) {
+      foundAnyRepos = true;
     }
+
+    const match = result.data.find(
+      (r) => r.name.toLowerCase() === localRepoLower
+    );
+    if (match) {
+      const headCommit = getHeadCommit(cwd);
+      return setCommitsWithRefs(orgSlug, version, [
+        { repository: match.name, commit: headCommit },
+      ]);
+    }
+
+    if (!result.nextCursor) {
+      break;
+    }
+    cursor = result.nextCursor;
+  }
+
+  if (!foundAnyRepos) {
+    const endpoint = `organizations/${orgSlug}/releases/${encodeURIComponent(version)}/`;
+    throw new ApiError(
+      "No repository integrations configured for this organization.",
+      400,
+      undefined,
+      endpoint
+    );
+  }
+
+  throw new ValidationError(
+    `No Sentry repository matching '${localRepo}'.`,
+    "repository"
   );
-  return data;
 }
 
 /**

@@ -15,7 +15,6 @@ import {
   getRelease,
   listReleaseDeploys,
   listReleasesPaginated,
-  setCommitsAuto,
   setCommitsLocal,
   updateRelease,
 } from "../../../src/lib/api/releases.js";
@@ -234,28 +233,8 @@ describe("createReleaseDeploy", () => {
 // setCommitsAuto
 // =============================================================================
 
-describe("setCommitsAuto", () => {
-  test("sends auto refs to the API", async () => {
-    const withCommits = { ...SAMPLE_RELEASE, commitCount: 5 };
-    globalThis.fetch = mockFetch(async (input, init) => {
-      const req = new Request(input!, init);
-      expect(req.method).toBe("PUT");
-      expect(req.url).toContain("/releases/1.0.0/");
-      const body = (await req.json()) as {
-        refs: Array<{ repository: string; commit: string }>;
-      };
-      expect(body.refs).toEqual([{ repository: "auto", commit: "auto" }]);
-      return new Response(JSON.stringify(withCommits), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    });
-
-    const release = await setCommitsAuto("test-org", "1.0.0");
-
-    expect(release.commitCount).toBe(5);
-  });
-});
+// setCommitsAuto tests are in test/isolated/set-commits-auto.test.ts
+// because they require mock.module() for git helpers.
 
 // =============================================================================
 // setCommitsLocal

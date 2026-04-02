@@ -18,6 +18,7 @@ import type { OrgReleaseResponse } from "@sentry/api";
 import { setCommitsCommand } from "../../../src/commands/release/set-commits.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+import { ValidationError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import { useTestConfigDir } from "../../helpers.js";
@@ -187,5 +188,98 @@ describe("release set-commits --commit", () => {
         "1.0.0"
       )
     ).rejects.toThrow("Only one of --auto, --local, or --commit");
+  });
+});
+
+describe("release set-commits --auto", () => {
+  let setCommitsAutoSpy: ReturnType<typeof spyOn>;
+  let resolveOrgSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    setCommitsAutoSpy = spyOn(apiClient, "setCommitsAuto");
+    resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
+  });
+
+  afterEach(() => {
+    setCommitsAutoSpy.mockRestore();
+    resolveOrgSpy.mockRestore();
+  });
+
+  test("passes cwd to setCommitsAuto", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "my-org" });
+    setCommitsAutoSpy.mockResolvedValue(sampleRelease);
+
+    const { context } = createMockContext("/my/project");
+    const func = await setCommitsCommand.loader();
+    await func.call(
+      context,
+      {
+        auto: true,
+        local: false,
+        clear: false,
+        commit: undefined,
+        "initial-depth": 20,
+        json: true,
+      },
+      "1.0.0"
+    );
+
+    expect(setCommitsAutoSpy).toHaveBeenCalledWith(
+      "my-org",
+      "1.0.0",
+      "/my/project"
+    );
+  });
+});
+
+describe("release set-commits (default mode)", () => {
+  let setCommitsAutoSpy: ReturnType<typeof spyOn>;
+  let setCommitsLocalSpy: ReturnType<typeof spyOn>;
+  let resolveOrgSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    setCommitsAutoSpy = spyOn(apiClient, "setCommitsAuto");
+    setCommitsLocalSpy = spyOn(apiClient, "setCommitsLocal");
+    resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
+  });
+
+  afterEach(() => {
+    setCommitsAutoSpy.mockRestore();
+    setCommitsLocalSpy.mockRestore();
+    resolveOrgSpy.mockRestore();
+  });
+
+  test("falls back to local on ValidationError from auto", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "my-org" });
+    setCommitsAutoSpy.mockRejectedValue(
+      new ValidationError(
+        "No Sentry repository matching 'foo/bar'.",
+        "repository"
+      )
+    );
+    setCommitsLocalSpy.mockResolvedValue(sampleRelease);
+
+    // Use the actual repo root as cwd so getCommitLog can read git history
+    const repoRoot = new URL("../../..", import.meta.url).pathname.replace(
+      /\/$/,
+      ""
+    );
+    const { context } = createMockContext(repoRoot);
+    const func = await setCommitsCommand.loader();
+    await func.call(
+      context,
+      {
+        auto: false,
+        local: false,
+        clear: false,
+        commit: undefined,
+        "initial-depth": 20,
+        json: true,
+      },
+      "1.0.0"
+    );
+
+    expect(setCommitsAutoSpy).toHaveBeenCalled();
+    expect(setCommitsLocalSpy).toHaveBeenCalled();
   });
 });

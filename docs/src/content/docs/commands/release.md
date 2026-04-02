@@ -141,7 +141,7 @@ Set commits for a release
 
 | Option | Description |
 |--------|-------------|
-| `--auto` | Use repository integration to auto-discover commits |
+| `--auto` | Auto-discover commits via repository integration (needs local git checkout) |
 | `--local` | Read commits from local git history |
 | `--clear` | Clear all commits from the release |
 | `--commit <commit>` | Explicit commit as REPO@SHA or REPO@PREV..SHA (comma-separated) |
@@ -189,4 +189,18 @@ sentry release create $(sentry release propose-version)
 # Output as JSON
 sentry release list --json
 sentry release view 1.0.0 --json
+
+# CI/CD: full release workflow with org prefix
+sentry release create my-org/1.0.0 --project my-project --url "https://github.com/org/repo/releases/tag/1.0.0"
+sentry release set-commits my-org/1.0.0 --auto
+sentry release finalize my-org/1.0.0
+sentry release deploy my-org/1.0.0 production
 ```
+
+## Important Notes
+
+- **Version matching**: The release version must match the `release` value in your `Sentry.init()` call. If your SDK uses `"1.0.0"`, create the release as `sentry release create org/1.0.0` (version = `1.0.0`), **not** `sentry release create org/myapp/1.0.0`.
+- **The `org/` prefix is the org slug**: In `sentry release create sentry/1.0.0`, `sentry` is the org slug and `1.0.0` is the version. The `/` separates org from version, it's not part of the version string.
+- **`--auto` needs a git checkout**: The `--auto` flag lists repos from the Sentry API and matches against your local `origin` remote URL. A full checkout (`git fetch-depth: 0`) is needed for `--auto` to work. Without a checkout, use `--local`.
+- **Default mode tries `--auto` first**: When neither `--auto` nor `--local` is specified, the CLI tries auto-discovery first and falls back to local git history if the integration isn't configured.
+- **Node.js >= 22 required**: The `sentry` npm package requires Node.js 22 or later. CI runners like `ubuntu-latest` ship Node.js 20 by default.

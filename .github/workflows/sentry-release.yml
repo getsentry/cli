@@ -22,11 +22,19 @@ jobs:
     # always run on manual dispatch.
     if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
     env:
+      # Secret is scoped to the "production" environment — the job needs
+      # `environment: production` above to access it.
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
       # Tag names are bare semver (e.g., "0.24.0", no "v" prefix),
-      # matching both the npm package version and Sentry release version.
+      # matching the Sentry.init() release value and sourcemap uploads.
       VERSION: ${{ github.event.release.tag_name || inputs.version }}
     steps:
+      # Full checkout needed for set-commits --auto (discovers git remote + HEAD).
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # The sentry npm package requires Node.js >= 22 (ubuntu-latest ships 20).
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
@@ -35,9 +43,16 @@ jobs:
       - name: Install CLI
         run: npm install -g "sentry@${VERSION}"
 
+      # "sentry/${VERSION}" = org-slug/version (e.g., org=sentry, version=0.24.0).
+      # The org/ prefix is how org is specified — it is NOT part of the version.
+      # The version portion must match Sentry.init({ release }) exactly.
       - name: Create release
-        run: sentry release create "sentry/${VERSION}" --project cli
+        run: >-
+          sentry release create "sentry/${VERSION}" --project cli
+          --url "https://github.com/${{ github.repository }}/releases/tag/${VERSION}"
 
+      # --auto matches the local origin remote against Sentry repo integrations.
+      # continue-on-error: integration may not be configured for all orgs.
       - name: Set commits
         continue-on-error: true
         run: sentry release set-commits "sentry/${VERSION}" --auto

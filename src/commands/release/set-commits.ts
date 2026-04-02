@@ -130,7 +130,7 @@ async function setCommitsDefault(
   }
 
   try {
-    const release = await setCommitsAuto(org, version);
+    const release = await setCommitsAuto(org, version, cwd);
     clearRepoIntegrationCache(org);
     return release;
   } catch (error) {
@@ -138,6 +138,13 @@ async function setCommitsDefault(
       cacheNoRepoIntegration(org);
       log.warn(
         "Could not auto-discover commits (no repository integration). " +
+          "Falling back to local git history."
+      );
+      return setCommitsFromLocal(org, version, cwd, depth);
+    }
+    if (error instanceof ValidationError) {
+      log.warn(
+        `Auto-discovery failed: ${error.message}. ` +
           "Falling back to local git history."
       );
       return setCommitsFromLocal(org, version, cwd, depth);
@@ -162,8 +169,10 @@ export const setCommitsCommand = buildCommand({
     brief: "Set commits for a release",
     fullDescription:
       "Associate commits with a release.\n\n" +
-      "Use --auto to let Sentry discover commits via your repository integration,\n" +
-      "or --local to read commits from the local git history.\n\n" +
+      "Use --auto to let Sentry discover commits via your repository integration\n" +
+      "(requires a local git checkout — matches the origin remote against Sentry repos),\n" +
+      "or --local to read commits from the local git history.\n" +
+      "With no flag, tries --auto first and falls back to --local on failure.\n\n" +
       "Examples:\n" +
       "  sentry release set-commits 1.0.0 --auto\n" +
       "  sentry release set-commits my-org/1.0.0 --local\n" +
@@ -186,7 +195,8 @@ export const setCommitsCommand = buildCommand({
     flags: {
       auto: {
         kind: "boolean",
-        brief: "Use repository integration to auto-discover commits",
+        brief:
+          "Auto-discover commits via repository integration (needs local git checkout)",
         default: false,
       },
       local: {
@@ -312,7 +322,7 @@ export const setCommitsCommand = buildCommand({
       );
     } else if (flags.auto) {
       // Explicit --auto: use repo integration, fail hard on error
-      release = await setCommitsAuto(resolved.org, version);
+      release = await setCommitsAuto(resolved.org, version, cwd);
     } else {
       // Default (no flag): try auto with cached fallback
       release = await setCommitsDefault(
