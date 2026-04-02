@@ -141,7 +141,7 @@ Set commits for a release
 
 | Option | Description |
 |--------|-------------|
-| `--auto` | Use repository integration to auto-discover commits |
+| `--auto` | Auto-discover commits via repository integration (needs local git checkout) |
 | `--local` | Read commits from local git history |
 | `--clear` | Clear all commits from the release |
 | `--commit <commit>` | Explicit commit as REPO@SHA or REPO@PREV..SHA (comma-separated) |
