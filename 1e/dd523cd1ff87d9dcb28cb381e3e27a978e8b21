@@ -1,0 +1,107 @@
+# Fix #640: Stricli parsed flag string defaults bypass numberParser
+
+## Finding
+
+**This is not a bug.** Stricli's runtime at `node_modules/@stricli/core/dist/index.js:623` always passes `kind: "parsed"` flag defaults through `parse()`:
+
+```js
+return parseInput(externalFlagName, flag, flag.default, context);
+```
+
+So `numberParser("20")` → `20` (number). Commands receive the correct type at runtime.
+
+This matches option 1 from the issue: "Verify Stricli's behavior: does it actually call `parse()` on the default? If so, this is a non-issue."
+
+## Changes
+
+### 1. Add regression test (`test/lib/command.test.ts`)
+
+Insert after the test at line 169 ("captures flags as Sentry tags when command runs"). The existing test at line 124 runs `["test", "--verbose", "--limit", "50"]` (explicit flag). The new test runs `["test"]` (no flag, uses default) and asserts the value is `number 10`, not `string "10"`.
+
+```typescript
+test("passes string defaults through parse() — numberParser default is number at runtime", async () => {
+  let receivedFlags: Record<string, unknown> | null = null;
+
+  const command = buildCommand<{ limit: number }, [], TestContext>({
+    auth: false,
+    docs: { brief: "Test" },
+    parameters: {
+      flags: {
+        limit: {
+          kind: "parsed",
+          parse: numberParser,
+          brief: "Limit",
+          default: "10",
+        },
+      },
+    },
+    // biome-ignore lint/correctness/useYield: test command — no output to yield
+    async *func(this: TestContext, flags: { limit: number }) {
+      receivedFlags = flags as unknown as Record<string, unknown>;
+    },
+  });
+
+  const routeMap = buildRouteMap({
+    routes: { test: command },
+    docs: { brief: "Test app" },
+  });
+  const app = buildApplication(routeMap, { name: "test" });
+  const ctx = createTestContext();
+
+  // Run WITHOUT --limit to exercise the default path
+  await run(app, ["test"], ctx as TestContext);
+
+  expect(receivedFlags).not.toBeNull();
+  expect(receivedFlags!.limit).toBe(10);
+  expect(typeof receivedFlags!.limit).toBe("number");
+});
+```
+
+### 2. Update comment in `src/commands/auth/login.ts:130`
+
+Current:
+```
+// Stricli requires string defaults (raw CLI input); numberParser converts to number
+```
+
+New (more accurate — emphasizes defaults go through parse):
+```
+// Stricli passes string defaults through parse(); numberParser converts to number
+```
+
+### 3. Add comment in `src/commands/release/set-commits.ts:213`
+
+Add trailing comment:
+```typescript
+default: "20", // Stricli passes string defaults through parse(); numberParser converts to number
+```
+
+### 4. Update JSDoc in `src/lib/list-command.ts:255`
+
+Current:
+```
+ * @param defaultValue - Default limit as a string (default: "30")
+```
+
+New:
+```
+ * @param defaultValue - Default limit as a string — Stricli passes it through
+ *   numberParser at runtime, so the command receives a number (default: "30")
+```
+
+## Files Modified
+
+| File | Change |
+|------|--------|
+| `test/lib/command.test.ts` (~line 170) | Add regression test |
+| `src/commands/auth/login.ts:130` | Update comment |
+| `src/commands/release/set-commits.ts:213` | Add inline comment |
+| `src/lib/list-command.ts:255` | Expand JSDoc param |
+
+## Verification
+
+```bash
+bun test test/lib/command.test.ts    # New test passes
+bun run typecheck                     # No type errors
+bun run lint                          # No lint issues
+```
