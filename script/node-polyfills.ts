@@ -103,13 +103,21 @@ const bunSqlitePolyfill = { Database: NodeDatabasePolyfill };
 const BunPolyfill = {
   file(path: string) {
     return {
-      /** File size in bytes (synchronous, like Bun.file().size). */
+      /** File size in bytes (synchronous, like Bun.file().size). Returns 0 for non-existent files. */
       get size(): number {
-        return statSync(path).size;
+        try {
+          return statSync(path).size;
+        } catch {
+          return 0;
+        }
       },
-      /** Last-modified time in ms since epoch (like Bun.file().lastModified). */
+      /** Last-modified time in ms since epoch (like Bun.file().lastModified). Returns 0 for non-existent files. */
       get lastModified(): number {
-        return statSync(path).mtimeMs;
+        try {
+          return statSync(path).mtimeMs;
+        } catch {
+          return 0;
+        }
       },
       async exists(): Promise<boolean> {
         try {
@@ -149,8 +157,12 @@ const BunPolyfill = {
     try {
       const isWindows = process.platform === "win32";
       const cmd = isWindows ? `where ${command}` : `which ${command}`;
-      // If a custom PATH is provided, override it in the subprocess env
-      const env = opts?.PATH ? { ...process.env, PATH: opts.PATH } : undefined;
+      // If a custom PATH is provided, override it in the subprocess env.
+      // Use !== undefined (not truthy) so empty-string PATH is respected.
+      const env =
+        opts?.PATH !== undefined
+          ? { ...process.env, PATH: opts.PATH }
+          : undefined;
       return (
         execSync(cmd, {
           encoding: "utf-8",

@@ -326,10 +326,18 @@ describe("spawnSync polyfill", () => {
 function polyfillFile(path: string) {
   return {
     get size(): number {
-      return statSync(path).size;
+      try {
+        return statSync(path).size;
+      } catch {
+        return 0;
+      }
     },
     get lastModified(): number {
-      return statSync(path).mtimeMs;
+      try {
+        return statSync(path).mtimeMs;
+      } catch {
+        return 0;
+      }
     },
   };
 }
@@ -393,9 +401,17 @@ describe("file polyfill size and lastModified", () => {
     }
   });
 
-  test("size throws for non-existent file", () => {
+  test("size returns 0 for non-existent file (matches Bun behavior)", () => {
     const pf = polyfillFile("/tmp/__nonexistent_file_polyfill_test__");
-    expect(() => pf.size).toThrow();
+    expect(pf.size).toBe(0);
+    expect(pf.size).toBe(
+      Bun.file("/tmp/__nonexistent_file_polyfill_test__").size
+    );
+  });
+
+  test("lastModified returns 0 for non-existent file", () => {
+    const pf = polyfillFile("/tmp/__nonexistent_file_polyfill_test__");
+    expect(pf.lastModified).toBe(0);
   });
 });
 
@@ -411,7 +427,10 @@ function polyfillWhich(
   try {
     const isWindows = process.platform === "win32";
     const cmd = isWindows ? `where ${command}` : `which ${command}`;
-    const env = opts?.PATH ? { ...process.env, PATH: opts.PATH } : undefined;
+    const env =
+      opts?.PATH !== undefined
+        ? { ...process.env, PATH: opts.PATH }
+        : undefined;
     return (
       execSync(cmd, {
         encoding: "utf-8",
@@ -437,6 +456,13 @@ describe("which polyfill with PATH option", () => {
   test("returns null for nonexistent command", () => {
     const result = polyfillWhich("__nonexistent_command_polyfill_test__");
     expect(result).toBeNull();
+  });
+
+  test("returns null when PATH is empty string (matches Bun behavior)", () => {
+    // Empty-string PATH should be respected, not ignored as falsy
+    const result = polyfillWhich("node", { PATH: "" });
+    expect(result).toBeNull();
+    expect(result).toBe(Bun.which("node", { PATH: "" }));
   });
 
   test("returns null when PATH excludes command directory", () => {
