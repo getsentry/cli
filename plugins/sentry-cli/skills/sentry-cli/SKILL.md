@@ -138,61 +138,7 @@ Display types with default sizes:
 
 Use **common** types for general dashboards. Use **specialized** only when specifically requested. Avoid **internal** types unless the user explicitly asks.
 
-Available datasets: `spans` (default, covers most use cases), `discover`, `issue`, `error-events`, `transaction-like`, `metrics`, `logs`, `tracemetrics`, `preprod-app-size`.
-
-#### Choosing the right dataset
-
-- **`spans`** — use for span-based queries: `span.duration`, `span.op`, `transaction`, span attributes, `cache.hit`, etc. This is the default and covers most use cases.
-- **`tracemetrics`** — use for custom metrics emitted via `Sentry.metrics.distribution()`, `Sentry.metrics.gauge()`, `Sentry.metrics.count()`, or SDK integrations like `nodeRuntimeMetricsIntegration`. The query format is different from spans (see below).
-- **`metrics`** — the legacy MRI-based metrics dataset (`d:custom/name@unit`). Deprecated in favor of `tracemetrics` for SDK v10+ trace-bound metrics. Avoid unless you know the org has standalone custom metrics enabled.
-
-#### tracemetrics query format
-
-Custom metrics emitted via the Sentry SDK (e.g., `Sentry.metrics.distribution("completion.duration_ms", value)`) use the `tracemetrics` dataset with a **comma-separated aggregate format**, not the MRI format used by the `metrics` dataset.
-
-**Format:** `aggregation(value,metric_name,metric_type,unit)`
-
-| Parameter | Description | Values |
-|---|---|---|
-| `aggregation` | Aggregate function | `avg`, `sum`, `count`, `p50`, `p75`, `p90`, `p95`, `p99`, `min`, `max` |
-| `value` | Literal string | Always `value` |
-| `metric_name` | The metric name as emitted by the SDK | e.g., `completion.duration_ms`, `node.runtime.cpu.utilization` |
-| `metric_type` | The Sentry metric type | `distribution`, `gauge`, `counter`, `set` |
-| `unit` | The unit passed to the SDK (or `none` if omitted) | `none`, `byte`, `second`, `millisecond`, `ratio`, etc. |
-
-**CLI shorthand:** `--query aggregation:value,metric_name,metric_type,unit`
-
-**Examples:**
-
-```bash
-# Distribution metric (no unit specified in SDK → "none")
-sentry dashboard widget add <dashboard> "Completion Latency" \
-  --display line --dataset tracemetrics \
-  --query "p50(value,completion.duration_ms,distribution,none)" \
-  --query "p90(value,completion.duration_ms,distribution,none)"
-
-# Gauge metric with byte unit (from nodeRuntimeMetricsIntegration)
-sentry dashboard widget add <dashboard> "Memory Usage" \
-  --display line --dataset tracemetrics \
-  --query "avg(value,node.runtime.mem.rss,gauge,byte)" \
-  --query "avg(value,node.runtime.mem.heap_used,gauge,byte)"
-
-# Gauge metric with no unit
-sentry dashboard widget add <dashboard> "CPU Utilization" \
-  --display line --dataset tracemetrics \
-  --query "avg(value,node.runtime.cpu.utilization,gauge,none)"
-```
-
-**How to determine the correct parameters:**
-1. **metric_name**: The first argument to `Sentry.metrics.distribution()`, `.gauge()`, or `.count()`.
-2. **metric_type**: `distribution` for `.distribution()`, `gauge` for `.gauge()`, `counter` for `.count()`.
-3. **unit**: The `unit` option passed to the SDK call. If no `unit` option is specified, use `none`. Check the SDK source for integrations — e.g., `nodeRuntimeMetricsIntegration` uses `byte` for memory metrics, `second` for CPU/uptime, and no unit (`none`) for utilization ratios.
-
-**Important:** Do NOT use MRI format (`d:custom/name@unit`) with the `tracemetrics` dataset — that format is for the legacy `metrics` dataset only. The `tracemetrics` dataset uses the comma-separated format above.
-
-**Display type restrictions:** `tracemetrics` supports `area`, `bar`, `big_number`, `categorical_bar`, `line` only. No `table`, `top_n`, or `stacked_area`.
-
-Run `sentry dashboard widget --help` for the full list including aggregate functions.
+Available datasets: `spans` (default), `tracemetrics`, `discover`, `issue`, `error-events`, `logs`. Run `sentry dashboard widget --help` for dataset descriptions, query formats, and examples.
 
 **Row-filling examples:**
 
@@ -260,12 +206,12 @@ When querying the Events API (directly or via `sentry api`), valid dataset value
 
 #### Dashboard Widget Mistakes
 
-- **Using `metrics` dataset for SDK v10+ custom metrics**: SDK v10+ emits trace-bound metrics via `trace_metric` envelope items. Use `--dataset tracemetrics` with the comma-separated format `aggregation(value,metric_name,metric_type,unit)`, NOT `--dataset metrics` with MRI format `d:custom/name@unit`.
-- **Wrong MRI unit in metrics queries**: If you do use the `metrics` dataset, the `@unit` suffix must exactly match what the SDK emits. If no `unit` option is passed to `Sentry.metrics.distribution()`, the unit is `none`. Check the SDK source — e.g., `nodeRuntimeMetricsIntegration` uses `byte` for memory, `second` for uptime, and no unit for utilization.
-- **Missing `--limit` with `--group-by`**: Widgets that use `--group-by` MUST include `--limit`. The Sentry API rejects grouped widgets without a limit. Always include `--limit 5` (or another value) when using `--group-by`.
-- **`--sort` referencing a field not in `--query`**: The `--sort` field must be one of the aggregate expressions in `--query`. If you sort by `-count` but only query `p50:span.duration`, the API returns 400. Either add `count` to `--query` or sort by a queried field.
-- **Span attributes are not queryable as metrics**: You cannot use `avg:dsn.files_collected` on span attributes via the `events-stats` endpoint. Span attributes are key-value metadata on spans — use them in `--where` filters or `--group-by` columns, not as aggregate fields. Only `span.duration` and a few built-in measurements support aggregation.
-- **Stale `--sort` after changing `--query`**: When editing a widget to change the query (e.g., p75→p50), also update `--sort` if it references the old aggregate. The API silently accepts the sort but the dashboard shows errors.
+- **Wrong dataset for custom metrics**: Use `--dataset tracemetrics` for custom metrics (`Sentry.metrics.distribution/gauge/count`). The query format is `aggregation(value,metric_name,metric_type,unit)` — see `sentry dashboard widget --help` for details.
+- **Wrong unit in tracemetrics queries**: The `unit` parameter must match the SDK emission. If no `unit` option is passed to `Sentry.metrics.*()`, use `none`. Check the SDK source for integrations — e.g., `nodeRuntimeMetricsIntegration` uses `byte` for memory, `second` for uptime, `none` for utilization ratios.
+- **Missing `--limit` with `--group-by`**: The Sentry API rejects grouped widgets without a limit. Always include `--limit` when using `--group-by`.
+- **`--sort` referencing a field not in `--query`**: The sort field must be one of the aggregate expressions in `--query`. If you sort by `-count` but only query `p50:span.duration`, the API returns 400.
+- **Span attributes are not aggregatable**: You cannot use `avg:dsn.files_collected` on span attributes. Span attributes are key-value metadata — use them in `--where` filters or `--group-by` columns, not as aggregate fields. Only `span.duration` and built-in measurements support aggregation.
+- **Stale `--sort` after changing `--query`**: When editing a widget to change the query (e.g., p75→p50), also update `--sort` if it references the old aggregate.
 
 ## Prerequisites
 

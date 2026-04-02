@@ -26,7 +26,6 @@ import { logger } from "../lib/logger.js";
 export const WIDGET_TYPES = [
   "discover",
   "issue",
-  "metrics",
   "error-events",
   "transaction-like",
   "spans",
@@ -351,16 +350,6 @@ export const DATASET_SUPPORTED_DISPLAY_TYPES = {
     "top_n",
   ],
   "transaction-like": [
-    "area",
-    "bar",
-    "big_number",
-    "categorical_bar",
-    "line",
-    "stacked_area",
-    "table",
-    "top_n",
-  ],
-  metrics: [
     "area",
     "bar",
     "big_number",
@@ -1006,7 +995,7 @@ export type WidgetDataResult =
 /**
  * Maps widget types to API dataset parameter values.
  *
- * Widget types that don't map to a dataset (issue, metrics, etc.)
+ * Widget types that don't map to a dataset (issue, tracemetrics, etc.)
  * return null and are rendered as "unsupported".
  */
 const WIDGET_TYPE_TO_DATASET: Record<string, string> = {

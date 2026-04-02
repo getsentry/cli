@@ -53,7 +53,6 @@ describe("WIDGET_TYPES", () => {
     const expected: WidgetType[] = [
       "discover",
       "issue",
-      "metrics",
       "error-events",
       "transaction-like",
       "spans",
@@ -770,7 +769,6 @@ describe("mapWidgetTypeToDataset", () => {
 
   test("returns null for unsupported widget types", () => {
     expect(mapWidgetTypeToDataset("issue")).toBeNull();
-    expect(mapWidgetTypeToDataset("metrics")).toBeNull();
     expect(mapWidgetTypeToDataset("tracemetrics")).toBeNull();
     expect(mapWidgetTypeToDataset("preprod-app-size")).toBeNull();
   });
