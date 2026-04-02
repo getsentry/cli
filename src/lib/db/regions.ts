@@ -10,6 +10,7 @@
  * look up by `org_id = '1081365'` → get the slug).
  */
 
+import { recordCacheHit } from "../telemetry.js";
 import { getDatabase } from "./index.js";
 import { runUpsert } from "./utils.js";
 
@@ -59,6 +60,7 @@ export function getOrgRegion(orgSlug: string): string | undefined {
     .query(`SELECT region_url FROM ${TABLE} WHERE org_slug = ?`)
     .get(orgSlug) as Pick<OrgRegionRow, "region_url"> | undefined;
 
+  recordCacheHit("region", !!row);
   return row?.region_url;
 }
 

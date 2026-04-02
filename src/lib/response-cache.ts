@@ -29,7 +29,7 @@ import pLimit from "p-limit";
 
 import { getConfigDir } from "./db/index.js";
 import { getEnv } from "./env.js";
-import { withCacheSpan } from "./telemetry.js";
+import { recordCacheHit, withCacheSpan } from "./telemetry.js";
 
 // ---------------------------------------------------------------------------
 // TTL tiers — used as fallback when the server sends no cache headers
@@ -386,6 +386,7 @@ export async function getCachedResponse(
       const entry = await readCacheEntry(key);
       if (!entry) {
         span.setAttribute("cache.hit", false);
+        recordCacheHit("http", false);
         return;
       }
 
@@ -393,11 +394,13 @@ export async function getCachedResponse(
         const policy = CachePolicy.fromObject(entry.policy);
         if (!isEntryFresh(policy, entry, requestHeaders, url)) {
           span.setAttribute("cache.hit", false);
+          recordCacheHit("http", false);
           return;
         }
 
         const body = JSON.stringify(entry.body);
         span.setAttribute("cache.hit", true);
+        recordCacheHit("http", true);
         span.setAttribute("cache.item_size", body.length);
 
         const responseHeaders = buildResponseHeaders(policy, entry);
@@ -409,6 +412,7 @@ export async function getCachedResponse(
         // Corrupted or version-incompatible policy object — treat as cache miss.
         // Best-effort cleanup of the broken entry.
         span.setAttribute("cache.hit", false);
+        recordCacheHit("http", false);
         unlink(cacheFilePath(key)).catch(() => {
           // Ignored — fire-and-forget
         });

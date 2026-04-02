@@ -13,6 +13,7 @@ import type {
   DetectedDsn,
   ResolvedProjectInfo,
 } from "../dsn/types.js";
+import { recordCacheHit } from "../telemetry.js";
 import { getDatabase, maybeCleanupCaches } from "./index.js";
 import { runUpsert, touchCacheEntry } from "./utils.js";
 
@@ -141,9 +142,11 @@ export function getCachedDsn(directory: string): CachedDsnEntry | undefined {
     .get(directory) as DsnCacheRow | undefined;
 
   if (!row) {
+    recordCacheHit("dsn", false);
     return;
   }
 
+  recordCacheHit("dsn", true);
   touchCacheEntry("dsn_cache", "directory", directory);
   return rowToCachedDsnEntry(row);
 }
@@ -330,6 +333,7 @@ export async function getCachedDetection(
     .get(projectRoot) as DsnCacheRow | undefined;
 
   if (!row) {
+    recordCacheHit("dsn-detection", false);
     return;
   }
 
@@ -340,6 +344,7 @@ export async function getCachedDetection(
     row.ttl_expires_at === null
   ) {
     // Old cache entry without full detection data
+    recordCacheHit("dsn-detection", false);
     return;
   }
 
@@ -347,11 +352,13 @@ export async function getCachedDetection(
 
   // Check TTL expiration
   if (now > row.ttl_expires_at) {
+    recordCacheHit("dsn-detection", false);
     return;
   }
 
   // Check project root directory mtime
   if (!(await validateDirMtime(projectRoot, row.root_dir_mtime))) {
+    recordCacheHit("dsn-detection", false);
     return;
   }
 
@@ -361,6 +368,7 @@ export async function getCachedDetection(
     number
   >;
   if (!(await validateSourceMtimes(projectRoot, sourceMtimes))) {
+    recordCacheHit("dsn-detection", false);
     return;
   }
 
@@ -369,9 +377,11 @@ export async function getCachedDetection(
     ? (JSON.parse(row.dir_mtimes_json) as Record<string, number>)
     : {};
   if (!(await validateDirMtimes(projectRoot, dirMtimes))) {
+    recordCacheHit("dsn-detection", false);
     return;
   }
 
+  recordCacheHit("dsn-detection", true);
   // Cache is valid - update last access time
   touchCacheEntry("dsn_cache", "directory", projectRoot);
 
