@@ -13,6 +13,8 @@ export const logRoute = buildRouteMap({
     list: listCommand,
     view: viewCommand,
   },
+  defaultCommand: "view",
+  aliases: { show: "view" },
   docs: {
     brief: "View Sentry logs",
     fullDescription:

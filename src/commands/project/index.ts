@@ -11,6 +11,8 @@ export const projectRoute = buildRouteMap({
     list: listCommand,
     view: viewCommand,
   },
+  defaultCommand: "view",
+  aliases: { show: "view", remove: "delete" },
   docs: {
     brief: "Work with Sentry projects",
     fullDescription:

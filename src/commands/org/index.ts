@@ -7,6 +7,8 @@ export const orgRoute = buildRouteMap({
     list: listCommand,
     view: viewCommand,
   },
+  defaultCommand: "view",
+  aliases: { show: "view" },
   docs: {
     brief: "Work with Sentry organizations",
     fullDescription:
