@@ -2,22 +2,35 @@ name: Sentry Release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g., 0.24.0)"
+        required: true
+        type: string
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   finalize:
     name: Finalize Sentry Release
     runs-on: ubuntu-latest
-    # Skip pre-releases (nightlies, dev versions)
-    if: "!github.event.release.prerelease"
+    # Skip pre-releases (nightlies, dev versions) on automatic trigger;
+    # always run on manual dispatch.
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
     env:
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
       # Tag names are bare semver (e.g., "0.24.0", no "v" prefix),
       # matching both the npm package version and Sentry release version.
-      VERSION: ${{ github.event.release.tag_name }}
+      VERSION: ${{ github.event.release.tag_name || inputs.version }}
     steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
       - name: Install CLI
         run: npm install -g "sentry@${VERSION}"
 
@@ -33,3 +46,21 @@ jobs:
 
       - name: Create deploy
         run: sentry release deploy "sentry/${VERSION}" production
+
+      - name: File issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "Sentry release finalization failed for ${VERSION}" \
+            --body "The [Sentry Release workflow](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) failed for version \`${VERSION}\`.
+
+          Trigger: \`${{ github.event_name }}\`
+
+          Please investigate and re-run manually if needed:
+          \`\`\`
+          gh workflow run sentry-release.yml -f version=${VERSION}
+          \`\`\`" \
+            --label bug
