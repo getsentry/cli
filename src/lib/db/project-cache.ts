@@ -3,6 +3,7 @@
  */
 
 import type { CachedProject } from "../../types/index.js";
+import { recordCacheHit } from "../telemetry.js";
 import { getDatabase, maybeCleanupCaches } from "./index.js";
 import { runUpsert, touchCacheEntry } from "./utils.js";
 
@@ -44,9 +45,11 @@ function getByKey(key: string): CachedProject | undefined {
     .get(key) as ProjectCacheRow | undefined;
 
   if (!row) {
+    recordCacheHit("project", false);
     return;
   }
 
+  recordCacheHit("project", true);
   touchCacheEntry("project_cache", "cache_key", key);
   return rowToCachedProject(row);
 }

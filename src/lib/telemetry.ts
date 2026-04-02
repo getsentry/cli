@@ -621,6 +621,23 @@ export function setArgsContext(args: readonly unknown[]): void {
 }
 
 /**
+ * Record a cache hit or miss as a distribution metric (0 or 100).
+ *
+ * Emitting 0 for miss and 100 for hit allows computing hit rate as
+ * `avg(value,cache.hit_rate,distribution,none)` on the tracemetrics
+ * dashboard — Sentry doesn't support division in widgets, so this
+ * pre-computed approach gives us percentages directly.
+ *
+ * @param cacheName - Identifier for the cache (e.g., "dsn", "project", "region", "http")
+ * @param hit - Whether the cache lookup was a hit
+ */
+export function recordCacheHit(cacheName: string, hit: boolean): void {
+  Sentry.metrics.distribution("cache.hit_rate", hit ? 100 : 0, {
+    attributes: { cache_name: cacheName },
+  });
+}
+
+/**
  * Wrap an operation with a Sentry span for tracing.
  *
  * Creates a child span under the current active span to track
