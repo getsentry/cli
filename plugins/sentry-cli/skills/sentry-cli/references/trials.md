@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-trials
-version: 0.24.0
+version: 0.25.0-dev.0
 description: List and start product trials
 requires:
   bins: ["sentry"]

@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-sourcemap
-version: 0.24.0
+version: 0.25.0-dev.0
 description: Sentry CLI sourcemap commands
 requires:
   bins: ["sentry"]
