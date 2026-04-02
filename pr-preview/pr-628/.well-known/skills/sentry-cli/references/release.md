@@ -45,6 +45,7 @@ Finalize a release
 **Flags:**
 - `--released <value> - Custom release timestamp (ISO 8601). Defaults to now.`
 - `--url <value> - URL for the release`
+- `-n, --dry-run - Show what would happen without making changes`
 
 ### `sentry release delete <org/version...>`
 
@@ -64,6 +65,7 @@ Create a deploy for a release
 - `--started <value> - Deploy start time (ISO 8601)`
 - `--finished <value> - Deploy finish time (ISO 8601)`
 - `-t, --time <value> - Deploy duration in seconds (sets started = now - time, finished = now)`
+- `-n, --dry-run - Show what would happen without making changes`
 
 ### `sentry release deploys <org/version...>`
 
