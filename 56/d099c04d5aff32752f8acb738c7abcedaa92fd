@@ -1,0 +1,206 @@
+# Plan: Shared Infrastructure for Create/Delete Commands
+
+## Goal
+
+Establish shared helpers and standards for create/delete commands, paralleling
+what `list-command.ts` does for list commands.
+
+## New File: `src/lib/mutate-command.ts`
+
+Parallels `list-command.ts` in naming and structure. Contains shared constants,
+utilities, and a `buildDeleteCommand` wrapper for mutation (create/delete) commands.
+
+### Level A: Shared Flag Constants
+
+```typescript
+/** Standard --dry-run flag for create and delete commands */
+export const DRY_RUN_FLAG = {
+  kind: "boolean" as const,
+  brief: "Show what would happen without making changes",
+  default: false,
+} as const;
+
+/** Standard --yes flag for delete commands */
+export const YES_FLAG = {
+  kind: "boolean" as const,
+  brief: "Skip confirmation prompt",
+  default: false,
+} as const;
+
+/** Standard --force flag for delete commands */
+export const FORCE_FLAG = {
+  kind: "boolean" as const,
+  brief: "Force the operation without confirmation",
+  default: false,
+} as const;
+
+// Spreadable bundles (like LIST_BASE_ALIASES, FRESH_ALIASES)
+export const DESTRUCTIVE_FLAGS   = { yes: YES_FLAG, force: FORCE_FLAG, "dry-run": DRY_RUN_FLAG };
+export const DESTRUCTIVE_ALIASES = { y: "yes", f: "force", n: "dry-run" };
+export const DRY_RUN_ALIASES     = { n: "dry-run" };  // for create commands
+```
+
+### Level B: Shared Utilities
+
+```typescript
+/** Check whether --yes or --force was passed */
+export function isConfirmationBypassed(flags: {
+  yes?: boolean; force?: boolean
+}): boolean;
+
+/** Throw CliError if non-interactive and confirmation not bypassed.
+ *  Exported for commands not using buildDeleteCommand (e.g., create commands). */
+export function guardNonInteractive(
+  flags: { yes?: boolean; force?: boolean; "dry-run"?: boolean }
+): void;
+
+/** Type-out confirmation prompt. User must type the exact expected string.
+ *  Low-level: handles Symbol(clack:cancel), returns boolean.
+ *  Does NOT include non-interactive guard (wrapper handles that). */
+export function confirmByTyping(
+  expected: string,
+  promptMessage: string,
+  opts?: { logger?: ConsolaInstance }
+): Promise<boolean>;
+
+/** Block auto-detect targets for destructive operations */
+export function requireExplicitTarget(
+  parsed: ParsedOrgProject,
+  entityType: string,
+  usageHint: string
+): void;
+```
+
+### Level C: `buildDeleteCommand` wrapper
+
+Mirrors `buildListCommand` (lines 452-535 of `list-command.ts`):
+
+```typescript
+export type DeleteCommandOptions = {
+  /** Skip --force flag injection (e.g., low-severity delete) */
+  noForceFlag?: boolean;
+  /** Skip --dry-run flag injection */
+  noDryRunFlag?: boolean;
+  /** Skip the non-interactive safety guard */
+  noNonInteractiveGuard?: boolean;
+};
+
+export function buildDeleteCommand<FLAGS, ARGS, CONTEXT>(
+  builderArgs: { parameters, docs, func, output, auth },
+  options?: DeleteCommandOptions,
+): Command<CONTEXT>;
+```
+
+**What it does (matching buildListCommand's pattern):**
+
+1. **Auto-injects flags** — merges `--yes`, `--force`, `--dry-run` into existing
+   flags (skips if already defined, controlled by options)
+2. **Auto-injects aliases** — merges `-y`, `-f`, `-n` into existing aliases
+   (skips if key already taken)
+3. **Non-interactive guard pre-hook** — before running the original `func()`:
+   - If `--dry-run` is set → skip guard (dry-run is safe non-interactively)
+   - If `--yes` or `--force` is set → skip guard (user explicitly confirmed)
+   - If `!isatty(0)` → throw `CliError("Destructive operation refused in
+     non-interactive mode. Use --yes or --force to confirm.")`
+   - This is analogous to `applyFreshFlag()` in `buildListCommand`
+4. **Passes to `buildCommand()`** — the base wrapper handles `--json`, `--fields`,
+   telemetry, auth, etc.
+
+**Why a wrapper is justified (unlike the first draft):**
+- The non-interactive guard is a **safety invariant** that every delete command must
+  enforce. Centralizing it prevents forgetting.
+- It **fails fast** — blocks before target resolution/API calls, saving round-trips
+  when running without `--yes` in CI.
+- Matches the established pattern: `buildListCommand` also adds just 2-4 flags + a
+  behavioral pre-hook.
+
+## Files to Modify
+
+### 1. Create `src/lib/mutate-command.ts` (~150-180 lines)
+All Level A constants, Level B utilities, and Level C wrapper as described above.
+Full JSDoc on every export.
+
+### 2. Refactor `src/commands/project/delete.ts`
+- Use `buildDeleteCommand()` instead of `buildCommand()`
+- Remove inline `--yes`, `--force`, `--dry-run` flag definitions (auto-injected)
+- Remove inline aliases `{ y, f, n }` (auto-injected)
+- Replace local `confirmDeletion()` with imported `confirmByTyping()` +
+  `isConfirmationBypassed()`
+- Remove the `isatty(0)` check inside the local confirmation function (wrapper
+  handles it as a pre-hook now — fails fast before target resolution)
+- Replace inline auto-detect check (lines 234-242) with `requireExplicitTarget()`
+- Keep `buildPermissionError()` in-place (domain-specific)
+- Keep `buildResult()` in-place (command-specific output shape)
+- **No behavior change** — same safety guarantees, slightly earlier non-interactive
+  rejection (before API calls instead of after)
+
+### 3. Refactor `src/commands/project/create.ts`
+- Import `DRY_RUN_FLAG`, `DRY_RUN_ALIASES` from `mutate-command.ts`
+- Replace inline `"dry-run"` flag definition (line 315-319) with `DRY_RUN_FLAG`
+- Replace `{ t: "team", n: "dry-run" }` with `{ ...DRY_RUN_ALIASES, t: "team" }`
+- **No behavior change** — pure structural refactor
+
+### 4. Add safety flags to `src/commands/dashboard/widget/delete.ts`
+- Use `buildDeleteCommand()` instead of `buildCommand()`
+- Gets `--yes`, `--force`, `--dry-run` flags + aliases automatically
+- Add `--dry-run` handling in func: resolve widget, show what would be removed,
+  return early before the PUT call
+- `--yes`/`--force` are no-ops for now (no prompt to bypass), but available for
+  scripting and forward-compatibility
+- Non-interactive guard fires via wrapper (with opt-out option if we decide
+  widget delete is too low-severity)
+- Update `DeleteFlags` type, `DeleteResult` type (add optional `dryRun` field)
+- Update `formatWidgetDeleted` in `src/lib/formatters/human.ts` to handle dry-run
+
+### 5. NOT modified (and why)
+- `auth/logout.ts` — local-only credential wipe, no target, no confirmation,
+  `auth: false`. Different class of operation entirely.
+- `dashboard/create.ts` — no `--dry-run` today; adding is a feature request.
+- `dashboard/widget/add.ts` — uses `-n` for `--limit` (alias conflict with
+  `DRY_RUN_ALIASES`). Different enough to leave as-is.
+- `trial/start.ts` — special-purpose create-like command, not standard CRUD.
+
+## Tests
+
+### New: `test/lib/mutate-command.test.ts`
+- `isConfirmationBypassed`: true iff `yes` or `force` is true
+- `requireExplicitTarget`: throws `ContextError` only for `auto-detect` type,
+  passes for `explicit`/`project-search`/`org-all`
+- `guardNonInteractive`: behavior with/without `isatty` (may need mock)
+- Flag constant shape assertions (correct `kind`, `default`, `brief`)
+
+### Update: `test/commands/project/delete.test.ts`
+- Verify all existing tests still pass after refactoring
+
+### Update: `test/commands/dashboard/widget/delete.test.ts`
+- Add test for `--dry-run` showing preview without deleting
+- Add test for `--yes` flag being accepted (no-op)
+- Verify existing tests still pass with new flags
+
+### Existing: `test/isolated/project-delete-confirm.test.ts`
+- Verify still passes (confirmation flow uses same underlying behavior)
+
+## Documentation
+
+### Update AGENTS.md — "Key Patterns" section
+Add a "Create & Delete Command Standards" subsection documenting:
+- Delete commands: use `buildDeleteCommand()` from `mutate-command.ts`
+- Create commands: use `DRY_RUN_FLAG`/`DRY_RUN_ALIASES` from `mutate-command.ts`
+- Confirmation: use `confirmByTyping()` for type-out confirmation in func body
+- Safety: `buildDeleteCommand` auto-enforces non-interactive guard
+
+### Regenerate SKILL.md
+Run `bun run generate:skill` after changes.
+
+## Verification
+
+```bash
+bun run typecheck
+bun run lint
+bun test test/lib/mutate-command.test.ts
+bun test test/commands/project/delete
+bun test test/commands/project/create
+bun test test/commands/dashboard/widget
+bun test test/isolated/project-delete
+bun run check:skill  # after generate:skill
+```
