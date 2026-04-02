@@ -18,23 +18,6 @@ export type CommandSuggestion = {
 };
 
 /**
- * Route groups that have `defaultCommand: "view"` set.
- *
- * Used to detect the no-args case (`sentry issue` with no subcommand)
- * so we can show a usage hint instead of a confusing parse error.
- */
-export const ROUTES_WITH_DEFAULT_VIEW: ReadonlySet<string> = new Set([
-  "issue",
-  "event",
-  "org",
-  "project",
-  "dashboard",
-  "trace",
-  "span",
-  "log",
-]);
-
-/**
  * Synonym map: `routeContext/unknownToken` → suggestion.
  *
  * Route context is the last successfully matched route segment before

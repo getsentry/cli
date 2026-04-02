@@ -7,10 +7,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import {
-  getCommandSuggestion,
-  ROUTES_WITH_DEFAULT_VIEW,
-} from "../../src/lib/command-suggestions.js";
+import { routes } from "../../src/app.js";
+import { getCommandSuggestion } from "../../src/lib/command-suggestions.js";
+import { isRouteMap, type RouteMap } from "../../src/lib/introspect.js";
 
 describe("getCommandSuggestion", () => {
   // --- Pattern 1: issue events (most common) ---
@@ -119,8 +118,20 @@ describe("getCommandSuggestion", () => {
   });
 });
 
-describe("ROUTES_WITH_DEFAULT_VIEW", () => {
-  test("contains all 8 route groups with defaultCommand: view", () => {
+describe("routes with defaultCommand", () => {
+  /** Derive the set the same way app.ts does — via introspection */
+  const routesWithDefault = new Set(
+    routes
+      .getAllEntries()
+      .filter(
+        (e) =>
+          isRouteMap(e.target as unknown) &&
+          (e.target as unknown as RouteMap).getDefaultCommand?.()
+      )
+      .map((e) => e.name.original)
+  );
+
+  test("all route groups with a view subcommand have defaultCommand set", () => {
     const expected = [
       "issue",
       "event",
@@ -132,15 +143,15 @@ describe("ROUTES_WITH_DEFAULT_VIEW", () => {
       "log",
     ];
     for (const route of expected) {
-      expect(ROUTES_WITH_DEFAULT_VIEW.has(route)).toBe(true);
+      expect(routesWithDefault.has(route)).toBe(true);
     }
   });
 
-  test("does not contain route groups without defaultCommand", () => {
-    expect(ROUTES_WITH_DEFAULT_VIEW.has("auth")).toBe(false);
-    expect(ROUTES_WITH_DEFAULT_VIEW.has("cli")).toBe(false);
-    expect(ROUTES_WITH_DEFAULT_VIEW.has("sourcemap")).toBe(false);
-    expect(ROUTES_WITH_DEFAULT_VIEW.has("repo")).toBe(false);
-    expect(ROUTES_WITH_DEFAULT_VIEW.has("team")).toBe(false);
+  test("route groups without view do not have defaultCommand", () => {
+    expect(routesWithDefault.has("auth")).toBe(false);
+    expect(routesWithDefault.has("cli")).toBe(false);
+    expect(routesWithDefault.has("sourcemap")).toBe(false);
+    expect(routesWithDefault.has("repo")).toBe(false);
+    expect(routesWithDefault.has("team")).toBe(false);
   });
 });

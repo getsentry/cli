@@ -35,6 +35,8 @@ export type RouteMap = {
   brief: string;
   fullDescription?: string;
   getAllEntries: () => RouteMapEntry[];
+  /** Returns the default command if one is configured, undefined otherwise */
+  getDefaultCommand?: () => unknown;
 };
 
 /** A leaf command with parameters */

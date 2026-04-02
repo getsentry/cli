@@ -40,7 +40,6 @@ import { listCommand as trialListCommand } from "./commands/trial/list.js";
 import {
   getCommandSuggestion,
   getSynonymSuggestionFromArgv,
-  ROUTES_WITH_DEFAULT_VIEW,
 } from "./lib/command-suggestions.js";
 import { CLI_VERSION } from "./lib/constants.js";
 import {
@@ -51,6 +50,7 @@ import {
   stringifyUnknown,
 } from "./lib/errors.js";
 import { error as errorColor, warning } from "./lib/formatters/colors.js";
+import { isRouteMap, type RouteMap } from "./lib/introspect.js";
 
 /**
  * Plural alias → singular route name mapping.
@@ -128,6 +128,24 @@ export const routes = buildRouteMap({
 });
 
 /**
+ * Route group names that have `defaultCommand` set.
+ *
+ * Derived from the route map at module load time — no manual list to maintain.
+ * Used to detect the no-args case (`sentry issue` with no subcommand)
+ * so we can show a usage hint instead of a confusing parse error.
+ */
+const routesWithDefaultCommand: ReadonlySet<string> = new Set(
+  routes
+    .getAllEntries()
+    .filter(
+      (e) =>
+        isRouteMap(e.target as unknown) &&
+        (e.target as unknown as RouteMap).getDefaultCommand?.()
+    )
+    .map((e) => e.name.original)
+);
+
+/**
  * Detect when the user typed a bare route group with no subcommand (e.g., `sentry issue`).
  *
  * With `defaultCommand: "view"` on route groups, Stricli routes to the view
@@ -141,7 +159,7 @@ function detectBareRouteGroup(ansiColor: boolean): string | undefined {
   if (
     nonFlags.length <= 1 &&
     nonFlags[0] &&
-    ROUTES_WITH_DEFAULT_VIEW.has(nonFlags[0])
+    routesWithDefaultCommand.has(nonFlags[0])
   ) {
     const route = nonFlags[0];
     const msg = `Usage: sentry ${route} <command> [args]\nRun "sentry ${route} --help" to see available commands`;
