@@ -146,7 +146,9 @@ function validateQueryConstraints(
     validateGroupByRequiresLimit(columns, limit ?? undefined);
   }
 
-  if (flags.sort || flags.query) {
+  // Only validate sort when user explicitly passes --sort, not when merely
+  // changing --query (which may leave the existing auto-defaulted sort stale)
+  if (flags.sort) {
     const orderby =
       mergedQueries?.[0]?.orderby ?? existing.queries?.[0]?.orderby;
     const aggregates =
