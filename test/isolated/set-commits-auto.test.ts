@@ -127,7 +127,7 @@ describe("setCommitsAuto", () => {
         })
     );
 
-    expect(setCommitsAuto("test-org", "1.0.0", "/tmp")).rejects.toThrow(
+    await expect(setCommitsAuto("test-org", "1.0.0", "/tmp")).rejects.toThrow(
       /No repository integrations/
     );
   });

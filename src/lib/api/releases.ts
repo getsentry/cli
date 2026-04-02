@@ -16,7 +16,7 @@ import {
   updateAnOrganization_sRelease,
 } from "@sentry/api";
 
-import { ApiError } from "../errors.js";
+import { ApiError, ValidationError } from "../errors.js";
 import { getHeadCommit, getRepositoryName } from "../git.js";
 import { resolveOrgRegion } from "../region.js";
 import {
@@ -285,6 +285,7 @@ export async function createReleaseDeploy(
  * @param cwd - Working directory to discover git remote and HEAD from
  * @returns Updated release detail with commit count
  * @throws {ApiError} When the org has no repository integrations (400)
+ * @throws {ValidationError} When local git remote is missing or doesn't match any Sentry repo
  */
 export async function setCommitsAuto(
   orgSlug: string,
@@ -293,19 +294,20 @@ export async function setCommitsAuto(
 ): Promise<OrgReleaseResponse> {
   const repos = await listRepositories(orgSlug);
   if (repos.length === 0) {
+    const endpoint = `organizations/${orgSlug}/releases/${encodeURIComponent(version)}/`;
     throw new ApiError(
       "No repository integrations configured for this organization.",
       400,
-      `organizations/${orgSlug}/releases/${encodeURIComponent(version)}/`
+      undefined,
+      endpoint
     );
   }
 
   const localRepo = getRepositoryName(cwd);
   if (!localRepo) {
-    throw new ApiError(
+    throw new ValidationError(
       "Could not determine repository name from local git remote.",
-      400,
-      `organizations/${orgSlug}/releases/${encodeURIComponent(version)}/`
+      "repository"
     );
   }
 
@@ -314,11 +316,10 @@ export async function setCommitsAuto(
     (r) => r.name.toLowerCase() === localRepo.toLowerCase()
   );
   if (!matchedRepo) {
-    throw new ApiError(
+    throw new ValidationError(
       `No Sentry repository matching '${localRepo}'. ` +
         `Available: ${repos.map((r) => r.name).join(", ")}`,
-      400,
-      `organizations/${orgSlug}/releases/${encodeURIComponent(version)}/`
+      "repository"
     );
   }
 
