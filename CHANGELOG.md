@@ -1,6 +1,20 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.24.1
+
+### Bug Fixes 🐛
+
+- (ci) Fix set-commits --auto and add checkout/URL to sentry-release workflow by @BYK in [#649](https://github.com/getsentry/cli/pull/649)
+- (upgrade) Add blank lines around changelog in upgrade output by @BYK in [#642](https://github.com/getsentry/cli/pull/642)
+
+### Internal Changes 🔧
+
+- Restore sentry/ org prefix in sentry-release workflow by @BYK in [#648](https://github.com/getsentry/cli/pull/648)
+- Use production environment for sentry-release auth token by @BYK in [#645](https://github.com/getsentry/cli/pull/645)
+- Fix sentry-release workflow Node.js version and add manual trigger by @BYK in [#643](https://github.com/getsentry/cli/pull/643)
+- Regenerate skill files and command docs by @github-actions[bot] in [59c820e4](https://github.com/getsentry/cli/commit/59c820e430d04f4816b35cc463f4d08102512fa4)
+
 ## 0.24.0
 
 ### New Features ✨
