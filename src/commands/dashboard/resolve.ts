@@ -381,8 +381,30 @@ const KNOWN_SPAN_AGGREGATE_FIELDS = new Set([
 ]);
 
 /**
- * Warn when an aggregate argument looks like a span attribute rather than
- * an aggregatable field. No-arg functions (count(), epm()) are fine.
+ * Aggregate functions that require numeric measurement fields.
+ * Functions like count_unique, any, count accept non-numeric columns
+ * (e.g., transaction, span.op) and should not trigger the warning.
+ */
+const NUMERIC_AGGREGATE_FUNCTIONS = new Set([
+  "avg",
+  "sum",
+  "min",
+  "max",
+  "p50",
+  "p75",
+  "p90",
+  "p95",
+  "p99",
+  "p100",
+  "percentile",
+]);
+
+/**
+ * Warn when a numeric aggregate function (avg, sum, p50, etc.) is applied
+ * to a field that isn't a known aggregatable span measurement. Functions
+ * like count_unique(transaction) or any(span.op) accept non-numeric
+ * columns and are not checked.
+ *
  * Only checks for the spans dataset.
  */
 function warnUnknownAggregateFields(
@@ -397,16 +419,21 @@ function warnUnknownAggregateFields(
     if (parenIdx < 0) {
       continue;
     }
+    const fn = agg.slice(0, parenIdx);
+    // Only check numeric aggregate functions — count_unique, any, etc. accept any column
+    if (!NUMERIC_AGGREGATE_FUNCTIONS.has(fn)) {
+      continue;
+    }
     const inner = agg.slice(parenIdx + 1, -1);
-    // No-arg functions like count(), epm() have empty inner — skip
     if (!inner) {
       continue;
     }
     if (!KNOWN_SPAN_AGGREGATE_FIELDS.has(inner)) {
       log.warn(
         `Aggregate field "${inner}" in "${agg}" is not a known aggregatable span field. ` +
-          "Span attributes (custom tags) cannot be aggregated — use them in --where or --group-by instead. " +
-          `Known fields: ${[...KNOWN_SPAN_AGGREGATE_FIELDS].join(", ")}`
+          "Span attributes (custom tags) cannot be used with numeric aggregates — " +
+          "use them in --where or --group-by instead. " +
+          `Known numeric fields: ${[...KNOWN_SPAN_AGGREGATE_FIELDS].join(", ")}`
       );
     }
   }
