@@ -1,7 +1,12 @@
 /**
  * Node.js polyfills for Bun APIs. Injected at bundle time via esbuild.
  */
-import { execSync, spawn as nodeSpawn } from "node:child_process";
+import {
+  execSync,
+  spawn as nodeSpawn,
+  spawnSync as nodeSpawnSync,
+} from "node:child_process";
+import { statSync } from "node:fs";
 import { access, readFile, writeFile } from "node:fs/promises";
 // node:sqlite is imported lazily inside NodeDatabasePolyfill to avoid
 // crashing on Node.js versions without node:sqlite support when the
@@ -98,6 +103,22 @@ const bunSqlitePolyfill = { Database: NodeDatabasePolyfill };
 const BunPolyfill = {
   file(path: string) {
     return {
+      /** File size in bytes (synchronous, like Bun.file().size). Returns 0 for non-existent files. */
+      get size(): number {
+        try {
+          return statSync(path).size;
+        } catch {
+          return 0;
+        }
+      },
+      /** Last-modified time in ms since epoch (like Bun.file().lastModified). Returns 0 for non-existent files. */
+      get lastModified(): number {
+        try {
+          return statSync(path).mtimeMs;
+        } catch {
+          return 0;
+        }
+      },
       async exists(): Promise<boolean> {
         try {
           await access(path);
@@ -132,18 +153,53 @@ const BunPolyfill = {
     }
   },
 
-  which(command: string): string | null {
+  which(command: string, opts?: { PATH?: string }): string | null {
     try {
       const isWindows = process.platform === "win32";
       const cmd = isWindows ? `where ${command}` : `which ${command}`;
+      // If a custom PATH is provided, override it in the subprocess env.
+      // Use !== undefined (not truthy) so empty-string PATH is respected.
+      const env =
+        opts?.PATH !== undefined
+          ? { ...process.env, PATH: opts.PATH }
+          : undefined;
       return (
-        execSync(cmd, { encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] })
+        execSync(cmd, {
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "ignore"],
+          env,
+        })
           .trim()
           .split("\n")[0] || null
       );
     } catch {
       return null;
     }
+  },
+
+  /**
+   * Synchronously spawn a subprocess. Matches Bun.spawnSync() used by
+   * git.ts for pre-flight checks in `sentry init`.
+   */
+  spawnSync(
+    cmd: string[],
+    opts?: {
+      stdout?: "pipe" | "ignore" | "inherit";
+      stderr?: "pipe" | "ignore" | "inherit";
+      cwd?: string;
+    }
+  ) {
+    const [command, ...args] = cmd;
+    const result = nodeSpawnSync(command, args, {
+      stdio: ["ignore", opts?.stdout ?? "ignore", opts?.stderr ?? "ignore"],
+      cwd: opts?.cwd,
+    });
+    return {
+      success: result.status === 0,
+      exitCode: result.status ?? 1,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    };
   },
 
   spawn(
