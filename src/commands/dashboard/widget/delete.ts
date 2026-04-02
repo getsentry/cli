@@ -4,9 +4,10 @@
  * Remove a widget from an existing dashboard.
  *
  * Uses `buildDeleteCommand` — auto-injects `--yes`/`--force`/`--dry-run`
- * flags and enforces the non-interactive guard before `func()` runs.
- * `--yes`/`--force` are no-ops for now (no confirmation prompt) but
- * available for scripting and forward-compatibility.
+ * flags. Non-interactive guard is disabled (`noNonInteractiveGuard`) because
+ * widget deletion is reversible (re-add the widget). `--yes`/`--force` are
+ * accepted but have no effect today (no confirmation prompt); `--dry-run`
+ * shows which widget would be removed without modifying the dashboard.
  */
 
 import type { SentryContext } from "../../../context.js";
@@ -47,128 +48,131 @@ type DeleteResult = {
   dryRun?: boolean;
 };
 
-export const deleteCommand = buildDeleteCommand({
-  docs: {
-    brief: "Delete a widget from a dashboard",
-    fullDescription:
-      "Remove a widget from an existing Sentry dashboard.\n\n" +
-      "The dashboard can be specified by numeric ID or title.\n" +
-      "Identify the widget by --index (0-based) or --title.\n\n" +
-      "Examples:\n" +
-      "  sentry dashboard widget delete 12345 --index 0\n" +
-      "  sentry dashboard widget delete 'My Dashboard' --title 'Error Rate'\n" +
-      "  sentry dashboard widget delete 12345 --index 0 --dry-run",
-  },
-  output: {
-    human: formatWidgetDeleted,
-    jsonTransform: (result: DeleteResult) => {
-      if (result.dryRun) {
+export const deleteCommand = buildDeleteCommand(
+  {
+    docs: {
+      brief: "Delete a widget from a dashboard",
+      fullDescription:
+        "Remove a widget from an existing Sentry dashboard.\n\n" +
+        "The dashboard can be specified by numeric ID or title.\n" +
+        "Identify the widget by --index (0-based) or --title.\n\n" +
+        "Examples:\n" +
+        "  sentry dashboard widget delete 12345 --index 0\n" +
+        "  sentry dashboard widget delete 'My Dashboard' --title 'Error Rate'\n" +
+        "  sentry dashboard widget delete 12345 --index 0 --dry-run",
+    },
+    output: {
+      human: formatWidgetDeleted,
+      jsonTransform: (result: DeleteResult) => {
+        if (result.dryRun) {
+          return {
+            dryRun: true,
+            widgetTitle: result.widgetTitle,
+            widgetCount: result.dashboard.widgets?.length ?? 0,
+            url: result.url,
+          };
+        }
         return {
-          dryRun: true,
+          deleted: true,
           widgetTitle: result.widgetTitle,
           widgetCount: result.dashboard.widgets?.length ?? 0,
           url: result.url,
         };
+      },
+    },
+    parameters: {
+      positional: {
+        kind: "array",
+        parameter: {
+          placeholder: "org/project/dashboard",
+          brief: "[<org/project>] <dashboard-id-or-title>",
+          parse: String,
+        },
+      },
+      flags: {
+        index: {
+          kind: "parsed",
+          parse: numberParser,
+          brief: "Widget index (0-based)",
+          optional: true,
+        },
+        title: {
+          kind: "parsed",
+          parse: String,
+          brief: "Widget title to match",
+          optional: true,
+        },
+      },
+      aliases: { i: "index", t: "title" },
+    },
+    async *func(this: SentryContext, flags: DeleteFlags, ...args: string[]) {
+      const { cwd } = this;
+
+      if (flags.index === undefined && !flags.title) {
+        throw new ValidationError(
+          "Specify --index or --title to identify the widget to delete.",
+          "index"
+        );
       }
-      return {
-        deleted: true,
-        widgetTitle: result.widgetTitle,
-        widgetCount: result.dashboard.widgets?.length ?? 0,
-        url: result.url,
-      };
-    },
-  },
-  parameters: {
-    positional: {
-      kind: "array",
-      parameter: {
-        placeholder: "org/project/dashboard",
-        brief: "[<org/project>] <dashboard-id-or-title>",
-        parse: String,
-      },
-    },
-    flags: {
-      index: {
-        kind: "parsed",
-        parse: numberParser,
-        brief: "Widget index (0-based)",
-        optional: true,
-      },
-      title: {
-        kind: "parsed",
-        parse: String,
-        brief: "Widget title to match",
-        optional: true,
-      },
-    },
-    aliases: { i: "index", t: "title" },
-  },
-  async *func(this: SentryContext, flags: DeleteFlags, ...args: string[]) {
-    const { cwd } = this;
 
-    if (flags.index === undefined && !flags.title) {
-      throw new ValidationError(
-        "Specify --index or --title to identify the widget to delete.",
-        "index"
+      const { dashboardRef, targetArg } = parseDashboardPositionalArgs(args);
+      const parsed = parseOrgProjectArg(targetArg);
+      const orgSlug = await resolveOrgFromTarget(
+        parsed,
+        cwd,
+        "sentry dashboard widget delete <org>/ <id> (--index <n> | --title <name>)"
       );
-    }
+      const dashboardId = await resolveDashboardId(orgSlug, dashboardRef);
 
-    const { dashboardRef, targetArg } = parseDashboardPositionalArgs(args);
-    const parsed = parseOrgProjectArg(targetArg);
-    const orgSlug = await resolveOrgFromTarget(
-      parsed,
-      cwd,
-      "sentry dashboard widget delete <org>/ <id> (--index <n> | --title <name>)"
-    );
-    const dashboardId = await resolveDashboardId(orgSlug, dashboardRef);
+      // GET current dashboard → find widget
+      const current = await getDashboard(orgSlug, dashboardId).catch(
+        (error: unknown) =>
+          enrichDashboardError(error, {
+            orgSlug,
+            dashboardId,
+            operation: "view",
+          })
+      );
+      const widgets = current.widgets ?? [];
 
-    // GET current dashboard → find widget
-    const current = await getDashboard(orgSlug, dashboardId).catch(
-      (error: unknown) =>
+      const widgetIndex = resolveWidgetIndex(widgets, flags.index, flags.title);
+      const widgetTitle = widgets[widgetIndex]?.title;
+      const url = buildDashboardUrl(orgSlug, dashboardId);
+
+      // Dry-run mode: show what would be removed without removing it
+      if (flags["dry-run"]) {
+        yield new CommandOutput({
+          dashboard: current,
+          widgetTitle,
+          url,
+          dryRun: true,
+        } as DeleteResult);
+        return { hint: `Dashboard: ${url}` };
+      }
+
+      // Splice the widget and PUT the updated dashboard
+      const updateBody = prepareDashboardForUpdate(current);
+      updateBody.widgets.splice(widgetIndex, 1);
+
+      const updated = await updateDashboard(
+        orgSlug,
+        dashboardId,
+        updateBody
+      ).catch((error: unknown) =>
         enrichDashboardError(error, {
           orgSlug,
           dashboardId,
-          operation: "view",
+          operation: "update",
         })
-    );
-    const widgets = current.widgets ?? [];
+      );
 
-    const widgetIndex = resolveWidgetIndex(widgets, flags.index, flags.title);
-    const widgetTitle = widgets[widgetIndex]?.title;
-    const url = buildDashboardUrl(orgSlug, dashboardId);
-
-    // Dry-run mode: show what would be removed without removing it
-    if (flags["dry-run"]) {
       yield new CommandOutput({
-        dashboard: current,
+        dashboard: updated,
         widgetTitle,
         url,
-        dryRun: true,
       } as DeleteResult);
       return { hint: `Dashboard: ${url}` };
-    }
-
-    // Splice the widget and PUT the updated dashboard
-    const updateBody = prepareDashboardForUpdate(current);
-    updateBody.widgets.splice(widgetIndex, 1);
-
-    const updated = await updateDashboard(
-      orgSlug,
-      dashboardId,
-      updateBody
-    ).catch((error: unknown) =>
-      enrichDashboardError(error, {
-        orgSlug,
-        dashboardId,
-        operation: "update",
-      })
-    );
-
-    yield new CommandOutput({
-      dashboard: updated,
-      widgetTitle,
-      url,
-    } as DeleteResult);
-    return { hint: `Dashboard: ${url}` };
+    },
   },
-});
+  { noNonInteractiveGuard: true }
+);
