@@ -18,6 +18,7 @@ import {
   ValidationError,
 } from "../../lib/errors.js";
 import { fuzzyMatch } from "../../lib/fuzzy.js";
+import { logger } from "../../lib/logger.js";
 import { resolveEffectiveOrg } from "../../lib/region.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
@@ -316,6 +317,129 @@ export function resolveWidgetIndex(
 }
 
 /**
+ * Validate that a sort expression references an aggregate present in the query.
+ * The Sentry API returns 400 when the sort field isn't in the widget's aggregates.
+ *
+ * @param orderby - Parsed sort expression (e.g., "-count()", "p90(span.duration)")
+ * @param aggregates - Parsed aggregate expressions from the query
+ */
+export function validateSortReferencesAggregate(
+  orderby: string,
+  aggregates: string[]
+): void {
+  // Strip leading "-" for descending sorts
+  const sortAgg = orderby.startsWith("-") ? orderby.slice(1) : orderby;
+  if (!aggregates.includes(sortAgg)) {
+    throw new ValidationError(
+      `Sort expression "${orderby}" references "${sortAgg}" which is not in the query.\n\n` +
+        "The --sort field must be one of the aggregate expressions in --query.\n" +
+        `Current aggregates: ${aggregates.join(", ")}\n\n` +
+        `Either add "${sortAgg}" to --query or sort by an existing aggregate.`,
+      "sort"
+    );
+  }
+}
+
+/**
+ * Validate that grouped widgets (those with columns/group-by) include a limit.
+ * The Sentry API rejects grouped widgets without a limit.
+ *
+ * @param columns - Group-by columns
+ * @param limit - Widget limit (undefined if not set)
+ */
+export function validateGroupByRequiresLimit(
+  columns: string[],
+  limit: number | undefined
+): void {
+  if (columns.length > 0 && limit === undefined) {
+    throw new ValidationError(
+      "Widgets with --group-by require --limit. " +
+        "Add --limit <n> to specify the maximum number of groups to display.",
+      "limit"
+    );
+  }
+}
+
+const log = logger.withTag("dashboard");
+
+/**
+ * Known aggregatable fields for the spans dataset.
+ *
+ * Span attributes (e.g., dsn.files_collected, resolve.method) are key-value
+ * metadata and cannot be used as aggregate fields — only in --where or --group-by.
+ * This set covers built-in numeric fields that support aggregation.
+ * Measurements (http.*, cache.*, etc.) are project-specific and may not be
+ * exhaustive — we warn instead of error for unknown fields.
+ */
+const KNOWN_SPAN_AGGREGATE_FIELDS = new Set([
+  "span.duration",
+  "span.self_time",
+  "http.response_content_length",
+  "http.decoded_response_content_length",
+  "http.response_transfer_size",
+  "cache.item_size",
+]);
+
+/**
+ * Aggregate functions that require numeric measurement fields.
+ * Functions like count_unique, any, count accept non-numeric columns
+ * (e.g., transaction, span.op) and should not trigger the warning.
+ */
+const NUMERIC_AGGREGATE_FUNCTIONS = new Set([
+  "avg",
+  "sum",
+  "min",
+  "max",
+  "p50",
+  "p75",
+  "p90",
+  "p95",
+  "p99",
+  "p100",
+  "percentile",
+]);
+
+/**
+ * Warn when a numeric aggregate function (avg, sum, p50, etc.) is applied
+ * to a field that isn't a known aggregatable span measurement. Functions
+ * like count_unique(transaction) or any(span.op) accept non-numeric
+ * columns and are not checked.
+ *
+ * Only checks for the spans dataset.
+ */
+function warnUnknownAggregateFields(
+  aggregates: string[],
+  dataset: string | undefined
+): void {
+  if (dataset && dataset !== "spans") {
+    return;
+  }
+  for (const agg of aggregates) {
+    const parenIdx = agg.indexOf("(");
+    if (parenIdx < 0) {
+      continue;
+    }
+    const fn = agg.slice(0, parenIdx);
+    // Only check numeric aggregate functions — count_unique, any, etc. accept any column
+    if (!NUMERIC_AGGREGATE_FUNCTIONS.has(fn)) {
+      continue;
+    }
+    const inner = agg.slice(parenIdx + 1, -1);
+    if (!inner) {
+      continue;
+    }
+    if (!KNOWN_SPAN_AGGREGATE_FIELDS.has(inner)) {
+      log.warn(
+        `Aggregate field "${inner}" in "${agg}" is not a known aggregatable span field. ` +
+          "Span attributes (custom tags) cannot be used with numeric aggregates — " +
+          "use them in --where or --group-by instead. " +
+          `Known numeric fields: ${[...KNOWN_SPAN_AGGREGATE_FIELDS].join(", ")}`
+      );
+    }
+  }
+}
+
+/**
  * Build a widget from user-provided flag values.
  *
  * Shared between `dashboard widget add` and `dashboard widget edit`.
@@ -336,6 +460,7 @@ export function buildWidgetFromFlags(opts: {
 }): DashboardWidget {
   const aggregates = (opts.query ?? ["count"]).map(parseAggregate);
   validateAggregateNames(aggregates, opts.dataset);
+  warnUnknownAggregateFields(aggregates, opts.dataset);
 
   // Issue table widgets need at least one column or the Sentry UI shows "Columns: None".
   // Default to ["issue"] for table display only — timeseries (line/area/bar) don't use columns.
@@ -348,6 +473,15 @@ export function buildWidgetFromFlags(opts: {
   let orderby = opts.sort ? parseSortExpression(opts.sort) : undefined;
   if (columns.length > 0 && !orderby && aggregates.length > 0) {
     orderby = `-${aggregates[0]}`;
+  }
+
+  // Only validate when user explicitly passes --group-by, not for auto-defaulted columns
+  // (e.g., issue dataset auto-defaults columns to ["issue"] for table display)
+  if (opts.groupBy) {
+    validateGroupByRequiresLimit(columns, opts.limit);
+  }
+  if (orderby) {
+    validateSortReferencesAggregate(orderby, aggregates);
   }
 
   const raw = {

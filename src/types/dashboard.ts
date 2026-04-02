@@ -26,7 +26,6 @@ import { logger } from "../lib/logger.js";
 export const WIDGET_TYPES = [
   "discover",
   "issue",
-  "metrics",
   "error-events",
   "transaction-like",
   "spans",
@@ -360,16 +359,6 @@ export const DATASET_SUPPORTED_DISPLAY_TYPES = {
     "table",
     "top_n",
   ],
-  metrics: [
-    "area",
-    "bar",
-    "big_number",
-    "categorical_bar",
-    "line",
-    "stacked_area",
-    "table",
-    "top_n",
-  ],
   logs: [
     "area",
     "bar",
@@ -479,8 +468,27 @@ function extractFunctionName(aggregate: string): string {
 }
 
 /**
+ * Check whether a parsed aggregate uses the tracemetrics comma-separated format.
+ * Format: `aggregation(value,metric_name,metric_type,unit)`
+ * Example: `p50(value,completion.duration_ms,distribution,none)`
+ */
+function isTracemetricsAggregate(aggregate: string): boolean {
+  const parenIdx = aggregate.indexOf("(");
+  if (parenIdx < 0) {
+    return false;
+  }
+  const inner = aggregate.slice(parenIdx + 1, -1);
+  return inner.startsWith("value,") && inner.split(",").length === 4;
+}
+
+/**
  * Validate that all aggregate function names in a list are known.
  * Throws a ValidationError listing valid functions if any are invalid.
+ *
+ * For the `tracemetrics` dataset, aggregates must use the comma-separated
+ * format: `aggregation(value,metric_name,metric_type,unit)`. Standard
+ * span-style aggregates like `count()` or `p50(span.duration)` are
+ * invalid for tracemetrics.
  *
  * @param aggregates - Parsed aggregate strings (e.g. ["count()", "p95(span.duration)"])
  * @param dataset - Widget dataset, determines which function list to validate against
@@ -489,6 +497,27 @@ export function validateAggregateNames(
   aggregates: string[],
   dataset?: string
 ): void {
+  // tracemetrics uses a different aggregate format — validate structure, not function names
+  if (dataset === "tracemetrics") {
+    for (const agg of aggregates) {
+      if (!isTracemetricsAggregate(agg)) {
+        throw new ValidationError(
+          `Invalid tracemetrics aggregate "${agg}".\n\n` +
+            "tracemetrics queries must use the format: aggregation(value,metric_name,metric_type,unit)\n" +
+            "Example: p50(value,completion.duration_ms,distribution,none)\n\n" +
+            "Parameters:\n" +
+            "  - aggregation: avg, sum, count, p50, p75, p90, p95, p99, min, max\n" +
+            `  - value: literal string "value"\n` +
+            "  - metric_name: the name passed to Sentry.metrics.distribution/gauge/count\n" +
+            "  - metric_type: distribution, gauge, counter, set\n" +
+            "  - unit: none, byte, second, millisecond, etc. (must match SDK emission)",
+          "query"
+        );
+      }
+    }
+    return;
+  }
+
   const validFunctions: readonly string[] =
     dataset === "discover" || dataset === "error-events"
       ? DISCOVER_AGGREGATE_FUNCTIONS
@@ -966,7 +995,7 @@ export type WidgetDataResult =
 /**
  * Maps widget types to API dataset parameter values.
  *
- * Widget types that don't map to a dataset (issue, metrics, etc.)
+ * Widget types that don't map to a dataset (issue, tracemetrics, etc.)
  * return null and are rendered as "unsupported".
  */
 const WIDGET_TYPE_TO_DATASET: Record<string, string> = {
