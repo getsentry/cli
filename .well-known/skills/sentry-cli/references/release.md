@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-release
-version: 0.24.0
+version: 0.24.1
 description: Sentry CLI release commands
 requires:
   bins: ["sentry"]
@@ -76,7 +76,7 @@ List deploys for a release
 Set commits for a release
 
 **Flags:**
-- `--auto - Use repository integration to auto-discover commits`
+- `--auto - Auto-discover commits via repository integration (needs local git checkout)`
 - `--local - Read commits from local git history`
 - `--clear - Clear all commits from the release`
 - `--commit <value> - Explicit commit as REPO@SHA or REPO@PREV..SHA (comma-separated)`
@@ -120,6 +120,12 @@ sentry release create $(sentry release propose-version)
 # Output as JSON
 sentry release list --json
 sentry release view 1.0.0 --json
+
+# CI/CD: full release workflow with org prefix
+sentry release create my-org/1.0.0 --project my-project --url "https://github.com/org/repo/releases/tag/1.0.0"
+sentry release set-commits my-org/1.0.0 --auto
+sentry release finalize my-org/1.0.0
+sentry release deploy my-org/1.0.0 production
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-dashboards
-version: 0.24.0
+version: 0.24.1
 description: List, view, and create Sentry dashboards
 requires:
   bins: ["sentry"]

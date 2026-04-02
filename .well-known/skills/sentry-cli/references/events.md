@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-events
-version: 0.24.0
+version: 0.24.1
 description: View individual error events
 requires:
   bins: ["sentry"]

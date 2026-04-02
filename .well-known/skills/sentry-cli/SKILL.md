@@ -1,6 +1,6 @@
 ---
 name: sentry-cli
-version: 0.24.0
+version: 0.24.1
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 requires:
   bins: ["sentry"]
@@ -193,6 +193,38 @@ sentry span list my-org/my-project/abc123def456...
 
 When querying the Events API (directly or via `sentry api`), valid dataset values are: `spans`, `transactions`, `logs`, `errors`, `discover`.
 
+### Release Workflow
+
+The `sentry release` command group manages Sentry releases for tracking deploys and associating commits with errors. A typical CI workflow:
+
+```bash
+# Create a release (version must match Sentry.init() release value)
+sentry release create my-org/1.0.0 --project my-project
+
+# Associate commits via repository integration (requires git checkout)
+sentry release set-commits my-org/1.0.0 --auto
+
+# Mark the release as finalized
+sentry release finalize my-org/1.0.0
+
+# Record a deploy
+sentry release deploy my-org/1.0.0 production
+```
+
+**Key details:**
+
+- The `org/version` positional is `<org-slug>/<version>`, NOT a version prefix. `sentry release create sentry/1.0.0` means org=`sentry`, version=`1.0.0`. This is how org is specified — not via `SENTRY_ORG`.
+- The release **version** (e.g., `1.0.0`) must match the `release` value in your `Sentry.init()` call. If your SDK uses bare semver, the release must be bare semver too.
+- `--auto` requires **both** a Sentry repository integration (GitHub/GitLab/Bitbucket) **and** a local git checkout. It lists repos from the API and matches against your local `origin` remote URL, then sends the HEAD commit SHA. Without a checkout, use `--local` instead.
+- When neither `--auto` nor `--local` is specified, the CLI tries `--auto` first and falls back to `--local` on failure.
+
+#### CI/CD Setup Notes
+
+- The `sentry` npm package requires **Node.js >= 22**. CI runners like `ubuntu-latest` ship Node.js 20 — add `actions/setup-node@v6` with `node-version: 22`.
+- If `SENTRY_AUTH_TOKEN` is scoped to a GitHub environment (e.g., `production`), set `environment: production` on the job.
+- A full git checkout (`fetch-depth: 0`) is needed for `--auto` to discover the remote URL and HEAD.
+- `set-commits --auto` has `continue-on-error` in most workflows because it requires a working repository integration. If the integration isn't configured, the step fails but the rest of the release workflow succeeds.
+
 ### Common Mistakes
 
 - **Wrong issue ID format**: Use `PROJECT-123` (short ID), not the numeric ID `123456789`. The short ID includes the project prefix.
@@ -202,6 +234,8 @@ When querying the Events API (directly or via `sentry api`), valid dataset value
 - **Confusing `--query` syntax**: The `--query` flag uses Sentry search syntax (e.g., `is:unresolved`, `assigned:me`), not free text search.
 - **Not using `--web`**: View commands support `-w`/`--web` to open the resource in the browser — useful for sharing links.
 - **Fetching API schemas instead of using the CLI**: Prefer `sentry schema` to browse the API and `sentry api` to make requests — the CLI handles authentication and endpoint resolution, so there's rarely a need to download OpenAPI specs separately.
+- **Release version mismatch**: The `org/version` positional is `<org-slug>/<version>`, where `org/` is the org, not part of the version. `sentry release create sentry/1.0.0` creates version `1.0.0` in org `sentry`. If your `Sentry.init()` uses `release: "1.0.0"`, this is correct. Don't double-prefix like `sentry/myapp/1.0.0`.
+- **Running `set-commits --auto` without a git checkout**: `--auto` needs a local git repo to discover the origin remote URL and HEAD commit. In CI, ensure `actions/checkout` with `fetch-depth: 0` runs before `set-commits --auto`.
 - **Using `sentry api` when CLI commands suffice**: `sentry issue list --json` already includes `shortId`, `title`, `priority`, `level`, `status`, `permalink`, and other fields at the top level. Some fields like `count`, `userCount`, `firstSeen`, and `lastSeen` may be null depending on the issue. Use `--fields` to select specific fields and `--help` to see all available fields. Only fall back to `sentry api` for data the CLI doesn't expose.
 
 ## Prerequisites
