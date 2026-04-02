@@ -14,6 +14,7 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | [`dashboard`](./dashboard/) | Manage Sentry dashboards |
 | [`org`](./org/) | Work with Sentry organizations |
 | [`project`](./project/) | Work with Sentry projects |
+| [`release`](./release/) | Work with Sentry releases |
 | [`repo`](./repo/) | Work with Sentry repositories |
 | [`team`](./team/) | Work with Sentry teams |
 | [`issue`](./issue/) | Manage Sentry issues |
