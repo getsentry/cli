@@ -71,9 +71,10 @@ List deploys for a release
 Set commits for a release
 
 **Flags:**
-- `--auto - Use repository integration to auto-discover commits (default)`
+- `--auto - Use repository integration to auto-discover commits`
 - `--local - Read commits from local git history`
 - `--clear - Clear all commits from the release`
+- `--commit <value> - Explicit commit in REPO@SHA format (can be comma-separated)`
 - `--initial-depth <value> - Number of commits to read with --local - (default: "20")`
 
 ### `sentry release propose-version`
