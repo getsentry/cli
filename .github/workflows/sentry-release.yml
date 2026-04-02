@@ -27,6 +27,10 @@ jobs:
       # matching both the npm package version and Sentry release version.
       VERSION: ${{ github.event.release.tag_name || inputs.version }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
@@ -36,7 +40,9 @@ jobs:
         run: npm install -g "sentry@${VERSION}"
 
       - name: Create release
-        run: sentry release create "sentry/${VERSION}" --project cli
+        run: >-
+          sentry release create "sentry/${VERSION}" --project cli
+          --url "https://github.com/${{ github.repository }}/releases/tag/${VERSION}"
 
       - name: Set commits
         continue-on-error: true

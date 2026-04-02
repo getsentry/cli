@@ -130,7 +130,7 @@ async function setCommitsDefault(
   }
 
   try {
-    const release = await setCommitsAuto(org, version);
+    const release = await setCommitsAuto(org, version, cwd);
     clearRepoIntegrationCache(org);
     return release;
   } catch (error) {
@@ -312,7 +312,7 @@ export const setCommitsCommand = buildCommand({
       );
     } else if (flags.auto) {
       // Explicit --auto: use repo integration, fail hard on error
-      release = await setCommitsAuto(resolved.org, version);
+      release = await setCommitsAuto(resolved.org, version, cwd);
     } else {
       // Default (no flag): try auto with cached fallback
       release = await setCommitsDefault(
