@@ -87,6 +87,18 @@ export {
   tryGetPrimaryDsn,
 } from "./api/projects.js";
 export {
+  createRelease,
+  createReleaseDeploy,
+  deleteRelease,
+  getRelease,
+  listReleaseDeploys,
+  listReleasesPaginated,
+  setCommitsAuto,
+  setCommitsLocal,
+  setCommitsWithRefs,
+  updateRelease,
+} from "./api/releases.js";
+export {
   listRepositories,
   listRepositoriesPaginated,
 } from "./api/repositories.js";

@@ -556,7 +556,8 @@ for (const { path, command } of allCommands) {
   let body: string;
 
   const brief = command.brief || path.join(" ");
-  const methodName = path.at(-1) ?? path[0];
+  const rawName = path.at(-1) ?? path[0];
+  const methodName = needsQuoting(rawName) ? `"${rawName}"` : rawName;
   const indent = "    ".repeat(path.length - 1);
 
   if (hasVariadicPositional) {

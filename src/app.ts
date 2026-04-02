@@ -25,6 +25,8 @@ import { orgRoute } from "./commands/org/index.js";
 import { listCommand as orgListCommand } from "./commands/org/list.js";
 import { projectRoute } from "./commands/project/index.js";
 import { listCommand as projectListCommand } from "./commands/project/list.js";
+import { releaseRoute } from "./commands/release/index.js";
+import { listCommand as releaseListCommand } from "./commands/release/list.js";
 import { repoRoute } from "./commands/repo/index.js";
 import { listCommand as repoListCommand } from "./commands/repo/list.js";
 import { schemaCommand } from "./commands/schema.js";
@@ -61,6 +63,7 @@ const PLURAL_TO_SINGULAR: Record<string, string> = {
   issues: "issue",
   orgs: "org",
   projects: "project",
+  releases: "release",
   repos: "repo",
   teams: "team",
   logs: "log",
@@ -79,6 +82,7 @@ export const routes = buildRouteMap({
     dashboard: dashboardRoute,
     org: orgRoute,
     project: projectRoute,
+    release: releaseRoute,
     repo: repoRoute,
     team: teamRoute,
     issue: issueRoute,
@@ -96,6 +100,7 @@ export const routes = buildRouteMap({
     issues: issueListCommand,
     orgs: orgListCommand,
     projects: projectListCommand,
+    releases: releaseListCommand,
     repos: repoListCommand,
     teams: teamListCommand,
     logs: logListCommand,
@@ -115,6 +120,7 @@ export const routes = buildRouteMap({
       issues: true,
       orgs: true,
       projects: true,
+      releases: true,
       repos: true,
       teams: true,
       logs: true,

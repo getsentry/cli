@@ -116,6 +116,14 @@ export const ORG_PROJECT_COMMANDS = new Set([
  */
 export const ORG_ONLY_COMMANDS = new Set([
   "org view",
+  "release list",
+  "release view",
+  "release create",
+  "release finalize",
+  "release delete",
+  "release deploy",
+  "release deploys",
+  "release set-commits",
   "team list",
   "repo list",
   "trial list",

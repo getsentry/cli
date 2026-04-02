@@ -61,6 +61,14 @@ bun run test:unit                        # Run unit tests only
 bun run test:e2e                         # Run e2e tests only
 ```
 
+## Rules: No Runtime Dependencies
+
+**CRITICAL**: All packages must be in `devDependencies`, never `dependencies`. Everything is bundled at build time via esbuild. CI enforces this with `bun run check:deps`.
+
+When adding a package, always use `bun add -d <package>` (the `-d` flag).
+
+When the `@sentry/api` SDK provides types for an API response, import them directly from `@sentry/api` instead of creating redundant Zod schemas in `src/types/sentry.ts`.
+
 ## Rules: Use Bun APIs
 
 **CRITICAL**: This project uses Bun as runtime. Always prefer Bun-native APIs over Node.js equivalents.
@@ -1038,4 +1046,7 @@ mock.module("./some-module", () => ({
 
 <!-- lore:019d3f09-d39b-7795-b8a0-4a3e58a996f9 -->
 * **validateWidgetEnums skipDeprecatedCheck for edit-path inherited datasets**: When editing a widget, \`effectiveDataset = flags.dataset ?? existing.widgetType\` may inherit a deprecated type (e.g., \`discover\`). The \`validateWidgetEnums\` deprecation check must be skipped for inherited values — only fire when the user explicitly passes \`--dataset\`. Solution: \`validateWidgetEnums(effectiveDisplay, effectiveDataset, { skipDeprecatedCheck: true })\` in \`edit.ts\`. The cross-validation between display type and dataset still runs on effective values, catching incompatible combos. The deprecation rejection helper \`rejectInvalidDataset()\` is extracted to keep \`validateWidgetEnums\` under Biome's complexity limit of 15.
+
+<!-- lore:019d5a00-0000-7000-a000-000000000001 -->
+* **set-commits default mode makes speculative --auto API call by design**: When \`release set-commits\` is called without \`--auto\` or \`--local\`, it tries auto-discovery first and falls back to local git on 400 error. This matches the reference sentry-cli behavior (parity-correct). A per-org negative cache in the \`metadata\` table (\`repos_configured.<org>\` = \`"false"\`, 1-hour TTL) skips the speculative auto call on subsequent runs when no repo integration is configured. The cache clears on successful auto-discovery.
 <!-- End lore-managed section -->
