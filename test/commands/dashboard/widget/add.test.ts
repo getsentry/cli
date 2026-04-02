@@ -286,6 +286,7 @@ describe("dashboard widget add", () => {
         display: "table",
         dataset: "issue",
         "group-by": ["project"],
+        limit: 5,
       },
       "123",
       "Issues by Project"

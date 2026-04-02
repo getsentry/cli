@@ -324,6 +324,50 @@ export function resolveWidgetIndex(
  * @param opts - Widget configuration from parsed flags
  * @returns Validated widget with computed query fields
  */
+/**
+ * Validate that a sort expression references an aggregate present in the query.
+ * The Sentry API returns 400 when the sort field isn't in the widget's aggregates.
+ *
+ * @param orderby - Parsed sort expression (e.g., "-count()", "p90(span.duration)")
+ * @param aggregates - Parsed aggregate expressions from the query
+ */
+export function validateSortReferencesAggregate(
+  orderby: string,
+  aggregates: string[]
+): void {
+  // Strip leading "-" for descending sorts
+  const sortAgg = orderby.startsWith("-") ? orderby.slice(1) : orderby;
+  if (!aggregates.includes(sortAgg)) {
+    throw new ValidationError(
+      `Sort expression "${orderby}" references "${sortAgg}" which is not in the query.\n\n` +
+        "The --sort field must be one of the aggregate expressions in --query.\n" +
+        `Current aggregates: ${aggregates.join(", ")}\n\n` +
+        `Either add "${sortAgg}" to --query or sort by an existing aggregate.`,
+      "sort"
+    );
+  }
+}
+
+/**
+ * Validate that grouped widgets (those with columns/group-by) include a limit.
+ * The Sentry API rejects grouped widgets without a limit.
+ *
+ * @param columns - Group-by columns
+ * @param limit - Widget limit (undefined if not set)
+ */
+export function validateGroupByRequiresLimit(
+  columns: string[],
+  limit: number | undefined
+): void {
+  if (columns.length > 0 && limit === undefined) {
+    throw new ValidationError(
+      "Widgets with --group-by require --limit. " +
+        "Add --limit <n> to specify the maximum number of groups to display.",
+      "limit"
+    );
+  }
+}
+
 export function buildWidgetFromFlags(opts: {
   title: string;
   display: string;
@@ -348,6 +392,15 @@ export function buildWidgetFromFlags(opts: {
   let orderby = opts.sort ? parseSortExpression(opts.sort) : undefined;
   if (columns.length > 0 && !orderby && aggregates.length > 0) {
     orderby = `-${aggregates[0]}`;
+  }
+
+  // Only validate when user explicitly passes --group-by, not for auto-defaulted columns
+  // (e.g., issue dataset auto-defaults columns to ["issue"] for table display)
+  if (opts.groupBy) {
+    validateGroupByRequiresLimit(columns, opts.limit);
+  }
+  if (orderby) {
+    validateSortReferencesAggregate(orderby, aggregates);
   }
 
   const raw = {

@@ -32,6 +32,8 @@ import {
   resolveDashboardId,
   resolveOrgFromTarget,
   resolveWidgetIndex,
+  validateGroupByRequiresLimit,
+  validateSortReferencesAggregate,
   validateWidgetEnums,
   type WidgetQueryFlags,
 } from "../resolve.js";
@@ -101,15 +103,15 @@ function mergeLayout(
   };
 }
 
-/** Build the replacement widget object by merging flags over existing */
-function buildReplacement(
+/**
+ * Validate enum and aggregate constraints on the effective (merged) widget state.
+ * Extracted from buildReplacement to stay under Biome's complexity limit.
+ */
+function validateEnumsAndAggregates(
   flags: EditFlags,
-  existing: DashboardWidget
-): DashboardWidget {
-  const mergedQueries = mergeQueries(flags, existing.queries?.[0]);
-
-  // Validate aggregates when query or dataset changes — prevents broken widgets
-  // (e.g. switching --dataset from discover to spans with discover-only aggregates)
+  existing: DashboardWidget,
+  mergedQueries: DashboardWidgetQuery[] | undefined
+): void {
   const newDataset = flags.dataset ?? existing.widgetType;
   const aggregatesToValidate =
     mergedQueries?.[0]?.aggregates ?? existing.queries?.[0]?.aggregates;
@@ -117,22 +119,55 @@ function buildReplacement(
     validateAggregateNames(aggregatesToValidate, newDataset);
   }
 
-  const limit = flags.limit !== undefined ? flags.limit : existing.limit;
-
-  const effectiveDisplay = flags.display ?? existing.displayType;
-  const effectiveDataset = flags.dataset ?? existing.widgetType;
-
-  // Re-validate after merging with existing values. validateWidgetEnums only
-  // checks the cross-constraint when both args are provided, so it misses
-  // e.g. `--dataset preprod-app-size` on a widget that's already `table`.
-  // validateWidgetEnums itself skips untracked display types (text, wheel, etc.).
   if (flags.display || flags.dataset) {
+    const effectiveDisplay = flags.display ?? existing.displayType;
+    const effectiveDataset = flags.dataset ?? existing.widgetType;
     validateWidgetEnums(effectiveDisplay, effectiveDataset);
   }
+}
+
+/**
+ * Validate group-by+limit and sort constraints on the effective (merged) widget state.
+ * Only runs when the user changes query, group-by, or sort — not when preserving
+ * existing widget state which may predate these validations.
+ */
+function validateQueryConstraints(
+  flags: EditFlags,
+  existing: DashboardWidget,
+  mergedQueries: DashboardWidgetQuery[] | undefined,
+  limit: number | null | undefined
+): void {
+  if (flags["group-by"] || flags.query) {
+    const columns =
+      mergedQueries?.[0]?.columns ?? existing.queries?.[0]?.columns ?? [];
+    validateGroupByRequiresLimit(columns, limit ?? undefined);
+  }
+
+  if (flags.sort || flags.query) {
+    const orderby =
+      mergedQueries?.[0]?.orderby ?? existing.queries?.[0]?.orderby;
+    const aggregates =
+      mergedQueries?.[0]?.aggregates ?? existing.queries?.[0]?.aggregates ?? [];
+    if (orderby && aggregates.length > 0) {
+      validateSortReferencesAggregate(orderby, aggregates);
+    }
+  }
+}
+
+/** Build the replacement widget object by merging flags over existing */
+function buildReplacement(
+  flags: EditFlags,
+  existing: DashboardWidget
+): DashboardWidget {
+  const mergedQueries = mergeQueries(flags, existing.queries?.[0]);
+  const limit = flags.limit !== undefined ? flags.limit : existing.limit;
+
+  validateEnumsAndAggregates(flags, existing, mergedQueries);
+  validateQueryConstraints(flags, existing, mergedQueries, limit);
 
   const raw: Record<string, unknown> = {
     title: flags["new-title"] ?? existing.title,
-    displayType: effectiveDisplay,
+    displayType: flags.display ?? existing.displayType,
     queries: mergedQueries ?? existing.queries,
     layout: mergeLayout(flags, existing),
   };
