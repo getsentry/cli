@@ -20,13 +20,15 @@ import { ApiError, ValidationError } from "../errors.js";
 import { getHeadCommit, getRepositoryName } from "../git.js";
 import { resolveOrgRegion } from "../region.js";
 import {
+  API_MAX_PER_PAGE,
   apiRequestToRegion,
   getOrgSdkConfig,
+  MAX_PAGINATION_PAGES,
   type PaginatedResponse,
   unwrapPaginatedResult,
   unwrapResult,
 } from "./infrastructure.js";
-import { listRepositories } from "./repositories.js";
+import { listRepositoriesPaginated } from "./repositories.js";
 
 // We cast through `unknown` to bridge the gap between the SDK's internal
 // return types and the public response types — the shapes are compatible
@@ -292,8 +294,47 @@ export async function setCommitsAuto(
   version: string,
   cwd?: string
 ): Promise<OrgReleaseResponse> {
-  const repos = await listRepositories(orgSlug);
-  if (repos.length === 0) {
+  const localRepo = getRepositoryName(cwd);
+  if (!localRepo) {
+    throw new ValidationError(
+      "Could not determine repository name from local git remote.",
+      "repository"
+    );
+  }
+
+  // Paginate through org repos to find one matching the local git remote.
+  // Stops as soon as a match is found to avoid unnecessary API calls.
+  const localRepoLower = localRepo.toLowerCase();
+  let cursor: string | undefined;
+  let foundAnyRepos = false;
+
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
+    const result = await listRepositoriesPaginated(orgSlug, {
+      cursor,
+      perPage: API_MAX_PER_PAGE,
+    });
+
+    if (result.data.length > 0) {
+      foundAnyRepos = true;
+    }
+
+    const match = result.data.find(
+      (r) => r.name.toLowerCase() === localRepoLower
+    );
+    if (match) {
+      const headCommit = getHeadCommit(cwd);
+      return setCommitsWithRefs(orgSlug, version, [
+        { repository: match.name, commit: headCommit },
+      ]);
+    }
+
+    if (!result.nextCursor) {
+      break;
+    }
+    cursor = result.nextCursor;
+  }
+
+  if (!foundAnyRepos) {
     const endpoint = `organizations/${orgSlug}/releases/${encodeURIComponent(version)}/`;
     throw new ApiError(
       "No repository integrations configured for this organization.",
@@ -303,30 +344,10 @@ export async function setCommitsAuto(
     );
   }
 
-  const localRepo = getRepositoryName(cwd);
-  if (!localRepo) {
-    throw new ValidationError(
-      "Could not determine repository name from local git remote.",
-      "repository"
-    );
-  }
-
-  // Match local remote (e.g., "getsentry/cli") against Sentry repo names
-  const matchedRepo = repos.find(
-    (r) => r.name.toLowerCase() === localRepo.toLowerCase()
+  throw new ValidationError(
+    `No Sentry repository matching '${localRepo}'.`,
+    "repository"
   );
-  if (!matchedRepo) {
-    throw new ValidationError(
-      `No Sentry repository matching '${localRepo}'. ` +
-        `Available: ${repos.map((r) => r.name).join(", ")}`,
-      "repository"
-    );
-  }
-
-  const headCommit = getHeadCommit(cwd);
-  return setCommitsWithRefs(orgSlug, version, [
-    { repository: matchedRepo.name, commit: headCommit },
-  ]);
 }
 
 /**
