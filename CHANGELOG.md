@@ -1,6 +1,52 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.24.0
+
+### New Features ✨
+
+#### Telemetry
+
+- Add cache hit rate metric across all cache systems by @BYK in [#638](https://github.com/getsentry/cli/pull/638)
+- Add performance instrumentation and CLI Performance dashboard by @BYK in [#625](https://github.com/getsentry/cli/pull/625)
+- Upgrade Sentry SDK to 10.47.0 and enable runtime metrics by @BYK in [#622](https://github.com/getsentry/cli/pull/622)
+
+#### Other
+
+- (auth) Show token expiry in days/weeks instead of raw hours by @BYK in [#620](https://github.com/getsentry/cli/pull/620)
+- (ci) Add delta patch generation for stable releases by @BYK in [#618](https://github.com/getsentry/cli/pull/618)
+- (commands) Add shared helpers and buildDeleteCommand for mutation commands by @BYK in [#639](https://github.com/getsentry/cli/pull/639)
+- (dashboard) Render text widget markdown content in dashboard view by @BYK in [#624](https://github.com/getsentry/cli/pull/624)
+- (release) Add release command group and CI finalization by @BYK in [#628](https://github.com/getsentry/cli/pull/628)
+- (traces) Expose custom span attributes and improve agent guidance by @BYK in [#623](https://github.com/getsentry/cli/pull/623)
+- Improve unknown command UX with aliases, default routing, and suggestions by @BYK in [#635](https://github.com/getsentry/cli/pull/635)
+
+### Bug Fixes 🐛
+
+#### Telemetry
+
+- Exclude OutputError from Sentry exception capture (CLI-PK) by @BYK in [#629](https://github.com/getsentry/cli/pull/629)
+- Derive environment from CLI_VERSION instead of NODE_ENV by @BYK in [#627](https://github.com/getsentry/cli/pull/627)
+
+#### Other
+
+- (build) Use esbuild for binary bundling to fix minifier collision bug by @BYK in [#619](https://github.com/getsentry/cli/pull/619)
+- (ci) Restore GH_TOKEN for gh CLI steps in generate-patches by @BYK in [#634](https://github.com/getsentry/cli/pull/634)
+- (commands) Add regression test for Stricli numberParser defaults (#640) by @BYK in [#641](https://github.com/getsentry/cli/pull/641)
+- (init) Prompt for team selection when user belongs to multiple teams by @betegon in [#621](https://github.com/getsentry/cli/pull/621)
+- (polyfill) Add missing Bun API polyfills for npm distribution by @BYK in [#637](https://github.com/getsentry/cli/pull/637)
+- (upgrade) Remove "What's new" header from changelog output by @BYK in [#626](https://github.com/getsentry/cli/pull/626)
+
+### Documentation 📚
+
+- Add tracemetrics dataset guidance and validate aggregate format by @BYK in [#636](https://github.com/getsentry/cli/pull/636)
+
+### Internal Changes 🔧
+
+- (deps) Upgrade @sentry/api from 0.54.0 to 0.94.0 by @BYK in [#630](https://github.com/getsentry/cli/pull/630)
+- Remove stale debug-level stderr assertions and fix logger state leak by @BYK in [#631](https://github.com/getsentry/cli/pull/631)
+- Regenerate skill files and command docs by @github-actions[bot] in [e01b2520](https://github.com/getsentry/cli/commit/e01b2520ff6c858e032d2714e4e16168bdeef926)
+
 ## 0.23.0
 
 ### New Features ✨
