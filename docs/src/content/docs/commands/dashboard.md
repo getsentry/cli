@@ -126,6 +126,9 @@ Delete a widget from a dashboard
 |--------|-------------|
 | `-i, --index <index>` | Widget index (0-based) |
 | `-t, --title <title>` | Widget title to match |
+| `-y, --yes` | Skip confirmation prompt |
+| `-f, --force` | Force the operation without confirmation |
+| `-n, --dry-run` | Show what would happen without making changes |
 
 All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
 

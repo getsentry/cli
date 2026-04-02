@@ -12,13 +12,12 @@
  * 5. Display result
  *
  * Safety measures:
- * - No auto-detect mode: requires explicit target to prevent accidental deletion
- * - Type-out confirmation: user must type the full `org/project` slug
- * - Strict cancellation check (Symbol(clack:cancel) gotcha)
- * - Refuses to run in non-interactive mode without --yes flag
+ * - Uses `buildDeleteCommand` — auto-injects `--yes`/`--force`/`--dry-run`
+ *   flags and enforces the non-interactive guard before `func()` runs
+ * - No auto-detect mode: `requireExplicitTarget` blocks accidental deletion
+ * - Type-out confirmation via `confirmByTyping` (unless --yes/--force)
  */
 
-import { isatty } from "node:tty";
 import type { SentryContext } from "../../context.js";
 import {
   deleteProject,
@@ -26,15 +25,20 @@ import {
   getProject,
 } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
-import { buildCommand } from "../../lib/command.js";
 import { getCachedOrgRole } from "../../lib/db/regions.js";
-import { ApiError, CliError, ContextError } from "../../lib/errors.js";
+import { ApiError } from "../../lib/errors.js";
 import {
   formatProjectDeleted,
   type ProjectDeleteResult,
 } from "../../lib/formatters/human.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
+import {
+  buildDeleteCommand,
+  confirmByTyping,
+  isConfirmationBypassed,
+  requireExplicitTarget,
+} from "../../lib/mutate-command.js";
 import { resolveOrgProjectTarget } from "../../lib/resolve-target.js";
 import { buildProjectUrl } from "../../lib/sentry-urls.js";
 
@@ -42,46 +46,6 @@ const log = logger.withTag("project.delete");
 
 /** Command name used in error messages and resolution hints */
 const COMMAND_NAME = "project delete";
-
-/**
- * Prompt for confirmation before deleting a project.
- *
- * Uses a type-out confirmation where the user must type the full
- * `org/project` slug — similar to GitHub's deletion confirmation.
- *
- * Throws in non-interactive mode without --yes. Returns true if
- * the typed input matches, false otherwise.
- *
- * @param orgSlug - Organization slug for display and matching
- * @param project - Project with slug and name for display and matching
- * @returns true if confirmed, false if cancelled or mismatched
- */
-async function confirmDeletion(
-  orgSlug: string,
-  project: { slug: string; name: string }
-): Promise<boolean> {
-  const expected = `${orgSlug}/${project.slug}`;
-
-  if (!isatty(0)) {
-    throw new CliError(
-      `Refusing to delete '${expected}' in non-interactive mode. ` +
-        "Use --yes or --force to confirm."
-    );
-  }
-
-  const response = await log.prompt(
-    `Type '${expected}' to permanently delete project '${project.name}':`,
-    { type: "text", placeholder: expected }
-  );
-
-  // consola prompt returns Symbol(clack:cancel) on Ctrl+C — a truthy value.
-  // Check type to avoid treating cancel as a valid response.
-  if (typeof response !== "string") {
-    return false;
-  }
-
-  return response.trim() === expected;
-}
 
 /**
  * Build an actionable 403 error by checking the user's org role.
@@ -164,7 +128,7 @@ type DeleteFlags = {
   readonly fields?: string[];
 };
 
-export const deleteCommand = buildCommand({
+export const deleteCommand = buildDeleteCommand({
   docs: {
     brief: "Delete a project",
     fullDescription:
@@ -207,39 +171,17 @@ export const deleteCommand = buildCommand({
         },
       ],
     },
-    flags: {
-      yes: {
-        kind: "boolean",
-        brief: "Skip confirmation prompt",
-        default: false,
-      },
-      force: {
-        kind: "boolean",
-        brief: "Force deletion without confirmation",
-        default: false,
-      },
-      "dry-run": {
-        kind: "boolean",
-        brief: "Validate and show what would be deleted without deleting",
-        default: false,
-      },
-    },
-    aliases: { y: "yes", f: "force", n: "dry-run" },
   },
   async *func(this: SentryContext, flags: DeleteFlags, target: string) {
     const { cwd } = this;
 
     // Block auto-detect for safety — destructive commands require explicit targets
     const parsed = parseOrgProjectArg(target);
-    if (parsed.type === "auto-detect") {
-      throw new ContextError(
-        "Project target",
-        `sentry ${COMMAND_NAME} <org>/<project>`,
-        [
-          "Auto-detection is disabled for delete — specify the target explicitly",
-        ]
-      );
-    }
+    requireExplicitTarget(
+      parsed,
+      "Project target",
+      `sentry ${COMMAND_NAME} <org>/<project>`
+    );
 
     const resolved = await resolveOrgProjectTarget(parsed, cwd, COMMAND_NAME);
     const { org: orgSlug, project: projectSlug } = resolved;
@@ -255,9 +197,13 @@ export const deleteCommand = buildCommand({
       return;
     }
 
-    // Confirmation gate
-    if (!(flags.yes || flags.force)) {
-      const confirmed = await confirmDeletion(orgSlug, project);
+    // Confirmation gate — non-interactive guard is handled by buildDeleteCommand
+    if (!isConfirmationBypassed(flags)) {
+      const expected = `${orgSlug}/${project.slug}`;
+      const confirmed = await confirmByTyping(
+        expected,
+        `Type '${expected}' to permanently delete project '${project.name}':`
+      );
       if (!confirmed) {
         log.info("Cancelled.");
         return;
