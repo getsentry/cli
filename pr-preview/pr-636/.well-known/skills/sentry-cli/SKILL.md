@@ -208,9 +208,9 @@ When querying the Events API (directly or via `sentry api`), valid dataset value
 
 - **Wrong dataset for custom metrics**: Use `--dataset tracemetrics` for custom metrics (`Sentry.metrics.distribution/gauge/count`). The query format is `aggregation(value,metric_name,metric_type,unit)` — see `sentry dashboard widget --help` for details.
 - **Wrong unit in tracemetrics queries**: The `unit` parameter must match the SDK emission. If no `unit` option is passed to `Sentry.metrics.*()`, use `none`. Check the SDK source for integrations — e.g., `nodeRuntimeMetricsIntegration` uses `byte` for memory, `second` for uptime, `none` for utilization ratios.
-- **Missing `--limit` with `--group-by`**: The Sentry API rejects grouped widgets without a limit. Always include `--limit` when using `--group-by`.
-- **`--sort` referencing a field not in `--query`**: The sort field must be one of the aggregate expressions in `--query`. If you sort by `-count` but only query `p50:span.duration`, the API returns 400.
-- **Span attributes are not aggregatable**: You cannot use `avg:dsn.files_collected` on span attributes. Span attributes are key-value metadata — use them in `--where` filters or `--group-by` columns, not as aggregate fields. Only `span.duration` and built-in measurements support aggregation.
+- **Missing `--limit` with `--group-by`**: Always include `--limit` when using `--group-by`. The CLI validates this before sending to the API.
+- **`--sort` referencing a field not in `--query`**: The sort field must be one of the aggregate expressions in `--query`. The CLI validates this before sending to the API.
+- **Span attributes are not aggregatable**: You cannot use `avg:dsn.files_collected` on span attributes. Span attributes are key-value metadata — use them in `--where` filters or `--group-by` columns, not as aggregate fields. The CLI warns when an aggregate field doesn't match known aggregatable fields (`span.duration`, `span.self_time`, etc.).
 - **Stale `--sort` after changing `--query`**: When editing a widget to change the query (e.g., p75→p50), also update `--sort` if it references the old aggregate.
 
 ## Prerequisites
