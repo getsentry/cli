@@ -204,15 +204,6 @@ When querying the Events API (directly or via `sentry api`), valid dataset value
 - **Fetching API schemas instead of using the CLI**: Prefer `sentry schema` to browse the API and `sentry api` to make requests — the CLI handles authentication and endpoint resolution, so there's rarely a need to download OpenAPI specs separately.
 - **Using `sentry api` when CLI commands suffice**: `sentry issue list --json` already includes `shortId`, `title`, `priority`, `level`, `status`, `permalink`, and other fields at the top level. Some fields like `count`, `userCount`, `firstSeen`, and `lastSeen` may be null depending on the issue. Use `--fields` to select specific fields and `--help` to see all available fields. Only fall back to `sentry api` for data the CLI doesn't expose.
 
-#### Dashboard Widget Mistakes
-
-- **Wrong dataset for custom metrics**: Use `--dataset tracemetrics` for custom metrics (`Sentry.metrics.distribution/gauge/count`). The query format is `aggregation(value,metric_name,metric_type,unit)` — see `sentry dashboard widget --help` for details.
-- **Wrong unit in tracemetrics queries**: The `unit` parameter must match the SDK emission. If no `unit` option is passed to `Sentry.metrics.*()`, use `none`. Check the SDK source for integrations — e.g., `nodeRuntimeMetricsIntegration` uses `byte` for memory, `second` for uptime, `none` for utilization ratios.
-- **Missing `--limit` with `--group-by`**: Always include `--limit` when using `--group-by`. The CLI validates this before sending to the API.
-- **`--sort` referencing a field not in `--query`**: The sort field must be one of the aggregate expressions in `--query`. The CLI validates this before sending to the API.
-- **Span attributes are not aggregatable**: You cannot use `avg:dsn.files_collected` on span attributes. Span attributes are key-value metadata — use them in `--where` filters or `--group-by` columns, not as aggregate fields. The CLI warns when an aggregate field doesn't match known aggregatable fields (`span.duration`, `span.self_time`, etc.).
-- **Stale `--sort` after changing `--query`**: When editing a widget to change the query (e.g., p75→p50), also update `--sort` if it references the old aggregate.
-
 ## Prerequisites
 
 The CLI must be installed and authenticated before use.
