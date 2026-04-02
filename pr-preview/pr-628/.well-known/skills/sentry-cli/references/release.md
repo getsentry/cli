@@ -74,7 +74,7 @@ Set commits for a release
 - `--auto - Use repository integration to auto-discover commits`
 - `--local - Read commits from local git history`
 - `--clear - Clear all commits from the release`
-- `--commit <value> - Explicit commit in REPO@SHA format (can be comma-separated)`
+- `--commit <value> - Explicit commit as REPO@SHA or REPO@PREV..SHA (comma-separated)`
 - `--initial-depth <value> - Number of commits to read with --local - (default: "20")`
 
 ### `sentry release propose-version`
