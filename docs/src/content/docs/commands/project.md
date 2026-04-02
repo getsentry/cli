@@ -23,7 +23,7 @@ Create a new project
 | Option | Description |
 |--------|-------------|
 | `-t, --team <team>` | Team to create the project under |
-| `-n, --dry-run` | Validate inputs and show what would be created without creating it |
+| `-n, --dry-run` | Show what would happen without making changes |
 
 ### `sentry project delete <org/project>`
 
@@ -40,8 +40,8 @@ Delete a project
 | Option | Description |
 |--------|-------------|
 | `-y, --yes` | Skip confirmation prompt |
-| `-f, --force` | Force deletion without confirmation |
-| `-n, --dry-run` | Validate and show what would be deleted without deleting |
+| `-f, --force` | Force the operation without confirmation |
+| `-n, --dry-run` | Show what would happen without making changes |
 
 ### `sentry project list <org/project>`
 
