@@ -17,13 +17,14 @@ jobs:
   finalize:
     name: Finalize Sentry Release
     runs-on: ubuntu-latest
+    environment: production
     # Skip pre-releases (nightlies, dev versions) on automatic trigger;
     # always run on manual dispatch.
     if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
     env:
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
       # Tag names are bare semver (e.g., "0.24.0", no "v" prefix),
-      # matching both the npm package version and Sentry release version.
+      # matching the npm package version, Sentry.init() release, and sourcemap uploads.
       VERSION: ${{ github.event.release.tag_name || inputs.version }}
     steps:
       - name: Setup Node.js
@@ -35,17 +36,17 @@ jobs:
         run: npm install -g "sentry@${VERSION}"
 
       - name: Create release
-        run: sentry release create "sentry/${VERSION}" --project cli
+        run: sentry release create "${VERSION}" --project cli
 
       - name: Set commits
         continue-on-error: true
-        run: sentry release set-commits "sentry/${VERSION}" --auto
+        run: sentry release set-commits "${VERSION}" --auto
 
       - name: Finalize release
-        run: sentry release finalize "sentry/${VERSION}"
+        run: sentry release finalize "${VERSION}"
 
       - name: Create deploy
-        run: sentry release deploy "sentry/${VERSION}" production
+        run: sentry release deploy "${VERSION}" production
 
       - name: File issue on failure
         if: failure()
