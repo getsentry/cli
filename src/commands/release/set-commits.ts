@@ -210,7 +210,7 @@ export const setCommitsCommand = buildCommand({
         kind: "parsed",
         parse: numberParser,
         brief: "Number of commits to read with --local",
-        default: "20",
+        default: "20", // Stricli passes string defaults through parse(); numberParser converts to number
       },
     },
   },

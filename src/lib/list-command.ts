@@ -252,7 +252,8 @@ export function paginationHint(opts: {
  * Build the `--limit` / `-n` flag for a list command.
  *
  * @param entityPlural - Plural entity name used in the brief (e.g. "teams")
- * @param defaultValue - Default limit as a string (default: "30")
+ * @param defaultValue - Default limit as a string — Stricli passes it through
+ *   numberParser at runtime, so the command receives a number (default: "30")
  */
 export function buildListLimitFlag(
   entityPlural: string,

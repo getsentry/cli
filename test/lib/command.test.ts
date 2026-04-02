@@ -168,6 +168,44 @@ describe("buildCommand telemetry integration", () => {
     expect(setTagSpy).toHaveBeenCalledWith("flag.limit", "50");
   });
 
+  test("passes string defaults through parse() — numberParser default is number at runtime", async () => {
+    let receivedFlags: Record<string, unknown> | null = null;
+
+    const command = buildCommand<{ limit: number }, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {
+        flags: {
+          limit: {
+            kind: "parsed",
+            parse: numberParser,
+            brief: "Limit",
+            default: "10",
+          },
+        },
+      },
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(this: TestContext, flags: { limit: number }) {
+        receivedFlags = flags as unknown as Record<string, unknown>;
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    // Run WITHOUT --limit to exercise the default path
+    await run(app, ["test"], ctx as TestContext);
+
+    expect(receivedFlags).not.toBeNull();
+    // Critical: must be number 10, not string "10"
+    expect(receivedFlags!.limit).toBe(10);
+    expect(typeof receivedFlags!.limit).toBe("number");
+  });
+
   test("skips false boolean flags in telemetry", async () => {
     const command = buildCommand<{ json: boolean }, [], TestContext>({
       auth: false,
