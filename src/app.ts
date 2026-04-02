@@ -186,6 +186,31 @@ function detectPluralAliasMisuse(ansiColor: boolean): string | undefined {
 }
 
 /**
+ * Format a CliError with a synonym suggestion when the user typed a known
+ * synonym that was consumed as a positional arg by `defaultCommand: "view"`.
+ *
+ * Returns the formatted error string if a synonym match is found,
+ * undefined otherwise. Skips Sentry capture for these known user mistakes.
+ */
+function formatSynonymError(
+  exc: unknown,
+  ansiColor: boolean
+): string | undefined {
+  if (!(exc instanceof CliError)) {
+    return;
+  }
+  const synonymHint = getSynonymSuggestionFromArgv();
+  if (!synonymHint) {
+    return;
+  }
+  const prefix = ansiColor ? errorColor("Error:") : "Error:";
+  const tip = ansiColor
+    ? warning(`Tip: ${synonymHint}`)
+    : `Tip: ${synonymHint}`;
+  return `${prefix} ${exc.format()}\n${tip}`;
+}
+
+/**
  * Custom error formatting for CLI errors.
  *
  * - AuthError (not_authenticated): Re-thrown to allow auto-login flow in bin.ts
@@ -274,23 +299,22 @@ const customText: ApplicationText = {
       throw exc;
     }
 
+    // Case C: With defaultCommand: "view", unknown tokens like "events" are
+    // silently consumed as the positional arg. The view command fails at the
+    // domain level (e.g., ResolutionError). Check argv for a known synonym
+    // and show the suggestion — skip Sentry capture since these are known
+    // user mistakes, not real errors.
+    const synonymResult = formatSynonymError(exc, ansiColor);
+    if (synonymResult) {
+      return synonymResult;
+    }
+
     // Report command errors to Sentry. Stricli catches exceptions and doesn't
     // re-throw, so we must capture here to get visibility into command failures.
     Sentry.captureException(exc);
 
     if (exc instanceof CliError) {
       const prefix = ansiColor ? errorColor("Error:") : "Error:";
-      // Case C: With defaultCommand: "view", unknown tokens like "events" are
-      // silently consumed as the positional arg. The view command fails at the
-      // domain level (e.g., ResolutionError). Check argv for a known synonym
-      // and append the suggestion to the error.
-      const synonymHint = getSynonymSuggestionFromArgv();
-      if (synonymHint) {
-        const tip = ansiColor
-          ? warning(`Tip: ${synonymHint}`)
-          : `Tip: ${synonymHint}`;
-        return `${prefix} ${exc.format()}\n${tip}`;
-      }
       return `${prefix} ${exc.format()}`;
     }
     if (exc instanceof Error) {
