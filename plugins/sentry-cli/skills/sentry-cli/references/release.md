@@ -121,8 +121,8 @@ sentry release create $(sentry release propose-version)
 sentry release list --json
 sentry release view 1.0.0 --json
 
-# CI/CD: full release workflow with org prefix
-sentry release create my-org/1.0.0 --project my-project --url "https://github.com/org/repo/releases/tag/1.0.0"
+# Full release workflow with explicit org
+sentry release create my-org/1.0.0 --project my-project
 sentry release set-commits my-org/1.0.0 --auto
 sentry release finalize my-org/1.0.0
 sentry release deploy my-org/1.0.0 production

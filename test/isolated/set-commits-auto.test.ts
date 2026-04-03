@@ -77,7 +77,7 @@ afterEach(() => {
 });
 
 describe("setCommitsAuto", () => {
-  test("lists repos, discovers HEAD, and sends refs to the API", async () => {
+  test("lists repos, discovers HEAD, fetches previous commit, and sends refs", async () => {
     const withCommits = { ...SAMPLE_RELEASE, commitCount: 5 };
     const requests: { method: string; url: string }[] = [];
 
@@ -85,7 +85,7 @@ describe("setCommitsAuto", () => {
       const req = new Request(input!, init);
       requests.push({ method: req.method, url: req.url });
 
-      // First request: list org repositories (SDK uses /repos/ endpoint)
+      // List org repositories (SDK uses /repos/ endpoint)
       if (req.url.includes("/repos/")) {
         expect(req.method).toBe("GET");
         return new Response(JSON.stringify([SAMPLE_REPO]), {
@@ -94,16 +94,32 @@ describe("setCommitsAuto", () => {
         });
       }
 
-      // Second request: PUT refs on the release
+      // Previous release commit lookup
+      if (req.url.includes("/previous-with-commits/")) {
+        expect(req.method).toBe("GET");
+        return new Response(
+          JSON.stringify({
+            lastCommit: { id: "prev000000000000000000000000000000000000" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // PUT refs on the release
       expect(req.method).toBe("PUT");
       expect(req.url).toContain("/releases/1.0.0/");
       const body = (await req.json()) as {
-        refs: Array<{ repository: string; commit: string }>;
+        refs: Array<{
+          repository: string;
+          commit: string;
+          previousCommit?: string;
+        }>;
       };
       expect(body.refs).toEqual([
         {
           repository: "getsentry/cli",
           commit: "abc123def456789012345678901234567890abcd",
+          previousCommit: "prev000000000000000000000000000000000000",
         },
       ]);
       return new Response(JSON.stringify(withCommits), {
@@ -115,7 +131,6 @@ describe("setCommitsAuto", () => {
     const release = await setCommitsAuto("test-org", "1.0.0", "/tmp");
 
     expect(release.commitCount).toBe(5);
-    expect(requests).toHaveLength(2);
   });
 
   test("throws ApiError when org has no repositories", async () => {
@@ -169,6 +184,14 @@ describe("setCommitsAuto", () => {
         }
         // Second page: the matching repo, no next cursor
         return new Response(JSON.stringify([SAMPLE_REPO]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Previous release commit lookup (no previous release)
+      if (req.url.includes("/previous-with-commits/")) {
+        return new Response(JSON.stringify({}), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });

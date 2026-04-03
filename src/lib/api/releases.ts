@@ -272,6 +272,41 @@ export async function createReleaseDeploy(
 }
 
 /**
+ * Get the last commit SHA from the previous release that has commits.
+ *
+ * Uses the undocumented `/previous-with-commits/` endpoint (same as the
+ * reference sentry-cli) to determine the commit baseline for range-based
+ * commit association. Without this, Sentry can't compute which commits
+ * are new in the current release and reports 0 commits.
+ *
+ * @param orgSlug - Organization slug
+ * @param version - Current release version
+ * @returns Previous release's last commit SHA, or undefined if no previous release
+ */
+async function getPreviousReleaseCommit(
+  orgSlug: string,
+  version: string
+): Promise<string | undefined> {
+  try {
+    const regionUrl = await resolveOrgRegion(orgSlug);
+    const encodedVersion = encodeURIComponent(version);
+    const { data } = await apiRequestToRegion<{
+      lastCommit?: { id: string } | null;
+    }>(
+      regionUrl,
+      `organizations/${orgSlug}/releases/${encodedVersion}/previous-with-commits/`,
+      { method: "GET" }
+    );
+    return data?.lastCommit?.id;
+  } catch {
+    // Not critical — if we can't get the previous commit, we still send
+    // refs without previousCommit. Sentry will try to determine the range
+    // from its own data (may result in 0 commits for first releases).
+    return;
+  }
+}
+
+/**
  * Set commits on a release using auto-discovery mode.
  *
  * Lists the org's repositories from the Sentry API, matches against the
@@ -323,9 +358,16 @@ export async function setCommitsAuto(
     );
     if (match) {
       const headCommit = getHeadCommit(cwd);
-      return setCommitsWithRefs(orgSlug, version, [
-        { repository: match.name, commit: headCommit },
-      ]);
+      const previousCommit = await getPreviousReleaseCommit(orgSlug, version);
+      const ref: {
+        repository: string;
+        commit: string;
+        previousCommit?: string;
+      } = { repository: match.name, commit: headCommit };
+      if (previousCommit) {
+        ref.previousCommit = previousCommit;
+      }
+      return setCommitsWithRefs(orgSlug, version, [ref]);
     }
 
     if (!result.nextCursor) {

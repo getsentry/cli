@@ -47,9 +47,7 @@ jobs:
       # The org/ prefix is how org is specified — it is NOT part of the version.
       # The version portion must match Sentry.init({ release }) exactly.
       - name: Create release
-        run: >-
-          sentry release create "sentry/${VERSION}" --project cli
-          --url "https://github.com/${{ github.repository }}/releases/tag/${VERSION}"
+        run: sentry release create "sentry/${VERSION}" --project cli
 
       # --auto matches the local origin remote against Sentry repo integrations.
       # continue-on-error: integration may not be configured for all orgs.
@@ -61,7 +59,9 @@ jobs:
         run: sentry release finalize "sentry/${VERSION}"
 
       - name: Create deploy
-        run: sentry release deploy "sentry/${VERSION}" production
+        run: >-
+          sentry release deploy "sentry/${VERSION}" production
+          --url "https://github.com/${{ github.repository }}/releases/tag/${VERSION}"
 
       - name: File issue on failure
         if: failure()
