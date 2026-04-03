@@ -166,12 +166,16 @@ const DEFAULT_CONTEXT_ALTERNATIVES = [
  * @param resource - What is required (e.g., "Organization", "Trace ID and span ID")
  * @param command - Single-line CLI usage example (e.g., "sentry org view <org-slug>")
  * @param alternatives - Alternative ways to provide the context
+ * @param note - Optional informational context (e.g., "Found 2 DSN(s) that could not be resolved").
+ *   Rendered as a separate "Note:" section after alternatives. Use this for diagnostic
+ *   information that explains what the CLI tried — keep alternatives purely actionable.
  * @returns Formatted multi-line error message
  */
 function buildContextMessage(
   resource: string,
   command: string,
-  alternatives: string[]
+  alternatives: string[],
+  note?: string
 ): string {
   // Compound resources ("X and Y") need plural grammar
   const isPlural = resource.includes(" and ");
@@ -186,6 +190,9 @@ function buildContextMessage(
     for (const alt of alternatives) {
       lines.push(`  - ${alt}`);
     }
+  }
+  if (note) {
+    lines.push("", `Note: ${note}`);
   }
   return lines.join("\n");
 }
@@ -229,23 +236,29 @@ function buildResolutionMessage(
  *   that should use {@link ResolutionError}.
  * @param alternatives - Alternative ways to resolve (defaults to DSN/project detection hints).
  *   Pass `[]` when the defaults are irrelevant (e.g., for missing positional IDs like Trace ID).
+ * @param note - Optional informational context rendered as a separate "Note:" section.
+ *   Use for diagnostic info (e.g., "Found 2 DSN(s) that could not be resolved").
+ *   Keep alternatives purely actionable — put explanations here instead.
  */
 export class ContextError extends CliError {
   readonly resource: string;
   readonly command: string;
   readonly alternatives: string[];
+  readonly note?: string;
 
   constructor(
     resource: string,
     command: string,
-    alternatives: string[] = [...DEFAULT_CONTEXT_ALTERNATIVES]
+    alternatives: string[] = [...DEFAULT_CONTEXT_ALTERNATIVES],
+    note?: string
   ) {
     // Include full formatted message so it's shown even when caught by external handlers
-    super(buildContextMessage(resource, command, alternatives));
+    super(buildContextMessage(resource, command, alternatives, note));
     this.name = "ContextError";
     this.resource = resource;
     this.command = command;
     this.alternatives = alternatives;
+    this.note = note;
 
     // Dev-time assertion: command must be a single-line CLI usage example.
     // Multi-line commands are a sign the caller should use ResolutionError.

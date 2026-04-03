@@ -1145,10 +1145,12 @@ async function handleResolvedTargets(
 
   if (targets.length === 0) {
     if (skippedSelfHosted) {
-      throw new ContextError("Organization and project", USAGE_HINT, [
-        `Found ${skippedSelfHosted} DSN(s) that could not be resolved`,
-        "You may not have access to these projects, or you can specify the target explicitly",
-      ]);
+      throw new ContextError(
+        "Organization and project",
+        USAGE_HINT,
+        undefined,
+        `Found ${skippedSelfHosted} DSN(s) that could not be resolved — you may not have access to these projects`
+      );
     }
     throw new ContextError("Organization and project", USAGE_HINT);
   }

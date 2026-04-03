@@ -45,11 +45,12 @@ const USAGE_HINT = "sentry project view <org>/<project>";
  */
 function buildContextError(skippedSelfHosted?: number): ContextError {
   if (skippedSelfHosted) {
-    return new ContextError("Organization and project", USAGE_HINT, [
-      "Run from a directory with a Sentry-configured project",
-      "Set SENTRY_ORG and SENTRY_PROJECT (or SENTRY_DSN) environment variables",
-      `Found ${skippedSelfHosted} DSN(s) that could not be resolved — you may not have access to these projects`,
-    ]);
+    return new ContextError(
+      "Organization and project",
+      USAGE_HINT,
+      undefined,
+      `Found ${skippedSelfHosted} DSN(s) that could not be resolved — you may not have access to these projects`
+    );
   }
 
   return new ContextError("Organization and project", USAGE_HINT);

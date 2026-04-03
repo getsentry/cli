@@ -131,6 +131,53 @@ describe("ContextError", () => {
     expect(formatted).toContain("Resource is required.");
     expect(formatted).not.toContain("Or:");
   });
+
+  test("format() includes note section after alternatives", () => {
+    const err = new ContextError(
+      "Organization",
+      "sentry org list",
+      undefined,
+      "Found 2 DSN(s) that could not be resolved"
+    );
+    const formatted = err.format();
+    expect(formatted).toContain("Organization is required.");
+    // Default alternatives are present
+    expect(formatted).toContain("Or:");
+    expect(formatted).toContain(
+      "Run from a directory with a Sentry-configured project"
+    );
+    // Note appears as a separate section
+    expect(formatted).toContain(
+      "Note: Found 2 DSN(s) that could not be resolved"
+    );
+    // Note appears after alternatives
+    const orIndex = formatted.indexOf("Or:");
+    const noteIndex = formatted.indexOf("Note:");
+    expect(noteIndex).toBeGreaterThan(orIndex);
+  });
+
+  test("format() includes note without alternatives", () => {
+    const err = new ContextError(
+      "Resource",
+      "sentry resource get",
+      [],
+      "Some diagnostic info"
+    );
+    const formatted = err.format();
+    expect(formatted).toContain("Resource is required.");
+    expect(formatted).not.toContain("Or:");
+    expect(formatted).toContain("Note: Some diagnostic info");
+  });
+
+  test("note field is stored on instance", () => {
+    const err = new ContextError(
+      "Organization",
+      "sentry org list",
+      undefined,
+      "test note"
+    );
+    expect(err.note).toBe("test note");
+  });
 });
 
 describe("ResolutionError", () => {
