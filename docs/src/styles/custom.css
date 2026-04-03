@@ -222,13 +222,9 @@ site-search button kbd {
 .hero h1 {
   font-size: clamp(2.5rem, 8vw, 4rem) !important;
   font-weight: 700 !important;
-  line-height: 1.1 !important;
+  line-height: 1 !important;
   letter-spacing: -0.03em !important;
   margin-bottom: 1.5rem !important;
-  background: linear-gradient(135deg, #fff 0%, rgba(255, 255, 255, 0.8) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
 }
 
 /* Hero tagline */
