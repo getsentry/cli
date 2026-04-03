@@ -142,7 +142,7 @@ async function setCommitsDefault(
       );
       return setCommitsFromLocal(org, version, cwd, depth);
     }
-    if (error instanceof ValidationError) {
+    if (error instanceof ValidationError && error.field === "repository") {
       log.warn(
         `Auto-discovery failed: ${error.message}. ` +
           "Falling back to local git history."

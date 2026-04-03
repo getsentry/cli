@@ -93,6 +93,31 @@ sentry schema issues
 sentry schema "GET /api/0/organizations/{organization_id_or_slug}/issues/"
 ```
 
+### Manage Releases
+
+```bash
+# Create a release — version must match Sentry.init({ release }) exactly
+sentry release create my-org/1.0.0 --project my-project
+
+# Associate commits via repository integration (needs local git checkout)
+sentry release set-commits my-org/1.0.0 --auto
+
+# Or read commits from local git history (no integration needed)
+sentry release set-commits my-org/1.0.0 --local
+
+# Mark the release as finalized
+sentry release finalize my-org/1.0.0
+
+# Record a production deploy
+sentry release deploy my-org/1.0.0 production
+```
+
+**Key details:**
+- The positional is `<org-slug>/<version>`. In `sentry release create sentry/1.0.0`, `sentry` is the org and `1.0.0` is the version — the slash separates org from version, it is not part of the version string.
+- The **version** must match the `release` value in `Sentry.init()`. If your SDK uses `"1.0.0"`, the command must use `org/1.0.0`.
+- `--auto` requires a Sentry repository integration (GitHub/GitLab/Bitbucket) **and** a local git checkout. It matches your `origin` remote against Sentry's repo list. Without a checkout, use `--local`.
+- With no flag, `set-commits` tries `--auto` first and falls back to `--local` on failure.
+
 ### Arbitrary API Access
 
 ```bash
@@ -182,38 +207,6 @@ sentry span list my-org/my-project/abc123def456...
 ### Dataset names for the Events API
 
 When querying the Events API (directly or via `sentry api`), valid dataset values are: `spans`, `transactions`, `logs`, `errors`, `discover`.
-
-## Release Workflow
-
-The `sentry release` command group manages Sentry releases for tracking deploys and associating commits with errors. A typical CI workflow:
-
-```bash
-# Create a release (version must match Sentry.init() release value)
-sentry release create my-org/1.0.0 --project my-project
-
-# Associate commits via repository integration (requires git checkout)
-sentry release set-commits my-org/1.0.0 --auto
-
-# Mark the release as finalized
-sentry release finalize my-org/1.0.0
-
-# Record a deploy
-sentry release deploy my-org/1.0.0 production
-```
-
-**Key details:**
-
-- The `org/version` positional is `<org-slug>/<version>`, NOT a version prefix. `sentry release create sentry/1.0.0` means org=`sentry`, version=`1.0.0`. This is how org is specified — not via `SENTRY_ORG`.
-- The release **version** (e.g., `1.0.0`) must match the `release` value in your `Sentry.init()` call. If your SDK uses bare semver, the release must be bare semver too.
-- `--auto` requires **both** a Sentry repository integration (GitHub/GitLab/Bitbucket) **and** a local git checkout. It lists repos from the API and matches against your local `origin` remote URL, then sends the HEAD commit SHA. Without a checkout, use `--local` instead.
-- When neither `--auto` nor `--local` is specified, the CLI tries `--auto` first and falls back to `--local` on failure.
-
-### CI/CD Setup Notes
-
-- The `sentry` npm package requires **Node.js >= 22**. CI runners like `ubuntu-latest` ship Node.js 20 — add `actions/setup-node@v6` with `node-version: 22`.
-- If `SENTRY_AUTH_TOKEN` is scoped to a GitHub environment (e.g., `production`), set `environment: production` on the job.
-- A full git checkout (`fetch-depth: 0`) is needed for `--auto` to discover the remote URL and HEAD.
-- `set-commits --auto` has `continue-on-error` in most workflows because it requires a working repository integration. If the integration isn't configured, the step fails but the rest of the release workflow succeeds.
 
 ## Common Mistakes
 
