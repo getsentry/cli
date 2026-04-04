@@ -197,7 +197,7 @@ export async function listIssueEvents(
 
   const config = await getOrgSdkConfig(orgSlug);
 
-  let allEvents: IssueEvent[] = [];
+  const allEvents: IssueEvent[] = [];
   let currentCursor = cursor;
   let nextCursor: string | undefined;
 
@@ -235,7 +235,7 @@ export async function listIssueEvents(
   // Trim to exact limit; discard nextCursor if we overshot to avoid
   // cursor-position skips (same pattern as listIssuesAllPages).
   if (allEvents.length > limit) {
-    allEvents = allEvents.slice(0, limit);
+    return { data: allEvents.slice(0, limit) };
   }
 
   return { data: allEvents, nextCursor };
