@@ -239,6 +239,93 @@ export type SentryEvent = Omit<
   culprit?: string | null;
 };
 
+// Issue Event (list endpoint)
+
+/**
+ * A lightweight event from the issue events list endpoint.
+ *
+ * This is a subset of the full event detail — the list endpoint returns
+ * minimal event metadata without stacktraces, breadcrumbs, or contexts.
+ * Use {@link SentryEvent} for full event details from the detail endpoint.
+ */
+export type IssueEvent = {
+  /** Internal event ID (numeric string) */
+  id: string;
+  /** Event type (e.g., "error", "default", "transaction") */
+  "event.type": string;
+  /** The group (issue) ID this event belongs to */
+  groupID: string | null;
+  /** UUID-format event ID */
+  eventID: string;
+  /** Project ID (numeric string) */
+  projectID: string;
+  /** Event message */
+  message: string;
+  /** Event title (typically the error type + message) */
+  title: string;
+  /** Source location (file:line) where the event originated */
+  location: string | null;
+  /** The culprit (function/module that caused the error) */
+  culprit: string | null;
+  /** User context if available */
+  user: {
+    id?: string | null;
+    email?: string | null;
+    username?: string | null;
+    ip_address?: string | null;
+    name?: string | null;
+  } | null;
+  /** Event tags */
+  tags: Array<{ key: string; value: string }>;
+  /** Platform (e.g., "python", "javascript") */
+  platform: string | null;
+  /** ISO 8601 timestamp when the event was created */
+  dateCreated: string;
+  /** Crash file URL if available */
+  crashFile: string | null;
+  /** Event metadata */
+  metadata: Record<string, unknown> | null;
+};
+
+/**
+ * Zod schema for {@link IssueEvent} — used for `--fields` documentation in `--help`.
+ */
+export const IssueEventSchema = z
+  .object({
+    id: z.string().describe("Internal event ID"),
+    "event.type": z
+      .string()
+      .describe("Event type (error, default, transaction)"),
+    groupID: z.string().nullable().describe("Group (issue) ID"),
+    eventID: z.string().describe("UUID-format event ID"),
+    projectID: z.string().describe("Project ID"),
+    message: z.string().describe("Event message"),
+    title: z.string().describe("Event title"),
+    location: z.string().nullable().describe("Source location (file:line)"),
+    culprit: z.string().nullable().describe("Culprit function/module"),
+    user: z
+      .object({
+        id: z.string().nullish().describe("User ID"),
+        email: z.string().nullish().describe("User email"),
+        username: z.string().nullish().describe("Username"),
+        ip_address: z.string().nullish().describe("IP address"),
+        name: z.string().nullish().describe("User display name"),
+      })
+      .nullable()
+      .describe("User context"),
+    tags: z
+      .array(z.object({ key: z.string(), value: z.string() }))
+      .describe("Event tags"),
+    platform: z
+      .string()
+      .nullable()
+      .describe("Platform (python, javascript, etc.)"),
+    dateCreated: z.string().describe("ISO 8601 creation timestamp"),
+    crashFile: z.string().nullable().describe("Crash file URL"),
+    metadata: z.record(z.unknown()).nullable().describe("Event metadata"),
+  })
+  .describe("Issue event (list endpoint)");
+
 // Project Keys (DSN)
 
 /**

@@ -294,6 +294,7 @@ Work with Sentry projects
 Manage Sentry issues
 
 - `sentry issue list <org/project>` — List issues in a project
+- `sentry issue events <issue>` — List events for a specific issue
 - `sentry issue explain <issue>` — Analyze an issue's root cause using Seer AI
 - `sentry issue plan <issue>` — Generate a solution plan using Seer AI
 - `sentry issue view <issue>` — View details of a specific issue

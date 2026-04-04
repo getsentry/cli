@@ -70,6 +70,38 @@ sentry issue list my-org/frontend --query "is:resolved"
 sentry issue list my-org/frontend --sort freq --limit 20
 ```
 
+### `sentry issue events <issue>`
+
+List events for a specific issue
+
+**Flags:**
+- `-n, --limit <value> - Number of events (1-1000) - (default: "25")`
+- `-q, --query <value> - Search query (Sentry search syntax)`
+- `--full - Include full event body (stacktraces)`
+- `-t, --period <value> - Time period (e.g., "1h", "24h", "7d", "30d") - (default: "7d")`
+- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+- `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
+
+**JSON Fields** (use `--json --fields` to select specific fields):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Internal event ID |
+| `event.type` | string | Event type (error, default, transaction) |
+| `groupID` | string \| null | Group (issue) ID |
+| `eventID` | string | UUID-format event ID |
+| `projectID` | string | Project ID |
+| `message` | string | Event message |
+| `title` | string | Event title |
+| `location` | string \| null | Source location (file:line) |
+| `culprit` | string \| null | Culprit function/module |
+| `user` | object \| null | User context |
+| `tags` | array | Event tags |
+| `platform` | string \| null | Platform (python, javascript, etc.) |
+| `dateCreated` | string | ISO 8601 creation timestamp |
+| `crashFile` | string \| null | Crash file URL |
+| `metadata` | unknown \| null | Event metadata |
+
 ### `sentry issue explain <issue>`
 
 Analyze an issue's root cause using Seer AI

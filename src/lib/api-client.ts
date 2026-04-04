@@ -30,6 +30,7 @@ export {
   findEventAcrossOrgs,
   getEvent,
   getLatestEvent,
+  listIssueEvents,
   type ResolvedEvent,
   resolveEventInOrg,
 } from "./api/events.js";

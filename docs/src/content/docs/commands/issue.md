@@ -29,6 +29,27 @@ List issues in a project
 | `--compact` | Single-line rows for compact output (auto-detects if omitted) |
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 
+### `sentry issue events <issue>`
+
+List events for a specific issue
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<issue>` | Issue: @latest, @most_frequent, &lt;org&gt;/ID, &lt;project&gt;-suffix, ID, or suffix |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-n, --limit <limit>` | Number of events (1-1000) (default: "25") |
+| `-q, --query <query>` | Search query (Sentry search syntax) |
+| `--full` | Include full event body (stacktraces) |
+| `-t, --period <period>` | Time period (e.g., "1h", "24h", "7d", "30d") (default: "7d") |
+| `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
+| `-c, --cursor <cursor>` | Navigate pages: "next", "prev", "first" (or raw cursor string) |
+
 ### `sentry issue explain <issue>`
 
 Analyze an issue's root cause using Seer AI
