@@ -232,11 +232,12 @@ export async function listIssueEvents(
     currentCursor = nextCursor;
   }
 
-  // Trim to exact limit; discard nextCursor if we overshot to avoid
-  // cursor-position skips (same pattern as listIssuesAllPages).
-  if (allEvents.length > limit) {
-    return { data: allEvents.slice(0, limit) };
-  }
+  // Trim to exact limit. Unlike listIssuesAllPages (which controls per_page),
+  // the issue events endpoint has no per-page parameter, so the API may return
+  // more items than requested. We preserve nextCursor so the command-level
+  // cursor stack can navigate to subsequent pages.
+  const trimmed =
+    allEvents.length > limit ? allEvents.slice(0, limit) : allEvents;
 
-  return { data: allEvents, nextCursor };
+  return { data: trimmed, nextCursor };
 }
