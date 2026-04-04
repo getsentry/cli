@@ -89,6 +89,7 @@ export function handleComplete(args: string[]): void {
  */
 export const ORG_PROJECT_COMMANDS = new Set([
   "issue list",
+  "issue events",
   "issue view",
   "issue explain",
   "issue plan",
