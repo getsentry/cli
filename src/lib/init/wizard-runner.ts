@@ -93,10 +93,9 @@ function truncateForTerminal(message: string): string {
 }
 
 /**
- * Build a human-readable spinner message from the actual payload params
- * instead of relying on the server-provided `detail` string. This ensures
- * the user always sees truthful information about which files are being
- * read, written, or checked — regardless of what the server sends.
+ * Build a human-readable spinner message from the payload params.
+ * Each operation type generates a descriptive message showing which
+ * files are being read, written, or checked.
  */
 export function describeLocalOp(payload: LocalOpPayload): string {
   switch (payload.operation) {

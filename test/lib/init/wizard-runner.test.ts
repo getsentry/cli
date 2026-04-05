@@ -542,7 +542,7 @@ describe("runWizard", () => {
       expect(payload.operation).toBe("list-dir");
     });
 
-    test("ignores server detail and generates message from payload params", async () => {
+    test("generates spinner message from payload params", async () => {
       mockStartResult = {
         status: "suspended",
         suspended: [["install-deps"]],
@@ -551,7 +551,6 @@ describe("runWizard", () => {
             suspendPayload: {
               type: "local-op",
               operation: "run-commands",
-              detail: "Server-provided message about next.config.js",
               cwd: "/app",
               params: {
                 commands: ["pip install sentry-sdk"],
@@ -564,13 +563,12 @@ describe("runWizard", () => {
 
       await runWizard(makeOptions());
 
-      // Should use CLI-generated message, NOT the server detail
       expect(spinnerMock.message).toHaveBeenCalledWith(
         "Running pip install sentry-sdk..."
       );
     });
 
-    test("generates message from payload when detail is absent", async () => {
+    test("generates message for run-commands operation", async () => {
       mockStartResult = {
         status: "suspended",
         suspended: [["install-deps"]],
