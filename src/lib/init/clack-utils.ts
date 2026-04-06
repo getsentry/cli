@@ -60,6 +60,10 @@ const FEATURE_INFO: Record<string, { label: string; hint: string }> = {
     label: "User Feedback",
     hint: "Collect in-app user feedback and reports",
   },
+  reactFeatures: {
+    label: "React Features",
+    hint: "Redux, component tracking, source maps, and integrations",
+  },
 };
 
 export function featureLabel(id: string): string {
@@ -81,6 +85,7 @@ const FEATURE_DISPLAY_ORDER = [
   "crons",
   "aiMonitoring",
   "userFeedback",
+  "reactFeatures",
 ];
 
 /** Sort features into canonical display order for the multi-select prompt. */
