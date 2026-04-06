@@ -21,7 +21,7 @@ List logs from a project
 
 | Option | Description |
 |--------|-------------|
-| `-n, --limit <limit>` | Number of log entries (1-1000) (default: "100") |
+| `-n, --limit <limit>` | Number of log entries (1-1000) (default: "25") |
 | `-q, --query <query>` | Filter query (Sentry search syntax) |
 | `-f, --follow <follow>` | Stream logs (optionally specify poll interval in seconds) |
 | `-t, --period <period>` | Time period (e.g., "30d", "14d", "24h"). Default: 30d (project mode), 14d (trace mode) |
