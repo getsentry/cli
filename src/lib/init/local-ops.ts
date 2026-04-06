@@ -835,7 +835,10 @@ async function createSentryProject(
     if (options.org && options.project) {
       const existing = await tryGetExistingProject(orgSlug, slug);
       if (existing) {
-        return existing;
+        return {
+          ...existing,
+          message: `Using existing project "${slug}" in ${orgSlug}`,
+        };
       }
     }
 

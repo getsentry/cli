@@ -94,6 +94,8 @@ export type CreateSentryProjectPayload = {
 export type LocalOpResult = {
   ok: boolean;
   error?: string;
+  /** Optional user-facing message (e.g. "Using existing project 'foo'"). */
+  message?: string;
   data?: unknown;
 };
 

@@ -191,6 +191,11 @@ async function handleSuspendedStep(
 
     const localResult = await handleLocalOp(payload, options);
 
+    if (localResult.message) {
+      spin.stop(localResult.message);
+      spin.start("Processing...");
+    }
+
     const history = stepHistory.get(stepId) ?? [];
     history.push(localResult);
     stepHistory.set(stepId, history);

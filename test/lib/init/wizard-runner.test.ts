@@ -638,6 +638,41 @@ describe("runWizard", () => {
       }
     });
 
+    test("displays message from LocalOpResult via spin.stop", async () => {
+      handleLocalOpSpy.mockResolvedValue({
+        ok: true,
+        message: 'Using existing project "my-app" in acme',
+        data: { orgSlug: "acme", projectSlug: "my-app" },
+      });
+
+      mockStartResult = {
+        status: "suspended",
+        suspended: [["ensure-sentry-project"]],
+        steps: {
+          "ensure-sentry-project": {
+            suspendPayload: {
+              type: "local-op",
+              operation: "create-sentry-project",
+              cwd: "/app",
+              params: { name: "my-app", platform: "python" },
+            },
+          },
+        },
+      };
+      mockResumeResults = [{ status: "success" }];
+
+      await runWizard(makeOptions());
+
+      expect(spinnerMock.stop).toHaveBeenCalledWith(
+        'Using existing project "my-app" in acme'
+      );
+      // Spinner should restart after showing the message
+      const startCalls = spinnerMock.start.mock.calls.map(
+        (c: string[]) => c[0]
+      );
+      expect(startCalls).toContain("Processing...");
+    });
+
     test("dispatches interactive payload to handleInteractive", async () => {
       mockStartResult = {
         status: "suspended",

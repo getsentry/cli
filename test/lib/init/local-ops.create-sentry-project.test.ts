@@ -433,6 +433,9 @@ describe("create-sentry-project", () => {
       );
 
       expect(result.ok).toBe(true);
+      expect(result.message).toBe(
+        'Using existing project "my-app" in acme-corp'
+      );
       const data = result.data as { orgSlug: string; projectSlug: string };
       expect(data.orgSlug).toBe("acme-corp");
       expect(data.projectSlug).toBe("my-app");
