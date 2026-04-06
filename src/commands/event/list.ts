@@ -1,7 +1,10 @@
 /**
- * sentry issue events
+ * sentry event list
  *
  * List events for a specific Sentry issue.
+ * This is the top-level event listing command — functionally equivalent to
+ * `sentry issue events` but living in the `event` route. The `sentry events`
+ * plural alias points here.
  */
 
 import type { SentryContext } from "../../context.js";
@@ -18,24 +21,31 @@ import { buildListCommand, paginationHint } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
 import { IssueEventSchema } from "../../types/index.js";
 import {
+  buildCommandHint,
+  issueIdPositional,
+  resolveIssue,
+} from "../issue/utils.js";
+import {
   appendEventsFlags,
   EVENTS_ALIASES,
   EVENTS_FLAGS,
   type EventsFlags,
   formatEventsHuman,
   jsonTransformEvents,
-} from "../event/shared-events.js";
-import { buildCommandHint, issueIdPositional, resolveIssue } from "./utils.js";
+} from "./shared-events.js";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 /** Command name used in issue resolution error messages */
-const COMMAND_NAME = "events";
+const COMMAND_NAME = "list";
+
+/** Base command prefix for error hints */
+const COMMAND_BASE = "sentry event";
 
 /** Command key for pagination cursor storage */
-export const PAGINATION_KEY = "issue-events";
+const PAGINATION_KEY = "event-list";
 
 // ---------------------------------------------------------------------------
 // Pagination hints
@@ -46,7 +56,7 @@ function nextPageHint(
   issueArg: string,
   flags: Pick<EventsFlags, "query" | "full" | "period">
 ): string {
-  return appendEventsFlags(`sentry issue events ${issueArg} -c next`, flags);
+  return appendEventsFlags(`sentry event list ${issueArg} -c next`, flags);
 }
 
 /** Build the CLI hint for fetching the previous page, preserving active flags. */
@@ -54,16 +64,16 @@ function prevPageHint(
   issueArg: string,
   flags: Pick<EventsFlags, "query" | "full" | "period">
 ): string {
-  return appendEventsFlags(`sentry issue events ${issueArg} -c prev`, flags);
+  return appendEventsFlags(`sentry event list ${issueArg} -c prev`, flags);
 }
 
 // ---------------------------------------------------------------------------
 // Command definition
 // ---------------------------------------------------------------------------
 
-export const eventsCommand = buildListCommand("issue", {
+export const listCommand = buildListCommand("event", {
   docs: {
-    brief: "List events for a specific issue",
+    brief: "List events for an issue",
     fullDescription:
       "List events belonging to a Sentry issue.\n\n" +
       "Issue formats:\n" +
@@ -74,11 +84,11 @@ export const eventsCommand = buildListCommand("issue", {
       "  ID               - Short ID: CLI-G\n" +
       "  numeric          - Numeric ID: 123456789\n\n" +
       "Examples:\n" +
-      "  sentry issue events CLI-G\n" +
-      "  sentry issue events @latest --limit 50\n" +
-      "  sentry issue events 123456789 --full\n" +
-      '  sentry issue events CLI-G -q "user.email:foo@bar.com"\n' +
-      "  sentry issue events CLI-G --json",
+      "  sentry event list CLI-G\n" +
+      "  sentry event list @latest --limit 50\n" +
+      "  sentry event list 123456789 --full\n" +
+      '  sentry event list CLI-G -q "user.email:foo@bar.com"\n' +
+      "  sentry event list CLI-G --json",
   },
   output: {
     human: formatEventsHuman,
@@ -98,19 +108,20 @@ export const eventsCommand = buildListCommand("issue", {
       issueArg,
       cwd,
       command: COMMAND_NAME,
+      commandBase: COMMAND_BASE,
     });
 
     // Org is required for region-routed events endpoint
     if (!org) {
       throw new ContextError(
         "Organization",
-        buildCommandHint(COMMAND_NAME, issueArg)
+        buildCommandHint(COMMAND_NAME, issueArg, COMMAND_BASE)
       );
     }
 
     // Build context key for pagination (keyed by issue ID + query-varying params)
     const contextKey = buildPaginationContextKey(
-      "issue-events",
+      "event-list",
       `${org}/${issue.id}`,
       { q: flags.query, period: flags.period }
     );

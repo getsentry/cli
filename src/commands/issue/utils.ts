@@ -72,26 +72,31 @@ export const issueIdPositional = {
  *
  * @param command - The issue subcommand (e.g., "view", "explain")
  * @param issueId - The user-provided issue ID
+ * @param base - Base command prefix (default: "sentry issue")
  */
-export function buildCommandHint(command: string, issueId: string): string {
+export function buildCommandHint(
+  command: string,
+  issueId: string,
+  base = "sentry issue"
+): string {
   // Selectors already include the @ prefix and are self-contained
   if (issueId.startsWith("@")) {
-    return `sentry issue ${command} <org>/${issueId}`;
+    return `${base} ${command} <org>/${issueId}`;
   }
   // Input already contains org/project context — show as-is to avoid double-prefixing
   if (issueId.includes("/")) {
-    return `sentry issue ${command} ${issueId}`;
+    return `${base} ${command} ${issueId}`;
   }
   // Numeric IDs always need org context - can't be combined with project
   if (isAllDigits(issueId)) {
-    return `sentry issue ${command} <org>/${issueId}`;
+    return `${base} ${command} <org>/${issueId}`;
   }
   // Short suffixes can be combined with project prefix
   if (isShortSuffix(issueId)) {
-    return `sentry issue ${command} <project>-${issueId}`;
+    return `${base} ${command} <project>-${issueId}`;
   }
   // Everything else (has dash) needs org prefix
-  return `sentry issue ${command} <org>/${issueId}`;
+  return `${base} ${command} <org>/${issueId}`;
 }
 
 /** Default timeout in milliseconds (6 minutes) */
@@ -461,6 +466,8 @@ export type ResolveIssueOptions = {
   cwd: string;
   /** Command name for error messages (e.g., "view", "explain") */
   command: string;
+  /** Base command prefix for error hints (default: "sentry issue") */
+  commandBase?: string;
 };
 
 /**
@@ -544,9 +551,9 @@ async function resolveNumericIssue(
 export async function resolveIssue(
   options: ResolveIssueOptions
 ): Promise<ResolvedIssueResult> {
-  const { issueArg, cwd, command } = options;
+  const { issueArg, cwd, command, commandBase } = options;
   const parsed = parseIssueArg(issueArg);
-  const commandHint = buildCommandHint(command, issueArg);
+  const commandHint = buildCommandHint(command, issueArg, commandBase);
 
   let result: ResolvedIssueResult;
 

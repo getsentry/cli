@@ -303,9 +303,10 @@ Manage Sentry issues
 
 ### Event
 
-View Sentry events
+View and list Sentry events
 
 - `sentry event view <org/project/event-id...>` — View details of a specific event
+- `sentry event list <issue>` — List events for an issue
 
 → Full flags and examples: `references/event.md`
 
