@@ -101,6 +101,13 @@ export const listCommand = buildListCommand("event", {
     aliases: EVENTS_ALIASES,
   },
   async *func(this: SentryContext, flags: EventsFlags, issueArg: string) {
+    // interceptSubcommand (in buildListCommand) may replace the positional
+    // with undefined when the user types e.g. "sentry events view" via the
+    // plural alias. The tip message is already printed — just bail out.
+    if (!issueArg) {
+      return;
+    }
+
     const { cwd } = this;
 
     // Resolve issue using shared resolution logic (supports @latest, short IDs, etc.)
