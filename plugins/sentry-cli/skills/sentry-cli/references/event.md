@@ -1,7 +1,7 @@
 ---
-name: sentry-cli-events
+name: sentry-cli-event
 version: 0.25.0-dev.0
-description: View individual error events
+description: View Sentry events
 requires:
   bins: ["sentry"]
   auth: true

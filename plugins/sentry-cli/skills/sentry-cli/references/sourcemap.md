@@ -1,13 +1,13 @@
 ---
 name: sentry-cli-sourcemap
 version: 0.25.0-dev.0
-description: Sentry CLI sourcemap commands
+description: Manage sourcemaps
 requires:
   bins: ["sentry"]
   auth: true
 ---
 
-# sourcemap Commands
+# Sourcemap Commands
 
 Manage sourcemaps
 

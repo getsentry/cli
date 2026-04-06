@@ -276,7 +276,7 @@ Work with Sentry organizations
 - `sentry org list` — List organizations
 - `sentry org view <org>` — View details of an organization
 
-→ Full flags and examples: `references/organizations.md`
+→ Full flags and examples: `references/org.md`
 
 ### Project
 
@@ -287,7 +287,7 @@ Work with Sentry projects
 - `sentry project list <org/project>` — List projects
 - `sentry project view <org/project>` — View details of a project
 
-→ Full flags and examples: `references/projects.md`
+→ Full flags and examples: `references/project.md`
 
 ### Issue
 
@@ -299,7 +299,7 @@ Manage Sentry issues
 - `sentry issue plan <issue>` — Generate a solution plan using Seer AI
 - `sentry issue view <issue>` — View details of a specific issue
 
-→ Full flags and examples: `references/issues.md`
+→ Full flags and examples: `references/issue.md`
 
 ### Event
 
@@ -307,7 +307,7 @@ View Sentry events
 
 - `sentry event view <org/project/event-id...>` — View details of a specific event
 
-→ Full flags and examples: `references/events.md`
+→ Full flags and examples: `references/event.md`
 
 ### Api
 
@@ -326,7 +326,7 @@ CLI-related commands
 - `sentry cli setup` — Configure shell integration
 - `sentry cli upgrade <version>` — Update the Sentry CLI to the latest version
 
-→ Full flags and examples: `references/setup.md`
+→ Full flags and examples: `references/cli.md`
 
 ### Dashboard
 
@@ -339,7 +339,7 @@ Manage Sentry dashboards
 - `sentry dashboard widget edit <org/project/dashboard...>` — Edit a widget in a dashboard
 - `sentry dashboard widget delete <org/project/dashboard...>` — Delete a widget from a dashboard
 
-→ Full flags and examples: `references/dashboards.md`
+→ Full flags and examples: `references/dashboard.md`
 
 ### Release
 
@@ -363,7 +363,7 @@ Work with Sentry repositories
 
 - `sentry repo list <org/project>` — List repositories
 
-→ Full flags and examples: `references/teams.md`
+→ Full flags and examples: `references/repo.md`
 
 ### Team
 
@@ -371,7 +371,7 @@ Work with Sentry teams
 
 - `sentry team list <org/project>` — List teams
 
-→ Full flags and examples: `references/teams.md`
+→ Full flags and examples: `references/team.md`
 
 ### Log
 
@@ -380,7 +380,7 @@ View Sentry logs
 - `sentry log list <org/project-or-trace-id...>` — List logs from a project
 - `sentry log view <org/project/log-id...>` — View details of one or more log entries
 
-→ Full flags and examples: `references/logs.md`
+→ Full flags and examples: `references/log.md`
 
 ### Sourcemap
 
@@ -398,7 +398,7 @@ List and view spans in projects or traces
 - `sentry span list <org/project/trace-id...>` — List spans in a project or trace
 - `sentry span view <trace-id/span-id...>` — View details of specific spans
 
-→ Full flags and examples: `references/traces.md`
+→ Full flags and examples: `references/span.md`
 
 ### Trace
 
@@ -408,7 +408,7 @@ View distributed traces
 - `sentry trace view <org/project/trace-id...>` — View details of a specific trace
 - `sentry trace logs <org/trace-id...>` — View logs associated with a trace
 
-→ Full flags and examples: `references/traces.md`
+→ Full flags and examples: `references/trace.md`
 
 ### Trial
 
@@ -417,7 +417,7 @@ Manage product trials
 - `sentry trial list <org>` — List product trials
 - `sentry trial start <name> <org>` — Start a product trial
 
-→ Full flags and examples: `references/trials.md`
+→ Full flags and examples: `references/trial.md`
 
 ### Init
 
@@ -425,7 +425,7 @@ Initialize Sentry in your project (experimental)
 
 - `sentry init <target> <directory>` — Initialize Sentry in your project (experimental)
 
-→ Full flags and examples: `references/setup.md`
+→ Full flags and examples: `references/init.md`
 
 ### Schema
 
@@ -433,7 +433,7 @@ Browse the Sentry API schema
 
 - `sentry schema <resource...>` — Browse the Sentry API schema
 
-→ Full flags and examples: `references/setup.md`
+→ Full flags and examples: `references/schema.md`
 
 ## Global Options
 

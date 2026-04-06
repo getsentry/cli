@@ -1,13 +1,13 @@
 ---
 name: sentry-cli-api
 version: 0.25.0-dev.0
-description: Make arbitrary Sentry API requests
+description: Make an authenticated API request
 requires:
   bins: ["sentry"]
   auth: true
 ---
 
-# API Command
+# API Commands
 
 Make an authenticated API request
 

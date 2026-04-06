@@ -1,13 +1,13 @@
 ---
 name: sentry-cli-auth
 version: 0.25.0-dev.0
-description: Authenticate with Sentry via OAuth or API tokens
+description: Authenticate with Sentry
 requires:
   bins: ["sentry"]
   auth: true
 ---
 
-# Authentication Commands
+# Auth Commands
 
 Authenticate with Sentry
 

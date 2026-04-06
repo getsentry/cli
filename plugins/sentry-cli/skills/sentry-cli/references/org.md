@@ -1,13 +1,13 @@
 ---
-name: sentry-cli-organizations
+name: sentry-cli-org
 version: 0.25.0-dev.0
-description: List and view Sentry organizations
+description: Work with Sentry organizations
 requires:
   bins: ["sentry"]
   auth: true
 ---
 
-# Organization Commands
+# Org Commands
 
 Work with Sentry organizations
 

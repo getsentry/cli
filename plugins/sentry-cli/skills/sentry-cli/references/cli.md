@@ -1,19 +1,15 @@
 ---
-name: sentry-cli-setup
+name: sentry-cli-cli
 version: 0.25.0-dev.0
-description: Configure the CLI, install integrations, and manage upgrades
+description: CLI-related commands
 requires:
   bins: ["sentry"]
   auth: true
 ---
 
-# CLI Setup Commands
+# CLI Commands
 
 CLI-related commands
-
-Initialize Sentry in your project (experimental)
-
-Browse the Sentry API schema
 
 ### `sentry cli feedback <message...>`
 
@@ -97,71 +93,6 @@ sentry cli upgrade nightly
 
 # Switch back to stable
 sentry cli upgrade stable
-```
-
-### `sentry init <target> <directory>`
-
-Initialize Sentry in your project (experimental)
-
-**Flags:**
-- `-y, --yes - Non-interactive mode (accept defaults)`
-- `--dry-run - Preview changes without applying them`
-- `--features <value>... - Features to enable: errors,tracing,logs,replay,metrics,profiling,sourcemaps,crons,ai-monitoring,user-feedback`
-- `-t, --team <value> - Team slug to create the project under`
-
-**Examples:**
-
-```bash
-# Interactive setup
-sentry init
-
-# Non-interactive with auto-yes
-sentry init -y
-
-# Dry run to preview changes
-sentry init --dry-run
-
-# Target a subdirectory
-sentry init ./my-app
-
-# Use a specific org (auto-detect project)
-sentry init acme/
-
-# Use a specific org and project
-sentry init acme/my-app
-
-# Assign a team when creating a new project
-sentry init acme/ --team backend
-
-# Enable specific features
-sentry init --features profiling,replay
-```
-
-### `sentry schema <resource...>`
-
-Browse the Sentry API schema
-
-**Flags:**
-- `--all - Show all endpoints in a flat list`
-- `-q, --search <value> - Search endpoints by keyword`
-
-**Examples:**
-
-```bash
-# List all API resources
-sentry schema
-
-# Browse issue endpoints
-sentry schema issues
-
-# View details for a specific operation
-sentry schema issues list
-
-# Search for monitoring-related endpoints
-sentry schema --search monitor
-
-# Flat list of every endpoint
-sentry schema --all
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
