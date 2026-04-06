@@ -194,7 +194,7 @@ describe("create-sentry-project", () => {
 
   describe("resolveOrgSlug (called directly)", () => {
     test("single org fallback when resolveOrg returns null", async () => {
-      resolveOrgPrefetchedSpy.mockResolvedValue(null);
+      resolveOrgSpy.mockResolvedValue(null);
       listOrgsSpy.mockResolvedValue([
         { id: "1", slug: "solo-org", name: "Solo Org" },
       ]);
@@ -206,7 +206,7 @@ describe("create-sentry-project", () => {
     });
 
     test("no orgs (not authenticated) returns error result", async () => {
-      resolveOrgPrefetchedSpy.mockResolvedValue(null);
+      resolveOrgSpy.mockResolvedValue(null);
       listOrgsSpy.mockResolvedValue([]);
 
       const result = await resolveOrgSlug("/tmp/test", false);
@@ -218,7 +218,7 @@ describe("create-sentry-project", () => {
     });
 
     test("multiple orgs + yes flag returns error with slug list", async () => {
-      resolveOrgPrefetchedSpy.mockResolvedValue(null);
+      resolveOrgSpy.mockResolvedValue(null);
       listOrgsSpy.mockResolvedValue([
         { id: "1", slug: "org-a", name: "Org A" },
         { id: "2", slug: "org-b", name: "Org B" },
@@ -235,7 +235,7 @@ describe("create-sentry-project", () => {
     });
 
     test("multiple orgs + interactive select picks chosen org", async () => {
-      resolveOrgPrefetchedSpy.mockResolvedValue(null);
+      resolveOrgSpy.mockResolvedValue(null);
       listOrgsSpy.mockResolvedValue([
         { id: "1", slug: "org-a", name: "Org A" },
         { id: "2", slug: "org-b", name: "Org B" },
@@ -249,7 +249,7 @@ describe("create-sentry-project", () => {
     });
 
     test("multiple orgs + user cancels select throws WizardCancelledError", async () => {
-      resolveOrgPrefetchedSpy.mockResolvedValue(null);
+      resolveOrgSpy.mockResolvedValue(null);
       listOrgsSpy.mockResolvedValue([
         { id: "1", slug: "org-a", name: "Org A" },
         { id: "2", slug: "org-b", name: "Org B" },
@@ -295,23 +295,18 @@ describe("create-sentry-project", () => {
     expect(data.dsn).toBe("");
   });
 
-  describe("resolveOrgSlug — numeric org ID from DSN", () => {
-    test("numeric ID + cache hit → resolved to slug", async () => {
-      resolveOrgPrefetchedSpy.mockResolvedValue({ org: "4507492088676352" });
-      getOrgByNumericIdSpy.mockReturnValue({
-        slug: "acme-corp",
-        regionUrl: "https://us.sentry.io",
-      });
+  describe("resolveOrgSlug — resolveOrg integration", () => {
+    test("returns org from resolveOrg when it resolves", async () => {
+      resolveOrgSpy.mockResolvedValue({ org: "acme-corp" });
 
       const result = await resolveOrgSlug("/tmp/test", false);
 
       expect(result).toBe("acme-corp");
-      expect(getOrgByNumericIdSpy).toHaveBeenCalledWith("4507492088676352");
+      expect(listOrgsSpy).not.toHaveBeenCalled();
     });
 
-    test("numeric ID + cache miss → falls through to single org in listOrganizations", async () => {
-      resolveOrgPrefetchedSpy.mockResolvedValue({ org: "4507492088676352" });
-      getOrgByNumericIdSpy.mockReturnValue(undefined);
+    test("falls through to listOrganizations when resolveOrg returns null", async () => {
+      resolveOrgSpy.mockResolvedValue(null);
       listOrgsSpy.mockResolvedValue([
         { id: "1", slug: "solo-org", name: "Solo Org" },
       ]);
@@ -319,22 +314,6 @@ describe("create-sentry-project", () => {
       const result = await resolveOrgSlug("/tmp/test", false);
 
       expect(result).toBe("solo-org");
-    });
-
-    test("numeric ID + cache miss + multiple orgs + --yes → error with org list", async () => {
-      resolveOrgPrefetchedSpy.mockResolvedValue({ org: "4507492088676352" });
-      getOrgByNumericIdSpy.mockReturnValue(undefined);
-      listOrgsSpy.mockResolvedValue([
-        { id: "1", slug: "org-a", name: "Org A" },
-        { id: "2", slug: "org-b", name: "Org B" },
-      ]);
-
-      const result = await resolveOrgSlug("/tmp/test", true);
-
-      expect(typeof result).toBe("object");
-      const err = result as { ok: boolean; error: string };
-      expect(err.ok).toBe(false);
-      expect(err.error).toContain("Multiple organizations found");
     });
   });
 
