@@ -16,7 +16,7 @@ View Sentry logs
 List logs from a project
 
 **Flags:**
-- `-n, --limit <value> - Number of log entries (1-1000) - (default: "25")`
+- `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
 - `-q, --query <value> - Filter query (Sentry search syntax)`
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
 - `-t, --period <value> - Time range: "7d", "2026-03-01..2026-04-01", ">=2026-03-01"`
