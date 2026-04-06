@@ -73,13 +73,17 @@ sentry issue plan PROJ-ABC
 | `sentry auth` | Login, logout, check authentication status |
 | `sentry org` | List and view organizations |
 | `sentry project` | List, view, create, and delete projects |
-| `sentry issue` | List, view, explain, and plan issues |
+| `sentry issue` | List, view, explain, plan issues, and list events |
 | `sentry event` | View event details |
 | `sentry trace` | List and view distributed traces |
 | `sentry span` | List and view spans |
 | `sentry log` | List and view logs (with streaming) |
-| `sentry dashboard` | List, view, and create dashboards with widgets |
+| `sentry release` | Create, finalize, deploy, and manage releases |
+| `sentry dashboard` | List, view, create dashboards and manage widgets |
 | `sentry sourcemap` | Inject debug IDs and upload sourcemaps |
+| `sentry team` | List teams in an organization |
+| `sentry repo` | List repositories in an organization |
+| `sentry trial` | List and start product trials |
 | `sentry init` | Initialize Sentry in your project |
 | `sentry schema` | Browse the Sentry API schema |
 | `sentry api` | Make direct API requests |

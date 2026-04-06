@@ -105,6 +105,8 @@ const ROUTE_TO_REFERENCE: Record<string, string> = {
   trace: "traces",
   span: "traces",
   trial: "trials",
+  release: "releases",
+  sourcemap: "sourcemaps",
   cli: "setup",
   init: "setup",
   schema: "setup",
@@ -123,6 +125,8 @@ const REFERENCE_TITLES: Record<string, string> = {
   logs: "Log Commands",
   traces: "Trace & Span Commands",
   trials: "Trial Commands",
+  releases: "Release Commands",
+  sourcemaps: "Sourcemap Commands",
   setup: "CLI Setup Commands",
 };
 
@@ -139,6 +143,8 @@ const REFERENCE_DESCRIPTIONS: Record<string, string> = {
   logs: "List and stream logs from Sentry projects",
   traces: "List and inspect traces and spans for performance analysis",
   trials: "List and start product trials",
+  releases: "Create, finalize, deploy, and manage Sentry releases",
+  sourcemaps: "Inject debug IDs and upload sourcemaps to Sentry",
   setup: "Configure the CLI, install integrations, and manage upgrades",
 };
 

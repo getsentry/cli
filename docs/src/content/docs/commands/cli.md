@@ -123,7 +123,8 @@ The CLI detects how it was installed and uses the appropriate upgrade method:
 | brew | Binary in a Homebrew Cellar (`brew install getsentry/tools/sentry`) |
 | npm | Globally installed via `npm install -g sentry` |
 | pnpm | Globally installed via `pnpm add -g sentry` |
-| bun | Globally installed via `bun install -g sentry` |
+| bun | Globally installed via `bun add -g sentry` |
+| yarn | Globally installed via `yarn global add sentry` |
 
 Nightly builds are only available as standalone binaries (via the curl install method). Switching to nightly from a package manager install will automatically migrate to a standalone binary.
 

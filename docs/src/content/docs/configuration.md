@@ -155,6 +155,30 @@ Disable API response caching. When set, the CLI will not cache API responses and
 export SENTRY_NO_CACHE=1
 ```
 
+### `SENTRY_RELEASE`
+
+Used by `sentry release propose-version` to propose a release version. When set, `propose-version` returns this value instead of reading from CI environment variables or git.
+
+```bash
+export SENTRY_RELEASE=1.0.0
+```
+
+### `SENTRY_MAX_PAGINATION_PAGES`
+
+Override the maximum number of pages the CLI will fetch when auto-paginating API responses. Defaults to 50. Only needed in rare cases with extremely large datasets.
+
+```bash
+export SENTRY_MAX_PAGINATION_PAGES=100
+```
+
+### `SENTRY_CLI_NO_AUTO_REPAIR`
+
+Disable automatic SQLite database schema repair. By default, the CLI auto-repairs its local database when schema mismatches are detected. Set this to skip automatic repair (useful for debugging).
+
+```bash
+export SENTRY_CLI_NO_AUTO_REPAIR=1
+```
+
 ## Global Options
 
 These flags are accepted by every command. They are not shown in individual command `--help` output, but are always available.
