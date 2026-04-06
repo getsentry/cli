@@ -659,8 +659,7 @@ function generateCompactCommandsSection(
       continue;
     }
 
-    const titleCase = route.name.charAt(0).toUpperCase() + route.name.slice(1);
-    lines.push(`### ${titleCase}`);
+    lines.push(`### ${capitalize(route.name)}`);
     lines.push("");
     lines.push(route.brief);
     lines.push("");
