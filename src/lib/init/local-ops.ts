@@ -346,98 +346,61 @@ export async function handleLocalOp(
   }
 }
 
-/** Directory names that are listed but never recursed into. */
-const SKIP_DIRS = new Set(["node_modules"]);
-
-/** Return true if a symlink escapes the project directory. */
-function isEscapingSymlink(cwd: string, relPath: string): boolean {
-  try {
-    safePath(cwd, relPath);
-    return false;
-  } catch {
-    return true;
-  }
-}
-
-/** Whether a directory entry should be recursed into. */
-function shouldRecurse(entry: fs.Dirent): boolean {
-  if (!entry.isDirectory() || entry.isSymbolicLink()) {
-    return false;
-  }
-  return !(entry.name.startsWith(".") || SKIP_DIRS.has(entry.name));
-}
-
-type WalkContext = {
-  cwd: string;
-  recursive: boolean;
-  maxDepth: number;
-  maxEntries: number;
-  entries: DirEntry[];
-};
-
-/** Process a single dirent during directory walking. */
-async function processDirEntry(
-  ctx: WalkContext,
-  dir: string,
-  entry: fs.Dirent,
-  depth: number
-): Promise<void> {
-  const relPath = path.relative(ctx.cwd, path.join(dir, entry.name));
-  if (entry.isSymbolicLink() && isEscapingSymlink(ctx.cwd, relPath)) {
-    return;
-  }
-
-  const type = entry.isDirectory() ? "directory" : "file";
-  ctx.entries.push({ name: entry.name, path: relPath, type });
-
-  if (ctx.recursive && shouldRecurse(entry)) {
-    await walkDir(ctx, path.join(dir, entry.name), depth + 1);
-  }
-}
-
-async function walkDir(
-  ctx: WalkContext,
-  dir: string,
-  depth: number
-): Promise<void> {
-  if (ctx.entries.length >= ctx.maxEntries || depth > ctx.maxDepth) {
-    return;
-  }
-
-  let handle: fs.Dir;
-  try {
-    handle = await fs.promises.opendir(dir, { bufferSize: 1024 });
-  } catch {
-    return;
-  }
-
-  // No explicit handle.close() needed: for-await-of auto-closes the Dir
-  try {
-    for await (const entry of handle) {
-      if (ctx.entries.length >= ctx.maxEntries) {
-        break;
-      }
-      await processDirEntry(ctx, dir, entry, depth);
-    }
-  } catch {
-    // Directory unreadable (ENOENT, EACCES, etc.) — skip gracefully
-  }
-}
-
 async function listDir(payload: ListDirPayload): Promise<LocalOpResult> {
   const { cwd, params } = payload;
   const targetPath = safePath(cwd, params.path);
+  const maxDepth = params.maxDepth ?? 3;
+  const maxEntries = params.maxEntries ?? 500;
+  const recursive = params.recursive ?? false;
 
-  const ctx: WalkContext = {
-    cwd,
-    recursive: params.recursive ?? false,
-    maxDepth: params.maxDepth ?? 3,
-    maxEntries: params.maxEntries ?? 500,
-    entries: [],
-  };
+  const entries: DirEntry[] = [];
 
-  await walkDir(ctx, targetPath, 0);
-  return { ok: true, data: { entries: ctx.entries } };
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: recursive directory walk is inherently complex but straightforward
+  async function walk(dir: string, depth: number): Promise<void> {
+    if (entries.length >= maxEntries || depth > maxDepth) {
+      return;
+    }
+
+    let dirEntries: fs.Dirent[];
+    try {
+      dirEntries = await fs.promises.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of dirEntries) {
+      if (entries.length >= maxEntries) {
+        return;
+      }
+
+      const relPath = path.relative(cwd, path.join(dir, entry.name));
+
+      // Skip symlinks that escape the project directory
+      if (entry.isSymbolicLink()) {
+        try {
+          safePath(cwd, relPath);
+        } catch {
+          continue;
+        }
+      }
+
+      const type = entry.isDirectory() ? "directory" : "file";
+      entries.push({ name: entry.name, path: relPath, type });
+
+      if (
+        recursive &&
+        entry.isDirectory() &&
+        !entry.isSymbolicLink() &&
+        !entry.name.startsWith(".") &&
+        entry.name !== "node_modules"
+      ) {
+        await walk(path.join(dir, entry.name), depth + 1);
+      }
+    }
+  }
+
+  await walk(targetPath, 0);
+  return { ok: true, data: { entries } };
 }
 
 async function readSingleFile(
