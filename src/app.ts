@@ -60,6 +60,7 @@ import { isRouteMap, type RouteMap } from "./lib/introspect.js";
  */
 const PLURAL_TO_SINGULAR: Record<string, string> = {
   dashboards: "dashboard",
+  events: "event",
   issues: "issue",
   orgs: "org",
   projects: "project",
@@ -87,6 +88,7 @@ export const routes = buildRouteMap({
     team: teamRoute,
     issue: issueRoute,
     event: eventRoute,
+    events: eventRoute,
     log: logRoute,
     sourcemap: sourcemapRoute,
     sourcemaps: sourcemapRoute,
@@ -117,6 +119,7 @@ export const routes = buildRouteMap({
       "It provides commands for authentication, viewing issues, and making API calls.",
     hideRoute: {
       dashboards: true,
+      events: true,
       issues: true,
       orgs: true,
       projects: true,
