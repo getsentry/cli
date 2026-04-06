@@ -62,7 +62,7 @@ View logs associated with a trace
 |--------|-------------|
 | `-w, --web` | Open trace in browser |
 | `-t, --period <period>` | Time period to search (e.g., "14d", "7d", "24h"). Default: 14d (default: "14d") |
-| `-n, --limit <limit>` | Number of log entries (<=1000) (default: "25") |
+| `-n, --limit <limit>` | Number of log entries (<=1000) (default: "100") |
 | `-q, --query <query>` | Additional filter query (Sentry search syntax) |
 | `-s, --sort <sort>` | Sort order: "newest" (default) or "oldest" (default: "newest") |
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
