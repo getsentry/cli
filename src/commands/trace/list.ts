@@ -18,6 +18,9 @@ import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   buildListCommand,
+  LIST_DEFAULT_LIMIT,
+  LIST_MAX_LIMIT,
+  LIST_MIN_LIMIT,
   LIST_PERIOD_FLAG,
   PERIOD_ALIASES,
   paginationHint,
@@ -66,15 +69,6 @@ type TraceListResult = {
 
 /** Accepted values for the --sort flag */
 const VALID_SORT_VALUES: SortValue[] = ["date", "duration"];
-
-/** Maximum allowed value for --limit flag */
-const MAX_LIMIT = 1000;
-
-/** Minimum allowed value for --limit flag */
-const MIN_LIMIT = 1;
-
-/** Default number of traces to show */
-const DEFAULT_LIMIT = 20;
 
 /** Command name used in resolver error messages */
 const COMMAND_NAME = "trace list";
@@ -125,7 +119,7 @@ function prevPageHint(
  * Parse --limit flag, delegating range validation to shared utility.
  */
 function parseLimit(value: string): number {
-  return validateLimit(value, MIN_LIMIT, MAX_LIMIT);
+  return validateLimit(value, LIST_MIN_LIMIT, LIST_MAX_LIMIT);
 }
 
 /**
@@ -231,8 +225,8 @@ export const listCommand = buildListCommand("trace", {
       limit: {
         kind: "parsed",
         parse: parseLimit,
-        brief: `Number of traces (${MIN_LIMIT}-${MAX_LIMIT})`,
-        default: String(DEFAULT_LIMIT),
+        brief: `Number of traces (${LIST_MIN_LIMIT}-${LIST_MAX_LIMIT})`,
+        default: String(LIST_DEFAULT_LIMIT),
       },
       query: {
         kind: "parsed",

@@ -31,6 +31,8 @@ import { renderMarkdown } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   buildListCommand,
+  LIST_DEFAULT_LIMIT,
+  LIST_MAX_LIMIT,
   LIST_PERIOD_FLAG,
   PERIOD_ALIASES,
   paginationHint,
@@ -133,17 +135,6 @@ function extractExtraApiFields(
 /** Accepted values for the --sort flag (matches trace list) */
 const VALID_SORT_VALUES: SpanSortValue[] = ["date", "duration"];
 
-/**
- * CLI-side upper bound for --limit.
- *
- * Passed directly as `per_page` to the Sentry Events API (spans dataset).
- * Matches the cap used by `issue list`, `trace list`, and `log list`.
- */
-const MAX_LIMIT = 1000;
-
-/** Default number of spans to show */
-const DEFAULT_LIMIT = 25;
-
 /** Default sort order for span results */
 const DEFAULT_SORT: SpanSortValue = "date";
 
@@ -166,7 +157,7 @@ const TRACE_USAGE_HINT = "sentry span list [<org>/<project>/]<trace-id>";
  * Parse --limit flag, delegating range validation to shared utility.
  */
 function parseLimit(value: string): number {
-  return validateLimit(value, 1, MAX_LIMIT);
+  return validateLimit(value, 1, LIST_MAX_LIMIT);
 }
 
 /**
@@ -570,8 +561,8 @@ export const listCommand = buildListCommand("span", {
       limit: {
         kind: "parsed",
         parse: parseLimit,
-        brief: `Number of spans (<=${MAX_LIMIT})`,
-        default: String(DEFAULT_LIMIT),
+        brief: `Number of spans (<=${LIST_MAX_LIMIT})`,
+        default: String(LIST_DEFAULT_LIMIT),
       },
       query: {
         kind: "parsed",

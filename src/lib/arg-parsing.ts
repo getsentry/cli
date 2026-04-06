@@ -243,13 +243,17 @@ export function detectSwappedTrialArgs(
  * Used by commands that need API-side limiting (trace list, log list) where
  * the value is passed directly to the API as `per_page`.
  *
+ * Defaults match the shared constants {@link LIST_MIN_LIMIT} (1) and
+ * {@link LIST_MAX_LIMIT} (1000) from `list-command.ts`.
+ *
  * @param value - Raw string input from CLI flag
- * @param min - Minimum allowed value (inclusive)
- * @param max - Maximum allowed value (inclusive)
+ * @param min - Minimum allowed value (inclusive, default: 1)
+ * @param max - Maximum allowed value (inclusive, default: 1000)
  * @returns Parsed integer
  * @throws {Error} If value is NaN or outside [min, max]
  *
  * @example
+ * validateLimit("50")           // 50  (uses defaults 1–1000)
  * validateLimit("50", 1, 1000)  // 50
  * validateLimit("0", 1, 1000)   // throws
  * validateLimit("abc", 1, 1000) // throws

@@ -11,7 +11,13 @@ import { filterFields } from "../../lib/formatters/json.js";
 import { colorTag, escapeMarkdownCell } from "../../lib/formatters/markdown.js";
 import { type Column, formatTable } from "../../lib/formatters/table.js";
 import { formatRelativeTime } from "../../lib/formatters/time-utils.js";
-import { LIST_PERIOD_FLAG, PERIOD_ALIASES } from "../../lib/list-command.js";
+import {
+  LIST_DEFAULT_LIMIT,
+  LIST_MAX_LIMIT,
+  LIST_MIN_LIMIT,
+  LIST_PERIOD_FLAG,
+  PERIOD_ALIASES,
+} from "../../lib/list-command.js";
 import type { IssueEvent } from "../../types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -54,15 +60,6 @@ export type EventsResult = {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-/** Maximum allowed value for --limit flag */
-export const MAX_LIMIT = 1000;
-
-/** Minimum allowed value for --limit flag */
-export const MIN_LIMIT = 1;
-
-/** Default number of events to show */
-export const DEFAULT_LIMIT = 25;
 
 /** Default time period for event queries */
 export const DEFAULT_PERIOD = "7d";
@@ -192,7 +189,7 @@ export function appendEventsFlags(
 
 /** Parse --limit flag, delegating range validation to shared utility. */
 export function parseLimit(value: string): number {
-  return validateLimit(value, MIN_LIMIT, MAX_LIMIT);
+  return validateLimit(value, LIST_MIN_LIMIT, LIST_MAX_LIMIT);
 }
 
 // ---------------------------------------------------------------------------
@@ -204,8 +201,8 @@ export const EVENTS_FLAGS = {
   limit: {
     kind: "parsed",
     parse: parseLimit,
-    brief: `Number of events (${MIN_LIMIT}-${MAX_LIMIT})`,
-    default: String(DEFAULT_LIMIT),
+    brief: `Number of events (${LIST_MIN_LIMIT}-${LIST_MAX_LIMIT})`,
+    default: String(LIST_DEFAULT_LIMIT),
   },
   query: {
     kind: "parsed",

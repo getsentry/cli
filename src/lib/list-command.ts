@@ -38,6 +38,20 @@ import { disableResponseCache } from "./response-cache.js";
 // ---------------------------------------------------------------------------
 
 /**
+ * Absolute maximum items a list command will return.
+ *
+ * The Sentry API silently caps `per_page` at 100; commands auto-paginate
+ * to fill larger limits but stop at this ceiling for practical CLI use.
+ */
+export const LIST_MAX_LIMIT = 1000;
+
+/** Minimum allowed value for `--limit` across all list commands. */
+export const LIST_MIN_LIMIT = 1;
+
+/** Default number of items returned by list commands when `--limit` is omitted. */
+export const LIST_DEFAULT_LIMIT = 25;
+
+/**
  * Positional `org/project` parameter shared by all list commands.
  *
  * Accepts `<org>/`, `<org>/<project>`, or bare `<project>` (search).
@@ -253,11 +267,12 @@ export function paginationHint(opts: {
  *
  * @param entityPlural - Plural entity name used in the brief (e.g. "teams")
  * @param defaultValue - Default limit as a string — Stricli passes it through
- *   numberParser at runtime, so the command receives a number (default: "30")
+ *   numberParser at runtime, so the command receives a number
+ *   (default: {@link LIST_DEFAULT_LIMIT})
  */
 export function buildListLimitFlag(
   entityPlural: string,
-  defaultValue = "30"
+  defaultValue = String(LIST_DEFAULT_LIMIT)
 ): {
   kind: "parsed";
   parse: typeof numberParser;
