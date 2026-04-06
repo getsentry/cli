@@ -29,6 +29,7 @@ import { resolveOrgPrefetched } from "./prefetch.js";
 import type {
   ApplyPatchsetPayload,
   CreateSentryProjectPayload,
+  DetectSentryPayload,
   DirEntry,
   FileExistsBatchPayload,
   ListDirPayload,
@@ -324,6 +325,8 @@ export async function handleLocalOp(
         return await applyPatchset(payload, options.dryRun);
       case "create-sentry-project":
         return await createSentryProject(payload, options);
+      case "detect-sentry":
+        return await detectSentry(payload);
       default:
         return {
           ok: false,
@@ -787,6 +790,26 @@ export async function detectExistingProject(cwd: string): Promise<{
     // Auth error or network error — org inaccessible, fall through to creation
   }
   return null;
+}
+
+async function detectSentry(
+  payload: DetectSentryPayload
+): Promise<LocalOpResult> {
+  const { detectDsn } = await import("../dsn/index.js");
+  const dsn = await detectDsn(payload.cwd);
+
+  if (!dsn) {
+    return { ok: true, data: { status: "none", signals: [] } };
+  }
+
+  const signals = [
+    `dsn: ${dsn.source}${dsn.sourcePath ? ` (${dsn.sourcePath})` : ""}`,
+  ];
+
+  return {
+    ok: true,
+    data: { status: "installed", signals, dsn: dsn.raw },
+  };
 }
 
 async function createSentryProject(

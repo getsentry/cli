@@ -129,6 +129,8 @@ export function describeLocalOp(payload: LocalOpPayload): string {
       return "Listing directory...";
     case "create-sentry-project":
       return `Creating project "${payload.params.name}" (${payload.params.platform})...`;
+    case "detect-sentry":
+      return "Checking for existing Sentry setup...";
     default:
       return `${(payload as { operation: string }).operation}...`;
   }
