@@ -60,6 +60,7 @@ import { isRouteMap, type RouteMap } from "./lib/introspect.js";
  */
 const PLURAL_TO_SINGULAR: Record<string, string> = {
   dashboards: "dashboard",
+  events: "event",
   issues: "issue",
   orgs: "org",
   projects: "project",
@@ -87,6 +88,7 @@ export const routes = buildRouteMap({
     team: teamRoute,
     issue: issueRoute,
     event: eventRoute,
+    events: eventRoute,
     log: logRoute,
     sourcemap: sourcemapRoute,
     sourcemaps: sourcemapRoute,
@@ -117,6 +119,7 @@ export const routes = buildRouteMap({
       "It provides commands for authentication, viewing issues, and making API calls.",
     hideRoute: {
       dashboards: true,
+      events: true,
       issues: true,
       orgs: true,
       projects: true,
@@ -244,7 +247,7 @@ const customText: ApplicationText = {
         return `${text_en.exceptionWhileParsingArguments(exc, ansiColor)}${pluralHint}`;
       }
 
-      // With defaultCommand: "view", unknown tokens like "events" fill the
+      // With defaultCommand: "view", unknown tokens like "metrics" fill the
       // positional slot, then extra args (e.g., CLI-AB) trigger this error.
       // Check if the first non-route token is a known synonym.
       const synonymHint = getSynonymSuggestionFromArgv();
@@ -305,7 +308,7 @@ const customText: ApplicationText = {
       throw exc;
     }
 
-    // Case C: With defaultCommand: "view", unknown tokens like "events" are
+    // Case C: With defaultCommand: "view", unknown tokens like "metrics" are
     // silently consumed as the positional arg. The view command fails at the
     // domain level (e.g., ResolutionError). Check argv for a known synonym
     // and show the suggestion — skip Sentry capture since these are known

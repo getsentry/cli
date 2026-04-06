@@ -208,10 +208,14 @@ function findSwapMatches(invalid: string): string[] {
   const suffixPrefix = `${suffix}-`;
   // Try suffix as a component in other platforms (e.g. "*-hono" for suffix "hono")
   const suffixSuffix = `-${suffix}`;
+  // Also match suffix as a middle component (e.g. "cloudflare" in "node-cloudflare-workers")
+  const suffixMiddle = `-${suffix}-`;
   for (const p of VALID_PLATFORMS) {
     if (p.startsWith(suffixPrefix) && p !== swapped) {
       results.push(p);
     } else if (p.endsWith(suffixSuffix) && p !== invalid) {
+      results.push(p);
+    } else if (p.includes(suffixMiddle)) {
       results.push(p);
     }
   }

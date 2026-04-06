@@ -222,6 +222,32 @@ describe("parsePositionalArgs", () => {
         ValidationError
       );
     });
+
+    test("throws ContextError for bare span ID without trace ID (CLI-SC)", () => {
+      expect(() => parsePositionalArgs(["a1b2c3d4e5f67890"])).toThrow(
+        ContextError
+      );
+    });
+
+    test("bare span ID error identifies the input and suggests correct usage", () => {
+      try {
+        parsePositionalArgs(["A1B2C3D4E5F67890"]);
+        expect.unreachable("Should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ContextError);
+        const msg = (error as ContextError).message;
+        expect(msg).toContain("looks like a span ID");
+        expect(msg).toContain("sentry span view <trace-id> a1b2c3d4e5f67890");
+        expect(msg).toContain("sentry trace list");
+      }
+    });
+
+    test("bare span ID with dashes is still detected (CLI-SC)", () => {
+      // Some tools format span IDs with dashes
+      expect(() => parsePositionalArgs(["a1b2-c3d4-e5f6-7890"])).toThrow(
+        ContextError
+      );
+    });
   });
 });
 
