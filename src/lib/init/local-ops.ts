@@ -349,6 +349,62 @@ export async function handleLocalOp(
 /** Directory names that are listed at their level but never recursed into. */
 const SKIP_DIRS = new Set(["node_modules"]);
 
+/**
+ * Check whether an entry is inside a hidden dir or node_modules.
+ * Top-level skip-dirs (relFromTarget === "") are still listed.
+ */
+function isInsideSkippedDir(relFromTarget: string): boolean {
+  if (relFromTarget === "") {
+    return false;
+  }
+  const segments = relFromTarget.split(path.sep);
+  return segments.some((s) => s.startsWith(".") || SKIP_DIRS.has(s));
+}
+
+/** Return true when a symlink resolves to a path outside `cwd`. */
+function isEscapingSymlink(
+  entry: fs.Dirent,
+  cwd: string,
+  relPath: string
+): boolean {
+  if (!entry.isSymbolicLink()) {
+    return false;
+  }
+  try {
+    safePath(cwd, relPath);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/** Convert a Dirent to a DirEntry, or return null if it should be skipped. */
+function toDirEntry(
+  entry: fs.Dirent,
+  cwd: string,
+  targetPath: string,
+  maxDepth: number
+): DirEntry | null {
+  const relFromTarget = path.relative(targetPath, entry.parentPath);
+  const depth = relFromTarget === "" ? 0 : relFromTarget.split(path.sep).length;
+
+  if (depth > maxDepth) {
+    return null;
+  }
+  if (isInsideSkippedDir(relFromTarget)) {
+    return null;
+  }
+
+  const relPath = path.relative(cwd, path.join(entry.parentPath, entry.name));
+
+  if (isEscapingSymlink(entry, cwd, relPath)) {
+    return null;
+  }
+
+  const type = entry.isDirectory() ? "directory" : "file";
+  return { name: entry.name, path: relPath, type };
+}
+
 async function listDir(payload: ListDirPayload): Promise<LocalOpResult> {
   const { cwd, params } = payload;
   const targetPath = safePath(cwd, params.path);
@@ -364,37 +420,14 @@ async function listDir(payload: ListDirPayload): Promise<LocalOpResult> {
       bufferSize: 1024,
     });
 
-    for await (const entry of dir) {
-      if (entries.length >= maxEntries) break;
-
-      const relFromTarget = path.relative(targetPath, entry.parentPath);
-      const depth =
-        relFromTarget === "" ? 0 : relFromTarget.split(path.sep).length;
-
-      if (depth > maxDepth) continue;
-
-      // Skip entries nested inside hidden dirs or node_modules,
-      // but still list the skip-dirs themselves at their parent level.
-      if (relFromTarget !== "") {
-        const segments = relFromTarget.split(path.sep);
-        if (segments.some((s) => s.startsWith(".") || SKIP_DIRS.has(s))) {
-          continue;
-        }
+    for await (const dirent of dir) {
+      if (entries.length >= maxEntries) {
+        break;
       }
-
-      const relPath = path.relative(cwd, path.join(entry.parentPath, entry.name));
-
-      // If this entry is a symlink, verify it doesn't escape the project directory.
-      if (entry.isSymbolicLink()) {
-        try {
-          safePath(cwd, relPath);
-        } catch {
-          continue;
-        }
+      const parsed = toDirEntry(dirent, cwd, targetPath, maxDepth);
+      if (parsed) {
+        entries.push(parsed);
       }
-
-      const type = entry.isDirectory() ? "directory" : "file";
-      entries.push({ name: entry.name, path: relPath, type });
     }
   } catch {
     // Directory doesn't exist or can't be read
