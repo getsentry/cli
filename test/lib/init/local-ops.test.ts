@@ -482,6 +482,27 @@ describe("handleLocalOp", () => {
       expect(names).toContain("legit.ts");
       expect(names).not.toContain("escape-link");
     });
+
+    test("excludes nested symlinks that point outside project directory in recursive mode", async () => {
+      mkdirSync(join(testDir, "sub"));
+      writeFileSync(join(testDir, "sub", "legit.ts"), "x");
+      symlinkSync("/tmp", join(testDir, "sub", "escape-link"));
+
+      const payload: ListDirPayload = {
+        type: "local-op",
+        operation: "list-dir",
+        cwd: testDir,
+        params: { path: ".", recursive: true, maxDepth: 3 },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      const entries = (result.data as { entries: Array<{ path: string }> })
+        .entries;
+      const paths = entries.map((e) => e.path);
+
+      expect(paths).toContain(join("sub", "legit.ts"));
+      expect(paths).not.toContain(join("sub", "escape-link"));
+    });
   });
 
   describe("read-files", () => {

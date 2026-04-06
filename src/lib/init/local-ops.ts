@@ -346,30 +346,11 @@ export async function handleLocalOp(
   }
 }
 
-/** Directory names that are listed at their level but never recursed into. */
+/** Directory names that are listed but never recursed into. */
 const SKIP_DIRS = new Set(["node_modules"]);
 
-/**
- * Check whether an entry is inside a hidden dir or node_modules.
- * Top-level skip-dirs (relFromTarget === "") are still listed.
- */
-function isInsideSkippedDir(relFromTarget: string): boolean {
-  if (relFromTarget === "") {
-    return false;
-  }
-  const segments = relFromTarget.split(path.sep);
-  return segments.some((s) => s.startsWith(".") || SKIP_DIRS.has(s));
-}
-
-/** Return true when a symlink resolves to a path outside `cwd`. */
-function isEscapingSymlink(
-  entry: fs.Dirent,
-  cwd: string,
-  relPath: string
-): boolean {
-  if (!entry.isSymbolicLink()) {
-    return false;
-  }
+/** Return true if a symlink escapes the project directory. */
+function isEscapingSymlink(cwd: string, relPath: string): boolean {
   try {
     safePath(cwd, relPath);
     return false;
@@ -378,62 +359,86 @@ function isEscapingSymlink(
   }
 }
 
-/** Convert a Dirent to a DirEntry, or return null if it should be skipped. */
-function toDirEntry(
+/** Whether a directory entry should be recursed into. */
+function shouldRecurse(entry: fs.Dirent): boolean {
+  if (!entry.isDirectory() || entry.isSymbolicLink()) {
+    return false;
+  }
+  return !(entry.name.startsWith(".") || SKIP_DIRS.has(entry.name));
+}
+
+type WalkContext = {
+  cwd: string;
+  recursive: boolean;
+  maxDepth: number;
+  maxEntries: number;
+  entries: DirEntry[];
+};
+
+/** Process a single dirent during directory walking. */
+async function processDirEntry(
+  ctx: WalkContext,
+  dir: string,
   entry: fs.Dirent,
-  cwd: string,
-  targetPath: string,
-  maxDepth: number
-): DirEntry | null {
-  const relFromTarget = path.relative(targetPath, entry.parentPath);
-  const depth = relFromTarget === "" ? 0 : relFromTarget.split(path.sep).length;
-
-  if (depth > maxDepth) {
-    return null;
-  }
-  if (isInsideSkippedDir(relFromTarget)) {
-    return null;
-  }
-
-  const relPath = path.relative(cwd, path.join(entry.parentPath, entry.name));
-
-  if (isEscapingSymlink(entry, cwd, relPath)) {
-    return null;
+  depth: number
+): Promise<void> {
+  const relPath = path.relative(ctx.cwd, path.join(dir, entry.name));
+  if (entry.isSymbolicLink() && isEscapingSymlink(ctx.cwd, relPath)) {
+    return;
   }
 
   const type = entry.isDirectory() ? "directory" : "file";
-  return { name: entry.name, path: relPath, type };
+  ctx.entries.push({ name: entry.name, path: relPath, type });
+
+  if (ctx.recursive && shouldRecurse(entry)) {
+    await walkDir(ctx, path.join(dir, entry.name), depth + 1);
+  }
+}
+
+async function walkDir(
+  ctx: WalkContext,
+  dir: string,
+  depth: number
+): Promise<void> {
+  if (ctx.entries.length >= ctx.maxEntries || depth > ctx.maxDepth) {
+    return;
+  }
+
+  let handle: fs.Dir;
+  try {
+    handle = await fs.promises.opendir(dir, { bufferSize: 1024 });
+  } catch {
+    return;
+  }
+
+  try {
+    for await (const entry of handle) {
+      if (ctx.entries.length >= ctx.maxEntries) {
+        break;
+      }
+      await processDirEntry(ctx, dir, entry, depth);
+    }
+  } catch {
+    // Directory unreadable (ENOENT, EACCES, etc.) — skip gracefully
+  } finally {
+    await handle.close();
+  }
 }
 
 async function listDir(payload: ListDirPayload): Promise<LocalOpResult> {
   const { cwd, params } = payload;
   const targetPath = safePath(cwd, params.path);
-  const maxDepth = params.maxDepth ?? 3;
-  const maxEntries = params.maxEntries ?? 500;
-  const recursive = params.recursive ?? false;
 
-  const entries: DirEntry[] = [];
+  const ctx: WalkContext = {
+    cwd,
+    recursive: params.recursive ?? false,
+    maxDepth: params.maxDepth ?? 3,
+    maxEntries: params.maxEntries ?? 500,
+    entries: [],
+  };
 
-  try {
-    const dir = await fs.promises.opendir(targetPath, {
-      recursive,
-      bufferSize: 1024,
-    });
-
-    for await (const dirent of dir) {
-      if (entries.length >= maxEntries) {
-        break;
-      }
-      const parsed = toDirEntry(dirent, cwd, targetPath, maxDepth);
-      if (parsed) {
-        entries.push(parsed);
-      }
-    }
-  } catch {
-    // Directory doesn't exist or can't be read
-  }
-
-  return { ok: true, data: { entries } };
+  await walkDir(ctx, targetPath, 0);
+  return { ok: true, data: { entries: ctx.entries } };
 }
 
 async function readSingleFile(
