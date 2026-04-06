@@ -623,7 +623,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   let run: Awaited<ReturnType<typeof workflow.createRun>>;
   let result: WorkflowRunResult;
   try {
-    const dirListing = precomputeDirListing(directory);
+    const dirListing = await precomputeDirListing(directory);
     spin.message("Connecting to wizard...");
     run = await workflow.createRun();
     result = assertWorkflowResult(

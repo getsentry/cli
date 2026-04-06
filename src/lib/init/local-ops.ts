@@ -284,8 +284,10 @@ function safePath(cwd: string, relative: string): string {
  * Pre-compute directory listing before the first API call.
  * Uses the same parameters the server's discover-context step would request.
  */
-export function precomputeDirListing(directory: string): DirEntry[] {
-  const result = listDir({
+export async function precomputeDirListing(
+  directory: string
+): Promise<DirEntry[]> {
+  const result = await listDir({
     type: "local-op",
     operation: "list-dir",
     cwd: directory,
@@ -344,7 +346,10 @@ export async function handleLocalOp(
   }
 }
 
-function listDir(payload: ListDirPayload): LocalOpResult {
+/** Directory names that are listed at their level but never recursed into. */
+const SKIP_DIRS = new Set(["node_modules"]);
+
+async function listDir(payload: ListDirPayload): Promise<LocalOpResult> {
   const { cwd, params } = payload;
   const targetPath = safePath(cwd, params.path);
   const maxDepth = params.maxDepth ?? 3;
@@ -353,40 +358,48 @@ function listDir(payload: ListDirPayload): LocalOpResult {
 
   const entries: DirEntry[] = [];
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: walking the directory tree is a complex operation
-  function walk(dir: string, depth: number): void {
-    if (entries.length >= maxEntries || depth > maxDepth) {
-      return;
-    }
+  try {
+    const dir = await fs.promises.opendir(targetPath, {
+      recursive,
+      bufferSize: 1024,
+    });
 
-    let dirEntries: fs.Dirent[];
-    try {
-      dirEntries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
+    for await (const entry of dir) {
+      if (entries.length >= maxEntries) break;
 
-    for (const entry of dirEntries) {
-      if (entries.length >= maxEntries) {
-        return;
+      const relFromTarget = path.relative(targetPath, entry.parentPath);
+      const depth =
+        relFromTarget === "" ? 0 : relFromTarget.split(path.sep).length;
+
+      if (depth > maxDepth) continue;
+
+      // Skip entries nested inside hidden dirs or node_modules,
+      // but still list the skip-dirs themselves at their parent level.
+      if (relFromTarget !== "") {
+        const segments = relFromTarget.split(path.sep);
+        if (segments.some((s) => s.startsWith(".") || SKIP_DIRS.has(s))) {
+          continue;
+        }
       }
 
-      const relPath = path.relative(cwd, path.join(dir, entry.name));
+      const relPath = path.relative(cwd, path.join(entry.parentPath, entry.name));
+
+      // If this entry is a symlink, verify it doesn't escape the project directory.
+      if (entry.isSymbolicLink()) {
+        try {
+          safePath(cwd, relPath);
+        } catch {
+          continue;
+        }
+      }
+
       const type = entry.isDirectory() ? "directory" : "file";
       entries.push({ name: entry.name, path: relPath, type });
-
-      if (
-        recursive &&
-        entry.isDirectory() &&
-        !entry.name.startsWith(".") &&
-        entry.name !== "node_modules"
-      ) {
-        walk(path.join(dir, entry.name), depth + 1);
-      }
     }
+  } catch {
+    // Directory doesn't exist or can't be read
   }
 
-  walk(targetPath, 0);
   return { ok: true, data: { entries } };
 }
 

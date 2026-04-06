@@ -193,9 +193,10 @@ beforeEach(() => {
     ok: true,
     data: { results: [] },
   });
-  precomputeDirListingSpy = spyOn(ops, "precomputeDirListing").mockReturnValue(
-    []
-  );
+  precomputeDirListingSpy = spyOn(
+    ops,
+    "precomputeDirListing"
+  ).mockResolvedValue([]);
   handleInteractiveSpy = spyOn(inter, "handleInteractive").mockResolvedValue({
     action: "continue",
   });
