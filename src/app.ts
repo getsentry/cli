@@ -247,7 +247,7 @@ const customText: ApplicationText = {
         return `${text_en.exceptionWhileParsingArguments(exc, ansiColor)}${pluralHint}`;
       }
 
-      // With defaultCommand: "view", unknown tokens like "events" fill the
+      // With defaultCommand: "view", unknown tokens like "metrics" fill the
       // positional slot, then extra args (e.g., CLI-AB) trigger this error.
       // Check if the first non-route token is a known synonym.
       const synonymHint = getSynonymSuggestionFromArgv();
@@ -308,7 +308,7 @@ const customText: ApplicationText = {
       throw exc;
     }
 
-    // Case C: With defaultCommand: "view", unknown tokens like "events" are
+    // Case C: With defaultCommand: "view", unknown tokens like "metrics" are
     // silently consumed as the positional arg. The view command fails at the
     // domain level (e.g., ResolutionError). Check argv for a known synonym
     // and show the suggestion — skip Sentry capture since these are known

@@ -68,6 +68,12 @@ describe("suggestPlatform", () => {
     expect(results).toContain("javascript-react");
   });
 
+  test("suggests middle-component match: javascript-cloudflare → node-cloudflare-* (CLI-WD)", () => {
+    const results = suggestPlatform("javascript-cloudflare");
+    expect(results).toContain("node-cloudflare-pages");
+    expect(results).toContain("node-cloudflare-workers");
+  });
+
   test("returns empty array for garbage input", () => {
     expect(suggestPlatform("xyzgarbage")).toEqual([]);
   });
