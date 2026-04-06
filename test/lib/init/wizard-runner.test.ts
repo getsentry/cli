@@ -36,10 +36,14 @@ import * as inter from "../../../src/lib/init/interactive.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as ops from "../../../src/lib/init/local-ops.js";
 import type {
+  LocalOpPayload,
   WizardOptions,
   WorkflowRunResult,
 } from "../../../src/lib/init/types.js";
-import { runWizard } from "../../../src/lib/init/wizard-runner.js";
+import {
+  describeLocalOp,
+  runWizard,
+} from "../../../src/lib/init/wizard-runner.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as sentryUrls from "../../../src/lib/sentry-urls.js";
 
@@ -538,7 +542,7 @@ describe("runWizard", () => {
       expect(payload.operation).toBe("list-dir");
     });
 
-    test("uses detail field for spinner message when present", async () => {
+    test("generates spinner message from payload params", async () => {
       mockStartResult = {
         status: "suspended",
         suspended: [["install-deps"]],
@@ -547,10 +551,9 @@ describe("runWizard", () => {
             suspendPayload: {
               type: "local-op",
               operation: "run-commands",
-              detail: "npm install @sentry/nextjs @sentry/profiling-node",
               cwd: "/app",
               params: {
-                commands: ["npm install @sentry/nextjs @sentry/profiling-node"],
+                commands: ["pip install sentry-sdk"],
               },
             },
           },
@@ -561,11 +564,11 @@ describe("runWizard", () => {
       await runWizard(makeOptions());
 
       expect(spinnerMock.message).toHaveBeenCalledWith(
-        "npm install @sentry/nextjs @sentry/profiling-node"
+        "Running pip install sentry-sdk..."
       );
     });
 
-    test("falls back to generic message when detail is absent", async () => {
+    test("generates message for run-commands operation", async () => {
       mockStartResult = {
         status: "suspended",
         suspended: [["install-deps"]],
@@ -585,19 +588,17 @@ describe("runWizard", () => {
       await runWizard(makeOptions());
 
       expect(spinnerMock.message).toHaveBeenCalledWith(
-        "Installing dependencies (run-commands)..."
+        "Running npm install @sentry/nextjs..."
       );
     });
 
-    test("truncates detail message when terminal is narrow", async () => {
+    test("truncates generated message when terminal is narrow", async () => {
       const origColumns = process.stdout.columns;
       Object.defineProperty(process.stdout, "columns", {
         value: 40,
         configurable: true,
       });
 
-      const longDetail =
-        "npm install @sentry/nextjs @sentry/profiling-node @sentry/browser";
       mockStartResult = {
         status: "suspended",
         suspended: [["install-deps"]],
@@ -606,9 +607,12 @@ describe("runWizard", () => {
             suspendPayload: {
               type: "local-op",
               operation: "run-commands",
-              detail: longDetail,
               cwd: "/app",
-              params: { commands: [longDetail] },
+              params: {
+                commands: [
+                  "npm install @sentry/nextjs @sentry/profiling-node @sentry/browser",
+                ],
+              },
             },
           },
         },
@@ -620,7 +624,7 @@ describe("runWizard", () => {
 
         // 40 columns - 4 reserved = 36 max, truncated with "…"
         const call = spinnerMock.message.mock.calls.find((c: string[]) =>
-          c[0]?.includes("npm install")
+          c[0]?.includes("Running")
         ) as string[] | undefined;
         expect(call).toBeDefined();
         const msg = call?.[0] ?? "";
@@ -632,6 +636,41 @@ describe("runWizard", () => {
           configurable: true,
         });
       }
+    });
+
+    test("displays message from LocalOpResult via spin.stop", async () => {
+      handleLocalOpSpy.mockResolvedValue({
+        ok: true,
+        message: 'Using existing project "my-app" in acme',
+        data: { orgSlug: "acme", projectSlug: "my-app" },
+      });
+
+      mockStartResult = {
+        status: "suspended",
+        suspended: [["ensure-sentry-project"]],
+        steps: {
+          "ensure-sentry-project": {
+            suspendPayload: {
+              type: "local-op",
+              operation: "create-sentry-project",
+              cwd: "/app",
+              params: { name: "my-app", platform: "python" },
+            },
+          },
+        },
+      };
+      mockResumeResults = [{ status: "success" }];
+
+      await runWizard(makeOptions());
+
+      expect(spinnerMock.stop).toHaveBeenCalledWith(
+        'Using existing project "my-app" in acme'
+      );
+      // Spinner should restart after showing the message
+      const startCalls = spinnerMock.start.mock.calls.map(
+        (c: string[]) => c[0]
+      );
+      expect(startCalls).toContain("Processing...");
     });
 
     test("dispatches interactive payload to handleInteractive", async () => {
@@ -884,6 +923,179 @@ describe("runWizard", () => {
         "Invalid workflow response: expected object"
       );
       expect(process.exitCode).toBe(1);
+    });
+  });
+});
+
+// ── describeLocalOp unit tests ──────────────────────────────────────────────
+
+describe("describeLocalOp", () => {
+  function payload(
+    overrides: Partial<LocalOpPayload> &
+      Pick<LocalOpPayload, "operation" | "params">
+  ): LocalOpPayload {
+    return { type: "local-op", cwd: "/app", ...overrides } as LocalOpPayload;
+  }
+
+  describe("read-files", () => {
+    test("single file shows basename", () => {
+      const msg = describeLocalOp(
+        payload({
+          operation: "read-files",
+          params: { paths: ["src/settings.py"] },
+        })
+      );
+      expect(msg).toBe("Reading settings.py...");
+    });
+
+    test("two files shows both basenames", () => {
+      const msg = describeLocalOp(
+        payload({
+          operation: "read-files",
+          params: { paths: ["src/settings.py", "src/urls.py"] },
+        })
+      );
+      expect(msg).toBe("Reading settings.py, urls.py...");
+    });
+
+    test("three+ files shows count and first two basenames", () => {
+      const msg = describeLocalOp(
+        payload({
+          operation: "read-files",
+          params: {
+            paths: ["a/one.py", "b/two.py", "c/three.py", "d/four.py"],
+          },
+        })
+      );
+      expect(msg).toBe("Reading 4 files (one.py, two.py, ...)...");
+    });
+
+    test("empty paths array", () => {
+      const msg = describeLocalOp(
+        payload({ operation: "read-files", params: { paths: [] } })
+      );
+      expect(msg).toBe("Reading files...");
+    });
+  });
+
+  describe("file-exists-batch", () => {
+    test("single file shows basename", () => {
+      const msg = describeLocalOp(
+        payload({
+          operation: "file-exists-batch",
+          params: { paths: ["requirements.txt"] },
+        })
+      );
+      expect(msg).toBe("Checking requirements.txt...");
+    });
+
+    test("multiple files shows count", () => {
+      const msg = describeLocalOp(
+        payload({
+          operation: "file-exists-batch",
+          params: { paths: ["a.py", "b.py", "c.py"] },
+        })
+      );
+      expect(msg).toBe("Checking 3 files (a.py, b.py, ...)...");
+    });
+  });
+
+  describe("apply-patchset", () => {
+    test("single create shows verb and basename", () => {
+      const msg = describeLocalOp(
+        payload({
+          operation: "apply-patchset",
+          params: {
+            patches: [{ path: "src/sentry.py", action: "create", patch: "" }],
+          },
+        })
+      );
+      expect(msg).toBe("Creating sentry.py...");
+    });
+
+    test("single modify shows verb and basename", () => {
+      const msg = describeLocalOp(
+        payload({
+          operation: "apply-patchset",
+          params: {
+            patches: [{ path: "settings.py", action: "modify", patch: "" }],
+          },
+        })
+      );
+      expect(msg).toBe("Modifying settings.py...");
+    });
+
+    test("single delete shows verb and basename", () => {
+      const msg = describeLocalOp(
+        payload({
+          operation: "apply-patchset",
+          params: {
+            patches: [{ path: "old.js", action: "delete", patch: "" }],
+          },
+        })
+      );
+      expect(msg).toBe("Deleting old.js...");
+    });
+
+    test("multiple patches shows count and breakdown", () => {
+      const msg = describeLocalOp(
+        payload({
+          operation: "apply-patchset",
+          params: {
+            patches: [
+              { path: "a.py", action: "create", patch: "" },
+              { path: "b.py", action: "create", patch: "" },
+              { path: "c.py", action: "modify", patch: "" },
+            ],
+          },
+        })
+      );
+      expect(msg).toBe("Applying 3 file changes (2 created, 1 modified)...");
+    });
+  });
+
+  describe("run-commands", () => {
+    test("single command shows the command", () => {
+      const msg = describeLocalOp(
+        payload({
+          operation: "run-commands",
+          params: { commands: ["pip install sentry-sdk"] },
+        })
+      );
+      expect(msg).toBe("Running pip install sentry-sdk...");
+    });
+
+    test("multiple commands shows count and first", () => {
+      const msg = describeLocalOp(
+        payload({
+          operation: "run-commands",
+          params: {
+            commands: ["pip install sentry-sdk", "python manage.py check"],
+          },
+        })
+      );
+      expect(msg).toBe("Running 2 commands (pip install sentry-sdk, ...)...");
+    });
+  });
+
+  describe("list-dir", () => {
+    test("shows generic listing message", () => {
+      const msg = describeLocalOp(
+        payload({ operation: "list-dir", params: { path: "." } })
+      );
+      expect(msg).toBe("Listing directory...");
+    });
+  });
+
+  describe("create-sentry-project", () => {
+    test("shows project name and platform", () => {
+      const msg = describeLocalOp(
+        payload({
+          operation: "create-sentry-project",
+          params: { name: "my-app", platform: "python-django" },
+        })
+      );
+      expect(msg).toBe('Creating project "my-app" (python-django)...');
     });
   });
 });

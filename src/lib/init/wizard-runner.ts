@@ -7,6 +7,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { basename } from "node:path";
 import {
   cancel,
   confirm,
@@ -49,6 +50,7 @@ import {
   tryGetExistingProject,
 } from "./local-ops.js";
 import type {
+  LocalOpPayload,
   LocalOpResult,
   SuspendPayload,
   WizardOptions,
@@ -90,6 +92,91 @@ function truncateForTerminal(message: string): string {
   return `${message.slice(0, maxWidth - 1)}…`;
 }
 
+/**
+ * Build a human-readable spinner message from the payload params.
+ * Each operation type generates a descriptive message showing which
+ * files are being read, written, or checked.
+ */
+export function describeLocalOp(payload: LocalOpPayload): string {
+  switch (payload.operation) {
+    case "read-files": {
+      const paths = payload.params.paths;
+      return describeFilePaths("Reading", paths);
+    }
+    case "file-exists-batch": {
+      const paths = payload.params.paths;
+      return describeFilePaths("Checking", paths);
+    }
+    case "apply-patchset": {
+      const patches = payload.params.patches;
+      const first = patches[0];
+      if (patches.length === 1 && first) {
+        const verb = patchActionVerb(first.action);
+        return `${verb} ${basename(first.path)}...`;
+      }
+      const counts = patchActionCounts(patches);
+      return `Applying ${patches.length} file changes (${counts})...`;
+    }
+    case "run-commands": {
+      const cmds = payload.params.commands;
+      const first = cmds[0];
+      if (cmds.length === 1 && first) {
+        return `Running ${first}...`;
+      }
+      return `Running ${cmds.length} commands (${first ?? "..."}, ...)...`;
+    }
+    case "list-dir":
+      return "Listing directory...";
+    case "create-sentry-project":
+      return `Creating project "${payload.params.name}" (${payload.params.platform})...`;
+    default:
+      return `${(payload as { operation: string }).operation}...`;
+  }
+}
+
+/** Format a file paths list into a human-readable message with a verb prefix. */
+function describeFilePaths(verb: string, paths: string[]): string {
+  const first = paths[0];
+  const second = paths[1];
+  if (!first) {
+    return `${verb} files...`;
+  }
+  if (paths.length === 1) {
+    return `${verb} ${basename(first)}...`;
+  }
+  if (paths.length === 2 && second) {
+    return `${verb} ${basename(first)}, ${basename(second)}...`;
+  }
+  return `${verb} ${paths.length} files (${basename(first)}${second ? `, ${basename(second)}` : ""}, ...)...`;
+}
+
+/** Map a patch action to a user-facing verb. */
+function patchActionVerb(action: string): string {
+  switch (action) {
+    case "create":
+      return "Creating";
+    case "modify":
+      return "Modifying";
+    case "delete":
+      return "Deleting";
+    default:
+      return "Updating";
+  }
+}
+
+/** Summarize patch actions into a compact string like "2 created, 1 modified". */
+function patchActionCounts(patches: Array<{ action: string }>): string {
+  const counts = new Map<string, number>();
+  for (const p of patches) {
+    counts.set(p.action, (counts.get(p.action) ?? 0) + 1);
+  }
+  const parts: string[] = [];
+  for (const [action, count] of counts) {
+    parts.push(`${count} ${action === "modify" ? "modified" : `${action}d`}`);
+  }
+  return parts.join(", ");
+}
+
 async function handleSuspendedStep(
   ctx: StepContext,
   stepPhases: Map<string, number>,
@@ -99,12 +186,15 @@ async function handleSuspendedStep(
   const label = STEP_LABELS[stepId] ?? stepId;
 
   if (payload.type === "local-op") {
-    const message = payload.detail
-      ? payload.detail
-      : `${label} (${payload.operation})...`;
+    const message = describeLocalOp(payload);
     spin.message(truncateForTerminal(message));
 
     const localResult = await handleLocalOp(payload, options);
+
+    if (localResult.message) {
+      spin.stop(localResult.message);
+      spin.start("Processing...");
+    }
 
     const history = stepHistory.get(stepId) ?? [];
     history.push(localResult);
