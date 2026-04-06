@@ -194,7 +194,7 @@ describe("create-sentry-project", () => {
 
   describe("resolveOrgSlug (called directly)", () => {
     test("single org fallback when resolveOrg returns null", async () => {
-      resolveOrgSpy.mockResolvedValue(null);
+      resolveOrgPrefetchedSpy.mockResolvedValue(null);
       listOrgsSpy.mockResolvedValue([
         { id: "1", slug: "solo-org", name: "Solo Org" },
       ]);
@@ -206,7 +206,7 @@ describe("create-sentry-project", () => {
     });
 
     test("no orgs (not authenticated) returns error result", async () => {
-      resolveOrgSpy.mockResolvedValue(null);
+      resolveOrgPrefetchedSpy.mockResolvedValue(null);
       listOrgsSpy.mockResolvedValue([]);
 
       const result = await resolveOrgSlug("/tmp/test", false);
@@ -218,7 +218,7 @@ describe("create-sentry-project", () => {
     });
 
     test("multiple orgs + yes flag returns error with slug list", async () => {
-      resolveOrgSpy.mockResolvedValue(null);
+      resolveOrgPrefetchedSpy.mockResolvedValue(null);
       listOrgsSpy.mockResolvedValue([
         { id: "1", slug: "org-a", name: "Org A" },
         { id: "2", slug: "org-b", name: "Org B" },
@@ -235,7 +235,7 @@ describe("create-sentry-project", () => {
     });
 
     test("multiple orgs + interactive select picks chosen org", async () => {
-      resolveOrgSpy.mockResolvedValue(null);
+      resolveOrgPrefetchedSpy.mockResolvedValue(null);
       listOrgsSpy.mockResolvedValue([
         { id: "1", slug: "org-a", name: "Org A" },
         { id: "2", slug: "org-b", name: "Org B" },
@@ -249,7 +249,7 @@ describe("create-sentry-project", () => {
     });
 
     test("multiple orgs + user cancels select throws WizardCancelledError", async () => {
-      resolveOrgSpy.mockResolvedValue(null);
+      resolveOrgPrefetchedSpy.mockResolvedValue(null);
       listOrgsSpy.mockResolvedValue([
         { id: "1", slug: "org-a", name: "Org A" },
         { id: "2", slug: "org-b", name: "Org B" },
@@ -296,8 +296,8 @@ describe("create-sentry-project", () => {
   });
 
   describe("resolveOrgSlug — resolveOrg integration", () => {
-    test("returns org from resolveOrg when it resolves", async () => {
-      resolveOrgSpy.mockResolvedValue({ org: "acme-corp" });
+    test("returns org slug when resolveOrg resolves", async () => {
+      resolveOrgPrefetchedSpy.mockResolvedValue({ org: "acme-corp" });
 
       const result = await resolveOrgSlug("/tmp/test", false);
 
@@ -306,7 +306,18 @@ describe("create-sentry-project", () => {
     });
 
     test("falls through to listOrganizations when resolveOrg returns null", async () => {
-      resolveOrgSpy.mockResolvedValue(null);
+      resolveOrgPrefetchedSpy.mockResolvedValue(null);
+      listOrgsSpy.mockResolvedValue([
+        { id: "1", slug: "solo-org", name: "Solo Org" },
+      ]);
+
+      const result = await resolveOrgSlug("/tmp/test", false);
+
+      expect(result).toBe("solo-org");
+    });
+
+    test("numeric ID from resolveOrg falls through to org picker", async () => {
+      resolveOrgPrefetchedSpy.mockResolvedValue({ org: "4507492088676352" });
       listOrgsSpy.mockResolvedValue([
         { id: "1", slug: "solo-org", name: "Solo Org" },
       ]);

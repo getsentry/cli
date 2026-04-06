@@ -16,7 +16,6 @@ import {
   tryGetPrimaryDsn,
 } from "../api-client.js";
 import { ApiError } from "../errors.js";
-import { resolveOrg } from "../resolve-target.js";
 import { resolveOrCreateTeam } from "../resolve-team.js";
 import { buildProjectUrl } from "../sentry-urls.js";
 import { slugify } from "../utils.js";
@@ -26,6 +25,7 @@ import {
   MAX_FILE_BYTES,
   MAX_OUTPUT_BYTES,
 } from "./constants.js";
+import { resolveOrgPrefetched } from "./prefetch.js";
 import type {
   ApplyPatchsetPayload,
   CreateSentryProjectPayload,
@@ -706,11 +706,18 @@ async function applyPatchset(
   return { ok: true, data: { applied } };
 }
 
+/** Matches a bare numeric org ID extracted from a DSN (e.g. "4507492088676352"). */
+const NUMERIC_ORG_ID_RE = /^\d+$/;
+
 /**
  * Resolve the org slug using the shared offline-first resolver, falling back
  * to interactive selection when multiple orgs are available.
  *
- * Resolution priority (via {@link resolveOrg}):
+ * Uses the prefetch-aware helper from `./prefetch.ts` — if
+ * {@link warmOrgDetection} was called earlier (by `init.ts`), the result is
+ * already cached and returns near-instantly.
+ *
+ * Resolution priority (via `resolveOrg`):
  * 1. CLI `--org` flag
  * 2. `SENTRY_ORG` / `SENTRY_PROJECT` env vars
  * 3. Config defaults (SQLite)
@@ -725,9 +732,11 @@ export async function resolveOrgSlug(
   cwd: string,
   yes: boolean
 ): Promise<string | LocalOpResult> {
-  // Reuse the shared offline-first resolver (flags, env vars, defaults, DSN)
-  const resolved = await resolveOrg({ cwd });
-  if (resolved) {
+  // normalizeNumericOrg inside resolveOrg may return a raw numeric ID when
+  // the cache is cold and the API refresh fails. Numeric IDs break write
+  // operations (project/team creation), so fall through to the org picker.
+  const resolved = await resolveOrgPrefetched(cwd);
+  if (resolved && !NUMERIC_ORG_ID_RE.test(resolved.org)) {
     return resolved.org;
   }
 
