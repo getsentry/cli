@@ -309,7 +309,7 @@ View Sentry events
 
 → Full flags and examples: `references/event.md`
 
-### Api
+### API
 
 Make an authenticated API request
 
@@ -317,7 +317,7 @@ Make an authenticated API request
 
 → Full flags and examples: `references/api.md`
 
-### Cli
+### CLI
 
 CLI-related commands
 
