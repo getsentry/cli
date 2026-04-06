@@ -1,13 +1,13 @@
 ---
-name: sentry-cli-sourcemap
+name: sentry-cli-sourcemaps
 version: 0.25.0-dev.0
-description: Sentry CLI sourcemap commands
+description: Inject debug IDs and upload sourcemaps to Sentry
 requires:
   bins: ["sentry"]
   auth: true
 ---
 
-# sourcemap Commands
+# Sourcemap Commands
 
 Manage sourcemaps
 

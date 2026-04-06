@@ -355,7 +355,7 @@ Work with Sentry releases
 - `sentry release set-commits <org/version...>` — Set commits for a release
 - `sentry release propose-version` — Propose a release version
 
-→ Full flags and examples: `references/release.md`
+→ Full flags and examples: `references/releases.md`
 
 ### Repo
 
@@ -389,7 +389,7 @@ Manage sourcemaps
 - `sentry sourcemap inject <directory>` — Inject debug IDs into JavaScript files and sourcemaps
 - `sentry sourcemap upload <directory>` — Upload sourcemaps to Sentry
 
-→ Full flags and examples: `references/sourcemap.md`
+→ Full flags and examples: `references/sourcemaps.md`
 
 ### Span
 

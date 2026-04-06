@@ -1,13 +1,13 @@
 ---
-name: sentry-cli-release
+name: sentry-cli-releases
 version: 0.25.0-dev.0
-description: Sentry CLI release commands
+description: Create, finalize, deploy, and manage Sentry releases
 requires:
   bins: ["sentry"]
   auth: true
 ---
 
-# release Commands
+# Release Commands
 
 Work with Sentry releases
 
