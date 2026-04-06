@@ -16,7 +16,7 @@ Work with Sentry organizations
 List organizations
 
 **Flags:**
-- `-n, --limit <value> - Maximum number of organizations to list - (default: "30")`
+- `-n, --limit <value> - Maximum number of organizations to list - (default: "25")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
 ### `sentry org view <org>`

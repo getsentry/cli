@@ -56,7 +56,7 @@ sentry project delete my-org/old-project --yes
 List projects
 
 **Flags:**
-- `-n, --limit <value> - Maximum number of projects to list - (default: "30")`
+- `-n, --limit <value> - Maximum number of projects to list - (default: "25")`
 - `-p, --platform <value> - Filter by platform (e.g., javascript, python)`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
