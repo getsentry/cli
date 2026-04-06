@@ -43,7 +43,7 @@ const FEATURE_INFO: Record<string, { label: string; hint: string }> = {
     hint: "Code-level performance insights",
   },
   logs: { label: "Logging", hint: "Structured log ingestion" },
-  metrics: { label: "Custom Metrics", hint: "Track custom business metrics" },
+  metrics: { label: "Metrics", hint: "Track business metrics" },
   sourceMaps: {
     label: "Source Maps",
     hint: "See original source code in production errors",
