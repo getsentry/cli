@@ -4,8 +4,9 @@
  * Format wizard results and errors for terminal display using clack.
  */
 
-import { cancel, log, note, outro } from "@clack/prompts";
-import { terminalLink } from "../formatters/colors.js";
+import { cancel, log, outro } from "@clack/prompts";
+import { green, red, terminalLink, yellow } from "../formatters/colors.js";
+import { mdKvTable, renderMarkdown } from "../formatters/markdown.js";
 import { featureLabel } from "./clack-utils.js";
 import {
   EXIT_DEPENDENCY_INSTALL_FAILED,
@@ -16,56 +17,60 @@ import type { WizardOutput, WorkflowRunResult } from "./types.js";
 
 function fileActionIcon(action: string): string {
   if (action === "create") {
-    return "+";
+    return green("+");
   }
   if (action === "delete") {
-    return "-";
+    return red("-");
   }
-  return "~";
+  return yellow("~");
 }
 
-function buildSummaryLines(output: WizardOutput): string[] {
-  const lines: string[] = [];
+function buildSummary(output: WizardOutput): string {
+  const sections: string[] = [];
 
+  const kvRows: [string, string][] = [];
   if (output.platform) {
-    lines.push(`Platform:    ${output.platform}`);
+    kvRows.push(["Platform", output.platform]);
   }
   if (output.projectDir) {
-    lines.push(`Directory:   ${output.projectDir}`);
+    kvRows.push(["Directory", output.projectDir]);
   }
-
   if (output.features?.length) {
-    lines.push(`Features:    ${output.features.map(featureLabel).join(", ")}`);
+    kvRows.push(["Features", output.features.map(featureLabel).join(", ")]);
   }
-
   if (output.commands?.length) {
-    lines.push(`Commands:    ${output.commands.join("; ")}`);
+    kvRows.push(["Commands", output.commands.join("; ")]);
   }
   if (output.sentryProjectUrl) {
-    lines.push(`Project:     ${terminalLink(output.sentryProjectUrl)}`);
+    kvRows.push(["Project", output.sentryProjectUrl]);
   }
   if (output.docsUrl) {
-    lines.push(`Docs:        ${terminalLink(output.docsUrl)}`);
+    kvRows.push(["Docs", output.docsUrl]);
+  }
+
+  if (kvRows.length > 0) {
+    sections.push(mdKvTable(kvRows));
   }
 
   const changedFiles = output.changedFiles;
   if (changedFiles?.length) {
-    lines.push("");
-    lines.push("Changed files:");
-    for (const f of changedFiles) {
-      lines.push(`  ${fileActionIcon(f.action)} ${f.path}`);
-    }
+    sections.push(
+      "### Changed files\n\n" +
+        changedFiles
+          .map((f) => `- ${fileActionIcon(f.action)} ${f.path}`)
+          .join("\n")
+    );
   }
 
-  return lines;
+  return sections.join("\n\n");
 }
 
 export function formatResult(result: WorkflowRunResult): void {
   const output: WizardOutput = result.result ?? {};
-  const lines = buildSummaryLines(output);
+  const md = buildSummary(output);
 
-  if (lines.length > 0) {
-    note(lines.join("\n"), "Setup complete");
+  if (md.length > 0) {
+    log.message(renderMarkdown(md));
   }
 
   if (output.warnings?.length) {
