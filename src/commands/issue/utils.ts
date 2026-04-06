@@ -500,7 +500,8 @@ function extractOrgFromPermalink(
 async function resolveNumericIssue(
   id: string,
   cwd: string,
-  command: string
+  command: string,
+  commandBase = "sentry issue"
 ): Promise<ResolvedIssueResult> {
   const resolvedOrg = await resolveOrg({ cwd });
   try {
@@ -521,10 +522,10 @@ async function resolveNumericIssue(
       // group IDs with short-ID suffixes. When org context is available, use
       // the real org slug instead of <org> placeholder (CLI-BT, 18 users).
       const orgHint = resolvedOrg?.org ?? "<org>";
-      const hint = `sentry issue ${command} ${orgHint}/${id}`;
+      const hint = `${commandBase} ${command} ${orgHint}/${id}`;
       throw new ResolutionError(`Issue ${id}`, "not found", hint, [
         `No issue with numeric ID ${id} found — you may not have access, or it may have been deleted.`,
-        `If this is a short ID suffix, try: sentry issue ${command} <project>-${id}`,
+        `If this is a short ID suffix, try: ${commandBase} ${command} <project>-${id}`,
       ]);
     }
     throw err;
@@ -559,7 +560,7 @@ export async function resolveIssue(
 
   switch (parsed.type) {
     case "numeric":
-      result = await resolveNumericIssue(parsed.id, cwd, command);
+      result = await resolveNumericIssue(parsed.id, cwd, command, commandBase);
       break;
 
     case "explicit": {
