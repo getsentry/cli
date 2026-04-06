@@ -7,9 +7,9 @@
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import {
+  ENV_SOURCE_PREFIX,
   getActiveEnvVarName,
   getAuthConfig,
-  isEnvTokenActive,
   refreshToken,
 } from "../../lib/db/auth.js";
 import { AuthError } from "../../lib/errors.js";
@@ -71,8 +71,9 @@ Examples:
     },
   },
   async *func(this: SentryContext, flags: RefreshFlags) {
-    // Env var tokens can't be refreshed
-    if (isEnvTokenActive()) {
+    // Env var tokens can't be refreshed — only block if env is the effective source
+    const currentAuth = getAuthConfig();
+    if (currentAuth?.source.startsWith(ENV_SOURCE_PREFIX)) {
       const envVar = getActiveEnvVarName();
       throw new AuthError(
         "invalid",

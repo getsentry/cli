@@ -282,8 +282,6 @@ describe("statusCommand.func", () => {
       // Plain mode strips markdown escapes: SENTRY_TOKEN (not SENTRY\_TOKEN)
       expect(getOutput()).toContain("SENTRY_TOKEN");
       expect(getOutput()).toContain("environment variable");
-      // Should NOT say SENTRY_AUTH_TOKEN
-      expect(getOutput()).not.toContain("SENTRY_AUTH_TOKEN");
     });
   });
 

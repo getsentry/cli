@@ -11,7 +11,9 @@ import {
   type AuthConfig,
   type AuthSource,
   ENV_SOURCE_PREFIX,
+  getActiveEnvVarName,
   getAuthConfig,
+  getRawEnvToken,
   isAuthenticated,
 } from "../../lib/db/auth.js";
 import {
@@ -76,6 +78,13 @@ export type AuthStatusData = {
     organizations?: Array<{ name: string; slug: string }>;
     /** Error message if verification failed */
     error?: string;
+  };
+  /** Environment variable token info (present when SENTRY_AUTH_TOKEN or SENTRY_TOKEN is set) */
+  envToken?: {
+    /** Name of the env var (e.g., "SENTRY_AUTH_TOKEN") */
+    envVar: string;
+    /** Whether the env token is the effective auth source (vs bypassed for OAuth) */
+    active: boolean;
   };
 };
 
@@ -186,6 +195,13 @@ export const statusCommand = buildCommand({
         : undefined;
     }
 
+    // Check for env token regardless of whether it's the active source
+    // (it may be set but bypassed because stored OAuth takes priority)
+    const rawEnv = getRawEnvToken();
+    const envTokenData: AuthStatusData["envToken"] = rawEnv
+      ? { envVar: getActiveEnvVarName(), active: fromEnv }
+      : undefined;
+
     const data: AuthStatusData = {
       authenticated: true,
       source: auth?.source ?? "oauth",
@@ -194,6 +210,7 @@ export const statusCommand = buildCommand({
       token: collectTokenInfo(auth, flags["show-token"]),
       defaults: collectDefaults(),
       verification: await verifyCredentials(),
+      envToken: envTokenData,
     };
 
     yield new CommandOutput(data);

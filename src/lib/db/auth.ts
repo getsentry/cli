@@ -37,9 +37,33 @@ export type AuthConfig = {
 };
 
 /**
+ * Read the raw token string from environment variables, ignoring all filters.
+ *
+ * Unlike {@link getEnvToken}, this always returns the env token if set, even
+ * when stored OAuth credentials would normally take priority. Used by the HTTP
+ * layer to check "was an env token provided?" independent of whether it's being
+ * used, and by the per-endpoint permission cache.
+ */
+export function getRawEnvToken(): string | undefined {
+  const authToken = getEnv().SENTRY_AUTH_TOKEN?.trim();
+  if (authToken) {
+    return authToken;
+  }
+  const sentryToken = getEnv().SENTRY_TOKEN?.trim();
+  if (sentryToken) {
+    return sentryToken;
+  }
+  return;
+}
+
+/**
  * Read token from environment variables.
  * `SENTRY_AUTH_TOKEN` takes priority over `SENTRY_TOKEN` (matches legacy sentry-cli).
  * Empty or whitespace-only values are treated as unset.
+ *
+ * This function is intentionally pure (no DB access). The "prefer stored OAuth
+ * over env token" logic lives in {@link getAuthToken} and {@link getAuthConfig}
+ * which check the DB first when `SENTRY_FORCE_ENV_TOKEN` is not set.
  */
 function getEnvToken(): { token: string; source: AuthSource } | undefined {
   const authToken = getEnv().SENTRY_AUTH_TOKEN?.trim();
@@ -62,34 +86,49 @@ export function isEnvTokenActive(): boolean {
 }
 
 /**
- * Get the name of the active env var providing authentication.
- * Returns the specific variable name (e.g. "SENTRY_AUTH_TOKEN" or "SENTRY_TOKEN").
- *
- * **Important**: Call only after checking {@link isEnvTokenActive} returns true.
- * Falls back to "SENTRY_AUTH_TOKEN" if no env source is active, which is a safe
- * default for error messages but may be misleading if used unconditionally.
+ * Get the name of the env var providing a token, for error messages.
+ * Returns the specific variable name (e.g. "SENTRY_AUTH_TOKEN" or "SENTRY_TOKEN")
+ * by checking which env var {@link getRawEnvToken} would read.
+ * Falls back to "SENTRY_AUTH_TOKEN" if no env var is set.
  */
 export function getActiveEnvVarName(): string {
-  const env = getEnvToken();
-  if (env) {
-    return env.source.slice(ENV_SOURCE_PREFIX.length);
+  // Match getRawEnvToken() priority: SENTRY_AUTH_TOKEN first, then SENTRY_TOKEN
+  if (getEnv().SENTRY_AUTH_TOKEN?.trim()) {
+    return "SENTRY_AUTH_TOKEN";
+  }
+  if (getEnv().SENTRY_TOKEN?.trim()) {
+    return "SENTRY_TOKEN";
   }
   return "SENTRY_AUTH_TOKEN";
 }
 
 export function getAuthConfig(): AuthConfig | undefined {
-  const envToken = getEnvToken();
-  if (envToken) {
-    return { token: envToken.token, source: envToken.source };
+  // When SENTRY_FORCE_ENV_TOKEN is set, check env first (old behavior).
+  // Otherwise, check the DB first — stored OAuth takes priority over env tokens.
+  // This is the core fix for #646: wizard-generated build tokens no longer
+  // silently override the user's interactive login.
+  const forceEnv = getEnv().SENTRY_FORCE_ENV_TOKEN?.trim();
+  if (forceEnv) {
+    const envToken = getEnvToken();
+    if (envToken) {
+      return { token: envToken.token, source: envToken.source };
+    }
   }
 
-  return withDbSpan("getAuthConfig", () => {
+  const dbConfig = withDbSpan("getAuthConfig", () => {
     const db = getDatabase();
     const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
       | AuthRow
       | undefined;
 
     if (!row?.token) {
+      return;
+    }
+
+    // Skip expired tokens without a refresh token — they're unusable.
+    // Expired tokens WITH a refresh token are kept: auth refresh and
+    // refreshToken() need them to perform the OAuth refresh flow.
+    if (row.expires_at && Date.now() > row.expires_at && !row.refresh_token) {
       return;
     }
 
@@ -101,16 +140,34 @@ export function getAuthConfig(): AuthConfig | undefined {
       source: "oauth" as const,
     };
   });
-}
-
-/** Get the active auth token. Checks env vars first, then falls back to SQLite. */
-export function getAuthToken(): string | undefined {
-  const envToken = getEnvToken();
-  if (envToken) {
-    return envToken.token;
+  if (dbConfig) {
+    return dbConfig;
   }
 
-  return withDbSpan("getAuthToken", () => {
+  // No stored OAuth — fall back to env token
+  const envToken = getEnvToken();
+  if (envToken) {
+    return { token: envToken.token, source: envToken.source };
+  }
+  return;
+}
+
+/**
+ * Get the active auth token.
+ *
+ * Default: checks the DB first (stored OAuth wins), then falls back to env vars.
+ * With `SENTRY_FORCE_ENV_TOKEN=1`: checks env vars first (old behavior).
+ */
+export function getAuthToken(): string | undefined {
+  const forceEnv = getEnv().SENTRY_FORCE_ENV_TOKEN?.trim();
+  if (forceEnv) {
+    const envToken = getEnvToken();
+    if (envToken) {
+      return envToken.token;
+    }
+  }
+
+  const dbToken = withDbSpan("getAuthToken", () => {
     const db = getDatabase();
     const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
       | AuthRow
@@ -126,6 +183,16 @@ export function getAuthToken(): string | undefined {
 
     return row.token;
   });
+  if (dbToken) {
+    return dbToken;
+  }
+
+  // No stored OAuth — fall back to env token
+  const envToken = getEnvToken();
+  if (envToken) {
+    return envToken.token;
+  }
+  return;
 }
 
 export function setAuthToken(
@@ -179,6 +246,32 @@ export function isAuthenticated(): boolean {
   return !!token;
 }
 
+/**
+ * Check if usable OAuth credentials are stored in the database.
+ *
+ * Returns true when the `auth` table has either:
+ * - A non-expired token, or
+ * - An expired token with a refresh token (will be refreshed on next use)
+ *
+ * Used by the login command to decide whether to prompt for re-authentication
+ * when an env token is present.
+ */
+export function hasStoredAuthCredentials(): boolean {
+  const db = getDatabase();
+  const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
+    | AuthRow
+    | undefined;
+  if (!row?.token) {
+    return false;
+  }
+  // Non-expired token
+  if (!row.expires_at || Date.now() <= row.expires_at) {
+    return true;
+  }
+  // Expired but has refresh token — will be refreshed on next use
+  return !!row.refresh_token;
+}
+
 export type RefreshTokenOptions = {
   /** Bypass threshold check and always refresh */
   force?: boolean;
@@ -229,10 +322,13 @@ async function performTokenRefresh(
 export async function refreshToken(
   options: RefreshTokenOptions = {}
 ): Promise<RefreshTokenResult> {
-  // Env var tokens are assumed valid — no refresh, no expiry check
-  const envToken = getEnvToken();
-  if (envToken) {
-    return { token: envToken.token, refreshed: false };
+  // With SENTRY_FORCE_ENV_TOKEN, env token takes priority (no refresh needed).
+  const forceEnv = getEnv().SENTRY_FORCE_ENV_TOKEN?.trim();
+  if (forceEnv) {
+    const envToken = getEnvToken();
+    if (envToken) {
+      return { token: envToken.token, refreshed: false };
+    }
   }
 
   const { force = false } = options;
@@ -244,6 +340,11 @@ export async function refreshToken(
     | undefined;
 
   if (!row?.token) {
+    // No stored token — try env token as fallback
+    const envToken = getEnvToken();
+    if (envToken) {
+      return { token: envToken.token, refreshed: false };
+    }
     throw new AuthError("not_authenticated");
   }
 
@@ -271,6 +372,11 @@ export async function refreshToken(
 
   if (!row.refresh_token) {
     await clearAuth();
+    // Fall back to env token if available (consistent with getAuthToken/getAuthConfig)
+    const envToken = getEnvToken();
+    if (envToken) {
+      return { token: envToken.token, refreshed: false };
+    }
     throw new AuthError(
       "expired",
       "Session expired and no refresh token available. Run 'sentry auth login'."

@@ -57,6 +57,7 @@ export function throwApiError(
     error && typeof error === "object" && "detail" in error
       ? stringifyUnknown((error as { detail: unknown }).detail)
       : stringifyUnknown(error);
+
   throw new ApiError(
     `${context}: ${status} ${response.statusText ?? "Unknown"}`,
     status,

@@ -90,7 +90,10 @@ describe("logoutCommand.func", () => {
 
   test("OAuth token: clears auth and writes success to stdout", async () => {
     isAuthenticatedSpy.mockReturnValue(true);
-    isEnvTokenActiveSpy.mockReturnValue(false);
+    getAuthConfigSpy.mockReturnValue({
+      token: "sntrys_oauth_123",
+      source: "oauth",
+    });
     const { context, getOutput } = createContext();
 
     await func.call(context, {});
@@ -124,7 +127,10 @@ describe("logoutCommand.func", () => {
 
   test("env token (SENTRY_TOKEN): shows correct env var name in error", async () => {
     isAuthenticatedSpy.mockReturnValue(true);
-    isEnvTokenActiveSpy.mockReturnValue(true);
+    getAuthConfigSpy.mockReturnValue({
+      token: "sntrys_token_456",
+      source: "env:SENTRY_TOKEN",
+    });
     // Clear SENTRY_AUTH_TOKEN so SENTRY_TOKEN takes priority
     const savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
     delete process.env.SENTRY_AUTH_TOKEN;
@@ -148,23 +154,18 @@ describe("logoutCommand.func", () => {
     expect(clearAuthSpy).not.toHaveBeenCalled();
   });
 
-  test("env token: error message includes env var from getActiveEnvVarName", async () => {
+  test("OAuth source with env var set: clears stored OAuth (env var still present)", async () => {
     isAuthenticatedSpy.mockReturnValue(true);
-    isEnvTokenActiveSpy.mockReturnValue(true);
-    // Simulate edge case: source doesn't start with "env:" prefix
+    // Effective source is OAuth even though env var is set
     getAuthConfigSpy.mockReturnValue({
-      token: "sntrys_token",
+      token: "sntrys_oauth",
       source: "oauth",
     });
-    const { context } = createContext();
+    const { context, getOutput } = createContext();
 
-    try {
-      await func.call(context, {});
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(AuthError);
-      // Falls back to "SENTRY_AUTH_TOKEN" as default env var name
-      expect((err as AuthError).message).toContain("SENTRY_AUTH_TOKEN");
-    }
+    await func.call(context, {});
+
+    expect(clearAuthSpy).toHaveBeenCalled();
+    expect(getOutput()).toContain("Logged out successfully");
   });
 });
