@@ -16,7 +16,6 @@ import {
   applyFreshFlag,
   FRESH_ALIASES,
   FRESH_FLAG,
-  LIST_DEFAULT_LIMIT,
   LIST_MAX_LIMIT,
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
@@ -136,7 +135,7 @@ export const logsCommand = buildCommand({
         kind: "parsed",
         parse: parseLimit,
         brief: `Number of log entries (<=${LIST_MAX_LIMIT})`,
-        default: String(LIST_DEFAULT_LIMIT),
+        default: "100", // Logs are high-volume; 25 is too stingy for debugging
       },
       query: {
         kind: "parsed",

@@ -37,7 +37,6 @@ import {
 import type { StreamingTable } from "../../lib/formatters/text-table.js";
 import {
   buildListCommand,
-  LIST_DEFAULT_LIMIT,
   LIST_MAX_LIMIT,
   LIST_MIN_LIMIT,
   TARGET_PATTERN_NOTE,
@@ -628,7 +627,7 @@ export const listCommand = buildListCommand(
           kind: "parsed",
           parse: parseLimit,
           brief: `Number of log entries (${LIST_MIN_LIMIT}-${LIST_MAX_LIMIT})`,
-          default: String(LIST_DEFAULT_LIMIT),
+          default: "100", // Logs are high-volume; 25 is too stingy for debugging
         },
         query: {
           kind: "parsed",
