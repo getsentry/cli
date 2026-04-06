@@ -25,7 +25,8 @@ export type LocalOpPayload =
   | FileExistsBatchPayload
   | RunCommandsPayload
   | ApplyPatchsetPayload
-  | CreateSentryProjectPayload;
+  | CreateSentryProjectPayload
+  | DetectSentryPayload;
 
 export type ListDirPayload = {
   type: "local-op";
@@ -89,6 +90,15 @@ export type CreateSentryProjectPayload = {
     name: string;
     platform: string;
   };
+};
+
+export type DetectSentryPayload = {
+  type: "local-op";
+  operation: "detect-sentry";
+  /** Human-readable spinner hint from the server (≤ 120 chars, sensitive values redacted). */
+  detail?: string;
+  cwd: string;
+  params: Record<string, never>;
 };
 
 export type LocalOpResult = {
