@@ -103,6 +103,7 @@ export const ORG_PROJECT_COMMANDS = new Set([
   "span list",
   "span view",
   "event view",
+  "event list",
   "log list",
   "log view",
   "dashboard list",

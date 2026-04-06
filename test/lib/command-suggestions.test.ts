@@ -59,12 +59,9 @@ describe("getCommandSuggestion", () => {
     expect(s!.command).toContain("assignedTo");
   });
 
-  // --- Pattern 4: event list ---
-  test("suggests issue view for 'event/list'", () => {
-    const s = getCommandSuggestion("event", "list");
-    expect(s).toBeDefined();
-    expect(s!.command).toContain("issue view");
-    expect(s!.explanation).toContain("scoped to issues");
+  // --- Pattern 4: event list is now a real command (no longer a synonym) ---
+  test("returns undefined for 'event/list' (now a real command)", () => {
+    expect(getCommandSuggestion("event", "list")).toBeUndefined();
   });
 
   // --- Pattern 5: old sentry-cli commands ---
