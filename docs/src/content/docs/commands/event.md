@@ -3,7 +3,7 @@ title: event
 description: Event commands for the Sentry CLI
 ---
 
-View Sentry events
+View and list Sentry events
 
 ## Commands
 
@@ -24,6 +24,27 @@ View details of a specific event
 | `-w, --web` | Open in browser |
 | `--spans <spans>` | Span tree depth limit (number, "all" for unlimited, "no" to disable) (default: "3") |
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
+
+### `sentry event list <issue>`
+
+List events for an issue
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<issue>` | Issue: @latest, @most_frequent, &lt;org&gt;/ID, &lt;project&gt;-suffix, ID, or suffix |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-n, --limit <limit>` | Number of events (1-1000) (default: "25") |
+| `-q, --query <query>` | Search query (Sentry search syntax) |
+| `--full` | Include full event body (stacktraces) |
+| `-t, --period <period>` | Time period (e.g., "1h", "24h", "7d", "30d") (default: "7d") |
+| `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
+| `-c, --cursor <cursor>` | Navigate pages: "next", "prev", "first" (or raw cursor string) |
 
 All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
 
