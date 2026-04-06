@@ -73,8 +73,8 @@ export {
   listOrganizationsUncached,
 } from "./api/organizations.js";
 export {
-  createProject,
   type CreatedProjectDetails,
+  createProject,
   createProjectWithDsn,
   deleteProject,
   findProjectByDsnKey,
