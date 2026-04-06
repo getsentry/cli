@@ -436,59 +436,82 @@ async function listDir(payload: ListDirPayload): Promise<LocalOpResult> {
   return { ok: true, data: { entries } };
 }
 
-function readFiles(payload: ReadFilesPayload): LocalOpResult {
+async function readSingleFile(
+  cwd: string,
+  filePath: string,
+  maxBytes: number
+): Promise<string | null> {
+  try {
+    const absPath = safePath(cwd, filePath);
+    const stat = await fs.promises.stat(absPath);
+    let content: string;
+    if (stat.size > maxBytes) {
+      const fh = await fs.promises.open(absPath, "r");
+      try {
+        const buffer = Buffer.alloc(maxBytes);
+        await fh.read(buffer, 0, maxBytes, 0);
+        content = buffer.toString("utf-8");
+      } finally {
+        await fh.close();
+      }
+    } else {
+      content = await fs.promises.readFile(absPath, "utf-8");
+    }
+
+    // Minify JSON files by stripping whitespace/formatting
+    if (filePath.endsWith(".json")) {
+      try {
+        content = JSON.stringify(JSON.parse(content));
+      } catch {
+        // Not valid JSON (truncated, JSONC, etc.) — send as-is
+      }
+    }
+
+    return content;
+  } catch {
+    return null;
+  }
+}
+
+async function readFiles(payload: ReadFilesPayload): Promise<LocalOpResult> {
   const { cwd, params } = payload;
   const maxBytes = params.maxBytes ?? MAX_FILE_BYTES;
+
+  const results = await Promise.all(
+    params.paths.map(async (filePath) => {
+      const content = await readSingleFile(cwd, filePath, maxBytes);
+      return [filePath, content] as const;
+    })
+  );
+
   const files: Record<string, string | null> = {};
-
-  for (const filePath of params.paths) {
-    try {
-      const absPath = safePath(cwd, filePath);
-      const stat = fs.statSync(absPath);
-      let content: string;
-      if (stat.size > maxBytes) {
-        // Read only up to maxBytes
-        const buffer = Buffer.alloc(maxBytes);
-        const fd = fs.openSync(absPath, "r");
-        try {
-          fs.readSync(fd, buffer, 0, maxBytes, 0);
-        } finally {
-          fs.closeSync(fd);
-        }
-        content = buffer.toString("utf-8");
-      } else {
-        content = fs.readFileSync(absPath, "utf-8");
-      }
-
-      // Minify JSON files by stripping whitespace/formatting
-      if (filePath.endsWith(".json")) {
-        try {
-          content = JSON.stringify(JSON.parse(content));
-        } catch {
-          // Not valid JSON (truncated, JSONC, etc.) — send as-is
-        }
-      }
-
-      files[filePath] = content;
-    } catch {
-      files[filePath] = null;
-    }
+  for (const [filePath, content] of results) {
+    files[filePath] = content;
   }
 
   return { ok: true, data: { files } };
 }
 
-function fileExistsBatch(payload: FileExistsBatchPayload): LocalOpResult {
+async function fileExistsBatch(
+  payload: FileExistsBatchPayload
+): Promise<LocalOpResult> {
   const { cwd, params } = payload;
-  const exists: Record<string, boolean> = {};
 
-  for (const filePath of params.paths) {
-    try {
-      const absPath = safePath(cwd, filePath);
-      exists[filePath] = fs.existsSync(absPath);
-    } catch {
-      exists[filePath] = false;
-    }
+  const results = await Promise.all(
+    params.paths.map(async (filePath) => {
+      try {
+        const absPath = safePath(cwd, filePath);
+        await fs.promises.access(absPath);
+        return [filePath, true] as const;
+      } catch {
+        return [filePath, false] as const;
+      }
+    })
+  );
+
+  const exists: Record<string, boolean> = {};
+  for (const [filePath, found] of results) {
+    exists[filePath] = found;
   }
 
   return { ok: true, data: { exists } };
@@ -626,24 +649,56 @@ function applyPatchsetDryRun(payload: ApplyPatchsetPayload): LocalOpResult {
  * indentation style is detected and preserved. For `create` actions, a default
  * of 2-space indentation is used.
  */
-function resolvePatchContent(
+async function resolvePatchContent(
   absPath: string,
   patch: ApplyPatchsetPayload["params"]["patches"][number]
-): string {
+): Promise<string> {
   if (!patch.path.endsWith(".json")) {
     return patch.patch;
   }
   if (patch.action === "modify") {
-    const existing = fs.readFileSync(absPath, "utf-8");
+    const existing = await fs.promises.readFile(absPath, "utf-8");
     return prettyPrintJson(patch.patch, detectJsonIndent(existing));
   }
   return prettyPrintJson(patch.patch, DEFAULT_JSON_INDENT);
 }
 
-function applyPatchset(
+type Patch = ApplyPatchsetPayload["params"]["patches"][number];
+
+const VALID_PATCH_ACTIONS = new Set(["create", "modify", "delete"]);
+
+async function applySinglePatch(absPath: string, patch: Patch): Promise<void> {
+  switch (patch.action) {
+    case "create": {
+      await fs.promises.mkdir(path.dirname(absPath), { recursive: true });
+      const content = await resolvePatchContent(absPath, patch);
+      await fs.promises.writeFile(absPath, content, "utf-8");
+      break;
+    }
+    case "modify": {
+      const content = await resolvePatchContent(absPath, patch);
+      await fs.promises.writeFile(absPath, content, "utf-8");
+      break;
+    }
+    case "delete": {
+      try {
+        await fs.promises.unlink(absPath);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw err;
+        }
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+async function applyPatchset(
   payload: ApplyPatchsetPayload,
   dryRun?: boolean
-): LocalOpResult {
+): Promise<LocalOpResult> {
   if (dryRun) {
     return applyPatchsetDryRun(payload);
   }
@@ -653,7 +708,7 @@ function applyPatchset(
   // Phase 1: Validate all paths and actions before writing anything
   for (const patch of params.patches) {
     safePath(cwd, patch.path);
-    if (!["create", "modify", "delete"].includes(patch.action)) {
+    if (!VALID_PATCH_ACTIONS.has(patch.action)) {
       return {
         ok: false,
         error: `Unknown patch action: "${patch.action}" for path "${patch.path}"`,
@@ -661,48 +716,26 @@ function applyPatchset(
     }
   }
 
-  // Phase 2: Apply patches
+  // Phase 2: Apply patches (sequential — later patches may depend on earlier creates)
   const applied: Array<{ path: string; action: string }> = [];
 
   for (const patch of params.patches) {
     const absPath = safePath(cwd, patch.path);
 
-    switch (patch.action) {
-      case "create": {
-        const dir = path.dirname(absPath);
-        fs.mkdirSync(dir, { recursive: true });
-        const content = resolvePatchContent(absPath, patch);
-        fs.writeFileSync(absPath, content, "utf-8");
-        applied.push({ path: patch.path, action: "create" });
-        break;
-      }
-      case "modify": {
-        if (!fs.existsSync(absPath)) {
-          return {
-            ok: false,
-            error: `Cannot modify "${patch.path}": file does not exist`,
-            data: { applied },
-          };
-        }
-        const content = resolvePatchContent(absPath, patch);
-        fs.writeFileSync(absPath, content, "utf-8");
-        applied.push({ path: patch.path, action: "modify" });
-        break;
-      }
-      case "delete": {
-        if (fs.existsSync(absPath)) {
-          fs.unlinkSync(absPath);
-        }
-        applied.push({ path: patch.path, action: "delete" });
-        break;
-      }
-      default:
+    if (patch.action === "modify") {
+      try {
+        await fs.promises.access(absPath);
+      } catch {
         return {
           ok: false,
-          error: `Unknown patch action: "${patch.action}" for path "${patch.path}"`,
+          error: `Cannot modify "${patch.path}": file does not exist`,
           data: { applied },
         };
+      }
     }
+
+    await applySinglePatch(absPath, patch);
+    applied.push({ path: patch.path, action: patch.action });
   }
 
   return { ok: true, data: { applied } };
