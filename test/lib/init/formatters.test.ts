@@ -12,7 +12,7 @@ import * as clack from "@clack/prompts";
 import { formatError, formatResult } from "../../../src/lib/init/formatters.js";
 
 // Spy on clack functions to capture arguments without replacing them
-let noteSpy: ReturnType<typeof spyOn>;
+let logMessageSpy: ReturnType<typeof spyOn>;
 let outroSpy: ReturnType<typeof spyOn>;
 let cancelSpy: ReturnType<typeof spyOn>;
 let logInfoSpy: ReturnType<typeof spyOn>;
@@ -24,7 +24,7 @@ const noop = () => {
 };
 
 beforeEach(() => {
-  noteSpy = spyOn(clack, "note").mockImplementation(noop);
+  logMessageSpy = spyOn(clack.log, "message").mockImplementation(noop);
   outroSpy = spyOn(clack, "outro").mockImplementation(noop);
   cancelSpy = spyOn(clack, "cancel").mockImplementation(noop);
   logInfoSpy = spyOn(clack.log, "info").mockImplementation(noop);
@@ -33,7 +33,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  noteSpy.mockRestore();
+  logMessageSpy.mockRestore();
   outroSpy.mockRestore();
   cancelSpy.mockRestore();
   logInfoSpy.mockRestore();
@@ -60,25 +60,23 @@ describe("formatResult", () => {
       },
     });
 
-    expect(noteSpy).toHaveBeenCalledTimes(1);
-    const noteContent: string = noteSpy.mock.calls[0][0];
+    expect(logMessageSpy).toHaveBeenCalledTimes(1);
+    const content: string = logMessageSpy.mock.calls[0][0];
 
-    expect(noteContent).toContain("Next.js");
-    expect(noteContent).toContain("/app");
-    expect(noteContent).toContain("Error Monitoring");
-    expect(noteContent).toContain("Performance Monitoring");
-    expect(noteContent).toContain("npm install @sentry/nextjs");
-    expect(noteContent).toContain("+ sentry.client.config.ts");
-    expect(noteContent).toContain("~ next.config.js");
-    expect(noteContent).toContain("- old-sentry.js");
-
-    expect(noteSpy.mock.calls[0][1]).toBe("Setup complete");
+    expect(content).toContain("Next.js");
+    expect(content).toContain("/app");
+    expect(content).toContain("Error Monitoring");
+    expect(content).toContain("Performance Monitoring");
+    expect(content).toContain("npm install @sentry/nextjs");
+    expect(content).toContain("sentry.client.config.ts");
+    expect(content).toContain("next.config.js");
+    expect(content).toContain("old-sentry.js");
   });
 
-  test("skips note when result has no summary fields", () => {
+  test("skips summary when result has no summary fields", () => {
     formatResult({ status: "success" });
 
-    expect(noteSpy).not.toHaveBeenCalled();
+    expect(logMessageSpy).not.toHaveBeenCalled();
     expect(outroSpy).toHaveBeenCalled();
   });
 
@@ -98,8 +96,8 @@ describe("formatResult", () => {
   test("unwraps nested result property", () => {
     formatResult({ status: "success", result: { platform: "React" } });
 
-    const noteContent: string = noteSpy.mock.calls[0][0];
-    expect(noteContent).toContain("React");
+    const content: string = logMessageSpy.mock.calls[0][0];
+    expect(content).toContain("React");
   });
 });
 
