@@ -61,7 +61,6 @@ export type EventsResult = {
 // Constants
 // ---------------------------------------------------------------------------
 
-
 /** Default time period for event queries */
 export const DEFAULT_PERIOD = "7d";
 
