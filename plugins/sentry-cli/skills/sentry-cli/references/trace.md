@@ -16,7 +16,7 @@ View distributed traces
 List recent traces in a project
 
 **Flags:**
-- `-n, --limit <value> - Number of traces (1-1000) - (default: "20")`
+- `-n, --limit <value> - Number of traces (1-1000) - (default: "25")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-s, --sort <value> - Sort by: date, duration - (default: "date")`
 - `-t, --period <value> - Time period (e.g., "1h", "24h", "7d", "30d") - (default: "7d")`

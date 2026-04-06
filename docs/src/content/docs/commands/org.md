@@ -15,7 +15,7 @@ List organizations
 
 | Option | Description |
 |--------|-------------|
-| `-n, --limit <limit>` | Maximum number of organizations to list (default: "30") |
+| `-n, --limit <limit>` | Maximum number of organizations to list (default: "25") |
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 
 ### `sentry org view <org>`

@@ -18,7 +18,7 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | [`repo`](./repo/) | Work with Sentry repositories |
 | [`team`](./team/) | Work with Sentry teams |
 | [`issue`](./issue/) | Manage Sentry issues |
-| [`event`](./event/) | View Sentry events |
+| [`event`](./event/) | View and list Sentry events |
 | [`log`](./log/) | View Sentry logs |
 | [`sourcemap`](./sourcemap/) | Manage sourcemaps |
 | [`span`](./span/) | List and view spans in projects or traces |

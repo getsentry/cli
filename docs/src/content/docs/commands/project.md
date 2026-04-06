@@ -57,7 +57,7 @@ List projects
 
 | Option | Description |
 |--------|-------------|
-| `-n, --limit <limit>` | Maximum number of projects to list (default: "30") |
+| `-n, --limit <limit>` | Maximum number of projects to list (default: "25") |
 | `-p, --platform <platform>` | Filter by platform (e.g., javascript, python) |
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 | `-c, --cursor <cursor>` | Navigate pages: "next", "prev", "first" (or raw cursor string) |

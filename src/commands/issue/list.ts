@@ -57,6 +57,7 @@ import {
   buildListCommand,
   buildListLimitFlag,
   LIST_BASE_ALIASES,
+  LIST_MAX_LIMIT,
   LIST_TARGET_POSITIONAL,
   paginationHint,
   parseCursorFlag,
@@ -131,12 +132,6 @@ const VALID_SORT_VALUES: SortValue[] = ["date", "new", "freq", "user"];
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry issue list <org>/<project>";
-
-/**
- * Maximum --limit value (user-facing ceiling for practical CLI response times).
- * Auto-pagination can theoretically fetch more, but 1000 keeps responses reasonable.
- */
-const MAX_LIMIT = 1000;
 
 /** Options returned by {@link buildListApiOptions}. */
 type ListApiOptions = {
@@ -1374,7 +1369,7 @@ async function handleResolvedTargets(
 
   let moreHint: string | undefined;
   if (hasMoreToShow) {
-    const higherLimit = Math.min(flags.limit * 2, MAX_LIMIT);
+    const higherLimit = Math.min(flags.limit * 2, LIST_MAX_LIMIT);
     const canIncreaseLimit = higherLimit > flags.limit;
     const actionParts: string[] = [];
     if (canIncreaseLimit) {
@@ -1429,7 +1424,7 @@ export const __testing = {
   compareDates,
   parseSort,
   CURSOR_SEP,
-  MAX_LIMIT,
+  MAX_LIMIT: LIST_MAX_LIMIT,
   VALID_SORT_VALUES,
 };
 
@@ -1542,7 +1537,7 @@ export const listCommand = buildListCommand("issue", {
         brief: "Search query (Sentry search syntax)",
         optional: true,
       },
-      limit: buildListLimitFlag("issues", "25"),
+      limit: buildListLimitFlag("issues"),
       sort: {
         kind: "parsed",
         parse: parseSort,
@@ -1586,9 +1581,9 @@ export const listCommand = buildListCommand("issue", {
     if (flags.limit < 1) {
       throw new ValidationError("--limit must be at least 1.", "limit");
     }
-    if (flags.limit > MAX_LIMIT) {
+    if (flags.limit > LIST_MAX_LIMIT) {
       throw new ValidationError(
-        `--limit cannot exceed ${MAX_LIMIT}. ` +
+        `--limit cannot exceed ${LIST_MAX_LIMIT}. ` +
           "Use --cursor to paginate through larger result sets.",
         "limit"
       );

@@ -72,26 +72,31 @@ export const issueIdPositional = {
  *
  * @param command - The issue subcommand (e.g., "view", "explain")
  * @param issueId - The user-provided issue ID
+ * @param base - Base command prefix (default: "sentry issue")
  */
-export function buildCommandHint(command: string, issueId: string): string {
+export function buildCommandHint(
+  command: string,
+  issueId: string,
+  base = "sentry issue"
+): string {
   // Selectors already include the @ prefix and are self-contained
   if (issueId.startsWith("@")) {
-    return `sentry issue ${command} <org>/${issueId}`;
+    return `${base} ${command} <org>/${issueId}`;
   }
   // Input already contains org/project context — show as-is to avoid double-prefixing
   if (issueId.includes("/")) {
-    return `sentry issue ${command} ${issueId}`;
+    return `${base} ${command} ${issueId}`;
   }
   // Numeric IDs always need org context - can't be combined with project
   if (isAllDigits(issueId)) {
-    return `sentry issue ${command} <org>/${issueId}`;
+    return `${base} ${command} <org>/${issueId}`;
   }
   // Short suffixes can be combined with project prefix
   if (isShortSuffix(issueId)) {
-    return `sentry issue ${command} <project>-${issueId}`;
+    return `${base} ${command} <project>-${issueId}`;
   }
   // Everything else (has dash) needs org prefix
-  return `sentry issue ${command} <org>/${issueId}`;
+  return `${base} ${command} <org>/${issueId}`;
 }
 
 /** Default timeout in milliseconds (6 minutes) */
@@ -461,6 +466,8 @@ export type ResolveIssueOptions = {
   cwd: string;
   /** Command name for error messages (e.g., "view", "explain") */
   command: string;
+  /** Base command prefix for error hints (default: "sentry issue") */
+  commandBase?: string;
 };
 
 /**
@@ -493,7 +500,8 @@ function extractOrgFromPermalink(
 async function resolveNumericIssue(
   id: string,
   cwd: string,
-  command: string
+  command: string,
+  commandBase = "sentry issue"
 ): Promise<ResolvedIssueResult> {
   const resolvedOrg = await resolveOrg({ cwd });
   try {
@@ -514,10 +522,10 @@ async function resolveNumericIssue(
       // group IDs with short-ID suffixes. When org context is available, use
       // the real org slug instead of <org> placeholder (CLI-BT, 18 users).
       const orgHint = resolvedOrg?.org ?? "<org>";
-      const hint = `sentry issue ${command} ${orgHint}/${id}`;
+      const hint = `${commandBase} ${command} ${orgHint}/${id}`;
       throw new ResolutionError(`Issue ${id}`, "not found", hint, [
         `No issue with numeric ID ${id} found — you may not have access, or it may have been deleted.`,
-        `If this is a short ID suffix, try: sentry issue ${command} <project>-${id}`,
+        `If this is a short ID suffix, try: ${commandBase} ${command} <project>-${id}`,
       ]);
     }
     throw err;
@@ -544,15 +552,15 @@ async function resolveNumericIssue(
 export async function resolveIssue(
   options: ResolveIssueOptions
 ): Promise<ResolvedIssueResult> {
-  const { issueArg, cwd, command } = options;
+  const { issueArg, cwd, command, commandBase } = options;
   const parsed = parseIssueArg(issueArg);
-  const commandHint = buildCommandHint(command, issueArg);
+  const commandHint = buildCommandHint(command, issueArg, commandBase);
 
   let result: ResolvedIssueResult;
 
   switch (parsed.type) {
     case "numeric":
-      result = await resolveNumericIssue(parsed.id, cwd, command);
+      result = await resolveNumericIssue(parsed.id, cwd, command, commandBase);
       break;
 
     case "explicit": {

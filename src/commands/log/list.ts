@@ -37,6 +37,8 @@ import {
 import type { StreamingTable } from "../../lib/formatters/text-table.js";
 import {
   buildListCommand,
+  LIST_MAX_LIMIT,
+  LIST_MIN_LIMIT,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
@@ -79,15 +81,6 @@ type LogListResult = {
 /** Output yielded by log list: either a batch (single-fetch) or an individual item (follow). */
 type LogOutput = LogLike | LogListResult;
 
-/** Maximum allowed value for --limit flag */
-const MAX_LIMIT = 1000;
-
-/** Minimum allowed value for --limit flag */
-const MIN_LIMIT = 1;
-
-/** Default number of log entries to show */
-const DEFAULT_LIMIT = 100;
-
 /** Default poll interval in seconds for --follow mode */
 const DEFAULT_POLL_INTERVAL = 2;
 
@@ -104,7 +97,7 @@ const DEFAULT_TRACE_PERIOD = "14d";
  * Parse --limit flag, delegating range validation to shared utility.
  */
 function parseLimit(value: string): number {
-  return validateLimit(value, MIN_LIMIT, MAX_LIMIT);
+  return validateLimit(value, LIST_MIN_LIMIT, LIST_MAX_LIMIT);
 }
 
 /**
@@ -633,8 +626,8 @@ export const listCommand = buildListCommand(
         limit: {
           kind: "parsed",
           parse: parseLimit,
-          brief: `Number of log entries (${MIN_LIMIT}-${MAX_LIMIT})`,
-          default: String(DEFAULT_LIMIT),
+          brief: `Number of log entries (${LIST_MIN_LIMIT}-${LIST_MAX_LIMIT})`,
+          default: "100", // Logs are high-volume; 25 is too stingy for debugging
         },
         query: {
           kind: "parsed",

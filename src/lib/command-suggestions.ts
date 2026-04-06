@@ -97,16 +97,6 @@ const SUGGESTIONS: ReadonlyMap<string, CommandSuggestion> = new Map([
     },
   ],
 
-  // --- event list (~6 events) ---
-  [
-    "event/list",
-    {
-      command: "sentry issue view <issue-id>",
-      explanation:
-        "Events are scoped to issues. View an issue to see its latest event",
-    },
-  ],
-
   // --- old sentry-cli commands (~5 events) ---
   ["cli/info", { command: "sentry auth status" }],
   [

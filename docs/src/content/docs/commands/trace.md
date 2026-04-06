@@ -21,7 +21,7 @@ List recent traces in a project
 
 | Option | Description |
 |--------|-------------|
-| `-n, --limit <limit>` | Number of traces (1-1000) (default: "20") |
+| `-n, --limit <limit>` | Number of traces (1-1000) (default: "25") |
 | `-q, --query <query>` | Search query (Sentry search syntax) |
 | `-s, --sort <sort>` | Sort by: date, duration (default: "date") |
 | `-t, --period <period>` | Time period (e.g., "1h", "24h", "7d", "30d") (default: "7d") |

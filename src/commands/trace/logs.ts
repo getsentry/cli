@@ -16,6 +16,7 @@ import {
   applyFreshFlag,
   FRESH_ALIASES,
   FRESH_FLAG,
+  LIST_MAX_LIMIT,
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
@@ -65,12 +66,6 @@ function formatTraceLogsHuman(data: TraceLogsData): string {
   return parts.join("").trimEnd();
 }
 
-/** Maximum allowed value for --limit flag */
-const MAX_LIMIT = 1000;
-
-/** Default number of log entries to show */
-const DEFAULT_LIMIT = 100;
-
 /**
  * Default time period for the trace-logs API.
  * The API requires statsPeriod — without it the response may be empty even
@@ -85,7 +80,7 @@ const USAGE_HINT = "sentry trace logs [<org>/]<trace-id>";
  * Parse --limit flag, delegating range validation to shared utility.
  */
 function parseLimit(value: string): number {
-  return validateLimit(value, 1, MAX_LIMIT);
+  return validateLimit(value, 1, LIST_MAX_LIMIT);
 }
 
 export const logsCommand = buildCommand({
@@ -139,8 +134,8 @@ export const logsCommand = buildCommand({
       limit: {
         kind: "parsed",
         parse: parseLimit,
-        brief: `Number of log entries (<=${MAX_LIMIT})`,
-        default: String(DEFAULT_LIMIT),
+        brief: `Number of log entries (<=${LIST_MAX_LIMIT})`,
+        default: "100", // Logs are high-volume; 25 is too stingy for debugging
       },
       query: {
         kind: "parsed",

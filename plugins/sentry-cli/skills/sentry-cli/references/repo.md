@@ -16,7 +16,7 @@ Work with Sentry repositories
 List repositories
 
 **Flags:**
-- `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
+- `-n, --limit <value> - Maximum number of repositories to list - (default: "25")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
