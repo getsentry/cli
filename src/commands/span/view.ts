@@ -130,6 +130,20 @@ export function parsePositionalArgs(args: string[]): {
     }
   }
 
+  // Single bare arg that looks like a span ID (16-char hex, no slashes):
+  // the user forgot the trace ID. Give a targeted ContextError instead of the
+  // confusing "Invalid trace ID" from validateTraceId(). (CLI-SC)
+  if (args.length === 1 && !first.includes("/")) {
+    const normalized = first.trim().toLowerCase().replace(/-/g, "");
+    if (SPAN_ID_RE.test(normalized)) {
+      throw new ContextError("Trace ID and span ID", USAGE_HINT, [
+        `'${first}' looks like a span ID (16 characters), not a trace ID`,
+        `Provide the trace ID first: sentry span view <trace-id> ${normalized}`,
+        `Use 'sentry trace list' to find trace IDs`,
+      ]);
+    }
+  }
+
   // First arg is trace target (possibly with org/project prefix)
   const traceTarget = parseSlashSeparatedTraceTarget(first, USAGE_HINT);
 
