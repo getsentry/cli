@@ -5,8 +5,8 @@
  */
 
 import { cancel, log, outro } from "@clack/prompts";
-import { green, red, terminalLink, yellow } from "../formatters/colors.js";
-import { mdKvTable, renderMarkdown } from "../formatters/markdown.js";
+import { terminalLink } from "../formatters/colors.js";
+import { colorTag, mdKvTable, renderMarkdown } from "../formatters/markdown.js";
 import { featureLabel } from "./clack-utils.js";
 import {
   EXIT_DEPENDENCY_INSTALL_FAILED,
@@ -17,12 +17,12 @@ import type { WizardOutput, WorkflowRunResult } from "./types.js";
 
 function fileActionIcon(action: string): string {
   if (action === "create") {
-    return green("+");
+    return colorTag("green", "+");
   }
   if (action === "delete") {
-    return red("-");
+    return colorTag("red", "-");
   }
-  return yellow("~");
+  return colorTag("yellow", "~");
 }
 
 function buildSummary(output: WizardOutput): string {
