@@ -40,9 +40,6 @@ import type {
   WizardOptions,
 } from "./types.js";
 
-/** Matches a bare numeric org ID extracted from a DSN (e.g. "4507492088676352"). */
-const NUMERIC_ORG_ID_RE = /^\d+$/;
-
 /** Whitespace characters used for JSON indentation. */
 const Indenter = {
   SPACE: " ",
@@ -709,17 +706,25 @@ async function applyPatchset(
   return { ok: true, data: { applied } };
 }
 
+/** Matches a bare numeric org ID extracted from a DSN (e.g. "4507492088676352"). */
+const NUMERIC_ORG_ID_RE = /^\d+$/;
+
 /**
- * Resolve the org slug from local config, env vars, or by listing the user's
- * organizations from the API as a fallback.
+ * Resolve the org slug using the shared offline-first resolver, falling back
+ * to interactive selection when multiple orgs are available.
  *
- * DSN scanning uses the prefetch-aware helper from `./prefetch.ts` — if
+ * Uses the prefetch-aware helper from `./prefetch.ts` — if
  * {@link warmOrgDetection} was called earlier (by `init.ts`), the result is
  * already cached and returns near-instantly.
  *
- * `listOrganizations()` uses SQLite caching for near-instant warm lookups
- * (populated after `sentry login` or the first API call), so it does not
- * need background prefetching.
+ * Resolution priority (via `resolveOrg`):
+ * 1. CLI `--org` flag
+ * 2. `SENTRY_ORG` / `SENTRY_PROJECT` env vars
+ * 3. Config defaults (SQLite)
+ * 4. DSN auto-detection (with numeric ID normalization)
+ *
+ * If none of the above resolve, lists the user's organizations (SQLite-cached
+ * after `sentry login`) and prompts for selection.
  *
  * @returns The org slug on success, or a {@link LocalOpResult} error to return early.
  */
@@ -727,21 +732,12 @@ export async function resolveOrgSlug(
   cwd: string,
   yes: boolean
 ): Promise<string | LocalOpResult> {
+  // normalizeNumericOrg inside resolveOrg may return a raw numeric ID when
+  // the cache is cold and the API refresh fails. Numeric IDs break write
+  // operations (project/team creation), so fall through to the org picker.
   const resolved = await resolveOrgPrefetched(cwd);
-  if (resolved) {
-    // If the detected org is a raw numeric ID (extracted from a DSN), try to
-    // resolve it to a real slug. Numeric IDs can fail for write operations like
-    // project/team creation, and may belong to a different Sentry account.
-    if (NUMERIC_ORG_ID_RE.test(resolved.org)) {
-      const { getOrgByNumericId } = await import("../db/regions.js");
-      const match = getOrgByNumericId(resolved.org);
-      if (match) {
-        return match.slug;
-      }
-      // Cache miss — fall through to listOrganizations() for proper selection
-    } else {
-      return resolved.org;
-    }
+  if (resolved && !NUMERIC_ORG_ID_RE.test(resolved.org)) {
+    return resolved.org;
   }
 
   // Fallback: list user's organizations (SQLite-cached after login/first call)

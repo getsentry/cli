@@ -295,23 +295,18 @@ describe("create-sentry-project", () => {
     expect(data.dsn).toBe("");
   });
 
-  describe("resolveOrgSlug — numeric org ID from DSN", () => {
-    test("numeric ID + cache hit → resolved to slug", async () => {
-      resolveOrgPrefetchedSpy.mockResolvedValue({ org: "4507492088676352" });
-      getOrgByNumericIdSpy.mockReturnValue({
-        slug: "acme-corp",
-        regionUrl: "https://us.sentry.io",
-      });
+  describe("resolveOrgSlug — resolveOrg integration", () => {
+    test("returns org slug when resolveOrg resolves", async () => {
+      resolveOrgPrefetchedSpy.mockResolvedValue({ org: "acme-corp" });
 
       const result = await resolveOrgSlug("/tmp/test", false);
 
       expect(result).toBe("acme-corp");
-      expect(getOrgByNumericIdSpy).toHaveBeenCalledWith("4507492088676352");
+      expect(listOrgsSpy).not.toHaveBeenCalled();
     });
 
-    test("numeric ID + cache miss → falls through to single org in listOrganizations", async () => {
-      resolveOrgPrefetchedSpy.mockResolvedValue({ org: "4507492088676352" });
-      getOrgByNumericIdSpy.mockReturnValue(undefined);
+    test("falls through to listOrganizations when resolveOrg returns null", async () => {
+      resolveOrgPrefetchedSpy.mockResolvedValue(null);
       listOrgsSpy.mockResolvedValue([
         { id: "1", slug: "solo-org", name: "Solo Org" },
       ]);
@@ -321,20 +316,15 @@ describe("create-sentry-project", () => {
       expect(result).toBe("solo-org");
     });
 
-    test("numeric ID + cache miss + multiple orgs + --yes → error with org list", async () => {
+    test("numeric ID from resolveOrg falls through to org picker", async () => {
       resolveOrgPrefetchedSpy.mockResolvedValue({ org: "4507492088676352" });
-      getOrgByNumericIdSpy.mockReturnValue(undefined);
       listOrgsSpy.mockResolvedValue([
-        { id: "1", slug: "org-a", name: "Org A" },
-        { id: "2", slug: "org-b", name: "Org B" },
+        { id: "1", slug: "solo-org", name: "Solo Org" },
       ]);
 
-      const result = await resolveOrgSlug("/tmp/test", true);
+      const result = await resolveOrgSlug("/tmp/test", false);
 
-      expect(typeof result).toBe("object");
-      const err = result as { ok: boolean; error: string };
-      expect(err.ok).toBe(false);
-      expect(err.error).toContain("Multiple organizations found");
+      expect(result).toBe("solo-org");
     });
   });
 
