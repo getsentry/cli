@@ -532,8 +532,9 @@ async function runCommands(
   return { ok: true, data: { results } };
 }
 
-// Note: shell: true targets Unix shells. Windows cmd.exe metacharacters
-// (%, ^) are not blocked; the CLI assumes a Unix Node.js environment.
+// Runs the executable directly (no shell) to eliminate shell injection as an
+// attack vector. The command string is split on whitespace into [exe, ...args].
+// validateCommand() still blocks metacharacters as defense-in-depth.
 function runSingleCommand(
   command: string,
   cwd: string,
@@ -545,8 +546,8 @@ function runSingleCommand(
   stderr: string;
 }> {
   return new Promise((resolve) => {
-    const child = spawn(command, [], {
-      shell: true,
+    const [executable = "", ...args] = command.trim().split(WHITESPACE_RE);
+    const child = spawn(executable, args, {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
       timeout: timeoutMs,

@@ -616,7 +616,7 @@ describe("handleLocalOp", () => {
         type: "local-op",
         operation: "run-commands",
         cwd: testDir,
-        params: { commands: ["echo hello"] },
+        params: { commands: ["/bin/echo hello"] },
       };
 
       const result = await handleLocalOp(payload, options);
@@ -664,7 +664,9 @@ describe("handleLocalOp", () => {
         type: "local-op",
         operation: "run-commands",
         cwd: testDir,
-        params: { commands: ["false", "echo should_not_run"] },
+        params: {
+          commands: ["/usr/bin/false", "/bin/echo should_not_run"],
+        },
       };
 
       const result = await handleLocalOp(payload, options);
@@ -675,7 +677,7 @@ describe("handleLocalOp", () => {
         }
       ).results;
       expect(results).toHaveLength(1);
-      expect(results[0].command).toBe("false");
+      expect(results[0].command).toBe("/usr/bin/false");
     });
 
     test("dry-run validates commands but skips execution", async () => {
@@ -697,7 +699,7 @@ describe("handleLocalOp", () => {
         type: "local-op",
         operation: "run-commands",
         cwd: testDir,
-        params: { commands: ["npm install @sentry/node", "echo hello"] },
+        params: { commands: ["npm install @sentry/node", "/bin/echo hello"] },
       };
 
       const dryRunOptions = makeOptions({ dryRun: true, directory: testDir });
@@ -718,7 +720,7 @@ describe("handleLocalOp", () => {
         type: "local-op",
         operation: "run-commands",
         cwd: testDir,
-        params: { commands: ["echo hello", "rm -rf /"] },
+        params: { commands: ["/bin/echo hello", "rm -rf /"] },
       };
 
       const result = await handleLocalOp(payload, options);
