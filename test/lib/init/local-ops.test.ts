@@ -462,6 +462,47 @@ describe("handleLocalOp", () => {
       // Depth 2+ should not be reached
       expect(paths).not.toContain(join("a", "b", "c"));
     });
+
+    test("excludes symlinks that point outside project directory", async () => {
+      writeFileSync(join(testDir, "legit.ts"), "x");
+      symlinkSync("/tmp", join(testDir, "escape-link"));
+
+      const payload: ListDirPayload = {
+        type: "local-op",
+        operation: "list-dir",
+        cwd: testDir,
+        params: { path: "." },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      const entries = (result.data as { entries: Array<{ name: string }> })
+        .entries;
+      const names = entries.map((e) => e.name);
+
+      expect(names).toContain("legit.ts");
+      expect(names).not.toContain("escape-link");
+    });
+
+    test("excludes nested symlinks that point outside project directory in recursive mode", async () => {
+      mkdirSync(join(testDir, "sub"));
+      writeFileSync(join(testDir, "sub", "legit.ts"), "x");
+      symlinkSync("/tmp", join(testDir, "sub", "escape-link"));
+
+      const payload: ListDirPayload = {
+        type: "local-op",
+        operation: "list-dir",
+        cwd: testDir,
+        params: { path: ".", recursive: true, maxDepth: 3 },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      const entries = (result.data as { entries: Array<{ path: string }> })
+        .entries;
+      const paths = entries.map((e) => e.path);
+
+      expect(paths).toContain(join("sub", "legit.ts"));
+      expect(paths).not.toContain(join("sub", "escape-link"));
+    });
   });
 
   describe("read-files", () => {
@@ -906,11 +947,11 @@ describe("precomputeDirListing", () => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  test("returns DirEntry[] directly", () => {
+  test("returns DirEntry[] directly", async () => {
     writeFileSync(join(testDir, "app.ts"), "x");
     mkdirSync(join(testDir, "src"));
 
-    const entries = precomputeDirListing(testDir);
+    const entries = await precomputeDirListing(testDir);
 
     expect(Array.isArray(entries)).toBe(true);
     expect(entries.length).toBeGreaterThanOrEqual(2);
@@ -926,16 +967,16 @@ describe("precomputeDirListing", () => {
     expect(dir?.type).toBe("directory");
   });
 
-  test("returns empty array for non-existent directory", () => {
-    const entries = precomputeDirListing(join(testDir, "nope"));
+  test("returns empty array for non-existent directory", async () => {
+    const entries = await precomputeDirListing(join(testDir, "nope"));
     expect(entries).toEqual([]);
   });
 
-  test("recursively lists nested entries", () => {
+  test("recursively lists nested entries", async () => {
     mkdirSync(join(testDir, "a"));
     writeFileSync(join(testDir, "a", "nested.ts"), "x");
 
-    const entries = precomputeDirListing(testDir);
+    const entries = await precomputeDirListing(testDir);
     const paths = entries.map((e) => e.path);
     expect(paths).toContain(join("a", "nested.ts"));
   });
