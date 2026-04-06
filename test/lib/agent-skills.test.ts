@@ -95,7 +95,7 @@ describe("agent-skills", () => {
         "references"
       );
       expect(existsSync(refsDir)).toBe(true);
-      expect(existsSync(join(refsDir, "issues.md"))).toBe(true);
+      expect(existsSync(join(refsDir, "issue.md"))).toBe(true);
     });
 
     test("creates intermediate directories", async () => {

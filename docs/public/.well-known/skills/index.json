@@ -7,18 +7,22 @@
         "SKILL.md",
         "references/api.md",
         "references/auth.md",
-        "references/dashboards.md",
-        "references/events.md",
-        "references/issues.md",
-        "references/logs.md",
-        "references/organizations.md",
-        "references/projects.md",
+        "references/cli.md",
+        "references/dashboard.md",
+        "references/event.md",
+        "references/init.md",
+        "references/issue.md",
+        "references/log.md",
+        "references/org.md",
+        "references/project.md",
         "references/release.md",
-        "references/setup.md",
+        "references/repo.md",
+        "references/schema.md",
         "references/sourcemap.md",
-        "references/teams.md",
-        "references/traces.md",
-        "references/trials.md"
+        "references/span.md",
+        "references/team.md",
+        "references/trace.md",
+        "references/trial.md"
       ]
     }
   ]

@@ -1,7 +1,7 @@
 ---
-name: sentry-cli-trials
+name: sentry-cli-trial
 version: 0.25.0-dev.0
-description: List and start product trials
+description: Manage product trials
 requires:
   bins: ["sentry"]
   auth: true
