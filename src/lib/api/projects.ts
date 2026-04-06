@@ -26,6 +26,7 @@ import { getCachedOrganizations } from "../db/regions.js";
 import { type AuthGuardSuccess, withAuthGuard } from "../errors.js";
 import { logger } from "../logger.js";
 import { getApiBaseUrl } from "../sentry-client.js";
+import { buildProjectUrl } from "../sentry-urls.js";
 import { isAllDigits } from "../utils.js";
 
 import {
@@ -166,6 +167,30 @@ export async function createProject(
   });
   const data = unwrapResult(result, "Failed to create project");
   return data as unknown as SentryProject;
+}
+
+/** Result of creating a project and fetching its DSN + dashboard URL. */
+export type CreatedProjectDetails = {
+  project: SentryProject;
+  dsn: string | null;
+  url: string;
+};
+
+/**
+ * Create a project, fetch its DSN, and build its dashboard URL.
+ *
+ * Shared core used by both `sentry project create` and `sentry init`.
+ * Callers handle their own error wrapping and team resolution.
+ */
+export async function createProjectWithDsn(
+  orgSlug: string,
+  teamSlug: string,
+  body: CreateProjectBody
+): Promise<CreatedProjectDetails> {
+  const project = await createProject(orgSlug, teamSlug, body);
+  const dsn = await tryGetPrimaryDsn(orgSlug, project.slug);
+  const url = buildProjectUrl(orgSlug, project.slug);
+  return { project, dsn, url };
 }
 
 /**

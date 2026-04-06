@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isCancel, select } from "@clack/prompts";
 import {
-  createProject,
+  createProjectWithDsn,
   getProject,
   listOrganizations,
   tryGetPrimaryDsn,
@@ -915,17 +915,12 @@ async function createSentryProject(
       usageHint: "sentry init",
     });
 
-    // 5. Create project
-    const project = await createProject(orgSlug, team.slug, {
-      name,
-      platform,
-    });
-
-    // 6. Get DSN (best-effort)
-    const dsn = await tryGetPrimaryDsn(orgSlug, project.slug);
-
-    // 7. Build URL
-    const url = buildProjectUrl(orgSlug, project.slug);
+    // 5. Create project, fetch DSN, and build URL
+    const { project, dsn, url } = await createProjectWithDsn(
+      orgSlug,
+      team.slug,
+      { name, platform }
+    );
 
     return {
       ok: true,
