@@ -1,0 +1,338 @@
+# Issue #646: Wizard-generated SENTRY_AUTH_TOKEN blocks OAuth-based CLI login
+
+## Problem
+
+When `SENTRY_AUTH_TOKEN` is in the environment (from wizard `.env.sentry-build-plugin` or build tooling), the CLI uses it for all API requests. The wizard token has limited scopes — sufficient for sourcemap uploads but not for interactive CLI commands. The CLI blocks login, bypasses auto-recovery, and shows generic errors.
+
+## Approach: Per-Endpoint Insufficient Token Cache with OAuth Fallback
+
+Store the full token + the specific `(method, url_path)` that failed in a dedicated DB table. On subsequent requests to the same endpoint, skip the env token and use stored OAuth credentials. On first encounter of a new failing endpoint, mark it and retry with OAuth in the same request.
+
+**Key design insight**: The env token IS valid for some endpoints (e.g., sourcemap upload) but NOT others (e.g., issue list). The fallback is per-endpoint, not global. The check lives in the HTTP layer, not in `getEnvToken()`.
+
+### Token scope mutability (verified via Sentry docs)
+
+- **Org tokens** (wizard-generated `sntrys_...`): scopes fixed at creation, cannot be edited
+- **Personal tokens**: scopes set at creation, cannot be edited later
+- **Internal integration tokens**: scopes ARE editable without changing the token string
+
+A **24-hour TTL** is applied to cache entries. This handles internal integration tokens (whose scopes can change) and prevents unbounded table growth. Stale entries are ignored on read (`created_at` check) and cleaned up lazily via the existing 10% probabilistic cleanup in `cleanupExpiredCaches()` (`src/lib/db/index.ts:156`). The `--fresh` flag and `clearAuth()` also clear the cache immediately.
+
+---
+
+## Implementation
+
+### 1. New table: `env_token_permissions`
+
+**`src/lib/db/schema.ts`**
+
+Add to `TABLE_SCHEMAS` and bump `CURRENT_SCHEMA_VERSION` from 12 to 13:
+
+```typescript
+env_token_permissions: {
+  columns: {
+    token: { type: "TEXT", notNull: true },
+    method: { type: "TEXT", notNull: true },
+    url_path: { type: "TEXT", notNull: true },
+    status: { type: "INTEGER", notNull: true },    // HTTP status (401/403)
+    created_at: {
+      type: "INTEGER",
+      notNull: true,
+      default: "(unixepoch() * 1000)",
+    },
+  },
+  compositePrimaryKey: ["token", "method", "url_path"],
+},
+```
+
+Add migration 12 → 13 in `runMigrations()`:
+```typescript
+if (currentVersion < 13) {
+  db.exec(EXPECTED_TABLES.env_token_permissions as string);
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_env_token_permissions_token " +
+    "ON env_token_permissions (token)"
+  );
+}
+```
+
+The composite PK gives exact `(token, method, url_path)` lookups. The separate `token` index enables fast `DELETE ... WHERE token = ?` and `SELECT ... WHERE token = ?` queries.
+
+**`src/lib/db/index.ts`** — Add env token cleanup to `cleanupExpiredCaches()` (line 156):
+```typescript
+// After existing cleanup queries:
+const envTokenExpiryTime = Date.now() - ENV_TOKEN_CACHE_TTL_MS;
+database
+  .query("DELETE FROM env_token_permissions WHERE created_at < ?")
+  .run(envTokenExpiryTime);
+```
+Import `ENV_TOKEN_CACHE_TTL_MS` from `./env-token-cache.js`. This piggybacks on the existing 10% probabilistic trigger — no separate cleanup mechanism needed.
+
+### 2. DB access layer: `src/lib/db/env-token-cache.ts` (new file)
+
+```typescript
+/** 24-hour TTL for env token permission cache entries */
+export const ENV_TOKEN_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Check if a specific endpoint is marked insufficient for the given token.
+ * Returns false if the entry exists but is older than ENV_TOKEN_CACHE_TTL_MS.
+ */
+export function isEndpointInsufficient(token: string, method: string, urlPath: string): boolean
+
+/**
+ * Mark a specific endpoint as insufficient for the given token.
+ * Uses UPSERT to refresh created_at on re-encounter.
+ * Calls maybeCleanupCaches() (10% probability) to prune expired entries.
+ */
+export function markEndpointInsufficient(token: string, method: string, urlPath: string, status: number): void
+
+/** Clear all insufficient marks (for --fresh and clearAuth). */
+export function clearEnvTokenCache(): void
+
+/** Clear marks for a specific token. */
+export function clearEnvTokenCacheForToken(token: string): void
+```
+
+All use `getDatabase()` and `withDbSpan()` consistent with other DB modules.
+`urlPath` is the pathname only (no query params, no host) — e.g., `/api/0/organizations/my-org/issues/`.
+
+`isEndpointInsufficient` checks `created_at > Date.now() - ENV_TOKEN_CACHE_TTL_MS` in the WHERE clause so expired entries are functionally ignored before the probabilistic cleanup deletes them.
+
+### 3. Auth layer: `src/lib/db/auth.ts`
+
+**New exports:**
+
+- `getRawEnvToken(): string | undefined` — Always reads from `process.env`, no caching or filtering. Extracted from existing `getEnvToken()` internals. Used by the HTTP layer to check "was an env token set?" independent of whether it's being used.
+
+- `hasStoredAuthToken(): boolean` — Returns true if the `auth` table has a valid (non-expired) token. Thin wrapper for the login command.
+
+**Modified `getEnvToken()`** (line 44): Add `SENTRY_IGNORE_ENV_TOKEN` check at the top:
+```typescript
+function getEnvToken(): { token: string; source: AuthSource } | undefined {
+  if (getEnv().SENTRY_IGNORE_ENV_TOKEN?.trim()) return undefined;
+  // ... existing logic unchanged
+}
+```
+This is the ONLY change to `getEnvToken()` — no per-endpoint check here.
+
+**Modified `refreshToken()`** (line 229): Add `skipEnv` option:
+```typescript
+export async function refreshToken(
+  options: RefreshTokenOptions = {}
+): Promise<RefreshTokenResult> {
+  if (!options.skipEnv) {
+    const envToken = getEnvToken();
+    if (envToken) {
+      return { token: envToken.token, refreshed: false };
+    }
+  }
+  // ... rest unchanged (DB/OAuth logic)
+}
+```
+The `RefreshTokenOptions` type gains `skipEnv?: boolean`.
+
+**Modified `clearAuth()`** (line 158): Add `clearEnvTokenCache()` call to wipe stale fallback state on logout.
+
+### 4. HTTP layer: `src/lib/sentry-client.ts`
+
+This is where the per-endpoint logic lives.
+
+**New function `tryEnvTokenFallback()`:**
+```typescript
+async function tryEnvTokenFallback(
+  headers: Headers,
+  method: string,
+  urlPath: string,
+  status: number
+): Promise<boolean> {
+  const rawToken = getRawEnvToken();
+  if (!rawToken) return false;
+  if (headers.get(RETRY_MARKER_HEADER)) return false;
+
+  markEndpointInsufficient(rawToken, method, urlPath, status);
+
+  try {
+    const { token: oauthToken } = await refreshToken({ skipEnv: true });
+    headers.set("Authorization", `Bearer ${oauthToken}`);
+    headers.set(RETRY_MARKER_HEADER, "1");
+    log.warn(
+      "SENTRY_AUTH_TOKEN has insufficient permissions for this endpoint — using stored OAuth credentials."
+    );
+    return true;
+  } catch {
+    return false;  // No OAuth token available
+  }
+}
+```
+
+**Modified `handleResponse()`** (line 180): Add context + env token fallback:
+```typescript
+async function handleResponse(
+  response: Response,
+  headers: Headers,
+  isLastAttempt: boolean,
+  context: { method: string; urlPath: string }
+): Promise<AttemptResult> {
+  // Env token fallback: on 401/403 with an env token, try stored OAuth
+  if (
+    (response.status === 401 || response.status === 403) &&
+    getRawEnvToken()
+  ) {
+    const fell = await tryEnvTokenFallback(
+      headers, context.method, context.urlPath, response.status
+    );
+    if (fell) return { action: "retry" };
+  }
+
+  // Existing 401 handling (OAuth token refresh)
+  if (response.status === 401) {
+    const refreshed = await handleUnauthorized(headers);
+    return refreshed ? { action: "retry" } : { action: "done", response };
+  }
+
+  if (RETRYABLE_STATUS_CODES.includes(response.status) && !isLastAttempt) {
+    return { action: "retry" };
+  }
+  return { action: "done", response };
+}
+```
+
+**Modified `fetchWithRetry()`** (line 294): Pre-check cache + pass context:
+```typescript
+async function fetchWithRetry(input, init, method, fullUrl) {
+  const urlPath = extractUrlPath(input);
+  const rawEnvToken = getRawEnvToken();
+
+  // Pre-check: if env token is known-insufficient for this endpoint, skip it
+  const skipEnv = rawEnvToken != null &&
+    isEndpointInsufficient(rawEnvToken, method, urlPath);
+  const { token } = await refreshToken(skipEnv ? { skipEnv: true } : {});
+  const headers = prepareHeaders(input, init, token);
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const isLastAttempt = attempt === MAX_RETRIES;
+    const result = await executeAttempt(input, init, headers, isLastAttempt,
+      { method, urlPath });  // pass context through
+    // ... rest unchanged
+  }
+}
+```
+
+**Modified `executeAttempt()`**: Pass context to `handleResponse()`.
+
+**Imports**: Add `getRawEnvToken` from `./db/auth.js` and `isEndpointInsufficient`, `markEndpointInsufficient` from `./db/env-token-cache.js`.
+
+### 5. Login command: `src/commands/auth/login.ts`
+
+**Modified `handleExistingAuth()`** (line 71): Replace the hard block with a warning:
+```typescript
+if (isEnvTokenActive()) {
+  const envVar = getActiveEnvVarName();
+  log.warn(
+    `${envVar} is set in your environment (likely from build tooling).\n` +
+    `  OAuth credentials will be stored separately and used for CLI commands.`
+  );
+  if (!hasStoredAuthToken()) {
+    return true;  // No existing OAuth — proceed directly to login
+  }
+  // Fall through to existing re-auth confirmation logic below
+}
+```
+The rest of the function (force/interactive/non-interactive checks) handles the case where stored OAuth already exists.
+
+**New import**: `hasStoredAuthToken` from `../../lib/db/auth.js`.
+
+### 6. Auth status: `src/commands/auth/status.ts`
+
+**Extended `AuthStatusData`**: Add `envToken?` field:
+```typescript
+envToken?: {
+  envVar: string;          // "SENTRY_AUTH_TOKEN" or "SENTRY_TOKEN"
+  active: boolean;         // true if env token is the effective auth source
+  insufficientEndpoints: number;  // count of marked endpoints
+};
+```
+
+**Modified `func()`**: After collecting auth config, also probe the raw env token:
+- Read `getRawEnvToken()` and `isEnvTokenActive()`
+- Count insufficient endpoints from the DB
+- Populate `data.envToken` when a raw env token exists
+
+**Modified `formatAuthStatus()`** in `src/lib/formatters/human.ts`: Show env token status line, e.g.:
+```
+  Environment:     SENTRY_AUTH_TOKEN is set (bypassed for 3 endpoints — using OAuth)
+```
+
+### 7. Fresh flag: `src/lib/list-command.ts`
+
+**Modified `applyFreshFlag()`** (line 146): Add `clearEnvTokenCache()` call so `--fresh` re-evaluates all env token permissions.
+
+**New import**: `clearEnvTokenCache` from `./db/env-token-cache.js`.
+
+### 8. Error enhancement when no OAuth fallback exists
+
+When the env token fallback fails (no stored OAuth) and the 401/403 propagates, the error message should explain the situation. In the API error handling path (where `ApiError` is constructed from HTTP responses):
+
+If `getRawEnvToken()` is set and status is 401 or 403, throw `AuthError` instead of `ApiError`:
+```
+API returned 403. SENTRY_AUTH_TOKEN is set but lacks permissions for this endpoint.
+  Run 'sentry auth login' to authenticate with OAuth, or set SENTRY_IGNORE_ENV_TOKEN=1.
+```
+
+This converts the error from `ApiError` (which auto-login ignores) to `AuthError` (which triggers auto-login in interactive mode).
+
+---
+
+## Files Summary
+
+| File | Action | Changes |
+|------|--------|---------|
+| `src/lib/db/schema.ts` | modify | Add `env_token_permissions` table, bump version to 13, add migration + index |
+| `src/lib/db/index.ts` | modify | Add env token cleanup to `cleanupExpiredCaches()` with 24h TTL |
+| `src/lib/db/env-token-cache.ts` | **new** | `isEndpointInsufficient` (with TTL check), `markEndpointInsufficient` (with `maybeCleanupCaches`), `clearEnvTokenCache` |
+| `src/lib/db/auth.ts` | modify | Add `getRawEnvToken`, `hasStoredAuthToken`, `SENTRY_IGNORE_ENV_TOKEN` check, `skipEnv` option on `refreshToken`, call `clearEnvTokenCache` in `clearAuth` |
+| `src/lib/sentry-client.ts` | modify | Add `tryEnvTokenFallback`, pre-check cache in `fetchWithRetry`, add context to `handleResponse` + `executeAttempt` |
+| `src/commands/auth/login.ts` | modify | Warn instead of block when env token active |
+| `src/commands/auth/status.ts` | modify | Show env token info alongside OAuth status |
+| `src/lib/formatters/human.ts` | modify | Format env token status in `formatAuthStatus()` |
+| `src/lib/list-command.ts` | modify | Clear env token cache in `applyFreshFlag()` |
+
+---
+
+## Testing
+
+### Unit tests: `test/lib/db/env-token-cache.test.ts` (new)
+- `isEndpointInsufficient` returns false when no entry exists
+- `markEndpointInsufficient` + `isEndpointInsufficient` round-trip
+- Same token, different endpoint → independent marks
+- Different token, same endpoint → independent marks
+- `clearEnvTokenCache` wipes all entries
+- `clearEnvTokenCacheForToken` only wipes entries for that token
+- Entries older than 24h TTL are ignored by `isEndpointInsufficient`
+- Re-marking an endpoint refreshes its `created_at` (UPSERT behavior)
+
+### Unit tests: `test/lib/db/auth.test.ts` (extend existing)
+- `getEnvToken()` returns undefined when `SENTRY_IGNORE_ENV_TOKEN` is set
+- `getRawEnvToken()` returns token even when `SENTRY_IGNORE_ENV_TOKEN` is set
+- `hasStoredAuthToken()` returns true/false correctly
+- `refreshToken({ skipEnv: true })` skips env token and uses OAuth
+
+### Unit tests: `test/lib/sentry-client.test.ts` (extend or new)
+- `fetchWithRetry` uses OAuth when endpoint is pre-marked insufficient
+- `handleResponse` marks endpoint + retries with OAuth on 401/403 from env token
+- `handleResponse` does NOT mark/retry when no env token is active
+- `handleResponse` does NOT retry when `RETRY_MARKER_HEADER` is set (prevents loops)
+- Fallback gracefully fails when no stored OAuth exists
+
+### Property-based tests: `test/lib/db/env-token-cache.property.test.ts` (new)
+- For any `(token, method, path)` triple: mark then check → true
+- For any two distinct triples: marks are independent
+- TTL invariant: entries with `created_at` older than TTL are always ignored
+
+### Verify
+```bash
+bun run typecheck
+bun run lint
+bun run test:unit
+```
