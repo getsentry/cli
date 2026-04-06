@@ -74,6 +74,8 @@ export {
 } from "./api/organizations.js";
 export {
   createProject,
+  type CreatedProjectDetails,
+  createProjectWithDsn,
   deleteProject,
   findProjectByDsnKey,
   findProjectsByPattern,
