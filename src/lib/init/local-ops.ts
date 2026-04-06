@@ -795,25 +795,21 @@ export async function detectExistingProject(cwd: string): Promise<{
 async function detectSentry(
   payload: DetectSentryPayload
 ): Promise<LocalOpResult> {
-  try {
-    const { detectDsn } = await import("../dsn/index.js");
-    const dsn = await detectDsn(payload.cwd);
+  const { detectDsn } = await import("../dsn/index.js");
+  const dsn = await detectDsn(payload.cwd);
 
-    if (!dsn) {
-      return { ok: true, data: { status: "none", signals: [] } };
-    }
-
-    const signals = [
-      `dsn: ${dsn.source}${dsn.sourcePath ? ` (${dsn.sourcePath})` : ""}`,
-    ];
-
-    return {
-      ok: true,
-      data: { status: "installed", signals, dsn: dsn.raw },
-    };
-  } catch {
+  if (!dsn) {
     return { ok: true, data: { status: "none", signals: [] } };
   }
+
+  const signals = [
+    `dsn: ${dsn.source}${dsn.sourcePath ? ` (${dsn.sourcePath})` : ""}`,
+  ];
+
+  return {
+    ok: true,
+    data: { status: "installed", signals, dsn: dsn.raw },
+  };
 }
 
 async function createSentryProject(
