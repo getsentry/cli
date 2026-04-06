@@ -411,6 +411,7 @@ async function walkDir(
     return;
   }
 
+  // No explicit handle.close() needed: for-await-of auto-closes the Dir
   try {
     for await (const entry of handle) {
       if (ctx.entries.length >= ctx.maxEntries) {
@@ -420,8 +421,6 @@ async function walkDir(
     }
   } catch {
     // Directory unreadable (ENOENT, EACCES, etc.) — skip gracefully
-  } finally {
-    await handle.close();
   }
 }
 
