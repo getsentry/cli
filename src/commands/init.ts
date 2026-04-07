@@ -22,12 +22,12 @@ import type { SentryContext } from "../context.js";
 import { findProjectsBySlug } from "../lib/api/projects.js";
 import { looksLikePath, parseOrgProjectArg } from "../lib/arg-parsing.js";
 import { buildCommand } from "../lib/command.js";
-import { DRY_RUN_ALIASES, DRY_RUN_FLAG } from "../lib/mutate-command.js";
 import { ContextError, ValidationError } from "../lib/errors.js";
 import { warmOrgDetection } from "../lib/init/prefetch.js";
 import { runWizard } from "../lib/init/wizard-runner.js";
 import { validateResourceId } from "../lib/input-validation.js";
 import { logger } from "../lib/logger.js";
+import { DRY_RUN_ALIASES, DRY_RUN_FLAG } from "../lib/mutate-command.js";
 
 const log = logger.withTag("init");
 
