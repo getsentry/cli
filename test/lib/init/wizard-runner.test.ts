@@ -27,6 +27,7 @@ import * as banner from "../../../src/lib/banner.js";
 import * as auth from "../../../src/lib/db/auth.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as userDb from "../../../src/lib/db/user.js";
+import { WizardError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as fmt from "../../../src/lib/init/formatters.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
@@ -259,7 +260,11 @@ afterEach(() => {
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
-describe("runWizard", () => {
+// Guard against tests that accidentally wait for interactive input.
+// If a test hangs for 10s it's almost certainly blocked on stdin, not slow I/O.
+const TEST_TIMEOUT_MS = 10_000;
+
+describe("runWizard", { timeout: TEST_TIMEOUT_MS }, () => {
   describe("success path", () => {
     test("calls formatResult when workflow completes successfully", async () => {
       mockStartResult = { status: "success", result: { platform: "React" } };
@@ -273,23 +278,21 @@ describe("runWizard", () => {
   });
 
   describe("TTY check", () => {
-    test("writes error to stderr when not TTY and not --yes", async () => {
+    test("throws WizardError when not TTY and not --yes", async () => {
       const origIsTTY = process.stdin.isTTY;
       Object.defineProperty(process.stdin, "isTTY", {
         value: false,
         configurable: true,
       });
 
-      await runWizard(makeOptions({ yes: false }));
+      await expect(runWizard(makeOptions({ yes: false }))).rejects.toThrow(
+        WizardError
+      );
 
       Object.defineProperty(process.stdin, "isTTY", {
         value: origIsTTY,
         configurable: true,
       });
-
-      const written = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
-      expect(written).toContain("Interactive mode requires a terminal");
-      expect(process.exitCode).toBe(1);
     });
   });
 
@@ -404,12 +407,11 @@ describe("runWizard", () => {
       // Advance past the timeout
       jest.advanceTimersByTime(API_TIMEOUT_MS);
 
-      await promise;
+      await expect(promise).rejects.toThrow(WizardError);
 
       expect(logErrorSpy).toHaveBeenCalled();
       const errorMsg: string = logErrorSpy.mock.calls[0][0];
       expect(errorMsg).toContain("timed out");
-      expect(process.exitCode).toBe(1);
 
       jest.useRealTimers();
     });
@@ -424,11 +426,10 @@ describe("runWizard", () => {
       };
       getWorkflowSpy.mockReturnValue(mockWorkflow as any);
 
-      await runWizard(makeOptions());
+      await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
       expect(logErrorSpy).toHaveBeenCalledWith("Connection refused");
       expect(cancelSpy).toHaveBeenCalledWith("Setup failed");
-      expect(process.exitCode).toBe(1);
     });
   });
 
@@ -436,11 +437,10 @@ describe("runWizard", () => {
     test("calls formatError when status is failed", async () => {
       mockStartResult = { status: "failed", error: "workflow exploded" };
 
-      await runWizard(makeOptions());
+      await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
       expect(formatErrorSpy).toHaveBeenCalled();
       expect(formatResultSpy).not.toHaveBeenCalled();
-      expect(process.exitCode).toBe(1);
     });
   });
 
@@ -451,10 +451,9 @@ describe("runWizard", () => {
         result: { exitCode: 10 },
       };
 
-      await runWizard(makeOptions());
+      await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
       expect(formatErrorSpy).toHaveBeenCalled();
-      expect(process.exitCode).toBe(1);
     });
   });
 
@@ -734,12 +733,11 @@ describe("runWizard", () => {
         },
       };
 
-      await runWizard(makeOptions());
+      await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
       expect(logErrorSpy).toHaveBeenCalled();
       const errorMsg: string = logErrorSpy.mock.calls[0][0];
       expect(errorMsg).toContain("alien");
-      expect(process.exitCode).toBe(1);
     });
 
     test("handles missing suspend payload", async () => {
@@ -749,12 +747,11 @@ describe("runWizard", () => {
         steps: {},
       };
 
-      await runWizard(makeOptions());
+      await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
       expect(logErrorSpy).toHaveBeenCalled();
       const errorMsg: string = logErrorSpy.mock.calls[0][0];
       expect(errorMsg).toContain("No suspend payload");
-      expect(process.exitCode).toBe(1);
     });
 
     test("non-WizardCancelledError in catch triggers log.error + cancel", async () => {
@@ -775,11 +772,10 @@ describe("runWizard", () => {
         },
       };
 
-      await runWizard(makeOptions());
+      await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
       expect(logErrorSpy).toHaveBeenCalledWith("string error");
       expect(cancelSpy).toHaveBeenCalledWith("Setup failed");
-      expect(process.exitCode).toBe(1);
     });
 
     test("falls back to result.suspendPayload when step payload missing", async () => {
@@ -880,12 +876,11 @@ describe("runWizard", () => {
       };
       getWorkflowSpy.mockReturnValue(badWorkflow as any);
 
-      await runWizard(makeOptions());
+      await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
       expect(logErrorSpy).toHaveBeenCalledWith(
         "Invalid workflow response: expected object"
       );
-      expect(process.exitCode).toBe(1);
     });
 
     test("rejects response with invalid status", async () => {
@@ -900,12 +895,11 @@ describe("runWizard", () => {
       };
       getWorkflowSpy.mockReturnValue(badWorkflow as any);
 
-      await runWizard(makeOptions());
+      await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
       expect(logErrorSpy).toHaveBeenCalledWith(
         "Unexpected workflow status: banana"
       );
-      expect(process.exitCode).toBe(1);
     });
 
     test("rejects null response from startAsync", async () => {
@@ -918,12 +912,11 @@ describe("runWizard", () => {
       };
       getWorkflowSpy.mockReturnValue(badWorkflow as any);
 
-      await runWizard(makeOptions());
+      await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
       expect(logErrorSpy).toHaveBeenCalledWith(
         "Invalid workflow response: expected object"
       );
-      expect(process.exitCode).toBe(1);
     });
   });
 });
