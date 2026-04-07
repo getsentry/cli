@@ -83,19 +83,19 @@ Usage: install [options]
 Options:
     -h, --help              Display this help message
     -v, --version <version> Install a specific version (e.g., 0.2.0) or "nightly"
-        --init              Run \`sentry init\` ephemerally without installing the CLI
         --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
         --no-completions    Don't install shell completions
 
 Environment Variables:
     SENTRY_INSTALL_DIR      Override the installation directory
     SENTRY_VERSION          Install a specific version (e.g., 0.19.0, nightly)
+    SENTRY_INIT             Set to 1 to run \`sentry init\` after installing
 
 Examples:
     curl -fsSL https://cli.sentry.dev/install | bash
     curl -fsSL https://cli.sentry.dev/install | bash -s -- --version nightly
     curl -fsSL https://cli.sentry.dev/install | bash -s -- --version 0.19.0
-    curl -fsSL https://cli.sentry.dev/install | bash -s -- --init
+    SENTRY_INIT=1 curl -fsSL https://cli.sentry.dev/install | bash
     SENTRY_VERSION=nightly curl -fsSL https://cli.sentry.dev/install | bash
     SENTRY_INSTALL_DIR=~/.local/bin curl -fsSL https://cli.sentry.dev/install | bash
 EOF
@@ -104,8 +104,6 @@ EOF
 requested_version="${SENTRY_VERSION:-}"
 no_modify_path=false
 no_completions=false
-init_mode=false
-init_args=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
@@ -116,13 +114,6 @@ while [[ $# -gt 0 ]]; do
       else
         die "Error: --version requires a version argument" "args"
       fi
-      ;;
-    --init)
-      init_mode=true
-      shift
-      # Remaining args are forwarded to `sentry init`
-      init_args=("$@")
-      break
       ;;
     --no-modify-path)
       no_modify_path=true
@@ -135,12 +126,6 @@ while [[ $# -gt 0 ]]; do
     *) shift ;;
   esac
 done
-
-# In init mode, skip download if the CLI is already installed.
-if [[ "$init_mode" == "true" ]] && command -v sentry >/dev/null 2>&1; then
-  echo -e "${MUTED}sentry found in PATH, running init directly...${NC}"
-  exec sentry init ${init_args[@]+"${init_args[@]}"}
-fi
 
 # Detect OS
 case "$(uname -s)" in
@@ -270,33 +255,32 @@ fi
 
 chmod +x "$tmp_binary"
 
-if [[ "$init_mode" == "true" ]]; then
-  # Ephemeral mode: run the wizard and clean up. The EXIT trap (set earlier)
-  # removes the temp binary. The binary inherits the terminal's stdin (the
-  # pipe is already consumed by bash), so interactive prompts work normally.
-  "$tmp_binary" init ${init_args[@]+"${init_args[@]}"}
+# Delegate installation and configuration to the binary itself.
+# setup --install handles: directory selection, binary placement, PATH,
+# completions, agent skills, and the welcome message.
+# --channel persists the release channel so future `sentry cli upgrade`
+# calls track the same channel without requiring a flag.
+if [[ "$requested_version" == "nightly" ]]; then
+  channel="nightly"
 else
-  # Delegate installation and configuration to the binary itself.
-  # setup --install handles: directory selection, binary placement, PATH,
-  # completions, agent skills, and the welcome message.
-  # --channel persists the release channel so future `sentry cli upgrade`
-  # calls track the same channel without requiring a flag.
-  if [[ "$requested_version" == "nightly" ]]; then
-    channel="nightly"
-  else
-    channel="stable"
-  fi
-  setup_args="--install --method curl --channel $channel"
-  if [[ "$no_modify_path" == "true" ]]; then
-    setup_args="$setup_args --no-modify-path"
-  fi
-  if [[ "$no_completions" == "true" ]]; then
-    setup_args="$setup_args --no-completions"
-  fi
+  channel="stable"
+fi
+setup_args="--install --method curl --channel $channel"
+if [[ "$no_modify_path" == "true" ]]; then
+  setup_args="$setup_args --no-modify-path"
+fi
+if [[ "$no_completions" == "true" ]]; then
+  setup_args="$setup_args --no-completions"
+fi
 
-  # Remove trap — setup will handle temp cleanup on success
-  trap - EXIT
+# Remove trap — setup will handle temp cleanup on success
+trap - EXIT
 
-  # shellcheck disable=SC2086
-  "$tmp_binary" cli setup $setup_args
+# shellcheck disable=SC2086
+"$tmp_binary" cli setup $setup_args
+
+# Optionally launch the setup wizard after install.
+# </dev/tty reopens stdin from the terminal since `curl | bash` consumes it.
+if [[ "${SENTRY_INIT:-}" == "1" ]]; then
+  sentry init </dev/tty
 fi
