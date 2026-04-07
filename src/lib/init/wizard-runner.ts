@@ -20,13 +20,12 @@ import {
 import { MastraClient } from "@mastra/client-js";
 import { captureException, getTraceData } from "@sentry/node-core/light";
 import type { SentryTeam } from "../../types/index.js";
-import { createTeam, listTeams } from "../api-client.js";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
 import { WizardError } from "../errors.js";
 import { terminalLink } from "../formatters/colors.js";
-import { getSentryBaseUrl } from "../sentry-urls.js";
+import { resolveOrCreateTeam } from "../resolve-team.js";
 import { slugify } from "../utils.js";
 import {
   abortIfCancelled,
@@ -506,58 +505,34 @@ async function resolvePreSpinnerOptions(
   // Resolve team upfront so failures surface before the AI workflow starts.
   if (!opts.team && opts.org) {
     try {
-      const teams = await listTeams(opts.org);
-
-      if (teams.length === 0) {
-        // New org with no teams — auto-create one
-        const teamSlug = deriveTeamSlug();
-        try {
-          const created = await createTeam(opts.org, teamSlug);
-          opts = { ...opts, team: created.slug };
-        } catch (err) {
-          captureException(err, {
-            extra: { orgSlug: opts.org, teamSlug, context: "auto-create team" },
-          });
-          const teamsUrl = `${getSentryBaseUrl()}/settings/${opts.org}/teams/`;
-          log.error(
-            "No teams in your organization.\n" +
-              `Create one at ${terminalLink(teamsUrl)} and run sentry init again.`
-          );
-          cancel("Setup failed.");
-          throw new WizardError("No teams in your organization.");
-        }
-      } else if (teams.length === 1) {
-        opts = { ...opts, team: (teams[0] as SentryTeam).slug };
-      } else {
-        // Multiple teams — prefer teams the user belongs to
-        const memberTeams = teams.filter((t) => t.isMember === true);
-        const candidates = memberTeams.length > 0 ? memberTeams : teams;
-
-        if (candidates.length === 1) {
-          opts = { ...opts, team: (candidates[0] as SentryTeam).slug };
-        } else if (yes) {
-          opts = { ...opts, team: (candidates[0] as SentryTeam).slug };
-        } else {
-          const selected = await select({
-            message: "Which team should own this project?",
-            options: candidates.map((t) => ({
-              value: t.slug,
-              label: t.slug,
-              hint: t.name !== t.slug ? t.name : undefined,
-            })),
-          });
-          if (isCancel(selected)) {
-            cancel("Setup cancelled.");
-            process.exitCode = 0;
-            return null;
-          }
-          opts = { ...opts, team: selected };
-        }
-      }
-    } catch (err) {
-      captureException(err, {
-        extra: { orgSlug: opts.org, context: "early team resolution" },
+      const result = await resolveOrCreateTeam(opts.org, {
+        autoCreateSlug: deriveTeamSlug(),
+        usageHint: "sentry init",
+        onAmbiguous: yes
+          ? async (candidates) => (candidates[0] as SentryTeam).slug
+          : async (candidates) => {
+              const selected = await select({
+                message: "Which team should own this project?",
+                options: candidates.map((t) => ({
+                  value: t.slug,
+                  label: t.slug,
+                  hint: t.name !== t.slug ? t.name : undefined,
+                })),
+              });
+              if (isCancel(selected)) {
+                cancel("Setup cancelled.");
+                process.exitCode = 0;
+                throw new WizardCancelledError();
+              }
+              return selected;
+            },
       });
+      opts = { ...opts, team: result.slug };
+    } catch (err) {
+      if (err instanceof WizardCancelledError) {
+        return null;
+      }
+      throw new WizardError(errorMessage(err));
     }
   }
 

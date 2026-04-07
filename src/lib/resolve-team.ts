@@ -71,6 +71,11 @@ export type ResolveTeamOptions = {
    * with the autoCreateSlug value.
    */
   dryRun?: boolean;
+  /**
+   * Called when multiple candidate teams remain after membership filtering.
+   * Return the selected team slug. If not provided, a ContextError is thrown.
+   */
+  onAmbiguous?: (candidates: SentryTeam[]) => Promise<string>;
 };
 
 /** Result of team resolution, including how the team was determined */
@@ -142,7 +147,12 @@ export async function resolveOrCreateTeam(
     };
   }
 
-  // Multiple candidates — user must specify
+  // Multiple candidates — let caller choose or throw
+  if (options.onAmbiguous) {
+    const slug = await options.onAmbiguous(candidates);
+    return { slug, source: "auto-selected" };
+  }
+
   const label =
     memberTeams.length > 0
       ? `You belong to ${candidates.length} teams in ${orgSlug}`
