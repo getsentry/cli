@@ -17,7 +17,13 @@ import {
   resolveProject,
 } from "../../lib/dsn/index.js";
 import { isAuthenticated } from "../../lib/db/auth.js";
-import { bold, green, muted, yellow } from "../../lib/formatters/colors.js";
+import {
+  colorTag,
+  escapeMarkdownInline,
+  mdKvTable,
+  renderMarkdown,
+  safeCodeSpan,
+} from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
@@ -85,39 +91,39 @@ type DsnDiscoveryData = {
 
 /** Mask the middle of a DSN's public key for display */
 function maskDsnKey(dsn: string): string {
-  // Replace the public key portion: https://KEY@host/id → https://KEY[masked]@host/id
   return dsn.replace(
     /^(https?:\/\/)([a-z0-9]{4})[a-z0-9]+(@)/i,
     (_, proto, start, at) => `${proto}${start}****${at}`
   );
 }
 
-function formatDsnEntry(
-  entry: DsnDiscoveryData["dsns"][number],
-  index: number,
-  total: number
-): string {
+function formatDsnEntry(entry: DsnDiscoveryData["dsns"][number]): string {
   const lines: string[] = [];
 
-  const prefix = total > 1 ? `${index + 1}. ` : "";
-  const primaryTag = entry.primary ? green(" (primary)") : "";
-  lines.push(`${prefix}${bold(maskDsnKey(entry.dsn))}${primaryTag}`);
-  lines.push(`   Source: ${entry.sourceDescription}`);
+  const rows: [string, string][] = [
+    ["DSN", safeCodeSpan(maskDsnKey(entry.dsn))],
+    ["Source", escapeMarkdownInline(entry.sourceDescription)],
+  ];
   if (entry.packagePath) {
-    lines.push(`   Package: ${entry.packagePath}`);
+    rows.push(["Package", safeCodeSpan(entry.packagePath)]);
   }
-  lines.push(`   Project ID: ${entry.projectId}`);
+  rows.push(["Project ID", safeCodeSpan(entry.projectId)]);
   if (entry.orgId) {
-    lines.push(`   Org ID: ${entry.orgId}`);
+    rows.push(["Org ID", safeCodeSpan(entry.orgId)]);
   }
   if (entry.resolved) {
-    lines.push(
-      `   Resolved: ${green(`${entry.resolved.orgSlug}/${entry.resolved.projectSlug}`)}`
-    );
+    rows.push([
+      "Resolved",
+      colorTag(
+        "green",
+        `${entry.resolved.orgSlug}/${entry.resolved.projectSlug}`
+      ),
+    ]);
   } else {
-    lines.push(`   Resolved: ${muted("(not yet resolved)")}`);
+    rows.push(["Resolved", colorTag("muted", "(not yet resolved)")]);
   }
 
+  lines.push(mdKvTable(rows));
   return lines.join("\n");
 }
 
@@ -125,61 +131,70 @@ function formatDsnDiscovery(data: DsnDiscoveryData): string {
   const lines: string[] = [];
 
   // Project root
-  lines.push(bold("Project root"));
-  lines.push(`  Path:   ${data.projectRoot.path}`);
-  lines.push(`  Reason: ${data.projectRoot.reason}`);
+  lines.push("## Project root");
+  lines.push("");
+  lines.push(
+    mdKvTable([
+      ["Path", safeCodeSpan(data.projectRoot.path)],
+      ["Reason", data.projectRoot.reason],
+    ])
+  );
 
   // Scan summary
+  lines.push("## Scan");
   lines.push("");
-  lines.push(bold("Scan"));
+  const dirCount = data.scan.dirs.length;
+  const fileCount = data.scan.files;
   lines.push(
-    `  ${data.scan.dirs.length} director${data.scan.dirs.length === 1 ? "y" : "ies"}, ${data.scan.files} file${data.scan.files === 1 ? "" : "s"} checked`
+    `${dirCount} director${dirCount === 1 ? "y" : "ies"}, ${fileCount} file${fileCount === 1 ? "" : "s"} checked`
   );
-  if (data.scan.dirs.length > 0) {
-    // Sort dirs for stable display, show relative paths
+  lines.push("");
+  if (dirCount > 0) {
     const sortedDirs = [...data.scan.dirs].sort();
     for (const dir of sortedDirs) {
-      lines.push(`    ${muted(dir)}`);
+      lines.push(`- ${colorTag("muted", dir)}`);
     }
+    lines.push("");
   }
 
   // Env var
+  lines.push("## Environment");
   lines.push("");
-  lines.push(bold("Environment"));
   if (data.envVar) {
-    lines.push(`  SENTRY_DSN: ${maskDsnKey(data.envVar)}`);
+    lines.push(`SENTRY\\_DSN: ${safeCodeSpan(maskDsnKey(data.envVar))}`);
   } else {
-    lines.push(`  SENTRY_DSN: ${muted("(not set)")}`);
+    lines.push(`SENTRY\\_DSN: ${colorTag("muted", "(not set)")}`);
   }
+  lines.push("");
 
   // DSNs
-  lines.push("");
   if (data.count === 0) {
-    lines.push(yellow("No DSNs found"));
+    lines.push(colorTag("yellow", "No DSNs found"));
     lines.push("");
     lines.push("The CLI looks for DSNs in:");
-    lines.push("  1. Source code (Sentry.init calls, DSN strings)");
-    lines.push("  2. .env files (SENTRY_DSN=...)");
-    lines.push("  3. SENTRY_DSN environment variable");
+    lines.push("1. Source code (Sentry.init calls, DSN strings)");
+    lines.push("2. .env files (SENTRY\\_DSN=...)");
+    lines.push("3. SENTRY\\_DSN environment variable");
     lines.push("");
     lines.push(
-      `Searched from ${muted(data.cwd)} up to ${muted(data.projectRoot.path)}`
+      `Searched from ${safeCodeSpan(data.cwd)} up to ${safeCodeSpan(data.projectRoot.path)}`
     );
   } else {
-    lines.push(
-      bold(`Found ${data.count} DSN${data.count > 1 ? "s" : ""}`)
-    );
-    lines.push("");
-    for (let i = 0; i < data.dsns.length; i++) {
-      const entry = data.dsns[i]!;
-      lines.push(formatDsnEntry(entry, i, data.count));
-      if (i < data.dsns.length - 1) {
+    lines.push(`## Found ${data.count} DSN${data.count > 1 ? "s" : ""}`);
+    for (const [i, entry] of data.dsns.entries()) {
+      lines.push("");
+      if (data.count > 1) {
+        const primaryTag = entry.primary
+          ? ` ${colorTag("green", "(primary)")}`
+          : "";
+        lines.push(`### ${i + 1}.${primaryTag}`);
         lines.push("");
       }
+      lines.push(formatDsnEntry(entry));
     }
   }
 
-  return lines.join("\n");
+  return renderMarkdown(lines.join("\n"));
 }
 
 function mapDsn(
