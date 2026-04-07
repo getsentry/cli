@@ -84,41 +84,6 @@ function parseRelativeParts(
   return { value: num, unit };
 }
 
-/** Check if a string is a date-only value (no time component) */
-function isDateOnly(value: string): boolean {
-  return !value.includes("T");
-}
-
-/** Check if a datetime string has an explicit timezone indicator (Z, +HH:MM, -HH:MM) */
-function hasTimezone(value: string): boolean {
-  if (value.endsWith("Z")) {
-    return true;
-  }
-  // Look for +/- offset after the time portion (position 10+ to skip date hyphens)
-  const tail = value.slice(10);
-  const lastPlus = tail.lastIndexOf("+");
-  const lastMinus = tail.lastIndexOf("-");
-  return lastPlus > 0 || lastMinus > 0;
-}
-
-// ---------------------------------------------------------------------------
-// Local timezone helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Get the local timezone UTC offset string (e.g., "-05:00", "+09:00", "+00:00")
- * for a specific date. The offset may vary by date due to DST.
- */
-function getLocalOffsetString(date: Date): string {
-  const offsetMinutes = date.getTimezoneOffset();
-  // getTimezoneOffset returns minutes *behind* UTC, so flip the sign
-  const sign = offsetMinutes <= 0 ? "+" : "-";
-  const abs = Math.abs(offsetMinutes);
-  const hours = String(Math.floor(abs / 60)).padStart(2, "0");
-  const mins = String(abs % 60).padStart(2, "0");
-  return `${sign}${hours}:${mins}`;
-}
-
 // ---------------------------------------------------------------------------
 // Date parsing
 // ---------------------------------------------------------------------------
@@ -134,12 +99,28 @@ function getLocalOffsetString(date: Date): string {
 type DatePosition = "start" | "end" | "after" | "before";
 
 /**
+ * Validate a date string with `new Date()` and return the parsed Date.
+ * @throws ValidationError on invalid input
+ */
+function validateDate(raw: string): Date {
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) {
+    throw new ValidationError(
+      `Invalid date: '${raw}'. Expected ISO-8601 format (e.g., 2024-01-01 or 2024-01-01T12:00:00).`,
+      "period"
+    );
+  }
+  return d;
+}
+
+/**
  * Parse and normalize a date string based on its position in a range expression.
  *
- * - Date-only inputs (`YYYY-MM-DD`) are normalized with local timezone offset
- *   and position-aware time boundaries.
- * - Datetime inputs without timezone get local timezone appended.
- * - Datetime inputs with explicit timezone are passed through as-is.
+ * All outputs are UTC ISO-8601 strings (via `.toISOString()`).
+ * - Date-only inputs are interpreted as local time (JS treats `new Date("2024-01-15T00:00:00")`
+ *   without "Z" as local), then converted to UTC.
+ * - Datetime inputs with explicit timezone are parsed natively by `new Date()`.
+ * - Datetime inputs without timezone are treated as local time by `new Date()`.
  *
  * @throws ValidationError on invalid date input
  */
@@ -152,83 +133,43 @@ export function parseDate(raw: string, position: DatePosition): string {
     );
   }
 
-  if (isDateOnly(trimmed)) {
+  // Date-only (no "T"): apply position-aware time boundaries in local time
+  if (!trimmed.includes("T")) {
     return normalizeDateOnly(trimmed, position);
   }
 
-  return normalizeDatetime(trimmed, position);
+  // Datetime: validate and convert to UTC
+  return validateDate(trimmed).toISOString();
 }
 
 /**
  * Normalize a date-only string (YYYY-MM-DD) with position-aware boundaries.
  *
- * Uses local timezone so "2024-01-15" means the user's local midnight,
- * not UTC midnight.
+ * Constructs datetimes without "Z" so `new Date()` interprets them as local time,
+ * then converts to UTC via `.toISOString()`.
  */
 function normalizeDateOnly(dateStr: string, position: DatePosition): string {
-  // Validate by constructing a Date in local time
-  const testDate = new Date(`${dateStr}T12:00:00`);
-  if (Number.isNaN(testDate.getTime())) {
-    throw new ValidationError(
-      `Invalid date: '${dateStr}'. Expected YYYY-MM-DD format.`,
-      "period"
-    );
-  }
+  // Validate the date is parseable
+  validateDate(`${dateStr}T12:00:00`);
 
   if (position === "start") {
-    // Inclusive start: local midnight of the given day
-    const d = new Date(`${dateStr}T00:00:00`);
-    return `${dateStr}T00:00:00.000${getLocalOffsetString(d)}`;
+    return new Date(`${dateStr}T00:00:00`).toISOString();
   }
   if (position === "end") {
-    // Inclusive end: local end-of-day
-    const d = new Date(`${dateStr}T23:59:59`);
-    return `${dateStr}T23:59:59.999${getLocalOffsetString(d)}`;
+    return new Date(`${dateStr}T23:59:59.999`).toISOString();
   }
   if (position === "after") {
     // Exclusive start (>): next day's local midnight
     const nextDay = new Date(`${dateStr}T12:00:00`);
     nextDay.setDate(nextDay.getDate() + 1);
     const nextStr = nextDay.toISOString().slice(0, 10);
-    const d = new Date(`${nextStr}T00:00:00`);
-    return `${nextStr}T00:00:00.000${getLocalOffsetString(d)}`;
+    return new Date(`${nextStr}T00:00:00`).toISOString();
   }
   // position === "before": Exclusive end (<): previous day's local end-of-day
   const prevDay = new Date(`${dateStr}T12:00:00`);
   prevDay.setDate(prevDay.getDate() - 1);
   const prevStr = prevDay.toISOString().slice(0, 10);
-  const d = new Date(`${prevStr}T23:59:59`);
-  return `${prevStr}T23:59:59.999${getLocalOffsetString(d)}`;
-}
-
-/**
- * Normalize a datetime string, appending local timezone if none is present.
- */
-function normalizeDatetime(
-  datetimeStr: string,
-  _position: DatePosition
-): string {
-  // If it already has a timezone, validate and pass through
-  if (hasTimezone(datetimeStr)) {
-    const d = new Date(datetimeStr);
-    if (Number.isNaN(d.getTime())) {
-      throw new ValidationError(
-        `Invalid datetime: '${datetimeStr}'. Expected ISO-8601 format.`,
-        "period"
-      );
-    }
-    return datetimeStr;
-  }
-
-  // No timezone — interpret as local time, append local offset
-  const d = new Date(datetimeStr);
-  if (Number.isNaN(d.getTime())) {
-    throw new ValidationError(
-      `Invalid datetime: '${datetimeStr}'. Expected ISO-8601 format (e.g., 2024-01-01T12:00:00).`,
-      "period"
-    );
-  }
-  return `${datetimeStr}${getLocalOffsetString(d)}`;
+  return new Date(`${prevStr}T23:59:59.999`).toISOString();
 }
 
 // ---------------------------------------------------------------------------
