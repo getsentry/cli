@@ -461,13 +461,15 @@ async function executeTraceSingleFetch(
   });
 
   const periodLabel =
-    timeRange.type === "relative" ? timeRange.period : "specified range";
+    timeRange.type === "relative"
+      ? `in the last ${timeRange.period}`
+      : "in the specified range";
 
   if (logs.length === 0) {
     return {
       result: { logs: [], traceId, hasMore: false },
       hint:
-        `No logs found for trace ${traceId} in the last ${periodLabel}.\n\n` +
+        `No logs found for trace ${traceId} ${periodLabel}.\n\n` +
         "Try 'sentry trace logs' for more options (e.g., --period 30d).",
     };
   }
