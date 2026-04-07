@@ -50,17 +50,56 @@ export type TimeRangeApiParams = {
 export const PERIOD_BRIEF =
   'Time range: "7d", "2024-01-01..2024-02-01", ">=2024-01-01"';
 
-/** Matches valid relative period strings like "7d", "24h", "1m", "2w" */
-const RELATIVE_PERIOD_RE = /^(\d+)([smhdw])$/;
+/** Valid unit suffixes for relative period strings */
+const PERIOD_UNITS = "smhdw";
 
-/** Matches ISO-8601 date-only format: YYYY-MM-DD */
-const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** Seconds per unit for relative period computation */
+const UNIT_SECONDS: Record<string, number> = {
+  s: 1,
+  m: 60,
+  h: 3600,
+  d: 86_400,
+  w: 604_800,
+};
 
 /**
- * Detects whether a datetime string has an explicit timezone indicator.
- * Matches trailing Z, +HH:MM, -HH:MM, +HHMM, -HHMM.
+ * Try to parse a relative period string (e.g., "7d") into its numeric value and unit.
+ * Returns null if the string isn't a valid relative period.
  */
-const HAS_TZ_RE = /(?:Z|[+-]\d{2}:?\d{2})$/;
+function parseRelativeParts(
+  value: string
+): { value: number; unit: string } | null {
+  if (value.length < 2) {
+    return null;
+  }
+  const unit = value.at(-1) ?? "";
+  if (!PERIOD_UNITS.includes(unit)) {
+    return null;
+  }
+  const numStr = value.slice(0, -1);
+  const num = Number(numStr);
+  if (!Number.isInteger(num) || num < 0 || numStr.length === 0) {
+    return null;
+  }
+  return { value: num, unit };
+}
+
+/** Check if a string is a date-only value (no time component) */
+function isDateOnly(value: string): boolean {
+  return !value.includes("T");
+}
+
+/** Check if a datetime string has an explicit timezone indicator (Z, +HH:MM, -HH:MM) */
+function hasTimezone(value: string): boolean {
+  if (value.endsWith("Z")) {
+    return true;
+  }
+  // Look for +/- offset after the time portion (position 10+ to skip date hyphens)
+  const tail = value.slice(10);
+  const lastPlus = tail.lastIndexOf("+");
+  const lastMinus = tail.lastIndexOf("-");
+  return lastPlus > 0 || lastMinus > 0;
+}
 
 // ---------------------------------------------------------------------------
 // Local timezone helpers
@@ -113,7 +152,7 @@ export function parseDate(raw: string, position: DatePosition): string {
     );
   }
 
-  if (DATE_ONLY_RE.test(trimmed)) {
+  if (isDateOnly(trimmed)) {
     return normalizeDateOnly(trimmed, position);
   }
 
@@ -170,7 +209,7 @@ function normalizeDatetime(
   _position: DatePosition
 ): string {
   // If it already has a timezone, validate and pass through
-  if (HAS_TZ_RE.test(datetimeStr)) {
+  if (hasTimezone(datetimeStr)) {
     const d = new Date(datetimeStr);
     if (Number.isNaN(d.getTime())) {
       throw new ValidationError(
@@ -278,12 +317,11 @@ function tryParseRange(value: string): AbsoluteTimeRange | null {
  * Returns the parsed TimeRange or null if the value isn't a valid relative duration.
  */
 function tryParseRelative(value: string): RelativeTimeRange | null {
-  const match = RELATIVE_PERIOD_RE.exec(value);
-  if (!match) {
+  const parts = parseRelativeParts(value);
+  if (!parts) {
     return null;
   }
-  const numericValue = Number(match[1]);
-  if (numericValue === 0) {
+  if (parts.value === 0) {
     throw new ValidationError(
       `Invalid period '${value}': duration cannot be zero.`,
       "period"
@@ -400,20 +438,12 @@ export function timeRangeToSeconds(range: TimeRange): number | undefined {
 
 /** Parse a relative period string into seconds. */
 function relativeToSeconds(period: string): number | undefined {
-  const match = RELATIVE_PERIOD_RE.exec(period);
-  if (!match) {
+  const parts = parseRelativeParts(period);
+  if (!parts) {
     return;
   }
-  const value = Number(match[1]);
-  const unitSeconds: Record<string, number> = {
-    s: 1,
-    m: 60,
-    h: 3600,
-    d: 86_400,
-    w: 604_800,
-  };
-  const unit = unitSeconds[match[2] ?? ""];
-  return unit ? value * unit : undefined;
+  const seconds = UNIT_SECONDS[parts.unit];
+  return seconds ? parts.value * seconds : undefined;
 }
 
 /** Compute seconds between two ISO-8601 datetime strings. */
