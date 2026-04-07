@@ -13,7 +13,7 @@ Work with Sentry releases
 
 ### `sentry release list <org/project>`
 
-List releases
+List releases with adoption and health metrics
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of releases to list - (default: "25")`
@@ -22,7 +22,7 @@ List releases
 
 ### `sentry release view <org/version...>`
 
-View release details
+View release details with health metrics
 
 **Flags:**
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`

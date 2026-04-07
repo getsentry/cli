@@ -96,6 +96,7 @@ export {
   getRelease,
   listReleaseDeploys,
   listReleasesPaginated,
+  type ReleaseSortValue,
   setCommitsAuto,
   setCommitsLocal,
   setCommitsWithRefs,

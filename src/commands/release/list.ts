@@ -2,6 +2,7 @@
  * sentry release list
  *
  * List releases in an organization with pagination support.
+ * Includes per-project health/adoption metrics when available.
  */
 
 import type { OrgReleaseResponse } from "@sentry/api";
@@ -19,6 +20,24 @@ export const PAGINATION_KEY = "release-list";
 
 type ReleaseWithOrg = OrgReleaseResponse & { orgSlug?: string };
 
+/**
+ * Extract health data from the first project that has it.
+ *
+ * A release spans multiple projects; each gets independent health data.
+ * For the list table we pick the first project with `hasHealthData: true`.
+ */
+function getHealthData(release: OrgReleaseResponse) {
+  return release.projects?.find((p) => p.healthData?.hasHealthData)?.healthData;
+}
+
+/** Format a percentage value with one decimal, or "—" when absent. */
+function fmtPct(value: number | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+  return `${value.toFixed(1)}%`;
+}
+
 const RELEASE_COLUMNS: Column<ReleaseWithOrg>[] = [
   { header: "ORG", value: (r) => r.orgSlug || "" },
   {
@@ -26,16 +45,23 @@ const RELEASE_COLUMNS: Column<ReleaseWithOrg>[] = [
     value: (r) => escapeMarkdownCell(r.shortVersion || r.version),
   },
   {
-    header: "STATUS",
-    value: (r) => (r.dateReleased ? "Finalized" : "Unreleased"),
-  },
-  {
     header: "CREATED",
     value: (r) => (r.dateCreated ? formatRelativeTime(r.dateCreated) : ""),
   },
   {
-    header: "RELEASED",
-    value: (r) => (r.dateReleased ? formatRelativeTime(r.dateReleased) : "—"),
+    header: "ADOPTION",
+    value: (r) => fmtPct(getHealthData(r)?.adoption),
+    align: "right",
+  },
+  {
+    header: "CRASH-FREE",
+    value: (r) => fmtPct(getHealthData(r)?.crashFreeSessions),
+    align: "right",
+  },
+  {
+    header: "ISSUES",
+    value: (r) => String(r.newGroups ?? 0),
+    align: "right",
   },
   { header: "COMMITS", value: (r) => String(r.commitCount ?? 0) },
   { header: "DEPLOYS", value: (r) => String(r.deployCount ?? 0) },
@@ -48,20 +74,27 @@ const releaseListConfig: OrgListConfig<OrgReleaseResponse, ReleaseWithOrg> = {
   commandPrefix: "sentry release list",
   // listForOrg fetches a buffer page for multi-org fan-out.
   // The framework truncates results to --limit after aggregation.
+  // health=true to populate per-project adoption/crash-free metrics.
   listForOrg: async (org) => {
-    const { data } = await listReleasesPaginated(org, { perPage: 100 });
+    const { data } = await listReleasesPaginated(org, {
+      perPage: 100,
+      health: true,
+    });
     return data;
   },
-  listPaginated: (org, opts) => listReleasesPaginated(org, opts),
+  listPaginated: (org, opts) =>
+    listReleasesPaginated(org, { ...opts, health: true }),
   withOrg: (release, orgSlug) => ({ ...release, orgSlug }),
   displayTable: (releases: ReleaseWithOrg[]) =>
     formatTable(releases, RELEASE_COLUMNS),
 };
 
 const docs: OrgListCommandDocs = {
-  brief: "List releases",
+  brief: "List releases with adoption and health metrics",
   fullDescription:
-    "List releases in an organization.\n\n" +
+    "List releases in an organization with adoption and crash-free metrics.\n\n" +
+    "Health data (adoption %, crash-free session rate) is shown per-release\n" +
+    "from the first project that has session data.\n\n" +
     "Target specification:\n" +
     "  sentry release list               # auto-detect from DSN or config\n" +
     "  sentry release list <org>/        # list all releases in org (paginated)\n" +

@@ -38,8 +38,11 @@ import { listRepositoriesPaginated } from "./repositories.js";
  * List releases in an organization with pagination control.
  * Returns a single page of results with cursor metadata.
  *
+ * When `health` is true, each release's `projects[].healthData` is populated
+ * with adoption percentages, crash-free rates, and session/user counts.
+ *
  * @param orgSlug - Organization slug
- * @param options - Pagination, query, and sort options
+ * @param options - Pagination, query, sort, and health options
  * @returns Single page of releases with cursor metadata
  */
 export async function listReleasesPaginated(
@@ -49,6 +52,8 @@ export async function listReleasesPaginated(
     perPage?: number;
     query?: string;
     sort?: string;
+    /** Include per-project health/adoption data in the response. */
+    health?: boolean;
   } = {}
 ): Promise<PaginatedResponse<OrgReleaseResponse[]>> {
   const config = await getOrgSdkConfig(orgSlug);
@@ -56,12 +61,13 @@ export async function listReleasesPaginated(
   const result = await listAnOrganization_sReleases({
     ...config,
     path: { organization_id_or_slug: orgSlug },
-    // per_page and sort are supported at runtime but not in the OpenAPI spec
+    // per_page, sort, and health are supported at runtime but not in the OpenAPI spec
     query: {
       cursor: options.cursor,
       per_page: options.perPage ?? 25,
       query: options.query,
       sort: options.sort,
+      health: options.health ? 1 : undefined,
     } as { cursor?: string },
   });
 
@@ -73,17 +79,38 @@ export async function listReleasesPaginated(
   );
 }
 
+/** Sort options for the release list endpoint. */
+export type ReleaseSortValue =
+  | "date"
+  | "sessions"
+  | "users"
+  | "crash_free_sessions"
+  | "crash_free_users";
+
 /**
  * Get a single release by version.
  * Version is URL-encoded by the SDK.
  *
+ * When `health` is true, each project in the response includes a
+ * `healthData` object with adoption percentages, crash-free rates,
+ * and session/user counts for the requested period.
+ *
  * @param orgSlug - Organization slug
  * @param version - Release version string (e.g., "1.0.0", "sentry-cli@0.24.0")
+ * @param options - Optional health and adoption query parameters
  * @returns Full release detail
  */
 export async function getRelease(
   orgSlug: string,
-  version: string
+  version: string,
+  options?: {
+    /** Include per-project health/adoption data. */
+    health?: boolean;
+    /** Include adoption stage info (e.g., "adopted", "low_adoption"). */
+    adoptionStages?: boolean;
+    /** Period for health stats: "24h", "7d", "14d", etc. Defaults to "24h". */
+    healthStatsPeriod?: string;
+  }
 ): Promise<OrgReleaseResponse> {
   const config = await getOrgSdkConfig(orgSlug);
 
@@ -92,6 +119,21 @@ export async function getRelease(
     path: {
       organization_id_or_slug: orgSlug,
       version,
+    },
+    query: {
+      health: options?.health,
+      adoptionStages: options?.adoptionStages,
+      healthStatsPeriod: options?.healthStatsPeriod as
+        | "24h"
+        | "7d"
+        | "14d"
+        | "30d"
+        | "1h"
+        | "1d"
+        | "2d"
+        | "48h"
+        | "90d"
+        | undefined,
     },
   });
 
