@@ -23,7 +23,7 @@ Initialize Sentry in your project (experimental)
 | Option | Description |
 |--------|-------------|
 | `-y, --yes` | Non-interactive mode (accept defaults) |
-| `--dry-run` | Preview changes without applying them |
+| `-n, --dry-run` | Show what would happen without making changes |
 | `--features <features>...` | Features to enable: errors,tracing,logs,replay,metrics,profiling,sourcemaps,crons,ai-monitoring,user-feedback |
 | `-t, --team <team>` | Team slug to create the project under |
 

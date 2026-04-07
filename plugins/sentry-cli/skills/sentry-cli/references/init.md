@@ -17,7 +17,7 @@ Initialize Sentry in your project (experimental)
 
 **Flags:**
 - `-y, --yes - Non-interactive mode (accept defaults)`
-- `--dry-run - Preview changes without applying them`
+- `-n, --dry-run - Show what would happen without making changes`
 - `--features <value>... - Features to enable: errors,tracing,logs,replay,metrics,profiling,sourcemaps,crons,ai-monitoring,user-feedback`
 - `-t, --team <value> - Team slug to create the project under`
 
