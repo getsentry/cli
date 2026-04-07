@@ -878,8 +878,8 @@ async function createSentryProject(
         orgSlug: options.org ?? "(dry-run)",
         projectSlug: slug,
         projectId: "(dry-run)",
-        dsn: "https://key@o0.ingest.sentry.io/0",
-        url: "https://sentry.io/dry-run",
+        dsn: "(dry-run)",
+        url: "(dry-run)",
       },
     };
   }
