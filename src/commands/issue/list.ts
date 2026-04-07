@@ -81,6 +81,13 @@ import {
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import {
+  PERIOD_BRIEF,
+  parsePeriod,
+  serializeTimeRange,
+  type TimeRange,
+  timeRangeToApiParams,
+} from "../../lib/time-range.js";
+import {
   type ProjectAliasEntry,
   type SentryIssue,
   SentryIssueSchema,
@@ -542,6 +549,10 @@ async function fetchIssuesForTarget(
     limit: number;
     sort: SortValue;
     statsPeriod?: string;
+    /** Absolute start datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+    start?: string;
+    /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+    end?: string;
     /** Resume from this cursor (Phase 2 redistribution or next-page resume). */
     startCursor?: string;
     onPage?: (fetched: number, limit: number) => void;
@@ -559,6 +570,8 @@ async function fetchIssuesForTarget(
         ...options,
         projectId: target.projectId,
         groupStatsPeriod: options.groupStatsPeriod,
+        start: options.start,
+        end: options.end,
       }
     );
     return { target, issues, hasMore: !!nextCursor, nextCursor };
@@ -627,6 +640,10 @@ type BudgetFetchOptions = {
   limit: number;
   sort: SortValue;
   statsPeriod?: string;
+  /** Absolute start datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  start?: string;
+  /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  end?: string;
   /** Per-target cursors from a previous page (compound cursor resume). */
   startCursors?: Map<string, string>;
   /** Pre-computed collapse fields for API performance. @see {@link buildListApiOptions} */
@@ -804,7 +821,8 @@ function decodeCompoundCursor(raw: string): (string | null)[] {
  */
 function buildMultiTargetContextKey(
   targets: ResolvedTarget[],
-  flags: Pick<ListFlags, "sort" | "query" | "period">
+  flags: Pick<ListFlags, "sort" | "query">,
+  timeRange: TimeRange
 ): string {
   const host = getApiBaseUrl();
   const targetFingerprint = targets
@@ -814,7 +832,7 @@ function buildMultiTargetContextKey(
   const escapedQuery = flags.query
     ? escapeContextKeyValue(flags.query)
     : undefined;
-  const escapedPeriod = escapeContextKeyValue(flags.period ?? "90d");
+  const escapedPeriod = escapeContextKeyValue(serializeTimeRange(timeRange));
   const escapedSort = escapeContextKeyValue(flags.sort);
   return (
     `host:${host}|type:multi:${targetFingerprint}` +
@@ -855,11 +873,16 @@ function prevPageHint(org: string, flags: ListFlags): string {
  */
 async function fetchOrgAllIssues(
   org: string,
-  flags: Pick<ListFlags, "query" | "limit" | "sort" | "period" | "json">,
-  cursor: string | undefined,
-  onPage?: (fetched: number, limit: number) => void
+  flags: Pick<ListFlags, "query" | "limit" | "sort" | "json">,
+  timeRange: TimeRange,
+  options: {
+    cursor?: string;
+    onPage?: (fetched: number, limit: number) => void;
+  }
 ): Promise<IssuesPage> {
   const apiOpts = buildListApiOptions(flags.json);
+  const timeParams = timeRangeToApiParams(timeRange);
+  const { cursor, onPage } = options;
 
   // When resuming with --cursor, fetch a single page so the cursor chain stays intact.
   if (cursor) {
@@ -869,7 +892,7 @@ async function fetchOrgAllIssues(
       cursor,
       perPage,
       sort: flags.sort,
-      statsPeriod: flags.period,
+      ...timeParams,
       groupStatsPeriod: apiOpts.groupStatsPeriod,
       collapse: apiOpts.collapse,
     });
@@ -881,7 +904,7 @@ async function fetchOrgAllIssues(
     query: flags.query,
     limit: flags.limit,
     sort: flags.sort,
-    statsPeriod: flags.period,
+    ...timeParams,
     groupStatsPeriod: apiOpts.groupStatsPeriod,
     collapse: apiOpts.collapse,
     onPage,
@@ -893,6 +916,7 @@ async function fetchOrgAllIssues(
 type OrgAllIssuesOptions = {
   org: string;
   flags: ListFlags;
+  timeRange: TimeRange;
 };
 
 /**
@@ -905,11 +929,11 @@ type OrgAllIssuesOptions = {
 async function handleOrgAllIssues(
   options: OrgAllIssuesOptions
 ): Promise<IssueListResult> {
-  const { org, flags } = options;
+  const { org, flags, timeRange } = options;
   // Encode sort + query in context key so cursors from different searches don't collide.
   const contextKey = buildPaginationContextKey("org", org, {
     sort: flags.sort,
-    period: flags.period ?? "90d",
+    period: serializeTimeRange(timeRange),
     q: flags.query,
   });
   const { cursor, direction } = resolveCursor(
@@ -926,11 +950,13 @@ async function handleOrgAllIssues(
         json: flags.json,
       },
       (setMessage) =>
-        fetchOrgAllIssues(org, flags, cursor, (fetched, limit) =>
-          setMessage(
-            `Fetching issues, ${fetched} and counting (up to ${limit})...`
-          )
-        )
+        fetchOrgAllIssues(org, flags, timeRange, {
+          cursor,
+          onPage: (fetched, limit) =>
+            setMessage(
+              `Fetching issues, ${fetched} and counting (up to ${limit})...`
+            ),
+        })
     );
   } catch (error) {
     throw enrichIssueListError(error, flags);
@@ -1000,6 +1026,7 @@ type ResolvedTargetsOptions = {
   parsed: ReturnType<typeof parseOrgProjectArg>;
   flags: ListFlags;
   cwd: string;
+  timeRange: TimeRange;
 };
 
 /** Default --period value (used to detect user-implicit vs explicit). */
@@ -1133,7 +1160,7 @@ function build403Detail(originalDetail: string | undefined): string {
 async function handleResolvedTargets(
   options: ResolvedTargetsOptions
 ): Promise<IssueListResult> {
-  const { parsed, flags, cwd } = options;
+  const { parsed, flags, cwd, timeRange } = options;
 
   const { targets, footer, skippedSelfHosted, detectedDsns } =
     await resolveTargetsFromParsedArg(parsed, cwd);
@@ -1152,7 +1179,7 @@ async function handleResolvedTargets(
 
   // Build a compound cursor context key that encodes the full target set +
   // search parameters so a cursor from one search is never reused for another.
-  const contextKey = buildMultiTargetContextKey(targets, flags);
+  const contextKey = buildMultiTargetContextKey(targets, flags, timeRange);
 
   // Resolve per-target start cursors from the stored compound cursor (--cursor resume).
   // Sorted target keys must match the order used in buildMultiTargetContextKey.
@@ -1202,7 +1229,7 @@ async function handleResolvedTargets(
           query: flags.query,
           limit: flags.limit,
           sort: flags.sort,
-          statsPeriod: flags.period,
+          ...timeRangeToApiParams(timeRange),
           startCursors,
           collapse: apiOpts.collapse,
           groupStatsPeriod: apiOpts.groupStatsPeriod,
@@ -1547,7 +1574,7 @@ export const listCommand = buildListCommand("issue", {
       period: {
         kind: "parsed",
         parse: String,
-        brief: "Time period for issue activity (e.g. 24h, 14d, 90d)",
+        brief: PERIOD_BRIEF,
         default: "90d",
       },
       cursor: {
@@ -1589,11 +1616,14 @@ export const listCommand = buildListCommand("issue", {
       );
     }
 
+    const timeRange = parsePeriod(flags.period ?? DEFAULT_PERIOD);
+
     // biome-ignore lint/suspicious/noExplicitAny: shared handler accepts any mode variant
     const resolveAndHandle: ModeHandler<any> = (ctx) =>
       handleResolvedTargets({
         ...ctx,
         flags,
+        timeRange,
       });
 
     const result = (await dispatchOrgScopedList({
@@ -1616,6 +1646,7 @@ export const listCommand = buildListCommand("issue", {
           handleOrgAllIssues({
             org: ctx.parsed.org,
             flags,
+            timeRange,
           }),
       },
     })) as IssueListResult;

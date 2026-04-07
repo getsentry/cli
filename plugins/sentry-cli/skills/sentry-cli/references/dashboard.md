@@ -42,7 +42,7 @@ View a dashboard
 - `-w, --web - Open in browser`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-r, --refresh <value> - Auto-refresh interval in seconds (default: 60, min: 10)`
-- `-t, --period <value> - Time period override (e.g., "24h", "7d", "14d")`
+- `-t, --period <value> - Time range: "7d", "2024-01-01..2024-02-01", ">=2024-01-01"`
 
 **Examples:**
 

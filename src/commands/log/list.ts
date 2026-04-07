@@ -45,6 +45,12 @@ import { logger } from "../../lib/logger.js";
 import { withProgress } from "../../lib/polling.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
 import {
+  PERIOD_BRIEF,
+  parsePeriod,
+  type TimeRange,
+  timeRangeToApiParams,
+} from "../../lib/time-range.js";
+import {
   parseDualModeArgs,
   resolveTraceOrg,
   warnIfNormalized,
@@ -171,13 +177,13 @@ const DEFAULT_PROJECT_PERIOD = "30d";
 async function executeSingleFetch(
   org: string,
   project: string,
-  flags: ListFlags
+  flags: ListFlags,
+  timeRange: TimeRange
 ): Promise<FetchResult> {
-  const period = flags.period ?? DEFAULT_PROJECT_PERIOD;
   const logs = await listLogs(org, project, {
     query: flags.query,
     limit: flags.limit,
-    statsPeriod: period,
+    ...timeRangeToApiParams(timeRange),
     sort: flags.sort,
   });
 
@@ -436,24 +442,24 @@ async function* yieldTraceFollowItems<T extends LogLike>(
 async function executeTraceSingleFetch(
   org: string,
   traceId: string,
-  flags: ListFlags
+  flags: ListFlags,
+  timeRange: TimeRange
 ): Promise<FetchResult> {
-  // Use the explicit period if set, otherwise default to 14d for trace mode.
-  // The flag is optional (no default) so undefined means "not explicitly set".
-  const period = flags.period ?? DEFAULT_TRACE_PERIOD;
-
   const logs = await listTraceLogs(org, traceId, {
     query: flags.query,
     limit: flags.limit,
-    statsPeriod: period,
+    ...timeRangeToApiParams(timeRange),
     sort: flags.sort,
   });
+
+  const periodLabel =
+    timeRange.type === "relative" ? timeRange.period : "specified range";
 
   if (logs.length === 0) {
     return {
       result: { logs: [], traceId, hasMore: false },
       hint:
-        `No logs found for trace ${traceId} in the last ${period}.\n\n` +
+        `No logs found for trace ${traceId} in the last ${periodLabel}.\n\n` +
         "Try 'sentry trace logs' for more options (e.g., --period 30d).",
     };
   }
@@ -645,8 +651,7 @@ export const listCommand = buildListCommand(
         period: {
           kind: "parsed",
           parse: String,
-          brief:
-            'Time period (e.g., "30d", "14d", "24h"). Default: 30d (project mode), 14d (trace mode)',
+          brief: PERIOD_BRIEF,
           optional: true,
         },
         sort: {
@@ -675,6 +680,24 @@ export const listCommand = buildListCommand(
       const { cwd } = this;
 
       const parsed = parseLogListArgs(args);
+
+      // Resolve mode-dependent default period, then parse the time range
+      const effectivePeriod =
+        flags.period ??
+        (parsed.mode === "trace"
+          ? DEFAULT_TRACE_PERIOD
+          : DEFAULT_PROJECT_PERIOD);
+      const timeRange = parsePeriod(effectivePeriod);
+
+      // Follow mode cannot be used with an end-bounded absolute range —
+      // streaming polls for new events, but an end date caps the window.
+      if (flags.follow && timeRange.type === "absolute" && timeRange.end) {
+        throw new ValidationError(
+          "--follow cannot be used with an end date boundary. " +
+            "Remove the end date to stream new events.",
+          "period"
+        );
+      }
 
       if (parsed.mode === "trace") {
         // Trace mode: use the org-scoped trace-logs endpoint.
@@ -739,7 +762,7 @@ export const listCommand = buildListCommand(
             message: `Fetching logs (up to ${flags.limit})...`,
             json: flags.json,
           },
-          () => executeTraceSingleFetch(org, traceId, flags)
+          () => executeTraceSingleFetch(org, traceId, flags, timeRange)
         );
         yield new CommandOutput(result);
         return { hint };
@@ -783,7 +806,7 @@ export const listCommand = buildListCommand(
             message: `Fetching logs (up to ${flags.limit})...`,
             json: flags.json,
           },
-          () => executeSingleFetch(org, project, flags)
+          () => executeSingleFetch(org, project, flags, timeRange)
         );
         yield new CommandOutput(result);
         return { hint };

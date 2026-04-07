@@ -190,6 +190,10 @@ type ListTransactionsOptions = {
   statsPeriod?: string;
   /** Pagination cursor to resume from a previous page */
   cursor?: string;
+  /** Absolute start datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  start?: string;
+  /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  end?: string;
 };
 
 /**
@@ -232,6 +236,8 @@ export async function listTransactions(
           query: fullQuery || undefined,
           per_page: options.limit || 10,
           statsPeriod: options.statsPeriod ?? "7d",
+          start: options.start,
+          end: options.end,
           sort:
             options.sort === "duration"
               ? "-transaction.duration"
@@ -277,6 +283,10 @@ type ListSpansOptions = {
   cursor?: string;
   /** Additional field names to request from the API beyond SPAN_FIELDS */
   extraFields?: string[];
+  /** Absolute start datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  start?: string;
+  /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  end?: string;
 };
 
 /**
@@ -314,6 +324,8 @@ export async function listSpans(
         query: fullQuery || undefined,
         per_page: options.limit || 10,
         statsPeriod: options.statsPeriod ?? "7d",
+        start: options.start,
+        end: options.end,
         sort: options.sort === "duration" ? "-span.duration" : "-timestamp",
         cursor: options.cursor,
       },

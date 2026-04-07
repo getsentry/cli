@@ -16,6 +16,11 @@ import { ContextError } from "../../lib/errors.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { buildListCommand, paginationHint } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
+import {
+  parsePeriod,
+  serializeTimeRange,
+  timeRangeToApiParams,
+} from "../../lib/time-range.js";
 import { IssueEventSchema } from "../../types/index.js";
 import {
   appendEventsFlags,
@@ -92,6 +97,7 @@ export const eventsCommand = buildListCommand("issue", {
   },
   async *func(this: SentryContext, flags: EventsFlags, issueArg: string) {
     const { cwd } = this;
+    const timeRange = parsePeriod(flags.period);
 
     // Resolve issue using shared resolution logic (supports @latest, short IDs, etc.)
     const { org, issue } = await resolveIssue({
@@ -112,7 +118,7 @@ export const eventsCommand = buildListCommand("issue", {
     const contextKey = buildPaginationContextKey(
       "issue-events",
       `${org}/${issue.id}`,
-      { q: flags.query, period: flags.period }
+      { q: flags.query, period: serializeTimeRange(timeRange) }
     );
     const { cursor, direction } = resolveCursor(
       flags.cursor,
@@ -131,7 +137,7 @@ export const eventsCommand = buildListCommand("issue", {
           query: flags.query,
           full: flags.full,
           cursor,
-          statsPeriod: flags.period,
+          ...timeRangeToApiParams(timeRange),
         })
     );
 

@@ -29,6 +29,11 @@ import {
 import { withProgress } from "../../lib/polling.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
 import {
+  parsePeriod,
+  serializeTimeRange,
+  timeRangeToApiParams,
+} from "../../lib/time-range.js";
+import {
   type TransactionListItem,
   TransactionListItemSchema,
 } from "../../types/index.js";
@@ -251,6 +256,7 @@ export const listCommand = buildListCommand("trace", {
   },
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
     const { cwd } = this;
+    const timeRange = parsePeriod(flags.period);
 
     // Resolve org/project from positional arg, config, or DSN auto-detection
     const { org, project } = await resolveOrgProjectFromArg(
@@ -262,7 +268,7 @@ export const listCommand = buildListCommand("trace", {
     const contextKey = buildPaginationContextKey("trace", `${org}/${project}`, {
       sort: flags.sort,
       q: flags.query,
-      period: flags.period,
+      period: serializeTimeRange(timeRange),
     });
     const { cursor, direction } = resolveCursor(
       flags.cursor,
@@ -281,7 +287,7 @@ export const listCommand = buildListCommand("trace", {
           limit: flags.limit,
           sort: flags.sort,
           cursor,
-          statsPeriod: flags.period,
+          ...timeRangeToApiParams(timeRange),
         })
     );
 

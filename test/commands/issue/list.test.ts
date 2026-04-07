@@ -914,7 +914,7 @@ describe("issue list: compound cursor resume", () => {
 
     // Build the context key matching buildMultiTargetContextKey for a single target
     const fingerprint = "test-org/proj-a";
-    const contextKey = `host:${host}|type:multi:${fingerprint}|sort:date|period:${escapeContextKeyValue("90d")}`;
+    const contextKey = `host:${host}|type:multi:${fingerprint}|sort:date|period:${escapeContextKeyValue("rel:90d")}`;
     // Set up pagination state so "last"/"next" resolves to "resume-cursor:0:0"
     advancePaginationState(
       PAGINATION_KEY,
