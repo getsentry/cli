@@ -232,6 +232,12 @@ describe("parseDate: output format", () => {
     expect(result).toBe(expected);
   });
 
+  test("space separator is accepted as T alternative", () => {
+    const withSpace = parseDate("2024-06-15 12:00:00Z", "start");
+    const withT = parseDate("2024-06-15T12:00:00Z", "start");
+    expect(withSpace).toBe(withT);
+  });
+
   test("rejects invalid date", () => {
     expect(() => parseDate("not-a-date", "start")).toThrow("Invalid");
   });

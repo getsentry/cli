@@ -46,13 +46,6 @@ export type TimeRangeApiParams = {
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Brief text for --period flag help, shared across commands */
-export const PERIOD_BRIEF =
-  'Time range: "7d", "2024-01-01..2024-02-01", ">=2024-01-01"';
-
-/** Valid unit suffixes for relative period strings */
-const PERIOD_UNITS = "smhdw";
-
 /** Seconds per unit for relative period computation */
 const UNIT_SECONDS: Record<string, number> = {
   s: 1,
@@ -61,6 +54,23 @@ const UNIT_SECONDS: Record<string, number> = {
   d: 86_400,
   w: 604_800,
 };
+
+/** Valid unit suffixes for relative period strings, derived from UNIT_SECONDS */
+const PERIOD_UNITS = new Set(Object.keys(UNIT_SECONDS));
+
+/**
+ * Dynamic example dates relative to "today" so examples never look stale.
+ * Computed once at module load.
+ */
+const EXAMPLE_START = (() => {
+  const d = new Date();
+  d.setMonth(d.getMonth() - 1);
+  return d.toISOString().slice(0, 10);
+})();
+const EXAMPLE_END = new Date().toISOString().slice(0, 10);
+
+/** Brief text for --period flag help, shared across commands */
+export const PERIOD_BRIEF = `Time range: "7d", "${EXAMPLE_START}..${EXAMPLE_END}", ">=${EXAMPLE_START}"`;
 
 /**
  * Try to parse a relative period string (e.g., "7d") into its numeric value and unit.
@@ -72,8 +82,8 @@ function parseRelativeParts(
   if (value.length < 2) {
     return null;
   }
-  const unit = value.at(-1) ?? "";
-  if (!PERIOD_UNITS.includes(unit)) {
+  const unit = value.at(-1) as string;
+  if (!PERIOD_UNITS.has(unit)) {
     return null;
   }
   const numStr = value.slice(0, -1);
@@ -106,7 +116,7 @@ function validateDate(raw: string): Date {
   const d = new Date(raw);
   if (Number.isNaN(d.getTime())) {
     throw new ValidationError(
-      `Invalid date: '${raw}'. Expected ISO-8601 format (e.g., 2024-01-01 or 2024-01-01T12:00:00).`,
+      `Invalid date: '${raw}'. Expected ISO-8601 format (e.g., ${EXAMPLE_START} or ${EXAMPLE_START}T12:00:00).`,
       "period"
     );
   }
@@ -128,18 +138,23 @@ export function parseDate(raw: string, position: DatePosition): string {
   const trimmed = raw.trim();
   if (trimmed.length === 0) {
     throw new ValidationError(
-      "Empty date value. Expected ISO-8601 format (e.g., 2024-01-01)",
+      `Empty date value. Expected ISO-8601 format (e.g., ${EXAMPLE_START})`,
       "period"
     );
   }
 
+  // Normalize space-separated datetime to ISO "T" separator (common user input)
+  const normalized = trimmed.includes(" ")
+    ? trimmed.replace(" ", "T")
+    : trimmed;
+
   // Date-only (no "T"): apply position-aware time boundaries in local time
-  if (!trimmed.includes("T")) {
-    return normalizeDateOnly(trimmed, position);
+  if (!normalized.includes("T")) {
+    return normalizeDateOnly(normalized, position);
   }
 
   // Datetime: validate and convert to UTC
-  return validateDate(trimmed).toISOString();
+  return validateDate(normalized).toISOString();
 }
 
 /**
@@ -203,7 +218,7 @@ function tryParseOperator(value: string): AbsoluteTimeRange | null {
     const dateStr = value.slice(op.prefix.length);
     if (dateStr.length === 0) {
       throw new ValidationError(
-        `Missing date after '${op.prefix}'. Expected e.g., '${op.prefix}2024-01-01'.`,
+        `Missing date after '${op.prefix}'. Expected e.g., '${op.prefix}${EXAMPLE_START}'.`,
         "period"
       );
     }
@@ -233,7 +248,7 @@ function tryParseRange(value: string): AbsoluteTimeRange | null {
   if (left.length === 0 && right.length === 0) {
     throw new ValidationError(
       "Empty range '..'. Provide at least one date " +
-        "(e.g., '2024-01-01..', '..2024-02-01', '2024-01-01..2024-02-01').",
+        `(e.g., '${EXAMPLE_START}..', '..${EXAMPLE_END}', '${EXAMPLE_START}..${EXAMPLE_END}').`,
       "period"
     );
   }
@@ -290,7 +305,7 @@ export function parsePeriod(value: string): TimeRange {
   if (trimmed.length === 0) {
     throw new ValidationError(
       "Empty period value. Use a relative duration (e.g., '7d', '24h') " +
-        "or a date range (e.g., '2024-01-01..2024-02-01', '>=2024-01-01').",
+        `or a date range (e.g., '${EXAMPLE_START}..${EXAMPLE_END}', '>=${EXAMPLE_START}').`,
       "period"
     );
   }
@@ -307,8 +322,8 @@ export function parsePeriod(value: string): TimeRange {
 function throwInvalidPeriod(value: string): never {
   throw new ValidationError(
     `Invalid period '${value}'. Use a relative duration (e.g., '7d', '24h'), ` +
-      "a date range (e.g., '2024-01-01..2024-02-01'), " +
-      "or a comparison operator (e.g., '>=2024-01-01', '<2024-02-01').",
+      `a date range (e.g., '${EXAMPLE_START}..${EXAMPLE_END}'), ` +
+      `or a comparison operator (e.g., '>=${EXAMPLE_START}', '<${EXAMPLE_END}').`,
     "period"
   );
 }
