@@ -32,6 +32,7 @@ import {
   type OrgListConfig,
 } from "./org-list.js";
 import { disableResponseCache } from "./response-cache.js";
+import { PERIOD_BRIEF } from "./time-range.js";
 
 // ---------------------------------------------------------------------------
 // Level A: shared parameter / flag definitions
@@ -305,7 +306,7 @@ export function buildListLimitFlag(
 export const LIST_PERIOD_FLAG = {
   kind: "parsed" as const,
   parse: String,
-  brief: 'Time period (e.g., "1h", "24h", "7d", "30d")',
+  brief: PERIOD_BRIEF,
   default: "7d",
 };
 

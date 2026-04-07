@@ -22,6 +22,11 @@ import { logger } from "../../lib/logger.js";
 import { withProgress } from "../../lib/polling.js";
 import { resolveOrgRegion } from "../../lib/region.js";
 import { buildDashboardUrl } from "../../lib/sentry-urls.js";
+import {
+  PERIOD_BRIEF,
+  parsePeriod,
+  timeRangeToSeconds,
+} from "../../lib/time-range.js";
 import type {
   DashboardWidget,
   WidgetDataResult,
@@ -175,7 +180,7 @@ export const viewCommand = buildCommand({
       period: {
         kind: "parsed",
         parse: String,
-        brief: 'Time period override (e.g., "24h", "7d", "14d")',
+        brief: PERIOD_BRIEF,
         optional: true,
       },
     },
@@ -213,7 +218,14 @@ export const viewCommand = buildCommand({
     );
 
     const regionUrl = await resolveOrgRegion(orgSlug);
-    const period = flags.period ?? dashboard.period ?? "24h";
+    const effectivePeriod = flags.period ?? dashboard.period ?? "24h";
+    const timeRange = parsePeriod(effectivePeriod);
+    const periodSeconds = timeRangeToSeconds(timeRange);
+    // WidgetQueryOptions uses `period` (not `statsPeriod`) for the relative field
+    const widgetTimeOpts =
+      timeRange.type === "relative"
+        ? { period: timeRange.period }
+        : { start: timeRange.start, end: timeRange.end };
     const widgets = dashboard.widgets ?? [];
 
     if (flags.refresh !== undefined) {
@@ -244,12 +256,12 @@ export const viewCommand = buildCommand({
             regionUrl,
             orgSlug,
             dashboard,
-            { period }
+            { ...widgetTimeOpts, periodSeconds }
           );
 
           // Build output data before clearing so clear→render is instantaneous
           const viewData = buildViewData(dashboard, widgetData, widgets, {
-            period,
+            period: effectivePeriod,
             url,
           });
 
@@ -271,11 +283,18 @@ export const viewCommand = buildCommand({
     // ── Single fetch mode ──
     const widgetData = await withProgress(
       { message: "Querying widget data...", json: flags.json },
-      () => queryAllWidgets(regionUrl, orgSlug, dashboard, { period })
+      () =>
+        queryAllWidgets(regionUrl, orgSlug, dashboard, {
+          ...widgetTimeOpts,
+          periodSeconds,
+        })
     );
 
     yield new CommandOutput(
-      buildViewData(dashboard, widgetData, widgets, { period, url })
+      buildViewData(dashboard, widgetData, widgets, {
+        period: effectivePeriod,
+        url,
+      })
     );
     return { hint: `Dashboard: ${url}` };
   },

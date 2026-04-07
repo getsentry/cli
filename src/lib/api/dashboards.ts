@@ -144,6 +144,12 @@ export async function updateDashboard(
 type WidgetQueryOptions = {
   /** Override the dashboard's time period (e.g., "24h", "7d") */
   period?: string;
+  /** Absolute start datetime (ISO-8601). Mutually exclusive with period. */
+  start?: string;
+  /** Absolute end datetime (ISO-8601). Mutually exclusive with period. */
+  end?: string;
+  /** Pre-computed total seconds for interval computation (for absolute ranges). */
+  periodSeconds?: number;
   /** Filter by environment(s) — from dashboard.environment */
   environment?: string[];
   /** Filter by project ID(s) — from dashboard.projects */
@@ -204,10 +210,12 @@ const VALID_INTERVALS = ["1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d"];
  * produces at least `chartWidth` data points, ensuring barWidth stays at 1.
  */
 export function computeOptimalInterval(
-  statsPeriod: string,
-  widget: DashboardWidget
+  statsPeriod: string | undefined,
+  widget: DashboardWidget,
+  periodSeconds?: number
 ): string | undefined {
-  const totalSeconds = periodToSeconds(statsPeriod);
+  const totalSeconds =
+    periodSeconds ?? (statsPeriod ? periodToSeconds(statsPeriod) : undefined);
   if (!totalSeconds) {
     return widget.interval;
   }
@@ -325,14 +333,30 @@ type WidgetQueryParams = {
   regionUrl: string;
   orgSlug: string;
   widget: DashboardWidget;
-  statsPeriod: string;
+  /** Relative period (e.g., "24h"). Omit when using absolute start/end. */
+  statsPeriod?: string;
+  /** Absolute start datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  start?: string;
+  /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  end?: string;
+  /** Pre-computed total seconds for interval computation (for absolute ranges). */
+  periodSeconds?: number;
   options?: WidgetQueryOptions;
 };
 
 async function queryWidgetTimeseries(
   params: WidgetQueryParams
 ): Promise<TimeseriesResult> {
-  const { regionUrl, orgSlug, widget, statsPeriod, options = {} } = params;
+  const {
+    regionUrl,
+    orgSlug,
+    widget,
+    statsPeriod,
+    start,
+    end,
+    periodSeconds,
+    options = {},
+  } = params;
   const allSeries: TimeseriesResult["series"] = [];
 
   for (const query of widget.queries ?? []) {
@@ -346,7 +370,9 @@ async function queryWidgetTimeseries(
       query: query.conditions || undefined,
       dataset: dataset ?? undefined,
       statsPeriod,
-      interval: computeOptimalInterval(statsPeriod, widget),
+      start,
+      end,
+      interval: computeOptimalInterval(statsPeriod, widget, periodSeconds),
       environment: options.environment,
       project: options.project?.map(String),
     };
@@ -391,7 +417,15 @@ async function queryWidgetTimeseries(
 async function queryWidgetTable(
   params: WidgetQueryParams
 ): Promise<TableResult> {
-  const { regionUrl, orgSlug, widget, statsPeriod, options = {} } = params;
+  const {
+    regionUrl,
+    orgSlug,
+    widget,
+    statsPeriod,
+    start,
+    end,
+    options = {},
+  } = params;
   const query = widget.queries?.[0];
   const fields = query?.fields ?? [
     ...(query?.columns ?? []),
@@ -408,6 +442,8 @@ async function queryWidgetTable(
         query: query?.conditions || undefined,
         dataset: dataset ?? undefined,
         statsPeriod,
+        start,
+        end,
         sort: query?.orderby || undefined,
         per_page: widget.limit ?? 10,
         environment: options.environment,
@@ -543,7 +579,12 @@ export async function queryAllWidgets(
   options: WidgetQueryOptions = {}
 ): Promise<Map<number, WidgetDataResult>> {
   const widgets = dashboard.widgets ?? [];
-  const statsPeriod = options.period ?? dashboard.period ?? "24h";
+  // When absolute start/end are provided, skip relative statsPeriod —
+  // the API treats them as mutually exclusive.
+  const statsPeriod =
+    options.start || options.end
+      ? undefined
+      : (options.period ?? dashboard.period ?? "24h");
 
   // Merge dashboard-level filters with caller overrides
   const mergedOptions: WidgetQueryOptions = {
@@ -568,6 +609,9 @@ export async function queryAllWidgets(
           orgSlug,
           widget,
           statsPeriod,
+          start: options.start,
+          end: options.end,
+          periodSeconds: options.periodSeconds,
           options: mergedOptions,
         })
       )

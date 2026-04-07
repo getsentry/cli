@@ -174,6 +174,10 @@ export type ListIssueEventsOptions = {
   cursor?: string;
   /** Relative time period (e.g., "7d", "24h"). Overrides start/end on the API. */
   statsPeriod?: string;
+  /** Absolute start datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  start?: string;
+  /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  end?: string;
 };
 
 /**
@@ -193,7 +197,7 @@ export async function listIssueEvents(
   issueId: string,
   options: ListIssueEventsOptions = {}
 ): Promise<PaginatedResponse<IssueEvent[]>> {
-  const { limit = 25, query, full, cursor, statsPeriod } = options;
+  const { limit = 25, query, full, cursor, statsPeriod, start, end } = options;
 
   const config = await getOrgSdkConfig(orgSlug);
 
@@ -213,6 +217,8 @@ export async function listIssueEvents(
         full,
         cursor: currentCursor,
         statsPeriod,
+        start,
+        end,
       },
     });
 

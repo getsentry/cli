@@ -59,6 +59,10 @@ type ListLogsOptions = {
   sort?: LogSortDirection;
   /** Only return logs after this timestamp_precise value (for streaming) */
   afterTimestamp?: number;
+  /** Absolute start datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  start?: string;
+  /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  end?: string;
 };
 
 /**
@@ -97,7 +101,12 @@ export async function listLogs(
       project: isNumericProject ? [Number(projectSlug)] : undefined,
       query: fullQuery || undefined,
       per_page: options.limit || API_MAX_PER_PAGE,
-      statsPeriod: options.statsPeriod ?? "30d",
+      statsPeriod:
+        options.start || options.end
+          ? undefined
+          : (options.statsPeriod ?? "30d"),
+      start: options.start,
+      end: options.end,
       sort: toApiSort(options.sort),
     },
   });
@@ -209,6 +218,10 @@ type ListTraceLogsOptions = {
   statsPeriod?: string;
   /** Sort direction: "newest" (default) or "oldest" */
   sort?: LogSortDirection;
+  /** Absolute start datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  start?: string;
+  /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  end?: string;
 };
 
 /**
@@ -240,7 +253,12 @@ export async function listTraceLogs(
     {
       params: {
         traceId,
-        statsPeriod: options.statsPeriod ?? "14d",
+        statsPeriod:
+          options.start || options.end
+            ? undefined
+            : (options.statsPeriod ?? "14d"),
+        start: options.start,
+        end: options.end,
         per_page: options.limit ?? API_MAX_PER_PAGE,
         query: options.query,
         sort: toApiSort(options.sort),

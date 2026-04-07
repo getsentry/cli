@@ -118,6 +118,10 @@ export async function listIssuesPaginated(
     /** Fields to collapse (omit) from the response for performance.
      *  @see {@link buildIssueListCollapse} */
     collapse?: IssueCollapseField[];
+    /** Absolute start datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+    start?: string;
+    /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+    end?: string;
   } = {}
 ): Promise<PaginatedResponse<SentryIssue[]>> {
   // When we have a numeric project ID, use the `project` query param (Array<number>)
@@ -144,6 +148,8 @@ export async function listIssuesPaginated(
       limit: options.perPage ?? 25,
       sort: options.sort,
       statsPeriod: options.statsPeriod,
+      start: options.start,
+      end: options.end,
       groupStatsPeriod: options.groupStatsPeriod,
       collapse: options.collapse,
     },
@@ -201,6 +207,10 @@ export async function listIssuesAllPages(
     /** Fields to collapse (omit) from the response for performance.
      *  @see {@link buildIssueListCollapse} */
     collapse?: IssueCollapseField[];
+    /** Absolute start datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+    start?: string;
+    /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+    end?: string;
   }
 ): Promise<IssuesPage> {
   if (options.limit < 1) {
@@ -222,6 +232,8 @@ export async function listIssuesAllPages(
       perPage,
       sort: options.sort,
       statsPeriod: options.statsPeriod,
+      start: options.start,
+      end: options.end,
       projectId: options.projectId,
       groupStatsPeriod: options.groupStatsPeriod,
       collapse: options.collapse,

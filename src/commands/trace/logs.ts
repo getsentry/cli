@@ -21,6 +21,11 @@ import {
 import { withProgress } from "../../lib/polling.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
 import {
+  PERIOD_BRIEF,
+  parsePeriod,
+  timeRangeToApiParams,
+} from "../../lib/time-range.js";
+import {
   parseTraceTarget,
   resolveTraceOrg,
   warnIfNormalized,
@@ -128,7 +133,7 @@ export const logsCommand = buildCommand({
       period: {
         kind: "parsed",
         parse: String,
-        brief: `Time period to search (e.g., "14d", "7d", "24h"). Default: ${DEFAULT_PERIOD}`,
+        brief: PERIOD_BRIEF,
         default: DEFAULT_PERIOD,
       },
       limit: {
@@ -163,6 +168,7 @@ export const logsCommand = buildCommand({
   async *func(this: SentryContext, flags: LogsFlags, ...args: string[]) {
     applyFreshFlag(flags);
     const { cwd } = this;
+    const timeRange = parsePeriod(flags.period);
 
     // Parse and resolve org/trace-id
     const parsed = parseTraceTarget(args, USAGE_HINT);
@@ -180,7 +186,7 @@ export const logsCommand = buildCommand({
       },
       () =>
         listTraceLogs(org, traceId, {
-          statsPeriod: flags.period,
+          ...timeRangeToApiParams(timeRange),
           limit: flags.limit,
           query: flags.query,
           sort: flags.sort,

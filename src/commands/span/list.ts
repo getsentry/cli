@@ -41,6 +41,12 @@ import {
 import { withProgress } from "../../lib/polling.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
 import {
+  parsePeriod,
+  serializeTimeRange,
+  type TimeRange,
+  timeRangeToApiParams,
+} from "../../lib/time-range.js";
+import {
   type ParsedTraceTarget,
   parseDualModeArgs,
   resolveTraceOrgProject,
@@ -334,6 +340,8 @@ function jsonTransformSpanList(data: SpanListData, fields?: string[]): unknown {
 type ModeContext = {
   cwd: string;
   flags: ListFlags;
+  /** Parsed time range from the --period flag */
+  timeRange: TimeRange;
   /** Extra API field names derived from --fields (undefined when none needed) */
   extraApiFields?: string[];
 };
@@ -348,7 +356,7 @@ async function handleTraceMode(
   parsed: ParsedTraceTarget,
   ctx: ModeContext
 ): Promise<{ output: SpanListData; hint?: string }> {
-  const { flags, cwd, extraApiFields } = ctx;
+  const { flags, cwd, extraApiFields, timeRange } = ctx;
   warnIfNormalized(parsed, "span.list");
   const { traceId, org, project } = await resolveTraceOrgProject(
     parsed,
@@ -364,7 +372,7 @@ async function handleTraceMode(
   const contextKey = buildPaginationContextKey(
     "span",
     `${org}/${project}/${traceId}`,
-    { sort: flags.sort, q: flags.query, period: flags.period }
+    { sort: flags.sort, q: flags.query, period: serializeTimeRange(timeRange) }
   );
   const { cursor, direction } = resolveCursor(
     flags.cursor,
@@ -380,7 +388,7 @@ async function handleTraceMode(
         sort: flags.sort,
         limit: flags.limit,
         cursor,
-        statsPeriod: flags.period,
+        ...timeRangeToApiParams(timeRange),
         extraFields: extraApiFields,
       })
   );
@@ -434,7 +442,7 @@ async function handleProjectMode(
   target: string | undefined,
   ctx: ModeContext
 ): Promise<{ output: SpanListData; hint?: string }> {
-  const { flags, cwd, extraApiFields } = ctx;
+  const { flags, cwd, extraApiFields, timeRange } = ctx;
   const { org, project } = await resolveOrgProjectFromArg(
     target,
     cwd,
@@ -445,7 +453,7 @@ async function handleProjectMode(
   const contextKey = buildPaginationContextKey(
     "span-search",
     `${org}/${project}`,
-    { sort: flags.sort, q: flags.query, period: flags.period }
+    { sort: flags.sort, q: flags.query, period: serializeTimeRange(timeRange) }
   );
   const { cursor, direction } = resolveCursor(
     flags.cursor,
@@ -461,7 +469,7 @@ async function handleProjectMode(
         sort: flags.sort,
         limit: flags.limit,
         cursor,
-        statsPeriod: flags.period,
+        ...timeRangeToApiParams(timeRange),
         extraFields: extraApiFields,
       })
   );
@@ -588,9 +596,10 @@ export const listCommand = buildListCommand("span", {
   },
   async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {
     const { cwd } = this;
+    const timeRange = parsePeriod(flags.period);
     const parsed = parseSpanListArgs(args);
     const extraApiFields = extractExtraApiFields(flags.fields);
-    const modeCtx: ModeContext = { cwd, flags, extraApiFields };
+    const modeCtx: ModeContext = { cwd, flags, timeRange, extraApiFields };
 
     const { output, hint } =
       parsed.mode === "trace"
