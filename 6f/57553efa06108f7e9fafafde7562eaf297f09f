@@ -1,0 +1,359 @@
+# Plan: Overload `--period` with absolute date range support
+
+## Summary
+
+Extend the existing `--period` flag across all 7 commands to accept absolute date ranges using `..` syntax, in addition to existing relative durations. Follows `gh` CLI conventions (`--created "2023-01-01..2023-06-01"`).
+
+### Supported formats
+
+| Syntax | Meaning | API params |
+|--------|---------|------------|
+| `7d`, `24h`, `1h` | Relative duration (existing) | `statsPeriod=7d` |
+| `2024-01-01..2024-02-01` | Full range | `start=...&end=...` |
+| `2024-01-01..` | Start only (open end) | `start=...` |
+| `..2024-02-01` | End only (open start) | `end=...` |
+| `>2024-01-01` | After date (exclusive) | `start=2024-01-02T00:00:00.000Z` |
+| `>=2024-01-01` | From date (inclusive) | `start=2024-01-01T00:00:00.000Z` |
+| `<2024-02-01` | Before date (exclusive) | `end=2024-01-31T23:59:59.999Z` |
+| `<=2024-02-01` | Through date (inclusive) | `end=2024-02-01T23:59:59.999Z` |
+
+Date formats: `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM:SS`, `YYYY-MM-DDTHH:MM:SSZ`, `YYYY-MM-DDTHH:MM:SS+HH:MM`
+
+This matches the `gh` CLI operator syntax (e.g., `gh search issues --created ">2023-01-01"`).
+
+---
+
+## Affected commands (8)
+
+| Command | Current flag | Default | API function | Notes |
+|---------|-------------|---------|-------------|-------|
+| `trace list` | `LIST_PERIOD_FLAG` (shared) | `"7d"` | `listTransactions()` | |
+| `span list` | `LIST_PERIOD_FLAG` (shared) | `"7d"` | `listSpans()` | |
+| `issue events` | `EVENTS_FLAGS.period` (shared) | `"7d"` | `listIssueEvents()` | Uses shared `event/shared-events.ts` |
+| `event list` | `EVENTS_FLAGS.period` (shared) | `"7d"` | `listIssueEvents()` | **NEW** — parallel to `issue events`, same shared module |
+| `issue list` | Custom inline | `"90d"` | `listIssuesPaginated()` | |
+| `trace logs` | Custom inline | `"14d"` | `listTraceLogs()` | |
+| `log list` | Custom inline | optional | `listLogs()` / `listTraceLogs()` | |
+| `dashboard view` | Custom inline | optional | `queryAllWidgets()` | |
+
+`issue events` and `event list` share flags/formatters via `src/commands/event/shared-events.ts`. Changes to the shared module automatically apply to both.
+
+All underlying Sentry API endpoints support `start`/`end` params (except the private `/trace-logs/` endpoint — unknown, but we'll pass them and let the API decide).
+
+---
+
+## Files to create/modify
+
+| File | Action | Description |
+|------|--------|-------------|
+| `src/lib/time-range.ts` | **NEW** | Core module: types, parser, converters |
+| `src/lib/list-command.ts` | Edit | Update `LIST_PERIOD_FLAG` brief text |
+| `src/lib/api/traces.ts` | Edit | Add `start?`/`end?` to options types |
+| `src/lib/api/events.ts` | Edit | Add `start?`/`end?` to options type |
+| `src/lib/api/issues.ts` | Edit | Add `start?`/`end?` to options types |
+| `src/lib/api/logs.ts` | Edit | Add `start?`/`end?` to options types |
+| `src/lib/api/dashboards.ts` | Edit | Accept `TimeRangeApiParams`, update interval computation |
+| `src/commands/event/shared-events.ts` | Edit | Update `appendEventsFlags` to handle range display |
+| `src/commands/trace/list.ts` | Edit | Parse period, spread API params |
+| `src/commands/span/list.ts` | Edit | Same pattern |
+| `src/commands/issue/events.ts` | Edit | Same pattern (uses shared-events.ts) |
+| `src/commands/event/list.ts` | Edit | Same pattern (uses shared-events.ts) |
+| `src/commands/issue/list.ts` | Edit | Same pattern + multi-target context keys |
+| `src/commands/trace/logs.ts` | Edit | Same pattern |
+| `src/commands/log/list.ts` | Edit | Same pattern + follow-mode validation |
+| `src/commands/dashboard/view.ts` | Edit | Same pattern + interval computation |
+| `test/lib/time-range.property.test.ts` | **NEW** | Property-based tests |
+| `test/lib/time-range.test.ts` | **NEW** | Unit tests + edge cases |
+
+---
+
+## Step 1: New module `src/lib/time-range.ts`
+
+### Types
+
+```typescript
+/** Relative duration like "7d", "24h" */
+type RelativeTimeRange = {
+  readonly type: "relative";
+  readonly period: string;
+};
+
+/** Absolute date range with optional open ends */
+type AbsoluteTimeRange = {
+  readonly type: "absolute";
+  readonly start?: string; // ISO-8601 datetime
+  readonly end?: string;   // ISO-8601 datetime
+};
+
+type TimeRange = RelativeTimeRange | AbsoluteTimeRange;
+
+/** API parameters — statsPeriod and start/end are mutually exclusive */
+type TimeRangeApiParams = {
+  statsPeriod?: string;
+  start?: string;
+  end?: string;
+};
+```
+
+### Functions
+
+```typescript
+/** Parse --period flag value into a TimeRange. Throws ValidationError. */
+function parsePeriod(value: string): TimeRange;
+
+/** Convert parsed TimeRange to Sentry API query parameters */
+function timeRangeToApiParams(range: TimeRange): TimeRangeApiParams;
+
+/** Deterministic string for pagination context keys */
+function serializeTimeRange(range: TimeRange): string;
+
+/** Compute total seconds for interval calculation (dashboards) */
+function timeRangeToSeconds(range: TimeRange): number | undefined;
+
+/** Updated brief text for --period flag help */
+const PERIOD_BRIEF = 'Time range: "7d", "2024-01-01..2024-02-01", ">=2024-01-01"';
+```
+
+### Parser logic
+
+```
+1. Check for comparison operators (>=, >, <=, <) at the start:
+   a. ">=" + date → parseDate(date, "start") → { type: "absolute", start }
+   b. ">"  + date → parseDate(date, "after")  → { type: "absolute", start }
+      "after" position: date-only gets next day start (2024-01-01 → 2024-01-02T00:00:00.000Z)
+                        datetime passed through as-is (already exclusive)
+   c. "<=" + date → parseDate(date, "end")   → { type: "absolute", end }
+   d. "<"  + date → parseDate(date, "before") → { type: "absolute", end }
+      "before" position: date-only gets prev day end (2024-02-01 → 2024-01-31T23:59:59.999Z)
+                         datetime passed through as-is (already exclusive)
+
+2. If value contains ".." → split on first ".."
+   a. Left empty + right empty ("..") → ValidationError
+   b. Parse left as parseDate(raw, "start"), right as parseDate(raw, "end")
+   c. Validate start < end when both present
+   d. Return { type: "absolute", start?, end? }
+
+3. Otherwise → validate as relative duration against /^\d+[mhdw]$/
+   a. Reject zero durations ("0d", "0h")
+   b. Return { type: "relative", period: value }
+
+4. None matched → ValidationError with helpful message
+```
+
+### Date normalization (`parseDate`)
+
+The `position` parameter controls how date-only inputs are normalized to create intuitive inclusive/exclusive boundaries:
+
+| Position | Date-only normalization (example: UTC-5) | When used |
+|----------|------------------------------------------|-----------|
+| `"start"` | `2024-01-01` → `2024-01-01T00:00:00.000-05:00` | `>=`, left side of `..` |
+| `"end"` | `2024-02-01` → `2024-02-01T23:59:59.999-05:00` | `<=`, right side of `..` |
+| `"after"` | `2024-01-01` → `2024-01-02T00:00:00.000-05:00` (next day) | `>` (exclusive) |
+| `"before"` | `2024-02-01` → `2024-01-31T23:59:59.999-05:00` (prev day end) | `<` (exclusive) |
+
+Common rules:
+- Date-only and datetime without TZ → apply **local machine timezone offset** (via `new Date().getTimezoneOffset()` or `Intl.DateTimeFormat().resolvedOptions().timeZone`). E.g., on a machine in `America/New_York` (UTC-5), `2024-01-15` becomes `2024-01-15T00:00:00.000-05:00`. This is the intuitive behavior — when a user types a date, they mean their local midnight, not UTC midnight.
+- Datetime with explicit TZ (`Z`, `+05:30`, `-08:00`) → pass through as-is
+- Invalid date → `ValidationError`
+
+**Implementation:** Use `Intl.DateTimeFormat().resolvedOptions().timeZone` to get the IANA timezone, then format the offset using `new Date(dateString).getTimezoneOffset()` to produce the `±HH:MM` suffix. Alternatively, simply construct `new Date("2024-01-15T00:00:00")` (without `Z`) which JS interprets as local time, then call `.toISOString()` — but this converts to UTC which loses the user's intent in the serialized form. Better approach: compute the UTC offset string and append it directly, preserving locality in the API call.
+
+**Why position-aware normalization?** When a user writes `--period ">2024-01-15"`, they mean "after Jan 15" (exclusive). For date-only inputs, this means starting from Jan 16 at local midnight. Without this, `>2024-01-15` and `>=2024-01-15` would be indistinguishable. For datetime inputs, the value is already precise so no adjustment is needed.
+
+### Serialization
+
+For pagination context keys, normalize all dates to UTC (via `.toISOString()`) to ensure deterministic keys regardless of local timezone:
+
+- Relative: `"rel:7d"`
+- Absolute: `"abs:2024-01-01T05:00:00.000Z..2024-02-02T04:59:59.999Z"` (UTC-normalized)
+- Open-ended: `"abs:2024-01-01T05:00:00.000Z.."` or `"abs:..2024-02-02T04:59:59.999Z"`
+
+Note: Operator variants (`>`, `>=`, `<`, `<=`) are normalized to the same `abs:` serialization as their equivalent `..` form after date adjustment. `>2024-01-01` serializes identically to `2024-01-02..` after normalization. This ensures pagination cache consistency regardless of which syntax the user chose.
+
+The API params (`start`/`end`) preserve the original timezone offset for the API call. Only the serialization for cache keys normalizes to UTC.
+
+---
+
+## Step 2: API layer changes
+
+Mechanical change across all API option types — add `start?` and `end?` alongside existing `statsPeriod?`, spread into API call params. No behavioral change until commands start passing them.
+
+**For raw `apiRequestToRegion` calls** (traces, spans, logs, dashboards):
+```diff
+ params: {
+   statsPeriod: options.statsPeriod,
++  start: options.start,
++  end: options.end,
+   // ...rest unchanged
+ }
+```
+
+**For SDK calls** (issues, issue events) — SDK types already support `start`/`end`:
+```diff
+ query: {
+   statsPeriod: options.statsPeriod,
++  start: options.start,
++  end: options.end,
+ }
+```
+
+**`api/dashboards.ts` special handling:**
+- `WidgetQueryParams` gains `start?`/`end?` alongside `statsPeriod`
+- `computeOptimalInterval()` accepts a `periodSeconds: number` parameter. For absolute ranges, callers compute seconds via `timeRangeToSeconds()` and pass it directly instead of relying on `periodToSeconds(statsPeriod)`.
+
+---
+
+## Step 3: Update shared flag brief
+
+In `src/lib/list-command.ts`:
+```diff
+ export const LIST_PERIOD_FLAG = {
+   kind: "parsed" as const,
+   parse: String,
+-  brief: 'Time period (e.g., "1h", "24h", "7d", "30d")',
++  brief: PERIOD_BRIEF,  // imported from time-range.ts
+   default: "7d",
+ };
+```
+
+Also update the custom inline flags in the 4 commands that define their own — use `PERIOD_BRIEF` for the `brief` text.
+
+---
+
+## Step 4: Command changes (all 8)
+
+Same pattern in each command's `func()` body:
+
+```diff
+ async *func(this: SentryContext, flags, ...) {
++  const timeRange = parsePeriod(flags.period);
+   // ...
+   const contextKey = buildPaginationContextKey("entity", scope, {
+-    period: flags.period,
++    period: serializeTimeRange(timeRange),
+   });
+   // ...
+   const result = await apiFunction(org, {
+-    statsPeriod: flags.period,
++    ...timeRangeToApiParams(timeRange),
+   });
+```
+
+### Command-specific notes
+
+**`issue events` + `event list`**: Both import flags/formatters from `src/commands/event/shared-events.ts`. The `appendEventsFlags` helper displays the period in hints — update it to handle range values in the hint display. Both commands apply the same `parsePeriod` → `timeRangeToApiParams` flow in their `func()` bodies independently (they have separate `func()` implementations with different pagination keys and hint prefixes).
+
+**`issue list`**: Has the most complex flow — `fetchOrgAllIssues`, `listIssuesPaginated`, `buildMultiTargetContextKey` all pass `statsPeriod`. All need the spread pattern.
+
+**`log list`**: Follow mode (`--follow`) with an end-bounded range is contradictory. Validate: if `timeRange.type === "absolute" && timeRange.end`, throw `ValidationError("--follow cannot be used with an end date boundary")`.
+
+**`dashboard view`**: `computeOptimalInterval` needs `timeRangeToSeconds(timeRange)` instead of `periodToSeconds(statsPeriod)`. For open-ended ranges (no end), use `Date.now()` as the end for the computation.
+
+**`trace logs`**: Private `/trace-logs/` endpoint — pass `start`/`end` and let the API decide. No special fallback.
+
+---
+
+## Step 5: Tests
+
+### `test/lib/time-range.property.test.ts`
+
+Property-based tests with `fast-check`:
+1. Round-trip for relative periods (generated `\d+[mhdw]`)
+2. Round-trip for `..` date ranges (two sorted ISO dates)
+3. Open-ended `..` parsing (start only, end only)
+4. Operator parsing: `>`, `>=`, `<`, `<=` with generated dates
+5. Mutual exclusivity: `timeRangeToApiParams` returns `statsPeriod` XOR `start`/`end`, never both
+6. Serialization determinism and injectivity
+7. Date-only normalization: start gets `T00:00:00.000` + local offset, end gets `T23:59:59.999` + local offset
+8. Operator equivalence: `>=date` serializes same as `date..`, `<=date` same as `..date`
+9. Exclusive operators shift dates: `>2024-01-15` start > `>=2024-01-15` start (for date-only)
+
+### `test/lib/time-range.test.ts`
+
+Unit tests for:
+- Validation errors: `""`, `".."`, `"abc"`, `"7x"`, `"0d"`, `">"`, `">="`, invalid dates, end-before-start
+- Operator date-only normalization (tests mock timezone to a fixed offset for determinism):
+  - `>=2024-01-01` → start has local midnight with local TZ offset
+  - `>2024-01-01` → start has next day local midnight with local TZ offset
+  - `<=2024-02-01` → end has local EOD with local TZ offset
+  - `<2024-02-01` → end has prev day local EOD with local TZ offset
+- Operator datetime passthrough (no day shift for precise times):
+  - `>2024-01-01T12:00:00Z` → start `2024-01-01T12:00:00Z` (as-is)
+- Timezone handling:
+  - Date-only → local timezone offset applied (not UTC)
+  - Datetime with explicit TZ → passed through as-is
+  - Datetime without TZ → local timezone offset applied
+- Backward compatibility: all existing relative values work (`"1h"`, `"24h"`, `"7d"`, `"14d"`, `"30d"`, `"90d"`)
+- API params output for each format (relative, range, open-ended, all 4 operators)
+- `timeRangeToSeconds` for relative, absolute, and open-ended
+
+---
+
+## Step 6: Implementation order
+
+0. Merge `origin/main` into working branch (resolve conflict in `src/commands/issue/events.ts` — accept upstream version which uses `shared-events.ts`)
+1. `src/lib/time-range.ts` + tests — self-contained, no deps
+2. API layer edits (add `start?`/`end?` to all option types) — backward compatible, no caller changes
+3. `LIST_PERIOD_FLAG` brief update in `list-command.ts`
+4. Commands in order of simplicity:
+   - `trace list` (simplest — one code path)
+   - `span list` (two paths, identical pattern)
+   - `event/shared-events.ts` + `issue events` + `event list` (shared module update applies to both)
+   - `trace logs` (private endpoint)
+   - `dashboard view` (interval computation)
+   - `issue list` (most complex — multi-target keys, org-all mode)
+   - `log list` (follow mode validation)
+5. `bun run generate:skill`
+6. `bun run lint:fix && bun run typecheck && bun test`
+
+Each step is independently shippable.
+
+---
+
+## Edge cases
+
+| Input | Behavior |
+|-------|----------|
+| `"7d..14d"` | Split on `..`, try to parse `"7d"` as date → `ValidationError("Invalid start date")` |
+| `"2024-01-01"` (no `..`, no operator) | Fails relative regex, no `..`, no operator → `ValidationError("Use a duration (7d), range (2024-01-01..2024-02-01), or operator (>=2024-01-01)")` |
+| `".."` | Both sides empty → `ValidationError` |
+| `">"` / `">="` / `"<"` / `"<="` | Operator with no date → `ValidationError` |
+| `"2024-01-01..2023-01-01"` | End before start → `ValidationError` |
+| `"2030-01-01..2030-02-01"` | Future dates → valid (API returns empty results) |
+| `">2024-01-01"` vs `">=2024-01-01"` | Different: `>` starts at next day, `>=` starts at same day midnight |
+| `"<2024-02-01"` vs `"<=2024-02-01"` | Different: `<` ends at prev day EOD, `<=` ends at same day EOD |
+| `">2024-01-01T12:00:00Z"` | Datetime with `>`: passed through as-is (already precise, no day adjustment) |
+| `--follow --period "..2024-06-01"` | End-bounded + follow → `ValidationError("--follow cannot be used with an end date boundary")` |
+| `--follow --period "<2024-06-01"` | Same — end-bounded + follow → `ValidationError` |
+
+---
+
+## Verification
+
+```bash
+# Type check
+bun run typecheck
+
+# Lint
+bun run lint
+
+# Run new tests
+bun test test/lib/time-range.property.test.ts test/lib/time-range.test.ts
+
+# Run all unit tests
+bun run test:unit
+
+# Smoke test (requires auth)
+bun run dev -- trace list test-org/test-project --period 7d                        # relative (existing)
+bun run dev -- trace list test-org/test-project --period "2024-01-01..2024-02-01"  # range
+bun run dev -- issue events CLI-G --period ">=2024-06-01"                          # from date
+bun run dev -- issue events CLI-G --period ">2024-06-01"                           # after date
+bun run dev -- issue list test-org/ --period "<=2024-03-01"                        # through date
+bun run dev -- issue list test-org/ --period "<2024-03-01"                         # before date
+bun run dev -- issue events CLI-G --period "2024-06-01.."                          # open start
+bun run dev -- issue list test-org/ --period "..2024-03-01"                        # open end
+bun run dev -- issue events CLI-G --period 7d --json                               # JSON backward compat
+
+# Skill check
+bun run generate:skill && bun run check:skill
+```
