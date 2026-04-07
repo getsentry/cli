@@ -1,6 +1,54 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.25.0
+
+### New Features ✨
+
+- (event) Add 'sentry event list' command for issue-scoped event listing by @BYK in [#671](https://github.com/getsentry/cli/pull/671)
+- (init) Add detect-sentry local-op for cross-language Sentry detection by @betegon in [#657](https://github.com/getsentry/cli/pull/657)
+- (issue) Add `sentry issue events` command (#632) by @BYK in [#654](https://github.com/getsentry/cli/pull/654)
+- (period) Support absolute date ranges in --period flag by @BYK in [#674](https://github.com/getsentry/cli/pull/674)
+
+### Bug Fixes 🐛
+
+#### Init
+
+- Run commands without shell to eliminate injection surface by @betegon in [#665](https://github.com/getsentry/cli/pull/665)
+- Use opendir for listDir and validate symlinks during traversal by @betegon in [#663](https://github.com/getsentry/cli/pull/663)
+- Rename 'Custom Metrics' feature label to 'Metrics' by @MathurAditya724 in [#659](https://github.com/getsentry/cli/pull/659)
+- Add reactFeatures to feature display info by @MathurAditya724 in [#658](https://github.com/getsentry/cli/pull/658)
+- Generate spinner messages from payload params instead of server detail by @MathurAditya724 in [#655](https://github.com/getsentry/cli/pull/655)
+
+#### Other
+
+- (auth) Fall back to OAuth when env token lacks endpoint permissions by @BYK in [#673](https://github.com/getsentry/cli/pull/673)
+- (errors) Separate informational notes from actionable alternatives in ContextError by @BYK in [#651](https://github.com/getsentry/cli/pull/651)
+- (skill-gen) Eliminate manual maps to prevent undocumented commands by @BYK in [#670](https://github.com/getsentry/cli/pull/670)
+- Three bug fixes from Sentry telemetry (CLI-SC, CLI-QZ, CLI-WD) by @cursor in [#664](https://github.com/getsentry/cli/pull/664)
+- Fix set-commits --auto, document release workflow pitfalls by @BYK in [#650](https://github.com/getsentry/cli/pull/650)
+
+### Internal Changes 🔧
+
+#### Init
+
+- Use shared YES_FLAG and add -y alias constant by @betegon in [#681](https://github.com/getsentry/cli/pull/681)
+- Reuse resolveOrCreateTeam for wizard team resolution by @betegon in [#679](https://github.com/getsentry/cli/pull/679)
+- Route wizard errors through framework error pipeline by @betegon in [#678](https://github.com/getsentry/cli/pull/678)
+- Use guardNonInteractive for TTY check by @betegon in [#677](https://github.com/getsentry/cli/pull/677)
+- Use shared DRY_RUN_FLAG and add -n alias by @betegon in [#676](https://github.com/getsentry/cli/pull/676)
+- Reuse resolveOrg for offline-first org detection by @betegon in [#666](https://github.com/getsentry/cli/pull/666)
+- Use mdKvTable and renderMarkdown for wizard summary by @betegon in [#661](https://github.com/getsentry/cli/pull/661)
+
+#### Other
+
+- Extract createProjectWithDsn to deduplicate project creation by @betegon in [#667](https://github.com/getsentry/cli/pull/667)
+- Regenerate skill files and command docs by @github-actions[bot] in [eb1b19e7](https://github.com/getsentry/cli/commit/eb1b19e70a31e44695e0b84b7ce76a7928f7c828)
+
+### Other
+
+- Update custom.css by @stevenplewis in [#653](https://github.com/getsentry/cli/pull/653)
+
 ## 0.24.1
 
 ### Bug Fixes 🐛
