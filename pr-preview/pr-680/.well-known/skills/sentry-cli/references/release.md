@@ -17,7 +17,7 @@ List releases with adoption and health metrics
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of releases to list - (default: "25")`
-- `-s, --sort <value> - Sort order: date, sessions, users, crash_free_sessions, crash_free_users - (default: "date")`
+- `-s, --sort <value> - Sort: date, sessions, users, crash_free_sessions (cfs), crash_free_users (cfu) - (default: "date")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
