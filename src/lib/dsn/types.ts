@@ -124,6 +124,10 @@ export type DsnDetectionResult = {
   fingerprint: string;
   /** Detected project language (for future use) */
   language?: string;
+  /** Directories scanned for DSNs (relative to project root) */
+  scannedDirs?: string[];
+  /** Number of source files checked */
+  filesScanned?: number;
 };
 
 /**

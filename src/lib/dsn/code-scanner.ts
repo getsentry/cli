@@ -38,6 +38,8 @@ export type CodeScanResult = {
   sourceMtimes: Record<string, number>;
   /** Mtimes of scanned directories (for detecting new files added to subdirs) */
   dirMtimes: Record<string, number>;
+  /** Number of source files collected for scanning */
+  filesCollected: number;
 };
 
 /**
@@ -681,7 +683,7 @@ function scanDirectory(
         collectResult = await collectFiles(cwd, ig);
       } catch {
         span.setStatus({ code: 2, message: "Directory scan failed" });
-        return { dsns: [], sourceMtimes: {}, dirMtimes: {} };
+        return { dsns: [], sourceMtimes: {}, dirMtimes: {}, filesCollected: 0 };
       }
 
       const { files, dirMtimes } = collectResult;
@@ -689,7 +691,7 @@ function scanDirectory(
       span.setAttribute("dsn.files_collected", files.length);
 
       if (files.length === 0) {
-        return { dsns: [], sourceMtimes: {}, dirMtimes };
+        return { dsns: [], sourceMtimes: {}, dirMtimes, filesCollected: 0 };
       }
 
       // Scan files
@@ -704,7 +706,7 @@ function scanDirectory(
         "dsn.dsns_found": results.size,
       });
 
-      return { dsns: [...results.values()], sourceMtimes, dirMtimes };
+      return { dsns: [...results.values()], sourceMtimes, dirMtimes, filesCollected: files.length };
     },
     {
       "dsn.scan_dir": cwd,

@@ -11,6 +11,13 @@ requires:
 
 CLI-related commands
 
+### `sentry cli dsn`
+
+Inspect DSN discovery for the current directory
+
+**Flags:**
+- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+
 ### `sentry cli feedback <message...>`
 
 Send feedback about the CLI

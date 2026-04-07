@@ -322,6 +322,7 @@ Make an authenticated API request
 
 CLI-related commands
 
+- `sentry cli dsn` — Inspect DSN discovery for the current directory
 - `sentry cli feedback <message...>` — Send feedback about the CLI
 - `sentry cli fix` — Diagnose and repair CLI database issues
 - `sentry cli setup` — Configure shell integration

@@ -176,6 +176,7 @@ export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
     dsns: codeDsns,
     sourceMtimes: codeMtimes,
     dirMtimes: codeDirMtimes,
+    filesCollected,
   } = await scanCodeForDsns(projectRoot);
   for (const dsn of codeDsns) {
     addDsn(dsn);
@@ -227,6 +228,8 @@ export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
     all: allDsns,
     hasMultiple,
     fingerprint,
+    scannedDirs: Object.keys(codeDirMtimes),
+    filesScanned: filesCollected,
   };
 }
 

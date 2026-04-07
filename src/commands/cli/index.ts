@@ -1,4 +1,5 @@
 import { buildRouteMap } from "@stricli/core";
+import { dsnCommand } from "./dsn.js";
 import { feedbackCommand } from "./feedback.js";
 import { fixCommand } from "./fix.js";
 import { setupCommand } from "./setup.js";
@@ -6,6 +7,7 @@ import { upgradeCommand } from "./upgrade.js";
 
 export const cliRoute = buildRouteMap({
   routes: {
+    dsn: dsnCommand,
     feedback: feedbackCommand,
     fix: fixCommand,
     setup: setupCommand,
