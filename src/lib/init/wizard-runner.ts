@@ -25,7 +25,6 @@ import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
 import { terminalLink } from "../formatters/colors.js";
-import { guardNonInteractive } from "../mutate-command.js";
 import { getSentryBaseUrl } from "../sentry-urls.js";
 import { slugify } from "../utils.js";
 import {
@@ -326,11 +325,9 @@ async function preamble(
   yes: boolean,
   dryRun: boolean
 ): Promise<boolean> {
-  try {
-    guardNonInteractive({ yes, "dry-run": dryRun });
-  } catch (err) {
+  if (!(yes || dryRun || process.stdin.isTTY)) {
     process.stderr.write(
-      `Error: ${err instanceof Error ? err.message : "Interactive mode requires a terminal. Use --yes for non-interactive mode."}\n`
+      "Error: Interactive mode requires a terminal. Use --yes for non-interactive mode.\n"
     );
     process.exitCode = 1;
     return false;
