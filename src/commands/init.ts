@@ -27,6 +27,7 @@ import { warmOrgDetection } from "../lib/init/prefetch.js";
 import { runWizard } from "../lib/init/wizard-runner.js";
 import { validateResourceId } from "../lib/input-validation.js";
 import { logger } from "../lib/logger.js";
+import { DRY_RUN_ALIASES, DRY_RUN_FLAG } from "../lib/mutate-command.js";
 
 const log = logger.withTag("init");
 
@@ -209,11 +210,7 @@ export const initCommand = buildCommand<
         brief: "Non-interactive mode (accept defaults)",
         default: false,
       },
-      "dry-run": {
-        kind: "boolean",
-        brief: "Preview changes without applying them",
-        default: false,
-      },
+      "dry-run": DRY_RUN_FLAG,
       features: {
         kind: "parsed",
         parse: String,
@@ -230,6 +227,7 @@ export const initCommand = buildCommand<
       },
     },
     aliases: {
+      ...DRY_RUN_ALIASES,
       y: "yes",
       t: "team",
     },
