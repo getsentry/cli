@@ -25,8 +25,8 @@ import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
 import { terminalLink } from "../formatters/colors.js";
-import { getSentryBaseUrl } from "../sentry-urls.js";
 import { guardNonInteractive } from "../mutate-command.js";
+import { getSentryBaseUrl } from "../sentry-urls.js";
 import { slugify } from "../utils.js";
 import {
   abortIfCancelled,
