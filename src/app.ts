@@ -51,6 +51,7 @@ import {
   getExitCode,
   OutputError,
   stringifyUnknown,
+  WizardError,
 } from "./lib/errors.js";
 import { error as errorColor, warning } from "./lib/formatters/colors.js";
 import { isRouteMap, type RouteMap } from "./lib/introspect.js";
@@ -324,6 +325,11 @@ const customText: ApplicationText = {
     Sentry.captureException(exc);
 
     if (exc instanceof CliError) {
+      // WizardError with rendered=true: clack already displayed the error.
+      // Return empty string to avoid double output, exit code flows through.
+      if (exc instanceof WizardError && exc.rendered) {
+        return "";
+      }
       const prefix = ansiColor ? errorColor("Error:") : "Error:";
       return `${prefix} ${exc.format()}`;
     }

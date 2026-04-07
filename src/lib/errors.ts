@@ -476,6 +476,21 @@ export class TimeoutError extends CliError {
   }
 }
 
+/**
+ * Error thrown by the init wizard when it has already displayed
+ * the error via clack UI. The `rendered` flag tells the framework
+ * error handler to skip its own formatting.
+ */
+export class WizardError extends CliError {
+  readonly rendered: boolean;
+
+  constructor(message: string, options?: { rendered?: boolean }) {
+    super(message);
+    this.name = "WizardError";
+    this.rendered = options?.rendered ?? true;
+  }
+}
+
 // Error Utilities
 
 /**
