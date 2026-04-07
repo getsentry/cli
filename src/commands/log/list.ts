@@ -689,12 +689,12 @@ export const listCommand = buildListCommand(
           : DEFAULT_PROJECT_PERIOD);
       const timeRange = parsePeriod(effectivePeriod);
 
-      // Follow mode cannot be used with an end-bounded absolute range —
-      // streaming polls for new events, but an end date caps the window.
-      if (flags.follow && timeRange.type === "absolute" && timeRange.end) {
+      // Follow mode streams live events via short polling intervals —
+      // absolute date ranges are silently ignored, so reject them entirely.
+      if (flags.follow && timeRange.type === "absolute") {
         throw new ValidationError(
-          "--follow cannot be used with an end date boundary. " +
-            "Remove the end date to stream new events.",
+          "--follow cannot be used with an absolute date range. " +
+            "Use a relative duration (e.g., --period 1h) or omit --period.",
           "period"
         );
       }

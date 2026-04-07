@@ -235,7 +235,10 @@ export async function listTransactions(
           // omitting the parameter.
           query: fullQuery || undefined,
           per_page: options.limit || 10,
-          statsPeriod: options.statsPeriod ?? "7d",
+          statsPeriod:
+            options.start || options.end
+              ? undefined
+              : (options.statsPeriod ?? "7d"),
           start: options.start,
           end: options.end,
           sort:
@@ -323,7 +326,10 @@ export async function listSpans(
         project: isNumericProject ? projectSlug : undefined,
         query: fullQuery || undefined,
         per_page: options.limit || 10,
-        statsPeriod: options.statsPeriod ?? "7d",
+        statsPeriod:
+          options.start || options.end
+            ? undefined
+            : (options.statsPeriod ?? "7d"),
         start: options.start,
         end: options.end,
         sort: options.sort === "duration" ? "-span.duration" : "-timestamp",

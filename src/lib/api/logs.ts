@@ -101,7 +101,10 @@ export async function listLogs(
       project: isNumericProject ? [Number(projectSlug)] : undefined,
       query: fullQuery || undefined,
       per_page: options.limit || API_MAX_PER_PAGE,
-      statsPeriod: options.statsPeriod ?? "30d",
+      statsPeriod:
+        options.start || options.end
+          ? undefined
+          : (options.statsPeriod ?? "30d"),
       start: options.start,
       end: options.end,
       sort: toApiSort(options.sort),
@@ -250,7 +253,10 @@ export async function listTraceLogs(
     {
       params: {
         traceId,
-        statsPeriod: options.statsPeriod ?? "14d",
+        statsPeriod:
+          options.start || options.end
+            ? undefined
+            : (options.statsPeriod ?? "14d"),
         start: options.start,
         end: options.end,
         per_page: options.limit ?? API_MAX_PER_PAGE,

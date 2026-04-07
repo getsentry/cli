@@ -147,6 +147,9 @@ export function parseDate(raw: string, position: DatePosition): string {
  *
  * Constructs datetimes without "Z" so `new Date()` interprets them as local time,
  * then converts to UTC via `.toISOString()`.
+ *
+ * Day arithmetic for "after"/"before" uses local Date methods (setDate/setHours)
+ * to avoid UTC/local mismatches in extreme timezones.
  */
 function normalizeDateOnly(dateStr: string, position: DatePosition): string {
   // Validate the date is parseable
@@ -159,17 +162,18 @@ function normalizeDateOnly(dateStr: string, position: DatePosition): string {
     return new Date(`${dateStr}T23:59:59.999`).toISOString();
   }
   if (position === "after") {
-    // Exclusive start (>): next day's local midnight
-    const nextDay = new Date(`${dateStr}T12:00:00`);
-    nextDay.setDate(nextDay.getDate() + 1);
-    const nextStr = nextDay.toISOString().slice(0, 10);
-    return new Date(`${nextStr}T00:00:00`).toISOString();
+    // Exclusive start (>): next day's local midnight.
+    // Use local Date methods throughout to avoid UTC/local day mismatch.
+    const d = new Date(`${dateStr}T00:00:00`);
+    d.setDate(d.getDate() + 1);
+    d.setHours(0, 0, 0, 0);
+    return d.toISOString();
   }
-  // position === "before": Exclusive end (<): previous day's local end-of-day
-  const prevDay = new Date(`${dateStr}T12:00:00`);
-  prevDay.setDate(prevDay.getDate() - 1);
-  const prevStr = prevDay.toISOString().slice(0, 10);
-  return new Date(`${prevStr}T23:59:59.999`).toISOString();
+  // position === "before": Exclusive end (<): previous day's local end-of-day.
+  const d = new Date(`${dateStr}T23:59:59.999`);
+  d.setDate(d.getDate() - 1);
+  d.setHours(23, 59, 59, 999);
+  return d.toISOString();
 }
 
 // ---------------------------------------------------------------------------
