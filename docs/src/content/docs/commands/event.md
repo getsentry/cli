@@ -42,7 +42,7 @@ List events for an issue
 | `-n, --limit <limit>` | Number of events (1-1000) (default: "25") |
 | `-q, --query <query>` | Search query (Sentry search syntax) |
 | `--full` | Include full event body (stacktraces) |
-| `-t, --period <period>` | Time period (e.g., "1h", "24h", "7d", "30d") (default: "7d") |
+| `-t, --period <period>` | Time range: "7d", "2024-01-01..2024-02-01", ">=2024-01-01" (default: "7d") |
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 | `-c, --cursor <cursor>` | Navigate pages: "next", "prev", "first" (or raw cursor string) |
 
