@@ -1,0 +1,131 @@
+# Plan: Add release adoption/health data to existing commands (#463)
+
+## Context
+
+Issue [#463](https://github.com/getsentry/cli/issues/463) requests release adoption and health
+metrics (crash-free rate, adoption %, session counts) in the CLI.
+
+**Origin/main already has a full `release` command group** with 11 files:
+`list`, `view`, `create`, `delete`, `deploy`, `deploys`, `finalize`, `parse`,
+`propose-version`, `set-commits`, plus `index.ts`.
+
+**What's missing**: The existing `list` and `view` commands don't request or display health data.
+The API module (`src/lib/api/releases.ts`) never passes `health=1` or `adoptionStages=1`. The
+`OrgReleaseResponse` SDK type already includes `projects[].healthData` fields — they just come
+back as `null`/absent because we don't ask for them.
+
+**Branch state**: We're on `feat/mutate-command-helpers` (3 local commits). Need a new branch
+from `origin/main`.
+
+## Gap Analysis
+
+| What exists | What's missing |
+|-------------|----------------|
+| `listReleasesPaginated` — no `health` param | Pass `health=1` to get adoption data per project |
+| `getRelease` — no `query` param at all | Pass `health`, `adoptionStages`, `healthStatsPeriod` |
+| List table: VERSION, STATUS, CREATED, RELEASED, COMMITS, DEPLOYS | ADOPTION and CRASH-FREE columns |
+| View detail: basic metadata KV table | Per-project health breakdown section |
+| No sort by health metrics | `--sort` with `crash_free_sessions`, `crash_free_users`, `sessions`, `users` |
+
+## Pre-work
+
+1. `git checkout -b feat/release-health origin/main`
+2. `bun install`
+
+## Files to Modify
+
+| File | Change |
+|------|--------|
+| `src/lib/api/releases.ts` | Add `health` param to `listReleasesPaginated`, add `query` options to `getRelease` |
+| `src/commands/release/list.ts` | Pass `health: true`, add ADOPTION + CRASH-FREE columns, add `--sort` flag |
+| `src/commands/release/view.ts` | Pass `health: true, adoptionStages: true`, add health breakdown to formatter |
+| `test/commands/release/view.test.ts` | Update to cover health data display |
+
+## Implementation
+
+### Step 1: API layer (`src/lib/api/releases.ts`)
+
+**`listReleasesPaginated`** — add `health?: boolean` to options, pass in query cast:
+```typescript
+query: {
+  cursor: options.cursor,
+  per_page: options.perPage ?? 25,
+  query: options.query,
+  sort: options.sort,
+  health: options.health ? 1 : undefined,   // ← new
+} as { cursor?: string },
+```
+
+**`getRelease`** — add optional `options` parameter:
+```typescript
+export async function getRelease(
+  orgSlug: string,
+  version: string,
+  options?: {
+    health?: boolean;
+    adoptionStages?: boolean;
+    healthStatsPeriod?: string;
+  }
+): Promise<OrgReleaseResponse> {
+  // ...
+  const result = await retrieveAnOrganization_sRelease({
+    ...config,
+    path: { organization_id_or_slug: orgSlug, version },
+    query: {                              // ← new
+      health: options?.health,
+      adoptionStages: options?.adoptionStages,
+      healthStatsPeriod: options?.healthStatsPeriod,
+    },
+  });
+```
+The retrieve endpoint's SDK query type already declares `health`, `adoptionStages`,
+`healthStatsPeriod` — no cast needed here.
+
+### Step 2: List command (`src/commands/release/list.ts`)
+
+1. **Pass `health: true`** in `listForOrg` and `listPaginated` calls
+2. **Add columns** after RELEASED:
+   - `ADOPTION` — `projects[0].healthData?.adoption` formatted as `42.3%` (right-aligned)
+   - `CRASH-FREE` — `projects[0].healthData?.crashFreeSessions` formatted as `98.7%` (right-aligned)
+   - Use first project with `hasHealthData: true`, show `—` when absent
+3. **Add `--sort` flag** — `date` (default) | `sessions` | `users` | `crash_free_sessions` | `crash_free_users`
+
+Helper to extract "best" health data from projects array:
+```typescript
+function getHealthData(release: OrgReleaseResponse) {
+  return release.projects?.find(p => p.healthData?.hasHealthData)?.healthData;
+}
+```
+
+### Step 3: View command (`src/commands/release/view.ts`)
+
+1. **Call with health options**:
+   ```typescript
+   const release = await getRelease(resolved.org, version, {
+     health: true,
+     adoptionStages: true,
+   });
+   ```
+
+2. **Add health section** to `formatReleaseDetails` after the base KV table:
+   - Section header: `### Health by Project`
+   - Per-project table with columns: PROJECT, ADOPTION, CRASH-FREE USERS, CRASH-FREE SESSIONS, USERS (24h), SESSIONS (24h)
+   - Only shown when at least one project has `hasHealthData: true`
+
+3. **Optionally add `--health-period` flag** (24h|7d|14d|30d — passed as `healthStatsPeriod` to API).
+   Default: omit (API defaults to 24h).
+
+### Step 4: Tests
+
+Update `test/commands/release/view.test.ts` to cover:
+- Release with health data present → verify per-project section renders
+- Release without health data → verify graceful fallback (no health section)
+
+## Verification
+
+1. `bun run typecheck`
+2. `bun run lint:fix && bun run lint`
+3. `bun test test/commands/release/` — existing + new tests pass
+4. `bun test` — full suite
+5. Smoke test: `bun run dev -- release list` and `bun run dev -- release view <version>` (with auth)
+6. `bun run generate:skill && bun run check:skill`
