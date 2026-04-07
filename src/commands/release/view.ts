@@ -27,15 +27,8 @@ import {
   FRESH_FLAG,
 } from "../../lib/list-command.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
+import { fmtCount, fmtPct } from "./format.js";
 import { parseReleaseArg } from "./parse.js";
-
-/** Format a percentage with one decimal, colorized by threshold. */
-function fmtPct(value: number | null | undefined): string {
-  if (value === null || value === undefined) {
-    return "—";
-  }
-  return `${value.toFixed(1)}%`;
-}
 
 /** Format a crash-free rate with color coding (green ≥ 99, yellow ≥ 95, red < 95). */
 function fmtCrashFree(value: number | null | undefined): string {
@@ -50,14 +43,6 @@ function fmtCrashFree(value: number | null | undefined): string {
     return colorTag("yellow", formatted);
   }
   return colorTag("red", formatted);
-}
-
-/** Format a count with thousands separators, or "—" when absent. */
-function fmtCount(value: number | null | undefined): string {
-  if (value === null || value === undefined) {
-    return "—";
-  }
-  return value.toLocaleString("en-US");
 }
 
 /**

@@ -15,6 +15,7 @@ import {
   type OrgListCommandDocs,
 } from "../../lib/list-command.js";
 import type { OrgListConfig } from "../../lib/org-list.js";
+import { fmtPct } from "./format.js";
 
 export const PAGINATION_KEY = "release-list";
 
@@ -28,14 +29,6 @@ type ReleaseWithOrg = OrgReleaseResponse & { orgSlug?: string };
  */
 function getHealthData(release: OrgReleaseResponse) {
   return release.projects?.find((p) => p.healthData?.hasHealthData)?.healthData;
-}
-
-/** Format a percentage value with one decimal, or "—" when absent. */
-function fmtPct(value: number | null | undefined): string {
-  if (value === null || value === undefined) {
-    return "—";
-  }
-  return `${value.toFixed(1)}%`;
 }
 
 const RELEASE_COLUMNS: Column<ReleaseWithOrg>[] = [
