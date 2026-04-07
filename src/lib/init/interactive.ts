@@ -15,6 +15,10 @@ import {
   sortFeatures,
 } from "./clack-utils.js";
 import { REQUIRED_FEATURE } from "./constants.js";
+import {
+  computeRecommendedFeatures,
+  detectPlatformDeps,
+} from "./feature-detection.js";
 import type {
   ConfirmPayload,
   InteractivePayload,
@@ -106,6 +110,18 @@ async function handleMultiSelect(
     return { features: hasRequired ? [REQUIRED_FEATURE] : [] };
   }
 
+  // Compute recommended features based on project dependencies.
+  // Use server-provided recommendations if available, otherwise detect locally.
+  let recommended: string[];
+  if (payload.recommendedFeatures && payload.recommendedFeatures.length > 0) {
+    recommended = payload.recommendedFeatures;
+  } else {
+    const deps = detectPlatformDeps(options.directory);
+    recommended = computeRecommendedFeatures(optional, deps);
+  }
+  // Only include recommendations that are in the optional list
+  const initialValues = recommended.filter((f) => optional.includes(f));
+
   const hints: string[] = [];
   // Use clack's vertical bar character so hint lines align with the option lines below
   const bar = chalk.gray("\u2502");
@@ -123,7 +139,7 @@ async function handleMultiSelect(
       label: featureLabel(feature),
       hint: featureHint(feature),
     })),
-    initialValues: optional,
+    initialValues,
     required: false,
   });
 
