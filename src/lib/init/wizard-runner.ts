@@ -532,6 +532,8 @@ async function resolvePreSpinnerOptions(
       if (err instanceof WizardCancelledError) {
         return null;
       }
+      log.error(errorMessage(err));
+      cancel("Setup failed.");
       throw new WizardError(errorMessage(err));
     }
   }
