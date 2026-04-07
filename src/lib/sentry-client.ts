@@ -14,7 +14,7 @@ import {
   getConfiguredSentryUrl,
   getUserAgent,
 } from "./constants.js";
-import { getAuthToken, isEnvTokenActive, refreshToken } from "./db/auth.js";
+import { getAuthToken, refreshToken } from "./db/auth.js";
 import { logger } from "./logger.js";
 import { getCachedResponse, storeCachedResponse } from "./response-cache.js";
 import { withHttpSpan } from "./telemetry.js";
@@ -108,10 +108,10 @@ async function handleUnauthorized(headers: Headers): Promise<boolean> {
   if (headers.get(RETRY_MARKER_HEADER)) {
     return false;
   }
-  // Env var tokens can't be refreshed — let the 401 propagate
-  if (isEnvTokenActive()) {
-    return false;
-  }
+  // refreshToken handles the token selection: it refreshes OAuth when OAuth is
+  // the effective auth source, or returns the env token without refresh when
+  // SENTRY_FORCE_ENV_TOKEN is set. If the token can't be refreshed (env token,
+  // no refresh token), `refreshed` is false and the 401 propagates.
   try {
     const { token: newToken, refreshed } = await refreshToken({ force: true });
     if (refreshed) {

@@ -74,28 +74,34 @@ describe("property: env var priority", () => {
     );
   });
 
-  test("env var always wins over stored token", () => {
+  test("stored OAuth wins over env var (default behavior)", () => {
     fcAssert(
       property(tokenArb, tokenArb, (envToken, storedToken) => {
         setAuthToken(storedToken);
         process.env.SENTRY_AUTH_TOKEN = envToken;
 
-        expect(getAuthToken()).toBe(envToken.trim());
+        // Stored OAuth takes priority — env token is for build tooling
+        expect(getAuthToken()).toBe(storedToken);
+        expect(getAuthConfig()?.source).toBe("oauth" satisfies AuthSource);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("SENTRY_TOKEN wins over stored token when SENTRY_AUTH_TOKEN is absent", () => {
+  test("SENTRY_FORCE_ENV_TOKEN overrides stored OAuth", () => {
     fcAssert(
       property(tokenArb, tokenArb, (envToken, storedToken) => {
         setAuthToken(storedToken);
-        process.env.SENTRY_TOKEN = envToken;
-
-        expect(getAuthToken()).toBe(envToken.trim());
-        expect(getAuthConfig()?.source).toBe(
-          "env:SENTRY_TOKEN" satisfies AuthSource
-        );
+        process.env.SENTRY_AUTH_TOKEN = envToken;
+        try {
+          process.env.SENTRY_FORCE_ENV_TOKEN = "1";
+          expect(getAuthToken()).toBe(envToken.trim());
+          expect(getAuthConfig()?.source).toBe(
+            "env:SENTRY_AUTH_TOKEN" satisfies AuthSource
+          );
+        } finally {
+          delete process.env.SENTRY_FORCE_ENV_TOKEN;
+        }
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -145,37 +151,40 @@ describe("property: env tokens never trigger refresh", () => {
 });
 
 describe("property: isEnvTokenActive consistency", () => {
-  test("isEnvTokenActive matches whether getAuthConfig returns env source", () => {
+  test("when no env token, getAuthConfig never returns env source", () => {
     fcAssert(
-      property(
-        option(tokenArb),
-        option(tokenArb),
-        option(tokenArb),
-        (authTokenOpt, sentryTokenOpt, storedTokenOpt) => {
-          // Clean slate
-          delete process.env.SENTRY_AUTH_TOKEN;
-          delete process.env.SENTRY_TOKEN;
+      property(option(tokenArb), (storedTokenOpt) => {
+        // Clean slate — no env tokens
+        delete process.env.SENTRY_AUTH_TOKEN;
+        delete process.env.SENTRY_TOKEN;
 
-          if (authTokenOpt !== null) {
-            process.env.SENTRY_AUTH_TOKEN = authTokenOpt;
-          }
-          if (sentryTokenOpt !== null) {
-            process.env.SENTRY_TOKEN = sentryTokenOpt;
-          }
-          if (storedTokenOpt !== null) {
-            setAuthToken(storedTokenOpt);
-          }
-
-          const config = getAuthConfig();
-          const envActive = isEnvTokenActive();
-
-          if (envActive) {
-            expect(config?.source).toMatch(/^env:/);
-          } else if (config) {
-            expect(config.source).toBe("oauth");
-          }
+        if (storedTokenOpt !== null) {
+          setAuthToken(storedTokenOpt);
         }
-      ),
+
+        const config = getAuthConfig();
+        const envActive = isEnvTokenActive();
+
+        expect(envActive).toBe(false);
+        if (config) {
+          expect(config.source).toBe("oauth");
+        }
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("stored OAuth takes priority: getAuthConfig returns oauth even when env token is set", () => {
+    fcAssert(
+      property(tokenArb, tokenArb, (envToken, storedToken) => {
+        process.env.SENTRY_AUTH_TOKEN = envToken;
+        setAuthToken(storedToken);
+
+        const config = getAuthConfig();
+        expect(config?.source).toBe("oauth");
+        // But isEnvTokenActive is still true (env token exists)
+        expect(isEnvTokenActive()).toBe(true);
+      }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });

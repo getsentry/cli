@@ -12,6 +12,7 @@ import {
   getActiveEnvVarName,
   getAuthConfig,
   getAuthToken,
+  getRawEnvToken,
   isAuthenticated,
   isEnvTokenActive,
   refreshToken,
@@ -114,12 +115,32 @@ describe("env var auth: getActiveEnvVarName", () => {
 });
 
 describe("env var auth: refreshToken edge cases", () => {
-  test("env token skips stored token entirely", async () => {
-    setAuthToken("stored_token", -1, "refresh_token");
+  test("env token used when no stored OAuth exists", async () => {
     process.env.SENTRY_AUTH_TOKEN = "env_token";
     const result = await refreshToken();
     expect(result.token).toBe("env_token");
     expect(result.refreshed).toBe(false);
+  });
+
+  test("stored OAuth preferred over env token", async () => {
+    setAuthToken("stored_token", 3600);
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    const result = await refreshToken();
+    expect(result.token).toBe("stored_token");
+    expect(result.refreshed).toBe(false);
+  });
+
+  test("SENTRY_FORCE_ENV_TOKEN overrides stored OAuth in refreshToken", async () => {
+    setAuthToken("stored_token", 3600);
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    try {
+      process.env.SENTRY_FORCE_ENV_TOKEN = "1";
+      const result = await refreshToken();
+      expect(result.token).toBe("env_token");
+      expect(result.refreshed).toBe(false);
+    } finally {
+      delete process.env.SENTRY_FORCE_ENV_TOKEN;
+    }
   });
 
   test("has no expiresAt or expiresIn for env tokens", async () => {
@@ -127,5 +148,52 @@ describe("env var auth: refreshToken edge cases", () => {
     const result = await refreshToken();
     expect(result.expiresAt).toBeUndefined();
     expect(result.expiresIn).toBeUndefined();
+  });
+});
+
+describe("env var auth: getRawEnvToken", () => {
+  test("returns SENTRY_TOKEN when SENTRY_AUTH_TOKEN is unset", () => {
+    process.env.SENTRY_TOKEN = "fallback_token";
+    expect(getRawEnvToken()).toBe("fallback_token");
+  });
+
+  test("returns undefined when no env var is set", () => {
+    expect(getRawEnvToken()).toBeUndefined();
+  });
+});
+
+describe("OAuth-preferred auth (#646)", () => {
+  test("getAuthConfig prefers stored OAuth over env token", () => {
+    setAuthToken("stored_oauth", 3600);
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    const config = getAuthConfig();
+    expect(config?.source).toBe("oauth");
+    expect(config?.token).toBe("stored_oauth");
+  });
+
+  test("getAuthConfig falls back to env token when no stored OAuth", () => {
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    const config = getAuthConfig();
+    expect(config?.source).toBe("env:SENTRY_AUTH_TOKEN");
+    expect(config?.token).toBe("env_token");
+  });
+
+  test("getAuthToken skips expired stored token and falls to env", () => {
+    setAuthToken("expired_token", -1);
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    expect(getAuthToken()).toBe("env_token");
+  });
+
+  test("SENTRY_FORCE_ENV_TOKEN makes getAuthConfig prefer env token", () => {
+    setAuthToken("stored_oauth", 3600);
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    try {
+      process.env.SENTRY_FORCE_ENV_TOKEN = "1";
+      const config = getAuthConfig();
+      expect(config?.source).toBe("env:SENTRY_AUTH_TOKEN");
+      expect(config?.token).toBe("env_token");
+    } finally {
+      delete process.env.SENTRY_FORCE_ENV_TOKEN;
+    }
   });
 });

@@ -1826,6 +1826,10 @@ export function formatAuthStatus(data: AuthStatusData): string {
     lines.push(mdKvTable(authRows));
   }
 
+  if (data.envToken) {
+    lines.push(formatEnvTokenSection(data.envToken));
+  }
+
   if (data.defaults) {
     lines.push(formatDefaultsSection(data.defaults));
   }
@@ -1835,6 +1839,24 @@ export function formatAuthStatus(data: AuthStatusData): string {
   }
 
   return renderMarkdown(lines.join("\n"));
+}
+
+/**
+ * Format the env token status section.
+ * Shows whether the env token is active or bypassed, and how many endpoints
+ * have been marked insufficient.
+ */
+function formatEnvTokenSection(
+  envToken: NonNullable<AuthStatusData["envToken"]>
+): string {
+  const status = envToken.active
+    ? "active"
+    : "set but not used (using OAuth credentials)";
+  const rows: [string, string][] = [
+    ["Env var", safeCodeSpan(envToken.envVar)],
+    ["Status", status],
+  ];
+  return `\n${mdKvTable(rows, "Environment Token")}`;
 }
 
 // Project Creation Formatting

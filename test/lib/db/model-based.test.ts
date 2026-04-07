@@ -165,25 +165,25 @@ class GetAuthTokenCommand implements AsyncCommand<DbModel, RealDb> {
 
   async run(model: DbModel, _real: RealDb): Promise<void> {
     const realToken = getAuthToken();
+    const now = Date.now();
 
-    // Env vars take priority: SENTRY_AUTH_TOKEN > SENTRY_TOKEN > stored token
+    // Stored OAuth wins over env token (default since #646).
+    const hasUsableOAuth =
+      model.auth.token !== null &&
+      (model.auth.expiresAt === null || model.auth.expiresAt > now);
+    if (hasUsableOAuth) {
+      expect(realToken).toBe(model.auth.token as string);
+      return;
+    }
+
+    // No usable stored token — fall back to env token
     const envToken = model.envAuthToken ?? model.envSentryToken;
     if (envToken) {
       expect(realToken).toBe(envToken);
       return;
     }
 
-    // Token should be undefined if:
-    // 1. No token set
-    // 2. Token is expired (expiresAt < now)
-    const now = Date.now();
-    const expectedToken =
-      model.auth.token &&
-      (model.auth.expiresAt === null || model.auth.expiresAt > now)
-        ? model.auth.token
-        : undefined;
-
-    expect(realToken).toBe(expectedToken);
+    expect(realToken).toBeUndefined();
   }
 
   toString = () => "getAuthToken()";
@@ -195,7 +195,29 @@ class GetAuthConfigCommand implements AsyncCommand<DbModel, RealDb> {
   async run(model: DbModel, _real: RealDb): Promise<void> {
     const realConfig = getAuthConfig();
 
-    // Env vars take priority
+    // Stored OAuth wins over env token (default since #646).
+    // Skip expired tokens without a refresh token (consistent with getAuthToken).
+    const now = Date.now();
+    const isExpired =
+      model.auth.expiresAt !== null && model.auth.expiresAt <= now;
+    const hasRefresh = model.auth.refreshToken !== null;
+    const hasUsableOAuth =
+      model.auth.token !== null && (!isExpired || hasRefresh);
+
+    if (hasUsableOAuth) {
+      expect(realConfig).toBeDefined();
+      expect(realConfig?.token).toBe(model.auth.token as string);
+      expect(realConfig?.source).toBe("oauth");
+      expect(realConfig?.refreshToken).toBe(
+        (model.auth.refreshToken ?? undefined) as string | undefined
+      );
+      if (model.auth.expiresAt !== null) {
+        expect(realConfig?.expiresAt).toBeDefined();
+      }
+      return;
+    }
+
+    // No usable stored OAuth — fall back to env token
     if (model.envAuthToken) {
       expect(realConfig).toBeDefined();
       expect(realConfig?.token).toBe(model.envAuthToken);
@@ -213,20 +235,7 @@ class GetAuthConfigCommand implements AsyncCommand<DbModel, RealDb> {
       return;
     }
 
-    if (model.auth.token === null) {
-      expect(realConfig).toBeUndefined();
-    } else {
-      expect(realConfig).toBeDefined();
-      expect(realConfig?.token).toBe(model.auth.token);
-      expect(realConfig?.source).toBe("oauth");
-      expect(realConfig?.refreshToken).toBe(
-        model.auth.refreshToken ?? undefined
-      );
-      // Note: expiresAt/issuedAt may have slight timing differences, so we check presence
-      if (model.auth.expiresAt !== null) {
-        expect(realConfig?.expiresAt).toBeDefined();
-      }
-    }
+    expect(realConfig).toBeUndefined();
   }
 
   toString = () => "getAuthConfig()";
@@ -908,9 +917,9 @@ describe("model-based: database layer", () => {
           const retrieved = getAuthToken();
           expect(retrieved).toBeUndefined();
 
-          // But auth config should still have the token stored
+          // Config also returns undefined for expired tokens without refresh token
           const config = getAuthConfig();
-          expect(config?.token).toBe(token);
+          expect(config).toBeUndefined();
         } finally {
           if (savedAuthToken !== undefined) {
             process.env.SENTRY_AUTH_TOKEN = savedAuthToken;

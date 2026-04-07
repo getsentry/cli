@@ -86,6 +86,7 @@ describe("loginCommand.func --token path", () => {
   let getCurrentUserSpy: ReturnType<typeof spyOn>;
   let setUserInfoSpy: ReturnType<typeof spyOn>;
   let runInteractiveLoginSpy: ReturnType<typeof spyOn>;
+  let hasStoredAuthCredentialsSpy: ReturnType<typeof spyOn>;
   let func: LoginFunc;
 
   beforeEach(async () => {
@@ -97,7 +98,9 @@ describe("loginCommand.func --token path", () => {
     getCurrentUserSpy = spyOn(apiClient, "getCurrentUser");
     setUserInfoSpy = spyOn(dbUser, "setUserInfo");
     runInteractiveLoginSpy = spyOn(interactiveLogin, "runInteractiveLogin");
+    hasStoredAuthCredentialsSpy = spyOn(dbAuth, "hasStoredAuthCredentials");
     isEnvTokenActiveSpy.mockReturnValue(false);
+    hasStoredAuthCredentialsSpy.mockReturnValue(false);
     func = (await loginCommand.loader()) as unknown as LoginFunc;
   });
 
@@ -110,6 +113,7 @@ describe("loginCommand.func --token path", () => {
     getCurrentUserSpy.mockRestore();
     setUserInfoSpy.mockRestore();
     runInteractiveLoginSpy.mockRestore();
+    hasStoredAuthCredentialsSpy.mockRestore();
   });
 
   test("already authenticated (non-TTY, no --force): prints re-auth message with --force hint", async () => {
@@ -122,34 +126,41 @@ describe("loginCommand.func --token path", () => {
     expect(getCurrentUserSpy).not.toHaveBeenCalled();
   });
 
-  test("already authenticated (env token SENTRY_AUTH_TOKEN): tells user to unset specific var", async () => {
+  test("already authenticated (env token SENTRY_AUTH_TOKEN): warns and proceeds to OAuth login", async () => {
     isAuthenticatedSpy.mockReturnValue(true);
     isEnvTokenActiveSpy.mockReturnValue(true);
-    // Need to also spy on getAuthConfig for the specific env var name
-    const getAuthConfigSpy = spyOn(dbAuth, "getAuthConfig");
-    getAuthConfigSpy.mockReturnValue({
-      token: "sntrys_env_123",
-      source: "env:SENTRY_AUTH_TOKEN",
+    hasStoredAuthCredentialsSpy.mockReturnValue(false);
+    runInteractiveLoginSpy.mockResolvedValue({
+      method: "oauth",
+      configPath: "/fake",
     });
 
     const { context } = createContext();
     await func.call(context, { force: false, timeout: 900 });
 
-    expect(setAuthTokenSpy).not.toHaveBeenCalled();
-    getAuthConfigSpy.mockRestore();
+    // With no stored OAuth, login proceeds directly (no clearAuth needed)
+    expect(runInteractiveLoginSpy).toHaveBeenCalled();
   });
 
-  test("already authenticated (env token SENTRY_TOKEN): shows specific var name", async () => {
+  test("already authenticated (env token SENTRY_TOKEN): warns and proceeds to OAuth login", async () => {
     isAuthenticatedSpy.mockReturnValue(true);
     isEnvTokenActiveSpy.mockReturnValue(true);
+    hasStoredAuthCredentialsSpy.mockReturnValue(false);
     // Set env var directly — getActiveEnvVarName() reads env vars via getEnvToken()
     process.env.SENTRY_TOKEN = "sntrys_token_456";
+    runInteractiveLoginSpy.mockResolvedValue({
+      method: "oauth",
+      configPath: "/fake",
+    });
 
-    const { context } = createContext();
-    await func.call(context, { force: false, timeout: 900 });
+    try {
+      const { context } = createContext();
+      await func.call(context, { force: false, timeout: 900 });
 
-    expect(setAuthTokenSpy).not.toHaveBeenCalled();
-    delete process.env.SENTRY_TOKEN;
+      expect(runInteractiveLoginSpy).toHaveBeenCalled();
+    } finally {
+      delete process.env.SENTRY_TOKEN;
+    }
   });
 
   test("--token: stores token, fetches user, writes success", async () => {
@@ -315,14 +326,19 @@ describe("loginCommand.func --token path", () => {
     expect(getStdout()).toContain("Authenticated");
   });
 
-  test("--force with env token: still blocks (env var case unchanged)", async () => {
+  test("--force with env token: proceeds to OAuth login (no longer blocks)", async () => {
     isAuthenticatedSpy.mockReturnValue(true);
     isEnvTokenActiveSpy.mockReturnValue(true);
+    hasStoredAuthCredentialsSpy.mockReturnValue(false);
+    runInteractiveLoginSpy.mockResolvedValue({
+      method: "oauth",
+      configPath: "/fake",
+    });
 
     const { context } = createContext();
     await func.call(context, { force: true, timeout: 900 });
 
-    expect(clearAuthSpy).not.toHaveBeenCalled();
-    expect(runInteractiveLoginSpy).not.toHaveBeenCalled();
+    // Env token no longer blocks — login proceeds
+    expect(runInteractiveLoginSpy).toHaveBeenCalled();
   });
 });
