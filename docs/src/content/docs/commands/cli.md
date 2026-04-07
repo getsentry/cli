@@ -7,6 +7,16 @@ CLI-related commands
 
 ## Commands
 
+### `sentry cli dsn`
+
+Inspect DSN discovery for the current directory
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
+
 ### `sentry cli feedback <message...>`
 
 Send feedback about the CLI
