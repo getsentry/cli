@@ -23,8 +23,8 @@ import type { SentryTeam } from "../../types/index.js";
 import { createTeam, listTeams } from "../api-client.js";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
-import { WizardError } from "../errors.js";
 import { getAuthToken } from "../db/auth.js";
+import { WizardError } from "../errors.js";
 import { terminalLink } from "../formatters/colors.js";
 import { getSentryBaseUrl } from "../sentry-urls.js";
 import { slugify } from "../utils.js";
@@ -455,7 +455,9 @@ async function resolvePreSpinnerOptions(
     if (typeof orgResult !== "string") {
       log.error(orgResult.error ?? "Failed to resolve organization.");
       cancel("Setup failed.");
-      throw new WizardError(orgResult.error ?? "Failed to resolve organization.");
+      throw new WizardError(
+        orgResult.error ?? "Failed to resolve organization."
+      );
     }
     opts = { ...opts, org: orgResult };
   }
@@ -716,13 +718,13 @@ function handleFinalResult(
     }
     formatError(result);
     throw new WizardError("Workflow returned an error");
-  } else {
-    if (spinState.running) {
-      spin.stop("Done");
-      spinState.running = false;
-    }
-    formatResult(result);
   }
+
+  if (spinState.running) {
+    spin.stop("Done");
+    spinState.running = false;
+  }
+  formatResult(result);
 }
 
 function extractSuspendPayload(
