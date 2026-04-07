@@ -22,6 +22,7 @@ import type { SentryContext } from "../context.js";
 import { findProjectsBySlug } from "../lib/api/projects.js";
 import { looksLikePath, parseOrgProjectArg } from "../lib/arg-parsing.js";
 import { buildCommand } from "../lib/command.js";
+import { DRY_RUN_ALIASES, DRY_RUN_FLAG } from "../lib/mutate-command.js";
 import { ContextError, ValidationError } from "../lib/errors.js";
 import { warmOrgDetection } from "../lib/init/prefetch.js";
 import { runWizard } from "../lib/init/wizard-runner.js";
@@ -209,11 +210,7 @@ export const initCommand = buildCommand<
         brief: "Non-interactive mode (accept defaults)",
         default: false,
       },
-      "dry-run": {
-        kind: "boolean",
-        brief: "Preview changes without applying them",
-        default: false,
-      },
+      "dry-run": DRY_RUN_FLAG,
       features: {
         kind: "parsed",
         parse: String,
@@ -230,6 +227,7 @@ export const initCommand = buildCommand<
       },
     },
     aliases: {
+      ...DRY_RUN_ALIASES,
       y: "yes",
       t: "team",
     },
