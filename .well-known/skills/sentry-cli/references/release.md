@@ -1,13 +1,13 @@
 ---
 name: sentry-cli-release
-version: 0.24.1
-description: Sentry CLI release commands
+version: 0.25.0
+description: Work with Sentry releases
 requires:
   bins: ["sentry"]
   auth: true
 ---
 
-# release Commands
+# Release Commands
 
 Work with Sentry releases
 
@@ -16,7 +16,7 @@ Work with Sentry releases
 List releases
 
 **Flags:**
-- `-n, --limit <value> - Maximum number of releases to list - (default: "30")`
+- `-n, --limit <value> - Maximum number of releases to list - (default: "25")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
@@ -121,8 +121,8 @@ sentry release create $(sentry release propose-version)
 sentry release list --json
 sentry release view 1.0.0 --json
 
-# CI/CD: full release workflow with org prefix
-sentry release create my-org/1.0.0 --project my-project --url "https://github.com/org/repo/releases/tag/1.0.0"
+# Full release workflow with explicit org
+sentry release create my-org/1.0.0 --project my-project
 sentry release set-commits my-org/1.0.0 --auto
 sentry release finalize my-org/1.0.0
 sentry release deploy my-org/1.0.0 production
