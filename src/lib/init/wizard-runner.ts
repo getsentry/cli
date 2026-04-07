@@ -24,6 +24,7 @@ import { createTeam, listTeams } from "../api-client.js";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
+import { WizardError } from "../errors.js";
 import { terminalLink } from "../formatters/colors.js";
 import { getSentryBaseUrl } from "../sentry-urls.js";
 import { slugify } from "../utils.js";
@@ -326,11 +327,10 @@ async function preamble(
   dryRun: boolean
 ): Promise<boolean> {
   if (!(yes || dryRun || process.stdin.isTTY)) {
-    process.stderr.write(
-      "Error: Interactive mode requires a terminal. Use --yes for non-interactive mode.\n"
+    throw new WizardError(
+      "Interactive mode requires a terminal. Use --yes for non-interactive mode.",
+      { rendered: false }
     );
-    process.exitCode = 1;
-    return false;
   }
 
   process.stderr.write(`\n${formatBanner()}\n\n`);
@@ -450,14 +450,14 @@ async function resolvePreSpinnerOptions(
       }
       log.error(errorMessage(err));
       cancel("Setup failed.");
-      process.exitCode = 1;
-      return null;
+      throw new WizardError(errorMessage(err));
     }
     if (typeof orgResult !== "string") {
       log.error(orgResult.error ?? "Failed to resolve organization.");
       cancel("Setup failed.");
-      process.exitCode = 1;
-      return null;
+      throw new WizardError(
+        orgResult.error ?? "Failed to resolve organization."
+      );
     }
     opts = { ...opts, org: orgResult };
   }
@@ -524,8 +524,7 @@ async function resolvePreSpinnerOptions(
               `Create one at ${terminalLink(teamsUrl)} and run sentry init again.`
           );
           cancel("Setup failed.");
-          process.exitCode = 1;
-          return null;
+          throw new WizardError("No teams in your organization.");
         }
       } else if (teams.length === 1) {
         opts = { ...opts, team: (teams[0] as SentryTeam).slug };
@@ -565,6 +564,7 @@ async function resolvePreSpinnerOptions(
   return opts;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard orchestration with error handling branches
 export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   const { directory, yes, dryRun, features } = initialOptions;
 
@@ -646,8 +646,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     spinState.running = false;
     log.error(errorMessage(err));
     cancel("Setup failed");
-    process.exitCode = 1;
-    return;
+    throw new WizardError(errorMessage(err));
   }
 
   const stepPhases = new Map<string, number>();
@@ -664,8 +663,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
         spinState.running = false;
         log.error(`No suspend payload found for step "${stepId}"`);
         cancel("Setup failed");
-        process.exitCode = 1;
-        return;
+        throw new WizardError(`No suspend payload found for step "${stepId}"`);
       }
 
       const resumeData = await handleSuspendedStep(
@@ -700,14 +698,17 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       process.exitCode = 0;
       return;
     }
+    // Already rendered by an inner throw — don't double-display
+    if (err instanceof WizardError) {
+      throw err;
+    }
     if (spinState.running) {
       spin.stop("Error", 1);
       spinState.running = false;
     }
     log.error(errorMessage(err));
     cancel("Setup failed");
-    process.exitCode = 1;
-    return;
+    throw new WizardError(errorMessage(err));
   }
 
   handleFinalResult(result, spin, spinState);
@@ -726,14 +727,14 @@ function handleFinalResult(
       spinState.running = false;
     }
     formatError(result);
-    process.exitCode = 1;
-  } else {
-    if (spinState.running) {
-      spin.stop("Done");
-      spinState.running = false;
-    }
-    formatResult(result);
+    throw new WizardError("Workflow returned an error");
   }
+
+  if (spinState.running) {
+    spin.stop("Done");
+    spinState.running = false;
+  }
+  formatResult(result);
 }
 
 function extractSuspendPayload(
