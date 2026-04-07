@@ -10,6 +10,7 @@
 import * as Sentry from "@sentry/node-core/light";
 import type { z } from "zod";
 
+import { getRawEnvToken } from "../db/auth.js";
 import { getEnv } from "../env.js";
 import { ApiError, AuthError, stringifyUnknown } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
@@ -57,6 +58,29 @@ export function throwApiError(
     error && typeof error === "object" && "detail" in error
       ? stringifyUnknown((error as { detail: unknown }).detail)
       : stringifyUnknown(error);
+
+  // When an env token is set and we get 401, the HTTP-layer fallback to
+  // stored OAuth already failed (no stored credentials). Convert to AuthError
+  // so the auto-login middleware in cli.ts can trigger interactive login.
+  if (status === 401 && getRawEnvToken()) {
+    throw new AuthError(
+      "not_authenticated",
+      `${context}: ${status} ${response.statusText ?? "Unknown"}.\n` +
+        "  SENTRY_AUTH_TOKEN is set but lacks permissions for this endpoint.\n" +
+        "  Run 'sentry auth login' to authenticate with OAuth."
+    );
+  }
+
+  // For 403 with env token, keep as ApiError but add guidance
+  if (status === 403 && getRawEnvToken()) {
+    throw new ApiError(
+      `${context}: ${status} ${response.statusText ?? "Unknown"}`,
+      status,
+      `${detail}\n\n  SENTRY_AUTH_TOKEN may lack permissions for this endpoint.\n` +
+        "  Run 'sentry auth login' to authenticate with OAuth."
+    );
+  }
+
   throw new ApiError(
     `${context}: ${status} ${response.statusText ?? "Unknown"}`,
     status,
