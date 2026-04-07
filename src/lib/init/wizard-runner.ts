@@ -564,6 +564,7 @@ async function resolvePreSpinnerOptions(
   return opts;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard orchestration with error handling branches
 export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   const { directory, yes, dryRun, features } = initialOptions;
 
@@ -691,6 +692,10 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       captureException(err);
       process.exitCode = 0;
       return;
+    }
+    // Already rendered by an inner throw — don't double-display
+    if (err instanceof WizardError) {
+      throw err;
     }
     if (spinState.running) {
       spin.stop("Error", 1);
