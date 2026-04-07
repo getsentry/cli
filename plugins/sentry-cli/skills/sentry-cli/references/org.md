@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-org
-version: 0.25.0
+version: 0.26.0-dev.0
 description: Work with Sentry organizations
 requires:
   bins: ["sentry"]
