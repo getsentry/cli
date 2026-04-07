@@ -13,7 +13,9 @@ import {
 } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
+import { fmtPct } from "../../lib/formatters/numbers.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
+import { sparkline } from "../../lib/formatters/sparkline.js";
 import { type Column, formatTable } from "../../lib/formatters/table.js";
 import { formatRelativeTime } from "../../lib/formatters/time-utils.js";
 import {
@@ -28,7 +30,6 @@ import {
   type ListResult,
   type OrgListConfig,
 } from "../../lib/org-list.js";
-import { fmtPct } from "./format.js";
 
 export const PAGINATION_KEY = "release-list";
 
@@ -43,20 +44,40 @@ const VALID_SORT_VALUES: ReleaseSortValue[] = [
   "crash_free_users",
 ];
 
+/**
+ * Short aliases for sort values.
+ *
+ * Accepted alongside the canonical API values for convenience:
+ * - `stable_sessions` / `cfs` → `crash_free_sessions`
+ * - `stable_users` / `cfu` → `crash_free_users`
+ */
+const SORT_ALIASES: Record<string, ReleaseSortValue> = {
+  stable_sessions: "crash_free_sessions",
+  stable_users: "crash_free_users",
+  cfs: "crash_free_sessions",
+  cfu: "crash_free_users",
+};
+
 const DEFAULT_SORT: ReleaseSortValue = "date";
 
 /**
  * Parse and validate the `--sort` flag value.
  *
- * @throws Error when value is not one of the accepted sort keys
+ * Accepts canonical API values and short aliases.
+ * @throws Error when value is not recognized
  */
 function parseSortFlag(value: string): ReleaseSortValue {
   if (VALID_SORT_VALUES.includes(value as ReleaseSortValue)) {
     return value as ReleaseSortValue;
   }
-  throw new Error(
-    `Invalid sort value. Must be one of: ${VALID_SORT_VALUES.join(", ")}`
+  const alias = SORT_ALIASES[value];
+  if (alias) {
+    return alias;
+  }
+  const allAccepted = [...VALID_SORT_VALUES, ...Object.keys(SORT_ALIASES)].join(
+    ", "
   );
+  throw new Error(`Invalid sort value. Must be one of: ${allAccepted}`);
 }
 
 /**
@@ -67,6 +88,29 @@ function parseSortFlag(value: string): ReleaseSortValue {
  */
 function getHealthData(release: OrgReleaseResponse) {
   return release.projects?.find((p) => p.healthData?.hasHealthData)?.healthData;
+}
+
+/**
+ * Extract session time-series data points from health stats.
+ *
+ * The `stats` object follows the same `{ "<period>": [[ts, count], ...] }`
+ * shape as issue stats. Takes the first available key.
+ */
+function extractSessionPoints(stats?: Record<string, unknown>): number[] {
+  if (!stats) {
+    return [];
+  }
+  const key = Object.keys(stats)[0];
+  if (!key) {
+    return [];
+  }
+  const buckets = stats[key];
+  if (!Array.isArray(buckets)) {
+    return [];
+  }
+  return buckets.map((b: unknown) =>
+    Array.isArray(b) && b.length >= 2 ? Number(b[1]) || 0 : 0
+  );
 }
 
 const RELEASE_COLUMNS: Column<ReleaseWithOrg>[] = [
@@ -90,11 +134,23 @@ const RELEASE_COLUMNS: Column<ReleaseWithOrg>[] = [
     align: "right",
   },
   {
+    header: "SESSIONS",
+    value: (r) => {
+      const health = getHealthData(r);
+      if (!health) {
+        return "";
+      }
+      const points = extractSessionPoints(
+        health.stats as Record<string, unknown> | undefined
+      );
+      return points.length > 0 ? sparkline(points) : "";
+    },
+  },
+  {
     header: "ISSUES",
     value: (r) => String(r.newGroups ?? 0),
     align: "right",
   },
-  { header: "COMMITS", value: (r) => String(r.commitCount ?? 0) },
   { header: "DEPLOYS", value: (r) => String(r.deployCount ?? 0) },
 ];
 
@@ -168,8 +224,8 @@ export const listCommand = buildListCommand("release", {
       "  date                 # by creation date (default)\n" +
       "  sessions             # by total sessions\n" +
       "  users                # by total users\n" +
-      "  crash_free_sessions  # by crash-free session rate\n" +
-      "  crash_free_users     # by crash-free user rate\n\n" +
+      "  crash_free_sessions  # by crash-free session rate (aliases: stable_sessions, cfs)\n" +
+      "  crash_free_users     # by crash-free user rate (aliases: stable_users, cfu)\n\n" +
       "Target specification:\n" +
       "  sentry release list               # auto-detect from DSN or config\n" +
       "  sentry release list <org>/        # list all releases in org (paginated)\n" +
@@ -199,7 +255,7 @@ export const listCommand = buildListCommand("release", {
         kind: "parsed" as const,
         parse: parseSortFlag,
         brief:
-          "Sort order: date, sessions, users, crash_free_sessions, crash_free_users",
+          "Sort: date, sessions, users, crash_free_sessions (cfs), crash_free_users (cfu)",
         default: DEFAULT_SORT,
       },
     },

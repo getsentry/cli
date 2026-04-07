@@ -330,24 +330,15 @@ function calcGlyphWidth(formatted: string, glyphW: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// Number formatting
+// Number formatting — shared helpers live in numbers.ts, dashboard-only
+// helpers remain here.
 // ---------------------------------------------------------------------------
 
-const compactFormatter = new Intl.NumberFormat("en-US", {
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-
-const standardFormatter = new Intl.NumberFormat("en-US", {
-  maximumFractionDigits: 2,
-});
-
-function formatNumber(value: number): string {
-  if (Math.abs(value) >= 1_000_000) {
-    return compactFormatter.format(value);
-  }
-  return standardFormatter.format(value);
-}
+import {
+  compactFormatter,
+  formatCompactWithUnit,
+  formatWithUnit,
+} from "./numbers.js";
 
 /**
  * Format a value as a short Y-axis tick label (max ~4 chars).
@@ -374,32 +365,6 @@ function formatBigNumberValue(value: number): string {
     return compactFormatter.format(value);
   }
   return Math.round(value).toString();
-}
-
-/** Append unit suffix to a pre-formatted number string. */
-function appendUnitSuffix(formatted: string, unit?: string | null): string {
-  if (!unit || unit === "none" || unit === "null") {
-    return formatted;
-  }
-  if (unit === "millisecond") {
-    return `${formatted}ms`;
-  }
-  if (unit === "second") {
-    return `${formatted}s`;
-  }
-  if (unit === "byte") {
-    return `${formatted}B`;
-  }
-  return `${formatted} ${unit}`;
-}
-
-function formatWithUnit(value: number, unit?: string | null): string {
-  return appendUnitSuffix(formatNumber(value), unit);
-}
-
-/** Format a number with unit using compact notation (K/M/B). */
-function formatCompactWithUnit(value: number, unit?: string | null): string {
-  return appendUnitSuffix(compactFormatter.format(Math.round(value)), unit);
 }
 
 // ---------------------------------------------------------------------------

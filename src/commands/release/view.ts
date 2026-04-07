@@ -19,6 +19,7 @@ import {
   renderMarkdown,
   safeCodeSpan,
 } from "../../lib/formatters/markdown.js";
+import { fmtCount, fmtPct } from "../../lib/formatters/numbers.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { formatRelativeTime } from "../../lib/formatters/time-utils.js";
 import {
@@ -27,7 +28,6 @@ import {
   FRESH_FLAG,
 } from "../../lib/list-command.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
-import { fmtCount, fmtPct } from "./format.js";
 import { parseReleaseArg } from "./parse.js";
 
 /** Format a crash-free rate with color coding (green ≥ 99, yellow ≥ 95, red < 95). */
