@@ -325,7 +325,7 @@ async function preamble(
   yes: boolean,
   dryRun: boolean
 ): Promise<boolean> {
-  if (!(yes || process.stdin.isTTY)) {
+  if (!(yes || dryRun || process.stdin.isTTY)) {
     process.stderr.write(
       "Error: Interactive mode requires a terminal. Use --yes for non-interactive mode.\n"
     );
@@ -338,7 +338,7 @@ async function preamble(
 
   let confirmed: boolean;
   try {
-    confirmed = await confirmExperimental(yes);
+    confirmed = await confirmExperimental(yes || dryRun);
   } catch (err) {
     if (err instanceof WizardCancelledError) {
       // Intentionally captured: track why users bail before completing
@@ -359,7 +359,7 @@ async function preamble(
     log.warn("Dry-run mode: no files will be modified.");
   }
 
-  const gitOk = await checkGitStatus({ cwd: directory, yes });
+  const gitOk = await checkGitStatus({ cwd: directory, yes: yes || dryRun });
   if (!gitOk) {
     cancel("Setup cancelled.");
     process.exitCode = 0;
@@ -577,7 +577,12 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       `\nFor manual setup: ${terminalLink(SENTRY_DOCS_URL)}`
   );
 
-  const options = await resolvePreSpinnerOptions(initialOptions);
+  // In dry-run mode, treat all interactive prompts as non-interactive
+  // (auto-accept defaults) since we passed the TTY guard above.
+  const effectiveOptions = dryRun
+    ? { ...initialOptions, yes: true }
+    : initialOptions;
+  const options = await resolvePreSpinnerOptions(effectiveOptions);
   if (!options) {
     return;
   }
