@@ -25,7 +25,6 @@ import { buildDashboardUrl } from "../../lib/sentry-urls.js";
 import {
   PERIOD_BRIEF,
   parsePeriod,
-  timeRangeToApiParams,
   timeRangeToSeconds,
 } from "../../lib/time-range.js";
 import type {
@@ -221,8 +220,12 @@ export const viewCommand = buildCommand({
     const regionUrl = await resolveOrgRegion(orgSlug);
     const effectivePeriod = flags.period ?? dashboard.period ?? "24h";
     const timeRange = parsePeriod(effectivePeriod);
-    const timeApiParams = timeRangeToApiParams(timeRange);
     const periodSeconds = timeRangeToSeconds(timeRange);
+    // WidgetQueryOptions uses `period` (not `statsPeriod`) for the relative field
+    const widgetTimeOpts =
+      timeRange.type === "relative"
+        ? { period: timeRange.period }
+        : { start: timeRange.start, end: timeRange.end };
     const widgets = dashboard.widgets ?? [];
 
     if (flags.refresh !== undefined) {
@@ -253,7 +256,7 @@ export const viewCommand = buildCommand({
             regionUrl,
             orgSlug,
             dashboard,
-            { ...timeApiParams, periodSeconds }
+            { ...widgetTimeOpts, periodSeconds }
           );
 
           // Build output data before clearing so clear→render is instantaneous
@@ -282,7 +285,7 @@ export const viewCommand = buildCommand({
       { message: "Querying widget data...", json: flags.json },
       () =>
         queryAllWidgets(regionUrl, orgSlug, dashboard, {
-          ...timeApiParams,
+          ...widgetTimeOpts,
           periodSeconds,
         })
     );

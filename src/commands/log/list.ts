@@ -187,8 +187,16 @@ async function executeSingleFetch(
     sort: flags.sort,
   });
 
+  const periodLabel =
+    timeRange.type === "relative"
+      ? `in the last ${timeRange.period}`
+      : "in the specified range";
+
   if (logs.length === 0) {
-    return { result: { logs: [], hasMore: false }, hint: "No logs found." };
+    return {
+      result: { logs: [], hasMore: false },
+      hint: `No logs found ${periodLabel}.`,
+    };
   }
 
   const hasMore = logs.length >= flags.limit;
