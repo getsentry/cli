@@ -43,7 +43,7 @@ View a dashboard
 | `-w, --web` | Open in browser |
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 | `-r, --refresh <refresh>` | Auto-refresh interval in seconds (default: 60, min: 10) |
-| `-t, --period <period>` | Time range: "7d", "2026-03-07..2026-04-07", ">=2026-03-07" |
+| `-t, --period <period>` | Time range: "7d", "2026-03-08..2026-04-08", ">=2026-03-08" |
 
 ### `sentry dashboard create <org/project/title...>`
 
