@@ -83,18 +83,17 @@ Usage: install [options]
 Options:
     -h, --help              Display this help message
     -v, --version <version> Install a specific version (e.g., 0.2.0) or "nightly"
-        --init              Run \`sentry init\` after installing
         --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
         --no-completions    Don't install shell completions
 
 Environment Variables:
     SENTRY_INSTALL_DIR      Override the installation directory
     SENTRY_VERSION          Install a specific version (e.g., 0.19.0, nightly)
-    SENTRY_INIT             Same as --init
+    SENTRY_INIT             Set to 1 to run \`sentry init\` after installing
 
 Examples:
     curl -fsSL https://cli.sentry.dev/install | bash
-    curl -fsSL https://cli.sentry.dev/install | bash -s -- --init
+    curl -fsSL https://cli.sentry.dev/install | SENTRY_INIT=1 bash
     curl -fsSL https://cli.sentry.dev/install | bash -s -- --version nightly
     curl -fsSL https://cli.sentry.dev/install | bash -s -- --version 0.19.0
     SENTRY_VERSION=nightly curl -fsSL https://cli.sentry.dev/install | bash
@@ -105,7 +104,6 @@ EOF
 requested_version="${SENTRY_VERSION:-}"
 no_modify_path=false
 no_completions=false
-run_init="${SENTRY_INIT:-false}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
@@ -116,10 +114,6 @@ while [[ $# -gt 0 ]]; do
       else
         die "Error: --version requires a version argument" "args"
       fi
-      ;;
-    --init)
-      run_init=true
-      shift
       ;;
     --no-modify-path)
       no_modify_path=true
@@ -289,7 +283,7 @@ trap - EXIT
 # Resolve the installed binary path using the same logic as the TS code:
 # SENTRY_INSTALL_DIR > ~/.local/bin > ~/bin > ~/.sentry/bin
 # </dev/tty reopens stdin from the terminal since `curl | bash` consumes it.
-if [[ "$run_init" == "true" || "$run_init" == "1" ]]; then
+if [[ "${SENTRY_INIT:-}" == "1" ]]; then
   sentry_bin=""
   for dir in "${SENTRY_INSTALL_DIR:-}" "$HOME/.local/bin" "$HOME/bin" "$HOME/.sentry/bin"; do
     if [[ -x "${dir}/sentry" ]]; then
