@@ -275,7 +275,32 @@ function formatListHuman(result: ListResult<ReleaseWithOrg>): string {
 // Auto-detect override: resolve DSN → project-scoped listing
 // ---------------------------------------------------------------------------
 
-/** Deduplicate resolved targets by org+project key. */
+/** Matches DSN source paths in primary app directories. */
+const PRIMARY_SOURCE_RE = /^(src|lib|app)\//;
+/** Matches .env and .env.local files. */
+const ENV_FILE_RE = /\.(env|env\.local)$/;
+
+/**
+ * Rank a detected target for primary-project selection.
+ *
+ * Lower score = higher priority. Prefers DSNs found in application source
+ * (`src/`, `lib/`, `app/`) over ancillary paths (`docs/`, `test/`, `scripts/`).
+ */
+function targetPriority(t: ResolvedTarget): number {
+  const from = t.detectedFrom?.toLowerCase() ?? "";
+  // Primary source directories — most likely the "real" project
+  if (PRIMARY_SOURCE_RE.test(from) || ENV_FILE_RE.test(from)) {
+    return 0;
+  }
+  // Config files at project root
+  if (!from.includes("/")) {
+    return 1;
+  }
+  // Everything else (docs/, test/, scripts/, etc.)
+  return 2;
+}
+
+/** Deduplicate and rank targets, best candidate first. */
 function deduplicateTargets(targets: ResolvedTarget[]): ResolvedTarget[] {
   const seen = new Set<string>();
   const result: ResolvedTarget[] = [];
@@ -286,7 +311,7 @@ function deduplicateTargets(targets: ResolvedTarget[]): ResolvedTarget[] {
       result.push(t);
     }
   }
-  return result;
+  return result.sort((a, b) => targetPriority(a) - targetPriority(b));
 }
 
 /** Resolve a project slug to a numeric ID array for the API query param. */
@@ -335,17 +360,16 @@ async function fetchReleasesForTargets(
 }
 
 /**
- * Custom auto-detect handler that resolves DSN/config to org+project targets,
- * then fetches releases scoped to each detected project.
+ * Custom auto-detect handler that resolves DSN/config to a single project
+ * target, then fetches releases scoped to that project.
  *
- * The default auto-detect handler only resolves org slugs and calls
- * `listForOrg`, which returns ALL releases in the org. Since orgs can have
- * hundreds of projects, the specific project's releases get buried.
- * This override uses `resolveAllTargets` to get project context from DSN
- * detection, then passes project IDs to the API for scoped results.
+ * Uses only the **first** detected target (primary project). Unlike issue
+ * list where each issue has a project-prefix short ID, release versions
+ * are project-ambiguous — mixing releases from multiple detected projects
+ * produces confusing, unsorted output.
  *
- * When no `--environment` is given and a single project is detected,
- * auto-defaults to the `production` or `prod` environment if it exists.
+ * When no `--environment` is given, auto-defaults to `production` or
+ * `prod` if that environment exists on the detected project.
  */
 async function handleAutoDetectWithProject(
   config: OrgListConfig<OrgReleaseResponse, ReleaseWithOrg>,
@@ -354,28 +378,28 @@ async function handleAutoDetectWithProject(
 ): Promise<ListResult<ReleaseWithOrg>> {
   const { cwd, flags } = ctx;
   const resolved = await resolveAllTargets({ cwd });
+  const unique = deduplicateTargets(resolved.targets);
+  const primary = unique[0];
 
-  if (resolved.targets.length === 0) {
+  if (!primary) {
     return {
       items: [],
       hint: "No project detected. Specify a target: sentry release list <org>/<project>",
     };
   }
 
-  const unique = deduplicateTargets(resolved.targets);
-
   // Smart default: auto-select production env when user omitted --environment
   const effectiveExtra = { ...extra };
-  if (!effectiveExtra.environment && unique.length === 1 && unique[0]) {
+  if (!effectiveExtra.environment) {
     effectiveExtra.environment = await resolveDefaultEnvironment(
-      unique[0].org,
-      unique[0].project
+      primary.org,
+      primary.project
     );
   }
 
   const allItems = await fetchReleasesForTargets(
     config,
-    unique,
+    [primary],
     effectiveExtra,
     flags.limit
   );
@@ -383,18 +407,22 @@ async function handleAutoDetectWithProject(
 
   const hintParts: string[] = [];
   if (limited.length === 0) {
-    const projects = unique.map((t) => `${t.org}/${t.project}`).join(", ");
-    hintParts.push(`No releases found for ${projects}.`);
+    hintParts.push(`No releases found for ${primary.org}/${primary.project}.`);
   }
   if (resolved.footer) {
     hintParts.push(resolved.footer);
   }
-  const detectedFrom = unique
-    .filter((t) => t.detectedFrom)
-    .map((t) => `${t.project} (from ${t.detectedFrom})`)
-    .join(", ");
-  if (detectedFrom) {
-    hintParts.push(`Detected: ${detectedFrom}`);
+  if (primary.detectedFrom) {
+    hintParts.push(
+      `Detected: ${primary.project} (from ${primary.detectedFrom})`
+    );
+  }
+  if (unique.length > 1) {
+    const others = unique
+      .slice(1)
+      .map((t) => t.project)
+      .join(", ");
+    hintParts.push(`Also detected: ${others} (use <org>/<project> to switch)`);
   }
   if (effectiveExtra.environment) {
     hintParts.push(
