@@ -280,8 +280,6 @@ trap - EXIT
 "$tmp_binary" cli setup $setup_args
 
 # Optionally launch the setup wizard after install.
-# Resolve the installed binary path using the same logic as the TS code:
-# SENTRY_INSTALL_DIR > ~/.local/bin > ~/bin > ~/.sentry/bin
 # </dev/tty reopens stdin from the terminal since `curl | bash` consumes it.
 if [[ "${SENTRY_INIT:-}" == "1" ]]; then
   sentry_bin=""
