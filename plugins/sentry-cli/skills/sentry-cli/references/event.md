@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-event
-version: 0.26.0-dev.0
+version: 0.25.0-dev.0
 description: View and list Sentry events
 requires:
   bins: ["sentry"]
@@ -28,7 +28,7 @@ List events for an issue
 - `-n, --limit <value> - Number of events (1-1000) - (default: "25")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `--full - Include full event body (stacktraces)`
-- `-t, --period <value> - Time range: "7d", "2026-03-01..2026-04-01", ">=2026-03-01" - (default: "7d")`
+- `-t, --period <value> - Time range: "7d", "2026-03-08..2026-04-08", ">=2026-03-08" - (default: "7d")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 

@@ -28,6 +28,7 @@ import {
   unwrapPaginatedResult,
   unwrapResult,
 } from "./infrastructure.js";
+import { getProject } from "./projects.js";
 import { listRepositoriesPaginated } from "./repositories.js";
 
 // We cast through `unknown` to bridge the gap between the SDK's internal
@@ -45,29 +46,44 @@ import { listRepositoriesPaginated } from "./repositories.js";
  * @param options - Pagination, query, sort, and health options
  * @returns Single page of releases with cursor metadata
  */
+/** Options for listing releases with pagination. */
+export type ListReleasesOptions = {
+  cursor?: string;
+  perPage?: number;
+  query?: string;
+  sort?: string;
+  /** Include per-project health/adoption data in the response. */
+  health?: boolean;
+  /** Filter by numeric project IDs (repeated query param). */
+  project?: number[];
+  /** Filter by environment names (repeated query param). */
+  environment?: string[];
+  /** Stats period for health data, e.g. "24h", "7d", "90d". */
+  statsPeriod?: string;
+  /** Filter by release status: "open" (active) or "archived". */
+  status?: string;
+};
+
 export async function listReleasesPaginated(
   orgSlug: string,
-  options: {
-    cursor?: string;
-    perPage?: number;
-    query?: string;
-    sort?: string;
-    /** Include per-project health/adoption data in the response. */
-    health?: boolean;
-  } = {}
+  options: ListReleasesOptions = {}
 ): Promise<PaginatedResponse<OrgReleaseResponse[]>> {
   const config = await getOrgSdkConfig(orgSlug);
 
   const result = await listAnOrganization_sReleases({
     ...config,
     path: { organization_id_or_slug: orgSlug },
-    // per_page, sort, and health are supported at runtime but not in the OpenAPI spec
+    // Most query params are supported at runtime but absent from the OpenAPI spec
     query: {
       cursor: options.cursor,
       per_page: options.perPage ?? 25,
       query: options.query,
       sort: options.sort,
       health: options.health ? 1 : undefined,
+      project: options.project,
+      environment: options.environment,
+      statsPeriod: options.statsPeriod,
+      status: options.status,
     } as { cursor?: string },
   });
 
@@ -77,6 +93,30 @@ export async function listReleasesPaginated(
       | { data: undefined; error: unknown },
     "Failed to list releases"
   );
+}
+
+/**
+ * List releases scoped to a specific project.
+ *
+ * Resolves the project slug to a numeric ID (required by the API's
+ * `project` query param), then fetches with health data.
+ */
+export async function listReleasesForProject(
+  orgSlug: string,
+  projectSlug: string,
+  options: Omit<ListReleasesOptions, "project"> = {}
+): Promise<OrgReleaseResponse[]> {
+  // Resolve slug → numeric ID (the API requires numeric project IDs)
+  const info = await getProject(orgSlug, projectSlug);
+  const numericId = Number(info.id);
+  const projectIds =
+    Number.isFinite(numericId) && numericId > 0 ? [numericId] : undefined;
+  const { data } = await listReleasesPaginated(orgSlug, {
+    ...options,
+    project: projectIds,
+    perPage: options.perPage ?? 100,
+  });
+  return data;
 }
 
 /** Sort options for the release list endpoint. */
