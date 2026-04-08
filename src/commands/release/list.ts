@@ -30,10 +30,16 @@ import {
 } from "../../lib/list-command.js";
 import {
   dispatchOrgScopedList,
+  type HandlerContext,
   jsonTransformListResult,
   type ListResult,
   type OrgListConfig,
 } from "../../lib/org-list.js";
+import {
+  type ResolvedTarget,
+  resolveAllTargets,
+  toNumericId,
+} from "../../lib/resolve-target.js";
 import { buildReleaseUrl } from "../../lib/sentry-urls.js";
 import { fmtCrashFree } from "./view.js";
 
@@ -265,6 +271,111 @@ function formatListHuman(result: ListResult<ReleaseWithOrg>): string {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-detect override: resolve DSN → project-scoped listing
+// ---------------------------------------------------------------------------
+
+/**
+ * Custom auto-detect handler that resolves DSN/config to org+project targets,
+ * then fetches releases scoped to each detected project.
+ *
+ * The default auto-detect handler only resolves org slugs and calls
+ * `listForOrg`, which returns ALL releases in the org. Since orgs can have
+ * hundreds of projects, the specific project's releases get buried.
+ * This override uses `resolveAllTargets` to get project context from DSN
+ * detection, then passes project IDs to the API for scoped results.
+ */
+async function handleAutoDetectWithProject(
+  config: OrgListConfig<OrgReleaseResponse, ReleaseWithOrg>,
+  extra: ExtraApiOptions,
+  ctx: HandlerContext<"auto-detect">
+): Promise<ListResult<ReleaseWithOrg>> {
+  const { cwd, flags } = ctx;
+  const resolved = await resolveAllTargets({ cwd });
+
+  if (resolved.targets.length === 0) {
+    // No DSN/config found — fall back to org-wide listing via listForOrg
+    const { data } = await listReleasesPaginated("", {
+      perPage: flags.limit,
+      health: true,
+      ...extra,
+    });
+    return {
+      items: data.map((r) => config.withOrg(r, "")),
+      hint: "No project detected. Specify a target: sentry release list <org>/<project>",
+    };
+  }
+
+  // Deduplicate by org+project
+  const seen = new Set<string>();
+  const unique: ResolvedTarget[] = [];
+  for (const t of resolved.targets) {
+    const key = `${t.org}/${t.project}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(t);
+    }
+  }
+
+  // Fetch releases scoped to each detected project
+  const allItems: ReleaseWithOrg[] = [];
+  const hintParts: string[] = [];
+
+  for (const t of unique) {
+    const projectIds = t.projectId ? [t.projectId] : undefined;
+    // If we don't have a numeric project ID, try to resolve it
+    const ids = projectIds ?? (await resolveProjectIds(t.org, t.project));
+    const { data } = await listReleasesPaginated(t.org, {
+      perPage: Math.min(flags.limit, 100),
+      health: true,
+      project: ids,
+      ...extra,
+    });
+    for (const release of data) {
+      allItems.push(config.withOrg(release, t.org));
+    }
+  }
+
+  const limited = allItems.slice(0, flags.limit);
+
+  if (limited.length === 0) {
+    const projects = unique.map((t) => `${t.org}/${t.project}`).join(", ");
+    hintParts.push(`No releases found for ${projects}.`);
+  }
+
+  if (resolved.footer) {
+    hintParts.push(resolved.footer);
+  }
+
+  const detectedFrom = unique
+    .filter((t) => t.detectedFrom)
+    .map((t) => `${t.project} (from ${t.detectedFrom})`)
+    .join(", ");
+  if (detectedFrom) {
+    hintParts.push(`Detected: ${detectedFrom}`);
+  }
+
+  return {
+    items: limited,
+    hint: hintParts.length > 0 ? hintParts.join("\n") : undefined,
+  };
+}
+
+/** Resolve a project slug to a numeric ID array for the API query param. */
+async function resolveProjectIds(
+  org: string,
+  project: string
+): Promise<number[] | undefined> {
+  try {
+    const { getProject } = await import("../../lib/api-client.js");
+    const info = await getProject(org, project);
+    const id = toNumericId(info.id);
+    return id ? [id] : undefined;
+  } catch {
+    return;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Flags
 // ---------------------------------------------------------------------------
 
@@ -368,6 +479,10 @@ export const listCommand = buildListCommand("release", {
       flags,
       parsed,
       orgSlugMatchBehavior: "redirect",
+      overrides: {
+        "auto-detect": (ctx: HandlerContext<"auto-detect">) =>
+          handleAutoDetectWithProject(config, extra, ctx),
+      },
     });
     yield new CommandOutput(result);
     const hint = result.items.length > 0 ? result.hint : undefined;
