@@ -1,0 +1,40 @@
+# Plan: buildRouteMap wrapper with standard subcommand aliases
+
+## Summary
+
+Create `src/lib/route-map.ts` as the single entry point for building Stricli
+route maps — analogous to how `src/lib/command.ts` wraps `buildCommand`. The
+wrapper auto-injects standard aliases based on which route keys exist:
+
+| Route    | Auto-aliases   |
+|----------|----------------|
+| `list`   | `ls`           |
+| `view`   | `show`         |
+| `delete` | `remove`, `rm` |
+| `create` | `new`          |
+
+## Design
+
+- `STANDARD_ALIASES`: `Map<string, ReadonlySet<string>>` mapping canonical
+  route names to their alias sets.
+- `buildRouteMap()`: inspects `args.routes` keys, computes auto-aliases,
+  merges with manual `args.aliases` (manual takes precedence), forwards to
+  Stricli's `buildRouteMap`.
+- Aliases that collide with actual route names are silently skipped.
+
+## Files
+
+- **New**: `src/lib/route-map.ts` — wrapper with `STANDARD_ALIASES` map
+- **Migrated** (import swap + alias removal): all 16 command group `index.ts`
+  files + `app.ts`
+- **Updated**: `src/lib/list-command.ts` — `getSubcommandsForRoute()` now
+  collects subcommand aliases so `sentry issues ls` is properly intercepted
+
+## Verification
+
+```bash
+bun run typecheck
+bun run lint
+bun test test/lib test/commands test/types
+bun run check:skill
+```
