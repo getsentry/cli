@@ -19,7 +19,7 @@ List issues in a project
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-n, --limit <value> - Maximum number of issues to list - (default: "25")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
-- `-t, --period <value> - Time range: "7d", "2026-03-08..2026-04-08", ">=2026-03-08" - (default: "90d")`
+- `-t, --period <value> - Time range: "7d", "2025-01-01..2025-01-31", ">=2025-01-01" - (default: "90d")`
 - `-c, --cursor <value> - Pagination cursor (use "next" for next page, "prev" for previous)`
 - `--compact - Single-line rows for compact output (auto-detects if omitted)`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
@@ -78,7 +78,7 @@ List events for a specific issue
 - `-n, --limit <value> - Number of events (1-1000) - (default: "25")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `--full - Include full event body (stacktraces)`
-- `-t, --period <value> - Time range: "7d", "2026-03-08..2026-04-08", ">=2026-03-08" - (default: "7d")`
+- `-t, --period <value> - Time range: "7d", "2025-01-01..2025-01-31", ">=2025-01-01" - (default: "7d")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
