@@ -336,15 +336,13 @@ export const LIST_BASE_ALIASES: Aliases<string> = { n: "limit", c: "cursor" };
 let _subcommandsByRoute: Map<string, Set<string>> | undefined;
 
 /**
- * Get the subcommand names for a given singular route (e.g. "project" → {"list", "view"}).
- *
- * Lazily walks the Stricli route map on first call. Uses `require()` to break
- * the circular dependency: list-command → app → commands → list-command.
+ * Entry shape returned by Stricli's getAllEntries().
+ * `aliases` is always present at runtime (empty array when none),
+ * but typed as optional for defensive safety.
  */
-/** Entry shape returned by Stricli's getAllEntries() */
 type RouteEntry = {
   name: { original: string };
-  aliases: readonly string[];
+  aliases?: readonly string[];
   target: unknown;
 };
 
@@ -355,13 +353,19 @@ function collectChildNames(parent: {
   const names = new Set<string>();
   for (const child of parent.getAllEntries()) {
     names.add(child.name.original);
-    for (const alias of child.aliases) {
+    for (const alias of child.aliases ?? []) {
       names.add(alias);
     }
   }
   return names;
 }
 
+/**
+ * Get the subcommand names for a given singular route (e.g. "project" → {"list", "view"}).
+ *
+ * Lazily walks the Stricli route map on first call. Uses `require()` to break
+ * the circular dependency: list-command → app → commands → list-command.
+ */
 function getSubcommandsForRoute(routeName: string): Set<string> {
   if (!_subcommandsByRoute) {
     _subcommandsByRoute = new Map();
