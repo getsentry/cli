@@ -19,7 +19,7 @@ List spans in a project or trace
 - `-n, --limit <value> - Number of spans (<=1000) - (default: "25")`
 - `-q, --query <value> - Filter spans (e.g., "op:db", "duration:>100ms", "project:backend")`
 - `-s, --sort <value> - Sort order: date, duration - (default: "date")`
-- `-t, --period <value> - Time range: "7d", "2025-01-01..2025-01-31", ">=2025-01-01" - (default: "7d")`
+- `-t, --period <value> - Time range: "7d", "2026-03-08..2026-04-08", ">=2026-03-08" - (default: "7d")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
