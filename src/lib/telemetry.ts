@@ -19,6 +19,7 @@ import {
   SENTRY_CLI_DSN,
 } from "./constants.js";
 import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
+import { detectAgent } from "./detect-agent.js";
 import { getEnv } from "./env.js";
 import { ApiError, AuthError, OutputError } from "./errors.js";
 import { attachSentryReporter } from "./logger.js";
@@ -521,6 +522,12 @@ export function initSentry(
 
     // Tag whether running in an interactive terminal or agent/CI environment
     Sentry.setTag("is_tty", !!process.stdout.isTTY);
+
+    // Tag which AI agent (if any) is driving the CLI
+    const agent = detectAgent();
+    if (agent) {
+      Sentry.setTag("agent", agent);
+    }
 
     // Wire up consola → Sentry log forwarding now that the client is active
     attachSentryReporter();
