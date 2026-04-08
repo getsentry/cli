@@ -1,0 +1,62 @@
+# Plan: Add `ls` as alias for `list` across all commands
+
+## Summary
+
+Add `ls` → `list` as a Stricli subcommand alias in every route group that has a `list` command. This follows the existing pattern of `show` → `view` and `remove` → `delete` aliases.
+
+## Approach
+
+Stricli's `buildRouteMap()` natively supports an `aliases` property that maps alias names to route names. The change is mechanical: add `ls: "list"` to the `aliases` object in each route group's `index.ts`.
+
+## Files to modify
+
+### 1. Route groups — add `ls: "list"` to aliases
+
+Files that **already have** an `aliases` property (just add `ls: "list"`):
+- `src/commands/issue/index.ts` — `{ show: "view" }` → `{ show: "view", ls: "list" }`
+- `src/commands/event/index.ts` — same pattern
+- `src/commands/org/index.ts` — same
+- `src/commands/project/index.ts` — `{ show: "view", remove: "delete" }` → add `ls: "list"`
+- `src/commands/trace/index.ts` — same as issue
+- `src/commands/span/index.ts` — same
+- `src/commands/log/index.ts` — same
+- `src/commands/dashboard/index.ts` — same
+
+Files that **don't have** an `aliases` property yet (add it):
+- `src/commands/release/index.ts` — add `aliases: { ls: "list" }`
+- `src/commands/repo/index.ts` — add `aliases: { ls: "list" }`
+- `src/commands/team/index.ts` — add `aliases: { ls: "list" }`
+- `src/commands/trial/index.ts` — add `aliases: { ls: "list" }`
+
+### 2. Plural form interception — `src/lib/list-command.ts`
+
+`interceptSubcommand()` (line 391) checks if a positional arg is a known subcommand name. It builds the set via `getSubcommandsForRoute()` which only collects `child.name.original` from Stricli's `getAllEntries()`.
+
+**Verify** whether Stricli's `getAllEntries()` includes alias entries. If it does, `ls` is automatically recognized. If it doesn't, update `getSubcommandsForRoute()` to also collect aliases from each child entry (they expose `readonly aliases: readonly string[]`).
+
+This ensures `sentry issues ls` (plural form + alias) correctly prints the tip and auto-detects instead of treating `ls` as an org slug.
+
+### 3. SKILL.md regeneration
+
+Run `bun run generate:skill` after changes (CI enforces via `check:skill`).
+
+## Verification
+
+```bash
+# 1. Type checking
+bun run typecheck
+
+# 2. Lint
+bun run lint
+
+# 3. Tests
+bun test
+
+# 4. Manual smoke test
+bun run dev -- issue ls
+bun run dev -- issue list   # confirm still works
+bun run dev -- issues ls    # plural + alias
+
+# 5. SKILL.md
+bun run check:skill
+```
