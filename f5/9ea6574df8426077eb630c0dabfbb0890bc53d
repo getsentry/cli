@@ -1,0 +1,238 @@
+# Plan: `.sentryclirc` Config File Support
+
+## Goal
+Add backward-compatible support for `.sentryclirc` INI config files, solving:
+- Per-directory org/project defaults for monorepos
+- Global defaults via `~/.sentryclirc`
+- Backward compat with old sentry-cli config files
+
+**No new commands.** `.sentryclirc` files are the config mechanism. The existing (empty) SQLite defaults table remains as a lower-priority fallback.
+
+## Resolution Chain (after changes)
+
+```
+1. Explicit CLI args          (highest)
+2. Environment variables      (SENTRY_ORG, SENTRY_PROJECT, SENTRY_AUTH_TOKEN, etc.)
+3. .sentryclirc file          ← NEW (walked up from CWD, merged with global)
+4. SQLite defaults            (unchanged, still unpopulated)
+5. DSN auto-detection
+6. Directory name inference   (lowest)
+```
+
+`.sentryclirc` values for `token` and `url` are applied via env shim (set the corresponding `process.env` vars if not already set). Org/project are inserted directly into the resolution chain for proper source tracking.
+
+## Design
+
+### `.sentryclirc` format (INI, matching old sentry-cli)
+```ini
+[defaults]
+org = my-org
+project = my-project
+url = https://sentry.io/
+
+[auth]
+token = sntrys_...
+```
+
+### Walk-up behavior
+1. Start at `cwd`, walk toward filesystem root
+2. At each directory, check for `.sentryclirc`
+3. Collect all found files (closest-first order)
+4. Always also check global: `$SENTRY_CONFIG_DIR/.sentryclirc`, then `~/.sentryclirc`
+5. Merge: per-field, closest file wins; global fills gaps
+
+### Env shim (token + url)
+Applied early in `startCli()` before any command dispatch:
+- `[auth] token` → `process.env.SENTRY_AUTH_TOKEN` (if env var unset)
+- `[defaults] url` → `process.env.SENTRY_URL` (if `SENTRY_HOST` and `SENTRY_URL` both unset)
+
+This avoids changes to `auth.ts` and `constants.ts`. The existing env var handling picks up the values naturally.
+
+### Resolution chain insertion (org + project)
+Inserted as paired check (both org AND project required, matching existing pattern) in:
+- `resolveOrgAndProject()` — between env vars (line ~983) and SQLite defaults (line ~986)
+- `resolveAllTargets()` — between env vars (line ~812) and SQLite defaults (line ~816)
+- `resolveOrg()` — between env vars (line ~1051) and SQLite defaults (line ~1055), org-only
+- `resolveOrgsForListing()` — between env vars (line ~1191) and SQLite defaults (line ~1193), org-only
+
+Source tracking: `detectedFrom: ".sentryclirc (<filepath>)"`
+
+## Files
+
+### New files (4 source + 3 test)
+
+| File | Purpose |
+|------|---------|
+| `src/lib/ini.ts` | Zero-dep INI parser |
+| `src/lib/sentryclirc.ts` | Walk-up discovery + merge + env shim |
+| `test/lib/ini.test.ts` | Unit tests (edge cases, real-world fixture) |
+| `test/lib/ini.property.test.ts` | Property-based tests (round-trip, idempotency, case insensitivity) |
+| `test/lib/sentryclirc.test.ts` | Unit tests (walk-up, merge, env shim, caching) |
+| `test/lib/sentryclirc.property.test.ts` | Property tests (merge monotonicity, closest-wins) |
+| `test/fixtures/sentryclirc/` | Directory tree fixtures for walk-up tests |
+
+### Modified files (3)
+
+| File | Change |
+|------|--------|
+| `src/cli.ts` | Call `applySentryCliRcEnvShim(process.cwd())` early in `startCli()` before dispatch |
+| `src/lib/resolve-target.ts` | Insert `.sentryclirc` org/project check as step 3 in 4 resolution functions; update doc comment |
+| `src/commands/auth/status.ts` | Show `.sentryclirc` info in `sentry auth status` output (optional, nice-to-have) |
+
+## Implementation Details
+
+### 1. INI Parser (`src/lib/ini.ts`)
+
+```typescript
+export type IniData = Record<string, Record<string, string>>;
+export function parseIni(content: string): IniData;
+```
+
+Rules:
+- `[section]` headers → section name lowercased, trimmed
+- `key = value` → key lowercased, value trimmed
+- `#` and `;` line comments (not inline — tokens can contain `#`)
+- Keys before any section → `""` (empty) section
+- Quoted values: strip matching outer `"` or `'` quotes
+- Strip UTF-8 BOM
+- Duplicate keys: last wins. Duplicate sections: merged
+- Malformed lines: silently skip (debug log)
+- No multi-line values
+
+### 2. `.sentryclirc` Reader (`src/lib/sentryclirc.ts`)
+
+```typescript
+export type SentryCliRcConfig = {
+  org?: string;
+  project?: string;
+  url?: string;
+  token?: string;
+  sources: { org?: string; project?: string; url?: string; token?: string };
+};
+
+/** Load and cache .sentryclirc (process-lifetime cache keyed by cwd) */
+export function loadSentryCliRc(cwd: string): SentryCliRcConfig;
+
+/** Apply env shim for token/url. Call once early in boot. */
+export function applySentryCliRcEnvShim(cwd: string): void;
+```
+
+Walk-up uses `existsSync` + `readFileSync` (synchronous — the walk reads at most ~20 tiny files, matches `getDefaultOrganization()` sync pattern). Cycle detection via `realpathSync` + `Set<string>`. File read errors silently ignored (ENOENT, EACCES).
+
+### 3. `cli.ts` boot integration
+
+```typescript
+// In startCli(), before args parsing
+export function startCli(): Promise<void> {
+  applySentryCliRcEnvShim(process.cwd());
+  const args = process.argv.slice(2);
+  // ... existing code
+}
+```
+
+### 4. Resolution chain insertion (in `resolve-target.ts`)
+
+Pattern for each function (example for `resolveOrgAndProject`):
+
+```typescript
+// After env var check, before SQLite defaults:
+const rcConfig = loadSentryCliRc(cwd);
+if (rcConfig.org && rcConfig.project) {
+  return withTelemetryContext({
+    org: rcConfig.org,
+    project: rcConfig.project,
+    orgDisplay: rcConfig.org,
+    projectDisplay: rcConfig.project,
+    detectedFrom: `.sentryclirc (${rcConfig.sources.project})`,
+  });
+}
+```
+
+For org-only functions (`resolveOrg`, `resolveOrgsForListing`), check only `rcConfig.org`.
+
+## Test Plan
+
+### Property-based tests (fast-check)
+
+**`ini.property.test.ts`:**
+- Round-trip: `parseIni(serialize(data)) ≡ data` for generated IniData
+- Idempotency: `parseIni(serialize(parseIni(x))) ≡ parseIni(x)`
+- Comment immunity: inserting `# ...` lines doesn't change result
+- Key/section case insensitivity
+- Last-write-wins for duplicate keys
+
+**`sentryclirc.property.test.ts`:**
+- Merge monotonicity: adding a config file never removes resolved fields
+- Closest-wins: closest file always takes priority per-field
+
+### Unit tests
+
+**`ini.test.ts`:**
+- Empty file, comments-only file, BOM handling
+- Quoted value stripping (matched/mismatched quotes)
+- Real-world `.sentryclirc` from old CLI docs
+- Malformed lines (no `=`, unclosed section, empty key)
+
+**`sentryclirc.test.ts`:**
+- No files found → empty config
+- Single local `.sentryclirc` → populated config
+- Global fills gaps when local is partial
+- Closest file wins for overlapping keys
+- Env shim: sets `SENTRY_AUTH_TOKEN` only if unset
+- Env shim: sets `SENTRY_URL` only if `SENTRY_HOST` and `SENTRY_URL` both unset
+- Process-lifetime cache returns same reference on second call
+- `SENTRY_CONFIG_DIR` override for global path lookup
+
+### Existing test updates
+- `test/lib/resolve-target.test.ts` — mock `loadSentryCliRc`, verify it slots between env vars and SQLite defaults
+
+## Edge Cases
+
+| Scenario | Behavior |
+|----------|----------|
+| Invalid INI syntax | Malformed lines skipped; valid lines still parsed |
+| Token in `.sentryclirc` expired/revoked | API returns 401; normal auth error flow applies |
+| `.sentryclirc` org conflicts with DSN org | `.sentryclirc` wins (higher priority, DSN never consulted) |
+| Only `org` in `.sentryclirc`, no `project` | Org used for org-only resolution; `resolveOrgAndProject` falls through to next step |
+| Symlinks in walk-up | `realpathSync` resolves them; cycle detected via `Set` |
+| File permission denied | Silently skipped; other files still contribute |
+| Library mode (SDK invoke) | `applySentryCliRcEnvShim` only called from CLI entry; library mode uses `setEnv()` separately |
+
+## Verification
+
+```bash
+# Type checking
+bun run typecheck
+
+# Lint
+bun run lint
+
+# Run new tests
+bun test test/lib/ini.test.ts
+bun test test/lib/ini.property.test.ts
+bun test test/lib/sentryclirc.test.ts
+bun test test/lib/sentryclirc.property.test.ts
+
+# Run affected existing tests
+bun test test/lib/resolve-target.test.ts
+
+# Full test suite
+bun run test:unit
+
+# Manual smoke test
+echo -e '[defaults]\norg = sentry\nproject = sentry' > /tmp/test-sentryclirc/.sentryclirc
+cd /tmp/test-sentryclirc && sentry issue list  # should use org=sentry, project=sentry
+
+# SKILL.md (may need regen if command docs mention resolution chain)
+bun run check:skill
+```
+
+## Implementation Order
+
+1. `src/lib/ini.ts` + tests — standalone, no deps
+2. `src/lib/sentryclirc.ts` + tests — depends on (1)
+3. `src/cli.ts` — add `applySentryCliRcEnvShim` call
+4. `src/lib/resolve-target.ts` — insert org/project resolution step
+5. Update resolve-target tests
+6. `bun run typecheck && bun run lint:fix && bun run test:unit`
+7. `bun run check:skill` (regenerate if needed)
