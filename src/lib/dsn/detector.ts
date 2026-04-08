@@ -24,6 +24,7 @@ import {
   getCachedProjectRoot,
   setCachedProjectRoot,
 } from "../db/project-root-cache.js";
+import { logger } from "../logger.js";
 import {
   extractFirstDsnFromContent,
   scanCodeForDsns,
@@ -43,6 +44,8 @@ import type {
   DsnDetectionResult,
   DsnSource,
 } from "./types.js";
+
+const log = logger.withTag("dsn-detect");
 
 /**
  * Detect DSN with project root detection and caching support.
@@ -86,6 +89,7 @@ export async function detectDsn(cwd: string): Promise<DetectedDsn | null> {
       }
 
       // Cache hit! Return with resolved info if available
+      log.debug(`DSN cache hit for ${projectRoot}`);
       return {
         ...verified,
         resolved: cached.resolved,
@@ -98,6 +102,9 @@ export async function detectDsn(cwd: string): Promise<DetectedDsn | null> {
   const detected = await fullScanFirst(projectRoot);
 
   if (detected) {
+    log.debug(
+      `DSN detected: ${detected.raw} from ${getDsnSourceDescription(detected)}`
+    );
     // Cache for next time (without resolved info yet)
     setCachedDsn(projectRoot, {
       dsn: detected.raw,
@@ -106,6 +113,8 @@ export async function detectDsn(cwd: string): Promise<DetectedDsn | null> {
       source: detected.source,
       sourcePath: detected.sourcePath,
     });
+  } else {
+    log.debug(`No DSN found after full scan of ${projectRoot}`);
   }
 
   return detected;
@@ -144,11 +153,16 @@ export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
     });
   }
 
+  log.debug(`DSN detection starting from project root: ${projectRoot}`);
+
   // 2. Try cached detection result
   const cachedDetection = await getCachedDetection(projectRoot);
 
   if (cachedDetection) {
     // Cache hit! Return cached result
+    log.debug(
+      `DSN detection cache hit: ${cachedDetection.allDsns.length} DSN(s) cached`
+    );
     return {
       primary: cachedDetection.allDsns[0] ?? null,
       all: cachedDetection.allDsns,
@@ -221,6 +235,12 @@ export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
 
   // Multiple DSNs is valid in monorepos (different packages/apps)
   const hasMultiple = allDsns.length > 1;
+
+  log.debug(`DSN detection complete: ${allDsns.length} DSN(s) found`);
+  for (const dsn of allDsns) {
+    const isPrimary = dsn === allDsns[0] ? " [primary]" : "";
+    log.debug(`  ${dsn.raw} — ${getDsnSourceDescription(dsn)}${isPrimary}`);
+  }
 
   return {
     primary: allDsns[0] ?? null,

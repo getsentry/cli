@@ -16,12 +16,15 @@
 import { opendir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { logger } from "../logger.js";
 import { anyTrue } from "../promises.js";
 import { withFsSpan, withTracingSpan } from "../telemetry.js";
 import { ENV_FILES, extractDsnFromEnvContent } from "./env-file.js";
 import { handleFileError } from "./fs-utils.js";
 import { createDetectedDsn } from "./parser.js";
 import type { DetectedDsn } from "./types.js";
+
+const log = logger.withTag("dsn-project-root");
 
 /** Why a directory was chosen as project root */
 export type ProjectRootReason =
@@ -553,6 +556,10 @@ export function findProjectRoot(startDir: string): Promise<ProjectRootResult> {
       const stopBoundary = getStopBoundary();
 
       const result = await walkUpDirectories(resolvedStart, stopBoundary);
+
+      log.debug(
+        `Project root: ${result.projectRoot} (reason: ${result.reason})`
+      );
 
       span.setAttributes({
         "dsn.found": result.foundDsn !== undefined,

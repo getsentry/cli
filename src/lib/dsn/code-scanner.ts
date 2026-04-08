@@ -686,6 +686,10 @@ function scanDirectory(
 
       const { files, dirMtimes } = collectResult;
 
+      log.debug(
+        `Code scan: collected ${files.length} files from ${Object.keys(dirMtimes).length} directories`
+      );
+
       span.setAttribute("dsn.files_collected", files.length);
 
       if (files.length === 0) {
@@ -697,6 +701,10 @@ function scanDirectory(
         cwd,
         files,
         stopOnFirst
+      );
+
+      log.debug(
+        `Code scan: scanned ${filesScanned} files, found ${results.size} DSN(s)`
       );
 
       span.setAttributes({

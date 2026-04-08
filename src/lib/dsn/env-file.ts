@@ -10,11 +10,14 @@
 
 import { opendir } from "node:fs/promises";
 import { join } from "node:path";
+import { logger } from "../logger.js";
 import { withTracingSpan } from "../telemetry.js";
 import { createDetectedDsn } from "./parser.js";
 import { scanSpecificFiles } from "./scanner.js";
 import type { DetectedDsn } from "./types.js";
 import { MONOREPO_ROOTS } from "./types.js";
+
+const log = logger.withTag("dsn-env-file");
 
 /**
  * Result of scanning env files, including mtimes for caching.
@@ -156,6 +159,9 @@ export async function detectFromAllEnvFiles(
         });
       allDsns.push(...rootDsns);
       Object.assign(allMtimes, rootMtimes);
+      if (rootDsns.length > 0) {
+        log.debug(`Found ${rootDsns.length} DSN(s) in root .env files`);
+      }
 
       // 2. Check monorepo package directories
       const {
@@ -165,6 +171,11 @@ export async function detectFromAllEnvFiles(
       } = await detectFromMonorepoEnvFiles(cwd);
       allDsns.push(...monorepoDsns);
       Object.assign(allMtimes, monorepoMtimes);
+      if (packagesScanned > 0) {
+        log.debug(
+          `Scanned ${packagesScanned} monorepo packages, found ${monorepoDsns.length} DSN(s) in package .env files`
+        );
+      }
 
       // Root checks ENV_FILES.length names; each monorepo package also checks ENV_FILES.length
       const filesChecked = ENV_FILES.length * (1 + packagesScanned);

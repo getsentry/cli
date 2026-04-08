@@ -926,6 +926,15 @@ async function resolveDetectedDsns(
   // Count DSNs that couldn't be resolved (API errors, permissions, etc.)
   const unresolvedCount = resolvedTargets.filter((t) => t === null).length;
 
+  for (const t of targets) {
+    log.debug(`Resolved: ${t.org}/${t.project} (from DSN)`);
+  }
+  if (unresolvedCount > 0) {
+    log.debug(
+      `DSN resolution: ${unresolvedCount} DSN(s) could not be resolved`
+    );
+  }
+
   if (targets.length === 0) {
     return {
       targets: [],
