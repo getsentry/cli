@@ -11,6 +11,7 @@ import {
   createANewReleaseForAnOrganization,
   deleteAnOrganization_sRelease,
   listAnOrganization_sReleases,
+  listAProject_sEnvironments,
   listARelease_sDeploys,
   retrieveAnOrganization_sRelease,
   updateAnOrganization_sRelease,
@@ -528,4 +529,38 @@ export function setCommitsLocal(
   }>
 ): Promise<OrgReleaseResponse> {
   return updateRelease(orgSlug, version, { commits });
+}
+
+// ---------------------------------------------------------------------------
+// Environments
+// ---------------------------------------------------------------------------
+
+/** A visible project environment. */
+export type ProjectEnvironment = {
+  id: string;
+  name: string;
+  isHidden: boolean;
+};
+
+/**
+ * List visible environments for a project.
+ *
+ * Lightweight call — returns a small array of `{ id, name, isHidden }`.
+ * Used to auto-detect a production environment for smart defaults.
+ */
+export async function listProjectEnvironments(
+  orgSlug: string,
+  projectSlug: string
+): Promise<ProjectEnvironment[]> {
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await listAProject_sEnvironments({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      project_id_or_slug: projectSlug,
+    },
+    query: { visibility: "visible" },
+  });
+  const data = unwrapResult(result, "Failed to list environments");
+  return data as unknown as ProjectEnvironment[];
 }

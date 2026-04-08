@@ -9,6 +9,7 @@ import type { OrgReleaseResponse } from "@sentry/api";
 import type { SentryContext } from "../../context.js";
 import {
   type ListReleasesOptions,
+  listProjectEnvironments,
   listReleasesForProject,
   listReleasesPaginated,
   type ReleaseSortValue,
@@ -274,90 +275,18 @@ function formatListHuman(result: ListResult<ReleaseWithOrg>): string {
 // Auto-detect override: resolve DSN → project-scoped listing
 // ---------------------------------------------------------------------------
 
-/**
- * Custom auto-detect handler that resolves DSN/config to org+project targets,
- * then fetches releases scoped to each detected project.
- *
- * The default auto-detect handler only resolves org slugs and calls
- * `listForOrg`, which returns ALL releases in the org. Since orgs can have
- * hundreds of projects, the specific project's releases get buried.
- * This override uses `resolveAllTargets` to get project context from DSN
- * detection, then passes project IDs to the API for scoped results.
- */
-async function handleAutoDetectWithProject(
-  config: OrgListConfig<OrgReleaseResponse, ReleaseWithOrg>,
-  extra: ExtraApiOptions,
-  ctx: HandlerContext<"auto-detect">
-): Promise<ListResult<ReleaseWithOrg>> {
-  const { cwd, flags } = ctx;
-  const resolved = await resolveAllTargets({ cwd });
-
-  if (resolved.targets.length === 0) {
-    // No DSN/config found — fall back to org-wide listing via listForOrg
-    const { data } = await listReleasesPaginated("", {
-      perPage: flags.limit,
-      health: true,
-      ...extra,
-    });
-    return {
-      items: data.map((r) => config.withOrg(r, "")),
-      hint: "No project detected. Specify a target: sentry release list <org>/<project>",
-    };
-  }
-
-  // Deduplicate by org+project
+/** Deduplicate resolved targets by org+project key. */
+function deduplicateTargets(targets: ResolvedTarget[]): ResolvedTarget[] {
   const seen = new Set<string>();
-  const unique: ResolvedTarget[] = [];
-  for (const t of resolved.targets) {
+  const result: ResolvedTarget[] = [];
+  for (const t of targets) {
     const key = `${t.org}/${t.project}`;
     if (!seen.has(key)) {
       seen.add(key);
-      unique.push(t);
+      result.push(t);
     }
   }
-
-  // Fetch releases scoped to each detected project
-  const allItems: ReleaseWithOrg[] = [];
-  const hintParts: string[] = [];
-
-  for (const t of unique) {
-    const projectIds = t.projectId ? [t.projectId] : undefined;
-    // If we don't have a numeric project ID, try to resolve it
-    const ids = projectIds ?? (await resolveProjectIds(t.org, t.project));
-    const { data } = await listReleasesPaginated(t.org, {
-      perPage: Math.min(flags.limit, 100),
-      health: true,
-      project: ids,
-      ...extra,
-    });
-    for (const release of data) {
-      allItems.push(config.withOrg(release, t.org));
-    }
-  }
-
-  const limited = allItems.slice(0, flags.limit);
-
-  if (limited.length === 0) {
-    const projects = unique.map((t) => `${t.org}/${t.project}`).join(", ");
-    hintParts.push(`No releases found for ${projects}.`);
-  }
-
-  if (resolved.footer) {
-    hintParts.push(resolved.footer);
-  }
-
-  const detectedFrom = unique
-    .filter((t) => t.detectedFrom)
-    .map((t) => `${t.project} (from ${t.detectedFrom})`)
-    .join(", ");
-  if (detectedFrom) {
-    hintParts.push(`Detected: ${detectedFrom}`);
-  }
-
-  return {
-    items: limited,
-    hint: hintParts.length > 0 ? hintParts.join("\n") : undefined,
-  };
+  return result;
 }
 
 /** Resolve a project slug to a numeric ID array for the API query param. */
@@ -375,14 +304,148 @@ async function resolveProjectIds(
   }
 }
 
+/**
+ * Fetch releases for a list of resolved targets, scoped by project ID.
+ *
+ * Each target contributes releases tagged with its org slug. Results are
+ * merged and truncated to `limit`.
+ */
+async function fetchReleasesForTargets(
+  config: OrgListConfig<OrgReleaseResponse, ReleaseWithOrg>,
+  targets: ResolvedTarget[],
+  extra: ExtraApiOptions,
+  limit: number
+): Promise<ReleaseWithOrg[]> {
+  const allItems: ReleaseWithOrg[] = [];
+  for (const t of targets) {
+    const ids = t.projectId
+      ? [t.projectId]
+      : await resolveProjectIds(t.org, t.project);
+    const { data } = await listReleasesPaginated(t.org, {
+      perPage: Math.min(limit, 100),
+      health: true,
+      project: ids,
+      ...extra,
+    });
+    for (const release of data) {
+      allItems.push(config.withOrg(release, t.org));
+    }
+  }
+  return allItems;
+}
+
+/**
+ * Custom auto-detect handler that resolves DSN/config to org+project targets,
+ * then fetches releases scoped to each detected project.
+ *
+ * The default auto-detect handler only resolves org slugs and calls
+ * `listForOrg`, which returns ALL releases in the org. Since orgs can have
+ * hundreds of projects, the specific project's releases get buried.
+ * This override uses `resolveAllTargets` to get project context from DSN
+ * detection, then passes project IDs to the API for scoped results.
+ *
+ * When no `--environment` is given and a single project is detected,
+ * auto-defaults to the `production` or `prod` environment if it exists.
+ */
+async function handleAutoDetectWithProject(
+  config: OrgListConfig<OrgReleaseResponse, ReleaseWithOrg>,
+  extra: ExtraApiOptions,
+  ctx: HandlerContext<"auto-detect">
+): Promise<ListResult<ReleaseWithOrg>> {
+  const { cwd, flags } = ctx;
+  const resolved = await resolveAllTargets({ cwd });
+
+  if (resolved.targets.length === 0) {
+    return {
+      items: [],
+      hint: "No project detected. Specify a target: sentry release list <org>/<project>",
+    };
+  }
+
+  const unique = deduplicateTargets(resolved.targets);
+
+  // Smart default: auto-select production env when user omitted --environment
+  const effectiveExtra = { ...extra };
+  if (!effectiveExtra.environment && unique.length === 1 && unique[0]) {
+    effectiveExtra.environment = await resolveDefaultEnvironment(
+      unique[0].org,
+      unique[0].project
+    );
+  }
+
+  const allItems = await fetchReleasesForTargets(
+    config,
+    unique,
+    effectiveExtra,
+    flags.limit
+  );
+  const limited = allItems.slice(0, flags.limit);
+
+  const hintParts: string[] = [];
+  if (limited.length === 0) {
+    const projects = unique.map((t) => `${t.org}/${t.project}`).join(", ");
+    hintParts.push(`No releases found for ${projects}.`);
+  }
+  if (resolved.footer) {
+    hintParts.push(resolved.footer);
+  }
+  const detectedFrom = unique
+    .filter((t) => t.detectedFrom)
+    .map((t) => `${t.project} (from ${t.detectedFrom})`)
+    .join(", ");
+  if (detectedFrom) {
+    hintParts.push(`Detected: ${detectedFrom}`);
+  }
+  if (effectiveExtra.environment) {
+    hintParts.push(
+      `Environment: ${effectiveExtra.environment.join(", ")} (use -e to change)`
+    );
+  }
+  return {
+    items: limited,
+    hint: hintParts.length > 0 ? hintParts.join("\n") : undefined,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Flags
 // ---------------------------------------------------------------------------
 
+/** Known production environment names to auto-detect as default. */
+const PRODUCTION_ENV_NAMES = ["production", "prod"];
+
+/**
+ * Resolve environment filter for the API call.
+ *
+ * When the user passes `-e`, those values are used directly.
+ * When no `-e` is given and we have a detected project, check if
+ * `production` or `prod` exists and default to it — matching the
+ * Sentry web UI's default behavior of showing production releases.
+ *
+ * Returns `undefined` (all environments) if no production env is found.
+ */
+async function resolveDefaultEnvironment(
+  org: string,
+  project: string
+): Promise<string[] | undefined> {
+  try {
+    const envs = await listProjectEnvironments(org, project);
+    const names = envs.map((e) => e.name);
+    for (const candidate of PRODUCTION_ENV_NAMES) {
+      if (names.includes(candidate)) {
+        return [candidate];
+      }
+    }
+  } catch {
+    // Environment listing failed — don't filter
+  }
+  return;
+}
+
 type ListFlags = {
   readonly limit: number;
   readonly sort: ReleaseSortValue;
-  readonly environment?: string;
+  readonly environment?: readonly string[];
   readonly period: string;
   readonly status: string;
   readonly json: boolean;
@@ -445,7 +508,8 @@ export const listCommand = buildListCommand("release", {
       environment: {
         kind: "parsed" as const,
         parse: String,
-        brief: "Filter by environment (e.g., production)",
+        brief: "Filter by environment (repeatable, comma-separated)",
+        variadic: true as const,
         optional: true as const,
       },
       period: {
@@ -466,9 +530,16 @@ export const listCommand = buildListCommand("release", {
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
     const { cwd } = this;
     const parsed = parseOrgProjectArg(target);
+    // Flatten: -e prod,dev -e staging → ["prod", "dev", "staging"]
+    const envFilter = flags.environment
+      ? [...flags.environment]
+          .flatMap((v) => v.split(","))
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : undefined;
     const extra: ExtraApiOptions = {
       sort: flags.sort,
-      environment: flags.environment ? [flags.environment] : undefined,
+      environment: envFilter,
       statsPeriod: flags.period,
       status: flags.status,
     };

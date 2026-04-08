@@ -95,6 +95,7 @@ export {
   deleteRelease,
   getRelease,
   type ListReleasesOptions,
+  listProjectEnvironments,
   listReleaseDeploys,
   listReleasesForProject,
   listReleasesPaginated,
