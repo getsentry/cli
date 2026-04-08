@@ -18,7 +18,6 @@ import {
   colorTag,
   escapeMarkdownInline,
 } from "../../lib/formatters/markdown.js";
-import { fmtPct } from "../../lib/formatters/numbers.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { sparkline } from "../../lib/formatters/sparkline.js";
 import { type Column, formatTable } from "../../lib/formatters/table.js";
@@ -36,6 +35,7 @@ import {
   type OrgListConfig,
 } from "../../lib/org-list.js";
 import { buildReleaseUrl } from "../../lib/sentry-urls.js";
+import { fmtCrashFree } from "./view.js";
 
 export const PAGINATION_KEY = "release-list";
 
@@ -141,21 +141,6 @@ function formatAdoption(value: number | null | undefined): string {
   return text;
 }
 
-/** Color crash-free rate: green ≥ 99%, yellow ≥ 95%, red < 95%. */
-function formatCrashFree(value: number | null | undefined): string {
-  if (value === null || value === undefined) {
-    return colorTag("muted", "—");
-  }
-  const text = fmtPct(value);
-  if (value >= 99) {
-    return colorTag("green", text);
-  }
-  if (value >= 95) {
-    return colorTag("yellow", text);
-  }
-  return colorTag("red", text);
-}
-
 /** Session sparkline in muted color. */
 function formatSessionSparkline(r: OrgReleaseResponse): string {
   const health = getHealthData(r);
@@ -193,7 +178,7 @@ const RELEASE_COLUMNS: Column<ReleaseWithOrg>[] = [
   },
   {
     header: "CRASH-FREE",
-    value: (r) => formatCrashFree(getHealthData(r)?.crashFreeSessions),
+    value: (r) => fmtCrashFree(getHealthData(r)?.crashFreeSessions),
     align: "right",
   },
   {

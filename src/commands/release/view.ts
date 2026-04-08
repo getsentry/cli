@@ -31,7 +31,7 @@ import { resolveOrg } from "../../lib/resolve-target.js";
 import { parseReleaseArg } from "./parse.js";
 
 /** Format a crash-free rate with color coding (green ≥ 99, yellow ≥ 95, red < 95). */
-function fmtCrashFree(value: number | null | undefined): string {
+export function fmtCrashFree(value: number | null | undefined): string {
   if (value === null || value === undefined) {
     return "—";
   }
