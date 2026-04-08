@@ -3,7 +3,6 @@ import * as Sentry from "@sentry/node-core/light";
 import {
   type ApplicationText,
   buildApplication,
-  buildRouteMap,
   text_en,
   UnexpectedPositionalError,
   UnsatisfiedPositionalError,
@@ -55,6 +54,7 @@ import {
 } from "./lib/errors.js";
 import { error as errorColor, warning } from "./lib/formatters/colors.js";
 import { isRouteMap, type RouteMap } from "./lib/introspect.js";
+import { buildRouteMap } from "./lib/route-map.js";
 
 /**
  * Plural alias → singular route name mapping.

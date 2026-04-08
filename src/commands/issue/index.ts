@@ -1,4 +1,4 @@
-import { buildRouteMap } from "@stricli/core";
+import { buildRouteMap } from "../../lib/route-map.js";
 import { eventsCommand } from "./events.js";
 import { explainCommand } from "./explain.js";
 import { listCommand } from "./list.js";
@@ -14,7 +14,6 @@ export const issueRoute = buildRouteMap({
     view: viewCommand,
   },
   defaultCommand: "view",
-  aliases: { show: "view" },
   docs: {
     brief: "Manage Sentry issues",
     fullDescription:
