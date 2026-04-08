@@ -341,32 +341,44 @@ let _subcommandsByRoute: Map<string, Set<string>> | undefined;
  * Lazily walks the Stricli route map on first call. Uses `require()` to break
  * the circular dependency: list-command → app → commands → list-command.
  */
+/** Entry shape returned by Stricli's getAllEntries() */
+type RouteEntry = {
+  name: { original: string };
+  aliases: readonly string[];
+  target: unknown;
+};
+
+/** Collect all subcommand names and aliases from a route group's children. */
+function collectChildNames(parent: {
+  getAllEntries: () => readonly RouteEntry[];
+}): Set<string> {
+  const names = new Set<string>();
+  for (const child of parent.getAllEntries()) {
+    names.add(child.name.original);
+    for (const alias of child.aliases) {
+      names.add(alias);
+    }
+  }
+  return names;
+}
+
 function getSubcommandsForRoute(routeName: string): Set<string> {
   if (!_subcommandsByRoute) {
     _subcommandsByRoute = new Map();
 
     const { routes } = require("../app.js") as {
-      routes: {
-        getAllEntries: () => readonly {
-          name: { original: string };
-          target: unknown;
-        }[];
-      };
+      routes: { getAllEntries: () => readonly RouteEntry[] };
     };
 
     for (const entry of routes.getAllEntries()) {
       const target = entry.target as unknown as Record<string, unknown>;
       if (typeof target?.getAllEntries === "function") {
-        const children = (
-          target.getAllEntries as () => readonly {
-            name: { original: string };
-          }[]
-        )();
-        const names = new Set<string>();
-        for (const child of children) {
-          names.add(child.name.original);
-        }
-        _subcommandsByRoute.set(entry.name.original, names);
+        _subcommandsByRoute.set(
+          entry.name.original,
+          collectChildNames(
+            target as { getAllEntries: () => readonly RouteEntry[] }
+          )
+        );
       }
     }
   }

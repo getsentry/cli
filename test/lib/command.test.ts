@@ -11,7 +11,6 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as Sentry from "@sentry/node-core/light";
 import {
   buildApplication,
-  buildRouteMap,
   type CommandContext,
   run,
   text_en,
@@ -28,6 +27,7 @@ import {
 import { OutputError } from "../../src/lib/errors.js";
 import { CommandOutput } from "../../src/lib/formatters/output.js";
 import { LOG_LEVEL_NAMES, logger, setLogLevel } from "../../src/lib/logger.js";
+import { buildRouteMap } from "../../src/lib/route-map.js";
 
 /** Minimal context for test commands */
 type TestContext = CommandContext & {

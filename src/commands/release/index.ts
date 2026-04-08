@@ -4,7 +4,7 @@
  * Route map for release management commands.
  */
 
-import { buildRouteMap } from "@stricli/core";
+import { buildRouteMap } from "../../lib/route-map.js";
 import { createCommand } from "./create.js";
 import { deleteCommand } from "./delete.js";
 import { deployCommand } from "./deploy.js";

@@ -1,4 +1,4 @@
-import { buildRouteMap } from "@stricli/core";
+import { buildRouteMap } from "../../lib/route-map.js";
 import { feedbackCommand } from "./feedback.js";
 import { fixCommand } from "./fix.js";
 import { setupCommand } from "./setup.js";

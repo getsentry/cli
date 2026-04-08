@@ -22,8 +22,8 @@
           "options": {
             "paths": {
               "@stricli/core": {
-                "importNames": ["buildCommand"],
-                "message": "Import buildCommand from '../lib/command.js' instead. The wrapper injects telemetry, --log-level, and --verbose."
+                "importNames": ["buildCommand", "buildRouteMap"],
+                "message": "Import buildCommand from '../lib/command.js' and buildRouteMap from '../lib/route-map.js' instead. The wrappers inject telemetry and standard subcommand aliases."
               }
             }
           }
@@ -89,8 +89,8 @@
       }
     },
     {
-      // command.ts is the canonical wrapper — it must import buildCommand from @stricli/core
-      "includes": ["src/lib/command.ts"],
+      // command.ts and route-map.ts are the canonical wrappers — they must import from @stricli/core
+      "includes": ["src/lib/command.ts", "src/lib/route-map.ts"],
       "linter": {
         "rules": {
           "style": {
@@ -111,8 +111,8 @@
               "options": {
                 "paths": {
                   "@stricli/core": {
-                    "importNames": ["buildCommand"],
-                    "message": "Import buildCommand from '../lib/command.js' instead. The wrapper injects telemetry, --log-level, and --verbose."
+                    "importNames": ["buildCommand", "buildRouteMap"],
+                    "message": "Import buildCommand from '../lib/command.js' and buildRouteMap from '../lib/route-map.js' instead. The wrappers inject telemetry and standard subcommand aliases."
                   },
                   "chalk": {
                     "message": "Use colorTag() from formatters/markdown.js for colored output. Raw chalk bypasses the plain-output pipeline (NO_COLOR, SENTRY_PLAIN_OUTPUT)."

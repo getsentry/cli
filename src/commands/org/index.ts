@@ -1,4 +1,4 @@
-import { buildRouteMap } from "@stricli/core";
+import { buildRouteMap } from "../../lib/route-map.js";
 import { listCommand } from "./list.js";
 import { viewCommand } from "./view.js";
 
@@ -8,7 +8,6 @@ export const orgRoute = buildRouteMap({
     view: viewCommand,
   },
   defaultCommand: "view",
-  aliases: { show: "view" },
   docs: {
     brief: "Work with Sentry organizations",
     fullDescription:
