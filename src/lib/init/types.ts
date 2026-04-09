@@ -69,16 +69,22 @@ export type RunCommandsPayload = {
   };
 };
 
+export type PatchEdit = {
+  oldString: string;
+  newString: string;
+};
+
+export type ApplyPatchsetPatch =
+  | { path: string; action: "create"; patch: string }
+  | { path: string; action: "modify"; edits: PatchEdit[] }
+  | { path: string; action: "delete"; patch?: string };
+
 export type ApplyPatchsetPayload = {
   type: "local-op";
   operation: "apply-patchset";
   cwd: string;
   params: {
-    patches: Array<{
-      path: string;
-      action: "create" | "modify" | "delete";
-      patch: string;
-    }>;
+    patches: ApplyPatchsetPatch[];
   };
 };
 

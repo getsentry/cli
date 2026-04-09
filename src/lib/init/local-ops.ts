@@ -26,7 +26,9 @@ import {
   MAX_OUTPUT_BYTES,
 } from "./constants.js";
 import { resolveOrgPrefetched } from "./prefetch.js";
+import { replace } from "./replacers.js";
 import type {
+  ApplyPatchsetPatch,
   ApplyPatchsetPayload,
   CreateSentryProjectPayload,
   DetectSentryPayload,
@@ -58,25 +60,6 @@ const DEFAULT_JSON_INDENT: JsonIndent = {
   replacer: Indenter.SPACE,
   length: 2,
 };
-
-/** Matches the first indented line in a string to detect whitespace style. */
-const INDENT_PATTERN = /^(\s+)/m;
-
-/**
- * Detect the indentation style of a JSON string by inspecting the first
- * indented line. Returns a default of 2 spaces if no indentation is found.
- */
-function detectJsonIndent(content: string): JsonIndent {
-  const match = content.match(INDENT_PATTERN);
-  if (!match?.[1]) {
-    return DEFAULT_JSON_INDENT;
-  }
-  const indent = match[1];
-  if (indent.includes("\t")) {
-    return { replacer: Indenter.TAB, length: indent.length };
-  }
-  return { replacer: Indenter.SPACE, length: indent.length };
-}
 
 /** Build the third argument for `JSON.stringify` from a `JsonIndent`. */
 function jsonIndentArg(indent: JsonIndent): string {
@@ -600,39 +583,59 @@ function applyPatchsetDryRun(payload: ApplyPatchsetPayload): LocalOpResult {
 }
 
 /**
- * Resolve the final file content for a patch, pretty-printing JSON files
- * to preserve readable formatting. For `modify` actions, the existing file's
- * indentation style is detected and preserved. For `create` actions, a default
- * of 2-space indentation is used.
+ * Resolve the final file content for a full-content patch (create only),
+ * pretty-printing JSON files to preserve readable formatting.
  */
-async function resolvePatchContent(
-  absPath: string,
-  patch: ApplyPatchsetPayload["params"]["patches"][number]
-): Promise<string> {
+function resolvePatchContent(patch: { path: string; patch: string }): string {
   if (!patch.path.endsWith(".json")) {
     return patch.patch;
-  }
-  if (patch.action === "modify") {
-    const existing = await fs.promises.readFile(absPath, "utf-8");
-    return prettyPrintJson(patch.patch, detectJsonIndent(existing));
   }
   return prettyPrintJson(patch.patch, DEFAULT_JSON_INDENT);
 }
 
-type Patch = ApplyPatchsetPayload["params"]["patches"][number];
-
 const VALID_PATCH_ACTIONS = new Set(["create", "modify", "delete"]);
 
-async function applySinglePatch(absPath: string, patch: Patch): Promise<void> {
+/**
+ * Apply edits (oldString/newString pairs) to a file using fuzzy matching.
+ * Edits are applied sequentially — each edit operates on the result of the
+ * previous one. Returns the final file content.
+ */
+async function applyEdits(
+  absPath: string,
+  filePath: string,
+  edits: Array<{ oldString: string; newString: string }>
+): Promise<string> {
+  let content = await fs.promises.readFile(absPath, "utf-8");
+
+  for (let i = 0; i < edits.length; i++) {
+    const edit = edits[i] as (typeof edits)[number];
+    try {
+      content = replace(content, edit.oldString, edit.newString);
+    } catch (err) {
+      throw new Error(
+        `Edit #${i + 1} failed on "${filePath}": ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  return content;
+}
+
+async function applySinglePatch(
+  absPath: string,
+  patch: ApplyPatchsetPatch
+): Promise<void> {
   switch (patch.action) {
     case "create": {
       await fs.promises.mkdir(path.dirname(absPath), { recursive: true });
-      const content = await resolvePatchContent(absPath, patch);
+      const content = resolvePatchContent(
+        patch as ApplyPatchsetPatch & { patch: string }
+      );
       await fs.promises.writeFile(absPath, content, "utf-8");
       break;
     }
     case "modify": {
-      const content = await resolvePatchContent(absPath, patch);
+      const content = await applyEdits(absPath, patch.path, patch.edits);
       await fs.promises.writeFile(absPath, content, "utf-8");
       break;
     }
