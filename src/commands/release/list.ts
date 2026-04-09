@@ -377,16 +377,44 @@ async function fetchReleasesForTarget(
 }
 
 /**
- * Sort releases by dateCreated descending (newest first).
- * Falls back to version string comparison when dates match.
+ * Build a comparator for client-side merge-sort of multi-project results.
+ *
+ * The API already returns per-project results in the requested sort order,
+ * so this mirrors the same ordering for the cross-project merge. All
+ * comparators sort descending (highest/newest first).
  */
-function sortByDateDesc(a: ReleaseWithOrg, b: ReleaseWithOrg): number {
-  const da = a.dateCreated ? new Date(a.dateCreated).getTime() : 0;
-  const db = b.dateCreated ? new Date(b.dateCreated).getTime() : 0;
-  if (da !== db) {
+function buildMergeSorter(
+  sort: ReleaseSortValue
+): (a: ReleaseWithOrg, b: ReleaseWithOrg) => number {
+  return (a, b) => {
+    const diff = getSortValue(b, sort) - getSortValue(a, sort);
+    if (diff !== 0) {
+      return diff;
+    }
+    // Tiebreak by dateCreated descending
+    const da = a.dateCreated ? new Date(a.dateCreated).getTime() : 0;
+    const db = b.dateCreated ? new Date(b.dateCreated).getTime() : 0;
     return db - da;
+  };
+}
+
+/** Extract the numeric value used for sorting from a release. */
+function getSortValue(r: ReleaseWithOrg, sort: ReleaseSortValue): number {
+  const h = getHealthData(r);
+  switch (sort) {
+    case "date":
+      return r.dateCreated ? new Date(r.dateCreated).getTime() : 0;
+    case "sessions":
+      return h?.totalSessions24h ?? 0;
+    case "users":
+      return h?.totalUsers24h ?? 0;
+    case "crash_free_sessions":
+      return h?.crashFreeSessions ?? -1;
+    case "crash_free_users":
+      return h?.crashFreeUsers ?? -1;
+    default:
+      return r.dateCreated ? new Date(r.dateCreated).getTime() : 0;
   }
-  return (b.version ?? "").localeCompare(a.version ?? "");
 }
 
 /**
@@ -396,7 +424,8 @@ function sortByDateDesc(a: ReleaseWithOrg, b: ReleaseWithOrg): number {
  */
 function trimWithProjectGuarantee(
   items: ReleaseWithOrg[],
-  limit: number
+  limit: number,
+  comparator: (a: ReleaseWithOrg, b: ReleaseWithOrg) => number
 ): ReleaseWithOrg[] {
   if (items.length <= limit) {
     return items;
@@ -421,7 +450,7 @@ function trimWithProjectGuarantee(
   // Fill remaining slots from rest (already in sorted order)
   const filler = rest.slice(0, limit - guaranteed.length);
   // Merge and re-sort to maintain date order
-  return [...guaranteed, ...filler].sort(sortByDateDesc);
+  return [...guaranteed, ...filler].sort(comparator);
 }
 
 /**
@@ -462,10 +491,13 @@ async function handleAutoDetectWithProject(
   );
   const merged = results.flat();
 
-  // Client-side sort and trim with project guarantee
-  merged.sort(sortByDateDesc);
+  // Client-side sort matching the --sort flag, then trim with project guarantee
+  const comparator = buildMergeSorter(
+    (effectiveExtra.sort as ReleaseSortValue) ?? "date"
+  );
+  merged.sort(comparator);
   const limited = isMultiProject
-    ? trimWithProjectGuarantee(merged, flags.limit)
+    ? trimWithProjectGuarantee(merged, flags.limit, comparator)
     : merged.slice(0, flags.limit);
 
   const hintParts: string[] = [];
