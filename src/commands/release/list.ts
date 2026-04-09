@@ -711,16 +711,14 @@ export const listCommand = buildListCommand("release", {
       },
     });
     yield new CommandOutput(result);
-    const hintParts: string[] = [];
-    if (result.hint) {
-      hintParts.push(result.hint);
-    }
+    // Only return the env hint here — result.hint is already rendered
+    // by formatListHuman (for empty results) or as the header (for non-empty).
+    // Returning it again would duplicate the text.
     if (resolvedExtra.environment && !envFilter) {
-      hintParts.push(
-        `Environment: ${resolvedExtra.environment.join(", ")} (use -e to change)`
-      );
+      return {
+        hint: `Environment: ${resolvedExtra.environment.join(", ")} (use -e to change)`,
+      };
     }
-    const hint = hintParts.length > 0 ? hintParts.join("\n") : undefined;
-    return { hint };
+    return { hint: result.hint };
   },
 });
