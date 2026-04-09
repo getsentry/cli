@@ -11,6 +11,7 @@ import { join } from "node:path";
 import {
   buildCacheKey,
   clearResponseCache,
+  disableResponseCache,
   getCachedResponse,
   normalizeUrl,
   resetCacheState,
@@ -261,6 +262,75 @@ describe("cache bypass", () => {
 
     const cached = await getCachedResponse(TEST_METHOD, TEST_URL, {});
     expect(cached).toBeUndefined();
+  });
+
+  test("--fresh bypasses cache reads", async () => {
+    await storeCachedResponse(
+      TEST_METHOD,
+      TEST_URL,
+      {},
+      mockResponse(TEST_BODY)
+    );
+
+    disableResponseCache();
+
+    const cached = await getCachedResponse(TEST_METHOD, TEST_URL, {});
+    expect(cached).toBeUndefined();
+  });
+
+  test("--fresh still allows cache writes", async () => {
+    disableResponseCache();
+
+    const freshBody = { data: "fresh" };
+    await storeCachedResponse(
+      TEST_METHOD,
+      TEST_URL,
+      {},
+      mockResponse(freshBody)
+    );
+
+    // Re-enable cache reads to verify the write succeeded
+    resetCacheState();
+
+    const cached = await getCachedResponse(TEST_METHOD, TEST_URL, {});
+    expect(cached).toBeDefined();
+    expect(await cached!.json()).toEqual(freshBody);
+  });
+
+  test("--fresh round-trip: stale entry is replaced by fresh response", async () => {
+    const staleBody = { data: "stale" };
+    const freshBody = { data: "fresh" };
+
+    // Store initial stale entry
+    await storeCachedResponse(
+      TEST_METHOD,
+      TEST_URL,
+      {},
+      mockResponse(staleBody)
+    );
+
+    // Activate --fresh: reads are bypassed, but writes still go through
+    disableResponseCache();
+
+    // Verify stale entry is not served
+    const duringFresh = await getCachedResponse(TEST_METHOD, TEST_URL, {});
+    expect(duringFresh).toBeUndefined();
+
+    // Store fresh response (overwrites the stale entry)
+    await storeCachedResponse(
+      TEST_METHOD,
+      TEST_URL,
+      {},
+      mockResponse(freshBody)
+    );
+
+    // Re-enable cache reads (simulates next invocation without --fresh)
+    resetCacheState();
+
+    // Verify fresh data is served from cache
+    const afterFresh = await getCachedResponse(TEST_METHOD, TEST_URL, {});
+    expect(afterFresh).toBeDefined();
+    expect(await afterFresh!.json()).toEqual(freshBody);
   });
 });
 
