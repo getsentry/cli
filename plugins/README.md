@@ -81,10 +81,10 @@ The SKILL.md file is **auto-generated** from the CLI's command definitions. Do n
 To regenerate after modifying commands:
 
 ```bash
-bun run generate:skill
+bun run generate:docs
 ```
 
-CI will fail if SKILL.md is out of date and post a comment with the required changes.
+CI will auto-commit updated skill files when they are stale.
 
 ## License
 
