@@ -222,6 +222,69 @@ describe("injectDebugId", () => {
     expect(jsResult).toContain('console.log("hello")');
   });
 
+  test("skipSnippet: true skips IIFE but still appends debugId comment and mutates sourcemap", async () => {
+    const jsPath = join(tmpDir, "bundle.js");
+    const mapPath = join(tmpDir, "bundle.js.map");
+    const originalMappings = "AAAA;BACA";
+
+    await writeFile(jsPath, 'console.log("hello");\n');
+    await writeFile(
+      mapPath,
+      JSON.stringify({
+        version: 3,
+        sources: ["input.ts"],
+        mappings: originalMappings,
+      })
+    );
+
+    const { debugId } = await injectDebugId(jsPath, mapPath, {
+      skipSnippet: true,
+    });
+
+    // Debug ID should be a valid UUID v4
+    expect(debugId).toMatch(UUID_V4_RE);
+
+    // JS file should NOT have the IIFE snippet
+    const jsResult = await readFile(jsPath, "utf-8");
+    expect(jsResult).not.toContain("sentry-dbid-");
+    expect(jsResult).not.toContain("_sentryDebugIds");
+    // But should have the debugId comment
+    expect(jsResult).toContain(`//# debugId=${debugId}`);
+    // Original content should still be present
+    expect(jsResult).toContain('console.log("hello")');
+
+    // Sourcemap should have debugId fields
+    const mapResult = JSON.parse(await readFile(mapPath, "utf-8"));
+    expect(mapResult.debugId).toBe(debugId);
+    expect(mapResult.debug_id).toBe(debugId);
+    // Mappings should NOT have the extra `;` prefix (no snippet line added)
+    expect(mapResult.mappings).toBe(originalMappings);
+  });
+
+  test("skipSnippet: true is idempotent", async () => {
+    const jsPath = join(tmpDir, "bundle.js");
+    const mapPath = join(tmpDir, "bundle.js.map");
+
+    await writeFile(jsPath, 'console.log("hello");\n');
+    await writeFile(
+      mapPath,
+      JSON.stringify({
+        version: 3,
+        sources: ["input.ts"],
+        mappings: "AAAA",
+      })
+    );
+
+    const first = await injectDebugId(jsPath, mapPath, { skipSnippet: true });
+    const jsAfterFirst = await readFile(jsPath, "utf-8");
+
+    const second = await injectDebugId(jsPath, mapPath, { skipSnippet: true });
+    const jsAfterSecond = await readFile(jsPath, "utf-8");
+
+    expect(second.debugId).toBe(first.debugId);
+    expect(jsAfterSecond).toBe(jsAfterFirst);
+  });
+
   test("debug ID is deterministic based on sourcemap content", async () => {
     // Create two different JS files with the same sourcemap content
     const jsPath1 = join(tmpDir, "a.js");

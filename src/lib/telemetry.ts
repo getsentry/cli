@@ -367,6 +367,54 @@ export function initSentry(
   const libraryMode = options?.libraryMode ?? false;
   const environment = getCliEnvironment();
 
+  /**
+   * Ensure frame paths are absolute so Sentry's symbolicator can match them.
+   *
+   * Bun compiled binaries with `sourcemap: "linked"` produce relative
+   * paths like `"dist-bin/bin.js"` in `Error.stack`. The symbolicator's
+   * `get_release_file_candidate_urls` generates `"~dist-bin/bin.js"` for
+   * relative paths (missing the `/` after `~`), which never matches
+   * uploaded artifacts at `"~/dist-bin/bin.js"`. Prepending `/` makes
+   * the candidate `"~/dist-bin/bin.js"` — a match.
+   */
+  /** True if the path is relative (no leading `/`, no scheme, not `native`). */
+  function isRelativePath(p: string): boolean {
+    if (p.startsWith("/") || p === "native") {
+      return false;
+    }
+    return !p.includes("://");
+  }
+
+  function ensureAbsolute(p: string): string {
+    return isRelativePath(p) ? `/${p}` : p;
+  }
+
+  function normalizeExceptionFrames(event: Sentry.ErrorEvent): void {
+    for (const exc of event.exception?.values ?? []) {
+      for (const frame of exc.stacktrace?.frames ?? []) {
+        if (frame.abs_path) {
+          frame.abs_path = ensureAbsolute(frame.abs_path);
+        }
+        if (frame.filename) {
+          frame.filename = ensureAbsolute(frame.filename);
+        }
+      }
+    }
+  }
+
+  function normalizeDebugImages(event: Sentry.ErrorEvent): void {
+    for (const img of event.debug_meta?.images ?? []) {
+      if ("code_file" in img && typeof img.code_file === "string") {
+        img.code_file = ensureAbsolute(img.code_file);
+      }
+    }
+  }
+
+  function normalizeFramePaths(event: Sentry.ErrorEvent): void {
+    normalizeExceptionFrames(event);
+    normalizeDebugImages(event);
+  }
+
   // Close the previous client to clean up its internal timers and beforeExit
   // handlers (client report flusher interval, log flush listener). Without
   // this, re-initializing the SDK (e.g., in tests) leaks setInterval handles
@@ -433,6 +481,13 @@ export function initSentry(
       if (isEpipeError(event)) {
         return null;
       }
+
+      // Normalize relative frame paths to absolute. Bun's compiled binaries
+      // with sourcemap: "linked" produce relative paths like "dist-bin/bin.js"
+      // in Error.stack. Sentry's symbolicator only matches absolute paths
+      // when generating tilde-prefixed URL candidates (e.g., "~/dist-bin/bin.js"),
+      // silently skipping resolution for relative paths.
+      normalizeFramePaths(event);
 
       return event;
     },

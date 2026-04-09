@@ -3,7 +3,7 @@ import { unlink } from "node:fs/promises";
 import { build, type Plugin } from "esbuild";
 import pkg from "../package.json";
 import { uploadSourcemaps } from "../src/lib/api/sourcemaps.js";
-import { injectDebugId } from "./debug-id.js";
+import { injectDebugId, PLACEHOLDER_DEBUG_ID } from "./debug-id.js";
 
 const VERSION = pkg.version;
 const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
@@ -67,7 +67,9 @@ async function injectDebugIdsForOutputs(
   for (const jsPath of jsFiles) {
     const mapPath = `${jsPath}.map`;
     try {
-      const { debugId } = await injectDebugId(jsPath, mapPath);
+      const { debugId } = await injectDebugId(jsPath, mapPath, {
+        skipSnippet: true,
+      });
       injected.push({ jsPath, mapPath, debugId });
       console.log(`  Debug ID injected: ${debugId}`);
     } catch (err) {
@@ -151,6 +153,16 @@ const sentrySourcemapPlugin: Plugin = {
         return;
       }
 
+      // Replace the placeholder UUID with the real debug ID in each JS output.
+      // Both are 36-char UUIDs so sourcemap character positions stay valid.
+      for (const { jsPath, debugId } of injected) {
+        const content = await Bun.file(jsPath).text();
+        await Bun.write(
+          jsPath,
+          content.split(PLACEHOLDER_DEBUG_ID).join(debugId)
+        );
+      }
+
       if (!process.env.SENTRY_AUTH_TOKEN) {
         return;
       }
@@ -194,6 +206,7 @@ const result = await build({
     SENTRY_CLI_VERSION: JSON.stringify(VERSION),
     SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
     "process.env.NODE_ENV": JSON.stringify("production"),
+    __SENTRY_DEBUG_ID__: JSON.stringify(PLACEHOLDER_DEBUG_ID),
     // Replace import.meta.url with the injected shim variable for CJS
     "import.meta.url": "import_meta_url",
   },
