@@ -688,12 +688,12 @@ jobs:
           bun install --frozen-lockfile
           bun run build
       - name: Upload sourcemaps to Sentry
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && env.SENTRY_AUTH_TOKEN != ''
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: |
-          npx sentry sourcemap inject docs/dist/
-          npx sentry sourcemap upload docs/dist/ \
+          bun run --bun src/bin.ts sourcemap inject docs/dist/
+          bun run --bun src/bin.ts sourcemap upload docs/dist/ \
             --release "${{ steps.version.outputs.version }}" \
             --url-prefix "~/" \
             sentry/cli-website
