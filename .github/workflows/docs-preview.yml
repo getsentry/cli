@@ -49,15 +49,14 @@ jobs:
           bun install --frozen-lockfile
           bun run build
 
-      - name: Inject debug IDs
-        run: bun run --bun src/bin.ts sourcemap inject docs/dist/
-      - name: Upload sourcemaps to Sentry
+      - name: Inject debug IDs and upload sourcemaps
         if: env.SENTRY_AUTH_TOKEN != ''
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: sentry
           SENTRY_PROJECT: cli-website
         run: |
+          bun run --bun src/bin.ts sourcemap inject docs/dist/
           bun run --bun src/bin.ts sourcemap upload docs/dist/ \
             --release "${{ steps.version.outputs.version }}" \
             --url-prefix "~/"

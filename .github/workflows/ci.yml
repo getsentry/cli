@@ -694,18 +694,17 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run build
-      # Inject debug IDs into the built JS files BEFORE packaging.
-      # This ensures deployed files have the //# debugId= comment and the
-      # _sentryDebugIds IIFE so runtime events carry debug_meta.
-      - name: Inject debug IDs
-        run: ./dist-bin/sentry-linux-x64 sourcemap inject docs/dist/
-      - name: Upload sourcemaps to Sentry
-        if: github.event_name == 'push'
+      # Inject debug IDs and upload sourcemaps. The inject step adds
+      # //# debugId= and the _sentryDebugIds IIFE to deployed JS files.
+      # Both steps require SENTRY_AUTH_TOKEN (the CLI checks auth on startup).
+      - name: Inject debug IDs and upload sourcemaps
+        if: github.event_name == 'push' && env.SENTRY_AUTH_TOKEN != ''
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: sentry
           SENTRY_PROJECT: cli-website
         run: |
+          ./dist-bin/sentry-linux-x64 sourcemap inject docs/dist/
           ./dist-bin/sentry-linux-x64 sourcemap upload docs/dist/ \
             --release "${{ steps.version.outputs.version }}" \
             --url-prefix "~/"
