@@ -531,11 +531,15 @@ export function initSentry(
     if (agent) {
       Sentry.setTag("agent", agent);
     } else {
-      detectAgentFromProcessTree().then((processAgent) => {
-        if (processAgent) {
-          Sentry.setTag("agent", processAgent);
-        }
-      });
+      detectAgentFromProcessTree()
+        .then((processAgent) => {
+          if (processAgent) {
+            Sentry.setTag("agent", processAgent);
+          }
+        })
+        .catch(() => {
+          // Best-effort — swallow errors silently
+        });
     }
 
     // Wire up consola → Sentry log forwarding now that the client is active
