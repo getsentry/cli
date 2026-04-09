@@ -31,6 +31,10 @@ jobs:
       - if: steps.cache.outputs.cache-hit != 'true'
         run: bun install --frozen-lockfile
 
+      - name: Get CLI version
+        id: version
+        run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+
       - name: Generate docs content
         run: bun run generate:schema && bun run generate:docs
 
@@ -39,9 +43,21 @@ jobs:
         env:
           # Override base path for PR preview (no /cli prefix since preview domain is different)
           DOCS_BASE_PATH: /pr-preview/pr-${{ github.event.pull_request.number }}
+          PUBLIC_SENTRY_ENVIRONMENT: staging
+          SENTRY_RELEASE: ${{ steps.version.outputs.version }}
         run: |
           bun install --frozen-lockfile
           bun run build
+
+      - name: Upload sourcemaps to Sentry
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          npx sentry sourcemap inject docs/dist/
+          npx sentry sourcemap upload docs/dist/ \
+            --release "${{ steps.version.outputs.version }}" \
+            --url-prefix "~/" \
+            sentry/cli-website
 
       - name: Ensure .nojekyll at gh-pages root
         run: |

@@ -674,13 +674,29 @@ jobs:
           key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: bun install --frozen-lockfile
+      - name: Get CLI version
+        id: version
+        run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
       - name: Generate docs content
         run: bun run generate:schema && bun run generate:docs
       - name: Build Docs
         working-directory: docs
+        env:
+          PUBLIC_SENTRY_ENVIRONMENT: production
+          SENTRY_RELEASE: ${{ steps.version.outputs.version }}
         run: |
           bun install --frozen-lockfile
           bun run build
+      - name: Upload sourcemaps to Sentry
+        if: github.event_name == 'push'
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          npx sentry sourcemap inject docs/dist/
+          npx sentry sourcemap upload docs/dist/ \
+            --release "${{ steps.version.outputs.version }}" \
+            --url-prefix "~/" \
+            sentry/cli-website
       - name: Package Docs
         run: |
           cp .nojekyll docs/dist/

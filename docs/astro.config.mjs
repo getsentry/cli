@@ -5,20 +5,33 @@ import { defineConfig } from "astro/config";
 // Allow base path override via environment variable for PR previews
 const base = process.env.DOCS_BASE_PATH || "/";
 
+// Release name from CI (root package.json version). Undefined in local dev.
+const release = process.env.SENTRY_RELEASE;
+
 export default defineConfig({
   site: "https://cli.sentry.dev",
   base,
   markdown: {
     smartypants: false,
   },
+  // Generate sourcemaps for Sentry. "hidden" produces .map files without
+  // adding //# sourceMappingURL comments to the output (the debug IDs
+  // injected post-build by `sentry sourcemap inject` are used instead).
+  vite: {
+    build: {
+      sourcemap: "hidden",
+    },
+  },
   integrations: [
     sentry({
       project: "cli-website",
       org: "sentry",
-      authToken: process.env.SENTRY_AUTH_TOKEN,
-      sourceMapsUploadOptions: {
-        enabled: !!process.env.SENTRY_AUTH_TOKEN,
-      },
+      environment: process.env.PUBLIC_SENTRY_ENVIRONMENT ?? "development",
+      release: release ? { name: release } : undefined,
+      // Disable the plugin's sourcemap upload — it pulls in @sentry/cli
+      // (20+ MB binary download). We use our own CLI post-build instead
+      // (see CI workflow: `sentry sourcemap inject` + `sentry sourcemap upload`).
+      sourceMapsUploadOptions: { enabled: false },
     }),
     starlight({
       title: "Sentry CLI",

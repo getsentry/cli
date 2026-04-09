@@ -2,6 +2,7 @@ import * as Sentry from "@sentry/astro";
 
 Sentry.init({
   dsn: "https://2aca5fe97c71868bc3aa7fb48620dc39@o1.ingest.us.sentry.io/4510798755856384",
+  environment: import.meta.env.PUBLIC_SENTRY_ENVIRONMENT ?? "development",
   sendDefaultPii: true,
   integrations: [
     Sentry.browserTracingIntegration(),
