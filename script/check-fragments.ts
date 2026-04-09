@@ -12,10 +12,21 @@
  *   bun run script/check-fragments.ts
  */
 
-import { readdirSync } from "node:fs";
-import { routes } from "../src/app.js";
+import { mkdirSync, readdirSync } from "node:fs";
 import type { RouteMap } from "../src/lib/introspect.js";
-import { extractAllRoutes } from "../src/lib/introspect.js";
+
+// Ensure skill-content stub exists (see generate-command-docs.ts for rationale)
+const SKILL_CONTENT_PATH = "src/generated/skill-content.ts";
+if (!(await Bun.file(SKILL_CONTENT_PATH).exists())) {
+  mkdirSync("src/generated", { recursive: true });
+  await Bun.write(
+    SKILL_CONTENT_PATH,
+    "export const SKILL_FILES: [string, string][] = [];\n"
+  );
+}
+
+const { routes } = await import("../src/app.js");
+const { extractAllRoutes } = await import("../src/lib/introspect.js");
 
 const FRAGMENTS_DIR = "docs/src/fragments/commands";
 const GENERATED_END_MARKER = "<!-- GENERATED:END -->";
