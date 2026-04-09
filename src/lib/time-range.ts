@@ -59,15 +59,21 @@ const UNIT_SECONDS: Record<string, number> = {
 const PERIOD_UNITS = new Set(Object.keys(UNIT_SECONDS));
 
 /**
- * Dynamic example dates relative to "today" so examples never look stale.
- * Computed once at module load.
+ * Example dates for --period help text, snapped to the 1st of the month so
+ * they only change ~12×/year instead of daily. Keeps examples looking current
+ * without causing constant regeneration churn in committed skill files.
  */
 const EXAMPLE_START = (() => {
   const d = new Date();
+  d.setDate(1);
   d.setMonth(d.getMonth() - 1);
   return d.toISOString().slice(0, 10);
 })();
-const EXAMPLE_END = new Date().toISOString().slice(0, 10);
+const EXAMPLE_END = (() => {
+  const d = new Date();
+  d.setDate(1);
+  return d.toISOString().slice(0, 10);
+})();
 
 /** Brief text for --period flag help, shared across commands */
 export const PERIOD_BRIEF = `Time range: "7d", "${EXAMPLE_START}..${EXAMPLE_END}", ">=${EXAMPLE_START}"`;

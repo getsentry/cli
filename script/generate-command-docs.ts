@@ -6,11 +6,12 @@
  * pages for the documentation website. Flags, arguments, and aliases are
  * extracted directly from source code, preventing documentation drift.
  *
- * Each page has two sections separated by a marker comment:
- *   1. Auto-generated reference (above marker) — flags, args, descriptions
- *   2. Hand-written custom content (below marker) — examples, guides, tips
+ * Each generated page combines:
+ *   1. Auto-generated reference — flags, args, descriptions (from CLI metadata)
+ *   2. Hand-written fragment — examples, guides, tips (from docs/src/fragments/commands/)
  *
- * Custom content below the marker is preserved across regeneration.
+ * The generated output is gitignored. Fragment files are the committed
+ * source of truth for custom content.
  *
  * Usage:
  *   bun run script/generate-command-docs.ts
@@ -20,7 +21,7 @@
  *   docs/src/content/docs/commands/index.md   (commands overview table)
  */
 
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { routes } from "../src/app.js";
 import type {
   CommandInfo,
@@ -32,6 +33,7 @@ import type {
 import { extractAllRoutes } from "../src/lib/introspect.js";
 
 const DOCS_DIR = "docs/src/content/docs/commands";
+const FRAGMENTS_DIR = "docs/src/fragments/commands";
 const INDEX_PATH = `${DOCS_DIR}/index.md`;
 
 /**
@@ -264,21 +266,18 @@ function generateCommandsTable(allRoutes: RouteInfo[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// Custom Content Preservation
+// Custom Content (Fragment Files)
 // ---------------------------------------------------------------------------
 
 /**
- * Read existing custom content from below the GENERATED:END marker.
- * Returns empty string if no marker found or file doesn't exist.
+ * Read hand-written custom content from a fragment file.
+ * Fragment files live in docs/src/fragments/commands/ and contain only
+ * the custom sections (examples, guides) — no frontmatter or generated content.
+ * Returns empty string if the fragment file doesn't exist.
  */
-async function readCustomContent(filePath: string): Promise<string> {
+async function readCustomContent(fragmentName: string): Promise<string> {
   try {
-    const content = await Bun.file(filePath).text();
-    const markerIndex = content.indexOf(GENERATED_END_MARKER);
-    if (markerIndex === -1) {
-      return "";
-    }
-    return content.slice(markerIndex + GENERATED_END_MARKER.length);
+    return await Bun.file(`${FRAGMENTS_DIR}/${fragmentName}.md`).text();
   } catch {
     return "";
   }
@@ -295,6 +294,9 @@ const routeInfos = extractAllRoutes(routeMap).filter(
 
 const generatedFiles: string[] = [];
 
+// Ensure output directory exists (it's gitignored, may be absent on fresh checkout)
+mkdirSync(DOCS_DIR, { recursive: true });
+
 // Clean up legacy cli/ subdirectory if it exists (we now use cli.md)
 try {
   rmSync(`${DOCS_DIR}/cli`, { recursive: true, force: true });
@@ -306,7 +308,7 @@ try {
 for (const route of routeInfos) {
   const filePath = `${DOCS_DIR}/${route.name}.md`;
   const pageContent = generatePage(route);
-  const customContent = await readCustomContent(filePath);
+  const customContent = await readCustomContent(route.name);
   const fullContent = customContent
     ? pageContent + customContent
     : `${pageContent}\n`;
@@ -316,7 +318,7 @@ for (const route of routeInfos) {
 }
 
 // Update commands/index.md
-const indexCustomContent = await readCustomContent(INDEX_PATH);
+const indexCustomContent = await readCustomContent("index");
 const indexLines: string[] = [];
 indexLines.push("---");
 indexLines.push("title: Commands");

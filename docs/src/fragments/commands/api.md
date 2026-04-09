@@ -1,39 +1,4 @@
----
-title: api
-description: API command for the Sentry CLI
----
 
-Make an authenticated API request
-
-## Usage
-
-### `sentry api <endpoint>`
-
-Make an authenticated API request
-
-**Arguments:**
-
-| Argument | Description |
-|----------|-------------|
-| `<endpoint>` | API endpoint relative to /api/0/ (e.g., organizations/) |
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `-X, --method <method>` | The HTTP method for the request (default: "GET") |
-| `-d, --data <data>` | Inline JSON body for the request (like curl -d) |
-| `-F, --field <field>...` | Add a typed parameter (key=value, key[sub]=value, key[]=value) |
-| `-f, --raw-field <raw-field>...` | Add a string parameter without JSON parsing |
-| `-H, --header <header>...` | Add a HTTP request header in key:value format |
-| `--input <input>` | The file to use as body for the HTTP request (use "-" to read from standard input) |
-| `--silent` | Do not print the response body |
-| `--verbose` | Include full HTTP request and response in the output |
-| `-n, --dry-run` | Show the resolved request without sending it |
-
-All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
-
-<!-- GENERATED:END -->
 
 ## Examples
 

@@ -42,8 +42,8 @@ jobs:
             skill:
               - 'src/**'
               - 'docs/**'
-              - 'plugins/**'
               - 'script/generate-skill.ts'
+              - 'script/generate-command-docs.ts'
               - 'script/eval-skill.ts'
               - 'test/skill-eval/**'
             code:
@@ -88,8 +88,8 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Nightly version: ${VERSION}"
 
-  check-skill:
-    name: Check skill files
+  check-generated:
+    name: Validate generated files
     needs: [changes]
     if: needs.changes.outputs.skill == 'true'
     runs-on: ubuntu-latest
@@ -116,25 +116,30 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Generate API Schema
         run: bun run generate:schema
+      - name: Generate docs and skill files
+        run: bun run generate:docs
+      - name: Validate fragments
+        run: bun run check:fragments
       - name: Check skill files
         id: check-skill
-        run: bun run check:skill
-        continue-on-error: true
-      - name: Check command docs
-        id: check-docs
-        run: bun run check:command-docs
-        continue-on-error: true
-      - name: Auto-commit regenerated files
-        if: (steps.check-skill.outcome == 'failure' || steps.check-docs.outcome == 'failure') && steps.token.outcome == 'success'
+        run: |
+          if git diff --quiet plugins/sentry-cli/skills/sentry-cli/; then
+            echo "Skill files are up to date"
+          else
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            echo "Skill files are out of date"
+          fi
+      - name: Auto-commit regenerated skill files
+        if: steps.check-skill.outputs.stale == 'true' && steps.token.outcome == 'success'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add plugins/sentry-cli/skills/sentry-cli/ docs/public/.well-known/skills/index.json docs/src/content/docs/commands/
-          git diff --cached --quiet || (git commit -m "chore: regenerate skill files and command docs" && git push)
-      - name: Fail for fork PRs with stale generated files
-        if: (steps.check-skill.outcome == 'failure' || steps.check-docs.outcome == 'failure') && steps.token.outcome != 'success'
+          git add plugins/sentry-cli/skills/sentry-cli/
+          git diff --cached --quiet || (git commit -m "chore: regenerate skill files" && git push)
+      - name: Fail for fork PRs with stale skill files
+        if: steps.check-skill.outputs.stale == 'true' && steps.token.outcome != 'success'
         run: |
-          echo "::error::Generated files are out of date. Run 'bun run generate:skill' and 'bun run generate:command-docs' locally and commit the result."
+          echo "::error::Skill files are out of date. Run 'bun run generate:docs' locally and commit the result."
           exit 1
 
   eval-skill:
@@ -177,6 +182,9 @@ jobs:
           key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
       - if: steps.detect-fork.outputs.is_fork != 'true' && steps.cache.outputs.cache-hit != 'true'
         run: bun install --frozen-lockfile
+      - name: Generate docs and skill files
+        if: steps.detect-fork.outputs.is_fork != 'true'
+        run: bun run generate:schema && bun run generate:docs
       - name: Eval SKILL.md
         if: steps.detect-fork.outputs.is_fork != 'true'
         run: bun run eval:skill
@@ -659,6 +667,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v5
+        id: cache
+        with:
+          path: node_modules
+          key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bun install --frozen-lockfile
+      - name: Generate docs content
+        run: bun run generate:schema && bun run generate:docs
       - name: Build Docs
         working-directory: docs
         run: |
@@ -677,7 +694,7 @@ jobs:
   ci-status:
     name: CI Status
     if: always()
-    needs: [changes, check-skill, eval-skill, build-binary, build-npm, build-docs, test-e2e, generate-patches, publish-nightly]
+    needs: [changes, check-generated, eval-skill, build-binary, build-npm, build-docs, test-e2e, generate-patches, publish-nightly]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
@@ -685,7 +702,7 @@ jobs:
         run: |
           # Check for explicit failures or cancellations in all jobs
           # generate-patches and publish-nightly are skipped on PRs — that's expected
-          results="${{ needs.check-skill.result }} ${{ needs.eval-skill.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.generate-patches.result }} ${{ needs.publish-nightly.result }}"
+          results="${{ needs.check-generated.result }} ${{ needs.eval-skill.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.generate-patches.result }} ${{ needs.publish-nightly.result }}"
           for result in $results; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               echo "::error::CI failed"
@@ -699,8 +716,8 @@ jobs:
             echo "::error::CI failed - upstream job failed causing test-e2e to be skipped"
             exit 1
           fi
-          if [[ "${{ needs.changes.outputs.skill }}" == "true" && "${{ needs.check-skill.result }}" == "skipped" ]]; then
-            echo "::error::CI failed - upstream job failed causing check-skill to be skipped"
+          if [[ "${{ needs.changes.outputs.skill }}" == "true" && "${{ needs.check-generated.result }}" == "skipped" ]]; then
+            echo "::error::CI failed - upstream job failed causing check-generated to be skipped"
             exit 1
           fi
           if [[ "${{ needs.changes.outputs.skill }}" == "true" && "${{ needs.eval-skill.result }}" == "skipped" ]]; then
