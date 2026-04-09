@@ -1,0 +1,129 @@
+# Fix #691: Dashboard widget auto-placer — add `--layout` flag
+
+## Problem
+
+`assignDefaultLayout()` uses greedy gap-filling (first-fit, top-down scan). For automation workflows that add widgets sequentially, small widgets get wedged into gaps beside taller charts, producing broken layouts. But gap-filling is sometimes desirable for compact dashboards.
+
+## Solution: `--layout` / `-l` flag with two modes
+
+| Mode | Behavior | When to use |
+|------|----------|-------------|
+| `sequential` **(default)** | Cursor-based append — place after last widget, wrap to new row on overflow. Never backfills interior gaps. | Automation, sequential `widget add` calls |
+| `dense` | Current gap-filling — first-fit scan from (0,0). Compact layout. | When you want widgets packed tightly |
+
+## Files to modify
+
+### 1. `src/types/dashboard.ts`
+
+**Add type** near layout constants (~line 608):
+
+```typescript
+/** Controls how the auto-placer positions new widgets in the grid */
+export type WidgetLayoutMode = "sequential" | "dense";
+```
+
+**Extract current scan loop** into a private `assignLayoutDense()` helper (keeps the existing first-fit logic).
+
+**Add private `assignLayoutSequential()`** — cursor-based logic:
+- Reverse-scan `existingWidgets` for last widget with a layout
+- Cursor = `(last.x + last.w, last.y)`
+- If cursor fits (within grid + `regionFits`): place there
+- Otherwise: `(0, maxY)` — new row below everything
+
+**Update `assignDefaultLayout()` signature** to accept optional `mode`:
+
+```typescript
+export function assignDefaultLayout(
+  widget: DashboardWidget,
+  existingWidgets: DashboardWidget[],
+  mode: WidgetLayoutMode = "sequential"
+): DashboardWidget
+```
+
+Delegates to `assignLayoutSequential` or `assignLayoutDense` based on mode. Early-returns if widget already has a layout (unchanged).
+
+### 2. `src/commands/dashboard/widget/add.ts`
+
+**Add `layout` flag** to `parameters.flags`:
+
+```typescript
+layout: {
+  kind: "parsed",
+  parse: String,
+  brief: "Layout mode: sequential (append in order) or dense (fill gaps)",
+  default: "sequential",
+},
+```
+
+**Add alias** `l: "layout"`.
+
+**Update `AddFlags`** to include `readonly layout: string`.
+
+**Validate** the flag value early (before network calls), reject anything other than `"sequential"` or `"dense"`.
+
+**Pass mode** to `assignDefaultLayout()`:
+
+```typescript
+newWidget = assignDefaultLayout(newWidget, updateBody.widgets, flags.layout as WidgetLayoutMode);
+```
+
+### 3. `test/types/dashboard.test.ts`
+
+**Rename** existing test: "finds first gap" → "places after last widget on same row"
+
+**Add tests** in the `assignDefaultLayout` describe block:
+
+Sequential mode (default):
+- Three sequential same-size widgets fill a row left-to-right
+- Wraps to new row when cursor overflows grid width
+- **Does NOT backfill gap beside taller widget** (core regression test)
+- Table (6x2) forces next widget to new row
+- All existing widgets lack layouts → place at (0,0)
+- Last widget has no layout but earlier one does → uses earlier as cursor
+- Cursor overlaps manually-placed widget → falls back to below
+
+Dense mode:
+- Fills gap beside taller widget (preserves old behavior)
+- Finds first available gap top-to-bottom
+
+Both modes:
+- Unknown displayType uses fallback size 3×2
+
+### 4. `test/types/dashboard.property.test.ts` — new file
+
+Property-based tests using `fast-check`. Invariants for **both** modes:
+
+| Property | Description |
+|----------|-------------|
+| Grid bounds | `x ≥ 0`, `y ≥ 0`, `x + w ≤ 6` |
+| No overlap | Placed widget never overlaps any existing widget |
+| Idempotency | Widget with layout returns unchanged regardless of mode |
+
+Sequential-only property:
+
+| Property | Description |
+|----------|-------------|
+| Monotonic y | Sequential placements have non-decreasing y-coordinates |
+
+### 5. `test/commands/dashboard/widget/add.test.ts`
+
+Add tests for `--layout` flag:
+- `--layout dense` passes dense mode through
+- Default (no flag) uses sequential mode
+- `--layout invalid` rejects with ValidationError
+
+## No changes needed
+
+- `buildOccupiedGrid()`, `regionFits()` — used by both modes, unchanged
+- `validateWidgetLayout()` — independent validation, unchanged
+- `widget edit` — widgets already have layouts, auto-placer not invoked
+
+## Verification
+
+```bash
+bun test test/types/dashboard.test.ts
+bun test test/types/dashboard.property.test.ts
+bun test test/commands/dashboard/widget/add.test.ts
+bun run typecheck
+bun run lint
+```
