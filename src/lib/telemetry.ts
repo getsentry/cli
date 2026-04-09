@@ -22,7 +22,7 @@ import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
 import { detectAgent, detectAgentFromProcessTree } from "./detect-agent.js";
 import { getEnv } from "./env.js";
 import { ApiError, AuthError, OutputError } from "./errors.js";
-import { attachSentryReporter } from "./logger.js";
+import { attachSentryReporter, logger } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 import { getRealUsername } from "./utils.js";
 
@@ -537,8 +537,8 @@ export function initSentry(
             Sentry.setTag("agent", processAgent);
           }
         })
-        .catch(() => {
-          // Best-effort — swallow errors silently
+        .catch((error) => {
+          logger.withTag("agent").warn("Process tree detection failed:", error);
         });
     }
 

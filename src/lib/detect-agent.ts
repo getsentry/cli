@@ -200,7 +200,7 @@ export async function getProcessInfoFromOS(
   // macOS / other Unix: use ps(1) asynchronously
   if (process.platform !== "win32") {
     try {
-      const result = await execFilePromise(
+      const result = await execFileUnreffed(
         "ps",
         ["-p", String(pid), "-o", "ppid=,comm="],
         { timeout: 500 }
@@ -215,19 +215,28 @@ export async function getProcessInfoFromOS(
   }
 }
 
-/** Promisified `execFile` — resolves with stdout, rejects on error/timeout. */
-function execFilePromise(
+/**
+ * Spawn `execFile` with the child process unreffed so it never
+ * prevents the CLI from exiting. Resolves with stdout on success.
+ */
+function execFileUnreffed(
   cmd: string,
   args: readonly string[],
   opts: { timeout?: number }
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { encoding: "utf-8", ...opts }, (err, stdout) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(stdout);
+    const child = execFile(
+      cmd,
+      args,
+      { encoding: "utf-8", ...opts },
+      (err, stdout) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(stdout);
+        }
       }
-    });
+    );
+    child.unref();
   });
 }
