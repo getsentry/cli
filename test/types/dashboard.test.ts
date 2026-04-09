@@ -594,7 +594,7 @@ describe("assignDefaultLayout", () => {
     expect(result.layout!.h).toBe(1);
   });
 
-  test("widget in partially filled grid finds first gap", () => {
+  test("places after last widget on same row (default sequential mode)", () => {
     const existing: DashboardWidget[] = [
       {
         title: "Existing",
@@ -608,9 +608,194 @@ describe("assignDefaultLayout", () => {
     };
     const result = assignDefaultLayout(widget, existing);
     expect(result.layout).toBeDefined();
-    // Should be placed after the existing widget, not overlapping
+    // Cursor from last widget: (0+2, 0) = (2, 0)
     expect(result.layout!.x).toBe(2);
     expect(result.layout!.y).toBe(0);
+  });
+
+  // -- Sequential mode tests -----------------------------------------------
+
+  test("sequential: three same-size widgets fill a row left-to-right", () => {
+    const existing: DashboardWidget[] = [
+      {
+        title: "A",
+        displayType: "big_number",
+        layout: { x: 0, y: 0, w: 2, h: 1 },
+      },
+      {
+        title: "B",
+        displayType: "big_number",
+        layout: { x: 2, y: 0, w: 2, h: 1 },
+      },
+    ];
+    const result = assignDefaultLayout(
+      { title: "C", displayType: "big_number" },
+      existing
+    );
+    expect(result.layout).toMatchObject({ x: 4, y: 0, w: 2, h: 1 });
+  });
+
+  test("sequential: wraps to new row when cursor overflows grid width", () => {
+    const existing: DashboardWidget[] = [
+      {
+        title: "A",
+        displayType: "line",
+        layout: { x: 0, y: 0, w: 3, h: 2 },
+      },
+      {
+        title: "B",
+        displayType: "line",
+        layout: { x: 3, y: 0, w: 3, h: 2 },
+      },
+    ];
+    const result = assignDefaultLayout(
+      { title: "C", displayType: "line" },
+      existing
+    );
+    // cursor=(6,0) → 6+3=9 > 6, overflow → (0, 2)
+    expect(result.layout).toMatchObject({ x: 0, y: 2, w: 3, h: 2 });
+  });
+
+  test("sequential: does NOT backfill gap beside taller widget", () => {
+    const existing: DashboardWidget[] = [
+      {
+        title: "Chart",
+        displayType: "line",
+        layout: { x: 0, y: 0, w: 4, h: 2 },
+      },
+      {
+        title: "KPI-1",
+        displayType: "big_number",
+        layout: { x: 4, y: 0, w: 2, h: 1 },
+      },
+    ];
+    const result = assignDefaultLayout(
+      { title: "KPI-2", displayType: "big_number" },
+      existing
+    );
+    // Old greedy algorithm would place at (4,1) — the gap beside the line chart.
+    // Sequential mode wraps to below everything instead.
+    expect(result.layout).toMatchObject({ x: 0, y: 2 });
+  });
+
+  test("sequential: table (6x2) forces next widget to new row", () => {
+    const existing: DashboardWidget[] = [
+      {
+        title: "Table",
+        displayType: "table",
+        layout: { x: 0, y: 0, w: 6, h: 2 },
+      },
+    ];
+    const result = assignDefaultLayout(
+      { title: "Chart", displayType: "line" },
+      existing
+    );
+    // cursor=(6,0) → 6+3=9 > 6, overflow → (0, 2)
+    expect(result.layout).toMatchObject({ x: 0, y: 2, w: 3, h: 2 });
+  });
+
+  test("sequential: all existing widgets lack layouts → place at (0, 0)", () => {
+    const existing: DashboardWidget[] = [
+      { title: "No Layout 1", displayType: "line" },
+      { title: "No Layout 2", displayType: "bar" },
+    ];
+    const result = assignDefaultLayout(
+      { title: "New", displayType: "big_number" },
+      existing
+    );
+    expect(result.layout).toMatchObject({ x: 0, y: 0, w: 2, h: 1 });
+  });
+
+  test("sequential: uses earlier widget when last has no layout", () => {
+    const existing: DashboardWidget[] = [
+      {
+        title: "Has Layout",
+        displayType: "big_number",
+        layout: { x: 0, y: 0, w: 2, h: 1 },
+      },
+      { title: "No Layout", displayType: "line" },
+    ];
+    const result = assignDefaultLayout(
+      { title: "New", displayType: "big_number" },
+      existing
+    );
+    // Last with layout is at (0,0) w=2, cursor=(2,0)
+    expect(result.layout).toMatchObject({ x: 2, y: 0, w: 2, h: 1 });
+  });
+
+  test("sequential: cursor overlaps manually-placed widget → falls back to below", () => {
+    // B at (4,0) was placed before A in the array, simulating manual rearrangement.
+    // Last widget with layout = A at (0,0) w=3 → cursor = (3, 0).
+    // New big_number (2x1) at (3,0) would need (3,0) and (4,0).
+    // (4,0) is occupied by B → regionFits fails → fallback to (0, maxY=2).
+    const existing: DashboardWidget[] = [
+      {
+        title: "B",
+        displayType: "big_number",
+        layout: { x: 4, y: 0, w: 2, h: 2 },
+      },
+      {
+        title: "A",
+        displayType: "line",
+        layout: { x: 0, y: 0, w: 3, h: 2 },
+      },
+    ];
+    const result = assignDefaultLayout(
+      { title: "New", displayType: "big_number" },
+      existing
+    );
+    expect(result.layout).toMatchObject({ x: 0, y: 2 });
+  });
+
+  // -- Dense mode tests ----------------------------------------------------
+
+  test("dense: fills gap beside taller widget", () => {
+    const existing: DashboardWidget[] = [
+      {
+        title: "Chart",
+        displayType: "line",
+        layout: { x: 0, y: 0, w: 4, h: 2 },
+      },
+      {
+        title: "KPI-1",
+        displayType: "big_number",
+        layout: { x: 4, y: 0, w: 2, h: 1 },
+      },
+    ];
+    const result = assignDefaultLayout(
+      { title: "KPI-2", displayType: "big_number" },
+      existing,
+      "dense"
+    );
+    // Dense mode finds the gap at (4,1) beside the line chart
+    expect(result.layout).toMatchObject({ x: 4, y: 1, w: 2, h: 1 });
+  });
+
+  test("dense: finds first available gap top-to-bottom", () => {
+    const existing: DashboardWidget[] = [
+      {
+        title: "A",
+        displayType: "big_number",
+        layout: { x: 0, y: 0, w: 2, h: 1 },
+      },
+    ];
+    const result = assignDefaultLayout(
+      { title: "B", displayType: "big_number" },
+      existing,
+      "dense"
+    );
+    // First gap is at (2,0)
+    expect(result.layout).toMatchObject({ x: 2, y: 0 });
+  });
+
+  // -- Shared behavior tests -----------------------------------------------
+
+  test("unknown displayType uses fallback size 3x2", () => {
+    const result = assignDefaultLayout(
+      { title: "Custom", displayType: "some_future_type" } as DashboardWidget,
+      []
+    );
+    expect(result.layout).toMatchObject({ x: 0, y: 0, w: 3, h: 2 });
   });
 });
 

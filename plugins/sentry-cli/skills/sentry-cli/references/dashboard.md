@@ -86,6 +86,7 @@ Add a widget to a dashboard
 - `--y <value> - Grid row position (0-based)`
 - `--width <value> - Widget width in grid columns (1–6)`
 - `--height <value> - Widget height in grid rows (min 1)`
+- `-l, --layout <value> - Layout mode: sequential (append in order) or dense (fill gaps) - (default: "sequential")`
 
 **Examples:**
 

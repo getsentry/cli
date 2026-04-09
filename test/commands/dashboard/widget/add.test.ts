@@ -491,4 +491,68 @@ describe("dashboard widget add", () => {
     const addedWidget = body.widgets.at(-1);
     expect(addedWidget.queries[0].orderby).toBe("-count()");
   });
+
+  // -- Layout mode flag tests -----------------------------------------------
+
+  test("--layout dense passes dense mode to auto-placer", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      { json: false, display: "big_number", query: ["count"], layout: "dense" },
+      "123",
+      "Dense Widget"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    // Existing widgets: big_number at (0,0,2,1) and table at (2,0,4,2).
+    // Dense mode finds the first gap. The gap at (0,1) fits a 2x1 big_number.
+    expect(addedWidget.layout.x).toBe(0);
+    expect(addedWidget.layout.y).toBe(1);
+  });
+
+  test("--layout sequential (default) uses sequential placement", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "big_number",
+        query: ["count"],
+        layout: "sequential",
+      },
+      "123",
+      "Sequential Widget"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    // Existing widgets: big_number at (0,0,2,1) and table at (2,0,4,2).
+    // Last widget is table at x=2,w=4 → cursor=(6,0) → 6+2=8 > 6 → wrap to (0,2).
+    expect(addedWidget.layout.x).toBe(0);
+    expect(addedWidget.layout.y).toBe(2);
+  });
+
+  test("--layout invalid rejects with ValidationError", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    const err = await func
+      .call(
+        context,
+        {
+          json: false,
+          display: "big_number",
+          query: ["count"],
+          layout: "invalid",
+        },
+        "123",
+        "Bad Layout"
+      )
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect((err as ValidationError).message).toContain("--layout");
+  });
 });

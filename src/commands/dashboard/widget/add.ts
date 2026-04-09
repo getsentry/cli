@@ -20,6 +20,7 @@ import {
   prepareDashboardForUpdate,
   validateWidgetLayout,
   type WidgetLayoutFlags,
+  type WidgetLayoutMode,
 } from "../../../types/dashboard.js";
 import {
   buildWidgetFromFlags,
@@ -34,6 +35,7 @@ import {
 type AddFlags = WidgetQueryFlags &
   WidgetLayoutFlags & {
     readonly display: string;
+    readonly layout: string;
     readonly json: boolean;
     readonly fields?: string[];
   };
@@ -178,6 +180,12 @@ export const addCommand = buildCommand({
         brief: "Widget height in grid rows (min 1)",
         optional: true,
       },
+      layout: {
+        kind: "parsed",
+        parse: String,
+        brief: "Layout mode: sequential (append in order) or dense (fill gaps)",
+        default: "sequential",
+      },
     },
     aliases: {
       d: "display",
@@ -186,6 +194,7 @@ export const addCommand = buildCommand({
       g: "group-by",
       s: "sort",
       n: "limit",
+      l: "layout",
     },
   },
   async *func(this: SentryContext, flags: AddFlags, ...args: string[]) {
@@ -217,6 +226,20 @@ export const addCommand = buildCommand({
       limit: flags.limit,
     });
 
+    // Validate layout mode before any network calls
+    const layoutMode: WidgetLayoutMode =
+      flags.layout === "dense" ? "dense" : "sequential";
+    if (
+      flags.layout &&
+      flags.layout !== "sequential" &&
+      flags.layout !== "dense"
+    ) {
+      throw new ValidationError(
+        `Invalid --layout mode "${flags.layout}". Valid values: sequential, dense`,
+        "layout"
+      );
+    }
+
     // Validate individual layout flag ranges before any network calls
     // (catches --x -1, --width 7, etc. early without needing the dashboard)
     validateWidgetLayout(flags);
@@ -230,7 +253,7 @@ export const addCommand = buildCommand({
 
     // Always run auto-layout first to get default position and dimensions,
     // then override with any explicit user flags.
-    newWidget = assignDefaultLayout(newWidget, updateBody.widgets);
+    newWidget = assignDefaultLayout(newWidget, updateBody.widgets, layoutMode);
 
     const hasExplicitLayout =
       flags.x !== undefined ||
