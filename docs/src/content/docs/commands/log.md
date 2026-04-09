@@ -24,7 +24,7 @@ List logs from a project
 | `-n, --limit <limit>` | Number of log entries (1-1000) (default: "100") |
 | `-q, --query <query>` | Filter query (Sentry search syntax) |
 | `-f, --follow <follow>` | Stream logs (optionally specify poll interval in seconds) |
-| `-t, --period <period>` | Time range: "7d", "2026-03-08..2026-04-08", ">=2026-03-08" |
+| `-t, --period <period>` | Time range: "7d", "2026-03-09..2026-04-09", ">=2026-03-09" |
 | `-s, --sort <sort>` | Sort order: "newest" (default) or "oldest" (default: "newest") |
 | `--fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 
