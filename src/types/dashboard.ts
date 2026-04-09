@@ -995,7 +995,7 @@ export type WidgetDataResult =
 /**
  * Maps widget types to API dataset parameter values.
  *
- * Widget types that don't map to a dataset (issue, tracemetrics, etc.)
+ * Widget types that don't map to a dataset (issue, preprod-app-size, etc.)
  * return null and are rendered as "unsupported".
  */
 const WIDGET_TYPE_TO_DATASET: Record<string, string> = {
@@ -1004,6 +1004,7 @@ const WIDGET_TYPE_TO_DATASET: Record<string, string> = {
   "error-events": "errors",
   "transaction-like": "transactions",
   logs: "logs",
+  tracemetrics: "metricsEnhanced",
 };
 
 /**
