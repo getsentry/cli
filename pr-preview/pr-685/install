@@ -280,7 +280,8 @@ trap - EXIT
 "$tmp_binary" cli setup $setup_args
 
 # Optionally launch the setup wizard after install.
-# The binary reopens /dev/tty itself for interactive prompts.
+# Reconnect stdin to the real terminal so the wizard can prompt
+# interactively — when piped (curl | bash), stdin is the pipe.
 if [[ "${SENTRY_INIT:-}" == "1" ]]; then
   sentry_bin=""
   for dir in "${SENTRY_INSTALL_DIR:-}" "$HOME/.local/bin" "$HOME/bin" "$HOME/.sentry/bin"; do
@@ -292,5 +293,5 @@ if [[ "${SENTRY_INIT:-}" == "1" ]]; then
   if [[ -z "$sentry_bin" ]]; then
     die "Cannot find installed sentry binary" "init"
   fi
-  "$sentry_bin" init
+  exec "$sentry_bin" init </dev/tty
 fi
