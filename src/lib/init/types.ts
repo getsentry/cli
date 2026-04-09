@@ -27,6 +27,8 @@ export type LocalOpPayload =
   | FileExistsBatchPayload
   | RunCommandsPayload
   | ApplyPatchsetPayload
+  | GrepPayload
+  | GlobPayload
   | CreateSentryProjectPayload
   | DetectSentryPayload;
 
@@ -68,6 +70,33 @@ export type RunCommandsPayload = {
   params: {
     commands: string[];
     timeoutMs?: number;
+  };
+};
+
+export type GrepSearch = {
+  pattern: string;
+  path?: string;
+  include?: string;
+};
+
+export type GrepPayload = {
+  type: "local-op";
+  operation: "grep";
+  cwd: string;
+  params: {
+    searches: GrepSearch[];
+    maxResultsPerSearch?: number;
+  };
+};
+
+export type GlobPayload = {
+  type: "local-op";
+  operation: "glob";
+  cwd: string;
+  params: {
+    patterns: string[];
+    path?: string;
+    maxResults?: number;
   };
 };
 

@@ -16,6 +16,8 @@ import {
 import type {
   ApplyPatchsetPayload,
   FileExistsBatchPayload,
+  GlobPayload,
+  GrepPayload,
   ListDirPayload,
   LocalOpPayload,
   ReadFilesPayload,
@@ -1261,5 +1263,230 @@ describe("precomputeDirListing", () => {
     const entries = await precomputeDirListing(testDir);
     const paths = entries.map((e) => e.path);
     expect(paths).toContain(join("a", "nested.ts"));
+  });
+});
+
+describe("grep", () => {
+  let testDir: string;
+  let options: WizardOptions;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join("/tmp", "grep-test-"));
+    options = makeOptions({ directory: testDir });
+    writeFileSync(
+      join(testDir, "app.ts"),
+      'import * as Sentry from "@sentry/node";\nSentry.init({ dsn: "..." });\n'
+    );
+    writeFileSync(
+      join(testDir, "utils.ts"),
+      "export function helper() { return 1; }\n"
+    );
+    mkdirSync(join(testDir, "src"));
+    writeFileSync(
+      join(testDir, "src", "index.ts"),
+      'import { helper } from "./utils";\nSentry.init({});\n'
+    );
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  test("finds matches for a single pattern", async () => {
+    const payload: GrepPayload = {
+      type: "local-op",
+      operation: "grep",
+      cwd: testDir,
+      params: {
+        searches: [{ pattern: "Sentry\\.init" }],
+      },
+    };
+
+    const result = await handleLocalOp(payload, options);
+    expect(result.ok).toBe(true);
+    const data = result.data as {
+      results: Array<{
+        pattern: string;
+        matches: Array<{ path: string; lineNum: number; line: string }>;
+        truncated: boolean;
+      }>;
+    };
+    expect(data.results).toHaveLength(1);
+    expect(data.results[0].matches.length).toBeGreaterThanOrEqual(2);
+    expect(data.results[0].truncated).toBe(false);
+  });
+
+  test("supports multiple search patterns in one call", async () => {
+    const payload: GrepPayload = {
+      type: "local-op",
+      operation: "grep",
+      cwd: testDir,
+      params: {
+        searches: [{ pattern: "@sentry/node" }, { pattern: "helper" }],
+      },
+    };
+
+    const result = await handleLocalOp(payload, options);
+    expect(result.ok).toBe(true);
+    const data = result.data as {
+      results: Array<{ pattern: string; matches: unknown[] }>;
+    };
+    expect(data.results).toHaveLength(2);
+    expect(data.results[0].pattern).toBe("@sentry/node");
+    expect(data.results[0].matches.length).toBeGreaterThanOrEqual(1);
+    expect(data.results[1].pattern).toBe("helper");
+    expect(data.results[1].matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("supports include glob filter", async () => {
+    const payload: GrepPayload = {
+      type: "local-op",
+      operation: "grep",
+      cwd: testDir,
+      params: {
+        searches: [{ pattern: "Sentry", include: "app.*" }],
+      },
+    };
+
+    const result = await handleLocalOp(payload, options);
+    expect(result.ok).toBe(true);
+    const data = result.data as {
+      results: Array<{ matches: Array<{ path: string }> }>;
+    };
+    for (const match of data.results[0].matches) {
+      expect(match.path).toContain("app");
+    }
+  });
+
+  test("returns empty matches for non-matching pattern", async () => {
+    const payload: GrepPayload = {
+      type: "local-op",
+      operation: "grep",
+      cwd: testDir,
+      params: {
+        searches: [{ pattern: "nonexistent_string_xyz" }],
+      },
+    };
+
+    const result = await handleLocalOp(payload, options);
+    expect(result.ok).toBe(true);
+    const data = result.data as { results: Array<{ matches: unknown[] }> };
+    expect(data.results[0].matches).toHaveLength(0);
+  });
+
+  test("returns paths relative to cwd when searching a subdirectory", async () => {
+    const payload: GrepPayload = {
+      type: "local-op",
+      operation: "grep",
+      cwd: testDir,
+      params: {
+        searches: [{ pattern: "helper", path: "src" }],
+      },
+    };
+
+    const result = await handleLocalOp(payload, options);
+    expect(result.ok).toBe(true);
+    const data = result.data as {
+      results: Array<{
+        matches: Array<{ path: string; lineNum: number }>;
+      }>;
+    };
+    expect(data.results[0].matches.length).toBeGreaterThanOrEqual(1);
+    for (const match of data.results[0].matches) {
+      expect(match.path).toMatch(/^src\//);
+    }
+  });
+
+  test("respects path sandbox", async () => {
+    const payload: GrepPayload = {
+      type: "local-op",
+      operation: "grep",
+      cwd: testDir,
+      params: {
+        searches: [{ pattern: "test", path: "../../etc" }],
+      },
+    };
+
+    const result = await handleLocalOp(payload, options);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("outside project directory");
+  });
+});
+
+describe("glob", () => {
+  let testDir: string;
+  let options: WizardOptions;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join("/tmp", "glob-test-"));
+    options = makeOptions({ directory: testDir });
+    writeFileSync(join(testDir, "app.ts"), "x");
+    writeFileSync(join(testDir, "utils.ts"), "x");
+    writeFileSync(join(testDir, "config.json"), "{}");
+    mkdirSync(join(testDir, "src"));
+    writeFileSync(join(testDir, "src", "index.ts"), "x");
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  test("finds files matching a single pattern", async () => {
+    const payload: GlobPayload = {
+      type: "local-op",
+      operation: "glob",
+      cwd: testDir,
+      params: {
+        patterns: ["*.ts"],
+      },
+    };
+
+    const result = await handleLocalOp(payload, options);
+    expect(result.ok).toBe(true);
+    const data = result.data as {
+      results: Array<{ pattern: string; files: string[]; truncated: boolean }>;
+    };
+    expect(data.results).toHaveLength(1);
+    expect(data.results[0].files.length).toBeGreaterThanOrEqual(2);
+    expect(data.results[0].truncated).toBe(false);
+    for (const f of data.results[0].files) {
+      expect(f).toMatch(/\.ts$/);
+    }
+  });
+
+  test("supports multiple patterns in one call", async () => {
+    const payload: GlobPayload = {
+      type: "local-op",
+      operation: "glob",
+      cwd: testDir,
+      params: {
+        patterns: ["*.ts", "*.json"],
+      },
+    };
+
+    const result = await handleLocalOp(payload, options);
+    expect(result.ok).toBe(true);
+    const data = result.data as {
+      results: Array<{ pattern: string; files: string[] }>;
+    };
+    expect(data.results).toHaveLength(2);
+    expect(data.results[0].files.length).toBeGreaterThanOrEqual(2);
+    expect(data.results[1].files.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("returns empty for non-matching pattern", async () => {
+    const payload: GlobPayload = {
+      type: "local-op",
+      operation: "glob",
+      cwd: testDir,
+      params: {
+        patterns: ["*.xyz"],
+      },
+    };
+
+    const result = await handleLocalOp(payload, options);
+    expect(result.ok).toBe(true);
+    const data = result.data as { results: Array<{ files: string[] }> };
+    expect(data.results[0].files).toHaveLength(0);
   });
 });
