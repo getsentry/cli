@@ -140,9 +140,10 @@ describe("detectAgent", () => {
 
   // ── Replit ─────────────────────────────────────────────────────────
 
-  test("REPL_ID → replit", () => {
+  test("REPL_ID alone does not trigger detection (platform env, not agent signal)", () => {
+    withNoProcessTree();
     withEnv({ REPL_ID: "abc123" });
-    expect(detectAgent()).toBe("replit");
+    expect(detectAgent()).toBeUndefined();
   });
 
   // ── GitHub Copilot ─────────────────────────────────────────────────

@@ -38,8 +38,8 @@ export const ENV_VAR_AGENTS = new Map<string, string>([
   ["AUGMENT_AGENT", "augment"],
   // OpenCode
   ["OPENCODE_CLIENT", "opencode"],
-  // Replit
-  ["REPL_ID", "replit"],
+  // Replit — REPL_ID intentionally excluded because it's set in ALL Replit
+  // workspaces, not just when the AI agent is driving the CLI
   // GitHub Copilot — COPILOT_GITHUB_TOKEN intentionally excluded because
   // users may export it persistently for auth, causing false positives
   ["COPILOT_MODEL", "github-copilot"],
