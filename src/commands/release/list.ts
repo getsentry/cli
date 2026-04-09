@@ -46,7 +46,11 @@ import { fmtCrashFree } from "./view.js";
 
 export const PAGINATION_KEY = "release-list";
 
-type ReleaseWithOrg = OrgReleaseResponse & { orgSlug?: string };
+type ReleaseWithOrg = OrgReleaseResponse & {
+  orgSlug?: string;
+  /** Project slug when from multi-project auto-detect (for labeling). */
+  targetProject?: string;
+};
 
 // ---------------------------------------------------------------------------
 // Sort
@@ -167,45 +171,64 @@ function formatSessionSparkline(r: OrgReleaseResponse): string {
 // Column definitions
 // ---------------------------------------------------------------------------
 
-const RELEASE_COLUMNS: Column<ReleaseWithOrg>[] = [
-  { header: "ORG", value: (r) => r.orgSlug || "" },
-  {
-    header: "VERSION",
-    value: formatVersionCell,
-    shrinkable: false,
-  },
-  {
-    header: "ADOPTION",
-    value: (r) => formatAdoption(getHealthData(r)?.adoption),
-    align: "right",
-  },
-  {
-    header: "SESSIONS",
-    value: formatSessionSparkline,
-  },
-  {
-    header: "CRASH-FREE",
-    value: (r) => fmtCrashFree(getHealthData(r)?.crashFreeSessions),
-    align: "right",
-  },
-  {
-    header: "CRASHES",
-    value: (r) => {
-      const h = getHealthData(r);
-      const v = h?.sessionsCrashed;
-      if (v === undefined || v === null) {
-        return colorTag("muted", "—");
-      }
-      return v > 0 ? colorTag("red", String(v)) : colorTag("green", "0");
+/** Format the CRASHES cell: red when > 0, green when 0, muted dash when absent. */
+function formatCrashes(r: ReleaseWithOrg): string {
+  const h = getHealthData(r);
+  const v = h?.sessionsCrashed;
+  if (v === undefined || v === null) {
+    return colorTag("muted", "—");
+  }
+  return v > 0 ? colorTag("red", String(v)) : colorTag("green", "0");
+}
+
+/** Build columns for the release table. Includes PROJECT when multi-project. */
+function buildColumns(multiProject: boolean): Column<ReleaseWithOrg>[] {
+  const cols: Column<ReleaseWithOrg>[] = [
+    { header: "ORG", value: (r) => r.orgSlug || "" },
+  ];
+  if (multiProject) {
+    cols.push({
+      header: "PROJECT",
+      value: (r) =>
+        colorTag("muted", r.targetProject || r.projects?.[0]?.slug || ""),
+    });
+  }
+  cols.push(
+    {
+      header: "VERSION",
+      value: formatVersionCell,
+      shrinkable: false,
     },
-    align: "right",
-  },
-  {
-    header: "NEW ISSUES",
-    value: (r) => String(r.newGroups ?? 0),
-    align: "right",
-  },
-];
+    {
+      header: "ADOPTION",
+      value: (r) => formatAdoption(getHealthData(r)?.adoption),
+      align: "right",
+    },
+    {
+      header: "SESSIONS",
+      value: formatSessionSparkline,
+    },
+    {
+      header: "CRASH-FREE",
+      value: (r) => fmtCrashFree(getHealthData(r)?.crashFreeSessions),
+      align: "right",
+    },
+    {
+      header: "CRASHES",
+      value: formatCrashes,
+      align: "right",
+    },
+    {
+      header: "NEW ISSUES",
+      value: (r) => String(r.newGroups ?? 0),
+      align: "right",
+    }
+  );
+  return cols;
+}
+
+/** Default single-project columns. */
+const RELEASE_COLUMNS = buildColumns(false);
 
 /** Muted ANSI color for row separators (matches issue list). */
 const MUTED_ANSI = "\x1b[38;2;137;130;148m";
@@ -260,9 +283,12 @@ function formatListHuman(result: ListResult<ReleaseWithOrg>): string {
     return parts.join("\n");
   }
 
-  parts.push(
-    formatTable(result.items, RELEASE_COLUMNS, { rowSeparator: MUTED_ANSI })
-  );
+  // Detect multi-project from items and use appropriate columns
+  const projects = new Set(result.items.map((r) => r.targetProject || ""));
+  const isMulti = projects.size > 1 && !projects.has("");
+  const columns = isMulti ? buildColumns(true) : RELEASE_COLUMNS;
+
+  parts.push(formatTable(result.items, columns, { rowSeparator: MUTED_ANSI }));
 
   if (result.header) {
     parts.push(`\n${result.header}`);
@@ -330,109 +356,148 @@ async function resolveProjectIds(
 }
 
 /**
- * Fetch releases for a list of resolved targets, scoped by project ID.
- *
- * Each target contributes releases tagged with its org slug. Results are
- * merged and truncated to `limit`.
+ * Fetch releases for a single target, scoped by project ID.
+ * Tags each release with orgSlug and targetProject for labeling.
  */
-async function fetchReleasesForTargets(
-  config: OrgListConfig<OrgReleaseResponse, ReleaseWithOrg>,
-  targets: ResolvedTarget[],
+async function fetchReleasesForTarget(
+  t: ResolvedTarget,
   extra: ExtraApiOptions,
-  limit: number
+  perPage: number
 ): Promise<ReleaseWithOrg[]> {
-  const allItems: ReleaseWithOrg[] = [];
-  for (const t of targets) {
-    const ids = t.projectId
-      ? [t.projectId]
-      : await resolveProjectIds(t.org, t.project);
-    const { data } = await listReleasesPaginated(t.org, {
-      perPage: Math.min(limit, 100),
-      health: true,
-      project: ids,
-      ...extra,
-    });
-    for (const release of data) {
-      allItems.push(config.withOrg(release, t.org));
-    }
-  }
-  return allItems;
+  const ids = t.projectId
+    ? [t.projectId]
+    : await resolveProjectIds(t.org, t.project);
+  const { data } = await listReleasesPaginated(t.org, {
+    perPage,
+    health: true,
+    project: ids,
+    ...extra,
+  });
+  return data.map((r) => ({ ...r, orgSlug: t.org, targetProject: t.project }));
 }
 
 /**
- * Custom auto-detect handler that resolves DSN/config to a single project
- * target, then fetches releases scoped to that project.
+ * Sort releases by dateCreated descending (newest first).
+ * Falls back to version string comparison when dates match.
+ */
+function sortByDateDesc(a: ReleaseWithOrg, b: ReleaseWithOrg): number {
+  const da = a.dateCreated ? new Date(a.dateCreated).getTime() : 0;
+  const db = b.dateCreated ? new Date(b.dateCreated).getTime() : 0;
+  if (da !== db) {
+    return db - da;
+  }
+  return (b.version ?? "").localeCompare(a.version ?? "");
+}
+
+/**
+ * Trim merged results to `limit`, guaranteeing at least one release per
+ * project appears — so no project is invisible in the output.
+ * Follows the same pattern as `trimWithProjectGuarantee` in issue list.
+ */
+function trimWithProjectGuarantee(
+  items: ReleaseWithOrg[],
+  limit: number
+): ReleaseWithOrg[] {
+  if (items.length <= limit) {
+    return items;
+  }
+  const seenProjects = new Set<string>();
+  const guaranteed: ReleaseWithOrg[] = [];
+  const rest: ReleaseWithOrg[] = [];
+  // First pass: pick one representative per project
+  for (const item of items) {
+    const key = item.targetProject || item.orgSlug || "";
+    if (seenProjects.has(key)) {
+      rest.push(item);
+    } else {
+      seenProjects.add(key);
+      guaranteed.push(item);
+    }
+  }
+  // If guaranteed alone fills the limit, no room for extras
+  if (guaranteed.length >= limit) {
+    return guaranteed.slice(0, limit);
+  }
+  // Fill remaining slots from rest (already in sorted order)
+  const filler = rest.slice(0, limit - guaranteed.length);
+  // Merge and re-sort to maintain date order
+  return [...guaranteed, ...filler].sort(sortByDateDesc);
+}
+
+/**
+ * Custom auto-detect handler: resolves DSN/config to org+project targets,
+ * fetches releases from ALL detected projects in parallel, merges with
+ * client-side sort by dateCreated, and shows a PROJECT column when
+ * multiple projects contribute results.
  *
- * Uses only the **first** detected target (primary project). Unlike issue
- * list where each issue has a project-prefix short ID, release versions
- * are project-ambiguous — mixing releases from multiple detected projects
- * produces confusing, unsorted output.
+ * Follows the issue list pattern: fetch all, sort, trim with project
+ * guarantee (at least 1 release per project in output).
  *
  * When no `--environment` is given, auto-defaults to `production` or
- * `prod` if that environment exists on the detected project.
+ * `prod` if the primary project has that environment.
  */
 async function handleAutoDetectWithProject(
-  config: OrgListConfig<OrgReleaseResponse, ReleaseWithOrg>,
   extra: ExtraApiOptions,
   ctx: HandlerContext<"auto-detect">
 ): Promise<ListResult<ReleaseWithOrg>> {
   const { cwd, flags } = ctx;
   const resolved = await resolveAllTargets({ cwd });
   const unique = deduplicateTargets(resolved.targets);
-  const primary = unique[0];
 
-  if (!primary) {
+  if (unique.length === 0) {
     return {
       items: [],
       hint: "No project detected. Specify a target: sentry release list <org>/<project>",
     };
   }
 
-  // Smart default: auto-select production env when user omitted --environment
-  const effectiveExtra = { ...extra };
-  if (!effectiveExtra.environment) {
-    effectiveExtra.environment = await resolveDefaultEnvironment(
-      primary.org,
-      primary.project
-    );
-  }
+  // Smart env default from primary (highest-ranked) target
+  const effectiveExtra = await applySmartEnvDefault(extra, unique[0]);
+  const isMultiProject = unique.length > 1;
 
-  const allItems = await fetchReleasesForTargets(
-    config,
-    [primary],
-    effectiveExtra,
-    flags.limit
+  // Fetch from ALL targets in parallel, each scoped by project ID
+  const perTarget = Math.min(Math.ceil(flags.limit / unique.length), 100);
+  const results = await Promise.all(
+    unique.map((t) => fetchReleasesForTarget(t, effectiveExtra, perTarget))
   );
-  const limited = allItems.slice(0, flags.limit);
+  const merged = results.flat();
+
+  // Client-side sort and trim with project guarantee
+  merged.sort(sortByDateDesc);
+  const limited = isMultiProject
+    ? trimWithProjectGuarantee(merged, flags.limit)
+    : merged.slice(0, flags.limit);
 
   const hintParts: string[] = [];
   if (limited.length === 0) {
-    hintParts.push(`No releases found for ${primary.org}/${primary.project}.`);
+    const names = unique.map((t) => `${t.org}/${t.project}`).join(", ");
+    hintParts.push(`No releases found for ${names}.`);
   }
   if (resolved.footer) {
     hintParts.push(resolved.footer);
-  }
-  if (primary.detectedFrom) {
-    hintParts.push(
-      `Detected: ${primary.project} (from ${primary.detectedFrom})`
-    );
-  }
-  if (unique.length > 1) {
-    const others = unique
-      .slice(1)
-      .map((t) => t.project)
-      .join(", ");
-    hintParts.push(`Also detected: ${others} (use <org>/<project> to switch)`);
   }
   if (effectiveExtra.environment) {
     hintParts.push(
       `Environment: ${effectiveExtra.environment.join(", ")} (use -e to change)`
     );
   }
+
   return {
     items: limited,
     hint: hintParts.length > 0 ? hintParts.join("\n") : undefined,
   };
+}
+
+/** Apply smart production env default from the primary target. */
+async function applySmartEnvDefault(
+  extra: ExtraApiOptions,
+  primary?: ResolvedTarget
+): Promise<ExtraApiOptions> {
+  if (extra.environment || !primary) {
+    return extra;
+  }
+  const env = await resolveDefaultEnvironment(primary.org, primary.project);
+  return env ? { ...extra, environment: env } : extra;
 }
 
 // ---------------------------------------------------------------------------
@@ -580,7 +645,7 @@ export const listCommand = buildListCommand("release", {
       orgSlugMatchBehavior: "redirect",
       overrides: {
         "auto-detect": (ctx: HandlerContext<"auto-detect">) =>
-          handleAutoDetectWithProject(config, extra, ctx),
+          handleAutoDetectWithProject(extra, ctx),
       },
     });
     yield new CommandOutput(result);
