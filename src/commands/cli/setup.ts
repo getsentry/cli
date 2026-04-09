@@ -8,6 +8,7 @@
 
 import { existsSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { captureException } from "@sentry/node-core/light";
 import type { SentryContext } from "../../context.js";
 import { installAgentSkills } from "../../lib/agent-skills.js";
 import {
@@ -331,6 +332,10 @@ async function bestEffort(
     await fn();
   } catch (error) {
     warn(stepName, error);
+    captureException(error, {
+      level: "warning",
+      tags: { "setup.step": stepName },
+    });
   }
 }
 
