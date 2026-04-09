@@ -30,6 +30,11 @@ import {
 import { resolveOrg } from "../../lib/resolve-target.js";
 import { parseReleaseArg } from "./parse.js";
 
+/** Wrap a plain "—" in muted color for consistent table styling. */
+function mutedIfDash(value: string): string {
+  return value === "—" ? colorTag("muted", "—") : value;
+}
+
 /** Format a crash-free rate with color coding (green ≥ 99, yellow ≥ 95, red < 95). */
 export function fmtCrashFree(value: number | null | undefined): string {
   if (value === null || value === undefined) {
@@ -77,11 +82,11 @@ function formatProjectHealthTable(release: OrgReleaseResponse): string {
     const h = project.healthData;
     const cells = [
       escapeMarkdownCell(project.slug),
-      fmtPct(h?.adoption),
+      mutedIfDash(fmtPct(h?.adoption)),
       fmtCrashFree(h?.crashFreeUsers),
       fmtCrashFree(h?.crashFreeSessions),
-      fmtCount(h?.totalUsers24h),
-      fmtCount(h?.totalSessions24h),
+      mutedIfDash(fmtCount(h?.totalUsers24h)),
+      mutedIfDash(fmtCount(h?.totalSessions24h)),
     ];
     lines.push(`| ${cells.join(" | ")} |`);
   }

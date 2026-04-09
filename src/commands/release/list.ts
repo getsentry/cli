@@ -695,7 +695,7 @@ export const listCommand = buildListCommand("release", {
 
     // Smart env default: when no -e given and we know the project, check
     // if "production"/"prod" exists and auto-select it. Applies to explicit
-    // (org/project), project-search (bare slug), and auto-detect modes.
+    // (org/project) here; auto-detect handles its own default in the override.
     const resolvedExtra = await resolveEnvForParsedTarget(extra, parsed);
     const config = buildReleaseListConfig(resolvedExtra);
     const result = await dispatchOrgScopedList({
