@@ -24,51 +24,29 @@ jobs:
           gh api "repos/$REPO/issues/$PR/labels/eval-skill" -X DELETE 2>/dev/null || true
           gh api "repos/$REPO/issues/$PR/labels/eval-skill-passed" -X DELETE 2>/dev/null || true
 
-  eval:
-    name: Run skill eval
+  notify-manual-review:
+    name: Require manual review for fork PRs
     if: >-
       github.event.action == 'labeled'
       && github.event.label.name == 'eval-skill'
       && github.event.pull_request.head.repo.fork == true
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-
-      - uses: oven-sh/setup-bun@v2
-
-      - uses: actions/cache@v5
-        id: cache
-        with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
-      - if: steps.cache.outputs.cache-hit != 'true'
-        run: bun install --frozen-lockfile
-
-      - name: Eval SKILL.md
-        id: eval
-        run: bun run eval:skill
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        continue-on-error: true
+      # SECURITY: Do not checkout PR code in pull_request_target context.
+      # pull_request_target runs with write permissions and access to secrets,
+      # but checking out PR code would allow malicious PRs to exfiltrate secrets
+      # via modified dependencies or build scripts.
+      # See: https://securitylab.github.com/research/github-actions-preventing-pwn-requests/
 
       - name: Post commit status
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           SHA="${{ github.event.pull_request.head.sha }}"
-          if [[ "${{ steps.eval.outcome }}" == "success" ]]; then
-            STATE="success"
-            DESC="Skill eval passed"
-          else
-            STATE="failure"
-            DESC="Skill eval failed"
-          fi
           gh api "repos/${{ github.repository }}/statuses/$SHA" \
-            -f state="$STATE" \
+            -f state="pending" \
             -f context="eval-skill/fork" \
-            -f description="$DESC"
+            -f description="Manual review required for fork PRs (security restriction)"
 
       - name: Remove eval-skill label
         if: always()
@@ -78,20 +56,17 @@ jobs:
           gh api "repos/${{ github.repository }}/issues/${{ github.event.number }}/labels/eval-skill" \
             -X DELETE 2>/dev/null || true
 
-      # Use the SENTRY_RELEASE_BOT app token to add the label — app tokens
-      # can trigger workflow runs, unlike GITHUB_TOKEN (recursion protection).
-      - name: Get app token
-        id: token
-        if: steps.eval.outcome == 'success'
-        uses: actions/create-github-app-token@v3
-        with:
-          app-id: ${{ vars.SENTRY_RELEASE_BOT_CLIENT_ID }}
-          private-key: ${{ secrets.SENTRY_RELEASE_BOT_PRIVATE_KEY }}
-
-      - name: Add eval-skill-passed label (triggers main CI re-run)
-        if: steps.eval.outcome == 'success'
+      - name: Add comment with instructions
         env:
-          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          gh api "repos/${{ github.repository }}/issues/${{ github.event.number }}/labels" \
-            --input - <<< '{"labels":["eval-skill-passed"]}'
+          gh api "repos/${{ github.repository }}/issues/${{ github.event.number }}/comments" \
+            -f body="⚠️ **Security Notice**: Automated skill evaluation is disabled for fork PRs to prevent potential secret exfiltration.
+
+For security reasons, this workflow was updated to not execute untrusted code from fork PRs with access to repository secrets. A maintainer with write access can manually trigger the evaluation by:
+
+1. Checking out the PR branch locally
+2. Running \`bun run eval:skill\` with appropriate API credentials
+3. Reviewing the results and adding the \`eval-skill-passed\` label if successful
+
+See [GitHub Security Lab: Preventing pwn requests](https://securitylab.github.com/research/github-actions-preventing-pwn-requests/) for more information about this security issue."
