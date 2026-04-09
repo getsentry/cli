@@ -609,6 +609,16 @@ export function prepareWidgetQueries(
 /** Sentry dashboard grid column count */
 export const GRID_COLUMNS = 6;
 
+/**
+ * Controls how the auto-placer positions new widgets in the grid.
+ *
+ * - `sequential` — Cursor-based append: place after the last widget,
+ *   wrap to a new row on overflow. Never backfills interior gaps.
+ * - `dense` — First-fit packing: scan top-to-bottom, left-to-right
+ *   and place in the first available gap. Produces compact layouts.
+ */
+export type WidgetLayoutMode = "sequential" | "dense";
+
 /** Default widget dimensions by displayType */
 const DEFAULT_WIDGET_SIZE: Partial<
   Record<DisplayType, { w: number; h: number; minH: number }>
@@ -671,39 +681,112 @@ function regionFits(
   return true;
 }
 
+/** Grid state computed from existing widget layouts */
+type OccupiedGrid = { occupied: Set<string>; maxY: number };
+
+/** Widget dimensions resolved from displayType */
+type WidgetSize = { w: number; h: number; minH: number };
+
+/**
+ * Dense (first-fit) placement: scan the grid top-to-bottom, left-to-right
+ * and place the widget in the first gap where it fits.
+ */
+function assignLayoutDense(
+  widget: DashboardWidget,
+  size: WidgetSize,
+  grid: OccupiedGrid
+): DashboardWidget {
+  const { w, h, minH } = size;
+  for (let y = 0; y <= grid.maxY; y++) {
+    for (let x = 0; x <= GRID_COLUMNS - w; x++) {
+      if (regionFits(grid.occupied, { px: x, py: y, w, h })) {
+        return { ...widget, layout: { x, y, w, h, minH } };
+      }
+    }
+  }
+  return { ...widget, layout: { x: 0, y: grid.maxY, w, h, minH } };
+}
+
+/**
+ * Find the layout of the last widget in the array that has one.
+ * Reverse-scans because the API preserves insertion order.
+ */
+function findLastLayout(
+  widgets: DashboardWidget[]
+): DashboardWidgetLayout | undefined {
+  for (let i = widgets.length - 1; i >= 0; i--) {
+    const layout = widgets[i]?.layout;
+    if (layout) {
+      return layout;
+    }
+  }
+}
+
+/**
+ * Sequential (cursor-based) placement: place the widget immediately to the
+ * right of the last existing widget on the same row. When the row overflows
+ * or the position overlaps a manually-placed widget, wrap to a fresh row
+ * below all existing content.
+ */
+function assignLayoutSequential(
+  widget: DashboardWidget,
+  existingWidgets: DashboardWidget[],
+  size: WidgetSize,
+  grid: OccupiedGrid
+): DashboardWidget {
+  const { w, h, minH } = size;
+  const lastLayout = findLastLayout(existingWidgets);
+
+  if (lastLayout) {
+    const cursorX = lastLayout.x + lastLayout.w;
+    const cursorY = lastLayout.y;
+
+    // Place at cursor if it fits within the grid and doesn't overlap
+    if (
+      cursorX + w <= GRID_COLUMNS &&
+      regionFits(grid.occupied, { px: cursorX, py: cursorY, w, h })
+    ) {
+      return { ...widget, layout: { x: cursorX, y: cursorY, w, h, minH } };
+    }
+  }
+
+  // Wrap to a new row below all existing content
+  return { ...widget, layout: { x: 0, y: grid.maxY, w, h, minH } };
+}
+
 /**
  * Assign a default layout to a widget if it doesn't already have one.
- * Packs the widget into the first available space in a 6-column grid,
- * scanning rows top-to-bottom and left-to-right.
+ *
+ * Two placement modes are available:
+ * - `"sequential"` (default) — Cursor-based append: the widget is placed
+ *   immediately after the last existing widget, wrapping to a new row when
+ *   the current row overflows. Interior gaps are never backfilled.
+ * - `"dense"` — First-fit packing: the widget is placed in the first
+ *   available gap, scanning top-to-bottom and left-to-right.
  *
  * @param widget - Widget that may be missing a layout
  * @param existingWidgets - Widgets already in the dashboard (used to compute placement)
+ * @param mode - Layout strategy (`"sequential"` or `"dense"`)
  * @returns Widget with layout guaranteed
  */
 export function assignDefaultLayout(
   widget: DashboardWidget,
-  existingWidgets: DashboardWidget[]
+  existingWidgets: DashboardWidget[],
+  mode: WidgetLayoutMode = "sequential"
 ): DashboardWidget {
   if (widget.layout) {
     return widget;
   }
 
-  const { w, h, minH } =
+  const size =
     DEFAULT_WIDGET_SIZE[widget.displayType as DisplayType] ?? FALLBACK_SIZE;
+  const grid = buildOccupiedGrid(existingWidgets);
 
-  const { occupied, maxY } = buildOccupiedGrid(existingWidgets);
-
-  // Scan rows to find the first position where the widget fits
-  for (let y = 0; y <= maxY; y++) {
-    for (let x = 0; x <= GRID_COLUMNS - w; x++) {
-      if (regionFits(occupied, { px: x, py: y, w, h })) {
-        return { ...widget, layout: { x, y, w, h, minH } };
-      }
-    }
+  if (mode === "dense") {
+    return assignLayoutDense(widget, size, grid);
   }
 
-  // No gap found — place below everything
-  return { ...widget, layout: { x: 0, y: maxY, w, h, minH } };
+  return assignLayoutSequential(widget, existingWidgets, size, grid);
 }
 
 // ---------------------------------------------------------------------------
