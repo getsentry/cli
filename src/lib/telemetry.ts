@@ -19,9 +19,10 @@ import {
   SENTRY_CLI_DSN,
 } from "./constants.js";
 import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
+import { detectAgent, detectAgentFromProcessTree } from "./detect-agent.js";
 import { getEnv } from "./env.js";
 import { ApiError, AuthError, OutputError } from "./errors.js";
-import { attachSentryReporter } from "./logger.js";
+import { attachSentryReporter, logger } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 import { getRealUsername } from "./utils.js";
 
@@ -521,6 +522,25 @@ export function initSentry(
 
     // Tag whether running in an interactive terminal or agent/CI environment
     Sentry.setTag("is_tty", !!process.stdout.isTTY);
+
+    // Tag which AI agent (if any) is driving the CLI.
+    // Env var detection is sync (instant). If no env var matches, fire off
+    // async process tree detection in the background — it sets the tag
+    // before the transaction finishes without blocking CLI startup.
+    const agent = detectAgent();
+    if (agent) {
+      Sentry.setTag("agent", agent);
+    } else {
+      detectAgentFromProcessTree()
+        .then((processAgent) => {
+          if (processAgent) {
+            Sentry.setTag("agent", processAgent);
+          }
+        })
+        .catch((error) => {
+          logger.withTag("agent").warn("Process tree detection failed:", error);
+        });
+    }
 
     // Wire up consola → Sentry log forwarding now that the client is active
     attachSentryReporter();
