@@ -82,7 +82,7 @@ export default defineConfig({
                 const path = window.location.pathname;
                 // Works with both / (prod) and /pr-preview/pr-XX (preview)
                 return path === '/' || 
-                       /^\\/pr-preview\\/pr-\\d+\\/?$/.test(path);
+                       /^\\/_preview\\/pr-(\\d+|main)\\/?$/.test(path);
               }
               
               function checkAtBottom() {
