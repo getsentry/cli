@@ -8,9 +8,10 @@
  * Resolution priority (highest to lowest):
  * 1. Explicit CLI flags
  * 2. SENTRY_ORG / SENTRY_PROJECT environment variables
- * 3. Config defaults
- * 4. DSN auto-detection (source code, .env files, environment variables)
- * 5. Directory name inference (matches project slugs with word boundaries)
+ * 3. `.sentryclirc` config file (walked up from CWD, merged with global)
+ * 4. Config defaults (SQLite)
+ * 5. DSN auto-detection (source code, .env files, environment variables)
+ * 6. Directory name inference (matches project slugs with word boundaries)
  */
 
 import { basename } from "node:path";
@@ -52,6 +53,7 @@ import {
 import { fuzzyMatch } from "./fuzzy.js";
 import { logger } from "./logger.js";
 import { resolveEffectiveOrg } from "./region.js";
+import { CONFIG_FILENAME, loadSentryCliRc } from "./sentryclirc.js";
 import { setOrgProjectContext, withTracingSpan } from "./telemetry.js";
 import { isAllDigits } from "./utils.js";
 
@@ -755,9 +757,10 @@ async function resolveDsnsWithTimeout(
  * Resolution priority:
  * 1. Explicit org and project - returns single target
  * 2. SENTRY_ORG / SENTRY_PROJECT env vars - returns single target
- * 3. Config defaults - returns single target
- * 4. DSN auto-detection - may return multiple targets
- * 5. Directory name inference - matches project slugs with word boundaries
+ * 3. `.sentryclirc` config file - returns single target
+ * 4. Config defaults - returns single target
+ * 5. DSN auto-detection - may return multiple targets
+ * 6. Directory name inference - matches project slugs with word boundaries
  *
  * @param options - Resolution options with org, project, and cwd
  * @returns All resolved targets and optional footer message
@@ -818,10 +821,30 @@ export async function resolveAllTargets(
       }
 
       log.debug(
-        "No SENTRY_ORG/SENTRY_PROJECT env vars, trying config defaults"
+        `No SENTRY_ORG/SENTRY_PROJECT env vars, trying ${CONFIG_FILENAME} config file`
       );
 
-      // 3. Config defaults
+      // 3. .sentryclirc config file (walked up from cwd, merged with global)
+      const rcConfig = await loadSentryCliRc(cwd);
+      if (rcConfig.org && rcConfig.project) {
+        span.setAttribute("resolve.method", "sentryclirc");
+        setOrgProjectContext([rcConfig.org], [rcConfig.project]);
+        return {
+          targets: [
+            {
+              org: rcConfig.org,
+              project: rcConfig.project,
+              orgDisplay: rcConfig.org,
+              projectDisplay: rcConfig.project,
+              detectedFrom: `${CONFIG_FILENAME} (${rcConfig.sources.project})`,
+            },
+          ],
+        };
+      }
+
+      log.debug(`No ${CONFIG_FILENAME} org/project, trying config defaults`);
+
+      // 4. Config defaults
       const defaultOrg = getDefaultOrganization();
       const defaultProject = getDefaultProject();
       if (defaultOrg && defaultProject) {
@@ -841,14 +864,14 @@ export async function resolveAllTargets(
 
       log.debug("No config defaults set, trying DSN auto-detection");
 
-      // 4. DSN auto-detection (may find multiple in monorepos)
+      // 5. DSN auto-detection (may find multiple in monorepos)
       const detection = await detectAllDsns(cwd);
 
       if (detection.all.length === 0) {
         log.debug(
           "No DSNs found in source code or env files, trying directory name inference"
         );
-        // 5. Fallback: infer from directory name
+        // 6. Fallback: infer from directory name
         const result = await inferFromDirectoryName(cwd);
         if (result.targets.length === 0) {
           span.setAttribute("resolve.method", "none");
@@ -957,9 +980,10 @@ async function resolveDetectedDsns(
  * Resolution priority:
  * 1. Explicit org and project - both must be provided together
  * 2. SENTRY_ORG / SENTRY_PROJECT env vars
- * 3. Config defaults
- * 4. DSN auto-detection
- * 5. Directory name inference - matches project slugs with word boundaries
+ * 3. `.sentryclirc` config file
+ * 4. Config defaults
+ * 5. DSN auto-detection
+ * 6. Directory name inference - matches project slugs with word boundaries
  *
  * @param options - Resolution options with org, project, and cwd
  * @returns Resolved target, or null if resolution failed
@@ -1007,7 +1031,20 @@ export async function resolveOrgAndProject(
         });
       }
 
-      // 3. Config defaults
+      // 3. .sentryclirc config file
+      const rcConfig = await loadSentryCliRc(cwd);
+      if (rcConfig.org && rcConfig.project) {
+        span.setAttribute("resolve.method", "sentryclirc");
+        return withTelemetryContext({
+          org: rcConfig.org,
+          project: rcConfig.project,
+          orgDisplay: rcConfig.org,
+          projectDisplay: rcConfig.project,
+          detectedFrom: `${CONFIG_FILENAME} (${rcConfig.sources.project})`,
+        });
+      }
+
+      // 4. Config defaults
       const defaultOrg = getDefaultOrganization();
       const defaultProject = getDefaultProject();
       if (defaultOrg && defaultProject) {
@@ -1020,7 +1057,7 @@ export async function resolveOrgAndProject(
         });
       }
 
-      // 4. DSN auto-detection
+      // 5. DSN auto-detection
       try {
         const dsnResult = await resolveFromDsn(cwd);
         if (dsnResult) {
@@ -1031,7 +1068,7 @@ export async function resolveOrgAndProject(
         // Fall through to directory inference
       }
 
-      // 5. Fallback: infer from directory name
+      // 6. Fallback: infer from directory name
       const inferred = await inferFromDirectoryName(cwd);
       const [first] = inferred.targets;
       if (!first) {
@@ -1059,8 +1096,9 @@ export async function resolveOrgAndProject(
  * Resolution priority:
  * 1. Positional argument
  * 2. SENTRY_ORG / SENTRY_PROJECT env vars
- * 3. Config defaults
- * 4. DSN auto-detection
+ * 3. `.sentryclirc` config file
+ * 4. Config defaults
+ * 5. DSN auto-detection
  *
  * @param options - Resolution options with flag and cwd
  * @returns Resolved org, or null if resolution failed
@@ -1083,14 +1121,24 @@ export async function resolveOrg(
     return { org: envVars.org, detectedFrom: envVars.detectedFrom };
   }
 
-  // 3. Config defaults
+  // 3. .sentryclirc config file (org only)
+  const rcConfig = await loadSentryCliRc(cwd);
+  if (rcConfig.org) {
+    setOrgProjectContext([rcConfig.org], []);
+    return {
+      org: rcConfig.org,
+      detectedFrom: `${CONFIG_FILENAME} (${rcConfig.sources.org})`,
+    };
+  }
+
+  // 4. Config defaults
   const defaultOrg = getDefaultOrganization();
   if (defaultOrg) {
     setOrgProjectContext([defaultOrg], []);
     return { org: defaultOrg };
   }
 
-  // 4. DSN auto-detection
+  // 5. DSN auto-detection
   try {
     const result = await resolveOrgFromDsn(cwd);
     if (result) {
@@ -1198,9 +1246,11 @@ export type OrgListResolution = {
  *
  * Resolution priority:
  * 1. Explicit org flag → use that single org
- * 2. Config default org → use that org
- * 3. DSN auto-detection → extract unique orgs from detected targets
- * 4. No context found → empty list (caller must decide to show all orgs or error)
+ * 2. SENTRY_ORG / SENTRY_PROJECT env vars → use that org
+ * 3. `.sentryclirc` config file → use org from config
+ * 4. Config default org → use that org
+ * 5. DSN auto-detection → extract unique orgs from detected targets
+ * 6. No context found → empty list (caller must decide to show all orgs or error)
  *
  * @param orgFlag - Explicit org slug from CLI positional arg, or undefined
  * @param cwd - Current working directory for DSN detection
@@ -1222,6 +1272,14 @@ export async function resolveOrgsForListing(
     return { orgs: [envVars.org] };
   }
 
+  // 3. .sentryclirc config file
+  const rcConfig = await loadSentryCliRc(cwd);
+  if (rcConfig.org) {
+    setOrgProjectContext([rcConfig.org], []);
+    return { orgs: [rcConfig.org] };
+  }
+
+  // 4. Config defaults
   const defaultOrg = getDefaultOrganization();
   if (defaultOrg) {
     setOrgProjectContext([defaultOrg], []);

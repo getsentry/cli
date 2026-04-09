@@ -11,6 +11,31 @@
  */
 
 import { getEnv } from "./lib/env.js";
+import { applySentryCliRcEnvShim } from "./lib/sentryclirc.js";
+
+/**
+ * Preload project context: walk up from `cwd` once, finding both the
+ * project root (for DSN detection) and `.sentryclirc` config (for
+ * org/project defaults and env shim). Caches both results so later calls
+ * to `findProjectRoot` and `loadSentryCliRc` are cache hits.
+ */
+async function preloadProjectContext(cwd: string): Promise<void> {
+  // Dynamic import keeps the heavy DSN/DB modules out of the completion fast-path
+  const [{ findProjectRoot }, { setCachedProjectRoot }] = await Promise.all([
+    import("./lib/dsn/project-root.js"),
+    import("./lib/db/project-root-cache.js"),
+  ]);
+
+  const result = await findProjectRoot(cwd);
+  await setCachedProjectRoot(cwd, {
+    projectRoot: result.projectRoot,
+    reason: result.reason,
+  });
+
+  // Apply .sentryclirc env shim (token, URL) — sentryclirc cache was
+  // populated as a side effect of findProjectRoot's walk
+  await applySentryCliRcEnvShim(cwd);
+}
 
 /**
  * Fast-path: shell completion.
@@ -401,14 +426,24 @@ export async function runCli(cliArgs: string[]): Promise<void> {
  * Reads `process.argv`, dispatches to the completion fast-path or the full
  * CLI runner, and handles fatal errors. Called from `bin.ts`.
  */
-export function startCli(): Promise<void> {
+export async function startCli(): Promise<void> {
   const args = process.argv.slice(2);
 
+  // Completions are a fast-path (~1ms) — skip .sentryclirc I/O.
   if (args[0] === "__complete") {
     return runCompletion(args.slice(1)).catch(() => {
       // Completions should never crash — silently return no results
       process.exitCode = 0;
     });
+  }
+
+  // Walk up from CWD once to find project root AND .sentryclirc config.
+  // Caches both so later findProjectRoot / loadSentryCliRc calls are hits.
+  // Non-fatal — the CLI can still work via env vars and DSN detection.
+  try {
+    await preloadProjectContext(process.cwd());
+  } catch {
+    // Gracefully degrade: project context is optional for CLI operation.
   }
 
   return runCli(args).catch((err) => {
