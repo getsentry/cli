@@ -47,6 +47,7 @@ import {
   detectExistingProject,
   handleLocalOp,
   precomputeDirListing,
+  preReadCommonFiles,
   resolveOrgSlug,
   tryGetExistingProject,
 } from "./local-ops.js";
@@ -616,12 +617,20 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   let result: WorkflowRunResult;
   try {
     const dirListing = await precomputeDirListing(directory);
+    const fileCache = await preReadCommonFiles(directory, dirListing);
     spin.message("Connecting to wizard...");
     run = await workflow.createRun();
     result = assertWorkflowResult(
       await withTimeout(
         run.startAsync({
-          inputData: { directory, yes, dryRun, features, dirListing },
+          inputData: {
+            directory,
+            yes,
+            dryRun,
+            features,
+            dirListing,
+            fileCache,
+          },
           tracingOptions,
         }),
         API_TIMEOUT_MS,
