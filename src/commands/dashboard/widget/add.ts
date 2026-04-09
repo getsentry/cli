@@ -227,8 +227,6 @@ export const addCommand = buildCommand({
     });
 
     // Validate layout mode before any network calls
-    const layoutMode: WidgetLayoutMode =
-      flags.layout === "dense" ? "dense" : "sequential";
     if (
       flags.layout &&
       flags.layout !== "sequential" &&
@@ -239,6 +237,8 @@ export const addCommand = buildCommand({
         "layout"
       );
     }
+    const layoutMode: WidgetLayoutMode =
+      flags.layout === "dense" ? "dense" : "sequential";
 
     // Validate individual layout flag ranges before any network calls
     // (catches --x -1, --width 7, etc. early without needing the dashboard)
