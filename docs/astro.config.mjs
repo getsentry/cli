@@ -5,9 +5,6 @@ import { defineConfig } from "astro/config";
 // Allow base path override via environment variable for PR previews
 const base = process.env.DOCS_BASE_PATH || "/";
 
-// Release name from CI (root package.json version). Undefined in local dev.
-const release = process.env.SENTRY_RELEASE;
-
 export default defineConfig({
   site: "https://cli.sentry.dev",
   base,
@@ -27,7 +24,10 @@ export default defineConfig({
       project: "cli-website",
       org: "sentry",
       environment: process.env.PUBLIC_SENTRY_ENVIRONMENT ?? "development",
-      release: release ? { name: release } : undefined,
+      // Note: @sentry/astro v10 does not support the `release` build-time
+      // option (todo(v11) in the source). Release is set in Sentry.init()
+      // via PUBLIC_SENTRY_RELEASE / SENTRY_RELEASE env vars instead.
+      //
       // Disable the plugin's sourcemap upload — it pulls in @sentry/cli
       // (20+ MB binary download). We use our own CLI post-build instead
       // (see CI workflow: `sentry sourcemap inject` + `sentry sourcemap upload`).

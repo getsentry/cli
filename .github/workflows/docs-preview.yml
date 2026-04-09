@@ -45,6 +45,7 @@ jobs:
           DOCS_BASE_PATH: /pr-preview/pr-${{ github.event.pull_request.number }}
           PUBLIC_SENTRY_ENVIRONMENT: staging
           SENTRY_RELEASE: ${{ steps.version.outputs.version }}
+          PUBLIC_SENTRY_RELEASE: ${{ steps.version.outputs.version }}
         run: |
           bun install --frozen-lockfile
           bun run build
@@ -60,6 +61,10 @@ jobs:
           bun run --bun src/bin.ts sourcemap upload docs/dist/ \
             --release "${{ steps.version.outputs.version }}" \
             --url-prefix "~/"
+
+      # Remove .map files — uploaded to Sentry but shouldn't be deployed.
+      - name: Remove sourcemaps from output
+        run: find docs/dist -name '*.map' -delete
 
       - name: Ensure .nojekyll at gh-pages root
         run: |

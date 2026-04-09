@@ -691,6 +691,7 @@ jobs:
         env:
           PUBLIC_SENTRY_ENVIRONMENT: production
           SENTRY_RELEASE: ${{ steps.version.outputs.version }}
+          PUBLIC_SENTRY_RELEASE: ${{ steps.version.outputs.version }}
         run: |
           bun install --frozen-lockfile
           bun run build
