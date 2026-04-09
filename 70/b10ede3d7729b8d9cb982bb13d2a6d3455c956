@@ -1,0 +1,39 @@
+# Fix: tracemetrics widgets not rendered in `dashboard view`
+
+**Issue**: https://github.com/getsentry/cli/issues/692
+
+## Root Cause
+
+`mapWidgetTypeToDataset("tracemetrics")` returns `null` because `tracemetrics` is missing from the `WIDGET_TYPE_TO_DATASET` map in `src/types/dashboard.ts`. In `queryWidgetData()` (api/dashboards.ts), a `null` dataset causes the widget to be classified as `{ type: "unsupported" }` and rendered as a placeholder — skipping all data fetching and rendering.
+
+## Fix
+
+Add `tracemetrics` → `"metricsEnhanced"` to the dataset mapping. This is the correct API dataset string used by Sentry's web frontend for trace-based metrics widgets (SDK v10+ custom metrics via `Sentry.metrics.distribution()`, `.gauge()`, `.count()`).
+
+Once mapped, the existing code paths handle tracemetrics correctly:
+- **Timeseries** displays (line, area, bar, categorical_bar) → `queryWidgetTimeseries` → events-stats API ✓
+- **big_number** → `queryWidgetTable` with limit=1 → events API ✓
+- **Aggregate format** (`p50(value,metric,type,unit)`) passes through as-is in `yAxis`/`field` params ✓
+- **Error handling** — any API failures are caught and rendered as error placeholders, not crashes ✓
+
+No changes needed to the formatter or API layer — the dispatch logic routes purely by display type, which already works for all tracemetrics-supported displays.
+
+## Files to Modify
+
+### 1. `src/types/dashboard.ts`
+- **Add** `tracemetrics: "metricsEnhanced"` to `WIDGET_TYPE_TO_DATASET` (line ~1001)
+- **Update JSDoc** above the map to remove `tracemetrics` from the "unsupported" example list
+
+### 2. `test/types/dashboard.test.ts`
+- **Move** `tracemetrics` from the "returns null for unsupported widget types" test to the "maps known widget types" test
+- **Assert** `mapWidgetTypeToDataset("tracemetrics")` returns `"metricsEnhanced"`
+
+## Verification
+
+```bash
+bun test test/types/dashboard.test.ts      # Dataset mapping test
+bun test test/commands/dashboard/           # All dashboard command tests
+bun run typecheck                           # Type safety
+bun run lint                                # Lint clean
+bun test                                    # Full test suite
+```
