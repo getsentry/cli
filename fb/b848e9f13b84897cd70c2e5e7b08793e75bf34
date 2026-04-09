@@ -1,0 +1,108 @@
+# Fix: Resilience against read-only `.claude` directories (#699)
+
+## Problem
+
+When the Sentry CLI runs inside Claude Code's sandbox (where `~/.claude` is read-only), `sentry cli setup` crashes trying to write skill files to `~/.claude/skills/sentry-cli/`. The sandbox may intercept write syscalls and terminate the process before JavaScript's `try/catch` can handle the error. Additionally, setup step failures are completely invisible — no telemetry is reported to Sentry.
+
+## Changes
+
+### 1. `src/lib/agent-skills.ts` — Add writability pre-check + telemetry on unexpected errors
+
+**Import changes:**
+- Add `accessSync`, `constants` from `node:fs`
+- Add `* as Sentry` from `@sentry/node-core/light`
+
+**Add writability check** after `detectClaudeCode()`, before the write try-block:
+```typescript
+// Verify .claude is writable before attempting file creation.
+// In sandboxed environments (e.g., Claude Code sandbox), .claude may exist
+// but be read-only. Some sandboxes terminate the process on write attempts,
+// bypassing JavaScript error handling — so we must check before writing.
+try {
+  accessSync(join(homeDir, ".claude"), constants.W_OK);
+} catch {
+  return null;
+}
+```
+
+**Add telemetry** in the existing catch-all block (unexpected errors only — the early-returns above handle expected cases silently):
+```typescript
+} catch (error) {
+  Sentry.captureException(error, {
+    level: "warning",
+    tags: { "setup.step": "agent-skills" },
+  });
+  return null;
+}
+```
+
+**Why both layers?**
+- The `accessSync` check prevents sandbox process termination (expected case → silent return)
+- The catch-all telemetry captures unexpected errors (disk full, subdirectory permissions, Bun.write failures)
+
+### 2. `src/commands/cli/setup.ts` — Report all best-effort step failures to Sentry
+
+Currently `bestEffort()` logs a local warning but never reports to Sentry. Add `Sentry.captureException` so we have visibility into ALL setup step failures:
+
+```typescript
+import * as Sentry from "@sentry/node-core/light";
+
+async function bestEffort(
+  stepName: string,
+  fn: () => void | Promise<void>,
+  warn: WarnLogger
+) {
+  try {
+    await fn();
+  } catch (error) {
+    warn(stepName, error);
+    Sentry.captureException(error, {
+      level: "warning",
+      tags: { "setup.step": stepName },
+    });
+  }
+}
+```
+
+This covers errors from PATH modification, shell completions, install info recording, and any agent-skills errors that might propagate (though most are caught internally by `installAgentSkills()`).
+
+**Follows existing codebase pattern:** `delta-upgrade.ts` uses the same `level: "warning"` + `tags` pattern for non-fatal fallback scenarios.
+
+### 3. `test/lib/agent-skills.test.ts` — Add sandbox test
+
+Add one test after the existing "returns null on filesystem error" test:
+
+```typescript
+test("returns null when .claude exists but is not writable (sandbox)", async () => {
+  mkdirSync(join(testDir, ".claude"), { recursive: true, mode: 0o555 });
+  const result = await installAgentSkills(testDir);
+  expect(result).toBeNull();
+  // Verify no write was attempted — skills subdir should not exist
+  expect(existsSync(join(testDir, ".claude", "skills"))).toBe(false);
+  chmodSync(join(testDir, ".claude"), 0o755);
+});
+```
+
+Uses `0o555` (r-x) to model a sandbox-mounted read-only directory. Asserts `.claude/skills` was NOT created, proving the early-return fired before any write attempt.
+
+## What NOT to change
+
+- **`detectClaudeCode()`** — stays as pure existence check (separation of concerns)
+- **`handleAgentSkills()`** — no changes needed, flows through `bestEffort()` naturally
+- **No new error class** — this is graceful degradation, not an error condition
+
+## Files Modified
+
+| File | Change |
+|------|--------|
+| `src/lib/agent-skills.ts` | Add `accessSync` writability check + `Sentry.captureException` in catch |
+| `src/commands/cli/setup.ts` | Add `Sentry.captureException` in `bestEffort()` |
+| `test/lib/agent-skills.test.ts` | Add sandbox (read-only `.claude`) test case |
+
+## Verification
+
+```bash
+bun test test/lib/agent-skills.test.ts   # All tests pass (existing + new)
+bun run typecheck                         # No type errors
+bun run lint                              # No lint issues
+```
