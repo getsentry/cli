@@ -14,14 +14,9 @@ function withEnv(vars: Record<string, string>) {
   setEnv(vars as NodeJS.ProcessEnv);
 }
 
-/** No-op provider typed to satisfy ProcessInfoProvider. */
-function noProcessInfo(_pid: number): undefined {
+/** No-op async provider typed to satisfy ProcessInfoProvider. */
+async function noProcessInfo(_pid: number): Promise<undefined> {
   return;
-}
-
-/** Disable process tree detection so env-var tests are isolated. */
-function withNoProcessTree() {
-  setProcessInfoProvider(noProcessInfo);
 }
 
 describe("detectAgent", () => {
@@ -38,13 +33,11 @@ describe("detectAgent", () => {
   });
 
   test("AI_AGENT empty string is ignored", () => {
-    withNoProcessTree();
     withEnv({ AI_AGENT: "" });
     expect(detectAgent()).toBeUndefined();
   });
 
   test("AI_AGENT whitespace-only is ignored", () => {
-    withNoProcessTree();
     withEnv({ AI_AGENT: "   " });
     expect(detectAgent()).toBeUndefined();
   });
@@ -138,11 +131,15 @@ describe("detectAgent", () => {
     expect(detectAgent()).toBe("cowork");
   });
 
-  // ── Replit ─────────────────────────────────────────────────────────
+  // ── Excluded env vars (false positive risks) ──────────────────────
 
   test("REPL_ID alone does not trigger detection (platform env, not agent signal)", () => {
-    withNoProcessTree();
     withEnv({ REPL_ID: "abc123" });
+    expect(detectAgent()).toBeUndefined();
+  });
+
+  test("COPILOT_GITHUB_TOKEN alone does not trigger detection (false positive risk)", () => {
+    withEnv({ COPILOT_GITHUB_TOKEN: "ghu_xxx" });
     expect(detectAgent()).toBeUndefined();
   });
 
@@ -156,12 +153,6 @@ describe("detectAgent", () => {
   test("COPILOT_ALLOW_ALL → github-copilot", () => {
     withEnv({ COPILOT_ALLOW_ALL: "1" });
     expect(detectAgent()).toBe("github-copilot");
-  });
-
-  test("COPILOT_GITHUB_TOKEN alone does not trigger detection (false positive risk)", () => {
-    withNoProcessTree();
-    withEnv({ COPILOT_GITHUB_TOKEN: "ghu_xxx" });
-    expect(detectAgent()).toBeUndefined();
   });
 
   // ── Goose ──────────────────────────────────────────────────────────
@@ -181,19 +172,16 @@ describe("detectAgent", () => {
   // ── AGENT generic fallback ─────────────────────────────────────────
 
   test("AGENT as generic fallback", () => {
-    withNoProcessTree();
     withEnv({ AGENT: "some-new-agent" });
     expect(detectAgent()).toBe("some-new-agent");
   });
 
   test("AGENT is trimmed", () => {
-    withNoProcessTree();
     withEnv({ AGENT: "  goose  " });
     expect(detectAgent()).toBe("goose");
   });
 
   test("AGENT empty string is ignored", () => {
-    withNoProcessTree();
     withEnv({ AGENT: "" });
     expect(detectAgent()).toBeUndefined();
   });
@@ -205,42 +193,9 @@ describe("detectAgent", () => {
 
   // ── No agent ───────────────────────────────────────────────────────
 
-  test("no env vars → undefined (with process tree disabled)", () => {
-    withNoProcessTree();
+  test("no env vars → undefined", () => {
     withEnv({});
     expect(detectAgent()).toBeUndefined();
-  });
-
-  // ── Process tree integration ───────────────────────────────────────
-
-  test("process tree detection fires between env vars and AGENT fallback", () => {
-    setProcessInfoProvider((pid) => {
-      if (pid === process.ppid) {
-        return { name: "cursor", ppid: 1 };
-      }
-    });
-    withEnv({});
-    expect(detectAgent()).toBe("cursor");
-  });
-
-  test("env vars take priority over process tree", () => {
-    setProcessInfoProvider((pid) => {
-      if (pid === process.ppid) {
-        return { name: "cursor", ppid: 1 };
-      }
-    });
-    withEnv({ GEMINI_CLI: "1" });
-    expect(detectAgent()).toBe("gemini");
-  });
-
-  test("AI_AGENT takes priority over process tree", () => {
-    setProcessInfoProvider((pid) => {
-      if (pid === process.ppid) {
-        return { name: "cursor", ppid: 1 };
-      }
-    });
-    withEnv({ AI_AGENT: "custom" });
-    expect(detectAgent()).toBe("custom");
   });
 });
 
@@ -292,18 +247,18 @@ describe("detectAgentFromProcessTree", () => {
     setProcessInfoProvider(getProcessInfoFromOS);
   });
 
-  test("returns agent when parent matches", () => {
-    setProcessInfoProvider((pid) => {
+  test("returns agent when parent matches", async () => {
+    setProcessInfoProvider(async (pid) => {
       if (pid === process.ppid) {
         return { name: "cursor", ppid: 1 };
       }
     });
-    expect(detectAgentFromProcessTree()).toBe("cursor");
+    expect(await detectAgentFromProcessTree()).toBe("cursor");
   });
 
-  test("walks up to grandparent", () => {
+  test("walks up to grandparent", async () => {
     const shellPid = 100;
-    setProcessInfoProvider((pid) => {
+    setProcessInfoProvider(async (pid) => {
       // parent is bash, grandparent is cursor
       if (pid === process.ppid) {
         return { name: "bash", ppid: shellPid };
@@ -312,29 +267,29 @@ describe("detectAgentFromProcessTree", () => {
         return { name: "Cursor", ppid: 1 };
       }
     });
-    expect(detectAgentFromProcessTree()).toBe("cursor");
+    expect(await detectAgentFromProcessTree()).toBe("cursor");
   });
 
-  test("case-insensitive matching", () => {
-    setProcessInfoProvider((pid) => {
+  test("case-insensitive matching", async () => {
+    setProcessInfoProvider(async (pid) => {
       if (pid === process.ppid) {
         return { name: "Claude", ppid: 1 };
       }
     });
-    expect(detectAgentFromProcessTree()).toBe("claude");
+    expect(await detectAgentFromProcessTree()).toBe("claude");
   });
 
-  test("returns undefined when no agent in tree", () => {
-    setProcessInfoProvider((pid) => {
+  test("returns undefined when no agent in tree", async () => {
+    setProcessInfoProvider(async (pid) => {
       if (pid === process.ppid) {
         return { name: "bash", ppid: 1 };
       }
     });
-    expect(detectAgentFromProcessTree()).toBeUndefined();
+    expect(await detectAgentFromProcessTree()).toBeUndefined();
   });
 
-  test("stops at PID 1 (init/launchd)", () => {
-    setProcessInfoProvider((pid) => {
+  test("stops at PID 1 (init/launchd)", async () => {
+    setProcessInfoProvider(async (pid) => {
       if (pid === process.ppid) {
         return { name: "bash", ppid: 1 };
       }
@@ -343,15 +298,15 @@ describe("detectAgentFromProcessTree", () => {
         return { name: "cursor", ppid: 0 };
       }
     });
-    expect(detectAgentFromProcessTree()).toBeUndefined();
+    expect(await detectAgentFromProcessTree()).toBeUndefined();
   });
 
-  test("stops when getProcessInfo returns undefined", () => {
+  test("stops when getProcessInfo returns undefined", async () => {
     setProcessInfoProvider(noProcessInfo);
-    expect(detectAgentFromProcessTree()).toBeUndefined();
+    expect(await detectAgentFromProcessTree()).toBeUndefined();
   });
 
-  test("respects max depth", () => {
+  test("respects max depth", async () => {
     // Create a chain deeper than MAX_ANCESTOR_DEPTH (5)
     let nextPid = process.ppid;
     const chain = new Map<number, { name: string; ppid: number }>();
@@ -363,14 +318,14 @@ describe("detectAgentFromProcessTree", () => {
     // Put cursor at depth 8 (beyond the limit)
     chain.set(nextPid, { name: "cursor", ppid: 1 });
 
-    setProcessInfoProvider((pid) => chain.get(pid));
-    expect(detectAgentFromProcessTree()).toBeUndefined();
+    setProcessInfoProvider(async (pid) => chain.get(pid));
+    expect(await detectAgentFromProcessTree()).toBeUndefined();
   });
 });
 
 describe("getProcessInfoFromOS", () => {
-  test("returns info for own process", () => {
-    const info = getProcessInfoFromOS(process.pid);
+  test("returns info for own process", async () => {
+    const info = await getProcessInfoFromOS(process.pid);
     expect(info).toBeDefined();
     if (info) {
       expect(info.name.length).toBeGreaterThan(0);
@@ -378,8 +333,8 @@ describe("getProcessInfoFromOS", () => {
     }
   });
 
-  test("returns info for parent process", () => {
-    const info = getProcessInfoFromOS(process.ppid);
+  test("returns info for parent process", async () => {
+    const info = await getProcessInfoFromOS(process.ppid);
     expect(info).toBeDefined();
     if (info) {
       expect(info.name.length).toBeGreaterThan(0);
@@ -387,13 +342,13 @@ describe("getProcessInfoFromOS", () => {
     }
   });
 
-  test("returns undefined for non-existent PID", () => {
-    const info = getProcessInfoFromOS(99_999_999);
+  test("returns undefined for non-existent PID", async () => {
+    const info = await getProcessInfoFromOS(99_999_999);
     expect(info).toBeUndefined();
   });
 
-  test("returns undefined for PID 0", () => {
-    const info = getProcessInfoFromOS(0);
+  test("returns undefined for PID 0", async () => {
+    const info = await getProcessInfoFromOS(0);
     expect(info).toBeUndefined();
   });
 });

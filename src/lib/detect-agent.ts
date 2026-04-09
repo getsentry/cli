@@ -3,17 +3,18 @@
  * a specific AI coding agent.
  *
  * Detection uses two strategies:
- * 1. **Environment variables** that agents inject into child processes
- *    (adapted from Vercel's @vercel/detect-agent, Apache-2.0)
- * 2. **Process tree walking** — scan parent/grandparent process names
- *    for known agent executables (fallback when env vars are absent)
+ * 1. **Environment variables** (sync) — agents inject these into child
+ *    processes. Adapted from Vercel's @vercel/detect-agent (Apache-2.0).
+ * 2. **Process tree walking** (async) — scan parent/grandparent process
+ *    names for known agent executables. Runs as a non-blocking background
+ *    task so it never delays CLI startup.
  *
  * To add a new agent, add entries to {@link ENV_VAR_AGENTS} and/or
  * {@link PROCESS_NAME_AGENTS}.
  */
 
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 
 import { getEnv } from "./env.js";
@@ -87,10 +88,10 @@ type ProcessInfo = {
 };
 
 /**
- * Process info provider signature. Default reads from `/proc/` or `ps(1)`.
+ * Async process info provider signature. Default reads from `/proc/` or `ps(1)`.
  * Override via {@link setProcessInfoProvider} for testing.
  */
-type ProcessInfoProvider = (pid: number) => ProcessInfo | undefined;
+type ProcessInfoProvider = (pid: number) => Promise<ProcessInfo | undefined>;
 
 let _getProcessInfo: ProcessInfoProvider = getProcessInfoFromOS;
 
@@ -105,16 +106,16 @@ export function setProcessInfoProvider(provider: ProcessInfoProvider): void {
 }
 
 /**
- * Detect which AI agent (if any) is invoking the CLI.
+ * Detect agent from environment variables only (synchronous, no I/O).
  *
  * Priority:
  * 1. `AI_AGENT` env var — explicit override, any agent can self-identify
  * 2. Agent-specific env vars from {@link ENV_VAR_AGENTS}
  * 3. Claude Code with Cowork variant (conditional, can't be in the map)
- * 4. Parent process tree — walk ancestors looking for known executables
- * 5. `AGENT` env var — generic fallback set by Goose, Amp, and others
+ * 4. `AGENT` env var — generic fallback set by Goose, Amp, and others
  *
  * Returns the agent name string, or `undefined` if no agent is detected.
+ * For process tree fallback, use {@link detectAgentFromProcessTree} separately.
  */
 export function detectAgent(): string | undefined {
   const env = getEnv();
@@ -137,31 +138,28 @@ export function detectAgent(): string | undefined {
     return env.CLAUDE_CODE_IS_COWORK ? "cowork" : "claude";
   }
 
-  // 4. Process tree: walk parent → grandparent → ... looking for known agents
-  const processAgent = detectAgentFromProcessTree();
-  if (processAgent) {
-    return processAgent;
-  }
-
-  // 5. Lowest priority: generic AGENT fallback
+  // 4. Lowest priority: generic AGENT fallback
   return env.AGENT?.trim() || undefined;
 }
 
 /**
  * Walk the ancestor process tree looking for known agent executables.
  *
- * Starts at the direct parent (`process.ppid`) and walks up to
- * {@link MAX_ANCESTOR_DEPTH} levels. Stops at PID 1 (init/launchd)
- * or on any read error (process exited, permission denied).
+ * Fully async — never blocks CLI startup. Starts at the direct parent
+ * (`process.ppid`) and walks up to {@link MAX_ANCESTOR_DEPTH} levels.
+ * Stops at PID 1 (init/launchd) or on any read error.
  *
- * On Linux, reads `/proc/<pid>/status` (in-memory, fast).
- * On macOS, falls back to `ps(1)`.
+ * - **Linux**: reads `/proc/<pid>/status` (in-memory filesystem, fast).
+ * - **macOS**: uses `ps(1)` with a 500ms timeout per invocation.
+ * - **Windows**: not supported (env var detection still works).
  */
-export function detectAgentFromProcessTree(): string | undefined {
+export async function detectAgentFromProcessTree(): Promise<
+  string | undefined
+> {
   let pid = process.ppid;
 
   for (let depth = 0; depth < MAX_ANCESTOR_DEPTH && pid > 1; depth++) {
-    const info = _getProcessInfo(pid);
+    const info = await _getProcessInfo(pid);
     if (!info) {
       break;
     }
@@ -182,13 +180,14 @@ export function detectAgentFromProcessTree(): string | undefined {
  *
  * Tries `/proc/<pid>/status` first (Linux, no subprocess overhead),
  * falls back to `ps(1)` (macOS and other Unix systems).
- *
- * Returns `undefined` if the process doesn't exist or can't be read.
+ * Windows is unsupported — returns `undefined`.
  */
-export function getProcessInfoFromOS(pid: number): ProcessInfo | undefined {
-  // Linux: /proc is an in-memory filesystem — no subprocess needed
+export async function getProcessInfoFromOS(
+  pid: number
+): Promise<ProcessInfo | undefined> {
+  // Linux: /proc is an in-memory filesystem — fast even though async
   try {
-    const status = readFileSync(`/proc/${pid}/status`, "utf-8");
+    const status = await readFile(`/proc/${pid}/status`, "utf-8");
     const nameMatch = status.match(PROC_STATUS_NAME_RE);
     const ppidMatch = status.match(PROC_STATUS_PPID_RE);
     if (nameMatch?.[1] && ppidMatch?.[1]) {
@@ -198,27 +197,37 @@ export function getProcessInfoFromOS(pid: number): ProcessInfo | undefined {
     // Not Linux or process is gone — fall through to ps
   }
 
-  // macOS / other Unix: use ps(1)
+  // macOS / other Unix: use ps(1) asynchronously
   if (process.platform !== "win32") {
     try {
-      const result = execFileSync(
+      const result = await execFilePromise(
         "ps",
         ["-p", String(pid), "-o", "ppid=,comm="],
-        {
-          encoding: "utf-8",
-          stdio: ["pipe", "pipe", "ignore"],
-          // Guard against ps hanging on degraded systems — this runs
-          // synchronously during CLI startup, so keep it tight
-          timeout: 500,
-        }
+        { timeout: 500 }
       );
-      // Output: "  1234 /Applications/Cursor.app/Contents/MacOS/Cursor"
       const match = result.trim().match(PS_PPID_COMM_RE);
       if (match?.[1] && match?.[2]) {
         return { name: basename(match[2].trim()), ppid: Number(match[1]) };
       }
     } catch {
-      // Process gone or ps not available
+      // Process gone, ps not available, or timeout
     }
   }
+}
+
+/** Promisified `execFile` — resolves with stdout, rejects on error/timeout. */
+function execFilePromise(
+  cmd: string,
+  args: readonly string[],
+  opts: { timeout?: number }
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { encoding: "utf-8", ...opts }, (err, stdout) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(stdout);
+      }
+    });
+  });
 }
