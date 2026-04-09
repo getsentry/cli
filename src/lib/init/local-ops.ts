@@ -96,40 +96,31 @@ function prettyPrintJson(content: string, indent: JsonIndent): string {
 }
 
 /**
- * Shell metacharacters that enable chaining, piping, substitution, or redirection.
- * All legitimate install commands are simple single commands that don't need these.
+ * Patterns that indicate shell injection. Commands run via `spawn` (no shell),
+ * so these have no runtime effect — they are defense-in-depth against command
+ * chaining, piping, redirection, and command substitution.
  *
- * Ordering matters for error-message accuracy (not correctness): multi-character
- * operators like `&&` and `||` are checked before their single-character prefixes
- * (`&`, `|`) so the reported label describes the actual construct the user wrote.
+ * Characters that are harmless without a shell — quotes, braces, globs,
+ * parentheses, backslashes, bare `$`, `#` — are intentionally NOT blocked.
+ * They appear in legitimate package specifiers like
+ * `pip install sentry-sdk[django]` or version ranges with `*`.
+ *
+ * Ordering: multi-char operators (`&&`, `||`) before single-char prefixes
+ * (`&`, `|`) so the reported label describes what the user actually wrote.
  */
 const SHELL_METACHARACTER_PATTERNS: Array<{ pattern: string; label: string }> =
   [
     { pattern: ";", label: "command chaining (;)" },
-    // Check multi-char operators before single `|` / `&` so labels are accurate
     { pattern: "&&", label: "command chaining (&&)" },
     { pattern: "||", label: "command chaining (||)" },
     { pattern: "|", label: "piping (|)" },
     { pattern: "&", label: "background execution (&)" },
     { pattern: "`", label: "command substitution (`)" },
     { pattern: "$(", label: "command substitution ($()" },
-    { pattern: "(", label: "subshell/grouping (()" },
-    { pattern: ")", label: "subshell/grouping ())" },
-    { pattern: "$", label: "variable/command expansion ($)" },
-    { pattern: "'", label: "single quote (')" },
-    { pattern: '"', label: 'double quote (")' },
-    { pattern: "\\", label: "backslash escape (\\)" },
     { pattern: "\n", label: "newline" },
     { pattern: "\r", label: "carriage return" },
     { pattern: ">", label: "redirection (>)" },
     { pattern: "<", label: "redirection (<)" },
-    // Glob and brace expansion — brace expansion is the real risk
-    // (e.g. `npm install {evil,@sentry/node}`)
-    { pattern: "{", label: "brace expansion ({)" },
-    { pattern: "}", label: "brace expansion (})" },
-    { pattern: "*", label: "glob expansion (*)" },
-    { pattern: "?", label: "glob expansion (?)" },
-    { pattern: "#", label: "shell comment (#)" },
   ];
 
 const WHITESPACE_RE = /\s+/;
