@@ -207,6 +207,9 @@ export function getProcessInfoFromOS(pid: number): ProcessInfo | undefined {
         {
           encoding: "utf-8",
           stdio: ["pipe", "pipe", "ignore"],
+          // Guard against ps hanging on degraded systems — this runs
+          // synchronously during CLI startup, so keep it tight
+          timeout: 500,
         }
       );
       // Output: "  1234 /Applications/Cursor.app/Contents/MacOS/Cursor"
