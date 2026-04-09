@@ -511,7 +511,8 @@ async function handleAutoDetectWithProject(
   if (resolved.footer) {
     hintParts.push(resolved.footer);
   }
-  if (effectiveExtra.environment) {
+  // Only show env hint when it was auto-applied (not when user passed -e)
+  if (effectiveExtra.environment && !extra.environment) {
     hintParts.push(
       `Environment: ${effectiveExtra.environment.join(", ")} (use -e to change)`
     );
