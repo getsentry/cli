@@ -1,0 +1,129 @@
+# Plan: Global Flag Hoisting + `-v` Alias
+
+## Problem
+
+Two issues with `--verbose`:
+
+1. **No `-v` short alias** — `sentry cli upgrade -v` doesn't work because `-v` was never added as an alias for `--verbose`. The `buildCommand` wrapper injects the flag definition but no alias.
+2. **Positional restriction** — `--verbose` / `-v` only work after the leaf command. Stricli can't route past flags at route/group levels:
+   - `sentry cli upgrade --verbose` ✅
+   - `sentry cli --verbose upgrade` ❌
+   - `sentry --verbose cli upgrade` ❌
+
+Note: `sentry -v` will remain `--version` (Stricli built-in, only at `inputs[0]`). At the subcommand level, `-v` means `--verbose`.
+
+## Files to Change
+
+### 1. Modify: `src/lib/command.ts` — Add `-v` alias injection
+
+Following the existing pattern from `buildDeleteCommand` in `mutate-command.ts` (lines 371-384), inject `v: "verbose"` into the merged aliases unless the command already uses `v`:
+
+```typescript
+// After line 380 (const mergedParams = ...)
+const existingAliases = (existingParams.aliases ?? {}) as Record<string, unknown>;
+const mergedAliases: Record<string, unknown> = { ...existingAliases };
+
+// Inject -v alias for --verbose unless already taken or command owns verbose
+if (!commandOwnsVerbose && !("v" in mergedAliases)) {
+  mergedAliases.v = "verbose";
+}
+
+const mergedParams = { ...existingParams, flags: mergedFlags, aliases: mergedAliases };
+```
+
+### 2. New: `src/lib/argv-hoist.ts` (~90 lines)
+
+Pure function, zero imports, zero side effects.
+
+**Hoistable flags** (must stay in sync with `buildCommand` in `command.ts`):
+
+| Long form | Short form | Takes value | Negatable |
+|-----------|-----------|-------------|-----------|
+| `--verbose` | `-v` | No | Yes (`--no-verbose`) |
+| `--log-level` | — | Yes | No |
+| `--json` | — | Yes (`--no-json`) | Yes |
+| `--fields` | — | Yes | No |
+
+**Algorithm** (single-pass, O(n)):
+1. Scan argv left-to-right. Maintain two arrays: `remaining[]`, `hoisted[]`
+2. On `--` separator → push it and all remaining tokens to `remaining`, stop scanning
+3. On a hoistable long flag (`--verbose`, `--log-level`, etc.) or short flag (`-v`) → push to `hoisted` (+ consume next token for value-taking flags)
+4. On anything else → push to `remaining`
+5. Return `[...remaining, ...hoisted]`
+
+Handles: `--flag=value` form, `--no-flag` negation, `-v` short form, missing value (Stricli reports error), repeated flags, flags already at end (no-op).
+
+### 3. Modify: `src/cli.ts` — Call `hoistGlobalFlags` in `runCli()`
+
+```typescript
+export async function runCli(cliArgs: string[]): Promise<void> {
+  const { hoistGlobalFlags } = await import("./lib/argv-hoist.js");
+  // ...existing imports...
+
+  const hoistedArgs = hoistGlobalFlags(cliArgs);
+
+  // ...existing middleware/env setup (uses cliArgs for read-only checks)...
+
+  try {
+    await executor(hoistedArgs);  // ← hoisted args for Stricli
+
+    // Help recovery uses ORIGINAL cliArgs so `cliArgs.at(-1) === "help"`
+    // still works when global flags were placed before "help".
+    if (...exitCode check... && cliArgs.at(-1) === "help" && ...) { ... }
+  }
+}
+```
+
+**Key design**: hoist inside `runCli()` so both `hoistedArgs` and original `cliArgs` are available. The help-as-positional recovery (line 387) checks `at(-1) === "help"` on the original args. The executor gets hoisted args for correct Stricli routing.
+
+### 4. No other changes
+
+`buildCommand`'s flag injection stays as-is — it defines the Stricli flag *schema*; hoisting fixes *token position*. They're complementary.
+
+## Edge Cases
+
+| Scenario | Result |
+|----------|--------|
+| `sentry -v` | → Stricli intercepts as `--version` (built-in, unchanged) |
+| `sentry cli upgrade -v` | → `-v` hoisted to end, parsed as `--verbose` ✅ |
+| `sentry -v cli upgrade` | → hoisted to `["cli", "upgrade", "-v"]` ✅ |
+| `sentry --verbose` (no command) | → `["--verbose"]` — Stricli shows top-level help |
+| `sentry --verbose issue help` | → help recovery uses original `at(-1) === "help"` ✅ |
+| `sentry issue -- --verbose` | → `--verbose` after `--` NOT hoisted |
+| `sentry --log-level debug cli upgrade` | → `["cli", "upgrade", "--log-level", "debug"]` |
+| `sentry --log-level=debug cli upgrade` | → `["cli", "upgrade", "--log-level=debug"]` |
+| `sentry --verbose api /endpoint` | → api's own `verbose` flag handles it |
+
+## Tests
+
+### New: `test/lib/argv-hoist.test.ts`
+
+~20 unit tests: no-op passthrough, boolean hoisting (`--verbose`, `-v`), value hoisting (`--flag val` and `--flag=val`), `--no-flag` negation, `--` separator, mixed flags, unknown flags passthrough, empty argv, flag at end (identity), repeated flags, real-world nested commands.
+
+### New: `test/lib/argv-hoist.property.test.ts`
+
+3 properties:
+1. **Token conservation**: output has exactly the same tokens as input (sorted)
+2. **Order preservation**: non-hoistable tokens keep relative order
+3. **Idempotency**: `hoist(hoist(x)) === hoist(x)`
+
+### Existing: verify `-v` alias doesn't break existing tests
+
+Run full test suite — the alias injection is safe (only when `v` is not already taken).
+
+## Verification
+
+```bash
+bun test test/lib/argv-hoist.test.ts test/lib/argv-hoist.property.test.ts
+bun run typecheck
+bun run lint
+bun test  # full suite
+
+# Manual smoke tests
+bun run dev -- -v cli upgrade --check       # -v at root (should verbose, not version — wait, at inputs[0] this IS version)
+bun run dev -- cli upgrade -v --check       # -v on leaf command
+bun run dev -- cli -v upgrade --check       # -v at route level, hoisted
+bun run dev -- --verbose cli upgrade --check
+bun run dev -- cli --verbose upgrade --check
+bun run dev -- --verbose issue help         # help recovery still works
+```
