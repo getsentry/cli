@@ -14,7 +14,10 @@ import {
   listReleasesPaginated,
   type ReleaseSortValue,
 } from "../../lib/api-client.js";
-import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
+import {
+  type ParsedOrgProject,
+  parseOrgProjectArg,
+} from "../../lib/arg-parsing.js";
 import {
   colorTag,
   escapeMarkdownInline,
@@ -520,7 +523,7 @@ async function handleAutoDetectWithProject(
   };
 }
 
-/** Apply smart production env default from the primary target. */
+/** Apply smart production env default from a resolved target. */
 async function applySmartEnvDefault(
   extra: ExtraApiOptions,
   primary?: ResolvedTarget
@@ -530,6 +533,27 @@ async function applySmartEnvDefault(
   }
   const env = await resolveDefaultEnvironment(primary.org, primary.project);
   return env ? { ...extra, environment: env } : extra;
+}
+
+/**
+ * Apply smart production env default from the parsed target argument.
+ *
+ * For explicit targets (`org/project`), resolves the environment immediately.
+ * For auto-detect, the override handler applies its own default.
+ * For org-all and project-search, skipped (no reliable project to check).
+ */
+async function resolveEnvForParsedTarget(
+  extra: ExtraApiOptions,
+  parsed: ParsedOrgProject
+): Promise<ExtraApiOptions> {
+  if (extra.environment) {
+    return extra;
+  }
+  if (parsed.type === "explicit") {
+    const env = await resolveDefaultEnvironment(parsed.org, parsed.project);
+    return env ? { ...extra, environment: env } : extra;
+  }
+  return extra;
 }
 
 // ---------------------------------------------------------------------------
@@ -668,7 +692,12 @@ export const listCommand = buildListCommand("release", {
       statsPeriod: flags.period,
       status: flags.status,
     };
-    const config = buildReleaseListConfig(extra);
+
+    // Smart env default: when no -e given and we know the project, check
+    // if "production"/"prod" exists and auto-select it. Applies to explicit
+    // (org/project), project-search (bare slug), and auto-detect modes.
+    const resolvedExtra = await resolveEnvForParsedTarget(extra, parsed);
+    const config = buildReleaseListConfig(resolvedExtra);
     const result = await dispatchOrgScopedList({
       config,
       cwd,
@@ -677,11 +706,23 @@ export const listCommand = buildListCommand("release", {
       orgSlugMatchBehavior: "redirect",
       overrides: {
         "auto-detect": (ctx: HandlerContext<"auto-detect">) =>
-          handleAutoDetectWithProject(extra, ctx),
+          handleAutoDetectWithProject(resolvedExtra, ctx),
       },
     });
     yield new CommandOutput(result);
-    const hint = result.items.length > 0 ? result.hint : undefined;
+    const hintParts: string[] = [];
+    if (result.hint) {
+      hintParts.push(result.hint);
+    }
+    if (resolvedExtra.environment && !envFilter) {
+      hintParts.push(
+        `Environment: ${resolvedExtra.environment.join(", ")} (use -e to change)`
+      );
+    }
+    const hint =
+      result.items.length > 0 && hintParts.length > 0
+        ? hintParts.join("\n")
+        : undefined;
     return { hint };
   },
 });
