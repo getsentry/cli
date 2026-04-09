@@ -1,6 +1,15 @@
 name: Docs Preview
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'src/**'
+      - 'script/generate-command-docs.ts'
+      - 'script/generate-skill.ts'
+      - 'install'
+      - '.github/workflows/docs-preview.yml'
   pull_request:
     paths:
       - 'docs/**'
@@ -13,6 +22,10 @@ on:
 permissions:
   contents: write
   pull-requests: write
+
+concurrency:
+  group: docs-preview-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   preview:
@@ -41,8 +54,9 @@ jobs:
       - name: Build Docs for Preview
         working-directory: docs
         env:
-          # Override base path for PR preview (no /cli prefix since preview domain is different)
-          DOCS_BASE_PATH: /pr-preview/pr-${{ github.event.pull_request.number }}
+          DOCS_BASE_PATH: ${{ github.event_name == 'push'
+            && '/_preview/pr-main'
+            || format('/_preview/pr-{0}', github.event.pull_request.number) }}
           PUBLIC_SENTRY_ENVIRONMENT: staging
           SENTRY_RELEASE: ${{ steps.version.outputs.version }}
           PUBLIC_SENTRY_RELEASE: ${{ steps.version.outputs.version }}
@@ -102,6 +116,8 @@ jobs:
         with:
           source-dir: docs/dist/
           preview-branch: gh-pages
-          umbrella-dir: pr-preview
+          umbrella-dir: _preview
           pages-base-url: cli.sentry.dev
-          action: auto
+          action: ${{ github.event_name == 'push' && 'deploy' || 'auto' }}
+          pr-number: ${{ github.event_name == 'push' && 'main' || github.event.pull_request.number }}
+          comment: ${{ github.event_name != 'push' }}
