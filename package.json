@@ -1,6 +1,6 @@
 {
   "name": "sentry",
-  "version": "0.25.0-dev.0",
+  "version": "0.26.0-dev.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/getsentry/cli.git"
@@ -30,7 +30,6 @@
     "http-cache-semantics": "^4.2.0",
     "ignore": "^7.0.5",
     "marked": "^15",
-    "openai": "^6.22.0",
     "p-limit": "^7.2.0",
     "picomatch": "^4.0.3",
     "pretty-ms": "^9.3.0",

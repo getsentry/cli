@@ -1,4 +1,4 @@
-import { buildRouteMap } from "@stricli/core";
+import { buildRouteMap } from "../../../lib/route-map.js";
 import { addCommand } from "./add.js";
 import { deleteCommand } from "./delete.js";
 import { editCommand } from "./edit.js";
@@ -9,7 +9,6 @@ export const widgetRoute = buildRouteMap({
     edit: editCommand,
     delete: deleteCommand,
   },
-  aliases: { remove: "delete" },
   docs: {
     brief: "Manage dashboard widgets",
     fullDescription:

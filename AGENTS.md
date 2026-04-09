@@ -269,6 +269,40 @@ export const myCommand = buildCommand({
 - The wrapper auto-injects `--json` and `--fields` flags. Do NOT add your own `json` flag.
 - Do NOT use `stdout.write()` or `if (flags.json)` branching — the wrapper handles it.
 
+### Route Maps (Stricli)
+
+Route groups use Stricli's `buildRouteMap` wrapped by `src/lib/route-map.ts`.
+
+**CRITICAL**: Import `buildRouteMap` from `../../lib/route-map.js`, **NEVER** from `@stricli/core` directly — the wrapper auto-injects standard subcommand aliases based on which route keys exist:
+
+| Route    | Auto-aliases   |
+|----------|----------------|
+| `list`   | `ls`           |
+| `view`   | `show`         |
+| `delete` | `remove`, `rm` |
+| `create` | `new`          |
+
+Manually specified aliases in `aliases` are merged with (and take precedence over) auto-generated ones. Do NOT manually add aliases that are already in the standard set above.
+
+```typescript
+import { buildRouteMap } from "../../lib/route-map.js";
+
+export const myRoute = buildRouteMap({
+  routes: {
+    list: listCommand,
+    view: viewCommand,
+    create: createCommand,
+  },
+  defaultCommand: "view",
+  // No need for aliases — ls, show, and new are auto-injected.
+  // Only add aliases for non-standard mappings:
+  // aliases: { custom: "list" },
+  docs: {
+    brief: "Manage my resources",
+  },
+});
+```
+
 ### Positional Arguments
 
 Use `parseSlashSeparatedArg` from `src/lib/arg-parsing.ts` for the standard `[<org>/<project>/]<id>` pattern. Required identifiers (trace IDs, span IDs) should be **positional args**, not flags.

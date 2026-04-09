@@ -336,6 +336,31 @@ export const LIST_BASE_ALIASES: Aliases<string> = { n: "limit", c: "cursor" };
 let _subcommandsByRoute: Map<string, Set<string>> | undefined;
 
 /**
+ * Entry shape returned by Stricli's getAllEntries().
+ * `aliases` is always present at runtime (empty array when none),
+ * but typed as optional for defensive safety.
+ */
+type RouteEntry = {
+  name: { original: string };
+  aliases?: readonly string[];
+  target: unknown;
+};
+
+/** Collect all subcommand names and aliases from a route group's children. */
+function collectChildNames(parent: {
+  getAllEntries: () => readonly RouteEntry[];
+}): Set<string> {
+  const names = new Set<string>();
+  for (const child of parent.getAllEntries()) {
+    names.add(child.name.original);
+    for (const alias of child.aliases ?? []) {
+      names.add(alias);
+    }
+  }
+  return names;
+}
+
+/**
  * Get the subcommand names for a given singular route (e.g. "project" → {"list", "view"}).
  *
  * Lazily walks the Stricli route map on first call. Uses `require()` to break
@@ -346,27 +371,18 @@ function getSubcommandsForRoute(routeName: string): Set<string> {
     _subcommandsByRoute = new Map();
 
     const { routes } = require("../app.js") as {
-      routes: {
-        getAllEntries: () => readonly {
-          name: { original: string };
-          target: unknown;
-        }[];
-      };
+      routes: { getAllEntries: () => readonly RouteEntry[] };
     };
 
     for (const entry of routes.getAllEntries()) {
       const target = entry.target as unknown as Record<string, unknown>;
       if (typeof target?.getAllEntries === "function") {
-        const children = (
-          target.getAllEntries as () => readonly {
-            name: { original: string };
-          }[]
-        )();
-        const names = new Set<string>();
-        for (const child of children) {
-          names.add(child.name.original);
-        }
-        _subcommandsByRoute.set(entry.name.original, names);
+        _subcommandsByRoute.set(
+          entry.name.original,
+          collectChildNames(
+            target as { getAllEntries: () => readonly RouteEntry[] }
+          )
+        );
       }
     }
   }

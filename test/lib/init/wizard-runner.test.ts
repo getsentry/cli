@@ -628,8 +628,11 @@ describe("runWizard", { timeout: TEST_TIMEOUT_MS }, () => {
         ) as string[] | undefined;
         expect(call).toBeDefined();
         const msg = call?.[0] ?? "";
-        expect(msg.length).toBeLessThanOrEqual(36);
-        expect(msg.endsWith("…")).toBe(true);
+        // The rendered message contains ANSI codes, so check visible content
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escape sequences
+        const plain = msg.replace(/\x1b\[[^m]*m/g, "");
+        expect(plain.length).toBeLessThanOrEqual(36);
+        expect(plain.endsWith("…")).toBe(true);
       } finally {
         Object.defineProperty(process.stdout, "columns", {
           value: origColumns,
@@ -939,7 +942,7 @@ describe("describeLocalOp", () => {
           params: { paths: ["src/settings.py"] },
         })
       );
-      expect(msg).toBe("Reading settings.py...");
+      expect(msg).toBe("Reading `settings.py`...");
     });
 
     test("two files shows both basenames", () => {
@@ -949,7 +952,7 @@ describe("describeLocalOp", () => {
           params: { paths: ["src/settings.py", "src/urls.py"] },
         })
       );
-      expect(msg).toBe("Reading settings.py, urls.py...");
+      expect(msg).toBe("Reading `settings.py`, `urls.py`...");
     });
 
     test("three+ files shows count and first two basenames", () => {
@@ -961,7 +964,7 @@ describe("describeLocalOp", () => {
           },
         })
       );
-      expect(msg).toBe("Reading 4 files (one.py, two.py, ...)...");
+      expect(msg).toBe("Reading 4 files (`one.py`, `two.py`, ...)...");
     });
 
     test("empty paths array", () => {
@@ -980,7 +983,7 @@ describe("describeLocalOp", () => {
           params: { paths: ["requirements.txt"] },
         })
       );
-      expect(msg).toBe("Checking requirements.txt...");
+      expect(msg).toBe("Checking `requirements.txt`...");
     });
 
     test("multiple files shows count", () => {
@@ -990,7 +993,7 @@ describe("describeLocalOp", () => {
           params: { paths: ["a.py", "b.py", "c.py"] },
         })
       );
-      expect(msg).toBe("Checking 3 files (a.py, b.py, ...)...");
+      expect(msg).toBe("Checking 3 files (`a.py`, `b.py`, ...)...");
     });
   });
 
@@ -1004,7 +1007,7 @@ describe("describeLocalOp", () => {
           },
         })
       );
-      expect(msg).toBe("Creating sentry.py...");
+      expect(msg).toBe("Creating `sentry.py`...");
     });
 
     test("single modify shows verb and basename", () => {
@@ -1016,7 +1019,7 @@ describe("describeLocalOp", () => {
           },
         })
       );
-      expect(msg).toBe("Modifying settings.py...");
+      expect(msg).toBe("Modifying `settings.py`...");
     });
 
     test("single delete shows verb and basename", () => {
@@ -1028,7 +1031,7 @@ describe("describeLocalOp", () => {
           },
         })
       );
-      expect(msg).toBe("Deleting old.js...");
+      expect(msg).toBe("Deleting `old.js`...");
     });
 
     test("multiple patches shows count and breakdown", () => {
@@ -1056,7 +1059,7 @@ describe("describeLocalOp", () => {
           params: { commands: ["pip install sentry-sdk"] },
         })
       );
-      expect(msg).toBe("Running pip install sentry-sdk...");
+      expect(msg).toBe("Running `pip install sentry-sdk`...");
     });
 
     test("multiple commands shows count and first", () => {
@@ -1068,7 +1071,7 @@ describe("describeLocalOp", () => {
           },
         })
       );
-      expect(msg).toBe("Running 2 commands (pip install sentry-sdk, ...)...");
+      expect(msg).toBe("Running 2 commands (`pip install sentry-sdk`, ...)...");
     });
   });
 
@@ -1089,7 +1092,7 @@ describe("describeLocalOp", () => {
           params: { name: "my-app", platform: "python-django" },
         })
       );
-      expect(msg).toBe('Creating project "my-app" (python-django)...');
+      expect(msg).toBe("Creating project `my-app` (python-django)...");
     });
   });
 });

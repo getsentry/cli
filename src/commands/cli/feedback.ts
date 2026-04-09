@@ -63,7 +63,13 @@ export const feedbackCommand = buildCommand({
       );
     }
 
-    Sentry.captureFeedback({ message });
+    const { getUserInfo } = await import("../../lib/db/user.js");
+    const user = getUserInfo();
+    Sentry.captureFeedback({
+      message,
+      email: user?.email,
+      name: user?.name ?? user?.username,
+    });
 
     // Flush to ensure feedback is sent before process exits
     const sent = await Sentry.flush(3000);

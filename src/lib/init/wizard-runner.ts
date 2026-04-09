@@ -25,6 +25,7 @@ import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
 import { WizardError } from "../errors.js";
 import { terminalLink } from "../formatters/colors.js";
+import { renderInlineMarkdown, safeCodeSpan } from "../formatters/markdown.js";
 import { resolveOrCreateTeam } from "../resolve-team.js";
 import { slugify } from "../utils.js";
 import {
@@ -89,7 +90,16 @@ function truncateForTerminal(message: string): string {
   if (message.length <= maxWidth) {
     return message;
   }
-  return `${message.slice(0, maxWidth - 1)}…`;
+  let truncated = message.slice(0, maxWidth - 1);
+  // If truncation split a backtick code span, drop the unmatched backtick
+  // so renderInlineMarkdown doesn't produce a literal ` character.
+  const backtickCount = truncated.split("`").length - 1;
+  if (backtickCount % 2 !== 0) {
+    const lastBacktick = truncated.lastIndexOf("`");
+    truncated =
+      truncated.slice(0, lastBacktick) + truncated.slice(lastBacktick + 1);
+  }
+  return `${truncated}…`;
 }
 
 /**
@@ -112,7 +122,7 @@ export function describeLocalOp(payload: LocalOpPayload): string {
       const first = patches[0];
       if (patches.length === 1 && first) {
         const verb = patchActionVerb(first.action);
-        return `${verb} ${basename(first.path)}...`;
+        return `${verb} ${safeCodeSpan(basename(first.path))}...`;
       }
       const counts = patchActionCounts(patches);
       return `Applying ${patches.length} file changes (${counts})...`;
@@ -121,14 +131,14 @@ export function describeLocalOp(payload: LocalOpPayload): string {
       const cmds = payload.params.commands;
       const first = cmds[0];
       if (cmds.length === 1 && first) {
-        return `Running ${first}...`;
+        return `Running ${safeCodeSpan(first)}...`;
       }
-      return `Running ${cmds.length} commands (${first ?? "..."}, ...)...`;
+      return `Running ${cmds.length} commands (${safeCodeSpan(first ?? "...")}, ...)...`;
     }
     case "list-dir":
       return "Listing directory...";
     case "create-sentry-project":
-      return `Creating project "${payload.params.name}" (${payload.params.platform})...`;
+      return `Creating project ${safeCodeSpan(payload.params.name)} (${payload.params.platform})...`;
     case "detect-sentry":
       return "Checking for existing Sentry setup...";
     default:
@@ -144,12 +154,12 @@ function describeFilePaths(verb: string, paths: string[]): string {
     return `${verb} files...`;
   }
   if (paths.length === 1) {
-    return `${verb} ${basename(first)}...`;
+    return `${verb} ${safeCodeSpan(basename(first))}...`;
   }
   if (paths.length === 2 && second) {
-    return `${verb} ${basename(first)}, ${basename(second)}...`;
+    return `${verb} ${safeCodeSpan(basename(first))}, ${safeCodeSpan(basename(second))}...`;
   }
-  return `${verb} ${paths.length} files (${basename(first)}${second ? `, ${basename(second)}` : ""}, ...)...`;
+  return `${verb} ${paths.length} files (${safeCodeSpan(basename(first))}${second ? `, ${safeCodeSpan(basename(second))}` : ""}, ...)...`;
 }
 
 /** Map a patch action to a user-facing verb. */
@@ -189,12 +199,12 @@ async function handleSuspendedStep(
 
   if (payload.type === "local-op") {
     const message = describeLocalOp(payload);
-    spin.message(truncateForTerminal(message));
+    spin.message(renderInlineMarkdown(truncateForTerminal(message)));
 
     const localResult = await handleLocalOp(payload, options);
 
     if (localResult.message) {
-      spin.stop(localResult.message);
+      spin.stop(renderInlineMarkdown(localResult.message));
       spin.start("Processing...");
     }
 

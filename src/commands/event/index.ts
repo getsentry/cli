@@ -1,4 +1,4 @@
-import { buildRouteMap } from "@stricli/core";
+import { buildRouteMap } from "../../lib/route-map.js";
 import { listCommand } from "./list.js";
 import { viewCommand } from "./view.js";
 
@@ -8,7 +8,6 @@ export const eventRoute = buildRouteMap({
     list: listCommand,
   },
   defaultCommand: "view",
-  aliases: { show: "view" },
   docs: {
     brief: "View and list Sentry events",
     fullDescription:

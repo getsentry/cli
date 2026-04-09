@@ -123,7 +123,7 @@ async function handleMultiSelect(
       label: featureLabel(feature),
       hint: featureHint(feature),
     })),
-    initialValues: optional,
+    initialValues: optional.filter((f) => f === "performanceMonitoring"),
     required: false,
   });
 
