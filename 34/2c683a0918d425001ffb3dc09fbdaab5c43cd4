@@ -1,0 +1,117 @@
+# Plan: Add `main` branch preview + rename umbrella dir to `_preview`
+
+## Goal
+Add a continuously-updated `main` branch docs preview alongside PR previews. Rename the umbrella directory from `pr-preview` to `_preview`. Production deploys stay with Craft.
+
+**Result:**
+- `cli.sentry.dev/` → production (deployed by Craft on release)
+- `cli.sentry.dev/_preview/pr-main/` → latest main branch preview
+- `cli.sentry.dev/_preview/pr-123/` → PR preview
+
+## Files to Change (2 files)
+
+### 1. `.github/workflows/docs-preview.yml`
+
+Extend the existing workflow to also trigger on push to `main`:
+
+- **Add trigger**: `push: branches: [main]` with same `paths` filters as `pull_request`
+- **Rename umbrella-dir**: `pr-preview` → `_preview`
+- **Update `DOCS_BASE_PATH`**: Use `/_preview/pr-main` for push events, `/_preview/pr-<N>` for PRs
+- **Conditional deploy step**: Use `rossjrw/pr-preview-action` for both, but with different inputs:
+  - **Push to main**: `action: deploy`, `pr-number: main`, `comment: false`
+  - **PR events**: `action: auto` (same as today, auto-deploys on open/sync, removes on close)
+- **Concurrency**: Change from `docs-gh-pages` to `docs-preview-${{ github.ref }}` — each ref gets its own lock, so PR deploys don't block main deploys and vice versa
+
+```yaml
+name: Docs Preview
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'src/**'
+      - 'script/generate-command-docs.ts'
+      - 'script/generate-skill.ts'
+      - '.github/workflows/docs-preview.yml'
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'src/**'
+      - 'script/generate-command-docs.ts'
+      - 'script/generate-skill.ts'
+      - '.github/workflows/docs-preview.yml'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: docs-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v5
+        id: cache
+        with:
+          path: node_modules
+          key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Generate docs content
+        run: bun run generate:schema && bun run generate:docs
+
+      - name: Build Docs for Preview
+        working-directory: docs
+        env:
+          DOCS_BASE_PATH: ${{ github.event_name == 'push'
+            && '/_preview/pr-main'
+            || format('/_preview/pr-{0}', github.event.pull_request.number) }}
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Ensure .nojekyll at gh-pages root
+        run: |
+          # ... (same as today, unchanged)
+
+      - name: Deploy Preview
+        uses: rossjrw/pr-preview-action@v1
+        with:
+          source-dir: docs/dist/
+          preview-branch: gh-pages
+          umbrella-dir: _preview
+          pages-base-url: cli.sentry.dev
+          action: ${{ github.event_name == 'push' && 'deploy' || 'auto' }}
+          pr-number: ${{ github.event_name == 'push' && 'main' || github.event.pull_request.number }}
+          comment: ${{ github.event_name != 'push' }}
+```
+
+### 2. `docs/astro.config.mjs` (line 72)
+
+Update the landing page detection regex to match the new `_preview` path and include `main`:
+
+```js
+// Before:
+/^\/pr-preview\/pr-\d+\/?$/.test(path);
+
+// After:
+/^\/_preview\/pr-(\d+|main)\/?$/.test(path);
+```
+
+## What stays the same
+- `.craft.yml` — unchanged, production deploys via Craft remain as-is
+- `.github/workflows/ci.yml` — unchanged, `build-docs` job still builds + packages for Craft
+- Old `pr-preview/` directory on `gh-pages` — left as-is, harmless
+
+## Verification
+1. Open a PR touching docs → verify preview deploys to `cli.sentry.dev/_preview/pr-<N>/`
+2. Merge to main → verify preview deploys to `cli.sentry.dev/_preview/pr-main/`
+3. Close a PR without merging → verify `_preview/pr-<N>/` is cleaned up
+4. Production site at `cli.sentry.dev/` remains unaffected
