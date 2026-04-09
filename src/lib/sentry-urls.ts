@@ -221,3 +221,21 @@ export function buildTraceUrl(orgSlug: string, traceId: string): string {
   }
   return `${getSentryBaseUrl()}/organizations/${orgSlug}/traces/${traceId}/`;
 }
+
+/**
+ * Build URL to view a release in Sentry.
+ *
+ * Version is URI-encoded since release versions often contain special
+ * characters (e.g., `sentry-cli@0.24.0`, `1.0.0-beta+build.123`).
+ *
+ * @param orgSlug - Organization slug
+ * @param version - Release version string
+ * @returns Full URL to the release detail page
+ */
+export function buildReleaseUrl(orgSlug: string, version: string): string {
+  const encoded = encodeURIComponent(version);
+  if (isSaaS()) {
+    return `${getOrgBaseUrl(orgSlug)}/releases/${encoded}/`;
+  }
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/releases/${encoded}/`;
+}

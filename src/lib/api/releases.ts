@@ -11,6 +11,7 @@ import {
   createANewReleaseForAnOrganization,
   deleteAnOrganization_sRelease,
   listAnOrganization_sReleases,
+  listAProject_sEnvironments,
   listARelease_sDeploys,
   retrieveAnOrganization_sRelease,
   updateAnOrganization_sRelease,
@@ -28,6 +29,7 @@ import {
   unwrapPaginatedResult,
   unwrapResult,
 } from "./infrastructure.js";
+import { getProject } from "./projects.js";
 import { listRepositoriesPaginated } from "./repositories.js";
 
 // We cast through `unknown` to bridge the gap between the SDK's internal
@@ -38,30 +40,51 @@ import { listRepositoriesPaginated } from "./repositories.js";
  * List releases in an organization with pagination control.
  * Returns a single page of results with cursor metadata.
  *
+ * When `health` is true, each release's `projects[].healthData` is populated
+ * with adoption percentages, crash-free rates, and session/user counts.
+ *
  * @param orgSlug - Organization slug
- * @param options - Pagination, query, and sort options
+ * @param options - Pagination, query, sort, and health options
  * @returns Single page of releases with cursor metadata
  */
+/** Options for listing releases with pagination. */
+export type ListReleasesOptions = {
+  cursor?: string;
+  perPage?: number;
+  query?: string;
+  sort?: string;
+  /** Include per-project health/adoption data in the response. */
+  health?: boolean;
+  /** Filter by numeric project IDs (repeated query param). */
+  project?: number[];
+  /** Filter by environment names (repeated query param). */
+  environment?: string[];
+  /** Stats period for health data, e.g. "24h", "7d", "90d". */
+  statsPeriod?: string;
+  /** Filter by release status: "open" (active) or "archived". */
+  status?: string;
+};
+
 export async function listReleasesPaginated(
   orgSlug: string,
-  options: {
-    cursor?: string;
-    perPage?: number;
-    query?: string;
-    sort?: string;
-  } = {}
+  options: ListReleasesOptions = {}
 ): Promise<PaginatedResponse<OrgReleaseResponse[]>> {
   const config = await getOrgSdkConfig(orgSlug);
 
   const result = await listAnOrganization_sReleases({
     ...config,
     path: { organization_id_or_slug: orgSlug },
-    // per_page and sort are supported at runtime but not in the OpenAPI spec
+    // Most query params are supported at runtime but absent from the OpenAPI spec
     query: {
       cursor: options.cursor,
       per_page: options.perPage ?? 25,
       query: options.query,
       sort: options.sort,
+      health: options.health ? 1 : undefined,
+      project: options.project,
+      environment: options.environment,
+      statsPeriod: options.statsPeriod,
+      status: options.status,
     } as { cursor?: string },
   });
 
@@ -74,16 +97,61 @@ export async function listReleasesPaginated(
 }
 
 /**
+ * List releases scoped to a specific project.
+ *
+ * Resolves the project slug to a numeric ID (required by the API's
+ * `project` query param), then fetches with health data.
+ */
+export async function listReleasesForProject(
+  orgSlug: string,
+  projectSlug: string,
+  options: Omit<ListReleasesOptions, "project"> = {}
+): Promise<OrgReleaseResponse[]> {
+  // Resolve slug → numeric ID (the API requires numeric project IDs)
+  const info = await getProject(orgSlug, projectSlug);
+  const numericId = Number(info.id);
+  const projectIds =
+    Number.isFinite(numericId) && numericId > 0 ? [numericId] : undefined;
+  const { data } = await listReleasesPaginated(orgSlug, {
+    ...options,
+    project: projectIds,
+    perPage: options.perPage ?? 100,
+  });
+  return data;
+}
+
+/** Sort options for the release list endpoint. */
+export type ReleaseSortValue =
+  | "date"
+  | "sessions"
+  | "users"
+  | "crash_free_sessions"
+  | "crash_free_users";
+
+/**
  * Get a single release by version.
  * Version is URL-encoded by the SDK.
  *
+ * When `health` is true, each project in the response includes a
+ * `healthData` object with adoption percentages, crash-free rates,
+ * and session/user counts for the requested period.
+ *
  * @param orgSlug - Organization slug
  * @param version - Release version string (e.g., "1.0.0", "sentry-cli@0.24.0")
+ * @param options - Optional health and adoption query parameters
  * @returns Full release detail
  */
 export async function getRelease(
   orgSlug: string,
-  version: string
+  version: string,
+  options?: {
+    /** Include per-project health/adoption data. */
+    health?: boolean;
+    /** Include adoption stage info (e.g., "adopted", "low_adoption"). */
+    adoptionStages?: boolean;
+    /** Period for health stats: "24h", "7d", "14d", etc. Defaults to "24h". */
+    healthStatsPeriod?: string;
+  }
 ): Promise<OrgReleaseResponse> {
   const config = await getOrgSdkConfig(orgSlug);
 
@@ -92,6 +160,21 @@ export async function getRelease(
     path: {
       organization_id_or_slug: orgSlug,
       version,
+    },
+    query: {
+      health: options?.health,
+      adoptionStages: options?.adoptionStages,
+      healthStatsPeriod: options?.healthStatsPeriod as
+        | "24h"
+        | "7d"
+        | "14d"
+        | "30d"
+        | "1h"
+        | "1d"
+        | "2d"
+        | "48h"
+        | "90d"
+        | undefined,
     },
   });
 
@@ -446,4 +529,38 @@ export function setCommitsLocal(
   }>
 ): Promise<OrgReleaseResponse> {
   return updateRelease(orgSlug, version, { commits });
+}
+
+// ---------------------------------------------------------------------------
+// Environments
+// ---------------------------------------------------------------------------
+
+/** A visible project environment. */
+export type ProjectEnvironment = {
+  id: string;
+  name: string;
+  isHidden: boolean;
+};
+
+/**
+ * List visible environments for a project.
+ *
+ * Lightweight call — returns a small array of `{ id, name, isHidden }`.
+ * Used to auto-detect a production environment for smart defaults.
+ */
+export async function listProjectEnvironments(
+  orgSlug: string,
+  projectSlug: string
+): Promise<ProjectEnvironment[]> {
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await listAProject_sEnvironments({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      project_id_or_slug: projectSlug,
+    },
+    query: { visibility: "visible" },
+  });
+  const data = unwrapResult(result, "Failed to list environments");
+  return data as unknown as ProjectEnvironment[];
 }

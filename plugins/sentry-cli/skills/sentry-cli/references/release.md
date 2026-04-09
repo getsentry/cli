@@ -13,16 +13,20 @@ Work with Sentry releases
 
 ### `sentry release list <org/project>`
 
-List releases
+List releases with adoption and health metrics
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of releases to list - (default: "25")`
+- `-s, --sort <value> - Sort: date, sessions, users, crash_free_sessions (cfs), crash_free_users (cfu) - (default: "date")`
+- `-e, --environment <value>... - Filter by environment (repeatable, comma-separated)`
+- `-t, --period <value> - Health stats period (e.g., 24h, 7d, 14d, 90d) - (default: "90d")`
+- `--status <value> - Filter by status: open (default) or archived - (default: "open")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
 ### `sentry release view <org/version...>`
 
-View release details
+View release details with health metrics
 
 **Flags:**
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
