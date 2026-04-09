@@ -346,8 +346,8 @@ Manage Sentry dashboards
 
 Work with Sentry releases
 
-- `sentry release list <org/project>` — List releases
-- `sentry release view <org/version...>` — View release details
+- `sentry release list <org/project>` — List releases with adoption and health metrics
+- `sentry release view <org/version...>` — View release details with health metrics
 - `sentry release create <org/version...>` — Create a release
 - `sentry release finalize <org/version...>` — Finalize a release
 - `sentry release delete <org/version...>` — Delete a release
