@@ -15,9 +15,18 @@
 
 import { opendir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { anyTrue } from "../promises.js";
+import {
+  applyGlobalFallbacks,
+  applySentryCliRcDir,
+  createSentryCliRcConfig,
+  CONFIG_FILENAME as SENTRYCLIRC_FILENAME,
+  type SentryCliRcConfig,
+  setSentryCliRcCache,
+} from "../sentryclirc.js";
 import { withFsSpan, withTracingSpan } from "../telemetry.js";
+import { walkUpFrom } from "../walk-up.js";
 import { ENV_FILES, extractDsnFromEnvContent } from "./env-file.js";
 import { handleFileError } from "./fs-utils.js";
 import { createDetectedDsn } from "./parser.js";
@@ -74,6 +83,9 @@ const CI_MARKERS = [
 
 /** Language/package markers - strong project boundary */
 const LANGUAGE_MARKERS = [
+  // Sentry CLI config — treated as a project boundary (not definitive root,
+  // so the walk continues past it to find VCS markers in monorepos)
+  SENTRYCLIRC_FILENAME,
   // JavaScript/Node ecosystem
   "package.json",
   "deno.json",
@@ -393,14 +405,6 @@ function selectProjectRoot(
   return { projectRoot: fallback, reason: "fallback" };
 }
 
-/** State tracked during directory walk-up */
-type WalkState = {
-  currentDir: string;
-  levelsTraversed: number;
-  languageMarkerAt: string | null;
-  buildSystemAt: string | null;
-};
-
 /**
  * Create result when DSN is found in .env file
  */
@@ -448,89 +452,96 @@ function createRepoRootResult(
 }
 
 /**
+ * Finalize accumulated sentryclirc config: apply global fallbacks and cache.
+ */
+async function finalizeSentryCliRc(
+  cwd: string,
+  config: SentryCliRcConfig
+): Promise<void> {
+  await applyGlobalFallbacks(config);
+  setSentryCliRcCache(cwd, config);
+}
+
+/**
  * Walk up directories searching for project root.
  *
- * Loop logic:
- * 1. Always process starting directory (do-while ensures this)
- * 2. Stop at stopBoundary AFTER processing it (break before moving to parent)
- * 3. Stop at filesystem root (parentDir === currentDir)
+ * Uses the shared {@link walkUpFrom} generator for directory traversal
+ * (with symlink cycle detection). Also reads `.sentryclirc` files at each
+ * level and populates the sentryclirc cache (with global fallbacks applied),
+ * so that a later `loadSentryCliRc` call for the same `cwd` is a cache hit
+ * instead of a second walk.
+ *
+ * Stops at the `stopBoundary` (home dir) after processing it, or when the
+ * generator reaches the filesystem root.
  */
 async function walkUpDirectories(
   resolvedStart: string,
   stopBoundary: string
 ): Promise<ProjectRootResult> {
-  const state: WalkState = {
-    currentDir: resolvedStart,
-    levelsTraversed: 0,
-    languageMarkerAt: null,
-    buildSystemAt: null,
-  };
+  let levelsTraversed = 0;
+  let languageMarkerAt: string | null = null;
+  let buildSystemAt: string | null = null;
+  const rcConfig = createSentryCliRcConfig();
 
-  // do-while ensures starting directory is always checked,
-  // even when it equals the stop boundary (e.g., user runs from home dir)
-  do {
-    state.levelsTraversed += 1;
+  for await (const currentDir of walkUpFrom(resolvedStart)) {
+    levelsTraversed += 1;
 
-    const { dsnResult, repoRootResult, hasLang, hasBuild } =
-      await processDirectoryLevel(
-        state.currentDir,
-        state.languageMarkerAt,
-        state.buildSystemAt
-      );
+    // Check project-root markers AND .sentryclirc in parallel
+    const [{ dsnResult, repoRootResult, hasLang, hasBuild }] =
+      await Promise.all([
+        processDirectoryLevel(currentDir, languageMarkerAt, buildSystemAt),
+        applySentryCliRcDir(rcConfig, currentDir),
+      ]);
 
     // 1. Check for DSN in .env files - immediate return (unless at/above home directory)
     // Don't use a .env in the home directory as a project root indicator,
     // as users may have global configs that shouldn't define project boundaries
-    if (dsnResult && state.currentDir !== stopBoundary) {
-      return createDsnFoundResult(
-        state.currentDir,
-        dsnResult,
-        state.levelsTraversed
-      );
+    if (dsnResult && currentDir !== stopBoundary) {
+      await finalizeSentryCliRc(resolvedStart, rcConfig);
+      return createDsnFoundResult(currentDir, dsnResult, levelsTraversed);
     }
 
     // 2. Check for VCS/CI markers - definitive root, stop walking
     if (repoRootResult.found) {
+      await finalizeSentryCliRc(resolvedStart, rcConfig);
       return createRepoRootResult(
-        state.currentDir,
+        currentDir,
         repoRootResult.type,
-        state.levelsTraversed,
-        state.languageMarkerAt
+        levelsTraversed,
+        languageMarkerAt
       );
     }
 
     // 3. Remember language marker (closest to cwd wins)
-    if (!state.languageMarkerAt && hasLang) {
-      state.languageMarkerAt = state.currentDir;
+    if (!languageMarkerAt && hasLang) {
+      languageMarkerAt = currentDir;
     }
 
     // 4. Remember build system marker (last resort)
-    if (!state.buildSystemAt && hasBuild) {
-      state.buildSystemAt = state.currentDir;
+    if (!buildSystemAt && hasBuild) {
+      buildSystemAt = currentDir;
     }
 
-    // Move to parent directory (or stop if at boundary/root)
-    const parentDir = dirname(state.currentDir);
-    const shouldStop =
-      state.currentDir === stopBoundary || parentDir === state.currentDir;
-    if (shouldStop) {
+    // Stop at boundary after processing it (e.g., home dir)
+    if (currentDir === stopBoundary) {
       break;
     }
-    state.currentDir = parentDir;
-    // biome-ignore lint/correctness/noConstantCondition: loop exits via break
-  } while (true);
+  }
+
+  // Populate sentryclirc cache from accumulated data
+  setSentryCliRcCache(resolvedStart, rcConfig);
 
   // Determine project root from candidates (priority order)
   const selected = selectProjectRoot(
-    state.languageMarkerAt,
-    state.buildSystemAt,
+    languageMarkerAt,
+    buildSystemAt,
     resolvedStart
   );
 
   return {
     projectRoot: selected.projectRoot,
     reason: selected.reason,
-    levelsTraversed: state.levelsTraversed,
+    levelsTraversed,
   };
 }
 
