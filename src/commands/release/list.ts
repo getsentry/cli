@@ -720,10 +720,7 @@ export const listCommand = buildListCommand("release", {
         `Environment: ${resolvedExtra.environment.join(", ")} (use -e to change)`
       );
     }
-    const hint =
-      result.items.length > 0 && hintParts.length > 0
-        ? hintParts.join("\n")
-        : undefined;
+    const hint = hintParts.length > 0 ? hintParts.join("\n") : undefined;
     return { hint };
   },
 });
