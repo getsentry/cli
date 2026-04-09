@@ -8,8 +8,9 @@
  * produced by script/generate-skill.ts), so no network fetch is needed.
  */
 
-import { existsSync, mkdirSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { captureException } from "@sentry/node-core/light";
 import { SKILL_FILES } from "../generated/skill-content.js";
 
 /** Where skills are installed */
@@ -62,6 +63,16 @@ export async function installAgentSkills(
     return null;
   }
 
+  // Verify .claude is writable before attempting file creation.
+  // In sandboxed environments (e.g., Claude Code sandbox), .claude may exist
+  // but be read-only. Some sandboxes terminate the process on write attempts,
+  // bypassing JavaScript error handling — so we must check before writing.
+  try {
+    accessSync(join(homeDir, ".claude"), constants.W_OK);
+  } catch {
+    return null;
+  }
+
   try {
     const skillPath = getSkillInstallPath(homeDir);
     const skillDir = dirname(skillPath);
@@ -86,7 +97,11 @@ export async function installAgentSkills(
       created: !alreadyExists,
       referenceCount,
     };
-  } catch {
+  } catch (error) {
+    captureException(error, {
+      level: "warning",
+      tags: { "setup.step": "agent-skills" },
+    });
     return null;
   }
 }
