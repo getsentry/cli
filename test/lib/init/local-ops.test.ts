@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs, {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -751,7 +752,7 @@ describe("handleLocalOp", () => {
     });
 
     test("modifies an existing file", async () => {
-      writeFileSync(join(testDir, "existing.txt"), "old");
+      writeFileSync(join(testDir, "existing.txt"), "old content here");
 
       const payload: ApplyPatchsetPayload = {
         type: "local-op",
@@ -759,7 +760,11 @@ describe("handleLocalOp", () => {
         cwd: testDir,
         params: {
           patches: [
-            { path: "existing.txt", action: "modify", patch: "new content" },
+            {
+              path: "existing.txt",
+              action: "modify",
+              edits: [{ oldString: "old content", newString: "new content" }],
+            },
           ],
         },
       };
@@ -767,7 +772,7 @@ describe("handleLocalOp", () => {
       const result = await handleLocalOp(payload, options);
       expect(result.ok).toBe(true);
       expect(fs.readFileSync(join(testDir, "existing.txt"), "utf-8")).toBe(
-        "new content"
+        "new content here"
       );
     });
 
@@ -777,7 +782,13 @@ describe("handleLocalOp", () => {
         operation: "apply-patchset",
         cwd: testDir,
         params: {
-          patches: [{ path: "ghost.txt", action: "modify", patch: "content" }],
+          patches: [
+            {
+              path: "ghost.txt",
+              action: "modify",
+              edits: [{ oldString: "x", newString: "y" }],
+            },
+          ],
         },
       };
 
@@ -818,7 +829,7 @@ describe("handleLocalOp", () => {
     });
 
     test("applies multiple patches in sequence", async () => {
-      writeFileSync(join(testDir, "to-modify.txt"), "old");
+      writeFileSync(join(testDir, "to-modify.txt"), "old content");
       writeFileSync(join(testDir, "to-delete.txt"), "bye");
 
       const payload: ApplyPatchsetPayload = {
@@ -828,8 +839,12 @@ describe("handleLocalOp", () => {
         params: {
           patches: [
             { path: "created.txt", action: "create", patch: "new" },
-            { path: "to-modify.txt", action: "modify", patch: "updated" },
-            { path: "to-delete.txt", action: "delete", patch: "" },
+            {
+              path: "to-modify.txt",
+              action: "modify",
+              edits: [{ oldString: "old content", newString: "updated" }],
+            },
+            { path: "to-delete.txt", action: "delete" },
           ],
         },
       };
@@ -910,6 +925,152 @@ describe("handleLocalOp", () => {
       const result = await handleLocalOp(payload, dryRunOptions);
       expect(result.ok).toBe(false);
       expect(result.error).toContain("outside project directory");
+    });
+
+    test("modifies file using edits (oldString/newString)", async () => {
+      writeFileSync(
+        join(testDir, "config.ts"),
+        [
+          'import * as Sentry from "@sentry/nextjs";',
+          "",
+          "Sentry.init({",
+          '  dsn: "https://old@sentry.io/1",',
+          "  tracesSampleRate: 1.0,",
+          "});",
+        ].join("\n")
+      );
+
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: "config.ts",
+              action: "modify",
+              edits: [
+                {
+                  oldString: '  dsn: "https://old@sentry.io/1",',
+                  newString: '  dsn: "https://new@sentry.io/2",',
+                },
+                {
+                  oldString: "  tracesSampleRate: 1.0,",
+                  newString:
+                    "  tracesSampleRate: 0.5,\n  replaysSessionSampleRate: 0.1,",
+                },
+              ],
+            },
+          ],
+        },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      expect(result.ok).toBe(true);
+
+      const content = readFileSync(join(testDir, "config.ts"), "utf-8");
+      expect(content).toContain("new@sentry.io/2");
+      expect(content).not.toContain("old@sentry.io/1");
+      expect(content).toContain("tracesSampleRate: 0.5,");
+      expect(content).toContain("replaysSessionSampleRate: 0.1,");
+    });
+
+    test("edits-based modify fails gracefully when oldString not found", async () => {
+      writeFileSync(join(testDir, "app.ts"), "const x = 1;\n");
+
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: "app.ts",
+              action: "modify",
+              edits: [
+                {
+                  oldString: "this text does not exist",
+                  newString: "replacement",
+                },
+              ],
+            },
+          ],
+        },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('Edit #1 failed on "app.ts"');
+    });
+
+    test("edits-based modify with fuzzy matching (indentation difference)", async () => {
+      writeFileSync(
+        join(testDir, "fuzzy.ts"),
+        "    const x = 1;\n    const y = 2;\n"
+      );
+
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: "fuzzy.ts",
+              action: "modify",
+              edits: [
+                {
+                  oldString: "  const x = 1;\n  const y = 2;",
+                  newString: "  const x = 10;\n  const y = 20;",
+                },
+              ],
+            },
+          ],
+        },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      expect(result.ok).toBe(true);
+
+      const content = readFileSync(join(testDir, "fuzzy.ts"), "utf-8");
+      expect(content).toContain("const x = 10;");
+      expect(content).toContain("const y = 20;");
+    });
+
+    test("mixed create + edits-based modify in single patchset", async () => {
+      writeFileSync(join(testDir, "existing.ts"), 'const old = "value";\n');
+
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: "new-file.ts",
+              action: "create",
+              patch: 'import * as Sentry from "@sentry/node";\n',
+            },
+            {
+              path: "existing.ts",
+              action: "modify",
+              edits: [
+                {
+                  oldString: 'const old = "value";',
+                  newString: 'const updated = "new-value";',
+                },
+              ],
+            },
+          ],
+        },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      expect(result.ok).toBe(true);
+
+      expect(fs.existsSync(join(testDir, "new-file.ts"))).toBe(true);
+      const content = readFileSync(join(testDir, "existing.ts"), "utf-8");
+      expect(content).toContain('const updated = "new-value"');
     });
   });
 });
