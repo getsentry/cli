@@ -662,7 +662,7 @@ jobs:
 
   build-docs:
     name: Build Docs
-    needs: [lint]
+    needs: [lint, build-binary]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -677,6 +677,13 @@ jobs:
       - name: Get CLI version
         id: version
         run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+      - name: Download compiled CLI binary
+        uses: actions/download-artifact@v8
+        with:
+          name: sentry-linux-x64
+          path: dist-bin
+      - name: Make binary executable
+        run: chmod +x dist-bin/sentry-linux-x64
       - name: Generate docs content
         run: bun run generate:schema && bun run generate:docs
       - name: Build Docs
@@ -687,6 +694,25 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run build
+      # Inject debug IDs into the built JS files BEFORE packaging.
+      # This ensures deployed files have the //# debugId= comment and the
+      # _sentryDebugIds IIFE so runtime events carry debug_meta.
+      - name: Inject debug IDs
+        run: ./dist-bin/sentry-linux-x64 sourcemap inject docs/dist/
+      - name: Upload sourcemaps to Sentry
+        if: github.event_name == 'push'
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: sentry
+          SENTRY_PROJECT: cli-website
+        run: |
+          ./dist-bin/sentry-linux-x64 sourcemap upload docs/dist/ \
+            --release "${{ steps.version.outputs.version }}" \
+            --url-prefix "~/"
+      # Remove .map files — they were uploaded to Sentry but shouldn't
+      # be deployed to production.
+      - name: Remove sourcemaps from output
+        run: find docs/dist -name '*.map' -delete
       - name: Package Docs
         run: |
           cp .nojekyll docs/dist/
@@ -697,47 +723,10 @@ jobs:
           name: gh-pages
           path: gh-pages.zip
 
-  upload-docs-sourcemaps:
-    name: Upload Docs Sourcemaps
-    needs: [build-binary, build-docs]
-    # Only on main/release pushes (not PRs) — requires SENTRY_AUTH_TOKEN.
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: Get CLI version
-        id: version
-        run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
-      - name: Download compiled CLI binary
-        uses: actions/download-artifact@v8
-        with:
-          name: sentry-linux-x64
-          path: dist-bin
-      - name: Make binary executable
-        run: chmod +x dist-bin/sentry-linux-x64
-      - name: Download docs artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: gh-pages
-          path: .
-      - name: Extract docs
-        run: |
-          mkdir -p docs-dist
-          cd docs-dist && unzip ../gh-pages.zip
-      - name: Inject debug IDs and upload sourcemaps
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-        run: |
-          ./dist-bin/sentry-linux-x64 sourcemap inject docs-dist/
-          ./dist-bin/sentry-linux-x64 sourcemap upload docs-dist/ \
-            --release "${{ steps.version.outputs.version }}" \
-            --url-prefix "~/" \
-            sentry/cli-website
-
   ci-status:
     name: CI Status
     if: always()
-    needs: [changes, check-generated, eval-skill, build-binary, build-npm, build-docs, upload-docs-sourcemaps, test-e2e, generate-patches, publish-nightly]
+    needs: [changes, check-generated, eval-skill, build-binary, build-npm, build-docs, test-e2e, generate-patches, publish-nightly]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
