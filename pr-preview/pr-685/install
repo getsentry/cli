@@ -285,6 +285,7 @@ trap - EXIT
 if [[ "${SENTRY_INIT:-}" == "1" ]]; then
   sentry_bin=""
   for dir in "${SENTRY_INSTALL_DIR:-}" "$HOME/.local/bin" "$HOME/bin" "$HOME/.sentry/bin"; do
+    [[ -z "$dir" ]] && continue
     if [[ -x "${dir}/sentry" ]]; then
       sentry_bin="${dir}/sentry"
       break
@@ -292,6 +293,9 @@ if [[ "${SENTRY_INIT:-}" == "1" ]]; then
   done
   if [[ -z "$sentry_bin" ]]; then
     die "Cannot find installed sentry binary" "init"
+  fi
+  if [[ ! -e /dev/tty ]]; then
+    die "SENTRY_INIT=1 requires an interactive terminal (/dev/tty not available)" "init"
   fi
   exec "$sentry_bin" init </dev/tty
 fi
