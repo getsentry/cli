@@ -40,10 +40,10 @@ export const ENV_VAR_AGENTS = new Map<string, string>([
   ["OPENCODE_CLIENT", "opencode"],
   // Replit
   ["REPL_ID", "replit"],
-  // GitHub Copilot
+  // GitHub Copilot — COPILOT_GITHUB_TOKEN intentionally excluded because
+  // users may export it persistently for auth, causing false positives
   ["COPILOT_MODEL", "github-copilot"],
   ["COPILOT_ALLOW_ALL", "github-copilot"],
-  ["COPILOT_GITHUB_TOKEN", "github-copilot"],
   // Goose
   ["GOOSE_TERMINAL", "goose"],
   // Amp

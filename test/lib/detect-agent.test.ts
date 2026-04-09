@@ -157,9 +157,10 @@ describe("detectAgent", () => {
     expect(detectAgent()).toBe("github-copilot");
   });
 
-  test("COPILOT_GITHUB_TOKEN → github-copilot", () => {
+  test("COPILOT_GITHUB_TOKEN alone does not trigger detection (false positive risk)", () => {
+    withNoProcessTree();
     withEnv({ COPILOT_GITHUB_TOKEN: "ghu_xxx" });
-    expect(detectAgent()).toBe("github-copilot");
+    expect(detectAgent()).toBeUndefined();
   });
 
   // ── Goose ──────────────────────────────────────────────────────────
