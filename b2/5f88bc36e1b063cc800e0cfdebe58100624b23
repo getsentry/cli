@@ -1,0 +1,99 @@
+# Fix: `--fresh` flag should update cache with fresh response
+
+## Problem
+
+When `--fresh` (`-f`) is used on any view/list command (not just `dashboard view`), the flag calls `disableResponseCache()` which sets a process-global `cacheDisabledFlag = true`. This flag is checked by **both** `getCachedResponse()` (reads) and `storeCachedResponse()` (writes), causing both to no-op.
+
+This means:
+1. `--fresh` correctly skips reading stale cache ✅
+2. `--fresh` also skips **writing** the fresh API response back to cache ❌
+3. Next invocation without `--fresh` still sees the old stale entry (until TTL expires) ❌
+
+## Fix
+
+Separate the "skip cache reads" concern from the "skip cache writes" concern in `src/lib/response-cache.ts`.
+
+`--fresh` should only bypass reads. `SENTRY_NO_CACHE=1` should bypass both (it's an explicit "no caching at all" directive).
+
+### File: `src/lib/response-cache.ts`
+
+1. **Rename** `cacheDisabledFlag` → `cacheReadBypassed` for clarity
+2. **Add** a `isCacheWriteDisabled()` helper that only checks `SENTRY_NO_CACHE=1`
+3. **Update** `getCachedResponse()` to use `isCacheDisabled()` (unchanged — checks both flag + env)
+4. **Update** `storeCachedResponse()` to use `isCacheWriteDisabled()` (only env var, not the `--fresh` flag)
+5. **Update** `resetCacheState()` to reset the renamed flag (for tests)
+6. **Update** JSDoc on `disableResponseCache()` to clarify it only bypasses reads
+
+Concrete diff:
+
+```typescript
+// Before:
+let cacheDisabledFlag = false;
+
+export function disableResponseCache(): void {
+  cacheDisabledFlag = true;
+}
+
+export function resetCacheState(): void {
+  cacheDisabledFlag = false;
+}
+
+export function isCacheDisabled(): boolean {
+  return cacheDisabledFlag || getEnv().SENTRY_NO_CACHE === "1";
+}
+
+// In storeCachedResponse:
+if (method !== "GET" || isCacheDisabled() || ...) { return; }
+
+// After:
+let cacheReadBypassed = false;
+
+/**
+ * Bypass cache reads for the current process.
+ * Called when `--fresh` flag is passed. Fresh API responses are still
+ * written to cache so subsequent invocations serve updated data.
+ */
+export function disableResponseCache(): void {
+  cacheReadBypassed = true;
+}
+
+export function resetCacheState(): void {
+  cacheReadBypassed = false;
+}
+
+export function isCacheDisabled(): boolean {
+  return cacheReadBypassed || getEnv().SENTRY_NO_CACHE === "1";
+}
+
+/** Check if cache writes are disabled (only by env var, not --fresh). */
+function isCacheWriteDisabled(): boolean {
+  return getEnv().SENTRY_NO_CACHE === "1";
+}
+
+// In storeCachedResponse:
+if (method !== "GET" || isCacheWriteDisabled() || ...) { return; }
+```
+
+### File: `test/lib/response-cache.test.ts` (or similar)
+
+Add/update test cases:
+- **`--fresh` bypasses cache reads**: call `disableResponseCache()`, verify `getCachedResponse()` returns `undefined`
+- **`--fresh` still allows cache writes**: call `disableResponseCache()`, verify `storeCachedResponse()` writes to disk
+- **`SENTRY_NO_CACHE=1` blocks both reads AND writes**: verify neither function operates
+- **Round-trip with `--fresh`**: store stale entry → `disableResponseCache()` → fetch (bypasses stale) → fresh response stored → `resetCacheState()` → fetch (hits fresh cache)
+
+## Verification
+
+```bash
+# Run existing response-cache tests
+bun test test/lib/response-cache
+
+# Run full test suite to check for regressions
+bun run test:unit
+
+# Typecheck
+bun run typecheck
+
+# Lint
+bun run lint
+```
