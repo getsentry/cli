@@ -662,7 +662,7 @@ jobs:
 
   build-docs:
     name: Build Docs
-    needs: [lint]
+    needs: [lint, build-binary]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -674,18 +674,50 @@ jobs:
           key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: bun install --frozen-lockfile
+      - name: Get CLI version
+        id: version
+        run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+      - name: Download compiled CLI binary
+        uses: actions/download-artifact@v8
+        with:
+          name: sentry-linux-x64
+          path: dist-bin
+      - name: Make binary executable
+        run: chmod +x dist-bin/sentry-linux-x64
       - name: Generate docs content
         run: bun run generate:schema && bun run generate:docs
       - name: Build Docs
         working-directory: docs
+        env:
+          PUBLIC_SENTRY_ENVIRONMENT: production
+          SENTRY_RELEASE: ${{ steps.version.outputs.version }}
+          PUBLIC_SENTRY_RELEASE: ${{ steps.version.outputs.version }}
         run: |
           bun install --frozen-lockfile
           bun run build
+      # Inject debug IDs and upload sourcemaps. The inject step adds
+      # //# debugId= and the _sentryDebugIds IIFE to deployed JS files.
+      # Both steps require SENTRY_AUTH_TOKEN (the CLI checks auth on startup).
+      - name: Inject debug IDs and upload sourcemaps
+        if: github.event_name == 'push' && env.SENTRY_AUTH_TOKEN != ''
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: sentry
+          SENTRY_PROJECT: cli-website
+        run: |
+          ./dist-bin/sentry-linux-x64 sourcemap inject docs/dist/
+          ./dist-bin/sentry-linux-x64 sourcemap upload docs/dist/ \
+            --release "${{ steps.version.outputs.version }}" \
+            --url-prefix "~/"
+      # Remove .map files — they were uploaded to Sentry but shouldn't
+      # be deployed to production.
+      - name: Remove sourcemaps from output
+        run: find docs/dist -name '*.map' -delete
       - name: Package Docs
         run: |
           cp .nojekyll docs/dist/
           cd docs/dist && zip -r ../../gh-pages.zip .
-      - name: Upload artifact
+      - name: Upload docs artifact
         uses: actions/upload-artifact@v7
         with:
           name: gh-pages

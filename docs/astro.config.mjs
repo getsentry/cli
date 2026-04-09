@@ -11,14 +11,27 @@ export default defineConfig({
   markdown: {
     smartypants: false,
   },
+  // Generate sourcemaps for Sentry. "hidden" produces .map files without
+  // adding //# sourceMappingURL comments to the output (the debug IDs
+  // injected post-build by `sentry sourcemap inject` are used instead).
+  vite: {
+    build: {
+      sourcemap: "hidden",
+    },
+  },
   integrations: [
     sentry({
       project: "cli-website",
       org: "sentry",
-      authToken: process.env.SENTRY_AUTH_TOKEN,
-      sourceMapsUploadOptions: {
-        enabled: !!process.env.SENTRY_AUTH_TOKEN,
-      },
+      environment: process.env.PUBLIC_SENTRY_ENVIRONMENT ?? "development",
+      // Note: @sentry/astro v10 does not support the `release` build-time
+      // option (todo(v11) in the source). Release is set in Sentry.init()
+      // via PUBLIC_SENTRY_RELEASE / SENTRY_RELEASE env vars instead.
+      //
+      // Disable the plugin's sourcemap upload — it pulls in @sentry/cli
+      // (20+ MB binary download). We use our own CLI post-build instead
+      // (see CI workflow: `sentry sourcemap inject` + `sentry sourcemap upload`).
+      sourceMapsUploadOptions: { enabled: false },
     }),
     starlight({
       title: "Sentry CLI",
