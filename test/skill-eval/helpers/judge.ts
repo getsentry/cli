@@ -74,18 +74,25 @@ function evaluateDeterministic(
 
 /**
  * Use the LLM judge to evaluate overall plan quality.
- * Returns null if the judge call fails.
+ * The command reference (extracted from SKILL.md) grounds the judge so it
+ * doesn't hallucinate that valid `sentry` commands don't exist.
  */
 async function evaluateWithLLMJudge(
   client: LLMClient,
   prompt: string,
-  plan: AgentPlan
+  plan: AgentPlan,
+  commandReference: string
 ): Promise<CriterionResult> {
   const commandList = plan.commands
     .map((c, i) => `${i + 1}. \`${c.command}\` — ${c.purpose}`)
     .join("\n");
 
   const judgePrompt = `You are evaluating whether an AI agent's CLI command plan is good.
+
+The agent was given a skill guide for the \`sentry\` CLI (not the legacy \`sentry-cli\`).
+Here are the valid commands from that guide:
+
+${commandReference}
 
 The user asked: "${prompt}"
 
@@ -96,10 +103,12 @@ ${commandList}
 Notes: ${plan.notes}
 
 Evaluate the plan on overall quality. A good plan:
-- Uses the right Sentry CLI commands for the task
+- Uses commands that exist in the reference above
 - Would actually work if executed
 - Is efficient (no unnecessary commands)
 - Directly addresses what the user asked for
+
+Do NOT penalize commands that appear in the reference above. This is a real CLI tool.
 
 Return ONLY valid JSON:
 {"pass": true, "reason": "Brief explanation"}
@@ -146,11 +155,15 @@ or
 /**
  * Evaluate a test case's plan against all its criteria.
  * Runs deterministic checks first, then the LLM judge for overall quality.
+ *
+ * @param commandReference - The Command Reference section from SKILL.md,
+ *   injected into the judge prompt so it can verify commands exist.
  */
 export async function judgePlan(
   client: LLMClient,
   testCase: TestCase,
-  plan: AgentPlan | null
+  plan: AgentPlan | null,
+  commandReference: string
 ): Promise<CaseResult> {
   // If the planner failed to produce a plan, fail all criteria
   if (!plan) {
@@ -181,7 +194,12 @@ export async function judgePlan(
   }
 
   // Run LLM judge for overall quality
-  const llmVerdict = await evaluateWithLLMJudge(client, testCase.prompt, plan);
+  const llmVerdict = await evaluateWithLLMJudge(
+    client,
+    testCase.prompt,
+    plan,
+    commandReference
+  );
   criteria.push(llmVerdict);
 
   // Compute score: fraction of criteria that passed

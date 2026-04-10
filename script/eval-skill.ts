@@ -46,6 +46,18 @@ const VERSION_RE = /^version:\s*(.+)$/m;
  */
 const DEFAULT_THRESHOLD = 0.75;
 
+/** Extract the "## Command Reference" section from SKILL.md for the judge. */
+function extractCommandReference(skillContent: string): string {
+  const start = skillContent.indexOf("## Command Reference");
+  if (start === -1) {
+    return "";
+  }
+  const end = skillContent.indexOf("\n## ", start + 1);
+  return end === -1
+    ? skillContent.slice(start)
+    : skillContent.slice(start, end);
+}
+
 /** Run all eval cases against a single model */
 async function evalModel(
   client: Awaited<ReturnType<typeof createClient>>,
@@ -53,6 +65,7 @@ async function evalModel(
   skillContent: string,
   testCases: TestCase[]
 ): Promise<ModelResult> {
+  const commandReference = extractCommandReference(skillContent);
   console.log(`\nEvaluating: ${model}`);
   console.log("─".repeat(40));
 
@@ -67,7 +80,7 @@ async function evalModel(
       skillContent,
       testCase.prompt
     );
-    const result = await judgePlan(client, testCase, plan);
+    const result = await judgePlan(client, testCase, plan, commandReference);
     results.push(result);
 
     const icon = result.passed ? "✓" : "✗";
