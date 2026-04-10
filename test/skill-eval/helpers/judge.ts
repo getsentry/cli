@@ -94,6 +94,11 @@ Here are the valid commands from that guide:
 
 ${commandReference}
 
+Important context about how this CLI works:
+- Positional args like \`<org/project>\` are OPTIONAL — the CLI auto-detects org and project from the local directory context (DSN detection). Omitting them is correct and expected.
+- Each command supports additional flags (e.g., --json, --query, --limit, --period, --fields) documented in separate reference files. The compact listing above only shows command signatures, not all flags.
+- --json is a global flag available on all list/view commands.
+
 The user asked: "${prompt}"
 
 The agent's plan:
@@ -108,7 +113,10 @@ Evaluate the plan on overall quality. A good plan:
 - Is efficient (no unnecessary commands)
 - Directly addresses what the user asked for
 
-Do NOT penalize commands that appear in the reference above. This is a real CLI tool.
+Do NOT penalize:
+- Commands that appear in the reference above — this is a real CLI tool
+- Omitting org/project args — auto-detection is a core feature
+- Using flags like --json, --query, --limit, --fields, --period — they are real flags
 
 Return ONLY valid JSON:
 {"pass": true, "reason": "Brief explanation"}

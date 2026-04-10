@@ -66,6 +66,11 @@ async function evalModel(
   testCases: TestCase[]
 ): Promise<ModelResult> {
   const commandReference = extractCommandReference(skillContent);
+  if (!commandReference) {
+    console.error(
+      'Warning: "## Command Reference" section not found in SKILL.md — judge will lack command context'
+    );
+  }
   console.log(`\nEvaluating: ${model}`);
   console.log("─".repeat(40));
 
