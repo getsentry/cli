@@ -1,6 +1,6 @@
 ---
 name: sentry-cli
-version: 0.25.0
+version: 0.26.0
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 requires:
   bins: ["sentry"]
@@ -22,7 +22,7 @@ Best practices and operational guidance for AI coding agents using the Sentry CL
 - **Use `sentry schema` to explore the API** — if you need to discover API endpoints, run `sentry schema` to browse interactively or `sentry schema <resource>` to search. This is faster than fetching OpenAPI specs externally.
 - **Use `sentry issue view <id>` to investigate issues** — when asked about a specific issue (e.g., `CLI-G5`, `PROJECT-123`), use `sentry issue view` directly.
 - **Use `--json` for machine-readable output** — pipe through `jq` for filtering. Human-readable output includes formatting that is hard to parse.
-- **The CLI auto-detects org/project** — most commands work without explicit targets by scanning for DSNs in `.env` files, source code, config defaults, and directory names. Only specify `<org>/<project>` when the CLI reports it can't detect the target or detects the wrong one.
+- **The CLI auto-detects org/project** — most commands work without explicit targets by checking `.sentryclirc` config files, scanning for DSNs in `.env` files and source code, and matching directory names. Only specify `<org>/<project>` when the CLI reports it can't detect the target or detects the wrong one.
 
 ### Design Principles
 
@@ -223,7 +223,7 @@ When querying the Events API (directly or via `sentry api`), valid dataset value
 - **Wrong issue ID format**: Use `PROJECT-123` (short ID), not the numeric ID `123456789`. The short ID includes the project prefix.
 - **Pre-authenticating unnecessarily**: Don't run `sentry auth login` before every command. The CLI detects missing/expired auth and prompts automatically. Only run `sentry auth login` if you need to switch accounts.
 - **Missing `--json` for piping**: Human-readable output includes formatting. Use `--json` when parsing output programmatically.
-- **Specifying org/project when not needed**: Auto-detection resolves org/project from DSNs, env vars, config defaults, and directory names. Let it work first — only add `<org>/<project>` if the CLI says it can't detect the target or detects the wrong one.
+- **Specifying org/project when not needed**: Auto-detection resolves org/project from `.sentryclirc` config files, DSNs, env vars, and directory names. Let it work first — only add `<org>/<project>` if the CLI says it can't detect the target or detects the wrong one.
 - **Confusing `--query` syntax**: The `--query` flag uses Sentry search syntax (e.g., `is:unresolved`, `assigned:me`), not free text search.
 - **Not using `--web`**: View commands support `-w`/`--web` to open the resource in the browser — useful for sharing links.
 - **Fetching API schemas instead of using the CLI**: Prefer `sentry schema` to browse the API and `sentry api` to make requests — the CLI handles authentication and endpoint resolution, so there's rarely a need to download OpenAPI specs separately.
@@ -346,8 +346,8 @@ Manage Sentry dashboards
 
 Work with Sentry releases
 
-- `sentry release list <org/project>` — List releases
-- `sentry release view <org/version...>` — View release details
+- `sentry release list <org/project>` — List releases with adoption and health metrics
+- `sentry release view <org/version...>` — View release details with health metrics
 - `sentry release create <org/version...>` — Create a release
 - `sentry release finalize <org/version...>` — Finalize a release
 - `sentry release delete <org/version...>` — Delete a release
