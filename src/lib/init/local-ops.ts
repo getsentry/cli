@@ -269,6 +269,144 @@ export async function precomputeDirListing(
   return (result.data as { entries?: DirEntry[] })?.entries ?? [];
 }
 
+/**
+ * Common config file names that are frequently requested by multiple workflow
+ * steps (discover-context, detect-platform, plan-codemods). Pre-reading them
+ * eliminates 1-3 suspend/resume round-trips.
+ */
+const COMMON_CONFIG_FILES = [
+  // ── Manifests (all ecosystems) ──
+  "package.json",
+  "tsconfig.json",
+  "pyproject.toml",
+  "requirements.txt",
+  "requirements-dev.txt",
+  "setup.py",
+  "setup.cfg",
+  "Pipfile",
+  "Gemfile",
+  "Gemfile.lock",
+  "go.mod",
+  "build.gradle",
+  "build.gradle.kts",
+  "settings.gradle",
+  "settings.gradle.kts",
+  "pom.xml",
+  "Cargo.toml",
+  "pubspec.yaml",
+  "mix.exs",
+  "composer.json",
+  "Podfile",
+  "CMakeLists.txt",
+
+  // ── JavaScript/TypeScript framework configs ──
+  "next.config.js",
+  "next.config.mjs",
+  "next.config.ts",
+  "nuxt.config.ts",
+  "nuxt.config.js",
+  "angular.json",
+  "astro.config.mjs",
+  "astro.config.ts",
+  "svelte.config.js",
+  "remix.config.js",
+  "vite.config.ts",
+  "vite.config.js",
+  "webpack.config.js",
+  "metro.config.js",
+  "app.json",
+  "electron-builder.yml",
+  "wrangler.toml",
+  "wrangler.jsonc",
+  "serverless.yml",
+  "serverless.ts",
+  "bunfig.toml",
+
+  // ── Python entry points / framework markers ──
+  "manage.py",
+  "app.py",
+  "main.py",
+
+  // ── PHP framework markers ──
+  "artisan",
+  "symfony.lock",
+  "wp-config.php",
+  "config/packages/sentry.yaml",
+
+  // ── .NET ──
+  "appsettings.json",
+  "Program.cs",
+  "Startup.cs",
+
+  // ── Java / Android ──
+  "app/build.gradle",
+  "app/build.gradle.kts",
+  "src/main/resources/application.properties",
+  "src/main/resources/application.yml",
+
+  // ── Ruby (Rails) ──
+  "config/application.rb",
+
+  // ── Go entry point ──
+  "main.go",
+
+  // ── Sentry configs (all ecosystems) ──
+  "sentry.client.config.ts",
+  "sentry.client.config.js",
+  "sentry.server.config.ts",
+  "sentry.server.config.js",
+  "sentry.edge.config.ts",
+  "sentry.edge.config.js",
+  "sentry.properties",
+  "instrumentation.ts",
+  "instrumentation.js",
+];
+
+const MAX_PREREAD_TOTAL_BYTES = 512 * 1024;
+
+/**
+ * Pre-read common config files that exist in the directory listing.
+ * Returns a fileCache map (path -> content or null) that the server
+ * can use to skip read-files suspend/resume round-trips.
+ */
+export async function preReadCommonFiles(
+  directory: string,
+  dirListing: DirEntry[]
+): Promise<Record<string, string | null>> {
+  const listingPaths = new Set(
+    dirListing.map((e) => e.path.replaceAll("\\", "/"))
+  );
+  const toRead = COMMON_CONFIG_FILES.filter((f) => listingPaths.has(f));
+
+  const cache: Record<string, string | null> = {};
+  let totalBytes = 0;
+
+  for (const filePath of toRead) {
+    if (totalBytes >= MAX_PREREAD_TOTAL_BYTES) {
+      break;
+    }
+    try {
+      const absPath = path.join(directory, filePath);
+      let content = await fs.promises.readFile(absPath, "utf-8");
+      if (filePath.endsWith(".json")) {
+        try {
+          content = JSON.stringify(JSON.parse(content));
+        } catch {
+          // Not valid JSON — send as-is
+        }
+      }
+      if (totalBytes + content.length <= MAX_PREREAD_TOTAL_BYTES) {
+        cache[filePath] = content;
+        totalBytes += content.length;
+      }
+    } catch {
+      cache[filePath] = null;
+    }
+  }
+
+  return cache;
+}
+
 export async function handleLocalOp(
   payload: LocalOpPayload,
   options: WizardOptions

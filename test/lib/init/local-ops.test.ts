@@ -1273,9 +1273,6 @@ describe("grep", () => {
   beforeEach(() => {
     testDir = mkdtempSync(join("/tmp", "grep-test-"));
     options = makeOptions({ directory: testDir });
-    // Init a git repo so git grep / git ls-files tier is exercised
-    const { execSync } = require("node:child_process");
-    execSync("git init -q", { cwd: testDir });
     writeFileSync(
       join(testDir, "app.ts"),
       'import * as Sentry from "@sentry/node";\nSentry.init({ dsn: "..." });\n'
@@ -1423,8 +1420,6 @@ describe("glob", () => {
   beforeEach(() => {
     testDir = mkdtempSync(join("/tmp", "glob-test-"));
     options = makeOptions({ directory: testDir });
-    const { execSync } = require("node:child_process");
-    execSync("git init -q", { cwd: testDir });
     writeFileSync(join(testDir, "app.ts"), "x");
     writeFileSync(join(testDir, "utils.ts"), "x");
     writeFileSync(join(testDir, "config.json"), "{}");

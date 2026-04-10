@@ -198,6 +198,7 @@ beforeEach(() => {
     ops,
     "precomputeDirListing"
   ).mockResolvedValue([]);
+  spyOn(ops, "preReadCommonFiles").mockResolvedValue({});
   handleInteractiveSpy = spyOn(inter, "handleInteractive").mockResolvedValue({
     action: "continue",
   });
@@ -400,9 +401,10 @@ describe("runWizard", { timeout: TEST_TIMEOUT_MS }, () => {
       const promise = runWizard(makeOptions());
 
       // Flush microtasks so runWizard reaches the withTimeout setTimeout.
-      // preamble() → confirmExperimental() → checkGitStatus() → createRun()
+      // preamble() → confirmExperimental() → checkGitStatus() →
+      // precomputeDirListing() → preReadCommonFiles() → createRun()
       // each need a tick.
-      for (let i = 0; i < 10; i++) await Promise.resolve();
+      for (let i = 0; i < 20; i++) await Promise.resolve();
 
       // Advance past the timeout
       jest.advanceTimersByTime(API_TIMEOUT_MS);
