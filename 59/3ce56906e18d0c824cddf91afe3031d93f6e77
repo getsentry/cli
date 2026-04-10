@@ -1,0 +1,122 @@
+# Fix: Skill Eval Judge False Negatives
+
+## Problem
+
+The skill eval (`bun run eval:skill`) fails because the **LLM judge** (Haiku 4.5) doesn't know about the `sentry` CLI and gives false negatives. It confuses it with the old `sentry-cli` tool.
+
+**CI run:** https://github.com/getsentry/cli/actions/runs/24207303049/job/70666509005
+
+Sonnet 4.6 passes 8/8 (100%). Opus 4.6 fails 3/8 (62.5%, below 75% threshold). All deterministic checks pass — only the LLM judge's `overall-quality` criterion fails.
+
+### Three failures (all false negatives):
+
+| Case | Agent Plan (correct) | Judge Reason (wrong) |
+|------|---------------------|---------------------|
+| `view-specific-issue` | `sentry issue view PROJ-42` | "assumes a 'sentry' CLI tool exists... actual Sentry CLI uses different syntax (e.g., 'sentry-cli issues')" |
+| `list-traces` | `sentry trace list` | "`sentry trace list` does not exist in the Sentry CLI" |
+| `api-fallback` | `sentry api /api/0/organizations/...` | "sentry schema is unlikely the right tool... auto-detect is misleading" |
+
+## Root Cause
+
+The judge prompt in `judge.ts` has **zero context** about what the `sentry` CLI is or what commands it supports. It asks the judge "would these commands actually work?" but gives it no reference material. The judge relies on training data → knows old `sentry-cli` → rejects valid `sentry` commands.
+
+## Fix
+
+Include the **Command Reference** section from SKILL.md in the judge prompt. This is a compact ~180-line listing of all valid commands, auto-generated from CLI metadata (robust to command changes).
+
+### Files to modify:
+
+1. **`script/eval-skill.ts`** — Extract command reference, pass through call chain
+2. **`test/skill-eval/helpers/judge.ts`** — Accept command reference, inject into judge prompt
+
+### Changes:
+
+#### 1. `script/eval-skill.ts`
+
+Add helper to extract Command Reference section from SKILL.md:
+```typescript
+function extractCommandReference(skillContent: string): string {
+  const start = skillContent.indexOf("## Command Reference");
+  if (start === -1) return "";
+  const end = skillContent.indexOf("\n## ", start + 1);
+  return end === -1 ? skillContent.slice(start) : skillContent.slice(start, end);
+}
+```
+
+In `main()`, extract once after loading skill content:
+```typescript
+const commandReference = extractCommandReference(skillContent);
+```
+
+Pass `commandReference` through `evalModel()` → `judgePlan()`:
+- Add `commandReference: string` parameter to `evalModel()`
+- Pass it to `judgePlan()` call
+
+#### 2. `test/skill-eval/helpers/judge.ts`
+
+Add `commandReference: string` parameter to both `judgePlan()` and `evaluateWithLLMJudge()`.
+
+Rewrite judge prompt to include command reference as grounding context:
+```typescript
+const judgePrompt = `You are evaluating whether an AI agent's CLI command plan is good.
+
+The agent was given a skill guide for the \`sentry\` CLI (not the legacy \`sentry-cli\`).
+Here are the valid commands from that guide:
+
+${commandReference}
+
+The user asked: "${prompt}"
+
+The agent's plan:
+Thinking: ${plan.thinking}
+Commands:
+${commandList}
+Notes: ${plan.notes}
+
+Evaluate the plan on overall quality. A good plan:
+- Uses commands that exist in the reference above
+- Would actually work if executed
+- Is efficient (no unnecessary commands)
+- Directly addresses what the user asked for
+
+Do NOT penalize commands that appear in the reference above. This is a real CLI tool.
+
+Return ONLY valid JSON:
+{"pass": true, "reason": "Brief explanation"}
+or
+{"pass": false, "reason": "Brief explanation of what's wrong"}`;
+```
+
+### Call chain (4 touch points):
+
+```
+main()                        → extracts commandReference
+  evalModel(..., commandReference)  → passes through
+    judgePlan(..., commandReference)   → passes through
+      evaluateWithLLMJudge(..., commandReference) → injects into prompt
+```
+
+## Why this works
+
+- **Fixes all 3 failures**: Judge sees that `sentry issue view`, `sentry trace list`, and `sentry api` are real commands
+- **Robust**: Command reference is extracted from SKILL.md at runtime (auto-generated from CLI metadata)
+- **Cheap**: ~1,500 extra tokens for Haiku — negligible cost
+- **Minimal change**: 2 files, no type changes, deterministic checks untouched
+
+## Verification
+
+```bash
+# Generate docs first (needed for SKILL.md)
+bun run generate:schema && bun run generate:docs
+
+# Run the eval (requires ANTHROPIC_API_KEY)
+bun run eval:skill
+
+# Expected: both models should pass at ≥75% threshold
+# Sonnet 4.6: 8/8 (100%)
+# Opus 4.6: should improve from 5/8 to 7-8/8
+```
+
+Also verify:
+- `bun run typecheck` passes
+- `bun run lint` passes
