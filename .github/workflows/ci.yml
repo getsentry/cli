@@ -42,6 +42,7 @@ jobs:
             skill:
               - 'src/**'
               - 'docs/**'
+              - 'package.json'
               - 'script/generate-skill.ts'
               - 'script/generate-command-docs.ts'
               - 'script/eval-skill.ts'
