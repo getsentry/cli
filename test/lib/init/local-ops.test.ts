@@ -1072,6 +1072,149 @@ describe("handleLocalOp", () => {
       const content = readFileSync(join(testDir, "existing.ts"), "utf-8");
       expect(content).toContain('const updated = "new-value"');
     });
+
+    test("injects auth token into .env.sentry-build-plugin with empty SENTRY_AUTH_TOKEN", async () => {
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: ".env.sentry-build-plugin",
+              action: "create",
+              patch: "SENTRY_AUTH_TOKEN=\n",
+            },
+          ],
+        },
+      };
+
+      const opts = makeOptions({
+        directory: testDir,
+        authToken: "sntrys_test_token_123",
+      });
+      const result = await handleLocalOp(payload, opts);
+      expect(result.ok).toBe(true);
+
+      const content = readFileSync(
+        join(testDir, ".env.sentry-build-plugin"),
+        "utf-8"
+      );
+      expect(content).toBe("SENTRY_AUTH_TOKEN=sntrys_test_token_123\n");
+    });
+
+    test("does not inject auth token into non-env files", async () => {
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: "config.ts",
+              action: "create",
+              patch: "SENTRY_AUTH_TOKEN=\n",
+            },
+          ],
+        },
+      };
+
+      const opts = makeOptions({
+        directory: testDir,
+        authToken: "sntrys_test_token_123",
+      });
+      const result = await handleLocalOp(payload, opts);
+      expect(result.ok).toBe(true);
+
+      const content = readFileSync(join(testDir, "config.ts"), "utf-8");
+      expect(content).toBe("SENTRY_AUTH_TOKEN=\n");
+    });
+
+    test("does not overwrite existing non-empty SENTRY_AUTH_TOKEN", async () => {
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: ".env.sentry-build-plugin",
+              action: "create",
+              patch: "SENTRY_AUTH_TOKEN=existing_value\n",
+            },
+          ],
+        },
+      };
+
+      const opts = makeOptions({
+        directory: testDir,
+        authToken: "sntrys_different_token",
+      });
+      const result = await handleLocalOp(payload, opts);
+      expect(result.ok).toBe(true);
+
+      const content = readFileSync(
+        join(testDir, ".env.sentry-build-plugin"),
+        "utf-8"
+      );
+      expect(content).toBe("SENTRY_AUTH_TOKEN=existing_value\n");
+    });
+
+    test("handles .env file with empty quoted SENTRY_AUTH_TOKEN", async () => {
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: ".env.sentry-build-plugin",
+              action: "create",
+              patch: 'SENTRY_AUTH_TOKEN=""\n',
+            },
+          ],
+        },
+      };
+
+      const opts = makeOptions({
+        directory: testDir,
+        authToken: "sntrys_test_token_456",
+      });
+      const result = await handleLocalOp(payload, opts);
+      expect(result.ok).toBe(true);
+
+      const content = readFileSync(
+        join(testDir, ".env.sentry-build-plugin"),
+        "utf-8"
+      );
+      expect(content).toBe("SENTRY_AUTH_TOKEN=sntrys_test_token_456\n");
+    });
+
+    test("does not inject when no auth token is available", async () => {
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: ".env.sentry-build-plugin",
+              action: "create",
+              patch: "SENTRY_AUTH_TOKEN=\n",
+            },
+          ],
+        },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      expect(result.ok).toBe(true);
+
+      const content = readFileSync(
+        join(testDir, ".env.sentry-build-plugin"),
+        "utf-8"
+      );
+      expect(content).toBe("SENTRY_AUTH_TOKEN=\n");
+    });
   });
 });
 

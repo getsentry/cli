@@ -587,6 +587,12 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   };
 
   const token = getAuthToken();
+
+  // Make the auth token available to local-ops for injecting into generated
+  // env files (e.g. .env.sentry-build-plugin). The token is never sent to
+  // the remote server — it stays client-side only.
+  options.authToken = token;
+
   const client = new MastraClient({
     baseUrl: MASTRA_API_URL,
     headers: token ? { Authorization: `Bearer ${token}` } : {},

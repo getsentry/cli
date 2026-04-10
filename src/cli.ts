@@ -136,6 +136,7 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   const { isatty } = await import("node:tty");
   const { ExitCode, run } = await import("@stricli/core");
   const { app } = await import("./app.js");
+  const { hoistGlobalFlags } = await import("./lib/argv-hoist.js");
   const { buildContext } = await import("./context.js");
   const { AuthError, OutputError, formatError, getExitCode } = await import(
     "./lib/errors.js"
@@ -154,6 +155,13 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     maybeCheckForUpdateInBackground,
     shouldSuppressNotification,
   } = await import("./lib/version-check.js");
+
+  // Move global flags (--verbose, -v, --log-level, --json, --fields) from any
+  // position to the end of argv, where Stricli's leaf-command parser can
+  // find them. This allows `sentry --verbose issue list` to work.
+  // The original cliArgs are kept for post-run checks (e.g., help recovery)
+  // that rely on the original token positions.
+  const hoistedArgs = hoistGlobalFlags(cliArgs);
 
   // ---------------------------------------------------------------------------
   // Error-recovery middleware
@@ -363,7 +371,9 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     setLogLevel(envLogLevel);
   }
 
-  const suppressNotification = shouldSuppressNotification(cliArgs);
+  // Use hoisted args so positional checks (e.g., args[0] === "cli") work
+  // even when global flags precede the subcommand in the original argv.
+  const suppressNotification = shouldSuppressNotification(hoistedArgs);
 
   // Start background update check (non-blocking)
   if (!suppressNotification) {
@@ -371,7 +381,7 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   }
 
   try {
-    await executor(cliArgs);
+    await executor(hoistedArgs);
 
     // When Stricli can't match a subcommand in a route group (e.g.,
     // `sentry dashboard help`), it writes "No command registered for `help`"
@@ -380,6 +390,8 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     // the custom help command with proper introspection output.
     // Check both raw (-5) and unsigned (251) forms because Node.js keeps
     // the raw value while Bun converts to unsigned byte.
+    // Uses original cliArgs (not hoisted) so the `at(-1) === "help"` check
+    // works when global flags were placed before "help".
     if (
       (process.exitCode === ExitCode.UnknownCommand ||
         process.exitCode === (ExitCode.UnknownCommand + 256) % 256) &&

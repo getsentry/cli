@@ -295,7 +295,7 @@ export async function handleLocalOp(
       case "run-commands":
         return await runCommands(payload, options.dryRun);
       case "apply-patchset":
-        return await applyPatchset(payload, options.dryRun);
+        return await applyPatchset(payload, options.dryRun, options.authToken);
       case "create-sentry-project":
         return await createSentryProject(payload, options);
       case "detect-sentry":
@@ -582,15 +582,41 @@ function applyPatchsetDryRun(payload: ApplyPatchsetPayload): LocalOpResult {
   return { ok: true, data: { applied } };
 }
 
+/** Pattern matching empty or placeholder SENTRY_AUTH_TOKEN values in env files.
+ *  Uses [ \t] (horizontal whitespace) instead of \s to avoid consuming newlines. */
+const EMPTY_AUTH_TOKEN_RE =
+  /^(SENTRY_AUTH_TOKEN[ \t]*=[ \t]*)(?:['"]?[ \t]*['"]?)?[ \t]*$/m;
+
 /**
  * Resolve the final file content for a full-content patch (create only),
- * pretty-printing JSON files to preserve readable formatting.
+ * pretty-printing JSON files to preserve readable formatting, and injecting
+ * the auth token into env files when the server left it empty.
  */
-function resolvePatchContent(patch: { path: string; patch: string }): string {
-  if (!patch.path.endsWith(".json")) {
-    return patch.patch;
+function resolvePatchContent(
+  patch: { path: string; patch: string },
+  authToken?: string
+): string {
+  let content = patch.path.endsWith(".json")
+    ? prettyPrintJson(patch.patch, DEFAULT_JSON_INDENT)
+    : patch.patch;
+
+  // Inject the auth token into env files when the AI left the value empty.
+  // The server never has access to the user's token, so it generates
+  // SENTRY_AUTH_TOKEN= (empty). We fill it in client-side.
+  if (authToken && isEnvFile(patch.path) && EMPTY_AUTH_TOKEN_RE.test(content)) {
+    content = content.replace(
+      EMPTY_AUTH_TOKEN_RE,
+      (_, prefix) => `${prefix}${authToken}`
+    );
   }
-  return prettyPrintJson(patch.patch, DEFAULT_JSON_INDENT);
+
+  return content;
+}
+
+/** Returns true if the file path looks like a .env file. */
+function isEnvFile(filePath: string): boolean {
+  const name = filePath.split("/").pop() ?? "";
+  return name === ".env" || name.startsWith(".env.");
 }
 
 const VALID_PATCH_ACTIONS = new Set(["create", "modify", "delete"]);
@@ -623,13 +649,15 @@ async function applyEdits(
 
 async function applySinglePatch(
   absPath: string,
-  patch: ApplyPatchsetPatch
+  patch: ApplyPatchsetPatch,
+  authToken?: string
 ): Promise<void> {
   switch (patch.action) {
     case "create": {
       await fs.promises.mkdir(path.dirname(absPath), { recursive: true });
       const content = resolvePatchContent(
-        patch as ApplyPatchsetPatch & { patch: string }
+        patch as ApplyPatchsetPatch & { patch: string },
+        authToken
       );
       await fs.promises.writeFile(absPath, content, "utf-8");
       break;
@@ -656,7 +684,8 @@ async function applySinglePatch(
 
 async function applyPatchset(
   payload: ApplyPatchsetPayload,
-  dryRun?: boolean
+  dryRun?: boolean,
+  authToken?: string
 ): Promise<LocalOpResult> {
   if (dryRun) {
     return applyPatchsetDryRun(payload);
@@ -693,7 +722,7 @@ async function applyPatchset(
       }
     }
 
-    await applySinglePatch(absPath, patch);
+    await applySinglePatch(absPath, patch, authToken);
     applied.push({ path: patch.path, action: patch.action });
   }
 
