@@ -1,0 +1,106 @@
+# Fix: Broken sourcemaps on Windows builds (CLI-129)
+
+## Problem
+
+On Windows, compiled Bun binaries report stack trace frame filenames with backslashes (e.g., `dist-bin\bin.js`). The `ensureAbsolute()` function in telemetry prepends `/` to make it `/dist-bin\bin.js`, but the uploaded sourcemap artifact lives at URL `~/dist-bin/bin.js` (forward slashes). The Sentry symbolicator can't match the frame to the artifact, so sourcemaps are never applied.
+
+**Evidence** (Sentry issue CLI-129, event `b1519c00`):
+```json
+{ "filename": "/dist-bin\\bin.js", "function": "ut", "context": [] }
+```
+- `filename` has a backslash — doesn't match uploaded artifact URL `~/dist-bin/bin.js`
+- `function` is still minified (`ut`) — confirms sourcemaps aren't applied
+- `context` is empty — no source context available
+
+## Root Cause
+
+`ensureAbsolute()` in `src/lib/telemetry.ts:389-391` doesn't normalize backslashes:
+
+```typescript
+function ensureAbsolute(p: string): string {
+  return isRelativePath(p) ? `/${p}` : p;
+}
+```
+
+On Windows, Bun resolves `Error.stack` paths through the embedded sourcemap using OS-native separators → `dist-bin\bin.js`. The function prepends `/` but leaves the backslash intact → `/dist-bin\bin.js`.
+
+## Changes
+
+### 1. Normalize backslashes in `ensureAbsolute()` — `src/lib/telemetry.ts`
+
+**Lines 389-391.** Add `.replaceAll("\\", "/")` before the relative-path check.
+
+```typescript
+function ensureAbsolute(p: string): string {
+  // Normalize Windows backslashes to forward slashes for sourcemap URL
+  // matching. Bun on Windows produces paths like "dist-bin\bin.js" in
+  // Error.stack — the symbolicator expects forward slashes to match
+  // artifacts at "~/dist-bin/bin.js".
+  const normalized = p.replaceAll("\\", "/");
+  return isRelativePath(normalized) ? `/${normalized}` : normalized;
+}
+```
+
+This fixes all three normalization call sites (`frame.filename`, `frame.abs_path`, `debug_meta.images[].code_file`) since they all route through `ensureAbsolute()`.
+
+### 2. Normalize sourcemap `sources` array — `src/lib/sourcemap/debug-id.ts`
+
+**After line 138** (after `JSON.parse` of the sourcemap). Normalize the `sources` array to use forward slashes. esbuild on Windows may produce paths like `src\\bin.ts` in the array.
+
+```typescript
+const map = JSON.parse(mapContent) as {
+  mappings: string;
+  sources?: string[];   // ← add to type
+  debug_id?: string;
+  debugId?: string;
+};
+
+// Normalize Windows backslashes in the sources array so uploaded
+// sourcemaps have consistent forward-slash paths regardless of
+// build platform. No-op on Linux/macOS.
+if (map.sources) {
+  map.sources = map.sources.map((s) => s.replaceAll("\\", "/"));
+}
+```
+
+This lives in `debug-id.ts` (not `build.ts`) so both the CLI's own build AND user-facing `sentry sourcemap inject` benefit from the normalization. It piggybacks on the existing parse → mutate → serialize cycle — no extra I/O.
+
+### 3. Add tests — `test/script/debug-id.test.ts`
+
+Add two test cases to the existing `describe("injectDebugId")` block:
+
+1. **"normalizes backslashes in sourcemap sources array"** — Creates a sourcemap with `sources: ["src\\lib\\utils.ts", "src\\bin.ts"]`, runs `injectDebugId`, asserts the result has `["src/lib/utils.ts", "src/bin.ts"]`.
+
+2. **"preserves forward-slash sources unchanged"** — Verifies the normalization is a no-op when sources already use forward slashes.
+
+## Files Modified
+
+| File | Change |
+|------|--------|
+| `src/lib/telemetry.ts` | ~5 lines: backslash normalization in `ensureAbsolute()` |
+| `src/lib/sourcemap/debug-id.ts` | ~8 lines: normalize `sources` array after JSON parse |
+| `test/script/debug-id.test.ts` | ~30 lines: 2 new test cases for sources normalization |
+
+## What's NOT changed (and why)
+
+- **`script/build.ts` metafile key lookup** (line 119): esbuild on Windows returns backslash keys in `metafile.outputs`, so `result.metafile?.outputs[BUNDLE_JS]` returns `undefined`. This is logging-only (falls back to `Bun.file(BUNDLE_JS).size`). Not worth fixing.
+- **`src/commands/sourcemap/upload.ts`**: Already has `.replaceAll("\\", "/")` on line 129 — correctly handled.
+- **`src/lib/sourcemap/zip.ts`**: Entry names come from `urlToBundlePath()` which builds from URL strings, not filesystem paths. Already safe.
+
+## Verification
+
+```bash
+# 1. Run the existing debug-id tests + new tests
+bun test test/script/debug-id.test.ts
+
+# 2. Run full unit test suite to check for regressions
+bun run test:unit
+
+# 3. Typecheck
+bun run typecheck
+
+# 4. Lint
+bun run lint
+```
+
+The runtime fix (telemetry frame normalization) can only be fully verified by deploying a Windows build and checking if Sentry events have resolved source context. After merging, monitor CLI-129 for new events — they should show resolved function names and source context instead of minified `ut`.
