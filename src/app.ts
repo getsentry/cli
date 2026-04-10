@@ -45,6 +45,7 @@ import {
 } from "./lib/command-suggestions.js";
 import { CLI_VERSION } from "./lib/constants.js";
 import {
+  ApiError,
   AuthError,
   CliError,
   getExitCode,
@@ -322,6 +323,14 @@ const customText: ApplicationText = {
 
     // Report command errors to Sentry. Stricli catches exceptions and doesn't
     // re-throw, so we must capture here to get visibility into command failures.
+    // 400 Bad Request = CLI bug (we constructed a malformed request).
+    if (exc instanceof ApiError) {
+      Sentry.setContext("api_error", {
+        status: exc.status,
+        endpoint: exc.endpoint,
+        detail: exc.detail,
+      });
+    }
     Sentry.captureException(exc);
 
     if (exc instanceof CliError) {
