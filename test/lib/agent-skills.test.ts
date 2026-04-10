@@ -129,5 +129,20 @@ describe("agent-skills", () => {
       // Restore write permission so afterEach cleanup can remove it
       chmodSync(join(testDir, ".claude"), 0o755);
     });
+
+    test("returns null when .claude exists but is not writable (sandbox)", async () => {
+      // Simulate a sandboxed .claude directory: readable + executable, not writable.
+      // The accessSync(W_OK) pre-check should catch this before any write attempt.
+      mkdirSync(join(testDir, ".claude"), { recursive: true, mode: 0o555 });
+
+      const result = await installAgentSkills(testDir);
+      expect(result).toBeNull();
+
+      // Verify no write was attempted — skills subdir should not exist
+      expect(existsSync(join(testDir, ".claude", "skills"))).toBe(false);
+
+      // Restore write permission so afterEach cleanup can remove it
+      chmodSync(join(testDir, ".claude"), 0o755);
+    });
   });
 });

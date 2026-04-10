@@ -30,7 +30,7 @@
  *     bin.js.map          (sourcemap, uploaded to Sentry then deleted)
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, renameSync } from "node:fs";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 import { processBinary } from "binpunch";
@@ -38,7 +38,7 @@ import { $ } from "bun";
 import { build as esbuild } from "esbuild";
 import pkg from "../package.json";
 import { uploadSourcemaps } from "../src/lib/api/sourcemaps.js";
-import { injectDebugId } from "./debug-id.js";
+import { injectDebugId, PLACEHOLDER_DEBUG_ID } from "./debug-id.js";
 
 const gzipAsync = promisify(gzip);
 
@@ -104,13 +104,15 @@ async function bundleJs(): Promise<boolean> {
       target: "esnext",
       format: "esm",
       external: ["bun:*"],
-      sourcemap: "external",
+      sourcemap: "linked",
+      // Minify syntax and whitespace but NOT identifiers. Bun.build
       minify: true,
       metafile: true,
       define: {
         SENTRY_CLI_VERSION: JSON.stringify(VERSION),
         SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
         "process.env.NODE_ENV": JSON.stringify("production"),
+        __SENTRY_DEBUG_ID__: JSON.stringify(PLACEHOLDER_DEBUG_ID),
       },
     });
 
@@ -147,17 +149,54 @@ async function bundleJs(): Promise<boolean> {
  * injection always runs (even without auth token) so local builds get
  * debug IDs for development/testing.
  */
-async function injectAndUploadSourcemap(): Promise<void> {
-  // Always inject debug IDs (even without auth token) so local builds
-  // get debug IDs for development/testing purposes.
+/** Module-level debug ID set by {@link injectDebugIds} for use in {@link uploadSourcemapToSentry}. */
+let currentDebugId: string | undefined;
+
+/**
+ * Inject debug IDs into the JS and sourcemap. Runs before compilation.
+ * The upload happens separately after compilation (see {@link uploadSourcemapToSentry}).
+ */
+async function injectDebugIds(): Promise<void> {
+  // skipSnippet: true — the IIFE snippet breaks ESM (placed before import
+  // declarations). The debug ID is instead registered in constants.ts via
+  // a build-time __SENTRY_DEBUG_ID__ constant.
   console.log("  Injecting debug IDs...");
-  let debugId: string;
   try {
-    ({ debugId } = await injectDebugId(BUNDLE_JS, SOURCEMAP_FILE));
+    const { debugId } = await injectDebugId(BUNDLE_JS, SOURCEMAP_FILE, {
+      skipSnippet: true,
+    });
+    currentDebugId = debugId;
     console.log(`    -> Debug ID: ${debugId}`);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.warn(`    Warning: Debug ID injection failed: ${msg}`);
+    return;
+  }
+
+  // Replace the placeholder UUID with the real debug ID in the JS bundle.
+  // Both are 36-char UUIDs so sourcemap character positions stay valid.
+  try {
+    const jsContent = await Bun.file(BUNDLE_JS).text();
+    await Bun.write(
+      BUNDLE_JS,
+      jsContent.split(PLACEHOLDER_DEBUG_ID).join(currentDebugId)
+    );
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `    Warning: Debug ID placeholder replacement failed: ${msg}`
+    );
+  }
+}
+
+/**
+ * Upload the (composed) sourcemap to Sentry. Runs after compilation
+ * because {@link compileTarget} composes the Bun sourcemap with the
+ * esbuild sourcemap first.
+ */
+async function uploadSourcemapToSentry(): Promise<void> {
+  const debugId = currentDebugId;
+  if (!debugId) {
     return;
   }
 
@@ -169,7 +208,13 @@ async function injectAndUploadSourcemap(): Promise<void> {
   console.log(`  Uploading sourcemap to Sentry (release: ${VERSION})...`);
 
   try {
-    const urlPrefix = "~/$bunfs/root/";
+    // With sourcemap: "linked", Bun's runtime auto-resolves Error.stack
+    // paths via the embedded map, producing relative paths like
+    // "dist-bin/bin.js". The beforeSend hook normalizes these to absolute
+    // ("/dist-bin/bin.js") so the symbolicator's candidate URL generator
+    // produces "~/dist-bin/bin.js" — matching our upload URL.
+    const dir = BUNDLE_JS.slice(0, BUNDLE_JS.lastIndexOf("/") + 1);
+    const urlPrefix = `~/${dir}`;
     const jsBasename = BUNDLE_JS.split("/").pop() ?? "bin.js";
     const mapBasename = SOURCEMAP_FILE.split("/").pop() ?? "bin.js.map";
 
@@ -204,8 +249,11 @@ async function injectAndUploadSourcemap(): Promise<void> {
 /**
  * Step 2: Compile the pre-bundled JS into a native binary for a target.
  *
- * Uses the JS file produced by {@link bundleJs} — no sourcemap is embedded
- * in the binary (it's uploaded to Sentry separately).
+ * Uses the JS file produced by {@link bundleJs}. The esbuild sourcemap
+ * (JS → original TS) is uploaded to Sentry as-is — no composition needed
+ * because `sourcemap: "linked"` causes Bun to embed a sourcemap in the
+ * binary that its runtime uses to auto-resolve `Error.stack` positions
+ * back to the esbuild output's coordinate space.
  */
 async function compileTarget(target: BuildTarget): Promise<boolean> {
   const packageName = getPackageName(target);
@@ -215,31 +263,48 @@ async function compileTarget(target: BuildTarget): Promise<boolean> {
 
   console.log(`  Step 2: Compiling ${packageName}...`);
 
-  const result = await Bun.build({
-    entrypoints: [BUNDLE_JS],
-    compile: {
-      target: getBunTarget(target) as
-        | "bun-darwin-arm64"
-        | "bun-darwin-x64"
-        | "bun-linux-x64"
-        | "bun-linux-arm64"
-        | "bun-windows-x64",
-      outfile,
-    },
-    // Already minified in Step 1 — skip re-minification to avoid
-    // double-minifying identifiers and producing different output.
-    minify: false,
-  });
+  // Rename the esbuild map out of the way before Bun.build overwrites it
+  // (sourcemap: "linked" writes Bun's own map to bin.js.map).
+  // Restored in the finally block so subsequent targets and the upload
+  // always find the esbuild map, even if compilation fails.
+  const esbuildMapBackup = `${SOURCEMAP_FILE}.esbuild`;
+  renameSync(SOURCEMAP_FILE, esbuildMapBackup);
 
-  if (!result.success) {
-    console.error(`  Failed to compile ${packageName}:`);
-    for (const log of result.logs) {
-      console.error(`    ${log}`);
+  try {
+    const result = await Bun.build({
+      entrypoints: [BUNDLE_JS],
+      compile: {
+        target: getBunTarget(target) as
+          | "bun-darwin-arm64"
+          | "bun-darwin-x64"
+          | "bun-linux-x64"
+          | "bun-linux-arm64"
+          | "bun-windows-x64",
+        outfile,
+      },
+      // "linked" embeds a sourcemap in the binary. At runtime, Bun's engine
+      // auto-resolves Error.stack positions through this embedded map back to
+      // the esbuild output positions. The esbuild sourcemap (uploaded to
+      // Sentry) then maps those to original TypeScript sources.
+      sourcemap: "linked",
+      // Minify whitespace and syntax but NOT identifiers to avoid Bun's
+      // identifier renaming collision bug (oven-sh/bun#14585).
+      minify: { whitespace: true, syntax: true, identifiers: false },
+    });
+
+    if (!result.success) {
+      console.error(`  Failed to compile ${packageName}:`);
+      for (const log of result.logs) {
+        console.error(`    ${log}`);
+      }
+      return false;
     }
-    return false;
-  }
 
-  console.log(`    -> ${outfile}`);
+    console.log(`    -> ${outfile}`);
+  } finally {
+    // Restore the esbuild sourcemap (Bun.build wrote its own map).
+    renameSync(esbuildMapBackup, SOURCEMAP_FILE);
+  }
 
   // Hole-punch: zero unused ICU data entries so they compress to nearly nothing.
   // Always runs so the smoke test exercises the same binary as the release.
@@ -344,8 +409,10 @@ async function build(): Promise<void> {
     process.exit(1);
   }
 
-  // Inject debug IDs and upload sourcemap to Sentry before compiling (non-fatal on failure)
-  await injectAndUploadSourcemap();
+  // Inject debug IDs into the JS and sourcemap (non-fatal on failure).
+  // Upload happens AFTER compilation because Bun.build (with sourcemap: "linked")
+  // overwrites bin.js.map. We restore it from the saved copy before uploading.
+  await injectDebugIds();
 
   console.log("");
 
@@ -361,6 +428,9 @@ async function build(): Promise<void> {
       failCount += 1;
     }
   }
+
+  // Step 3: Upload the composed sourcemap to Sentry (after compilation)
+  await uploadSourcemapToSentry();
 
   // Clean up intermediate bundle (only the binaries are artifacts)
   await $`rm -f ${BUNDLE_JS} ${SOURCEMAP_FILE}`;

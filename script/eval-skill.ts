@@ -4,9 +4,10 @@
  *
  * Sends test prompts to agent models (Opus 4.6 + Sonnet 4.6) with SKILL.md
  * as context, then grades the planned commands on efficiency criteria.
+ * Commands are verified against the real CLI binary (via `-h`) to ground
+ * the LLM judge with empirical results.
  *
  * Requires ANTHROPIC_API_KEY env var for Anthropic API access.
- * In CI, the key is stored in the "skill-eval" environment (protected).
  *
  * Usage:
  *   bun run eval:skill
@@ -17,6 +18,7 @@
  *   EVAL_AGENT_MODELS   - Comma-separated model IDs (default: sonnet-4-6, opus-4-6)
  *   EVAL_JUDGE_MODEL    - Judge model ID (default: haiku-4-5)
  *   EVAL_THRESHOLD      - Minimum pass rate 0-1 (default: 0.75)
+ *   SENTRY_CLI_BINARY   - Path to pre-built binary (falls back to bun run src/bin.ts)
  */
 
 import cases from "../test/skill-eval/cases.json";

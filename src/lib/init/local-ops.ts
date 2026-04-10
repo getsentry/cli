@@ -26,12 +26,16 @@ import {
   MAX_OUTPUT_BYTES,
 } from "./constants.js";
 import { resolveOrgPrefetched } from "./prefetch.js";
+import { replace } from "./replacers.js";
 import type {
+  ApplyPatchsetPatch,
   ApplyPatchsetPayload,
   CreateSentryProjectPayload,
   DetectSentryPayload,
   DirEntry,
   FileExistsBatchPayload,
+  GlobPayload,
+  GrepPayload,
   ListDirPayload,
   LocalOpPayload,
   LocalOpResult,
@@ -58,25 +62,6 @@ const DEFAULT_JSON_INDENT: JsonIndent = {
   replacer: Indenter.SPACE,
   length: 2,
 };
-
-/** Matches the first indented line in a string to detect whitespace style. */
-const INDENT_PATTERN = /^(\s+)/m;
-
-/**
- * Detect the indentation style of a JSON string by inspecting the first
- * indented line. Returns a default of 2 spaces if no indentation is found.
- */
-function detectJsonIndent(content: string): JsonIndent {
-  const match = content.match(INDENT_PATTERN);
-  if (!match?.[1]) {
-    return DEFAULT_JSON_INDENT;
-  }
-  const indent = match[1];
-  if (indent.includes("\t")) {
-    return { replacer: Indenter.TAB, length: indent.length };
-  }
-  return { replacer: Indenter.SPACE, length: indent.length };
-}
 
 /** Build the third argument for `JSON.stringify` from a `JsonIndent`. */
 function jsonIndentArg(indent: JsonIndent): string {
@@ -290,18 +275,31 @@ export async function precomputeDirListing(
  * eliminates 1-3 suspend/resume round-trips.
  */
 const COMMON_CONFIG_FILES = [
+  // ── Manifests (all ecosystems) ──
   "package.json",
   "tsconfig.json",
   "pyproject.toml",
+  "requirements.txt",
+  "requirements-dev.txt",
+  "setup.py",
+  "setup.cfg",
+  "Pipfile",
   "Gemfile",
+  "Gemfile.lock",
   "go.mod",
   "build.gradle",
   "build.gradle.kts",
+  "settings.gradle",
+  "settings.gradle.kts",
   "pom.xml",
   "Cargo.toml",
   "pubspec.yaml",
   "mix.exs",
   "composer.json",
+  "Podfile",
+  "CMakeLists.txt",
+
+  // ── JavaScript/TypeScript framework configs ──
   "next.config.js",
   "next.config.mjs",
   "next.config.ts",
@@ -315,12 +313,51 @@ const COMMON_CONFIG_FILES = [
   "vite.config.ts",
   "vite.config.js",
   "webpack.config.js",
+  "metro.config.js",
+  "app.json",
+  "electron-builder.yml",
+  "wrangler.toml",
+  "wrangler.jsonc",
+  "serverless.yml",
+  "serverless.ts",
+  "bunfig.toml",
+
+  // ── Python entry points / framework markers ──
+  "manage.py",
+  "app.py",
+  "main.py",
+
+  // ── PHP framework markers ──
+  "artisan",
+  "symfony.lock",
+  "wp-config.php",
+  "config/packages/sentry.yaml",
+
+  // ── .NET ──
+  "appsettings.json",
+  "Program.cs",
+  "Startup.cs",
+
+  // ── Java / Android ──
+  "app/build.gradle",
+  "app/build.gradle.kts",
+  "src/main/resources/application.properties",
+  "src/main/resources/application.yml",
+
+  // ── Ruby (Rails) ──
+  "config/application.rb",
+
+  // ── Go entry point ──
+  "main.go",
+
+  // ── Sentry configs (all ecosystems) ──
   "sentry.client.config.ts",
   "sentry.client.config.js",
   "sentry.server.config.ts",
   "sentry.server.config.js",
   "sentry.edge.config.ts",
   "sentry.edge.config.js",
+  "sentry.properties",
   "instrumentation.ts",
   "instrumentation.js",
 ];
@@ -336,7 +373,9 @@ export async function preReadCommonFiles(
   directory: string,
   dirListing: DirEntry[]
 ): Promise<Record<string, string | null>> {
-  const listingPaths = new Set(dirListing.map((e) => e.path));
+  const listingPaths = new Set(
+    dirListing.map((e) => e.path.replaceAll("\\", "/"))
+  );
   const toRead = COMMON_CONFIG_FILES.filter((f) => listingPaths.has(f));
 
   const cache: Record<string, string | null> = {};
@@ -348,7 +387,14 @@ export async function preReadCommonFiles(
     }
     try {
       const absPath = path.join(directory, filePath);
-      const content = await fs.promises.readFile(absPath, "utf-8");
+      let content = await fs.promises.readFile(absPath, "utf-8");
+      if (filePath.endsWith(".json")) {
+        try {
+          content = JSON.stringify(JSON.parse(content));
+        } catch {
+          // Not valid JSON — send as-is
+        }
+      }
       if (totalBytes + content.length <= MAX_PREREAD_TOTAL_BYTES) {
         cache[filePath] = content;
         totalBytes += content.length;
@@ -389,7 +435,11 @@ export async function handleLocalOp(
       case "run-commands":
         return await runCommands(payload, options.dryRun);
       case "apply-patchset":
-        return await applyPatchset(payload, options.dryRun);
+        return await applyPatchset(payload, options.dryRun, options.authToken);
+      case "grep":
+        return await grep(payload);
+      case "glob":
+        return await glob(payload);
       case "create-sentry-project":
         return await createSentryProject(payload, options);
       case "detect-sentry":
@@ -676,40 +726,88 @@ function applyPatchsetDryRun(payload: ApplyPatchsetPayload): LocalOpResult {
   return { ok: true, data: { applied } };
 }
 
+/** Pattern matching empty or placeholder SENTRY_AUTH_TOKEN values in env files.
+ *  Uses [ \t] (horizontal whitespace) instead of \s to avoid consuming newlines. */
+const EMPTY_AUTH_TOKEN_RE =
+  /^(SENTRY_AUTH_TOKEN[ \t]*=[ \t]*)(?:['"]?[ \t]*['"]?)?[ \t]*$/m;
+
 /**
- * Resolve the final file content for a patch, pretty-printing JSON files
- * to preserve readable formatting. For `modify` actions, the existing file's
- * indentation style is detected and preserved. For `create` actions, a default
- * of 2-space indentation is used.
+ * Resolve the final file content for a full-content patch (create only),
+ * pretty-printing JSON files to preserve readable formatting, and injecting
+ * the auth token into env files when the server left it empty.
  */
-async function resolvePatchContent(
-  absPath: string,
-  patch: ApplyPatchsetPayload["params"]["patches"][number]
-): Promise<string> {
-  if (!patch.path.endsWith(".json")) {
-    return patch.patch;
+function resolvePatchContent(
+  patch: { path: string; patch: string },
+  authToken?: string
+): string {
+  let content = patch.path.endsWith(".json")
+    ? prettyPrintJson(patch.patch, DEFAULT_JSON_INDENT)
+    : patch.patch;
+
+  // Inject the auth token into env files when the AI left the value empty.
+  // The server never has access to the user's token, so it generates
+  // SENTRY_AUTH_TOKEN= (empty). We fill it in client-side.
+  if (authToken && isEnvFile(patch.path) && EMPTY_AUTH_TOKEN_RE.test(content)) {
+    content = content.replace(
+      EMPTY_AUTH_TOKEN_RE,
+      (_, prefix) => `${prefix}${authToken}`
+    );
   }
-  if (patch.action === "modify") {
-    const existing = await fs.promises.readFile(absPath, "utf-8");
-    return prettyPrintJson(patch.patch, detectJsonIndent(existing));
-  }
-  return prettyPrintJson(patch.patch, DEFAULT_JSON_INDENT);
+
+  return content;
 }
 
-type Patch = ApplyPatchsetPayload["params"]["patches"][number];
+/** Returns true if the file path looks like a .env file. */
+function isEnvFile(filePath: string): boolean {
+  const name = filePath.split("/").pop() ?? "";
+  return name === ".env" || name.startsWith(".env.");
+}
 
 const VALID_PATCH_ACTIONS = new Set(["create", "modify", "delete"]);
 
-async function applySinglePatch(absPath: string, patch: Patch): Promise<void> {
+/**
+ * Apply edits (oldString/newString pairs) to a file using fuzzy matching.
+ * Edits are applied sequentially — each edit operates on the result of the
+ * previous one. Returns the final file content.
+ */
+async function applyEdits(
+  absPath: string,
+  filePath: string,
+  edits: Array<{ oldString: string; newString: string }>
+): Promise<string> {
+  let content = await fs.promises.readFile(absPath, "utf-8");
+
+  for (let i = 0; i < edits.length; i++) {
+    const edit = edits[i] as (typeof edits)[number];
+    try {
+      content = replace(content, edit.oldString, edit.newString);
+    } catch (err) {
+      throw new Error(
+        `Edit #${i + 1} failed on "${filePath}": ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  return content;
+}
+
+async function applySinglePatch(
+  absPath: string,
+  patch: ApplyPatchsetPatch,
+  authToken?: string
+): Promise<void> {
   switch (patch.action) {
     case "create": {
       await fs.promises.mkdir(path.dirname(absPath), { recursive: true });
-      const content = await resolvePatchContent(absPath, patch);
+      const content = resolvePatchContent(
+        patch as ApplyPatchsetPatch & { patch: string },
+        authToken
+      );
       await fs.promises.writeFile(absPath, content, "utf-8");
       break;
     }
     case "modify": {
-      const content = await resolvePatchContent(absPath, patch);
+      const content = await applyEdits(absPath, patch.path, patch.edits);
       await fs.promises.writeFile(absPath, content, "utf-8");
       break;
     }
@@ -730,7 +828,8 @@ async function applySinglePatch(absPath: string, patch: Patch): Promise<void> {
 
 async function applyPatchset(
   payload: ApplyPatchsetPayload,
-  dryRun?: boolean
+  dryRun?: boolean,
+  authToken?: string
 ): Promise<LocalOpResult> {
   if (dryRun) {
     return applyPatchsetDryRun(payload);
@@ -767,7 +866,7 @@ async function applyPatchset(
       }
     }
 
-    await applySinglePatch(absPath, patch);
+    await applySinglePatch(absPath, patch, authToken);
     applied.push({ path: patch.path, action: patch.action });
   }
 
@@ -922,6 +1021,485 @@ async function detectSentry(
     data: { status: "installed", signals, dsn: dsn.raw },
   };
 }
+
+// ── Grep & Glob ─────────────────────────────────────────────────────
+
+const MAX_GREP_RESULTS_PER_SEARCH = 100;
+const MAX_GREP_LINE_LENGTH = 2000;
+const MAX_GLOB_RESULTS = 100;
+const SKIP_DIRS = new Set([
+  "node_modules",
+  ".git",
+  "__pycache__",
+  ".venv",
+  "venv",
+  "dist",
+  "build",
+]);
+
+type GrepMatch = { path: string; lineNum: number; line: string };
+
+// ── Ripgrep implementations (preferred when rg is on PATH) ──────────
+
+/**
+ * Spawn a command, collect stdout + stderr, reject on spawn errors (ENOENT).
+ * Drains both streams to prevent pipe buffer deadlocks.
+ */
+function spawnCollect(
+  cmd: string,
+  args: string[],
+  cwd: string
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 30_000,
+    });
+
+    const outChunks: Buffer[] = [];
+    let outLen = 0;
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (outLen < MAX_OUTPUT_BYTES) {
+        outChunks.push(chunk);
+        outLen += chunk.length;
+      }
+    });
+
+    const errChunks: Buffer[] = [];
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (errChunks.length < 64) {
+        errChunks.push(chunk);
+      }
+    });
+
+    child.on("error", (err) => {
+      reject(err);
+    });
+    child.on("close", (code, signal) => {
+      if (signal) {
+        reject(new Error(`Process killed by ${signal} (timeout)`));
+        return;
+      }
+      resolve({
+        stdout: Buffer.concat(outChunks).toString("utf-8"),
+        stderr: Buffer.concat(errChunks).toString("utf-8"),
+        exitCode: code ?? 1,
+      });
+    });
+  });
+}
+
+/**
+ * Parse ripgrep output using `|` as field separator (set via
+ * `--field-match-separator=|`) to avoid ambiguity with `:` in
+ * Windows drive-letter paths.
+ * Format: filepath|linenum|matched text
+ */
+function parseRgGrepOutput(
+  cwd: string,
+  stdout: string,
+  maxResults: number
+): { matches: GrepMatch[]; truncated: boolean } {
+  const lines = stdout.split("\n").filter(Boolean);
+  const truncated = lines.length > maxResults;
+  const matches: GrepMatch[] = [];
+
+  for (const line of lines.slice(0, maxResults)) {
+    const firstSep = line.indexOf("|");
+    if (firstSep === -1) {
+      continue;
+    }
+    const filePart = line.substring(0, firstSep);
+    const rest = line.substring(firstSep + 1);
+    const secondSep = rest.indexOf("|");
+    if (secondSep === -1) {
+      continue;
+    }
+    const lineNum = Number.parseInt(rest.substring(0, secondSep), 10);
+    let text = rest.substring(secondSep + 1);
+    if (text.length > MAX_GREP_LINE_LENGTH) {
+      text = `${text.substring(0, MAX_GREP_LINE_LENGTH)}…`;
+    }
+    matches.push({ path: path.relative(cwd, filePart), lineNum, line: text });
+  }
+
+  return { matches, truncated };
+}
+
+async function rgGrepSearch(opts: {
+  cwd: string;
+  pattern: string;
+  target: string;
+  include: string | undefined;
+  maxResults: number;
+}): Promise<{ matches: GrepMatch[]; truncated: boolean }> {
+  const { cwd, pattern, target, include, maxResults } = opts;
+  const args = [
+    "-nH",
+    "--no-messages",
+    "--hidden",
+    "--field-match-separator=|",
+    "--regexp",
+    pattern,
+  ];
+  if (include) {
+    args.push("--glob", include);
+  }
+  args.push(target);
+
+  const { stdout, exitCode } = await spawnCollect("rg", args, cwd);
+
+  if (exitCode === 1 || (exitCode === 2 && !stdout.trim())) {
+    return { matches: [], truncated: false };
+  }
+  if (exitCode !== 0 && exitCode !== 2) {
+    throw new Error(`ripgrep failed with exit code ${exitCode}`);
+  }
+
+  return parseRgGrepOutput(cwd, stdout, maxResults);
+}
+
+async function rgGlobSearch(opts: {
+  cwd: string;
+  pattern: string;
+  target: string;
+  maxResults: number;
+}): Promise<{ files: string[]; truncated: boolean }> {
+  const { cwd, pattern, target, maxResults } = opts;
+  const args = ["--files", "--hidden", "--glob", pattern, target];
+
+  const { stdout, exitCode } = await spawnCollect("rg", args, cwd);
+
+  if (exitCode === 1 || (exitCode === 2 && !stdout.trim())) {
+    return { files: [], truncated: false };
+  }
+  if (exitCode !== 0 && exitCode !== 2) {
+    throw new Error(`ripgrep failed with exit code ${exitCode}`);
+  }
+
+  const lines = stdout.split("\n").filter(Boolean);
+  const truncated = lines.length > maxResults;
+  const files = lines.slice(0, maxResults).map((f) => path.relative(cwd, f));
+  return { files, truncated };
+}
+
+// ── Node.js fallback (when rg is not installed) ─────────────────────
+
+/**
+ * Recursively walk a directory, yielding relative file paths.
+ * Skips common non-source directories and respects an optional glob filter.
+ */
+async function* walkFiles(
+  root: string,
+  base: string,
+  globPattern: string | undefined
+): AsyncGenerator<string> {
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.promises.readdir(base, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const full = path.join(base, entry.name);
+    const rel = path.relative(root, full);
+    if (entry.isDirectory() && !SKIP_DIRS.has(entry.name)) {
+      yield* walkFiles(root, full, globPattern);
+    } else if (entry.isFile()) {
+      const matchTarget = globPattern?.includes("/") ? rel : entry.name;
+      if (!globPattern || matchGlob(matchTarget, globPattern)) {
+        yield rel;
+      }
+    }
+  }
+}
+
+/** Minimal glob matcher — supports `*`, `**`, and `?` wildcards. */
+function matchGlob(name: string, pattern: string): boolean {
+  const re = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, "\0")
+    .replace(/\*/g, "[^/]*")
+    .replace(/\0/g, ".*")
+    .replace(/\?/g, ".");
+  return new RegExp(`^${re}$`).test(name);
+}
+
+/**
+ * Search files for a regex pattern using Node.js fs. Fallback for when
+ * ripgrep is not available.
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: file-walking search with early exits
+async function fsGrepSearch(opts: {
+  cwd: string;
+  pattern: string;
+  searchPath: string | undefined;
+  include: string | undefined;
+  maxResults: number;
+}): Promise<{ matches: GrepMatch[]; truncated: boolean }> {
+  const { cwd, pattern, searchPath, include, maxResults } = opts;
+  const target = searchPath ? safePath(cwd, searchPath) : cwd;
+  let regex: RegExp;
+  try {
+    regex = new RegExp(pattern);
+  } catch {
+    return { matches: [], truncated: false };
+  }
+  const matches: GrepMatch[] = [];
+
+  for await (const rel of walkFiles(cwd, target, include)) {
+    if (matches.length > maxResults) {
+      break;
+    }
+    const absPath = path.join(cwd, rel);
+    let content: string;
+    try {
+      const stat = await fs.promises.stat(absPath);
+      if (stat.size > MAX_FILE_BYTES) {
+        continue;
+      }
+      content = await fs.promises.readFile(absPath, "utf-8");
+    } catch {
+      continue;
+    }
+    const lines = content.split("\n");
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i] ?? "";
+      if (regex.test(line)) {
+        let text = line;
+        if (text.length > MAX_GREP_LINE_LENGTH) {
+          text = `${text.substring(0, MAX_GREP_LINE_LENGTH)}…`;
+        }
+        matches.push({ path: rel, lineNum: i + 1, line: text });
+        if (matches.length > maxResults) {
+          break;
+        }
+      }
+    }
+  }
+
+  const truncated = matches.length > maxResults;
+  if (truncated) {
+    matches.length = maxResults;
+  }
+  return { matches, truncated };
+}
+
+async function fsGlobSearch(opts: {
+  cwd: string;
+  pattern: string;
+  searchPath: string | undefined;
+  maxResults: number;
+}): Promise<{ files: string[]; truncated: boolean }> {
+  const { cwd, pattern, searchPath, maxResults } = opts;
+  const target = searchPath ? safePath(cwd, searchPath) : cwd;
+  const files: string[] = [];
+
+  for await (const rel of walkFiles(cwd, target, pattern)) {
+    files.push(rel);
+    if (files.length > maxResults) {
+      break;
+    }
+  }
+
+  const truncated = files.length > maxResults;
+  if (truncated) {
+    files.length = maxResults;
+  }
+  return { files, truncated };
+}
+
+// ── git grep / git ls-files (middle fallback tier) ──────────────────
+
+const GREP_LINE_RE = /^(.+?):(\d+):(.*)$/;
+
+function parseGrepOutput(
+  stdout: string,
+  maxResults: number,
+  pathPrefix?: string
+): { matches: GrepMatch[]; truncated: boolean } {
+  const lines = stdout.split("\n").filter(Boolean);
+  const matches: GrepMatch[] = [];
+
+  for (const line of lines) {
+    const m = line.match(GREP_LINE_RE);
+    if (!(m?.[1] && m[2] && m[3] !== null && m[3] !== undefined)) {
+      continue;
+    }
+    const lineNum = Number.parseInt(m[2], 10);
+    let text: string = m[3];
+    if (text.length > MAX_GREP_LINE_LENGTH) {
+      text = `${text.substring(0, MAX_GREP_LINE_LENGTH)}…`;
+    }
+    const filePath = pathPrefix ? path.join(pathPrefix, m[1]) : m[1];
+    matches.push({ path: filePath, lineNum, line: text });
+    if (matches.length > maxResults) {
+      break;
+    }
+  }
+
+  const truncated = matches.length > maxResults;
+  if (truncated) {
+    matches.length = maxResults;
+  }
+  return { matches, truncated };
+}
+
+async function gitGrepSearch(opts: {
+  cwd: string;
+  pattern: string;
+  target: string;
+  include: string | undefined;
+  maxResults: number;
+}): Promise<{ matches: GrepMatch[]; truncated: boolean }> {
+  const { cwd, pattern, target, include, maxResults } = opts;
+  const args = ["grep", "--untracked", "-n", "-E", pattern];
+  if (include) {
+    args.push("--", include);
+  }
+
+  const { stdout, exitCode } = await spawnCollect("git", args, target);
+
+  if (exitCode === 1) {
+    return { matches: [], truncated: false };
+  }
+  if (exitCode !== 0) {
+    throw new Error(`git grep failed with exit code ${exitCode}`);
+  }
+
+  const prefix = path.relative(cwd, target);
+  return parseGrepOutput(stdout, maxResults, prefix || undefined);
+}
+
+async function gitLsFiles(opts: {
+  cwd: string;
+  pattern: string;
+  target: string;
+  maxResults: number;
+}): Promise<{ files: string[]; truncated: boolean }> {
+  const { cwd, pattern, target, maxResults } = opts;
+  const args = [
+    "ls-files",
+    "--cached",
+    "--others",
+    "--exclude-standard",
+    pattern,
+  ];
+
+  const { stdout, exitCode } = await spawnCollect("git", args, target);
+
+  if (exitCode !== 0) {
+    throw new Error(`git ls-files failed with exit code ${exitCode}`);
+  }
+
+  const lines = stdout.split("\n").filter(Boolean);
+  const truncated = lines.length > maxResults;
+  const files = lines
+    .slice(0, maxResults)
+    .map((f) => path.relative(cwd, path.resolve(target, f)));
+  return { files, truncated };
+}
+
+// ── Dispatch: rg → git → Node.js ────────────────────────────────────
+
+function isGitRepo(dir: string): boolean {
+  try {
+    return fs.statSync(path.join(dir, ".git")).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+async function grepSearch(opts: {
+  cwd: string;
+  pattern: string;
+  searchPath: string | undefined;
+  include: string | undefined;
+  maxResults: number;
+}): Promise<{ matches: GrepMatch[]; truncated: boolean }> {
+  const target = opts.searchPath
+    ? safePath(opts.cwd, opts.searchPath)
+    : opts.cwd;
+  const resolvedOpts = { ...opts, target };
+  try {
+    return await rgGrepSearch(resolvedOpts);
+  } catch {
+    if (isGitRepo(opts.cwd)) {
+      try {
+        return await gitGrepSearch(resolvedOpts);
+      } catch {
+        // fall through to fs
+      }
+    }
+    return await fsGrepSearch(opts);
+  }
+}
+
+async function globSearchImpl(opts: {
+  cwd: string;
+  pattern: string;
+  searchPath: string | undefined;
+  maxResults: number;
+}): Promise<{ files: string[]; truncated: boolean }> {
+  const target = opts.searchPath
+    ? safePath(opts.cwd, opts.searchPath)
+    : opts.cwd;
+  const resolvedOpts = { ...opts, target };
+  try {
+    return await rgGlobSearch(resolvedOpts);
+  } catch {
+    if (isGitRepo(opts.cwd)) {
+      try {
+        return await gitLsFiles(resolvedOpts);
+      } catch {
+        // fall through to fs
+      }
+    }
+    return await fsGlobSearch(opts);
+  }
+}
+
+async function grep(payload: GrepPayload): Promise<LocalOpResult> {
+  const { cwd, params } = payload;
+  const maxResults = params.maxResultsPerSearch ?? MAX_GREP_RESULTS_PER_SEARCH;
+
+  const results = await Promise.all(
+    params.searches.map(async (search) => {
+      const { matches, truncated } = await grepSearch({
+        cwd,
+        pattern: search.pattern,
+        searchPath: search.path,
+        include: search.include,
+        maxResults,
+      });
+      return { pattern: search.pattern, matches, truncated };
+    })
+  );
+
+  return { ok: true, data: { results } };
+}
+
+async function glob(payload: GlobPayload): Promise<LocalOpResult> {
+  const { cwd, params } = payload;
+  const maxResults = params.maxResults ?? MAX_GLOB_RESULTS;
+
+  const results = await Promise.all(
+    params.patterns.map(async (pattern) => {
+      const { files, truncated } = await globSearchImpl({
+        cwd,
+        pattern,
+        searchPath: params.path,
+        maxResults,
+      });
+      return { pattern, files, truncated };
+    })
+  );
+
+  return { ok: true, data: { results } };
+}
+
+// ── Sentry project + DSN ────────────────────────────────────────────
 
 async function createSentryProject(
   payload: CreateSentryProjectPayload,

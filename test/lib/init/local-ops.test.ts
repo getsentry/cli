@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs, {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -15,6 +16,8 @@ import {
 import type {
   ApplyPatchsetPayload,
   FileExistsBatchPayload,
+  GlobPayload,
+  GrepPayload,
   ListDirPayload,
   LocalOpPayload,
   ReadFilesPayload,
@@ -751,7 +754,7 @@ describe("handleLocalOp", () => {
     });
 
     test("modifies an existing file", async () => {
-      writeFileSync(join(testDir, "existing.txt"), "old");
+      writeFileSync(join(testDir, "existing.txt"), "old content here");
 
       const payload: ApplyPatchsetPayload = {
         type: "local-op",
@@ -759,7 +762,11 @@ describe("handleLocalOp", () => {
         cwd: testDir,
         params: {
           patches: [
-            { path: "existing.txt", action: "modify", patch: "new content" },
+            {
+              path: "existing.txt",
+              action: "modify",
+              edits: [{ oldString: "old content", newString: "new content" }],
+            },
           ],
         },
       };
@@ -767,7 +774,7 @@ describe("handleLocalOp", () => {
       const result = await handleLocalOp(payload, options);
       expect(result.ok).toBe(true);
       expect(fs.readFileSync(join(testDir, "existing.txt"), "utf-8")).toBe(
-        "new content"
+        "new content here"
       );
     });
 
@@ -777,7 +784,13 @@ describe("handleLocalOp", () => {
         operation: "apply-patchset",
         cwd: testDir,
         params: {
-          patches: [{ path: "ghost.txt", action: "modify", patch: "content" }],
+          patches: [
+            {
+              path: "ghost.txt",
+              action: "modify",
+              edits: [{ oldString: "x", newString: "y" }],
+            },
+          ],
         },
       };
 
@@ -818,7 +831,7 @@ describe("handleLocalOp", () => {
     });
 
     test("applies multiple patches in sequence", async () => {
-      writeFileSync(join(testDir, "to-modify.txt"), "old");
+      writeFileSync(join(testDir, "to-modify.txt"), "old content");
       writeFileSync(join(testDir, "to-delete.txt"), "bye");
 
       const payload: ApplyPatchsetPayload = {
@@ -828,8 +841,12 @@ describe("handleLocalOp", () => {
         params: {
           patches: [
             { path: "created.txt", action: "create", patch: "new" },
-            { path: "to-modify.txt", action: "modify", patch: "updated" },
-            { path: "to-delete.txt", action: "delete", patch: "" },
+            {
+              path: "to-modify.txt",
+              action: "modify",
+              edits: [{ oldString: "old content", newString: "updated" }],
+            },
+            { path: "to-delete.txt", action: "delete" },
           ],
         },
       };
@@ -911,6 +928,295 @@ describe("handleLocalOp", () => {
       expect(result.ok).toBe(false);
       expect(result.error).toContain("outside project directory");
     });
+
+    test("modifies file using edits (oldString/newString)", async () => {
+      writeFileSync(
+        join(testDir, "config.ts"),
+        [
+          'import * as Sentry from "@sentry/nextjs";',
+          "",
+          "Sentry.init({",
+          '  dsn: "https://old@sentry.io/1",',
+          "  tracesSampleRate: 1.0,",
+          "});",
+        ].join("\n")
+      );
+
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: "config.ts",
+              action: "modify",
+              edits: [
+                {
+                  oldString: '  dsn: "https://old@sentry.io/1",',
+                  newString: '  dsn: "https://new@sentry.io/2",',
+                },
+                {
+                  oldString: "  tracesSampleRate: 1.0,",
+                  newString:
+                    "  tracesSampleRate: 0.5,\n  replaysSessionSampleRate: 0.1,",
+                },
+              ],
+            },
+          ],
+        },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      expect(result.ok).toBe(true);
+
+      const content = readFileSync(join(testDir, "config.ts"), "utf-8");
+      expect(content).toContain("new@sentry.io/2");
+      expect(content).not.toContain("old@sentry.io/1");
+      expect(content).toContain("tracesSampleRate: 0.5,");
+      expect(content).toContain("replaysSessionSampleRate: 0.1,");
+    });
+
+    test("edits-based modify fails gracefully when oldString not found", async () => {
+      writeFileSync(join(testDir, "app.ts"), "const x = 1;\n");
+
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: "app.ts",
+              action: "modify",
+              edits: [
+                {
+                  oldString: "this text does not exist",
+                  newString: "replacement",
+                },
+              ],
+            },
+          ],
+        },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('Edit #1 failed on "app.ts"');
+    });
+
+    test("edits-based modify with fuzzy matching (indentation difference)", async () => {
+      writeFileSync(
+        join(testDir, "fuzzy.ts"),
+        "    const x = 1;\n    const y = 2;\n"
+      );
+
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: "fuzzy.ts",
+              action: "modify",
+              edits: [
+                {
+                  oldString: "  const x = 1;\n  const y = 2;",
+                  newString: "  const x = 10;\n  const y = 20;",
+                },
+              ],
+            },
+          ],
+        },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      expect(result.ok).toBe(true);
+
+      const content = readFileSync(join(testDir, "fuzzy.ts"), "utf-8");
+      expect(content).toContain("const x = 10;");
+      expect(content).toContain("const y = 20;");
+    });
+
+    test("mixed create + edits-based modify in single patchset", async () => {
+      writeFileSync(join(testDir, "existing.ts"), 'const old = "value";\n');
+
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: "new-file.ts",
+              action: "create",
+              patch: 'import * as Sentry from "@sentry/node";\n',
+            },
+            {
+              path: "existing.ts",
+              action: "modify",
+              edits: [
+                {
+                  oldString: 'const old = "value";',
+                  newString: 'const updated = "new-value";',
+                },
+              ],
+            },
+          ],
+        },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      expect(result.ok).toBe(true);
+
+      expect(fs.existsSync(join(testDir, "new-file.ts"))).toBe(true);
+      const content = readFileSync(join(testDir, "existing.ts"), "utf-8");
+      expect(content).toContain('const updated = "new-value"');
+    });
+
+    test("injects auth token into .env.sentry-build-plugin with empty SENTRY_AUTH_TOKEN", async () => {
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: ".env.sentry-build-plugin",
+              action: "create",
+              patch: "SENTRY_AUTH_TOKEN=\n",
+            },
+          ],
+        },
+      };
+
+      const opts = makeOptions({
+        directory: testDir,
+        authToken: "sntrys_test_token_123",
+      });
+      const result = await handleLocalOp(payload, opts);
+      expect(result.ok).toBe(true);
+
+      const content = readFileSync(
+        join(testDir, ".env.sentry-build-plugin"),
+        "utf-8"
+      );
+      expect(content).toBe("SENTRY_AUTH_TOKEN=sntrys_test_token_123\n");
+    });
+
+    test("does not inject auth token into non-env files", async () => {
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: "config.ts",
+              action: "create",
+              patch: "SENTRY_AUTH_TOKEN=\n",
+            },
+          ],
+        },
+      };
+
+      const opts = makeOptions({
+        directory: testDir,
+        authToken: "sntrys_test_token_123",
+      });
+      const result = await handleLocalOp(payload, opts);
+      expect(result.ok).toBe(true);
+
+      const content = readFileSync(join(testDir, "config.ts"), "utf-8");
+      expect(content).toBe("SENTRY_AUTH_TOKEN=\n");
+    });
+
+    test("does not overwrite existing non-empty SENTRY_AUTH_TOKEN", async () => {
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: ".env.sentry-build-plugin",
+              action: "create",
+              patch: "SENTRY_AUTH_TOKEN=existing_value\n",
+            },
+          ],
+        },
+      };
+
+      const opts = makeOptions({
+        directory: testDir,
+        authToken: "sntrys_different_token",
+      });
+      const result = await handleLocalOp(payload, opts);
+      expect(result.ok).toBe(true);
+
+      const content = readFileSync(
+        join(testDir, ".env.sentry-build-plugin"),
+        "utf-8"
+      );
+      expect(content).toBe("SENTRY_AUTH_TOKEN=existing_value\n");
+    });
+
+    test("handles .env file with empty quoted SENTRY_AUTH_TOKEN", async () => {
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: ".env.sentry-build-plugin",
+              action: "create",
+              patch: 'SENTRY_AUTH_TOKEN=""\n',
+            },
+          ],
+        },
+      };
+
+      const opts = makeOptions({
+        directory: testDir,
+        authToken: "sntrys_test_token_456",
+      });
+      const result = await handleLocalOp(payload, opts);
+      expect(result.ok).toBe(true);
+
+      const content = readFileSync(
+        join(testDir, ".env.sentry-build-plugin"),
+        "utf-8"
+      );
+      expect(content).toBe("SENTRY_AUTH_TOKEN=sntrys_test_token_456\n");
+    });
+
+    test("does not inject when no auth token is available", async () => {
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: ".env.sentry-build-plugin",
+              action: "create",
+              patch: "SENTRY_AUTH_TOKEN=\n",
+            },
+          ],
+        },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      expect(result.ok).toBe(true);
+
+      const content = readFileSync(
+        join(testDir, ".env.sentry-build-plugin"),
+        "utf-8"
+      );
+      expect(content).toBe("SENTRY_AUTH_TOKEN=\n");
+    });
   });
 });
 
@@ -957,5 +1263,230 @@ describe("precomputeDirListing", () => {
     const entries = await precomputeDirListing(testDir);
     const paths = entries.map((e) => e.path);
     expect(paths).toContain(join("a", "nested.ts"));
+  });
+});
+
+describe("grep", () => {
+  let testDir: string;
+  let options: WizardOptions;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join("/tmp", "grep-test-"));
+    options = makeOptions({ directory: testDir });
+    writeFileSync(
+      join(testDir, "app.ts"),
+      'import * as Sentry from "@sentry/node";\nSentry.init({ dsn: "..." });\n'
+    );
+    writeFileSync(
+      join(testDir, "utils.ts"),
+      "export function helper() { return 1; }\n"
+    );
+    mkdirSync(join(testDir, "src"));
+    writeFileSync(
+      join(testDir, "src", "index.ts"),
+      'import { helper } from "./utils";\nSentry.init({});\n'
+    );
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  test("finds matches for a single pattern", async () => {
+    const payload: GrepPayload = {
+      type: "local-op",
+      operation: "grep",
+      cwd: testDir,
+      params: {
+        searches: [{ pattern: "Sentry\\.init" }],
+      },
+    };
+
+    const result = await handleLocalOp(payload, options);
+    expect(result.ok).toBe(true);
+    const data = result.data as {
+      results: Array<{
+        pattern: string;
+        matches: Array<{ path: string; lineNum: number; line: string }>;
+        truncated: boolean;
+      }>;
+    };
+    expect(data.results).toHaveLength(1);
+    expect(data.results[0].matches.length).toBeGreaterThanOrEqual(2);
+    expect(data.results[0].truncated).toBe(false);
+  });
+
+  test("supports multiple search patterns in one call", async () => {
+    const payload: GrepPayload = {
+      type: "local-op",
+      operation: "grep",
+      cwd: testDir,
+      params: {
+        searches: [{ pattern: "@sentry/node" }, { pattern: "helper" }],
+      },
+    };
+
+    const result = await handleLocalOp(payload, options);
+    expect(result.ok).toBe(true);
+    const data = result.data as {
+      results: Array<{ pattern: string; matches: unknown[] }>;
+    };
+    expect(data.results).toHaveLength(2);
+    expect(data.results[0].pattern).toBe("@sentry/node");
+    expect(data.results[0].matches.length).toBeGreaterThanOrEqual(1);
+    expect(data.results[1].pattern).toBe("helper");
+    expect(data.results[1].matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("supports include glob filter", async () => {
+    const payload: GrepPayload = {
+      type: "local-op",
+      operation: "grep",
+      cwd: testDir,
+      params: {
+        searches: [{ pattern: "Sentry", include: "app.*" }],
+      },
+    };
+
+    const result = await handleLocalOp(payload, options);
+    expect(result.ok).toBe(true);
+    const data = result.data as {
+      results: Array<{ matches: Array<{ path: string }> }>;
+    };
+    for (const match of data.results[0].matches) {
+      expect(match.path).toContain("app");
+    }
+  });
+
+  test("returns empty matches for non-matching pattern", async () => {
+    const payload: GrepPayload = {
+      type: "local-op",
+      operation: "grep",
+      cwd: testDir,
+      params: {
+        searches: [{ pattern: "nonexistent_string_xyz" }],
+      },
+    };
+
+    const result = await handleLocalOp(payload, options);
+    expect(result.ok).toBe(true);
+    const data = result.data as { results: Array<{ matches: unknown[] }> };
+    expect(data.results[0].matches).toHaveLength(0);
+  });
+
+  test("returns paths relative to cwd when searching a subdirectory", async () => {
+    const payload: GrepPayload = {
+      type: "local-op",
+      operation: "grep",
+      cwd: testDir,
+      params: {
+        searches: [{ pattern: "helper", path: "src" }],
+      },
+    };
+
+    const result = await handleLocalOp(payload, options);
+    expect(result.ok).toBe(true);
+    const data = result.data as {
+      results: Array<{
+        matches: Array<{ path: string; lineNum: number }>;
+      }>;
+    };
+    expect(data.results[0].matches.length).toBeGreaterThanOrEqual(1);
+    for (const match of data.results[0].matches) {
+      expect(match.path).toMatch(/^src\//);
+    }
+  });
+
+  test("respects path sandbox", async () => {
+    const payload: GrepPayload = {
+      type: "local-op",
+      operation: "grep",
+      cwd: testDir,
+      params: {
+        searches: [{ pattern: "test", path: "../../etc" }],
+      },
+    };
+
+    const result = await handleLocalOp(payload, options);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("outside project directory");
+  });
+});
+
+describe("glob", () => {
+  let testDir: string;
+  let options: WizardOptions;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join("/tmp", "glob-test-"));
+    options = makeOptions({ directory: testDir });
+    writeFileSync(join(testDir, "app.ts"), "x");
+    writeFileSync(join(testDir, "utils.ts"), "x");
+    writeFileSync(join(testDir, "config.json"), "{}");
+    mkdirSync(join(testDir, "src"));
+    writeFileSync(join(testDir, "src", "index.ts"), "x");
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  test("finds files matching a single pattern", async () => {
+    const payload: GlobPayload = {
+      type: "local-op",
+      operation: "glob",
+      cwd: testDir,
+      params: {
+        patterns: ["*.ts"],
+      },
+    };
+
+    const result = await handleLocalOp(payload, options);
+    expect(result.ok).toBe(true);
+    const data = result.data as {
+      results: Array<{ pattern: string; files: string[]; truncated: boolean }>;
+    };
+    expect(data.results).toHaveLength(1);
+    expect(data.results[0].files.length).toBeGreaterThanOrEqual(2);
+    expect(data.results[0].truncated).toBe(false);
+    for (const f of data.results[0].files) {
+      expect(f).toMatch(/\.ts$/);
+    }
+  });
+
+  test("supports multiple patterns in one call", async () => {
+    const payload: GlobPayload = {
+      type: "local-op",
+      operation: "glob",
+      cwd: testDir,
+      params: {
+        patterns: ["*.ts", "*.json"],
+      },
+    };
+
+    const result = await handleLocalOp(payload, options);
+    expect(result.ok).toBe(true);
+    const data = result.data as {
+      results: Array<{ pattern: string; files: string[] }>;
+    };
+    expect(data.results).toHaveLength(2);
+    expect(data.results[0].files.length).toBeGreaterThanOrEqual(2);
+    expect(data.results[1].files.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("returns empty for non-matching pattern", async () => {
+    const payload: GlobPayload = {
+      type: "local-op",
+      operation: "glob",
+      cwd: testDir,
+      params: {
+        patterns: ["*.xyz"],
+      },
+    };
+
+    const result = await handleLocalOp(payload, options);
+    expect(result.ok).toBe(true);
+    const data = result.data as { results: Array<{ files: string[] }> };
+    expect(data.results[0].files).toHaveLength(0);
   });
 });

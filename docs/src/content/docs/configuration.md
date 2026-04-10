@@ -1,9 +1,67 @@
 ---
 title: Configuration
-description: Environment variables and configuration options for the Sentry CLI
+description: Environment variables, config files, and configuration options for the Sentry CLI
 ---
 
-The Sentry CLI can be configured through environment variables and a local database. Most users don't need to set any of these — the CLI auto-detects your project from your codebase and stores credentials locally after `sentry auth login`.
+The Sentry CLI can be configured through config files, environment variables, and a local database. Most users don't need to set any of these — the CLI auto-detects your project from your codebase and stores credentials locally after `sentry auth login`.
+
+## Configuration File (`.sentryclirc`)
+
+The CLI supports a `.sentryclirc` config file using standard INI syntax. This is the same format used by the legacy `sentry-cli` tool, so existing config files are automatically picked up.
+
+### How It Works
+
+The CLI looks for `.sentryclirc` files by walking up from your current directory toward the filesystem root. If multiple files are found, values from the closest file take priority, with `~/.sentryclirc` serving as a global fallback.
+
+```ini
+[defaults]
+org = my-org
+project = my-project
+
+[auth]
+token = sntrys_...
+```
+
+### Supported Fields
+
+| Section | Key | Description |
+|---------|-----|-------------|
+| `[defaults]` | `org` | Default organization slug |
+| `[defaults]` | `project` | Default project slug |
+| `[defaults]` | `url` | Sentry base URL (for self-hosted) |
+| `[auth]` | `token` | Auth token (mapped to `SENTRY_AUTH_TOKEN`) |
+
+### Monorepo Setup
+
+In monorepos, place a `.sentryclirc` at the repo root with your org, then add per-package configs with just the project:
+
+```
+my-monorepo/
+  .sentryclirc              # [defaults] org = my-company
+  packages/
+    frontend/
+      .sentryclirc          # [defaults] project = frontend-web
+    backend/
+      .sentryclirc          # [defaults] project = backend-api
+```
+
+When you run a command from `packages/frontend/`, the CLI resolves `org = my-company` from the root and `project = frontend-web` from the closest file.
+
+### Resolution Priority
+
+When the CLI needs to determine your org and project, it checks these sources in order:
+
+1. **Explicit CLI arguments** — `sentry issue list my-org/my-project`
+2. **Environment variables** — `SENTRY_ORG` / `SENTRY_PROJECT`
+3. **`.sentryclirc` config file** — walked up from CWD, merged with `~/.sentryclirc`
+4. **DSN auto-detection** — scans source code and `.env` files
+5. **Directory name inference** — matches your directory name against project slugs
+
+The first source that provides both org and project wins. For org-only commands, only the org is needed.
+
+### Backward Compatibility
+
+If you previously used the legacy `sentry-cli` and have a `~/.sentryclirc` file, the new CLI reads it automatically. The `[defaults]` and `[auth]` sections are fully compatible. The `[auth] token` value is mapped to the `SENTRY_AUTH_TOKEN` environment variable internally (only if the env var is not already set).
 
 ## Environment Variables
 

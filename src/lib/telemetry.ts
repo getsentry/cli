@@ -19,9 +19,10 @@ import {
   SENTRY_CLI_DSN,
 } from "./constants.js";
 import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
+import { detectAgent, detectAgentFromProcessTree } from "./detect-agent.js";
 import { getEnv } from "./env.js";
 import { ApiError, AuthError, OutputError } from "./errors.js";
-import { attachSentryReporter } from "./logger.js";
+import { attachSentryReporter, logger } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 import { getRealUsername } from "./utils.js";
 
@@ -367,6 +368,54 @@ export function initSentry(
   const libraryMode = options?.libraryMode ?? false;
   const environment = getCliEnvironment();
 
+  /**
+   * Ensure frame paths are absolute so Sentry's symbolicator can match them.
+   *
+   * Bun compiled binaries with `sourcemap: "linked"` produce relative
+   * paths like `"dist-bin/bin.js"` in `Error.stack`. The symbolicator's
+   * `get_release_file_candidate_urls` generates `"~dist-bin/bin.js"` for
+   * relative paths (missing the `/` after `~`), which never matches
+   * uploaded artifacts at `"~/dist-bin/bin.js"`. Prepending `/` makes
+   * the candidate `"~/dist-bin/bin.js"` — a match.
+   */
+  /** True if the path is relative (no leading `/`, no scheme, not `native`). */
+  function isRelativePath(p: string): boolean {
+    if (p.startsWith("/") || p === "native") {
+      return false;
+    }
+    return !p.includes("://");
+  }
+
+  function ensureAbsolute(p: string): string {
+    return isRelativePath(p) ? `/${p}` : p;
+  }
+
+  function normalizeExceptionFrames(event: Sentry.ErrorEvent): void {
+    for (const exc of event.exception?.values ?? []) {
+      for (const frame of exc.stacktrace?.frames ?? []) {
+        if (frame.abs_path) {
+          frame.abs_path = ensureAbsolute(frame.abs_path);
+        }
+        if (frame.filename) {
+          frame.filename = ensureAbsolute(frame.filename);
+        }
+      }
+    }
+  }
+
+  function normalizeDebugImages(event: Sentry.ErrorEvent): void {
+    for (const img of event.debug_meta?.images ?? []) {
+      if ("code_file" in img && typeof img.code_file === "string") {
+        img.code_file = ensureAbsolute(img.code_file);
+      }
+    }
+  }
+
+  function normalizeFramePaths(event: Sentry.ErrorEvent): void {
+    normalizeExceptionFrames(event);
+    normalizeDebugImages(event);
+  }
+
   // Close the previous client to clean up its internal timers and beforeExit
   // handlers (client report flusher interval, log flush listener). Without
   // this, re-initializing the SDK (e.g., in tests) leaks setInterval handles
@@ -434,6 +483,13 @@ export function initSentry(
         return null;
       }
 
+      // Normalize relative frame paths to absolute. Bun's compiled binaries
+      // with sourcemap: "linked" produce relative paths like "dist-bin/bin.js"
+      // in Error.stack. Sentry's symbolicator only matches absolute paths
+      // when generating tilde-prefixed URL candidates (e.g., "~/dist-bin/bin.js"),
+      // silently skipping resolution for relative paths.
+      normalizeFramePaths(event);
+
       return event;
     },
   });
@@ -466,6 +522,25 @@ export function initSentry(
 
     // Tag whether running in an interactive terminal or agent/CI environment
     Sentry.setTag("is_tty", !!process.stdout.isTTY);
+
+    // Tag which AI agent (if any) is driving the CLI.
+    // Env var detection is sync (instant). If no env var matches, fire off
+    // async process tree detection in the background — it sets the tag
+    // before the transaction finishes without blocking CLI startup.
+    const agent = detectAgent();
+    if (agent) {
+      Sentry.setTag("agent", agent);
+    } else {
+      detectAgentFromProcessTree()
+        .then((processAgent) => {
+          if (processAgent) {
+            Sentry.setTag("agent", processAgent);
+          }
+        })
+        .catch((error) => {
+          logger.withTag("agent").warn("Process tree detection failed:", error);
+        });
+    }
 
     // Wire up consola → Sentry log forwarding now that the client is active
     attachSentryReporter();

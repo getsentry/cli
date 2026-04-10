@@ -1,9 +1,10 @@
 /**
  * Phase 2: Grade the agent's plan against test case criteria.
  *
- * Two passes:
+ * Three passes:
  * 1. Deterministic — string matching for anti-patterns, expected-patterns, max-commands
- * 2. LLM judge — coherence/quality check using a cheap model (Haiku 4.6)
+ * 2. Command verification — run each planned command with `-h` against the real binary
+ * 3. LLM judge — coherence/quality check using a cheap model (Haiku 4.5)
  */
 
 import type { LLMClient } from "./llm-client.js";
@@ -15,6 +16,7 @@ import type {
   CriterionResult,
   TestCase,
 } from "./types.js";
+import { formatVerifications, verifyPlannedCommands } from "./verify.js";
 
 /**
  * Evaluate a single deterministic criterion against the plan's commands.
@@ -74,18 +76,27 @@ function evaluateDeterministic(
 
 /**
  * Use the LLM judge to evaluate overall plan quality.
- * Returns null if the judge call fails.
+ *
+ * The judge receives empirical verification results from running each
+ * planned command with `-h` against the real binary — no command reference
+ * or "allowed list" is provided, keeping the judge independent.
  */
 async function evaluateWithLLMJudge(
   client: LLMClient,
   prompt: string,
-  plan: AgentPlan
+  plan: AgentPlan,
+  verificationSummary: string
 ): Promise<CriterionResult> {
   const commandList = plan.commands
     .map((c, i) => `${i + 1}. \`${c.command}\` — ${c.purpose}`)
     .join("\n");
 
   const judgePrompt = `You are evaluating whether an AI agent's CLI command plan is good.
+
+The agent planned commands for the \`sentry\` CLI — a modern command-line tool (distinct from the legacy \`sentry-cli\`).
+
+We verified each planned command against the real CLI binary by running it with \`-h\`:
+${verificationSummary}
 
 The user asked: "${prompt}"
 
@@ -96,7 +107,7 @@ ${commandList}
 Notes: ${plan.notes}
 
 Evaluate the plan on overall quality. A good plan:
-- Uses the right Sentry CLI commands for the task
+- Uses commands verified as VALID above
 - Would actually work if executed
 - Is efficient (no unnecessary commands)
 - Directly addresses what the user asked for
@@ -145,7 +156,9 @@ or
 
 /**
  * Evaluate a test case's plan against all its criteria.
- * Runs deterministic checks first, then the LLM judge for overall quality.
+ *
+ * Runs deterministic checks first, then verifies commands against the
+ * real binary, then passes verification results to the LLM judge.
  */
 export async function judgePlan(
   client: LLMClient,
@@ -180,8 +193,17 @@ export async function judgePlan(
     criteria.push(evaluateDeterministic(name, def, plan));
   }
 
-  // Run LLM judge for overall quality
-  const llmVerdict = await evaluateWithLLMJudge(client, testCase.prompt, plan);
+  // Verify commands against the real binary
+  const verifications = await verifyPlannedCommands(plan.commands);
+  const verificationSummary = formatVerifications(verifications);
+
+  // Run LLM judge with verification results
+  const llmVerdict = await evaluateWithLLMJudge(
+    client,
+    testCase.prompt,
+    plan,
+    verificationSummary
+  );
   criteria.push(llmVerdict);
 
   // Compute score: fraction of criteria that passed

@@ -64,22 +64,30 @@ export function getDebugIdSnippet(debugId: string): string {
  * Inject a Sentry debug ID into a JavaScript file and its companion
  * sourcemap.
  *
- * Performs four mutations:
+ * By default performs four mutations:
  * 1. Prepends the runtime snippet to the JS file (after any hashbang)
  * 2. Appends a `//# debugId=<uuid>` comment to the JS file
  * 3. Prepends a `;` to the sourcemap `mappings` (offsets by one line)
  * 4. Adds `debug_id` and `debugId` fields to the sourcemap JSON
+ *
+ * When `options.skipSnippet` is `true`, step 1 is skipped and step 3
+ * is adjusted (no extra `;` prefix since no snippet line is added).
+ * This is used by the CLI's own build pipeline where the debug ID is
+ * registered in source code (`constants.ts`) instead of via the IIFE.
  *
  * The operation is **idempotent** — files that already contain a
  * `//# debugId=` comment are returned unchanged.
  *
  * @param jsPath - Path to the JavaScript file
  * @param mapPath - Path to the companion `.map` file
+ * @param options - Optional settings
+ * @param options.skipSnippet - Skip the IIFE runtime snippet (steps 1 & 3)
  * @returns The debug ID and whether it was newly injected
  */
 export async function injectDebugId(
   jsPath: string,
-  mapPath: string
+  mapPath: string,
+  options?: { skipSnippet?: boolean }
 ): Promise<{ debugId: string; wasInjected: boolean }> {
   const [jsContent, mapContent] = await Promise.all([
     readFile(jsPath, "utf-8"),
@@ -94,21 +102,29 @@ export async function injectDebugId(
 
   // Generate debug ID from the sourcemap content (deterministic)
   const debugId = contentToDebugId(mapContent);
-  const snippet = getDebugIdSnippet(debugId);
+  const skipSnippet = options?.skipSnippet ?? false;
 
   // --- Mutate JS file ---
-  // Preserve hashbang if present, insert snippet after it
   let newJs: string;
-  if (jsContent.startsWith("#!")) {
-    const newlineIdx = jsContent.indexOf("\n");
-    // Handle hashbang without trailing newline (entire file is the #! line)
-    const splitAt = newlineIdx === -1 ? jsContent.length : newlineIdx + 1;
-    const hashbang = jsContent.slice(0, splitAt);
-    const rest = jsContent.slice(splitAt);
-    const sep = newlineIdx === -1 ? "\n" : "";
-    newJs = `${hashbang}${sep}${snippet}\n${rest}`;
+  if (skipSnippet) {
+    // Metadata-only mode: just append the debugId comment, no IIFE snippet.
+    // Used by the CLI's own build where the debug ID is registered in source.
+    newJs = jsContent;
   } else {
-    newJs = `${snippet}\n${jsContent}`;
+    // Full mode: prepend the runtime IIFE snippet (for user-facing injection).
+    const snippet = getDebugIdSnippet(debugId);
+    // Preserve hashbang if present, insert snippet after it
+    if (jsContent.startsWith("#!")) {
+      const newlineIdx = jsContent.indexOf("\n");
+      // Handle hashbang without trailing newline (entire file is the #! line)
+      const splitAt = newlineIdx === -1 ? jsContent.length : newlineIdx + 1;
+      const hashbang = jsContent.slice(0, splitAt);
+      const rest = jsContent.slice(splitAt);
+      const sep = newlineIdx === -1 ? "\n" : "";
+      newJs = `${hashbang}${sep}${snippet}\n${rest}`;
+    } else {
+      newJs = `${snippet}\n${jsContent}`;
+    }
   }
   // Append debug ID comment at the end
   newJs += `\n${DEBUGID_COMMENT_PREFIX}${debugId}\n`;
@@ -120,10 +136,12 @@ export async function injectDebugId(
     debug_id?: string;
     debugId?: string;
   };
-  // Prepend one `;` to mappings — tells decoders "no mappings for the
-  // first line" (the injected snippet line). Each `;` in VLQ mappings
-  // represents a line boundary.
-  map.mappings = `;${map.mappings}`;
+  if (!skipSnippet) {
+    // Prepend one `;` to mappings — tells decoders "no mappings for the
+    // first line" (the injected snippet line). Each `;` in VLQ mappings
+    // represents a line boundary.
+    map.mappings = `;${map.mappings}`;
+  }
   map.debug_id = debugId;
   map.debugId = debugId;
 

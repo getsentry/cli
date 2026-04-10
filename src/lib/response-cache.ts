@@ -307,18 +307,20 @@ function buildResponseHeaders(
 // Cache bypass control
 // ---------------------------------------------------------------------------
 
-let cacheDisabledFlag = false;
+let cacheReadBypassed = false;
 
 /**
- * Disable the response cache for the current process.
- * Called when `--fresh` flag is passed to a command.
+ * Bypass cache reads for the current process.
+ *
+ * Called when `--fresh` flag is passed to a command. Fresh API responses are
+ * still written to cache so subsequent invocations serve updated data.
  */
 export function disableResponseCache(): void {
-  cacheDisabledFlag = true;
+  cacheReadBypassed = true;
 }
 
 /**
- * Re-enable the response cache after `disableResponseCache()` was called.
+ * Re-enable cache reads after `disableResponseCache()` was called.
  *
  * This is only needed in tests to prevent one test's `--fresh` flag from
  * permanently disabling caching for subsequent tests in the same process.
@@ -327,17 +329,28 @@ export function disableResponseCache(): void {
  * @internal Exported for testing
  */
 export function resetCacheState(): void {
-  cacheDisabledFlag = false;
+  cacheReadBypassed = false;
 }
 
 /**
- * Check if response caching is disabled.
- * Cache is disabled when:
- * - `disableResponseCache()` was called (--refresh flag)
+ * Check if cache reads are disabled.
+ * Reads are skipped when:
+ * - `disableResponseCache()` was called (`--fresh` flag)
  * - `SENTRY_NO_CACHE=1` environment variable is set
  */
 export function isCacheDisabled(): boolean {
-  return cacheDisabledFlag || getEnv().SENTRY_NO_CACHE === "1";
+  return cacheReadBypassed || getEnv().SENTRY_NO_CACHE === "1";
+}
+
+/**
+ * Check if cache writes are disabled.
+ *
+ * Only the `SENTRY_NO_CACHE=1` env var disables writes. The `--fresh` flag
+ * intentionally allows writes so that the freshly-fetched response replaces
+ * any stale cache entry.
+ */
+function isCacheWriteDisabled(): boolean {
+  return getEnv().SENTRY_NO_CACHE === "1";
 }
 
 // ---------------------------------------------------------------------------
@@ -474,7 +487,7 @@ export async function storeCachedResponse(
 ): Promise<void> {
   if (
     method !== "GET" ||
-    isCacheDisabled() ||
+    isCacheWriteDisabled() ||
     !response.ok ||
     classifyUrl(url) === "no-cache"
   ) {

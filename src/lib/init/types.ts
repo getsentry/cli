@@ -15,6 +15,8 @@ export type WizardOptions = {
   org?: string;
   /** Explicit project name from CLI arg (e.g., "my-app" from "acme/my-app"). Overrides wizard-detected name. */
   project?: string;
+  /** Auth token for injecting into generated env files (e.g., .env.sentry-build-plugin). Never sent to the server. */
+  authToken?: string;
 };
 
 // Local-op suspend payloads
@@ -25,6 +27,8 @@ export type LocalOpPayload =
   | FileExistsBatchPayload
   | RunCommandsPayload
   | ApplyPatchsetPayload
+  | GrepPayload
+  | GlobPayload
   | CreateSentryProjectPayload
   | DetectSentryPayload;
 
@@ -69,16 +73,49 @@ export type RunCommandsPayload = {
   };
 };
 
+export type GrepSearch = {
+  pattern: string;
+  path?: string;
+  include?: string;
+};
+
+export type GrepPayload = {
+  type: "local-op";
+  operation: "grep";
+  cwd: string;
+  params: {
+    searches: GrepSearch[];
+    maxResultsPerSearch?: number;
+  };
+};
+
+export type GlobPayload = {
+  type: "local-op";
+  operation: "glob";
+  cwd: string;
+  params: {
+    patterns: string[];
+    path?: string;
+    maxResults?: number;
+  };
+};
+
+export type PatchEdit = {
+  oldString: string;
+  newString: string;
+};
+
+export type ApplyPatchsetPatch =
+  | { path: string; action: "create"; patch: string }
+  | { path: string; action: "modify"; edits: PatchEdit[] }
+  | { path: string; action: "delete"; patch?: string };
+
 export type ApplyPatchsetPayload = {
   type: "local-op";
   operation: "apply-patchset";
   cwd: string;
   params: {
-    patches: Array<{
-      path: string;
-      action: "create" | "modify" | "delete";
-      patch: string;
-    }>;
+    patches: ApplyPatchsetPatch[];
   };
 };
 

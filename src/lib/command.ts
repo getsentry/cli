@@ -54,6 +54,7 @@ import {
   writeFooter,
 } from "./formatters/output.js";
 import { isPlainOutput } from "./formatters/plain-detect.js";
+import { GLOBAL_FLAGS } from "./global-flags.js";
 import {
   LOG_LEVEL_NAMES,
   type LogLevelName,
@@ -377,7 +378,25 @@ export function buildCommand<
   // This makes field info visible in Stricli's --help output.
   const enrichedDocs = enrichDocsWithSchema(builderArgs.docs, outputConfig);
 
-  const mergedParams = { ...existingParams, flags: mergedFlags };
+  // Inject short aliases for global flags (e.g., -v → --verbose).
+  // Derived from the shared GLOBAL_FLAGS definition so adding a new
+  // global flag with a short alias automatically propagates here.
+  const existingAliases = (existingParams.aliases ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const mergedAliases: Record<string, unknown> = { ...existingAliases };
+  for (const gf of GLOBAL_FLAGS) {
+    if (gf.short && !(gf.name in existingFlags || gf.short in mergedAliases)) {
+      mergedAliases[gf.short] = gf.name;
+    }
+  }
+
+  const mergedParams = {
+    ...existingParams,
+    flags: mergedFlags,
+    aliases: mergedAliases,
+  };
 
   /**
    * If the yielded value is a {@link CommandOutput}, render it via

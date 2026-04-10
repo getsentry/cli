@@ -147,18 +147,27 @@ describe("property: ZipWriter round-trip", () => {
 });
 
 describe("ZipWriter binary format", () => {
-  test("starts with local file header signature", async () => {
+  test("starts with SYSB header followed by local file header", async () => {
     const zipPath = join(tmpDir, "sig.zip");
     const zip = await ZipWriter.create(zipPath);
     await zip.addEntry("a.txt", Buffer.from("a"));
     await zip.finalize();
 
     const data = await readFile(zipPath);
-    // Local file header signature: PK\x03\x04
-    expect(data[0]).toBe(0x50); // P
-    expect(data[1]).toBe(0x4b); // K
-    expect(data[2]).toBe(0x03);
-    expect(data[3]).toBe(0x04);
+    // SourceBundle magic header: SYSB + version 2 (LE)
+    expect(data[0]).toBe(0x53); // S
+    expect(data[1]).toBe(0x59); // Y
+    expect(data[2]).toBe(0x53); // S
+    expect(data[3]).toBe(0x42); // B
+    expect(data[4]).toBe(0x02); // version 2 (LE)
+    expect(data[5]).toBe(0x00);
+    expect(data[6]).toBe(0x00);
+    expect(data[7]).toBe(0x00);
+    // Local file header signature follows: PK\x03\x04
+    expect(data[8]).toBe(0x50); // P
+    expect(data[9]).toBe(0x4b); // K
+    expect(data[10]).toBe(0x03);
+    expect(data[11]).toBe(0x04);
   });
 
   test("ends with EOCD signature", async () => {

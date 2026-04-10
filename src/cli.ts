@@ -11,6 +11,31 @@
  */
 
 import { getEnv } from "./lib/env.js";
+import { applySentryCliRcEnvShim } from "./lib/sentryclirc.js";
+
+/**
+ * Preload project context: walk up from `cwd` once, finding both the
+ * project root (for DSN detection) and `.sentryclirc` config (for
+ * org/project defaults and env shim). Caches both results so later calls
+ * to `findProjectRoot` and `loadSentryCliRc` are cache hits.
+ */
+async function preloadProjectContext(cwd: string): Promise<void> {
+  // Dynamic import keeps the heavy DSN/DB modules out of the completion fast-path
+  const [{ findProjectRoot }, { setCachedProjectRoot }] = await Promise.all([
+    import("./lib/dsn/project-root.js"),
+    import("./lib/db/project-root-cache.js"),
+  ]);
+
+  const result = await findProjectRoot(cwd);
+  await setCachedProjectRoot(cwd, {
+    projectRoot: result.projectRoot,
+    reason: result.reason,
+  });
+
+  // Apply .sentryclirc env shim (token, URL) — sentryclirc cache was
+  // populated as a side effect of findProjectRoot's walk
+  await applySentryCliRcEnvShim(cwd);
+}
 
 /**
  * Fast-path: shell completion.
@@ -111,6 +136,7 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   const { isatty } = await import("node:tty");
   const { ExitCode, run } = await import("@stricli/core");
   const { app } = await import("./app.js");
+  const { hoistGlobalFlags } = await import("./lib/argv-hoist.js");
   const { buildContext } = await import("./context.js");
   const { AuthError, OutputError, formatError, getExitCode } = await import(
     "./lib/errors.js"
@@ -129,6 +155,13 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     maybeCheckForUpdateInBackground,
     shouldSuppressNotification,
   } = await import("./lib/version-check.js");
+
+  // Move global flags (--verbose, -v, --log-level, --json, --fields) from any
+  // position to the end of argv, where Stricli's leaf-command parser can
+  // find them. This allows `sentry --verbose issue list` to work.
+  // The original cliArgs are kept for post-run checks (e.g., help recovery)
+  // that rely on the original token positions.
+  const hoistedArgs = hoistGlobalFlags(cliArgs);
 
   // ---------------------------------------------------------------------------
   // Error-recovery middleware
@@ -338,7 +371,9 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     setLogLevel(envLogLevel);
   }
 
-  const suppressNotification = shouldSuppressNotification(cliArgs);
+  // Use hoisted args so positional checks (e.g., args[0] === "cli") work
+  // even when global flags precede the subcommand in the original argv.
+  const suppressNotification = shouldSuppressNotification(hoistedArgs);
 
   // Start background update check (non-blocking)
   if (!suppressNotification) {
@@ -346,7 +381,7 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   }
 
   try {
-    await executor(cliArgs);
+    await executor(hoistedArgs);
 
     // When Stricli can't match a subcommand in a route group (e.g.,
     // `sentry dashboard help`), it writes "No command registered for `help`"
@@ -355,6 +390,8 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     // the custom help command with proper introspection output.
     // Check both raw (-5) and unsigned (251) forms because Node.js keeps
     // the raw value while Bun converts to unsigned byte.
+    // Uses original cliArgs (not hoisted) so the `at(-1) === "help"` check
+    // works when global flags were placed before "help".
     if (
       (process.exitCode === ExitCode.UnknownCommand ||
         process.exitCode === (ExitCode.UnknownCommand + 256) % 256) &&
@@ -401,14 +438,24 @@ export async function runCli(cliArgs: string[]): Promise<void> {
  * Reads `process.argv`, dispatches to the completion fast-path or the full
  * CLI runner, and handles fatal errors. Called from `bin.ts`.
  */
-export function startCli(): Promise<void> {
+export async function startCli(): Promise<void> {
   const args = process.argv.slice(2);
 
+  // Completions are a fast-path (~1ms) — skip .sentryclirc I/O.
   if (args[0] === "__complete") {
     return runCompletion(args.slice(1)).catch(() => {
       // Completions should never crash — silently return no results
       process.exitCode = 0;
     });
+  }
+
+  // Walk up from CWD once to find project root AND .sentryclirc config.
+  // Caches both so later findProjectRoot / loadSentryCliRc calls are hits.
+  // Non-fatal — the CLI can still work via env vars and DSN detection.
+  try {
+    await preloadProjectContext(process.cwd());
+  } catch {
+    // Gracefully degrade: project context is optional for CLI operation.
   }
 
   return runCli(args).catch((err) => {

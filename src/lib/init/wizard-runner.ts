@@ -138,6 +138,20 @@ export function describeLocalOp(payload: LocalOpPayload): string {
     }
     case "list-dir":
       return "Listing directory...";
+    case "grep": {
+      const searches = payload.params.searches;
+      if (searches.length === 1 && searches[0]) {
+        return `Searching for ${safeCodeSpan(searches[0].pattern)}...`;
+      }
+      return `Running ${searches.length} searches...`;
+    }
+    case "glob": {
+      const patterns = payload.params.patterns;
+      if (patterns.length === 1 && patterns[0]) {
+        return `Finding files matching ${safeCodeSpan(patterns[0])}...`;
+      }
+      return `Finding files (${patterns.length} patterns)...`;
+    }
     case "create-sentry-project":
       return `Creating project ${safeCodeSpan(payload.params.name)} (${payload.params.platform})...`;
     case "detect-sentry":
@@ -588,6 +602,12 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   };
 
   const token = getAuthToken();
+
+  // Make the auth token available to local-ops for injecting into generated
+  // env files (e.g. .env.sentry-build-plugin). The token is never sent to
+  // the remote server — it stays client-side only.
+  options.authToken = token;
+
   const client = new MastraClient({
     baseUrl: MASTRA_API_URL,
     headers: token ? { Authorization: `Bearer ${token}` } : {},
