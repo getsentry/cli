@@ -34,6 +34,8 @@ import type {
   DetectSentryPayload,
   DirEntry,
   FileExistsBatchPayload,
+  GlobPayload,
+  GrepPayload,
   ListDirPayload,
   LocalOpPayload,
   LocalOpResult,
@@ -296,6 +298,10 @@ export async function handleLocalOp(
         return await runCommands(payload, options.dryRun);
       case "apply-patchset":
         return await applyPatchset(payload, options.dryRun, options.authToken);
+      case "grep":
+        return await grep(payload);
+      case "glob":
+        return await glob(payload);
       case "create-sentry-project":
         return await createSentryProject(payload, options);
       case "detect-sentry":
@@ -877,6 +883,485 @@ async function detectSentry(
     data: { status: "installed", signals, dsn: dsn.raw },
   };
 }
+
+// ── Grep & Glob ─────────────────────────────────────────────────────
+
+const MAX_GREP_RESULTS_PER_SEARCH = 100;
+const MAX_GREP_LINE_LENGTH = 2000;
+const MAX_GLOB_RESULTS = 100;
+const SKIP_DIRS = new Set([
+  "node_modules",
+  ".git",
+  "__pycache__",
+  ".venv",
+  "venv",
+  "dist",
+  "build",
+]);
+
+type GrepMatch = { path: string; lineNum: number; line: string };
+
+// ── Ripgrep implementations (preferred when rg is on PATH) ──────────
+
+/**
+ * Spawn a command, collect stdout + stderr, reject on spawn errors (ENOENT).
+ * Drains both streams to prevent pipe buffer deadlocks.
+ */
+function spawnCollect(
+  cmd: string,
+  args: string[],
+  cwd: string
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 30_000,
+    });
+
+    const outChunks: Buffer[] = [];
+    let outLen = 0;
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (outLen < MAX_OUTPUT_BYTES) {
+        outChunks.push(chunk);
+        outLen += chunk.length;
+      }
+    });
+
+    const errChunks: Buffer[] = [];
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (errChunks.length < 64) {
+        errChunks.push(chunk);
+      }
+    });
+
+    child.on("error", (err) => {
+      reject(err);
+    });
+    child.on("close", (code, signal) => {
+      if (signal) {
+        reject(new Error(`Process killed by ${signal} (timeout)`));
+        return;
+      }
+      resolve({
+        stdout: Buffer.concat(outChunks).toString("utf-8"),
+        stderr: Buffer.concat(errChunks).toString("utf-8"),
+        exitCode: code ?? 1,
+      });
+    });
+  });
+}
+
+/**
+ * Parse ripgrep output using `|` as field separator (set via
+ * `--field-match-separator=|`) to avoid ambiguity with `:` in
+ * Windows drive-letter paths.
+ * Format: filepath|linenum|matched text
+ */
+function parseRgGrepOutput(
+  cwd: string,
+  stdout: string,
+  maxResults: number
+): { matches: GrepMatch[]; truncated: boolean } {
+  const lines = stdout.split("\n").filter(Boolean);
+  const truncated = lines.length > maxResults;
+  const matches: GrepMatch[] = [];
+
+  for (const line of lines.slice(0, maxResults)) {
+    const firstSep = line.indexOf("|");
+    if (firstSep === -1) {
+      continue;
+    }
+    const filePart = line.substring(0, firstSep);
+    const rest = line.substring(firstSep + 1);
+    const secondSep = rest.indexOf("|");
+    if (secondSep === -1) {
+      continue;
+    }
+    const lineNum = Number.parseInt(rest.substring(0, secondSep), 10);
+    let text = rest.substring(secondSep + 1);
+    if (text.length > MAX_GREP_LINE_LENGTH) {
+      text = `${text.substring(0, MAX_GREP_LINE_LENGTH)}…`;
+    }
+    matches.push({ path: path.relative(cwd, filePart), lineNum, line: text });
+  }
+
+  return { matches, truncated };
+}
+
+async function rgGrepSearch(opts: {
+  cwd: string;
+  pattern: string;
+  target: string;
+  include: string | undefined;
+  maxResults: number;
+}): Promise<{ matches: GrepMatch[]; truncated: boolean }> {
+  const { cwd, pattern, target, include, maxResults } = opts;
+  const args = [
+    "-nH",
+    "--no-messages",
+    "--hidden",
+    "--field-match-separator=|",
+    "--regexp",
+    pattern,
+  ];
+  if (include) {
+    args.push("--glob", include);
+  }
+  args.push(target);
+
+  const { stdout, exitCode } = await spawnCollect("rg", args, cwd);
+
+  if (exitCode === 1 || (exitCode === 2 && !stdout.trim())) {
+    return { matches: [], truncated: false };
+  }
+  if (exitCode !== 0 && exitCode !== 2) {
+    throw new Error(`ripgrep failed with exit code ${exitCode}`);
+  }
+
+  return parseRgGrepOutput(cwd, stdout, maxResults);
+}
+
+async function rgGlobSearch(opts: {
+  cwd: string;
+  pattern: string;
+  target: string;
+  maxResults: number;
+}): Promise<{ files: string[]; truncated: boolean }> {
+  const { cwd, pattern, target, maxResults } = opts;
+  const args = ["--files", "--hidden", "--glob", pattern, target];
+
+  const { stdout, exitCode } = await spawnCollect("rg", args, cwd);
+
+  if (exitCode === 1 || (exitCode === 2 && !stdout.trim())) {
+    return { files: [], truncated: false };
+  }
+  if (exitCode !== 0 && exitCode !== 2) {
+    throw new Error(`ripgrep failed with exit code ${exitCode}`);
+  }
+
+  const lines = stdout.split("\n").filter(Boolean);
+  const truncated = lines.length > maxResults;
+  const files = lines.slice(0, maxResults).map((f) => path.relative(cwd, f));
+  return { files, truncated };
+}
+
+// ── Node.js fallback (when rg is not installed) ─────────────────────
+
+/**
+ * Recursively walk a directory, yielding relative file paths.
+ * Skips common non-source directories and respects an optional glob filter.
+ */
+async function* walkFiles(
+  root: string,
+  base: string,
+  globPattern: string | undefined
+): AsyncGenerator<string> {
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.promises.readdir(base, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const full = path.join(base, entry.name);
+    const rel = path.relative(root, full);
+    if (entry.isDirectory() && !SKIP_DIRS.has(entry.name)) {
+      yield* walkFiles(root, full, globPattern);
+    } else if (entry.isFile()) {
+      const matchTarget = globPattern?.includes("/") ? rel : entry.name;
+      if (!globPattern || matchGlob(matchTarget, globPattern)) {
+        yield rel;
+      }
+    }
+  }
+}
+
+/** Minimal glob matcher — supports `*`, `**`, and `?` wildcards. */
+function matchGlob(name: string, pattern: string): boolean {
+  const re = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, "\0")
+    .replace(/\*/g, "[^/]*")
+    .replace(/\0/g, ".*")
+    .replace(/\?/g, ".");
+  return new RegExp(`^${re}$`).test(name);
+}
+
+/**
+ * Search files for a regex pattern using Node.js fs. Fallback for when
+ * ripgrep is not available.
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: file-walking search with early exits
+async function fsGrepSearch(opts: {
+  cwd: string;
+  pattern: string;
+  searchPath: string | undefined;
+  include: string | undefined;
+  maxResults: number;
+}): Promise<{ matches: GrepMatch[]; truncated: boolean }> {
+  const { cwd, pattern, searchPath, include, maxResults } = opts;
+  const target = searchPath ? safePath(cwd, searchPath) : cwd;
+  let regex: RegExp;
+  try {
+    regex = new RegExp(pattern);
+  } catch {
+    return { matches: [], truncated: false };
+  }
+  const matches: GrepMatch[] = [];
+
+  for await (const rel of walkFiles(cwd, target, include)) {
+    if (matches.length > maxResults) {
+      break;
+    }
+    const absPath = path.join(cwd, rel);
+    let content: string;
+    try {
+      const stat = await fs.promises.stat(absPath);
+      if (stat.size > MAX_FILE_BYTES) {
+        continue;
+      }
+      content = await fs.promises.readFile(absPath, "utf-8");
+    } catch {
+      continue;
+    }
+    const lines = content.split("\n");
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i] ?? "";
+      if (regex.test(line)) {
+        let text = line;
+        if (text.length > MAX_GREP_LINE_LENGTH) {
+          text = `${text.substring(0, MAX_GREP_LINE_LENGTH)}…`;
+        }
+        matches.push({ path: rel, lineNum: i + 1, line: text });
+        if (matches.length > maxResults) {
+          break;
+        }
+      }
+    }
+  }
+
+  const truncated = matches.length > maxResults;
+  if (truncated) {
+    matches.length = maxResults;
+  }
+  return { matches, truncated };
+}
+
+async function fsGlobSearch(opts: {
+  cwd: string;
+  pattern: string;
+  searchPath: string | undefined;
+  maxResults: number;
+}): Promise<{ files: string[]; truncated: boolean }> {
+  const { cwd, pattern, searchPath, maxResults } = opts;
+  const target = searchPath ? safePath(cwd, searchPath) : cwd;
+  const files: string[] = [];
+
+  for await (const rel of walkFiles(cwd, target, pattern)) {
+    files.push(rel);
+    if (files.length > maxResults) {
+      break;
+    }
+  }
+
+  const truncated = files.length > maxResults;
+  if (truncated) {
+    files.length = maxResults;
+  }
+  return { files, truncated };
+}
+
+// ── git grep / git ls-files (middle fallback tier) ──────────────────
+
+const GREP_LINE_RE = /^(.+?):(\d+):(.*)$/;
+
+function parseGrepOutput(
+  stdout: string,
+  maxResults: number,
+  pathPrefix?: string
+): { matches: GrepMatch[]; truncated: boolean } {
+  const lines = stdout.split("\n").filter(Boolean);
+  const matches: GrepMatch[] = [];
+
+  for (const line of lines) {
+    const m = line.match(GREP_LINE_RE);
+    if (!(m?.[1] && m[2] && m[3] !== null && m[3] !== undefined)) {
+      continue;
+    }
+    const lineNum = Number.parseInt(m[2], 10);
+    let text: string = m[3];
+    if (text.length > MAX_GREP_LINE_LENGTH) {
+      text = `${text.substring(0, MAX_GREP_LINE_LENGTH)}…`;
+    }
+    const filePath = pathPrefix ? path.join(pathPrefix, m[1]) : m[1];
+    matches.push({ path: filePath, lineNum, line: text });
+    if (matches.length > maxResults) {
+      break;
+    }
+  }
+
+  const truncated = matches.length > maxResults;
+  if (truncated) {
+    matches.length = maxResults;
+  }
+  return { matches, truncated };
+}
+
+async function gitGrepSearch(opts: {
+  cwd: string;
+  pattern: string;
+  target: string;
+  include: string | undefined;
+  maxResults: number;
+}): Promise<{ matches: GrepMatch[]; truncated: boolean }> {
+  const { cwd, pattern, target, include, maxResults } = opts;
+  const args = ["grep", "--untracked", "-n", "-E", pattern];
+  if (include) {
+    args.push("--", include);
+  }
+
+  const { stdout, exitCode } = await spawnCollect("git", args, target);
+
+  if (exitCode === 1) {
+    return { matches: [], truncated: false };
+  }
+  if (exitCode !== 0) {
+    throw new Error(`git grep failed with exit code ${exitCode}`);
+  }
+
+  const prefix = path.relative(cwd, target);
+  return parseGrepOutput(stdout, maxResults, prefix || undefined);
+}
+
+async function gitLsFiles(opts: {
+  cwd: string;
+  pattern: string;
+  target: string;
+  maxResults: number;
+}): Promise<{ files: string[]; truncated: boolean }> {
+  const { cwd, pattern, target, maxResults } = opts;
+  const args = [
+    "ls-files",
+    "--cached",
+    "--others",
+    "--exclude-standard",
+    pattern,
+  ];
+
+  const { stdout, exitCode } = await spawnCollect("git", args, target);
+
+  if (exitCode !== 0) {
+    throw new Error(`git ls-files failed with exit code ${exitCode}`);
+  }
+
+  const lines = stdout.split("\n").filter(Boolean);
+  const truncated = lines.length > maxResults;
+  const files = lines
+    .slice(0, maxResults)
+    .map((f) => path.relative(cwd, path.resolve(target, f)));
+  return { files, truncated };
+}
+
+// ── Dispatch: rg → git → Node.js ────────────────────────────────────
+
+function isGitRepo(dir: string): boolean {
+  try {
+    return fs.statSync(path.join(dir, ".git")).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+async function grepSearch(opts: {
+  cwd: string;
+  pattern: string;
+  searchPath: string | undefined;
+  include: string | undefined;
+  maxResults: number;
+}): Promise<{ matches: GrepMatch[]; truncated: boolean }> {
+  const target = opts.searchPath
+    ? safePath(opts.cwd, opts.searchPath)
+    : opts.cwd;
+  const resolvedOpts = { ...opts, target };
+  try {
+    return await rgGrepSearch(resolvedOpts);
+  } catch {
+    if (isGitRepo(opts.cwd)) {
+      try {
+        return await gitGrepSearch(resolvedOpts);
+      } catch {
+        // fall through to fs
+      }
+    }
+    return await fsGrepSearch(opts);
+  }
+}
+
+async function globSearchImpl(opts: {
+  cwd: string;
+  pattern: string;
+  searchPath: string | undefined;
+  maxResults: number;
+}): Promise<{ files: string[]; truncated: boolean }> {
+  const target = opts.searchPath
+    ? safePath(opts.cwd, opts.searchPath)
+    : opts.cwd;
+  const resolvedOpts = { ...opts, target };
+  try {
+    return await rgGlobSearch(resolvedOpts);
+  } catch {
+    if (isGitRepo(opts.cwd)) {
+      try {
+        return await gitLsFiles(resolvedOpts);
+      } catch {
+        // fall through to fs
+      }
+    }
+    return await fsGlobSearch(opts);
+  }
+}
+
+async function grep(payload: GrepPayload): Promise<LocalOpResult> {
+  const { cwd, params } = payload;
+  const maxResults = params.maxResultsPerSearch ?? MAX_GREP_RESULTS_PER_SEARCH;
+
+  const results = await Promise.all(
+    params.searches.map(async (search) => {
+      const { matches, truncated } = await grepSearch({
+        cwd,
+        pattern: search.pattern,
+        searchPath: search.path,
+        include: search.include,
+        maxResults,
+      });
+      return { pattern: search.pattern, matches, truncated };
+    })
+  );
+
+  return { ok: true, data: { results } };
+}
+
+async function glob(payload: GlobPayload): Promise<LocalOpResult> {
+  const { cwd, params } = payload;
+  const maxResults = params.maxResults ?? MAX_GLOB_RESULTS;
+
+  const results = await Promise.all(
+    params.patterns.map(async (pattern) => {
+      const { files, truncated } = await globSearchImpl({
+        cwd,
+        pattern,
+        searchPath: params.path,
+        maxResults,
+      });
+      return { pattern, files, truncated };
+    })
+  );
+
+  return { ok: true, data: { results } };
+}
+
+// ── Sentry project + DSN ────────────────────────────────────────────
 
 async function createSentryProject(
   payload: CreateSentryProjectPayload,
