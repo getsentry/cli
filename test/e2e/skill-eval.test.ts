@@ -9,7 +9,7 @@
  * In CI, the key is only passed when skill-related files change.
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import cases from "../skill-eval/cases.json";
 import { judgePlan } from "../skill-eval/helpers/judge.js";
 import { createClient } from "../skill-eval/helpers/llm-client.js";
@@ -21,7 +21,26 @@ const DEFAULT_THRESHOLD = 0.75;
 
 const apiKey = process.env.ANTHROPIC_API_KEY;
 
+/**
+ * The test preload mocks globalThis.fetch to block external network calls.
+ * This test needs real fetch for Anthropic API calls, so we restore it
+ * during the describe block and put the mock back when done.
+ */
+const originalFetch = (globalThis as { __originalFetch?: typeof fetch })
+  .__originalFetch;
+
 describe.skipIf(!apiKey)("skill eval", () => {
+  const savedFetch = globalThis.fetch;
+
+  beforeAll(() => {
+    if (originalFetch) {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  afterAll(() => {
+    globalThis.fetch = savedFetch;
+  });
   const testCases = cases as unknown as TestCase[];
   const threshold = process.env.EVAL_THRESHOLD
     ? Number.parseFloat(process.env.EVAL_THRESHOLD)
