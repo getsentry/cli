@@ -133,7 +133,7 @@ export async function injectDebugId(
   // Parse, adjust mappings, add debug ID fields
   const map = JSON.parse(mapContent) as {
     mappings: string;
-    sources?: string[];
+    sources?: (string | null)[];
     debug_id?: string;
     debugId?: string;
   };
@@ -143,7 +143,7 @@ export async function injectDebugId(
   // platform. Bundlers on Windows (esbuild, Bun) may produce paths like
   // "src\\bin.ts". No-op on Linux/macOS.
   if (map.sources) {
-    map.sources = map.sources.map((s) => s.replaceAll("\\", "/"));
+    map.sources = map.sources.map((s) => (s ? s.replaceAll("\\", "/") : s));
   }
 
   if (!skipSnippet) {

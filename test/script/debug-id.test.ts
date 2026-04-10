@@ -305,6 +305,26 @@ describe("injectDebugId", () => {
     expect(mapResult.sources).toEqual(["src/lib/utils.ts", "src/bin.ts"]);
   });
 
+  test("preserves null entries in sourcemap sources array", async () => {
+    const jsPath = join(tmpDir, "bundle.js");
+    const mapPath = join(tmpDir, "bundle.js.map");
+
+    await writeFile(jsPath, 'console.log("hello");\n');
+    await writeFile(
+      mapPath,
+      JSON.stringify({
+        version: 3,
+        sources: [null, "src\\bin.ts", null],
+        mappings: "AAAA",
+      })
+    );
+
+    await injectDebugId(jsPath, mapPath);
+
+    const mapResult = JSON.parse(await readFile(mapPath, "utf-8"));
+    expect(mapResult.sources).toEqual([null, "src/bin.ts", null]);
+  });
+
   test("preserves forward-slash sources unchanged", async () => {
     const jsPath = join(tmpDir, "bundle.js");
     const mapPath = join(tmpDir, "bundle.js.map");
