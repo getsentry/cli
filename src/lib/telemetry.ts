@@ -387,7 +387,12 @@ export function initSentry(
   }
 
   function ensureAbsolute(p: string): string {
-    return isRelativePath(p) ? `/${p}` : p;
+    // Normalize Windows backslashes to forward slashes for sourcemap URL
+    // matching. Bun on Windows produces paths like "dist-bin\bin.js" in
+    // Error.stack — the symbolicator expects forward slashes to match
+    // artifacts at "~/dist-bin/bin.js".
+    const normalized = p.replaceAll("\\", "/");
+    return isRelativePath(normalized) ? `/${normalized}` : normalized;
   }
 
   function normalizeExceptionFrames(event: Sentry.ErrorEvent): void {

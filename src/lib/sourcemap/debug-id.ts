@@ -133,9 +133,19 @@ export async function injectDebugId(
   // Parse, adjust mappings, add debug ID fields
   const map = JSON.parse(mapContent) as {
     mappings: string;
+    sources?: string[];
     debug_id?: string;
     debugId?: string;
   };
+
+  // Normalize Windows backslashes in the sources array so uploaded
+  // sourcemaps have consistent forward-slash paths regardless of build
+  // platform. Bundlers on Windows (esbuild, Bun) may produce paths like
+  // "src\\bin.ts". No-op on Linux/macOS.
+  if (map.sources) {
+    map.sources = map.sources.map((s) => s.replaceAll("\\", "/"));
+  }
+
   if (!skipSnippet) {
     // Prepend one `;` to mappings — tells decoders "no mappings for the
     // first line" (the injected snippet line). Each `;` in VLQ mappings
