@@ -1,9 +1,10 @@
 /**
  * Phase 2: Grade the agent's plan against test case criteria.
  *
- * Two passes:
+ * Three passes:
  * 1. Deterministic — string matching for anti-patterns, expected-patterns, max-commands
- * 2. LLM judge — coherence/quality check using a cheap model (Haiku 4.6)
+ * 2. Command verification — run each planned command with `-h` against the real binary
+ * 3. LLM judge — coherence/quality check using a cheap model (Haiku 4.5)
  */
 
 import type { LLMClient } from "./llm-client.js";
@@ -15,6 +16,7 @@ import type {
   CriterionResult,
   TestCase,
 } from "./types.js";
+import { formatVerifications, verifyPlannedCommands } from "./verify.js";
 
 /**
  * Evaluate a single deterministic criterion against the plan's commands.
@@ -74,14 +76,16 @@ function evaluateDeterministic(
 
 /**
  * Use the LLM judge to evaluate overall plan quality.
- * The command reference (extracted from SKILL.md) grounds the judge so it
- * doesn't hallucinate that valid `sentry` commands don't exist.
+ *
+ * The judge receives empirical verification results from running each
+ * planned command with `-h` against the real binary — no command reference
+ * or "allowed list" is provided, keeping the judge independent.
  */
 async function evaluateWithLLMJudge(
   client: LLMClient,
   prompt: string,
   plan: AgentPlan,
-  commandReference: string
+  verificationSummary: string
 ): Promise<CriterionResult> {
   const commandList = plan.commands
     .map((c, i) => `${i + 1}. \`${c.command}\` — ${c.purpose}`)
@@ -89,15 +93,10 @@ async function evaluateWithLLMJudge(
 
   const judgePrompt = `You are evaluating whether an AI agent's CLI command plan is good.
 
-The agent was given a skill guide for the \`sentry\` CLI (not the legacy \`sentry-cli\`).
-Here are the valid commands from that guide:
+The agent planned commands for the \`sentry\` CLI — a modern command-line tool (distinct from the legacy \`sentry-cli\`).
 
-${commandReference}
-
-Important context about how this CLI works:
-- Positional args like \`<org/project>\` are OPTIONAL — the CLI auto-detects org and project from the local directory context (DSN detection). Omitting them is correct and expected.
-- Each command supports additional flags (e.g., --json, --query, --limit, --period, --fields) documented in separate reference files. The compact listing above only shows command signatures, not all flags.
-- --json is a global flag available on all list/view commands.
+We verified each planned command against the real CLI binary by running it with \`-h\`:
+${verificationSummary}
 
 The user asked: "${prompt}"
 
@@ -108,15 +107,10 @@ ${commandList}
 Notes: ${plan.notes}
 
 Evaluate the plan on overall quality. A good plan:
-- Uses commands that exist in the reference above
+- Uses commands verified as VALID above
 - Would actually work if executed
 - Is efficient (no unnecessary commands)
 - Directly addresses what the user asked for
-
-Do NOT penalize:
-- Commands that appear in the reference above — this is a real CLI tool
-- Omitting org/project args — auto-detection is a core feature
-- Using flags like --json, --query, --limit, --fields, --period — they are real flags
 
 Return ONLY valid JSON:
 {"pass": true, "reason": "Brief explanation"}
@@ -162,16 +156,14 @@ or
 
 /**
  * Evaluate a test case's plan against all its criteria.
- * Runs deterministic checks first, then the LLM judge for overall quality.
  *
- * @param commandReference - The Command Reference section from SKILL.md,
- *   injected into the judge prompt so it can verify commands exist.
+ * Runs deterministic checks first, then verifies commands against the
+ * real binary, then passes verification results to the LLM judge.
  */
 export async function judgePlan(
   client: LLMClient,
   testCase: TestCase,
-  plan: AgentPlan | null,
-  commandReference: string
+  plan: AgentPlan | null
 ): Promise<CaseResult> {
   // If the planner failed to produce a plan, fail all criteria
   if (!plan) {
@@ -201,12 +193,16 @@ export async function judgePlan(
     criteria.push(evaluateDeterministic(name, def, plan));
   }
 
-  // Run LLM judge for overall quality
+  // Verify commands against the real binary
+  const verifications = await verifyPlannedCommands(plan.commands);
+  const verificationSummary = formatVerifications(verifications);
+
+  // Run LLM judge with verification results
   const llmVerdict = await evaluateWithLLMJudge(
     client,
     testCase.prompt,
     plan,
-    commandReference
+    verificationSummary
   );
   criteria.push(llmVerdict);
 

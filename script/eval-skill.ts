@@ -4,9 +4,10 @@
  *
  * Sends test prompts to agent models (Opus 4.6 + Sonnet 4.6) with SKILL.md
  * as context, then grades the planned commands on efficiency criteria.
+ * Commands are verified against the real CLI binary (via `-h`) to ground
+ * the LLM judge with empirical results.
  *
  * Requires ANTHROPIC_API_KEY env var for Anthropic API access.
- * In CI, the key is stored in the "skill-eval" environment (protected).
  *
  * Usage:
  *   bun run eval:skill
@@ -17,6 +18,7 @@
  *   EVAL_AGENT_MODELS   - Comma-separated model IDs (default: sonnet-4-6, opus-4-6)
  *   EVAL_JUDGE_MODEL    - Judge model ID (default: haiku-4-5)
  *   EVAL_THRESHOLD      - Minimum pass rate 0-1 (default: 0.75)
+ *   SENTRY_CLI_BINARY   - Path to pre-built binary (falls back to bun run src/bin.ts)
  */
 
 import cases from "../test/skill-eval/cases.json";
@@ -46,18 +48,6 @@ const VERSION_RE = /^version:\s*(.+)$/m;
  */
 const DEFAULT_THRESHOLD = 0.75;
 
-/** Extract the "## Command Reference" section from SKILL.md for the judge. */
-function extractCommandReference(skillContent: string): string {
-  const start = skillContent.indexOf("## Command Reference");
-  if (start === -1) {
-    return "";
-  }
-  const end = skillContent.indexOf("\n## ", start + 1);
-  return end === -1
-    ? skillContent.slice(start)
-    : skillContent.slice(start, end);
-}
-
 /** Run all eval cases against a single model */
 async function evalModel(
   client: Awaited<ReturnType<typeof createClient>>,
@@ -65,12 +55,6 @@ async function evalModel(
   skillContent: string,
   testCases: TestCase[]
 ): Promise<ModelResult> {
-  const commandReference = extractCommandReference(skillContent);
-  if (!commandReference) {
-    console.error(
-      'Warning: "## Command Reference" section not found in SKILL.md — judge will lack command context'
-    );
-  }
   console.log(`\nEvaluating: ${model}`);
   console.log("─".repeat(40));
 
@@ -85,7 +69,7 @@ async function evalModel(
       skillContent,
       testCase.prompt
     );
-    const result = await judgePlan(client, testCase, plan, commandReference);
+    const result = await judgePlan(client, testCase, plan);
     results.push(result);
 
     const icon = result.passed ? "✓" : "✗";
