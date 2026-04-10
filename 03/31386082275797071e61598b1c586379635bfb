@@ -1,0 +1,84 @@
+# Fix CLI-129: Dashboard widget queries send `sort` for non-spans datasets → 400
+
+## Problem
+
+`ApiError: API request failed: 400 Bad Request` is captured in CLI-129. Per project policy, 400s are CLI bugs — the CLI should never construct a malformed request.
+
+3 events in the issue:
+1. `sentry.dashboard.view` → **400 Bad Request** (claude agent, macOS) — **confirmed code bug**
+2. `sentry.dashboard.view` → 500 Internal Server Error (same user/session)
+3. `sentry.whoami` → 400 Bad Request (cursor agent, Windows) — investigation needed
+
+## Root Cause
+
+### Dashboard 400 (confirmed)
+
+`queryWidgetTable()` in `src/lib/api/dashboards.ts` (line 447) passes `sort: query?.orderby` to the events API for **all** datasets. The `events-stats/` counterpart (`queryWidgetTimeseries`, lines 384-389) correctly guards this:
+
+```typescript
+// The sort param is only supported on the spans dataset —
+// errors/discover endpoints reject it with 400.
+if (dataset === "spans") {
+  reqParams.sort = query.orderby ?? `-${aggregates[0] ?? "count()"}`;
+}
+```
+
+But `queryWidgetTable` has no guard:
+```typescript
+sort: query?.orderby || undefined,  // ← sent for ALL datasets
+```
+
+When a dashboard has a table/big_number widget with `widgetType: "error-events"` or `"discover"` and the widget query has `orderby`, the CLI sends `sort=...` to `/organizations/{org}/events/?dataset=errors`, which returns **400 Bad Request**.
+
+### Whoami 400 (uncertain)
+
+`GET /api/0/auth/` is a simple authenticated GET. The trace shows the HTTP span completed (247ms), so it's possible the 400 is the actual HTTP response that then throws `ApiError`. Most likely cause: malformed auth token on Windows (BOM, trailing newline, truncated). After the diagnostic improvement below, future occurrences will have endpoint context for proper diagnosis.
+
+## Changes
+
+### 1. `src/lib/api/dashboards.ts` — Guard `sort` by dataset in `queryWidgetTable`
+
+**Line 447**: Apply the same dataset guard used by `queryWidgetTimeseries`:
+
+```typescript
+// Before:
+sort: query?.orderby || undefined,
+
+// After:
+// sort is only supported on spans dataset — others reject with 400
+...(dataset === "spans" && query?.orderby ? { sort: query.orderby } : {}),
+```
+
+### 2. `src/app.ts` — Enrich `ApiError` captures with structured context
+
+**Line 325**: Before `Sentry.captureException(exc)`, set `Sentry.setContext()` for `ApiError` instances so the Sentry event includes endpoint, status, and detail. Currently, the event only shows `"API request failed: 400 Bad Request"` with no indication of _which_ endpoint or _what_ the server said.
+
+```typescript
+if (exc instanceof ApiError) {
+  Sentry.setContext("api_error", {
+    status: exc.status,
+    endpoint: exc.endpoint,
+    detail: exc.detail,
+  });
+}
+Sentry.captureException(exc);
+```
+
+Import `ApiError` from `./lib/errors.js` (already imports `CliError`, `AuthError` from there).
+
+## Files Modified
+
+| File | Change |
+|------|--------|
+| `src/lib/api/dashboards.ts` | Guard `sort` param by `dataset === "spans"` in `queryWidgetTable` |
+| `src/app.ts` | Add `api_error` context to `ApiError` captures |
+
+## Verification
+
+```bash
+bun run typecheck
+bun run lint
+bun test
+```
+
+Existing dashboard tests should cover the query construction. Check if `test/lib/api/dashboards*.test.ts` tests `queryWidgetTable` with non-spans widget types — if not, add a test that verifies `sort` is NOT sent for `error-events` datasets.
