@@ -15,6 +15,8 @@ export type WizardOptions = {
   org?: string;
   /** Explicit project name from CLI arg (e.g., "my-app" from "acme/my-app"). Overrides wizard-detected name. */
   project?: string;
+  /** Auth token for injecting into generated env files (e.g., .env.sentry-build-plugin). Never sent to the server. */
+  authToken?: string;
 };
 
 // Local-op suspend payloads
