@@ -1,6 +1,58 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.26.0
+
+### New Features ✨
+
+#### Docs
+
+- Deploy main branch preview alongside PR previews by @BYK in [#707](https://github.com/getsentry/cli/pull/707)
+- Enable sourcemap upload, releases, and environment tracking by @BYK in [#705](https://github.com/getsentry/cli/pull/705)
+
+#### Init
+
+- Pre-read common config files to reduce round-trips by @betegon in [#704](https://github.com/getsentry/cli/pull/704)
+- Add grep and glob local-op handlers by @betegon in [#703](https://github.com/getsentry/cli/pull/703)
+- Add fuzzy edit replacers and edits-based apply-patchset by @betegon in [#698](https://github.com/getsentry/cli/pull/698)
+
+#### Other
+
+- (cli) Hoist global flags from any argv position and add -v alias by @BYK in [#709](https://github.com/getsentry/cli/pull/709)
+- (commands) Add buildRouteMap wrapper with standard subcommand aliases by @BYK in [#690](https://github.com/getsentry/cli/pull/690)
+- (config) Support .sentryclirc config file for per-directory defaults by @BYK in [#693](https://github.com/getsentry/cli/pull/693)
+- (install) Add SENTRY_INIT env var to run wizard after install by @betegon in [#685](https://github.com/getsentry/cli/pull/685)
+- (release) Surface adoption and health metrics in list and view (#463) by @BYK in [#680](https://github.com/getsentry/cli/pull/680)
+- (telemetry) Add agent detection tag for AI coding tools by @betegon in [#687](https://github.com/getsentry/cli/pull/687)
+
+### Bug Fixes 🐛
+
+#### Dashboard
+
+- Add --layout flag to widget add for predictable placement by @BYK in [#700](https://github.com/getsentry/cli/pull/700)
+- Render tracemetrics widgets in dashboard view by @BYK in [#695](https://github.com/getsentry/cli/pull/695)
+
+#### Init
+
+- Add size guard and deduplicate JSON minification in preReadCommonFiles by @betegon in [#713](https://github.com/getsentry/cli/pull/713)
+- Narrow command validation to actual shell injection vectors by @betegon in [#697](https://github.com/getsentry/cli/pull/697)
+
+#### Other
+
+- (build) Enable sourcemap resolution for compiled binaries by @BYK in [#701](https://github.com/getsentry/cli/pull/701)
+- (cache) --fresh flag now updates cache with fresh response by @BYK in [#708](https://github.com/getsentry/cli/pull/708)
+- (eval) Ground LLM judge with command reference to prevent false negatives by @BYK in [#712](https://github.com/getsentry/cli/pull/712)
+- (init,feedback) Default to tracing only in feature select and attach user email to feedback by @MathurAditya724 in [#688](https://github.com/getsentry/cli/pull/688)
+- (setup) Handle read-only .claude directory in sandboxed environments by @BYK in [#702](https://github.com/getsentry/cli/pull/702)
+- Inject auth token into generated .env.sentry-build-plugin files by @MathurAditya724 in [#706](https://github.com/getsentry/cli/pull/706)
+
+### Internal Changes 🔧
+
+- (docs) Gitignore generated command docs, extract fragments by @BYK in [#696](https://github.com/getsentry/cli/pull/696)
+- (eval) Replace OpenAI with Anthropic SDK in init-eval judge by @betegon in [#683](https://github.com/getsentry/cli/pull/683)
+- (init) Use markdown pipeline for spinner messages by @betegon in [#686](https://github.com/getsentry/cli/pull/686)
+- Regenerate skill files and command docs by @github-actions[bot] in [584ec0e0](https://github.com/getsentry/cli/commit/584ec0e001611873197c52a01156bef1c4fe9431)
+
 ## 0.25.0
 
 ### New Features ✨
