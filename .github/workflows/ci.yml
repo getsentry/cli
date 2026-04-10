@@ -142,61 +142,6 @@ jobs:
           echo "::error::Skill files are out of date. Run 'bun run generate:docs' locally and commit the result."
           exit 1
 
-  eval-skill:
-    name: Eval SKILL.md
-    needs: [changes]
-    if: needs.changes.outputs.skill == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      # For fork PRs: check if eval has already passed via commit status
-      - name: Detect fork
-        id: detect-fork
-        run: |
-          if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]]; then
-            echo "is_fork=true" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Check fork eval status
-        if: steps.detect-fork.outputs.is_fork == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          SHA="${{ github.event.pull_request.head.sha }}"
-          STATUS=$(gh api "repos/${{ github.repository }}/commits/$SHA/statuses" \
-            --jq '[.[] | select(.context == "eval-skill/fork")] | first | .state // "none"')
-          if [[ "$STATUS" != "success" ]]; then
-            echo "::error::Fork PR modifies skill files but eval has not passed for commit $SHA."
-            echo "::error::A maintainer must review the code and add the 'eval-skill' label."
-            exit 1
-          fi
-          echo "Fork eval passed for $SHA"
-      # For internal PRs: run the eval directly
-      - uses: actions/checkout@v6
-        if: steps.detect-fork.outputs.is_fork != 'true'
-      - uses: oven-sh/setup-bun@v2
-        if: steps.detect-fork.outputs.is_fork != 'true'
-      - uses: actions/cache@v5
-        if: steps.detect-fork.outputs.is_fork != 'true'
-        id: cache
-        with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
-      - if: steps.detect-fork.outputs.is_fork != 'true' && steps.cache.outputs.cache-hit != 'true'
-        run: bun install --frozen-lockfile
-      - name: Generate docs and skill files
-        if: steps.detect-fork.outputs.is_fork != 'true'
-        run: bun run generate:schema && bun run generate:docs
-      - name: Eval SKILL.md
-        if: steps.detect-fork.outputs.is_fork != 'true'
-        run: bun run eval:skill
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      - name: Upload eval results
-        if: always() && steps.detect-fork.outputs.is_fork != 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: skill-eval-results
-          path: test/skill-eval/results.json
-
   lint:
     name: Lint & Typecheck
     needs: [changes]
@@ -597,7 +542,7 @@ jobs:
 
   test-e2e:
     name: E2E Tests
-    needs: [build-binary]
+    needs: [build-binary, changes]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -621,6 +566,9 @@ jobs:
       - name: E2E Tests
         env:
           SENTRY_CLI_BINARY: ${{ github.workspace }}/dist-bin/sentry-linux-x64
+          # Pass API key only when skill files changed — the skill-eval e2e test
+          # auto-skips when the key is absent, so non-skill PRs aren't affected.
+          ANTHROPIC_API_KEY: ${{ needs.changes.outputs.skill == 'true' && secrets.ANTHROPIC_API_KEY || '' }}
         run: bun run test:e2e
 
   build-npm:
@@ -726,7 +674,7 @@ jobs:
   ci-status:
     name: CI Status
     if: always()
-    needs: [changes, check-generated, eval-skill, build-binary, build-npm, build-docs, test-e2e, generate-patches, publish-nightly]
+    needs: [changes, check-generated, build-binary, build-npm, build-docs, test-e2e, generate-patches, publish-nightly]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
@@ -734,7 +682,7 @@ jobs:
         run: |
           # Check for explicit failures or cancellations in all jobs
           # generate-patches and publish-nightly are skipped on PRs — that's expected
-          results="${{ needs.check-generated.result }} ${{ needs.eval-skill.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.generate-patches.result }} ${{ needs.publish-nightly.result }}"
+          results="${{ needs.check-generated.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.generate-patches.result }} ${{ needs.publish-nightly.result }}"
           for result in $results; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               echo "::error::CI failed"
@@ -752,9 +700,4 @@ jobs:
             echo "::error::CI failed - upstream job failed causing check-generated to be skipped"
             exit 1
           fi
-          if [[ "${{ needs.changes.outputs.skill }}" == "true" && "${{ needs.eval-skill.result }}" == "skipped" ]]; then
-            echo "::error::CI failed - upstream job failed causing eval-skill to be skipped"
-            exit 1
-          fi
-
           echo "CI passed"
