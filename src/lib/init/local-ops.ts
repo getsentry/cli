@@ -604,7 +604,10 @@ function resolvePatchContent(
   // The server never has access to the user's token, so it generates
   // SENTRY_AUTH_TOKEN= (empty). We fill it in client-side.
   if (authToken && isEnvFile(patch.path) && EMPTY_AUTH_TOKEN_RE.test(content)) {
-    content = content.replace(EMPTY_AUTH_TOKEN_RE, `$1${authToken}`);
+    content = content.replace(
+      EMPTY_AUTH_TOKEN_RE,
+      (_, prefix) => `${prefix}${authToken}`
+    );
   }
 
   return content;
