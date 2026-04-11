@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-event
-version: 0.26.0
+version: 0.26.1
 description: View and list Sentry events
 requires:
   bins: ["sentry"]
