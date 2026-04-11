@@ -12,13 +12,32 @@
  * and verify help output is shown when resolution fails.
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { run } from "@stricli/core";
 import { app } from "../../src/app.js";
 import type { SentryContext } from "../../src/context.js";
-import { useTestConfigDir } from "../helpers.js";
+import { mockFetch, useTestConfigDir } from "../helpers.js";
 
 useTestConfigDir("help-positional-");
+
+// Silence unmocked fetch calls from the resolution cascade.
+// Commands run through run(app, args) with "help" as a positional arg
+// trigger real resolution (e.g., findProjectsBySlug("help") → listOrganizations)
+// before the help-recovery error handler fires. A silent 404 prevents
+// preload warnings while preserving the error → recovery behavior.
+let originalFetch: typeof globalThis.fetch;
+
+beforeEach(() => {
+  originalFetch = globalThis.fetch;
+  globalThis.fetch = mockFetch(
+    async () =>
+      new Response(JSON.stringify({ detail: "Not found" }), { status: 404 })
+  );
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
 
 /** Captured output from a command run */
 type CapturedOutput = {

@@ -18,6 +18,8 @@ import {
 import { createCommand } from "../../../src/commands/project/create.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
+import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import {
   ApiError,
   CliError,
@@ -27,6 +29,7 @@ import {
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { SentryProject, SentryTeam } from "../../../src/types/index.js";
+import { useTestConfigDir } from "../../helpers.js";
 
 const sampleTeam: SentryTeam = {
   id: "1",
@@ -52,6 +55,10 @@ const sampleProject: SentryProject = {
   dateCreated: "2026-02-12T10:00:00Z",
 };
 
+// Isolated DB for region cache — prevents "unexpected fetch" warnings
+// from resolveOrgRegion when buildOrgNotFoundError calls resolveEffectiveOrg
+useTestConfigDir("test-project-create-");
+
 function createMockContext() {
   const stdoutWrite = mock(() => true);
   return {
@@ -73,6 +80,11 @@ describe("project create", () => {
   let resolveOrgSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
+    // Pre-populate region cache for orgs used in tests to avoid
+    // "unexpected fetch" warnings from resolveOrgRegion
+    setOrgRegion("acme-corp", DEFAULT_SENTRY_URL);
+    setOrgRegion("123", DEFAULT_SENTRY_URL);
+
     listTeamsSpy = spyOn(apiClient, "listTeams");
     createProjectSpy = spyOn(apiClient, "createProject");
     createTeamSpy = spyOn(apiClient, "createTeam");

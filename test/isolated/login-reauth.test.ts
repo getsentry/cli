@@ -114,6 +114,7 @@ describe("login re-authentication interactive prompt", () => {
   let clearAuthSpy: ReturnType<typeof spyOn>;
   let runInteractiveLoginSpy: ReturnType<typeof spyOn>;
   let getUserInfoSpy: ReturnType<typeof spyOn>;
+  let listOrgsUncachedSpy: ReturnType<typeof spyOn>;
   let func: LoginFunc;
 
   beforeEach(async () => {
@@ -122,6 +123,11 @@ describe("login re-authentication interactive prompt", () => {
     clearAuthSpy = spyOn(dbAuth, "clearAuth");
     runInteractiveLoginSpy = spyOn(interactiveLogin, "runInteractiveLogin");
     getUserInfoSpy = spyOn(dbUser, "getUserInfo");
+    // Prevent warmOrgCache() fire-and-forget from hitting real fetch.
+    // After successful login, warmOrgCache() calls listOrganizationsUncached()
+    // which triggers API calls that leak as "unexpected fetch" warnings.
+    listOrgsUncachedSpy = spyOn(apiClient, "listOrganizationsUncached");
+    listOrgsUncachedSpy.mockResolvedValue([]);
 
     // Defaults
     isEnvTokenActiveSpy.mockReturnValue(false);
@@ -139,6 +145,7 @@ describe("login re-authentication interactive prompt", () => {
     clearAuthSpy.mockRestore();
     runInteractiveLoginSpy.mockRestore();
     getUserInfoSpy.mockRestore();
+    listOrgsUncachedSpy.mockRestore();
   });
 
   test("shows prompt with user identity when authenticated on TTY", async () => {

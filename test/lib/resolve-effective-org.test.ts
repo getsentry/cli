@@ -241,6 +241,16 @@ describe("resolveEffectiveOrg with API refresh", () => {
     const { clearAuth } = await import("../../src/lib/db/auth.js");
     await clearAuth();
 
+    // Set a silent fetch mock to prevent preload warnings.
+    // Without auth, resolveEffectiveOrg tries an API refresh that fails,
+    // then falls back to the original slug.
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify({ detail: "Unauthorized" }), {
+          status: 401,
+        })
+    );
+
     const result = await resolveEffectiveOrg("o1081365");
     expect(result).toBe("o1081365");
   });

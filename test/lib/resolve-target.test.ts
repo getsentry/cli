@@ -176,12 +176,25 @@ describe("toNumericId", () => {
 describe("Environment variable resolution (SENTRY_ORG / SENTRY_PROJECT)", () => {
   useTestConfigDir("test-resolve-target-");
 
+  // Silence unmocked fetch calls from resolution cascade fall-through.
+  // Tests that set valid env vars short-circuit before fetch; tests that
+  // fall through (empty/whitespace env vars) trigger DSN detection and
+  // directory inference which call the API. A silent 404 prevents preload
+  // warnings while preserving the catch-and-continue behavior.
+  let originalFetch: typeof globalThis.fetch;
+
   beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify({ detail: "Not found" }), { status: 404 })
+    );
     delete process.env.SENTRY_ORG;
     delete process.env.SENTRY_PROJECT;
   });
 
   afterEach(() => {
+    globalThis.fetch = originalFetch;
     delete process.env.SENTRY_ORG;
     delete process.env.SENTRY_PROJECT;
   });
