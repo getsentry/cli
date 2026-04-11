@@ -17,7 +17,7 @@ import {
 import { getAuthToken, refreshToken } from "./db/auth.js";
 import { logger } from "./logger.js";
 import { getCachedResponse, storeCachedResponse } from "./response-cache.js";
-import { withHttpSpan } from "./telemetry.js";
+import { withTracingSpan } from "./telemetry.js";
 
 const log = logger.withTag("http");
 
@@ -361,30 +361,40 @@ function createAuthenticatedFetch(): (
       init?.method ?? (input instanceof Request ? input.method : "GET");
     const urlPath = extractUrlPath(input);
 
-    return withHttpSpan(method, urlPath, async () => {
-      const fullUrl = extractFullUrl(input);
-      const startTime = performance.now();
+    return withTracingSpan(
+      `${method} ${urlPath}`,
+      "http.client",
+      async (span) => {
+        const fullUrl = extractFullUrl(input);
+        const startTime = performance.now();
 
-      // Check cache before auth/retry for GET requests.
-      // Uses current token (no refresh) so lookups are fast but Vary-correct.
-      const cached = await tryCacheHit(
-        method,
-        fullUrl,
-        authHeaders(getAuthToken())
-      );
-      if (cached) {
-        log.debug(
-          `${method} ${urlPath} → ${cached.status} (cache hit, ${(performance.now() - startTime).toFixed(0)}ms)`
+        // Check cache before auth/retry for GET requests.
+        // Uses current token (no refresh) so lookups are fast but Vary-correct.
+        const cached = await tryCacheHit(
+          method,
+          fullUrl,
+          authHeaders(getAuthToken())
         );
-        return cached;
-      }
+        if (cached) {
+          span.setAttribute("http.response.status_code", cached.status);
+          log.debug(
+            `${method} ${urlPath} → ${cached.status} (cache hit, ${(performance.now() - startTime).toFixed(0)}ms)`
+          );
+          return cached;
+        }
 
-      const response = await fetchWithRetry(input, init, method, fullUrl);
-      log.debug(
-        `${method} ${urlPath} → ${response.status} (${(performance.now() - startTime).toFixed(0)}ms)`
-      );
-      return response;
-    });
+        const response = await fetchWithRetry(input, init, method, fullUrl);
+        span.setAttribute("http.response.status_code", response.status);
+        if (!response.ok) {
+          span.setStatus({ code: 2, message: `${response.status}` });
+        }
+        log.debug(
+          `${method} ${urlPath} → ${response.status} (${(performance.now() - startTime).toFixed(0)}ms)`
+        );
+        return response;
+      },
+      { "http.request.method": method, "url.path": urlPath }
+    );
   };
 }
 

@@ -444,7 +444,9 @@ async function queryWidgetTable(
         statsPeriod,
         start,
         end,
-        sort: query?.orderby || undefined,
+        // sort is only supported on the spans dataset —
+        // errors/discover endpoints reject it with 400.
+        sort: dataset === "spans" ? query?.orderby || undefined : undefined,
         per_page: widget.limit ?? 10,
         environment: options.environment,
         project: options.project?.map(String),
