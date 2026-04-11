@@ -87,6 +87,7 @@ describe("loginCommand.func --token path", () => {
   let setUserInfoSpy: ReturnType<typeof spyOn>;
   let runInteractiveLoginSpy: ReturnType<typeof spyOn>;
   let hasStoredAuthCredentialsSpy: ReturnType<typeof spyOn>;
+  let listOrgsUncachedSpy: ReturnType<typeof spyOn>;
   let func: LoginFunc;
 
   beforeEach(async () => {
@@ -99,6 +100,11 @@ describe("loginCommand.func --token path", () => {
     setUserInfoSpy = spyOn(dbUser, "setUserInfo");
     runInteractiveLoginSpy = spyOn(interactiveLogin, "runInteractiveLogin");
     hasStoredAuthCredentialsSpy = spyOn(dbAuth, "hasStoredAuthCredentials");
+    // Prevent warmOrgCache() fire-and-forget from hitting real fetch.
+    // After successful login, warmOrgCache() calls listOrganizationsUncached()
+    // which triggers API calls that leak as "unexpected fetch" warnings.
+    listOrgsUncachedSpy = spyOn(apiClient, "listOrganizationsUncached");
+    listOrgsUncachedSpy.mockResolvedValue([]);
     isEnvTokenActiveSpy.mockReturnValue(false);
     hasStoredAuthCredentialsSpy.mockReturnValue(false);
     func = (await loginCommand.loader()) as unknown as LoginFunc;
@@ -114,6 +120,7 @@ describe("loginCommand.func --token path", () => {
     setUserInfoSpy.mockRestore();
     runInteractiveLoginSpy.mockRestore();
     hasStoredAuthCredentialsSpy.mockRestore();
+    listOrgsUncachedSpy.mockRestore();
   });
 
   test("already authenticated (non-TTY, no --force): prints re-auth message with --force hint", async () => {

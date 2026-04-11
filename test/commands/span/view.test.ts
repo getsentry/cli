@@ -20,6 +20,8 @@ import {
 } from "../../../src/commands/span/view.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
+import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import { ContextError, ValidationError } from "../../../src/lib/errors.js";
 import { validateSpanId } from "../../../src/lib/hex-id.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
@@ -280,6 +282,7 @@ function makeTraceSpan(spanId: string, children: unknown[] = []): unknown {
 describe("viewCommand.func", () => {
   let func: ViewFunc;
   let getDetailedTraceSpy: ReturnType<typeof spyOn>;
+  let getSpanDetailsSpy: ReturnType<typeof spyOn>;
   let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
 
   function createContext() {
@@ -305,15 +308,24 @@ describe("viewCommand.func", () => {
   beforeEach(async () => {
     func = (await viewCommand.loader()) as unknown as ViewFunc;
     getDetailedTraceSpy = spyOn(apiClient, "getDetailedTrace");
+    getSpanDetailsSpy = spyOn(apiClient, "getSpanDetails").mockResolvedValue({
+      itemId: "mock-span",
+      itemType: "span",
+      attributes: [],
+    });
     resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
     resolveOrgAndProjectSpy.mockResolvedValue({
       org: "test-org",
       project: "test-project",
     });
+    // Pre-populate org region cache to prevent resolveOrgRegion from fetching
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
     getDetailedTraceSpy.mockRestore();
+    getSpanDetailsSpy.mockRestore();
     resolveOrgAndProjectSpy.mockRestore();
   });
 

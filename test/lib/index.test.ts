@@ -1,7 +1,44 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import createSentrySDK, { SentryError } from "../../src/index.js";
+import { mockFetch } from "../helpers.js";
 
 describe("createSentrySDK() library API", () => {
+  // Silence unmocked fetch calls from resolution cascade.
+  // SDK tests that call commands like "issue list" or "org list" trigger
+  // the org/project resolution cascade which hits real API endpoints.
+  // A silent 404 prevents preload warnings while preserving error behavior.
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    // Return empty successes rather than 404s so the resolution cascade
+    // terminates cleanly without triggering follow-up requests that could
+    // outlive the test and spill into later test files.
+    globalThis.fetch = mockFetch(async (input) => {
+      let url: string;
+      if (typeof input === "string") {
+        url = input;
+      } else if (input instanceof URL) {
+        url = input.href;
+      } else {
+        url = new Request(input).url;
+      }
+      if (url.includes("/regions/")) {
+        return new Response(JSON.stringify({ regions: [] }), { status: 200 });
+      }
+      if (url.includes("/organizations/")) {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      // Return empty 200 for all other endpoints (projects, issues, etc.)
+      // to prevent follow-up requests from outliving the test.
+      return new Response(JSON.stringify({}), { status: 200 });
+    });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
   test("sdk.run returns version string for --version", async () => {
     const sdk = createSentrySDK();
     const result = await sdk.run("--version");
@@ -19,7 +56,9 @@ describe("createSentrySDK() library API", () => {
   });
 
   test("sdk.run throws when auth is required but missing", async () => {
-    const sdk = createSentrySDK();
+    // Use cwd:/tmp to prevent DSN scanning of the repo root which finds
+    // real DSNs and triggers async project resolution that can outlive the test.
+    const sdk = createSentrySDK({ cwd: "/tmp" });
     try {
       // issue list requires auth — with no token and isolated config, it should fail
       await sdk.run("issue", "list");
@@ -43,7 +82,7 @@ describe("createSentrySDK() library API", () => {
   });
 
   test("process.env is unchanged after failed call", async () => {
-    const sdk = createSentrySDK();
+    const sdk = createSentrySDK({ cwd: "/tmp" });
     const envBefore = { ...process.env };
     try {
       await sdk.run("issue", "list");

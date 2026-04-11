@@ -14,7 +14,7 @@ import {
   maybeCheckForUpdateInBackground,
   shouldSuppressNotification,
 } from "../../src/lib/version-check.js";
-import { useTestConfigDir } from "../helpers.js";
+import { mockFetch, useTestConfigDir } from "../helpers.js";
 
 describe("shouldSuppressNotification", () => {
   test("suppresses for upgrade command", () => {
@@ -162,16 +162,27 @@ describe("abortPendingVersionCheck", () => {
 describe("maybeCheckForUpdateInBackground", () => {
   useTestConfigDir("test-version-bg-");
   let savedNoUpdateCheck: string | undefined;
+  let originalFetch: typeof globalThis.fetch;
 
   beforeEach(() => {
     // Save and clear the env var to test real implementation
     savedNoUpdateCheck = process.env.SENTRY_CLI_NO_UPDATE_CHECK;
     delete process.env.SENTRY_CLI_NO_UPDATE_CHECK;
+    // Silence background fetch calls to GitHub API that would otherwise
+    // hit the preload mock and produce "unexpected fetch" warnings.
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify({ tag_name: "v0.0.0-dev" }), {
+          status: 200,
+        })
+    );
   });
 
   afterEach(() => {
     // Abort any pending check to clean up
     abortPendingVersionCheck();
+    globalThis.fetch = originalFetch;
     // Restore the env var
     if (savedNoUpdateCheck !== undefined) {
       process.env.SENTRY_CLI_NO_UPDATE_CHECK = savedNoUpdateCheck;

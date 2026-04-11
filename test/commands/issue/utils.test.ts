@@ -17,7 +17,7 @@ import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { setCachedProject } from "../../../src/lib/db/project-cache.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import { ApiError, ResolutionError } from "../../../src/lib/errors.js";
-import { useTestConfigDir } from "../../helpers.js";
+import { mockFetch, useTestConfigDir } from "../../helpers.js";
 
 describe("buildCommandHint", () => {
   test("suggests <org>/ID for numeric IDs", () => {
@@ -81,6 +81,12 @@ let originalFetch: typeof globalThis.fetch;
 
 beforeEach(async () => {
   originalFetch = globalThis.fetch;
+  // Default to a silent 404 so tests that don't set a custom fetch mock
+  // won't produce "unexpected fetch" warnings from the preload trap.
+  globalThis.fetch = mockFetch(
+    async () =>
+      new Response(JSON.stringify({ detail: "Not found" }), { status: 404 })
+  );
   await setAuthToken("test-token");
   // Pre-populate region cache for orgs used in tests to avoid region resolution API calls
   setOrgRegion("test-org", DEFAULT_SENTRY_URL);
