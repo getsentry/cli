@@ -1,0 +1,89 @@
+# Fix "unexpected fetch call to" Warnings in Unit Tests
+
+## Problem
+182 `[TEST] Unexpected fetch call to:` warnings in CI unit tests, caused by test code paths reaching the global fetch trap in `test/preload.ts` without proper mocking. The warnings are noisy but tests still pass because all fetch-triggering code paths are wrapped in try/catch (errors are caught and swallowed, but the `console.error` fires before the catch).
+
+## Root Cause Summary
+Five test files have incomplete mocking — they spy on some API functions but miss code paths that trigger fetch calls through the org/project resolution cascade, DSN detection, directory inference, or org cache warming.
+
+## Fixes (5 files)
+
+### 1. `test/lib/resolve-target-listing.test.ts` — 3 warnings
+**Leak**: `resolveOrgProjectTarget` explicit-type test calls `resolveEffectiveOrg("my-org")` → `resolveOrgRegion("my-org")` → fetch `/organizations/my-org/`. The sibling `resolveOrgProjectFromArg` describe block already calls `setOrgRegion("my-org", ...)` in its `beforeEach`, but this block doesn't.
+
+**Fix**: Add `setOrgRegion("my-org", DEFAULT_SENTRY_URL)` to the `resolveOrgProjectTarget` describe block's `beforeEach` (around line 129).
+
+### 2. `test/lib/resolve-target.test.ts` — ~30 warnings
+**Leak**: Environment variable tests that result in `null` from env var parsing fall through to `resolveFromDsn(cwd)` and `inferFromDirectoryName(cwd)`, which call fetch for `/organizations/N/`, `/projects/N/M/`, `/users/me/regions/`, `/organizations/`. These tests only care about env var behavior, not DSN/directory detection.
+
+**Fix**: In the "Environment variable resolution" describe block (`beforeEach` around line 208), add spies to prevent the resolution cascade:
+```typescript
+import * as dsnDetector from "../../src/lib/dsn/detector.js";
+
+// In beforeEach:
+spyOn(dsnDetector, "detectDsn").mockResolvedValue(null);
+spyOn(dsnDetector, "detectAllDsns").mockResolvedValue({ all: [] });
+```
+Also spy on `findProjectsByPattern` (or `findProjectsBySlug`) from `apiClient` to prevent directory inference from fetching.
+
+### 3. `test/lib/index.test.ts` — ~60 warnings
+**Leak**: SDK integration tests like `sdk.run("issue", "list")` and `sdk.org.list()` trigger the full resolution cascade. `process.cwd()` is the repo root which contains real DSNs in source code (org IDs "1", "123", "0"). The org.list test hits `listOrganizationsUncached` → `getUserRegions` → fetch.
+
+**Fix**: Replace `globalThis.fetch` with a mock for these tests. Save/restore pattern:
+```typescript
+let originalFetch: typeof globalThis.fetch;
+beforeEach(() => { originalFetch = globalThis.fetch; });
+afterEach(() => { globalThis.fetch = originalFetch; });
+```
+Then per-test: `globalThis.fetch = mockFetch(async () => new Response(JSON.stringify([]), { status: 200 }))` or more targeted responses. The tests already expect errors, so the mock just needs to not produce `console.error` warnings.
+
+Alternatively, since these tests verify error/env behavior rather than API responses, set `SENTRY_ORG` + `SENTRY_PROJECT` env vars in `beforeEach` to short-circuit the resolution cascade before it reaches fetch.
+
+### 4. `test/commands/log/view.test.ts` — ~40 warnings
+**Leak**: The `resolveProjectBySlug` and `viewCommand.func` describe blocks spy on `apiClient.findProjectsBySlug` (barrel re-export), but `resolve-target.ts` imports `findProjectsBySlug` directly — the spy on the barrel doesn't intercept internal module calls. The real `findProjectsBySlug` runs and calls `listOrganizations` → `getUserRegions` → fetch.
+
+**Fix**: For the `resolveProjectBySlug` describe block (line 239), additionally spy on `listOrganizationsUncached` from `apiClient`, or better yet mock `findProjectsBySlug` by spying on the source module (`api/projects.ts`) directly. Or the cleanest approach: also spy on `apiClient.listOrganizationsUncached` to mock the org listing that `findProjectsBySlug` triggers:
+```typescript
+spyOn(apiClient, "listOrganizationsUncached").mockResolvedValue([
+  { slug: "test-org", ... }
+]);
+```
+
+### 5. `test/isolated/login-reauth.test.ts` — 5 warnings
+**Leak**: After successful login, `warmOrgCache()` is called fire-and-forget (`.catch(() => {})`), which calls `listOrganizationsUncached()` → `getUserRegions` → fetch. The errors are swallowed but the fetch warning fires.
+
+**Fix**: Add spy on `apiClient.listOrganizationsUncached`:
+```typescript
+import * as apiClient from "../../src/lib/api-client.js";
+// In beforeEach:
+spyOn(apiClient, "listOrganizationsUncached").mockResolvedValue([]);
+```
+
+## Verification
+```bash
+# Run each fixed test file individually and check no warnings appear:
+bun test test/lib/resolve-target-listing.test.ts 2>&1 | grep "Unexpected fetch"
+bun test test/lib/resolve-target.test.ts 2>&1 | grep "Unexpected fetch"
+bun test test/lib/index.test.ts 2>&1 | grep "Unexpected fetch"
+bun test test/commands/log/view.test.ts 2>&1 | grep "Unexpected fetch"
+bun test test/isolated/login-reauth.test.ts 2>&1 | grep "Unexpected fetch"
+
+# Run the full unit test suite and confirm zero warnings:
+bun run test:unit 2>&1 | grep "Unexpected fetch" | wc -l  # should be 0
+
+# Run isolated tests:
+bun run test:isolated 2>&1 | grep "Unexpected fetch" | wc -l  # should be 0
+
+# Ensure all tests still pass:
+bun run test:unit
+bun run test:isolated
+bun run typecheck
+bun run lint
+```
+
+## Files Modified
+- `test/lib/resolve-target-listing.test.ts`
+- `test/lib/resolve-target.test.ts`
+- `test/lib/index.test.ts`
+- `test/commands/log/view.test.ts`
+- `test/isolated/login-reauth.test.ts`
