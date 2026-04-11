@@ -11,6 +11,7 @@ import {
   getIssue,
   getIssueByShortId,
   getIssueInOrg,
+  getSharedIssue,
   ISSUE_DETAIL_COLLAPSE,
   type IssueSort,
   listIssuesPaginated,
@@ -79,6 +80,10 @@ export function buildCommandHint(
   issueId: string,
   base = "sentry issue"
 ): string {
+  // URLs are self-contained — no enrichment needed
+  if (issueId.startsWith("http://") || issueId.startsWith("https://")) {
+    return `${base} ${command} ${issueId}`;
+  }
   // Selectors already include the @ prefix and are self-contained
   if (issueId.startsWith("@")) {
     return `${base} ${command} <org>/${issueId}`;
@@ -457,6 +462,51 @@ async function resolveSelector(
 }
 
 /**
+ * Resolve a share URL to a full issue via two-step lookup:
+ * 1. Call public share API to get numeric group ID
+ * 2. Fetch full issue details via authenticated API
+ *
+ * When the share URL includes org context (from subdomain), uses org-scoped
+ * endpoint for proper region routing. Otherwise falls back to the unscoped
+ * endpoint and extracts org from the response permalink.
+ *
+ * @param shareId - The share ID from the URL
+ * @param org - Optional organization slug (from share URL subdomain)
+ * @param baseUrl - The Sentry instance base URL
+ * @param cwd - Current working directory for context resolution
+ */
+async function resolveShareIssue(
+  shareId: string,
+  org: string | undefined,
+  baseUrl: string,
+  cwd: string
+): Promise<ResolvedIssueResult> {
+  const shared = await getSharedIssue(baseUrl, shareId);
+  const groupId = shared.groupID;
+
+  // Fetch full issue via authenticated API
+  if (org) {
+    const resolvedOrg = await resolveEffectiveOrg(org);
+    const issue = await getIssueInOrg(resolvedOrg, groupId, {
+      collapse: ISSUE_DETAIL_COLLAPSE,
+    });
+    return { org: resolvedOrg, issue };
+  }
+
+  // No org from URL — try env/DSN context, then fall back to unscoped fetch
+  const resolvedOrg = await resolveOrg({ cwd });
+  const issue = resolvedOrg
+    ? await getIssueInOrg(resolvedOrg.org, groupId, {
+        collapse: ISSUE_DETAIL_COLLAPSE,
+      })
+    : await getIssue(groupId, { collapse: ISSUE_DETAIL_COLLAPSE });
+  return {
+    org: resolvedOrg?.org ?? extractOrgFromPermalink(issue.permalink),
+    issue,
+  };
+}
+
+/**
  * Options for resolving an issue ID.
  */
 export type ResolveIssueOptions = {
@@ -628,6 +678,16 @@ export async function resolveIssue(
         parsed.org,
         cwd,
         commandHint
+      );
+      break;
+
+    case "share":
+      // Share URL — resolve via public share API, then authenticated fetch
+      result = await resolveShareIssue(
+        parsed.shareId,
+        parsed.org,
+        parsed.baseUrl,
+        cwd
       );
       break;
 

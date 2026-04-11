@@ -394,8 +394,12 @@ export type ParsedOrgProject =
 /**
  * Map a parsed Sentry URL to a ParsedOrgProject.
  * If the URL contains a project slug, returns explicit; otherwise org-all.
+ * Share URLs without org context fall back to auto-detect.
  */
 function orgProjectFromUrl(parsed: ParsedSentryUrl): ParsedOrgProject {
+  if (!parsed.org) {
+    return { type: "auto-detect" };
+  }
   if (parsed.project) {
     return { type: "explicit", org: parsed.org, project: parsed.project };
   }
@@ -404,11 +408,27 @@ function orgProjectFromUrl(parsed: ParsedSentryUrl): ParsedOrgProject {
 
 /**
  * Map a parsed Sentry URL to a ParsedIssueArg.
- * Handles numeric group IDs and short IDs (e.g., "CLI-G") from the URL path.
+ * Handles share URLs, numeric group IDs, and short IDs (e.g., "CLI-G") from the URL path.
  */
 function issueArgFromUrl(parsed: ParsedSentryUrl): ParsedIssueArg | null {
+  // Share URL → resolve via public share API
+  if (parsed.shareId) {
+    return {
+      type: "share",
+      shareId: parsed.shareId,
+      org: parsed.org,
+      baseUrl: parsed.baseUrl,
+    };
+  }
+
   const { issueId } = parsed;
   if (!issueId) {
+    return null;
+  }
+
+  // Non-share URLs always have org from their matchers; guard narrows the type
+  const { org } = parsed;
+  if (!org) {
     return null;
   }
 
@@ -416,7 +436,7 @@ function issueArgFromUrl(parsed: ParsedSentryUrl): ParsedIssueArg | null {
   if (isAllDigits(issueId)) {
     return {
       type: "explicit-org-numeric",
-      org: parsed.org,
+      org,
       numericId: issueId,
     };
   }
@@ -430,7 +450,7 @@ function issueArgFromUrl(parsed: ParsedSentryUrl): ParsedIssueArg | null {
       // Lowercase project slug — Sentry slugs are always lowercase.
       return {
         type: "explicit",
-        org: parsed.org,
+        org,
         project: project.toLowerCase(),
         suffix,
       };
@@ -440,7 +460,7 @@ function issueArgFromUrl(parsed: ParsedSentryUrl): ParsedIssueArg | null {
   // No dash — treat as suffix-only with org context
   return {
     type: "explicit-org-suffix",
-    org: parsed.org,
+    org,
     suffix: issueId.toUpperCase(),
   };
 }
@@ -638,7 +658,8 @@ export type ParsedIssueArg =
   | { type: "explicit-org-numeric"; org: string; numericId: string }
   | { type: "project-search"; projectSlug: string; suffix: string }
   | { type: "suffix-only"; suffix: string }
-  | { type: "selector"; selector: IssueSelector; org?: string };
+  | { type: "selector"; selector: IssueSelector; org?: string }
+  | { type: "share"; shareId: string; org?: string; baseUrl: string };
 
 /**
  * Parse a CLI issue argument into its component parts.

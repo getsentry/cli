@@ -483,6 +483,45 @@ describe("parseIssueArg", () => {
         );
       }
     });
+
+    test("SaaS subdomain share URL returns share type with org", () => {
+      expect(
+        parseIssueArg(
+          "https://gibush-kq.sentry.io/share/issue/f1abd515c51346778384ff25dfb341e5/"
+        )
+      ).toEqual({
+        type: "share",
+        shareId: "f1abd515c51346778384ff25dfb341e5",
+        org: "gibush-kq",
+        baseUrl: "https://gibush-kq.sentry.io",
+      });
+    });
+
+    test("bare sentry.io share URL returns share type without org", () => {
+      expect(
+        parseIssueArg(
+          "https://sentry.io/share/issue/f1abd515c51346778384ff25dfb341e5/"
+        )
+      ).toEqual({
+        type: "share",
+        shareId: "f1abd515c51346778384ff25dfb341e5",
+        org: undefined,
+        baseUrl: "https://sentry.io",
+      });
+    });
+
+    test("self-hosted share URL returns share type", () => {
+      expect(
+        parseIssueArg(
+          "https://sentry.example.com/share/issue/aabbccdd11223344aabbccdd11223344/"
+        )
+      ).toEqual({
+        type: "share",
+        shareId: "aabbccdd11223344aabbccdd11223344",
+        org: undefined,
+        baseUrl: "https://sentry.example.com",
+      });
+    });
   });
 
   // Parser preserves DSN-style org identifiers (normalization moved to resolution layer)

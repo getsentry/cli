@@ -288,6 +288,78 @@ describe("parseSentryUrl", () => {
     });
   });
 
+  describe("share URLs", () => {
+    test("SaaS subdomain share URL extracts org and shareId", () => {
+      const result = parseSentryUrl(
+        "https://gibush-kq.sentry.io/share/issue/f1abd515c51346778384ff25dfb341e5/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://gibush-kq.sentry.io",
+        org: "gibush-kq",
+        shareId: "f1abd515c51346778384ff25dfb341e5",
+      });
+    });
+
+    test("bare sentry.io share URL has no org", () => {
+      const result = parseSentryUrl(
+        "https://sentry.io/share/issue/f1abd515c51346778384ff25dfb341e5/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.io",
+        shareId: "f1abd515c51346778384ff25dfb341e5",
+      });
+    });
+
+    test("self-hosted share URL", () => {
+      const result = parseSentryUrl(
+        "https://sentry.example.com/share/issue/aabbccdd11223344aabbccdd11223344/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.example.com",
+        shareId: "aabbccdd11223344aabbccdd11223344",
+      });
+    });
+
+    test("self-hosted share URL with port", () => {
+      const result = parseSentryUrl(
+        "https://sentry.acme.internal:9000/share/issue/deadbeefdeadbeefdeadbeefdeadbeef/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.acme.internal:9000",
+        shareId: "deadbeefdeadbeefdeadbeefdeadbeef",
+      });
+    });
+
+    test("region subdomain share URL has no org", () => {
+      // us.sentry.io is a region, not an org — share URL falls through to matchSharePath
+      const result = parseSentryUrl(
+        "https://us.sentry.io/share/issue/f1abd515c51346778384ff25dfb341e5/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://us.sentry.io",
+        shareId: "f1abd515c51346778384ff25dfb341e5",
+      });
+    });
+
+    test("share URL without trailing slash", () => {
+      const result = parseSentryUrl(
+        "https://sentry.io/share/issue/f1abd515c51346778384ff25dfb341e5"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.io",
+        shareId: "f1abd515c51346778384ff25dfb341e5",
+      });
+    });
+
+    test("/share/ without issue segment returns null", () => {
+      expect(parseSentryUrl("https://sentry.io/share/")).toBeNull();
+    });
+
+    test("/share/issue/ without shareId returns null", () => {
+      expect(parseSentryUrl("https://sentry.io/share/issue/")).toBeNull();
+    });
+  });
+
   describe("unrecognized paths return null", () => {
     test("root URL", () => {
       expect(parseSentryUrl("https://sentry.io/")).toBeNull();
