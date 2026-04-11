@@ -1,6 +1,14 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.26.1
+
+### Bug Fixes 🐛
+
+- (build) Normalize Windows backslash paths for sourcemap resolution by @BYK in [#714](https://github.com/getsentry/cli/pull/714)
+- (dashboard) Guard sort param by dataset in widget table queries by @BYK in [#715](https://github.com/getsentry/cli/pull/715)
+- (test) Silence "unexpected fetch call to" warnings in unit tests by @BYK in [#716](https://github.com/getsentry/cli/pull/716)
+
 ## 0.26.0
 
 ### New Features ✨
