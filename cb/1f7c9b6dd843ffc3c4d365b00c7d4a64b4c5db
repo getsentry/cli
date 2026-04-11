@@ -1,0 +1,280 @@
+# Plan: Support Share Issue URLs (CLI-T4)
+
+## Problem
+
+When a user passes a Sentry share URL like `https://gibush-kq.sentry.io/share/issue/f1abd515c51346778384ff25dfb341e5/` to `sentry issue view`, the CLI throws:
+
+> Error: Invalid issue format: "https://gibush-kq.sentry.io/share/issue/f1abd515c51346778384ff25dfb341e5/". Missing pr...
+
+Root cause: `parseSentryUrl()` doesn't recognize `/share/issue/` paths → returns `null` → URL falls through to string pattern matching → fails.
+
+## Solution
+
+Thread share URL support through the three-layer pipeline: **URL parsing → argument parsing → issue resolution**.
+
+Two-step resolution: call the public share endpoint to get the numeric group ID, then fetch full details via the authenticated API.
+
+---
+
+## Changes
+
+### 1. `src/lib/sentry-url-parser.ts` — Recognize share URLs
+
+**Add `shareId` field to `ParsedSentryUrl`** (line 21):
+```typescript
+export type ParsedSentryUrl = {
+  baseUrl: string;
+  org?: string;           // ← Make optional (share URLs may lack org)
+  issueId?: string;
+  eventId?: string;
+  project?: string;
+  traceId?: string;
+  shareId?: string;       // ← NEW
+};
+```
+
+**Add share branch to `matchSubdomainOrg()`** (before the `return null` at line 137):
+```typescript
+// /share/issue/{shareId}/ — share URL with org from subdomain
+if (segments[0] === "share" && segments[1] === "issue" && segments[2]) {
+  return { baseUrl, org, shareId: segments[2] };
+}
+```
+
+**Add `matchSharePath()` function** — catches non-subdomain share URLs (bare `sentry.io`, self-hosted):
+```typescript
+function matchSharePath(
+  baseUrl: string,
+  segments: string[]
+): ParsedSentryUrl | null {
+  if (segments[0] !== "share" || segments[1] !== "issue" || !segments[2]) {
+    return null;
+  }
+  return { baseUrl, shareId: segments[2] };
+}
+```
+
+**Wire into `parseSentryUrl()` chain** (line 174) — add `matchSharePath` last so subdomain share URLs get org extraction first:
+```typescript
+return (
+  matchOrganizationsPath(baseUrl, segments) ??
+  matchSettingsPath(baseUrl, segments) ??
+  matchSubdomainOrg(baseUrl, url.hostname, segments) ??
+  matchSharePath(baseUrl, segments)              // ← NEW
+);
+```
+
+### 2. `src/lib/arg-parsing.ts` — New `"share"` variant
+
+**Add variant to `ParsedIssueArg` union** (line 641):
+```typescript
+| { type: "share"; shareId: string; org?: string; baseUrl: string };
+```
+
+**Update `issueArgFromUrl()`** (line 409) — add share check before existing `issueId` check:
+```typescript
+function issueArgFromUrl(parsed: ParsedSentryUrl): ParsedIssueArg | null {
+  if (parsed.shareId) {
+    return {
+      type: "share",
+      shareId: parsed.shareId,
+      org: parsed.org,
+      baseUrl: parsed.baseUrl,
+    };
+  }
+  // ... existing issueId logic
+}
+```
+
+**Guard `org` usage in `orgProjectFromUrl()`** (line 398) — since `org` is now optional:
+```typescript
+function orgProjectFromUrl(parsed: ParsedSentryUrl): ParsedOrgProject {
+  if (!parsed.org) {
+    return { type: "auto-detect" };
+  }
+  // ... existing logic unchanged
+}
+```
+
+**Guard `org` in `issueArgFromUrl()`** — after the new shareId early-return, narrow `org` for remaining code:
+```typescript
+function issueArgFromUrl(parsed: ParsedSentryUrl): ParsedIssueArg | null {
+  // Share URL → resolve via share API
+  if (parsed.shareId) {
+    return { type: "share", shareId: parsed.shareId, org: parsed.org, baseUrl: parsed.baseUrl };
+  }
+
+  const { issueId, org } = parsed;
+  if (!issueId || !org) return null;  // ← narrowing guard (org guaranteed for non-share URLs)
+  // ... rest uses `org` (narrowed to string)
+}
+```
+
+### 2b. `src/commands/event/view.ts` — Guard `org` access
+
+This file also uses `parseSentryUrl()` and accesses `.org` directly (lines 227, 234). Add optional chaining guards — share URLs have no eventId/issueId so they fall through to the existing ContextError already, but TypeScript needs the narrowing:
+
+```typescript
+// Line 227: guard org for event URL
+if (urlParsed.eventId && urlParsed.org) {
+  return { eventId: urlParsed.eventId, targetArg: `${urlParsed.org}/` };
+}
+if (urlParsed.issueId && urlParsed.org) {
+  return { eventId: LATEST_EVENT_SENTINEL, targetArg: `${urlParsed.org}/`, issueId: urlParsed.issueId };
+}
+```
+
+### 3. `src/lib/api/issues.ts` — Share API function
+
+Add `getSharedIssue()` that calls `GET /api/0/shared/issues/{shareId}/`:
+
+```typescript
+export async function getSharedIssue(
+  baseUrl: string,
+  shareId: string
+): Promise<{ groupID: string }> {
+  const url = `${baseUrl}/api/0/shared/issues/${encodeURIComponent(shareId)}/`;
+  const response = await fetch(url, {
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new ApiError(
+        "Share link not found or expired",
+        404,
+        "The share link may have been disabled by the issue owner.\n" +
+          "  Ask them to re-enable sharing, or use the issue ID directly.",
+        `shared/issues/${shareId}`
+      );
+    }
+    throw new ApiError(
+      `Failed to resolve share link`,
+      response.status,
+      undefined,
+      `shared/issues/${shareId}`
+    );
+  }
+  return (await response.json()) as { groupID: string };
+}
+```
+
+Key design decisions:
+- Uses raw `fetch` (not `apiRequestToRegion`) because the share endpoint is public/unauthenticated
+- `baseUrl` comes from the share URL itself — no region resolution needed
+- Only extracts `groupID` — full details come from the authenticated API
+
+**Re-export from `src/lib/api-client.ts`** — add `getSharedIssue` to the issues export block.
+
+### 4. `src/commands/issue/utils.ts` — Handle `"share"` type
+
+**Add `resolveShareIssue()` function**:
+```typescript
+async function resolveShareIssue(
+  shareId: string,
+  org: string | undefined,
+  baseUrl: string,
+  cwd: string,
+  command: string,
+  commandBase: string
+): Promise<ResolvedIssueResult> {
+  const shared = await getSharedIssue(baseUrl, shareId);
+  const groupId = shared.groupID;
+
+  // Fetch full issue via authenticated API
+  if (org) {
+    const resolvedOrg = await resolveEffectiveOrg(org);
+    const issue = await getIssueInOrg(resolvedOrg, groupId, {
+      collapse: ISSUE_DETAIL_COLLAPSE,
+    });
+    return { org: resolvedOrg, issue };
+  }
+
+  // No org from URL — fall back to unscoped fetch + permalink extraction
+  const resolvedOrg = await resolveOrg({ cwd });
+  const issue = resolvedOrg
+    ? await getIssueInOrg(resolvedOrg.org, groupId, { collapse: ISSUE_DETAIL_COLLAPSE })
+    : await getIssue(groupId, { collapse: ISSUE_DETAIL_COLLAPSE });
+  return {
+    org: resolvedOrg?.org ?? extractOrgFromPermalink(issue.permalink),
+    issue,
+  };
+}
+```
+
+**Add `"share"` case to `resolveIssue()` switch** (before `default`):
+```typescript
+case "share":
+  result = await resolveShareIssue(
+    parsed.shareId,
+    parsed.org,
+    parsed.baseUrl,
+    cwd,
+    command,
+    commandBase ?? "sentry issue"
+  );
+  break;
+```
+
+**Update `buildCommandHint()`** — URLs are self-contained, no enrichment needed:
+```typescript
+// At the top of the function, before the @ check:
+if (issueId.startsWith("http://") || issueId.startsWith("https://")) {
+  return `${base} ${command} ${issueId}`;
+}
+```
+
+### 5. Tests
+
+**`test/lib/sentry-url-parser.test.ts`** — Add share URL test suite:
+- SaaS subdomain: `https://gibush-kq.sentry.io/share/issue/{id}/` → org + shareId
+- Bare SaaS: `https://sentry.io/share/issue/{id}/` → shareId only, no org
+- Self-hosted: `https://sentry.example.com/share/issue/{id}/` → shareId only
+- Region subdomain: `https://us.sentry.io/share/issue/{id}/` → shareId only (region skipped)
+- Without trailing slash
+- Incomplete paths (`/share/`, `/share/issue/`) → null
+
+**`test/lib/arg-parsing.test.ts`** — Add share URL parsing tests:
+- SaaS subdomain → `{ type: "share", shareId, org, baseUrl }`
+- No org URL → `{ type: "share", shareId, org: undefined, baseUrl }`
+
+**`test/commands/issue/utils.test.ts`** — Add share resolution tests:
+- Happy path: share API → groupID → authenticated fetch → full issue
+- Share expired/disabled: 404 → clear error message
+- No org fallback: unscoped fetch + permalink extraction
+
+---
+
+## Files Modified
+
+| File | Change |
+|------|--------|
+| `src/lib/sentry-url-parser.ts` | Make `org` optional, add `shareId`, add `matchSharePath`, add share branch to `matchSubdomainOrg` |
+| `src/lib/arg-parsing.ts` | Add `"share"` to `ParsedIssueArg`, update `issueArgFromUrl` + `orgProjectFromUrl` |
+| `src/commands/event/view.ts` | Guard `org` access with narrowing (2 lines) |
+| `src/lib/api/issues.ts` | Add `getSharedIssue()` |
+| `src/lib/api-client.ts` | Re-export `getSharedIssue` |
+| `src/commands/issue/utils.ts` | Add `resolveShareIssue`, add `"share"` case, update `buildCommandHint` |
+| `test/lib/sentry-url-parser.test.ts` | Share URL tests |
+| `test/lib/arg-parsing.test.ts` | Share URL parsing tests |
+| `test/commands/issue/utils.test.ts` | Share resolution tests |
+
+## Verification
+
+```bash
+# 1. Type check (catches any org optionality breakage)
+bun run typecheck
+
+# 2. Run affected tests
+bun test test/lib/sentry-url-parser.test.ts
+bun test test/lib/arg-parsing.test.ts
+bun test test/commands/issue/utils.test.ts
+
+# 3. Run full test suite
+bun test
+
+# 4. Lint
+bun run lint
+
+# 5. Manual E2E (requires auth)
+bun run dev -- issue view "https://gibush-kq.sentry.io/share/issue/f1abd515c51346778384ff25dfb341e5/"
+```
