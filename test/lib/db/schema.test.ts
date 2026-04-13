@@ -18,6 +18,7 @@ import {
   runMigrations,
   tableExists,
 } from "../../../src/lib/db/schema.js";
+import { getMetadata } from "../../../src/lib/db/utils.js";
 import { useTestConfigDir } from "../../helpers.js";
 
 /**
@@ -223,7 +224,6 @@ describe("EXPECTED_TABLES", () => {
     const expectedTableNames = [
       "schema_version",
       "auth",
-      "defaults",
       "project_cache",
       "dsn_cache",
       "project_aliases",
@@ -370,6 +370,106 @@ describe("runMigrations", () => {
     runMigrations(db);
 
     expect(tableExists(db, "pagination_cursors")).toBe(true);
+    db.close();
+  });
+
+  test("migration 12→13 moves defaults data to metadata and drops table", () => {
+    const db = new Database(join(getTestDir(), "test.db"));
+    initSchema(db);
+
+    // Recreate the old defaults table that was removed from TABLE_SCHEMAS
+    db.exec(`CREATE TABLE IF NOT EXISTS defaults (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      organization TEXT,
+      project TEXT,
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    )`);
+    db.query(
+      "INSERT INTO defaults (id, organization, project) VALUES (1, ?, ?)"
+    ).run("migrated-org", "migrated-project");
+
+    // Set version to 12 so migration 12→13 fires
+    db.query("UPDATE schema_version SET version = 12").run();
+
+    runMigrations(db);
+
+    // defaults table should be dropped
+    expect(tableExists(db, "defaults")).toBe(false);
+
+    // Data should be in metadata
+    const m = getMetadata(db, ["defaults.org", "defaults.project"]);
+    expect(m.get("defaults.org")).toBe("migrated-org");
+    expect(m.get("defaults.project")).toBe("migrated-project");
+
+    db.close();
+  });
+
+  test("migration 12→13 handles empty defaults table", () => {
+    const db = new Database(join(getTestDir(), "test.db"));
+    initSchema(db);
+
+    // Create old defaults table with no data
+    db.exec(`CREATE TABLE IF NOT EXISTS defaults (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      organization TEXT,
+      project TEXT,
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    )`);
+    db.query("UPDATE schema_version SET version = 12").run();
+
+    runMigrations(db);
+
+    // Table should still be dropped even without data
+    expect(tableExists(db, "defaults")).toBe(false);
+
+    // No metadata entries created for empty values
+    const m = getMetadata(db, ["defaults.org", "defaults.project"]);
+    expect(m.get("defaults.org")).toBeUndefined();
+
+    db.close();
+  });
+
+  test("migration 12→13 handles partial defaults (org only)", () => {
+    const db = new Database(join(getTestDir(), "test.db"));
+    initSchema(db);
+
+    db.exec(`CREATE TABLE IF NOT EXISTS defaults (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      organization TEXT,
+      project TEXT,
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    )`);
+    db.query(
+      "INSERT INTO defaults (id, organization, project) VALUES (1, ?, NULL)"
+    ).run("only-org");
+    db.query("UPDATE schema_version SET version = 12").run();
+
+    runMigrations(db);
+
+    expect(tableExists(db, "defaults")).toBe(false);
+
+    const m = getMetadata(db, ["defaults.org", "defaults.project"]);
+    expect(m.get("defaults.org")).toBe("only-org");
+    expect(m.get("defaults.project")).toBeUndefined();
+
+    db.close();
+  });
+
+  test("migration 12→13 skipped when defaults table does not exist", () => {
+    const db = new Database(join(getTestDir(), "test.db"));
+    initSchema(db);
+    db.query("UPDATE schema_version SET version = 12").run();
+
+    // No defaults table exists (fresh install on schema ≥13)
+    runMigrations(db);
+
+    // Should complete without error, version updated
+    const version = (
+      db.query("SELECT version FROM schema_version").get() as {
+        version: number;
+      }
+    ).version;
+    expect(version).toBe(CURRENT_SCHEMA_VERSION);
     db.close();
   });
 });

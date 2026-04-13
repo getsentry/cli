@@ -389,8 +389,11 @@ describe("resolveOrgAndIssueId", () => {
   });
 
   test("resolves short suffix format (e.g., 'G') using project context from defaults", async () => {
-    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
-    setDefaults("my-org", "my-project");
+    const { setDefaultOrganization, setDefaultProject } = await import(
+      "../../../src/lib/db/defaults.js"
+    );
+    setDefaultOrganization("my-org");
+    setDefaultProject("my-project");
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -439,9 +442,7 @@ describe("resolveOrgAndIssueId", () => {
   test("throws ResolutionError for short suffix without project context", async () => {
     // Clear any defaults to ensure no project context
     const { clearAuth } = await import("../../../src/lib/db/auth.js");
-    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
     await clearAuth();
-    setDefaults(undefined, undefined);
 
     await expect(
       resolveOrgAndIssueId({
@@ -705,8 +706,11 @@ describe("resolveOrgAndIssueId", () => {
   });
 
   test("short suffix auth error (401) propagates", async () => {
-    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
-    setDefaults("my-org", "my-project");
+    const { setDefaultOrganization, setDefaultProject } = await import(
+      "../../../src/lib/db/defaults.js"
+    );
+    setDefaultOrganization("my-org");
+    setDefaultProject("my-project");
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async () =>
@@ -725,8 +729,11 @@ describe("resolveOrgAndIssueId", () => {
   });
 
   test("short suffix server error (500) propagates", async () => {
-    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
-    setDefaults("my-org", "my-project");
+    const { setDefaultOrganization, setDefaultProject } = await import(
+      "../../../src/lib/db/defaults.js"
+    );
+    setDefaultOrganization("my-org");
+    setDefaultProject("my-project");
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async () =>
@@ -1615,8 +1622,10 @@ describe("ensureRootCauseAnalysis", () => {
 
 describe("resolveOrgAndIssueId: magic @ selectors", () => {
   test("resolves @latest to the most recent unresolved issue", async () => {
-    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
-    setDefaults("test-org", undefined);
+    const { setDefaultOrganization } = await import(
+      "../../../src/lib/db/defaults.js"
+    );
+    setDefaultOrganization("test-org");
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1664,8 +1673,10 @@ describe("resolveOrgAndIssueId: magic @ selectors", () => {
   });
 
   test("resolves @most_frequent to the highest frequency issue", async () => {
-    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
-    setDefaults("test-org", undefined);
+    const { setDefaultOrganization } = await import(
+      "../../../src/lib/db/defaults.js"
+    );
+    setDefaultOrganization("test-org");
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1758,8 +1769,10 @@ describe("resolveOrgAndIssueId: magic @ selectors", () => {
   });
 
   test("throws ResolutionError when no unresolved issues found", async () => {
-    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
-    setDefaults("test-org", undefined);
+    const { setDefaultOrganization } = await import(
+      "../../../src/lib/db/defaults.js"
+    );
+    setDefaultOrganization("test-org");
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1793,9 +1806,7 @@ describe("resolveOrgAndIssueId: magic @ selectors", () => {
   test("throws ContextError when org cannot be resolved for bare @selector", async () => {
     // Clear defaults so there's no org context
     const { clearAuth } = await import("../../../src/lib/db/auth.js");
-    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
     await clearAuth();
-    setDefaults(undefined, undefined);
 
     await expect(
       resolveOrgAndIssueId({

@@ -2405,3 +2405,90 @@ export function formatWidgetEdited(result: {
   lines.push("", `URL: ${result.url}`);
   return renderMarkdown(lines.join("\n"));
 }
+
+// ---------------------------------------------------------------------------
+// CLI Defaults Formatting
+// ---------------------------------------------------------------------------
+
+/** Structured defaults command result (imported from the command module) */
+type DefaultsResult = import("../../commands/cli/defaults.js").DefaultsResult;
+
+/** Display labels for each default key */
+const DEFAULT_LABELS: Record<string, string> = {
+  organization: "Organization",
+  project: "Project",
+  telemetry: "Telemetry",
+  url: "URL",
+};
+
+/**
+ * Describe the effective telemetry source for display.
+ * Shows when an env var overrides the stored preference.
+ */
+function telemetryOverrideNote(
+  effective: DefaultsResult["telemetryEffective"]
+): string {
+  if (!effective?.source.startsWith("env:")) {
+    return "";
+  }
+  const envVar = effective.source.slice("env:".length);
+  return ` ${colorTag("muted", `(overridden: disabled via ${envVar})`)}`;
+}
+
+/**
+ * Format defaults command result as rendered markdown.
+ */
+export function formatDefaultsResult(data: DefaultsResult): string {
+  switch (data.action) {
+    case "show": {
+      const rows: [string, string][] = [];
+      const d = data.defaults;
+
+      rows.push([
+        "Organization",
+        d.organization
+          ? safeCodeSpan(d.organization)
+          : colorTag("muted", "not set"),
+      ]);
+      rows.push([
+        "Project",
+        d.project ? safeCodeSpan(d.project) : colorTag("muted", "not set"),
+      ]);
+
+      const telLabel = d.telemetry ?? "on (default)";
+      rows.push([
+        "Telemetry",
+        `${escapeMarkdownInline(String(telLabel))}${telemetryOverrideNote(data.telemetryEffective)}`,
+      ]);
+
+      rows.push([
+        "URL",
+        d.url ? safeCodeSpan(d.url) : colorTag("muted", "not set"),
+      ]);
+
+      return renderMarkdown(mdKvTable(rows, "Defaults"));
+    }
+
+    case "set": {
+      const label =
+        DEFAULT_LABELS[data.changed?.key ?? ""] ?? data.changed?.key;
+      return renderMarkdown(
+        `${colorTag("green", "✓")} Default ${escapeMarkdownInline(label ?? "setting")} set to ${safeCodeSpan(String(data.changed?.newValue))}`
+      );
+    }
+
+    case "clear": {
+      const label =
+        DEFAULT_LABELS[data.changed?.key ?? ""] ?? data.changed?.key;
+      return renderMarkdown(
+        `${colorTag("green", "✓")} Default ${escapeMarkdownInline(label ?? "setting")} cleared`
+      );
+    }
+
+    case "clear-all":
+      return renderMarkdown(`${colorTag("green", "✓")} All defaults cleared`);
+
+    default:
+      return "";
+  }
+}

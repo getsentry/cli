@@ -1,61 +1,165 @@
 /**
- * Default organization/project storage (single-row table pattern).
+ * Persistent CLI defaults stored in the metadata KV table.
+ *
+ * All defaults use metadata keys prefixed with `defaults.`:
+ * - `defaults.org` — default organization slug
+ * - `defaults.project` — default project slug
+ * - `defaults.telemetry` — telemetry preference (`"on"` / `"off"`)
+ * - `defaults.url` — Sentry instance URL (for self-hosted)
  */
 
 import { getDatabase } from "./index.js";
-import { runUpsert } from "./utils.js";
+import { clearMetadata, getMetadata, setMetadata } from "./utils.js";
 
-type DefaultsRow = {
+const DEFAULTS_ORG = "defaults.org";
+const DEFAULTS_PROJECT = "defaults.project";
+const DEFAULTS_TELEMETRY = "defaults.telemetry";
+const DEFAULTS_URL = "defaults.url";
+
+/** All metadata keys used for defaults (for bulk operations) */
+const ALL_DEFAULTS_KEYS = [
+  DEFAULTS_ORG,
+  DEFAULTS_PROJECT,
+  DEFAULTS_TELEMETRY,
+  DEFAULTS_URL,
+];
+
+/** State of all persistent defaults */
+export type DefaultsState = {
+  /** Default organization slug, or null if unset */
   organization: string | null;
+  /** Default project slug, or null if unset */
   project: string | null;
-  updated_at: number;
+  /** Telemetry preference: "on", "off", or null (= default enabled) */
+  telemetry: "on" | "off" | null;
+  /** Default Sentry instance URL, or null if unset */
+  url: string | null;
 };
 
-export function getDefaultOrganization(): string | undefined {
-  const db = getDatabase();
-  const row = db
-    .query("SELECT organization FROM defaults WHERE id = 1")
-    .get() as Pick<DefaultsRow, "organization"> | undefined;
-
-  return row?.organization ?? undefined;
+/** Parse a raw telemetry metadata value to a typed "on" | "off" | null. */
+function parseTelemetryValue(val: string | undefined): "on" | "off" | null {
+  if (val === "on") {
+    return "on";
+  }
+  if (val === "off") {
+    return "off";
+  }
+  return null;
 }
 
-export function getDefaultProject(): string | undefined {
-  const db = getDatabase();
-  const row = db.query("SELECT project FROM defaults WHERE id = 1").get() as
-    | Pick<DefaultsRow, "project">
-    | undefined;
+// ---------------------------------------------------------------------------
+// Getters
+// ---------------------------------------------------------------------------
 
-  return row?.project ?? undefined;
+/** Get the default organization slug, or null if not set. */
+export function getDefaultOrganization(): string | null {
+  const db = getDatabase();
+  const m = getMetadata(db, [DEFAULTS_ORG]);
+  return m.get(DEFAULTS_ORG) ?? null;
+}
+
+/** Get the default project slug, or null if not set. */
+export function getDefaultProject(): string | null {
+  const db = getDatabase();
+  const m = getMetadata(db, [DEFAULTS_PROJECT]);
+  return m.get(DEFAULTS_PROJECT) ?? null;
 }
 
 /**
- * Set default organization and/or project.
+ * Get the persistent telemetry preference.
  *
- * @param organization - undefined = keep existing, null = clear, string = set new value
- * @param project - undefined = keep existing, null = clear, string = set new value
+ * @returns `true` if explicitly enabled, `false` if explicitly disabled,
+ *   `undefined` if no preference is stored (callers should default to enabled)
  */
-export function setDefaults(
-  organization?: string | null,
-  project?: string | null
-): void {
+export function getTelemetryPreference(): boolean | undefined {
   const db = getDatabase();
-  const now = Date.now();
+  const m = getMetadata(db, [DEFAULTS_TELEMETRY]);
+  const val = m.get(DEFAULTS_TELEMETRY);
+  if (val === "on") {
+    return true;
+  }
+  if (val === "off") {
+    return false;
+  }
+  return;
+}
 
-  const current = db
-    .query("SELECT organization, project FROM defaults WHERE id = 1")
-    .get() as Pick<DefaultsRow, "organization" | "project"> | undefined;
+/** Get the default Sentry instance URL, or null if not set. */
+export function getDefaultUrl(): string | null {
+  const db = getDatabase();
+  const m = getMetadata(db, [DEFAULTS_URL]);
+  return m.get(DEFAULTS_URL) ?? null;
+}
 
-  // undefined = keep existing value, null = explicitly clear, string = set new value
-  const newOrg =
-    organization === undefined ? (current?.organization ?? null) : organization;
-  const newProject =
-    project === undefined ? (current?.project ?? null) : project;
+/**
+ * Get all persistent defaults as a structured object.
+ * Used by the `sentry cli defaults` show mode and JSON output.
+ */
+export function getAllDefaults(): DefaultsState {
+  const db = getDatabase();
+  const m = getMetadata(db, ALL_DEFAULTS_KEYS);
+  const telVal = m.get(DEFAULTS_TELEMETRY);
+  return {
+    organization: m.get(DEFAULTS_ORG) ?? null,
+    project: m.get(DEFAULTS_PROJECT) ?? null,
+    telemetry: parseTelemetryValue(telVal),
+    url: m.get(DEFAULTS_URL) ?? null,
+  };
+}
 
-  runUpsert(
-    db,
-    "defaults",
-    { id: 1, organization: newOrg, project: newProject, updated_at: now },
-    ["id"]
-  );
+// ---------------------------------------------------------------------------
+// Setters (null = clear the value)
+// ---------------------------------------------------------------------------
+
+/** Set or clear the default organization. Pass `null` to clear. */
+export function setDefaultOrganization(value: string | null): void {
+  const db = getDatabase();
+  if (value === null) {
+    clearMetadata(db, [DEFAULTS_ORG]);
+  } else {
+    setMetadata(db, { [DEFAULTS_ORG]: value });
+  }
+}
+
+/** Set or clear the default project. Pass `null` to clear. */
+export function setDefaultProject(value: string | null): void {
+  const db = getDatabase();
+  if (value === null) {
+    clearMetadata(db, [DEFAULTS_PROJECT]);
+  } else {
+    setMetadata(db, { [DEFAULTS_PROJECT]: value });
+  }
+}
+
+/**
+ * Set or clear the persistent telemetry preference.
+ * Pass `null` to remove the preference (callers will default to enabled).
+ */
+export function setTelemetryPreference(enabled: boolean | null): void {
+  const db = getDatabase();
+  if (enabled === null) {
+    clearMetadata(db, [DEFAULTS_TELEMETRY]);
+  } else {
+    setMetadata(db, { [DEFAULTS_TELEMETRY]: enabled ? "on" : "off" });
+  }
+}
+
+/** Set or clear the default Sentry instance URL. Pass `null` to clear. */
+export function setDefaultUrl(url: string | null): void {
+  const db = getDatabase();
+  if (url === null) {
+    clearMetadata(db, [DEFAULTS_URL]);
+  } else {
+    setMetadata(db, { [DEFAULTS_URL]: url });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bulk operations
+// ---------------------------------------------------------------------------
+
+/** Clear all persistent defaults (org, project, telemetry, url). */
+export function clearAllDefaults(): void {
+  const db = getDatabase();
+  clearMetadata(db, ALL_DEFAULTS_KEYS);
 }

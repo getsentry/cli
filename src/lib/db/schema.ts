@@ -16,7 +16,7 @@ import { getEnv } from "../env.js";
 import { stringifyUnknown } from "../errors.js";
 import { logger } from "../logger.js";
 
-export const CURRENT_SCHEMA_VERSION = 12;
+export const CURRENT_SCHEMA_VERSION = 13;
 
 /** Environment variable to disable auto-repair */
 const NO_AUTO_REPAIR_ENV = "SENTRY_CLI_NO_AUTO_REPAIR";
@@ -68,18 +68,7 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
       },
     },
   },
-  defaults: {
-    columns: {
-      id: { type: "INTEGER", primaryKey: true, check: "id = 1" },
-      organization: { type: "TEXT" },
-      project: { type: "TEXT" },
-      updated_at: {
-        type: "INTEGER",
-        notNull: true,
-        default: "(unixepoch() * 1000)",
-      },
-    },
-  },
+
   project_cache: {
     columns: {
       cache_key: { type: "TEXT", primaryKey: true },
@@ -684,6 +673,7 @@ function getSchemaVersion(db: Database): number {
  * - Column renames (requires data copy in SQLite)
  * - Complex constraints
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential migration steps are inherently linear
 export function runMigrations(db: Database): void {
   const currentVersion = getSchemaVersion(db);
 
@@ -768,6 +758,28 @@ export function runMigrations(db: Database): void {
       db.exec("DROP TABLE pagination_cursors");
     }
     db.exec(EXPECTED_TABLES.pagination_cursors as string);
+  }
+
+  // Migration 12 -> 13: Consolidate defaults into metadata KV table.
+  // The single-row `defaults` table was never written by production code.
+  // Move any data (from JSON migration or manual DB edits) to metadata,
+  // then drop the table. New defaults use metadata keys: defaults.org,
+  // defaults.project, defaults.telemetry, defaults.url.
+  if (currentVersion < 13 && tableExists(db, "defaults")) {
+    const row = db
+      .query("SELECT organization, project FROM defaults WHERE id = 1")
+      .get() as { organization: string | null; project: string | null } | null;
+    if (row?.organization) {
+      db.query(
+        "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)"
+      ).run("defaults.org", row.organization);
+    }
+    if (row?.project) {
+      db.query(
+        "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)"
+      ).run("defaults.project", row.project);
+    }
+    db.exec("DROP TABLE defaults");
   }
 
   if (currentVersion < CURRENT_SCHEMA_VERSION) {
