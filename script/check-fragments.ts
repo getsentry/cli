@@ -1,12 +1,12 @@
 #!/usr/bin/env bun
 /**
- * Validate command doc fragment files.
+ * Validate doc fragment files.
  *
- * Ensures fragment files in docs/src/fragments/commands/ stay consistent
- * with the CLI route tree:
+ * Ensures fragment files stay consistent with the CLI route tree:
  *   1. Every route has a corresponding fragment file (+ index.md)
  *   2. Every fragment file corresponds to an existing route (or is index.md)
  *   3. Fragment files don't accidentally contain frontmatter or the generated marker
+ *   4. Top-level fragments (e.g., configuration.md) exist
  *
  * Usage:
  *   bun run script/check-fragments.ts
@@ -97,6 +97,28 @@ for (const file of fragmentFiles) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Check 4: Top-level fragments (non-command generated pages)
+// ---------------------------------------------------------------------------
+
+const TOP_LEVEL_FRAGMENTS_DIR = "docs/src/fragments";
+
+/** Top-level fragment files that must exist (for generated doc pages) */
+const REQUIRED_TOP_LEVEL_FRAGMENTS = ["configuration"];
+
+for (const name of REQUIRED_TOP_LEVEL_FRAGMENTS) {
+  const path = `${TOP_LEVEL_FRAGMENTS_DIR}/${name}.md`;
+  if (!(await Bun.file(path).exists())) {
+    errors.push(
+      `Missing top-level fragment: ${path} (required for generated ${name}.md page)`
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Results
+// ---------------------------------------------------------------------------
+
 if (errors.length > 0) {
   console.error(`Found ${errors.length} fragment validation error(s):\n`);
   for (const err of errors) {
@@ -106,5 +128,8 @@ if (errors.length > 0) {
 }
 
 console.log(
-  `All ${actualFragments.size} fragment files valid (${routeNames.size} routes + index)`
+  `All ${actualFragments.size} command fragment files valid (${routeNames.size} routes + index)`
+);
+console.log(
+  `All ${REQUIRED_TOP_LEVEL_FRAGMENTS.length} top-level fragment(s) valid`
 );

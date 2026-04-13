@@ -49,8 +49,8 @@ function getClientId(): string {
   );
 }
 
-// OAuth scopes requested for the CLI
-const SCOPES = [
+/** OAuth scopes requested by the CLI. Exported for doc generation. */
+export const OAUTH_SCOPES: readonly string[] = [
   "project:read",
   "project:write",
   "project:admin",
@@ -60,7 +60,10 @@ const SCOPES = [
   "member:read",
   "team:read",
   "team:write",
-].join(" ");
+];
+
+/** Space-joined scope string for OAuth requests */
+const SCOPES = OAUTH_SCOPES.join(" ");
 
 type DeviceFlowCallbacks = {
   onUserCode: (
