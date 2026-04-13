@@ -195,6 +195,12 @@ describe("property: classifyUrl", () => {
     expect(classifyUrl(url)).toBe("immutable");
   });
 
+  test("trace-items (span detail) URLs are immutable", () => {
+    const url =
+      "https://us.sentry.io/api/0/projects/org/proj/trace-items/a1b2c3d4e5f67890/?trace_id=abc&item_type=spans";
+    expect(classifyUrl(url)).toBe("immutable");
+  });
+
   test("issue URLs are volatile (lists and detail views)", () => {
     const urls = [
       "https://us.sentry.io/api/0/projects/org/proj/issues/",

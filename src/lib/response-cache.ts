@@ -62,8 +62,12 @@ const FALLBACK_TTL_MS: Record<TtlTier, number> = {
 const URL_TIER_REGEXPS: Readonly<Record<TtlTier, readonly RegExp[]>> = {
   // Polling endpoints where state changes rapidly
   "no-cache": [/\/(?:autofix|root-cause)\//],
-  // Specific resources by ID (events, traces) — never change once created
-  immutable: [/\/events\/[^/?]+\/?(?:\?|$)/, /\/trace\/[0-9a-f]{32}\//],
+  // Specific resources by ID (events, traces, span details) — never change once created
+  immutable: [
+    /\/events\/[^/?]+\/?(?:\?|$)/,
+    /\/trace\/[0-9a-f]{32}\//,
+    /\/trace-items\/[0-9a-f]+\//,
+  ],
   // Issue endpoints (lists AND detail views), dataset queries, trace-logs
   volatile: [
     /\/issues\//,

@@ -10,12 +10,16 @@
 import { describe, expect, test } from "bun:test";
 import {
   assert as fcAssert,
+  integer,
   property,
   stringMatching,
   tuple,
+  uniqueArray,
 } from "fast-check";
+import { flattenSpanTree } from "../../../src/commands/trace/view.js";
 import { ContextError, ValidationError } from "../../../src/lib/errors.js";
 import { parseTraceTarget } from "../../../src/lib/trace-target.js";
+import type { TraceSpan } from "../../../src/types/sentry.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
 
 /** Valid trace IDs (32-char hex) */
@@ -142,5 +146,118 @@ describe("parseTraceTarget properties", () => {
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
+  });
+});
+
+// ============================================================================
+// flattenSpanTree properties
+// ============================================================================
+
+/**
+ * Build a span tree from a flat list of (spanId, parentIndex) pairs.
+ * parentIndex = -1 means root. Otherwise index into the flat list.
+ */
+function buildTree(
+  items: Array<{ id: string; parentIdx: number }>
+): TraceSpan[] {
+  const nodes: TraceSpan[] = items.map((item) => ({
+    span_id: item.id,
+    start_timestamp: 1,
+  }));
+
+  const roots: TraceSpan[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const node = nodes[i];
+    if (!item) {
+      continue;
+    }
+    if (!node) {
+      continue;
+    }
+    if (item.parentIdx < 0 || item.parentIdx >= i) {
+      roots.push(node);
+    } else {
+      const parent = nodes[item.parentIdx];
+      if (parent) {
+        if (!parent.children) {
+          parent.children = [];
+        }
+        parent.children.push(node);
+      }
+    }
+  }
+  return roots;
+}
+
+/** Generate a span tree of 0-20 spans via flat list + tree construction */
+const spanTreeArb = uniqueArray(stringMatching(/^[a-f0-9]{16}$/), {
+  minLength: 0,
+  maxLength: 20,
+})
+  .chain((ids) =>
+    tuple(
+      ...ids.map((id, i) =>
+        integer({ min: -1, max: Math.max(0, i - 1) }).map((parentIdx) => ({
+          id,
+          parentIdx,
+        }))
+      )
+    )
+  )
+  .map((items) => buildTree(items));
+
+/** Count all spans in a tree recursively */
+function countSpans(spans: TraceSpan[]): number {
+  let count = 0;
+  for (const span of spans) {
+    count += 1;
+    if (span.children) {
+      count += countSpans(span.children);
+    }
+  }
+  return count;
+}
+
+/** Collect all span IDs from a tree recursively */
+function collectSpanIds(spans: TraceSpan[]): Set<string> {
+  const ids = new Set<string>();
+  for (const span of spans) {
+    ids.add(span.span_id);
+    if (span.children) {
+      for (const id of collectSpanIds(span.children)) {
+        ids.add(id);
+      }
+    }
+  }
+  return ids;
+}
+
+describe("flattenSpanTree properties", () => {
+  test("result length equals total span count", async () => {
+    await fcAssert(
+      property(spanTreeArb, (tree) => {
+        const result = flattenSpanTree(tree);
+        expect(result).toHaveLength(countSpans(tree));
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("all returned spans exist in original tree", async () => {
+    await fcAssert(
+      property(spanTreeArb, (tree) => {
+        const result = flattenSpanTree(tree);
+        const originalIds = collectSpanIds(tree);
+        for (const span of result) {
+          expect(originalIds.has(span.span_id)).toBe(true);
+        }
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("empty input returns empty output", () => {
+    expect(flattenSpanTree([])).toEqual([]);
   });
 });

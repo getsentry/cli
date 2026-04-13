@@ -4,14 +4,12 @@
  * View detailed information about one or more spans within a trace.
  */
 
-import pLimit from "p-limit";
-
 import type { SentryContext } from "../../context.js";
-import type { TraceItemDetail } from "../../lib/api-client.js";
 import {
+  attributesToDict,
+  fetchMultiSpanDetails,
   getDetailedTrace,
-  getSpanDetails,
-  REDUNDANT_DETAIL_ATTRS,
+  type TraceItemDetail,
 } from "../../lib/api-client.js";
 import { spansFlag } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
@@ -44,27 +42,6 @@ import {
 } from "../../lib/trace-target.js";
 
 const log = logger.withTag("span.view");
-
-/** Concurrency limit for parallel span detail fetches */
-const SPAN_DETAIL_CONCURRENCY = 5;
-
-/**
- * Convert a trace-items attribute array into a key-value dict,
- * filtering out attributes already shown in the standard span fields
- * and EAP storage internals (tags[], precise timestamps, etc.).
- */
-function attributesToDict(
-  attributes: TraceItemDetail["attributes"]
-): Record<string, unknown> {
-  return Object.fromEntries(
-    attributes
-      .filter(
-        (a) =>
-          !(REDUNDANT_DETAIL_ATTRS.has(a.name) || a.name.startsWith("tags["))
-      )
-      .map((a) => [a.name, a.value])
-  );
-}
 
 type ViewFlags = {
   readonly json: boolean;
@@ -289,39 +266,6 @@ function formatSpanViewHuman(data: SpanViewData): string {
 }
 
 /**
- * Fetch full attribute details for found spans in parallel.
- *
- * Uses p-limit to cap concurrency and avoid overwhelming the API.
- * Failures for individual spans are logged as warnings — the command
- * still returns the basic span data from the trace tree.
- */
-async function fetchSpanDetails(
-  results: SpanResult[],
-  org: string,
-  project: string,
-  traceId: string
-): Promise<Map<string, TraceItemDetail>> {
-  const limit = pLimit(SPAN_DETAIL_CONCURRENCY);
-  const details = new Map<string, TraceItemDetail>();
-
-  await limit.map(results, async (r) => {
-    try {
-      const detail = await getSpanDetails(
-        org,
-        r.span.project_slug || project,
-        r.spanId,
-        traceId
-      );
-      details.set(r.spanId, detail);
-    } catch {
-      log.warn(`Could not fetch details for span ${r.spanId}`);
-    }
-  });
-
-  return details;
-}
-
-/**
  * Transform span view data for JSON output.
  * Applies `--fields` filtering per element.
  */
@@ -423,7 +367,13 @@ export const viewCommand = buildCommand({
 
     // Fetch full attribute details for each found span in parallel.
     // Uses the trace-items detail endpoint which returns ALL attributes.
-    const details = await fetchSpanDetails(results, org, project, traceId);
+    const details = await fetchMultiSpanDetails(
+      results.map((r) => ({
+        span_id: r.spanId,
+        project_slug: r.span.project_slug,
+      })),
+      { org, fallbackProject: project, traceId }
+    );
 
     yield new CommandOutput({
       results,
