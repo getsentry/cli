@@ -269,7 +269,7 @@ describe("dashboard widget add", () => {
   // Layout flag tests
   // -------------------------------------------------------------------------
 
-  test("uses explicit layout when --x --y --width --height provided", async () => {
+  test("uses explicit layout when --col --row --width --height provided", async () => {
     const { context } = createMockContext();
     const func = await addCommand.loader();
     await func.call(
@@ -278,8 +278,8 @@ describe("dashboard widget add", () => {
         json: false,
         display: "line",
         query: ["count"],
-        x: 0,
-        y: 5,
+        col: 0,
+        row: 5,
         width: 6,
         height: 3,
       },
@@ -304,7 +304,7 @@ describe("dashboard widget add", () => {
         json: false,
         display: "big_number",
         query: ["count"],
-        x: 4,
+        col: 4,
       },
       "123",
       "Positioned Counter"
@@ -333,14 +333,14 @@ describe("dashboard widget add", () => {
     expect(err.message).toContain("--width");
   });
 
-  test("throws ValidationError when --x overflows with auto-layout default width", async () => {
-    // table display defaults to w=6, so --x 1 would produce x=1 + w=6 = 7 > 6
+  test("throws ValidationError when --col overflows with auto-layout default width", async () => {
+    // table display defaults to w=6, so --col 1 would produce x=1 + w=6 = 7 > 6
     const { context } = createMockContext();
     const func = await addCommand.loader();
     const err = await func
       .call(
         context,
-        { json: false, display: "table", query: ["count"], x: 1 },
+        { json: false, display: "table", query: ["count"], col: 1 },
         "123",
         "Wide Table"
       )
@@ -349,19 +349,19 @@ describe("dashboard widget add", () => {
     expect(err.message).toContain("overflows the grid");
   });
 
-  test("throws ValidationError for negative y", async () => {
+  test("throws ValidationError for negative row", async () => {
     const { context } = createMockContext();
     const func = await addCommand.loader();
     const err = await func
       .call(
         context,
-        { json: false, display: "line", query: ["count"], y: -1 },
+        { json: false, display: "line", query: ["count"], row: -1 },
         "123",
         "Bad Y"
       )
       .catch((e: Error) => e);
     expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toContain("--y");
+    expect(err.message).toContain("--row");
   });
 
   test("auto-defaults orderby when group-by + limit provided", async () => {

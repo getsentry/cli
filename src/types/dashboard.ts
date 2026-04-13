@@ -710,8 +710,8 @@ export function assignDefaultLayout(
 
 /** Shared layout flags accepted by widget add and edit commands */
 export type WidgetLayoutFlags = {
-  readonly x?: number;
-  readonly y?: number;
+  readonly col?: number;
+  readonly row?: number;
   readonly width?: number;
   readonly height?: number;
 };
@@ -751,11 +751,11 @@ export function validateWidgetLayout(
   flags: WidgetLayoutFlags,
   existing?: DashboardWidgetLayout
 ): void {
-  if (flags.x !== undefined) {
-    assertLayoutInt(flags.x, "x", 0, GRID_COLUMNS - 1);
+  if (flags.col !== undefined) {
+    assertLayoutInt(flags.col, "col", 0, GRID_COLUMNS - 1);
   }
-  if (flags.y !== undefined) {
-    assertLayoutInt(flags.y, "y", 0);
+  if (flags.row !== undefined) {
+    assertLayoutInt(flags.row, "row", 0);
   }
   if (flags.width !== undefined) {
     assertLayoutInt(flags.width, "width", 1, GRID_COLUMNS);
@@ -764,8 +764,8 @@ export function validateWidgetLayout(
     assertLayoutInt(flags.height, "height", 1);
   }
 
-  // Cross-validate x + width doesn't overflow the grid
-  const effectiveX = flags.x ?? existing?.x;
+  // Cross-validate col + width doesn't overflow the grid
+  const effectiveX = flags.col ?? existing?.x;
   const effectiveW = flags.width ?? existing?.w;
   if (
     effectiveX !== undefined &&
@@ -773,8 +773,8 @@ export function validateWidgetLayout(
     effectiveX + effectiveW > GRID_COLUMNS
   ) {
     throw new ValidationError(
-      `Widget overflows the grid: x(${effectiveX}) + width(${effectiveW}) = ${effectiveX + effectiveW}, but the grid is ${GRID_COLUMNS} columns wide.`,
-      "x"
+      `Widget overflows the grid: col(${effectiveX}) + width(${effectiveW}) = ${effectiveX + effectiveW}, but the grid is ${GRID_COLUMNS} columns wide.`,
+      "col"
     );
   }
 }
