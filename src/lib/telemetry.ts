@@ -78,6 +78,70 @@ export function markSessionCrashed(): void {
   }
 }
 
+/** Env var that disables CLI telemetry when set to `"1"`. */
+export const TELEMETRY_ENV_VAR = "SENTRY_CLI_NO_TELEMETRY";
+
+/** Industry-standard env var for opting out of telemetry (consoledonottrack.com). */
+export const DO_NOT_TRACK_ENV_VAR = "DO_NOT_TRACK";
+
+/** Result of resolving the effective telemetry state */
+export type TelemetryEffective = {
+  /** Whether telemetry is enabled after applying all overrides */
+  enabled: boolean;
+  /**
+   * Which layer determined the result:
+   * - `"env:SENTRY_CLI_NO_TELEMETRY"` — env var opt-out
+   * - `"env:DO_NOT_TRACK"` — industry-standard opt-out
+   * - `"preference"` — persistent `sentry cli defaults telemetry` setting
+   * - `"default"` — no override, telemetry enabled by default
+   */
+  source: string;
+};
+
+/**
+ * Resolve the effective telemetry state with source attribution.
+ *
+ * Priority (highest to lowest):
+ * 1. `SENTRY_CLI_NO_TELEMETRY=1` — explicit CLI env var opt-out
+ * 2. `DO_NOT_TRACK=1` — industry standard (consoledonottrack.com)
+ * 3. SQLite persistent preference — `sentry cli defaults telemetry on/off`
+ * 4. Default: enabled
+ *
+ * The DB read is wrapped in try/catch — if the database is uninitialized
+ * or corrupted, we fall through to the default (enabled).
+ */
+export function computeTelemetryEffective(): TelemetryEffective {
+  if (getEnv()[TELEMETRY_ENV_VAR] === "1") {
+    return { enabled: false, source: `env:${TELEMETRY_ENV_VAR}` };
+  }
+
+  if (getEnv()[DO_NOT_TRACK_ENV_VAR] === "1") {
+    return { enabled: false, source: `env:${DO_NOT_TRACK_ENV_VAR}` };
+  }
+
+  try {
+    const { getTelemetryPreference } = require("./db/defaults.js") as {
+      getTelemetryPreference: () => boolean | undefined;
+    };
+    const pref = getTelemetryPreference();
+    if (pref !== undefined) {
+      return { enabled: pref, source: "preference" };
+    }
+  } catch {
+    // DB not initialized yet — fall through to default
+  }
+
+  return { enabled: true, source: "default" };
+}
+
+/**
+ * Convenience wrapper: returns just the boolean enabled state.
+ * Used by `withTelemetry()` and other call sites that only need the decision.
+ */
+export function isTelemetryEnabled(): boolean {
+  return computeTelemetryEffective().enabled;
+}
+
 /**
  * Wrap CLI execution with telemetry tracking.
  *
@@ -88,7 +152,10 @@ export function markSessionCrashed(): void {
  * sessions are reliably tracked even for unhandled rejections and other
  * paths that bypass this function's try/catch.
  *
- * Telemetry can be disabled via SENTRY_CLI_NO_TELEMETRY=1 env var.
+ * Telemetry can be disabled via:
+ * - `SENTRY_CLI_NO_TELEMETRY=1` environment variable
+ * - `DO_NOT_TRACK=1` environment variable (consoledonottrack.com)
+ * - `sentry cli defaults telemetry off` (persistent preference)
  *
  * @param callback - The CLI execution function to wrap, receives the span for naming
  * @returns The result of the callback
@@ -97,7 +164,7 @@ export async function withTelemetry<T>(
   callback: (span: Span | undefined) => T | Promise<T>,
   options?: { libraryMode?: boolean }
 ): Promise<T> {
-  const enabled = getEnv().SENTRY_CLI_NO_TELEMETRY !== "1";
+  const enabled = isTelemetryEnabled();
   const client = initSentry(enabled, options);
   if (!client?.getOptions().enabled) {
     return callback(undefined);

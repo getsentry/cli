@@ -22,7 +22,10 @@ import {
 import * as apiClient from "../../../src/lib/api-client.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
-import { setDefaults } from "../../../src/lib/db/defaults.js";
+import {
+  setDefaultOrganization,
+  setDefaultProject,
+} from "../../../src/lib/db/defaults.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as paginationDb from "../../../src/lib/db/pagination.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
@@ -55,7 +58,8 @@ beforeEach(async () => {
   func = (await listCommand.loader()) as unknown as ListFunc;
   await setAuthToken("test-token");
   setOrgRegion("test-org", DEFAULT_SENTRY_URL);
-  setDefaults("test-org", "test-project");
+  setDefaultOrganization("test-org");
+  setDefaultProject("test-project");
 });
 
 afterEach(() => {
@@ -119,7 +123,7 @@ function mockIssue(overrides?: Record<string, unknown>) {
 
 describe("issue list: error propagation", () => {
   test("throws ApiError (not plain Error) when all fetches fail with 400", async () => {
-    // Uses default org/project from setDefaults("test-org", "test-project")
+    // Uses default org/project from setDefaultOrganization/setDefaultProject
     // listIssues hits: /api/0/organizations/test-org/issues/?query=project:test-project
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);

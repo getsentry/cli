@@ -35,6 +35,22 @@ async function preloadProjectContext(cwd: string): Promise<void> {
   // Apply .sentryclirc env shim (token, URL) — sentryclirc cache was
   // populated as a side effect of findProjectRoot's walk
   await applySentryCliRcEnvShim(cwd);
+
+  // Apply persistent URL default (lower priority than env vars and .sentryclirc).
+  // Same mechanism as .sentryclirc — writes to env.SENTRY_URL so all downstream
+  // URL resolution code picks it up automatically.
+  const env = getEnv();
+  if (!(env.SENTRY_HOST?.trim() || env.SENTRY_URL?.trim())) {
+    try {
+      const { getDefaultUrl } = await import("./lib/db/defaults.js");
+      const url = getDefaultUrl();
+      if (url) {
+        env.SENTRY_URL = url;
+      }
+    } catch {
+      // DB not available — skip
+    }
+  }
 }
 
 /**

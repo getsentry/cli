@@ -153,15 +153,15 @@ export function migrateFromJson(db: Database): void {
       );
     }
 
-    if (oldConfig.defaults?.organization || oldConfig.defaults?.project) {
-      db.query(`
-        INSERT OR REPLACE INTO defaults (id, organization, project, updated_at)
-        VALUES (1, ?, ?, ?)
-      `).run(
-        oldConfig.defaults.organization ?? null,
-        oldConfig.defaults.project ?? null,
-        Date.now()
-      );
+    if (oldConfig.defaults?.organization) {
+      db.query(
+        "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)"
+      ).run("defaults.org", oldConfig.defaults.organization);
+    }
+    if (oldConfig.defaults?.project) {
+      db.query(
+        "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)"
+      ).run("defaults.project", oldConfig.defaults.project);
     }
 
     if (oldConfig.projectCache) {
