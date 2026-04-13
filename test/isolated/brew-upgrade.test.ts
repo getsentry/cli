@@ -153,14 +153,17 @@ describe("executeUpgrade (brew)", () => {
   test("invokes brew with correct arguments", async () => {
     let capturedCmd = "";
     let capturedArgs: string[] = [];
-    spawnImpl = (cmd, args) => {
+    let capturedOpts: object = {};
+    spawnImpl = (cmd, args, opts) => {
       capturedCmd = cmd;
       capturedArgs = args;
+      capturedOpts = opts;
       return fakeProcess(0);
     };
     await executeUpgrade("brew", "1.0.0");
     expect(capturedCmd).toBe("brew");
     expect(capturedArgs).toEqual(["upgrade", "getsentry/tools/sentry"]);
+    expect(capturedOpts).toHaveProperty("shell", process.platform === "win32");
   });
 });
 
@@ -177,14 +180,17 @@ describe("executeUpgrade (package managers)", () => {
   test("npm: uses correct install arguments", async () => {
     let capturedCmd = "";
     let capturedArgs: string[] = [];
-    spawnImpl = (cmd, args) => {
+    let capturedOpts: object = {};
+    spawnImpl = (cmd, args, opts) => {
       capturedCmd = cmd;
       capturedArgs = args;
+      capturedOpts = opts;
       return fakeProcess(0);
     };
     await executeUpgrade("npm", "1.2.3");
     expect(capturedCmd).toBe("npm");
     expect(capturedArgs).toEqual(["install", "-g", "sentry@1.2.3"]);
+    expect(capturedOpts).toHaveProperty("shell", process.platform === "win32");
   });
 
   test("pnpm: uses correct install arguments", async () => {
@@ -210,14 +216,17 @@ describe("executeUpgrade (package managers)", () => {
   test("yarn: uses 'global add' arguments", async () => {
     let capturedCmd = "";
     let capturedArgs: string[] = [];
-    spawnImpl = (cmd, args) => {
+    let capturedOpts: object = {};
+    spawnImpl = (cmd, args, opts) => {
       capturedCmd = cmd;
       capturedArgs = args;
+      capturedOpts = opts;
       return fakeProcess(0);
     };
     await executeUpgrade("yarn", "1.2.3");
     expect(capturedCmd).toBe("yarn");
     expect(capturedArgs).toEqual(["global", "add", "sentry@1.2.3"]);
+    expect(capturedOpts).toHaveProperty("shell", process.platform === "win32");
   });
 
   test("npm: throws UpgradeError on non-zero exit", async () => {
@@ -289,10 +298,15 @@ describe("detectInstallationMethod — legacy pm detection via isInstalledWith",
   });
 
   test("detects npm when 'npm list -g sentry' output includes 'sentry@'", async () => {
-    spawnImpl = (_cmd, args) =>
-      fakeProcess(0, args.includes("sentry") ? "sentry@1.0.0" : "");
+    let capturedOpts: object = {};
+    spawnImpl = (_cmd, args, opts) => {
+      capturedOpts = opts;
+      return fakeProcess(0, args.includes("sentry") ? "sentry@1.0.0" : "");
+    };
     const method = await detectInstallationMethod();
     expect(method).toBe("npm");
+    // runCommand passes shell: true on Windows for .cmd compatibility
+    expect(capturedOpts).toHaveProperty("shell", process.platform === "win32");
   });
 
   test("detects yarn when 'yarn global list' output includes 'sentry@'", async () => {
