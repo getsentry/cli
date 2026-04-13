@@ -205,19 +205,21 @@ function parseSort(value: string): SortValue {
 }
 
 /**
- * Matches standalone boolean OR operator — surrounded by whitespace or
- * string boundaries, ensuring it doesn't match inside qualifier values
- * like `tag:OR` where `:` would create a false word boundary.
+ * Tokenize a Sentry search query respecting quoted strings.
+ *
+ * Handles `key:"quoted value with spaces"` as a single token by matching
+ * optional non-whitespace before a quoted section, then any remaining
+ * non-whitespace characters. Bare words and `key:value` pairs without
+ * quotes are also single tokens.
  */
-const BOOLEAN_OR_RE = /(^|\s)OR(\s|$)/;
-/**
- * Matches standalone boolean AND operator — same whitespace/boundary
- * guard as OR to avoid false matches in qualifier values.
- */
-const BOOLEAN_AND_RE = /(^|\s)AND(\s|$)/;
+const QUERY_TOKEN_RE = /\S*"[^"]*"\S*|\S+/g;
 
 /**
  * Sanitize `--query` before sending to the Sentry API.
+ *
+ * Tokenizes the query respecting quoted strings, then checks for standalone
+ * `OR` / `AND` tokens (not inside quoted values or qualifier values like
+ * `tag:OR`).
  *
  * - **AND**: Sentry search implicitly ANDs space-separated terms, so explicit
  *   `AND` has identical semantics. Strip it and warn — the user's intent is
@@ -232,7 +234,23 @@ function sanitizeQuery(
   query: string,
   log: { warn: (msg: string) => void }
 ): string {
-  if (BOOLEAN_OR_RE.test(query)) {
+  const tokens = query.match(QUERY_TOKEN_RE) ?? [];
+
+  let hasOr = false;
+  let hasAnd = false;
+  const cleaned: string[] = [];
+
+  for (const token of tokens) {
+    if (token === "OR") {
+      hasOr = true;
+    } else if (token === "AND") {
+      hasAnd = true;
+    } else {
+      cleaned.push(token);
+    }
+  }
+
+  if (hasOr) {
     throw new ValidationError(
       "Sentry search does not support the OR operator.\n\n" +
         "Alternatives:\n" +
@@ -243,14 +261,16 @@ function sanitizeQuery(
       "query"
     );
   }
-  if (BOOLEAN_AND_RE.test(query)) {
-    const sanitized = query.replace(/\s+AND(?=\s|$)/g, "").trim();
+
+  if (hasAnd) {
+    const sanitized = cleaned.join(" ");
     log.warn(
       "Sentry search implicitly ANDs terms — removed explicit AND operator. " +
         `Running query: "${sanitized}"`
     );
     return sanitized;
   }
+
   return query;
 }
 

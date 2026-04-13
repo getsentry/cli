@@ -1218,4 +1218,24 @@ describe("sanitizeQuery", () => {
       "is:unresolved tag:OR_something"
     );
   });
+
+  test("does not match OR inside quoted strings", () => {
+    expect(sanitizeQuery('message:"error OR timeout"', noopLog)).toBe(
+      'message:"error OR timeout"'
+    );
+  });
+
+  test("does not match AND inside quoted strings", () => {
+    expect(sanitizeQuery('title:"error AND timeout"', noopLog)).toBe(
+      'title:"error AND timeout"'
+    );
+  });
+
+  test("handles leading AND", () => {
+    expect(sanitizeQuery("AND error timeout", noopLog)).toBe("error timeout");
+  });
+
+  test("handles trailing AND", () => {
+    expect(sanitizeQuery("error timeout AND", noopLog)).toBe("error timeout");
+  });
 });
