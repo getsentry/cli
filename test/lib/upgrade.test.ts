@@ -19,7 +19,6 @@ import {
 } from "../../src/lib/binary.js";
 import {
   clearInstallInfo,
-  getInstallInfo,
   setInstallInfo,
 } from "../../src/lib/db/install-info.js";
 import { UpgradeError } from "../../src/lib/errors.js";
@@ -796,7 +795,7 @@ describe("detectPackageManagerFromPath", () => {
   });
 });
 
-describe("detectInstallationMethod — node_modules path detection", () => {
+describe("detectInstallationMethod — node_modules path fallback", () => {
   useTestConfigDir("test-detect-path-");
 
   let originalArgv: string[];
@@ -821,8 +820,9 @@ describe("detectInstallationMethod — node_modules path detection", () => {
     clearInstallInfo();
   });
 
-  test("path-based npm detection overrides stale curl in DB", async () => {
-    setInstallInfo({ method: "curl", path: "/old/path", version: "0.0.1" });
+  test("stored info takes priority over path-based detection", async () => {
+    // If DB says "yarn", respect it even if path says node_modules
+    setInstallInfo({ method: "yarn", path: "/old/path", version: "0.0.1" });
     process.argv[1] = join(
       "/usr/local/lib",
       "node_modules",
@@ -832,58 +832,7 @@ describe("detectInstallationMethod — node_modules path detection", () => {
     );
 
     const method = await detectInstallationMethod();
-    expect(method).toBe("npm");
-  });
-
-  test("path-based pnpm detection overrides stale stored info", async () => {
-    setInstallInfo({ method: "curl", path: "/old/path", version: "0.0.1" });
-    process.argv[1] = join(
-      "/usr/local/lib",
-      "node_modules",
-      ".pnpm",
-      "sentry@0.27.0",
-      "node_modules",
-      "sentry",
-      "dist",
-      "bin.cjs"
-    );
-
-    const method = await detectInstallationMethod();
-    expect(method).toBe("pnpm");
-  });
-
-  test("path-based bun detection overrides stale stored info", async () => {
-    setInstallInfo({ method: "curl", path: "/old/path", version: "0.0.1" });
-    process.argv[1] = join(
-      homedir(),
-      ".bun",
-      "install",
-      "global",
-      "node_modules",
-      "sentry",
-      "dist",
-      "bin.cjs"
-    );
-
-    const method = await detectInstallationMethod();
-    expect(method).toBe("bun");
-  });
-
-  test("path-based detection persists result to DB", async () => {
-    const npmPath = join(
-      "/usr/local/lib",
-      "node_modules",
-      "sentry",
-      "dist",
-      "bin.cjs"
-    );
-    process.argv[1] = npmPath;
-
-    await detectInstallationMethod();
-
-    const stored = getInstallInfo();
-    expect(stored?.method).toBe("npm");
-    expect(stored?.path).toBe(npmPath);
+    expect(method).toBe("yarn");
   });
 
   test("Homebrew still takes priority over node_modules path", async () => {

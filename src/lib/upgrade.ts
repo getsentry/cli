@@ -264,6 +264,15 @@ async function detectLegacyInstallationMethod(): Promise<InstallationMethod> {
     }
   }
 
+  // Fallback: if all subprocess calls failed (e.g. Windows ENOENT where
+  // .cmd files aren't found by spawn()), detect from node_modules path.
+  // Placed after subprocess calls so that yarn is correctly detected on
+  // platforms where subprocess detection works (macOS/Linux).
+  const pmFromPath = detectPackageManagerFromPath();
+  if (pmFromPath) {
+    return pmFromPath;
+  }
+
   return "unknown";
 }
 
@@ -272,10 +281,9 @@ async function detectLegacyInstallationMethod(): Promise<InstallationMethod> {
  *
  * Priority:
  * 1. Homebrew — cheap realpath check, overrides stale stored info
- * 2. node_modules path — cheap argv check, overrides stale stored info
- * 3. Stored install info in DB (fast path)
- * 4. Legacy detection via subprocess calls (slow fallback)
- * 5. Auto-save detected method for future runs
+ * 2. Stored install info in DB (fast path)
+ * 3. Legacy detection: curl paths → subprocess calls → node_modules path
+ * 4. Auto-save detected method for future runs
  *
  * @returns Detected installation method, or "unknown" if unable to determine
  */
@@ -287,21 +295,7 @@ export async function detectInstallationMethod(): Promise<InstallationMethod> {
     return "brew";
   }
 
-  // Check if running from a node_modules directory — fast and authoritative,
-  // like the Homebrew check. Overrides stale stored info (e.g. user previously
-  // had curl recorded but switched to npm). Also avoids the slow subprocess
-  // fallback which fails on Windows where pm binaries are .cmd files.
-  const pmFromPath = detectPackageManagerFromPath();
-  if (pmFromPath) {
-    setInstallInfo({
-      method: pmFromPath,
-      path: process.argv[1] ?? "",
-      version: CLI_VERSION,
-    });
-    return pmFromPath;
-  }
-
-  // Check stored info (fast path for non-Homebrew, non-npm installs)
+  // Check stored info (fast path for non-Homebrew installs)
   const stored = getInstallInfo();
   if (stored?.method) {
     return stored.method;
@@ -310,13 +304,18 @@ export async function detectInstallationMethod(): Promise<InstallationMethod> {
   // Legacy detection for existing installs (pre-setup command)
   const legacyMethod = await detectLegacyInstallationMethod();
 
-  // Auto-save detected method for future runs
+  // Auto-save detected method for future runs (best-effort —
+  // a read-only or broken DB shouldn't block detection)
   if (legacyMethod !== "unknown") {
-    setInstallInfo({
-      method: legacyMethod,
-      path: process.execPath,
-      version: CLI_VERSION,
-    });
+    try {
+      setInstallInfo({
+        method: legacyMethod,
+        path: process.execPath,
+        version: CLI_VERSION,
+      });
+    } catch {
+      log.debug("Failed to persist install info (DB may be read-only)");
+    }
   }
 
   return legacyMethod;
