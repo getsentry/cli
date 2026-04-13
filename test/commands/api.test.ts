@@ -127,9 +127,23 @@ describe("normalizeEndpoint: path traversal hardening (#350)", () => {
     );
   });
 
-  test("rejects control characters in endpoint", () => {
-    expect(() => normalizeEndpoint("organizations/\x00admin/")).toThrow(
-      /Invalid/
+  test("strips control characters from endpoint", () => {
+    expect(normalizeEndpoint("organizations/\x00admin/")).toBe(
+      "organizations/admin/"
+    );
+  });
+
+  test("strips newlines from multi-line pasted endpoints (CLI-FR)", () => {
+    expect(
+      normalizeEndpoint(
+        "organizations/my-org/issues/?\n  environment=Production&project=123"
+      )
+    ).toBe("organizations/my-org/issues/?environment=Production&project=123");
+  });
+
+  test("strips tabs and carriage returns from endpoint", () => {
+    expect(normalizeEndpoint("organizations/\tmy-org/\r\nissues/")).toBe(
+      "organizations/my-org/issues/"
     );
   });
 });
