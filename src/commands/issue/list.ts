@@ -1609,13 +1609,6 @@ function formatIssueListHuman(result: IssueListResult): string {
 }
 
 /**
- * Transform an {@link IssueListResult} into the JSON output format.
- *
- * Paginated responses produce a `{ data, hasMore, nextCursor?, errors? }` envelope.
- * Non-paginated responses produce a flat `[...]` array.
- * Field filtering is applied per-element inside `data`, not to the wrapper.
- */
-/**
  * Compact search syntax reference embedded in JSON output.
  *
  * Gives agents and power users a machine-readable summary of Sentry's issue
