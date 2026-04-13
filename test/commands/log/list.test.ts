@@ -799,7 +799,7 @@ describe("listCommand.func — trace mode org resolution failure", () => {
       expect.unreachable("Should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(ContextError);
-      expect((error as ContextError).message).toContain("Organization");
+      expect((error as ContextError).message).toContain("organization");
     }
   });
 });

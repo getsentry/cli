@@ -268,6 +268,6 @@ describe("event list command func()", () => {
         { limit: 25, json: false, full: false, period: "7d" },
         "123456789"
       )
-    ).rejects.toThrow("Organization");
+    ).rejects.toThrow("organization");
   });
 });

@@ -154,7 +154,7 @@ export class OutputError extends CliError {
 }
 
 const DEFAULT_CONTEXT_ALTERNATIVES = [
-  "Run from a directory with a Sentry-configured project",
+  "Run from a directory with a Sentry DSN in source code or .env files",
   "Set SENTRY_ORG and SENTRY_PROJECT (or SENTRY_DSN) environment variables",
   "Run 'sentry org list' to find your organization slug",
   "Run 'sentry project list <org>/' to find project slugs",
@@ -169,22 +169,36 @@ const DEFAULT_CONTEXT_ALTERNATIVES = [
  * @param note - Optional informational context (e.g., "Found 2 DSN(s) that could not be resolved").
  *   Rendered as a separate "Note:" section after alternatives. Use this for diagnostic
  *   information that explains what the CLI tried — keep alternatives purely actionable.
+ * @param isAutoDetect - When true, the headline explains that auto-detection was attempted
+ *   and failed rather than stating the value "is required". Callers that omit `alternatives`
+ *   (using defaults) trigger this automatically via the {@link ContextError} constructor.
  * @returns Formatted multi-line error message
  */
 function buildContextMessage(
   resource: string,
   command: string,
   alternatives: string[],
-  note?: string
+  options?: { note?: string; isAutoDetect?: boolean }
 ): string {
+  const { note, isAutoDetect } = options ?? {};
   // Compound resources ("X and Y") need plural grammar
   const isPlural = resource.includes(" and ");
-  const lines = [
-    `${resource} ${isPlural ? "are" : "is"} required.`,
-    "",
-    `Specify ${isPlural ? "them" : "it"} using:`,
-    `  ${command}`,
-  ];
+  const pronoun = isPlural ? "them" : "it";
+
+  const lines = isAutoDetect
+    ? [
+        `Could not auto-detect ${resource.toLowerCase()}.`,
+        "",
+        `Provide ${pronoun} explicitly:`,
+        `  ${command}`,
+      ]
+    : [
+        `${resource} ${isPlural ? "are" : "is"} required.`,
+        "",
+        `Specify ${pronoun} using:`,
+        `  ${command}`,
+      ];
+
   if (alternatives.length > 0) {
     lines.push("", "Or:");
     for (const alt of alternatives) {
@@ -229,6 +243,10 @@ function buildResolutionMessage(
  * user **provided** a value that couldn't be matched, use {@link ResolutionError}
  * instead. For malformed input, use {@link ValidationError}.
  *
+ * When `alternatives` is omitted (using defaults), the error assumes auto-detection
+ * was attempted and produces a "Could not auto-detect ..." headline. When `alternatives`
+ * is explicitly provided (including `[]`), the error uses "... is/are required." instead.
+ *
  * @param resource - What is required (e.g., "Organization", "Organization and project").
  *   Use " and " to join compound resources — triggers plural grammar ("are required").
  * @param command - **Single-line** CLI usage example (e.g., "sentry org view <org-slug>").
@@ -249,15 +267,26 @@ export class ContextError extends CliError {
   constructor(
     resource: string,
     command: string,
-    alternatives: string[] = [...DEFAULT_CONTEXT_ALTERNATIVES],
+    alternatives?: string[],
     note?: string
   ) {
+    // When alternatives is omitted, auto-detection was tried and failed
+    const isAutoDetect = alternatives === undefined;
+    const resolvedAlternatives = alternatives ?? [
+      ...DEFAULT_CONTEXT_ALTERNATIVES,
+    ];
+
     // Include full formatted message so it's shown even when caught by external handlers
-    super(buildContextMessage(resource, command, alternatives, note));
+    super(
+      buildContextMessage(resource, command, resolvedAlternatives, {
+        note,
+        isAutoDetect,
+      })
+    );
     this.name = "ContextError";
     this.resource = resource;
     this.command = command;
-    this.alternatives = alternatives;
+    this.alternatives = resolvedAlternatives;
     this.note = note;
 
     // Dev-time assertion: command must be a single-line CLI usage example.

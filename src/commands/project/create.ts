@@ -360,13 +360,13 @@ export const createCommand = buildCommand({
         name = parsed.projectSlug;
         break;
       case "org-all":
-        throw new ContextError("Project name", USAGE_HINT);
+        throw new ContextError("Project name", USAGE_HINT, []);
       case "auto-detect":
         // Shouldn't happen — nameArg is a required positional
-        throw new ContextError("Project name", USAGE_HINT);
+        throw new ContextError("Project name", USAGE_HINT, []);
       default: {
         const _exhaustive: never = parsed;
-        throw new ContextError("Project name", String(_exhaustive));
+        throw new ContextError("Project name", String(_exhaustive), []);
       }
     }
 

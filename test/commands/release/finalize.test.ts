@@ -98,7 +98,7 @@ describe("release finalize", () => {
     const func = await finalizeCommand.loader();
 
     await expect(func.call(context, { json: false }, "1.0.0")).rejects.toThrow(
-      "Organization"
+      "organization"
     );
   });
 });
