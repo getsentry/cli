@@ -48,16 +48,31 @@ cli/
 │   ├── app.ts          # Stricli application setup
 │   ├── context.ts      # Dependency injection context
 │   ├── commands/       # CLI commands
-│   │   ├── auth/       # Authentication commands
-│   │   ├── org/        # Organization commands
-│   │   ├── project/    # Project commands
-│   │   ├── issue/      # Issue commands
-│   │   └── event/      # Event commands
+│   │   ├── auth/       # login, logout, status, refresh, token, whoami
+│   │   ├── org/        # list, view
+│   │   ├── project/    # list, view, create, delete
+│   │   ├── issue/      # list, view, explain, plan, events
+│   │   ├── event/      # list, view
+│   │   ├── trace/      # list, view, logs
+│   │   ├── span/       # list, view
+│   │   ├── log/        # list, view
+│   │   ├── release/    # list, view, create, finalize, delete, deploy, set-commits
+│   │   ├── dashboard/  # list, view, create, widget (add, edit, delete)
+│   │   ├── sourcemap/  # inject, upload
+│   │   ├── team/       # list
+│   │   ├── repo/       # list
+│   │   ├── trial/      # list, start
+│   │   ├── cli/        # upgrade, setup, fix, feedback
+│   │   ├── api.ts      # Direct API access
+│   │   ├── init.ts     # Project initialization wizard
+│   │   ├── schema.ts   # API schema browser
+│   │   └── help.ts     # Help command
 │   ├── lib/            # Shared utilities
 │   └── types/          # TypeScript types and Zod schemas
-├── test/               # Test files
-├── script/             # Build scripts
-└── docs/               # Documentation site
+├── test/               # Test files (mirrors src/ structure)
+├── script/             # Build and utility scripts
+├── plugins/            # Agent skill files
+└── docs/               # Documentation site (Astro + Starlight)
 ```
 
 ## Building

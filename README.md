@@ -33,8 +33,11 @@ brew install getsentry/tools/sentry
 ```bash
 npm install -g sentry
 pnpm add -g sentry
+yarn global add sentry
 bun add -g sentry
 ```
+
+> **Note:** The npm package requires Node.js ≥22.
 
 ### Run Without Installing
 
@@ -74,12 +77,16 @@ sentry issue plan PROJ-ABC
 | `sentry org` | List and view organizations |
 | `sentry project` | List, view, create, and delete projects |
 | `sentry issue` | List, view, explain, and plan issues |
-| `sentry event` | View event details |
+| `sentry event` | List and view event details |
 | `sentry trace` | List and view distributed traces |
 | `sentry span` | List and view spans |
 | `sentry log` | List and view logs (with streaming) |
+| `sentry release` | Create, finalize, deploy, and manage releases |
 | `sentry dashboard` | List, view, and create dashboards with widgets |
 | `sentry sourcemap` | Inject debug IDs and upload sourcemaps |
+| `sentry team` | List teams in an organization |
+| `sentry repo` | List repositories in an organization |
+| `sentry trial` | List and start product trials |
 | `sentry init` | Initialize Sentry in your project |
 | `sentry schema` | Browse the Sentry API schema |
 | `sentry api` | Make direct API requests |

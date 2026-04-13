@@ -213,6 +213,38 @@ Disable API response caching. When set, the CLI will not cache API responses and
 export SENTRY_NO_CACHE=1
 ```
 
+### `SENTRY_FORCE_ENV_TOKEN`
+
+When set, environment variable tokens (`SENTRY_AUTH_TOKEN` / `SENTRY_TOKEN`) take precedence over the stored OAuth token from `sentry auth login`. Useful for self-hosted setups or CI environments where you want to ensure the env token is always used.
+
+```bash
+export SENTRY_FORCE_ENV_TOKEN=1
+```
+
+### `SENTRY_OUTPUT_FORMAT`
+
+Force the output format for all commands. Currently only `json` is supported. This is primarily used by the library API (`createSentrySDK()`) to get JSON output without passing `--json` flags.
+
+```bash
+export SENTRY_OUTPUT_FORMAT=json
+```
+
+### `SENTRY_MAX_PAGINATION_PAGES`
+
+Cap the maximum number of pages fetched during auto-pagination. Defaults to 50. Useful for limiting API calls when using large `--limit` values.
+
+```bash
+export SENTRY_MAX_PAGINATION_PAGES=10
+```
+
+### `SENTRY_INIT`
+
+Used with the install script. When set to `1`, the installer runs `sentry init` after installing the binary to guide you through project setup.
+
+```bash
+SENTRY_INIT=1 curl https://cli.sentry.dev/install -fsS | bash
+```
+
 ## Global Options
 
 These flags are accepted by every command. They are not shown in individual command `--help` output, but are always available.

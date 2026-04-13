@@ -63,7 +63,7 @@ When creating your Sentry OAuth application:
   - `org:read`
   - `event:read`, `event:write`
   - `member:read`
-  - `team:read`
+  - `team:read`, `team:write`
 
 ## Environment Variables
 
