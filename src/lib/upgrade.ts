@@ -68,9 +68,6 @@ const NPM_REGISTRY_URL = "https://registry.npmjs.org/sentry";
 /** Regex to strip 'v' prefix from version strings */
 export const VERSION_PREFIX_REGEX = /^v/;
 
-/** Splits a file path on both forward slashes and backslashes (Unix + Windows) */
-const PATH_SEPARATOR_RE = /[\\/]/;
-
 // Curl Binary Helpers
 
 /**
@@ -214,8 +211,8 @@ function isHomebrewInstall(): boolean {
  * package manager executables are .cmd files not found by spawn()).
  *
  * pnpm is distinguished by its unique ".pnpm" directory inside node_modules.
- * All other node_modules layouts (npm, yarn, bun) return "npm" — the
- * upgrade command uses the same `npm install -g` path for all of them.
+ * bun global installs live under ~/.bun/ (detected via ".bun" segment).
+ * All other node_modules layouts (npm, yarn) default to "npm".
  *
  * @returns Package manager name, or null if not running from node_modules
  */
@@ -225,8 +222,7 @@ export function detectPackageManagerFromPath(): PackageManager | null {
     return null;
   }
 
-  // Split on both / and \ for cross-platform support (Unix + Windows)
-  const segments = scriptPath.split(PATH_SEPARATOR_RE);
+  const segments = scriptPath.split(sep);
   if (!segments.includes("node_modules")) {
     return null;
   }
@@ -236,8 +232,12 @@ export function detectPackageManagerFromPath(): PackageManager | null {
     return "pnpm";
   }
 
-  // Default to npm for other node_modules installations
-  // (npm, yarn classic, and bun global all use the same flat layout)
+  // bun global installs live under ~/.bun/install/global/node_modules/
+  if (segments.includes(".bun")) {
+    return "bun";
+  }
+
+  // Default to npm for other node_modules installations (npm, yarn classic)
   return "npm";
 }
 

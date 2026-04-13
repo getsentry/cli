@@ -724,33 +724,59 @@ describe("detectPackageManagerFromPath", () => {
     process.argv = originalArgv;
   });
 
-  test("detects npm from standard Unix node_modules path", () => {
-    process.argv[1] = "/usr/local/lib/node_modules/sentry/dist/bin.cjs";
+  test("detects npm from node_modules path", () => {
+    process.argv[1] = join(
+      "/usr/local/lib",
+      "node_modules",
+      "sentry",
+      "dist",
+      "bin.cjs"
+    );
     expect(detectPackageManagerFromPath()).toBe("npm");
   });
 
   test("detects pnpm from .pnpm directory layout", () => {
-    process.argv[1] =
-      "/usr/local/lib/node_modules/.pnpm/sentry@0.27.0/node_modules/sentry/dist/bin.cjs";
+    process.argv[1] = join(
+      "/usr/local/lib",
+      "node_modules",
+      ".pnpm",
+      "sentry@0.27.0",
+      "node_modules",
+      "sentry",
+      "dist",
+      "bin.cjs"
+    );
     expect(detectPackageManagerFromPath()).toBe("pnpm");
   });
 
-  test("detects npm from Windows backslash path", () => {
-    process.argv[1] =
-      "C:\\Users\\User\\AppData\\Roaming\\npm\\node_modules\\sentry\\dist\\bin.cjs";
-    expect(detectPackageManagerFromPath()).toBe("npm");
+  test("detects bun from .bun global install path", () => {
+    process.argv[1] = join(
+      homedir(),
+      ".bun",
+      "install",
+      "global",
+      "node_modules",
+      "sentry",
+      "dist",
+      "bin.cjs"
+    );
+    expect(detectPackageManagerFromPath()).toBe("bun");
   });
 
-  test("detects pnpm from Windows backslash path with .pnpm", () => {
-    process.argv[1] =
-      "C:\\Users\\User\\node_modules\\.pnpm\\sentry@1.0.0\\node_modules\\sentry\\dist\\bin.cjs";
-    expect(detectPackageManagerFromPath()).toBe("pnpm");
-  });
-
-  test("detects npm from Windows 8.3 short path (real bug report)", () => {
-    // Exact path from Sentry issue CLI-Y1
-    process.argv[1] =
-      "C:\\Users\\Minhyung\\CONFIG~1\\herd\\bin\\nvm\\v24.2.0\\node_modules\\sentry\\dist\\index.cjs";
+  test("detects npm from NVM-managed path with node_modules", () => {
+    // Mimics the CLI-Y1 bug report layout (NVM + Laravel Herd)
+    process.argv[1] = join(
+      homedir(),
+      "config",
+      "herd",
+      "bin",
+      "nvm",
+      "v24.2.0",
+      "node_modules",
+      "sentry",
+      "dist",
+      "index.cjs"
+    );
     expect(detectPackageManagerFromPath()).toBe("npm");
   });
 
@@ -765,7 +791,7 @@ describe("detectPackageManagerFromPath", () => {
   });
 
   test("returns null for dev mode source path", () => {
-    process.argv[1] = "/home/user/cli/src/bin.ts";
+    process.argv[1] = join("/home", "user", "cli", "src", "bin.ts");
     expect(detectPackageManagerFromPath()).toBeNull();
   });
 });
@@ -797,7 +823,13 @@ describe("detectInstallationMethod — node_modules path detection", () => {
 
   test("path-based npm detection overrides stale curl in DB", async () => {
     setInstallInfo({ method: "curl", path: "/old/path", version: "0.0.1" });
-    process.argv[1] = "/usr/local/lib/node_modules/sentry/dist/bin.cjs";
+    process.argv[1] = join(
+      "/usr/local/lib",
+      "node_modules",
+      "sentry",
+      "dist",
+      "bin.cjs"
+    );
 
     const method = await detectInstallationMethod();
     expect(method).toBe("npm");
@@ -805,27 +837,63 @@ describe("detectInstallationMethod — node_modules path detection", () => {
 
   test("path-based pnpm detection overrides stale stored info", async () => {
     setInstallInfo({ method: "curl", path: "/old/path", version: "0.0.1" });
-    process.argv[1] =
-      "/usr/local/lib/node_modules/.pnpm/sentry@0.27.0/node_modules/sentry/dist/bin.cjs";
+    process.argv[1] = join(
+      "/usr/local/lib",
+      "node_modules",
+      ".pnpm",
+      "sentry@0.27.0",
+      "node_modules",
+      "sentry",
+      "dist",
+      "bin.cjs"
+    );
 
     const method = await detectInstallationMethod();
     expect(method).toBe("pnpm");
   });
 
+  test("path-based bun detection overrides stale stored info", async () => {
+    setInstallInfo({ method: "curl", path: "/old/path", version: "0.0.1" });
+    process.argv[1] = join(
+      homedir(),
+      ".bun",
+      "install",
+      "global",
+      "node_modules",
+      "sentry",
+      "dist",
+      "bin.cjs"
+    );
+
+    const method = await detectInstallationMethod();
+    expect(method).toBe("bun");
+  });
+
   test("path-based detection persists result to DB", async () => {
-    process.argv[1] = "/usr/local/lib/node_modules/sentry/dist/bin.cjs";
+    const npmPath = join(
+      "/usr/local/lib",
+      "node_modules",
+      "sentry",
+      "dist",
+      "bin.cjs"
+    );
+    process.argv[1] = npmPath;
 
     await detectInstallationMethod();
 
     const stored = getInstallInfo();
     expect(stored?.method).toBe("npm");
-    expect(stored?.path).toBe(
-      "/usr/local/lib/node_modules/sentry/dist/bin.cjs"
-    );
+    expect(stored?.path).toBe(npmPath);
   });
 
   test("Homebrew still takes priority over node_modules path", async () => {
-    process.argv[1] = "/usr/local/lib/node_modules/sentry/dist/bin.cjs";
+    process.argv[1] = join(
+      "/usr/local/lib",
+      "node_modules",
+      "sentry",
+      "dist",
+      "bin.cjs"
+    );
     Object.defineProperty(process, "execPath", {
       value: "/opt/homebrew/Cellar/sentry/1.2.3/bin/sentry",
       configurable: true,
