@@ -1,0 +1,69 @@
+# Fix: Windows ENOENT when spawning npm/pnpm/yarn during upgrade
+
+**Issue**: [CLI-13T](https://sentry.sentry.io/issues/7407520017/) — `UpgradeError: npm failed: spawn npm ENOENT`
+
+## Root Cause
+
+On Windows, `npm`, `pnpm`, and `yarn` are `.cmd` batch files (not `.exe` binaries). Node.js's `child_process.spawn()` **without `shell: true`** cannot execute `.cmd` files — it returns `ENOENT`. This is a [well-known Windows/Node.js pitfall](https://nodejs.org/api/child_process.html#spawning-bat-and-cmd-files-on-windows).
+
+The affected user installed via `npm install -g sentry` under nvm (Laravel Herd's nvm on Windows). The upgrade command detected `npm` as the install method (from stored DB info) but failed when trying to run `spawn("npm", ["install", "-g", "sentry@..."])`.
+
+**Two functions are affected** in `src/lib/upgrade.ts`:
+1. `executeUpgradePackageManager()` (line 766) — **the reported crash**
+2. `runCommand()` (line 141) — used by `isInstalledWith()` for legacy detection; silently fails on Windows (caught by try/catch, returns false), so npm/pnpm/yarn can never be auto-detected on Windows
+
+## Fix
+
+Add `shell: process.platform === "win32"` to all `spawn()` calls in `src/lib/upgrade.ts`. This routes through `cmd.exe` on Windows, which correctly resolves `.cmd` files.
+
+**Safety**: No shell injection risk — package manager names are from a closed set, version strings are registry-validated before use. No behavior change on Linux/macOS (`false` is the default).
+
+## Changes
+
+### 1. `src/lib/upgrade.ts` — 3 spawn calls
+
+**`runCommand()`** (line 141) — add shell option + update JSDoc:
+```typescript
+const proc = spawn(command, args, {
+  stdio: ["ignore", "pipe", "pipe"],
+  shell: process.platform === "win32",  // NEW
+});
+```
+
+**`executeUpgradeHomebrew()`** (line 724) — consistency (brew is macOS-only, harmless):
+```typescript
+const proc = spawn("brew", ["upgrade", "getsentry/tools/sentry"], {
+  stdio: "inherit",
+  shell: process.platform === "win32",  // NEW
+});
+```
+
+**`executeUpgradePackageManager()`** (line 766) — the primary fix:
+```typescript
+const proc = spawn(pm, args, {
+  stdio: "inherit",
+  shell: process.platform === "win32",  // NEW
+});
+```
+
+### 2. `test/isolated/brew-upgrade.test.ts` — capture + assert spawn options
+
+Update 4 existing tests that capture spawn args to also capture `opts` and assert `shell` is set correctly. Add 1 new test for `runCommand`/detection path. The tests verify `shell` equals `process.platform === "win32"` (which is `false` on Linux CI — confirming no regression).
+
+Tests to update:
+- "invokes brew with correct arguments" (line 153)
+- "npm: uses correct install arguments" (line 177)
+- "yarn: uses 'global add' arguments" (line 210)
+- "detects npm when 'npm list -g sentry' output includes 'sentry@'" (line 291)
+
+New test: verify `runCommand` passes `shell` option for Windows `.cmd` compatibility.
+
+## Verification
+
+```bash
+bun test test/isolated/brew-upgrade.test.ts   # Spawn-based tests (primary)
+bun test test/lib/upgrade.test.ts             # Upgrade library tests
+bun test test/commands/cli/upgrade.test.ts    # Upgrade command tests
+bun run typecheck
+bun run lint
+```
