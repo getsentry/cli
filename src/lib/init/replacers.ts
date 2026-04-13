@@ -488,9 +488,7 @@ export function replace(
   replaceAll = false
 ): string {
   if (oldString === newString) {
-    throw new Error(
-      "No changes to apply: oldString and newString are identical."
-    );
+    return content;
   }
 
   let notFound = true;

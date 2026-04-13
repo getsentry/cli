@@ -19,10 +19,9 @@ describe("replace", () => {
     );
   });
 
-  test("throws when oldString equals newString", () => {
-    expect(() => replace("hello", "hello", "hello")).toThrow(
-      "No changes to apply"
-    );
+  test("returns content unchanged when oldString equals newString", () => {
+    const result = replace("hello world", "hello", "hello");
+    expect(result).toBe("hello world");
   });
 
   test("throws on ambiguous match (multiple occurrences)", () => {
