@@ -292,10 +292,10 @@ jobs:
         # Only needed on main (to fetch previous nightly from GHCR)
         if: github.ref == 'refs/heads/main'
         run: |
-          VERSION=1.2.3
-          EXPECTED_SHA256="b4efc97a91f471f323f193ea4b4d63d8ff443ca3aab514151a30751330852827"
+          VERSION=1.3.1
+          EXPECTED_SHA256="d52c4af76ce6a3ceb8579e51fb751a43ac051cca67f965f973a0b0e897a2bb86"
           TARBALL="oras_${VERSION}_linux_amd64.tar.gz"
-          curl -sfLo "$TARBALL" "https://github.com/oras-project/oras/releases/download/v${VERSION}/${TARBALL}"
+          curl --retry 3 --retry-delay 5 --retry-all-errors -sfLo "$TARBALL" "https://github.com/oras-project/oras/releases/download/v${VERSION}/${TARBALL}"
           echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
           tar -xz -C /usr/local/bin oras < "$TARBALL"
           rm "$TARBALL"
@@ -305,7 +305,7 @@ jobs:
           VERSION=0.1.19
           EXPECTED_SHA256="9f1ac75a133ee09883ad2096a86d57791513de5fc6f262dfadee8dcee94a71b9"
           TARBALL="zig-bsdiff-linux-x64.tar.gz"
-          curl -sfLo "$TARBALL" "https://github.com/blackboardsh/zig-bsdiff/releases/download/v${VERSION}/${TARBALL}"
+          curl --retry 3 --retry-delay 5 --retry-all-errors -sfLo "$TARBALL" "https://github.com/blackboardsh/zig-bsdiff/releases/download/v${VERSION}/${TARBALL}"
           echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
           tar -xz -C /usr/local/bin < "$TARBALL"
           rm "$TARBALL"
@@ -469,10 +469,10 @@ jobs:
 
       - name: Install ORAS CLI
         run: |
-          VERSION=1.2.3
-          EXPECTED_SHA256="b4efc97a91f471f323f193ea4b4d63d8ff443ca3aab514151a30751330852827"
+          VERSION=1.3.1
+          EXPECTED_SHA256="d52c4af76ce6a3ceb8579e51fb751a43ac051cca67f965f973a0b0e897a2bb86"
           TARBALL="oras_${VERSION}_linux_amd64.tar.gz"
-          curl -sfLo "$TARBALL" "https://github.com/oras-project/oras/releases/download/v${VERSION}/${TARBALL}"
+          curl --retry 3 --retry-delay 5 --retry-all-errors -sfLo "$TARBALL" "https://github.com/oras-project/oras/releases/download/v${VERSION}/${TARBALL}"
           echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
           tar -xz -C /usr/local/bin oras < "$TARBALL"
           rm "$TARBALL"
@@ -687,15 +687,16 @@ jobs:
   ci-status:
     name: CI Status
     if: always()
-    needs: [changes, check-generated, build-binary, build-npm, build-docs, test-e2e, generate-patches, publish-nightly]
+    needs: [changes, check-generated, build-binary, build-npm, build-docs, test-e2e, generate-patches]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
       - name: Check CI status
         run: |
           # Check for explicit failures or cancellations in all jobs
-          # generate-patches and publish-nightly are skipped on PRs — that's expected
-          results="${{ needs.check-generated.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.generate-patches.result }} ${{ needs.publish-nightly.result }}"
+          # generate-patches is skipped on PRs — that's expected
+          # publish-nightly is excluded: it's infrastructure (GHCR push), not code quality
+          results="${{ needs.check-generated.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.generate-patches.result }}"
           for result in $results; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               echo "::error::CI failed"
