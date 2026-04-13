@@ -20,6 +20,7 @@ import {
   resolveOrgAndProject,
   resolveOrgsForListing,
   toNumericId,
+  tryFuzzyProjectRecovery,
 } from "../../src/lib/resolve-target.js";
 import { mockFetch, useTestConfigDir } from "../helpers.js";
 
@@ -478,5 +479,181 @@ describe("fetchProjectId", () => {
 
     const result = await fetchProjectId("test-org", "test-project");
     expect(result).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// tryFuzzyProjectRecovery
+//
+// Tests the discriminated-result fuzzy recovery function. Mocks
+// globalThis.fetch to control which projects the API returns per org.
+// ============================================================================
+
+describe("tryFuzzyProjectRecovery", () => {
+  useTestConfigDir("test-fuzzy-recovery-");
+
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(async () => {
+    originalFetch = globalThis.fetch;
+    await setAuthToken("test-token");
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  /**
+   * Build a mock fetch that responds to list-projects endpoints.
+   *
+   * @param projectsByOrg - Map of org slug → list of project slugs
+   */
+  function mockListProjects(
+    projectsByOrg: Record<string, string[]>
+  ): typeof fetch {
+    return mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const url = req.url;
+      // Match /organizations/<org>/projects/
+      const orgMatch = url.match(/\/organizations\/([^/]+)\/projects/);
+      if (orgMatch) {
+        const org = orgMatch[1] as string;
+        const slugs = projectsByOrg[org];
+        if (slugs) {
+          const projects = slugs.map((slug, i) => ({
+            id: String(i + 1),
+            slug,
+            name: slug,
+          }));
+          return Response.json(projects);
+        }
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    });
+  }
+
+  test("returns 'match' when exactly one similar project exists", async () => {
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    globalThis.fetch = mockListProjects({
+      "test-org": ["app-frontend", "app-backend", "admin-panel"],
+    });
+
+    const result = await tryFuzzyProjectRecovery("app-front", [
+      { slug: "test-org" },
+    ]);
+    expect(result.kind).toBe("match");
+    if (result.kind === "match") {
+      expect(result.project).toBe("app-frontend");
+      expect(result.org).toBe("test-org");
+    }
+  });
+
+  test("returns 'suggestions' when multiple similar projects exist", async () => {
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    globalThis.fetch = mockListProjects({
+      "test-org": ["app-frontend", "app-backend", "app-worker"],
+    });
+
+    const result = await tryFuzzyProjectRecovery("app", [{ slug: "test-org" }]);
+    expect(result.kind).toBe("suggestions");
+    if (result.kind === "suggestions") {
+      expect(result.suggestions.length).toBeGreaterThan(0);
+      expect(result.suggestions[0]).toContain("test-org");
+    }
+  });
+
+  test("returns 'none' when no similar projects exist", async () => {
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    globalThis.fetch = mockListProjects({
+      "test-org": ["completely-different-name"],
+    });
+
+    const result = await tryFuzzyProjectRecovery("zzz-no-match-zzz", [
+      { slug: "test-org" },
+    ]);
+    expect(result.kind).toBe("none");
+  });
+
+  test("returns 'none' when all orgs fail to respond", async () => {
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify({ detail: "Error" }), { status: 500 })
+    );
+
+    const result = await tryFuzzyProjectRecovery("some-slug", [
+      { slug: "test-org" },
+    ]);
+    expect(result.kind).toBe("none");
+  });
+
+  test("returns 'none' with empty orgs list", async () => {
+    const result = await tryFuzzyProjectRecovery("anything", []);
+    expect(result.kind).toBe("none");
+  });
+
+  test("searches across multiple orgs", async () => {
+    setOrgRegion("org-alpha", DEFAULT_SENTRY_URL);
+    setOrgRegion("org-beta", DEFAULT_SENTRY_URL);
+    globalThis.fetch = mockListProjects({
+      "org-alpha": ["web-client", "api-server"],
+      "org-beta": ["mobile-app", "web-portal"],
+    });
+
+    const result = await tryFuzzyProjectRecovery("web-portal", [
+      { slug: "org-alpha" },
+      { slug: "org-beta" },
+    ]);
+    expect(result.kind).toBe("match");
+    if (result.kind === "match") {
+      expect(result.project).toBe("web-portal");
+      expect(result.org).toBe("org-beta");
+    }
+  });
+
+  test("deduplicates slugs across orgs for fuzzy matching", async () => {
+    setOrgRegion("org-one", DEFAULT_SENTRY_URL);
+    setOrgRegion("org-two", DEFAULT_SENTRY_URL);
+    // Same project slug in two orgs — should return suggestions, not crash
+    globalThis.fetch = mockListProjects({
+      "org-one": ["shared-service"],
+      "org-two": ["shared-service"],
+    });
+
+    const result = await tryFuzzyProjectRecovery("shared-servic", [
+      { slug: "org-one" },
+      { slug: "org-two" },
+    ]);
+    // Both orgs have the matching slug, so it returns suggestions (not a
+    // single match) since there are 2 org-qualified entries
+    expect(result.kind).toBe("suggestions");
+  });
+
+  test("gracefully handles partial org failures", async () => {
+    setOrgRegion("good-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("bad-org", DEFAULT_SENTRY_URL);
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const url = req.url;
+      if (url.includes("good-org")) {
+        return Response.json([
+          { id: "1", slug: "target-project", name: "target-project" },
+        ]);
+      }
+      // bad-org returns error
+      return new Response(JSON.stringify({ detail: "Error" }), { status: 500 });
+    });
+
+    const result = await tryFuzzyProjectRecovery("target-project", [
+      { slug: "good-org" },
+      { slug: "bad-org" },
+    ]);
+    expect(result.kind).toBe("match");
+    if (result.kind === "match") {
+      expect(result.project).toBe("target-project");
+      expect(result.org).toBe("good-org");
+    }
   });
 });
