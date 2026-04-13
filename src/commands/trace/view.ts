@@ -567,7 +567,9 @@ export const viewCommand = buildCommand({
     // Format span tree (unless disabled with --spans 0 or --spans no)
     const spanTreeLines =
       flags.spans > 0
-        ? formatSimpleSpanTree(traceId, spans, flags.spans)
+        ? formatSimpleSpanTree(traceId, spans, flags.spans, {
+            projectFiltered: !!projectFilter,
+          })
         : undefined;
 
     // Fetch per-span details when --full is set or --json auto-enables it
