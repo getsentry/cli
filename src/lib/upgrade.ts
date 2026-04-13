@@ -68,6 +68,9 @@ const NPM_REGISTRY_URL = "https://registry.npmjs.org/sentry";
 /** Regex to strip 'v' prefix from version strings */
 export const VERSION_PREFIX_REGEX = /^v/;
 
+/** Splits a file path on both forward slashes and backslashes (Unix + Windows) */
+const PATH_SEPARATOR_RE = /[\\/]/;
+
 // Curl Binary Helpers
 
 /**
@@ -201,6 +204,44 @@ function isHomebrewInstall(): boolean {
 }
 
 /**
+ * Detect package manager from the script path in process.argv[1].
+ *
+ * When the CLI is installed via npm/pnpm/yarn/bun as a global package,
+ * Node.js sets process.argv[1] to the script entry point inside
+ * node_modules (e.g., ".../node_modules/sentry/dist/bin.cjs").
+ * This is a fast, authoritative signal that avoids the slow and
+ * fragile subprocess-based detection (which fails on Windows where
+ * package manager executables are .cmd files not found by spawn()).
+ *
+ * pnpm is distinguished by its unique ".pnpm" directory inside node_modules.
+ * All other node_modules layouts (npm, yarn, bun) return "npm" — the
+ * upgrade command uses the same `npm install -g` path for all of them.
+ *
+ * @returns Package manager name, or null if not running from node_modules
+ */
+export function detectPackageManagerFromPath(): PackageManager | null {
+  const scriptPath = process.argv[1];
+  if (!scriptPath) {
+    return null;
+  }
+
+  // Split on both / and \ for cross-platform support (Unix + Windows)
+  const segments = scriptPath.split(PATH_SEPARATOR_RE);
+  if (!segments.includes("node_modules")) {
+    return null;
+  }
+
+  // pnpm uses a distinctive .pnpm directory inside node_modules
+  if (segments.includes(".pnpm")) {
+    return "pnpm";
+  }
+
+  // Default to npm for other node_modules installations
+  // (npm, yarn classic, and bun global all use the same flat layout)
+  return "npm";
+}
+
+/**
  * Legacy detection for existing installs that don't have stored install info.
  * Checks known curl install paths and package managers.
  *
@@ -230,9 +271,11 @@ async function detectLegacyInstallationMethod(): Promise<InstallationMethod> {
  * Detect how the CLI was installed.
  *
  * Priority:
- * 1. Check stored install info in DB (fast path)
- * 2. Fall back to legacy detection for existing installs
- * 3. Auto-save detected method for future runs
+ * 1. Homebrew — cheap realpath check, overrides stale stored info
+ * 2. node_modules path — cheap argv check, overrides stale stored info
+ * 3. Stored install info in DB (fast path)
+ * 4. Legacy detection via subprocess calls (slow fallback)
+ * 5. Auto-save detected method for future runs
  *
  * @returns Detected installation method, or "unknown" if unable to determine
  */
@@ -244,16 +287,30 @@ export async function detectInstallationMethod(): Promise<InstallationMethod> {
     return "brew";
   }
 
-  // 1. Check stored info (fast path for non-Homebrew installs)
+  // Check if running from a node_modules directory — fast and authoritative,
+  // like the Homebrew check. Overrides stale stored info (e.g. user previously
+  // had curl recorded but switched to npm). Also avoids the slow subprocess
+  // fallback which fails on Windows where pm binaries are .cmd files.
+  const pmFromPath = detectPackageManagerFromPath();
+  if (pmFromPath) {
+    setInstallInfo({
+      method: pmFromPath,
+      path: process.argv[1] ?? "",
+      version: CLI_VERSION,
+    });
+    return pmFromPath;
+  }
+
+  // Check stored info (fast path for non-Homebrew, non-npm installs)
   const stored = getInstallInfo();
   if (stored?.method) {
     return stored.method;
   }
 
-  // 2. Legacy detection for existing installs (pre-setup command)
+  // Legacy detection for existing installs (pre-setup command)
   const legacyMethod = await detectLegacyInstallationMethod();
 
-  // 3. Auto-save detected method for future runs
+  // Auto-save detected method for future runs
   if (legacyMethod !== "unknown") {
     setInstallInfo({
       method: legacyMethod,
