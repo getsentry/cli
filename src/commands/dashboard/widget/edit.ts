@@ -204,7 +204,7 @@ export const editCommand = buildCommand({
       "  sentry dashboard widget edit 12345 --title 'Error Rate' --display bar\n" +
       "  sentry dashboard widget edit 'My Dashboard' --index 0 --query p95:span.duration\n" +
       "  sentry dashboard widget edit 12345 --title 'Old Name' --new-title 'New Name'\n" +
-      "  sentry dashboard widget edit 12345 --index 0 --x 0 --y 0 --width 6 --height 2",
+      "  sentry dashboard widget edit 12345 --index 0 --col 0 --row 0 --width 6 --height 2",
   },
   output: {
     human: formatWidgetEdited,
@@ -354,7 +354,7 @@ export const editCommand = buildCommand({
     const updateBody = prepareDashboardForUpdate(current);
     const existing = updateBody.widgets[widgetIndex] as DashboardWidget;
 
-    // Validate individual layout flag ranges early (catches --x -1, --width 7, etc.)
+    // Validate individual layout flag ranges early (catches --col -1, --width 7, etc.)
     validateWidgetLayout(flags, existing.layout);
 
     const replacement = buildReplacement(flags, existing);

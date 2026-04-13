@@ -18,6 +18,9 @@ import { getDefaultSdkConfig } from "../lib/sentry-client.js";
 
 const log = logger.withTag("api");
 
+/** Strips line breaks and surrounding indentation from copy-pasted endpoints. */
+const LINE_BREAK_PATTERN = /[ \t]*[\r\n]+[ \t]*/g;
+
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
 
 type ApiFlags = {
@@ -90,7 +93,7 @@ export function normalizeEndpoint(endpoint: string): string {
   // producing newlines and indentation (CLI-FR, 215 events).
   // Other control characters (NUL, etc.) are left for validateEndpoint
   // to reject — those indicate corruption, not copy-paste.
-  const cleaned = endpoint.replace(/[ \t]*[\r\n]+[ \t]*/g, "").trim();
+  const cleaned = endpoint.replace(LINE_BREAK_PATTERN, "").trim();
   if (cleaned !== endpoint) {
     log.warn("Stripped line breaks from endpoint (copy-paste artifact)");
   }
@@ -1208,7 +1211,7 @@ export const apiCommand = buildCommand({
     // leading slash removed) since normalizeEndpoint also strips copy-paste
     // artifacts before the api/0/ check. Without this, line-break removal
     // alone would shrink the length and trigger a false api/0/ warning.
-    const cleaned = endpoint.replace(/[ \t]*[\r\n]+[ \t]*/g, "").trim();
+    const cleaned = endpoint.replace(LINE_BREAK_PATTERN, "").trim();
     const baseLen = cleaned.startsWith("/")
       ? cleaned.length - 1
       : cleaned.length;

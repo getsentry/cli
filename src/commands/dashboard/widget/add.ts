@@ -243,7 +243,7 @@ export const addCommand = buildCommand({
       flags.layout === "dense" ? "dense" : "sequential";
 
     // Validate individual layout flag ranges before any network calls
-    // (catches --x -1, --width 7, etc. early without needing the dashboard)
+    // (catches --col -1, --width 7, etc. early without needing the dashboard)
     validateWidgetLayout(flags);
 
     // GET current dashboard → append widget with layout → PUT
@@ -276,7 +276,7 @@ export const addCommand = buildCommand({
         },
       };
       // Re-validate the merged layout to catch cross-dimensional overflow
-      // (e.g., --x 5 on a table widget with auto-width 6 → 5+6=11 > 6)
+      // (e.g., --col 5 on a table widget with auto-width 6 → 5+6=11 > 6)
       const finalLayout = newWidget.layout ?? baseLayout;
       validateWidgetLayout(
         { col: finalLayout.x, width: finalLayout.w },
