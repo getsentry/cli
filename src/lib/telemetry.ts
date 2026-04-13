@@ -200,10 +200,11 @@ export async function withTelemetry<T>(
         try {
           return await callback(span);
         } catch (e) {
-          // Record 4xx API errors as span attributes instead of exceptions.
-          // These are user errors (wrong ID, no access) not CLI bugs, but
-          // recording on the span lets us detect volume spikes in Discover.
-          if (isClientApiError(e)) {
+          // Record user API errors (401–499) as span attributes instead of
+          // exceptions. These are user errors (wrong ID, no access), not CLI
+          // bugs. Recording on the span lets us detect volume spikes in Discover.
+          // 400 Bad Request is NOT filtered here — it's a CLI bug.
+          if (isUserApiError(e)) {
             recordApiErrorOnSpan(span, e as ApiError);
           }
           throw e;
@@ -216,13 +217,14 @@ export async function withTelemetry<T>(
     const isExpectedAuthState =
       e instanceof AuthError &&
       (e.reason === "not_authenticated" || e.reason === "expired");
-    // 4xx API errors are user errors (wrong ID, no access), not CLI bugs.
-    // They're recorded as span attributes above for volume-spike detection.
+    // User API errors (401–499) are user errors (wrong ID, no access), not
+    // CLI bugs. They're recorded as span attributes above for volume-spike
+    // detection. 400 Bad Request is NOT filtered — it indicates a CLI bug.
     // OutputError is an intentional non-zero exit (e.g., `sentry api` got a
     // 4xx/5xx response) — not a CLI bug. Error details are recorded as span
     // attributes by the command itself.
     if (
-      !(isExpectedAuthState || isClientApiError(e) || e instanceof OutputError)
+      !(isExpectedAuthState || isUserApiError(e) || e instanceof OutputError)
     ) {
       Sentry.captureException(e);
       markSessionCrashed();
@@ -304,16 +306,19 @@ export function isEpipeError(event: Sentry.ErrorEvent): boolean {
 }
 
 /**
- * Check if an error is a client-side (4xx) API error.
+ * Check if an error is a user-caused (401–499) API error.
  *
- * 4xx errors are user errors — wrong issue IDs, no access, invalid input —
- * not CLI bugs. These should be recorded as span attributes for volume-spike
- * detection in Discover, but should NOT be captured as Sentry exceptions.
+ * 401–499 errors are user errors — wrong issue IDs, no access, rate limited —
+ * not CLI bugs. 400 Bad Request is **excluded** because it indicates the CLI
+ * constructed a malformed API request, which is a code defect.
+ *
+ * These should be recorded as span attributes for volume-spike detection in
+ * Discover, but should NOT be captured as Sentry exceptions.
  *
  * @internal Exported for testing
  */
-export function isClientApiError(error: unknown): boolean {
-  return error instanceof ApiError && error.status >= 400 && error.status < 500;
+export function isUserApiError(error: unknown): boolean {
+  return error instanceof ApiError && error.status > 400 && error.status < 500;
 }
 
 /**

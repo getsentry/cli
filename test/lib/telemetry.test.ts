@@ -22,7 +22,7 @@ import {
   createTracedDatabase,
   getSentryTracePropagationTargets,
   initSentry,
-  isClientApiError,
+  isUserApiError,
   recordApiErrorOnSpan,
   resetReadonlyWarning,
   setArgsContext,
@@ -235,51 +235,55 @@ describe("withTelemetry", () => {
   });
 });
 
-describe("isClientApiError", () => {
-  test("returns true for 400 Bad Request", () => {
-    expect(isClientApiError(new ApiError("Bad request", 400))).toBe(true);
+describe("isUserApiError", () => {
+  test("returns false for 400 Bad Request (CLI bug, not user error)", () => {
+    expect(isUserApiError(new ApiError("Bad request", 400))).toBe(false);
+  });
+
+  test("returns true for 401 Unauthorized", () => {
+    expect(isUserApiError(new ApiError("Unauthorized", 401))).toBe(true);
   });
 
   test("returns true for 403 Forbidden", () => {
-    expect(isClientApiError(new ApiError("Forbidden", 403, "No access"))).toBe(
+    expect(isUserApiError(new ApiError("Forbidden", 403, "No access"))).toBe(
       true
     );
   });
 
   test("returns true for 404 Not Found", () => {
     expect(
-      isClientApiError(new ApiError("Not found", 404, "Issue not found"))
+      isUserApiError(new ApiError("Not found", 404, "Issue not found"))
     ).toBe(true);
   });
 
   test("returns true for 429 Too Many Requests", () => {
-    expect(isClientApiError(new ApiError("Rate limited", 429))).toBe(true);
+    expect(isUserApiError(new ApiError("Rate limited", 429))).toBe(true);
   });
 
   test("returns false for 500 Internal Server Error", () => {
-    expect(isClientApiError(new ApiError("Server error", 500))).toBe(false);
+    expect(isUserApiError(new ApiError("Server error", 500))).toBe(false);
   });
 
   test("returns false for 502 Bad Gateway", () => {
-    expect(isClientApiError(new ApiError("Bad gateway", 502))).toBe(false);
+    expect(isUserApiError(new ApiError("Bad gateway", 502))).toBe(false);
   });
 
   test("returns false for non-ApiError", () => {
-    expect(isClientApiError(new Error("generic error"))).toBe(false);
+    expect(isUserApiError(new Error("generic error"))).toBe(false);
   });
 
   test("returns false for AuthError", () => {
-    expect(isClientApiError(new AuthError("not_authenticated"))).toBe(false);
+    expect(isUserApiError(new AuthError("not_authenticated"))).toBe(false);
   });
 
   test("returns false for null/undefined", () => {
-    expect(isClientApiError(null)).toBe(false);
-    expect(isClientApiError(undefined)).toBe(false);
+    expect(isUserApiError(null)).toBe(false);
+    expect(isUserApiError(undefined)).toBe(false);
   });
 
   test("returns false for non-Error objects", () => {
-    expect(isClientApiError({ status: 404 })).toBe(false);
-    expect(isClientApiError("404")).toBe(false);
+    expect(isUserApiError({ status: 404 })).toBe(false);
+    expect(isUserApiError("404")).toBe(false);
   });
 });
 
