@@ -149,10 +149,12 @@ function generateProjectStructure(allRoutes: RouteInfo[]): string {
   }
 
   // Combine standalone commands with help.ts (which is in SKIP_ROUTES
-  // for doc generation but still exists in the filesystem)
+  // for doc generation but still exists in the filesystem).
+  // Add help before sorting so it lands in correct alphabetical position.
   const allStandaloneEntries: { name: string; brief: string }[] =
     standalones.map((r) => ({ name: r.name, brief: r.commands[0].brief }));
   allStandaloneEntries.push({ name: "help", brief: "Help command" });
+  allStandaloneEntries.sort((a, b) => a.name.localeCompare(b.name));
 
   // Render standalone command files
   for (let i = 0; i < allStandaloneEntries.length; i += 1) {

@@ -65,9 +65,9 @@ cli/
 │   │   ├── trace/       # list, view, logs
 │   │   ├── trial/       # list, start
 │   │   ├── api.ts       # Make an authenticated API request
+│   │   ├── help.ts      # Help command
 │   │   ├── init.ts      # Initialize Sentry in your project (experimental)
-│   │   ├── schema.ts    # Browse the Sentry API schema
-│   │   └── help.ts      # Help command
+│   │   └── schema.ts    # Browse the Sentry API schema
 │   ├── lib/            # Shared utilities
 │   └── types/          # TypeScript types and Zod schemas
 ├── test/               # Test files (mirrors src/ structure)
