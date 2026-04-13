@@ -1,0 +1,295 @@
+# Plan: Consistent project filtering across trace commands (#737)
+
+## Problem
+
+When a user provides `org/project/trace-id`, only `span list` actually filters by project. Other commands silently discard the project segment — inconsistent UX.
+
+## Approach: API-level filtering everywhere
+
+Every command filters server-side. No client-side tree walking.
+
+| Command | Mechanism | Notes |
+|---------|-----------|-------|
+| `span list` | ✅ Already works — `project:{slug}` in query | No changes to filtering |
+| `trace view` | Pass numeric project ID to API instead of `-1` | Need `getProject()` call for slug→ID |
+| `trace logs` | `project:{slug}` in query param | Same pattern as span list |
+| `log list` (trace mode) | `project:{slug}` in query param | Same pattern as span list |
+
+For `trace view` orphaned spans (parent is in another project): note it, no supplemental fetch. If the user wants the full tree, the hint gives them the exact command.
+
+Multi-project: `--query 'project:[cli,backend]'` works on any command with `--query` via Sentry's in-list search syntax. Document in flag briefs and docs.
+
+## Hints: always copy-pasteable with real values
+
+Hints must interpolate actual org, project, and trace ID so the user can copy-paste directly. Examples of what they'll look like at runtime:
+
+**When filtered** (`trace view my-org/cli-server/abc123...`):
+```
+Filtered to project 'cli-server'. Full trace: sentry trace view my-org/abc123def456abc123def456abc12345
+```
+
+**When unfiltered and multi-project** (`trace view abc123...`):
+```
+This trace spans 4 projects (cli, cli-server, sentry, release-registry). Filter: sentry trace view my-org/cli-server/abc123def456abc123def456abc12345
+```
+
+**Trace logs filtered** (`trace logs my-org/cli-server/abc123...`):
+```
+Filtered to project 'cli-server'. Full trace logs: sentry trace logs my-org/abc123def456abc123def456abc12345
+Multi-project filter: sentry trace logs abc123def456abc123def456abc12345 -q 'project:[cli-server,api]'
+```
+
+**Span list multi-project query hint** (on `span list <trace-id>` with no project):
+```
+Filter by project: sentry span list my-org/cli-server/abc123def456abc123def456abc12345
+```
+
+## Implementation
+
+### 1. `getDetailedTrace` — Accept optional project ID
+
+**File: `src/lib/api/traces.ts`**
+
+Add optional `projectId` parameter:
+
+```typescript
+export async function getDetailedTrace(
+  orgSlug: string,
+  traceId: string,
+  timestamp: number,
+  additionalAttributes?: string[],
+  projectId?: number,                    // NEW
+): Promise<TraceSpan[]> {
+  // ...
+  params: {
+    timestamp,
+    limit: 10_000,
+    project: projectId ?? -1,            // CHANGED from hardcoded -1
+    additional_attributes: additionalAttributes,
+  },
+```
+
+### 2. `trace view` — Use resolved project
+
+**File: `src/commands/trace/view.ts`**
+
+Currently discards `resolved.project`. Change to:
+
+```typescript
+const resolved = await resolveTraceOrgProject(parsed, cwd, USAGE_HINT);
+traceId = resolved.traceId;
+org = resolved.org;
+
+// Resolve numeric project ID when user explicitly provided a project
+let projectFilter: string | undefined;
+let numericProjectId: number | undefined;
+if (parsed.type === "explicit") {
+  projectFilter = resolved.project;
+  const projectData = resolved.projectData ?? await getProject(org, resolved.project);
+  numericProjectId = Number(projectData.id);
+}
+
+const spans = await getDetailedTrace(org, traceId, timestamp, additionalAttributes, numericProjectId);
+```
+
+Build hint with real values:
+```typescript
+const summary = computeTraceSummary(traceId, spans);
+
+let hint: string;
+if (projectFilter) {
+  hint = `Filtered to project '${projectFilter}'. Full trace: sentry trace view ${org}/${traceId}`;
+} else if (summary.projects.length > 1) {
+  const projectList = summary.projects.join(", ");
+  const firstProject = summary.projects[0];
+  hint = `This trace spans ${summary.projects.length} projects (${projectList}). Filter: sentry trace view ${org}/${firstProject}/${traceId}`;
+} else {
+  hint = `Tip: Open in browser with 'sentry trace view --web ${traceId}'`;
+}
+```
+
+### 3. `formatSimpleSpanTree` — Orphan parent indicator
+
+**File: `src/lib/formatters/human.ts`**
+
+In `formatSimpleSpanTree`, after the "Trace —" header, detect orphaned root spans (have `parent_span_id` but no sibling/child in the result references that parent). Add a muted indicator:
+
+```typescript
+// Check if any root span has a parent outside this result set
+const hasOrphanedParent = displaySpans.some(span => span.parent_span_id);
+if (hasOrphanedParent) {
+  lines.push(plainSafeMuted("⤴ parent span in another project"));
+}
+```
+
+### 4. `trace logs` — Pass project in query
+
+**File: `src/commands/trace/logs.ts`**
+
+Capture explicit project from parsed target, prepend `project:{slug}` to query:
+
+```typescript
+const parsed = parseTraceTarget(args, USAGE_HINT);
+const { traceId, org } = await resolveTraceOrg(parsed, cwd, USAGE_HINT);
+
+// Capture explicit project for API-level filtering
+const projectFilter = parsed.type === "explicit" ? parsed.project : undefined;
+
+// Build query with project filter
+let query = flags.query;
+if (projectFilter) {
+  const pf = `project:${projectFilter}`;
+  query = query ? `${pf} ${query}` : pf;
+}
+
+const logs = await listTraceLogs(org, traceId, {
+  ...timeRangeToApiParams(timeRange),
+  limit: flags.limit,
+  query,
+  sort: flags.sort,
+});
+```
+
+Update usage hint: `"sentry trace logs [<org>/[<project>/]]<trace-id>"`
+
+Update `fullDescription` to document project filtering.
+
+Build hint with real values:
+```typescript
+if (projectFilter) {
+  hint = `Filtered to project '${projectFilter}'. Full trace logs: sentry trace logs ${org}/${traceId}`;
+} else {
+  hint = `Filter by project: sentry trace logs ${org}/<project>/${traceId}`;
+}
+```
+
+Wait — the "else" hint should use a real project name if we can detect one cheaply. But for `trace logs`, we don't know the projects unless we inspect the log entries. We can:
+```typescript
+// After fetching logs, extract unique project IDs from results for the hint
+if (!projectFilter && logs.length > 0) {
+  // TraceLog has "project.id" (numeric) — not ideal for hints
+  // Just suggest the syntax:
+  hint = `Filter by project: sentry trace logs ${org}/<project>/${traceId}`;
+}
+```
+
+For `trace logs`, `TraceLog` only has `project.id` (numeric), not `project_slug`. So the multi-project hint can't list project names cheaply. That's fine — the generic syntax hint is still helpful. For `trace view` and `span list`, we have `project_slug` on spans so we can list real names.
+
+### 5. `log list` (trace mode) — Same as trace logs
+
+**File: `src/commands/log/list.ts`**
+
+Apply identical pattern in the trace-mode branch: capture `parsed.project` when `parsed.type === "explicit"`, prepend `project:{slug}` to query.
+
+### 6. Conditional Project column in span table
+
+**File: `src/lib/formatters/trace.ts`**
+
+When `formatSpanTable` receives spans from multiple `project_slug` values, auto-prepend a "Project" column:
+
+```typescript
+const PROJECT_COLUMN: Column<FlatSpan> = {
+  header: "Project",
+  value: (s) => escapeMarkdownCell(s.project_slug || "—"),
+  minWidth: 8,
+};
+
+export function formatSpanTable(spans: FlatSpan[], extraColumns?: string[]): string {
+  const projects = new Set(spans.map(s => s.project_slug).filter(Boolean));
+  const base = projects.size > 1 ? [PROJECT_COLUMN, ...SPAN_TABLE_COLUMNS] : SPAN_TABLE_COLUMNS;
+  const columns = extraColumns?.length ? [...base, ...buildExtraColumns(extraColumns)] : base;
+  return formatTable(spans, columns, { truncate: true });
+}
+```
+
+### 7. `span list` hints — Add project filter suggestion
+
+**File: `src/commands/span/list.ts`**
+
+In `handleTraceMode`, after fetching spans, add a project filter hint when results span multiple projects:
+
+```typescript
+const projects = new Set(flatSpans.map(s => s.project_slug).filter(Boolean));
+if (projects.size > 1 && !flags.query?.includes("project:")) {
+  const firstProject = [...projects][0];
+  const filterHint = `Filter by project: sentry span list ${org}/${firstProject}/${traceId}`;
+  hint = hint ? `${hint}\n${filterHint}` : filterHint;
+}
+```
+
+### 8. Documentation & flag briefs
+
+**`--query` flag briefs** — Update on `span list`, `trace logs`, `log list`:
+```typescript
+// span list (already mentions project:backend, update to show multi-project)
+brief: 'Filter spans (e.g., "op:db", "project:backend", "project:[cli,api]")'
+
+// trace logs
+brief: 'Filter query (e.g., "level:error", "project:backend", "project:[cli,api]")'
+
+// log list
+brief: 'Filter query (e.g., "level:error", "project:backend", "project:[cli,api]")'
+```
+
+**`docs/src/fragments/commands/span.md`** — Add:
+```markdown
+### Filter by project in a trace
+
+```bash
+# Show only spans from one project
+sentry span list my-org/cli-server/abc123def456abc123def456abc12345
+
+# Or via --query
+sentry span list abc123def456abc123def456abc12345 -q "project:cli-server"
+
+# Multiple projects
+sentry span list abc123def456abc123def456abc12345 -q "project:[cli-server,api]"
+```
+
+**`docs/src/fragments/commands/trace.md`** — Add:
+```markdown
+### Cross-project traces
+
+```bash
+# Filter trace view to one project
+sentry trace view my-org/cli-server/abc123def456abc123def456abc12345
+
+# Full trace (all projects, default)
+sentry trace view my-org/abc123def456abc123def456abc12345
+
+# Filter trace logs by project
+sentry trace logs my-org/cli-server/abc123def456abc123def456abc12345
+
+# Multiple projects via --query
+sentry trace logs abc123def456abc123def456abc12345 -q "project:[cli-server,api]"
+```
+
+## Files to modify
+
+| # | File | Change |
+|---|------|--------|
+| 1 | `src/lib/api/traces.ts` | Add optional `projectId` param to `getDetailedTrace` |
+| 2 | `src/commands/trace/view.ts` | Resolve project → numeric ID, pass to API, real-value hints |
+| 3 | `src/commands/trace/logs.ts` | Prepend `project:{slug}` to query, update usage/description, real-value hints |
+| 4 | `src/commands/log/list.ts` | Same pattern in trace mode |
+| 5 | `src/lib/formatters/human.ts` | Orphan parent indicator in `formatSimpleSpanTree` |
+| 6 | `src/lib/formatters/trace.ts` | Conditional Project column in `formatSpanTable` |
+| 7 | `src/commands/span/list.ts` | Multi-project filter hint with real project names |
+| 8 | `docs/src/fragments/commands/span.md` | Cross-project filtering examples |
+| 9 | `docs/src/fragments/commands/trace.md` | Cross-project filtering examples |
+
+## Tests
+
+- `getDetailedTrace` with `projectId` — verify `project` param is passed correctly
+- `formatSimpleSpanTree` orphan indicator — verify "⤴ parent span in another project" line
+- `formatSpanTable` — Project column appears for multi-project, absent for single
+- `trace logs` — verify `project:{slug}` prepended to query when explicit project
+- Existing trace/span test suites — no regressions
+
+```bash
+bun run typecheck
+bun run lint
+bun test test/lib/formatters/
+bun test test/lib/api/
+bun run test:unit
+```
