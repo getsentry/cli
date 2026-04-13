@@ -705,7 +705,9 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
   options: {
     flags: BaseListFlags;
     orgAllFallback?: (orgSlug: string) => Promise<ListResult<TWithOrg>>;
-  }
+  },
+  /** Guard against infinite recursion from fuzzy recovery. */
+  _isRecoveryAttempt = false
 ): Promise<ListResult<TWithOrg>> {
   const { flags, orgAllFallback } = options;
   const { projects: matches, orgs } = await withProgress(
@@ -742,14 +744,17 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
     }
 
     // Attempt fuzzy auto-recovery — if a single similar project is found,
-    // re-run the handler with the corrected slug.
-    const correctedSlug = await tryFuzzyRecoveryForList(
-      projectSlug,
-      orgs,
-      config.commandPrefix
-    );
-    if (correctedSlug) {
-      return handleProjectSearch(config, correctedSlug, options);
+    // re-run the handler with the corrected slug. Skip on retry to prevent
+    // infinite recursion if the corrected slug also fails to match exactly.
+    if (!_isRecoveryAttempt) {
+      const correctedSlug = await tryFuzzyRecoveryForList(
+        projectSlug,
+        orgs,
+        config.commandPrefix
+      );
+      if (correctedSlug) {
+        return handleProjectSearch(config, correctedSlug, options, true);
+      }
     }
 
     // Use ResolutionError — the user provided a project slug but it wasn't found.
