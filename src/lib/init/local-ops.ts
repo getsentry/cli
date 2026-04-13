@@ -80,15 +80,6 @@ function prettyPrintJson(content: string, indent: JsonIndent): string {
   }
 }
 
-/** Strip whitespace/formatting from JSON. Returns input unchanged if not valid JSON. */
-function minifyJson(content: string): string {
-  try {
-    return JSON.stringify(JSON.parse(content));
-  } catch {
-    return content;
-  }
-}
-
 /**
  * Patterns that indicate shell injection. Commands run via `spawn` (no shell),
  * so these have no runtime effect — they are defense-in-depth against command
@@ -400,10 +391,7 @@ export async function preReadCommonFiles(
       if (stat.size > MAX_FILE_BYTES) {
         continue;
       }
-      let content = await fs.promises.readFile(absPath, "utf-8");
-      if (filePath.endsWith(".json")) {
-        content = minifyJson(content);
-      }
+      const content = await fs.promises.readFile(absPath, "utf-8");
       if (totalBytes + content.length <= MAX_PREREAD_TOTAL_BYTES) {
         cache[filePath] = content;
         totalBytes += content.length;
@@ -547,10 +535,6 @@ async function readSingleFile(
       }
     } else {
       content = await fs.promises.readFile(absPath, "utf-8");
-    }
-
-    if (filePath.endsWith(".json")) {
-      content = minifyJson(content);
     }
 
     return content;
