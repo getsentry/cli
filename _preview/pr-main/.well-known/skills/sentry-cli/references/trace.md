@@ -56,6 +56,7 @@ View details of a specific trace
 
 **Flags:**
 - `-w, --web - Open in browser`
+- `--full - Fetch full span attributes (auto-enabled with --json)`
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
