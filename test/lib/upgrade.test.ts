@@ -24,6 +24,7 @@ import {
 import { UpgradeError } from "../../src/lib/errors.js";
 import {
   detectInstallationMethod,
+  detectPackageManagerFromPath,
   executeUpgrade,
   fetchLatestFromGitHub,
   fetchLatestFromNpm,
@@ -708,6 +709,147 @@ describe("Homebrew detection (detectInstallationMethod)", () => {
     // non-Cellar path because that triggers the slow package-manager fallthrough.
     expect("/home/user/.sentry/bin/sentry".includes("/Cellar/")).toBe(false);
     expect("/opt/homebrew/bin/sentry".includes("/Cellar/")).toBe(false);
+  });
+});
+
+describe("detectPackageManagerFromPath", () => {
+  let originalArgv: string[];
+
+  beforeEach(() => {
+    originalArgv = [...process.argv];
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+  });
+
+  test("detects npm from node_modules path", () => {
+    process.argv[1] = join(
+      "/usr/local/lib",
+      "node_modules",
+      "sentry",
+      "dist",
+      "bin.cjs"
+    );
+    expect(detectPackageManagerFromPath()).toBe("npm");
+  });
+
+  test("detects pnpm from .pnpm directory layout", () => {
+    process.argv[1] = join(
+      "/usr/local/lib",
+      "node_modules",
+      ".pnpm",
+      "sentry@0.27.0",
+      "node_modules",
+      "sentry",
+      "dist",
+      "bin.cjs"
+    );
+    expect(detectPackageManagerFromPath()).toBe("pnpm");
+  });
+
+  test("detects bun from .bun global install path", () => {
+    process.argv[1] = join(
+      homedir(),
+      ".bun",
+      "install",
+      "global",
+      "node_modules",
+      "sentry",
+      "dist",
+      "bin.cjs"
+    );
+    expect(detectPackageManagerFromPath()).toBe("bun");
+  });
+
+  test("detects npm from NVM-managed path with node_modules", () => {
+    // Mimics the CLI-Y1 bug report layout (NVM + Laravel Herd)
+    process.argv[1] = join(
+      homedir(),
+      "config",
+      "herd",
+      "bin",
+      "nvm",
+      "v24.2.0",
+      "node_modules",
+      "sentry",
+      "dist",
+      "index.cjs"
+    );
+    expect(detectPackageManagerFromPath()).toBe("npm");
+  });
+
+  test("returns null when argv[1] is undefined", () => {
+    process.argv = [process.argv[0]];
+    expect(detectPackageManagerFromPath()).toBeNull();
+  });
+
+  test("returns null for Bun compiled binary (argv[1] is CLI arg)", () => {
+    process.argv[1] = "issue";
+    expect(detectPackageManagerFromPath()).toBeNull();
+  });
+
+  test("returns null for dev mode source path", () => {
+    process.argv[1] = join("/home", "user", "cli", "src", "bin.ts");
+    expect(detectPackageManagerFromPath()).toBeNull();
+  });
+});
+
+describe("detectInstallationMethod — node_modules path fallback", () => {
+  useTestConfigDir("test-detect-path-");
+
+  let originalArgv: string[];
+  let originalExecPath: string;
+
+  beforeEach(() => {
+    originalArgv = [...process.argv];
+    originalExecPath = process.execPath;
+    // Typical Node.js execPath — not Homebrew, not curl
+    Object.defineProperty(process, "execPath", {
+      value: "/usr/bin/node",
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    Object.defineProperty(process, "execPath", {
+      value: originalExecPath,
+      configurable: true,
+    });
+    clearInstallInfo();
+  });
+
+  test("stored info takes priority over path-based detection", async () => {
+    // If DB says "yarn", respect it even if path says node_modules
+    setInstallInfo({ method: "yarn", path: "/old/path", version: "0.0.1" });
+    process.argv[1] = join(
+      "/usr/local/lib",
+      "node_modules",
+      "sentry",
+      "dist",
+      "bin.cjs"
+    );
+
+    const method = await detectInstallationMethod();
+    expect(method).toBe("yarn");
+  });
+
+  test("Homebrew still takes priority over node_modules path", async () => {
+    process.argv[1] = join(
+      "/usr/local/lib",
+      "node_modules",
+      "sentry",
+      "dist",
+      "bin.cjs"
+    );
+    Object.defineProperty(process, "execPath", {
+      value: "/opt/homebrew/Cellar/sentry/1.2.3/bin/sentry",
+      configurable: true,
+    });
+
+    const method = await detectInstallationMethod();
+    expect(method).toBe("brew");
   });
 });
 
