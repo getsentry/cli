@@ -49,14 +49,30 @@ When the CLI needs to determine your org and project, it checks these sources in
 1. **Explicit CLI arguments** — `sentry issue list my-org/my-project`
 2. **Environment variables** — `SENTRY_ORG` / `SENTRY_PROJECT`
 3. **`.sentryclirc` config file** — walked up from CWD, merged with `~/.sentryclirc`
-4. **DSN auto-detection** — scans source code and `.env` files
-5. **Directory name inference** — matches your directory name against project slugs
+4. **Persistent defaults** — set via `sentry cli defaults`
+5. **DSN auto-detection** — scans source code and `.env` files
+6. **Directory name inference** — matches your directory name against project slugs
 
 The first source that provides both org and project wins. For org-only commands, only the org is needed.
 
 ### Backward Compatibility
 
 If you previously used the legacy `sentry-cli` and have a `~/.sentryclirc` file, the new CLI reads it automatically. The `[defaults]` and `[auth]` sections are fully compatible. The `[auth] token` value is mapped to the `SENTRY_AUTH_TOKEN` environment variable internally (only if the env var is not already set).
+
+## Persistent Defaults
+
+Use `sentry cli defaults` to set persistent defaults for organization, project, URL, and telemetry. These are stored in the CLI's local database and apply to all commands.
+
+```bash
+sentry cli defaults org my-org           # Set default organization
+sentry cli defaults project my-project   # Set default project
+sentry cli defaults url https://...      # Set Sentry URL (self-hosted)
+sentry cli defaults telemetry off        # Disable telemetry
+sentry cli defaults                      # Show all current defaults
+sentry cli defaults org --clear          # Clear a specific default
+```
+
+See [`sentry cli defaults`](./commands/cli/#sentry-cli-defaults) for full usage.
 
 ## Global Options
 
