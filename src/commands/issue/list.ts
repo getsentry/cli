@@ -204,10 +204,17 @@ function parseSort(value: string): SortValue {
   return value as SortValue;
 }
 
-/** Matches standalone boolean OR operator (word boundary, not inside a qualifier value). */
-const BOOLEAN_OR_RE = /\bOR\b/;
-/** Matches standalone boolean AND operator. */
-const BOOLEAN_AND_RE = /\bAND\b/;
+/**
+ * Matches standalone boolean OR operator — surrounded by whitespace or
+ * string boundaries, ensuring it doesn't match inside qualifier values
+ * like `tag:OR` where `:` would create a false word boundary.
+ */
+const BOOLEAN_OR_RE = /(^|\s)OR(\s|$)/;
+/**
+ * Matches standalone boolean AND operator — same whitespace/boundary
+ * guard as OR to avoid false matches in qualifier values.
+ */
+const BOOLEAN_AND_RE = /(^|\s)AND(\s|$)/;
 
 /**
  * Sanitize `--query` before sending to the Sentry API.
@@ -237,7 +244,7 @@ function sanitizeQuery(
     );
   }
   if (BOOLEAN_AND_RE.test(query)) {
-    const sanitized = query.replace(/\s*\bAND\b\s*/g, " ").trim();
+    const sanitized = query.replace(/\s+AND(?=\s|$)/g, "").trim();
     log.warn(
       "Sentry search implicitly ANDs terms — removed explicit AND operator. " +
         `Running query: "${sanitized}"`

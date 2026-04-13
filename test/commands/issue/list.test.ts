@@ -1204,4 +1204,18 @@ describe("sanitizeQuery", () => {
       "is:unresolved level:error"
     );
   });
+
+  test("does not match OR inside qualifier values (tag:OR)", () => {
+    expect(sanitizeQuery("tag:OR", noopLog)).toBe("tag:OR");
+  });
+
+  test("does not match AND inside qualifier values (tag:AND)", () => {
+    expect(sanitizeQuery("tag:AND", noopLog)).toBe("tag:AND");
+  });
+
+  test("does not match OR in qualifier values with more context", () => {
+    expect(sanitizeQuery("is:unresolved tag:OR_something", noopLog)).toBe(
+      "is:unresolved tag:OR_something"
+    );
+  });
 });
