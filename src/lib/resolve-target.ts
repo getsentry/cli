@@ -639,6 +639,79 @@ async function findSimilarProjects(
 }
 
 /**
+ * Find similar project slugs across all accessible organizations.
+ *
+ * Used by project-search resolution when an exact slug match fails.
+ * Lists projects in each org, then fuzzy-matches the slug against all
+ * available project slugs. Best-effort: API or auth failures for individual
+ * orgs are silently skipped.
+ *
+ * @param slug - The project slug that wasn't found
+ * @param orgs - Accessible organizations to search
+ * @returns Up to 5 similar projects with their org context, or empty array
+ */
+async function findSimilarProjectsAcrossOrgs(
+  slug: string,
+  orgs: { slug: string }[]
+): Promise<{ slug: string; orgSlug: string }[]> {
+  try {
+    const concurrency = pLimit(5);
+    const orgProjects = await Promise.all(
+      orgs.map((org) =>
+        concurrency(async () => {
+          const result = await withAuthGuard(() => listProjects(org.slug));
+          if (!result.ok) {
+            return [];
+          }
+          return result.value.map((p) => ({
+            slug: p.slug,
+            orgSlug: org.slug,
+          }));
+        })
+      )
+    );
+    const allProjects = orgProjects.flat();
+    const slugs = allProjects.map((p) => p.slug);
+    const matches = fuzzyMatch(slug, slugs, { maxResults: 5 });
+    return matches.flatMap((matched) =>
+      allProjects.filter((p) => p.slug === matched)
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Attempt fuzzy auto-recovery when a project slug isn't found.
+ *
+ * If exactly one similar project is found (prefix/substring/close edit
+ * distance), auto-recovers by returning it with a warning. With multiple
+ * matches, adds suggestions to the thrown ResolutionError.
+ *
+ * @returns The resolved org/project pair if auto-recovered, or undefined
+ */
+export async function tryFuzzyProjectRecovery(
+  slug: string,
+  orgs: { slug: string }[],
+  errorFactory: (suggestions: string[]) => ResolutionError
+): Promise<{ org: string; project: string } | undefined> {
+  const similar = await findSimilarProjectsAcrossOrgs(slug, orgs);
+  if (similar.length === 1) {
+    const match = similar[0] as (typeof similar)[0];
+    log.warn(
+      `Project '${slug}' not found. Using similar project '${match.slug}' in org '${match.orgSlug}'.`
+    );
+    return { org: match.orgSlug, project: match.slug };
+  }
+  if (similar.length > 1) {
+    const suggestions = [
+      `Similar projects: ${similar.map((s) => `'${s.orgSlug}/${s.slug}'`).join(", ")}`,
+    ];
+    throw errorFactory(suggestions);
+  }
+}
+
+/**
  * Fetch the numeric project ID for an explicit org/project pair.
  *
  * Throws on auth errors and 404s (user-actionable). Returns undefined
@@ -1190,6 +1263,31 @@ export async function resolveProjectBySlug(
       );
     }
 
+    // Attempt fuzzy auto-recovery before throwing
+    const recovered = await tryFuzzyProjectRecovery(
+      projectSlug,
+      orgs,
+      (suggestions) =>
+        new ResolutionError(
+          `Project "${projectSlug}"`,
+          "not found",
+          usageHint,
+          suggestions
+        )
+    );
+    if (recovered) {
+      const proj = await withAuthGuard(() =>
+        getProject(recovered.org, recovered.project)
+      );
+      if (proj.ok) {
+        return withTelemetryContext({
+          org: recovered.org,
+          project: recovered.project,
+          projectData: proj.value,
+        });
+      }
+    }
+
     throw new ResolutionError(
       `Project "${projectSlug}"`,
       "not found",
@@ -1361,6 +1459,25 @@ export async function resolveOrgProjectTarget(
             `sentry ${commandName} ${parsed.projectSlug}/<project>`,
             [`List projects: sentry project list ${parsed.projectSlug}/`]
           );
+        }
+
+        // Attempt fuzzy auto-recovery before throwing
+        const recovered = await tryFuzzyProjectRecovery(
+          parsed.projectSlug,
+          orgs,
+          (suggestions) =>
+            new ResolutionError(
+              `Project '${parsed.projectSlug}'`,
+              "not found",
+              `sentry ${commandName} <org>/${parsed.projectSlug}`,
+              suggestions
+            )
+        );
+        if (recovered) {
+          return withTelemetryContext({
+            org: recovered.org,
+            project: recovered.project,
+          });
         }
 
         throw new ResolutionError(

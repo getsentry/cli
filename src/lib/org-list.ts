@@ -54,7 +54,10 @@ import { paginationHint } from "./list-command.js";
 import { logger } from "./logger.js";
 import { withProgress } from "./polling.js";
 import { resolveEffectiveOrg } from "./region.js";
-import { resolveOrgsForListing } from "./resolve-target.js";
+import {
+  resolveOrgsForListing,
+  tryFuzzyProjectRecovery,
+} from "./resolve-target.js";
 import { setOrgProjectContext } from "./telemetry.js";
 
 const log = logger.withTag("org-list");
@@ -651,6 +654,32 @@ export async function handleExplicitProject<TEntity, TWithOrg>(
 }
 
 /**
+ * Attempt fuzzy recovery for a project slug in the list-command context.
+ *
+ * Returns the corrected slug if exactly one similar project is found, or
+ * undefined if no recovery is possible. Throws ResolutionError with
+ * suggestions if multiple matches are found.
+ */
+async function tryFuzzyRecoveryForList(
+  slug: string,
+  orgs: { slug: string }[],
+  commandPrefix: string
+): Promise<string | undefined> {
+  const recovered = await tryFuzzyProjectRecovery(
+    slug,
+    orgs,
+    (suggestions) =>
+      new ResolutionError(
+        `Project '${slug}'`,
+        "not found",
+        `${commandPrefix} <org>/${slug}`,
+        suggestions
+      )
+  );
+  return recovered?.project;
+}
+
+/**
  * Handle project-search mode (bare slug, e.g., "cli").
  *
  * Searches for a project matching the slug across all accessible orgs via
@@ -669,6 +698,7 @@ export async function handleExplicitProject<TEntity, TWithOrg>(
  *
  * Returns a {@link ListResult} with items and hint text.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: multi-mode dispatch with recovery is inherently branchy
 export async function handleProjectSearch<TEntity, TWithOrg>(
   config: OrgListConfig<TEntity, TWithOrg>,
   projectSlug: string,
@@ -710,6 +740,18 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
     if (flags.json) {
       return { items: [] };
     }
+
+    // Attempt fuzzy auto-recovery — if a single similar project is found,
+    // re-run the handler with the corrected slug.
+    const correctedSlug = await tryFuzzyRecoveryForList(
+      projectSlug,
+      orgs,
+      config.commandPrefix
+    );
+    if (correctedSlug) {
+      return handleProjectSearch(config, correctedSlug, options);
+    }
+
     // Use ResolutionError — the user provided a project slug but it wasn't found.
     throw new ResolutionError(
       `Project '${projectSlug}'`,
