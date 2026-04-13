@@ -1187,10 +1187,23 @@ describe("sanitizeQuery", () => {
     expect(warnings[0]).toContain("error timeout");
   });
 
-  test("does not match lowercase 'and' or 'or'", () => {
-    // Sentry search operators are case-sensitive uppercase
+  test("does not match 'and'/'or' as substrings of normal words", () => {
     expect(sanitizeQuery("sandbox handler", noopLog)).toBe("sandbox handler");
     expect(sanitizeQuery("order error", noopLog)).toBe("order error");
+  });
+
+  test("handles case-insensitive OR (matches PEG grammar)", () => {
+    expect(() => sanitizeQuery("error Or timeout", noopLog)).toThrow(
+      ValidationError
+    );
+    expect(() => sanitizeQuery("error or timeout", noopLog)).toThrow(
+      ValidationError
+    );
+  });
+
+  test("handles case-insensitive AND (matches PEG grammar)", () => {
+    expect(sanitizeQuery("error And timeout", noopLog)).toBe("error timeout");
+    expect(sanitizeQuery("error and timeout", noopLog)).toBe("error timeout");
   });
 
   test("rejects OR even with qualifiers mixed in", () => {
