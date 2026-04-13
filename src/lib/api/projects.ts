@@ -21,8 +21,13 @@ import type {
   SentryProject,
 } from "../../types/index.js";
 
-import { cacheProjectsForOrg } from "../db/project-cache.js";
+import {
+  cacheProjectsForOrg,
+  setCachedProject,
+  setCachedProjectByDsnKey,
+} from "../db/project-cache.js";
 import { getCachedOrganizations } from "../db/regions.js";
+import { parseDsn } from "../dsn/parser.js";
 import { type AuthGuardSuccess, withAuthGuard } from "../errors.js";
 import { logger } from "../logger.js";
 import { getApiBaseUrl } from "../sentry-client.js";
@@ -190,6 +195,32 @@ export async function createProjectWithDsn(
   const project = await createProject(orgSlug, teamSlug, body);
   const dsn = await tryGetPrimaryDsn(orgSlug, project.slug);
   const url = buildProjectUrl(orgSlug, project.slug);
+
+  // Seed project_cache so the next command doesn't re-resolve via API
+  try {
+    const parsed = dsn ? parseDsn(dsn) : null;
+    if (parsed?.orgId) {
+      setCachedProject(parsed.orgId, parsed.projectId, {
+        orgSlug,
+        orgName: orgSlug,
+        projectSlug: project.slug,
+        projectName: project.name,
+        projectId: project.id,
+      });
+    }
+    if (parsed?.publicKey) {
+      setCachedProjectByDsnKey(parsed.publicKey, {
+        orgSlug,
+        orgName: orgSlug,
+        projectSlug: project.slug,
+        projectName: project.name,
+        projectId: project.id,
+      });
+    }
+  } catch {
+    // Best-effort — cache failure should not break project creation
+  }
+
   return { project, dsn, url };
 }
 

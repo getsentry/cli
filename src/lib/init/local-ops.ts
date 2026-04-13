@@ -15,6 +15,8 @@ import {
   listOrganizations,
   tryGetPrimaryDsn,
 } from "../api-client.js";
+import { setCachedDsn } from "../db/dsn-cache.js";
+import { parseDsn } from "../dsn/parser.js";
 import { ApiError } from "../errors.js";
 import { resolveOrCreateTeam } from "../resolve-team.js";
 import { buildProjectUrl } from "../sentry-urls.js";
@@ -1489,6 +1491,7 @@ async function glob(payload: GlobPayload): Promise<LocalOpResult> {
 
 // ── Sentry project + DSN ────────────────────────────────────────────
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: branching for dry-run, existing project, new project, and best-effort cache seeding
 async function createSentryProject(
   payload: CreateSentryProjectPayload,
   options: WizardOptions
@@ -1535,6 +1538,34 @@ async function createSentryProject(
     if (options.org && options.project) {
       const existing = await tryGetExistingProject(orgSlug, slug);
       if (existing) {
+        // Seed dsn_cache so detectDsn() gets a cache hit next time
+        const d = existing.data as {
+          orgSlug: string;
+          projectSlug: string;
+          projectId: string;
+          dsn: string;
+        };
+        if (d.dsn) {
+          try {
+            const parsed = parseDsn(d.dsn);
+            if (parsed) {
+              setCachedDsn(payload.cwd, {
+                dsn: d.dsn,
+                projectId: parsed.projectId,
+                orgId: parsed.orgId,
+                source: "code",
+                resolved: {
+                  orgSlug: d.orgSlug,
+                  orgName: d.orgSlug,
+                  projectSlug: d.projectSlug,
+                  projectName: d.projectSlug,
+                },
+              });
+            }
+          } catch {
+            // Best-effort
+          }
+        }
         return {
           ...existing,
           message: `Using existing project "${slug}" in ${orgSlug}`,
@@ -1555,6 +1586,30 @@ async function createSentryProject(
       team.slug,
       { name, platform }
     );
+
+    // Seed dsn_cache so detectDsn() gets a cache hit next time
+    // (project_cache already seeded by createProjectWithDsn)
+    if (dsn) {
+      try {
+        const parsed = parseDsn(dsn);
+        if (parsed) {
+          setCachedDsn(payload.cwd, {
+            dsn,
+            projectId: parsed.projectId,
+            orgId: parsed.orgId,
+            source: "code",
+            resolved: {
+              orgSlug,
+              orgName: orgSlug,
+              projectSlug: project.slug,
+              projectName: project.name,
+            },
+          });
+        }
+      } catch {
+        // Best-effort
+      }
+    }
 
     return {
       ok: true,
