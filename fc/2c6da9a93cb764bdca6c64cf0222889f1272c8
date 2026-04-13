@@ -1,0 +1,86 @@
+# Fix CLI-12E: Remove dataset-vs-display cross-validation
+
+## Problem
+
+`sentry dashboard widget add ... --display big_number --dataset issue` throws:
+```
+ValidationError: The "issue" dataset supports: table, area, line, bar. Got: "big_number".
+```
+
+## Root cause
+
+The CLI's `DATASET_SUPPORTED_DISPLAY_TYPES` in `src/types/dashboard.ts` was copied from the Sentry **frontend UI picker** (`supportedDisplayTypes` in each `datasetConfig/*.tsx`). That list controls which options are **enabled in the widget builder dropdown** — a product/design decision, not a backend constraint.
+
+**The Sentry backend does NOT cross-validate `displayType` against `widgetType`.** The `DashboardWidgetSerializer` validates each as an independent enum field — any valid display type with any valid dataset is accepted. The frontend can render all combos too (e.g., issue+big_number works via `useIssuesTableQuery`).
+
+The CLI is the only thing blocking valid operations. This is the same situation as `--where` syntax — we don't validate it client-side, we let the backend be the authority.
+
+## Fix
+
+Remove the dataset-vs-display cross-validation from `validateWidgetEnums()` in `resolve.ts`. Keep the individual enum checks (unknown display type, unknown dataset still throw). Delete `DATASET_SUPPORTED_DISPLAY_TYPES` from `dashboard.ts` since it has no other consumers.
+
+## Files to modify
+
+| File | Change |
+|------|--------|
+| `src/types/dashboard.ts` | Remove `DATASET_SUPPORTED_DISPLAY_TYPES` constant and its JSDoc |
+| `src/commands/dashboard/resolve.ts` | Remove cross-validation block (lines 639-654) and its import |
+| `test/commands/dashboard/widget/add.test.ts` | Change test: `big_number` + `issue` should succeed |
+| `test/commands/dashboard/widget/edit.test.ts` | Change tests: dataset/display combos should succeed |
+
+## Detailed changes
+
+### 1. `src/types/dashboard.ts` — Remove `DATASET_SUPPORTED_DISPLAY_TYPES` (lines 301-384)
+
+Delete the entire `DATASET_SUPPORTED_DISPLAY_TYPES` constant and its 27-line JSDoc block. No other code references it.
+
+### 2. `src/commands/dashboard/resolve.ts` — Trim `validateWidgetEnums` (lines 620-655)
+
+Remove the import of `DATASET_SUPPORTED_DISPLAY_TYPES` from the import block (line 27).
+
+Remove lines 639-654 (the cross-validation block). The function becomes:
+
+```typescript
+export function validateWidgetEnums(display?: string, dataset?: string): void {
+  if (
+    display &&
+    !DISPLAY_TYPES.includes(display as (typeof DISPLAY_TYPES)[number])
+  ) {
+    throw new ValidationError(
+      `Invalid --display value "${display}".\nValid display types: ${DISPLAY_TYPES.join(", ")}`,
+      "display"
+    );
+  }
+  if (
+    dataset &&
+    !WIDGET_TYPES.includes(dataset as (typeof WIDGET_TYPES)[number])
+  ) {
+    throw new ValidationError(
+      `Invalid --dataset value "${dataset}".\nValid datasets: ${WIDGET_TYPES.join(", ")}`,
+      "dataset"
+    );
+  }
+}
+```
+
+### 3. `test/commands/dashboard/widget/add.test.ts` (lines 215-229)
+
+Replace "throws ValidationError for big_number with issue dataset" with a test that verifies the widget is **created successfully** with `displayType: "big_number"` and `widgetType: "issue"`.
+
+### 4. `test/commands/dashboard/widget/edit.test.ts` (lines 185-246)
+
+Two tests use the now-removed cross-validation:
+
+- **"throws ValidationError when --dataset change produces invalid combo with existing display"** (lines 185-215): Change to verify the edit succeeds — changing dataset to `issue` on a `big_number` widget should work.
+
+- **"throws ValidationError when --display change produces invalid combo with existing dataset"** (lines 217-246): This tests `preprod-app-size` + `table`. Same fix — verify the edit succeeds.
+
+## Verification
+
+```bash
+bun test test/commands/dashboard/widget/add.test.ts
+bun test test/commands/dashboard/widget/edit.test.ts
+bun run typecheck
+bun run lint
+bun test
+```
