@@ -16,7 +16,7 @@ Manage Sentry issues
 List issues in a project
 
 **Flags:**
-- `-q, --query <value> - Search query (Sentry search syntax)`
+- `-q, --query <value> - Search query (Sentry syntax, implicit AND, no OR operator)`
 - `-n, --limit <value> - Maximum number of issues to list - (default: "25")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
 - `-t, --period <value> - Time range: "7d", "2026-03-01..2026-04-01", ">=2026-03-01" - (default: "90d")`
@@ -68,6 +68,15 @@ sentry issue list my-org/frontend --query "is:resolved"
 
 # Sort by frequency
 sentry issue list my-org/frontend --sort freq --limit 20
+
+# Multiple filters (space-separated = implicit AND)
+sentry issue list --query "is:unresolved level:error assigned:me"
+
+# Negation and wildcards
+sentry issue list --query "!browser:Chrome message:*timeout*"
+
+# Match multiple values for one key (in-list syntax)
+sentry issue list --query "browser:[Chrome,Firefox]"
 ```
 
 ### `sentry issue events <issue>`
