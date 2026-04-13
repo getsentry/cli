@@ -129,6 +129,10 @@ export function startCleanupOldBinary(): void {
 /**
  * Run a shell command and capture stdout.
  *
+ * On Windows, package managers (npm, pnpm, yarn) are `.cmd` batch files.
+ * `spawn()` without `shell: true` cannot execute `.cmd` files (ENOENT),
+ * so we route through cmd.exe on Windows.
+ *
  * @param command - Command to execute
  * @param args - Command arguments
  * @returns stdout content and exit code
@@ -140,6 +144,7 @@ function runCommand(
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args, {
       stdio: ["ignore", "pipe", "pipe"],
+      shell: process.platform === "win32",
     });
 
     let stdout = "";
@@ -723,6 +728,7 @@ function executeUpgradeHomebrew(): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn("brew", ["upgrade", "getsentry/tools/sentry"], {
       stdio: "inherit",
+      shell: process.platform === "win32",
     });
 
     proc.on("close", (code) => {
@@ -763,7 +769,12 @@ function executeUpgradePackageManager(
         ? ["global", "add", `sentry@${version}`]
         : ["install", "-g", `sentry@${version}`];
 
-    const proc = spawn(pm, args, { stdio: "inherit" });
+    // npm/pnpm/yarn are .cmd batch files on Windows; spawn() without
+    // shell: true cannot execute .cmd files (ENOENT).
+    const proc = spawn(pm, args, {
+      stdio: "inherit",
+      shell: process.platform === "win32",
+    });
 
     proc.on("close", (code) => {
       if (code === 0) {
