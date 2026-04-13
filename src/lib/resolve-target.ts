@@ -671,8 +671,12 @@ async function findSimilarProjectsAcrossOrgs(
       )
     );
     const allProjects = orgProjects.flat();
-    const slugs = allProjects.map((p) => p.slug);
-    const matches = fuzzyMatch(slug, slugs, { maxResults: 5 });
+    // Deduplicate slugs so fuzzyMatch doesn't waste slots on the same
+    // project appearing in multiple orgs.
+    const uniqueSlugs = [...new Set(allProjects.map((p) => p.slug))];
+    const matches = fuzzyMatch(slug, uniqueSlugs, { maxResults: 5 });
+    // Expand matched slugs back to org-qualified entries (may include
+    // the same slug from multiple orgs — that's correct for suggestions).
     return matches.flatMap((matched) =>
       allProjects.filter((p) => p.slug === matched)
     );

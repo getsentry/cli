@@ -739,13 +739,10 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
       );
     }
 
-    if (flags.json) {
-      return { items: [] };
-    }
-
     // Attempt fuzzy auto-recovery — if a single similar project is found,
-    // re-run the handler with the corrected slug. Skip on retry to prevent
-    // infinite recursion if the corrected slug also fails to match exactly.
+    // re-run the handler with the corrected slug. Applied before the JSON
+    // early return so both human and JSON consumers benefit from recovery.
+    // Skip on retry to prevent infinite recursion.
     if (!_isRecoveryAttempt) {
       const correctedSlug = await tryFuzzyRecoveryForList(
         projectSlug,
@@ -755,6 +752,10 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
       if (correctedSlug) {
         return handleProjectSearch(config, correctedSlug, options, true);
       }
+    }
+
+    if (flags.json) {
+      return { items: [] };
     }
 
     // Use ResolutionError — the user provided a project slug but it wasn't found.
