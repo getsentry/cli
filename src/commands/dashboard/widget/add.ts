@@ -96,7 +96,7 @@ export const addCommand = buildCommand({
       "Sort shorthand (--sort flag):\n" +
       "  count          → count()         (ascending)\n" +
       "  -count         → -count()        (descending)\n\n" +
-      "Layout flags (--x, --y, --width, --height) control widget position\n" +
+      "Layout flags (--col/-x, --row/-y, --width, --height) control widget position\n" +
       "and size in the 6-column dashboard grid. Omitted values use auto-layout.",
   },
   output: {
@@ -156,13 +156,13 @@ export const addCommand = buildCommand({
         brief: "Result limit",
         optional: true,
       },
-      x: {
+      col: {
         kind: "parsed",
         parse: numberParser,
         brief: "Grid column position (0-based, 0–5)",
         optional: true,
       },
-      y: {
+      row: {
         kind: "parsed",
         parse: numberParser,
         brief: "Grid row position (0-based)",
@@ -195,6 +195,8 @@ export const addCommand = buildCommand({
       s: "sort",
       n: "limit",
       l: "layout",
+      x: "col",
+      y: "row",
     },
   },
   async *func(this: SentryContext, flags: AddFlags, ...args: string[]) {
@@ -256,8 +258,8 @@ export const addCommand = buildCommand({
     newWidget = assignDefaultLayout(newWidget, updateBody.widgets, layoutMode);
 
     const hasExplicitLayout =
-      flags.x !== undefined ||
-      flags.y !== undefined ||
+      flags.col !== undefined ||
+      flags.row !== undefined ||
       flags.width !== undefined ||
       flags.height !== undefined;
 
@@ -267,8 +269,8 @@ export const addCommand = buildCommand({
         ...newWidget,
         layout: {
           ...baseLayout,
-          ...(flags.x !== undefined && { x: flags.x }),
-          ...(flags.y !== undefined && { y: flags.y }),
+          ...(flags.col !== undefined && { x: flags.col }),
+          ...(flags.row !== undefined && { y: flags.row }),
           ...(flags.width !== undefined && { w: flags.width }),
           ...(flags.height !== undefined && { h: flags.height }),
         },
@@ -277,7 +279,7 @@ export const addCommand = buildCommand({
       // (e.g., --x 5 on a table widget with auto-width 6 → 5+6=11 > 6)
       const finalLayout = newWidget.layout ?? baseLayout;
       validateWidgetLayout(
-        { x: finalLayout.x, width: finalLayout.w },
+        { col: finalLayout.x, width: finalLayout.w },
         finalLayout
       );
     }

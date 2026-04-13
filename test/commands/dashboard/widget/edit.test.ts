@@ -291,10 +291,10 @@ describe("dashboard widget edit", () => {
   // Layout flag tests
   // -------------------------------------------------------------------------
 
-  test("applies --x and --y layout flags to existing widget", async () => {
+  test("applies --col and --row layout flags to existing widget", async () => {
     const { context } = createMockContext();
     const func = await editCommand.loader();
-    await func.call(context, { json: false, index: 0, x: 4, y: 3 }, "123");
+    await func.call(context, { json: false, index: 0, col: 4, row: 3 }, "123");
 
     const body = updateDashboardSpy.mock.calls[0]?.[2];
     const edited = body.widgets[0];
@@ -310,7 +310,7 @@ describe("dashboard widget edit", () => {
     const func = await editCommand.loader();
     await func.call(
       context,
-      { json: false, index: 1, x: 0, width: 6, height: 4 },
+      { json: false, index: 1, col: 0, width: 6, height: 4 },
       "123"
     );
 
@@ -332,14 +332,14 @@ describe("dashboard widget edit", () => {
     expect(edited.layout).toEqual({ x: 0, y: 0, w: 2, h: 1 });
   });
 
-  test("throws ValidationError for x out of range", async () => {
+  test("throws ValidationError for col out of range", async () => {
     const { context } = createMockContext();
     const func = await editCommand.loader();
     const err = await func
-      .call(context, { json: false, index: 0, x: 6 }, "123")
+      .call(context, { json: false, index: 0, col: 6 }, "123")
       .catch((e: Error) => e);
     expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toContain("--x");
+    expect(err.message).toContain("--col");
   });
 
   test("throws ValidationError for negative width", async () => {
@@ -352,8 +352,8 @@ describe("dashboard widget edit", () => {
     expect(err.message).toContain("--width");
   });
 
-  test("throws ValidationError when --x overflows with fallback width on layoutless widget", async () => {
-    // Widget without layout uses FALLBACK_LAYOUT (w=3), so --x 4 → 4+3=7 > 6
+  test("throws ValidationError when --col overflows with fallback width on layoutless widget", async () => {
+    // Widget without layout uses FALLBACK_LAYOUT (w=3), so --col 4 → 4+3=7 > 6
     getDashboardSpy.mockResolvedValueOnce({
       ...sampleDashboard,
       widgets: [
@@ -377,17 +377,17 @@ describe("dashboard widget edit", () => {
     const { context } = createMockContext();
     const func = await editCommand.loader();
     const err = await func
-      .call(context, { json: false, index: 0, x: 4 }, "123")
+      .call(context, { json: false, index: 0, col: 4 }, "123")
       .catch((e: Error) => e);
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.message).toContain("overflows the grid");
   });
 
-  test("throws ValidationError when x + width overflows grid", async () => {
+  test("throws ValidationError when col + width overflows grid", async () => {
     const { context } = createMockContext();
     const func = await editCommand.loader();
     const err = await func
-      .call(context, { json: false, index: 0, x: 4, width: 4 }, "123")
+      .call(context, { json: false, index: 0, col: 4, width: 4 }, "123")
       .catch((e: Error) => e);
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.message).toContain("overflows the grid");
