@@ -14,7 +14,11 @@ import {
   listLogs,
   listTraceLogs,
 } from "../../lib/api-client.js";
-import { parseLogSort, validateLimit } from "../../lib/arg-parsing.js";
+import {
+  buildProjectQuery,
+  parseLogSort,
+  validateLimit,
+} from "../../lib/arg-parsing.js";
 import {
   AuthError,
   stringifyUnknown,
@@ -98,21 +102,6 @@ const TRACE_USAGE_HINT = "sentry log list [<org>/[<project>/]]<trace-id>";
 
 /** Default time period for trace-logs queries */
 const DEFAULT_TRACE_PERIOD = "14d";
-
-/**
- * Prepend `project:{slug}` to a query string when a project filter is specified.
- * Returns the original query unchanged when no project is given.
- */
-function buildProjectQuery(
-  query: string | undefined,
-  projectFilter: string | undefined
-): string | undefined {
-  if (!projectFilter) {
-    return query;
-  }
-  const pf = `project:${projectFilter}`;
-  return query ? `${pf} ${query}` : pf;
-}
 
 /**
  * Parse --limit flag, delegating range validation to shared utility.

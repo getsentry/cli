@@ -975,3 +975,25 @@ export function parseIssueArg(arg: string): ParsedIssueArg {
   // 5. No dash, no slash → suffix only (needs DSN context)
   return { type: "suffix-only", suffix: arg.toUpperCase() };
 }
+
+// ---------------------------------------------------------------------------
+// Query helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Prepend `project:{slug}` to a query string when a project filter is specified.
+ * Returns the original query unchanged when no project is given.
+ *
+ * Used by trace-scoped commands (`trace logs`, `log list` trace mode) to apply
+ * the project from `org/project/trace-id` positional syntax as an API filter.
+ */
+export function buildProjectQuery(
+  query: string | undefined,
+  projectFilter: string | undefined
+): string | undefined {
+  if (!projectFilter) {
+    return query;
+  }
+  const pf = `project:${projectFilter}`;
+  return query ? `${pf} ${query}` : pf;
+}

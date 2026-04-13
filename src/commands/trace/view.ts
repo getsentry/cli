@@ -57,7 +57,6 @@ type ViewFlags = {
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry trace view [<org>/<project>/]<trace-id>";
 
-/** Resolved trace target with optional project filter. */
 /**
  * Build a contextual hint with real values for easy copy-paste.
  */

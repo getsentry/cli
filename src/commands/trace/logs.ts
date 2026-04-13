@@ -6,7 +6,11 @@
 
 import type { SentryContext } from "../../context.js";
 import { type LogSortDirection, listTraceLogs } from "../../lib/api-client.js";
-import { parseLogSort, validateLimit } from "../../lib/arg-parsing.js";
+import {
+  buildProjectQuery,
+  parseLogSort,
+  validateLimit,
+} from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { filterFields } from "../../lib/formatters/json.js";
@@ -187,11 +191,7 @@ export const logsCommand = buildCommand({
     }
 
     // Prepend project filter to the query when user explicitly specified a project
-    let query = flags.query;
-    if (projectFilter) {
-      const pf = `project:${projectFilter}`;
-      query = query ? `${pf} ${query}` : pf;
-    }
+    const query = buildProjectQuery(flags.query, projectFilter);
 
     const logs = await withProgress(
       {
