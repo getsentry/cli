@@ -182,9 +182,10 @@ describe("dashboard widget edit", () => {
     expect(edited.queries[0].columns).toEqual(["span.description"]);
   });
 
-  test("throws ValidationError when --dataset change produces invalid combo with existing display", async () => {
-    // existing widget is displayType: "big_number" (spans), user changes only --dataset to "issue"
-    // → effective combo is big_number + issue, which is invalid
+  // The backend validates displayType and widgetType as independent enums —
+  // any valid display type is accepted with any valid dataset.
+
+  test("allows --dataset change to issue on big_number widget", async () => {
     getDashboardSpy.mockResolvedValueOnce({
       ...sampleDashboard,
       widgets: [
@@ -207,15 +208,18 @@ describe("dashboard widget edit", () => {
     });
     const { context } = createMockContext();
     const func = await editCommand.loader();
-    const err = await func
-      .call(context, { json: false, index: 0, dataset: "issue" }, "123")
-      .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toContain('"issue" dataset supports');
+    await func.call(
+      context,
+      { json: false, index: 0, dataset: "issue" },
+      "123"
+    );
+    expect(updateDashboardSpy).toHaveBeenCalledTimes(1);
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    expect(body.widgets[0].displayType).toBe("big_number");
+    expect(body.widgets[0].widgetType).toBe("issue");
   });
 
-  test("throws ValidationError when --display change produces invalid combo with existing dataset", async () => {
-    // existing widget is displayType: "line" + widgetType: "preprod-app-size", user changes only --display to "table"
+  test("allows --display change to table on preprod-app-size widget", async () => {
     getDashboardSpy.mockResolvedValueOnce({
       ...sampleDashboard,
       widgets: [
@@ -238,16 +242,18 @@ describe("dashboard widget edit", () => {
     });
     const { context } = createMockContext();
     const func = await editCommand.loader();
-    const err = await func
-      .call(context, { json: false, index: 0, display: "table" }, "123")
-      .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toContain('"preprod-app-size" dataset supports');
+    await func.call(
+      context,
+      { json: false, index: 0, display: "table" },
+      "123"
+    );
+    expect(updateDashboardSpy).toHaveBeenCalledTimes(1);
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    expect(body.widgets[0].displayType).toBe("table");
+    expect(body.widgets[0].widgetType).toBe("preprod-app-size");
   });
 
-  test("allows --dataset change on widget with untracked display type (text)", async () => {
-    // text, wheel, rage_and_dead_clicks, agents_traces_table bypass Sentry's dataset system
-    // entirely — they should not be cross-validated against a dataset.
+  test("allows --dataset change on widget with text display type", async () => {
     getDashboardSpy.mockResolvedValueOnce({
       ...sampleDashboard,
       widgets: [
