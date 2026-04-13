@@ -876,11 +876,12 @@ export async function resolveAllTargets(
         };
       }
 
-      // Error if only one flag is provided
+      // Error if only one flag is provided — not an auto-detect failure
       if (org || project) {
         throw new ContextError(
           "Organization and project",
-          options.usageHint ?? "sentry <command> <org>/<project>"
+          options.usageHint ?? "sentry <command> <org>/<project>",
+          []
         );
       }
 
@@ -1094,11 +1095,12 @@ export async function resolveOrgAndProject(
         });
       }
 
-      // Error if only one flag is provided
+      // Error if only one flag is provided — not an auto-detect failure
       if (org || project) {
         throw new ContextError(
           "Organization and project",
-          options.usageHint ?? "sentry <command> <org>/<project>"
+          options.usageHint ?? "sentry <command> <org>/<project>",
+          []
         );
       }
 
@@ -1463,7 +1465,8 @@ export async function resolveOrgProjectTarget(
     case "org-all":
       throw new ContextError(
         "Project",
-        `sentry ${commandName} ${parsed.org}/<project>`
+        `sentry ${commandName} ${parsed.org}/<project>`,
+        []
       );
 
     case "project-search": {

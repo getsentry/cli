@@ -346,7 +346,7 @@ describe("viewCommand.func", () => {
       } catch (error) {
         expect(error).toBeInstanceOf(ContextError);
         expect((error as ContextError).message).toContain(
-          "Organization and project"
+          "organization and project"
         );
       }
     });

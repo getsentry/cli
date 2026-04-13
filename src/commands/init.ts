@@ -164,7 +164,7 @@ async function resolveTarget(targetArg: string | undefined): Promise<{
       return { org: undefined, project: undefined };
     default: {
       const _exhaustive: never = parsed;
-      throw new ContextError("Target", String(_exhaustive));
+      throw new ContextError("Target", String(_exhaustive), []);
     }
   }
 }

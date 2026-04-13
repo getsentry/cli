@@ -133,7 +133,7 @@ describe("resolveOrgProjectFromArg", () => {
       expect.unreachable("Should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(ContextError);
-      expect((error as ContextError).message).toContain("project");
+      expect((error as ContextError).message).toContain("Project");
       expect((error as ContextError).message).toContain("my-org/<project>");
     }
   });

@@ -177,7 +177,7 @@ async function resolveTarget(
     }
 
     case "org-all":
-      throw new ContextError("Specific project", USAGE_HINT);
+      throw new ContextError("Specific project", USAGE_HINT, []);
 
     case "auto-detect":
       return resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
