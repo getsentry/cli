@@ -71,6 +71,21 @@ describe("buildCommandHint", () => {
       "sentry issue explain sentry/cli/CLI-A1"
     );
   });
+
+  test("returns URL as-is for share URLs", () => {
+    const shareUrl =
+      "https://gibush-kq.sentry.io/share/issue/f1abd515c51346778384ff25dfb341e5/";
+    expect(buildCommandHint("view", shareUrl)).toBe(
+      `sentry issue view ${shareUrl}`
+    );
+  });
+
+  test("returns URL as-is for regular issue URLs", () => {
+    const issueUrl = "https://sentry.io/organizations/my-org/issues/12345/";
+    expect(buildCommandHint("view", issueUrl)).toBe(
+      `sentry issue view ${issueUrl}`
+    );
+  });
 });
 
 const getConfigDir = useTestConfigDir("test-issue-utils-", {
@@ -1981,5 +1996,139 @@ describe("resolveIssue: project-search DSN shortcut", () => {
         (r) => r.includes("/organizations/") && !r.includes("/shortids/")
       )
     ).toBe(false);
+  });
+});
+
+describe("resolveIssue with share URLs", () => {
+  const cwd = "/tmp/test-share";
+
+  test("resolves share URL with org from subdomain", async () => {
+    setOrgRegion("gibush-kq", DEFAULT_SENTRY_URL);
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // Share API endpoint (public, no auth)
+      if (url.includes("/shared/issues/f1abd515c51346778384ff25dfb341e5")) {
+        return new Response(JSON.stringify({ groupID: "99124558" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Authenticated issue fetch
+      if (url.includes("/organizations/gibush-kq/issues/99124558/")) {
+        return new Response(
+          JSON.stringify({
+            id: "99124558",
+            shortId: "BACKEND-A1",
+            title: "Share Test Issue",
+            status: "unresolved",
+            platform: "python",
+            type: "error",
+            count: "5",
+            userCount: 3,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await resolveIssue({
+      issueArg:
+        "https://gibush-kq.sentry.io/share/issue/f1abd515c51346778384ff25dfb341e5/",
+      cwd,
+      command: "view",
+    });
+
+    expect(result.org).toBe("gibush-kq");
+    expect(result.issue.id).toBe("99124558");
+    expect(result.issue.shortId).toBe("BACKEND-A1");
+  });
+
+  test("resolves share URL without org via unscoped fetch", async () => {
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // Share API endpoint
+      if (url.includes("/shared/issues/aabbccdd11223344aabbccdd11223344")) {
+        return new Response(JSON.stringify({ groupID: "55555" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Unscoped issue fetch
+      if (url.includes("/issues/55555/")) {
+        return new Response(
+          JSON.stringify({
+            id: "55555",
+            shortId: "WEB-B2",
+            title: "Unscoped Share Issue",
+            status: "unresolved",
+            platform: "javascript",
+            type: "error",
+            count: "1",
+            userCount: 1,
+            permalink: "https://test-org.sentry.io/issues/55555/",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await resolveIssue({
+      issueArg:
+        "https://sentry.io/share/issue/aabbccdd11223344aabbccdd11223344/",
+      cwd,
+      command: "view",
+    });
+
+    expect(result.issue.id).toBe("55555");
+    expect(result.org).toBe("test-org");
+  });
+
+  test("throws ApiError when share link is expired/disabled", async () => {
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    await expect(
+      resolveIssue({
+        issueArg:
+          "https://sentry.io/share/issue/deadbeefdeadbeefdeadbeefdeadbeef/",
+        cwd,
+        command: "view",
+      })
+    ).rejects.toThrow(ApiError);
+
+    try {
+      await resolveIssue({
+        issueArg:
+          "https://sentry.io/share/issue/deadbeefdeadbeefdeadbeefdeadbeef/",
+        cwd,
+        command: "view",
+      });
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      expect((error as ApiError).message).toContain("Share link not found");
+    }
   });
 });

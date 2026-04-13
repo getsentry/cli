@@ -220,13 +220,13 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
   const urlParsed = parseSentryUrl(first);
   if (urlParsed) {
     applySentryUrlContext(urlParsed.baseUrl);
-    if (urlParsed.eventId) {
+    if (urlParsed.eventId && urlParsed.org) {
       // Event URL: pass org as OrgAll target ("{org}/").
       // Event URLs don't contain a project slug, so viewCommand falls
       // back to auto-detect for the project while keeping the org context.
       return { eventId: urlParsed.eventId, targetArg: `${urlParsed.org}/` };
     }
-    if (urlParsed.issueId) {
+    if (urlParsed.issueId && urlParsed.org) {
       // Issue URL without event ID — fetch the latest event for this issue.
       // The caller uses issueId to fetch via getLatestEvent.
       return {

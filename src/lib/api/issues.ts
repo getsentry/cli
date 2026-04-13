@@ -407,3 +407,45 @@ export function updateIssueStatus(
     body: { status },
   });
 }
+
+/**
+ * Resolve a share ID to basic issue data via the public share endpoint.
+ *
+ * This endpoint does not require authentication and is not org-scoped.
+ * The response includes the numeric `groupID` needed to fetch full issue
+ * details via the authenticated API.
+ *
+ * @param baseUrl - The Sentry instance base URL (from the share URL)
+ * @param shareId - The share ID extracted from the share URL
+ * @returns Object containing the numeric groupID
+ * @throws {ApiError} When the share link is expired, disabled, or invalid
+ */
+export async function getSharedIssue(
+  baseUrl: string,
+  shareId: string
+): Promise<{ groupID: string }> {
+  const url = `${baseUrl}/api/0/shared/issues/${encodeURIComponent(shareId)}/`;
+  const response = await fetch(url, {
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new ApiError(
+        "Share link not found or expired",
+        404,
+        "The share link may have been disabled by the issue owner.\n" +
+          "  Ask them to re-enable sharing, or use the issue ID directly.",
+        `shared/issues/${shareId}`
+      );
+    }
+    throw new ApiError(
+      "Failed to resolve share link",
+      response.status,
+      undefined,
+      `shared/issues/${shareId}`
+    );
+  }
+
+  return (await response.json()) as { groupID: string };
+}
