@@ -88,23 +88,33 @@ export type TraceItemDetail = {
   links: unknown;
 };
 
+/** Options for {@link getDetailedTrace}. */
+type GetDetailedTraceOptions = {
+  /** Extra attribute names to include on each span */
+  additionalAttributes?: string[];
+  /** Numeric project ID to filter spans. Omit or -1 for all projects. */
+  projectId?: number;
+};
+
 /**
  * Get detailed trace with nested children structure.
  * This is an internal endpoint not covered by the public API.
  * Uses region-aware routing for multi-region support.
  *
+ * When `projectId` is provided, the API returns only spans belonging to that
+ * project. Pass `-1` (or omit) to fetch spans from all projects.
+ *
  * @param orgSlug - Organization slug
  * @param traceId - The trace ID (from event.contexts.trace.trace_id)
  * @param timestamp - Unix timestamp (seconds) from the event's dateCreated
- * @param additionalAttributes - Extra attribute names to include on each span
- *   (passed as repeated `additional_attributes` query params to the API)
+ * @param options - Optional additional attributes and project filter
  * @returns Array of root spans with nested children
  */
 export async function getDetailedTrace(
   orgSlug: string,
   traceId: string,
   timestamp: number,
-  additionalAttributes?: string[]
+  options: GetDetailedTraceOptions = {}
 ): Promise<TraceSpan[]> {
   const regionUrl = await resolveOrgRegion(orgSlug);
 
@@ -115,8 +125,8 @@ export async function getDetailedTrace(
       params: {
         timestamp,
         limit: 10_000,
-        project: -1,
-        additional_attributes: additionalAttributes,
+        project: options.projectId ?? -1,
+        additional_attributes: options.additionalAttributes,
       },
     }
   );

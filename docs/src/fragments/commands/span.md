@@ -21,6 +21,19 @@ sentry span list abc123def456abc123def456abc12345
 sentry span list -c next
 ```
 
+### Filter by project in a trace
+
+```bash
+# Show only spans from one project within a trace
+sentry span list my-org/cli-server/abc123def456abc123def456abc12345
+
+# Or use --query to filter by project
+sentry span list abc123def456abc123def456abc12345 -q "project:cli-server"
+
+# Multiple projects at once
+sentry span list abc123def456abc123def456abc12345 -q "project:[cli-server,api]"
+```
+
 ### View spans
 
 ```bash

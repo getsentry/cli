@@ -79,7 +79,7 @@ function formatTraceLogsHuman(data: TraceLogsData): string {
 const DEFAULT_PERIOD = "14d";
 
 /** Usage hint shown in error messages */
-const USAGE_HINT = "sentry trace logs [<org>/]<trace-id>";
+const USAGE_HINT = "sentry trace logs [<org>/[<project>/]]<trace-id>";
 
 /**
  * Parse --limit flag, delegating range validation to shared utility.
@@ -93,15 +93,17 @@ export const logsCommand = buildCommand({
     brief: "View logs associated with a trace",
     fullDescription:
       "View logs associated with a specific distributed trace.\n\n" +
-      "Uses the dedicated trace-logs endpoint, which is org-scoped and\n" +
-      "automatically queries all projects — no project flag needed.\n\n" +
       "Target specification:\n" +
-      "  sentry trace logs <trace-id>          # auto-detect org\n" +
-      "  sentry trace logs <org>/<trace-id>    # explicit org\n\n" +
+      "  sentry trace logs <trace-id>                    # auto-detect org\n" +
+      "  sentry trace logs <org>/<trace-id>              # explicit org\n" +
+      "  sentry trace logs <org>/<project>/<trace-id>    # filter to project\n\n" +
+      "When a project is specified, only logs from that project are shown.\n" +
+      "Use --query 'project:[a,b]' to filter to multiple projects.\n\n" +
       "The trace ID is the 32-character hexadecimal identifier.\n\n" +
       "Examples:\n" +
       "  sentry trace logs abc123def456abc123def456abc123de\n" +
       "  sentry trace logs myorg/abc123def456abc123def456abc123de\n" +
+      "  sentry trace logs myorg/backend/abc123def456abc123def456abc123de\n" +
       "  sentry trace logs --period 7d abc123def456abc123def456abc123de\n" +
       "  sentry trace logs --json abc123def456abc123def456abc123de",
   },
@@ -119,8 +121,9 @@ export const logsCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
-        placeholder: "org/trace-id",
-        brief: "[<org>/]<trace-id> - Optional org and required trace ID",
+        placeholder: "org/project/trace-id",
+        brief:
+          "[<org>/[<project>/]]<trace-id> - Optional org/project and required trace ID",
         parse: String,
       },
     },
@@ -145,7 +148,8 @@ export const logsCommand = buildCommand({
       query: {
         kind: "parsed",
         parse: String,
-        brief: "Additional filter query (Sentry search syntax)",
+        brief:
+          'Filter query (e.g., "level:error", "project:backend", "project:[a,b]")',
         optional: true,
       },
       sort: {
@@ -170,13 +174,23 @@ export const logsCommand = buildCommand({
     const { cwd } = this;
     const timeRange = parsePeriod(flags.period);
 
-    // Parse and resolve org/trace-id
+    // Parse and resolve org/trace-id (project captured for filtering)
     const parsed = parseTraceTarget(args, USAGE_HINT);
     warnIfNormalized(parsed, "trace.logs");
     const { traceId, org } = await resolveTraceOrg(parsed, cwd, USAGE_HINT);
+    const projectFilter =
+      parsed.type === "explicit" ? parsed.project : undefined;
+
     if (flags.web) {
       await openInBrowser(buildTraceUrl(org, traceId), "trace");
       return;
+    }
+
+    // Prepend project filter to the query when user explicitly specified a project
+    let query = flags.query;
+    if (projectFilter) {
+      const pf = `project:${projectFilter}`;
+      query = query ? `${pf} ${query}` : pf;
     }
 
     const logs = await withProgress(
@@ -188,7 +202,7 @@ export const logsCommand = buildCommand({
         listTraceLogs(org, traceId, {
           ...timeRangeToApiParams(timeRange),
           limit: flags.limit,
-          query: flags.query,
+          query,
           sort: flags.sort,
         })
     );
@@ -199,11 +213,21 @@ export const logsCommand = buildCommand({
       `No logs found for trace ${traceId} in the last ${flags.period}.\n\n` +
       `Try a longer period: sentry trace logs --period 30d ${traceId}`;
 
-    return yield new CommandOutput({
+    yield new CommandOutput({
       logs,
       traceId,
       hasMore,
       emptyMessage,
     });
+
+    // Build hint with real values for easy copy-paste
+    if (projectFilter) {
+      return {
+        hint: `Filtered to project '${projectFilter}'. Full trace logs: sentry trace logs ${org}/${traceId}`,
+      };
+    }
+    return {
+      hint: `Filter by project: sentry trace logs ${org}/<project>/${traceId}`,
+    };
   },
 });

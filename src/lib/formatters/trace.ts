@@ -415,6 +415,16 @@ export function spanListItemToFlatSpan(
   return flat;
 }
 
+/**
+ * Project column — auto-prepended when spans come from multiple projects.
+ * @see formatSpanTable
+ */
+const PROJECT_COLUMN: Column<FlatSpan> = {
+  header: "Project",
+  value: (s) => escapeMarkdownCell(s.project_slug || "—"),
+  minWidth: 8,
+};
+
 /** Column definitions for the flat span table */
 const SPAN_TABLE_COLUMNS: Column<FlatSpan>[] = [
   {
@@ -468,6 +478,9 @@ function buildExtraColumns(extraColumns: string[]): Column<FlatSpan>[] {
 /**
  * Format a flat span list as a rendered table string.
  *
+ * When spans come from multiple projects, a "Project" column is automatically
+ * prepended so the user can see which service each span belongs to.
+ *
  * When `extraColumns` are provided, additional columns are appended after the
  * standard columns for custom attributes requested via `--fields`.
  *
@@ -482,9 +495,15 @@ export function formatSpanTable(
   spans: FlatSpan[],
   extraColumns?: string[]
 ): string {
+  // Auto-add Project column when spans come from multiple projects
+  const projects = new Set(spans.map((s) => s.project_slug).filter(Boolean));
+  const baseColumns =
+    projects.size > 1
+      ? [PROJECT_COLUMN, ...SPAN_TABLE_COLUMNS]
+      : SPAN_TABLE_COLUMNS;
   const columns = extraColumns?.length
-    ? [...SPAN_TABLE_COLUMNS, ...buildExtraColumns(extraColumns)]
-    : SPAN_TABLE_COLUMNS;
+    ? [...baseColumns, ...buildExtraColumns(extraColumns)]
+    : baseColumns;
   return formatTable(spans, columns, { truncate: true });
 }
 

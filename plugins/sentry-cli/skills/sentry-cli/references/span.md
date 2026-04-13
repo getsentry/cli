@@ -17,7 +17,7 @@ List spans in a project or trace
 
 **Flags:**
 - `-n, --limit <value> - Number of spans (<=1000) - (default: "25")`
-- `-q, --query <value> - Filter spans (e.g., "op:db", "duration:>100ms", "project:backend")`
+- `-q, --query <value> - Filter spans (e.g., "op:db", "project:backend", "project:[cli,api]")`
 - `-s, --sort <value> - Sort order: date, duration - (default: "date")`
 - `-t, --period <value> - Time range: "7d", "2026-03-01..2026-04-01", ">=2026-03-01" - (default: "7d")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
@@ -54,6 +54,15 @@ sentry span list abc123def456abc123def456abc12345
 
 # Paginate through results
 sentry span list -c next
+
+# Show only spans from one project within a trace
+sentry span list my-org/cli-server/abc123def456abc123def456abc12345
+
+# Or use --query to filter by project
+sentry span list abc123def456abc123def456abc12345 -q "project:cli-server"
+
+# Multiple projects at once
+sentry span list abc123def456abc123def456abc12345 -q "project:[cli-server,api]"
 ```
 
 ### `sentry span view <trace-id/span-id...>`

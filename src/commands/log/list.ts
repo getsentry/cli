@@ -94,10 +94,25 @@ const DEFAULT_POLL_INTERVAL = 2;
 const COMMAND_NAME = "log list";
 
 /** Usage hint for trace mode error messages */
-const TRACE_USAGE_HINT = "sentry log list [<org>/]<trace-id>";
+const TRACE_USAGE_HINT = "sentry log list [<org>/[<project>/]]<trace-id>";
 
 /** Default time period for trace-logs queries */
 const DEFAULT_TRACE_PERIOD = "14d";
+
+/**
+ * Prepend `project:{slug}` to a query string when a project filter is specified.
+ * Returns the original query unchanged when no project is given.
+ */
+function buildProjectQuery(
+  query: string | undefined,
+  projectFilter: string | undefined
+): string | undefined {
+  if (!projectFilter) {
+    return query;
+  }
+  const pf = `project:${projectFilter}`;
+  return query ? `${pf} ${query}` : pf;
+}
 
 /**
  * Parse --limit flag, delegating range validation to shared utility.
@@ -440,9 +455,20 @@ async function* yieldTraceFollowItems<T extends LogLike>(
   }
 }
 
+/** Options for {@link executeTraceSingleFetch}. */
+type TraceFetchOptions = {
+  flags: ListFlags;
+  timeRange: TimeRange;
+  /** Project slug for API-level filtering (from org/project/trace-id syntax) */
+  projectFilter?: string;
+};
+
 /**
  * Execute a single fetch of trace-filtered logs (non-streaming, trace mode).
  * Uses the dedicated trace-logs endpoint which is org-scoped.
+ *
+ * When `projectFilter` is provided, `project:{slug}` is prepended to the query
+ * for API-level filtering, and the hint includes a copy-pasteable unfiltered command.
  *
  * Returns the fetched logs, trace ID, and a human-readable hint.
  * The caller (via the output config) handles rendering to stdout.
@@ -450,11 +476,12 @@ async function* yieldTraceFollowItems<T extends LogLike>(
 async function executeTraceSingleFetch(
   org: string,
   traceId: string,
-  flags: ListFlags,
-  timeRange: TimeRange
+  options: TraceFetchOptions
 ): Promise<FetchResult> {
+  const { flags, timeRange, projectFilter } = options;
+  const query = buildProjectQuery(flags.query, projectFilter);
   const logs = await listTraceLogs(org, traceId, {
-    query: flags.query,
+    query,
     limit: flags.limit,
     ...timeRangeToApiParams(timeRange),
     sort: flags.sort,
@@ -478,9 +505,17 @@ async function executeTraceSingleFetch(
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"} for trace ${traceId}.`;
   const tip = hasMore ? " Use --limit to show more." : "";
 
+  // Build hint with real values for easy copy-paste
+  let hint = `${countText}${tip}`;
+  if (projectFilter) {
+    hint += `\nFiltered to project '${projectFilter}'. Full trace logs: sentry log list ${org}/${traceId}`;
+  } else {
+    hint += `\nFilter by project: sentry log list ${org}/<project>/${traceId}`;
+  }
+
   return {
     result: { logs, traceId, hasMore },
-    hint: `${countText}${tip}`,
+    hint,
   };
 }
 
@@ -648,7 +683,8 @@ export const listCommand = buildListCommand(
         query: {
           kind: "parsed",
           parse: String,
-          brief: "Filter query (Sentry search syntax)",
+          brief:
+            'Filter query (e.g., "level:error", "project:backend", "project:[a,b]")',
           optional: true,
         },
         follow: {
@@ -717,6 +753,14 @@ export const listCommand = buildListCommand(
           cwd,
           TRACE_USAGE_HINT
         );
+
+        // Capture explicit project for API-level filtering
+        const projectFilter =
+          parsed.parsed.type === "explicit" ? parsed.parsed.project : undefined;
+
+        // Prepend project filter to the query when user explicitly specified a project
+        const traceQuery = buildProjectQuery(flags.query, projectFilter);
+
         if (flags.follow) {
           // Banner (suppressed in JSON mode)
           writeFollowBanner(
@@ -735,7 +779,7 @@ export const listCommand = buildListCommand(
               ?.abortSignal,
             fetch: (statsPeriod) =>
               listTraceLogs(org, traceId, {
-                query: flags.query,
+                query: traceQuery,
                 limit: flags.limit,
                 statsPeriod,
               }),
@@ -772,7 +816,12 @@ export const listCommand = buildListCommand(
             message: `Fetching logs (up to ${flags.limit})...`,
             json: flags.json,
           },
-          () => executeTraceSingleFetch(org, traceId, flags, timeRange)
+          () =>
+            executeTraceSingleFetch(org, traceId, {
+              flags,
+              timeRange,
+              projectFilter,
+            })
         );
         yield new CommandOutput(result);
         return { hint };

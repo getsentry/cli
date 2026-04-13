@@ -31,6 +31,22 @@ sentry trace view abc123def456abc123def456abc12345 -w
 sentry trace view PROJ-123
 ```
 
+### Cross-project traces
+
+```bash
+# Filter trace view to one project's spans
+sentry trace view my-org/cli-server/abc123def456abc123def456abc12345
+
+# Full trace across all projects (default)
+sentry trace view my-org/abc123def456abc123def456abc12345
+
+# Filter trace logs by project
+sentry trace logs my-org/cli-server/abc123def456abc123def456abc12345
+
+# Multiple projects via --query
+sentry trace logs abc123def456abc123def456abc12345 -q "project:[cli-server,api]"
+```
+
 ### View trace logs
 
 ```bash

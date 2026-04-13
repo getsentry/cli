@@ -1160,6 +1160,13 @@ export function formatSimpleSpanTree(
     lines.push("");
     lines.push(`${plainSafeMuted("Trace —")} ${traceId}`);
 
+    // When API filters by project, some root spans may have a parent_span_id
+    // pointing to a span in another project that wasn't returned.
+    const hasOrphanedParent = spans.some((s) => s.parent_span_id);
+    if (hasOrphanedParent) {
+      lines.push(plainSafeMuted("⤴ parent span in another project"));
+    }
+
     const totalRootSpans = spans.length;
     const truncated = totalRootSpans > MAX_ROOT_SPANS;
     const displaySpans = truncated ? spans.slice(0, MAX_ROOT_SPANS) : spans;

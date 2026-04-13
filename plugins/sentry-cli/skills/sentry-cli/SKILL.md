@@ -408,7 +408,7 @@ View distributed traces
 
 - `sentry trace list <org/project>` — List recent traces in a project
 - `sentry trace view <org/project/trace-id...>` — View details of a specific trace
-- `sentry trace logs <org/trace-id...>` — View logs associated with a trace
+- `sentry trace logs <org/project/trace-id...>` — View logs associated with a trace
 
 → Full flags and examples: `references/trace.md`
 
