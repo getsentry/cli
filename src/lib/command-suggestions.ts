@@ -97,15 +97,6 @@ const SUGGESTIONS: ReadonlyMap<string, CommandSuggestion> = new Map([
     },
   ],
 
-  // --- top-level synonyms (from CLI-TM telemetry, 54 events) ---
-  [
-    "/info",
-    {
-      command: "sentry auth status",
-      explanation: "For account info, use",
-    },
-  ],
-
   // --- old sentry-cli commands (~5 events) ---
   ["cli/info", { command: "sentry auth status" }],
   [

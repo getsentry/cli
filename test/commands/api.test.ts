@@ -127,9 +127,9 @@ describe("normalizeEndpoint: path traversal hardening (#350)", () => {
     );
   });
 
-  test("strips control characters from endpoint", () => {
-    expect(normalizeEndpoint("organizations/\x00admin/")).toBe(
-      "organizations/admin/"
+  test("rejects control characters in endpoint", () => {
+    expect(() => normalizeEndpoint("organizations/\x00admin/")).toThrow(
+      /Invalid/
     );
   });
 
@@ -141,9 +141,16 @@ describe("normalizeEndpoint: path traversal hardening (#350)", () => {
     ).toBe("organizations/my-org/issues/?environment=Production&project=123");
   });
 
-  test("strips tabs and carriage returns from endpoint", () => {
-    expect(normalizeEndpoint("organizations/\tmy-org/\r\nissues/")).toBe(
+  test("strips carriage returns and surrounding indentation", () => {
+    expect(normalizeEndpoint("organizations/my-org/\r\n  issues/")).toBe(
       "organizations/my-org/issues/"
+    );
+  });
+
+  test("preserves tabs within segments (not line-break related)", () => {
+    // Tabs without adjacent line breaks are control chars — rejected
+    expect(() => normalizeEndpoint("organizations/\tmy-org/")).toThrow(
+      /Invalid/
     );
   });
 });

@@ -364,7 +364,7 @@ export const editCommand = buildCommand({
     // because the fallback dimensions weren't known yet.
     if (replacement.layout && !existing.layout) {
       validateWidgetLayout(
-        { x: replacement.layout.x, width: replacement.layout.w },
+        { col: replacement.layout.x, width: replacement.layout.w },
         replacement.layout
       );
     }

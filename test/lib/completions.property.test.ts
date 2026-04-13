@@ -182,6 +182,7 @@ describe("proposeCompletions: Stricli integration", () => {
   // potential positional arg for the default command and proposes flags
   // instead. These groups are tested separately below.
   const groupsWithDefaultCommand = new Set([
+    "auth",
     "issue",
     "event",
     "org",

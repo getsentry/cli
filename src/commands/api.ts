@@ -85,13 +85,17 @@ export function parseMethod(value: string): HttpMethod {
  * @internal Exported for testing
  */
 export function normalizeEndpoint(endpoint: string): string {
-  // Strip ASCII control characters and any adjacent whitespace before
-  // validation. Users often copy-paste multi-line URLs from docs or
-  // scripts, producing newlines and indentation (CLI-FR, 215 events).
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally stripping control chars from user input
-  const cleaned = endpoint.replace(/\s*[\x00-\x1f]+\s*/g, "").trim();
+  // Strip line breaks and surrounding indentation from copy-pasted
+  // endpoints. Users often paste multi-line URLs from docs or scripts,
+  // producing newlines and indentation (CLI-FR, 215 events).
+  // Other control characters (NUL, etc.) are left for validateEndpoint
+  // to reject — those indicate corruption, not copy-paste.
+  const cleaned = endpoint.replace(/[ \t]*[\r\n]+[ \t]*/g, "").trim();
+  if (cleaned !== endpoint) {
+    log.warn("Stripped line breaks from endpoint (copy-paste artifact)");
+  }
 
-  // Reject path traversal after cleaning
+  // Reject path traversal and remaining control characters after cleaning
   validateEndpoint(cleaned);
 
   // Remove leading slash if present (rawApiRequest handles the base URL)

@@ -974,15 +974,15 @@ describe("validateWidgetLayout", () => {
 
   test("accepts valid layout flags", () => {
     expect(() =>
-      validateWidgetLayout({ x: 0, y: 0, width: 3, height: 2 })
+      validateWidgetLayout({ col: 0, row: 0, width: 3, height: 2 })
     ).not.toThrow();
     expect(() =>
-      validateWidgetLayout({ x: 5, y: 10, width: 1, height: 1 })
+      validateWidgetLayout({ col: 5, row: 10, width: 1, height: 1 })
     ).not.toThrow();
   });
 
   test("accepts partial layout flags", () => {
-    expect(() => validateWidgetLayout({ x: 3 })).not.toThrow();
+    expect(() => validateWidgetLayout({ col: 3 })).not.toThrow();
     expect(() => validateWidgetLayout({ width: 6 })).not.toThrow();
     expect(() => validateWidgetLayout({ height: 4 })).not.toThrow();
   });
@@ -991,17 +991,17 @@ describe("validateWidgetLayout", () => {
     expect(() => validateWidgetLayout({})).not.toThrow();
   });
 
-  test("rejects x >= GRID_COLUMNS", () => {
-    expect(() => validateWidgetLayout({ x: 6 })).toThrow(ValidationError);
-    expect(() => validateWidgetLayout({ x: 100 })).toThrow(ValidationError);
+  test("rejects col >= GRID_COLUMNS", () => {
+    expect(() => validateWidgetLayout({ col: 6 })).toThrow(ValidationError);
+    expect(() => validateWidgetLayout({ col: 100 })).toThrow(ValidationError);
   });
 
-  test("rejects negative x", () => {
-    expect(() => validateWidgetLayout({ x: -1 })).toThrow(ValidationError);
+  test("rejects negative col", () => {
+    expect(() => validateWidgetLayout({ col: -1 })).toThrow(ValidationError);
   });
 
-  test("rejects negative y", () => {
-    expect(() => validateWidgetLayout({ y: -1 })).toThrow(ValidationError);
+  test("rejects negative row", () => {
+    expect(() => validateWidgetLayout({ row: -1 })).toThrow(ValidationError);
   });
 
   test("rejects width < 1", () => {
@@ -1018,32 +1018,32 @@ describe("validateWidgetLayout", () => {
     expect(() => validateWidgetLayout({ height: -1 })).toThrow(ValidationError);
   });
 
-  test("rejects x + width > GRID_COLUMNS", () => {
-    expect(() => validateWidgetLayout({ x: 4, width: 4 })).toThrow(
+  test("rejects col + width > GRID_COLUMNS", () => {
+    expect(() => validateWidgetLayout({ col: 4, width: 4 })).toThrow(
       ValidationError
     );
-    expect(() => validateWidgetLayout({ x: 5, width: 2 })).toThrow(
+    expect(() => validateWidgetLayout({ col: 5, width: 2 })).toThrow(
       ValidationError
     );
   });
 
-  test("allows x + width = GRID_COLUMNS (exactly fills)", () => {
-    expect(() => validateWidgetLayout({ x: 3, width: 3 })).not.toThrow();
-    expect(() => validateWidgetLayout({ x: 0, width: 6 })).not.toThrow();
+  test("allows col + width = GRID_COLUMNS (exactly fills)", () => {
+    expect(() => validateWidgetLayout({ col: 3, width: 3 })).not.toThrow();
+    expect(() => validateWidgetLayout({ col: 0, width: 6 })).not.toThrow();
   });
 
   test("cross-validates with existing layout", () => {
     const existing = { x: 4, y: 0, w: 2, h: 1 };
-    // Changing only x=5 with existing w=2 → 5+2=7 > 6
-    expect(() => validateWidgetLayout({ x: 5 }, existing)).toThrow(
+    // Changing only col=5 with existing w=2 → 5+2=7 > 6
+    expect(() => validateWidgetLayout({ col: 5 }, existing)).toThrow(
       ValidationError
     );
     // Changing only width=3 with existing x=4 → 4+3=7 > 6
     expect(() => validateWidgetLayout({ width: 3 }, existing)).toThrow(
       ValidationError
     );
-    // Valid: x=4 with existing w=2 → 4+2=6 ≤ 6
-    expect(() => validateWidgetLayout({ x: 4 }, existing)).not.toThrow();
+    // Valid: col=4 with existing w=2 → 4+2=6 ≤ 6
+    expect(() => validateWidgetLayout({ col: 4 }, existing)).not.toThrow();
   });
 });
 

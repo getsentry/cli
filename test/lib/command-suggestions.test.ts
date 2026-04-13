@@ -144,8 +144,11 @@ describe("routes with defaultCommand", () => {
     }
   });
 
-  test("route groups without view do not have defaultCommand", () => {
-    expect(routesWithDefault.has("auth")).toBe(false);
+  test("auth route group has defaultCommand (status)", () => {
+    expect(routesWithDefault.has("auth")).toBe(true);
+  });
+
+  test("route groups without defaultCommand", () => {
     expect(routesWithDefault.has("cli")).toBe(false);
     expect(routesWithDefault.has("sourcemap")).toBe(false);
     expect(routesWithDefault.has("repo")).toBe(false);

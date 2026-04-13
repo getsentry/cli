@@ -550,6 +550,18 @@ const { sql, values } = upsert(
 );
 ```
 
+### UX Philosophy: Intent-First Correction
+
+When the user's intent is unambiguous, **do what they meant** instead of rejecting with an error. Show a `log.warn()` notice explaining what was corrected and how to do it properly next time. Only reject when intent is ambiguous or the input is genuinely dangerous (e.g., path traversal).
+
+This applies across the CLI:
+- **Input cleanup** — strip copy-paste artifacts (line breaks, indentation) and warn, rather than throwing `ValidationError`
+- **Entity type recovery** — resolve wrong-type identifiers to the correct type (see "Auto-Recovery" below)
+- **Argument order swapping** — fix swapped positional args with a stderr warning
+- **Slug/org matching** — redirect bare slugs to the most likely intent
+
+When recovery is **ambiguous or impossible**, keep the error but add entity-aware suggestions and fuzzy matches.
+
 ### Error Handling
 
 All CLI errors extend the `CliError` base class from `src/lib/errors.ts`:
@@ -1070,4 +1082,5 @@ mock.module("./some-module", () => ({
 
 <!-- lore:019cc43d-e651-7154-a88e-1309c4a2a2b6 -->
 * **Testing Stricli command func() bodies via spyOn mocking**: To unit-test a Stricli command's \`func()\` body: (1) \`const func = await cmd.loader()\`, (2) \`func.call(mockContext, flags, ...args)\` with mock \`stdout\`, \`stderr\`, \`cwd\`, \`setContext\`. (3) \`spyOn\` namespace imports to mock dependencies (e.g., \`spyOn(apiClient, 'getLogs')\`). The \`loader()\` return type union causes \`.call()\` LSP errors — these are false positives that pass \`tsc --noEmit\`. When API functions are renamed (e.g., \`getLog\` → \`getLogs\`), update both spy target name AND mock return shape (single → array). Slug normalization (\`normalizeSlug\`) replaces underscores with dashes but does NOT lowercase — test assertions must match original casing (e.g., \`'CAM-82X'\` not \`'cam-82x'\`).
+
 <!-- End lore-managed section -->

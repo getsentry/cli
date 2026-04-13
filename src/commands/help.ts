@@ -10,7 +10,6 @@
 
 import type { SentryContext } from "../context.js";
 import { buildCommand } from "../lib/command.js";
-import { getCommandSuggestion } from "../lib/command-suggestions.js";
 import { OutputError } from "../lib/errors.js";
 import { CommandOutput } from "../lib/formatters/output.js";
 import {
@@ -59,17 +58,6 @@ export const helpCommand = buildCommand({
     // This ensures --json mode always gets structured output.
     const result = introspectCommand(commandPath);
     if ("error" in result) {
-      // Enrich the error with a command suggestion when the unknown token
-      // matches a known synonym (e.g., "info" → "sentry auth status").
-      // Without this, agents and scripts that run `sentry info` get a bare
-      // "command not found" dump instead of an actionable hint (CLI-TM).
-      const suggestion = getCommandSuggestion("", commandPath[0] ?? "");
-      if (suggestion) {
-        const hint = suggestion.explanation
-          ? `${suggestion.explanation} ${suggestion.command}`
-          : `Try: ${suggestion.command}`;
-        result.suggestions = [hint, ...(result.suggestions ?? [])];
-      }
       // OutputError renders through the output system but exits non-zero
       throw new OutputError(result);
     }
