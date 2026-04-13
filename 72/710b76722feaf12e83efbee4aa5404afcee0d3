@@ -1,0 +1,91 @@
+# Improve ContextError messaging for auto-detection failures
+
+## Problem
+When org/project auto-detection fails, the error says "Organization and project are required" — which sounds like the user forgot to do something. It should instead explain that auto-detection was attempted and failed, and clearly instruct on how to provide the values.
+
+## Approach
+
+**Key insight**: `ContextError` is used for two distinct scenarios:
+1. **Auto-detection failed** — caller passes NO `alternatives` (gets `DEFAULT_CONTEXT_ALTERNATIVES`). ~12 call sites.
+2. **Required input missing** — caller passes `[]` or custom alternatives. ~15 call sites.
+
+We detect the scenario by checking whether `alternatives === undefined` before applying the default. No new constructor parameters needed, fully backward compatible.
+
+## Changes
+
+### 1. `src/lib/errors.ts` — Core changes
+
+**Update `DEFAULT_CONTEXT_ALTERNATIVES`** — slightly improved wording:
+```typescript
+const DEFAULT_CONTEXT_ALTERNATIVES = [
+  "Run from a directory with a Sentry DSN in source code or .env files",
+  "Set SENTRY_ORG and SENTRY_PROJECT (or SENTRY_DSN) environment variables",
+  "Run 'sentry org list' to find your organization slug",
+  "Run 'sentry project list <org>/' to find project slugs",
+] as const;
+```
+First line changes from "Sentry-configured project" → "Sentry DSN in source code or .env files" (tells user what the CLI actually looks for). Rest unchanged — discovery hints are kept for users who want to specify explicitly.
+
+**Update `buildContextMessage`** — add `isAutoDetect` parameter:
+- When `isAutoDetect=true`: headline → `"Could not auto-detect {resource}."` (resource lowercased), instruction → `"Provide {them} explicitly:"`
+- When `isAutoDetect=false`: unchanged — `"{Resource} {is/are} required."`, `"Specify {them} using:"`
+- "Or:" section header stays `"Or:"` for both modes (alternatives are a mix of auto-detection setup and discovery)
+
+**Update `ContextError` constructor** — detect auto-detect mode from `alternatives === undefined`:
+```typescript
+constructor(resource, command, alternatives?, note?) {
+  const isAutoDetect = alternatives === undefined;
+  const resolvedAlts = alternatives ?? [...DEFAULT_CONTEXT_ALTERNATIVES];
+  super(buildContextMessage(resource, command, resolvedAlts, note, isAutoDetect));
+  // ... store fields as before
+}
+```
+
+**New message format for auto-detect failures:**
+```
+Could not auto-detect organization and project.
+
+Provide them explicitly:
+  sentry issue list <org>/<project>
+
+Or:
+  - Run from a directory with a Sentry DSN in source code or .env files
+  - Set SENTRY_ORG and SENTRY_PROJECT (or SENTRY_DSN) environment variables
+  - Run 'sentry org list' to find your organization slug
+  - Run 'sentry project list <org>/' to find project slugs
+```
+
+**Unchanged format for required input (custom or empty alternatives):**
+```
+Event ID is required.
+
+Specify it using:
+  sentry event view [<org>/<project>/]<event-id>
+```
+
+### 2. `test/lib/errors.test.ts` — Update test assertions
+
+- Test "format() includes usage hints with default alternatives" (line 105): change assertion from `"Organization is required."` to `"Could not auto-detect organization."`, update alternative text assertion for the first bullet
+- Test "format() includes note section after alternatives" (line 135): same headline change, update first alternative text
+- Tests with custom or empty alternatives (lines 118, 128, 159): **UNCHANGED** — still use "is required"
+- Add test: verify auto-detect mode uses different wording than explicit alternatives
+
+### 3. `test/commands/log/list.test.ts:802` — Minor assertion update
+
+Change `.toContain("Organization")` to `.toContain("organization")` (lowercase in new auto-detect format).
+
+### 4. No source command changes needed
+
+All ~12 auto-detect call sites already pass `alternatives` as `undefined` (or omit it). They automatically pick up the new messaging. No command files need edits.
+
+## Files to modify
+- `src/lib/errors.ts` (lines 156-277)
+- `test/lib/errors.test.ts` (lines 104-180)
+- `test/commands/log/list.test.ts` (line 802)
+
+## Verification
+1. `bun test test/lib/errors.test.ts` — Core error formatting tests
+2. `bun test test/commands/log/list.test.ts` — Log list auto-detect test
+3. `bun test` — Full test suite to catch any other assertions on the old wording
+4. `bun run typecheck` — Type checking
+5. `bun run lint` — Style compliance
