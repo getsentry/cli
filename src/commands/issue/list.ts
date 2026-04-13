@@ -204,6 +204,49 @@ function parseSort(value: string): SortValue {
   return value as SortValue;
 }
 
+/** Matches standalone boolean OR operator (word boundary, not inside a qualifier value). */
+const BOOLEAN_OR_RE = /\bOR\b/;
+/** Matches standalone boolean AND operator. */
+const BOOLEAN_AND_RE = /\bAND\b/;
+
+/**
+ * Sanitize `--query` before sending to the Sentry API.
+ *
+ * - **AND**: Sentry search implicitly ANDs space-separated terms, so explicit
+ *   `AND` has identical semantics. Strip it and warn — the user's intent is
+ *   fulfilled without error.
+ * - **OR**: Genuinely different semantics (union vs intersection). The API
+ *   rejects it with 400. Throw a helpful ValidationError since we cannot
+ *   silently approximate the intent.
+ *
+ * @returns The sanitized query string (AND stripped, OR rejected)
+ */
+function sanitizeQuery(
+  query: string,
+  log: { warn: (msg: string) => void }
+): string {
+  if (BOOLEAN_OR_RE.test(query)) {
+    throw new ValidationError(
+      "Sentry search does not support the OR operator.\n\n" +
+        "Alternatives:\n" +
+        '  - Use space-separated terms (implicit AND): --query "error timeout"\n' +
+        "  - Run separate queries for each term\n" +
+        '  - Use wildcards for partial matching: --query "*error*"\n\n' +
+        "Search syntax: https://docs.sentry.io/concepts/search/",
+      "query"
+    );
+  }
+  if (BOOLEAN_AND_RE.test(query)) {
+    const sanitized = query.replace(/\s*\bAND\b\s*/g, " ").trim();
+    log.warn(
+      "Sentry search implicitly ANDs terms — removed explicit AND operator. " +
+        `Running query: "${sanitized}"`
+    );
+    return sanitized;
+  }
+  return query;
+}
+
 /**
  * Format the issue list header with column titles.
  *
@@ -1450,6 +1493,7 @@ export const __testing = {
   getComparator,
   compareDates,
   parseSort,
+  sanitizeQuery,
   CURSOR_SEP,
   MAX_LIMIT: LIST_MAX_LIMIT,
   VALID_SORT_VALUES,
@@ -1599,6 +1643,7 @@ export const listCommand = buildListCommand("issue", {
   },
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
     const { cwd } = this;
+    const log = logger.withTag("issue.list");
 
     const parsed = parseOrgProjectArg(target);
 
@@ -1616,20 +1661,25 @@ export const listCommand = buildListCommand("issue", {
       );
     }
 
-    const timeRange = parsePeriod(flags.period ?? DEFAULT_PERIOD);
+    // Sanitize --query: auto-correct AND (same semantics), reject OR (different semantics).
+    const effectiveFlags: ListFlags = flags.query
+      ? { ...flags, query: sanitizeQuery(flags.query, log) }
+      : flags;
+
+    const timeRange = parsePeriod(effectiveFlags.period ?? DEFAULT_PERIOD);
 
     // biome-ignore lint/suspicious/noExplicitAny: shared handler accepts any mode variant
     const resolveAndHandle: ModeHandler<any> = (ctx) =>
       handleResolvedTargets({
         ...ctx,
-        flags,
+        flags: effectiveFlags,
         timeRange,
       });
 
     const result = (await dispatchOrgScopedList({
       config: issueListMeta,
       cwd,
-      flags,
+      flags: effectiveFlags,
       parsed,
       // When a bare slug matches a cached org, silently redirect to org-all
       // mode instead of erroring (CLI-MC, 17 users). The user typed an org
@@ -1645,7 +1695,7 @@ export const listCommand = buildListCommand("issue", {
         "org-all": (ctx) =>
           handleOrgAllIssues({
             org: ctx.parsed.org,
-            flags,
+            flags: effectiveFlags,
             timeRange,
           }),
       },

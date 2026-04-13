@@ -15,6 +15,7 @@ import {
   test,
 } from "bun:test";
 import {
+  __testing,
   listCommand,
   PAGINATION_KEY,
 } from "../../../src/commands/issue/list.js";
@@ -29,7 +30,11 @@ import {
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as paginationDb from "../../../src/lib/db/pagination.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
-import { ApiError, ResolutionError } from "../../../src/lib/errors.js";
+import {
+  ApiError,
+  ResolutionError,
+  ValidationError,
+} from "../../../src/lib/errors.js";
 import { mockFetch, useTestConfigDir } from "../../helpers.js";
 
 type ListFlags = {
@@ -1120,5 +1125,83 @@ describe("issue list: collapse parameter optimization", () => {
     const callArgs = listIssuesPaginatedSpy.mock.calls[0];
     const options = callArgs?.[2] as Record<string, unknown> | undefined;
     expect(options?.groupStatsPeriod).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sanitizeQuery
+// ---------------------------------------------------------------------------
+
+const { sanitizeQuery } = __testing;
+
+/** No-op logger for tests that don't check warnings */
+// biome-ignore lint/suspicious/noEmptyBlockStatements: intentional no-op
+const noopLog = { warn: () => {} };
+
+describe("sanitizeQuery", () => {
+  test("passes through a simple query unchanged", () => {
+    expect(sanitizeQuery("is:unresolved level:error", noopLog)).toBe(
+      "is:unresolved level:error"
+    );
+  });
+
+  test("passes through a plain text query unchanged", () => {
+    expect(sanitizeQuery("timeout crash", noopLog)).toBe("timeout crash");
+  });
+
+  test("throws ValidationError for OR operator", () => {
+    expect(() => sanitizeQuery("error OR timeout", noopLog)).toThrow(
+      ValidationError
+    );
+  });
+
+  test("ValidationError for OR includes field and suggestions", () => {
+    try {
+      sanitizeQuery("login OR auth OR token", noopLog);
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      const ve = error as ValidationError;
+      expect(ve.field).toBe("query");
+      expect(ve.message).toContain("OR");
+      expect(ve.message).toContain("docs.sentry.io");
+    }
+  });
+
+  test("strips AND and returns cleaned query", () => {
+    expect(sanitizeQuery("error AND timeout", noopLog)).toBe("error timeout");
+  });
+
+  test("strips multiple AND operators", () => {
+    expect(sanitizeQuery("error AND timeout AND crash", noopLog)).toBe(
+      "error timeout crash"
+    );
+  });
+
+  test("AND removal emits a warning", () => {
+    const warnings: string[] = [];
+    const log = { warn: (msg: string) => warnings.push(msg) };
+    sanitizeQuery("error AND timeout", log);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("AND");
+    expect(warnings[0]).toContain("error timeout");
+  });
+
+  test("does not match lowercase 'and' or 'or'", () => {
+    // Sentry search operators are case-sensitive uppercase
+    expect(sanitizeQuery("sandbox handler", noopLog)).toBe("sandbox handler");
+    expect(sanitizeQuery("order error", noopLog)).toBe("order error");
+  });
+
+  test("rejects OR even with qualifiers mixed in", () => {
+    expect(() =>
+      sanitizeQuery("is:unresolved error OR timeout", noopLog)
+    ).toThrow(ValidationError);
+  });
+
+  test("strips AND with qualifiers", () => {
+    expect(sanitizeQuery("is:unresolved AND level:error", noopLog)).toBe(
+      "is:unresolved level:error"
+    );
   });
 });
