@@ -200,7 +200,7 @@ describe("release view", () => {
 
     await expect(
       func.call(context, { fresh: false, json: false }, "1.0.0")
-    ).rejects.toThrow("Organization");
+    ).rejects.toThrow("organization");
   });
 
   test("displays per-project health data in human mode", async () => {

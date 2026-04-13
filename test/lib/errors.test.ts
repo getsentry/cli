@@ -102,13 +102,14 @@ describe("ConfigError", () => {
 });
 
 describe("ContextError", () => {
-  test("format() includes usage hints with default alternatives", () => {
+  test("format() uses auto-detect headline when alternatives omitted", () => {
     const err = new ContextError("Organization", "sentry org list");
     const formatted = err.format();
-    expect(formatted).toContain("Organization is required.");
+    expect(formatted).toContain("Could not auto-detect organization.");
+    expect(formatted).toContain("Provide it explicitly:");
     expect(formatted).toContain("sentry org list");
     expect(formatted).toContain(
-      "Run from a directory with a Sentry-configured project"
+      "Run from a directory with a Sentry DSN in source code or .env files"
     );
     expect(formatted).toContain(
       "Set SENTRY_ORG and SENTRY_PROJECT (or SENTRY_DSN) environment variables"
@@ -140,11 +141,11 @@ describe("ContextError", () => {
       "Found 2 DSN(s) that could not be resolved"
     );
     const formatted = err.format();
-    expect(formatted).toContain("Organization is required.");
+    expect(formatted).toContain("Could not auto-detect organization.");
     // Default alternatives are present
     expect(formatted).toContain("Or:");
     expect(formatted).toContain(
-      "Run from a directory with a Sentry-configured project"
+      "Run from a directory with a Sentry DSN in source code or .env files"
     );
     // Note appears as a separate section
     expect(formatted).toContain(

@@ -153,7 +153,7 @@ describe("resolveOrgAndIssueId", () => {
         cwd: getConfigDir(),
         command: "explain",
       })
-    ).rejects.toThrow("Organization");
+    ).rejects.toThrow("organization");
   });
 
   test("resolves numeric ID when API response includes subdomain-style permalink", async () => {
@@ -1814,7 +1814,7 @@ describe("resolveOrgAndIssueId: magic @ selectors", () => {
         cwd: getConfigDir(),
         command: "view",
       })
-    ).rejects.toThrow("Organization");
+    ).rejects.toThrow("organization");
   });
 });
 
