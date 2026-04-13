@@ -82,8 +82,8 @@ Add a widget to a dashboard
 - `-g, --group-by <value>... - Group-by column (repeatable)`
 - `-s, --sort <value> - Order by (prefix - for desc, e.g. -count)`
 - `-n, --limit <value> - Result limit`
-- `--x <value> - Grid column position (0-based, 0–5)`
-- `--y <value> - Grid row position (0-based)`
+- `-x, --col <value> - Grid column position (0-based, 0–5)`
+- `-y, --row <value> - Grid row position (0-based)`
 - `--width <value> - Widget width in grid columns (1–6)`
 - `--height <value> - Widget height in grid rows (min 1)`
 - `-l, --layout <value> - Layout mode: sequential (append in order) or dense (fill gaps) - (default: "sequential")`
@@ -128,8 +128,8 @@ Edit a widget in a dashboard
 - `-g, --group-by <value>... - Group-by column (repeatable)`
 - `-s, --sort <value> - Order by (prefix - for desc, e.g. -count)`
 - `-n, --limit <value> - Result limit`
-- `--x <value> - Grid column position (0-based, 0–5)`
-- `--y <value> - Grid row position (0-based)`
+- `-x, --col <value> - Grid column position (0-based, 0–5)`
+- `-y, --row <value> - Grid row position (0-based)`
 - `--width <value> - Widget width in grid columns (1–6)`
 - `--height <value> - Widget height in grid rows (min 1)`
 
