@@ -85,11 +85,17 @@ export function parseMethod(value: string): HttpMethod {
  * @internal Exported for testing
  */
 export function normalizeEndpoint(endpoint: string): string {
-  // Reject path traversal and control characters before processing
-  validateEndpoint(endpoint);
+  // Strip ASCII control characters and any adjacent whitespace before
+  // validation. Users often copy-paste multi-line URLs from docs or
+  // scripts, producing newlines and indentation (CLI-FR, 215 events).
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally stripping control chars from user input
+  const cleaned = endpoint.replace(/\s*[\x00-\x1f]+\s*/g, "").trim();
+
+  // Reject path traversal after cleaning
+  validateEndpoint(cleaned);
 
   // Remove leading slash if present (rawApiRequest handles the base URL)
-  let trimmed = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
+  let trimmed = cleaned.startsWith("/") ? cleaned.slice(1) : cleaned;
 
   // Strip api/0/ prefix if user accidentally included it — the base URL
   // already includes /api/0/, so keeping it would produce a doubled path
