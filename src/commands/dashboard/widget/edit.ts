@@ -85,8 +85,8 @@ function mergeLayout(
   existing: DashboardWidget
 ): DashboardWidget["layout"] {
   const hasChange =
-    flags.x !== undefined ||
-    flags.y !== undefined ||
+    flags.col !== undefined ||
+    flags.row !== undefined ||
     flags.width !== undefined ||
     flags.height !== undefined;
 
@@ -96,8 +96,8 @@ function mergeLayout(
 
   return {
     ...(existing.layout ?? FALLBACK_LAYOUT),
-    ...(flags.x !== undefined && { x: flags.x }),
-    ...(flags.y !== undefined && { y: flags.y }),
+    ...(flags.col !== undefined && { x: flags.col }),
+    ...(flags.row !== undefined && { y: flags.row }),
     ...(flags.width !== undefined && { w: flags.width }),
     ...(flags.height !== undefined && { h: flags.height }),
   };
@@ -198,13 +198,13 @@ export const editCommand = buildCommand({
       "The dashboard can be specified by numeric ID or title.\n" +
       "Identify the widget by --index (0-based) or --title.\n" +
       "Only provided flags are changed — omitted values are preserved.\n\n" +
-      "Layout flags (--x, --y, --width, --height) control widget position\n" +
+      "Layout flags (--col/-x, --row/-y, --width, --height) control widget position\n" +
       "and size in the 6-column dashboard grid.\n\n" +
       "Examples:\n" +
       "  sentry dashboard widget edit 12345 --title 'Error Rate' --display bar\n" +
       "  sentry dashboard widget edit 'My Dashboard' --index 0 --query p95:span.duration\n" +
       "  sentry dashboard widget edit 12345 --title 'Old Name' --new-title 'New Name'\n" +
-      "  sentry dashboard widget edit 12345 --index 0 --x 0 --y 0 --width 6 --height 2",
+      "  sentry dashboard widget edit 12345 --index 0 --col 0 --row 0 --width 6 --height 2",
   },
   output: {
     human: formatWidgetEdited,
@@ -282,13 +282,13 @@ export const editCommand = buildCommand({
         brief: "Result limit",
         optional: true,
       },
-      x: {
+      col: {
         kind: "parsed",
         parse: numberParser,
         brief: "Grid column position (0-based, 0–5)",
         optional: true,
       },
-      y: {
+      row: {
         kind: "parsed",
         parse: numberParser,
         brief: "Grid row position (0-based)",
@@ -316,6 +316,8 @@ export const editCommand = buildCommand({
       g: "group-by",
       s: "sort",
       n: "limit",
+      x: "col",
+      y: "row",
     },
   },
   async *func(this: SentryContext, flags: EditFlags, ...args: string[]) {
@@ -352,7 +354,7 @@ export const editCommand = buildCommand({
     const updateBody = prepareDashboardForUpdate(current);
     const existing = updateBody.widgets[widgetIndex] as DashboardWidget;
 
-    // Validate individual layout flag ranges early (catches --x -1, --width 7, etc.)
+    // Validate individual layout flag ranges early (catches --col -1, --width 7, etc.)
     validateWidgetLayout(flags, existing.layout);
 
     const replacement = buildReplacement(flags, existing);
@@ -362,7 +364,7 @@ export const editCommand = buildCommand({
     // because the fallback dimensions weren't known yet.
     if (replacement.layout && !existing.layout) {
       validateWidgetLayout(
-        { x: replacement.layout.x, width: replacement.layout.w },
+        { col: replacement.layout.x, width: replacement.layout.w },
         replacement.layout
       );
     }

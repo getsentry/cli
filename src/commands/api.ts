@@ -18,6 +18,9 @@ import { getDefaultSdkConfig } from "../lib/sentry-client.js";
 
 const log = logger.withTag("api");
 
+/** Strips line breaks and surrounding indentation from copy-pasted endpoints. */
+const LINE_BREAK_PATTERN = /[ \t]*[\r\n]+[ \t]*/g;
+
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
 
 type ApiFlags = {
@@ -85,11 +88,21 @@ export function parseMethod(value: string): HttpMethod {
  * @internal Exported for testing
  */
 export function normalizeEndpoint(endpoint: string): string {
-  // Reject path traversal and control characters before processing
-  validateEndpoint(endpoint);
+  // Strip line breaks and surrounding indentation from copy-pasted
+  // endpoints. Users often paste multi-line URLs from docs or scripts,
+  // producing newlines and indentation (CLI-FR, 215 events).
+  // Other control characters (NUL, etc.) are left for validateEndpoint
+  // to reject — those indicate corruption, not copy-paste.
+  const cleaned = endpoint.replace(LINE_BREAK_PATTERN, "").trim();
+  if (cleaned !== endpoint) {
+    log.warn("Stripped line breaks from endpoint (copy-paste artifact)");
+  }
+
+  // Reject path traversal and remaining control characters after cleaning
+  validateEndpoint(cleaned);
 
   // Remove leading slash if present (rawApiRequest handles the base URL)
-  let trimmed = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
+  let trimmed = cleaned.startsWith("/") ? cleaned.slice(1) : cleaned;
 
   // Strip api/0/ prefix if user accidentally included it — the base URL
   // already includes /api/0/, so keeping it would produce a doubled path
@@ -1194,12 +1207,15 @@ export const apiCommand = buildCommand({
     const normalizedEndpoint = normalizeEndpoint(endpoint);
 
     // Detect whether normalizeEndpoint stripped the api/0/ prefix (CLI-K1).
-    // normalizeEndpoint only adds at most 1 char (trailing slash), so if the
-    // normalized result is shorter than the raw input, the prefix was stripped.
-    const rawLen = endpoint.startsWith("/")
-      ? endpoint.length - 1
-      : endpoint.length;
-    if (normalizedEndpoint.length < rawLen) {
+    // Compare against the cleaned endpoint (line breaks removed, trimmed,
+    // leading slash removed) since normalizeEndpoint also strips copy-paste
+    // artifacts before the api/0/ check. Without this, line-break removal
+    // alone would shrink the length and trigger a false api/0/ warning.
+    const cleaned = endpoint.replace(LINE_BREAK_PATTERN, "").trim();
+    const baseLen = cleaned.startsWith("/")
+      ? cleaned.length - 1
+      : cleaned.length;
+    if (normalizedEndpoint.length < baseLen) {
       log.warn(
         "Endpoint includes the /api/0/ prefix which is added automatically — stripping it to avoid a doubled path"
       );

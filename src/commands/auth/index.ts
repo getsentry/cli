@@ -15,6 +15,7 @@ export const authRoute = buildRouteMap({
     token: tokenCommand,
     whoami: whoamiCommand,
   },
+  defaultCommand: "status",
   docs: {
     brief: "Authenticate with Sentry",
     fullDescription:
