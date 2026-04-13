@@ -6,9 +6,12 @@
 
 import type { SentryContext } from "../../context.js";
 import {
+  attributesToDict,
+  fetchMultiSpanDetails,
   getDetailedTrace,
   getIssueByShortId,
   getLatestEvent,
+  type TraceItemDetail,
 } from "../../lib/api-client.js";
 import {
   detectSwappedViewArgs,
@@ -46,6 +49,7 @@ type ViewFlags = {
   readonly web: boolean;
   readonly spans: number;
   readonly fresh: boolean;
+  readonly full: boolean;
   readonly fields?: string[];
 };
 
@@ -166,6 +170,8 @@ export type TraceViewData = {
   spans: unknown[];
   /** Pre-formatted span tree lines for human output (not serialized) */
   spanTreeLines?: string[];
+  /** Per-span attribute details from trace-items endpoint (when --full or --json) */
+  details?: Map<string, TraceItemDetail>;
 };
 
 /**
@@ -187,12 +193,74 @@ function countSpansWithAdditionalAttrs(spans: unknown[]): number {
   return count;
 }
 
+/** Span count threshold for the large-trace informational warning */
+const LARGE_TRACE_WARN_THRESHOLD = 500;
+
+/** Span count threshold for showing progress indicator */
+const PROGRESS_THRESHOLD = 20;
+
+/**
+ * Flatten a nested span tree into an array in depth-first order.
+ * Collects ALL spans — no cap.
+ *
+ * @internal Exported for testing
+ */
+export function flattenSpanTree(spans: TraceSpan[]): TraceSpan[] {
+  const result: TraceSpan[] = [];
+  // Reverse so the first child is popped first (depth-first order)
+  const stack = [...spans].reverse();
+  let span = stack.pop();
+  while (span) {
+    result.push(span);
+    if (span.children) {
+      for (let i = span.children.length - 1; i >= 0; i--) {
+        const child = span.children[i];
+        if (child) {
+          stack.push(child);
+        }
+      }
+    }
+    span = stack.pop();
+  }
+  return result;
+}
+
+/**
+ * Recursively merge detail data dicts onto a span tree for JSON output.
+ * Each span with a matching detail entry gets a `data` dict containing
+ * filtered custom attributes.
+ */
+function mergeSpanDetails(
+  span: TraceSpan,
+  details: Map<string, TraceItemDetail>
+): TraceSpan & { data?: Record<string, unknown> } {
+  const { children, ...rest } = span;
+  const result: TraceSpan & { data?: Record<string, unknown> } = { ...rest };
+
+  if (span.span_id) {
+    const detail = details.get(span.span_id);
+    if (detail) {
+      const data = attributesToDict(detail.attributes);
+      if (Object.keys(data).length > 0) {
+        result.data = data;
+      }
+    }
+  }
+
+  if (children) {
+    result.children = children.map((c) => mergeSpanDetails(c, details));
+  }
+
+  return result;
+}
+
 /**
  * Format trace view data for human-readable terminal output.
  *
  * Renders trace summary and optional span tree.
  * When spans carry `additional_attributes` (requested via `--fields`),
  * a note is appended indicating how many spans have extra data.
+ * When `details` are present (from --full or --json), notes their count.
  *
  * @internal Exported for testing
  */
@@ -205,11 +273,19 @@ export function formatTraceView(data: TraceViewData): string {
     parts.push(data.spanTreeLines.join("\n"));
   }
 
+  // Note spans with additional_attributes (from --fields)
   const attrsCount = countSpansWithAdditionalAttrs(data.spans);
   if (attrsCount > 0) {
     const spanWord = attrsCount === 1 ? "span has" : "spans have";
     parts.push(
       `\n${attrsCount} ${spanWord} additional attributes. Use --json to see them.`
+    );
+  }
+
+  // Note spans with full detail data (from --full or auto-fetched with --json)
+  if (data.details && data.details.size > 0) {
+    parts.push(
+      `\n${data.details.size} span(s) have attribute data. Use --json to see full details.`
     );
   }
 
@@ -265,13 +341,100 @@ function jsonTransformTraceView(
   data: TraceViewData,
   fields?: string[]
 ): unknown {
-  const { summary, spans } = data;
-  const cleanedSpans = (spans as TraceSpan[]).map(filterSpanMeasurements);
+  const { summary, spans, details } = data;
+  const cleanedSpans = (spans as TraceSpan[]).map((span) => {
+    const cleaned = filterSpanMeasurements(span);
+    return details && details.size > 0
+      ? mergeSpanDetails(cleaned, details)
+      : cleaned;
+  });
   const result: Record<string, unknown> = { ...summary, spans: cleanedSpans };
   if (fields && fields.length > 0) {
     return filterFields(result, fields);
   }
   return result;
+}
+
+/** Resolved trace target: org, project (optional), and trace ID */
+type ResolvedTrace = {
+  traceId: string;
+  org: string;
+  project?: string;
+};
+
+/**
+ * Resolve a trace from an issue short ID by looking up the issue,
+ * fetching its latest event, and extracting the trace ID.
+ */
+async function resolveTraceFromIssue(
+  issueShortId: string,
+  cwd: string
+): Promise<ResolvedTrace> {
+  const log = logger.withTag("trace.view");
+  log.warn(
+    `'${issueShortId}' is an issue short ID, not a trace ID. Looking up the issue's trace.`
+  );
+
+  const resolved = await resolveOrg({ cwd });
+  if (!resolved) {
+    throw new ContextError("Organization", `sentry issue view ${issueShortId}`);
+  }
+  const org = resolved.org;
+
+  const issue = await getIssueByShortId(org, issueShortId);
+  let project: string | undefined;
+  if (issue.project?.slug) {
+    setOrgProjectContext([org], [issue.project.slug]);
+    project = issue.project.slug;
+  }
+
+  const event = await getLatestEvent(org, issue.id);
+  const traceId = event?.contexts?.trace?.trace_id;
+  if (!traceId) {
+    throw new ValidationError(
+      `Could not find a trace for issue '${issueShortId}'. The latest event has no trace context.\n\n` +
+        `Try: sentry issue view ${issueShortId}`
+    );
+  }
+
+  return { traceId, org, project };
+}
+
+/**
+ * Fetch per-span details when --full or --json is active.
+ *
+ * Extracted from func() to keep cognitive complexity under the Biome
+ * limit of 15. Logs a warning for large traces and reports progress
+ * on stderr for traces with more than {@link PROGRESS_THRESHOLD} spans.
+ */
+function fetchTraceSpanDetails(
+  spans: TraceSpan[],
+  totalCount: number,
+  options: {
+    org: string;
+    fallbackProject: string;
+    traceId: string;
+  }
+): Promise<Map<string, TraceItemDetail>> {
+  const log = logger.withTag("trace.view");
+  const flat = flattenSpanTree(spans);
+
+  if (totalCount > LARGE_TRACE_WARN_THRESHOLD) {
+    log.warn(
+      `Trace has ${totalCount} spans \u2014 this may take a moment. ` +
+        "Use 'sentry span view' for specific spans."
+    );
+  }
+
+  return fetchMultiSpanDetails(flat, {
+    ...options,
+    onProgress:
+      flat.length > PROGRESS_THRESHOLD
+        ? (done, total) => {
+            log.info(`Fetching span data (${done}/${total})...`);
+          }
+        : undefined,
+  });
 }
 
 export const viewCommand = buildCommand({
@@ -305,6 +468,11 @@ export const viewCommand = buildCommand({
         brief: "Open in browser",
         default: false,
       },
+      full: {
+        kind: "boolean",
+        brief: "Fetch full span attributes (auto-enabled with --json)",
+        default: false,
+      },
       ...spansFlag,
       fresh: FRESH_FLAG,
     },
@@ -325,47 +493,15 @@ export const viewCommand = buildCommand({
       log.warn(suggestion);
     }
 
-    let traceId: string;
-    let org: string;
-
+    let resolved: ResolvedTrace;
     if (issueShortId) {
-      // Auto-recover: user passed an issue short ID instead of a trace ID.
-      // Resolve the issue → get its latest event → extract trace ID.
-      log.warn(
-        `'${issueShortId}' is an issue short ID, not a trace ID. Looking up the issue's trace.`
-      );
-
-      const resolved = await resolveOrg({ cwd });
-      if (!resolved) {
-        throw new ContextError(
-          "Organization",
-          `sentry issue view ${issueShortId}`
-        );
-      }
-      org = resolved.org;
-
-      const issue = await getIssueByShortId(org, issueShortId);
-      // Enrich telemetry with the issue's project (resolveOrg only sets sentry.org)
-      if (issue.project?.slug) {
-        setOrgProjectContext([org], [issue.project.slug]);
-      }
-      const event = await getLatestEvent(org, issue.id);
-      const eventTraceId = event?.contexts?.trace?.trace_id;
-      if (!eventTraceId) {
-        throw new ValidationError(
-          `Could not find a trace for issue '${issueShortId}'. The latest event has no trace context.\n\n` +
-            `Try: sentry issue view ${issueShortId}`
-        );
-      }
-      traceId = eventTraceId;
+      resolved = await resolveTraceFromIssue(issueShortId, cwd);
     } else {
-      // Normal flow: parse and resolve org/project/trace-id
       const parsed = parseTraceTarget(correctedArgs, USAGE_HINT);
       warnIfNormalized(parsed, "trace.view");
-      const resolved = await resolveTraceOrgProject(parsed, cwd, USAGE_HINT);
-      traceId = resolved.traceId;
-      org = resolved.org;
+      resolved = await resolveTraceOrgProject(parsed, cwd, USAGE_HINT);
     }
+    const { traceId, org, project } = resolved;
 
     if (flags.web) {
       await openInBrowser(buildTraceUrl(org, traceId), "trace");
@@ -401,9 +537,26 @@ export const viewCommand = buildCommand({
         ? formatSimpleSpanTree(traceId, spans, flags.spans)
         : undefined;
 
-    yield new CommandOutput({ summary, spans, spanTreeLines });
+    // Fetch per-span details when --full is set or --json auto-enables it
+    const shouldFetchDetails = flags.full || flags.json;
+    const spanDetails = shouldFetchDetails
+      ? await fetchTraceSpanDetails(spans, summary.spanCount, {
+          org,
+          fallbackProject: project ?? spans[0]?.project_slug ?? "",
+          traceId,
+        })
+      : undefined;
+
+    yield new CommandOutput({
+      summary,
+      spans,
+      spanTreeLines,
+      details: spanDetails,
+    });
     return {
-      hint: `Tip: Open in browser with 'sentry trace view --web ${traceId}'`,
+      hint: shouldFetchDetails
+        ? `Tip: Open in browser with 'sentry trace view --web ${traceId}'`
+        : "Tip: Use --full to fetch span attributes, or --json for complete data",
     };
   },
 });

@@ -122,8 +122,14 @@ export {
   listTeams,
   listTeamsPaginated,
 } from "./api/teams.js";
-export type { TraceItemAttribute, TraceItemDetail } from "./api/traces.js";
+export type {
+  FetchMultiSpanDetailsOptions,
+  TraceItemAttribute,
+  TraceItemDetail,
+} from "./api/traces.js";
 export {
+  attributesToDict,
+  fetchMultiSpanDetails,
   getDetailedTrace,
   getSpanDetails,
   listSpans,

@@ -4,6 +4,8 @@
  * Functions for retrieving detailed traces, listing transactions, and listing spans.
  */
 
+import pLimit from "p-limit";
+
 import {
   type SpanListItem,
   type SpansResponse,
@@ -14,6 +16,7 @@ import {
   TransactionsResponseSchema,
 } from "../../types/index.js";
 
+import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
 import { isAllDigits } from "../utils.js";
 
@@ -22,6 +25,8 @@ import {
   type PaginatedResponse,
   parseLinkHeader,
 } from "./infrastructure.js";
+
+const log = logger.withTag("api.traces");
 
 // ---------------------------------------------------------------------------
 // Trace item (span) detail types
@@ -151,6 +156,87 @@ export async function getSpanDetails(
   );
   return data;
 }
+
+// ---------------------------------------------------------------------------
+// Shared span detail helpers
+// ---------------------------------------------------------------------------
+
+/** Concurrency for parallel detail fetches (shared between trace/span view) */
+const SPAN_DETAIL_CONCURRENCY = 15;
+
+/**
+ * Convert a trace-items attribute array into a key-value dict,
+ * filtering out attributes already shown in the standard span fields
+ * and EAP storage internals (tags[], precise timestamps, etc.).
+ */
+export function attributesToDict(
+  attributes: TraceItemDetail["attributes"]
+): Record<string, unknown> {
+  return Object.fromEntries(
+    attributes
+      .filter(
+        (a) =>
+          !(REDUNDANT_DETAIL_ATTRS.has(a.name) || a.name.startsWith("tags["))
+      )
+      .map((a) => [a.name, a.value])
+  );
+}
+
+/** Options for {@link fetchMultiSpanDetails} */
+export type FetchMultiSpanDetailsOptions = {
+  /** Organization slug */
+  org: string;
+  /** Project slug to use when a span has no project_slug */
+  fallbackProject: string;
+  /** The parent trace ID (required by the API) */
+  traceId: string;
+  /** Callback fired after each successful fetch for progress reporting */
+  onProgress?: (done: number, total: number) => void;
+};
+
+/**
+ * Fetch full attribute details for multiple spans in parallel.
+ *
+ * Uses p-limit to cap concurrency at {@link SPAN_DETAIL_CONCURRENCY}.
+ * Failures for individual spans are logged as warnings — callers
+ * still get partial results for the spans that succeeded.
+ *
+ * @param spans - Spans to fetch details for (must have span_id and optionally project_slug)
+ * @param options - Org, project, traceId, and optional progress callback
+ * @returns Map of span_id to detail
+ */
+export async function fetchMultiSpanDetails(
+  spans: Array<{ span_id: string; project_slug?: string }>,
+  options: FetchMultiSpanDetailsOptions
+): Promise<Map<string, TraceItemDetail>> {
+  const { org, fallbackProject, traceId, onProgress } = options;
+  const limit = pLimit(SPAN_DETAIL_CONCURRENCY);
+  const details = new Map<string, TraceItemDetail>();
+  let completed = 0;
+  const total = spans.length;
+
+  await limit.map(spans, async (span) => {
+    try {
+      const detail = await getSpanDetails(
+        org,
+        span.project_slug || fallbackProject,
+        span.span_id,
+        traceId
+      );
+      details.set(span.span_id, detail);
+    } catch {
+      log.warn(`Could not fetch details for span ${span.span_id}`);
+    }
+    completed += 1;
+    onProgress?.(completed, total);
+  });
+
+  return details;
+}
+
+// ---------------------------------------------------------------------------
+// Normalization
+// ---------------------------------------------------------------------------
 
 /**
  * The trace detail API (`/trace/{id}/`) returns each span's unique identifier
