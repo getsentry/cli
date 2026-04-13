@@ -21,7 +21,7 @@ ID            SHORT ID    TITLE                           COUNT   USERS
 987654321     FRONT-DEF   ReferenceError: x is not de...  456     89
 ```
 
-**Filter by status:**
+**Filter by status and search:**
 
 ```bash
 # Show only unresolved issues
@@ -32,7 +32,26 @@ sentry issue list my-org/frontend --query "is:resolved"
 
 # Sort by frequency
 sentry issue list my-org/frontend --sort freq --limit 20
+
+# Multiple filters (space-separated = implicit AND)
+sentry issue list --query "is:unresolved level:error assigned:me"
+
+# Negation and wildcards
+sentry issue list --query "!browser:Chrome message:*timeout*"
+
+# Match multiple values for one key (in-list syntax)
+sentry issue list --query "browser:[Chrome,Firefox]"
 ```
+
+:::caution[Search syntax]
+Sentry search uses **implicit AND** — space-separated terms are all required.
+**AND/OR operators are not supported** for issue search. Use alternatives:
+- `key:[val1,val2]` — in-list syntax (matches val1 OR val2 for one key)
+- Run separate queries for different terms
+- `*term*` — wildcard matching
+
+Full syntax reference: [Sentry Search Docs](https://docs.sentry.io/concepts/search/)
+:::
 
 ### View an issue
 

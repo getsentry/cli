@@ -207,19 +207,40 @@ function parseSort(value: string): SortValue {
 /**
  * Tokenize a Sentry search query respecting quoted strings.
  *
- * Handles `key:"quoted value with spaces"` as a single token by matching
- * optional non-whitespace before a quoted section, then any remaining
- * non-whitespace characters. Bare words and `key:value` pairs without
- * quotes are also single tokens.
+ * This regex is functionally equivalent to `split_query_into_tokens()` in
+ * the Sentry backend (`src/sentry/search/utils.py`) for the purpose of
+ * detecting standalone boolean operators. It splits on whitespace while
+ * keeping `key:"quoted value with spaces"` as a single token.
+ *
+ * Minor differences from the backend tokenizer (acceptable for our use case):
+ * - Does not handle single-quoted strings (`'value'`) — rare in CLI context
+ * - Does not join `key: value` (colon-space) into one token — irrelevant
+ *   since AND/OR are never qualifier values with a preceding colon
+ * - Does not handle escaped quotes (`\"`) inside strings — edge case
+ *
+ * The full Sentry search grammar is a PEG grammar (Peggy on frontend,
+ * Parsimonious on backend). The canonical grammar lives at:
+ *   https://github.com/getsentry/sentry/blob/master/static/app/components/searchSyntax/grammar.pegjs
+ *
+ * The backend's simpler tokenizer that issue search actually uses:
+ *   https://github.com/getsentry/sentry/blob/master/src/sentry/search/utils.py
+ *   (see `split_query_into_tokens` and `tokenize_query`)
+ *
+ * Future work: if we need full query validation beyond AND/OR detection,
+ * consider porting the PEG grammar via Peggy (JS PEG parser generator) or
+ * a pre-compiled route. The grammar is ~200 lines and self-contained.
  */
-const QUERY_TOKEN_RE = /\S*"[^"]*"\S*|\S+/g;
+const QUERY_TOKEN_RE = /(?:[^\s"]*"[^"]*"[^\s"]*)|[^\s]+/g;
 
 /**
  * Sanitize `--query` before sending to the Sentry API.
  *
  * Tokenizes the query respecting quoted strings, then checks for standalone
- * `OR` / `AND` tokens (not inside quoted values or qualifier values like
- * `tag:OR`).
+ * `OR` / `AND` tokens (case-insensitive, matching the PEG grammar's
+ * `or_operator = "OR"i` / `and_operator = "AND"i` rules).
+ *
+ * Tokens inside quoted values (`message:"error OR timeout"`) or qualifier
+ * values (`tag:OR`) are never standalone and are not matched.
  *
  * - **AND**: Sentry search implicitly ANDs space-separated terms, so explicit
  *   `AND` has identical semantics. Strip it and warn — the user's intent is
@@ -227,6 +248,9 @@ const QUERY_TOKEN_RE = /\S*"[^"]*"\S*|\S+/g;
  * - **OR**: Genuinely different semantics (union vs intersection). The API
  *   rejects it with 400. Throw a helpful ValidationError since we cannot
  *   silently approximate the intent.
+ *
+ * The backend's `tokenize_query()` also skips AND/OR:
+ *   `if token.upper() in ["OR", "AND"]: continue`
  *
  * @returns The sanitized query string (AND stripped, OR rejected)
  */
@@ -241,9 +265,10 @@ function sanitizeQuery(
   const cleaned: string[] = [];
 
   for (const token of tokens) {
-    if (token === "OR") {
+    const upper = token.toUpperCase();
+    if (upper === "OR") {
       hasOr = true;
-    } else if (token === "AND") {
+    } else if (upper === "AND") {
       hasAnd = true;
     } else {
       cleaned.push(token);
@@ -255,6 +280,7 @@ function sanitizeQuery(
       "Sentry search does not support the OR operator.\n\n" +
         "Alternatives:\n" +
         '  - Use space-separated terms (implicit AND): --query "error timeout"\n' +
+        '  - Use in-list syntax for a single key: --query "key:[val1,val2]"\n' +
         "  - Run separate queries for each term\n" +
         '  - Use wildcards for partial matching: --query "*error*"\n\n' +
         "Search syntax: https://docs.sentry.io/concepts/search/",
@@ -1589,10 +1615,79 @@ function formatIssueListHuman(result: IssueListResult): string {
  * Non-paginated responses produce a flat `[...]` array.
  * Field filtering is applied per-element inside `data`, not to the wrapper.
  */
-// JSON transform delegates to the shared jsonTransformListResult in org-list.ts.
-// IssueListResult extends ListResult<SentryIssue>, so the shared function handles
-// all envelope fields (hasMore, nextCursor, errors, jsonExtra) uniformly.
-const jsonTransformIssueList = jsonTransformListResult;
+/**
+ * Compact search syntax reference embedded in JSON output.
+ *
+ * Gives agents and power users a machine-readable summary of Sentry's issue
+ * search syntax without needing to consult external docs. Derived from the
+ * PEG grammar at:
+ *   https://github.com/getsentry/sentry/blob/master/static/app/components/searchSyntax/grammar.pegjs
+ */
+const SEARCH_SYNTAX_REFERENCE = {
+  _type: "sentry_search_syntax",
+  docs: "https://docs.sentry.io/concepts/search/",
+  grammar:
+    "https://github.com/getsentry/sentry/blob/master/static/app/components/searchSyntax/grammar.pegjs",
+  behavior: "Terms are space-separated and implicitly ANDed.",
+  operators: {
+    and: "NOT supported — implicit (space-separated terms are all required)",
+    or: "NOT supported — use key:[val1,val2] in-list syntax instead",
+    not: "!key:value (prefix with !)",
+    comparison: [">=", "<=", ">", "<", "=", "!="],
+    wildcard: "* in values (e.g., message:*timeout*)",
+    inList: "key:[val1,val2] — matches any value in the list",
+  },
+  filterTypes: [
+    "text (key:value)",
+    "text_in (key:[val1,val2])",
+    "numeric (key:>100, key:<=50)",
+    "boolean (key:true, key:false)",
+    "date (key:>2024-01-01)",
+    "relative_date (key:-24h, key:+7d)",
+    "duration (key:>1s, key:<500ms)",
+    "has (has:key — not null check)",
+    "is (is:unresolved, is:resolved, is:ignored)",
+  ],
+  commonFilters: [
+    "is:unresolved",
+    "is:resolved",
+    "is:ignored",
+    "assigned:me",
+    "assigned:[me,none]",
+    "has:user",
+    "level:error",
+    "level:warning",
+    "!browser:Chrome",
+    "firstSeen:-24h",
+    "lastSeen:-1h",
+    "age:-7d",
+    "times_seen:>100",
+  ],
+};
+
+/**
+ * JSON transform for issue list that injects search syntax reference.
+ *
+ * Delegates to shared `jsonTransformListResult` for envelope handling,
+ * then adds `_searchSyntax` to paginated envelopes so agents can discover
+ * query capabilities programmatically.
+ */
+function jsonTransformIssueList(
+  result: IssueListResult,
+  fields?: string[]
+): unknown {
+  const transformed = jsonTransformListResult(result, fields);
+  // Only inject into paginated envelope objects, not flat arrays
+  if (
+    transformed &&
+    typeof transformed === "object" &&
+    !Array.isArray(transformed)
+  ) {
+    (transformed as Record<string, unknown>)._searchSyntax =
+      SEARCH_SYNTAX_REFERENCE;
+  }
+  return transformed;
+}
 
 /** Output configuration for the issue list command. */
 const issueListOutput: OutputConfig<IssueListResult> = {
@@ -1623,6 +1718,16 @@ export const listCommand = buildListCommand("issue", {
       "Use --cursor / -c next / -c prev to paginate through larger result sets.\n\n" +
       "By default, only issues with activity in the last 90 days are shown. " +
       "Use --period to adjust (e.g. --period 24h, --period 14d).\n\n" +
+      "Query syntax (--query flag):\n" +
+      "  Terms are space-separated and implicitly ANDed together.\n" +
+      "  AND/OR operators are NOT supported. Use alternatives:\n" +
+      "    key:[val1,val2]   # in-list: matches val1 OR val2 for one key\n" +
+      "    *term*            # wildcard matching\n" +
+      "  Filters:  key:value, !key:value (negation), key:>N, key:<N\n" +
+      '  Quoted:   message:"exact phrase with spaces"\n' +
+      "  Built-in: is:unresolved, is:resolved, assigned:me, has:user\n" +
+      "  Dates:    age:-24h (last 24h), firstSeen:+7d (older than 7d)\n" +
+      "  Docs:     https://docs.sentry.io/concepts/search/\n\n" +
       "Alias: `sentry issues` → `sentry issue list`",
   },
   output: issueListOutput,
@@ -1632,7 +1737,7 @@ export const listCommand = buildListCommand("issue", {
       query: {
         kind: "parsed",
         parse: String,
-        brief: "Search query (Sentry search syntax)",
+        brief: "Search query (Sentry syntax, implicit AND, no OR operator)",
         optional: true,
       },
       limit: buildListLimitFlag("issues"),
