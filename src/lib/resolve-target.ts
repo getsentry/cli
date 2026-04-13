@@ -1295,17 +1295,27 @@ export async function resolveProjectBySlug(
       // Recovery fetch failed — fall through to the original error
     }
 
+    const defaultHint = isAllDigits(projectSlug)
+      ? "No project with this ID was found — check the ID or use the project slug instead"
+      : "Check that you have access to a project with this slug";
+    let suggestions: string[];
+    if (fuzzyResult.kind === "suggestions") {
+      suggestions = fuzzyResult.suggestions;
+    } else if (fuzzyResult.kind === "match") {
+      // Match was found but getProject failed — mention the matched project
+      suggestions = [
+        `Similar project '${fuzzyResult.org}/${fuzzyResult.project}' was found but could not be accessed`,
+        defaultHint,
+      ];
+    } else {
+      suggestions = [defaultHint];
+    }
+
     throw new ResolutionError(
       `Project "${projectSlug}"`,
       "not found",
       usageHint,
-      fuzzyResult.kind === "suggestions"
-        ? fuzzyResult.suggestions
-        : [
-            isAllDigits(projectSlug)
-              ? "No project with this ID was found — check the ID or use the project slug instead"
-              : "Check that you have access to a project with this slug",
-          ]
+      suggestions
     );
   }
   if (projects.length > 1) {
