@@ -1659,25 +1659,30 @@ const SEARCH_SYNTAX_REFERENCE = {
 };
 
 /**
- * JSON transform for issue list that injects search syntax reference.
+ * JSON transform for issue list that conditionally injects search syntax.
  *
- * Delegates to shared `jsonTransformListResult` for envelope handling,
- * then adds `_searchSyntax` to paginated envelopes so agents can discover
- * query capabilities programmatically.
+ * Delegates to shared `jsonTransformListResult` for envelope handling.
+ * Adds `_searchSyntax` only when the result set is empty — that's when
+ * users/agents most likely need query help (bad query, wrong syntax).
+ * Avoids bloating every successful response with static metadata.
  */
 function jsonTransformIssueList(
   result: IssueListResult,
   fields?: string[]
 ): unknown {
   const transformed = jsonTransformListResult(result, fields);
-  // Only inject into paginated envelope objects, not flat arrays
+  // Only inject into empty paginated envelopes — helps agents discover
+  // query syntax when their search returned nothing.
   if (
     transformed &&
     typeof transformed === "object" &&
     !Array.isArray(transformed)
   ) {
-    (transformed as Record<string, unknown>)._searchSyntax =
-      SEARCH_SYNTAX_REFERENCE;
+    const envelope = transformed as Record<string, unknown>;
+    const data = envelope.data;
+    if (Array.isArray(data) && data.length === 0) {
+      envelope._searchSyntax = SEARCH_SYNTAX_REFERENCE;
+    }
   }
   return transformed;
 }
