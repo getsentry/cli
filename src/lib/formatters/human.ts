@@ -1126,18 +1126,6 @@ function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
  */
 const MAX_ROOT_SPANS = 50;
 
-/**
- * Format trace as a simple tree with "op — description (duration)" per span.
- * Durations are shown when available, omitted otherwise.
- *
- * Root spans are capped at {@link MAX_ROOT_SPANS} to prevent terminal flooding
- * when traces contain thousands of flat spans.
- *
- * @param traceId - The trace ID for the header
- * @param spans - Root-level spans from the /trace/ API
- * @param maxDepth - Maximum nesting depth to display (default: unlimited). 0 = disabled, Infinity = unlimited.
- * @returns Array of formatted lines ready for display
- */
 /** Options for {@link formatSimpleSpanTree}. */
 type SpanTreeOptions = {
   /**
@@ -1150,6 +1138,19 @@ type SpanTreeOptions = {
   projectFiltered?: boolean;
 };
 
+/**
+ * Format trace as a simple tree with "op — description (duration)" per span.
+ * Durations are shown when available, omitted otherwise.
+ *
+ * Root spans are capped at {@link MAX_ROOT_SPANS} to prevent terminal flooding
+ * when traces contain thousands of flat spans.
+ *
+ * @param traceId - The trace ID for the header
+ * @param spans - Root-level spans from the /trace/ API
+ * @param maxDepth - Maximum nesting depth to display (default: unlimited). 0 = disabled, Infinity = unlimited.
+ * @param options - Optional display options (e.g., project filter indicator)
+ * @returns Array of formatted lines ready for display
+ */
 export function formatSimpleSpanTree(
   traceId: string,
   spans: TraceSpan[],
