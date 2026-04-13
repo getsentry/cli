@@ -1,0 +1,304 @@
+# Plan: `sentry cli defaults` Command
+
+## Summary
+
+Implement `sentry cli defaults` — a single command for viewing and managing persistent CLI defaults. Consolidate storage from the dead `defaults` single-row table to the `metadata` KV table. Add persistent telemetry opt-out and `DO_NOT_TRACK` support.
+
+## Command UX
+
+```bash
+sentry cli defaults                       # Show all current defaults
+sentry cli defaults org my-org            # Set default organization
+sentry cli defaults project my-proj       # Set default project
+sentry cli defaults telemetry on          # Set telemetry (on/off/yes/no/true/false/1/0)
+sentry cli defaults url https://...       # Set default Sentry URL (self-hosted)
+sentry cli defaults org                   # Show just that default's value
+sentry cli defaults org --clear           # Clear a specific default (no confirmation)
+sentry cli defaults --clear               # Clear ALL defaults (needs --yes/-y/--force/-f or TTY prompt)
+```
+
+## Architecture: Single Command (Not Route Map)
+
+Stricli receives `["org", "my-org"]` as variadic positional args via `kind: "array"`. Recognized keys: `org`, `organization`, `project`, `telemetry`, `url`.
+
+## Storage Consolidation: Drop `defaults` Table → Metadata KV
+
+The `defaults` table is never written by production code. All defaults move to `metadata`:
+
+| Default | Metadata key | Values |
+|---------|-------------|--------|
+| org | `defaults.org` | org slug string |
+| project | `defaults.project` | project slug string |
+| telemetry | `defaults.telemetry` | `"on"` / `"off"` |
+| url | `defaults.url` | URL string |
+
+`metadata.key` is already `PRIMARY KEY` → implicit unique index, O(log n) lookups.
+
+## Telemetry Priority Chain
+
+```
+1. SENTRY_CLI_NO_TELEMETRY=1   → disabled  (existing, highest)
+2. DO_NOT_TRACK=1               → disabled  (new, consoledonottrack.com)
+3. metadata "defaults.telemetry" → on/off   (new, persistent)
+4. Default                      → enabled   (lowest)
+```
+
+## URL Priority Chain
+
+```
+1. SENTRY_HOST env var          (highest)
+2. SENTRY_URL env var
+3. .sentryclirc [defaults] url  (sets SENTRY_URL via env shim)
+4. metadata "defaults.url"      (new — applied in preloadProjectContext)
+5. https://sentry.io            (default)
+```
+
+Applied in `preloadProjectContext()` after `applySentryCliRcEnvShim()` by writing to `env.SENTRY_URL` if unset. Same mechanism as `.sentryclirc` — no changes to `getConfiguredSentryUrl()`.
+
+---
+
+## Files to Create
+
+### 1. `src/lib/parse-bool.ts` — Boolean value parser
+
+```typescript
+export function parseBoolValue(input: string): boolean | null
+```
+
+- **True**: `on`, `yes`, `true`, `1`, `t`, `y` (case-insensitive, trimmed)
+- **False**: `off`, `no`, `false`, `0`, `f`, `n`
+- **Unrecognized**: `null`
+
+Adapted from Sentry JS SDK `envToBool`.
+
+### 2. `src/commands/cli/defaults.ts` — The command
+
+```typescript
+buildCommand({
+  auth: false,
+  parameters: {
+    positional: { kind: "array", parameter: { parse: String, placeholder: "key value" } },
+    flags: {
+      clear: { kind: "boolean", brief: "Clear the default(s)", default: false },
+      yes: YES_FLAG,
+      force: FORCE_FLAG,
+    },
+    aliases: { y: "yes", f: "force" },
+  },
+})
+```
+
+Dispatch:
+- `args=[]` no `--clear` → show all
+- `args=[]` + `--clear` → clear-all (with `guardNonInteractive` + confirm prompt)
+- `args=["org"]` → show specific
+- `args=["org", "val"]` → set
+- `args=["key"]` + `--clear` → clear specific (no confirmation)
+
+### 3. `test/lib/parse-bool.property.test.ts`
+
+Property tests: known true/false values → correct result, arbitrary casing, whitespace padding, unknown → `null`.
+
+### 4. `test/commands/cli/defaults.test.ts`
+
+Unit tests: show/set/clear/clear-all modes, invalid key/value errors, JSON output shape, non-interactive guard.
+
+---
+
+## Files to Modify
+
+### 5. `src/lib/db/defaults.ts` — Complete rewrite
+
+Replace single-row table functions with metadata KV helpers:
+
+```typescript
+const DEFAULTS_ORG = "defaults.org";
+const DEFAULTS_PROJECT = "defaults.project";
+const DEFAULTS_TELEMETRY = "defaults.telemetry";
+const DEFAULTS_URL = "defaults.url";
+const ALL_DEFAULTS_KEYS = [DEFAULTS_ORG, DEFAULTS_PROJECT, DEFAULTS_TELEMETRY, DEFAULTS_URL];
+
+// Getters (same public API, new implementation)
+export function getDefaultOrganization(): string | undefined
+export function getDefaultProject(): string | undefined
+
+// New getters
+export function getTelemetryPreference(): boolean | undefined  // "on"→true, "off"→false, missing→undefined
+export function getDefaultUrl(): string | undefined
+
+// Setters (individual, not three-valued)
+export function setDefaultOrganization(value: string | null): void  // null = clear
+export function setDefaultProject(value: string | null): void
+export function setTelemetryPreference(enabled: boolean | null): void
+export function setDefaultUrl(url: string | null): void
+
+// Bulk
+export function getAllDefaults(): DefaultsState
+export function clearAllDefaults(): void
+```
+
+**Key change**: `getDefaultOrganization()` and `getDefaultProject()` keep the same signatures — all consumers (`resolve-target.ts`, `auth/status.ts`, `cli.ts`, `project/list.ts`) work unchanged.
+
+Old `setDefaults(org?, project?)` is removed. Tests updated to use individual setters.
+
+### 6. `src/lib/db/schema.ts` — Drop defaults table + migration
+
+- Remove `defaults` entry from `TABLE_SCHEMAS` (lines 71-82)
+- Bump `CURRENT_SCHEMA_VERSION` from 12 to 13
+- Add migration 12→13 in `runMigrations()`:
+
+```typescript
+// Migration 12 -> 13: Consolidate defaults into metadata KV table.
+if (currentVersion < 13) {
+  if (tableExists(db, "defaults")) {
+    const row = db.query("SELECT organization, project FROM defaults WHERE id = 1")
+      .get() as { organization: string | null; project: string | null } | null;
+    if (row?.organization) {
+      db.query("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)")
+        .run("defaults.org", row.organization);
+    }
+    if (row?.project) {
+      db.query("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)")
+        .run("defaults.project", row.project);
+    }
+    db.exec("DROP TABLE defaults");
+  }
+}
+```
+
+### 7. `src/lib/db/migration.ts` — Update JSON migration
+
+Lines 156-165: Change `INSERT INTO defaults` to `INSERT INTO metadata`:
+
+```typescript
+if (oldConfig.defaults?.organization) {
+  db.query("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)")
+    .run("defaults.org", oldConfig.defaults.organization);
+}
+if (oldConfig.defaults?.project) {
+  db.query("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)")
+    .run("defaults.project", oldConfig.defaults.project);
+}
+```
+
+### 8. `src/lib/telemetry.ts` — Persistent telemetry preference
+
+New exported function `isTelemetryEnabled()`:
+
+```typescript
+export function isTelemetryEnabled(): boolean {
+  if (getEnv().SENTRY_CLI_NO_TELEMETRY === "1") return false;
+  if (getEnv().DO_NOT_TRACK === "1") return false;
+  try {
+    const pref = getTelemetryPreference();  // from db/defaults.ts
+    if (pref !== undefined) return pref;
+  } catch { /* DB not ready */ }
+  return true;
+}
+```
+
+Then in `withTelemetry()` line 99: `const enabled = isTelemetryEnabled();`
+
+### 9. `src/cli.ts` — URL default in `preloadProjectContext()`
+
+After `applySentryCliRcEnvShim(cwd)` (line 37):
+
+```typescript
+const env = getEnv();
+if (!env.SENTRY_HOST?.trim() && !env.SENTRY_URL?.trim()) {
+  try {
+    const { getDefaultUrl } = await import("./lib/db/defaults.js");
+    const url = getDefaultUrl();
+    if (url) env.SENTRY_URL = url;
+  } catch { /* DB not ready */ }
+}
+```
+
+### 10. `src/commands/cli/index.ts` — Route map
+
+Add `defaults: defaultsCommand` to routes.
+
+### 11. `src/lib/formatters/human.ts` — Formatter
+
+Add `formatDefaultsResult()`:
+- **show**: `mdKvTable` with all defaults, `colorTag("muted", "not set")` for nulls, env override notes for telemetry
+- **set**: `Default organization set to 'my-org'`
+- **clear**: `Default organization cleared`
+- **clear-all**: `All defaults cleared`
+
+### 12. Test files using `setDefaults()` — Update to new API
+
+| File | Change |
+|------|--------|
+| `test/lib/config.test.ts` | Replace `setDefaults("org", "proj")` with individual `setDefaultOrganization()`/`setDefaultProject()` calls. Drop redundant three-valued semantics tests (metadata KV is simpler). |
+| `test/commands/project/list.test.ts` | `setDefaults("test-org")` → `setDefaultOrganization("test-org")` |
+| `test/commands/issue/list.test.ts` | `setDefaults("test-org", "test-project")` → individual setters |
+| `test/commands/issue/utils.test.ts` | Same — individual setters. `setDefaults(undefined, undefined)` → no-op (just don't call anything) |
+
+---
+
+## Result Type
+
+```typescript
+type DefaultsState = {
+  organization: string | null;
+  project: string | null;
+  telemetry: "on" | "off" | null;  // null = unset (default: enabled)
+  url: string | null;
+};
+
+type DefaultsResult = {
+  action: "show" | "set" | "clear" | "clear-all";
+  defaults: DefaultsState;
+  telemetryEffective?: { enabled: boolean; source: string };  // display-only, jsonExclude
+  changed?: { key: string; previousValue: string | boolean | null; newValue: string | boolean | null };
+};
+```
+
+---
+
+## Implementation Order
+
+| # | What | Depends on |
+|---|------|-----------|
+| 1 | `src/lib/parse-bool.ts` | — |
+| 2 | `test/lib/parse-bool.property.test.ts` | 1 |
+| 3 | `src/lib/db/schema.ts` — remove defaults table, add migration 13 | — |
+| 4 | `src/lib/db/migration.ts` — update JSON migration | 3 |
+| 5 | `src/lib/db/defaults.ts` — rewrite to metadata KV | 3 |
+| 6 | Update test files using `setDefaults()` | 5 |
+| 7 | `src/lib/telemetry.ts` — `isTelemetryEnabled()` | 5 |
+| 8 | `src/cli.ts` — URL default in `preloadProjectContext` | 5 |
+| 9 | `src/lib/formatters/human.ts` — `formatDefaultsResult` | 5 |
+| 10 | `src/commands/cli/defaults.ts` — the command | 1, 5, 9 |
+| 11 | `src/commands/cli/index.ts` — route map | 10 |
+| 12 | `test/commands/cli/defaults.test.ts` | 10 |
+| 13 | Typecheck + lint + full test suite | all |
+
+---
+
+## Edge Cases
+
+1. **Migration data preservation**: Migration 13 copies any `defaults` table data to `metadata` before dropping. Empty in practice but correct in principle.
+2. **JSON migration**: Updated to write to `metadata` instead of `defaults` table for first-time users with old `config.json`.
+3. **DB not ready**: Both telemetry preference and URL default reads use `try/catch` — fall through silently.
+4. **`DO_NOT_TRACK` spec**: Only `DO_NOT_TRACK=1` disables. Other values (including `"0"`) are treated as "not set".
+5. **No circular deps**: `db/defaults.ts` does NOT import from `telemetry.ts`. Safe to import in `telemetry.ts`.
+
+## Verification
+
+```bash
+bun test test/lib/parse-bool.property.test.ts
+bun test test/commands/cli/defaults.test.ts
+bun test test/lib/config.test.ts
+bun run test:unit          # full unit suite (catches broken setDefaults callers)
+bun run typecheck
+bun run lint
+
+# Smoke test
+bun run dev -- cli defaults
+bun run dev -- cli defaults org my-org
+bun run dev -- cli defaults telemetry off
+bun run dev -- cli defaults --json
+bun run dev -- cli defaults --clear --yes
+```
