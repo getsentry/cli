@@ -322,6 +322,7 @@ Make an authenticated API request
 
 CLI-related commands
 
+- `sentry cli defaults <key value...>` — View and manage default settings
 - `sentry cli feedback <message...>` — Send feedback about the CLI
 - `sentry cli fix` — Diagnose and repair CLI database issues
 - `sentry cli setup` — Configure shell integration
