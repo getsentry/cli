@@ -212,38 +212,6 @@ describe("dashboard widget add", () => {
     expect(err.message).toContain("Unknown aggregate function");
   });
 
-  test("throws ValidationError for big_number with issue dataset", async () => {
-    const { context } = createMockContext();
-    const func = await addCommand.loader();
-
-    const err = await func
-      .call(
-        context,
-        { json: false, display: "big_number", dataset: "issue" },
-        "123",
-        "Unresolved Count"
-      )
-      .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toContain('"issue" dataset supports');
-  });
-
-  test("allows line/area/bar with issue dataset", async () => {
-    const { context } = createMockContext();
-    const func = await addCommand.loader();
-
-    for (const display of ["line", "area", "bar"]) {
-      updateDashboardSpy.mockClear();
-      await func.call(
-        context,
-        { json: false, display, dataset: "issue" },
-        "123",
-        "Issues Over Time"
-      );
-      expect(updateDashboardSpy).toHaveBeenCalledTimes(1);
-    }
-  });
-
   test("issue line dataset does not default columns", async () => {
     const { context } = createMockContext();
     const func = await addCommand.loader();
@@ -295,81 +263,6 @@ describe("dashboard widget add", () => {
     const body = updateDashboardSpy.mock.calls[0]?.[2];
     const addedWidget = body.widgets.at(-1);
     expect(addedWidget.queries[0].columns).toEqual(["project"]);
-  });
-
-  // preprod-app-size: line only
-  // https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/mobileAppSize.tsx#L255
-  test("throws ValidationError for table with preprod-app-size dataset", async () => {
-    const { context } = createMockContext();
-    const func = await addCommand.loader();
-    const err = await func
-      .call(
-        context,
-        { json: false, display: "table", dataset: "preprod-app-size" },
-        "123",
-        "App Size"
-      )
-      .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toContain('"preprod-app-size" dataset supports');
-  });
-
-  test("allows line with preprod-app-size dataset", async () => {
-    const { context } = createMockContext();
-    const func = await addCommand.loader();
-    await func.call(
-      context,
-      { json: false, display: "line", dataset: "preprod-app-size" },
-      "123",
-      "App Size"
-    );
-    expect(updateDashboardSpy).toHaveBeenCalledTimes(1);
-  });
-
-  // tracemetrics: no table or top_n
-  // https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/traceMetrics.tsx#L285-L291
-  test("throws ValidationError for table with tracemetrics dataset", async () => {
-    const { context } = createMockContext();
-    const func = await addCommand.loader();
-    const err = await func
-      .call(
-        context,
-        { json: false, display: "table", dataset: "tracemetrics" },
-        "123",
-        "Trace Metrics"
-      )
-      .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toContain('"tracemetrics" dataset supports');
-  });
-
-  // spans: only dataset supporting details and server_tree
-  // https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/spans.tsx#L287-L297
-  test("allows details display with spans dataset", async () => {
-    const { context } = createMockContext();
-    const func = await addCommand.loader();
-    await func.call(
-      context,
-      { json: false, display: "details", dataset: "spans" },
-      "123",
-      "Span Details"
-    );
-    expect(updateDashboardSpy).toHaveBeenCalledTimes(1);
-  });
-
-  test("throws ValidationError for details display with non-spans dataset", async () => {
-    const { context } = createMockContext();
-    const func = await addCommand.loader();
-    const err = await func
-      .call(
-        context,
-        { json: false, display: "details", dataset: "logs" },
-        "123",
-        "Details"
-      )
-      .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toContain('"logs" dataset supports');
   });
 
   // -------------------------------------------------------------------------

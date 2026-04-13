@@ -24,7 +24,6 @@ import { resolveOrg } from "../../lib/resolve-target.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import { isAllDigits } from "../../lib/utils.js";
 import {
-  DATASET_SUPPORTED_DISPLAY_TYPES,
   type DashboardWidget,
   DISPLAY_TYPES,
   parseAggregate,
@@ -33,7 +32,6 @@ import {
   prepareWidgetQueries,
   validateAggregateNames,
   WIDGET_TYPES,
-  type WidgetType,
 } from "../../types/dashboard.js";
 
 /** Shared widget query flags used by `add` and `edit` commands */
@@ -636,20 +634,6 @@ export function validateWidgetEnums(display?: string, dataset?: string): void {
       "dataset"
     );
   }
-  if (display && dataset) {
-    // Untracked display types (text, wheel, rage_and_dead_clicks, agents_traces_table)
-    // bypass Sentry's dataset query system entirely — no dataset constraint applies.
-    const isTrackedDisplay = Object.values(
-      DATASET_SUPPORTED_DISPLAY_TYPES
-    ).some((types) => (types as readonly string[]).includes(display));
-    if (isTrackedDisplay) {
-      const supported = DATASET_SUPPORTED_DISPLAY_TYPES[dataset as WidgetType];
-      if (supported && !(supported as readonly string[]).includes(display)) {
-        throw new ValidationError(
-          `The "${dataset}" dataset supports: ${supported.join(", ")}. Got: "${display}".`,
-          "display"
-        );
-      }
-    }
-  }
+  // The Sentry backend validates displayType and widgetType as independent enums —
+  // any valid display type is accepted with any valid dataset. No cross-validation needed.
 }
