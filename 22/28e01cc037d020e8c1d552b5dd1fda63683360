@@ -1,0 +1,94 @@
+# Fix npm installation method detection via node_modules path check
+
+**Issue**: CLI-Y1 — `UpgradeError: Could not detect installation method` on Windows when installed via npm.
+
+## Root Cause
+
+When installed via npm (or any JS package manager), `detectInstallationMethod()` in `src/lib/upgrade.ts` relies on spawning `npm list -g sentry`, `pnpm list -g`, etc. to detect the install method. On Windows (especially with NVM-managed Node.js), these spawns fail with ENOENT because `.cmd` executables aren't resolved without `shell: true`. The CLI returns `"unknown"` despite running from a `node_modules` directory — a very strong signal it was installed by a package manager.
+
+## Fix
+
+Add a fast, authoritative path-based check `detectPackageManagerFromPath()` that examines `process.argv[1]` for a `node_modules` segment. This mirrors the existing Homebrew `/Cellar/` check — cheap, reliable, and overrides stale DB state.
+
+### Files to modify
+
+1. **`src/lib/upgrade.ts`** — Add detection function + wire it into the cascade
+2. **`test/lib/upgrade.test.ts`** — Add test cases for path-based detection
+
+### Changes in `src/lib/upgrade.ts`
+
+#### 1. Add `detectPackageManagerFromPath()` (after `isHomebrewInstall()`, ~line 201)
+
+```typescript
+function detectPackageManagerFromPath(): PackageManager | null {
+  const scriptPath = process.argv[1];
+  if (!scriptPath) return null;
+
+  const segments = scriptPath.split(/[\\/]/);  // cross-platform
+  if (!segments.includes("node_modules")) return null;
+
+  if (segments.includes(".pnpm")) return "pnpm";
+  return "npm";  // default for npm/yarn/bun global layouts
+}
+```
+
+Key design decisions:
+- Uses `process.argv[1]` — Node.js always sets this to the script path; Bun compiled binaries set it to the first CLI arg (never contains `node_modules`)
+- Splits on both `/` and `\` for Windows compatibility
+- Detects pnpm via its distinctive `.pnpm` directory; defaults to `"npm"` for other layouts
+- Windows 8.3 short paths (e.g., `CONFIG~1`) don't affect `node_modules` segment detection
+
+#### 2. Wire into `detectInstallationMethod()` — after Homebrew, before DB lookup
+
+```typescript
+export async function detectInstallationMethod(): Promise<InstallationMethod> {
+  if (isHomebrewInstall()) return "brew";
+
+  // NEW: Check if running from node_modules (authoritative, like Homebrew)
+  const pmFromPath = detectPackageManagerFromPath();
+  if (pmFromPath) {
+    setInstallInfo({ method: pmFromPath, path: process.argv[1] ?? "", version: CLI_VERSION });
+    return pmFromPath;
+  }
+
+  const stored = getInstallInfo();
+  if (stored?.method) return stored.method;
+
+  const legacyMethod = await detectLegacyInstallationMethod();
+  // ... (rest unchanged)
+}
+```
+
+Placing it before the DB lookup ensures:
+- Stale DB info (e.g., user previously had curl, switched to npm) is overridden
+- The result is persisted so subsequent runs hit the DB fast path
+
+### Test cases in `test/lib/upgrade.test.ts`
+
+New describe blocks:
+
+**`detectInstallationMethod — node_modules path detection`**
+- Standard npm path (Unix): `/usr/local/lib/node_modules/sentry/dist/bin.cjs` → `"npm"`
+- pnpm path: `.../node_modules/.pnpm/sentry@0.27.0/node_modules/sentry/dist/bin.cjs` → `"pnpm"`
+- Windows backslash path: `C:\Users\...\node_modules\sentry\dist\bin.cjs` → `"npm"`
+- Windows 8.3 short path (from real bug report): `C:\Users\Minhyung\CONFIG~1\herd\bin\nvm\v24.2.0\node_modules\sentry\dist\index.cjs` → `"npm"`
+- No `argv[1]` → falls through (no detection)
+- Bun compiled binary `argv[1]` = `"issue"` → falls through
+- Dev mode path without `node_modules` → falls through
+- Overrides stale curl in DB → returns `"npm"`, not `"curl"`
+- Persists to DB after detection
+
+Test setup: save/restore `process.argv` and `process.execPath` in beforeEach/afterEach. Set `execPath` to a non-Homebrew, non-curl path (e.g., `/usr/bin/node`) so detection falls through to the path check.
+
+## What this does NOT fix
+
+The Windows spawn ENOENT issue for `executeUpgradePackageManager()` is a separate problem — even after detecting "npm", the upgrade command will try `npm install -g sentry@version` which may also ENOENT on Windows without `shell: true`. That's a separate issue for a follow-up PR.
+
+## Verification
+
+```bash
+bun test test/lib/upgrade.test.ts     # New + existing tests pass
+bun run typecheck                      # No type errors
+bun run lint                           # No lint issues
+bun run test:unit                      # Full unit test suite passes
+```
