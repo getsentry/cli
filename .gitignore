@@ -58,8 +58,9 @@ src/generated/
 src/sdk.generated.ts
 src/sdk.generated.d.cts
 
-# Generated command docs (rebuilt from fragments + CLI introspection)
+# Generated docs pages (rebuilt from fragments + CLI introspection / env registry)
 docs/src/content/docs/commands/
+docs/src/content/docs/configuration.md
 
 # Generated discovery manifest (rebuilt by generate:skill, served via symlinked skill files)
 docs/public/.well-known/skills/index.json

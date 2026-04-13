@@ -1,14 +1,15 @@
 #!/usr/bin/env bun
 /**
- * Generate Command Reference Documentation from Stricli Command Metadata
+ * Generate Command Reference & Configuration Documentation
  *
- * Introspects the CLI's route tree to generate accurate command reference
- * pages for the documentation website. Flags, arguments, and aliases are
- * extracted directly from source code, preventing documentation drift.
+ * Introspects the CLI's route tree and env var registry to generate
+ * accurate reference pages for the documentation website. Flags, arguments,
+ * aliases, and environment variables are extracted directly from source code,
+ * preventing documentation drift.
  *
  * Each generated page combines:
- *   1. Auto-generated reference — flags, args, descriptions (from CLI metadata)
- *   2. Hand-written fragment — examples, guides, tips (from docs/src/fragments/commands/)
+ *   1. Auto-generated reference — from CLI metadata or env registry
+ *   2. Hand-written fragment — examples, guides, tips (from docs/src/fragments/)
  *
  * The generated output is gitignored. Fragment files are the committed
  * source of truth for custom content.
@@ -17,8 +18,9 @@
  *   bun run script/generate-command-docs.ts
  *
  * Output:
- *   docs/src/content/docs/commands/{route}.md (one per visible route)
- *   docs/src/content/docs/commands/index.md   (commands overview table)
+ *   docs/src/content/docs/commands/{route}.md  (one per visible route)
+ *   docs/src/content/docs/commands/index.md    (commands overview table)
+ *   docs/src/content/docs/configuration.md     (env var reference + config fragment)
  */
 
 import { mkdirSync, rmSync } from "node:fs";
@@ -37,6 +39,7 @@ if (!(await Bun.file(SKILL_CONTENT_PATH).exists())) {
   await Bun.write(SKILL_CONTENT_PATH, SKILL_CONTENT_STUB);
 }
 
+import type { EnvVarEntry } from "../src/lib/env-registry.js";
 import type {
   CommandInfo,
   FlagInfo,
@@ -47,10 +50,14 @@ import type {
 
 const { routes } = await import("../src/app.js");
 const { extractAllRoutes } = await import("../src/lib/introspect.js");
+const { ENV_VAR_REGISTRY } = await import("../src/lib/env-registry.js");
 
 const DOCS_DIR = "docs/src/content/docs/commands";
+const DOCS_CONTENT_DIR = "docs/src/content/docs";
 const FRAGMENTS_DIR = "docs/src/fragments/commands";
+const FRAGMENTS_ROOT = "docs/src/fragments";
 const INDEX_PATH = `${DOCS_DIR}/index.md`;
+const CONFIG_PATH = `${DOCS_CONTENT_DIR}/configuration.md`;
 
 /**
  * Marker comment separating auto-generated reference content from
@@ -282,11 +289,75 @@ function generateCommandsTable(allRoutes: RouteInfo[]): string {
 }
 
 // ---------------------------------------------------------------------------
+// Configuration Page Generation
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate a `### \`VAR_NAME\`` section for a single environment variable.
+ * Matches the existing hand-written format in configuration.md.
+ */
+function generateEnvVarSection(entry: EnvVarEntry): string {
+  const lines: string[] = [];
+  lines.push(`### \`${entry.name}\``);
+  lines.push("");
+  lines.push(entry.description);
+
+  if (entry.example !== undefined) {
+    lines.push("");
+    lines.push("```bash");
+    lines.push(`export ${entry.name}=${entry.example}`);
+    lines.push("```");
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Generate the full auto-generated portion of the configuration page.
+ *
+ * Includes frontmatter, intro paragraph, and per-variable reference
+ * sections. The fragment (config file docs, global options, credential
+ * storage) is appended after the end marker.
+ */
+function generateConfigurationPage(registry: readonly EnvVarEntry[]): string {
+  const lines: string[] = [];
+
+  // YAML frontmatter
+  lines.push("---");
+  lines.push("title: Configuration");
+  lines.push(
+    "description: Environment variables, config files, and configuration options for the Sentry CLI"
+  );
+  lines.push("---");
+  lines.push("");
+
+  // Intro
+  lines.push(
+    "The Sentry CLI can be configured through config files, environment variables, and a local database. Most users don't need to set any of these — the CLI auto-detects your project from your codebase and stores credentials locally after `sentry auth login`."
+  );
+  lines.push("");
+
+  // Environment Variables section
+  lines.push("## Environment Variables");
+  lines.push("");
+
+  for (const entry of registry) {
+    lines.push(generateEnvVarSection(entry));
+    lines.push("");
+  }
+
+  // End marker
+  lines.push(GENERATED_END_MARKER);
+
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Custom Content (Fragment Files)
 // ---------------------------------------------------------------------------
 
 /**
- * Read hand-written custom content from a fragment file.
+ * Read hand-written custom content from a command fragment file.
  * Fragment files live in docs/src/fragments/commands/ and contain only
  * the custom sections (examples, guides) — no frontmatter or generated content.
  * Returns empty string if the fragment file doesn't exist.
@@ -294,6 +365,19 @@ function generateCommandsTable(allRoutes: RouteInfo[]): string {
 async function readCustomContent(fragmentName: string): Promise<string> {
   try {
     return await Bun.file(`${FRAGMENTS_DIR}/${fragmentName}.md`).text();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Read hand-written custom content from a top-level fragment file.
+ * Top-level fragments live in docs/src/fragments/ (not the commands/ subdirectory).
+ * Returns empty string if the fragment file doesn't exist.
+ */
+async function readTopLevelFragment(fragmentName: string): Promise<string> {
+  try {
+    return await Bun.file(`${FRAGMENTS_ROOT}/${fragmentName}.md`).text();
   } catch {
     return "";
   }
@@ -357,6 +441,18 @@ const indexContent = indexCustomContent
 
 await Bun.write(INDEX_PATH, indexContent);
 
+// ---------------------------------------------------------------------------
+// Generate configuration.md (env var reference + fragment)
+// ---------------------------------------------------------------------------
+
+const configGenerated = generateConfigurationPage(ENV_VAR_REGISTRY);
+const configFragment = await readTopLevelFragment("configuration");
+const configContent = configFragment
+  ? configGenerated + configFragment
+  : `${configGenerated}\n`;
+
+await Bun.write(CONFIG_PATH, configContent);
+
 console.log(
-  `Generated ${generatedFiles.length} command doc pages + ${INDEX_PATH}`
+  `Generated ${generatedFiles.length} command doc pages + ${INDEX_PATH} + ${CONFIG_PATH}`
 );

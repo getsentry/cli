@@ -43,8 +43,11 @@ jobs:
               - 'src/**'
               - 'docs/**'
               - 'package.json'
+              - 'README.md'
+              - 'DEVELOPMENT.md'
               - 'script/generate-skill.ts'
               - 'script/generate-command-docs.ts'
+              - 'script/generate-docs-sections.ts'
               - 'script/eval-skill.ts'
               - 'test/skill-eval/**'
             code:
@@ -130,17 +133,26 @@ jobs:
             echo "stale=true" >> "$GITHUB_OUTPUT"
             echo "Skill files are out of date"
           fi
-      - name: Auto-commit regenerated skill files
-        if: steps.check-skill.outputs.stale == 'true' && steps.token.outcome == 'success'
+      - name: Check docs sections
+        id: check-sections
+        run: |
+          if git diff --quiet DEVELOPMENT.md docs/src/content/docs/contributing.md docs/src/content/docs/self-hosted.md; then
+            echo "Docs sections are up to date"
+          else
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            echo "Docs sections are out of date"
+          fi
+      - name: Auto-commit regenerated files
+        if: (steps.check-skill.outputs.stale == 'true' || steps.check-sections.outputs.stale == 'true') && steps.token.outcome == 'success'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add plugins/sentry-cli/skills/sentry-cli/
-          git diff --cached --quiet || (git commit -m "chore: regenerate skill files" && git push)
-      - name: Fail for fork PRs with stale skill files
-        if: steps.check-skill.outputs.stale == 'true' && steps.token.outcome != 'success'
+          git add plugins/sentry-cli/skills/sentry-cli/ DEVELOPMENT.md docs/src/content/docs/contributing.md docs/src/content/docs/self-hosted.md
+          git diff --cached --quiet || (git commit -m "chore: regenerate docs" && git push)
+      - name: Fail for fork PRs with stale generated files
+        if: (steps.check-skill.outputs.stale == 'true' || steps.check-sections.outputs.stale == 'true') && steps.token.outcome != 'success'
         run: |
-          echo "::error::Skill files are out of date. Run 'bun run generate:docs' locally and commit the result."
+          echo "::error::Generated files are out of date. Run 'bun run generate:docs' locally and commit the result."
           exit 1
 
   lint:

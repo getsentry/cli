@@ -41,6 +41,7 @@ Edit `.env.local` with your development credentials.
 
 ## Project Structure
 
+<!-- GENERATED:START project-structure -->
 ```
 cli/
 ├── src/
@@ -48,17 +49,33 @@ cli/
 │   ├── app.ts          # Stricli application setup
 │   ├── context.ts      # Dependency injection context
 │   ├── commands/       # CLI commands
-│   │   ├── auth/       # Authentication commands
-│   │   ├── org/        # Organization commands
-│   │   ├── project/    # Project commands
-│   │   ├── issue/      # Issue commands
-│   │   └── event/      # Event commands
+│   │   ├── auth/        # login, logout, refresh, status, token, whoami
+│   │   ├── cli/         # defaults, feedback, fix, setup, upgrade
+│   │   ├── dashboard/   # list, view, create, add, edit, delete
+│   │   ├── event/       # view, list
+│   │   ├── issue/       # list, events, explain, plan, view
+│   │   ├── log/         # list, view
+│   │   ├── org/         # list, view
+│   │   ├── project/     # create, delete, list, view
+│   │   ├── release/     # list, view, create, finalize, delete, deploy, deploys, set-commits, propose-version
+│   │   ├── repo/        # list
+│   │   ├── sourcemap/   # inject, upload
+│   │   ├── span/        # list, view
+│   │   ├── team/        # list
+│   │   ├── trace/       # list, view, logs
+│   │   ├── trial/       # list, start
+│   │   ├── api.ts       # Make an authenticated API request
+│   │   ├── help.ts      # Help command
+│   │   ├── init.ts      # Initialize Sentry in your project (experimental)
+│   │   └── schema.ts    # Browse the Sentry API schema
 │   ├── lib/            # Shared utilities
 │   └── types/          # TypeScript types and Zod schemas
-├── test/               # Test files
-├── script/             # Build scripts
-└── docs/               # Documentation site
+├── test/               # Test files (mirrors src/ structure)
+├── script/             # Build and utility scripts
+├── plugins/            # Agent skill files
+└── docs/               # Documentation site (Astro + Starlight)
 ```
+<!-- GENERATED:END project-structure -->
 
 ## Building
 

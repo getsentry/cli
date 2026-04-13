@@ -84,13 +84,15 @@
     "test:init-eval": "bun test test/init-eval --timeout 600000 --concurrency 6",
     "generate:sdk": "bun run script/generate-sdk.ts",
     "generate:skill": "bun run script/generate-skill.ts",
-    "generate:docs": "bun run generate:command-docs && bun run generate:skill",
+    "generate:docs": "bun run generate:command-docs && bun run generate:skill && bun run generate:docs-sections",
+    "generate:docs-sections": "bun run script/generate-docs-sections.ts",
     "generate:schema": "bun run script/generate-api-schema.ts",
     "generate:command-docs": "bun run script/generate-command-docs.ts",
     "eval:skill": "bun run script/eval-skill.ts",
     "check:fragments": "bun run script/check-fragments.ts",
     "check:deps": "bun run script/check-no-deps.ts",
-    "check:errors": "bun run script/check-error-patterns.ts"
+    "check:errors": "bun run script/check-error-patterns.ts",
+    "check:docs-sections": "bun run script/generate-docs-sections.ts --check"
   },
   "type": "module",
   "types": "./dist/index.d.cts"
