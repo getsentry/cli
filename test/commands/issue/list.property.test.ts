@@ -494,3 +494,67 @@ describe("property: buildProjectAliasMap", () => {
     expect(Object.keys(entries).length).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// sanitizeQuery
+// ---------------------------------------------------------------------------
+
+const { sanitizeQuery } = __testing;
+
+/** Generates a non-empty string that does NOT contain standalone OR or AND. */
+const safeTermArb = constantFrom(
+  "is:unresolved",
+  "level:error",
+  "timeout",
+  "crash",
+  "http.status:500",
+  "assigned:me",
+  "sandbox",
+  "order",
+  "android"
+);
+
+// biome-ignore lint/suspicious/noEmptyBlockStatements: intentional no-op
+const noopLog = { warn: () => {} };
+
+describe("property: sanitizeQuery", () => {
+  test("query with OR always throws ValidationError", () => {
+    fcAssert(
+      property(
+        tuple(safeTermArb, safeTermArb).map(([a, b]) => `${a} OR ${b}`),
+        (query) => {
+          expect(() => sanitizeQuery(query, noopLog)).toThrow();
+        }
+      ),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("AND removal preserves all non-AND tokens", () => {
+    fcAssert(
+      property(
+        tuple(safeTermArb, safeTermArb).map(([a, b]) => `${a} AND ${b}`),
+        (query) => {
+          const result = sanitizeQuery(query, noopLog);
+          // Both original terms must be present in the result
+          const parts = query.split(/\s+AND\s+/);
+          for (const part of parts) {
+            expect(result).toContain(part.trim());
+          }
+          // AND must not be present
+          expect(result).not.toContain("AND");
+        }
+      ),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("safe queries pass through unchanged", () => {
+    fcAssert(
+      property(safeTermArb, (term) => {
+        expect(sanitizeQuery(term, noopLog)).toBe(term);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
