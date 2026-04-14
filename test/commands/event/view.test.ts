@@ -1076,7 +1076,7 @@ describe("fetchEventWithContext", () => {
     );
     spyOn(apiClient, "resolveEventInOrg").mockResolvedValue(null);
     spyOn(apiClient, "findEventAcrossOrgs").mockRejectedValue(
-      new AuthError("Token expired", "expired")
+      new AuthError("expired", "Token expired")
     );
 
     await expect(
@@ -1089,7 +1089,7 @@ describe("fetchEventWithContext", () => {
       new ApiError("Not found", 404)
     );
     spyOn(apiClient, "resolveEventInOrg").mockRejectedValue(
-      new AuthError("Token expired", "expired")
+      new AuthError("expired", "Token expired")
     );
     const findSpy = spyOn(apiClient, "findEventAcrossOrgs");
 
