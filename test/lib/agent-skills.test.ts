@@ -1,11 +1,8 @@
 /**
  * Agent Skills Tests
  *
- * Unit tests for Claude Code detection, skill path construction,
- * and embedded skill file installation.
- *
- * Note: URL construction and network fetching tests were removed when
- * skill content was embedded at build time (no more network fetch).
+ * Unit tests for Claude Code detection, shared path construction, and
+ * embedded skill installation across detected agent roots.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -44,9 +41,14 @@ describe("agent-skills", () => {
   });
 
   describe("getSkillInstallPath", () => {
-    test("returns correct path under ~/.claude/skills", () => {
+    test("defaults to the Claude Code path", () => {
       const path = getSkillInstallPath("/home/user");
       expect(path).toBe("/home/user/.claude/skills/sentry-cli/SKILL.md");
+    });
+
+    test("returns correct path under ~/.agents/skills", () => {
+      const path = getSkillInstallPath("/home/user", ".agents");
+      expect(path).toBe("/home/user/.agents/skills/sentry-cli/SKILL.md");
     });
   });
 
@@ -62,53 +64,102 @@ describe("agent-skills", () => {
     });
 
     afterEach(() => {
+      for (const dir of [
+        testDir,
+        join(testDir, ".agents"),
+        join(testDir, ".claude"),
+      ]) {
+        try {
+          if (existsSync(dir)) {
+            chmodSync(dir, 0o755);
+          }
+        } catch {
+          // Ignore cleanup races for directories that never existed.
+        }
+      }
       rmSync(testDir, { recursive: true, force: true });
     });
 
-    test("returns null when Claude Code is not detected", async () => {
+    test("returns null when no supported agent root is detected", async () => {
       const result = await installAgentSkills(testDir);
       expect(result).toBeNull();
     });
 
-    test("installs embedded skill files when Claude Code is detected", async () => {
-      mkdirSync(join(testDir, ".claude"), { recursive: true });
+    test("installs to ~/.agents/ when the shared agent root exists", async () => {
+      mkdirSync(join(testDir, ".agents"), { recursive: true });
 
       const result = await installAgentSkills(testDir);
 
       expect(result).not.toBeNull();
       expect(result!.created).toBe(true);
       expect(result!.path).toBe(
-        join(testDir, ".claude", "skills", "sentry-cli", "SKILL.md")
+        join(testDir, ".agents", "skills", "sentry-cli", "SKILL.md")
       );
       expect(existsSync(result!.path)).toBe(true);
 
       const content = await Bun.file(result!.path).text();
       expect(content).toContain("sentry-cli");
 
-      // Check reference files were created
       expect(result!.referenceCount).toBeGreaterThan(0);
       const refsDir = join(
         testDir,
-        ".claude",
+        ".agents",
         "skills",
         "sentry-cli",
         "references"
       );
       expect(existsSync(refsDir)).toBe(true);
       expect(existsSync(join(refsDir, "issue.md"))).toBe(true);
+
+      expect(
+        existsSync(join(testDir, ".claude", "skills", "sentry-cli", "SKILL.md"))
+      ).toBe(false);
     });
 
-    test("creates intermediate directories", async () => {
+    test("installs to both ~/.agents/ and ~/.claude/ when both roots exist", async () => {
+      mkdirSync(join(testDir, ".agents"), { recursive: true });
       mkdirSync(join(testDir, ".claude"), { recursive: true });
 
       const result = await installAgentSkills(testDir);
 
       expect(result).not.toBeNull();
-      expect(existsSync(result!.path)).toBe(true);
+      expect(result!.path).toBe(
+        join(testDir, ".agents", "skills", "sentry-cli", "SKILL.md")
+      );
+      expect(
+        existsSync(join(testDir, ".agents", "skills", "sentry-cli", "SKILL.md"))
+      ).toBe(true);
+      expect(
+        existsSync(join(testDir, ".claude", "skills", "sentry-cli", "SKILL.md"))
+      ).toBe(true);
+      expect(
+        existsSync(
+          join(
+            testDir,
+            ".agents",
+            "skills",
+            "sentry-cli",
+            "references",
+            "issue.md"
+          )
+        )
+      ).toBe(true);
+      expect(
+        existsSync(
+          join(
+            testDir,
+            ".claude",
+            "skills",
+            "sentry-cli",
+            "references",
+            "issue.md"
+          )
+        )
+      ).toBe(true);
     });
 
     test("reports created: false when updating existing file", async () => {
-      mkdirSync(join(testDir, ".claude"), { recursive: true });
+      mkdirSync(join(testDir, ".agents"), { recursive: true });
 
       const first = await installAgentSkills(testDir);
       expect(first!.created).toBe(true);
@@ -118,31 +169,65 @@ describe("agent-skills", () => {
       expect(second!.path).toBe(first!.path);
     });
 
-    test("returns null on filesystem error without throwing", async () => {
-      // Create .claude as a read-only directory so mkdirSync for the
-      // skills subdirectory fails with EACCES
-      mkdirSync(join(testDir, ".claude"), { recursive: true, mode: 0o444 });
+    test("reports the fresh claude path when shared skills already exist", async () => {
+      mkdirSync(join(testDir, ".agents"), { recursive: true });
 
-      const result = await installAgentSkills(testDir);
-      expect(result).toBeNull();
+      const first = await installAgentSkills(testDir);
+      expect(first!.created).toBe(true);
+      expect(first!.path).toBe(
+        join(testDir, ".agents", "skills", "sentry-cli", "SKILL.md")
+      );
 
-      // Restore write permission so afterEach cleanup can remove it
-      chmodSync(join(testDir, ".claude"), 0o755);
+      mkdirSync(join(testDir, ".claude"), { recursive: true });
+
+      const second = await installAgentSkills(testDir);
+      expect(second).not.toBeNull();
+      expect(second!.created).toBe(true);
+      expect(second!.path).toBe(
+        join(testDir, ".claude", "skills", "sentry-cli", "SKILL.md")
+      );
     });
 
-    test("returns null when .claude exists but is not writable (sandbox)", async () => {
-      // Simulate a sandboxed .claude directory: readable + executable, not writable.
-      // The accessSync(W_OK) pre-check should catch this before any write attempt.
-      mkdirSync(join(testDir, ".claude"), { recursive: true, mode: 0o555 });
+    test("claude install succeeds even if ~/.agents is not writable", async () => {
+      mkdirSync(join(testDir, ".agents"), { recursive: true });
+      chmodSync(join(testDir, ".agents"), 0o444);
+      mkdirSync(join(testDir, ".claude"), { recursive: true });
+
+      const result = await installAgentSkills(testDir);
+      expect(result).not.toBeNull();
+      expect(result!.path).toBe(
+        join(testDir, ".claude", "skills", "sentry-cli", "SKILL.md")
+      );
+      expect(existsSync(result!.path)).toBe(true);
+      expect(
+        existsSync(join(testDir, ".agents", "skills", "sentry-cli", "SKILL.md"))
+      ).toBe(false);
+    });
+
+    test("agents install succeeds even if ~/.claude is not writable", async () => {
+      mkdirSync(join(testDir, ".agents"), { recursive: true });
+      mkdirSync(join(testDir, ".claude"), { recursive: true });
+      chmodSync(join(testDir, ".claude"), 0o444);
+
+      const result = await installAgentSkills(testDir);
+      expect(result).not.toBeNull();
+      expect(result!.path).toBe(
+        join(testDir, ".agents", "skills", "sentry-cli", "SKILL.md")
+      );
+      expect(existsSync(result!.path)).toBe(true);
+      expect(
+        existsSync(join(testDir, ".claude", "skills", "sentry-cli", "SKILL.md"))
+      ).toBe(false);
+    });
+
+    test("returns null when all detected targets are not writable", async () => {
+      mkdirSync(join(testDir, ".agents"), { recursive: true });
+      mkdirSync(join(testDir, ".claude"), { recursive: true });
+      chmodSync(join(testDir, ".agents"), 0o444);
+      chmodSync(join(testDir, ".claude"), 0o444);
 
       const result = await installAgentSkills(testDir);
       expect(result).toBeNull();
-
-      // Verify no write was attempted — skills subdir should not exist
-      expect(existsSync(join(testDir, ".claude", "skills"))).toBe(false);
-
-      // Restore write permission so afterEach cleanup can remove it
-      chmodSync(join(testDir, ".claude"), 0o755);
     });
   });
 });

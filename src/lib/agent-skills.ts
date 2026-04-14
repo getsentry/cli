@@ -1,8 +1,8 @@
 /**
  * Agent skill installation for AI coding assistants.
  *
- * Detects supported AI coding agents (currently Claude Code) and installs
- * the Sentry CLI skill files so the agent can use CLI commands effectively.
+ * Detects supported agent roots and installs the embedded Sentry CLI
+ * skill files without creating new top-level agent directories.
  *
  * Skill file contents are embedded at build time (via a generated module
  * produced by script/generate-skill.ts), so no network fetch is needed.
@@ -24,59 +24,65 @@ export type AgentSkillLocation = {
 };
 
 /**
+ * Get the root directory for an agent skill installation target.
+ */
+function getSkillRootPath(
+  homeDir: string,
+  rootDir: ".agents" | ".claude"
+): string {
+  return join(homeDir, rootDir);
+}
+
+/**
  * Check if Claude Code is installed by looking for the ~/.claude directory.
  *
  * Claude Code creates this directory on first use for settings, skills,
  * and other configuration. Its presence is a reliable indicator.
  */
 export function detectClaudeCode(homeDir: string): boolean {
-  return existsSync(join(homeDir, ".claude"));
+  return existsSync(getSkillRootPath(homeDir, ".claude"));
 }
 
 /**
- * Get the installation path for the Sentry CLI skill in Claude Code.
+ * Check if a shared Agent Skills root already exists.
  *
- * Skills are stored under ~/.claude/skills/<skill-name>/SKILL.md,
- * matching the convention used by the `npx skills` tool.
+ * Compatible agents create `~/.agents` when they adopt the shared skills
+ * layout, so its presence is the opt-in signal for installing there.
  */
-export function getSkillInstallPath(homeDir: string): string {
-  return join(homeDir, ".claude", "skills", "sentry-cli", "SKILL.md");
+function detectSharedAgentSkillsRoot(homeDir: string): boolean {
+  return existsSync(getSkillRootPath(homeDir, ".agents"));
 }
 
 /**
- * Install the Sentry CLI agent skill for Claude Code.
+ * Get the installation path for the Sentry CLI skill under a supported
+ * agent root.
  *
- * Checks if Claude Code is installed and writes the embedded skill files
- * to the Claude Code skills directory. Skill content is bundled into the
- * binary at build time, so no network access is required.
- *
- * Returns null (without throwing) if Claude Code isn't detected
- * or any other error occurs.
- *
- * @param homeDir - User's home directory
- * @returns Location info if installed, null otherwise
+ * `~/.claude` remains the default to preserve the existing helper behavior,
+ * while callers can also pass `".agents"` for the shared Agent Skills path.
  */
-export async function installAgentSkills(
-  homeDir: string
+export function getSkillInstallPath(
+  homeDir: string,
+  rootDir: ".agents" | ".claude" = ".claude"
+): string {
+  return join(
+    getSkillRootPath(homeDir, rootDir),
+    "skills",
+    "sentry-cli",
+    "SKILL.md"
+  );
+}
+
+/**
+ * Write embedded skill files beneath an already-detected agent root.
+ *
+ * Callers must ensure the target root exists and is writable before invoking
+ * this helper. Returns null on any filesystem failure.
+ */
+async function writeSkillFiles(
+  skillPath: string
 ): Promise<AgentSkillLocation | null> {
-  if (!detectClaudeCode(homeDir)) {
-    return null;
-  }
-
-  // Verify .claude is writable before attempting file creation.
-  // In sandboxed environments (e.g., Claude Code sandbox), .claude may exist
-  // but be read-only. Some sandboxes terminate the process on write attempts,
-  // bypassing JavaScript error handling — so we must check before writing.
   try {
-    accessSync(join(homeDir, ".claude"), constants.W_OK);
-  } catch {
-    return null;
-  }
-
-  try {
-    const skillPath = getSkillInstallPath(homeDir);
     const skillDir = dirname(skillPath);
-
     const alreadyExists = existsSync(skillPath);
     let referenceCount = 0;
 
@@ -104,4 +110,77 @@ export async function installAgentSkills(
     });
     return null;
   }
+}
+
+/**
+ * Install the embedded skill files for a detected agent root.
+ *
+ * This helper verifies the target root remains present and writable before
+ * attempting to create the nested `skills/sentry-cli` directory tree.
+ */
+async function installDetectedAgentSkill(
+  homeDir: string,
+  rootDir: ".agents" | ".claude"
+): Promise<AgentSkillLocation | null> {
+  const parentDir = getSkillRootPath(homeDir, rootDir);
+  if (!existsSync(parentDir)) {
+    return null;
+  }
+
+  // In sandboxed environments, the agent root may exist but be read-only.
+  // Some sandboxes terminate the process on write attempts, bypassing
+  // JavaScript error handling, so we must check before writing.
+  try {
+    accessSync(parentDir, constants.W_OK);
+  } catch {
+    return null;
+  }
+
+  return await writeSkillFiles(getSkillInstallPath(homeDir, rootDir));
+}
+
+/**
+ * Install the Sentry CLI agent skill for detected AI coding assistants.
+ *
+ * Installs under any supported root that already exists:
+ *
+ * - `~/.agents/skills/sentry-cli/` for compatible agents using the shared
+ *   Agent Skills layout
+ * - `~/.claude/skills/sentry-cli/` when Claude Code is installed
+ *
+ * The installer never creates top-level agent roots. Their presence is the
+ * detection signal that the user already has a compatible agent installed.
+ * Each target is independent, so a failure in one location does not block
+ * the others.
+ *
+ * If any target is freshly created, the returned `path` points to that new
+ * installation so setup output matches the file that was actually added.
+ *
+ * @param homeDir - User's home directory
+ * @returns Location info if installed to at least one detected target, null otherwise
+ */
+export async function installAgentSkills(
+  homeDir: string
+): Promise<AgentSkillLocation | null> {
+  const results: AgentSkillLocation[] = [];
+
+  if (detectSharedAgentSkillsRoot(homeDir)) {
+    const location = await installDetectedAgentSkill(homeDir, ".agents");
+    if (location) {
+      results.push(location);
+    }
+  }
+
+  if (detectClaudeCode(homeDir)) {
+    const location = await installDetectedAgentSkill(homeDir, ".claude");
+    if (location) {
+      results.push(location);
+    }
+  }
+
+  if (results.length === 0) {
+    return null;
+  }
+
+  return results.find((location) => location.created) ?? results[0] ?? null;
 }
