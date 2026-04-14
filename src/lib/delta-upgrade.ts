@@ -495,29 +495,79 @@ type ValidateChainOpts = {
   fullGzSize: number;
 };
 
+/** Reason a chain step failed validation */
+type ChainStepFailure =
+  | { reason: "version-mismatch"; expected: string; actual: string | null }
+  | { reason: "missing-layer"; layerName: string }
+  | { reason: "size-exceeded"; layerSize: number; budget: number };
+
+/** Result of validating a single chain step */
+type ChainStepResult =
+  | { ok: true; digest: string; size: number }
+  | { ok: false; failure: ChainStepFailure };
+
 /**
  * Validate a single step in the nightly chain.
  *
- * @returns Layer digest and size if valid, or null if the step is invalid
+ * Checks three conditions in order:
+ * 1. Manifest's `from-version` annotation matches the expected previous version
+ * 2. A layer with the expected platform title exists in the manifest
+ * 3. The layer's size fits within the remaining download budget
+ *
+ * @returns Layer digest and size on success, or a typed failure reason
  */
-function validateChainStep(
+export function validateChainStep(
   manifest: OciManifest,
   opts: { expectedFrom: string; patchLayerName: string; sizeLimit: number }
-): { digest: string; size: number } | null {
+): ChainStepResult {
   const fromVersion = getPatchFromVersion(manifest);
   if (fromVersion !== opts.expectedFrom) {
-    return null;
+    return {
+      ok: false,
+      failure: {
+        reason: "version-mismatch",
+        expected: opts.expectedFrom,
+        actual: fromVersion,
+      },
+    };
   }
 
   const layer = manifest.layers.find((l) => {
     const title = l.annotations?.["org.opencontainers.image.title"];
     return title === opts.patchLayerName;
   });
-  if (!layer || layer.size > opts.sizeLimit) {
-    return null;
+  if (!layer) {
+    return {
+      ok: false,
+      failure: { reason: "missing-layer", layerName: opts.patchLayerName },
+    };
+  }
+  if (layer.size > opts.sizeLimit) {
+    return {
+      ok: false,
+      failure: {
+        reason: "size-exceeded",
+        layerSize: layer.size,
+        budget: opts.sizeLimit,
+      },
+    };
   }
 
-  return { digest: layer.digest, size: layer.size };
+  return { ok: true, digest: layer.digest, size: layer.size };
+}
+
+/** Format a chain step failure reason for debug logging */
+function formatStepFailure(failure: ChainStepFailure): string {
+  switch (failure.reason) {
+    case "version-mismatch":
+      return `version mismatch (expected=${failure.expected}, actual=${failure.actual ?? "missing"})`;
+    case "missing-layer":
+      return `platform layer not found (expected=${failure.layerName})`;
+    case "size-exceeded":
+      return `patch too large (size=${failure.layerSize}, budget=${failure.budget})`;
+    default:
+      return "unknown failure";
+  }
 }
 
 /**
@@ -553,20 +603,20 @@ function validateNightlyChain(
     }
 
     const remainingBudget = fullGzSize * SIZE_THRESHOLD_RATIO - totalSize;
-    const step = validateChainStep(manifest, {
+    const result = validateChainStep(manifest, {
       expectedFrom: prevVersion,
       patchLayerName,
       sizeLimit: remainingBudget,
     });
-    if (!step) {
+    if (!result.ok) {
       log.debug(
-        `Nightly chain step ${i + 1} failed validation (from=${prevVersion}, budget=${remainingBudget})`
+        `Nightly chain step ${i + 1} failed: ${formatStepFailure(result.failure)}`
       );
       return null;
     }
 
-    digests.push(step.digest);
-    totalSize += step.size;
+    digests.push(result.digest);
+    totalSize += result.size;
     prevVersion = tag.slice(PATCH_TAG_PREFIX.length);
 
     if (i === manifests.length - 1) {

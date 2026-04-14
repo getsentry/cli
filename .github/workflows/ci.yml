@@ -328,7 +328,7 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
 
           # Find previous nightly tag
-          TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-' | sort -V || echo "")
+          TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-[0-9]' | sort -V || echo "")
           PREV_TAG=""
           for tag in $TAGS; do
             # Current tag may not exist yet (publish-nightly hasn't run),
@@ -531,7 +531,7 @@ jobs:
           fi
 
           # Find from-version by listing GHCR nightly tags
-          TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-' | sort -V || echo "")
+          TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-[0-9]' | sort -V || echo "")
           PREV_TAG=""
           for tag in $TAGS; do
             if [ "$tag" = "nightly-${VERSION}" ]; then break; fi
