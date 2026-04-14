@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-cli
-version: 0.26.1
+version: 0.27.0
 description: CLI-related commands
 requires:
   bins: ["sentry"]
@@ -10,6 +10,15 @@ requires:
 # CLI Commands
 
 CLI-related commands
+
+### `sentry cli defaults <key value...>`
+
+View and manage default settings
+
+**Flags:**
+- `--clear - Clear the specified default, or all defaults if no key is given`
+- `-y, --yes - Skip confirmation prompt`
+- `-f, --force - Force the operation without confirmation`
 
 ### `sentry cli feedback <message...>`
 

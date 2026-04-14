@@ -1,6 +1,6 @@
 ---
 name: sentry-cli
-version: 0.26.1
+version: 0.27.0
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 requires:
   bins: ["sentry"]
@@ -322,6 +322,7 @@ Make an authenticated API request
 
 CLI-related commands
 
+- `sentry cli defaults <key value...>` — View and manage default settings
 - `sentry cli feedback <message...>` — Send feedback about the CLI
 - `sentry cli fix` — Diagnose and repair CLI database issues
 - `sentry cli setup` — Configure shell integration
@@ -407,7 +408,7 @@ View distributed traces
 
 - `sentry trace list <org/project>` — List recent traces in a project
 - `sentry trace view <org/project/trace-id...>` — View details of a specific trace
-- `sentry trace logs <org/trace-id...>` — View logs associated with a trace
+- `sentry trace logs <org/project/trace-id...>` — View logs associated with a trace
 
 → Full flags and examples: `references/trace.md`
 
