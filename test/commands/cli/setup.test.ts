@@ -730,7 +730,7 @@ describe("sentry cli setup", () => {
       expect(existsSync(skillPath)).toBe(true);
     });
 
-    test("silently skips when Claude Code is not detected", async () => {
+    test("silently skips when no supported agent root is detected", async () => {
       const { context, getOutput, restore } = createMockContext({
         homeDir: testDir,
         execPath: join(testDir, "bin", "sentry"),
@@ -748,6 +748,34 @@ describe("sentry cli setup", () => {
       );
 
       expect(getOutput()).not.toContain("Agent skills:");
+    });
+
+    test("installs to ~/.agents/ when the shared agent root is detected", async () => {
+      mkdirSync(join(testDir, ".agents"), { recursive: true });
+
+      const { context, getOutput, restore } = createMockContext({
+        homeDir: testDir,
+        execPath: join(testDir, "bin", "sentry"),
+        env: {
+          PATH: `/usr/bin:${join(testDir, "bin")}:/bin`,
+          SHELL: "/bin/bash",
+        },
+      });
+      restoreStderr = restore;
+
+      await run(
+        app,
+        ["cli", "setup", "--no-modify-path", "--no-completions"],
+        context
+      );
+
+      expect(getOutput()).toContain("Agent skills: Installed to");
+      expect(
+        existsSync(join(testDir, ".agents", "skills", "sentry-cli", "SKILL.md"))
+      ).toBe(true);
+      expect(
+        existsSync(join(testDir, ".claude", "skills", "sentry-cli", "SKILL.md"))
+      ).toBe(false);
     });
 
     test("suppresses agent skills message on subsequent runs (upgrade scenario)", async () => {

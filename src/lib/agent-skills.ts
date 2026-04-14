@@ -1,8 +1,9 @@
 /**
  * Agent skill installation for AI coding assistants.
  *
- * Detects supported AI coding agents (currently Claude Code) and installs
- * the Sentry CLI skill files so the agent can use CLI commands effectively.
+ * Detects supported AI coding agents (currently Claude Code and agents that
+ * use the shared `~/.agents` root) and installs the Sentry CLI skill files
+ * so the agent can use CLI commands effectively.
  *
  * Skill file contents are embedded at build time (via a generated module
  * produced by script/generate-skill.ts), so no network fetch is needed.
@@ -34,49 +35,30 @@ export function detectClaudeCode(homeDir: string): boolean {
 }
 
 /**
- * Get the installation path for the Sentry CLI skill in Claude Code.
+ * Get the installation path for the Sentry CLI skill under a supported AI
+ * coding assistant root.
  *
- * Skills are stored under ~/.claude/skills/<skill-name>/SKILL.md,
- * matching the convention used by the `npx skills` tool.
+ * `~/.claude` remains the default to preserve the existing helper behavior,
+ * while callers can also pass `".agents"` for the shared Agent Skills path.
  */
-export function getSkillInstallPath(homeDir: string): string {
-  return join(homeDir, ".claude", "skills", "sentry-cli", "SKILL.md");
+export function getSkillInstallPath(
+  homeDir: string,
+  rootDir: ".agents" | ".claude" = ".claude"
+): string {
+  return join(homeDir, rootDir, "skills", "sentry-cli", "SKILL.md");
 }
 
 /**
- * Install the Sentry CLI agent skill for Claude Code.
+ * Write embedded skill files beneath an already-detected agent root.
  *
- * Checks if Claude Code is installed and writes the embedded skill files
- * to the Claude Code skills directory. Skill content is bundled into the
- * binary at build time, so no network access is required.
- *
- * Returns null (without throwing) if Claude Code isn't detected
- * or any other error occurs.
- *
- * @param homeDir - User's home directory
- * @returns Location info if installed, null otherwise
+ * Callers must ensure the target root exists and is writable before invoking
+ * this helper. Returns null on any filesystem failure.
  */
-export async function installAgentSkills(
-  homeDir: string
+async function writeSkillFiles(
+  skillPath: string
 ): Promise<AgentSkillLocation | null> {
-  if (!detectClaudeCode(homeDir)) {
-    return null;
-  }
-
-  // Verify .claude is writable before attempting file creation.
-  // In sandboxed environments (e.g., Claude Code sandbox), .claude may exist
-  // but be read-only. Some sandboxes terminate the process on write attempts,
-  // bypassing JavaScript error handling — so we must check before writing.
   try {
-    accessSync(join(homeDir, ".claude"), constants.W_OK);
-  } catch {
-    return null;
-  }
-
-  try {
-    const skillPath = getSkillInstallPath(homeDir);
     const skillDir = dirname(skillPath);
-
     const alreadyExists = existsSync(skillPath);
     let referenceCount = 0;
 
@@ -104,4 +86,63 @@ export async function installAgentSkills(
     });
     return null;
   }
+}
+
+/**
+ * Install the Sentry CLI agent skill for detected AI coding assistants.
+ *
+ * Checks supported roots and writes the embedded skill files to each detected
+ * location. The installer never creates top-level agent roots. Their presence
+ * is the detection signal that the user already has a compatible agent installed.
+ *
+ * If any target is freshly created, the returned `path` points to that new
+ * installation so setup output matches the file that was actually added.
+ *
+ * @param homeDir - User's home directory
+ * @returns Location info if installed to at least one detected target, null otherwise
+ */
+export async function installAgentSkills(
+  homeDir: string
+): Promise<AgentSkillLocation | null> {
+  const installTargets = [
+    {
+      detected: existsSync(join(homeDir, ".agents")),
+      rootDir: ".agents" as const,
+    },
+    {
+      detected: detectClaudeCode(homeDir),
+      rootDir: ".claude" as const,
+    },
+  ];
+  const results: AgentSkillLocation[] = [];
+
+  for (const target of installTargets) {
+    if (!target.detected) {
+      continue;
+    }
+
+    const parentDir = join(homeDir, target.rootDir);
+
+    // In sandboxed environments, the agent root may exist but be read-only.
+    // Some sandboxes terminate the process on write attempts, bypassing
+    // JavaScript error handling — so we must check before writing.
+    try {
+      accessSync(parentDir, constants.W_OK);
+    } catch {
+      continue;
+    }
+
+    const location = await writeSkillFiles(
+      getSkillInstallPath(homeDir, target.rootDir)
+    );
+    if (location) {
+      results.push(location);
+    }
+  }
+
+  if (results.length === 0) {
+    return null;
+  }
+
+  return results.find((location) => location.created) ?? results[0] ?? null;
 }
