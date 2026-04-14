@@ -1,0 +1,61 @@
+# CLI-14K: Release delete fails with unhelpful error for releases with health data
+
+## Issue Summary
+
+When a user runs `sentry release delete --force --yes <org>/<version>` on a release that has health data (session/crash data), the Sentry API returns HTTP 400 with:
+
+> "This release has health data and cannot be removed."
+
+**Two problems:**
+1. **No error handling**: The `deleteRelease()` call on line 134 of `delete.ts` has no try/catch. The raw `ApiError` propagates to the global error handler, producing a confusing developer-facing error message instead of a user-friendly one.
+2. **`--force` is misleading**: Users expect `--force` to force-delete despite restrictions, but it only bypasses the local confirmation prompt. The API has no force-delete parameter for releases with health data — this is a server-side hard block.
+
+## Fix
+
+**File:** `src/commands/release/delete.ts`
+
+Wrap the `deleteRelease()` call in a try/catch that catches `ApiError` with status 400 and provides a clear, actionable error message. This mirrors the existing pattern in `project/delete.ts` (lines 213-220) which catches 403 errors and provides enriched permission errors.
+
+### Changes
+
+```typescript
+// In delete.ts, around line 134:
+import { ApiError } from "../../lib/errors.js";
+
+try {
+  await deleteRelease(resolved.org, version);
+} catch (error) {
+  if (error instanceof ApiError && error.status === 400 && error.detail?.includes("health data")) {
+    throw new ApiError(
+      `Release '${version}' has health data and cannot be deleted`,
+      400,
+      "Releases with active session or crash-free data are protected by Sentry and cannot be removed via the API. " +
+        "The health data must age out before the release can be deleted. " +
+        "You can view release health details at: https://sentry.io/organizations/${resolved.org}/releases/${encodeURIComponent(version)}/"
+    );
+  }
+  throw error;
+}
+```
+
+### What this does
+- Catches the specific 400 "health data" error from the API
+- Re-throws an `ApiError` with a clear title and actionable detail
+- Tells the user *why* it can't be deleted and *what* they can do about it
+- All other errors (404, 403, network, etc.) pass through unchanged
+
+### What this does NOT do
+- Does not add a server-side force-delete option (none exists in the API)
+- Does not change `--force` flag semantics (it's consistently a confirmation bypass across all delete commands)
+
+## Test
+
+**File:** `test/commands/release/delete.test.ts` (modify or create)
+
+Add a test case that mocks the `deleteRelease` API call to throw an `ApiError(400)` with "health data" in the detail, and verifies the enriched error message surfaces.
+
+## Verification
+
+1. `bun test test/commands/release/delete.test.ts` — unit tests pass
+2. `bun run typecheck` — no type errors
+3. `bun run lint` — no lint errors
