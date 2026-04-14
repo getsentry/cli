@@ -728,6 +728,19 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   }
 
   handleFinalResult(result, spin, spinState);
+
+  // Eagerly populate dsn_cache so the next command doesn't re-scan files.
+  // The DSN is now in source code (written by apply-patchset), so detectDsn
+  // will find it and cache with the correct projectRoot and sourcePath.
+  // project_cache was already seeded by createProjectWithDsn.
+  if (!dryRun) {
+    try {
+      const { detectDsn } = await import("../dsn/index.js");
+      await detectDsn(directory);
+    } catch {
+      // Best-effort — cache seeding failure doesn't affect init result
+    }
+  }
 }
 
 function handleFinalResult(
