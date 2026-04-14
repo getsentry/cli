@@ -1084,6 +1084,22 @@ describe("fetchEventWithContext", () => {
     ).rejects.toThrow(AuthError);
   });
 
+  test("propagates AuthError from same-org fallback", async () => {
+    spyOn(apiClient, "getEvent").mockRejectedValue(
+      new ApiError("Not found", 404)
+    );
+    spyOn(apiClient, "resolveEventInOrg").mockRejectedValue(
+      new AuthError("Token expired", "expired")
+    );
+    const findSpy = spyOn(apiClient, "findEventAcrossOrgs");
+
+    await expect(
+      fetchEventWithContext(null, "my-org", "my-project", "abc123")
+    ).rejects.toThrow(AuthError);
+    // Cross-org should never be attempted when auth is broken
+    expect(findSpy).not.toHaveBeenCalled();
+  });
+
   test("tries cross-org fallback even when org-wide search throws", async () => {
     spyOn(apiClient, "getEvent").mockRejectedValue(
       new ApiError("Not found", 404)

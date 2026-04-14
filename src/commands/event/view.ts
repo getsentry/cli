@@ -479,7 +479,11 @@ async function tryEventFallbacks(
       );
       return resolved.event;
     }
-  } catch {
+  } catch (sameOrgError) {
+    // Propagate auth errors — they indicate a global problem (expired token)
+    if (sameOrgError instanceof AuthError) {
+      throw sameOrgError;
+    }
     // Transient failure — don't mark org as searched so cross-org retries it
   }
 
