@@ -32,7 +32,7 @@ import {
 import { formatEventDetails } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
-import { HEX_ID_RE, normalizeHexId } from "../../lib/hex-id.js";
+import { HEX_ID_RE, normalizeHexId, validateHexId } from "../../lib/hex-id.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -737,11 +737,20 @@ export const viewCommand = buildCommand({
     const log = logger.withTag("event.view");
 
     // Parse positional args
-    const { eventId, targetArg, warning, issueId, issueShortId } =
+    let { eventId, targetArg, warning, issueId, issueShortId } =
       parsePositionalArgs(args);
     if (warning) {
       log.warn(warning);
     }
+
+    // Validate event ID format early (before API calls) when the ID came
+    // from user input. Skip when the ID is a sentinel from issue URL/short
+    // ID detection — those paths resolve the event through issue lookup.
+    // Capture the normalized return value (lowercased, UUID dashes stripped).
+    if (eventId !== LATEST_EVENT_SENTINEL && !issueId && !issueShortId) {
+      eventId = validateHexId(eventId, "event ID");
+    }
+
     const parsed = parseOrgProjectArg(targetArg);
 
     // Handle issue-based shortcuts (issue URLs and short IDs) before

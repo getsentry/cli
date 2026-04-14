@@ -136,6 +136,54 @@ describe("validateHexId", () => {
     }
   });
 
+  test("error hints help flag for --h input", () => {
+    try {
+      validateHexId("--h", "event ID");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      const msg = (error as ValidationError).message;
+      expect(msg).toContain("looks like a help flag");
+      expect(msg).toContain("--help or -h");
+    }
+  });
+
+  test("error hints help flag for -help input", () => {
+    try {
+      validateHexId("-help", "trace ID");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      const msg = (error as ValidationError).message;
+      expect(msg).toContain("looks like a help flag");
+    }
+  });
+
+  test("error hints generic flag for --verbose input", () => {
+    try {
+      validateHexId("--verbose", "log ID");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      const msg = (error as ValidationError).message;
+      expect(msg).toContain("looks like a CLI flag");
+      expect(msg).toContain("--help");
+    }
+  });
+
+  test("flag-like detection takes precedence over slug hint", () => {
+    try {
+      validateHexId("--my-flag", "event ID");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      const msg = (error as ValidationError).message;
+      expect(msg).toContain("looks like a CLI flag");
+      // Should NOT suggest project slug
+      expect(msg).not.toContain("doesn't look like a hex ID");
+    }
+  });
+
   test("no extra hint for random-length hex (not a span ID)", () => {
     try {
       validateHexId("abc123", "log ID");

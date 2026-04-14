@@ -787,8 +787,9 @@ describe("viewCommand.func", () => {
   let openInBrowserSpy: ReturnType<typeof spyOn>;
   let resolveProjectBySlugSpy: ReturnType<typeof spyOn>;
 
+  const VALID_EVENT_ID = "abc123def456abc123def456abc123de";
   const sampleEvent: SentryEvent = {
-    eventID: "abc123def456",
+    eventID: VALID_EVENT_ID,
     title: "Error: test",
     metadata: {},
     contexts: {},
@@ -833,11 +834,11 @@ describe("viewCommand.func", () => {
 
     const { context } = createMockContext();
     const func = await viewCommand.loader();
-    // "abc123def456" has no slash, "test-org/test-proj" has slash → swap detected
+    // Valid 32-char hex has no slash, "test-org/test-proj" has slash → swap detected
     await func.call(
       context,
       { json: true, web: false, spans: 0 },
-      "abc123def456",
+      VALID_EVENT_ID,
       "test-org/test-proj"
     );
 
@@ -904,12 +905,44 @@ describe("viewCommand.func", () => {
       context,
       { json: true, web: false, spans: 0 },
       "test_org/test_proj",
-      "abc123def456"
+      VALID_EVENT_ID
     );
 
     // parseOrgProjectArg normalizes "test_org/test_proj" → "test-org/test-proj"
     // and sets normalized=true, triggering the warning path (line 343-345)
     expect(getEventSpy).toHaveBeenCalled();
+  });
+
+  test("throws ValidationError for flag-like event ID (--h)", async () => {
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+
+    try {
+      await func.call(context, { json: false, web: false, spans: 0 }, "--h");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      const msg = (error as ValidationError).message;
+      expect(msg).toContain("event ID");
+      expect(msg).toContain("looks like a help flag");
+    }
+  });
+
+  test("throws ValidationError for non-hex event ID", async () => {
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+
+    try {
+      await func.call(
+        context,
+        { json: false, web: false, spans: 0 },
+        "not-a-hex-id"
+      );
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as ValidationError).message).toContain("event ID");
+    }
   });
 });
 
