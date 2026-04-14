@@ -1796,7 +1796,7 @@ export const listCommand = buildListCommand("issue", {
         items: [issue],
         displayRows,
         title: `Issue ${issue.shortId}`,
-        footerMode: "single",
+        footerMode: "none",
         compact: true,
       } satisfies IssueListResult);
       return {
