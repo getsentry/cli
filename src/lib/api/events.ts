@@ -121,6 +121,12 @@ export async function resolveEventInOrg(
   }
 }
 
+/** Options for {@link findEventAcrossOrgs}. */
+export type FindEventAcrossOrgsOptions = {
+  /** Org slugs to skip (already searched by the caller). */
+  excludeOrgs?: string[];
+};
+
 /**
  * Search for an event across all accessible organizations by event ID.
  *
@@ -128,11 +134,19 @@ export async function resolveEventInOrg(
  * Returns the first match found, or null if the event is not accessible.
  *
  * @param eventId - The event ID (UUID) to look up
+ * @param options - Optional settings (e.g., orgs to skip)
  */
 export async function findEventAcrossOrgs(
-  eventId: string
+  eventId: string,
+  options?: FindEventAcrossOrgsOptions
 ): Promise<ResolvedEvent | null> {
-  const orgs = await listOrganizations();
+  const excludeSet = options?.excludeOrgs
+    ? new Set(options.excludeOrgs)
+    : undefined;
+  const allOrgs = await listOrganizations();
+  const orgs = excludeSet
+    ? allOrgs.filter((o) => !excludeSet.has(o.slug))
+    : allOrgs;
 
   const limit = pLimit(ORG_FANOUT_CONCURRENCY);
   const results = await Promise.allSettled(

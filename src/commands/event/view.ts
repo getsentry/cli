@@ -447,16 +447,62 @@ async function fetchLatestEventData(
 }
 
 /**
+ * Try to find an event via cross-project and cross-org fallbacks.
+ *
+ * 1. Same-org fallback: tries the eventids resolution endpoint within `org`.
+ * 2. Cross-org fallback: fans out to all accessible orgs (skipping `org`).
+ *
+ * Returns the event and logs a warning when found in a different location,
+ * or returns null if the event cannot be found anywhere.
+ */
+async function tryEventFallbacks(
+  org: string,
+  project: string,
+  eventId: string
+): Promise<SentryEvent | null> {
+  // Same-org fallback: try cross-project lookup within the specified org.
+  // Handles wrong-project resolution from DSN auto-detect or config defaults.
+  try {
+    const resolved = await resolveEventInOrg(org, eventId);
+    if (resolved) {
+      logger.warn(
+        `Event not found in ${org}/${project}, but found in ${resolved.org}/${resolved.project}.`
+      );
+      return resolved.event;
+    }
+  } catch {
+    // Fallback failed (network, 500, etc.) — continue to cross-org
+  }
+
+  // Cross-org fallback: the event may exist in a different organization.
+  // Skips the org already searched to avoid a redundant API call.
+  try {
+    const crossOrg = await findEventAcrossOrgs(eventId, {
+      excludeOrgs: [org],
+    });
+    if (crossOrg) {
+      logger.warn(
+        `Event not found in '${org}', but found in ${crossOrg.org}/${crossOrg.project}.`
+      );
+      return crossOrg.event;
+    }
+  } catch {
+    // Cross-org search failed — continue to suggestions
+  }
+
+  return null;
+}
+
+/**
  * Fetch an event, enriching 404 errors with actionable suggestions.
  *
  * The generic "Failed to get event: 404 Not Found" is the most common
  * event view failure (CLI-6F, 54 users). This wrapper adds context about
- * data retention, ID format, and cross-project lookup.
+ * data retention, ID format, and cross-project/cross-org lookup.
  *
- * When the project-scoped fetch returns 404, automatically tries the
- * org-wide eventids resolution endpoint as a fallback. This handles the
- * common case where DSN auto-detection or config defaults resolve to
- * the wrong project within the correct org (CLI-KW, 9 users).
+ * When the project-scoped fetch returns 404, automatically tries:
+ * 1. Org-wide eventids resolution (wrong project within correct org)
+ * 2. Cross-org search across all accessible orgs (wrong org entirely)
  *
  * @param prefetchedEvent - Already-resolved event (from cross-org lookup), or null
  * @param org - Organization slug
@@ -477,26 +523,15 @@ export async function fetchEventWithContext(
     return await getEvent(org, project, eventId);
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) {
-      // Auto-fallback: try cross-project lookup within the same org.
-      // Handles wrong-project resolution from DSN auto-detect or config defaults.
-      // Wrapped in try-catch so that fallback failures (500s, network errors)
-      // don't mask the helpful ResolutionError with suggestions.
-      try {
-        const resolved = await resolveEventInOrg(org, eventId);
-        if (resolved) {
-          logger.warn(
-            `Event not found in ${org}/${project}, but found in ${resolved.org}/${resolved.project}.`
-          );
-          return resolved.event;
-        }
-      } catch {
-        // Fallback failed (network, 500, etc.) — continue to suggestions
+      const fallback = await tryEventFallbacks(org, project, eventId);
+      if (fallback) {
+        return fallback;
       }
 
       const suggestions = [
         "The event may have been deleted due to data retention policies",
         "Verify the event ID is a 32-character hex string (e.g., a1b2c3d4...)",
-        `The event was not found in any project in '${org}'`,
+        "The event was not found in any accessible organization",
       ];
 
       // Nudge the user when the event ID looks like an issue short ID
