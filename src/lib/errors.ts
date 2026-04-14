@@ -392,7 +392,8 @@ export type UpgradeErrorReason =
   | "unsupported_operation"
   | "network_error"
   | "execution_failed"
-  | "version_not_found";
+  | "version_not_found"
+  | "offline_cache_miss";
 
 /**
  * Upgrade-related errors.
@@ -412,6 +413,8 @@ export class UpgradeError extends CliError {
       network_error: "Failed to fetch version information.",
       execution_failed: "Upgrade command failed.",
       version_not_found: "The specified version was not found.",
+      offline_cache_miss:
+        "Cannot upgrade offline — no pre-downloaded update is available.",
     };
     super(message ?? defaultMessages[reason]);
     this.name = "UpgradeError";

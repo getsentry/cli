@@ -25,6 +25,7 @@ import { UpgradeError } from "../../src/lib/errors.js";
 import {
   detectInstallationMethod,
   detectPackageManagerFromPath,
+  downloadBinaryToTemp,
   executeUpgrade,
   fetchLatestFromGitHub,
   fetchLatestFromNpm,
@@ -267,6 +268,14 @@ describe("UpgradeError", () => {
     expect(error.reason).toBe("unsupported_operation");
     expect(error.message).toBe(
       "This operation is not supported for this installation method."
+    );
+  });
+
+  test("creates error with default message for offline_cache_miss", () => {
+    const error = new UpgradeError("offline_cache_miss");
+    expect(error.reason).toBe("offline_cache_miss");
+    expect(error.message).toBe(
+      "Cannot upgrade offline — no pre-downloaded update is available."
     );
   });
 
@@ -1469,5 +1478,66 @@ describe("executeUpgrade with curl method (nightly)", () => {
     // Verify decompressed content matches original
     const content = await Bun.file(result!.tempBinaryPath).arrayBuffer();
     expect(new Uint8Array(content)).toEqual(mockBinaryContent);
+  });
+});
+
+describe("downloadBinaryToTemp offline errors", () => {
+  const offlineBinDir = join(TEST_TMP_DIR, "upgrade-offline-test");
+  const offlineInstallPath = join(offlineBinDir, "sentry");
+
+  beforeEach(() => {
+    clearInstallInfo();
+    mkdirSync(offlineBinDir, { recursive: true });
+    setInstallInfo({
+      method: "curl",
+      path: offlineInstallPath,
+      version: "0.0.0",
+    });
+  });
+
+  afterEach(async () => {
+    globalThis.fetch = originalFetch;
+    const paths = getCurlInstallPaths();
+    for (const p of [
+      paths.installPath,
+      paths.tempPath,
+      paths.oldPath,
+      paths.lockPath,
+    ]) {
+      try {
+        await unlink(p);
+      } catch {
+        // Ignore
+      }
+    }
+    clearInstallInfo();
+  });
+
+  test("explicit offline: throws offline_cache_miss with actionable message", async () => {
+    try {
+      await downloadBinaryToTemp("0.26.1", undefined, "explicit");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(UpgradeError);
+      const upgradeError = error as UpgradeError;
+      expect(upgradeError.reason).toBe("offline_cache_miss");
+      expect(upgradeError.message).toContain("in offline mode");
+      expect(upgradeError.message).toContain("without `--offline`");
+      expect(upgradeError.message).not.toContain("cached patches");
+    }
+  });
+
+  test("network fallback: throws offline_cache_miss with connection message", async () => {
+    try {
+      await downloadBinaryToTemp("0.26.1", undefined, "network-fallback");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(UpgradeError);
+      const upgradeError = error as UpgradeError;
+      expect(upgradeError.reason).toBe("offline_cache_miss");
+      expect(upgradeError.message).toContain("network is unavailable");
+      expect(upgradeError.message).toContain("Check your internet connection");
+      expect(upgradeError.message).not.toContain("cached patches");
+    }
   });
 });

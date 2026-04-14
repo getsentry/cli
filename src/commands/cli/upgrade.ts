@@ -46,6 +46,7 @@ import {
   getCurlInstallPaths,
   type InstallationMethod,
   NIGHTLY_TAG,
+  type OfflineMode,
   parseInstallationMethod,
   VERSION_PREFIX_REGEX,
   versionExists,
@@ -163,7 +164,7 @@ async function resolveTargetWithFallback(opts: {
    *  clearing the version cache before the offline path can read it). */
   persistChannelFn: () => void;
 }): Promise<
-  | { kind: "target"; target: string; offline: boolean }
+  | { kind: "target"; target: string; offline: OfflineMode }
   | { kind: "done"; result: UpgradeResult }
 > {
   const { resolveOpts, versionArg, offline, method, persistChannelFn } = opts;
@@ -183,7 +184,7 @@ async function resolveTargetWithFallback(opts: {
     const target = resolveOfflineTarget(versionArg);
     persistChannelFn();
     log.info(`Offline mode: using cached target ${target}`);
-    return { kind: "target", target, offline: true };
+    return { kind: "target", target, offline: "explicit" };
   }
 
   // Non-offline: persist channel upfront (no cache dependency)
@@ -209,7 +210,7 @@ async function resolveTargetWithFallback(opts: {
       const target = resolveOfflineTarget(versionArg);
       log.warn("Network unavailable, falling back to cached upgrade target");
       log.info(`Using cached target: ${target}`);
-      return { kind: "target", target, offline: true };
+      return { kind: "target", target, offline: "network-fallback" };
     } catch {
       // No cached version either — re-throw original network error
       throw error;
@@ -427,7 +428,7 @@ async function executeStandardUpgrade(opts: {
   versionArg: string | undefined;
   target: string;
   execPath: string;
-  offline?: boolean;
+  offline?: OfflineMode;
   json?: boolean;
 }): Promise<void> {
   const { method, channel, versionArg, target, execPath, offline, json } = opts;
@@ -608,7 +609,7 @@ function startChangelogFetch(
   channel: ReleaseChannel,
   currentVersion: string,
   targetVersion: string,
-  offline: boolean
+  offline: OfflineMode
 ): Promise<ChangelogSummary | undefined> {
   if (offline || currentVersion === targetVersion) {
     return Promise.resolve(undefined);
@@ -631,7 +632,7 @@ async function buildCheckResultWithChangelog(opts: {
   method: InstallationMethod;
   channel: ReleaseChannel;
   flags: UpgradeFlags;
-  offline: boolean;
+  offline: OfflineMode;
   changelogPromise: Promise<ChangelogSummary | undefined>;
 }): Promise<UpgradeResult> {
   const result = buildCheckResult(opts);
@@ -776,7 +777,7 @@ export const upgradeCommand = buildCommand({
         channel,
         method,
         forced: false,
-        offline: offline || undefined,
+        offline: offline ? true : undefined,
       } satisfies UpgradeResult);
     }
     const downgrade = isDowngrade(CLI_VERSION, target);
@@ -813,7 +814,7 @@ export const upgradeCommand = buildCommand({
       channel,
       method,
       forced: flags.force,
-      offline: offline || undefined,
+      offline: offline ? true : undefined,
       warnings,
       changelog,
     } satisfies UpgradeResult);
