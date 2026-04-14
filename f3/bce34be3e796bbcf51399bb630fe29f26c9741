@@ -1,0 +1,81 @@
+# Plan: Auto-recover when issue short ID is passed to `issue list`
+
+## Problem
+When a user runs `sentry issue list ARMAX-3E`, the CLI throws a `ResolutionError`:
+> 'ARMAX-3E' looks like an issue short ID, not a project slug.
+
+The user's intent is unambiguous — they want to see that issue. Per our UX motto, we should give them what they want with a warning.
+
+## Approach
+Follow the established auto-recovery pattern (per `event/view.ts`, `trace/view.ts`): detect the issue short ID early in `func()`, resolve it, show the result, warn + hint.
+
+Since `issue list` has its own `IssueListResult` output pipeline, we'll wrap the resolved issue as a **single-item list result** — this keeps the output contract intact and avoids cross-command formatter coupling. The warning and hint tell the user what happened and nudge them to the right command.
+
+## Changes
+
+### `src/commands/issue/list.ts`
+
+**1. Add import for `resolveIssue`** (top of file, with existing local imports):
+```typescript
+import { resolveIssue } from "./utils.js";
+```
+
+**2. Add early short-circuit in `func()`** — after `parseOrgProjectArg(target)` (line 1778), before the `--limit` validation block (line 1783):
+
+```typescript
+// Auto-recover: user passed an issue short ID (e.g., "ARMAX-3E") instead
+// of a project slug. Their intent is unambiguous — resolve and show it.
+if (
+  parsed.type === "project-search" &&
+  looksLikeIssueShortId(parsed.projectSlug)
+) {
+  const shortId = parsed.projectSlug;
+  log.warn(
+    `'${shortId}' is an issue short ID, not a project slug. Showing the issue.`
+  );
+  const { org, issue } = await resolveIssue({
+    issueArg: shortId,
+    cwd,
+    command: "view",
+  });
+  const displayRows: IssueTableRow[] = [
+    {
+      issue,
+      orgSlug: org ?? "",
+      formatOptions: {
+        projectSlug: issue.project?.slug ?? "",
+        isMultiProject: false,
+      },
+    },
+  ];
+  yield new CommandOutput({
+    items: [issue],
+    displayRows,
+    title: `Issue ${issue.shortId}`,
+    footerMode: "single",
+    compact: true,
+  } satisfies IssueListResult);
+  return {
+    hint: `Tip: Use 'sentry issue view ${shortId}' for full details`,
+  };
+}
+```
+
+**3. Remove the `ResolutionError` throw** in `resolveTargetsFromParsedArg()` (lines 543-555) — this code path is now unreachable for issue short IDs since `func()` intercepts first. Remove the dead code block:
+
+```typescript
+// DELETE lines 543-555:
+// case "project-search": {
+//   if (looksLikeIssueShortId(parsed.projectSlug)) {
+//     throw new ResolutionError(...)
+//   }
+```
+
+## Files Modified
+- `src/commands/issue/list.ts` — add import, add early short-circuit, remove dead error throw
+
+## Verification
+1. **Typecheck**: `bun run typecheck`
+2. **Lint**: `bun run lint`
+3. **Unit tests**: `bun run test:unit` (existing tests should pass)
+4. **Manual test**: `bun run dev -- issue list CLI-159` (or any known issue short ID) — should show the issue in table format with a warning and hint, not an error
