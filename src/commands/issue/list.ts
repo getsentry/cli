@@ -93,6 +93,7 @@ import {
   SentryIssueSchema,
   type Writer,
 } from "../../types/index.js";
+import { resolveIssue } from "./utils.js";
 
 /** Command key for pagination cursor storage */
 export const PAGINATION_KEY = "issue-list";
@@ -462,7 +463,6 @@ type TargetResolutionResult = {
  * - org-all: All projects in specified org
  * - project-search: Find project across all orgs
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: inherent multi-mode target resolution with per-mode error handling
 async function resolveTargetsFromParsedArg(
   parsed: ReturnType<typeof parseOrgProjectArg>,
   cwd: string
@@ -541,18 +541,8 @@ async function resolveTargetsFromParsedArg(
     }
 
     case "project-search": {
-      // Detect when user passes an issue short ID instead of a project slug.
-      // Short IDs like "CONVERSATION-SVC-F" or "CLI-BM" are all-uppercase
-      // with a dash-separated suffix — a pattern that never occurs in project
-      // slugs (which are always lowercase).
-      if (looksLikeIssueShortId(parsed.projectSlug)) {
-        throw new ResolutionError(
-          `'${parsed.projectSlug}'`,
-          "looks like an issue short ID, not a project slug",
-          `sentry issue view ${parsed.projectSlug}`,
-          ["To list issues in a project: sentry issue list <org>/<project>"]
-        );
-      }
+      // Issue short IDs are intercepted early in func() and auto-recovered
+      // (see the looksLikeIssueShortId check above dispatchOrgScopedList).
 
       // Find project across all orgs
       const { projects: matches, orgs } = await findProjectsBySlug(
@@ -1776,6 +1766,43 @@ export const listCommand = buildListCommand("issue", {
     const log = logger.withTag("issue.list");
 
     const parsed = parseOrgProjectArg(target);
+
+    // Auto-recover: user passed an issue short ID (e.g., "ARMAX-3E") instead
+    // of a project slug. Their intent is unambiguous — resolve and show it.
+    if (
+      parsed.type === "project-search" &&
+      looksLikeIssueShortId(parsed.projectSlug)
+    ) {
+      const shortId = parsed.projectSlug;
+      log.warn(
+        `'${shortId}' is an issue short ID, not a project slug. Showing the issue.`
+      );
+      const { org, issue } = await resolveIssue({
+        issueArg: shortId,
+        cwd,
+        command: "view",
+      });
+      const displayRows: IssueTableRow[] = [
+        {
+          issue,
+          orgSlug: org ?? "",
+          formatOptions: {
+            projectSlug: issue.project?.slug ?? "",
+            isMultiProject: false,
+          },
+        },
+      ];
+      yield new CommandOutput({
+        items: [issue],
+        displayRows,
+        title: `Issue ${issue.shortId}`,
+        footerMode: "none",
+        compact: true,
+      } satisfies IssueListResult);
+      return {
+        hint: `Tip: Use 'sentry issue view ${shortId}' for full details`,
+      };
+    }
 
     // Validate --limit range. Auto-pagination handles the API's 100-per-page
     // cap transparently, but we cap the total at MAX_LIMIT for practical CLI
