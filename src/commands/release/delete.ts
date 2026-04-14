@@ -9,7 +9,7 @@
 
 import type { SentryContext } from "../../context.js";
 import { deleteRelease, getRelease } from "../../lib/api-client.js";
-import { ContextError } from "../../lib/errors.js";
+import { ApiError, ContextError } from "../../lib/errors.js";
 import { renderMarkdown, safeCodeSpan } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
@@ -18,6 +18,7 @@ import {
   isConfirmationBypassed,
 } from "../../lib/mutate-command.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
+import { buildReleaseUrl } from "../../lib/sentry-urls.js";
 import { parseReleaseArg } from "./parse.js";
 
 type DeleteResult = {
@@ -39,6 +40,33 @@ function formatReleaseDeleted(result: DeleteResult): string {
   return renderMarkdown(
     `Release ${safeCodeSpan(result.version)} deleted from **${result.org}**.`
   );
+}
+
+/**
+ * Enrich the raw 400 "health data" ApiError with an actionable message.
+ * Returns the enriched error if it matches, otherwise returns the original.
+ */
+function enrichDeleteError(
+  error: unknown,
+  orgSlug: string,
+  version: string
+): unknown {
+  if (
+    error instanceof ApiError &&
+    error.status === 400 &&
+    error.detail?.includes("health data")
+  ) {
+    const url = buildReleaseUrl(orgSlug, version);
+    return new ApiError(
+      `Release '${version}' has health data and cannot be deleted`,
+      400,
+      "Releases with active session or crash-free data are protected by Sentry " +
+        "and cannot be removed via the API. The health data must age out before " +
+        `the release can be deleted.\n  Release: ${url}`,
+      error.endpoint
+    );
+  }
+  return error;
 }
 
 type DeleteFlags = {
@@ -131,7 +159,11 @@ export const deleteCommand = buildDeleteCommand({
       }
     }
 
-    await deleteRelease(resolved.org, version);
+    try {
+      await deleteRelease(resolved.org, version);
+    } catch (error) {
+      throw enrichDeleteError(error, resolved.org, version);
+    }
     yield new CommandOutput({ deleted: true, org: resolved.org, version });
   },
 });
