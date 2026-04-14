@@ -1,0 +1,106 @@
+# Fix: `sentry event view` cannot find events in a different org (#734)
+
+## Problem
+
+When a user specifies the wrong org (e.g., `sentry event view bete-dev/cli/<event-id>`), but the event exists in a different org (`sentry`), the fallback chain only searches within the specified org — never across orgs. The existing `findEventAcrossOrgs` function is only wired into the **auto-detect** path, not the **explicit target** path.
+
+**Current fallback chain in `fetchEventWithContext`:**
+1. Project-scoped: `getEvent(org, project, eventId)` → 404
+2. Same-org: `resolveEventInOrg(org, eventId)` → null
+3. ❌ **Missing**: cross-org search
+4. Throws `ResolutionError`
+
+## Fix
+
+Add a **cross-org fallback** step using the existing `findEventAcrossOrgs()` before throwing. This follows the "intent-first correction" UX philosophy: do what the user meant, show a warning.
+
+## Files to Modify
+
+### 1. `src/lib/api/events.ts` — Add `excludeOrgs` option
+
+Add an optional `options` parameter to `findEventAcrossOrgs` so the caller can skip the org already searched (avoids one redundant API call):
+
+```typescript
+export type FindEventAcrossOrgsOptions = {
+  /** Org slugs to skip (already searched). */
+  excludeOrgs?: string[];
+};
+
+export async function findEventAcrossOrgs(
+  eventId: string,
+  options?: FindEventAcrossOrgsOptions,
+): Promise<ResolvedEvent | null> {
+  const excludeSet = options?.excludeOrgs
+    ? new Set(options.excludeOrgs)
+    : undefined;
+  const allOrgs = await listOrganizations();
+  const orgs = excludeSet
+    ? allOrgs.filter((o) => !excludeSet.has(o.slug))
+    : allOrgs;
+  // ... rest unchanged
+```
+
+This is backward-compatible — existing caller in `resolveAutoDetectTarget` (line 394) passes no options.
+
+### 2. `src/commands/event/view.ts` — Cross-org fallback in `fetchEventWithContext`
+
+Between the `resolveEventInOrg` null-check (line ~493) and the `ResolutionError` throw (line ~509), add:
+
+```typescript
+// Cross-org fallback — the event may exist in a different org.
+// Skips the org already searched to avoid a redundant API call.
+try {
+  const crossOrg = await findEventAcrossOrgs(eventId, {
+    excludeOrgs: [org],
+  });
+  if (crossOrg) {
+    logger.warn(
+      `Event not found in '${org}', but found in ${crossOrg.org}/${crossOrg.project}.`
+    );
+    return crossOrg.event;
+  }
+} catch {
+  // Cross-org search failed — continue to suggestions
+}
+```
+
+Also update the last suggestion from:
+```
+`The event was not found in any project in '${org}'`
+```
+to:
+```
+"The event was not found in any accessible organization"
+```
+
+### 3. `test/commands/event/view.test.ts` — Update + add tests
+
+**Update** existing test "throws ResolutionError when both project-scoped and org-wide fail" (line 981) to also mock `findEventAcrossOrgs` returning null.
+
+**Add** new tests:
+- Cross-org fallback finds event in different org → returns it
+- Cross-org passes `excludeOrgs` to skip already-searched org
+- Cross-org fallback error is swallowed → falls through to `ResolutionError`
+- Org-wide fallback error doesn't prevent cross-org attempt
+
+## Edge Cases
+
+| Case | Handling |
+|---|---|
+| User has only 1 org | `excludeOrgs` filters it out → empty list → null → ResolutionError |
+| Event in same org, different project | Caught by existing `resolveEventInOrg` fallback (step 2). Cross-org never runs |
+| `findEventAcrossOrgs` throws | Swallowed by try/catch. ResolutionError with suggestions |
+| User has many orgs | Already bounded by `ORG_FANOUT_CONCURRENCY` (p-limit). Only on 404 path |
+
+## Verification
+
+```bash
+# Run existing tests
+bun test test/commands/event/view.test.ts
+
+# Type check
+bun run typecheck
+
+# Lint
+bun run lint
+```
