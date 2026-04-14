@@ -1,6 +1,60 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.27.0
+
+### New Features ✨
+
+- (cli) Add `sentry cli defaults` command for persistent settings by @BYK in [#721](https://github.com/getsentry/cli/pull/721)
+- (docs) Auto-generate driftable documentation sections by @BYK in [#739](https://github.com/getsentry/cli/pull/739)
+- (issue-list) Add search syntax docs, case-insensitive AND/OR, and JSON syntax reference by @BYK in [#738](https://github.com/getsentry/cli/pull/738)
+- (setup) Install agent skills for detected roots by @betegon in [#747](https://github.com/getsentry/cli/pull/747)
+- (trace) Consistent project filtering across trace commands (#737) by @BYK in [#743](https://github.com/getsentry/cli/pull/743)
+- (trace-view) Expose span attributes in trace and span views by @BYK in [#742](https://github.com/getsentry/cli/pull/742)
+
+### Bug Fixes 🐛
+
+#### Event View
+
+- Validate event ID format before API call (CLI-156) by @BYK in [#751](https://github.com/getsentry/cli/pull/751)
+- Add cross-org fallback when event not found by @BYK in [#744](https://github.com/getsentry/cli/pull/744)
+
+#### Init
+
+- Treat no-op edits as passthrough instead of throwing by @betegon in [#731](https://github.com/getsentry/cli/pull/731)
+- Remove JSON minification that breaks edit-based codemods by @betegon in [#719](https://github.com/getsentry/cli/pull/719)
+
+#### Issue List
+
+- Auto-recover when user passes issue short ID instead of project slug by @BYK in [#750](https://github.com/getsentry/cli/pull/750)
+- Auto-correct AND and reject OR in --query to prevent 400 by @BYK in [#727](https://github.com/getsentry/cli/pull/727)
+
+#### Resolve
+
+- Address review comments and add tests for fuzzy project recovery by @BYK in [#732](https://github.com/getsentry/cli/pull/732)
+- Fuzzy auto-recovery for project slug resolution by @BYK in [#728](https://github.com/getsentry/cli/pull/728)
+
+#### Upgrade
+
+- Contextual error messages for offline cache miss (CLI-13Z) by @BYK in [#752](https://github.com/getsentry/cli/pull/752)
+- Detect npm install method from node_modules path by @BYK in [#723](https://github.com/getsentry/cli/pull/723)
+- Add shell option on Windows for .cmd package managers by @BYK in [#722](https://github.com/getsentry/cli/pull/722)
+
+#### Other
+
+- (ci) Add retry logic to ORAS/bsdiff downloads and upgrade ORAS by @BYK in [#741](https://github.com/getsentry/cli/pull/741)
+- (dashboard) Remove overly restrictive dataset-display cross-validation by @BYK in [#720](https://github.com/getsentry/cli/pull/720)
+- (delta-upgrade) Filter non-versioned nightly tags from GHCR patch generation by @BYK in [#753](https://github.com/getsentry/cli/pull/753)
+- (errors) Improve ContextError wording for auto-detect failures by @BYK in [#726](https://github.com/getsentry/cli/pull/726)
+- (issue) Support share issue URLs by @BYK in [#718](https://github.com/getsentry/cli/pull/718)
+- (release-delete) Enrich error for releases with health data (CLI-14K) by @BYK in [#749](https://github.com/getsentry/cli/pull/749)
+- (telemetry) Rename isClientApiError to isUserApiError and exclude 400 by @BYK in [#729](https://github.com/getsentry/cli/pull/729)
+- Bug fixes from Sentry error monitoring (CLI-FR, CLI-RN) + auth default by @BYK in [#740](https://github.com/getsentry/cli/pull/740)
+
+### Internal Changes 🔧
+
+- Regenerate skill files by @github-actions[bot] in [ca16b2ff](https://github.com/getsentry/cli/commit/ca16b2ff3501fa65fc57f208e29e01d38b474eb8)
+
 ## 0.26.1
 
 ### Bug Fixes 🐛
