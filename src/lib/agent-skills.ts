@@ -93,8 +93,7 @@ async function writeSkillFiles(
  *
  * Checks supported roots and writes the embedded skill files to each detected
  * location. The installer never creates top-level agent roots. Their presence
- * is the detection signal that the user already has a compatible agent
- * installed, matching the original Claude-only skip behavior.
+ * is the detection signal that the user already has a compatible agent installed.
  *
  * If any target is freshly created, the returned `path` points to that new
  * installation so setup output matches the file that was actually added.
