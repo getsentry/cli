@@ -23,7 +23,12 @@ import {
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { ApiError, ContextError, ResolutionError } from "../../lib/errors.js";
+import {
+  ApiError,
+  AuthError,
+  ContextError,
+  ResolutionError,
+} from "../../lib/errors.js";
 import { formatEventDetails } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
@@ -462,8 +467,12 @@ async function tryEventFallbacks(
 ): Promise<SentryEvent | null> {
   // Same-org fallback: try cross-project lookup within the specified org.
   // Handles wrong-project resolution from DSN auto-detect or config defaults.
+  // Track whether the search completed so we can skip the org in cross-org
+  // only when we got a definitive "not found" (not a transient failure).
+  let sameOrgSearched = false;
   try {
     const resolved = await resolveEventInOrg(org, eventId);
+    sameOrgSearched = true;
     if (resolved) {
       logger.warn(
         `Event not found in ${org}/${project}, but found in ${resolved.org}/${resolved.project}.`
@@ -471,14 +480,15 @@ async function tryEventFallbacks(
       return resolved.event;
     }
   } catch {
-    // Fallback failed (network, 500, etc.) — continue to cross-org
+    // Transient failure — don't mark org as searched so cross-org retries it
   }
 
   // Cross-org fallback: the event may exist in a different organization.
-  // Skips the org already searched to avoid a redundant API call.
+  // Only exclude the org if the same-org search completed successfully
+  // (returned null). If it threw a transient error, let cross-org retry it.
   try {
     const crossOrg = await findEventAcrossOrgs(eventId, {
-      excludeOrgs: [org],
+      excludeOrgs: sameOrgSearched ? [org] : undefined,
     });
     if (crossOrg) {
       logger.warn(
@@ -486,8 +496,12 @@ async function tryEventFallbacks(
       );
       return crossOrg.event;
     }
-  } catch {
-    // Cross-org search failed — continue to suggestions
+  } catch (fallbackError) {
+    // Propagate auth errors — they indicate a global problem (expired token)
+    if (fallbackError instanceof AuthError) {
+      throw fallbackError;
+    }
+    // Swallow transient errors — continue to suggestions
   }
 
   return null;

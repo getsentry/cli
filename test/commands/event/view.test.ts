@@ -32,6 +32,7 @@ import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import {
   ApiError,
+  AuthError,
   ContextError,
   ResolutionError,
   ValidationError,
@@ -1014,10 +1015,11 @@ describe("fetchEventWithContext", () => {
     expect(result).toBe(crossOrgEvent);
   });
 
-  test("cross-org fallback passes excludeOrgs to skip already-searched org", async () => {
+  test("cross-org fallback passes excludeOrgs when same-org search succeeded", async () => {
     spyOn(apiClient, "getEvent").mockRejectedValue(
       new ApiError("Not found", 404)
     );
+    // Same-org search completed successfully (returned null = definitive "not found")
     spyOn(apiClient, "resolveEventInOrg").mockResolvedValue(null);
     const findSpy = spyOn(apiClient, "findEventAcrossOrgs").mockResolvedValue(
       null
@@ -1032,7 +1034,29 @@ describe("fetchEventWithContext", () => {
     });
   });
 
-  test("swallows cross-org fallback errors and throws ResolutionError", async () => {
+  test("cross-org does not exclude org when same-org search threw", async () => {
+    spyOn(apiClient, "getEvent").mockRejectedValue(
+      new ApiError("Not found", 404)
+    );
+    // Same-org search threw a transient error — org was NOT definitively searched
+    spyOn(apiClient, "resolveEventInOrg").mockRejectedValue(
+      new Error("500 Internal Server Error")
+    );
+    const findSpy = spyOn(apiClient, "findEventAcrossOrgs").mockResolvedValue(
+      null
+    );
+
+    await expect(
+      fetchEventWithContext(null, "my-org", "my-project", "abc123")
+    ).rejects.toThrow(ResolutionError);
+
+    // excludeOrgs should be undefined so cross-org retries the same org
+    expect(findSpy).toHaveBeenCalledWith("abc123", {
+      excludeOrgs: undefined,
+    });
+  });
+
+  test("swallows non-auth cross-org errors and throws ResolutionError", async () => {
     spyOn(apiClient, "getEvent").mockRejectedValue(
       new ApiError("Not found", 404)
     );
@@ -1044,6 +1068,20 @@ describe("fetchEventWithContext", () => {
     await expect(
       fetchEventWithContext(null, "my-org", "my-project", "abc123")
     ).rejects.toThrow(ResolutionError);
+  });
+
+  test("propagates AuthError from cross-org fallback", async () => {
+    spyOn(apiClient, "getEvent").mockRejectedValue(
+      new ApiError("Not found", 404)
+    );
+    spyOn(apiClient, "resolveEventInOrg").mockResolvedValue(null);
+    spyOn(apiClient, "findEventAcrossOrgs").mockRejectedValue(
+      new AuthError("Token expired", "expired")
+    );
+
+    await expect(
+      fetchEventWithContext(null, "my-org", "my-project", "abc123")
+    ).rejects.toThrow(AuthError);
   });
 
   test("tries cross-org fallback even when org-wide search throws", async () => {
