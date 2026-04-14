@@ -52,7 +52,7 @@ describe("sentry event view", () => {
       "event",
       "view",
       `${TEST_ORG}/${TEST_PROJECT}`,
-      "abc123",
+      "abc123def456abc123def456abc123de",
     ]);
 
     expect(result.exitCode).toBe(1);
@@ -62,10 +62,25 @@ describe("sentry event view", () => {
   test("requires org and project without DSN", async () => {
     await ctx.setAuthToken(TEST_TOKEN);
 
-    const result = await ctx.run(["event", "view", "abc123"]);
+    const result = await ctx.run([
+      "event",
+      "view",
+      "abc123def456abc123def456abc123de",
+    ]);
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr + result.stdout).toMatch(/organization|project/i);
+  });
+
+  test("rejects invalid event ID format", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    const result = await ctx.run(["event", "view", "abc123"]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr + result.stdout).toMatch(
+      /invalid event id|32-character hexadecimal/i
+    );
   });
 
   test("handles non-existent event", async () => {
@@ -76,7 +91,7 @@ describe("sentry event view", () => {
       "event",
       "view",
       `${TEST_ORG}/${TEST_PROJECT}`,
-      "nonexistent123",
+      "abc123def456abc123def456abc123de",
     ]);
 
     expect(result.exitCode).toBe(1);

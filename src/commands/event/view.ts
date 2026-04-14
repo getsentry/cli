@@ -737,7 +737,7 @@ export const viewCommand = buildCommand({
     const log = logger.withTag("event.view");
 
     // Parse positional args
-    const { eventId, targetArg, warning, issueId, issueShortId } =
+    let { eventId, targetArg, warning, issueId, issueShortId } =
       parsePositionalArgs(args);
     if (warning) {
       log.warn(warning);
@@ -746,8 +746,9 @@ export const viewCommand = buildCommand({
     // Validate event ID format early (before API calls) when the ID came
     // from user input. Skip when the ID is a sentinel from issue URL/short
     // ID detection — those paths resolve the event through issue lookup.
+    // Capture the normalized return value (lowercased, UUID dashes stripped).
     if (eventId !== LATEST_EVENT_SENTINEL && !issueId && !issueShortId) {
-      validateHexId(eventId, "event ID");
+      eventId = validateHexId(eventId, "event ID");
     }
 
     const parsed = parseOrgProjectArg(targetArg);
