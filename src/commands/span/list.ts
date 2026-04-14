@@ -576,7 +576,7 @@ export const listCommand = buildListCommand("span", {
         kind: "parsed",
         parse: String,
         brief:
-          'Filter spans (e.g., "op:db", "duration:>100ms", "project:backend")',
+          'Filter spans (e.g., "op:db", "project:backend", "project:[cli,api]")',
         optional: true,
       },
       sort: {

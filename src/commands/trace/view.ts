@@ -11,6 +11,7 @@ import {
   getDetailedTrace,
   getIssueByShortId,
   getLatestEvent,
+  getProject,
   type TraceItemDetail,
 } from "../../lib/api-client.js";
 import {
@@ -55,6 +56,26 @@ type ViewFlags = {
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry trace view [<org>/<project>/]<trace-id>";
+
+/**
+ * Build a contextual hint with real values for easy copy-paste.
+ */
+function buildViewHint(
+  traceId: string,
+  org: string,
+  projectFilter: string | undefined,
+  summary: ReturnType<typeof computeTraceSummary>
+): string {
+  if (projectFilter) {
+    return `Filtered to project '${projectFilter}'. Full trace: sentry trace view ${org}/${traceId}`;
+  }
+  if (summary.projects.length > 1) {
+    const projectList = summary.projects.join(", ");
+    const firstProject = summary.projects[0];
+    return `This trace spans ${summary.projects.length} projects (${projectList}). Filter: sentry trace view ${org}/${firstProject}/${traceId}`;
+  }
+  return `Tip: Open in browser with 'sentry trace view --web ${traceId}'`;
+}
 
 /**
  * Standard field names in trace view output (summary keys + "spans").
@@ -360,6 +381,8 @@ type ResolvedTrace = {
   traceId: string;
   org: string;
   project?: string;
+  /** Project slug when user explicitly provided org/project/trace-id */
+  projectFilter?: string;
 };
 
 /**
@@ -499,9 +522,13 @@ export const viewCommand = buildCommand({
     } else {
       const parsed = parseTraceTarget(correctedArgs, USAGE_HINT);
       warnIfNormalized(parsed, "trace.view");
-      resolved = await resolveTraceOrgProject(parsed, cwd, USAGE_HINT);
+      const target = await resolveTraceOrgProject(parsed, cwd, USAGE_HINT);
+      resolved = {
+        ...target,
+        projectFilter: parsed.type === "explicit" ? target.project : undefined,
+      };
     }
-    const { traceId, org, project } = resolved;
+    const { traceId, org, project, projectFilter } = resolved;
 
     if (flags.web) {
       await openInBrowser(buildTraceUrl(org, traceId), "trace");
@@ -512,15 +539,20 @@ export const viewCommand = buildCommand({
     // trace API populates them on each span for JSON consumers.
     const additionalAttributes = extractAdditionalAttributes(flags.fields);
 
+    // Resolve numeric project ID for API-level filtering
+    let numericProjectId: number | undefined;
+    if (projectFilter) {
+      const projectData = await getProject(org, projectFilter);
+      numericProjectId = Number(projectData.id);
+    }
+
     // The trace API requires a timestamp to help locate the trace data.
     // Use current time - the API will search around this timestamp.
     const timestamp = Math.floor(Date.now() / 1000);
-    const spans = await getDetailedTrace(
-      org,
-      traceId,
-      timestamp,
-      additionalAttributes
-    );
+    const spans = await getDetailedTrace(org, traceId, timestamp, {
+      additionalAttributes,
+      projectId: numericProjectId,
+    });
 
     if (spans.length === 0) {
       throw new ValidationError(
@@ -534,7 +566,9 @@ export const viewCommand = buildCommand({
     // Format span tree (unless disabled with --spans 0 or --spans no)
     const spanTreeLines =
       flags.spans > 0
-        ? formatSimpleSpanTree(traceId, spans, flags.spans)
+        ? formatSimpleSpanTree(traceId, spans, flags.spans, {
+            projectFiltered: !!projectFilter,
+          })
         : undefined;
 
     // Fetch per-span details when --full is set or --json auto-enables it
@@ -553,10 +587,6 @@ export const viewCommand = buildCommand({
       spanTreeLines,
       details: spanDetails,
     });
-    return {
-      hint: shouldFetchDetails
-        ? `Tip: Open in browser with 'sentry trace view --web ${traceId}'`
-        : "Tip: Use --full to fetch span attributes, or --json for complete data",
-    };
+    return { hint: buildViewHint(traceId, org, projectFilter, summary) };
   },
 });

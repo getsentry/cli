@@ -89,6 +89,7 @@ describe("viewCommand.func", () => {
   let fetchMultiSpanDetailsSpy: ReturnType<typeof spyOn>;
   let getIssueByShortIdSpy: ReturnType<typeof spyOn>;
   let getLatestEventSpy: ReturnType<typeof spyOn>;
+  let getProjectSpy: ReturnType<typeof spyOn>;
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
   let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
   let resolveOrgSpy: ReturnType<typeof spyOn>;
@@ -139,12 +140,20 @@ describe("viewCommand.func", () => {
     ).mockResolvedValue(new Map());
     getIssueByShortIdSpy = spyOn(apiClient, "getIssueByShortId");
     getLatestEventSpy = spyOn(apiClient, "getLatestEvent");
+    getProjectSpy = spyOn(apiClient, "getProject");
     findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
     resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
     resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
     openInBrowserSpy = spyOn(browser, "openInBrowser");
     setOrgRegion("test-org", DEFAULT_SENTRY_URL);
     setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+
+    // Mock getProject for explicit org/project/trace-id targets
+    getProjectSpy.mockResolvedValue({
+      id: "42",
+      slug: "test-project",
+      name: "Test Project",
+    });
   });
 
   afterEach(() => {
@@ -152,6 +161,7 @@ describe("viewCommand.func", () => {
     fetchMultiSpanDetailsSpy.mockRestore();
     getIssueByShortIdSpy.mockRestore();
     getLatestEventSpy.mockRestore();
+    getProjectSpy.mockRestore();
     findProjectsBySlugSpy.mockRestore();
     resolveOrgAndProjectSpy.mockRestore();
     resolveOrgSpy.mockRestore();
@@ -192,8 +202,8 @@ describe("viewCommand.func", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("aaaa1111bbbb2222cccc3333dddd4444");
-    // Human mode without --full shows hint about --full/--json
-    expect(output).toContain("--full");
+    // Explicit org/project triggers project-filtered hint
+    expect(output).toContain("Filtered to project");
   });
 
   test("throws ValidationError when no spans found", async () => {
@@ -267,8 +277,8 @@ describe("viewCommand.func", () => {
     // Summary should be present
     expect(output).toContain("aaaa1111bbbb2222cccc3333dddd4444");
     // Span tree details should not appear (no span_id rendered)
-    // The footer should still be present (hint about --full in human mode)
-    expect(output).toContain("--full");
+    // The footer should still be present (project-filtered hint for explicit target)
+    expect(output).toContain("Filtered to project");
   });
 
   test("throws ContextError for org-all target", async () => {
@@ -405,7 +415,7 @@ describe("viewCommand.func", () => {
       "test-org",
       traceIdFromEvent,
       expect.any(Number),
-      undefined
+      { additionalAttributes: undefined, projectId: undefined }
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");

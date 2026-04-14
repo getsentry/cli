@@ -1126,6 +1126,18 @@ function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
  */
 const MAX_ROOT_SPANS = 50;
 
+/** Options for {@link formatSimpleSpanTree}. */
+type SpanTreeOptions = {
+  /**
+   * When true, the tree was produced by a project-filtered API call.
+   * Root spans with `parent_span_id` are annotated as having a parent
+   * in another project. Without this flag the annotation is suppressed
+   * because root spans in unfiltered traces can legitimately have
+   * `parent_span_id` at service boundaries.
+   */
+  projectFiltered?: boolean;
+};
+
 /**
  * Format trace as a simple tree with "op — description (duration)" per span.
  * Durations are shown when available, omitted otherwise.
@@ -1136,12 +1148,14 @@ const MAX_ROOT_SPANS = 50;
  * @param traceId - The trace ID for the header
  * @param spans - Root-level spans from the /trace/ API
  * @param maxDepth - Maximum nesting depth to display (default: unlimited). 0 = disabled, Infinity = unlimited.
+ * @param options - Optional display options (e.g., project filter indicator)
  * @returns Array of formatted lines ready for display
  */
 export function formatSimpleSpanTree(
   traceId: string,
   spans: TraceSpan[],
-  maxDepth = Number.MAX_SAFE_INTEGER
+  maxDepth = Number.MAX_SAFE_INTEGER,
+  options: SpanTreeOptions = {}
 ): string[] {
   return withSerializeSpan("formatSimpleSpanTree", () => {
     // maxDepth = 0 means disabled (caller should skip, but handle gracefully)
@@ -1159,6 +1173,15 @@ export function formatSimpleSpanTree(
     lines.push(plainSafeMuted("─── Span Tree ───"));
     lines.push("");
     lines.push(`${plainSafeMuted("Trace —")} ${traceId}`);
+
+    // When API filters by project, root spans may have a parent_span_id
+    // pointing to a span in another project that wasn't returned.
+    // Only show this annotation when a project filter is active — in
+    // unfiltered traces, root spans at service boundaries legitimately
+    // have parent_span_id without implying missing data.
+    if (options.projectFiltered && spans.some((s) => s.parent_span_id)) {
+      lines.push(plainSafeMuted("⤴ parent span in another project"));
+    }
 
     const totalRootSpans = spans.length;
     const truncated = totalRootSpans > MAX_ROOT_SPANS;
