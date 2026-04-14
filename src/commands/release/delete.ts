@@ -62,7 +62,8 @@ function enrichDeleteError(
       400,
       "Releases with active session or crash-free data are protected by Sentry " +
         "and cannot be removed via the API. The health data must age out before " +
-        `the release can be deleted.\n  Release: ${url}`
+        `the release can be deleted.\n  Release: ${url}`,
+      error.endpoint
     );
   }
   return error;

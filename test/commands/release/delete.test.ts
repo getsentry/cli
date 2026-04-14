@@ -135,11 +135,13 @@ describe("release delete", () => {
   });
 
   test("enriches 400 health data error with actionable message", async () => {
+    const endpoint = "DELETE /api/0/organizations/my-org/releases/1.0.0/";
     deleteReleaseSpy.mockRejectedValue(
       new ApiError(
         "Failed to delete release '1.0.0': 400 Bad Request",
         400,
-        "This release has health data and cannot be removed."
+        "This release has health data and cannot be removed.",
+        endpoint
       )
     );
 
@@ -158,6 +160,7 @@ describe("release delete", () => {
       expect(apiErr.detail).toContain("protected by Sentry");
       expect(apiErr.detail).toContain("age out");
       expect(apiErr.detail).toContain("my-org");
+      expect(apiErr.endpoint).toBe(endpoint);
     }
   });
 
