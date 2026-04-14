@@ -495,9 +495,14 @@ async function tryEventFallbacks(
       excludeOrgs: sameOrgSearched ? [org] : undefined,
     });
     if (crossOrg) {
-      logger.warn(
-        `Event not found in '${org}', but found in ${crossOrg.org}/${crossOrg.project}.`
-      );
+      // Use project-scoped phrasing when found in same org (different project)
+      // to avoid the contradictory "not found in 'org', found in org/project".
+      const location = `${crossOrg.org}/${crossOrg.project}`;
+      const prefix =
+        crossOrg.org === org
+          ? `Event not found in ${org}/${project}`
+          : `Event not found in '${org}'`;
+      logger.warn(`${prefix}, but found in ${location}.`);
       return crossOrg.event;
     }
   } catch (fallbackError) {
