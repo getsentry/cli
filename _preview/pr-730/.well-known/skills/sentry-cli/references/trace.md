@@ -56,6 +56,7 @@ View details of a specific trace
 
 **Flags:**
 - `-w, --web - Open in browser`
+- `--full - Fetch full span attributes (auto-enabled with --json)`
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
@@ -70,9 +71,21 @@ sentry trace view abc123def456abc123def456abc12345 -w
 
 # Auto-recover from an issue short ID
 sentry trace view PROJ-123
+
+# Filter trace view to one project's spans
+sentry trace view my-org/cli-server/abc123def456abc123def456abc12345
+
+# Full trace across all projects (default)
+sentry trace view my-org/abc123def456abc123def456abc12345
+
+# Filter trace logs by project
+sentry trace logs my-org/cli-server/abc123def456abc123def456abc12345
+
+# Multiple projects via --query
+sentry trace logs abc123def456abc123def456abc12345 -q "project:[cli-server,api]"
 ```
 
-### `sentry trace logs <org/trace-id...>`
+### `sentry trace logs <org/project/trace-id...>`
 
 View logs associated with a trace
 
@@ -80,7 +93,7 @@ View logs associated with a trace
 - `-w, --web - Open trace in browser`
 - `-t, --period <value> - Time range: "7d", "2026-03-01..2026-04-01", ">=2026-03-01" - (default: "14d")`
 - `-n, --limit <value> - Number of log entries (<=1000) - (default: "100")`
-- `-q, --query <value> - Additional filter query (Sentry search syntax)`
+- `-q, --query <value> - Filter query (e.g., "level:error", "project:backend", "project:[a,b]")`
 - `-s, --sort <value> - Sort order: "newest" (default) or "oldest" - (default: "newest")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
