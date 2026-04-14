@@ -485,8 +485,8 @@ export function buildCommand<
 
   /**
    * When a command throws a {@link CliError} and a positional arg was
-   * `"help"`, the user likely intended `--help`. Show the command's
-   * help instead of the confusing error.
+   * `"help"`, `"--h"`, or `"-help"`, the user likely intended `--help`.
+   * Show the command's help instead of the confusing error.
    *
    * Only fires as **error recovery** — if the command succeeds with a
    * legitimate value like a project named "help", this never runs.
@@ -511,7 +511,10 @@ export function buildCommand<
     if (!(err instanceof CliError) || err instanceof OutputError) {
       return false;
     }
-    if (args.length === 0 || !args.some((a) => a === "help")) {
+    if (
+      args.length === 0 ||
+      !args.some((a) => a === "help" || a === "--h" || a === "-help")
+    ) {
       return false;
     }
     if (!ctx.commandPrefix) {
