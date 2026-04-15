@@ -639,7 +639,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   try {
     const [dirListing, existingSentry] = await Promise.all([
       precomputeDirListing(directory),
-      precomputeSentryDetection(directory),
+      precomputeSentryDetection(directory).catch(() => null),
     ]);
     const fileCache = await preReadCommonFiles(directory, dirListing);
     spin.message("Connecting to wizard...");
@@ -654,7 +654,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
             features,
             dirListing,
             fileCache,
-            existingSentry: existingSentry.data,
+            existingSentry: existingSentry?.data,
           },
           tracingOptions,
         }),
