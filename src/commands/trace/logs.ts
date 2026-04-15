@@ -152,7 +152,7 @@ export const logsCommand = buildCommand({
       },
       query: {
         kind: "parsed",
-        parse: String,
+        parse: sanitizeQuery,
         brief:
           'Filter query (e.g., "level:error", "project:backend", "project:[a,b]")',
         optional: true,
@@ -192,7 +192,7 @@ export const logsCommand = buildCommand({
     }
 
     // Prepend project filter to the query when user explicitly specified a project
-    const query = buildProjectQuery(sanitizeQuery(flags.query), projectFilter);
+    const query = buildProjectQuery(flags.query, projectFilter);
 
     const logs = await withProgress(
       {

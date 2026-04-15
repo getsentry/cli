@@ -575,7 +575,7 @@ export const listCommand = buildListCommand("span", {
       },
       query: {
         kind: "parsed",
-        parse: String,
+        parse: sanitizeQuery,
         brief:
           'Filter spans (e.g., "op:db", "project:backend", "project:[cli,api]")',
         optional: true,
@@ -602,7 +602,7 @@ export const listCommand = buildListCommand("span", {
     const extraApiFields = extractExtraApiFields(flags.fields);
     const modeCtx: ModeContext = {
       cwd,
-      flags: { ...flags, query: sanitizeQuery(flags.query) },
+      flags,
       timeRange,
       extraApiFields,
     };

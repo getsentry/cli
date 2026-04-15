@@ -672,7 +672,7 @@ export const listCommand = buildListCommand(
         },
         query: {
           kind: "parsed",
-          parse: String,
+          parse: sanitizeQuery,
           brief:
             'Filter query (e.g., "level:error", "project:backend", "project:[a,b]")',
           optional: true,
@@ -714,11 +714,6 @@ export const listCommand = buildListCommand(
       }
 
       const { cwd } = this;
-
-      // Sanitize --query early — it's consumed in multiple code paths below.
-      // Shadow `flags` so all downstream reads get the sanitized query.
-      // biome-ignore lint/style/noParameterAssign: intentional query sanitization shadow
-      flags = { ...flags, query: sanitizeQuery(flags.query) };
 
       const parsed = parseLogListArgs(args);
 

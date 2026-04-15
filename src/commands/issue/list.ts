@@ -1630,8 +1630,8 @@ export const listCommand = buildListCommand("issue", {
     flags: {
       query: {
         kind: "parsed",
-        parse: String,
-        brief: "Search query (Sentry syntax, implicit AND, no OR operator)",
+        parse: sanitizeQuery,
+        brief: "Search query (Sentry syntax, OR auto-rewritten to in-list)",
         optional: true,
       },
       limit: buildListLimitFlag("issues"),
@@ -1724,26 +1724,20 @@ export const listCommand = buildListCommand("issue", {
       );
     }
 
-    // Sanitize --query: strip AND, rewrite OR to in-list when possible.
-    const effectiveFlags: ListFlags = {
-      ...flags,
-      query: sanitizeQuery(flags.query),
-    };
-
-    const timeRange = parsePeriod(effectiveFlags.period ?? DEFAULT_PERIOD);
+    const timeRange = parsePeriod(flags.period ?? DEFAULT_PERIOD);
 
     // biome-ignore lint/suspicious/noExplicitAny: shared handler accepts any mode variant
     const resolveAndHandle: ModeHandler<any> = (ctx) =>
       handleResolvedTargets({
         ...ctx,
-        flags: effectiveFlags,
+        flags,
         timeRange,
       });
 
     const result = (await dispatchOrgScopedList({
       config: issueListMeta,
       cwd,
-      flags: effectiveFlags,
+      flags,
       parsed,
       // When a bare slug matches a cached org, silently redirect to org-all
       // mode instead of erroring (CLI-MC, 17 users). The user typed an org
@@ -1759,7 +1753,7 @@ export const listCommand = buildListCommand("issue", {
         "org-all": (ctx) =>
           handleOrgAllIssues({
             org: ctx.parsed.org,
-            flags: effectiveFlags,
+            flags,
             timeRange,
           }),
       },
