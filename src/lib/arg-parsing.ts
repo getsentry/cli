@@ -18,34 +18,94 @@ import { isAllDigits } from "./utils.js";
 // Slug normalization
 // ---------------------------------------------------------------------------
 
+/** Describes what was normalized in a slug — used for targeted warning messages. */
+export type NormalizeReason = "underscores" | "spaces" | "both";
+
 /**
- * Normalize a Sentry slug by replacing underscores with dashes.
+ * Normalize a Sentry slug by replacing underscores and spaces with dashes.
  *
- * Sentry enforces that organization and project slugs use dashes, never
- * underscores. Users frequently type underscores by mistake (e.g.,
- * `selfbase_admin_backend` instead of `selfbase-admin-backend`).
+ * Sentry enforces that slugs use lowercase letters, numbers, and dashes.
+ * Users frequently type underscores by mistake or paste display names
+ * (e.g., `"My Project"` instead of `"my-project"`).
+ *
+ * Normalization rules:
+ * 1. Underscores → dashes (existing)
+ * 2. Spaces → dashes, with lowercase (spaces imply a display name)
+ * 3. Consecutive dashes collapsed (`"My  Project"` → `"my-project"`)
+ * 4. Leading/trailing dashes trimmed
+ *
+ * Lowercasing is only applied when spaces are present. Pure underscore
+ * normalization preserves casing for backward compatibility.
  *
  * @param slug - Raw slug string from CLI input
- * @returns Normalized slug and whether normalization was applied
+ * @returns Normalized slug, whether normalization was applied, and reason
  *
  * @example
- * normalizeSlug("selfbase_admin_backend")  // { slug: "selfbase-admin-backend", normalized: true }
+ * normalizeSlug("selfbase_admin_backend")  // { slug: "selfbase-admin-backend", normalized: true, reason: "underscores" }
+ * normalizeSlug("My Project")              // { slug: "my-project", normalized: true, reason: "spaces" }
+ * normalizeSlug("My_Project Name")         // { slug: "my-project-name", normalized: true, reason: "both" }
  * normalizeSlug("my-project")              // { slug: "my-project", normalized: false }
  */
 export function normalizeSlug(slug: string): {
   slug: string;
   normalized: boolean;
+  reason?: NormalizeReason;
 } {
-  if (slug.includes("_")) {
-    return { slug: slug.replace(/_/g, "-"), normalized: true };
+  const hasUnderscores = slug.includes("_");
+  const hasSpaces = slug.includes(" ");
+
+  if (!(hasUnderscores || hasSpaces)) {
+    return { slug, normalized: false };
   }
-  return { slug, normalized: false };
+
+  let result = slug;
+
+  // When spaces are present, lowercase the entire slug.
+  // Spaces imply a display name like "My Project" — slugs are always lowercase.
+  if (hasSpaces) {
+    result = result.toLowerCase();
+  }
+
+  // Replace runs of underscores/spaces with a single dash.
+  // Using [_ ]+ collapses "My  Project" and "a__b" in one pass.
+  result = result.replace(/[_ ]+/g, "-");
+
+  // Trim leading/trailing dashes (from " My Project " → "-my-project-")
+  result = result.replace(/^-+|-+$/g, "");
+
+  let reason: NormalizeReason;
+  if (hasUnderscores && hasSpaces) {
+    reason = "both";
+  } else if (hasSpaces) {
+    reason = "spaces";
+  } else {
+    reason = "underscores";
+  }
+
+  return { slug: result, normalized: true, reason };
 }
 
 const log = logger.withTag("arg-parsing");
 
 /**
- * Emit a warning when slug normalization replaced underscores with dashes.
+ * Combine two normalization reasons into the most descriptive one.
+ * Used when org and project slugs have different normalizations.
+ */
+function combineReasons(
+  a?: NormalizeReason,
+  b?: NormalizeReason
+): NormalizeReason {
+  if (a === "both" || b === "both") {
+    return "both";
+  }
+  if (a && b && a !== b) {
+    return "both";
+  }
+  return a ?? b ?? "underscores";
+}
+
+/**
+ * Emit a warning when slug normalization changed the input.
  * Called internally by {@link parseOrgProjectArg} — callers do not need to
  * check `parsed.normalized` themselves.
  */
@@ -67,9 +127,21 @@ function warnNormalized(
       return;
   }
 
-  log.warn(
-    `Normalized slug to '${slug}' (Sentry slugs use dashes, never underscores)`
-  );
+  let explanation: string;
+  switch (parsed.reason) {
+    case "spaces":
+      explanation = "Sentry slugs use lowercase with dashes, not spaces";
+      break;
+    case "both":
+      explanation =
+        "Sentry slugs use lowercase with dashes, not spaces or underscores";
+      break;
+    default:
+      explanation = "Sentry slugs use dashes, never underscores";
+      break;
+  }
+
+  log.warn(`Normalized slug to '${slug}' (${explanation})`);
 }
 
 // ---------------------------------------------------------------------------
@@ -366,28 +438,34 @@ export const ProjectSpecificationType = {
  * Parsed result from an org/project positional argument.
  * Discriminated union based on the `type` field.
  *
- * When `normalized` is true, the slug contained underscores that were
- * auto-corrected to dashes. Callers should emit a warning via `log.warn()`.
+ * When `normalized` is true, the slug was auto-corrected (underscores → dashes,
+ * spaces → dashes with lowercasing). `reason` describes what was normalized.
  */
 export type ParsedOrgProject =
   | {
       type: typeof ProjectSpecificationType.Explicit;
       org: string;
       project: string;
-      /** True if any slug was normalized (underscores → dashes) */
+      /** True if any slug was normalized */
       normalized?: boolean;
+      /** What was normalized — used for targeted warning messages */
+      reason?: NormalizeReason;
     }
   | {
       type: typeof ProjectSpecificationType.OrgAll;
       org: string;
-      /** True if org slug was normalized (underscores → dashes) */
+      /** True if org slug was normalized */
       normalized?: boolean;
+      /** What was normalized — used for targeted warning messages */
+      reason?: NormalizeReason;
     }
   | {
       type: typeof ProjectSpecificationType.ProjectSearch;
       projectSlug: string;
-      /** True if project slug was normalized (underscores → dashes) */
+      /** True if project slug was normalized */
       normalized?: boolean;
+      /** What was normalized — used for targeted warning messages */
+      reason?: NormalizeReason;
     }
   | { type: typeof ProjectSpecificationType.AutoDetect };
 
@@ -516,38 +594,39 @@ function parseSlashOrgProject(input: string): ParsedOrgProject {
       );
     }
     rejectAtSelector(rawProject, "project slug");
-    validateResourceId(rawProject, "project slug");
     const np = normalizeSlug(rawProject);
+    validateResourceId(np.slug, "project slug");
     return {
       type: "project-search",
       projectSlug: np.slug,
-      ...(np.normalized && { normalized: true }),
+      ...(np.normalized && { normalized: true, reason: np.reason }),
     };
   }
 
   rejectAtSelector(rawOrg, "organization slug");
-  validateResourceId(rawOrg, "organization slug");
   const no = normalizeSlug(rawOrg);
+  validateResourceId(no.slug, "organization slug");
 
   if (!rawProject) {
     // "sentry/" → list all projects in org
     return {
       type: "org-all",
       org: no.slug,
-      ...(no.normalized && { normalized: true }),
+      ...(no.normalized && { normalized: true, reason: no.reason }),
     };
   }
 
   // "sentry/cli" → explicit org and project
   rejectAtSelector(rawProject, "project slug");
-  validateResourceId(rawProject, "project slug");
   const np = normalizeSlug(rawProject);
+  validateResourceId(np.slug, "project slug");
   const normalized = no.normalized || np.normalized;
+  const reason = normalized ? combineReasons(no.reason, np.reason) : undefined;
   return {
     type: "explicit",
     org: no.slug,
     project: np.slug,
-    ...(normalized && { normalized: true }),
+    ...(normalized && { normalized: true, reason }),
   };
 }
 
@@ -592,12 +671,12 @@ export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
   } else {
     // No slash → search for project across all orgs
     rejectAtSelector(trimmed, "project slug");
-    validateResourceId(trimmed, "project slug");
     const np = normalizeSlug(trimmed);
+    validateResourceId(np.slug, "project slug");
     parsed = {
       type: "project-search",
       projectSlug: np.slug,
-      ...(np.normalized && { normalized: true }),
+      ...(np.normalized && { normalized: true, reason: np.reason }),
     };
   }
 
@@ -883,19 +962,26 @@ export function parseSlashSeparatedArg(
   idLabel: string,
   usageHint: string
 ): { id: string; targetArg: string | undefined } {
-  const slashIdx = arg.indexOf("/");
+  // Trim whitespace — agents may pass trailing newlines
+  const trimmed = arg.trim();
+
+  if (!trimmed) {
+    throw new ContextError(idLabel, usageHint, []);
+  }
+
+  const slashIdx = trimmed.indexOf("/");
 
   if (slashIdx === -1) {
     // No slashes — plain ID. Skip validation here because callers may
     // do further processing (e.g., splitting newline-separated IDs).
     // Downstream validators like validateHexId or validateTraceId provide
     // format-specific validation.
-    return { id: arg, targetArg: undefined };
+    return { id: trimmed, targetArg: undefined };
   }
 
   // IDs are hex and never contain "/" — this must be a structured
   // "org/project/id" or "org/project" (missing ID)
-  const lastSlashIdx = arg.lastIndexOf("/");
+  const lastSlashIdx = trimmed.lastIndexOf("/");
 
   if (slashIdx === lastSlashIdx) {
     // Exactly one slash: "org/project" without ID
@@ -903,8 +989,8 @@ export function parseSlashSeparatedArg(
   }
 
   // Two+ slashes: split on last "/" → target + id
-  const targetArg = arg.slice(0, lastSlashIdx);
-  const id = arg.slice(lastSlashIdx + 1);
+  const targetArg = trimmed.slice(0, lastSlashIdx);
+  const id = trimmed.slice(lastSlashIdx + 1);
 
   if (!id) {
     throw new ContextError(idLabel, usageHint, []);
@@ -918,8 +1004,18 @@ export function parseSlashSeparatedArg(
 }
 
 export function parseIssueArg(arg: string): ParsedIssueArg {
+  // Trim whitespace — agents may pass trailing newlines (CLI-16M)
+  const input = arg.trim();
+
+  if (!input) {
+    throw new ValidationError(
+      "Issue identifier is empty after trimming whitespace.",
+      "issue identifier"
+    );
+  }
+
   // 0. URL detection — extract issue ID from Sentry web URLs
-  const urlParsed = parseSentryUrl(arg);
+  const urlParsed = parseSentryUrl(input);
   if (urlParsed) {
     applySentryUrlContext(urlParsed.baseUrl);
     const result = issueArgFromUrl(urlParsed);
@@ -935,13 +1031,13 @@ export function parseIssueArg(arg: string): ParsedIssueArg {
 
   // 1. Magic @ selectors — detect before any other parsing.
   // Supports bare `@latest` and org-prefixed `sentry/@latest`.
-  if (arg.includes("@")) {
-    const slashIdx = arg.indexOf("/");
-    const selectorPart = slashIdx === -1 ? arg : arg.slice(slashIdx + 1);
+  if (input.includes("@")) {
+    const slashIdx = input.indexOf("/");
+    const selectorPart = slashIdx === -1 ? input : input.slice(slashIdx + 1);
     const selector = parseSelector(selectorPart);
     if (selector) {
       if (slashIdx !== -1) {
-        const org = normalizeSlug(arg.slice(0, slashIdx)).slug;
+        const org = normalizeSlug(input.slice(0, slashIdx)).slug;
         validateResourceId(org, "organization slug");
         return { type: "selector", selector, org };
       }
@@ -954,26 +1050,26 @@ export function parseIssueArg(arg: string): ParsedIssueArg {
   // Validate raw input against injection characters before parsing.
   // Slashes are allowed (they're structural separators), but ?, #, %, whitespace,
   // and control characters are never valid in issue identifiers.
-  validateResourceId(arg.replace(/\//g, ""), "issue identifier");
+  validateResourceId(input.replace(/\//g, ""), "issue identifier");
 
   // 2. Pure numeric → direct fetch by ID
-  if (isAllDigits(arg)) {
-    return { type: "numeric", id: arg };
+  if (isAllDigits(input)) {
+    return { type: "numeric", id: input };
   }
 
   // 3. Has slash → check slash FIRST (takes precedence over dashes)
   // This ensures "my-org/123" parses as org="my-org", not project="my"
-  if (arg.includes("/")) {
-    return parseWithSlash(arg);
+  if (input.includes("/")) {
+    return parseWithSlash(input);
   }
 
   // 4. Has dash but no slash → split on last "-" for project-suffix
-  if (arg.includes("-")) {
-    return parseWithDash(arg);
+  if (input.includes("-")) {
+    return parseWithDash(input);
   }
 
   // 5. No dash, no slash → suffix only (needs DSN context)
-  return { type: "suffix-only", suffix: arg.toUpperCase() };
+  return { type: "suffix-only", suffix: input.toUpperCase() };
 }
 
 // ---------------------------------------------------------------------------
