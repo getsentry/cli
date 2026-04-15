@@ -1,0 +1,94 @@
+# Fix CLI-14M & CLI-16M: Input Normalization for Spaces and Trailing Whitespace
+
+## Problem
+
+Two related `ValidationError` issues from the input validation layer:
+
+- **CLI-14M**: `Invalid project slug: contains a space.` — User passed a display name like `"My Project"` instead of slug `"my-project"` as a positional arg to `sentry issue list`.
+- **CLI-16M**: `Invalid issue identifier: contains a newline.` — AI agent (Claude) passed an issue ID with a trailing `\n` to `sentry issue view`.
+
+Both are caught by `validateResourceId()` in `src/lib/input-validation.ts`. The validation is correct, but the parsing layer should normalize recoverable inputs before validation — just like it already normalizes underscores → dashes.
+
+## Root Cause
+
+1. **Spaces in slugs**: `normalizeSlug()` only handles underscores → dashes. Spaces are passed raw to `validateResourceId()` which rejects them. But Sentry generates slugs by lowercasing + replacing spaces with dashes, so `"My Project"` → `"my-project"` is a safe normalization.
+
+2. **Validation before normalization**: `parseSlashOrgProject()` and `parseOrgProjectArg()` call `validateResourceId()` BEFORE `normalizeSlug()`, so even if we add space handling to `normalizeSlug`, it would be too late.
+
+3. **No trimming in `parseIssueArg`**: Unlike `parseOrgProjectArg()` which does `arg.trim()`, `parseIssueArg()` validates the raw arg — trailing `\n` from agents fails immediately.
+
+## Fix
+
+### 1. Extend `normalizeSlug()` — `src/lib/arg-parsing.ts`
+
+Add space handling to the existing underscore normalization:
+- Replace spaces with dashes (like underscores)
+- Lowercase when spaces are present (display names like "My Project" need lowercasing; underscore-only normalization preserves case for backward compat)
+- Collapse consecutive dashes (`"My  Project"` → `"my-project"` not `"my--project"`)
+- Trim leading/trailing dashes from conversion
+- Return a `reason` field: `"underscores"` | `"spaces"` | `"both"` for targeted warning messages
+
+### 2. Reorder: normalize before validate — `src/lib/arg-parsing.ts`
+
+In `parseSlashOrgProject()` (3 paths: `/project`, `org/`, `org/project`) and `parseOrgProjectArg()` (bare slug path), move `normalizeSlug()` BEFORE `validateResourceId()`. Validate the normalized slug so spaces are already dashes.
+
+`rejectAtSelector()` stays on raw input — `@` isn't affected by normalization and error messages should show original input.
+
+### 3. Add `.trim()` to `parseIssueArg()` and `parseSlashSeparatedArg()` — `src/lib/arg-parsing.ts`
+
+- `parseIssueArg`: Trim at the start, use trimmed value throughout. Handles trailing `\n` from agents.
+- `parseSlashSeparatedArg`: Same pattern. Used by event/trace/log/span view commands.
+- Do NOT normalize spaces→dashes in issue IDs — `"CLI-G5"` should never have spaces silently converted.
+
+### 4. Update `ParsedOrgProject` type and `warnNormalized()` — `src/lib/arg-parsing.ts`
+
+- Add `reason?: "underscores" | "spaces" | "both"` to each variant with `normalized`
+- Update warning messages: `"spaces"` → "use lowercase with dashes, not spaces"; `"both"` → "not spaces or underscores"
+- Add `combineReasons()` helper for `org/project` where org and project may have different normalizations
+
+## Files to Modify
+
+| File | Changes |
+|------|---------|
+| `src/lib/arg-parsing.ts` | All source changes (normalizeSlug, type, reorder, trim, warnNormalized) |
+| `test/lib/arg-parsing.test.ts` | Update `"rejects space"` → `"normalizes space"`; add space normalization + trimming tests; update `normalizeSlug` unit test expectations for `reason` field |
+| `test/lib/arg-parsing.property.test.ts` | Update `normalizeSlug` properties (length ≤ input, normalized iff underscores or spaces); add space normalization properties |
+
+Files NOT changed:
+- `src/lib/input-validation.ts` — `validateResourceId` still rejects spaces (defense-in-depth for any path that skips normalization)
+- `test/lib/input-validation.property.test.ts` — validation properties unchanged
+
+## Key Edge Cases
+
+| Input | Result | Notes |
+|-------|--------|-------|
+| `"My Project"` | `projectSlug: "my-project"` | Space→dash + lowercase |
+| `"My Org/My Project"` | `org: "my-org", project: "my-project"` | Both parts normalized |
+| `"My  Project"` | `projectSlug: "my-project"` | Consecutive dashes collapsed |
+| `"My_Project Name"` | `projectSlug: "my-project-name"` | Both underscore + space, reason: "both" |
+| `"org/ My Project"` | `project: "my-project"` | Leading dash from space trimmed |
+| `"CLI-G5\n"` | `projectSlug: "cli", suffix: "G5"` | Trimmed before parsing |
+| `"  \n  "` | ValidationError: empty | Empty after trim throws |
+| `"my_project"` | `projectSlug: "my-project"` | Existing behavior preserved, NOT lowercased |
+| `"12345 6789"` (issue ID) | ValidationError | Internal space in issue ID still rejected (no normalization, only trim) |
+
+## Verification
+
+```bash
+# Run the targeted unit tests
+bun test test/lib/arg-parsing.test.ts
+bun test test/lib/arg-parsing.property.test.ts
+
+# Ensure input-validation tests still pass (unchanged)
+bun test test/lib/input-validation.test.ts
+bun test test/lib/input-validation.property.test.ts
+
+# Run full test suite
+bun test
+
+# Type check
+bun run typecheck
+
+# Lint
+bun run lint
+```
