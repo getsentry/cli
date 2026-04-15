@@ -1,0 +1,182 @@
+# Plan: `SENTRY_CUSTOM_HEADERS` for self-hosted IAP support
+
+**Issue**: https://github.com/getsentry/cli/issues/759
+
+## Summary
+
+Two mechanisms to inject custom HTTP headers into **all** requests to a self-hosted Sentry instance:
+
+1. **`sentry cli defaults headers "X-IAP-Token: abc123"`** — persistent SQLite storage (primary UX)
+2. **`SENTRY_CUSTOM_HEADERS` env var** — CI/scripting override (same format, higher priority)
+
+**Self-hosted only.** Ignored with a warning on SaaS (`*.sentry.io`).
+
+---
+
+## Format Specification
+
+Semicolon-separated `Name: Value` pairs. Newlines also accepted as separators.
+
+```bash
+# Single header (most common — no separator needed)
+SENTRY_CUSTOM_HEADERS="X-IAP-Token: abc123"
+
+# Multiple headers
+SENTRY_CUSTOM_HEADERS="X-IAP-Token: abc123; X-Forwarded-For: 10.0.0.1"
+
+# Same via defaults command
+sentry cli defaults headers "X-IAP-Token: abc123; X-Forwarded-For: 10.0.0.1"
+```
+
+**Parsing rules:**
+- Split on `;` and `\n` (supports both inline and multi-line)
+- Each segment: split on first `:` → `[name.trim(), value.trim()]`
+- Skip empty/whitespace-only segments
+- Trim `\r` for Windows line endings
+- Forbidden names (case-insensitive): `Authorization`, `Host`, `Content-Type`, `Content-Length`, `User-Agent`, `sentry-trace`, `baggage`
+- Throw `ConfigError` on malformed segments or forbidden names
+
+**Resolution priority:** `SENTRY_CUSTOM_HEADERS` env var > `defaults.headers` in SQLite > none
+
+---
+
+## Files to Create
+
+### 1. `src/lib/custom-headers.ts`
+
+Core module. Three exports:
+
+- **`parseCustomHeaders(raw: string): ReadonlyArray<[string, string]>`**
+  Pure parser. Throws `ConfigError` on invalid input. Exported for testing.
+
+- **`getCustomHeaders(): ReadonlyArray<[string, string]>`**
+  Reads env var (via `getEnv()`) first, falls back to `getDefaultHeaders()` from DB.
+  Returns `[]` if not self-hosted. Logs one-time `log.warn()` if headers configured but target is SaaS.
+  Caches parsed result; re-checks self-hosted guard per call (since `SENTRY_HOST` can be set dynamically by URL arg parsing).
+
+- **`applyCustomHeaders(headers: Headers): void`**
+  Applies parsed headers to a `Headers` instance via `headers.set()`.
+
+### 2. `test/lib/custom-headers.test.ts`
+
+Unit tests:
+- Parser: single header, multiple (semicolon), multiple (newline), mixed separators, value with colons, whitespace trimming, empty segments, `\r\n`, all error cases (no colon, empty name, spaces in name, each forbidden header)
+- `getCustomHeaders()`: unset sources, SaaS mode → empty, self-hosted mode → returns headers, env var overrides SQLite
+- `applyCustomHeaders()`: applies to Headers, doesn't clobber unrelated headers
+
+### 3. `test/lib/custom-headers.property.test.ts`
+
+Property-based tests:
+- Round-trip: valid `[name, value]` pairs → format as `"name: value"` → parse → same result
+- Count: number of valid segments = number of returned headers
+- Order preserved
+- Arbitraries: `headerNameArb` (alphanum + dashes, no forbidden), `headerValueArb` (printable ASCII, no `;` or `\n`)
+
+---
+
+## Files to Modify
+
+### 4. `src/lib/sentry-client.ts` — `prepareHeaders()` (line 98)
+
+Add one line before `return headers;`:
+
+```typescript
+applyCustomHeaders(headers);
+```
+
+Covers ALL authenticated API requests (SDK calls, `rawApiRequest`, `apiRequestToRegion`).
+
+### 5. `src/lib/oauth.ts` — `fetchWithConnectionError()` (line 84)
+
+Inject custom headers before the `fetch()` call. Covers all 3 OAuth endpoints (device code, poll, refresh) — fixes the exact error from the issue:
+
+```typescript
+async function fetchWithConnectionError(url: string, init: RequestInit): Promise<Response> {
+  const customHeaders = getCustomHeaders();
+  if (customHeaders.length > 0) {
+    const merged = new Headers(init.headers);
+    for (const [name, value] of customHeaders) {
+      merged.set(name, value);
+    }
+    init = { ...init, headers: merged };
+  }
+  try { return await fetch(url, init); }
+  catch (error) { /* unchanged */ }
+}
+```
+
+### 6. `src/lib/api/issues.ts` — `getSharedIssue()` (line 428)
+
+Apply custom headers to the unauthenticated shared-issue fetch:
+
+```typescript
+const headers = new Headers({ "Content-Type": "application/json" });
+applyCustomHeaders(headers);
+const response = await fetch(url, { headers });
+```
+
+### 7. `src/lib/db/defaults.ts`
+
+Add `defaults.headers` key alongside existing defaults:
+- `getDefaultHeaders(): string | null`
+- `setDefaultHeaders(value: string | null): void`
+- Include in `getAllDefaults()` → `DefaultsState.headers`
+- Include key in `ALL_DEFAULTS_KEYS` for bulk clear
+
+### 8. `src/commands/cli/defaults.ts`
+
+Add `headers` to `DEFAULTS_REGISTRY` with:
+- **get**: `getDefaultHeaders()`
+- **set**: validates via `parseCustomHeaders()` (ensures well-formed), stores raw string
+- **clear**: `setDefaultHeaders(null)`
+
+Add to `DefaultKey` type. Add docs to `fullDescription` examples table.
+
+### 9. `src/lib/formatters/human.ts` — `formatDefaultsResult()`
+
+Add `headers` row to the "show" case. Display parsed header names/values or `"not set"`. Add `"Headers"` to `DEFAULT_LABELS`.
+
+### 10. `src/lib/env-registry.ts`
+
+Add `SENTRY_CUSTOM_HEADERS` entry after `SENTRY_CLIENT_ID` (line 87):
+
+```typescript
+{
+  name: "SENTRY_CUSTOM_HEADERS",
+  description: "Custom HTTP headers ... self-hosted only ...",
+  example: 'SENTRY_CUSTOM_HEADERS="X-IAP-Token: my-proxy-token"',
+},
+```
+
+---
+
+## Not Modified
+
+| File | Reason |
+|------|--------|
+| `delta-upgrade.ts`, `ghcr.ts`, `release-notes.ts`, `binary.ts` | Fetch from GitHub/GHCR, not Sentry |
+| `wizard-runner.ts` | Fetches from Mastra, not Sentry |
+| Any command files | No `-H` flag per requirements |
+
+---
+
+## Verification
+
+```bash
+bun run typecheck
+bun run lint:fix
+bun test test/lib/custom-headers.test.ts
+bun test test/lib/custom-headers.property.test.ts
+bun test  # full suite for regressions
+
+# Smoke test: self-hosted with headers
+SENTRY_HOST=https://sentry.example.com SENTRY_CUSTOM_HEADERS="X-Test: hello" bun run dev -- auth status
+
+# Smoke test: SaaS should warn and ignore
+SENTRY_CUSTOM_HEADERS="X-Test: hello" bun run dev -- auth status
+
+# Smoke test: defaults command
+bun run dev -- cli defaults headers "X-IAP-Token: abc123"
+bun run dev -- cli defaults headers
+bun run dev -- cli defaults headers --clear
+```
