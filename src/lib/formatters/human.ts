@@ -2442,6 +2442,7 @@ const DEFAULT_LABELS: Record<string, string> = {
   project: "Project",
   telemetry: "Telemetry",
   url: "URL",
+  headers: "Headers",
 };
 
 /**
@@ -2458,39 +2459,31 @@ function telemetryOverrideNote(
   return ` ${colorTag("muted", `(overridden: disabled via ${envVar})`)}`;
 }
 
+/** Build the rows for the "show" mode of the defaults command. */
+function buildDefaultsShowRows(data: DefaultsResult): [string, string][] {
+  const d = data.defaults;
+  const notSet = colorTag("muted", "not set");
+  const telLabel = d.telemetry ?? "on (default)";
+
+  return [
+    ["Organization", d.organization ? safeCodeSpan(d.organization) : notSet],
+    ["Project", d.project ? safeCodeSpan(d.project) : notSet],
+    [
+      "Telemetry",
+      `${escapeMarkdownInline(String(telLabel))}${telemetryOverrideNote(data.telemetryEffective)}`,
+    ],
+    ["URL", d.url ? safeCodeSpan(d.url) : notSet],
+    ["Headers", d.headers ? safeCodeSpan(d.headers) : notSet],
+  ];
+}
+
 /**
  * Format defaults command result as rendered markdown.
  */
 export function formatDefaultsResult(data: DefaultsResult): string {
   switch (data.action) {
-    case "show": {
-      const rows: [string, string][] = [];
-      const d = data.defaults;
-
-      rows.push([
-        "Organization",
-        d.organization
-          ? safeCodeSpan(d.organization)
-          : colorTag("muted", "not set"),
-      ]);
-      rows.push([
-        "Project",
-        d.project ? safeCodeSpan(d.project) : colorTag("muted", "not set"),
-      ]);
-
-      const telLabel = d.telemetry ?? "on (default)";
-      rows.push([
-        "Telemetry",
-        `${escapeMarkdownInline(String(telLabel))}${telemetryOverrideNote(data.telemetryEffective)}`,
-      ]);
-
-      rows.push([
-        "URL",
-        d.url ? safeCodeSpan(d.url) : colorTag("muted", "not set"),
-      ]);
-
-      return renderMarkdown(mdKvTable(rows, "Defaults"));
-    }
+    case "show":
+      return renderMarkdown(mdKvTable(buildDefaultsShowRows(data), "Defaults"));
 
     case "set": {
       const label =

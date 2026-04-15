@@ -14,6 +14,7 @@ import {
   getConfiguredSentryUrl,
   getUserAgent,
 } from "./constants.js";
+import { applyCustomHeaders } from "./custom-headers.js";
 import { getAuthToken, refreshToken } from "./db/auth.js";
 import { logger } from "./logger.js";
 import { getCachedResponse, storeCachedResponse } from "./response-cache.js";
@@ -96,6 +97,9 @@ function prepareHeaders(
   if (traceData.baggage) {
     headers.set("baggage", traceData.baggage);
   }
+
+  // Inject user-configured custom headers for self-hosted proxies (IAP, mTLS, etc.)
+  applyCustomHeaders(headers);
 
   return headers;
 }
