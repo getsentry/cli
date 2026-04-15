@@ -95,7 +95,7 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
       "reverse proxies that require additional headers for authentication " +
       "(e.g., Google IAP, Cloudflare Access).\n\n" +
       "Can also be set persistently with `sentry cli defaults headers`.",
-    example: 'SENTRY_CUSTOM_HEADERS="X-IAP-Token: my-proxy-token"',
+    example: '"X-IAP-Token: my-proxy-token"',
   },
   // -- Paths --
   {
