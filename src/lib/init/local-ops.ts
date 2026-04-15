@@ -990,9 +990,7 @@ export async function detectExistingProject(cwd: string): Promise<{
   return null;
 }
 
-async function detectSentry(
-  payload: DetectSentryPayload
-): Promise<LocalOpResult> {
+function detectSentry(payload: DetectSentryPayload): Promise<LocalOpResult> {
   return precomputeSentryDetection(payload.cwd);
 }
 
