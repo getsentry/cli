@@ -66,11 +66,9 @@ export function normalizeSlug(slug: string): {
     result = result.toLowerCase();
   }
 
-  // Replace underscores and spaces with dashes
-  result = result.replace(/[_ ]/g, "-");
-
-  // Collapse consecutive dashes (from "My  Project" or "a__b")
-  result = result.replace(/-{2,}/g, "-");
+  // Replace runs of underscores/spaces with a single dash.
+  // Using [_ ]+ collapses "My  Project" and "a__b" in one pass.
+  result = result.replace(/[_ ]+/g, "-");
 
   // Trim leading/trailing dashes (from " My Project " → "-my-project-")
   result = result.replace(/^-+|-+$/g, "");
