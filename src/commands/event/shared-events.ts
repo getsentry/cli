@@ -19,7 +19,7 @@ import {
   PERIOD_ALIASES,
 } from "../../lib/list-command.js";
 import { sanitizeQuery } from "../../lib/search-query.js";
-import { formatTimeRangeFlag, type TimeRange } from "../../lib/time-range.js";
+import { appendPeriodHint, type TimeRange } from "../../lib/time-range.js";
 import type { IssueEvent } from "../../types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -179,9 +179,7 @@ export function appendEventsFlags(
   if (flags.full) {
     parts.push("--full");
   }
-  if (formatTimeRangeFlag(flags.period) !== DEFAULT_PERIOD) {
-    parts.push(`--period ${formatTimeRangeFlag(flags.period)}`);
-  }
+  appendPeriodHint(parts, flags.period, DEFAULT_PERIOD);
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
 }
 

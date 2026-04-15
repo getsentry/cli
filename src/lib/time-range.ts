@@ -478,3 +478,28 @@ export function formatTimeRangeFlag(range: TimeRange): string {
   }
   return "";
 }
+
+/**
+ * Append a `--period` hint to a CLI hint parts array, but only when the
+ * period differs from the command's default.
+ *
+ * This is the standard pattern for pagination hint builders across all
+ * list commands. Avoids repeating the `formatTimeRangeFlag` + comparison
+ * boilerplate in every command.
+ *
+ * @param parts - Mutable array of CLI flag strings being built
+ * @param period - The current `TimeRange` from `flags.period`
+ * @param defaultPeriod - The string form of the command's default (e.g. `"7d"`)
+ * @param flag - The flag name to use in the hint (default: `"--period"`)
+ */
+export function appendPeriodHint(
+  parts: string[],
+  period: TimeRange,
+  defaultPeriod: string,
+  flag = "--period"
+): void {
+  const formatted = formatTimeRangeFlag(period);
+  if (formatted !== defaultPeriod) {
+    parts.push(`${flag} ${formatted}`);
+  }
+}

@@ -42,7 +42,7 @@ import { withProgress } from "../../lib/polling.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
 import { sanitizeQuery } from "../../lib/search-query.js";
 import {
-  formatTimeRangeFlag,
+  appendPeriodHint,
   serializeTimeRange,
   type TimeRange,
   timeRangeToApiParams,
@@ -209,9 +209,7 @@ function appendFlagHints(
   if (flags.query) {
     parts.push(`-q "${flags.query}"`);
   }
-  if (formatTimeRangeFlag(flags.period) !== DEFAULT_PERIOD) {
-    parts.push(`--period ${formatTimeRangeFlag(flags.period)}`);
-  }
+  appendPeriodHint(parts, flags.period, DEFAULT_PERIOD);
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
 }
 

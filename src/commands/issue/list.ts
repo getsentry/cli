@@ -85,6 +85,7 @@ import {
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import {
+  appendPeriodHint,
   formatTimeRangeFlag,
   PERIOD_BRIEF,
   parsePeriod,
@@ -848,9 +849,7 @@ function appendIssueFlags(base: string, flags: ListFlags): string {
   if (flags.query) {
     parts.push(`-q "${flags.query}"`);
   }
-  if (formatTimeRangeFlag(flags.period) !== "90d") {
-    parts.push(`-t ${formatTimeRangeFlag(flags.period)}`);
-  }
+  appendPeriodHint(parts, flags.period, DEFAULT_PERIOD, "-t");
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
 }
 
