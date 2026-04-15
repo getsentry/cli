@@ -367,11 +367,8 @@ function buildCheckResult(opts: {
  */
 const SPAWN_MAX_ATTEMPTS = 5;
 
-/**
- * Backoff delays (ms) between spawn retry attempts.
- * Index 0 = delay before retry #1, etc. Total budget: ~5s.
- */
-const SPAWN_RETRY_DELAYS_MS = [500, 1000, 1500, 2000];
+/** Base delay (ms) between spawn retry attempts. Delay = attempt * base. */
+const SPAWN_RETRY_BASE_MS = 500;
 
 /**
  * Check whether an error is an EBUSY system error from spawn.
@@ -417,7 +414,7 @@ async function spawnWithRetry(
       if (!isEbusyError(error) || attempt === SPAWN_MAX_ATTEMPTS) {
         throw error;
       }
-      const delay = SPAWN_RETRY_DELAYS_MS[attempt - 1] ?? 2000;
+      const delay = attempt * SPAWN_RETRY_BASE_MS;
       log.warn(
         `Binary is locked (antivirus scan?), retrying in ${delay}ms... (attempt ${attempt}/${SPAWN_MAX_ATTEMPTS})`
       );
