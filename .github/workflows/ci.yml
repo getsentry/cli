@@ -328,7 +328,7 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
 
           # Find previous nightly tag
-          TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-' | sort -V || echo "")
+          TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-[0-9]' | sort -V || echo "")
           PREV_TAG=""
           for tag in $TAGS; do
             # Current tag may not exist yet (publish-nightly hasn't run),
@@ -407,6 +407,56 @@ jobs:
           done
 
           echo "Generated ${GENERATED} patches"
+
+      - name: Validate patch sizes
+        if: env.HAS_PREV == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Client rejects chains exceeding 60% of gzipped binary size
+          # (SIZE_THRESHOLD_RATIO in src/lib/delta-upgrade.ts). Use 50% here
+          # so single-step patches are caught with margin to spare.
+          MAX_RATIO: 50
+        run: |
+          shopt -s nullglob
+          OVERSIZED=""
+
+          for patch_file in patches/*.patch; do
+            name=$(basename "$patch_file" .patch)
+            gz_binary="new-binaries/${name}.gz"
+            [ -f "$gz_binary" ] || continue
+
+            patch_size=$(stat --printf='%s' "$patch_file")
+            gz_size=$(stat --printf='%s' "$gz_binary")
+            ratio=$(awk "BEGIN { printf \"%.0f\", ($patch_size / $gz_size) * 100 }")
+
+            if [ "$ratio" -gt "$MAX_RATIO" ]; then
+              echo "::error::Patch ${name}.patch is ${ratio}% of gzipped binary (limit: ${MAX_RATIO}%)"
+              OVERSIZED="$(printf '%s\n- `%s.patch`: %s%% of gzipped binary (%s / %s bytes)' "$OVERSIZED" "$name" "$ratio" "$patch_size" "$gz_size")"
+              rm "$patch_file"
+            fi
+          done
+
+          if [ -n "$OVERSIZED" ]; then
+            TITLE="Delta patch generation produced oversized patches"
+            BODY="$(cat <<ISSUE_EOF
+          The \`generate-patches\` job produced patches exceeding ${MAX_RATIO}% of gzipped binary size:
+          ${OVERSIZED}
+
+          These patches were **excluded** from the artifact upload. This usually means the old binary download failed (empty/wrong file).
+
+          **Branch:** \`${GITHUB_REF_NAME}\`
+          **Commit:** ${GITHUB_SHA}
+          **Run:** ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          ISSUE_EOF
+          )"
+
+            EXISTING=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$TITLE" --json number --jq '.[0].number // empty')
+            if [ -n "$EXISTING" ]; then
+              gh issue comment "$EXISTING" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+            else
+              gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY" --label bug
+            fi
+          fi
 
       - name: Upload patch artifacts
         if: env.HAS_PREV == 'true'
@@ -531,7 +581,7 @@ jobs:
           fi
 
           # Find from-version by listing GHCR nightly tags
-          TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-' | sort -V || echo "")
+          TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-[0-9]' | sort -V || echo "")
           PREV_TAG=""
           for tag in $TAGS; do
             if [ "$tag" = "nightly-${VERSION}" ]; then break; fi

@@ -57,6 +57,15 @@ export type InstallationMethod =
 /** Package managers that can be used for global installs */
 type PackageManager = "npm" | "pnpm" | "bun" | "yarn";
 
+/**
+ * How the current upgrade reached the offline code path.
+ *
+ * - `false` — online upgrade (network available)
+ * - `"explicit"` — user passed `--offline` flag
+ * - `"network-fallback"` — network failed, auto-fell back to cache
+ */
+export type OfflineMode = false | "explicit" | "network-fallback";
+
 // Constants
 
 /** The git tag used for the rolling nightly GitHub release (stable fallback only). */
@@ -680,7 +689,7 @@ async function downloadStableToPath(
 export async function downloadBinaryToTemp(
   version: string,
   downloadTag?: string,
-  offline?: boolean
+  offline?: OfflineMode
 ): Promise<DownloadResult> {
   const { tempPath, lockPath } = getCurlInstallPaths();
 
@@ -696,14 +705,18 @@ export async function downloadBinaryToTemp(
 
     // Try delta upgrade first — downloads tiny patches instead of full binary.
     // Falls back to full download on any failure (missing patches, hash mismatch, etc.)
-    const deltaResult = await tryDeltaUpgrade(version, tempPath, offline);
+    const deltaResult = await tryDeltaUpgrade(version, tempPath, !!offline);
     let patchBytes: number | undefined;
     if (deltaResult) {
       patchBytes = deltaResult.patchBytes;
     } else if (offline) {
       throw new UpgradeError(
-        "network_error",
-        `No cached patches available for upgrade to ${version}. Run 'sentry cli upgrade' with network access first.`
+        "offline_cache_miss",
+        offline === "explicit"
+          ? `Cannot upgrade to ${version} in offline mode — no pre-downloaded update is available. ` +
+              "Run `sentry cli upgrade` without `--offline` to download the update directly."
+          : `Cannot upgrade to ${version} — the network is unavailable and no pre-downloaded update was found. ` +
+              "Check your internet connection and try again."
       );
     } else {
       log.debug("Downloading full binary");
@@ -875,7 +888,7 @@ export async function executeUpgrade(
   method: InstallationMethod,
   version: string,
   downloadTag?: string,
-  offline?: boolean
+  offline?: OfflineMode
 ): Promise<DownloadResult | null> {
   switch (method) {
     case "curl":

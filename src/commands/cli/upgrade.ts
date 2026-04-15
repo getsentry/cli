@@ -46,6 +46,7 @@ import {
   getCurlInstallPaths,
   type InstallationMethod,
   NIGHTLY_TAG,
+  type OfflineMode,
   parseInstallationMethod,
   VERSION_PREFIX_REGEX,
   versionExists,
@@ -163,7 +164,7 @@ async function resolveTargetWithFallback(opts: {
    *  clearing the version cache before the offline path can read it). */
   persistChannelFn: () => void;
 }): Promise<
-  | { kind: "target"; target: string; offline: boolean }
+  | { kind: "target"; target: string; offline: OfflineMode }
   | { kind: "done"; result: UpgradeResult }
 > {
   const { resolveOpts, versionArg, offline, method, persistChannelFn } = opts;
@@ -183,7 +184,7 @@ async function resolveTargetWithFallback(opts: {
     const target = resolveOfflineTarget(versionArg);
     persistChannelFn();
     log.info(`Offline mode: using cached target ${target}`);
-    return { kind: "target", target, offline: true };
+    return { kind: "target", target, offline: "explicit" };
   }
 
   // Non-offline: persist channel upfront (no cache dependency)
@@ -209,7 +210,7 @@ async function resolveTargetWithFallback(opts: {
       const target = resolveOfflineTarget(versionArg);
       log.warn("Network unavailable, falling back to cached upgrade target");
       log.info(`Using cached target: ${target}`);
-      return { kind: "target", target, offline: true };
+      return { kind: "target", target, offline: "network-fallback" };
     } catch {
       // No cached version either — re-throw original network error
       throw error;
@@ -358,6 +359,73 @@ function buildCheckResult(opts: {
 }
 
 /**
+ * Maximum number of spawn attempts for the new binary.
+ *
+ * On Windows, Defender/SmartScreen may lock a newly-written executable for
+ * antivirus scanning after the file handle is closed. This causes EBUSY from
+ * uv_spawn. Retrying with backoff lets the scan complete without a fixed sleep.
+ */
+const SPAWN_MAX_ATTEMPTS = 5;
+
+/** Base delay (ms) between spawn retry attempts. Delay = attempt * base. */
+const SPAWN_RETRY_BASE_MS = 500;
+
+/**
+ * Check whether an error is an EBUSY system error from spawn.
+ *
+ * On Windows, Defender/SmartScreen locks newly-written executables for
+ * scanning. libuv's uv_spawn fails with EBUSY until the lock is released.
+ */
+export function isEbusyError(error: unknown): boolean {
+  return (
+    error instanceof Error && (error as NodeJS.ErrnoException).code === "EBUSY"
+  );
+}
+
+/**
+ * Spawn a binary with retry on EBUSY errors.
+ *
+ * On Windows, Defender/SmartScreen asynchronously scans newly-written
+ * executables after the file handle is closed. If the CLI spawns the
+ * binary before the scan completes, uv_spawn fails with EBUSY.
+ * This function retries with backoff to let the scan finish.
+ *
+ * On non-Windows platforms (or when Defender isn't active), the first
+ * attempt succeeds immediately with zero overhead.
+ *
+ * @returns Process exit code from the successful spawn
+ * @throws The last EBUSY error if all attempts are exhausted
+ * @throws Immediately on non-EBUSY errors (ENOENT, EACCES, etc.)
+ */
+async function spawnWithRetry(
+  binaryPath: string,
+  args: string[],
+  env: NodeJS.ProcessEnv | undefined
+): Promise<number> {
+  for (let attempt = 1; attempt <= SPAWN_MAX_ATTEMPTS; attempt++) {
+    try {
+      const proc = Bun.spawn([binaryPath, ...args], {
+        stdout: "inherit",
+        stderr: "inherit",
+        env,
+      });
+      return await proc.exited;
+    } catch (error) {
+      if (!isEbusyError(error) || attempt === SPAWN_MAX_ATTEMPTS) {
+        throw error;
+      }
+      const delay = attempt * SPAWN_RETRY_BASE_MS;
+      log.warn(
+        `Binary is locked (antivirus scan?), retrying in ${delay}ms... (attempt ${attempt}/${SPAWN_MAX_ATTEMPTS})`
+      );
+      await Bun.sleep(delay);
+    }
+  }
+  // Unreachable — the loop either returns or throws
+  throw new UpgradeError("execution_failed", "Spawn retry loop exhausted");
+}
+
+/**
  * Spawn the new binary with `cli setup` to update completions, agent skills,
  * and record installation metadata.
  */
@@ -403,12 +471,7 @@ async function runSetupOnNewBinary(opts: SetupOptions): Promise<void> {
     ? { ...process.env, SENTRY_INSTALL_DIR: installDir }
     : undefined;
 
-  const proc = Bun.spawn([binaryPath, ...args], {
-    stdout: "inherit",
-    stderr: "inherit",
-    env,
-  });
-  const exitCode = await proc.exited;
+  const exitCode = await spawnWithRetry(binaryPath, args, env);
   if (exitCode !== 0) {
     throw new UpgradeError(
       "execution_failed",
@@ -427,7 +490,7 @@ async function executeStandardUpgrade(opts: {
   versionArg: string | undefined;
   target: string;
   execPath: string;
-  offline?: boolean;
+  offline?: OfflineMode;
   json?: boolean;
 }): Promise<void> {
   const { method, channel, versionArg, target, execPath, offline, json } = opts;
@@ -608,7 +671,7 @@ function startChangelogFetch(
   channel: ReleaseChannel,
   currentVersion: string,
   targetVersion: string,
-  offline: boolean
+  offline: OfflineMode
 ): Promise<ChangelogSummary | undefined> {
   if (offline || currentVersion === targetVersion) {
     return Promise.resolve(undefined);
@@ -631,7 +694,7 @@ async function buildCheckResultWithChangelog(opts: {
   method: InstallationMethod;
   channel: ReleaseChannel;
   flags: UpgradeFlags;
-  offline: boolean;
+  offline: OfflineMode;
   changelogPromise: Promise<ChangelogSummary | undefined>;
 }): Promise<UpgradeResult> {
   const result = buildCheckResult(opts);
@@ -776,7 +839,7 @@ export const upgradeCommand = buildCommand({
         channel,
         method,
         forced: false,
-        offline: offline || undefined,
+        offline: offline ? true : undefined,
       } satisfies UpgradeResult);
     }
     const downgrade = isDowngrade(CLI_VERSION, target);
@@ -813,7 +876,7 @@ export const upgradeCommand = buildCommand({
       channel,
       method,
       forced: flags.force,
-      offline: offline || undefined,
+      offline: offline ? true : undefined,
       warnings,
       changelog,
     } satisfies UpgradeResult);

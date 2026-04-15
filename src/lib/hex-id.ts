@@ -27,6 +27,12 @@ const MAX_DISPLAY_LENGTH = 40;
 /** Matches any character that is NOT a lowercase hex digit (used for slug detection in error hints) */
 const NON_HEX_RE = /[^0-9a-f]/;
 
+/** Matches strings starting with a dash — likely CLI flags that Stricli didn't recognize */
+const FLAG_LIKE_RE = /^-/;
+
+/** Matches common help flag typos (e.g., "--h", "-h", "--help", "-help") */
+const HELP_FLAG_RE = /^--?h(elp)?$/;
+
 /**
  * Normalize a potential hex ID: trim, lowercase, strip UUID dashes.
  * Does NOT validate — call this before checking {@link HEX_ID_RE}.
@@ -77,8 +83,18 @@ export function validateHexId(value: string, label: string): string {
       `Invalid ${label} "${display}". Expected a 32-character hexadecimal string.\n\n` +
       "Example: abc123def456abc123def456abc123de";
 
-    // Detect common misidentified entity types and add helpful hints
-    if (SPAN_ID_RE.test(normalized)) {
+    // Detect common misidentified entity types and add helpful hints.
+    // Flag-like check first — strings starting with "-" are almost certainly
+    // CLI flags that Stricli didn't recognize (e.g., "--h" instead of "-h").
+    if (FLAG_LIKE_RE.test(normalized)) {
+      if (HELP_FLAG_RE.test(normalized)) {
+        message +=
+          "\n\nThis looks like a help flag. Use --help or -h for help.";
+      } else {
+        message +=
+          "\n\nThis looks like a CLI flag, not a hex ID. Check flag syntax with --help.";
+      }
+    } else if (SPAN_ID_RE.test(normalized)) {
       // 16-char hex looks like a span ID
       message +=
         "\n\nThis looks like a span ID (16 characters). " +

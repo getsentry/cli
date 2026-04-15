@@ -18,6 +18,7 @@ import {
   LIST_PERIOD_FLAG,
   PERIOD_ALIASES,
 } from "../../lib/list-command.js";
+import { sanitizeQuery } from "../../lib/search-query.js";
 import type { IssueEvent } from "../../types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -206,7 +207,7 @@ export const EVENTS_FLAGS = {
   },
   query: {
     kind: "parsed",
-    parse: String,
+    parse: sanitizeQuery,
     brief: "Search query (Sentry search syntax)",
     optional: true,
   },

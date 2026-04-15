@@ -1,6 +1,6 @@
 {
   "name": "sentry",
-  "version": "0.27.0-dev.0",
+  "version": "0.28.0-dev.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/getsentry/cli.git"
@@ -31,6 +31,7 @@
     "ignore": "^7.0.5",
     "marked": "^15",
     "p-limit": "^7.2.0",
+    "peggy": "^5.1.0",
     "picomatch": "^4.0.3",
     "pretty-ms": "^9.3.0",
     "qrcode-terminal": "^0.12.0",
@@ -82,9 +83,10 @@
     "test:isolated": "bun run generate:docs && bun run generate:sdk && bun test --timeout 15000 test/isolated",
     "test:e2e": "bun run generate:docs && bun run generate:sdk && bun test --timeout 15000 test/e2e",
     "test:init-eval": "bun test test/init-eval --timeout 600000 --concurrency 6",
+    "generate:parser": "bun run script/generate-parser.ts",
     "generate:sdk": "bun run script/generate-sdk.ts",
     "generate:skill": "bun run script/generate-skill.ts",
-    "generate:docs": "bun run generate:command-docs && bun run generate:skill && bun run generate:docs-sections",
+    "generate:docs": "bun run generate:parser && bun run generate:command-docs && bun run generate:skill && bun run generate:docs-sections",
     "generate:docs-sections": "bun run script/generate-docs-sections.ts",
     "generate:schema": "bun run script/generate-api-schema.ts",
     "generate:command-docs": "bun run script/generate-command-docs.ts",
