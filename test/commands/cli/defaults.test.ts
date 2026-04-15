@@ -10,6 +10,7 @@ import chalk from "chalk";
 import {
   clearAllDefaults,
   getAllDefaults,
+  getDefaultHeaders,
   getDefaultOrganization,
   getDefaultProject,
   getDefaultUrl,
@@ -114,6 +115,7 @@ describe("defaults storage", () => {
       project: "test-project",
       telemetry: "off",
       url: "https://sentry.example.com",
+      headers: null,
     });
   });
 
@@ -124,6 +126,7 @@ describe("defaults storage", () => {
       project: null,
       telemetry: null,
       url: null,
+      headers: null,
     });
   });
 
@@ -139,6 +142,7 @@ describe("defaults storage", () => {
     expect(getDefaultProject()).toBeNull();
     expect(getTelemetryPreference()).toBeUndefined();
     expect(getDefaultUrl()).toBeNull();
+    expect(getDefaultHeaders()).toBeNull();
   });
 });
 
