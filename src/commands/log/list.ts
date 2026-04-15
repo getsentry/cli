@@ -52,6 +52,8 @@ import { sanitizeQuery } from "../../lib/search-query.js";
 import {
   PERIOD_BRIEF,
   parsePeriod,
+  TIME_RANGE_14D,
+  TIME_RANGE_30D,
   type TimeRange,
   timeRangeToApiParams,
 } from "../../lib/time-range.js";
@@ -67,7 +69,7 @@ type ListFlags = {
   readonly limit: number;
   readonly query?: string;
   readonly follow?: number;
-  readonly period?: string;
+  readonly period?: TimeRange;
   readonly sort: LogSortDirection;
   readonly json: boolean;
   readonly fresh: boolean;
@@ -100,9 +102,6 @@ const COMMAND_NAME = "log list";
 
 /** Usage hint for trace mode error messages */
 const TRACE_USAGE_HINT = "sentry log list [<org>/[<project>/]]<trace-id>";
-
-/** Default time period for trace-logs queries */
-const DEFAULT_TRACE_PERIOD = "14d";
 
 /**
  * Parse --limit flag, delegating range validation to shared utility.
@@ -167,11 +166,6 @@ function parseLogListArgs(
 ): ReturnType<typeof parseDualModeArgs> {
   return parseDualModeArgs(args, TRACE_USAGE_HINT);
 }
-
-/** Default time period for project-scoped log queries.
- * Log retention is 30 days (https://docs.sentry.io/security-legal-pii/security/data-retention-periods/).
- * Periods >30d hit a degraded API path that returns stale/incomplete data. */
-const DEFAULT_PROJECT_PERIOD = "30d";
 
 /**
  * Execute a single fetch of logs (non-streaming mode).
@@ -686,7 +680,7 @@ export const listCommand = buildListCommand(
         },
         period: {
           kind: "parsed",
-          parse: String,
+          parse: parsePeriod,
           brief: PERIOD_BRIEF,
           optional: true,
         },
@@ -717,13 +711,10 @@ export const listCommand = buildListCommand(
 
       const parsed = parseLogListArgs(args);
 
-      // Resolve mode-dependent default period, then parse the time range
-      const effectivePeriod =
+      // Resolve mode-dependent default period
+      const timeRange =
         flags.period ??
-        (parsed.mode === "trace"
-          ? DEFAULT_TRACE_PERIOD
-          : DEFAULT_PROJECT_PERIOD);
-      const timeRange = parsePeriod(effectivePeriod);
+        (parsed.mode === "trace" ? TIME_RANGE_14D : TIME_RANGE_30D);
 
       // Follow mode streams live events via short polling intervals —
       // absolute date ranges are silently ignored, so reject them entirely.

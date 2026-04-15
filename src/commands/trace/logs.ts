@@ -26,8 +26,10 @@ import { withProgress } from "../../lib/polling.js";
 import { sanitizeQuery } from "../../lib/search-query.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
 import {
+  formatTimeRangeFlag,
   PERIOD_BRIEF,
   parsePeriod,
+  type TimeRange,
   timeRangeToApiParams,
 } from "../../lib/time-range.js";
 import {
@@ -39,7 +41,7 @@ import {
 type LogsFlags = {
   readonly json: boolean;
   readonly web: boolean;
-  readonly period: string;
+  readonly period: TimeRange;
   readonly limit: number;
   readonly query?: string;
   readonly sort: LogSortDirection;
@@ -140,7 +142,7 @@ export const logsCommand = buildCommand({
       },
       period: {
         kind: "parsed",
-        parse: String,
+        parse: parsePeriod,
         brief: PERIOD_BRIEF,
         default: DEFAULT_PERIOD,
       },
@@ -177,7 +179,7 @@ export const logsCommand = buildCommand({
   async *func(this: SentryContext, flags: LogsFlags, ...args: string[]) {
     applyFreshFlag(flags);
     const { cwd } = this;
-    const timeRange = parsePeriod(flags.period);
+    const timeRange = flags.period;
 
     // Parse and resolve org/trace-id (project captured for filtering)
     const parsed = parseTraceTarget(args, USAGE_HINT);
@@ -211,7 +213,7 @@ export const logsCommand = buildCommand({
     const hasMore = logs.length >= flags.limit;
 
     const emptyMessage =
-      `No logs found for trace ${traceId} in the last ${flags.period}.\n\n` +
+      `No logs found for trace ${traceId} in the last ${formatTimeRangeFlag(flags.period)}.\n\n` +
       `Try a longer period: sentry trace logs --period 30d ${traceId}`;
 
     yield new CommandOutput({

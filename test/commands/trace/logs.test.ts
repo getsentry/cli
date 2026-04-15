@@ -28,6 +28,7 @@ import { ContextError } from "../../../src/lib/errors.js";
 import * as polling from "../../../src/lib/polling.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
+import { parsePeriod } from "../../../src/lib/time-range.js";
 import type { TraceLog } from "../../../src/types/sentry.js";
 
 // Note: parseTraceTarget parsing tests are in test/lib/trace-target.test.ts
@@ -131,7 +132,13 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: true, web: false, period: "14d", limit: 100, sort: "newest" },
+        {
+          json: true,
+          web: false,
+          period: parsePeriod("14d"),
+          limit: 100,
+          sort: "newest",
+        },
         TRACE_ID
       );
 
@@ -154,7 +161,13 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: true, web: false, period: "14d", limit: 100, sort: "newest" },
+        {
+          json: true,
+          web: false,
+          period: parsePeriod("14d"),
+          limit: 100,
+          sort: "newest",
+        },
         TRACE_ID
       );
 
@@ -173,7 +186,13 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: false, web: false, period: "14d", limit: 100, sort: "newest" },
+        {
+          json: false,
+          web: false,
+          period: parsePeriod("14d"),
+          limit: 100,
+          sort: "newest",
+        },
         TRACE_ID
       );
 
@@ -190,7 +209,13 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: false, web: false, period: "30d", limit: 100, sort: "newest" },
+        {
+          json: false,
+          web: false,
+          period: parsePeriod("30d"),
+          limit: 100,
+          sort: "newest",
+        },
         TRACE_ID
       );
 
@@ -206,7 +231,13 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: false, web: false, period: "14d", limit: 100, sort: "newest" },
+        {
+          json: false,
+          web: false,
+          period: parsePeriod("14d"),
+          limit: 100,
+          sort: "newest",
+        },
         TRACE_ID
       );
 
@@ -224,7 +255,13 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: false, web: false, period: "14d", limit: 100, sort: "newest" },
+        {
+          json: false,
+          web: false,
+          period: parsePeriod("14d"),
+          limit: 100,
+          sort: "newest",
+        },
         TRACE_ID
       );
 
@@ -241,7 +278,13 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: false, web: false, period: "14d", limit: 100, sort: "newest" },
+        {
+          json: false,
+          web: false,
+          period: parsePeriod("14d"),
+          limit: 100,
+          sort: "newest",
+        },
         TRACE_ID
       );
 
@@ -259,7 +302,13 @@ describe("logsCommand.func", () => {
       await func.call(
         context,
         // limit equals number of returned logs → hasMore = true
-        { json: false, web: false, period: "14d", limit: 3, sort: "newest" },
+        {
+          json: false,
+          web: false,
+          period: parsePeriod("14d"),
+          limit: 3,
+          sort: "newest",
+        },
         TRACE_ID
       );
 
@@ -275,7 +324,13 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: false, web: false, period: "14d", limit: 100, sort: "newest" },
+        {
+          json: false,
+          web: false,
+          period: parsePeriod("14d"),
+          limit: 100,
+          sort: "newest",
+        },
         TRACE_ID
       );
 
@@ -293,7 +348,13 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: true, web: false, period: "14d", limit: 100, sort: "newest" },
+        {
+          json: true,
+          web: false,
+          period: parsePeriod("14d"),
+          limit: 100,
+          sort: "newest",
+        },
         ORG,
         TRACE_ID
       );
@@ -312,7 +373,13 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: true, web: false, period: "14d", limit: 100, sort: "newest" },
+        {
+          json: true,
+          web: false,
+          period: parsePeriod("14d"),
+          limit: 100,
+          sort: "newest",
+        },
         TRACE_ID
       );
 
@@ -334,7 +401,7 @@ describe("logsCommand.func", () => {
           {
             json: false,
             web: false,
-            period: "14d",
+            period: parsePeriod("14d"),
             limit: 100,
             sort: "newest",
           },
@@ -356,7 +423,7 @@ describe("logsCommand.func", () => {
         {
           json: false,
           web: false,
-          period: "7d",
+          period: parsePeriod("7d"),
           limit: 50,
           query: "level:error",
           sort: "newest",
@@ -380,7 +447,13 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: false, web: false, period: "14d", limit: 100, sort: "newest" },
+        {
+          json: false,
+          web: false,
+          period: parsePeriod("14d"),
+          limit: 100,
+          sort: "newest",
+        },
         TRACE_ID
       );
 
@@ -403,7 +476,13 @@ describe("logsCommand.func", () => {
       try {
         await func.call(
           context,
-          { json: false, web: true, period: "14d", limit: 100, sort: "newest" },
+          {
+            json: false,
+            web: true,
+            period: parsePeriod("14d"),
+            limit: 100,
+            sort: "newest",
+          },
           TRACE_ID
         );
       } catch {
@@ -423,7 +502,13 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: false, web: false, period: "14d", limit: 100, sort: "newest" },
+        {
+          json: false,
+          web: false,
+          period: parsePeriod("14d"),
+          limit: 100,
+          sort: "newest",
+        },
         TRACE_ID
       );
 
@@ -442,7 +527,13 @@ describe("logsCommand.func", () => {
       const func = await logsCommand.loader();
       await func.call(
         context,
-        { json: false, web: false, period: "14d", limit: 100, sort: "oldest" },
+        {
+          json: false,
+          web: false,
+          period: parsePeriod("14d"),
+          limit: 100,
+          sort: "oldest",
+        },
         TRACE_ID
       );
 

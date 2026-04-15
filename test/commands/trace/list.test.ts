@@ -29,6 +29,7 @@ import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import { ContextError, ResolutionError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
+import { parsePeriod } from "../../../src/lib/time-range.js";
 import type { TransactionListItem } from "../../../src/types/sentry.js";
 
 // Reference paginationDb early to prevent import stripping by auto-organize
@@ -297,7 +298,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: true, period: "7d" },
+      { limit: 20, sort: "date", json: true, period: parsePeriod("7d") },
       "test-org/test-project"
     );
 
@@ -317,7 +318,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: true, period: "7d" },
+      { limit: 20, sort: "date", json: true, period: parsePeriod("7d") },
       "test-org/test-project"
     );
 
@@ -336,7 +337,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: false, period: "7d" },
+      { limit: 20, sort: "date", json: false, period: parsePeriod("7d") },
       "test-org/test-project"
     );
 
@@ -351,7 +352,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: false, period: "7d" },
+      { limit: 20, sort: "date", json: false, period: parsePeriod("7d") },
       "test-org/test-project"
     );
 
@@ -373,7 +374,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 2, sort: "date", json: false, period: "7d" },
+      { limit: 2, sort: "date", json: false, period: parsePeriod("7d") },
       "test-org/test-project"
     );
 
@@ -389,7 +390,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 100, sort: "date", json: false, period: "7d" },
+      { limit: 100, sort: "date", json: false, period: parsePeriod("7d") },
       "test-org/test-project"
     );
 
@@ -405,7 +406,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: false, period: "7d" },
+      { limit: 20, sort: "date", json: false, period: parsePeriod("7d") },
       "test-org/test-project"
     );
 
@@ -426,7 +427,7 @@ describe("listCommand.func", () => {
         sort: "duration",
         json: false,
         query: "transaction:GET",
-        period: "7d",
+        period: parsePeriod("7d"),
       },
       "test-org/test-project"
     );
@@ -454,7 +455,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: true, period: "7d" },
+      { limit: 20, sort: "date", json: true, period: parsePeriod("7d") },
       "test-org/test-project"
     );
 
@@ -477,7 +478,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "duration", json: false, period: "7d" },
+      { limit: 20, sort: "duration", json: false, period: parsePeriod("7d") },
       "test-org/test-project"
     );
 
@@ -494,7 +495,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: false, period: "7d" },
+      { limit: 20, sort: "date", json: false, period: parsePeriod("7d") },
       "test-org/test-project"
     );
 
@@ -512,7 +513,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: false, period: "7d" },
+      { limit: 20, sort: "date", json: false, period: parsePeriod("7d") },
       "test-org/test-project"
     );
 
@@ -536,7 +537,7 @@ describe("listCommand.func", () => {
         sort: "date",
         json: false,
         query: "transaction:POST",
-        period: "7d",
+        period: parsePeriod("7d"),
       },
       "test-org/test-project"
     );
@@ -553,7 +554,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: true, period: "7d" },
+      { limit: 20, sort: "date", json: true, period: parsePeriod("7d") },
       "test-org/test-project"
     );
 
@@ -571,7 +572,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: false, period: "24h" },
+      { limit: 20, sort: "date", json: false, period: parsePeriod("24h") },
       "test-org/test-project"
     );
 
@@ -594,7 +595,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 20, sort: "date", json: false, period: "30d" },
+      { limit: 20, sort: "date", json: false, period: parsePeriod("30d") },
       "test-org/test-project"
     );
 

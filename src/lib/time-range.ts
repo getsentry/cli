@@ -424,3 +424,57 @@ function absoluteRangeToSeconds(
   }
   return Math.max(0, (endMs - startMs) / 1000);
 }
+
+// ---------------------------------------------------------------------------
+// Pre-parsed TimeRange constants for runtime defaults
+// ---------------------------------------------------------------------------
+
+/** Pre-parsed `{ type: "relative", period: "14d" }` for commands with 14-day default. */
+export const TIME_RANGE_14D: RelativeTimeRange = {
+  type: "relative",
+  period: "14d",
+};
+
+/** Pre-parsed `{ type: "relative", period: "24h" }` for commands with 24-hour default. */
+export const TIME_RANGE_24H: RelativeTimeRange = {
+  type: "relative",
+  period: "24h",
+};
+
+/** Pre-parsed `{ type: "relative", period: "30d" }` for commands with 30-day default. */
+export const TIME_RANGE_30D: RelativeTimeRange = {
+  type: "relative",
+  period: "30d",
+};
+
+// ---------------------------------------------------------------------------
+// Flag value formatting
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a TimeRange as a CLI-friendly `--period` flag value.
+ *
+ * Used in pagination hint builders and error messages where the original
+ * string representation is needed. Unlike {@link serializeTimeRange} (which
+ * produces `rel:7d` / `abs:...` for context keys), this returns the
+ * human-readable form that the user would type.
+ *
+ * - Relative: `"7d"`, `"24h"`
+ * - Absolute both bounds: `"2024-01-01..2024-02-01"`
+ * - Absolute open-ended: `">=2024-01-01"`, `"<=2024-02-01"`
+ */
+export function formatTimeRangeFlag(range: TimeRange): string {
+  if (range.type === "relative") {
+    return range.period;
+  }
+  if (range.start && range.end) {
+    return `${range.start}..${range.end}`;
+  }
+  if (range.start) {
+    return `>=${range.start}`;
+  }
+  if (range.end) {
+    return `<=${range.end}`;
+  }
+  return "";
+}
