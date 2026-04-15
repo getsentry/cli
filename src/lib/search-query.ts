@@ -204,6 +204,11 @@ function tryRewriteOr(nodes: SearchNode[]): SearchNode[] | null {
     }
   }
 
+  // All-OR input (e.g. "OR OR OR") produces an empty result — treat as unmergeable
+  if (result.length === 0) {
+    return null;
+  }
+
   return result;
 }
 
@@ -240,6 +245,68 @@ function collectOrChain(
 }
 
 // ---------------------------------------------------------------------------
+// Boolean operator scanning (recursive into paren groups)
+// ---------------------------------------------------------------------------
+
+/**
+ * Recursively scan AST nodes for boolean operators, including inside
+ * paren groups. Returns whether OR and/or AND were found anywhere.
+ */
+function scanBooleanOps(nodes: SearchNode[]): {
+  hasOr: boolean;
+  hasAnd: boolean;
+} {
+  let hasOr = false;
+  let hasAnd = false;
+
+  for (const node of nodes) {
+    if (node.type === "boolean_op") {
+      if (node.op === "OR") {
+        hasOr = true;
+      } else {
+        hasAnd = true;
+      }
+    } else if (node.type === "paren_group") {
+      const inner = scanBooleanOps(node.inner);
+      hasOr = hasOr || inner.hasOr;
+      hasAnd = hasAnd || inner.hasAnd;
+    }
+  }
+
+  return { hasOr, hasAnd };
+}
+
+/**
+ * Non-recursive scan — only checks top-level nodes, not paren group contents.
+ * Used to distinguish "OR at top level" from "OR only inside paren groups".
+ */
+function scanBooleanOpsFlat(nodes: SearchNode[]): {
+  hasOr: boolean;
+  hasAnd: boolean;
+} {
+  let hasOr = false;
+  let hasAnd = false;
+  for (const node of nodes) {
+    if (node.type === "boolean_op") {
+      if (node.op === "OR") {
+        hasOr = true;
+      } else {
+        hasAnd = true;
+      }
+    }
+  }
+  return { hasOr, hasAnd };
+}
+
+/**
+ * Remove AND boolean_op nodes from a flat node list.
+ * Does NOT recurse into paren groups — those are opaque.
+ */
+function stripAndNodes(nodes: SearchNode[]): SearchNode[] {
+  return nodes.filter((n) => !(n.type === "boolean_op" && n.op === "AND"));
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -271,34 +338,42 @@ export function sanitizeQuery(query: string | undefined): string | undefined {
     return query;
   }
 
-  const nodes = parse(query);
-
-  let hasOr = false;
-  let hasAnd = false;
-
-  for (const node of nodes) {
-    if (node.type === "boolean_op") {
-      if (node.op === "OR") {
-        hasOr = true;
-      } else {
-        hasAnd = true;
-      }
-    }
+  let nodes: SearchNode[];
+  try {
+    nodes = parse(query);
+  } catch {
+    // Malformed query (unmatched parens, etc.) — pass through to the API
+    // which will return a proper 400 with details. Don't crash with a raw
+    // SyntaxError from the PEG parser.
+    return query;
   }
 
-  if (hasOr) {
+  const topLevel = scanBooleanOpsFlat(nodes);
+  const deep = scanBooleanOps(nodes);
+
+  // OR found only inside paren groups — can't rewrite, must throw
+  if (deep.hasOr && !topLevel.hasOr) {
+    throw new ValidationError(
+      "Could not rewrite OR inside parenthesized group.\n\n" +
+        "Sentry search does not support boolean operators. " +
+        "Remove the parentheses and use in-list syntax instead:\n" +
+        "  (level:error OR level:warning)  →  level:[error,warning]\n\n" +
+        "Search syntax: https://docs.sentry.io/concepts/search/",
+      "query"
+    );
+  }
+
+  if (deep.hasOr) {
     // Strip AND nodes before OR rewrite
-    const withoutAnd = hasAnd
-      ? nodes.filter((n) => !(n.type === "boolean_op" && n.op === "AND"))
-      : nodes;
-    return handleOr(withoutAnd, hasAnd);
+    const withoutAnd = deep.hasAnd ? stripAndNodes(nodes) : nodes;
+    return handleOr(withoutAnd, deep.hasAnd);
   }
+
+  // AND anywhere (including inside paren groups)
+  const hasAnd = deep.hasAnd;
 
   if (hasAnd) {
-    const withoutAnd = nodes.filter(
-      (n) => !(n.type === "boolean_op" && n.op === "AND")
-    );
-    const sanitized = serializeNodes(withoutAnd);
+    const sanitized = serializeNodes(stripAndNodes(nodes));
     log.warn(
       "Sentry search implicitly ANDs terms — removed explicit AND operator. " +
         `Running query: "${sanitized}"`

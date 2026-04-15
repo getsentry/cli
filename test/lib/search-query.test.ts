@@ -278,15 +278,37 @@ describe("sanitizeQuery: OR → throws", () => {
 // ---------------------------------------------------------------------------
 
 describe("sanitizeQuery: paren groups", () => {
-  test("passes through paren groups unchanged", () => {
-    expect(sanitizeQuery("(level:error OR level:warning)")).toBe(
-      "(level:error OR level:warning)"
+  test("throws for OR inside paren groups", () => {
+    expect(() => sanitizeQuery("(level:error OR level:warning)")).toThrow(
+      ValidationError
     );
   });
 
-  test("passes through paren groups with surrounding filters", () => {
-    expect(sanitizeQuery("(level:error OR level:warning) assigned:me")).toBe(
-      "(level:error OR level:warning) assigned:me"
+  test("throws for OR inside paren groups with surrounding filters", () => {
+    expect(() =>
+      sanitizeQuery("(level:error OR level:warning) assigned:me")
+    ).toThrow(ValidationError);
+  });
+
+  test("passes through paren groups without boolean operators", () => {
+    expect(sanitizeQuery("(level:error) assigned:me")).toBe(
+      "(level:error) assigned:me"
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Edge cases
+// ---------------------------------------------------------------------------
+
+describe("sanitizeQuery: edge cases", () => {
+  test("throws for all-OR input", () => {
+    expect(() => sanitizeQuery("OR OR OR")).toThrow(ValidationError);
+  });
+
+  test("passes through malformed queries (unmatched parens)", () => {
+    // Unmatched parens cause PEG parse failure — pass through to API
+    expect(sanitizeQuery("(level:error")).toBe("(level:error");
+    expect(sanitizeQuery("level:error)")).toBe("level:error)");
   });
 });
