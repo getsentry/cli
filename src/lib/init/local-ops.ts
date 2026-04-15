@@ -31,7 +31,6 @@ import type {
   ApplyPatchsetPatch,
   ApplyPatchsetPayload,
   CreateSentryProjectPayload,
-  DetectSentryPayload,
   DirEntry,
   FileExistsBatchPayload,
   GlobPayload,
@@ -440,7 +439,7 @@ export async function handleLocalOp(
       case "create-sentry-project":
         return await createSentryProject(payload, options);
       case "detect-sentry":
-        return await detectSentry(payload);
+        return await precomputeSentryDetection(payload.cwd);
       default:
         return {
           ok: false,
@@ -990,11 +989,16 @@ export async function detectExistingProject(cwd: string): Promise<{
   return null;
 }
 
-async function detectSentry(
-  payload: DetectSentryPayload
+/**
+ * Detect existing Sentry setup in a directory. Exported so wizard-runner
+ * can pre-compute this alongside dirListing before the workflow starts,
+ * eliminating a suspend/resume roundtrip.
+ */
+export async function precomputeSentryDetection(
+  cwd: string
 ): Promise<LocalOpResult> {
   const { detectDsn } = await import("../dsn/index.js");
-  const dsn = await detectDsn(payload.cwd);
+  const dsn = await detectDsn(cwd);
 
   if (!dsn) {
     return { ok: true, data: { status: "none", signals: [] } };
