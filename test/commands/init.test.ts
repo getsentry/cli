@@ -349,9 +349,11 @@ describe("init command func", () => {
       );
     });
 
-    test("invalid org slug (whitespace) throws", async () => {
+    test("org slug with whitespace is normalized (not rejected)", async () => {
+      // Spaces in slugs are normalized to dashes (like underscore normalization)
       const ctx = makeContext();
-      expect(func.call(ctx, DEFAULT_FLAGS, "acme corp/")).rejects.toThrow();
+      await func.call(ctx, DEFAULT_FLAGS, "acme corp/");
+      expect(capturedArgs?.org).toBe("acme-corp");
     });
   });
 
