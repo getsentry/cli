@@ -78,7 +78,10 @@ import {
   resolveAllTargets,
   toNumericId,
 } from "../../lib/resolve-target.js";
-import { sanitizeQuery } from "../../lib/search-query.js";
+import {
+  SEARCH_SYNTAX_REFERENCE,
+  sanitizeQuery,
+} from "../../lib/search-query.js";
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import {
@@ -1504,55 +1507,7 @@ function formatIssueListHuman(result: IssueListResult): string {
   return parts.join("");
 }
 
-/**
- * Compact search syntax reference embedded in JSON output.
- *
- * Gives agents and power users a machine-readable summary of Sentry's issue
- * search syntax without needing to consult external docs. Derived from the
- * PEG grammar at:
- *   https://github.com/getsentry/sentry/blob/master/static/app/components/searchSyntax/grammar.pegjs
- */
-const SEARCH_SYNTAX_REFERENCE = {
-  _type: "sentry_search_syntax",
-  docs: "https://docs.sentry.io/concepts/search/",
-  grammar:
-    "https://github.com/getsentry/sentry/blob/master/static/app/components/searchSyntax/grammar.pegjs",
-  behavior: "Terms are space-separated and implicitly ANDed.",
-  operators: {
-    and: "NOT supported — implicit (space-separated terms are all required)",
-    or: "Auto-rewritten to in-list syntax (key:[val1,val2]) when all OR terms share the same qualifier key; otherwise rejected",
-    not: "!key:value (prefix with !)",
-    comparison: [">=", "<=", ">", "<", "=", "!="],
-    wildcard: "* in values (e.g., message:*timeout*)",
-    inList: "key:[val1,val2] — matches any value in the list",
-  },
-  filterTypes: [
-    "text (key:value)",
-    "text_in (key:[val1,val2])",
-    "numeric (key:>100, key:<=50)",
-    "boolean (key:true, key:false)",
-    "date (key:>2024-01-01)",
-    "relative_date (key:-24h, key:+7d)",
-    "duration (key:>1s, key:<500ms)",
-    "has (has:key — not null check)",
-    "is (is:unresolved, is:resolved, is:ignored)",
-  ],
-  commonFilters: [
-    "is:unresolved",
-    "is:resolved",
-    "is:ignored",
-    "assigned:me",
-    "assigned:[me,none]",
-    "has:user",
-    "level:error",
-    "level:warning",
-    "!browser:Chrome",
-    "firstSeen:-24h",
-    "lastSeen:-1h",
-    "age:-7d",
-    "times_seen:>100",
-  ],
-};
+// Search syntax reference lives in src/lib/search-query.ts
 
 /**
  * JSON transform for issue list that conditionally injects search syntax.
