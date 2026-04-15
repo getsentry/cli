@@ -31,7 +31,6 @@ import type {
   ApplyPatchsetPatch,
   ApplyPatchsetPayload,
   CreateSentryProjectPayload,
-  DetectSentryPayload,
   DirEntry,
   FileExistsBatchPayload,
   GlobPayload,
@@ -440,7 +439,7 @@ export async function handleLocalOp(
       case "create-sentry-project":
         return await createSentryProject(payload, options);
       case "detect-sentry":
-        return await detectSentry(payload);
+        return await precomputeSentryDetection(payload.cwd);
       default:
         return {
           ok: false,
@@ -988,10 +987,6 @@ export async function detectExistingProject(cwd: string): Promise<{
     // Auth error or network error — org inaccessible, fall through to creation
   }
   return null;
-}
-
-function detectSentry(payload: DetectSentryPayload): Promise<LocalOpResult> {
-  return precomputeSentryDetection(payload.cwd);
 }
 
 /**
