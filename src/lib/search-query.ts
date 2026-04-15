@@ -103,7 +103,11 @@ function isMergeableFilter(
     if (node.negated) {
       return false;
     }
-    return !INVALID_INLIST_KEYS.has(node.key.toLowerCase());
+    if (INVALID_INLIST_KEYS.has(node.key.toLowerCase())) {
+      return false;
+    }
+    // No wildcards in any existing in-list values
+    return !node.values.some((v) => v.includes("*"));
   }
   return false;
 }
@@ -249,14 +253,17 @@ function collectOrChain(
 // ---------------------------------------------------------------------------
 
 /**
- * Recursively scan AST nodes for boolean operators, including inside
- * paren groups. Returns whether OR and/or AND were found anywhere.
+ * Recursively scan AST nodes for OR operators, including inside paren
+ * groups. AND detection is top-level only (via {@link scanBooleanOpsFlat})
+ * because AND inside paren groups can't be stripped from the opaque `raw`
+ * text and should pass through to the API as-is.
  */
 function scanBooleanOps(nodes: SearchNode[]): {
   hasOr: boolean;
   hasAnd: boolean;
 } {
   let hasOr = false;
+  // AND is only detected at top level — paren group internals are opaque
   let hasAnd = false;
 
   for (const node of nodes) {
@@ -266,14 +273,25 @@ function scanBooleanOps(nodes: SearchNode[]): {
       } else {
         hasAnd = true;
       }
-    } else if (node.type === "paren_group") {
-      const inner = scanBooleanOps(node.inner);
-      hasOr = hasOr || inner.hasOr;
-      hasAnd = hasAnd || inner.hasAnd;
+    } else if (node.type === "paren_group" && hasOrInNodes(node.inner)) {
+      hasOr = true;
     }
   }
 
   return { hasOr, hasAnd };
+}
+
+/** Check whether any node (recursively) contains an OR operator. */
+function hasOrInNodes(nodes: SearchNode[]): boolean {
+  for (const node of nodes) {
+    if (node.type === "boolean_op" && node.op === "OR") {
+      return true;
+    }
+    if (node.type === "paren_group" && hasOrInNodes(node.inner)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**

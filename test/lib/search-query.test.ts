@@ -311,4 +311,15 @@ describe("sanitizeQuery: edge cases", () => {
     expect(sanitizeQuery("(level:error")).toBe("(level:error");
     expect(sanitizeQuery("level:error)")).toBe("level:error)");
   });
+
+  test("passes through AND inside paren groups unchanged", () => {
+    // AND inside parens can't be stripped from opaque raw text — pass through
+    expect(sanitizeQuery("(error AND timeout)")).toBe("(error AND timeout)");
+  });
+
+  test("rejects wildcard values in existing in-list during merge", () => {
+    expect(() => sanitizeQuery("key:[*err*] OR key:val")).toThrow(
+      ValidationError
+    );
+  });
 });
