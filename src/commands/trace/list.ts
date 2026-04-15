@@ -28,6 +28,7 @@ import {
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
+import { sanitizeQuery } from "../../lib/search-query.js";
 import {
   parsePeriod,
   serializeTimeRange,
@@ -235,7 +236,7 @@ export const listCommand = buildListCommand("trace", {
       },
       query: {
         kind: "parsed",
-        parse: String,
+        parse: sanitizeQuery,
         brief: "Search query (Sentry search syntax)",
         optional: true,
       },
@@ -257,6 +258,7 @@ export const listCommand = buildListCommand("trace", {
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
     const { cwd } = this;
     const timeRange = parsePeriod(flags.period);
+    const { query } = flags;
 
     // Resolve org/project from positional arg, config, or DSN auto-detection
     const { org, project } = await resolveOrgProjectFromArg(
@@ -267,7 +269,7 @@ export const listCommand = buildListCommand("trace", {
     // Build context key and resolve cursor for pagination
     const contextKey = buildPaginationContextKey("trace", `${org}/${project}`, {
       sort: flags.sort,
-      q: flags.query,
+      q: query,
       period: serializeTimeRange(timeRange),
     });
     const { cursor, direction } = resolveCursor(
@@ -283,7 +285,7 @@ export const listCommand = buildListCommand("trace", {
       },
       () =>
         listTransactions(org, project, {
-          query: flags.query,
+          query,
           limit: flags.limit,
           sort: flags.sort,
           cursor,

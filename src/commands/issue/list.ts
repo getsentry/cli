@@ -78,6 +78,10 @@ import {
   resolveAllTargets,
   toNumericId,
 } from "../../lib/resolve-target.js";
+import {
+  SEARCH_SYNTAX_REFERENCE,
+  sanitizeQuery,
+} from "../../lib/search-query.js";
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import {
@@ -205,101 +209,7 @@ function parseSort(value: string): SortValue {
   return value as SortValue;
 }
 
-/**
- * Tokenize a Sentry search query respecting quoted strings.
- *
- * This regex is functionally equivalent to `split_query_into_tokens()` in
- * the Sentry backend (`src/sentry/search/utils.py`) for the purpose of
- * detecting standalone boolean operators. It splits on whitespace while
- * keeping `key:"quoted value with spaces"` as a single token.
- *
- * Minor differences from the backend tokenizer (acceptable for our use case):
- * - Does not handle single-quoted strings (`'value'`) — rare in CLI context
- * - Does not join `key: value` (colon-space) into one token — irrelevant
- *   since AND/OR are never qualifier values with a preceding colon
- * - Does not handle escaped quotes (`\"`) inside strings — edge case
- *
- * The full Sentry search grammar is a PEG grammar (Peggy on frontend,
- * Parsimonious on backend). The canonical grammar lives at:
- *   https://github.com/getsentry/sentry/blob/master/static/app/components/searchSyntax/grammar.pegjs
- *
- * The backend's simpler tokenizer that issue search actually uses:
- *   https://github.com/getsentry/sentry/blob/master/src/sentry/search/utils.py
- *   (see `split_query_into_tokens` and `tokenize_query`)
- *
- * Future work: if we need full query validation beyond AND/OR detection,
- * consider porting the PEG grammar via Peggy (JS PEG parser generator) or
- * a pre-compiled route. The grammar is ~200 lines and self-contained.
- */
-const QUERY_TOKEN_RE = /(?:[^\s"]*"[^"]*"[^\s"]*)|[^\s]+/g;
-
-/**
- * Sanitize `--query` before sending to the Sentry API.
- *
- * Tokenizes the query respecting quoted strings, then checks for standalone
- * `OR` / `AND` tokens (case-insensitive, matching the PEG grammar's
- * `or_operator = "OR"i` / `and_operator = "AND"i` rules).
- *
- * Tokens inside quoted values (`message:"error OR timeout"`) or qualifier
- * values (`tag:OR`) are never standalone and are not matched.
- *
- * - **AND**: Sentry search implicitly ANDs space-separated terms, so explicit
- *   `AND` has identical semantics. Strip it and warn — the user's intent is
- *   fulfilled without error.
- * - **OR**: Genuinely different semantics (union vs intersection). The API
- *   rejects it with 400. Throw a helpful ValidationError since we cannot
- *   silently approximate the intent.
- *
- * The backend's `tokenize_query()` also skips AND/OR:
- *   `if token.upper() in ["OR", "AND"]: continue`
- *
- * @returns The sanitized query string (AND stripped, OR rejected)
- */
-function sanitizeQuery(
-  query: string,
-  log: { warn: (msg: string) => void }
-): string {
-  const tokens = query.match(QUERY_TOKEN_RE) ?? [];
-
-  let hasOr = false;
-  let hasAnd = false;
-  const cleaned: string[] = [];
-
-  for (const token of tokens) {
-    const upper = token.toUpperCase();
-    if (upper === "OR") {
-      hasOr = true;
-    } else if (upper === "AND") {
-      hasAnd = true;
-    } else {
-      cleaned.push(token);
-    }
-  }
-
-  if (hasOr) {
-    throw new ValidationError(
-      "Sentry search does not support the OR operator.\n\n" +
-        "Alternatives:\n" +
-        '  - Use space-separated terms (implicit AND): --query "error timeout"\n' +
-        '  - Use in-list syntax for a single key: --query "key:[val1,val2]"\n' +
-        "  - Run separate queries for each term\n" +
-        '  - Use wildcards for partial matching: --query "*error*"\n\n' +
-        "Search syntax: https://docs.sentry.io/concepts/search/",
-      "query"
-    );
-  }
-
-  if (hasAnd) {
-    const sanitized = cleaned.join(" ");
-    log.warn(
-      "Sentry search implicitly ANDs terms — removed explicit AND operator. " +
-        `Running query: "${sanitized}"`
-    );
-    return sanitized;
-  }
-
-  return query;
-}
+// Query sanitization (AND/OR handling) is in src/lib/search-query.ts
 
 /**
  * Format the issue list header with column titles.
@@ -1536,7 +1446,6 @@ export const __testing = {
   getComparator,
   compareDates,
   parseSort,
-  sanitizeQuery,
   CURSOR_SEP,
   MAX_LIMIT: LIST_MAX_LIMIT,
   VALID_SORT_VALUES,
@@ -1598,55 +1507,7 @@ function formatIssueListHuman(result: IssueListResult): string {
   return parts.join("");
 }
 
-/**
- * Compact search syntax reference embedded in JSON output.
- *
- * Gives agents and power users a machine-readable summary of Sentry's issue
- * search syntax without needing to consult external docs. Derived from the
- * PEG grammar at:
- *   https://github.com/getsentry/sentry/blob/master/static/app/components/searchSyntax/grammar.pegjs
- */
-const SEARCH_SYNTAX_REFERENCE = {
-  _type: "sentry_search_syntax",
-  docs: "https://docs.sentry.io/concepts/search/",
-  grammar:
-    "https://github.com/getsentry/sentry/blob/master/static/app/components/searchSyntax/grammar.pegjs",
-  behavior: "Terms are space-separated and implicitly ANDed.",
-  operators: {
-    and: "NOT supported — implicit (space-separated terms are all required)",
-    or: "NOT supported — use key:[val1,val2] in-list syntax instead",
-    not: "!key:value (prefix with !)",
-    comparison: [">=", "<=", ">", "<", "=", "!="],
-    wildcard: "* in values (e.g., message:*timeout*)",
-    inList: "key:[val1,val2] — matches any value in the list",
-  },
-  filterTypes: [
-    "text (key:value)",
-    "text_in (key:[val1,val2])",
-    "numeric (key:>100, key:<=50)",
-    "boolean (key:true, key:false)",
-    "date (key:>2024-01-01)",
-    "relative_date (key:-24h, key:+7d)",
-    "duration (key:>1s, key:<500ms)",
-    "has (has:key — not null check)",
-    "is (is:unresolved, is:resolved, is:ignored)",
-  ],
-  commonFilters: [
-    "is:unresolved",
-    "is:resolved",
-    "is:ignored",
-    "assigned:me",
-    "assigned:[me,none]",
-    "has:user",
-    "level:error",
-    "level:warning",
-    "!browser:Chrome",
-    "firstSeen:-24h",
-    "lastSeen:-1h",
-    "age:-7d",
-    "times_seen:>100",
-  ],
-};
+// Search syntax reference lives in src/lib/search-query.ts
 
 /**
  * JSON transform for issue list that conditionally injects search syntax.
@@ -1724,7 +1585,7 @@ export const listCommand = buildListCommand("issue", {
     flags: {
       query: {
         kind: "parsed",
-        parse: String,
+        parse: sanitizeQuery,
         brief: "Search query (Sentry syntax, implicit AND, no OR operator)",
         optional: true,
       },
@@ -1818,25 +1679,20 @@ export const listCommand = buildListCommand("issue", {
       );
     }
 
-    // Sanitize --query: auto-correct AND (same semantics), reject OR (different semantics).
-    const effectiveFlags: ListFlags = flags.query
-      ? { ...flags, query: sanitizeQuery(flags.query, log) }
-      : flags;
-
-    const timeRange = parsePeriod(effectiveFlags.period ?? DEFAULT_PERIOD);
+    const timeRange = parsePeriod(flags.period ?? DEFAULT_PERIOD);
 
     // biome-ignore lint/suspicious/noExplicitAny: shared handler accepts any mode variant
     const resolveAndHandle: ModeHandler<any> = (ctx) =>
       handleResolvedTargets({
         ...ctx,
-        flags: effectiveFlags,
+        flags,
         timeRange,
       });
 
     const result = (await dispatchOrgScopedList({
       config: issueListMeta,
       cwd,
-      flags: effectiveFlags,
+      flags,
       parsed,
       // When a bare slug matches a cached org, silently redirect to org-all
       // mode instead of erroring (CLI-MC, 17 users). The user typed an org
@@ -1852,7 +1708,7 @@ export const listCommand = buildListCommand("issue", {
         "org-all": (ctx) =>
           handleOrgAllIssues({
             org: ctx.parsed.org,
-            flags: effectiveFlags,
+            flags,
             timeRange,
           }),
       },

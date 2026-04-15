@@ -48,6 +48,7 @@ import {
 import { logger } from "../../lib/logger.js";
 import { withProgress } from "../../lib/polling.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
+import { sanitizeQuery } from "../../lib/search-query.js";
 import {
   PERIOD_BRIEF,
   parsePeriod,
@@ -671,7 +672,7 @@ export const listCommand = buildListCommand(
         },
         query: {
           kind: "parsed",
-          parse: String,
+          parse: sanitizeQuery,
           brief:
             'Filter query (e.g., "level:error", "project:backend", "project:[a,b]")',
           optional: true,

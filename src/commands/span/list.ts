@@ -40,6 +40,7 @@ import {
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
+import { sanitizeQuery } from "../../lib/search-query.js";
 import {
   parsePeriod,
   serializeTimeRange,
@@ -574,7 +575,7 @@ export const listCommand = buildListCommand("span", {
       },
       query: {
         kind: "parsed",
-        parse: String,
+        parse: sanitizeQuery,
         brief:
           'Filter spans (e.g., "op:db", "project:backend", "project:[cli,api]")',
         optional: true,
@@ -599,7 +600,12 @@ export const listCommand = buildListCommand("span", {
     const timeRange = parsePeriod(flags.period);
     const parsed = parseSpanListArgs(args);
     const extraApiFields = extractExtraApiFields(flags.fields);
-    const modeCtx: ModeContext = { cwd, flags, timeRange, extraApiFields };
+    const modeCtx: ModeContext = {
+      cwd,
+      flags,
+      timeRange,
+      extraApiFields,
+    };
 
     const { output, hint } =
       parsed.mode === "trace"

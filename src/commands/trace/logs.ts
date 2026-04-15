@@ -23,6 +23,7 @@ import {
   LIST_MAX_LIMIT,
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
+import { sanitizeQuery } from "../../lib/search-query.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
 import {
   PERIOD_BRIEF,
@@ -151,7 +152,7 @@ export const logsCommand = buildCommand({
       },
       query: {
         kind: "parsed",
-        parse: String,
+        parse: sanitizeQuery,
         brief:
           'Filter query (e.g., "level:error", "project:backend", "project:[a,b]")',
         optional: true,
