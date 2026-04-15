@@ -265,4 +265,28 @@ describe("sanitizeQuery: OR → throws", () => {
       )
     ).toThrow(ValidationError);
   });
+
+  test("throws for parenthesized groups across OR boundary", () => {
+    expect(() =>
+      sanitizeQuery("(level:error assigned:me) OR (level:warning assigned:bob)")
+    ).toThrow(ValidationError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Paren group handling
+// ---------------------------------------------------------------------------
+
+describe("sanitizeQuery: paren groups", () => {
+  test("passes through paren groups unchanged", () => {
+    expect(sanitizeQuery("(level:error OR level:warning)")).toBe(
+      "(level:error OR level:warning)"
+    );
+  });
+
+  test("passes through paren groups with surrounding filters", () => {
+    expect(sanitizeQuery("(level:error OR level:warning) assigned:me")).toBe(
+      "(level:error OR level:warning) assigned:me"
+    );
+  });
 });

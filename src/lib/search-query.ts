@@ -11,58 +11,21 @@
  *   when all OR operands share the same qualifier key. Throws a
  *   {@link ValidationError} when the rewrite is not possible.
  *
- * The canonical Sentry search grammar lives at:
- *   https://github.com/getsentry/sentry/blob/master/static/app/components/searchSyntax/grammar.pegjs
+ * Parsing uses a pre-compiled PEG parser generated from
+ * `src/lib/search-query.pegjs` (a simplified version of Sentry's
+ * canonical grammar). The parser classifies every term structurally —
+ * comparison operators, in-list values, paren groups, etc. — so the
+ * rewriting logic doesn't need regex-based reject-lists.
  *
- * The backend's simpler tokenizer that issue search actually uses:
- *   https://github.com/getsentry/sentry/blob/master/src/sentry/search/utils.py
- *   (see `split_query_into_tokens` and `tokenize_query`)
+ * @see {@link https://github.com/getsentry/sentry/blob/master/static/app/components/searchSyntax/grammar.pegjs | Canonical Sentry PEG grammar}
  */
 
+import type { SearchNode } from "../generated/search-parser.js";
+import { parse } from "../generated/search-parser.js";
 import { ValidationError } from "./errors.js";
 import { logger } from "./logger.js";
 
 const log = logger.withTag("search-query");
-
-// ---------------------------------------------------------------------------
-// Tokenizer
-// ---------------------------------------------------------------------------
-
-/**
- * Tokenize a Sentry search query respecting quoted strings.
- *
- * This regex is functionally equivalent to `split_query_into_tokens()` in
- * the Sentry backend (`src/sentry/search/utils.py`) for the purpose of
- * detecting standalone boolean operators. It splits on whitespace while
- * keeping `key:"quoted value with spaces"` as a single token.
- *
- * Minor differences from the backend tokenizer (acceptable for our use case):
- * - Does not handle single-quoted strings (`'value'`) — rare in CLI context
- * - Does not join `key: value` (colon-space) into one token — irrelevant
- *   since AND/OR are never qualifier values with a preceding colon
- * - Does not handle escaped quotes (`\"`) inside strings — edge case
- */
-export const QUERY_TOKEN_RE = /(?:[^\s"]*"[^"]*"[^\s"]*)|[^\s]+/g;
-
-// ---------------------------------------------------------------------------
-// Qualifier parsing
-// ---------------------------------------------------------------------------
-
-/**
- * Matches a Sentry search qualifier token: `key:value` or `!key:value`.
- *
- * Captures:
- * - Group 1: `!` prefix (negation, may be empty)
- * - Group 2: key name (alphanumeric, dots, brackets, dashes)
- * - Group 3: value (everything after the first colon)
- */
-const QUALIFIER_RE = /^(!?)([a-zA-Z0-9_.[\]-]+):(.+)$/;
-
-/**
- * Detects an existing in-list value: `[val1,val2,...]`.
- * Captures the raw comma-separated content inside the brackets.
- */
-const IN_LIST_VALUE_RE = /^\[(.+)\]$/;
 
 /**
  * Keys that do not support in-list syntax in Sentry search.
@@ -72,89 +35,43 @@ const IN_LIST_VALUE_RE = /^\[(.+)\]$/;
  */
 const INVALID_INLIST_KEYS = new Set(["is", "has"]);
 
-/**
- * Matches values that use comparison operators (numeric, date, duration).
- *
- * These are parsed by the PEG grammar as `numeric_filter`, `date_filter`,
- * or `duration_filter` — NOT `text_filter` — and cannot appear inside
- * in-list brackets. Examples: `>100`, `<=50`, `>=2024-01-01`, `>1s`.
- */
-const COMPARISON_VALUE_RE = /^[><=!]/;
-
-/** Parsed qualifier token. */
-type ParsedQualifier = {
-  negated: boolean;
-  key: string;
-  value: string;
-};
-
-/**
- * Parse a token as a Sentry search qualifier (`key:value`).
- *
- * @returns The parsed qualifier, or `null` for free-text tokens.
- */
-function parseQualifier(token: string): ParsedQualifier | null {
-  const match = token.match(QUALIFIER_RE);
-  if (!match) {
-    return null;
-  }
-  return {
-    negated: !!match[1],
-    key: match[2] as string,
-    value: match[3] as string,
-  };
-}
-
 // ---------------------------------------------------------------------------
-// In-list value handling
+// AST → string serialization
 // ---------------------------------------------------------------------------
 
-/**
- * Split an in-list value string into individual values, respecting quotes.
- *
- * Handles `["a,b",c]` correctly by not splitting on commas inside `"..."`.
- * The input should be the raw content inside the brackets (without `[` / `]`).
- *
- * @example
- * ```ts
- * splitInListValues('"foo bar",baz,"a,b"')
- * // → ['"foo bar"', 'baz', '"a,b"']
- * ```
- */
-function splitInListValues(raw: string): string[] {
-  const values: string[] = [];
-  let current = "";
-  let inQuote = false;
-  for (const ch of raw) {
-    if (ch === '"') {
-      inQuote = !inQuote;
-      current += ch;
-    } else if (ch === "," && !inQuote) {
-      values.push(current);
-      current = "";
-    } else {
-      current += ch;
+/** Serialize a single AST node back to query string form. */
+function serializeNode(node: SearchNode): string {
+  switch (node.type) {
+    case "boolean_op": {
+      return node.op;
+    }
+    case "free_text": {
+      return node.value;
+    }
+    case "paren_group": {
+      return node.raw;
+    }
+    case "text_filter": {
+      const prefix = node.negated ? "!" : "";
+      return `${prefix}${node.key}:${node.value}`;
+    }
+    case "text_in_filter": {
+      const prefix = node.negated ? "!" : "";
+      return `${prefix}${node.key}:[${node.values.join(",")}]`;
+    }
+    case "comparison_filter": {
+      const prefix = node.negated ? "!" : "";
+      return `${prefix}${node.key}:${node.op}${node.value}`;
+    }
+    default: {
+      return "";
     }
   }
-  if (current) {
-    values.push(current);
-  }
-  return values;
 }
 
-/**
- * Extract individual values from a qualifier value, flattening in-list brackets.
- *
- * - `"plain"` → `["plain"]`
- * - `"[a,b,c]"` → `["a", "b", "c"]`
- * - `'["foo bar",baz]'` → `['"foo bar"', 'baz']`
- */
-function extractValues(value: string): string[] {
-  const listMatch = value.match(IN_LIST_VALUE_RE);
-  if (listMatch?.[1]) {
-    return splitInListValues(listMatch[1]);
-  }
-  return [value];
+/** Serialize a list of AST nodes back to a query string. */
+function serializeNodes(nodes: SearchNode[]): string {
+  return nodes.map(serializeNode).join(" ");
 }
 
 // ---------------------------------------------------------------------------
@@ -162,163 +79,119 @@ function extractValues(value: string): string[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Try to merge a group of qualifier tokens into in-list syntax.
+ * Check whether an AST node can participate in an in-list merge.
  *
- * All tokens must be qualifiers with the same key (case-insensitive),
- * the key must support in-list syntax, and no token may be negated or
- * contain wildcards.
- *
- * @returns The merged token (e.g. `key:[a,b,c]`), or `null` if merging
- *   is not possible.
+ * Only `text_filter` and `text_in_filter` nodes with valid keys (not
+ * `is:`/`has:`), no negation, and no wildcards are eligible.
+ * Comparison filters, free text, paren groups, and boolean ops cannot.
  */
-function tryMergeQualifiers(group: string[]): string | null {
-  const parsed: ParsedQualifier[] = [];
-  for (const token of group) {
-    const q = parseQualifier(token);
-    if (!q) {
-      return null;
+function isMergeableFilter(
+  node: SearchNode
+): node is
+  | (SearchNode & { type: "text_filter" })
+  | (SearchNode & { type: "text_in_filter" }) {
+  if (node.type === "text_filter") {
+    if (node.negated) {
+      return false;
     }
-    parsed.push(q);
+    if (INVALID_INLIST_KEYS.has(node.key.toLowerCase())) {
+      return false;
+    }
+    return !node.value.includes("*");
   }
+  if (node.type === "text_in_filter") {
+    if (node.negated) {
+      return false;
+    }
+    return !INVALID_INLIST_KEYS.has(node.key.toLowerCase());
+  }
+  return false;
+}
 
-  const first = parsed[0];
-  if (!first) {
-    return null;
+/** Extract all values from a mergeable filter node. */
+function valuesFromNode(
+  node: SearchNode & { type: "text_filter" | "text_in_filter" }
+): string[] {
+  if (node.type === "text_in_filter") {
+    return node.values;
   }
-  if (!canMergeQualifiers(parsed)) {
-    return null;
-  }
-
-  // Collect and flatten all values (handles existing in-list brackets)
-  const allValues: string[] = [];
-  for (const q of parsed) {
-    allValues.push(...extractValues(q.value));
-  }
-
-  // Preserve the key casing from the first token
-  return `${first.key}:[${allValues.join(",")}]`;
+  return [node.value];
 }
 
 /**
- * Check whether a set of parsed qualifiers can be merged into in-list syntax.
- *
- * Rejects when keys differ, the key is invalid for in-list, any qualifier
- * is negated, or any value contains wildcards.
+ * Try to merge a group of AST nodes (OR-connected) into a single
+ * in-list filter node. Returns the merged node or `null`.
  */
-function canMergeQualifiers(parsed: ParsedQualifier[]): boolean {
-  const first = parsed[0];
+function tryMergeGroup(group: SearchNode[]): SearchNode | null {
+  // All must be mergeable filters
+  for (const node of group) {
+    if (!isMergeableFilter(node)) {
+      return null;
+    }
+  }
+
+  const filters = group as Array<
+    SearchNode & { type: "text_filter" | "text_in_filter" }
+  >;
+  const first = filters[0];
   if (!first) {
-    return false;
+    return null;
   }
 
   // All must have the same key (case-insensitive)
   const keyLower = first.key.toLowerCase();
-  for (const q of parsed) {
-    if (q.key.toLowerCase() !== keyLower) {
-      return false;
+  for (const f of filters) {
+    if (f.key.toLowerCase() !== keyLower) {
+      return null;
     }
   }
 
-  // Key must be valid for in-list
-  if (INVALID_INLIST_KEYS.has(keyLower)) {
-    return false;
+  // Collect and flatten all values
+  const allValues: string[] = [];
+  for (const f of filters) {
+    allValues.push(...valuesFromNode(f));
   }
 
-  // No negation allowed (negated in-list has different semantics)
-  if (parsed.some((q) => q.negated)) {
-    return false;
-  }
-
-  // No comparison operators in values (>, <, >=, <=, !=) — these are
-  // numeric/date/duration filters, not text filters, and can't go in brackets
-  if (parsed.some((q) => COMPARISON_VALUE_RE.test(q.value))) {
-    return false;
-  }
-
-  // No wildcards in values
-  if (parsed.some((q) => q.value.includes("*"))) {
-    return false;
-  }
-
-  return true;
-}
-
-/** Check whether a token is a standalone OR operator (case-insensitive). */
-function isOrToken(token: string): boolean {
-  return token.toUpperCase() === "OR";
+  return {
+    type: "text_in_filter",
+    negated: false,
+    key: first.key,
+    values: allValues,
+  };
 }
 
 /**
- * Collect a single OR-chain starting at index `start`.
- *
- * An OR-chain is a sequence of non-OR tokens connected by OR tokens:
- * `tok OR tok OR tok`. Returns the group of non-OR tokens and the
- * index past the end of the chain.
- *
- * @param tokens - Full token list
- * @param start - Index of the first non-OR token in the chain
- * @returns `[group, nextIndex]`
- */
-function collectOrChain(tokens: string[], start: number): [string[], number] {
-  // start is always a valid index (caller guarantees)
-  const group = [tokens[start] as string];
-  let j = start + 1;
-
-  while (j < tokens.length && isOrToken(tokens[j] as string)) {
-    j += 1; // skip the OR
-    // Skip consecutive ORs (e.g. "a OR OR b")
-    while (j < tokens.length && isOrToken(tokens[j] as string)) {
-      j += 1;
-    }
-    if (j < tokens.length) {
-      group.push(tokens[j] as string);
-      j += 1;
-    }
-  }
-
-  return [group, j];
-}
-
-/**
- * Attempt to rewrite all OR groups in the token list to in-list syntax.
- *
- * OR binds the immediately adjacent non-OR tokens into chains.
- * Each chain is passed to {@link tryMergeQualifiers}. If every chain
- * rewrites successfully, the result is returned; otherwise `null`.
- *
- * @param tokens - Token list with AND already stripped but OR preserved
- * @returns The fully rewritten query, or `null` if any OR group can't
- *   be rewritten.
+ * Walk the AST node list and attempt to rewrite all OR groups to
+ * in-list syntax. Returns the rewritten node list, or `null` if
+ * any OR group cannot be merged.
  */
 /**
- * Merge an OR group into a single token, or return `null` if not possible.
- * Single-element groups pass through unchanged.
+ * Merge an OR group into a single node. Single-element groups pass through.
+ * Returns `null` if the group cannot be merged.
  */
-function mergeOrGroup(group: string[]): string | null {
-  const first = group[0];
-  if (group.length === 1 && first) {
-    return first;
+function mergeOrGroup(group: SearchNode[]): SearchNode | null {
+  if (group.length === 1) {
+    return group[0] ?? null;
   }
-  return tryMergeQualifiers(group);
+  return tryMergeGroup(group);
 }
 
-function tryRewriteOr(tokens: string[]): string | null {
-  const result: string[] = [];
+function tryRewriteOr(nodes: SearchNode[]): SearchNode[] | null {
+  const result: SearchNode[] = [];
   let i = 0;
 
-  while (i < tokens.length) {
-    const current = tokens[i] as string;
+  while (i < nodes.length) {
+    const current = nodes[i] as SearchNode;
 
-    // Skip stray leading/consecutive OR tokens
-    if (isOrToken(current)) {
+    // Skip stray OR tokens
+    if (isOrNode(nodes, i)) {
       i += 1;
       continue;
     }
 
-    // Check if this token starts an OR chain
-    const next = tokens[i + 1];
-    if (next && isOrToken(next)) {
-      const [group, nextIndex] = collectOrChain(tokens, i);
+    // Check if next node is OR → collect and merge the chain
+    if (isOrNode(nodes, i + 1)) {
+      const [group, nextIndex] = collectOrChain(nodes, i);
       const merged = mergeOrGroup(group);
       if (!merged) {
         return null;
@@ -326,13 +199,44 @@ function tryRewriteOr(tokens: string[]): string | null {
       result.push(merged);
       i = nextIndex;
     } else {
-      // Regular token — pass through
       result.push(current);
       i += 1;
     }
   }
 
-  return result.join(" ");
+  return result;
+}
+
+/** Check whether the node at index `j` is an OR operator. */
+function isOrNode(nodes: SearchNode[], j: number): boolean {
+  const node = nodes[j];
+  return node?.type === "boolean_op" && node.op === "OR";
+}
+
+/**
+ * Collect an OR-chain starting at `start`. Returns the group of
+ * non-OR nodes and the index past the end of the chain.
+ */
+function collectOrChain(
+  nodes: SearchNode[],
+  start: number
+): [SearchNode[], number] {
+  const group = [nodes[start] as SearchNode];
+  let j = start + 1;
+
+  while (isOrNode(nodes, j)) {
+    j += 1; // skip OR
+    // Skip consecutive ORs
+    while (isOrNode(nodes, j)) {
+      j += 1;
+    }
+    if (j < nodes.length) {
+      group.push(nodes[j] as SearchNode);
+      j += 1;
+    }
+  }
+
+  return [group, j];
 }
 
 // ---------------------------------------------------------------------------
@@ -342,16 +246,15 @@ function tryRewriteOr(tokens: string[]): string | null {
 /**
  * Sanitize a `--query` value before sending to the Sentry API.
  *
- * Tokenizes the query respecting quoted strings, then handles boolean
- * operators:
+ * Parses the query using a PEG grammar, then handles boolean operators:
  *
  * - **AND**: Stripped (implicit in Sentry search). Warns via stderr.
  * - **OR**: Attempted rewrite to in-list syntax (`key:[val1,val2]`).
  *   Succeeds when all OR operands share the same valid qualifier key.
  *   Throws {@link ValidationError} when the rewrite is not possible.
  *
- * Tokens inside quoted values (`message:"error OR timeout"`) or qualifier
- * values (`tag:OR`) are never standalone and are not matched.
+ * Paren groups, quoted values, and comparison operators are handled
+ * correctly by the grammar — no regex-based reject-lists needed.
  *
  * Accepts `undefined` for convenience — commands can pass `flags.query`
  * directly without a conditional guard.
@@ -367,31 +270,35 @@ export function sanitizeQuery(query: string | undefined): string | undefined {
   if (!query) {
     return query;
   }
-  const tokens = query.match(QUERY_TOKEN_RE) ?? [];
+
+  const nodes = parse(query);
 
   let hasOr = false;
   let hasAnd = false;
-  const withOrPreserved: string[] = [];
 
-  for (const token of tokens) {
-    const upper = token.toUpperCase();
-    if (upper === "OR") {
-      hasOr = true;
-      withOrPreserved.push(token); // preserve for rewrite attempt
-    } else if (upper === "AND") {
-      hasAnd = true;
-      // strip AND (implicit in Sentry search)
-    } else {
-      withOrPreserved.push(token);
+  for (const node of nodes) {
+    if (node.type === "boolean_op") {
+      if (node.op === "OR") {
+        hasOr = true;
+      } else {
+        hasAnd = true;
+      }
     }
   }
 
   if (hasOr) {
-    return handleOr(withOrPreserved, hasAnd);
+    // Strip AND nodes before OR rewrite
+    const withoutAnd = hasAnd
+      ? nodes.filter((n) => !(n.type === "boolean_op" && n.op === "AND"))
+      : nodes;
+    return handleOr(withoutAnd, hasAnd);
   }
 
   if (hasAnd) {
-    const sanitized = withOrPreserved.join(" ");
+    const withoutAnd = nodes.filter(
+      (n) => !(n.type === "boolean_op" && n.op === "AND")
+    );
+    const sanitized = serializeNodes(withoutAnd);
     log.warn(
       "Sentry search implicitly ANDs terms — removed explicit AND operator. " +
         `Running query: "${sanitized}"`
@@ -406,17 +313,18 @@ export function sanitizeQuery(query: string | undefined): string | undefined {
  * Handle the OR rewrite path — extracted to keep `sanitizeQuery` under
  * the cognitive complexity limit.
  */
-function handleOr(tokens: string[], hasAnd: boolean): string {
-  const rewritten = tryRewriteOr(tokens);
-  if (rewritten !== null) {
+function handleOr(nodes: SearchNode[], hasAnd: boolean): string {
+  const rewritten = tryRewriteOr(nodes);
+  if (rewritten) {
+    const result = serializeNodes(rewritten);
     const notes: string[] = [];
     notes.push("Rewrote OR using in-list syntax: key:[val1,val2].");
     if (hasAnd) {
       notes.push("Also removed explicit AND (implicit in Sentry search).");
     }
-    notes.push(`Running query: "${rewritten}"`);
+    notes.push(`Running query: "${result}"`);
     log.warn(notes.join(" "));
-    return rewritten;
+    return result;
   }
 
   throw new ValidationError(
@@ -428,7 +336,8 @@ function handleOr(tokens: string[], hasAnd: boolean): string {
       "  - Different keys (level:error OR assigned:me)\n" +
       "  - is: or has: qualifiers (not supported with in-list)\n" +
       "  - Negated qualifiers (!key:val1 OR !key:val2)\n" +
-      "  - Comparison values (age:>24h OR age:>7d)\n\n" +
+      "  - Comparison values (age:>24h OR age:>7d)\n" +
+      "  - Parenthesized groups\n\n" +
       "Alternatives:\n" +
       '  - Write in-list syntax directly: --query "key:[val1,val2]"\n' +
       "  - Run separate queries for each term\n\n" +
@@ -502,9 +411,9 @@ export const SEARCH_SYNTAX_REFERENCE = {
  * @internal Exported for testing only. Not part of the public API.
  */
 export const __testing = {
-  parseQualifier,
-  splitInListValues,
-  extractValues,
-  tryMergeQualifiers,
+  isMergeableFilter,
+  tryMergeGroup,
   tryRewriteOr,
+  serializeNode,
+  serializeNodes,
 };
