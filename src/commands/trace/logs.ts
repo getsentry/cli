@@ -23,6 +23,7 @@ import {
   LIST_MAX_LIMIT,
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
+import { sanitizeQuery } from "../../lib/search-query.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
 import {
   PERIOD_BRIEF,
@@ -190,8 +191,13 @@ export const logsCommand = buildCommand({
       return;
     }
 
+    // Sanitize --query: strip AND, rewrite OR to in-list when possible.
+    const sanitizedQuery = flags.query
+      ? sanitizeQuery(flags.query)
+      : flags.query;
+
     // Prepend project filter to the query when user explicitly specified a project
-    const query = buildProjectQuery(flags.query, projectFilter);
+    const query = buildProjectQuery(sanitizedQuery, projectFilter);
 
     const logs = await withProgress(
       {

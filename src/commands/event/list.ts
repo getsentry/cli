@@ -19,6 +19,7 @@ import { ContextError } from "../../lib/errors.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { buildListCommand, paginationHint } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
+import { sanitizeQuery } from "../../lib/search-query.js";
 import {
   parsePeriod,
   serializeTimeRange,
@@ -132,11 +133,14 @@ export const listCommand = buildListCommand("event", {
       );
     }
 
+    // Sanitize --query: strip AND, rewrite OR to in-list when possible.
+    const query = flags.query ? sanitizeQuery(flags.query) : flags.query;
+
     // Build context key for pagination (keyed by issue ID + query-varying params)
     const contextKey = buildPaginationContextKey(
       "event-list",
       `${org}/${issue.id}`,
-      { q: flags.query, period: serializeTimeRange(timeRange) }
+      { q: query, period: serializeTimeRange(timeRange) }
     );
     const { cursor, direction } = resolveCursor(
       flags.cursor,
@@ -152,7 +156,7 @@ export const listCommand = buildListCommand("event", {
       () =>
         listIssueEvents(org, issue.id, {
           limit: flags.limit,
-          query: flags.query,
+          query,
           full: flags.full,
           cursor,
           ...timeRangeToApiParams(timeRange),

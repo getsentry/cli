@@ -48,6 +48,7 @@ import {
 import { logger } from "../../lib/logger.js";
 import { withProgress } from "../../lib/polling.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
+import { sanitizeQuery } from "../../lib/search-query.js";
 import {
   PERIOD_BRIEF,
   parsePeriod,
@@ -713,6 +714,13 @@ export const listCommand = buildListCommand(
       }
 
       const { cwd } = this;
+
+      // Sanitize --query early — it's consumed in multiple code paths below.
+      // Shadow `flags` so all downstream reads get the sanitized query.
+      // biome-ignore lint/style/noParameterAssign: intentional query sanitization shadow
+      flags = flags.query
+        ? { ...flags, query: sanitizeQuery(flags.query) }
+        : flags;
 
       const parsed = parseLogListArgs(args);
 
