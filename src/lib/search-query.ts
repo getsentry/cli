@@ -72,6 +72,15 @@ const IN_LIST_VALUE_RE = /^\[(.+)\]$/;
  */
 const INVALID_INLIST_KEYS = new Set(["is", "has"]);
 
+/**
+ * Matches values that use comparison operators (numeric, date, duration).
+ *
+ * These are parsed by the PEG grammar as `numeric_filter`, `date_filter`,
+ * or `duration_filter` — NOT `text_filter` — and cannot appear inside
+ * in-list brackets. Examples: `>100`, `<=50`, `>=2024-01-01`, `>1s`.
+ */
+const COMPARISON_VALUE_RE = /^[><=!]/;
+
 /** Parsed qualifier token. */
 type ParsedQualifier = {
   negated: boolean;
@@ -217,6 +226,12 @@ function canMergeQualifiers(parsed: ParsedQualifier[]): boolean {
 
   // No negation allowed (negated in-list has different semantics)
   if (parsed.some((q) => q.negated)) {
+    return false;
+  }
+
+  // No comparison operators in values (>, <, >=, <=, !=) — these are
+  // numeric/date/duration filters, not text filters, and can't go in brackets
+  if (parsed.some((q) => COMPARISON_VALUE_RE.test(q.value))) {
     return false;
   }
 
@@ -412,7 +427,8 @@ function handleOr(tokens: string[], hasAnd: boolean): string {
       "  - Free-text terms without a key (error OR timeout)\n" +
       "  - Different keys (level:error OR assigned:me)\n" +
       "  - is: or has: qualifiers (not supported with in-list)\n" +
-      "  - Negated qualifiers (!key:val1 OR !key:val2)\n\n" +
+      "  - Negated qualifiers (!key:val1 OR !key:val2)\n" +
+      "  - Comparison values (age:>24h OR age:>7d)\n\n" +
       "Alternatives:\n" +
       '  - Write in-list syntax directly: --query "key:[val1,val2]"\n' +
       "  - Run separate queries for each term\n\n" +

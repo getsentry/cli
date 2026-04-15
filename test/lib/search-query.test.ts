@@ -224,6 +224,19 @@ describe("sanitizeQuery: OR → throws", () => {
     );
   });
 
+  test("throws for comparison operator values (not valid in in-list)", () => {
+    expect(() => sanitizeQuery("age:>24h OR age:>7d")).toThrow(ValidationError);
+    expect(() => sanitizeQuery("times_seen:>100 OR times_seen:>200")).toThrow(
+      ValidationError
+    );
+    expect(() =>
+      sanitizeQuery("span.duration:>=1s OR span.duration:>=500ms")
+    ).toThrow(ValidationError);
+    expect(() =>
+      sanitizeQuery("firstSeen:<=2024-01-01 OR firstSeen:<=2024-06-01")
+    ).toThrow(ValidationError);
+  });
+
   test("throws for mixed free-text and qualifier OR", () => {
     expect(() => sanitizeQuery("is:unresolved error OR timeout")).toThrow(
       ValidationError
