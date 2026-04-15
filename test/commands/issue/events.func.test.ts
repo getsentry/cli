@@ -23,6 +23,7 @@ import * as issueUtils from "../../../src/commands/issue/utils.js";
 import * as apiClient from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as paginationDb from "../../../src/lib/db/pagination.js";
+import { parsePeriod } from "../../../src/lib/time-range.js";
 import type { IssueEvent, SentryIssue } from "../../../src/types/sentry.js";
 
 // Reference paginationDb early to prevent import stripping by auto-organize
@@ -146,7 +147,7 @@ describe("eventsCommand.func()", () => {
     const func = await eventsCommand.loader();
     await func.call(
       context,
-      { limit: 25, json: true, full: false, period: "7d" },
+      { limit: 25, json: true, full: false, period: parsePeriod("7d") },
       "CLI-G5"
     );
 
@@ -170,7 +171,7 @@ describe("eventsCommand.func()", () => {
     const func = await eventsCommand.loader();
     await func.call(
       context,
-      { limit: 25, json: true, full: false, period: "7d" },
+      { limit: 25, json: true, full: false, period: parsePeriod("7d") },
       "CLI-G5"
     );
 
@@ -193,7 +194,7 @@ describe("eventsCommand.func()", () => {
     const func = await eventsCommand.loader();
     await func.call(
       context,
-      { limit: 25, json: false, full: false, period: "7d" },
+      { limit: 25, json: false, full: false, period: parsePeriod("7d") },
       "CLI-G5"
     );
 
@@ -212,7 +213,7 @@ describe("eventsCommand.func()", () => {
     const func = await eventsCommand.loader();
     await func.call(
       context,
-      { limit: 25, json: false, full: false, period: "7d" },
+      { limit: 25, json: false, full: false, period: parsePeriod("7d") },
       "CLI-G5"
     );
 
@@ -237,7 +238,7 @@ describe("eventsCommand.func()", () => {
     const func = await eventsCommand.loader();
     await func.call(
       context,
-      { limit: 2, json: false, full: false, period: "7d" },
+      { limit: 2, json: false, full: false, period: parsePeriod("7d") },
       "CLI-G5"
     );
 
@@ -257,7 +258,7 @@ describe("eventsCommand.func()", () => {
     const func = await eventsCommand.loader();
     await func.call(
       context,
-      { limit: 100, json: false, full: false, period: "7d" },
+      { limit: 100, json: false, full: false, period: parsePeriod("7d") },
       "CLI-G5"
     );
 
@@ -277,7 +278,7 @@ describe("eventsCommand.func()", () => {
     const func = await eventsCommand.loader();
     await func.call(
       context,
-      { limit: 25, json: false, full: false, period: "7d" },
+      { limit: 25, json: false, full: false, period: parsePeriod("7d") },
       "CLI-G5"
     );
 
@@ -302,7 +303,7 @@ describe("eventsCommand.func()", () => {
         json: false,
         full: true,
         query: "user.email:test@example.com",
-        period: "24h",
+        period: parsePeriod("24h"),
       },
       "CLI-G5"
     );
@@ -327,7 +328,7 @@ describe("eventsCommand.func()", () => {
     const func = await eventsCommand.loader();
     await func.call(
       context,
-      { limit: 25, json: false, full: false, period: "30d" },
+      { limit: 25, json: false, full: false, period: parsePeriod("30d") },
       "CLI-G5"
     );
 
@@ -352,7 +353,7 @@ describe("eventsCommand.func()", () => {
     const func = await eventsCommand.loader();
     await func.call(
       context,
-      { limit: 2, json: true, full: false, period: "7d" },
+      { limit: 2, json: true, full: false, period: parsePeriod("7d") },
       "CLI-G5"
     );
 
@@ -373,7 +374,7 @@ describe("eventsCommand.func()", () => {
     const func = await eventsCommand.loader();
     await func.call(
       context,
-      { limit: 25, json: true, full: false, period: "7d" },
+      { limit: 25, json: true, full: false, period: parsePeriod("7d") },
       "CLI-G5"
     );
 
@@ -396,7 +397,7 @@ describe("eventsCommand.func()", () => {
     const func = await eventsCommand.loader();
     await func.call(
       context,
-      { limit: 25, json: true, full: false, period: "7d" },
+      { limit: 25, json: true, full: false, period: parsePeriod("7d") },
       "CLI-G5"
     );
 
@@ -421,7 +422,7 @@ describe("eventsCommand.func()", () => {
     const func = await eventsCommand.loader();
     await func.call(
       context,
-      { limit: 25, json: false, full: false, period: "7d" },
+      { limit: 25, json: false, full: false, period: parsePeriod("7d") },
       "CLI-G5"
     );
 
@@ -443,7 +444,7 @@ describe("eventsCommand.func()", () => {
     const func = await eventsCommand.loader();
     await func.call(
       context,
-      { limit: 25, json: false, full: false, period: "7d" },
+      { limit: 25, json: false, full: false, period: parsePeriod("7d") },
       "CLI-G5"
     );
 
@@ -466,7 +467,7 @@ describe("eventsCommand.func()", () => {
     const func = await eventsCommand.loader();
     await func.call(
       context,
-      { limit: 25, json: false, full: false, period: "7d" },
+      { limit: 25, json: false, full: false, period: parsePeriod("7d") },
       "CLI-G5"
     );
 
@@ -489,7 +490,7 @@ describe("eventsCommand.func()", () => {
     await expect(
       func.call(
         context,
-        { limit: 25, json: false, full: false, period: "7d" },
+        { limit: 25, json: false, full: false, period: parsePeriod("7d") },
         "123456789"
       )
     ).rejects.toThrow("organization");

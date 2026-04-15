@@ -23,8 +23,11 @@ import { withProgress } from "../../lib/polling.js";
 import { resolveOrgRegion } from "../../lib/region.js";
 import { buildDashboardUrl } from "../../lib/sentry-urls.js";
 import {
+  formatTimeRangeFlag,
   PERIOD_BRIEF,
   parsePeriod,
+  TIME_RANGE_24H,
+  type TimeRange,
   timeRangeToSeconds,
 } from "../../lib/time-range.js";
 import type {
@@ -48,7 +51,7 @@ type ViewFlags = {
   readonly web: boolean;
   readonly fresh: boolean;
   readonly refresh?: number;
-  readonly period?: string;
+  readonly period?: TimeRange;
   readonly json: boolean;
   readonly fields?: string[];
 };
@@ -131,6 +134,22 @@ function buildViewData(
   };
 }
 
+/**
+ * Resolve the effective time range for a dashboard view.
+ *
+ * Priority: explicit --period flag > dashboard's saved period > 24h default.
+ * Dashboard period is a raw string from the API that needs parsing.
+ */
+function resolveViewTimeRange(
+  flagPeriod: TimeRange | undefined,
+  dashboardPeriod: string | null | undefined
+): TimeRange {
+  if (flagPeriod) {
+    return flagPeriod;
+  }
+  return dashboardPeriod ? parsePeriod(dashboardPeriod) : TIME_RANGE_24H;
+}
+
 export const viewCommand = buildCommand({
   docs: {
     brief: "View a dashboard",
@@ -179,7 +198,7 @@ export const viewCommand = buildCommand({
       },
       period: {
         kind: "parsed",
-        parse: String,
+        parse: parsePeriod,
         brief: PERIOD_BRIEF,
         optional: true,
       },
@@ -218,8 +237,7 @@ export const viewCommand = buildCommand({
     );
 
     const regionUrl = await resolveOrgRegion(orgSlug);
-    const effectivePeriod = flags.period ?? dashboard.period ?? "24h";
-    const timeRange = parsePeriod(effectivePeriod);
+    const timeRange = resolveViewTimeRange(flags.period, dashboard.period);
     const periodSeconds = timeRangeToSeconds(timeRange);
     // WidgetQueryOptions uses `period` (not `statsPeriod`) for the relative field
     const widgetTimeOpts =
@@ -261,7 +279,7 @@ export const viewCommand = buildCommand({
 
           // Build output data before clearing so clear→render is instantaneous
           const viewData = buildViewData(dashboard, widgetData, widgets, {
-            period: effectivePeriod,
+            period: formatTimeRangeFlag(timeRange),
             url,
           });
 
@@ -292,7 +310,7 @@ export const viewCommand = buildCommand({
 
     yield new CommandOutput(
       buildViewData(dashboard, widgetData, widgets, {
-        period: effectivePeriod,
+        period: formatTimeRangeFlag(timeRange),
         url,
       })
     );

@@ -85,6 +85,8 @@ import {
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import {
+  appendPeriodHint,
+  formatTimeRangeFlag,
   PERIOD_BRIEF,
   parsePeriod,
   serializeTimeRange,
@@ -106,7 +108,7 @@ type ListFlags = {
   readonly query?: string;
   readonly limit: number;
   readonly sort: "date" | "new" | "freq" | "user";
-  readonly period: string;
+  readonly period: TimeRange;
   readonly json: boolean;
   readonly cursor?: string;
   readonly fresh: boolean;
@@ -847,9 +849,7 @@ function appendIssueFlags(base: string, flags: ListFlags): string {
   if (flags.query) {
     parts.push(`-q "${flags.query}"`);
   }
-  if (flags.period && flags.period !== "90d") {
-    parts.push(`-t ${flags.period}`);
-  }
+  appendPeriodHint(parts, flags.period, DEFAULT_PERIOD, "-t");
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
 }
 
@@ -1058,7 +1058,7 @@ function build400Detail(
     );
   }
 
-  if (!flags.period || flags.period === DEFAULT_PERIOD) {
+  if (formatTimeRangeFlag(flags.period) === DEFAULT_PERIOD) {
     suggestions.push("Try a shorter time range: --period 14d or --period 24h");
   }
 
@@ -1598,7 +1598,7 @@ export const listCommand = buildListCommand("issue", {
       },
       period: {
         kind: "parsed",
-        parse: String,
+        parse: parsePeriod,
         brief: PERIOD_BRIEF,
         default: "90d",
       },
@@ -1679,7 +1679,7 @@ export const listCommand = buildListCommand("issue", {
       );
     }
 
-    const timeRange = parsePeriod(flags.period ?? DEFAULT_PERIOD);
+    const timeRange = flags.period;
 
     // biome-ignore lint/suspicious/noExplicitAny: shared handler accepts any mode variant
     const resolveAndHandle: ModeHandler<any> = (ctx) =>

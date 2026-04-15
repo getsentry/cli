@@ -19,6 +19,7 @@ import {
   PERIOD_ALIASES,
 } from "../../lib/list-command.js";
 import { sanitizeQuery } from "../../lib/search-query.js";
+import { appendPeriodHint, type TimeRange } from "../../lib/time-range.js";
 import type { IssueEvent } from "../../types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -30,7 +31,7 @@ export type EventsFlags = {
   readonly limit: number;
   readonly query?: string;
   readonly full: boolean;
-  readonly period: string;
+  readonly period: TimeRange;
   readonly json: boolean;
   readonly cursor?: string;
   readonly fresh: boolean;
@@ -178,9 +179,7 @@ export function appendEventsFlags(
   if (flags.full) {
     parts.push("--full");
   }
-  if (flags.period !== DEFAULT_PERIOD) {
-    parts.push(`--period ${flags.period}`);
-  }
+  appendPeriodHint(parts, flags.period, DEFAULT_PERIOD);
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
 }
 

@@ -43,6 +43,7 @@ import * as formatters from "../../../src/lib/formatters/index.js";
 import * as polling from "../../../src/lib/polling.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
+import { parsePeriod } from "../../../src/lib/time-range.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as traceTarget from "../../../src/lib/trace-target.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
@@ -734,7 +735,7 @@ describe("listCommand.func — period flag", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { json: true, limit: 100, period: "30d", sort: "newest" },
+      { json: true, limit: 100, period: parsePeriod("30d"), sort: "newest" },
       TRACE_ID
     );
 

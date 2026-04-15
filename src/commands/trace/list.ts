@@ -30,8 +30,9 @@ import { withProgress } from "../../lib/polling.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
 import { sanitizeQuery } from "../../lib/search-query.js";
 import {
-  parsePeriod,
+  appendPeriodHint,
   serializeTimeRange,
+  type TimeRange,
   timeRangeToApiParams,
 } from "../../lib/time-range.js";
 import {
@@ -43,7 +44,7 @@ type ListFlags = {
   readonly limit: number;
   readonly query?: string;
   readonly sort: "date" | "duration";
-  readonly period: string;
+  readonly period: TimeRange;
   readonly json: boolean;
   readonly cursor?: string;
   readonly fresh: boolean;
@@ -97,9 +98,7 @@ function appendTraceFlags(
   if (flags.query) {
     parts.push(`-q "${flags.query}"`);
   }
-  if (flags.period !== DEFAULT_PERIOD) {
-    parts.push(`--period ${flags.period}`);
-  }
+  appendPeriodHint(parts, flags.period, DEFAULT_PERIOD);
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
 }
 
@@ -257,7 +256,7 @@ export const listCommand = buildListCommand("trace", {
   },
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
     const { cwd } = this;
-    const timeRange = parsePeriod(flags.period);
+    const timeRange = flags.period;
     const { query } = flags;
 
     // Resolve org/project from positional arg, config, or DSN auto-detection

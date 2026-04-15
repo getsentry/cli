@@ -42,7 +42,7 @@ import { withProgress } from "../../lib/polling.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
 import { sanitizeQuery } from "../../lib/search-query.js";
 import {
-  parsePeriod,
+  appendPeriodHint,
   serializeTimeRange,
   type TimeRange,
   timeRangeToApiParams,
@@ -59,7 +59,7 @@ type ListFlags = {
   readonly limit: number;
   readonly query?: string;
   readonly sort: SpanSortValue;
-  readonly period: string;
+  readonly period: TimeRange;
   readonly cursor?: string;
   readonly json: boolean;
   readonly fresh: boolean;
@@ -209,9 +209,7 @@ function appendFlagHints(
   if (flags.query) {
     parts.push(`-q "${flags.query}"`);
   }
-  if (flags.period !== DEFAULT_PERIOD) {
-    parts.push(`--period ${flags.period}`);
-  }
+  appendPeriodHint(parts, flags.period, DEFAULT_PERIOD);
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
 }
 
@@ -597,7 +595,7 @@ export const listCommand = buildListCommand("span", {
   },
   async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {
     const { cwd } = this;
-    const timeRange = parsePeriod(flags.period);
+    const timeRange = flags.period;
     const parsed = parseSpanListArgs(args);
     const extraApiFields = extractExtraApiFields(flags.fields);
     const modeCtx: ModeContext = {

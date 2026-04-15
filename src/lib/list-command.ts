@@ -32,7 +32,7 @@ import {
   type OrgListConfig,
 } from "./org-list.js";
 import { disableResponseCache } from "./response-cache.js";
-import { PERIOD_BRIEF } from "./time-range.js";
+import { PERIOD_BRIEF, parsePeriod } from "./time-range.js";
 
 // ---------------------------------------------------------------------------
 // Level A: shared parameter / flag definitions
@@ -292,10 +292,16 @@ export function buildListLimitFlag(
  * The `--period` / `-t` flag for list commands that query time-bounded data.
  *
  * Controls the `statsPeriod` parameter sent to the Sentry Events API.
- * Accepts Sentry duration strings like `"1h"`, `"24h"`, `"7d"`, `"30d"`.
+ * Accepts relative durations (`"7d"`, `"24h"`), date ranges
+ * (`"2024-01-01..2024-02-01"`), and comparison operators (`">=2024-01-01"`).
+ *
+ * Stricli calls `parsePeriod` on both user input and the default value,
+ * so `flags.period` is always a `TimeRange` object — no manual
+ * `parsePeriod()` call needed in `func()`.
  *
  * Default is `"7d"` (7 days). Commands that need a different default (e.g.,
- * `issue list` uses `"90d"`) should define their own flag inline.
+ * `issue list` uses `"90d"`) should define their own flag inline with
+ * `parse: parsePeriod`.
  *
  * @example
  * ```ts
@@ -305,7 +311,7 @@ export function buildListLimitFlag(
  */
 export const LIST_PERIOD_FLAG = {
   kind: "parsed" as const,
-  parse: String,
+  parse: parsePeriod,
   brief: PERIOD_BRIEF,
   default: "7d",
 };
