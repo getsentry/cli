@@ -191,13 +191,8 @@ export const logsCommand = buildCommand({
       return;
     }
 
-    // Sanitize --query: strip AND, rewrite OR to in-list when possible.
-    const sanitizedQuery = flags.query
-      ? sanitizeQuery(flags.query)
-      : flags.query;
-
     // Prepend project filter to the query when user explicitly specified a project
-    const query = buildProjectQuery(sanitizedQuery, projectFilter);
+    const query = buildProjectQuery(sanitizeQuery(flags.query), projectFilter);
 
     const logs = await withProgress(
       {

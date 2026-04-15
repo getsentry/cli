@@ -718,9 +718,7 @@ export const listCommand = buildListCommand(
       // Sanitize --query early — it's consumed in multiple code paths below.
       // Shadow `flags` so all downstream reads get the sanitized query.
       // biome-ignore lint/style/noParameterAssign: intentional query sanitization shadow
-      flags = flags.query
-        ? { ...flags, query: sanitizeQuery(flags.query) }
-        : flags;
+      flags = { ...flags, query: sanitizeQuery(flags.query) };
 
       const parsed = parseLogListArgs(args);
 

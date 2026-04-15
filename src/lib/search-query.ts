@@ -338,11 +338,20 @@ function tryRewriteOr(tokens: string[]): string | null {
  * Tokens inside quoted values (`message:"error OR timeout"`) or qualifier
  * values (`tag:OR`) are never standalone and are not matched.
  *
- * @param query - Raw query string from `--query` flag
- * @returns The sanitized query string with AND stripped and OR rewritten
+ * Accepts `undefined` for convenience — commands can pass `flags.query`
+ * directly without a conditional guard.
+ *
+ * @param query - Raw query string from `--query` flag, or `undefined`
+ * @returns The sanitized query, or `undefined` if input was `undefined`
  * @throws {ValidationError} When OR cannot be rewritten to in-list syntax
  */
-export function sanitizeQuery(query: string): string {
+export function sanitizeQuery(query: string): string;
+export function sanitizeQuery(query: undefined): undefined;
+export function sanitizeQuery(query: string | undefined): string | undefined;
+export function sanitizeQuery(query: string | undefined): string | undefined {
+  if (!query) {
+    return query;
+  }
   const tokens = query.match(QUERY_TOKEN_RE) ?? [];
 
   let hasOr = false;

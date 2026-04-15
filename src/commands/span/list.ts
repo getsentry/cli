@@ -600,13 +600,9 @@ export const listCommand = buildListCommand("span", {
     const timeRange = parsePeriod(flags.period);
     const parsed = parseSpanListArgs(args);
     const extraApiFields = extractExtraApiFields(flags.fields);
-    // Sanitize --query: strip AND, rewrite OR to in-list when possible.
-    const sanitizedFlags: ListFlags = flags.query
-      ? { ...flags, query: sanitizeQuery(flags.query) }
-      : flags;
     const modeCtx: ModeContext = {
       cwd,
-      flags: sanitizedFlags,
+      flags: { ...flags, query: sanitizeQuery(flags.query) },
       timeRange,
       extraApiFields,
     };

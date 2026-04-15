@@ -115,8 +115,7 @@ export const eventsCommand = buildListCommand("issue", {
       );
     }
 
-    // Sanitize --query: strip AND, rewrite OR to in-list when possible.
-    const query = flags.query ? sanitizeQuery(flags.query) : flags.query;
+    const query = sanitizeQuery(flags.query);
 
     // Build context key for pagination (keyed by issue ID + query-varying params)
     const contextKey = buildPaginationContextKey(

@@ -1725,9 +1725,10 @@ export const listCommand = buildListCommand("issue", {
     }
 
     // Sanitize --query: strip AND, rewrite OR to in-list when possible.
-    const effectiveFlags: ListFlags = flags.query
-      ? { ...flags, query: sanitizeQuery(flags.query) }
-      : flags;
+    const effectiveFlags: ListFlags = {
+      ...flags,
+      query: sanitizeQuery(flags.query),
+    };
 
     const timeRange = parsePeriod(effectiveFlags.period ?? DEFAULT_PERIOD);
 

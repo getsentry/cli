@@ -258,7 +258,7 @@ export const listCommand = buildListCommand("trace", {
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
     const { cwd } = this;
     const timeRange = parsePeriod(flags.period);
-    const query = flags.query ? sanitizeQuery(flags.query) : flags.query;
+    const query = sanitizeQuery(flags.query);
 
     // Resolve org/project from positional arg, config, or DSN auto-detection
     const { org, project } = await resolveOrgProjectFromArg(
