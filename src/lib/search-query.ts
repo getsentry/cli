@@ -253,32 +253,17 @@ function collectOrChain(
 // ---------------------------------------------------------------------------
 
 /**
- * Recursively scan AST nodes for OR operators, including inside paren
- * groups. AND detection is top-level only (via {@link scanBooleanOpsFlat})
- * because AND inside paren groups can't be stripped from the opaque `raw`
- * text and should pass through to the API as-is.
+ * Check whether any paren group (at any nesting depth) contains an OR
+ * operator. These are opaque — their `raw` text can't be rewritten —
+ * so any OR inside must be rejected even if top-level OR is rewritable.
  */
-function scanBooleanOps(nodes: SearchNode[]): {
-  hasOr: boolean;
-  hasAnd: boolean;
-} {
-  let hasOr = false;
-  // AND is only detected at top level — paren group internals are opaque
-  let hasAnd = false;
-
+function hasOrInParenGroups(nodes: SearchNode[]): boolean {
   for (const node of nodes) {
-    if (node.type === "boolean_op") {
-      if (node.op === "OR") {
-        hasOr = true;
-      } else {
-        hasAnd = true;
-      }
-    } else if (node.type === "paren_group" && hasOrInNodes(node.inner)) {
-      hasOr = true;
+    if (node.type === "paren_group" && hasOrInNodes(node.inner)) {
+      return true;
     }
   }
-
-  return { hasOr, hasAnd };
+  return false;
 }
 
 /** Check whether any node (recursively) contains an OR operator. */
@@ -366,11 +351,10 @@ export function sanitizeQuery(query: string | undefined): string | undefined {
     return query;
   }
 
-  const topLevel = scanBooleanOpsFlat(nodes);
-  const deep = scanBooleanOps(nodes);
-
-  // OR found only inside paren groups — can't rewrite, must throw
-  if (deep.hasOr && !topLevel.hasOr) {
+  // Check for OR inside paren groups first — these are opaque and can't
+  // be rewritten. Must throw even if top-level OR would be rewritable,
+  // because the paren group's raw text would pass the OR through to the API.
+  if (hasOrInParenGroups(nodes)) {
     throw new ValidationError(
       "Could not rewrite OR inside parenthesized group.\n\n" +
         "Sentry search does not support boolean operators. " +
@@ -381,14 +365,13 @@ export function sanitizeQuery(query: string | undefined): string | undefined {
     );
   }
 
-  if (deep.hasOr) {
-    // Strip AND nodes before OR rewrite
-    const withoutAnd = deep.hasAnd ? stripAndNodes(nodes) : nodes;
-    return handleOr(withoutAnd, deep.hasAnd);
-  }
+  const { hasOr, hasAnd } = scanBooleanOpsFlat(nodes);
 
-  // AND anywhere (including inside paren groups)
-  const hasAnd = deep.hasAnd;
+  if (hasOr) {
+    // Strip AND nodes before OR rewrite
+    const withoutAnd = hasAnd ? stripAndNodes(nodes) : nodes;
+    return handleOr(withoutAnd, hasAnd);
+  }
 
   if (hasAnd) {
     const sanitized = serializeNodes(stripAndNodes(nodes));

@@ -312,6 +312,12 @@ describe("sanitizeQuery: edge cases", () => {
     expect(sanitizeQuery("level:error)")).toBe("level:error)");
   });
 
+  test("throws for OR in paren group even with rewritable top-level OR", () => {
+    expect(() =>
+      sanitizeQuery("level:error OR level:warning (a:1 OR a:2)")
+    ).toThrow(ValidationError);
+  });
+
   test("passes through AND inside paren groups unchanged", () => {
     // AND inside parens can't be stripped from opaque raw text — pass through
     expect(sanitizeQuery("(error AND timeout)")).toBe("(error AND timeout)");
