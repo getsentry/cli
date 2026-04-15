@@ -47,6 +47,7 @@ import {
   detectExistingProject,
   handleLocalOp,
   precomputeDirListing,
+  precomputeSentryDetection,
   preReadCommonFiles,
   resolveOrgSlug,
   tryGetExistingProject,
@@ -636,7 +637,10 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   let run: Awaited<ReturnType<typeof workflow.createRun>>;
   let result: WorkflowRunResult;
   try {
-    const dirListing = await precomputeDirListing(directory);
+    const [dirListing, existingSentry] = await Promise.all([
+      precomputeDirListing(directory),
+      precomputeSentryDetection(directory),
+    ]);
     const fileCache = await preReadCommonFiles(directory, dirListing);
     spin.message("Connecting to wizard...");
     run = await workflow.createRun();
@@ -650,6 +654,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
             features,
             dirListing,
             fileCache,
+            existingSentry: existingSentry.data,
           },
           tracingOptions,
         }),

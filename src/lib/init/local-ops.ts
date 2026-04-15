@@ -993,8 +993,19 @@ export async function detectExistingProject(cwd: string): Promise<{
 async function detectSentry(
   payload: DetectSentryPayload
 ): Promise<LocalOpResult> {
+  return precomputeSentryDetection(payload.cwd);
+}
+
+/**
+ * Detect existing Sentry setup in a directory. Exported so wizard-runner
+ * can pre-compute this alongside dirListing before the workflow starts,
+ * eliminating a suspend/resume roundtrip.
+ */
+export async function precomputeSentryDetection(
+  cwd: string
+): Promise<LocalOpResult> {
   const { detectDsn } = await import("../dsn/index.js");
-  const dsn = await detectDsn(payload.cwd);
+  const dsn = await detectDsn(cwd);
 
   if (!dsn) {
     return { ok: true, data: { status: "none", signals: [] } };
