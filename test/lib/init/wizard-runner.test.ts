@@ -199,6 +199,10 @@ beforeEach(() => {
     "precomputeDirListing"
   ).mockResolvedValue([]);
   spyOn(ops, "preReadCommonFiles").mockResolvedValue({});
+  spyOn(ops, "precomputeSentryDetection").mockResolvedValue({
+    ok: true,
+    data: { status: "none", signals: [] },
+  });
   handleInteractiveSpy = spyOn(inter, "handleInteractive").mockResolvedValue({
     action: "continue",
   });
