@@ -22,7 +22,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import peggy from "peggy";
 
-const GRAMMAR_PATH = resolve("src/lib/search-query.pegjs");
+const GRAMMAR_PATH = resolve("script/search-query.pegjs");
 const OUTPUT_JS = resolve("src/generated/search-parser.js");
 const OUTPUT_DTS = resolve("src/generated/search-parser.d.ts");
 

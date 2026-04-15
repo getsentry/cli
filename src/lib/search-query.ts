@@ -12,7 +12,7 @@
  *   {@link ValidationError} when the rewrite is not possible.
  *
  * Parsing uses a pre-compiled PEG parser generated from
- * `src/lib/search-query.pegjs` (a simplified version of Sentry's
+ * `script/search-query.pegjs` (a simplified version of Sentry's
  * canonical grammar). The parser classifies every term structurally —
  * comparison operators, in-list values, paren groups, etc. — so the
  * rewriting logic doesn't need regex-based reject-lists.
