@@ -32,7 +32,7 @@
  *     bin.js.map          (sourcemap, uploaded to Sentry then deleted)
  */
 
-import { mkdirSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 import { processBinary } from "binpunch";
@@ -72,6 +72,18 @@ function getPackageName(target: BuildTarget): string {
   const platformName = target.os === "win32" ? "windows" : target.os;
   const libcSuffix = target.libc ? `-${target.libc}` : "";
   return `sentry-${platformName}-${target.arch}${libcSuffix}`;
+}
+
+/**
+ * Detect musl libc on the current system (for `--single` builds).
+ * Checks for the musl dynamic linker at the well-known path.
+ */
+function detectMusl(): boolean {
+  if (process.platform !== "linux") {
+    return false;
+  }
+  const muslArch = process.arch === "x64" ? "x86_64" : "aarch64";
+  return existsSync(`/lib/ld-musl-${muslArch}.so.1`);
 }
 
 /** Get Bun compile target string */
@@ -391,8 +403,12 @@ async function build(): Promise<void> {
     targets = [target];
     console.log(`\nBuilding for target: ${getPackageName(target)}`);
   } else if (singleBuild) {
+    const musl = detectMusl();
     const currentTarget = ALL_TARGETS.find(
-      (t) => t.os === process.platform && t.arch === process.arch
+      (t) =>
+        t.os === process.platform &&
+        t.arch === process.arch &&
+        (musl ? t.libc === "musl" : !t.libc)
     );
     if (!currentTarget) {
       console.error(

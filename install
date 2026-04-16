@@ -51,7 +51,7 @@ report_error() {
     envelope=$(printf '%s\n%s\n%s' \
       "{\"event_id\":\"${event_id}\",\"dsn\":\"https://${SENTRY_DSN_KEY}@o1.ingest.us.sentry.io/${SENTRY_PROJECT_ID}\"}" \
       '{"type":"event"}' \
-      "{\"event_id\":\"${event_id}\",\"timestamp\":\"${timestamp}\",\"platform\":\"other\",\"level\":\"error\",\"logger\":\"install\",\"server_name\":\"install-script\",\"message\":{\"formatted\":\"${json_msg}\"},\"tags\":{\"os\":\"${os:-unknown}\",\"arch\":\"${arch:-unknown}\",\"libc\":\"${libc_suffix:-glibc}\",\"channel\":\"${json_channel}\",\"step\":\"${json_step}\",\"install.version\":\"${json_version}\"},\"contexts\":{\"runtime\":{\"name\":\"bash\",\"version\":\"${BASH_VERSION:-unknown}\"}}}")
+      "{\"event_id\":\"${event_id}\",\"timestamp\":\"${timestamp}\",\"platform\":\"other\",\"level\":\"error\",\"logger\":\"install\",\"server_name\":\"install-script\",\"message\":{\"formatted\":\"${json_msg}\"},\"tags\":{\"os\":\"${os:-unknown}\",\"arch\":\"${arch:-unknown}\",\"libc\":\"${libc_variant:-glibc}\",\"channel\":\"${json_channel}\",\"step\":\"${json_step}\",\"install.version\":\"${json_version}\"},\"contexts\":{\"runtime\":{\"name\":\"bash\",\"version\":\"${BASH_VERSION:-unknown}\"}}}")
 
     curl -sf --max-time 2 \
       -H "Content-Type: application/x-sentry-envelope" \
@@ -166,6 +166,7 @@ if [[ "$os" == "linux" ]]; then
 
   if detect_musl; then
     libc_suffix="-musl"
+    libc_variant="musl"
   fi
 fi
 
