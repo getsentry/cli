@@ -121,7 +121,3 @@ export const runCommandsTool: InitToolDefinition<"run-commands"> = {
   },
   execute: runCommands,
 };
-
-export function validateCommand(command: string): string | undefined {
-  return validateToolCommand(command);
-}

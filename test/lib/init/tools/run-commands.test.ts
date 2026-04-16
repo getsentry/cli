@@ -1,10 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
-import {
-  runCommands,
-  validateCommand,
-} from "../../../../src/lib/init/tools/run-commands.js";
+import { runCommands } from "../../../../src/lib/init/tools/run-commands.js";
+import { validateCommand } from "../../../../src/lib/init/tools/command-utils.js";
 import type { RunCommandsPayload } from "../../../../src/lib/init/types.js";
 
 let testDir: string;
