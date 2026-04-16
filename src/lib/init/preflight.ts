@@ -7,7 +7,7 @@ import { resolveOrCreateTeam } from "../resolve-team.js";
 import { slugify } from "../utils.js";
 import { WizardCancelledError } from "./clack-utils.js";
 import { tryGetExistingProjectData } from "./existing-project.js";
-import { resolveOrgPrefetched } from "./prefetch.js";
+import { resolveOrgPrefetched } from "./org-prefetch.js";
 import type {
   ExistingProjectData,
   ResolvedInitContext,

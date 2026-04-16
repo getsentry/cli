@@ -9,7 +9,7 @@ import * as auth from "../../../src/lib/db/auth.js";
 import * as dsnIndex from "../../../src/lib/dsn/index.js";
 import { ApiError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as prefetch from "../../../src/lib/init/prefetch.js";
+import * as prefetch from "../../../src/lib/init/org-prefetch.js";
 import { resolveInitContext } from "../../../src/lib/init/preflight.js";
 import type { WizardOptions } from "../../../src/lib/init/types.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference

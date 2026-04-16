@@ -23,7 +23,7 @@ import { findProjectsBySlug } from "../lib/api/projects.js";
 import { looksLikePath, parseOrgProjectArg } from "../lib/arg-parsing.js";
 import { buildCommand } from "../lib/command.js";
 import { ContextError, ValidationError } from "../lib/errors.js";
-import { warmOrgDetection } from "../lib/init/prefetch.js";
+import { warmOrgDetection } from "../lib/init/org-prefetch.js";
 import { runWizard } from "../lib/init/wizard-runner.js";
 import { validateResourceId } from "../lib/input-validation.js";
 import { logger } from "../lib/logger.js";

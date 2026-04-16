@@ -13,8 +13,8 @@ import { initCommand } from "../../src/commands/init.js";
 import * as projectsApi from "../../src/lib/api/projects.js";
 import { ContextError, ValidationError } from "../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as prefetchNs from "../../src/lib/init/prefetch.js";
-import { resetPrefetch } from "../../src/lib/init/prefetch.js";
+import * as prefetchNs from "../../src/lib/init/org-prefetch.js";
+import { resetPrefetch } from "../../src/lib/init/org-prefetch.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as wizardRunner from "../../src/lib/init/wizard-runner.js";
 
