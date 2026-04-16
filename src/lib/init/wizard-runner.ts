@@ -14,7 +14,11 @@ import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { WizardError } from "../errors.js";
 import { terminalLink } from "../formatters/colors.js";
-import { renderInlineMarkdown } from "../formatters/markdown.js";
+import {
+  colorTag,
+  renderInlineMarkdown,
+  safeCodeSpan,
+} from "../formatters/markdown.js";
 import {
   abortIfCancelled,
   STEP_LABELS,
@@ -71,12 +75,16 @@ function nextPhase(
  * Leaves room for the spinner character and padding.
  */
 function truncateForTerminal(message: string): string {
+  return message.split("\n").map(truncateLineForTerminal).join("\n");
+}
+
+function truncateLineForTerminal(line: string): string {
   // Reserve space for spinner (2 chars) + some padding
   const maxWidth = (process.stdout.columns || 80) - 4;
-  if (message.length <= maxWidth) {
-    return message;
+  if (line.length <= maxWidth) {
+    return line;
   }
-  let truncated = message.slice(0, maxWidth - 1);
+  let truncated = line.slice(0, maxWidth - 1);
   // If truncation split a backtick code span, drop the unmatched backtick
   // so renderInlineMarkdown doesn't produce a literal ` character.
   const backtickCount = truncated.split("`").length - 1;
@@ -86,6 +94,41 @@ function truncateForTerminal(message: string): string {
       truncated.slice(0, lastBacktick) + truncated.slice(lastBacktick + 1);
   }
   return `${truncated}…`;
+}
+
+type ReadFilesTree = {
+  paths: string[];
+  phase: "reading" | "analyzing";
+};
+
+function formatReadFilesTree(progress: ReadFilesTree): string {
+  const { paths, phase } = progress;
+  if (paths.length === 0) {
+    return phase === "analyzing" ? "Analyzing files..." : "Reading files...";
+  }
+
+  const header =
+    phase === "analyzing"
+      ? paths.length === 1
+        ? "Analyzing file..."
+        : "Analyzing files..."
+      : paths.length === 1
+        ? "Reading file..."
+        : "Reading files...";
+
+  const lines = [header];
+  for (const [index, filePath] of paths.entries()) {
+    const branch = index === paths.length - 1 ? "└─" : "├─";
+    lines.push(`${branch} ${readFilesStatusIcon(phase)} ${safeCodeSpan(filePath)}`);
+  }
+  return lines.join("\n");
+}
+
+function readFilesStatusIcon(phase: ReadFilesTree["phase"]): string {
+  if (phase === "analyzing") {
+    return colorTag("green", "✓");
+  }
+  return colorTag("yellow", "●");
 }
 
 /**
@@ -99,7 +142,10 @@ function describePostTool(payload: SuspendPayload): string | undefined {
 
   switch (payload.operation) {
     case "read-files":
-      return `Analyzing ${payload.params.paths.length === 1 ? "file" : "files"}...`;
+      return formatReadFilesTree({
+        paths: payload.params.paths,
+        phase: "analyzing",
+      });
     case "list-dir":
       return "Analyzing directory structure...";
     case "file-exists-batch":
@@ -120,7 +166,13 @@ async function handleSuspendedStep(
     const message =
       ("detail" in payload && typeof payload.detail === "string"
         ? payload.detail
-        : undefined) ?? describeTool(payload);
+        : undefined) ??
+      (payload.operation === "read-files"
+        ? formatReadFilesTree({
+            paths: payload.params.paths,
+            phase: "reading",
+          })
+        : describeTool(payload));
     spin.message(renderInlineMarkdown(truncateForTerminal(message)));
 
     const toolResult = await executeTool(payload, context);

@@ -348,6 +348,43 @@ describe("runWizard", () => {
     await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
   });
 
+  test("shows a multiline tree while reading files and then analyzing them", async () => {
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["detect-platform"]],
+      steps: {
+        "detect-platform": {
+          suspendPayload: {
+            type: "tool",
+            operation: "read-files",
+            cwd: "/tmp/test",
+            params: {
+              paths: ["src/settings.py", "src/urls.py"],
+            },
+          },
+        },
+      },
+    };
+    mockResumeResults = [{ status: "success" }];
+
+    await runWizard(makeOptions());
+
+    const messages = spinnerMock.message.mock.calls.map(
+      (call: string[]) =>
+        call[0]?.replace(
+          // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escape sequences
+          /\x1b\[[^m]*m/g,
+          ""
+        )
+    );
+    expect(messages).toContain(
+      "Reading files...\n├─ ● `src/settings.py`\n└─ ● `src/urls.py`"
+    );
+    expect(messages).toContain(
+      "Analyzing files...\n├─ ✓ `src/settings.py`\n└─ ✓ `src/urls.py`"
+    );
+  });
+
   test("renders tool result messages via the spinner stop state", async () => {
     mockStartResult = {
       status: "suspended",
@@ -371,6 +408,7 @@ describe("runWizard", () => {
     mockResumeResults = [{ status: "success" }];
 
     await runWizard(makeOptions());
+
     expect(spinnerMock.stop).toHaveBeenCalledWith("Using existing project");
   });
 });
