@@ -51,7 +51,7 @@ report_error() {
     envelope=$(printf '%s\n%s\n%s' \
       "{\"event_id\":\"${event_id}\",\"dsn\":\"https://${SENTRY_DSN_KEY}@o1.ingest.us.sentry.io/${SENTRY_PROJECT_ID}\"}" \
       '{"type":"event"}' \
-      "{\"event_id\":\"${event_id}\",\"timestamp\":\"${timestamp}\",\"platform\":\"other\",\"level\":\"error\",\"logger\":\"install\",\"server_name\":\"install-script\",\"message\":{\"formatted\":\"${json_msg}\"},\"tags\":{\"os\":\"${os:-unknown}\",\"arch\":\"${arch:-unknown}\",\"channel\":\"${json_channel}\",\"step\":\"${json_step}\",\"install.version\":\"${json_version}\"},\"contexts\":{\"runtime\":{\"name\":\"bash\",\"version\":\"${BASH_VERSION:-unknown}\"}}}")
+      "{\"event_id\":\"${event_id}\",\"timestamp\":\"${timestamp}\",\"platform\":\"other\",\"level\":\"error\",\"logger\":\"install\",\"server_name\":\"install-script\",\"message\":{\"formatted\":\"${json_msg}\"},\"tags\":{\"os\":\"${os:-unknown}\",\"arch\":\"${arch:-unknown}\",\"libc\":\"${libc_suffix:-glibc}\",\"channel\":\"${json_channel}\",\"step\":\"${json_step}\",\"install.version\":\"${json_version}\"},\"contexts\":{\"runtime\":{\"name\":\"bash\",\"version\":\"${BASH_VERSION:-unknown}\"}}}")
 
     curl -sf --max-time 2 \
       -H "Content-Type: application/x-sentry-envelope" \
@@ -143,6 +143,32 @@ case "$arch" in
   *) die "Unsupported architecture: $arch" "detect-arch" ;;
 esac
 
+# Detect C library variant (musl vs glibc) on Linux.
+# musl-based systems (Alpine, Void, etc.) need a different binary.
+libc_suffix=""
+if [[ "$os" == "linux" ]]; then
+  detect_musl() {
+    # Heuristic 1: Check for musl dynamic linker
+    local musl_arch
+    case "$arch" in
+      x64) musl_arch="x86_64" ;;
+      arm64) musl_arch="aarch64" ;;
+    esac
+    [ -f "/lib/ld-musl-${musl_arch}.so.1" ] && return 0
+
+    # Heuristic 2: ldd --version outputs "musl libc" on musl systems
+    if command -v ldd >/dev/null 2>&1; then
+      ldd --version 2>&1 | grep -qi musl && return 0
+    fi
+
+    return 1
+  }
+
+  if detect_musl; then
+    libc_suffix="-musl"
+  fi
+fi
+
 # Validate supported combinations
 suffix=""
 if [[ "$os" == "windows" ]]; then
@@ -199,7 +225,7 @@ if [[ "$requested_version" == "nightly" ]]; then
   # Each OCI layer has "digest" before "org.opencontainers.image.title".
   # Track the last-seen digest and print it when the target filename matches.
   # This avoids sed newline replacement which differs between GNU and BSD.
-  gz_filename="sentry-${os}-${arch}${suffix}.gz"
+  gz_filename="sentry-${os}-${arch}${libc_suffix}${suffix}.gz"
   digest=$(echo "$MANIFEST" \
     | awk -F'"' -v target="$gz_filename" '{
         for(i=1;i<=NF;i++){
@@ -238,7 +264,7 @@ else
 
   # Strip leading 'v' if present (releases use version without 'v' prefix)
   version="${version#v}"
-  filename="sentry-${os}-${arch}${suffix}"
+  filename="sentry-${os}-${arch}${libc_suffix}${suffix}"
   url="https://github.com/getsentry/cli/releases/download/${version}/${filename}"
 
   echo -e "${MUTED}Downloading sentry v${version}...${NC}"

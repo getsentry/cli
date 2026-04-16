@@ -25,7 +25,9 @@
  *     sentry-darwin-arm64
  *     sentry-darwin-x64
  *     sentry-linux-arm64
+ *     sentry-linux-arm64-musl
  *     sentry-linux-x64
+ *     sentry-linux-x64-musl
  *     sentry-windows-x64.exe
  *     bin.js.map          (sourcemap, uploaded to Sentry then deleted)
  */
@@ -51,25 +53,31 @@ const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
 type BuildTarget = {
   os: "darwin" | "linux" | "win32";
   arch: "arm64" | "x64";
+  /** C library variant. Only relevant for Linux targets (musl for Alpine, etc.) */
+  libc?: "musl";
 };
 
 const ALL_TARGETS: BuildTarget[] = [
   { os: "darwin", arch: "arm64" },
   { os: "darwin", arch: "x64" },
   { os: "linux", arch: "arm64" },
+  { os: "linux", arch: "arm64", libc: "musl" },
   { os: "linux", arch: "x64" },
+  { os: "linux", arch: "x64", libc: "musl" },
   { os: "win32", arch: "x64" },
 ];
 
 /** Get package name for a target (uses "windows" instead of "win32") */
 function getPackageName(target: BuildTarget): string {
   const platformName = target.os === "win32" ? "windows" : target.os;
-  return `sentry-${platformName}-${target.arch}`;
+  const libcSuffix = target.libc ? `-${target.libc}` : "";
+  return `sentry-${platformName}-${target.arch}${libcSuffix}`;
 }
 
 /** Get Bun compile target string */
 function getBunTarget(target: BuildTarget): string {
-  return `bun-${target.os}-${target.arch}`;
+  const libcSuffix = target.libc ? `-${target.libc}` : "";
+  return `bun-${target.os}-${target.arch}${libcSuffix}`;
 }
 
 /** Path to the pre-bundled JS used by Step 2 (compile). */
@@ -278,7 +286,9 @@ async function compileTarget(target: BuildTarget): Promise<boolean> {
           | "bun-darwin-arm64"
           | "bun-darwin-x64"
           | "bun-linux-x64"
+          | "bun-linux-x64-musl"
           | "bun-linux-arm64"
+          | "bun-linux-arm64-musl"
           | "bun-windows-x64",
         outfile,
       },
@@ -331,16 +341,18 @@ async function compileTarget(target: BuildTarget): Promise<boolean> {
   return true;
 }
 
-/** Parse target string (e.g., "darwin-x64" or "linux-arm64") into BuildTarget */
+/** Parse target string (e.g., "darwin-x64", "linux-arm64", "linux-x64-musl") into BuildTarget */
 function parseTarget(targetStr: string): BuildTarget | null {
   // Handle "windows" alias for "win32"
   const normalized = targetStr.replace("windows-", "win32-");
-  const [os, arch] = normalized.split("-") as [
-    BuildTarget["os"],
-    BuildTarget["arch"],
-  ];
+  const parts = normalized.split("-");
+  const os = parts[0] as BuildTarget["os"];
+  const arch = parts[1] as BuildTarget["arch"];
+  const libc = parts[2] === "musl" ? ("musl" as const) : undefined;
 
-  const target = ALL_TARGETS.find((t) => t.os === os && t.arch === arch);
+  const target = ALL_TARGETS.find(
+    (t) => t.os === os && t.arch === arch && t.libc === libc
+  );
   return target ?? null;
 }
 
@@ -372,7 +384,7 @@ async function build(): Promise<void> {
     if (!target) {
       console.error(`Invalid target: ${targetArg}`);
       console.error(
-        `Valid targets: ${ALL_TARGETS.map((t) => `${t.os === "win32" ? "windows" : t.os}-${t.arch}`).join(", ")}`
+        `Valid targets: ${ALL_TARGETS.map((t) => `${t.os === "win32" ? "windows" : t.os}-${t.arch}${t.libc ? `-${t.libc}` : ""}`).join(", ")}`
       );
       process.exit(1);
     }
