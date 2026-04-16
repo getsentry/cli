@@ -28,7 +28,11 @@ export type ResolvedInitContext = {
   dryRun: boolean;
   features?: string[];
   org: string;
-  team: string;
+  /**
+   * Resolved team slug for init operations.
+   * Omitted when init defers empty-org auto-creation until project creation.
+   */
+  team?: string;
   project?: string;
   authToken?: string;
   existingProject?: ExistingProjectData;

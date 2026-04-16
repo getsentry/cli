@@ -1,4 +1,5 @@
 import { createProjectWithDsn } from "../../api-client.js";
+import { resolveOrCreateTeam } from "../../resolve-team.js";
 import { slugify } from "../../utils.js";
 import { tryGetExistingProjectData } from "../existing-project.js";
 import type { CreateSentryProjectPayload, ToolResult } from "../types.js";
@@ -6,7 +7,9 @@ import { formatToolError } from "./shared.js";
 import type { InitToolDefinition, ToolContext } from "./types.js";
 
 /**
- * Create a new Sentry project using the org/team that preflight already resolved.
+ * Create a new Sentry project using the org that preflight already resolved.
+ * Team creation is deferred here for empty-org init flows so the final project
+ * slug can be reused as the team slug.
  */
 export async function createSentryProject(
   payload: CreateSentryProjectPayload,
@@ -32,19 +35,6 @@ export async function createSentryProject(
     };
   }
 
-  if (context.dryRun) {
-    return {
-      ok: true,
-      data: {
-        orgSlug: context.org,
-        projectSlug: slug,
-        projectId: "(dry-run)",
-        dsn: "https://key@o0.ingest.sentry.io/0",
-        url: "https://sentry.io/dry-run",
-      },
-    };
-  }
-
   try {
     if (context.project) {
       const existingProject = await tryGetExistingProjectData(
@@ -60,9 +50,32 @@ export async function createSentryProject(
       }
     }
 
+    const teamSlug = context.team
+      ? context.team
+      : (
+          await resolveOrCreateTeam(context.org, {
+            autoCreateSlug: slug,
+            usageHint: "sentry init",
+            dryRun: context.dryRun,
+          })
+        ).slug;
+
+    if (context.dryRun) {
+      return {
+        ok: true,
+        data: {
+          orgSlug: context.org,
+          projectSlug: slug,
+          projectId: "(dry-run)",
+          dsn: "https://key@o0.ingest.sentry.io/0",
+          url: "https://sentry.io/dry-run",
+        },
+      };
+    }
+
     const { project, dsn, url } = await createProjectWithDsn(
       context.org,
-      context.team,
+      teamSlug,
       {
         name,
         platform: payload.params.platform,

@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as apiClient from "../../../../src/lib/api-client.js";
 import { createSentryProject } from "../../../../src/lib/init/tools/create-sentry-project.js";
 import type { CreateSentryProjectPayload } from "../../../../src/lib/init/types.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as resolveTeam from "../../../../src/lib/resolve-team.js";
 
 function makePayload(
   overrides?: Partial<CreateSentryProjectPayload["params"]>
@@ -22,6 +24,7 @@ function makePayload(
 let createProjectWithDsnSpy: ReturnType<typeof spyOn>;
 let getProjectSpy: ReturnType<typeof spyOn>;
 let tryGetPrimaryDsnSpy: ReturnType<typeof spyOn>;
+let resolveOrCreateTeamSpy: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
   createProjectWithDsnSpy = spyOn(
@@ -48,12 +51,20 @@ beforeEach(() => {
   tryGetPrimaryDsnSpy = spyOn(apiClient, "tryGetPrimaryDsn").mockResolvedValue(
     "https://abc@o1.ingest.sentry.io/42"
   );
+  resolveOrCreateTeamSpy = spyOn(
+    resolveTeam,
+    "resolveOrCreateTeam"
+  ).mockResolvedValue({
+    slug: "generated-team",
+    source: "auto-created",
+  } as any);
 });
 
 afterEach(() => {
   createProjectWithDsnSpy.mockRestore();
   getProjectSpy.mockRestore();
   tryGetPrimaryDsnSpy.mockRestore();
+  resolveOrCreateTeamSpy.mockRestore();
 });
 
 describe("createSentryProject", () => {
@@ -61,7 +72,7 @@ describe("createSentryProject", () => {
     const result = await createSentryProject(makePayload(), {
       dryRun: false,
       org: "acme",
-      team: "platform",
+      team: undefined,
       project: "my-app",
       existingProject: {
         orgSlug: "acme",
@@ -75,6 +86,7 @@ describe("createSentryProject", () => {
     expect(result.ok).toBe(true);
     expect(result.message).toContain("Using existing project");
     expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
+    expect(resolveOrCreateTeamSpy).not.toHaveBeenCalled();
   });
 
   test("creates a new project with the pre-resolved org and team", async () => {
@@ -108,13 +120,14 @@ describe("createSentryProject", () => {
     const result = await createSentryProject(makePayload(), {
       dryRun: false,
       org: "acme",
-      team: "platform",
+      team: undefined,
       project: "my-app",
     });
 
     expect(result.ok).toBe(true);
     expect(result.message).toContain("Using existing project");
     expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
+    expect(resolveOrCreateTeamSpy).not.toHaveBeenCalled();
   });
 
   test("surfaces lookup failures before creating when a known slug cannot be verified", async () => {
@@ -145,6 +158,53 @@ describe("createSentryProject", () => {
       expect.objectContaining({
         orgSlug: "acme",
         projectId: "(dry-run)",
+      })
+    );
+    expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
+  });
+
+  test("resolves the team at project creation time when preflight deferred it", async () => {
+    const result = await createSentryProject(makePayload(), {
+      dryRun: false,
+      org: "acme",
+      team: undefined,
+      project: undefined,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(resolveOrCreateTeamSpy).toHaveBeenCalledWith(
+      "acme",
+      expect.objectContaining({
+        autoCreateSlug: "my-app",
+        usageHint: "sentry init",
+        dryRun: false,
+      })
+    );
+    expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
+      "acme",
+      "generated-team",
+      expect.objectContaining({
+        name: "my-app",
+        platform: "javascript-react",
+      })
+    );
+  });
+
+  test("uses the final project slug for deferred team resolution in dry-run mode", async () => {
+    const result = await createSentryProject(makePayload(), {
+      dryRun: true,
+      org: "acme",
+      team: undefined,
+      project: undefined,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(resolveOrCreateTeamSpy).toHaveBeenCalledWith(
+      "acme",
+      expect.objectContaining({
+        autoCreateSlug: "my-app",
+        usageHint: "sentry init",
+        dryRun: true,
       })
     );
     expect(createProjectWithDsnSpy).not.toHaveBeenCalled();

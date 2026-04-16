@@ -52,9 +52,6 @@ export async function resolveInitContext(
     }
 
     const team = await resolveTeam(org, initial);
-    if (!team) {
-      return null;
-    }
 
     return buildResolvedInitContext(initial, org, team, projectSelection);
   });
@@ -82,7 +79,7 @@ async function withPreflightHandling(
 function buildResolvedInitContext(
   initial: WizardOptions,
   org: string,
-  team: string,
+  team: string | undefined,
   selection: ProjectSelection
 ): ResolvedInitContext {
   return {
@@ -287,13 +284,13 @@ async function resolveExistingProjectChoice(opts: {
 async function resolveTeam(
   org: string,
   initial: WizardOptions
-): Promise<string | null> {
+): Promise<string | undefined> {
   try {
     const result = await resolveOrCreateTeam(org, {
       team: initial.team,
-      autoCreateSlug: "default",
       usageHint: "sentry init",
       dryRun: initial.dryRun,
+      deferAutoCreateOnEmptyOrg: true,
       onAmbiguous: initial.yes
         ? async (candidates) => (candidates[0] as SentryTeam).slug
         : async (candidates) => {
@@ -311,7 +308,7 @@ async function resolveTeam(
             return selected;
           },
     });
-    return result.slug;
+    return result.source === "deferred" ? undefined : result.slug;
   } catch (error) {
     if (error instanceof WizardCancelledError) {
       throw error;

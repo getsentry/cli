@@ -191,6 +191,21 @@ describe("resolveInitContext", () => {
     expect(context?.existingProject).toBeUndefined();
   });
 
+  test("defers empty-org team creation until project creation", async () => {
+    resolveOrCreateTeamSpy.mockResolvedValue({ source: "deferred" } as any);
+
+    const context = await resolveInitContext(makeOptions());
+
+    expect(context?.team).toBeUndefined();
+    expect(resolveOrCreateTeamSpy).toHaveBeenCalledWith(
+      "acme",
+      expect.objectContaining({
+        team: undefined,
+        deferAutoCreateOnEmptyOrg: true,
+      })
+    );
+  });
+
   test("clears the project when the user chooses to create new", async () => {
     selectSpy.mockResolvedValue("create");
 
@@ -200,6 +215,26 @@ describe("resolveInitContext", () => {
 
     expect(context?.project).toBeUndefined();
     expect(context?.existingProject).toBeUndefined();
+  });
+
+  test("resolves an explicit team during preflight", async () => {
+    resolveOrCreateTeamSpy.mockImplementation(async (_org, options) => ({
+      slug: options.team ?? "platform",
+      source: options.team ? "explicit" : "auto-selected",
+    }));
+
+    const context = await resolveInitContext(
+      makeOptions({ team: "backend", yes: false })
+    );
+
+    expect(context?.team).toBe("backend");
+    expect(resolveOrCreateTeamSpy).toHaveBeenCalledWith(
+      "acme",
+      expect.objectContaining({
+        team: "backend",
+        deferAutoCreateOnEmptyOrg: true,
+      })
+    );
   });
 
   test("uses the ambiguity callback when team selection requires it", async () => {
