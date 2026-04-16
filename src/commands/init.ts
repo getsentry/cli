@@ -104,7 +104,7 @@ function classifyArgs(
  *
  * For `project-search` (bare slug), searches for an existing project first.
  * If not found, treats the slug as a **new project name** to create —
- * org will be resolved later by the wizard's `resolveOrgSlug()`.
+ * org will be resolved later by init preflight before the workflow starts.
  * If the slug matches an org name, treats it as org-only (like `slug/`).
  */
 async function resolveTarget(targetArg: string | undefined): Promise<{
@@ -154,7 +154,7 @@ async function resolveTarget(targetArg: string | undefined): Promise<{
       }
 
       // Truly not found — treat as the name for a new project to create.
-      // Org will be resolved later by the wizard via resolveOrgSlug().
+      // Org will be resolved later by init preflight before the workflow starts.
       log.info(
         `No existing project "${parsed.projectSlug}" found — will create a new project with this name.`
       );

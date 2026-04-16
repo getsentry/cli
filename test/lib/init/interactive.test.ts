@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as clack from "@clack/prompts";
 import { handleInteractive } from "../../../src/lib/init/interactive.js";
-import type { WizardOptions } from "../../../src/lib/init/types.js";
+import type { InteractiveContext } from "../../../src/lib/init/types.js";
 
 const noop = () => {
   /* suppress clack output */
@@ -24,14 +24,12 @@ let logWarnSpy: ReturnType<typeof spyOn>;
 let cancelSpy: ReturnType<typeof spyOn>;
 let isCancelSpy: ReturnType<typeof spyOn>;
 
-function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
+function makeOptions(
+  overrides?: Partial<InteractiveContext>
+): InteractiveContext {
   return {
-    directory: "/tmp/test",
     yes: false,
     dryRun: false,
-    stdout: { write: () => true },
-    stderr: { write: () => true },
-    stdin: process.stdin,
     ...overrides,
   };
 }

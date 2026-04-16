@@ -2,32 +2,25 @@
  * Wizard Runner
  *
  * Main suspend/resume loop that drives the remote Mastra workflow.
- * Each iteration: check status → if suspended, perform local-op or
+ * Each iteration: check status → if suspended, perform tool or
  * interactive prompt → resume with result → repeat.
  */
 
 import { randomBytes } from "node:crypto";
-import { basename } from "node:path";
 import {
   cancel,
   confirm,
   intro,
-  isCancel,
   log,
-  select,
   spinner,
 } from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 import { captureException, getTraceData } from "@sentry/node-core/light";
-import type { SentryTeam } from "../../types/index.js";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
-import { getAuthToken } from "../db/auth.js";
 import { WizardError } from "../errors.js";
 import { terminalLink } from "../formatters/colors.js";
-import { renderInlineMarkdown, safeCodeSpan } from "../formatters/markdown.js";
-import { resolveOrCreateTeam } from "../resolve-team.js";
-import { slugify } from "../utils.js";
+import { renderInlineMarkdown } from "../formatters/markdown.js";
 import {
   abortIfCancelled,
   STEP_LABELS,
@@ -43,22 +36,19 @@ import {
 import { formatError, formatResult } from "./formatters.js";
 import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
-import {
-  detectExistingProject,
-  handleLocalOp,
-  precomputeDirListing,
-  precomputeSentryDetection,
-  preReadCommonFiles,
-  resolveOrgSlug,
-  tryGetExistingProject,
-} from "./local-ops.js";
+import { resolveInitContext } from "./preflight.js";
+import { describeTool, executeTool } from "./tools/registry.js";
 import type {
-  LocalOpPayload,
-  LocalOpResult,
+  ResolvedInitContext,
   SuspendPayload,
   WizardOptions,
   WorkflowRunResult,
 } from "./types.js";
+import {
+  precomputeDirListing,
+  precomputeSentryDetection,
+  preReadCommonFiles,
+} from "./workflow-inputs.js";
 
 type Spinner = ReturnType<typeof spinner>;
 
@@ -69,7 +59,7 @@ type StepContext = {
   stepId: string;
   spin: Spinner;
   spinState: SpinState;
-  options: WizardOptions;
+  context: ResolvedInitContext;
 };
 
 function nextPhase(
@@ -104,132 +94,31 @@ function truncateForTerminal(message: string): string {
   return `${truncated}…`;
 }
 
-/**
- * Build a human-readable spinner message from the payload params.
- * Each operation type generates a descriptive message showing which
- * files are being read, written, or checked.
- */
-export function describeLocalOp(payload: LocalOpPayload): string {
-  switch (payload.operation) {
-    case "read-files": {
-      const paths = payload.params.paths;
-      return describeFilePaths("Reading", paths);
-    }
-    case "file-exists-batch": {
-      const paths = payload.params.paths;
-      return describeFilePaths("Checking", paths);
-    }
-    case "apply-patchset": {
-      const patches = payload.params.patches;
-      const first = patches[0];
-      if (patches.length === 1 && first) {
-        const verb = patchActionVerb(first.action);
-        return `${verb} ${safeCodeSpan(basename(first.path))}...`;
-      }
-      const counts = patchActionCounts(patches);
-      return `Applying ${patches.length} file changes (${counts})...`;
-    }
-    case "run-commands": {
-      const cmds = payload.params.commands;
-      const first = cmds[0];
-      if (cmds.length === 1 && first) {
-        return `Running ${safeCodeSpan(first)}...`;
-      }
-      return `Running ${cmds.length} commands (${safeCodeSpan(first ?? "...")}, ...)...`;
-    }
-    case "list-dir":
-      return "Listing directory...";
-    case "grep": {
-      const searches = payload.params.searches;
-      if (searches.length === 1 && searches[0]) {
-        return `Searching for ${safeCodeSpan(searches[0].pattern)}...`;
-      }
-      return `Running ${searches.length} searches...`;
-    }
-    case "glob": {
-      const patterns = payload.params.patterns;
-      if (patterns.length === 1 && patterns[0]) {
-        return `Finding files matching ${safeCodeSpan(patterns[0])}...`;
-      }
-      return `Finding files (${patterns.length} patterns)...`;
-    }
-    case "create-sentry-project":
-      return `Creating project ${safeCodeSpan(payload.params.name)} (${payload.params.platform})...`;
-    case "detect-sentry":
-      return "Checking for existing Sentry setup...";
-    default:
-      return `${(payload as { operation: string }).operation}...`;
-  }
-}
-
-/** Format a file paths list into a human-readable message with a verb prefix. */
-function describeFilePaths(verb: string, paths: string[]): string {
-  const first = paths[0];
-  const second = paths[1];
-  if (!first) {
-    return `${verb} files...`;
-  }
-  if (paths.length === 1) {
-    return `${verb} ${safeCodeSpan(basename(first))}...`;
-  }
-  if (paths.length === 2 && second) {
-    return `${verb} ${safeCodeSpan(basename(first))}, ${safeCodeSpan(basename(second))}...`;
-  }
-  return `${verb} ${paths.length} files (${safeCodeSpan(basename(first))}${second ? `, ${safeCodeSpan(basename(second))}` : ""}, ...)...`;
-}
-
-/** Map a patch action to a user-facing verb. */
-function patchActionVerb(action: string): string {
-  switch (action) {
-    case "create":
-      return "Creating";
-    case "modify":
-      return "Modifying";
-    case "delete":
-      return "Deleting";
-    default:
-      return "Updating";
-  }
-}
-
-/** Summarize patch actions into a compact string like "2 created, 1 modified". */
-function patchActionCounts(patches: Array<{ action: string }>): string {
-  const counts = new Map<string, number>();
-  for (const p of patches) {
-    counts.set(p.action, (counts.get(p.action) ?? 0) + 1);
-  }
-  const parts: string[] = [];
-  for (const [action, count] of counts) {
-    parts.push(`${count} ${action === "modify" ? "modified" : `${action}d`}`);
-  }
-  return parts.join(", ");
-}
-
 async function handleSuspendedStep(
   ctx: StepContext,
   stepPhases: Map<string, number>,
   stepHistory: Map<string, Record<string, unknown>[]>
 ): Promise<Record<string, unknown>> {
-  const { payload, stepId, spin, spinState, options } = ctx;
+  const { payload, stepId, spin, spinState, context } = ctx;
   const label = STEP_LABELS[stepId] ?? stepId;
 
-  if (payload.type === "local-op") {
-    const message = describeLocalOp(payload);
+  if (payload.type === "tool") {
+    const message = describeTool(payload);
     spin.message(renderInlineMarkdown(truncateForTerminal(message)));
 
-    const localResult = await handleLocalOp(payload, options);
+    const toolResult = await executeTool(payload, context);
 
-    if (localResult.message) {
-      spin.stop(renderInlineMarkdown(localResult.message));
+    if (toolResult.message) {
+      spin.stop(renderInlineMarkdown(toolResult.message));
       spin.start("Processing...");
     }
 
     const history = stepHistory.get(stepId) ?? [];
-    history.push(localResult);
+    history.push(toolResult);
     stepHistory.set(stepId, history);
 
     return {
-      ...localResult,
+      ...toolResult,
       _phase: nextPhase(stepPhases, stepId, ["read-files", "analyze", "done"]),
       _prevPhases: history.slice(0, -1),
     };
@@ -238,7 +127,7 @@ async function handleSuspendedStep(
   if (payload.type === "interactive") {
     // In dry-run mode, verification always fails because no files were written
     // (the server skips apply-patchset). Auto-continue since this is expected.
-    if (options.dryRun && stepId === VERIFY_CHANGES_STEP) {
+    if (context.dryRun && stepId === VERIFY_CHANGES_STEP) {
       return {
         action: "continue",
         _phase: nextPhase(stepPhases, stepId, ["apply"]),
@@ -248,7 +137,7 @@ async function handleSuspendedStep(
     spin.stop(label);
     spinState.running = false;
 
-    const interactiveResult = await handleInteractive(payload, options);
+    const interactiveResult = await handleInteractive(payload, context);
 
     spin.start("Processing...");
     spinState.running = true;
@@ -295,7 +184,7 @@ function assertSuspendPayload(raw: unknown): SuspendPayload {
   const obj = raw as Record<string, unknown>;
   if (
     typeof obj.type !== "string" ||
-    !["local-op", "interactive"].includes(obj.type)
+    !["tool", "interactive"].includes(obj.type)
   ) {
     throw new Error(`Unknown suspend payload type: ${String(obj.type)}`);
   }
@@ -394,179 +283,6 @@ async function preamble(
   return true;
 }
 
-/**
- * Derive a team slug for auto-creation when the org has no teams.
- */
-function deriveTeamSlug(): string {
-  return "default";
-}
-
-/**
- * Resolve org and detect an existing Sentry project before the spinner starts.
- *
- * Clack requires all interactive prompts to complete before any spinner/task
- * begins — the spinner's setInterval writes output below an active prompt if
- * interleaved. This function surfaces all interactive decisions upfront.
- *
- * @returns Updated options with org and project resolved, or `null` to abort.
- *          When `null` is returned, `process.exitCode` is already set.
- */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard pre-flight branches are inherently nested
-async function resolvePreSpinnerOptions(
-  options: WizardOptions
-): Promise<WizardOptions | null> {
-  const { directory, yes } = options;
-  let opts = options;
-
-  if (!(opts.org || opts.project)) {
-    let existing: Awaited<ReturnType<typeof detectExistingProject>> = null;
-    try {
-      existing = await detectExistingProject(directory);
-    } catch {
-      // Filesystem error (e.g. permission denied) — treat as no existing project
-    }
-    if (existing) {
-      if (yes) {
-        opts = {
-          ...opts,
-          org: existing.orgSlug,
-          project: existing.projectSlug,
-        };
-      } else {
-        const choice = await select({
-          message: "Found an existing Sentry project in this codebase.",
-          options: [
-            {
-              value: "existing" as const,
-              label: `Use existing project (${existing.orgSlug}/${existing.projectSlug})`,
-              hint: "Sentry is already configured here",
-            },
-            {
-              value: "create" as const,
-              label: "Create a new Sentry project",
-            },
-          ],
-        });
-        if (isCancel(choice)) {
-          cancel("Setup cancelled.");
-          process.exitCode = 0;
-          return null;
-        }
-        if (choice === "existing") {
-          opts = {
-            ...opts,
-            org: existing.orgSlug,
-            project: existing.projectSlug,
-          };
-        }
-      }
-    }
-  }
-
-  if (!opts.org) {
-    let orgResult: string | LocalOpResult;
-    try {
-      orgResult = await resolveOrgSlug(directory, yes);
-    } catch (err) {
-      if (err instanceof WizardCancelledError) {
-        cancel("Setup cancelled.");
-        process.exitCode = 0;
-        return null;
-      }
-      log.error(errorMessage(err));
-      cancel("Setup failed.");
-      throw new WizardError(errorMessage(err));
-    }
-    if (typeof orgResult !== "string") {
-      log.error(orgResult.error ?? "Failed to resolve organization.");
-      cancel("Setup failed.");
-      throw new WizardError(
-        orgResult.error ?? "Failed to resolve organization."
-      );
-    }
-    opts = { ...opts, org: orgResult };
-  }
-
-  // Bare slug case: user ran `sentry init my-app` (project set, org not originally
-  // provided). Org was just resolved above. Check if this named project already
-  // exists in the resolved org and prompt the user — must happen before the spinner.
-  if (options.project && !options.org && opts.org) {
-    const slug = slugify(options.project);
-    const resolvedOrg = opts.org;
-    if (slug) {
-      try {
-        const existing = await tryGetExistingProject(resolvedOrg, slug);
-        if (existing && !yes) {
-          const choice = await select({
-            message: `Found existing project '${slug}' in ${resolvedOrg}.`,
-            options: [
-              {
-                value: "existing" as const,
-                label: `Use existing (${resolvedOrg}/${slug})`,
-                hint: "Already configured",
-              },
-              {
-                value: "create" as const,
-                label: "Create a new project",
-                hint: "Wizard will detect the project name from your codebase",
-              },
-            ],
-          });
-          if (isCancel(choice)) {
-            cancel("Setup cancelled.");
-            process.exitCode = 0;
-            return null;
-          }
-          if (choice === "create") {
-            // Clear project so the wizard auto-detects the name from the codebase
-            opts = { ...opts, project: undefined };
-          }
-        }
-      } catch {
-        // API error checking for existing project — proceed and let createSentryProject handle it
-      }
-    }
-  }
-
-  // Resolve team upfront so failures surface before the AI workflow starts.
-  if (!opts.team && opts.org) {
-    try {
-      const result = await resolveOrCreateTeam(opts.org, {
-        autoCreateSlug: deriveTeamSlug(),
-        usageHint: "sentry init",
-        onAmbiguous: yes
-          ? async (candidates) => (candidates[0] as SentryTeam).slug
-          : async (candidates) => {
-              const selected = await select({
-                message: "Which team should own this project?",
-                options: candidates.map((t) => ({
-                  value: t.slug,
-                  label: t.slug,
-                  hint: t.name !== t.slug ? t.name : undefined,
-                })),
-              });
-              if (isCancel(selected)) {
-                cancel("Setup cancelled.");
-                process.exitCode = 0;
-                throw new WizardCancelledError();
-              }
-              return selected;
-            },
-      });
-      opts = { ...opts, team: result.slug };
-    } catch (err) {
-      if (err instanceof WizardCancelledError) {
-        return null;
-      }
-      log.error(errorMessage(err));
-      cancel("Setup failed.");
-      throw new WizardError(errorMessage(err));
-    }
-  }
-
-  return opts;
-}
-
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard orchestration with error handling branches
 export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   const { directory, yes, dryRun, features } = initialOptions;
@@ -585,8 +301,8 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   const effectiveOptions = dryRun
     ? { ...initialOptions, yes: true }
     : initialOptions;
-  const options = await resolvePreSpinnerOptions(effectiveOptions);
-  if (!options) {
+  const context = await resolveInitContext(effectiveOptions);
+  if (!context) {
     return;
   }
 
@@ -602,12 +318,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     },
   };
 
-  const token = getAuthToken();
-
-  // Make the auth token available to local-ops for injecting into generated
-  // env files (e.g. .env.sentry-build-plugin). The token is never sent to
-  // the remote server — it stays client-side only.
-  options.authToken = token;
+  const token = context.authToken;
 
   const client = new MastraClient({
     baseUrl: MASTRA_API_URL,
@@ -693,7 +404,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
           stepId: extracted.stepId,
           spin,
           spinState,
-          options,
+          context,
         },
         stepPhases,
         stepHistory
