@@ -1,6 +1,27 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.28.0
+
+### New Features ✨
+
+- (build) Add musl binaries for Alpine Linux support by @BYK in [#762](https://github.com/getsentry/cli/pull/762)
+- (custom-headers) Add SENTRY_CUSTOM_HEADERS for self-hosted proxy auth by @BYK in [#761](https://github.com/getsentry/cli/pull/761)
+- (init) Pre-supply existingSentry to eliminate roundtrip by @betegon in [#755](https://github.com/getsentry/cli/pull/755)
+
+### Bug Fixes 🐛
+
+- (arg-parsing) Normalize spaces in slugs and trim whitespace in issue IDs (CLI-14M, CLI-16M) by @BYK in [#757](https://github.com/getsentry/cli/pull/757)
+- (ci) Install libstdc++/libgcc for Alpine smoke test and add musl to PR matrix by @BYK in [#765](https://github.com/getsentry/cli/pull/765)
+- (search) Rewrite OR queries to in-list syntax across all --query commands (CLI-16J) by @BYK in [#758](https://github.com/getsentry/cli/pull/758)
+- (upgrade) Retry spawn on EBUSY for Windows Defender file locking (CLI-16E) by @BYK in [#756](https://github.com/getsentry/cli/pull/756)
+
+### Internal Changes 🔧
+
+- (init) Split tools and preflight by @betegon in [#764](https://github.com/getsentry/cli/pull/764)
+- (time-range) Parse --period at flag level via parsePeriod by @BYK in [#760](https://github.com/getsentry/cli/pull/760)
+- Regenerate docs by @github-actions[bot] in [34bf056d](https://github.com/getsentry/cli/commit/34bf056d0bca3cc90f0287dbda44bc1c140d64b2)
+
 ## 0.27.0
 
 ### New Features ✨
