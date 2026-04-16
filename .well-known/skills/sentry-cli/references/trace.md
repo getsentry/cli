@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-trace
-version: 0.27.0
+version: 0.28.0
 description: View distributed traces
 requires:
   bins: ["sentry"]
