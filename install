@@ -167,6 +167,23 @@ if [[ "$os" == "linux" ]]; then
   if detect_musl; then
     libc_suffix="-musl"
     libc_variant="musl"
+
+    # Bun musl binaries dynamically link libstdc++ and libgcc_s.
+    # Auto-install them on Alpine when running as root (typical in Docker).
+    # When not root, warn with install instructions.
+    if ! ldconfig -p 2>/dev/null | grep -q libstdc++ && ! [ -f /usr/lib/libstdc++.so.6 ]; then
+      if command -v apk >/dev/null 2>&1; then
+        if [ "$(id -u)" = "0" ]; then
+          echo -e "${MUTED}Installing required C++ runtime libraries...${NC}"
+          apk add --no-cache libstdc++ libgcc >/dev/null 2>&1 \
+            || die "Failed to install libstdc++ and libgcc (required for musl binary)" "deps"
+        else
+          echo -e "${RED}Missing required libraries: libstdc++ libgcc${NC}" >&2
+          echo -e "${RED}Run: apk add libstdc++ libgcc${NC}" >&2
+          die "Cannot install dependencies without root. Run as root or install manually." "deps"
+        fi
+      fi
+    fi
   fi
 fi
 
