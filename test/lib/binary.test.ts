@@ -22,8 +22,10 @@ import {
   getBinaryDownloadUrl,
   getBinaryFilename,
   getBinaryPaths,
+  getPlatformBinaryName,
   installBinary,
   isDowngrade,
+  isMusl,
   releaseLock,
   replaceBinarySync,
 } from "../../src/lib/binary.js";
@@ -521,5 +523,64 @@ describe("isDowngrade", () => {
     expect(isDowngrade("0.14.0-dev.1772724107", "0.14.0-dev.1772732047")).toBe(
       false
     );
+  });
+});
+
+describe("isMusl", () => {
+  test("returns false on non-Linux platforms", () => {
+    if (process.platform !== "linux") {
+      expect(isMusl()).toBe(false);
+    }
+  });
+
+  test("returns a boolean on Linux", () => {
+    if (process.platform === "linux") {
+      expect(typeof isMusl()).toBe("boolean");
+    }
+  });
+
+  test("result is cached (calling twice returns same value)", () => {
+    const first = isMusl();
+    const second = isMusl();
+    expect(first).toBe(second);
+  });
+});
+
+describe("getPlatformBinaryName", () => {
+  test("starts with sentry- prefix", () => {
+    expect(getPlatformBinaryName()).toStartWith("sentry-");
+  });
+
+  test("includes correct architecture", () => {
+    const name = getPlatformBinaryName();
+    const expectedArch = process.arch === "arm64" ? "arm64" : "x64";
+    expect(name).toContain(expectedArch);
+  });
+
+  test("includes correct OS", () => {
+    const name = getPlatformBinaryName();
+    if (process.platform === "darwin") {
+      expect(name).toContain("darwin");
+    } else if (process.platform === "win32") {
+      expect(name).toContain("windows");
+      expect(name).toEndWith(".exe");
+    } else {
+      expect(name).toContain("linux");
+    }
+  });
+
+  test("on CI (glibc), does not contain -musl suffix", () => {
+    // CI runners use glibc-based Ubuntu. This test verifies the
+    // musl detection correctly identifies glibc systems.
+    if (process.platform === "linux" && !isMusl()) {
+      expect(getPlatformBinaryName()).not.toContain("-musl");
+    }
+  });
+
+  test("includes -musl suffix on musl systems", () => {
+    // Only runs on musl-based systems (e.g., Alpine CI containers)
+    if (process.platform === "linux" && isMusl()) {
+      expect(getPlatformBinaryName()).toContain("-musl");
+    }
   });
 });

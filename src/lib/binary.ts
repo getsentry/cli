@@ -21,10 +21,57 @@ import { stringifyUnknown, UpgradeError } from "./errors.js";
 export const KNOWN_CURL_DIRS = [".local/bin", "bin", ".sentry/bin"];
 
 /**
+ * Detect whether the current process is running on a musl-based Linux system
+ * (e.g., Alpine Linux, Void Linux musl variant).
+ *
+ * Uses two heuristics in order of reliability:
+ * 1. Check for `/lib/ld-musl-<arch>.so.1` — the musl dynamic linker is always
+ *    at this path on musl systems. Fast stat check, no subprocess.
+ * 2. Parse `ldd --version` output — musl's ldd writes "musl libc" to stderr,
+ *    while glibc outputs "GNU C Library" to stdout.
+ *
+ * The result is cached after first call since libc cannot change at runtime.
+ */
+let cachedIsMusl: boolean | undefined;
+
+export function isMusl(): boolean {
+  if (process.platform !== "linux") {
+    return false;
+  }
+  if (cachedIsMusl !== undefined) {
+    return cachedIsMusl;
+  }
+
+  // Heuristic 1: Check for musl dynamic linker
+  const muslArch = process.arch === "x64" ? "x86_64" : "aarch64";
+  if (existsSync(`/lib/ld-musl-${muslArch}.so.1`)) {
+    cachedIsMusl = true;
+    return true;
+  }
+
+  // Heuristic 2: ldd --version output (musl ldd writes "musl libc" to stderr)
+  try {
+    const result = Bun.spawnSync(["ldd", "--version"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const output =
+      Buffer.from(result.stdout).toString() +
+      Buffer.from(result.stderr).toString();
+    cachedIsMusl = output.toLowerCase().includes("musl");
+    return cachedIsMusl;
+  } catch {
+    // ldd not found or failed — assume glibc (the common case)
+    cachedIsMusl = false;
+    return false;
+  }
+}
+
+/**
  * Build the platform-specific binary base name.
  *
  * Matches the naming convention used by GitHub Releases and GHCR:
- * `sentry-<os>-<arch>[.exe]` (e.g., `sentry-linux-x64`, `sentry-darwin-arm64`).
+ * `sentry-<os>-<arch>[-musl][.exe]` (e.g., `sentry-linux-x64`, `sentry-linux-arm64-musl`).
  */
 export function getPlatformBinaryName(): string {
   let os: string;
@@ -36,8 +83,9 @@ export function getPlatformBinaryName(): string {
     os = "linux";
   }
   const arch = process.arch === "arm64" ? "arm64" : "x64";
+  const libcSuffix = isMusl() ? "-musl" : "";
   const suffix = process.platform === "win32" ? ".exe" : "";
-  return `sentry-${os}-${arch}${suffix}`;
+  return `sentry-${os}-${arch}${libcSuffix}${suffix}`;
 }
 
 /**

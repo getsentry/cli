@@ -73,11 +73,13 @@ jobs:
             else
               # main, release/**, workflow_call: full cross-platform matrix
               echo '{"include":[
-                {"target":"darwin-arm64",  "os":"macos-latest",  "can-test":true},
-                {"target":"linux-x64",     "os":"ubuntu-latest", "can-test":true},
-                {"target":"windows-x64",   "os":"windows-latest","can-test":true},
-                {"target":"darwin-x64",    "os":"macos-latest",  "can-test":false},
-                {"target":"linux-arm64",   "os":"ubuntu-latest", "can-test":false}
+                {"target":"darwin-arm64",      "os":"macos-latest",  "can-test":true},
+                {"target":"linux-x64",         "os":"ubuntu-latest", "can-test":true},
+                {"target":"linux-x64-musl",    "os":"ubuntu-latest", "can-test":false},
+                {"target":"windows-x64",       "os":"windows-latest","can-test":true},
+                {"target":"darwin-x64",        "os":"macos-latest",  "can-test":false},
+                {"target":"linux-arm64",       "os":"ubuntu-latest", "can-test":false},
+                {"target":"linux-arm64-musl",  "os":"ubuntu-latest", "can-test":false}
               ]}'
             fi
             echo 'MATRIX_EOF'
@@ -265,6 +267,11 @@ jobs:
           else
             ./dist-bin/sentry-${{ matrix.target }} --help
           fi
+      - name: Smoke test (musl/Alpine)
+        if: matrix.target == 'linux-x64-musl'
+        run: |
+          docker run --rm -v "$PWD/dist-bin:/dist-bin:ro" alpine:latest \
+            /dist-bin/sentry-linux-x64-musl --help
       - name: Upload binary artifact
         uses: actions/upload-artifact@v7
         with:

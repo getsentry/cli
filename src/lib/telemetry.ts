@@ -12,6 +12,7 @@
 import { chmodSync, statSync } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
+import { isMusl } from "./binary.js";
 import {
   CLI_VERSION,
   getCliEnvironment,
@@ -433,6 +434,19 @@ export function getSentryTracePropagationTargets(): (string | RegExp)[] {
  *
  * @internal Exported for testing
  */
+
+/**
+ * Set the cli.libc Sentry tag on Linux (musl for Alpine, glibc for most distros).
+ * No-op on non-Linux — the concept doesn't apply to macOS/Windows.
+ * Extracted from initSentry to stay under the cognitive complexity limit.
+ */
+function setLibcTag(): void {
+  if (process.platform !== "linux") {
+    return;
+  }
+  Sentry.setTag("cli.libc", isMusl() ? "musl" : "glibc");
+}
+
 export function initSentry(
   enabled: boolean,
   options?: { libraryMode?: boolean }
@@ -599,6 +613,9 @@ export function initSentry(
 
     // Tag whether running in an interactive terminal or agent/CI environment
     Sentry.setTag("is_tty", !!process.stdout.isTTY);
+
+    // Tag the C library variant on Linux (musl vs glibc).
+    setLibcTag();
 
     // Tag which AI agent (if any) is driving the CLI.
     // Env var detection is sync (instant). If no env var matches, fire off
