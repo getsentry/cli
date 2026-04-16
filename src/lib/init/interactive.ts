@@ -17,15 +17,15 @@ import {
 import { REQUIRED_FEATURE } from "./constants.js";
 import type {
   ConfirmPayload,
+  InteractiveContext,
   InteractivePayload,
   MultiSelectPayload,
   SelectPayload,
-  WizardOptions,
 } from "./types.js";
 
 export async function handleInteractive(
   payload: InteractivePayload,
-  options: WizardOptions
+  options: InteractiveContext
 ): Promise<Record<string, unknown>> {
   switch (payload.kind) {
     case "select":
@@ -41,7 +41,7 @@ export async function handleInteractive(
 
 async function handleSelect(
   payload: SelectPayload,
-  options: WizardOptions
+  options: InteractiveContext
 ): Promise<Record<string, unknown>> {
   const apps = payload.apps ?? [];
   const items = payload.options ?? apps.map((a) => a.name);
@@ -78,7 +78,7 @@ async function handleSelect(
 
 async function handleMultiSelect(
   payload: MultiSelectPayload,
-  options: WizardOptions
+  options: InteractiveContext
 ): Promise<Record<string, unknown>> {
   const available = payload.availableFeatures ?? payload.options ?? [];
 
@@ -137,7 +137,7 @@ async function handleMultiSelect(
 
 async function handleConfirm(
   payload: ConfirmPayload,
-  options: WizardOptions
+  options: InteractiveContext
 ): Promise<Record<string, unknown>> {
   if (options.yes) {
     log.info("Auto-confirmed: continuing");

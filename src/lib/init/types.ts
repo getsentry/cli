@@ -4,24 +4,44 @@ export type DirEntry = {
   type: "file" | "directory";
 };
 
+export type ExistingProjectData = {
+  orgSlug: string;
+  projectSlug: string;
+  projectId: string;
+  dsn: string;
+  url: string;
+};
+
 export type WizardOptions = {
   directory: string;
   yes: boolean;
   dryRun: boolean;
   features?: string[];
-  /** Explicit team slug to create the project under. Skips team resolution. */
   team?: string;
-  /** Explicit org slug from CLI arg (e.g., "acme" from "acme/my-app"). Skips interactive org selection. */
   org?: string;
-  /** Explicit project name from CLI arg (e.g., "my-app" from "acme/my-app"). Overrides wizard-detected name. */
   project?: string;
-  /** Auth token for injecting into generated env files (e.g., .env.sentry-build-plugin). Never sent to the server. */
-  authToken?: string;
 };
 
-// Local-op suspend payloads
+export type ResolvedInitContext = {
+  directory: string;
+  yes: boolean;
+  dryRun: boolean;
+  features?: string[];
+  org: string;
+  /**
+   * Resolved team slug for init operations.
+   * Omitted when init defers empty-org auto-creation until project creation.
+   */
+  team?: string;
+  project?: string;
+  authToken?: string;
+  existingProject?: ExistingProjectData;
+};
 
-export type LocalOpPayload =
+export type InteractiveContext = Pick<ResolvedInitContext, "yes" | "dryRun">;
+
+// Tool suspend payloads
+export type ToolPayload =
   | ListDirPayload
   | ReadFilesPayload
   | FileExistsBatchPayload
@@ -32,8 +52,10 @@ export type LocalOpPayload =
   | CreateSentryProjectPayload
   | DetectSentryPayload;
 
+export type ToolOperation = ToolPayload["operation"];
+
 export type ListDirPayload = {
-  type: "local-op";
+  type: "tool";
   operation: "list-dir";
   cwd: string;
   params: {
@@ -45,7 +67,7 @@ export type ListDirPayload = {
 };
 
 export type ReadFilesPayload = {
-  type: "local-op";
+  type: "tool";
   operation: "read-files";
   cwd: string;
   params: {
@@ -55,7 +77,7 @@ export type ReadFilesPayload = {
 };
 
 export type FileExistsBatchPayload = {
-  type: "local-op";
+  type: "tool";
   operation: "file-exists-batch";
   cwd: string;
   params: {
@@ -64,7 +86,7 @@ export type FileExistsBatchPayload = {
 };
 
 export type RunCommandsPayload = {
-  type: "local-op";
+  type: "tool";
   operation: "run-commands";
   cwd: string;
   params: {
@@ -80,7 +102,7 @@ export type GrepSearch = {
 };
 
 export type GrepPayload = {
-  type: "local-op";
+  type: "tool";
   operation: "grep";
   cwd: string;
   params: {
@@ -90,7 +112,7 @@ export type GrepPayload = {
 };
 
 export type GlobPayload = {
-  type: "local-op";
+  type: "tool";
   operation: "glob";
   cwd: string;
   params: {
@@ -111,7 +133,7 @@ export type ApplyPatchsetPatch =
   | { path: string; action: "delete"; patch?: string };
 
 export type ApplyPatchsetPayload = {
-  type: "local-op";
+  type: "tool";
   operation: "apply-patchset";
   cwd: string;
   params: {
@@ -120,7 +142,7 @@ export type ApplyPatchsetPayload = {
 };
 
 export type CreateSentryProjectPayload = {
-  type: "local-op";
+  type: "tool";
   operation: "create-sentry-project";
   cwd: string;
   params: {
@@ -130,24 +152,21 @@ export type CreateSentryProjectPayload = {
 };
 
 export type DetectSentryPayload = {
-  type: "local-op";
+  type: "tool";
   operation: "detect-sentry";
-  /** Human-readable spinner hint from the server (≤ 120 chars, sensitive values redacted). */
   detail?: string;
   cwd: string;
   params: Record<string, never>;
 };
 
-export type LocalOpResult = {
+export type ToolResult = {
   ok: boolean;
   error?: string;
-  /** Optional user-facing message (e.g. "Using existing project 'foo'"). */
   message?: string;
   data?: unknown;
 };
 
-// Wizard output — typed shape of the `result` field returned by the server
-
+// Wizard output
 export type WizardOutput = {
   platform?: string;
   projectDir?: string;
@@ -161,8 +180,7 @@ export type WizardOutput = {
   message?: string;
 };
 
-// Interactive suspend payloads
-
+// Interactive payloads
 export type InteractivePayload =
   | SelectPayload
   | MultiSelectPayload
@@ -190,11 +208,7 @@ export type ConfirmPayload = {
   prompt: string;
 };
 
-// Combined suspend payload — either a local-op or an interactive prompt
-
-export type SuspendPayload = LocalOpPayload | InteractivePayload;
-
-// Workflow run result
+export type SuspendPayload = ToolPayload | InteractivePayload;
 
 export type WorkflowRunResult = {
   status: "suspended" | "success" | "failed";

@@ -13,9 +13,8 @@
  * without any HTTP requests.  Only `resolveOrg()` (DSN scanning) benefits
  * from background prefetching since it performs filesystem I/O.
  *
- * This keeps the hot path (inside the wizard's `createSentryProject`)
- * free of explicit promise-threading — callers just swap in the
- * prefetch-aware functions.
+ * This keeps init preflight free of explicit promise-threading — callers
+ * just swap in the prefetch-aware functions.
  */
 
 import type { ResolvedOrg } from "../resolve-target.js";

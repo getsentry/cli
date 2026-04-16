@@ -49,7 +49,7 @@ import {
 import { resolveOrg } from "../../lib/resolve-target.js";
 import {
   buildOrgNotFoundError,
-  type ResolvedTeam,
+  type ResolvedConcreteTeam,
   resolveOrCreateTeam,
 } from "../../lib/resolve-team.js";
 import { slugify } from "../../lib/utils.js";
@@ -380,7 +380,7 @@ export const createCommand = buildCommand({
     const orgSlug = resolved.org;
 
     // Resolve team — auto-creates a team if the org has none
-    const team: ResolvedTeam = await resolveOrCreateTeam(orgSlug, {
+    const team: ResolvedConcreteTeam = await resolveOrCreateTeam(orgSlug, {
       team: flags.team,
       detectedFrom: resolved.detectedFrom,
       usageHint: USAGE_HINT,
