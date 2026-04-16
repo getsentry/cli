@@ -85,6 +85,18 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
       "Client ID of a public OAuth application on your Sentry instance. **Required for [self-hosted Sentry](./self-hosted/)** (26.1.0+) to use `sentry auth login` with the device flow. See the [Self-Hosted guide](./self-hosted/#1-create-a-public-oauth-application) for how to create one.",
     example: "your-oauth-client-id",
   },
+  // -- Custom headers --
+  {
+    name: "SENTRY_CUSTOM_HEADERS",
+    description:
+      "Custom HTTP headers to include in all requests to your Sentry instance. " +
+      "**Only applies to [self-hosted Sentry](./self-hosted/).** Ignored when targeting sentry.io.\n\n" +
+      "Use semicolon-separated `Name: Value` pairs. Useful for environments behind " +
+      "reverse proxies that require additional headers for authentication " +
+      "(e.g., Google IAP, Cloudflare Access).\n\n" +
+      "Can also be set persistently with `sentry cli defaults headers`.",
+    example: '"X-IAP-Token: my-proxy-token"',
+  },
   // -- Paths --
   {
     name: "SENTRY_CONFIG_DIR",

@@ -15,6 +15,7 @@ const DEFAULTS_ORG = "defaults.org";
 const DEFAULTS_PROJECT = "defaults.project";
 const DEFAULTS_TELEMETRY = "defaults.telemetry";
 const DEFAULTS_URL = "defaults.url";
+const DEFAULTS_HEADERS = "defaults.headers";
 
 /** All metadata keys used for defaults (for bulk operations) */
 const ALL_DEFAULTS_KEYS = [
@@ -22,6 +23,7 @@ const ALL_DEFAULTS_KEYS = [
   DEFAULTS_PROJECT,
   DEFAULTS_TELEMETRY,
   DEFAULTS_URL,
+  DEFAULTS_HEADERS,
 ];
 
 /** State of all persistent defaults */
@@ -34,6 +36,8 @@ export type DefaultsState = {
   telemetry: "on" | "off" | null;
   /** Default Sentry instance URL, or null if unset */
   url: string | null;
+  /** Custom HTTP headers for self-hosted proxy auth, or null if unset */
+  headers: string | null;
 };
 
 /** Parse a raw telemetry metadata value to a typed "on" | "off" | null. */
@@ -92,6 +96,16 @@ export function getDefaultUrl(): string | null {
 }
 
 /**
+ * Get the default custom headers string, or null if not set.
+ * Format: semicolon-separated `Name: Value` pairs.
+ */
+export function getDefaultHeaders(): string | null {
+  const db = getDatabase();
+  const m = getMetadata(db, [DEFAULTS_HEADERS]);
+  return m.get(DEFAULTS_HEADERS) ?? null;
+}
+
+/**
  * Get all persistent defaults as a structured object.
  * Used by the `sentry cli defaults` show mode and JSON output.
  */
@@ -104,6 +118,7 @@ export function getAllDefaults(): DefaultsState {
     project: m.get(DEFAULTS_PROJECT) ?? null,
     telemetry: parseTelemetryValue(telVal),
     url: m.get(DEFAULTS_URL) ?? null,
+    headers: m.get(DEFAULTS_HEADERS) ?? null,
   };
 }
 
@@ -151,6 +166,19 @@ export function setDefaultUrl(url: string | null): void {
     clearMetadata(db, [DEFAULTS_URL]);
   } else {
     setMetadata(db, { [DEFAULTS_URL]: url });
+  }
+}
+
+/**
+ * Set or clear the default custom headers. Pass `null` to clear.
+ * Value should be semicolon-separated `Name: Value` pairs.
+ */
+export function setDefaultHeaders(value: string | null): void {
+  const db = getDatabase();
+  if (value === null) {
+    clearMetadata(db, [DEFAULTS_HEADERS]);
+  } else {
+    setMetadata(db, { [DEFAULTS_HEADERS]: value });
   }
 }
 

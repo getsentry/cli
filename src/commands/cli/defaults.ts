@@ -13,14 +13,17 @@
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { normalizeUrl } from "../../lib/constants.js";
+import { parseCustomHeaders } from "../../lib/custom-headers.js";
 import {
   clearAllDefaults,
   type DefaultsState,
   getAllDefaults,
+  getDefaultHeaders,
   getDefaultOrganization,
   getDefaultProject,
   getDefaultUrl,
   getTelemetryPreference,
+  setDefaultHeaders,
   setDefaultOrganization,
   setDefaultProject,
   setDefaultUrl,
@@ -44,7 +47,7 @@ import { computeTelemetryEffective } from "../../lib/telemetry.js";
 // ---------------------------------------------------------------------------
 
 /** Canonical key names matching DefaultsState fields */
-type DefaultKey = "organization" | "project" | "telemetry" | "url";
+type DefaultKey = "organization" | "project" | "telemetry" | "url" | "headers";
 
 /** Handler for reading, writing, and clearing a single default */
 type DefaultHandler = {
@@ -119,6 +122,15 @@ const DEFAULTS_REGISTRY: Record<DefaultKey, DefaultHandler> = {
     },
     clear: () => setDefaultUrl(null),
   },
+  headers: {
+    get: getDefaultHeaders,
+    set: (value) => {
+      // Validate the header string by parsing it — throws ConfigError on bad input
+      parseCustomHeaders(value);
+      setDefaultHeaders(value);
+    },
+    clear: () => setDefaultHeaders(null),
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -183,6 +195,7 @@ export const defaultsCommand = buildCommand({
       "sentry cli defaults project my-proj    # Set default project\n" +
       "sentry cli defaults telemetry off      # Disable telemetry\n" +
       "sentry cli defaults url https://...    # Set Sentry URL (self-hosted)\n" +
+      "sentry cli defaults headers 'X-IAP: t'  # Set custom headers (self-hosted)\n" +
       "sentry cli defaults org --clear        # Clear a specific default\n" +
       "sentry cli defaults --clear --yes      # Clear all defaults\n" +
       "```\n\n" +
@@ -192,7 +205,8 @@ export const defaultsCommand = buildCommand({
       "| `org` | Default organization slug |\n" +
       "| `project` | Default project slug |\n" +
       "| `telemetry` | Telemetry preference (on/off, yes/no, true/false, 1/0) |\n" +
-      "| `url` | Sentry instance URL (for self-hosted installations) |",
+      "| `url` | Sentry instance URL (for self-hosted installations) |\n" +
+      "| `headers` | Custom HTTP headers for self-hosted proxies (semicolon-separated `Name: Value`) |",
   },
   output: {
     human: formatDefaultsResult,
@@ -246,7 +260,7 @@ export const defaultsCommand = buildCommand({
         guardNonInteractive(flags);
         if (!isConfirmationBypassed(flags)) {
           const confirmed = await log.prompt(
-            "This will clear all defaults (organization, project, telemetry, URL). Continue?",
+            "This will clear all defaults (organization, project, telemetry, URL, headers). Continue?",
             { type: "confirm" }
           );
           if (confirmed !== true) {

@@ -12,6 +12,7 @@ import {
   TokenResponseSchema,
 } from "../types/index.js";
 import { DEFAULT_SENTRY_URL, getConfiguredSentryUrl } from "./constants.js";
+import { getCustomHeaders } from "./custom-headers.js";
 import { setAuthToken } from "./db/auth.js";
 import { getEnv } from "./env.js";
 import { ApiError, AuthError, ConfigError, DeviceFlowError } from "./errors.js";
@@ -85,8 +86,19 @@ async function fetchWithConnectionError(
   url: string,
   init: RequestInit
 ): Promise<Response> {
+  // Inject custom headers for self-hosted proxies (IAP, mTLS, etc.)
+  let effectiveInit = init;
+  const customHeaders = getCustomHeaders();
+  if (customHeaders.length > 0) {
+    const merged = new Headers(init.headers);
+    for (const [name, value] of customHeaders) {
+      merged.set(name, value);
+    }
+    effectiveInit = { ...init, headers: merged };
+  }
+
   try {
-    return await fetch(url, init);
+    return await fetch(url, effectiveInit);
   } catch (error) {
     const isConnectionError =
       error instanceof Error &&

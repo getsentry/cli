@@ -9,6 +9,7 @@ import { listAnOrganization_sIssues } from "@sentry/api";
 
 import type { SentryIssue } from "../../types/index.js";
 
+import { applyCustomHeaders } from "../custom-headers.js";
 import { ApiError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
 
@@ -425,9 +426,9 @@ export async function getSharedIssue(
   shareId: string
 ): Promise<{ groupID: string }> {
   const url = `${baseUrl}/api/0/shared/issues/${encodeURIComponent(shareId)}/`;
-  const response = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
-  });
+  const headers = new Headers({ "Content-Type": "application/json" });
+  applyCustomHeaders(headers);
+  const response = await fetch(url, { headers });
 
   if (!response.ok) {
     if (response.status === 404) {
