@@ -7,13 +7,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import {
-  cancel,
-  confirm,
-  intro,
-  log,
-  spinner,
-} from "@clack/prompts";
+import { cancel, confirm, intro, log, spinner } from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 import { captureException, getTraceData } from "@sentry/node-core/light";
 import { formatBanner } from "../banner.js";

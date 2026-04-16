@@ -1,28 +1,21 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as clack from "@clack/prompts";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as apiClient from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as auth from "../../../src/lib/db/auth.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as dsnIndex from "../../../src/lib/dsn/index.js";
 import { ApiError } from "../../../src/lib/errors.js";
-import { resolveInitContext } from "../../../src/lib/init/preflight.js";
-import type { WizardOptions } from "../../../src/lib/init/types.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as prefetch from "../../../src/lib/init/prefetch.js";
+import { resolveInitContext } from "../../../src/lib/init/preflight.js";
+import type { WizardOptions } from "../../../src/lib/init/types.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as resolveTeam from "../../../src/lib/resolve-team.js";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as dsnIndex from "../../../src/lib/dsn/index.js";
 
 function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
   return {
@@ -62,9 +55,10 @@ beforeEach(() => {
     prefetch,
     "resolveOrgPrefetched"
   ).mockResolvedValue({ org: "acme" });
-  listOrganizationsSpy = spyOn(apiClient, "listOrganizations").mockResolvedValue(
-    [{ id: "1", slug: "acme", name: "Acme" }]
-  );
+  listOrganizationsSpy = spyOn(
+    apiClient,
+    "listOrganizations"
+  ).mockResolvedValue([{ id: "1", slug: "acme", name: "Acme" }]);
   getProjectSpy = spyOn(apiClient, "getProject").mockResolvedValue({
     id: "42",
     slug: "my-app",
@@ -72,10 +66,9 @@ beforeEach(() => {
     platform: "javascript-react",
     dateCreated: "2026-04-16T00:00:00Z",
   } as any);
-  tryGetPrimaryDsnSpy = spyOn(
-    apiClient,
-    "tryGetPrimaryDsn"
-  ).mockResolvedValue("https://abc@o1.ingest.sentry.io/42");
+  tryGetPrimaryDsnSpy = spyOn(apiClient, "tryGetPrimaryDsn").mockResolvedValue(
+    "https://abc@o1.ingest.sentry.io/42"
+  );
   getAuthTokenSpy = spyOn(auth, "getAuthToken").mockReturnValue("sntrys_test");
   resolveOrCreateTeamSpy = spyOn(
     resolveTeam,

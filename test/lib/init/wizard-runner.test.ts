@@ -150,7 +150,9 @@ beforeEach(() => {
   const run = {
     startAsync: mock(() => Promise.resolve(mockStartResult)),
     resumeAsync: mock(() => {
-      const result = mockResumeResults[resumeCallCount] ?? { status: "success" };
+      const result = mockResumeResults[resumeCallCount] ?? {
+        status: "success",
+      };
       resumeCallCount += 1;
       return Promise.resolve(result);
     }),

@@ -1,56 +1,14 @@
-import { spawn as nodeSpawn } from "node:child_process";
-import fs from "node:fs";
 import path from "node:path";
-import { MAX_OUTPUT_BYTES } from "../constants.js";
 import type { GlobPayload, ToolResult } from "../types.js";
-import { safePath } from "./shared.js";
+import {
+  isGitRepo,
+  resolveSearchTarget,
+  spawnSearchProcess,
+  walkFiles,
+} from "./search-utils.js";
 import type { InitToolDefinition } from "./types.js";
 
 const MAX_GLOB_RESULTS = 100;
-const SKIP_DIRS = new Set([
-  "node_modules",
-  ".git",
-  "__pycache__",
-  ".venv",
-  "venv",
-  "dist",
-  "build",
-]);
-
-function spawnCollect(
-  cmd: string,
-  args: string[],
-  cwd: string
-): Promise<{ stdout: string; exitCode: number }> {
-  return new Promise((resolve, reject) => {
-    const child = nodeSpawn(cmd, args, {
-      cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 30_000,
-    });
-
-    const outChunks: Buffer[] = [];
-    let outLen = 0;
-    child.stdout.on("data", (chunk: Buffer) => {
-      if (outLen < MAX_OUTPUT_BYTES) {
-        outChunks.push(chunk);
-        outLen += chunk.length;
-      }
-    });
-
-    child.on("error", reject);
-    child.on("close", (code, signal) => {
-      if (signal) {
-        reject(new Error(`Process killed by ${signal} (timeout)`));
-        return;
-      }
-      resolve({
-        stdout: Buffer.concat(outChunks).toString("utf-8"),
-        exitCode: code ?? 1,
-      });
-    });
-  });
-}
 
 async function rgGlobSearch(opts: {
   cwd: string;
@@ -58,7 +16,7 @@ async function rgGlobSearch(opts: {
   target: string;
   maxResults: number;
 }): Promise<{ files: string[]; truncated: boolean }> {
-  const { stdout, exitCode } = await spawnCollect(
+  const { stdout, exitCode } = await spawnSearchProcess(
     "rg",
     ["--files", "--hidden", "--glob", opts.pattern, opts.target],
     opts.cwd
@@ -73,51 +31,10 @@ async function rgGlobSearch(opts: {
 
   const lines = stdout.split("\n").filter(Boolean);
   const truncated = lines.length > opts.maxResults;
-  const files = lines.slice(0, opts.maxResults).map((filePath) => path.relative(opts.cwd, filePath));
+  const files = lines
+    .slice(0, opts.maxResults)
+    .map((filePath) => path.relative(opts.cwd, filePath));
   return { files, truncated };
-}
-
-async function* walkFiles(
-  root: string,
-  base: string,
-  pattern: string
-): AsyncGenerator<string> {
-  let entries: fs.Dirent[];
-  try {
-    entries = await fs.promises.readdir(base, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    const full = path.join(base, entry.name);
-    const rel = path.relative(root, full);
-    if (entry.isDirectory() && !SKIP_DIRS.has(entry.name)) {
-      yield* walkFiles(root, full, pattern);
-    } else if (entry.isFile()) {
-      const matchTarget = pattern.includes("/") ? rel : entry.name;
-      if (matchGlob(matchTarget, pattern)) {
-        yield rel;
-      }
-    }
-  }
-}
-
-function matchGlob(name: string, pattern: string): boolean {
-  const re = pattern
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*\*/g, "\0")
-    .replace(/\*/g, "[^/]*")
-    .replace(/\0/g, ".*")
-    .replace(/\?/g, ".");
-  return new RegExp(`^${re}$`).test(name);
-}
-
-function isGitRepo(dir: string): boolean {
-  try {
-    return fs.statSync(path.join(dir, ".git")).isDirectory();
-  } catch {
-    return false;
-  }
 }
 
 async function gitLsFiles(opts: {
@@ -126,7 +43,7 @@ async function gitLsFiles(opts: {
   target: string;
   maxResults: number;
 }): Promise<{ files: string[]; truncated: boolean }> {
-  const { stdout, exitCode } = await spawnCollect(
+  const { stdout, exitCode } = await spawnSearchProcess(
     "git",
     ["ls-files", "--cached", "--others", "--exclude-standard", opts.pattern],
     opts.target
@@ -140,7 +57,9 @@ async function gitLsFiles(opts: {
   const truncated = lines.length > opts.maxResults;
   const files = lines
     .slice(0, opts.maxResults)
-    .map((filePath) => path.relative(opts.cwd, path.resolve(opts.target, filePath)));
+    .map((filePath) =>
+      path.relative(opts.cwd, path.resolve(opts.target, filePath))
+    );
   return { files, truncated };
 }
 
@@ -150,7 +69,7 @@ async function fsGlobSearch(opts: {
   searchPath: string | undefined;
   maxResults: number;
 }): Promise<{ files: string[]; truncated: boolean }> {
-  const target = opts.searchPath ? safePath(opts.cwd, opts.searchPath) : opts.cwd;
+  const target = resolveSearchTarget(opts.cwd, opts.searchPath);
   const files: string[] = [];
 
   for await (const rel of walkFiles(opts.cwd, target, opts.pattern)) {
@@ -173,8 +92,9 @@ async function globSearch(opts: {
   searchPath: string | undefined;
   maxResults: number;
 }): Promise<{ files: string[]; truncated: boolean }> {
-  const target = opts.searchPath ? safePath(opts.cwd, opts.searchPath) : opts.cwd;
+  const target = resolveSearchTarget(opts.cwd, opts.searchPath);
   const resolvedOpts = { ...opts, target };
+
   try {
     return await rgGlobSearch(resolvedOpts);
   } catch {
@@ -182,7 +102,7 @@ async function globSearch(opts: {
       try {
         return await gitLsFiles(resolvedOpts);
       } catch {
-        // fall through
+        // fall through to filesystem search
       }
     }
     return await fsGlobSearch(opts);
@@ -223,4 +143,3 @@ export const globTool: InitToolDefinition<"glob"> = {
   },
   execute: glob,
 };
-

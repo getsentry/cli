@@ -1,10 +1,7 @@
 import { createProjectWithDsn } from "../../api-client.js";
 import { slugify } from "../../utils.js";
 import { tryGetExistingProjectData } from "../existing-project.js";
-import type {
-  CreateSentryProjectPayload,
-  ToolResult,
-} from "../types.js";
+import type { CreateSentryProjectPayload, ToolResult } from "../types.js";
 import { formatToolError } from "./shared.js";
 import type { InitToolDefinition, ToolContext } from "./types.js";
 
@@ -50,7 +47,10 @@ export async function createSentryProject(
 
   try {
     if (context.project) {
-      const existingProject = await tryGetExistingProjectData(context.org, slug);
+      const existingProject = await tryGetExistingProjectData(
+        context.org,
+        slug
+      );
       if (existingProject) {
         return {
           ok: true,

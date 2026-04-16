@@ -1,18 +1,14 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as dsnIndex from "../../../../src/lib/dsn/index.js";
 import { executeTool } from "../../../../src/lib/init/tools/registry.js";
+import type {
+  ResolvedInitContext,
+  ToolPayload,
+} from "../../../../src/lib/init/types.js";
 import { precomputeDirListing } from "../../../../src/lib/init/workflow-inputs.js";
-import type { ResolvedInitContext, ToolPayload } from "../../../../src/lib/init/types.js";
 
 function makeContext(directory: string): ResolvedInitContext {
   return {
@@ -56,7 +52,10 @@ describe("filesystem tools", () => {
   test("lists and precomputes directory contents", async () => {
     fs.writeFileSync(path.join(testDir, "index.ts"), "export {};\n");
     fs.mkdirSync(path.join(testDir, "src"));
-    fs.writeFileSync(path.join(testDir, "src", "app.ts"), "console.log('x');\n");
+    fs.writeFileSync(
+      path.join(testDir, "src", "app.ts"),
+      "console.log('x');\n"
+    );
 
     const result = await executeTool(
       {
@@ -67,7 +66,8 @@ describe("filesystem tools", () => {
       },
       makeContext(testDir)
     );
-    const entries = (result.data as { entries: Array<{ path: string }> }).entries;
+    const entries = (result.data as { entries: Array<{ path: string }> })
+      .entries;
     const precomputed = await precomputeDirListing(testDir);
 
     expect(result.ok).toBe(true);
@@ -154,7 +154,9 @@ describe("filesystem tools", () => {
       makeContext(testDir)
     );
 
-    expect((grepResult.data as any).results[0].matches[0].path).toBe("src/app.ts");
+    expect((grepResult.data as any).results[0].matches[0].path).toBe(
+      "src/app.ts"
+    );
     expect((globResult.data as any).results[0].files).toContain("src/app.ts");
   });
 

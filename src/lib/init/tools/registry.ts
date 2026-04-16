@@ -1,4 +1,4 @@
-import type { ToolPayload, ToolResult } from "../types.js";
+import type { ToolOperation, ToolPayload, ToolResult } from "../types.js";
 import { applyPatchsetTool } from "./apply-patchset.js";
 import { createSentryProjectTool } from "./create-sentry-project.js";
 import { detectSentryTool } from "./detect-sentry.js";
@@ -9,7 +9,7 @@ import { listDirTool } from "./list-dir.js";
 import { readFilesTool } from "./read-files.js";
 import { runCommandsTool } from "./run-commands.js";
 import { formatToolError, validateToolSandbox } from "./shared.js";
-import type { InitToolDefinition, ToolContext } from "./types.js";
+import type { AnyInitToolDefinition, ToolContext } from "./types.js";
 
 const toolDefinitions = [
   listDirTool,
@@ -21,10 +21,10 @@ const toolDefinitions = [
   globTool,
   createSentryProjectTool,
   detectSentryTool,
-] as const satisfies readonly InitToolDefinition<any>[];
+] as const satisfies readonly AnyInitToolDefinition[];
 
-const toolRegistry = new Map(
-  toolDefinitions.map((tool) => [tool.operation, tool])
+const toolRegistry = new Map<ToolOperation, AnyInitToolDefinition>(
+  toolDefinitions.map((tool) => [tool.operation, tool] as const)
 );
 
 /**
@@ -61,4 +61,3 @@ export async function executeTool(
     return { ok: false, error: formatToolError(error) };
   }
 }
-

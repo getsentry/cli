@@ -6,12 +6,13 @@ import type {
   ApplyPatchsetPayload,
   ToolResult,
 } from "../types.js";
-import { isEnvFile, prettyPrintJson, safePath } from "./shared.js";
+import { safePath } from "./shared.js";
 import type { InitToolDefinition, ToolContext } from "./types.js";
 
 /** Pattern matching empty or placeholder SENTRY_AUTH_TOKEN values in env files. */
 const EMPTY_AUTH_TOKEN_RE =
   /^(SENTRY_AUTH_TOKEN[ \t]*=[ \t]*)(?:['"]?[ \t]*['"]?)?[ \t]*$/m;
+const PATH_SEGMENT_RE = /[/\\]/u;
 
 const VALID_PATCH_ACTIONS = new Set(["create", "modify", "delete"]);
 
@@ -130,6 +131,19 @@ function resolvePatchContent(
   return content;
 }
 
+function prettyPrintJson(content: string): string {
+  try {
+    return `${JSON.stringify(JSON.parse(content), null, 2)}\n`;
+  } catch {
+    return content;
+  }
+}
+
+function isEnvFile(filePath: string): boolean {
+  const name = filePath.split(PATH_SEGMENT_RE).at(-1) ?? "";
+  return name === ".env" || name.startsWith(".env.");
+}
+
 async function applyEdits(
   absPath: string,
   filePath: string,
@@ -162,15 +176,8 @@ export const applyPatchsetTool: InitToolDefinition<"apply-patchset"> = {
   describe: (payload) => {
     const [first] = payload.params.patches;
     if (payload.params.patches.length === 1 && first) {
-      const verb =
-        first.action === "create"
-          ? "Creating"
-          : first.action === "modify"
-            ? "Modifying"
-            : first.action === "delete"
-              ? "Deleting"
-              : "Updating";
-      const fileName = first.path.split(/[/\\]/u).at(-1) ?? first.path;
+      const verb = patchActionVerb(first.action);
+      const fileName = first.path.split(PATH_SEGMENT_RE).at(-1) ?? first.path;
       return `${verb} \`${fileName}\`...`;
     }
     return `Applying ${payload.params.patches.length} file changes...`;
@@ -178,3 +185,15 @@ export const applyPatchsetTool: InitToolDefinition<"apply-patchset"> = {
   execute: applyPatchset,
 };
 
+function patchActionVerb(action: ApplyPatchsetPatch["action"]): string {
+  switch (action) {
+    case "create":
+      return "Creating";
+    case "modify":
+      return "Modifying";
+    case "delete":
+      return "Deleting";
+    default:
+      return "Updating";
+  }
+}

@@ -28,6 +28,6 @@ export async function detectSentry(cwd: string): Promise<ToolResult> {
 export const detectSentryTool: InitToolDefinition<"detect-sentry"> = {
   operation: "detect-sentry",
   describe: () => "Checking for existing Sentry setup...",
-  execute: async (payload: DetectSentryPayload) => await detectSentry(payload.cwd),
+  execute: async (payload: DetectSentryPayload) =>
+    await detectSentry(payload.cwd),
 };
-

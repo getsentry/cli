@@ -3,6 +3,8 @@ import type { FileExistsBatchPayload, ToolResult } from "../types.js";
 import { safePath } from "./shared.js";
 import type { InitToolDefinition } from "./types.js";
 
+const PATH_SEGMENT_RE = /[/\\]/u;
+
 /**
  * Check whether a batch of paths exists inside the sandbox.
  */
@@ -51,7 +53,6 @@ export const fileExistsBatchTool: InitToolDefinition<"file-exists-batch"> = {
 };
 
 function pathBase(filePath: string): string {
-  const parts = filePath.split(/[/\\]/u);
+  const parts = filePath.split(PATH_SEGMENT_RE);
   return parts.at(-1) ?? filePath;
 }
-

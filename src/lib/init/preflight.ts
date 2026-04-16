@@ -22,48 +22,33 @@ type ExistingProjectChoice = {
   shouldAbort?: boolean;
 };
 
+type InitContextSeed = {
+  org?: string;
+  project?: string;
+  existingProject?: ExistingProjectData;
+};
+
+type ProjectSelection = Pick<
+  ResolvedInitContext,
+  "project" | "existingProject"
+>;
+
 /**
  * Resolve org, project, team, and auth state before the init workflow starts.
  */
 export async function resolveInitContext(
   initial: WizardOptions
 ): Promise<ResolvedInitContext | null> {
-  try {
-    const detected = await resolveDetectedProject(initial);
-    if (detected.shouldAbort) {
+  return await withPreflightHandling(async () => {
+    const seed = await resolveInitContextSeed(initial);
+    if (!seed) {
       return null;
     }
 
-    let org = detected.org ?? initial.org;
-    let project = detected.project ?? initial.project;
-    let existingProject = detected.existingProject;
-
-    if (!org) {
-      const orgResult = await resolveOrgSlug(initial.directory, initial.yes);
-      if (typeof orgResult !== "string") {
-        throw new WizardError(
-          orgResult.error ?? "Failed to resolve organization."
-        );
-      }
-      org = orgResult;
-    }
-
-    if (project && org) {
-      const resolvedProject = await resolveExistingProjectChoice({
-        org,
-        project,
-        yes: initial.yes,
-        promptOnExisting: Boolean(initial.project && !initial.org),
-      });
-      if (resolvedProject.shouldAbort) {
-        return null;
-      }
-      if ("project" in resolvedProject) {
-        project = resolvedProject.project;
-      }
-      if ("existingProject" in resolvedProject) {
-        existingProject = resolvedProject.existingProject;
-      }
+    const org = await ensureOrg(seed.org, initial);
+    const projectSelection = await resolveProjectSelection(org, initial, seed);
+    if (!projectSelection) {
+      return null;
     }
 
     const team = await resolveTeam(org, initial);
@@ -71,23 +56,22 @@ export async function resolveInitContext(
       return null;
     }
 
-    return {
-      directory: initial.directory,
-      yes: initial.yes,
-      dryRun: initial.dryRun,
-      features: initial.features,
-      org,
-      team,
-      project,
-      authToken: getAuthToken(),
-      existingProject,
-    };
+    return buildResolvedInitContext(initial, org, team, projectSelection);
+  });
+}
+
+async function withPreflightHandling(
+  action: () => Promise<ResolvedInitContext | null>
+): Promise<ResolvedInitContext | null> {
+  try {
+    return await action();
   } catch (error) {
     if (error instanceof WizardCancelledError) {
       cancel("Setup cancelled.");
       process.exitCode = 0;
       return null;
     }
+
     const message = error instanceof Error ? error.message : String(error);
     log.error(message);
     cancel("Setup failed.");
@@ -95,27 +79,115 @@ export async function resolveInitContext(
   }
 }
 
+function buildResolvedInitContext(
+  initial: WizardOptions,
+  org: string,
+  team: string,
+  selection: ProjectSelection
+): ResolvedInitContext {
+  return {
+    directory: initial.directory,
+    yes: initial.yes,
+    dryRun: initial.dryRun,
+    features: initial.features,
+    org,
+    team,
+    project: selection.project,
+    authToken: getAuthToken(),
+    existingProject: selection.existingProject,
+  };
+}
+
+async function resolveInitContextSeed(
+  initial: WizardOptions
+): Promise<InitContextSeed | null> {
+  const detected = await resolveDetectedProject(initial);
+  if (detected?.shouldAbort) {
+    return null;
+  }
+
+  return {
+    org: detected?.org ?? initial.org,
+    project: detected?.project ?? initial.project,
+    existingProject: detected?.existingProject,
+  };
+}
+
+async function ensureOrg(
+  org: string | undefined,
+  initial: WizardOptions
+): Promise<string> {
+  if (org) {
+    return org;
+  }
+
+  const orgResult = await resolveOrgSlug(initial.directory, initial.yes);
+  if (typeof orgResult === "string") {
+    return orgResult;
+  }
+
+  throw new WizardError(orgResult.error ?? "Failed to resolve organization.");
+}
+
+async function resolveProjectSelection(
+  org: string,
+  initial: WizardOptions,
+  seed: InitContextSeed
+): Promise<ProjectSelection | null> {
+  if (!seed.project) {
+    return {
+      project: seed.project,
+      existingProject: seed.existingProject,
+    };
+  }
+
+  const resolved = await resolveExistingProjectChoice({
+    org,
+    project: seed.project,
+    yes: initial.yes,
+    promptOnExisting: Boolean(initial.project && !initial.org),
+  });
+  if (resolved.shouldAbort) {
+    return null;
+  }
+
+  return mergeProjectSelection(seed, resolved);
+}
+
+function mergeProjectSelection(
+  seed: InitContextSeed,
+  resolved: ExistingProjectChoice
+): ProjectSelection {
+  const project = "project" in resolved ? resolved.project : seed.project;
+  const clearedProject =
+    "project" in resolved && resolved.project === undefined;
+
+  return {
+    project,
+    existingProject: clearedProject
+      ? undefined
+      : (resolved.existingProject ?? seed.existingProject),
+  };
+}
+
 async function resolveDetectedProject(initial: WizardOptions): Promise<{
   org?: string;
   project?: string;
   existingProject?: ExistingProjectData;
   shouldAbort?: boolean;
-}> {
+} | null> {
   if (initial.org || initial.project) {
-    return {};
+    return null;
   }
 
-  let detectedProject:
-    | { orgSlug: string; projectSlug: string }
-    | null = null;
+  let detectedProject: { orgSlug: string; projectSlug: string } | null = null;
   try {
     detectedProject = await detectExistingProject(initial.directory);
   } catch {
-    return {};
+    return null;
   }
-
   if (!detectedProject) {
-    return {};
+    return null;
   }
 
   const existingProject = await tryGetExistingProjectData(
@@ -155,6 +227,7 @@ async function resolveDetectedProject(initial: WizardOptions): Promise<{
       ...(existingProject ? { existingProject } : {}),
     };
   }
+
   return {};
 }
 

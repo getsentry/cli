@@ -1,9 +1,10 @@
 import { DEFAULT_COMMAND_TIMEOUT_MS } from "../constants.js";
-import type {
-  RunCommandsPayload,
-  ToolResult,
-} from "../types.js";
-import { parseCommand, readSpawnOutput, validateCommand } from "./shared.js";
+import type { RunCommandsPayload, ToolResult } from "../types.js";
+import {
+  parseCommand,
+  readSpawnOutput,
+  validateCommand as validateToolCommand,
+} from "./command-utils.js";
 import type { InitToolDefinition, ToolContext } from "./types.js";
 
 /**
@@ -14,10 +15,10 @@ export async function runCommands(
   context: Pick<ToolContext, "dryRun">
 ): Promise<ToolResult> {
   const timeoutMs = payload.params.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
-  const parsedCommands = [];
+  const parsedCommands: ReturnType<typeof parseCommand>[] = [];
 
   for (const command of payload.params.commands) {
-    const validationError = validateCommand(command);
+    const validationError = validateToolCommand(command);
     if (validationError) {
       return { ok: false, error: validationError };
     }
@@ -121,5 +122,6 @@ export const runCommandsTool: InitToolDefinition<"run-commands"> = {
   execute: runCommands,
 };
 
-export { validateCommand };
-
+export function validateCommand(command: string): string | undefined {
+  return validateToolCommand(command);
+}

@@ -84,7 +84,9 @@ const MAX_PREREAD_TOTAL_BYTES = 512 * 1024;
 /**
  * Pre-compute the initial directory listing before the first workflow call.
  */
-export async function precomputeDirListing(directory: string): Promise<DirEntry[]> {
+export async function precomputeDirListing(
+  directory: string
+): Promise<DirEntry[]> {
   const result = await listDir({
     type: "tool",
     operation: "list-dir",
@@ -104,7 +106,9 @@ export async function preReadCommonFiles(
   const listingPaths = new Set(
     dirListing.map((entry) => entry.path.replaceAll("\\", "/"))
   );
-  const toRead = COMMON_CONFIG_FILES.filter((filePath) => listingPaths.has(filePath));
+  const toRead = COMMON_CONFIG_FILES.filter((filePath) =>
+    listingPaths.has(filePath)
+  );
 
   const cache: Record<string, string | null> = {};
   let totalBytes = 0;
@@ -138,4 +142,3 @@ export async function preReadCommonFiles(
 export async function precomputeSentryDetection(directory: string) {
   return await detectSentry(directory);
 }
-

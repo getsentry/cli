@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { describeTool, executeTool } from "../../../../src/lib/init/tools/registry.js";
-import type { ResolvedInitContext, ToolPayload } from "../../../../src/lib/init/types.js";
+import {
+  describeTool,
+  executeTool,
+} from "../../../../src/lib/init/tools/registry.js";
+import type {
+  ResolvedInitContext,
+  ToolPayload,
+} from "../../../../src/lib/init/types.js";
 
 function makeContext(): ResolvedInitContext {
   return {

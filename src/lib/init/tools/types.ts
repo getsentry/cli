@@ -17,7 +17,9 @@ export type InitToolDefinition<TOperation extends ToolOperation> = {
   /** Stable operation name used in suspend payloads. */
   operation: TOperation;
   /** Build a short spinner message for the current payload. */
-  describe: (payload: Extract<ToolPayload, { operation: TOperation }>) => string;
+  describe: (
+    payload: Extract<ToolPayload, { operation: TOperation }>
+  ) => string;
   /** Execute the tool and return a resumable payload result. */
   execute: (
     payload: Extract<ToolPayload, { operation: TOperation }>,
@@ -25,3 +27,9 @@ export type InitToolDefinition<TOperation extends ToolOperation> = {
   ) => Promise<ToolResult>;
 };
 
+/**
+ * Union of all concrete init tool definitions.
+ */
+export type AnyInitToolDefinition = {
+  [Operation in ToolOperation]: InitToolDefinition<Operation>;
+}[ToolOperation];

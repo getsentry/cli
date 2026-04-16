@@ -1,7 +1,10 @@
-import type { ReadFilesPayload, ToolResult } from "../types.js";
+import fs from "node:fs";
 import { MAX_FILE_BYTES } from "../constants.js";
-import { readSingleFile } from "./shared.js";
+import type { ReadFilesPayload, ToolResult } from "../types.js";
+import { safePath } from "./shared.js";
 import type { InitToolDefinition } from "./types.js";
+
+const PATH_SEGMENT_RE = /[/\\]/u;
 
 /**
  * Read one or more files from the sandboxed project directory.
@@ -23,6 +26,31 @@ export async function readFiles(
   }
 
   return { ok: true, data: { files } };
+}
+
+async function readSingleFile(
+  cwd: string,
+  filePath: string,
+  maxBytes: number
+): Promise<string | null> {
+  try {
+    const absPath = safePath(cwd, filePath);
+    const stat = await fs.promises.stat(absPath);
+    if (stat.size <= maxBytes) {
+      return await fs.promises.readFile(absPath, "utf-8");
+    }
+
+    const handle = await fs.promises.open(absPath, "r");
+    try {
+      const buffer = Buffer.alloc(maxBytes);
+      await handle.read(buffer, 0, maxBytes, 0);
+      return buffer.toString("utf-8");
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -47,7 +75,6 @@ export const readFilesTool: InitToolDefinition<"read-files"> = {
 };
 
 function pathBase(filePath: string): string {
-  const parts = filePath.split(/[/\\]/u);
+  const parts = filePath.split(PATH_SEGMENT_RE);
   return parts.at(-1) ?? filePath;
 }
-

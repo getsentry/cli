@@ -45,10 +45,9 @@ beforeEach(() => {
     platform: "javascript-react",
     dateCreated: "2026-04-16T00:00:00Z",
   } as any);
-  tryGetPrimaryDsnSpy = spyOn(
-    apiClient,
-    "tryGetPrimaryDsn"
-  ).mockResolvedValue("https://abc@o1.ingest.sentry.io/42");
+  tryGetPrimaryDsnSpy = spyOn(apiClient, "tryGetPrimaryDsn").mockResolvedValue(
+    "https://abc@o1.ingest.sentry.io/42"
+  );
 });
 
 afterEach(() => {
@@ -115,6 +114,21 @@ describe("createSentryProject", () => {
 
     expect(result.ok).toBe(true);
     expect(result.message).toContain("Using existing project");
+    expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
+  });
+
+  test("surfaces lookup failures before creating when a known slug cannot be verified", async () => {
+    getProjectSpy.mockRejectedValueOnce(new Error("temporary failure"));
+
+    const result = await createSentryProject(makePayload(), {
+      dryRun: false,
+      org: "acme",
+      team: "platform",
+      project: "my-app",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("temporary failure");
     expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
   });
 
