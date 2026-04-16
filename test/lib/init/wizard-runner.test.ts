@@ -356,7 +356,7 @@ describe("runWizard", () => {
         "ensure-sentry-project": {
           suspendPayload: {
             type: "tool",
-            operation: "create-sentry-project",
+            operation: "ensure-sentry-project",
             cwd: "/tmp/test",
             params: { name: "my-app", platform: "javascript-react" },
           },
@@ -371,7 +371,6 @@ describe("runWizard", () => {
     mockResumeResults = [{ status: "success" }];
 
     await runWizard(makeOptions());
-
     expect(spinnerMock.stop).toHaveBeenCalledWith("Using existing project");
   });
 });

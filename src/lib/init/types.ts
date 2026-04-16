@@ -49,7 +49,7 @@ export type ToolPayload =
   | ApplyPatchsetPayload
   | GrepPayload
   | GlobPayload
-  | CreateSentryProjectPayload
+  | EnsureSentryProjectPayload
   | DetectSentryPayload;
 
 export type ToolOperation = ToolPayload["operation"];
@@ -141,9 +141,11 @@ export type ApplyPatchsetPayload = {
   };
 };
 
-export type CreateSentryProjectPayload = {
+export type EnsureSentryProjectPayload = {
   type: "tool";
-  operation: "create-sentry-project";
+  operation: "ensure-sentry-project";
+  /** Human-readable spinner hint from the server (≤ 120 chars, sensitive values redacted). */
+  detail?: string;
   cwd: string;
   params: {
     name: string;

@@ -2,16 +2,16 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as apiClient from "../../../../src/lib/api-client.js";
 import { createSentryProject } from "../../../../src/lib/init/tools/create-sentry-project.js";
-import type { CreateSentryProjectPayload } from "../../../../src/lib/init/types.js";
+import type { EnsureSentryProjectPayload } from "../../../../src/lib/init/types.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as resolveTeam from "../../../../src/lib/resolve-team.js";
 
 function makePayload(
-  overrides?: Partial<CreateSentryProjectPayload["params"]>
-): CreateSentryProjectPayload {
+  overrides?: Partial<EnsureSentryProjectPayload["params"]>
+): EnsureSentryProjectPayload {
   return {
     type: "tool",
-    operation: "create-sentry-project",
+    operation: "ensure-sentry-project",
     cwd: "/tmp/test",
     params: {
       name: "my-app",
@@ -120,8 +120,8 @@ describe("createSentryProject", () => {
     const result = await createSentryProject(makePayload(), {
       dryRun: false,
       org: "acme",
-      team: undefined,
-      project: "my-app",
+      team: "platform",
+      project: undefined,
     });
 
     expect(result.ok).toBe(true);
@@ -137,7 +137,7 @@ describe("createSentryProject", () => {
       dryRun: false,
       org: "acme",
       team: "platform",
-      project: "my-app",
+      project: undefined,
     });
 
     expect(result.ok).toBe(false);

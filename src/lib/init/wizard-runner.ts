@@ -88,6 +88,26 @@ function truncateForTerminal(message: string): string {
   return `${truncated}…`;
 }
 
+/**
+ * Build a follow-up spinner message after a tool succeeds and the CLI is
+ * waiting for the server to continue processing the returned data.
+ */
+function describePostTool(payload: SuspendPayload): string | undefined {
+  if (payload.type !== "tool") {
+    return;
+  }
+
+  switch (payload.operation) {
+    case "read-files":
+      return `Analyzing ${payload.params.paths.length === 1 ? "file" : "files"}...`;
+    case "list-dir":
+      return "Analyzing directory structure...";
+    case "file-exists-batch":
+      return "Analyzing project files...";
+    default:
+      return;
+  }
+}
 async function handleSuspendedStep(
   ctx: StepContext,
   stepPhases: Map<string, number>,
@@ -97,7 +117,10 @@ async function handleSuspendedStep(
   const label = STEP_LABELS[stepId] ?? stepId;
 
   if (payload.type === "tool") {
-    const message = describeTool(payload);
+    const message =
+      ("detail" in payload && typeof payload.detail === "string"
+        ? payload.detail
+        : undefined) ?? describeTool(payload);
     spin.message(renderInlineMarkdown(truncateForTerminal(message)));
 
     const toolResult = await executeTool(payload, context);
@@ -105,6 +128,12 @@ async function handleSuspendedStep(
     if (toolResult.message) {
       spin.stop(renderInlineMarkdown(toolResult.message));
       spin.start("Processing...");
+    } else {
+      const followUpMessage =
+        toolResult.ok === false ? undefined : describePostTool(payload);
+      if (followUpMessage) {
+        spin.message(renderInlineMarkdown(truncateForTerminal(followUpMessage)));
+      }
     }
 
     const history = stepHistory.get(stepId) ?? [];
