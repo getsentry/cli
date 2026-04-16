@@ -1,0 +1,205 @@
+# Plan: musl/Alpine Linux Binary Support
+
+**Issue:** https://github.com/getsentry/cli/issues/754
+
+## Summary
+
+Add `sentry-linux-x64-musl` and `sentry-linux-arm64-musl` native binaries so Alpine Linux and other musl-based systems can use the curl installer and self-upgrade. Bun natively supports `bun-linux-x64-musl` and `bun-linux-arm64-musl` compile targets, making this straightforward.
+
+## Files to Modify
+
+| File | Change |
+|------|--------|
+| `script/build.ts` | Extend `BuildTarget` type with `libc` field, add musl entries to `ALL_TARGETS`, update helper functions |
+| `src/lib/binary.ts` | Add `isMusl()` detection, update `getPlatformBinaryName()` to include `-musl` suffix |
+| `install` | Add `detect_musl` function, use `libc_suffix` in binary filename construction |
+| `.github/workflows/ci.yml` | Add `linux-x64-musl` and `linux-arm64-musl` to build matrix, add Alpine Docker smoke test |
+| `test/lib/binary.test.ts` | Add tests for musl detection behavior |
+
+**No changes needed:** `.craft.yml` (regex `/^sentry-.*$/` already matches), Homebrew formula (correctly excludes musl), `src/lib/upgrade.ts`, `src/lib/delta-upgrade.ts` (both consume `getPlatformBinaryName()` which auto-propagates).
+
+---
+
+## Step 1: `script/build.ts` — Extend build targets
+
+1. **Add `libc` to `BuildTarget`:**
+   ```typescript
+   type BuildTarget = {
+     os: "darwin" | "linux" | "win32";
+     arch: "arm64" | "x64";
+     libc?: "musl";
+   };
+   ```
+
+2. **Add musl entries to `ALL_TARGETS`** (after existing linux entries):
+   ```typescript
+   { os: "linux", arch: "arm64", libc: "musl" },
+   { os: "linux", arch: "x64", libc: "musl" },
+   ```
+
+3. **Update `getPackageName()`** — append `-musl` suffix:
+   ```typescript
+   function getPackageName(target: BuildTarget): string {
+     const platformName = target.os === "win32" ? "windows" : target.os;
+     const libcSuffix = target.libc ? `-${target.libc}` : "";
+     return `sentry-${platformName}-${target.arch}${libcSuffix}`;
+   }
+   ```
+
+4. **Update `getBunTarget()`** — append `-musl`:
+   ```typescript
+   function getBunTarget(target: BuildTarget): string {
+     const libcSuffix = target.libc ? `-${target.libc}` : "";
+     return `bun-${target.os}-${target.arch}${libcSuffix}`;
+   }
+   ```
+
+5. **Update compile target union** (lines 277-282) — add `"bun-linux-x64-musl" | "bun-linux-arm64-musl"`
+
+6. **Update `parseTarget()`** — handle 3-part strings like `linux-x64-musl`:
+   ```typescript
+   function parseTarget(targetStr: string): BuildTarget | null {
+     const normalized = targetStr.replace("windows-", "win32-");
+     const parts = normalized.split("-");
+     const os = parts[0] as BuildTarget["os"];
+     const arch = parts[1] as BuildTarget["arch"];
+     const libc = parts[2] === "musl" ? ("musl" as const) : undefined;
+     const target = ALL_TARGETS.find(
+       (t) => t.os === os && t.arch === arch && t.libc === libc
+     );
+     return target ?? null;
+   }
+   ```
+
+7. **Update error message** and **doc comment** listing output files to include musl variants.
+
+---
+
+## Step 2: `src/lib/binary.ts` — Runtime musl detection
+
+1. **Add `isMusl()` function** (cached, sync):
+   ```typescript
+   let cachedIsMusl: boolean | undefined;
+
+   function isMusl(): boolean {
+     if (process.platform !== "linux") return false;
+     if (cachedIsMusl !== undefined) return cachedIsMusl;
+
+     // Check for musl dynamic linker (fast stat, works on all musl distros)
+     const muslArch = process.arch === "x64" ? "x86_64" : "aarch64";
+     if (existsSync(`/lib/ld-musl-${muslArch}.so.1`)) {
+       cachedIsMusl = true;
+       return true;
+     }
+
+     // Fallback: ldd --version (musl ldd writes "musl libc" to stderr)
+     try {
+       const result = Bun.spawnSync(["ldd", "--version"], {
+         stdout: "pipe",
+         stderr: "pipe",
+       });
+       const output =
+         Buffer.from(result.stdout).toString() +
+         Buffer.from(result.stderr).toString();
+       cachedIsMusl = output.toLowerCase().includes("musl");
+       return cachedIsMusl;
+     } catch {
+       cachedIsMusl = false;
+       return false;
+     }
+   }
+   ```
+
+   - `existsSync` is already imported. `Bun.spawnSync` is polyfilled in Node.js distribution.
+   - Cached because libc can't change at runtime.
+
+2. **Update `getPlatformBinaryName()`** — insert musl suffix:
+   ```typescript
+   export function getPlatformBinaryName(): string {
+     // ... existing os/arch logic ...
+     const libcSuffix = isMusl() ? "-musl" : "";
+     const suffix = process.platform === "win32" ? ".exe" : "";
+     return `sentry-${os}-${arch}${libcSuffix}${suffix}`;
+   }
+   ```
+
+   This auto-propagates to `getBinaryDownloadUrl()`, `upgrade.ts`, and `delta-upgrade.ts`.
+
+---
+
+## Step 3: `install` script — musl detection in bash
+
+1. **Add detection after arch detection** (after line 144):
+   ```bash
+   libc_suffix=""
+   if [[ "$os" == "linux" ]]; then
+     detect_musl() {
+       local musl_arch
+       case "$arch" in
+         x64) musl_arch="x86_64" ;;
+         arm64) musl_arch="aarch64" ;;
+       esac
+       [ -f "/lib/ld-musl-${musl_arch}.so.1" ] && return 0
+       command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl && return 0
+       return 1
+     }
+     if detect_musl; then
+       libc_suffix="-musl"
+     fi
+   fi
+   ```
+
+2. **Update filename construction** in both nightly and stable paths:
+   - Line 202: `gz_filename="sentry-${os}-${arch}${libc_suffix}${suffix}.gz"`
+   - Line 241: `filename="sentry-${os}-${arch}${libc_suffix}${suffix}"`
+
+3. **Add to telemetry tags**: Include `libc_suffix` in `report_error` for debugging.
+
+---
+
+## Step 4: `.github/workflows/ci.yml` — CI matrix
+
+1. **Add musl targets to full matrix** (main/release builds):
+   ```json
+   {"target":"linux-x64-musl",   "os":"ubuntu-latest", "can-test":false},
+   {"target":"linux-arm64-musl", "os":"ubuntu-latest", "can-test":false}
+   ```
+   Cross-compiled by Bun on ubuntu-latest. `can-test: false` because glibc runner can't execute musl binaries.
+
+2. **Add Alpine Docker smoke test** (after existing smoke test step):
+   ```yaml
+   - name: Smoke test (musl/Alpine)
+     if: matrix.target == 'linux-x64-musl'
+     run: |
+       docker run --rm -v "$PWD/dist-bin:/dist-bin" alpine:latest \
+         /dist-bin/sentry-linux-x64-musl --help
+   ```
+   Only for x64-musl (arm64-musl can't run on x64 runners without QEMU).
+
+---
+
+## Step 5: `test/lib/binary.test.ts` — Tests
+
+Add tests to verify:
+- `getPlatformBinaryName()` returns a valid name on the current platform
+- On CI (ubuntu/glibc), the name does NOT contain `-musl`
+- Export `isMusl` for testing if we want direct unit tests (or test via `getPlatformBinaryName` behavior)
+
+---
+
+## What automatically works (no changes needed)
+
+- **Stable downloads**: `getBinaryDownloadUrl()` calls `getPlatformBinaryName()` → correct URL
+- **Nightly GHCR**: artifacts uploaded via glob `*.gz` → musl `.gz` files included
+- **Delta patches**: `generate-patches` iterates `new-binaries/sentry-*` → musl patches auto-generated
+- **Craft release**: artifact regex `/^sentry-.*$/` matches musl variants
+- **Registry checksums**: `includeNames: '/^sentry-.*\.gz$/'` matches musl `.gz` files
+- **Homebrew**: `includeNames` pattern explicitly excludes musl (correct — Homebrew uses glibc)
+
+## Verification
+
+1. **Build locally**: `bun run build --target linux-x64-musl` — verify binary is produced in `dist-bin/`
+2. **Docker smoke test**: `docker run --rm -v ./dist-bin:/d alpine:latest /d/sentry-linux-x64-musl --help`
+3. **Unit tests**: `bun test test/lib/binary.test.ts`
+4. **Install script test**: Run install script inside Alpine Docker container to verify musl detection
+5. **Full CI**: Push to a branch and verify all 7 targets build (5 existing + 2 musl)
