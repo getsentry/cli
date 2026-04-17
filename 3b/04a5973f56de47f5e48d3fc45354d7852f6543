@@ -1,0 +1,95 @@
+# Fix CLI-19A: EINVAL kqueue from unbounded parallel stat()
+
+## Issue Summary
+
+CLI-19A reports EINVAL kqueue errors during project root detection. The root cause is `anyTrue()` in `src/lib/promises.ts` launching ALL predicates simultaneously with zero concurrency control. During project root walk-up, `anyExists()` fires ~68 parallel `stat()` calls per directory level (7 VCS + 12 CI + 30 language + 19 build markers). On macOS, this exhausts kqueue file descriptor limits for deeply nested projects.
+
+**CLI-12Z (TypeError replaceAll)**: Already fixed in commit `cff56b69`. The null guard at `debug-id.ts:146` handles null source map entries. Skipping — just needs the Sentry issue marked resolved.
+
+## Plan: Single PR for CLI-19A
+
+### Approach
+
+Wrap the `pathExists` predicate inside `anyExists()` with a **module-scoped shared `p-limit` limiter** in `project-root.ts`. Keep `anyTrue()` generic — don't pollute a combinator utility with I/O concerns. The limiter lives with the code that actually makes stat() calls.
+
+Why shared (module-level) instead of per-call:
+- `processDirectoryLevel` fires 4 parallel `anyExists()` groups. A per-call limiter would still allow 4 × limit concurrent stats; a shared limiter enforces a single global budget, which is what the FD table actually cares about.
+- Budget is naturally reused across walk-up levels too (the walk is sequential, so levels don't overlap in practice — but the shared limiter is correct regardless).
+
+Why 32:
+- `code-scanner.ts` uses `pLimit(50)` for full file reads (open + read + close, heavier than stat). Stats are cheaper.
+- 32 leaves generous headroom under macOS's ~256 FD kqueue ceiling, even accounting for Bun's own event loop FDs.
+- Keeps the common case (VCS markers: 7 items, CI: 12 items) fully parallel. Only `LANGUAGE_MARKERS` (30) and `BUILD_SYSTEM_MARKERS` (19) can bump into the cap, and only when all 4 groups happen to run simultaneously.
+
+### Changes
+
+#### 1. `src/lib/dsn/project-root.ts` — Wrap `pathExists` with a shared stat limiter
+
+Add module-level `p-limit` instance and wrap the predicate passed to `anyTrue`:
+
+```typescript
+import pLimit from "p-limit";
+
+/**
+ * Maximum concurrent stat() calls across all project-root detection work.
+ *
+ * Shared across every anyExists() call so the budget bounds total FD
+ * pressure, not per-group pressure. processDirectoryLevel fires 4
+ * parallel anyExists() groups (VCS, CI, language, build — up to 68
+ * stat() calls combined) and this limiter caps their combined concurrency.
+ *
+ * macOS kqueue has a ~256 FD limit per process; exceeding it returns
+ * EINVAL (CLI-19A). 32 leaves generous headroom while keeping the
+ * common-case marker checks (VCS: 7, CI: 12) fully parallel. Matches
+ * the "shared pLimit instance" pattern used in response-cache.ts.
+ */
+const STAT_CONCURRENCY = 32;
+const statLimit = pLimit(STAT_CONCURRENCY);
+
+function anyExists(dir: string, names: readonly string[]): Promise<boolean> {
+  return anyTrue(names, (name) =>
+    statLimit(() => pathExists(join(dir, name)))
+  );
+}
+```
+
+That's the entire fix. `anyTrue()` is untouched — it remains a pure combinator with no I/O knowledge. The limit lives exactly where the I/O happens.
+
+#### 2. `src/lib/promises.ts` — No changes
+
+`anyTrue()` stays generic. Its contract ("run all predicates concurrently, resolve on first true") is preserved.
+
+**Worst-case FDs post-fix**: min(stats, 32) + ~few misc = ~35–40 at peak (down from ~68+).
+
+#### 3. Tests
+
+`anyTrue()` tests remain unchanged — the combinator isn't touched.
+
+Add integration-style tests for `anyExists()` concurrency in the existing `test/lib/dsn/project-root.test.ts`:
+- `anyExists caps concurrent stat() calls`: Use a temp dir (or mock `stat`) with 50+ candidate paths, instrument the predicate to track `maxConcurrent`, assert ≤ `STAT_CONCURRENCY`
+- `anyExists still returns true on first match`: Verify early-exit semantics survive the limiter wrapping
+
+Note: `statLimit` is module-scoped so it persists across tests. The tests should be resilient to that (use unique temp dirs per test, don't assert on exact counts — only upper bounds).
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/lib/dsn/project-root.ts` | Add `STAT_CONCURRENCY = 32` + shared `statLimit`, wrap `pathExists` in `anyExists()` |
+| `test/lib/dsn/project-root.test.ts` | Add concurrency cap + early-exit preservation tests |
+
+### What NOT to change
+- Don't add EINVAL to `fs-utils.ts` ignorable errors (root cause fix only)
+- Don't restructure `hasRepoRootMarker()`'s `Promise.all()` (20 FDs is fine)
+- Don't sequence marker groups — parallel between groups is correct
+- Don't touch `code-scanner.ts` or its `pLimit(50)`
+
+### Branch & PR
+- Branch: `fix/cli-19a-kqueue-concurrency` (from current HEAD)
+- PR title: `fix(dsn): limit concurrent stat() calls in project root detection (CLI-19A)`
+
+### Verification
+1. `bun test test/lib/dsn/project-root.test.ts` — New concurrency tests pass
+2. `bun test` — Full suite passes (no regressions in existing `anyTrue` tests)
+3. `bun run typecheck` — No type errors
+4. `bun run lint` — No lint issues
