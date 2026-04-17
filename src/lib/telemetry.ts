@@ -585,9 +585,7 @@ export function initSentry(
       // Enrich events with cli_error.* tags for server-side fingerprint rules.
       // reportCliError already sets these for command-level errors; this
       // catches uncaught exceptions and best-effort background captures.
-      enrichEventWithGroupingTags(event);
-
-      return event;
+      return enrichEventWithGroupingTags(event);
     },
   });
 

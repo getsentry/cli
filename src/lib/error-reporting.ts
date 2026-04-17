@@ -233,7 +233,11 @@ export function enrichEventWithGroupingTags(
     return event;
   }
 
-  const exc = event.exception?.values?.[0];
+  // Use the last (outermost/thrown) exception in the chain, not the first
+  // (innermost/root cause). Per the Sentry protocol, values[0] is the root
+  // cause and values[n-1] is the actually-thrown exception.
+  const values = event.exception?.values;
+  const exc = values?.[values.length - 1];
   if (!exc?.type) {
     return event;
   }
