@@ -1,16 +1,17 @@
 /**
  * Wizard Runner
  *
- * Main suspend/resume loop that drives the remote Mastra workflow.
- * Each iteration: check status → if suspended, perform tool or
- * interactive prompt → resume with result → repeat.
+ * Drives the remote init workflow by:
+ * 1. Starting a durable run
+ * 2. Streaming NDJSON progress events
+ * 3. Executing local tools/prompts when requested
+ * 4. Resuming the workflow with local results
+ * 5. Reconnecting to the stream when needed
  */
 
-import { randomBytes } from "node:crypto";
 import { basename } from "node:path";
 import { cancel, confirm, intro, log } from "@clack/prompts";
-import { MastraClient } from "@mastra/client-js";
-import { captureException, getTraceData } from "@sentry/node-core/light";
+import { captureException } from "@sentry/node-core/light";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { WizardError } from "../errors.js";
@@ -21,46 +22,59 @@ import {
   safeCodeSpan,
   stripColorTags,
 } from "../formatters/markdown.js";
-import {
-  abortIfCancelled,
-  STEP_LABELS,
-  WizardCancelledError,
-} from "./clack-utils.js";
-import {
-  API_TIMEOUT_MS,
-  MASTRA_API_URL,
-  SENTRY_DOCS_URL,
-  VERIFY_CHANGES_STEP,
-  WORKFLOW_ID,
-} from "./constants.js";
+import { abortIfCancelled, WizardCancelledError } from "./clack-utils.js";
+import { INIT_API_URL, MAX_STREAM_RECONNECTS, SENTRY_DOCS_URL } from "./constants.js";
 import { formatError, formatResult } from "./formatters.js";
 import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
 import { resolveInitContext } from "./preflight.js";
 import { createWizardSpinner } from "./spinner.js";
+import {
+  readNdjsonStream,
+  reconnectInitStream,
+  resumeInitAction,
+  startInitStream,
+} from "./transport.js";
 import { describeTool, executeTool } from "./tools/registry.js";
 import type {
+  InitActionRequestEvent,
+  InitActionResumeBody,
+  InitDoneEvent,
+  InitErrorEvent,
+  InitEvent,
+  InitStartInput,
+  InteractivePayload,
   ResolvedInitContext,
-  SuspendPayload,
+  ToolPayload,
+  WizardOutput,
   WizardOptions,
-  WorkflowRunResult,
 } from "./types.js";
-import {
-  precomputeDirListing,
-  precomputeSentryDetection,
-  preReadCommonFiles,
-} from "./workflow-inputs.js";
+import { precomputeSentryDetection } from "./workflow-inputs.js";
+
+const VERIFY_CHANGES_STEP = "verify-changes";
 
 type Spinner = ReturnType<typeof createWizardSpinner>;
 
 type SpinState = { running: boolean };
 
 type StepContext = {
-  payload: SuspendPayload;
-  stepId: string;
+  event: InitActionRequestEvent;
   spin: Spinner;
   spinState: SpinState;
   context: ResolvedInitContext;
+};
+
+type ReadFilesDisplay = {
+  paths: string[];
+  phase: "reading" | "analyzing";
+};
+
+type StreamState = {
+  nextStartIndex: number;
+  finalOutput?: WizardOutput;
+  finalError?: InitErrorEvent;
+  done?: InitDoneEvent;
+  completedActionIds: Set<string>;
 };
 
 function nextPhase(
@@ -71,6 +85,40 @@ function nextPhase(
   const phase = (stepPhases.get(stepId) ?? 0) + 1;
   stepPhases.set(stepId, phase);
   return names[Math.min(phase - 1, names.length - 1)] ?? "done";
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function assertToolPayload(raw: unknown): ToolPayload {
+  if (!isRecord(raw) || raw.type !== "tool" || typeof raw.operation !== "string") {
+    throw new Error("Invalid tool action payload");
+  }
+  return raw as ToolPayload;
+}
+
+function assertInteractivePayload(raw: unknown): InteractivePayload {
+  if (
+    !isRecord(raw) ||
+    raw.type !== "interactive" ||
+    typeof raw.kind !== "string"
+  ) {
+    throw new Error("Invalid prompt action payload");
+  }
+  return raw as InteractivePayload;
+}
+
+function nextReconnectDelay(attempt: number): number {
+  return Math.min(250 * 2 ** attempt, 4_000);
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -97,33 +145,6 @@ function truncateLineForTerminal(line: string): string {
   return `${truncated}…`;
 }
 
-type ReadFilesDisplay = {
-  paths: string[];
-  phase: "reading" | "analyzing";
-};
-
-function formatReadFilesSummary(progress: ReadFilesDisplay): string {
-  const { paths, phase } = progress;
-  if (paths.length === 0) {
-    return phase === "analyzing" ? "Analyzing files..." : "Reading files...";
-  }
-
-  let header: string;
-  if (phase === "analyzing") {
-    header = paths.length === 1 ? "Analyzing file..." : "Analyzing files...";
-  } else {
-    header = paths.length === 1 ? "Reading file..." : "Reading files...";
-  }
-
-  const icon = readFilesStatusIcon(phase);
-  const displayPaths = compactDisplayPaths(paths);
-  const items = displayPaths.map((filePath, index) => {
-    const branch = index === paths.length - 1 ? "└─" : "├─";
-    return `${branch} ${icon} ${safeCodeSpan(filePath)}`;
-  });
-  return `${header}\n${items.join("\n")}`;
-}
-
 function readFilesStatusIcon(phase: ReadFilesDisplay["phase"]): string {
   return phase === "analyzing"
     ? colorTag("green", "✓")
@@ -142,15 +163,31 @@ function compactDisplayPaths(paths: string[]): string[] {
   });
 }
 
-/**
- * Build a follow-up spinner message after a tool succeeds and the CLI is
- * waiting for the server to continue processing the returned data.
- */
-function describePostTool(payload: SuspendPayload): string | undefined {
-  if (payload.type !== "tool") {
-    return;
+function formatReadFilesSummary(progress: ReadFilesDisplay): string {
+  const { paths, phase } = progress;
+  if (paths.length === 0) {
+    return phase === "analyzing" ? "Analyzing files..." : "Reading files...";
   }
 
+  const header =
+    phase === "analyzing"
+      ? paths.length === 1
+        ? "Analyzing file..."
+        : "Analyzing files..."
+      : paths.length === 1
+        ? "Reading file..."
+        : "Reading files...";
+
+  const icon = readFilesStatusIcon(phase);
+  const displayPaths = compactDisplayPaths(paths);
+  const items = displayPaths.map((filePath, index) => {
+    const branch = index === paths.length - 1 ? "└─" : "├─";
+    return `${branch} ${icon} ${safeCodeSpan(filePath)}`;
+  });
+  return `${header}\n${items.join("\n")}`;
+}
+
+function describePostTool(payload: ToolPayload): string | undefined {
   switch (payload.operation) {
     case "read-files":
       return formatReadFilesSummary({
@@ -166,138 +203,181 @@ function describePostTool(payload: SuspendPayload): string | undefined {
   }
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: suspend handling needs to branch across tool and interactive payload kinds
-async function handleSuspendedStep(
+function toResumeError(error: unknown): InitActionResumeBody {
+  const message = errorMessage(error);
+  return {
+    ok: false,
+    error: {
+      message,
+      details: error,
+    },
+  };
+}
+
+async function performActionRequest(
   ctx: StepContext,
   stepPhases: Map<string, number>,
   stepHistory: Map<string, Record<string, unknown>[]>
-): Promise<Record<string, unknown>> {
-  const { payload, stepId, spin, spinState, context } = ctx;
-  const label = STEP_LABELS[stepId] ?? stepId;
+): Promise<InitActionResumeBody> {
+  const { event, context, spin, spinState } = ctx;
+  const stepId = event.name;
 
-  if (payload.type === "tool") {
+  if (event.kind === "tool") {
+    const payload = assertToolPayload(event.payload);
     const message =
-      ("detail" in payload && typeof payload.detail === "string"
-        ? payload.detail
-        : undefined) ??
+      event.description ??
       (payload.operation === "read-files"
         ? formatReadFilesSummary({
             paths: payload.params.paths,
             phase: "reading",
           })
         : describeTool(payload));
+
     spin.message(renderInlineMarkdown(truncateForTerminal(message)));
 
     const toolResult = await executeTool(payload, context);
+    if (toolResult.ok === false) {
+      return {
+        ok: false,
+        error: {
+          message: toolResult.error ?? "Local tool failed",
+          details: toolResult.data,
+        },
+      };
+    }
 
     if (toolResult.message) {
       spin.stop(renderInlineMarkdown(toolResult.message));
       spin.start("Processing...");
+      spinState.running = true;
     } else {
-      const followUpMessage =
-        toolResult.ok === false ? undefined : describePostTool(payload);
-      if (followUpMessage) {
-        spin.message(
-          renderInlineMarkdown(truncateForTerminal(followUpMessage))
-        );
+      const followUp = describePostTool(payload);
+      if (followUp) {
+        spin.message(renderInlineMarkdown(truncateForTerminal(followUp)));
       }
     }
 
     const history = stepHistory.get(stepId) ?? [];
-    history.push(toolResult);
+    history.push(toolResult as Record<string, unknown>);
     stepHistory.set(stepId, history);
 
     return {
-      ...toolResult,
-      _phase: nextPhase(stepPhases, stepId, ["read-files", "analyze", "done"]),
-      _prevPhases: history.slice(0, -1),
+      ok: true,
+      output: {
+        ...toolResult,
+        _phase: nextPhase(stepPhases, stepId, [
+          "read-files",
+          "analyze",
+          "done",
+        ]),
+        _prevPhases: history.slice(0, -1),
+      },
     };
   }
 
-  if (payload.type === "interactive") {
-    if (context.dryRun && stepId === VERIFY_CHANGES_STEP) {
-      return {
+  const payload = assertInteractivePayload(event.payload);
+  if (context.dryRun && event.name === VERIFY_CHANGES_STEP) {
+    return {
+      ok: true,
+      output: {
         action: "continue",
         _phase: nextPhase(stepPhases, stepId, ["apply"]),
-      };
-    }
-
-    spin.stop(label);
-    spinState.running = false;
-
-    const interactiveResult = await handleInteractive(payload, context);
-
-    spin.start("Processing...");
-    spinState.running = true;
-
-    return {
-      ...interactiveResult,
-      _phase: nextPhase(stepPhases, stepId, ["apply"]),
+      },
     };
   }
 
-  spin.stop("Error", 1);
-  spinState.running = false;
-  log.error(
-    `Unknown suspend payload type "${(payload as { type: string }).type}"`
-  );
-  cancel("Setup failed");
-  throw new WizardCancelledError();
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
-function assertWorkflowResult(raw: unknown): WorkflowRunResult {
-  if (!raw || typeof raw !== "object") {
-    throw new Error("Invalid workflow response: expected object");
+  if (spinState.running) {
+    spin.stop(event.description ?? payload.prompt);
+    spinState.running = false;
   }
-  const obj = raw as Record<string, unknown>;
-  if (
-    typeof obj.status !== "string" ||
-    !["suspended", "success", "failed"].includes(obj.status)
-  ) {
-    throw new Error(`Unexpected workflow status: ${String(obj.status)}`);
-  }
-  return obj as WorkflowRunResult;
-}
 
-function assertSuspendPayload(raw: unknown): SuspendPayload {
-  if (!raw || typeof raw !== "object") {
-    throw new Error("Invalid suspend payload: expected object");
-  }
-  const obj = raw as Record<string, unknown>;
-  if (
-    typeof obj.type !== "string" ||
-    !["tool", "interactive"].includes(obj.type)
-  ) {
-    throw new Error(`Unknown suspend payload type: ${String(obj.type)}`);
-  }
-  return obj as SuspendPayload;
-}
-
-function withTimeout<T>(
-  promise: Promise<T>,
-  ms: number,
-  label: string
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`${label} timed out after ${ms / 1000}s`)),
-      ms
-    );
-    promise.then(
-      (val) => {
-        clearTimeout(timer);
-        resolve(val);
+  try {
+    const promptResult = await handleInteractive(payload, context);
+    spin.start("Processing...");
+    spinState.running = true;
+    return {
+      ok: true,
+      output: {
+        ...promptResult,
+        _phase: nextPhase(stepPhases, stepId, ["apply"]),
       },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
+    };
+  } catch (error) {
+    if (!(error instanceof WizardCancelledError)) {
+      spin.start("Processing...");
+      spinState.running = true;
+    }
+    throw error;
+  }
+}
+
+async function handleEvent(
+  event: InitEvent,
+  context: ResolvedInitContext,
+  spin: Spinner,
+  spinState: SpinState,
+  state: StreamState,
+  stepPhases: Map<string, number>,
+  stepHistory: Map<string, Record<string, unknown>[]>
+): Promise<void> {
+  state.nextStartIndex += 1;
+
+  switch (event.type) {
+    case "status":
+      spin.message(renderInlineMarkdown(truncateForTerminal(event.message)));
+      return;
+    case "warning":
+      log.warn(event.message);
+      return;
+    case "summary":
+      state.finalOutput = event.output;
+      return;
+    case "error":
+      state.finalError = event;
+      return;
+    case "done":
+      state.done = event;
+      return;
+    case "action_result":
+      if (event.summary) {
+        spin.message(renderInlineMarkdown(truncateForTerminal(event.summary)));
       }
-    );
-  });
+      return;
+    case "action_request":
+      if (state.completedActionIds.has(event.actionId)) {
+        return;
+      }
+
+      try {
+        const resumeBody = await performActionRequest(
+          {
+            event,
+            context,
+            spin,
+            spinState,
+          },
+          stepPhases,
+          stepHistory
+        );
+        await resumeInitAction(event.actionId, resumeBody, {
+          baseUrl: INIT_API_URL,
+        });
+        state.completedActionIds.add(event.actionId);
+      } catch (error) {
+        if (error instanceof WizardCancelledError) {
+          throw error;
+        }
+        await resumeInitAction(event.actionId, toResumeError(error), {
+          baseUrl: INIT_API_URL,
+        });
+        state.completedActionIds.add(event.actionId);
+      }
+      return;
+    default: {
+      const _exhaustive: never = event;
+      throw new Error(`Unhandled init event: ${String(_exhaustive)}`);
+    }
+  }
 }
 
 async function confirmExperimental(yes: boolean): Promise<boolean> {
@@ -330,14 +410,15 @@ async function preamble(
   let confirmed: boolean;
   try {
     confirmed = await confirmExperimental(yes || dryRun);
-  } catch (err) {
-    if (err instanceof WizardCancelledError) {
-      captureException(err);
+  } catch (error) {
+    if (error instanceof WizardCancelledError) {
+      captureException(error);
       process.exitCode = 0;
       return false;
     }
-    throw err;
+    throw error;
   }
+
   if (!confirmed) {
     cancel("Setup cancelled.");
     process.exitCode = 0;
@@ -358,7 +439,29 @@ async function preamble(
   return true;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard orchestration with error handling branches
+function buildFinalError(
+  finalError: InitErrorEvent | undefined,
+  finalOutput: WizardOutput | undefined,
+  done: InitDoneEvent | undefined
+): InitErrorEvent {
+  if (finalError) {
+    return {
+      ...finalError,
+      output: finalError.output ?? finalOutput,
+    };
+  }
+
+  return {
+    type: "error",
+    message:
+      done?.ok === false
+        ? "Workflow completed with an error."
+        : "Workflow completed without a success result.",
+    output: finalOutput,
+  };
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard orchestration with stream reconnect handling
 export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   const { directory, yes, dryRun, features } = initialOptions;
 
@@ -379,188 +482,130 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     return;
   }
 
-  const tracingOptions = {
-    traceId: randomBytes(16).toString("hex"),
-    tags: ["sentry-cli", "init-wizard"],
-    metadata: {
-      cliVersion: CLI_VERSION,
-      os: process.platform,
-      arch: process.arch,
-      nodeVersion: process.version,
-      dryRun,
-    },
-  };
-
-  const token = context.authToken;
-
-  const client = new MastraClient({
-    baseUrl: MASTRA_API_URL,
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    fetch: ((url, init) => {
-      const traceData = getTraceData();
-      return fetch(url, {
-        ...init,
-        headers: {
-          ...(init?.headers as Record<string, string> | undefined),
-          ...(traceData["sentry-trace"] && {
-            "sentry-trace": traceData["sentry-trace"],
-          }),
-          ...(traceData.baggage && { baggage: traceData.baggage }),
-        },
-      });
-    }) as typeof fetch,
-  });
-  const workflow = client.getWorkflow(WORKFLOW_ID);
-
   const spin = createWizardSpinner();
   const spinState: SpinState = { running: false };
+  const state: StreamState = {
+    nextStartIndex: 0,
+    completedActionIds: new Set<string>(),
+  };
+  const stepPhases = new Map<string, number>();
+  const stepHistory = new Map<string, Record<string, unknown>[]>();
 
   spin.start("Scanning project...");
   spinState.running = true;
 
-  let run: Awaited<ReturnType<typeof workflow.createRun>>;
-  let result: WorkflowRunResult;
+  let runId: string | undefined;
   try {
-    const [dirListing, existingSentry] = await Promise.all([
-      precomputeDirListing(directory),
-      precomputeSentryDetection(directory).catch(() => null),
-    ]);
-    const fileCache = await preReadCommonFiles(directory, dirListing);
-    spin.message("Connecting to wizard...");
-    run = await workflow.createRun();
-    result = assertWorkflowResult(
-      await withTimeout(
-        run.startAsync({
-          inputData: {
-            directory,
-            yes,
-            dryRun,
-            features,
-            dirListing,
-            fileCache,
-            existingSentry: existingSentry?.data,
-          },
-          tracingOptions,
-        }),
-        API_TIMEOUT_MS,
-        "Workflow start"
-      )
+    const existingSentry = await precomputeSentryDetection(directory).catch(
+      () => null
     );
-  } catch (err) {
+    const startInput: InitStartInput = {
+      directory,
+      yes,
+      dryRun,
+      features,
+      org: context.org,
+      team: context.team,
+      project: context.project,
+      existingProject: context.existingProject,
+      existingSentry:
+        existingSentry?.ok === true
+          ? (existingSentry.data as InitStartInput["existingSentry"])
+          : null,
+      cliVersion: CLI_VERSION,
+    };
+
+    spin.message("Connecting to wizard...");
+    const started = await startInitStream(startInput, {
+      baseUrl: INIT_API_URL,
+    });
+    runId = started.runId;
+  } catch (error) {
     spin.stop("Connection failed", 1);
     spinState.running = false;
-    log.error(errorMessage(err));
+    log.error(errorMessage(error));
     cancel("Setup failed");
-    throw new WizardError(errorMessage(err));
+    throw new WizardError(errorMessage(error));
   }
 
-  const stepPhases = new Map<string, number>();
-  const stepHistory = new Map<string, Record<string, unknown>[]>();
-
   try {
-    while (result.status === "suspended") {
-      const stepPath = result.suspended?.at(0) ?? [];
-      const stepId: string = stepPath.at(-1) ?? "unknown";
+    if (!runId) {
+      throw new Error("Init start succeeded but no workflow runId was returned.");
+    }
 
-      const extracted = extractSuspendPayload(result, stepId);
-      if (!extracted) {
-        spin.stop("Error", 1);
-        spinState.running = false;
-        log.error(`No suspend payload found for step "${stepId}"`);
-        cancel("Setup failed");
-        throw new WizardError(`No suspend payload found for step "${stepId}"`);
-      }
+    let reconnectAttempt = 0;
+    let currentResponse = await reconnectInitStream(runId, state.nextStartIndex, {
+      baseUrl: INIT_API_URL,
+    });
 
-      const resumeData = await handleSuspendedStep(
-        {
-          payload: extracted.payload,
-          stepId: extracted.stepId,
+    while (!(state.done || state.finalError)) {
+      const eventCount = await readNdjsonStream(currentResponse, async (event) => {
+        await handleEvent(
+          event,
+          context,
           spin,
           spinState,
-          context,
-        },
-        stepPhases,
-        stepHistory
-      );
+          state,
+          stepPhases,
+          stepHistory
+        );
+      });
 
-      result = assertWorkflowResult(
-        await withTimeout(
-          run.resumeAsync({
-            step: extracted.stepId,
-            resumeData,
-            tracingOptions,
-          }),
-          API_TIMEOUT_MS,
-          "Workflow resume"
+      if (state.done || state.finalError) {
+        break;
+      }
+
+      reconnectAttempt = eventCount === 0 ? reconnectAttempt + 1 : 0;
+      if (reconnectAttempt > MAX_STREAM_RECONNECTS) {
+        throw new Error(
+          `Init stream disconnected too many times (${MAX_STREAM_RECONNECTS})`
+        );
+      }
+
+      spin.message(
+        renderInlineMarkdown(
+          truncateForTerminal("Connection interrupted. Reconnecting...")
         )
       );
+      await sleepMs(nextReconnectDelay(reconnectAttempt));
+      currentResponse = await reconnectInitStream(runId, state.nextStartIndex, {
+        baseUrl: INIT_API_URL,
+      });
     }
-  } catch (err) {
-    if (err instanceof WizardCancelledError) {
-      captureException(err);
+  } catch (error) {
+    if (error instanceof WizardCancelledError) {
+      captureException(error);
       process.exitCode = 0;
       return;
-    }
-    if (err instanceof WizardError) {
-      throw err;
     }
     if (spinState.running) {
       spin.stop("Error", 1);
       spinState.running = false;
     }
-    log.error(errorMessage(err));
+    log.error(errorMessage(error));
     cancel("Setup failed");
-    throw new WizardError(errorMessage(err));
+    throw new WizardError(errorMessage(error));
   }
 
-  handleFinalResult(result, spin, spinState);
-}
-
-function handleFinalResult(
-  result: WorkflowRunResult,
-  spin: Spinner,
-  spinState: SpinState
-): void {
-  const hasError = result.status !== "success" || result.result?.exitCode;
-
-  if (hasError) {
+  if (state.done?.ok) {
     if (spinState.running) {
-      spin.stop("Failed", 1);
+      spin.stop("Done");
       spinState.running = false;
     }
-    formatError(result);
-    throw new WizardError("Workflow returned an error");
+    formatResult(state.finalOutput ?? {});
+    return;
   }
+
+  const finalError = buildFinalError(
+    state.finalError,
+    state.finalOutput,
+    state.done
+  );
 
   if (spinState.running) {
-    spin.stop("Done");
+    spin.stop("Failed", 1);
     spinState.running = false;
   }
-  formatResult(result);
-}
-
-function extractSuspendPayload(
-  result: WorkflowRunResult,
-  stepId: string
-): { payload: SuspendPayload; stepId: string } | undefined {
-  const stepPayload = result.steps?.[stepId]?.suspendPayload;
-  if (stepPayload) {
-    return { payload: assertSuspendPayload(stepPayload), stepId };
-  }
-
-  if (result.suspendPayload) {
-    return { payload: assertSuspendPayload(result.suspendPayload), stepId };
-  }
-
-  for (const key of Object.keys(result.steps ?? {})) {
-    const step = result.steps?.[key];
-    if (step?.suspendPayload) {
-      return {
-        payload: assertSuspendPayload(step.suspendPayload),
-        stepId: key,
-      };
-    }
-  }
-
-  return;
+  formatError(finalError);
+  throw new WizardError(finalError.message);
 }

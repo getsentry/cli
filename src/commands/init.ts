@@ -2,8 +2,8 @@
  * sentry init
  *
  * Initialize Sentry in a project using the remote wizard workflow.
- * Communicates with the Mastra API via suspend/resume to perform
- * local filesystem operations and interactive prompts.
+ * Streams progress from the init API and performs any requested
+ * local filesystem operations or interactive prompts on the CLI side.
  *
  * Supports two optional positionals with smart disambiguation:
  *   sentry init                       — auto-detect everything, dir = cwd
@@ -262,9 +262,9 @@ export const initCommand = buildCommand<
       await resolveTarget(targetArg);
 
     // 5. Start background org detection when org is not yet known.
-    //    The prefetch runs concurrently with the preamble, the wizard startup,
-    //    and all early suspend/resume rounds — by the time the wizard needs the
-    //    org (inside createSentryProject), the result is already cached.
+    //    The prefetch runs concurrently with the preamble, wizard startup,
+    //    and early streamed action round-trips — by the time the wizard needs
+    //    the org (inside createSentryProject), the result is already cached.
     if (!explicitOrg) {
       warmOrgDetection(targetDir);
     }

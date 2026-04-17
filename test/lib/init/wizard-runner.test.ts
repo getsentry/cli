@@ -9,7 +9,6 @@ import {
 } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as clack from "@clack/prompts";
-import { MastraClient } from "@mastra/client-js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as banner from "../../../src/lib/banner.js";
 import { WizardError } from "../../../src/lib/errors.js";
@@ -24,12 +23,15 @@ import * as preflight from "../../../src/lib/init/preflight.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as initSpinner from "../../../src/lib/init/spinner.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as initTransport from "../../../src/lib/init/transport.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as registry from "../../../src/lib/init/tools/registry.js";
 import type {
+  InitActionResumeBody,
+  InitEvent,
   ResolvedInitContext,
   ToolPayload,
   WizardOptions,
-  WorkflowRunResult,
 } from "../../../src/lib/init/types.js";
 import { runWizard } from "../../../src/lib/init/wizard-runner.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
@@ -63,14 +65,11 @@ function makeContext(
     dryRun: false,
     org: "acme",
     team: "platform",
+    project: "my-app",
     authToken: "test-token",
     ...overrides,
   };
 }
-
-let mockStartResult: WorkflowRunResult;
-let mockResumeResults: WorkflowRunResult[];
-let resumeCallCount = 0;
 
 let introSpy: ReturnType<typeof spyOn>;
 let confirmSpy: ReturnType<typeof spyOn>;
@@ -86,19 +85,22 @@ let formatErrorSpy: ReturnType<typeof spyOn>;
 let checkGitStatusSpy: ReturnType<typeof spyOn>;
 let handleInteractiveSpy: ReturnType<typeof spyOn>;
 let resolveInitContextSpy: ReturnType<typeof spyOn>;
+let startInitStreamSpy: ReturnType<typeof spyOn>;
+let reconnectInitStreamSpy: ReturnType<typeof spyOn>;
+let resumeInitActionSpy: ReturnType<typeof spyOn>;
+let readNdjsonStreamSpy: ReturnType<typeof spyOn>;
 let describeToolSpy: ReturnType<typeof spyOn>;
 let executeToolSpy: ReturnType<typeof spyOn>;
-let precomputeDirListingSpy: ReturnType<typeof spyOn>;
-let preReadCommonFilesSpy: ReturnType<typeof spyOn>;
 let precomputeSentryDetectionSpy: ReturnType<typeof spyOn>;
-let getWorkflowSpy: ReturnType<typeof spyOn>;
 let stderrSpy: ReturnType<typeof spyOn>;
 
+let streamBatches: InitEvent[][];
+let resumeBodies: InitActionResumeBody[];
+
 beforeEach(() => {
-  mockStartResult = { status: "success", result: { platform: "React" } };
-  mockResumeResults = [];
-  resumeCallCount = 0;
   process.exitCode = 0;
+  streamBatches = [[{ type: "summary", output: { platform: "React" } }, { type: "done", ok: true }]];
+  resumeBodies = [];
 
   introSpy = spyOn(clack, "intro").mockImplementation(noop);
   confirmSpy = spyOn(clack, "confirm").mockResolvedValue(true);
@@ -107,7 +109,7 @@ beforeEach(() => {
   logWarnSpy = spyOn(clack.log, "warn").mockImplementation(noop);
   logErrorSpy = spyOn(clack.log, "error").mockImplementation(noop);
   spinnerSpy = spyOn(initSpinner, "createWizardSpinner").mockReturnValue(
-    spinnerMock as any
+    spinnerMock as never
   );
 
   spinnerMock.start.mockClear();
@@ -132,14 +134,6 @@ beforeEach(() => {
     ok: true,
     data: { results: [] },
   });
-  precomputeDirListingSpy = spyOn(
-    workflowInputs,
-    "precomputeDirListing"
-  ).mockResolvedValue([]);
-  preReadCommonFilesSpy = spyOn(
-    workflowInputs,
-    "preReadCommonFiles"
-  ).mockResolvedValue({});
   precomputeSentryDetectionSpy = spyOn(
     workflowInputs,
     "precomputeSentryDetection"
@@ -148,25 +142,36 @@ beforeEach(() => {
     data: { status: "none", signals: [] },
   });
   stderrSpy = spyOn(process.stderr, "write").mockImplementation(
-    () => true as any
+    () => true as never
   );
 
-  const run = {
-    startAsync: mock(() => Promise.resolve(mockStartResult)),
-    resumeAsync: mock(() => {
-      const result = mockResumeResults[resumeCallCount] ?? {
-        status: "success",
-      };
-      resumeCallCount += 1;
-      return Promise.resolve(result);
-    }),
-  };
-  const workflow = {
-    createRun: mock(() => Promise.resolve(run)),
-  };
-  getWorkflowSpy = spyOn(MastraClient.prototype, "getWorkflow").mockReturnValue(
-    workflow as any
-  );
+  startInitStreamSpy = spyOn(
+    initTransport,
+    "startInitStream"
+  ).mockResolvedValue({
+    response: {} as Response,
+    runId: "run-123",
+  });
+  reconnectInitStreamSpy = spyOn(
+    initTransport,
+    "reconnectInitStream"
+  ).mockResolvedValue({} as Response);
+  resumeInitActionSpy = spyOn(
+    initTransport,
+    "resumeInitAction"
+  ).mockImplementation(async (_actionId, body) => {
+    resumeBodies.push(body);
+  });
+  readNdjsonStreamSpy = spyOn(
+    initTransport,
+    "readNdjsonStream"
+  ).mockImplementation(async (_response, onEvent) => {
+    const batch = streamBatches.shift() ?? [];
+    for (const event of batch) {
+      await onEvent(event);
+    }
+    return batch.length;
+  });
 });
 
 afterEach(() => {
@@ -184,41 +189,42 @@ afterEach(() => {
   checkGitStatusSpy.mockRestore();
   handleInteractiveSpy.mockRestore();
   resolveInitContextSpy.mockRestore();
+  startInitStreamSpy.mockRestore();
+  reconnectInitStreamSpy.mockRestore();
+  resumeInitActionSpy.mockRestore();
+  readNdjsonStreamSpy.mockRestore();
   describeToolSpy.mockRestore();
   executeToolSpy.mockRestore();
-  precomputeDirListingSpy.mockRestore();
-  preReadCommonFilesSpy.mockRestore();
   precomputeSentryDetectionSpy.mockRestore();
-  getWorkflowSpy.mockRestore();
   stderrSpy.mockRestore();
 
   process.exitCode = 0;
 });
 
 describe("runWizard", () => {
-  test("formats successful results", async () => {
+  test("starts the workflow without authToken, dirListing, or fileCache in the payload", async () => {
     await runWizard(makeOptions());
 
-    expect(formatResultSpy).toHaveBeenCalled();
+    const startArg = startInitStreamSpy.mock.calls[0]?.[0] as Record<
+      string,
+      unknown
+    >;
+    expect(startArg).toMatchObject({
+      directory: "/tmp/test",
+      yes: true,
+      dryRun: false,
+      org: "acme",
+      team: "platform",
+      project: "my-app",
+      existingSentry: { status: "none", signals: [] },
+      cliVersion: expect.any(String),
+    });
+    expect(startArg.authToken).toBeUndefined();
+    expect(startArg.dirListing).toBeUndefined();
+    expect(startArg.fileCache).toBeUndefined();
+    expect(formatResultSpy).toHaveBeenCalledWith({ platform: "React" });
     expect(formatErrorSpy).not.toHaveBeenCalled();
     expect(spinnerMock.stop).toHaveBeenCalledWith("Done");
-  });
-
-  test("throws when stdin is not a TTY without --yes", async () => {
-    const originalIsTTY = process.stdin.isTTY;
-    Object.defineProperty(process.stdin, "isTTY", {
-      value: false,
-      configurable: true,
-    });
-
-    await expect(runWizard(makeOptions({ yes: false }))).rejects.toThrow(
-      WizardError
-    );
-
-    Object.defineProperty(process.stdin, "isTTY", {
-      value: originalIsTTY,
-      configurable: true,
-    });
   });
 
   test("passes dry-run as non-interactive into preflight", async () => {
@@ -230,12 +236,12 @@ describe("runWizard", () => {
     expect(logWarnSpy).toHaveBeenCalled();
   });
 
-  test("stops before workflow creation when preflight returns null", async () => {
+  test("stops before transport creation when preflight returns null", async () => {
     resolveInitContextSpy.mockResolvedValue(null);
 
     await runWizard(makeOptions());
 
-    expect(getWorkflowSpy).not.toHaveBeenCalled();
+    expect(startInitStreamSpy).not.toHaveBeenCalled();
     expect(formatResultSpy).not.toHaveBeenCalled();
   });
 
@@ -245,47 +251,69 @@ describe("runWizard", () => {
     await runWizard(makeOptions());
 
     expect(cancelSpy).toHaveBeenCalledWith("Setup cancelled.");
-    expect(getWorkflowSpy).not.toHaveBeenCalled();
+    expect(startInitStreamSpy).not.toHaveBeenCalled();
   });
 
-  test("dispatches tool payloads through the registry", async () => {
+  test("dispatches tool action requests through the local registry", async () => {
     const payload: ToolPayload = {
       type: "tool",
       operation: "run-commands",
       cwd: "/tmp/test",
       params: { commands: ["npm install @sentry/node"] },
     };
-    mockStartResult = {
-      status: "suspended",
-      suspended: [["install-deps"]],
-      steps: {
-        "install-deps": { suspendPayload: payload },
-      },
-    };
-    mockResumeResults = [{ status: "success" }];
+    streamBatches = [
+      [
+        {
+          type: "action_request",
+          actionId: "tool-1",
+          kind: "tool",
+          name: "install-deps",
+          payload,
+        },
+      ],
+      [{ type: "done", ok: true }],
+    ];
 
     await runWizard(makeOptions());
 
     expect(describeToolSpy).toHaveBeenCalledWith(payload);
     expect(executeToolSpy).toHaveBeenCalledWith(payload, makeContext());
+    expect(resumeInitActionSpy).toHaveBeenCalledWith(
+      "tool-1",
+      expect.objectContaining({
+        ok: true,
+        output: expect.objectContaining({
+          ok: true,
+          data: { results: [] },
+        }),
+      }),
+      expect.objectContaining({ baseUrl: expect.any(String) })
+    );
+    expect(reconnectInitStreamSpy).toHaveBeenCalledWith(
+      "run-123",
+      1,
+      expect.objectContaining({ baseUrl: expect.any(String) })
+    );
     expect(spinnerMock.message).toHaveBeenCalledWith("Running tool...");
   });
 
-  test("dispatches interactive payloads to the prompt handler", async () => {
-    mockStartResult = {
-      status: "suspended",
-      suspended: [["pick-feature"]],
-      steps: {
-        "pick-feature": {
-          suspendPayload: {
+  test("dispatches prompt action requests through interactive handlers", async () => {
+    streamBatches = [
+      [
+        {
+          type: "action_request",
+          actionId: "prompt-1",
+          kind: "prompt",
+          name: "select-features",
+          payload: {
             type: "interactive",
             kind: "confirm",
             prompt: "Continue?",
           },
         },
-      },
-    };
-    mockResumeResults = [{ status: "success" }];
+      ],
+      [{ type: "done", ok: true }],
+    ];
 
     await runWizard(makeOptions());
 
@@ -297,68 +325,177 @@ describe("runWizard", () => {
       },
       makeContext()
     );
+    expect(resumeBodies[0]).toEqual({
+      ok: true,
+      output: {
+        action: "continue",
+        _phase: "apply",
+      },
+    });
   });
 
-  test("skips verify-changes interactive prompts during dry-run", async () => {
+  test("deduplicates replayed action requests by actionId", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "list-dir",
+      cwd: "/tmp/test",
+      params: { path: ".", recursive: true },
+    };
+    streamBatches = [
+      [
+        {
+          type: "action_request",
+          actionId: "dup-1",
+          kind: "tool",
+          name: "detect-platform",
+          payload,
+        },
+      ],
+      [
+        {
+          type: "action_request",
+          actionId: "dup-1",
+          kind: "tool",
+          name: "detect-platform",
+          payload,
+        },
+        { type: "summary", output: { platform: "node" } },
+        { type: "done", ok: true },
+      ],
+    ];
+
+    await runWizard(makeOptions());
+
+    expect(executeToolSpy).toHaveBeenCalledTimes(1);
+    expect(resumeInitActionSpy).toHaveBeenCalledTimes(1);
+    expect(reconnectInitStreamSpy).toHaveBeenCalledWith(
+      "run-123",
+      1,
+      expect.objectContaining({ baseUrl: expect.any(String) })
+    );
+  });
+
+  test("skips verify-changes prompt actions during dry-run", async () => {
     resolveInitContextSpy.mockResolvedValue(makeContext({ dryRun: true }));
-    mockStartResult = {
-      status: "suspended",
-      suspended: [["verify-changes"]],
-      steps: {
-        "verify-changes": {
-          suspendPayload: {
+    streamBatches = [
+      [
+        {
+          type: "action_request",
+          actionId: "verify-1",
+          kind: "prompt",
+          name: "verify-changes",
+          payload: {
             type: "interactive",
             kind: "confirm",
-            prompt: "Verify changes?",
+            prompt: "Verification found issues. Continue anyway?",
           },
         },
-      },
-    };
-    mockResumeResults = [{ status: "success" }];
+      ],
+      [{ type: "done", ok: true }],
+    ];
 
     await runWizard(makeOptions({ dryRun: true }));
 
     expect(handleInteractiveSpy).not.toHaveBeenCalled();
+    expect(resumeBodies[0]).toEqual({
+      ok: true,
+      output: {
+        action: "continue",
+        _phase: "apply",
+      },
+    });
   });
 
-  test("surfaces malformed suspend payload types", async () => {
-    mockStartResult = {
-      status: "suspended",
-      suspended: [["detect-platform"]],
-      steps: {
-        "detect-platform": {
-          suspendPayload: {
+  test("renders final summaries from summary and done events", async () => {
+    streamBatches = [
+      [
+        {
+          type: "summary",
+          output: {
+            platform: "Node",
+            projectDir: "/tmp/test",
+            warnings: ["Heads up"],
+          },
+        },
+        { type: "done", ok: true },
+      ],
+    ];
+
+    await runWizard(makeOptions());
+
+    expect(formatResultSpy).toHaveBeenCalledWith({
+      platform: "Node",
+      projectDir: "/tmp/test",
+      warnings: ["Heads up"],
+    });
+  });
+
+  test("renders final errors from summary and error events", async () => {
+    streamBatches = [
+      [
+        {
+          type: "summary",
+          output: { platform: "Node", commands: ["npm install"] },
+        },
+        {
+          type: "error",
+          message: "Could not determine project platform",
+          exitCode: 20,
+        },
+      ],
+    ];
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+
+    expect(formatErrorSpy).toHaveBeenCalledWith({
+      type: "error",
+      message: "Could not determine project platform",
+      exitCode: 20,
+      output: {
+        platform: "Node",
+        commands: ["npm install"],
+      },
+    });
+    expect(formatResultSpy).not.toHaveBeenCalled();
+  });
+
+  test("surfaces malformed action payload types", async () => {
+    streamBatches = [
+      [
+        {
+          type: "action_request",
+          actionId: "bad-1",
+          kind: "tool",
+          name: "detect-platform",
+          payload: {
             type: "unknown",
             operation: "list-dir",
             cwd: "/tmp/test",
             params: { path: "." },
           },
         },
-      },
-    };
+      ],
+      [{ type: "error", message: "Bad action payload" }],
+    ];
 
     await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
-  });
-
-  test("fails when a suspended step has no payload", async () => {
-    mockStartResult = {
-      status: "suspended",
-      suspended: [["detect-platform"]],
-      steps: {
-        "detect-platform": {},
-      },
-    };
-
-    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+    expect(resumeBodies[0]).toEqual({
+      ok: false,
+      error: expect.objectContaining({
+        message: "Invalid tool action payload",
+      }),
+    });
   });
 
   test("shows a multiline tree while reading files and then analyzing them", async () => {
-    mockStartResult = {
-      status: "suspended",
-      suspended: [["detect-platform"]],
-      steps: {
-        "detect-platform": {
-          suspendPayload: {
+    streamBatches = [
+      [
+        {
+          type: "action_request",
+          actionId: "read-1",
+          kind: "tool",
+          name: "detect-platform",
+          payload: {
             type: "tool",
             operation: "read-files",
             cwd: "/tmp/test",
@@ -367,9 +504,9 @@ describe("runWizard", () => {
             },
           },
         },
-      },
-    };
-    mockResumeResults = [{ status: "success" }];
+      ],
+      [{ type: "done", ok: true }],
+    ];
 
     await runWizard(makeOptions());
 
@@ -389,26 +526,28 @@ describe("runWizard", () => {
   });
 
   test("renders tool result messages via the spinner stop state", async () => {
-    mockStartResult = {
-      status: "suspended",
-      suspended: [["ensure-sentry-project"]],
-      steps: {
-        "ensure-sentry-project": {
-          suspendPayload: {
+    streamBatches = [
+      [
+        {
+          type: "action_request",
+          actionId: "ensure-1",
+          kind: "tool",
+          name: "ensure-sentry-project",
+          payload: {
             type: "tool",
             operation: "create-sentry-project",
             cwd: "/tmp/test",
             params: { name: "my-app", platform: "javascript-react" },
           },
         },
-      },
-    };
+      ],
+      [{ type: "done", ok: true }],
+    ];
     executeToolSpy.mockResolvedValue({
       ok: true,
       message: "Using existing project",
       data: {},
     });
-    mockResumeResults = [{ status: "success" }];
 
     await runWizard(makeOptions());
 

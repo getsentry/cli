@@ -225,11 +225,95 @@ export type ConfirmPayload = {
 
 export type SuspendPayload = ToolPayload | InteractivePayload;
 
-export type WorkflowRunResult = {
-  status: "suspended" | "success" | "failed";
-  suspended?: string[][];
-  steps?: Record<string, { suspendPayload?: unknown }>;
-  suspendPayload?: unknown;
-  result?: WizardOutput;
-  error?: string;
+export type InitStartInput = {
+  directory: string;
+  yes: boolean;
+  dryRun: boolean;
+  features?: string[];
+  org?: string;
+  team?: string;
+  project?: string;
+  existingProject?: ExistingProjectData;
+  existingSentry?: {
+    status: "installed" | "partial" | "none";
+    signals: string[];
+  } | null;
+  cliVersion: string;
+};
+
+export type InitActionResumeBody =
+  | { ok: true; output: Record<string, unknown> }
+  | {
+      ok: false;
+      error: {
+        message: string;
+        code?: string;
+        details?: unknown;
+      };
+    };
+
+export type InitStatusEvent = {
+  type: "status";
+  message: string;
+  phase?: string;
+};
+
+export type InitActionRequestEvent = {
+  type: "action_request";
+  actionId: string;
+  kind: "tool" | "prompt";
+  name: string;
+  description?: string;
+  payload: unknown;
+};
+
+export type InitActionResultEvent = {
+  type: "action_result";
+  actionId: string;
+  ok: boolean;
+  summary?: string;
+};
+
+export type InitWarningEvent = {
+  type: "warning";
+  message: string;
+};
+
+export type InitSummaryEvent = {
+  type: "summary";
+  output: WizardOutput;
+};
+
+export type InitErrorEvent = {
+  type: "error";
+  message: string;
+  exitCode?: number;
+  docsUrl?: string;
+  commands?: string[];
+  output?: WizardOutput;
+};
+
+export type InitDoneEvent = {
+  type: "done";
+  ok: boolean;
+};
+
+export type InitEvent =
+  | InitStatusEvent
+  | InitActionRequestEvent
+  | InitActionResultEvent
+  | InitWarningEvent
+  | InitSummaryEvent
+  | InitErrorEvent
+  | InitDoneEvent;
+
+export type InitStatusResponse = {
+  status: "queued" | "running" | "waiting_for_action" | "completed" | "failed" | "cancelled";
+  output?: WizardOutput;
+  error?: {
+    message: string;
+    exitCode?: number;
+    docsUrl?: string;
+    commands?: string[];
+  };
 };

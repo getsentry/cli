@@ -29,9 +29,9 @@ export async function runWizard(
   const cmd = getCliCommand().map((part) =>
     part.includes("/") ? resolve(CLI_ROOT, part) : part
   );
-  const mastraUrl = process.env.MASTRA_API_URL;
-  if (!mastraUrl) {
-    throw new Error("MASTRA_API_URL env var is required to run init evals");
+  const initApiUrl = process.env.INIT_API_URL ?? process.env.MASTRA_API_URL;
+  if (!initApiUrl) {
+    throw new Error("INIT_API_URL env var is required to run init evals");
   }
 
   // Install dependencies first so the wizard sees a realistic project
@@ -68,8 +68,8 @@ export async function runWizard(
     stderr: "pipe",
     env: {
       ...process.env,
-      // Override the hardcoded Mastra URL to point at local/test server
-      MASTRA_API_URL: mastraUrl,
+      // Override the default init API URL to point at the test server
+      INIT_API_URL: initApiUrl,
       // Disable telemetry
       SENTRY_CLI_NO_TELEMETRY: "1",
     },

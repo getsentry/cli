@@ -13,7 +13,7 @@ import {
   EXIT_PLATFORM_NOT_DETECTED,
   EXIT_VERIFICATION_FAILED,
 } from "./constants.js";
-import type { WizardOutput, WorkflowRunResult } from "./types.js";
+import type { InitErrorEvent, WizardOutput } from "./types.js";
 
 type ChangedFile = NonNullable<WizardOutput["changedFiles"]>[number];
 
@@ -160,8 +160,7 @@ function buildSummary(output: WizardOutput): string {
   return sections.join("\n\n");
 }
 
-export function formatResult(result: WorkflowRunResult): void {
-  const output: WizardOutput = result.result ?? {};
+export function formatResult(output: WizardOutput): void {
   const md = buildSummary(output);
 
   if (md.length > 0) {
@@ -182,11 +181,10 @@ export function formatResult(result: WorkflowRunResult): void {
   outro("Sentry SDK installed successfully!");
 }
 
-export function formatError(result: WorkflowRunResult): void {
-  const inner = result.result;
-  const message =
-    result.error ?? inner?.message ?? "Wizard failed with an unknown error";
-  const exitCode = inner?.exitCode ?? 1;
+export function formatError(error: InitErrorEvent): void {
+  const output = error.output;
+  const message = error.message || "Wizard failed with an unknown error";
+  const exitCode = error.exitCode ?? output?.exitCode ?? 1;
 
   log.error(String(message));
 
@@ -195,7 +193,7 @@ export function formatError(result: WorkflowRunResult): void {
       "Hint: Could not detect your project's platform. Check that the directory contains a valid project."
     );
   } else if (exitCode === EXIT_DEPENDENCY_INSTALL_FAILED) {
-    const commands = inner?.commands;
+    const commands = error.commands ?? output?.commands;
     if (commands?.length) {
       log.warn(
         `You can install dependencies manually:\n${commands.map((cmd) => `  $ ${cmd}`).join("\n")}`
@@ -205,7 +203,7 @@ export function formatError(result: WorkflowRunResult): void {
     log.warn("Hint: Fix the verification issues and run 'sentry init' again.");
   }
 
-  const docsUrl = inner?.docsUrl;
+  const docsUrl = error.docsUrl ?? output?.docsUrl;
   if (docsUrl) {
     log.info(`Docs: ${terminalLink(docsUrl)}`);
   }

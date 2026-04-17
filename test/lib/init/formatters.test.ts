@@ -44,21 +44,18 @@ afterEach(() => {
 describe("formatResult", () => {
   test("displays summary with all fields and a nested changed-files tree", () => {
     formatResult({
-      status: "success",
-      result: {
-        platform: "Next.js",
-        projectDir: "/app",
-        features: ["errorMonitoring", "performanceMonitoring"],
-        commands: ["npm install @sentry/nextjs"],
-        sentryProjectUrl: "https://sentry.io/project",
-        docsUrl: "https://docs.sentry.io",
-        changedFiles: [
-          { action: "modify", path: "next.config.js" },
-          { action: "create", path: "src/app/instrumentation-client.ts" },
-          { action: "modify", path: "src/app/layout.tsx" },
-          { action: "delete", path: "src/old-sentry.js" },
-        ],
-      },
+      platform: "Next.js",
+      projectDir: "/app",
+      features: ["errorMonitoring", "performanceMonitoring"],
+      commands: ["npm install @sentry/nextjs"],
+      sentryProjectUrl: "https://sentry.io/project",
+      docsUrl: "https://docs.sentry.io",
+      changedFiles: [
+        { action: "modify", path: "next.config.js" },
+        { action: "create", path: "src/app/instrumentation-client.ts" },
+        { action: "modify", path: "src/app/layout.tsx" },
+        { action: "delete", path: "src/old-sentry.js" },
+      ],
     });
 
     expect(logMessageSpy).toHaveBeenCalledTimes(1);
@@ -88,7 +85,7 @@ describe("formatResult", () => {
   });
 
   test("skips summary when result has no summary fields", () => {
-    formatResult({ status: "success" });
+    formatResult({});
 
     expect(logMessageSpy).not.toHaveBeenCalled();
     expect(outroSpy).toHaveBeenCalled();
@@ -96,10 +93,7 @@ describe("formatResult", () => {
 
   test("displays warnings when present", () => {
     formatResult({
-      status: "success",
-      result: {
-        warnings: ["Source maps not configured", "Missing DSN"],
-      },
+      warnings: ["Source maps not configured", "Missing DSN"],
     });
 
     expect(logWarnSpy).toHaveBeenCalledTimes(2);
@@ -107,8 +101,8 @@ describe("formatResult", () => {
     expect(logWarnSpy.mock.calls[1][0]).toBe("Missing DSN");
   });
 
-  test("unwraps nested result property", () => {
-    formatResult({ status: "success", result: { platform: "React" } });
+  test("renders a minimal summary", () => {
+    formatResult({ platform: "React" });
 
     const content: string = logMessageSpy.mock.calls[0][0];
     expect(content).toContain("React");
@@ -117,28 +111,24 @@ describe("formatResult", () => {
 
 describe("formatError", () => {
   test("logs the error message", () => {
-    formatError({ status: "failed", error: "Connection timed out" });
+    formatError({ type: "error", message: "Connection timed out" });
 
     expect(logErrorSpy).toHaveBeenCalledWith("Connection timed out");
     expect(cancelSpy).toHaveBeenCalledWith("Setup failed");
   });
 
-  test("extracts message from nested result.message", () => {
-    formatError({ status: "failed", result: { message: "Inner failure" } });
+  test("falls back to unknown error when the message is empty", () => {
+    formatError({ type: "error", message: "" });
 
-    expect(logErrorSpy).toHaveBeenCalledWith("Inner failure");
-  });
-
-  test("falls back to unknown error when no message available", () => {
-    formatError({ status: "failed" });
-
-    expect(logErrorSpy).toHaveBeenCalledWith(
-      "Wizard failed with an unknown error"
-    );
+    expect(logErrorSpy).toHaveBeenCalledWith("Wizard failed with an unknown error");
   });
 
   test("shows platform hint for detection failure exit code (20)", () => {
-    formatError({ status: "failed", result: { exitCode: 20 } });
+    formatError({
+      type: "error",
+      message: "Could not detect platform",
+      exitCode: 20,
+    });
 
     const warnMsg: string = logWarnSpy.mock.calls[0][0];
     expect(warnMsg).toContain("platform");
@@ -146,8 +136,9 @@ describe("formatError", () => {
 
   test("shows manual install commands for dependency failure (30)", () => {
     formatError({
-      status: "failed",
-      result: {
+      type: "error",
+      message: "Install failed",
+      output: {
         exitCode: 30,
         commands: ["npm install @sentry/node"],
       },
@@ -158,7 +149,11 @@ describe("formatError", () => {
   });
 
   test("shows verification hint for exit code 50", () => {
-    formatError({ status: "failed", result: { exitCode: 50 } });
+    formatError({
+      type: "error",
+      message: "Verification failed",
+      exitCode: 50,
+    });
 
     const warnMsg: string = logWarnSpy.mock.calls[0][0];
     expect(warnMsg).toContain("verification");
@@ -166,8 +161,9 @@ describe("formatError", () => {
 
   test("shows docs URL when present", () => {
     formatError({
-      status: "failed",
-      result: { docsUrl: "https://docs.sentry.io/platforms/react/" },
+      type: "error",
+      message: "See docs",
+      output: { docsUrl: "https://docs.sentry.io/platforms/react/" },
     });
 
     const infoCalls = logInfoSpy.mock.calls.map((c) => String(c[0]));
