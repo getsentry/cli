@@ -232,6 +232,82 @@ describe("withTelemetry", () => {
       expect(captureSpy).not.toHaveBeenCalled();
       captureSpy.mockRestore();
     });
+
+    test("emits cli.error.silenced metric for user API errors", async () => {
+      const metricSpy = spyOn(Sentry.metrics, "distribution");
+      const captureSpy = spyOn(Sentry, "captureException");
+      const error = new ApiError(
+        "Not found",
+        404,
+        "detail",
+        "/api/0/organizations/foo/"
+      );
+      await expect(
+        withTelemetry(() => {
+          throw error;
+        })
+      ).rejects.toThrow(error);
+      // Silenced: no captureException
+      expect(captureSpy).not.toHaveBeenCalled();
+      // Metric emitted with normalized endpoint attribute
+      const silencedCall = metricSpy.mock.calls.find(
+        (c) => c[0] === "cli.error.silenced"
+      );
+      expect(silencedCall).toBeDefined();
+      expect(silencedCall?.[2]).toMatchObject({
+        attributes: expect.objectContaining({
+          error_class: "ApiError",
+          reason: "api_user_error",
+          api_status: 404,
+        }),
+      });
+      metricSpy.mockRestore();
+      captureSpy.mockRestore();
+    });
+
+    test("captures 5xx ApiError with fingerprint applied", async () => {
+      const captureSpy = spyOn(Sentry, "captureException");
+      const withScopeSpy = spyOn(Sentry, "withScope");
+      const error = new ApiError(
+        "Server error",
+        500,
+        "Internal",
+        "/api/0/organizations/foo/"
+      );
+      await expect(
+        withTelemetry(() => {
+          throw error;
+        })
+      ).rejects.toThrow(error);
+      // Captured via reportCliError → Sentry.withScope
+      expect(withScopeSpy).toHaveBeenCalled();
+      expect(captureSpy).toHaveBeenCalledWith(error);
+      withScopeSpy.mockRestore();
+      captureSpy.mockRestore();
+    });
+
+    test("captures ContextError with fingerprint (no silencing)", async () => {
+      const captureSpy = spyOn(Sentry, "captureException");
+      const metricSpy = spyOn(Sentry.metrics, "distribution");
+      const { ContextError } = await import("../../src/lib/errors.js");
+      const error = new ContextError(
+        "Organization and project",
+        "sentry issue view <org>/<project>/<id>"
+      );
+      await expect(
+        withTelemetry(() => {
+          throw error;
+        })
+      ).rejects.toThrow(error);
+      expect(captureSpy).toHaveBeenCalledWith(error);
+      // No silencing metric for captured errors
+      const silencedCall = metricSpy.mock.calls.find(
+        (c) => c[0] === "cli.error.silenced"
+      );
+      expect(silencedCall).toBeUndefined();
+      captureSpy.mockRestore();
+      metricSpy.mockRestore();
+    });
   });
 });
 

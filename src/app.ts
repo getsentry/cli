@@ -1,5 +1,3 @@
-// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
-import * as Sentry from "@sentry/node-core/light";
 import {
   type ApplicationText,
   buildApplication,
@@ -44,8 +42,8 @@ import {
   getSynonymSuggestionFromArgv,
 } from "./lib/command-suggestions.js";
 import { CLI_VERSION } from "./lib/constants.js";
+import { reportCliError } from "./lib/error-reporting.js";
 import {
-  ApiError,
   AuthError,
   CliError,
   getExitCode,
@@ -321,17 +319,12 @@ const customText: ApplicationText = {
       return synonymResult;
     }
 
-    // Report command errors to Sentry. Stricli catches exceptions and doesn't
-    // re-throw, so we must capture here to get visibility into command failures.
-    // 400 Bad Request = CLI bug (we constructed a malformed request).
-    if (exc instanceof ApiError) {
-      Sentry.setContext("api_error", {
-        status: exc.status,
-        endpoint: exc.endpoint,
-        detail: exc.detail,
-      });
-    }
-    Sentry.captureException(exc);
+    // Report command errors to Sentry with stable fingerprinting. Stricli
+    // catches exceptions and doesn't re-throw, so we must capture here to
+    // get visibility into command failures. Silencing rules (OutputError,
+    // expected AuthError, 401–499 ApiError) and fingerprint normalization
+    // are enforced inside reportCliError. 400 Bad Request = CLI bug.
+    reportCliError(exc);
 
     if (exc instanceof CliError) {
       // WizardError with rendered=true: clack already displayed the error.

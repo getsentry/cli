@@ -22,6 +22,10 @@ import {
 import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
 import { detectAgent, detectAgentFromProcessTree } from "./detect-agent.js";
 import { getEnv } from "./env.js";
+import {
+  fingerprintFromEventPayload,
+  reportCliError,
+} from "./error-reporting.js";
 import { ApiError, AuthError, OutputError } from "./errors.js";
 import { attachSentryReporter, logger } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
@@ -215,23 +219,38 @@ export async function withTelemetry<T>(
       }
     );
   } catch (e) {
-    const isExpectedAuthState =
-      e instanceof AuthError &&
-      (e.reason === "not_authenticated" || e.reason === "expired");
-    // User API errors (401–499) are user errors (wrong ID, no access), not
-    // CLI bugs. They're recorded as span attributes above for volume-spike
-    // detection. 400 Bad Request is NOT filtered — it indicates a CLI bug.
-    // OutputError is an intentional non-zero exit (e.g., `sentry api` got a
-    // 4xx/5xx response) — not a CLI bug. Error details are recorded as span
-    // attributes by the command itself.
-    if (
-      !(isExpectedAuthState || isUserApiError(e) || e instanceof OutputError)
-    ) {
-      Sentry.captureException(e);
+    // Route through reportCliError so silencing (OutputError, expected-auth
+    // AuthError, 401–499 ApiError) and fingerprint normalization are applied
+    // consistently. Silenced errors emit a `cli.error.silenced` metric +
+    // optional structured log instead of creating a Sentry issue.
+    reportCliError(e);
+    if (!shouldSilenceFromTelemetry(e)) {
       markSessionCrashed();
     }
     throw e;
   }
+}
+
+/**
+ * Mirror of {@link reportCliError}'s silencing rules used to decide whether
+ * to mark the session crashed.
+ *
+ * Silenced errors represent expected states (user not logged in, user-error
+ * 4xx, `OutputError` sentinel) — marking the session crashed for those would
+ * skew release-health metrics. Only genuine command failures that flow
+ * through to `captureException` should mark the session as crashed.
+ */
+function shouldSilenceFromTelemetry(error: unknown): boolean {
+  if (error instanceof OutputError) {
+    return true;
+  }
+  if (
+    error instanceof AuthError &&
+    (error.reason === "not_authenticated" || error.reason === "expired")
+  ) {
+    return true;
+  }
+  return isUserApiError(error);
 }
 
 /**
@@ -580,6 +599,19 @@ export function initSentry(
       // when generating tilde-prefixed URL candidates (e.g., "~/dist-bin/bin.js"),
       // silently skipping resolution for relative paths.
       normalizeFramePaths(event);
+
+      // Fallback fingerprint for events that bypass reportCliError —
+      // uncaught exceptions, unhandled rejections, and best-effort
+      // captureException calls from background tasks (delta-upgrade,
+      // teams/dashboards fetch, version-check, etc.). reportCliError
+      // already set a fingerprint for command-level errors; we only
+      // apply the fallback when none is set.
+      if (!event.fingerprint || event.fingerprint.length === 0) {
+        const fp = fingerprintFromEventPayload(event);
+        if (fp) {
+          event.fingerprint = fp;
+        }
+      }
 
       return event;
     },
