@@ -1,0 +1,258 @@
+# Reduce Sentry issue fragmentation from CLI error reporting
+
+## Governing principles (from prior decisions — reconfirmed)
+
+These came out of earlier design work and the user's clarification just now:
+
+1. **Keep user-input errors captured as Sentry issues.** `ContextError`, `ResolutionError`, `ValidationError`, and `SeerError` all stay captured — they are the UX signal we use to decide where to invest in better auto-detection, smarter resolution, or clearer messaging.
+2. **Keep `SeerError` captured in particular** — the counts feed a marketing dashboard for trial/upsell demand tracking. Do not filter.
+3. **Keep the existing `401–499` `ApiError` silencing rule** (`400` and `5xx` are CLI bugs, captured; `401–499` are user/env errors, silenced; already recorded on the command span via `recordApiErrorOnSpan`).
+4. **If we silence anything, we must still capture volume + user info** via metrics and/or structured logs. No silent drops.
+5. **The real problem is grouping fragmentation, not volume.** The noise from "many new errors" is largely the same logical error showing up as N different Sentry issues because the message varies by user data.
+
+## Observed situation (live Sentry data, project `sentry/cli`)
+
+Pulled real issues to validate the diagnosis. The fragmentation hypothesis is confirmed.
+
+### Fragmentation patterns (concrete, observed)
+
+| Logical error | # distinct Sentry issues | Combined events | Examples |
+|---|---:|---:|---|
+| `ContextError: Could not auto-detect organization[ and project].` | **13** | ~125 | CLI-K9 (10), CLI-15H (40), CLI-15N (54), CLI-15D, CLI-15B, CLI-13J, CLI-17W, CLI-178, CLI-18V, CLI-170, CLI-15R, CLI-166, CLI-15Y |
+| `ContextError: Event ID is required.` | **4** | ~94 | CLI-SS (57), CLI-CG (14), CLI-VG (20), CLI-173 (3) |
+| `ResolutionError: Project '<slug>' not found[...]` | **~15+** | Many | CLI-V3, CLI-189, CLI-193, CLI-V5, CLI-18Z, CLI-15P, CLI-QV, CLI-17V, CLI-17M, CLI-PM, ... — one per slug |
+| `ResolutionError: Issue <numeric-id> not found.` | **~6** | Many | CLI-16A, CLI-171, CLI-18Y, CLI-TT, CLI-QG, CLI-RG — one per numeric ID |
+| `ResolutionError: Issue suffix '<X>' could not be resolved...` | **~7** | Many | CLI-19B, CLI-198, CLI-191, CLI-18R, CLI-13E, CLI-183, CLI-16F |
+| `ApiError: Short ID '<X>' not found in organization '<Y>'` | **~5** | Many | CLI-17T, CLI-16H, CLI-18P, CLI-TD, CLI-177 |
+| `ApiError: API request failed: 400 Bad Request` | **5+** | CLI-188 (27) | Generic msg at multiple call sites |
+| `ValidationError: Invalid trace ID "<X>"...` | **5** | | CLI-199, CLI-17E, CLI-15J, CLI-M0, CLI-10R, CLI-10S |
+| `ValidationError: Invalid event ID "<X>"...` | **2** | | CLI-16G, CLI-18T |
+| `ApiError: Failed to list projects: 400 Bad Request` | **3+** | | CLI-185, CLI-15C (one per call site) |
+| `Error: EPERM ... /Users/<name>/.local/share/zsh/...` | **3** | 21 total | CLI-18A, CLI-187, CLI-16D — splits by username |
+| `Error: Cannot find module ... undici` (Windows npm) | **3** | | CLI-18J, CLI-18H, CLI-18G — splits by Windows temp paths |
+| `TypeError: fetch failed` | **5** | | CLI-18D, CLI-18F, CLI-17Y, CLI-16W, CLI-XQ — stack-frame splits |
+
+### High-volume issues (single groups — OK, but informative)
+
+| Short ID | Title | Events | Notes |
+|---|---|---:|---|
+| CLI-19 | `AuthError: Invalid API token.` | **417** | Already one group. Huge UX signal — people paste wrong tokens. Keep captured. |
+| CLI-18M | `SeerError: Seer requires a paid plan.` | 26 | Already one group. Feeds marketing dashboard. Keep captured. |
+| CLI-SS | `ContextError: Event ID is required.` | 57 | Part of fragmented group above. |
+| CLI-12Z | `TypeError: Cannot read properties of undefined (reading 'replaceAll')` | 50 | **Real bug** — likely source-map `null` sources gotcha. Separate fix. |
+| CLI-BJ | `Unexpected failure at line 298` | 280 | **Out of scope** — emitted by `install.sh` bash trap, not CLI runtime. |
+
+### Out-of-scope issues
+
+- `CLI-WEBSITE-*` (9 issues) — from the `cli.sentry.dev` docs site (different DSN/runtime).
+- `CLI-BJ "Unexpected failure at line 298"` — bash install script, separate pipeline.
+- `CLI-12Z TypeError replaceAll`, `CLI-19A EINVAL kqueue` — real bugs, not grouping issues. Flag for separate tickets.
+
+## Plan: primary change is fingerprint normalization, no demotion
+
+### 1. Central reporter: `src/lib/error-reporting.ts` (new file)
+
+One entry point for command-level error capture. Replaces direct `Sentry.captureException` calls in `app.ts` and `telemetry.ts`. Behavior:
+
+```ts
+export function reportCliError(
+  error: unknown,
+  options?: {
+    tags?: Record<string, string>;
+    contexts?: Record<string, Record<string, unknown>>;
+  },
+): void
+```
+
+1. **Apply existing silencing rules** (unchanged behavior):
+   - `OutputError` → skip
+   - `AuthError` with `reason === "not_authenticated" | "expired"` → skip
+   - `isUserApiError(error)` (`401–499`) → skip
+2. **For each silenced case, emit a metric** so we retain volume + user info (see section 3).
+3. **For the rest** (including `ContextError`, `ResolutionError`, `ValidationError`, `SeerError`, `AuthError(invalid)`, `ApiError(400|500+)`, generic errors): compute a stable fingerprint, attach structured `cli_error` context, and call `Sentry.captureException`.
+
+The helper runs inside `Sentry.withScope` so fingerprints and extra contexts don't leak into subsequent events.
+
+### 2. Fingerprint rules (the core change)
+
+Chosen to collapse every fragmentation pattern observed above while keeping class+kind granularity. **User data never enters the fingerprint** — it all stays in `cli_error` context (queryable in Discover).
+
+| Error class | Fingerprint | Collapse |
+|---|---|---|
+| `ContextError` | `["ContextError", resource]` | 13 `"Organization and project"` issues → 1; 4 `"Event ID"` → 1 |
+| `ResolutionError` | `["ResolutionError", extractResourceKind(resource), extractHeadlineKind(headline)]` | 15+ `"Project X not found"` → 1; 7 `"Issue suffix X"` → 1; 6 `"Issue <id> not found"` → 1 |
+| `ValidationError` | `["ValidationError", field ?? extractMessagePrefix(message)]` | 5 `"Invalid trace ID"` → 1; 2 `"Invalid event ID"` → 1 |
+| `ApiError` | `["ApiError", String(status), normalizeEndpoint(endpoint)]` | 5+ `"Short ID X not found"` → 1 per endpoint template; 5+ `"400 Bad Request"` → split meaningfully by endpoint (same endpoint = same bug) |
+| `SeerError` | `["SeerError", reason]` | 3 possible reasons → at most 3 issues; currently 1 (`not_enabled`) |
+| `AuthError` | `["AuthError", reason]` | Only `invalid` reaches capture; already 1 group (CLI-19) |
+| `ConfigError` | `["ConfigError", extractMessagePrefix(message)]` | |
+| `DeviceFlowError` | `["DeviceFlowError", code]` | |
+| `UpgradeError` | `["UpgradeError", reason]` | |
+| `TimeoutError` | `["TimeoutError"]` | |
+| `WizardError` | `["WizardError", extractMessagePrefix(message)]` | |
+| Generic `Error` | `null` (default grouping) **unless** message contains a user path, in which case `["Error", name, normalizeErrorMessage(message)]` | 3 EPERM → 1; 3 undici-missing → 1 |
+
+### 3. Normalization helpers (in `error-reporting.ts`)
+
+All deterministic and unit-tested.
+
+**`extractResourceKind(resource)`** — strips user-supplied identifiers from the `resource` field:
+- Remove single-quoted `'...'` and double-quoted `"..."` substrings
+- Remove long hex IDs (`[0-9a-f]{16,32}`) and numeric IDs (6+ digits)
+- Collapse whitespace, trim
+
+Validated against live data:
+- `"Project 'api-track' not found in organization 'get-a-newsletter'"` → `"Project not found in organization"`
+- `"Issue suffix 'AIRLLOYD' could not be resolved without project context."` → `"Issue suffix could not be resolved without project context."`
+- `"Issue 7420431306 not found."` → `"Issue not found."`
+- `"Event 'e689b90e' not found in mamiteam/okhome-api."` → `"Event not found in mamiteam/okhome-api."` (slug pair preserved — see below)
+  - We'll also run `normalizeEndpoint`-style replacement on bare slug/slug at end of resource so `"mamiteam/okhome-api"` becomes `"{slug}/{slug}"`.
+
+**`extractHeadlineKind(headline)`** — applies the same strip rules to `ResolutionError.headline` so variants like `not found` vs `access denied` vs `is an organization, not a project` still stay as distinct issues within `ResolutionError`.
+
+**`normalizeEndpoint(endpoint)`** — applied in order:
+```
+strip querystring
+/api/0/organizations/[^/]+  → /api/0/organizations/{slug}
+/projects/[^/]+/[^/]+       → /projects/{slug}/{slug}
+/teams/[^/]+/[^/]+          → /teams/{slug}/{slug}
+/issues/\d+                 → /issues/{id}
+/releases/[^/]+             → /releases/{version}
+/[0-9a-f]{32}               → /{hex_id}
+/[0-9a-f]{16}               → /{span_id}
+```
+
+**`extractMessagePrefix(message)`** — first 6 words of the message, with any quoted substring replaced by `<value>`. Fallback when there's no structured field.
+
+**`normalizeErrorMessage(message)`** — for generic-Error fallback only:
+```
+C:\Users\[^\\]+\           → C:\Users\<user>\
+/Users/[^/]+/              → /Users/<user>/
+/home/[^/]+/               → /home/<user>/
+/tmp/[^/]+                 → /tmp/<tempfile>
+0x[0-9a-f]+                → 0x<addr>
+```
+
+### 4. Metrics for silenced errors (user info preserved)
+
+Inside `reportCliError`, when we decide to skip `captureException`, emit a **Sentry metric** so volume is still visible and user/org context is attached:
+
+```ts
+Sentry.metrics.distribution("cli.error.silenced", 1, {
+  attributes: {
+    error_class: errName,          // "AuthError" | "ApiError" | "OutputError"
+    reason: authReason ?? "",      // "not_authenticated" | "expired"
+    api_status: apiStatus ?? 0,    // 401 | 403 | 404 | 429 | 0
+    endpoint: normalizeEndpoint(apiEndpoint) ?? "",
+    command: currentCommand ?? "",
+  },
+});
+```
+
+User/org identity (`user.id`, `user.email`, `sentry.org`, `sentry.project`) is already on the active scope via `Sentry.setUser()` / `Sentry.setTag()`, which Sentry automatically attaches to metrics emitted within that scope. No extra code needed.
+
+Also emit a **structured log** at `info` level for 401–499 so the event is queryable in Sentry Logs:
+
+```ts
+Sentry.logger.info("cli.api_error_silenced", {
+  status: apiError.status,
+  endpoint: normalizeEndpoint(apiError.endpoint),
+  detail: apiError.detail,
+});
+```
+
+(We already have `enableLogs: true` and the consola → Sentry logger bridge is wired up.)
+
+This preserves: **count** (via metric distribution), **which user** (via user on scope propagating to metric), **which org/project** (via tags on scope), **which endpoint/status/reason** (via metric attributes), and **free-form detail** (via log).
+
+For `OutputError`: no metric (intentional exit; `api` command already records its own span attrs).
+
+For `AuthError(not_authenticated|expired)`: emit metric only, no log (high cardinality, expected state on login flow).
+
+### 5. `beforeSend` safety net
+
+Add a fallback fingerprint pass in `beforeSend` (`src/lib/telemetry.ts:553-571`) for events that bypass `reportCliError` — uncaught exceptions, unhandled rejections, best-effort `captureException` calls elsewhere in the codebase:
+
+```ts
+if (!event.fingerprint || event.fingerprint.length === 0) {
+  const fp = fingerprintFromEventPayload(event);
+  if (fp) event.fingerprint = fp;
+}
+```
+
+`fingerprintFromEventPayload(event)` reads `event.exception.values[0].type` (string class name) and `.value` (message) and applies the same normalization helpers. Catches path-embedded errors like EPERM (3 issues → 1) and Windows undici module-not-found (3 → 1).
+
+### 6. Wire-up sites (minimal)
+
+| File:line | Change |
+|---|---|
+| `src/app.ts:327-334` | Replace `setContext("api_error", ...)` + `captureException(exc)` with `reportCliError(exc)` (context move into helper). **No change to existing filter chain above** — `OutputError`, `AuthError(not_authenticated|expired)`, and synonym bypass remain before this line; `reportCliError` still enforces them internally for defense-in-depth. |
+| `src/lib/telemetry.ts:216-231` | Replace `captureException(e); markSessionCrashed()` with `reportCliError(e); markSessionCrashed()`. Keep the outer condition (`!(isExpectedAuthState || isUserApiError(e) || e instanceof OutputError)`) as a fast path — inside, `reportCliError` emits metrics for the filtered cases. |
+| `src/lib/telemetry.ts:553-571` | Add `fingerprintFromEventPayload` fallback pass to `beforeSend`. |
+
+**Leave best-effort `captureException` sites as-is** — they already pass informative tags/contexts and their stack traces are the correct signal:
+- `src/lib/delta-upgrade.ts:896` (warning-level delta upgrade failures)
+- `src/lib/api/teams.ts:131`, `src/lib/api/dashboards.ts:534` (graceful degradation)
+- `src/lib/agent-skills.ts:83`, `src/commands/cli/setup.ts:336` (setup helpers)
+- `src/lib/version-check.ts:146, 218` (background update check)
+- `src/lib/init/wizard-runner.ts:371, 718`, `src/lib/interactive-login.ts:188`
+- `src/commands/log/list.ts:327`, `src/lib/dsn/fs-utils.ts:51`
+- `src/lib/telemetry.ts:57` (telemetry init failure)
+
+`beforeSend`'s fallback fingerprint still applies to these as a safety net.
+
+## Files to modify
+
+| File | Change |
+|---|---|
+| **`src/lib/error-reporting.ts`** | **New** — `reportCliError`, `computeFingerprint`, `fingerprintFromEventPayload`, `extractResourceKind`, `extractHeadlineKind`, `normalizeEndpoint`, `extractMessagePrefix`, `normalizeErrorMessage`, `buildCliErrorContext`, metric+log emission for silenced errors |
+| `src/app.ts` | Replace the two-line capture at 327-334 with `reportCliError(exc)`. No other behavior change. |
+| `src/lib/telemetry.ts` | Replace `captureException` at 229 with `reportCliError`. Add `beforeSend` fallback fingerprint pass at 553-571. |
+| **`test/lib/error-reporting.test.ts`** | **New** — per-class fingerprint tests; silencing preserves (OutputError / AuthError not_authenticated / expired / 401-429 ApiError); metric emitted for each silenced class; `cli_error` context attached for captured errors; `api_error` context still attached for `ApiError` (back-compat) |
+| **`test/lib/error-reporting.property.test.ts`** | **New** — properties: two same-class+kind errors with different user data → identical fingerprints; `normalizeEndpoint` stable across slug/id; `extractResourceKind` strips all quoted inputs |
+| `test/app.test.ts` | Update assertions from direct `captureException` to `reportCliError`; verify context shape unchanged |
+| `test/lib/telemetry.test.ts` | Update outer-catch assertion to `reportCliError`; verify `beforeSend` fallback fingerprint |
+
+**No changes** to `src/lib/errors.ts` — the existing classes already carry all metadata the helper needs (`status`, `endpoint`, `detail`, `reason`, `resource`, `headline`, `field`, `code`).
+
+## Verification
+
+1. **Unit tests** (`bun test test/lib/error-reporting.test.ts`):
+   - 12 error classes × correct fingerprint
+   - Silenced cases: `OutputError`, `AuthError(not_authenticated)`, `AuthError(expired)`, `ApiError(401|403|404|429)` — all skip `captureException` AND emit `cli.error.silenced` metric
+   - Captured cases: `AuthError(invalid)`, `ApiError(400|500|502|503)`, `ContextError`, `ResolutionError`, `ValidationError`, `SeerError`, `ConfigError`, `DeviceFlowError`, `UpgradeError`, `TimeoutError`, `WizardError`, generic `Error` — all reach `captureException` with expected fingerprint
+   - `cli_error` context attached for all captured
+   - `api_error` context still attached for captured `ApiError` (back-compat with existing Discover queries)
+
+2. **Property tests** (`bun test test/lib/error-reporting.property.test.ts`):
+   - `normalizeEndpoint(/api/0/organizations/${slug}/issues/${id}/)` stable for any `slug`/`id` pair
+   - `extractResourceKind("Project '" + slug + "'")` always returns `"Project"` (quote style + slug-invariant)
+   - For any two `ResolutionError`s built with different user slugs but same template → identical fingerprint
+
+3. **Integration** (`bun test`, `bun run typecheck`, `bun run lint:fix`):
+   - All existing tests pass (`app.ts`, `telemetry.ts`, `cli.ts` public behavior unchanged)
+   - No new lint/type errors
+
+4. **Manual smoke tests** (`bun run --env-file=.env.local dev <args>`, telemetry on):
+   - `sentry event view` (no default org) → `ContextError` captured, fingerprint `["ContextError", "Organization and project"]`, no slug in fingerprint
+   - `sentry issue view bogus-org/bogus-project/bogus-id` → `ResolutionError` captured, fingerprint `["ResolutionError", "Project not found in organization", ...]`
+   - `sentry api /organizations/bogus/` → `ApiError(403)` silenced, metric `cli.error.silenced{error_class:"ApiError",api_status:403,endpoint:"/api/0/organizations/{slug}/"}` emitted, log entry written
+   - `sentry auth login --token bogus` → `AuthError(invalid)` captured as single fingerprinted issue (same group as today's CLI-19)
+   - `sentry issue explain <real-id>` on free-plan org → `SeerError(not_enabled)` captured, fingerprint `["SeerError", "not_enabled"]` — **marketing dashboard keeps working**
+   - Confirm in Sentry web UI: event has `fingerprint` override visible; user/org tags still attached
+
+5. **Post-merge observation (24-48h on `sentry/cli`)**:
+   - 13 `"Could not auto-detect"` issues collapse to 1; event count on that one matches sum of previous 13
+   - Project-not-found fragmentation collapses similarly
+   - `CLI-19` (AuthError invalid) continues to receive events (not filtered) — UX signal preserved
+   - `CLI-18M` (SeerError) continues to receive events — marketing dashboard preserved
+   - New metric `cli.error.silenced` visible in Sentry metrics; distribution split by `error_class`/`api_status` gives the old span-attribute signal as a first-class metric
+   - No structurally different errors accidentally collide into the same group (spot-check 5-10 collapsed issues in UI)
+
+## Out of scope
+
+- **`CLI-WEBSITE-*`** (docs site): separate DSN, separate cleanup.
+- **`CLI-BJ "Unexpected failure at line 298"`** (280 events): `install.sh` bash trap — needs its own fix in the install pipeline.
+- **Real bugs surfaced**: `CLI-12Z TypeError replaceAll` (likely null-source gotcha), `CLI-19A EINVAL kqueue` — separate tickets.
+- **Cleaning up inline `throw new ApiError(...)` sites** with dynamic messages (23 sites): fingerprint normalization solves the grouping symptom without code churn. Can be cleaned up opportunistically later.
+- **Demoting any error class to logs-only / metrics-only** (no issue emission): explicitly out — user preference is to keep issues for UX visibility and SeerError for marketing.
