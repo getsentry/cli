@@ -57,4 +57,18 @@ describe("createWizardSpinner", () => {
     expect(plain).toContain("│  ├─ settings.py");
     expect(plain).toContain("Analyzing files...");
   });
+
+  test("does not print a stale message when stopped with an empty string", () => {
+    const output = new CaptureStream();
+    const spin = createWizardSpinner(output as unknown as NodeJS.WriteStream);
+
+    spin.start("Selecting features");
+    spin.stop("");
+
+    const plain = stripAnsi(output.output());
+    expect(plain).toContain("Selecting features");
+    expect(plain).not.toContain("◆  Selecting features");
+    expect(plain).not.toContain("■  Selecting features");
+    expect(plain).not.toContain("▲  Selecting features");
+  });
 });

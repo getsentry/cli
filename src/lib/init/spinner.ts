@@ -120,7 +120,7 @@ export function createWizardSpinner(
     }
   }
 
-  function stop(nextMessage = "", code = 0): void {
+  function stop(nextMessage?: string, code = 0): void {
     if (timer) {
       clearInterval(timer);
       timer = undefined;
@@ -129,7 +129,9 @@ export function createWizardSpinner(
       return;
     }
     running = false;
-    message = nextMessage || message;
+    if (nextMessage !== undefined) {
+      message = nextMessage;
+    }
     clearRenderedBlock();
     if (message) {
       output.write(

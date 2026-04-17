@@ -103,7 +103,11 @@ function renderChangedFileNode(
   const childPrefix = `${prefix}${isLast ? "   " : "│  "}`;
   for (const [index, child] of children.entries()) {
     lines.push(
-      ...renderChangedFileNode(child, childPrefix, index === children.length - 1)
+      ...renderChangedFileNode(
+        child,
+        childPrefix,
+        index === children.length - 1
+      )
     );
   }
 
