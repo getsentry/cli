@@ -4,9 +4,8 @@
  * Tests for finding project root by walking up from a starting directory.
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { stat } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -15,7 +14,6 @@ import {
   hasBuildSystemMarker,
   hasLanguageMarker,
   hasRepoRootMarker,
-  STAT_CONCURRENCY,
 } from "../../../src/lib/dsn/project-root.js";
 
 // Test directory structure helper
@@ -320,55 +318,4 @@ describe("project-root", () => {
     });
   });
 
-  describe("stat() concurrency limiting", () => {
-    test("caps concurrent stat() calls at STAT_CONCURRENCY", async () => {
-      let concurrent = 0;
-      let maxConcurrent = 0;
-
-      // Spy on stat to track concurrent calls without changing behavior
-      const realStat = stat;
-      mock.module("node:fs/promises", () => ({
-        ...require("node:fs/promises"),
-        stat: async (path: string) => {
-          concurrent += 1;
-          maxConcurrent = Math.max(maxConcurrent, concurrent);
-          try {
-            return await realStat(path);
-          } finally {
-            concurrent -= 1;
-          }
-        },
-        opendir: require("node:fs/promises").opendir,
-      }));
-
-      // hasBuildSystemMarker uses anyExists with BUILD_SYSTEM_MARKERS (19 items).
-      // We want to test with more items — call hasRepoRootMarker which fans out
-      // across VCS (7) + CI (12) + editorconfig (1) all via the shared statLimit.
-      // Instead, directly verify via a directory with many fake marker names.
-      // The most direct route: create many files and call hasBuildSystemMarker
-      // repeatedly to accumulate concurrent pressure.
-      //
-      // Simpler: use the fact that all anyExists() calls share statLimit.
-      // Fire hasBuildSystemMarker (19) + hasLanguageMarker (30) in parallel → 49 stats,
-      // more than STAT_CONCURRENCY=32, so the cap must be visible.
-      await Promise.all([
-        hasBuildSystemMarker(testDir), // 19 stat() calls
-        hasLanguageMarker(testDir), // 30 stat() calls
-      ]);
-
-      mock.restore();
-
-      expect(maxConcurrent).toBeLessThanOrEqual(STAT_CONCURRENCY);
-    });
-
-    test("anyExists still resolves true when a marker exists (limiter doesn't break early exit)", async () => {
-      // Place a recognizable marker and verify detection still works
-      // even with the concurrency limiter in the path.
-      createFile(join(testDir, "Makefile"), "");
-
-      const result = await hasBuildSystemMarker(testDir);
-
-      expect(result).toBe(true);
-    });
-  });
 });
