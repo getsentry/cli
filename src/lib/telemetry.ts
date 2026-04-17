@@ -24,7 +24,7 @@ import { detectAgent, detectAgentFromProcessTree } from "./detect-agent.js";
 import { getEnv } from "./env.js";
 import {
   classifySilenced,
-  fingerprintFromEventPayload,
+  enrichEventWithGroupingTags,
   reportCliError,
 } from "./error-reporting.js";
 import { ApiError } from "./errors.js";
@@ -582,18 +582,10 @@ export function initSentry(
       // silently skipping resolution for relative paths.
       normalizeFramePaths(event);
 
-      // Fallback fingerprint for events that bypass reportCliError —
-      // uncaught exceptions, unhandled rejections, and best-effort
-      // captureException calls from background tasks (delta-upgrade,
-      // teams/dashboards fetch, version-check, etc.). reportCliError
-      // already set a fingerprint for command-level errors; we only
-      // apply the fallback when none is set.
-      if (!event.fingerprint || event.fingerprint.length === 0) {
-        const fp = fingerprintFromEventPayload(event);
-        if (fp) {
-          event.fingerprint = fp;
-        }
-      }
+      // Enrich events with cli_error.* tags for server-side fingerprint rules.
+      // reportCliError already sets these for command-level errors; this
+      // catches uncaught exceptions and best-effort background captures.
+      enrichEventWithGroupingTags(event);
 
       return event;
     },
