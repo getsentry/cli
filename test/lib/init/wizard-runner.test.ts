@@ -382,10 +382,10 @@ describe("runWizard", () => {
         )
     );
     expect(messages).toContain(
-      "Reading files...\n├─ ● `settings.py`\n└─ ● `urls.py`"
+      "Reading files...\n├─ ● settings.py\n└─ ● urls.py"
     );
     expect(messages).toContain(
-      "Analyzing files...\n├─ ✓ `settings.py`\n└─ ✓ `urls.py`"
+      "Analyzing files...\n├─ ✓ settings.py\n└─ ✓ urls.py"
     );
   });
 

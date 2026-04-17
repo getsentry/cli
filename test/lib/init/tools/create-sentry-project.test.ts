@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as apiClient from "../../../../src/lib/api-client.js";
+import { ApiError } from "../../../../src/lib/errors.js";
 import { createSentryProject } from "../../../../src/lib/init/tools/create-sentry-project.js";
 import type { EnsureSentryProjectPayload } from "../../../../src/lib/init/types.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
@@ -90,13 +91,7 @@ describe("createSentryProject", () => {
   });
 
   test("creates a new project with the pre-resolved org and team", async () => {
-    getProjectSpy.mockResolvedValueOnce({
-      id: "42",
-      slug: "different-project",
-      name: "different-project",
-      platform: "javascript-react",
-      dateCreated: "2026-04-16T00:00:00Z",
-    } as any);
+    getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
 
     const result = await createSentryProject(makePayload(), {
       dryRun: false,
@@ -146,6 +141,8 @@ describe("createSentryProject", () => {
   });
 
   test("returns dry-run placeholder project data", async () => {
+    getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
+
     const result = await createSentryProject(makePayload(), {
       dryRun: true,
       org: "acme",
@@ -164,6 +161,8 @@ describe("createSentryProject", () => {
   });
 
   test("resolves the team at project creation time when preflight deferred it", async () => {
+    getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
+
     const result = await createSentryProject(makePayload(), {
       dryRun: false,
       org: "acme",
@@ -191,6 +190,8 @@ describe("createSentryProject", () => {
   });
 
   test("uses the final project slug for deferred team resolution in dry-run mode", async () => {
+    getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
+
     const result = await createSentryProject(makePayload(), {
       dryRun: true,
       org: "acme",
