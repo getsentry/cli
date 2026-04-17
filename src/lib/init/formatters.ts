@@ -31,7 +31,7 @@ function fileActionIcon(action: string): string {
   if (action === "delete") {
     return colorTag("red", "-");
   }
-  return colorTag("yellow", "•");
+  return colorTag("yellow", "\\~");
 }
 
 function createFileTreeNode(name: string): FileTreeNode {

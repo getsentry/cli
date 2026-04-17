@@ -80,8 +80,8 @@ describe("formatResult", () => {
     expect(content).toContain("├─ src/");
     expect(content).toContain("│  ├─ app/");
     expect(content).toContain("│  │  ├─ + instrumentation-client.ts");
-    expect(content).toContain("│  │  └─ • layout.tsx");
-    expect(content).toContain("└─ • next.config.js");
+    expect(content).toContain("│  │  └─ ~ layout.tsx");
+    expect(content).toContain("└─ ~ next.config.js");
     const changedFilesSection = content.slice(content.indexOf("Changed files"));
     expect(changedFilesSection).toContain("│");
     expect(content).not.toContain("`");
