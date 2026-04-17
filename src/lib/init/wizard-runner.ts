@@ -108,14 +108,12 @@ function formatReadFilesSummary(progress: ReadFilesDisplay): string {
     return phase === "analyzing" ? "Analyzing files..." : "Reading files...";
   }
 
-  const header =
-    phase === "analyzing"
-      ? paths.length === 1
-        ? "Analyzing file..."
-        : "Analyzing files..."
-      : paths.length === 1
-        ? "Reading file..."
-        : "Reading files...";
+  let header: string;
+  if (phase === "analyzing") {
+    header = paths.length === 1 ? "Analyzing file..." : "Analyzing files...";
+  } else {
+    header = paths.length === 1 ? "Reading file..." : "Reading files...";
+  }
 
   const icon = readFilesStatusIcon(phase);
   const displayPaths = compactDisplayPaths(paths);
@@ -168,6 +166,7 @@ function describePostTool(payload: SuspendPayload): string | undefined {
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: suspend handling needs to branch across tool and interactive payload kinds
 async function handleSuspendedStep(
   ctx: StepContext,
   stepPhases: Map<string, number>,
@@ -198,7 +197,9 @@ async function handleSuspendedStep(
       const followUpMessage =
         toolResult.ok === false ? undefined : describePostTool(payload);
       if (followUpMessage) {
-        spin.message(renderInlineMarkdown(truncateForTerminal(followUpMessage)));
+        spin.message(
+          renderInlineMarkdown(truncateForTerminal(followUpMessage))
+        );
       }
     }
 
@@ -221,7 +222,7 @@ async function handleSuspendedStep(
       };
     }
 
-    spin.stop(label);
+    spin.stop(stepId === "select-features" ? "" : label);
     spinState.running = false;
 
     const interactiveResult = await handleInteractive(payload, context);

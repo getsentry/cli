@@ -1,6 +1,10 @@
 import { clearScreenDown, cursorTo, moveCursor } from "node:readline";
 import stringWidth from "string-width";
-import { colorTag, renderInlineMarkdown, stripColorTags } from "../formatters/markdown.js";
+import {
+  colorTag,
+  renderInlineMarkdown,
+  stripColorTags,
+} from "../formatters/markdown.js";
 
 const HIDE_CURSOR = "\u001B[?25l";
 const SHOW_CURSOR = "\u001B[?25h";
@@ -24,7 +28,9 @@ type SpinnerOutput = NodeJS.WriteStream & {
  * blocks. Clack's public spinner API works well for one-line updates, but the
  * file tree view needs to redraw an entire block in place as progress changes.
  */
-export function createWizardSpinner(output: SpinnerOutput = process.stdout): WizardSpinner {
+export function createWizardSpinner(
+  output: SpinnerOutput = process.stdout
+): WizardSpinner {
   let running = false;
   let frameIndex = 0;
   let renderedRows = 0;
@@ -66,12 +72,14 @@ export function createWizardSpinner(output: SpinnerOutput = process.stdout): Wiz
   }
 
   function formatStoppedBlock(nextMessage: string, code: number): string {
-    const icon =
-      code === 0
-        ? colorTag("green", "◆")
-        : code === 1
-          ? colorTag("red", "■")
-          : colorTag("yellow", "▲");
+    let icon: string;
+    if (code === 0) {
+      icon = colorTag("green", "◆");
+    } else if (code === 1) {
+      icon = colorTag("red", "■");
+    } else {
+      icon = colorTag("yellow", "▲");
+    }
     const lines = nextMessage.split("\n");
     const [firstLine = "", ...rest] = lines;
     return [
@@ -104,10 +112,12 @@ export function createWizardSpinner(output: SpinnerOutput = process.stdout): Wiz
       output.write(HIDE_CURSOR);
     }
     renderCurrentFrame();
-    timer = setInterval(() => {
-      frameIndex = (frameIndex + 1) % SPINNER_FRAMES.length;
-      renderCurrentFrame();
-    }, SPINNER_INTERVAL_MS);
+    if (output.isTTY) {
+      timer = setInterval(() => {
+        frameIndex = (frameIndex + 1) % SPINNER_FRAMES.length;
+        renderCurrentFrame();
+      }, SPINNER_INTERVAL_MS);
+    }
   }
 
   function stop(nextMessage = "", code = 0): void {
@@ -122,7 +132,9 @@ export function createWizardSpinner(output: SpinnerOutput = process.stdout): Wiz
     message = nextMessage || message;
     clearRenderedBlock();
     if (message) {
-      output.write(`${renderInlineMarkdown(formatStoppedBlock(message, code))}\n`);
+      output.write(
+        `${renderInlineMarkdown(formatStoppedBlock(message, code))}\n`
+      );
     }
     if (output.isTTY) {
       output.write(SHOW_CURSOR);

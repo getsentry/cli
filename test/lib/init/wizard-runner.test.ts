@@ -373,13 +373,12 @@ describe("runWizard", () => {
 
     await runWizard(makeOptions());
 
-    const messages = spinnerMock.message.mock.calls.map(
-      (call: string[]) =>
-        call[0]?.replace(
-          // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escape sequences
-          /\x1b\[[^m]*m/g,
-          ""
-        )
+    const messages = spinnerMock.message.mock.calls.map((call: string[]) =>
+      call[0]?.replace(
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escape sequences
+        /\x1b\[[^m]*m/g,
+        ""
+      )
     );
     expect(messages).toContain(
       "Reading files...\n├─ ● settings.py\n└─ ● urls.py"

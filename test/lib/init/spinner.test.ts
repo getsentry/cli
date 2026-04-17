@@ -1,6 +1,13 @@
-import { Writable } from "node:stream";
 import { describe, expect, test } from "bun:test";
+import { Writable } from "node:stream";
 import { createWizardSpinner } from "../../../src/lib/init/spinner.js";
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape sequences in rendered terminal output
+const ANSI_CSI_RE = /\u001B\[[0-9;?]*[ -/]*[@-~]/g;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape sequences in rendered terminal output
+const ANSI_OSC_RE = /\u001B\][^\u0007]*\u0007/g;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI clear-screen escape sequence in rendered terminal output
+const ANSI_CLEAR_RE = /\u001B\[(?:0)?J/;
 
 class CaptureStream extends Writable {
   readonly chunks: string[] = [];
@@ -27,9 +34,7 @@ class CaptureStream extends Writable {
 }
 
 function stripAnsi(value: string): string {
-  return value
-    .replace(/\u001B\[[0-9;?]*[ -/]*[@-~]/g, "")
-    .replace(/\u001B\][^\u0007]*\u0007/g, "");
+  return value.replace(ANSI_CSI_RE, "").replace(ANSI_OSC_RE, "");
 }
 
 describe("createWizardSpinner", () => {
@@ -44,7 +49,7 @@ describe("createWizardSpinner", () => {
     const rendered = output.output();
     expect(rendered).toContain("\u001B[?25l");
     expect(rendered).toContain("\u001B[2A");
-    expect(rendered).toMatch(/\u001B\[(?:0)?J/);
+    expect(rendered).toMatch(ANSI_CLEAR_RE);
     expect(rendered).toContain("\u001B[?25h");
 
     const plain = stripAnsi(rendered);
