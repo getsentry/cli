@@ -7,7 +7,8 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { cancel, confirm, intro, log, spinner } from "@clack/prompts";
+import { basename } from "node:path";
+import { cancel, confirm, intro, log } from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 import { captureException, getTraceData } from "@sentry/node-core/light";
 import { formatBanner } from "../banner.js";
@@ -18,6 +19,7 @@ import {
   colorTag,
   renderInlineMarkdown,
   safeCodeSpan,
+  stripColorTags,
 } from "../formatters/markdown.js";
 import {
   abortIfCancelled,
@@ -35,6 +37,7 @@ import { formatError, formatResult } from "./formatters.js";
 import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
 import { resolveInitContext } from "./preflight.js";
+import { createWizardSpinner } from "./spinner.js";
 import { describeTool, executeTool } from "./tools/registry.js";
 import type {
   ResolvedInitContext,
@@ -48,7 +51,7 @@ import {
   preReadCommonFiles,
 } from "./workflow-inputs.js";
 
-type Spinner = ReturnType<typeof spinner>;
+type Spinner = ReturnType<typeof createWizardSpinner>;
 
 type SpinState = { running: boolean };
 
@@ -79,14 +82,12 @@ function truncateForTerminal(message: string): string {
 }
 
 function truncateLineForTerminal(line: string): string {
-  // Reserve space for spinner (2 chars) + some padding
   const maxWidth = (process.stdout.columns || 80) - 4;
-  if (line.length <= maxWidth) {
+  const visibleLine = stripColorTags(line).replace(/`/g, "");
+  if (visibleLine.length <= maxWidth) {
     return line;
   }
   let truncated = line.slice(0, maxWidth - 1);
-  // If truncation split a backtick code span, drop the unmatched backtick
-  // so renderInlineMarkdown doesn't produce a literal ` character.
   const backtickCount = truncated.split("`").length - 1;
   if (backtickCount % 2 !== 0) {
     const lastBacktick = truncated.lastIndexOf("`");
@@ -96,12 +97,12 @@ function truncateLineForTerminal(line: string): string {
   return `${truncated}…`;
 }
 
-type ReadFilesTree = {
+type ReadFilesDisplay = {
   paths: string[];
   phase: "reading" | "analyzing";
 };
 
-function formatReadFilesTree(progress: ReadFilesTree): string {
+function formatReadFilesSummary(progress: ReadFilesDisplay): string {
   const { paths, phase } = progress;
   if (paths.length === 0) {
     return phase === "analyzing" ? "Analyzing files..." : "Reading files...";
@@ -116,19 +117,31 @@ function formatReadFilesTree(progress: ReadFilesTree): string {
         ? "Reading file..."
         : "Reading files...";
 
-  const lines = [header];
-  for (const [index, filePath] of paths.entries()) {
+  const icon = readFilesStatusIcon(phase);
+  const displayPaths = compactDisplayPaths(paths);
+  const items = displayPaths.map((filePath, index) => {
     const branch = index === paths.length - 1 ? "└─" : "├─";
-    lines.push(`${branch} ${readFilesStatusIcon(phase)} ${safeCodeSpan(filePath)}`);
-  }
-  return lines.join("\n");
+    return `${branch} ${icon} ${safeCodeSpan(filePath)}`;
+  });
+  return `${header}\n${items.join("\n")}`;
 }
 
-function readFilesStatusIcon(phase: ReadFilesTree["phase"]): string {
-  if (phase === "analyzing") {
-    return colorTag("green", "✓");
+function readFilesStatusIcon(phase: ReadFilesDisplay["phase"]): string {
+  return phase === "analyzing"
+    ? colorTag("green", "✓")
+    : colorTag("yellow", "●");
+}
+
+function compactDisplayPaths(paths: string[]): string[] {
+  const basenameCounts = new Map<string, number>();
+  for (const filePath of paths) {
+    const name = basename(filePath);
+    basenameCounts.set(name, (basenameCounts.get(name) ?? 0) + 1);
   }
-  return colorTag("yellow", "●");
+  return paths.map((filePath) => {
+    const name = basename(filePath);
+    return basenameCounts.get(name) === 1 ? name : filePath;
+  });
 }
 
 /**
@@ -142,7 +155,7 @@ function describePostTool(payload: SuspendPayload): string | undefined {
 
   switch (payload.operation) {
     case "read-files":
-      return formatReadFilesTree({
+      return formatReadFilesSummary({
         paths: payload.params.paths,
         phase: "analyzing",
       });
@@ -154,6 +167,7 @@ function describePostTool(payload: SuspendPayload): string | undefined {
       return;
   }
 }
+
 async function handleSuspendedStep(
   ctx: StepContext,
   stepPhases: Map<string, number>,
@@ -168,7 +182,7 @@ async function handleSuspendedStep(
         ? payload.detail
         : undefined) ??
       (payload.operation === "read-files"
-        ? formatReadFilesTree({
+        ? formatReadFilesSummary({
             paths: payload.params.paths,
             phase: "reading",
           })
@@ -200,8 +214,6 @@ async function handleSuspendedStep(
   }
 
   if (payload.type === "interactive") {
-    // In dry-run mode, verification always fails because no files were written
-    // (the server skips apply-patchset). Auto-continue since this is expected.
     if (context.dryRun && stepId === VERIFY_CHANGES_STEP) {
       return {
         action: "continue",
@@ -223,8 +235,6 @@ async function handleSuspendedStep(
     };
   }
 
-  // Unreachable: assertSuspendPayload validates the type before we get here.
-  // Kept as a defensive fallback.
   spin.stop("Error", 1);
   spinState.running = false;
   log.error(
@@ -266,10 +276,6 @@ function assertSuspendPayload(raw: unknown): SuspendPayload {
   return obj as SuspendPayload;
 }
 
-/**
- * Race a promise against a timeout. Rejects with a descriptive error
- * if the promise doesn't settle within `ms` milliseconds.
- */
 function withTimeout<T>(
   promise: Promise<T>,
   ms: number,
@@ -293,7 +299,6 @@ function withTimeout<T>(
   });
 }
 
-/** Returns `true` if the user confirmed, `false` if they declined. */
 async function confirmExperimental(yes: boolean): Promise<boolean> {
   if (yes) {
     return true;
@@ -306,10 +311,6 @@ async function confirmExperimental(yes: boolean): Promise<boolean> {
   return !!proceed;
 }
 
-/**
- * Pre-flight checks: TTY guard, banner, intro, and experimental warning.
- * Returns `true` when the wizard should continue, `false` to abort.
- */
 async function preamble(
   directory: string,
   yes: boolean,
@@ -330,8 +331,6 @@ async function preamble(
     confirmed = await confirmExperimental(yes || dryRun);
   } catch (err) {
     if (err instanceof WizardCancelledError) {
-      // Intentionally captured: track why users bail before completing
-      // instrumentation so we can improve the onboarding flow.
       captureException(err);
       process.exitCode = 0;
       return false;
@@ -371,8 +370,6 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       `\nFor manual setup: ${terminalLink(SENTRY_DOCS_URL)}`
   );
 
-  // In dry-run mode, treat all interactive prompts as non-interactive
-  // (auto-accept defaults) since we passed the TTY guard above.
   const effectiveOptions = dryRun
     ? { ...initialOptions, yes: true }
     : initialOptions;
@@ -414,7 +411,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   });
   const workflow = client.getWorkflow(WORKFLOW_ID);
 
-  const spin = spinner();
+  const spin = createWizardSpinner();
   const spinState: SpinState = { running: false };
 
   spin.start("Scanning project...");
@@ -499,13 +496,10 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     }
   } catch (err) {
     if (err instanceof WizardCancelledError) {
-      // Intentionally captured: track why users bail before completing
-      // instrumentation so we can improve the onboarding flow.
       captureException(err);
       process.exitCode = 0;
       return;
     }
-    // Already rendered by an inner throw — don't double-display
     if (err instanceof WizardError) {
       throw err;
     }

@@ -22,6 +22,8 @@ import * as inter from "../../../src/lib/init/interactive.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as preflight from "../../../src/lib/init/preflight.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as initSpinner from "../../../src/lib/init/spinner.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as registry from "../../../src/lib/init/tools/registry.js";
 import type {
   ResolvedInitContext,
@@ -104,7 +106,9 @@ beforeEach(() => {
   logInfoSpy = spyOn(clack.log, "info").mockImplementation(noop);
   logWarnSpy = spyOn(clack.log, "warn").mockImplementation(noop);
   logErrorSpy = spyOn(clack.log, "error").mockImplementation(noop);
-  spinnerSpy = spyOn(clack, "spinner").mockReturnValue(spinnerMock as any);
+  spinnerSpy = spyOn(initSpinner, "createWizardSpinner").mockReturnValue(
+    spinnerMock as any
+  );
 
   spinnerMock.start.mockClear();
   spinnerMock.stop.mockClear();
@@ -378,10 +382,10 @@ describe("runWizard", () => {
         )
     );
     expect(messages).toContain(
-      "Reading files...\n├─ ● `src/settings.py`\n└─ ● `src/urls.py`"
+      "Reading files...\n├─ ● `settings.py`\n└─ ● `urls.py`"
     );
     expect(messages).toContain(
-      "Analyzing files...\n├─ ✓ `src/settings.py`\n└─ ✓ `src/urls.py`"
+      "Analyzing files...\n├─ ✓ `settings.py`\n└─ ✓ `urls.py`"
     );
   });
 
