@@ -317,5 +317,4 @@ describe("project-root", () => {
       });
     });
   });
-
 });

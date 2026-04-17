@@ -26,11 +26,8 @@ mock.module("@sentry/node-core/light", () => ({
   captureException: mock(),
 }));
 
-const {
-  hasBuildSystemMarker,
-  hasLanguageMarker,
-  STAT_CONCURRENCY,
-} = await import("../../../src/lib/dsn/project-root.js");
+const { hasBuildSystemMarker, hasLanguageMarker, STAT_CONCURRENCY } =
+  await import("../../../src/lib/dsn/project-root.js");
 
 function makeTempDir(prefix: string): string {
   const dir = join(
