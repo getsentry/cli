@@ -50,14 +50,14 @@ async function measureCommand(
 }
 
 describe("completion latency", () => {
-  test("completion exits under 200ms", async () => {
+  test("completion exits under 225ms", async () => {
     const result = await measureCommand(["__complete", "issue", "list", ""]);
 
     expect(result.exitCode).toBe(0);
 
-    // 200ms budget: dev mode ~67ms, CI ~140ms, pre-optimization ~530ms.
-    // Generous enough for CI variance while still catching regressions.
-    expect(result.duration).toBeLessThan(200);
+    // 225ms budget: dev mode ~67ms, CI ~140ms, occasional CI noise ~200ms,
+    // pre-optimization ~530ms. Still tight enough to catch real regressions.
+    expect(result.duration).toBeLessThan(225);
   });
 
   test("completion exits cleanly with no stderr", async () => {
