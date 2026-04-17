@@ -1,6 +1,9 @@
 import type { ToolOperation, ToolPayload, ToolResult } from "../types.js";
 import { applyPatchsetTool } from "./apply-patchset.js";
-import { createSentryProjectTool } from "./create-sentry-project.js";
+import {
+  createSentryProjectTool,
+  ensureSentryProjectTool,
+} from "./create-sentry-project.js";
 import { detectSentryTool } from "./detect-sentry.js";
 import { fileExistsBatchTool } from "./file-exists-batch.js";
 import { globTool } from "./glob.js";
@@ -20,6 +23,7 @@ const toolDefinitions = [
   grepTool,
   globTool,
   createSentryProjectTool,
+  ensureSentryProjectTool,
   detectSentryTool,
 ] as const satisfies readonly AnyInitToolDefinition[];
 

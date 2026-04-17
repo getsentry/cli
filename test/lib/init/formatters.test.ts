@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 describe("formatResult", () => {
-  test("displays summary with all fields and action icons", () => {
+  test("displays summary with all fields and a nested changed-files tree", () => {
     formatResult({
       status: "success",
       result: {
@@ -53,9 +53,10 @@ describe("formatResult", () => {
         sentryProjectUrl: "https://sentry.io/project",
         docsUrl: "https://docs.sentry.io",
         changedFiles: [
-          { action: "create", path: "sentry.client.config.ts" },
           { action: "modify", path: "next.config.js" },
-          { action: "delete", path: "old-sentry.js" },
+          { action: "create", path: "src/app/instrumentation-client.ts" },
+          { action: "modify", path: "src/app/layout.tsx" },
+          { action: "delete", path: "src/old-sentry.js" },
         ],
       },
     });
@@ -68,9 +69,22 @@ describe("formatResult", () => {
     expect(content).toContain("Error Monitoring");
     expect(content).toContain("Performance Monitoring");
     expect(content).toContain("npm install @sentry/nextjs");
-    expect(content).toContain("sentry.client.config.ts");
-    expect(content).toContain("next.config.js");
+    expect(content).toContain("Changed files");
+    expect(content).toContain("src/");
+    expect(content).toContain("app/");
+    expect(content).toContain("instrumentation-client.ts");
+    expect(content).toContain("layout.tsx");
     expect(content).toContain("old-sentry.js");
+    expect(content).toContain("next.config.js");
+    expect(content).toContain("Changed files\n├─ src/");
+    expect(content).toContain("├─ src/");
+    expect(content).toContain("│  ├─ app/");
+    expect(content).toContain("│  │  ├─ + instrumentation-client.ts");
+    expect(content).toContain("│  │  └─ ~ layout.tsx");
+    expect(content).toContain("└─ ~ next.config.js");
+    const changedFilesSection = content.slice(content.indexOf("Changed files"));
+    expect(changedFilesSection).toContain("│");
+    expect(content).not.toContain("`");
   });
 
   test("skips summary when result has no summary fields", () => {

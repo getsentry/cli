@@ -22,6 +22,8 @@ import * as inter from "../../../src/lib/init/interactive.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as preflight from "../../../src/lib/init/preflight.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as initSpinner from "../../../src/lib/init/spinner.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as registry from "../../../src/lib/init/tools/registry.js";
 import type {
   ResolvedInitContext,
@@ -104,7 +106,9 @@ beforeEach(() => {
   logInfoSpy = spyOn(clack.log, "info").mockImplementation(noop);
   logWarnSpy = spyOn(clack.log, "warn").mockImplementation(noop);
   logErrorSpy = spyOn(clack.log, "error").mockImplementation(noop);
-  spinnerSpy = spyOn(clack, "spinner").mockReturnValue(spinnerMock as any);
+  spinnerSpy = spyOn(initSpinner, "createWizardSpinner").mockReturnValue(
+    spinnerMock as any
+  );
 
   spinnerMock.start.mockClear();
   spinnerMock.stop.mockClear();
@@ -346,6 +350,42 @@ describe("runWizard", () => {
     };
 
     await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+  });
+
+  test("shows a multiline tree while reading files and then analyzing them", async () => {
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["detect-platform"]],
+      steps: {
+        "detect-platform": {
+          suspendPayload: {
+            type: "tool",
+            operation: "read-files",
+            cwd: "/tmp/test",
+            params: {
+              paths: ["src/settings.py", "src/urls.py"],
+            },
+          },
+        },
+      },
+    };
+    mockResumeResults = [{ status: "success" }];
+
+    await runWizard(makeOptions());
+
+    const messages = spinnerMock.message.mock.calls.map((call: string[]) =>
+      call[0]?.replace(
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escape sequences
+        /\x1b\[[^m]*m/g,
+        ""
+      )
+    );
+    expect(messages).toContain(
+      "Reading files...\n├─ ● settings.py\n└─ ● urls.py"
+    );
+    expect(messages).toContain(
+      "Analyzing files...\n├─ ✓ settings.py\n└─ ✓ urls.py"
+    );
   });
 
   test("renders tool result messages via the spinner stop state", async () => {

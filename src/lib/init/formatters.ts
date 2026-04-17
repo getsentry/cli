@@ -15,6 +15,15 @@ import {
 } from "./constants.js";
 import type { WizardOutput, WorkflowRunResult } from "./types.js";
 
+type ChangedFile = NonNullable<WizardOutput["changedFiles"]>[number];
+
+type FileTreeNode = {
+  name: string;
+  path?: string;
+  action?: string;
+  children: Map<string, FileTreeNode>;
+};
+
 function fileActionIcon(action: string): string {
   if (action === "create") {
     return colorTag("green", "+");
@@ -22,7 +31,98 @@ function fileActionIcon(action: string): string {
   if (action === "delete") {
     return colorTag("red", "-");
   }
-  return colorTag("yellow", "~");
+  return colorTag("yellow", "\\~");
+}
+
+function createFileTreeNode(name: string): FileTreeNode {
+  return { name, children: new Map<string, FileTreeNode>() };
+}
+
+function splitChangedFilePath(filePath: string): string[] {
+  return filePath
+    .replaceAll("\\", "/")
+    .split("/")
+    .filter((segment) => segment.length > 0);
+}
+
+function buildChangedFilesTree(changedFiles: ChangedFile[]): FileTreeNode {
+  const root = createFileTreeNode("");
+
+  for (const file of changedFiles) {
+    const parts = splitChangedFilePath(file.path);
+    let current = root;
+
+    for (const [index, part] of parts.entries()) {
+      let child = current.children.get(part);
+      if (!child) {
+        child = createFileTreeNode(part);
+        current.children.set(part, child);
+      }
+
+      if (index === parts.length - 1) {
+        child.path = file.path;
+        child.action = file.action;
+      }
+
+      current = child;
+    }
+  }
+
+  return root;
+}
+
+function sortTreeEntries(entries: FileTreeNode[]): FileTreeNode[] {
+  return [...entries].sort((left, right) => {
+    const leftIsDir = left.children.size > 0 && !left.action;
+    const rightIsDir = right.children.size > 0 && !right.action;
+
+    if (leftIsDir !== rightIsDir) {
+      return leftIsDir ? -1 : 1;
+    }
+
+    return left.name.localeCompare(right.name);
+  });
+}
+
+function renderChangedFileNode(
+  node: FileTreeNode,
+  prefix: string,
+  isLast: boolean
+): string[] {
+  const lines: string[] = [];
+  const label = node.action ? node.name : `${node.name}/`;
+  const branch = isLast ? "└─" : "├─";
+
+  if (node.action) {
+    lines.push(`${prefix}${branch} ${fileActionIcon(node.action)} ${label}`);
+  } else {
+    lines.push(`${prefix}${branch} ${label}`);
+  }
+
+  const children = sortTreeEntries([...node.children.values()]);
+  const childPrefix = `${prefix}${isLast ? "   " : "│  "}`;
+  for (const [index, child] of children.entries()) {
+    lines.push(
+      ...renderChangedFileNode(
+        child,
+        childPrefix,
+        index === children.length - 1
+      )
+    );
+  }
+
+  return lines;
+}
+
+function formatChangedFilesTree(changedFiles: ChangedFile[]): string {
+  const root = buildChangedFilesTree(changedFiles);
+  const entries = sortTreeEntries([...root.children.values()]);
+
+  return entries
+    .flatMap((entry, index) =>
+      renderChangedFileNode(entry, "", index === entries.length - 1)
+    )
+    .join("\n");
 }
 
 function buildSummary(output: WizardOutput): string {
@@ -54,12 +154,7 @@ function buildSummary(output: WizardOutput): string {
 
   const changedFiles = output.changedFiles;
   if (changedFiles?.length) {
-    sections.push(
-      "### Changed files\n\n" +
-        changedFiles
-          .map((f) => `- ${fileActionIcon(f.action)} ${f.path}`)
-          .join("\n")
-    );
+    sections.push(`Changed files\n${formatChangedFilesTree(changedFiles)}`);
   }
 
   return sections.join("\n\n");

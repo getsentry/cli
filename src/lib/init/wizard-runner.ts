@@ -7,14 +7,20 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { cancel, confirm, intro, log, spinner } from "@clack/prompts";
+import { basename } from "node:path";
+import { cancel, confirm, intro, log } from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 import { captureException, getTraceData } from "@sentry/node-core/light";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { WizardError } from "../errors.js";
 import { terminalLink } from "../formatters/colors.js";
-import { renderInlineMarkdown } from "../formatters/markdown.js";
+import {
+  colorTag,
+  renderInlineMarkdown,
+  safeCodeSpan,
+  stripColorTags,
+} from "../formatters/markdown.js";
 import {
   abortIfCancelled,
   STEP_LABELS,
@@ -31,6 +37,7 @@ import { formatError, formatResult } from "./formatters.js";
 import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
 import { resolveInitContext } from "./preflight.js";
+import { createWizardSpinner } from "./spinner.js";
 import { describeTool, executeTool } from "./tools/registry.js";
 import type {
   ResolvedInitContext,
@@ -44,7 +51,7 @@ import {
   preReadCommonFiles,
 } from "./workflow-inputs.js";
 
-type Spinner = ReturnType<typeof spinner>;
+type Spinner = ReturnType<typeof createWizardSpinner>;
 
 type SpinState = { running: boolean };
 
@@ -71,14 +78,16 @@ function nextPhase(
  * Leaves room for the spinner character and padding.
  */
 function truncateForTerminal(message: string): string {
-  // Reserve space for spinner (2 chars) + some padding
+  return message.split("\n").map(truncateLineForTerminal).join("\n");
+}
+
+function truncateLineForTerminal(line: string): string {
   const maxWidth = (process.stdout.columns || 80) - 4;
-  if (message.length <= maxWidth) {
-    return message;
+  const visibleLine = stripColorTags(line).replace(/`/g, "");
+  if (visibleLine.length <= maxWidth) {
+    return line;
   }
-  let truncated = message.slice(0, maxWidth - 1);
-  // If truncation split a backtick code span, drop the unmatched backtick
-  // so renderInlineMarkdown doesn't produce a literal ` character.
+  let truncated = line.slice(0, maxWidth - 1);
   const backtickCount = truncated.split("`").length - 1;
   if (backtickCount % 2 !== 0) {
     const lastBacktick = truncated.lastIndexOf("`");
@@ -88,6 +97,76 @@ function truncateForTerminal(message: string): string {
   return `${truncated}…`;
 }
 
+type ReadFilesDisplay = {
+  paths: string[];
+  phase: "reading" | "analyzing";
+};
+
+function formatReadFilesSummary(progress: ReadFilesDisplay): string {
+  const { paths, phase } = progress;
+  if (paths.length === 0) {
+    return phase === "analyzing" ? "Analyzing files..." : "Reading files...";
+  }
+
+  let header: string;
+  if (phase === "analyzing") {
+    header = paths.length === 1 ? "Analyzing file..." : "Analyzing files...";
+  } else {
+    header = paths.length === 1 ? "Reading file..." : "Reading files...";
+  }
+
+  const icon = readFilesStatusIcon(phase);
+  const displayPaths = compactDisplayPaths(paths);
+  const items = displayPaths.map((filePath, index) => {
+    const branch = index === paths.length - 1 ? "└─" : "├─";
+    return `${branch} ${icon} ${safeCodeSpan(filePath)}`;
+  });
+  return `${header}\n${items.join("\n")}`;
+}
+
+function readFilesStatusIcon(phase: ReadFilesDisplay["phase"]): string {
+  return phase === "analyzing"
+    ? colorTag("green", "✓")
+    : colorTag("yellow", "●");
+}
+
+function compactDisplayPaths(paths: string[]): string[] {
+  const basenameCounts = new Map<string, number>();
+  for (const filePath of paths) {
+    const name = basename(filePath);
+    basenameCounts.set(name, (basenameCounts.get(name) ?? 0) + 1);
+  }
+  return paths.map((filePath) => {
+    const name = basename(filePath);
+    return basenameCounts.get(name) === 1 ? name : filePath;
+  });
+}
+
+/**
+ * Build a follow-up spinner message after a tool succeeds and the CLI is
+ * waiting for the server to continue processing the returned data.
+ */
+function describePostTool(payload: SuspendPayload): string | undefined {
+  if (payload.type !== "tool") {
+    return;
+  }
+
+  switch (payload.operation) {
+    case "read-files":
+      return formatReadFilesSummary({
+        paths: payload.params.paths,
+        phase: "analyzing",
+      });
+    case "list-dir":
+      return "Analyzing directory structure...";
+    case "file-exists-batch":
+      return "Analyzing project files...";
+    default:
+      return;
+  }
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: suspend handling needs to branch across tool and interactive payload kinds
 async function handleSuspendedStep(
   ctx: StepContext,
   stepPhases: Map<string, number>,
@@ -97,7 +176,16 @@ async function handleSuspendedStep(
   const label = STEP_LABELS[stepId] ?? stepId;
 
   if (payload.type === "tool") {
-    const message = describeTool(payload);
+    const message =
+      ("detail" in payload && typeof payload.detail === "string"
+        ? payload.detail
+        : undefined) ??
+      (payload.operation === "read-files"
+        ? formatReadFilesSummary({
+            paths: payload.params.paths,
+            phase: "reading",
+          })
+        : describeTool(payload));
     spin.message(renderInlineMarkdown(truncateForTerminal(message)));
 
     const toolResult = await executeTool(payload, context);
@@ -105,6 +193,14 @@ async function handleSuspendedStep(
     if (toolResult.message) {
       spin.stop(renderInlineMarkdown(toolResult.message));
       spin.start("Processing...");
+    } else {
+      const followUpMessage =
+        toolResult.ok === false ? undefined : describePostTool(payload);
+      if (followUpMessage) {
+        spin.message(
+          renderInlineMarkdown(truncateForTerminal(followUpMessage))
+        );
+      }
     }
 
     const history = stepHistory.get(stepId) ?? [];
@@ -119,8 +215,6 @@ async function handleSuspendedStep(
   }
 
   if (payload.type === "interactive") {
-    // In dry-run mode, verification always fails because no files were written
-    // (the server skips apply-patchset). Auto-continue since this is expected.
     if (context.dryRun && stepId === VERIFY_CHANGES_STEP) {
       return {
         action: "continue",
@@ -142,8 +236,6 @@ async function handleSuspendedStep(
     };
   }
 
-  // Unreachable: assertSuspendPayload validates the type before we get here.
-  // Kept as a defensive fallback.
   spin.stop("Error", 1);
   spinState.running = false;
   log.error(
@@ -185,10 +277,6 @@ function assertSuspendPayload(raw: unknown): SuspendPayload {
   return obj as SuspendPayload;
 }
 
-/**
- * Race a promise against a timeout. Rejects with a descriptive error
- * if the promise doesn't settle within `ms` milliseconds.
- */
 function withTimeout<T>(
   promise: Promise<T>,
   ms: number,
@@ -212,7 +300,6 @@ function withTimeout<T>(
   });
 }
 
-/** Returns `true` if the user confirmed, `false` if they declined. */
 async function confirmExperimental(yes: boolean): Promise<boolean> {
   if (yes) {
     return true;
@@ -225,10 +312,6 @@ async function confirmExperimental(yes: boolean): Promise<boolean> {
   return !!proceed;
 }
 
-/**
- * Pre-flight checks: TTY guard, banner, intro, and experimental warning.
- * Returns `true` when the wizard should continue, `false` to abort.
- */
 async function preamble(
   directory: string,
   yes: boolean,
@@ -249,8 +332,6 @@ async function preamble(
     confirmed = await confirmExperimental(yes || dryRun);
   } catch (err) {
     if (err instanceof WizardCancelledError) {
-      // Intentionally captured: track why users bail before completing
-      // instrumentation so we can improve the onboarding flow.
       captureException(err);
       process.exitCode = 0;
       return false;
@@ -290,8 +371,6 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       `\nFor manual setup: ${terminalLink(SENTRY_DOCS_URL)}`
   );
 
-  // In dry-run mode, treat all interactive prompts as non-interactive
-  // (auto-accept defaults) since we passed the TTY guard above.
   const effectiveOptions = dryRun
     ? { ...initialOptions, yes: true }
     : initialOptions;
@@ -333,7 +412,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   });
   const workflow = client.getWorkflow(WORKFLOW_ID);
 
-  const spin = spinner();
+  const spin = createWizardSpinner();
   const spinState: SpinState = { running: false };
 
   spin.start("Scanning project...");
@@ -418,13 +497,10 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     }
   } catch (err) {
     if (err instanceof WizardCancelledError) {
-      // Intentionally captured: track why users bail before completing
-      // instrumentation so we can improve the onboarding flow.
       captureException(err);
       process.exitCode = 0;
       return;
     }
-    // Already rendered by an inner throw — don't double-display
     if (err instanceof WizardError) {
       throw err;
     }
