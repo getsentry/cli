@@ -38,6 +38,7 @@ import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
 import { resolveInitContext } from "./preflight.js";
 import { createWizardSpinner } from "./spinner.js";
+import { forwardFreshTtyToStdin } from "./stdin-reopen.js";
 import { describeTool, executeTool } from "./tools/registry.js";
 import type {
   ResolvedInitContext,
@@ -317,6 +318,14 @@ async function preamble(
   yes: boolean,
   dryRun: boolean
 ): Promise<boolean> {
+  // Bun's compiled binaries don't deliver keystrokes through TTY fds
+  // inherited via shell redirection (e.g. `curl | bash` →
+  // `exec sentry init </dev/tty` in install.sh). Open a fresh `/dev/tty` and
+  // forward its data events onto process.stdin so clack's prompts receive
+  // input. Also backfills process.stdin.isTTY when Bun leaves it undefined
+  // so clack's internal `isTTY && setRawMode(true)` gate still fires.
+  forwardFreshTtyToStdin();
+
   if (!(yes || dryRun || process.stdin.isTTY)) {
     throw new WizardError(
       "Interactive mode requires a terminal. Use --yes for non-interactive mode.",
