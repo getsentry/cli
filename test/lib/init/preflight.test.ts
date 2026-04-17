@@ -129,6 +129,8 @@ describe("resolveInitContext", () => {
         }),
       })
     );
+    expect(getProjectSpy).toHaveBeenCalledTimes(1);
+    expect(tryGetPrimaryDsnSpy).toHaveBeenCalledTimes(1);
   });
 
   test("keeps a detected DSN project even when project enrichment fails", async () => {
@@ -156,6 +158,41 @@ describe("resolveInitContext", () => {
       })
     );
     expect(context?.existingProject).toBeUndefined();
+  });
+
+  test("retries detected project enrichment during project selection when the first lookup yields no metadata", async () => {
+    detectDsnSpy.mockResolvedValue({
+      publicKey: "abc",
+      protocol: "https",
+      host: "o1.ingest.sentry.io",
+      projectId: "42",
+      raw: "https://abc@o1.ingest.sentry.io/42",
+      source: "env_file" as const,
+    });
+    resolveDsnByPublicKeySpy.mockResolvedValue({
+      org: "acme",
+      project: "my-app",
+    });
+    getProjectSpy
+      .mockRejectedValueOnce(new ApiError("not found", 404))
+      .mockResolvedValue({
+        id: "42",
+        slug: "my-app",
+        name: "my-app",
+        platform: "javascript-react",
+        dateCreated: "2026-04-16T00:00:00Z",
+      } as any);
+
+    const context = await resolveInitContext(makeOptions());
+
+    expect(context?.existingProject).toEqual(
+      expect.objectContaining({
+        orgSlug: "acme",
+        projectSlug: "my-app",
+      })
+    );
+    expect(getProjectSpy).toHaveBeenCalledTimes(2);
+    expect(tryGetPrimaryDsnSpy).toHaveBeenCalledTimes(1);
   });
 
   test("falls back to listing organizations when prefetch misses", async () => {
