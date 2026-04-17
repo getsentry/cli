@@ -222,7 +222,7 @@ async function handleSuspendedStep(
       };
     }
 
-    spin.stop(stepId === "select-features" ? "" : label);
+    spin.stop(label);
     spinState.running = false;
 
     const interactiveResult = await handleInteractive(payload, context);

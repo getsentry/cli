@@ -3,22 +3,35 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as apiClient from "../../../../src/lib/api-client.js";
 import { ApiError } from "../../../../src/lib/errors.js";
 import { createSentryProject } from "../../../../src/lib/init/tools/create-sentry-project.js";
-import type { EnsureSentryProjectPayload } from "../../../../src/lib/init/types.js";
+import type {
+  CreateSentryProjectPayload,
+  EnsureSentryProjectPayload,
+} from "../../../../src/lib/init/types.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as resolveTeam from "../../../../src/lib/resolve-team.js";
 
 function makePayload(
-  overrides?: Partial<EnsureSentryProjectPayload["params"]>
-): EnsureSentryProjectPayload {
+  overrides?: Partial<CreateSentryProjectPayload["params"]>,
+  operation: CreateSentryProjectPayload["operation"] = "create-sentry-project"
+): CreateSentryProjectPayload {
   return {
     type: "tool",
-    operation: "ensure-sentry-project",
+    operation,
     cwd: "/tmp/test",
     params: {
       name: "my-app",
       platform: "javascript-react",
       ...overrides,
     },
+  };
+}
+
+function makeEnsurePayload(
+  overrides?: Partial<EnsureSentryProjectPayload["params"]>
+): EnsureSentryProjectPayload {
+  return {
+    ...makePayload(overrides),
+    operation: "ensure-sentry-project",
   };
 }
 
@@ -88,6 +101,26 @@ describe("createSentryProject", () => {
     expect(result.message).toContain("Using existing project");
     expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
     expect(resolveOrCreateTeamSpy).not.toHaveBeenCalled();
+  });
+
+  test("accepts the legacy ensure-sentry-project alias", async () => {
+    const result = await createSentryProject(makeEnsurePayload(), {
+      dryRun: false,
+      org: "acme",
+      team: undefined,
+      project: "my-app",
+      existingProject: {
+        orgSlug: "acme",
+        projectSlug: "my-app",
+        projectId: "42",
+        dsn: "https://abc@o1.ingest.sentry.io/42",
+        url: "https://sentry.io/settings/acme/projects/my-app/",
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.message).toContain("Using existing project");
+    expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
   });
 
   test("creates a new project with the pre-resolved org and team", async () => {

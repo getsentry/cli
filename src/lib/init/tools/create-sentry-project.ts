@@ -2,7 +2,11 @@ import { createProjectWithDsn } from "../../api-client.js";
 import { resolveOrCreateTeam } from "../../resolve-team.js";
 import { slugify } from "../../utils.js";
 import { tryGetExistingProjectData } from "../existing-project.js";
-import type { EnsureSentryProjectPayload, ToolResult } from "../types.js";
+import type {
+  CreateSentryProjectPayload,
+  EnsureSentryProjectPayload,
+  ToolResult,
+} from "../types.js";
 import { formatToolError } from "./shared.js";
 import type { InitToolDefinition, ToolContext } from "./types.js";
 
@@ -12,7 +16,7 @@ import type { InitToolDefinition, ToolContext } from "./types.js";
  * slug can be reused as the team slug.
  */
 export async function createSentryProject(
-  payload: EnsureSentryProjectPayload,
+  payload: CreateSentryProjectPayload | EnsureSentryProjectPayload,
   context: Pick<
     ToolContext,
     "dryRun" | "existingProject" | "org" | "team" | "project"
@@ -93,13 +97,24 @@ export async function createSentryProject(
 }
 
 /**
- * Tool definition for ensuring a Sentry project exists for init.
+ * Tool definition for creating or ensuring a Sentry project exists for init.
  */
-export const createSentryProjectTool: InitToolDefinition<"ensure-sentry-project"> =
+const describeCreateSentryProject = (
+  payload: CreateSentryProjectPayload | EnsureSentryProjectPayload
+): string =>
+  payload.detail ??
+  `Ensuring project \`${payload.params.name}\` (${payload.params.platform})...`;
+
+export const createSentryProjectTool: InitToolDefinition<"create-sentry-project"> =
+  {
+    operation: "create-sentry-project",
+    describe: describeCreateSentryProject,
+    execute: createSentryProject,
+  };
+
+export const ensureSentryProjectTool: InitToolDefinition<"ensure-sentry-project"> =
   {
     operation: "ensure-sentry-project",
-    describe: (payload) =>
-      payload.detail ??
-      `Ensuring project \`${payload.params.name}\` (${payload.params.platform})...`,
+    describe: describeCreateSentryProject,
     execute: createSentryProject,
   };

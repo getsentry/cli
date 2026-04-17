@@ -396,7 +396,7 @@ describe("runWizard", () => {
         "ensure-sentry-project": {
           suspendPayload: {
             type: "tool",
-            operation: "ensure-sentry-project",
+            operation: "create-sentry-project",
             cwd: "/tmp/test",
             params: { name: "my-app", platform: "javascript-react" },
           },
