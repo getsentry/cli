@@ -141,6 +141,7 @@ async function resolveProjectSelection(
   const resolved = await resolveExistingProjectChoice({
     org,
     project: seed.project,
+    existingProject: seed.existingProject,
     yes: initial.yes,
     promptOnExisting: Boolean(initial.project && !initial.org),
   });
@@ -231,6 +232,7 @@ async function resolveDetectedProject(initial: WizardOptions): Promise<{
 async function resolveExistingProjectChoice(opts: {
   org: string;
   project: string;
+  existingProject?: ExistingProjectData;
   yes: boolean;
   promptOnExisting: boolean;
 }): Promise<ExistingProjectChoice> {
@@ -239,9 +241,12 @@ async function resolveExistingProjectChoice(opts: {
     return { project: opts.project };
   }
 
-  const existingProject = await tryGetExistingProjectData(opts.org, slug).catch(
-    () => null
-  );
+  const existingProject =
+    opts.existingProject &&
+    opts.existingProject.orgSlug === opts.org &&
+    opts.existingProject.projectSlug === slug
+      ? opts.existingProject
+      : await tryGetExistingProjectData(opts.org, slug).catch(() => null);
   if (!existingProject) {
     return { project: opts.project };
   }
