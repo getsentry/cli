@@ -16,6 +16,7 @@
 import { opendir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import pLimit from "p-limit";
 import { anyTrue } from "../promises.js";
 import {
   applyGlobalFallbacks,
@@ -174,6 +175,23 @@ const BUILD_SYSTEM_MARKERS = [
 const EDITORCONFIG_ROOT_REGEX = /^\s*root\s*=\s*true\s*$/im;
 
 /**
+ * Maximum concurrent stat() calls across all project-root detection work.
+ *
+ * Shared across every anyExists() call so the budget bounds total FD
+ * pressure, not per-group pressure. processDirectoryLevel fires 4
+ * parallel anyExists() groups (VCS: 7, CI: 12, language: 30, build: 19 —
+ * up to 68 stat() calls combined) and this limiter caps their combined
+ * concurrency.
+ *
+ * macOS kqueue has a ~256 FD limit per process; exceeding it returns
+ * EINVAL (CLI-19A). 32 leaves generous headroom while keeping the
+ * common-case marker checks (VCS: 7, CI: 12) fully parallel. Matches
+ * the shared pLimit pattern in response-cache.ts.
+ */
+export const STAT_CONCURRENCY = 32;
+const statLimit = pLimit(STAT_CONCURRENCY);
+
+/**
  * Check if a path exists (file or directory) using stat.
  */
 async function pathExists(filePath: string): Promise<boolean> {
@@ -189,12 +207,16 @@ async function pathExists(filePath: string): Promise<boolean> {
  * Check if any of the given paths exist in a directory.
  * Runs checks in parallel and resolves as soon as any returns true.
  *
+ * The shared statLimit limiter caps total concurrent stat() calls across
+ * all marker groups (VCS, CI, language, build) to avoid exhausting the
+ * OS file descriptor table (kqueue on macOS, epoll on Linux).
+ *
  * @param dir - Directory to check
  * @param names - Array of file/directory names to check
  * @returns True if any path exists
  */
 function anyExists(dir: string, names: readonly string[]): Promise<boolean> {
-  return anyTrue(names, (name) => pathExists(join(dir, name)));
+  return anyTrue(names, (name) => statLimit(() => pathExists(join(dir, name))));
 }
 
 /**
