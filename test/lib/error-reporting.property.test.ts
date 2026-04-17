@@ -210,8 +210,10 @@ describe("normalizeErrorMessage — property tests", () => {
   });
 
   test("leaves messages without user paths alone", () => {
+    // Exclude slugs starting with "0x" which match the hex-address pattern.
+    const safeSlugArb = slugArb.filter((s) => !s.startsWith("0x"));
     fcAssert(
-      property(slugArb, (slug) => {
+      property(safeSlugArb, (slug) => {
         // Generic API request messages without path context should pass through.
         const msg = `Failed to fetch ${slug}: 500 Internal Server Error`;
         expect(normalizeErrorMessage(msg)).toBe(msg);

@@ -23,10 +23,11 @@ import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
 import { detectAgent, detectAgentFromProcessTree } from "./detect-agent.js";
 import { getEnv } from "./env.js";
 import {
+  classifySilenced,
   fingerprintFromEventPayload,
   reportCliError,
 } from "./error-reporting.js";
-import { ApiError, AuthError, OutputError } from "./errors.js";
+import { ApiError } from "./errors.js";
 import { attachSentryReporter, logger } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 import { getRealUsername } from "./utils.js";
@@ -224,33 +225,14 @@ export async function withTelemetry<T>(
     // consistently. Silenced errors emit a `cli.error.silenced` metric +
     // optional structured log instead of creating a Sentry issue.
     reportCliError(e);
-    if (!shouldSilenceFromTelemetry(e)) {
+    // Only mark session crashed for errors that weren't silenced.
+    // Silenced errors (OutputError, expected AuthError, user 4xx ApiError)
+    // are expected states — marking them crashed would skew release-health.
+    if (!classifySilenced(e)) {
       markSessionCrashed();
     }
     throw e;
   }
-}
-
-/**
- * Mirror of {@link reportCliError}'s silencing rules used to decide whether
- * to mark the session crashed.
- *
- * Silenced errors represent expected states (user not logged in, user-error
- * 4xx, `OutputError` sentinel) — marking the session crashed for those would
- * skew release-health metrics. Only genuine command failures that flow
- * through to `captureException` should mark the session as crashed.
- */
-function shouldSilenceFromTelemetry(error: unknown): boolean {
-  if (error instanceof OutputError) {
-    return true;
-  }
-  if (
-    error instanceof AuthError &&
-    (error.reason === "not_authenticated" || error.reason === "expired")
-  ) {
-    return true;
-  }
-  return isUserApiError(error);
 }
 
 /**
