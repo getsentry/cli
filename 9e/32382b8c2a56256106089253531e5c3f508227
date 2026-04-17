@@ -1,0 +1,211 @@
+# `sentry init` prompt unresponsive after `curl | bash` install
+
+## Background
+
+User report: running
+```bash
+curl -fsSL https://cli.sentry.dev/install | SENTRY_INIT=1 bash
+```
+installs the binary, then `install` line 344 does:
+```bash
+exec "$sentry_bin" init </dev/tty
+```
+and on the first `@clack/prompts` `confirm` ("EXPERIMENTAL: … Continue?") at
+`src/lib/init/wizard-runner.ts:220`, keystrokes allegedly don't register.
+
+Reporter environment: macOS, iTerm2, zsh, no multiplexer. Neither we nor
+the reporter can readily re-run the exact scenario.
+
+## Phase 1 — Investigation (DONE)
+
+Shipped an opt-in probe (`src/lib/init/tty-diagnostics.ts`, gated on
+`SENTRY_INIT_DIAGNOSTICS=1`) with call sites in `preamble()` and before the
+first `confirm()` in `confirmExperimental()`. Captures:
+- runtime identity (argv[0], Bun/Node versions, platform)
+- `typeof stdin.isTTY`, value, `fd`, `readable`, `readableFlowing`, `isRaw`
+- `typeof stdin.setRawMode`
+- `isatty(0..2)` from `node:tty`
+- stdout TTY state + `columns`
+- live `setRawMode(true)` probe with try/catch
+- `/dev/tty` stat + openable + `isatty(fd)`
+
+### Results
+
+Ran Reproducer A (piped) and the plain control on the reporter's machine
+with a freshly built HEAD binary. Both runs showed identical, healthy TTY
+signals:
+
+```
+typeof stdin.isTTY: "boolean"
+stdin.isTTY: true
+typeof stdin.setRawMode: "function"
+isatty(0): true
+setRawMode(true) probe: "ok (isRaw=true)"
+```
+
+…and the prompt **accepted** keystrokes — output showed
+`◇ EXPERIMENTAL: … Continue?` / `│ No` / `└ Setup cancelled.`, i.e. clack's
+completed-prompt glyph with the answered value. The bug did **not**
+reproduce locally against HEAD.
+
+### Interpretation
+
+The root-cause hypothesis (Bun leaves `process.stdin.isTTY` undefined on
+fds inherited via shell redirect, causing clack to skip `setRawMode`) is
+**not confirmed** on this environment. Possibilities:
+
+1. The reporter was on an older binary that had a different stdin handoff
+   bug, since fixed in HEAD by an unrelated change.
+2. A Bun version difference between what's in latest stable and our local
+   dev build (reporter: unknown; ours: Bun 1.3.11) changed stdin plumbing.
+3. Environment difference we haven't spotted (iTerm2 vs something else,
+   though macOS+iTerm2+zsh is as vanilla as it gets).
+4. The original report conflated the bug with something else (stuck network
+   request masquerading as a stuck prompt; a different prompt further in).
+
+Since we cannot reproduce, blind "fixes" are dangerous. But the codebase
+**does** have a documented, consistent convention elsewhere (`src/cli.ts:225`,
+`src/lib/mutate-command.ts:165`, `src/commands/log/view.ts:234`,
+`src/commands/auth/login.ts:88`, `src/lib/seer-trial.ts:51`,
+`src/commands/trial/start.ts:185`): use `isatty(0)` from `node:tty` for
+reliable stdin TTY detection, because `process.stdin.isTTY` is known to be
+unreliable in Bun. The init wizard is the **last outlier** still using the
+unreliable form. Aligning it with the convention is not a blind fix — it's
+removing a latent inconsistency that the rest of the codebase treats as a
+known Bun quirk.
+
+## Phase 2 — Defensive hardening (TO EXECUTE)
+
+Scope: keep the diagnostic probe as-is (committed), align the init wizard's
+TTY handling with the existing codebase convention, and defensively shim
+`process.stdin.isTTY` when `isatty(0)` disagrees with it. This is not a
+speculative fix — it literally mirrors patterns elsewhere that were added
+precisely for the Bun-stdin-on-inherited-fd quirk.
+
+No work on "own `/dev/tty` stream" or per-prompt `input:` threading —
+that's a large refactor with no evidence it fixes anything that can't be
+addressed more simply. If the probe ever captures a diagnostic output
+showing `isatty(0) === true && setRawMode = THROW(...)`, we revisit.
+
+### Changes
+
+1. **`src/lib/init/wizard-runner.ts`** — `preamble()`:
+   - Import `isatty` from `node:tty`.
+   - Add the `isTTY` backfill **after** the diagnostic dump (so the dump
+     still sees the raw inherited state for future reports).
+   - Swap the TTY guard from `process.stdin.isTTY` to `isatty(0)`.
+
+   ```ts
+   import { isatty } from "node:tty";
+
+   async function preamble(directory, yes, dryRun): Promise<boolean> {
+     dumpTtyDiagnostics("preamble:start");
+
+     // Bun's single-file binary can leave process.stdin.isTTY undefined on
+     // fds inherited via shell redirects like `exec … </dev/tty`. Clack's
+     // setRawMode call is gated on input.isTTY, so a missing value silently
+     // disables raw mode and prompts never receive keypress events.
+     // Backfill isTTY when isatty(0) confirms fd 0 is a tty. Matches the
+     // isatty(0) convention used throughout the codebase (src/cli.ts,
+     // mutate-command, log/view, auth/login, seer-trial, trial/start).
+     if (process.stdin.isTTY === undefined && isatty(0)) {
+       (process.stdin as { isTTY?: boolean }).isTTY = true;
+     }
+
+     if (!(yes || dryRun || isatty(0))) {
+       throw new WizardError(
+         "Interactive mode requires a terminal. Use --yes for non-interactive mode.",
+         { rendered: false }
+       );
+     }
+     // ... rest unchanged
+   }
+   ```
+
+2. **`test/lib/init/wizard-runner.test.ts`** — the "throws when stdin is not
+   a TTY" test at line 203–218 currently mutates `process.stdin.isTTY` via
+   `Object.defineProperty`. After the guard change it needs to mock
+   `node:tty.isatty`. Use `mock.module("node:tty", …)` with a module-scoped
+   spy that can flip return values per test, following the same pattern
+   the file already uses for other module mocks.
+
+3. **Keep** `src/lib/init/tty-diagnostics.ts` and the two `dumpTtyDiagnostics`
+   call sites exactly as they are. They are no-op unless
+   `SENTRY_INIT_DIAGNOSTICS=1` — zero user-visible impact, but ensure the
+   next reporter can give us actionable data without us cutting a new release.
+
+### What we do NOT do
+
+- Do **not** open `/dev/tty` ourselves or thread a custom `input:` into every
+  clack call. That was the "belt and suspenders" option in the original plan;
+  it's only justified if diagnostics prove `setRawMode` throws on the
+  inherited fd. Current evidence says it doesn't.
+- Do **not** touch `install`. The script already does the right thing
+  (`exec … </dev/tty`), and on the reporter's run it apparently handed off
+  stdin correctly.
+- Do **not** touch `interactive.ts`, `git.ts`, or `clack-utils.ts`. The fix
+  lives entirely in `preamble()` where the TTY guard is.
+
+## Phase 3 — Verification
+
+**Automated:**
+
+```bash
+bun run typecheck
+bun run lint
+bun test test/lib/init/
+bun run test:unit     # full unit suite
+```
+
+The init-wizard test file needs its mock updated; otherwise everything
+should stay green.
+
+**Manual (where we have TTY access):**
+
+```bash
+SENTRY_CLIENT_ID=placeholder bun run build
+
+# Piped reproducer still works end-to-end:
+bash -c 'exec ./dist-bin/sentry-linux-x64 init </dev/tty' < /dev/null
+
+# Plain run still works:
+./dist-bin/sentry-linux-x64 init
+
+# Negative control — fully non-TTY stdin must error cleanly:
+echo '' | ./dist-bin/sentry-linux-x64 init
+# Expected: "Interactive mode requires a terminal. Use --yes for non-interactive mode."
+
+# --yes/--dry-run unaffected:
+echo '' | ./dist-bin/sentry-linux-x64 init --yes --dry-run
+```
+
+**Follow-up for the original reporter:**
+
+Ask them to re-run with the next nightly AND, if the bug returns, to capture:
+```bash
+SENTRY_INIT_DIAGNOSTICS=1 curl -fsSL https://cli.sentry.dev/install | SENTRY_INIT=1 bash 2>&1 | tee /tmp/sentry-bug.log
+```
+That output plus their macOS / Bun / iTerm versions unambiguously tells us
+whether any further action is needed.
+
+## Files changed
+
+- `src/lib/init/tty-diagnostics.ts` — NEW (already landed in Phase 1)
+- `src/lib/init/wizard-runner.ts` — MOD: Phase 1 dump calls already landed;
+  Phase 2 adds `isatty` import, `isTTY` backfill (3 lines), swaps guard
+- `test/lib/init/wizard-runner.test.ts` — MOD: update the TTY-guard test
+  to mock `node:tty.isatty` instead of mutating `process.stdin.isTTY`
+
+No dependency changes. Everything uses Node builtins.
+
+## Sign-off criteria
+
+- [ ] `bun run typecheck`, `bun run lint`, `bun run test:unit` all green.
+- [ ] `SENTRY_INIT_DIAGNOSTICS=1` still produces readable diagnostic
+      output on both the piped reproducer and the plain run, unchanged by
+      the backfill (the backfill must NOT alter what the probe prints,
+      since the probe runs first).
+- [ ] PR description calls out that this is defensive alignment with the
+      existing codebase convention for Bun stdin, **not** a confirmed fix
+      for the user's report; the probe stays in place so the next reporter
+      can provide targeted data.
