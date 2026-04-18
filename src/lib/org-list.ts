@@ -55,8 +55,9 @@ import { logger } from "./logger.js";
 import { withProgress } from "./polling.js";
 import { resolveEffectiveOrg } from "./region.js";
 import {
+  type ProjectNotFoundOutcome,
   resolveOrgsForListing,
-  tryFuzzyProjectRecovery,
+  triageProjectNotFound,
 } from "./resolve-target.js";
 import { setOrgProjectContext } from "./telemetry.js";
 
@@ -653,38 +654,6 @@ export async function handleExplicitProject<TEntity, TWithOrg>(
   return result;
 }
 
-/** Result from the list-command fuzzy recovery helper. */
-type ListFuzzyResult =
-  | { kind: "match"; slug: string }
-  | { kind: "suggestions"; suggestions: string[] }
-  | undefined;
-
-/**
- * Attempt fuzzy recovery for a project slug in the list-command context.
- *
- * Returns the corrected slug on single match, suggestions for multiple
- * matches, or undefined when nothing is found. Does NOT throw — callers
- * decide whether to show suggestions or return empty for JSON mode.
- */
-async function tryFuzzyRecoveryForList(
-  slug: string,
-  orgs: { slug: string }[],
-  /** Original user input before normalization — enables display-name matching
-   *  and clearer warning messages. Only set when normalization occurred. */
-  originalSlug?: string
-): Promise<ListFuzzyResult> {
-  const result = await tryFuzzyProjectRecovery(slug, orgs, originalSlug);
-  if (result.kind === "match") {
-    log.warn(
-      `No project matching '${originalSlug ?? slug}'. Using '${result.project}' in org '${result.org}'.`
-    );
-    return { kind: "match", slug: result.project };
-  }
-  if (result.kind === "suggestions") {
-    return { kind: "suggestions", suggestions: result.suggestions };
-  }
-}
-
 /**
  * Handle project-search mode (bare slug, e.g., "cli").
  *
@@ -729,8 +698,12 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
   );
 
   if (matches.length === 0) {
-    const matchingOrg = orgs.find((o) => o.slug === projectSlug);
-    if (matchingOrg) {
+    // Skip triage on recovery attempts to prevent infinite recursion.
+    const outcome: ProjectNotFoundOutcome = _isRecoveryAttempt
+      ? { kind: "not-found", displaySlug, suggestions: [] }
+      : await triageProjectNotFound(projectSlug, orgs, originalSlug);
+
+    if (outcome.kind === "org-match") {
       if (orgAllFallback) {
         log.warn(
           `'${projectSlug}' is an organization, not a project. ` +
@@ -749,37 +722,21 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
       );
     }
 
-    // Attempt fuzzy auto-recovery — if a single similar project is found,
-    // re-run the handler with the corrected slug. Applied before the JSON
-    // early return so both human and JSON consumers benefit from recovery.
-    // Skip on retry to prevent infinite recursion.
-    let fuzzySuggestions: string[] | undefined;
-    if (!_isRecoveryAttempt) {
-      const fuzzy = await tryFuzzyRecoveryForList(
-        projectSlug,
-        orgs,
-        originalSlug
-      );
-      if (fuzzy?.kind === "match") {
-        return handleProjectSearch(config, fuzzy.slug, options, true);
-      }
-      if (fuzzy?.kind === "suggestions") {
-        fuzzySuggestions = fuzzy.suggestions;
-      }
+    if (outcome.kind === "fuzzy-match") {
+      return handleProjectSearch(config, outcome.project, options, true);
     }
 
     if (flags.json) {
       return { items: [] };
     }
 
-    // Use ResolutionError — the user provided a project slug but it wasn't found.
     throw new ResolutionError(
       `Project '${displaySlug}'`,
       "not found",
       `${config.commandPrefix} <org>/${projectSlug}`,
-      fuzzySuggestions ?? [
-        "No project with this slug found in any accessible organization",
-      ]
+      outcome.suggestions.length > 0
+        ? outcome.suggestions
+        : ["No project with this slug found in any accessible organization"]
     );
   }
 

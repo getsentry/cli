@@ -46,7 +46,7 @@ import {
   paginationHint,
   targetPatternExplanation,
 } from "../../lib/list-command.js";
-import { logger } from "../../lib/logger.js";
+
 import {
   dispatchOrgScopedList,
   jsonTransformListResult,
@@ -55,14 +55,13 @@ import {
 } from "../../lib/org-list.js";
 import { withProgress } from "../../lib/polling.js";
 import {
+  type ProjectNotFoundOutcome,
   type ResolvedTarget,
   resolveAllTargets,
-  tryFuzzyProjectRecovery,
+  triageProjectNotFound,
 } from "../../lib/resolve-target.js";
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type { SentryProject } from "../../types/index.js";
-
-const log = logger.withTag("project-list");
 
 /** Extended result type with optional title shown above the table. */
 type ProjectListResult = ListResult<ProjectWithOrg> & { title?: string };
@@ -539,9 +538,12 @@ async function handleProjectNotFound(
   const { originalSlug, isRecoveryAttempt = false } = options ?? {};
   const displaySlug = originalSlug ?? projectSlug;
 
-  // Check if slug matches an org — user likely meant "project list <org>/"
-  const matchingOrg = orgs.find((o) => o.slug === projectSlug);
-  if (matchingOrg) {
+  // Skip triage on recovery attempts to prevent infinite recursion.
+  const outcome: ProjectNotFoundOutcome = isRecoveryAttempt
+    ? { kind: "not-found", displaySlug, suggestions: [] }
+    : await triageProjectNotFound(projectSlug, orgs, originalSlug);
+
+  if (outcome.kind === "org-match") {
     const contextKey = buildContextKey(
       { type: "org-all", org: projectSlug },
       flags,
@@ -559,25 +561,8 @@ async function handleProjectNotFound(
     return r;
   }
 
-  // Attempt fuzzy auto-recovery — also match display names when the
-  // user's original input is available (e.g. typed "My Project").
-  // Skip on retry to prevent infinite recursion.
-  let fuzzySuggestions: string[] | undefined;
-  if (!isRecoveryAttempt) {
-    const fuzzyResult = await tryFuzzyProjectRecovery(
-      projectSlug,
-      orgs,
-      originalSlug
-    );
-    if (fuzzyResult.kind === "match") {
-      log.warn(
-        `No project matching '${displaySlug}'. Using '${fuzzyResult.project}' in org '${fuzzyResult.org}'.`
-      );
-      return handleProjectSearch(fuzzyResult.project, flags);
-    }
-    if (fuzzyResult.kind === "suggestions") {
-      fuzzySuggestions = fuzzyResult.suggestions;
-    }
+  if (outcome.kind === "fuzzy-match") {
+    return handleProjectSearch(outcome.project, flags);
   }
 
   // JSON mode returns empty array; human mode throws a helpful error
@@ -588,9 +573,9 @@ async function handleProjectNotFound(
     `Project '${displaySlug}'`,
     "not found",
     `sentry project list <org>/${projectSlug}`,
-    fuzzySuggestions ?? [
-      "No project with this slug found in any accessible organization",
-    ]
+    outcome.suggestions.length > 0
+      ? outcome.suggestions
+      : ["No project with this slug found in any accessible organization"]
   );
 }
 
