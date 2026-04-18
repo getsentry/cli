@@ -689,13 +689,18 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
   const { flags, orgAllFallback, originalSlug } = options;
   /** Display label: the user's raw input when available, otherwise the slug. */
   const displaySlug = originalSlug ?? projectSlug;
-  const { projects: matches, orgs } = await withProgress(
-    {
-      message: `Fetching ${config.entityPlural} (up to ${flags.limit})...`,
-      json: flags.json,
-    },
-    () => findProjectsBySlug(projectSlug)
-  );
+  // When the input is a display name (originalSlug set, contains spaces),
+  // skip the slug-based API lookup and go straight to name-based matching.
+  const isDisplayName = originalSlug !== undefined;
+  const { projects: matches, orgs } = isDisplayName
+    ? { projects: [], orgs: await listOrganizations() }
+    : await withProgress(
+        {
+          message: `Fetching ${config.entityPlural} (up to ${flags.limit})...`,
+          json: flags.json,
+        },
+        () => findProjectsBySlug(projectSlug)
+      );
 
   if (matches.length === 0) {
     // Skip triage on recovery attempts to prevent infinite recursion.

@@ -589,13 +589,18 @@ export async function handleProjectSearch(
   /** @internal — prevents infinite recursion from fuzzy recovery. */
   _isRecoveryAttempt = false
 ): Promise<ListResult<ProjectWithOrg>> {
-  const { projects, orgs } = await withProgress(
-    {
-      message: `Fetching projects (up to ${flags.limit})...`,
-      json: flags.json,
-    },
-    () => findProjectsBySlug(projectSlug)
-  );
+  // When the input is a display name (originalSlug set, contains spaces),
+  // skip the slug-based API lookup and go straight to name-based matching.
+  const isDisplayName = originalSlug !== undefined;
+  const { projects, orgs } = isDisplayName
+    ? { projects: [], orgs: await listOrganizations() }
+    : await withProgress(
+        {
+          message: `Fetching projects (up to ${flags.limit})...`,
+          json: flags.json,
+        },
+        () => findProjectsBySlug(projectSlug)
+      );
   const filtered = filterByPlatform(projects, flags.platform);
 
   if (filtered.length === 0) {

@@ -22,6 +22,7 @@ import {
   findProjectsByPattern,
   findProjectsBySlug,
   getProject,
+  listOrganizations,
   listProjects,
 } from "./api-client.js";
 import { type ParsedOrgProject, parseOrgProjectArg } from "./arg-parsing.js";
@@ -1355,7 +1356,13 @@ export async function resolveProjectBySlug(
   /** Display label: the user's raw input when available, otherwise the slug. */
   const displaySlug = originalSlug ?? projectSlug;
 
-  const { projects, orgs } = await findProjectsBySlug(projectSlug);
+  // When the input is a display name (originalSlug set, contains spaces),
+  // skip the slug-based API lookup — it would just produce N 404s — and go
+  // straight to display-name fuzzy matching via triageProjectNotFound.
+  const isDisplayName = originalSlug !== undefined;
+  const { projects, orgs } = isDisplayName
+    ? { projects: [], orgs: await listOrganizations() }
+    : await findProjectsBySlug(projectSlug);
   if (projects.length === 0) {
     const outcome = await triageProjectNotFound(
       projectSlug,
@@ -1571,7 +1578,10 @@ export async function resolveOrgProjectTarget(
 
     case "project-search": {
       const displaySlug = parsed.originalSlug ?? parsed.projectSlug;
-      const { projects, orgs } = await findProjectsBySlug(parsed.projectSlug);
+      const isDisplayName = parsed.originalSlug !== undefined;
+      const { projects, orgs } = isDisplayName
+        ? { projects: [], orgs: await listOrganizations() }
+        : await findProjectsBySlug(parsed.projectSlug);
 
       if (projects.length === 0) {
         const outcome = await triageProjectNotFound(

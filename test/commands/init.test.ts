@@ -349,12 +349,13 @@ describe("init command func", () => {
       );
     });
 
-    test("org slug with whitespace is normalized (not rejected)", async () => {
-      // Spaces in slugs are normalized to dashes — the "display name"
-      // recovery path (e.g., "My Org" → "my-org").
+    test("org slug with whitespace is rejected by validateResourceId", async () => {
+      // Spaces in org slugs now hit validateResourceId and throw
+      // ValidationError — normalizeSlug no longer converts them.
       const ctx = makeContext();
-      await func.call(ctx, DEFAULT_FLAGS, "acme corp/");
-      expect(capturedArgs?.org).toBe("acme-corp");
+      await expect(func.call(ctx, DEFAULT_FLAGS, "acme corp/")).rejects.toThrow(
+        ValidationError
+      );
     });
   });
 

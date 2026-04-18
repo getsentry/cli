@@ -9,7 +9,7 @@
 import type { LogSortDirection } from "./api/logs.js";
 import { ContextError, ValidationError } from "./errors.js";
 import { validateResourceId } from "./input-validation.js";
-import { logger } from "./logger.js";
+
 import type { ParsedSentryUrl } from "./sentry-url-parser.js";
 import { applySentryUrlContext, parseSentryUrl } from "./sentry-url-parser.js";
 import { isAllDigits } from "./utils.js";
@@ -19,81 +19,33 @@ import { isAllDigits } from "./utils.js";
 // ---------------------------------------------------------------------------
 
 /**
- * Normalize a Sentry slug by converting display-name-style input to slug form.
+ * Normalize a Sentry slug from user input.
  *
- * Sentry slugs are always lowercase and use dashes as separators. Users
- * sometimes paste display names like `"My Project"` instead of
- * `"my-project"`; without normalization, `validateResourceId` would reject
- * those outright for containing spaces. Normalization gives us a chance to
- * recover the intent before validation runs.
+ * After the removal of underscore normalization (#771) and the move to
+ * display-name matching for space-containing inputs (#772), this function
+ * is effectively a no-op — valid slug characters pass through unchanged.
+ * It remains as a stable call-site for future normalization rules.
  *
- * Normalization rules (applied only when spaces are present):
- * 1. Lowercase the entire string
- * 2. Collapse runs of spaces into a single dash
- * 3. Trim leading/trailing dashes (from leading/trailing whitespace)
- *
- * Underscores are **not** normalized — Sentry accepts underscores in project
- * slugs at creation time, so rewriting them here would silently break
- * lookups for any customer who has one (see #770). Since underscores are
- * not in `validateResourceId`'s forbidden set either, they flow through
- * untouched.
+ * Spaces are handled separately: {@link looksLikeDisplayName} detects them
+ * and the parsing layer routes to a display-name search path that skips
+ * slug validation and API lookup entirely.
  *
  * @param slug - Raw slug string from CLI input
- * @returns Normalized slug and whether normalization was applied
- *
- * @example
- * normalizeSlug("My Project")              // { slug: "my-project", normalized: true }
- * normalizeSlug("My  Project")             // { slug: "my-project", normalized: true }
- * normalizeSlug("selfbase_admin_backend")  // { slug: "selfbase_admin_backend", normalized: false }
- * normalizeSlug("my-project")              // { slug: "my-project", normalized: false }
+ * @returns The slug unchanged with `normalized: false`
  */
 export function normalizeSlug(slug: string): {
   slug: string;
   normalized: boolean;
 } {
-  if (!slug.includes(" ")) {
-    return { slug, normalized: false };
-  }
-
-  // Spaces imply a display name — slugs are always lowercase.
-  // Collapse runs of spaces into a single dash, then trim any edge dashes
-  // introduced by leading/trailing whitespace in the input.
-  const result = slug
-    .toLowerCase()
-    .replace(/ +/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-  return { slug: result, normalized: true };
+  return { slug, normalized: false };
 }
 
-const log = logger.withTag("arg-parsing");
-
 /**
- * Emit a warning when slug normalization changed the input.
- * Called internally by {@link parseOrgProjectArg} — callers do not need to
- * check `parsed.normalized` themselves.
+ * Check if a string looks like a display name rather than a slug.
+ * Display names contain spaces, which are never valid in slugs.
  */
-function warnNormalized(
-  parsed: Exclude<ParsedOrgProject, { type: "auto-detect" }>
-): void {
-  let slug: string;
-  switch (parsed.type) {
-    case "explicit":
-      slug = `${parsed.org}/${parsed.project}`;
-      break;
-    case "org-all":
-      slug = `${parsed.org}/`;
-      break;
-    case "project-search":
-      slug = parsed.projectSlug;
-      break;
-    default:
-      return;
-  }
-
-  log.warn(
-    `Normalized slug to '${slug}' (Sentry slugs use lowercase with dashes, not spaces)`
-  );
+function looksLikeDisplayName(input: string): boolean {
+  return input.includes(" ");
 }
 
 // ---------------------------------------------------------------------------
@@ -548,12 +500,20 @@ function parseSlashOrgProject(input: string): ParsedOrgProject {
       );
     }
     rejectAtSelector(rawProject, "project slug");
+    if (looksLikeDisplayName(rawProject)) {
+      // Spaces → display name, not a slug. Skip slug validation and let
+      // the resolution layer do a fuzzy name-based search.
+      return {
+        type: "project-search",
+        projectSlug: rawProject,
+        originalSlug: rawProject,
+      };
+    }
     const np = normalizeSlug(rawProject);
     validateResourceId(np.slug, "project slug");
     return {
       type: "project-search",
       projectSlug: np.slug,
-      ...(np.normalized && { normalized: true, originalSlug: rawProject }),
     };
   }
 
@@ -624,17 +584,22 @@ export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
   } else {
     // No slash → search for project across all orgs
     rejectAtSelector(trimmed, "project slug");
-    const np = normalizeSlug(trimmed);
-    validateResourceId(np.slug, "project slug");
-    parsed = {
-      type: "project-search",
-      projectSlug: np.slug,
-      ...(np.normalized && { normalized: true, originalSlug: trimmed }),
-    };
-  }
-
-  if (parsed.type !== "auto-detect" && parsed.normalized) {
-    warnNormalized(parsed);
+    if (looksLikeDisplayName(trimmed)) {
+      // Spaces → display name, not a slug. Skip slug validation and let
+      // the resolution layer do a fuzzy name-based search.
+      parsed = {
+        type: "project-search",
+        projectSlug: trimmed,
+        originalSlug: trimmed,
+      };
+    } else {
+      const np = normalizeSlug(trimmed);
+      validateResourceId(np.slug, "project slug");
+      parsed = {
+        type: "project-search",
+        projectSlug: np.slug,
+      };
+    }
   }
 
   return parsed;
