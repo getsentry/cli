@@ -1,6 +1,29 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.28.1
+
+### Bug Fixes 🐛
+
+#### Init
+
+- Use isatty(0) for TTY detection and add diagnostic probe by @BYK in [#767](https://github.com/getsentry/cli/pull/767)
+- Reuse detected existing project data by @betegon in [#766](https://github.com/getsentry/cli/pull/766)
+- Ensure project reuse and spinner states by @MathurAditya724 in [#763](https://github.com/getsentry/cli/pull/763)
+
+#### Other
+
+- (arg-parsing) Accept underscores in Sentry slugs (#770) by @BYK in [#771](https://github.com/getsentry/cli/pull/771)
+- (ci) Scope build-binary and build-docs to production environment by @BYK in [#773](https://github.com/getsentry/cli/pull/773)
+- (dsn) Limit concurrent stat() calls in project root detection (CLI-19A) by @BYK in [#768](https://github.com/getsentry/cli/pull/768)
+- (project-create) Preserve ApiError type so 4xx errors are silenced by @BYK in [#775](https://github.com/getsentry/cli/pull/775)
+- (resolve-target) Reference original input in fuzzy-recovery warnings (#772) by @BYK in [#774](https://github.com/getsentry/cli/pull/774)
+- (telemetry) Reduce Sentry issue fragmentation with stable fingerprinting by @BYK in [#769](https://github.com/getsentry/cli/pull/769)
+
+### Internal Changes 🔧
+
+- Regenerate docs by @github-actions[bot] in [e02799c1](https://github.com/getsentry/cli/commit/e02799c1cb4a4c35ec981e1973a9b0dee78f2ae7)
+
 ## 0.28.0
 
 ### New Features ✨
