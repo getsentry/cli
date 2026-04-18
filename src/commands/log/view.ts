@@ -162,7 +162,8 @@ async function resolveTarget(
       const result = await resolveProjectBySlug(
         parsed.projectSlug,
         USAGE_HINT,
-        `sentry log view <org>/${parsed.projectSlug} ${logIds.join(" ")}`
+        `sentry log view <org>/${parsed.projectSlug} ${logIds.join(" ")}`,
+        parsed.originalSlug
       );
       if (
         ALL_DIGITS_RE.test(parsed.projectSlug) &&

@@ -6,7 +6,7 @@
  * error messages and edge cases.
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   detectSwappedTrialArgs,
   detectSwappedViewArgs,
@@ -179,96 +179,55 @@ describe("parseOrgProjectArg", () => {
     });
   });
 
-  describe("slug normalization warning", () => {
-    let stderrSpy: ReturnType<typeof spyOn>;
-    let stderrOutput: string;
-
-    beforeEach(() => {
-      stderrOutput = "";
-      stderrSpy = spyOn(process.stderr, "write").mockImplementation(
-        (chunk: string | Uint8Array) => {
-          stderrOutput += typeof chunk === "string" ? chunk : "";
-          return true;
-        }
-      );
-    });
-
-    afterEach(() => {
-      stderrSpy.mockRestore();
-    });
-
-    test("emits warning for project with spaces", () => {
+  describe("space handling (no normalization)", () => {
+    test("bare project with spaces produces project-search with originalSlug", () => {
       const result = parseOrgProjectArg("My Project");
       expect(result).toEqual({
         type: "project-search",
-        projectSlug: "my-project",
-        normalized: true,
+        projectSlug: "My Project",
+        originalSlug: "My Project",
       });
-      expect(stderrOutput).toContain("Normalized slug to 'my-project'");
-      expect(stderrOutput).toContain(
-        "Sentry slugs use lowercase with dashes, not spaces"
+    });
+
+    test("org with spaces in explicit mode throws ValidationError", () => {
+      expect(() => parseOrgProjectArg("My Org/cli")).toThrow(ValidationError);
+    });
+
+    test("project with spaces in explicit mode throws ValidationError", () => {
+      expect(() => parseOrgProjectArg("sentry/My Project")).toThrow(
+        ValidationError
       );
     });
 
-    test("emits warning for org with spaces in explicit mode", () => {
-      const result = parseOrgProjectArg("My Org/cli");
-      expect(result).toEqual({
-        type: "explicit",
-        org: "my-org",
-        project: "cli",
-        normalized: true,
-      });
-      expect(stderrOutput).toContain("Normalized slug to 'my-org/cli'");
+    test("org with spaces in org-all mode throws ValidationError", () => {
+      expect(() => parseOrgProjectArg("My Org/")).toThrow(ValidationError);
     });
 
-    test("emits warning for project with spaces in explicit mode", () => {
-      const result = parseOrgProjectArg("sentry/My Project");
-      expect(result).toEqual({
+    test("org with underscores and project with spaces throws ValidationError", () => {
+      // Spaces in the project part of explicit mode hit validateResourceId.
+      expect(() => parseOrgProjectArg("my_org/My Project")).toThrow(
+        ValidationError
+      );
+    });
+
+    test("does not throw for auto-detect", () => {
+      expect(parseOrgProjectArg(undefined)).toEqual({ type: "auto-detect" });
+    });
+
+    test("does not throw when no spaces present", () => {
+      expect(parseOrgProjectArg("sentry/cli")).toEqual({
         type: "explicit",
         org: "sentry",
-        project: "my-project",
-        normalized: true,
+        project: "cli",
       });
-      expect(stderrOutput).toContain("Normalized slug to 'sentry/my-project'");
     });
 
-    test("emits warning for org with spaces in org-all mode", () => {
-      const result = parseOrgProjectArg("My Org/");
-      expect(result).toEqual({
-        type: "org-all",
-        org: "my-org",
-        normalized: true,
+    test("does not throw for underscored slug", () => {
+      // Underscores are valid in Sentry slugs — no normalization, no error.
+      expect(parseOrgProjectArg("selfbase_admin_backend")).toEqual({
+        type: "project-search",
+        projectSlug: "selfbase_admin_backend",
       });
-      expect(stderrOutput).toContain("Normalized slug to 'my-org/'");
-    });
-
-    test("preserves underscores in mixed input, only normalizes spaces", () => {
-      // Underscores are valid in Sentry project slugs (see #770), so they
-      // must pass through untouched even when the org half has spaces.
-      const result = parseOrgProjectArg("my_org/My Project");
-      expect(result).toEqual({
-        type: "explicit",
-        org: "my_org",
-        project: "my-project",
-        normalized: true,
-      });
-      expect(stderrOutput).toContain("Normalized slug to 'my_org/my-project'");
-    });
-
-    test("does not emit warning for auto-detect", () => {
-      parseOrgProjectArg(undefined);
-      expect(stderrOutput).not.toContain("Normalized slug");
-    });
-
-    test("does not emit warning when no spaces present", () => {
-      parseOrgProjectArg("sentry/cli");
-      expect(stderrOutput).not.toContain("Normalized slug");
-    });
-
-    test("does not emit warning for underscored slug", () => {
-      // Underscores are valid in Sentry slugs — no normalization, no warning.
-      parseOrgProjectArg("selfbase_admin_backend");
-      expect(stderrOutput).not.toContain("Normalized slug");
     });
   });
 
@@ -814,34 +773,32 @@ describe("normalizeSlug", () => {
     });
   });
 
-  test("replaces spaces with dashes and lowercases", () => {
+  test("passes through input with spaces unchanged (no-op)", () => {
     expect(normalizeSlug("My Project")).toEqual({
-      slug: "my-project",
-      normalized: true,
+      slug: "My Project",
+      normalized: false,
     });
   });
 
-  test("collapses consecutive spaces into single dash", () => {
+  test("passes through input with consecutive spaces unchanged (no-op)", () => {
     expect(normalizeSlug("My  Project")).toEqual({
-      slug: "my-project",
-      normalized: true,
+      slug: "My  Project",
+      normalized: false,
     });
   });
 
-  test("trims leading/trailing dashes from space conversion", () => {
+  test("passes through input with leading/trailing spaces unchanged (no-op)", () => {
     expect(normalizeSlug(" My Project ")).toEqual({
-      slug: "my-project",
-      normalized: true,
+      slug: " My Project ",
+      normalized: false,
     });
   });
 
-  test("preserves underscores when spaces are also present", () => {
-    // Spaces get normalized; underscores flow through untouched.
-    // "My_Project Name" → lowercased → "my_project name" → space→dash →
-    // "my_project-name".
+  test("passes through input with underscores and spaces unchanged (no-op)", () => {
+    // normalizeSlug is a no-op — spaces and underscores both pass through.
     expect(normalizeSlug("My_Project Name")).toEqual({
-      slug: "my_project-name",
-      normalized: true,
+      slug: "My_Project Name",
+      normalized: false,
     });
   });
 });
@@ -1019,57 +976,46 @@ describe("parseOrgProjectArg: underscores pass through", () => {
   });
 });
 
-describe("parseOrgProjectArg space normalization", () => {
-  test("normalizes bare project with spaces and lowercases", () => {
+describe("parseOrgProjectArg space handling (no normalization)", () => {
+  test("bare project with spaces produces project-search with raw input", () => {
     expect(parseOrgProjectArg("My Project")).toEqual({
       type: "project-search",
-      projectSlug: "my-project",
-      normalized: true,
+      projectSlug: "My Project",
+      originalSlug: "My Project",
     });
   });
 
-  test("normalizes org/project with spaces", () => {
-    expect(parseOrgProjectArg("My Org/My Project")).toEqual({
-      type: "explicit",
-      org: "my-org",
-      project: "my-project",
-      normalized: true,
-    });
+  test("org/project with spaces throws ValidationError (spaces in org)", () => {
+    expect(() => parseOrgProjectArg("My Org/My Project")).toThrow(
+      ValidationError
+    );
   });
 
-  test("collapses consecutive spaces into single dash", () => {
+  test("consecutive spaces in bare project produces project-search with raw input", () => {
     expect(parseOrgProjectArg("My  Project")).toEqual({
       type: "project-search",
-      projectSlug: "my-project",
-      normalized: true,
+      projectSlug: "My  Project",
+      originalSlug: "My  Project",
     });
   });
 
-  test("normalizes org-all with spaces", () => {
-    expect(parseOrgProjectArg("My Org/")).toEqual({
-      type: "org-all",
-      org: "my-org",
-      normalized: true,
-    });
+  test("org-all with spaces throws ValidationError (spaces in org)", () => {
+    expect(() => parseOrgProjectArg("My Org/")).toThrow(ValidationError);
   });
 
-  test("normalizes leading-slash with spaces", () => {
+  test("leading-slash with spaces produces project-search with raw input", () => {
     expect(parseOrgProjectArg("/My Project")).toEqual({
       type: "project-search",
-      projectSlug: "my-project",
-      normalized: true,
+      projectSlug: "My Project",
+      originalSlug: "My Project",
     });
   });
 
-  test("preserves underscores when spaces are also present", () => {
-    // Underscores flow through; only spaces are rewritten. Lowercasing
-    // applies to the whole string since spaces triggered normalization.
-    expect(parseOrgProjectArg("my_org/My Project")).toEqual({
-      type: "explicit",
-      org: "my_org",
-      project: "my-project",
-      normalized: true,
-    });
+  test("underscores with spaces in explicit mode throws ValidationError", () => {
+    // Spaces in the project part of explicit mode hit validateResourceId.
+    expect(() => parseOrgProjectArg("my_org/My Project")).toThrow(
+      ValidationError
+    );
   });
 });
 
@@ -1108,13 +1054,13 @@ describe("parseOrgProjectArg: injection hardening", () => {
     );
   });
 
-  test("normalizes space in bare project slug instead of rejecting", () => {
-    // Spaces are normalized to dashes and lowercased — the recoverable
-    // display-name case.
+  test("bare project slug with space produces project-search with raw input", () => {
+    // Spaces in bare slugs are treated as display names — no normalization,
+    // the resolution layer does a fuzzy name-based search.
     expect(parseOrgProjectArg("my project")).toEqual({
       type: "project-search",
-      projectSlug: "my-project",
-      normalized: true,
+      projectSlug: "my project",
+      originalSlug: "my project",
     });
   });
 

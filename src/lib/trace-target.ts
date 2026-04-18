@@ -344,7 +344,8 @@ async function resolveProjectSearchTarget(
     usageHint.replace(
       USAGE_TARGET_RE,
       `<org>/${parsed.projectSlug}/${parsed.traceId}`
-    )
+    ),
+    undefined // ParsedTraceTarget has no originalSlug
   );
   return {
     traceId: parsed.traceId,

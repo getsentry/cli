@@ -22,6 +22,7 @@ import {
   findProjectsByPattern,
   findProjectsBySlug,
   getProject,
+  listOrganizations,
   listProjects,
 } from "./api-client.js";
 import { type ParsedOrgProject, parseOrgProjectArg } from "./arg-parsing.js";
@@ -652,7 +653,12 @@ async function findSimilarProjects(
  */
 async function findSimilarProjectsAcrossOrgs(
   slug: string,
-  orgs: { slug: string }[]
+  orgs: { slug: string }[],
+  /** Optional display name (e.g. user typed "My Project"). When provided,
+   *  the search also fuzzy-matches against project display names, making
+   *  it possible to resolve display-name input to the correct slug even
+   *  when the slug convention differs (e.g. underscores vs dashes). */
+  displayName?: string
 ): Promise<{ slug: string; orgSlug: string }[]> {
   try {
     const concurrency = pLimit(5);
@@ -665,19 +671,50 @@ async function findSimilarProjectsAcrossOrgs(
           }
           return result.value.map((p) => ({
             slug: p.slug,
+            name: p.name,
             orgSlug: org.slug,
           }));
         })
       )
     );
     const allProjects = orgProjects.flat();
+
     // Deduplicate slugs so fuzzyMatch doesn't waste slots on the same
     // project appearing in multiple orgs.
-    const uniqueSlugs = [...new Set(allProjects.map((p) => p.slug))];
-    const matches = fuzzyMatch(slug, uniqueSlugs, { maxResults: 5 });
+    const uniqueSlugs = Array.from(new Set(allProjects.map((p) => p.slug)));
+    const slugMatches = fuzzyMatch(slug, uniqueSlugs, { maxResults: 5 });
+
+    // When a display name is provided (input contained spaces), also
+    // fuzzy-match against project names. A name hit is mapped back to
+    // the corresponding slug so callers get a uniform result shape.
+    let nameMatchedSlugs: string[] = [];
+    if (displayName) {
+      const nameToSlug = new Map<string, string>();
+      for (const p of allProjects) {
+        // First slug wins — if multiple projects share a name, the first
+        // encountered org's project is used. Ambiguity is resolved later
+        // by the caller when results.length > 1.
+        if (!nameToSlug.has(p.name)) {
+          nameToSlug.set(p.name, p.slug);
+        }
+      }
+      const uniqueNames = Array.from(nameToSlug.keys());
+      const matchedNames = fuzzyMatch(displayName, uniqueNames, {
+        maxResults: 5,
+      });
+      nameMatchedSlugs = matchedNames
+        .map((n) => nameToSlug.get(n))
+        .filter((s): s is string => s !== null && s !== undefined);
+    }
+
+    // Merge slug matches and name matches, preferring slug matches.
+    const mergedSlugs = Array.from(
+      new Set(slugMatches.concat(nameMatchedSlugs))
+    );
+
     // Expand matched slugs back to org-qualified entries (may include
     // the same slug from multiple orgs — that's correct for suggestions).
-    return matches.flatMap((matched) =>
+    return mergedSlugs.flatMap((matched) =>
       allProjects.filter((p) => p.slug === matched)
     );
   } catch {
@@ -704,9 +741,11 @@ type FuzzyRecoveryResult =
  */
 export async function tryFuzzyProjectRecovery(
   slug: string,
-  orgs: { slug: string }[]
+  orgs: { slug: string }[],
+  /** Optional display name for name-based matching (see {@link findSimilarProjectsAcrossOrgs}). */
+  displayName?: string
 ): Promise<FuzzyRecoveryResult> {
-  const similar = await findSimilarProjectsAcrossOrgs(slug, orgs);
+  const similar = await findSimilarProjectsAcrossOrgs(slug, orgs, displayName);
   if (similar.length === 1) {
     const match = similar[0] as (typeof similar)[0];
     return { kind: "match", org: match.orgSlug, project: match.slug };
@@ -720,6 +759,57 @@ export async function tryFuzzyProjectRecovery(
     };
   }
   return { kind: "none" };
+}
+
+// ---------------------------------------------------------------------------
+// Project-not-found helper — shared across all resolution sites
+// ---------------------------------------------------------------------------
+
+/** Outcome of the "project not found" triage sequence. */
+export type ProjectNotFoundOutcome =
+  | { kind: "org-match"; orgSlug: string }
+  | { kind: "fuzzy-match"; org: string; project: string }
+  | { kind: "not-found"; displaySlug: string; suggestions: string[] };
+
+/**
+ * Triage a failed project-slug lookup.
+ *
+ * Runs the shared sequence that all resolution sites perform when
+ * `findProjectsBySlug` returns no results:
+ * 1. Check if the slug matches an organization (common mistake).
+ * 2. Attempt fuzzy recovery (including display-name matching).
+ * 3. If a single match is found, emit a warning and return it.
+ * 4. Otherwise, build the "not found" suggestions list.
+ *
+ * The caller decides what to do with each outcome (throw, redirect,
+ * recurse, verify-fetch, etc.).
+ */
+export async function triageProjectNotFound(
+  slug: string,
+  orgs: { slug: string }[],
+  originalSlug?: string
+): Promise<ProjectNotFoundOutcome> {
+  const displaySlug = originalSlug ?? slug;
+
+  // 1. Check if the slug matches an organization
+  if (orgs.some((o) => o.slug === slug)) {
+    return { kind: "org-match", orgSlug: slug };
+  }
+
+  // 2. Attempt fuzzy recovery — also match display names
+  const fuzzy = await tryFuzzyProjectRecovery(slug, orgs, originalSlug);
+  if (fuzzy.kind === "match") {
+    log.warn(
+      `No project matching '${displaySlug}'. Using '${fuzzy.project}' in org '${fuzzy.org}'.`
+    );
+    return { kind: "fuzzy-match", org: fuzzy.org, project: fuzzy.project };
+  }
+
+  // 3. Build "not found" result — pass through fuzzy suggestions or empty
+  //    array so each caller can apply its own default hint.
+  const suggestions = fuzzy.kind === "suggestions" ? fuzzy.suggestions : [];
+
+  return { kind: "not-found", displaySlug, suggestions };
 }
 
 /**
@@ -1259,13 +1349,28 @@ export async function resolveOrg(
 export async function resolveProjectBySlug(
   projectSlug: string,
   usageHint: string,
-  disambiguationExample?: string
+  disambiguationExample?: string,
+  /** Original user input before normalization — used for clearer messages. */
+  originalSlug?: string
 ): Promise<{ org: string; project: string; projectData: SentryProject }> {
-  const { projects, orgs } = await findProjectsBySlug(projectSlug);
+  /** Display label: the user's raw input when available, otherwise the slug. */
+  const displaySlug = originalSlug ?? projectSlug;
+
+  // When the input is a display name (originalSlug set, contains spaces),
+  // skip the slug-based API lookup — it would just produce N 404s — and go
+  // straight to display-name fuzzy matching via triageProjectNotFound.
+  const isDisplayName = originalSlug !== undefined;
+  const { projects, orgs } = isDisplayName
+    ? { projects: [], orgs: await listOrganizations() }
+    : await findProjectsBySlug(projectSlug);
   if (projects.length === 0) {
-    // Check if the slug matches an organization — common mistake
-    const isOrg = orgs.some((o) => o.slug === projectSlug);
-    if (isOrg) {
+    const outcome = await triageProjectNotFound(
+      projectSlug,
+      orgs,
+      originalSlug
+    );
+
+    if (outcome.kind === "org-match") {
       throw new ResolutionError(
         `'${projectSlug}'`,
         "is an organization, not a project",
@@ -1277,44 +1382,46 @@ export async function resolveProjectBySlug(
       );
     }
 
-    // Attempt fuzzy auto-recovery before throwing
-    const fuzzyResult = await tryFuzzyProjectRecovery(projectSlug, orgs);
-    if (fuzzyResult.kind === "match") {
+    if (outcome.kind === "fuzzy-match") {
+      // Verify the recovered project is accessible before returning
       const proj = await withAuthGuard(() =>
-        getProject(fuzzyResult.org, fuzzyResult.project)
+        getProject(outcome.org, outcome.project)
       );
       if (proj.ok) {
-        // Only warn after confirming the recovered project is accessible
-        log.warn(
-          `Project '${projectSlug}' not found. Using similar project '${fuzzyResult.project}' in org '${fuzzyResult.org}'.`
-        );
         return withTelemetryContext({
-          org: fuzzyResult.org,
-          project: fuzzyResult.project,
+          org: outcome.org,
+          project: outcome.project,
           projectData: proj.value,
         });
       }
-      // Recovery fetch failed — fall through to the original error
+      // Recovery fetch failed — build a custom suggestion
+      const defaultHint = isAllDigits(projectSlug)
+        ? "No project with this ID was found — check the ID or use the project slug instead"
+        : "Check that you have access to a project with this slug";
+      throw new ResolutionError(
+        `Project "${displaySlug}"`,
+        "not found",
+        usageHint,
+        [
+          `Similar project '${outcome.org}/${outcome.project}' was found but could not be accessed`,
+          defaultHint,
+        ]
+      );
     }
 
-    const defaultHint = isAllDigits(projectSlug)
-      ? "No project with this ID was found — check the ID or use the project slug instead"
-      : "Check that you have access to a project with this slug";
+    // outcome.kind === "not-found"
     let suggestions: string[];
-    if (fuzzyResult.kind === "suggestions") {
-      suggestions = fuzzyResult.suggestions;
-    } else if (fuzzyResult.kind === "match") {
-      // Match was found but getProject failed — mention the matched project
+    if (isAllDigits(projectSlug)) {
       suggestions = [
-        `Similar project '${fuzzyResult.org}/${fuzzyResult.project}' was found but could not be accessed`,
-        defaultHint,
+        "No project with this ID was found — check the ID or use the project slug instead",
       ];
+    } else if (outcome.suggestions.length > 0) {
+      suggestions = outcome.suggestions;
     } else {
-      suggestions = [defaultHint];
+      suggestions = ["Check that you have access to a project with this slug"];
     }
-
     throw new ResolutionError(
-      `Project "${projectSlug}"`,
+      `Project "${displaySlug}"`,
       "not found",
       usageHint,
       suggestions
@@ -1326,7 +1433,7 @@ export async function resolveProjectBySlug(
       ? `\n\nExample: ${disambiguationExample}`
       : "";
     throw new ValidationError(
-      `Project "${projectSlug}" exists in multiple organizations.\n\n` +
+      `Project "${displaySlug}" exists in multiple organizations.\n\n` +
         `Specify the organization:\n${orgList}${example}`
     );
   }
@@ -1470,12 +1577,20 @@ export async function resolveOrgProjectTarget(
       );
 
     case "project-search": {
-      const { projects, orgs } = await findProjectsBySlug(parsed.projectSlug);
+      const displaySlug = parsed.originalSlug ?? parsed.projectSlug;
+      const isDisplayName = parsed.originalSlug !== undefined;
+      const { projects, orgs } = isDisplayName
+        ? { projects: [], orgs: await listOrganizations() }
+        : await findProjectsBySlug(parsed.projectSlug);
 
       if (projects.length === 0) {
-        // Check if the slug matches an organization — common mistake
-        const isOrg = orgs.some((o) => o.slug === parsed.projectSlug);
-        if (isOrg) {
+        const outcome = await triageProjectNotFound(
+          parsed.projectSlug,
+          orgs,
+          parsed.originalSlug
+        );
+
+        if (outcome.kind === "org-match") {
           throw new ResolutionError(
             `'${parsed.projectSlug}'`,
             "is an organization, not a project",
@@ -1484,27 +1599,19 @@ export async function resolveOrgProjectTarget(
           );
         }
 
-        // Attempt fuzzy auto-recovery before throwing
-        const fuzzyResult = await tryFuzzyProjectRecovery(
-          parsed.projectSlug,
-          orgs
-        );
-        if (fuzzyResult.kind === "match") {
-          log.warn(
-            `Project '${parsed.projectSlug}' not found. Using similar project '${fuzzyResult.project}' in org '${fuzzyResult.org}'.`
-          );
+        if (outcome.kind === "fuzzy-match") {
           return withTelemetryContext({
-            org: fuzzyResult.org,
-            project: fuzzyResult.project,
+            org: outcome.org,
+            project: outcome.project,
           });
         }
 
         throw new ResolutionError(
-          `Project '${parsed.projectSlug}'`,
+          `Project '${displaySlug}'`,
           "not found",
           `sentry ${commandName} <org>/${parsed.projectSlug}`,
-          fuzzyResult.kind === "suggestions"
-            ? fuzzyResult.suggestions
+          outcome.suggestions.length > 0
+            ? outcome.suggestions
             : ["No project with this slug found in any accessible organization"]
         );
       }
@@ -1514,7 +1621,7 @@ export async function resolveOrgProjectTarget(
           .map((m) => `  sentry ${commandName} ${m.orgSlug}/${m.slug}`)
           .join("\n");
         throw new ResolutionError(
-          `Project '${parsed.projectSlug}'`,
+          `Project '${displaySlug}'`,
           "is ambiguous",
           `sentry ${commandName} <org>/${parsed.projectSlug}`,
           [

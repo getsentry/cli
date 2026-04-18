@@ -101,7 +101,9 @@ async function resolveDashboardTarget(
     case "project-search": {
       const found = await resolveProjectBySlug(
         parsed.projectSlug,
-        "sentry dashboard create <org>/<project> <title>"
+        "sentry dashboard create <org>/<project> <title>",
+        undefined,
+        parsed.originalSlug
       );
       const pid = toNumericId(found.projectData.id);
       return {

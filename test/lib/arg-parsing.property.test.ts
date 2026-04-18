@@ -383,86 +383,34 @@ const noSlashArb = stringMatching(/^[a-zA-Z0-9-]{1,20}$/);
 /** Generates display-name-like strings with spaces (e.g., "My Project") */
 const displayNameLikeArb = stringMatching(/^[A-Za-z][A-Za-z0-9 _-]{0,20}$/);
 
-/** Generates strings that always have at least one space */
-const withSpaceArb = stringMatching(/^[A-Za-z]+ [A-Za-z0-9]+$/);
+describe("normalizeSlug properties (no-op)", () => {
+  test("always returns the input unchanged", async () => {
+    await fcAssert(
+      property(displayNameLikeArb, (input) => {
+        const result = normalizeSlug(input);
+        expect(result.slug).toBe(input);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
 
-describe("normalizeSlug properties", () => {
-  test("idempotent: normalizing twice yields same slug as normalizing once", async () => {
+  test("normalized is always false", async () => {
+    await fcAssert(
+      property(displayNameLikeArb, (input) => {
+        const result = normalizeSlug(input);
+        expect(result.normalized).toBe(false);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("idempotent: normalizing twice yields same result as normalizing once", async () => {
     await fcAssert(
       property(displayNameLikeArb, (input) => {
         const first = normalizeSlug(input);
         const second = normalizeSlug(first.slug);
         expect(second.slug).toBe(first.slug);
-      }),
-      { numRuns: DEFAULT_NUM_RUNS }
-    );
-  });
-
-  test("normalized is true iff input contained a space", async () => {
-    // Underscores are intentionally preserved (see #770) — only spaces
-    // trigger normalization.
-    await fcAssert(
-      property(displayNameLikeArb, (input) => {
-        const result = normalizeSlug(input);
-        expect(result.normalized).toBe(input.includes(" "));
-      }),
-      { numRuns: DEFAULT_NUM_RUNS }
-    );
-  });
-
-  test("result slug never contains spaces", async () => {
-    await fcAssert(
-      property(displayNameLikeArb, (input) => {
-        const result = normalizeSlug(input);
-        expect(result.slug.includes(" ")).toBe(false);
-      }),
-      { numRuns: DEFAULT_NUM_RUNS }
-    );
-  });
-
-  test("underscores in input survive to output unchanged in count", async () => {
-    // Each underscore in the input must appear in the output — normalization
-    // never rewrites underscores. Using a comparison on count makes the
-    // property robust to other transforms (lowercasing, space→dash) that
-    // may or may not happen depending on whether spaces are present.
-    await fcAssert(
-      property(displayNameLikeArb, (input) => {
-        const result = normalizeSlug(input);
-        const inputUnderscores = (input.match(/_/g) ?? []).length;
-        const outputUnderscores = (result.slug.match(/_/g) ?? []).length;
-        expect(outputUnderscores).toBe(inputUnderscores);
-      }),
-      { numRuns: DEFAULT_NUM_RUNS }
-    );
-  });
-
-  test("result slug length is <= input length", async () => {
-    await fcAssert(
-      property(displayNameLikeArb, (input) => {
-        const result = normalizeSlug(input);
-        expect(result.slug.length).toBeLessThanOrEqual(input.length);
-      }),
-      { numRuns: DEFAULT_NUM_RUNS }
-    );
-  });
-
-  test("normalized slug never contains consecutive dashes", async () => {
-    await fcAssert(
-      property(withSpaceArb, (input) => {
-        const result = normalizeSlug(input);
-        // When normalization actually happens, consecutive dashes are collapsed
-        expect(result.slug.includes("--")).toBe(false);
-      }),
-      { numRuns: DEFAULT_NUM_RUNS }
-    );
-  });
-
-  test("result slug is lowercase when spaces were present", async () => {
-    await fcAssert(
-      property(withSpaceArb, (input) => {
-        const result = normalizeSlug(input);
-        expect(result.slug).toBe(result.slug.toLowerCase());
-        expect(result.normalized).toBe(true);
+        expect(second.normalized).toBe(first.normalized);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );

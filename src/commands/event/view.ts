@@ -328,7 +328,8 @@ export async function resolveEventTarget(
       const resolved = await resolveProjectBySlug(
         parsed.projectSlug,
         USAGE_HINT,
-        `sentry event view <org>/${parsed.projectSlug} ${eventId}`
+        `sentry event view <org>/${parsed.projectSlug} ${eventId}`,
+        parsed.originalSlug
       );
       return {
         org: resolved.org,
