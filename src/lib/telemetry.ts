@@ -22,7 +22,12 @@ import {
 import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
 import { detectAgent, detectAgentFromProcessTree } from "./detect-agent.js";
 import { getEnv } from "./env.js";
-import { ApiError, AuthError, OutputError } from "./errors.js";
+import {
+  classifySilenced,
+  enrichEventWithGroupingTags,
+  reportCliError,
+} from "./error-reporting.js";
+import { ApiError } from "./errors.js";
 import { attachSentryReporter, logger } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 import { getRealUsername } from "./utils.js";
@@ -215,19 +220,15 @@ export async function withTelemetry<T>(
       }
     );
   } catch (e) {
-    const isExpectedAuthState =
-      e instanceof AuthError &&
-      (e.reason === "not_authenticated" || e.reason === "expired");
-    // User API errors (401–499) are user errors (wrong ID, no access), not
-    // CLI bugs. They're recorded as span attributes above for volume-spike
-    // detection. 400 Bad Request is NOT filtered — it indicates a CLI bug.
-    // OutputError is an intentional non-zero exit (e.g., `sentry api` got a
-    // 4xx/5xx response) — not a CLI bug. Error details are recorded as span
-    // attributes by the command itself.
-    if (
-      !(isExpectedAuthState || isUserApiError(e) || e instanceof OutputError)
-    ) {
-      Sentry.captureException(e);
+    // Route through reportCliError so silencing (OutputError, expected-auth
+    // AuthError, 401–499 ApiError) and fingerprint normalization are applied
+    // consistently. Silenced errors emit a `cli.error.silenced` metric +
+    // optional structured log instead of creating a Sentry issue.
+    reportCliError(e);
+    // Only mark session crashed for errors that weren't silenced.
+    // Silenced errors (OutputError, expected AuthError, user 4xx ApiError)
+    // are expected states — marking them crashed would skew release-health.
+    if (!classifySilenced(e)) {
       markSessionCrashed();
     }
     throw e;
@@ -581,7 +582,10 @@ export function initSentry(
       // silently skipping resolution for relative paths.
       normalizeFramePaths(event);
 
-      return event;
+      // Enrich events with cli_error.* tags for server-side fingerprint rules.
+      // reportCliError already sets these for command-level errors; this
+      // catches uncaught exceptions and best-effort background captures.
+      return enrichEventWithGroupingTags(event);
     },
   });
 
