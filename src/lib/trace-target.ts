@@ -47,7 +47,7 @@ export type ParsedTraceTarget =
       traceId: string;
       org: string;
       project: string;
-      /** True if any slug was normalized (underscores → dashes) */
+      /** True if any slug was normalized (spaces → dashes with lowercasing) */
       normalized?: boolean;
     }
   | {
@@ -267,7 +267,9 @@ export function targetArgToTraceTarget(
 export function warnIfNormalized(parsed: ParsedTraceTarget, tag: string): void {
   if ("normalized" in parsed && parsed.normalized) {
     const log = logger.withTag(tag);
-    log.warn("Normalized slug (Sentry slugs use dashes, not underscores)");
+    log.warn(
+      "Normalized slug (Sentry slugs use lowercase with dashes, not spaces)"
+    );
   }
 }
 
