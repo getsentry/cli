@@ -728,7 +728,14 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
     }
 
     if (outcome.kind === "fuzzy-match") {
-      return handleProjectSearch(config, outcome.project, options, true);
+      // Don't pass originalSlug on the recovery call — the recovered slug
+      // is a real slug that should go through the normal slug-based lookup.
+      return handleProjectSearch(
+        config,
+        outcome.project,
+        { ...options, originalSlug: undefined },
+        true
+      );
     }
 
     if (flags.json) {
