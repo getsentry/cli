@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-release
-version: 0.28.0
+version: 0.28.1
 description: Work with Sentry releases
 requires:
   bins: ["sentry"]
