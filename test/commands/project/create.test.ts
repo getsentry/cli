@@ -425,15 +425,20 @@ describe("project create", () => {
     const { context } = createMockContext();
     const func = await createCommand.loader();
 
-    const err = await func
+    const err = (await func
       .call(context, { json: false }, "my-app", "node")
-      .catch((e: Error) => e);
+      .catch((e: Error) => e)) as ApiError;
     // Stays ApiError (not a plain CliError wrapper) so the 401–499
     // user-error silencing in error-reporting.ts still applies.
     expect(err).toBeInstanceOf(ApiError);
-    expect((err as ApiError).status).toBe(403);
+    expect(err.status).toBe(403);
+    expect(err.detail).toBe("No permission");
     expect(err.message).toContain("Failed to create project");
     expect(err.message).toContain("403");
+    // Detail is NOT duplicated in message — ApiError.format() appends it.
+    expect(err.message).not.toContain("No permission");
+    // But format() surfaces it for the user
+    expect(err.format()).toContain("No permission");
   });
 
   test("outputs JSON when --json flag is set", async () => {

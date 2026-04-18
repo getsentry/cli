@@ -259,9 +259,12 @@ async function createProjectWithErrors(opts: {
       // silencing in error-reporting.ts applies — e.g. 403 "Your organization
       // has disabled this feature for members" is a permission issue, not a
       // CLI bug. 5xx and network errors still get captured.
+      //
+      // The message is kept short — ApiError.format() appends `detail` and
+      // `endpoint` on separate lines, so embedding them in the message would
+      // duplicate the output.
       throw new ApiError(
-        `Failed to create project '${name}' in ${orgSlug}.\n\n` +
-          `API error (${error.status}): ${error.detail ?? error.message}`,
+        `Failed to create project '${name}' in ${orgSlug} (HTTP ${error.status}).`,
         error.status,
         error.detail,
         error.endpoint
