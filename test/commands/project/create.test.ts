@@ -417,7 +417,7 @@ describe("project create", () => {
     expect(err.message).toContain("Common platforms:");
   });
 
-  test("wraps other API errors with context", async () => {
+  test("wraps other API errors with context, preserving ApiError type", async () => {
     createProjectSpy.mockRejectedValue(
       new ApiError("API request failed: 403 Forbidden", 403, "No permission")
     );
@@ -428,7 +428,10 @@ describe("project create", () => {
     const err = await func
       .call(context, { json: false }, "my-app", "node")
       .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(CliError);
+    // Stays ApiError (not a plain CliError wrapper) so the 401–499
+    // user-error silencing in error-reporting.ts still applies.
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(403);
     expect(err.message).toContain("Failed to create project");
     expect(err.message).toContain("403");
   });

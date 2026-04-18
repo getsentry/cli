@@ -255,9 +255,16 @@ async function createProjectWithErrors(opts: {
         // createProjectWithDsn's return type differs from SentryProject
         return await (handleCreateProject404(opts) as never);
       }
-      throw new CliError(
+      // Re-throw as ApiError (not CliError) so the 401–499 user-error
+      // silencing in error-reporting.ts applies — e.g. 403 "Your organization
+      // has disabled this feature for members" is a permission issue, not a
+      // CLI bug. 5xx and network errors still get captured.
+      throw new ApiError(
         `Failed to create project '${name}' in ${orgSlug}.\n\n` +
-          `API error (${error.status}): ${error.detail ?? error.message}`
+          `API error (${error.status}): ${error.detail ?? error.message}`,
+        error.status,
+        error.detail,
+        error.endpoint
       );
     }
     throw error;
