@@ -192,13 +192,7 @@ if (process.env.SENTRY_AUTH_TOKEN) {
 const result = await build({
   entryPoints: ["./src/index.ts"],
   bundle: true,
-  // Preserve function/variable names so Sentry stack traces are readable
-  // even when sourcemap resolution fails. Matches the Bun binary build's
-  // approach (build.ts uses identifiers: false for the Bun.build step).
-  // The size impact is modest — identifiers compress well with gzip.
-  minifyWhitespace: true,
-  minifySyntax: true,
-  minifyIdentifiers: false,
+  minify: true,
   // No banner — warning suppression moved to dist/bin.cjs (CLI-only).
   // The library bundle must not suppress the host application's warnings.
   sourcemap: true,
