@@ -218,6 +218,10 @@ jobs:
     name: Build Binary (${{ matrix.target }})
     needs: [changes, lint, test-unit]
     runs-on: ${{ matrix.os }}
+    # SENTRY_AUTH_TOKEN is scoped to the production environment so sourcemap
+    # upload works on main/release branches. Without this, every binary build
+    # skips the upload and Sentry stack traces show minified names (e.g., xE).
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 'production' || '' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.build-targets) }}
@@ -683,6 +687,9 @@ jobs:
     name: Build Docs
     needs: [lint, build-binary]
     runs-on: ubuntu-latest
+    # SENTRY_AUTH_TOKEN is scoped to the production environment. Needed by
+    # the "Inject debug IDs and upload sourcemaps" step below.
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 'production' || '' }}
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
