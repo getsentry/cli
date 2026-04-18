@@ -1,0 +1,28 @@
+name: "Automation: Notify Linear releases"
+permissions:
+  contents: read
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to notify Linear for
+        required: false
+
+jobs:
+  notify-linear:
+    runs-on: ubuntu-latest
+    name: Notify Linear
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # linear-release-action needs full history to scan commits for Linear issue IDs
+          fetch-depth: 0
+      - name: Notify Linear release
+        continue-on-error: true
+        uses: linear/linear-release-action@v0
+        with:
+          access_key: ${{ secrets.LINEAR_STABLE_RELEASE_KEY }}
+          version: ${{ github.event.release.tag_name || inputs.version }}
