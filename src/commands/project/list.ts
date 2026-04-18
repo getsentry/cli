@@ -562,7 +562,9 @@ async function handleProjectNotFound(
   }
 
   if (outcome.kind === "fuzzy-match") {
-    return handleProjectSearch(outcome.project, flags);
+    // Pass isRecoveryAttempt=true to prevent infinite recursion if the
+    // fuzzy-recovered slug also fails to resolve.
+    return handleProjectSearch(outcome.project, flags, undefined, true);
   }
 
   // JSON mode returns empty array; human mode throws a helpful error
@@ -583,7 +585,9 @@ export async function handleProjectSearch(
   projectSlug: string,
   flags: ListFlags,
   /** Original user input before normalization — for clearer messages. */
-  originalSlug?: string
+  originalSlug?: string,
+  /** @internal — prevents infinite recursion from fuzzy recovery. */
+  _isRecoveryAttempt = false
 ): Promise<ListResult<ProjectWithOrg>> {
   const { projects, orgs } = await withProgress(
     {
@@ -602,7 +606,10 @@ export async function handleProjectSearch(
       };
     }
 
-    return handleProjectNotFound(projectSlug, orgs, flags, { originalSlug });
+    return handleProjectNotFound(projectSlug, orgs, flags, {
+      originalSlug,
+      isRecoveryAttempt: _isRecoveryAttempt,
+    });
   }
 
   const limited = filtered.slice(0, flags.limit);
