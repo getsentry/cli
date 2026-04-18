@@ -203,6 +203,7 @@ describe("parseOrgProjectArg", () => {
         type: "project-search",
         projectSlug: "my-project",
         normalized: true,
+        originalSlug: "My Project",
       });
       expect(stderrOutput).toContain("Normalized slug to 'my-project'");
       expect(stderrOutput).toContain(
@@ -1025,6 +1026,7 @@ describe("parseOrgProjectArg space normalization", () => {
       type: "project-search",
       projectSlug: "my-project",
       normalized: true,
+      originalSlug: "My Project",
     });
   });
 
@@ -1042,6 +1044,7 @@ describe("parseOrgProjectArg space normalization", () => {
       type: "project-search",
       projectSlug: "my-project",
       normalized: true,
+      originalSlug: "My  Project",
     });
   });
 
@@ -1058,6 +1061,7 @@ describe("parseOrgProjectArg space normalization", () => {
       type: "project-search",
       projectSlug: "my-project",
       normalized: true,
+      originalSlug: "My Project",
     });
   });
 
@@ -1115,6 +1119,7 @@ describe("parseOrgProjectArg: injection hardening", () => {
       type: "project-search",
       projectSlug: "my-project",
       normalized: true,
+      originalSlug: "my project",
     });
   });
 

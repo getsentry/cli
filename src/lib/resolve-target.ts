@@ -1259,8 +1259,13 @@ export async function resolveOrg(
 export async function resolveProjectBySlug(
   projectSlug: string,
   usageHint: string,
-  disambiguationExample?: string
+  disambiguationExample?: string,
+  /** Original user input before normalization — used for clearer messages. */
+  originalSlug?: string
 ): Promise<{ org: string; project: string; projectData: SentryProject }> {
+  /** Display label: the user's raw input when available, otherwise the slug. */
+  const displaySlug = originalSlug ?? projectSlug;
+
   const { projects, orgs } = await findProjectsBySlug(projectSlug);
   if (projects.length === 0) {
     // Check if the slug matches an organization — common mistake
@@ -1286,7 +1291,7 @@ export async function resolveProjectBySlug(
       if (proj.ok) {
         // Only warn after confirming the recovered project is accessible
         log.warn(
-          `Project '${projectSlug}' not found. Using similar project '${fuzzyResult.project}' in org '${fuzzyResult.org}'.`
+          `No project matching '${displaySlug}'. Using '${fuzzyResult.project}' in org '${fuzzyResult.org}'.`
         );
         return withTelemetryContext({
           org: fuzzyResult.org,
@@ -1314,7 +1319,7 @@ export async function resolveProjectBySlug(
     }
 
     throw new ResolutionError(
-      `Project "${projectSlug}"`,
+      `Project "${displaySlug}"`,
       "not found",
       usageHint,
       suggestions
@@ -1470,6 +1475,7 @@ export async function resolveOrgProjectTarget(
       );
 
     case "project-search": {
+      const displaySlug = parsed.originalSlug ?? parsed.projectSlug;
       const { projects, orgs } = await findProjectsBySlug(parsed.projectSlug);
 
       if (projects.length === 0) {
@@ -1491,7 +1497,7 @@ export async function resolveOrgProjectTarget(
         );
         if (fuzzyResult.kind === "match") {
           log.warn(
-            `Project '${parsed.projectSlug}' not found. Using similar project '${fuzzyResult.project}' in org '${fuzzyResult.org}'.`
+            `No project matching '${displaySlug}'. Using '${fuzzyResult.project}' in org '${fuzzyResult.org}'.`
           );
           return withTelemetryContext({
             org: fuzzyResult.org,
@@ -1500,7 +1506,7 @@ export async function resolveOrgProjectTarget(
         }
 
         throw new ResolutionError(
-          `Project '${parsed.projectSlug}'`,
+          `Project '${displaySlug}'`,
           "not found",
           `sentry ${commandName} <org>/${parsed.projectSlug}`,
           fuzzyResult.kind === "suggestions"

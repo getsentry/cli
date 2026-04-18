@@ -668,12 +668,14 @@ type ListFuzzyResult =
  */
 async function tryFuzzyRecoveryForList(
   slug: string,
-  orgs: { slug: string }[]
+  orgs: { slug: string }[],
+  /** Display label for warnings — the user's raw input when available. */
+  displaySlug?: string
 ): Promise<ListFuzzyResult> {
   const result = await tryFuzzyProjectRecovery(slug, orgs);
   if (result.kind === "match") {
     log.warn(
-      `Project '${slug}' not found. Using similar project '${result.project}' in org '${result.org}'.`
+      `No project matching '${displaySlug ?? slug}'. Using '${result.project}' in org '${result.org}'.`
     );
     return { kind: "match", slug: result.project };
   }
@@ -708,11 +710,15 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
   options: {
     flags: BaseListFlags;
     orgAllFallback?: (orgSlug: string) => Promise<ListResult<TWithOrg>>;
+    /** Original user input before normalization — for clearer messages. */
+    originalSlug?: string;
   },
   /** Guard against infinite recursion from fuzzy recovery. */
   _isRecoveryAttempt = false
 ): Promise<ListResult<TWithOrg>> {
-  const { flags, orgAllFallback } = options;
+  const { flags, orgAllFallback, originalSlug } = options;
+  /** Display label: the user's raw input when available, otherwise the slug. */
+  const displaySlug = originalSlug ?? projectSlug;
   const { projects: matches, orgs } = await withProgress(
     {
       message: `Fetching ${config.entityPlural} (up to ${flags.limit})...`,
@@ -748,7 +754,11 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
     // Skip on retry to prevent infinite recursion.
     let fuzzySuggestions: string[] | undefined;
     if (!_isRecoveryAttempt) {
-      const fuzzy = await tryFuzzyRecoveryForList(projectSlug, orgs);
+      const fuzzy = await tryFuzzyRecoveryForList(
+        projectSlug,
+        orgs,
+        displaySlug
+      );
       if (fuzzy?.kind === "match") {
         return handleProjectSearch(config, fuzzy.slug, options, true);
       }
@@ -763,7 +773,7 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
 
     // Use ResolutionError — the user provided a project slug but it wasn't found.
     throw new ResolutionError(
-      `Project '${projectSlug}'`,
+      `Project '${displaySlug}'`,
       "not found",
       `${config.commandPrefix} <org>/${projectSlug}`,
       fuzzySuggestions ?? [
@@ -881,6 +891,7 @@ function buildDefaultHandlers<TEntity, TWithOrg>(
       handleProjectSearch(config, ctx.parsed.projectSlug, {
         flags: ctx.flags,
         orgAllFallback: (orgSlug) => runOrgAll(config, orgSlug, ctx.flags),
+        originalSlug: ctx.parsed.originalSlug,
       }),
 
     "org-all": (ctx) => {

@@ -521,7 +521,9 @@ export async function handleOrgAll(
  */
 export async function handleProjectSearch(
   projectSlug: string,
-  flags: ListFlags
+  flags: ListFlags,
+  /** Original user input before normalization — for clearer messages. */
+  originalSlug?: string
 ): Promise<ListResult<ProjectWithOrg>> {
   const { projects, orgs } = await withProgress(
     {
@@ -565,7 +567,7 @@ export async function handleProjectSearch(
       return { items: [] };
     }
     throw new ResolutionError(
-      `Project '${projectSlug}'`,
+      `Project '${originalSlug ?? projectSlug}'`,
       "not found",
       `sentry project list <org>/${projectSlug}`,
       ["No project with this slug found in any accessible organization"]
@@ -686,7 +688,11 @@ export const listCommand = buildListCommand("project", {
           });
         },
         "project-search": (ctx) =>
-          handleProjectSearch(ctx.parsed.projectSlug, flags),
+          handleProjectSearch(
+            ctx.parsed.projectSlug,
+            flags,
+            ctx.parsed.originalSlug
+          ),
       },
     });
 

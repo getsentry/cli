@@ -413,6 +413,13 @@ export type ParsedOrgProject =
       projectSlug: string;
       /** True if project slug was normalized */
       normalized?: boolean;
+      /**
+       * Pre-normalization input when {@link normalized} is `true`.
+       * Used by the resolution layer to produce user-friendly messages
+       * that reference what the user actually typed rather than the
+       * intermediate normalized form.
+       */
+      originalSlug?: string;
     }
   | { type: typeof ProjectSpecificationType.AutoDetect };
 
@@ -546,7 +553,7 @@ function parseSlashOrgProject(input: string): ParsedOrgProject {
     return {
       type: "project-search",
       projectSlug: np.slug,
-      ...(np.normalized && { normalized: true }),
+      ...(np.normalized && { normalized: true, originalSlug: rawProject }),
     };
   }
 
@@ -622,7 +629,7 @@ export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
     parsed = {
       type: "project-search",
       projectSlug: np.slug,
-      ...(np.normalized && { normalized: true }),
+      ...(np.normalized && { normalized: true, originalSlug: trimmed }),
     };
   }
 
