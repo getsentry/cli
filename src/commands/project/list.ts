@@ -46,6 +46,7 @@ import {
   paginationHint,
   targetPatternExplanation,
 } from "../../lib/list-command.js";
+import { logger } from "../../lib/logger.js";
 import {
   dispatchOrgScopedList,
   jsonTransformListResult,
@@ -56,9 +57,12 @@ import { withProgress } from "../../lib/polling.js";
 import {
   type ResolvedTarget,
   resolveAllTargets,
+  tryFuzzyProjectRecovery,
 } from "../../lib/resolve-target.js";
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type { SentryProject } from "../../types/index.js";
+
+const log = logger.withTag("project-list");
 
 /** Extended result type with optional title shown above the table. */
 type ProjectListResult = ListResult<ProjectWithOrg> & { title?: string };
@@ -519,6 +523,69 @@ export async function handleOrgAll(
  * Handle project-search mode (bare slug, e.g., "sentry").
  * Searches for the project across all accessible organizations.
  */
+/**
+ * Handle the "no matching project" case — check for org match, attempt
+ * fuzzy recovery (including display-name matching), or throw an error.
+ *
+ * Extracted from {@link handleProjectSearch} to stay within the cognitive
+ * complexity budget.
+ */
+async function handleProjectNotFound(
+  projectSlug: string,
+  orgs: { slug: string }[],
+  flags: ListFlags,
+  originalSlug?: string
+): Promise<ListResult<ProjectWithOrg>> {
+  const displaySlug = originalSlug ?? projectSlug;
+
+  // Check if slug matches an org — user likely meant "project list <org>/"
+  const matchingOrg = orgs.find((o) => o.slug === projectSlug);
+  if (matchingOrg) {
+    const contextKey = buildContextKey(
+      { type: "org-all", org: projectSlug },
+      flags,
+      getApiBaseUrl()
+    );
+    const result = await handleOrgAll({
+      org: projectSlug,
+      flags,
+      contextKey,
+      cursor: undefined,
+      direction: "first",
+    });
+    const r = result as ProjectListResult;
+    r.title = `'${projectSlug}' is an organization, not a project. Showing all projects in '${projectSlug}'`;
+    return r;
+  }
+
+  // Attempt fuzzy auto-recovery — also match display names when the
+  // user's original input is available (e.g. typed "My Project").
+  const fuzzyResult = await tryFuzzyProjectRecovery(
+    projectSlug,
+    orgs,
+    originalSlug
+  );
+  if (fuzzyResult.kind === "match") {
+    log.warn(
+      `No project matching '${displaySlug}'. Using '${fuzzyResult.project}' in org '${fuzzyResult.org}'.`
+    );
+    return handleProjectSearch(fuzzyResult.project, flags);
+  }
+
+  // JSON mode returns empty array; human mode throws a helpful error
+  if (flags.json) {
+    return { items: [] };
+  }
+  throw new ResolutionError(
+    `Project '${displaySlug}'`,
+    "not found",
+    `sentry project list <org>/${projectSlug}`,
+    fuzzyResult.kind === "suggestions"
+      ? fuzzyResult.suggestions
+      : ["No project with this slug found in any accessible organization"]
+  );
+}
+
 export async function handleProjectSearch(
   projectSlug: string,
   flags: ListFlags,
@@ -542,36 +609,7 @@ export async function handleProjectSearch(
       };
     }
 
-    // Check if slug matches an org — user likely meant "project list <org>/"
-    const matchingOrg = orgs.find((o) => o.slug === projectSlug);
-    if (matchingOrg) {
-      const contextKey = buildContextKey(
-        { type: "org-all", org: projectSlug },
-        flags,
-        getApiBaseUrl()
-      );
-      const result = await handleOrgAll({
-        org: projectSlug,
-        flags,
-        contextKey,
-        cursor: undefined,
-        direction: "first",
-      });
-      const r = result as ProjectListResult;
-      r.title = `'${projectSlug}' is an organization, not a project. Showing all projects in '${projectSlug}'`;
-      return r;
-    }
-
-    // JSON mode returns empty array; human mode throws a helpful error
-    if (flags.json) {
-      return { items: [] };
-    }
-    throw new ResolutionError(
-      `Project '${originalSlug ?? projectSlug}'`,
-      "not found",
-      `sentry project list <org>/${projectSlug}`,
-      ["No project with this slug found in any accessible organization"]
-    );
+    return handleProjectNotFound(projectSlug, orgs, flags, originalSlug);
   }
 
   const limited = filtered.slice(0, flags.limit);

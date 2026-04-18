@@ -652,7 +652,12 @@ async function findSimilarProjects(
  */
 async function findSimilarProjectsAcrossOrgs(
   slug: string,
-  orgs: { slug: string }[]
+  orgs: { slug: string }[],
+  /** Optional display name (e.g. user typed "My Project"). When provided,
+   *  the search also fuzzy-matches against project display names, making
+   *  it possible to resolve display-name input to the correct slug even
+   *  when the slug convention differs (e.g. underscores vs dashes). */
+  displayName?: string
 ): Promise<{ slug: string; orgSlug: string }[]> {
   try {
     const concurrency = pLimit(5);
@@ -665,19 +670,50 @@ async function findSimilarProjectsAcrossOrgs(
           }
           return result.value.map((p) => ({
             slug: p.slug,
+            name: p.name,
             orgSlug: org.slug,
           }));
         })
       )
     );
     const allProjects = orgProjects.flat();
+
     // Deduplicate slugs so fuzzyMatch doesn't waste slots on the same
     // project appearing in multiple orgs.
-    const uniqueSlugs = [...new Set(allProjects.map((p) => p.slug))];
-    const matches = fuzzyMatch(slug, uniqueSlugs, { maxResults: 5 });
+    const uniqueSlugs = Array.from(new Set(allProjects.map((p) => p.slug)));
+    const slugMatches = fuzzyMatch(slug, uniqueSlugs, { maxResults: 5 });
+
+    // When a display name is provided (input contained spaces), also
+    // fuzzy-match against project names. A name hit is mapped back to
+    // the corresponding slug so callers get a uniform result shape.
+    let nameMatchedSlugs: string[] = [];
+    if (displayName) {
+      const nameToSlug = new Map<string, string>();
+      for (const p of allProjects) {
+        // First slug wins — if multiple projects share a name, the first
+        // encountered org's project is used. Ambiguity is resolved later
+        // by the caller when results.length > 1.
+        if (!nameToSlug.has(p.name)) {
+          nameToSlug.set(p.name, p.slug);
+        }
+      }
+      const uniqueNames = Array.from(nameToSlug.keys());
+      const matchedNames = fuzzyMatch(displayName, uniqueNames, {
+        maxResults: 5,
+      });
+      nameMatchedSlugs = matchedNames
+        .map((n) => nameToSlug.get(n))
+        .filter((s): s is string => s !== null && s !== undefined);
+    }
+
+    // Merge slug matches and name matches, preferring slug matches.
+    const mergedSlugs = Array.from(
+      new Set([...slugMatches, ...nameMatchedSlugs])
+    );
+
     // Expand matched slugs back to org-qualified entries (may include
     // the same slug from multiple orgs — that's correct for suggestions).
-    return matches.flatMap((matched) =>
+    return mergedSlugs.flatMap((matched) =>
       allProjects.filter((p) => p.slug === matched)
     );
   } catch {
@@ -704,9 +740,11 @@ type FuzzyRecoveryResult =
  */
 export async function tryFuzzyProjectRecovery(
   slug: string,
-  orgs: { slug: string }[]
+  orgs: { slug: string }[],
+  /** Optional display name for name-based matching (see {@link findSimilarProjectsAcrossOrgs}). */
+  displayName?: string
 ): Promise<FuzzyRecoveryResult> {
-  const similar = await findSimilarProjectsAcrossOrgs(slug, orgs);
+  const similar = await findSimilarProjectsAcrossOrgs(slug, orgs, displayName);
   if (similar.length === 1) {
     const match = similar[0] as (typeof similar)[0];
     return { kind: "match", org: match.orgSlug, project: match.slug };
@@ -1282,8 +1320,13 @@ export async function resolveProjectBySlug(
       );
     }
 
-    // Attempt fuzzy auto-recovery before throwing
-    const fuzzyResult = await tryFuzzyProjectRecovery(projectSlug, orgs);
+    // Attempt fuzzy auto-recovery before throwing — also match against
+    // project display names when the user's original input is available.
+    const fuzzyResult = await tryFuzzyProjectRecovery(
+      projectSlug,
+      orgs,
+      originalSlug
+    );
     if (fuzzyResult.kind === "match") {
       const proj = await withAuthGuard(() =>
         getProject(fuzzyResult.org, fuzzyResult.project)
@@ -1490,10 +1533,12 @@ export async function resolveOrgProjectTarget(
           );
         }
 
-        // Attempt fuzzy auto-recovery before throwing
+        // Attempt fuzzy auto-recovery before throwing — also match against
+        // project display names when the user's original input is available.
         const fuzzyResult = await tryFuzzyProjectRecovery(
           parsed.projectSlug,
-          orgs
+          orgs,
+          parsed.originalSlug
         );
         if (fuzzyResult.kind === "match") {
           log.warn(

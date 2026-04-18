@@ -672,7 +672,7 @@ async function tryFuzzyRecoveryForList(
   /** Display label for warnings — the user's raw input when available. */
   displaySlug?: string
 ): Promise<ListFuzzyResult> {
-  const result = await tryFuzzyProjectRecovery(slug, orgs);
+  const result = await tryFuzzyProjectRecovery(slug, orgs, displaySlug);
   if (result.kind === "match") {
     log.warn(
       `No project matching '${displaySlug ?? slug}'. Using '${result.project}' in org '${result.org}'.`
