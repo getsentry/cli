@@ -1331,7 +1331,7 @@ export async function resolveProjectBySlug(
       ? `\n\nExample: ${disambiguationExample}`
       : "";
     throw new ValidationError(
-      `Project "${projectSlug}" exists in multiple organizations.\n\n` +
+      `Project "${displaySlug}" exists in multiple organizations.\n\n` +
         `Specify the organization:\n${orgList}${example}`
     );
   }
@@ -1520,7 +1520,7 @@ export async function resolveOrgProjectTarget(
           .map((m) => `  sentry ${commandName} ${m.orgSlug}/${m.slug}`)
           .join("\n");
         throw new ResolutionError(
-          `Project '${parsed.projectSlug}'`,
+          `Project '${displaySlug}'`,
           "is ambiguous",
           `sentry ${commandName} <org>/${parsed.projectSlug}`,
           [
