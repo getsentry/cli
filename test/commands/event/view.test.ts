@@ -888,31 +888,6 @@ describe("viewCommand.func", () => {
     getLatestEventSpy.mockRestore();
   });
 
-  test("logs normalized slug warning when underscores present", async () => {
-    getEventSpy.mockResolvedValue(sampleEvent);
-    getSpanTreeLinesSpy.mockResolvedValue({
-      lines: [],
-      spans: null,
-      traceId: null,
-      success: false,
-    });
-    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
-
-    const { context } = createMockContext();
-    const func = await viewCommand.loader();
-    // Underscores in the slug trigger normalized warning
-    await func.call(
-      context,
-      { json: true, web: false, spans: 0 },
-      "test_org/test_proj",
-      VALID_EVENT_ID
-    );
-
-    // parseOrgProjectArg normalizes "test_org/test_proj" → "test-org/test-proj"
-    // and sets normalized=true, triggering the warning path (line 343-345)
-    expect(getEventSpy).toHaveBeenCalled();
-  });
-
   test("throws ValidationError for flag-like event ID (--h)", async () => {
     const { context } = createMockContext();
     const func = await viewCommand.loader();

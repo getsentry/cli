@@ -398,24 +398,39 @@ describe("normalizeSlug properties", () => {
     );
   });
 
-  test("normalized is true iff input contained underscores or spaces", async () => {
+  test("normalized is true iff input contained a space", async () => {
+    // Underscores are intentionally preserved (see #770) — only spaces
+    // trigger normalization.
     await fcAssert(
       property(displayNameLikeArb, (input) => {
         const result = normalizeSlug(input);
-        expect(result.normalized).toBe(
-          input.includes("_") || input.includes(" ")
-        );
+        expect(result.normalized).toBe(input.includes(" "));
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("result slug never contains underscores or spaces", async () => {
+  test("result slug never contains spaces", async () => {
     await fcAssert(
       property(displayNameLikeArb, (input) => {
         const result = normalizeSlug(input);
-        expect(result.slug.includes("_")).toBe(false);
         expect(result.slug.includes(" ")).toBe(false);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("underscores in input survive to output unchanged in count", async () => {
+    // Each underscore in the input must appear in the output — normalization
+    // never rewrites underscores. Using a comparison on count makes the
+    // property robust to other transforms (lowercasing, space→dash) that
+    // may or may not happen depending on whether spaces are present.
+    await fcAssert(
+      property(displayNameLikeArb, (input) => {
+        const result = normalizeSlug(input);
+        const inputUnderscores = (input.match(/_/g) ?? []).length;
+        const outputUnderscores = (result.slug.match(/_/g) ?? []).length;
+        expect(outputUnderscores).toBe(inputUnderscores);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -447,7 +462,7 @@ describe("normalizeSlug properties", () => {
       property(withSpaceArb, (input) => {
         const result = normalizeSlug(input);
         expect(result.slug).toBe(result.slug.toLowerCase());
-        expect(result.reason).toMatch(/^(spaces|both)$/);
+        expect(result.normalized).toBe(true);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
