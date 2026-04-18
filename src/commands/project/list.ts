@@ -534,8 +534,9 @@ async function handleProjectNotFound(
   projectSlug: string,
   orgs: { slug: string }[],
   flags: ListFlags,
-  originalSlug?: string
+  options?: { originalSlug?: string; isRecoveryAttempt?: boolean }
 ): Promise<ListResult<ProjectWithOrg>> {
+  const { originalSlug, isRecoveryAttempt = false } = options ?? {};
   const displaySlug = originalSlug ?? projectSlug;
 
   // Check if slug matches an org — user likely meant "project list <org>/"
@@ -560,16 +561,23 @@ async function handleProjectNotFound(
 
   // Attempt fuzzy auto-recovery — also match display names when the
   // user's original input is available (e.g. typed "My Project").
-  const fuzzyResult = await tryFuzzyProjectRecovery(
-    projectSlug,
-    orgs,
-    originalSlug
-  );
-  if (fuzzyResult.kind === "match") {
-    log.warn(
-      `No project matching '${displaySlug}'. Using '${fuzzyResult.project}' in org '${fuzzyResult.org}'.`
+  // Skip on retry to prevent infinite recursion.
+  let fuzzySuggestions: string[] | undefined;
+  if (!isRecoveryAttempt) {
+    const fuzzyResult = await tryFuzzyProjectRecovery(
+      projectSlug,
+      orgs,
+      originalSlug
     );
-    return handleProjectSearch(fuzzyResult.project, flags);
+    if (fuzzyResult.kind === "match") {
+      log.warn(
+        `No project matching '${displaySlug}'. Using '${fuzzyResult.project}' in org '${fuzzyResult.org}'.`
+      );
+      return handleProjectSearch(fuzzyResult.project, flags);
+    }
+    if (fuzzyResult.kind === "suggestions") {
+      fuzzySuggestions = fuzzyResult.suggestions;
+    }
   }
 
   // JSON mode returns empty array; human mode throws a helpful error
@@ -580,9 +588,9 @@ async function handleProjectNotFound(
     `Project '${displaySlug}'`,
     "not found",
     `sentry project list <org>/${projectSlug}`,
-    fuzzyResult.kind === "suggestions"
-      ? fuzzyResult.suggestions
-      : ["No project with this slug found in any accessible organization"]
+    fuzzySuggestions ?? [
+      "No project with this slug found in any accessible organization",
+    ]
   );
 }
 
@@ -609,7 +617,7 @@ export async function handleProjectSearch(
       };
     }
 
-    return handleProjectNotFound(projectSlug, orgs, flags, originalSlug);
+    return handleProjectNotFound(projectSlug, orgs, flags, { originalSlug });
   }
 
   const limited = filtered.slice(0, flags.limit);

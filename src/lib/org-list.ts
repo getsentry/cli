@@ -669,13 +669,14 @@ type ListFuzzyResult =
 async function tryFuzzyRecoveryForList(
   slug: string,
   orgs: { slug: string }[],
-  /** Display label for warnings — the user's raw input when available. */
-  displaySlug?: string
+  /** Original user input before normalization — enables display-name matching
+   *  and clearer warning messages. Only set when normalization occurred. */
+  originalSlug?: string
 ): Promise<ListFuzzyResult> {
-  const result = await tryFuzzyProjectRecovery(slug, orgs, displaySlug);
+  const result = await tryFuzzyProjectRecovery(slug, orgs, originalSlug);
   if (result.kind === "match") {
     log.warn(
-      `No project matching '${displaySlug ?? slug}'. Using '${result.project}' in org '${result.org}'.`
+      `No project matching '${originalSlug ?? slug}'. Using '${result.project}' in org '${result.org}'.`
     );
     return { kind: "match", slug: result.project };
   }
@@ -757,7 +758,7 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
       const fuzzy = await tryFuzzyRecoveryForList(
         projectSlug,
         orgs,
-        displaySlug
+        originalSlug
       );
       if (fuzzy?.kind === "match") {
         return handleProjectSearch(config, fuzzy.slug, options, true);
