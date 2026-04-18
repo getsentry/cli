@@ -459,23 +459,6 @@ describe("viewCommand.func", () => {
     ).rejects.toThrow(ValidationError);
   });
 
-  test("logs normalized slug warning when underscores present", async () => {
-    getLogsSpy.mockResolvedValue([sampleLog]);
-    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
-
-    const { context } = createMockContext();
-    const func = await viewCommand.loader();
-    // Underscores in the slug trigger normalized warning (line 161-163)
-    await func.call(
-      context,
-      { json: true, web: false },
-      "test_org/test_proj",
-      "968c763c740cfda8b6728f27fb9e9b01"
-    );
-
-    expect(getLogsSpy).toHaveBeenCalled();
-  });
-
   test("resolves project-search target via resolveProjectBySlug", async () => {
     findProjectsBySlugSpy.mockResolvedValue({
       projects: [

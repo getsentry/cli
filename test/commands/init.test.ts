@@ -350,7 +350,8 @@ describe("init command func", () => {
     });
 
     test("org slug with whitespace is normalized (not rejected)", async () => {
-      // Spaces in slugs are normalized to dashes (like underscore normalization)
+      // Spaces in slugs are normalized to dashes — the "display name"
+      // recovery path (e.g., "My Org" → "my-org").
       const ctx = makeContext();
       await func.call(ctx, DEFAULT_FLAGS, "acme corp/");
       expect(capturedArgs?.org).toBe("acme-corp");

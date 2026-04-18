@@ -18,91 +18,55 @@ import { isAllDigits } from "./utils.js";
 // Slug normalization
 // ---------------------------------------------------------------------------
 
-/** Describes what was normalized in a slug — used for targeted warning messages. */
-export type NormalizeReason = "underscores" | "spaces" | "both";
-
 /**
- * Normalize a Sentry slug by replacing underscores and spaces with dashes.
+ * Normalize a Sentry slug by converting display-name-style input to slug form.
  *
- * Sentry enforces that slugs use lowercase letters, numbers, and dashes.
- * Users frequently type underscores by mistake or paste display names
- * (e.g., `"My Project"` instead of `"my-project"`).
+ * Sentry slugs are always lowercase and use dashes as separators. Users
+ * sometimes paste display names like `"My Project"` instead of
+ * `"my-project"`; without normalization, `validateResourceId` would reject
+ * those outright for containing spaces. Normalization gives us a chance to
+ * recover the intent before validation runs.
  *
- * Normalization rules:
- * 1. Underscores → dashes (existing)
- * 2. Spaces → dashes, with lowercase (spaces imply a display name)
- * 3. Consecutive dashes collapsed (`"My  Project"` → `"my-project"`)
- * 4. Leading/trailing dashes trimmed
+ * Normalization rules (applied only when spaces are present):
+ * 1. Lowercase the entire string
+ * 2. Collapse runs of spaces into a single dash
+ * 3. Trim leading/trailing dashes (from leading/trailing whitespace)
  *
- * Lowercasing is only applied when spaces are present. Pure underscore
- * normalization preserves casing for backward compatibility.
+ * Underscores are **not** normalized — Sentry accepts underscores in project
+ * slugs at creation time, so rewriting them here would silently break
+ * lookups for any customer who has one (see #770). Since underscores are
+ * not in `validateResourceId`'s forbidden set either, they flow through
+ * untouched.
  *
  * @param slug - Raw slug string from CLI input
- * @returns Normalized slug, whether normalization was applied, and reason
+ * @returns Normalized slug and whether normalization was applied
  *
  * @example
- * normalizeSlug("selfbase_admin_backend")  // { slug: "selfbase-admin-backend", normalized: true, reason: "underscores" }
- * normalizeSlug("My Project")              // { slug: "my-project", normalized: true, reason: "spaces" }
- * normalizeSlug("My_Project Name")         // { slug: "my-project-name", normalized: true, reason: "both" }
+ * normalizeSlug("My Project")              // { slug: "my-project", normalized: true }
+ * normalizeSlug("My  Project")             // { slug: "my-project", normalized: true }
+ * normalizeSlug("selfbase_admin_backend")  // { slug: "selfbase_admin_backend", normalized: false }
  * normalizeSlug("my-project")              // { slug: "my-project", normalized: false }
  */
 export function normalizeSlug(slug: string): {
   slug: string;
   normalized: boolean;
-  reason?: NormalizeReason;
 } {
-  const hasUnderscores = slug.includes("_");
-  const hasSpaces = slug.includes(" ");
-
-  if (!(hasUnderscores || hasSpaces)) {
+  if (!slug.includes(" ")) {
     return { slug, normalized: false };
   }
 
-  let result = slug;
+  // Spaces imply a display name — slugs are always lowercase.
+  // Collapse runs of spaces into a single dash, then trim any edge dashes
+  // introduced by leading/trailing whitespace in the input.
+  const result = slug
+    .toLowerCase()
+    .replace(/ +/g, "-")
+    .replace(/^-+|-+$/g, "");
 
-  // When spaces are present, lowercase the entire slug.
-  // Spaces imply a display name like "My Project" — slugs are always lowercase.
-  if (hasSpaces) {
-    result = result.toLowerCase();
-  }
-
-  // Replace runs of underscores/spaces with a single dash.
-  // Using [_ ]+ collapses "My  Project" and "a__b" in one pass.
-  result = result.replace(/[_ ]+/g, "-");
-
-  // Trim leading/trailing dashes (from " My Project " → "-my-project-")
-  result = result.replace(/^-+|-+$/g, "");
-
-  let reason: NormalizeReason;
-  if (hasUnderscores && hasSpaces) {
-    reason = "both";
-  } else if (hasSpaces) {
-    reason = "spaces";
-  } else {
-    reason = "underscores";
-  }
-
-  return { slug: result, normalized: true, reason };
+  return { slug: result, normalized: true };
 }
 
 const log = logger.withTag("arg-parsing");
-
-/**
- * Combine two normalization reasons into the most descriptive one.
- * Used when org and project slugs have different normalizations.
- */
-function combineReasons(
-  a?: NormalizeReason,
-  b?: NormalizeReason
-): NormalizeReason {
-  if (a === "both" || b === "both") {
-    return "both";
-  }
-  if (a && b && a !== b) {
-    return "both";
-  }
-  return a ?? b ?? "underscores";
-}
 
 /**
  * Emit a warning when slug normalization changed the input.
@@ -127,21 +91,9 @@ function warnNormalized(
       return;
   }
 
-  let explanation: string;
-  switch (parsed.reason) {
-    case "spaces":
-      explanation = "Sentry slugs use lowercase with dashes, not spaces";
-      break;
-    case "both":
-      explanation =
-        "Sentry slugs use lowercase with dashes, not spaces or underscores";
-      break;
-    default:
-      explanation = "Sentry slugs use dashes, never underscores";
-      break;
-  }
-
-  log.warn(`Normalized slug to '${slug}' (${explanation})`);
+  log.warn(
+    `Normalized slug to '${slug}' (Sentry slugs use lowercase with dashes, not spaces)`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -438,8 +390,9 @@ export const ProjectSpecificationType = {
  * Parsed result from an org/project positional argument.
  * Discriminated union based on the `type` field.
  *
- * When `normalized` is true, the slug was auto-corrected (underscores → dashes,
- * spaces → dashes with lowercasing). `reason` describes what was normalized.
+ * When `normalized` is true, the slug was auto-corrected from display-name
+ * form (spaces → dashes with lowercasing). Underscores are preserved — Sentry
+ * allows underscored project slugs and the CLI must not rewrite them.
  */
 export type ParsedOrgProject =
   | {
@@ -448,24 +401,18 @@ export type ParsedOrgProject =
       project: string;
       /** True if any slug was normalized */
       normalized?: boolean;
-      /** What was normalized — used for targeted warning messages */
-      reason?: NormalizeReason;
     }
   | {
       type: typeof ProjectSpecificationType.OrgAll;
       org: string;
       /** True if org slug was normalized */
       normalized?: boolean;
-      /** What was normalized — used for targeted warning messages */
-      reason?: NormalizeReason;
     }
   | {
       type: typeof ProjectSpecificationType.ProjectSearch;
       projectSlug: string;
       /** True if project slug was normalized */
       normalized?: boolean;
-      /** What was normalized — used for targeted warning messages */
-      reason?: NormalizeReason;
     }
   | { type: typeof ProjectSpecificationType.AutoDetect };
 
@@ -599,7 +546,7 @@ function parseSlashOrgProject(input: string): ParsedOrgProject {
     return {
       type: "project-search",
       projectSlug: np.slug,
-      ...(np.normalized && { normalized: true, reason: np.reason }),
+      ...(np.normalized && { normalized: true }),
     };
   }
 
@@ -612,7 +559,7 @@ function parseSlashOrgProject(input: string): ParsedOrgProject {
     return {
       type: "org-all",
       org: no.slug,
-      ...(no.normalized && { normalized: true, reason: no.reason }),
+      ...(no.normalized && { normalized: true }),
     };
   }
 
@@ -621,12 +568,11 @@ function parseSlashOrgProject(input: string): ParsedOrgProject {
   const np = normalizeSlug(rawProject);
   validateResourceId(np.slug, "project slug");
   const normalized = no.normalized || np.normalized;
-  const reason = normalized ? combineReasons(no.reason, np.reason) : undefined;
   return {
     type: "explicit",
     org: no.slug,
     project: np.slug,
-    ...(normalized && { normalized: true, reason }),
+    ...(normalized && { normalized: true }),
   };
 }
 
@@ -676,7 +622,7 @@ export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
     parsed = {
       type: "project-search",
       projectSlug: np.slug,
-      ...(np.normalized && { normalized: true, reason: np.reason }),
+      ...(np.normalized && { normalized: true }),
     };
   }
 

@@ -348,24 +348,6 @@ describe("viewCommand.func", () => {
     expect(getDetailedTraceSpy).toHaveBeenCalled();
   });
 
-  test("logs normalized slug warning when underscores present", async () => {
-    getDetailedTraceSpy.mockResolvedValue(sampleSpans);
-
-    const { context } = createMockContext();
-    const func = await viewCommand.loader();
-    // Underscores in the slug trigger normalized warning (line 172-173)
-    await func.call(
-      context,
-      { json: true, web: false, spans: 100 },
-      "test_org/test_project",
-      "aaaa1111bbbb2222cccc3333dddd4444"
-    );
-
-    // parseOrgProjectArg normalizes "test_org/test_project" → "test-org/test-project"
-    // and sets normalized=true, triggering the log.warn (line 173)
-    expect(getDetailedTraceSpy).toHaveBeenCalled();
-  });
-
   test("logs suggestion when first arg looks like issue short ID", async () => {
     // "CAM-82X" as first arg matches issue short ID pattern.
     // parseOrgProjectArg("CAM-82X") → project-search, so we mock findProjectsBySlug.

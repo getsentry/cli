@@ -197,62 +197,12 @@ describe("parseOrgProjectArg", () => {
       stderrSpy.mockRestore();
     });
 
-    test("emits warning for underscored project slug", () => {
-      const result = parseOrgProjectArg("my_project");
-      expect(result).toEqual({
-        type: "project-search",
-        projectSlug: "my-project",
-        normalized: true,
-        reason: "underscores",
-      });
-      expect(stderrOutput).toContain("Normalized slug to 'my-project'");
-      expect(stderrOutput).toContain(
-        "Sentry slugs use dashes, never underscores"
-      );
-    });
-
-    test("emits warning for underscored org in explicit mode", () => {
-      const result = parseOrgProjectArg("my_org/cli");
-      expect(result).toEqual({
-        type: "explicit",
-        org: "my-org",
-        project: "cli",
-        normalized: true,
-        reason: "underscores",
-      });
-      expect(stderrOutput).toContain("Normalized slug to 'my-org/cli'");
-    });
-
-    test("emits warning for underscored project in explicit mode", () => {
-      const result = parseOrgProjectArg("sentry/my_project");
-      expect(result).toEqual({
-        type: "explicit",
-        org: "sentry",
-        project: "my-project",
-        normalized: true,
-        reason: "underscores",
-      });
-      expect(stderrOutput).toContain("Normalized slug to 'sentry/my-project'");
-    });
-
-    test("emits warning for underscored org in org-all mode", () => {
-      const result = parseOrgProjectArg("my_org/");
-      expect(result).toEqual({
-        type: "org-all",
-        org: "my-org",
-        normalized: true,
-        reason: "underscores",
-      });
-      expect(stderrOutput).toContain("Normalized slug to 'my-org/'");
-    });
-
-    test("emits space-specific warning for project with spaces", () => {
+    test("emits warning for project with spaces", () => {
       const result = parseOrgProjectArg("My Project");
       expect(result).toEqual({
         type: "project-search",
         projectSlug: "my-project",
         normalized: true,
-        reason: "spaces",
       });
       expect(stderrOutput).toContain("Normalized slug to 'my-project'");
       expect(stderrOutput).toContain(
@@ -260,17 +210,49 @@ describe("parseOrgProjectArg", () => {
       );
     });
 
-    test("emits combined warning for mixed spaces and underscores", () => {
-      const result = parseOrgProjectArg("my_org/My Project");
+    test("emits warning for org with spaces in explicit mode", () => {
+      const result = parseOrgProjectArg("My Org/cli");
       expect(result).toEqual({
         type: "explicit",
         org: "my-org",
+        project: "cli",
+        normalized: true,
+      });
+      expect(stderrOutput).toContain("Normalized slug to 'my-org/cli'");
+    });
+
+    test("emits warning for project with spaces in explicit mode", () => {
+      const result = parseOrgProjectArg("sentry/My Project");
+      expect(result).toEqual({
+        type: "explicit",
+        org: "sentry",
         project: "my-project",
         normalized: true,
-        reason: "both",
       });
-      expect(stderrOutput).toContain("Normalized slug to 'my-org/my-project'");
-      expect(stderrOutput).toContain("not spaces or underscores");
+      expect(stderrOutput).toContain("Normalized slug to 'sentry/my-project'");
+    });
+
+    test("emits warning for org with spaces in org-all mode", () => {
+      const result = parseOrgProjectArg("My Org/");
+      expect(result).toEqual({
+        type: "org-all",
+        org: "my-org",
+        normalized: true,
+      });
+      expect(stderrOutput).toContain("Normalized slug to 'my-org/'");
+    });
+
+    test("preserves underscores in mixed input, only normalizes spaces", () => {
+      // Underscores are valid in Sentry project slugs (see #770), so they
+      // must pass through untouched even when the org half has spaces.
+      const result = parseOrgProjectArg("my_org/My Project");
+      expect(result).toEqual({
+        type: "explicit",
+        org: "my_org",
+        project: "my-project",
+        normalized: true,
+      });
+      expect(stderrOutput).toContain("Normalized slug to 'my_org/my-project'");
     });
 
     test("does not emit warning for auto-detect", () => {
@@ -278,8 +260,14 @@ describe("parseOrgProjectArg", () => {
       expect(stderrOutput).not.toContain("Normalized slug");
     });
 
-    test("does not emit warning when no underscores present", () => {
+    test("does not emit warning when no spaces present", () => {
       parseOrgProjectArg("sentry/cli");
+      expect(stderrOutput).not.toContain("Normalized slug");
+    });
+
+    test("does not emit warning for underscored slug", () => {
+      // Underscores are valid in Sentry slugs — no normalization, no warning.
+      parseOrgProjectArg("selfbase_admin_backend");
       expect(stderrOutput).not.toContain("Normalized slug");
     });
   });
@@ -774,42 +762,48 @@ describe("parseIssueArg", () => {
 });
 
 describe("normalizeSlug", () => {
-  test("replaces underscores with dashes", () => {
+  test("preserves underscores (valid in Sentry slugs — #770)", () => {
+    // Sentry accepts underscores in project slugs, so the CLI must not
+    // rewrite them. Previously normalized to "selfbase-admin-backend"
+    // which then failed API lookups.
     expect(normalizeSlug("selfbase_admin_backend")).toEqual({
-      slug: "selfbase-admin-backend",
-      normalized: true,
-      reason: "underscores",
+      slug: "selfbase_admin_backend",
+      normalized: false,
     });
   });
 
-  test("preserves normal slugs (no underscores)", () => {
+  test("preserves normal slugs (no spaces)", () => {
     expect(normalizeSlug("my-project")).toEqual({
       slug: "my-project",
       normalized: false,
     });
   });
 
-  test("handles multiple underscores", () => {
+  test("preserves multiple underscores", () => {
     expect(normalizeSlug("a_b_c_d")).toEqual({
-      slug: "a-b-c-d",
-      normalized: true,
-      reason: "underscores",
+      slug: "a_b_c_d",
+      normalized: false,
     });
   });
 
-  test("handles leading underscore", () => {
+  test("preserves leading underscore", () => {
     expect(normalizeSlug("_leading")).toEqual({
-      slug: "leading",
-      normalized: true,
-      reason: "underscores",
+      slug: "_leading",
+      normalized: false,
     });
   });
 
-  test("handles trailing underscore", () => {
+  test("preserves trailing underscore", () => {
     expect(normalizeSlug("trailing_")).toEqual({
-      slug: "trailing",
-      normalized: true,
-      reason: "underscores",
+      slug: "trailing_",
+      normalized: false,
+    });
+  });
+
+  test("preserves mixed case when no spaces (no lowercasing trigger)", () => {
+    expect(normalizeSlug("My_Project")).toEqual({
+      slug: "My_Project",
+      normalized: false,
     });
   });
 
@@ -824,7 +818,6 @@ describe("normalizeSlug", () => {
     expect(normalizeSlug("My Project")).toEqual({
       slug: "my-project",
       normalized: true,
-      reason: "spaces",
     });
   });
 
@@ -832,7 +825,6 @@ describe("normalizeSlug", () => {
     expect(normalizeSlug("My  Project")).toEqual({
       slug: "my-project",
       normalized: true,
-      reason: "spaces",
     });
   });
 
@@ -840,23 +832,16 @@ describe("normalizeSlug", () => {
     expect(normalizeSlug(" My Project ")).toEqual({
       slug: "my-project",
       normalized: true,
-      reason: "spaces",
     });
   });
 
-  test("handles mixed underscores and spaces", () => {
+  test("preserves underscores when spaces are also present", () => {
+    // Spaces get normalized; underscores flow through untouched.
+    // "My_Project Name" → lowercased → "my_project name" → space→dash →
+    // "my_project-name".
     expect(normalizeSlug("My_Project Name")).toEqual({
-      slug: "my-project-name",
+      slug: "my_project-name",
       normalized: true,
-      reason: "both",
-    });
-  });
-
-  test("does not lowercase when only underscores (backward compat)", () => {
-    expect(normalizeSlug("My_Project")).toEqual({
-      slug: "My-Project",
-      normalized: true,
-      reason: "underscores",
     });
   });
 });
@@ -967,44 +952,49 @@ describe("detectSwappedTrialArgs", () => {
   });
 });
 
-describe("parseOrgProjectArg underscore normalization", () => {
-  test("normalizes org slug underscores in explicit mode", () => {
-    expect(parseOrgProjectArg("org_name/project")).toEqual({
+describe("parseOrgProjectArg: underscores pass through", () => {
+  // Sentry allows underscores in project slugs (the UI and API both accept
+  // them at creation time), so the CLI must not rewrite them. Previously
+  // these inputs were silently converted to dashes, causing "Project not
+  // found" errors for customers with underscored slugs (see #770).
+
+  test("preserves org slug underscores in explicit mode", () => {
+    const result = parseOrgProjectArg("org_name/project");
+    expect(result).toEqual({
       type: "explicit",
-      org: "org-name",
+      org: "org_name",
       project: "project",
-      normalized: true,
-      reason: "underscores",
     });
+    expect(result).not.toHaveProperty("normalized");
   });
 
-  test("normalizes project slug underscores in explicit mode", () => {
-    expect(parseOrgProjectArg("org/project_name")).toEqual({
+  test("preserves project slug underscores in explicit mode", () => {
+    const result = parseOrgProjectArg("org/project_name");
+    expect(result).toEqual({
       type: "explicit",
       org: "org",
-      project: "project-name",
-      normalized: true,
-      reason: "underscores",
+      project: "project_name",
     });
+    expect(result).not.toHaveProperty("normalized");
   });
 
-  test("normalizes both org and project underscores", () => {
-    expect(parseOrgProjectArg("org_name/project_name")).toEqual({
+  test("preserves both org and project underscores", () => {
+    const result = parseOrgProjectArg("org_name/project_name");
+    expect(result).toEqual({
       type: "explicit",
-      org: "org-name",
-      project: "project-name",
-      normalized: true,
-      reason: "underscores",
+      org: "org_name",
+      project: "project_name",
     });
+    expect(result).not.toHaveProperty("normalized");
   });
 
-  test("normalizes project-search underscores", () => {
-    expect(parseOrgProjectArg("selfbase_admin_backend")).toEqual({
+  test("preserves project-search underscores", () => {
+    const result = parseOrgProjectArg("selfbase_admin_backend");
+    expect(result).toEqual({
       type: "project-search",
-      projectSlug: "selfbase-admin-backend",
-      normalized: true,
-      reason: "underscores",
+      projectSlug: "selfbase_admin_backend",
     });
+    expect(result).not.toHaveProperty("normalized");
   });
 
   test("normalized is absent for normal slugs (explicit)", () => {
@@ -1019,13 +1009,13 @@ describe("parseOrgProjectArg underscore normalization", () => {
     expect(result).not.toHaveProperty("normalized");
   });
 
-  test("normalizes org slug underscores in org-all mode", () => {
-    expect(parseOrgProjectArg("org_name/")).toEqual({
+  test("preserves org slug underscores in org-all mode", () => {
+    const result = parseOrgProjectArg("org_name/");
+    expect(result).toEqual({
       type: "org-all",
-      org: "org-name",
-      normalized: true,
-      reason: "underscores",
+      org: "org_name",
     });
+    expect(result).not.toHaveProperty("normalized");
   });
 });
 
@@ -1035,7 +1025,6 @@ describe("parseOrgProjectArg space normalization", () => {
       type: "project-search",
       projectSlug: "my-project",
       normalized: true,
-      reason: "spaces",
     });
   });
 
@@ -1045,7 +1034,6 @@ describe("parseOrgProjectArg space normalization", () => {
       org: "my-org",
       project: "my-project",
       normalized: true,
-      reason: "spaces",
     });
   });
 
@@ -1054,7 +1042,6 @@ describe("parseOrgProjectArg space normalization", () => {
       type: "project-search",
       projectSlug: "my-project",
       normalized: true,
-      reason: "spaces",
     });
   });
 
@@ -1063,7 +1050,6 @@ describe("parseOrgProjectArg space normalization", () => {
       type: "org-all",
       org: "my-org",
       normalized: true,
-      reason: "spaces",
     });
   });
 
@@ -1072,17 +1058,17 @@ describe("parseOrgProjectArg space normalization", () => {
       type: "project-search",
       projectSlug: "my-project",
       normalized: true,
-      reason: "spaces",
     });
   });
 
-  test("normalizes mixed underscores and spaces", () => {
+  test("preserves underscores when spaces are also present", () => {
+    // Underscores flow through; only spaces are rewritten. Lowercasing
+    // applies to the whole string since spaces triggered normalization.
     expect(parseOrgProjectArg("my_org/My Project")).toEqual({
       type: "explicit",
-      org: "my-org",
+      org: "my_org",
       project: "my-project",
       normalized: true,
-      reason: "both",
     });
   });
 });
@@ -1123,12 +1109,12 @@ describe("parseOrgProjectArg: injection hardening", () => {
   });
 
   test("normalizes space in bare project slug instead of rejecting", () => {
-    // Spaces are normalized to dashes (like underscore normalization)
+    // Spaces are normalized to dashes and lowercased — the recoverable
+    // display-name case.
     expect(parseOrgProjectArg("my project")).toEqual({
       type: "project-search",
       projectSlug: "my-project",
       normalized: true,
-      reason: "spaces",
     });
   });
 
