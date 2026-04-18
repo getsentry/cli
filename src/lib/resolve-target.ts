@@ -1548,6 +1548,7 @@ export type ResolvedOrgProject = {
  * @returns Resolved org and project slugs
  * @throws {ContextError} When target cannot be resolved or org-all is used
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: multi-mode dispatch with fuzzy recovery is inherently branchy
 export async function resolveOrgProjectTarget(
   parsed: ParsedOrgProject,
   cwd: string,
@@ -1599,7 +1600,9 @@ export async function resolveOrgProjectTarget(
           `Project '${displaySlug}'`,
           "not found",
           `sentry ${commandName} <org>/${parsed.projectSlug}`,
-          outcome.suggestions
+          outcome.suggestions.length > 0
+            ? outcome.suggestions
+            : ["No project with this slug found in any accessible organization"]
         );
       }
 
