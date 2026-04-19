@@ -116,40 +116,6 @@ describe("resolveCommand.func()", () => {
     });
   });
 
-  test("resolves --in commit:<sha> as inCommit", async () => {
-    resolveIssueSpy.mockResolvedValue({
-      org: "test-org",
-      issue: makeMockIssue(),
-    });
-    updateSpy.mockResolvedValue(makeMockIssue());
-
-    const { context } = createMockContext();
-    const func = await resolveCommand.loader();
-    await func.call(context, { json: false, in: "commit:abc123" }, "CLI-G5");
-
-    expect(updateSpy).toHaveBeenCalledWith("123456789", "resolved", {
-      statusDetails: { inCommit: "abc123" },
-      orgSlug: "test-org",
-    });
-  });
-
-  test("rejects 'commit:' with no SHA", async () => {
-    resolveIssueSpy.mockResolvedValue({
-      org: "test-org",
-      issue: makeMockIssue(),
-    });
-
-    const { context } = createMockContext();
-    const func = await resolveCommand.loader();
-    const err = await func
-      .call(context, { json: false, in: "commit:" }, "CLI-G5")
-      .catch((e: Error) => e);
-
-    expect(err).toBeInstanceOf(Error);
-    expect(err.message).toContain("expected a commit SHA");
-    expect(updateSpy).not.toHaveBeenCalled();
-  });
-
   test("JSON output includes resolved_in metadata", async () => {
     resolveIssueSpy.mockResolvedValue({
       org: "test-org",

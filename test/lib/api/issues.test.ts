@@ -9,7 +9,6 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   mergeIssues,
   parseResolveSpec,
-  RESOLVE_COMMIT_PREFIX,
   RESOLVE_NEXT_RELEASE_SENTINEL,
 } from "../../../src/lib/api-client.js";
 import { ApiError, ValidationError } from "../../../src/lib/errors.js";
@@ -32,30 +31,6 @@ describe("parseResolveSpec", () => {
     expect(parseResolveSpec(RESOLVE_NEXT_RELEASE_SENTINEL)).toEqual({
       inNextRelease: true,
     });
-  });
-
-  test("parses 'commit:<sha>' as inCommit", () => {
-    expect(parseResolveSpec(`${RESOLVE_COMMIT_PREFIX}abc123`)).toEqual({
-      inCommit: "abc123",
-    });
-  });
-
-  test("parses 'commit:<long-sha>' as inCommit", () => {
-    expect(
-      parseResolveSpec(`${RESOLVE_COMMIT_PREFIX}6f1d9e3dd0ff878e0901d1c546`)
-    ).toEqual({ inCommit: "6f1d9e3dd0ff878e0901d1c546" });
-  });
-
-  test("throws ValidationError for 'commit:' with no SHA", () => {
-    expect(() => parseResolveSpec(RESOLVE_COMMIT_PREFIX)).toThrow(
-      ValidationError
-    );
-  });
-
-  test("throws ValidationError for 'commit:  ' (whitespace SHA)", () => {
-    expect(() => parseResolveSpec(`${RESOLVE_COMMIT_PREFIX}   `)).toThrow(
-      ValidationError
-    );
   });
 
   test("treats any other value as inRelease", () => {

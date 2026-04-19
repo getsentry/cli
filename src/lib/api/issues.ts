@@ -402,13 +402,16 @@ export async function tryGetIssueByShortId(
  *   Future events seen on releases **after** this one will regression-flag.
  * - `inNextRelease: true` — resolve in the next release after the current
  *   commit. Commonly used when the fix is merged but not yet tagged.
- * - `inCommit` — resolve tied to a specific commit SHA. Sentry resolves
- *   once a release containing the commit is created.
+ *
+ * `inCommit` resolution is intentionally not exposed here — the Sentry API
+ * requires both a SHA *and* a repository name registered in Sentry, which
+ * is cumbersome to collect from a CLI and rarely needed (most users reach
+ * for `inNextRelease` instead). Callers that genuinely need commit-scoped
+ * resolution can use `sentry api` directly.
  */
 export type ResolveStatusDetails =
   | { inRelease: string }
-  | { inNextRelease: true }
-  | { inCommit: string };
+  | { inNextRelease: true };
 
 /**
  * Sentinel string meaning "resolve in the next release (tied to HEAD)".
@@ -418,23 +421,14 @@ export type ResolveStatusDetails =
 export const RESOLVE_NEXT_RELEASE_SENTINEL = "@next";
 
 /**
- * Prefix meaning "resolve in this commit SHA" for {@link parseResolveSpec}.
- * `commit:abc123` → `{ inCommit: "abc123" }`.
- */
-export const RESOLVE_COMMIT_PREFIX = "commit:";
-
-/**
  * Parse an `--in` resolution-spec string into a {@link ResolveStatusDetails}
  * object. Grammar (see command docs):
  *
  * - `@next`           → `{ inNextRelease: true }`
- * - `commit:<sha>`    → `{ inCommit: <sha> }`
  * - anything else     → `{ inRelease: <value> }`
  *
  * Empty/whitespace-only input returns `null` (treated as "no spec" by the
  * caller, which resolves immediately without release tracking).
- *
- * @throws {ApiError} When a `commit:` prefix is given without a SHA.
  */
 export function parseResolveSpec(
   spec: string | undefined
@@ -448,16 +442,6 @@ export function parseResolveSpec(
   }
   if (trimmed === RESOLVE_NEXT_RELEASE_SENTINEL) {
     return { inNextRelease: true };
-  }
-  if (trimmed.startsWith(RESOLVE_COMMIT_PREFIX)) {
-    const sha = trimmed.slice(RESOLVE_COMMIT_PREFIX.length).trim();
-    if (!sha) {
-      throw new ValidationError(
-        `Invalid --in spec: expected a commit SHA after 'commit:' (got '${spec}').`,
-        "in"
-      );
-    }
-    return { inCommit: sha };
   }
   return { inRelease: trimmed };
 }

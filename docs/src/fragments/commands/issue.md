@@ -117,15 +117,20 @@ sentry issue resolve CLI-G5 --in 0.26.1
 
 # Resolve in the next release (tied to current HEAD)
 sentry issue resolve CLI-G5 --in @next
-
-# Resolve tied to a commit SHA — regression-flags once a release
-# containing that commit deploys
-sentry issue resolve CLI-G5 -i commit:abc123
+sentry issue resolve CLI-G5 -i @next
 
 # Reopen a resolved issue
 sentry issue unresolve CLI-G5
 sentry issue reopen CLI-G5   # alias
 ```
+
+:::note[Commit-scoped resolution not exposed]
+Sentry's API also supports resolving in a specific commit (`inCommit`), but
+it requires both a commit SHA *and* a repository name registered in Sentry.
+Collecting both from a CLI flag is cumbersome; most users want `--in @next`
+instead. If you genuinely need commit-scoped resolution, use
+`sentry api` directly.
+:::
 
 ### Merge fragmented issues
 

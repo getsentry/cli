@@ -60,7 +60,6 @@ export {
   type MergeIssuesResult,
   mergeIssues,
   parseResolveSpec,
-  RESOLVE_COMMIT_PREFIX,
   RESOLVE_NEXT_RELEASE_SENTINEL,
   type ResolveStatusDetails,
   tryGetIssueByShortId,

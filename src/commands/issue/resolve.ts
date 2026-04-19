@@ -16,7 +16,6 @@
 import type { SentryContext } from "../../context.js";
 import {
   parseResolveSpec,
-  RESOLVE_COMMIT_PREFIX,
   RESOLVE_NEXT_RELEASE_SENTINEL,
   type ResolveStatusDetails,
   updateIssueStatus,
@@ -58,10 +57,7 @@ function describeSpec(spec: ResolveStatusDetails | null): string {
   if ("inRelease" in spec) {
     return `in release '${spec.inRelease}'`;
   }
-  if ("inNextRelease" in spec) {
-    return "in the next release";
-  }
-  return `in commit '${spec.inCommit}'`;
+  return "in the next release";
 }
 
 function formatResolved(result: ResolveResult): string {
@@ -78,17 +74,15 @@ export const resolveCommand = buildCommand({
   docs: {
     brief: "Mark an issue as resolved",
     fullDescription:
-      "Resolve an issue, optionally tied to a release or commit.\n\n" +
+      "Resolve an issue, optionally tied to a release.\n\n" +
       "Resolution spec (--in / -i):\n" +
       `  ${RESOLVE_NEXT_RELEASE_SENTINEL}              Resolve in the next release (tied to HEAD)\n` +
-      `  ${RESOLVE_COMMIT_PREFIX}<sha>       Resolve when a release containing this commit deploys\n` +
       "  <version>          Resolve in this specific release (e.g., 0.26.1)\n" +
       "  (omitted)          Resolve immediately (no regression tracking)\n\n" +
       "Examples:\n" +
       "  sentry issue resolve CLI-12Z\n" +
       "  sentry issue resolve CLI-12Z --in 0.26.1\n" +
       "  sentry issue resolve CLI-196 --in @next\n" +
-      "  sentry issue resolve CLI-XX -i commit:abc123\n" +
       "  sentry issue resolve my-org/CLI-AB",
   },
   output: {
@@ -101,7 +95,7 @@ export const resolveCommand = buildCommand({
       in: {
         kind: "parsed",
         parse: String,
-        brief: `Resolve in a release ('<version>' | '${RESOLVE_NEXT_RELEASE_SENTINEL}' | '${RESOLVE_COMMIT_PREFIX}<sha>')`,
+        brief: `Resolve in a release ('<version>' or '${RESOLVE_NEXT_RELEASE_SENTINEL}')`,
         optional: true,
       },
     },
