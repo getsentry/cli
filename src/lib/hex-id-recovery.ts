@@ -208,9 +208,6 @@ export function preNormalize(input: string): {
   sentinel?: string;
 } {
   const lowered = input.trim().toLowerCase();
-  if (SENTINEL_VALUES.has(lowered)) {
-    return { cleaned: lowered, sentinel: lowered };
-  }
 
   // Strip URL fragment prefixes repeatedly so the function is idempotent.
   // A pathological double-prefixed input like `span-span-abc` would otherwise
@@ -227,6 +224,13 @@ export function preNormalize(input: string): {
         break;
       }
     }
+  }
+
+  // Sentinel check runs AFTER URL-prefix stripping so inputs like
+  // `span-null` (shell variable leak through a URL-builder) surface as
+  // a sentinel rather than a misleading "looks like a slug" error.
+  if (SENTINEL_VALUES.has(cleaned)) {
+    return { cleaned, sentinel: cleaned };
   }
 
   if (UUID_DASH_RE.test(cleaned)) {

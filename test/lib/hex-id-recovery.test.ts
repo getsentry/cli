@@ -64,6 +64,20 @@ describe("preNormalize", () => {
     expect(preNormalize("span-abc12345")).toEqual({ cleaned: "abc12345" });
   });
 
+  test("detects sentinel after URL prefix stripping", () => {
+    // Regression: `span-null` must be classified as sentinel, not slug.
+    // The sentinel check has to run AFTER prefix stripping to catch
+    // shell variable leaks that went through URL builders.
+    expect(preNormalize("span-null")).toEqual({
+      cleaned: "null",
+      sentinel: "null",
+    });
+    expect(preNormalize("event-latest")).toEqual({
+      cleaned: "latest",
+      sentinel: "latest",
+    });
+  });
+
   test("strips nested URL fragment prefixes (idempotency safety)", () => {
     // Ensures preNormalize is idempotent even on pathological inputs —
     // first pass would only peel the outer prefix without the loop.
