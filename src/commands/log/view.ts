@@ -37,6 +37,7 @@ import {
 import { RETENTION_DAYS } from "../../lib/retention.js";
 import { buildLogsUrl } from "../../lib/sentry-urls.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
+import { isAllDigits } from "../../lib/utils.js";
 import type { DetailedSentryLog } from "../../types/index.js";
 
 const log = logger.withTag("log-view");
@@ -47,8 +48,6 @@ type ViewFlags = {
   readonly fresh: boolean;
   readonly fields?: string[];
 };
-
-import { isAllDigits } from "../../lib/utils.js";
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry log view <org>/<project> <log-id> [<log-id>...]";
