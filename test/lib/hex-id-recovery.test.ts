@@ -140,6 +140,15 @@ describe("stripTrailingNonHex", () => {
   test("returns null for shorter input than expected", () => {
     expect(stripTrailingNonHex("abc", 32)).toBeNull();
   });
+
+  test("returns null when trace ID passed to span-length strip (all-hex tail)", () => {
+    // Regression: a 32-char trace ID mistakenly passed where a span ID is
+    // expected must NOT be silently truncated to 16 chars. Stripping would
+    // have returned `{hex: first-16, stripped: last-16}`, masking the
+    // wrong-entity-type error. The null return lets validateSpanId's
+    // targeted "looks like a trace ID" hint surface instead.
+    expect(stripTrailingNonHex(VALID_32, 16)).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -428,6 +437,25 @@ describe("recoverHexId decision tree", () => {
     expect(r.kind).toBe("stripped");
     expect(r.kind === "stripped" && r.id).toBe(VALID_32);
     expect(adapterCalled).toBe(false);
+  });
+
+  test("URL-prefixed UUID-dashed valid event ID: stripped field describes transformation", async () => {
+    // When preNormalize removes BOTH the URL prefix AND UUID dashes,
+    // `cleaned` is no longer a literal substring of the lowercased raw
+    // input. The stripped field should describe the transformation
+    // (URL prefix + UUID dashes) rather than echoing the whole input.
+    const uuidDashed = "c0a5a9d4-dce4-4358-ab42-31fc3bead7e9";
+    stubAdapter("event", async () => []);
+    const r = await recoverHexId(`event-${uuidDashed}`, "event", CLEAN_CTX);
+    expect(r.kind).toBe("stripped");
+    expect(r.kind === "stripped" && r.id).toBe(VALID_32);
+    // stripped should not equal the entire input — should describe the
+    // parts that were removed.
+    if (r.kind === "stripped") {
+      expect(r.stripped).not.toBe(`event-${uuidDashed}`);
+      // Should mention the prefix and dashes were stripped.
+      expect(r.stripped).toContain("event-");
+    }
   });
 
   test("8-hex prefix for trace does NOT trigger cross-entity (needs 16 hex)", async () => {

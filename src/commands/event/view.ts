@@ -37,6 +37,7 @@ import { HEX_ID_RE, normalizeHexId, validateHexId } from "../../lib/hex-id.js";
 import {
   handleRecoveryResult,
   recoverHexId,
+  resolveRecoveryOrg,
 } from "../../lib/hex-id-recovery.js";
 import {
   applyFreshFlag,
@@ -311,7 +312,7 @@ async function validateAndRecoverEventId(
     if (!(err instanceof ValidationError)) {
       throw err;
     }
-    const recoveryOrg = await tryResolveRecoveryOrg(parsed);
+    const recoveryOrg = await resolveRecoveryOrg(parsed);
     const recoveryCtx = recoveryOrg ?? { org: "", project: undefined };
     const result = await recoverHexId(rawEventId, "event", recoveryCtx);
     return handleRecoveryResult(result, err, {
@@ -319,56 +320,6 @@ async function validateAndRecoverEventId(
       canonicalCommand: `sentry event view ${recoveryCtx.org || "<org>"}/${recoveryCtx.project ?? "<project>"}/<id>`,
       logTag: "event.view",
     });
-  }
-}
-
-/**
- * Try to resolve just enough org/project context to feed the hex-ID recovery
- * system. Used only when `validateHexId` already failed — we're trying to
- * offer fuzzy prefix lookup.
- *
- * Only attempts recovery when the user provided an explicit target
- * (`<org>/<project>` or `<org>/`). For the auto-detect path we'd otherwise
- * trigger potentially expensive DSN/config scanning on a malformed input —
- * and without a project slug the fuzzy adapters return empty anyway, so
- * the recovery would always fall through to the slug/too-short hint path
- * which runs fine without an org context.
- *
- * Returns null when recovery can't proceed with an explicit target. The
- * caller then re-throws the original validation error unchanged (or falls
- * back to the cheap classifications in {@link recoverHexId} that don't
- * need API context).
- *
- * Swallows non-auth errors defensively. AuthError is re-thrown so the
- * auto-login flow still triggers.
- */
-async function tryResolveRecoveryOrg(
-  parsed: ReturnType<typeof parseOrgProjectArg>
-): Promise<{ org: string; project?: string } | null> {
-  try {
-    switch (parsed.type) {
-      case ProjectSpecificationType.Explicit:
-        return {
-          org: await resolveEffectiveOrg(parsed.org),
-          project: parsed.project,
-        };
-      case ProjectSpecificationType.OrgAll:
-        return { org: await resolveEffectiveOrg(parsed.org) };
-      case ProjectSpecificationType.ProjectSearch:
-      case ProjectSpecificationType.AutoDetect:
-        // Skip heavy resolution — recovery runs its cheap classifications
-        // (sentinel, over-nested, looks-like-slug) locally without needing
-        // an org. Fuzzy prefix lookup requires a project scope anyway, so
-        // there's nothing useful to gain by triggering DSN auto-detect.
-        return null;
-      default:
-        return null;
-    }
-  } catch (err) {
-    if (err instanceof AuthError) {
-      throw err;
-    }
-    return null;
   }
 }
 

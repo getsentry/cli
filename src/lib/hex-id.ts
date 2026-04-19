@@ -67,8 +67,8 @@ export const ALPHA_SEGMENT_RE = /[a-z]{2,}/i;
 /** Max display length for invalid IDs in error messages before truncation */
 const MAX_DISPLAY_LENGTH = 40;
 
-/** Matches any character that is NOT a lowercase hex digit */
-const NON_HEX_RE = /[^0-9a-f]/;
+/** Matches any character that is NOT a lowercase hex digit. */
+export const NON_HEX_RE = /[^0-9a-f]/;
 
 /** Matches strings starting with a dash — likely CLI flags that Stricli didn't recognize */
 const FLAG_LIKE_RE = /^-/;

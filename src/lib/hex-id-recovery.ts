@@ -26,6 +26,10 @@
 
 import type { SpanListItem, TransactionListItem } from "../types/index.js";
 import { listLogs, listSpans, listTransactions } from "./api-client.js";
+import {
+  type ParsedOrgProject,
+  ProjectSpecificationType,
+} from "./arg-parsing.js";
 import { AuthError, ResolutionError, ValidationError } from "./errors.js";
 import type { HexEntityType } from "./hex-id.js";
 import {
@@ -36,12 +40,14 @@ import {
   LEADING_HEX_CHAR_RE,
   LEADING_HEX_RE,
   MIDDLE_ELLIPSIS_RE,
+  NON_HEX_RE,
   normalizeHexId,
   PURE_HEX_RE,
   SPAN_ID_RE,
   UUID_DASH_RE,
 } from "./hex-id.js";
 import { logger } from "./logger.js";
+import { resolveEffectiveOrg } from "./region.js";
 import { RETENTION_DAYS, SCAN_PERIODS } from "./retention.js";
 
 const log = logger.withTag("hex-id-recovery");
@@ -239,13 +245,22 @@ export function preNormalize(input: string): {
 
 /**
  * Strip trailing non-hex chars and return the hex prefix **only when** the
- * result matches `expectedLen` exactly. Returns null when the input is
- * already valid length, when the leading hex run is too short, or when the
- * input starts with a non-hex char.
+ * result matches `expectedLen` exactly AND the stripped tail actually
+ * contains non-hex characters. Returns null when:
+ *
+ * - the input is already ≤ `expectedLen` (nothing to strip);
+ * - the leading hex run is shorter than `expectedLen`;
+ * - the input starts with a non-hex char;
+ * - the entire input is valid hex (the tail is all hex). This last case
+ *   prevents silently truncating a 32-char trace ID to a 16-char "span ID"
+ *   when the caller passes the wrong entity type — `validateSpanId` has a
+ *   dedicated "looks like a trace ID" hint for that scenario.
  *
  * @example
  * stripTrailingNonHex("c0a5a9d4dce44358ab4231fc3bead7e9ios", 32)
  * // → { hex: "c0a5a9d4dce44358ab4231fc3bead7e9", stripped: "ios" }
+ * stripTrailingNonHex("<32 hex chars>", 16)
+ * // → null (all hex; would silently truncate a trace ID to a span ID)
  */
 export function stripTrailingNonHex(
   input: string,
@@ -258,9 +273,15 @@ export function stripTrailingNonHex(
   if (!match || match[0].length < expectedLen) {
     return null;
   }
+  const stripped = input.slice(expectedLen);
+  // Require at least one non-hex char in the stripped tail, otherwise we'd
+  // be truncating a longer valid hex ID (likely a wrong-entity-type input).
+  if (!NON_HEX_RE.test(stripped)) {
+    return null;
+  }
   return {
     hex: match[0].slice(0, expectedLen),
-    stripped: input.slice(expectedLen),
+    stripped,
   };
 }
 
@@ -309,6 +330,50 @@ export function looksLikeSlug(input: string): boolean {
 /** Returns true for paths with 4+ slash-separated non-empty segments. */
 export function isOverNestedPath(input: string): boolean {
   return input.split("/").filter(Boolean).length >= OVER_NESTED_MIN_SEGMENTS;
+}
+
+/**
+ * Extract recovery context from a parsed org/project target.
+ *
+ * Shared by command-layer wrappers that need to feed `recoverHexId` an
+ * `{org, project?}` context. Only returns a concrete value for `explicit`
+ * and `org-all` modes — `project-search` and `auto-detect` deliberately
+ * return null because kicking off DSN auto-detection or cross-org project
+ * search during recovery would be expensive, and the cheap local
+ * classifications inside `recoverHexId` run fine without an org anyway.
+ *
+ * Routes through {@link resolveEffectiveOrg} to normalize DSN-style
+ * numeric org IDs (e.g. `o1081365`) to slugs — otherwise fuzzy-adapter
+ * API calls silently 404 on numeric orgs.
+ *
+ * Swallows non-auth errors defensively: a secondary resolution failure
+ * during recovery must never mask the original validation error.
+ * AuthError is re-thrown so the auto-login flow still triggers.
+ */
+export async function resolveRecoveryOrg(
+  parsed: ParsedOrgProject
+): Promise<{ org: string; project?: string } | null> {
+  try {
+    switch (parsed.type) {
+      case ProjectSpecificationType.Explicit:
+        return {
+          org: await resolveEffectiveOrg(parsed.org),
+          project: parsed.project,
+        };
+      case ProjectSpecificationType.OrgAll:
+        return { org: await resolveEffectiveOrg(parsed.org) };
+      case ProjectSpecificationType.ProjectSearch:
+      case ProjectSpecificationType.AutoDetect:
+        return null;
+      default:
+        return null;
+    }
+  } catch (err) {
+    if (err instanceof AuthError) {
+      throw err;
+    }
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -610,6 +675,13 @@ export async function recoverHexId(
  * but differs from the raw input (after trim+lowercase), return a stripped
  * result immediately. Prevents a valid ID from falling through to fuzzy
  * lookup just because the user prefixed it with `span-` etc.
+ *
+ * Building an accurate `stripped` field is tricky when pre-normalization
+ * removed both a URL-fragment prefix AND UUID dashes (the dashless
+ * `cleaned` isn't a literal substring of the dashed `lowered`). Rather
+ * than reconstruct the removed pieces, we report the raw difference in
+ * the raw input vs the cleaned result — good enough for the warning
+ * message, and the recovered ID is always correct regardless.
  */
 function tryPreNormalizedValidId(
   input: string,
@@ -629,10 +701,36 @@ function tryPreNormalizedValidId(
     kind: "stripped",
     id: cleaned,
     original: input,
-    // What got stripped: everything in the lowercased original that isn't
-    // part of the cleaned result.
-    stripped: lowered.replace(cleaned, ""),
+    stripped: describeStrippedParts(lowered, cleaned),
   };
+}
+
+/**
+ * Produce a human-readable description of what was removed from `raw` to
+ * get `cleaned`. Returns the exact substring diff when possible (a simple
+ * substring match); otherwise a summary of the transformation (URL prefix,
+ * UUID dashes, or both).
+ */
+function describeStrippedParts(raw: string, cleaned: string): string {
+  // Simple case: cleaned is a substring of raw — return the concatenation
+  // of everything outside that substring.
+  const idx = raw.indexOf(cleaned);
+  if (idx !== -1) {
+    return raw.slice(0, idx) + raw.slice(idx + cleaned.length);
+  }
+  // Mixed case: both URL prefix AND internal dashes were stripped, so
+  // cleaned isn't a literal substring. Summarize the transformation.
+  const parts: string[] = [];
+  for (const prefix of URL_FRAGMENT_PREFIXES) {
+    if (raw.startsWith(prefix)) {
+      parts.push(prefix);
+      break;
+    }
+  }
+  if (raw.includes("-")) {
+    parts.push("UUID dashes");
+  }
+  return parts.length > 0 ? parts.join(" + ") : "formatting";
 }
 
 /**
