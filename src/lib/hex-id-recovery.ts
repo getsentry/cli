@@ -658,13 +658,33 @@ export async function recoverHexId(
     return redirect;
   }
 
+  // Slug-shape check on the RAW input before fuzzy lookup. Slug-like
+  // inputs where the dashless form happens to start with enough hex
+  // chars (e.g. `cafe-babe-app` → `cafebabeapp`) would otherwise reach
+  // runFuzzyLookup and waste an API call on a clearly-mistaken input.
+  if (looksLikeSlug(input)) {
+    return {
+      kind: "failed",
+      original: input,
+      reason: "looks-like-slug",
+      hint: buildSlugHint(input, entityType, ctx.org),
+    };
+  }
+
   const candidate = extractHexCandidate(cleaned);
   const longEnough =
     candidate !== null &&
     (candidate.prefix.length >= MIN_FUZZY_PREFIX ||
       (candidate.suffix?.length ?? 0) >= MIN_FUZZY_PREFIX);
   if (!(longEnough && candidate)) {
-    return classifyShortInput(input, entityType, ctx);
+    // Raw-input slug check already ran above; here it's either a short
+    // pure-hex prefix or a short non-hex blob — neither is a slug.
+    return {
+      kind: "failed",
+      original: input,
+      reason: "too-short",
+      hint: `Need at least ${MIN_FUZZY_PREFIX} hex chars of the ${entityType} ID to attempt recovery.`,
+    };
   }
 
   return runFuzzyLookup(input, entityType, candidate, ctx);
@@ -769,31 +789,6 @@ async function tryCrossEntityRedirect(
     );
   }
   return null;
-}
-
-/**
- * Classify a "not long enough" input as either a slug (nudge toward list
- * command) or plain too-short (ask for more chars).
- */
-function classifyShortInput(
-  input: string,
-  entityType: HexEntityType,
-  ctx: LookupContext
-): RecoveryResult {
-  if (looksLikeSlug(input)) {
-    return {
-      kind: "failed",
-      original: input,
-      reason: "looks-like-slug",
-      hint: buildSlugHint(input, entityType, ctx.org),
-    };
-  }
-  return {
-    kind: "failed",
-    original: input,
-    reason: "too-short",
-    hint: `Need at least ${MIN_FUZZY_PREFIX} hex chars of the ${entityType} ID to attempt recovery.`,
-  };
 }
 
 /** Call the registered adapter and shape the result into a RecoveryResult. */

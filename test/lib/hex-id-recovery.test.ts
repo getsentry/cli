@@ -367,6 +367,23 @@ describe("recoverHexId decision tree", () => {
     expect(r.kind === "failed" && r.hint).toContain("issue list");
   });
 
+  test("hex-starting slug (cafe-babe-app) classified as slug, not fuzzy-looked-up", async () => {
+    // Regression: `cafe-babe-app` is clearly a project slug. preNormalize
+    // strips the dashes (dashless starts with hex `c`) to `cafebabeapp`,
+    // which has an 8+ char hex prefix that would trigger fuzzy lookup if
+    // the slug check only ran in the too-short branch. The raw-input
+    // slug check must fire first.
+    let adapterCalled = false;
+    stubAdapter("event", async () => {
+      adapterCalled = true;
+      return [];
+    });
+    const r = await recoverHexId("cafe-babe-app", "event", CLEAN_CTX);
+    expect(r.kind).toBe("failed");
+    expect(r.kind === "failed" && r.reason).toBe("looks-like-slug");
+    expect(adapterCalled).toBe(false);
+  });
+
   test("looks-like-slug for trace → trace list hint (CLI-M0 frontend)", async () => {
     const r = await recoverHexId("frontend-app", "trace", CLEAN_CTX);
     expect(r.kind).toBe("failed");
