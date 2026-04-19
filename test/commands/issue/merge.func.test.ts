@@ -41,13 +41,15 @@ function makeMockIssue(overrides?: Partial<SentryIssue>): SentryIssue {
 
 function createMockContext() {
   const stdoutWrite = mock(() => true);
+  const stderrWrite = mock(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
-      stderr: { write: mock(() => true) },
+      stderr: { write: stderrWrite },
       cwd: "/tmp",
     },
     stdoutWrite,
+    stderrWrite,
   };
 }
 
@@ -166,7 +168,7 @@ describe("mergeCommand.func()", () => {
     expect(mergeSpy).not.toHaveBeenCalled();
   });
 
-  test("JSON output maps numeric IDs back to short IDs", async () => {
+  test("JSON output maps numeric IDs back to short IDs with URL", async () => {
     resolveIssueSpy.mockImplementation(({ issueArg }: { issueArg: string }) =>
       Promise.resolve({
         org: "test-org",
@@ -185,12 +187,58 @@ describe("mergeCommand.func()", () => {
     const output = stdoutWrite.mock.calls.map((c) => String(c[0])).join("");
     const parsed = JSON.parse(output) as {
       org: string;
-      parent: { shortId: string; id: string };
+      parent: { shortId: string; id: string; url: string };
       children: { shortId: string; id: string }[];
     };
     expect(parsed.org).toBe("test-org");
     expect(parsed.parent.shortId).toBe("CLI-A");
     expect(parsed.parent.id).toBe("10A");
+    // URL surfaces the canonical parent so users can click through.
+    expect(parsed.parent.url).toContain("test-org");
+    expect(parsed.parent.url).toContain("10A");
     expect(parsed.children).toEqual([{ shortId: "CLI-B", id: "10B" }]);
+  });
+
+  test("warns when --into preference is overridden by Sentry", async () => {
+    resolveIssueSpy.mockImplementation(({ issueArg }: { issueArg: string }) =>
+      Promise.resolve({
+        org: "test-org",
+        issue: makeMockIssue({
+          shortId: issueArg,
+          id: issueArg.replace("CLI-", "10"),
+        }),
+      })
+    );
+    // User asked for CLI-B, but Sentry picked CLI-A (e.g. larger by count)
+    mergeSpy.mockResolvedValue({ parent: "10A", children: ["10B"] });
+
+    const { context, stderrWrite } = createMockContext();
+    const func = await mergeCommand.loader();
+    await func.call(context, { json: false, into: "CLI-B" }, "CLI-A", "CLI-B");
+
+    const stderr = stderrWrite.mock.calls.map((c) => String(c[0])).join("");
+    expect(stderr).toContain("--into 'CLI-B' was a preference");
+    expect(stderr).toContain("CLI-A as the canonical parent");
+  });
+
+  test("does not warn when --into preference was honored", async () => {
+    resolveIssueSpy.mockImplementation(({ issueArg }: { issueArg: string }) =>
+      Promise.resolve({
+        org: "test-org",
+        issue: makeMockIssue({
+          shortId: issueArg,
+          id: issueArg.replace("CLI-", "10"),
+        }),
+      })
+    );
+    // User asked for CLI-B, Sentry agreed.
+    mergeSpy.mockResolvedValue({ parent: "10B", children: ["10A"] });
+
+    const { context, stderrWrite } = createMockContext();
+    const func = await mergeCommand.loader();
+    await func.call(context, { json: false, into: "CLI-B" }, "CLI-A", "CLI-B");
+
+    const stderr = stderrWrite.mock.calls.map((c) => String(c[0])).join("");
+    expect(stderr).not.toContain("--into");
   });
 });

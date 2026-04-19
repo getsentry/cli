@@ -24,9 +24,10 @@ import type { SentryContext } from "../../context.js";
 import { type MergeIssuesResult, mergeIssues } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
 import { CliError, ValidationError } from "../../lib/errors.js";
-import { muted } from "../../lib/formatters/index.js";
+import { muted, warning } from "../../lib/formatters/index.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
+import { buildIssueUrl } from "../../lib/sentry-urls.js";
 import type { SentryIssue } from "../../types/index.js";
 import { resolveIssue } from "./utils.js";
 
@@ -56,7 +57,8 @@ type MergeCommandResult = {
 function formatMerged(result: MergeCommandResult): string {
   const head = `${muted("Merged")} ${result.childShortIds.length} issue(s) into ${result.parentShortId}`;
   const children = result.childShortIds.map((id) => `  • ${id}`).join("\n");
-  return `${head}\n${children}\n\nSee: ${result.raw.parent}`;
+  const url = buildIssueUrl(result.org, result.raw.parent);
+  return `${head}\n${children}\n\nSee: ${url}`;
 }
 
 function jsonTransform(result: MergeCommandResult): unknown {
@@ -65,6 +67,7 @@ function jsonTransform(result: MergeCommandResult): unknown {
     parent: {
       shortId: result.parentShortId,
       id: result.raw.parent,
+      url: buildIssueUrl(result.org, result.raw.parent),
     },
     children: result.childShortIds.map((shortId, i) => ({
       shortId,
@@ -152,8 +155,10 @@ export const mergeCommand = buildCommand({
       "Consolidate multiple issues into one. Useful when the same logical\n" +
       "error was split into separate groups (e.g. by Sentry's default\n" +
       "stack-trace grouping before fingerprint rules were applied).\n\n" +
-      "Sentry auto-picks the canonical parent (typically the largest by\n" +
-      "event count). Use --into to override.\n\n" +
+      "Sentry picks the canonical parent based on event count — typically\n" +
+      "the largest group. --into is a preference, not a guarantee: if your\n" +
+      "choice has fewer events, Sentry may still pick a different parent,\n" +
+      "in which case a warning is printed to stderr.\n\n" +
       "All issues must belong to the same organization. Only error-type\n" +
       "issues can be merged (the API rejects performance/info issues).\n\n" +
       "Examples:\n" +
@@ -179,7 +184,7 @@ export const mergeCommand = buildCommand({
         kind: "parsed",
         parse: String,
         brief:
-          "Pin the canonical parent (must match one of the provided issue IDs)",
+          "Prefer this issue as the canonical parent (must match one of the provided IDs)",
         optional: true,
       },
     },
@@ -200,6 +205,10 @@ export const mergeCommand = buildCommand({
     const { org, issues } = await resolveAllIssues(args, cwd);
     const ordered = orderForMerge(issues, flags.into);
     const groupIds = ordered.map((i) => i.id);
+    // `--into` is a preference, not a guarantee — track it so we can warn
+    // if Sentry picks a different parent (typically the largest by event
+    // count takes precedence over the requested ordering).
+    const requestedParentId = flags.into ? groupIds[0] : undefined;
 
     log.debug(
       `Merging ${groupIds.length} issues in ${org}: ${ordered.map((i) => i.shortId).join(", ")}`
@@ -211,6 +220,14 @@ export const mergeCommand = buildCommand({
     const idToShort = new Map(ordered.map((i) => [i.id, i.shortId]));
     const parentShortId = idToShort.get(raw.parent) ?? raw.parent;
     const childShortIds = raw.children.map((id) => idToShort.get(id) ?? id);
+
+    if (requestedParentId && requestedParentId !== raw.parent) {
+      const requestedShortId = idToShort.get(requestedParentId) ?? flags.into;
+      this.stderr.write(
+        `${warning("Warning:")} --into '${requestedShortId}' was a preference, not a guarantee. ` +
+          `Sentry selected ${parentShortId} as the canonical parent based on event count.\n`
+      );
+    }
 
     yield new CommandOutput<MergeCommandResult>({
       org,
