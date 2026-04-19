@@ -12,13 +12,7 @@
  * `api-client.coverage.test.ts`.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { setAuthToken } from "../../src/lib/db/auth.js";
 import { setOrgRegion } from "../../src/lib/db/regions.js";
@@ -211,14 +205,17 @@ describe("adapter query params", () => {
             {
               "sentry.item_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               timestamp: "2026-01-01T00:00:00Z",
-              timestamp_precise: 1735689600000000000,
+              // Nanosecond timestamps exceed Number.MAX_SAFE_INTEGER
+              // when encoded literally. Use string form (the schema
+              // coerces it to a number for us).
+              timestamp_precise: "1735689600000000000",
               message: "test log",
               severity: "info",
             },
             {
               "sentry.item_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
               timestamp: "2026-01-01T00:00:00Z",
-              timestamp_precise: 1735689600000000001,
+              timestamp_precise: "1735689600000000001",
               message: "another log",
               severity: "error",
             },
@@ -303,9 +300,9 @@ describe("recoverHexId trace redirect via findTraceBySpanId", () => {
     const spanId = "a1b2c3d4e5f67890";
     // First call (id:<span> lookup) returns empty → null trace → falls through.
     // Second call (fuzzy scan) also returns empty → no-matches.
-    let callCount = 0;
+    const callCount = { n: 0 };
     globalThis.fetch = mockFetch(async () => {
-      callCount++;
+      callCount.n += 1;
       return eventsResponse([]);
     });
 
@@ -314,7 +311,7 @@ describe("recoverHexId trace redirect via findTraceBySpanId", () => {
       project: "test-project",
     });
 
-    expect(callCount).toBeGreaterThanOrEqual(1);
+    expect(callCount.n).toBeGreaterThanOrEqual(1);
     // The span lookup returned null, so no redirect happened. Input has a
     // valid-looking 16-hex prefix, so it proceeds to the fuzzy path and
     // ultimately returns `no-matches` (or `multiple-matches` if somehow
