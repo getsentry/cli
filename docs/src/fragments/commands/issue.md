@@ -104,3 +104,59 @@ sentry issue plan 123456789 --cause 0
 - GitHub integration configured with repository access
 - Code mappings set up to link stack frames to source files
 - Root cause analysis must be completed (`sentry issue explain`) before generating a plan
+
+### Resolve and reopen issues
+
+```bash
+# Resolve immediately (no regression tracking)
+sentry issue resolve CLI-G5
+
+# Resolve in a specific release — future events on newer releases are
+# regression-flagged
+sentry issue resolve CLI-G5 --in 0.26.1
+
+# Monorepo-style releases work too (no special parsing)
+sentry issue resolve CLI-G5 --in spotlight@1.2.3
+
+# Resolve in the next release (tied to current HEAD)
+sentry issue resolve CLI-G5 --in @next
+sentry issue resolve CLI-G5 -i @next
+
+# Resolve in the current git HEAD — auto-detects the Sentry repo from
+# your git origin remote (hard-errors if it can't)
+sentry issue resolve CLI-G5 --in @commit
+
+# Explicit commit + repo (no git inspection; repo must be registered in Sentry)
+sentry issue resolve CLI-G5 --in @commit:getsentry/cli@abc123def
+
+# Reopen a resolved issue
+sentry issue unresolve CLI-G5
+sentry issue reopen CLI-G5   # alias
+```
+
+:::note[How `@commit` auto-detects]
+`--in @commit` reads `HEAD` and the `origin` remote, parses the remote as
+`owner/repo`, then looks it up in your org's Sentry repositories (cached
+locally for 7 days). If any step fails, the command stops with a clear
+error pointing you at `--in @commit:<repo>@<sha>` or `sentry repo list <org>/`
+— no silent fallback to a different resolution mode.
+:::
+
+### Merge fragmented issues
+
+Consolidate multiple issues (e.g. same logical error split by Sentry's
+default stack-trace grouping) into a single canonical group:
+
+```bash
+# Let Sentry auto-pick the parent (typically the largest by event count)
+sentry issue merge CLI-K9 CLI-15H CLI-15N
+
+# Pin the canonical parent explicitly — accepts the same formats as
+# positional args, including org-qualified and project-alias forms
+sentry issue merge CLI-K9 CLI-15H CLI-15N --into CLI-K9
+sentry issue merge my-org/CLI-K9 my-org/CLI-15H --into my-org/CLI-K9
+sentry issue merge cli-k9 cli-15h --into cli-k9    # alias form
+
+# Cross-org merges are rejected — all issues must share an organization
+# Non-error issue types (performance, info, etc.) cannot be merged
+```

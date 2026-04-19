@@ -53,7 +53,7 @@ cli/
 │   │   ├── cli/         # defaults, feedback, fix, setup, upgrade
 │   │   ├── dashboard/   # list, view, create, add, edit, delete
 │   │   ├── event/       # view, list
-│   │   ├── issue/       # list, events, explain, plan, view
+│   │   ├── issue/       # list, events, explain, plan, view, resolve, unresolve, merge
 │   │   ├── log/         # list, view
 │   │   ├── org/         # list, view
 │   │   ├── project/     # create, delete, list, view

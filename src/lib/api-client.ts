@@ -57,6 +57,15 @@ export {
   type IssuesPage,
   listIssuesAllPages,
   listIssuesPaginated,
+  type MergeIssuesResult,
+  mergeIssues,
+  type ParsedResolveSpec,
+  parseResolveSpec,
+  RESOLVE_COMMIT_EXPLICIT_PREFIX,
+  RESOLVE_COMMIT_SENTINEL,
+  RESOLVE_NEXT_RELEASE_SENTINEL,
+  type ResolveCommitSpec,
+  type ResolveStatusDetails,
   tryGetIssueByShortId,
   updateIssueStatus,
 } from "./api/issues.js";
@@ -107,7 +116,9 @@ export {
   updateRelease,
 } from "./api/releases.js";
 export {
+  listAllRepositories,
   listRepositories,
+  listRepositoriesCached,
   listRepositoriesPaginated,
 } from "./api/repositories.js";
 export {

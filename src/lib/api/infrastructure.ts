@@ -314,6 +314,21 @@ export async function apiRequestToRegion<T>(
     );
   }
 
+  // 204 No Content / 205 Reset Content have no body by spec — calling
+  // response.json() on them throws SyntaxError. Callers that expect a
+  // body on success receive a clear ApiError here instead of crashing
+  // downstream on `data.<field>`. Callers that expect 204 (e.g. the
+  // bulk mutate endpoint returns 204 when no IDs match) should catch
+  // this ApiError and handle it explicitly.
+  if (response.status === 204 || response.status === 205) {
+    throw new ApiError(
+      `API returned ${response.status} ${response.statusText} (no body)`,
+      response.status,
+      "The server returned no content — the request may have matched no records.",
+      endpoint
+    );
+  }
+
   const data = await response.json();
 
   if (schema) {

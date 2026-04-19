@@ -10,7 +10,7 @@ import { listAnOrganization_sIssues } from "@sentry/api";
 import type { SentryIssue } from "../../types/index.js";
 
 import { applyCustomHeaders } from "../custom-headers.js";
-import { ApiError } from "../errors.js";
+import { ApiError, ValidationError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
 
 import {
@@ -395,18 +395,239 @@ export async function tryGetIssueByShortId(
 }
 
 /**
- * Update an issue's status.
+ * Resolution-release tracking for {@link updateIssueStatus}. Maps to the
+ * `statusDetails` shape expected by Sentry's bulk mutate endpoint:
+ *
+ * - `inRelease` — resolve in a specific named release (e.g. `"0.26.1"`).
+ *   Future events seen on releases **after** this one will regression-flag.
+ * - `inNextRelease: true` — resolve in the next release after the current
+ *   commit. Commonly used when the fix is merged but not yet tagged.
+ * - `inCommit` — resolve tied to a commit in a Sentry-registered repo.
+ *   Sentry resolves when a release containing the commit is created. Both
+ *   `commit` (SHA) and `repository` (Sentry-registered repo name) are
+ *   required by the API's InCommitValidator.
  */
-export function updateIssueStatus(
+export type ResolveStatusDetails =
+  | { inRelease: string }
+  | { inNextRelease: true }
+  | { inCommit: { commit: string; repository: string } };
+
+/**
+ * Sentinel string meaning "resolve in the next release (tied to HEAD)".
+ * Chosen to never clash with a real version string — `@` is not a valid
+ * character in semver or Sentry release slugs.
+ */
+export const RESOLVE_NEXT_RELEASE_SENTINEL = "@next";
+
+/**
+ * Bare sentinel meaning "resolve at the current git HEAD, auto-detecting
+ * the Sentry-registered repo from the git origin URL". The command layer
+ * resolves this into a concrete `{inCommit: {...}}` before calling the API.
+ */
+export const RESOLVE_COMMIT_SENTINEL = "@commit";
+
+/**
+ * Prefix for the explicit commit form: `@commit:<repo>@<sha>`.
+ * Kept unambiguous against monorepo release strings like `pkg@1.2.3` by
+ * requiring the full `@commit:` anchor at the start.
+ */
+export const RESOLVE_COMMIT_EXPLICIT_PREFIX = "@commit:";
+
+/**
+ * Parsed representation of the `@commit` spec family — either an
+ * "auto-detect from HEAD" request or an explicit repo + SHA pair.
+ *
+ * Auto-detection needs git + an API call, so the CLI layer converts this
+ * into `ResolveStatusDetails` asynchronously via a separate resolver.
+ */
+export type ResolveCommitSpec =
+  | { kind: "auto" }
+  | { kind: "explicit"; repository: string; commit: string };
+
+/**
+ * Parsed representation of the fully-static portion of the `--in` grammar.
+ * Static specs ({@link ResolveStatusDetails}) are ready to ship to the API;
+ * commit specs ({@link ResolveCommitSpec}) need further resolution through
+ * git and the Sentry repo list before they become `{inCommit: ...}`.
+ */
+export type ParsedResolveSpec =
+  | { kind: "static"; details: ResolveStatusDetails }
+  | { kind: "commit"; spec: ResolveCommitSpec };
+
+/**
+ * Parse an `--in` resolution-spec string into its structured form.
+ *
+ * Grammar (see command docs):
+ *
+ * - `@next`                    → `{kind: "static", details: {inNextRelease: true}}`
+ * - `@commit`                  → `{kind: "commit", spec: {kind: "auto"}}`
+ * - `@commit:<repo>@<sha>`     → `{kind: "commit", spec: {kind: "explicit", ...}}`
+ * - anything else              → `{kind: "static", details: {inRelease: <value>}}`
+ *
+ * The explicit commit form requires a `<repo>@<sha>` payload after the
+ * `@commit:` anchor. Monorepo release strings like `pkg@1.2.3` are
+ * unambiguously treated as releases because they lack the `@commit:` prefix.
+ *
+ * Empty/whitespace-only input returns `null` (treated as "no spec" by the
+ * caller, which resolves immediately without release tracking).
+ *
+ * @throws {ValidationError} When `@commit:` prefix is given without a
+ *   well-formed `<repo>@<sha>` payload.
+ */
+export function parseResolveSpec(
+  spec: string | undefined
+): ParsedResolveSpec | null {
+  if (!spec) {
+    return null;
+  }
+  const trimmed = spec.trim();
+  if (!trimmed) {
+    return null;
+  }
+  // Sentinel matches are case-insensitive (`@NEXT`, `@Commit`, etc.) so
+  // typos and mixed-case variants don't silently fall through to
+  // inRelease. But the payload after `@commit:` keeps its original case,
+  // since repository names and SHAs are case-sensitive.
+  const lower = trimmed.toLowerCase();
+  if (lower === RESOLVE_NEXT_RELEASE_SENTINEL) {
+    return { kind: "static", details: { inNextRelease: true } };
+  }
+  if (lower === RESOLVE_COMMIT_SENTINEL) {
+    return { kind: "commit", spec: { kind: "auto" } };
+  }
+  if (lower.startsWith(RESOLVE_COMMIT_EXPLICIT_PREFIX)) {
+    const payload = trimmed.slice(RESOLVE_COMMIT_EXPLICIT_PREFIX.length);
+    // Split on the LAST `@` so repo names containing `@` (rare but legal
+    // for scoped npm-style names like `@acme/web`) resolve correctly.
+    const splitIdx = payload.lastIndexOf("@");
+    if (splitIdx <= 0 || splitIdx === payload.length - 1) {
+      throw new ValidationError(
+        `Invalid --in spec: '${spec}' — expected '${RESOLVE_COMMIT_EXPLICIT_PREFIX}<repo>@<sha>'.`,
+        "in"
+      );
+    }
+    const repository = payload.slice(0, splitIdx).trim();
+    const commit = payload.slice(splitIdx + 1).trim();
+    if (!(repository && commit)) {
+      throw new ValidationError(
+        `Invalid --in spec: '${spec}' — repo and SHA must both be non-empty.`,
+        "in"
+      );
+    }
+    return { kind: "commit", spec: { kind: "explicit", repository, commit } };
+  }
+  // Anything else starting with `@` is almost certainly a mistyped
+  // sentinel — reject with a clear message instead of silently creating
+  // a release named (e.g.) "@netx" that the user didn't intend.
+  if (trimmed.startsWith("@")) {
+    throw new ValidationError(
+      `Invalid --in spec: '${spec}' is not a recognized sentinel.\n\n` +
+        `Expected '${RESOLVE_NEXT_RELEASE_SENTINEL}', '${RESOLVE_COMMIT_SENTINEL}', or '${RESOLVE_COMMIT_EXPLICIT_PREFIX}<repo>@<sha>'.\n` +
+        "If you meant a literal release name, it cannot start with '@'.",
+      "in"
+    );
+  }
+  return { kind: "static", details: { inRelease: trimmed } };
+}
+
+/**
+ * Update an issue's status.
+ *
+ * When `status === "resolved"`, optional `statusDetails` can pin the fix
+ * to a release or commit (see {@link ResolveStatusDetails}). Without
+ * `statusDetails`, the issue is resolved immediately with no regression
+ * tracking — equivalent to clicking "Resolve" in the Sentry UI.
+ *
+ * When `options.orgSlug` is provided, the request is routed to that org's
+ * region via the org-scoped endpoint. Without it, falls back to the legacy
+ * global `/issues/{id}/` endpoint (works but not region-aware).
+ */
+export async function updateIssueStatus(
   issueId: string,
-  status: "resolved" | "unresolved" | "ignored"
+  status: "resolved" | "unresolved" | "ignored",
+  options?: {
+    statusDetails?: ResolveStatusDetails;
+    orgSlug?: string;
+  }
 ): Promise<SentryIssue> {
-  // Use raw request - the SDK's updateAnIssue requires org slug but
-  // the legacy /issues/{id}/ endpoint works without it
-  return apiRequest<SentryIssue>(`/issues/${issueId}/`, {
+  const body: Record<string, unknown> = { status };
+  if (options?.statusDetails) {
+    body.statusDetails = options.statusDetails;
+  }
+  if (options?.orgSlug) {
+    // Region-aware org-scoped endpoint — preferred when org is known.
+    const regionUrl = await resolveOrgRegion(options.orgSlug);
+    const { data } = await apiRequestToRegion<SentryIssue>(
+      regionUrl,
+      `/organizations/${encodeURIComponent(options.orgSlug)}/issues/${encodeURIComponent(issueId)}/`,
+      { method: "PUT", body }
+    );
+    return data;
+  }
+  // Legacy global endpoint — works without org but not region-aware.
+  return apiRequest<SentryIssue>(`/issues/${encodeURIComponent(issueId)}/`, {
     method: "PUT",
-    body: { status },
+    body,
   });
+}
+
+/** Result of a successful issue-merge operation. */
+export type MergeIssuesResult = {
+  /** Numeric group ID that the merged issues were consolidated into. */
+  parent: string;
+  /** Numeric group IDs that were merged into the parent (excludes parent). */
+  children: string[];
+};
+
+/**
+ * Merge multiple issues into a single canonical group.
+ *
+ * Sentry auto-picks the canonical parent (typically the largest by event
+ * count). Future events with fingerprints previously matching any of the
+ * children will flow into the parent group.
+ *
+ * @param orgSlug - Organization slug (required for the bulk mutate endpoint)
+ * @param groupIds - At least 2 numeric group IDs to merge
+ * @throws {ApiError} When fewer than 2 IDs are provided, or the API rejects
+ *   (e.g. `"Only error issues can be merged."` for non-error issue types)
+ */
+export async function mergeIssues(
+  orgSlug: string,
+  groupIds: readonly string[]
+): Promise<MergeIssuesResult> {
+  if (groupIds.length < 2) {
+    throw new ValidationError(
+      `Need at least 2 issues to merge (got ${groupIds.length}).`
+    );
+  }
+  // The bulk mutate endpoint accepts repeated `?id=X` query params plus a
+  // `{merge: 1}` body. The SDK wraps this but its typed `query` shape
+  // doesn't expose the array semantics cleanly, so use raw request.
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const query = groupIds.map((id) => `id=${encodeURIComponent(id)}`).join("&");
+  const path = `/organizations/${encodeURIComponent(orgSlug)}/issues/?${query}`;
+  type MergeResponse = { merge: MergeIssuesResult };
+  try {
+    const { data } = await apiRequestToRegion<MergeResponse>(regionUrl, path, {
+      method: "PUT",
+      body: { merge: 1 },
+    });
+    return data.merge;
+  } catch (error) {
+    // The bulk-mutate endpoint returns 204 when no matching issues are
+    // found — e.g. IDs out of scope, or issues deleted between resolution
+    // and the merge call. Catch the generic "no body" ApiError and re-throw
+    // with a friendlier user-facing message.
+    if (error instanceof ApiError && error.status === 204) {
+      throw new ApiError(
+        `No matching issues found for merge in '${orgSlug}'.`,
+        204,
+        "All provided issue IDs are out of scope or no longer exist.",
+        path
+      );
+    }
+    throw error;
+  }
 }
 
 /**

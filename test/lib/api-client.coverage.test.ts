@@ -994,6 +994,53 @@ describe("repositories.ts", () => {
       expect(result[0]!.name).toBe("getsentry/sentry");
     });
   });
+
+  describe("listAllRepositories", () => {
+    test("walks pagination and concatenates pages", async () => {
+      const pages: Array<Array<{ id: string; name: string }>> = [
+        [
+          { id: "1", name: "owner/repo-a" },
+          { id: "2", name: "owner/repo-b" },
+        ],
+        [{ id: "3", name: "owner/repo-c" }],
+      ];
+      let callIdx = 0;
+
+      globalThis.fetch = mockFetch(async () => {
+        const page = pages[callIdx];
+        callIdx += 1;
+        const hasNext = callIdx < pages.length;
+        const fullPage = page?.map((r) => ({
+          ...r,
+          url: `https://github.com/${r.name}`,
+          provider: { id: "github", name: "GitHub" },
+          status: "active",
+        }));
+        return new Response(JSON.stringify(fullPage), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            Link: hasNext
+              ? '<https://sentry.io/next>; rel="next"; results="true"; cursor="c1"'
+              : '<https://sentry.io/end>; rel="next"; results="false"; cursor=""',
+          },
+        });
+      });
+
+      // Dynamic import to avoid circular issue with already-imported listRepositories
+      const { listAllRepositories } = await import(
+        "../../src/lib/api/repositories.js"
+      );
+      const result = await listAllRepositories("test-org");
+      expect(result).toHaveLength(3);
+      expect(result.map((r) => r.name)).toEqual([
+        "owner/repo-a",
+        "owner/repo-b",
+        "owner/repo-c",
+      ]);
+      expect(callIdx).toBe(2);
+    });
+  });
 });
 
 // =============================================================================
