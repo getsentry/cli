@@ -74,107 +74,122 @@ describe("validateSpanId", () => {
 
 describe("parsePositionalArgs", () => {
   describe("trace-id + single span-id", () => {
-    test("parses trace ID and span ID as two positional args", () => {
+    test("returns deferred form for two-arg input (trace-ID recovery runs in command)", () => {
       const result = parsePositionalArgs([VALID_TRACE_ID, VALID_SPAN_ID]);
-      expect(result.traceTarget.traceId).toBe(VALID_TRACE_ID);
-      expect(result.traceTarget.type).toBe("auto-detect");
-      expect(result.spanIds).toEqual([VALID_SPAN_ID]);
+      expect(result.kind).toBe("deferred");
+      if (result.kind !== "deferred") throw new Error("unreachable");
+      expect(result.rawTraceArg).toBe(VALID_TRACE_ID);
+      expect(result.rawSpanIds).toEqual([VALID_SPAN_ID]);
     });
   });
 
   describe("trace-id + multiple span-ids", () => {
-    test("parses trace ID and multiple span IDs", () => {
+    test("passes multiple span IDs through as raw", () => {
       const result = parsePositionalArgs([
         VALID_TRACE_ID,
         VALID_SPAN_ID,
         VALID_SPAN_ID_2,
       ]);
-      expect(result.traceTarget.traceId).toBe(VALID_TRACE_ID);
-      expect(result.spanIds).toEqual([VALID_SPAN_ID, VALID_SPAN_ID_2]);
+      expect(result.kind).toBe("deferred");
+      if (result.kind !== "deferred") throw new Error("unreachable");
+      expect(result.rawTraceArg).toBe(VALID_TRACE_ID);
+      expect(result.rawSpanIds).toEqual([VALID_SPAN_ID, VALID_SPAN_ID_2]);
     });
   });
 
   describe("org/project/trace-id + span-id", () => {
-    test("parses slash-separated target with trace ID", () => {
-      const result = parsePositionalArgs([
-        `my-org/my-project/${VALID_TRACE_ID}`,
-        VALID_SPAN_ID,
-      ]);
-      expect(result.traceTarget.traceId).toBe(VALID_TRACE_ID);
-      expect(result.traceTarget.type).toBe("explicit");
-      expect(result.spanIds).toEqual([VALID_SPAN_ID]);
+    test("slash-separated target is deferred intact", () => {
+      const slashForm = `my-org/my-project/${VALID_TRACE_ID}`;
+      const result = parsePositionalArgs([slashForm, VALID_SPAN_ID]);
+      expect(result.kind).toBe("deferred");
+      if (result.kind !== "deferred") throw new Error("unreachable");
+      expect(result.rawTraceArg).toBe(slashForm);
+      expect(result.rawSpanIds).toEqual([VALID_SPAN_ID]);
     });
 
-    test("parses slash-separated target with multiple span IDs", () => {
+    test("slash-separated target with multiple span IDs", () => {
+      const slashForm = `my-org/my-project/${VALID_TRACE_ID}`;
       const result = parsePositionalArgs([
-        `my-org/my-project/${VALID_TRACE_ID}`,
+        slashForm,
         VALID_SPAN_ID,
         VALID_SPAN_ID_2,
       ]);
-      expect(result.traceTarget.traceId).toBe(VALID_TRACE_ID);
-      expect(result.traceTarget.type).toBe("explicit");
-      expect(result.spanIds).toEqual([VALID_SPAN_ID, VALID_SPAN_ID_2]);
+      expect(result.kind).toBe("deferred");
+      if (result.kind !== "deferred") throw new Error("unreachable");
+      expect(result.rawTraceArg).toBe(slashForm);
+      expect(result.rawSpanIds).toEqual([VALID_SPAN_ID, VALID_SPAN_ID_2]);
     });
   });
 
   describe("auto-split traceId/spanId single-arg format", () => {
-    test("auto-splits traceId/spanId single-arg format", () => {
+    test("auto-splits traceId/spanId single-arg format (resolved path)", () => {
       const result = parsePositionalArgs([
         "aaaa1111bbbb2222cccc3333dddd4444/a1b2c3d4e5f67890",
       ]);
+      expect(result.kind).toBe("resolved");
+      if (result.kind !== "resolved") throw new Error("unreachable");
       expect(result.traceTarget.traceId).toBe(
         "aaaa1111bbbb2222cccc3333dddd4444"
       );
       expect(result.traceTarget.type).toBe("auto-detect");
-      expect(result.spanIds).toEqual(["a1b2c3d4e5f67890"]);
+      expect(result.rawSpanIds).toEqual(["a1b2c3d4e5f67890"]);
     });
 
     test("auto-splits with uppercase hex IDs", () => {
       const result = parsePositionalArgs([
         "AAAA1111BBBB2222CCCC3333DDDD4444/A1B2C3D4E5F67890",
       ]);
+      expect(result.kind).toBe("resolved");
+      if (result.kind !== "resolved") throw new Error("unreachable");
       expect(result.traceTarget.traceId).toBe(
         "aaaa1111bbbb2222cccc3333dddd4444"
       );
-      expect(result.spanIds).toEqual(["a1b2c3d4e5f67890"]);
+      expect(result.rawSpanIds).toEqual(["a1b2c3d4e5f67890"]);
     });
 
-    test("does not auto-split org/traceId format (two args)", () => {
+    test("does not auto-split org/traceId format (two args) — defers to command", () => {
       // org/traceId has a non-hex org slug, so it shouldn't trigger the auto-split
       const result = parsePositionalArgs([
         "my-org/aaaa1111bbbb2222cccc3333dddd4444",
         "a1b2c3d4e5f67890",
       ]);
-      expect(result.traceTarget.traceId).toBe(
-        "aaaa1111bbbb2222cccc3333dddd4444"
+      expect(result.kind).toBe("deferred");
+      if (result.kind !== "deferred") throw new Error("unreachable");
+      expect(result.rawTraceArg).toBe(
+        "my-org/aaaa1111bbbb2222cccc3333dddd4444"
       );
-      expect(result.spanIds).toEqual(["a1b2c3d4e5f67890"]);
+      expect(result.rawSpanIds).toEqual(["a1b2c3d4e5f67890"]);
     });
 
     test("does not auto-split when left is not a valid trace ID", () => {
-      // "not-hex" on left side → falls through to normal parsing which throws
+      // Auto-split requires hex-on-both-sides. When left is non-hex,
+      // the single-arg input falls through to the "missing span IDs"
+      // branch and throws ContextError. (A two-arg variant would defer
+      // to the command layer — covered by other tests.)
       expect(() =>
         parsePositionalArgs(["not-a-hex-id/a1b2c3d4e5f67890"])
-      ).toThrow();
+      ).toThrow(ContextError);
     });
 
     test("does not auto-split when right is not a valid span ID", () => {
-      // Right side is 32-char (trace ID, not span ID) → falls through to normal parsing
+      // Right side 32-char hex is a trace ID (not a span ID) so the
+      // auto-split heuristic rejects it. As a single-arg form there are
+      // no span IDs in a second positional → ContextError.
       expect(() =>
         parsePositionalArgs([
           "aaaa1111bbbb2222cccc3333dddd4444/bbbb2222cccc3333dddd4444eeee5555",
         ])
-      ).toThrow();
+      ).toThrow(ContextError);
     });
 
-    test("does not auto-split with multiple slashes", () => {
-      // org/project/traceId format — should parse normally as explicit target
-      const result = parsePositionalArgs([
-        `my-org/my-project/${VALID_TRACE_ID}`,
-        VALID_SPAN_ID,
-      ]);
-      expect(result.traceTarget.type).toBe("explicit");
-      expect(result.traceTarget.traceId).toBe(VALID_TRACE_ID);
+    test("does not auto-split with multiple slashes (defers to command)", () => {
+      // org/project/traceId format — deferred to the command layer
+      // which calls parseTraceTargetWithRecovery.
+      const slashForm = `my-org/my-project/${VALID_TRACE_ID}`;
+      const result = parsePositionalArgs([slashForm, VALID_SPAN_ID]);
+      expect(result.kind).toBe("deferred");
+      if (result.kind !== "deferred") throw new Error("unreachable");
+      expect(result.rawTraceArg).toBe(slashForm);
     });
   });
 
@@ -207,22 +222,26 @@ describe("parsePositionalArgs", () => {
       }
     });
 
-    test("throws ValidationError for invalid trace ID", () => {
-      expect(() => parsePositionalArgs(["not-valid", VALID_SPAN_ID])).toThrow(
-        ValidationError
-      );
+    test("accepts invalid trace ID as raw (recovery runs at command layer)", () => {
+      // Previously threw synchronously; now the command-level recovery
+      // path (parseTraceTargetWithRecovery) handles malformed trace IDs
+      // consistent with `trace view`.
+      const result = parsePositionalArgs(["not-valid", VALID_SPAN_ID]);
+      expect(result.kind).toBe("deferred");
+      if (result.kind !== "deferred") throw new Error("unreachable");
+      expect(result.rawTraceArg).toBe("not-valid");
     });
 
-    test("throws ValidationError for invalid span ID", () => {
-      expect(() =>
-        parsePositionalArgs([VALID_TRACE_ID, "not-a-span-id"])
-      ).toThrow(ValidationError);
+    test("accepts invalid span ID as raw (validation deferred to command)", () => {
+      // parsePositionalArgs no longer validates span IDs so the command
+      // layer can run recovery with full trace context.
+      const result = parsePositionalArgs([VALID_TRACE_ID, "not-a-span-id"]);
+      expect(result.rawSpanIds).toEqual(["not-a-span-id"]);
     });
 
-    test("throws ValidationError for span ID that is too short", () => {
-      expect(() => parsePositionalArgs([VALID_TRACE_ID, "abcd1234"])).toThrow(
-        ValidationError
-      );
+    test("accepts too-short span ID as raw", () => {
+      const result = parsePositionalArgs([VALID_TRACE_ID, "abcd1234"]);
+      expect(result.rawSpanIds).toEqual(["abcd1234"]);
     });
 
     test("throws ContextError for bare span ID without trace ID (CLI-SC)", () => {

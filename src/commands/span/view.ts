@@ -30,13 +30,18 @@ import {
   validateSpanId,
 } from "../../lib/hex-id.js";
 import {
+  handleRecoveryResult,
+  recoverHexId,
+} from "../../lib/hex-id-recovery.js";
+import {
   applyFreshFlag,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
 import {
-  parseSlashSeparatedTraceTarget,
+  type parseSlashSeparatedTraceTarget,
+  parseTraceTargetWithRecovery,
   resolveTraceOrgProject,
   warnIfNormalized,
 } from "../../lib/trace-target.js";
@@ -54,22 +59,37 @@ type ViewFlags = {
 const USAGE_HINT =
   "sentry span view [<org>/<project>/]<trace-id> <span-id> [<span-id>...]";
 
+/** Result of the initial positional-arg parse for `span view`. */
+type SpanViewArgs =
+  | {
+      /** Args are already resolved (auto-split `<trace-id>/<span-id>`). */
+      kind: "resolved";
+      traceTarget: ReturnType<typeof parseSlashSeparatedTraceTarget>;
+      rawSpanIds: string[];
+    }
+  | {
+      /**
+       * First arg is the raw trace target (needs async recovery); the rest
+       * are raw span IDs. Command layer calls `parseTraceTargetWithRecovery`.
+       */
+      kind: "deferred";
+      rawTraceArg: string;
+      rawSpanIds: string[];
+    };
+
 /**
  * Parse positional arguments for span view.
  *
- * The first positional is the trace ID (optionally with org/project prefix),
- * parsed via the shared `parseSlashSeparatedTraceTarget`. The remaining
- * positionals are span IDs.
+ * Handles a few sync edge cases (single-arg `<trace>/<span>` slash split,
+ * bare span ID without a trace) and returns either a fully-resolved
+ * target or a deferred form. In the deferred case the command layer calls
+ * {@link parseTraceTargetWithRecovery} on `rawTraceArg` so a malformed
+ * trace ID gets the full recovery treatment (matching `trace view`
+ * behavior).
  *
- * @param args - Positional arguments from CLI
- * @returns Parsed trace target and span IDs
- * @throws {ContextError} If insufficient arguments
- * @throws {ValidationError} If any ID has an invalid format
+ * @throws {ContextError} If insufficient arguments or a single bare span ID
  */
-export function parsePositionalArgs(args: string[]): {
-  traceTarget: ReturnType<typeof parseSlashSeparatedTraceTarget>;
-  spanIds: string[];
-} {
+export function parsePositionalArgs(args: string[]): SpanViewArgs {
   if (args.length === 0) {
     throw new ContextError("Trace ID and span ID", USAGE_HINT, []);
   }
@@ -79,15 +99,14 @@ export function parsePositionalArgs(args: string[]): {
     throw new ContextError("Trace ID and span ID", USAGE_HINT, []);
   }
 
-  // Auto-detect traceId/spanId single-arg format (e.g., "abc.../a1b2c3d4e5f67890").
-  // When a single arg contains exactly one slash separating a 32-char hex trace ID
-  // from a 16-char hex span ID, the user clearly intended to pass both IDs.
-  // Without this check, parseSlashSeparatedTraceTarget treats the span ID as a
-  // trace ID and fails validation (CLI-G6).
+  // Auto-detect `<trace-id>/<span-id>` single-arg form. When a single
+  // arg contains exactly one slash separating a 32-char hex trace ID
+  // from a 16-char hex span ID, the user clearly intended to pass both.
+  // Without this check, parseSlashSeparatedTraceTarget treats the span
+  // ID as a trace ID and fails validation (CLI-G6).
   if (args.length === 1) {
     const slashIdx = first.indexOf("/");
     if (slashIdx !== -1 && first.indexOf("/", slashIdx + 1) === -1) {
-      // Exactly one slash — check if it's traceId/spanId format
       const left = normalizeHexId(first.slice(0, slashIdx));
       const right = first
         .slice(slashIdx + 1)
@@ -100,16 +119,17 @@ export function parsePositionalArgs(args: string[]): {
             `Use separate arguments: sentry span view ${left} ${right}`
         );
         return {
+          kind: "resolved",
           traceTarget: { type: "auto-detect" as const, traceId: left },
-          spanIds: [right],
+          rawSpanIds: [right],
         };
       }
     }
   }
 
   // Single bare arg that looks like a span ID (16-char hex, no slashes):
-  // the user forgot the trace ID. Give a targeted ContextError instead of the
-  // confusing "Invalid trace ID" from validateTraceId(). (CLI-SC)
+  // the user forgot the trace ID. Give a targeted ContextError instead
+  // of the confusing "Invalid trace ID" from validateTraceId() (CLI-SC).
   if (args.length === 1 && !first.includes("/")) {
     const normalized = first.trim().toLowerCase().replace(/-/g, "");
     if (SPAN_ID_RE.test(normalized)) {
@@ -121,19 +141,38 @@ export function parsePositionalArgs(args: string[]): {
     }
   }
 
-  // First arg is trace target (possibly with org/project prefix)
-  const traceTarget = parseSlashSeparatedTraceTarget(first, USAGE_HINT);
-
-  // Remaining args are span IDs
   const rawSpanIds = args.slice(1);
   if (rawSpanIds.length === 0) {
     throw new ContextError("Span ID", USAGE_HINT, [
       `Use 'sentry span list ${first}' to find span IDs within this trace`,
     ]);
   }
-  const spanIds = rawSpanIds.map((v) => validateSpanId(v));
 
-  return { traceTarget, spanIds };
+  return { kind: "deferred", rawTraceArg: first, rawSpanIds };
+}
+
+/**
+ * Validate a raw span ID, attempting {@link recoverHexId} on
+ * {@link ValidationError}. Requires trace-scoped context because span IDs
+ * are only unique within a trace.
+ */
+async function validateAndRecoverSpanId(
+  rawSpanId: string,
+  ctx: { org: string; project: string; traceId: string }
+): Promise<string> {
+  try {
+    return validateSpanId(rawSpanId);
+  } catch (err) {
+    if (!(err instanceof ValidationError)) {
+      throw err;
+    }
+    const result = await recoverHexId(rawSpanId, "span", ctx);
+    return handleRecoveryResult(result, err, {
+      entityType: "span",
+      canonicalCommand: `sentry span view ${ctx.org}/${ctx.project}/${ctx.traceId} <id>`,
+      logTag: "span.view",
+    });
+  }
 }
 
 /**
@@ -316,8 +355,16 @@ export const viewCommand = buildCommand({
     applyFreshFlag(flags);
     const { cwd } = this;
 
-    // Parse positional args: first is trace target, rest are span IDs
-    const { traceTarget, spanIds } = parsePositionalArgs(args);
+    // Parse positional args. Either we get a resolved trace target (single-arg
+    // <trace>/<span> slash form) or a deferred trace arg that routes through
+    // `parseTraceTargetWithRecovery` for async trace-ID recovery — same
+    // contract as `trace view`.
+    const parsed = parsePositionalArgs(args);
+    const rawSpanIds = parsed.rawSpanIds;
+    const traceTarget =
+      parsed.kind === "resolved"
+        ? parsed.traceTarget
+        : await parseTraceTargetWithRecovery([parsed.rawTraceArg], USAGE_HINT);
     warnIfNormalized(traceTarget, "span.view");
 
     // Resolve org/project
@@ -326,6 +373,15 @@ export const viewCommand = buildCommand({
       cwd,
       USAGE_HINT
     );
+
+    // Validate + recover span IDs now that trace context is available.
+    // Span IDs are unique only within a trace, so recovery scopes its
+    // fuzzy lookup via `ctx.traceId`.
+    const spanIds = await Promise.all(
+      rawSpanIds.map((raw) =>
+        validateAndRecoverSpanId(raw, { org, project, traceId })
+      )
+    );
     // Fetch trace data (single fetch for all span lookups)
     const timestamp = Math.floor(Date.now() / 1000);
     const spans = await getDetailedTrace(org, traceId, timestamp);
@@ -333,7 +389,8 @@ export const viewCommand = buildCommand({
     if (spans.length === 0) {
       throw new ValidationError(
         `No trace found with ID "${traceId}".\n\n` +
-          "Make sure the trace ID is correct and the trace was sent recently."
+          "The ID format is valid but no matching trace exists in this project. " +
+          "Check that you are querying the right org/project, or the trace may be past your plan's retention window."
       );
     }
 

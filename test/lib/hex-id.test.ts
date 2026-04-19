@@ -13,7 +13,12 @@
 import { describe, expect, test } from "bun:test";
 import { array, constantFrom, assert as fcAssert, property } from "fast-check";
 import { ValidationError } from "../../src/lib/errors.js";
-import { validateHexId, validateSpanId } from "../../src/lib/hex-id.js";
+import {
+  ageInDaysFromUuidV7,
+  decodeUuidV7Timestamp,
+  validateHexId,
+  validateSpanId,
+} from "../../src/lib/hex-id.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
 const HEX_CHARS = "0123456789abcdefABCDEF".split("");
@@ -355,5 +360,74 @@ describe("property: validateHexId", () => {
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
+  });
+});
+
+describe("decodeUuidV7Timestamp", () => {
+  // Real Sentry log IDs observed in CLI project telemetry.
+  // First 12 hex chars = milliseconds since Unix epoch.
+  test("decodes real Sentry log ID (April 2026)", () => {
+    const result = decodeUuidV7Timestamp("019da223817478d8a98508aaedbafdc1");
+    expect(result).not.toBeNull();
+    expect(result?.createdAt.toISOString().slice(0, 10)).toBe("2026-04-18");
+  });
+
+  test("decodes real Sentry log ID (February 2026)", () => {
+    const result = decodeUuidV7Timestamp("019c6d2ca9ec7cc5bd02f9190d77debe");
+    expect(result).not.toBeNull();
+    expect(result?.createdAt.toISOString().slice(0, 10)).toBe("2026-02-17");
+  });
+
+  test("accepts dash-separated UUIDv7", () => {
+    const dashed = "019da223-8174-78d8-a985-08aaedbafdc1";
+    const result = decodeUuidV7Timestamp(dashed);
+    expect(result).not.toBeNull();
+    expect(result?.createdAt.toISOString().slice(0, 10)).toBe("2026-04-18");
+  });
+
+  test("returns null for non-v7 (v4) UUID", () => {
+    // Random UUID v4 — version char at position 12 is "4"
+    const result = decodeUuidV7Timestamp("c0a5a9d4dce44358ab4231fc3bead7e9");
+    expect(result).toBeNull();
+  });
+
+  test("returns null for invalid hex input", () => {
+    expect(decodeUuidV7Timestamp("not-a-uuid")).toBeNull();
+    expect(decodeUuidV7Timestamp("")).toBeNull();
+    expect(decodeUuidV7Timestamp("019d")).toBeNull();
+  });
+
+  test("returns null for 32-char hex with version char outside v7", () => {
+    // Swap position 12 to "8" → not v7
+    expect(
+      decodeUuidV7Timestamp("019da22381848d8a98508aaedbafdc11")
+    ).toBeNull();
+  });
+});
+
+describe("ageInDaysFromUuidV7", () => {
+  /** Build a 32-char UUIDv7 where the embedded timestamp is `date`. */
+  function buildUuidV7(date: Date): string {
+    const ts = date.getTime().toString(16).padStart(12, "0");
+    // 12 time + 1 version + 19 rand/variant = 32 total
+    return `${ts}70008000000000000000`;
+  }
+
+  test("returns age in days relative to `now`", () => {
+    const now = new Date("2026-08-01T00:00:00Z");
+    const past = new Date(now.getTime() - 100 * 24 * 60 * 60 * 1000);
+    const age = ageInDaysFromUuidV7(buildUuidV7(past), now);
+    expect(age).toBeCloseTo(100, 5);
+  });
+
+  test("returns null for non-v7 input", () => {
+    expect(ageInDaysFromUuidV7("c0a5a9d4dce44358ab4231fc3bead7e9")).toBeNull();
+  });
+
+  test("returns negative age for future timestamps (no clamping)", () => {
+    const now = new Date("2020-01-01T00:00:00Z");
+    const future = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
+    const age = ageInDaysFromUuidV7(buildUuidV7(future), now);
+    expect(age).toBeCloseTo(-10, 5);
   });
 });

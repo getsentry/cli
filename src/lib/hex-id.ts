@@ -1,11 +1,27 @@
 /**
  * Shared Hex ID Validation
  *
- * Provides regex and validation for hexadecimal identifiers used across
- * the CLI (trace IDs, log IDs, span IDs, etc.).
+ * Central place for hexadecimal identifier primitives used across the CLI:
+ * regex patterns, normalization, validation, UUIDv7 timestamp decoding,
+ * and the `HexEntityType` discriminator that other modules key off.
+ * All callers — including `hex-id-recovery.ts` — should import from here
+ * rather than rolling their own patterns.
  */
 
 import { ValidationError } from "./errors.js";
+
+/**
+ * Entity types whose identifiers are 32- or 16-char hex strings.
+ *
+ * Lives in this low-level module so higher-level modules (`retention.ts`,
+ * `hex-id-recovery.ts`) can depend on it without creating a circular
+ * type dependency in the other direction.
+ */
+export type HexEntityType = "event" | "trace" | "log" | "span";
+
+// ---------------------------------------------------------------------------
+// Anchored patterns (match a complete string)
+// ---------------------------------------------------------------------------
 
 /** Regex for a valid 32-character hexadecimal ID */
 export const HEX_ID_RE = /^[0-9a-f]{32}$/i;
@@ -21,17 +37,47 @@ export const SPAN_ID_RE = /^[0-9a-f]{16}$/i;
 export const UUID_DASH_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Any-length pure hex string (case-insensitive). */
+export const PURE_HEX_RE = /^[0-9a-f]+$/i;
+
+// ---------------------------------------------------------------------------
+// Prefix / fragment patterns (unanchored)
+// ---------------------------------------------------------------------------
+
+/** Longest leading run of lowercase hex digits (no anchor at end). */
+export const LEADING_HEX_RE = /^[0-9a-f]+/;
+
+/** First char of a string is a hex digit. */
+export const LEADING_HEX_CHAR_RE = /^[0-9a-f]/;
+
+/**
+ * Middle-ellipsis pattern used in CLI output and some external tools:
+ * `<hex>...<hex>` or `<hex>…<hex>` (unicode horizontal ellipsis).
+ * Captures the hex prefix and suffix groups.
+ */
+export const MIDDLE_ELLIPSIS_RE = /^([0-9a-f]*)(?:\.\.\.|…)([0-9a-f]*)$/;
+
+/** Segment with 2+ alphabetic chars — used in slug heuristics. */
+export const ALPHA_SEGMENT_RE = /[a-z]{2,}/i;
+
+// ---------------------------------------------------------------------------
+// Other patterns used by validateHexId for error-hint classification
+// ---------------------------------------------------------------------------
+
 /** Max display length for invalid IDs in error messages before truncation */
 const MAX_DISPLAY_LENGTH = 40;
 
-/** Matches any character that is NOT a lowercase hex digit (used for slug detection in error hints) */
-const NON_HEX_RE = /[^0-9a-f]/;
+/** Matches any character that is NOT a lowercase hex digit. */
+export const NON_HEX_RE = /[^0-9a-f]/;
 
 /** Matches strings starting with a dash — likely CLI flags that Stricli didn't recognize */
 const FLAG_LIKE_RE = /^-/;
 
 /** Matches common help flag typos (e.g., "--h", "-h", "--help", "-help") */
 const HELP_FLAG_RE = /^--?h(elp)?$/;
+
+/** Global dash stripper (used internally for dash removal, not a match). */
+const DASH_GLOBAL_RE = /-/g;
 
 /**
  * Normalize a potential hex ID: trim, lowercase, strip UUID dashes.
@@ -46,7 +92,7 @@ const HELP_FLAG_RE = /^--?h(elp)?$/;
 export function normalizeHexId(value: string): string {
   let trimmed = value.trim().toLowerCase();
   if (UUID_DASH_RE.test(trimmed)) {
-    trimmed = trimmed.replace(/-/g, "");
+    trimmed = trimmed.replace(DASH_GLOBAL_RE, "");
   }
   return trimmed;
 }
@@ -100,10 +146,13 @@ export function validateHexId(value: string, label: string): string {
         "\n\nThis looks like a span ID (16 characters). " +
         `If you have the trace ID, try: sentry span view <trace-id> ${display}`;
     } else if (NON_HEX_RE.test(normalized)) {
-      // Contains non-hex characters — likely a slug or name
+      // Contains non-hex characters — likely a slug, name, or truncated input.
+      // The hex-id-recovery module at the command layer provides more specific
+      // hints (sentinel leak, slug detection, prefix lookup) when wired in;
+      // this is the generic fallback surfaced by paths that don't use recovery.
       message +=
-        `\n\nThis doesn't look like a hex ID. If this is a project, ` +
-        `specify it before the ID: <org>/<project> <${label}>`;
+        `\n\nThis doesn't look like a hex ID. If it is a name or slug, ` +
+        `pass it as a target: <org>/<project> <${label}>`;
     }
 
     throw new ValidationError(message);
@@ -124,7 +173,7 @@ export function validateHexId(value: string, label: string): string {
  * @throws {ValidationError} If the format is invalid
  */
 export function validateSpanId(value: string): string {
-  const trimmed = value.trim().toLowerCase().replace(/-/g, "");
+  const trimmed = value.trim().toLowerCase().replace(DASH_GLOBAL_RE, "");
 
   if (!SPAN_ID_RE.test(trimmed)) {
     const display =
@@ -146,4 +195,75 @@ export function validateSpanId(value: string): string {
   }
 
   return trimmed;
+}
+
+// ---------------------------------------------------------------------------
+// UUIDv7 timestamp decoding
+//
+// Sentry log IDs (and some future trace/event IDs) are UUIDv7, which embeds
+// a millisecond-precision Unix timestamp in the first 48 bits. When we can
+// decode a timestamp we can speak with certainty about retention ("created
+// 147 days ago — past the 90-day log retention window") instead of hedging
+// with "may have been deleted".
+//
+// UUIDv7 layout (after dash stripping):
+//   tttttttttttt  — 48 bits of milliseconds since Unix epoch (12 hex chars)
+//   7vvv           — 4 bits version (`7`) + 12 bits random
+//   yxxx           — 2 bits variant (binary 10, so first hex is 8/9/a/b) + 14 bits random
+//   xxxxxxxxxxxx  — 48 bits random
+// ---------------------------------------------------------------------------
+
+/** Version nibble position in a dash-stripped 32-char UUID. */
+const UUID_VERSION_INDEX = 12;
+
+/** UUIDv7 version character. */
+const UUID_V7 = "7";
+
+/**
+ * Decode a UUIDv7 (or any v7-prefixed 32-hex) into its embedded timestamp.
+ *
+ * Accepts either a dash-separated UUID (`xxxxxxxx-xxxx-7xxx-yxxx-xxxxxxxxxxxx`)
+ * or the dash-stripped 32-hex form. Returns `null` when the input isn't a
+ * version-7 UUID — callers should treat `null` as "can't make claims about
+ * this ID's age" and fall back to generic messaging.
+ *
+ * The returned `Date` is in UTC. Sub-millisecond precision is NOT preserved;
+ * UUIDv7 reserves ~12 bits for sub-ms rand/sequence but Sentry doesn't use
+ * those bits for time, so decoding only the high 48 bits is correct.
+ *
+ * @param value - Raw UUID string (with or without dashes)
+ * @returns `{ createdAt }` when the value is UUIDv7, else `null`
+ */
+export function decodeUuidV7Timestamp(
+  value: string
+): { createdAt: Date } | null {
+  const normalized = normalizeHexId(value);
+  if (!HEX_ID_RE.test(normalized)) {
+    return null;
+  }
+  if (normalized[UUID_VERSION_INDEX] !== UUID_V7) {
+    return null;
+  }
+  const timestampHex = normalized.slice(0, UUID_VERSION_INDEX);
+  const ms = Number.parseInt(timestampHex, 16);
+  if (!Number.isFinite(ms)) {
+    return null;
+  }
+  return { createdAt: new Date(ms) };
+}
+
+/**
+ * Compute the age in days of a UUIDv7 creation timestamp relative to `now`.
+ * Returns `null` when the value isn't a UUIDv7.
+ */
+export function ageInDaysFromUuidV7(
+  value: string,
+  now: Date = new Date()
+): number | null {
+  const decoded = decodeUuidV7Timestamp(value);
+  if (!decoded) {
+    return null;
+  }
+  const diffMs = now.getTime() - decoded.createdAt.getTime();
+  return diffMs / (24 * 60 * 60 * 1000);
 }

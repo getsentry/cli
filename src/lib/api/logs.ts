@@ -17,6 +17,7 @@ import {
 } from "../../types/index.js";
 
 import { resolveOrgRegion } from "../region.js";
+import { LOG_RETENTION_PERIOD } from "../retention.js";
 import { isAllDigits } from "../utils.js";
 
 import {
@@ -158,7 +159,7 @@ async function getLogsBatch(
       field: DETAILED_LOG_FIELDS,
       query,
       per_page: batchIds.length,
-      statsPeriod: "90d",
+      statsPeriod: LOG_RETENTION_PERIOD,
     },
   });
 
