@@ -23,7 +23,12 @@
 import type { SentryContext } from "../../context.js";
 import { type MergeIssuesResult, mergeIssues } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
-import { CliError, ValidationError } from "../../lib/errors.js";
+import {
+  ApiError,
+  CliError,
+  ResolutionError,
+  ValidationError,
+} from "../../lib/errors.js";
 import { muted, warning } from "../../lib/formatters/index.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
@@ -123,7 +128,24 @@ async function resolveAllIssues(
     // just asserted every entry has a non-empty org.
     throw new CliError("Internal error: resolved issue missing org slug.");
   }
-  return { org, issues: resolved.map((r) => r.issue) };
+
+  // Dedupe on resolved numeric ID: a user may pass the same issue in
+  // multiple forms (`CLI-K9`, `my-org/CLI-K9`, `100`), all of which
+  // collapse to the same group after resolution. Without this check we
+  // would send `?id=100&id=100` to Sentry, which the API dedupes server
+  // side — returning 204 ("no matching issues") — and then we re-throw
+  // that as a confusing "no matching issues" error. Catch it here instead.
+  const issues = resolved.map((r) => r.issue);
+  const uniqueIds = new Set(issues.map((i) => i.id));
+  if (uniqueIds.size < 2) {
+    throw new ValidationError(
+      `Merge needs at least 2 distinct issues (all inputs resolved to ${issues[0]?.shortId ?? "the same issue"}).\n\n` +
+        "Check your argument list — you may have passed the same issue in\n" +
+        "multiple forms (short ID + org-qualified + numeric all count as one)."
+    );
+  }
+
+  return { org, issues };
 }
 
 /**
@@ -155,14 +177,19 @@ async function orderForMerge(
   }
   const normalized = into.trim();
   // Fast path: direct match on shortId / id (bare or org-qualified form).
-  // The Sentry API's `shortId` field is always the bare short ID.
+  // Short IDs are canonically uppercase (e.g. CLI-K9); users sometimes
+  // type them in the case of the org/project part, so match
+  // case-insensitively to avoid paying for the API fallback unnecessarily.
+  // The Sentry API's `shortId` field is always uppercase.
   const lastSlash = normalized.lastIndexOf("/");
   const bare = lastSlash >= 0 ? normalized.slice(lastSlash + 1) : normalized;
+  const bareUpper = bare.toUpperCase();
+  const normalizedUpper = normalized.toUpperCase();
   const direct = issues.find(
     (i) =>
-      i.shortId === bare ||
+      i.shortId === bareUpper ||
       i.id === bare ||
-      i.shortId === normalized ||
+      i.shortId === normalizedUpper ||
       i.id === normalized
   );
   if (direct) {
@@ -173,16 +200,28 @@ async function orderForMerge(
   // (handles project-alias suffixes like `f-g`, URLs, @selectors, etc).
   // This adds a second API round trip in the alias-only case, but avoids
   // reimplementing the alias lookup logic here.
+  //
+  // Only a clean "not found" (ResolutionError, or ApiError with status 404)
+  // is swallowed — real errors (auth, 5xx, network, ContextError) propagate
+  // so the user sees a proper diagnostic instead of the misleading
+  // "did not match any of the provided issues".
   let resolvedId: string | undefined;
   try {
     const { issue: resolvedIssue } = await resolveIssue({
       issueArg: normalized,
       cwd,
-      command: "merge",
+      command: COMMAND,
     });
     resolvedId = resolvedIssue.id;
-  } catch {
-    // Resolution failed — fall through to the not-found error below.
+  } catch (error) {
+    if (
+      error instanceof ResolutionError ||
+      (error instanceof ApiError && error.status === 404)
+    ) {
+      // Clean not-found — fall through to the "not among provided" error.
+    } else {
+      throw error;
+    }
   }
 
   if (resolvedId) {

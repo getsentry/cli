@@ -19,6 +19,11 @@ import { mergeCommand } from "../../../src/commands/issue/merge.js";
 import * as issueUtils from "../../../src/commands/issue/utils.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+import {
+  ApiError,
+  AuthError,
+  ResolutionError,
+} from "../../../src/lib/errors.js";
 import type { SentryIssue } from "../../../src/types/sentry.js";
 
 function makeMockIssue(overrides?: Partial<SentryIssue>): SentryIssue {
@@ -335,5 +340,154 @@ describe("mergeCommand.func()", () => {
 
     const stderr = stderrWrite.mock.calls.map((c) => String(c[0])).join("");
     expect(stderr).not.toContain("--into");
+  });
+
+  test("rejects duplicate issue IDs after resolution (same issue in multiple forms)", async () => {
+    // User passes `CLI-A` and `100` which both resolve to the same numeric
+    // group id — without the dedupe guard, we'd send `?id=100&id=100` to
+    // Sentry and get back a confusing 204 → "no matching issues" error.
+    resolveIssueSpy.mockImplementation(() =>
+      Promise.resolve({
+        org: "test-org",
+        issue: makeMockIssue({ shortId: "CLI-A", id: "100" }),
+      })
+    );
+
+    const { context } = createMockContext();
+    const func = await mergeCommand.loader();
+    const err = await func
+      .call(context, { json: false }, "CLI-A", "100")
+      .catch((e: Error) => e);
+
+    expect(err.message).toContain("at least 2 distinct issues");
+    expect(err.message).toContain("CLI-A");
+    expect(mergeSpy).not.toHaveBeenCalled();
+  });
+
+  test("--into propagates auth errors instead of masking them as 'not found'", async () => {
+    // Fast-path direct match won't find CLI-XYZ (not among provided), so
+    // we fall back to resolveIssue. When that throws AuthError, the error
+    // must propagate — not be masked as the generic "did not match"
+    // message, which would be misleading during an outage or expired token.
+    let callIdx = 0;
+    resolveIssueSpy.mockImplementation(({ issueArg }: { issueArg: string }) => {
+      callIdx += 1;
+      if (callIdx <= 2) {
+        // First two calls resolve positional args normally
+        return Promise.resolve({
+          org: "test-org",
+          issue: makeMockIssue({
+            shortId: issueArg,
+            id: issueArg.replace("CLI-", "10"),
+          }),
+        });
+      }
+      // The --into fallback call throws an auth error
+      return Promise.reject(new AuthError("invalid"));
+    });
+
+    const { context } = createMockContext();
+    const func = await mergeCommand.loader();
+    const err = await func
+      .call(context, { json: false, into: "CLI-XYZ" }, "CLI-A", "CLI-B")
+      .catch((e: Error) => e);
+
+    // AuthError bubbles up (not the misleading "did not match" error)
+    expect(err).toBeInstanceOf(AuthError);
+    expect(mergeSpy).not.toHaveBeenCalled();
+  });
+
+  test("--into propagates 5xx ApiError instead of masking", async () => {
+    let callIdx = 0;
+    resolveIssueSpy.mockImplementation(({ issueArg }: { issueArg: string }) => {
+      callIdx += 1;
+      if (callIdx <= 2) {
+        return Promise.resolve({
+          org: "test-org",
+          issue: makeMockIssue({
+            shortId: issueArg,
+            id: issueArg.replace("CLI-", "10"),
+          }),
+        });
+      }
+      return Promise.reject(new ApiError("Internal error", 500));
+    });
+
+    const { context } = createMockContext();
+    const func = await mergeCommand.loader();
+    const err = await func
+      .call(context, { json: false, into: "CLI-XYZ" }, "CLI-A", "CLI-B")
+      .catch((e: Error) => e);
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(500);
+  });
+
+  test("--into swallows ResolutionError as clean not-found", async () => {
+    // Opposite of the above: when resolveIssue cleanly fails with
+    // ResolutionError (or a 404 ApiError), we should fall through to
+    // the 'did not match any of the provided issues' ValidationError.
+    let callIdx = 0;
+    resolveIssueSpy.mockImplementation(({ issueArg }: { issueArg: string }) => {
+      callIdx += 1;
+      if (callIdx <= 2) {
+        return Promise.resolve({
+          org: "test-org",
+          issue: makeMockIssue({
+            shortId: issueArg,
+            id: issueArg.replace("CLI-", "10"),
+          }),
+        });
+      }
+      return Promise.reject(
+        new ResolutionError("Issue 'XYZ'", "not found", "sentry issue view XYZ")
+      );
+    });
+
+    const { context } = createMockContext();
+    const func = await mergeCommand.loader();
+    const err = await func
+      .call(context, { json: false, into: "XYZ" }, "CLI-A", "CLI-B")
+      .catch((e: Error) => e);
+
+    // Should be the friendly "did not match" error, not the raw
+    // ResolutionError — the fallback path specifically handles not-found.
+    expect(err.message).toContain("did not match any of the provided issues");
+    expect(err.message).toContain("CLI-A, CLI-B");
+  });
+
+  test("fast-path matches short IDs case-insensitively", async () => {
+    // User types `cli-b` (lowercase) but short IDs are canonically
+    // uppercase. Direct match should still succeed without hitting the
+    // API-fallback path.
+    resolveIssueSpy.mockImplementation(({ issueArg }: { issueArg: string }) =>
+      Promise.resolve({
+        org: "test-org",
+        issue: makeMockIssue({
+          shortId: issueArg.toUpperCase(),
+          id: issueArg.toUpperCase().replace("CLI-", "10"),
+        }),
+      })
+    );
+    mergeSpy.mockResolvedValue({ parent: "10B", children: ["10A"] });
+
+    let fallbackCalls = 0;
+    // Count how many times resolveIssue is called — should be 2 (positional
+    // only) since the fast-path succeeds. If it were 3, the fallback fired.
+    const originalImpl = resolveIssueSpy.getMockImplementation();
+    resolveIssueSpy.mockImplementation((opts) => {
+      fallbackCalls += 1;
+      return originalImpl?.(opts) as ReturnType<typeof Promise.resolve>;
+    });
+
+    const { context } = createMockContext();
+    const func = await mergeCommand.loader();
+    await func.call(context, { json: false, into: "cli-b" }, "CLI-A", "CLI-B");
+
+    // 2 calls: one per positional arg. The fast path should hit on the
+    // lowercase `cli-b` → uppercase `CLI-B` comparison, avoiding a 3rd call.
+    expect(fallbackCalls).toBe(2);
+    const callArgs = mergeSpy.mock.calls[0] as [string, string[]];
+    expect(callArgs[1][0]).toBe("10B"); // parent at front
   });
 });

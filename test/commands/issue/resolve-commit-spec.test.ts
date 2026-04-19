@@ -117,6 +117,49 @@ describe("resolveCommitSpec — auto-detect mode", () => {
       headSpy.mockRestore();
     }
   });
+
+  test("resolves HEAD + matching Sentry repo (happy path)", async () => {
+    // Exercises the full success path: work-tree check → HEAD read →
+    // parseRemoteUrl parses the origin → listRepositoriesCached returns
+    // a repo whose externalSlug matches → resolved payload returned.
+    const gitSpy = spyOn(gitLib, "isInsideGitWorkTree").mockReturnValue(true);
+    const headSpy = spyOn(gitLib, "getHeadCommit").mockReturnValue(
+      "abc123def456"
+    );
+    // parseRemoteUrl runs on the output of `git remote get-url origin`,
+    // which resolveCommitSpec fetches internally via execFileSync. We can
+    // stub parseRemoteUrl to skip the real git call and return a known
+    // owner/repo.
+    const parseSpy = spyOn(gitLib, "parseRemoteUrl").mockReturnValue(
+      "getsentry/cli"
+    );
+    const listSpy = spyOn(
+      apiClient,
+      "listRepositoriesCached"
+    ).mockResolvedValue([
+      makeRepo({ name: "getsentry/cli", externalSlug: "getsentry/cli" }),
+    ]);
+
+    try {
+      // Use a cwd that actually has a git origin (the repo root) so the
+      // internal `git remote get-url origin` call succeeds and the stubbed
+      // parseRemoteUrl takes over from there.
+      const result = await resolveCommitSpec(
+        { kind: "auto" },
+        "sentry",
+        process.cwd()
+      );
+      expect(result).toEqual({
+        commit: "abc123def456",
+        repository: "getsentry/cli",
+      });
+    } finally {
+      gitSpy.mockRestore();
+      headSpy.mockRestore();
+      parseSpy.mockRestore();
+      listSpy.mockRestore();
+    }
+  });
 });
 
 describe("resolveCommitSpec — error messages are actionable", () => {

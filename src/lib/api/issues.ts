@@ -484,13 +484,18 @@ export function parseResolveSpec(
   if (!trimmed) {
     return null;
   }
-  if (trimmed === RESOLVE_NEXT_RELEASE_SENTINEL) {
+  // Sentinel matches are case-insensitive (`@NEXT`, `@Commit`, etc.) so
+  // typos and mixed-case variants don't silently fall through to
+  // inRelease. But the payload after `@commit:` keeps its original case,
+  // since repository names and SHAs are case-sensitive.
+  const lower = trimmed.toLowerCase();
+  if (lower === RESOLVE_NEXT_RELEASE_SENTINEL) {
     return { kind: "static", details: { inNextRelease: true } };
   }
-  if (trimmed === RESOLVE_COMMIT_SENTINEL) {
+  if (lower === RESOLVE_COMMIT_SENTINEL) {
     return { kind: "commit", spec: { kind: "auto" } };
   }
-  if (trimmed.startsWith(RESOLVE_COMMIT_EXPLICIT_PREFIX)) {
+  if (lower.startsWith(RESOLVE_COMMIT_EXPLICIT_PREFIX)) {
     const payload = trimmed.slice(RESOLVE_COMMIT_EXPLICIT_PREFIX.length);
     // Split on the LAST `@` so repo names containing `@` (rare but legal
     // for scoped npm-style names like `@acme/web`) resolve correctly.
@@ -510,6 +515,17 @@ export function parseResolveSpec(
       );
     }
     return { kind: "commit", spec: { kind: "explicit", repository, commit } };
+  }
+  // Anything else starting with `@` is almost certainly a mistyped
+  // sentinel — reject with a clear message instead of silently creating
+  // a release named (e.g.) "@netx" that the user didn't intend.
+  if (trimmed.startsWith("@")) {
+    throw new ValidationError(
+      `Invalid --in spec: '${spec}' is not a recognized sentinel.\n\n` +
+        `Expected '${RESOLVE_NEXT_RELEASE_SENTINEL}', '${RESOLVE_COMMIT_SENTINEL}', or '${RESOLVE_COMMIT_EXPLICIT_PREFIX}<repo>@<sha>'.\n` +
+        "If you meant a literal release name, it cannot start with '@'.",
+      "in"
+    );
   }
   return { kind: "static", details: { inRelease: trimmed } };
 }

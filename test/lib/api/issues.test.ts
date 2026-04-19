@@ -106,6 +106,49 @@ describe("parseResolveSpec", () => {
       details: { inRelease: "0.26.1" },
     });
   });
+
+  test("sentinel matching is case-insensitive (@Next, @NEXT, @Commit, ...)", () => {
+    // Users sometimes copy sentinels from docs with different casing, or
+    // a stack frame name may be auto-capitalized. All variants must
+    // normalize to the canonical sentinel, never silently fall through to
+    // inRelease.
+    expect(parseResolveSpec("@Next")).toEqual({
+      kind: "static",
+      details: { inNextRelease: true },
+    });
+    expect(parseResolveSpec("@NEXT")).toEqual({
+      kind: "static",
+      details: { inNextRelease: true },
+    });
+    expect(parseResolveSpec("@Commit")).toEqual({
+      kind: "commit",
+      spec: { kind: "auto" },
+    });
+    expect(parseResolveSpec("@COMMIT")).toEqual({
+      kind: "commit",
+      spec: { kind: "auto" },
+    });
+  });
+
+  test("explicit @commit prefix is case-insensitive but preserves payload case", () => {
+    expect(parseResolveSpec("@Commit:GetSentry/CLI@ABCDEF123")).toEqual({
+      kind: "commit",
+      spec: {
+        kind: "explicit",
+        repository: "GetSentry/CLI",
+        commit: "ABCDEF123",
+      },
+    });
+  });
+
+  test("rejects unknown @-prefixed tokens instead of silent inRelease fallback", () => {
+    // Typo guard: @netx, @commmit, @release, etc. must error instead of
+    // quietly creating a release named "@netx". Releases cannot legally
+    // start with @ in any supported format, so this is always a typo.
+    expect(() => parseResolveSpec("@netx")).toThrow(ValidationError);
+    expect(() => parseResolveSpec("@commmit")).toThrow(ValidationError);
+    expect(() => parseResolveSpec("@release")).toThrow(ValidationError);
+  });
 });
 
 describe("mergeIssues", () => {
