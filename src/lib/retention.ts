@@ -56,8 +56,11 @@ export const SCAN_PERIODS: Record<HexEntityType, string> = {
 };
 
 /**
- * Log retention in days as a Sentry-API `statsPeriod` string (e.g. "90d").
- * Exposed separately because `api/logs.ts#getLogs` uses this value as a
- * query parameter and benefits from a named constant over a magic string.
+ * Log retention as a Sentry-API `statsPeriod` string (e.g. "90d").
+ *
+ * Derived from {@link RETENTION_DAYS} so `api/logs.ts#getLogs` and the
+ * recovery module never drift — a single edit to `RETENTION_DAYS.log`
+ * updates both the numeric retention cap and the period string the API
+ * sees.
  */
-export const LOG_RETENTION_PERIOD = "90d";
+export const LOG_RETENTION_PERIOD = `${RETENTION_DAYS.log ?? 90}d`;

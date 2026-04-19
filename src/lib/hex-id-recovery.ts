@@ -25,7 +25,7 @@
  */
 
 import type { SpanListItem, TransactionListItem } from "../types/index.js";
-import { listSpans, listTransactions } from "./api-client.js";
+import { listLogs, listSpans, listTransactions } from "./api-client.js";
 import { AuthError, ResolutionError, ValidationError } from "./errors.js";
 import {
   ALPHA_SEGMENT_RE,
@@ -203,11 +203,20 @@ export function preNormalize(input: string): {
     return { cleaned: lowered, sentinel: lowered };
   }
 
+  // Strip URL fragment prefixes repeatedly so the function is idempotent.
+  // A pathological double-prefixed input like `span-span-abc` would otherwise
+  // strip only the outer `span-` and leave the inner prefix in place, which
+  // breaks `preNormalize(preNormalize(x)) === preNormalize(x)`.
   let cleaned = lowered;
-  for (const prefix of URL_FRAGMENT_PREFIXES) {
-    if (cleaned.startsWith(prefix)) {
-      cleaned = cleaned.slice(prefix.length);
-      break;
+  let stripped = true;
+  while (stripped) {
+    stripped = false;
+    for (const prefix of URL_FRAGMENT_PREFIXES) {
+      if (cleaned.startsWith(prefix)) {
+        cleaned = cleaned.slice(prefix.length);
+        stripped = true;
+        break;
+      }
     }
   }
 
@@ -387,7 +396,6 @@ const logAdapter: FuzzyLookupAdapter = async (ctx) => {
   if (!ctx.project) {
     return [];
   }
-  const { listLogs } = await import("./api-client.js");
   const logs = await listLogs(ctx.org, ctx.project, {
     limit: LOG_SCAN_LIMIT,
     statsPeriod: ctx.period ?? SCAN_PERIODS.log,

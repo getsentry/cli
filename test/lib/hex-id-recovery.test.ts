@@ -64,6 +64,15 @@ describe("preNormalize", () => {
     expect(preNormalize("span-abc12345")).toEqual({ cleaned: "abc12345" });
   });
 
+  test("strips nested URL fragment prefixes (idempotency safety)", () => {
+    // Ensures preNormalize is idempotent even on pathological inputs —
+    // first pass would only peel the outer prefix without the loop.
+    expect(preNormalize("span-span-abc")).toEqual({ cleaned: "abc" });
+    expect(preNormalize("trace-txn-deadbeef")).toEqual({
+      cleaned: "deadbeef",
+    });
+  });
+
   test("strips txn- URL fragment prefix", () => {
     expect(preNormalize("txn-abc123")).toEqual({ cleaned: "abc123" });
   });
