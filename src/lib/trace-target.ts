@@ -17,9 +17,10 @@
  */
 
 import { normalizeSlug, parseOrgProjectArg } from "./arg-parsing.js";
-import { ContextError, ValidationError } from "./errors.js";
+import { AuthError, ContextError, ValidationError } from "./errors.js";
 import { handleRecoveryResult, recoverHexId } from "./hex-id-recovery.js";
 import { logger } from "./logger.js";
+import { resolveEffectiveOrg } from "./region.js";
 import {
   resolveOrg,
   resolveOrgAndProject,
@@ -329,7 +330,7 @@ export async function parseTraceTargetWithRecovery(
     if (!raw?.rawTraceId) {
       throw err;
     }
-    const recoveryCtx = tryResolveTraceRecoveryOrg(raw.targetArg);
+    const recoveryCtx = await tryResolveTraceRecoveryOrg(raw.targetArg);
     const ctx = recoveryCtx ?? { org: "", project: undefined };
     const result = await recoverHexId(raw.rawTraceId, "trace", ctx);
     const recoveredTraceId = handleRecoveryResult(result, err, {
@@ -367,24 +368,43 @@ function substituteTraceId(args: string[], recoveredTraceId: string): string[] {
  * when the arg is absent or doesn't yield an org/project — auto-detection
  * is deliberately NOT attempted here because it's expensive and the fuzzy
  * adapters return empty without a project slug.
+ *
+ * Calls {@link resolveEffectiveOrg} to normalize DSN-style numeric org IDs
+ * (e.g. `o1081365`) to slugs, matching the behavior in event view's
+ * recovery path. Without this, fuzzy-adapter API calls like `listSpans`
+ * silently 404/403 on numeric org IDs.
+ *
+ * Swallows non-auth errors so a resolution failure during recovery never
+ * masks the original validation error. AuthError is re-thrown so the
+ * auto-login flow still triggers.
  */
-function tryResolveTraceRecoveryOrg(
+async function tryResolveTraceRecoveryOrg(
   targetArg: string | undefined
-): { org: string; project?: string } | null {
+): Promise<{ org: string; project?: string } | null> {
   if (!targetArg) {
     return null;
   }
   const parsed = parseOrgProjectArg(targetArg);
-  switch (parsed.type) {
-    case "explicit":
-      return { org: parsed.org, project: parsed.project };
-    case "org-all":
-      return { org: parsed.org };
-    case "project-search":
-    case "auto-detect":
-      return null;
-    default:
-      return null;
+  try {
+    switch (parsed.type) {
+      case "explicit":
+        return {
+          org: await resolveEffectiveOrg(parsed.org),
+          project: parsed.project,
+        };
+      case "org-all":
+        return { org: await resolveEffectiveOrg(parsed.org) };
+      case "project-search":
+      case "auto-detect":
+        return null;
+      default:
+        return null;
+    }
+  } catch (err) {
+    if (err instanceof AuthError) {
+      throw err;
+    }
+    return null;
   }
 }
 
