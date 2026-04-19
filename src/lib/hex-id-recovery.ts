@@ -27,6 +27,7 @@
 import type { SpanListItem, TransactionListItem } from "../types/index.js";
 import { listLogs, listSpans, listTransactions } from "./api-client.js";
 import { AuthError, ResolutionError, ValidationError } from "./errors.js";
+import type { HexEntityType } from "./hex-id.js";
 import {
   ALPHA_SEGMENT_RE,
   ageInDaysFromUuidV7,
@@ -49,8 +50,10 @@ const log = logger.withTag("hex-id-recovery");
 // Types
 // ---------------------------------------------------------------------------
 
-/** Entity types this module recovers. */
-export type HexEntityType = "event" | "trace" | "log" | "span";
+// `HexEntityType` lives in `./hex-id.js` so `retention.ts` and other
+// low-level modules can reference it without circular type dependencies.
+// Re-exported here for callers that already import from this module.
+export type { HexEntityType } from "./hex-id.js";
 
 /**
  * Extracted prefix/suffix from a raw malformed input.

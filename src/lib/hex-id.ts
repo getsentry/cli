@@ -2,12 +2,22 @@
  * Shared Hex ID Validation
  *
  * Central place for hexadecimal identifier primitives used across the CLI:
- * regex patterns, normalization, validation, and UUIDv7 timestamp decoding.
+ * regex patterns, normalization, validation, UUIDv7 timestamp decoding,
+ * and the `HexEntityType` discriminator that other modules key off.
  * All callers — including `hex-id-recovery.ts` — should import from here
  * rather than rolling their own patterns.
  */
 
 import { ValidationError } from "./errors.js";
+
+/**
+ * Entity types whose identifiers are 32- or 16-char hex strings.
+ *
+ * Lives in this low-level module so higher-level modules (`retention.ts`,
+ * `hex-id-recovery.ts`) can depend on it without creating a circular
+ * type dependency in the other direction.
+ */
+export type HexEntityType = "event" | "trace" | "log" | "span";
 
 // ---------------------------------------------------------------------------
 // Anchored patterns (match a complete string)

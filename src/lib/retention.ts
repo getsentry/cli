@@ -15,7 +15,7 @@
  *   can speak with certainty (UUIDv7 timestamps on logs).
  */
 
-import type { HexEntityType } from "./hex-id-recovery.js";
+import type { HexEntityType } from "./hex-id.js";
 
 /**
  * Hard retention cap, in days, per entity type.

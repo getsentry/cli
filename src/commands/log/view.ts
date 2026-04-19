@@ -337,12 +337,13 @@ function throwNotFoundError(
     );
   }
 
-  // Multiple IDs — annotate each expired one inline and surface a generic
-  // retention hint at the end.
-  const annotated = logIds
-    .map((id) => ` - \`${id}\`${retentionSuffix(id)}`)
+  // Multiple IDs — compute the retention suffix once per ID so both the
+  // inline annotation and the "any expired?" check reuse the same decode.
+  const suffixed = logIds.map((id) => ({ id, suffix: retentionSuffix(id) }));
+  const annotated = suffixed
+    .map(({ id, suffix }) => ` - \`${id}\`${suffix}`)
     .join("\n");
-  const anyExpired = logIds.some((id) => retentionSuffix(id) !== "");
+  const anyExpired = suffixed.some(({ suffix }) => suffix !== "");
   const hint = anyExpired
     ? "Expired log IDs are no longer retrievable. Check non-expired IDs and re-run."
     : "Make sure the log IDs are correct and the logs were sent within the last 90 days.";
