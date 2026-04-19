@@ -54,7 +54,14 @@ type ResolveResult = {
   spec: ResolveStatusDetails | null;
 };
 
-/** Describe the resolution spec for the human-readable output footer. */
+/**
+ * Describe the resolution spec for the human-readable output footer.
+ *
+ * Exhaustive over {@link ResolveStatusDetails} variants — any future
+ * variant added to the union triggers a TypeScript error at the
+ * `never`-typed `_exhaustive` assignment, preventing silent
+ * misclassification.
+ */
 function describeSpec(spec: ResolveStatusDetails | null): string {
   if (!spec) {
     return "immediately";
@@ -65,7 +72,13 @@ function describeSpec(spec: ResolveStatusDetails | null): string {
   if ("inCommit" in spec) {
     return `in commit ${spec.inCommit.commit.slice(0, 12)} (repo '${spec.inCommit.repository}')`;
   }
-  return "in the next release";
+  if ("inNextRelease" in spec) {
+    return "in the next release";
+  }
+  // Exhaustiveness check — TypeScript will error here if a new variant
+  // is added to ResolveStatusDetails without a matching branch above.
+  const _exhaustive: never = spec;
+  return _exhaustive;
 }
 
 function formatResolved(result: ResolveResult): string {
