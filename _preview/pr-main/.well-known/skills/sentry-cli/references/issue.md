@@ -165,4 +165,67 @@ sentry issue view FRONT-ABC
 sentry issue view FRONT-ABC -w
 ```
 
+### `sentry issue resolve <issue>`
+
+Mark an issue as resolved
+
+**Flags:**
+- `-i, --in <value> - Resolve in a release, next release, or commit ('<version>' | '@next' | '@commit' | '@commit:<repo>@<sha>')`
+
+**Examples:**
+
+```bash
+# Resolve immediately (no regression tracking)
+sentry issue resolve CLI-G5
+
+# Resolve in a specific release — future events on newer releases are
+# regression-flagged
+sentry issue resolve CLI-G5 --in 0.26.1
+
+# Monorepo-style releases work too (no special parsing)
+sentry issue resolve CLI-G5 --in spotlight@1.2.3
+
+# Resolve in the next release (tied to current HEAD)
+sentry issue resolve CLI-G5 --in @next
+sentry issue resolve CLI-G5 -i @next
+
+# Resolve in the current git HEAD — auto-detects the Sentry repo from
+# your git origin remote (hard-errors if it can't)
+sentry issue resolve CLI-G5 --in @commit
+
+# Explicit commit + repo (no git inspection; repo must be registered in Sentry)
+sentry issue resolve CLI-G5 --in @commit:getsentry/cli@abc123def
+
+# Reopen a resolved issue
+sentry issue unresolve CLI-G5
+sentry issue reopen CLI-G5   # alias
+```
+
+### `sentry issue unresolve <issue>`
+
+Reopen a resolved issue
+
+### `sentry issue merge <issue...>`
+
+Merge 2+ issues into a single canonical group
+
+**Flags:**
+- `-i, --into <value> - Prefer this issue as the canonical parent (must match one of the provided IDs)`
+
+**Examples:**
+
+```bash
+# Let Sentry auto-pick the parent (typically the largest by event count)
+sentry issue merge CLI-K9 CLI-15H CLI-15N
+
+# Pin the canonical parent explicitly — accepts the same formats as
+# positional args, including org-qualified and project-alias forms
+sentry issue merge CLI-K9 CLI-15H CLI-15N --into CLI-K9
+sentry issue merge my-org/CLI-K9 my-org/CLI-15H --into my-org/CLI-K9
+sentry issue merge cli-k9 cli-15h --into cli-k9    # alias form
+
+# Cross-org merges are rejected — all issues must share an organization
+# Non-error issue types (performance, info, etc.) cannot be merged
+```
+
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
