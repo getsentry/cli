@@ -57,6 +57,12 @@ export {
   type IssuesPage,
   listIssuesAllPages,
   listIssuesPaginated,
+  type MergeIssuesResult,
+  mergeIssues,
+  parseResolveSpec,
+  RESOLVE_COMMIT_PREFIX,
+  RESOLVE_NEXT_RELEASE_SENTINEL,
+  type ResolveStatusDetails,
   tryGetIssueByShortId,
   updateIssueStatus,
 } from "./api/issues.js";

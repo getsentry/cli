@@ -165,4 +165,58 @@ sentry issue view FRONT-ABC
 sentry issue view FRONT-ABC -w
 ```
 
+### `sentry issue resolve <issue>`
+
+Mark an issue as resolved
+
+**Flags:**
+- `-i, --in <value> - Resolve in a release ('<version>' | '@next' | 'commit:<sha>')`
+
+**Examples:**
+
+```bash
+# Resolve immediately (no regression tracking)
+sentry issue resolve CLI-G5
+
+# Resolve in a specific release — future events on newer releases are
+# regression-flagged
+sentry issue resolve CLI-G5 --in 0.26.1
+
+# Resolve in the next release (tied to current HEAD)
+sentry issue resolve CLI-G5 --in @next
+
+# Resolve tied to a commit SHA — regression-flags once a release
+# containing that commit deploys
+sentry issue resolve CLI-G5 -i commit:abc123
+
+# Reopen a resolved issue
+sentry issue unresolve CLI-G5
+sentry issue reopen CLI-G5   # alias
+```
+
+### `sentry issue unresolve <issue>`
+
+Reopen a resolved issue
+
+### `sentry issue merge <issue...>`
+
+Merge 2+ issues into a single canonical group
+
+**Flags:**
+- `-i, --into <value> - Pin the canonical parent (must match one of the provided issue IDs)`
+
+**Examples:**
+
+```bash
+# Let Sentry auto-pick the parent (typically the largest by event count)
+sentry issue merge CLI-K9 CLI-15H CLI-15N
+
+# Pin the canonical parent explicitly
+sentry issue merge CLI-K9 CLI-15H CLI-15N --into CLI-K9
+sentry issue merge CLI-K9 CLI-15H -i CLI-K9
+
+# Cross-org merges are rejected — all issues must share an organization
+# Non-error issue types (performance, info, etc.) cannot be merged
+```
+
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

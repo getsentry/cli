@@ -10,7 +10,7 @@ import { listAnOrganization_sIssues } from "@sentry/api";
 import type { SentryIssue } from "../../types/index.js";
 
 import { applyCustomHeaders } from "../custom-headers.js";
-import { ApiError } from "../errors.js";
+import { ApiError, ValidationError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
 
 import {
@@ -395,18 +395,155 @@ export async function tryGetIssueByShortId(
 }
 
 /**
- * Update an issue's status.
+ * Resolution-release tracking for {@link updateIssueStatus}. Maps to the
+ * `statusDetails` shape expected by Sentry's bulk mutate endpoint:
+ *
+ * - `inRelease` — resolve in a specific named release (e.g. `"0.26.1"`).
+ *   Future events seen on releases **after** this one will regression-flag.
+ * - `inNextRelease: true` — resolve in the next release after the current
+ *   commit. Commonly used when the fix is merged but not yet tagged.
+ * - `inCommit` — resolve tied to a specific commit SHA. Sentry resolves
+ *   once a release containing the commit is created.
  */
-export function updateIssueStatus(
+export type ResolveStatusDetails =
+  | { inRelease: string }
+  | { inNextRelease: true }
+  | { inCommit: string };
+
+/**
+ * Sentinel string meaning "resolve in the next release (tied to HEAD)".
+ * Chosen to never clash with a real version string — `@` is not a valid
+ * character in semver or Sentry release slugs.
+ */
+export const RESOLVE_NEXT_RELEASE_SENTINEL = "@next";
+
+/**
+ * Prefix meaning "resolve in this commit SHA" for {@link parseResolveSpec}.
+ * `commit:abc123` → `{ inCommit: "abc123" }`.
+ */
+export const RESOLVE_COMMIT_PREFIX = "commit:";
+
+/**
+ * Parse an `--in` resolution-spec string into a {@link ResolveStatusDetails}
+ * object. Grammar (see command docs):
+ *
+ * - `@next`           → `{ inNextRelease: true }`
+ * - `commit:<sha>`    → `{ inCommit: <sha> }`
+ * - anything else     → `{ inRelease: <value> }`
+ *
+ * Empty/whitespace-only input returns `null` (treated as "no spec" by the
+ * caller, which resolves immediately without release tracking).
+ *
+ * @throws {ApiError} When a `commit:` prefix is given without a SHA.
+ */
+export function parseResolveSpec(
+  spec: string | undefined
+): ResolveStatusDetails | null {
+  if (!spec) {
+    return null;
+  }
+  const trimmed = spec.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed === RESOLVE_NEXT_RELEASE_SENTINEL) {
+    return { inNextRelease: true };
+  }
+  if (trimmed.startsWith(RESOLVE_COMMIT_PREFIX)) {
+    const sha = trimmed.slice(RESOLVE_COMMIT_PREFIX.length).trim();
+    if (!sha) {
+      throw new ValidationError(
+        `Invalid --in spec: expected a commit SHA after 'commit:' (got '${spec}').`,
+        "in"
+      );
+    }
+    return { inCommit: sha };
+  }
+  return { inRelease: trimmed };
+}
+
+/**
+ * Update an issue's status.
+ *
+ * When `status === "resolved"`, optional `statusDetails` can pin the fix
+ * to a release or commit (see {@link ResolveStatusDetails}). Without
+ * `statusDetails`, the issue is resolved immediately with no regression
+ * tracking — equivalent to clicking "Resolve" in the Sentry UI.
+ *
+ * When `options.orgSlug` is provided, the request is routed to that org's
+ * region via the org-scoped endpoint. Without it, falls back to the legacy
+ * global `/issues/{id}/` endpoint (works but not region-aware).
+ */
+export async function updateIssueStatus(
   issueId: string,
-  status: "resolved" | "unresolved" | "ignored"
+  status: "resolved" | "unresolved" | "ignored",
+  options?: {
+    statusDetails?: ResolveStatusDetails;
+    orgSlug?: string;
+  }
 ): Promise<SentryIssue> {
-  // Use raw request - the SDK's updateAnIssue requires org slug but
-  // the legacy /issues/{id}/ endpoint works without it
-  return apiRequest<SentryIssue>(`/issues/${issueId}/`, {
+  const body: Record<string, unknown> = { status };
+  if (options?.statusDetails) {
+    body.statusDetails = options.statusDetails;
+  }
+  if (options?.orgSlug) {
+    // Region-aware org-scoped endpoint — preferred when org is known.
+    const regionUrl = await resolveOrgRegion(options.orgSlug);
+    const { data } = await apiRequestToRegion<SentryIssue>(
+      regionUrl,
+      `/organizations/${encodeURIComponent(options.orgSlug)}/issues/${encodeURIComponent(issueId)}/`,
+      { method: "PUT", body }
+    );
+    return data;
+  }
+  // Legacy global endpoint — works without org but not region-aware.
+  return apiRequest<SentryIssue>(`/issues/${encodeURIComponent(issueId)}/`, {
     method: "PUT",
-    body: { status },
+    body,
   });
+}
+
+/** Result of a successful issue-merge operation. */
+export type MergeIssuesResult = {
+  /** Numeric group ID that the merged issues were consolidated into. */
+  parent: string;
+  /** Numeric group IDs that were merged into the parent (excludes parent). */
+  children: string[];
+};
+
+/**
+ * Merge multiple issues into a single canonical group.
+ *
+ * Sentry auto-picks the canonical parent (typically the largest by event
+ * count). Future events with fingerprints previously matching any of the
+ * children will flow into the parent group.
+ *
+ * @param orgSlug - Organization slug (required for the bulk mutate endpoint)
+ * @param groupIds - At least 2 numeric group IDs to merge
+ * @throws {ApiError} When fewer than 2 IDs are provided, or the API rejects
+ *   (e.g. `"Only error issues can be merged."` for non-error issue types)
+ */
+export async function mergeIssues(
+  orgSlug: string,
+  groupIds: readonly string[]
+): Promise<MergeIssuesResult> {
+  if (groupIds.length < 2) {
+    throw new ValidationError(
+      `Need at least 2 issues to merge (got ${groupIds.length}).`
+    );
+  }
+  // The bulk mutate endpoint accepts repeated `?id=X` query params plus a
+  // `{merge: 1}` body. The SDK wraps this but its typed `query` shape
+  // doesn't expose the array semantics cleanly, so use raw request.
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const query = groupIds.map((id) => `id=${encodeURIComponent(id)}`).join("&");
+  const path = `/organizations/${encodeURIComponent(orgSlug)}/issues/?${query}`;
+  type MergeResponse = { merge: MergeIssuesResult };
+  const { data } = await apiRequestToRegion<MergeResponse>(regionUrl, path, {
+    method: "PUT",
+    body: { merge: 1 },
+  });
+  return data.merge;
 }
 
 /**

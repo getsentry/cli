@@ -298,6 +298,9 @@ Manage Sentry issues
 - `sentry issue explain <issue>` — Analyze an issue's root cause using Seer AI
 - `sentry issue plan <issue>` — Generate a solution plan using Seer AI
 - `sentry issue view <issue>` — View details of a specific issue
+- `sentry issue resolve <issue>` — Mark an issue as resolved
+- `sentry issue unresolve <issue>` — Reopen a resolved issue
+- `sentry issue merge <issue...>` — Merge 2+ issues into a single canonical group
 
 → Full flags and examples: `references/issue.md`
 
