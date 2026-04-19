@@ -14,6 +14,8 @@ import {
   test,
 } from "bun:test";
 import { resolveCommand } from "../../../src/commands/issue/resolve.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as commitSpec from "../../../src/commands/issue/resolve-commit-spec.js";
 import { unresolveCommand } from "../../../src/commands/issue/unresolve.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as issueUtils from "../../../src/commands/issue/utils.js";
@@ -114,6 +116,92 @@ describe("resolveCommand.func()", () => {
       statusDetails: { inNextRelease: true },
       orgSlug: "test-org",
     });
+  });
+
+  test("resolves --in @commit by delegating to resolveCommitSpec", async () => {
+    resolveIssueSpy.mockResolvedValue({
+      org: "test-org",
+      issue: makeMockIssue(),
+    });
+    updateSpy.mockResolvedValue(makeMockIssue());
+    const commitSpy = spyOn(commitSpec, "resolveCommitSpec").mockResolvedValue({
+      commit: "abc123def",
+      repository: "getsentry/cli",
+    });
+
+    try {
+      const { context } = createMockContext();
+      const func = await resolveCommand.loader();
+      await func.call(context, { json: false, in: "@commit" }, "CLI-G5");
+
+      expect(commitSpy).toHaveBeenCalledWith(
+        { kind: "auto" },
+        "test-org",
+        "/tmp"
+      );
+      expect(updateSpy).toHaveBeenCalledWith("123456789", "resolved", {
+        statusDetails: {
+          inCommit: { commit: "abc123def", repository: "getsentry/cli" },
+        },
+        orgSlug: "test-org",
+      });
+    } finally {
+      commitSpy.mockRestore();
+    }
+  });
+
+  test("resolves --in @commit:<repo>@<sha> via explicit spec", async () => {
+    resolveIssueSpy.mockResolvedValue({
+      org: "test-org",
+      issue: makeMockIssue(),
+    });
+    updateSpy.mockResolvedValue(makeMockIssue());
+    const commitSpy = spyOn(commitSpec, "resolveCommitSpec").mockResolvedValue({
+      commit: "abc123",
+      repository: "getsentry/cli",
+    });
+
+    try {
+      const { context } = createMockContext();
+      const func = await resolveCommand.loader();
+      await func.call(
+        context,
+        { json: false, in: "@commit:getsentry/cli@abc123" },
+        "CLI-G5"
+      );
+
+      expect(commitSpy).toHaveBeenCalledWith(
+        { kind: "explicit", repository: "getsentry/cli", commit: "abc123" },
+        "test-org",
+        "/tmp"
+      );
+      expect(updateSpy).toHaveBeenCalledWith("123456789", "resolved", {
+        statusDetails: {
+          inCommit: { commit: "abc123", repository: "getsentry/cli" },
+        },
+        orgSlug: "test-org",
+      });
+    } finally {
+      commitSpy.mockRestore();
+    }
+  });
+
+  test("--in @commit without an org context throws ContextError", async () => {
+    // No org resolved from the issue (e.g. bare numeric ID with no DSN cache hit)
+    resolveIssueSpy.mockResolvedValue({
+      org: undefined,
+      issue: makeMockIssue(),
+    });
+
+    const { context } = createMockContext();
+    const func = await resolveCommand.loader();
+    const err = await func
+      .call(context, { json: false, in: "@commit" }, "123456789")
+      .catch((e: Error) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain("Organization");
+    expect(updateSpy).not.toHaveBeenCalled();
   });
 
   test("JSON output includes resolved_in metadata", async () => {

@@ -402,16 +402,15 @@ export async function tryGetIssueByShortId(
  *   Future events seen on releases **after** this one will regression-flag.
  * - `inNextRelease: true` — resolve in the next release after the current
  *   commit. Commonly used when the fix is merged but not yet tagged.
- *
- * `inCommit` resolution is intentionally not exposed here — the Sentry API
- * requires both a SHA *and* a repository name registered in Sentry, which
- * is cumbersome to collect from a CLI and rarely needed (most users reach
- * for `inNextRelease` instead). Callers that genuinely need commit-scoped
- * resolution can use `sentry api` directly.
+ * - `inCommit` — resolve tied to a commit in a Sentry-registered repo.
+ *   Sentry resolves when a release containing the commit is created. Both
+ *   `commit` (SHA) and `repository` (Sentry-registered repo name) are
+ *   required by the API's InCommitValidator.
  */
 export type ResolveStatusDetails =
   | { inRelease: string }
-  | { inNextRelease: true };
+  | { inNextRelease: true }
+  | { inCommit: { commit: string; repository: string } };
 
 /**
  * Sentinel string meaning "resolve in the next release (tied to HEAD)".
@@ -421,18 +420,63 @@ export type ResolveStatusDetails =
 export const RESOLVE_NEXT_RELEASE_SENTINEL = "@next";
 
 /**
- * Parse an `--in` resolution-spec string into a {@link ResolveStatusDetails}
- * object. Grammar (see command docs):
+ * Bare sentinel meaning "resolve at the current git HEAD, auto-detecting
+ * the Sentry-registered repo from the git origin URL". The command layer
+ * resolves this into a concrete `{inCommit: {...}}` before calling the API.
+ */
+export const RESOLVE_COMMIT_SENTINEL = "@commit";
+
+/**
+ * Prefix for the explicit commit form: `@commit:<repo>@<sha>`.
+ * Kept unambiguous against monorepo release strings like `pkg@1.2.3` by
+ * requiring the full `@commit:` anchor at the start.
+ */
+export const RESOLVE_COMMIT_EXPLICIT_PREFIX = "@commit:";
+
+/**
+ * Parsed representation of the `@commit` spec family — either an
+ * "auto-detect from HEAD" request or an explicit repo + SHA pair.
  *
- * - `@next`           → `{ inNextRelease: true }`
- * - anything else     → `{ inRelease: <value> }`
+ * Auto-detection needs git + an API call, so the CLI layer converts this
+ * into `ResolveStatusDetails` asynchronously via a separate resolver.
+ */
+export type ResolveCommitSpec =
+  | { kind: "auto" }
+  | { kind: "explicit"; repository: string; commit: string };
+
+/**
+ * Parsed representation of the fully-static portion of the `--in` grammar.
+ * Static specs ({@link ResolveStatusDetails}) are ready to ship to the API;
+ * commit specs ({@link ResolveCommitSpec}) need further resolution through
+ * git and the Sentry repo list before they become `{inCommit: ...}`.
+ */
+export type ParsedResolveSpec =
+  | { kind: "static"; details: ResolveStatusDetails }
+  | { kind: "commit"; spec: ResolveCommitSpec };
+
+/**
+ * Parse an `--in` resolution-spec string into its structured form.
+ *
+ * Grammar (see command docs):
+ *
+ * - `@next`                    → `{kind: "static", details: {inNextRelease: true}}`
+ * - `@commit`                  → `{kind: "commit", spec: {kind: "auto"}}`
+ * - `@commit:<repo>@<sha>`     → `{kind: "commit", spec: {kind: "explicit", ...}}`
+ * - anything else              → `{kind: "static", details: {inRelease: <value>}}`
+ *
+ * The explicit commit form requires a `<repo>@<sha>` payload after the
+ * `@commit:` anchor. Monorepo release strings like `pkg@1.2.3` are
+ * unambiguously treated as releases because they lack the `@commit:` prefix.
  *
  * Empty/whitespace-only input returns `null` (treated as "no spec" by the
  * caller, which resolves immediately without release tracking).
+ *
+ * @throws {ValidationError} When `@commit:` prefix is given without a
+ *   well-formed `<repo>@<sha>` payload.
  */
 export function parseResolveSpec(
   spec: string | undefined
-): ResolveStatusDetails | null {
+): ParsedResolveSpec | null {
   if (!spec) {
     return null;
   }
@@ -441,9 +485,33 @@ export function parseResolveSpec(
     return null;
   }
   if (trimmed === RESOLVE_NEXT_RELEASE_SENTINEL) {
-    return { inNextRelease: true };
+    return { kind: "static", details: { inNextRelease: true } };
   }
-  return { inRelease: trimmed };
+  if (trimmed === RESOLVE_COMMIT_SENTINEL) {
+    return { kind: "commit", spec: { kind: "auto" } };
+  }
+  if (trimmed.startsWith(RESOLVE_COMMIT_EXPLICIT_PREFIX)) {
+    const payload = trimmed.slice(RESOLVE_COMMIT_EXPLICIT_PREFIX.length);
+    // Split on the LAST `@` so repo names containing `@` (rare but legal
+    // for scoped npm-style names like `@acme/web`) resolve correctly.
+    const splitIdx = payload.lastIndexOf("@");
+    if (splitIdx <= 0 || splitIdx === payload.length - 1) {
+      throw new ValidationError(
+        `Invalid --in spec: '${spec}' — expected '${RESOLVE_COMMIT_EXPLICIT_PREFIX}<repo>@<sha>'.`,
+        "in"
+      );
+    }
+    const repository = payload.slice(0, splitIdx).trim();
+    const commit = payload.slice(splitIdx + 1).trim();
+    if (!(repository && commit)) {
+      throw new ValidationError(
+        `Invalid --in spec: '${spec}' — repo and SHA must both be non-empty.`,
+        "in"
+      );
+    }
+    return { kind: "commit", spec: { kind: "explicit", repository, commit } };
+  }
+  return { kind: "static", details: { inRelease: trimmed } };
 }
 
 /**

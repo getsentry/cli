@@ -7,6 +7,7 @@
 import { listAnOrganization_sRepositories } from "@sentry/api";
 
 import type { SentryRepository } from "../../types/index.js";
+import { getCachedRepos, setCachedRepos } from "../db/repo-cache.js";
 
 import {
   getOrgSdkConfig,
@@ -41,6 +42,30 @@ export async function listRepositories(
  * @param options - Pagination options
  * @returns Single page of repositories with cursor metadata
  */
+/**
+ * List repositories in an organization, preferring the offline cache.
+ *
+ * On cache hit: returns the stored list immediately (no network).
+ * On cache miss (or stale): refetches via {@link listRepositories} and
+ * refreshes the cache. Failures bubble up — callers should decide how
+ * to handle an API error (typically a hard error, since repo resolution
+ * has no other source of truth).
+ *
+ * @param orgSlug - Organization slug
+ * @returns All Sentry-registered repositories for the org
+ */
+export async function listRepositoriesCached(
+  orgSlug: string
+): Promise<SentryRepository[]> {
+  const cached = getCachedRepos(orgSlug);
+  if (cached) {
+    return cached;
+  }
+  const fresh = await listRepositories(orgSlug);
+  setCachedRepos(orgSlug, fresh);
+  return fresh;
+}
+
 export async function listRepositoriesPaginated(
   orgSlug: string,
   options: { cursor?: string; perPage?: number } = {}

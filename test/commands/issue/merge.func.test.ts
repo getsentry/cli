@@ -145,6 +145,45 @@ describe("mergeCommand.func()", () => {
     expect(new Set(callArgs[1])).toEqual(new Set(["10A", "10B", "10C"]));
   });
 
+  test("--into accepts project-alias suffix (e.g. 'f-g')", async () => {
+    // When the user passes `f-g` as --into, it doesn't match any shortId
+    // on the direct-match fast path, so the command falls back to
+    // resolveIssue and then matches by numeric ID.
+    let callIdx = 0;
+    resolveIssueSpy.mockImplementation(({ issueArg }: { issueArg: string }) => {
+      callIdx += 1;
+      // Positional args resolve to CLI-A / CLI-B
+      if (issueArg === "CLI-A" || issueArg === "CLI-B") {
+        return Promise.resolve({
+          org: "test-org",
+          issue: makeMockIssue({
+            shortId: issueArg,
+            id: issueArg.replace("CLI-", "10"),
+          }),
+        });
+      }
+      // --into 'f-g' resolves (alias lookup) to CLI-B
+      if (issueArg === "f-g") {
+        return Promise.resolve({
+          org: "test-org",
+          issue: makeMockIssue({ shortId: "CLI-B", id: "10B" }),
+        });
+      }
+      return Promise.reject(new Error(`unexpected issueArg: ${issueArg}`));
+    });
+    mergeSpy.mockResolvedValue({ parent: "10B", children: ["10A"] });
+
+    const { context } = createMockContext();
+    const func = await mergeCommand.loader();
+    await func.call(context, { json: false, into: "f-g" }, "CLI-A", "CLI-B");
+
+    const callArgs = mergeSpy.mock.calls[0] as [string, string[]];
+    // Parent (10B) moved to front of the merge call
+    expect(callArgs[1][0]).toBe("10B");
+    // Three resolve calls total: 2 positional + 1 alias fallback
+    expect(callIdx).toBeGreaterThanOrEqual(3);
+  });
+
   test("--into accepts org-qualified short ID", async () => {
     resolveIssueSpy.mockImplementation(({ issueArg }: { issueArg: string }) =>
       Promise.resolve({

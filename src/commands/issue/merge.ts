@@ -119,47 +119,76 @@ async function resolveAllIssues(
 }
 
 /**
- * Sort issues so that the one matching `into` (short ID or numeric ID) is
- * first. Sentry's merge endpoint picks the parent by size; pre-sorting
- * nudges the tie-break toward the caller's preference for typical cases.
+ * Sort issues so that the one matching `into` is first. Sentry's merge
+ * endpoint picks the parent by size; pre-sorting nudges the tie-break
+ * toward the caller's preference for typical cases.
  *
- * Accepts the same formats as the positional args — bare short ID
- * (`CLI-K9`), numeric group ID (`100`), or org-qualified short ID
- * (`my-org/CLI-K9`). For the org-qualified form we drop the segment
- * before the last `/` before comparing against `issue.shortId` (which is
- * always unqualified in API responses).
+ * Accepts the same formats as the positional args — bare short ID,
+ * numeric group ID, org-qualified short ID, or project-alias suffix
+ * (`f-g`, `fr-a3`, etc). Aliases are resolved by running the input
+ * through `resolveIssue` and comparing the resulting numeric ID against
+ * the already-resolved issues.
+ *
+ * Fast path: try a direct string match first (avoids an API call when
+ * the user passes the canonical form). Fall back to `resolveIssue` only
+ * when the direct match misses, then look up by numeric ID.
  *
  * When `into` doesn't match any issue in the list, that's a user error —
  * we throw so the user can correct the mistake instead of silently getting
  * a different parent.
  */
-function orderForMerge(
+async function orderForMerge(
   issues: SentryIssue[],
-  into: string | undefined
-): SentryIssue[] {
+  into: string | undefined,
+  cwd: string
+): Promise<SentryIssue[]> {
   if (!into) {
     return issues;
   }
   const normalized = into.trim();
-  // Strip the "org/" prefix if present (e.g. "my-org/CLI-K9" → "CLI-K9").
+  // Fast path: direct match on shortId / id (bare or org-qualified form).
   // The Sentry API's `shortId` field is always the bare short ID.
   const lastSlash = normalized.lastIndexOf("/");
   const bare = lastSlash >= 0 ? normalized.slice(lastSlash + 1) : normalized;
-  const parent = issues.find(
+  const direct = issues.find(
     (i) =>
       i.shortId === bare ||
       i.id === bare ||
       i.shortId === normalized ||
       i.id === normalized
   );
-  if (!parent) {
-    throw new ValidationError(
-      `--into '${into}' did not match any of the provided issues.\n\n` +
-        `Provided: ${issues.map((i) => i.shortId).join(", ")}`,
-      "into"
-    );
+  if (direct) {
+    return [direct, ...issues.filter((i) => i !== direct)];
   }
-  return [parent, ...issues.filter((i) => i !== parent)];
+
+  // Fallback: resolve `into` through the same pipeline as positional args
+  // (handles project-alias suffixes like `f-g`, URLs, @selectors, etc).
+  // This adds a second API round trip in the alias-only case, but avoids
+  // reimplementing the alias lookup logic here.
+  let resolvedId: string | undefined;
+  try {
+    const { issue: resolvedIssue } = await resolveIssue({
+      issueArg: normalized,
+      cwd,
+      command: "merge",
+    });
+    resolvedId = resolvedIssue.id;
+  } catch {
+    // Resolution failed — fall through to the not-found error below.
+  }
+
+  if (resolvedId) {
+    const match = issues.find((i) => i.id === resolvedId);
+    if (match) {
+      return [match, ...issues.filter((i) => i !== match)];
+    }
+  }
+
+  throw new ValidationError(
+    `--into '${into}' did not match any of the provided issues.\n\n` +
+      `Provided: ${issues.map((i) => i.shortId).join(", ")}`,
+    "into"
+  );
 }
 
 export const mergeCommand = buildCommand({
@@ -217,7 +246,7 @@ export const mergeCommand = buildCommand({
     }
 
     const { org, issues } = await resolveAllIssues(args, cwd);
-    const ordered = orderForMerge(issues, flags.into);
+    const ordered = await orderForMerge(issues, flags.into, cwd);
     const groupIds = ordered.map((i) => i.id);
     // `--into` is a preference, not a guarantee — track it so we can warn
     // if Sentry picks a different parent (typically the largest by event

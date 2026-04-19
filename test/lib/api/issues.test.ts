@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   mergeIssues,
   parseResolveSpec,
+  RESOLVE_COMMIT_EXPLICIT_PREFIX,
+  RESOLVE_COMMIT_SENTINEL,
   RESOLVE_NEXT_RELEASE_SENTINEL,
 } from "../../../src/lib/api-client.js";
 import { ApiError, ValidationError } from "../../../src/lib/errors.js";
@@ -27,22 +29,82 @@ describe("parseResolveSpec", () => {
     expect(parseResolveSpec("   ")).toBeNull();
   });
 
-  test("parses @next sentinel as inNextRelease", () => {
+  test("parses @next sentinel as static inNextRelease", () => {
     expect(parseResolveSpec(RESOLVE_NEXT_RELEASE_SENTINEL)).toEqual({
-      inNextRelease: true,
+      kind: "static",
+      details: { inNextRelease: true },
     });
   });
 
-  test("treats any other value as inRelease", () => {
-    expect(parseResolveSpec("0.26.1")).toEqual({ inRelease: "0.26.1" });
-    expect(parseResolveSpec("v2.3.0")).toEqual({ inRelease: "v2.3.0" });
+  test("parses bare @commit as commit/auto", () => {
+    expect(parseResolveSpec(RESOLVE_COMMIT_SENTINEL)).toEqual({
+      kind: "commit",
+      spec: { kind: "auto" },
+    });
+  });
+
+  test("parses explicit @commit:<repo>@<sha> as commit/explicit", () => {
+    expect(
+      parseResolveSpec(`${RESOLVE_COMMIT_EXPLICIT_PREFIX}getsentry/cli@abc123`)
+    ).toEqual({
+      kind: "commit",
+      spec: { kind: "explicit", repository: "getsentry/cli", commit: "abc123" },
+    });
+  });
+
+  test("explicit @commit splits on the LAST '@' (scoped repo names like @acme/web)", () => {
+    expect(
+      parseResolveSpec(`${RESOLVE_COMMIT_EXPLICIT_PREFIX}@acme/web@abc123`)
+    ).toEqual({
+      kind: "commit",
+      spec: { kind: "explicit", repository: "@acme/web", commit: "abc123" },
+    });
+  });
+
+  test("@commit:<repo>@<sha> rejects missing SHA", () => {
+    expect(() =>
+      parseResolveSpec(`${RESOLVE_COMMIT_EXPLICIT_PREFIX}getsentry/cli@`)
+    ).toThrow(ValidationError);
+  });
+
+  test("@commit:<repo>@<sha> rejects missing repo", () => {
+    expect(() =>
+      parseResolveSpec(`${RESOLVE_COMMIT_EXPLICIT_PREFIX}@abc123`)
+    ).toThrow(ValidationError);
+  });
+
+  test("@commit:<repo>@<sha> rejects payload with no '@' separator", () => {
+    expect(() =>
+      parseResolveSpec(`${RESOLVE_COMMIT_EXPLICIT_PREFIX}getsentry/cli`)
+    ).toThrow(ValidationError);
+  });
+
+  test("treats any other value as static inRelease (including monorepo 'pkg@1.2.3')", () => {
+    expect(parseResolveSpec("0.26.1")).toEqual({
+      kind: "static",
+      details: { inRelease: "0.26.1" },
+    });
+    expect(parseResolveSpec("v2.3.0")).toEqual({
+      kind: "static",
+      details: { inRelease: "v2.3.0" },
+    });
+    // Monorepo-style release — must NOT be mistaken for a commit spec
+    // because it lacks the `@commit:` anchor.
+    expect(parseResolveSpec("spotlight@1.2.3")).toEqual({
+      kind: "static",
+      details: { inRelease: "spotlight@1.2.3" },
+    });
     expect(parseResolveSpec("my-release-tag")).toEqual({
-      inRelease: "my-release-tag",
+      kind: "static",
+      details: { inRelease: "my-release-tag" },
     });
   });
 
   test("trims surrounding whitespace from the version", () => {
-    expect(parseResolveSpec("  0.26.1  ")).toEqual({ inRelease: "0.26.1" });
+    expect(parseResolveSpec("  0.26.1  ")).toEqual({
+      kind: "static",
+      details: { inRelease: "0.26.1" },
+    });
   });
 });
 

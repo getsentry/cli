@@ -16,7 +16,7 @@ import { getEnv } from "../env.js";
 import { stringifyUnknown } from "../errors.js";
 import { logger } from "../logger.js";
 
-export const CURRENT_SCHEMA_VERSION = 13;
+export const CURRENT_SCHEMA_VERSION = 14;
 
 /** Environment variable to disable auto-repair */
 const NO_AUTO_REPAIR_ENV = "SENTRY_CLI_NO_AUTO_REPAIR";
@@ -186,6 +186,22 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
       id: { type: "INTEGER", primaryKey: true, check: "id = 1" },
       instance_id: { type: "TEXT", notNull: true },
       created_at: {
+        type: "INTEGER",
+        notNull: true,
+        default: "(unixepoch() * 1000)",
+      },
+    },
+  },
+  repo_cache: {
+    columns: {
+      // Composite PK (org_slug) — one row per org caches the full repo list
+      org_slug: { type: "TEXT", primaryKey: true },
+      // JSON array of SentryRepository — stored as blob since we re-hydrate
+      // the whole list on cache hit (no per-repo lookups). Keeps the cache
+      // simple and matches the typical usage pattern (match git origin →
+      // find one repo by name/url).
+      repos_json: { type: "TEXT", notNull: true },
+      cached_at: {
         type: "INTEGER",
         notNull: true,
         default: "(unixepoch() * 1000)",
@@ -780,6 +796,13 @@ export function runMigrations(db: Database): void {
       ).run("defaults.project", row.project);
     }
     db.exec("DROP TABLE defaults");
+  }
+
+  // Migration 13 -> 14: Add repo_cache table for offline Sentry repository
+  // lookups (used by `issue resolve --in @commit` to match git origin →
+  // Sentry-registered repo without an extra API round trip).
+  if (currentVersion < 14) {
+    db.exec(EXPECTED_TABLES.repo_cache as string);
   }
 
   if (currentVersion < CURRENT_SCHEMA_VERSION) {
