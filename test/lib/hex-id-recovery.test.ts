@@ -398,6 +398,38 @@ describe("recoverHexId decision tree", () => {
     expect(r.kind).toBe("fuzzy");
   });
 
+  test("URL-prefixed valid span ID returns stripped result without adapter call", async () => {
+    // Regression test: `span-<valid-16-hex>` is a valid span ID once the
+    // `span-` prefix is stripped. Recovery should recognize this and return
+    // immediately without invoking the fuzzy adapter (which might return
+    // empty if the span is outside the scan window).
+    let adapterCalled = false;
+    stubAdapter("span", async () => {
+      adapterCalled = true;
+      return [];
+    });
+    const r = await recoverHexId(`span-${VALID_16}`, "span", {
+      ...CLEAN_CTX,
+      traceId: "a".repeat(32),
+    });
+    expect(r.kind).toBe("stripped");
+    expect(r.kind === "stripped" && r.id).toBe(VALID_16);
+    expect(r.kind === "stripped" && r.stripped).toBe("span-");
+    expect(adapterCalled).toBe(false);
+  });
+
+  test("URL-prefixed valid event ID returns stripped result without adapter call", async () => {
+    let adapterCalled = false;
+    stubAdapter("event", async () => {
+      adapterCalled = true;
+      return [];
+    });
+    const r = await recoverHexId(`event-${VALID_32}`, "event", CLEAN_CTX);
+    expect(r.kind).toBe("stripped");
+    expect(r.kind === "stripped" && r.id).toBe(VALID_32);
+    expect(adapterCalled).toBe(false);
+  });
+
   test("8-hex prefix for trace does NOT trigger cross-entity (needs 16 hex)", async () => {
     // tryCrossEntityRedirect only fires when input is exactly 16 chars
     // (SPAN_ID_RE). An 8-char prefix falls through to the fuzzy adapter.

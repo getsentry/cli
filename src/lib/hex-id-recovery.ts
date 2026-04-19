@@ -563,6 +563,14 @@ export async function recoverHexId(
     };
   }
 
+  // If pre-normalization already produced a valid full-length ID, return
+  // it directly — no need to scan. Happens when the input differs only by
+  // URL-fragment prefix or UUID dashes from a valid hex.
+  const preNormalized = tryPreNormalizedValidId(input, cleaned, entityType);
+  if (preNormalized) {
+    return preNormalized;
+  }
+
   const stripped = stripTrailingNonHex(cleaned, expectedLen);
   if (stripped) {
     // When the stripped ID is a UUIDv7 past retention, the user will hit
@@ -595,6 +603,36 @@ export async function recoverHexId(
   }
 
   return runFuzzyLookup(input, entityType, candidate, ctx);
+}
+
+/**
+ * If `cleaned` is already a valid full-length hex ID of the expected type
+ * but differs from the raw input (after trim+lowercase), return a stripped
+ * result immediately. Prevents a valid ID from falling through to fuzzy
+ * lookup just because the user prefixed it with `span-` etc.
+ */
+function tryPreNormalizedValidId(
+  input: string,
+  cleaned: string,
+  entityType: HexEntityType
+): RecoveryResult | null {
+  const expectedRe = entityType === "span" ? SPAN_ID_RE : HEX_ID_RE;
+  const lowered = input.trim().toLowerCase();
+  if (cleaned === lowered || !expectedRe.test(cleaned)) {
+    return null;
+  }
+  const retention = checkRetentionExpiry(cleaned, entityType);
+  if (retention) {
+    return retention;
+  }
+  return {
+    kind: "stripped",
+    id: cleaned,
+    original: input,
+    // What got stripped: everything in the lowercased original that isn't
+    // part of the cleaned result.
+    stripped: lowered.replace(cleaned, ""),
+  };
 }
 
 /**
