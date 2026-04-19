@@ -119,6 +119,25 @@ export function extractResourceKind(resource: string): string {
 }
 
 /**
+ * Extract the first N words from the first line of an error message, after
+ * stripping quoted user data. Used as a grouping-key fallback when an error
+ * class lacks a structured `field`/`reason` to key on.
+ *
+ * `"Invalid trace ID \"abc\". Expected ..."` → `"Invalid trace ID"` (with maxWords=3)
+ */
+export function extractMessagePrefix(message: string, maxWords = 3): string {
+  const firstLine = message.split("\n", 1)[0] ?? "";
+  return firstLine
+    .replace(/'[^']*'/g, "")
+    .replace(/"[^"]*"/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .slice(0, maxWords)
+    .join(" ");
+}
+
+/**
  * Set `cli_error.*` tags on a Sentry scope for an error that will be
  * captured. These tags are matched by server-side fingerprint rules to
  * achieve stable grouping without SDK-side fingerprint logic.
@@ -145,7 +164,13 @@ function setGroupingTags(scope: Sentry.Scope, error: unknown): void {
         extractResourceKind(error.headline)
     );
   } else if (error instanceof ValidationError) {
-    scope.setTag("cli_error.kind", error.field ?? "");
+    // Fall back to the first few words of the message when no field is set
+    // (e.g. validateHexId throws with no `field`, so using field would
+    // collapse every unfielded ValidationError into one group).
+    scope.setTag(
+      "cli_error.kind",
+      error.field ?? extractMessagePrefix(error.message)
+    );
   } else if (error instanceof ApiError) {
     scope.setTag("cli_error.api_status", String(error.status));
     scope.setTag("cli_error.kind", String(error.status));
