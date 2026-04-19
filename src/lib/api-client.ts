@@ -116,6 +116,7 @@ export {
   updateRelease,
 } from "./api/releases.js";
 export {
+  listAllRepositories,
   listRepositories,
   listRepositoriesCached,
   listRepositoriesPaginated,
