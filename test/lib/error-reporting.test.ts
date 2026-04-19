@@ -14,6 +14,7 @@ import * as Sentry from "@sentry/node-core/light";
 import {
   classifySilenced,
   enrichEventWithGroupingTags,
+  extractMessagePrefix,
   extractResourceKind,
   reportCliError,
 } from "../../src/lib/error-reporting.js";
@@ -63,6 +64,46 @@ describe("extractResourceKind", () => {
 
   test("collapses whitespace introduced by strips", () => {
     expect(extractResourceKind("Issue    suffix    'X'")).toBe("Issue suffix");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractMessagePrefix
+// ---------------------------------------------------------------------------
+
+describe("extractMessagePrefix", () => {
+  test("returns first 3 words by default", () => {
+    expect(
+      extractMessagePrefix('Invalid trace ID "abc". Expected a 32-character.')
+    ).toBe("Invalid trace ID");
+  });
+
+  test("strips quoted substrings before word-counting", () => {
+    // Quoted input doesn't push the real content past the word limit.
+    expect(extractMessagePrefix('Invalid event ID "anything"')).toBe(
+      "Invalid event ID"
+    );
+  });
+
+  test("stops at first newline", () => {
+    expect(
+      extractMessagePrefix("Invalid slug.\n\nTry: sentry project create")
+    ).toBe("Invalid slug.");
+  });
+
+  test("returns '' for empty input", () => {
+    expect(extractMessagePrefix("")).toBe("");
+  });
+
+  test("respects custom maxWords", () => {
+    expect(extractMessagePrefix("one two three four five", 2)).toBe("one two");
+  });
+
+  test("same kind across different user-supplied values", () => {
+    // Invariant: slug variation should not change the kind
+    expect(extractMessagePrefix('Invalid trace ID "abc"')).toBe(
+      extractMessagePrefix('Invalid trace ID "def"')
+    );
   });
 });
 
@@ -186,12 +227,78 @@ describe("reportCliError integration", () => {
     withScopeSpy.mockRestore();
   });
 
+  /**
+   * Capture the tags that `reportCliError` would set on the scope.
+   * Intercepts `Sentry.withScope` and runs the callback with a fake scope
+   * that records `setTag`/`setContext` calls.
+   */
+  function capturedScopeTags(error: unknown): {
+    tags: Record<string, string>;
+    contexts: Record<string, unknown>;
+  } {
+    const tags: Record<string, string> = {};
+    const contexts: Record<string, unknown> = {};
+    const fakeScope = {
+      setTag(k: string, v: string) {
+        tags[k] = v;
+      },
+      setContext(k: string, v: unknown) {
+        contexts[k] = v;
+      },
+      setFingerprint() {
+        /* noop */
+      },
+    };
+    withScopeSpy.mockImplementation((fn: (s: unknown) => void) => {
+      fn(fakeScope);
+    });
+    reportCliError(error);
+    return { tags, contexts };
+  }
+
   test("captures ContextError with scope (tags applied)", () => {
     const err = new ContextError("Organization", "sentry org view <slug>");
     reportCliError(err);
     expect(captureSpy).toHaveBeenCalledWith(err);
     expect(withScopeSpy).toHaveBeenCalled();
     expect(metricSpy).not.toHaveBeenCalled();
+  });
+
+  test("ValidationError with field uses field as kind", () => {
+    const { tags } = capturedScopeTags(new ValidationError("Bad", "trace_id"));
+    expect(tags["cli_error.class"]).toBe("ValidationError");
+    expect(tags["cli_error.kind"]).toBe("trace_id");
+  });
+
+  test("ValidationError without field falls back to message prefix", () => {
+    // Without a stable fallback, every unfielded ValidationError would get
+    // kind="" and collapse into one huge mixed group.
+    const err = new ValidationError(
+      'Invalid trace ID "d2ad4a2d947b5983". Expected 32-char hex.'
+    );
+    const { tags } = capturedScopeTags(err);
+    expect(tags["cli_error.class"]).toBe("ValidationError");
+    expect(tags["cli_error.kind"]).toBe("Invalid trace ID");
+  });
+
+  test("ValidationError kind is stable across different user inputs", () => {
+    const a = capturedScopeTags(
+      new ValidationError('Invalid trace ID "abc"')
+    ).tags;
+    const b = capturedScopeTags(
+      new ValidationError('Invalid trace ID "xyz-different"')
+    ).tags;
+    expect(a["cli_error.kind"]).toBe(b["cli_error.kind"]);
+  });
+
+  test("ValidationError kind differentiates by validator", () => {
+    const traceErr = capturedScopeTags(
+      new ValidationError('Invalid trace ID "abc"')
+    ).tags;
+    const eventErr = capturedScopeTags(
+      new ValidationError('Invalid event ID "abc"')
+    ).tags;
+    expect(traceErr["cli_error.kind"]).not.toBe(eventErr["cli_error.kind"]);
   });
 
   test("captures ResolutionError", () => {
