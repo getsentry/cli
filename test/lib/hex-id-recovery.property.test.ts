@@ -12,12 +12,17 @@ import {
   array,
   constantFrom,
   assert as fcAssert,
+  integer,
   property,
   string,
   tuple,
 } from "fast-check";
 
-import { validateHexId } from "../../src/lib/hex-id.js";
+import {
+  ageInDaysFromUuidV7,
+  decodeUuidV7Timestamp,
+  validateHexId,
+} from "../../src/lib/hex-id.js";
 import {
   extractHexCandidate,
   isOverNestedPath,
@@ -214,6 +219,55 @@ describe("property: looksLikeSlug vs extractHexCandidate", () => {
       property(hex32Arb, (hex) => {
         if (looksLikeSlug(hex)) {
           throw new Error(`Pure hex ${hex} classified as slug`);
+        }
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
+describe("property: UUIDv7 round-trip via decode/age", () => {
+  /** Build a 32-char UUIDv7 where the embedded timestamp is `ms`. */
+  function buildUuidV7(ms: number): string {
+    const ts = ms.toString(16).padStart(12, "0");
+    return `${ts}70008000000000000000`;
+  }
+
+  // 48-bit unsigned range; restrict to post-epoch post-2020 / pre-3000 for
+  // readability. 2020-01-01 ≈ 1.58e12, 3000-01-01 ≈ 3.25e13.
+  const msArb = integer({ min: 1_577_836_800_000, max: 32_503_680_000_000 });
+
+  test("decoded timestamp round-trips the original ms", () => {
+    fcAssert(
+      property(msArb, (ms) => {
+        const decoded = decodeUuidV7Timestamp(buildUuidV7(ms));
+        if (!decoded) {
+          throw new Error(`Failed to decode UUIDv7 for ms=${ms}`);
+        }
+        if (decoded.createdAt.getTime() !== ms) {
+          throw new Error(
+            `Round-trip failed: ${ms} → ${decoded.createdAt.getTime()}`
+          );
+        }
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("age is monotonic: older UUIDv7 ⇒ age >= newer UUIDv7", () => {
+    fcAssert(
+      property(msArb, msArb, (msA, msB) => {
+        const now = new Date(Math.max(msA, msB) + 24 * 60 * 60 * 1000);
+        const ageA = ageInDaysFromUuidV7(buildUuidV7(msA), now);
+        const ageB = ageInDaysFromUuidV7(buildUuidV7(msB), now);
+        if (ageA === null || ageB === null) {
+          throw new Error("Unexpected null");
+        }
+        // Older ms → larger age (more days before `now`).
+        if (msA < msB && ageA < ageB) {
+          throw new Error(
+            `Monotonicity broken: ${msA}<${msB} but ${ageA}<${ageB}`
+          );
         }
       }),
       { numRuns: DEFAULT_NUM_RUNS }

@@ -645,9 +645,9 @@ export async function fetchEventWithContext(
       }
 
       const suggestions = [
-        "The event may have been deleted — event retention depends on your plan (typically 30-90 days)",
-        "Verify the event ID is a 32-character hex string (e.g., a1b2c3d4...)",
-        "The event was not found in any accessible organization",
+        "The ID format is valid but no matching event was found in any accessible organization",
+        "Check that you are querying the right org/project — the ID may belong to a different one",
+        "Events past your plan's retention window are no longer retrievable",
       ];
 
       // Nudge the user when the event ID looks like an issue short ID

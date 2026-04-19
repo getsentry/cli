@@ -19,7 +19,7 @@ import { ContextError, ValidationError } from "../../lib/errors.js";
 import { formatLogDetails } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
-import { validateHexId } from "../../lib/hex-id.js";
+import { ageInDaysFromUuidV7, validateHexId } from "../../lib/hex-id.js";
 import {
   handleRecoveryResult,
   recoverHexId,
@@ -34,6 +34,7 @@ import {
   resolveOrgAndProject,
   resolveProjectBySlug,
 } from "../../lib/resolve-target.js";
+import { RETENTION_DAYS } from "../../lib/retention.js";
 import { buildLogsUrl } from "../../lib/sentry-urls.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import type { DetailedSentryLog } from "../../types/index.js";
@@ -290,6 +291,29 @@ async function handleWebOpen(orgSlug: string, logIds: string[]): Promise<void> {
 }
 
 /**
+ * Build a retention-aware message for logs the API couldn't find.
+ *
+ * When a log ID is UUIDv7 (as Sentry emits) and its embedded timestamp is
+ * older than the hard retention cap, we can state with certainty that
+ * it's past retention rather than hedging with "may have been deleted".
+ *
+ * Returns a per-ID annotation like " (created 2025-12-15, past 90-day
+ * retention)" when applicable, else an empty string.
+ */
+function retentionSuffix(logId: string): string {
+  const retention = RETENTION_DAYS.log;
+  if (retention === null) {
+    return "";
+  }
+  const age = ageInDaysFromUuidV7(logId);
+  if (age === null || age <= retention) {
+    return "";
+  }
+  const days = Math.floor(age);
+  return ` (created ${days} days ago, past the ${retention}-day log retention)`;
+}
+
+/**
  * Throw a descriptive error when no logs were found.
  *
  * @param logIds - Requested IDs
@@ -302,13 +326,28 @@ function throwNotFoundError(
   org: string,
   project: string
 ): never {
-  const idList = formatIdList(logIds);
+  if (logIds.length === 1) {
+    const id = logIds[0] ?? "";
+    const suffix = retentionSuffix(id);
+    const hint = suffix
+      ? `This log is no longer retrievable.${suffix}`
+      : "Make sure the log ID is correct and the log was sent within the last 90 days.";
+    throw new ValidationError(
+      `No log found with ID "${id}" in ${org}/${project}.\n\n${hint}`
+    );
+  }
+
+  // Multiple IDs — annotate each expired one inline and surface a generic
+  // retention hint at the end.
+  const annotated = logIds
+    .map((id) => ` - \`${id}\`${retentionSuffix(id)}`)
+    .join("\n");
+  const anyExpired = logIds.some((id) => retentionSuffix(id) !== "");
+  const hint = anyExpired
+    ? "Expired log IDs are no longer retrievable. Check non-expired IDs and re-run."
+    : "Make sure the log IDs are correct and the logs were sent within the last 90 days.";
   throw new ValidationError(
-    logIds.length === 1
-      ? `No log found with ID "${logIds[0]}" in ${org}/${project}.\n\n` +
-          "Make sure the log ID is correct and the log was sent within the last 90 days."
-      : `No logs found with any of the following IDs in ${org}/${project}:\n${idList}\n\n` +
-          "Make sure the log IDs are correct and the logs were sent within the last 90 days."
+    `No logs found with any of the following IDs in ${org}/${project}:\n${annotated}\n\n${hint}`
   );
 }
 

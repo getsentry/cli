@@ -561,8 +561,8 @@ export const viewCommand = buildCommand({
     if (spans.length === 0) {
       throw new ValidationError(
         `No trace found with ID "${traceId}".\n\n` +
-          "Make sure the trace ID is correct. Trace retention depends on your plan — " +
-          "older traces may have been deleted. Check your org's settings for retention limits."
+          "The ID format is valid but no matching trace exists in this project. " +
+          "Check that you are querying the right org/project, or the trace may be past your plan's retention window."
       );
     }
 

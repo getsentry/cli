@@ -375,11 +375,7 @@ describe("recoverHexId decision tree", () => {
   test("middle-ellipsis input drives prefix+suffix lookup (prefix ≥8)", async () => {
     // Prefix must be ≥ MIN_FUZZY_PREFIX (8) for adapter to be invoked.
     const fullId = `abcdef12${"0".repeat(18)}def456`;
-    stubAdapter("log", async (candidate) => {
-      // Verify adapter received suffix
-      expect(candidate.suffix).toBe("def456");
-      return [fullId];
-    });
+    stubAdapter("log", async () => [fullId]);
     const r = await recoverHexId("abcdef12...def456", "log", CLEAN_CTX);
     expect(r.kind).toBe("fuzzy");
     expect(r.kind === "fuzzy" && r.suffix).toBe("def456");
@@ -400,6 +396,42 @@ describe("recoverHexId decision tree", () => {
     const r = await recoverHexId("abcd1234", "trace", CLEAN_CTX);
     expect(r.kind).toBe("failed");
     expect(r.kind === "failed" && r.reason).toBe("no-matches");
+  });
+
+  /** Build a 32-char UUIDv7 where the embedded timestamp is `date`. */
+  function buildUuidV7(date: Date): string {
+    const ts = date.getTime().toString(16).padStart(12, "0");
+    // 12 time + 1 version (7) + 19 variant/rand = 32 total
+    return `${ts}70008000000000000000`;
+  }
+
+  test("stripped UUIDv7 log ID past 90-day retention returns past-retention", async () => {
+    // Input: <expired UUIDv7><trailing junk>. strip would normally succeed
+    // but the stripped ID is past retention → recovery surfaces that
+    // instead of returning a hex that will hit a 404 downstream.
+    const past = new Date(Date.now() - 730 * 24 * 60 * 60 * 1000);
+    const expiredLogId = buildUuidV7(past);
+    expect(expiredLogId.length).toBe(32);
+    const r = await recoverHexId(`${expiredLogId}ios`, "log", CLEAN_CTX);
+    expect(r.kind).toBe("failed");
+    expect(r.kind === "failed" && r.reason).toBe("past-retention");
+    expect(r.kind === "failed" && r.hint).toContain("90-day log retention");
+  });
+
+  test("stripped UUIDv7 log ID within retention returns stripped result", async () => {
+    const recent = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+    const recentLogId = buildUuidV7(recent);
+    const r = await recoverHexId(`${recentLogId}ios`, "log", CLEAN_CTX);
+    expect(r.kind).toBe("stripped");
+    expect(r.kind === "stripped" && r.id).toBe(recentLogId);
+  });
+
+  test("retention check skipped for non-v7 (v4) UUIDs — traces/events lack a hard cap", async () => {
+    // A v4 UUID past a "retention-like" age — no hard cap on trace/event.
+    // Strip returns normally; retention short-circuit doesn't fire.
+    const v4Id = "c0a5a9d4dce44358ab4231fc3bead7e9";
+    const r = await recoverHexId(`${v4Id}ios`, "trace", CLEAN_CTX);
+    expect(r.kind).toBe("stripped");
   });
 });
 

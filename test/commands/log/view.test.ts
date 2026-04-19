@@ -506,4 +506,31 @@ describe("viewCommand.func", () => {
     expect(findProjectsBySlugSpy).toHaveBeenCalledWith("CAM-82X");
     expect(getLogsSpy).toHaveBeenCalled();
   });
+
+  test("not-found error annotates expired UUIDv7 log IDs with deterministic retention info", async () => {
+    // Build an expired UUIDv7 (2 years old, past 90d retention)
+    const expired = new Date(Date.now() - 730 * 24 * 60 * 60 * 1000);
+    const ts = expired.getTime().toString(16).padStart(12, "0");
+    const expiredLogId = `${ts}70008000000000000000`;
+    getLogsSpy.mockResolvedValue([]);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+    try {
+      await func.call(
+        context,
+        { json: true, web: false },
+        "test-org/test-project",
+        expiredLogId
+      );
+      expect.unreachable("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ValidationError);
+      const msg = (err as ValidationError).message;
+      // Retention-aware wording replaces the generic "was sent within 90 days"
+      expect(msg).toContain("past the 90-day log retention");
+      expect(msg).not.toContain("was sent within the last 90 days");
+    }
+  });
 });
