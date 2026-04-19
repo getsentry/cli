@@ -522,8 +522,7 @@ export const viewCommand = buildCommand({
     } else {
       const parsed = await parseTraceTargetWithRecovery(
         correctedArgs,
-        USAGE_HINT,
-        cwd
+        USAGE_HINT
       );
       warnIfNormalized(parsed, "trace.view");
       const target = await resolveTraceOrgProject(parsed, cwd, USAGE_HINT);

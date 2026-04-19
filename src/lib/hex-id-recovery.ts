@@ -24,6 +24,8 @@
  * module only owns the recovery-specific control flow.
  */
 
+import { addBreadcrumb } from "@sentry/node-core/light";
+
 import type { SpanListItem, TransactionListItem } from "../types/index.js";
 import { listLogs, listSpans, listTransactions } from "./api-client.js";
 import {
@@ -41,7 +43,6 @@ import {
   LEADING_HEX_RE,
   MIDDLE_ELLIPSIS_RE,
   NON_HEX_RE,
-  normalizeHexId,
   PURE_HEX_RE,
   SPAN_ID_RE,
   UUID_DASH_RE,
@@ -124,7 +125,6 @@ export type LookupContext = {
   traceId?: string;
   /** Override for the default scan window (e.g. "90d", "7d"). */
   period?: string;
-  signal?: AbortSignal;
 };
 
 /** Context passed by command code to produce consistent warnings/errors. */
@@ -173,7 +173,7 @@ const SENTINEL_VALUES: ReadonlySet<string> = new Set([
 ]);
 
 /** URL-fragment prefixes that precede a raw ID in Sentry URLs. */
-const URL_FRAGMENT_PREFIXES = ["span-", "txn-", "event-", "trace-"];
+const URL_FRAGMENT_PREFIXES = ["span-", "txn-", "event-", "trace-"] as const;
 
 /** Threshold (slash-separated segments) above which a path is "over-nested". */
 const OVER_NESTED_MIN_SEGMENTS = 4;
@@ -192,16 +192,20 @@ const SLUG_REDIRECT_COMMAND: Record<HexEntityType, string> = {
 // ---------------------------------------------------------------------------
 
 /**
- * Pre-normalize a raw input before further analysis.
+ * Pre-normalize a raw input before further analysis. Pipeline:
  *
- * Detects shell/pipeline sentinel leaks and returns the offending value so
- * the caller can fail fast with a targeted error. Otherwise strips URL
- * fragment prefixes, trims, lowercases, and strips dashes.
- *
- * Full UUIDs (8-4-4-4-12) collapse via the full-strip branch. Partial inputs
- * like `abc12345-6789` only lose their dashes when the dashless result
- * still starts with a hex digit — this avoids silently mangling slug-like
- * inputs (e.g., `human-interfaces` stays intact because `h` isn't hex).
+ * 1. Trim whitespace and lowercase.
+ * 2. Peel URL-fragment prefixes (`span-`, `txn-`, `event-`, `trace-`)
+ *    repeatedly until none apply. The loop ensures idempotence for
+ *    pathological inputs like `span-span-abc`.
+ * 3. If the result matches a shell/pipeline sentinel (`null`, `latest`,
+ *    …), short-circuit with `sentinel` set — runs AFTER prefix-stripping
+ *    so inputs like `span-null` (shell leak via a URL builder) are
+ *    classified correctly.
+ * 4. If the result is a full UUID (8-4-4-4-12), strip dashes and return.
+ * 5. Otherwise strip partial-UUID dashes ONLY when the dashless result
+ *    starts with a hex digit — avoids silently mangling slug-like inputs
+ *    (e.g., `human-interfaces` stays intact because `h` isn't hex).
  */
 export function preNormalize(input: string): {
   cleaned: string;
@@ -407,12 +411,13 @@ function checkRetentionExpiry(
   }
   const decoded = decodeUuidV7Timestamp(input);
   const createdIso = decoded?.createdAt.toISOString().slice(0, 10) ?? "unknown";
+  const entityCap = entityType.charAt(0).toUpperCase() + entityType.slice(1);
   return {
     kind: "failed",
     original: input,
     reason: "past-retention",
     hint:
-      `${capitalize(entityType)} ${input} was created ${createdIso} ` +
+      `${entityCap} ${input} was created ${createdIso} ` +
       `(${Math.floor(age)} days ago), past the ${retentionDays}-day ` +
       `${entityType} retention window. This ${entityType} is no longer available.`,
   };
@@ -441,7 +446,7 @@ function filterByCandidate(ids: string[], candidate: HexCandidate): string[] {
 }
 
 const eventAdapter: FuzzyLookupAdapter = async (ctx) => {
-  if (!ctx.project) {
+  if (!(ctx.org && ctx.project)) {
     return [];
   }
   const { data } = await listTransactions(ctx.org, ctx.project, {
@@ -453,7 +458,7 @@ const eventAdapter: FuzzyLookupAdapter = async (ctx) => {
 };
 
 const traceAdapter: FuzzyLookupAdapter = async (ctx) => {
-  if (!ctx.project) {
+  if (!(ctx.org && ctx.project)) {
     return [];
   }
   const { data } = await listSpans(ctx.org, ctx.project, {
@@ -465,7 +470,7 @@ const traceAdapter: FuzzyLookupAdapter = async (ctx) => {
 };
 
 const logAdapter: FuzzyLookupAdapter = async (ctx) => {
-  if (!ctx.project) {
+  if (!(ctx.org && ctx.project)) {
     return [];
   }
   const logs = await listLogs(ctx.org, ctx.project, {
@@ -477,7 +482,7 @@ const logAdapter: FuzzyLookupAdapter = async (ctx) => {
 };
 
 const spanAdapter: FuzzyLookupAdapter = async (ctx) => {
-  if (!(ctx.traceId && ctx.project)) {
+  if (!(ctx.org && ctx.traceId && ctx.project)) {
     return [];
   }
   const { data } = await listSpans(ctx.org, ctx.project, {
@@ -505,7 +510,7 @@ async function findTraceBySpanId(
   spanId: string,
   ctx: LookupContext
 ): Promise<string | null> {
-  if (!ctx.project) {
+  if (!(ctx.org && ctx.project)) {
     return null;
   }
   const { data } = await listSpans(ctx.org, ctx.project, {
@@ -538,8 +543,18 @@ function buildSlugHint(
 }
 
 /**
- * Format a "no matching prefix" hint. Logs get a firm retention statement;
- * traces/events get plan-dependent wording; spans are trace-scoped.
+ * Format a "no matching prefix" hint.
+ *
+ * For logs we state the scan-window boundary AND the retention cap
+ * separately because they differ (scan caps at 30d due to degraded API
+ * behavior above that window, retention is 90d). A log 30-90 days old
+ * is *within retention* but *outside the scan window* — the hint must
+ * tell the user to pass the full ID in that case instead of suggesting
+ * the log is gone.
+ *
+ * Traces/events use plan-dependent retention (null in RETENTION_DAYS),
+ * so we speak only about scan window. Spans are trace-scoped; no window
+ * to mention.
  */
 function buildNoMatchHint(
   entityType: HexEntityType,
@@ -548,66 +563,151 @@ function buildNoMatchHint(
   const window = period ?? SCAN_PERIODS[entityType];
   const retention = RETENTION_DAYS[entityType];
   if (entityType === "log" && retention !== null) {
-    return `No log matched this prefix in the last ${window}. Logs are retained for ${retention} days — older logs cannot be looked up.`;
+    return (
+      `No log matched this prefix in the last ${window}. ` +
+      `Prefix lookups are limited to ${window}; logs are retained for up to ${retention} days — ` +
+      `pass the full 32-character ID to look up a log older than ${window}.`
+    );
   }
   if (entityType === "span") {
     return "No span matched this prefix within the trace.";
   }
-  return `No ${entityType} matched this prefix in the last ${window}. The ID format is valid but no matching ${entityType} exists in this project — check that you're querying the right org/project, or widen --period.`;
+  return (
+    `No ${entityType} matched this prefix in the last ${window}. ` +
+    `The ID format is valid but no matching ${entityType} exists in this project — ` +
+    `check that you're querying the right org/project, or pass the full ID if older than ${window}.`
+  );
 }
 
 /**
  * Build the appropriate CliError for a `failed` recovery result.
  *
- * - `multiple-matches` → ResolutionError with candidate suggestions.
- * - `sentinel-leak` / `over-nested` / `looks-like-slug` / `too-short` /
- *   `no-matches` / `past-retention` → ValidationError combining the
- *   original validation message with the recovery hint.
- * - `api-error` → original validation error unchanged.
+ * Error class picks follow the AGENTS.md convention:
+ *
+ * - {@link ResolutionError} — the user **provided** a value that couldn't
+ *   be found/resolved (`multiple-matches`, `no-matches`, `past-retention`,
+ *   `looks-like-slug`).
+ * - {@link ValidationError} — the input is **malformed** (`sentinel-leak`,
+ *   `over-nested`, `too-short`).
+ * - `api-error` — recovery itself couldn't run, so we surface the strict
+ *   validator's original error unchanged.
  */
 function buildRecoveryError(
   result: Extract<RecoveryResult, { kind: "failed" }>,
   fallbackError: Error,
   options: HandleRecoveryOptions
 ): Error {
-  if (result.reason === "multiple-matches") {
-    const candidates = result.candidates ?? [];
-    return new ResolutionError(
-      `${capitalize(options.entityType)} prefix '${result.original}'`,
-      `matches ${candidates.length} ${options.entityType}s`,
-      `Re-run with more characters or the full ID: ${options.canonicalCommand}`,
-      candidates.map((c) => options.canonicalCommand.replace("<id>", c))
-    );
+  const entityCap =
+    options.entityType.charAt(0).toUpperCase() + options.entityType.slice(1);
+
+  switch (result.reason) {
+    case "multiple-matches": {
+      const candidates = result.candidates ?? [];
+      return new ResolutionError(
+        `${entityCap} prefix '${result.original}'`,
+        `matches ${candidates.length} ${options.entityType}s`,
+        `Re-run with more characters or the full ID: ${options.canonicalCommand}`,
+        candidates.map((c) => options.canonicalCommand.replace("<id>", c))
+      );
+    }
+    case "no-matches":
+    case "past-retention":
+    case "looks-like-slug":
+      return new ResolutionError(
+        `${entityCap} '${result.original}'`,
+        failedReasonHeadline(result.reason),
+        options.canonicalCommand,
+        result.hint ? [result.hint] : []
+      );
+    case "api-error":
+      return fallbackError;
+    case "sentinel-leak":
+    case "over-nested":
+    case "too-short": {
+      const base = fallbackError.message;
+      const hint = result.hint ?? "";
+      return new ValidationError(hint ? `${base}\n\n${hint}` : base);
+    }
+    default: {
+      const _exhaustive: never = result.reason;
+      return _exhaustive;
+    }
   }
-  if (result.reason === "api-error") {
-    return fallbackError;
-  }
-  const base = fallbackError.message;
-  const hint = result.hint ?? "";
-  return new ValidationError(hint ? `${base}\n\n${hint}` : base);
 }
 
-/** Capitalize the first letter of an entity label (for user-facing text). */
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
+/** Short headline describing why resolution failed, for ResolutionError. */
+function failedReasonHeadline(
+  reason: "no-matches" | "past-retention" | "looks-like-slug"
+): string {
+  switch (reason) {
+    case "no-matches":
+      return "not found";
+    case "past-retention":
+      return "is past retention";
+    case "looks-like-slug":
+      return "is not a valid ID";
+    default: {
+      const _exhaustive: never = reason;
+      return _exhaustive;
+    }
+  }
 }
-
-// ---------------------------------------------------------------------------
-// Main entry point
-// ---------------------------------------------------------------------------
 
 /**
- * Attempt to recover a malformed hex ID.
- *
- * Runs the decision tree: pre-normalize → sentinel detection → over-nested
- * path detection → syntactic strip → cross-entity redirect → UUIDv7
- * retention check → fuzzy lookup (with slug heuristic for short non-hex
- * inputs).
- *
  * Always returns a structured result. The command layer renders warnings
- * and errors via {@link handleRecoveryResult}.
+ * and errors via {@link handleRecoveryResult}. A telemetry breadcrumb is
+ * emitted for every recovery attempt so we can track which recovery
+ * classes actually fire in the wild.
  */
 export async function recoverHexId(
+  input: string,
+  entityType: HexEntityType,
+  ctx: LookupContext
+): Promise<RecoveryResult> {
+  const result = await recoverHexIdInternal(input, entityType, ctx);
+  recordRecoveryOutcome(entityType, input, result);
+  return result;
+}
+
+/**
+ * Emit a Sentry breadcrumb so we can correlate recovery outcomes with
+ * the CLI-16G / CLI-M0 / CLI-EQ issue classes. No PII — the prefix is a
+ * hex substring, not a user slug.
+ */
+function recordRecoveryOutcome(
+  entityType: HexEntityType,
+  input: string,
+  result: RecoveryResult
+): void {
+  try {
+    addBreadcrumb({
+      category: "hex_id_recovery",
+      type: "info",
+      level: result.kind === "failed" ? "warning" : "info",
+      message: `recovery ${result.kind}`,
+      data: {
+        entityType,
+        resultKind: result.kind,
+        inputLength: input.length,
+        ...(result.kind === "failed" && { failureReason: result.reason }),
+        ...(result.kind === "fuzzy" && {
+          prefixLength: result.prefix.length,
+          hadSuffix: Boolean(result.suffix),
+        }),
+      },
+    });
+  } catch {
+    // Sentry may not be initialized (e.g. in tests); breadcrumb is
+    // best-effort and must never throw into the recovery path.
+  }
+}
+
+/**
+ * Core decision tree for {@link recoverHexId}. Kept separate so the
+ * wrapper can unconditionally record a breadcrumb without cluttering
+ * every return statement.
+ */
+async function recoverHexIdInternal(
   input: string,
   entityType: HexEntityType,
   ctx: LookupContext
@@ -732,8 +832,11 @@ function tryPreNormalizedValidId(
 /**
  * Produce a human-readable description of what was removed from `raw` to
  * get `cleaned`. Returns the exact substring diff when possible (a simple
- * substring match); otherwise a summary of the transformation (URL prefix,
- * UUID dashes, or both).
+ * substring match); otherwise a summary of the transformation (URL prefix
+ * layers, UUID dashes, or both).
+ *
+ * Mirrors the peel-loop in {@link preNormalize} so nested prefixes like
+ * `span-span-abc` report "span- + span-" rather than just the outer one.
  */
 function describeStrippedParts(raw: string, cleaned: string): string {
   // Simple case: cleaned is a substring of raw — return the concatenation
@@ -742,16 +845,24 @@ function describeStrippedParts(raw: string, cleaned: string): string {
   if (idx !== -1) {
     return raw.slice(0, idx) + raw.slice(idx + cleaned.length);
   }
-  // Mixed case: both URL prefix AND internal dashes were stripped, so
-  // cleaned isn't a literal substring. Summarize the transformation.
+  // Mixed case: both URL prefix(es) AND internal dashes were stripped, so
+  // cleaned isn't a literal substring. Peel prefixes layer-by-layer so
+  // we report every one that was stripped.
   const parts: string[] = [];
-  for (const prefix of URL_FRAGMENT_PREFIXES) {
-    if (raw.startsWith(prefix)) {
-      parts.push(prefix);
-      break;
+  let remaining = raw;
+  let stripped = true;
+  while (stripped) {
+    stripped = false;
+    for (const prefix of URL_FRAGMENT_PREFIXES) {
+      if (remaining.startsWith(prefix)) {
+        parts.push(prefix);
+        remaining = remaining.slice(prefix.length);
+        stripped = true;
+        break;
+      }
     }
   }
-  if (raw.includes("-")) {
+  if (remaining.includes("-")) {
     parts.push("UUID dashes");
   }
   return parts.length > 0 ? parts.join(" + ") : "formatting";
@@ -767,11 +878,11 @@ async function tryCrossEntityRedirect(
   entityType: HexEntityType,
   ctx: LookupContext
 ): Promise<RecoveryResult | null> {
+  // `SPAN_ID_RE` matches exactly 16 hex chars, so the earlier guard
+  // already rules out 32-char trace IDs — no separate `HEX_ID_RE` check
+  // needed.
   if (entityType !== "trace" || !SPAN_ID_RE.test(cleaned)) {
     return null;
-  }
-  if (HEX_ID_RE.test(normalizeHexId(cleaned))) {
-    return null; // valid trace-length, shouldn't reach recovery
   }
   try {
     const trace = await findTraceBySpanId(cleaned, ctx);
@@ -832,10 +943,10 @@ async function runFuzzyLookup(
       candidates: filtered.slice(0, MAX_CANDIDATES),
     };
   }
-  const id = filtered[0];
-  if (!id) {
-    return { kind: "failed", original: input, reason: "no-matches" };
-  }
+  // `filtered.length === 1` by elimination; the non-null assertion here
+  // is safe and keeps TypeScript's `noUncheckedIndexedAccess` happy.
+  // biome-ignore lint/style/noNonNullAssertion: exactly one element after the checks above
+  const id = filtered[0]!;
   return {
     kind: "fuzzy",
     id,

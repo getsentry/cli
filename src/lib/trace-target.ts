@@ -320,8 +320,7 @@ export function extractRawTraceId(
  */
 export async function parseTraceTargetWithRecovery(
   args: string[],
-  usageHint: string,
-  _cwd: string
+  usageHint: string
 ): Promise<ParsedTraceTarget> {
   try {
     return parseTraceTarget(args, usageHint);
@@ -333,10 +332,7 @@ export async function parseTraceTargetWithRecovery(
     if (!raw?.rawTraceId) {
       throw err;
     }
-    const recoveryCtx = raw.targetArg
-      ? await resolveRecoveryOrg(parseOrgProjectArg(raw.targetArg))
-      : null;
-    const ctx = recoveryCtx ?? { org: "", project: undefined };
+    const ctx = await recoveryContextFromTargetArg(raw.targetArg);
     const result = await recoverHexId(raw.rawTraceId, "trace", ctx);
     const recoveredTraceId = handleRecoveryResult(result, err, {
       entityType: "trace",
@@ -346,6 +342,35 @@ export async function parseTraceTargetWithRecovery(
     const newArgs = substituteTraceId(args, recoveredTraceId);
     return parseTraceTarget(newArgs, usageHint);
   }
+}
+
+/**
+ * Best-effort recovery context derived from a raw target arg.
+ *
+ * `parseOrgProjectArg` throws on malformed slugs (e.g. `--h/nothex`
+ * produces a slug-validation error). Those errors are unrelated to the
+ * trace-ID problem we're trying to recover from; catching them here
+ * avoids masking the original trace-ID `ValidationError` with a
+ * confusing slug error.
+ */
+async function recoveryContextFromTargetArg(
+  targetArg: string | undefined
+): Promise<{ org: string; project?: string }> {
+  if (!targetArg) {
+    return { org: "", project: undefined };
+  }
+  let parsedTarget: ReturnType<typeof parseOrgProjectArg>;
+  try {
+    parsedTarget = parseOrgProjectArg(targetArg);
+  } catch {
+    return { org: "", project: undefined };
+  }
+  return (
+    (await resolveRecoveryOrg(parsedTarget)) ?? {
+      org: "",
+      project: undefined,
+    }
+  );
 }
 
 /**

@@ -1,18 +1,22 @@
 /**
  * Sentry data retention constants
  *
- * Central place for the "maximum age past which this entity is gone" values
- * we reference in error messages, retention hints, and scan-window defaults.
+ * Two decoupled concepts live here — keep them distinct:
  *
- * These are product facts about Sentry, not CLI behavior — changing one
- * should match a documented Sentry retention policy. Keep the comments
- * up-to-date with the source documentation.
+ * - {@link RETENTION_DAYS} — hard product retention cap per entity. After
+ *   this many days the entity is gone for good. Used in error messages
+ *   when we can speak with certainty (e.g., UUIDv7 timestamps on logs).
  *
- * Usage:
+ * - {@link SCAN_PERIODS} — how far back fuzzy recovery will scan via the
+ *   Events API when a user passes a truncated prefix. Smaller than the
+ *   retention cap because the Events API's spans/logs datasets become
+ *   sparse (or hit a degraded query path, per `api/logs.ts`) beyond this
+ *   window. These are operational tunings, not product facts.
  *
- * - Recovery / fuzzy scans pick `SCAN_PERIODS[entity]` as a default window.
- * - "Not found" error messages reference `RETENTION_DAYS[entity]` when we
- *   can speak with certainty (UUIDv7 timestamps on logs).
+ * Changing `RETENTION_DAYS.log` also updates {@link LOG_RETENTION_PERIOD}
+ * (derived). Changing `SCAN_PERIODS.log` is an independent decision about
+ * how far to scan — the two constants have different meanings and are
+ * intentionally not linked.
  */
 
 import type { HexEntityType } from "./hex-id.js";
@@ -35,18 +39,17 @@ export const RETENTION_DAYS: Record<HexEntityType, number | null> = {
 };
 
 /**
- * Default scan window for fuzzy recovery (`<entity> view <prefix>`).
+ * Default fuzzy-recovery scan window, as an API `statsPeriod` string.
  *
- * Wider than UI-facing list defaults because recovery should maximize the
- * chance of finding the full ID a user copy-pasted. Callers can override
- * via `LookupContext.period` when the user passed an explicit `--period`.
+ * Keep this **separate** from {@link RETENTION_DAYS} — scan windows are
+ * about query cost and API behavior, not product retention. For logs in
+ * particular, the Events API's `dataset=logs` path warns that periods
+ * above 30d hit a degraded endpoint with stale/incomplete data — so we
+ * cap the scan window at 30d even though the retention window is 90d.
  *
- * Values reflect the maximum useful retention window per entity:
- *
- * - `event`: 90 days — matches the `issue list` default, which is the
- *   same data source for finding events.
- * - `trace` / `log` / `span`: 30 days — spans/logs commonly become sparse
- *   past 30 days, and the API's default range is tighter here.
+ * The "no-matches" hint in recovery explains this boundary: a log that's
+ * within retention but outside the scan window needs to be looked up by
+ * its full ID rather than a prefix.
  */
 export const SCAN_PERIODS: Record<HexEntityType, string> = {
   event: "90d",
@@ -58,9 +61,16 @@ export const SCAN_PERIODS: Record<HexEntityType, string> = {
 /**
  * Log retention as a Sentry-API `statsPeriod` string (e.g. "90d").
  *
- * Derived from {@link RETENTION_DAYS} so `api/logs.ts#getLogs` and the
- * recovery module never drift — a single edit to `RETENTION_DAYS.log`
- * updates both the numeric retention cap and the period string the API
- * sees.
+ * Derived from {@link RETENTION_DAYS.log}, which is always a positive
+ * number (logs have a guaranteed hard retention cap). If a future
+ * refactor ever makes this nullable we want to fail loudly rather than
+ * silently substitute a wrong value, so this build-time assertion
+ * encodes the invariant.
  */
-export const LOG_RETENTION_PERIOD = `${RETENTION_DAYS.log ?? 90}d`;
+const LOG_RETENTION_CAP = RETENTION_DAYS.log;
+if (LOG_RETENTION_CAP === null || LOG_RETENTION_CAP <= 0) {
+  throw new Error(
+    `RETENTION_DAYS.log must be a positive number; got ${LOG_RETENTION_CAP}`
+  );
+}
+export const LOG_RETENTION_PERIOD = `${LOG_RETENTION_CAP}d`;

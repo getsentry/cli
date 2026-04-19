@@ -233,9 +233,11 @@ describe("property: UUIDv7 round-trip via decode/age", () => {
     return `${ts}70008000000000000000`;
   }
 
-  // 48-bit unsigned range; restrict to post-epoch post-2020 / pre-3000 for
-  // readability. 2020-01-01 ≈ 1.58e12, 3000-01-01 ≈ 3.25e13.
-  const msArb = integer({ min: 1_577_836_800_000, max: 32_503_680_000_000 });
+  // UUIDv7 was standardized May 2024 (RFC 9562). Restrict the arbitrary
+  // to plausible real timestamps: Jan 2024 through year 3000 (48-bit
+  // ceiling is 10889 so pre-3000 is well within range).
+  // 2024-01-01 ≈ 1.704e12, 3000-01-01 ≈ 3.25e13.
+  const msArb = integer({ min: 1_704_067_200_000, max: 32_503_680_000_000 });
 
   test("decoded timestamp round-trips the original ms", () => {
     fcAssert(

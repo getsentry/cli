@@ -48,11 +48,10 @@ type ViewFlags = {
   readonly fields?: string[];
 };
 
+import { isAllDigits } from "../../lib/utils.js";
+
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry log view <org>/<project> <log-id> [<log-id>...]";
-
-/** Matches a string of all digits (numeric project ID) */
-const ALL_DIGITS_RE = /^\d+$/;
 
 /**
  * Split a raw argument into individual log IDs.
@@ -202,7 +201,7 @@ async function resolveTarget(
         parsed.originalSlug
       );
       if (
-        ALL_DIGITS_RE.test(parsed.projectSlug) &&
+        isAllDigits(parsed.projectSlug) &&
         result.project !== parsed.projectSlug
       ) {
         log.info(
@@ -452,13 +451,13 @@ export const viewCommand = buildCommand({
       throw new ContextError("Organization and project", USAGE_HINT);
     }
 
-    // Validate + recover each log ID against the resolved target. Runs
-    // sequentially: a fuzzy lookup hits the API, and a malformed ID is
-    // usually fixable but the user should see the warnings in order.
-    const logIds: string[] = [];
-    for (const raw of rawLogIds) {
-      logIds.push(await validateAndRecoverLogId(raw, target));
-    }
+    // Validate + recover each log ID in parallel. `log.warn` preserves
+    // emission order regardless of await order, and a throwing recovery
+    // (multi-match ResolutionError) exits via `Promise.all` with the
+    // first-thrown error — same UX as the old sequential loop.
+    const logIds = await Promise.all(
+      rawLogIds.map((raw) => validateAndRecoverLogId(raw, target))
+    );
 
     if (flags.web) {
       await handleWebOpen(target.org, logIds);
