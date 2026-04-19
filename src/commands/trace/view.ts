@@ -39,7 +39,7 @@ import { resolveOrg } from "../../lib/resolve-target.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import {
-  parseTraceTarget,
+  parseTraceTargetWithRecovery,
   resolveTraceOrgProject,
   warnIfNormalized,
 } from "../../lib/trace-target.js";
@@ -520,7 +520,11 @@ export const viewCommand = buildCommand({
     if (issueShortId) {
       resolved = await resolveTraceFromIssue(issueShortId, cwd);
     } else {
-      const parsed = parseTraceTarget(correctedArgs, USAGE_HINT);
+      const parsed = await parseTraceTargetWithRecovery(
+        correctedArgs,
+        USAGE_HINT,
+        cwd
+      );
       warnIfNormalized(parsed, "trace.view");
       const target = await resolveTraceOrgProject(parsed, cwd, USAGE_HINT);
       resolved = {
@@ -557,7 +561,8 @@ export const viewCommand = buildCommand({
     if (spans.length === 0) {
       throw new ValidationError(
         `No trace found with ID "${traceId}".\n\n` +
-          "Make sure the trace ID is correct and the trace was sent recently."
+          "Make sure the trace ID is correct. Trace retention depends on your plan — " +
+          "older traces may have been deleted. Check your org's settings for retention limits."
       );
     }
 

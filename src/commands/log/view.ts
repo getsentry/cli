@@ -21,6 +21,10 @@ import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { validateHexId } from "../../lib/hex-id.js";
 import {
+  handleRecoveryResult,
+  recoverHexId,
+} from "../../lib/hex-id-recovery.js";
+import {
   applyFreshFlag,
   FRESH_ALIASES,
   FRESH_FLAG,
@@ -76,13 +80,16 @@ function splitLogIds(arg: string): string[] {
  *
  * Arguments containing newlines are split into multiple IDs.
  *
+ * Returns **raw** log IDs without running {@link validateHexId} — validation
+ * is deferred to the main command so {@link recoverHexId} can use the
+ * resolved org/project context for fuzzy prefix lookups.
+ *
  * @param args - Positional arguments from CLI
- * @returns Parsed log IDs and optional target arg
+ * @returns Parsed raw log IDs and optional target arg
  * @throws {ContextError} If no arguments provided
- * @throws {ValidationError} If any log ID has an invalid format
  */
 export function parsePositionalArgs(args: string[]): {
-  logIds: string[];
+  rawLogIds: string[];
   targetArg: string | undefined;
   /** Suggestion when first arg looks like an issue short ID */
   suggestion?: string;
@@ -104,29 +111,57 @@ export function parsePositionalArgs(args: string[]): {
       "Log ID",
       USAGE_HINT
     );
-    const logIds = splitLogIds(id).map((v) => validateHexId(v, "log ID"));
-    if (logIds.length === 0) {
+    const rawLogIds = splitLogIds(id);
+    if (rawLogIds.length === 0) {
       throw new ContextError("Log ID", USAGE_HINT, []);
     }
-    return { logIds, targetArg };
+    return { rawLogIds, targetArg };
   }
 
   // Two or more args — first is target, rest are log IDs.
   // Each arg may contain newlines (split them).
-  const rawIds = args.slice(1).flatMap(splitLogIds);
-  const logIds = rawIds.map((v) => validateHexId(v, "log ID"));
-  if (logIds.length === 0) {
+  const rawLogIds = args.slice(1).flatMap(splitLogIds);
+  if (rawLogIds.length === 0) {
     throw new ContextError("Log ID", USAGE_HINT, []);
   }
-  // Swap detection is not useful here: validateHexId above rejects non-hex
-  // log IDs (which include any containing "/"), so detectSwappedViewArgs
-  // (which checks for "/" in the second arg) can never trigger.
-  // We still check for issue short IDs in the first (target) position.
+  // Swap detection is not useful here: log IDs cannot contain "/", so
+  // detectSwappedViewArgs (which checks for "/" in the second arg) can
+  // never trigger. We still check for issue short IDs in the first (target)
+  // position.
   const suggestion = looksLikeIssueShortId(first)
     ? `Did you mean: sentry issue view ${first}`
     : undefined;
 
-  return { logIds, targetArg: first, suggestion };
+  return { rawLogIds, targetArg: first, suggestion };
+}
+
+/**
+ * Validate and attempt to recover one log ID against the resolved target.
+ *
+ * For each raw ID: run {@link validateHexId}; on {@link ValidationError},
+ * attempt {@link recoverHexId} with the resolved org/project. Successful
+ * recovery returns a valid hex ID (and emits a `log.warn`).
+ */
+async function validateAndRecoverLogId(
+  rawId: string,
+  target: ResolvedLogTarget
+): Promise<string> {
+  try {
+    return validateHexId(rawId, "log ID");
+  } catch (err) {
+    if (!(err instanceof ValidationError)) {
+      throw err;
+    }
+    const result = await recoverHexId(rawId, "log", {
+      org: target.org,
+      project: target.project,
+    });
+    return handleRecoveryResult(result, err, {
+      entityType: "log",
+      canonicalCommand: `sentry log view ${target.org}/${target.project}/<id>`,
+      logTag: "log.view",
+    });
+  }
 }
 
 /**
@@ -143,14 +178,14 @@ export type ResolvedLogTarget = {
  * Resolve the target org/project from the parsed arg.
  *
  * @param parsed - Result of `parseOrgProjectArg`
- * @param logIds - Parsed log IDs (used for usage hints)
+ * @param rawLogIds - Raw log IDs (used for usage hints; not yet validated)
  * @param cwd - Current working directory
  * @returns Resolved target, or null if resolution produced nothing
  * @throws {ContextError} If org-all mode is used (requires specific project)
  */
 async function resolveTarget(
   parsed: ReturnType<typeof parseOrgProjectArg>,
-  logIds: string[],
+  rawLogIds: string[],
   cwd: string
 ): Promise<ResolvedLogTarget | null> {
   switch (parsed.type) {
@@ -162,7 +197,7 @@ async function resolveTarget(
       const result = await resolveProjectBySlug(
         parsed.projectSlug,
         USAGE_HINT,
-        `sentry log view <org>/${parsed.projectSlug} ${logIds.join(" ")}`,
+        `sentry log view <org>/${parsed.projectSlug} ${rawLogIds.join(" ")}`,
         parsed.originalSlug
       );
       if (
@@ -355,17 +390,26 @@ export const viewCommand = buildCommand({
     const { cwd } = this;
     const cmdLog = logger.withTag("log.view");
 
-    // Parse positional args
-    const { logIds, targetArg, suggestion } = parsePositionalArgs(args);
+    // Parse positional args (raw — validation is deferred to after target
+    // resolution so we can run fuzzy recovery with org/project context).
+    const { rawLogIds, targetArg, suggestion } = parsePositionalArgs(args);
     if (suggestion) {
       cmdLog.warn(suggestion);
     }
     const parsed = parseOrgProjectArg(targetArg);
 
-    const target = await resolveTarget(parsed, logIds, cwd);
+    const target = await resolveTarget(parsed, rawLogIds, cwd);
 
     if (!target) {
       throw new ContextError("Organization and project", USAGE_HINT);
+    }
+
+    // Validate + recover each log ID against the resolved target. Runs
+    // sequentially: a fuzzy lookup hits the API, and a malformed ID is
+    // usually fixable but the user should see the warnings in order.
+    const logIds: string[] = [];
+    for (const raw of rawLogIds) {
+      logIds.push(await validateAndRecoverLogId(raw, target));
     }
 
     if (flags.web) {

@@ -28,11 +28,16 @@ import {
   AuthError,
   ContextError,
   ResolutionError,
+  ValidationError,
 } from "../../lib/errors.js";
 import { formatEventDetails } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { HEX_ID_RE, normalizeHexId, validateHexId } from "../../lib/hex-id.js";
+import {
+  handleRecoveryResult,
+  recoverHexId,
+} from "../../lib/hex-id-recovery.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -278,6 +283,93 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
 
   // Two or more args - first is target, second is event ID
   return { eventId: second, targetArg: first };
+}
+
+/**
+ * Validate the raw event ID via `validateHexId`, falling back to
+ * `recoverHexId` + `handleRecoveryResult` when validation fails.
+ *
+ * Returns the usable event ID (original, stripped, fuzzy-recovered, or
+ * cross-entity-redirected). Throws the original or augmented error when
+ * recovery can't produce a usable ID.
+ *
+ * Skips validation entirely when the event ID is a sentinel (`LATEST_EVENT_SENTINEL`)
+ * or when the caller already resolved via an issue URL / short ID path —
+ * those cases look up the event through issue lookup, not by hex ID.
+ */
+async function validateAndRecoverEventId(
+  rawEventId: string,
+  parsed: ReturnType<typeof parseOrgProjectArg>,
+  skipValidation: boolean
+): Promise<string> {
+  if (skipValidation) {
+    return rawEventId;
+  }
+  try {
+    return validateHexId(rawEventId, "event ID");
+  } catch (err) {
+    if (!(err instanceof ValidationError)) {
+      throw err;
+    }
+    const recoveryOrg = await tryResolveRecoveryOrg(parsed);
+    const recoveryCtx = recoveryOrg ?? { org: "", project: undefined };
+    const result = await recoverHexId(rawEventId, "event", recoveryCtx);
+    return handleRecoveryResult(result, err, {
+      entityType: "event",
+      canonicalCommand: `sentry event view ${recoveryCtx.org || "<org>"}/${recoveryCtx.project ?? "<project>"}/<id>`,
+      logTag: "event.view",
+    });
+  }
+}
+
+/**
+ * Try to resolve just enough org/project context to feed the hex-ID recovery
+ * system. Used only when `validateHexId` already failed — we're trying to
+ * offer fuzzy prefix lookup.
+ *
+ * Only attempts recovery when the user provided an explicit target
+ * (`<org>/<project>` or `<org>/`). For the auto-detect path we'd otherwise
+ * trigger potentially expensive DSN/config scanning on a malformed input —
+ * and without a project slug the fuzzy adapters return empty anyway, so
+ * the recovery would always fall through to the slug/too-short hint path
+ * which runs fine without an org context.
+ *
+ * Returns null when recovery can't proceed with an explicit target. The
+ * caller then re-throws the original validation error unchanged (or falls
+ * back to the cheap classifications in {@link recoverHexId} that don't
+ * need API context).
+ *
+ * Swallows non-auth errors defensively. AuthError is re-thrown so the
+ * auto-login flow still triggers.
+ */
+async function tryResolveRecoveryOrg(
+  parsed: ReturnType<typeof parseOrgProjectArg>
+): Promise<{ org: string; project?: string } | null> {
+  try {
+    switch (parsed.type) {
+      case ProjectSpecificationType.Explicit:
+        return {
+          org: await resolveEffectiveOrg(parsed.org),
+          project: parsed.project,
+        };
+      case ProjectSpecificationType.OrgAll:
+        return { org: await resolveEffectiveOrg(parsed.org) };
+      case ProjectSpecificationType.ProjectSearch:
+      case ProjectSpecificationType.AutoDetect:
+        // Skip heavy resolution — recovery runs its cheap classifications
+        // (sentinel, over-nested, looks-like-slug) locally without needing
+        // an org. Fuzzy prefix lookup requires a project scope anyway, so
+        // there's nothing useful to gain by triggering DSN auto-detect.
+        return null;
+      default:
+        return null;
+    }
+  } catch (err) {
+    if (err instanceof AuthError) {
+      throw err;
+    }
+    return null;
+  }
 }
 
 /**
@@ -553,7 +645,7 @@ export async function fetchEventWithContext(
       }
 
       const suggestions = [
-        "The event may have been deleted due to data retention policies",
+        "The event may have been deleted — event retention depends on your plan (typically 30-90 days)",
         "Verify the event ID is a 32-character hex string (e.g., a1b2c3d4...)",
         "The event was not found in any accessible organization",
       ];
@@ -738,19 +830,12 @@ export const viewCommand = buildCommand({
     const log = logger.withTag("event.view");
 
     // Parse positional args
-    let { eventId, targetArg, warning, issueId, issueShortId } =
-      parsePositionalArgs(args);
-    if (warning) {
-      log.warn(warning);
+    const parsedArgs = parsePositionalArgs(args);
+    if (parsedArgs.warning) {
+      log.warn(parsedArgs.warning);
     }
-
-    // Validate event ID format early (before API calls) when the ID came
-    // from user input. Skip when the ID is a sentinel from issue URL/short
-    // ID detection — those paths resolve the event through issue lookup.
-    // Capture the normalized return value (lowercased, UUID dashes stripped).
-    if (eventId !== LATEST_EVENT_SENTINEL && !issueId && !issueShortId) {
-      eventId = validateHexId(eventId, "event ID");
-    }
+    const { targetArg, issueId, issueShortId } = parsedArgs;
+    let { eventId } = parsedArgs;
 
     const parsed = parseOrgProjectArg(targetArg);
 
@@ -779,6 +864,15 @@ export const viewCommand = buildCommand({
       yield new CommandOutput(issueShortcut.data);
       return { hint: issueShortcut.hint };
     }
+
+    // Validate + attempt recovery. `skipValidation` is true when the ID is
+    // the LATEST_EVENT_SENTINEL or when resolveIssueShortcut already handled
+    // the request (issueId / issueShortId paths).
+    const skipValidation =
+      eventId === LATEST_EVENT_SENTINEL ||
+      issueId !== undefined ||
+      issueShortId !== undefined;
+    eventId = await validateAndRecoverEventId(eventId, parsed, skipValidation);
 
     const target = await resolveEventTarget({
       parsed,

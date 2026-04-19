@@ -78,7 +78,7 @@ describe("parsePositionalArgs", () => {
       const result = parsePositionalArgs([VALID_TRACE_ID, VALID_SPAN_ID]);
       expect(result.traceTarget.traceId).toBe(VALID_TRACE_ID);
       expect(result.traceTarget.type).toBe("auto-detect");
-      expect(result.spanIds).toEqual([VALID_SPAN_ID]);
+      expect(result.rawSpanIds).toEqual([VALID_SPAN_ID]);
     });
   });
 
@@ -90,7 +90,7 @@ describe("parsePositionalArgs", () => {
         VALID_SPAN_ID_2,
       ]);
       expect(result.traceTarget.traceId).toBe(VALID_TRACE_ID);
-      expect(result.spanIds).toEqual([VALID_SPAN_ID, VALID_SPAN_ID_2]);
+      expect(result.rawSpanIds).toEqual([VALID_SPAN_ID, VALID_SPAN_ID_2]);
     });
   });
 
@@ -102,7 +102,7 @@ describe("parsePositionalArgs", () => {
       ]);
       expect(result.traceTarget.traceId).toBe(VALID_TRACE_ID);
       expect(result.traceTarget.type).toBe("explicit");
-      expect(result.spanIds).toEqual([VALID_SPAN_ID]);
+      expect(result.rawSpanIds).toEqual([VALID_SPAN_ID]);
     });
 
     test("parses slash-separated target with multiple span IDs", () => {
@@ -113,7 +113,7 @@ describe("parsePositionalArgs", () => {
       ]);
       expect(result.traceTarget.traceId).toBe(VALID_TRACE_ID);
       expect(result.traceTarget.type).toBe("explicit");
-      expect(result.spanIds).toEqual([VALID_SPAN_ID, VALID_SPAN_ID_2]);
+      expect(result.rawSpanIds).toEqual([VALID_SPAN_ID, VALID_SPAN_ID_2]);
     });
   });
 
@@ -126,7 +126,7 @@ describe("parsePositionalArgs", () => {
         "aaaa1111bbbb2222cccc3333dddd4444"
       );
       expect(result.traceTarget.type).toBe("auto-detect");
-      expect(result.spanIds).toEqual(["a1b2c3d4e5f67890"]);
+      expect(result.rawSpanIds).toEqual(["a1b2c3d4e5f67890"]);
     });
 
     test("auto-splits with uppercase hex IDs", () => {
@@ -136,7 +136,7 @@ describe("parsePositionalArgs", () => {
       expect(result.traceTarget.traceId).toBe(
         "aaaa1111bbbb2222cccc3333dddd4444"
       );
-      expect(result.spanIds).toEqual(["a1b2c3d4e5f67890"]);
+      expect(result.rawSpanIds).toEqual(["a1b2c3d4e5f67890"]);
     });
 
     test("does not auto-split org/traceId format (two args)", () => {
@@ -148,7 +148,7 @@ describe("parsePositionalArgs", () => {
       expect(result.traceTarget.traceId).toBe(
         "aaaa1111bbbb2222cccc3333dddd4444"
       );
-      expect(result.spanIds).toEqual(["a1b2c3d4e5f67890"]);
+      expect(result.rawSpanIds).toEqual(["a1b2c3d4e5f67890"]);
     });
 
     test("does not auto-split when left is not a valid trace ID", () => {
@@ -213,16 +213,16 @@ describe("parsePositionalArgs", () => {
       );
     });
 
-    test("throws ValidationError for invalid span ID", () => {
-      expect(() =>
-        parsePositionalArgs([VALID_TRACE_ID, "not-a-span-id"])
-      ).toThrow(ValidationError);
+    test("accepts invalid span ID as raw (validation deferred to command)", () => {
+      // parsePositionalArgs no longer validates span IDs so the command
+      // layer can run recovery with full trace context.
+      const result = parsePositionalArgs([VALID_TRACE_ID, "not-a-span-id"]);
+      expect(result.rawSpanIds).toEqual(["not-a-span-id"]);
     });
 
-    test("throws ValidationError for span ID that is too short", () => {
-      expect(() => parsePositionalArgs([VALID_TRACE_ID, "abcd1234"])).toThrow(
-        ValidationError
-      );
+    test("accepts too-short span ID as raw", () => {
+      const result = parsePositionalArgs([VALID_TRACE_ID, "abcd1234"]);
+      expect(result.rawSpanIds).toEqual(["abcd1234"]);
     });
 
     test("throws ContextError for bare span ID without trace ID (CLI-SC)", () => {

@@ -18,6 +18,7 @@
 
 import { normalizeSlug, parseOrgProjectArg } from "./arg-parsing.js";
 import { ContextError, ValidationError } from "./errors.js";
+import { handleRecoveryResult, recoverHexId } from "./hex-id-recovery.js";
 import { logger } from "./logger.js";
 import {
   resolveOrg,
@@ -257,6 +258,133 @@ export function targetArgToTraceTarget(
       const _exhaustive: never = parsed;
       throw new ValidationError(`Unexpected target: ${_exhaustive}`);
     }
+  }
+}
+
+/**
+ * Extract the raw trace ID slot from a positional-arg invocation **without
+ * validating** it. Returns `{ rawTraceId, targetArg? }` where:
+ *
+ * - Single arg → the part after the last `/` is the trace ID candidate,
+ *   and anything before the last `/` is the target (org/project[/]).
+ * - Two+ args → the second arg is the raw trace ID, the first is the target.
+ *
+ * Used by {@link parseTraceTargetWithRecovery} to peek at the raw input
+ * before `parseTraceTarget` runs its strict validation. Returns null when
+ * there isn't a usable trace ID slot (e.g., zero args).
+ */
+export function extractRawTraceId(
+  args: string[]
+): { rawTraceId: string; targetArg?: string } | null {
+  if (args.length === 0) {
+    return null;
+  }
+  if (args.length === 1) {
+    const first = args[0];
+    if (!first) {
+      return null;
+    }
+    const lastSlash = first.lastIndexOf("/");
+    if (lastSlash === -1) {
+      return { rawTraceId: first };
+    }
+    const rawTraceId = first.slice(lastSlash + 1);
+    const prefix = first.slice(0, lastSlash);
+    return rawTraceId
+      ? { rawTraceId, targetArg: prefix || undefined }
+      : { rawTraceId: "" };
+  }
+  const second = args[1];
+  const first = args[0];
+  if (second === undefined) {
+    return null;
+  }
+  return { rawTraceId: second, targetArg: first };
+}
+
+/**
+ * Parse trace-target args, falling back to {@link recoverHexId} on an
+ * invalid trace ID. Returns a {@link ParsedTraceTarget} with a validated
+ * or recovered trace ID, or throws the original {@link ValidationError}
+ * when recovery can't proceed.
+ *
+ * The recovery path runs the cheap classifications (sentinel, slug, etc.)
+ * locally regardless of context. Fuzzy prefix lookup additionally requires
+ * an org+project, which we only extract from an explicit target — we do
+ * NOT attempt DSN/config auto-detection during recovery (it's expensive
+ * and the adapter returns empty without a project anyway).
+ */
+export async function parseTraceTargetWithRecovery(
+  args: string[],
+  usageHint: string,
+  _cwd: string
+): Promise<ParsedTraceTarget> {
+  try {
+    return parseTraceTarget(args, usageHint);
+  } catch (err) {
+    if (!(err instanceof ValidationError)) {
+      throw err;
+    }
+    const raw = extractRawTraceId(args);
+    if (!raw?.rawTraceId) {
+      throw err;
+    }
+    const recoveryCtx = tryResolveTraceRecoveryOrg(raw.targetArg);
+    const ctx = recoveryCtx ?? { org: "", project: undefined };
+    const result = await recoverHexId(raw.rawTraceId, "trace", ctx);
+    const recoveredTraceId = handleRecoveryResult(result, err, {
+      entityType: "trace",
+      canonicalCommand: `sentry trace view ${ctx.org || "<org>"}/${ctx.project ?? "<project>"}/<id>`,
+      logTag: "trace-target",
+    });
+    const newArgs = substituteTraceId(args, recoveredTraceId);
+    return parseTraceTarget(newArgs, usageHint);
+  }
+}
+
+/**
+ * Rebuild the positional args with the recovered trace ID in the correct
+ * slot. Mirrors the logic in {@link extractRawTraceId}.
+ */
+function substituteTraceId(args: string[], recoveredTraceId: string): string[] {
+  if (args.length === 1) {
+    const first = args[0];
+    if (!first) {
+      return [recoveredTraceId];
+    }
+    const lastSlash = first.lastIndexOf("/");
+    if (lastSlash === -1) {
+      return [recoveredTraceId];
+    }
+    const prefix = first.slice(0, lastSlash);
+    return [`${prefix}/${recoveredTraceId}`];
+  }
+  return [args[0] ?? "", recoveredTraceId, ...args.slice(2)];
+}
+
+/**
+ * Resolve trace recovery context from an explicit target arg. Returns null
+ * when the arg is absent or doesn't yield an org/project — auto-detection
+ * is deliberately NOT attempted here because it's expensive and the fuzzy
+ * adapters return empty without a project slug.
+ */
+function tryResolveTraceRecoveryOrg(
+  targetArg: string | undefined
+): { org: string; project?: string } | null {
+  if (!targetArg) {
+    return null;
+  }
+  const parsed = parseOrgProjectArg(targetArg);
+  switch (parsed.type) {
+    case "explicit":
+      return { org: parsed.org, project: parsed.project };
+    case "org-all":
+      return { org: parsed.org };
+    case "project-search":
+    case "auto-detect":
+      return null;
+    default:
+      return null;
   }
 }
 

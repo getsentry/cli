@@ -42,7 +42,7 @@ describe("parsePositionalArgs", () => {
   describe("single argument (log ID only)", () => {
     test("parses single 32-char hex log ID", () => {
       const result = parsePositionalArgs([ID1]);
-      expect(result.logIds).toEqual([ID1]);
+      expect(result.rawLogIds).toEqual([ID1]);
       expect(result.targetArg).toBeUndefined();
     });
   });
@@ -51,19 +51,19 @@ describe("parsePositionalArgs", () => {
     test("parses org/project target and log ID", () => {
       const result = parsePositionalArgs(["my-org/frontend", ID1]);
       expect(result.targetArg).toBe("my-org/frontend");
-      expect(result.logIds).toEqual([ID1]);
+      expect(result.rawLogIds).toEqual([ID1]);
     });
 
     test("parses project-only target and log ID", () => {
       const result = parsePositionalArgs(["frontend", ID1]);
       expect(result.targetArg).toBe("frontend");
-      expect(result.logIds).toEqual([ID1]);
+      expect(result.rawLogIds).toEqual([ID1]);
     });
 
     test("parses org/ target (all projects) and log ID", () => {
       const result = parsePositionalArgs(["my-org/", ID1]);
       expect(result.targetArg).toBe("my-org/");
-      expect(result.logIds).toEqual([ID1]);
+      expect(result.rawLogIds).toEqual([ID1]);
     });
   });
 
@@ -71,39 +71,39 @@ describe("parsePositionalArgs", () => {
     test("parses multiple space-separated log IDs", () => {
       const result = parsePositionalArgs(["my-org/frontend", ID1, ID2, ID3]);
       expect(result.targetArg).toBe("my-org/frontend");
-      expect(result.logIds).toEqual([ID1, ID2, ID3]);
+      expect(result.rawLogIds).toEqual([ID1, ID2, ID3]);
     });
 
     test("splits newline-separated IDs in a single argument", () => {
       const combined = `${ID1}\n${ID2}\n${ID3}`;
       const result = parsePositionalArgs(["my-org/frontend", combined]);
       expect(result.targetArg).toBe("my-org/frontend");
-      expect(result.logIds).toEqual([ID1, ID2, ID3]);
+      expect(result.rawLogIds).toEqual([ID1, ID2, ID3]);
     });
 
     test("splits newline-separated IDs in single-arg mode", () => {
       const combined = `${ID1}\n${ID2}`;
       const result = parsePositionalArgs([combined]);
-      expect(result.logIds).toEqual([ID1, ID2]);
+      expect(result.rawLogIds).toEqual([ID1, ID2]);
       expect(result.targetArg).toBeUndefined();
     });
 
     test("trims whitespace around newline-separated IDs", () => {
       const combined = `  ${ID1}  \n  ${ID2}  `;
       const result = parsePositionalArgs(["my-org/frontend", combined]);
-      expect(result.logIds).toEqual([ID1, ID2]);
+      expect(result.rawLogIds).toEqual([ID1, ID2]);
     });
 
     test("ignores empty lines in newline-separated IDs", () => {
       const combined = `${ID1}\n\n${ID2}\n`;
       const result = parsePositionalArgs(["my-org/frontend", combined]);
-      expect(result.logIds).toEqual([ID1, ID2]);
+      expect(result.rawLogIds).toEqual([ID1, ID2]);
     });
 
     test("handles mix of space-separated and newline-separated args", () => {
       const combined = `${ID2}\n${ID3}`;
       const result = parsePositionalArgs(["my-org/frontend", ID1, combined]);
-      expect(result.logIds).toEqual([ID1, ID2, ID3]);
+      expect(result.rawLogIds).toEqual([ID1, ID2, ID3]);
     });
   });
 
@@ -122,36 +122,27 @@ describe("parsePositionalArgs", () => {
       }
     });
 
-    test("throws ValidationError for non-hex log ID", () => {
-      expect(() => parsePositionalArgs(["not-a-hex-id"])).toThrow(
-        ValidationError
-      );
+    test("accepts non-hex log ID as raw (validation deferred)", () => {
+      const result = parsePositionalArgs(["not-a-hex-id"]);
+      expect(result.rawLogIds).toEqual(["not-a-hex-id"]);
     });
 
-    test("throws ValidationError for short log ID", () => {
-      expect(() => parsePositionalArgs(["abc123"])).toThrow(ValidationError);
+    test("accepts short log ID as raw (validation deferred)", () => {
+      // Validation is deferred to the main command so that recoverHexId can
+      // run fuzzy prefix lookups with org/project context. parsePositionalArgs
+      // returns the raw IDs; the command validates them later.
+      const result = parsePositionalArgs(["abc123"]);
+      expect(result.rawLogIds).toEqual(["abc123"]);
     });
 
-    test("throws ValidationError for log ID with invalid chars", () => {
-      expect(() =>
-        parsePositionalArgs(["gggg1111bbbb2222cccc3333dddd4444"])
-      ).toThrow(ValidationError);
+    test("accepts log ID with invalid chars as raw (validation deferred)", () => {
+      const result = parsePositionalArgs(["gggg1111bbbb2222cccc3333dddd4444"]);
+      expect(result.rawLogIds).toEqual(["gggg1111bbbb2222cccc3333dddd4444"]);
     });
 
-    test("ValidationError includes 'log ID' in message", () => {
-      try {
-        parsePositionalArgs(["bad"]);
-        expect.unreachable("Should have thrown");
-      } catch (error) {
-        expect(error).toBeInstanceOf(ValidationError);
-        expect((error as ValidationError).message).toContain("log ID");
-      }
-    });
-
-    test("throws ValidationError when one of multiple IDs is invalid", () => {
-      expect(() =>
-        parsePositionalArgs(["my-org/frontend", ID1, "not-valid"])
-      ).toThrow(ValidationError);
+    test("accepts multiple IDs including an invalid one as raw", () => {
+      const result = parsePositionalArgs(["my-org/frontend", ID1, "not-valid"]);
+      expect(result.rawLogIds).toEqual([ID1, "not-valid"]);
     });
 
     test("throws ContextError for empty log ID after target", () => {
@@ -165,13 +156,13 @@ describe("parsePositionalArgs", () => {
     test("parses org/project/logId as target + log ID", () => {
       const result = parsePositionalArgs([`sentry/cli/${ID1}`]);
       expect(result.targetArg).toBe("sentry/cli");
-      expect(result.logIds).toEqual([ID1]);
+      expect(result.rawLogIds).toEqual([ID1]);
     });
 
     test("handles hyphenated org and project slugs", () => {
       const result = parsePositionalArgs([`my-org/my-project/${ID1}`]);
       expect(result.targetArg).toBe("my-org/my-project");
-      expect(result.logIds).toEqual([ID1]);
+      expect(result.rawLogIds).toEqual([ID1]);
     });
 
     test("one slash (org/project, missing log ID) throws ContextError", () => {
@@ -194,14 +185,17 @@ describe("parsePositionalArgs", () => {
   });
 
   describe("suggestions and error handling", () => {
-    test("swapped args (hex ID first, org/project second) throws ValidationError", () => {
-      // Non-hex second arg fails validateHexId — user gets a clear error.
-      expect(() =>
-        parsePositionalArgs([
-          "968c763c740cfda8b6728f27fb9e9b01",
-          "my-org/my-project",
-        ])
-      ).toThrow(ValidationError);
+    test("swapped args (hex ID first, org/project second) returns raw IDs", () => {
+      // Validation is deferred: parsePositionalArgs now treats the first arg
+      // as the target and the second as a raw log ID. The command-level
+      // validateAndRecoverLogId catches the non-hex and either recovers or
+      // throws at that point.
+      const result = parsePositionalArgs([
+        "968c763c740cfda8b6728f27fb9e9b01",
+        "my-org/my-project",
+      ]);
+      expect(result.targetArg).toBe("968c763c740cfda8b6728f27fb9e9b01");
+      expect(result.rawLogIds).toEqual(["my-org/my-project"]);
     });
 
     test("returns suggestion when first arg looks like issue short ID", () => {
@@ -231,7 +225,7 @@ describe("parsePositionalArgs", () => {
       const combined = ids.join("\n");
       const result = parsePositionalArgs(["brandai/brandai", combined]);
       expect(result.targetArg).toBe("brandai/brandai");
-      expect(result.logIds).toEqual(ids);
+      expect(result.rawLogIds).toEqual(ids);
     });
   });
 });
@@ -444,11 +438,16 @@ describe("viewCommand.func", () => {
     openInBrowserSpy.mockRestore();
   });
 
-  test("swapped args throw ValidationError since non-hex ID fails validation", async () => {
+  test("swapped args are handled downstream (validation deferred)", async () => {
+    // With validation deferred, `parsePositionalArgs` no longer throws on
+    // non-hex log IDs. The command now treats the first arg as the target
+    // and tries to resolve it as a project. Since the first arg is a hex
+    // string (looks like a project-search slug), `findProjectsBySlug` is
+    // called and returns empty → ResolutionError. The key behavior is that
+    // the invocation fails — the exact error class depends on the resolver.
+    findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
     const { context } = createMockContext();
     const func = await viewCommand.loader();
-    // With hex validation, "test-org/test-proj" in log ID position throws
-    // ValidationError before swap detection runs.
     await expect(
       func.call(
         context,
@@ -456,7 +455,7 @@ describe("viewCommand.func", () => {
         "968c763c740cfda8b6728f27fb9e9b01",
         "test-org/test-proj"
       )
-    ).rejects.toThrow(ValidationError);
+    ).rejects.toThrow();
   });
 
   test("resolves project-search target via resolveProjectBySlug", async () => {

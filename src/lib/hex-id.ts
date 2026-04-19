@@ -100,10 +100,13 @@ export function validateHexId(value: string, label: string): string {
         "\n\nThis looks like a span ID (16 characters). " +
         `If you have the trace ID, try: sentry span view <trace-id> ${display}`;
     } else if (NON_HEX_RE.test(normalized)) {
-      // Contains non-hex characters — likely a slug or name
+      // Contains non-hex characters — likely a slug, name, or truncated input.
+      // The hex-id-recovery module at the command layer provides more specific
+      // hints (sentinel leak, slug detection, prefix lookup) when wired in;
+      // this is the generic fallback surfaced by paths that don't use recovery.
       message +=
-        `\n\nThis doesn't look like a hex ID. If this is a project, ` +
-        `specify it before the ID: <org>/<project> <${label}>`;
+        `\n\nThis doesn't look like a hex ID. If it is a name or slug, ` +
+        `pass it as a target: <org>/<project> <${label}>`;
     }
 
     throw new ValidationError(message);

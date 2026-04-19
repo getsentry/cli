@@ -30,6 +30,10 @@ import {
   validateSpanId,
 } from "../../lib/hex-id.js";
 import {
+  handleRecoveryResult,
+  recoverHexId,
+} from "../../lib/hex-id-recovery.js";
+import {
   applyFreshFlag,
   FRESH_ALIASES,
   FRESH_FLAG,
@@ -59,16 +63,17 @@ const USAGE_HINT =
  *
  * The first positional is the trace ID (optionally with org/project prefix),
  * parsed via the shared `parseSlashSeparatedTraceTarget`. The remaining
- * positionals are span IDs.
+ * positionals are span IDs (returned raw so recovery can run with trace
+ * context).
  *
  * @param args - Positional arguments from CLI
- * @returns Parsed trace target and span IDs
+ * @returns Parsed trace target and raw span IDs
  * @throws {ContextError} If insufficient arguments
- * @throws {ValidationError} If any ID has an invalid format
+ * @throws {ValidationError} If the trace ID has an invalid format
  */
 export function parsePositionalArgs(args: string[]): {
   traceTarget: ReturnType<typeof parseSlashSeparatedTraceTarget>;
-  spanIds: string[];
+  rawSpanIds: string[];
 } {
   if (args.length === 0) {
     throw new ContextError("Trace ID and span ID", USAGE_HINT, []);
@@ -101,7 +106,7 @@ export function parsePositionalArgs(args: string[]): {
         );
         return {
           traceTarget: { type: "auto-detect" as const, traceId: left },
-          spanIds: [right],
+          rawSpanIds: [right],
         };
       }
     }
@@ -121,19 +126,44 @@ export function parsePositionalArgs(args: string[]): {
     }
   }
 
-  // First arg is trace target (possibly with org/project prefix)
+  // First arg is trace target (possibly with org/project prefix).
+  // Trace-ID recovery runs asynchronously in the command layer — this is
+  // a sync function so it keeps the strict validation.
   const traceTarget = parseSlashSeparatedTraceTarget(first, USAGE_HINT);
 
-  // Remaining args are span IDs
+  // Remaining args are raw span IDs — validated in the command layer.
   const rawSpanIds = args.slice(1);
   if (rawSpanIds.length === 0) {
     throw new ContextError("Span ID", USAGE_HINT, [
       `Use 'sentry span list ${first}' to find span IDs within this trace`,
     ]);
   }
-  const spanIds = rawSpanIds.map((v) => validateSpanId(v));
 
-  return { traceTarget, spanIds };
+  return { traceTarget, rawSpanIds };
+}
+
+/**
+ * Validate a raw span ID, attempting {@link recoverHexId} on
+ * {@link ValidationError}. Requires trace-scoped context because span IDs
+ * are only unique within a trace.
+ */
+async function validateAndRecoverSpanId(
+  rawSpanId: string,
+  ctx: { org: string; project: string; traceId: string }
+): Promise<string> {
+  try {
+    return validateSpanId(rawSpanId);
+  } catch (err) {
+    if (!(err instanceof ValidationError)) {
+      throw err;
+    }
+    const result = await recoverHexId(rawSpanId, "span", ctx);
+    return handleRecoveryResult(result, err, {
+      entityType: "span",
+      canonicalCommand: `sentry span view ${ctx.org}/${ctx.project}/${ctx.traceId} <id>`,
+      logTag: "span.view",
+    });
+  }
 }
 
 /**
@@ -316,8 +346,8 @@ export const viewCommand = buildCommand({
     applyFreshFlag(flags);
     const { cwd } = this;
 
-    // Parse positional args: first is trace target, rest are span IDs
-    const { traceTarget, spanIds } = parsePositionalArgs(args);
+    // Parse positional args: first is trace target, rest are raw span IDs
+    const { traceTarget, rawSpanIds } = parsePositionalArgs(args);
     warnIfNormalized(traceTarget, "span.view");
 
     // Resolve org/project
@@ -326,6 +356,16 @@ export const viewCommand = buildCommand({
       cwd,
       USAGE_HINT
     );
+
+    // Validate + recover span IDs now that trace context is available.
+    // Span IDs are unique only within a trace, so recovery scopes its
+    // fuzzy lookup via `ctx.traceId`.
+    const spanIds: string[] = [];
+    for (const raw of rawSpanIds) {
+      spanIds.push(
+        await validateAndRecoverSpanId(raw, { org, project, traceId })
+      );
+    }
     // Fetch trace data (single fetch for all span lookups)
     const timestamp = Math.floor(Date.now() / 1000);
     const spans = await getDetailedTrace(org, traceId, timestamp);
@@ -333,7 +373,8 @@ export const viewCommand = buildCommand({
     if (spans.length === 0) {
       throw new ValidationError(
         `No trace found with ID "${traceId}".\n\n` +
-          "Make sure the trace ID is correct and the trace was sent recently."
+          "Make sure the trace ID is correct. Trace retention depends on your plan — " +
+          "older traces may have been deleted."
       );
     }
 
