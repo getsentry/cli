@@ -523,10 +523,26 @@ export async function mergeIssues(
   const query = groupIds.map((id) => `id=${encodeURIComponent(id)}`).join("&");
   const path = `/organizations/${encodeURIComponent(orgSlug)}/issues/?${query}`;
   type MergeResponse = { merge: MergeIssuesResult };
-  const { data } = await apiRequestToRegion<MergeResponse>(regionUrl, path, {
-    method: "PUT",
-    body: { merge: 1 },
-  });
+  const { data } = await apiRequestToRegion<MergeResponse | null>(
+    regionUrl,
+    path,
+    {
+      method: "PUT",
+      body: { merge: 1 },
+    }
+  );
+  // The bulk-mutate endpoint returns 204 (with null body) when no matching
+  // issues are found — e.g. IDs out of scope, or issues deleted between
+  // resolution and the merge call. Surface this as an ApiError so callers
+  // can present a friendlier message than "Cannot read .merge of null".
+  if (!data) {
+    throw new ApiError(
+      `No matching issues found for merge in '${orgSlug}'.`,
+      204,
+      "All provided issue IDs are out of scope or no longer exist.",
+      path
+    );
+  }
   return data.merge;
 }
 

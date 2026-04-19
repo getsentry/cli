@@ -29,9 +29,8 @@ import { issueIdPositional, resolveIssue } from "./utils.js";
 
 const log = logger.withTag("issue.resolve");
 
-/** Command identifier for resolution hints / error messages. */
-const COMMAND = "issue resolve";
-const COMMAND_BASE = "issue";
+/** Subcommand name passed to resolveIssue for error-hint construction. */
+const COMMAND = "resolve";
 
 type ResolveFlags = {
   readonly json: boolean;
@@ -111,7 +110,6 @@ export const resolveCommand = buildCommand({
       issueArg,
       cwd,
       command: COMMAND,
-      commandBase: COMMAND_BASE,
     });
 
     const updated = await updateIssueStatus(issue.id, "resolved", {

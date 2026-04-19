@@ -314,6 +314,14 @@ export async function apiRequestToRegion<T>(
     );
   }
 
+  // 204 No Content and 205 Reset Content have no body by spec —
+  // calling response.json() on them throws SyntaxError. Return `null`
+  // as the parsed body; callers that expect data should either avoid
+  // calling endpoints that can return 204, or handle null explicitly.
+  if (response.status === 204 || response.status === 205) {
+    return { data: null as T, headers: response.headers };
+  }
+
   const data = await response.json();
 
   if (schema) {

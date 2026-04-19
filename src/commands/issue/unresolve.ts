@@ -15,8 +15,7 @@ import { issueIdPositional, resolveIssue } from "./utils.js";
 
 const log = logger.withTag("issue.unresolve");
 
-const COMMAND = "issue unresolve";
-const COMMAND_BASE = "issue";
+const COMMAND = "unresolve";
 
 type UnresolveFlags = {
   readonly json: boolean;
@@ -50,7 +49,6 @@ export const unresolveCommand = buildCommand({
       issueArg,
       cwd,
       command: COMMAND,
-      commandBase: COMMAND_BASE,
     });
 
     const updated = await updateIssueStatus(issue.id, "unresolved", {

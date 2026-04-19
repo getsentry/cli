@@ -33,8 +33,9 @@ import { resolveIssue } from "./utils.js";
 
 const log = logger.withTag("issue.merge");
 
-const COMMAND = "issue merge";
-const COMMAND_BASE = "issue";
+const COMMAND = "merge";
+/** Full command path for error messages (this one isn't passed to resolveIssue). */
+const COMMAND_PATH = "issue merge";
 
 type MergeFlags = {
   readonly json: boolean;
@@ -89,7 +90,6 @@ async function resolveAllIssues(
         issueArg: arg,
         cwd,
         command: COMMAND,
-        commandBase: COMMAND_BASE,
       })
     )
   );
@@ -211,7 +211,7 @@ export const mergeCommand = buildCommand({
 
     if (args.length < 2) {
       throw new ValidationError(
-        `'${COMMAND}' needs at least 2 issue IDs (got ${args.length}).\n\n` +
+        `'sentry ${COMMAND_PATH}' needs at least 2 issue IDs (got ${args.length}).\n\n` +
           "Example: sentry issue merge CLI-K9 CLI-15H CLI-15N"
       );
     }

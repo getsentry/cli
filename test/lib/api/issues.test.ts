@@ -110,4 +110,23 @@ describe("mergeIssues", () => {
       mergeIssues("test-org", ["100", "200"])
     ).rejects.toBeInstanceOf(ApiError);
   });
+
+  test("handles 204 No Content (no matching issues) gracefully", async () => {
+    // Sentry's bulk mutate returns 204 when IDs are out of scope or the
+    // matched set is empty — without a body. Previously this crashed with
+    // SyntaxError in response.json().
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(null, {
+          status: 204,
+        })
+    );
+
+    await expect(
+      mergeIssues("test-org", ["100", "200"])
+    ).rejects.toBeInstanceOf(ApiError);
+    await expect(mergeIssues("test-org", ["100", "200"])).rejects.toThrow(
+      /no matching issues|out of scope/i
+    );
+  });
 });
