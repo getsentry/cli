@@ -145,6 +145,34 @@ describe("mergeCommand.func()", () => {
     expect(new Set(callArgs[1])).toEqual(new Set(["10A", "10B", "10C"]));
   });
 
+  test("--into accepts org-qualified short ID", async () => {
+    resolveIssueSpy.mockImplementation(({ issueArg }: { issueArg: string }) =>
+      Promise.resolve({
+        org: "test-org",
+        issue: makeMockIssue({
+          // resolveIssue returns bare short ID even if arg was org-qualified
+          shortId: issueArg.split("/").pop() as string,
+          id: (issueArg.split("/").pop() as string).replace("CLI-", "10"),
+        }),
+      })
+    );
+    mergeSpy.mockResolvedValue({ parent: "10B", children: ["10A", "10C"] });
+
+    const { context } = createMockContext();
+    const func = await mergeCommand.loader();
+    // User passes org-qualified form to --into; should still match.
+    await func.call(
+      context,
+      { json: false, into: "my-org/CLI-B" },
+      "CLI-A",
+      "CLI-B",
+      "CLI-C"
+    );
+
+    const callArgs = mergeSpy.mock.calls[0] as [string, string[]];
+    expect(callArgs[1][0]).toBe("10B"); // parent still moved to front
+  });
+
   test("--into rejects a value that doesn't match any provided issue", async () => {
     resolveIssueSpy.mockImplementation(({ issueArg }: { issueArg: string }) =>
       Promise.resolve({

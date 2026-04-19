@@ -123,6 +123,12 @@ async function resolveAllIssues(
  * first. Sentry's merge endpoint picks the parent by size; pre-sorting
  * nudges the tie-break toward the caller's preference for typical cases.
  *
+ * Accepts the same formats as the positional args — bare short ID
+ * (`CLI-K9`), numeric group ID (`100`), or org-qualified short ID
+ * (`my-org/CLI-K9`). For the org-qualified form we drop the segment
+ * before the last `/` before comparing against `issue.shortId` (which is
+ * always unqualified in API responses).
+ *
  * When `into` doesn't match any issue in the list, that's a user error —
  * we throw so the user can correct the mistake instead of silently getting
  * a different parent.
@@ -135,8 +141,16 @@ function orderForMerge(
     return issues;
   }
   const normalized = into.trim();
+  // Strip the "org/" prefix if present (e.g. "my-org/CLI-K9" → "CLI-K9").
+  // The Sentry API's `shortId` field is always the bare short ID.
+  const lastSlash = normalized.lastIndexOf("/");
+  const bare = lastSlash >= 0 ? normalized.slice(lastSlash + 1) : normalized;
   const parent = issues.find(
-    (i) => i.shortId === normalized || i.id === normalized
+    (i) =>
+      i.shortId === bare ||
+      i.id === bare ||
+      i.shortId === normalized ||
+      i.id === normalized
   );
   if (!parent) {
     throw new ValidationError(
