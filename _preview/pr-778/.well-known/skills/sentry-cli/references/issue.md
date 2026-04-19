@@ -200,7 +200,7 @@ Reopen a resolved issue
 Merge 2+ issues into a single canonical group
 
 **Flags:**
-- `-i, --into <value> - Pin the canonical parent (must match one of the provided issue IDs)`
+- `-i, --into <value> - Prefer this issue as the canonical parent (must match one of the provided IDs)`
 
 **Examples:**
 
