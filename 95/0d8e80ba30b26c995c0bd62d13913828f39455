@@ -1,0 +1,401 @@
+# Auto-Recover Malformed & Truncated Hex IDs
+
+## Real-World Input Analysis (from Sentry CLI project telemetry)
+
+Telemetry from the `cli` project surfaces multiple overlapping issues — all worth fixing with a single recovery pipeline:
+
+### CLI-16G — Invalid event ID (43 events / 24 users / ongoing)
+Sample malformed inputs:
+```
+05d6975ab9bb, 074acaeae0c6, 130efe1f5f2b, 32bb376b3c28, 4773c9b469c8,
+5fff680a1f4f, 78ed4311286d, 7f0e619c93b0, 88682d26b828, 91f0b7f0d29b,
+a1c63d511390, a315533323c1, a3cdaa1c436c, b5ced9cd7313, c9e68cc11c3f,
+cfa988d224fa, d586e2728499, d9509ea547c4, e0f95ec413fd           (all 12 hex chars)
+c0a5a9d4dce44358ab4231fc3bios                                     (32 hex + trailing "ios")
+14d9a67fda344df0a138a88d62e41be                                   (31 hex — off-by-one truncation)
+d3808597105ed493                                                  (16 hex — span ID?)
+b092b5d6                                                          (8 hex)
+apacta-2-wttd, simpelweb-2ry, server-xn                           (project slug mistaken for event ID)
+latest, get, null                                                 (shell/pipeline sentinel leak)
+gohighlevel/highlevel-flutter/27bc063...                          (over-nested path)
+```
+
+### CLI-M0 — Invalid trace ID (25 events / 13 users)
+```
+9b3e164945bfd210, a87568cd13ec79f4, d2ad4a2d947b5983,
+806d81e63743e22b, b43bdc94a56b4c68                                (16 hex — span IDs passed as trace ID)
+91304e58                                                          (8 hex)
+rust, frontend, vie2, cloud-labs-staging,
+human-interfaces, human-interfaces-f                              (project slugs)
+```
+
+### CLI-163 — Invalid span ID (3 events)
+```
+0f359be41b42454c97a1a4317596d7ad, 2a4aa30d6b86418c9f26c01f52222314 (32 hex — trace IDs as span)
+null                                                               (sentinel)
+```
+
+### CLI-197 — Invalid log ID (1 event)
+```
+uts-patient-app-7d                                                 (project slug)
+```
+
+### CLI-EQ — "No log found with ID" (18+ events / valid 32-hex, retention expired)
+```
+019da223817478d8a98508aaedbafdc1, 019d7ab81e2b73658b1f3c1c1896a5f1 …
+```
+All start with `019d…` — UUIDv7 time prefix indicates logs past the 90-day retention window.
+
+### CLI-1A4 / CLI-3V — "No trace found with ID" (valid 32-hex, not found)
+Similar retention-boundary pattern.
+
+### Updated taxonomy of malformed inputs
+
+| Class | Pattern | Frequency | Example | Recovery approach |
+|-------|---------|-----------|---------|--------------------|
+| **A** — Trailing junk concat | `<32hex><non-hex junk>` | Low | `c0a5a9d4dce44358ab4231fc3bios` | Syntactic strip + warn |
+| **B** — UI-truncated pure hex | 8, 12, or 16 hex chars alone | **Very high** (90%+ of event-view failures) | `05d6975ab9bb` (12 hex) | Fuzzy API prefix lookup |
+| **C** — Middle-ellipsis | `<hex>...<hex>` | Low (own CLI output paste) | `abc123...def456` | Prefix+suffix lookup |
+| **D** — Off-by-one truncation | 31 hex (or 15 for span) | Low | `14d9a67fda344df0a138a88d62e41be` | Treat as prefix, fuzzy lookup |
+| **E** — Wrong-entity hex | 16-hex passed to `trace view`, 32-hex to `span view`, 32-hex to `event view` | High | `9b3e164945bfd210` to `trace view` | **Auto-resolve**: look up the parent/related entity and redirect |
+| **F** — Sentinel leak | `null`, `latest`, `get`, `@latest` | Moderate | `null` | Detect + targeted error with cause hint |
+| **G** — Slug mistaken for ID | `human-interfaces`, `uts-patient-app-7d`, `apacta-2-wttd` | Moderate | slug-like identifiers | Detect + redirect to `project view` / `issue list` suggestion |
+| **H** — Over-nested path | `<org>/<project>/<extra>/<id>` | Rare | `gohighlevel/highlevel-flutter/27bc063...` | Parser fix to collapse extra path segments |
+| **I** — Valid but not found | Valid 32-hex, API 404 | High for logs (retention) | `019da223817478d8…` | Already handled — add retention-period hint |
+
+**Key insight**: Class B (pure UI-truncated hex) is the **dominant** failure mode, not Class A. The `c0a5a9d4dce44358ab4231fc3bios` ("iOS") case that kicked off this plan is actually rare compared to users copy-pasting 12-char truncated IDs from the Sentry UI.
+
+## Goals
+
+1. **Syntactic normalization** (no API): strip trailing non-hex junk (Class A); strip URL-fragment prefixes (`span-`, `txn-`); expand middle-ellipsis (Class C); strip UUID dashes on partials. If result is a valid full-length ID, warn and continue.
+2. **Fuzzy prefix recovery** (API-based): when hex prefix is ≥8 chars (Class B), or 31-char prefix (Class D), or prefix+suffix from ellipsis (Class C), query the API. Auto-use on single match; surface candidates on multiple.
+3. **Cross-entity auto-resolve** (Class E): 16-hex to `trace view` → look up the span's parent trace; 32-hex to `span view` → treat as trace ID; 32-hex to `event view` when it doesn't match event lookup → fall back to trace/event. Use `log.warn` + redirect.
+4. **Smart error hints** (Classes F, G, I):
+   - Detect sentinel inputs (`null`, `latest`, `get`) — error with "looks like shell/pipeline leak".
+   - Detect slug-like inputs (contains dashes and alphabetic-only segments) — suggest `project view` or `issue list`.
+   - On 404 "not found" for valid IDs: check UUIDv7 timestamp prefix; if older than retention, add "logs expire after 90 days" hint.
+5. **Parser fix for over-nested paths** (Class H): accept `<org>/<project>/<extra-segments>/<id>` by treating anything after `<org>/<project>/` as the ID, possibly with further slash-splitting.
+6. Apply symmetrically to 32-char IDs (event, trace, log) and 16-char span IDs.
+7. Existing auto-recovery (issue short ID → latest event, `traceId/spanId` slash split) keeps priority — runs first.
+
+## Non-Goals
+
+- Leading-junk stripping (e.g., `ios<32hex>`) — user confirmed trailing-only.
+- Interactive "did you mean?" prompts — AI-agent primary consumer, must be non-interactive.
+- Caching fuzzy results — typos have near-zero reuse.
+- Auto-picking on collision — always surface candidates and ask user to re-run with more characters.
+
+## Issues this plan resolves
+
+Upon successful implementation + deploy, these issues should be fixed (marked resolved in Sentry after verification):
+
+| Issue | Fix mechanism |
+|-------|---------------|
+| **CLI-16G** (merged **CLI-1A8**) | Class A strip + Class B fuzzy prefix + Class F/G/H hints |
+| **CLI-M0** | Class B fuzzy prefix (16-hex → trace lookup via span) + Class E cross-entity + Class G hint |
+| **CLI-163** | Class E cross-entity (32-hex → trace ID, redirect) + Class F sentinel detection |
+| **CLI-197** | Class G slug detection |
+| **CLI-EQ** / **CLI-1A4** / **CLI-3V** | Class I retention-period hints (no recovery, just clearer errors) |
+
+---
+
+## Design
+
+### New module: `src/lib/hex-id-recovery.ts`
+
+Keeps `hex-id.ts` sync/pure (Stricli `parse` contract). Recovery is async (needs API + org context) and lives at the command layer, invoked in the `catch` block around `validateHexId`.
+
+```typescript
+export type HexEntityType = "event" | "trace" | "log" | "span";
+
+/** Extracted prefix/suffix parts from a raw malformed input. */
+export interface HexCandidate {
+  prefix: string;   // leading hex chars (lowercased, dashes stripped)
+  suffix?: string;  // trailing hex chars, only set when middle-ellipsis detected
+}
+
+export type RecoveryResult =
+  | { kind: "stripped"; id: string; original: string; stripped: string }
+  | { kind: "fuzzy";    id: string; original: string; prefix: string; suffix?: string }
+  | { kind: "redirect"; id: string; original: string; fromEntity: HexEntityType; toEntity: HexEntityType } // Class E
+  | { kind: "failed";   original: string; reason: RecoveryFailureReason; candidates?: string[]; hint?: string };
+
+export type RecoveryFailureReason =
+  | "too-short"
+  | "no-matches"
+  | "multiple-matches"
+  | "api-error"
+  | "sentinel-leak"     // Class F: null, latest, get, undefined
+  | "looks-like-slug"   // Class G: project slug mistaken for ID
+  | "over-nested";      // Class H: too many path segments
+
+export interface LookupContext {
+  org: string;
+  project?: string;
+  traceId?: string;
+  period?: string;
+  signal?: AbortSignal;
+}
+
+/** Strip URL prefixes, UUID dashes; detect common sentinel strings. */
+export function preNormalize(input: string): { cleaned: string; sentinel?: string };
+
+/** Pure sync: strip trailing non-hex; return hex iff result === expectedLen. */
+export function stripTrailingNonHex(input: string, expectedLen: 32 | 16): { hex: string; stripped: string } | null;
+
+/** Pure sync: extract {prefix, suffix?} from `<hex>...<hex>` forms. */
+export function extractHexCandidate(input: string): HexCandidate | null;
+
+/** Heuristic: input "looks like" a slug (contains dashes, multiple alpha segments). */
+export function looksLikeSlug(input: string): boolean;
+
+/** Main entry. Called from commands after validateHexId throws. */
+export async function recoverHexId(
+  input: string,
+  entityType: HexEntityType,
+  ctx: LookupContext
+): Promise<RecoveryResult>;
+```
+
+### Decision tree in `recoverHexId`
+
+```
+expectedLen = entityType === "span" ? 16 : 32
+minPrefix   = 8    // smallest UI truncation observed; scan-scoped to project+period
+
+// Step 0: pre-normalize
+{ cleaned, sentinel } = preNormalize(input)
+if (sentinel)  →  { kind: "failed", reason: "sentinel-leak", hint: `'${sentinel}' is not a hex ID — likely a shell/pipeline value leak.` }
+
+// Step 1: check for over-nested path form (Class H)
+if (cleaned.split("/").length >= 3)   // e.g., org/project/extra/id
+  →  { kind: "failed", reason: "over-nested", hint: `Use exactly <org>/<project>/<id>; extra path segments not supported.` }
+
+// Step 2: Class E — cross-entity redirect when the input is already a VALID ID of a different type
+if (entityType === "trace" && SPAN_ID_RE.test(cleaned))      // valid 16-hex span → look up span's trace
+  span = await findSpanById(cleaned, ctx)
+  if (span?.trace)  →  { kind: "redirect", id: span.trace, fromEntity: "span", toEntity: "trace" }
+if (entityType === "span"  && HEX_ID_RE.test(cleaned))       // valid 32-hex trace passed as span → treat as trace
+  →  { kind: "redirect", id: cleaned, fromEntity: "trace", toEntity: "trace" }  // caller re-runs trace view
+  // (handled at the command layer — see span/view.ts integration below)
+
+// Step 3: Class A — syntactic strip
+s = stripTrailingNonHex(cleaned, expectedLen)
+if (s !== null)  →  { kind: "stripped", id: s.hex, stripped: s.stripped }
+
+// Step 4: Class C / B / D — fuzzy lookup
+cand = extractHexCandidate(cleaned)
+if (cand === null || (cand.prefix.length < minPrefix && (cand.suffix?.length ?? 0) < minPrefix))
+  // Class G check: does input look like a project slug?
+  if (looksLikeSlug(input))
+    →  { kind: "failed", reason: "looks-like-slug", hint: `Did you mean '${input}' as a project slug? Try: sentry issue list <org>/${input}` }
+  →  { kind: "failed", reason: "too-short", hint: "Need at least 8 hex chars for prefix recovery." }
+
+candidates = await ADAPTERS[entityType].findByPrefix(cand, ctx)    // pass prefix + suffix
+candidates = candidates
+  .filter(c => c.startsWith(cand.prefix))
+  .filter(c => !cand.suffix || c.endsWith(cand.suffix))
+
+switch (candidates.length) {
+  case 0: →  { kind: "failed", reason: "no-matches", hint: retentionHint(entityType, ctx.period) }
+  case 1: →  { kind: "fuzzy", id: candidates[0], prefix: cand.prefix, suffix: cand.suffix }
+  default: →  { kind: "failed", reason: "multiple-matches", candidates: candidates.slice(0, 5) }
+}
+```
+
+Where `retentionHint(entityType, period)` returns:
+- log → `"Logs are retained for 90 days. Check the ID or widen --period."`
+- trace/event → `"Traces/events are retained per your plan. Check the ID or widen --period."`
+
+### Per-entity adapters
+
+Research indicates Sentry's `id:` / `trace:` search keys are typed UUID and likely reject wildcard prefixes. So the **scan-and-filter path is the primary strategy**. Wildcard attempts stay as a cheap first try with 400 telemetry capture per AGENTS.md 400-convention.
+
+| Entity | Primary (scan + client filter) | Optional wildcard try | Default window |
+|--------|----------------------------------|------------------------|----------------|
+| event  | `listIssueEvents` / project `events`, filter `eventID.startsWith(prefix)` + optional `.endsWith(suffix)` | `events/?dataset=errors&query=id:<prefix>*` | 90d |
+| trace  | `listSpans` filtered + deduped by `trace` | `events/?dataset=spans&query=trace:<prefix>*` | 30d |
+| log    | `listLogs` recent + filter `sentry.item_id.startsWith(prefix)` | `listLogs` with `query: "sentry.item_id:<prefix>*"` | 30d |
+| span   | `listSpans(org, project, { query: \`trace:${traceId}\` })` + filter on `id` | `listSpans(..., query: \`id:<prefix>* trace:${traceId}\`)` | trace's window |
+
+`findSpanById(spanId, ctx)` for Class E trace-from-span redirect: `listSpans(org, project?, { query: \`id:${spanId}\` })`, first result.
+
+**Scoping rules:**
+- Require `ctx.org` always (resolved before recovery).
+- Prefer `ctx.project` for scan scoping. When absent, fan out across projects with `pLimit(5)` (matches `findEventAcrossOrgs`), capped at 50 projects — beyond that, raise `ResolutionError`.
+- Cap total scan at `MAX_PAGINATION_PAGES * API_MAX_PER_PAGE` (5000) per project.
+- Span adapter requires `ctx.traceId`.
+
+### Integration — command wiring
+
+Each command's new pattern:
+
+```typescript
+let id: string;
+try {
+  id = validateHexId(rawId, "event ID");
+} catch (err) {
+  if (!(err instanceof ValidationError)) throw err;
+  const r = await recoverHexId(rawId, "event", { org: resolved.org, project: resolved.project });
+  id = handleRecovery(err, rawId, r, "event");
+}
+```
+
+Where `handleRecovery`:
+- `stripped` → `log.warn("Stripped trailing '<junk>' from ID; using <id>.")`, return `id`.
+- `fuzzy` → `log.warn("Interpreted '<orig>' as <entity> <id> (matched hex prefix).")`, return `id`.
+- `redirect` → `log.warn("'<orig>' is a <fromEntity>, not a <toEntity>. Using the associated <toEntity> <id>.")`, return `id`.
+- `failed`:
+  - `sentinel-leak` → `ValidationError` with `result.hint` attached (e.g., "`null` is not a hex ID — likely a shell/pipeline value leak").
+  - `over-nested` → `ValidationError` with `result.hint`.
+  - `looks-like-slug` → `ResolutionError` nudging to `project view` or `issue list`.
+  - `too-short` → rethrow augmented `ValidationError` with "need ≥8 hex chars".
+  - `no-matches` → rethrow augmented with `retentionHint`.
+  - `multiple-matches` → `ResolutionError` with candidate list (max 5) and canonical command.
+  - `api-error` → rethrow original `ValidationError` (telemetry already captured).
+
+### Parser fix for Class H (over-nested paths)
+
+`parseSlashSeparatedArg` (`src/lib/arg-parsing.ts`) currently handles `<org>/<id>`, `<org>/<project>/<id>`. For inputs like `gohighlevel/highlevel-flutter/27bc063...` it already works via `parseOrgProjectArg` — need to verify. If the ID portion itself contains slashes (unlikely for hex but happens for project paths in URL dumps), the parser should take everything after the second `/` as the ID. This is a small targeted change in `arg-parsing.ts` if needed.
+
+### Files modified
+
+| File | Change |
+|------|--------|
+| **NEW** `src/lib/hex-id-recovery.ts` | Core logic + adapter registry + sentinel/slug/retention helpers |
+| **NEW** `test/lib/hex-id-recovery.test.ts` | Unit tests for all normalization + decision tree (mocked adapter) |
+| **NEW** `test/lib/hex-id-recovery.property.test.ts` | Property tests: strip idempotence, preserves valid IDs, output always hex, length invariants |
+| **NEW** `test/isolated/lib/hex-id-recovery-adapters.test.ts` | Mock `globalThis.fetch` to exercise wildcard try + scan fallback per adapter |
+| `src/commands/event/view.ts` | Wrap `validateHexId` call in try/catch around `recoverHexId("event", ...)`. |
+| `src/commands/log/view.ts` | Same wrapping for both single and multi-arg paths. |
+| `src/commands/span/view.ts` | Same for `validateSpanId`; also handle 32-hex → trace redirect at command layer. |
+| `src/lib/trace-target.ts` | Add async `resolveTraceTargetWithRecovery(raw, ctx)` wrapping `validateTraceId`. Callers (`trace/view.ts`, `span/view.ts` trace path) switch to async. |
+| `src/lib/hex-id.ts` | **No change to core logic.** Soften the "if this is a project" hint since recovery now covers that case. Ensure current "looks like a span ID" and "looks like a trace ID" hints are retained as fallbacks. |
+| `src/lib/arg-parsing.ts` | Small targeted fix if `parseSlashSeparatedArg` doesn't already handle 3+ segments cleanly (Class H). |
+| `src/commands/event/view.ts` / `trace/view.ts` / `log/view.ts` | When API returns 404 for a valid ID, augment the "No X found" error with retention hint (Class I). |
+
+### Edge cases & defensive handling
+
+- **Issue short IDs** (`CLI-ABC`) never reach recovery — existing redirects handle them; their normalized hex prefix is < minPrefix anyway.
+- **Empty/whitespace** — rejects in `validateHexId` early.
+- **UUID dashes on partial input** — `preNormalize` strips dashes after UUID-full check fails.
+- **URL-fragment prefixes** — `preNormalize` strips leading `span-`, `txn-`, `event-`.
+- **Zero-padded OTEL trace IDs** — valid hex; pass through unchanged.
+- **Middle-ellipsis** — `extractHexCandidate` handles `...` and unicode `…`.
+- **`--json` mode** — `log.warn()` routes to stderr; JSON output on stdout. Unchanged.
+- **Abort signals** — `LookupContext.signal` plumbed through adapters.
+- **Strip succeeds but stripped ID doesn't exist on Sentry** — downstream 404 surfaces as `retentionHint`-augmented error. Strip is purely syntactic.
+- **8-char prefix collision**: never auto-picks on multi-match; always surfaces candidates.
+- **Class E span-to-trace redirect**: if span lookup succeeds, the `redirect` case runs the normal trace view with the recovered trace ID — user sees the warning and gets correct output.
+
+### Telemetry
+
+- Breadcrumb `hex_id_recovery` with `{ entityType, resultKind, prefixLen, hadSuffix, failureReason? }`. No PII — hex prefix is not sensitive.
+- Wildcard 400 captured via existing `Sentry.setContext('api_error', ...)` + `captureException` (AGENTS.md 400-convention).
+- `ResolutionError`/`ValidationError` from recovery skipped by `isExpectedUserError()` (existing).
+
+### User confirmation — no prompting
+
+- **1 match (fuzzy or redirect)** → auto-use with warning.
+- **Multiple matches** → `ResolutionError` with candidate list.
+- **0 matches** → augmented `ValidationError`.
+
+---
+
+## Minimum prefix length: **8 hex chars** for all entities
+
+Telemetry confirms **8-char UI truncation is the floor** — and 12-char is the most common real-world input. Accepting 8 chars covers all observed UI-copy cases. Multi-match branch handles inevitable 8-char collisions by showing candidates rather than auto-picking.
+
+| Entity | ID length | Min fuzzy prefix | Collision handling |
+|--------|-----------|-------------------|---------------------|
+| event / trace / log | 32 | 8 | Scope to project + window; `multiple-matches` → candidate list |
+| span | 16 | 8 | Scoped within `traceId`; effectively unique |
+
+---
+
+## Testing strategy
+
+### Unit tests (`test/lib/hex-id-recovery.test.ts`)
+Drive table-driven tests from the **real-world telemetry inventory above** — every example should land in the expected class:
+
+- `preNormalize`: `span-abc123` → `abc123`, `  null  ` → `{ cleaned: "null", sentinel: "null" }`, `@latest` → sentinel `latest`, `abc12345-6789` → `abc123456789`.
+- `stripTrailingNonHex`:
+  - `c0a5a9d4dce44358ab4231fc3bios` → `{ hex: …, stripped: "ios" }` ← CLI-1A8
+  - 32-hex alone → `null` (already valid; no stripping needed)
+  - 12-hex alone (`05d6975ab9bb`) → `null` (falls through to fuzzy)
+  - `14d9a67fda344df0a138a88d62e41be` (31 hex) → `null` (falls through to fuzzy)
+- `extractHexCandidate`:
+  - `abc12345` → `{ prefix: "abc12345" }`
+  - `abc123...def456` → `{ prefix: "abc123", suffix: "def456" }`
+  - `abc123…def456` (unicode) → same
+  - Empty / all non-hex → `null`
+- `looksLikeSlug`: `apacta-2-wttd` → true, `human-interfaces-f` → true, `c0a5a9d4` → false.
+- `recoverHexId` decision tree (mocked adapter), one test per real-world example:
+  - `"05d6975ab9bb"` (12 hex) → adapter called with prefix → single match → `fuzzy`
+  - `"c0a5a9d4dce44358ab4231fc3bios"` → `stripped`
+  - `"14d9a67fda344df0a138a88d62e41be"` (31 hex) → adapter called → `fuzzy`
+  - `"null"` → `failed(sentinel-leak)`, no adapter call
+  - `"apacta-2-wttd"` → `failed(looks-like-slug)`, no adapter call
+  - `"gohighlevel/highlevel-flutter/27bc063..."` → `failed(over-nested)`
+  - `"9b3e164945bfd210"` as trace → `redirect` via span lookup (mock returns `{trace: "abc…"}`)
+  - `"0f359be41b42454c97a1a4317596d7ad"` as span → `redirect` to trace view
+
+### Property tests (`test/lib/hex-id-recovery.property.test.ts`)
+- `stripTrailingNonHex` on any `<32hex>` + non-hex junk → always returns the 32hex.
+- `extractHexCandidate` output prefix/suffix always match `/^[0-9a-f]*$/`.
+- Valid 32-hex IDs pass through `validateHexId` unchanged — recovery never triggered — invariance.
+- 8-char pure hex input → always reaches fuzzy branch (never `stripped`, never `too-short`).
+- `preNormalize` never increases length.
+
+### Command-level tests
+Per-command (event/trace/log/span `view`): mock `recoverHexId` to each result kind, verify warnings, downstream calls, and hint strings. Additionally mock the cross-entity redirect path in span/trace view.
+
+### Isolated adapter tests (`test/isolated/lib/hex-id-recovery-adapters.test.ts`)
+Mock `globalThis.fetch` (per AGENTS.md):
+- Wildcard returns matches → scan not invoked.
+- Wildcard 400 → scan runs transparently.
+- Scan pagination caps honestly.
+- `AbortSignal` cancels.
+- `findSpanById` (Class E helper) returns `{trace}`.
+
+---
+
+## Risks / open questions
+
+1. **Wildcard on `id:`/`trace:` fields** — likely unsupported. Scan is primary; wildcard is cheap optimism. Telemetry confirms per-field support over time.
+2. **Scan cost on high-volume orgs** — cap via `MAX_PAGINATION_PAGES` + project scoping. If scan exhausts without match, return `no-matches` with retention hint rather than continuing to expand.
+3. **Cross-project event fuzzy** — capped fan-out (50 projects, `pLimit(5)`). Beyond cap, `ResolutionError` asks for explicit `<org>/<project>/<id>`.
+4. **Class E span-to-trace lookup requires `listSpans`** — same infra as trace fuzzy; ensure the adapter reuse works.
+5. **UUIDv7 retention detection**: `019d…` prefix indicates recent-enough ID for logs (19d is still within 90d window). The retention hint is generic — we don't try to parse UUIDv7 timestamps and compare. Just hint that logs expire after 90 days.
+6. **Over-nested parser change** — if `parseSlashSeparatedArg` already accepts the form, skip the parser change and handle in recovery only.
+
+---
+
+## Verification
+
+After implementation:
+
+1. `bun run typecheck` — no type errors.
+2. `bun run lint` — passes ultracite.
+3. `bun test test/lib/hex-id-recovery.test.ts test/lib/hex-id-recovery.property.test.ts` — new tests pass.
+4. `bun test test/isolated/lib/hex-id-recovery-adapters.test.ts` — adapter tests pass.
+5. `bun test` — full suite, no regressions.
+6. **Telemetry-driven smoke tests** (each reproduces a real Sentry issue):
+   - `sentry event view <org>/<project>/c0a5a9d4dce44358ab4231fc3bios` → auto-strip ✓ (CLI-1A8 / CLI-16G)
+   - `sentry event view <org>/<project>/05d6975ab9bb` → fuzzy-find or `multiple-matches` ✓ (CLI-16G)
+   - `sentry event view <org>/<project>/14d9a67fda344df0a138a88d62e41be` → fuzzy-find ✓ (CLI-16G off-by-one)
+   - `sentry event view <org>/<project>/null` → clear sentinel error ✓ (CLI-16G)
+   - `sentry event view <org>/<project>/apacta-2-wttd` → slug hint ✓ (CLI-16G)
+   - `sentry trace view <org>/<project>/9b3e164945bfd210` → redirect to trace via span lookup ✓ (CLI-M0)
+   - `sentry trace view <org>/<project>/frontend` → slug hint ✓ (CLI-M0)
+   - `sentry span view <org>/<project>/<trace-id>/0f359be41b42454c97a1a4317596d7ad` → redirect to trace view ✓ (CLI-163)
+   - `sentry log view <org>/<project>/uts-patient-app-7d` → slug hint ✓ (CLI-197)
+   - `sentry log view <org>/<project>/019da223817478d8a98508aaedbafdc1` (expired) → retention hint ✓ (CLI-EQ)
+   - `sentry event view <org>/<project>/<first-8-hex-of-real-event>` → fuzzy-finds ✓
+   - `sentry log view <org>/<project>/<first-6>...<last-6-of-log-id>` → middle-ellipsis fuzzy ✓
+   - Issue short ID still works: `sentry event view <org>/CLI-ABC` → issue redirect ✓
+7. **Mark issues resolved in Sentry** once the release is deployed and telemetry confirms the errors stop firing:
+   - Watch CLI-16G (target), CLI-M0, CLI-163, CLI-197 event counts drop.
+   - CLI-EQ / CLI-1A4 / CLI-3V stay open until the retention hint actually ships and we confirm users get better errors.
+
+Commit strategy: split into (1) recovery module + tests, (2) command integration per entity, (3) parser fix for over-nesting, (4) docs/fragment updates. Follow AGENTS.md `feat(scope):` commit format. Reference issues in commit footers: `Fixes CLI-16G. Helps CLI-M0, CLI-163, CLI-197.`
