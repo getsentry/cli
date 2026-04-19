@@ -326,12 +326,20 @@ function throwNotFoundError(
   org: string,
   project: string
 ): never {
+  // Generic fallback wording references `RETENTION_DAYS.log` so a single
+  // edit in `retention.ts` keeps this message in sync with the
+  // deterministic retention-aware path.
+  const retentionDays = RETENTION_DAYS.log;
+  const genericHint = retentionDays
+    ? `Make sure the log IDs are correct and were sent within the last ${retentionDays} days.`
+    : "Make sure the log IDs are correct.";
+
   if (logIds.length === 1) {
     const id = logIds[0] ?? "";
     const suffix = retentionSuffix(id);
     const hint = suffix
       ? `This log is no longer retrievable.${suffix}`
-      : "Make sure the log ID is correct and the log was sent within the last 90 days.";
+      : genericHint.replace("log IDs are correct", "log ID is correct");
     throw new ValidationError(
       `No log found with ID "${id}" in ${org}/${project}.\n\n${hint}`
     );
@@ -346,7 +354,7 @@ function throwNotFoundError(
   const anyExpired = suffixed.some(({ suffix }) => suffix !== "");
   const hint = anyExpired
     ? "Expired log IDs are no longer retrievable. Check non-expired IDs and re-run."
-    : "Make sure the log IDs are correct and the logs were sent within the last 90 days.";
+    : genericHint;
   throw new ValidationError(
     `No logs found with any of the following IDs in ${org}/${project}:\n${annotated}\n\n${hint}`
   );
