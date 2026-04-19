@@ -170,7 +170,7 @@ sentry issue view FRONT-ABC -w
 Mark an issue as resolved
 
 **Flags:**
-- `-i, --in <value> - Resolve in a release ('<version>' | '@next' | 'commit:<sha>')`
+- `-i, --in <value> - Resolve in a release ('<version>' or '@next')`
 
 **Examples:**
 
@@ -184,10 +184,7 @@ sentry issue resolve CLI-G5 --in 0.26.1
 
 # Resolve in the next release (tied to current HEAD)
 sentry issue resolve CLI-G5 --in @next
-
-# Resolve tied to a commit SHA — regression-flags once a release
-# containing that commit deploys
-sentry issue resolve CLI-G5 -i commit:abc123
+sentry issue resolve CLI-G5 -i @next
 
 # Reopen a resolved issue
 sentry issue unresolve CLI-G5
