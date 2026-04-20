@@ -9,6 +9,7 @@
 import { routes } from "../app.js";
 import { formatBanner } from "./banner.js";
 import { isAuthenticated } from "./db/auth.js";
+import { TOP_LEVEL_ENV_VARS } from "./env-registry.js";
 import { cyan, magenta, muted } from "./formatters/colors.js";
 import {
   type CommandInfo,
@@ -100,6 +101,27 @@ function formatCommands(commands: HelpCommand[]): string {
 }
 
 /**
+ * Format the top-level environment variable list with aligned descriptions.
+ *
+ * Source of truth: `TOP_LEVEL_ENV_VARS` in `env-registry.ts`. Keep this
+ * short — full docs live under `configuration.md`.
+ */
+function formatEnvVars(): string {
+  if (TOP_LEVEL_ENV_VARS.length === 0) {
+    return "";
+  }
+  const padding = 4;
+  const maxNameLength = Math.max(
+    ...TOP_LEVEL_ENV_VARS.map((v) => v.name.length)
+  );
+  return TOP_LEVEL_ENV_VARS.map((v) => {
+    const namePadded = v.name.padEnd(maxNameLength + padding);
+    const desc = v.briefDescription ?? v.description.split("\n")[0] ?? "";
+    return `    ${cyan(namePadded)}${muted(desc)}`;
+  }).join("\n");
+}
+
+/**
  * Build the custom branded help output string.
  * Shows a contextual example based on authentication status.
  */
@@ -124,6 +146,14 @@ export function printCustomHelp(): string {
   lines.push(formatCommands(generateCommands()));
   lines.push("");
 
+  // Environment variables (auto-generated from env-registry)
+  const envVars = formatEnvVars();
+  if (envVars) {
+    lines.push(`  ${muted("Environment Variables:")}`);
+    lines.push(envVars);
+    lines.push("");
+  }
+
   // Example
   lines.push(`  ${muted("try:")} ${magenta(example)}`);
   lines.push("");
@@ -141,6 +171,23 @@ export function printCustomHelp(): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * Metadata for a top-level environment variable as exposed to JSON callers
+ * of `sentry help --json`.
+ */
+export type HelpEnvVarInfo = {
+  /** Variable name (e.g. `SENTRY_AUTH_TOKEN`). */
+  name: string;
+  /** Short one-line description suitable for list display. */
+  brief: string;
+  /** Full markdown description from the env-var registry. */
+  description: string;
+  /** Example value (when provided in the registry). */
+  example?: string;
+  /** Default value (when provided in the registry). */
+  defaultValue?: string;
+};
+
+/**
  * Result of introspecting the CLI.
  * Yielded as CommandOutput — JSON mode serializes directly, human mode
  * passes through {@link formatHelpHuman}.
@@ -149,18 +196,42 @@ export function printCustomHelp(): string {
  * it's stripped from JSON output via `jsonExclude`.
  */
 export type HelpJsonResult =
-  | ({ routes: RouteInfo[] } & { _banner?: string })
+  | ({ routes: RouteInfo[]; envVars: HelpEnvVarInfo[] } & { _banner?: string })
   | CommandInfo
   | RouteInfo
   | { error: string; suggestions?: string[] };
 
 /**
- * Introspect the full command tree.
- * Returns all visible routes with all flags included.
+ * Build the top-level env-var list for JSON output.
+ *
+ * Exposes exactly the entries marked `topLevel` in the registry so that
+ * consumers (AI agents, docs tooling) can surface them without having to
+ * re-parse the CLI's branded help.
  */
-export function introspectAllCommands(): { routes: RouteInfo[] } {
+function buildTopLevelEnvVars(): HelpEnvVarInfo[] {
+  return TOP_LEVEL_ENV_VARS.map((v) => ({
+    name: v.name,
+    brief: v.briefDescription ?? v.description.split("\n")[0] ?? "",
+    description: v.description,
+    example: v.example,
+    defaultValue: v.defaultValue,
+  }));
+}
+
+/**
+ * Introspect the full command tree.
+ * Returns all visible routes with all flags included, plus the top-level
+ * environment variables recognized by the CLI.
+ */
+export function introspectAllCommands(): {
+  routes: RouteInfo[];
+  envVars: HelpEnvVarInfo[];
+} {
   const routeMap = routes as unknown as RouteMap;
-  return { routes: extractAllRoutes(routeMap) };
+  return {
+    routes: extractAllRoutes(routeMap),
+    envVars: buildTopLevelEnvVars(),
+  };
 }
 
 /**
@@ -341,9 +412,20 @@ export function formatHelpHuman(data: HelpJsonResult): string {
     return `Error: ${data.error}`;
   }
 
-  // Full tree without banner (shouldn't happen in practice)
+  // Full tree without banner (shouldn't happen in practice — the help
+  // command always attaches one). Keep the envVars in sync anyway.
   if ("routes" in data) {
-    return data.routes.map(formatGroupHuman).join("\n\n");
+    const routesText = data.routes.map(formatGroupHuman).join("\n\n");
+    if ("envVars" in data && data.envVars.length > 0) {
+      const lines = [
+        routesText,
+        "",
+        "Environment Variables:",
+        ...data.envVars.map((v) => `  ${v.name} — ${v.brief}`),
+      ];
+      return lines.join("\n");
+    }
+    return routesText;
   }
 
   return "";
