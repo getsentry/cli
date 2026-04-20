@@ -32,7 +32,6 @@ import {
   resolveDashboardId,
   resolveOrgFromTarget,
   resolveWidgetIndex,
-  validateGroupByRequiresLimit,
   validateSortReferencesAggregate,
   validateWidgetEnums,
   type WidgetQueryFlags,
@@ -128,25 +127,16 @@ function validateEnumsAndAggregates(
 
 
 /**
- * Validate group-by+limit and sort constraints on the effective (merged) widget state.
- * Only runs when the user changes query, group-by, or sort — not when preserving
+ * Validate sort constraints on the effective (merged) widget state.
+ * Only runs when the user changes sort — not when preserving
  * existing widget state which may predate these validations.
  */
 function validateQueryConstraints(
   flags: EditFlags,
   existing: DashboardWidget,
   mergedQueries: DashboardWidgetQuery[] | undefined,
-  limit: number | null | undefined
+  _limit: number | null | undefined
 ): void {
-  // Only validate when user explicitly passes --group-by, not when merely
-  // changing --query on an existing grouped widget (which may have auto-defaulted
-  // columns like ["issue"] with no limit)
-  if (flags["group-by"]) {
-    const columns =
-      mergedQueries?.[0]?.columns ?? existing.queries?.[0]?.columns ?? [];
-    validateGroupByRequiresLimit(columns, limit ?? undefined);
-  }
-
   // Only validate sort when user explicitly passes --sort, not when merely
   // changing --query (which may leave the existing auto-defaulted sort stale)
   if (flags.sort) {
@@ -160,13 +150,26 @@ function validateQueryConstraints(
   }
 }
 
+/** Default limit for grouped widgets (matches the Sentry UI default) */
+const DEFAULT_GROUP_BY_LIMIT = 5;
+
 /** Build the replacement widget object by merging flags over existing */
 function buildReplacement(
   flags: EditFlags,
   existing: DashboardWidget
 ): DashboardWidget {
   const mergedQueries = mergeQueries(flags, existing.queries?.[0]);
-  const limit = flags.limit !== undefined ? flags.limit : existing.limit;
+  let limit = flags.limit !== undefined ? flags.limit : existing.limit;
+
+  // Auto-default limit when --group-by is added and neither the flag nor the
+  // existing widget provides one.
+  if (flags["group-by"] && (limit === undefined || limit === null)) {
+    const columns =
+      mergedQueries?.[0]?.columns ?? existing.queries?.[0]?.columns ?? [];
+    if (columns.length > 0) {
+      limit = DEFAULT_GROUP_BY_LIMIT;
+    }
+  }
 
   validateEnumsAndAggregates(flags, existing, mergedQueries);
   validateQueryConstraints(flags, existing, mergedQueries, limit);

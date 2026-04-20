@@ -360,6 +360,9 @@ export function validateGroupByRequiresLimit(
 
 const log = logger.withTag("dashboard");
 
+/** Default limit for grouped widgets (matches the Sentry UI default) */
+const DEFAULT_GROUP_BY_LIMIT = 5;
+
 /**
  * Known aggregatable fields for the spans dataset.
  *
@@ -473,11 +476,17 @@ export function buildWidgetFromFlags(opts: {
     orderby = `-${aggregates[0]}`;
   }
 
-  // Only validate when user explicitly passes --group-by, not for auto-defaulted columns
-  // (e.g., issue dataset auto-defaults columns to ["issue"] for table display)
-  if (opts.groupBy) {
-    validateGroupByRequiresLimit(columns, opts.limit);
+  // Auto-default limit to 5 when --group-by is used without --limit.
+  // The Sentry API rejects grouped widgets without a limit, and 5 matches
+  // the Sentry UI default for grouped widgets.
+  let limit = opts.limit;
+  if (opts.groupBy && opts.groupBy.length > 0 && limit === undefined) {
+    limit = DEFAULT_GROUP_BY_LIMIT;
+    log.info(
+      `Auto-defaulting --limit to ${DEFAULT_GROUP_BY_LIMIT} for grouped widget. Use --limit to override.`
+    );
   }
+
   if (orderby) {
     validateSortReferencesAggregate(orderby, aggregates);
   }
@@ -495,7 +504,7 @@ export function buildWidgetFromFlags(opts: {
         name: "",
       },
     ],
-    ...(opts.limit !== undefined && { limit: opts.limit }),
+    ...(limit !== undefined && { limit }),
   };
   return prepareWidgetQueries(parseWidgetInput(raw));
 }
