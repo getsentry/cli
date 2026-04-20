@@ -1,0 +1,219 @@
+/**
+ * Shared constants for the `scan` module.
+ *
+ * These values are deliberately policy-free defaults for a general-purpose
+ * scanner. Callers that need stricter DSN-style filtering should spread
+ * `DSN_ADDITIONAL_SKIP_DIRS` into their `alwaysSkipDirs` option.
+ *
+ * Single source of truth: `src/lib/dsn/code-scanner.ts` previously owned
+ * `TEXT_EXTENSIONS`, `MAX_FILE_SIZE`, `CONCURRENCY_LIMIT`, `normalizePath`,
+ * and `isMonorepoPackageDir`. Once PR 3 lands, `code-scanner.ts` re-imports
+ * from here instead of duplicating.
+ */
+
+import { availableParallelism } from "node:os";
+import path from "node:path";
+// Re-exported below so scan callers don't have to reach into `dsn/`.
+import { MONOREPO_ROOTS as DSN_MONOREPO_ROOTS } from "../dsn/types.js";
+
+/**
+ * File extensions the walker classifies as text without running the
+ * 8 KB NUL-byte sniff. Files with extensions outside this set fall
+ * through to `readHeadAndSniff()` which inspects the first 8 KB.
+ *
+ * Lifted verbatim from `src/lib/dsn/code-scanner.ts` so that PR 3 can
+ * swap the DSN scanner over to this module with no behavior change.
+ */
+export const TEXT_EXTENSIONS: ReadonlySet<string> = new Set([
+  // JavaScript/TypeScript ecosystem
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".astro",
+  ".vue",
+  ".svelte",
+  // Python
+  ".py",
+  // Go
+  ".go",
+  // Ruby
+  ".rb",
+  ".erb",
+  // PHP
+  ".php",
+  // JVM languages
+  ".java",
+  ".kt",
+  ".kts",
+  ".scala",
+  ".groovy",
+  // .NET languages
+  ".cs",
+  ".fs",
+  ".vb",
+  // Rust
+  ".rs",
+  // Swift/Objective-C
+  ".swift",
+  ".m",
+  ".mm",
+  // Dart/Flutter
+  ".dart",
+  // Elixir/Erlang
+  ".ex",
+  ".exs",
+  ".erl",
+  // Lua
+  ".lua",
+  // Config/data formats
+  ".json",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".xml",
+  ".properties",
+  ".config",
+]);
+
+/**
+ * Default directories the walker always skips, independent of any user
+ * `.gitignore`. Limited to VCS + common build outputs — explicitly NOT
+ * including test / fixture / IDE dirs, because a general-purpose scanner
+ * has no business skipping those. Callers like the DSN detector, which
+ * have stricter policy, combine this list with `DSN_ADDITIONAL_SKIP_DIRS`.
+ */
+export const DEFAULT_SKIP_DIRS: readonly string[] = [
+  // Version control
+  ".git",
+  ".hg",
+  ".svn",
+  // Node / JS
+  "node_modules",
+  // Python
+  "__pycache__",
+  "venv",
+  ".venv",
+  // General build outputs
+  "dist",
+  "build",
+  "target",
+  ".next",
+  ".nuxt",
+  ".output",
+  // Go / Ruby / Gradle
+  "vendor",
+  ".gradle",
+  ".bundle",
+  // Coverage + caches
+  "coverage",
+  ".cache",
+  ".turbo",
+];
+
+/**
+ * DSN-specific extras that the DSN scanner needs on top of `DEFAULT_SKIP_DIRS`.
+ * These are listed separately because a general grep caller shouldn't skip
+ * `test/` / `fixtures/` (users search inside tests all the time), but the
+ * DSN scanner does (to avoid picking up fixture DSNs).
+ */
+export const DSN_ADDITIONAL_SKIP_DIRS: readonly string[] = [
+  // IDE / editor
+  ".idea",
+  ".vscode",
+  ".cursor",
+  // Test directories with fixture DSNs
+  "test",
+  "tests",
+  "__mocks__",
+  "fixtures",
+  "__fixtures__",
+  // Python cache dirs the generic list doesn't cover
+  ".pytest_cache",
+  ".mypy_cache",
+  ".ruff_cache",
+  // Alt build output name
+  "out",
+];
+
+/**
+ * Skip files larger than this during walks. 256 KB covers source files
+ * comfortably while keeping single-file `readText` within budget.
+ *
+ * Callers that need to accept larger files can override via
+ * `WalkOptions.maxFileSize`.
+ */
+export const MAX_FILE_SIZE = 256 * 1024;
+
+/**
+ * Concurrency ceiling for per-file work outside the walker itself
+ * (binary sniffing, content reading, regex matching via
+ * `mapFilesConcurrent`). The walker itself is a sequential generator;
+ * this bounds the parallel fan-out of its consumers.
+ *
+ * Data-driven default: on PR 3.5's benchmark sweep (see
+ * `script/bench-sweep.ts`) the synthetic/large fixture's
+ * `scan.grepFiles` op had its p50 knee at exactly
+ * `availableParallelism` — 4 on a 4-core box, with conc=1 taking ~1.5×
+ * as long and conc=8+ flat-lining at ~10% worse than the knee. Above
+ * CPU count, extra concurrency adds scheduling overhead without more
+ * useful work; the main thread can only serialize so many regex
+ * callbacks per event loop turn.
+ *
+ * The floor of 2 protects single-core systems where
+ * `availableParallelism()` would return 1 (serial execution is ~1.5×
+ * slower on large scans — giving two in flight lets us overlap read
+ * I/O with the regex pass on the previous file).
+ *
+ * No cap: users with high-core boxes presumably have matching I/O.
+ * The old hardcoded value `50` was inherited from the pre-PR-3 DSN
+ * scanner with no measurement; on this bench it produced a p50
+ * ~8% worse than `availableParallelism`.
+ *
+ * Callers can override per-call via `WalkOptions.concurrency` /
+ * `GrepOptions.concurrency` for one-off tuning.
+ */
+export const CONCURRENCY_LIMIT = Math.max(2, availableParallelism());
+
+/**
+ * Byte length read from the head of a file to classify binary-ness.
+ * Standard NUL-byte heuristic used by rg, git, grep, and file(1).
+ */
+export const BINARY_SNIFF_BYTES = 8192;
+
+/**
+ * Re-export MONOREPO_ROOTS so downstream scan-module consumers don't have
+ * to cross into the `dsn/` package.
+ */
+export const MONOREPO_ROOTS = DSN_MONOREPO_ROOTS;
+
+/**
+ * Normalize path separators to forward slashes. No-op on POSIX,
+ * `\\` → `/` on Windows. Required for:
+ *   1. The `ignore` package (which expects forward slashes)
+ *   2. Monorepo-boundary detection (splits on "/")
+ *   3. Consistent relativePath values on `WalkEntry`
+ */
+export const normalizePath: (p: string) => string =
+  path.sep === path.posix.sep
+    ? (x) => x
+    : (x) => x.replaceAll(path.sep, path.posix.sep);
+
+/**
+ * True if `relativePath` names a monorepo package directory — exactly
+ * two segments where the first is one of `MONOREPO_ROOTS`
+ * (e.g., "packages/frontend", "apps/server").
+ *
+ * Not used by the core walker (which is policy-free), but exported for
+ * consumers like the DSN scanner that want to reset their depth counter
+ * at package boundaries.
+ */
+export function isMonorepoPackageDir(relativePath: string): boolean {
+  const segments = relativePath.split("/");
+  return (
+    segments.length === 2 &&
+    MONOREPO_ROOTS.includes(segments[0] as (typeof MONOREPO_ROOTS)[number])
+  );
+}

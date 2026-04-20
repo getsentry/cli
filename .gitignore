@@ -20,6 +20,9 @@ coverage-isolated
 *.junit.xml
 test/skill-eval/results.json
 
+# local bench baselines — machine-specific, not for version control
+.bench/
+
 # logs
 logs
 _.log

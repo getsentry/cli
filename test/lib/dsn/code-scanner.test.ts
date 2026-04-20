@@ -573,5 +573,33 @@ describe("Code Scanner", () => {
         chmodSync(filePath, 0o644);
       }
     });
+
+    test("dirMtimes is populated for every visited directory", async () => {
+      // PR 3 migrated the walker; dirMtimes comes from the
+      // `onDirectoryVisit` hook. This pins the invariant the cache
+      // verifier (`src/lib/db/dsn-cache.ts::validateDirMtime`) silently
+      // depends on — every directory entered by the walker must have
+      // a finite integer mtime in the result. Previously asserted by
+      // nothing; now explicit.
+      mkdirSync(join(testDir, "src", "lib", "deep"), { recursive: true });
+      writeFileSync(join(testDir, "src/a.ts"), "// no dsn");
+      writeFileSync(join(testDir, "src/lib/b.ts"), "// no dsn");
+      writeFileSync(join(testDir, "src/lib/deep/c.ts"), "// no dsn");
+
+      const result = await scanCodeForDsns(testDir);
+      // Keys are POSIX-normalized relative paths; "." for cwd.
+      const keys = Object.keys(result.dirMtimes).sort();
+      expect(keys).toContain(".");
+      expect(keys).toContain("src");
+      expect(keys).toContain("src/lib");
+      expect(keys).toContain("src/lib/deep");
+      // Values are floored integers matching the cache verifier's math.
+      for (const [dir, mtime] of Object.entries(result.dirMtimes)) {
+        expect(Number.isInteger(mtime)).toBe(true);
+        expect(mtime).toBeGreaterThan(0);
+        // Sanity: key should never be an absolute path.
+        expect(dir.startsWith("/")).toBe(false);
+      }
+    });
   });
 });
