@@ -27,6 +27,7 @@ import { join } from "node:path";
 import CachePolicy from "http-cache-semantics";
 import pLimit from "p-limit";
 
+import { getIdentityFingerprint } from "./db/auth.js";
 import { getConfigDir } from "./db/index.js";
 import { getEnv } from "./env.js";
 import { recordCacheHit, withCacheSpan } from "./telemetry.js";
@@ -108,20 +109,33 @@ export function classifyUrl(url: string): TtlTier {
 // ---------------------------------------------------------------------------
 
 /**
- * Build a deterministic cache key from an HTTP method and URL.
+ * Build a deterministic cache key from the active identity, HTTP method,
+ * and URL.
  *
- * Query parameters are sorted alphabetically so that `?a=1&b=2` and `?b=2&a=1`
- * produce the same key. The key is then SHA-256 hashed to produce a fixed-length
- * filename-safe string.
+ * Query parameters are sorted alphabetically so that `?a=1&b=2` and
+ * `?b=2&a=1` produce the same key. The identity fingerprint scopes the
+ * key to the current bearer token (see
+ * {@link "./db/auth.js".getIdentityFingerprint}) so that switching
+ * accounts — env-token swap, `auth login`, `auth logout` — uses a
+ * fresh cache slot instead of serving another user's data. The final
+ * string is SHA-256 hashed to produce a fixed-length filename-safe
+ * identifier.
  *
+ * @param identity - Opaque identity fingerprint (e.g. from
+ *   `getIdentityFingerprint()`). Pass {@link "./db/auth.js".ANON_IDENTITY}
+ *   when no token is active.
  * @param method - HTTP method (e.g., "GET")
  * @param url - Full URL string
  * @returns Hex-encoded SHA-256 hash suitable for use as a filename
  * @internal Exported for testing
  */
-export function buildCacheKey(method: string, url: string): string {
+export function buildCacheKey(
+  identity: string,
+  method: string,
+  url: string
+): string {
   const normalized = normalizeUrl(method, url);
-  return createHash("sha256").update(normalized).digest("hex");
+  return createHash("sha256").update(`${identity}|${normalized}`).digest("hex");
 }
 
 /**
@@ -388,7 +402,7 @@ export async function getCachedResponse(
 
   let key: string;
   try {
-    key = buildCacheKey(method, url);
+    key = buildCacheKey(getIdentityFingerprint(), method, url);
   } catch {
     // Malformed URL (e.g., self-hosted with bad base URL) — skip cache lookup.
     // The request will proceed without caching; fetch() itself will surface
@@ -500,7 +514,7 @@ export async function storeCachedResponse(
 
   let key: string;
   try {
-    key = buildCacheKey(method, url);
+    key = buildCacheKey(getIdentityFingerprint(), method, url);
   } catch {
     // Malformed URL — skip caching this response
     return;
@@ -602,11 +616,68 @@ async function writeResponseToCache(
  */
 export async function invalidateCachedResponse(url: string): Promise<void> {
   try {
-    const key = buildCacheKey("GET", url);
+    const key = buildCacheKey(getIdentityFingerprint(), "GET", url);
     await rm(cacheFilePath(key), { force: true });
   } catch {
     // Best-effort — ignore if file doesn't exist or can't be deleted
   }
+}
+
+/**
+ * Invalidate every cached GET whose URL starts with the given prefix.
+ *
+ * Lets mutation commands flush downstream list/detail endpoints at once
+ * without having to enumerate every paginated variant. The filter runs
+ * against the `url` field stored inside each cache entry so ordering of
+ * query parameters is irrelevant (the cache file name is a hash).
+ *
+ * Only entries belonging to the current identity can ever match — the
+ * cache key already incorporates the identity fingerprint, so entries
+ * for other accounts live under completely different filenames.
+ *
+ * Best-effort: individual file failures are swallowed. The mutation
+ * succeeded; a stale cache entry is strictly preferable to surfacing a
+ * filesystem error to the user.
+ *
+ * @param prefix - Full-URL prefix (e.g.
+ *   `"https://us.sentry.io/api/0/organizations/acme/projects/"`).
+ *   Exact-matching `invalidateCachedResponse` is preferred when the
+ *   caller can construct the precise URL.
+ */
+export async function invalidateCachedResponsesMatching(
+  prefix: string
+): Promise<void> {
+  const cacheDir = getCacheDir();
+  let files: string[];
+  try {
+    files = await readdir(cacheDir);
+  } catch (error) {
+    if (isNotFound(error)) {
+      return;
+    }
+    // Unknown read error — best-effort: skip
+    return;
+  }
+
+  const jsonFiles = files.filter((f) => f.endsWith(".json"));
+  if (jsonFiles.length === 0) {
+    return;
+  }
+
+  await cacheIO.map(jsonFiles, async (file) => {
+    const filePath = join(cacheDir, file);
+    try {
+      const raw = await readFile(filePath, "utf-8");
+      const entry = JSON.parse(raw) as CacheEntry;
+      if (entry.url?.startsWith(prefix)) {
+        await unlink(filePath).catch(() => {
+          // Best-effort: another process may have deleted it
+        });
+      }
+    } catch {
+      // Unparseable or missing — leave to cleanup
+    }
+  });
 }
 
 /**

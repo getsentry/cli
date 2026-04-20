@@ -12,6 +12,10 @@ import type { SentryIssue } from "../../types/index.js";
 import { applyCustomHeaders } from "../custom-headers.js";
 import { ApiError, ValidationError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
+import {
+  invalidateCachedResponse,
+  invalidateCachedResponsesMatching,
+} from "../response-cache.js";
 
 import {
   API_MAX_PER_PAGE,
@@ -554,6 +558,7 @@ export async function updateIssueStatus(
   if (options?.statusDetails) {
     body.statusDetails = options.statusDetails;
   }
+
   if (options?.orgSlug) {
     // Region-aware org-scoped endpoint — preferred when org is known.
     const regionUrl = await resolveOrgRegion(options.orgSlug);
@@ -562,13 +567,29 @@ export async function updateIssueStatus(
       `/organizations/${encodeURIComponent(options.orgSlug)}/issues/${encodeURIComponent(issueId)}/`,
       { method: "PUT", body }
     );
+    await invalidateIssueCaches(regionUrl, options.orgSlug, issueId);
     return data;
   }
+
   // Legacy global endpoint — works without org but not region-aware.
-  return apiRequest<SentryIssue>(`/issues/${encodeURIComponent(issueId)}/`, {
-    method: "PUT",
-    body,
-  });
+  const legacyData = await apiRequest<SentryIssue>(
+    `/issues/${encodeURIComponent(issueId)}/`,
+    { method: "PUT", body }
+  );
+  // Without an org slug we don't know the region, so we can only flush
+  // the legacy issue-detail URL. Region-scoped lists still age out via
+  // their TTL. Callers that know the org should pass it to enable the
+  // broader org-scoped invalidation above.
+  try {
+    const { getApiBaseUrl } = await import("../sentry-client.js");
+    const base = stripTrailingSlashLocal(getApiBaseUrl());
+    await invalidateCachedResponse(
+      `${base}/api/0/issues/${encodeURIComponent(issueId)}/`
+    );
+  } catch {
+    // Non-fatal — the mutation already succeeded.
+  }
+  return legacyData;
 }
 
 /** Result of a successful issue-merge operation. */
@@ -612,6 +633,17 @@ export async function mergeIssues(
       method: "PUT",
       body: { merge: 1 },
     });
+    // Flush cached detail + list entries for every affected group ID so
+    // downstream reads (`issue view`, `issue list`) see the merge
+    // result immediately. Children disappear into the parent so they
+    // need invalidation too.
+    const affectedIds = [data.merge.parent, ...data.merge.children];
+    await Promise.all(
+      affectedIds.map((id) => invalidateIssueCaches(regionUrl, orgSlug, id))
+    );
+    // Also flush the org-wide issue list endpoint since merges change
+    // which groups appear in paginated results.
+    await invalidateOrgIssueList(regionUrl, orgSlug);
     return data.merge;
   } catch (error) {
     // The bulk-mutate endpoint returns 204 when no matching issues are
@@ -670,4 +702,54 @@ export async function getSharedIssue(
   }
 
   return (await response.json()) as { groupID: string };
+}
+
+/** Strip a trailing slash from a base URL for clean `/api/0/...` composition. */
+function stripTrailingSlashLocal(url: string): string {
+  return url.endsWith("/") ? url.slice(0, -1) : url;
+}
+
+/**
+ * Invalidate cached responses affected by a single-issue mutation.
+ *
+ * Covers both the org-scoped and legacy issue detail endpoints and the
+ * paginated issue-list family for the org, so that `issue view` /
+ * `issue list` surface the mutation instead of a pre-mutation snapshot.
+ *
+ * Best-effort: failures are swallowed inside the helper — the mutation
+ * has already succeeded and a stale cache entry is strictly better than
+ * surfacing a filesystem error to the user.
+ */
+async function invalidateIssueCaches(
+  regionUrl: string,
+  orgSlug: string,
+  issueId: string
+): Promise<void> {
+  const base = stripTrailingSlashLocal(regionUrl);
+  const encodedOrg = encodeURIComponent(orgSlug);
+  const encodedId = encodeURIComponent(issueId);
+  await Promise.all([
+    invalidateCachedResponse(
+      `${base}/api/0/organizations/${encodedOrg}/issues/${encodedId}/`
+    ),
+    invalidateCachedResponse(`${base}/api/0/issues/${encodedId}/`),
+    invalidateOrgIssueList(regionUrl, orgSlug),
+  ]);
+}
+
+/**
+ * Invalidate the org-wide issue list endpoint (all paginated variants).
+ *
+ * The list endpoint is keyed by query string (sort, cursor, query,
+ * statsPeriod, ...) so we have to do a prefix sweep rather than a
+ * single URL invalidation.
+ */
+async function invalidateOrgIssueList(
+  regionUrl: string,
+  orgSlug: string
+): Promise<void> {
+  const base = stripTrailingSlashLocal(regionUrl);
+  await invalidateCachedResponsesMatching(
+    `${base}/api/0/organizations/${encodeURIComponent(orgSlug)}/issues/`
+  );
 }

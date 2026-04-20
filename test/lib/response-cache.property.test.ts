@@ -66,10 +66,12 @@ const sentryUrlArb = tuple(
 // ---------------------------------------------------------------------------
 
 describe("property: buildCacheKey", () => {
+  const TEST_IDENTITY = "anon";
+
   test("produces a 64-char hex string (SHA-256)", () => {
     fcAssert(
       property(methodArb, sentryUrlArb, (method, url) => {
-        const key = buildCacheKey(method, url);
+        const key = buildCacheKey(TEST_IDENTITY, method, url);
         expect(key).toMatch(/^[0-9a-f]{64}$/);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -79,8 +81,8 @@ describe("property: buildCacheKey", () => {
   test("is deterministic — same inputs produce same key", () => {
     fcAssert(
       property(methodArb, sentryUrlArb, (method, url) => {
-        const key1 = buildCacheKey(method, url);
-        const key2 = buildCacheKey(method, url);
+        const key1 = buildCacheKey(TEST_IDENTITY, method, url);
+        const key2 = buildCacheKey(TEST_IDENTITY, method, url);
         expect(key1).toBe(key2);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -90,9 +92,22 @@ describe("property: buildCacheKey", () => {
   test("different methods produce different keys for same URL", () => {
     fcAssert(
       property(sentryUrlArb, (url) => {
-        const getKey = buildCacheKey("GET", url);
-        const postKey = buildCacheKey("POST", url);
+        const getKey = buildCacheKey(TEST_IDENTITY, "GET", url);
+        const postKey = buildCacheKey(TEST_IDENTITY, "POST", url);
         expect(getKey).not.toBe(postKey);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("different identities produce different keys for same method + URL", () => {
+    // Core invariant of identity-scoped caching — two users/tokens
+    // running the same command against the same URL must never collide.
+    fcAssert(
+      property(methodArb, sentryUrlArb, (method, url) => {
+        const aliceKey = buildCacheKey("alice-fp", method, url);
+        const bobKey = buildCacheKey("bob-fp", method, url);
+        expect(aliceKey).not.toBe(bobKey);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -106,8 +121,8 @@ describe("property: buildCacheKey", () => {
         (base, path) => {
           const url1 = `${base}/api/0/${path}?a=1&b=2&c=3`;
           const url2 = `${base}/api/0/${path}?c=3&a=1&b=2`;
-          const key1 = buildCacheKey("GET", url1);
-          const key2 = buildCacheKey("GET", url2);
+          const key1 = buildCacheKey(TEST_IDENTITY, "GET", url1);
+          const key2 = buildCacheKey(TEST_IDENTITY, "GET", url2);
           expect(key1).toBe(key2);
         }
       ),
@@ -118,8 +133,8 @@ describe("property: buildCacheKey", () => {
   test("method comparison is case-insensitive", () => {
     fcAssert(
       property(sentryUrlArb, (url) => {
-        const key1 = buildCacheKey("get", url);
-        const key2 = buildCacheKey("GET", url);
+        const key1 = buildCacheKey(TEST_IDENTITY, "get", url);
+        const key2 = buildCacheKey(TEST_IDENTITY, "GET", url);
         expect(key1).toBe(key2);
       }),
       { numRuns: DEFAULT_NUM_RUNS }

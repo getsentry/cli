@@ -371,20 +371,38 @@ describe("normalizeUrl", () => {
 
 describe("buildCacheKey", () => {
   test("produces a 64-char hex string", () => {
-    const key = buildCacheKey("GET", TEST_URL);
+    const key = buildCacheKey("anon", "GET", TEST_URL);
     expect(key).toMatch(/^[0-9a-f]{64}$/);
   });
 
   test("is deterministic", () => {
-    const key1 = buildCacheKey("GET", TEST_URL);
-    const key2 = buildCacheKey("GET", TEST_URL);
+    const key1 = buildCacheKey("anon", "GET", TEST_URL);
+    const key2 = buildCacheKey("anon", "GET", TEST_URL);
     expect(key1).toBe(key2);
   });
 
   test("different methods produce different keys", () => {
-    const getKey = buildCacheKey("GET", TEST_URL);
-    const postKey = buildCacheKey("POST", TEST_URL);
+    const getKey = buildCacheKey("anon", "GET", TEST_URL);
+    const postKey = buildCacheKey("anon", "POST", TEST_URL);
     expect(getKey).not.toBe(postKey);
+  });
+
+  test("different identities produce different keys for the same URL", () => {
+    // The core invariant of the identity-scoped cache: switching accounts
+    // must route reads/writes through a different namespace so users
+    // never see each other's cached data.
+    const aliceKey = buildCacheKey("alice-fingerprint", "GET", TEST_URL);
+    const bobKey = buildCacheKey("bob-fingerprint", "GET", TEST_URL);
+    expect(aliceKey).not.toBe(bobKey);
+  });
+
+  test("anonymous callers share a namespace across invocations", () => {
+    // Logged-out CLIs (no token, no env var) all share the `anon`
+    // namespace, which matches the pre-identity-scoping behavior and
+    // keeps things obvious in the cache directory layout.
+    const key1 = buildCacheKey("anon", "GET", TEST_URL);
+    const key2 = buildCacheKey("anon", "GET", TEST_URL);
+    expect(key1).toBe(key2);
   });
 });
 

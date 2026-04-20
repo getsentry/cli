@@ -2,8 +2,8 @@
  * Authentication credential storage (single-row table pattern).
  */
 
+import { createHash } from "node:crypto";
 import { getEnv } from "../env.js";
-import { clearResponseCache } from "../response-cache.js";
 import { withDbSpan } from "../telemetry.js";
 import { getDatabase } from "./index.js";
 import { clearAllIssueOrgCache } from "./issue-org-cache.js";
@@ -236,9 +236,13 @@ export async function clearAuth(): Promise<void> {
     clearAllIssueOrgCache();
   });
 
-  // Clear cached API responses — they are tied to the current user's permissions.
-  // Awaited so cache is fully removed before the process exits.
+  // Clear cached API responses — they are tied to the current user's
+  // permissions. Awaited so cache is fully removed before the process exits.
+  // Dynamic import breaks a potential circular dependency: response-cache
+  // now imports identity helpers from this module to namespace cache keys
+  // per identity (see `getIdentityFingerprint`).
   try {
+    const { clearResponseCache } = await import("../response-cache.js");
     await clearResponseCache();
   } catch {
     // Non-fatal: cache directory may not exist yet
@@ -248,6 +252,102 @@ export async function clearAuth(): Promise<void> {
 export function isAuthenticated(): boolean {
   const token = getAuthToken();
   return !!token;
+}
+
+/**
+ * Fingerprint returned when no token is present (logged out, no env var).
+ *
+ * Keeps cache-key generation total without coupling response-cache to
+ * undefined handling: anonymous callers still share a namespace across
+ * invocations, which matches the pre-identity-scoped behavior.
+ */
+export const ANON_IDENTITY = "anon";
+
+/** Length of the hex-encoded identity fingerprint. 16 hex chars = 64 bits. */
+const IDENTITY_FINGERPRINT_LEN = 16;
+
+/**
+ * Compute a stable, opaque fingerprint of the active bearer identity.
+ *
+ * The fingerprint namespaces every response-cache key (see
+ * {@link ../response-cache.js}) so that cached data belongs to exactly
+ * one identity. Switching accounts — by swapping `SENTRY_AUTH_TOKEN`,
+ * running `auth login` to replace the stored OAuth session, or logging
+ * out — produces a different fingerprint and therefore an empty cache
+ * slot, fixing the stale-`whoami`-after-login class of bugs reported
+ * in getsentry/cli#785 without requiring every mutation to call
+ * `invalidateCachedResponse` manually.
+ *
+ * Fingerprint sources, in order of precedence (mirrors `getAuthConfig`):
+ *
+ * - **OAuth**: hash the stored `refresh_token`. This is intentionally
+ *   distinct from the hourly-rotating access token — using the refresh
+ *   token keeps the cache hot across normal token refreshes, and only
+ *   invalidates it on an actual `auth login`/`auth logout`.
+ * - **Env token**: hash the raw `SENTRY_AUTH_TOKEN` / `SENTRY_TOKEN`
+ *   value. Env tokens don't rotate, so hashing the token itself is
+ *   equivalent to hashing a stable identity.
+ * - **No token / fully anonymous**: return {@link ANON_IDENTITY}.
+ *
+ * The result is a SHA-256 hex digest truncated to 16 characters
+ * (64 bits) — enough to make collisions astronomically unlikely for a
+ * single-user CLI while keeping cache filenames short.
+ *
+ * Performance: this function runs on every HTTP request (for cache
+ * lookups), so it must stay synchronous and cheap. SHA-256 over a
+ * short token is a few hundred nanoseconds — well below the HTTP
+ * latency budget.
+ */
+export function getIdentityFingerprint(): string {
+  // Read the raw env token first: when SENTRY_FORCE_ENV_TOKEN is set,
+  // env tokens take precedence over stored OAuth and we want the
+  // fingerprint to match the token that will actually be sent.
+  const forceEnv = getEnv().SENTRY_FORCE_ENV_TOKEN?.trim();
+  if (forceEnv) {
+    const envToken = getRawEnvToken();
+    if (envToken) {
+      return hashIdentity("env", envToken);
+    }
+  }
+
+  // Otherwise prefer the OAuth refresh token when present (stable
+  // across hourly access-token rotation). Access-only rows without a
+  // refresh_token fall through to hashing the access token itself.
+  const dbRow = withDbSpan("getIdentityFingerprint", () => {
+    const db = getDatabase();
+    return db
+      .query("SELECT token, refresh_token FROM auth WHERE id = 1")
+      .get() as
+      | { token: string | null; refresh_token: string | null }
+      | undefined;
+  });
+  if (dbRow?.refresh_token) {
+    return hashIdentity("oauth", dbRow.refresh_token);
+  }
+  if (dbRow?.token) {
+    return hashIdentity("oauth-access", dbRow.token);
+  }
+
+  // Finally, fall back to the env token when no OAuth is stored.
+  const envToken = getRawEnvToken();
+  if (envToken) {
+    return hashIdentity("env", envToken);
+  }
+
+  return ANON_IDENTITY;
+}
+
+/**
+ * Build a fingerprint by hashing `kind|secret` so that rotating from
+ * e.g. env→oauth with the same secret value still produces a distinct
+ * fingerprint (defensive — the kinds shouldn't collide, but the prefix
+ * makes that guarantee explicit and costs nothing).
+ */
+function hashIdentity(kind: string, secret: string): string {
+  return createHash("sha256")
+    .update(`${kind}|${secret}`)
+    .digest("hex")
+    .slice(0, IDENTITY_FINGERPRINT_LEN);
 }
 
 /**

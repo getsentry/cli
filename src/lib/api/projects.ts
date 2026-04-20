@@ -25,6 +25,11 @@ import { cacheProjectsForOrg } from "../db/project-cache.js";
 import { getCachedOrganizations } from "../db/regions.js";
 import { type AuthGuardSuccess, withAuthGuard } from "../errors.js";
 import { logger } from "../logger.js";
+import { resolveOrgRegion } from "../region.js";
+import {
+  invalidateCachedResponse,
+  invalidateCachedResponsesMatching,
+} from "../response-cache.js";
 import { getApiBaseUrl } from "../sentry-client.js";
 import { buildProjectUrl } from "../sentry-urls.js";
 import { isAllDigits } from "../utils.js";
@@ -166,6 +171,13 @@ export async function createProject(
     body,
   });
   const data = unwrapResult(result, "Failed to create project");
+
+  // Invalidate any cached project list for this org so the next
+  // `project list` / `project view` call picks up the new project
+  // instead of serving a stale list. Best-effort — failures are
+  // silently swallowed inside the helper.
+  await invalidateOrgProjectCache(orgSlug);
+
   return data as unknown as SentryProject;
 }
 
@@ -215,6 +227,41 @@ export async function deleteProject(
     },
   });
   unwrapResult(result, "Failed to delete project");
+
+  // Flush the now-stale project GET and any cached project list for the
+  // org. Follow-up commands (`project list`, `project view`) will fetch
+  // fresh data instead of showing the just-deleted project.
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const base = stripTrailingSlash(regionUrl);
+  await Promise.all([
+    invalidateCachedResponse(
+      `${base}/api/0/projects/${encodeURIComponent(orgSlug)}/${encodeURIComponent(projectSlug)}/`
+    ),
+    invalidateCachedResponsesMatching(
+      `${base}/api/0/organizations/${encodeURIComponent(orgSlug)}/projects/`
+    ),
+  ]);
+}
+
+/** Remove the trailing slash from a region URL so we can compose /api/0/... */
+function stripTrailingSlash(url: string): string {
+  return url.endsWith("/") ? url.slice(0, -1) : url;
+}
+
+/**
+ * Invalidate every cached response whose URL belongs to the given org's
+ * project list or detail endpoints. Called after `project create` /
+ * `project delete` so downstream reads see the mutation immediately.
+ *
+ * Wraps the pattern-match invalidator to keep the call sites short and
+ * document *why* we clear these specific prefixes.
+ */
+async function invalidateOrgProjectCache(orgSlug: string): Promise<void> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const base = stripTrailingSlash(regionUrl);
+  await invalidateCachedResponsesMatching(
+    `${base}/api/0/organizations/${encodeURIComponent(orgSlug)}/projects/`
+  );
 }
 
 /** Result of searching for projects by slug across all organizations. */
