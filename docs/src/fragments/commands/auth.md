@@ -76,12 +76,14 @@ sentry auth whoami
 
 Auth tokens are stored in a SQLite database at `~/.sentry/cli.db` with restricted file permissions.
 
-## Environment Variable Precedence
+## Token Precedence
 
-The CLI checks for auth tokens in the following order, using the first one found:
+By default, the CLI checks for auth tokens in the following order:
 
-1. `SENTRY_AUTH_TOKEN` environment variable
-2. `SENTRY_TOKEN` environment variable (legacy alias)
-3. The stored OAuth token in the SQLite database
+1. The stored OAuth token in the SQLite database (from `sentry auth login`)
+2. `SENTRY_AUTH_TOKEN` environment variable
+3. `SENTRY_TOKEN` environment variable (legacy alias)
+
+The stored OAuth token takes priority because it supports automatic refresh. To override this and force environment tokens to win, set `SENTRY_FORCE_ENV_TOKEN=1`.
 
 When a token comes from an environment variable, the CLI skips expiry checks and automatic refresh.
