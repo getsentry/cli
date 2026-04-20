@@ -610,12 +610,36 @@ export function enrichDashboardError(
 }
 
 /**
+ * Common dataset synonyms that users (and AI agents) pass instead of the
+ * internal Sentry widget type names.
+ *
+ * The Sentry UI and API docs surface names like "errors" and "transactions"
+ * but widget types use "error-events" and "transaction-like".
+ */
+const DATASET_ALIASES: Record<string, string> = {
+  errors: "error-events",
+  error: "error-events",
+  transactions: "transaction-like",
+  transaction: "transaction-like",
+  metrics: "tracemetrics",
+};
+
+/**
+ * Resolve a user-provided dataset value to the canonical widget type.
+ * Returns the input unchanged if no alias matches.
+ */
+export function resolveDatasetAlias(dataset: string): string {
+  return DATASET_ALIASES[dataset] ?? dataset;
+}
+
+/**
  * Validate --display and --dataset flag values against known enums.
  *
  * @param display - Display type flag value
- * @param dataset - Dataset flag value
+ * @param dataset - Dataset flag value (aliases like "errors" are auto-resolved)
+ * @returns The resolved dataset value (may differ from input if an alias was applied)
  */
-export function validateWidgetEnums(display?: string, dataset?: string): void {
+export function validateWidgetEnums(display?: string, dataset?: string): string | undefined {
   if (
     display &&
     !DISPLAY_TYPES.includes(display as (typeof DISPLAY_TYPES)[number])
@@ -625,15 +649,15 @@ export function validateWidgetEnums(display?: string, dataset?: string): void {
       "display"
     );
   }
+  const resolved = dataset ? resolveDatasetAlias(dataset) : undefined;
   if (
-    dataset &&
-    !WIDGET_TYPES.includes(dataset as (typeof WIDGET_TYPES)[number])
+    resolved &&
+    !WIDGET_TYPES.includes(resolved as (typeof WIDGET_TYPES)[number])
   ) {
     throw new ValidationError(
       `Invalid --dataset value "${dataset}".\nValid datasets: ${WIDGET_TYPES.join(", ")}`,
       "dataset"
     );
   }
-  // The Sentry backend validates displayType and widgetType as independent enums —
-  // any valid display type is accepted with any valid dataset. No cross-validation needed.
+  return resolved;
 }
