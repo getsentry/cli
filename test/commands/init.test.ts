@@ -30,6 +30,7 @@ let capturedArgs: Record<string, unknown> | undefined;
 let runWizardSpy: ReturnType<typeof spyOn>;
 let findProjectsSpy: ReturnType<typeof spyOn>;
 let warmSpy: ReturnType<typeof spyOn>;
+let exitSpy: ReturnType<typeof spyOn>;
 
 const func = (await initCommand.loader()) as unknown as (
   this: {
@@ -76,12 +77,20 @@ beforeEach(() => {
     // biome-ignore lint/suspicious/noEmptyBlockStatements: intentional no-op mock
     () => {}
   );
+  // The init command force-exits after the wizard to release Bun's fetch
+  // keep-alive sockets (src/commands/init.ts). Tests call `func` directly,
+  // so without this stub `process.exit` would terminate the test runner
+  // mid-suite.
+  exitSpy = spyOn(process, "exit").mockImplementation((() => {
+    // intentionally no-op — see comment above
+  }) as never);
 });
 
 afterEach(() => {
   runWizardSpy.mockRestore();
   findProjectsSpy.mockRestore();
   warmSpy.mockRestore();
+  exitSpy.mockRestore();
   resetPrefetch();
 });
 
