@@ -9,6 +9,7 @@
  */
 
 import { getTraceData } from "@sentry/node-core/light";
+import { maybeWarnEnvTokenIgnored } from "./auth-hint.js";
 import {
   DEFAULT_SENTRY_URL,
   getConfiguredSentryUrl,
@@ -361,6 +362,13 @@ function createAuthenticatedFetch(): (
     input: Request | string | URL,
     init?: RequestInit
   ): Promise<Response> {
+    // Once-per-process hint when env-var auth token is shadowed by a
+    // stored OAuth login. Runs here (rather than at command entry) so
+    // the hint only fires for commands that actually exercise auth —
+    // `sentry help` and similar local-only commands stay quiet.
+    // Internally rate-limited and cheap on repeat calls.
+    maybeWarnEnvTokenIgnored();
+
     const method =
       init?.method ?? (input instanceof Request ? input.method : "GET");
     const urlPath = extractUrlPath(input);
