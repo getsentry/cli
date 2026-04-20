@@ -216,7 +216,7 @@ export const initCommand = buildCommand<
         kind: "parsed",
         parse: String,
         brief:
-          "Features to enable: errors,tracing,logs,replay,metrics,profiling,sourcemaps,crons,ai-monitoring,user-feedback",
+          "Features to enable: errors,tracing,logs,replay,profiling,ai-monitoring,user-feedback",
         variadic: true,
         optional: true,
       },
