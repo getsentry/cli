@@ -32,7 +32,7 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
   {
     name: "SENTRY_AUTH_TOKEN",
     description:
-      "Authentication token for the Sentry API. This is the primary way to authenticate in CI/CD pipelines and scripts where interactive login is not possible.\n\nYou can create auth tokens in your [Sentry account settings](https://sentry.io/settings/account/api/auth-tokens/). When set, this takes precedence over any stored OAuth token from `sentry auth login`.",
+      "Authentication token for the Sentry API. This is the primary way to authenticate in CI/CD pipelines and scripts where interactive login is not possible.\n\nYou can create auth tokens in your [Sentry account settings](https://sentry.io/settings/account/api/auth-tokens/). By default, a stored OAuth token from `sentry auth login` takes priority over this variable. Set `SENTRY_FORCE_ENV_TOKEN=1` to give environment tokens precedence instead.",
     example: "sntrys_YOUR_TOKEN_HERE",
   },
   {
