@@ -204,8 +204,10 @@ export const addCommand = buildCommand({
 
     const { dashboardArgs, title } = parseAddPositionalArgs(args);
 
-    // Validate enums before any network calls (fail fast)
-    validateWidgetEnums(flags.display, flags.dataset);
+    // Validate enums before any network calls (fail fast).
+    // resolvedDataset may differ from flags.dataset when an alias is applied
+    // (e.g., "errors" → "error-events").
+    const resolvedDataset = validateWidgetEnums(flags.display, flags.dataset);
 
     const { dashboardRef, targetArg } =
       parseDashboardPositionalArgs(dashboardArgs);
@@ -220,7 +222,7 @@ export const addCommand = buildCommand({
     let newWidget = buildWidgetFromFlags({
       title,
       display: flags.display,
-      dataset: flags.dataset,
+      dataset: resolvedDataset,
       query: flags.query,
       where: flags.where,
       groupBy: flags["group-by"],

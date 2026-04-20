@@ -612,13 +612,27 @@ export function getCompletionPath(
   }
 }
 
+/** EPERM/EACCES/ENOTDIR — permission or path structure issues */
+function isPermissionError(err: unknown): boolean {
+  if (!(err instanceof Error)) {
+    return false;
+  }
+  const code = (err as NodeJS.ErrnoException).code;
+  return code === "EPERM" || code === "EACCES" || code === "ENOTDIR";
+}
+
 /**
  * Install completion script for a shell type.
+ *
+ * Returns `null` when the shell is unsupported or when the target directory
+ * cannot be written to (EPERM/EACCES/ENOTDIR). Permission errors are common
+ * when Homebrew runs post-install hooks or when `~/.local/share` is owned
+ * by root from a previous `sudo brew install`.
  *
  * @param shellType - The shell type
  * @param homeDir - User's home directory
  * @param xdgDataHome - XDG_DATA_HOME or undefined for default
- * @returns Location info if installed, null if shell not supported
+ * @returns Location info if installed, null if shell not supported or path not writable
  */
 export async function installCompletions(
   shellType: ShellType,
@@ -635,17 +649,23 @@ export async function installCompletions(
     return null;
   }
 
-  // Create directory if needed
-  const dir = dirname(path);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true, mode: 0o755 });
+  try {
+    const dir = dirname(path);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true, mode: 0o755 });
+    }
+
+    const alreadyExists = existsSync(path);
+    await Bun.write(path, script);
+
+    return {
+      path,
+      created: !alreadyExists,
+    };
+  } catch (err) {
+    if (isPermissionError(err)) {
+      return null;
+    }
+    throw err;
   }
-
-  const alreadyExists = existsSync(path);
-  await Bun.write(path, script);
-
-  return {
-    path,
-    created: !alreadyExists,
-  };
 }
