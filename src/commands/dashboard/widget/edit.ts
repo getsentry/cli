@@ -126,6 +126,7 @@ function validateEnumsAndAggregates(
   }
 }
 
+
 /**
  * Validate group-by+limit and sort constraints on the effective (merged) widget state.
  * Only runs when the user changes query, group-by, or sort — not when preserving
@@ -332,7 +333,10 @@ export const editCommand = buildCommand({
       );
     }
 
-    validateWidgetEnums(flags.display, flags.dataset);
+    const resolvedDataset = validateWidgetEnums(flags.display, flags.dataset);
+    const effectiveFlags = resolvedDataset !== flags.dataset
+      ? { ...flags, dataset: resolvedDataset }
+      : flags;
 
     const { dashboardRef, targetArg } = parseDashboardPositionalArgs(args);
     const parsed = parseOrgProjectArg(targetArg);
@@ -357,7 +361,7 @@ export const editCommand = buildCommand({
     // Validate individual layout flag ranges early (catches --col -1, --width 7, etc.)
     validateWidgetLayout(flags, existing.layout);
 
-    const replacement = buildReplacement(flags, existing);
+    const replacement = buildReplacement(effectiveFlags, existing);
 
     // Re-validate the final merged layout when the existing widget had no layout
     // and FALLBACK_LAYOUT was used — the early check couldn't cross-validate
