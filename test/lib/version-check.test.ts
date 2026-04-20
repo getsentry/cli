@@ -12,9 +12,29 @@ import {
   abortPendingVersionCheck,
   getUpdateNotification,
   maybeCheckForUpdateInBackground,
+  resetUpdateNotificationState,
   shouldSuppressNotification,
 } from "../../src/lib/version-check.js";
 import { mockFetch, useTestConfigDir } from "../helpers.js";
+
+/**
+ * Force `process.stderr.isTTY` for the duration of a test.
+ *
+ * `getUpdateNotification` suppresses output when stderr is not a TTY
+ * (scripts, CI, pipes) so tests that assert a non-null notification
+ * must simulate a TTY first. Restores the previous value on cleanup.
+ */
+function withStderrTTY(value: boolean): () => void {
+  const original = process.stderr.isTTY;
+  (process.stderr as { isTTY?: boolean }).isTTY = value;
+  return () => {
+    if (original === undefined) {
+      delete (process.stderr as { isTTY?: boolean }).isTTY;
+    } else {
+      (process.stderr as { isTTY?: boolean }).isTTY = original;
+    }
+  };
+}
 
 describe("shouldSuppressNotification", () => {
   test("suppresses for upgrade command", () => {
@@ -76,11 +96,17 @@ describe("shouldSuppressNotification", () => {
 describe("getUpdateNotification", () => {
   useTestConfigDir("test-version-notif-");
   let savedNoUpdateCheck: string | undefined;
+  let restoreTTY: (() => void) | undefined;
 
   beforeEach(() => {
     // Save and clear the env var to test real implementation
     savedNoUpdateCheck = process.env.SENTRY_CLI_NO_UPDATE_CHECK;
     delete process.env.SENTRY_CLI_NO_UPDATE_CHECK;
+    // Reset the in-process "already notified" latch so each test starts fresh.
+    resetUpdateNotificationState();
+    // Default to TTY so the human-facing banner path is exercised. Tests
+    // that specifically check non-TTY suppression override this.
+    restoreTTY = withStderrTTY(true);
   });
 
   afterEach(() => {
@@ -88,6 +114,8 @@ describe("getUpdateNotification", () => {
     if (savedNoUpdateCheck !== undefined) {
       process.env.SENTRY_CLI_NO_UPDATE_CHECK = savedNoUpdateCheck;
     }
+    restoreTTY?.();
+    restoreTTY = undefined;
   });
 
   test("returns null when no version info is cached", () => {
@@ -140,6 +168,45 @@ describe("getUpdateNotification", () => {
     expect(notification).not.toBeNull();
     expect(notification).toContain("Update available:");
     expect(notification).not.toContain("New nightly available:");
+  });
+
+  test("returns null when stderr is not a TTY (scripts, CI, pipes)", () => {
+    // Override the TTY shim set in beforeEach with a non-TTY stderr.
+    restoreTTY?.();
+    restoreTTY = withStderrTTY(false);
+
+    setVersionCheckInfo("99.0.0");
+    const notification = getUpdateNotification();
+    expect(notification).toBeNull();
+  });
+
+  test("only notifies once per process even with a newer version", () => {
+    setVersionCheckInfo("99.0.0");
+
+    const first = getUpdateNotification();
+    const second = getUpdateNotification();
+    const third = getUpdateNotification();
+
+    expect(first).not.toBeNull();
+    // Subsequent calls in the same process must be silent — the banner
+    // is printed once at the end of the command run, not per API call.
+    expect(second).toBeNull();
+    expect(third).toBeNull();
+  });
+
+  test("rate-limits across CLI invocations to once per day", () => {
+    setVersionCheckInfo("99.0.0");
+
+    // First invocation emits the banner and stamps last_notified.
+    const first = getUpdateNotification();
+    expect(first).not.toBeNull();
+
+    // Simulate a fresh CLI invocation.
+    resetUpdateNotificationState();
+
+    // Still within the 24h window → no banner.
+    const second = getUpdateNotification();
+    expect(second).toBeNull();
   });
 });
 

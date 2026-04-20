@@ -10,14 +10,23 @@ import { clearMetadata, getMetadata, setMetadata } from "./utils.js";
 
 const KEY_LAST_CHECKED = "version_check.last_checked";
 const KEY_LATEST_VERSION = "version_check.latest_version";
+/**
+ * Timestamp (ms) when we last printed the "new version available"
+ * notification to stderr. Separate from `last_checked` so the cached
+ * latest-version can stay hot for faster subsequent checks while the
+ * notification itself is rate-limited to once per day.
+ */
+const KEY_LAST_NOTIFIED = "version_check.last_notified";
 
-const ALL_KEYS = [KEY_LAST_CHECKED, KEY_LATEST_VERSION];
+const ALL_KEYS = [KEY_LAST_CHECKED, KEY_LATEST_VERSION, KEY_LAST_NOTIFIED];
 
 export type VersionCheckInfo = {
   /** Unix timestamp (ms) of last check, or null if never checked */
   lastChecked: number | null;
   /** Latest version string from GitHub, or null if never fetched */
   latestVersion: string | null;
+  /** Unix timestamp (ms) when we last printed the update notification, or null */
+  lastNotified: number | null;
 };
 
 /**
@@ -29,11 +38,24 @@ export function getVersionCheckInfo(): VersionCheckInfo {
 
   const lastChecked = m.get(KEY_LAST_CHECKED);
   const latestVersion = m.get(KEY_LATEST_VERSION);
+  const lastNotified = m.get(KEY_LAST_NOTIFIED);
 
   return {
     lastChecked: lastChecked ? Number(lastChecked) : null,
     latestVersion: latestVersion ?? null,
+    lastNotified: lastNotified ? Number(lastNotified) : null,
   };
+}
+
+/**
+ * Record that we just displayed the update notification.
+ *
+ * Called from `getUpdateNotification()` so repeat CLI invocations within
+ * the rate-limit window don't keep re-printing the same banner.
+ */
+export function markUpdateNotified(): void {
+  const db = getDatabase();
+  setMetadata(db, { [KEY_LAST_NOTIFIED]: String(Date.now()) });
 }
 
 /**

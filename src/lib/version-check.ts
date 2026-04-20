@@ -13,6 +13,7 @@ import { CLI_VERSION } from "./constants.js";
 import { getReleaseChannel } from "./db/release-channel.js";
 import {
   getVersionCheckInfo,
+  markUpdateNotified,
   setVersionCheckInfo,
 } from "./db/version-check.js";
 import {
@@ -26,6 +27,17 @@ import { fetchLatestFromGitHub, fetchLatestNightlyVersion } from "./upgrade.js";
 
 /** Target check interval: ~24 hours */
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Minimum time between successive "new version available" notifications.
+ *
+ * Rate-limits the banner to once per 24h regardless of how many commands
+ * run in that window. Previously the banner fired on every invocation as
+ * long as the cached latest-version was ahead of CLI_VERSION, cluttering
+ * scripts, CI output, and screen-sharing sessions (see CLI UX feedback
+ * getsentry/cli#785 item #10).
+ */
+const NOTIFICATION_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /** Jitter factor for probabilistic checking (±20%) */
 const JITTER_FACTOR = 0.2;
@@ -195,13 +207,62 @@ function checkForUpdateInBackgroundImpl(): void {
 }
 
 /**
+ * Check whether stderr is attached to a TTY.
+ *
+ * Non-TTY output covers scripts piping into other commands, CI logs, and
+ * editors capturing CLI output. The update banner is human-only signal —
+ * suppress it when no human will read it. Matches `gh` CLI behavior.
+ */
+function isStderrTTY(): boolean {
+  return Boolean(process.stderr.isTTY);
+}
+
+/**
+ * Whether we've already returned an update notification this process.
+ *
+ * A single process (e.g. `sentry help` piped into `less`) may read the
+ * notification twice — once for the banner render, once by other code
+ * paths — but we only want to count as "notified" once.
+ */
+let notifiedThisProcess = false;
+
+/**
+ * Check whether enough time has passed since the last notification.
+ *
+ * Uses the DB-backed `last_notified` timestamp so the rate limit survives
+ * across CLI invocations. Returns `true` on first-ever notification
+ * (`lastNotified === null`).
+ */
+function canNotifyAgain(lastNotified: number | null): boolean {
+  if (lastNotified === null) {
+    return true;
+  }
+  return Date.now() - lastNotified >= NOTIFICATION_INTERVAL_MS;
+}
+
+/**
  * Get the update notification message if a new version is available.
- * Returns null if up-to-date, no cached version info, or on error.
- * Never throws - errors are caught and reported to Sentry.
+ * Returns null if up-to-date, no cached version info, rate-limited, on a
+ * non-TTY stderr, or on error. Never throws — errors are caught and
+ * reported to Sentry.
+ *
+ * Side effects: when a non-null message is returned, the function also
+ * persists `last_notified = now` via {@link markUpdateNotified} so
+ * subsequent invocations within the rate-limit window return null.
  */
 function getUpdateNotificationImpl(): string | null {
+  // Gate 1: non-TTY stderr (scripts, CI, pipes).
+  if (!isStderrTTY()) {
+    return null;
+  }
+
+  // Gate 2: don't double-emit within the same process.
+  if (notifiedThisProcess) {
+    return null;
+  }
+
   try {
-    const { latestVersion } = getVersionCheckInfo();
+    const { latestVersion, lastNotified } = getVersionCheckInfo();
 
     if (!latestVersion) {
       return null;
@@ -213,15 +274,45 @@ function getUpdateNotificationImpl(): string | null {
       return null;
     }
 
+    // Gate 3: daily rate limit across CLI invocations.
+    if (!canNotifyAgain(lastNotified)) {
+      return null;
+    }
+
     const channel = getReleaseChannel();
     const label =
       channel === "nightly" ? "New nightly available:" : "Update available:";
+
+    // Record that we're about to print the banner so repeat invocations
+    // within the rate-limit window stay silent. Failures here are
+    // non-fatal: the banner still prints, it just won't be rate-limited
+    // on the next run. That's strictly better than swallowing the notice.
+    try {
+      markUpdateNotified();
+    } catch (error) {
+      Sentry.captureException(error);
+    }
+    notifiedThisProcess = true;
+
     return `\n${muted(label)} ${cyan(CLI_VERSION)} -> ${cyan(latestVersion)}  Run ${cyan('"sentry cli upgrade"')} to update.\n`;
   } catch (error) {
     // DB access failed - report to Sentry but don't crash CLI
     Sentry.captureException(error);
     return null;
   }
+}
+
+/**
+ * Reset the in-process "already notified" latch.
+ *
+ * Tests call this between scenarios to re-exercise the first-notification
+ * path without spinning up a new process. Not part of the public API and
+ * should not be called from production code.
+ *
+ * @internal
+ */
+export function resetUpdateNotificationState(): void {
+  notifiedThisProcess = false;
 }
 
 /**
