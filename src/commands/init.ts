@@ -279,5 +279,12 @@ export const initCommand = buildCommand<
       org: explicitOrg,
       project: explicitProject,
     });
+
+    // Force exit after the wizard completes. `sentry init` is a terminal
+    // command, and Bun's global fetch dispatcher (used by MastraClient) can
+    // hold keep-alive sockets open past the wizard, leaving the libuv loop
+    // alive and the shell appearing to hang. `process.exit` flushes stdio
+    // and releases those handles unconditionally.
+    process.exit(process.exitCode ?? 0);
   },
 });
