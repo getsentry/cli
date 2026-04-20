@@ -3,11 +3,17 @@ title: Agentic Usage
 description: Enable AI coding agents to use the Sentry CLI
 ---
 
-AI coding agents like Claude Code can use the Sentry CLI through the skill system. This allows agents to interact with Sentry directly from your development environment.
+AI coding agents like Claude Code and Cursor can use the Sentry CLI through the skill system. This allows agents to interact with Sentry directly from your development environment.
 
-## Adding the Skill
+## Automatic Installation
 
-Add the Sentry CLI skill to your agent:
+When you install the CLI (via `curl`, Homebrew, or a package manager), `sentry cli setup` automatically installs agent skills into any detected agent root directories (`~/.claude`, `~/.agents`). Skills are also refreshed on `sentry cli upgrade`. No network fetch is needed — skill files are embedded in the binary.
+
+To skip automatic skill installation, pass `--no-agent-skills` to `sentry cli setup`.
+
+## Manual Installation
+
+Add the Sentry CLI skill to your agent manually:
 
 ```bash
 npx skills add https://cli.sentry.dev
@@ -43,4 +49,4 @@ The skill uses your existing CLI authentication, so you'll need to run `sentry a
 ## Requirements
 
 - An authenticated Sentry CLI installation (`sentry auth login`)
-- An AI coding agent that supports the skills system (e.g., Claude Code)
+- An AI coding agent that supports the skills system (e.g., Claude Code, Cursor, or any agent using `~/.agents`)
