@@ -5,7 +5,6 @@
  * Environment is the first positional arg (required), deploy name is optional second.
  */
 
-import type { DeployResponse } from "@sentry/api";
 import type { SentryContext } from "../../context.js";
 import { createReleaseDeploy } from "../../lib/api-client.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
@@ -19,6 +18,7 @@ import { CommandOutput } from "../../lib/formatters/output.js";
 import { formatRelativeTime } from "../../lib/formatters/time-utils.js";
 import { DRY_RUN_ALIASES, DRY_RUN_FLAG } from "../../lib/mutate-command.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
+import type { SentryDeploy } from "../../types/index.js";
 import { parseReleaseArg } from "./parse.js";
 
 function formatDeployCreated(data: Record<string, unknown>): string {
@@ -27,7 +27,7 @@ function formatDeployCreated(data: Record<string, unknown>): string {
       `Would create deploy for ${safeCodeSpan(String(data.environment))} environment (dry run)`
     );
   }
-  const deploy = data as unknown as DeployResponse;
+  const deploy = data as unknown as SentryDeploy;
   const lines: string[] = [];
   lines.push("## Deploy Created");
   lines.push("");

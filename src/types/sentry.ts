@@ -15,10 +15,13 @@
 
 import type {
   IssueEventDetailsResponse,
+  DeployResponse as SdkDeployResponse,
   RetrieveAnIssueResponse as SdkIssueDetail,
   ListOrganizations as SdkOrganizationList,
   ProjectKey as SdkProjectKey,
   OrganizationProjectResponseDict as SdkProjectList,
+  OrgReleaseResponse as SdkReleaseResponse,
+  BaseTeam as SdkTeam,
 } from "@sentry/api";
 import { z } from "zod";
 
@@ -68,8 +71,40 @@ export type SentryProject = Partial<SdkProjectListItem> & {
 
 // Issue Constants
 
-export const ISSUE_STATUSES = ["resolved", "unresolved", "ignored"] as const;
+/**
+ * Runtime-iterable tuple of issue status values, tied to the SDK's literal
+ * union in both directions:
+ *
+ * - `satisfies readonly NonNullable<SdkIssueDetail["status"]>[]` catches
+ *   **removals/renames** in the SDK union (a tuple entry that no longer
+ *   exists in the union fails to assign).
+ * - `_IssueStatusParity` below catches **additions** in the SDK union
+ *   (an SDK status missing from our tuple makes the conditional type
+ *   reduce to `never` instead of `true`).
+ *
+ * Together they fail typechecking on any drift, forcing the tuple and the
+ * SDK union to stay in sync.
+ */
+export const ISSUE_STATUSES = [
+  "resolved",
+  "unresolved",
+  "ignored",
+] as const satisfies readonly NonNullable<SdkIssueDetail["status"]>[];
 export type IssueStatus = (typeof ISSUE_STATUSES)[number];
+
+/**
+ * Compile-time exhaustiveness check for `ISSUE_STATUSES`.
+ * If the SDK ever adds a status that isn't in the tuple, this resolves to
+ * `never` and the assignment fails to typecheck. The tuple-wrapping
+ * (`[X] extends [Y]`) prevents distributive inference so the check fires
+ * on the union as a whole.
+ */
+type _IssueStatusParity = [NonNullable<SdkIssueDetail["status"]>] extends [
+  IssueStatus,
+]
+  ? true
+  : never;
+const _ISSUE_STATUS_PARITY: _IssueStatusParity = true;
 
 export const ISSUE_LEVELS = [
   "fatal",
@@ -439,36 +474,34 @@ export const ISSUE_SUBSTATUSES = [
 ] as const;
 export type IssueSubstatus = (typeof ISSUE_SUBSTATUSES)[number];
 
-// Release (embedded in Issue)
+// Release
 
-export const ReleaseSchema = z
-  .object({
-    id: z.number().optional(),
-    version: z.string(),
-    shortVersion: z.string().optional(),
-    status: z.string().optional(),
-    dateCreated: z.string().optional(),
-    dateReleased: z.string().nullable().optional(),
-    ref: z.string().nullable().optional(),
-    url: z.string().nullable().optional(),
-    commitCount: z.number().optional(),
-    deployCount: z.number().optional(),
-    authors: z.array(z.unknown()).optional(),
-    projects: z
-      .array(
-        z
-          .object({
-            id: z.union([z.string(), z.number()]),
-            slug: z.string(),
-            name: z.string(),
-          })
-          .passthrough()
-      )
-      .optional(),
-  })
-  .passthrough();
+/**
+ * A Sentry release.
+ *
+ * Based on the `@sentry/api` org-release response type (`OrgReleaseResponse`).
+ * Only `version` is unconditionally required; all other SDK fields (id, status,
+ * versionInfo, data, authors, projects, ...) are widened to optional so test
+ * fixtures and partial API responses can omit them without casts.
+ */
+export type SentryRelease = Partial<SdkReleaseResponse> & {
+  version: string;
+};
 
-export type Release = z.infer<typeof ReleaseSchema>;
+// Deploy
+
+/**
+ * A Sentry deploy.
+ *
+ * Based on the `@sentry/api` deploy response type (`DeployResponse`).
+ * Core identifiers are required; timestamps and display fields are widened
+ * to optional so test mocks can omit `dateStarted`, `dateFinished`, `name`,
+ * and `url`.
+ */
+export type SentryDeploy = Partial<SdkDeployResponse> & {
+  id: string;
+  environment: string;
+};
 
 // Issue
 
@@ -951,7 +984,25 @@ export const SentryTeamSchema = z
   })
   .passthrough();
 
-export type SentryTeam = z.infer<typeof SentryTeamSchema>;
+/**
+ * A Sentry team.
+ *
+ * Based on the `@sentry/api` `BaseTeam` type. Only core identifiers are
+ * required; other SDK fields (dateCreated, isMember, teamRole, flags, access,
+ * hasAccess, isPending, memberCount, avatar) are widened to optional so test
+ * mocks and partial list-endpoint responses can omit them.
+ *
+ * `SentryTeamSchema` above is kept separately as the `--fields` / SKILL.md
+ * documentation schema — it is NOT used for runtime validation (team list
+ * responses are cast `as unknown as SentryTeam[]` in `api/teams.ts`), so the
+ * schema and type are allowed to diverge: the schema curates a user-facing
+ * subset of fields, the type follows the SDK's structural superset.
+ */
+export type SentryTeam = Partial<SdkTeam> & {
+  id: string;
+  slug: string;
+  name: string;
+};
 
 // Product Trials
 

@@ -6,9 +6,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import type { OrgReleaseResponse } from "@sentry/api";
 import { setAuthToken } from "../../src/lib/db/auth.js";
 import { setOrgRegion } from "../../src/lib/db/regions.js";
+import type { SentryRelease } from "../../src/types/index.js";
 import { mockFetch, useTestConfigDir } from "../helpers.js";
 
 useTestConfigDir("set-commits-auto-");
@@ -26,7 +26,7 @@ mock.module("../../src/lib/git.js", () => ({
 // Import after mock.module so the mocked git helpers are used
 const { setCommitsAuto } = await import("../../src/lib/api/releases.js");
 
-const SAMPLE_RELEASE: OrgReleaseResponse = {
+const SAMPLE_RELEASE: SentryRelease = {
   id: 1,
   version: "1.0.0",
   shortVersion: "1.0.0",

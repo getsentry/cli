@@ -16,11 +16,12 @@ import { deployCommand } from "../../../src/commands/release/deploy.js";
 import * as apiClient from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
+import type { SentryDeploy } from "../../../src/types/index.js";
 import { useTestConfigDir } from "../../helpers.js";
 
 useTestConfigDir("release-deploy-");
 
-const sampleDeploy: DeployResponse = {
+const sampleDeploy: SentryDeploy = {
   id: "42",
   environment: "production",
   dateStarted: null,

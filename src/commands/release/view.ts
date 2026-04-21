@@ -5,7 +5,6 @@
  * health and adoption metrics when available.
  */
 
-import type { OrgReleaseResponse } from "@sentry/api";
 import type { SentryContext } from "../../context.js";
 import { getRelease } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
@@ -28,6 +27,7 @@ import {
   FRESH_FLAG,
 } from "../../lib/list-command.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
+import type { SentryRelease } from "../../types/index.js";
 import { parseReleaseArg } from "./parse.js";
 
 /** Wrap a plain "—" in muted color for consistent table styling. */
@@ -56,7 +56,7 @@ export function fmtCrashFree(value: number | null | undefined): string {
  * Only includes projects that have health data. Returns empty string
  * if no project has data (so the section is skipped entirely).
  */
-function formatProjectHealthTable(release: OrgReleaseResponse): string {
+function formatProjectHealthTable(release: SentryRelease): string {
   const projects = release.projects?.filter((p) => p.healthData?.hasHealthData);
   if (!projects?.length) {
     return "";
@@ -94,7 +94,7 @@ function formatProjectHealthTable(release: OrgReleaseResponse): string {
   return lines.join("\n");
 }
 
-function formatReleaseDetails(release: OrgReleaseResponse): string {
+function formatReleaseDetails(release: SentryRelease): string {
   const lines: string[] = [];
 
   lines.push(

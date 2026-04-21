@@ -16,11 +16,12 @@ import { createCommand } from "../../../src/commands/release/create.js";
 import * as apiClient from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
+import type { SentryRelease } from "../../../src/types/index.js";
 import { useTestConfigDir } from "../../helpers.js";
 
 useTestConfigDir("release-create-");
 
-const sampleRelease: OrgReleaseResponse = {
+const sampleRelease: SentryRelease = {
   id: 1,
   version: "1.0.0",
   shortVersion: "1.0.0",

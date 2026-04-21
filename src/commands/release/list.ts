@@ -5,7 +5,6 @@
  * project scoping, environment filtering, and rich terminal styling.
  */
 
-import type { OrgReleaseResponse } from "@sentry/api";
 import type { SentryContext } from "../../context.js";
 import {
   type ListReleasesOptions,
@@ -45,11 +44,12 @@ import {
   toNumericId,
 } from "../../lib/resolve-target.js";
 import { buildReleaseUrl } from "../../lib/sentry-urls.js";
+import type { SentryRelease } from "../../types/index.js";
 import { fmtCrashFree } from "./view.js";
 
 export const PAGINATION_KEY = "release-list";
 
-type ReleaseWithOrg = OrgReleaseResponse & {
+type ReleaseWithOrg = SentryRelease & {
   orgSlug?: string;
   /** Project slug when from multi-project auto-detect (for labeling). */
   targetProject?: string;
@@ -95,7 +95,7 @@ function parseSortFlag(value: string): ReleaseSortValue {
 // ---------------------------------------------------------------------------
 
 /** Pick health data from the first project that has it. */
-function getHealthData(release: OrgReleaseResponse) {
+function getHealthData(release: SentryRelease) {
   return release.projects?.find((p) => p.healthData?.hasHealthData)?.healthData;
 }
 
@@ -156,7 +156,7 @@ function formatAdoption(value: number | null | undefined): string {
 }
 
 /** Session sparkline in muted color. */
-function formatSessionSparkline(r: OrgReleaseResponse): string {
+function formatSessionSparkline(r: SentryRelease): string {
   const health = getHealthData(r);
   if (!health) {
     return "";
@@ -248,7 +248,7 @@ type ExtraApiOptions = Pick<
 
 function buildReleaseListConfig(
   extra: ExtraApiOptions
-): OrgListConfig<OrgReleaseResponse, ReleaseWithOrg> {
+): OrgListConfig<SentryRelease, ReleaseWithOrg> {
   return {
     paginationKey: PAGINATION_KEY,
     entityName: "release",

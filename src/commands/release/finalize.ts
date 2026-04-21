@@ -4,7 +4,6 @@
  * Finalize a release by setting its dateReleased to now.
  */
 
-import type { OrgReleaseResponse } from "@sentry/api";
 import type { SentryContext } from "../../context.js";
 import { updateRelease } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
@@ -19,6 +18,7 @@ import {
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { DRY_RUN_ALIASES, DRY_RUN_FLAG } from "../../lib/mutate-command.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
+import type { SentryRelease } from "../../types/index.js";
 import { parseReleaseArg } from "./parse.js";
 
 function formatReleaseFinalized(data: Record<string, unknown>): string {
@@ -27,7 +27,7 @@ function formatReleaseFinalized(data: Record<string, unknown>): string {
       `Would finalize release ${safeCodeSpan(String(data.version))} (dry run)`
     );
   }
-  const release = data as unknown as OrgReleaseResponse;
+  const release = data as unknown as SentryRelease;
   const lines: string[] = [];
   lines.push(`## Release Finalized: ${escapeMarkdownInline(release.version)}`);
   lines.push("");

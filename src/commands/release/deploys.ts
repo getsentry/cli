@@ -4,7 +4,6 @@
  * List deploys for a release.
  */
 
-import type { DeployResponse } from "@sentry/api";
 import type { SentryContext } from "../../context.js";
 import { listReleaseDeploys } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
@@ -13,9 +12,10 @@ import { CommandOutput } from "../../lib/formatters/output.js";
 import { type Column, formatTable } from "../../lib/formatters/table.js";
 import { formatRelativeTime } from "../../lib/formatters/time-utils.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
+import type { SentryDeploy } from "../../types/index.js";
 import { parseReleaseArg } from "./parse.js";
 
-const DEPLOY_COLUMNS: Column<DeployResponse>[] = [
+const DEPLOY_COLUMNS: Column<SentryDeploy>[] = [
   { header: "ENVIRONMENT", value: (d) => d.environment },
   { header: "NAME", value: (d) => d.name || "—" },
   {
@@ -24,7 +24,7 @@ const DEPLOY_COLUMNS: Column<DeployResponse>[] = [
   },
 ];
 
-function formatDeployList(deploys: DeployResponse[]): string {
+function formatDeployList(deploys: SentryDeploy[]): string {
   if (deploys.length === 0) {
     return "No deploys found for this release.";
   }
