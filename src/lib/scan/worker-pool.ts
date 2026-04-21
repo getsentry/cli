@@ -7,20 +7,31 @@
  * `grep-worker.js` for the worker body + rationale). Subsequent
  * calls reuse the pool.
  *
- * Workers are `.unref()`'d so the CLI exits cleanly without an
- * explicit shutdown — they'll be torn down by the runtime when the
- * main process ends.
+ * ### Lifetime
+ *
+ * Workers are kept ref'd — they hold the event loop open. The CLI
+ * relies on `process.exit()` at the end of command execution to
+ * tear them down; no explicit shutdown is required from callers.
+ *
+ * An earlier iteration `.unref()`'d each worker for "clean" exit,
+ * but that caused a deadlock: when the main thread's only pending
+ * work was a promise awaiting a worker result, unref'd workers
+ * didn't process messages on idle ticks and the pipeline hung with
+ * in-flight batches never settling.
+ *
+ * `terminatePool()` is provided for tests that need to reset the
+ * singleton between cases; it's not part of the CLI shutdown path.
  *
  * ### Feature-gate
  *
- * `isWorkerSupported()` returns true only when `Worker` and `Blob`
- * + `URL.createObjectURL` are available. On the Node library bundle
- * (`dist/index.cjs`), these globals exist (Node provides them via
- * `worker_threads` aliases in Bun, and Node 22+ has `Blob` /
- * `createObjectURL`). We avoid depending on `bun:*` or `Bun.*` APIs
- * so the same code works in both runtimes.
+ * `isWorkerSupported()` returns true only when `Worker`, `Blob`,
+ * and `URL.createObjectURL` are available. The Bun runtime and
+ * Bun-compiled binaries always pass this check; the Node library
+ * bundle (`dist/index.cjs`) may or may not depending on the
+ * consumer's Node version. We avoid depending on `bun:*` or
+ * `Bun.*` APIs so the same code works in both runtimes.
  *
- * When unsupported, callers fall back to the current async
+ * When unsupported, callers fall back to the async
  * `mapFilesConcurrent` path.
  */
 

@@ -404,6 +404,15 @@ function scanDirectory(cwd: string): Promise<CodeScanResult> {
             const rel = normalizePath(path.relative(cwd, absDir)) || ".";
             dirMtimes[rel] = mtimeMs;
           },
+          // Disable line-text truncation. The default (2000 chars) is
+          // fine for interactive grep output, but would silently drop
+          // DSNs that appear past column ~1900 on long minified lines.
+          // `processMatch` re-runs `DSN_PATTERN` on `match.line`, so
+          // a `…` suffix introduced by truncation would make the
+          // regex fail at the pattern-terminating `/\d+`. The
+          // per-DSN memory cost is bounded by the walker's
+          // `maxFileSize` (256 KB) and the `seen` dedup map.
+          maxLineLength: Number.POSITIVE_INFINITY,
         });
 
         for await (const match of iter) {
