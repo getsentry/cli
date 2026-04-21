@@ -12,10 +12,7 @@ import type { SentryIssue } from "../../types/index.js";
 import { applyCustomHeaders } from "../custom-headers.js";
 import { ApiError, ValidationError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
-import {
-  invalidateCachedResponse,
-  invalidateCachedResponsesMatching,
-} from "../response-cache.js";
+import { invalidateCachedResponsesMatching } from "../response-cache.js";
 import { getApiBaseUrl } from "../sentry-client.js";
 
 import {
@@ -575,13 +572,14 @@ export async function updateIssueStatus(
 
   // Legacy global endpoint — works without org but not region-aware,
   // so we can only flush the legacy issue-detail URL. Region-scoped
-  // lists age out via their TTL.
+  // lists age out via their TTL. Prefix-sweep (not exact-match)
+  // because `getIssue` caches under `.../issues/{id}/?collapse=...`.
   const legacyData = await apiRequest<SentryIssue>(
     `/issues/${encodeURIComponent(issueId)}/`,
     { method: "PUT", body }
   );
   const base = stripTrailingSlash(getApiBaseUrl());
-  await invalidateCachedResponse(
+  await invalidateCachedResponsesMatching(
     `${base}/api/0/issues/${encodeURIComponent(issueId)}/`
   );
   return legacyData;
@@ -698,10 +696,12 @@ export async function getSharedIssue(
 }
 
 /**
- * Flush both the org-scoped and legacy detail endpoints for one issue.
- * Does NOT sweep the org-wide list — callers must call
- * {@link invalidateOrgIssueList} once per operation to avoid N+1
- * full-directory scans. Never throws.
+ * Flush both the org-scoped and legacy detail endpoints for one issue,
+ * including all `collapse` query-param variants (`getIssueInOrg` caches
+ * responses under URLs like `.../issues/{id}/?collapse=stats&...` so
+ * exact-match invalidation would miss them). Does NOT sweep the
+ * org-wide list — callers must call {@link invalidateOrgIssueList}
+ * once per operation. Never throws.
  */
 async function invalidateIssueDetailCaches(
   regionUrl: string,
@@ -713,10 +713,10 @@ async function invalidateIssueDetailCaches(
     const encodedOrg = encodeURIComponent(orgSlug);
     const encodedId = encodeURIComponent(issueId);
     await Promise.all([
-      invalidateCachedResponse(
+      invalidateCachedResponsesMatching(
         `${base}/api/0/organizations/${encodedOrg}/issues/${encodedId}/`
       ),
-      invalidateCachedResponse(`${base}/api/0/issues/${encodedId}/`),
+      invalidateCachedResponsesMatching(`${base}/api/0/issues/${encodedId}/`),
     ]);
   } catch {
     /* best-effort: mutation already succeeded upstream */

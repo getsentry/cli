@@ -542,3 +542,42 @@ describe("invalidateCachedResponse", () => {
     expect(await getCachedResponse("GET", TEST_URL, {})).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression: prefix-sweep must catch query-string variants
+// (sentry-bot finding on #788 — `getIssue` caches under
+// `/issues/{id}/?collapse=stats&...` so exact-match invalidation of
+// `/issues/{id}/` would silently fail to clear the stale entry.)
+// ---------------------------------------------------------------------------
+
+describe("invalidateCachedResponsesMatching with query params", () => {
+  const DETAIL_BASE =
+    "https://us.sentry.io/api/0/organizations/acme/issues/12345/";
+
+  test("clears entries cached with varying query parameters", async () => {
+    await storeCachedResponse(
+      "GET",
+      `${DETAIL_BASE}?collapse=stats&collapse=lifetime`,
+      {},
+      mockResponse({ id: "12345" })
+    );
+    expect(
+      await getCachedResponse(
+        "GET",
+        `${DETAIL_BASE}?collapse=stats&collapse=lifetime`,
+        {}
+      )
+    ).toBeDefined();
+
+    // Mutation-side invalidator uses the base URL (no params).
+    await invalidateCachedResponsesMatching(DETAIL_BASE);
+
+    expect(
+      await getCachedResponse(
+        "GET",
+        `${DETAIL_BASE}?collapse=stats&collapse=lifetime`,
+        {}
+      )
+    ).toBeUndefined();
+  });
+});
