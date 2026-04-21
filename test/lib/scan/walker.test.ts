@@ -10,7 +10,13 @@
  */
 
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WalkEntry } from "../../../src/lib/scan/types.js";
@@ -585,6 +591,73 @@ describe("walkFiles — nested .gitignore loading", () => {
       // `a/ignored.ts` yields.
       expect(files.includes("a/ignored.ts")).toBe(true);
       expect(files.includes("a/ok.ts")).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("walkFiles — followSymlinks", () => {
+  test("skips symlinks by default (followSymlinks: false)", async () => {
+    const { cwd, cleanup } = makeSandbox({
+      "real-dir/inside.ts": "x",
+      "real-file.ts": "y",
+    });
+    try {
+      symlinkSync(join(cwd, "real-dir"), join(cwd, "link-dir"));
+      symlinkSync(join(cwd, "real-file.ts"), join(cwd, "link-file.ts"));
+      const files = await collect({ cwd });
+      expect(files.sort()).toEqual(["real-dir/inside.ts", "real-file.ts"]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("followSymlinks: true follows symlinked files and dirs", async () => {
+    const { cwd, cleanup } = makeSandbox({
+      "aaa-real/inside.ts": "x",
+      "real-file.ts": "y",
+    });
+    try {
+      // Alphabetical order means `aaa-real` is visited first, so the
+      // real path claims the inode and subsequent symlinks to the
+      // same inode are skipped by cycle detection.
+      symlinkSync(join(cwd, "aaa-real"), join(cwd, "zzz-link"));
+      symlinkSync(join(cwd, "real-file.ts"), join(cwd, "link-file.ts"));
+      const files = await collect({ cwd, followSymlinks: true });
+      // Real dir's files yield; symlinked file also yields (different
+      // inode as a file is a different dentry).
+      expect(files.includes("aaa-real/inside.ts")).toBe(true);
+      expect(files.includes("real-file.ts")).toBe(true);
+      expect(files.includes("link-file.ts")).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("followSymlinks: true breaks circular symlinks via inode detection", async () => {
+    const { cwd, cleanup } = makeSandbox({
+      "inner/x.ts": "hello",
+    });
+    try {
+      // Create a cycle: inner/back -> cwd
+      symlinkSync(cwd, join(cwd, "inner", "back"));
+      const files = await collect({ cwd, followSymlinks: true });
+      // If the cycle weren't broken, we'd loop infinitely. Bounded
+      // result proves the inodeKey guard fires.
+      expect(files.length).toBeLessThan(20);
+      expect(files.includes("inner/x.ts")).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("broken symlink is silently skipped", async () => {
+    const { cwd, cleanup } = makeSandbox({ "real.ts": "hi" });
+    try {
+      symlinkSync(join(cwd, "nonexistent"), join(cwd, "broken.ts"));
+      const files = await collect({ cwd, followSymlinks: true });
+      expect(files).toEqual(["real.ts"]);
     } finally {
       cleanup();
     }

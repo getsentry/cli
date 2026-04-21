@@ -33,12 +33,19 @@
  * flags `(?i)` / `(?im)` / `(?i:...)` are translated to JS flags.
  */
 
-import picomatch from "picomatch";
 import { handleFileError } from "../dsn/fs-utils.js";
 import {
   type ConcurrentOptions,
   mapFilesConcurrentStream,
 } from "./concurrent.js";
+import {
+  basenameOf,
+  type CompiledMatcher,
+  compileMatchers,
+  joinPosix,
+  matchesAny,
+  walkerRoot,
+} from "./path-utils.js";
 import { compilePattern, ensureGlobalMultilineFlags } from "./regex.js";
 import type {
   GrepMatch,
@@ -52,56 +59,6 @@ import { walkFiles } from "./walker.js";
 
 /** Default line-truncation length for the init-wizard wire shape. */
 const DEFAULT_MAX_LINE_LENGTH = 2000;
-
-/** Compiled per-pattern glob matcher. See glob.ts for the shape. */
-type CompiledMatcher = {
-  test: (input: string) => boolean;
-  pathMode: boolean;
-};
-
-function compileMatchers(
-  patterns: string | readonly string[] | undefined
-): CompiledMatcher[] {
-  if (patterns === undefined) {
-    return [];
-  }
-  const list = typeof patterns === "string" ? [patterns] : patterns;
-  return list.map((pattern) => ({
-    test: picomatch(pattern, { dot: true }),
-    pathMode: pattern.includes("/"),
-  }));
-}
-
-function matchesAny(
-  matchers: readonly CompiledMatcher[],
-  relPath: string,
-  basename: string
-): boolean {
-  for (const m of matchers) {
-    if (m.test(m.pathMode ? relPath : basename)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function basenameOf(rel: string): string {
-  const slashIdx = rel.lastIndexOf("/");
-  return slashIdx === -1 ? rel : rel.slice(slashIdx + 1);
-}
-
-/**
- * Resolve `opts.path` against `opts.cwd`. When `opts.path` is set the
- * walker runs against the subdir; we map yielded relative paths back
- * into cwd-relative form at the match boundary.
- */
-function walkerRoot(cwd: string, sub: string | undefined): string {
-  if (!sub) {
-    return cwd;
-  }
-  const path = require("node:path") as typeof import("node:path");
-  return path.resolve(cwd, sub);
-}
 
 /**
  * Build a stats object seeded with zeros. Separated so both iterable
@@ -224,13 +181,20 @@ async function readAndGrep(
   const matches: GrepMatch[] = [];
   // Whole-buffer iteration requires `/g`; `/m` makes `^`/`$` match at
   // line boundaries so patterns like `^foo` behave the same way they
-  // did under the old split-per-line approach. `ensureGlobalMultilineFlags`
-  // returns the input unchanged if both flags are already present.
-  const regex = ensureGlobalMultilineFlags(opts.regex);
-  // Reset in case the regex is shared across files (it is — one per
-  // grep() call). Without this, a `/g` regex's `lastIndex` leaks
-  // between files and later files silently skip matches before it.
-  regex.lastIndex = 0;
+  // did under the old split-per-line approach.
+  //
+  // We clone the regex per file so each invocation has its own
+  // `lastIndex`. Today the exec/loop block below runs synchronously
+  // with no `await`, so concurrent `readAndGrep` workers can't
+  // actually observe each other's `lastIndex` mutations (JS is
+  // single-threaded; microtasks only yield at `await`). But the
+  // clone is still worth paying — it's ~1µs per file and eliminates
+  // the foot-gun if anyone ever introduces an `await` inside the
+  // match loop. `ensureGlobalMultilineFlags` would otherwise return
+  // the caller's RegExp unchanged when it already has `/gm`, leaving
+  // the stateful object shared across workers.
+  const ensured = ensureGlobalMultilineFlags(opts.regex);
+  const regex = new RegExp(ensured.source, ensured.flags);
 
   // Cursor for incremental line-number computation. We walk forward
   // through the buffer, counting `\n` once per match emission. The
@@ -280,13 +244,6 @@ async function readAndGrep(
   }
 
   return matches;
-}
-
-/** Join POSIX-style. Local copy to avoid a shared util dependency. */
-function joinPosix(a: string, b: string): string {
-  const left = a.endsWith("/") ? a.slice(0, -1) : a;
-  const right = b.startsWith("/") ? b.slice(1) : b;
-  return `${left}/${right}`;
 }
 
 /**

@@ -181,6 +181,7 @@ async function* walkFilesImpl(opts: WalkOptions): AsyncGenerator<WalkEntry> {
  * under Biome's ceiling. Mutates `ctx.stats`, pushes directories onto
  * `ctx.stack`, and returns a `WalkEntry` when a file should be yielded.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: filter cascade (hidden, symlink, dir, file, ignore, ext) is inherently branchy
 async function processEntry(
   entry: Dirent,
   frame: DirFrame,
@@ -196,11 +197,33 @@ async function processEntry(
   const abs = path.join(frame.absDir, entry.name);
   const rel = normalizePath(path.relative(cfg.cwd, abs));
 
-  if (entry.isDirectory()) {
+  // For regular dirs/files, the Dirent already tells us the type.
+  // For symlinks (when `followSymlinks: true`), we need to `stat()`
+  // the target to learn whether it resolves to a file or a directory.
+  // `readdir({withFileTypes})` uses lstat semantics: `isSymbolicLink`
+  // returns true while `isFile`/`isDirectory` are both false. Without
+  // this extra stat, symlinks would fall through `isDirectory()` +
+  // `isFile()` and be silently dropped.
+  let isDir: boolean;
+  let isFile: boolean;
+  if (entry.isSymbolicLink() && cfg.followSymlinks) {
+    const resolved = await statSymlinkTarget(abs);
+    if (!resolved) {
+      // Broken symlink or stat error — skip (matches rg's behavior).
+      return null;
+    }
+    isDir = resolved.isDirectory;
+    isFile = resolved.isFile;
+  } else {
+    isDir = entry.isDirectory();
+    isFile = entry.isFile();
+  }
+
+  if (isDir) {
     await maybeDescend(abs, rel, frame.depth, ctx);
     return null;
   }
-  if (!entry.isFile()) {
+  if (!isFile) {
     return null;
   }
   // maxDepth controls directory *descent*, not file yield. Files sit
@@ -432,6 +455,32 @@ async function inodeKey(absPath: string): Promise<string | null> {
     return `${s.dev}:${s.ino}`;
   } catch (error) {
     handleFileError(error, { operation: "scan.walk.inodeKey", path: absPath });
+    return null;
+  }
+}
+
+/**
+ * Resolve what a symlink points to. Returns `null` when the target
+ * is missing (broken symlink) or the stat otherwise fails — in both
+ * cases the caller should skip the entry the way ripgrep does.
+ *
+ * Uses `stat` (which follows symlinks) rather than `lstat` so we see
+ * the target's true kind. Cycle detection happens later in
+ * `maybeDescend` via `inodeKey`.
+ */
+async function statSymlinkTarget(
+  absPath: string
+): Promise<{ isFile: boolean; isDirectory: boolean } | null> {
+  try {
+    const s = await stat(absPath);
+    return { isFile: s.isFile(), isDirectory: s.isDirectory() };
+  } catch (error) {
+    // ENOENT (broken symlink) is the expected failure case — swallow.
+    // Other errors go through handleFileError so Sentry sees them.
+    handleFileError(error, {
+      operation: "scan.walk.statSymlinkTarget",
+      path: absPath,
+    });
     return null;
   }
 }

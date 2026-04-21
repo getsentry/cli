@@ -436,3 +436,58 @@ describe("grepFiles — iterable variant", () => {
     }
   });
 });
+
+describe("collectGrep — pre-compiled RegExp isolation", () => {
+  test("concurrent workers each emit every match for a shared RegExp", async () => {
+    // Guards against a foot-gun identified in review: when a caller
+    // passes a pre-compiled `/gm` RegExp, `ensureGlobalMultilineFlags`
+    // returns the same object, which workers mutate via
+    // `regex.exec`'s `lastIndex`. Today the match loop is fully
+    // synchronous so JS's single-threaded microtask model hides the
+    // sharing — but if anyone introduces an `await` inside the loop
+    // the bug would manifest. The fix is a per-file `new RegExp(...)`
+    // clone. This test exercises the shared-regex shape so a
+    // regression would blow up here before landing.
+    const PATTERN_LINE = "hit-marker-unique-42";
+    const NUM_FILES = 30;
+    const MATCHES_PER_FILE = 5;
+    const NOISE_LINES = 200; // large enough to force multi-line scan per file
+
+    const layout: Record<string, string> = {};
+    for (let f = 0; f < NUM_FILES; f += 1) {
+      const lines: string[] = [];
+      for (let i = 0; i < NOISE_LINES; i += 1) {
+        lines.push(`noise noise noise line ${i}`);
+        if (i % Math.floor(NOISE_LINES / MATCHES_PER_FILE) === 0) {
+          lines.push(PATTERN_LINE);
+        }
+      }
+      layout[`file-${f}.txt`] = lines.join("\n");
+    }
+    const { cwd, cleanup } = makeSandbox(layout);
+    try {
+      // Pre-compile with /gm — exactly the shape that would have
+      // returned-as-is through `ensureGlobalMultilineFlags`.
+      const sharedRegex = /hit-marker-unique-\d+/gm;
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: sharedRegex,
+        concurrency: 8, // plenty of room for interleaving
+      });
+      // Each file emits one match per unique-matching line. Across all
+      // files, total = NUM_FILES * MATCHES_PER_FILE. If the race were
+      // present, some files would miss matches whose `index` is
+      // behind a concurrent worker's advanced `lastIndex`.
+      const perFile = new Map<string, number>();
+      for (const m of matches) {
+        perFile.set(m.path, (perFile.get(m.path) ?? 0) + 1);
+      }
+      expect(perFile.size).toBe(NUM_FILES);
+      for (const [file, count] of perFile) {
+        expect([file, count]).toEqual([file, MATCHES_PER_FILE]);
+      }
+    } finally {
+      cleanup();
+    }
+  });
+});
