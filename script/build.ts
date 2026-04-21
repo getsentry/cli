@@ -303,6 +303,17 @@ async function compileTarget(target: BuildTarget): Promise<boolean> {
           | "bun-linux-arm64-musl"
           | "bun-windows-x64",
         outfile,
+        // Deterministic runtime: don't let a `.env` or `bunfig.toml` in the
+        // user's CWD silently inject configuration into the compiled CLI.
+        // Our env vars (SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_DSN, ...) are
+        // documented as shell-level; picking them up from a project-local
+        // `.env.local` is a footgun — e.g. a Next.js project's file could
+        // override the stored OAuth token via `getRawEnvToken()` in
+        // `src/lib/db/auth.ts`, or pre-empt DSN auto-detection in
+        // `src/lib/resolve-target.ts`. Users who want these vars set in a
+        // directory can use `direnv` or source their `.env` explicitly.
+        autoloadDotenv: false,
+        autoloadBunfig: false,
       },
       // "linked" embeds a sourcemap in the binary. At runtime, Bun's engine
       // auto-resolves Error.stack positions through this embedded map back to
@@ -312,6 +323,12 @@ async function compileTarget(target: BuildTarget): Promise<boolean> {
       // Minify whitespace and syntax but NOT identifiers to avoid Bun's
       // identifier renaming collision bug (oven-sh/bun#14585).
       minify: { whitespace: true, syntax: true, identifiers: false },
+      // NOTE: `bytecode: true` would move JS parse cost from startup to
+      // build time, but as of Bun 1.3.11 it crashes our ESM bundle at
+      // runtime with "Expected CommonJS module to have a function wrapper"
+      // before any of our code runs. Likely related to oven-sh/bun#21097 /
+      // #23490. Revisit once Bun's bytecode path stabilizes for our two-
+      // step esbuild-then-compile pipeline.
     });
 
     if (!result.success) {
