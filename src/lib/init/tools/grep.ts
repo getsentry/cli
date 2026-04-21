@@ -1,285 +1,108 @@
-import fs from "node:fs";
-import path from "node:path";
-import { MAX_FILE_BYTES } from "../constants.js";
-import type { GrepPayload, ToolResult } from "../types.js";
-import {
-  isGitRepo,
-  resolveSearchTarget,
-  spawnSearchProcess,
-  walkFiles,
-} from "./search-utils.js";
+/**
+ * Init-wizard `grep` tool adapter.
+ *
+ * Thin wrapper over `collectGrep` from `src/lib/scan/`. Historically
+ * this file contained a `rg → git grep → fs walk` fallback chain with
+ * ~300 LOC of subprocess-spawn plumbing; that was all replaced by the
+ * pure-TS scanner shipped in PR #791. This adapter now just:
+ *
+ * 1. Sandboxes the user-supplied `search.path` via `safePath`.
+ * 2. Forwards each `GrepSearch` to `collectGrep` with the wire-level
+ *    constants (`maxResults`, `maxLineLength`) plumbed through.
+ * 3. Strips the `absolutePath` field from each `GrepMatch` before
+ *    returning — the Mastra wire contract has never included it.
+ * 4. Catches `ValidationError` from `compilePattern` so a bad regex
+ *    from the agent surfaces as an empty result for that search
+ *    (rather than taking down the whole payload).
+ */
+
+import { ValidationError } from "../../errors.js";
+import { collectGrep } from "../../scan/index.js";
+import type { GrepPayload, GrepSearch, ToolResult } from "../types.js";
+import { safePath } from "./shared.js";
 import type { InitToolDefinition } from "./types.js";
 
 const MAX_GREP_RESULTS_PER_SEARCH = 100;
 const MAX_GREP_LINE_LENGTH = 2000;
-const GREP_LINE_RE = /^(.+?):(\d+):(.*)$/;
 
-type GrepMatch = { path: string; lineNum: number; line: string };
+/** Per-match shape on the wire — no `absolutePath`, by contract. */
+type WireGrepMatch = { path: string; lineNum: number; line: string };
 
-function truncateMatchLine(line: string): string {
-  if (line.length <= MAX_GREP_LINE_LENGTH) {
-    return line;
-  }
-  return `${line.substring(0, MAX_GREP_LINE_LENGTH)}…`;
-}
+type SearchResult = {
+  pattern: string;
+  matches: WireGrepMatch[];
+  truncated: boolean;
+};
 
-function limitMatches<T>(
-  matches: T[],
-  maxResults: number
-): { matches: T[]; truncated: boolean } {
-  const truncated = matches.length > maxResults;
-  if (truncated) {
-    matches.length = maxResults;
-  }
-  return { matches, truncated };
-}
-
-function parseRgGrepOutput(
+/**
+ * Run one `GrepSearch`. Throws if `safePath` rejects `search.path`;
+ * caller (`grep`) hoists the throw to the registry's error path.
+ */
+async function runOneSearch(
   cwd: string,
-  stdout: string,
+  search: GrepSearch,
   maxResults: number
-): { matches: GrepMatch[]; truncated: boolean } {
-  const lines = stdout.split("\n").filter(Boolean);
-  const matches: GrepMatch[] = [];
-
-  for (const line of lines.slice(0, maxResults)) {
-    const firstSep = line.indexOf("|");
-    if (firstSep === -1) {
-      continue;
-    }
-
-    const filePart = line.substring(0, firstSep);
-    const rest = line.substring(firstSep + 1);
-    const secondSep = rest.indexOf("|");
-    if (secondSep === -1) {
-      continue;
-    }
-
-    const lineNum = Number.parseInt(rest.substring(0, secondSep), 10);
-    const text = truncateMatchLine(rest.substring(secondSep + 1));
-    matches.push({ path: path.relative(cwd, filePart), lineNum, line: text });
+): Promise<SearchResult> {
+  // Validate the subpath against the sandbox. `safePath` throws on
+  // escape attempts — the scan engine explicitly trusts its `path`
+  // input (see `src/lib/scan/types.ts::GrepOptions.path`), so the
+  // adapter is the correct place to enforce sandboxing. We only need
+  // the validation side effect; `collectGrep` takes a cwd-relative
+  // subpath, so we pass `search.path` through unchanged afterward.
+  if (search.path !== undefined) {
+    safePath(cwd, search.path);
   }
 
-  return {
-    matches,
-    truncated: lines.length > maxResults,
-  };
-}
-
-async function rgGrepSearch(opts: {
-  cwd: string;
-  pattern: string;
-  target: string;
-  include: string | undefined;
-  maxResults: number;
-}): Promise<{ matches: GrepMatch[]; truncated: boolean }> {
-  const args = [
-    "-nH",
-    "--no-messages",
-    "--hidden",
-    "--field-match-separator=|",
-    "--regexp",
-    opts.pattern,
-  ];
-  if (opts.include) {
-    args.push("--glob", opts.include);
-  }
-  args.push(opts.target);
-
-  const { stdout, exitCode } = await spawnSearchProcess("rg", args, opts.cwd);
-  if (exitCode === 1 || (exitCode === 2 && !stdout.trim())) {
-    return { matches: [], truncated: false };
-  }
-  if (exitCode !== 0 && exitCode !== 2) {
-    throw new Error(`ripgrep failed with exit code ${exitCode}`);
-  }
-
-  return parseRgGrepOutput(opts.cwd, stdout, opts.maxResults);
-}
-
-function compilePattern(pattern: string): RegExp | null {
   try {
-    return new RegExp(pattern);
-  } catch {
-    return null;
-  }
-}
-
-async function readSearchableFile(absPath: string): Promise<string | null> {
-  try {
-    const stat = await fs.promises.stat(absPath);
-    if (stat.size > MAX_FILE_BYTES) {
-      return null;
-    }
-    return await fs.promises.readFile(absPath, "utf-8");
-  } catch {
-    return null;
-  }
-}
-
-function findRegexMatches(
-  relPath: string,
-  content: string,
-  regex: RegExp,
-  maxResults: number
-): GrepMatch[] {
-  const matches: GrepMatch[] = [];
-  const lines = content.split("\n");
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i] ?? "";
-    regex.lastIndex = 0;
-    if (!regex.test(line)) {
-      continue;
-    }
-
-    matches.push({
-      path: relPath,
-      lineNum: i + 1,
-      line: truncateMatchLine(line),
+    const { matches, stats } = await collectGrep({
+      cwd,
+      pattern: search.pattern,
+      include: search.include,
+      path: search.path,
+      // `caseInsensitive` is the wire shape; the scan engine exposes
+      // the inverse (`caseSensitive`). Pass `undefined` when the
+      // caller didn't set it so the engine's default (rg-like,
+      // case-sensitive) takes effect.
+      caseSensitive: search.caseInsensitive === true ? false : undefined,
+      multiline: search.multiline,
+      maxResults,
+      maxLineLength: MAX_GREP_LINE_LENGTH,
     });
-    if (matches.length > maxResults) {
-      break;
+    return {
+      pattern: search.pattern,
+      // Strip `absolutePath` — not part of the Mastra wire contract.
+      matches: matches.map((m) => ({
+        path: m.path,
+        lineNum: m.lineNum,
+        line: m.line,
+      })),
+      truncated: stats.truncated,
+    };
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      // Malformed regex from the agent. Surface as an empty row for
+      // this search rather than aborting the whole payload — lets the
+      // agent retry with a corrected pattern.
+      return { pattern: search.pattern, matches: [], truncated: false };
     }
-  }
-
-  return matches;
-}
-
-async function fsGrepSearch(opts: {
-  cwd: string;
-  pattern: string;
-  searchPath: string | undefined;
-  include: string | undefined;
-  maxResults: number;
-}): Promise<{ matches: GrepMatch[]; truncated: boolean }> {
-  const target = resolveSearchTarget(opts.cwd, opts.searchPath);
-  const regex = compilePattern(opts.pattern);
-  if (!regex) {
-    return { matches: [], truncated: false };
-  }
-
-  const matches: GrepMatch[] = [];
-  for await (const rel of walkFiles(opts.cwd, target, opts.include)) {
-    if (matches.length > opts.maxResults) {
-      break;
-    }
-
-    const absPath = path.join(opts.cwd, rel);
-    const content = await readSearchableFile(absPath);
-    if (!content) {
-      continue;
-    }
-
-    matches.push(
-      ...findRegexMatches(
-        rel,
-        content,
-        regex,
-        opts.maxResults - matches.length + 1
-      )
-    );
-  }
-
-  return limitMatches(matches, opts.maxResults);
-}
-
-function parseGrepOutput(
-  stdout: string,
-  maxResults: number,
-  pathPrefix?: string
-): { matches: GrepMatch[]; truncated: boolean } {
-  const matches: GrepMatch[] = [];
-  for (const line of stdout.split("\n").filter(Boolean)) {
-    const match = line.match(GREP_LINE_RE);
-    if (!(match?.[1] && match[2] && match[3] !== undefined)) {
-      continue;
-    }
-
-    matches.push({
-      path: pathPrefix ? path.join(pathPrefix, match[1]) : match[1],
-      lineNum: Number.parseInt(match[2], 10),
-      line: truncateMatchLine(match[3]),
-    });
-    if (matches.length > maxResults) {
-      break;
-    }
-  }
-
-  return limitMatches(matches, maxResults);
-}
-
-async function gitGrepSearch(opts: {
-  cwd: string;
-  pattern: string;
-  target: string;
-  include: string | undefined;
-  maxResults: number;
-}): Promise<{ matches: GrepMatch[]; truncated: boolean }> {
-  const args = ["grep", "--untracked", "-n", "-E", opts.pattern];
-  if (opts.include) {
-    args.push("--", opts.include);
-  }
-
-  const { stdout, exitCode } = await spawnSearchProcess(
-    "git",
-    args,
-    opts.target
-  );
-  if (exitCode === 1) {
-    return { matches: [], truncated: false };
-  }
-  if (exitCode !== 0) {
-    throw new Error(`git grep failed with exit code ${exitCode}`);
-  }
-
-  const prefix = path.relative(opts.cwd, opts.target);
-  return parseGrepOutput(stdout, opts.maxResults, prefix || undefined);
-}
-
-async function grepSearch(opts: {
-  cwd: string;
-  pattern: string;
-  searchPath: string | undefined;
-  include: string | undefined;
-  maxResults: number;
-}): Promise<{ matches: GrepMatch[]; truncated: boolean }> {
-  const target = resolveSearchTarget(opts.cwd, opts.searchPath);
-  const resolvedOpts = { ...opts, target };
-
-  try {
-    return await rgGrepSearch(resolvedOpts);
-  } catch {
-    if (isGitRepo(opts.cwd)) {
-      try {
-        return await gitGrepSearch(resolvedOpts);
-      } catch {
-        // fall through to filesystem search
-      }
-    }
-    return await fsGrepSearch(opts);
+    throw error;
   }
 }
 
 /**
  * Search project files for one or more regex patterns.
+ *
+ * Searches run in parallel via `Promise.all` — preserves the
+ * concurrency shape of the pre-PR implementation.
  */
 export async function grep(payload: GrepPayload): Promise<ToolResult> {
   const maxResults =
     payload.params.maxResultsPerSearch ?? MAX_GREP_RESULTS_PER_SEARCH;
   const results = await Promise.all(
-    payload.params.searches.map(async (search) => {
-      const { matches, truncated } = await grepSearch({
-        cwd: payload.cwd,
-        pattern: search.pattern,
-        searchPath: search.path,
-        include: search.include,
-        maxResults,
-      });
-      return { pattern: search.pattern, matches, truncated };
-    })
+    payload.params.searches.map((search) =>
+      runOneSearch(payload.cwd, search, maxResults)
+    )
   );
-
   return { ok: true, data: { results } };
 }
 

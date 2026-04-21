@@ -1,131 +1,60 @@
-import path from "node:path";
+/**
+ * Init-wizard `glob` tool adapter.
+ *
+ * Thin wrapper over `collectGlob` from `src/lib/scan/`. Historically
+ * this file contained a `rg --files → git ls-files → fs walk` fallback
+ * chain with ~150 LOC of subprocess plumbing; all replaced by the
+ * pure-TS scanner from PR #791. This adapter:
+ *
+ * 1. Sandboxes the user-supplied `params.path` via `safePath` (once,
+ *    since it's shared across all patterns).
+ * 2. Runs each pattern as a separate `collectGlob` call — the wire
+ *    contract returns one result row per pattern, with its own
+ *    `truncated` flag. `collectGlob` accepts a `patterns` array but
+ *    unions them, which would lose per-pattern attribution.
+ * 3. Passes each pattern's `files` + `truncated` straight through.
+ */
+
+import { collectGlob } from "../../scan/index.js";
 import type { GlobPayload, ToolResult } from "../types.js";
-import {
-  isGitRepo,
-  resolveSearchTarget,
-  spawnSearchProcess,
-  walkFiles,
-} from "./search-utils.js";
+import { safePath } from "./shared.js";
 import type { InitToolDefinition } from "./types.js";
 
 const MAX_GLOB_RESULTS = 100;
 
-async function rgGlobSearch(opts: {
-  cwd: string;
+type PatternResult = {
   pattern: string;
-  target: string;
-  maxResults: number;
-}): Promise<{ files: string[]; truncated: boolean }> {
-  const { stdout, exitCode } = await spawnSearchProcess(
-    "rg",
-    ["--files", "--hidden", "--glob", opts.pattern, opts.target],
-    opts.cwd
-  );
-
-  if (exitCode === 1 || (exitCode === 2 && !stdout.trim())) {
-    return { files: [], truncated: false };
-  }
-  if (exitCode !== 0 && exitCode !== 2) {
-    throw new Error(`ripgrep failed with exit code ${exitCode}`);
-  }
-
-  const lines = stdout.split("\n").filter(Boolean);
-  const truncated = lines.length > opts.maxResults;
-  const files = lines
-    .slice(0, opts.maxResults)
-    .map((filePath) => path.relative(opts.cwd, filePath));
-  return { files, truncated };
-}
-
-async function gitLsFiles(opts: {
-  cwd: string;
-  pattern: string;
-  target: string;
-  maxResults: number;
-}): Promise<{ files: string[]; truncated: boolean }> {
-  const { stdout, exitCode } = await spawnSearchProcess(
-    "git",
-    ["ls-files", "--cached", "--others", "--exclude-standard", opts.pattern],
-    opts.target
-  );
-
-  if (exitCode !== 0) {
-    throw new Error(`git ls-files failed with exit code ${exitCode}`);
-  }
-
-  const lines = stdout.split("\n").filter(Boolean);
-  const truncated = lines.length > opts.maxResults;
-  const files = lines
-    .slice(0, opts.maxResults)
-    .map((filePath) =>
-      path.relative(opts.cwd, path.resolve(opts.target, filePath))
-    );
-  return { files, truncated };
-}
-
-async function fsGlobSearch(opts: {
-  cwd: string;
-  pattern: string;
-  searchPath: string | undefined;
-  maxResults: number;
-}): Promise<{ files: string[]; truncated: boolean }> {
-  const target = resolveSearchTarget(opts.cwd, opts.searchPath);
-  const files: string[] = [];
-
-  for await (const rel of walkFiles(opts.cwd, target, opts.pattern)) {
-    files.push(rel);
-    if (files.length > opts.maxResults) {
-      break;
-    }
-  }
-
-  const truncated = files.length > opts.maxResults;
-  if (truncated) {
-    files.length = opts.maxResults;
-  }
-  return { files, truncated };
-}
-
-async function globSearch(opts: {
-  cwd: string;
-  pattern: string;
-  searchPath: string | undefined;
-  maxResults: number;
-}): Promise<{ files: string[]; truncated: boolean }> {
-  const target = resolveSearchTarget(opts.cwd, opts.searchPath);
-  const resolvedOpts = { ...opts, target };
-
-  try {
-    return await rgGlobSearch(resolvedOpts);
-  } catch {
-    if (isGitRepo(opts.cwd)) {
-      try {
-        return await gitLsFiles(resolvedOpts);
-      } catch {
-        // fall through to filesystem search
-      }
-    }
-    return await fsGlobSearch(opts);
-  }
-}
+  files: string[];
+  truncated: boolean;
+};
 
 /**
  * Find files matching one or more glob patterns.
+ *
+ * Patterns run in parallel via `Promise.all` — preserves the
+ * concurrency shape of the pre-PR implementation.
  */
 export async function glob(payload: GlobPayload): Promise<ToolResult> {
   const maxResults = payload.params.maxResults ?? MAX_GLOB_RESULTS;
-  const results = await Promise.all(
+
+  // Validate the optional subpath once before spawning per-pattern
+  // calls — a single throw aborts the whole payload, which matches
+  // the registry's sandbox-reject contract.
+  if (payload.params.path !== undefined) {
+    safePath(payload.cwd, payload.params.path);
+  }
+
+  const results: PatternResult[] = await Promise.all(
     payload.params.patterns.map(async (pattern) => {
-      const { files, truncated } = await globSearch({
+      const { files, truncated } = await collectGlob({
         cwd: payload.cwd,
-        pattern,
-        searchPath: payload.params.path,
+        patterns: pattern,
+        path: payload.params.path,
         maxResults,
       });
       return { pattern, files, truncated };
     })
   );
-
   return { ok: true, data: { results } };
 }
 
