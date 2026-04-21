@@ -6,7 +6,7 @@ import { getEnv } from "../env.js";
 import { clearResponseCache } from "../response-cache.js";
 import { withDbSpan } from "../telemetry.js";
 import { getDatabase } from "./index.js";
-import { runUpsert } from "./utils.js";
+import { clearMetadataByPrefix, runUpsert } from "./utils.js";
 
 /** Refresh when less than 10% of token lifetime remains */
 export const REFRESH_THRESHOLD = 0.1;
@@ -226,10 +226,13 @@ export async function clearAuth(): Promise<void> {
   withDbSpan("clearAuth", () => {
     const db = getDatabase();
     db.query("DELETE FROM auth WHERE id = 1").run();
-    // Also clear user info, org region cache, and pagination cursors when logging out
+    // Also clear user info, org region cache, pagination cursors, and the
+    // issue-id → org cache (scoped to the current user's permissions) when
+    // logging out.
     db.query("DELETE FROM user_info WHERE id = 1").run();
     db.query("DELETE FROM org_regions").run();
     db.query("DELETE FROM pagination_cursors").run();
+    clearMetadataByPrefix(db, "issue_org.");
   });
 
   // Clear cached API responses — they are tied to the current user's permissions.

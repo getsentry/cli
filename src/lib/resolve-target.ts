@@ -31,6 +31,7 @@ import { getCachedDsn, setCachedDsn } from "./db/dsn-cache.js";
 import {
   getCachedProject,
   getCachedProjectByDsnKey,
+  getCachedProjectBySlug,
   setCachedProject,
   setCachedProjectByDsnKey,
 } from "./db/project-cache.js";
@@ -821,11 +822,29 @@ export async function triageProjectNotFound(
  *
  * On 404, attempts to list similar projects in the org to help the
  * user find the correct slug (CLI-C0, 36 users).
+ *
+ * Consults the slug-based project cache first to avoid an extra
+ * `GET /projects/{org}/{project}/` call on every `<org>/<project>`
+ * invocation. The cache is populated by `listProjects()` (batch) and
+ * by DSN resolution. Cache entries without a `projectId` fall through
+ * to the API call (older rows from before schema v7).
  */
 export async function fetchProjectId(
   org: string,
   project: string
 ): Promise<number | undefined> {
+  // Cache-first: avoid a round trip when `listProjects()` or DSN resolution
+  // has already populated the entry for this (org, project) slug pair.
+  // Addresses the `sentry.issue.list` "Consecutive HTTP" performance issue
+  // where the preflight project lookup ran before every issues fetch.
+  const cached = getCachedProjectBySlug(org, project);
+  if (cached?.projectId) {
+    const numeric = toNumericId(cached.projectId);
+    if (numeric !== undefined) {
+      return numeric;
+    }
+  }
+
   const projectResult = await withAuthGuard(() => getProject(org, project));
   if (!projectResult.ok) {
     if (
@@ -851,7 +870,22 @@ export async function fetchProjectId(
     }
     return;
   }
-  return toNumericId(projectResult.value.id);
+
+  // Populate the cache for next time. The `getProject` response carries the
+  // numeric project ID and (usually) the organization payload; use whatever
+  // is available to seed future lookups.
+  const project_ = projectResult.value;
+  if (project_.organization) {
+    setCachedProject(project_.organization.id, project_.id, {
+      orgSlug: project_.organization.slug,
+      orgName: project_.organization.name,
+      projectSlug: project_.slug,
+      projectName: project_.name,
+      projectId: project_.id,
+    });
+  }
+
+  return toNumericId(project_.id);
 }
 
 /**

@@ -10,6 +10,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { array, constantFrom, assert as fcAssert, property } from "fast-check";
 import { DEFAULT_SENTRY_URL } from "../../src/lib/constants.js";
 import { setAuthToken } from "../../src/lib/db/auth.js";
+import {
+  cacheProjectsForOrg,
+  clearProjectCache,
+  getCachedProjectBySlug,
+} from "../../src/lib/db/project-cache.js";
 import { setOrgRegion } from "../../src/lib/db/regions.js";
 import { AuthError, ResolutionError } from "../../src/lib/errors.js";
 import {
@@ -479,6 +484,88 @@ describe("fetchProjectId", () => {
 
     const result = await fetchProjectId("test-org", "test-project");
     expect(result).toBeUndefined();
+  });
+
+  test("returns cached project ID without hitting the API", async () => {
+    await setAuthToken("test-token");
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    clearProjectCache();
+    // Seed the cache via cacheProjectsForOrg (the `list:` key path) as
+    // `listProjects()` does in production.
+    cacheProjectsForOrg("test-org", "Test Org", [
+      { id: "999", slug: "cached-project", name: "Cached Project" },
+    ]);
+
+    let apiCalled = false;
+    globalThis.fetch = mockFetch(async () => {
+      apiCalled = true;
+      return new Response("should not be called", { status: 500 });
+    });
+
+    const result = await fetchProjectId("test-org", "cached-project");
+    expect(result).toBe(999);
+    expect(apiCalled).toBe(false);
+  });
+
+  test("writes the response to the project cache on a cache miss", async () => {
+    await setAuthToken("test-token");
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    clearProjectCache();
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/api/0/projects/test-org/fresh-project/")) {
+        return Response.json({
+          id: "1234",
+          slug: "fresh-project",
+          name: "Fresh Project",
+          organization: {
+            id: "500",
+            slug: "test-org",
+            name: "Test Org",
+          },
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    });
+
+    await fetchProjectId("test-org", "fresh-project");
+
+    // After the call, the cache should be populated so a subsequent call
+    // skips the API entirely.
+    const cached = getCachedProjectBySlug("test-org", "fresh-project");
+    expect(cached).toBeDefined();
+    expect(cached?.projectId).toBe("1234");
+    expect(cached?.projectName).toBe("Fresh Project");
+  });
+
+  test("falls through to API when the cache has no projectId (legacy rows)", async () => {
+    await setAuthToken("test-token");
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    clearProjectCache();
+    // Seed a cache entry WITHOUT a projectId (mirrors pre-schema-v7 rows).
+    const { setCachedProject } = await import(
+      "../../src/lib/db/project-cache.js"
+    );
+    setCachedProject("org-id", "proj-id", {
+      orgSlug: "test-org",
+      orgName: "Test Org",
+      projectSlug: "legacy-project",
+      projectName: "Legacy",
+    });
+
+    let apiCalled = false;
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/api/0/projects/test-org/legacy-project/")) {
+        apiCalled = true;
+        return Response.json({ id: "777", slug: "legacy-project" });
+      }
+      return new Response("Not found", { status: 404 });
+    });
+
+    const result = await fetchProjectId("test-org", "legacy-project");
+    expect(result).toBe(777);
+    expect(apiCalled).toBe(true);
   });
 });
 
