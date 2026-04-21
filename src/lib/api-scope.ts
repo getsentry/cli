@@ -72,12 +72,10 @@ const SENTRY_SCOPES = [
  *
  * Using an explicit alternation (rather than a `<ns>:<action>` product)
  * avoids matching nonexistent combinations like `release:write` or
- * `alerts:admin`, which `SENTRY_SCOPES` doesn't list.
+ * `alerts:admin`, which `SENTRY_SCOPES` doesn't list. `:` is not a
+ * regex metacharacter so the scope strings need no escaping.
  */
-const KNOWN_SCOPE_RE = new RegExp(
-  `\\b(?:${SENTRY_SCOPES.map((s) => s.replace(":", ":")).join("|")})\\b`,
-  "gi"
-);
+const KNOWN_SCOPE_RE = new RegExp(`\\b(?:${SENTRY_SCOPES.join("|")})\\b`, "gi");
 
 /**
  * Extract Sentry scope identifiers from a 403 response detail value.
