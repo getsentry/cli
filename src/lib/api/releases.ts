@@ -5,7 +5,6 @@
  * Sentry releases in an organization.
  */
 
-import type { DeployResponse, OrgReleaseResponse } from "@sentry/api";
 import {
   createADeploy,
   createANewReleaseForAnOrganization,
@@ -16,7 +15,7 @@ import {
   retrieveAnOrganization_sRelease,
   updateAnOrganization_sRelease,
 } from "@sentry/api";
-
+import type { SentryDeploy, SentryRelease } from "../../types/index.js";
 import { ApiError, ValidationError } from "../errors.js";
 import { getHeadCommit, getRepositoryName } from "../git.js";
 import { resolveOrgRegion } from "../region.js";
@@ -68,7 +67,7 @@ export type ListReleasesOptions = {
 export async function listReleasesPaginated(
   orgSlug: string,
   options: ListReleasesOptions = {}
-): Promise<PaginatedResponse<OrgReleaseResponse[]>> {
+): Promise<PaginatedResponse<SentryRelease[]>> {
   const config = await getOrgSdkConfig(orgSlug);
 
   const result = await listAnOrganization_sReleases({
@@ -88,9 +87,9 @@ export async function listReleasesPaginated(
     } as { cursor?: string },
   });
 
-  return unwrapPaginatedResult<OrgReleaseResponse[]>(
+  return unwrapPaginatedResult<SentryRelease[]>(
     result as
-      | { data: OrgReleaseResponse[]; error: undefined }
+      | { data: SentryRelease[]; error: undefined }
       | { data: undefined; error: unknown },
     "Failed to list releases"
   );
@@ -106,7 +105,7 @@ export async function listReleasesForProject(
   orgSlug: string,
   projectSlug: string,
   options: Omit<ListReleasesOptions, "project"> = {}
-): Promise<OrgReleaseResponse[]> {
+): Promise<SentryRelease[]> {
   // Resolve slug → numeric ID (the API requires numeric project IDs)
   const info = await getProject(orgSlug, projectSlug);
   const numericId = Number(info.id);
@@ -152,7 +151,7 @@ export async function getRelease(
     /** Period for health stats: "24h", "7d", "14d", etc. Defaults to "24h". */
     healthStatsPeriod?: string;
   }
-): Promise<OrgReleaseResponse> {
+): Promise<SentryRelease> {
   const config = await getOrgSdkConfig(orgSlug);
 
   const result = await retrieveAnOrganization_sRelease({
@@ -179,7 +178,7 @@ export async function getRelease(
   });
 
   const data = unwrapResult(result, `Failed to get release '${version}'`);
-  return data as unknown as OrgReleaseResponse;
+  return data as unknown as SentryRelease;
 }
 
 /**
@@ -206,7 +205,7 @@ export async function createRelease(
       timestamp?: string;
     }>;
   }
-): Promise<OrgReleaseResponse> {
+): Promise<SentryRelease> {
   const config = await getOrgSdkConfig(orgSlug);
 
   // Cast body through unknown — the SDK's body type requires `projects: string[]`
@@ -221,10 +220,10 @@ export async function createRelease(
 
   // 208 = release already exists (idempotent) — treat as success
   if (result.data) {
-    return result.data as unknown as OrgReleaseResponse;
+    return result.data as unknown as SentryRelease;
   }
   const data = unwrapResult(result, "Failed to create release");
-  return data as unknown as OrgReleaseResponse;
+  return data as unknown as SentryRelease;
 }
 
 /**
@@ -251,7 +250,7 @@ export async function updateRelease(
       timestamp?: string;
     }>;
   }
-): Promise<OrgReleaseResponse> {
+): Promise<SentryRelease> {
   const config = await getOrgSdkConfig(orgSlug);
 
   const result = await updateAnOrganization_sRelease({
@@ -266,7 +265,7 @@ export async function updateRelease(
   });
 
   const data = unwrapResult(result, `Failed to update release '${version}'`);
-  return data as unknown as OrgReleaseResponse;
+  return data as unknown as SentryRelease;
 }
 
 /**
@@ -302,7 +301,7 @@ export async function deleteRelease(
 export async function listReleaseDeploys(
   orgSlug: string,
   version: string
-): Promise<DeployResponse[]> {
+): Promise<SentryDeploy[]> {
   const config = await getOrgSdkConfig(orgSlug);
 
   const result = await listARelease_sDeploys({
@@ -317,7 +316,7 @@ export async function listReleaseDeploys(
     result,
     `Failed to list deploys for release '${version}'`
   );
-  return data as unknown as DeployResponse[];
+  return data as unknown as SentryDeploy[];
 }
 
 /**
@@ -338,7 +337,7 @@ export async function createReleaseDeploy(
     dateStarted?: string;
     dateFinished?: string;
   }
-): Promise<DeployResponse> {
+): Promise<SentryDeploy> {
   const config = await getOrgSdkConfig(orgSlug);
 
   const result = await createADeploy({
@@ -351,7 +350,7 @@ export async function createReleaseDeploy(
   });
 
   const data = unwrapResult(result, "Failed to create deploy");
-  return data as unknown as DeployResponse;
+  return data as unknown as SentryDeploy;
 }
 
 /**
@@ -411,7 +410,7 @@ export async function setCommitsAuto(
   orgSlug: string,
   version: string,
   cwd?: string
-): Promise<OrgReleaseResponse> {
+): Promise<SentryRelease> {
   const localRepo = getRepositoryName(cwd);
   if (!localRepo) {
     throw new ValidationError(
@@ -494,10 +493,10 @@ export async function setCommitsWithRefs(
     commit: string;
     previousCommit?: string;
   }>
-): Promise<OrgReleaseResponse> {
+): Promise<SentryRelease> {
   const regionUrl = await resolveOrgRegion(orgSlug);
   const encodedVersion = encodeURIComponent(version);
-  const { data } = await apiRequestToRegion<OrgReleaseResponse>(
+  const { data } = await apiRequestToRegion<SentryRelease>(
     regionUrl,
     `organizations/${orgSlug}/releases/${encodedVersion}/`,
     {
@@ -527,7 +526,7 @@ export function setCommitsLocal(
     author_email?: string;
     timestamp?: string;
   }>
-): Promise<OrgReleaseResponse> {
+): Promise<SentryRelease> {
   return updateRelease(orgSlug, version, { commits });
 }
 

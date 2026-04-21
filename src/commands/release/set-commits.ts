@@ -4,7 +4,6 @@
  * Associate commits with a release using auto-discovery or local git history.
  */
 
-import type { OrgReleaseResponse } from "@sentry/api";
 import type { SentryContext } from "../../context.js";
 import {
   setCommitsAuto,
@@ -30,6 +29,7 @@ import {
 } from "../../lib/git.js";
 import { logger } from "../../lib/logger.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
+import type { SentryRelease } from "../../types/index.js";
 import { parseReleaseArg } from "./parse.js";
 
 const log = logger.withTag("release.set-commits");
@@ -40,7 +40,7 @@ function setCommitsFromLocal(
   version: string,
   cwd: string,
   depth: number
-): Promise<OrgReleaseResponse> {
+): Promise<SentryRelease> {
   const shallow = isShallowRepository(cwd);
   if (shallow) {
     log.warn(
@@ -123,7 +123,7 @@ async function setCommitsDefault(
   version: string,
   cwd: string,
   depth: number
-): Promise<OrgReleaseResponse> {
+): Promise<SentryRelease> {
   // Fast path: cached "no repos" — skip the API call entirely
   if (hasNoRepoIntegration(org)) {
     return setCommitsFromLocal(org, version, cwd, depth);
@@ -153,7 +153,7 @@ async function setCommitsDefault(
   }
 }
 
-function formatCommitsSet(release: OrgReleaseResponse): string {
+function formatCommitsSet(release: SentryRelease): string {
   const lines: string[] = [];
   lines.push(`## Commits Set: ${escapeMarkdownInline(release.version)}`);
   lines.push("");
@@ -310,7 +310,7 @@ export const setCommitsCommand = buildCommand({
       return;
     }
 
-    let release: OrgReleaseResponse;
+    let release: SentryRelease;
 
     if (flags.local) {
       // Explicit --local: use local git only

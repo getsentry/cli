@@ -4,7 +4,6 @@
  * Create a new Sentry release.
  */
 
-import type { OrgReleaseResponse } from "@sentry/api";
 import type { SentryContext } from "../../context.js";
 import { createRelease } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
@@ -19,9 +18,10 @@ import {
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { DRY_RUN_ALIASES, DRY_RUN_FLAG } from "../../lib/mutate-command.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
+import type { SentryRelease } from "../../types/index.js";
 import { parseReleaseArg } from "./parse.js";
 
-function formatReleaseCreated(release: OrgReleaseResponse): string {
+function formatReleaseCreated(release: SentryRelease): string {
   const lines: string[] = [];
   lines.push(`## Release Created: ${escapeMarkdownInline(release.version)}`);
   lines.push("");
@@ -71,7 +71,7 @@ export const createCommand = buildCommand({
             " (dry run)"
         );
       }
-      return formatReleaseCreated(data as OrgReleaseResponse);
+      return formatReleaseCreated(data as SentryRelease);
     },
   },
   parameters: {

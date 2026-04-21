@@ -14,17 +14,17 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import type { OrgReleaseResponse } from "@sentry/api";
 import { viewCommand } from "../../../src/commands/release/view.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
+import type { SentryRelease } from "../../../src/types/index.js";
 import { useTestConfigDir } from "../../helpers.js";
 
 useTestConfigDir("release-view-");
 
-const sampleRelease: OrgReleaseResponse = {
+const sampleRelease: SentryRelease = {
   id: 1,
   version: "1.0.0",
   shortVersion: "1.0.0",
@@ -53,7 +53,7 @@ const sampleRelease: OrgReleaseResponse = {
 };
 
 /** Sample release with per-project health data populated (as from `?health=1`). */
-const sampleReleaseWithHealth: OrgReleaseResponse = {
+const sampleReleaseWithHealth: SentryRelease = {
   ...sampleRelease,
   projects: [
     {

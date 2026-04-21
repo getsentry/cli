@@ -7,7 +7,6 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { DeployResponse, OrgReleaseResponse } from "@sentry/api";
 import {
   createRelease,
   createReleaseDeploy,
@@ -20,11 +19,12 @@ import {
 } from "../../../src/lib/api/releases.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
+import type { SentryDeploy, SentryRelease } from "../../../src/types/index.js";
 import { mockFetch, useTestConfigDir } from "../../helpers.js";
 
 useTestConfigDir("api-releases-");
 
-const SAMPLE_RELEASE: OrgReleaseResponse = {
+const SAMPLE_RELEASE: SentryRelease = {
   id: 1,
   version: "1.0.0",
   shortVersion: "1.0.0",
@@ -54,7 +54,7 @@ const SAMPLE_RELEASE: OrgReleaseResponse = {
   versionInfo: null,
 };
 
-const SAMPLE_DEPLOY: DeployResponse = {
+const SAMPLE_DEPLOY: SentryDeploy = {
   id: "42",
   environment: "production",
   dateStarted: null,
