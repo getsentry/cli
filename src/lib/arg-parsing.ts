@@ -237,7 +237,10 @@ export function detectSwappedTrialArgs(
 export function validateLimit(value: string, min = 1, max = 1000): number {
   const num = Number.parseInt(value, 10);
   if (Number.isNaN(num) || num < min || num > max) {
-    throw new Error(`--limit must be between ${min} and ${max}`);
+    throw new ValidationError(
+      `--limit must be between ${min} and ${max}`,
+      "limit"
+    );
   }
   return num;
 }
@@ -257,8 +260,9 @@ const VALID_LOG_SORT_DIRECTIONS: readonly LogSortDirection[] = [
  */
 export function parseLogSort(value: string): LogSortDirection {
   if (!VALID_LOG_SORT_DIRECTIONS.includes(value as LogSortDirection)) {
-    throw new Error(
-      `Invalid sort value. Must be one of: ${VALID_LOG_SORT_DIRECTIONS.join(", ")}`
+    throw new ValidationError(
+      `Invalid sort value. Must be one of: ${VALID_LOG_SORT_DIRECTIONS.join(", ")}`,
+      "sort"
     );
   }
   return value as LogSortDirection;
@@ -495,7 +499,7 @@ function parseSlashOrgProject(input: string): ParsedOrgProject {
   if (!rawOrg) {
     // "/cli" → search for project across all orgs
     if (!rawProject) {
-      throw new Error(
+      throw new ValidationError(
         'Invalid format: "/" requires a project slug (e.g., "/cli")'
       );
     }
@@ -705,8 +709,9 @@ function parseMultiSlashIssueArg(
   const remainder = rest.slice(slashIdx + 1);
 
   if (!(project && remainder)) {
-    throw new Error(
-      `Invalid issue format: "${arg}". Missing project or issue ID segment.`
+    throw new ValidationError(
+      `Invalid issue format: "${arg}". Missing project or issue ID segment.`,
+      "issue"
     );
   }
 
@@ -781,14 +786,16 @@ function parseAfterSlash(
     const suffix = rest.slice(lastDash + 1).toUpperCase();
 
     if (!project) {
-      throw new Error(
-        `Invalid issue format: "${arg}". Cannot use trailing slash before suffix.`
+      throw new ValidationError(
+        `Invalid issue format: "${arg}". Cannot use trailing slash before suffix.`,
+        "issue"
       );
     }
 
     if (!suffix) {
-      throw new Error(
-        `Invalid issue format: "${arg}". Missing suffix after dash.`
+      throw new ValidationError(
+        `Invalid issue format: "${arg}". Missing suffix after dash.`,
+        "issue"
       );
     }
 
@@ -810,8 +817,9 @@ function parseWithSlash(arg: string): ParsedIssueArg {
   const rest = arg.slice(slashIdx + 1);
 
   if (!rest) {
-    throw new Error(
-      `Invalid issue format: "${arg}". Missing issue ID after slash.`
+    throw new ValidationError(
+      `Invalid issue format: "${arg}". Missing issue ID after slash.`,
+      "issue"
     );
   }
 
@@ -836,14 +844,16 @@ function parseWithDash(arg: string): ParsedIssueArg {
   const suffix = arg.slice(lastDash + 1).toUpperCase();
 
   if (!projectSlug) {
-    throw new Error(
-      `Invalid issue format: "${arg}". Missing project before suffix.`
+    throw new ValidationError(
+      `Invalid issue format: "${arg}". Missing project before suffix.`,
+      "issue"
     );
   }
 
   if (!suffix) {
-    throw new Error(
-      `Invalid issue format: "${arg}". Missing suffix after dash.`
+    throw new ValidationError(
+      `Invalid issue format: "${arg}". Missing suffix after dash.`,
+      "issue"
     );
   }
 

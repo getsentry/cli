@@ -347,6 +347,20 @@ describe("parseIssueArg", () => {
     test("just slash throws error", () => {
       expect(() => parseIssueArg("/")).toThrow("Missing issue ID after slash");
     });
+
+    test("invalid issue format throws ValidationError (not raw Error)", () => {
+      // Ensures the fingerprint rule's `cli_error.class:"ValidationError"` tag
+      // fires for these user-input errors, so they group under the canonical
+      // ValidationError parent instead of as generic `Error` issues in Sentry.
+      // Regression: CLI-1C9 was created because `parseIssueArg` used raw
+      // `throw new Error(...)` instead of `ValidationError` for format errors.
+      expect(() => parseIssueArg("XQUIK-")).toThrow(ValidationError);
+      expect(() => parseIssueArg("cli-")).toThrow(ValidationError);
+      expect(() => parseIssueArg("sentry/")).toThrow(ValidationError);
+      expect(() => parseIssueArg("sentry/-G")).toThrow(ValidationError);
+      expect(() => parseIssueArg("-G")).toThrow(ValidationError);
+      expect(() => parseIssueArg("/")).toThrow(ValidationError);
+    });
   });
 
   // URL integration tests — applySentryUrlContext may set SENTRY_HOST/SENTRY_URL as a side effect
