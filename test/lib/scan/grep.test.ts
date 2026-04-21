@@ -736,4 +736,40 @@ describe("collectGrep — literal prefilter fast path", () => {
       cleanup();
     }
   });
+
+  test("case-insensitive prefilter handles Unicode length-changing lowercase (Cursor #2)", async () => {
+    // Regression: `toLowerCase()` on content containing Turkish `İ`
+    // (U+0130) produces `i` + U+0307, making the lowercased haystack
+    // LONGER than the original. `haystack.indexOf(literal)` returned
+    // positions that didn't align with `content`, causing
+    // line-boundary math to point at the wrong line or miss later
+    // matches entirely (because `lineEnd + 1` advanced the search
+    // cursor past real match positions).
+    //
+    // Fix: when `toLowerCase().length !== content.length`, fall
+    // back to the whole-buffer regex path, which has no cross-string
+    // position dependency.
+    const { cwd, cleanup } = makeSandbox({
+      "turkish.ts": [
+        "İİİİİİİ line 1 with Sentry.init here",
+        "İİİİİİİ line 2 plain",
+        "İİİİİİİ line 3 with Sentry.init again",
+        "İİİİİİİ line 4 plain",
+      ].join("\n"),
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "Sentry\\.init",
+        caseSensitive: false,
+      });
+      // Both Sentry.init matches on lines 1 and 3 should be found.
+      // Before the fix, only line 1 was found — the lineEnd from
+      // content got passed back to haystack's indexOf and skipped
+      // past line 3's match.
+      expect(matches.map((m) => m.lineNum)).toEqual([1, 3]);
+    } finally {
+      cleanup();
+    }
+  });
 });

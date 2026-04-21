@@ -236,6 +236,7 @@ async function readAndGrep(
  * doesn't guarantee the full regex matches the line (e.g., literal
  * `foo` in pattern `foo(?!bar)`).
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: per-candidate line bounds + verify + line-number + truncation + Unicode guard is inherently branchy
 function grepByLiteralPrefilter(
   content: string,
   entry: WalkEntry,
@@ -244,7 +245,31 @@ function grepByLiteralPrefilter(
 ): GrepMatch[] {
   const matches: GrepMatch[] = [];
   const isCaseInsensitive = opts.regex.flags.includes("i");
-  const haystack = isCaseInsensitive ? content.toLowerCase() : content;
+
+  // Case-insensitive path: lowercase the haystack once and search
+  // for the pre-lowercased `literal`. This is ~50× faster than a
+  // regex engine call per-line but relies on positions in `haystack`
+  // aligning with positions in `content`. JS's `toLowerCase()` can
+  // produce a LONGER string for some Unicode code points (e.g.
+  // Turkish `İ` U+0130 → `i` + U+0307 combining dot, net +1 char).
+  // When length changes, `hit` indices from `haystack` are misaligned
+  // with `content`, breaking line-boundary math and line numbering.
+  //
+  // Guard: when the lengths diverge, fall back to the whole-buffer
+  // regex path (correct but slower). This is cheap to check (one
+  // length comparison) and real source code rarely contains the
+  // problematic characters, so the fast path still fires on the
+  // overwhelming common case.
+  let haystack: string;
+  if (isCaseInsensitive) {
+    const lowered = content.toLowerCase();
+    if (lowered.length !== content.length) {
+      return grepByWholeBuffer(content, entry, opts);
+    }
+    haystack = lowered;
+  } else {
+    haystack = content;
+  }
   const ctx: MatchContext = { entry, opts, content };
 
   // Clone the regex per file (same reasoning as `grepByWholeBuffer`).
