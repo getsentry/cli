@@ -13,7 +13,7 @@ import {
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError, withAuthGuard } from "../../lib/errors.js";
+import { AuthError, ContextError, withAuthGuard } from "../../lib/errors.js";
 import { divider, formatProjectDetails } from "../../lib/formatters/index.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
@@ -92,15 +92,21 @@ type ProjectWithDsn = {
 };
 
 /**
- * Fetch project details and keys for a single target.
- * Returns null on non-auth errors (e.g., no access to project).
- * Rethrows auth errors so they propagate to the user.
+ * Perform the parallel project + DSN fetch for a single target.
+ *
+ * Shared by both `fetchProjectDetails` (which swallows non-auth
+ * failures) and `fetchProjectDetailsOrThrow` (which rethrows them).
+ * Extracted so the two callers stay in lockstep — if a future change
+ * adds another parallel call or swaps the DSN lookup, both paths
+ * benefit automatically.
+ *
+ * `AuthError` (from `withAuthGuard`) always propagates so the
+ * auto-login middleware in `cli.ts` can fire.
  */
-async function fetchProjectDetails(
-  target: ResolvedTarget
-): Promise<ProjectWithDsn | null> {
-  const result = await withAuthGuard(async () => {
-    // Fetch project (skip if already fetched during resolution) and DSN in parallel
+function fetchProjectAndDsn(target: ResolvedTarget): Promise<ProjectWithDsn> {
+  return withAuthGuard(async () => {
+    // Fetch project (skip if already fetched during resolution) and
+    // its DSN in parallel.
     const [project, dsn] = await Promise.all([
       target.projectData
         ? Promise.resolve(target.projectData)
@@ -108,8 +114,35 @@ async function fetchProjectDetails(
       tryGetPrimaryDsn(target.org, target.project),
     ]);
     return { project, dsn };
+  }).then((result) => {
+    if (result.ok) {
+      return result.value;
+    }
+    // Non-auth failure: rethrow the captured error so the caller can
+    // decide whether to swallow it or surface it.
+    throw result.error;
   });
-  return result.ok ? result.value : null;
+}
+
+/**
+ * Fetch project details and keys for a single target.
+ * Returns null on non-auth errors (e.g., no access to project).
+ * Rethrows auth errors so they propagate to the user.
+ */
+async function fetchProjectDetails(
+  target: ResolvedTarget
+): Promise<ProjectWithDsn | null> {
+  try {
+    return await fetchProjectAndDsn(target);
+  } catch (error) {
+    // AuthError is surfaced by `fetchProjectAndDsn` via `withAuthGuard` —
+    // it bypasses the catch because it's re-thrown inside the guarded
+    // block. Re-inspect here so the auto-login middleware still fires.
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    return null;
+  }
 }
 
 /**
@@ -123,27 +156,10 @@ async function fetchProjectDetails(
  * (getsentry/cli#785 item #8). Re-fetches without the auth guard so
  * any non-auth ApiError surfaces as-is.
  */
-async function fetchProjectDetailsOrThrow(
+function fetchProjectDetailsOrThrow(
   target: ResolvedTarget
 ): Promise<ProjectWithDsn> {
-  // First try with the auth guard to catch AuthError specifically (so
-  // the auto-login middleware in cli.ts can still fire). On non-auth
-  // failure, re-run without the guard to let the real API error bubble
-  // up to the global error handler.
-  const guarded = await withAuthGuard(async () => {
-    const [project, dsn] = await Promise.all([
-      target.projectData
-        ? Promise.resolve(target.projectData)
-        : getProject(target.org, target.project),
-      tryGetPrimaryDsn(target.org, target.project),
-    ]);
-    return { project, dsn };
-  });
-  if (guarded.ok) {
-    return guarded.value;
-  }
-  // Non-auth failure: rethrow the captured error unchanged.
-  throw guarded.error;
+  return fetchProjectAndDsn(target);
 }
 
 /** Result of fetching project details for multiple targets */

@@ -1,54 +1,98 @@
 /**
  * Scope extraction helpers for Sentry 403 responses.
  *
- * Sentry's 403 responses occasionally include the specific permission
- * scope the token is missing — either as an explicit field on the JSON
- * body or embedded in the `detail` message string. This module pulls
- * that information out so we can surface it to users instead of the
- * hardcoded generic "org:read, project:read" list referenced in
- * getsentry/cli#785 item #9.
+ * The primary goal is to surface the specific permission scope a token
+ * is missing, instead of the hardcoded generic "org:read, project:read"
+ * list referenced in getsentry/cli#785 item #9.
  *
- * Response shapes observed in the wild:
+ * Reality check against the Sentry codebase (getsentry/sentry
+ * `src/sentry/api/bases/organization.py` and `src/sentry/api/base.py`):
+ * the standard 403 path is a DRF `PermissionDenied` with the default
+ * `"You do not have permission to perform this action."` string — no
+ * structured scope field, no scope identifier in the text. A handful
+ * of sites pass a custom `detail` string (for example
+ * `src/sentry/api/helpers/teams.py` and `src/sentry/api/endpoints/
+ * rule_snooze.py`), and those strings are free-form but sometimes
+ * mention scope identifiers verbatim.
  *
- * 1. `{"detail": "You do not have permission to perform this action."}`
- *    Plain — nothing to extract.
+ * This module therefore:
  *
- * 2. `{"detail": "You do not have the required scope to perform this
- *    action. Required scopes: event:read"}`
- *    Scope named in the detail string.
+ * - Scans the detail text for exact scope identifiers from the
+ *   canonical {@link SENTRY_SCOPES} set. Matches are only real
+ *   identifiers; arbitrary `foo:bar` substrings in error text never
+ *   get surfaced as scopes.
+ * - Also peeks at a few structured field names
+ *   (`required` / `requiredScopes` / `scopes`) that Sentry could
+ *   reasonably start emitting in the future. These paths are zero-cost
+ *   when absent and future-proof the CLI against a backend change that
+ *   adds them.
  *
- * 3. Top-level `required` / `requiredScopes` arrays on some endpoints:
- *    `{"detail": "...", "required": ["event:read"]}`
- *
- * This module's sole contract is: given an API-response detail value,
- * return the subset of Sentry scope identifiers that appear in it, in
- * source order, deduplicated. Callers decide how to render them.
+ * Callers that receive an empty array should fall back to their own
+ * hardcoded defaults (mirrors the pre-fix behavior).
  */
 
 /**
- * Matches a Sentry scope identifier of the form `<resource>:<action>`.
+ * Canonical Sentry scope identifiers, mirrored from
+ * `src/sentry/conf/server.py` `SENTRY_SCOPES` (and its hierarchy
+ * mapping). Kept as a single source of truth so the regex and tests
+ * agree on what is and isn't a real scope.
  *
- * The scope namespace is short and well-known — we match only the
- * resources the CLI's OAuth flow requests plus the small set of
- * adjacent scopes users commonly need. Unrecognized pairs stay out of
- * the match list so random `foo:bar` substrings in error messages
- * don't get surfaced as scopes.
+ * Deliberately excluded:
+ * - `openid` / `profile` / `email` — OIDC scopes, never part of a
+ *   CLI 403 response.
+ * - `org:superuser` — internal-only, never returned to clients.
  */
-const KNOWN_SCOPE_RE =
-  /\b(?:org|project|team|member|event|release|alerts)(?::(?:read|write|admin))\b/gi;
+const SENTRY_SCOPES = [
+  "org:read",
+  "org:write",
+  "org:admin",
+  "org:integrations",
+  "org:ci",
+  "member:invite",
+  "member:read",
+  "member:write",
+  "member:admin",
+  "team:read",
+  "team:write",
+  "team:admin",
+  "project:read",
+  "project:write",
+  "project:admin",
+  "project:releases",
+  "project:distribution",
+  "event:read",
+  "event:write",
+  "event:admin",
+  "alerts:read",
+  "alerts:write",
+] as const;
+
+/**
+ * Build a word-bounded alternation regex from {@link SENTRY_SCOPES}.
+ *
+ * Using an explicit alternation (rather than a `<ns>:<action>` product)
+ * avoids matching nonexistent combinations like `release:write` or
+ * `alerts:admin`, which `SENTRY_SCOPES` doesn't list.
+ */
+const KNOWN_SCOPE_RE = new RegExp(
+  `\\b(?:${SENTRY_SCOPES.map((s) => s.replace(":", ":")).join("|")})\\b`,
+  "gi"
+);
 
 /**
  * Extract Sentry scope identifiers from a 403 response detail value.
  *
- * The detail may be a plain string, a structured record with a
- * `required` / `requiredScopes` / `scopes` array, or `undefined`. All
- * three shapes are handled. Returns an empty array when no scopes are
- * identifiable — callers should fall back to their hardcoded defaults
- * in that case.
+ * Current Sentry API responses rarely name the missing scope (see the
+ * module-level notes), so this function usually returns `[]` and
+ * callers fall back to their hardcoded default hint. It DOES fire
+ * correctly when the scope appears in a custom DRF `PermissionDenied`
+ * detail string, and remains future-proof for structured response
+ * shapes that could be added later.
  *
- * @param detail - The ApiError.detail value from a 403 response
- * @returns Deduplicated, source-ordered list of scope identifiers
- *   (e.g. `["event:read"]`)
+ * @param detail - The ApiError.detail value from a 403 response.
+ *   May be a plain string, a structured record, or `undefined`.
+ * @returns Deduplicated, source-ordered list of known Sentry scope
+ *   identifiers (e.g. `["event:read"]`). Empty when none found.
  */
 export function extractRequiredScopes(detail: unknown): string[] {
   if (!detail) {
