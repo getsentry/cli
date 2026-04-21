@@ -708,15 +708,19 @@ async function invalidateIssueDetailCaches(
   orgSlug: string,
   issueId: string
 ): Promise<void> {
-  const base = stripTrailingSlash(regionUrl);
-  const encodedOrg = encodeURIComponent(orgSlug);
-  const encodedId = encodeURIComponent(issueId);
-  await Promise.all([
-    invalidateCachedResponse(
-      `${base}/api/0/organizations/${encodedOrg}/issues/${encodedId}/`
-    ),
-    invalidateCachedResponse(`${base}/api/0/issues/${encodedId}/`),
-  ]);
+  try {
+    const base = stripTrailingSlash(regionUrl);
+    const encodedOrg = encodeURIComponent(orgSlug);
+    const encodedId = encodeURIComponent(issueId);
+    await Promise.all([
+      invalidateCachedResponse(
+        `${base}/api/0/organizations/${encodedOrg}/issues/${encodedId}/`
+      ),
+      invalidateCachedResponse(`${base}/api/0/issues/${encodedId}/`),
+    ]);
+  } catch {
+    /* best-effort: mutation already succeeded upstream */
+  }
 }
 
 /**
@@ -730,10 +734,14 @@ async function invalidateIssueCaches(
   orgSlug: string,
   issueId: string
 ): Promise<void> {
-  await Promise.all([
-    invalidateIssueDetailCaches(regionUrl, orgSlug, issueId),
-    invalidateOrgIssueList(regionUrl, orgSlug),
-  ]);
+  try {
+    await Promise.all([
+      invalidateIssueDetailCaches(regionUrl, orgSlug, issueId),
+      invalidateOrgIssueList(regionUrl, orgSlug),
+    ]);
+  } catch {
+    /* best-effort: mutation already succeeded upstream */
+  }
 }
 
 /**
@@ -744,8 +752,12 @@ async function invalidateOrgIssueList(
   regionUrl: string,
   orgSlug: string
 ): Promise<void> {
-  const base = stripTrailingSlash(regionUrl);
-  await invalidateCachedResponsesMatching(
-    `${base}/api/0/organizations/${encodeURIComponent(orgSlug)}/issues/`
-  );
+  try {
+    const base = stripTrailingSlash(regionUrl);
+    await invalidateCachedResponsesMatching(
+      `${base}/api/0/organizations/${encodeURIComponent(orgSlug)}/issues/`
+    );
+  } catch {
+    /* best-effort: mutation already succeeded upstream */
+  }
 }

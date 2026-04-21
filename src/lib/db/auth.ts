@@ -325,12 +325,14 @@ function computeIdentityFingerprint(): string {
 }
 
 /**
- * 16-char MD5 hex of `kind|secret`. Not used for auth — just a cheap
- * cache namespace. Collisions are benign (identities would share a
- * cache slot, same as the anonymous case).
+ * 16-char SHA-256 hex of `kind|secret`. Not used for auth — just a
+ * cache namespace. Truncation is fine: collisions are benign (two
+ * colliding identities would share a cache slot, same as the
+ * anonymous case) and we compute this once per process via
+ * {@link getIdentityFingerprint} memoization.
  */
 function hashIdentity(kind: string, secret: string): string {
-  return createHash("md5")
+  return createHash("sha256")
     .update(`${kind}|${secret}`)
     .digest("hex")
     .slice(0, 16);
