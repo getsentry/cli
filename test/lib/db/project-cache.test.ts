@@ -10,6 +10,7 @@ import {
   clearProjectCache,
   getCachedProject,
   getCachedProjectByDsnKey,
+  getCachedProjectBySlug,
   getCachedProjectsForOrg,
   setCachedProject,
   setCachedProjectByDsnKey,
@@ -278,10 +279,12 @@ describe("clearProjectCache", () => {
     // Clear all
     clearProjectCache();
 
-    // All should be undefined
+    // All should be undefined across every lookup shape.
     expect(getCachedProject("org-1", "project-1")).toBeUndefined();
     expect(getCachedProject("org-2", "project-2")).toBeUndefined();
     expect(getCachedProjectByDsnKey("key1")).toBeUndefined();
+    expect(getCachedProjectBySlug("org-one", "project-one")).toBeUndefined();
+    expect(getCachedProjectBySlug("key-org", "key-project")).toBeUndefined();
   });
 
   test("does not throw when cache is already empty", async () => {
@@ -458,5 +461,118 @@ describe("getCachedProjectsForOrg", () => {
 
     const result = getCachedProjectsForOrg("beta-org");
     expect(result).toEqual([]);
+  });
+});
+
+describe("getCachedProjectBySlug", () => {
+  test("returns undefined when no cache entry exists", () => {
+    const result = getCachedProjectBySlug("my-org", "my-project");
+    expect(result).toBeUndefined();
+  });
+
+  test("returns entry populated via setCachedProject (orgId:projectId key)", () => {
+    setCachedProject("123", "456", {
+      orgSlug: "my-org",
+      orgName: "My Organization",
+      projectSlug: "my-project",
+      projectName: "My Project",
+      projectId: "456",
+    });
+
+    const result = getCachedProjectBySlug("my-org", "my-project");
+    expect(result).toBeDefined();
+    expect(result?.orgSlug).toBe("my-org");
+    expect(result?.projectSlug).toBe("my-project");
+    expect(result?.projectId).toBe("456");
+  });
+
+  test("returns entry populated via setCachedProjectByDsnKey (dsn: key)", () => {
+    setCachedProjectByDsnKey("abcdef1234567890", {
+      orgSlug: "dsn-org",
+      orgName: "DSN Org",
+      projectSlug: "dsn-project",
+      projectName: "DSN Project",
+      projectId: "789",
+    });
+
+    const result = getCachedProjectBySlug("dsn-org", "dsn-project");
+    expect(result).toBeDefined();
+    expect(result?.projectId).toBe("789");
+  });
+
+  test("returns entry populated via cacheProjectsForOrg (list: key)", () => {
+    cacheProjectsForOrg("my-org", "My Org", [
+      { id: "101", slug: "listed-project", name: "Listed Project" },
+    ]);
+
+    const result = getCachedProjectBySlug("my-org", "listed-project");
+    expect(result).toBeDefined();
+    expect(result?.projectId).toBe("101");
+    expect(result?.projectName).toBe("Listed Project");
+  });
+
+  test("returns the most recently cached entry when multiple key shapes match", async () => {
+    // Older entry via dsn key
+    setCachedProjectByDsnKey("key-1", {
+      orgSlug: "my-org",
+      orgName: "My Org",
+      projectSlug: "dup",
+      projectName: "Old Name",
+      projectId: "111",
+    });
+    // Small delay so `cached_at` differs; setCachedProject uses Date.now()
+    await Bun.sleep(5);
+    // Newer entry via orgId:projectId key
+    setCachedProject("org-id", "proj-id", {
+      orgSlug: "my-org",
+      orgName: "My Org",
+      projectSlug: "dup",
+      projectName: "New Name",
+      projectId: "222",
+    });
+
+    const result = getCachedProjectBySlug("my-org", "dup");
+    expect(result).toBeDefined();
+    expect(result?.projectName).toBe("New Name");
+    expect(result?.projectId).toBe("222");
+  });
+
+  test("does not match a different org", () => {
+    setCachedProject("123", "456", {
+      orgSlug: "org-a",
+      orgName: "A",
+      projectSlug: "shared-slug",
+      projectName: "A",
+      projectId: "456",
+    });
+
+    expect(getCachedProjectBySlug("org-b", "shared-slug")).toBeUndefined();
+  });
+
+  test("does not match a different project", () => {
+    setCachedProject("123", "456", {
+      orgSlug: "org-a",
+      orgName: "A",
+      projectSlug: "proj-a",
+      projectName: "A",
+      projectId: "456",
+    });
+
+    expect(getCachedProjectBySlug("org-a", "proj-b")).toBeUndefined();
+  });
+
+  test("returns entry even when projectId is missing (older rows)", () => {
+    setCachedProject("123", "456", {
+      orgSlug: "legacy-org",
+      orgName: "Legacy",
+      projectSlug: "legacy-project",
+      projectName: "Legacy",
+    });
+
+    const result = getCachedProjectBySlug("legacy-org", "legacy-project");
+    expect(result).toBeDefined();
+    // SQLite stores missing project IDs as NULL; the row mapper passes
+    // the value through unchanged, so callers see `null` (not undefined).
+    expect(result?.projectId).toBeFalsy();
   });
 });

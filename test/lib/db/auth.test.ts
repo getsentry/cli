@@ -197,3 +197,23 @@ describe("OAuth-preferred auth (#646)", () => {
     }
   });
 });
+
+describe("clearAuth: integration with per-account caches", () => {
+  test("clearAuth drops issue_org_cache entries (prevents cross-account leakage)", async () => {
+    const { clearAuth } = await import("../../../src/lib/db/auth.js");
+    const { setCachedIssueOrg, getCachedIssueOrg } = await import(
+      "../../../src/lib/db/issue-org-cache.js"
+    );
+
+    // Seed a mapping as if a previous session resolved this issue.
+    await setAuthToken("test-token");
+    setCachedIssueOrg("12345", "previous-account-org");
+    expect(getCachedIssueOrg("12345")).toBe("previous-account-org");
+
+    await clearAuth();
+
+    // Mapping must be gone — otherwise the next account would leak into
+    // their `issue view` fallback routing.
+    expect(getCachedIssueOrg("12345")).toBeUndefined();
+  });
+});

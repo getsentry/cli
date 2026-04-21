@@ -21,6 +21,11 @@ import {
   tryGetIssueByShortId,
 } from "../../lib/api-client.js";
 import { type IssueSelector, parseIssueArg } from "../../lib/arg-parsing.js";
+import {
+  clearCachedIssueOrg,
+  getCachedIssueOrg,
+  setCachedIssueOrg,
+} from "../../lib/db/issue-org-cache.js";
 import { getProjectByAlias } from "../../lib/db/project-aliases.js";
 import { detectAllDsns } from "../../lib/dsn/index.js";
 import {
@@ -487,23 +492,40 @@ async function resolveShareIssue(
   // Fetch full issue via authenticated API
   if (org) {
     const resolvedOrg = await resolveEffectiveOrg(org);
-    const issue = await getIssueInOrg(resolvedOrg, groupId, {
+    const orgScopedIssue = await getIssueInOrg(resolvedOrg, groupId, {
       collapse: ISSUE_DETAIL_COLLAPSE,
     });
-    return { org: resolvedOrg, issue };
+    return { org: resolvedOrg, issue: orgScopedIssue };
   }
 
-  // No org from URL — try env/DSN context, then fall back to unscoped fetch
+  // No org from URL — try env/DSN context, then the issue-id → org cache,
+  // then fall back to the unscoped fetch. See resolveNumericIssue for the
+  // full rationale behind the cache.
   const resolvedOrg = await resolveOrg({ cwd });
-  const issue = resolvedOrg
-    ? await getIssueInOrg(resolvedOrg.org, groupId, {
-        collapse: ISSUE_DETAIL_COLLAPSE,
-      })
-    : await getIssue(groupId, { collapse: ISSUE_DETAIL_COLLAPSE });
-  return {
-    org: resolvedOrg?.org ?? extractOrgFromPermalink(issue.permalink),
-    issue,
-  };
+  const cachedOrg = resolvedOrg ? null : getCachedIssueOrg(groupId);
+  const { issue, cacheEvicted } = await fetchIssueByNumericId(
+    groupId,
+    resolvedOrg?.org,
+    cachedOrg
+  );
+  // When `cacheEvicted` is true, the cached org was stale (404'd) — do NOT
+  // let it win the `??` chain; re-derive from the permalink instead.
+  const effectiveCachedOrg = cacheEvicted ? null : cachedOrg;
+  const resolvedOrgSlug =
+    resolvedOrg?.org ??
+    effectiveCachedOrg ??
+    extractOrgFromPermalink(issue.permalink);
+  if (resolvedOrgSlug && !resolvedOrg && !effectiveCachedOrg) {
+    // Best-effort — a broken/read-only DB must not fail a successful lookup.
+    try {
+      setCachedIssueOrg(groupId, resolvedOrgSlug);
+    } catch (cacheErr) {
+      log.debug(
+        `Failed to cache issue-org mapping for ${groupId}: ${String(cacheErr)}`
+      );
+    }
+  }
+  return { org: resolvedOrgSlug, issue };
 }
 
 /**
@@ -539,13 +561,75 @@ function extractOrgFromPermalink(
 }
 
 /**
+ * Result of {@link fetchIssueByNumericId}.
+ *
+ * `cacheEvicted` is true when the helper invalidated a stale `cachedOrg`
+ * entry after a 404 and fell through to the legacy unscoped endpoint.
+ * Callers MUST treat their local `cachedOrg` as stale when this flag is
+ * set and re-derive the org from `issue.permalink` instead — otherwise
+ * a stale slug leaks into downstream API calls (issue events, traces).
+ */
+type FetchIssueByNumericIdResult = {
+  issue: SentryIssue;
+  cacheEvicted: boolean;
+};
+
+/**
+ * Fetch an issue by numeric ID, preferring an org-scoped endpoint when
+ * the caller has explicit or cached org context. Falls back to the legacy
+ * unscoped `/api/0/issues/{id}/` endpoint when no org is known, and also
+ * when a cached org yields a 404 (stale mapping).
+ *
+ * Extracted from {@link resolveNumericIssue} to keep its cognitive
+ * complexity below the project's lint threshold.
+ */
+async function fetchIssueByNumericId(
+  id: string,
+  explicitOrg: string | undefined,
+  cachedOrg: string | null | undefined
+): Promise<FetchIssueByNumericIdResult> {
+  if (explicitOrg) {
+    const issue = await getIssueInOrg(explicitOrg, id, {
+      collapse: ISSUE_DETAIL_COLLAPSE,
+    });
+    return { issue, cacheEvicted: false };
+  }
+  if (cachedOrg) {
+    try {
+      const issue = await getIssueInOrg(cachedOrg, id, {
+        collapse: ISSUE_DETAIL_COLLAPSE,
+      });
+      return { issue, cacheEvicted: false };
+    } catch (orgErr) {
+      if (orgErr instanceof ApiError && orgErr.status === 404) {
+        // Stale mapping (issue moved / deleted / access revoked). Evict the
+        // cache entry and fall through to the legacy unscoped endpoint.
+        clearCachedIssueOrg(id);
+        const issue = await getIssue(id, { collapse: ISSUE_DETAIL_COLLAPSE });
+        return { issue, cacheEvicted: true };
+      }
+      throw orgErr;
+    }
+  }
+  const issue = await getIssue(id, { collapse: ISSUE_DETAIL_COLLAPSE });
+  return { issue, cacheEvicted: false };
+}
+
+/**
  * Resolve a bare numeric issue ID.
  *
  * Attempts org-scoped resolution with region routing when org context can be
- * derived from the working directory (DSN / env vars / config defaults).
+ * derived from the working directory (DSN / env vars / config defaults), or
+ * from the issue-id → org cache populated on previous runs.
  * Falls back to the legacy unscoped endpoint otherwise.
  * Extracts the org slug from the response permalink so callers like
  * {@link resolveOrgAndIssueId} can proceed without explicit org context.
+ *
+ * Caching: after a successful permalink-based org extraction, records the
+ * numeric-id → org mapping so future runs skip the unscoped fallback and
+ * route directly via the regional API. This addresses the
+ * `sentry.issue.view` "Consecutive HTTP" fan-out pattern for bare numeric
+ * IDs (Pattern D in the Sentry issue triage).
  */
 async function resolveNumericIssue(
   id: string,
@@ -554,16 +638,40 @@ async function resolveNumericIssue(
   commandBase = "sentry issue"
 ): Promise<ResolvedIssueResult> {
   const resolvedOrg = await resolveOrg({ cwd });
+  // Prefer explicit context over the cache — `resolveOrg()` already factors
+  // in env vars and config defaults that may point at a different org.
+  const cachedOrg = resolvedOrg ? null : getCachedIssueOrg(id);
   try {
-    const issue = resolvedOrg
-      ? await getIssueInOrg(resolvedOrg.org, id, {
-          collapse: ISSUE_DETAIL_COLLAPSE,
-        })
-      : await getIssue(id, { collapse: ISSUE_DETAIL_COLLAPSE });
+    const { issue, cacheEvicted } = await fetchIssueByNumericId(
+      id,
+      resolvedOrg?.org,
+      cachedOrg
+    );
+    // When `cacheEvicted` is true, the cached org slug was stale (404'd) and
+    // the helper fell through to the unscoped endpoint. Do NOT let the stale
+    // `cachedOrg` participate in the `??` chain — re-derive from permalink.
+    const effectiveCachedOrg = cacheEvicted ? null : cachedOrg;
     // Extract org from the response permalink as a fallback so that callers
     // like resolveOrgAndIssueId (used by explain/plan) get the org slug even
     // when no org context was available before the fetch.
-    const org = resolvedOrg?.org ?? extractOrgFromPermalink(issue.permalink);
+    const org =
+      resolvedOrg?.org ??
+      effectiveCachedOrg ??
+      extractOrgFromPermalink(issue.permalink);
+    // Best-effort: remember the numeric-id → org mapping so the next run
+    // skips the unscoped fallback. Skipped when the org came from a still-
+    // valid cache hit (already stored). When the cache was evicted we SHOULD
+    // re-write the corrected mapping derived from the permalink.
+    if (org && !resolvedOrg && !effectiveCachedOrg) {
+      // Best-effort — a broken/read-only DB must not fail a successful lookup.
+      try {
+        setCachedIssueOrg(id, org);
+      } catch (cacheErr) {
+        log.debug(
+          `Failed to cache issue-org mapping for ${id}: ${String(cacheErr)}`
+        );
+      }
+    }
     return { org, issue };
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
@@ -571,6 +679,11 @@ async function resolveNumericIssue(
       // and suggesting the short-ID format, since users often confuse numeric
       // group IDs with short-ID suffixes. When org context is available, use
       // the real org slug instead of <org> placeholder (CLI-BT, 18 users).
+      //
+      // Skip `cachedOrg` here: if the unscoped legacy endpoint 404'd too,
+      // the helper has already evicted the (proven-stale) cache entry, so
+      // suggesting the old slug in the hint would mislead the user. Only
+      // explicit `resolvedOrg` is worth preserving.
       const orgHint = resolvedOrg?.org ?? "<org>";
       const hint = `${commandBase} ${command} ${orgHint}/${id}`;
       throw new ResolutionError(`Issue ${id}`, "not found", hint, [

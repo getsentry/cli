@@ -109,6 +109,46 @@ export function setCachedProjectByDsnKey(
 }
 
 /**
+ * Look up a cached project by organization and project slug.
+ *
+ * Returns the most recently cached entry matching the (org_slug, project_slug)
+ * pair across ALL cache key shapes (`orgId:projectId`, `dsn:publicKey`,
+ * `list:{org}/{project}`). This is useful for slug-based lookups where the
+ * caller doesn't know the numeric org/project IDs upfront — e.g., when
+ * resolving `<org>/<project>` from CLI arguments in `fetchProjectId`.
+ *
+ * Uses `MAX(cached_at)` with a covariant SELECT: SQLite guarantees the other
+ * columns come from the row that produced the MAX value. This avoids the
+ * ambiguity that would arise from a plain `LIMIT 1` without an ORDER BY.
+ *
+ * @param orgSlug - Organization slug (case-sensitive)
+ * @param projectSlug - Project slug (case-sensitive)
+ * @returns Cached project entry, or undefined if no match
+ */
+export function getCachedProjectBySlug(
+  orgSlug: string,
+  projectSlug: string
+): CachedProject | undefined {
+  const db = getDatabase();
+  const row = db
+    .query(
+      "SELECT cache_key, org_slug, org_name, project_slug, project_name, project_id, MAX(cached_at) AS cached_at, last_accessed FROM project_cache WHERE org_slug = ? AND project_slug = ?"
+    )
+    .get(orgSlug, projectSlug) as ProjectCacheRow | undefined;
+
+  // When no rows match, SQLite still returns a single row with NULL columns
+  // because of the MAX aggregate — guard on cache_key being populated.
+  if (!row?.cache_key) {
+    recordCacheHit("project", false);
+    return;
+  }
+
+  recordCacheHit("project", true);
+  touchCacheEntry("project_cache", "cache_key", row.cache_key);
+  return rowToCachedProject(row);
+}
+
+/**
  * Get cached project slugs for a specific organization.
  *
  * Used by shell completions to suggest projects within a known org.
