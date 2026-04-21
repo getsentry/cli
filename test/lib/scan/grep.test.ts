@@ -711,4 +711,29 @@ describe("collectGrep — literal prefilter fast path", () => {
       cleanup();
     }
   });
+
+  test("optional group containing class with paren matches all branches (Cursor #1 followup)", async () => {
+    // Regression: the group-depth tracker inside `extractInnerLiteral`
+    // didn't treat `[...]` as opaque, so `(ABC[)]DEF)?GHI` extracted
+    // `DEF` as a required literal. The prefilter then silently
+    // missed lines matching only the `GHI` branch (group optional).
+    //
+    // After the fix, the whole group is correctly skipped and `GHI`
+    // is identified as the post-group required literal, so both
+    // match shapes are found.
+    const { cwd, cleanup } = makeSandbox({
+      "only-ghi.txt": "GHI line without the optional prefix\n",
+      "full-match.txt": "ABC)DEFGHI full match line\n",
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "(ABC[)]DEF)?GHI",
+      });
+      const lineDigest = matches.map((m) => `${m.path}:${m.lineNum}`).sort();
+      expect(lineDigest).toEqual(["full-match.txt:1", "only-ghi.txt:1"]);
+    } finally {
+      cleanup();
+    }
+  });
 });

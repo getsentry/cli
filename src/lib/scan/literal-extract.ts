@@ -178,7 +178,7 @@ export function extractInnerLiteral(
     if (c === "(") {
       // Group or lookaround — skip. v1 doesn't peek inside.
       commit();
-      i = skipToMatching(source, i, "(", ")");
+      i = skipGroup(source, i);
       continue;
     }
 
@@ -315,19 +315,21 @@ function skipCharacterClass(source: string, i: number): number {
 }
 
 /**
- * Advance past a balanced `open`/`close` pair starting at `i`
- * (where `source[i] === open`). Handles nested pairs and escaped
- * chars. Returns the index just past the matching close.
+ * Advance past a balanced `(...)` group starting at `i` (where
+ * `source[i] === "("`). Handles nested groups and escaped chars.
+ * Returns the index just past the matching `)`.
  *
- * NOTE: Regex character classes `[...]` are NOT nestable — use
- * `skipCharacterClass` for those. This helper is for `(...)` groups.
+ * CRITICAL: `[...]` character classes are OPAQUE to group-depth
+ * tracking. A `)` or `(` inside a class is a literal byte, not a
+ * grouping metacharacter, and MUST NOT change depth. Without this,
+ * a pattern like `(foo[)]bar)?baz` would exit the group at the `)`
+ * inside `[)]`, making the extractor treat `bar` as top-level and
+ * missing the fact that the whole group is optional.
+ *
+ * NOTE: Regex character classes are NOT nestable — `[[]` is a
+ * class containing a literal `[`, per regex spec.
  */
-function skipToMatching(
-  source: string,
-  i: number,
-  open: string,
-  close: string
-): number {
+function skipGroup(source: string, i: number): number {
   let depth = 1;
   let j = i + 1;
   while (j < source.length && depth > 0) {
@@ -336,9 +338,15 @@ function skipToMatching(
       j += 2;
       continue;
     }
-    if (c === open) {
+    if (c === "[") {
+      // Skip the whole character class — `(` and `)` inside it
+      // are literal and must not affect group depth.
+      j = skipCharacterClass(source, j);
+      continue;
+    }
+    if (c === "(") {
       depth += 1;
-    } else if (c === close) {
+    } else if (c === ")") {
       depth -= 1;
     }
     j += 1;

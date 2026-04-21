@@ -162,3 +162,38 @@ describe("extractInnerLiteral — character-class opaqueness (Cursor bug #1)", (
     expect(extractInnerLiteral(pattern, "")).toBe(expected);
   });
 });
+
+describe("extractInnerLiteral — class-in-group opaqueness (Cursor bug #1 followup)", () => {
+  /**
+   * Sibling of the earlier char-class-opaqueness bug: the group-
+   * skipper `skipGroup` (formerly `skipToMatching`) didn't treat
+   * `[...]` as opaque, so a `)` inside a char class closed the
+   * enclosing group early. For `(ABC[)]DEF)?GHI`, the extractor
+   * thought `DEF` was outside the optional group (hence "required"),
+   * and used it as the prefilter — silently missing lines that
+   * matched only `GHI`.
+   *
+   * Fix: `skipGroup` now calls `skipCharacterClass` when it sees
+   * `[`, making classes opaque to group-depth tracking.
+   */
+  test.each([
+    // Optional group containing a literal paren inside a class —
+    // the content of the group is NOT required; only what follows is.
+    ["(ABC[)]DEF)?GHI", "GHI"],
+    ["(foo[)]bar)?baz", "baz"],
+    ["(foo[(]bar)?baz", "baz"],
+    ["(A[[]B)?CDE", "CDE"],
+    ["(A[\\)]B)?CDE", "CDE"],
+  ])("extracts the post-group literal when group contains a class with ( or )", (pattern, expected) => {
+    expect(extractInnerLiteral(pattern, "")).toBe(expected);
+  });
+
+  test.each([
+    ["(foo)bar", "bar"], // regular group + literal
+    ["(foo)?bar", "bar"], // optional group + literal
+    ["(abc)?xyz", "xyz"], // sanity check
+    ["((foo))?bar", "bar"], // nested groups (skipGroup handles nesting)
+  ])("control: regular groups still skip correctly", (pattern, expected) => {
+    expect(extractInnerLiteral(pattern, "")).toBe(expected);
+  });
+});
