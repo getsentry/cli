@@ -214,6 +214,14 @@ export type GrepMatch = {
    * consumers that care should trim their own way.
    */
   line: string;
+  /**
+   * Floored `stat.mtimeMs` of the source file. Populated only when
+   * `GrepOptions.recordMtimes` is true; otherwise omitted (not
+   * zero — the absence distinguishes "not asked" from "asked and
+   * happens to be 0"). Consumers use this for cache invalidation;
+   * see `src/lib/dsn/code-scanner.ts`.
+   */
+  mtime?: number;
 };
 
 /**
@@ -260,6 +268,20 @@ export type GrepOptions = {
   maxFileSize?: number;
   descentHook?: WalkOptions["descentHook"];
   followSymlinks?: boolean;
+  /**
+   * When true, each `GrepMatch` includes the source file's floored
+   * `mtimeMs`. Used by cache-invalidation layers (e.g., the DSN
+   * scanner's `sourceMtimes` map). Forwarded to the walker;
+   * incidentally costs an extra stat per file, so it's opt-in.
+   */
+  recordMtimes?: boolean;
+  /**
+   * Optional hook invoked once per directory visited during the
+   * walk with its floored `mtimeMs`. Used for directory-level cache
+   * invalidation (e.g., "has a new file been added to this dir?").
+   * Forwarded to `walkFiles`.
+   */
+  onDirectoryVisit?: WalkOptions["onDirectoryVisit"];
 
   // --- Grep-specific ---
   /**

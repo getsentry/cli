@@ -175,6 +175,13 @@ type PerFileOptions = {
    * silent misses under per-line verify.
    */
   literal: string | null;
+  /**
+   * When true, each emitted `GrepMatch` carries `mtime` (the
+   * source file's floored `mtimeMs`). The walker produces it; the
+   * grep path just forwards it. Incurs one extra stat per file at
+   * the walker layer.
+   */
+  recordMtimes: boolean;
 };
 
 /**
@@ -352,7 +359,7 @@ function buildMatch(ctx: MatchContext, bounds: LineBounds): GrepMatch {
     rawLine.length > ctx.opts.maxLineLength
       ? `${rawLine.slice(0, ctx.opts.maxLineLength - 1)}…`
       : rawLine;
-  return {
+  const match: GrepMatch = {
     path: ctx.opts.pathPrefix
       ? joinPosix(ctx.opts.pathPrefix, ctx.entry.relativePath)
       : ctx.entry.relativePath,
@@ -360,6 +367,10 @@ function buildMatch(ctx: MatchContext, bounds: LineBounds): GrepMatch {
     lineNum: bounds.lineNum,
     line,
   };
+  if (ctx.opts.recordMtimes) {
+    match.mtime = ctx.entry.mtime;
+  }
+  return match;
 }
 
 /**
@@ -379,6 +390,8 @@ function buildWalkOptions(opts: GrepOptions, root: string): WalkOptions {
     maxFileSize: opts.maxFileSize,
     descentHook: opts.descentHook,
     followSymlinks: opts.followSymlinks,
+    recordMtimes: opts.recordMtimes,
+    onDirectoryVisit: opts.onDirectoryVisit,
     signal: opts.signal,
     timeBudgetMs: opts.timeBudgetMs,
   };
@@ -542,7 +555,11 @@ async function* grepViaWorkers(
   let walkerDone = false;
   let inflightCount = 0;
 
-  const dispatchBatch = (paths: string[], rels: string[]): void => {
+  const dispatchBatch = (
+    paths: string[],
+    rels: string[],
+    mtimes: readonly number[] | null
+  ): void => {
     opts.stats.filesRead += paths.length;
     inflightCount += 1;
     pool
@@ -558,7 +575,10 @@ async function* grepViaWorkers(
       })
       .then(
         (result) => {
-          pending.push(decodeWorkerMatches(result, paths, rels));
+          // `decodeWorkerMatches` attaches per-file mtime by pathIdx
+          // when `mtimes` is non-null. Mtime comes from the walker
+          // (main thread) — worker doesn't need to stat again.
+          pending.push(decodeWorkerMatches(result, paths, rels, mtimes));
         },
         () => {
           // Worker error — skip this batch. Per-file errors are
@@ -575,10 +595,15 @@ async function* grepViaWorkers(
   // Errors thrown by the walker (e.g. `AbortError` when the caller
   // signals abort) propagate to the consumer via `producerError`.
   let producerError: unknown = null;
+  const recordMtimes = opts.perFile.recordMtimes;
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: walker drain + path-prefix handling + batch flush + error capture is inherently branchy
   const producer = (async () => {
     let batch: string[] = [];
     let batchRel: string[] = [];
+    // Per-batch mtime array (parallel to `batch`). Only allocated
+    // when the caller opts in via `recordMtimes`; otherwise stays
+    // null and the decoder skips the `mtime` field entirely.
+    let batchMtimes: number[] | null = recordMtimes ? [] : null;
     try {
       for await (const entry of opts.walkSource) {
         if (earlyExit) {
@@ -590,15 +615,19 @@ async function* grepViaWorkers(
             ? joinPosix(opts.perFile.pathPrefix, entry.relativePath)
             : entry.relativePath
         );
+        if (batchMtimes !== null) {
+          batchMtimes.push(entry.mtime);
+        }
         if (batch.length >= WORKER_BATCH_SIZE) {
-          dispatchBatch(batch, batchRel);
+          dispatchBatch(batch, batchRel, batchMtimes);
           batch = [];
           batchRel = [];
+          batchMtimes = recordMtimes ? [] : null;
         }
       }
       // Final partial batch.
       if (batch.length > 0) {
-        dispatchBatch(batch, batchRel);
+        dispatchBatch(batch, batchRel, batchMtimes);
       }
     } catch (error) {
       producerError = error;
@@ -720,6 +749,8 @@ type GrepPipelineSetup = {
    * are skipped entirely.
    */
   literal: string | null;
+  /** Mirrors `GrepOptions.recordMtimes`. Threaded into PerFileOptions. */
+  recordMtimes: boolean;
   stats: GrepStats;
   walkSource: AsyncIterable<WalkEntry>;
   maxResults: number;
@@ -783,6 +814,7 @@ function setupGrepPipeline(opts: GrepOptions): GrepPipelineSetup {
     regex,
     multiline,
     literal,
+    recordMtimes: opts.recordMtimes ?? false,
     stats,
     walkSource,
     maxResults: opts.maxResults ?? Number.POSITIVE_INFINITY,
@@ -820,6 +852,7 @@ export async function* grepFiles(opts: GrepOptions): AsyncGenerator<GrepMatch> {
       maxMatchesPerFile: setup.maxMatchesPerFile,
       pathPrefix: setup.pathPrefix,
       literal: setup.literal,
+      recordMtimes: setup.recordMtimes,
     },
     walkSource: setup.walkSource,
     stats: setup.stats,
@@ -865,6 +898,7 @@ export async function collectGrep(opts: GrepOptions): Promise<GrepResult> {
       maxMatchesPerFile: setup.maxMatchesPerFile,
       pathPrefix: setup.pathPrefix,
       literal: setup.literal,
+      recordMtimes: setup.recordMtimes,
     },
     walkSource: setup.walkSource,
     stats: setup.stats,

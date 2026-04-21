@@ -74,14 +74,22 @@ type PooledWorker = {
   /**
    * Queue of pending result resolvers. Populated by `dispatch`,
    * drained in FIFO order by `worker.onmessage` as `result` messages
-   * arrive. Workers process messages in postMessage order (both Bun
-   * and Node `worker_threads` guarantee this), so FIFO-order
-   * resolution is correct.
+   * arrive. Workers process messages sequentially so FIFO matching
+   * is sound.
    */
   pending: Array<{
     resolve: (r: WorkerGrepResult) => void;
     reject: (e: unknown) => void;
   }>;
+  /**
+   * False once the worker has emitted an `error` event. Dispatchers
+   * skip dead workers — without this, the least-loaded selection
+   * would favor a dead worker (its `inflight` gets reset to 0 in
+   * the error handler), new dispatches would post to a worker that
+   * can't respond, and the calling `grepViaWorkers` would deadlock
+   * waiting for results that never arrive.
+   */
+  alive: boolean;
 };
 
 type WorkerPool = {
@@ -191,6 +199,7 @@ export function getWorkerPool(): WorkerPool {
       }),
       inflight: 0,
       pending: [],
+      alive: true,
     };
     // Single onmessage handler per worker. Matches `result` messages
     // to the oldest pending dispatch via FIFO shift. Messages from
@@ -210,7 +219,10 @@ export function getWorkerPool(): WorkerPool {
       next.resolve({ ints: data.ints, linePool: data.linePool });
     });
     w.addEventListener("error", (err) => {
-      // Fail all pending dispatches on worker error.
+      // Mark the worker dead before rejecting pending dispatches —
+      // `dispatch` consults `alive` under the least-loaded picker to
+      // avoid routing new work to a worker that can't respond.
+      pw.alive = false;
       const errMsg = err.message ?? String(err);
       while (pw.pending.length > 0) {
         const p = pw.pending.shift();
@@ -224,33 +236,45 @@ export function getWorkerPool(): WorkerPool {
   pool = {
     workers,
     dispatch(request: WorkerGrepRequest): Promise<WorkerGrepResult> {
-      // Pick least-loaded worker. On tie, lowest index wins (stable).
-      let best = workers[0] as PooledWorker;
+      // Pick least-loaded LIVE worker. Dead workers (those that
+      // emitted an `error` event) are skipped entirely — dispatching
+      // to them would hang because they can't respond. Their
+      // `inflight` gets reset to 0 in the error handler, which
+      // would otherwise make them the "least loaded" and silently
+      // capture all subsequent dispatches.
+      let best: PooledWorker | null = null;
       for (const pw of workers) {
-        if (pw.inflight < best.inflight) {
+        if (!pw.alive) {
+          continue;
+        }
+        if (best === null || pw.inflight < best.inflight) {
           best = pw;
         }
       }
-      best.inflight += 1;
+      if (best === null) {
+        return Promise.reject(new Error("worker pool: all workers dead"));
+      }
+      const chosen = best;
+      chosen.inflight += 1;
 
       // Enqueue a pending slot for this request. The worker's
       // `onmessage` handler will resolve it when the corresponding
       // `result` message arrives (FIFO).
       const result = new Promise<WorkerGrepResult>((resolve, reject) => {
-        best.pending.push({ resolve, reject });
+        chosen.pending.push({ resolve, reject });
       });
       // Wait for readiness (first dispatch only), then post the
       // request. Subsequent dispatches skip the await (the ready
       // promise is already settled).
-      best.ready.then(
+      chosen.ready.then(
         () => {
-          best.worker.postMessage(request);
+          chosen.worker.postMessage(request);
         },
         (err) => {
           // Readiness failed — fail this dispatch's resolver.
-          const slot = best.pending.pop();
+          const slot = chosen.pending.pop();
           if (slot) {
-            best.inflight -= 1;
+            chosen.inflight -= 1;
             slot.reject(err);
           }
         }
@@ -290,19 +314,20 @@ export function terminatePool(): void {
 
 /**
  * Decode a worker's packed `{ints, linePool}` into an array of
- * `GrepMatch`es, using the caller's `paths` and `pathsBase` to
+ * `GrepMatch`es, using the caller's `paths` and `relPaths` to
  * reconstruct path fields.
  *
- * `pathsBase` is the `relativePath` prefix the walker would emit —
- * typically `cfg.cwd.length + 1` characters trimmed from each
- * absolute path. For grep we pass the absolute path as both
- * `path` and `absolutePath` and let the caller reinterpret; see
- * `grep.ts` integration.
+ * Optional `mtimes` is a parallel per-path array: when provided,
+ * each emitted `GrepMatch` gets an `mtime` field indexed by the
+ * match's `pathIdx`. Populated by callers that set
+ * `recordMtimes: true` — the mtime is known on the main thread
+ * from the walker, not from the worker.
  */
 export function decodeWorkerMatches(
   result: WorkerGrepResult,
-  paths: string[],
-  relPaths: string[]
+  paths: readonly string[],
+  relPaths: readonly string[],
+  mtimes: readonly number[] | null = null
 ): GrepMatch[] {
   const { ints, linePool } = result;
   const matches: GrepMatch[] = [];
@@ -317,12 +342,16 @@ export function decodeWorkerMatches(
     const absolutePath = paths[pathIdx] ?? "";
     const relativePath = relPaths[pathIdx] ?? absolutePath;
     const line = linePool.slice(lineOffset, lineOffset + lineLength);
-    matches.push({
+    const match: GrepMatch = {
       path: relativePath,
       absolutePath,
       lineNum,
       line,
-    });
+    };
+    if (mtimes !== null) {
+      match.mtime = mtimes[pathIdx];
+    }
+    matches.push(match);
   }
   return matches;
 }
