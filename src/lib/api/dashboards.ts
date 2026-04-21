@@ -27,7 +27,6 @@ import {
 } from "../../types/dashboard.js";
 import { stringifyUnknown } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
-import { invalidateCachedResponse } from "../response-cache.js";
 
 import {
   apiRequestToRegion,
@@ -125,14 +124,6 @@ export async function updateDashboard(
     method: "PUT",
     body,
   });
-
-  // Invalidate cached GET for this dashboard so subsequent view commands
-  // return fresh data instead of the pre-mutation cached response.
-  const normalizedBase = regionUrl.endsWith("/")
-    ? regionUrl.slice(0, -1)
-    : regionUrl;
-  await invalidateCachedResponse(`${normalizedBase}/api/0${path}`);
-
   return data;
 }
 

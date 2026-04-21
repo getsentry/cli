@@ -10,6 +10,7 @@
 
 import { getTraceData } from "@sentry/node-core/light";
 import { maybeWarnEnvTokenIgnored } from "./auth-hint.js";
+import { computeInvalidationPrefixes } from "./cache-keys.js";
 import {
   DEFAULT_SENTRY_URL,
   getConfiguredSentryUrl,
@@ -18,7 +19,11 @@ import {
 import { applyCustomHeaders } from "./custom-headers.js";
 import { getAuthToken, refreshToken } from "./db/auth.js";
 import { logger } from "./logger.js";
-import { getCachedResponse, storeCachedResponse } from "./response-cache.js";
+import {
+  getCachedResponse,
+  invalidateCachedResponsesMatching,
+  storeCachedResponse,
+} from "./response-cache.js";
 import { withTracingSpan } from "./telemetry.js";
 
 const log = logger.withTag("http");
@@ -285,6 +290,46 @@ function cacheResponse(
   });
 }
 
+/**
+ * Auto-invalidate cache entries that a successful non-GET mutation
+ * made stale. Awaited before returning the response so a subsequent
+ * read in the same command sees fresh data (the whole point of
+ * post-mutation invalidation).
+ *
+ * Prefix computation lives in {@link computeInvalidationPrefixes}
+ * (hierarchy walk + cross-endpoint rules). Each prefix runs through
+ * `invalidateCachedResponsesMatching`, which is identity-gated so
+ * a mutation by one account can't evict another account's cache.
+ *
+ * GETs skip invalidation entirely; they go through the cache-write
+ * path above. 4xx/5xx non-GETs skip too — a rejected mutation didn't
+ * change server state so its cache is still accurate.
+ *
+ * Never throws: the helpers we call are already best-effort, but we
+ * wrap defensively because a housekeeping error must never surface
+ * as a user-visible failure after a successful mutation.
+ */
+async function invalidateAfterMutation(
+  method: string,
+  fullUrl: string,
+  response: Response
+): Promise<void> {
+  if (method === "GET" || !response.ok) {
+    return;
+  }
+  const prefixes = computeInvalidationPrefixes(fullUrl);
+  if (prefixes.length === 0) {
+    return;
+  }
+  try {
+    await Promise.all(
+      prefixes.map((prefix) => invalidateCachedResponsesMatching(prefix))
+    );
+  } catch {
+    /* best-effort: mutation already succeeded upstream */
+  }
+}
+
 /** Build a `{ authorization }` header map from a bearer token, or `{}` if absent. */
 function authHeaders(token: string | undefined): Record<string, string> {
   return token ? { authorization: `Bearer ${token}` } : {};
@@ -318,6 +363,9 @@ async function fetchWithRetry(
         authHeaders(getAuthToken()),
         result.response
       );
+      // Awaited so a subsequent read in the same command sees fresh
+      // data. Never throws — own contract enforced by the helper.
+      await invalidateAfterMutation(method, fullUrl, result.response);
       return result.response;
     }
     if (result.action === "throw") {
