@@ -112,18 +112,25 @@ cli/
 │   ├── app.ts              # Stricli application setup
 │   ├── context.ts          # Dependency injection context
 │   ├── commands/           # CLI commands
-│   │   ├── auth/           # login, logout, status, refresh
-│   │   ├── event/          # view
-│   │   ├── issue/          # list, view, explain, plan
-│   │   ├── org/            # list, view
-│   │   ├── project/        # list, view
-│   │   ├── span/           # list, view
-│   │   ├── trace/          # list, view, logs
+│   │   ├── auth/           # login, logout, refresh, status, token, whoami
+│   │   ├── cli/            # defaults, feedback, fix, setup, upgrade
+│   │   ├── dashboard/      # list, view, create, widget (add, edit, delete)
+│   │   ├── event/          # list, view
+│   │   ├── issue/          # list, view, events, explain, plan, resolve, unresolve, merge
 │   │   ├── log/            # list, view
+│   │   ├── org/            # list, view
+│   │   ├── project/        # list, view, create, delete
+│   │   ├── release/        # list, view, create, finalize, delete, deploy, deploys, set-commits, propose-version
+│   │   ├── repo/           # list
+│   │   ├── sourcemap/      # inject, upload
+│   │   ├── span/           # list, view
+│   │   ├── team/           # list
+│   │   ├── trace/          # list, view, logs
 │   │   ├── trial/          # list, start
-│   │   ├── cli/            # fix, upgrade, feedback, setup
 │   │   ├── api.ts          # Direct API access command
-│   │   └── help.ts         # Help command
+│   │   ├── help.ts         # Help command
+│   │   ├── init.ts         # Initialize Sentry in your project (experimental)
+│   │   └── schema.ts       # Browse the Sentry API schema
 │   ├── lib/                # Shared utilities
 │   │   ├── command.ts      # buildCommand wrapper (telemetry + output)
 │   │   ├── api-client.ts   # Barrel re-export for API modules

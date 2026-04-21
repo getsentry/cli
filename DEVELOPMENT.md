@@ -69,11 +69,15 @@ When creating your Sentry OAuth application:
 
 ## Environment Variables
 
-| Variable           | Description                                           | Default              |
-| ------------------ | ----------------------------------------------------- | -------------------- |
-| `SENTRY_CLIENT_ID` | Sentry OAuth app client ID                            | (required)           |
-| `SENTRY_HOST`      | Sentry instance URL (for self-hosted, takes precedence) | `https://sentry.io`  |
-| `SENTRY_URL`       | Alias for `SENTRY_HOST`                               | `https://sentry.io`  |
+| Variable                | Description                                                      | Default              |
+| ----------------------- | ---------------------------------------------------------------- | -------------------- |
+| `SENTRY_CLIENT_ID`      | Sentry OAuth app client ID                                       | (required for build) |
+| `SENTRY_HOST`           | Sentry instance URL (for self-hosted, takes precedence)          | `https://sentry.io`  |
+| `SENTRY_URL`            | Alias for `SENTRY_HOST`                                          | `https://sentry.io`  |
+| `SENTRY_AUTH_TOKEN`     | API token for non-interactive use (lower priority than stored OAuth by default) | —     |
+| `SENTRY_FORCE_ENV_TOKEN`| Force env token to take priority over stored OAuth token         | —                    |
+| `SENTRY_CLI_NO_TELEMETRY`| Disable CLI telemetry (error tracking)                          | —                    |
+| `SENTRY_LOG_LEVEL`      | Diagnostic log level (`error`, `warn`, `log`, `info`, `debug`, `trace`) | `info`        |
 
 ## Building
 
