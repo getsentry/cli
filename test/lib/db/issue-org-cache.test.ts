@@ -95,8 +95,9 @@ describe("clearAllIssueOrgCache", () => {
     expect(getCachedIssueOrg("3")).toBeUndefined();
   });
 
-  test("does not touch unrelated metadata keys", async () => {
-    // Seed an unrelated metadata entry using the shared helpers.
+  test("does not touch unrelated tables (metadata, org_regions, etc.)", async () => {
+    // Seed an unrelated metadata entry + an unrelated table row so we can
+    // confirm clearAllIssueOrgCache only drops its own table.
     const { getDatabase } = await import("../../../src/lib/db/index.js");
     const { getMetadata, setMetadata } = await import(
       "../../../src/lib/db/utils.js"

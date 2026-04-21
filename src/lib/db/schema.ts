@@ -16,7 +16,7 @@ import { getEnv } from "../env.js";
 import { stringifyUnknown } from "../errors.js";
 import { logger } from "../logger.js";
 
-export const CURRENT_SCHEMA_VERSION = 14;
+export const CURRENT_SCHEMA_VERSION = 15;
 
 /** Environment variable to disable auto-repair */
 const NO_AUTO_REPAIR_ENV = "SENTRY_CLI_NO_AUTO_REPAIR";
@@ -201,6 +201,33 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
       // simple and matches the typical usage pattern (match git origin →
       // find one repo by name/url).
       repos_json: { type: "TEXT", notNull: true },
+      cached_at: {
+        type: "INTEGER",
+        notNull: true,
+        default: "(unixepoch() * 1000)",
+      },
+    },
+  },
+  /**
+   * Mapping from numeric issue group IDs to organization slugs.
+   *
+   * Populated after `sentry issue view <numeric-id>` falls back to the legacy
+   * unscoped `/api/0/issues/{id}/` endpoint and extracts the org from the
+   * response permalink. Subsequent runs consult this cache to route directly
+   * via the org-scoped endpoint, avoiding the redundant unscoped lookup
+   * flagged as a "Consecutive HTTP" performance issue in Sentry.
+   *
+   * Entries are best-effort: a stale mapping (issue moved / deleted / access
+   * revoked) causes a 404 on the cached org call, which the caller evicts and
+   * falls back from. Cleared on logout (scoped to the current user's
+   * permissions).
+   */
+  issue_org_cache: {
+    columns: {
+      // Numeric issue group ID (e.g., "7413562541"). TEXT to sidestep the
+      // 2^53 JavaScript number limit if Sentry's group IDs ever exceed it.
+      issue_id: { type: "TEXT", primaryKey: true },
+      org_slug: { type: "TEXT", notNull: true },
       cached_at: {
         type: "INTEGER",
         notNull: true,
@@ -803,6 +830,13 @@ export function runMigrations(db: Database): void {
   // Sentry-registered repo without an extra API round trip).
   if (currentVersion < 14) {
     db.exec(EXPECTED_TABLES.repo_cache as string);
+  }
+
+  // Migration 14 -> 15: Add issue_org_cache table for numeric-id → org
+  // mappings used by `issue view <numeric-id>` to skip the legacy unscoped
+  // `/api/0/issues/{id}/` endpoint on repeat runs.
+  if (currentVersion < 15) {
+    db.exec(EXPECTED_TABLES.issue_org_cache as string);
   }
 
   if (currentVersion < CURRENT_SCHEMA_VERSION) {

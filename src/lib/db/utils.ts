@@ -198,27 +198,6 @@ export function clearMetadata(db: QueryRunner, keys: string[]): void {
   db.query(`DELETE FROM metadata WHERE key IN (${placeholders})`).run(...keys);
 }
 
-/**
- * Delete all keys from the `metadata` table that start with a given prefix.
- *
- * Intended for cache-style entries grouped under a common namespace
- * (e.g., `issue_org.<numericId>`). The prefix is matched literally — SQLite
- * `LIKE` wildcards (`%` and `_`) in the prefix are NOT escaped, so callers
- * must not pass user-controlled values.
- *
- * @param db - Database instance
- * @param prefix - Namespace prefix to match (e.g., "issue_org.")
- *
- * @example
- * clearMetadataByPrefix(db, "issue_org.");
- */
-export function clearMetadataByPrefix(db: QueryRunner, prefix: string): void {
-  if (prefix.length === 0) {
-    return;
-  }
-  db.query("DELETE FROM metadata WHERE key LIKE ?").run(`${prefix}%`);
-}
-
 // ---------------------------------------------------------------------------
 // Cache entry helpers
 // ---------------------------------------------------------------------------

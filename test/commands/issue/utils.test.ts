@@ -947,6 +947,146 @@ describe("resolveOrgAndIssueId", () => {
   });
 });
 
+describe("resolveOrgAndIssueId: issue-id → org cache (Pattern D)", () => {
+  test("uses cached org on warm cache (single org-scoped call)", async () => {
+    const { setCachedIssueOrg, getCachedIssueOrg } = await import(
+      "../../../src/lib/db/issue-org-cache.js"
+    );
+    setCachedIssueOrg("77777777", "cached-org");
+
+    // Track which endpoint is hit — must be org-scoped, not legacy unscoped.
+    const calls: string[] = [];
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      calls.push(req.url);
+      if (req.url.includes("/organizations/cached-org/issues/77777777/")) {
+        return new Response(
+          JSON.stringify({
+            id: "77777777",
+            shortId: "CACHED-1",
+            permalink:
+              "https://sentry.io/organizations/cached-org/issues/77777777/",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await resolveOrgAndIssueId({
+      issueArg: "77777777",
+      cwd: getConfigDir(),
+      command: "view",
+    });
+
+    expect(result.org).toBe("cached-org");
+    // Should NOT have hit the legacy unscoped /api/0/issues/{id}/ endpoint.
+    expect(calls.some((u) => /\/api\/0\/issues\/77777777\//.test(u))).toBe(
+      false
+    );
+    // The org-scoped endpoint is what got called.
+    expect(
+      calls.some((u) =>
+        u.includes("/organizations/cached-org/issues/77777777/")
+      )
+    ).toBe(true);
+    // Cache stays populated (it was a valid hit).
+    expect(getCachedIssueOrg("77777777")).toBe("cached-org");
+  });
+
+  test("evicts stale cache entry on 404 and uses permalink org (does not leak stale slug)", async () => {
+    const { setCachedIssueOrg, getCachedIssueOrg } = await import(
+      "../../../src/lib/db/issue-org-cache.js"
+    );
+    // Seed a stale mapping that will 404 on the org-scoped endpoint.
+    setCachedIssueOrg("88888888", "stale-org");
+    setOrgRegion("stale-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("correct-org", DEFAULT_SENTRY_URL);
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+      // Org-scoped call with the stale org → 404.
+      if (url.includes("/organizations/stale-org/issues/88888888/")) {
+        return new Response(JSON.stringify({ detail: "Not found" }), {
+          status: 404,
+        });
+      }
+      // Legacy unscoped fallback returns the correct org via permalink.
+      if (/\/api\/0\/issues\/88888888\/(\?|$)/.test(url)) {
+        return new Response(
+          JSON.stringify({
+            id: "88888888",
+            shortId: "CORRECT-1",
+            permalink:
+              "https://sentry.io/organizations/correct-org/issues/88888888/",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await resolveOrgAndIssueId({
+      issueArg: "88888888",
+      cwd: getConfigDir(),
+      command: "view",
+    });
+
+    // Critical assertion: the returned org is the CORRECT one from the
+    // permalink, NOT the stale cached slug.
+    expect(result.org).toBe("correct-org");
+    expect(result.org).not.toBe("stale-org");
+    // The stale cache entry should have been evicted and replaced with
+    // the corrected mapping from the permalink.
+    expect(getCachedIssueOrg("88888888")).toBe("correct-org");
+  });
+
+  test("writes numeric-id → org mapping after legacy unscoped fallback", async () => {
+    const { getCachedIssueOrg } = await import(
+      "../../../src/lib/db/issue-org-cache.js"
+    );
+    setOrgRegion("fresh-org", DEFAULT_SENTRY_URL);
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      // Match /api/0/issues/99999999/ regardless of query string (?collapse=...).
+      if (/\/api\/0\/issues\/99999999\/(\?|$)/.test(req.url)) {
+        return new Response(
+          JSON.stringify({
+            id: "99999999",
+            shortId: "FRESH-1",
+            permalink:
+              "https://sentry.io/organizations/fresh-org/issues/99999999/",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    expect(getCachedIssueOrg("99999999")).toBeUndefined();
+    const result = await resolveOrgAndIssueId({
+      issueArg: "99999999",
+      cwd: getConfigDir(),
+      command: "view",
+    });
+
+    expect(result.org).toBe("fresh-org");
+    // Mapping should now be cached for next time.
+    expect(getCachedIssueOrg("99999999")).toBe("fresh-org");
+  });
+});
+
 describe("pollAutofixState", () => {
   test("returns immediately when state is COMPLETED", async () => {
     let fetchCount = 0;

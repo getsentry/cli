@@ -492,10 +492,10 @@ async function resolveShareIssue(
   // Fetch full issue via authenticated API
   if (org) {
     const resolvedOrg = await resolveEffectiveOrg(org);
-    const issue = await getIssueInOrg(resolvedOrg, groupId, {
+    const orgScopedIssue = await getIssueInOrg(resolvedOrg, groupId, {
       collapse: ISSUE_DETAIL_COLLAPSE,
     });
-    return { org: resolvedOrg, issue };
+    return { org: resolvedOrg, issue: orgScopedIssue };
   }
 
   // No org from URL — try env/DSN context, then the issue-id → org cache,
@@ -503,14 +503,19 @@ async function resolveShareIssue(
   // full rationale behind the cache.
   const resolvedOrg = await resolveOrg({ cwd });
   const cachedOrg = resolvedOrg ? null : getCachedIssueOrg(groupId);
-  const issue = await fetchIssueByNumericId(
+  const { issue, cacheEvicted } = await fetchIssueByNumericId(
     groupId,
     resolvedOrg?.org,
     cachedOrg
   );
+  // When `cacheEvicted` is true, the cached org was stale (404'd) — do NOT
+  // let it win the `??` chain; re-derive from the permalink instead.
+  const effectiveCachedOrg = cacheEvicted ? null : cachedOrg;
   const resolvedOrgSlug =
-    resolvedOrg?.org ?? cachedOrg ?? extractOrgFromPermalink(issue.permalink);
-  if (resolvedOrgSlug && !resolvedOrg && !cachedOrg) {
+    resolvedOrg?.org ??
+    effectiveCachedOrg ??
+    extractOrgFromPermalink(issue.permalink);
+  if (resolvedOrgSlug && !resolvedOrg && !effectiveCachedOrg) {
     setCachedIssueOrg(groupId, resolvedOrgSlug);
   }
   return { org: resolvedOrgSlug, issue };
@@ -557,32 +562,50 @@ function extractOrgFromPermalink(
  * Extracted from {@link resolveNumericIssue} to keep its cognitive
  * complexity below the project's lint threshold.
  */
+/**
+ * Result of {@link fetchIssueByNumericId}.
+ *
+ * `cacheEvicted` is true when the helper invalidated a stale `cachedOrg`
+ * entry after a 404 and fell through to the legacy unscoped endpoint.
+ * Callers MUST treat their local `cachedOrg` as stale when this flag is
+ * set and re-derive the org from `issue.permalink` instead — otherwise
+ * a stale slug leaks into downstream API calls (issue events, traces).
+ */
+type FetchIssueByNumericIdResult = {
+  issue: SentryIssue;
+  cacheEvicted: boolean;
+};
+
 async function fetchIssueByNumericId(
   id: string,
   explicitOrg: string | undefined,
   cachedOrg: string | null | undefined
-): Promise<SentryIssue> {
+): Promise<FetchIssueByNumericIdResult> {
   if (explicitOrg) {
-    return await getIssueInOrg(explicitOrg, id, {
+    const issue = await getIssueInOrg(explicitOrg, id, {
       collapse: ISSUE_DETAIL_COLLAPSE,
     });
+    return { issue, cacheEvicted: false };
   }
   if (cachedOrg) {
     try {
-      return await getIssueInOrg(cachedOrg, id, {
+      const issue = await getIssueInOrg(cachedOrg, id, {
         collapse: ISSUE_DETAIL_COLLAPSE,
       });
+      return { issue, cacheEvicted: false };
     } catch (orgErr) {
       if (orgErr instanceof ApiError && orgErr.status === 404) {
         // Stale mapping (issue moved / deleted / access revoked). Evict the
         // cache entry and fall through to the legacy unscoped endpoint.
         clearCachedIssueOrg(id);
-        return await getIssue(id, { collapse: ISSUE_DETAIL_COLLAPSE });
+        const issue = await getIssue(id, { collapse: ISSUE_DETAIL_COLLAPSE });
+        return { issue, cacheEvicted: true };
       }
       throw orgErr;
     }
   }
-  return await getIssue(id, { collapse: ISSUE_DETAIL_COLLAPSE });
+  const issue = await getIssue(id, { collapse: ISSUE_DETAIL_COLLAPSE });
+  return { issue, cacheEvicted: false };
 }
 
 /**
@@ -612,16 +635,27 @@ async function resolveNumericIssue(
   // in env vars and config defaults that may point at a different org.
   const cachedOrg = resolvedOrg ? null : getCachedIssueOrg(id);
   try {
-    const issue = await fetchIssueByNumericId(id, resolvedOrg?.org, cachedOrg);
+    const { issue, cacheEvicted } = await fetchIssueByNumericId(
+      id,
+      resolvedOrg?.org,
+      cachedOrg
+    );
+    // When `cacheEvicted` is true, the cached org slug was stale (404'd) and
+    // the helper fell through to the unscoped endpoint. Do NOT let the stale
+    // `cachedOrg` participate in the `??` chain — re-derive from permalink.
+    const effectiveCachedOrg = cacheEvicted ? null : cachedOrg;
     // Extract org from the response permalink as a fallback so that callers
     // like resolveOrgAndIssueId (used by explain/plan) get the org slug even
     // when no org context was available before the fetch.
     const org =
-      resolvedOrg?.org ?? cachedOrg ?? extractOrgFromPermalink(issue.permalink);
+      resolvedOrg?.org ??
+      effectiveCachedOrg ??
+      extractOrgFromPermalink(issue.permalink);
     // Best-effort: remember the numeric-id → org mapping so the next run
-    // skips the unscoped fallback. Skipped when the org came from a cache
-    // hit (already stored) or when extraction failed.
-    if (org && !resolvedOrg && !cachedOrg) {
+    // skips the unscoped fallback. Skipped when the org came from a still-
+    // valid cache hit (already stored). When the cache was evicted we SHOULD
+    // re-write the corrected mapping derived from the permalink.
+    if (org && !resolvedOrg && !effectiveCachedOrg) {
       setCachedIssueOrg(id, org);
     }
     return { org, issue };

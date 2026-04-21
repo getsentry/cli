@@ -13,11 +13,11 @@
  * the `sentry.issue.view` "Consecutive HTTP" pattern for Pattern D in
  * the issue triage (numeric-ID org discovery fan-out).
  *
- * Storage: the existing `metadata` KV table with key shape
- * `issue_org.{numericId}` and value = org slug. No schema migration
- * required. Entries are best-effort: a stale mapping (issue deleted,
- * access revoked, or moved) causes a single 404 on the cached org
- * call which the caller falls back from, and we evict the entry.
+ * Storage: dedicated `issue_org_cache` SQLite table (schema v15). Entries
+ * are best-effort — a stale mapping (issue deleted, access revoked, or
+ * moved) causes a single 404 on the cached org call which the caller
+ * falls back from and evicts the entry. Cleared on logout since
+ * mappings are scoped to the authenticated user's permissions.
  *
  * Values are not TTL'd because issues are owned by a single org for
  * their entire lifetime — the mapping cannot change except by issue
@@ -26,19 +26,13 @@
 
 import { recordCacheHit } from "../telemetry.js";
 import { getDatabase } from "./index.js";
-import {
-  clearMetadata,
-  clearMetadataByPrefix,
-  getMetadata,
-  setMetadata,
-} from "./utils.js";
+import { runUpsert } from "./utils.js";
 
-/** Metadata key namespace for issue-id → org mappings. */
-const KEY_PREFIX = "issue_org.";
-
-function metadataKey(numericId: string): string {
-  return `${KEY_PREFIX}${numericId}`;
-}
+type IssueOrgRow = {
+  issue_id: string;
+  org_slug: string;
+  cached_at: number;
+};
 
 /**
  * Look up the cached organization slug for a numeric issue ID.
@@ -47,11 +41,17 @@ function metadataKey(numericId: string): string {
  * @returns Org slug if cached, undefined otherwise
  */
 export function getCachedIssueOrg(numericId: string): string | undefined {
+  if (!numericId) {
+    recordCacheHit("issue_org", false);
+    return;
+  }
   const db = getDatabase();
-  const map = getMetadata(db, [metadataKey(numericId)]);
-  const org = map.get(metadataKey(numericId));
-  recordCacheHit("issue_org", !!org);
-  return org;
+  const row = db
+    .query("SELECT org_slug FROM issue_org_cache WHERE issue_id = ?")
+    .get(numericId) as Pick<IssueOrgRow, "org_slug"> | undefined;
+
+  recordCacheHit("issue_org", !!row);
+  return row?.org_slug;
 }
 
 /**
@@ -69,7 +69,16 @@ export function setCachedIssueOrg(numericId: string, orgSlug: string): void {
     return;
   }
   const db = getDatabase();
-  setMetadata(db, { [metadataKey(numericId)]: orgSlug });
+  runUpsert(
+    db,
+    "issue_org_cache",
+    {
+      issue_id: numericId,
+      org_slug: orgSlug,
+      cached_at: Date.now(),
+    },
+    ["issue_id"]
+  );
 }
 
 /**
@@ -85,17 +94,16 @@ export function clearCachedIssueOrg(numericId: string): void {
     return;
   }
   const db = getDatabase();
-  clearMetadata(db, [metadataKey(numericId)]);
+  db.query("DELETE FROM issue_org_cache WHERE issue_id = ?").run(numericId);
 }
 
 /**
  * Drop ALL issue-id → org mappings.
  *
  * Called from auth logout handlers so signing out with one account does
- * not leak mappings into a different account's session. Kept separate
- * from `clearMetadata` so the caller can target just this cache class.
+ * not leak mappings into a different account's session.
  */
 export function clearAllIssueOrgCache(): void {
   const db = getDatabase();
-  clearMetadataByPrefix(db, KEY_PREFIX);
+  db.query("DELETE FROM issue_org_cache").run();
 }
