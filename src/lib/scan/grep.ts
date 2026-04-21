@@ -535,16 +535,22 @@ function setupGrepPipeline(opts: GrepOptions): GrepPipelineSetup {
     multiline,
   });
 
-  // Literal extraction runs on the source the caller passed (or the
-  // compiled regex's source if they passed a RegExp), plus the
-  // compiled regex's flags. `compilePattern` handles `(?i)`-style
-  // inline flag translation, so by the time we see `regex.flags`
-  // they reflect the true case-sensitivity.
-  const patternSource =
-    typeof opts.pattern === "string" ? opts.pattern : opts.pattern.source;
-  const literal = extractInnerLiteral(patternSource, regex.flags);
+  // Literal extraction runs on the COMPILED regex's source, not the
+  // raw user input. `compilePattern` rewrites scoped inline flags
+  // like `(?i:foo|bar)baz` — strip the group and widen the flag,
+  // which yields `foo|barbaz` (source) + `i` (flag). The rewritten
+  // source has top-level alternation the original lacked. If we
+  // extracted from the original, `hasTopLevelAlternation` would miss
+  // it and we'd extract `"baz"` as a "required" literal — but the
+  // compiled regex can match `foo` alone, silently dropping lines
+  // that match the first branch of the alternation.
+  //
+  // Always extract from `regex.source` so the extractor sees what
+  // the regex engine will actually run. `regex.flags` is authoritative
+  // for case-sensitivity either way.
+  const literal = extractInnerLiteral(regex.source, regex.flags);
   const literalIsPattern =
-    literal !== null && isPureLiteral(patternSource, regex.flags);
+    literal !== null && isPureLiteral(regex.source, regex.flags);
 
   const includes = compileMatchers(opts.include);
   const excludes = compileMatchers(opts.exclude);

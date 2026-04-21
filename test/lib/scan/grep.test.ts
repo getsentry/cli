@@ -772,4 +772,33 @@ describe("collectGrep — literal prefilter fast path", () => {
       cleanup();
     }
   });
+
+  test("scoped inline flags that introduce top-level alternation are safely handled (Cursor #3)", async () => {
+    // Regression: `compilePattern` rewrites `(?i:foo|bar)baz` into
+    // `foo|barbaz` + the global `i` flag. The rewritten source has
+    // top-level alternation the original lacked. If the literal
+    // extractor runs on the ORIGINAL source, `hasTopLevelAlternation`
+    // doesn't see the `|` and extracts `"baz"` as a required literal.
+    // But the compiled regex matches `foo` alone — lines with just
+    // `foo` get silently dropped by the prefilter.
+    //
+    // Fix: extract from `regex.source` (post-compile) so the
+    // extractor sees what the engine will run. `hasTopLevelAlternation`
+    // now sees the `foo|barbaz` and correctly returns null — the
+    // prefilter is skipped and both branches match.
+    const { cwd, cleanup } = makeSandbox({
+      "foo-only.txt": "foo line without that other word\n",
+      "barbaz.txt": "contains barbaz here\n",
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "(?i:foo|bar)baz",
+      });
+      const paths = matches.map((m) => m.path).sort();
+      expect(paths).toEqual(["barbaz.txt", "foo-only.txt"]);
+    } finally {
+      cleanup();
+    }
+  });
 });
