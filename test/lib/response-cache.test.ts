@@ -8,11 +8,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { setAuthToken } from "../../src/lib/db/auth.js";
 import {
   buildCacheKey,
   clearResponseCache,
   disableResponseCache,
   getCachedResponse,
+  invalidateCachedResponse,
+  invalidateCachedResponsesMatching,
   normalizeUrl,
   resetCacheState,
   storeCachedResponse,
@@ -371,20 +374,27 @@ describe("normalizeUrl", () => {
 
 describe("buildCacheKey", () => {
   test("produces a 64-char hex string", () => {
-    const key = buildCacheKey("GET", TEST_URL);
-    expect(key).toMatch(/^[0-9a-f]{64}$/);
+    expect(buildCacheKey("GET", TEST_URL)).toMatch(/^[0-9a-f]{64}$/);
   });
 
   test("is deterministic", () => {
-    const key1 = buildCacheKey("GET", TEST_URL);
-    const key2 = buildCacheKey("GET", TEST_URL);
-    expect(key1).toBe(key2);
+    expect(buildCacheKey("GET", TEST_URL)).toBe(buildCacheKey("GET", TEST_URL));
   });
 
   test("different methods produce different keys", () => {
-    const getKey = buildCacheKey("GET", TEST_URL);
-    const postKey = buildCacheKey("POST", TEST_URL);
-    expect(getKey).not.toBe(postKey);
+    expect(buildCacheKey("GET", TEST_URL)).not.toBe(
+      buildCacheKey("POST", TEST_URL)
+    );
+  });
+
+  test("different identities produce different keys for the same URL", () => {
+    // Switching accounts must route reads/writes through a different
+    // namespace so users never see each other's cached data.
+    setAuthToken("alice_access", 3600, "alice_refresh");
+    const aliceKey = buildCacheKey("GET", TEST_URL);
+    setAuthToken("bob_access", 3600, "bob_refresh");
+    const bobKey = buildCacheKey("GET", TEST_URL);
+    expect(aliceKey).not.toBe(bobKey);
   });
 });
 
@@ -460,5 +470,114 @@ describe("file structure", () => {
     const files = await readdir(cacheDir);
     expect(files.length).toBe(1);
     expect(files[0]).toMatch(/^[0-9a-f]{64}\.json$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Prefix-based invalidation + identity isolation (getsentry/cli#788 follow-up)
+// ---------------------------------------------------------------------------
+
+describe("invalidateCachedResponsesMatching", () => {
+  const ORG_PREFIX = "https://us.sentry.io/api/0/organizations/myorg/projects/";
+  const ORG_LIST_URL = `${ORG_PREFIX}?cursor=abc`;
+  const OTHER_PREFIX =
+    "https://us.sentry.io/api/0/organizations/other-org/projects/";
+
+  test("removes entries whose URL matches the prefix", async () => {
+    await storeCachedResponse(
+      "GET",
+      ORG_LIST_URL,
+      {},
+      mockResponse({ matched: true })
+    );
+    await storeCachedResponse(
+      "GET",
+      `${OTHER_PREFIX}?cursor=def`,
+      {},
+      mockResponse({ matched: false })
+    );
+
+    await invalidateCachedResponsesMatching(ORG_PREFIX);
+
+    // The matching entry is gone; the other org's entry survives.
+    expect(await getCachedResponse("GET", ORG_LIST_URL, {})).toBeUndefined();
+    const survivor = await getCachedResponse(
+      "GET",
+      `${OTHER_PREFIX}?cursor=def`,
+      {}
+    );
+    expect(survivor).toBeDefined();
+  });
+
+  test("does not delete entries belonging to a different identity", async () => {
+    // A writes a cache entry, B sweeps the same URL prefix; A's entry
+    // must survive because B can only see its own identity's files.
+    setAuthToken("identity-a", 3600, "refresh-a");
+    await storeCachedResponse(
+      "GET",
+      ORG_LIST_URL,
+      {},
+      mockResponse({ owner: "a" })
+    );
+    expect(await getCachedResponse("GET", ORG_LIST_URL, {})).toBeDefined();
+
+    setAuthToken("identity-b", 3600, "refresh-b");
+    await invalidateCachedResponsesMatching(ORG_PREFIX);
+
+    setAuthToken("identity-a", 3600, "refresh-a");
+    expect(await getCachedResponse("GET", ORG_LIST_URL, {})).toBeDefined();
+  });
+
+  test("is a no-op when the cache dir does not exist", async () => {
+    await invalidateCachedResponsesMatching(ORG_PREFIX);
+  });
+});
+
+describe("invalidateCachedResponse", () => {
+  test("removes the exact cached entry for the current identity", async () => {
+    await storeCachedResponse("GET", TEST_URL, {}, mockResponse(TEST_BODY));
+    expect(await getCachedResponse("GET", TEST_URL, {})).toBeDefined();
+
+    await invalidateCachedResponse(TEST_URL);
+    expect(await getCachedResponse("GET", TEST_URL, {})).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: prefix-sweep must catch query-string variants
+// (sentry-bot finding on #788 — `getIssue` caches under
+// `/issues/{id}/?collapse=stats&...` so exact-match invalidation of
+// `/issues/{id}/` would silently fail to clear the stale entry.)
+// ---------------------------------------------------------------------------
+
+describe("invalidateCachedResponsesMatching with query params", () => {
+  const DETAIL_BASE =
+    "https://us.sentry.io/api/0/organizations/acme/issues/12345/";
+
+  test("clears entries cached with varying query parameters", async () => {
+    await storeCachedResponse(
+      "GET",
+      `${DETAIL_BASE}?collapse=stats&collapse=lifetime`,
+      {},
+      mockResponse({ id: "12345" })
+    );
+    expect(
+      await getCachedResponse(
+        "GET",
+        `${DETAIL_BASE}?collapse=stats&collapse=lifetime`,
+        {}
+      )
+    ).toBeDefined();
+
+    // Mutation-side invalidator uses the base URL (no params).
+    await invalidateCachedResponsesMatching(DETAIL_BASE);
+
+    expect(
+      await getCachedResponse(
+        "GET",
+        `${DETAIL_BASE}?collapse=stats&collapse=lifetime`,
+        {}
+      )
+    ).toBeUndefined();
   });
 });

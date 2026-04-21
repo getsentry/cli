@@ -166,6 +166,27 @@ export async function getOrgSdkConfig(orgSlug: string) {
 }
 
 /**
+ * Build a full Sentry API URL from a region base and path segments.
+ *
+ * Each segment is passed through `encodeURIComponent`, so callers can
+ * pass user-supplied slugs directly without worrying about slashes,
+ * spaces, or other reserved characters. The `/api/0/` prefix and the
+ * required trailing slash are added automatically.
+ *
+ * @example
+ *   buildApiUrl(regionUrl, "organizations", orgSlug, "projects")
+ *   // → `${regionUrl.replace(/\/$/,"")}/api/0/organizations/<org>/projects/`
+ */
+export function buildApiUrl(regionUrl: string, ...segments: string[]): string {
+  const base = regionUrl.endsWith("/") ? regionUrl.slice(0, -1) : regionUrl;
+  if (segments.length === 0) {
+    return `${base}/api/0/`;
+  }
+  const path = segments.map(encodeURIComponent).join("/");
+  return `${base}/api/0/${path}/`;
+}
+
+/**
  * Extract the value of a named attribute from a Link header segment.
  * Parses `key="value"` pairs using string operations instead of regex
  * for robustness and performance.

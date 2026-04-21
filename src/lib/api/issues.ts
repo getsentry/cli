@@ -12,11 +12,14 @@ import type { SentryIssue } from "../../types/index.js";
 import { applyCustomHeaders } from "../custom-headers.js";
 import { ApiError, ValidationError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
+import { invalidateCachedResponsesMatching } from "../response-cache.js";
+import { getApiBaseUrl } from "../sentry-client.js";
 
 import {
   API_MAX_PER_PAGE,
   apiRequest,
   apiRequestToRegion,
+  buildApiUrl,
   getOrgSdkConfig,
   MAX_PAGINATION_PAGES,
   type PaginatedResponse,
@@ -554,6 +557,7 @@ export async function updateIssueStatus(
   if (options?.statusDetails) {
     body.statusDetails = options.statusDetails;
   }
+
   if (options?.orgSlug) {
     // Region-aware org-scoped endpoint — preferred when org is known.
     const regionUrl = await resolveOrgRegion(options.orgSlug);
@@ -562,13 +566,22 @@ export async function updateIssueStatus(
       `/organizations/${encodeURIComponent(options.orgSlug)}/issues/${encodeURIComponent(issueId)}/`,
       { method: "PUT", body }
     );
+    await invalidateIssueCaches(regionUrl, options.orgSlug, issueId);
     return data;
   }
-  // Legacy global endpoint — works without org but not region-aware.
-  return apiRequest<SentryIssue>(`/issues/${encodeURIComponent(issueId)}/`, {
-    method: "PUT",
-    body,
-  });
+
+  // Legacy global endpoint — works without org but not region-aware,
+  // so we can only flush the legacy issue-detail URL. Region-scoped
+  // lists age out via their TTL. Prefix-sweep (not exact-match)
+  // because `getIssue` caches under `.../issues/{id}/?collapse=...`.
+  const legacyData = await apiRequest<SentryIssue>(
+    `/issues/${encodeURIComponent(issueId)}/`,
+    { method: "PUT", body }
+  );
+  await invalidateCachedResponsesMatching(
+    buildApiUrl(getApiBaseUrl(), "issues", issueId)
+  );
+  return legacyData;
 }
 
 /** Result of a successful issue-merge operation. */
@@ -612,6 +625,15 @@ export async function mergeIssues(
       method: "PUT",
       body: { merge: 1 },
     });
+    // Flush detail caches for every affected ID (detail-only avoids
+    // N+1 list scans) then sweep the org-wide list once.
+    const affectedIds = data.merge.children.toSpliced(0, 0, data.merge.parent);
+    await Promise.all(
+      affectedIds.map((id) =>
+        invalidateIssueDetailCaches(regionUrl, orgSlug, id)
+      )
+    );
+    await invalidateOrgIssueList(regionUrl, orgSlug);
     return data.merge;
   } catch (error) {
     // The bulk-mutate endpoint returns 204 when no matching issues are
@@ -670,4 +692,78 @@ export async function getSharedIssue(
   }
 
   return (await response.json()) as { groupID: string };
+}
+
+/**
+ * Flush both the org-scoped and legacy detail endpoints for one issue,
+ * including all `collapse` query-param variants (`getIssueInOrg` caches
+ * responses under URLs like `.../issues/{id}/?collapse=stats&...` so
+ * exact-match invalidation would miss them). Does NOT sweep the
+ * org-wide list — callers must call {@link invalidateOrgIssueList}
+ * once per operation. Never throws.
+ */
+async function invalidateIssueDetailCaches(
+  regionUrl: string,
+  orgSlug: string,
+  issueId: string
+): Promise<void> {
+  try {
+    await Promise.all([
+      invalidateCachedResponsesMatching(
+        buildApiUrl(regionUrl, "organizations", orgSlug, "issues", issueId)
+      ),
+      // Legacy `/api/0/issues/{id}/` is stored under the non-region base
+      // (see `apiRequest` → `getApiBaseUrl`), NOT the org's region URL.
+      invalidateCachedResponsesMatching(
+        buildApiUrl(getApiBaseUrl(), "issues", issueId)
+      ),
+    ]);
+  } catch {
+    /* best-effort: mutation already succeeded upstream */
+  }
+}
+
+/**
+ * Flush detail + list caches for one issue. Use for single-issue
+ * mutations (resolve, unresolve); batch mutations should use the
+ * detail-only helper plus one final {@link invalidateOrgIssueList}.
+ *
+ * Minor redundancy: the org-scoped half of
+ * {@link invalidateIssueDetailCaches} is already a prefix of the
+ * {@link invalidateOrgIssueList} sweep. Accepted because the helpers
+ * are each also used solo elsewhere, and the extra directory walk is
+ * negligible.
+ *
+ * Never throws.
+ */
+async function invalidateIssueCaches(
+  regionUrl: string,
+  orgSlug: string,
+  issueId: string
+): Promise<void> {
+  try {
+    await Promise.all([
+      invalidateIssueDetailCaches(regionUrl, orgSlug, issueId),
+      invalidateOrgIssueList(regionUrl, orgSlug),
+    ]);
+  } catch {
+    /* best-effort: mutation already succeeded upstream */
+  }
+}
+
+/**
+ * Sweep every paginated variant of the org's issue-list endpoint.
+ * Never throws.
+ */
+async function invalidateOrgIssueList(
+  regionUrl: string,
+  orgSlug: string
+): Promise<void> {
+  try {
+    await invalidateCachedResponsesMatching(
+      buildApiUrl(regionUrl, "organizations", orgSlug, "issues")
+    );
+  } catch {
+    /* best-effort: mutation already succeeded upstream */
+  }
 }

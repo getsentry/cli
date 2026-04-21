@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { throwApiError } from "../../../src/lib/api/infrastructure.js";
+import {
+  buildApiUrl,
+  throwApiError,
+} from "../../../src/lib/api/infrastructure.js";
 import { ApiError } from "../../../src/lib/errors.js";
 
 describe("throwApiError", () => {
@@ -97,5 +100,36 @@ describe("throwApiError", () => {
       expect(apiError.message).toBe("Failed to get event: Network error");
       expect(apiError.detail).toContain("ECONNREFUSED");
     }
+  });
+});
+
+describe("buildApiUrl", () => {
+  const BASE = "https://us.sentry.io";
+
+  test("composes /api/0/ + segments with a trailing slash", () => {
+    expect(buildApiUrl(BASE, "organizations", "acme", "projects")).toBe(
+      "https://us.sentry.io/api/0/organizations/acme/projects/"
+    );
+  });
+
+  test("strips a single trailing slash from the base", () => {
+    expect(buildApiUrl(`${BASE}/`, "organizations", "acme")).toBe(
+      "https://us.sentry.io/api/0/organizations/acme/"
+    );
+  });
+
+  test("URL-encodes each segment so reserved chars are safe", () => {
+    // Slash in a user-supplied slug used to break manual template-string
+    // builders. encodeURIComponent renders it as %2F.
+    expect(buildApiUrl(BASE, "organizations", "acme/evil", "projects")).toBe(
+      "https://us.sentry.io/api/0/organizations/acme%2Fevil/projects/"
+    );
+    expect(buildApiUrl(BASE, "projects", "my org", "my proj")).toBe(
+      "https://us.sentry.io/api/0/projects/my%20org/my%20proj/"
+    );
+  });
+
+  test("handles zero segments — returns the base /api/0/ root", () => {
+    expect(buildApiUrl(BASE)).toBe("https://us.sentry.io/api/0/");
   });
 });

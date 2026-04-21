@@ -25,6 +25,11 @@ import { cacheProjectsForOrg } from "../db/project-cache.js";
 import { getCachedOrganizations } from "../db/regions.js";
 import { type AuthGuardSuccess, withAuthGuard } from "../errors.js";
 import { logger } from "../logger.js";
+import { resolveOrgRegion } from "../region.js";
+import {
+  invalidateCachedResponse,
+  invalidateCachedResponsesMatching,
+} from "../response-cache.js";
 import { getApiBaseUrl } from "../sentry-client.js";
 import { buildProjectUrl } from "../sentry-urls.js";
 import { isAllDigits } from "../utils.js";
@@ -32,6 +37,7 @@ import { isAllDigits } from "../utils.js";
 import {
   API_MAX_PER_PAGE,
   apiRequestToRegion,
+  buildApiUrl,
   getOrgSdkConfig,
   MAX_PAGINATION_PAGES,
   ORG_FANOUT_CONCURRENCY,
@@ -166,6 +172,7 @@ export async function createProject(
     body,
   });
   const data = unwrapResult(result, "Failed to create project");
+  await invalidateOrgProjectCache(orgSlug);
   return data as unknown as SentryProject;
 }
 
@@ -215,6 +222,46 @@ export async function deleteProject(
     },
   });
   unwrapResult(result, "Failed to delete project");
+  await invalidateProjectCaches(orgSlug, projectSlug);
+}
+
+/**
+ * Flush the project-detail GET and the org-wide project list so
+ * follow-up `project list` / `project view` reads don't see the
+ * deleted project. Never throws.
+ */
+async function invalidateProjectCaches(
+  orgSlug: string,
+  projectSlug: string
+): Promise<void> {
+  try {
+    const regionUrl = await resolveOrgRegion(orgSlug);
+    await Promise.all([
+      invalidateCachedResponse(
+        buildApiUrl(regionUrl, "projects", orgSlug, projectSlug)
+      ),
+      invalidateCachedResponsesMatching(
+        buildApiUrl(regionUrl, "organizations", orgSlug, "projects")
+      ),
+    ]);
+  } catch {
+    /* best-effort: mutation already succeeded */
+  }
+}
+
+/**
+ * Sweep every paginated variant of the org's project-list endpoint.
+ * Used by `project create`. Never throws.
+ */
+async function invalidateOrgProjectCache(orgSlug: string): Promise<void> {
+  try {
+    const regionUrl = await resolveOrgRegion(orgSlug);
+    await invalidateCachedResponsesMatching(
+      buildApiUrl(regionUrl, "organizations", orgSlug, "projects")
+    );
+  } catch {
+    /* best-effort: mutation already succeeded */
+  }
 }
 
 /** Result of searching for projects by slug across all organizations. */

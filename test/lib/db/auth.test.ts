@@ -9,13 +9,16 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  ANON_IDENTITY,
   getActiveEnvVarName,
   getAuthConfig,
   getAuthToken,
+  getIdentityFingerprint,
   getRawEnvToken,
   isAuthenticated,
   isEnvTokenActive,
   refreshToken,
+  resetIdentityFingerprintCache,
   setAuthToken,
 } from "../../../src/lib/db/auth.js";
 import { useTestConfigDir } from "../../helpers.js";
@@ -30,6 +33,7 @@ beforeEach(() => {
   savedSentryToken = process.env.SENTRY_TOKEN;
   delete process.env.SENTRY_AUTH_TOKEN;
   delete process.env.SENTRY_TOKEN;
+  resetIdentityFingerprintCache();
 });
 
 afterEach(() => {
@@ -215,5 +219,107 @@ describe("clearAuth: integration with per-account caches", () => {
     // Mapping must be gone — otherwise the next account would leak into
     // their `issue view` fallback routing.
     expect(getCachedIssueOrg("12345")).toBeUndefined();
+  });
+});
+
+describe("getIdentityFingerprint", () => {
+  test("returns the anonymous fingerprint when no token is present", () => {
+    expect(getIdentityFingerprint()).toBe(ANON_IDENTITY);
+  });
+
+  test("returns a stable 16-char hex fingerprint for a given env token", () => {
+    process.env.SENTRY_AUTH_TOKEN = "sntrys_alice";
+    const fp1 = getIdentityFingerprint();
+    const fp2 = getIdentityFingerprint();
+    expect(fp1).toMatch(/^[0-9a-f]{16}$/);
+    expect(fp1).toBe(fp2);
+  });
+
+  test("different env tokens produce different fingerprints", () => {
+    process.env.SENTRY_AUTH_TOKEN = "sntrys_alice";
+    const aliceFp = getIdentityFingerprint();
+    process.env.SENTRY_AUTH_TOKEN = "sntrys_bob";
+    resetIdentityFingerprintCache();
+    const bobFp = getIdentityFingerprint();
+    expect(aliceFp).not.toBe(bobFp);
+  });
+
+  test("SENTRY_AUTH_TOKEN and SENTRY_TOKEN produce the same fingerprint", () => {
+    // Same secret value → same fingerprint regardless of which env var
+    // holds it (the variable name is not part of the identity).
+    process.env.SENTRY_AUTH_TOKEN = "same_token";
+    const authFp = getIdentityFingerprint();
+    delete process.env.SENTRY_AUTH_TOKEN;
+    process.env.SENTRY_TOKEN = "same_token";
+    resetIdentityFingerprintCache();
+    const legacyFp = getIdentityFingerprint();
+    expect(authFp).toBe(legacyFp);
+  });
+
+  test("OAuth refresh token is the identity root (stable across access-token rotation)", () => {
+    // Simulate two consecutive access tokens backed by the same refresh
+    // token — an hourly OAuth refresh must not churn the cache.
+    setAuthToken("access_token_1", 3600, "shared_refresh");
+    const fp1 = getIdentityFingerprint();
+    setAuthToken("access_token_2", 3600, "shared_refresh");
+    const fp2 = getIdentityFingerprint();
+    expect(fp1).toBe(fp2);
+  });
+
+  test("different OAuth refresh tokens produce different fingerprints", () => {
+    setAuthToken("access_token", 3600, "refresh_alice");
+    const aliceFp = getIdentityFingerprint();
+    setAuthToken("access_token", 3600, "refresh_bob");
+    const bobFp = getIdentityFingerprint();
+    expect(aliceFp).not.toBe(bobFp);
+  });
+
+  test("SENTRY_FORCE_ENV_TOKEN switches the fingerprint source to the env token", () => {
+    setAuthToken("stored_oauth", 3600, "stored_refresh");
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    const storedFp = getIdentityFingerprint();
+    try {
+      process.env.SENTRY_FORCE_ENV_TOKEN = "1";
+      resetIdentityFingerprintCache();
+      const envFp = getIdentityFingerprint();
+      expect(envFp).not.toBe(storedFp);
+    } finally {
+      delete process.env.SENTRY_FORCE_ENV_TOKEN;
+    }
+  });
+
+  test("env and OAuth fingerprints with the same secret value are distinct", () => {
+    // The `kind` prefix in hashIdentity keeps env/oauth namespaces
+    // distinct even when secrets happen to collide.
+    process.env.SENTRY_AUTH_TOKEN = "shared_secret";
+    const envFp = getIdentityFingerprint();
+    delete process.env.SENTRY_AUTH_TOKEN;
+    setAuthToken("shared_secret", 3600, "shared_secret");
+    const oauthFp = getIdentityFingerprint();
+    expect(envFp).not.toBe(oauthFp);
+  });
+
+  test("expired access-only OAuth token falls through to env token", () => {
+    // Mirrors getAuthConfig: an expired access token with no
+    // refresh_token is unusable — the API client sends the env token,
+    // so the fingerprint must match.
+    setAuthToken("expired_access", -1);
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    resetIdentityFingerprintCache();
+    const fp = getIdentityFingerprint();
+
+    // With no DB row, same env token should produce the same fingerprint.
+    setAuthToken("", -1);
+    resetIdentityFingerprintCache();
+    expect(getIdentityFingerprint()).toBe(fp);
+  });
+
+  test("expired access-only OAuth token with refresh_token uses the refresh token", () => {
+    // An expired access token + refresh_token is still usable; the
+    // fingerprint keys off the stable refresh_token.
+    setAuthToken("expired_access", -1, "live_refresh");
+    const fp = getIdentityFingerprint();
+    setAuthToken("fresh_access", 3600, "live_refresh");
+    expect(getIdentityFingerprint()).toBe(fp);
   });
 });

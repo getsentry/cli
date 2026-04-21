@@ -27,6 +27,7 @@ import { join } from "node:path";
 import CachePolicy from "http-cache-semantics";
 import pLimit from "p-limit";
 
+import { getIdentityFingerprint } from "./db/auth.js";
 import { getConfigDir } from "./db/index.js";
 import { getEnv } from "./env.js";
 import { recordCacheHit, withCacheSpan } from "./telemetry.js";
@@ -108,20 +109,19 @@ export function classifyUrl(url: string): TtlTier {
 // ---------------------------------------------------------------------------
 
 /**
- * Build a deterministic cache key from an HTTP method and URL.
+ * Build a deterministic cache key from the active identity + method + URL.
  *
- * Query parameters are sorted alphabetically so that `?a=1&b=2` and `?b=2&a=1`
- * produce the same key. The key is then SHA-256 hashed to produce a fixed-length
- * filename-safe string.
+ * Query params are sorted alphabetically so `?a=1&b=2` and `?b=2&a=1`
+ * produce the same key. The identity fingerprint scopes entries per
+ * bearer token so switching accounts never serves another user's data.
  *
- * @param method - HTTP method (e.g., "GET")
- * @param url - Full URL string
- * @returns Hex-encoded SHA-256 hash suitable for use as a filename
  * @internal Exported for testing
  */
 export function buildCacheKey(method: string, url: string): string {
   const normalized = normalizeUrl(method, url);
-  return createHash("sha256").update(normalized).digest("hex");
+  return createHash("sha256")
+    .update(`${getIdentityFingerprint()}|${normalized}`)
+    .digest("hex");
 }
 
 /**
@@ -164,6 +164,13 @@ type CacheEntry = {
   headers: Record<string, string>;
   /** Original URL, used for TTL tier classification during cleanup */
   url: string;
+  /**
+   * Identity fingerprint that owns this entry. Used by
+   * {@link invalidateCachedResponsesMatching} to skip other identities'
+   * files. Optional for backwards compat: legacy entries are treated
+   * as foreign and skipped.
+   */
+  identity?: string;
   /** When this entry was created (epoch ms) */
   createdAt: number;
   /**
@@ -390,9 +397,8 @@ export async function getCachedResponse(
   try {
     key = buildCacheKey(method, url);
   } catch {
-    // Malformed URL (e.g., self-hosted with bad base URL) — skip cache lookup.
-    // The request will proceed without caching; fetch() itself will surface
-    // the real error if the URL is truly broken.
+    // Malformed URL — skip cache lookup. The request itself will surface
+    // any real URL error.
     return;
   }
 
@@ -511,12 +517,13 @@ export async function storeCachedResponse(
       url,
       "cache.put",
       async (span) => {
-        const size = await writeResponseToCache(
+        const size = await writeResponseToCache({
           key,
+          identity: getIdentityFingerprint(),
           url,
           requestHeaders,
-          response
-        );
+          response,
+        });
         if (size > 0) {
           span.setAttribute("cache.item_size", size);
         }
@@ -531,20 +538,22 @@ export async function storeCachedResponse(
   }
 }
 
+/** Inputs for {@link writeResponseToCache}, bundled to stay under useMaxParams. */
+type WriteRequest = {
+  key: string;
+  identity: string;
+  url: string;
+  requestHeaders: Record<string, string>;
+  response: Response;
+};
+
 /**
- * Core cache write logic, separated for complexity management.
+ * Core cache write logic. Always called for GET requests.
  *
- * Always called for GET requests (caller checks method), so "GET" is hardcoded
- * for the CachePolicy constructor.
- *
- * @returns The serialized body size in bytes (0 if not storable).
+ * @returns Serialized body size in bytes (0 if not storable).
  */
-async function writeResponseToCache(
-  key: string,
-  url: string,
-  requestHeaders: Record<string, string>,
-  response: Response
-): Promise<number> {
+async function writeResponseToCache(req: WriteRequest): Promise<number> {
+  const { key, identity, url, requestHeaders, response } = req;
   const responseHeadersObj = headersToObject(response.headers);
 
   const policy = new CachePolicy(
@@ -574,6 +583,7 @@ async function writeResponseToCache(
     status: response.status,
     headers: pickHeaders(response.headers),
     url,
+    identity,
     createdAt: now,
     expiresAt: now + ttl,
   };
@@ -593,19 +603,62 @@ async function writeResponseToCache(
 }
 
 /**
- * Invalidate the cached GET response for a specific URL.
- *
- * Used by mutation commands (PUT/POST/DELETE) that change server state,
- * so subsequent GET commands don't serve stale data.
- *
- * @param url - Full URL of the GET endpoint to invalidate
+ * Invalidate the cached GET response for a specific URL. Best-effort;
+ * never throws. Used by mutation commands so subsequent GETs don't
+ * serve stale data.
  */
 export async function invalidateCachedResponse(url: string): Promise<void> {
   try {
     const key = buildCacheKey("GET", url);
     await rm(cacheFilePath(key), { force: true });
   } catch {
-    // Best-effort — ignore if file doesn't exist or can't be deleted
+    /* best-effort */
+  }
+}
+
+/**
+ * Invalidate every cached GET whose URL starts with `prefix` and
+ * belongs to the current identity. Best-effort; never throws.
+ *
+ * Cache filenames already scope entries by identity (see
+ * {@link buildCacheKey}), but a prefix sweep has to read every file
+ * to match on `url` — so we re-check `entry.identity` before deleting,
+ * otherwise user A's mutation could evict user B's cached entries on
+ * a shared cache dir. Entries written by older CLI versions lack the
+ * `identity` field and are treated as foreign.
+ */
+export async function invalidateCachedResponsesMatching(
+  prefix: string
+): Promise<void> {
+  try {
+    const cacheDir = getCacheDir();
+    const files = await readdir(cacheDir);
+    const jsonFiles = files.filter((f) => f.endsWith(".json"));
+    if (jsonFiles.length === 0) {
+      return;
+    }
+
+    const currentIdentity = getIdentityFingerprint();
+
+    await cacheIO.map(jsonFiles, async (file) => {
+      const filePath = join(cacheDir, file);
+      try {
+        const raw = await readFile(filePath, "utf-8");
+        const entry = JSON.parse(raw) as CacheEntry;
+        if (
+          entry.identity === currentIdentity &&
+          entry.url?.startsWith(prefix)
+        ) {
+          await unlink(filePath).catch(() => {
+            /* another process may have deleted it */
+          });
+        }
+      } catch {
+        /* unparseable/missing — leave to cleanup */
+      }
+    });
+  } catch {
+    /* best-effort: mutation has already succeeded upstream */
   }
 }
 

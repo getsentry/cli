@@ -2,8 +2,8 @@
  * Authentication credential storage (single-row table pattern).
  */
 
+import { createHash } from "node:crypto";
 import { getEnv } from "../env.js";
-import { clearResponseCache } from "../response-cache.js";
 import { withDbSpan } from "../telemetry.js";
 import { getDatabase } from "./index.js";
 import { clearAllIssueOrgCache } from "./issue-org-cache.js";
@@ -221,6 +221,9 @@ export function setAuthToken(
       ["id"]
     );
   });
+  // Auth row changed — drop the memoized fingerprint so the next
+  // `getIdentityFingerprint()` call reflects the new row.
+  resetIdentityFingerprintCache();
 }
 
 export async function clearAuth(): Promise<void> {
@@ -235,10 +238,11 @@ export async function clearAuth(): Promise<void> {
     db.query("DELETE FROM pagination_cursors").run();
     clearAllIssueOrgCache();
   });
+  resetIdentityFingerprintCache();
 
-  // Clear cached API responses — they are tied to the current user's permissions.
-  // Awaited so cache is fully removed before the process exits.
+  // Dynamic import avoids the auth→response-cache→auth cycle.
   try {
+    const { clearResponseCache } = await import("../response-cache.js");
     await clearResponseCache();
   } catch {
     // Non-fatal: cache directory may not exist yet
@@ -248,6 +252,88 @@ export async function clearAuth(): Promise<void> {
 export function isAuthenticated(): boolean {
   const token = getAuthToken();
   return !!token;
+}
+
+/** Fingerprint returned when no token is present (logged out, no env var). */
+export const ANON_IDENTITY = "<anon>";
+
+/** Memoized fingerprint. Identity doesn't change within a single CLI run. */
+let cachedFingerprint: string | undefined;
+
+/**
+ * Opaque fingerprint of the active bearer identity, used to namespace
+ * response-cache keys so entries never leak across accounts. Mirrors
+ * `getAuthConfig` precedence: forced env token > stored OAuth
+ * (refresh_token preferred for stability across access-token rotation,
+ * falling through expired access-only rows) > env token > anonymous.
+ *
+ * Memoized. Reset on every mutation point (`setAuthToken`,
+ * `clearAuth`), so both the common case (OAuth access-token refresh
+ * with a stable refresh_token — fingerprint unchanged in practice)
+ * and the uncommon case (server-rotated refresh_token — fingerprint
+ * changes, cache naturally re-populates under the new identity) work
+ * correctly. Tests that mutate auth state between cases call
+ * {@link resetIdentityFingerprintCache}.
+ */
+export function getIdentityFingerprint(): string {
+  if (cachedFingerprint === undefined) {
+    cachedFingerprint = computeIdentityFingerprint();
+  }
+  return cachedFingerprint;
+}
+
+/** Reset the memoized fingerprint. Tests only — call between auth-state mutations. */
+export function resetIdentityFingerprintCache(): void {
+  cachedFingerprint = undefined;
+}
+
+function computeIdentityFingerprint(): string {
+  // Forced env-token: matches what `refreshToken()` will actually send.
+  if (getEnv().SENTRY_FORCE_ENV_TOKEN?.trim()) {
+    const envToken = getRawEnvToken();
+    if (envToken) {
+      return hashIdentity("env", envToken);
+    }
+  }
+
+  const row = withDbSpan("getIdentityFingerprint", () => {
+    const db = getDatabase();
+    return db
+      .query("SELECT token, refresh_token, expires_at FROM auth WHERE id = 1")
+      .get() as
+      | {
+          token: string | null;
+          refresh_token: string | null;
+          expires_at: number | null;
+        }
+      | undefined;
+  });
+  // Prefer refresh_token: stable across access-token rotation.
+  if (row?.refresh_token) {
+    return hashIdentity("oauth", row.refresh_token);
+  }
+  // Access-only row: skip if expired (mirrors getAuthConfig).
+  if (row?.token && !(row.expires_at && Date.now() > row.expires_at)) {
+    return hashIdentity("oauth-access", row.token);
+  }
+
+  const envToken = getRawEnvToken();
+  if (envToken) {
+    return hashIdentity("env", envToken);
+  }
+  return ANON_IDENTITY;
+}
+
+/**
+ * 16-char MD5 hex of `kind|secret`. Not used for auth — just a cheap
+ * cache namespace. Collisions are benign (identities would share a
+ * cache slot, same as the anonymous case).
+ */
+function hashIdentity(kind: string, secret: string): string {
+  return createHash("md5")
+    .update(`${kind}|${secret}`)
+    .digest("hex")
+    .slice(0, 16);
 }
 
 /**
