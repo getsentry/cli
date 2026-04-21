@@ -313,22 +313,36 @@ export function getIdentityFingerprint(): string {
   // Otherwise prefer the OAuth refresh token when present (stable
   // across hourly access-token rotation). Access-only rows without a
   // refresh_token fall through to hashing the access token itself.
+  //
+  // Must mirror `getAuthConfig`'s expiry semantics: an access-only row
+  // (no refresh_token) with a past `expires_at` is unusable — the API
+  // client will fall back to the env token for the actual request. If
+  // we still hash it here, the cache namespace diverges from the
+  // identity that sends the request and we could serve a previous
+  // user's cached data to the env-token user.
   const dbRow = withDbSpan("getIdentityFingerprint", () => {
     const db = getDatabase();
     return db
-      .query("SELECT token, refresh_token FROM auth WHERE id = 1")
+      .query("SELECT token, refresh_token, expires_at FROM auth WHERE id = 1")
       .get() as
-      | { token: string | null; refresh_token: string | null }
+      | {
+          token: string | null;
+          refresh_token: string | null;
+          expires_at: number | null;
+        }
       | undefined;
   });
   if (dbRow?.refresh_token) {
+    // Keyed by refresh_token — stable across access-token rotation,
+    // including the about-to-expire case where the API client will
+    // refresh the token before the next request.
     return hashIdentity("oauth", dbRow.refresh_token);
   }
-  if (dbRow?.token) {
+  if (dbRow?.token && !(dbRow.expires_at && Date.now() > dbRow.expires_at)) {
     return hashIdentity("oauth-access", dbRow.token);
   }
 
-  // Finally, fall back to the env token when no OAuth is stored.
+  // Finally, fall back to the env token when no usable OAuth is stored.
   const envToken = getRawEnvToken();
   if (envToken) {
     return hashIdentity("env", envToken);

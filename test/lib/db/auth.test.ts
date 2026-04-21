@@ -299,4 +299,44 @@ describe("getIdentityFingerprint", () => {
     const oauthFp = getIdentityFingerprint();
     expect(envFp).not.toBe(oauthFp);
   });
+
+  test("expired access-only OAuth token falls through to env token", () => {
+    // Mirrors getAuthConfig: an expired token with no refresh token is
+    // unusable — the API client will fall back to the env token for
+    // the next request. If the fingerprint still used the stale access
+    // token, cache reads/writes would land under the dead OAuth
+    // namespace while requests go under the env identity, serving
+    // another user's cached data.
+    //
+    // setAuthToken(token, expiresIn: -1) writes an already-expired row
+    // with no refresh_token (third arg omitted).
+    setAuthToken("expired_access", -1);
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+
+    const fp = getIdentityFingerprint();
+
+    // The fingerprint should match the env-token identity, not the
+    // stale DB token.
+    delete process.env.SENTRY_AUTH_TOKEN;
+    // Clear the expired DB row to isolate: anon is the only other
+    // possibility this case could collapse into.
+    setAuthToken("", -1); // idempotent clear not available; rely on positive check below
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    const envOnlyFp = getIdentityFingerprint();
+    expect(fp).toBe(envOnlyFp);
+  });
+
+  test("expired access-only OAuth token with refresh_token uses the refresh token", () => {
+    // An expired access token that has a refresh token is still usable
+    // — the API client will perform an OAuth refresh. Fingerprint
+    // should key off the stable refresh token, not the (about-to-be-
+    // rotated) access token.
+    setAuthToken("expired_access", -1, "live_refresh");
+    const fp = getIdentityFingerprint();
+
+    // Rotate the access token; refresh stays the same. Fingerprint
+    // must not change.
+    setAuthToken("fresh_access", 3600, "live_refresh");
+    expect(getIdentityFingerprint()).toBe(fp);
+  });
 });

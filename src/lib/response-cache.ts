@@ -697,45 +697,57 @@ export async function invalidateCachedResponse(url: string): Promise<void> {
 export async function invalidateCachedResponsesMatching(
   prefix: string
 ): Promise<void> {
-  const cacheDir = getCacheDir();
-  let files: string[];
+  // Whole-body try/catch: this helper is called from post-mutation
+  // paths (`project create`, `issue resolve`, `mergeIssues`, …) where
+  // a successful mutation has already returned from the API. Any throw
+  // from here — \`getIdentityFingerprint\` hitting a DB error, a
+  // filesystem race, an unexpected IO failure — must not propagate,
+  // because the caller cannot undo the mutation and users would see
+  // the operation as "failed" despite the server having accepted it.
+  // A stale cache entry is strictly preferable to a false error.
   try {
-    files = await readdir(cacheDir);
-  } catch (error) {
-    if (isNotFound(error)) {
-      return;
-    }
-    // Unknown read error — best-effort: skip
-    return;
-  }
-
-  const jsonFiles = files.filter((f) => f.endsWith(".json"));
-  if (jsonFiles.length === 0) {
-    return;
-  }
-
-  const currentIdentity = getIdentityFingerprint();
-
-  await cacheIO.map(jsonFiles, async (file) => {
-    const filePath = join(cacheDir, file);
+    const cacheDir = getCacheDir();
+    let files: string[];
     try {
-      const raw = await readFile(filePath, "utf-8");
-      const entry = JSON.parse(raw) as CacheEntry;
-      // Identity gate: only delete entries the current identity wrote.
-      // Missing `identity` field = legacy entry from before this check
-      // existed; skip rather than risk crossing identities.
-      if (entry.identity !== currentIdentity) {
+      files = await readdir(cacheDir);
+    } catch (error) {
+      if (isNotFound(error)) {
         return;
       }
-      if (entry.url?.startsWith(prefix)) {
-        await unlink(filePath).catch(() => {
-          // Best-effort: another process may have deleted it
-        });
-      }
-    } catch {
-      // Unparseable or missing — leave to cleanup
+      // Unknown read error — best-effort: skip
+      return;
     }
-  });
+
+    const jsonFiles = files.filter((f) => f.endsWith(".json"));
+    if (jsonFiles.length === 0) {
+      return;
+    }
+
+    const currentIdentity = getIdentityFingerprint();
+
+    await cacheIO.map(jsonFiles, async (file) => {
+      const filePath = join(cacheDir, file);
+      try {
+        const raw = await readFile(filePath, "utf-8");
+        const entry = JSON.parse(raw) as CacheEntry;
+        // Identity gate: only delete entries the current identity wrote.
+        // Missing `identity` field = legacy entry from before this check
+        // existed; skip rather than risk crossing identities.
+        if (entry.identity !== currentIdentity) {
+          return;
+        }
+        if (entry.url?.startsWith(prefix)) {
+          await unlink(filePath).catch(() => {
+            // Best-effort: another process may have deleted it
+          });
+        }
+      } catch {
+        // Unparseable or missing — leave to cleanup
+      }
+    });
+  } catch {
+    // Best-effort — see whole-body comment above.
+  }
 }
 
 /**

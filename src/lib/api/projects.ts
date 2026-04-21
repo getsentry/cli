@@ -266,13 +266,23 @@ export async function deleteProject(
  *
  * Wraps the pattern-match invalidator to keep the call sites short and
  * document *why* we clear these specific prefixes.
+ *
+ * **Never throws.** Called from post-mutation paths where the server
+ * has already committed the change; surfacing a cache-housekeeping
+ * error to the caller would cause the mutation to appear failed. This
+ * lets `createProject` / `deleteProject` drop their own try/catch
+ * wrappers — the helper is self-contained.
  */
 async function invalidateOrgProjectCache(orgSlug: string): Promise<void> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const base = stripTrailingSlash(regionUrl);
-  await invalidateCachedResponsesMatching(
-    `${base}/api/0/organizations/${encodeURIComponent(orgSlug)}/projects/`
-  );
+  try {
+    const regionUrl = await resolveOrgRegion(orgSlug);
+    const base = stripTrailingSlash(regionUrl);
+    await invalidateCachedResponsesMatching(
+      `${base}/api/0/organizations/${encodeURIComponent(orgSlug)}/projects/`
+    );
+  } catch {
+    // Non-fatal — see JSDoc.
+  }
 }
 
 /** Result of searching for projects by slug across all organizations. */

@@ -717,24 +717,30 @@ export async function getSharedIssue(
  * operation, not per-issue-affected, since the list sweep is a full
  * cache-directory scan.
  *
- * Best-effort: failures are swallowed inside the helper — the mutation
- * has already succeeded and a stale cache entry is strictly better than
- * surfacing a filesystem error to the user.
+ * **Never throws.** Called from post-mutation paths where the server
+ * has already committed the change; surfacing a cache-housekeeping
+ * error to the caller would cause the mutation to appear failed. All
+ * failures are swallowed — stale cache is strictly better than a false
+ * error on a successful mutation.
  */
 async function invalidateIssueDetailCaches(
   regionUrl: string,
   orgSlug: string,
   issueId: string
 ): Promise<void> {
-  const base = stripTrailingSlash(regionUrl);
-  const encodedOrg = encodeURIComponent(orgSlug);
-  const encodedId = encodeURIComponent(issueId);
-  await Promise.all([
-    invalidateCachedResponse(
-      `${base}/api/0/organizations/${encodedOrg}/issues/${encodedId}/`
-    ),
-    invalidateCachedResponse(`${base}/api/0/issues/${encodedId}/`),
-  ]);
+  try {
+    const base = stripTrailingSlash(regionUrl);
+    const encodedOrg = encodeURIComponent(orgSlug);
+    const encodedId = encodeURIComponent(issueId);
+    await Promise.all([
+      invalidateCachedResponse(
+        `${base}/api/0/organizations/${encodedOrg}/issues/${encodedId}/`
+      ),
+      invalidateCachedResponse(`${base}/api/0/issues/${encodedId}/`),
+    ]);
+  } catch {
+    // Non-fatal — see JSDoc.
+  }
 }
 
 /**
@@ -746,16 +752,22 @@ async function invalidateIssueDetailCaches(
  * {@link invalidateIssueDetailCaches} and call
  * {@link invalidateOrgIssueList} once at the end, to avoid N+1 full
  * cache scans.
+ *
+ * **Never throws** — same reasoning as {@link invalidateIssueDetailCaches}.
  */
 async function invalidateIssueCaches(
   regionUrl: string,
   orgSlug: string,
   issueId: string
 ): Promise<void> {
-  await Promise.all([
-    invalidateIssueDetailCaches(regionUrl, orgSlug, issueId),
-    invalidateOrgIssueList(regionUrl, orgSlug),
-  ]);
+  try {
+    await Promise.all([
+      invalidateIssueDetailCaches(regionUrl, orgSlug, issueId),
+      invalidateOrgIssueList(regionUrl, orgSlug),
+    ]);
+  } catch {
+    // Non-fatal — see JSDoc.
+  }
 }
 
 /**
@@ -764,13 +776,19 @@ async function invalidateIssueCaches(
  * The list endpoint is keyed by query string (sort, cursor, query,
  * statsPeriod, ...) so we have to do a prefix sweep rather than a
  * single URL invalidation.
+ *
+ * **Never throws** — same reasoning as {@link invalidateIssueDetailCaches}.
  */
 async function invalidateOrgIssueList(
   regionUrl: string,
   orgSlug: string
 ): Promise<void> {
-  const base = stripTrailingSlash(regionUrl);
-  await invalidateCachedResponsesMatching(
-    `${base}/api/0/organizations/${encodeURIComponent(orgSlug)}/issues/`
-  );
+  try {
+    const base = stripTrailingSlash(regionUrl);
+    await invalidateCachedResponsesMatching(
+      `${base}/api/0/organizations/${encodeURIComponent(orgSlug)}/issues/`
+    );
+  } catch {
+    // Non-fatal — see JSDoc.
+  }
 }
