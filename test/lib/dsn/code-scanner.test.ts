@@ -60,6 +60,24 @@ describe("Code Scanner", () => {
       expect(dsns).toEqual(["https://abc123@o123.ingest.sentry.io/456"]);
     });
 
+    test.each([
+      ["all lower", "https://abc@o1.ingest.sentry.io/456"],
+      ["all upper", "HTTPS://abc@o1.ingest.sentry.io/456"],
+      ["title", "Https://abc@o1.ingest.sentry.io/456"],
+      ["mixed", "hTtPs://abc@o1.ingest.sentry.io/456"],
+      ["http no s", "HTTP://abc@o1.ingest.sentry.io/456"],
+    ])("detects DSN with %s scheme casing (regression: literal-prefix fast path)", (_label, url) => {
+      // An earlier version of the literal-prefix probe used two
+      // case-sensitive `indexOf` calls (covering only all-lower and
+      // all-upper), which silently dropped mixed-case schemes like
+      // `Https://`. The probe is now `/http/i`. This test pins the
+      // correctness contract.
+      const content = `const DSN = "${url}";`;
+      const dsns = extractDsnsFromContent(content);
+      expect(dsns).toHaveLength(1);
+      expect(dsns[0]).toBe(url);
+    });
+
     test("extracts multiple DSNs", () => {
       const content = `
         const PROD_DSN = "https://prod@o123.ingest.sentry.io/111";
@@ -571,6 +589,53 @@ describe("Code Scanner", () => {
       } finally {
         // Restore permissions so afterEach cleanup can delete
         chmodSync(filePath, 0o644);
+      }
+    });
+
+    test("nonexistent root produces empty result, no partial state", async () => {
+      // Documents the contract that's hardened by the PR 791 review
+      // finding: any error path through `scanDirectory` returns all
+      // three result maps empty. The catch block used to leak a
+      // partial `dirMtimes` populated by `onDirectoryVisit` before
+      // the error — if cached, the verifier would only check visited
+      // dirs and miss new DSNs in unvisited ones. Fix: empty on error.
+      //
+      // (In practice the walker doesn't throw on a missing root —
+      // it simply yields nothing — so this is the happy-empty path.
+      // The mid-walk-throw case is hard to synthesize in a test but
+      // the fix covers it symmetrically via the catch block.)
+      const missingDir = join(testDir, "does-not-exist");
+      const result = await scanCodeForDsns(missingDir);
+      expect(result.dsns).toEqual([]);
+      expect(result.sourceMtimes).toEqual({});
+      expect(result.dirMtimes).toEqual({});
+    });
+
+    test("dirMtimes is populated for every visited directory", async () => {
+      // PR 3 migrated the walker; dirMtimes comes from the
+      // `onDirectoryVisit` hook. This pins the invariant the cache
+      // verifier (`src/lib/db/dsn-cache.ts::validateDirMtime`) silently
+      // depends on — every directory entered by the walker must have
+      // a finite integer mtime in the result. Previously asserted by
+      // nothing; now explicit.
+      mkdirSync(join(testDir, "src", "lib", "deep"), { recursive: true });
+      writeFileSync(join(testDir, "src/a.ts"), "// no dsn");
+      writeFileSync(join(testDir, "src/lib/b.ts"), "// no dsn");
+      writeFileSync(join(testDir, "src/lib/deep/c.ts"), "// no dsn");
+
+      const result = await scanCodeForDsns(testDir);
+      // Keys are POSIX-normalized relative paths; "." for cwd.
+      const keys = Object.keys(result.dirMtimes).sort();
+      expect(keys).toContain(".");
+      expect(keys).toContain("src");
+      expect(keys).toContain("src/lib");
+      expect(keys).toContain("src/lib/deep");
+      // Values are floored integers matching the cache verifier's math.
+      for (const [dir, mtime] of Object.entries(result.dirMtimes)) {
+        expect(Number.isInteger(mtime)).toBe(true);
+        expect(mtime).toBeGreaterThan(0);
+        // Sanity: key should never be an absolute path.
+        expect(dir.startsWith("/")).toBe(false);
       }
     });
   });
