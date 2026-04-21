@@ -555,3 +555,130 @@ describe("collectGrep — pre-compiled RegExp isolation", () => {
     }
   });
 });
+
+describe("collectGrep — literal prefilter fast path", () => {
+  /**
+   * These tests exercise the `grepByLiteralPrefilter` path that kicks
+   * in when the pattern has an extractable literal but isn't itself a
+   * pure literal (e.g., `import.*from` → literal `import`). The tests
+   * verify both correctness (same results as whole-buffer) and that
+   * the multiline-false fallback path produces buffer-anchored
+   * matches.
+   */
+
+  test("regex with extractable literal produces same matches as whole-buffer", async () => {
+    const { cwd, cleanup } = makeSandbox({
+      "a.ts": [
+        "import { foo } from 'bar';",
+        "const x = 42;",
+        "import { baz } from 'qux';",
+        "// not an import statement",
+        "ximport_typeXYZ", // contains "import" but no "from" after
+      ].join("\n"),
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "import.*from",
+      });
+      // Two true matches: lines 1 and 3. Line 5 has "import" but no
+      // "from" after — literal prefilter catches it as a candidate
+      // but regex verify rejects it.
+      expect(matches.map((m) => m.lineNum)).toEqual([1, 3]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("literal prefilter correctly handles escape sequences like Sentry\\.init", async () => {
+    const { cwd, cleanup } = makeSandbox({
+      "a.ts": [
+        "import * as Sentry from 'sentry';",
+        "Sentry.init({ dsn: '...' });",
+        "const x = Sentryxinit; // not a match",
+      ].join("\n"),
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "Sentry\\.init",
+      });
+      expect(matches).toHaveLength(1);
+      expect(matches[0].lineNum).toBe(2);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("case-insensitive literal prefilter finds all casings", async () => {
+    const { cwd, cleanup } = makeSandbox({
+      "a.ts": ["IMPORT X FROM Y", "import y from z", "Import Z From W"].join(
+        "\n"
+      ),
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "import.*from",
+        caseSensitive: false,
+      });
+      expect(matches).toHaveLength(3);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("literal prefilter correctly handles file with zero literal hits", async () => {
+    // Pattern `import.*from` extracts literal "import". This file
+    // contains no "import" substring at all — prefilter short-
+    // circuits without running the regex.
+    const { cwd, cleanup } = makeSandbox({
+      "a.ts": "const x = 42;\nconst y = x + 1;\n",
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "import.*from",
+      });
+      expect(matches).toEqual([]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("pure literal patterns go through whole-buffer (not prefilter)", async () => {
+    // `SENTRY_DSN` is a pure literal — the extractor returns it but
+    // `isPureLiteral` flags it, so we skip the prefilter (would add
+    // overhead without benefit — the regex engine is already optimal
+    // for pure literals). Behavior test: identical results.
+    const { cwd, cleanup } = makeSandbox({
+      "a.ts": "const SENTRY_DSN = 'abc';\nconst other = 1;\nSENTRY_DSN again",
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "SENTRY_DSN",
+      });
+      expect(matches.map((m) => m.lineNum)).toEqual([1, 3]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("patterns with top-level alternation go through whole-buffer", async () => {
+    // `foo|bar` has no extractable literal (extractor bails on
+    // alternation). Must use whole-buffer path.
+    const { cwd, cleanup } = makeSandbox({
+      "a.ts": "has foo\nhas bar\nhas qux",
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "foo|bar",
+      });
+      expect(matches.map((m) => m.lineNum)).toEqual([1, 2]);
+    } finally {
+      cleanup();
+    }
+  });
+});
