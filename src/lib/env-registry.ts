@@ -18,6 +18,14 @@ export type EnvVarEntry = {
   defaultValue?: string;
   /** Install-script-only variable (not used at runtime by the CLI binary). */
   installOnly?: boolean;
+  /**
+   * Surface this variable in the branded `sentry --help` output (and in the
+   * `envVars` array of `sentry help --json`). Reserve for the highest-signal
+   * variables — the full list lives in `configuration.md`.
+   */
+  topLevel?: boolean;
+  /** Short one-line description used in the branded help summary. Falls back to `description` when absent. */
+  briefDescription?: string;
 };
 
 /**
@@ -32,8 +40,10 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
   {
     name: "SENTRY_AUTH_TOKEN",
     description:
-      "Authentication token for the Sentry API. This is the primary way to authenticate in CI/CD pipelines and scripts where interactive login is not possible.\n\nYou can create auth tokens in your [Sentry account settings](https://sentry.io/settings/account/api/auth-tokens/). When set, this takes precedence over any stored OAuth token from `sentry auth login`.",
+      "Authentication token for the Sentry API. This is the primary way to authenticate in CI/CD pipelines and scripts where interactive login is not possible.\n\nYou can create auth tokens in your [Sentry account settings](https://sentry.io/settings/account/api/auth-tokens/). When a stored OAuth login from `sentry auth login` also exists, the stored login takes priority — set `SENTRY_FORCE_ENV_TOKEN=1` to override.",
     example: "sntrys_YOUR_TOKEN_HERE",
+    topLevel: true,
+    briefDescription: "Auth token used for API requests (CI, scripts).",
   },
   {
     name: "SENTRY_TOKEN",
@@ -45,6 +55,8 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
     description:
       "When set, environment variable tokens (`SENTRY_AUTH_TOKEN` / `SENTRY_TOKEN`) take precedence over the stored OAuth token from `sentry auth login`. By default, the stored OAuth token takes priority because it supports automatic refresh. Set this if you want to ensure the environment variable token is always used, which is useful for self-hosted setups or CI environments.",
     example: "1",
+    topLevel: true,
+    briefDescription: "Prefer the env-var token over a stored OAuth login.",
   },
   // -- Targeting --
   {
@@ -52,18 +64,24 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
     description:
       "Default organization slug. Skips organization auto-detection.",
     example: "my-org",
+    topLevel: true,
+    briefDescription: "Default organization slug.",
   },
   {
     name: "SENTRY_PROJECT",
     description:
       "Default project slug. Can also include the org in `org/project` format.\n\nWhen using the `org/project` combo format, `SENTRY_ORG` is ignored.",
     example: "my-org/my-project",
+    topLevel: true,
+    briefDescription: "Default project slug (or `org/project`).",
   },
   {
     name: "SENTRY_DSN",
     description:
       "Sentry DSN for project auto-detection. This is the same DSN you use in `Sentry.init()`. The CLI resolves it to determine your organization and project.\n\nThe CLI also detects DSNs from `.env` files and source code automatically — see [DSN Auto-Detection](./features/#dsn-auto-detection).",
     example: "https://key@o123.ingest.us.sentry.io/456",
+    topLevel: true,
+    briefDescription: "DSN used to auto-detect org + project.",
   },
   // -- URL --
   {
@@ -72,6 +90,8 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
       "Base URL of your Sentry instance. **Only needed for [self-hosted Sentry](./self-hosted/).** SaaS users (sentry.io) should not set this.\n\nWhen set, all API requests (including OAuth login) are directed to this URL instead of `https://sentry.io`. The CLI also sets this automatically when you pass a self-hosted Sentry URL as a command argument.\n\n`SENTRY_HOST` takes precedence over `SENTRY_URL`. Both work identically — use whichever you prefer.",
     example: "https://sentry.example.com",
     defaultValue: "https://sentry.io",
+    topLevel: true,
+    briefDescription: "Base URL of your Sentry instance (self-hosted).",
   },
   {
     name: "SENTRY_URL",
@@ -139,6 +159,8 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
     description:
       "Standard convention to disable color output. See [no-color.org](https://no-color.org/). Respected when `SENTRY_PLAIN_OUTPUT` is not set.",
     example: "1",
+    topLevel: true,
+    briefDescription: "Disable colored output (no-color.org convention).",
   },
   {
     name: "FORCE_COLOR",
@@ -159,6 +181,8 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
       "Controls the verbosity of diagnostic output. Defaults to `info`.\n\nValid values: `error`, `warn`, `log`, `info`, `debug`, `trace`\n\nEquivalent to passing `--log-level debug` on the command line. CLI flags take precedence over the environment variable.",
     example: "debug",
     defaultValue: "info",
+    topLevel: true,
+    briefDescription: "Log verbosity (error, warn, info, debug, trace).",
   },
   {
     name: "SENTRY_CLI_NO_TELEMETRY",
@@ -194,3 +218,12 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
     example: "1",
   },
 ];
+
+/**
+ * Subset of env vars surfaced in the branded `sentry --help` output and in
+ * the `envVars` array of `sentry help --json`.
+ *
+ * Order is preserved from {@link ENV_VAR_REGISTRY}.
+ */
+export const TOP_LEVEL_ENV_VARS: readonly EnvVarEntry[] =
+  ENV_VAR_REGISTRY.filter((entry) => entry.topLevel);
