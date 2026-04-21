@@ -19,10 +19,10 @@ import {
   API_MAX_PER_PAGE,
   apiRequest,
   apiRequestToRegion,
+  buildApiUrl,
   getOrgSdkConfig,
   MAX_PAGINATION_PAGES,
   type PaginatedResponse,
-  stripTrailingSlash,
   unwrapPaginatedResult,
 } from "./infrastructure.js";
 
@@ -578,9 +578,8 @@ export async function updateIssueStatus(
     `/issues/${encodeURIComponent(issueId)}/`,
     { method: "PUT", body }
   );
-  const base = stripTrailingSlash(getApiBaseUrl());
   await invalidateCachedResponsesMatching(
-    `${base}/api/0/issues/${encodeURIComponent(issueId)}/`
+    buildApiUrl(getApiBaseUrl(), "issues", issueId)
   );
   return legacyData;
 }
@@ -628,7 +627,7 @@ export async function mergeIssues(
     });
     // Flush detail caches for every affected ID (detail-only avoids
     // N+1 list scans) then sweep the org-wide list once.
-    const affectedIds = [data.merge.parent, ...data.merge.children];
+    const affectedIds = data.merge.children.toSpliced(0, 0, data.merge.parent);
     await Promise.all(
       affectedIds.map((id) =>
         invalidateIssueDetailCaches(regionUrl, orgSlug, id)
@@ -709,14 +708,13 @@ async function invalidateIssueDetailCaches(
   issueId: string
 ): Promise<void> {
   try {
-    const base = stripTrailingSlash(regionUrl);
-    const encodedOrg = encodeURIComponent(orgSlug);
-    const encodedId = encodeURIComponent(issueId);
     await Promise.all([
       invalidateCachedResponsesMatching(
-        `${base}/api/0/organizations/${encodedOrg}/issues/${encodedId}/`
+        buildApiUrl(regionUrl, "organizations", orgSlug, "issues", issueId)
       ),
-      invalidateCachedResponsesMatching(`${base}/api/0/issues/${encodedId}/`),
+      invalidateCachedResponsesMatching(
+        buildApiUrl(regionUrl, "issues", issueId)
+      ),
     ]);
   } catch {
     /* best-effort: mutation already succeeded upstream */
@@ -753,9 +751,8 @@ async function invalidateOrgIssueList(
   orgSlug: string
 ): Promise<void> {
   try {
-    const base = stripTrailingSlash(regionUrl);
     await invalidateCachedResponsesMatching(
-      `${base}/api/0/organizations/${encodeURIComponent(orgSlug)}/issues/`
+      buildApiUrl(regionUrl, "organizations", orgSlug, "issues")
     );
   } catch {
     /* best-effort: mutation already succeeded upstream */

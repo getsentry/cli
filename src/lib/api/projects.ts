@@ -37,11 +37,11 @@ import { isAllDigits } from "../utils.js";
 import {
   API_MAX_PER_PAGE,
   apiRequestToRegion,
+  buildApiUrl,
   getOrgSdkConfig,
   MAX_PAGINATION_PAGES,
   ORG_FANOUT_CONCURRENCY,
   type PaginatedResponse,
-  stripTrailingSlash,
   unwrapPaginatedResult,
   unwrapResult,
 } from "./infrastructure.js";
@@ -236,13 +236,12 @@ async function invalidateProjectCaches(
 ): Promise<void> {
   try {
     const regionUrl = await resolveOrgRegion(orgSlug);
-    const base = stripTrailingSlash(regionUrl);
     await Promise.all([
       invalidateCachedResponse(
-        `${base}/api/0/projects/${encodeURIComponent(orgSlug)}/${encodeURIComponent(projectSlug)}/`
+        buildApiUrl(regionUrl, "projects", orgSlug, projectSlug)
       ),
       invalidateCachedResponsesMatching(
-        `${base}/api/0/organizations/${encodeURIComponent(orgSlug)}/projects/`
+        buildApiUrl(regionUrl, "organizations", orgSlug, "projects")
       ),
     ]);
   } catch {
@@ -257,9 +256,8 @@ async function invalidateProjectCaches(
 async function invalidateOrgProjectCache(orgSlug: string): Promise<void> {
   try {
     const regionUrl = await resolveOrgRegion(orgSlug);
-    const base = stripTrailingSlash(regionUrl);
     await invalidateCachedResponsesMatching(
-      `${base}/api/0/organizations/${encodeURIComponent(orgSlug)}/projects/`
+      buildApiUrl(regionUrl, "organizations", orgSlug, "projects")
     );
   } catch {
     /* best-effort: mutation already succeeded */

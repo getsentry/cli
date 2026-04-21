@@ -166,18 +166,27 @@ export async function getOrgSdkConfig(orgSlug: string) {
 }
 
 /**
- * Strip a single trailing slash from a base URL.
+ * Build a full Sentry API URL from a region base and path segments.
  *
- * Used by cache-invalidation helpers that compose full URLs by
- * concatenating a region base URL with `/api/0/...` — keeping the
- * trailing slash on both sides produces `//api/0/...`, which doesn't
- * match the cache keys we wrote on the way in.
+ * Each segment is passed through `encodeURIComponent`, so callers can
+ * pass user-supplied slugs directly without worrying about slashes,
+ * spaces, or other reserved characters. The `/api/0/` prefix and the
+ * required trailing slash are added automatically.
  *
- * Small but shared: duplicating it per domain module (`api/issues.ts`,
- * `api/projects.ts`) risks divergence.
+ * @example
+ *   buildApiUrl(regionUrl, "organizations", orgSlug, "projects")
+ *   // → `${regionUrl.replace(/\/$/,"")}/api/0/organizations/<org>/projects/`
  */
-export function stripTrailingSlash(url: string): string {
-  return url.endsWith("/") ? url.slice(0, -1) : url;
+export function buildApiUrl(
+  regionUrl: string,
+  ...segments: string[]
+): string {
+  const base = regionUrl.endsWith("/") ? regionUrl.slice(0, -1) : regionUrl;
+  if (segments.length === 0) {
+    return `${base}/api/0/`;
+  }
+  const path = segments.map(encodeURIComponent).join("/");
+  return `${base}/api/0/${path}/`;
 }
 
 /**
