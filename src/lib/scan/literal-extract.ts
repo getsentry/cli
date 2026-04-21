@@ -1,12 +1,21 @@
 /**
- * Conservative literal-prefix extractor for grep's fast path.
+ * Conservative literal-prefix extractor for grep's file-level gate.
  *
  * Walks a regex source looking for the longest contiguous run of
  * non-metacharacter literal bytes that every match must contain.
- * When found, the grep engine can scan the file for that literal via
- * the vastly cheaper `String.prototype.indexOf` and only invoke the
- * regex engine on lines that contain a candidate — ripgrep's central
- * perf trick, adapted to pure JS.
+ * When found, `grep.ts::readAndGrep` checks whether the file
+ * contains that literal via the vastly cheaper
+ * `String.prototype.indexOf` and skips the regex engine entirely on
+ * files where it doesn't appear — ripgrep's central perf trick,
+ * adapted to pure JS as a file-level gate.
+ *
+ * The gate is deliberately file-level only. Per-line or per-match
+ * use of the literal would introduce subtle correctness failures
+ * for patterns whose match spans newlines (e.g., `foo\sbar`) or
+ * whose compiled form differs from the user's source (e.g.,
+ * `\x41foo` decodes to `Afoo`). Keeping the gate at file-level
+ * sidesteps all of that: the regex engine still does the actual
+ * matching on files that pass.
  *
  * ### Extraction rules (conservative; safety over completeness)
  *
@@ -43,19 +52,21 @@
  *   than the regex engine saves.
  * - Made entirely of whitespace or punctuation (same reason).
  *
- * ### Match-everywhere false-positive rate
+ * ### Gate effectiveness
  *
  * When the extracted literal is rare (e.g., `Sentry.init` → `Sentry`),
- * the prefilter eliminates 95%+ of lines before touching the regex
- * engine. When the literal is common (e.g., `\sfoo\s` → `foo`), the
- * prefilter still narrows the search and the regex engine only runs
- * on lines containing `foo`.
+ * the file-level gate rejects typically 95%+ of files in a large
+ * tree. When the literal is common (e.g., `\sfoo\s` → `foo`), fewer
+ * files are rejected, but the regex engine still only runs on files
+ * where a match is actually possible — the gate is always at least
+ * weakly useful.
  *
  * When the pattern is ITSELF a pure literal (no metachars, just
- * bytes), the extractor returns the whole pattern — that's fine for
- * the file-level gate in `grep.ts::readAndGrep`, which uses indexOf
- * as a boolean presence check and then falls through to the regex
- * engine regardless.
+ * bytes), the extractor returns the whole pattern. The gate treats
+ * it the same as any other literal — boolean `indexOf` presence
+ * check, then fall through to the regex engine. V8's regex engine
+ * handles pure-literal patterns efficiently, so no special-case
+ * routing is warranted.
  */
 
 /**

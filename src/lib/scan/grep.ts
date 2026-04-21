@@ -4,7 +4,8 @@
  * Layers regex matching onto `walkFiles`:
  *   1. Walk cwd with the caller's filters (extensions, depth, gitignore).
  *   2. Post-filter yields by `isBinary` + include/exclude globs.
- *   3. Read each surviving file's content and test line-by-line.
+ *   3. Read each surviving file's content, optionally gate via the
+ *      extracted literal, run the regex across the full buffer.
  *   4. Emit `GrepMatch` entries as they arrive.
  *
  * ### Primary API
@@ -22,15 +23,22 @@
  *
  * Full slurp via `Bun.file(path).text()`. The walker's
  * `maxFileSize` (default 256 KB) caps the blast radius; minified
- * bundles bigger than that never reach us. Line splitting via
- * `content.split("\n")` — fine for utf-8 text, preserves `\r` on
- * CRLF files verbatim.
+ * bundles bigger than that never reach us. CRLF line endings are
+ * preserved verbatim in the emitted match text.
  *
- * ### Regex strategy
+ * ### Matching strategy
  *
- * `compilePattern` produces a `g`-less RegExp. Each line gets a
- * fresh `regex.test(line)` — no `lastIndex` state to reset. Inline
- * flags `(?i)` / `(?im)` / `(?i:...)` are translated to JS flags.
+ * Before matching, `setupGrepPipeline` extracts a literal prefix
+ * from the compiled regex (when possible). If the file doesn't
+ * contain that literal, it can't possibly match — skip via cheap
+ * `indexOf`. Files that pass the gate, or patterns with no
+ * extractable literal, go through `grepByWholeBuffer`, which clones
+ * the compiled regex per file (`/g`-augmented, plus `/m` when
+ * `multiline` is true), iterates via `regex.exec(content)` on the
+ * full buffer, and emits one `GrepMatch` per matching line
+ * (advancing `lastIndex` past the line's newline so the next match
+ * starts on a fresh line). Inline flags `(?i)` / `(?im)` / `(?i:...)`
+ * are translated to JS flags by `compilePattern`.
  */
 
 import { handleFileError } from "../dsn/fs-utils.js";
