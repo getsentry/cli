@@ -398,19 +398,19 @@ function scanDirectory(
 /**
  * Per-file worker: read the file, extract DSNs via the DSN-specific
  * content pipeline, wrap each raw match in a `DetectedDsn`. Returns
- * an empty array (not null) for files with no DSNs so the early-exit
- * logic in `mapFilesConcurrent.onResult` sees zero-hit files as
- * "keep going, not done".
+ * `null` when the file contributes nothing (no raw matches OR every
+ * match got rejected by host validation OR the file was unreadable)
+ * so `mapFilesConcurrent` skips the push + onResult callback entirely
+ * — important on large walks where most files have zero DSNs.
  *
  * Re-throws `ConfigError` so `scanDirectory`'s outer try/catch can
  * propagate user-facing misconfig. All other fs errors are logged at
- * debug level and treated as "no DSNs here" — matches the pre-PR-3
- * scanner's error-handling shape exactly.
+ * debug level and treated as "skip this file silently".
  */
 async function processEntry(
   entry: WalkEntry,
   state: ScanDirectoryState
-): Promise<DetectedDsn[]> {
+): Promise<DetectedDsn[] | null> {
   state.filesScanned.count += 1;
   try {
     const content = await Bun.file(entry.absolutePath).text();
@@ -419,7 +419,13 @@ async function processEntry(
       state.stopOnFirst ? 1 : undefined
     );
     if (raws.length === 0) {
-      return [];
+      // Return null so `mapFilesConcurrent` skips the push + the
+      // `onResult` callback entirely. On a typical 10k-file walk
+      // where ~99% of files contain no DSN, returning `[]` would
+      // fire ~9900 no-op `onResult` calls and push that many empty
+      // arrays into the (otherwise unused) results list. `null` is
+      // the documented "skip this file" signal.
+      return null;
     }
     const packagePath = inferPackagePath(entry.relativePath);
     const detected = raws
@@ -429,9 +435,13 @@ async function processEntry(
       .filter((d): d is DetectedDsn => d !== null);
     // Only record mtime when at least one DSN was accepted (matches
     // pre-PR-3 behavior — the cache only tracks files it cares about).
-    if (detected.length > 0) {
-      state.sourceMtimes[entry.relativePath] = entry.mtime;
+    if (detected.length === 0) {
+      // All raw matches got rejected by host validation (e.g., a
+      // self-hosted repo scanning a file with a saas.sentry.io URL).
+      // Skip the push + onResult — same signal as "no DSNs found".
+      return null;
     }
+    state.sourceMtimes[entry.relativePath] = entry.mtime;
     return detected;
   } catch (error) {
     if (error instanceof ConfigError) {
@@ -439,9 +449,9 @@ async function processEntry(
     }
     // ENOENT / EACCES / malformed content — the pre-PR-3 scanner
     // matched these with a single `log.debug(...)` and returned
-    // empty. Preserve that behavior exactly.
+    // empty. Preserve that behavior exactly (null = skip silently).
     log.debug(`Cannot read file: ${entry.relativePath}`);
-    return [];
+    return null;
   }
 }
 
