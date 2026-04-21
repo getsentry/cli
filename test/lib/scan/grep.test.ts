@@ -555,3 +555,294 @@ describe("collectGrep — pre-compiled RegExp isolation", () => {
     }
   });
 });
+
+describe("collectGrep — literal prefilter fast path", () => {
+  /**
+   * These tests exercise the `grepByLiteralPrefilter` path that kicks
+   * in when the pattern has an extractable literal but isn't itself a
+   * pure literal (e.g., `import.*from` → literal `import`). The tests
+   * verify both correctness (same results as whole-buffer) and that
+   * the multiline-false fallback path produces buffer-anchored
+   * matches.
+   */
+
+  test("regex with extractable literal produces same matches as whole-buffer", async () => {
+    const { cwd, cleanup } = makeSandbox({
+      "a.ts": [
+        "import { foo } from 'bar';",
+        "const x = 42;",
+        "import { baz } from 'qux';",
+        "// not an import statement",
+        "ximport_typeXYZ", // contains "import" but no "from" after
+      ].join("\n"),
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "import.*from",
+      });
+      // Two true matches: lines 1 and 3. Line 5 has "import" but no
+      // "from" after — literal prefilter catches it as a candidate
+      // but regex verify rejects it.
+      expect(matches.map((m) => m.lineNum)).toEqual([1, 3]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("literal prefilter correctly handles escape sequences like Sentry\\.init", async () => {
+    const { cwd, cleanup } = makeSandbox({
+      "a.ts": [
+        "import * as Sentry from 'sentry';",
+        "Sentry.init({ dsn: '...' });",
+        "const x = Sentryxinit; // not a match",
+      ].join("\n"),
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "Sentry\\.init",
+      });
+      expect(matches).toHaveLength(1);
+      expect(matches[0].lineNum).toBe(2);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("case-insensitive literal prefilter finds all casings", async () => {
+    const { cwd, cleanup } = makeSandbox({
+      "a.ts": ["IMPORT X FROM Y", "import y from z", "Import Z From W"].join(
+        "\n"
+      ),
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "import.*from",
+        caseSensitive: false,
+      });
+      expect(matches).toHaveLength(3);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("literal prefilter correctly handles file with zero literal hits", async () => {
+    // Pattern `import.*from` extracts literal "import". This file
+    // contains no "import" substring at all — prefilter short-
+    // circuits without running the regex.
+    const { cwd, cleanup } = makeSandbox({
+      "a.ts": "const x = 42;\nconst y = x + 1;\n",
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "import.*from",
+      });
+      expect(matches).toEqual([]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("pure literal patterns still match correctly (via file-level gate + whole-buffer)", async () => {
+    // `SENTRY_DSN` is a pure literal. The extractor returns it, and
+    // the file-level gate uses it to cheaply reject files without
+    // the literal. Files that contain it fall through to the whole-
+    // buffer matcher, which finds all match positions via the regex
+    // engine (V8 handles pure-literal patterns efficiently).
+    const { cwd, cleanup } = makeSandbox({
+      "a.ts": "const SENTRY_DSN = 'abc';\nconst other = 1;\nSENTRY_DSN again",
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "SENTRY_DSN",
+      });
+      expect(matches.map((m) => m.lineNum)).toEqual([1, 3]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("patterns with top-level alternation go through whole-buffer", async () => {
+    // `foo|bar` has no extractable literal (extractor bails on
+    // alternation). Must use whole-buffer path.
+    const { cwd, cleanup } = makeSandbox({
+      "a.ts": "has foo\nhas bar\nhas qux",
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "foo|bar",
+      });
+      expect(matches.map((m) => m.lineNum)).toEqual([1, 2]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("character-class with parens + alternation finds all branches (Cursor bug #1)", async () => {
+    // Regression: `[(]foo|bar` previously extracted `foo` as a
+    // required literal, causing the prefilter to silently miss
+    // lines matching only the `bar` branch. The fix makes char
+    // classes opaque to alternation detection.
+    const { cwd, cleanup } = makeSandbox({
+      "only-bar.txt": "bar line without the paren-branch\n",
+      "only-paren.txt": "(foo line with the paren-branch\n",
+      "both.txt": "bar then (foo on different lines\n(foo again\nbar again\n",
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "[(]foo|bar",
+      });
+      // All four lines should match: two in `both.txt`, one each
+      // in the single-branch files.
+      const lineDigest = matches.map((m) => `${m.path}:${m.lineNum}`).sort();
+      expect(lineDigest).toEqual([
+        "both.txt:1",
+        "both.txt:2",
+        "both.txt:3",
+        "only-bar.txt:1",
+        "only-paren.txt:1",
+      ]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("optional group containing class with paren matches all branches (Cursor #1 followup)", async () => {
+    // Regression: the group-depth tracker inside `extractInnerLiteral`
+    // didn't treat `[...]` as opaque, so `(ABC[)]DEF)?GHI` extracted
+    // `DEF` as a required literal. The prefilter then silently
+    // missed lines matching only the `GHI` branch (group optional).
+    //
+    // After the fix, the whole group is correctly skipped and `GHI`
+    // is identified as the post-group required literal, so both
+    // match shapes are found.
+    const { cwd, cleanup } = makeSandbox({
+      "only-ghi.txt": "GHI line without the optional prefix\n",
+      "full-match.txt": "ABC)DEFGHI full match line\n",
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "(ABC[)]DEF)?GHI",
+      });
+      const lineDigest = matches.map((m) => `${m.path}:${m.lineNum}`).sort();
+      expect(lineDigest).toEqual(["full-match.txt:1", "only-ghi.txt:1"]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("case-insensitive prefilter handles Unicode length-changing lowercase (Cursor #2)", async () => {
+    // Regression: `toLowerCase()` on content containing Turkish `İ`
+    // (U+0130) produces `i` + U+0307, making the lowercased haystack
+    // LONGER than the original. `haystack.indexOf(literal)` returned
+    // positions that didn't align with `content`, causing
+    // line-boundary math to point at the wrong line or miss later
+    // matches entirely (because `lineEnd + 1` advanced the search
+    // cursor past real match positions).
+    //
+    // Fix: when `toLowerCase().length !== content.length`, fall
+    // back to the whole-buffer regex path, which has no cross-string
+    // position dependency.
+    const { cwd, cleanup } = makeSandbox({
+      "turkish.ts": [
+        "İİİİİİİ line 1 with Sentry.init here",
+        "İİİİİİİ line 2 plain",
+        "İİİİİİİ line 3 with Sentry.init again",
+        "İİİİİİİ line 4 plain",
+      ].join("\n"),
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "Sentry\\.init",
+        caseSensitive: false,
+      });
+      // Both Sentry.init matches on lines 1 and 3 should be found.
+      // Before the fix, only line 1 was found — the lineEnd from
+      // content got passed back to haystack's indexOf and skipped
+      // past line 3's match.
+      expect(matches.map((m) => m.lineNum)).toEqual([1, 3]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("cross-newline patterns (foo\\sbar) find matches spanning line boundaries (review followup)", async () => {
+    // Regression: the old prefilter did per-line verify via
+    // `verifyRegex.test(lineText)`, which failed to detect matches
+    // that span newlines (e.g., `\s` matches `\n`). After
+    // simplifying the prefilter to a file-level gate only, the
+    // regex engine handles cross-newline matches correctly.
+    const { cwd, cleanup } = makeSandbox({
+      "same-line.txt": "foo bar on one line\n",
+      "split.txt": "foo\nbar\n", // \s (which includes \n) joins "foo" and "bar"
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "foo\\sbar",
+      });
+      const paths = matches.map((m) => m.path).sort();
+      expect(paths).toEqual(["same-line.txt", "split.txt"]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("multi-char escapes like \\x41 find matches for the decoded char (review followup)", async () => {
+    // Regression: the old extractor advanced `\x41` by 2 chars,
+    // leaving `41` as a "literal" that wrongly flagged the file
+    // gate. Pattern `\x41foo` matches `Afoo` (the compiled regex
+    // decodes `\x41` to `A`), so files containing `Afoo` should
+    // match and files containing literal `41foo` should NOT.
+    const { cwd, cleanup } = makeSandbox({
+      "actual-match.txt": "Afoo here\n", // contains decoded `A` + foo
+      "literal-41foo.txt": "41foo here\n", // contains literal "41foo" text
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "\\x41foo",
+      });
+      expect(matches.map((m) => m.path)).toEqual(["actual-match.txt"]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("scoped inline flags that introduce top-level alternation are safely handled (Cursor #3)", async () => {
+    // Regression: `compilePattern` rewrites `(?i:foo|bar)baz` into
+    // `foo|barbaz` + the global `i` flag. The rewritten source has
+    // top-level alternation the original lacked. If the literal
+    // extractor runs on the ORIGINAL source, `hasTopLevelAlternation`
+    // doesn't see the `|` and extracts `"baz"` as a required literal.
+    // But the compiled regex matches `foo` alone — lines with just
+    // `foo` get silently dropped by the prefilter.
+    //
+    // Fix: extract from `regex.source` (post-compile) so the
+    // extractor sees what the engine will run. `hasTopLevelAlternation`
+    // now sees the `foo|barbaz` and correctly returns null — the
+    // prefilter is skipped and both branches match.
+    const { cwd, cleanup } = makeSandbox({
+      "foo-only.txt": "foo line without that other word\n",
+      "barbaz.txt": "contains barbaz here\n",
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "(?i:foo|bar)baz",
+      });
+      const paths = matches.map((m) => m.path).sort();
+      expect(paths).toEqual(["barbaz.txt", "foo-only.txt"]);
+    } finally {
+      cleanup();
+    }
+  });
+});

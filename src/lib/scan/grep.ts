@@ -4,7 +4,8 @@
  * Layers regex matching onto `walkFiles`:
  *   1. Walk cwd with the caller's filters (extensions, depth, gitignore).
  *   2. Post-filter yields by `isBinary` + include/exclude globs.
- *   3. Read each surviving file's content and test line-by-line.
+ *   3. Read each surviving file's content, optionally gate via the
+ *      extracted literal, run the regex across the full buffer.
  *   4. Emit `GrepMatch` entries as they arrive.
  *
  * ### Primary API
@@ -22,15 +23,22 @@
  *
  * Full slurp via `Bun.file(path).text()`. The walker's
  * `maxFileSize` (default 256 KB) caps the blast radius; minified
- * bundles bigger than that never reach us. Line splitting via
- * `content.split("\n")` — fine for utf-8 text, preserves `\r` on
- * CRLF files verbatim.
+ * bundles bigger than that never reach us. CRLF line endings are
+ * preserved verbatim in the emitted match text.
  *
- * ### Regex strategy
+ * ### Matching strategy
  *
- * `compilePattern` produces a `g`-less RegExp. Each line gets a
- * fresh `regex.test(line)` — no `lastIndex` state to reset. Inline
- * flags `(?i)` / `(?im)` / `(?i:...)` are translated to JS flags.
+ * Before matching, `setupGrepPipeline` extracts a literal prefix
+ * from the compiled regex (when possible). If the file doesn't
+ * contain that literal, it can't possibly match — skip via cheap
+ * `indexOf`. Files that pass the gate, or patterns with no
+ * extractable literal, go through `grepByWholeBuffer`, which clones
+ * the compiled regex per file (`/g`-augmented, plus `/m` when
+ * `multiline` is true), iterates via `regex.exec(content)` on the
+ * full buffer, and emits one `GrepMatch` per matching line
+ * (advancing `lastIndex` past the line's newline so the next match
+ * starts on a fresh line). Inline flags `(?i)` / `(?im)` / `(?i:...)`
+ * are translated to JS flags by `compilePattern`.
  */
 
 import { handleFileError } from "../dsn/fs-utils.js";
@@ -38,6 +46,7 @@ import {
   type ConcurrentOptions,
   mapFilesConcurrentStream,
 } from "./concurrent.js";
+import { extractInnerLiteral } from "./literal-extract.js";
 import {
   basenameOf,
   type CompiledMatcher,
@@ -146,6 +155,21 @@ type PerFileOptions = {
   maxLineLength: number;
   maxMatchesPerFile: number;
   pathPrefix: string;
+  /**
+   * Optional literal prefilter — when set, the per-file path runs
+   * a cheap `indexOf(literal)` gate before invoking the regex
+   * engine. Files that don't contain the literal are skipped
+   * entirely. Computed once per `collectGrep`/`grepFiles` call via
+   * `extractInnerLiteral`.
+   *
+   * NOTE: the gate is file-level only. We intentionally do NOT use
+   * the literal to locate individual matches — patterns that can
+   * span newlines (e.g., `foo\sbar` where `\s` matches `\n`) and
+   * patterns whose literal differs from the compiled form (e.g.,
+   * `\x41foo` matches `Afoo`, not `\x41foo`) would both produce
+   * silent misses under per-line verify.
+   */
+  literal: string | null;
 };
 
 /**
@@ -171,7 +195,6 @@ type PerFileOptions = {
  * the next `matchAll` iteration. Without this skip, a regex like
  * `/foo/g` on `"foo foo"` would emit two matches on the same line.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: per-match cursor + line-number + truncation is inherently branchy
 async function readAndGrep(
   entry: WalkEntry,
   opts: PerFileOptions
@@ -187,7 +210,67 @@ async function readAndGrep(
     return null;
   }
 
-  const matches: GrepMatch[] = [];
+  // File-level prefilter gate. If the pattern has an extractable
+  // literal, skip the regex engine entirely on files that don't
+  // contain the literal — ripgrep's central optimization, adapted.
+  //
+  // Important: this is a FILE-level gate only. We deliberately do
+  // NOT attempt to use the literal to find/verify matches line-by-
+  // line. That approach has subtle correctness failures for patterns
+  // that can match across newlines (e.g., `foo\sbar` where `\s`
+  // matches `\n`) and for patterns whose literal isn't what the
+  // regex engine actually matches (e.g., `\x41foo` matches `Afoo`,
+  // not the literal string `\x41foo`; and `(?i:foo|bar)baz` compiles
+  // to `foo|barbaz` with different alternation structure).
+  //
+  // Keeping the gate at file-level sidesteps all of that: we only
+  // use `indexOf(literal)` to quickly reject files that can't match,
+  // and let V8's regex engine handle the actual matching. The perf
+  // win is still substantial because most files in a large tree
+  // contain zero instances of the literal, and `indexOf` is much
+  // cheaper than constructing the regex engine's NFA state.
+  //
+  // Preconditions for the gate:
+  // - Literal must be extractable AND not case-sensitivity-altered
+  //   in a way that breaks indexOf (so: either case-sensitive search,
+  //   OR content.toLowerCase() preserves length).
+  // - The literal must actually be something the compiled regex MUST
+  //   match — guaranteed by `extractInnerLiteral` operating on the
+  //   compiled regex source (see `setupGrepPipeline`).
+  if (opts.literal !== null) {
+    const isCaseInsensitive = opts.regex.flags.includes("i");
+    // Note: for case-insensitive search, `content.toLowerCase()` may
+    // be LONGER than `content` (e.g., Turkish `İ` → `i` + U+0307).
+    // That's fine because we only use the result as a boolean gate:
+    // "does the literal exist anywhere in this file?" The returned
+    // position is never used as a `content` offset — the whole-buffer
+    // regex engine does the actual match localization.
+    const haystack = isCaseInsensitive ? content.toLowerCase() : content;
+    if (haystack.indexOf(opts.literal) === -1) {
+      return [];
+    }
+    // File contains the literal — fall through to the whole-buffer
+    // matcher. The regex engine handles the actual matching; the
+    // literal gate only ruled out files that can't possibly match.
+  }
+
+  return grepByWholeBuffer(content, entry, opts);
+}
+
+/**
+ * Whole-buffer grep — runs the compiled regex across the full file
+ * content, emitting one `GrepMatch` per match's enclosing line.
+ *
+ * This is the primary matching implementation. The file-level
+ * literal gate in `readAndGrep` may skip files that have no chance
+ * of matching, but once a file reaches this function the regex
+ * engine does the actual work.
+ */
+function grepByWholeBuffer(
+  content: string,
+  entry: WalkEntry,
+  opts: PerFileOptions
+): GrepMatch[] {
   // Whole-buffer iteration requires `/g`. `/m` (line-boundary
   // anchoring) is applied when the caller opts into grep-like
   // semantics via `opts.multiline` (the default — see `GrepOptions`
@@ -195,66 +278,83 @@ async function readAndGrep(
   // anchor `^/$` to the buffer boundaries like raw JS semantics.
   //
   // We clone the regex per file so each invocation has its own
-  // `lastIndex`. Today the exec/loop block below runs synchronously
-  // with no `await`, so concurrent `readAndGrep` workers can't
-  // actually observe each other's `lastIndex` mutations (JS is
-  // single-threaded; microtasks only yield at `await`). But the
-  // clone is still worth paying — it's ~1µs per file and eliminates
-  // the foot-gun if anyone ever introduces an `await` inside the
-  // match loop.
+  // `lastIndex`. Today the exec/loop block runs synchronously with
+  // no `await`, so concurrent `readAndGrep` workers can't actually
+  // observe each other's `lastIndex` mutations (JS is single-threaded;
+  // microtasks only yield at `await`). But the clone is still worth
+  // paying — ~1µs per file — to eliminate the foot-gun if anyone
+  // ever introduces an `await` inside the match loop.
   const ensured = opts.multiline
     ? ensureGlobalMultilineFlags(opts.regex)
     : ensureGlobalFlag(opts.regex);
   const regex = new RegExp(ensured.source, ensured.flags);
+  const ctx: MatchContext = { entry, opts, content };
 
-  // Cursor for incremental line-number computation. We walk forward
-  // through the buffer, counting `\n` once per match emission. The
-  // 10-char constant is `\n`.
-  const NEWLINE = 10;
+  const matches: GrepMatch[] = [];
+  // Advance `cursor` to each match index using `indexOf("\n", cursor)`
+  // in a loop — skipping newline-to-newline instead of walking char-
+  // by-char via `charCodeAt`. 2-5× faster because V8 implements
+  // `indexOf` in optimized C++ with no per-iteration JS interop.
   let lineNum = 1;
   let cursor = 0;
   let match = regex.exec(content);
   while (match !== null) {
     const matchIndex = match.index;
-    // Advance line counter to the match position.
-    while (cursor < matchIndex) {
-      if (content.charCodeAt(cursor) === NEWLINE) {
-        lineNum += 1;
-      }
-      cursor += 1;
+    let nl = content.indexOf("\n", cursor);
+    while (nl !== -1 && nl < matchIndex) {
+      lineNum += 1;
+      nl = content.indexOf("\n", nl + 1);
     }
+    cursor = matchIndex;
     const lineStart = content.lastIndexOf("\n", matchIndex) + 1;
-    const lineEnd = content.indexOf("\n", matchIndex);
-    const rawLine = content.slice(
-      lineStart,
-      lineEnd === -1 ? content.length : lineEnd
-    );
-    const line =
-      rawLine.length > opts.maxLineLength
-        ? `${rawLine.slice(0, opts.maxLineLength - 1)}…`
-        : rawLine;
-    matches.push({
-      path: opts.pathPrefix
-        ? joinPosix(opts.pathPrefix, entry.relativePath)
-        : entry.relativePath,
-      absolutePath: entry.absolutePath,
-      lineNum,
-      line,
-    });
+    const lineEndRaw = content.indexOf("\n", matchIndex);
+    const lineEnd = lineEndRaw === -1 ? content.length : lineEndRaw;
+    matches.push(buildMatch(ctx, { lineNum, lineStart, lineEnd }));
     if (matches.length >= opts.maxMatchesPerFile) {
       break;
     }
-    // Per-line-emission contract: skip past this line's `\n` so the
-    // next matchAll iteration starts on a new line. If the match
-    // ended the file, we're done.
-    if (lineEnd === -1) {
+    if (lineEndRaw === -1) {
       break;
     }
     regex.lastIndex = lineEnd + 1;
     match = regex.exec(content);
   }
-
   return matches;
+}
+
+/**
+ * Per-call context for `buildMatch` — bundles args that stay
+ * constant for the duration of a file's scan (entry, opts, content)
+ * separately from args that change per match (lineNum, lineStart,
+ * lineEnd). Keeps Biome's useMaxParams under the 4-param ceiling.
+ */
+type MatchContext = {
+  entry: WalkEntry;
+  opts: PerFileOptions;
+  content: string;
+};
+
+type LineBounds = {
+  lineNum: number;
+  lineStart: number;
+  lineEnd: number;
+};
+
+/** Build a `GrepMatch` record for one line. Shared by all grep paths. */
+function buildMatch(ctx: MatchContext, bounds: LineBounds): GrepMatch {
+  const rawLine = ctx.content.slice(bounds.lineStart, bounds.lineEnd);
+  const line =
+    rawLine.length > ctx.opts.maxLineLength
+      ? `${rawLine.slice(0, ctx.opts.maxLineLength - 1)}…`
+      : rawLine;
+  return {
+    path: ctx.opts.pathPrefix
+      ? joinPosix(ctx.opts.pathPrefix, ctx.entry.relativePath)
+      : ctx.entry.relativePath,
+    absolutePath: ctx.entry.absolutePath,
+    lineNum: bounds.lineNum,
+    line,
+  };
 }
 
 /**
@@ -341,6 +441,14 @@ async function* grepFilesInternal(
 type GrepPipelineSetup = {
   regex: RegExp;
   multiline: boolean;
+  /**
+   * Pre-extracted literal prefilter (see `extractInnerLiteral`). Null
+   * when the pattern has no safe extractable literal (top-level
+   * alternation, all-metachar, etc.). When set, `readAndGrep` uses
+   * it as a file-level gate via `indexOf` — files without the literal
+   * are skipped entirely.
+   */
+  literal: string | null;
   stats: GrepStats;
   walkSource: AsyncIterable<WalkEntry>;
   maxResults: number;
@@ -355,6 +463,12 @@ type GrepPipelineSetup = {
 /**
  * Resolve all defaults + compile + wire the walker. Both `grepFiles`
  * and `collectGrep` consume this — keeps defaults in one place.
+ *
+ * Extracts a literal prefix/substring from the compiled regex (if
+ * possible) so the per-file path can use `indexOf` as a file-level
+ * gate. The gate is conservative: we only use it to skip files that
+ * can't possibly contain a match; the whole-buffer matcher handles
+ * the actual matching.
  */
 function setupGrepPipeline(opts: GrepOptions): GrepPipelineSetup {
   // Default `multiline: true` — matches grep/rg's line-boundary
@@ -365,6 +479,22 @@ function setupGrepPipeline(opts: GrepOptions): GrepPipelineSetup {
     caseSensitive: opts.caseSensitive,
     multiline,
   });
+
+  // Literal extraction runs on the COMPILED regex's source, not the
+  // raw user input. `compilePattern` rewrites scoped inline flags
+  // like `(?i:foo|bar)baz` — strip the group and widen the flag,
+  // which yields `foo|barbaz` (source) + `i` (flag). The rewritten
+  // source has top-level alternation the original lacked. If we
+  // extracted from the original, `hasTopLevelAlternation` would miss
+  // it and we'd extract `"baz"` as a "required" literal — but the
+  // compiled regex can match `foo` alone, silently dropping lines
+  // that match the first branch of the alternation.
+  //
+  // Always extract from `regex.source` so the extractor sees what
+  // the regex engine will actually run. `regex.flags` is authoritative
+  // for case-sensitivity either way.
+  const literal = extractInnerLiteral(regex.source, regex.flags);
+
   const includes = compileMatchers(opts.include);
   const excludes = compileMatchers(opts.exclude);
   const includeBinary = opts.includeBinary ?? false;
@@ -381,6 +511,7 @@ function setupGrepPipeline(opts: GrepOptions): GrepPipelineSetup {
   return {
     regex,
     multiline,
+    literal,
     stats,
     walkSource,
     maxResults: opts.maxResults ?? Number.POSITIVE_INFINITY,
@@ -417,6 +548,7 @@ export async function* grepFiles(opts: GrepOptions): AsyncGenerator<GrepMatch> {
       maxLineLength: setup.maxLineLength,
       maxMatchesPerFile: setup.maxMatchesPerFile,
       pathPrefix: setup.pathPrefix,
+      literal: setup.literal,
     },
     walkSource: setup.walkSource,
     stats: setup.stats,
@@ -461,6 +593,7 @@ export async function collectGrep(opts: GrepOptions): Promise<GrepResult> {
       maxLineLength: setup.maxLineLength,
       maxMatchesPerFile: setup.maxMatchesPerFile,
       pathPrefix: setup.pathPrefix,
+      literal: setup.literal,
     },
     walkSource: setup.walkSource,
     stats: setup.stats,
