@@ -141,6 +141,8 @@ export function migrateFromJson(db: Database): void {
 
   try {
     if (oldConfig.auth?.token) {
+      // Direct write (not via setAuthToken) — safe only because migration
+      // runs during DB bootstrap, before getIdentityFingerprint() memoizes.
       db.query(`
         INSERT OR REPLACE INTO auth (id, token, refresh_token, expires_at, issued_at, updated_at)
         VALUES (1, ?, ?, ?, ?, ?)

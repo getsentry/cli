@@ -267,10 +267,13 @@ let cachedFingerprint: string | undefined;
  * (refresh_token preferred for stability across access-token rotation,
  * falling through expired access-only rows) > env token > anonymous.
  *
- * Memoized — the identity doesn't change mid-process (`auth login`
- * wipes the cache via `clearAuth`, access-token rotation keeps the
- * same refresh_token). Tests that mutate auth state between cases
- * call {@link resetIdentityFingerprintCache}.
+ * Memoized. Reset on every mutation point (`setAuthToken`,
+ * `clearAuth`), so both the common case (OAuth access-token refresh
+ * with a stable refresh_token — fingerprint unchanged in practice)
+ * and the uncommon case (server-rotated refresh_token — fingerprint
+ * changes, cache naturally re-populates under the new identity) work
+ * correctly. Tests that mutate auth state between cases call
+ * {@link resetIdentityFingerprintCache}.
  */
 export function getIdentityFingerprint(): string {
   if (cachedFingerprint === undefined) {
