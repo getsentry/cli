@@ -41,6 +41,7 @@ import { build as esbuild } from "esbuild";
 import pkg from "../package.json";
 import { uploadSourcemaps } from "../src/lib/api/sourcemaps.js";
 import { injectDebugId, PLACEHOLDER_DEBUG_ID } from "./debug-id.js";
+import { textImportPlugin } from "./text-import-plugin.js";
 
 const gzipAsync = promisify(gzip);
 
@@ -134,6 +135,7 @@ async function bundleJs(): Promise<boolean> {
         "process.env.NODE_ENV": JSON.stringify("production"),
         __SENTRY_DEBUG_ID__: JSON.stringify(PLACEHOLDER_DEBUG_ID),
       },
+      plugins: [textImportPlugin],
     });
 
     const output = result.metafile?.outputs[BUNDLE_JS];

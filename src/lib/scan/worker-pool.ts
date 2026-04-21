@@ -4,7 +4,8 @@
  * Lazy-initialized singleton: the first call to `getWorkerPool()`
  * spawns N workers via a Blob URL (for compatibility with
  * `bun build --compile`'s single-file binary — see
- * `grep-worker-source.ts`). Subsequent calls reuse the pool.
+ * `grep-worker.js` for the worker body + rationale). Subsequent
+ * calls reuse the pool.
  *
  * Workers are `.unref()`'d so the CLI exits cleanly without an
  * explicit shutdown — they'll be torn down by the runtime when the
@@ -24,7 +25,21 @@
  */
 
 import { availableParallelism } from "node:os";
-import { GREP_WORKER_SOURCE } from "./grep-worker-source.js";
+// Raw-text import: Bun reads the file's contents at bundle time and
+// exposes them as the module's default export (a string). The file
+// is a real `.js` file (`grep-worker.js`) so it's lintable,
+// syntax-checked, and easy to edit. At runtime we feed the string
+// to a `Blob` + `URL.createObjectURL` to spawn workers. See
+// `grep-worker.js` for full rationale.
+//
+// TypeScript's type system doesn't model Bun's `with { type: "text" }`
+// attribute (the default export gets typed as the module's shape),
+// so we cast through unknown. Guarded at startup by the runtime
+// Blob constructor which would throw if given a non-string.
+import grepWorkerSource from "./grep-worker.js" with { type: "text" };
+
+const GREP_WORKER_SOURCE = grepWorkerSource as unknown as string;
+
 import type { GrepMatch } from "./types.js";
 
 /**
