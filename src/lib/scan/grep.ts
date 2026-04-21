@@ -305,9 +305,16 @@ async function* grepFilesInternal(
 ): AsyncGenerator<GrepMatch> {
   for await (const match of mapFilesConcurrentStream(
     opts.walkSource,
-    (entry) => {
-      opts.stats.filesRead += 1;
-      return readAndGrep(entry, opts.perFile);
+    async (entry) => {
+      const matches = await readAndGrep(entry, opts.perFile);
+      // `filesRead` is documented as "files whose content was read
+      // and tested against the pattern" — only increment when
+      // `readAndGrep` actually succeeded (returned a non-null array).
+      // A null return means the open failed; we don't count those.
+      if (matches !== null) {
+        opts.stats.filesRead += 1;
+      }
+      return matches;
     },
     opts.concurrent
   )) {
@@ -325,6 +332,68 @@ async function* grepFilesInternal(
 }
 
 /**
+ * Resolved pipeline inputs shared by `grepFiles` and `collectGrep`.
+ * Extracted so both entry points get the same default-resolution,
+ * pattern compilation, matcher compilation, walker construction, and
+ * filter wiring — a divergence between the two would be a silent
+ * correctness bug.
+ */
+type GrepPipelineSetup = {
+  regex: RegExp;
+  multiline: boolean;
+  stats: GrepStats;
+  walkSource: AsyncIterable<WalkEntry>;
+  maxResults: number;
+  stopOnFirst: boolean;
+  maxLineLength: number;
+  maxMatchesPerFile: number;
+  pathPrefix: string;
+  concurrency: number | undefined;
+  signal: AbortSignal | undefined;
+};
+
+/**
+ * Resolve all defaults + compile + wire the walker. Both `grepFiles`
+ * and `collectGrep` consume this — keeps defaults in one place.
+ */
+function setupGrepPipeline(opts: GrepOptions): GrepPipelineSetup {
+  // Default `multiline: true` — matches grep/rg's line-boundary
+  // anchoring semantics. Callers opt out with `multiline: false` for
+  // buffer-boundary JS semantics.
+  const multiline = opts.multiline ?? true;
+  const regex = compilePattern(opts.pattern, {
+    caseSensitive: opts.caseSensitive,
+    multiline,
+  });
+  const includes = compileMatchers(opts.include);
+  const excludes = compileMatchers(opts.exclude);
+  const includeBinary = opts.includeBinary ?? false;
+
+  const root = walkerRoot(opts.cwd, opts.path);
+  const walkOpts = buildWalkOptions(opts, root);
+
+  const stats = createStats();
+  const walkSource = applyGrepFilters(
+    tapWalkerStats(walkFiles(walkOpts), stats),
+    { includes, excludes, includeBinary, stats }
+  );
+
+  return {
+    regex,
+    multiline,
+    stats,
+    walkSource,
+    maxResults: opts.maxResults ?? Number.POSITIVE_INFINITY,
+    stopOnFirst: opts.stopOnFirst ?? false,
+    maxLineLength: opts.maxLineLength ?? DEFAULT_MAX_LINE_LENGTH,
+    maxMatchesPerFile: opts.maxMatchesPerFile ?? Number.POSITIVE_INFINITY,
+    pathPrefix: opts.path ?? "",
+    concurrency: opts.concurrency,
+    signal: opts.signal,
+  };
+}
+
+/**
  * Public entry point — yield one `GrepMatch` per matching line under
  * `opts.cwd`. Consumer `break` halts in-flight work (via the
  * concurrent-stream's internal early-exit flag).
@@ -338,48 +407,25 @@ async function* grepFilesInternal(
  */
 // biome-ignore lint/suspicious/useAwait: yield* delegates to async generator
 export async function* grepFiles(opts: GrepOptions): AsyncGenerator<GrepMatch> {
-  // Default `multiline: true` — matches grep/rg's line-boundary
-  // anchoring semantics. Callers opt out with `multiline: false` for
-  // buffer-boundary JS semantics.
-  const multiline = opts.multiline ?? true;
-  const regex = compilePattern(opts.pattern, {
-    caseSensitive: opts.caseSensitive,
-    multiline,
-  });
-  const includes = compileMatchers(opts.include);
-  const excludes = compileMatchers(opts.exclude);
-  const includeBinary = opts.includeBinary ?? false;
-  const maxResults = opts.maxResults ?? Number.POSITIVE_INFINITY;
-  const stopOnFirst = opts.stopOnFirst ?? false;
-  const maxLineLength = opts.maxLineLength ?? DEFAULT_MAX_LINE_LENGTH;
-  const maxMatchesPerFile = opts.maxMatchesPerFile ?? Number.POSITIVE_INFINITY;
-
-  const root = walkerRoot(opts.cwd, opts.path);
-  const walkOpts = buildWalkOptions(opts, root);
-
-  const stats = createStats();
-  const walkSource = applyGrepFilters(
-    tapWalkerStats(walkFiles(walkOpts), stats),
-    { includes, excludes, includeBinary, stats }
-  );
+  const setup = setupGrepPipeline(opts);
 
   yield* grepFilesInternal({
-    regex,
+    regex: setup.regex,
     perFile: {
-      regex,
-      multiline,
-      maxLineLength,
-      maxMatchesPerFile,
-      pathPrefix: opts.path ?? "",
+      regex: setup.regex,
+      multiline: setup.multiline,
+      maxLineLength: setup.maxLineLength,
+      maxMatchesPerFile: setup.maxMatchesPerFile,
+      pathPrefix: setup.pathPrefix,
     },
-    walkSource,
-    stats,
+    walkSource: setup.walkSource,
+    stats: setup.stats,
     concurrent: {
-      concurrency: opts.concurrency,
-      signal: opts.signal,
+      concurrency: setup.concurrency,
+      signal: setup.signal,
     },
-    maxResults,
-    stopOnFirst,
+    maxResults: setup.maxResults,
+    stopOnFirst: setup.stopOnFirst,
   });
 }
 
@@ -392,62 +438,40 @@ export async function* grepFiles(opts: GrepOptions): AsyncGenerator<GrepMatch> {
  * numeric ascending on `lineNum` within a path.
  */
 export async function collectGrep(opts: GrepOptions): Promise<GrepResult> {
-  // We need visibility into `stats` from the public entry point, so
-  // we drive the pipeline ourselves rather than re-awaiting grepFiles.
-  const multiline = opts.multiline ?? true;
-  const regex = compilePattern(opts.pattern, {
-    caseSensitive: opts.caseSensitive,
-    multiline,
-  });
-  const includes = compileMatchers(opts.include);
-  const excludes = compileMatchers(opts.exclude);
-  const includeBinary = opts.includeBinary ?? false;
-  const maxResults = opts.maxResults ?? Number.POSITIVE_INFINITY;
-  const stopOnFirst = opts.stopOnFirst ?? false;
-  const maxLineLength = opts.maxLineLength ?? DEFAULT_MAX_LINE_LENGTH;
-  const maxMatchesPerFile = opts.maxMatchesPerFile ?? Number.POSITIVE_INFINITY;
+  const setup = setupGrepPipeline(opts);
 
-  // Ask the iterator for one extra match past `maxResults` so the
-  // collector can distinguish "exactly maxResults matches existed"
-  // from "more existed but we stopped". Without this +1 probe, the
-  // iterator flips `stats.truncated = true` as soon as it emits the
-  // N-th match, whether or not an (N+1)-th match was available.
-  // Same pattern as `collectGlob`; see the corresponding lore entry
-  // on `collectGlob/collectGrep truncation flag`.
-  const probeLimit = Number.isFinite(maxResults)
-    ? Math.min(Number.MAX_SAFE_INTEGER, maxResults + 1)
+  // Ask the iterator for one extra match past `maxResults` so we can
+  // distinguish "exactly maxResults matches existed" from "more
+  // existed but we stopped". Without this +1 probe, the iterator
+  // would flip `stats.truncated = true` the moment it emits the
+  // N-th match, regardless of whether an (N+1)-th was available.
+  // Same pattern as `collectGlob`; see the lore entry on
+  // `collectGlob/collectGrep truncation flag`.
+  const probeLimit = Number.isFinite(setup.maxResults)
+    ? Math.min(Number.MAX_SAFE_INTEGER, setup.maxResults + 1)
     : Number.POSITIVE_INFINITY;
-
-  const root = walkerRoot(opts.cwd, opts.path);
-  const walkOpts = buildWalkOptions(opts, root);
-
-  const stats = createStats();
-  const walkSource = applyGrepFilters(
-    tapWalkerStats(walkFiles(walkOpts), stats),
-    { includes, excludes, includeBinary, stats }
-  );
 
   const matches: GrepMatch[] = [];
   let truncated = false;
   for await (const match of grepFilesInternal({
-    regex,
+    regex: setup.regex,
     perFile: {
-      regex,
-      multiline,
-      maxLineLength,
-      maxMatchesPerFile,
-      pathPrefix: opts.path ?? "",
+      regex: setup.regex,
+      multiline: setup.multiline,
+      maxLineLength: setup.maxLineLength,
+      maxMatchesPerFile: setup.maxMatchesPerFile,
+      pathPrefix: setup.pathPrefix,
     },
-    walkSource,
-    stats,
+    walkSource: setup.walkSource,
+    stats: setup.stats,
     concurrent: {
-      concurrency: opts.concurrency,
-      signal: opts.signal,
+      concurrency: setup.concurrency,
+      signal: setup.signal,
     },
     maxResults: probeLimit,
-    stopOnFirst,
+    stopOnFirst: setup.stopOnFirst,
   })) {
-    if (matches.length >= maxResults) {
+    if (matches.length >= setup.maxResults) {
       // We've got the overshoot match — there ARE more results than
       // the caller asked for. Stop draining, flag truncation.
       truncated = true;
@@ -460,9 +484,9 @@ export async function collectGrep(opts: GrepOptions): Promise<GrepResult> {
   // iterator populated. Preserves stopOnFirst-path flag (stats.truncated
   // is already set by the iterator in that case).
   if (truncated) {
-    stats.truncated = true;
+    setup.stats.truncated = true;
   }
-  return { matches, stats };
+  return { matches, stats: setup.stats };
 }
 
 /** [path, lineNum] lexicographic comparator for stable collectGrep output. */
