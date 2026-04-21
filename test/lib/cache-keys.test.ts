@@ -8,33 +8,45 @@ import { computeInvalidationPrefixes } from "../../src/lib/cache-keys.js";
 const BASE = "https://us.sentry.io/api/0/";
 
 describe("computeInvalidationPrefixes — hierarchy walk", () => {
-  test("detail URL yields self + org list ancestor", () => {
+  test("detail URL yields self + ancestors down to owner", () => {
     const prefixes = computeInvalidationPrefixes(
       `${BASE}organizations/acme/issues/12345/`
     );
     expect(prefixes).toContain(`${BASE}organizations/acme/issues/12345/`);
     expect(prefixes).toContain(`${BASE}organizations/acme/issues/`);
     expect(prefixes).toContain(`${BASE}organizations/acme/`);
-    expect(prefixes).toContain(`${BASE}organizations/`);
+    // The bare `organizations/` root is deliberately NOT swept —
+    // it would evict other orgs' caches.
+    expect(prefixes).not.toContain(`${BASE}organizations/`);
   });
 
-  test("deeply nested path yields every ancestor", () => {
+  test("deeply nested path yields every ancestor down to owner", () => {
     const prefixes = computeInvalidationPrefixes(
       `${BASE}organizations/acme/releases/1.0.0/deploys/`
     );
-    // Five segments → five ancestor prefixes.
     expect(prefixes).toContain(
       `${BASE}organizations/acme/releases/1.0.0/deploys/`
     );
     expect(prefixes).toContain(`${BASE}organizations/acme/releases/1.0.0/`);
     expect(prefixes).toContain(`${BASE}organizations/acme/releases/`);
     expect(prefixes).toContain(`${BASE}organizations/acme/`);
-    expect(prefixes).toContain(`${BASE}organizations/`);
+    // Stop at the owner level, don't sweep bare `organizations/`.
+    expect(prefixes).not.toContain(`${BASE}organizations/`);
   });
 
   test("single-segment path yields only the segment itself", () => {
+    // Paths with ≤ 2 segments walk all the way down — a mutation
+    // targeting the root itself should still clear its own cache.
     const prefixes = computeInvalidationPrefixes(`${BASE}organizations/`);
     expect(prefixes).toEqual([`${BASE}organizations/`]);
+  });
+
+  test("two-segment path walks to the top (owner-level mutation)", () => {
+    // `organizations/acme/` is the resource owner; the floor kicks in
+    // at length > 2, so this still yields both prefixes.
+    const prefixes = computeInvalidationPrefixes(`${BASE}organizations/acme/`);
+    expect(prefixes).toContain(`${BASE}organizations/acme/`);
+    expect(prefixes).toContain(`${BASE}organizations/`);
   });
 
   test("query string is stripped from the prefix set", () => {
@@ -64,11 +76,11 @@ describe("computeInvalidationPrefixes — cross-endpoint rules", () => {
       `${BASE}teams/acme/backend/projects/`
     );
     expect(prefixes).toContain(`${BASE}organizations/acme/projects/`);
-    // Plus the hierarchy walk:
+    // Plus the hierarchy walk (capped at the owner level):
     expect(prefixes).toContain(`${BASE}teams/acme/backend/projects/`);
     expect(prefixes).toContain(`${BASE}teams/acme/backend/`);
     expect(prefixes).toContain(`${BASE}teams/acme/`);
-    expect(prefixes).toContain(`${BASE}teams/`);
+    expect(prefixes).not.toContain(`${BASE}teams/`);
   });
 
   test("DELETE /projects/{org}/{project}/ invalidates org project list", () => {
@@ -76,10 +88,11 @@ describe("computeInvalidationPrefixes — cross-endpoint rules", () => {
       `${BASE}projects/acme/frontend/`
     );
     expect(prefixes).toContain(`${BASE}organizations/acme/projects/`);
-    // Plus the hierarchy walk from the mutation URL:
     expect(prefixes).toContain(`${BASE}projects/acme/frontend/`);
     expect(prefixes).toContain(`${BASE}projects/acme/`);
-    expect(prefixes).toContain(`${BASE}projects/`);
+    // Two segments: floor allows the top (projects/). Reasonable —
+    // a DELETE on an owner-level resource does clear that root.
+    expect(prefixes).not.toContain(`${BASE}projects/`);
   });
 
   test("unrelated paths get no cross-endpoint sweep", () => {
@@ -133,7 +146,7 @@ describe("computeInvalidationPrefixes — edge cases", () => {
       "https://sentry.example.com/api/0/organizations/acme/issues/12345/"
     );
     expect(prefixes).toContain(
-      "https://sentry.example.com/api/0/organizations/"
+      "https://sentry.example.com/api/0/organizations/acme/"
     );
   });
 });

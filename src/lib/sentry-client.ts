@@ -293,21 +293,17 @@ function cacheResponse(
 /**
  * Auto-invalidate cache entries that a successful non-GET mutation
  * made stale. Awaited before returning the response so a subsequent
- * read in the same command sees fresh data (the whole point of
- * post-mutation invalidation).
+ * read in the same command sees fresh data.
  *
  * Prefix computation lives in {@link computeInvalidationPrefixes}
  * (hierarchy walk + cross-endpoint rules). Each prefix runs through
- * `invalidateCachedResponsesMatching`, which is identity-gated so
- * a mutation by one account can't evict another account's cache.
+ * `invalidateCachedResponsesMatching` — a no-throw helper that's
+ * already identity-gated so a mutation by one account can't evict
+ * another account's cache.
  *
  * GETs skip invalidation entirely; they go through the cache-write
  * path above. 4xx/5xx non-GETs skip too — a rejected mutation didn't
  * change server state so its cache is still accurate.
- *
- * Never throws: the helpers we call are already best-effort, but we
- * wrap defensively because a housekeeping error must never surface
- * as a user-visible failure after a successful mutation.
  */
 async function invalidateAfterMutation(
   method: string,
@@ -318,16 +314,9 @@ async function invalidateAfterMutation(
     return;
   }
   const prefixes = computeInvalidationPrefixes(fullUrl);
-  if (prefixes.length === 0) {
-    return;
-  }
-  try {
-    await Promise.all(
-      prefixes.map((prefix) => invalidateCachedResponsesMatching(prefix))
-    );
-  } catch {
-    /* best-effort: mutation already succeeded upstream */
-  }
+  await Promise.all(
+    prefixes.map((prefix) => invalidateCachedResponsesMatching(prefix))
+  );
 }
 
 /** Build a `{ authorization }` header map from a bearer token, or `{}` if absent. */
@@ -363,8 +352,6 @@ async function fetchWithRetry(
         authHeaders(getAuthToken()),
         result.response
       );
-      // Awaited so a subsequent read in the same command sees fresh
-      // data. Never throws — own contract enforced by the helper.
       await invalidateAfterMutation(method, fullUrl, result.response);
       return result.response;
     }

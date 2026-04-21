@@ -125,14 +125,21 @@ export function computeInvalidationPrefixes(fullUrl: string): string[] {
 
 /**
  * Yield every path-prefix sequence of `relPath` in descending length,
- * always ending with a trailing slash.
+ * stopping at the "resource owner" level (typically `{root}/{owner}/`,
+ * e.g. `organizations/acme/`). The bare `organizations/` root is
+ * deliberately omitted — sweeping it on every mutation would evict
+ * unrelated cross-org caches, since a mutation under one org cannot
+ * invalidate another org's state.
  *
  * `"organizations/acme/releases/1.0.0/deploys/"` yields:
  * - `"organizations/acme/releases/1.0.0/deploys/"`
  * - `"organizations/acme/releases/1.0.0/"`
  * - `"organizations/acme/releases/"`
  * - `"organizations/acme/"`
- * - `"organizations/"`
+ *
+ * Single-segment paths (e.g. `"organizations/"`) still yield themselves
+ * — a mutation at the resource-owner root is rare but the sweep should
+ * still clear its cache.
  */
 function* ancestorSegments(relPath: string): Generator<string> {
   const trimmed = relPath.endsWith("/") ? relPath.slice(0, -1) : relPath;
@@ -140,7 +147,13 @@ function* ancestorSegments(relPath: string): Generator<string> {
     return;
   }
   const parts = trimmed.split("/");
-  for (let i = parts.length; i > 0; i--) {
+  // Stop at 2 segments when the path has more — a mutation under
+  // `organizations/acme/.../...` shouldn't sweep the bare
+  // `organizations/` root (would evict other orgs' caches). Paths
+  // with ≤ 2 segments (e.g. the `organizations/` root itself, or
+  // `teams/acme/`) still walk all the way down.
+  const floor = parts.length > 2 ? 2 : 1;
+  for (let i = parts.length; i >= floor; i--) {
     yield `${parts.slice(0, i).join("/")}/`;
   }
 }
