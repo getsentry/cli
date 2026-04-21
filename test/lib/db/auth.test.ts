@@ -18,6 +18,7 @@ import {
   isAuthenticated,
   isEnvTokenActive,
   refreshToken,
+  resetIdentityFingerprintCache,
   setAuthToken,
 } from "../../../src/lib/db/auth.js";
 import { useTestConfigDir } from "../../helpers.js";
@@ -32,6 +33,7 @@ beforeEach(() => {
   savedSentryToken = process.env.SENTRY_TOKEN;
   delete process.env.SENTRY_AUTH_TOKEN;
   delete process.env.SENTRY_TOKEN;
+  resetIdentityFingerprintCache();
 });
 
 afterEach(() => {
@@ -237,19 +239,19 @@ describe("getIdentityFingerprint", () => {
     process.env.SENTRY_AUTH_TOKEN = "sntrys_alice";
     const aliceFp = getIdentityFingerprint();
     process.env.SENTRY_AUTH_TOKEN = "sntrys_bob";
+    resetIdentityFingerprintCache();
     const bobFp = getIdentityFingerprint();
     expect(aliceFp).not.toBe(bobFp);
   });
 
-  test("SENTRY_AUTH_TOKEN and SENTRY_TOKEN produce distinct fingerprints", () => {
-    // Different env var names, same value → same fingerprint, because
-    // we hash the token itself (the variable name is not part of the
-    // identity). This keeps the cache hot if a user migrates from the
-    // legacy SENTRY_TOKEN to SENTRY_AUTH_TOKEN without rotating.
+  test("SENTRY_AUTH_TOKEN and SENTRY_TOKEN produce the same fingerprint", () => {
+    // Same secret value → same fingerprint regardless of which env var
+    // holds it (the variable name is not part of the identity).
     process.env.SENTRY_AUTH_TOKEN = "same_token";
     const authFp = getIdentityFingerprint();
     delete process.env.SENTRY_AUTH_TOKEN;
     process.env.SENTRY_TOKEN = "same_token";
+    resetIdentityFingerprintCache();
     const legacyFp = getIdentityFingerprint();
     expect(authFp).toBe(legacyFp);
   });
@@ -278,10 +280,8 @@ describe("getIdentityFingerprint", () => {
     const storedFp = getIdentityFingerprint();
     try {
       process.env.SENTRY_FORCE_ENV_TOKEN = "1";
+      resetIdentityFingerprintCache();
       const envFp = getIdentityFingerprint();
-      // The forced-env fingerprint must differ from the stored-OAuth
-      // fingerprint — otherwise forcing the env token would still
-      // serve the OAuth cache entries.
       expect(envFp).not.toBe(storedFp);
     } finally {
       delete process.env.SENTRY_FORCE_ENV_TOKEN;
@@ -289,9 +289,8 @@ describe("getIdentityFingerprint", () => {
   });
 
   test("env and OAuth fingerprints with the same secret value are distinct", () => {
-    // Different "kinds" prefixed into the hash ensure no accidental
-    // cache sharing when a coincidence of byte values would otherwise
-    // collide.
+    // The `kind` prefix in hashIdentity keeps env/oauth namespaces
+    // distinct even when secrets happen to collide.
     process.env.SENTRY_AUTH_TOKEN = "shared_secret";
     const envFp = getIdentityFingerprint();
     delete process.env.SENTRY_AUTH_TOKEN;
@@ -301,41 +300,25 @@ describe("getIdentityFingerprint", () => {
   });
 
   test("expired access-only OAuth token falls through to env token", () => {
-    // Mirrors getAuthConfig: an expired token with no refresh token is
-    // unusable — the API client will fall back to the env token for
-    // the next request. If the fingerprint still used the stale access
-    // token, cache reads/writes would land under the dead OAuth
-    // namespace while requests go under the env identity, serving
-    // another user's cached data.
-    //
-    // setAuthToken(token, expiresIn: -1) writes an already-expired row
-    // with no refresh_token (third arg omitted).
+    // Mirrors getAuthConfig: an expired access token with no
+    // refresh_token is unusable — the API client sends the env token,
+    // so the fingerprint must match.
     setAuthToken("expired_access", -1);
     process.env.SENTRY_AUTH_TOKEN = "env_token";
-
+    resetIdentityFingerprintCache();
     const fp = getIdentityFingerprint();
 
-    // The fingerprint should match the env-token identity, not the
-    // stale DB token.
-    delete process.env.SENTRY_AUTH_TOKEN;
-    // Clear the expired DB row to isolate: anon is the only other
-    // possibility this case could collapse into.
-    setAuthToken("", -1); // idempotent clear not available; rely on positive check below
-    process.env.SENTRY_AUTH_TOKEN = "env_token";
-    const envOnlyFp = getIdentityFingerprint();
-    expect(fp).toBe(envOnlyFp);
+    // With no DB row, same env token should produce the same fingerprint.
+    setAuthToken("", -1);
+    resetIdentityFingerprintCache();
+    expect(getIdentityFingerprint()).toBe(fp);
   });
 
   test("expired access-only OAuth token with refresh_token uses the refresh token", () => {
-    // An expired access token that has a refresh token is still usable
-    // — the API client will perform an OAuth refresh. Fingerprint
-    // should key off the stable refresh token, not the (about-to-be-
-    // rotated) access token.
+    // An expired access token + refresh_token is still usable; the
+    // fingerprint keys off the stable refresh_token.
     setAuthToken("expired_access", -1, "live_refresh");
     const fp = getIdentityFingerprint();
-
-    // Rotate the access token; refresh stays the same. Fingerprint
-    // must not change.
     setAuthToken("fresh_access", 3600, "live_refresh");
     expect(getIdentityFingerprint()).toBe(fp);
   });

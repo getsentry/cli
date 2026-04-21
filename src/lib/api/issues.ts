@@ -16,6 +16,7 @@ import {
   invalidateCachedResponse,
   invalidateCachedResponsesMatching,
 } from "../response-cache.js";
+import { getApiBaseUrl } from "../sentry-client.js";
 
 import {
   API_MAX_PER_PAGE,
@@ -572,24 +573,17 @@ export async function updateIssueStatus(
     return data;
   }
 
-  // Legacy global endpoint — works without org but not region-aware.
+  // Legacy global endpoint — works without org but not region-aware,
+  // so we can only flush the legacy issue-detail URL. Region-scoped
+  // lists age out via their TTL.
   const legacyData = await apiRequest<SentryIssue>(
     `/issues/${encodeURIComponent(issueId)}/`,
     { method: "PUT", body }
   );
-  // Without an org slug we don't know the region, so we can only flush
-  // the legacy issue-detail URL. Region-scoped lists still age out via
-  // their TTL. Callers that know the org should pass it to enable the
-  // broader org-scoped invalidation above.
-  try {
-    const { getApiBaseUrl } = await import("../sentry-client.js");
-    const base = stripTrailingSlash(getApiBaseUrl());
-    await invalidateCachedResponse(
-      `${base}/api/0/issues/${encodeURIComponent(issueId)}/`
-    );
-  } catch {
-    // Non-fatal — the mutation already succeeded.
-  }
+  const base = stripTrailingSlash(getApiBaseUrl());
+  await invalidateCachedResponse(
+    `${base}/api/0/issues/${encodeURIComponent(issueId)}/`
+  );
   return legacyData;
 }
 
@@ -634,13 +628,8 @@ export async function mergeIssues(
       method: "PUT",
       body: { merge: 1 },
     });
-    // Flush cached detail entries for every affected group ID — children
-    // disappear into the parent, and the parent's cached detail predates
-    // the merge. Then sweep the org-wide list once. Using
-    // `invalidateIssueDetailCaches` (detail-only) instead of
-    // `invalidateIssueCaches` here avoids N+1 full cache-directory scans
-    // for large merges: a single post-loop `invalidateOrgIssueList`
-    // covers every list variant in one pass.
+    // Flush detail caches for every affected ID (detail-only avoids
+    // N+1 list scans) then sweep the org-wide list once.
     const affectedIds = [data.merge.parent, ...data.merge.children];
     await Promise.all(
       affectedIds.map((id) =>
@@ -709,86 +698,54 @@ export async function getSharedIssue(
 }
 
 /**
- * Invalidate cached detail-endpoint responses for a single issue.
- *
- * Covers both the org-scoped and legacy `/issues/{id}/` URLs. This
- * does NOT sweep the org-wide issue list — callers that mutate issues
- * should call {@link invalidateOrgIssueList} exactly once per
- * operation, not per-issue-affected, since the list sweep is a full
- * cache-directory scan.
- *
- * **Never throws.** Called from post-mutation paths where the server
- * has already committed the change; surfacing a cache-housekeeping
- * error to the caller would cause the mutation to appear failed. All
- * failures are swallowed — stale cache is strictly better than a false
- * error on a successful mutation.
+ * Flush both the org-scoped and legacy detail endpoints for one issue.
+ * Does NOT sweep the org-wide list — callers must call
+ * {@link invalidateOrgIssueList} once per operation to avoid N+1
+ * full-directory scans. Never throws.
  */
 async function invalidateIssueDetailCaches(
   regionUrl: string,
   orgSlug: string,
   issueId: string
 ): Promise<void> {
-  try {
-    const base = stripTrailingSlash(regionUrl);
-    const encodedOrg = encodeURIComponent(orgSlug);
-    const encodedId = encodeURIComponent(issueId);
-    await Promise.all([
-      invalidateCachedResponse(
-        `${base}/api/0/organizations/${encodedOrg}/issues/${encodedId}/`
-      ),
-      invalidateCachedResponse(`${base}/api/0/issues/${encodedId}/`),
-    ]);
-  } catch {
-    // Non-fatal — see JSDoc.
-  }
+  const base = stripTrailingSlash(regionUrl);
+  const encodedOrg = encodeURIComponent(orgSlug);
+  const encodedId = encodeURIComponent(issueId);
+  await Promise.all([
+    invalidateCachedResponse(
+      `${base}/api/0/organizations/${encodedOrg}/issues/${encodedId}/`
+    ),
+    invalidateCachedResponse(`${base}/api/0/issues/${encodedId}/`),
+  ]);
 }
 
 /**
- * Invalidate every cached response tied to a single issue: its detail
- * endpoints AND the org-wide paginated list.
- *
- * Single-issue mutations (resolve, unresolve) use this directly. Batch
- * mutations (merge) should instead invalidate each issue's detail with
- * {@link invalidateIssueDetailCaches} and call
- * {@link invalidateOrgIssueList} once at the end, to avoid N+1 full
- * cache scans.
- *
- * **Never throws** — same reasoning as {@link invalidateIssueDetailCaches}.
+ * Flush detail + list caches for one issue. Use for single-issue
+ * mutations (resolve, unresolve); batch mutations should use the
+ * detail-only helper plus one final {@link invalidateOrgIssueList}.
+ * Never throws.
  */
 async function invalidateIssueCaches(
   regionUrl: string,
   orgSlug: string,
   issueId: string
 ): Promise<void> {
-  try {
-    await Promise.all([
-      invalidateIssueDetailCaches(regionUrl, orgSlug, issueId),
-      invalidateOrgIssueList(regionUrl, orgSlug),
-    ]);
-  } catch {
-    // Non-fatal — see JSDoc.
-  }
+  await Promise.all([
+    invalidateIssueDetailCaches(regionUrl, orgSlug, issueId),
+    invalidateOrgIssueList(regionUrl, orgSlug),
+  ]);
 }
 
 /**
- * Invalidate the org-wide issue list endpoint (all paginated variants).
- *
- * The list endpoint is keyed by query string (sort, cursor, query,
- * statsPeriod, ...) so we have to do a prefix sweep rather than a
- * single URL invalidation.
- *
- * **Never throws** — same reasoning as {@link invalidateIssueDetailCaches}.
+ * Sweep every paginated variant of the org's issue-list endpoint.
+ * Never throws.
  */
 async function invalidateOrgIssueList(
   regionUrl: string,
   orgSlug: string
 ): Promise<void> {
-  try {
-    const base = stripTrailingSlash(regionUrl);
-    await invalidateCachedResponsesMatching(
-      `${base}/api/0/organizations/${encodeURIComponent(orgSlug)}/issues/`
-    );
-  } catch {
-    // Non-fatal — see JSDoc.
-  }
+  const base = stripTrailingSlash(regionUrl);
+  await invalidateCachedResponsesMatching(
+    `${base}/api/0/organizations/${encodeURIComponent(orgSlug)}/issues/`
+  );
 }

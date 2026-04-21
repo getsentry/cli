@@ -172,20 +172,7 @@ export async function createProject(
     body,
   });
   const data = unwrapResult(result, "Failed to create project");
-
-  // Invalidate any cached project list for this org so the next
-  // `project list` / `project view` call picks up the new project
-  // instead of serving a stale list. Wrapped in try/catch because the
-  // helper calls `resolveOrgRegion` which can throw on transient
-  // network/DB failures — letting that throw here would mask the
-  // successful create and risk the caller retrying + creating a
-  // duplicate. Stale cache is strictly better than a lost result.
-  try {
-    await invalidateOrgProjectCache(orgSlug);
-  } catch {
-    // Non-fatal — the mutation already succeeded.
-  }
-
+  await invalidateOrgProjectCache(orgSlug);
   return data as unknown as SentryProject;
 }
 
@@ -235,14 +222,18 @@ export async function deleteProject(
     },
   });
   unwrapResult(result, "Failed to delete project");
+  await invalidateProjectCaches(orgSlug, projectSlug);
+}
 
-  // Flush the now-stale project GET and any cached project list for the
-  // org. Follow-up commands (`project list`, `project view`) will fetch
-  // fresh data instead of showing the just-deleted project. Wrapped in
-  // try/catch so transient failures (e.g., `resolveOrgRegion` DB error,
-  // filesystem errors) don't propagate after a successful mutation —
-  // stale cache is strictly better than raising an error for a delete
-  // that already happened.
+/**
+ * Flush the project-detail GET and the org-wide project list so
+ * follow-up `project list` / `project view` reads don't see the
+ * deleted project. Never throws.
+ */
+async function invalidateProjectCaches(
+  orgSlug: string,
+  projectSlug: string
+): Promise<void> {
   try {
     const regionUrl = await resolveOrgRegion(orgSlug);
     const base = stripTrailingSlash(regionUrl);
@@ -255,23 +246,13 @@ export async function deleteProject(
       ),
     ]);
   } catch {
-    // Non-fatal — the delete already succeeded.
+    /* best-effort: mutation already succeeded */
   }
 }
 
 /**
- * Invalidate every cached response whose URL belongs to the given org's
- * project list or detail endpoints. Called after `project create` /
- * `project delete` so downstream reads see the mutation immediately.
- *
- * Wraps the pattern-match invalidator to keep the call sites short and
- * document *why* we clear these specific prefixes.
- *
- * **Never throws.** Called from post-mutation paths where the server
- * has already committed the change; surfacing a cache-housekeeping
- * error to the caller would cause the mutation to appear failed. This
- * lets `createProject` / `deleteProject` drop their own try/catch
- * wrappers — the helper is self-contained.
+ * Sweep every paginated variant of the org's project-list endpoint.
+ * Used by `project create`. Never throws.
  */
 async function invalidateOrgProjectCache(orgSlug: string): Promise<void> {
   try {
@@ -281,7 +262,7 @@ async function invalidateOrgProjectCache(orgSlug: string): Promise<void> {
       `${base}/api/0/organizations/${encodeURIComponent(orgSlug)}/projects/`
     );
   } catch {
-    // Non-fatal — see JSDoc.
+    /* best-effort: mutation already succeeded */
   }
 }
 

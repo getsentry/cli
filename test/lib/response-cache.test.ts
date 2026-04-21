@@ -374,38 +374,27 @@ describe("normalizeUrl", () => {
 
 describe("buildCacheKey", () => {
   test("produces a 64-char hex string", () => {
-    const key = buildCacheKey("anon", "GET", TEST_URL);
-    expect(key).toMatch(/^[0-9a-f]{64}$/);
+    expect(buildCacheKey("GET", TEST_URL)).toMatch(/^[0-9a-f]{64}$/);
   });
 
   test("is deterministic", () => {
-    const key1 = buildCacheKey("anon", "GET", TEST_URL);
-    const key2 = buildCacheKey("anon", "GET", TEST_URL);
-    expect(key1).toBe(key2);
+    expect(buildCacheKey("GET", TEST_URL)).toBe(buildCacheKey("GET", TEST_URL));
   });
 
   test("different methods produce different keys", () => {
-    const getKey = buildCacheKey("anon", "GET", TEST_URL);
-    const postKey = buildCacheKey("anon", "POST", TEST_URL);
-    expect(getKey).not.toBe(postKey);
+    expect(buildCacheKey("GET", TEST_URL)).not.toBe(
+      buildCacheKey("POST", TEST_URL)
+    );
   });
 
   test("different identities produce different keys for the same URL", () => {
-    // The core invariant of the identity-scoped cache: switching accounts
-    // must route reads/writes through a different namespace so users
-    // never see each other's cached data.
-    const aliceKey = buildCacheKey("alice-fingerprint", "GET", TEST_URL);
-    const bobKey = buildCacheKey("bob-fingerprint", "GET", TEST_URL);
+    // Switching accounts must route reads/writes through a different
+    // namespace so users never see each other's cached data.
+    setAuthToken("alice_access", 3600, "alice_refresh");
+    const aliceKey = buildCacheKey("GET", TEST_URL);
+    setAuthToken("bob_access", 3600, "bob_refresh");
+    const bobKey = buildCacheKey("GET", TEST_URL);
     expect(aliceKey).not.toBe(bobKey);
-  });
-
-  test("anonymous callers share a namespace across invocations", () => {
-    // Logged-out CLIs (no token, no env var) all share the `anon`
-    // namespace, which matches the pre-identity-scoping behavior and
-    // keeps things obvious in the cache directory layout.
-    const key1 = buildCacheKey("anon", "GET", TEST_URL);
-    const key2 = buildCacheKey("anon", "GET", TEST_URL);
-    expect(key1).toBe(key2);
   });
 });
 
@@ -521,7 +510,8 @@ describe("invalidateCachedResponsesMatching", () => {
   });
 
   test("does not delete entries belonging to a different identity", async () => {
-    // Identity A writes to the same URL prefix.
+    // A writes a cache entry, B sweeps the same URL prefix; A's entry
+    // must survive because B can only see its own identity's files.
     setAuthToken("identity-a", 3600, "refresh-a");
     await storeCachedResponse(
       "GET",
@@ -529,24 +519,16 @@ describe("invalidateCachedResponsesMatching", () => {
       {},
       mockResponse({ owner: "a" })
     );
-
-    // Identity A's entry is visible to identity A.
     expect(await getCachedResponse("GET", ORG_LIST_URL, {})).toBeDefined();
 
-    // Switch to identity B and issue a prefix sweep over the same URL.
     setAuthToken("identity-b", 3600, "refresh-b");
     await invalidateCachedResponsesMatching(ORG_PREFIX);
 
-    // Identity A's cached entry must survive — the sweep only touches
-    // files owned by the current (B) identity. This is the core fix
-    // for the sentry-bot / cursor-bot review on #788.
     setAuthToken("identity-a", 3600, "refresh-a");
-    const survivor = await getCachedResponse("GET", ORG_LIST_URL, {});
-    expect(survivor).toBeDefined();
+    expect(await getCachedResponse("GET", ORG_LIST_URL, {})).toBeDefined();
   });
 
   test("is a no-op when the cache dir does not exist", async () => {
-    // Nothing written yet — invalidation should not throw.
     await invalidateCachedResponsesMatching(ORG_PREFIX);
   });
 });
