@@ -22,6 +22,8 @@
  *   is wrong, just a helpful breadcrumb).
  */
 
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
+import * as Sentry from "@sentry/node-core/light";
 import {
   getActiveEnvVarName,
   getRawEnvToken,
@@ -60,13 +62,16 @@ export function maybeWarnEnvTokenIgnored(): void {
     return;
   }
 
-  // No stored OAuth → no collision.
+  // No stored OAuth → no collision. DB access failures are reported
+  // to Sentry but must not crash the CLI — the hint is best-effort.
+  // When `hasStoredAuthCredentials()` throws, `hasStored` stays `false`
+  // and the subsequent guard suppresses the hint, which is the intended
+  // conservative behavior.
   let hasStored = false;
   try {
     hasStored = hasStoredAuthCredentials();
-  } catch {
-    // DB access failed — silently skip; this is a best-effort hint.
-    return;
+  } catch (error) {
+    Sentry.captureException(error);
   }
   if (!hasStored) {
     return;
@@ -95,7 +100,11 @@ function resolveStoredUserLabel(): string {
   try {
     const user = getUserInfo();
     return user?.username ?? user?.email ?? user?.name ?? "stored OAuth user";
-  } catch {
+  } catch (error) {
+    // DB read failure for the user-info cache is non-fatal — fall back
+    // to the neutral label — but still surface the error to Sentry so
+    // we can diagnose persistent cache-read failures.
+    Sentry.captureException(error);
     return "stored OAuth user";
   }
 }
