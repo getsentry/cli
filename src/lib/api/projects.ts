@@ -41,6 +41,7 @@ import {
   MAX_PAGINATION_PAGES,
   ORG_FANOUT_CONCURRENCY,
   type PaginatedResponse,
+  stripTrailingSlash,
   unwrapPaginatedResult,
   unwrapResult,
 } from "./infrastructure.js";
@@ -174,9 +175,16 @@ export async function createProject(
 
   // Invalidate any cached project list for this org so the next
   // `project list` / `project view` call picks up the new project
-  // instead of serving a stale list. Best-effort — failures are
-  // silently swallowed inside the helper.
-  await invalidateOrgProjectCache(orgSlug);
+  // instead of serving a stale list. Wrapped in try/catch because the
+  // helper calls `resolveOrgRegion` which can throw on transient
+  // network/DB failures — letting that throw here would mask the
+  // successful create and risk the caller retrying + creating a
+  // duplicate. Stale cache is strictly better than a lost result.
+  try {
+    await invalidateOrgProjectCache(orgSlug);
+  } catch {
+    // Non-fatal — the mutation already succeeded.
+  }
 
   return data as unknown as SentryProject;
 }
@@ -230,22 +238,25 @@ export async function deleteProject(
 
   // Flush the now-stale project GET and any cached project list for the
   // org. Follow-up commands (`project list`, `project view`) will fetch
-  // fresh data instead of showing the just-deleted project.
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const base = stripTrailingSlash(regionUrl);
-  await Promise.all([
-    invalidateCachedResponse(
-      `${base}/api/0/projects/${encodeURIComponent(orgSlug)}/${encodeURIComponent(projectSlug)}/`
-    ),
-    invalidateCachedResponsesMatching(
-      `${base}/api/0/organizations/${encodeURIComponent(orgSlug)}/projects/`
-    ),
-  ]);
-}
-
-/** Remove the trailing slash from a region URL so we can compose /api/0/... */
-function stripTrailingSlash(url: string): string {
-  return url.endsWith("/") ? url.slice(0, -1) : url;
+  // fresh data instead of showing the just-deleted project. Wrapped in
+  // try/catch so transient failures (e.g., `resolveOrgRegion` DB error,
+  // filesystem errors) don't propagate after a successful mutation —
+  // stale cache is strictly better than raising an error for a delete
+  // that already happened.
+  try {
+    const regionUrl = await resolveOrgRegion(orgSlug);
+    const base = stripTrailingSlash(regionUrl);
+    await Promise.all([
+      invalidateCachedResponse(
+        `${base}/api/0/projects/${encodeURIComponent(orgSlug)}/${encodeURIComponent(projectSlug)}/`
+      ),
+      invalidateCachedResponsesMatching(
+        `${base}/api/0/organizations/${encodeURIComponent(orgSlug)}/projects/`
+      ),
+    ]);
+  } catch {
+    // Non-fatal — the delete already succeeded.
+  }
 }
 
 /**

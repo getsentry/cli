@@ -24,6 +24,7 @@ import {
   getOrgSdkConfig,
   MAX_PAGINATION_PAGES,
   type PaginatedResponse,
+  stripTrailingSlash,
   unwrapPaginatedResult,
 } from "./infrastructure.js";
 
@@ -582,7 +583,7 @@ export async function updateIssueStatus(
   // broader org-scoped invalidation above.
   try {
     const { getApiBaseUrl } = await import("../sentry-client.js");
-    const base = stripTrailingSlashLocal(getApiBaseUrl());
+    const base = stripTrailingSlash(getApiBaseUrl());
     await invalidateCachedResponse(
       `${base}/api/0/issues/${encodeURIComponent(issueId)}/`
     );
@@ -633,16 +634,19 @@ export async function mergeIssues(
       method: "PUT",
       body: { merge: 1 },
     });
-    // Flush cached detail + list entries for every affected group ID so
-    // downstream reads (`issue view`, `issue list`) see the merge
-    // result immediately. Children disappear into the parent so they
-    // need invalidation too.
+    // Flush cached detail entries for every affected group ID — children
+    // disappear into the parent, and the parent's cached detail predates
+    // the merge. Then sweep the org-wide list once. Using
+    // `invalidateIssueDetailCaches` (detail-only) instead of
+    // `invalidateIssueCaches` here avoids N+1 full cache-directory scans
+    // for large merges: a single post-loop `invalidateOrgIssueList`
+    // covers every list variant in one pass.
     const affectedIds = [data.merge.parent, ...data.merge.children];
     await Promise.all(
-      affectedIds.map((id) => invalidateIssueCaches(regionUrl, orgSlug, id))
+      affectedIds.map((id) =>
+        invalidateIssueDetailCaches(regionUrl, orgSlug, id)
+      )
     );
-    // Also flush the org-wide issue list endpoint since merges change
-    // which groups appear in paginated results.
     await invalidateOrgIssueList(regionUrl, orgSlug);
     return data.merge;
   } catch (error) {
@@ -704,28 +708,25 @@ export async function getSharedIssue(
   return (await response.json()) as { groupID: string };
 }
 
-/** Strip a trailing slash from a base URL for clean `/api/0/...` composition. */
-function stripTrailingSlashLocal(url: string): string {
-  return url.endsWith("/") ? url.slice(0, -1) : url;
-}
-
 /**
- * Invalidate cached responses affected by a single-issue mutation.
+ * Invalidate cached detail-endpoint responses for a single issue.
  *
- * Covers both the org-scoped and legacy issue detail endpoints and the
- * paginated issue-list family for the org, so that `issue view` /
- * `issue list` surface the mutation instead of a pre-mutation snapshot.
+ * Covers both the org-scoped and legacy `/issues/{id}/` URLs. This
+ * does NOT sweep the org-wide issue list — callers that mutate issues
+ * should call {@link invalidateOrgIssueList} exactly once per
+ * operation, not per-issue-affected, since the list sweep is a full
+ * cache-directory scan.
  *
  * Best-effort: failures are swallowed inside the helper — the mutation
  * has already succeeded and a stale cache entry is strictly better than
  * surfacing a filesystem error to the user.
  */
-async function invalidateIssueCaches(
+async function invalidateIssueDetailCaches(
   regionUrl: string,
   orgSlug: string,
   issueId: string
 ): Promise<void> {
-  const base = stripTrailingSlashLocal(regionUrl);
+  const base = stripTrailingSlash(regionUrl);
   const encodedOrg = encodeURIComponent(orgSlug);
   const encodedId = encodeURIComponent(issueId);
   await Promise.all([
@@ -733,6 +734,26 @@ async function invalidateIssueCaches(
       `${base}/api/0/organizations/${encodedOrg}/issues/${encodedId}/`
     ),
     invalidateCachedResponse(`${base}/api/0/issues/${encodedId}/`),
+  ]);
+}
+
+/**
+ * Invalidate every cached response tied to a single issue: its detail
+ * endpoints AND the org-wide paginated list.
+ *
+ * Single-issue mutations (resolve, unresolve) use this directly. Batch
+ * mutations (merge) should instead invalidate each issue's detail with
+ * {@link invalidateIssueDetailCaches} and call
+ * {@link invalidateOrgIssueList} once at the end, to avoid N+1 full
+ * cache scans.
+ */
+async function invalidateIssueCaches(
+  regionUrl: string,
+  orgSlug: string,
+  issueId: string
+): Promise<void> {
+  await Promise.all([
+    invalidateIssueDetailCaches(regionUrl, orgSlug, issueId),
     invalidateOrgIssueList(regionUrl, orgSlug),
   ]);
 }
@@ -748,7 +769,7 @@ async function invalidateOrgIssueList(
   regionUrl: string,
   orgSlug: string
 ): Promise<void> {
-  const base = stripTrailingSlashLocal(regionUrl);
+  const base = stripTrailingSlash(regionUrl);
   await invalidateCachedResponsesMatching(
     `${base}/api/0/organizations/${encodeURIComponent(orgSlug)}/issues/`
   );

@@ -166,6 +166,21 @@ export async function getOrgSdkConfig(orgSlug: string) {
 }
 
 /**
+ * Strip a single trailing slash from a base URL.
+ *
+ * Used by cache-invalidation helpers that compose full URLs by
+ * concatenating a region base URL with `/api/0/...` — keeping the
+ * trailing slash on both sides produces `//api/0/...`, which doesn't
+ * match the cache keys we wrote on the way in.
+ *
+ * Small but shared: duplicating it per domain module (`api/issues.ts`,
+ * `api/projects.ts`) risks divergence.
+ */
+export function stripTrailingSlash(url: string): string {
+  return url.endsWith("/") ? url.slice(0, -1) : url;
+}
+
+/**
  * Extract the value of a named attribute from a Link header segment.
  * Parses `key="value"` pairs using string operations instead of regex
  * for robustness and performance.

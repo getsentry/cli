@@ -8,11 +8,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { setAuthToken } from "../../src/lib/db/auth.js";
 import {
   buildCacheKey,
   clearResponseCache,
   disableResponseCache,
   getCachedResponse,
+  invalidateCachedResponse,
+  invalidateCachedResponsesMatching,
   normalizeUrl,
   resetCacheState,
   storeCachedResponse,
@@ -478,5 +481,82 @@ describe("file structure", () => {
     const files = await readdir(cacheDir);
     expect(files.length).toBe(1);
     expect(files[0]).toMatch(/^[0-9a-f]{64}\.json$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Prefix-based invalidation + identity isolation (getsentry/cli#788 follow-up)
+// ---------------------------------------------------------------------------
+
+describe("invalidateCachedResponsesMatching", () => {
+  const ORG_PREFIX = "https://us.sentry.io/api/0/organizations/myorg/projects/";
+  const ORG_LIST_URL = `${ORG_PREFIX}?cursor=abc`;
+  const OTHER_PREFIX =
+    "https://us.sentry.io/api/0/organizations/other-org/projects/";
+
+  test("removes entries whose URL matches the prefix", async () => {
+    await storeCachedResponse(
+      "GET",
+      ORG_LIST_URL,
+      {},
+      mockResponse({ matched: true })
+    );
+    await storeCachedResponse(
+      "GET",
+      `${OTHER_PREFIX}?cursor=def`,
+      {},
+      mockResponse({ matched: false })
+    );
+
+    await invalidateCachedResponsesMatching(ORG_PREFIX);
+
+    // The matching entry is gone; the other org's entry survives.
+    expect(await getCachedResponse("GET", ORG_LIST_URL, {})).toBeUndefined();
+    const survivor = await getCachedResponse(
+      "GET",
+      `${OTHER_PREFIX}?cursor=def`,
+      {}
+    );
+    expect(survivor).toBeDefined();
+  });
+
+  test("does not delete entries belonging to a different identity", async () => {
+    // Identity A writes to the same URL prefix.
+    setAuthToken("identity-a", 3600, "refresh-a");
+    await storeCachedResponse(
+      "GET",
+      ORG_LIST_URL,
+      {},
+      mockResponse({ owner: "a" })
+    );
+
+    // Identity A's entry is visible to identity A.
+    expect(await getCachedResponse("GET", ORG_LIST_URL, {})).toBeDefined();
+
+    // Switch to identity B and issue a prefix sweep over the same URL.
+    setAuthToken("identity-b", 3600, "refresh-b");
+    await invalidateCachedResponsesMatching(ORG_PREFIX);
+
+    // Identity A's cached entry must survive — the sweep only touches
+    // files owned by the current (B) identity. This is the core fix
+    // for the sentry-bot / cursor-bot review on #788.
+    setAuthToken("identity-a", 3600, "refresh-a");
+    const survivor = await getCachedResponse("GET", ORG_LIST_URL, {});
+    expect(survivor).toBeDefined();
+  });
+
+  test("is a no-op when the cache dir does not exist", async () => {
+    // Nothing written yet — invalidation should not throw.
+    await invalidateCachedResponsesMatching(ORG_PREFIX);
+  });
+});
+
+describe("invalidateCachedResponse", () => {
+  test("removes the exact cached entry for the current identity", async () => {
+    await storeCachedResponse("GET", TEST_URL, {}, mockResponse(TEST_BODY));
+    expect(await getCachedResponse("GET", TEST_URL, {})).toBeDefined();
+
+    await invalidateCachedResponse(TEST_URL);
+    expect(await getCachedResponse("GET", TEST_URL, {})).toBeUndefined();
   });
 });

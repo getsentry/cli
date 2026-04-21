@@ -178,6 +178,23 @@ type CacheEntry = {
   headers: Record<string, string>;
   /** Original URL, used for TTL tier classification during cleanup */
   url: string;
+  /**
+   * Identity fingerprint of the bearer token that owns this entry.
+   *
+   * The cache key already incorporates the fingerprint, so two
+   * identities will never produce the same filename for the same URL.
+   * This field exists specifically for prefix-based invalidation —
+   * `invalidateCachedResponsesMatching` opens every file in the shared
+   * cache dir, so it must double-check that each file belongs to the
+   * current identity before deleting it. Without this, one identity's
+   * mutation could evict another identity's cache entry that happened
+   * to be on a URL matching the prefix.
+   *
+   * Optional for backwards compatibility — entries written before this
+   * field was added are treated as foreign-identity (never deleted by
+   * prefix-invalidation; they still age out via TTL cleanup).
+   */
+  identity?: string;
   /** When this entry was created (epoch ms) */
   createdAt: number;
   /**
@@ -512,9 +529,10 @@ export async function storeCachedResponse(
     return;
   }
 
+  const identity = getIdentityFingerprint();
   let key: string;
   try {
-    key = buildCacheKey(getIdentityFingerprint(), method, url);
+    key = buildCacheKey(identity, method, url);
   } catch {
     // Malformed URL — skip caching this response
     return;
@@ -525,12 +543,13 @@ export async function storeCachedResponse(
       url,
       "cache.put",
       async (span) => {
-        const size = await writeResponseToCache(
+        const size = await writeResponseToCache({
           key,
+          identity,
           url,
           requestHeaders,
-          response
-        );
+          response,
+        });
         if (size > 0) {
           span.setAttribute("cache.item_size", size);
         }
@@ -546,19 +565,41 @@ export async function storeCachedResponse(
 }
 
 /**
+ * Inputs for {@link writeResponseToCache}.
+ *
+ * Bundled into a single object to keep the function arg count under
+ * the `useMaxParams` lint threshold and to make call sites easier to
+ * skim (five named keys vs five positional args).
+ */
+type WriteRequest = {
+  /** Cache key derived from identity + method + URL. */
+  key: string;
+  /**
+   * Opaque identity fingerprint of the bearer token that owns this
+   * entry. Persisted alongside the entry so that prefix-based
+   * invalidation (`invalidateCachedResponsesMatching`) can skip files
+   * belonging to other identities.
+   */
+  identity: string;
+  /** Full request URL. */
+  url: string;
+  /** Request headers sent with this request (stored for Vary-aware reads). */
+  requestHeaders: Record<string, string>;
+  /** Clone of the fetch `Response` to persist. */
+  response: Response;
+};
+
+/**
  * Core cache write logic, separated for complexity management.
  *
- * Always called for GET requests (caller checks method), so "GET" is hardcoded
- * for the CachePolicy constructor.
+ * Always called for GET requests (caller checks method), so "GET" is
+ * hardcoded for the `CachePolicy` constructor.
  *
  * @returns The serialized body size in bytes (0 if not storable).
  */
-async function writeResponseToCache(
-  key: string,
-  url: string,
-  requestHeaders: Record<string, string>,
-  response: Response
-): Promise<number> {
+
+async function writeResponseToCache(req: WriteRequest): Promise<number> {
+  const { key, identity, url, requestHeaders, response } = req;
   const responseHeadersObj = headersToObject(response.headers);
 
   const policy = new CachePolicy(
@@ -588,6 +629,7 @@ async function writeResponseToCache(
     status: response.status,
     headers: pickHeaders(response.headers),
     url,
+    identity,
     createdAt: now,
     expiresAt: now + ttl,
   };
@@ -624,16 +666,24 @@ export async function invalidateCachedResponse(url: string): Promise<void> {
 }
 
 /**
- * Invalidate every cached GET whose URL starts with the given prefix.
+ * Invalidate every cached GET whose URL starts with the given prefix
+ * **for the current identity only**.
  *
  * Lets mutation commands flush downstream list/detail endpoints at once
  * without having to enumerate every paginated variant. The filter runs
  * against the `url` field stored inside each cache entry so ordering of
  * query parameters is irrelevant (the cache file name is a hash).
  *
- * Only entries belonging to the current identity can ever match — the
- * cache key already incorporates the identity fingerprint, so entries
- * for other accounts live under completely different filenames.
+ * Identity isolation: the cache directory is shared across identities
+ * on the same machine (e.g. a developer who has logged in as multiple
+ * users, or a CI job reusing a cache dir). The cache filename already
+ * scopes entries to the identity that wrote them, but this function
+ * opens every file to match by URL prefix — so it must double-check
+ * the `identity` field on each entry before deleting, otherwise a
+ * mutation by user A could evict user B's cache for the same URL
+ * pattern. Entries written by older CLI versions that predate the
+ * `identity` field are treated as foreign and skipped (they still age
+ * out via TTL cleanup).
  *
  * Best-effort: individual file failures are swallowed. The mutation
  * succeeded; a stale cache entry is strictly preferable to surfacing a
@@ -664,11 +714,19 @@ export async function invalidateCachedResponsesMatching(
     return;
   }
 
+  const currentIdentity = getIdentityFingerprint();
+
   await cacheIO.map(jsonFiles, async (file) => {
     const filePath = join(cacheDir, file);
     try {
       const raw = await readFile(filePath, "utf-8");
       const entry = JSON.parse(raw) as CacheEntry;
+      // Identity gate: only delete entries the current identity wrote.
+      // Missing `identity` field = legacy entry from before this check
+      // existed; skip rather than risk crossing identities.
+      if (entry.identity !== currentIdentity) {
+        return;
+      }
       if (entry.url?.startsWith(prefix)) {
         await unlink(filePath).catch(() => {
           // Best-effort: another process may have deleted it
