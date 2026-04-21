@@ -1085,6 +1085,56 @@ describe("resolveOrgAndIssueId: issue-id → org cache (Pattern D)", () => {
     // Mapping should now be cached for next time.
     expect(getCachedIssueOrg("99999999")).toBe("fresh-org");
   });
+
+  test("5xx on cached-org fetch propagates the error WITHOUT evicting the cache", async () => {
+    const { setCachedIssueOrg, getCachedIssueOrg } = await import(
+      "../../../src/lib/db/issue-org-cache.js"
+    );
+    // Seed a valid mapping — the org-scoped endpoint will return 500 (transient).
+    setCachedIssueOrg("66666666", "still-valid-org");
+    setOrgRegion("still-valid-org", DEFAULT_SENTRY_URL);
+
+    let legacyFallbackCalled = false;
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+      if (url.includes("/organizations/still-valid-org/issues/66666666/")) {
+        return new Response(JSON.stringify({ detail: "Internal error" }), {
+          status: 500,
+        });
+      }
+      if (/\/api\/0\/issues\/66666666\/(\?|$)/.test(url)) {
+        legacyFallbackCalled = true;
+        return new Response(
+          JSON.stringify({
+            id: "66666666",
+            permalink:
+              "https://sentry.io/organizations/still-valid-org/issues/66666666/",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    // Error must propagate — the helper only falls back on 404, not on 5xx.
+    await expect(
+      resolveOrgAndIssueId({
+        issueArg: "66666666",
+        cwd: getConfigDir(),
+        command: "view",
+      })
+    ).rejects.toThrow(ApiError);
+
+    // Cache must NOT have been evicted — the failure was transient, the
+    // mapping may still be correct.
+    expect(getCachedIssueOrg("66666666")).toBe("still-valid-org");
+    // Legacy fallback must NOT have been reached.
+    expect(legacyFallbackCalled).toBe(false);
+  });
 });
 
 describe("pollAutofixState", () => {

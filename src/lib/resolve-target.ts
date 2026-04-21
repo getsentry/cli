@@ -873,16 +873,23 @@ export async function fetchProjectId(
 
   // Populate the cache for next time. The `getProject` response carries the
   // numeric project ID and (usually) the organization payload; use whatever
-  // is available to seed future lookups.
+  // is available to seed future lookups. Guarded with try/catch so a broken
+  // or read-only DB does NOT crash the primary API-success path.
   const project_ = projectResult.value;
   if (project_.organization) {
-    setCachedProject(project_.organization.id, project_.id, {
-      orgSlug: project_.organization.slug,
-      orgName: project_.organization.name,
-      projectSlug: project_.slug,
-      projectName: project_.name,
-      projectId: project_.id,
-    });
+    try {
+      setCachedProject(project_.organization.id, project_.id, {
+        orgSlug: project_.organization.slug,
+        orgName: project_.organization.name,
+        projectSlug: project_.slug,
+        projectName: project_.name,
+        projectId: project_.id,
+      });
+    } catch (cacheErr) {
+      log.debug(
+        `Failed to cache project '${org}/${project}': ${String(cacheErr)}`
+      );
+    }
   }
 
   return toNumericId(project_.id);

@@ -516,7 +516,14 @@ async function resolveShareIssue(
     effectiveCachedOrg ??
     extractOrgFromPermalink(issue.permalink);
   if (resolvedOrgSlug && !resolvedOrg && !effectiveCachedOrg) {
-    setCachedIssueOrg(groupId, resolvedOrgSlug);
+    // Best-effort — a broken/read-only DB must not fail a successful lookup.
+    try {
+      setCachedIssueOrg(groupId, resolvedOrgSlug);
+    } catch (cacheErr) {
+      log.debug(
+        `Failed to cache issue-org mapping for ${groupId}: ${String(cacheErr)}`
+      );
+    }
   }
   return { org: resolvedOrgSlug, issue };
 }
@@ -554,15 +561,6 @@ function extractOrgFromPermalink(
 }
 
 /**
- * Fetch an issue by numeric ID, preferring an org-scoped endpoint when
- * the caller has explicit or cached org context. Falls back to the legacy
- * unscoped `/api/0/issues/{id}/` endpoint when no org is known, and also
- * when a cached org yields a 404 (stale mapping).
- *
- * Extracted from {@link resolveNumericIssue} to keep its cognitive
- * complexity below the project's lint threshold.
- */
-/**
  * Result of {@link fetchIssueByNumericId}.
  *
  * `cacheEvicted` is true when the helper invalidated a stale `cachedOrg`
@@ -576,6 +574,15 @@ type FetchIssueByNumericIdResult = {
   cacheEvicted: boolean;
 };
 
+/**
+ * Fetch an issue by numeric ID, preferring an org-scoped endpoint when
+ * the caller has explicit or cached org context. Falls back to the legacy
+ * unscoped `/api/0/issues/{id}/` endpoint when no org is known, and also
+ * when a cached org yields a 404 (stale mapping).
+ *
+ * Extracted from {@link resolveNumericIssue} to keep its cognitive
+ * complexity below the project's lint threshold.
+ */
 async function fetchIssueByNumericId(
   id: string,
   explicitOrg: string | undefined,
@@ -656,7 +663,14 @@ async function resolveNumericIssue(
     // valid cache hit (already stored). When the cache was evicted we SHOULD
     // re-write the corrected mapping derived from the permalink.
     if (org && !resolvedOrg && !effectiveCachedOrg) {
-      setCachedIssueOrg(id, org);
+      // Best-effort — a broken/read-only DB must not fail a successful lookup.
+      try {
+        setCachedIssueOrg(id, org);
+      } catch (cacheErr) {
+        log.debug(
+          `Failed to cache issue-org mapping for ${id}: ${String(cacheErr)}`
+        );
+      }
     }
     return { org, issue };
   } catch (err) {
@@ -665,7 +679,12 @@ async function resolveNumericIssue(
       // and suggesting the short-ID format, since users often confuse numeric
       // group IDs with short-ID suffixes. When org context is available, use
       // the real org slug instead of <org> placeholder (CLI-BT, 18 users).
-      const orgHint = resolvedOrg?.org ?? cachedOrg ?? "<org>";
+      //
+      // Skip `cachedOrg` here: if the unscoped legacy endpoint 404'd too,
+      // the helper has already evicted the (proven-stale) cache entry, so
+      // suggesting the old slug in the hint would mislead the user. Only
+      // explicit `resolvedOrg` is worth preserving.
+      const orgHint = resolvedOrg?.org ?? "<org>";
       const hint = `${commandBase} ${command} ${orgHint}/${id}`;
       throw new ResolutionError(`Issue ${id}`, "not found", hint, [
         `No issue with numeric ID ${id} found — you may not have access, or it may have been deleted.`,

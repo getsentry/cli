@@ -83,7 +83,7 @@ describe("clearCachedIssueOrg", () => {
 });
 
 describe("clearAllIssueOrgCache", () => {
-  test("removes all issue_org.* entries", () => {
+  test("removes all cached mappings", () => {
     setCachedIssueOrg("1", "a");
     setCachedIssueOrg("2", "b");
     setCachedIssueOrg("3", "c");

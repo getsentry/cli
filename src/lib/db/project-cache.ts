@@ -134,9 +134,7 @@ export function getCachedProjectBySlug(
     .query(
       "SELECT cache_key, org_slug, org_name, project_slug, project_name, project_id, MAX(cached_at) AS cached_at, last_accessed FROM project_cache WHERE org_slug = ? AND project_slug = ?"
     )
-    .get(orgSlug, projectSlug) as
-    | (ProjectCacheRow & { "MAX(cached_at)"?: number })
-    | undefined;
+    .get(orgSlug, projectSlug) as ProjectCacheRow | undefined;
 
   // When no rows match, SQLite still returns a single row with NULL columns
   // because of the MAX aggregate — guard on cache_key being populated.

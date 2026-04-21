@@ -279,10 +279,12 @@ describe("clearProjectCache", () => {
     // Clear all
     clearProjectCache();
 
-    // All should be undefined
+    // All should be undefined across every lookup shape.
     expect(getCachedProject("org-1", "project-1")).toBeUndefined();
     expect(getCachedProject("org-2", "project-2")).toBeUndefined();
     expect(getCachedProjectByDsnKey("key1")).toBeUndefined();
+    expect(getCachedProjectBySlug("org-one", "project-one")).toBeUndefined();
+    expect(getCachedProjectBySlug("key-org", "key-project")).toBeUndefined();
   });
 
   test("does not throw when cache is already empty", async () => {
@@ -572,28 +574,5 @@ describe("getCachedProjectBySlug", () => {
     // SQLite stores missing project IDs as NULL; the row mapper passes
     // the value through unchanged, so callers see `null` (not undefined).
     expect(result?.projectId).toBeFalsy();
-  });
-});
-
-describe("clearProjectCache", () => {
-  test("clears all entries across all key shapes", () => {
-    setCachedProject("a", "b", {
-      orgSlug: "org",
-      orgName: "Org",
-      projectSlug: "proj",
-      projectName: "Proj",
-    });
-    setCachedProjectByDsnKey("pk", {
-      orgSlug: "org",
-      orgName: "Org",
-      projectSlug: "proj",
-      projectName: "Proj",
-    });
-
-    clearProjectCache();
-
-    expect(getCachedProject("a", "b")).toBeUndefined();
-    expect(getCachedProjectByDsnKey("pk")).toBeUndefined();
-    expect(getCachedProjectBySlug("org", "proj")).toBeUndefined();
   });
 });
