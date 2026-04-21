@@ -197,3 +197,35 @@ describe("extractInnerLiteral — class-in-group opaqueness (Cursor bug #1 follo
     expect(extractInnerLiteral(pattern, "")).toBe(expected);
   });
 });
+
+describe("extractInnerLiteral — multi-char escape sequences (review followup)", () => {
+  /**
+   * Regression: `\x41` is a hex-escape encoding `A` — the literal
+   * is 4 source chars long (`\`, `x`, `4`, `1`). The old extractor
+   * always advanced escape sequences by 2, leaving `41` behind as
+   * "literal" text. For `\x41foo` the extractor returned `"41foo"`
+   * but the compiled regex matches `Afoo` — silent miss on the
+   * gate (file containing `Afoo` but not `41foo` got skipped).
+   *
+   * Fix: `escapeSequenceLength` correctly computes the full length
+   * of `\x..`, `\u....`, `\u{...}`, `\cX`, `\k<name>`, and
+   * `\p{...}` / `\P{...}` sequences. The extractor now skips past
+   * the WHOLE sequence and breaks the run (we don't try to decode
+   * the escape into its character — conservative).
+   */
+  test.each([
+    // Multi-char escapes — tail must NOT be extracted as literal
+    ["\\x41foo", "foo"], // \x41 = A; skip + foo is the literal
+    ["\\u0041foo", "foo"], // \u0041 = A
+    ["\\u{1F600}foo", "foo"], // braced unicode
+    ["\\cAfoo", "foo"], // control-A
+    ["\\k<name>foo", "foo"], // named backref
+    ["\\p{L}foo", "foo"], // Unicode property
+    ["\\P{L}foo", "foo"], // negated Unicode property
+    // Pre-escape literals still work (first-tied-longest)
+    ["bar\\x41foo", "bar"], // both runs length 3; first wins
+    ["longer_bar\\x41foo", "longer_bar"], // longer_bar > foo, longer wins
+  ])("correctly skips multi-char escape %p → %p", (pattern, expected) => {
+    expect(extractInnerLiteral(pattern, "")).toBe(expected);
+  });
+});

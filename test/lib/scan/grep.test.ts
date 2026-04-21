@@ -773,6 +773,49 @@ describe("collectGrep — literal prefilter fast path", () => {
     }
   });
 
+  test("cross-newline patterns (foo\\sbar) find matches spanning line boundaries (review followup)", async () => {
+    // Regression: the old prefilter did per-line verify via
+    // `verifyRegex.test(lineText)`, which failed to detect matches
+    // that span newlines (e.g., `\s` matches `\n`). After
+    // simplifying the prefilter to a file-level gate only, the
+    // regex engine handles cross-newline matches correctly.
+    const { cwd, cleanup } = makeSandbox({
+      "same-line.txt": "foo bar on one line\n",
+      "split.txt": "foo\nbar\n", // \s (which includes \n) joins "foo" and "bar"
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "foo\\sbar",
+      });
+      const paths = matches.map((m) => m.path).sort();
+      expect(paths).toEqual(["same-line.txt", "split.txt"]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("multi-char escapes like \\x41 find matches for the decoded char (review followup)", async () => {
+    // Regression: the old extractor advanced `\x41` by 2 chars,
+    // leaving `41` as a "literal" that wrongly flagged the file
+    // gate. Pattern `\x41foo` matches `Afoo` (the compiled regex
+    // decodes `\x41` to `A`), so files containing `Afoo` should
+    // match and files containing literal `41foo` should NOT.
+    const { cwd, cleanup } = makeSandbox({
+      "actual-match.txt": "Afoo here\n", // contains decoded `A` + foo
+      "literal-41foo.txt": "41foo here\n", // contains literal "41foo" text
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "\\x41foo",
+      });
+      expect(matches.map((m) => m.path)).toEqual(["actual-match.txt"]);
+    } finally {
+      cleanup();
+    }
+  });
+
   test("scoped inline flags that introduce top-level alternation are safely handled (Cursor #3)", async () => {
     // Regression: `compilePattern` rewrites `(?i:foo|bar)baz` into
     // `foo|barbaz` + the global `i` flag. The rewritten source has

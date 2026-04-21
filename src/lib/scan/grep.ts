@@ -38,7 +38,7 @@ import {
   type ConcurrentOptions,
   mapFilesConcurrentStream,
 } from "./concurrent.js";
-import { extractInnerLiteral, isPureLiteral } from "./literal-extract.js";
+import { extractInnerLiteral } from "./literal-extract.js";
 import {
   basenameOf,
   type CompiledMatcher,
@@ -148,20 +148,20 @@ type PerFileOptions = {
   maxMatchesPerFile: number;
   pathPrefix: string;
   /**
-   * Optional literal prefilter — when set, the per-file path uses
-   * `indexOf(literal)` to locate candidate lines and only runs the
-   * regex engine on those lines. Dramatically faster on files that
-   * don't contain the literal (~5ms/MB vs 100ms/MB for regex).
-   * Computed once per `collectGrep`/`grepFiles` call via
+   * Optional literal prefilter — when set, the per-file path runs
+   * a cheap `indexOf(literal)` gate before invoking the regex
+   * engine. Files that don't contain the literal are skipped
+   * entirely. Computed once per `collectGrep`/`grepFiles` call via
    * `extractInnerLiteral`.
+   *
+   * NOTE: the gate is file-level only. We intentionally do NOT use
+   * the literal to locate individual matches — patterns that can
+   * span newlines (e.g., `foo\sbar` where `\s` matches `\n`) and
+   * patterns whose literal differs from the compiled form (e.g.,
+   * `\x41foo` matches `Afoo`, not `\x41foo`) would both produce
+   * silent misses under per-line verify.
    */
   literal: string | null;
-  /**
-   * True when the regex is itself a pure literal (no metacharacters
-   * at all). The per-file path can skip the regex engine entirely
-   * and emit matches directly from the `indexOf` walk.
-   */
-  literalIsPattern: boolean;
 };
 
 /**
@@ -202,118 +202,61 @@ async function readAndGrep(
     return null;
   }
 
-  // Fast path — regex with an extractable literal prefix/substring.
-  // Use `indexOf(literal)` to find candidate lines, run the regex
-  // engine only on those lines. Skips the regex on 95%+ of lines
-  // that can't possibly match — ripgrep's central optimization.
+  // File-level prefilter gate. If the pattern has an extractable
+  // literal, skip the regex engine entirely on files that don't
+  // contain the literal — ripgrep's central optimization, adapted.
   //
-  // Two preconditions gate this path:
+  // Important: this is a FILE-level gate only. We deliberately do
+  // NOT attempt to use the literal to find/verify matches line-by-
+  // line. That approach has subtle correctness failures for patterns
+  // that can match across newlines (e.g., `foo\sbar` where `\s`
+  // matches `\n`) and for patterns whose literal isn't what the
+  // regex engine actually matches (e.g., `\x41foo` matches `Afoo`,
+  // not the literal string `\x41foo`; and `(?i:foo|bar)baz` compiles
+  // to `foo|barbaz` with different alternation structure).
   //
-  // 1. `opts.multiline` must be true. The fast path verifies matches
-  //    on per-line slices; when `multiline: false` the caller wants
-  //    `^/$` anchored to the WHOLE buffer, not per-line, so per-line
-  //    verification would produce wrong results.
+  // Keeping the gate at file-level sidesteps all of that: we only
+  // use `indexOf(literal)` to quickly reject files that can't match,
+  // and let V8's regex engine handle the actual matching. The perf
+  // win is still substantial because most files in a large tree
+  // contain zero instances of the literal, and `indexOf` is much
+  // cheaper than constructing the regex engine's NFA state.
   //
-  // 2. The pattern must NOT be a pure literal. V8's regex engine is
-  //    hyper-optimized for pure-literal patterns — it's roughly as
-  //    fast as `String.indexOf` without our prefilter's overhead.
-  //    The prefilter only wins when the regex engine is doing
-  //    non-trivial work (backtracking, character classes, etc.) that
-  //    we can avoid on non-candidate lines.
-  if (opts.multiline && opts.literal !== null && !opts.literalIsPattern) {
-    return grepByLiteralPrefilter(content, entry, opts, opts.literal);
+  // Preconditions for the gate:
+  // - Literal must be extractable AND not case-sensitivity-altered
+  //   in a way that breaks indexOf (so: either case-sensitive search,
+  //   OR content.toLowerCase() preserves length).
+  // - The literal must actually be something the compiled regex MUST
+  //   match — guaranteed by `extractInnerLiteral` operating on the
+  //   compiled regex source (see `setupGrepPipeline`).
+  if (opts.literal !== null) {
+    const isCaseInsensitive = opts.regex.flags.includes("i");
+    // Note: for case-insensitive search, `content.toLowerCase()` may
+    // be LONGER than `content` (e.g., Turkish `İ` → `i` + U+0307).
+    // That's fine because we only use the result as a boolean gate:
+    // "does the literal exist anywhere in this file?" The returned
+    // position is never used as a `content` offset — the whole-buffer
+    // regex engine does the actual match localization.
+    const haystack = isCaseInsensitive ? content.toLowerCase() : content;
+    if (haystack.indexOf(opts.literal) === -1) {
+      return [];
+    }
+    // File contains the literal — fall through to the whole-buffer
+    // matcher. The regex engine handles the actual matching; the
+    // literal gate only ruled out files that can't possibly match.
   }
 
-  // Slow path — regex has no extractable literal (e.g., `foo|bar`,
-  // `.*`, complex patterns). Whole-buffer iteration.
   return grepByWholeBuffer(content, entry, opts);
 }
 
 /**
- * Fast path for regex patterns that contain an extractable literal.
- * Uses `indexOf(literal)` to locate candidate lines, runs the regex
- * engine only on those. Verifies each candidate — an `indexOf` hit
- * doesn't guarantee the full regex matches the line (e.g., literal
- * `foo` in pattern `foo(?!bar)`).
- */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: per-candidate line bounds + verify + line-number + truncation + Unicode guard is inherently branchy
-function grepByLiteralPrefilter(
-  content: string,
-  entry: WalkEntry,
-  opts: PerFileOptions,
-  literal: string
-): GrepMatch[] {
-  const matches: GrepMatch[] = [];
-  const isCaseInsensitive = opts.regex.flags.includes("i");
-
-  // Case-insensitive path: lowercase the haystack once and search
-  // for the pre-lowercased `literal`. This is ~50× faster than a
-  // regex engine call per-line but relies on positions in `haystack`
-  // aligning with positions in `content`. JS's `toLowerCase()` can
-  // produce a LONGER string for some Unicode code points (e.g.
-  // Turkish `İ` U+0130 → `i` + U+0307 combining dot, net +1 char).
-  // When length changes, `hit` indices from `haystack` are misaligned
-  // with `content`, breaking line-boundary math and line numbering.
-  //
-  // Guard: when the lengths diverge, fall back to the whole-buffer
-  // regex path (correct but slower). This is cheap to check (one
-  // length comparison) and real source code rarely contains the
-  // problematic characters, so the fast path still fires on the
-  // overwhelming common case.
-  let haystack: string;
-  if (isCaseInsensitive) {
-    const lowered = content.toLowerCase();
-    if (lowered.length !== content.length) {
-      return grepByWholeBuffer(content, entry, opts);
-    }
-    haystack = lowered;
-  } else {
-    haystack = content;
-  }
-  const ctx: MatchContext = { entry, opts, content };
-
-  // Clone the regex per file (same reasoning as `grepByWholeBuffer`).
-  // We use the pattern WITHOUT `/g` — we run `test` on single lines.
-  const verifyRegex = new RegExp(
-    opts.regex.source,
-    stripGlobalFlag(opts.regex.flags)
-  );
-
-  let lineNum = 1;
-  let cursor = 0;
-  let hit = haystack.indexOf(literal);
-  while (hit !== -1) {
-    // Advance line counter.
-    let nl = content.indexOf("\n", cursor);
-    while (nl !== -1 && nl < hit) {
-      lineNum += 1;
-      nl = content.indexOf("\n", nl + 1);
-    }
-    cursor = hit;
-
-    const lineStart = content.lastIndexOf("\n", hit) + 1;
-    const lineEndRaw = content.indexOf("\n", hit);
-    const lineEnd = lineEndRaw === -1 ? content.length : lineEndRaw;
-
-    // Verify the full regex matches this line.
-    const lineText = content.slice(lineStart, lineEnd);
-    if (verifyRegex.test(lineText)) {
-      matches.push(buildMatch(ctx, { lineNum, lineStart, lineEnd }));
-      if (matches.length >= opts.maxMatchesPerFile) {
-        break;
-      }
-    }
-    if (lineEndRaw === -1) {
-      break;
-    }
-    // Skip to the next line before searching again.
-    hit = haystack.indexOf(literal, lineEnd + 1);
-  }
-  return matches;
-}
-
-/**
- * Slow path — no literal extractable. Use whole-buffer regex.exec.
+ * Whole-buffer grep — runs the compiled regex across the full file
+ * content, emitting one `GrepMatch` per match's enclosing line.
+ *
+ * This is the primary matching implementation. The file-level
+ * literal gate in `readAndGrep` may skip files that have no chance
+ * of matching, but once a file reaches this function the regex
+ * engine does the actual work.
  */
 function grepByWholeBuffer(
   content: string,
@@ -406,11 +349,6 @@ function buildMatch(ctx: MatchContext, bounds: LineBounds): GrepMatch {
   };
 }
 
-/** Remove `g` flag from a flag string; no-op if absent. */
-function stripGlobalFlag(flags: string): string {
-  return flags.includes("g") ? flags.replace("g", "") : flags;
-}
-
 /**
  * Build walker options from grep options — the set that `walkFiles`
  * actually consumes. Anything grep-specific stays in grep.
@@ -499,12 +437,10 @@ type GrepPipelineSetup = {
    * Pre-extracted literal prefilter (see `extractInnerLiteral`). Null
    * when the pattern has no safe extractable literal (top-level
    * alternation, all-metachar, etc.). When set, `readAndGrep` uses
-   * `indexOf(literal)` to locate candidate lines before invoking the
-   * regex engine — ripgrep's central optimization.
+   * it as a file-level gate via `indexOf` — files without the literal
+   * are skipped entirely.
    */
   literal: string | null;
-  /** True when the regex IS a pure literal — regex engine skipped. */
-  literalIsPattern: boolean;
   stats: GrepStats;
   walkSource: AsyncIterable<WalkEntry>;
   maxResults: number;
@@ -520,10 +456,11 @@ type GrepPipelineSetup = {
  * Resolve all defaults + compile + wire the walker. Both `grepFiles`
  * and `collectGrep` consume this — keeps defaults in one place.
  *
- * Extracts a literal prefix/substring from the regex (if possible)
- * so the per-file path can use `indexOf` as a prefilter. When the
- * regex is itself a pure literal, flags that so the per-file path
- * can skip the regex engine entirely.
+ * Extracts a literal prefix/substring from the compiled regex (if
+ * possible) so the per-file path can use `indexOf` as a file-level
+ * gate. The gate is conservative: we only use it to skip files that
+ * can't possibly contain a match; the whole-buffer matcher handles
+ * the actual matching.
  */
 function setupGrepPipeline(opts: GrepOptions): GrepPipelineSetup {
   // Default `multiline: true` — matches grep/rg's line-boundary
@@ -549,8 +486,6 @@ function setupGrepPipeline(opts: GrepOptions): GrepPipelineSetup {
   // the regex engine will actually run. `regex.flags` is authoritative
   // for case-sensitivity either way.
   const literal = extractInnerLiteral(regex.source, regex.flags);
-  const literalIsPattern =
-    literal !== null && isPureLiteral(regex.source, regex.flags);
 
   const includes = compileMatchers(opts.include);
   const excludes = compileMatchers(opts.exclude);
@@ -569,7 +504,6 @@ function setupGrepPipeline(opts: GrepOptions): GrepPipelineSetup {
     regex,
     multiline,
     literal,
-    literalIsPattern,
     stats,
     walkSource,
     maxResults: opts.maxResults ?? Number.POSITIVE_INFINITY,
@@ -607,7 +541,6 @@ export async function* grepFiles(opts: GrepOptions): AsyncGenerator<GrepMatch> {
       maxMatchesPerFile: setup.maxMatchesPerFile,
       pathPrefix: setup.pathPrefix,
       literal: setup.literal,
-      literalIsPattern: setup.literalIsPattern,
     },
     walkSource: setup.walkSource,
     stats: setup.stats,
@@ -653,7 +586,6 @@ export async function collectGrep(opts: GrepOptions): Promise<GrepResult> {
       maxMatchesPerFile: setup.maxMatchesPerFile,
       pathPrefix: setup.pathPrefix,
       literal: setup.literal,
-      literalIsPattern: setup.literalIsPattern,
     },
     walkSource: setup.walkSource,
     stats: setup.stats,

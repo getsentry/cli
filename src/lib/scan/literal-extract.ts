@@ -153,18 +153,38 @@ export function extractInnerLiteral(
     const c = source[i];
 
     if (c === "\\") {
-      // Escape sequence. If the next char is an escaped metacharacter
-      // (`\.`, `\/`, `\\`, etc.), it represents a literal byte and
-      // CAN extend the current run. Otherwise (`\d`, `\w`, `\b`,
-      // `\t`, digit-escapes, etc.) it's a class/anchor — break.
+      // Escape sequence. Three cases:
+      //
+      // 1. Escaped metacharacter (`\.`, `\/`, `\\`, etc.) — represents
+      //    a literal byte, extends the current run.
+      //
+      // 2. Multi-char escape sequences (`\x41`, `\u0041`, `\u{1F600}`,
+      //    `\cA`, `\k<name>`) — these produce SPECIFIC characters but
+      //    the tail (e.g., `41` after `\x`) is NOT a literal run
+      //    extender. Skip past the whole sequence and break the run.
+      //    (A future pass could decode the escape and contribute its
+      //    char to the run — complex, bail-safe for v1.)
+      //
+      // 3. Character-class escapes (`\d`, `\w`, `\b`, `\t`, etc.) —
+      //    not literals. Advance 2 and break the run.
       const next = source[i + 1];
-      if (next !== undefined && ESCAPED_LITERAL_CHARS.has(next)) {
+      if (next === undefined) {
+        // Trailing `\` — malformed, bail on this run.
+        commit();
+        i += 2;
+        continue;
+      }
+      if (ESCAPED_LITERAL_CHARS.has(next)) {
+        // Case 1: `\.`, `\/`, `\\` etc. — extends the literal run.
         current += next;
         i += 2;
         continue;
       }
+      // Case 2 / 3: compute how far to advance past the whole escape
+      // sequence. Anything we don't recognize defaults to 2 (single-
+      // char escape like `\d`, `\b`, `\t`, `\n`, `\r`, `\s`, `\W`, etc.).
       commit();
-      i += 2;
+      i += escapeSequenceLength(source, i);
       continue;
     }
 
@@ -260,9 +280,11 @@ function hasTopLevelAlternation(source: string): boolean {
   while (i < source.length) {
     const c = source[i];
     if (c === "\\") {
-      // Skip the escape sequence. An escaped char is never a
-      // grouping/alternation metacharacter.
-      i += 2;
+      // Skip the whole escape sequence. An escaped char is never a
+      // grouping/alternation metacharacter, and multi-char escapes
+      // like `\x41`, `\u0041`, `\k<name>` have tails that must not
+      // be mistaken for `|`, `(`, `)`.
+      i += escapeSequenceLength(source, i);
       continue;
     }
     if (c === "[") {
@@ -287,6 +309,61 @@ function hasTopLevelAlternation(source: string): boolean {
 }
 
 /**
+ * Compute the total length (in source characters) of an escape
+ * sequence starting at `i` (where `source[i] === "\\"`). Handles:
+ *
+ * - `\xHH` — hex byte (4 source chars)
+ * - `\uHHHH` — unicode BMP code point (6 source chars)
+ * - `\u{H+}` — braced unicode code point (variable length)
+ * - `\cX` — control char (3 source chars)
+ * - `\k<name>` — named backref (variable length)
+ * - `\p{Name}`, `\P{Name}` — Unicode property escape (variable)
+ * - Anything else (single-char escape like `\d`, `\w`, `\b`, `\t`,
+ *   escaped metachars, numeric backrefs) — 2 source chars.
+ *
+ * Used by the extractor to correctly skip past the ENTIRE escape
+ * sequence so its tail characters don't get misinterpreted as
+ * literal bytes. `\x41foo` must advance 4 chars past `\x41`, not
+ * just 2 past `\x` — otherwise the extractor sees `41foo` as
+ * literals and wrongly extracts `"41foo"`.
+ */
+function escapeSequenceLength(source: string, i: number): number {
+  const next = source[i + 1];
+  if (next === undefined) {
+    return 2;
+  }
+  // Braced: `\u{H+}`, `\p{...}`, `\P{...}` — consume until closing `}`.
+  if ((next === "u" || next === "p" || next === "P") && source[i + 2] === "{") {
+    const close = source.indexOf("}", i + 3);
+    if (close === -1) {
+      return 2;
+    }
+    return close - i + 1;
+  }
+  // Fixed-width multi-char escapes.
+  if (next === "x") {
+    return 4; // \x + 2 hex digits
+  }
+  if (next === "u") {
+    return 6; // \u + 4 hex digits
+  }
+  if (next === "c") {
+    return 3; // \c + 1 control char
+  }
+  // Named backref: `\k<name>`.
+  if (next === "k" && source[i + 2] === "<") {
+    const close = source.indexOf(">", i + 3);
+    if (close === -1) {
+      return 2;
+    }
+    return close - i + 1;
+  }
+  // Default: single-char escape (`\d`, `\w`, `\b`, `\t`, etc., or
+  // a single-digit numeric backref `\1`).
+  return 2;
+}
+
+/**
  * Advance past a character class `[...]` starting at `i`
  * (where `source[i] === "["`). Unlike parens/groups, `[` inside
  * `[...]` is NOT nestable — it's a literal `[` character. Only the
@@ -303,7 +380,7 @@ function skipCharacterClass(source: string, i: number): number {
   while (j < source.length) {
     const c = source[j];
     if (c === "\\") {
-      j += 2;
+      j += escapeSequenceLength(source, j);
       continue;
     }
     if (c === "]") {
@@ -335,7 +412,7 @@ function skipGroup(source: string, i: number): number {
   while (j < source.length && depth > 0) {
     const c = source[j];
     if (c === "\\") {
-      j += 2;
+      j += escapeSequenceLength(source, j);
       continue;
     }
     if (c === "[") {
