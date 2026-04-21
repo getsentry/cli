@@ -69,6 +69,11 @@ import type {
   WalkOptions,
 } from "./types.js";
 import { walkFiles } from "./walker.js";
+import {
+  decodeWorkerMatches,
+  getWorkerPool,
+  isWorkerSupported,
+} from "./worker-pool.js";
 
 /** Default line-truncation length for the init-wizard wire shape. */
 const DEFAULT_MAX_LINE_LENGTH = 2000;
@@ -393,14 +398,67 @@ type GrepPipelineOptions = {
 };
 
 /**
- * The internal pipeline. Separated from the public entry point so
- * `collectGrep` can share it.
- *
- * `async *` is intentional even though we `yield*` into the
- * `for await` — the whole pipeline is async and callers expect
- * an `AsyncGenerator`.
+ * Batch size for worker dispatch. Each batch is a chunk of N file
+ * paths the worker will read + grep in one go. Benched on
+ * synthetic/large (10k files): 100 = 420ms, 200 = 275ms (streamed),
+ * 400 = 290ms. The plateau is around 200 — too small and postMessage
+ * overhead dominates; too large and we lose per-worker parallelism
+ * because the walker finishes yielding before the first worker
+ * returns.
  */
+const WORKER_BATCH_SIZE = 200;
+
+/**
+ * The internal pipeline. Separated from the public entry points so
+ * `grepFiles` and `collectGrep` share it.
+ *
+ * Two execution strategies:
+ *
+ * 1. **Worker pool** (default when the runtime supports `new Worker`
+ *    + `Blob` + `URL.createObjectURL`): walker streams paths on the
+ *    main thread, paths are batched into chunks of
+ *    `WORKER_BATCH_SIZE`, each batch is dispatched round-robin to
+ *    a lazy-initialized pool of workers. Workers return matches
+ *    packed as `Uint32Array` + a shared string pool (transferable,
+ *    zero-copy). Main thread decodes and yields.
+ *
+ * 2. **Async fallback** (when workers aren't available — e.g. some
+ *    Node library embeddings): falls back to `mapFilesConcurrent`
+ *    on the main thread. Same result, ~4× slower on large workloads.
+ *
+ * Worker disablement for tests or debugging: set
+ * `SENTRY_SCAN_DISABLE_WORKERS=1`.
+ */
+// biome-ignore lint/suspicious/useAwait: async generator that dispatches to one of two sub-generators via `yield*`; no `await` needed in the dispatcher itself
 async function* grepFilesInternal(
+  opts: GrepPipelineOptions
+): AsyncGenerator<GrepMatch> {
+  if (shouldUseWorkers()) {
+    yield* grepViaWorkers(opts);
+    return;
+  }
+  yield* grepViaAsyncMain(opts);
+}
+
+/**
+ * Returns true when the worker path should be used. Gated on the
+ * runtime capability check (`isWorkerSupported`) and the
+ * `SENTRY_SCAN_DISABLE_WORKERS` env var (for tests + debugging).
+ */
+function shouldUseWorkers(): boolean {
+  if (process.env.SENTRY_SCAN_DISABLE_WORKERS === "1") {
+    return false;
+  }
+  return isWorkerSupported();
+}
+
+/**
+ * Fallback pipeline: `mapFilesConcurrentStream` on the main thread.
+ * Used when the worker pool is unavailable or explicitly disabled.
+ * Identical semantics to the worker path; ~4× slower on 10k-file
+ * many-match workloads.
+ */
+async function* grepViaAsyncMain(
   opts: GrepPipelineOptions
 ): AsyncGenerator<GrepMatch> {
   for await (const match of mapFilesConcurrentStream(
@@ -429,6 +487,219 @@ async function* grepFilesInternal(
       return;
     }
   }
+}
+
+/**
+ * Worker-based pipeline. Streams paths from the walker, batches
+ * them, dispatches to workers, decodes results, yields matches in
+ * worker-completion order (not walker order).
+ *
+ * ### Streaming + early-exit
+ *
+ * Walker runs on main thread. As paths arrive, we accumulate into a
+ * `batch: string[]`. When the batch reaches `WORKER_BATCH_SIZE` we
+ * dispatch it and start a new batch. Each dispatch returns a
+ * promise; we race the set of in-flight dispatches so the first
+ * batch to finish yields its matches first (workers may complete
+ * out of order).
+ *
+ * On `maxResults`/`stopOnFirst`, we stop dispatching new batches.
+ * In-flight batches keep running (no cancellation API on workers)
+ * but their results are discarded once we've exited.
+ *
+ * `filesRead` counts all paths dispatched to workers — we don't
+ * distinguish "read successfully" from "open failed" at the worker
+ * boundary (the worker swallows the error and produces zero matches
+ * for that path). For the main-thread fallback the stat is more
+ * precise.
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: producer/consumer pattern with early exit, batch dispatch, and abort-signal propagation is inherently branchy
+async function* grepViaWorkers(
+  opts: GrepPipelineOptions
+): AsyncGenerator<GrepMatch> {
+  const pool = getWorkerPool();
+
+  // Queue of completed batches ready to emit. Filled by dispatched
+  // worker promises as they resolve; drained by this generator.
+  const pending: GrepMatch[][] = [];
+  // Consumer wait state: `pendingNotify` is a one-shot resolver set
+  // by the consumer when it's about to wait; `notifyPending` tracks
+  // a notification that arrived while no one was waiting, so the
+  // consumer picks it up on next loop iteration.
+  let pendingNotify: (() => void) | null = null;
+  let notifyPending = false;
+  const wakeConsumer = () => {
+    if (pendingNotify) {
+      const fn = pendingNotify;
+      pendingNotify = null;
+      fn();
+    } else {
+      notifyPending = true;
+    }
+  };
+
+  let earlyExit = false;
+  let walkerDone = false;
+  let inflightCount = 0;
+
+  const dispatchBatch = (paths: string[], rels: string[]): void => {
+    opts.stats.filesRead += paths.length;
+    inflightCount += 1;
+    pool
+      .dispatch({
+        paths,
+        patternSource: opts.perFile.regex.source,
+        flags: resolveWorkerFlags(opts.perFile),
+        maxLineLength: opts.perFile.maxLineLength,
+        maxMatchesPerFile: Number.isFinite(opts.perFile.maxMatchesPerFile)
+          ? opts.perFile.maxMatchesPerFile
+          : 0xff_ff_ff_ff,
+        literal: opts.perFile.literal,
+      })
+      .then(
+        (result) => {
+          pending.push(decodeWorkerMatches(result, paths, rels));
+        },
+        () => {
+          // Worker error — skip this batch. Per-file errors are
+          // already swallowed inside the worker itself.
+        }
+      )
+      .finally(() => {
+        inflightCount -= 1;
+        wakeConsumer();
+      });
+  };
+
+  // Producer: walk paths, batch them, dispatch each full batch.
+  // Errors thrown by the walker (e.g. `AbortError` when the caller
+  // signals abort) propagate to the consumer via `producerError`.
+  let producerError: unknown = null;
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: walker drain + path-prefix handling + batch flush + error capture is inherently branchy
+  const producer = (async () => {
+    let batch: string[] = [];
+    let batchRel: string[] = [];
+    try {
+      for await (const entry of opts.walkSource) {
+        if (earlyExit) {
+          break;
+        }
+        batch.push(entry.absolutePath);
+        batchRel.push(
+          opts.perFile.pathPrefix
+            ? joinPosix(opts.perFile.pathPrefix, entry.relativePath)
+            : entry.relativePath
+        );
+        if (batch.length >= WORKER_BATCH_SIZE) {
+          dispatchBatch(batch, batchRel);
+          batch = [];
+          batchRel = [];
+        }
+      }
+      // Final partial batch.
+      if (batch.length > 0) {
+        dispatchBatch(batch, batchRel);
+      }
+    } catch (error) {
+      producerError = error;
+    } finally {
+      walkerDone = true;
+      wakeConsumer();
+    }
+  })();
+
+  // Helper to check + throw on aborted signal. Matches the behavior
+  // of `walkFiles` which throws `DOMException("AbortError")` on the
+  // next yield when the signal fires mid-iteration.
+  const checkAborted = (): void => {
+    const signal = opts.concurrent.signal;
+    if (signal?.aborted) {
+      throw new DOMException("aborted", "AbortError");
+    }
+  };
+
+  // Consumer: drain `pending` as batches complete, yielding matches
+  // and respecting `maxResults`/`stopOnFirst`. Wait for `notify`
+  // when there's nothing to emit and more work is in flight.
+  try {
+    while (!earlyExit) {
+      checkAborted();
+      // Emit everything currently pending.
+      while (pending.length > 0) {
+        checkAborted();
+        const matches = pending.shift();
+        if (!matches) {
+          continue;
+        }
+        for (const m of matches) {
+          if (opts.stats.matchesEmitted >= opts.maxResults) {
+            opts.stats.truncated = true;
+            earlyExit = true;
+            break;
+          }
+          opts.stats.matchesEmitted += 1;
+          yield m;
+          checkAborted();
+          if (opts.stopOnFirst) {
+            opts.stats.truncated = true;
+            earlyExit = true;
+            break;
+          }
+        }
+        if (earlyExit) {
+          break;
+        }
+      }
+      if (earlyExit) {
+        break;
+      }
+      // Nothing pending. If the walker is done AND no in-flight
+      // batches remain, we're finished.
+      if (walkerDone && inflightCount === 0) {
+        break;
+      }
+      // Otherwise, wait for something to happen. Check for a
+      // pre-arrived notification first to avoid missing wakeups
+      // that happened while we were iterating `pending`.
+      if (notifyPending) {
+        notifyPending = false;
+        continue;
+      }
+      await new Promise<void>((resolve) => {
+        if (notifyPending) {
+          notifyPending = false;
+          resolve();
+        } else {
+          pendingNotify = resolve;
+        }
+      });
+    }
+  } finally {
+    // Ensure the producer settles even on early exit so errors
+    // surface in the next run (pool promises stay alive otherwise).
+    earlyExit = true;
+    wakeConsumer();
+    await producer;
+    // If the walker threw (typically `AbortError`), re-throw so the
+    // caller sees the same behavior as the async-fallback path.
+    if (producerError !== null) {
+      // biome-ignore lint/correctness/noUnsafeFinally: intentional — re-raising walker error (e.g., AbortError) so callers see it
+      throw producerError;
+    }
+  }
+}
+
+/**
+ * Resolve the regex flags to send to the worker. Matches the logic
+ * in `grepByWholeBuffer` — always `/g` (required for iteration),
+ * plus `/m` when the caller opted into line-boundary semantics (the
+ * default).
+ */
+function resolveWorkerFlags(opts: PerFileOptions): string {
+  const ensured = opts.multiline
+    ? ensureGlobalMultilineFlags(opts.regex)
+    : ensureGlobalFlag(opts.regex);
+  return ensured.flags;
 }
 
 /**
