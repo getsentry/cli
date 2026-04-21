@@ -71,6 +71,7 @@ function makeContext(
 let mockStartResult: WorkflowRunResult;
 let mockResumeResults: WorkflowRunResult[];
 let resumeCallCount = 0;
+let startAsyncMock: ReturnType<typeof mock>;
 
 let introSpy: ReturnType<typeof spyOn>;
 let confirmSpy: ReturnType<typeof spyOn>;
@@ -151,8 +152,9 @@ beforeEach(() => {
     () => true as any
   );
 
+  startAsyncMock = mock(() => Promise.resolve(mockStartResult));
   const run = {
-    startAsync: mock(() => Promise.resolve(mockStartResult)),
+    startAsync: startAsyncMock,
     resumeAsync: mock(() => {
       const result = mockResumeResults[resumeCallCount] ?? {
         status: "success",
@@ -386,6 +388,43 @@ describe("runWizard", () => {
     expect(messages).toContain(
       "Analyzing files...\n├─ ✓ settings.py\n└─ ✓ urls.py"
     );
+  });
+
+  test("passes precomputed dirListing/fileCache/existingSentry via initialState, not inputData", async () => {
+    const dirListing = [
+      { name: "package.json", path: "package.json", type: "file" as const },
+    ];
+    const fileCache = { "package.json": '{"name":"app"}' };
+    const detectedSentry = { status: "none" as const, signals: [] };
+
+    precomputeDirListingSpy.mockResolvedValue(dirListing);
+    preReadCommonFilesSpy.mockResolvedValue(fileCache);
+    precomputeSentryDetectionSpy.mockResolvedValue({
+      ok: true,
+      data: detectedSentry,
+    });
+
+    await runWizard(makeOptions());
+
+    expect(startAsyncMock).toHaveBeenCalledTimes(1);
+    const call = startAsyncMock.mock.calls[0] as
+      | [
+          {
+            inputData?: Record<string, unknown>;
+            initialState?: Record<string, unknown>;
+          },
+        ]
+      | undefined;
+    expect(call).toBeDefined();
+    const args = call?.[0] ?? {};
+
+    // Large shared context lives on state, not on inputData.
+    expect(args.inputData).not.toHaveProperty("dirListing");
+    expect(args.inputData).not.toHaveProperty("fileCache");
+    expect(args.inputData).not.toHaveProperty("existingSentry");
+    expect(args.initialState?.dirListing).toEqual(dirListing);
+    expect(args.initialState?.fileCache).toEqual(fileCache);
+    expect(args.initialState?.existingSentry).toEqual(detectedSentry);
   });
 
   test("renders tool result messages via the spinner stop state", async () => {
