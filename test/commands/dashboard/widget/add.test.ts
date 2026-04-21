@@ -513,6 +513,82 @@ describe("dashboard widget add", () => {
     expect(addedWidget.queries[0].orderby).toBe("-count()");
   });
 
+  test("auto-defaults --limit to 5 when --group-by is used without --limit", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "line",
+        query: ["count"],
+        "group-by": ["browser.name"],
+      },
+      "123",
+      "Top Browsers"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.limit).toBe(5);
+    expect(addedWidget.queries[0].columns).toEqual(["browser.name"]);
+    expect(addedWidget.queries[0].orderby).toBe("-count()");
+  });
+
+  test("explicit --limit wins over auto-default for grouped widgets", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "bar",
+        query: ["count"],
+        "group-by": ["browser.name"],
+        limit: 10,
+      },
+      "123",
+      "Top Browsers"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.limit).toBe(10);
+  });
+
+  test("ungrouped widget does not get an auto-default limit", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      { json: false, display: "big_number", query: ["count"] },
+      "123",
+      "Total Count"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.limit).toBeUndefined();
+  });
+
+  test("issue-dataset table default columns do NOT trigger auto-default limit", async () => {
+    // Regression guard: the issue/table combo auto-defaults columns to
+    // ["issue"] but should not auto-default a limit — existing widgets of
+    // this shape may legitimately have no limit.
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      { json: false, display: "table", dataset: "issue" },
+      "123",
+      "Top Issues"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.limit).toBeUndefined();
+  });
+
   // -- Layout mode flag tests -----------------------------------------------
 
   test("--layout dense passes dense mode to auto-placer", async () => {

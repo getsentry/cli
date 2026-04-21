@@ -7,6 +7,9 @@
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
+  applyGroupLimitAutoDefault,
+  autoDefaultGroupLimit,
+  DEFAULT_GROUP_BY_LIMIT,
   enrichDashboardError,
   normalizeDataset,
   parseDashboardListArgs,
@@ -621,5 +624,59 @@ describe("validateWidgetEnums (with normalizeDataset)", () => {
     expect(() => validateWidgetEnums("pie-chart", undefined)).toThrow(
       ValidationError
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// autoDefaultGroupLimit / applyGroupLimitAutoDefault
+// ---------------------------------------------------------------------------
+
+describe("autoDefaultGroupLimit", () => {
+  test("returns the provided limit when set", () => {
+    expect(autoDefaultGroupLimit(["browser.name"], 10)).toBe(10);
+  });
+
+  test("returns DEFAULT_GROUP_BY_LIMIT for grouped widgets with no limit", () => {
+    expect(autoDefaultGroupLimit(["browser.name"], undefined)).toBe(
+      DEFAULT_GROUP_BY_LIMIT
+    );
+    expect(autoDefaultGroupLimit(["browser.name"], null)).toBe(
+      DEFAULT_GROUP_BY_LIMIT
+    );
+  });
+
+  test("returns undefined for ungrouped widgets with no limit", () => {
+    expect(autoDefaultGroupLimit([], undefined)).toBeUndefined();
+    expect(autoDefaultGroupLimit([], null)).toBeUndefined();
+  });
+
+  test("preserves explicit limit even for ungrouped widgets", () => {
+    expect(autoDefaultGroupLimit([], 3)).toBe(3);
+  });
+});
+
+describe("applyGroupLimitAutoDefault", () => {
+  test("skips auto-default when --group-by not passed", () => {
+    // Auto-defaulted columns (e.g., ["issue"] for issue/table) should NOT
+    // trigger the auto-default limit — caller signals intent via userGroupBy.
+    expect(
+      applyGroupLimitAutoDefault(undefined, ["issue"], undefined)
+    ).toBeUndefined();
+  });
+
+  test("applies default when --group-by passed without limit", () => {
+    expect(
+      applyGroupLimitAutoDefault(["browser.name"], ["browser.name"], undefined)
+    ).toBe(DEFAULT_GROUP_BY_LIMIT);
+  });
+
+  test("preserves explicit limit", () => {
+    expect(
+      applyGroupLimitAutoDefault(["browser.name"], ["browser.name"], 25)
+    ).toBe(25);
+  });
+
+  test("empty --group-by is treated as not passed", () => {
+    expect(applyGroupLimitAutoDefault([], [], undefined)).toBeUndefined();
   });
 });

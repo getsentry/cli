@@ -465,4 +465,92 @@ describe("dashboard widget edit", () => {
     const body = updateDashboardSpy.mock.calls[0]?.[2];
     expect(body.widgets[0].widgetType).toBe("transaction-like");
   });
+
+  test("auto-defaults --limit to 5 when adding --group-by without --limit", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+
+    // Widget 0 (Error Count) has no existing limit or group-by.
+    await func.call(
+      context,
+      {
+        json: false,
+        index: 0,
+        display: "line",
+        "group-by": ["browser.name"],
+      },
+      "123"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    expect(body.widgets[0].limit).toBe(5);
+    expect(body.widgets[0].queries[0].columns).toEqual(["browser.name"]);
+  });
+
+  test("explicit --limit wins over auto-default when adding --group-by", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+
+    // line widgets have no row cap; bar/table cap at 10, which would mask the
+    // explicit-limit signal we want to assert.
+    await func.call(
+      context,
+      {
+        json: false,
+        index: 0,
+        display: "line",
+        "group-by": ["browser.name"],
+        limit: 25,
+      },
+      "123"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    expect(body.widgets[0].limit).toBe(25);
+  });
+
+  test("preserves existing limit when adding --group-by to a widget that has one", async () => {
+    // Seed an existing widget that already has a limit below any display
+    // cap so clamping doesn't hide the preservation signal.
+    getDashboardSpy.mockResolvedValueOnce({
+      ...sampleDashboard,
+      widgets: [
+        {
+          ...sampleDashboard.widgets[0],
+          limit: 8,
+        },
+        ...sampleDashboard.widgets.slice(1),
+      ],
+    });
+
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        index: 0,
+        display: "line",
+        "group-by": ["browser.name"],
+      },
+      "123"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    expect(body.widgets[0].limit).toBe(8);
+  });
+
+  test("does not auto-default limit when only changing --query on an ungrouped widget", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+
+    await func.call(
+      context,
+      { json: false, index: 0, query: ["p95:span.duration"] },
+      "123"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    expect(body.widgets[0].limit).toBeUndefined();
+  });
 });

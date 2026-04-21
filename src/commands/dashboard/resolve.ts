@@ -339,26 +339,73 @@ export function validateSortReferencesAggregate(
 }
 
 /**
- * Validate that grouped widgets (those with columns/group-by) include a limit.
- * The Sentry API rejects grouped widgets without a limit.
+ * Default limit for grouped widgets.
  *
- * @param columns - Group-by columns
- * @param limit - Widget limit (undefined if not set)
+ * Matches the Sentry UI default for grouped widgets. The Sentry API rejects
+ * grouped widgets without a limit, so the CLI transparently applies this
+ * value when the user passes --group-by without --limit instead of erroring.
  */
-export function validateGroupByRequiresLimit(
+export const DEFAULT_GROUP_BY_LIMIT = 5;
+
+/**
+ * Compute the limit to use for a grouped widget.
+ *
+ * Returns the provided limit when set. When the widget has group-by columns
+ * and no limit, returns `DEFAULT_GROUP_BY_LIMIT` so the API accepts the
+ * widget. Otherwise returns `undefined` (ungrouped widgets don't need a limit).
+ *
+ * Callers should `log.info` when the auto-default is applied so users
+ * understand why their request accepted without an explicit limit.
+ *
+ * @param columns - Group-by columns (empty for ungrouped widgets)
+ * @param limit - User-provided or existing limit (undefined/null if unset)
+ * @returns Effective limit, or `undefined` when no limit is needed
+ */
+export function autoDefaultGroupLimit(
   columns: string[],
-  limit: number | undefined
-): void {
-  if (columns.length > 0 && limit === undefined) {
-    throw new ValidationError(
-      "Widgets with --group-by require --limit. " +
-        "Add --limit <n> to specify the maximum number of groups to display.",
-      "limit"
-    );
+  limit: number | null | undefined
+): number | undefined {
+  if (limit !== undefined && limit !== null) {
+    return limit;
   }
+  if (columns.length > 0) {
+    return DEFAULT_GROUP_BY_LIMIT;
+  }
+  return;
 }
 
 const log = logger.withTag("dashboard");
+
+/**
+ * Apply the group-by limit auto-default for a user-initiated --group-by.
+ *
+ * Only fires when the user explicitly passed --group-by (not for auto-defaulted
+ * columns like the `["issue"]` default for issue-dataset tables — those widgets
+ * work without a limit). Emits `log.info` when the auto-default takes effect so
+ * users see why their command accepted without an explicit --limit.
+ *
+ * @param userGroupBy - The raw --group-by flag (undefined when not passed)
+ * @param columns - Effective columns after any defaulting
+ * @param limit - User-provided or existing limit (undefined/null if unset)
+ * @returns Effective limit to use in the widget payload
+ */
+export function applyGroupLimitAutoDefault(
+  userGroupBy: string[] | undefined,
+  columns: string[],
+  limit: number | null | undefined
+): number | null | undefined {
+  if (!userGroupBy || userGroupBy.length === 0) {
+    return limit;
+  }
+  const effective = autoDefaultGroupLimit(columns, limit);
+  if (effective !== limit && effective !== undefined) {
+    log.info(
+      `Auto-defaulting --limit to ${DEFAULT_GROUP_BY_LIMIT} for grouped widget. Pass --limit <n> to override.`
+    );
+    return effective;
+  }
+  return limit;
+}
 
 /**
  * Known aggregatable fields for the spans dataset.
@@ -473,11 +520,8 @@ export function buildWidgetFromFlags(opts: {
     orderby = `-${aggregates[0]}`;
   }
 
-  // Only validate when user explicitly passes --group-by, not for auto-defaulted columns
-  // (e.g., issue dataset auto-defaults columns to ["issue"] for table display)
-  if (opts.groupBy) {
-    validateGroupByRequiresLimit(columns, opts.limit);
-  }
+  const limit = applyGroupLimitAutoDefault(opts.groupBy, columns, opts.limit);
+
   if (orderby) {
     validateSortReferencesAggregate(orderby, aggregates);
   }
@@ -495,7 +539,7 @@ export function buildWidgetFromFlags(opts: {
         name: "",
       },
     ],
-    ...(opts.limit !== undefined && { limit: opts.limit }),
+    ...(limit !== undefined && { limit }),
   };
   return prepareWidgetQueries(parseWidgetInput(raw));
 }
