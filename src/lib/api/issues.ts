@@ -712,8 +712,10 @@ async function invalidateIssueDetailCaches(
       invalidateCachedResponsesMatching(
         buildApiUrl(regionUrl, "organizations", orgSlug, "issues", issueId)
       ),
+      // Legacy `/api/0/issues/{id}/` is stored under the non-region base
+      // (see `apiRequest` → `getApiBaseUrl`), NOT the org's region URL.
       invalidateCachedResponsesMatching(
-        buildApiUrl(regionUrl, "issues", issueId)
+        buildApiUrl(getApiBaseUrl(), "issues", issueId)
       ),
     ]);
   } catch {
@@ -725,6 +727,13 @@ async function invalidateIssueDetailCaches(
  * Flush detail + list caches for one issue. Use for single-issue
  * mutations (resolve, unresolve); batch mutations should use the
  * detail-only helper plus one final {@link invalidateOrgIssueList}.
+ *
+ * Minor redundancy: the org-scoped half of
+ * {@link invalidateIssueDetailCaches} is already a prefix of the
+ * {@link invalidateOrgIssueList} sweep. Accepted because the helpers
+ * are each also used solo elsewhere, and the extra directory walk is
+ * negligible.
+ *
  * Never throws.
  */
 async function invalidateIssueCaches(

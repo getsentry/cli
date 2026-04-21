@@ -177,10 +177,7 @@ export async function getOrgSdkConfig(orgSlug: string) {
  *   buildApiUrl(regionUrl, "organizations", orgSlug, "projects")
  *   // → `${regionUrl.replace(/\/$/,"")}/api/0/organizations/<org>/projects/`
  */
-export function buildApiUrl(
-  regionUrl: string,
-  ...segments: string[]
-): string {
+export function buildApiUrl(regionUrl: string, ...segments: string[]): string {
   const base = regionUrl.endsWith("/") ? regionUrl.slice(0, -1) : regionUrl;
   if (segments.length === 0) {
     return `${base}/api/0/`;
