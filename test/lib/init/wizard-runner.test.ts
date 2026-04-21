@@ -388,6 +388,26 @@ describe("runWizard", () => {
     );
   });
 
+  test("constructs MastraClient with retries: 0 so non-idempotent resumes are not retried", async () => {
+    let capturedRetries: unknown;
+    getWorkflowSpy.mockImplementation(function mockGetWorkflow(this: {
+      options?: { retries?: unknown };
+    }) {
+      capturedRetries = this.options?.retries;
+      return {
+        createRun: () =>
+          Promise.resolve({
+            startAsync: mock(() => Promise.resolve({ status: "success" })),
+            resumeAsync: mock(() => Promise.resolve({ status: "success" })),
+          }),
+      } as any;
+    });
+
+    await runWizard(makeOptions());
+
+    expect(capturedRetries).toBe(0);
+  });
+
   test("renders tool result messages via the spinner stop state", async () => {
     mockStartResult = {
       status: "suspended",

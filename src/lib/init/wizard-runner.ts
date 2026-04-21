@@ -402,8 +402,13 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
 
   const token = context.authToken;
 
+  // Disable MastraClient's built-in retries. Every wizard call (createRun,
+  // startAsync, resumeAsync) is stateful and non-idempotent; retrying a 5xx
+  // cannot succeed — it only hides the real server error by turning it into
+  // a cascade of "This workflow run was not suspended" responses.
   const client = new MastraClient({
     baseUrl: MASTRA_API_URL,
+    retries: 0,
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     fetch: ((url, init) => {
       const traceData = getTraceData();
