@@ -610,10 +610,61 @@ export function enrichDashboardError(
 }
 
 /**
+ * User-facing dataset synonyms resolved to the canonical Sentry widget type.
+ *
+ * The Sentry API/UI and docs surface names like `errors` and `transactions`
+ * but widget types use `error-events` and `transaction-like`. The CLI accepts
+ * both forms so users copying from docs or using API-dataset terminology
+ * don't have to translate.
+ *
+ * Keys are lowercase; matching is case-insensitive via {@link normalizeDataset}.
+ */
+const DATASET_ALIASES: Record<string, string> = {
+  error: "error-events",
+  errors: "error-events",
+  transaction: "transaction-like",
+  transactions: "transaction-like",
+  log: "logs",
+  // `metrics` and `metricsEnhanced` both alias to the canonical `tracemetrics`.
+  // `metricsEnhanced` is the value surfaced by the events API dataset param
+  // (see WIDGET_TYPE_TO_DATASET in types/dashboard.ts) and may appear in docs.
+  metrics: "tracemetrics",
+  metricsenhanced: "tracemetrics",
+};
+
+/**
+ * Normalize a user-provided `--dataset` value to the canonical widget type.
+ *
+ * - Case-insensitive (e.g. `Errors`, `ERRORS` → `error-events`).
+ * - Maps known synonyms via {@link DATASET_ALIASES}.
+ * - Returns the lower-cased input unchanged if no alias matches (the enum
+ *   check in {@link validateWidgetEnums} will reject unknown values).
+ * - Returns `undefined` for `undefined` input.
+ *
+ * Must be called once, up-front, and the result threaded through every
+ * downstream consumer (aggregate validator, warnings, PUT body). Leaving
+ * an un-normalized value in `flags.dataset` causes dataset-specific
+ * aggregate validation (e.g. `failure_rate` for `error-events`) to see
+ * the alias instead of the canonical name and reject valid inputs.
+ */
+export function normalizeDataset(dataset?: string): string | undefined {
+  if (dataset === undefined) {
+    return;
+  }
+  const lower = dataset.toLowerCase();
+  return DATASET_ALIASES[lower] ?? lower;
+}
+
+/**
  * Validate --display and --dataset flag values against known enums.
  *
+ * Callers MUST pass a dataset value already normalized via
+ * {@link normalizeDataset} so aliases and casing don't leak into the
+ * enum check. This function does not mutate or resolve aliases itself —
+ * it is a pure validator.
+ *
  * @param display - Display type flag value
- * @param dataset - Dataset flag value
+ * @param dataset - Dataset flag value (already normalized)
  */
 export function validateWidgetEnums(display?: string, dataset?: string): void {
   if (

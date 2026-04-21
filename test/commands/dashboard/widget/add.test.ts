@@ -244,6 +244,134 @@ describe("dashboard widget add", () => {
     expect(addedWidget.queries[0].orderby).toBe("-count()");
   });
 
+  test("resolves dataset alias 'errors' to 'error-events' in PUT body", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "big_number",
+        dataset: "errors",
+        query: ["count"],
+      },
+      "123",
+      "Error Count"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.widgetType).toBe("error-events");
+  });
+
+  test("resolves dataset alias 'transactions' to 'transaction-like'", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "line",
+        dataset: "transactions",
+        query: ["count"],
+      },
+      "123",
+      "Transactions Over Time"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.widgetType).toBe("transaction-like");
+  });
+
+  test("resolves dataset alias 'metricsEnhanced' to 'tracemetrics'", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "line",
+        dataset: "metricsEnhanced",
+        query: ["p50(value,completion.duration_ms,distribution,none)"],
+      },
+      "123",
+      "Latency"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.widgetType).toBe("tracemetrics");
+  });
+
+  test("dataset alias is resolved BEFORE dataset-aware aggregate validation", async () => {
+    // failure_rate is only valid for error-events/discover. With the alias
+    // "errors", dataset-aware validation must see "error-events" (canonical)
+    // before deciding whether to accept the aggregate.
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "big_number",
+        dataset: "errors",
+        query: ["failure_rate"],
+      },
+      "123",
+      "Failure Rate"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.widgetType).toBe("error-events");
+    expect(addedWidget.queries[0].aggregates).toEqual(["failure_rate()"]);
+  });
+
+  test("case-insensitive dataset values are accepted", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "big_number",
+        dataset: "ERRORS",
+        query: ["count"],
+      },
+      "123",
+      "Errors"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.widgetType).toBe("error-events");
+  });
+
+  test("rejects unknown --dataset with canonical list", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+
+    const err = await func
+      .call(
+        context,
+        {
+          json: false,
+          display: "big_number",
+          dataset: "bogus-dataset",
+          query: ["count"],
+        },
+        "123",
+        "Bad"
+      )
+      .catch((e: Error) => e);
+
+    expect(err).toBeInstanceOf(ValidationError);
+    // Error message surfaces the normalized (lowercased) value.
+    expect(err.message).toContain("bogus-dataset");
+    expect(err.message).toContain("Valid datasets:");
+  });
+
   test("issue dataset respects explicit --group-by over default", async () => {
     const { context } = createMockContext();
     const func = await addCommand.loader();

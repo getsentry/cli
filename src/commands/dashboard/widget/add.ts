@@ -25,6 +25,7 @@ import {
 import {
   buildWidgetFromFlags,
   enrichDashboardError,
+  normalizeDataset,
   parseDashboardPositionalArgs,
   resolveDashboardId,
   resolveOrgFromTarget,
@@ -121,7 +122,8 @@ export const addCommand = buildCommand({
       dataset: {
         kind: "parsed",
         parse: String,
-        brief: "Widget dataset (default: spans)",
+        brief:
+          "Widget dataset (default: spans). Accepts canonical names and API synonyms: spans, error-events/errors, transaction-like/transactions, tracemetrics/metrics, logs, issue, discover",
         optional: true,
       },
       query: {
@@ -204,8 +206,14 @@ export const addCommand = buildCommand({
 
     const { dashboardArgs, title } = parseAddPositionalArgs(args);
 
+    // Resolve dataset aliases (e.g. "errors" → "error-events") once, up front.
+    // Every downstream consumer — enum validation, dataset-aware aggregate
+    // validation, the PUT body — must see the canonical name, so we thread
+    // the normalized value and never reference flags.dataset below.
+    const dataset = normalizeDataset(flags.dataset);
+
     // Validate enums before any network calls (fail fast)
-    validateWidgetEnums(flags.display, flags.dataset);
+    validateWidgetEnums(flags.display, dataset);
 
     const { dashboardRef, targetArg } =
       parseDashboardPositionalArgs(dashboardArgs);
@@ -220,7 +228,7 @@ export const addCommand = buildCommand({
     let newWidget = buildWidgetFromFlags({
       title,
       display: flags.display,
-      dataset: flags.dataset,
+      dataset,
       query: flags.query,
       where: flags.where,
       groupBy: flags["group-by"],
