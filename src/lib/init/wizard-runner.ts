@@ -437,6 +437,13 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     const fileCache = await preReadCommonFiles(directory, dirListing);
     spin.message("Connecting to wizard...");
     run = await workflow.createRun();
+    // Large shared context (dirListing, fileCache, existingSentry)
+    // travels via Mastra's workflow `initialState` instead of `inputData`.
+    // Keeping it on state means the server stores it exactly once per run
+    // rather than duplicating it across every step's output in the D1
+    // snapshot — which used to overflow the per-row size limit on big
+    // projects and surface as a cascading "workflow run was not suspended"
+    // error. See getsentry/cli-init-api#98.
     result = assertWorkflowResult(
       await withTimeout(
         run.startAsync({
@@ -445,6 +452,8 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
             yes,
             dryRun,
             features,
+          },
+          initialState: {
             dirListing,
             fileCache,
             existingSentry: existingSentry?.data,
