@@ -19,6 +19,7 @@ import {
   listIssuesPaginated,
   listProjects,
 } from "../../lib/api-client.js";
+import { extractRequiredScopes } from "../../lib/api-scope.js";
 import {
   looksLikeIssueShortId,
   parseOrgProjectArg,
@@ -1112,27 +1113,52 @@ function enrichIssueListError(
 }
 
 /**
+ * Default scopes mentioned when the API response doesn't tell us which
+ * scope is missing. These are the minimum the issue-list endpoint needs
+ * — surfaced verbatim from the previous hardcoded message so the
+ * fallback behavior matches the pre-fix UX.
+ */
+const DEFAULT_ISSUE_LIST_SCOPES = "org:read, project:read";
+
+/**
  * Build an enriched error detail for 403 Forbidden responses.
  *
  * Only mentions token scopes when using a custom env-var token
  * (SENTRY_AUTH_TOKEN / SENTRY_TOKEN) since the regular `sentry auth login`
  * OAuth flow always grants the required scopes.
  *
+ * When the API's detail payload names the required scope(s) explicitly
+ * (see {@link extractRequiredScopes}) we surface that list instead of
+ * the hardcoded default — this is the fix for getsentry/cli#785 item #9
+ * where a token missing `event:read` was told it might be missing
+ * `org:read, project:read` (which it actually had).
+ *
  * @param originalDetail - The API response detail (may be undefined)
  * @returns Enhanced detail string with suggestions
  */
-function build403Detail(originalDetail: string | undefined): string {
+function build403Detail(originalDetail: unknown): string {
   const lines: string[] = [];
 
-  if (originalDetail) {
+  if (typeof originalDetail === "string" && originalDetail) {
     lines.push(originalDetail, "");
   }
 
   lines.push("Suggestions:");
 
   if (isEnvTokenActive()) {
+    const scopes = extractRequiredScopes(originalDetail);
+    const scopeList =
+      scopes.length > 0 ? scopes.join(", ") : DEFAULT_ISSUE_LIST_SCOPES;
+    // When the API was explicit about what's missing, frame the hint
+    // as a definite statement ("is missing") rather than a hedged
+    // "may lack" — this is the user-visible payoff of parsing the
+    // response.
+    const leader =
+      scopes.length > 0
+        ? `Your ${getActiveEnvVarName()} token is missing the required scope(s)`
+        : `Your ${getActiveEnvVarName()} token may lack the required scopes`;
     lines.push(
-      `  • Your ${getActiveEnvVarName()} token may lack the required scopes (org:read, project:read)`,
+      `  • ${leader} (${scopeList})`,
       "  • Check token scopes at: https://sentry.io/settings/auth-tokens/"
     );
   } else {

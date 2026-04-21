@@ -252,21 +252,68 @@ describe("viewCommand.func", () => {
     }
   });
 
-  test("non-auth API error is skipped silently", async () => {
-    getProjectSpy.mockRejectedValue(new Error("404 Not Found"));
+  test("non-auth API error on explicit target is rethrown verbatim", async () => {
+    // Previously the error was swallowed and a generic
+    // "Could not auto-detect organization and project" ContextError
+    // was raised — confusing because the user provided the target
+    // explicitly (getsentry/cli#785 item #8). The actual API error
+    // must bubble up so the user sees the real cause (404/403/etc.).
+    const apiErr = new Error("404 Not Found");
+    getProjectSpy.mockRejectedValue(apiErr);
     getProjectKeysSpy.mockResolvedValue(sampleKeys);
 
     const { context } = createMockContext();
     const func = await viewCommand.loader();
 
-    // The project fetch fails with a non-auth error, so it's filtered out.
-    // With no successful results, buildContextError is thrown.
     await expect(
       func.call(context, { json: false, web: false }, "my-org/bad-project")
-    ).rejects.toThrow(ContextError);
+    ).rejects.toThrow("404 Not Found");
 
-    // getProject was called (it just failed)
     expect(getProjectSpy).toHaveBeenCalledWith("my-org", "bad-project");
+  });
+
+  test("non-auth API error on project-search target is rethrown verbatim", async () => {
+    resolveProjectBySlugSpy.mockResolvedValue({
+      org: "acme",
+      project: "frontend",
+    });
+    const apiErr = new Error("403 Forbidden");
+    getProjectSpy.mockRejectedValue(apiErr);
+    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+
+    await expect(
+      func.call(context, { json: false, web: false }, "frontend")
+    ).rejects.toThrow("403 Forbidden");
+  });
+
+  test("non-auth API error on auto-detect target is swallowed (multi-target recovery)", async () => {
+    // For auto-detect — which may surface multiple DSN-discovered
+    // targets — per-target failures are still tolerated: one
+    // inaccessible DSN must not block the rest of the results. When
+    // all targets fail and the set ends up empty, the original
+    // ContextError is still the right surface.
+    resolveAllTargetsSpy.mockResolvedValue({
+      targets: [
+        {
+          org: "my-org",
+          project: "inaccessible",
+          orgDisplay: "my-org",
+          projectDisplay: "inaccessible",
+        },
+      ],
+    });
+    getProjectSpy.mockRejectedValue(new Error("403 Forbidden"));
+    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+
+    await expect(
+      func.call(context, { json: false, web: false })
+    ).rejects.toThrow(ContextError);
   });
 
   test("auth error from API is rethrown", async () => {
