@@ -28,6 +28,7 @@ import {
 } from "../../../types/dashboard.js";
 import {
   enrichDashboardError,
+  normalizeDataset,
   parseDashboardPositionalArgs,
   resolveDashboardId,
   resolveOrgFromTarget,
@@ -247,7 +248,8 @@ export const editCommand = buildCommand({
       dataset: {
         kind: "parsed",
         parse: String,
-        brief: "Widget dataset (default: spans)",
+        brief:
+          "Widget dataset (default: spans). Accepts canonical names and API synonyms: spans, error-events/errors, transaction-like/transactions, tracemetrics/metrics, logs, issue, discover",
         optional: true,
       },
       query: {
@@ -332,7 +334,19 @@ export const editCommand = buildCommand({
       );
     }
 
-    validateWidgetEnums(flags.display, flags.dataset);
+    // Resolve dataset aliases (e.g. "errors" → "error-events") once, up front.
+    // Replace flags.dataset with the canonical value so every downstream
+    // consumer — validateEnumsAndAggregates, validateAggregateNames, and the
+    // PUT body — sees the normalized name. Without this, dataset-aware
+    // aggregate validation (e.g. failure_rate for error-events) would fail
+    // when the user passes --dataset errors.
+    const normalizedDataset = normalizeDataset(flags.dataset);
+    const normalizedFlags: EditFlags =
+      normalizedDataset === flags.dataset
+        ? flags
+        : { ...flags, dataset: normalizedDataset };
+
+    validateWidgetEnums(normalizedFlags.display, normalizedFlags.dataset);
 
     const { dashboardRef, targetArg } = parseDashboardPositionalArgs(args);
     const parsed = parseOrgProjectArg(targetArg);
@@ -349,15 +363,19 @@ export const editCommand = buildCommand({
         enrichDashboardError(error, { orgSlug, dashboardId, operation: "view" })
     );
     const widgets = current.widgets ?? [];
-    const widgetIndex = resolveWidgetIndex(widgets, flags.index, flags.title);
+    const widgetIndex = resolveWidgetIndex(
+      widgets,
+      normalizedFlags.index,
+      normalizedFlags.title
+    );
 
     const updateBody = prepareDashboardForUpdate(current);
     const existing = updateBody.widgets[widgetIndex] as DashboardWidget;
 
     // Validate individual layout flag ranges early (catches --col -1, --width 7, etc.)
-    validateWidgetLayout(flags, existing.layout);
+    validateWidgetLayout(normalizedFlags, existing.layout);
 
-    const replacement = buildReplacement(flags, existing);
+    const replacement = buildReplacement(normalizedFlags, existing);
 
     // Re-validate the final merged layout when the existing widget had no layout
     // and FALLBACK_LAYOUT was used — the early check couldn't cross-validate

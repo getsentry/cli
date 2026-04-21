@@ -415,4 +415,54 @@ describe("dashboard widget edit", () => {
     expect(body.widgets[0].widgetType).toBe("discover");
     expect(body.widgets[0].queries[0].aggregates).toEqual(["failure_rate()"]);
   });
+
+  test("resolves --dataset alias 'errors' to 'error-events' in PUT body", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    await func.call(
+      context,
+      { json: false, index: 0, dataset: "errors" },
+      "123"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    expect(body.widgets[0].widgetType).toBe("error-events");
+  });
+
+  test("dataset alias is resolved BEFORE dataset-aware aggregate validation", async () => {
+    // Regression test for the "aliases resolve too late" bug: failure_rate
+    // is valid for error-events, so passing --dataset errors --query
+    // failure_rate must succeed. If the alias is not applied before
+    // validateAggregateNames runs, "errors" falls through the canonical
+    // branch and "Unknown aggregate function" is thrown.
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        index: 0,
+        dataset: "errors",
+        query: ["failure_rate"],
+      },
+      "123"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    expect(body.widgets[0].widgetType).toBe("error-events");
+    expect(body.widgets[0].queries[0].aggregates).toEqual(["failure_rate()"]);
+  });
+
+  test("case-insensitive --dataset values are accepted", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    await func.call(
+      context,
+      { json: false, index: 0, dataset: "TRANSACTIONS" },
+      "123"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    expect(body.widgets[0].widgetType).toBe("transaction-like");
+  });
 });

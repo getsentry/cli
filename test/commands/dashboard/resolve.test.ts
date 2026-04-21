@@ -8,10 +8,12 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   enrichDashboardError,
+  normalizeDataset,
   parseDashboardListArgs,
   parseDashboardPositionalArgs,
   resolveDashboardId,
   resolveOrgFromTarget,
+  validateWidgetEnums,
 } from "../../../src/commands/dashboard/resolve.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
@@ -540,5 +542,84 @@ describe("enrichDashboardError", () => {
     expect(() =>
       enrichDashboardError(apiErr, { orgSlug: "my-org", operation: "list" })
     ).toThrow(apiErr);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalizeDataset + validateWidgetEnums
+// ---------------------------------------------------------------------------
+
+describe("normalizeDataset", () => {
+  test("returns undefined for undefined input", () => {
+    expect(normalizeDataset(undefined)).toBeUndefined();
+  });
+
+  test("lowercases canonical values (pass-through)", () => {
+    expect(normalizeDataset("spans")).toBe("spans");
+    expect(normalizeDataset("error-events")).toBe("error-events");
+    expect(normalizeDataset("transaction-like")).toBe("transaction-like");
+    expect(normalizeDataset("tracemetrics")).toBe("tracemetrics");
+    expect(normalizeDataset("logs")).toBe("logs");
+    expect(normalizeDataset("issue")).toBe("issue");
+    expect(normalizeDataset("discover")).toBe("discover");
+  });
+
+  test("resolves error/errors aliases", () => {
+    expect(normalizeDataset("errors")).toBe("error-events");
+    expect(normalizeDataset("error")).toBe("error-events");
+  });
+
+  test("resolves transaction/transactions aliases", () => {
+    expect(normalizeDataset("transactions")).toBe("transaction-like");
+    expect(normalizeDataset("transaction")).toBe("transaction-like");
+  });
+
+  test("resolves metrics and metricsEnhanced aliases", () => {
+    expect(normalizeDataset("metrics")).toBe("tracemetrics");
+    expect(normalizeDataset("metricsEnhanced")).toBe("tracemetrics");
+  });
+
+  test("resolves log alias", () => {
+    expect(normalizeDataset("log")).toBe("logs");
+  });
+
+  test("case-insensitive matching", () => {
+    expect(normalizeDataset("Errors")).toBe("error-events");
+    expect(normalizeDataset("ERRORS")).toBe("error-events");
+    expect(normalizeDataset("SPANS")).toBe("spans");
+    expect(normalizeDataset("MetricsEnhanced")).toBe("tracemetrics");
+  });
+
+  test("returns lowercased unknown input unchanged for validator to reject", () => {
+    expect(normalizeDataset("unknown-dataset")).toBe("unknown-dataset");
+    expect(normalizeDataset("DoesNotExist")).toBe("doesnotexist");
+  });
+});
+
+describe("validateWidgetEnums (with normalizeDataset)", () => {
+  test("accepts a normalized alias without error", () => {
+    // Pipeline: caller runs normalizeDataset first, then passes the canonical
+    // value to validateWidgetEnums. This simulates the wiring in add/edit.
+    expect(() =>
+      validateWidgetEnums("bar", normalizeDataset("errors"))
+    ).not.toThrow();
+  });
+
+  test("rejects an unresolved alias when passed un-normalized", () => {
+    // Guard: forgetting to normalize surfaces as a ValidationError listing
+    // canonical values, not silent success.
+    expect(() => validateWidgetEnums("bar", "errors")).toThrow(ValidationError);
+  });
+
+  test("rejects unknown datasets (no such alias)", () => {
+    expect(() => validateWidgetEnums(undefined, "bogus-dataset")).toThrow(
+      ValidationError
+    );
+  });
+
+  test("rejects unknown display types", () => {
+    expect(() => validateWidgetEnums("pie-chart", undefined)).toThrow(
+      ValidationError
+    );
   });
 });

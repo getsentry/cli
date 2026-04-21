@@ -19,17 +19,25 @@ export const widgetRoute = buildRouteMap({
       "  specialized: stacked_area (3×2), top_n (3×2), categorical_bar (3×2), text (3×2)\n" +
       "  internal:    details (3×2), wheel (3×2), rage_and_dead_clicks (3×2),\n" +
       "               server_tree (3×2), agents_traces_table (3×2)\n\n" +
-      "Datasets:\n" +
-      "  spans (default)    Span-based queries: span.duration, span.op, transaction,\n" +
-      "                     span attributes, cache.hit, etc. Covers most use cases.\n" +
-      "  tracemetrics       Custom metrics from Sentry.metrics.distribution/gauge/count.\n" +
-      "                     Query format: aggregation(value,metric_name,metric_type,unit)\n" +
-      "                     Example: p50(value,completion.duration_ms,distribution,none)\n" +
-      "                     Supported displays: line, area, bar, big_number, categorical_bar\n" +
-      "  discover           Legacy discover queries (adds failure_rate, apdex, etc.)\n" +
-      "  issue              Issue-based queries\n" +
-      "  error-events       Error event queries\n" +
-      "  logs               Log queries\n\n" +
+      "Datasets (canonical name — accepted aliases):\n" +
+      "  spans (default)               Span-based queries: span.duration, span.op,\n" +
+      "                                transaction, span attributes, cache.hit, etc.\n" +
+      "                                Covers most use cases.\n" +
+      "  tracemetrics — metrics,       Custom metrics from Sentry.metrics.distribution/\n" +
+      "    metricsEnhanced             gauge/count. Query format:\n" +
+      "                                aggregation(value,metric_name,metric_type,unit)\n" +
+      "                                Example: p50(value,completion.duration_ms,distribution,none)\n" +
+      "                                Supported displays: line, area, bar, big_number,\n" +
+      "                                categorical_bar\n" +
+      "  discover                      Legacy discover queries (adds failure_rate,\n" +
+      "                                apdex, etc.)\n" +
+      "  issue                         Issue-based queries\n" +
+      "  error-events — errors, error  Error event queries\n" +
+      "  transaction-like — transactions, transaction\n" +
+      "                                Transaction-based queries\n" +
+      "  logs — log                    Log queries\n\n" +
+      "Dataset values are case-insensitive; Sentry UI/API names like 'errors'\n" +
+      "and 'transactions' are accepted in addition to the canonical forms.\n\n" +
       "Aggregates (spans): count, count_unique, sum, avg, percentile, p50, p75,\n" +
       "  p90, p95, p99, p100, eps, epm, any, min, max\n" +
       "Aggregates (discover adds): failure_count, failure_rate, apdex,\n" +
