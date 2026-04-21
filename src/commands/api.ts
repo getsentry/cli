@@ -1216,8 +1216,12 @@ export const apiCommand = buildCommand({
       ? cleaned.length - 1
       : cleaned.length;
     if (normalizedEndpoint.length < baseLen) {
-      log.warn(
-        "Endpoint includes the /api/0/ prefix which is added automatically — stripping it to avoid a doubled path"
+      // Silent auto-fix — not a warning. Users commonly copy/paste URLs
+      // that include the /api/0/ prefix; we strip it transparently and
+      // only surface the detail at debug level for troubleshooting
+      // (getsentry/cli#785 item #11).
+      log.debug(
+        "Stripped /api/0/ prefix from endpoint (auto-added by the API client)"
       );
     }
     const { body, params } = await resolveBody(flags, stdin);
