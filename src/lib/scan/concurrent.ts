@@ -195,10 +195,17 @@ export async function* mapFilesConcurrentStream<TIn, TOut>(
     // still be blocked on awake). We rely on the finally-block above
     // flipping `producerDone` + calling `wakeUp()`.
     await producer;
-  }
-
-  if (producerError) {
-    throw producerError;
+    // Propagate producer errors from inside the `finally` so they
+    // surface on both paths: normal drain-to-completion AND
+    // consumer-initiated `break`. Code *after* a generator's
+    // try/finally is unreachable when the consumer breaks (the
+    // runtime's `return()` resolves the iterator without executing
+    // the post-try body), so an error thrown outside this block
+    // would be silently lost on the break path.
+    if (producerError) {
+      // biome-ignore lint/correctness/noUnsafeFinally: intentional — this is the only path to surface producer errors on the break path
+      throw producerError;
+    }
   }
 }
 

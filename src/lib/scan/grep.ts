@@ -46,7 +46,11 @@ import {
   matchesAny,
   walkerRoot,
 } from "./path-utils.js";
-import { compilePattern, ensureGlobalMultilineFlags } from "./regex.js";
+import {
+  compilePattern,
+  ensureGlobalFlag,
+  ensureGlobalMultilineFlags,
+} from "./regex.js";
 import type {
   GrepMatch,
   GrepOptions,
@@ -129,11 +133,16 @@ async function* applyGrepFilters(
  * Options bundle for `readAndGrep` — collecting into one param keeps
  * Biome's `useMaxParams` rule happy.
  *
- * The regex is already wrapped with `ensureGlobalFlag` at pipeline
- * entry so `matchAll` works correctly without per-call wrapping.
+ * The regex is cloned per file at the top of `readAndGrep` so each
+ * worker gets its own `lastIndex`. The `multiline` flag controls
+ * whether `/m` is applied (line-boundary anchoring on) or not
+ * (buffer-boundary anchoring); we can't infer this from `regex.flags`
+ * because the caller's intent matters independent of whatever flags
+ * `compilePattern` already set.
  */
 type PerFileOptions = {
   regex: RegExp;
+  multiline: boolean;
   maxLineLength: number;
   maxMatchesPerFile: number;
   pathPrefix: string;
@@ -179,9 +188,11 @@ async function readAndGrep(
   }
 
   const matches: GrepMatch[] = [];
-  // Whole-buffer iteration requires `/g`; `/m` makes `^`/`$` match at
-  // line boundaries so patterns like `^foo` behave the same way they
-  // did under the old split-per-line approach.
+  // Whole-buffer iteration requires `/g`. `/m` (line-boundary
+  // anchoring) is applied when the caller opts into grep-like
+  // semantics via `opts.multiline` (the default — see `GrepOptions`
+  // docstring). If the caller explicitly set `multiline: false`,
+  // anchor `^/$` to the buffer boundaries like raw JS semantics.
   //
   // We clone the regex per file so each invocation has its own
   // `lastIndex`. Today the exec/loop block below runs synchronously
@@ -190,10 +201,10 @@ async function readAndGrep(
   // single-threaded; microtasks only yield at `await`). But the
   // clone is still worth paying — it's ~1µs per file and eliminates
   // the foot-gun if anyone ever introduces an `await` inside the
-  // match loop. `ensureGlobalMultilineFlags` would otherwise return
-  // the caller's RegExp unchanged when it already has `/gm`, leaving
-  // the stateful object shared across workers.
-  const ensured = ensureGlobalMultilineFlags(opts.regex);
+  // match loop.
+  const ensured = opts.multiline
+    ? ensureGlobalMultilineFlags(opts.regex)
+    : ensureGlobalFlag(opts.regex);
   const regex = new RegExp(ensured.source, ensured.flags);
 
   // Cursor for incremental line-number computation. We walk forward
@@ -327,9 +338,13 @@ async function* grepFilesInternal(
  */
 // biome-ignore lint/suspicious/useAwait: yield* delegates to async generator
 export async function* grepFiles(opts: GrepOptions): AsyncGenerator<GrepMatch> {
+  // Default `multiline: true` — matches grep/rg's line-boundary
+  // anchoring semantics. Callers opt out with `multiline: false` for
+  // buffer-boundary JS semantics.
+  const multiline = opts.multiline ?? true;
   const regex = compilePattern(opts.pattern, {
     caseSensitive: opts.caseSensitive,
-    multiline: opts.multiline,
+    multiline,
   });
   const includes = compileMatchers(opts.include);
   const excludes = compileMatchers(opts.exclude);
@@ -352,6 +367,7 @@ export async function* grepFiles(opts: GrepOptions): AsyncGenerator<GrepMatch> {
     regex,
     perFile: {
       regex,
+      multiline,
       maxLineLength,
       maxMatchesPerFile,
       pathPrefix: opts.path ?? "",
@@ -378,9 +394,10 @@ export async function* grepFiles(opts: GrepOptions): AsyncGenerator<GrepMatch> {
 export async function collectGrep(opts: GrepOptions): Promise<GrepResult> {
   // We need visibility into `stats` from the public entry point, so
   // we drive the pipeline ourselves rather than re-awaiting grepFiles.
+  const multiline = opts.multiline ?? true;
   const regex = compilePattern(opts.pattern, {
     caseSensitive: opts.caseSensitive,
-    multiline: opts.multiline,
+    multiline,
   });
   const includes = compileMatchers(opts.include);
   const excludes = compileMatchers(opts.exclude);
@@ -416,6 +433,7 @@ export async function collectGrep(opts: GrepOptions): Promise<GrepResult> {
     regex,
     perFile: {
       regex,
+      multiline,
       maxLineLength,
       maxMatchesPerFile,
       pathPrefix: opts.path ?? "",

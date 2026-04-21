@@ -162,6 +162,39 @@ describe("mapFilesConcurrentStream — streaming variant", () => {
     expect(threw).toBeInstanceOf(DOMException);
     expect((threw as DOMException).name).toBe("AbortError");
   });
+
+  test("producer errors surface even when consumer breaks early", async () => {
+    // Regression test for PR 791 review finding: the producer-error
+    // rethrow was placed after the generator's `try/finally`. When a
+    // consumer `break`s early, the runtime's `return()` resolves the
+    // iterator after the `finally` runs but does NOT execute code
+    // after the try block — so a producer error would be silently
+    // swallowed. The fix moves the rethrow inside the `finally`.
+    const erroringSource = (async function* () {
+      yield 1;
+      yield 2;
+      throw new Error("producer exploded");
+    })();
+
+    let caught: unknown = null;
+    try {
+      for await (const _ of mapFilesConcurrentStream(
+        erroringSource,
+        async (i) => [i * 2],
+        { concurrency: 1 }
+      )) {
+        // break immediately — the error hasn't been observed yet.
+        break;
+      }
+    } catch (error) {
+      caught = error;
+    }
+    // Without the fix: caught stays null (error lost).
+    // With the fix: the error propagates via the generator's
+    // `return()` -> finally path and surfaces at the consumer.
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe("producer exploded");
+  });
 });
 
 /**

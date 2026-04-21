@@ -124,6 +124,47 @@ describe("collectGrep — case sensitivity", () => {
   });
 });
 
+describe("collectGrep — multiline mode", () => {
+  test("default: ^ matches at line boundaries (grep-like)", async () => {
+    // Default `multiline: true` gives rg/grep semantics: `^foo` hits
+    // any line starting with `foo`, not just the first line of the
+    // file. Regression test for a PR 791 review finding that the
+    // `multiline` option was always forced to true internally; the
+    // fix ties behavior to the caller's explicit opt-in/out.
+    const { cwd, cleanup } = makeSandbox({
+      "a.txt": "nope\nfoo line\nalso nope\nfoo again",
+    });
+    try {
+      const { matches } = await collectGrep({ cwd, pattern: "^foo" });
+      expect(matches.map((m) => m.line)).toEqual(["foo line", "foo again"]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("multiline: false applies strict buffer-boundary anchoring", async () => {
+    // With `multiline: false`, `^` anchors to the buffer start only.
+    // Only the first line can match `^foo`; a later `foo`-start line
+    // inside the same file does NOT.
+    const { cwd, cleanup } = makeSandbox({
+      "a.txt": "nope\nfoo line\nalso nope",
+      "b.txt": "foo buffer-start",
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "^foo",
+        multiline: false,
+      });
+      expect(matches.map((m) => `${m.path}:${m.line}`)).toEqual([
+        "b.txt:foo buffer-start",
+      ]);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
 describe("collectGrep — include / exclude globs", () => {
   test("include narrows to matching files", async () => {
     const { cwd, cleanup } = makeSandbox({

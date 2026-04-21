@@ -269,9 +269,22 @@ export type GrepOptions = {
    */
   caseSensitive?: boolean;
   /**
-   * Enable the `m` flag (^ and $ match at line boundaries, not just
-   * string boundaries). Default: false. Rarely needed because grep
-   * already tests line-by-line.
+   * Control the `m` flag on the compiled pattern.
+   *
+   * - `true` (default): `^` / `$` match at line boundaries inside
+   *   each file. This is the grep-like semantic — patterns like
+   *   `^foo` match any line that starts with `foo`, not just the
+   *   first line of the file. Matches `rg`'s default behavior.
+   * - `false`: strict JS semantics — `^` anchors to the buffer start
+   *   and `$` to the buffer end. Only useful for patterns that
+   *   explicitly want to match on the whole file as a single unit.
+   *
+   * Note: the pre-PR-3.5 grep engine iterated line-by-line (via
+   * `content.split("\n")`), so each line was its own string and
+   * `^/$` anchored naturally. After the switch to whole-buffer
+   * `regex.exec`, the engine needs the `m` flag to recover the same
+   * anchoring semantics — which is why the default is `true` here
+   * despite `compilePattern`'s lower-level default being `false`.
    */
   multiline?: boolean;
   /**
