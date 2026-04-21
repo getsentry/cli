@@ -153,29 +153,54 @@ export const MAX_FILE_SIZE = 256 * 1024;
  * `mapFilesConcurrent`). The walker itself is a sequential generator;
  * this bounds the parallel fan-out of its consumers.
  *
- * Data-driven default: on PR 3.5's benchmark sweep (see
- * `script/bench-sweep.ts`) the synthetic/large fixture's
- * `scan.grepFiles` op had its p50 knee at exactly
- * `availableParallelism` — 4 on a 4-core box, with conc=1 taking ~1.5×
- * as long and conc=8+ flat-lining at ~10% worse than the knee. Above
- * CPU count, extra concurrency adds scheduling overhead without more
- * useful work; the main thread can only serialize so many regex
- * callbacks per event loop turn.
+ * ### Tuning rationale (empirical, workload-dependent)
  *
- * The floor of 2 protects single-core systems where
- * `availableParallelism()` would return 1 (serial execution is ~1.5×
- * slower on large scans — giving two in flight lets us overlap read
- * I/O with the regex pass on the previous file).
+ * This value is the result of two competing measurements on a 4-core
+ * box. The honest summary: **the "optimal" concurrency depends on the
+ * caller's shape**, and no single default is right for every workload.
  *
- * No cap: users with high-core boxes presumably have matching I/O.
- * The old hardcoded value `50` was inherited from the pre-PR-3 DSN
- * scanner with no measurement; on this bench it produced a p50
- * ~8% worse than `availableParallelism`.
+ * 1. **Walker-fed streaming** (DSN scanner, init-wizard grep over a
+ *    repo): the walker's serial `readdir` descent is the dominant
+ *    cost. Workers never starve; conc≥2 is enough; conc≈4-8 is best
+ *    empirically. Higher values add tiny scheduling overhead without
+ *    more useful work.
+ * 2. **Pure per-file I/O** (pre-listed file set, no walker): the
+ *    knee is at conc≈16 on raw reads, ≈32 on read+regex. libuv's
+ *    threadpool + async fs can keep many more in-flight tasks alive
+ *    than CPU count would suggest, because each task spends most of
+ *    its time awaiting I/O.
  *
- * Callers can override per-call via `WalkOptions.concurrency` /
- * `GrepOptions.concurrency` for one-off tuning.
+ * We split the difference and tie the default to `availableParallelism`
+ * with floors/caps:
+ *   - 1-2 cores → 2  (tiny CI runners)
+ *   - 4 cores   → 4
+ *   - 8 cores   → 8
+ *   - 16+ cores → 16 (capped)
+ *
+ * Optimizing for the walker-fed case costs ~1-2% on pure-I/O; the
+ * reverse costs ~15% on walker-fed. Walker-fed is the real-world
+ * workload (every current caller uses the walker). Callers with
+ * known-pure-I/O workloads should override via
+ * `WalkOptions.concurrency` / `GrepOptions.concurrency`.
+ *
+ * ### History
+ *
+ * - Pre-PR: hardcoded 50, inherited with no measurement. Fine for
+ *   walker-fed, wastes scheduling budget.
+ * - PR 3.5 first attempt: tied to `availableParallelism()`. Correct
+ *   direction, but the "knee" analysis conflated walker dominance
+ *   with actual I/O parallelism limits.
+ * - PR 3.5 second attempt: `cores × 4` capped at 32 (8 floor).
+ *   Microbench-optimal but regressed `scanCodeForDsns` ~15% because
+ *   the microbench excluded the walker which is the actual bottleneck.
+ * - Now: `availableParallelism` with 2/16 clamps. Measured best on
+ *   the walker-fed workload; "suboptimal" on pure I/O but close
+ *   enough (within a few ms).
  */
-export const CONCURRENCY_LIMIT = Math.max(2, availableParallelism());
+export const CONCURRENCY_LIMIT = Math.min(
+  16,
+  Math.max(2, availableParallelism())
+);
 
 /**
  * Byte length read from the head of a file to classify binary-ness.

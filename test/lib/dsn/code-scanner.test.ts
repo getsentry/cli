@@ -60,6 +60,24 @@ describe("Code Scanner", () => {
       expect(dsns).toEqual(["https://abc123@o123.ingest.sentry.io/456"]);
     });
 
+    test.each([
+      ["all lower", "https://abc@o1.ingest.sentry.io/456"],
+      ["all upper", "HTTPS://abc@o1.ingest.sentry.io/456"],
+      ["title", "Https://abc@o1.ingest.sentry.io/456"],
+      ["mixed", "hTtPs://abc@o1.ingest.sentry.io/456"],
+      ["http no s", "HTTP://abc@o1.ingest.sentry.io/456"],
+    ])("detects DSN with %s scheme casing (regression: literal-prefix fast path)", (_label, url) => {
+      // An earlier version of the literal-prefix probe used two
+      // case-sensitive `indexOf` calls (covering only all-lower and
+      // all-upper), which silently dropped mixed-case schemes like
+      // `Https://`. The probe is now `/http/i`. This test pins the
+      // correctness contract.
+      const content = `const DSN = "${url}";`;
+      const dsns = extractDsnsFromContent(content);
+      expect(dsns).toHaveLength(1);
+      expect(dsns[0]).toBe(url);
+    });
+
     test("extracts multiple DSNs", () => {
       const content = `
         const PROD_DSN = "https://prod@o123.ingest.sentry.io/111";

@@ -1,22 +1,25 @@
 /**
- * Property test for `extractDsnsFromContent`'s literal-prefix
- * fast-path.
+ * Property tests for `extractDsnsFromContent`'s literal-prefix fast
+ * path.
  *
  * The fast-path in `code-scanner.ts` short-circuits `matchAll` when
- * the file contains neither `"http"` nor `"HTTP"` — that's a
- * necessary condition for ANY DSN to appear. We pin the invariant:
- * for any random content (with or without DSNs, with or without the
- * substrings), the function's output must be the same as if the
- * fast-path were disabled.
+ * the file contains no case-insensitive `http` substring. The tests
+ * here pin down two properties:
  *
- * The fast-path path returns `[]` when the substrings are absent,
- * and the slow path's matchAll on a substring-free content would
- * also return `[]`. So the invariant reduces to: `output is
- * deterministic for any input`.
+ * 1. **Short-circuit correctness**: when we strip ALL casings of
+ *    `http` from random content, `extractDsnsFromContent` must
+ *    return `[]` (the fast path is safe to take).
  *
- * We strengthen it slightly by asserting that when the substrings
- * are present, the output is a subset of the raw regex matches —
- * confirming we don't accidentally produce extra hits.
+ * 2. **Set equality against the raw regex**: the fast-path output,
+ *    filtered through host validation, must equal the host-valid
+ *    subset of the raw `DSN_PATTERN` matches. This is bidirectional
+ *    — a subset-only check wouldn't catch the fast path silently
+ *    dropping valid DSNs (see the mixed-case regression a prior
+ *    reviewer found).
+ *
+ * The content arbitrary uses a MIXED-CASE ASCII alphabet deliberately.
+ * A lowercase-only alphabet would hide the mixed-case bug — if you
+ * narrow it back, the fast path's correctness is no longer tested.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -30,7 +33,11 @@ import {
 import { extractDsnsFromContent } from "../../../src/lib/dsn/code-scanner.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
 
-const BENIGN_CHARS = "abcdefghijklmnopqrstuvwxyz 0123456789\n".split("");
+// Mixed-case charset on purpose: the fast-path probe must match
+// ANY casing of the scheme (including `Https://`, `hTtP://`, etc.).
+// A lowercase-only arbitrary silently hides that regression.
+const BENIGN_CHARS =
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789\n".split("");
 
 /** Generate file contents — benign ASCII, may or may not contain http. */
 const contentArb = array(constantFrom(...BENIGN_CHARS), {
