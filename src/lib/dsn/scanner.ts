@@ -6,7 +6,7 @@
  */
 
 import { join } from "node:path";
-import { handleFileError } from "./fs-utils.js";
+import { handleFileError, isRegularFile } from "./fs-utils.js";
 import type { DetectedDsn } from "./types.js";
 
 /** Result of processing a single file for DSN extraction. */
@@ -70,8 +70,13 @@ export async function scanSpecificFiles(
     const filepath = join(cwd, filename);
 
     try {
+      // Guard: skip non-regular files (FIFOs, sockets, etc.) that would block.
+      // 1Password streams secrets via symlinked named pipes; Bun.file().text()
+      // blocks indefinitely on these.
+      if (!(await isRegularFile(filepath, "scanSpecificFiles.stat"))) {
+        continue;
+      }
       const file = Bun.file(filepath);
-      // Read file directly - handles ENOENT gracefully
       const content = await file.text();
       const result = processFile(filename, content);
 
