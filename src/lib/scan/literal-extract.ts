@@ -171,7 +171,7 @@ export function extractInnerLiteral(
     if (c === "[") {
       // Character class — content isn't a single required literal.
       commit();
-      i = skipToMatching(source, i, "[", "]");
+      i = skipCharacterClass(source, i);
       continue;
     }
 
@@ -246,36 +246,81 @@ export function isPureLiteral(source: string, flags: string): boolean {
   return literal === bare;
 }
 
-/** Is there a top-level `|` (alternation) in the pattern? */
+/**
+ * Is there a top-level `|` (alternation) in the pattern?
+ *
+ * Character classes `[...]` are OPAQUE to this scan — their interior
+ * contains literal bytes (including literal `(`, `)`, `|`) that must
+ * not be interpreted as grouping or alternation metacharacters. We
+ * skip the whole class in one step when `[` is seen.
+ */
 function hasTopLevelAlternation(source: string): boolean {
   let depthParen = 0;
-  let depthBracket = 0;
-  // biome-ignore lint/style/useForOf: the loop manually advances `i` past escape sequences, which for-of can't do
-  for (let i = 0; i < source.length; i += 1) {
+  let i = 0;
+  while (i < source.length) {
     const c = source[i];
     if (c === "\\") {
-      i += 1; // skip escaped char
+      // Skip the escape sequence. An escaped char is never a
+      // grouping/alternation metacharacter.
+      i += 2;
+      continue;
+    }
+    if (c === "[") {
+      // Character class: content is opaque. Skip past the first
+      // unescaped `]` (classes are NOT nestable — `[[]` matches a
+      // single literal `[`). This prevents `[(]` from being
+      // mistaken for an opening paren and corrupting `depthParen`,
+      // which would hide a subsequent top-level `|` alternation.
+      i = skipCharacterClass(source, i);
       continue;
     }
     if (c === "(") {
       depthParen += 1;
     } else if (c === ")") {
       depthParen -= 1;
-    } else if (c === "[") {
-      depthBracket += 1;
-    } else if (c === "]") {
-      depthBracket -= 1;
-    } else if (c === "|" && depthParen === 0 && depthBracket === 0) {
+    } else if (c === "|" && depthParen === 0) {
       return true;
     }
+    i += 1;
   }
   return false;
+}
+
+/**
+ * Advance past a character class `[...]` starting at `i`
+ * (where `source[i] === "["`). Unlike parens/groups, `[` inside
+ * `[...]` is NOT nestable — it's a literal `[` character. Only the
+ * first unescaped `]` closes the class.
+ *
+ * Handles escape sequences (`\]` stays inside the class).
+ *
+ * Returns the index just past the closing `]`, or `source.length` if
+ * the class is unterminated (malformed regex; caller should still
+ * advance past it).
+ */
+function skipCharacterClass(source: string, i: number): number {
+  let j = i + 1;
+  while (j < source.length) {
+    const c = source[j];
+    if (c === "\\") {
+      j += 2;
+      continue;
+    }
+    if (c === "]") {
+      return j + 1;
+    }
+    j += 1;
+  }
+  return j;
 }
 
 /**
  * Advance past a balanced `open`/`close` pair starting at `i`
  * (where `source[i] === open`). Handles nested pairs and escaped
  * chars. Returns the index just past the matching close.
+ *
+ * NOTE: Regex character classes `[...]` are NOT nestable — use
+ * `skipCharacterClass` for those. This helper is for `(...)` groups.
  */
 function skipToMatching(
   source: string,

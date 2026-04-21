@@ -128,3 +128,37 @@ describe("isPureLiteral", () => {
     expect(isPureLiteral("SENTRY_DSN", "i")).toBe(true);
   });
 });
+
+describe("extractInnerLiteral — character-class opaqueness (Cursor bug #1)", () => {
+  /**
+   * Regression: `[(]foo|bar` previously extracted `"foo"` because
+   * the alternation detector treated `(` inside `[...]` as an
+   * opening paren, which corrupted `depthParen` and hid the
+   * top-level `|` that followed. The prefilter then silently
+   * skipped lines matching only the `bar` branch.
+   *
+   * The fix: character classes are opaque to the alternation
+   * detector. When we see `[`, skip past the first unescaped `]`
+   * in one step. Also `[...]` is NOT nestable — `[[]` is a class
+   * containing a literal `[`.
+   */
+  test.each([
+    ["[(]foo|bar", null], // ( inside class + top-level alternation
+    ["[)]foo|bar", null],
+    ["[[]foo|bar", null], // [ inside class (nested-looking but flat)
+    ["[|]foo|bar", null], // | inside class is literal; second | is top-level
+    ["[(|)]foo|bar", null], // class containing (, |, )
+  ])("returns null for %p — alternation hidden by class corrupting paren depth", (pattern, expected) => {
+    expect(extractInnerLiteral(pattern, "")).toBe(expected);
+  });
+
+  test.each([
+    ["foo[(]bar", "foo"], // ( inside class, no alternation → longest run "foo"
+    ["foo[abc]bar", "foo"], // normal class between literals
+    ["[\\]]foo", "foo"], // escaped ] inside class
+    ["[^abc]def", "def"], // negated class
+    ["[a-z]{3,5}MARKER", "MARKER"], // class + quantifier + literal
+  ])("extracts %p → %p (no alternation present)", (pattern, expected) => {
+    expect(extractInnerLiteral(pattern, "")).toBe(expected);
+  });
+});

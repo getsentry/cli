@@ -681,4 +681,34 @@ describe("collectGrep — literal prefilter fast path", () => {
       cleanup();
     }
   });
+
+  test("character-class with parens + alternation finds all branches (Cursor bug #1)", async () => {
+    // Regression: `[(]foo|bar` previously extracted `foo` as a
+    // required literal, causing the prefilter to silently miss
+    // lines matching only the `bar` branch. The fix makes char
+    // classes opaque to alternation detection.
+    const { cwd, cleanup } = makeSandbox({
+      "only-bar.txt": "bar line without the paren-branch\n",
+      "only-paren.txt": "(foo line with the paren-branch\n",
+      "both.txt": "bar then (foo on different lines\n(foo again\nbar again\n",
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "[(]foo|bar",
+      });
+      // All four lines should match: two in `both.txt`, one each
+      // in the single-branch files.
+      const lineDigest = matches.map((m) => `${m.path}:${m.lineNum}`).sort();
+      expect(lineDigest).toEqual([
+        "both.txt:1",
+        "both.txt:2",
+        "both.txt:3",
+        "only-bar.txt:1",
+        "only-paren.txt:1",
+      ]);
+    } finally {
+      cleanup();
+    }
+  });
 });
