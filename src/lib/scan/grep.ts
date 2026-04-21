@@ -390,6 +390,17 @@ export async function collectGrep(opts: GrepOptions): Promise<GrepResult> {
   const maxLineLength = opts.maxLineLength ?? DEFAULT_MAX_LINE_LENGTH;
   const maxMatchesPerFile = opts.maxMatchesPerFile ?? Number.POSITIVE_INFINITY;
 
+  // Ask the iterator for one extra match past `maxResults` so the
+  // collector can distinguish "exactly maxResults matches existed"
+  // from "more existed but we stopped". Without this +1 probe, the
+  // iterator flips `stats.truncated = true` as soon as it emits the
+  // N-th match, whether or not an (N+1)-th match was available.
+  // Same pattern as `collectGlob`; see the corresponding lore entry
+  // on `collectGlob/collectGrep truncation flag`.
+  const probeLimit = Number.isFinite(maxResults)
+    ? Math.min(Number.MAX_SAFE_INTEGER, maxResults + 1)
+    : Number.POSITIVE_INFINITY;
+
   const root = walkerRoot(opts.cwd, opts.path);
   const walkOpts = buildWalkOptions(opts, root);
 
@@ -400,6 +411,7 @@ export async function collectGrep(opts: GrepOptions): Promise<GrepResult> {
   );
 
   const matches: GrepMatch[] = [];
+  let truncated = false;
   for await (const match of grepFilesInternal({
     regex,
     perFile: {
@@ -414,12 +426,24 @@ export async function collectGrep(opts: GrepOptions): Promise<GrepResult> {
       concurrency: opts.concurrency,
       signal: opts.signal,
     },
-    maxResults,
+    maxResults: probeLimit,
     stopOnFirst,
   })) {
+    if (matches.length >= maxResults) {
+      // We've got the overshoot match — there ARE more results than
+      // the caller asked for. Stop draining, flag truncation.
+      truncated = true;
+      break;
+    }
     matches.push(match);
   }
   matches.sort(compareMatches);
+  // Reflect the collector-level truncation in the stats bag the
+  // iterator populated. Preserves stopOnFirst-path flag (stats.truncated
+  // is already set by the iterator in that case).
+  if (truncated) {
+    stats.truncated = true;
+  }
   return { matches, stats };
 }
 

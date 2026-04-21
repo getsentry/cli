@@ -220,6 +220,29 @@ describe("collectGrep — truncation / limits", () => {
     }
   });
 
+  test("maxResults == exact match count does NOT set truncated", async () => {
+    // Regression for PR 791 review finding: `collectGrep` previously
+    // set `truncated = true` whenever `matchesEmitted >= maxResults`,
+    // so asking for `maxResults: 3` against a corpus with exactly 3
+    // matches falsely reported truncation. The fix mirrors
+    // `collectGlob`'s `+1` overshoot probe.
+    const { cwd, cleanup } = makeSandbox({
+      "a.txt": "hit\nhit\nhit",
+    });
+    try {
+      const { matches, stats } = await collectGrep({
+        cwd,
+        pattern: "hit",
+        maxResults: 3,
+      });
+      expect(matches.length).toBe(3);
+      // Exactly 3 matches exist; we requested 3; no truncation.
+      expect(stats.truncated).toBe(false);
+    } finally {
+      cleanup();
+    }
+  });
+
   test("stopOnFirst returns on first match", async () => {
     const { cwd, cleanup } = makeSandbox({
       "a.txt": "hit\nhit\nhit",

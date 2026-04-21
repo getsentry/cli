@@ -376,10 +376,15 @@ function scanDirectory(
         if (error instanceof ConfigError) {
           throw error;
         }
-        // Anything else is an unexpected walk failure. Matches the
-        // pre-PR-3 scanner's behavior: return empty + set span to error.
+        // Anything else is an unexpected walk failure. Return all
+        // three maps empty to match the pre-PR-3 scanner's error-path
+        // behavior AND avoid a cache-invalidation hole: a partial
+        // `dirMtimes` would cause the cache verifier to only check
+        // the dirs we happened to reach before the error, silently
+        // blessing the cache for dirs the walker never visited.
+        // Empty `dirMtimes` forces a full rescan on the next attempt.
         span.setStatus({ code: 2, message: "Directory scan failed" });
-        return { dsns: [], sourceMtimes: {}, dirMtimes };
+        return { dsns: [], sourceMtimes: {}, dirMtimes: {} };
       }
     },
     {

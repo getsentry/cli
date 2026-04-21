@@ -592,6 +592,25 @@ describe("Code Scanner", () => {
       }
     });
 
+    test("nonexistent root produces empty result, no partial state", async () => {
+      // Documents the contract that's hardened by the PR 791 review
+      // finding: any error path through `scanDirectory` returns all
+      // three result maps empty. The catch block used to leak a
+      // partial `dirMtimes` populated by `onDirectoryVisit` before
+      // the error — if cached, the verifier would only check visited
+      // dirs and miss new DSNs in unvisited ones. Fix: empty on error.
+      //
+      // (In practice the walker doesn't throw on a missing root —
+      // it simply yields nothing — so this is the happy-empty path.
+      // The mid-walk-throw case is hard to synthesize in a test but
+      // the fix covers it symmetrically via the catch block.)
+      const missingDir = join(testDir, "does-not-exist");
+      const result = await scanCodeForDsns(missingDir);
+      expect(result.dsns).toEqual([]);
+      expect(result.sourceMtimes).toEqual({});
+      expect(result.dirMtimes).toEqual({});
+    });
+
     test("dirMtimes is populated for every visited directory", async () => {
       // PR 3 migrated the walker; dirMtimes comes from the
       // `onDirectoryVisit` hook. This pins the invariant the cache
