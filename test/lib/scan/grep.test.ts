@@ -646,11 +646,12 @@ describe("collectGrep — literal prefilter fast path", () => {
     }
   });
 
-  test("pure literal patterns go through whole-buffer (not prefilter)", async () => {
-    // `SENTRY_DSN` is a pure literal — the extractor returns it but
-    // `isPureLiteral` flags it, so we skip the prefilter (would add
-    // overhead without benefit — the regex engine is already optimal
-    // for pure literals). Behavior test: identical results.
+  test("pure literal patterns still match correctly (via file-level gate + whole-buffer)", async () => {
+    // `SENTRY_DSN` is a pure literal. The extractor returns it, and
+    // the file-level gate uses it to cheaply reject files without
+    // the literal. Files that contain it fall through to the whole-
+    // buffer matcher, which finds all match positions via the regex
+    // engine (V8 handles pure-literal patterns efficiently).
     const { cwd, cleanup } = makeSandbox({
       "a.ts": "const SENTRY_DSN = 'abc';\nconst other = 1;\nSENTRY_DSN again",
     });

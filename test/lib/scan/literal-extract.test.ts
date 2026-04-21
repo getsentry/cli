@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  extractInnerLiteral,
-  isPureLiteral,
-} from "../../../src/lib/scan/literal-extract.js";
+import { extractInnerLiteral } from "../../../src/lib/scan/literal-extract.js";
 
 describe("extractInnerLiteral — basic patterns", () => {
   test.each([
@@ -100,32 +97,6 @@ describe("extractInnerLiteral — quantifier handling", () => {
     expect(extractInnerLiteral("short.*longer_run.*short", "")).toBe(
       "longer_run"
     );
-  });
-});
-
-describe("isPureLiteral", () => {
-  test("true when the whole pattern is a literal", () => {
-    expect(isPureLiteral("SENTRY_DSN", "")).toBe(true);
-    expect(isPureLiteral("hello world", "")).toBe(true);
-    expect(isPureLiteral("http://", "")).toBe(true);
-  });
-
-  test("false when the pattern contains regex metachars", () => {
-    expect(isPureLiteral("import.*from", "")).toBe(false);
-    expect(isPureLiteral("^foo", "")).toBe(false);
-    expect(isPureLiteral("foo|bar", "")).toBe(false);
-    expect(isPureLiteral("[abc]", "")).toBe(false);
-  });
-
-  test("false when escaped metachars present (extractor yields them but pattern isn't bare)", () => {
-    // Even though `Sentry\.init` extracts to `Sentry.init`, the
-    // source isn't the same as the literal (it has a backslash).
-    // isPureLiteral compares to source.
-    expect(isPureLiteral("Sentry\\.init", "")).toBe(false);
-  });
-
-  test("respects the i flag via case-insensitive comparison", () => {
-    expect(isPureLiteral("SENTRY_DSN", "i")).toBe(true);
   });
 });
 

@@ -52,9 +52,10 @@
  * on lines containing `foo`.
  *
  * When the pattern is ITSELF a pure literal (no metachars, just
- * bytes), the extractor returns the whole pattern. The caller can
- * detect this and use `indexOf` alone, skipping the regex engine
- * entirely — see `isPureLiteral`.
+ * bytes), the extractor returns the whole pattern — that's fine for
+ * the file-level gate in `grep.ts::readAndGrep`, which uses indexOf
+ * as a boolean presence check and then falls through to the regex
+ * engine regardless.
  */
 
 /**
@@ -246,24 +247,6 @@ export function extractInnerLiteral(
   }
 
   return flags.includes("i") ? best.toLowerCase() : best;
-}
-
-/**
- * True if the regex pattern is itself a pure literal (no metachars
- * at all, just bytes). When this is true, the caller can skip the
- * regex engine entirely and use `indexOf` alone — the regex would
- * match exactly where the literal matches.
- */
-export function isPureLiteral(source: string, flags: string): boolean {
-  // The regex is a pure literal iff the extraction yields the whole
-  // source unchanged (post-flag-adjustment). No metacharacters ever
-  // appeared.
-  const literal = extractInnerLiteral(source, flags);
-  if (literal === null) {
-    return false;
-  }
-  const bare = flags.includes("i") ? source.toLowerCase() : source;
-  return literal === bare;
 }
 
 /**
