@@ -92,21 +92,16 @@ type ProjectWithDsn = {
 };
 
 /**
- * Perform the parallel project + DSN fetch for a single target.
+ * Parallel project + DSN fetch for a single target.
  *
- * Shared by both `fetchProjectDetails` (which swallows non-auth
- * failures) and `fetchProjectDetailsOrThrow` (which rethrows them).
- * Extracted so the two callers stay in lockstep — if a future change
- * adds another parallel call or swaps the DSN lookup, both paths
- * benefit automatically.
- *
- * `AuthError` (from `withAuthGuard`) always propagates so the
- * auto-login middleware in `cli.ts` can fire.
+ * `AuthError` always propagates so the auto-login middleware fires.
+ * Other API failures rethrow so callers can choose to swallow
+ * (auto-detect) or surface (explicit/search) them.
  */
-function fetchProjectAndDsn(target: ResolvedTarget): Promise<ProjectWithDsn> {
-  return withAuthGuard(async () => {
-    // Fetch project (skip if already fetched during resolution) and
-    // its DSN in parallel.
+async function fetchProjectAndDsn(
+  target: ResolvedTarget
+): Promise<ProjectWithDsn> {
+  const result = await withAuthGuard(async () => {
     const [project, dsn] = await Promise.all([
       target.projectData
         ? Promise.resolve(target.projectData)
@@ -114,20 +109,16 @@ function fetchProjectAndDsn(target: ResolvedTarget): Promise<ProjectWithDsn> {
       tryGetPrimaryDsn(target.org, target.project),
     ]);
     return { project, dsn };
-  }).then((result) => {
-    if (result.ok) {
-      return result.value;
-    }
-    // Non-auth failure: rethrow the captured error so the caller can
-    // decide whether to swallow it or surface it.
-    throw result.error;
   });
+  if (result.ok) {
+    return result.value;
+  }
+  throw result.error;
 }
 
 /**
- * Fetch project details and keys for a single target.
- * Returns null on non-auth errors (e.g., no access to project).
- * Rethrows auth errors so they propagate to the user.
+ * Fetch details, swallowing non-auth failures (auto-detect mode).
+ * `AuthError` still propagates for the auto-login middleware.
  */
 async function fetchProjectDetails(
   target: ResolvedTarget
@@ -135,9 +126,6 @@ async function fetchProjectDetails(
   try {
     return await fetchProjectAndDsn(target);
   } catch (error) {
-    // AuthError is surfaced by `fetchProjectAndDsn` via `withAuthGuard` —
-    // it bypasses the catch because it's re-thrown inside the guarded
-    // block. Re-inspect here so the auto-login middleware still fires.
     if (error instanceof AuthError) {
       throw error;
     }
@@ -146,15 +134,11 @@ async function fetchProjectDetails(
 }
 
 /**
- * Fetch project details, rethrowing the underlying API error on failure.
+ * Fetch details, rethrowing API errors verbatim.
  *
- * Used when the user has explicitly named a project (explicit or
- * project-search modes). In those cases returning null and falling
- * through to a generic "Could not auto-detect ..." ContextError hides
- * the actual cause (403 no-access / 404 no-such-project) and forces
- * the user to re-provide context they already provided
- * (getsentry/cli#785 item #8). Re-fetches without the auth guard so
- * any non-auth ApiError surfaces as-is.
+ * Used for explicit/project-search targets: the user named the
+ * project, so surfacing the real 403/404 is more useful than the
+ * generic "Could not auto-detect" fallback (getsentry/cli#785 #8).
  */
 function fetchProjectDetailsOrThrow(
   target: ResolvedTarget
@@ -170,13 +154,8 @@ type FetchResult = {
 };
 
 /**
- * Fetch project details for all targets in parallel.
- * Filters out failed fetches while preserving target association.
- *
- * Used exclusively for auto-detect mode where we may surface zero or
- * more projects from DSN scanning — swallowing per-target failures is
- * intentional there, since a missing/inaccessible DSN target should
- * not take down the whole command.
+ * Fetch details for every auto-detected target in parallel, filtering
+ * out failures while preserving target association.
  */
 async function fetchAllProjectDetails(
   targets: ResolvedTarget[]
@@ -337,18 +316,9 @@ export const viewCommand = buildCommand({
       return;
     }
 
-    // Fetching strategy depends on how the target was specified:
-    //
-    // - Auto-detect mode surfaces zero or more DSN-discovered targets;
-    //   per-target failures are swallowed so one inaccessible DSN
-    //   doesn't block the rest of the results.
-    //
-    // - Explicit and project-search modes have exactly one target that
-    //   the user asked for by name. Any failure there must surface the
-    //   underlying API error (403/404/etc.) — swallowing it and falling
-    //   through to "Organization and project is required" is the bug
-    //   reported in getsentry/cli#785 item #8, since the user already
-    //   provided both.
+    // Auto-detect tolerates per-target failures (DSN scans may yield
+    // inaccessible targets); explicit/search rethrows so the real
+    // 403/404 surfaces instead of a misleading "not provided" error.
     let projects: SentryProject[];
     let dsns: (string | null)[];
     let targets: ResolvedTarget[];
@@ -359,8 +329,6 @@ export const viewCommand = buildCommand({
       dsns = fetched.dsns;
       targets = fetched.targets;
     } else {
-      // Explicit / project-search — rethrow real errors instead of
-      // masking them with buildContextError().
       const firstTarget = resolvedTargets[0];
       if (!firstTarget) {
         throw buildContextError();
