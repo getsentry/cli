@@ -301,12 +301,10 @@ export type GrepOptions = {
    *   and `$` to the buffer end. Only useful for patterns that
    *   explicitly want to match on the whole file as a single unit.
    *
-   * Note: the pre-PR-3.5 grep engine iterated line-by-line (via
-   * `content.split("\n")`), so each line was its own string and
-   * `^/$` anchored naturally. After the switch to whole-buffer
-   * `regex.exec`, the engine needs the `m` flag to recover the same
-   * anchoring semantics — which is why the default is `true` here
-   * despite `compilePattern`'s lower-level default being `false`.
+   * The default differs from `compilePattern`'s lower-level default
+   * (`false`): whole-buffer iteration needs the `m` flag to recover
+   * the line-boundary anchoring that a line-by-line engine would
+   * get for free.
    */
   multiline?: boolean;
   /**

@@ -4,41 +4,28 @@
  * Layers regex matching onto `walkFiles`:
  *   1. Walk cwd with the caller's filters (extensions, depth, gitignore).
  *   2. Post-filter yields by `isBinary` + include/exclude globs.
- *   3. Read each surviving file's content, optionally gate via the
- *      extracted literal, run the regex across the full buffer.
- *   4. Emit `GrepMatch` entries as they arrive.
+ *   3. Read each surviving file, optionally gate via an extracted
+ *      literal, run the regex across the full buffer.
+ *   4. Emit one `GrepMatch` per matching line.
  *
- * ### Primary API
+ * The public entry points are `grepFiles` (streaming) and
+ * `collectGrep` (drained + sorted). Both share `setupGrepPipeline`
+ * so defaults/compilation/matching are configured in one place.
  *
- * `grepFiles(opts)` returns an `AsyncIterable<GrepMatch>` that streams
- * matches as they're discovered. Consumer-initiated `break` halts
- * in-flight work via the shared early-exit flag inside
- * `mapFilesConcurrentStream`.
+ * File reads use `Bun.file(path).text()`; the walker's `maxFileSize`
+ * (default 256 KB) caps the blast radius. CRLF is preserved verbatim.
  *
- * `collectGrep(opts)` drains the iterable into a sorted array +
- * aggregate stats — the Promise-returning variant init-wizard style
- * callers want.
+ * Matching uses whole-buffer `regex.exec` iteration with the per-file
+ * regex cloned so `lastIndex` is local. A literal extracted from the
+ * compiled regex source (via `extractInnerLiteral`) is used as a
+ * cheap `indexOf` file-level gate before the regex runs. Inline flags
+ * (`(?i)` / `(?im)` / `(?i:...)`) are translated to JS flags by
+ * `compilePattern`.
  *
- * ### File-reading strategy
- *
- * Full slurp via `Bun.file(path).text()`. The walker's
- * `maxFileSize` (default 256 KB) caps the blast radius; minified
- * bundles bigger than that never reach us. CRLF line endings are
- * preserved verbatim in the emitted match text.
- *
- * ### Matching strategy
- *
- * Before matching, `setupGrepPipeline` extracts a literal prefix
- * from the compiled regex (when possible). If the file doesn't
- * contain that literal, it can't possibly match — skip via cheap
- * `indexOf`. Files that pass the gate, or patterns with no
- * extractable literal, go through `grepByWholeBuffer`, which clones
- * the compiled regex per file (`/g`-augmented, plus `/m` when
- * `multiline` is true), iterates via `regex.exec(content)` on the
- * full buffer, and emits one `GrepMatch` per matching line
- * (advancing `lastIndex` past the line's newline so the next match
- * starts on a fresh line). Inline flags `(?i)` / `(?im)` / `(?i:...)`
- * are translated to JS flags by `compilePattern`.
+ * When the runtime supports `new Worker(url)`, batches of file paths
+ * are dispatched to a worker pool; otherwise the pipeline falls back
+ * to main-thread `mapFilesConcurrent`. Disable workers for tests or
+ * debugging via `SENTRY_SCAN_DISABLE_WORKERS=1`.
  */
 
 import { handleFileError } from "../dsn/fs-utils.js";
@@ -78,10 +65,6 @@ import {
 /** Default line-truncation length for the init-wizard wire shape. */
 const DEFAULT_MAX_LINE_LENGTH = 2000;
 
-/**
- * Build a stats object seeded with zeros. Separated so both iterable
- * and collector paths share the init logic.
- */
 function createStats(): GrepStats {
   return {
     filesConsidered: 0,
@@ -92,11 +75,6 @@ function createStats(): GrepStats {
   };
 }
 
-/**
- * Wrap an async iterable to count each yielded entry into `stats`.
- * Lets `grepFiles`' internal pipeline observe the walker's output
- * without re-iterating it.
- */
 async function* tapWalkerStats<T extends WalkEntry>(
   source: AsyncIterable<T>,
   stats: GrepStats
@@ -107,11 +85,6 @@ async function* tapWalkerStats<T extends WalkEntry>(
   }
 }
 
-/**
- * Filter walker entries by the grep-specific criteria (binary +
- * include/exclude). Files that fail the filter are swallowed; the
- * downstream per-file worker never sees them.
- */
 async function* applyGrepFilters(
   source: AsyncIterable<WalkEntry>,
   opts: {
@@ -143,17 +116,6 @@ async function* applyGrepFilters(
   }
 }
 
-/**
- * Options bundle for `readAndGrep` — collecting into one param keeps
- * Biome's `useMaxParams` rule happy.
- *
- * The regex is cloned per file at the top of `readAndGrep` so each
- * worker gets its own `lastIndex`. The `multiline` flag controls
- * whether `/m` is applied (line-boundary anchoring on) or not
- * (buffer-boundary anchoring); we can't infer this from `regex.flags`
- * because the caller's intent matters independent of whatever flags
- * `compilePattern` already set.
- */
 type PerFileOptions = {
   regex: RegExp;
   multiline: boolean;
@@ -161,51 +123,24 @@ type PerFileOptions = {
   maxMatchesPerFile: number;
   pathPrefix: string;
   /**
-   * Optional literal prefilter — when set, the per-file path runs
-   * a cheap `indexOf(literal)` gate before invoking the regex
-   * engine. Files that don't contain the literal are skipped
-   * entirely. Computed once per `collectGrep`/`grepFiles` call via
-   * `extractInnerLiteral`.
+   * Pre-extracted literal for the file-level prefilter. Null when
+   * the pattern has no safe extractable literal (top-level
+   * alternation, all-metachar, etc.).
    *
-   * NOTE: the gate is file-level only. We intentionally do NOT use
-   * the literal to locate individual matches — patterns that can
-   * span newlines (e.g., `foo\sbar` where `\s` matches `\n`) and
-   * patterns whose literal differs from the compiled form (e.g.,
-   * `\x41foo` matches `Afoo`, not `\x41foo`) would both produce
-   * silent misses under per-line verify.
+   * The gate is file-level only — we never use the literal to
+   * locate individual matches. Patterns that can match across
+   * newlines or whose literal differs from the compiled form would
+   * both produce silent misses under a per-line verify.
    */
   literal: string | null;
-  /**
-   * When true, each emitted `GrepMatch` carries `mtime` (the
-   * source file's floored `mtimeMs`). The walker produces it; the
-   * grep path just forwards it. Incurs one extra stat per file at
-   * the walker layer.
-   */
+  /** When true, emitted `GrepMatch` entries carry `mtime`. */
   recordMtimes: boolean;
 };
 
 /**
- * Read one file's content and emit one `GrepMatch` per matching line.
- *
- * ### Implementation note
- *
- * We iterate matches via `content.matchAll(regex)` on the whole
- * buffer rather than `content.split("\n")` + per-line `regex.test`.
- * The split approach allocates one string per line (millions on
- * large repos), which dominates CPU on grep's hot path; whole-buffer
- * matchAll does the same work 10-12× faster because the regex engine
- * already understands `^`/`$`/`\n` and doesn't need a TS-side split.
- *
- * Line numbers are computed by incrementally counting `\n` up to
- * each match's offset with a running cursor — O(content_length) total
- * per file, amortized across all matches. For files with zero matches
- * the line-count work is O(0).
- *
- * Per-line emission: to match the init-wizard / rg contract (one
- * `GrepMatch` per matching line, not per in-line match), we advance
- * the regex's `lastIndex` past the end of the matched line before
- * the next `matchAll` iteration. Without this skip, a regex like
- * `/foo/g` on `"foo foo"` would emit two matches on the same line.
+ * Read one file and emit one `GrepMatch` per matching line.
+ * Applies the literal-prefilter gate when available, then runs the
+ * whole-buffer regex.
  */
 async function readAndGrep(
   entry: WalkEntry,
@@ -222,80 +157,33 @@ async function readAndGrep(
     return null;
   }
 
-  // File-level prefilter gate. If the pattern has an extractable
-  // literal, skip the regex engine entirely on files that don't
-  // contain the literal — ripgrep's central optimization, adapted.
-  //
-  // Important: this is a FILE-level gate only. We deliberately do
-  // NOT attempt to use the literal to find/verify matches line-by-
-  // line. That approach has subtle correctness failures for patterns
-  // that can match across newlines (e.g., `foo\sbar` where `\s`
-  // matches `\n`) and for patterns whose literal isn't what the
-  // regex engine actually matches (e.g., `\x41foo` matches `Afoo`,
-  // not the literal string `\x41foo`; and `(?i:foo|bar)baz` compiles
-  // to `foo|barbaz` with different alternation structure).
-  //
-  // Keeping the gate at file-level sidesteps all of that: we only
-  // use `indexOf(literal)` to quickly reject files that can't match,
-  // and let V8's regex engine handle the actual matching. The perf
-  // win is still substantial because most files in a large tree
-  // contain zero instances of the literal, and `indexOf` is much
-  // cheaper than constructing the regex engine's NFA state.
-  //
-  // Preconditions for the gate:
-  // - Literal must be extractable AND not case-sensitivity-altered
-  //   in a way that breaks indexOf (so: either case-sensitive search,
-  //   OR content.toLowerCase() preserves length).
-  // - The literal must actually be something the compiled regex MUST
-  //   match — guaranteed by `extractInnerLiteral` operating on the
-  //   compiled regex source (see `setupGrepPipeline`).
   if (opts.literal !== null) {
-    const isCaseInsensitive = opts.regex.flags.includes("i");
-    // Note: for case-insensitive search, `content.toLowerCase()` may
-    // be LONGER than `content` (e.g., Turkish `İ` → `i` + U+0307).
-    // That's fine because we only use the result as a boolean gate:
-    // "does the literal exist anywhere in this file?" The returned
-    // position is never used as a `content` offset — the whole-buffer
-    // regex engine does the actual match localization.
-    const haystack = isCaseInsensitive ? content.toLowerCase() : content;
+    // Case-insensitive search: lowercase the haystack for the gate.
+    // This may change string length (e.g., Turkish `İ` → `i` + U+0307),
+    // but we only use the result as a boolean "does the literal exist?"
+    // — the returned position is never used as a content offset.
+    const haystack = opts.regex.flags.includes("i")
+      ? content.toLowerCase()
+      : content;
     if (haystack.indexOf(opts.literal) === -1) {
       return [];
     }
-    // File contains the literal — fall through to the whole-buffer
-    // matcher. The regex engine handles the actual matching; the
-    // literal gate only ruled out files that can't possibly match.
   }
 
   return grepByWholeBuffer(content, entry, opts);
 }
 
 /**
- * Whole-buffer grep — runs the compiled regex across the full file
- * content, emitting one `GrepMatch` per match's enclosing line.
- *
- * This is the primary matching implementation. The file-level
- * literal gate in `readAndGrep` may skip files that have no chance
- * of matching, but once a file reaches this function the regex
- * engine does the actual work.
+ * Whole-buffer regex iteration. Clones the compiled regex so each
+ * invocation has its own `lastIndex`. `/g` is always applied;
+ * `/m` is applied when the caller opted into line-boundary
+ * anchoring (the default — see `GrepOptions.multiline`).
  */
 function grepByWholeBuffer(
   content: string,
   entry: WalkEntry,
   opts: PerFileOptions
 ): GrepMatch[] {
-  // Whole-buffer iteration requires `/g`. `/m` (line-boundary
-  // anchoring) is applied when the caller opts into grep-like
-  // semantics via `opts.multiline` (the default — see `GrepOptions`
-  // docstring). If the caller explicitly set `multiline: false`,
-  // anchor `^/$` to the buffer boundaries like raw JS semantics.
-  //
-  // We clone the regex per file so each invocation has its own
-  // `lastIndex`. Today the exec/loop block runs synchronously with
-  // no `await`, so concurrent `readAndGrep` workers can't actually
-  // observe each other's `lastIndex` mutations (JS is single-threaded;
-  // microtasks only yield at `await`). But the clone is still worth
-  // paying — ~1µs per file — to eliminate the foot-gun if anyone
-  // ever introduces an `await` inside the match loop.
   const ensured = opts.multiline
     ? ensureGlobalMultilineFlags(opts.regex)
     : ensureGlobalFlag(opts.regex);
@@ -303,10 +191,8 @@ function grepByWholeBuffer(
   const ctx: MatchContext = { entry, opts, content };
 
   const matches: GrepMatch[] = [];
-  // Advance `cursor` to each match index using `indexOf("\n", cursor)`
-  // in a loop — skipping newline-to-newline instead of walking char-
-  // by-char via `charCodeAt`. 2-5× faster because V8 implements
-  // `indexOf` in optimized C++ with no per-iteration JS interop.
+  // Track line numbers by jumping newline-to-newline with `indexOf`
+  // — faster than a `charCodeAt` walk (V8 optimizes `indexOf` in C++).
   let lineNum = 1;
   let cursor = 0;
   let match = regex.exec(content);
@@ -328,18 +214,13 @@ function grepByWholeBuffer(
     if (lineEndRaw === -1) {
       break;
     }
+    // Advance past the line so we emit at most one match per line.
     regex.lastIndex = lineEnd + 1;
     match = regex.exec(content);
   }
   return matches;
 }
 
-/**
- * Per-call context for `buildMatch` — bundles args that stay
- * constant for the duration of a file's scan (entry, opts, content)
- * separately from args that change per match (lineNum, lineStart,
- * lineEnd). Keeps Biome's useMaxParams under the 4-param ceiling.
- */
 type MatchContext = {
   entry: WalkEntry;
   opts: PerFileOptions;
@@ -352,7 +233,6 @@ type LineBounds = {
   lineEnd: number;
 };
 
-/** Build a `GrepMatch` record for one line. Shared by all grep paths. */
 function buildMatch(ctx: MatchContext, bounds: LineBounds): GrepMatch {
   const rawLine = ctx.content.slice(bounds.lineStart, bounds.lineEnd);
   const line =
@@ -373,10 +253,6 @@ function buildMatch(ctx: MatchContext, bounds: LineBounds): GrepMatch {
   return match;
 }
 
-/**
- * Build walker options from grep options — the set that `walkFiles`
- * actually consumes. Anything grep-specific stays in grep.
- */
 function buildWalkOptions(opts: GrepOptions, root: string): WalkOptions {
   return {
     cwd: root,
@@ -397,9 +273,6 @@ function buildWalkOptions(opts: GrepOptions, root: string): WalkOptions {
   };
 }
 
-/**
- * Options for `grepFilesInternal` — keeps arity down for Biome.
- */
 type GrepPipelineOptions = {
   regex: RegExp;
   perFile: PerFileOptions;
@@ -411,38 +284,14 @@ type GrepPipelineOptions = {
 };
 
 /**
- * Batch size for worker dispatch. Each batch is a chunk of N file
- * paths the worker will read + grep in one go. Benched on
- * synthetic/large (10k files): 100 = 420ms, 200 = 275ms (streamed),
- * 400 = 290ms. The plateau is around 200 — too small and postMessage
- * overhead dominates; too large and we lose per-worker parallelism
- * because the walker finishes yielding before the first worker
- * returns.
+ * Batch size for worker dispatch. Bench (synthetic/large, 10k files):
+ * 100 → 420ms, 200 → 275ms (plateau), 400 → 290ms. Too small and
+ * `postMessage` overhead dominates; too large and we lose parallelism
+ * because the walker finishes before workers return.
  */
 const WORKER_BATCH_SIZE = 200;
 
-/**
- * The internal pipeline. Separated from the public entry points so
- * `grepFiles` and `collectGrep` share it.
- *
- * Two execution strategies:
- *
- * 1. **Worker pool** (default when the runtime supports `new Worker`
- *    + `Blob` + `URL.createObjectURL`): walker streams paths on the
- *    main thread, paths are batched into chunks of
- *    `WORKER_BATCH_SIZE`, each batch is dispatched round-robin to
- *    a lazy-initialized pool of workers. Workers return matches
- *    packed as `Uint32Array` + a shared string pool (transferable,
- *    zero-copy). Main thread decodes and yields.
- *
- * 2. **Async fallback** (when workers aren't available — e.g. some
- *    Node library embeddings): falls back to `mapFilesConcurrent`
- *    on the main thread. Same result, ~4× slower on large workloads.
- *
- * Worker disablement for tests or debugging: set
- * `SENTRY_SCAN_DISABLE_WORKERS=1`.
- */
-// biome-ignore lint/suspicious/useAwait: async generator that dispatches to one of two sub-generators via `yield*`; no `await` needed in the dispatcher itself
+// biome-ignore lint/suspicious/useAwait: yield* delegates to sub-generators
 async function* grepFilesInternal(
   opts: GrepPipelineOptions
 ): AsyncGenerator<GrepMatch> {
@@ -453,11 +302,6 @@ async function* grepFilesInternal(
   yield* grepViaAsyncMain(opts);
 }
 
-/**
- * Returns true when the worker path should be used. Gated on the
- * runtime capability check (`isWorkerSupported`) and the
- * `SENTRY_SCAN_DISABLE_WORKERS` env var (for tests + debugging).
- */
 function shouldUseWorkers(): boolean {
   if (process.env.SENTRY_SCAN_DISABLE_WORKERS === "1") {
     return false;
@@ -466,10 +310,8 @@ function shouldUseWorkers(): boolean {
 }
 
 /**
- * Fallback pipeline: `mapFilesConcurrentStream` on the main thread.
- * Used when the worker pool is unavailable or explicitly disabled.
- * Identical semantics to the worker path; ~4× slower on 10k-file
- * many-match workloads.
+ * Main-thread fallback. Identical semantics to the worker path;
+ * ~4× slower on 10k-file many-match workloads.
  */
 async function* grepViaAsyncMain(
   opts: GrepPipelineOptions
@@ -478,10 +320,8 @@ async function* grepViaAsyncMain(
     opts.walkSource,
     async (entry) => {
       const matches = await readAndGrep(entry, opts.perFile);
-      // `filesRead` is documented as "files whose content was read
-      // and tested against the pattern" — only increment when
-      // `readAndGrep` actually succeeded (returned a non-null array).
-      // A null return means the open failed; we don't count those.
+      // Only count `filesRead` on successful read — a null return
+      // means the open failed.
       if (matches !== null) {
         opts.stats.filesRead += 1;
       }
@@ -503,28 +343,10 @@ async function* grepViaAsyncMain(
 }
 
 /**
- * Worker-based pipeline. Streams paths from the walker, batches
- * them, dispatches to workers, decodes results, yields matches in
- * worker-completion order (not walker order).
- *
- * ### Streaming + early-exit
- *
- * Walker runs on main thread. As paths arrive, we accumulate into a
- * `batch: string[]`. When the batch reaches `WORKER_BATCH_SIZE` we
- * dispatch it and start a new batch. Each dispatch returns a
- * promise; we race the set of in-flight dispatches so the first
- * batch to finish yields its matches first (workers may complete
- * out of order).
- *
- * On `maxResults`/`stopOnFirst`, we stop dispatching new batches.
- * In-flight batches keep running (no cancellation API on workers)
- * but their results are discarded once we've exited.
- *
- * `filesRead` counts all paths dispatched to workers — we don't
- * distinguish "read successfully" from "open failed" at the worker
- * boundary (the worker swallows the error and produces zero matches
- * for that path). For the main-thread fallback the stat is more
- * precise.
+ * Worker pipeline. Walker streams paths on the main thread; paths
+ * are batched, each batch dispatches round-robin to the pool,
+ * workers return packed results via transferable `Uint32Array`.
+ * Main thread decodes and yields in worker-completion order.
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: producer/consumer pattern with early exit, batch dispatch, and abort-signal propagation is inherently branchy
 async function* grepViaWorkers(
@@ -532,13 +354,10 @@ async function* grepViaWorkers(
 ): AsyncGenerator<GrepMatch> {
   const pool = getWorkerPool();
 
-  // Queue of completed batches ready to emit. Filled by dispatched
-  // worker promises as they resolve; drained by this generator.
   const pending: GrepMatch[][] = [];
-  // Consumer wait state: `pendingNotify` is a one-shot resolver set
-  // by the consumer when it's about to wait; `notifyPending` tracks
-  // a notification that arrived while no one was waiting, so the
-  // consumer picks it up on next loop iteration.
+  // Consumer wait state. `notifyPending` is set when `wakeConsumer`
+  // fires before the consumer is waiting, so the consumer picks it
+  // up on the next loop iteration instead of missing the wakeup.
   let pendingNotify: (() => void) | null = null;
   let notifyPending = false;
   const wakeConsumer = () => {
@@ -555,22 +374,12 @@ async function* grepViaWorkers(
   let walkerDone = false;
   let inflightCount = 0;
 
-  // Tracks batches that failed at dispatch time (worker error,
-  // "all workers dead", etc.) so we can surface silent-failure
-  // scenarios to the caller. A single failed batch is not fatal
-  // (its results are dropped — per-file errors are already expected
-  // to be swallowed inside the worker), but if every batch fails
-  // we throw so callers aren't handed a false-negative empty result
-  // that could poison downstream caches.
+  // Track dispatch outcomes so the consumer's `finally` can detect
+  // a pipeline-wide failure. `dispatchPromises` is awaited to ensure
+  // `failedBatches` is final before we check it (otherwise an
+  // early-exit could race the in-flight `.catch()` handlers).
   let dispatchedBatches = 0;
   let failedBatches = 0;
-  // Track dispatch promises so the consumer's `finally` can await
-  // them before checking the failure counters. Without this, an
-  // early exit (e.g., AbortError, maxResults = 0) could race the
-  // final failure assessment: the consumer's finally runs before
-  // in-flight dispatch `.catch()` handlers have bumped
-  // `failedBatches`, causing a legitimate all-failure scenario to
-  // silently pass through as "no matches found."
   const dispatchPromises: Promise<unknown>[] = [];
 
   const dispatchBatch = (
@@ -594,16 +403,9 @@ async function* grepViaWorkers(
       })
       .then(
         (result) => {
-          // `decodeWorkerMatches` attaches per-file mtime by pathIdx
-          // when `mtimes` is non-null. Mtime comes from the walker
-          // (main thread) — worker doesn't need to stat again.
           pending.push(decodeWorkerMatches(result, paths, rels, mtimes));
         },
         () => {
-          // Worker error — drop this batch's results. Per-file errors
-          // are already swallowed inside the worker itself. Counted so
-          // the consumer can surface total-pipeline failure if every
-          // batch failed.
           failedBatches += 1;
         }
       )
@@ -614,18 +416,14 @@ async function* grepViaWorkers(
     dispatchPromises.push(dispatchP);
   };
 
-  // Producer: walk paths, batch them, dispatch each full batch.
-  // Errors thrown by the walker (e.g. `AbortError` when the caller
-  // signals abort) propagate to the consumer via `producerError`.
   let producerError: unknown = null;
   const recordMtimes = opts.perFile.recordMtimes;
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: walker drain + path-prefix handling + batch flush + error capture is inherently branchy
   const producer = (async () => {
     let batch: string[] = [];
     let batchRel: string[] = [];
-    // Per-batch mtime array (parallel to `batch`). Only allocated
-    // when the caller opts in via `recordMtimes`; otherwise stays
-    // null and the decoder skips the `mtime` field entirely.
+    // Per-batch mtime array, parallel to `batch`. Allocated only
+    // when the caller opted into `recordMtimes`.
     let batchMtimes: number[] | null = recordMtimes ? [] : null;
     try {
       for await (const entry of opts.walkSource) {
@@ -648,7 +446,6 @@ async function* grepViaWorkers(
           batchMtimes = recordMtimes ? [] : null;
         }
       }
-      // Final partial batch.
       if (batch.length > 0) {
         dispatchBatch(batch, batchRel, batchMtimes);
       }
@@ -660,9 +457,8 @@ async function* grepViaWorkers(
     }
   })();
 
-  // Helper to check + throw on aborted signal. Matches the behavior
-  // of `walkFiles` which throws `DOMException("AbortError")` on the
-  // next yield when the signal fires mid-iteration.
+  // `walkFiles` throws `DOMException("AbortError")` on the next
+  // yield after the signal fires; mirror that in the consumer.
   const checkAborted = (): void => {
     const signal = opts.concurrent.signal;
     if (signal?.aborted) {
@@ -670,13 +466,9 @@ async function* grepViaWorkers(
     }
   };
 
-  // Consumer: drain `pending` as batches complete, yielding matches
-  // and respecting `maxResults`/`stopOnFirst`. Wait for `notify`
-  // when there's nothing to emit and more work is in flight.
   try {
     while (!earlyExit) {
       checkAborted();
-      // Emit everything currently pending.
       while (pending.length > 0) {
         checkAborted();
         const matches = pending.shift();
@@ -705,14 +497,12 @@ async function* grepViaWorkers(
       if (earlyExit) {
         break;
       }
-      // Nothing pending. If the walker is done AND no in-flight
-      // batches remain, we're finished.
       if (walkerDone && inflightCount === 0) {
         break;
       }
-      // Otherwise, wait for something to happen. Check for a
-      // pre-arrived notification first to avoid missing wakeups
-      // that happened while we were iterating `pending`.
+      // Wait for something to happen. Check for a pre-arrived
+      // notification first to avoid missing wakeups that fired while
+      // we were draining `pending`.
       if (notifyPending) {
         notifyPending = false;
         continue;
@@ -727,36 +517,25 @@ async function* grepViaWorkers(
       });
     }
   } finally {
-    // Ensure the producer settles even on early exit so errors
-    // surface in the next run (pool promises stay alive otherwise).
     earlyExit = true;
     wakeConsumer();
     await producer;
     // Await every dispatched batch so `failedBatches` is final
-    // before we inspect it. Without this, an early exit could run
-    // the failure check before in-flight `.catch()` handlers
-    // bumped the counter — collapsing an all-failure scenario into
-    // a silent "no matches" return. `allSettled` because we don't
-    // care about individual rejections here (each was already
-    // counted via the dispatch's `.catch()` handler).
+    // before the pipeline-failure check. Without this the failure
+    // check can race in-flight `.catch()` handlers on early exit.
     if (dispatchPromises.length > 0) {
       await Promise.allSettled(dispatchPromises);
     }
-    // If the walker threw (typically `AbortError`), re-throw so the
-    // caller sees the same behavior as the async-fallback path.
     if (producerError !== null) {
-      // biome-ignore lint/correctness/noUnsafeFinally: intentional — re-raising walker error (e.g., AbortError) so callers see it
+      // biome-ignore lint/correctness/noUnsafeFinally: re-raising walker error (e.g. AbortError) so callers see it
       throw producerError;
     }
-    // Worker-pipeline failure detector: if at least one batch was
-    // dispatched AND every dispatched batch failed, the pipeline
-    // returned zero matches due to worker failures — NOT due to the
-    // regex not matching. We must surface this so callers (notably
-    // the DSN cache layer) don't persist a false-negative empty
-    // result. A partial failure (some batches succeeded) is
-    // acceptable — we've at least reported the matches we did find.
+    // If every dispatched batch failed, the "no matches" result is
+    // a pipeline failure, not a genuine zero-match. Surface it so
+    // callers (notably the DSN cache layer) don't persist a
+    // false-negative empty result.
     if (dispatchedBatches > 0 && failedBatches === dispatchedBatches) {
-      // biome-ignore lint/correctness/noUnsafeFinally: intentional — surfacing pipeline-wide failure so false-negative empty result doesn't leak upstream
+      // biome-ignore lint/correctness/noUnsafeFinally: surfacing pipeline-wide failure so false-negative empty result doesn't leak upstream
       throw new Error(
         `worker pipeline: all ${dispatchedBatches} dispatched batch(es) failed`
       );
@@ -764,12 +543,6 @@ async function* grepViaWorkers(
   }
 }
 
-/**
- * Resolve the regex flags to send to the worker. Matches the logic
- * in `grepByWholeBuffer` — always `/g` (required for iteration),
- * plus `/m` when the caller opted into line-boundary semantics (the
- * default).
- */
 function resolveWorkerFlags(opts: PerFileOptions): string {
   const ensured = opts.multiline
     ? ensureGlobalMultilineFlags(opts.regex)
@@ -777,25 +550,10 @@ function resolveWorkerFlags(opts: PerFileOptions): string {
   return ensured.flags;
 }
 
-/**
- * Resolved pipeline inputs shared by `grepFiles` and `collectGrep`.
- * Extracted so both entry points get the same default-resolution,
- * pattern compilation, matcher compilation, walker construction, and
- * filter wiring — a divergence between the two would be a silent
- * correctness bug.
- */
 type GrepPipelineSetup = {
   regex: RegExp;
   multiline: boolean;
-  /**
-   * Pre-extracted literal prefilter (see `extractInnerLiteral`). Null
-   * when the pattern has no safe extractable literal (top-level
-   * alternation, all-metachar, etc.). When set, `readAndGrep` uses
-   * it as a file-level gate via `indexOf` — files without the literal
-   * are skipped entirely.
-   */
   literal: string | null;
-  /** Mirrors `GrepOptions.recordMtimes`. Threaded into PerFileOptions. */
   recordMtimes: boolean;
   stats: GrepStats;
   walkSource: AsyncIterable<WalkEntry>;
@@ -809,38 +567,23 @@ type GrepPipelineSetup = {
 };
 
 /**
- * Resolve all defaults + compile + wire the walker. Both `grepFiles`
- * and `collectGrep` consume this — keeps defaults in one place.
+ * Resolve defaults, compile the regex, extract a literal prefilter,
+ * compile include/exclude matchers, and wire the walker. Shared by
+ * `grepFiles` and `collectGrep` — divergence between the two would
+ * be a silent correctness bug.
  *
- * Extracts a literal prefix/substring from the compiled regex (if
- * possible) so the per-file path can use `indexOf` as a file-level
- * gate. The gate is conservative: we only use it to skip files that
- * can't possibly contain a match; the whole-buffer matcher handles
- * the actual matching.
+ * Literal extraction runs on `regex.source` (the compiled form), not
+ * the raw user pattern. `compilePattern` rewrites scoped inline flags
+ * like `(?i:foo|bar)baz` into `foo|barbaz` + `i` flag — extracting
+ * from the original would miss the top-level alternation and pick a
+ * bogus required literal, silently dropping one branch of matches.
  */
 function setupGrepPipeline(opts: GrepOptions): GrepPipelineSetup {
-  // Default `multiline: true` — matches grep/rg's line-boundary
-  // anchoring semantics. Callers opt out with `multiline: false` for
-  // buffer-boundary JS semantics.
   const multiline = opts.multiline ?? true;
   const regex = compilePattern(opts.pattern, {
     caseSensitive: opts.caseSensitive,
     multiline,
   });
-
-  // Literal extraction runs on the COMPILED regex's source, not the
-  // raw user input. `compilePattern` rewrites scoped inline flags
-  // like `(?i:foo|bar)baz` — strip the group and widen the flag,
-  // which yields `foo|barbaz` (source) + `i` (flag). The rewritten
-  // source has top-level alternation the original lacked. If we
-  // extracted from the original, `hasTopLevelAlternation` would miss
-  // it and we'd extract `"baz"` as a "required" literal — but the
-  // compiled regex can match `foo` alone, silently dropping lines
-  // that match the first branch of the alternation.
-  //
-  // Always extract from `regex.source` so the extractor sees what
-  // the regex engine will actually run. `regex.flags` is authoritative
-  // for case-sensitivity either way.
   const literal = extractInnerLiteral(regex.source, regex.flags);
 
   const includes = compileMatchers(opts.include);
@@ -874,16 +617,9 @@ function setupGrepPipeline(opts: GrepOptions): GrepPipelineSetup {
 }
 
 /**
- * Public entry point — yield one `GrepMatch` per matching line under
- * `opts.cwd`. Consumer `break` halts in-flight work (via the
- * concurrent-stream's internal early-exit flag).
- *
- * Throws `ValidationError` on bad regex input; propagates
- * `AbortError` from the `signal`.
- *
- * The `yield*` delegates to the internal pipeline, which does the
- * actual async work — `async *` is required so callers get an
- * `AsyncGenerator<GrepMatch>`.
+ * Stream one `GrepMatch` per matching line under `opts.cwd`.
+ * Consumer `break` halts in-flight work. Throws `ValidationError`
+ * on bad regex input; propagates `AbortError` from `opts.signal`.
  */
 // biome-ignore lint/suspicious/useAwait: yield* delegates to async generator
 export async function* grepFiles(opts: GrepOptions): AsyncGenerator<GrepMatch> {
@@ -912,23 +648,18 @@ export async function* grepFiles(opts: GrepOptions): AsyncGenerator<GrepMatch> {
 }
 
 /**
- * Drain `grepFiles` into a sorted-by-[path, lineNum] array alongside
+ * Drain `grepFiles` into a sorted-by-[path, lineNum] array plus
  * aggregate stats. Primary entry point for Promise-returning callers
  * (init wizard, diagnostic scripts).
- *
- * Sort order is stable across runs: byte-lexicographic on `path`,
- * numeric ascending on `lineNum` within a path.
  */
 export async function collectGrep(opts: GrepOptions): Promise<GrepResult> {
   const setup = setupGrepPipeline(opts);
 
-  // Ask the iterator for one extra match past `maxResults` so we can
-  // distinguish "exactly maxResults matches existed" from "more
-  // existed but we stopped". Without this +1 probe, the iterator
-  // would flip `stats.truncated = true` the moment it emits the
-  // N-th match, regardless of whether an (N+1)-th was available.
-  // Same pattern as `collectGlob`; see the lore entry on
-  // `collectGlob/collectGrep truncation flag`.
+  // Probe for one extra match past `maxResults` so we can distinguish
+  // "exactly N matches existed" from "more existed but we stopped."
+  // Without the +1 probe the iterator flips `truncated = true` the
+  // moment it emits the N-th match, regardless of whether an (N+1)-th
+  // was available.
   const probeLimit = Number.isFinite(setup.maxResults)
     ? Math.min(Number.MAX_SAFE_INTEGER, setup.maxResults + 1)
     : Number.POSITIVE_INFINITY;
@@ -956,24 +687,20 @@ export async function collectGrep(opts: GrepOptions): Promise<GrepResult> {
     stopOnFirst: setup.stopOnFirst,
   })) {
     if (matches.length >= setup.maxResults) {
-      // We've got the overshoot match — there ARE more results than
-      // the caller asked for. Stop draining, flag truncation.
       truncated = true;
       break;
     }
     matches.push(match);
   }
   matches.sort(compareMatches);
-  // Reflect the collector-level truncation in the stats bag the
-  // iterator populated. Preserves stopOnFirst-path flag (stats.truncated
-  // is already set by the iterator in that case).
+  // Preserve stopOnFirst-path flag (iterator already set it in that
+  // case); otherwise reflect the collector-level truncation.
   if (truncated) {
     setup.stats.truncated = true;
   }
   return { matches, stats: setup.stats };
 }
 
-/** [path, lineNum] lexicographic comparator for stable collectGrep output. */
 function compareMatches(a: GrepMatch, b: GrepMatch): number {
   if (a.path < b.path) {
     return -1;

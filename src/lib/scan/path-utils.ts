@@ -1,9 +1,7 @@
 /**
  * Internal path + pattern utilities shared by the grep and glob
- * engines in `src/lib/scan/`. Not part of the public barrel — these
- * are implementation details we factored out to stop two very similar
- * copies of the same logic drifting apart over time (flagged in PR
- * 791 review).
+ * engines. Not part of the public barrel — implementation details
+ * factored out to prevent drift between the two engines.
  */
 
 import path from "node:path";

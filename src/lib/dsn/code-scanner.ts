@@ -1,51 +1,29 @@
 /**
- * Language-Agnostic DSN Code Scanner (policy layer).
+ * Language-agnostic DSN code scanner.
  *
- * This module owns the DSN-specific policy (URL regex, comment-line
- * filtering, host validation, package-path inference, stop-on-first
- * semantics). All file walking, `.gitignore` handling, extension
- * filtering, bounded concurrency, AND worker-pool dispatch are
- * delegated to the shared `src/lib/scan/` module via `collectGrep`.
+ * Owns the DSN-specific policy (URL regex, comment-line filtering,
+ * host validation, package-path inference). File walking, gitignore
+ * handling, extension filtering, bounded concurrency, and worker-pool
+ * dispatch are delegated to `src/lib/scan/`.
  *
- * Flow:
- *   1. `scanDirectory(cwd, stopOnFirst)` calls `collectGrep` with the
- *      DSN pattern and preset (`dsnScanOptions()`), plus
- *      `recordMtimes: true` and an `onDirectoryVisit` hook so the
- *      cache-invalidation maps are populated in one traversal.
- *   2. `collectGrep` dispatches per-file work to the worker pool (when
- *      available) or a concurrent-async fallback. Each yielded
- *      `GrepMatch` represents one line containing a DSN URL; the
- *      grep engine handles the file-level literal gate (`http`) for
- *      free, so we skip files that can't possibly match before any
- *      regex runs.
- *   3. Main thread post-filters each match:
- *      - Skip commented lines (language-aware comment prefixes)
- *      - Re-run `DSN_PATTERN` on `match.line` to recover all DSNs
- *        (grep emits one match per line regardless of how many
- *        hits the line contains — rare for DSNs but the contract
- *        predates this refactor)
- *      - Validate host (`isValidDsnHost`)
- *      - Dedup on raw DSN string
- *      - Early-exit on first unique DSN when `stopOnFirst: true`
- *      - Build `DetectedDsn` with inferred package path
- *   4. `sourceMtimes` records mtime per file that contributed a
- *      validated DSN; `dirMtimes` records mtime per visited dir via
- *      the hook. Both are used by `src/lib/db/dsn-cache.ts` for
- *      cache invalidation.
+ * ### Flow
  *
- * Behavior change landed in PR 3: the walker's `nestedGitignore: true`
- * default (via `dsnScanOptions()`) means nested `.gitignore` files are
- * now honored. Pre-PR-3 code only read the project-root `.gitignore`.
- * This is a correctness improvement matching git's cumulative semantics;
- * DSNs in files covered by a subdir `.gitignore` are no longer detected.
+ * `scanCodeForDsns` routes through `collectGrep(DSN_PATTERN, ...)`.
+ * Each emitted `GrepMatch` is one line containing a DSN-like URL;
+ * the scanner post-filters matches on the main thread (comment-line
+ * check, host validation, dedup). `sourceMtimes` / `dirMtimes` are
+ * populated via `recordMtimes: true` + the `onDirectoryVisit` hook
+ * in a single traversal.
  *
- * Behavior change landed in PR 6 (this one): the DSN scanner now shares
- * the grep pipeline and gets worker-pool parallelism for free.
- * End-to-end time on the 10k-file fixture drops from ~330ms → ~200ms.
- * Correctness is unchanged — `extractDsnsFromContent` is still
- * exported for `src/lib/dsn/detector.ts::isDsnStillPresent` (the
- * cache-verify fast path for a single file) and internally we still
- * go through the same comment/host-validation filter.
+ * `scanCodeForFirstDsn` deliberately avoids the worker pool — the
+ * pool's ~20ms startup cost dwarfs the work for a stop-on-first scan
+ * that typically finds its target in the first few files. Uses a
+ * direct `walkFiles` loop instead.
+ *
+ * Both the `CodeScanResult` shape and the result-map semantics are
+ * cache-contract-stable — `src/lib/db/dsn-cache.ts` verifies entries
+ * against the filesystem, so changing keys/values requires bumping
+ * the cache schema.
  */
 
 import path from "node:path";
@@ -58,152 +36,94 @@ import { createDetectedDsn, inferPackagePath, parseDsn } from "./parser.js";
 import { DSN_MAX_DEPTH, dsnScanOptions } from "./scan-options.js";
 import type { DetectedDsn } from "./types.js";
 
-/** Scoped logger for DSN code scanning. */
 const log = logger.withTag("dsn-scan");
 
 /**
- * Result of scanning code for DSNs, including mtimes for caching.
- *
- * Shape is stable — `src/lib/db/dsn-cache.ts` stores this via
- * `setCachedDetection` and verifies `sourceMtimes` / `dirMtimes`
- * against the filesystem. Do NOT change keys/values without also
- * bumping the cache schema.
+ * Result of scanning code for DSNs. Shape is cache-contract-stable
+ * — `src/lib/db/dsn-cache.ts` uses it directly.
  */
 export type CodeScanResult = {
-  /** All detected DSNs */
   dsns: DetectedDsn[];
   /**
-   * Map of source file paths (POSIX, relative to cwd) to their mtimes.
-   * Only files that contained at least one DSN are present — the cache
+   * Map of source file paths (POSIX, relative to cwd) → mtime.
+   * Only files containing at least one validated DSN. The cache
    * verifier uses this to detect "source file touched since last scan".
    */
   sourceMtimes: Record<string, number>;
   /**
    * Map of scanned directories (POSIX, relative to cwd; `.` for the
-   * root) to their floored `stat.mtimeMs`. The verifier uses this to
-   * detect "files added to a scanned dir since last scan".
+   * root) → floored `stat.mtimeMs`. The verifier uses this to detect
+   * "files added to a scanned dir since last scan".
    */
   dirMtimes: Record<string, number>;
 };
 
-/**
- * Common comment prefixes to detect commented-out DSNs.
- * Lines starting with these (after trimming whitespace) are ignored.
- */
+/** Comment prefixes — lines starting with any of these are ignored. */
 const COMMENT_PREFIXES = ["//", "#", "--", "<!--", "/*", "*", "'''", '"""'];
 
 /**
- * Pattern to match Sentry DSN URLs.
- * Captures the full DSN including protocol, public key, optional secret key, host, and project ID.
+ * Sentry DSN URL pattern. Supports both formats:
+ * - `https://{PUBLIC_KEY}@{HOST}/{PROJECT_ID}`
+ * - `https://{PUBLIC_KEY}:{SECRET_KEY}@{HOST}/{PROJECT_ID}`
  *
- * Formats supported:
- * - https://{PUBLIC_KEY}@{HOST}/{PROJECT_ID}
- * - https://{PUBLIC_KEY}:{SECRET_KEY}@{HOST}/{PROJECT_ID}
- *
- * Examples:
- * - https://abc123def456@o123456.ingest.us.sentry.io/4507654321
- * - https://abc123def456:secret789@sentry.example.com/123
- *
- * The public key is typically a 32-character hex string, but we accept any
- * alphanumeric string to support test fixtures and edge cases.
- *
- * Note: Uses 'g' and 'i' flags. When used with String.matchAll(), the iterator
- * always starts from the beginning regardless of lastIndex, so no reset needed.
+ * Used with `String.matchAll`, which always iterates from the start
+ * regardless of `lastIndex`.
  */
 const DSN_PATTERN =
   /https?:\/\/[a-z0-9]+(?::[a-z0-9]+)?@[a-z0-9.-]+(?:\.[a-z]+|:[0-9]+)\/\d+/gi;
 
 /**
- * Case-insensitive probe for the DSN scheme prefix. `DSN_PATTERN`
- * starts with `https?` under the `/i` flag, so any match's first 4
- * chars are some casing of `http`. The literal-prefix fast path uses
- * this probe to skip `matchAll` on files with no `http` substring —
- * the common case on large walks.
- *
- * Must be `/i` for correctness: a previous version used two
- * case-sensitive `indexOf` calls covering only all-lower and
- * all-upper, which silently missed mixed-case URLs like `Https://…`
- * or `hTtP://…`. Regressed detection on any source file with
- * unusual scheme casing.
+ * Case-insensitive probe for the DSN scheme prefix. Every DSN starts
+ * with some casing of `http`, so a file without the substring has
+ * zero candidates and can skip the `matchAll` scan entirely. `/i` is
+ * required for correctness: mixed-case schemes like `Https://` or
+ * `hTtP://` would slip through a two-indexOf (lowercase + uppercase)
+ * probe.
  */
 const HTTP_SCHEME_PROBE = /http/i;
 
 /**
- * Extract DSN URLs from file content, filtering out those in commented lines.
+ * Extract DSN URLs from file content, filtering out commented lines
+ * and hosts that don't match the configured Sentry instance.
  *
- * Algorithm:
- * 1. Find all DSN matches in the content using regex
- * 2. For each match, find the line it appears on
- * 3. Check if that line is commented out
- * 4. Validate the DSN host is acceptable
- *
- * @param content - File content to scan
- * @param limit - Maximum number of DSNs to return (undefined = no limit)
- * @returns Array of unique DSN strings found in non-commented lines
+ * @param content - File content to scan.
+ * @param limit - Stop after this many unique DSNs. Unbounded when omitted.
+ * @returns Unique DSN strings in file order.
  */
 export function extractDsnsFromContent(
   content: string,
   limit?: number
 ): string[] {
-  // Literal-prefix fast path: every DSN starts with `http://` or
-  // `https://` (case-insensitive). When the scheme doesn't appear
-  // anywhere in the file, we know there are zero candidates and can
-  // skip the `matchAll` scan entirely. On large walks (10k+ files),
-  // ~99% of files contain no `http` substring in any casing, so the
-  // probe is effectively free.
-  //
-  // Correctness note: the probe must be case-insensitive. An earlier
-  // version used two `indexOf` calls covering only all-lowercase and
-  // all-uppercase, which regressed detection on mixed-case schemes
-  // like `Https://` or `hTtP://`. `/http/i.test()` is ~5µs per file
-  // in V8 — ~16ms slower than the two-indexOf version on a 10k-file
-  // scan, a trade we accept for correctness.
   if (!HTTP_SCHEME_PROBE.test(content)) {
     return [];
   }
 
   const dsns = new Set<string>();
-
-  // Find all potential DSN matches
   for (const match of content.matchAll(DSN_PATTERN)) {
     const dsn = match[0];
-    const matchIndex = match.index;
-
-    // Skip if we've already found this DSN
     if (dsns.has(dsn)) {
       continue;
     }
-
-    // Find the line this match appears on by looking backwards for newline
+    const matchIndex = match.index;
     const lineStart = content.lastIndexOf("\n", matchIndex) + 1;
     const lineEnd = content.indexOf("\n", matchIndex);
     const line = content.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
-
-    // Skip if the line is commented
     if (isCommentedLine(line.trim())) {
       continue;
     }
-
-    // Validate it's a DSN with an acceptable host
     if (isValidDsnHost(dsn)) {
       dsns.add(dsn);
-
-      // Early exit if we've reached the limit
       if (limit !== undefined && dsns.size >= limit) {
         break;
       }
     }
   }
-
   return [...dsns];
 }
 
 /**
- * Extract the first DSN from file content.
- * Used by cache verification to check if a DSN is still present in a file.
- *
- * @param content - File content
- * @returns First DSN found or null
+ * Extract the first DSN from file content. Used by cache verification
+ * to check if a DSN is still present in a file.
  */
 export function extractFirstDsnFromContent(content: string): string | null {
   const dsns = extractDsnsFromContent(content, 1);
@@ -211,32 +131,19 @@ export function extractFirstDsnFromContent(content: string): string | null {
 }
 
 /**
- * Scan a directory for all DSNs in source code files.
- *
- * Respects .gitignore (including nested), skips large files, and
- * limits depth via `dsnScanOptions()`. Returns all unique DSNs plus
- * mtimes for cache invalidation.
+ * Scan a directory for all DSNs in source code files. Respects nested
+ * `.gitignore`, skips large files, and limits depth via
+ * `dsnScanOptions()`. Returns unique DSNs plus mtime maps for cache
+ * invalidation.
  */
 export function scanCodeForDsns(cwd: string): Promise<CodeScanResult> {
   return scanDirectory(cwd);
 }
 
 /**
- * Scan a directory and return the first DSN found.
- *
- * Optimized for the common case of single-project repositories.
- * This path deliberately avoids the worker pool — spawning workers
- * for a stopOnFirst scan adds ~20ms of startup cost that dwarfs the
- * actual work (most scans find the DSN in the first few files).
- *
- * Walks files one at a time on the main thread, reading each with
- * `Bun.file().text()` and passing through `extractFirstDsnFromContent`
- * which benefits from the `/http/i` literal fast path — ~99% of
- * files skip the full regex entirely.
- *
- * The full-scan variant `scanCodeForDsns` takes the opposite
- * tradeoff: it uses workers + parallel file reads, which is a net
- * win when we need to inspect every file.
+ * Scan a directory and return the first DSN found. Optimized for
+ * single-project repositories — deliberately avoids the worker pool
+ * (pool startup dwarfs the work on a stop-on-first scan).
  */
 export function scanCodeForFirstDsn(cwd: string): Promise<DetectedDsn | null> {
   return withTracingSpan(
@@ -293,9 +200,6 @@ export function scanCodeForFirstDsn(cwd: string): Promise<DetectedDsn | null> {
   );
 }
 
-/**
- * Check if a line is commented out based on common comment prefixes.
- */
 function isCommentedLine(trimmedLine: string): boolean {
   return COMMENT_PREFIXES.some((prefix) => trimmedLine.startsWith(prefix));
 }
@@ -303,22 +207,19 @@ function isCommentedLine(trimmedLine: string): boolean {
 /**
  * Get the expected Sentry host for DSN validation.
  *
- * When SENTRY_URL is set (self-hosted), only DSNs matching that host are valid.
- * When not set (SaaS), only *.sentry.io DSNs are valid.
+ * Self-hosted (SENTRY_URL set): only DSNs matching the configured
+ * host are valid. SaaS: only `*.sentry.io` DSNs are valid.
  *
- * @throws {ConfigError} If SENTRY_URL is set but not a valid URL
- * @returns The expected host domain for DSN validation
+ * @throws {ConfigError} If SENTRY_URL is set but not a valid URL.
  */
 function getExpectedHost(): string {
   const sentryUrl = getConfiguredSentryUrl();
 
   if (sentryUrl) {
-    // Self-hosted: only accept DSNs matching the configured host
     try {
       const url = new URL(sentryUrl);
       return url.host;
     } catch {
-      // Invalid SENTRY_HOST/SENTRY_URL - throw immediately since nothing will work
       throw new ConfigError(
         `SENTRY_HOST/SENTRY_URL "${sentryUrl}" is not a valid URL`,
         "Set SENTRY_HOST/SENTRY_URL to a valid URL (e.g., https://sentry.example.com) or unset it to use sentry.io"
@@ -326,50 +227,29 @@ function getExpectedHost(): string {
     }
   }
 
-  // SaaS: only accept *.sentry.io
   return DEFAULT_SENTRY_HOST;
 }
 
 /**
- * Validate that a DSN has an acceptable Sentry host.
- *
- * When SENTRY_URL is set (self-hosted): DSNs matching host or any subdomain are valid
- * When SENTRY_URL is not set (SaaS): only *.sentry.io DSNs are valid
- *
- * This ensures we don't detect SaaS DSNs when configured for self-hosted
- * (they can't be queried against a self-hosted instance) and vice versa.
+ * Validate that a DSN has an acceptable Sentry host. Accepts exact
+ * match or any subdomain. Prevents SaaS DSNs from being detected on
+ * self-hosted instances (and vice versa).
  */
 function isValidDsnHost(dsn: string): boolean {
   const parsed = parseDsn(dsn);
   if (!parsed) {
     return false;
   }
-
   const expectedHost = getExpectedHost();
-
-  // Accept exact match or any subdomain for both SaaS and self-hosted
-  // e.g., for sentry.io: accept sentry.io or o123.ingest.us.sentry.io
-  // e.g., for sentry.example.com: accept sentry.example.com or ingest.sentry.example.com
   return (
     parsed.host === expectedHost || parsed.host.endsWith(`.${expectedHost}`)
   );
 }
 
 /**
- * Main scan implementation. Wraps the pipeline in a traced span so
- * production dashboards + the `scanCodeForDsns` bench op stay in
- * sync. Attribute names match the pre-PR-3 scanner byte-for-byte.
- *
- * Delegates the heavy lifting to `collectGrep`:
- * - Walker config (depth, gitignore, skip dirs) from `dsnScanOptions()`.
- * - `DSN_PATTERN` as the grep pattern — the engine's literal
- *   prefilter uses `http` as a file-level gate, identical to the
- *   pre-refactor `HTTP_SCHEME_PROBE` regex.
- * - `recordMtimes: true` + `onDirectoryVisit` populate the two
- *   cache-invalidation maps in one traversal.
- * - Worker pool handles per-file read + regex in parallel; main
- *   thread post-filters each `GrepMatch` for comments and host
- *   validation.
+ * Main full-scan implementation. Delegates the walker + grep work to
+ * `collectGrep`; post-filters matches for comments and host validation
+ * on the main thread.
  */
 function scanDirectory(cwd: string): Promise<CodeScanResult> {
   return withTracingSpan(
@@ -379,12 +259,9 @@ function scanDirectory(cwd: string): Promise<CodeScanResult> {
       const sourceMtimes: Record<string, number> = {};
       const dirMtimes: Record<string, number> = {};
       const seen = new Map<string, DetectedDsn>();
-      // Dedup set for mtime recording: one entry per file that
-      // contributed a validated DSN. Used to skip redundant mtime
-      // writes in `processMatch` — `grepFiles` emits one match per
-      // matching line, so a file with 3 DSN-containing lines would
-      // otherwise trigger 3 mtime writes for the same path. NOT
-      // used for telemetry (see `stats.filesRead` below).
+      // Dedup set for mtime recording. `grepFiles` emits one match
+      // per line, so a file with 3 DSN-containing lines would trigger
+      // 3 redundant writes to `sourceMtimes` without this gate.
       const filesSeenForMtime = new Set<string>();
 
       try {
@@ -397,55 +274,33 @@ function scanDirectory(cwd: string): Promise<CodeScanResult> {
             const rel = normalizePath(path.relative(cwd, absDir)) || ".";
             dirMtimes[rel] = mtimeMs;
           },
-          // Disable line-text truncation. The default (2000 chars) is
-          // fine for interactive grep output, but would silently drop
-          // DSNs that appear past column ~1900 on long minified lines.
-          // `processMatch` re-runs `DSN_PATTERN` on `match.line`, so
-          // a `…` suffix introduced by truncation would make the
-          // regex fail at the pattern-terminating `/\d+`. The
-          // per-DSN memory cost is bounded by the walker's
-          // `maxFileSize` (256 KB) and the `seen` dedup map.
+          // Disable line truncation — the default (2000 chars) would
+          // silently drop DSNs past column ~1900 on long minified
+          // lines because `processMatch` re-runs `DSN_PATTERN` on
+          // `match.line` and the pattern-terminating `/\d+` can't
+          // survive a `…` suffix. Memory is bounded by the walker's
+          // 256 KB `maxFileSize`.
           maxLineLength: Number.POSITIVE_INFINITY,
         });
 
         for (const match of matches) {
-          processMatch(match, {
-            seen,
-            sourceMtimes,
-            filesSeenForMtime,
-          });
+          processMatch(match, { seen, sourceMtimes, filesSeenForMtime });
         }
 
-        // `stats.filesRead` is the count of files actually read and
-        // tested by the grep pipeline — matches the walker-yielded
-        // file count after the walker's own filters (extension,
-        // gitignore, etc.). Consistent with `scanCodeForFirstDsn`
-        // which counts every file it walks. `files_collected` is a
-        // legacy attribute: alias to the same count so telemetry
-        // consumers don't need to know about the historical
-        // distinction.
         span.setAttribute("dsn.files_collected", stats.filesRead);
         span.setAttributes({
           "dsn.files_scanned": stats.filesRead,
           "dsn.dsns_found": seen.size,
         });
 
-        return {
-          dsns: [...seen.values()],
-          sourceMtimes,
-          dirMtimes,
-        };
+        return { dsns: [...seen.values()], sourceMtimes, dirMtimes };
       } catch (error) {
         if (error instanceof ConfigError) {
           throw error;
         }
-        // Anything else is an unexpected walk failure. Return all
-        // three maps empty to match the pre-PR-3 scanner's error-path
-        // behavior AND avoid a cache-invalidation hole: a partial
-        // `dirMtimes` would cause the cache verifier to only check
-        // the dirs we happened to reach before the error, silently
-        // blessing the cache for dirs the walker never visited.
-        // Empty `dirMtimes` forces a full rescan on the next attempt.
+        // Unexpected walk failure: return empty maps so the cache
+        // verifier forces a full rescan on next attempt. A partial
+        // `dirMtimes` would silently bless unvisited dirs.
         span.setStatus({ code: 2, message: "Directory scan failed" });
         return { dsns: [], sourceMtimes: {}, dirMtimes: {} };
       }
@@ -458,12 +313,6 @@ function scanDirectory(cwd: string): Promise<CodeScanResult> {
   );
 }
 
-/**
- * Per-match processing context. Collected into one record so the
- * hot loop's callback stays under Biome's cognitive-complexity
- * ceiling and the caller can mutate `seen` / `sourceMtimes` /
- * `filesSeenForMtime` by reference.
- */
 type MatchProcessingContext = {
   seen: Map<string, DetectedDsn>;
   sourceMtimes: Record<string, number>;
@@ -471,16 +320,9 @@ type MatchProcessingContext = {
 };
 
 /**
- * Process one `GrepMatch` from the DSN scan:
- *
- * 1. Skip commented lines.
- * 2. Extract all DSNs on the line via `extractDsnsOnLine` (rare
- *    multi-DSN lines preserved from pre-refactor behavior).
- * 3. For each DSN: validate via `createDetectedDsn`, record
- *    `fileHadValidDsn` for mtime tracking, dedup into `seen`.
- * 4. If this file contributed at least one validated DSN, record
- *    its mtime in `sourceMtimes` (first match wins since subsequent
- *    matches on the same file have the same mtime).
+ * Process one `GrepMatch`: skip commented lines, extract all DSNs on
+ * the line, validate hosts, dedup into `seen`, and record the file's
+ * mtime in `sourceMtimes` on first-match-per-file.
  */
 function processMatch(
   match: {
@@ -519,15 +361,9 @@ function processMatch(
 }
 
 /**
- * Extract DSN URLs from a single line's text. Called by
- * `scanDirectory` on each matching line yielded by `grepFiles`.
- * Runs the full `DSN_PATTERN` match + host validation, mirroring
- * `extractDsnsFromContent` but without the whole-file literal gate
+ * Extract DSN URLs from a single line's text. Mirrors
+ * `extractDsnsFromContent` but without the file-level scheme probe
  * (grep already handles that).
- *
- * Most lines have zero or one DSN; this loop handles the rare case
- * of two URLs on one line (a preserved behavior of the pre-refactor
- * scanner's `content.matchAll`).
  */
 function extractDsnsOnLine(line: string): string[] {
   const dsns: string[] = [];

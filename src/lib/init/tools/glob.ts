@@ -1,18 +1,8 @@
 /**
- * Init-wizard `glob` tool adapter.
- *
- * Thin wrapper over `collectGlob` from `src/lib/scan/`. Historically
- * this file contained a `rg --files → git ls-files → fs walk` fallback
- * chain with ~150 LOC of subprocess plumbing; all replaced by the
- * pure-TS scanner from PR #791. This adapter:
- *
- * 1. Sandboxes the user-supplied `params.path` via `safePath` (once,
- *    since it's shared across all patterns).
- * 2. Runs each pattern as a separate `collectGlob` call — the wire
- *    contract returns one result row per pattern, with its own
- *    `truncated` flag. `collectGlob` accepts a `patterns` array but
- *    unions them, which would lose per-pattern attribution.
- * 3. Passes each pattern's `files` + `truncated` straight through.
+ * Init-wizard `glob` tool adapter. Thin wrapper over `collectGlob`:
+ * sandboxes `params.path`, runs each pattern as a separate call
+ * (the wire contract returns one row per pattern with its own
+ * `truncated` flag), and passes `files` + `truncated` through.
  */
 
 import { collectGlob } from "../../scan/index.js";
@@ -28,18 +18,13 @@ type PatternResult = {
   truncated: boolean;
 };
 
-/**
- * Find files matching one or more glob patterns.
- *
- * Patterns run in parallel via `Promise.all` — preserves the
- * concurrency shape of the pre-PR implementation.
- */
+/** Find files matching one or more glob patterns in parallel. */
 export async function glob(payload: GlobPayload): Promise<ToolResult> {
   const maxResults = payload.params.maxResults ?? MAX_GLOB_RESULTS;
 
-  // Validate the optional subpath once before spawning per-pattern
-  // calls — a single throw aborts the whole payload, which matches
-  // the registry's sandbox-reject contract.
+  // Validate once before spawning per-pattern calls — a single
+  // throw aborts the whole payload, matching the registry's
+  // sandbox-reject contract.
   if (payload.params.path !== undefined) {
     safePath(payload.cwd, payload.params.path);
   }

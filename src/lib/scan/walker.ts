@@ -250,11 +250,9 @@ async function processEntry(
   if (!isFile) {
     return null;
   }
-  // maxDepth controls directory *descent*, not file yield. Files sit
-  // inside the last-entered dir; once the walker has entered that dir,
-  // every file in it is eligible for yield. This matches the classic
-  // Unix `find -maxdepth` semantics and the pre-PR-3 DSN scanner's
-  // MAX_SCAN_DEPTH behavior.
+  // `maxDepth` controls directory descent, not file yield. Once the
+  // walker has entered a dir, every file inside it is eligible —
+  // matches Unix `find -maxdepth` semantics.
   const fileDepth = frame.depth + 1;
   if (matcher.isIgnored(rel, false)) {
     return null;
@@ -491,9 +489,8 @@ function listDirEntries(dir: string): Dirent[] {
  * the walk.
  *
  * Uses `node:fs.stat` because `Bun.file()` doesn't support
- * directories (see the pre-PR-3 `getDirMtime` helper for the same
- * rationale). Flooring matches `src/lib/db/dsn-cache.ts`'s verifier
- * — see `validateDirMtime`.
+ * directories. Flooring matches `src/lib/db/dsn-cache.ts`'s
+ * `validateDirMtime`.
  */
 async function notifyDirectoryVisit(
   absDir: string,
