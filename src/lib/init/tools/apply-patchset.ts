@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { safeReadFile } from "../../safe-read.js";
 import { replace } from "../replacers.js";
 import type {
   ApplyPatchsetPatch,
@@ -149,7 +150,17 @@ async function applyEdits(
   filePath: string,
   edits: Array<{ oldString: string; newString: string }>
 ): Promise<string> {
-  let content = await fs.promises.readFile(absPath, "utf-8");
+  const initialContent = await safeReadFile(absPath, "apply-patchset.read");
+  if (initialContent === null) {
+    // Unreachable on the happy path — `applyPatchset` already
+    // `access()`-checked the file. Reachable when the file is a
+    // non-regular type (FIFO, socket, symlink → FIFO) that would
+    // otherwise hang `readFile` indefinitely.
+    throw new Error(
+      `Cannot read "${filePath}": not a regular file or read failed`
+    );
+  }
+  let content = initialContent;
 
   for (let i = 0; i < edits.length; i += 1) {
     const edit = edits[i];

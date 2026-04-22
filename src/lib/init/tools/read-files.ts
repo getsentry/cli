@@ -36,6 +36,12 @@ async function readSingleFile(
   try {
     const absPath = safePath(cwd, filePath);
     const stat = await fs.promises.stat(absPath);
+    // Guard against FIFOs / sockets / devices — both `readFile` and
+    // `open("r")` block indefinitely on a FIFO waiting for a writer.
+    // `stat` follows symlinks, so symlink → FIFO is caught too.
+    if (!stat.isFile()) {
+      return null;
+    }
     if (stat.size <= maxBytes) {
       return await fs.promises.readFile(absPath, "utf-8");
     }

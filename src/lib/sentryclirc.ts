@@ -22,6 +22,7 @@ import { getConfigDir } from "./db/index.js";
 import { getEnv } from "./env.js";
 import { parseIni } from "./ini.js";
 import { logger } from "./logger.js";
+import { safeReadFile } from "./safe-read.js";
 import { walkUpFrom } from "./walk-up.js";
 
 const log = logger.withTag("sentryclirc");
@@ -56,25 +57,6 @@ export type SentryCliRcConfig = {
  * Stores promises (not resolved values) so concurrent callers share the same load.
  */
 const cache = new Map<string, Promise<SentryCliRcConfig>>();
-
-/**
- * Read a file's text content, returning null for expected I/O errors.
- * ENOENT (missing) and EACCES (permission denied) return null.
- * All other errors propagate.
- */
-async function tryReadFile(filePath: string): Promise<string | null> {
-  try {
-    return await Bun.file(filePath).text();
-  } catch (error: unknown) {
-    if (error instanceof Error && "code" in error) {
-      const { code } = error as NodeJS.ErrnoException;
-      if (code === "ENOENT" || code === "EACCES") {
-        return null;
-      }
-    }
-    throw error;
-  }
-}
 
 /**
  * Fields we extract from an INI config, keyed by section.field.
@@ -134,7 +116,7 @@ async function tryApplyFile(
   filePath: string,
   isGlobal: boolean
 ): Promise<void> {
-  const content = await tryReadFile(filePath);
+  const content = await safeReadFile(filePath, "sentryclirc.read");
   if (content !== null) {
     log.debug(
       `Found ${isGlobal ? "global" : "local"} ${CONFIG_FILENAME} at ${filePath}`
