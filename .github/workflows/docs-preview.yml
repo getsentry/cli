@@ -81,6 +81,10 @@ jobs:
         run: find docs/dist -name '*.map' -delete
 
       - name: Ensure .nojekyll at gh-pages root
+        # Fork PRs can't push to the base repo (GITHUB_TOKEN is read-only on
+        # pull_request from forks). Skip the deploy but still run the build
+        # above so docs compilation errors surface.
+        if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -112,6 +116,8 @@ jobs:
           fi
 
       - name: Deploy Preview
+        # Same fork-PR guard as the .nojekyll step above.
+        if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
         uses: rossjrw/pr-preview-action@v1
         with:
           source-dir: docs/dist/
