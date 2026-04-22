@@ -16,13 +16,13 @@
  * `resolve-target.ts`.
  */
 
+import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { getConfigDir } from "./db/index.js";
 import { getEnv } from "./env.js";
 import { parseIni } from "./ini.js";
 import { logger } from "./logger.js";
-import { isRegularFile } from "./safe-read.js";
 import { walkUpFrom } from "./walk-up.js";
 
 const log = logger.withTag("sentryclirc");
@@ -108,30 +108,61 @@ function isComplete(result: SentryCliRcConfig): boolean {
 }
 
 /**
- * Read a `.sentryclirc` file's text content. Returns `null` when the
- * file is absent (ENOENT), unreadable for standard reasons (EACCES),
- * or is a non-regular file (FIFO / socket / symlink → FIFO — the
- * 1Password pattern).
+ * Read a `.sentryclirc` file's text content. Returns `null` when
+ * the file:
  *
- * Unlike {@link safeReadFile}, this deliberately re-throws other I/O
- * errors (EPERM, EISDIR, EIO, etc.). A `.sentryclirc` is a committed
- * config file — failing to read it with an unusual error is a
- * genuine problem the user should see, not silently swallow (which
- * would surface downstream as confusing "no auth token" or "no
- * project" errors).
+ * - is absent (ENOENT)
+ * - is unreadable for a common reason (EACCES)
+ * - is a non-regular file (FIFO / socket / symlink → FIFO — the
+ *   1Password pattern, which would otherwise block `text()`
+ *   indefinitely)
+ *
+ * Re-throws every other I/O error (EPERM, EISDIR, EIO,
+ * ENOTDIR, etc.). A `.sentryclirc` is a committed config file — a
+ * user with `chmod 000` at the directory level (EPERM), a typo
+ * pointing at a directory (EISDIR), or a disk throwing EIO needs
+ * to see that clearly, not have it silently suppressed and surface
+ * downstream as a confusing "no auth token" error.
+ *
+ * Note: cannot use {@link safeReadFile} / `isRegularFile` from
+ * `safe-read.ts` — their `handleFileError` treats EPERM and
+ * EISDIR as ignorable, swallowing them during the stat phase.
+ * That broader policy is correct for opportunistic DSN scans; not
+ * for this committed config load.
  */
+/**
+ * True for the two I/O errors we treat as "file effectively absent"
+ * — a missing path and a permission-denied read. Any other error
+ * code signals something worth surfacing to the user.
+ */
+function isNarrowAbsenceError(error: unknown): boolean {
+  if (error instanceof Error && "code" in error) {
+    const { code } = error as NodeJS.ErrnoException;
+    return code === "ENOENT" || code === "EACCES";
+  }
+  return false;
+}
+
 async function tryReadSentryCliRc(filePath: string): Promise<string | null> {
-  if (!(await isRegularFile(filePath, "sentryclirc.stat"))) {
+  let statResult: Awaited<ReturnType<typeof stat>>;
+  try {
+    statResult = await stat(filePath);
+  } catch (error) {
+    if (isNarrowAbsenceError(error)) {
+      return null;
+    }
+    throw error;
+  }
+  // Non-regular file (FIFO, socket, device, symlink → any of these)
+  // — `text()` would block. Return null so the walk-up moves on.
+  if (!statResult.isFile()) {
     return null;
   }
   try {
     return await Bun.file(filePath).text();
-  } catch (error: unknown) {
-    if (error instanceof Error && "code" in error) {
-      const { code } = error as NodeJS.ErrnoException;
-      if (code === "ENOENT" || code === "EACCES") {
-        return null;
-      }
+  } catch (error) {
+    if (isNarrowAbsenceError(error)) {
+      return null;
     }
     throw error;
   }
