@@ -21,6 +21,13 @@ import type {
   SentryOrganization,
   SentryProject,
 } from "../../../src/types/index.js";
+import { useTestConfigDir } from "../../helpers.js";
+
+// Isolated per-test config dir so `resolveOrgDisplayName`'s cached-org lookup
+// (via `getCachedOrganizations`) starts empty. Without this, an earlier test
+// run in the same process could seed `org_regions` and mask the slug-fallback
+// path below.
+useTestConfigDir("human-details-");
 
 // Helper to strip ANSI codes for content testing
 function stripAnsi(str: string): string {
@@ -177,12 +184,38 @@ describe("formatProjectDetails", () => {
 
   test("includes organization context when present", () => {
     const project = createMockProject({
-      organization: { slug: "acme", name: "Acme Corp" },
+      organization: { id: "1", slug: "acme", name: "Acme Corp" },
     });
 
     const result = stripAnsi(formatProjectDetails(project));
     expect(result).toContain("Acme Corp");
     expect(result).toContain("acme");
+  });
+
+  test("falls back to org slug when collapsed response omits name", () => {
+    // `getProject()` passes `?collapse=organization` to save ~400-500ms,
+    // which drops `organization.name`. `formatProjectDetails` must still
+    // render a reasonable Organization row. With no cached org name
+    // available (empty config dir + no seeded org_regions), the slug is
+    // the last-resort fallback.
+    const project = createMockProject({
+      organization: { id: "1", slug: "acme-only-slug" },
+    });
+
+    const result = stripAnsi(formatProjectDetails(project));
+
+    // Organization row renders the slug twice — once as the display name
+    // (fallback when no cached name exists) and once inside the parens
+    // as the raw slug identifier. Matching both positions guarantees the
+    // fallback actually fired; a stray cached name would show up between
+    // the "Organization" label and `(acme-only-slug)`.
+    // Renders as `Organization │ acme-only-slug (acme-only-slug)` (box-drawing
+    // separator). Matching both positions guarantees the fallback actually
+    // fired; a stray cached display name would show up between the
+    // "Organization" label and `(acme-only-slug)`.
+    expect(result).toMatch(
+      /Organization\s*\S\s*acme-only-slug\s*\(\s*acme-only-slug\s*\)/
+    );
   });
 
   test("includes capability flags", () => {
