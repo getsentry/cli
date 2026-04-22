@@ -122,6 +122,20 @@ describe("computeInvalidationPrefixes — edge cases", () => {
     expect(prefixes.length).toBe(new Set(prefixes).size);
   });
 
+  test("write-only endpoints skip invalidation entirely", () => {
+    // Sourcemap chunk uploads and bundle assembly don't modify any
+    // cacheable state; without this skip, every chunk POST would
+    // sweep the org's cache hierarchy.
+    expect(
+      computeInvalidationPrefixes(`${BASE}organizations/acme/chunk-upload/`)
+    ).toEqual([]);
+    expect(
+      computeInvalidationPrefixes(
+        `${BASE}organizations/acme/artifactbundle/assemble/`
+      )
+    ).toEqual([]);
+  });
+
   test("self-hosted base URLs are preserved", () => {
     const prefixes = computeInvalidationPrefixes(
       "https://sentry.example.com/api/0/organizations/acme/issues/12345/"

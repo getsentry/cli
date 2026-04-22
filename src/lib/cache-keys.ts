@@ -29,6 +29,19 @@
 
 const API_V0_SEGMENT = "/api/0/";
 
+/**
+ * Paths where a mutation doesn't change any cacheable state — typically
+ * write-only endpoints like chunk uploads and bundle assembly. Invalidation
+ * on these would pointlessly sweep the org's cache on every chunk of a
+ * sourcemap upload.
+ */
+const SKIP_INVALIDATION_PATTERNS: readonly RegExp[] = [
+  // Sourcemap chunk upload + bundle assemble. Both are write-only in the
+  // sense that no GET endpoint reads cacheable state under these paths.
+  /\/chunk-upload\//,
+  /\/artifactbundle\/assemble\//,
+];
+
 /** Rule for mutations whose effects cross URL trees. Patterns match the path relative to `/api/0/`. */
 type CrossEndpointRule = {
   match: RegExp;
@@ -71,6 +84,10 @@ export function computeInvalidationPrefixes(fullUrl: string): string[] {
 
   const apiIdx = parsed.pathname.indexOf(API_V0_SEGMENT);
   if (apiIdx === -1) {
+    return [];
+  }
+
+  if (SKIP_INVALIDATION_PATTERNS.some((p) => p.test(parsed.pathname))) {
     return [];
   }
 

@@ -52,7 +52,11 @@ function installMockFetch(handler: FetchHandler): void {
     handler(input, init)) as typeof fetch;
 }
 
-/** Run the authenticated fetch. `resetAuthenticatedFetch` in beforeEach ensures the singleton picks up the current mock. */
+/**
+ * Run the authenticated fetch. Works because `sentry-client.ts` calls
+ * `fetch(...)` as a bare global reference (see `fetchWithTimeout`), so
+ * swapping `globalThis.fetch` per-test is observable.
+ */
 function runAuthenticatedFetch(url: string, method = "GET"): Promise<Response> {
   return getSdkConfig("https://us.sentry.io").fetch(url, { method });
 }
