@@ -21,6 +21,14 @@ env:
   # Commit timestamp used for deterministic nightly version strings.
   # Defined at workflow level so build-binary and publish-nightly always agree.
   COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
+  # SENTRY_CLIENT_ID is baked into the binary at build time. Fork PRs can't
+  # read repo vars (getsentry org policy); fall back to a dummy. The resulting
+  # binary is only smoke-tested (--help) and never shipped, so any non-empty
+  # value works; tests tolerate the dummy via test/preload.ts.
+  SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID || 'ci-fork-pr-dummy' }}
+  # Sourcemap upload to Sentry (non-fatal, skipped when token is absent).
+  # Empty on fork PRs and non-production branches.
+  SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
 jobs:
   changes:
@@ -261,12 +269,6 @@ jobs:
           mv package.json.tmp package.json
       - name: Build
         env:
-          # Fork PRs can't read repo vars (getsentry org policy); fall back to
-          # a dummy. The resulting binary is only smoke-tested (`--help`) and
-          # never shipped, so any non-empty value works.
-          SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID || 'ci-fork-pr-dummy' }}
-          # Sourcemap upload to Sentry (non-fatal, skipped when token is absent)
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           # Set on main/release branches so build.ts runs binpunch + creates .gz
           RELEASE_BUILD: ${{ github.event_name != 'pull_request' && '1' || '' }}
         run: bun run build --target ${{ matrix.target }}
@@ -676,12 +678,6 @@ jobs:
       - if: steps.cache.outputs.cache-hit != 'true'
         run: bun install --frozen-lockfile
       - name: Bundle
-        env:
-          # Fork PRs can't read repo vars (getsentry org policy); fall back to
-          # a dummy. The resulting bundle is only smoke-tested (`--help`) and
-          # never shipped, so any non-empty value works.
-          SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID || 'ci-fork-pr-dummy' }}
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: bun run bundle
       - name: Smoke test (Node.js)
         run: node dist/bin.cjs --help
@@ -737,7 +733,6 @@ jobs:
       - name: Inject debug IDs and upload sourcemaps
         if: github.event_name == 'push' && env.SENTRY_AUTH_TOKEN != ''
         env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: sentry
           SENTRY_PROJECT: cli-website
         run: |
