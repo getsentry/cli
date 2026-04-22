@@ -35,6 +35,12 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
 
+      # Astro 6 requires Node >= 22.12. Pin an explicit version so the docs
+      # build doesn't rely on whatever ships on the runner image.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
       - uses: actions/cache@v5
         id: cache
         with:
@@ -62,9 +68,6 @@ jobs:
           PUBLIC_SENTRY_RELEASE: ${{ steps.version.outputs.version }}
         run: |
           bun install --frozen-lockfile
-          # The `build` script itself invokes `bun --bun astro …` so this
-          # works on Node < 22.12 (CI runners ship Node 20, but Astro 6's
-          # `#!/usr/bin/env node` shebang trips the engine check).
           bun run build
 
       - name: Inject debug IDs and upload sourcemaps
