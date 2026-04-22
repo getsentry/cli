@@ -224,9 +224,8 @@ export function getWorkerPool(): WorkerPool {
     const w = new Worker(url);
     // Workers are unref'd at spawn so an idle pool doesn't hold the
     // event loop open. On each `dispatch()` we `ref()` the worker
-    // before posting work, and `unref()` it again when the dispatch
-    // settles (either via `result` message, `error` event, or
-    // termination). This gives us:
+    // before posting work; when inflight drops to zero (i.e., the
+    // worker goes idle), we `unref()` it again. This gives us:
     //
     //   - Clean CLI exit: once all pending dispatches settle,
     //     workers are idle + unref'd, the loop drains, and the
@@ -236,9 +235,12 @@ export function getWorkerPool(): WorkerPool {
     //     work means their `message` events fire on the main
     //     thread's next tick, not starved by idle-tick bypass.
     //
-    // `ref`/`unref` must be balanced one-to-one. See `dispatch()`
-    // (ref on pending-slot push) + `onmessage` result handler
-    // (unref on shift) + `error` handler (unref on mass-reject).
+    // IMPORTANT: `Worker.ref()` / `.unref()` are idempotent booleans,
+    // NOT reference-counted. Calling `unref()` on a worker that has
+    // multiple dispatches in flight unrefs it entirely (subsequent
+    // `ref()` calls are no-ops until the worker becomes idle again).
+    // Hence the inflight-zero guard in every unref site — we only
+    // unref when the LAST dispatch for this worker completes.
     unrefWorker(w);
     const pw: PooledWorker = {
       worker: w,
@@ -273,9 +275,13 @@ export function getWorkerPool(): WorkerPool {
         return;
       }
       pw.inflight -= 1;
-      // Unref: dispatch completed, worker has one fewer reason to
-      // keep the loop alive. Matched by the `ref()` in `dispatch()`.
-      unrefWorker(pw.worker);
+      // `ref()` / `unref()` are idempotent booleans, NOT reference-
+      // counted. Only unref when the worker's own inflight drops to
+      // zero — unrefing while other dispatches are still in flight
+      // would let the event loop exit and drop their results.
+      if (pw.inflight === 0) {
+        unrefWorker(pw.worker);
+      }
       next.resolve({ ints: data.ints, linePool: data.linePool });
     });
     w.addEventListener("error", (err) => {
@@ -284,16 +290,17 @@ export function getWorkerPool(): WorkerPool {
       // avoid routing new work to a worker that can't respond.
       pw.alive = false;
       const errMsg = err.message ?? String(err);
-      // Drain the pending queue: reject each dispatch AND unref the
-      // worker once per dispatch so ref/unref stays balanced and the
-      // loop can drain.
+      // Drain the pending queue: reject each dispatch. Then unref
+      // the worker ONCE at the end (ref/unref are idempotent; one
+      // unref is sufficient to release the event-loop hold even if
+      // there were multiple pending dispatches).
       let slot = pw.pending.shift();
       while (slot !== undefined) {
-        unrefWorker(pw.worker);
         slot.reject(new Error(`worker error: ${errMsg}`));
         slot = pw.pending.shift();
       }
       pw.inflight = 0;
+      unrefWorker(pw.worker);
     });
     workers.push(pw);
   }
@@ -340,12 +347,17 @@ export function getWorkerPool(): WorkerPool {
           chosen.worker.postMessage(request);
         },
         (err) => {
-          // Readiness failed — fail this dispatch's resolver AND
-          // unref to balance the `refWorker` above.
+          // Readiness failed — fail this dispatch's resolver. Only
+          // unref if no other dispatches are in flight (same
+          // reasoning as the `message` handler: `unref()` is
+          // idempotent and unrefing while others are in flight
+          // would let the loop exit prematurely).
           const slot = chosen.pending.pop();
           if (slot) {
             chosen.inflight -= 1;
-            unrefWorker(chosen.worker);
+            if (chosen.inflight === 0) {
+              unrefWorker(chosen.worker);
+            }
             slot.reject(err);
           }
         }
@@ -355,15 +367,17 @@ export function getWorkerPool(): WorkerPool {
     terminate(): void {
       for (const pw of workers) {
         pw.alive = false;
-        // Drain pending: reject + unref per-dispatch so ref/unref
-        // stays balanced and the loop can drain.
+        // Drain pending: reject every dispatch. `ref`/`unref` are
+        // idempotent booleans — one unref at the end is sufficient
+        // to release the event-loop hold even if the worker had
+        // multiple pending dispatches.
         let slot = pw.pending.shift();
         while (slot !== undefined) {
-          unrefWorker(pw.worker);
           slot.reject(new Error("worker pool terminated"));
           slot = pw.pending.shift();
         }
         pw.inflight = 0;
+        unrefWorker(pw.worker);
         try {
           pw.worker.terminate();
         } catch {
