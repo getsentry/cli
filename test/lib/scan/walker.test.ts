@@ -663,3 +663,167 @@ describe("walkFiles — followSymlinks", () => {
     }
   });
 });
+
+describe("walkFiles — parallel walker (concurrency > 1)", () => {
+  test("yields the same set of files as the serial walker", async () => {
+    // Build a non-trivial tree so parallelism actually exercises
+    // the worker pool.
+    const { cwd, cleanup } = makeSandbox({
+      "a.ts": "x",
+      "apps/web/index.ts": "x",
+      "apps/web/src/a.ts": "x",
+      "apps/web/src/deep/b.ts": "x",
+      "libs/core/index.ts": "x",
+      "libs/core/src/c.ts": "x",
+      "libs/ui/button.ts": "x",
+      "services/api/server.ts": "x",
+      "services/api/routes/users.ts": "x",
+    });
+    try {
+      const serial = await collect({ cwd, concurrency: 1 });
+      const parallel = await collect({ cwd, concurrency: 4 });
+      expect(parallel).toEqual(serial);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("honors gitignore rules across concurrent descents", async () => {
+    // Root `.gitignore` excludes `ignored/` and `*.log` globally.
+    // Nested `libs/.gitignore` adds `extra-noise.txt` — a rule not
+    // reachable from the root — to prove nested gitignore loads
+    // under concurrent traversal.
+    const { cwd, cleanup } = makeSandbox({
+      ".gitignore": "ignored/\n*.log\n",
+      "src/a.ts": "x",
+      "src/b.log": "noise",
+      "src/nested/c.ts": "x",
+      "ignored/d.ts": "skip",
+      "libs/e.ts": "x",
+      "libs/.gitignore": "extra-noise.txt\n",
+      "libs/extra-noise.txt": "skip",
+      "libs/f.ts": "x",
+    });
+    try {
+      const parallel = await collect({ cwd, concurrency: 4, hidden: true });
+      expect(parallel.filter((p) => !p.endsWith(".gitignore"))).toEqual([
+        "libs/e.ts",
+        "libs/f.ts",
+        "src/a.ts",
+        "src/nested/c.ts",
+      ]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("honors descentHook under concurrent traversal", async () => {
+    // maxDepth: 1 + hook that resets depth at packages/*. Without
+    // the reset, packages/p would be depth 1 so its src/ would be
+    // skipped. With the reset, packages/p starts at depth 0, and
+    // its src reaches depth 1 (max) — inner.ts yields.
+    const { cwd, cleanup } = makeSandbox({
+      "packages/p/src/inner.ts": "x",
+      "shallow.ts": "x",
+      "deep/deeper/too-deep.ts": "x",
+    });
+    try {
+      const files = await collect({
+        cwd,
+        concurrency: 4,
+        maxDepth: 1,
+        descentHook: (rel, depth) =>
+          /^packages\/[^/]+$/u.test(rel) ? 0 : depth + 1,
+      });
+      // `shallow.ts` (depth 1) yields; `deep/deeper/too-deep.ts` is
+      // at depth 3 so it's excluded; `packages/p/src/inner.ts`
+      // yields because the hook resets packages/p to depth 0.
+      expect(files.sort()).toEqual(["packages/p/src/inner.ts", "shallow.ts"]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("aborts mid-walk when signal fires", async () => {
+    const { cwd, cleanup } = makeSandbox({
+      "a/1.ts": "x",
+      "b/1.ts": "x",
+      "c/1.ts": "x",
+      "d/1.ts": "x",
+      "e/1.ts": "x",
+    });
+    const ctrl = new AbortController();
+    try {
+      const drain = async (): Promise<number> => {
+        const iter = walkFiles({ cwd, concurrency: 4, signal: ctrl.signal });
+        let n = 0;
+        for await (const _ of iter) {
+          n += 1;
+          if (n === 1) {
+            ctrl.abort();
+          }
+        }
+        return n;
+      };
+      await expect(drain()).rejects.toThrow(/abort/i);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("propagates a pre-fired abort through the parallel walker", async () => {
+    // Regression: a pre-fired signal must throw immediately instead
+    // of hanging. The bug was that `checkAborted` threw outside the
+    // worker's try/catch, so `producerError` was never set and the
+    // consumer parked on `consumerAwake` forever.
+    const { cwd, cleanup } = makeSandbox({
+      "f.ts": "x",
+      "a/g.ts": "x",
+      "a/b/h.ts": "x",
+    });
+    const ctrl = new AbortController();
+    ctrl.abort();
+    try {
+      const drain = async () => {
+        for await (const _ of walkFiles({
+          cwd,
+          concurrency: 4,
+          signal: ctrl.signal,
+        })) {
+          /* drain */
+        }
+      };
+      // 2s ceiling — the bug manifested as an indefinite hang. With
+      // the fix, the throw propagates in ~10ms.
+      const watchdog = new Promise<never>((_, rej) =>
+        setTimeout(() => rej(new Error("timed out")), 2000)
+      );
+      await expect(Promise.race([drain(), watchdog])).rejects.toThrow(/abort/i);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("clamps pathological concurrency values instead of hanging", async () => {
+    // Regression: `concurrency: NaN` previously passed through
+    // `Math.max(1, NaN) = NaN`, so the dispatch routed to the
+    // parallel walker, which spawned zero workers (`i < NaN` is
+    // always false) but left the consumer parked on
+    // `consumerAwake` forever. `normalizeConcurrency` now clamps
+    // every non-finite / sub-1 value to the default.
+    const { cwd, cleanup } = makeSandbox({
+      "a.ts": "x",
+      "b/c.ts": "y",
+    });
+    try {
+      // All of these should route cleanly — either serial or the
+      // default parallel — and yield the same set of files.
+      for (const conc of [Number.NaN, Number.POSITIVE_INFINITY, -1, 0, 0.5]) {
+        const files = await collect({ cwd, concurrency: conc });
+        expect(files).toEqual(["a.ts", "b/c.ts"]);
+      }
+    } finally {
+      cleanup();
+    }
+  });
+});

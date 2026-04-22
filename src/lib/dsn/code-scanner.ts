@@ -156,6 +156,12 @@ export function scanCodeForFirstDsn(cwd: string): Promise<DetectedDsn | null> {
         for await (const entry of walkFiles({
           cwd,
           ...dsnScanOptions(),
+          // Early-exit consumer: we `return` on the first DSN-bearing
+          // file. The parallel walker's channel adds ~7ms per-file
+          // overhead; the serial walker uses a direct `yield` so
+          // `break` cuts immediately. Measured 2ms (serial) vs ~75ms
+          // (parallel) on the large bench fixture.
+          concurrency: 1,
         })) {
           filesScanned += 1;
           let content: string;
