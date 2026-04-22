@@ -70,4 +70,4 @@ export type {
   WalkEntry,
   WalkOptions,
 } from "./types.js";
-export { walkFiles } from "./walker.js";
+export { bulkConcurrency, walkFiles } from "./walker.js";

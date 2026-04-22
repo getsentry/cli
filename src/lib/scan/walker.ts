@@ -40,7 +40,8 @@
  */
 
 import { type Dirent, readdirSync, statSync } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
+import { availableParallelism } from "node:os";
 import path from "node:path";
 import { handleFileError } from "../dsn/fs-utils.js";
 import { logger } from "../logger.js";
@@ -91,7 +92,25 @@ type WalkContext = {
   matcher: IgnoreMatcher;
   stats: WalkStats;
   startedAt: number;
+  /**
+   * LIFO work stack of directory frames. Use `pushFrame` (below) to
+   * enqueue — it exists so the parallel walker can hook into new
+   * descents and wake idle workers. `stack.pop` is the only read
+   * path; both walkers use it directly.
+   *
+   * LIFO preserves DFS semantics, which early-exit callers
+   * (`scanCodeForFirstDsn`) rely on to reach DSN-bearing files
+   * quickly. Under high concurrency the traversal is effectively
+   * interleaved DFS per worker, which still reaches depth quickly.
+   */
   stack: DirFrame[];
+  /**
+   * Enqueue a directory frame for later processing. Abstracted from
+   * the raw `stack.push` so the parallel walker can signal idle
+   * workers on every new descent without monkey-patching the Array
+   * prototype. The serial walker's default is a plain `stack.push`.
+   */
+  pushFrame: (frame: DirFrame) => void;
   visitedInodes: Set<string>;
   /**
    * Precomputed `cfg.cwd.length + 1` — used to slice the cwd prefix
@@ -114,6 +133,95 @@ export function walkFiles(opts: WalkOptions): AsyncIterable<WalkEntry> {
   };
 }
 
+/**
+ * Process one directory frame: readdir, load nested `.gitignore`,
+ * fire `onDirectoryVisit`, then dispatch to `processEntry` for each
+ * dirent. `processEntry` pushes child dirs via `ctx.pushFrame` and
+ * returns a `WalkEntry` when a file should be emitted via `push`.
+ *
+ * Used by `walkParallel` (N workers call this concurrently).
+ * `walkSerial` inlines the same logic with a direct `yield` for
+ * lower per-dir overhead on short walks.
+ *
+ * `isCancelled()` is polled at every await boundary AND between
+ * per-entry iterations of the final for-loop, so a
+ * consumer-initiated `break` (e.g. a capped `collectGrep` hitting
+ * `maxResults`) cuts short the remaining work in the current
+ * directory — crucial because one slow `readdir` on a big
+ * directory would otherwise commit the worker to finishing every
+ * entry before noticing.
+ */
+async function processDir(
+  frame: DirFrame,
+  ctx: WalkContext,
+  push: (entry: WalkEntry) => void,
+  isCancelled: () => boolean
+): Promise<void> {
+  const { cfg, matcher, stats } = ctx;
+  stats.dirsVisited += 1;
+  stats.maxDepthReached = Math.max(stats.maxDepthReached, frame.depth);
+
+  const entries = await listDirEntries(frame.absDir, cfg.concurrency);
+  if (isCancelled()) {
+    return;
+  }
+
+  // Dentry-driven nested .gitignore loading: ONLY call loadFromDir
+  // when a .gitignore file is actually present. Load sequentially
+  // BEFORE processing children so per-entry `isIgnored` checks see
+  // this directory's rules.
+  if (
+    cfg.nestedGitignore &&
+    frame.absDir !== cfg.cwd &&
+    hasGitignore(entries)
+  ) {
+    await matcher.loadFromDir(frame.absDir);
+    if (isCancelled()) {
+      return;
+    }
+  }
+
+  // onDirectoryVisit hook fires after the dir's rules are loaded but
+  // before any of its entries are processed — matches the pre-parallel
+  // contract tests depend on.
+  if (cfg.onDirectoryVisit) {
+    await notifyDirectoryVisit(frame.absDir, cfg.onDirectoryVisit);
+    if (isCancelled()) {
+      return;
+    }
+  }
+
+  // Process entries serially within the directory. Parallelism
+  // happens at the directory level — we have dozens-to-thousands of
+  // dirs in flight; within each dir the per-entry work is cheap
+  // (classify, stat, push). `isCancelled` is polled between entries
+  // so a consumer-initiated `break` cuts the loop promptly — the
+  // `await processEntry` itself can't be interrupted.
+  for (const entry of entries) {
+    if (isCancelled()) {
+      return;
+    }
+    const result = await processEntry(entry, frame, ctx);
+    if (result !== null) {
+      push(result);
+    }
+  }
+}
+
+/**
+ * Dispatch to the serial or parallel walker based on `cfg.concurrency`.
+ *
+ * Serial (`concurrency === 1`) is optimal for early-exit consumers:
+ * each per-entry `yield` is direct (no channel hop) and uses sync
+ * `readdirSync`, so `scanCodeForFirstDsn` reaches the first DSN in
+ * ~2 ms on the synthetic/large fixture. The parallel path has a
+ * ~7 ms per-file channel-coordination overhead that dominates for
+ * short walks.
+ *
+ * Parallel (`concurrency > 1`) overlaps async `readdir` across
+ * directories, halving exhaustive scan times on fixtures with
+ * thousands of dirs (e.g. `scanCodeForDsns`: 238 → 175 ms).
+ */
 async function* walkFilesImpl(opts: WalkOptions): AsyncGenerator<WalkEntry> {
   const cfg = normalizeOptions(opts);
   const matcher = await buildMatcher(cfg);
@@ -126,65 +234,294 @@ async function* walkFilesImpl(opts: WalkOptions): AsyncGenerator<WalkEntry> {
     maxDepthReached: 0,
   };
   const startedAt = cfg.clock();
-
   const visitedInodes = new Set<string>();
   const stack: DirFrame[] = [{ absDir: cfg.cwd, depth: 0 }];
-
   const ctx: WalkContext = {
     cfg,
     matcher,
     stats,
     startedAt,
     stack,
+    // Default for the serial walker — a plain push. The parallel
+    // walker reassigns this inside its generator to also signal
+    // idle workers.
+    pushFrame: (frame: DirFrame) => {
+      stack.push(frame);
+    },
     visitedInodes,
     cwdPrefixLen: cfg.cwd.length + 1,
   };
 
   try {
-    while (stack.length > 0) {
-      checkAborted(cfg.signal);
-      const frame = stack.pop() as DirFrame;
-      stats.dirsVisited += 1;
-      stats.maxDepthReached = Math.max(stats.maxDepthReached, frame.depth);
-
-      const entries = listDirEntries(frame.absDir);
-      // Dentry-driven nested .gitignore loading: ONLY call loadFromDir
-      // when a .gitignore file is actually present in the directory
-      // listing we already read. This avoids a failed open + thrown
-      // Error on every subdir without a .gitignore — the dominant cost
-      // uncovered by PR 1's bench. The root cwd's .gitignore is
-      // already loaded by IgnoreStack.create(), so skip it here.
-      if (
-        cfg.nestedGitignore &&
-        frame.absDir !== cfg.cwd &&
-        hasGitignore(entries)
-      ) {
-        await matcher.loadFromDir(frame.absDir);
-      }
-
-      // Observer hook for consumers that need per-directory mtimes
-      // (primarily the DSN scanner's cache invalidation). Gated on
-      // the hook being defined — unset means we skip the extra stat.
-      if (cfg.onDirectoryVisit) {
-        await notifyDirectoryVisit(frame.absDir, cfg.onDirectoryVisit);
-      }
-
-      for (const entry of entries) {
-        const result = await processEntry(entry, frame, ctx);
-        if (result !== null) {
-          yield result;
-        }
-      }
+    if (cfg.concurrency <= 1) {
+      yield* walkSerial(ctx);
+    } else {
+      yield* walkParallel(ctx);
     }
   } finally {
     log.debug(
-      "walk done: yielded=%d dirs=%d hitBudget=%s maxDepth=%d elapsed=%dms",
+      "walk done: yielded=%d dirs=%d hitBudget=%s maxDepth=%d elapsed=%dms concurrency=%d",
       stats.filesYielded,
       stats.dirsVisited,
       stats.hitTimeBudget,
       stats.maxDepthReached,
-      Math.round(cfg.clock() - startedAt)
+      Math.round(cfg.clock() - startedAt),
+      cfg.concurrency
     );
+  }
+}
+
+/**
+ * Serial DFS walker — the fast path for early-exit consumers.
+ *
+ * Direct `yield` per entry (no producer-consumer channel) means a
+ * generator `break` stops everything immediately. `listDirEntries`
+ * uses sync `readdirSync` when `cfg.concurrency === 1`, trading away
+ * async I/O overlap (unused here) for lower per-call latency.
+ *
+ * This path is byte-for-byte the pre-parallel walker's body; the
+ * parallel path adds a different coordinator on top of the same
+ * per-entry helpers (`processEntry`, `maybeDescend`, `tryYieldFile`).
+ */
+async function* walkSerial(ctx: WalkContext): AsyncGenerator<WalkEntry> {
+  const { cfg, matcher, stack } = ctx;
+  while (stack.length > 0) {
+    checkAborted(cfg.signal);
+    const frame = stack.pop() as DirFrame;
+    ctx.stats.dirsVisited += 1;
+    ctx.stats.maxDepthReached = Math.max(
+      ctx.stats.maxDepthReached,
+      frame.depth
+    );
+
+    const entries = await listDirEntries(frame.absDir, cfg.concurrency);
+
+    if (
+      cfg.nestedGitignore &&
+      frame.absDir !== cfg.cwd &&
+      hasGitignore(entries)
+    ) {
+      await matcher.loadFromDir(frame.absDir);
+    }
+    if (cfg.onDirectoryVisit) {
+      await notifyDirectoryVisit(frame.absDir, cfg.onDirectoryVisit);
+    }
+    for (const entry of entries) {
+      const result = await processEntry(entry, frame, ctx);
+      if (result !== null) {
+        yield result;
+      }
+    }
+  }
+}
+
+/**
+ * Parallel walker — N workers pull from a shared LIFO stack,
+ * overlapping async `readdir` across directories. A producer-
+ * consumer channel buffers emits so the generator can yield in
+ * completion order.
+ *
+ * Adds ~7 ms per-file channel overhead vs the serial walker, so
+ * it's only worth using for bulk scans (dozens-plus of dirs).
+ * Callers that early-exit should use `concurrency: 1`.
+ */
+async function* walkParallel(ctx: WalkContext): AsyncGenerator<WalkEntry> {
+  const { cfg, stack } = ctx;
+
+  // --- Two coordination channels ---
+  //
+  // Consumer channel: workers push WalkEntry objects via `push(entry)`,
+  // the generator drains them between awaits on `consumerAwake`.
+  //
+  // Worker channel: idle workers park on `workerAwake` until
+  // `signalWorkers()` fires — either because a `maybeDescend` pushed
+  // a new frame, a peer worker completed (activeWorkers changed), or
+  // cancellation is requested. `signalWorkers` uses the swap-then-
+  // resolve pattern (see its definition below) so a late awaiter
+  // can't latch onto a stale resolved Promise and miss the next
+  // state transition.
+  //
+  // The two-channel design avoids the busy-spin (N-1 workers
+  // `setImmediate`ing every tick while one peer holds the stack
+  // empty during `await readdir`) that a single shared channel
+  // would produce.
+
+  const pending: WalkEntry[] = [];
+  let wakeConsumer: () => void = () => {
+    /* reassigned below */
+  };
+  let consumerAwake: Promise<void> = new Promise<void>((r) => {
+    wakeConsumer = r;
+  });
+  const resetConsumerAwake = () => {
+    consumerAwake = new Promise<void>((r) => {
+      wakeConsumer = r;
+    });
+  };
+  const push = (entry: WalkEntry): void => {
+    pending.push(entry);
+    wakeConsumer();
+  };
+
+  // Worker wake channel. All idle workers await the same Promise;
+  // `signalWorkers()` replaces it with a fresh unresolved one and
+  // resolves the old one, which wakes every current awaiter in the
+  // same microtask batch. The "swap before resolve" order matters:
+  // a worker that starts awaiting between the resolve and a later
+  // signal would otherwise latch onto a stale resolved Promise and
+  // miss the state transition it was waiting for.
+  //
+  // Every state transition that could unblock a waiting worker
+  // — a new frame pushed via `pushFrame`, a peer worker exiting
+  // that leaves `activeWorkers === 0`, or cancellation — calls
+  // `signalWorkers()`. Workers re-check `stack`/`activeWorkers`/
+  // `cancelled` at the top of every loop iteration, so a missed
+  // wake would be a deadlock — there's no other mechanism to
+  // un-park them.
+  let wakeWorkers: () => void = () => {
+    /* reassigned below */
+  };
+  let workerAwake: Promise<void> = new Promise<void>((r) => {
+    wakeWorkers = r;
+  });
+  const signalWorkers = (): void => {
+    const resolve = wakeWorkers;
+    workerAwake = new Promise<void>((r) => {
+      wakeWorkers = r;
+    });
+    resolve();
+  };
+
+  // Plumbing: `maybeDescend` pushes directly to `ctx.stack`. The
+  // serial walker's behavior is unchanged (stack is literal). The
+  // parallel walker needs to notice new frames and signal idle
+  // workers. Rather than overload `stack.push` (monkey-patching an
+  // Array instance is fragile), we route ALL descents through a
+  // dedicated `pushFrame` on the context. Both serial and parallel
+  // use it; parallel adds the `signalWorkers()` hook.
+  //
+  // The `ctx` object is local to `walkFilesImpl` and is GC'd after
+  // the generator exits, so we don't bother restoring the original
+  // `pushFrame` on shutdown.
+  ctx.pushFrame = (frame: DirFrame): void => {
+    stack.push(frame);
+    signalWorkers();
+  };
+
+  let activeWorkers = 0;
+  let producerError: unknown = null;
+  let cancelled = false;
+  const workerCount = cfg.concurrency;
+  const workers: Promise<void>[] = [];
+
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: worker lifecycle (cancelled, abort, idle-wait, error path, wake coordination) is inherently branchy
+  const runWorker = async (): Promise<void> => {
+    while (true) {
+      // Outer try catches:
+      //   - AbortError from `checkAborted` (crucially including the
+      //     first iteration when the signal was pre-fired);
+      //   - any thrown error from `processDir` (both FS and
+      //     non-FS bubbling past `handleFileError`).
+      // Without catching here, a pre-fired abort would propagate
+      // out of the worker before `activeWorkers` is ever
+      // incremented and before `producerError`/`cancelled` are
+      // set — the consumer would then hang on `consumerAwake`
+      // because the termination predicate never sees a producer
+      // error and the worker never decrements counters.
+      try {
+        if (cancelled) {
+          return;
+        }
+        checkAborted(cfg.signal);
+        // Pop (LIFO/DFS) rather than shift (FIFO/BFS) — matches the
+        // serial walker's traversal order so early-exit behavior is
+        // comparable at any concurrency setting.
+        const frame = stack.pop();
+        if (!frame) {
+          // Stack empty — exit only if no other worker is processing
+          // (i.e. nobody can `maybeDescend` new work). Otherwise park
+          // on the worker channel until a descent or cancellation
+          // fires. `signalWorkers` swaps in a fresh unresolved
+          // Promise before resolving the old one, so late awaiters
+          // can't latch onto a stale resolution.
+          if (activeWorkers === 0) {
+            return;
+          }
+          await workerAwake;
+          continue;
+        }
+        activeWorkers += 1;
+        try {
+          await processDir(frame, ctx, push, () => cancelled);
+        } finally {
+          activeWorkers -= 1;
+          // If we were the last active worker with an empty stack,
+          // nobody else can enqueue work — wake any idle peers so
+          // they observe `activeWorkers === 0` and exit.
+          if (activeWorkers === 0 && stack.length === 0) {
+            signalWorkers();
+          }
+          // Always wake the consumer so it can detect "all workers
+          // done" and terminate.
+          wakeConsumer();
+        }
+      } catch (error) {
+        // FS errors are swallowed inside `listDirEntries` /
+        // `notifyDirectoryVisit` via `handleFileError`. Anything
+        // reaching here is either (a) a pre-fired or mid-walk
+        // `AbortError` from `checkAborted`, or (b) a genuinely
+        // unexpected non-FS error.
+        producerError = error;
+        // Cascade: peers can't do useful work, so short-circuit
+        // them. The consumer sees `producerError` and throws.
+        cancelled = true;
+        signalWorkers();
+        wakeConsumer();
+        return;
+      }
+    }
+  };
+
+  for (let i = 0; i < workerCount; i += 1) {
+    workers.push(runWorker());
+  }
+
+  // If every worker throws synchronously before entering its
+  // try/finally (e.g. a pre-fired `signal.aborted` hits the
+  // `checkAborted` at the top of the loop), their per-worker
+  // `finally` wakeConsumer never fires. This outer chain guarantees
+  // the consumer observes the "all done" state regardless.
+  const allWorkersDone = Promise.all(workers).finally(() => {
+    wakeConsumer();
+  });
+
+  try {
+    while (true) {
+      if (pending.length > 0) {
+        while (pending.length > 0) {
+          yield pending.shift() as WalkEntry;
+          checkAborted(cfg.signal);
+        }
+        continue;
+      }
+      if (producerError !== null) {
+        throw producerError;
+      }
+      if (stack.length === 0 && activeWorkers === 0) {
+        break;
+      }
+      await consumerAwake;
+      resetConsumerAwake();
+    }
+  } finally {
+    // Stop pumping. Workers exit naturally once they notice
+    // `cancelled` on their next loop iteration; we await them so
+    // any lingering FS operations complete before returning
+    // control to the caller.
+    cancelled = true;
+    signalWorkers();
+    wakeConsumer();
+    await allWorkersDone;
   }
 }
 
@@ -318,10 +655,9 @@ async function maybeDescend(
       ctx.visitedInodes.add(key);
     }
   }
-  // Nested-.gitignore loading is now done by the main loop based on
-  // the child's dentry list — not here. See `hasGitignore` call in
-  // walkFilesImpl.
-  ctx.stack.push({ absDir: abs, depth: nextDepth });
+  // Nested-.gitignore loading is done by `processDir` based on the
+  // child's dentry list — not here. See the `hasGitignore` call.
+  ctx.pushFrame({ absDir: abs, depth: nextDepth });
 }
 
 /**
@@ -458,22 +794,28 @@ function compareByName(a: Dirent, b: Dirent): number {
 }
 
 /**
- * Read all entries in a directory, sorted by name for determinism.
+ * Read all entries in a directory, sorted by name.
  *
- * Uses synchronous `readdirSync({withFileTypes})` rather than the
- * async variant. Per-call cost is ~11µs p50 / 65µs max on a 10k-file
- * fixture — well below the ~4ms min latency of a microtask tick, so
- * blocking the event loop briefly per directory is cheap AND avoids
- * the ~60µs microtask overhead each async readdir incurs. Net: the
- * sync readdir is 2-3× faster on walks with many small directories,
- * which is every realistic CLI/codebase workload.
+ * Async `readdir` lets the concurrent walker overlap many calls across
+ * the worker pool (~5× faster than sync on cold-cache scans) but is
+ * ~2.5× slower than sync `readdirSync` per-call. At `concurrency === 1`
+ * there's no overlap to exploit, so we switch to the sync variant —
+ * which is the serial fast-path for early-exit consumers like
+ * `scanCodeForFirstDsn`.
  *
- * Sort is retained so yield order is filesystem-independent, which
- * tests rely on.
+ * Sort keeps per-directory yield order filesystem-independent. Inter-
+ * directory yield order is nondeterministic across concurrent runs;
+ * tests that compare against fixtures should sort the collected paths.
  */
-function listDirEntries(dir: string): Dirent[] {
+async function listDirEntries(
+  dir: string,
+  concurrency: number
+): Promise<Dirent[]> {
   try {
-    const entries = readdirSync(dir, { withFileTypes: true });
+    const entries =
+      concurrency === 1
+        ? readdirSync(dir, { withFileTypes: true })
+        : await readdir(dir, { withFileTypes: true });
     entries.sort(compareByName);
     return entries;
   } catch (error) {
@@ -565,6 +907,7 @@ type NormalizedOptions = {
   descentHook: (relPath: string, currentDepth: number) => number;
   followSymlinks: boolean;
   signal: AbortSignal | undefined;
+  concurrency: number;
   timeBudgetMs: number;
   clock: () => number;
   recordMtimes: boolean;
@@ -592,11 +935,28 @@ function normalizeOptions(opts: WalkOptions): NormalizedOptions {
     descentHook: opts.descentHook ?? defaultDescentHook,
     followSymlinks: opts.followSymlinks ?? false,
     signal: opts.signal,
+    concurrency: Math.max(1, opts.concurrency ?? bulkConcurrency()),
     timeBudgetMs: opts.timeBudgetMs ?? Number.POSITIVE_INFINITY,
     clock: opts.clock ?? (() => performance.now()),
     recordMtimes: opts.recordMtimes ?? false,
     onDirectoryVisit: opts.onDirectoryVisit,
   };
+}
+
+/**
+ * Default walker concurrency — overlaps async `readdir` I/O across
+ * directories for bulk-scan speedups. Matches the
+ * `CONCURRENCY_LIMIT` pattern used elsewhere (≥2, capped by CPU
+ * count).
+ *
+ * Early-exit consumers that `break` after a few files should pass
+ * `concurrency: 1` explicitly — the parallel walker's per-file
+ * channel overhead costs more than an early-exit consumer saves;
+ * the serial path uses direct `yield` and `readdirSync` instead.
+ * See `walkFilesImpl`'s dispatch for the trade-off.
+ */
+export function bulkConcurrency(): number {
+  return Math.max(2, availableParallelism());
 }
 
 function buildMatcher(cfg: NormalizedOptions): Promise<IgnoreMatcher> {

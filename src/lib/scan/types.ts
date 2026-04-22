@@ -137,6 +137,25 @@ export type WalkOptions = {
    */
   signal?: AbortSignal;
 
+  // --- Parallelism ---
+  /**
+   * Max number of directories to `readdir` in parallel. Default:
+   * `bulkConcurrency()` (= `max(2, availableParallelism())`), chosen
+   * to overlap async `readdir` I/O across directories — the primary
+   * speedup (~25%) for bulk scans like DSN detection or sourcemap
+   * discovery.
+   *
+   * Set to `1` for **early-exit** traversal, which uses a direct
+   * `yield` serial path (no producer-consumer channel) and sync
+   * `readdirSync` — measurably faster when the consumer `break`s
+   * after the first few files (e.g. `scanCodeForFirstDsn`).
+   *
+   * This only controls directory-level concurrency. File content
+   * reads (done by callers like `grepFiles`) have their own
+   * concurrency knob.
+   */
+  concurrency?: number;
+
   // --- Time budget ---
   /**
    * Wall-clock budget in milliseconds. Every directory at depth
