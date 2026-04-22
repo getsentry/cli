@@ -7,6 +7,7 @@
 
 import { readFile, stat } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
+import { NODE_MODULES_DIRNAME } from "../constants.js";
 import { walkFiles } from "../scan/index.js";
 import { EXISTING_DEBUGID_RE, injectDebugId } from "./debug-id.js";
 
@@ -110,7 +111,7 @@ async function findCompanionMap(jsPath: string): Promise<string | undefined> {
  *   dropping large JS files would skip debug-ID injection on the
  *   exact bundles users care about most.
  */
-const SOURCEMAP_SKIP_DIRS: readonly string[] = ["node_modules"];
+const SOURCEMAP_SKIP_DIRS: readonly string[] = [NODE_MODULES_DIRNAME];
 
 async function discoverFilePairs(
   dir: string,
