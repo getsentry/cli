@@ -40,9 +40,13 @@ export default defineConfig({
         src: "./src/assets/logo.svg",
         replacesTitle: true,
       },
-      social: {
-        github: "https://github.com/getsentry/cli",
-      },
+      social: [
+        {
+          icon: "github",
+          label: "GitHub",
+          href: "https://github.com/getsentry/cli",
+        },
+      ],
       expressiveCode: {
         themes: ["github-dark"],
         styleOverrides: {

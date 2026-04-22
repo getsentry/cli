@@ -1,11 +1,12 @@
 ---
-import type { Props } from "@astrojs/starlight/props";
 import Search from "@astrojs/starlight/components/Search.astro";
 import SiteTitle from "@astrojs/starlight/components/SiteTitle.astro";
 import SocialIcons from "@astrojs/starlight/components/SocialIcons.astro";
 
-// Check if we're on the homepage (splash page)
-const isHomepage = Astro.props.slug === "";
+// Check if we're on the homepage (splash page).
+// In Starlight >=0.33, route data lives on Astro.locals.starlightRoute; the
+// old `slug` field is now `id` (empty string for the landing page).
+const isHomepage = Astro.locals.starlightRoute.id === "";
 
 // Get base path for links
 const baseUrl = import.meta.env.BASE_URL;
@@ -14,14 +15,14 @@ const base = baseUrl.endsWith('/') ? baseUrl : baseUrl + '/';
 
 <div class:list={["header", "sl-flex", { "header-homepage": isHomepage }]}>
   <div class="sl-flex header-left">
-    <SiteTitle {...Astro.props} />
+    <SiteTitle />
   </div>
-  
+
   <div class="sl-flex header-right">
-    {!isHomepage && <Search {...Astro.props} />}
+    {!isHomepage && <Search />}
     {isHomepage && <a href={`${base}getting-started/`} class="header-nav-link">Docs</a>}
     {!isHomepage && <span class="header-nav-link header-nav-active">Docs</span>}
-    <SocialIcons {...Astro.props} />
+    <SocialIcons />
   </div>
 </div>
 
