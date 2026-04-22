@@ -415,11 +415,32 @@ async function runWizardInner(initialOptions: WizardOptions): Promise<void> {
 
   const token = context.authToken;
 
+  // AbortController bound to the MastraClient lifecycle. Aborting on
+  // teardown (success OR failure, via `using` below) cancels any in-flight
+  // fetches — releasing keep-alive sockets so the event loop drains and
+  // `sentry init` returns to the shell promptly. Without this, a stuck or
+  // idle socket in Bun's fetch dispatcher can hold the process alive past
+  // the wizard's natural exit.
+  const abortController = new AbortController();
+  using _mastraCleanup = {
+    [Symbol.dispose]: (): void => {
+      // Guard against double-abort — calling abort() on an already-aborted
+      // signal is a no-op in Node/Bun, but explicit check documents intent.
+      if (!abortController.signal.aborted) {
+        abortController.abort();
+      }
+    },
+  };
+
   const client = new MastraClient({
     baseUrl: MASTRA_API_URL,
     headers: token ? { Authorization: `Bearer ${token}` } : {},
+    abortSignal: abortController.signal,
     fetch: ((url, init) => {
       const traceData = getTraceData();
+      // Preserve `init.signal` via the spread — MastraClient may pass its
+      // own per-request signal, and the client-level `abortSignal` is
+      // forwarded through the same channel.
       return fetch(url, {
         ...init,
         headers: {
