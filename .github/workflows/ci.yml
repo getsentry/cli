@@ -26,9 +26,6 @@ env:
   # binary is only smoke-tested (--help) and never shipped, so any non-empty
   # value works; tests tolerate the dummy via test/preload.ts.
   SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID || 'ci-fork-pr-dummy' }}
-  # Sourcemap upload to Sentry (non-fatal, skipped when token is absent).
-  # Empty on fork PRs and non-production branches.
-  SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
 jobs:
   changes:
@@ -269,6 +266,10 @@ jobs:
           mv package.json.tmp package.json
       - name: Build
         env:
+          # Environment-scoped (production) — must be set at step level to
+          # resolve correctly; workflow-level env evaluates before the job's
+          # environment: is applied.
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           # Set on main/release branches so build.ts runs binpunch + creates .gz
           RELEASE_BUILD: ${{ github.event_name != 'pull_request' && '1' || '' }}
         run: bun run build --target ${{ matrix.target }}
@@ -678,6 +679,9 @@ jobs:
       - if: steps.cache.outputs.cache-hit != 'true'
         run: bun install --frozen-lockfile
       - name: Bundle
+        env:
+          # Environment-scoped (production) — see note in build-binary.
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: bun run bundle
       - name: Smoke test (Node.js)
         run: node dist/bin.cjs --help
@@ -696,6 +700,12 @@ jobs:
     # SENTRY_AUTH_TOKEN is scoped to the production environment. Needed by
     # the "Inject debug IDs and upload sourcemaps" step below.
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 'production' || '' }}
+    # Hoisted to job level (not step) so the `if: env.SENTRY_AUTH_TOKEN != ''`
+    # guard on the sourcemap-upload step can see it. Job-level env is resolved
+    # after `environment:` is applied, so the production-scoped secret resolves
+    # correctly.
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
