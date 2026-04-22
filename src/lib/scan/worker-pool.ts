@@ -336,8 +336,18 @@ export function getWorkerPool(): WorkerPool {
       // Enqueue a pending slot for this request. The worker's
       // `onmessage` handler will resolve it when the corresponding
       // `result` message arrives (FIFO).
+      //
+      // We hold a direct reference to `ourSlot` so the readiness-
+      // failure path can remove and reject THIS dispatch's entry
+      // specifically — not whatever happens to be at the front or
+      // back of the pending queue when the failure fires. With
+      // concurrent dispatches to the same worker, `pop()` or
+      // `shift()` could reject a sibling dispatch's promise with
+      // this dispatch's error.
+      let ourSlot: PooledWorker["pending"][number];
       const result = new Promise<WorkerGrepResult>((resolve, reject) => {
-        chosen.pending.push({ resolve, reject });
+        ourSlot = { resolve, reject };
+        chosen.pending.push(ourSlot);
       });
       // Wait for readiness (first dispatch only), then post the
       // request. Subsequent dispatches skip the await (the ready
@@ -347,18 +357,22 @@ export function getWorkerPool(): WorkerPool {
           chosen.worker.postMessage(request);
         },
         (err) => {
-          // Readiness failed — fail this dispatch's resolver. Only
-          // unref if no other dispatches are in flight (same
-          // reasoning as the `message` handler: `unref()` is
-          // idempotent and unrefing while others are in flight
-          // would let the loop exit prematurely).
-          const slot = chosen.pending.pop();
-          if (slot) {
+          // Readiness failed — fail THIS dispatch's resolver and
+          // remove ITS slot from the pending queue. Identity-based
+          // removal preserves the FIFO invariant for any sibling
+          // dispatches still in flight. Only unref if no other
+          // dispatches remain in flight (same reasoning as the
+          // `message` handler: `unref()` is idempotent, and
+          // unrefing while others are in flight would let the
+          // loop exit prematurely).
+          const idx = chosen.pending.indexOf(ourSlot);
+          if (idx !== -1) {
+            chosen.pending.splice(idx, 1);
             chosen.inflight -= 1;
             if (chosen.inflight === 0) {
               unrefWorker(chosen.worker);
             }
-            slot.reject(err);
+            ourSlot.reject(err);
           }
         }
       );

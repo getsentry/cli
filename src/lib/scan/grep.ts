@@ -564,6 +564,14 @@ async function* grepViaWorkers(
   // that could poison downstream caches.
   let dispatchedBatches = 0;
   let failedBatches = 0;
+  // Track dispatch promises so the consumer's `finally` can await
+  // them before checking the failure counters. Without this, an
+  // early exit (e.g., AbortError, maxResults = 0) could race the
+  // final failure assessment: the consumer's finally runs before
+  // in-flight dispatch `.catch()` handlers have bumped
+  // `failedBatches`, causing a legitimate all-failure scenario to
+  // silently pass through as "no matches found."
+  const dispatchPromises: Promise<unknown>[] = [];
 
   const dispatchBatch = (
     paths: string[],
@@ -573,7 +581,7 @@ async function* grepViaWorkers(
     opts.stats.filesRead += paths.length;
     inflightCount += 1;
     dispatchedBatches += 1;
-    pool
+    const dispatchP = pool
       .dispatch({
         paths,
         patternSource: opts.perFile.regex.source,
@@ -603,6 +611,7 @@ async function* grepViaWorkers(
         inflightCount -= 1;
         wakeConsumer();
       });
+    dispatchPromises.push(dispatchP);
   };
 
   // Producer: walk paths, batch them, dispatch each full batch.
@@ -723,6 +732,16 @@ async function* grepViaWorkers(
     earlyExit = true;
     wakeConsumer();
     await producer;
+    // Await every dispatched batch so `failedBatches` is final
+    // before we inspect it. Without this, an early exit could run
+    // the failure check before in-flight `.catch()` handlers
+    // bumped the counter — collapsing an all-failure scenario into
+    // a silent "no matches" return. `allSettled` because we don't
+    // care about individual rejections here (each was already
+    // counted via the dispatch's `.catch()` handler).
+    if (dispatchPromises.length > 0) {
+      await Promise.allSettled(dispatchPromises);
+    }
     // If the walker threw (typically `AbortError`), re-throw so the
     // caller sees the same behavior as the async-fallback path.
     if (producerError !== null) {
