@@ -17,11 +17,8 @@
  *   walker's default `hidden: true`.
  * - `**` spans directory boundaries.
  *
- * The semantics match the init wizard's pre-PR-791 FS-fallback
- * glob (a hand-rolled `matchGlob` in the now-deleted
- * `src/lib/init/tools/search-utils.ts`) but use picomatch's full
- * grammar — extglobs (`+(a|b)`), braces (`{a,b}`), negation
- * (`!pattern`), etc.
+ * Uses picomatch's full grammar: extglobs (`+(a|b)`), braces
+ * (`{a,b}`), negation (`!pattern`), etc.
  *
  * ### Cost model
  *

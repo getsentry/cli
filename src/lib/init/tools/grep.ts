@@ -1,19 +1,9 @@
 /**
- * Init-wizard `grep` tool adapter.
- *
- * Thin wrapper over `collectGrep` from `src/lib/scan/`. Historically
- * this file contained a `rg → git grep → fs walk` fallback chain with
- * ~300 LOC of subprocess-spawn plumbing; that was all replaced by the
- * pure-TS scanner shipped in PR #791. This adapter now just:
- *
- * 1. Sandboxes the user-supplied `search.path` via `safePath`.
- * 2. Forwards each `GrepSearch` to `collectGrep` with the wire-level
- *    constants (`maxResults`, `maxLineLength`) plumbed through.
- * 3. Strips the `absolutePath` field from each `GrepMatch` before
- *    returning — the Mastra wire contract has never included it.
- * 4. Catches `ValidationError` from `compilePattern` so a bad regex
- *    from the agent surfaces as an empty result for that search
- *    (rather than taking down the whole payload).
+ * Init-wizard `grep` tool adapter. Thin wrapper over `collectGrep`:
+ * sandboxes `search.path`, forwards the wire-level constants,
+ * strips `absolutePath` from each match (not part of the wire
+ * contract), and catches `ValidationError` from a bad regex so the
+ * agent can retry without the whole payload aborting.
  */
 
 import { ValidationError } from "../../errors.js";
@@ -34,21 +24,15 @@ type SearchResult = {
   truncated: boolean;
 };
 
-/**
- * Run one `GrepSearch`. Throws if `safePath` rejects `search.path`;
- * caller (`grep`) hoists the throw to the registry's error path.
- */
 async function runOneSearch(
   cwd: string,
   search: GrepSearch,
   maxResults: number
 ): Promise<SearchResult> {
-  // Validate the subpath against the sandbox. `safePath` throws on
-  // escape attempts — the scan engine explicitly trusts its `path`
-  // input (see `src/lib/scan/types.ts::GrepOptions.path`), so the
-  // adapter is the correct place to enforce sandboxing. We only need
-  // the validation side effect; `collectGrep` takes a cwd-relative
-  // subpath, so we pass `search.path` through unchanged afterward.
+  // The scan engine trusts its `path` input (see
+  // `GrepOptions.path`) — sandbox enforcement lives here. We only
+  // need the validation side effect; `collectGrep` takes a
+  // cwd-relative subpath, so we forward `search.path` unchanged.
   if (search.path !== undefined) {
     safePath(cwd, search.path);
   }
@@ -59,10 +43,9 @@ async function runOneSearch(
       pattern: search.pattern,
       include: search.include,
       path: search.path,
-      // `caseInsensitive` is the wire shape; the scan engine exposes
-      // the inverse (`caseSensitive`). Pass `undefined` when the
-      // caller didn't set it so the engine's default (rg-like,
-      // case-sensitive) takes effect.
+      // Wire shape uses `caseInsensitive`; scan engine uses the
+      // inverse. Leave undefined when unset so the engine's default
+      // (case-sensitive, rg-like) applies.
       caseSensitive: search.caseInsensitive === true ? false : undefined,
       multiline: search.multiline,
       maxResults,
@@ -70,7 +53,6 @@ async function runOneSearch(
     });
     return {
       pattern: search.pattern,
-      // Strip `absolutePath` — not part of the Mastra wire contract.
       matches: matches.map((m) => ({
         path: m.path,
         lineNum: m.lineNum,
@@ -80,21 +62,15 @@ async function runOneSearch(
     };
   } catch (error) {
     if (error instanceof ValidationError) {
-      // Malformed regex from the agent. Surface as an empty row for
-      // this search rather than aborting the whole payload — lets the
-      // agent retry with a corrected pattern.
+      // Malformed regex from the agent. Empty row lets the agent
+      // retry with a fix instead of aborting the whole payload.
       return { pattern: search.pattern, matches: [], truncated: false };
     }
     throw error;
   }
 }
 
-/**
- * Search project files for one or more regex patterns.
- *
- * Searches run in parallel via `Promise.all` — preserves the
- * concurrency shape of the pre-PR implementation.
- */
+/** Search project files for one or more regex patterns in parallel. */
 export async function grep(payload: GrepPayload): Promise<ToolResult> {
   const maxResults =
     payload.params.maxResultsPerSearch ?? MAX_GREP_RESULTS_PER_SEARCH;

@@ -1,23 +1,13 @@
 /**
  * esbuild plugin that polyfills Bun's `with { type: "text" }` import
- * attribute.
+ * attribute (esbuild only supports `json`). Intercepts matching
+ * imports, reads the file, and default-exports its contents as a
+ * string. Runtime behavior matches Bun's native handling.
  *
- * esbuild doesn't natively support the `text` import attribute (only
- * `json`), but Bun does. Our CLI code uses it to load the grep worker
- * source as a string at bundle time (see
- * `src/lib/scan/worker-pool.ts`). Without this plugin, esbuild errors
- * with `Importing with a type attribute of "text" is not supported`
- * on any file that imports a sibling `.js` as text.
- *
- * The plugin intercepts imports whose `with` attribute matches
- * `{ type: "text" }`, reads the file from disk, and emits it as a JS
- * module that default-exports the file's contents as a string.
- * Runtime behavior matches Bun's native handling, so the same source
- * works in dev (via `bun run`) and in compiled binaries (esbuild +
- * `bun build --compile` two-step).
- *
- * Used by both `script/build.ts` (single-file executable) and
- * `script/bundle.ts` (CJS library bundle for npm).
+ * Used by `script/build.ts` (single-file executable) and
+ * `script/bundle.ts` (CJS library bundle) so the grep-worker source
+ * in `src/lib/scan/worker-pool.ts` loads correctly in both dev and
+ * compiled builds.
  */
 
 import { readFileSync } from "node:fs";
@@ -25,7 +15,6 @@ import { resolve as resolvePath } from "node:path";
 import type { Plugin } from "esbuild";
 
 const TEXT_IMPORT_NS = "text-import";
-/** Match-any filter for esbuild's plugin API. Hoisted for top-level-regex lint. */
 const ANY_FILTER = /.*/;
 
 export const textImportPlugin: Plugin = {
