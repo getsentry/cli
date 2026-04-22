@@ -103,6 +103,11 @@ async function findCompanionMap(jsPath: string): Promise<string | undefined> {
  *   the walker's `DEFAULT_SKIP_DIRS` is too broad — it prunes
  *   `dist`/`build`/`.next` etc., which are exactly the dirs users
  *   want to scan into.
+ * - Disable the `maxFileSize` cap. The walker defaults to 256 KB,
+ *   but webpack / rollup / Next.js bundles routinely exceed that.
+ *   The old hand-rolled `readdir` loop had no size limit; silently
+ *   dropping large JS files would skip debug-ID injection on the
+ *   exact bundles users care about most.
  */
 const SOURCEMAP_SKIP_DIRS: readonly string[] = ["node_modules"];
 
@@ -117,6 +122,7 @@ async function discoverFilePairs(
     alwaysSkipDirs: SOURCEMAP_SKIP_DIRS,
     hidden: false,
     respectGitignore: false,
+    maxFileSize: Number.POSITIVE_INFINITY,
   })) {
     const mapPath = await findCompanionMap(entry.absolutePath);
     if (mapPath) {

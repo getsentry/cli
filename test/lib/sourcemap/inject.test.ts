@@ -148,4 +148,19 @@ describe("injectDirectory — discovery", () => {
     });
     expect(results).toEqual([]);
   });
+
+  test("discovers large JS bundles (> walker's default 256 KB)", async () => {
+    // Regression: `walkFiles` defaults to `maxFileSize: 256 KB`,
+    // which silently skipped any `.js` file larger than that —
+    // i.e. every real-world webpack/rollup/Next.js bundle. The
+    // adapter must opt out of the size cap.
+    const bundlePath = join(dir, "bundle.js");
+    // 512 KB of filler — exceeds the walker's default 256 KB cap.
+    writeFileSync(bundlePath, "x".repeat(512 * 1024));
+    writeFileSync(`${bundlePath}.map`, "{}\n");
+
+    const results = await injectDirectory(dir, { dryRun: true });
+    const paths = results.map((r) => r.jsPath.slice(dir.length + 1));
+    expect(paths).toEqual(["bundle.js"]);
+  });
 });
