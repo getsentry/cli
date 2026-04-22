@@ -13,6 +13,7 @@ import { MastraClient } from "@mastra/client-js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as banner from "../../../src/lib/banner.js";
 import { WizardError } from "../../../src/lib/errors.js";
+import { WizardCancelledError } from "../../../src/lib/init/clack-utils.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as fmt from "../../../src/lib/init/formatters.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
@@ -23,6 +24,8 @@ import * as inter from "../../../src/lib/init/interactive.js";
 import * as preflight from "../../../src/lib/init/preflight.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as initSpinner from "../../../src/lib/init/spinner.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as stdinReopen from "../../../src/lib/init/stdin-reopen.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as registry from "../../../src/lib/init/tools/registry.js";
 import type {
@@ -92,6 +95,7 @@ let executeToolSpy: ReturnType<typeof spyOn>;
 let precomputeDirListingSpy: ReturnType<typeof spyOn>;
 let preReadCommonFilesSpy: ReturnType<typeof spyOn>;
 let precomputeSentryDetectionSpy: ReturnType<typeof spyOn>;
+let closeFreshTtyForwardingSpy: ReturnType<typeof spyOn>;
 let getWorkflowSpy: ReturnType<typeof spyOn>;
 let stderrSpy: ReturnType<typeof spyOn>;
 
@@ -148,6 +152,7 @@ beforeEach(() => {
     ok: true,
     data: { status: "none", signals: [] },
   });
+  closeFreshTtyForwardingSpy = spyOn(stdinReopen, "closeFreshTtyForwarding");
   stderrSpy = spyOn(process.stderr, "write").mockImplementation(
     () => true as any
   );
@@ -191,6 +196,7 @@ afterEach(() => {
   precomputeDirListingSpy.mockRestore();
   preReadCommonFilesSpy.mockRestore();
   precomputeSentryDetectionSpy.mockRestore();
+  closeFreshTtyForwardingSpy.mockRestore();
   getWorkflowSpy.mockRestore();
   stderrSpy.mockRestore();
 
@@ -204,6 +210,7 @@ describe("runWizard", () => {
     expect(formatResultSpy).toHaveBeenCalled();
     expect(formatErrorSpy).not.toHaveBeenCalled();
     expect(spinnerMock.stop).toHaveBeenCalledWith("Done");
+    expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
   });
 
   test("throws when stdin is not a TTY without --yes", async () => {
@@ -352,6 +359,52 @@ describe("runWizard", () => {
     };
 
     await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+  });
+
+  test("tears down forwarding and stops the spinner on tool errors", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["npm install @sentry/node"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["install-deps"]],
+      steps: {
+        "install-deps": { suspendPayload: payload },
+      },
+    };
+    executeToolSpy.mockRejectedValue(new Error("boom"));
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+
+    expect(spinnerMock.stop).toHaveBeenCalledWith("Error", 1);
+    expect(cancelSpy).toHaveBeenCalledWith("Setup failed");
+    expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("tears down forwarding and stops the spinner on cancellation", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["npm install @sentry/node"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["install-deps"]],
+      steps: {
+        "install-deps": { suspendPayload: payload },
+      },
+    };
+    executeToolSpy.mockRejectedValue(new WizardCancelledError());
+
+    await runWizard(makeOptions());
+
+    expect(process.exitCode).toBe(0);
+    expect(spinnerMock.stop).toHaveBeenCalledWith("Cancelled", 0);
+    expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
   });
 
   test("shows a multiline tree while reading files and then analyzing them", async () => {

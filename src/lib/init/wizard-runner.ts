@@ -38,7 +38,10 @@ import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
 import { resolveInitContext } from "./preflight.js";
 import { createWizardSpinner } from "./spinner.js";
-import { forwardFreshTtyToStdin } from "./stdin-reopen.js";
+import {
+  closeFreshTtyForwarding,
+  forwardFreshTtyToStdin,
+} from "./stdin-reopen.js";
 import { describeTool, executeTool } from "./tools/registry.js";
 import type {
   ResolvedInitContext,
@@ -367,8 +370,18 @@ async function preamble(
   return true;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard orchestration with error handling branches
 export async function runWizard(initialOptions: WizardOptions): Promise<void> {
+  try {
+    await runWizardInner(initialOptions);
+  } finally {
+    // The wizard owns the temporary `/dev/tty` forwarding installed in
+    // preamble(), so teardown must run on every exit path.
+    closeFreshTtyForwarding();
+  }
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard orchestration with error handling branches
+async function runWizardInner(initialOptions: WizardOptions): Promise<void> {
   const { directory, yes, dryRun, features } = initialOptions;
 
   if (!(await preamble(directory, yes, dryRun))) {
@@ -514,6 +527,16 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       );
     }
   } catch (err) {
+    // A running spinner owns a live interval, so stop it before any early
+    // return or rethrow to avoid leaving the event loop artificially busy.
+    if (spinState.running) {
+      const [label, code] =
+        err instanceof WizardCancelledError
+          ? (["Cancelled", 0] as const)
+          : (["Error", 1] as const);
+      spin.stop(label, code);
+      spinState.running = false;
+    }
     if (err instanceof WizardCancelledError) {
       captureException(err);
       process.exitCode = 0;
@@ -521,10 +544,6 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     }
     if (err instanceof WizardError) {
       throw err;
-    }
-    if (spinState.running) {
-      spin.stop("Error", 1);
-      spinState.running = false;
     }
     log.error(errorMessage(err));
     cancel("Setup failed");

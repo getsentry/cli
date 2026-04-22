@@ -269,7 +269,9 @@ export const initCommand = buildCommand<
       warmOrgDetection(targetDir);
     }
 
-    // 6. Run the wizard
+    // 6. Run the wizard. It owns the temporary `/dev/tty` forwarding used
+    //    for `curl | bash` flows and tears it down on every exit path, so
+    //    init can return naturally once its own refs are released.
     await runWizard({
       directory: targetDir,
       yes: flags.yes,
@@ -279,12 +281,5 @@ export const initCommand = buildCommand<
       org: explicitOrg,
       project: explicitProject,
     });
-
-    // Force exit after the wizard completes. `sentry init` is a terminal
-    // command, and Bun's global fetch dispatcher (used by MastraClient) can
-    // hold keep-alive sockets open past the wizard, leaving the libuv loop
-    // alive and the shell appearing to hang. `process.exit` flushes stdio
-    // and releases those handles unconditionally.
-    process.exit(process.exitCode ?? 0);
   },
 });

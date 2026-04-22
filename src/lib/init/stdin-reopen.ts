@@ -18,7 +18,36 @@
 import { openSync } from "node:fs";
 import { isatty, ReadStream } from "node:tty";
 
-let installed = false;
+/**
+ * Mutable subset of `process.stdin` that the TTY-forwarding workaround
+ * temporarily patches while the init wizard is running.
+ */
+type StdinHandle = {
+  setRawMode: (mode: boolean) => NodeJS.ReadStream;
+  pause: () => NodeJS.ReadStream;
+  resume: () => NodeJS.ReadStream;
+  _read: (size: number) => void;
+};
+
+/**
+ * State captured when the init wizard installs fresh `/dev/tty` forwarding.
+ * Stored so teardown can release the temporary TTY handle and restore
+ * `process.stdin` to its original behavior.
+ */
+type InstalledState = {
+  fresh: ReadStream;
+  dataListener: (chunk: Buffer) => void;
+  errorListener: () => void;
+  original: {
+    setRawMode: StdinHandle["setRawMode"];
+    pause: StdinHandle["pause"];
+    resume: StdinHandle["resume"];
+    read: StdinHandle["_read"];
+  };
+  backfilledIsTty: boolean;
+};
+
+let installedState: InstalledState | null = null;
 
 /**
  * Open a fresh `/dev/tty` fd and wire it up to feed `process.stdin`'s event
@@ -33,7 +62,7 @@ let installed = false;
  * or leak additional `/dev/tty` fds.
  */
 export function forwardFreshTtyToStdin(): boolean {
-  if (installed) {
+  if (installedState) {
     return true;
   }
   if (!isatty(0)) {
@@ -48,41 +77,46 @@ export function forwardFreshTtyToStdin(): boolean {
   }
 
   const fresh = new ReadStream(fd);
+  const stdinHandle = process.stdin as unknown as StdinHandle;
+  const original = {
+    setRawMode: stdinHandle.setRawMode,
+    pause: stdinHandle.pause,
+    resume: stdinHandle.resume,
+    read: stdinHandle._read,
+  };
 
   // Bun's compiled binary can leave `process.stdin.isTTY === undefined` on
   // inherited-via-redirect fds even when `isatty(0)` is true. Clack gates
   // its internal `setRawMode(true)` call on `input.isTTY`, so without this
   // backfill the patched setRawMode below is never invoked and the fresh
   // fd stays in canonical mode (line-buffered, no keypresses).
+  let backfilledIsTty = false;
   if (process.stdin.isTTY === undefined) {
     (process.stdin as { isTTY?: boolean }).isTTY = true;
+    backfilledIsTty = true;
   }
 
   // Forward keystrokes from the working fd onto process.stdin so any
   // listeners clack attaches (readline's 'data', emitKeypressEvents'
   // 'keypress') fire as expected.
-  fresh.on("data", (chunk: Buffer) => {
+  const dataListener = (chunk: Buffer): void => {
     process.stdin.emit("data", chunk);
-  });
+  };
+  fresh.on("data", dataListener);
 
   // A ReadStream without an `error` listener crashes the process when it
   // emits (e.g. terminal disconnected, SSH dropped). The wizard can't
   // recover from a dead TTY, so silently drop — the next operation that
   // actually needs input will fail with a more meaningful error.
-  fresh.on("error", () => {
+  const errorListener = (): void => {
     // intentionally empty
-  });
+  };
+  fresh.on("error", errorListener);
 
   // setRawMode issues a TCSETS ioctl on the underlying TTY device. The device
   // is shared between the broken fd 0 and the fresh fd, but the broken fd's
   // ioctl path may be the root cause — so route raw-mode toggles through the
   // fresh fd, which we know works.
-  const stdinHandle = process.stdin as unknown as {
-    setRawMode: (mode: boolean) => NodeJS.ReadStream;
-    pause: () => NodeJS.ReadStream;
-    resume: () => NodeJS.ReadStream;
-    _read: (size: number) => void;
-  };
   stdinHandle.setRawMode = (mode: boolean): NodeJS.ReadStream => {
     fresh.setRawMode(mode);
     return process.stdin;
@@ -105,12 +139,48 @@ export function forwardFreshTtyToStdin(): boolean {
   // our 'data' handler fires.
   fresh.resume();
 
-  // `unref()` detaches the TTY handle from the event loop's lifetime so the
-  // process can exit when the wizard finishes. Without this, the still-flowing
-  // fresh stream keeps the event loop alive indefinitely (process.stdin.pause
-  // is a no-op now, so clack's own cleanup can't stop it either).
-  fresh.unref();
+  installedState = {
+    fresh,
+    dataListener,
+    errorListener,
+    original,
+    backfilledIsTty,
+  };
 
-  installed = true;
   return true;
+}
+
+/**
+ * Tear down the fresh `/dev/tty` forwarding installed by
+ * {@link forwardFreshTtyToStdin}.
+ *
+ * Must be safe on every wizard exit path, including when forwarding was never
+ * installed. Destroying the temporary `ReadStream` releases the TTY handle so
+ * the process can exit naturally once the wizard is done.
+ */
+export function closeFreshTtyForwarding(): void {
+  if (!installedState) {
+    return;
+  }
+
+  const { fresh, dataListener, errorListener, original, backfilledIsTty } =
+    installedState;
+  installedState = null;
+
+  fresh.off("data", dataListener);
+  fresh.off("error", errorListener);
+  // Pause before destroy so no queued read callback tries to deliver bytes
+  // after the stream has been torn down.
+  fresh.pause();
+  fresh.destroy();
+
+  const stdinHandle = process.stdin as unknown as StdinHandle;
+  stdinHandle.setRawMode = original.setRawMode;
+  stdinHandle.pause = original.pause;
+  stdinHandle.resume = original.resume;
+  stdinHandle._read = original.read;
+
+  if (backfilledIsTty) {
+    (process.stdin as { isTTY?: boolean }).isTTY = undefined;
+  }
 }

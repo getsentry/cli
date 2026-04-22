@@ -49,9 +49,8 @@ const SUPPRESSED_ARGS = new Set([
   "-V",
   "--json",
   "token",
-  // `init` force-exits after the wizard (src/commands/init.ts) to release
-  // Bun's fetch keep-alive sockets that keep the loop alive. That bypasses
-  // this check anyway — suppress explicitly so the intent is documented.
+  // `init` runs an interactive wizard with its own terminal UI, so suppress
+  // update notifications explicitly to avoid unrelated banners mid-flow.
   "init",
 ]);
 
