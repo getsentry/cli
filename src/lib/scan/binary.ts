@@ -92,6 +92,10 @@ export const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
   ".ods",
   ".odp",
   // Executables and compiled artifacts
+  // NOTE: `.obj` is deliberately EXCLUDED — it's shared with the
+  // Wavefront OBJ 3D model format (plain-text ASCII), common in
+  // game-dev / AR / 3D-printing repos. MSVC `.obj` outputs land in
+  // `build/`/`target/` dirs which DEFAULT_SKIP_DIRS prunes anyway.
   ".exe",
   ".dll",
   ".so",
@@ -100,19 +104,23 @@ export const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
   ".class",
   ".o",
   ".a",
-  ".obj",
   ".pyc",
   ".pyo",
   ".node",
-  // Databases (binary)
+  // Databases (binary-format SQLite / Access)
   ".db",
   ".sqlite",
   ".sqlite3",
   ".mdb",
-  // Generic binary
-  ".bin",
-  ".dat",
-  ".dump",
+  // Unambiguously-binary disk images.
+  // NOTE: generic blob extensions are deliberately EXCLUDED:
+  //   - `.bin`  — used for both firmware/raw data AND arbitrary
+  //     text dumps; no format spec.
+  //   - `.dat`  — countless text data formats use this.
+  //   - `.dump` — frequently plain-text SQL (`pg_dump`, `mysqldump`
+  //     default to text).
+  // All three fall back to the NUL-sniff, which classifies them
+  // correctly by content.
   ".iso",
   ".img",
 ]);
