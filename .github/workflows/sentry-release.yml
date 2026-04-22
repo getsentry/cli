@@ -34,7 +34,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      # The sentry npm package requires Node.js >= 22 (ubuntu-latest ships 20).
+      # The sentry npm package requires Node.js >= 22.12 — pin an explicit
+      # version so this job doesn't depend on the runner image's default.
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:

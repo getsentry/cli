@@ -221,9 +221,10 @@ const result = await build({
   plugins,
 });
 
-// Write the CLI bin wrapper (tiny — shebang + version check + dispatch)
+// Write the CLI bin wrapper (tiny — shebang + version check + dispatch).
+// Version floor must track `engines.node` in package.json.
 const BIN_WRAPPER = `#!/usr/bin/env node
-if(parseInt(process.versions.node)<22){console.error("Error: sentry requires Node.js 22 or later (found "+process.version+").\\n\\nEither upgrade Node.js, or install the standalone binary instead:\\n  curl -fsSL https://cli.sentry.dev/install | bash\\n");process.exit(1)}
+{let v=process.versions.node.split(".").map(Number);if(v[0]<22||(v[0]===22&&v[1]<12)){console.error("Error: sentry requires Node.js 22.12 or later (found "+process.version+").\\n\\nEither upgrade Node.js, or install the standalone binary instead:\\n  curl -fsSL https://cli.sentry.dev/install | bash\\n");process.exit(1)}}
 {let e=process.emit;process.emit=function(n,...a){return n==="warning"?!1:e.apply(this,[n,...a])}}
 require('./index.cjs')._cli().catch(()=>{process.exitCode=1});
 `;
