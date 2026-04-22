@@ -214,6 +214,70 @@ function toResumeError(error: unknown): InitActionResumeBody {
   };
 }
 
+function stopSpinner(
+  spin: Spinner,
+  spinState: SpinState,
+  message: string,
+  code?: number
+): void {
+  if (!spinState.running) {
+    return;
+  }
+
+  spin.stop(message, code);
+  spinState.running = false;
+}
+
+function failWizard(args: {
+  message: string;
+  spin: Spinner;
+  spinState: SpinState;
+  stopCode?: number;
+  stopMessage: string;
+}): never {
+  stopSpinner(args.spin, args.spinState, args.stopMessage, args.stopCode);
+  log.error(args.message);
+  cancel("Setup failed");
+  throw new WizardError(args.message);
+}
+
+async function resumeActionRequest(
+  event: InitActionRequestEvent,
+  body: InitActionResumeBody
+): Promise<void> {
+  try {
+    await resumeInitAction(event.actionId, body, {
+      baseUrl: INIT_API_URL,
+    });
+  } catch (error) {
+    throw new Error(
+      `Failed to resume ${event.kind} action ${safeCodeSpan(event.name)}: ${errorMessage(error)}`
+    );
+  }
+}
+
+function describeStreamReadError(error: unknown): string {
+  const message = errorMessage(error);
+  if (
+    message.includes("Invalid ") ||
+    message.includes("Unknown init event type") ||
+    message.includes("JSON")
+  ) {
+    return `Malformed init stream event: ${message}`;
+  }
+
+  return `Init stream read failed: ${message}`;
+}
+
+async function connectInitStream(
+  runId: string,
+  startIndex: number
+): Promise<Response> {
+  return reconnectInitStream(runId, startIndex, {
+    baseUrl: INIT_API_URL,
+  });
+}
+
 async function performActionRequest(
   ctx: StepContext,
   stepPhases: Map<string, number>,
@@ -359,23 +423,83 @@ async function handleEvent(
           stepPhases,
           stepHistory
         );
-        await resumeInitAction(event.actionId, resumeBody, {
-          baseUrl: INIT_API_URL,
-        });
+        await resumeActionRequest(event, resumeBody);
         state.completedActionIds.add(event.actionId);
       } catch (error) {
         if (error instanceof WizardCancelledError) {
           throw error;
         }
-        await resumeInitAction(event.actionId, toResumeError(error), {
-          baseUrl: INIT_API_URL,
-        });
+        await resumeActionRequest(event, toResumeError(error));
         state.completedActionIds.add(event.actionId);
       }
       return;
     default: {
       const _exhaustive: never = event;
       throw new Error(`Unhandled init event: ${String(_exhaustive)}`);
+    }
+  }
+}
+
+async function consumeStreamUntilTerminal(args: {
+  context: ResolvedInitContext;
+  runId: string;
+  spin: Spinner;
+  spinState: SpinState;
+  state: StreamState;
+  stepHistory: Map<string, Record<string, unknown>[]>;
+  stepPhases: Map<string, number>;
+}): Promise<void> {
+  let reconnectAttempt = 0;
+  let currentResponse = await connectInitStream(
+    args.runId,
+    args.state.nextStartIndex
+  );
+
+  while (!(args.state.done || args.state.finalError)) {
+    let eventCount: number;
+    try {
+      eventCount = await readNdjsonStream(currentResponse, async (event) => {
+        await handleEvent(
+          event,
+          args.context,
+          args.spin,
+          args.spinState,
+          args.state,
+          args.stepPhases,
+          args.stepHistory
+        );
+      });
+    } catch (error) {
+      throw new Error(describeStreamReadError(error));
+    }
+
+    if (args.state.done || args.state.finalError) {
+      return;
+    }
+
+    reconnectAttempt = eventCount === 0 ? reconnectAttempt + 1 : 0;
+    if (reconnectAttempt > MAX_STREAM_RECONNECTS) {
+      throw new Error(
+        `Init stream disconnected too many times without new events (${MAX_STREAM_RECONNECTS})`
+      );
+    }
+
+    args.spin.message(
+      renderInlineMarkdown(
+        truncateForTerminal("Connection interrupted. Reconnecting...")
+      )
+    );
+    await sleepMs(nextReconnectDelay(reconnectAttempt));
+
+    try {
+      currentResponse = await connectInitStream(
+        args.runId,
+        args.state.nextStartIndex
+      );
+    } catch (error) {
+      throw new Error(
+        `Failed to reconnect to the init stream: ${errorMessage(error)}`
+      );
     }
   }
 }
@@ -521,11 +645,13 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     });
     runId = started.runId;
   } catch (error) {
-    spin.stop("Connection failed", 1);
-    spinState.running = false;
-    log.error(errorMessage(error));
-    cancel("Setup failed");
-    throw new WizardError(errorMessage(error));
+    failWizard({
+      message: errorMessage(error),
+      spin,
+      spinState,
+      stopCode: 1,
+      stopMessage: "Connection failed",
+    });
   }
 
   try {
@@ -533,65 +659,32 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       throw new Error("Init start succeeded but no workflow runId was returned.");
     }
 
-    let reconnectAttempt = 0;
-    let currentResponse = await reconnectInitStream(runId, state.nextStartIndex, {
-      baseUrl: INIT_API_URL,
+    await consumeStreamUntilTerminal({
+      context,
+      runId,
+      spin,
+      spinState,
+      state,
+      stepHistory,
+      stepPhases,
     });
-
-    while (!(state.done || state.finalError)) {
-      const eventCount = await readNdjsonStream(currentResponse, async (event) => {
-        await handleEvent(
-          event,
-          context,
-          spin,
-          spinState,
-          state,
-          stepPhases,
-          stepHistory
-        );
-      });
-
-      if (state.done || state.finalError) {
-        break;
-      }
-
-      reconnectAttempt = eventCount === 0 ? reconnectAttempt + 1 : 0;
-      if (reconnectAttempt > MAX_STREAM_RECONNECTS) {
-        throw new Error(
-          `Init stream disconnected too many times (${MAX_STREAM_RECONNECTS})`
-        );
-      }
-
-      spin.message(
-        renderInlineMarkdown(
-          truncateForTerminal("Connection interrupted. Reconnecting...")
-        )
-      );
-      await sleepMs(nextReconnectDelay(reconnectAttempt));
-      currentResponse = await reconnectInitStream(runId, state.nextStartIndex, {
-        baseUrl: INIT_API_URL,
-      });
-    }
   } catch (error) {
     if (error instanceof WizardCancelledError) {
       captureException(error);
       process.exitCode = 0;
       return;
     }
-    if (spinState.running) {
-      spin.stop("Error", 1);
-      spinState.running = false;
-    }
-    log.error(errorMessage(error));
-    cancel("Setup failed");
-    throw new WizardError(errorMessage(error));
+    failWizard({
+      message: errorMessage(error),
+      spin,
+      spinState,
+      stopCode: 1,
+      stopMessage: "Error",
+    });
   }
 
   if (state.done?.ok) {
-    if (spinState.running) {
-      spin.stop("Done");
-      spinState.running = false;
-    }
+    stopSpinner(spin, spinState, "Done");
     formatResult(state.finalOutput ?? {});
     return;
   }
@@ -602,10 +695,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     state.done
   );
 
-  if (spinState.running) {
-    spin.stop("Failed", 1);
-    spinState.running = false;
-  }
+  stopSpinner(spin, spinState, "Failed", 1);
   formatError(finalError);
   throw new WizardError(finalError.message);
 }

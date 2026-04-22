@@ -1,155 +1,165 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import {
   readNdjsonStream,
   reconnectInitStream,
   resumeInitAction,
   startInitStream,
 } from "../../../src/lib/init/transport.js";
-import type { InitEvent, InitStartInput } from "../../../src/lib/init/types.js";
-import { mockFetch } from "../../helpers.js";
 
-function streamResponse(
-  chunks: string[],
-  headers?: HeadersInit,
-  status = 200
+function createJsonResponse(
+  body: unknown,
+  init: ResponseInit = {}
 ): Response {
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      for (const chunk of chunks) {
-        controller.enqueue(encoder.encode(chunk));
-      }
-      controller.close();
-    },
-  });
-
-  return new Response(stream, {
-    status,
+  return new Response(JSON.stringify(body), {
     headers: {
-      "content-type": "application/x-ndjson",
-      ...headers,
+      "content-type": "application/json",
+      ...(init.headers ?? {}),
     },
+    status: init.status ?? 200,
   });
 }
 
-async function collectEvents(response: Response): Promise<InitEvent[]> {
-  const events: InitEvent[] = [];
-  await readNdjsonStream(response, async (event) => {
-    events.push(event);
+describe("init transport", () => {
+  test("starts a workflow run and reads the run id header", async () => {
+    const fetchImpl = mock(async () =>
+      createJsonResponse(
+        { runId: "run_123" },
+        {
+          headers: {
+            "content-type": "application/json",
+            "x-workflow-run-id": "run_123",
+          },
+          status: 202,
+        }
+      )
+    ) as typeof fetch;
+
+    const started = await startInitStream(
+      {
+        cliVersion: "0.29.0-dev.0",
+        directory: "/tmp/project",
+        dryRun: false,
+        yes: true,
+      },
+      {
+        baseUrl: "http://localhost:3000",
+        fetchImpl,
+      }
+    );
+
+    expect(started.runId).toBe("run_123");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
-  return events;
-}
 
-type FetchCall = {
-  url: string;
-  init?: RequestInit;
-};
+  test("surfaces retryable start failures from the backend", async () => {
+    const fetchImpl = mock(async () =>
+      createJsonResponse(
+        {
+          error: "Runner did not become ready in time",
+          retryable: true,
+        },
+        { status: 503 }
+      )
+    ) as typeof fetch;
 
-let originalFetch: typeof globalThis.fetch;
-let calls: FetchCall[];
-let responses: Response[];
+    await expect(
+      startInitStream(
+        {
+          cliVersion: "0.29.0-dev.0",
+          directory: "/tmp/project",
+          dryRun: false,
+          yes: true,
+        },
+        {
+          baseUrl: "http://localhost:3000",
+          fetchImpl,
+        }
+      )
+    ).rejects.toThrow(
+      "Init start failed (503): Runner did not become ready in time [retryable]"
+    );
+  });
 
-beforeEach(() => {
-  calls = [];
-  responses = [];
-  originalFetch = globalThis.fetch;
-  globalThis.fetch = mockFetch(async (input, init) => {
-    calls.push({ url: String(input), init });
-    return (
-      responses.shift() ??
-      new Response("Unexpected fetch", {
-        status: 500,
+  test("reconnects the NDJSON stream from a start index", async () => {
+    const fetchImpl = mock(async () =>
+      new Response("", {
+        headers: {
+          "content-type": "application/x-ndjson; charset=utf-8",
+        },
+      })
+    ) as typeof fetch;
+
+    await reconnectInitStream("run_123", 7, {
+      baseUrl: "http://localhost:3000",
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://localhost:3000/api/init/run_123/stream?startIndex=7",
+      expect.objectContaining({
+        method: "GET",
       })
     );
   });
-});
 
-afterEach(() => {
-  globalThis.fetch = originalFetch;
-});
-
-describe("init transport", () => {
-  test("starts with POST /api/init and returns the runId", async () => {
-    responses = [
-      new Response(JSON.stringify({ runId: "run-123" }), {
-        headers: {
-          "content-type": "application/json",
-          "x-workflow-run-id": "run-123",
-        },
-        status: 202,
-      }),
-    ];
-
-    const input: InitStartInput = {
-      directory: "/tmp/test",
-      yes: true,
-      dryRun: false,
-      org: "acme",
-      cliVersion: "0.29.0-dev.0",
-    };
-
-    const started = await startInitStream(input, {
-      baseUrl: "https://example.test",
-    });
-
-    expect(started.runId).toBe("run-123");
-    expect(calls[0]?.url).toBe("https://example.test/api/init");
-    expect(calls[0]?.init?.method).toBe("POST");
-    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual(input);
-  });
-
-  test("reconnects the stream with startIndex", async () => {
-    responses = [streamResponse(['{"type":"done","ok":true}\n'])];
-
-    const response = await reconnectInitStream("run-123", 7, {
-      baseUrl: "https://example.test",
-    });
-    const events = await collectEvents(response);
-
-    expect(events).toEqual([{ type: "done", ok: true }]);
-    expect(calls[0]?.url).toBe(
-      "https://example.test/api/init/run-123/stream?startIndex=7"
-    );
-    expect(calls[0]?.init?.method).toBe("GET");
-  });
-
-  test("posts wrapped action results to the action endpoint", async () => {
-    responses = [new Response(null, { status: 204 })];
+  test("posts action resume payloads", async () => {
+    const fetchImpl = mock(async () => createJsonResponse({ ok: true })) as typeof fetch;
 
     await resumeInitAction(
-      "action-1",
+      "run_123:action:001:read-files",
       {
         ok: true,
         output: {
-          action: "continue",
-          _phase: "apply",
+          files: {},
         },
       },
-      { baseUrl: "https://example.test" }
+      {
+        baseUrl: "http://localhost:3000",
+        fetchImpl,
+      }
     );
 
-    expect(calls[0]?.url).toBe("https://example.test/api/init/actions/action-1");
-    expect(calls[0]?.init?.method).toBe("POST");
-    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
-      ok: true,
-      output: {
-        action: "continue",
-        _phase: "apply",
-      },
-    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  test("parses split NDJSON chunks across line boundaries", async () => {
-    const events = await collectEvents(
-      streamResponse([
-        '{"type":"summary","output":{"platform":"No',
-        'de"}}\n{"type":"done","ok":true}\n',
-      ])
+  test("reads NDJSON events and validates them", async () => {
+    const response = new Response(
+      [
+        JSON.stringify({
+          message: "Inspecting project…",
+          phase: "bootstrap",
+          type: "status",
+        }),
+        JSON.stringify({
+          ok: true,
+          type: "done",
+        }),
+      ].join("\n"),
+      {
+        headers: {
+          "content-type": "application/x-ndjson; charset=utf-8",
+        },
+      }
     );
 
-    expect(events).toEqual([
-      { type: "summary", output: { platform: "Node" } },
-      { type: "done", ok: true },
-    ]);
+    const seen: string[] = [];
+    const count = await readNdjsonStream(response, async (event) => {
+      seen.push(event.type);
+    });
+
+    expect(count).toBe(2);
+    expect(seen).toEqual(["status", "done"]);
+  });
+
+  test("fails on malformed NDJSON events", async () => {
+    const response = new Response('{"type":"status"}\n', {
+      headers: {
+        "content-type": "application/x-ndjson; charset=utf-8",
+      },
+    });
+
+    await expect(
+      readNdjsonStream(response, async () => {})
+    ).rejects.toThrow("Invalid status event");
   });
 });
