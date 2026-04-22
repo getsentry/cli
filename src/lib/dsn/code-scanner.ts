@@ -5,14 +5,14 @@
  * filtering, host validation, package-path inference, stop-on-first
  * semantics). All file walking, `.gitignore` handling, extension
  * filtering, bounded concurrency, AND worker-pool dispatch are
- * delegated to the shared `src/lib/scan/` module via `grepFiles`.
+ * delegated to the shared `src/lib/scan/` module via `collectGrep`.
  *
  * Flow:
- *   1. `scanDirectory(cwd, stopOnFirst)` calls `grepFiles` with the
+ *   1. `scanDirectory(cwd, stopOnFirst)` calls `collectGrep` with the
  *      DSN pattern and preset (`dsnScanOptions()`), plus
  *      `recordMtimes: true` and an `onDirectoryVisit` hook so the
  *      cache-invalidation maps are populated in one traversal.
- *   2. `grepFiles` dispatches per-file work to the worker pool (when
+ *   2. `collectGrep` dispatches per-file work to the worker pool (when
  *      available) or a concurrent-async fallback. Each yielded
  *      `GrepMatch` represents one line containing a DSN URL; the
  *      grep engine handles the file-level literal gate (`http`) for
@@ -52,7 +52,7 @@ import path from "node:path";
 import { DEFAULT_SENTRY_HOST, getConfiguredSentryUrl } from "../constants.js";
 import { ConfigError } from "../errors.js";
 import { logger } from "../logger.js";
-import { grepFiles, normalizePath, walkFiles } from "../scan/index.js";
+import { collectGrep, normalizePath, walkFiles } from "../scan/index.js";
 import { withTracingSpan } from "../telemetry.js";
 import { createDetectedDsn, inferPackagePath, parseDsn } from "./parser.js";
 import { DSN_MAX_DEPTH, dsnScanOptions } from "./scan-options.js";
@@ -360,7 +360,7 @@ function isValidDsnHost(dsn: string): boolean {
  * production dashboards + the `scanCodeForDsns` bench op stay in
  * sync. Attribute names match the pre-PR-3 scanner byte-for-byte.
  *
- * Delegates the heavy lifting to `grepFiles`:
+ * Delegates the heavy lifting to `collectGrep`:
  * - Walker config (depth, gitignore, skip dirs) from `dsnScanOptions()`.
  * - `DSN_PATTERN` as the grep pattern — the engine's literal
  *   prefilter uses `http` as a file-level gate, identical to the
@@ -379,22 +379,16 @@ function scanDirectory(cwd: string): Promise<CodeScanResult> {
       const sourceMtimes: Record<string, number> = {};
       const dirMtimes: Record<string, number> = {};
       const seen = new Map<string, DetectedDsn>();
-      // Unique absolute paths of files that had at least one DSN-like
-      // URL match (commented-out or not). Used as a set for dedup AND
-      // as the `dsn.files_collected` telemetry count. `grepFiles`
-      // emits one match per line, so counting matches would over-count;
-      // counting unique paths gives the pre-refactor semantics.
-      //
-      // Files with zero DSN-like URLs are skipped by grep's file-level
-      // `http` gate without emitting any match, so they're not counted
-      // here. This is a (minor) drift from the pre-refactor counter
-      // which tracked walker-yielded files regardless — accepted as
-      // the stricter count is still useful signal and matches
-      // rg-style "files with matches" semantics.
+      // Dedup set for mtime recording: one entry per file that
+      // contributed a validated DSN. Used to skip redundant mtime
+      // writes in `processMatch` — `grepFiles` emits one match per
+      // matching line, so a file with 3 DSN-containing lines would
+      // otherwise trigger 3 mtime writes for the same path. NOT
+      // used for telemetry (see `stats.filesRead` below).
       const filesSeenForMtime = new Set<string>();
 
       try {
-        const iter = grepFiles({
+        const { matches, stats } = await collectGrep({
           cwd,
           pattern: DSN_PATTERN,
           ...dsnScanOptions(),
@@ -414,7 +408,7 @@ function scanDirectory(cwd: string): Promise<CodeScanResult> {
           maxLineLength: Number.POSITIVE_INFINITY,
         });
 
-        for await (const match of iter) {
+        for (const match of matches) {
           processMatch(match, {
             seen,
             sourceMtimes,
@@ -422,13 +416,17 @@ function scanDirectory(cwd: string): Promise<CodeScanResult> {
           });
         }
 
-        // `filesSeenForMtime` holds one entry per file that had a
-        // validated DSN — use its `.size` for the `files_collected`
-        // and `files_scanned` attributes so a file with 3 DSN-matching
-        // lines counts as 1, not 3.
-        span.setAttribute("dsn.files_collected", filesSeenForMtime.size);
+        // `stats.filesRead` is the count of files actually read and
+        // tested by the grep pipeline — matches the walker-yielded
+        // file count after the walker's own filters (extension,
+        // gitignore, etc.). Consistent with `scanCodeForFirstDsn`
+        // which counts every file it walks. `files_collected` is a
+        // legacy attribute: alias to the same count so telemetry
+        // consumers don't need to know about the historical
+        // distinction.
+        span.setAttribute("dsn.files_collected", stats.filesRead);
         span.setAttributes({
-          "dsn.files_scanned": filesSeenForMtime.size,
+          "dsn.files_scanned": stats.filesRead,
           "dsn.dsns_found": seen.size,
         });
 
