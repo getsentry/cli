@@ -77,10 +77,31 @@ describe("classifyByExtension", () => {
     });
   });
 
-  test("unknown extensions return null (caller must sniff)", () => {
-    expect(classifyByExtension("/a/b/c.png", TEXT_EXTENSIONS)).toBeNull();
-    expect(classifyByExtension("/a/b/c.bin", TEXT_EXTENSIONS)).toBeNull();
-    expect(classifyByExtension("/a/b/c.woff", TEXT_EXTENSIONS)).toBeNull();
+  test("known-binary extensions return isBinary:true (no sniff)", () => {
+    expect(classifyByExtension("/a/b/c.png", TEXT_EXTENSIONS)).toEqual({
+      isBinary: true,
+    });
+    expect(classifyByExtension("/a/b/c.bin", TEXT_EXTENSIONS)).toEqual({
+      isBinary: true,
+    });
+    expect(classifyByExtension("/a/b/c.woff", TEXT_EXTENSIONS)).toEqual({
+      isBinary: true,
+    });
+    // Case-insensitive — common for screenshot exports etc.
+    expect(classifyByExtension("/a/b/c.PNG", TEXT_EXTENSIONS)).toEqual({
+      isBinary: true,
+    });
+  });
+
+  test("ambiguous extensions return null (caller must sniff)", () => {
+    // `.svg` is XML text, NOT in BINARY_EXTENSIONS.
+    expect(classifyByExtension("/a/b/c.svg", TEXT_EXTENSIONS)).toBeNull();
+    // `.log` / `.lock` / `.map` — usually text, unsafe to presume.
+    expect(classifyByExtension("/a/b/c.log", TEXT_EXTENSIONS)).toBeNull();
+    expect(classifyByExtension("/a/b/c.lock", TEXT_EXTENSIONS)).toBeNull();
+    expect(classifyByExtension("/a/b/c.map", TEXT_EXTENSIONS)).toBeNull();
+    // Wholly unknown extension.
+    expect(classifyByExtension("/a/b/c.xyz", TEXT_EXTENSIONS)).toBeNull();
   });
 
   test("no-extension files return null", () => {
