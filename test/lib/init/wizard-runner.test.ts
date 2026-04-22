@@ -246,6 +246,8 @@ describe("runWizard", () => {
 
     expect(getWorkflowSpy).not.toHaveBeenCalled();
     expect(formatResultSpy).not.toHaveBeenCalled();
+    // Early-return paths must still tear down TTY forwarding via `using`.
+    expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
   });
 
   test("aborts cleanly when git safety check fails", async () => {
@@ -255,6 +257,8 @@ describe("runWizard", () => {
 
     expect(cancelSpy).toHaveBeenCalledWith("Setup cancelled.");
     expect(getWorkflowSpy).not.toHaveBeenCalled();
+    // Early-return paths must still tear down TTY forwarding via `using`.
+    expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
   });
 
   test("dispatches tool payloads through the registry", async () => {
@@ -404,6 +408,34 @@ describe("runWizard", () => {
 
     expect(process.exitCode).toBe(0);
     expect(spinnerMock.stop).toHaveBeenCalledWith("Cancelled", 0);
+    expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("tears down forwarding when a WizardError is rethrown from a tool", async () => {
+    // The reordered catch block stops the spinner BEFORE the WizardError
+    // rethrow branch, so any WizardError thrown from handleSuspendedStep
+    // (e.g. tool handlers, malformed payloads) must still release the TTY
+    // handle via `using` teardown.
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["npm install @sentry/node"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["install-deps"]],
+      steps: {
+        "install-deps": { suspendPayload: payload },
+      },
+    };
+    executeToolSpy.mockRejectedValue(
+      new WizardError("tool rejected by server")
+    );
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+
+    expect(spinnerMock.stop).toHaveBeenCalledWith("Error", 1);
     expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
   });
 
