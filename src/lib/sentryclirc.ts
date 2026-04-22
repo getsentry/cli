@@ -108,6 +108,19 @@ function isComplete(result: SentryCliRcConfig): boolean {
 }
 
 /**
+ * True for the two I/O errors we treat as "file effectively absent"
+ * — a missing path and a permission-denied read. Any other error
+ * code signals something worth surfacing to the user.
+ */
+function isNarrowAbsenceError(error: unknown): boolean {
+  if (error instanceof Error && "code" in error) {
+    const { code } = error as NodeJS.ErrnoException;
+    return code === "ENOENT" || code === "EACCES";
+  }
+  return false;
+}
+
+/**
  * Read a `.sentryclirc` file's text content. Returns `null` when
  * the file:
  *
@@ -130,19 +143,6 @@ function isComplete(result: SentryCliRcConfig): boolean {
  * That broader policy is correct for opportunistic DSN scans; not
  * for this committed config load.
  */
-/**
- * True for the two I/O errors we treat as "file effectively absent"
- * — a missing path and a permission-denied read. Any other error
- * code signals something worth surfacing to the user.
- */
-function isNarrowAbsenceError(error: unknown): boolean {
-  if (error instanceof Error && "code" in error) {
-    const { code } = error as NodeJS.ErrnoException;
-    return code === "ENOENT" || code === "EACCES";
-  }
-  return false;
-}
-
 async function tryReadSentryCliRc(filePath: string): Promise<string | null> {
   let statResult: Awaited<ReturnType<typeof stat>>;
   try {
