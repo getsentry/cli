@@ -1,18 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { NODE_MODULES_DIRNAME } from "../../constants.js";
+import { normalizePath } from "../../scan/index.js";
 import type { DirEntry, ListDirPayload, ToolResult } from "../types.js";
 import { safePath } from "./shared.js";
 import type { InitToolDefinition } from "./types.js";
 
-/** Native → POSIX separator. Identity on POSIX hosts. */
-const NATIVE_IS_POSIX = path.sep === "/";
 const NATIVE_SEP = path.sep;
-
-/** Normalize a native-separator path to POSIX. No-op on POSIX hosts. */
-function toPosix(nativePath: string): string {
-  return NATIVE_IS_POSIX ? nativePath : nativePath.replaceAll(NATIVE_SEP, "/");
-}
 
 /**
  * List files and directories within the workflow sandbox.
@@ -95,7 +89,7 @@ function toDirEntry(
 
   return {
     name: entry.name,
-    path: toPosix(relNative),
+    path: normalizePath(relNative),
     type: entry.isDirectory() ? "directory" : "file",
   };
 }
