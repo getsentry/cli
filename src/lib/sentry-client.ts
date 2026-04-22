@@ -10,6 +10,7 @@
 
 import { getTraceData } from "@sentry/node-core/light";
 import { maybeWarnEnvTokenIgnored } from "./auth-hint.js";
+import { computeInvalidationPrefixes } from "./cache-keys.js";
 import {
   DEFAULT_SENTRY_URL,
   getConfiguredSentryUrl,
@@ -18,7 +19,11 @@ import {
 import { applyCustomHeaders } from "./custom-headers.js";
 import { getAuthToken, refreshToken } from "./db/auth.js";
 import { logger } from "./logger.js";
-import { getCachedResponse, storeCachedResponse } from "./response-cache.js";
+import {
+  getCachedResponse,
+  invalidateCachedResponsesMatching,
+  storeCachedResponse,
+} from "./response-cache.js";
 import { withTracingSpan } from "./telemetry.js";
 
 const log = logger.withTag("http");
@@ -285,6 +290,34 @@ function cacheResponse(
   });
 }
 
+/**
+ * Auto-invalidate cache entries that a successful non-GET mutation
+ * made stale. Awaited so a subsequent read in the same command sees
+ * fresh data. Prefix computation: {@link computeInvalidationPrefixes}.
+ *
+ * Never throws: a post-mutation housekeeping failure must not convert
+ * a successful mutation into a caller-visible error. Defense-in-depth
+ * for future regressions — the helpers we call are already no-throw
+ * today.
+ */
+async function invalidateAfterMutation(
+  method: string,
+  fullUrl: string,
+  response: Response
+): Promise<void> {
+  if (method === "GET" || !response.ok) {
+    return;
+  }
+  try {
+    const prefixes = computeInvalidationPrefixes(fullUrl, getApiBaseUrl());
+    await Promise.all(
+      prefixes.map((prefix) => invalidateCachedResponsesMatching(prefix))
+    );
+  } catch {
+    /* best-effort: mutation already succeeded upstream */
+  }
+}
+
 /** Build a `{ authorization }` header map from a bearer token, or `{}` if absent. */
 function authHeaders(token: string | undefined): Record<string, string> {
   return token ? { authorization: `Bearer ${token}` } : {};
@@ -318,6 +351,7 @@ async function fetchWithRetry(
         authHeaders(getAuthToken()),
         result.response
       );
+      await invalidateAfterMutation(method, fullUrl, result.response);
       return result.response;
     }
     if (result.action === "throw") {

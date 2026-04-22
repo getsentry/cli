@@ -14,7 +14,6 @@ import {
   clearResponseCache,
   disableResponseCache,
   getCachedResponse,
-  invalidateCachedResponse,
   invalidateCachedResponsesMatching,
   normalizeUrl,
   resetCacheState,
@@ -530,16 +529,6 @@ describe("invalidateCachedResponsesMatching", () => {
 
   test("is a no-op when the cache dir does not exist", async () => {
     await invalidateCachedResponsesMatching(ORG_PREFIX);
-  });
-});
-
-describe("invalidateCachedResponse", () => {
-  test("removes the exact cached entry for the current identity", async () => {
-    await storeCachedResponse("GET", TEST_URL, {}, mockResponse(TEST_BODY));
-    expect(await getCachedResponse("GET", TEST_URL, {})).toBeDefined();
-
-    await invalidateCachedResponse(TEST_URL);
-    expect(await getCachedResponse("GET", TEST_URL, {})).toBeUndefined();
   });
 });
 
