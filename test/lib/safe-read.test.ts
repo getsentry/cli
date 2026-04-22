@@ -15,7 +15,10 @@ import { readFiles } from "../../src/lib/init/tools/read-files.js";
 import type { DirEntry } from "../../src/lib/init/types.js";
 import { preReadCommonFiles } from "../../src/lib/init/workflow-inputs.js";
 import { safeReadFile } from "../../src/lib/safe-read.js";
-import { loadSentryCliRc } from "../../src/lib/sentryclirc.js";
+import {
+  clearSentryCliRcCache,
+  loadSentryCliRc,
+} from "../../src/lib/sentryclirc.js";
 
 /** Create a FIFO (named pipe) at the given path using mkfifo(1). */
 function createFifo(path: string): void {
@@ -77,6 +80,9 @@ describe("sentryclirc FIFO safety", () => {
   let originalSentryConfigDir: string | undefined;
 
   beforeEach(() => {
+    // Clear both the load cache AND the cached global-paths singleton
+    // so this describe block sees the overridden env vars below.
+    clearSentryCliRcCache();
     dir = join(
       tmpdir(),
       `sentryclirc-fifo-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -94,6 +100,9 @@ describe("sentryclirc FIFO safety", () => {
     process.env.HOME = originalHome;
     process.env.SENTRY_CONFIG_DIR = originalSentryConfigDir;
     rmSync(dir, { recursive: true, force: true });
+    // Reset again so later test files don't inherit stale globalPaths
+    // pointing at the now-deleted temp dir.
+    clearSentryCliRcCache();
   });
 
   test("skips a `.sentryclirc` FIFO in the project tree without hanging", async () => {

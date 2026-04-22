@@ -22,7 +22,7 @@ import { getConfigDir } from "./db/index.js";
 import { getEnv } from "./env.js";
 import { parseIni } from "./ini.js";
 import { logger } from "./logger.js";
-import { safeReadFile } from "./safe-read.js";
+import { isRegularFile } from "./safe-read.js";
 import { walkUpFrom } from "./walk-up.js";
 
 const log = logger.withTag("sentryclirc");
@@ -108,6 +108,36 @@ function isComplete(result: SentryCliRcConfig): boolean {
 }
 
 /**
+ * Read a `.sentryclirc` file's text content. Returns `null` when the
+ * file is absent (ENOENT), unreadable for standard reasons (EACCES),
+ * or is a non-regular file (FIFO / socket / symlink → FIFO — the
+ * 1Password pattern).
+ *
+ * Unlike {@link safeReadFile}, this deliberately re-throws other I/O
+ * errors (EPERM, EISDIR, EIO, etc.). A `.sentryclirc` is a committed
+ * config file — failing to read it with an unusual error is a
+ * genuine problem the user should see, not silently swallow (which
+ * would surface downstream as confusing "no auth token" or "no
+ * project" errors).
+ */
+async function tryReadSentryCliRc(filePath: string): Promise<string | null> {
+  if (!(await isRegularFile(filePath, "sentryclirc.stat"))) {
+    return null;
+  }
+  try {
+    return await Bun.file(filePath).text();
+  } catch (error: unknown) {
+    if (error instanceof Error && "code" in error) {
+      const { code } = error as NodeJS.ErrnoException;
+      if (code === "ENOENT" || code === "EACCES") {
+        return null;
+      }
+    }
+    throw error;
+  }
+}
+
+/**
  * Try to read and apply a `.sentryclirc` file to the result.
  * No-op if the file doesn't exist or can't be read.
  */
@@ -116,7 +146,7 @@ async function tryApplyFile(
   filePath: string,
   isGlobal: boolean
 ): Promise<void> {
-  const content = await safeReadFile(filePath, "sentryclirc.read");
+  const content = await tryReadSentryCliRc(filePath);
   if (content !== null) {
     log.debug(
       `Found ${isGlobal ? "global" : "local"} ${CONFIG_FILENAME} at ${filePath}`
