@@ -736,9 +736,10 @@ jobs:
           PUBLIC_SENTRY_RELEASE: ${{ steps.version.outputs.version }}
         run: |
           bun install --frozen-lockfile
-          # Run astro via Bun (--bun) so the build doesn't trip Astro 6's
-          # Node >=22.12 engine check — the CI runner ships Node 20.
-          bun run --bun build
+          # The `build` script itself invokes `bun --bun astro …` so this
+          # works on Node < 22.12 (CI runners ship Node 20, but Astro 6's
+          # `#!/usr/bin/env node` shebang trips the engine check).
+          bun run build
       # Inject debug IDs and upload sourcemaps. The inject step adds
       # //# debugId= and the _sentryDebugIds IIFE to deployed JS files.
       # Both steps require SENTRY_AUTH_TOKEN (the CLI checks auth on startup).

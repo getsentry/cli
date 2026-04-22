@@ -2,7 +2,7 @@
 import type { StarlightRouteData } from '@astrojs/starlight/route-data';
 
 const PAGE_TITLE_ID = '_top';
-const { entry, sidebar } = Astro.locals.starlightRoute as StarlightRouteData;
+const { entry, sidebar } = Astro.locals.starlightRoute;
 
 // Find the parent group for the current page
 function findParentGroup(sidebar: StarlightRouteData['sidebar']): string | null {
