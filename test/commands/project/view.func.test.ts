@@ -327,4 +327,85 @@ describe("viewCommand.func", () => {
       func.call(context, { json: false, web: false }, "my-org/test-project")
     ).rejects.toThrow(AuthError);
   });
+
+  test("JSON output re-hydrates organization.name when API response omits it", async () => {
+    // Collapsed API response: `organization.name` is absent. The command's
+    // jsonTransform must refill it via `resolveOrgDisplayName()` so scripts
+    // / agents that scrape `.organization.name` continue to see a value.
+    getProjectSpy.mockResolvedValue({
+      ...sampleProject,
+      organization: { id: "1", slug: "my-org" },
+    });
+    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(context, { json: true, web: false }, "my-org/test-project");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed[0].organization.slug).toBe("my-org");
+    // Fallback to slug when no cached display name is available
+    expect(parsed[0].organization.name).toBe("my-org");
+  });
+
+  test("JSON output preserves organization.name when API response includes it", async () => {
+    // Self-hosted / older Sentry ignore `?collapse=organization` and return
+    // the full payload — don't clobber `name` when it's already set.
+    getProjectSpy.mockResolvedValue({
+      ...sampleProject,
+      organization: { id: "1", slug: "my-org", name: "My Organization" },
+    });
+    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(context, { json: true, web: false }, "my-org/test-project");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed[0].organization.name).toBe("My Organization");
+  });
+
+  test("JSON output still strips detectedFrom (human-only field)", async () => {
+    getProjectSpy.mockResolvedValue(sampleProject);
+    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(context, { json: true, web: false }, "my-org/test-project");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed[0]).not.toHaveProperty("detectedFrom");
+  });
+
+  test("JSON output honours --fields filter", async () => {
+    getProjectSpy.mockResolvedValue({
+      ...sampleProject,
+      organization: { id: "1", slug: "my-org" },
+    });
+    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await viewCommand.loader();
+    // `fields` is auto-injected by the buildCommand wrapper; pass through
+    // the flag shape the wrapper would forward.
+    await func.call(
+      context,
+      {
+        json: true,
+        web: false,
+        fields: ["slug", "organization.slug"],
+      },
+      "my-org/test-project"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed[0]).toEqual({
+      slug: "test-project",
+      organization: { slug: "my-org" },
+    });
+  });
 });

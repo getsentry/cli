@@ -6,7 +6,11 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { getProject, tryGetPrimaryDsn } from "../../lib/api-client.js";
+import {
+  getProject,
+  resolveOrgDisplayName,
+  tryGetPrimaryDsn,
+} from "../../lib/api-client.js";
 import {
   ProjectSpecificationType,
   parseOrgProjectArg,
@@ -15,6 +19,7 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { AuthError, ContextError, withAuthGuard } from "../../lib/errors.js";
 import { divider, formatProjectDetails } from "../../lib/formatters/index.js";
+import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
@@ -180,6 +185,50 @@ async function fetchAllProjectDetails(
 }
 
 /**
+ * Re-hydrate `organization.name` on a project entry.
+ *
+ * `getProject()` passes `?collapse=organization` so the server returns
+ * only `{id, slug}` for `organization` (~400-500ms faster). For JSON
+ * consumers that scrape `.organization.name`, we refill the field from
+ * the cached organizations list (or the slug as last resort) so the
+ * JSON output shape stays stable across CLI versions.
+ */
+function hydrateOrganizationName(entry: ProjectViewEntry): ProjectViewEntry {
+  if (!entry.organization || entry.organization.name) {
+    return entry;
+  }
+  return {
+    ...entry,
+    organization: {
+      ...entry.organization,
+      name: resolveOrgDisplayName(entry.organization.slug),
+    },
+  };
+}
+
+/**
+ * Build the JSON payload: strip `detectedFrom` (human-only), re-hydrate
+ * `organization.name`, and apply `--fields` filtering.
+ *
+ * Replaces the simpler `jsonExclude: ["detectedFrom"]` config so we can
+ * also restore `organization.name` that the collapsed API response omits.
+ */
+function jsonTransformProjectView(
+  entries: ProjectViewEntry[],
+  fields?: string[]
+): unknown {
+  const hydrated = entries.map((entry) => {
+    const { detectedFrom: _detectedFrom, ...rest } =
+      hydrateOrganizationName(entry);
+    return rest;
+  });
+  if (fields && fields.length > 0) {
+    return hydrated.map((item) => filterFields(item, fields));
+  }
+  return hydrated;
+}
+
+/**
  * Format project view entries for human-readable terminal output.
  *
  * Renders each project's details with dividers between multiple projects,
@@ -221,7 +270,7 @@ export const viewCommand = buildCommand({
   },
   output: {
     human: formatProjectViewHuman,
-    jsonExclude: ["detectedFrom"],
+    jsonTransform: jsonTransformProjectView,
   },
   parameters: {
     positional: {
