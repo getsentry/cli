@@ -3,14 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro build",
-    "preview": "astro preview"
+    "dev": "bun --bun astro dev",
+    "build": "bun --bun astro build",
+    "preview": "bun --bun astro preview"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.31.1",
+    "@astrojs/starlight": "^0.38.3",
     "@sentry/astro": "^10.38.0",
-    "astro": "^5.1.1",
+    "astro": "^6.1.8",
     "sharp": "^0.33.5",
     "shiki": "^3.21.0"
   }

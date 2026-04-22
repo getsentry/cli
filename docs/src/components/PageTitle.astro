@@ -1,21 +1,20 @@
 ---
-import type { Props } from '@astrojs/starlight/props';
+import type { StarlightRouteData } from '@astrojs/starlight/route-data';
 
 const PAGE_TITLE_ID = '_top';
-const { entry, sidebar } = Astro.props as Props;
-const currentPath = Astro.url.pathname;
+const { entry, sidebar } = Astro.locals.starlightRoute;
 
 // Find the parent group for the current page
-function findParentGroup(sidebar: any[], path: string): string | null {
+function findParentGroup(sidebar: StarlightRouteData['sidebar']): string | null {
   for (const item of sidebar) {
     if (item.type === 'group' && item.entries) {
-      for (const entry of item.entries) {
-        if (entry.type === 'link' && entry.isCurrent) {
+      for (const child of item.entries) {
+        if (child.type === 'link' && child.isCurrent) {
           return item.label;
         }
         // Check nested groups
-        if (entry.type === 'group' && entry.entries) {
-          for (const nested of entry.entries) {
+        if (child.type === 'group' && child.entries) {
+          for (const nested of child.entries) {
             if (nested.type === 'link' && nested.isCurrent) {
               return item.label;
             }
@@ -27,7 +26,7 @@ function findParentGroup(sidebar: any[], path: string): string | null {
   return null;
 }
 
-const parentGroup = findParentGroup(sidebar, currentPath);
+const parentGroup = findParentGroup(sidebar);
 const title = entry.data.title;
 ---
 
