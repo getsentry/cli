@@ -149,6 +149,27 @@ describe("injectDirectory — discovery", () => {
     expect(results).toEqual([]);
   });
 
+  test("accepts relative paths (not just absolute)", async () => {
+    // Regression: `walkFiles` enforces absolute cwd and throws on
+    // relative input. CLI callers (`sourcemap inject ./dist`) pass
+    // the user-supplied arg straight through, so the adapter must
+    // resolve it to absolute itself.
+    writePair("app.js");
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      for (const relDir of ["./", ".", "./."]) {
+        const results = await injectDirectory(relDir, { dryRun: true });
+        expect(results).toHaveLength(1);
+        // The jsPath must still be absolute — consumers expect
+        // absolute paths for downstream file ops.
+        expect(results[0]?.jsPath).toMatch(/^\//);
+      }
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
   test("discovers large JS bundles (> walker's default 256 KB)", async () => {
     // Regression: `walkFiles` defaults to `maxFileSize: 256 KB`,
     // which silently skipped any `.js` file larger than that —

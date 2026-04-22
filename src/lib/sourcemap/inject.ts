@@ -6,6 +6,7 @@
  */
 
 import { readFile, stat } from "node:fs/promises";
+import { resolve as resolvePath } from "node:path";
 import { walkFiles } from "../scan/index.js";
 import { EXISTING_DEBUGID_RE, injectDebugId } from "./debug-id.js";
 
@@ -115,9 +116,14 @@ async function discoverFilePairs(
   dir: string,
   extensions: Set<string>
 ): Promise<FilePair[]> {
+  // `walkFiles` requires an absolute cwd. CLI callers pass
+  // user-supplied positional args like `./dist` directly through to
+  // `injectDirectory`, so we resolve here rather than push the
+  // requirement up to every caller.
+  const absDir = resolvePath(dir);
   const pairs: FilePair[] = [];
   for await (const entry of walkFiles({
-    cwd: dir,
+    cwd: absDir,
     extensions,
     alwaysSkipDirs: SOURCEMAP_SKIP_DIRS,
     hidden: false,
