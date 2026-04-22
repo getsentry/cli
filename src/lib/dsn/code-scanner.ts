@@ -379,19 +379,18 @@ function scanDirectory(cwd: string): Promise<CodeScanResult> {
       const sourceMtimes: Record<string, number> = {};
       const dirMtimes: Record<string, number> = {};
       const seen = new Map<string, DetectedDsn>();
-      let filesCollected = 0;
-      // `grepFiles` emits one match per line; the walker yields every
-      // file that passes the preset. We count the latter via a
-      // set of unique absolute paths seen across all emitted matches
-      // PLUS an implicit one-time count from the first match per file.
-      // For files with zero DSNs, grep's file-level `http` gate
-      // silently skips them without emitting — they're not counted
-      // in `filesCollected` here. The pre-refactor counter tracked
-      // walker-yielded files (including those with zero DSNs), so to
-      // preserve the telemetry shape we'd need a separate walker tap.
-      // Accept the semantic drift: `filesCollected` now means "files
-      // that contained at least one DSN-like URL"; still useful
-      // signal, just stricter.
+      // Unique absolute paths of files that had at least one DSN-like
+      // URL match (commented-out or not). Used as a set for dedup AND
+      // as the `dsn.files_collected` telemetry count. `grepFiles`
+      // emits one match per line, so counting matches would over-count;
+      // counting unique paths gives the pre-refactor semantics.
+      //
+      // Files with zero DSN-like URLs are skipped by grep's file-level
+      // `http` gate without emitting any match, so they're not counted
+      // here. This is a (minor) drift from the pre-refactor counter
+      // which tracked walker-yielded files regardless — accepted as
+      // the stricter count is still useful signal and matches
+      // rg-style "files with matches" semantics.
       const filesSeenForMtime = new Set<string>();
 
       try {
@@ -416,7 +415,6 @@ function scanDirectory(cwd: string): Promise<CodeScanResult> {
         });
 
         for await (const match of iter) {
-          filesCollected += 1;
           processMatch(match, {
             seen,
             sourceMtimes,
@@ -424,9 +422,13 @@ function scanDirectory(cwd: string): Promise<CodeScanResult> {
           });
         }
 
-        span.setAttribute("dsn.files_collected", filesCollected);
+        // `filesSeenForMtime` holds one entry per file that had a
+        // validated DSN — use its `.size` for the `files_collected`
+        // and `files_scanned` attributes so a file with 3 DSN-matching
+        // lines counts as 1, not 3.
+        span.setAttribute("dsn.files_collected", filesSeenForMtime.size);
         span.setAttributes({
-          "dsn.files_scanned": filesCollected,
+          "dsn.files_scanned": filesSeenForMtime.size,
           "dsn.dsns_found": seen.size,
         });
 

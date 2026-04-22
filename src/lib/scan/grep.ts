@@ -555,6 +555,16 @@ async function* grepViaWorkers(
   let walkerDone = false;
   let inflightCount = 0;
 
+  // Tracks batches that failed at dispatch time (worker error,
+  // "all workers dead", etc.) so we can surface silent-failure
+  // scenarios to the caller. A single failed batch is not fatal
+  // (its results are dropped — per-file errors are already expected
+  // to be swallowed inside the worker), but if every batch fails
+  // we throw so callers aren't handed a false-negative empty result
+  // that could poison downstream caches.
+  let dispatchedBatches = 0;
+  let failedBatches = 0;
+
   const dispatchBatch = (
     paths: string[],
     rels: string[],
@@ -562,6 +572,7 @@ async function* grepViaWorkers(
   ): void => {
     opts.stats.filesRead += paths.length;
     inflightCount += 1;
+    dispatchedBatches += 1;
     pool
       .dispatch({
         paths,
@@ -581,8 +592,11 @@ async function* grepViaWorkers(
           pending.push(decodeWorkerMatches(result, paths, rels, mtimes));
         },
         () => {
-          // Worker error — skip this batch. Per-file errors are
-          // already swallowed inside the worker itself.
+          // Worker error — drop this batch's results. Per-file errors
+          // are already swallowed inside the worker itself. Counted so
+          // the consumer can surface total-pipeline failure if every
+          // batch failed.
+          failedBatches += 1;
         }
       )
       .finally(() => {
@@ -714,6 +728,19 @@ async function* grepViaWorkers(
     if (producerError !== null) {
       // biome-ignore lint/correctness/noUnsafeFinally: intentional — re-raising walker error (e.g., AbortError) so callers see it
       throw producerError;
+    }
+    // Worker-pipeline failure detector: if at least one batch was
+    // dispatched AND every dispatched batch failed, the pipeline
+    // returned zero matches due to worker failures — NOT due to the
+    // regex not matching. We must surface this so callers (notably
+    // the DSN cache layer) don't persist a false-negative empty
+    // result. A partial failure (some batches succeeded) is
+    // acceptable — we've at least reported the matches we did find.
+    if (dispatchedBatches > 0 && failedBatches === dispatchedBatches) {
+      // biome-ignore lint/correctness/noUnsafeFinally: intentional — surfacing pipeline-wide failure so false-negative empty result doesn't leak upstream
+      throw new Error(
+        `worker pipeline: all ${dispatchedBatches} dispatched batch(es) failed`
+      );
     }
   }
 }
