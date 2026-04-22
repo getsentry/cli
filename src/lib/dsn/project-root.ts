@@ -29,7 +29,7 @@ import {
 import { withFsSpan, withTracingSpan } from "../telemetry.js";
 import { walkUpFrom } from "../walk-up.js";
 import { ENV_FILES, extractDsnFromEnvContent } from "./env-file.js";
-import { handleFileError } from "./fs-utils.js";
+import { handleFileError, isRegularFile } from "./fs-utils.js";
 import { createDetectedDsn } from "./parser.js";
 import type { DetectedDsn } from "./types.js";
 
@@ -262,6 +262,12 @@ async function anyGlobMatches(
 async function checkEditorConfigRoot(dir: string): Promise<boolean> {
   const editorConfigPath = join(dir, ".editorconfig");
   try {
+    // Guard: skip non-regular files (FIFOs, sockets, etc.) that would block
+    if (
+      !(await isRegularFile(editorConfigPath, "checkEditorConfigRoot.stat"))
+    ) {
+      return false;
+    }
     const content = await Bun.file(editorConfigPath).text();
     return EDITORCONFIG_ROOT_REGEX.test(content);
   } catch (error) {
@@ -361,6 +367,12 @@ function checkEnvForDsn(dir: string): Promise<DetectedDsn | null> {
     for (const filename of ENV_FILES) {
       const filePath = join(dir, filename);
       try {
+        // Guard: skip non-regular files (FIFOs, sockets, etc.) that would block.
+        // 1Password streams secrets via symlinked named pipes; Bun.file().text()
+        // blocks indefinitely on these.
+        if (!(await isRegularFile(filePath, "checkEnvForDsn.stat"))) {
+          continue;
+        }
         const content = await Bun.file(filePath).text();
         const dsn = extractDsnFromEnvContent(content);
         if (dsn) {

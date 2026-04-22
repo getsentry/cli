@@ -58,3 +58,29 @@ export function handleFileError(
     });
   }
 }
+
+/**
+ * Check if a path points to a regular file (not a FIFO, socket, device, etc.).
+ *
+ * Named pipes (FIFOs) — commonly used by 1Password to stream secrets via
+ * symlinked `.env` files — cause `Bun.file().text()` to block indefinitely
+ * waiting for a writer. This guard uses `Bun.file(path).stat()`, which follows
+ * symlinks and inspects file type without performing the blocking read, so a
+ * symlink → FIFO is correctly detected.
+ *
+ * @param filePath - Absolute path to check
+ * @param operation - Logical operation name for unexpected stat error reporting
+ * @returns True if the path is a regular file safe to read, false otherwise
+ */
+export async function isRegularFile(
+  filePath: string,
+  operation = "isRegularFile"
+): Promise<boolean> {
+  try {
+    const stats = await Bun.file(filePath).stat();
+    return stats.isFile();
+  } catch (error) {
+    handleFileError(error, { operation, path: filePath });
+    return false;
+  }
+}

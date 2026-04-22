@@ -35,6 +35,7 @@ import {
   detectFromEnvFiles,
   extractDsnFromEnvContent,
 } from "./env-file.js";
+import { isRegularFile } from "./fs-utils.js";
 import { createDetectedDsn, createDsnFingerprint, parseDsn } from "./parser.js";
 import { findProjectRoot } from "./project-root.js";
 import type {
@@ -284,6 +285,12 @@ async function verifyFileDsnCache(
   const filePath = join(cwd, cached.sourcePath);
 
   try {
+    // Guard: skip non-regular files (FIFOs, sockets, etc.) that would block.
+    // 1Password streams secrets via symlinked named pipes; Bun.file().text()
+    // blocks indefinitely on these.
+    if (!(await isRegularFile(filePath, "verifyFileDsnCache.stat"))) {
+      return null;
+    }
     const content = await Bun.file(filePath).text();
     const foundDsn = extractDsnFromContent(content, cached.source);
 
