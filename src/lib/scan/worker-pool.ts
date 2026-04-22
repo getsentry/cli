@@ -168,6 +168,24 @@ export function getPoolSize(): number {
 }
 
 /**
+ * Call `worker.ref()` if the runtime exposes it. Both Bun's native
+ * `Worker` and Node's `worker_threads.Worker` have `.ref()` / `.unref()`;
+ * DOM Worker shims may not. Guarded.
+ */
+function refWorker(w: Worker): void {
+  if (typeof (w as unknown as { ref?: () => void }).ref === "function") {
+    (w as unknown as { ref: () => void }).ref();
+  }
+}
+
+/** Counterpart to {@link refWorker}. */
+function unrefWorker(w: Worker): void {
+  if (typeof (w as unknown as { unref?: () => void }).unref === "function") {
+    (w as unknown as { unref: () => void }).unref();
+  }
+}
+
+/**
  * Build the worker's Blob-URL source once per pool. Cached so
  * repeated pool recreation (in tests) doesn't leak URLs.
  */
@@ -204,11 +222,24 @@ export function getWorkerPool(): WorkerPool {
 
   for (let i = 0; i < size; i += 1) {
     const w = new Worker(url);
-    // Note: NOT calling .unref() — when multiple dispatches are
-    // in-flight but the main thread only has promise waits pending,
-    // unref'd workers don't process messages on idle ticks, causing
-    // deadlock. The CLI explicitly terminates the pool at exit via
-    // `terminatePool()` so this doesn't leak.
+    // Workers are unref'd at spawn so an idle pool doesn't hold the
+    // event loop open. On each `dispatch()` we `ref()` the worker
+    // before posting work, and `unref()` it again when the dispatch
+    // settles (either via `result` message, `error` event, or
+    // termination). This gives us:
+    //
+    //   - Clean CLI exit: once all pending dispatches settle,
+    //     workers are idle + unref'd, the loop drains, and the
+    //     process exits naturally — no `beforeExit` / explicit
+    //     `terminatePool()` required on the CLI happy path.
+    //   - No mid-pipeline deadlock: ref'd workers during active
+    //     work means their `message` events fire on the main
+    //     thread's next tick, not starved by idle-tick bypass.
+    //
+    // `ref`/`unref` must be balanced one-to-one. See `dispatch()`
+    // (ref on pending-slot push) + `onmessage` result handler
+    // (unref on shift) + `error` handler (unref on mass-reject).
+    unrefWorker(w);
     const pw: PooledWorker = {
       worker: w,
       ready: new Promise<void>((resolve) => {
@@ -242,6 +273,9 @@ export function getWorkerPool(): WorkerPool {
         return;
       }
       pw.inflight -= 1;
+      // Unref: dispatch completed, worker has one fewer reason to
+      // keep the loop alive. Matched by the `ref()` in `dispatch()`.
+      unrefWorker(pw.worker);
       next.resolve({ ints: data.ints, linePool: data.linePool });
     });
     w.addEventListener("error", (err) => {
@@ -250,9 +284,14 @@ export function getWorkerPool(): WorkerPool {
       // avoid routing new work to a worker that can't respond.
       pw.alive = false;
       const errMsg = err.message ?? String(err);
-      while (pw.pending.length > 0) {
-        const p = pw.pending.shift();
-        p?.reject(new Error(`worker error: ${errMsg}`));
+      // Drain the pending queue: reject each dispatch AND unref the
+      // worker once per dispatch so ref/unref stays balanced and the
+      // loop can drain.
+      let slot = pw.pending.shift();
+      while (slot !== undefined) {
+        unrefWorker(pw.worker);
+        slot.reject(new Error(`worker error: ${errMsg}`));
+        slot = pw.pending.shift();
       }
       pw.inflight = 0;
     });
@@ -282,6 +321,10 @@ export function getWorkerPool(): WorkerPool {
       }
       const chosen = best;
       chosen.inflight += 1;
+      // Ref the worker while this dispatch is in flight. Matched by
+      // the `unref()` call in the `message` result handler (or the
+      // mass-unref in the `error` handler / `terminate()` path).
+      refWorker(chosen.worker);
 
       // Enqueue a pending slot for this request. The worker's
       // `onmessage` handler will resolve it when the corresponding
@@ -297,10 +340,12 @@ export function getWorkerPool(): WorkerPool {
           chosen.worker.postMessage(request);
         },
         (err) => {
-          // Readiness failed — fail this dispatch's resolver.
+          // Readiness failed — fail this dispatch's resolver AND
+          // unref to balance the `refWorker` above.
           const slot = chosen.pending.pop();
           if (slot) {
             chosen.inflight -= 1;
+            unrefWorker(chosen.worker);
             slot.reject(err);
           }
         }
@@ -309,6 +354,16 @@ export function getWorkerPool(): WorkerPool {
     },
     terminate(): void {
       for (const pw of workers) {
+        pw.alive = false;
+        // Drain pending: reject + unref per-dispatch so ref/unref
+        // stays balanced and the loop can drain.
+        let slot = pw.pending.shift();
+        while (slot !== undefined) {
+          unrefWorker(pw.worker);
+          slot.reject(new Error("worker pool terminated"));
+          slot = pw.pending.shift();
+        }
+        pw.inflight = 0;
         try {
           pw.worker.terminate();
         } catch {
