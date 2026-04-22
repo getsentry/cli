@@ -69,6 +69,11 @@ import type {
   WalkOptions,
 } from "./types.js";
 import { walkFiles } from "./walker.js";
+import {
+  decodeWorkerMatches,
+  getWorkerPool,
+  isWorkerSupported,
+} from "./worker-pool.js";
 
 /** Default line-truncation length for the init-wizard wire shape. */
 const DEFAULT_MAX_LINE_LENGTH = 2000;
@@ -170,6 +175,13 @@ type PerFileOptions = {
    * silent misses under per-line verify.
    */
   literal: string | null;
+  /**
+   * When true, each emitted `GrepMatch` carries `mtime` (the
+   * source file's floored `mtimeMs`). The walker produces it; the
+   * grep path just forwards it. Incurs one extra stat per file at
+   * the walker layer.
+   */
+  recordMtimes: boolean;
 };
 
 /**
@@ -347,7 +359,7 @@ function buildMatch(ctx: MatchContext, bounds: LineBounds): GrepMatch {
     rawLine.length > ctx.opts.maxLineLength
       ? `${rawLine.slice(0, ctx.opts.maxLineLength - 1)}…`
       : rawLine;
-  return {
+  const match: GrepMatch = {
     path: ctx.opts.pathPrefix
       ? joinPosix(ctx.opts.pathPrefix, ctx.entry.relativePath)
       : ctx.entry.relativePath,
@@ -355,6 +367,10 @@ function buildMatch(ctx: MatchContext, bounds: LineBounds): GrepMatch {
     lineNum: bounds.lineNum,
     line,
   };
+  if (ctx.opts.recordMtimes) {
+    match.mtime = ctx.entry.mtime;
+  }
+  return match;
 }
 
 /**
@@ -374,6 +390,8 @@ function buildWalkOptions(opts: GrepOptions, root: string): WalkOptions {
     maxFileSize: opts.maxFileSize,
     descentHook: opts.descentHook,
     followSymlinks: opts.followSymlinks,
+    recordMtimes: opts.recordMtimes,
+    onDirectoryVisit: opts.onDirectoryVisit,
     signal: opts.signal,
     timeBudgetMs: opts.timeBudgetMs,
   };
@@ -393,14 +411,67 @@ type GrepPipelineOptions = {
 };
 
 /**
- * The internal pipeline. Separated from the public entry point so
- * `collectGrep` can share it.
- *
- * `async *` is intentional even though we `yield*` into the
- * `for await` — the whole pipeline is async and callers expect
- * an `AsyncGenerator`.
+ * Batch size for worker dispatch. Each batch is a chunk of N file
+ * paths the worker will read + grep in one go. Benched on
+ * synthetic/large (10k files): 100 = 420ms, 200 = 275ms (streamed),
+ * 400 = 290ms. The plateau is around 200 — too small and postMessage
+ * overhead dominates; too large and we lose per-worker parallelism
+ * because the walker finishes yielding before the first worker
+ * returns.
  */
+const WORKER_BATCH_SIZE = 200;
+
+/**
+ * The internal pipeline. Separated from the public entry points so
+ * `grepFiles` and `collectGrep` share it.
+ *
+ * Two execution strategies:
+ *
+ * 1. **Worker pool** (default when the runtime supports `new Worker`
+ *    + `Blob` + `URL.createObjectURL`): walker streams paths on the
+ *    main thread, paths are batched into chunks of
+ *    `WORKER_BATCH_SIZE`, each batch is dispatched round-robin to
+ *    a lazy-initialized pool of workers. Workers return matches
+ *    packed as `Uint32Array` + a shared string pool (transferable,
+ *    zero-copy). Main thread decodes and yields.
+ *
+ * 2. **Async fallback** (when workers aren't available — e.g. some
+ *    Node library embeddings): falls back to `mapFilesConcurrent`
+ *    on the main thread. Same result, ~4× slower on large workloads.
+ *
+ * Worker disablement for tests or debugging: set
+ * `SENTRY_SCAN_DISABLE_WORKERS=1`.
+ */
+// biome-ignore lint/suspicious/useAwait: async generator that dispatches to one of two sub-generators via `yield*`; no `await` needed in the dispatcher itself
 async function* grepFilesInternal(
+  opts: GrepPipelineOptions
+): AsyncGenerator<GrepMatch> {
+  if (shouldUseWorkers()) {
+    yield* grepViaWorkers(opts);
+    return;
+  }
+  yield* grepViaAsyncMain(opts);
+}
+
+/**
+ * Returns true when the worker path should be used. Gated on the
+ * runtime capability check (`isWorkerSupported`) and the
+ * `SENTRY_SCAN_DISABLE_WORKERS` env var (for tests + debugging).
+ */
+function shouldUseWorkers(): boolean {
+  if (process.env.SENTRY_SCAN_DISABLE_WORKERS === "1") {
+    return false;
+  }
+  return isWorkerSupported();
+}
+
+/**
+ * Fallback pipeline: `mapFilesConcurrentStream` on the main thread.
+ * Used when the worker pool is unavailable or explicitly disabled.
+ * Identical semantics to the worker path; ~4× slower on 10k-file
+ * many-match workloads.
+ */
+async function* grepViaAsyncMain(
   opts: GrepPipelineOptions
 ): AsyncGenerator<GrepMatch> {
   for await (const match of mapFilesConcurrentStream(
@@ -432,6 +503,281 @@ async function* grepFilesInternal(
 }
 
 /**
+ * Worker-based pipeline. Streams paths from the walker, batches
+ * them, dispatches to workers, decodes results, yields matches in
+ * worker-completion order (not walker order).
+ *
+ * ### Streaming + early-exit
+ *
+ * Walker runs on main thread. As paths arrive, we accumulate into a
+ * `batch: string[]`. When the batch reaches `WORKER_BATCH_SIZE` we
+ * dispatch it and start a new batch. Each dispatch returns a
+ * promise; we race the set of in-flight dispatches so the first
+ * batch to finish yields its matches first (workers may complete
+ * out of order).
+ *
+ * On `maxResults`/`stopOnFirst`, we stop dispatching new batches.
+ * In-flight batches keep running (no cancellation API on workers)
+ * but their results are discarded once we've exited.
+ *
+ * `filesRead` counts all paths dispatched to workers — we don't
+ * distinguish "read successfully" from "open failed" at the worker
+ * boundary (the worker swallows the error and produces zero matches
+ * for that path). For the main-thread fallback the stat is more
+ * precise.
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: producer/consumer pattern with early exit, batch dispatch, and abort-signal propagation is inherently branchy
+async function* grepViaWorkers(
+  opts: GrepPipelineOptions
+): AsyncGenerator<GrepMatch> {
+  const pool = getWorkerPool();
+
+  // Queue of completed batches ready to emit. Filled by dispatched
+  // worker promises as they resolve; drained by this generator.
+  const pending: GrepMatch[][] = [];
+  // Consumer wait state: `pendingNotify` is a one-shot resolver set
+  // by the consumer when it's about to wait; `notifyPending` tracks
+  // a notification that arrived while no one was waiting, so the
+  // consumer picks it up on next loop iteration.
+  let pendingNotify: (() => void) | null = null;
+  let notifyPending = false;
+  const wakeConsumer = () => {
+    if (pendingNotify) {
+      const fn = pendingNotify;
+      pendingNotify = null;
+      fn();
+    } else {
+      notifyPending = true;
+    }
+  };
+
+  let earlyExit = false;
+  let walkerDone = false;
+  let inflightCount = 0;
+
+  // Tracks batches that failed at dispatch time (worker error,
+  // "all workers dead", etc.) so we can surface silent-failure
+  // scenarios to the caller. A single failed batch is not fatal
+  // (its results are dropped — per-file errors are already expected
+  // to be swallowed inside the worker), but if every batch fails
+  // we throw so callers aren't handed a false-negative empty result
+  // that could poison downstream caches.
+  let dispatchedBatches = 0;
+  let failedBatches = 0;
+  // Track dispatch promises so the consumer's `finally` can await
+  // them before checking the failure counters. Without this, an
+  // early exit (e.g., AbortError, maxResults = 0) could race the
+  // final failure assessment: the consumer's finally runs before
+  // in-flight dispatch `.catch()` handlers have bumped
+  // `failedBatches`, causing a legitimate all-failure scenario to
+  // silently pass through as "no matches found."
+  const dispatchPromises: Promise<unknown>[] = [];
+
+  const dispatchBatch = (
+    paths: string[],
+    rels: string[],
+    mtimes: readonly number[] | null
+  ): void => {
+    opts.stats.filesRead += paths.length;
+    inflightCount += 1;
+    dispatchedBatches += 1;
+    const dispatchP = pool
+      .dispatch({
+        paths,
+        patternSource: opts.perFile.regex.source,
+        flags: resolveWorkerFlags(opts.perFile),
+        maxLineLength: opts.perFile.maxLineLength,
+        maxMatchesPerFile: Number.isFinite(opts.perFile.maxMatchesPerFile)
+          ? opts.perFile.maxMatchesPerFile
+          : 0xff_ff_ff_ff,
+        literal: opts.perFile.literal,
+      })
+      .then(
+        (result) => {
+          // `decodeWorkerMatches` attaches per-file mtime by pathIdx
+          // when `mtimes` is non-null. Mtime comes from the walker
+          // (main thread) — worker doesn't need to stat again.
+          pending.push(decodeWorkerMatches(result, paths, rels, mtimes));
+        },
+        () => {
+          // Worker error — drop this batch's results. Per-file errors
+          // are already swallowed inside the worker itself. Counted so
+          // the consumer can surface total-pipeline failure if every
+          // batch failed.
+          failedBatches += 1;
+        }
+      )
+      .finally(() => {
+        inflightCount -= 1;
+        wakeConsumer();
+      });
+    dispatchPromises.push(dispatchP);
+  };
+
+  // Producer: walk paths, batch them, dispatch each full batch.
+  // Errors thrown by the walker (e.g. `AbortError` when the caller
+  // signals abort) propagate to the consumer via `producerError`.
+  let producerError: unknown = null;
+  const recordMtimes = opts.perFile.recordMtimes;
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: walker drain + path-prefix handling + batch flush + error capture is inherently branchy
+  const producer = (async () => {
+    let batch: string[] = [];
+    let batchRel: string[] = [];
+    // Per-batch mtime array (parallel to `batch`). Only allocated
+    // when the caller opts in via `recordMtimes`; otherwise stays
+    // null and the decoder skips the `mtime` field entirely.
+    let batchMtimes: number[] | null = recordMtimes ? [] : null;
+    try {
+      for await (const entry of opts.walkSource) {
+        if (earlyExit) {
+          break;
+        }
+        batch.push(entry.absolutePath);
+        batchRel.push(
+          opts.perFile.pathPrefix
+            ? joinPosix(opts.perFile.pathPrefix, entry.relativePath)
+            : entry.relativePath
+        );
+        if (batchMtimes !== null) {
+          batchMtimes.push(entry.mtime);
+        }
+        if (batch.length >= WORKER_BATCH_SIZE) {
+          dispatchBatch(batch, batchRel, batchMtimes);
+          batch = [];
+          batchRel = [];
+          batchMtimes = recordMtimes ? [] : null;
+        }
+      }
+      // Final partial batch.
+      if (batch.length > 0) {
+        dispatchBatch(batch, batchRel, batchMtimes);
+      }
+    } catch (error) {
+      producerError = error;
+    } finally {
+      walkerDone = true;
+      wakeConsumer();
+    }
+  })();
+
+  // Helper to check + throw on aborted signal. Matches the behavior
+  // of `walkFiles` which throws `DOMException("AbortError")` on the
+  // next yield when the signal fires mid-iteration.
+  const checkAborted = (): void => {
+    const signal = opts.concurrent.signal;
+    if (signal?.aborted) {
+      throw new DOMException("aborted", "AbortError");
+    }
+  };
+
+  // Consumer: drain `pending` as batches complete, yielding matches
+  // and respecting `maxResults`/`stopOnFirst`. Wait for `notify`
+  // when there's nothing to emit and more work is in flight.
+  try {
+    while (!earlyExit) {
+      checkAborted();
+      // Emit everything currently pending.
+      while (pending.length > 0) {
+        checkAborted();
+        const matches = pending.shift();
+        if (!matches) {
+          continue;
+        }
+        for (const m of matches) {
+          if (opts.stats.matchesEmitted >= opts.maxResults) {
+            opts.stats.truncated = true;
+            earlyExit = true;
+            break;
+          }
+          opts.stats.matchesEmitted += 1;
+          yield m;
+          checkAborted();
+          if (opts.stopOnFirst) {
+            opts.stats.truncated = true;
+            earlyExit = true;
+            break;
+          }
+        }
+        if (earlyExit) {
+          break;
+        }
+      }
+      if (earlyExit) {
+        break;
+      }
+      // Nothing pending. If the walker is done AND no in-flight
+      // batches remain, we're finished.
+      if (walkerDone && inflightCount === 0) {
+        break;
+      }
+      // Otherwise, wait for something to happen. Check for a
+      // pre-arrived notification first to avoid missing wakeups
+      // that happened while we were iterating `pending`.
+      if (notifyPending) {
+        notifyPending = false;
+        continue;
+      }
+      await new Promise<void>((resolve) => {
+        if (notifyPending) {
+          notifyPending = false;
+          resolve();
+        } else {
+          pendingNotify = resolve;
+        }
+      });
+    }
+  } finally {
+    // Ensure the producer settles even on early exit so errors
+    // surface in the next run (pool promises stay alive otherwise).
+    earlyExit = true;
+    wakeConsumer();
+    await producer;
+    // Await every dispatched batch so `failedBatches` is final
+    // before we inspect it. Without this, an early exit could run
+    // the failure check before in-flight `.catch()` handlers
+    // bumped the counter — collapsing an all-failure scenario into
+    // a silent "no matches" return. `allSettled` because we don't
+    // care about individual rejections here (each was already
+    // counted via the dispatch's `.catch()` handler).
+    if (dispatchPromises.length > 0) {
+      await Promise.allSettled(dispatchPromises);
+    }
+    // If the walker threw (typically `AbortError`), re-throw so the
+    // caller sees the same behavior as the async-fallback path.
+    if (producerError !== null) {
+      // biome-ignore lint/correctness/noUnsafeFinally: intentional — re-raising walker error (e.g., AbortError) so callers see it
+      throw producerError;
+    }
+    // Worker-pipeline failure detector: if at least one batch was
+    // dispatched AND every dispatched batch failed, the pipeline
+    // returned zero matches due to worker failures — NOT due to the
+    // regex not matching. We must surface this so callers (notably
+    // the DSN cache layer) don't persist a false-negative empty
+    // result. A partial failure (some batches succeeded) is
+    // acceptable — we've at least reported the matches we did find.
+    if (dispatchedBatches > 0 && failedBatches === dispatchedBatches) {
+      // biome-ignore lint/correctness/noUnsafeFinally: intentional — surfacing pipeline-wide failure so false-negative empty result doesn't leak upstream
+      throw new Error(
+        `worker pipeline: all ${dispatchedBatches} dispatched batch(es) failed`
+      );
+    }
+  }
+}
+
+/**
+ * Resolve the regex flags to send to the worker. Matches the logic
+ * in `grepByWholeBuffer` — always `/g` (required for iteration),
+ * plus `/m` when the caller opted into line-boundary semantics (the
+ * default).
+ */
+function resolveWorkerFlags(opts: PerFileOptions): string {
+  const ensured = opts.multiline
+    ? ensureGlobalMultilineFlags(opts.regex)
+    : ensureGlobalFlag(opts.regex);
+  return ensured.flags;
+}
+
+/**
  * Resolved pipeline inputs shared by `grepFiles` and `collectGrep`.
  * Extracted so both entry points get the same default-resolution,
  * pattern compilation, matcher compilation, walker construction, and
@@ -449,6 +795,8 @@ type GrepPipelineSetup = {
    * are skipped entirely.
    */
   literal: string | null;
+  /** Mirrors `GrepOptions.recordMtimes`. Threaded into PerFileOptions. */
+  recordMtimes: boolean;
   stats: GrepStats;
   walkSource: AsyncIterable<WalkEntry>;
   maxResults: number;
@@ -512,6 +860,7 @@ function setupGrepPipeline(opts: GrepOptions): GrepPipelineSetup {
     regex,
     multiline,
     literal,
+    recordMtimes: opts.recordMtimes ?? false,
     stats,
     walkSource,
     maxResults: opts.maxResults ?? Number.POSITIVE_INFINITY,
@@ -549,6 +898,7 @@ export async function* grepFiles(opts: GrepOptions): AsyncGenerator<GrepMatch> {
       maxMatchesPerFile: setup.maxMatchesPerFile,
       pathPrefix: setup.pathPrefix,
       literal: setup.literal,
+      recordMtimes: setup.recordMtimes,
     },
     walkSource: setup.walkSource,
     stats: setup.stats,
@@ -594,6 +944,7 @@ export async function collectGrep(opts: GrepOptions): Promise<GrepResult> {
       maxMatchesPerFile: setup.maxMatchesPerFile,
       pathPrefix: setup.pathPrefix,
       literal: setup.literal,
+      recordMtimes: setup.recordMtimes,
     },
     walkSource: setup.walkSource,
     stats: setup.stats,

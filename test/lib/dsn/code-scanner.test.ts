@@ -496,6 +496,28 @@ describe("Code Scanner", () => {
       expect(result.dsns).toEqual([]);
     });
 
+    test("finds DSNs on long single-line files (>2000 chars, common in minified JS)", async () => {
+      // Regression: `grepFiles` defaults to `maxLineLength: 2000` which
+      // truncates `match.line` with a `…` suffix. The DSN scanner then
+      // re-runs `DSN_PATTERN` on that truncated line, so a DSN near the
+      // end of a long line would silently disappear (the pattern ends
+      // with `/\d+` — trailing digits get replaced by `…`).
+      //
+      // The scanner explicitly passes `maxLineLength: Infinity` to
+      // disable truncation, because memory is bounded by the walker's
+      // 256KB file cap.
+      const filler = "x".repeat(1990);
+      const dsn = "https://abc@o111222.ingest.us.sentry.io/7654321";
+      const line = `${filler} const DSN = "${dsn}";`;
+      // Sanity: DSN starts past column 2000.
+      expect(line.indexOf(dsn)).toBeGreaterThan(2000);
+      writeFileSync(join(testDir, "minified.js"), line);
+
+      const result = await scanCodeForDsns(testDir);
+      expect(result.dsns).toHaveLength(1);
+      expect(result.dsns[0]?.raw).toBe(dsn);
+    });
+
     test("finds DSNs in monorepo packages deeper than MAX_SCAN_DEPTH", async () => {
       // packages/spotlight/src/instrument.ts is depth 3 from root,
       // but with monorepo depth reset, packages/spotlight/ resets to 0

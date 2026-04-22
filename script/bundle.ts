@@ -4,6 +4,7 @@ import { build, type Plugin } from "esbuild";
 import pkg from "../package.json";
 import { uploadSourcemaps } from "../src/lib/api/sourcemaps.js";
 import { injectDebugId, PLACEHOLDER_DEBUG_ID } from "./debug-id.js";
+import { textImportPlugin } from "./text-import-plugin.js";
 
 const VERSION = pkg.version;
 const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
@@ -179,7 +180,11 @@ const sentrySourcemapPlugin: Plugin = {
 };
 
 // Always inject debug IDs (even without auth token); upload is gated inside the plugin
-const plugins: Plugin[] = [bunSqlitePlugin, sentrySourcemapPlugin];
+const plugins: Plugin[] = [
+  bunSqlitePlugin,
+  sentrySourcemapPlugin,
+  textImportPlugin,
+];
 
 if (process.env.SENTRY_AUTH_TOKEN) {
   console.log("  Sentry auth token found, source maps will be uploaded");
