@@ -16,6 +16,7 @@
  * `resolve-target.ts`.
  */
 
+import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { getConfigDir } from "./db/index.js";
@@ -56,25 +57,6 @@ export type SentryCliRcConfig = {
  * Stores promises (not resolved values) so concurrent callers share the same load.
  */
 const cache = new Map<string, Promise<SentryCliRcConfig>>();
-
-/**
- * Read a file's text content, returning null for expected I/O errors.
- * ENOENT (missing) and EACCES (permission denied) return null.
- * All other errors propagate.
- */
-async function tryReadFile(filePath: string): Promise<string | null> {
-  try {
-    return await Bun.file(filePath).text();
-  } catch (error: unknown) {
-    if (error instanceof Error && "code" in error) {
-      const { code } = error as NodeJS.ErrnoException;
-      if (code === "ENOENT" || code === "EACCES") {
-        return null;
-      }
-    }
-    throw error;
-  }
-}
 
 /**
  * Fields we extract from an INI config, keyed by section.field.
@@ -126,6 +108,67 @@ function isComplete(result: SentryCliRcConfig): boolean {
 }
 
 /**
+ * True for the two I/O errors we treat as "file effectively absent"
+ * — a missing path and a permission-denied read. Any other error
+ * code signals something worth surfacing to the user.
+ */
+function isNarrowAbsenceError(error: unknown): boolean {
+  if (error instanceof Error && "code" in error) {
+    const { code } = error as NodeJS.ErrnoException;
+    return code === "ENOENT" || code === "EACCES";
+  }
+  return false;
+}
+
+/**
+ * Read a `.sentryclirc` file's text content. Returns `null` when
+ * the file:
+ *
+ * - is absent (ENOENT)
+ * - is unreadable for a common reason (EACCES)
+ * - is a non-regular file (FIFO / socket / symlink → FIFO — the
+ *   1Password pattern, which would otherwise block `text()`
+ *   indefinitely)
+ *
+ * Re-throws every other I/O error (EPERM, EISDIR, EIO,
+ * ENOTDIR, etc.). A `.sentryclirc` is a committed config file — a
+ * user with `chmod 000` at the directory level (EPERM), a typo
+ * pointing at a directory (EISDIR), or a disk throwing EIO needs
+ * to see that clearly, not have it silently suppressed and surface
+ * downstream as a confusing "no auth token" error.
+ *
+ * Note: cannot use {@link safeReadFile} / `isRegularFile` from
+ * `safe-read.ts` — their `handleFileError` treats EPERM and
+ * EISDIR as ignorable, swallowing them during the stat phase.
+ * That broader policy is correct for opportunistic DSN scans; not
+ * for this committed config load.
+ */
+async function tryReadSentryCliRc(filePath: string): Promise<string | null> {
+  let statResult: Awaited<ReturnType<typeof stat>>;
+  try {
+    statResult = await stat(filePath);
+  } catch (error) {
+    if (isNarrowAbsenceError(error)) {
+      return null;
+    }
+    throw error;
+  }
+  // Non-regular file (FIFO, socket, device, symlink → any of these)
+  // — `text()` would block. Return null so the walk-up moves on.
+  if (!statResult.isFile()) {
+    return null;
+  }
+  try {
+    return await Bun.file(filePath).text();
+  } catch (error) {
+    if (isNarrowAbsenceError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
  * Try to read and apply a `.sentryclirc` file to the result.
  * No-op if the file doesn't exist or can't be read.
  */
@@ -134,7 +177,7 @@ async function tryApplyFile(
   filePath: string,
   isGlobal: boolean
 ): Promise<void> {
-  const content = await tryReadFile(filePath);
+  const content = await tryReadSentryCliRc(filePath);
   if (content !== null) {
     log.debug(
       `Found ${isGlobal ? "global" : "local"} ${CONFIG_FILENAME} at ${filePath}`

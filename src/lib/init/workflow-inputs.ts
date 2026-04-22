@@ -121,6 +121,13 @@ export async function preReadCommonFiles(
     try {
       const absPath = path.join(directory, filePath);
       const stat = await fs.promises.stat(absPath);
+      // Guard against FIFOs / sockets / devices — `fs.readFile` on a
+      // FIFO blocks indefinitely waiting for a writer. `stat` follows
+      // symlinks, so a symlink → FIFO is also caught here.
+      if (!stat.isFile()) {
+        cache[filePath] = null;
+        continue;
+      }
       if (stat.size > MAX_FILE_BYTES) {
         continue;
       }
