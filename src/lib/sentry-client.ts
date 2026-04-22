@@ -292,18 +292,8 @@ function cacheResponse(
 
 /**
  * Auto-invalidate cache entries that a successful non-GET mutation
- * made stale. Awaited before returning the response so a subsequent
- * read in the same command sees fresh data.
- *
- * Prefix computation lives in {@link computeInvalidationPrefixes}
- * (hierarchy walk + cross-endpoint rules). Each prefix runs through
- * `invalidateCachedResponsesMatching` — a no-throw helper that's
- * already identity-gated so a mutation by one account can't evict
- * another account's cache.
- *
- * GETs skip invalidation entirely; they go through the cache-write
- * path above. 4xx/5xx non-GETs skip too — a rejected mutation didn't
- * change server state so its cache is still accurate.
+ * made stale. Awaited so a subsequent read in the same command sees
+ * fresh data. Prefix computation: {@link computeInvalidationPrefixes}.
  */
 async function invalidateAfterMutation(
   method: string,

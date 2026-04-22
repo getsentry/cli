@@ -27,40 +27,23 @@
  * query-param variant cached under that path).
  */
 
-/** Regex capturing the `/api/0/` boundary. Anchored so it matches only the canonical API prefix. */
 const API_V0_SEGMENT = "/api/0/";
 
-/**
- * Cross-endpoint invalidation rules.
- *
- * Each rule is a pattern the mutation URL path must match, plus a
- * function that returns additional prefixes to sweep. Patterns match
- * against the *path*, not the full URL — so the prefix returned is
- * prepended with the request's base later.
- *
- * Keep this table small. The hierarchy walk handles most cases; add a
- * rule here only when the API's cross-tree relationships force it.
- */
+/** Rule for mutations whose effects cross URL trees. Patterns match the path relative to `/api/0/`. */
 type CrossEndpointRule = {
-  /** Matches the path relative to `/api/0/` (no leading slash). */
   match: RegExp;
-  /** Returns additional path prefixes (relative to `/api/0/`) to sweep. */
   extra: (matchGroups: RegExpMatchArray) => string[];
 };
 
 const CROSS_ENDPOINT_RULES: CrossEndpointRule[] = [
+  // `POST teams/{org}/{team}/projects/` (create project in team) also
+  // invalidates the org project list at `organizations/{org}/projects/`.
   {
-    // POST /api/0/teams/{org}/{team}/projects/ (create a project in a team)
-    // invalidates the org project list at
-    // /api/0/organizations/{org}/projects/ which lives under a
-    // different URL tree.
     match: /^teams\/([^/]+)\/[^/]+\/projects\/?$/,
     extra: ([, org]) => [`organizations/${org}/projects/`],
   },
+  // `DELETE projects/{org}/{project}/` also invalidates the org project list.
   {
-    // DELETE /api/0/projects/{org}/{project}/ (delete a project)
-    // invalidates the org project list at
-    // /api/0/organizations/{org}/projects/ (different URL tree).
     match: /^projects\/([^/]+)\/[^/]+\/?$/,
     extra: ([, org]) => [`organizations/${org}/projects/`],
   },
@@ -91,26 +74,16 @@ export function computeInvalidationPrefixes(fullUrl: string): string[] {
     return [];
   }
 
-  // `base` includes origin + path up through and including `/api/0/`.
   const base = `${parsed.origin}${parsed.pathname.slice(0, apiIdx + API_V0_SEGMENT.length)}`;
-  // Path below `/api/0/`, leading slash trimmed, trailing slash kept
-  // so it matches against rules that anchor on `/?$`.
   const relPath = parsed.pathname.slice(apiIdx + API_V0_SEGMENT.length);
-
-  // No relative path means the mutation hit `/api/0/` itself; nothing to sweep.
   if (relPath === "") {
     return [];
   }
 
   const prefixes = new Set<string>();
-
-  // Rule 1: hierarchy walk. Sweep the URL's own path plus every
-  // ancestor with at least one segment.
   for (const segments of ancestorSegments(relPath)) {
     prefixes.add(`${base}${segments}`);
   }
-
-  // Rule 2: cross-endpoint table.
   for (const rule of CROSS_ENDPOINT_RULES) {
     const match = relPath.match(rule.match);
     if (match) {
@@ -119,7 +92,6 @@ export function computeInvalidationPrefixes(fullUrl: string): string[] {
       }
     }
   }
-
   return [...prefixes];
 }
 
@@ -147,11 +119,6 @@ function* ancestorSegments(relPath: string): Generator<string> {
     return;
   }
   const parts = trimmed.split("/");
-  // Stop at 2 segments when the path has more — a mutation under
-  // `organizations/acme/.../...` shouldn't sweep the bare
-  // `organizations/` root (would evict other orgs' caches). Paths
-  // with ≤ 2 segments (e.g. the `organizations/` root itself, or
-  // `teams/acme/`) still walk all the way down.
   const floor = parts.length > 2 ? 2 : 1;
   for (let i = parts.length; i >= floor; i--) {
     yield `${parts.slice(0, i).join("/")}/`;

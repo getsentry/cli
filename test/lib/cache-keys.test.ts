@@ -35,23 +35,18 @@ describe("computeInvalidationPrefixes — hierarchy walk", () => {
   });
 
   test("single-segment path yields only the segment itself", () => {
-    // Paths with ≤ 2 segments walk all the way down — a mutation
-    // targeting the root itself should still clear its own cache.
     const prefixes = computeInvalidationPrefixes(`${BASE}organizations/`);
     expect(prefixes).toEqual([`${BASE}organizations/`]);
   });
 
   test("two-segment path walks to the top (owner-level mutation)", () => {
-    // `organizations/acme/` is the resource owner; the floor kicks in
-    // at length > 2, so this still yields both prefixes.
+    // The floor only kicks in at length > 2.
     const prefixes = computeInvalidationPrefixes(`${BASE}organizations/acme/`);
     expect(prefixes).toContain(`${BASE}organizations/acme/`);
     expect(prefixes).toContain(`${BASE}organizations/`);
   });
 
   test("query string is stripped from the prefix set", () => {
-    // Prefix-sweep against the path catches every cached query variant,
-    // so the query itself is irrelevant for computing prefixes.
     const prefixes = computeInvalidationPrefixes(
       `${BASE}organizations/acme/issues/12345/?collapse=stats&collapse=lifetime`
     );
@@ -76,7 +71,6 @@ describe("computeInvalidationPrefixes — cross-endpoint rules", () => {
       `${BASE}teams/acme/backend/projects/`
     );
     expect(prefixes).toContain(`${BASE}organizations/acme/projects/`);
-    // Plus the hierarchy walk (capped at the owner level):
     expect(prefixes).toContain(`${BASE}teams/acme/backend/projects/`);
     expect(prefixes).toContain(`${BASE}teams/acme/backend/`);
     expect(prefixes).toContain(`${BASE}teams/acme/`);
@@ -90,8 +84,6 @@ describe("computeInvalidationPrefixes — cross-endpoint rules", () => {
     expect(prefixes).toContain(`${BASE}organizations/acme/projects/`);
     expect(prefixes).toContain(`${BASE}projects/acme/frontend/`);
     expect(prefixes).toContain(`${BASE}projects/acme/`);
-    // Two segments: floor allows the top (projects/). Reasonable —
-    // a DELETE on an owner-level resource does clear that root.
     expect(prefixes).not.toContain(`${BASE}projects/`);
   });
 
@@ -99,8 +91,6 @@ describe("computeInvalidationPrefixes — cross-endpoint rules", () => {
     const prefixes = computeInvalidationPrefixes(
       `${BASE}organizations/acme/teams/`
     );
-    // `organizations/.../teams/` doesn't match either cross-endpoint
-    // rule, so the result is only the hierarchy walk.
     expect(prefixes).not.toContain(`${BASE}organizations/acme/projects/`);
     expect(prefixes).toContain(`${BASE}organizations/acme/teams/`);
   });
@@ -111,7 +101,6 @@ describe("computeInvalidationPrefixes — edge cases", () => {
     expect(
       computeInvalidationPrefixes("https://example.com/some/path/")
     ).toEqual([]);
-    // Chunk-upload endpoints are arbitrary host URLs.
     expect(
       computeInvalidationPrefixes("https://uploads.sentry.io/x/y")
     ).toEqual([]);
@@ -127,15 +116,10 @@ describe("computeInvalidationPrefixes — edge cases", () => {
   });
 
   test("deduplicates prefixes across hierarchy + rule-table", () => {
-    // `teams/acme/backend/projects/` matches the cross-endpoint rule
-    // AND naturally walks up through `teams/acme/backend/` etc. The
-    // rule adds `organizations/acme/projects/` (unique). No duplicates
-    // should appear in the result.
     const prefixes = computeInvalidationPrefixes(
       `${BASE}teams/acme/backend/projects/`
     );
-    const unique = new Set(prefixes);
-    expect(prefixes.length).toBe(unique.size);
+    expect(prefixes.length).toBe(new Set(prefixes).size);
   });
 
   test("self-hosted base URLs are preserved", () => {

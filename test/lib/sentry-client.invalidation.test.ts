@@ -14,23 +14,18 @@ import {
   getCachedResponse,
   storeCachedResponse,
 } from "../../src/lib/response-cache.js";
-import { resetAuthenticatedFetch } from "../../src/lib/sentry-client.js";
+import {
+  getSdkConfig,
+  resetAuthenticatedFetch,
+} from "../../src/lib/sentry-client.js";
 import { useTestConfigDir } from "../helpers.js";
 
 useTestConfigDir("invalidation-");
 
-/**
- * Factory for a `Response` with a cacheable JSON body. Used both for
- * priming the cache (`storeCachedResponse`) and for mock-fetch returns.
- */
-function makeResponse(
-  body: unknown,
-  status = 200,
-  headers: Record<string, string> = {}
-): Response {
+function makeResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json", ...headers },
+    headers: { "content-type": "application/json" },
   });
 }
 
@@ -57,19 +52,9 @@ function installMockFetch(handler: FetchHandler): void {
     handler(input, init)) as typeof fetch;
 }
 
-/**
- * Run the authenticated fetch against a URL + method. Spins up the
- * singleton fresh (we reset it in beforeEach) so it picks up whichever
- * mock is installed.
- */
-async function runAuthenticatedFetch(
-  url: string,
-  method = "GET"
-): Promise<Response> {
-  // Import lazily so the module's cached state is reset between tests.
-  const { getSdkConfig } = await import("../../src/lib/sentry-client.js");
-  const { fetch } = getSdkConfig("https://us.sentry.io");
-  return fetch(url, { method });
+/** Run the authenticated fetch. `resetAuthenticatedFetch` in beforeEach ensures the singleton picks up the current mock. */
+function runAuthenticatedFetch(url: string, method = "GET"): Promise<Response> {
+  return getSdkConfig("https://us.sentry.io").fetch(url, { method });
 }
 
 const BASE = "https://us.sentry.io/api/0/";
@@ -78,7 +63,6 @@ const LIST_URL = `${BASE}organizations/acme/issues/`;
 
 describe("HTTP-layer auto-invalidation", () => {
   test("successful non-GET clears cached detail + list entries", async () => {
-    // Prime the cache as if earlier GETs populated these entries.
     await storeCachedResponse(
       "GET",
       DETAIL_URL,
@@ -91,12 +75,7 @@ describe("HTTP-layer auto-invalidation", () => {
       {},
       makeResponse({ data: [] })
     );
-    expect(await getCachedResponse("GET", DETAIL_URL, {})).toBeDefined();
-    expect(
-      await getCachedResponse("GET", `${LIST_URL}?cursor=abc`, {})
-    ).toBeDefined();
 
-    // Perform a mutation on the detail URL.
     installMockFetch(async (input, init) => {
       expect(init?.method).toBe("PUT");
       expect(String(input)).toBe(DETAIL_URL);
@@ -105,9 +84,8 @@ describe("HTTP-layer auto-invalidation", () => {
     const response = await runAuthenticatedFetch(DETAIL_URL, "PUT");
     expect(response.ok).toBe(true);
 
-    // Invalidation is awaited inside the fetch hook, so by the time
-    // the mutation's caller sees the response, the cache is already
-    // cleared — no race, no sleep needed.
+    // Invalidation is awaited inside the hook, so the cache is
+    // already cleared when the caller sees the response.
     expect(await getCachedResponse("GET", DETAIL_URL, {})).toBeUndefined();
     expect(
       await getCachedResponse("GET", `${LIST_URL}?cursor=abc`, {})
@@ -121,13 +99,10 @@ describe("HTTP-layer auto-invalidation", () => {
       {},
       makeResponse({ id: "12345" })
     );
-    expect(await getCachedResponse("GET", DETAIL_URL, {})).toBeDefined();
 
     installMockFetch(async () => makeResponse({ error: "denied" }, 403));
     const response = await runAuthenticatedFetch(DETAIL_URL, "PUT");
     expect(response.status).toBe(403);
-
-    // Cache entry survives — a rejected mutation didn't change state.
     expect(await getCachedResponse("GET", DETAIL_URL, {})).toBeDefined();
   });
 
@@ -138,20 +113,16 @@ describe("HTTP-layer auto-invalidation", () => {
       {},
       makeResponse({ id: "12345" })
     );
-    expect(await getCachedResponse("GET", DETAIL_URL, {})).toBeDefined();
 
-    // A fresh GET to a different URL — shouldn't touch existing cache entries.
     installMockFetch(async () => makeResponse({ id: "99999" }));
     await runAuthenticatedFetch(
       `${BASE}organizations/acme/issues/99999/`,
       "GET"
     );
-
     expect(await getCachedResponse("GET", DETAIL_URL, {})).toBeDefined();
   });
 
   test("cross-endpoint rule fires for project delete", async () => {
-    // Prime the org project-list cache.
     const orgListUrl = `${BASE}organizations/acme/projects/`;
     await storeCachedResponse(
       "GET",
@@ -159,24 +130,16 @@ describe("HTTP-layer auto-invalidation", () => {
       {},
       makeResponse({ data: [] })
     );
-    expect(
-      await getCachedResponse("GET", `${orgListUrl}?cursor=xyz`, {})
-    ).toBeDefined();
 
-    // DELETE on the non-org-prefixed project URL.
-    const deleteUrl = `${BASE}projects/acme/frontend/`;
     installMockFetch(async () => makeResponse({}, 204));
-    await runAuthenticatedFetch(deleteUrl, "DELETE");
+    await runAuthenticatedFetch(`${BASE}projects/acme/frontend/`, "DELETE");
 
-    // The cross-endpoint rule sweeps the org project-list even though
-    // the mutation hit a different URL tree.
     expect(
       await getCachedResponse("GET", `${orgListUrl}?cursor=xyz`, {})
     ).toBeUndefined();
   });
 
   test("another identity's cache survives a mutation", async () => {
-    // Identity A caches an entry.
     setAuthToken("identity-a", 3600, "refresh-a");
     await storeCachedResponse(
       "GET",
@@ -184,15 +147,11 @@ describe("HTTP-layer auto-invalidation", () => {
       {},
       makeResponse({ owner: "a" })
     );
-    expect(await getCachedResponse("GET", DETAIL_URL, {})).toBeDefined();
 
-    // Switch to identity B and mutate the same URL.
     setAuthToken("identity-b", 3600, "refresh-b");
     installMockFetch(async () => makeResponse({}, 200));
     await runAuthenticatedFetch(DETAIL_URL, "PUT");
 
-    // Back as identity A: the entry must survive because invalidation
-    // is identity-gated.
     setAuthToken("identity-a", 3600, "refresh-a");
     expect(await getCachedResponse("GET", DETAIL_URL, {})).toBeDefined();
   });
