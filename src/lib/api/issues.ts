@@ -12,6 +12,8 @@ import type { SentryIssue } from "../../types/index.js";
 import { applyCustomHeaders } from "../custom-headers.js";
 import { ApiError, ValidationError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
+import { invalidateCachedResponsesMatching } from "../response-cache.js";
+import { getApiBaseUrl } from "../sentry-client.js";
 
 import {
   API_MAX_PER_PAGE,
@@ -22,6 +24,8 @@ import {
   type PaginatedResponse,
   unwrapPaginatedResult,
 } from "./infrastructure.js";
+
+const TRAILING_SLASH_RE = /\/$/;
 
 /**
  * Sort options for issue listing, derived from the @sentry/api SDK types.
@@ -614,6 +618,21 @@ export async function mergeIssues(
       method: "PUT",
       body: { merge: 1 },
     });
+    // HTTP-layer invalidation covers the region-scoped caches via the
+    // prefix sweep on `/organizations/{org}/issues/`, but it can't see
+    // the affected IDs (they're in query params, stripped from the
+    // URL the hook sees). Manually clear each affected issue's legacy
+    // cross-origin cache so subsequent `getIssue(id)` doesn't serve
+    // stale data.
+    const apiBase = getApiBaseUrl().replace(TRAILING_SLASH_RE, "");
+    const affectedIds = data.merge.children.toSpliced(0, 0, data.merge.parent);
+    await Promise.all(
+      affectedIds.map((id) =>
+        invalidateCachedResponsesMatching(
+          `${apiBase}/api/0/issues/${encodeURIComponent(id)}/`
+        )
+      )
+    );
     return data.merge;
   } catch (error) {
     // The bulk-mutate endpoint returns 204 when no matching issues are
