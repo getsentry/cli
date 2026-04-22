@@ -103,9 +103,10 @@ export async function preReadCommonFiles(
   directory: string,
   dirListing: DirEntry[]
 ): Promise<Record<string, string | null>> {
-  const listingPaths = new Set(
-    dirListing.map((entry) => entry.path.replaceAll("\\", "/"))
-  );
+  // `listDir` emits POSIX-normalized paths regardless of host OS,
+  // so `COMMON_CONFIG_FILES` (POSIX) membership checks don't need
+  // any per-path separator translation.
+  const listingPaths = new Set(dirListing.map((entry) => entry.path));
   const toRead = COMMON_CONFIG_FILES.filter((filePath) =>
     listingPaths.has(filePath)
   );
