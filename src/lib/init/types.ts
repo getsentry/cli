@@ -100,6 +100,23 @@ export type GrepSearch = {
   pattern: string;
   path?: string;
   include?: string;
+  /**
+   * Case-insensitive match. Default: false (case-sensitive, matching
+   * `rg`'s default). A leading `(?i)` inline flag in `pattern` has
+   * the same effect — callers can use either.
+   *
+   * No current Mastra server invocation sets this field; reserving
+   * it here means the server can start sending it without a CLI
+   * update. The underlying scan engine natively supports it.
+   */
+  caseInsensitive?: boolean;
+  /**
+   * Multiline mode: when true (default), `^` and `$` match at line
+   * boundaries within the file — grep/rg semantics. When false, they
+   * anchor to the buffer start/end — strict JS `RegExp` semantics.
+   * Rarely needs to be set.
+   */
+  multiline?: boolean;
 };
 
 export type GrepPayload = {
