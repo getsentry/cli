@@ -28,6 +28,14 @@ export type FixtureSpec = {
   filesPerPackage: number;
   /** Text file extensions. Picked round-robin; DSN sprinkling works across all. */
   fileExtensions: string[];
+  /**
+   * Binary file extensions — picked for each binary blob. Defaults
+   * to `[".bin"]` for backward compat with pre-existing fixture
+   * hashes. Real-world shapes use a mix (`.png`, `.woff2`, `.mp3`,
+   * `.pdf`, etc.) to exercise the `BINARY_EXTENSIONS` fast-path in
+   * `src/lib/scan/binary.ts`.
+   */
+  binaryExtensions?: string[];
   /** Fraction [0,1] of files that are random binary blobs (NUL-byte-containing). */
   binaryRatio: number;
   /** Fraction [0,1] of text files that include a DSN somewhere in the body. */
@@ -272,10 +280,17 @@ function populatePackage(
     }
   }
 
+  // `assets/` is intentionally a sibling of `src/` so the binary
+  // blobs stay inside the walked tree (outside `src/` means the
+  // walker still reaches them via the package root). Extension
+  // picked from `spec.binaryExtensions` (defaults to `.bin` when
+  // unspecified).
+  const binaryExts = spec.binaryExtensions ?? [".bin"];
   for (let i = 0; i < binaryCount; i += 1) {
     const subdir = join(baseDir, "assets");
     mkdirSync(subdir, { recursive: true });
-    const filename = `blob-${i.toString().padStart(4, "0")}.bin`;
+    const ext = rng.pick(binaryExts);
+    const filename = `blob-${i.toString().padStart(4, "0")}${ext}`;
     writeFileSync(join(subdir, filename), buildBinaryBlob(spec.avgFileKB, rng));
     fileCount += 1;
   }
@@ -362,6 +377,9 @@ export function hashSpec(spec: FixtureMeta["spec"]): string {
   const canonical = JSON.stringify({
     ...spec,
     fileExtensions: [...spec.fileExtensions].sort(),
+    binaryExtensions: spec.binaryExtensions
+      ? [...spec.binaryExtensions].sort()
+      : undefined,
   });
   return createHash("sha256").update(canonical).digest("hex").slice(0, 16);
 }

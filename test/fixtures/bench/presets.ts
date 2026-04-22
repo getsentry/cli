@@ -21,6 +21,8 @@ export const SMALL: Omit<FixtureSpec, "rootDir" | "seed"> = {
   packages: 0,
   filesPerPackage: 100,
   fileExtensions: [".ts", ".tsx", ".js", ".json", ".yml", ".md"],
+  // See `LARGE` for the rationale.
+  binaryExtensions: [".png", ".jpg", ".woff2", ".mp3", ".pdf", ".bin"],
   binaryRatio: 0.05,
   dsnRatio: 0.1,
   gitignoreDepth: "root",
@@ -33,6 +35,8 @@ export const MEDIUM: Omit<FixtureSpec, "rootDir" | "seed"> = {
   packages: 10,
   filesPerPackage: 100,
   fileExtensions: [".ts", ".tsx", ".js", ".json", ".yml", ".py", ".md"],
+  // See `LARGE` for the rationale.
+  binaryExtensions: [".png", ".jpg", ".woff2", ".mp3", ".pdf", ".bin"],
   binaryRatio: 0.08,
   dsnRatio: 0.12,
   gitignoreDepth: "nested",
@@ -55,6 +59,12 @@ export const LARGE: Omit<FixtureSpec, "rootDir" | "seed"> = {
     ".go",
     ".md",
   ],
+  // Mix of realistic webapp binary extensions that hit the
+  // `BINARY_EXTENSIONS` fast-path in `src/lib/scan/binary.ts`. `.bin`
+  // is NOT in BINARY_EXTENSIONS (generic — falls through to
+  // NUL-sniff), so including it lets the walker exercise both paths
+  // proportionally.
+  binaryExtensions: [".png", ".jpg", ".woff2", ".mp3", ".pdf", ".bin"],
   binaryRatio: 0.1,
   dsnRatio: 0.08,
   gitignoreDepth: "nested",
