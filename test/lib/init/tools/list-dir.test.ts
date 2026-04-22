@@ -51,7 +51,13 @@ describe("listDir", () => {
     const entries = entriesOf(
       await listDir(makePayload(testDir, { path: "." }))
     );
-    expect(entries.map((e) => ({ name: e.name, type: e.type }))).toEqual([
+    // Order depends on `readdir` behavior (FS-dependent — e.g., ext4
+    // returns entries in insertion order while tmpfs and macOS APFS
+    // do not). Sort by name for a stable assertion.
+    const sorted = entries
+      .map((e) => ({ name: e.name, type: e.type }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    expect(sorted).toEqual([
       { name: "index.ts", type: "file" },
       { name: "src", type: "directory" },
     ]);
