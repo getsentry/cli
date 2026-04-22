@@ -603,20 +603,6 @@ async function writeResponseToCache(req: WriteRequest): Promise<number> {
 }
 
 /**
- * Invalidate the cached GET response for a specific URL. Best-effort;
- * never throws. Used by mutation commands so subsequent GETs don't
- * serve stale data.
- */
-export async function invalidateCachedResponse(url: string): Promise<void> {
-  try {
-    const key = buildCacheKey("GET", url);
-    await rm(cacheFilePath(key), { force: true });
-  } catch {
-    /* best-effort */
-  }
-}
-
-/**
  * Invalidate every cached GET whose URL starts with `prefix` and
  * belongs to the current identity. Best-effort; never throws.
  *
