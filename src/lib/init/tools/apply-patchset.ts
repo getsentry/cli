@@ -152,10 +152,13 @@ async function applyEdits(
 ): Promise<string> {
   const initialContent = await safeReadFile(absPath, "apply-patchset.read");
   if (initialContent === null) {
-    // Unreachable on the happy path — `applyPatchset` already
-    // `access()`-checked the file. Reachable when the file is a
-    // non-regular type (FIFO, socket, symlink → FIFO) that would
-    // otherwise hang `readFile` indefinitely.
+    // `applyPatchset`'s earlier `access()` call only verifies
+    // existence — it follows symlinks and succeeds on FIFOs/sockets,
+    // so this branch is the primary guard against non-regular files
+    // (FIFO, socket, symlink → FIFO) that would otherwise hang
+    // `readFile` indefinitely, plus any other expected I/O failure
+    // (permission, transient read error) routed through
+    // `safeReadFile`.
     throw new Error(
       `Cannot read "${filePath}": not a regular file or read failed`
     );

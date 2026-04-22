@@ -12,7 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyPatchset } from "../../src/lib/init/tools/apply-patchset.js";
 import { readFiles } from "../../src/lib/init/tools/read-files.js";
-import { precomputeDirListing } from "../../src/lib/init/workflow-inputs.js";
+import type { DirEntry } from "../../src/lib/init/types.js";
+import { preReadCommonFiles } from "../../src/lib/init/workflow-inputs.js";
 import { safeReadFile } from "../../src/lib/safe-read.js";
 import { loadSentryCliRc } from "../../src/lib/sentryclirc.js";
 
@@ -142,6 +143,28 @@ describe("init read-files FIFO safety", () => {
     expect(files["real.ts"]).toBe("export {};\n");
     expect(files[".env"]).toBeNull();
   });
+
+  test("returns null entry for a symlink to a FIFO (1Password pattern)", async () => {
+    // 1Password's `.env` integration uses a symlink → FIFO to stream
+    // secrets. `stat` follows the symlink so `isFile()` is false on
+    // the FIFO target, correctly rejected by the guard.
+    const fifo = join(dir, ".env-pipe");
+    const link = join(dir, ".env");
+    createFifo(fifo);
+    execSync(`ln -s ${JSON.stringify(fifo)} ${JSON.stringify(link)}`);
+
+    const result = await readFiles({
+      type: "tool",
+      operation: "read-files",
+      cwd: dir,
+      params: { paths: [".env"] },
+    });
+
+    expect(result.ok).toBe(true);
+    const files = (result.data as { files: Record<string, string | null> })
+      .files;
+    expect(files[".env"]).toBeNull();
+  });
 });
 
 describe("init apply-patchset FIFO safety", () => {
@@ -182,9 +205,36 @@ describe("init apply-patchset FIFO safety", () => {
       )
     ).rejects.toThrow(/not a regular file|read failed/);
   });
+
+  test("throws targeted error for a symlink to a FIFO", async () => {
+    const fifo = join(dir, "config.pipe");
+    const link = join(dir, "config.ts");
+    createFifo(fifo);
+    execSync(`ln -s ${JSON.stringify(fifo)} ${JSON.stringify(link)}`);
+
+    await expect(
+      applyPatchset(
+        {
+          type: "tool",
+          operation: "apply-patchset",
+          cwd: dir,
+          params: {
+            patches: [
+              {
+                action: "modify",
+                path: "config.ts",
+                edits: [{ oldString: "foo", newString: "bar" }],
+              },
+            ],
+          },
+        },
+        { dryRun: false, authToken: undefined }
+      )
+    ).rejects.toThrow(/not a regular file|read failed/);
+  });
 });
 
-describe("workflow-inputs precomputeDirListing FIFO safety", () => {
+describe("workflow-inputs preReadCommonFiles FIFO safety", () => {
   let dir: string;
 
   beforeEach(() => {
@@ -199,16 +249,18 @@ describe("workflow-inputs precomputeDirListing FIFO safety", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test("precomputeDirListing is unaffected by FIFOs in the tree", async () => {
-    // `precomputeDirListing` is the function that feeds
-    // `preReadCommonFiles` — calling it with a FIFO in place of
-    // a common-config file must not hang.
+  test("returns null entry for a FIFO-backed common-config file", async () => {
     writeFileSync(join(dir, "package.json"), '{"name":"x"}');
-    createFifo(join(dir, "pnpm-lock.yaml"));
+    // `tsconfig.json` is in `COMMON_CONFIG_FILES` but exists here as
+    // a FIFO. Without the `stat.isFile()` guard the read would hang.
+    createFifo(join(dir, "tsconfig.json"));
 
-    // No assertion about content — we just need the call to
-    // complete. A hang would blow the Bun test timeout.
-    const listing = await precomputeDirListing(dir);
-    expect(Array.isArray(listing)).toBe(true);
+    const listing: DirEntry[] = [
+      { name: "package.json", path: "package.json", type: "file" },
+      { name: "tsconfig.json", path: "tsconfig.json", type: "file" },
+    ];
+    const cache = await preReadCommonFiles(dir, listing);
+    expect(cache["package.json"]).toBe('{"name":"x"}');
+    expect(cache["tsconfig.json"]).toBeNull();
   });
 });
