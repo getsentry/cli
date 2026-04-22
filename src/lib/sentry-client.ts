@@ -294,6 +294,11 @@ function cacheResponse(
  * Auto-invalidate cache entries that a successful non-GET mutation
  * made stale. Awaited so a subsequent read in the same command sees
  * fresh data. Prefix computation: {@link computeInvalidationPrefixes}.
+ *
+ * Never throws: a post-mutation housekeeping failure must not convert
+ * a successful mutation into a caller-visible error. Defense-in-depth
+ * for future regressions — the helpers we call are already no-throw
+ * today.
  */
 async function invalidateAfterMutation(
   method: string,
@@ -303,10 +308,14 @@ async function invalidateAfterMutation(
   if (method === "GET" || !response.ok) {
     return;
   }
-  const prefixes = computeInvalidationPrefixes(fullUrl);
-  await Promise.all(
-    prefixes.map((prefix) => invalidateCachedResponsesMatching(prefix))
-  );
+  try {
+    const prefixes = computeInvalidationPrefixes(fullUrl, getApiBaseUrl());
+    await Promise.all(
+      prefixes.map((prefix) => invalidateCachedResponsesMatching(prefix))
+    );
+  } catch {
+    /* best-effort: mutation already succeeded upstream */
+  }
 }
 
 /** Build a `{ authorization }` header map from a bearer token, or `{}` if absent. */

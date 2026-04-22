@@ -28,6 +28,7 @@
  */
 
 const API_V0_SEGMENT = "/api/0/";
+const TRAILING_SLASH_RE = /\/$/;
 
 /**
  * Paths where a mutation doesn't change any cacheable state — typically
@@ -42,10 +43,20 @@ const SKIP_INVALIDATION_PATTERNS: readonly RegExp[] = [
   /\/artifactbundle\/assemble\//,
 ];
 
-/** Rule for mutations whose effects cross URL trees. Patterns match the path relative to `/api/0/`. */
+/**
+ * Rule for mutations whose effects cross URL trees. Patterns match
+ * the path relative to `/api/0/`. `extra` returns additional
+ * path-prefixes (swept under the mutation's own origin); `extraAbsolute`
+ * returns absolute URL prefixes (when invalidation must cross origins,
+ * e.g. region-scoped mutation clearing a cache under the control silo).
+ */
 type CrossEndpointRule = {
   match: RegExp;
-  extra: (matchGroups: RegExpMatchArray) => string[];
+  extra?: (matchGroups: RegExpMatchArray) => string[];
+  extraAbsolute?: (
+    matchGroups: RegExpMatchArray,
+    ctx: { apiBaseUrl: string }
+  ) => string[];
 };
 
 const CROSS_ENDPOINT_RULES: CrossEndpointRule[] = [
@@ -60,6 +71,18 @@ const CROSS_ENDPOINT_RULES: CrossEndpointRule[] = [
     match: /^projects\/([^/]+)\/[^/]+\/?$/,
     extra: ([, org]) => [`organizations/${org}/projects/`],
   },
+  // Org-scoped issue mutations at `organizations/{org}/issues/{id}/`
+  // also affect the legacy global endpoint at `issues/{id}/`, which
+  // `getIssue()` hits under the control-silo base URL (potentially a
+  // DIFFERENT origin than the org's region URL). Must clear the
+  // legacy cache too, or subsequent `getIssue()` calls serve stale
+  // data.
+  {
+    match: /^organizations\/[^/]+\/issues\/([^/]+)\/?$/,
+    extraAbsolute: ([, issueId], { apiBaseUrl }) => [
+      `${apiBaseUrl.replace(TRAILING_SLASH_RE, "")}/api/0/issues/${issueId}/`,
+    ],
+  },
 ];
 
 /**
@@ -68,13 +91,18 @@ const CROSS_ENDPOINT_RULES: CrossEndpointRule[] = [
  *
  * @param fullUrl - Fully-qualified URL of the mutation (absolute,
  *   including base). Query string is ignored.
- * @returns Array of full-URL prefixes (including base and
- *   `/api/0/`) ready to pass to
+ * @param apiBaseUrl - The CLI's non-region API base URL (used by rules
+ *   that need to clear caches under a different origin — e.g. the
+ *   legacy `/issues/{id}/` endpoint that `getIssue()` hits).
+ * @returns Array of full-URL prefixes ready to pass to
  *   `invalidateCachedResponsesMatching`. Returns `[]` if the URL is
  *   not under `/api/0/` (e.g. sourcemap chunk upload to an arbitrary
  *   endpoint) or can't be parsed.
  */
-export function computeInvalidationPrefixes(fullUrl: string): string[] {
+export function computeInvalidationPrefixes(
+  fullUrl: string,
+  apiBaseUrl: string
+): string[] {
   let parsed: URL;
   try {
     parsed = new URL(fullUrl);
@@ -101,15 +129,30 @@ export function computeInvalidationPrefixes(fullUrl: string): string[] {
   for (const segments of ancestorSegments(relPath)) {
     prefixes.add(`${base}${segments}`);
   }
-  for (const rule of CROSS_ENDPOINT_RULES) {
-    const match = relPath.match(rule.match);
-    if (match) {
-      for (const extra of rule.extra(match)) {
-        prefixes.add(`${base}${extra}`);
-      }
-    }
+  for (const extra of applyCrossEndpointRules(relPath, base, apiBaseUrl)) {
+    prefixes.add(extra);
   }
   return [...prefixes];
+}
+
+/** Apply the cross-endpoint rule table, yielding absolute prefix URLs. */
+function* applyCrossEndpointRules(
+  relPath: string,
+  base: string,
+  apiBaseUrl: string
+): Generator<string> {
+  for (const rule of CROSS_ENDPOINT_RULES) {
+    const match = relPath.match(rule.match);
+    if (!match) {
+      continue;
+    }
+    for (const extra of rule.extra?.(match) ?? []) {
+      yield `${base}${extra}`;
+    }
+    for (const absolute of rule.extraAbsolute?.(match, { apiBaseUrl }) ?? []) {
+      yield absolute;
+    }
+  }
 }
 
 /**

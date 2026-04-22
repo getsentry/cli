@@ -3,9 +3,15 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { computeInvalidationPrefixes } from "../../src/lib/cache-keys.js";
+import { computeInvalidationPrefixes as computeInvalidationPrefixesRaw } from "../../src/lib/cache-keys.js";
 
 const BASE = "https://us.sentry.io/api/0/";
+const API_BASE_URL = "https://sentry.io";
+
+/** Test wrapper that pins `apiBaseUrl` to the control-silo default. */
+function computeInvalidationPrefixes(fullUrl: string): string[] {
+  return computeInvalidationPrefixesRaw(fullUrl, API_BASE_URL);
+}
 
 describe("computeInvalidationPrefixes — hierarchy walk", () => {
   test("detail URL yields self + ancestors down to owner", () => {
@@ -85,6 +91,20 @@ describe("computeInvalidationPrefixes — cross-endpoint rules", () => {
     expect(prefixes).toContain(`${BASE}projects/acme/frontend/`);
     expect(prefixes).toContain(`${BASE}projects/acme/`);
     expect(prefixes).not.toContain(`${BASE}projects/`);
+  });
+
+  test("org-scoped issue mutation invalidates cross-origin legacy endpoint", () => {
+    // `updateIssueStatus` / `mergeIssues` hit the org-scoped endpoint
+    // at the region URL, but `getIssue()` caches under the control-silo
+    // URL at a DIFFERENT origin. Without a cross-origin rule, stale
+    // legacy cache entries survive org-scoped mutations.
+    const prefixes = computeInvalidationPrefixes(
+      `${BASE}organizations/acme/issues/12345/`
+    );
+    expect(prefixes).toContain(`${API_BASE_URL}/api/0/issues/12345/`);
+    // Plus the hierarchy walk under the mutation's own origin:
+    expect(prefixes).toContain(`${BASE}organizations/acme/issues/12345/`);
+    expect(prefixes).toContain(`${BASE}organizations/acme/issues/`);
   });
 
   test("unrelated paths get no cross-endpoint sweep", () => {
