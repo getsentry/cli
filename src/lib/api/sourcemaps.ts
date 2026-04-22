@@ -10,7 +10,12 @@
  * 2. Build artifact bundle ZIP (streaming to disk via {@link ZipWriter})
  * 3. Split ZIP into chunks, compute SHA-1 checksums
  * 4. POST assemble request → server reports missing chunks
- * 5. Upload missing chunks in parallel (gzip-compressed, multipart/form-data)
+ * 5. Upload missing chunks in parallel as multipart/form-data. When the
+ *    server advertises a codec in `compression`, chunks are compressed
+ *    per-request and the codec is announced via `Content-Encoding`. Codec
+ *    preference is `zstd` > `gzip` > plain. Newer servers advertise both;
+ *    older servers advertise only `gzip`; the `chunk-upload.no-compression`
+ *    kill-switch makes the list empty.
  * 6. Poll assemble endpoint until complete
  */
 
@@ -145,6 +150,94 @@ export async function getChunkUploadOptions(
     { schema: ChunkServerOptionsSchema }
   );
   return data;
+}
+
+/** Codecs the CLI knows how to emit, in order of preference. */
+export const UPLOAD_CODECS = ["zstd", "gzip"] as const;
+export type UploadEncoding = (typeof UPLOAD_CODECS)[number];
+
+/**
+ * Select the most efficient upload codec the server advertises, or
+ * `undefined` for plain (uncompressed) uploads when the server opts out
+ * of compression (e.g. the `chunk-upload.no-compression` kill-switch).
+ *
+ * Exported for testing.
+ */
+export function pickUploadEncoding(
+  compression: string[]
+): UploadEncoding | undefined {
+  for (const codec of UPLOAD_CODECS) {
+    if (compression.includes(codec)) {
+      return codec;
+    }
+  }
+  return;
+}
+
+/**
+ * Compress a chunk buffer with the chosen codec. Exported for testing.
+ */
+export async function encodeChunk(
+  buf: Buffer,
+  encoding: UploadEncoding | undefined
+): Promise<Uint8Array> {
+  if (encoding === "zstd") {
+    return Bun.zstdCompressSync(buf);
+  }
+  if (encoding === "gzip") {
+    return await gzipAsync(buf);
+  }
+  return buf;
+}
+
+/**
+ * Read a single chunk from the staging ZIP, compress it with the server's
+ * preferred codec, and POST it under the `file` multipart field. The codec
+ * (if any) is announced via the `Content-Encoding` header -- matching the
+ * server's forward-looking detection path. The legacy `file_gzip` field is
+ * intentionally not used here.
+ */
+async function uploadChunk(params: {
+  chunk: ChunkInfo;
+  tmpZipPath: string;
+  encoding: UploadEncoding | undefined;
+  fetch: (url: string, init: RequestInit) => Promise<Response>;
+  url: string;
+}): Promise<void> {
+  const { chunk, tmpZipPath, encoding, fetch: authFetch, url } = params;
+
+  const chunkFh = await open(tmpZipPath, "r");
+  let buf: Buffer;
+  try {
+    buf = Buffer.alloc(chunk.size);
+    await chunkFh.read(buf, 0, chunk.size, chunk.offset);
+  } finally {
+    await chunkFh.close();
+  }
+
+  const payload = await encodeChunk(buf, encoding);
+
+  const form = new FormData();
+  form.append(
+    "file",
+    new Blob([payload], { type: "application/octet-stream" }),
+    chunk.sha1
+  );
+
+  const init: RequestInit = { method: "POST", body: form };
+  if (encoding) {
+    init.headers = { "Content-Encoding": encoding };
+  }
+
+  const response = await authFetch(url, init);
+  if (!response.ok) {
+    throw new ApiError(
+      `Chunk upload failed: ${response.status} ${response.statusText}`,
+      response.status,
+      await response.text().catch(() => ""),
+      url
+    );
+  }
 }
 
 /**
@@ -344,47 +437,22 @@ async function uploadArtifactBundle(opts: {
   const missingChunks = chunks.filter((c) => missingSet.has(c.sha1));
 
   if (missingChunks.length > 0) {
+    const encoding = pickUploadEncoding(serverOptions.compression);
     const limit = pLimit(serverOptions.concurrency);
-    const useGzip = serverOptions.compression.includes("gzip");
     // Use the CLI's authenticated fetch for chunk uploads
     const { fetch: authFetch } = getSdkConfig(regionUrl);
 
     await Promise.all(
       missingChunks.map((chunk) =>
-        limit(async () => {
-          const chunkFh = await open(tmpZipPath, "r");
-          let buf: Buffer;
-          try {
-            buf = Buffer.alloc(chunk.size);
-            await chunkFh.read(buf, 0, chunk.size, chunk.offset);
-          } finally {
-            await chunkFh.close();
-          }
-
-          const payload = useGzip ? await gzipAsync(buf) : buf;
-          const fieldName = useGzip ? "file_gzip" : "file";
-
-          const form = new FormData();
-          form.append(
-            fieldName,
-            new Blob([payload], { type: "application/octet-stream" }),
-            chunk.sha1
-          );
-
-          const response = await authFetch(serverOptions.url, {
-            method: "POST",
-            body: form,
-          });
-
-          if (!response.ok) {
-            throw new ApiError(
-              `Chunk upload failed: ${response.status} ${response.statusText}`,
-              response.status,
-              await response.text().catch(() => ""),
-              serverOptions.url
-            );
-          }
-        })
+        limit(() =>
+          uploadChunk({
+            chunk,
+            tmpZipPath,
+            encoding,
+            fetch: authFetch,
+            url: serverOptions.url,
+          })
+        )
       )
     );
   }
