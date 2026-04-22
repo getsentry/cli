@@ -43,10 +43,3 @@ export async function safeReadFile(
     return null;
   }
 }
-
-// Re-exports so call sites don't have to reach into `./dsn/fs-utils.js`
-// for these companion helpers. `isRegularFile` is the low-level primitive
-// that sites with non-standard read shapes (size-gating, partial reads)
-// still need direct access to.
-// biome-ignore lint/performance/noBarrelFile: intentional two-symbol re-export for a tiny, stable helper module
-export { handleFileError, isRegularFile } from "./dsn/fs-utils.js";
