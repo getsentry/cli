@@ -935,7 +935,7 @@ function normalizeOptions(opts: WalkOptions): NormalizedOptions {
     descentHook: opts.descentHook ?? defaultDescentHook,
     followSymlinks: opts.followSymlinks ?? false,
     signal: opts.signal,
-    concurrency: Math.max(1, opts.concurrency ?? bulkConcurrency()),
+    concurrency: normalizeConcurrency(opts.concurrency),
     timeBudgetMs: opts.timeBudgetMs ?? Number.POSITIVE_INFINITY,
     clock: opts.clock ?? (() => performance.now()),
     recordMtimes: opts.recordMtimes ?? false,
@@ -957,6 +957,20 @@ function normalizeOptions(opts: WalkOptions): NormalizedOptions {
  */
 export function bulkConcurrency(): number {
   return Math.max(2, availableParallelism());
+}
+
+/**
+ * Clamp a user-supplied `concurrency` to a finite integer ≥ 1.
+ * Treats `undefined`, `null`, `NaN`, `Infinity`, and ≤ 0 as "use
+ * the default" so the dispatch in `walkFilesImpl` can't hang on
+ * pathological inputs (e.g. `concurrency: NaN` → zero workers
+ * spawned but `stack.length > 0` → consumer parks forever).
+ */
+function normalizeConcurrency(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value) || value < 1) {
+    return bulkConcurrency();
+  }
+  return Math.max(1, Math.floor(value));
 }
 
 function buildMatcher(cfg: NormalizedOptions): Promise<IgnoreMatcher> {

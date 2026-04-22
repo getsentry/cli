@@ -803,4 +803,27 @@ describe("walkFiles — parallel walker (concurrency > 1)", () => {
       cleanup();
     }
   });
+
+  test("clamps pathological concurrency values instead of hanging", async () => {
+    // Regression: `concurrency: NaN` previously passed through
+    // `Math.max(1, NaN) = NaN`, so the dispatch routed to the
+    // parallel walker, which spawned zero workers (`i < NaN` is
+    // always false) but left the consumer parked on
+    // `consumerAwake` forever. `normalizeConcurrency` now clamps
+    // every non-finite / sub-1 value to the default.
+    const { cwd, cleanup } = makeSandbox({
+      "a.ts": "x",
+      "b/c.ts": "y",
+    });
+    try {
+      // All of these should route cleanly — either serial or the
+      // default parallel — and yield the same set of files.
+      for (const conc of [Number.NaN, Number.POSITIVE_INFINITY, -1, 0, 0.5]) {
+        const files = await collect({ cwd, concurrency: conc });
+        expect(files).toEqual(["a.ts", "b/c.ts"]);
+      }
+    } finally {
+      cleanup();
+    }
+  });
 });
