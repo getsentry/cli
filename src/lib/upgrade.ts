@@ -24,7 +24,7 @@ import {
   KNOWN_CURL_DIRS,
   releaseLock,
 } from "./binary.js";
-import { CLI_VERSION } from "./constants.js";
+import { CLI_VERSION, NODE_MODULES_DIRNAME } from "./constants.js";
 import { getInstallInfo, setInstallInfo } from "./db/install-info.js";
 import type { ReleaseChannel } from "./db/release-channel.js";
 import { attemptDeltaUpgrade, type DeltaResult } from "./delta-upgrade.js";
@@ -237,7 +237,7 @@ export function detectPackageManagerFromPath(): PackageManager | null {
   }
 
   const segments = scriptPath.split(sep);
-  if (!segments.includes("node_modules")) {
+  if (!segments.includes(NODE_MODULES_DIRNAME)) {
     return null;
   }
 

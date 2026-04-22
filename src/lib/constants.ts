@@ -24,6 +24,14 @@ export const DEFAULT_SENTRY_HOST = "sentry.io";
 /** Default Sentry SaaS URL (control silo for OAuth and region discovery) */
 export const DEFAULT_SENTRY_URL = `https://${DEFAULT_SENTRY_HOST}`;
 
+/**
+ * Name of the JavaScript package directory — used as both a skip target
+ * when walking project trees (DSN scanner, sourcemap discovery, init
+ * wizard) and as a path segment when detecting how the CLI itself was
+ * installed (upgrade detection).
+ */
+export const NODE_MODULES_DIRNAME = "node_modules";
+
 /** Matches strings that already start with http:// or https:// */
 const HAS_PROTOCOL_RE = /^https?:\/\//i;
 

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { NODE_MODULES_DIRNAME } from "../../constants.js";
 import type { DirEntry, ListDirPayload, ToolResult } from "../types.js";
 import { safePath } from "./shared.js";
 import type { InitToolDefinition } from "./types.js";
@@ -64,7 +65,7 @@ function shouldRecurseInto(entry: fs.Dirent, state: WalkState): boolean {
     entry.isDirectory() &&
     !entry.isSymbolicLink() &&
     !entry.name.startsWith(".") &&
-    entry.name !== "node_modules"
+    entry.name !== NODE_MODULES_DIRNAME
   );
 }
 
