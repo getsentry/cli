@@ -62,7 +62,9 @@ jobs:
           PUBLIC_SENTRY_RELEASE: ${{ steps.version.outputs.version }}
         run: |
           bun install --frozen-lockfile
-          bun run build
+          # Run astro via Bun (--bun) so the build doesn't trip Astro 6's
+          # Node >=22.12 engine check — the CI runner ships Node 20.
+          bun run --bun build
 
       - name: Inject debug IDs and upload sourcemaps
         if: env.SENTRY_AUTH_TOKEN != ''
