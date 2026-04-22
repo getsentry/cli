@@ -177,11 +177,28 @@ describe("formatProjectDetails", () => {
 
   test("includes organization context when present", () => {
     const project = createMockProject({
-      organization: { slug: "acme", name: "Acme Corp" },
+      organization: { id: "1", slug: "acme", name: "Acme Corp" },
     });
 
     const result = stripAnsi(formatProjectDetails(project));
     expect(result).toContain("Acme Corp");
+    expect(result).toContain("acme");
+  });
+
+  test("falls back to org slug when collapsed response omits name", () => {
+    // `getProject()` passes `?collapse=organization` to save ~400-500ms,
+    // which drops `organization.name`. `formatProjectDetails` must still
+    // render a reasonable Organization row. With no cached org name
+    // available in the test's isolated config dir, the slug is the
+    // last-resort fallback.
+    const project = createMockProject({
+      organization: { id: "1", slug: "acme" },
+    });
+
+    const result = stripAnsi(formatProjectDetails(project));
+    // The `Organization` row appears, rendered as `slug (slug)` when no
+    // display name is available.
+    expect(result).toContain("Organization");
     expect(result).toContain("acme");
   });
 

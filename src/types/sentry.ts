@@ -58,11 +58,19 @@ export type SentryProject = Partial<SdkProjectListItem> & {
   id: string;
   slug: string;
   name: string;
-  /** Organization context (present in detail responses, absent in list) */
+  /**
+   * Organization context (present in detail responses, absent in list).
+   *
+   * `name` is optional because `getProject()` passes `?collapse=organization`
+   * to skip full-org serialization on the server (~400-500ms faster). The
+   * collapsed payload only carries `{id, slug}`. Callers needing a display
+   * name should use `resolveOrgDisplayName()` which falls back to the
+   * cached organizations list.
+   */
   organization?: {
     id: string;
     slug: string;
-    name: string;
+    name?: string;
     [key: string]: unknown;
   };
   /** Project status (returned by API but not in the OpenAPI spec) */

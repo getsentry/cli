@@ -97,6 +97,7 @@ export {
   matchesWordBoundary,
   type ProjectSearchResult,
   type ProjectWithOrg,
+  resolveOrgDisplayName,
   tryGetPrimaryDsn,
 } from "./api/projects.js";
 export {

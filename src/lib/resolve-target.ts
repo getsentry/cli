@@ -24,6 +24,7 @@ import {
   getProject,
   listOrganizations,
   listProjects,
+  resolveOrgDisplayName,
 } from "./api-client.js";
 import { type ParsedOrgProject, parseOrgProjectArg } from "./arg-parsing.js";
 import { getDefaultOrganization, getDefaultProject } from "./db/defaults.js";
@@ -193,9 +194,13 @@ export async function resolveFromDsn(
   const projectInfo = await getProject(dsn.orgId, dsn.projectId);
 
   if (projectInfo.organization) {
+    const orgName = resolveOrgDisplayName(
+      projectInfo.organization.slug,
+      projectInfo.organization.name
+    );
     setCachedProject(dsn.orgId, dsn.projectId, {
       orgSlug: projectInfo.organization.slug,
-      orgName: projectInfo.organization.name,
+      orgName,
       projectSlug: projectInfo.slug,
       projectName: projectInfo.name,
       projectId: projectInfo.id,
@@ -205,7 +210,7 @@ export async function resolveFromDsn(
       org: projectInfo.organization.slug,
       project: projectInfo.slug,
       projectId: toNumericId(projectInfo.id),
-      orgDisplay: projectInfo.organization.name,
+      orgDisplay: orgName,
       projectDisplay: projectInfo.name,
       detectedFrom,
     };
@@ -333,9 +338,13 @@ export async function resolveDsnByPublicKey(
     }
 
     if (projectInfo.organization) {
+      const orgName = resolveOrgDisplayName(
+        projectInfo.organization.slug,
+        projectInfo.organization.name
+      );
       setCachedProjectByDsnKey(dsn.publicKey, {
         orgSlug: projectInfo.organization.slug,
-        orgName: projectInfo.organization.name,
+        orgName,
         projectSlug: projectInfo.slug,
         projectName: projectInfo.name,
         projectId: projectInfo.id,
@@ -345,7 +354,7 @@ export async function resolveDsnByPublicKey(
         org: projectInfo.organization.slug,
         project: projectInfo.slug,
         projectId: toNumericId(projectInfo.id),
-        orgDisplay: projectInfo.organization.name,
+        orgDisplay: orgName,
         projectDisplay: projectInfo.name,
         detectedFrom,
         packagePath: dsn.packagePath,
@@ -402,9 +411,13 @@ async function resolveDsnToTarget(
     const projectInfo = await getProject(orgId, dsnProjectId);
 
     if (projectInfo.organization) {
+      const orgName = resolveOrgDisplayName(
+        projectInfo.organization.slug,
+        projectInfo.organization.name
+      );
       setCachedProject(orgId, dsnProjectId, {
         orgSlug: projectInfo.organization.slug,
-        orgName: projectInfo.organization.name,
+        orgName,
         projectSlug: projectInfo.slug,
         projectName: projectInfo.name,
         projectId: projectInfo.id,
@@ -414,7 +427,7 @@ async function resolveDsnToTarget(
         org: projectInfo.organization.slug,
         project: projectInfo.slug,
         projectId: toNumericId(projectInfo.id),
-        orgDisplay: projectInfo.organization.name,
+        orgDisplay: orgName,
         projectDisplay: projectInfo.name,
         detectedFrom,
         packagePath,
@@ -880,7 +893,10 @@ export async function fetchProjectId(
     try {
       setCachedProject(project_.organization.id, project_.id, {
         orgSlug: project_.organization.slug,
-        orgName: project_.organization.name,
+        orgName: resolveOrgDisplayName(
+          project_.organization.slug,
+          project_.organization.name
+        ),
         projectSlug: project_.slug,
         projectName: project_.name,
         projectId: project_.id,

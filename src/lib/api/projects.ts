@@ -26,10 +26,7 @@ import { getCachedOrganizations } from "../db/regions.js";
 import { type AuthGuardSuccess, withAuthGuard } from "../errors.js";
 import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
-import {
-  invalidateCachedResponse,
-  invalidateCachedResponsesMatching,
-} from "../response-cache.js";
+import { invalidateCachedResponsesMatching } from "../response-cache.js";
 import { getApiBaseUrl } from "../sentry-client.js";
 import { buildProjectUrl } from "../sentry-urls.js";
 import { isAllDigits } from "../utils.js";
@@ -229,6 +226,12 @@ export async function deleteProject(
  * Flush the project-detail GET and the org-wide project list so
  * follow-up `project list` / `project view` reads don't see the
  * deleted project. Never throws.
+ *
+ * Uses prefix-matching on the project detail URL rather than an exact
+ * match because `getProject()` appends `?collapse=organization`, and
+ * the response cache keys entries by the full URL (including query
+ * string). A prefix sweep catches the collapsed variant plus any
+ * future query-parameter additions.
  */
 async function invalidateProjectCaches(
   orgSlug: string,
@@ -237,7 +240,7 @@ async function invalidateProjectCaches(
   try {
     const regionUrl = await resolveOrgRegion(orgSlug);
     await Promise.all([
-      invalidateCachedResponse(
+      invalidateCachedResponsesMatching(
         buildApiUrl(regionUrl, "projects", orgSlug, projectSlug)
       ),
       invalidateCachedResponsesMatching(
@@ -453,6 +456,16 @@ export async function findProjectByDsnKey(
 /**
  * Get a specific project.
  * Uses region-aware routing for multi-region support.
+ *
+ * Passes `?collapse=organization` so the server skips full-org
+ * serialization (~400-500ms faster). The response's `organization` field
+ * is trimmed to `{id, slug}` — no `name`, feature flags, or options.
+ * Callers needing a display name should use `resolveOrgDisplayName()`
+ * which falls back to the cached organizations list.
+ *
+ * Self-hosted or older Sentry versions that don't recognize `collapse`
+ * silently ignore the query param and return the full `organization`
+ * payload, so this is safe for all deployments.
  */
 export async function getProject(
   orgSlug: string,
@@ -460,16 +473,54 @@ export async function getProject(
 ): Promise<SentryProject> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await retrieveAProject({
+  // `collapse` is server-supported but not in the OpenAPI spec, so the
+  // SDK types `query` as `never` on `RetrieveAProjectData`. Double-cast
+  // via `unknown` to bypass the stricter argument type while still
+  // sending the param at runtime. Same intent as the `per_page` cast
+  // used above.
+  const result = (await retrieveAProject({
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
       project_id_or_slug: projectSlug,
     },
-  });
+    query: { collapse: "organization" },
+  } as unknown as Parameters<typeof retrieveAProject>[0])) as
+    | { data: unknown; error: undefined }
+    | { data: undefined; error: unknown };
 
   const data = unwrapResult(result, "Failed to get project");
   return data as unknown as SentryProject;
+}
+
+/**
+ * Resolve an organization's display name from the best available source.
+ *
+ * `getProject()` passes `?collapse=organization` so the server skips
+ * full-org serialization (~400-500ms faster). Collapsed responses omit
+ * `organization.name`, so callers that want a human-friendly label must
+ * fall back to cached org metadata.
+ *
+ * Resolution order:
+ * 1. Explicit `name` if present (self-hosted or Sentry versions that
+ *    ignore the `collapse` query param still return the full payload).
+ * 2. The locally cached organizations list (populated by login and every
+ *    org-fanout operation).
+ * 3. The slug itself — always a valid human identifier, worst case.
+ *
+ * @param orgSlug - Organization slug (required for cache lookup)
+ * @param explicitName - The `organization.name` from an API response, if any
+ * @returns A display-ready organization name (never empty)
+ */
+export function resolveOrgDisplayName(
+  orgSlug: string,
+  explicitName?: string
+): string {
+  if (explicitName) {
+    return explicitName;
+  }
+  const cached = getCachedOrganizations().find((o) => o.slug === orgSlug);
+  return cached?.name ?? orgSlug;
 }
 
 /**

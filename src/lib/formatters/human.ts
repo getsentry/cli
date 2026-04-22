@@ -28,6 +28,7 @@ import type {
   TraceSpan,
   Writer,
 } from "../../types/index.js";
+import { resolveOrgDisplayName } from "../api-client.js";
 import { withSerializeSpan } from "../telemetry.js";
 import { type FixabilityTier, muted } from "./colors.js";
 import {
@@ -1537,9 +1538,13 @@ export function formatProjectDetails(
     kvRows.push(["Created", new Date(project.dateCreated).toLocaleString()]);
   }
   if (project.organization) {
+    const orgName = resolveOrgDisplayName(
+      project.organization.slug,
+      project.organization.name
+    );
     kvRows.push([
       "Organization",
-      `${escapeMarkdownInline(project.organization.name)} (${safeCodeSpan(project.organization.slug)})`,
+      `${escapeMarkdownInline(orgName)} (${safeCodeSpan(project.organization.slug)})`,
     ]);
   }
   if (project.firstEvent) {
