@@ -149,7 +149,7 @@ async function fetchRulesForTarget(
           return {
             target,
             rules,
-            hasMore: true,
+            hasMore: !!nextCursor,
             nextCursor: nextCursor ?? undefined,
           };
         }
@@ -468,7 +468,7 @@ async function handleResolvedTargets(
     const hint = footer
       ? `No issue alert rules found.\n\n${footer}`
       : "No issue alert rules found.";
-    return { items: [], hint, hasMore: false, hasPrev };
+    return { items: [], hint, hasMore: hasMoreToShow, hasPrev };
   }
 
   const title =

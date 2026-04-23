@@ -139,7 +139,7 @@ async function fetchRulesForOrg(
           return {
             orgSlug,
             rules,
-            hasMore: true,
+            hasMore: !!nextCursor,
             nextCursor: nextCursor ?? undefined,
           };
         }
@@ -455,7 +455,7 @@ async function handleResolvedOrgs(
     const hint = footer
       ? `No metric alert rules found.\n\n${footer}`
       : "No metric alert rules found.";
-    return { items: [], hint, hasMore: false, hasPrev };
+    return { items: [], hint, hasMore: hasMoreToShow, hasPrev };
   }
 
   const title =

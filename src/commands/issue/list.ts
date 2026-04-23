@@ -24,7 +24,11 @@ import {
 import { getActiveEnvVarName, isEnvTokenActive } from "../../lib/db/auth.js";
 import {
   advancePaginationState,
+  buildMultiTargetContextKey,
   buildPaginationContextKey,
+  CURSOR_SEP,
+  decodeCompoundCursor,
+  encodeCompoundCursor,
   hasPreviousPage,
   resolveCursor,
 } from "../../lib/db/pagination.js";
@@ -70,7 +74,10 @@ import {
   trimWithGroupGuarantee,
 } from "../../lib/org-list.js";
 import { withProgress } from "../../lib/polling.js";
-import type { ResolvedTarget } from "../../lib/resolve-target.js";
+import {
+  type ResolvedTarget,
+  resolveTargetsFromParsedArg,
+} from "../../lib/resolve-target.js";
 import {
   SEARCH_SYNTAX_REFERENCE,
   sanitizeQuery,
@@ -882,7 +889,6 @@ async function handleResolvedTargets(
 
   // Build a compound cursor context key that encodes the full target set +
   // search parameters so a cursor from one search is never reused for another.
-  <<<<<<< HEAD
   const contextKey = buildMultiTargetContextKey(targets, flags, timeRange);
 
   // Resolve per-target start cursors from the stored compound cursor (--cursor resume).
