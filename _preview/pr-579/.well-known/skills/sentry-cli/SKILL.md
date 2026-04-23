@@ -326,7 +326,9 @@ Make an authenticated API request
 Manage Sentry alert rules
 
 - `sentry alert issues list <org/project>` — List issue alert rules
+- `sentry alert issues view <org/project/rule-id-or-name>` — View an issue alert rule
 - `sentry alert metrics list <org/project>` — List metric alert rules
+- `sentry alert metrics view <org/rule-id-or-name>` — View a metric alert rule
 
 → Full flags and examples: `references/alert.md`
 

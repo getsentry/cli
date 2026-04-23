@@ -22,6 +22,13 @@ List issue alert rules
 - `-c, --cursor <value> - Pagination cursor (use "next" for next page, "prev" for previous)`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
+### `sentry alert issues view <org/project/rule-id-or-name>`
+
+View an issue alert rule
+
+**Flags:**
+- `-w, --web - Open issue alert rules page in browser`
+
 ### `sentry alert metrics list <org/project>`
 
 List metric alert rules
@@ -32,5 +39,12 @@ List metric alert rules
 - `-q, --query <value> - Filter rules by name`
 - `-c, --cursor <value> - Pagination cursor (use "next" for next page, "prev" for previous)`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+
+### `sentry alert metrics view <org/rule-id-or-name>`
+
+View a metric alert rule
+
+**Flags:**
+- `-w, --web - Open metric alert rules page in browser`
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
