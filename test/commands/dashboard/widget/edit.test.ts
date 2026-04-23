@@ -182,9 +182,10 @@ describe("dashboard widget edit", () => {
     expect(edited.queries[0].columns).toEqual(["span.description"]);
   });
 
-  test("throws ValidationError when --dataset change produces invalid combo with existing display", async () => {
-    // existing widget is displayType: "big_number" (spans), user changes only --dataset to "issue"
-    // → effective combo is big_number + issue, which is invalid
+  // The backend validates displayType and widgetType as independent enums —
+  // any valid display type is accepted with any valid dataset.
+
+  test("allows --dataset change to issue on big_number widget", async () => {
     getDashboardSpy.mockResolvedValueOnce({
       ...sampleDashboard,
       widgets: [
@@ -207,15 +208,18 @@ describe("dashboard widget edit", () => {
     });
     const { context } = createMockContext();
     const func = await editCommand.loader();
-    const err = await func
-      .call(context, { json: false, index: 0, dataset: "issue" }, "123")
-      .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toContain('"issue" dataset supports');
+    await func.call(
+      context,
+      { json: false, index: 0, dataset: "issue" },
+      "123"
+    );
+    expect(updateDashboardSpy).toHaveBeenCalledTimes(1);
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    expect(body.widgets[0].displayType).toBe("big_number");
+    expect(body.widgets[0].widgetType).toBe("issue");
   });
 
-  test("throws ValidationError when --display change produces invalid combo with existing dataset", async () => {
-    // existing widget is displayType: "line" + widgetType: "preprod-app-size", user changes only --display to "table"
+  test("allows --display change to table on preprod-app-size widget", async () => {
     getDashboardSpy.mockResolvedValueOnce({
       ...sampleDashboard,
       widgets: [
@@ -238,16 +242,18 @@ describe("dashboard widget edit", () => {
     });
     const { context } = createMockContext();
     const func = await editCommand.loader();
-    const err = await func
-      .call(context, { json: false, index: 0, display: "table" }, "123")
-      .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toContain('"preprod-app-size" dataset supports');
+    await func.call(
+      context,
+      { json: false, index: 0, display: "table" },
+      "123"
+    );
+    expect(updateDashboardSpy).toHaveBeenCalledTimes(1);
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    expect(body.widgets[0].displayType).toBe("table");
+    expect(body.widgets[0].widgetType).toBe("preprod-app-size");
   });
 
-  test("allows --dataset change on widget with untracked display type (text)", async () => {
-    // text, wheel, rage_and_dead_clicks, agents_traces_table bypass Sentry's dataset system
-    // entirely — they should not be cross-validated against a dataset.
+  test("allows --dataset change on widget with text display type", async () => {
     getDashboardSpy.mockResolvedValueOnce({
       ...sampleDashboard,
       widgets: [
@@ -281,6 +287,112 @@ describe("dashboard widget edit", () => {
     expect(updateDashboardSpy).toHaveBeenCalled();
   });
 
+  // -------------------------------------------------------------------------
+  // Layout flag tests
+  // -------------------------------------------------------------------------
+
+  test("applies --col and --row layout flags to existing widget", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    await func.call(context, { json: false, index: 0, col: 4, row: 3 }, "123");
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const edited = body.widgets[0];
+    expect(edited.layout.x).toBe(4);
+    expect(edited.layout.y).toBe(3);
+    // Width and height preserved from original
+    expect(edited.layout.w).toBe(2);
+    expect(edited.layout.h).toBe(1);
+  });
+
+  test("applies --width and --height layout flags", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    await func.call(
+      context,
+      { json: false, index: 1, col: 0, width: 6, height: 4 },
+      "123"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const edited = body.widgets[1];
+    expect(edited.layout.w).toBe(6);
+    expect(edited.layout.h).toBe(4);
+    expect(edited.layout.x).toBe(0);
+    expect(edited.layout.y).toBe(0);
+  });
+
+  test("preserves existing layout when no layout flags provided", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    await func.call(context, { json: false, index: 0, display: "line" }, "123");
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const edited = body.widgets[0];
+    expect(edited.layout).toEqual({ x: 0, y: 0, w: 2, h: 1 });
+  });
+
+  test("throws ValidationError for col out of range", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    const err = await func
+      .call(context, { json: false, index: 0, col: 6 }, "123")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain("--col");
+  });
+
+  test("throws ValidationError for negative width", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    const err = await func
+      .call(context, { json: false, index: 0, width: 0 }, "123")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain("--width");
+  });
+
+  test("throws ValidationError when --col overflows with fallback width on layoutless widget", async () => {
+    // Widget without layout uses FALLBACK_LAYOUT (w=3), so --col 4 → 4+3=7 > 6
+    getDashboardSpy.mockResolvedValueOnce({
+      ...sampleDashboard,
+      widgets: [
+        {
+          title: "No Layout Widget",
+          displayType: "line",
+          widgetType: "spans",
+          queries: [
+            {
+              name: "",
+              conditions: "",
+              columns: [],
+              aggregates: ["count()"],
+              fields: ["count()"],
+            },
+          ],
+          // no layout field
+        },
+      ],
+    });
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    const err = await func
+      .call(context, { json: false, index: 0, col: 4 }, "123")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain("overflows the grid");
+  });
+
+  test("throws ValidationError when col + width overflows grid", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    const err = await func
+      .call(context, { json: false, index: 0, col: 4, width: 4 }, "123")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain("overflows the grid");
+  });
+
   test("validates aggregates against new dataset when --dataset changes", async () => {
     const { context } = createMockContext();
     const func = await editCommand.loader();
@@ -302,5 +414,143 @@ describe("dashboard widget edit", () => {
     const body = updateDashboardSpy.mock.calls[0]?.[2];
     expect(body.widgets[0].widgetType).toBe("discover");
     expect(body.widgets[0].queries[0].aggregates).toEqual(["failure_rate()"]);
+  });
+
+  test("resolves --dataset alias 'errors' to 'error-events' in PUT body", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    await func.call(
+      context,
+      { json: false, index: 0, dataset: "errors" },
+      "123"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    expect(body.widgets[0].widgetType).toBe("error-events");
+  });
+
+  test("dataset alias is resolved BEFORE dataset-aware aggregate validation", async () => {
+    // Regression test for the "aliases resolve too late" bug: failure_rate
+    // is valid for error-events, so passing --dataset errors --query
+    // failure_rate must succeed. If the alias is not applied before
+    // validateAggregateNames runs, "errors" falls through the canonical
+    // branch and "Unknown aggregate function" is thrown.
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        index: 0,
+        dataset: "errors",
+        query: ["failure_rate"],
+      },
+      "123"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    expect(body.widgets[0].widgetType).toBe("error-events");
+    expect(body.widgets[0].queries[0].aggregates).toEqual(["failure_rate()"]);
+  });
+
+  test("case-insensitive --dataset values are accepted", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    await func.call(
+      context,
+      { json: false, index: 0, dataset: "TRANSACTIONS" },
+      "123"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    expect(body.widgets[0].widgetType).toBe("transaction-like");
+  });
+
+  test("auto-defaults --limit to 5 when adding --group-by without --limit", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+
+    // Widget 0 (Error Count) has no existing limit or group-by.
+    await func.call(
+      context,
+      {
+        json: false,
+        index: 0,
+        display: "line",
+        "group-by": ["browser.name"],
+      },
+      "123"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    expect(body.widgets[0].limit).toBe(5);
+    expect(body.widgets[0].queries[0].columns).toEqual(["browser.name"]);
+  });
+
+  test("explicit --limit wins over auto-default when adding --group-by", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+
+    // line widgets have no row cap; bar/table cap at 10, which would mask the
+    // explicit-limit signal we want to assert.
+    await func.call(
+      context,
+      {
+        json: false,
+        index: 0,
+        display: "line",
+        "group-by": ["browser.name"],
+        limit: 25,
+      },
+      "123"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    expect(body.widgets[0].limit).toBe(25);
+  });
+
+  test("preserves existing limit when adding --group-by to a widget that has one", async () => {
+    // Seed an existing widget that already has a limit below any display
+    // cap so clamping doesn't hide the preservation signal.
+    getDashboardSpy.mockResolvedValueOnce({
+      ...sampleDashboard,
+      widgets: [
+        {
+          ...sampleDashboard.widgets[0],
+          limit: 8,
+        },
+        ...sampleDashboard.widgets.slice(1),
+      ],
+    });
+
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        index: 0,
+        display: "line",
+        "group-by": ["browser.name"],
+      },
+      "123"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    expect(body.widgets[0].limit).toBe(8);
+  });
+
+  test("does not auto-default limit when only changing --query on an ungrouped widget", async () => {
+    const { context } = createMockContext();
+    const func = await editCommand.loader();
+
+    await func.call(
+      context,
+      { json: false, index: 0, query: ["p95:span.duration"] },
+      "123"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    expect(body.widgets[0].limit).toBeUndefined();
   });
 });

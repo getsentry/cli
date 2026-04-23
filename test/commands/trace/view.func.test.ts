@@ -18,6 +18,7 @@ import {
   test,
 } from "bun:test";
 import {
+  flattenSpanTree,
   formatTraceView,
   viewCommand,
 } from "../../../src/commands/trace/view.js";
@@ -85,8 +86,10 @@ describe("formatTraceView", () => {
 
 describe("viewCommand.func", () => {
   let getDetailedTraceSpy: ReturnType<typeof spyOn>;
+  let fetchMultiSpanDetailsSpy: ReturnType<typeof spyOn>;
   let getIssueByShortIdSpy: ReturnType<typeof spyOn>;
   let getLatestEventSpy: ReturnType<typeof spyOn>;
+  let getProjectSpy: ReturnType<typeof spyOn>;
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
   let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
   let resolveOrgSpy: ReturnType<typeof spyOn>;
@@ -131,20 +134,34 @@ describe("viewCommand.func", () => {
 
   beforeEach(async () => {
     getDetailedTraceSpy = spyOn(apiClient, "getDetailedTrace");
+    fetchMultiSpanDetailsSpy = spyOn(
+      apiClient,
+      "fetchMultiSpanDetails"
+    ).mockResolvedValue(new Map());
     getIssueByShortIdSpy = spyOn(apiClient, "getIssueByShortId");
     getLatestEventSpy = spyOn(apiClient, "getLatestEvent");
+    getProjectSpy = spyOn(apiClient, "getProject");
     findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
     resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
     resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
     openInBrowserSpy = spyOn(browser, "openInBrowser");
     setOrgRegion("test-org", DEFAULT_SENTRY_URL);
     setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+
+    // Mock getProject for explicit org/project/trace-id targets
+    getProjectSpy.mockResolvedValue({
+      id: "42",
+      slug: "test-project",
+      name: "Test Project",
+    });
   });
 
   afterEach(() => {
     getDetailedTraceSpy.mockRestore();
+    fetchMultiSpanDetailsSpy.mockRestore();
     getIssueByShortIdSpy.mockRestore();
     getLatestEventSpy.mockRestore();
+    getProjectSpy.mockRestore();
     findProjectsBySlugSpy.mockRestore();
     resolveOrgAndProjectSpy.mockRestore();
     resolveOrgSpy.mockRestore();
@@ -185,7 +202,8 @@ describe("viewCommand.func", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("aaaa1111bbbb2222cccc3333dddd4444");
-    expect(output).toContain("sentry trace view --web");
+    // Explicit org/project triggers project-filtered hint
+    expect(output).toContain("Filtered to project");
   });
 
   test("throws ValidationError when no spans found", async () => {
@@ -259,8 +277,8 @@ describe("viewCommand.func", () => {
     // Summary should be present
     expect(output).toContain("aaaa1111bbbb2222cccc3333dddd4444");
     // Span tree details should not appear (no span_id rendered)
-    // The footer should still be present
-    expect(output).toContain("sentry trace view --web");
+    // The footer should still be present (project-filtered hint for explicit target)
+    expect(output).toContain("Filtered to project");
   });
 
   test("throws ContextError for org-all target", async () => {
@@ -330,24 +348,6 @@ describe("viewCommand.func", () => {
     expect(getDetailedTraceSpy).toHaveBeenCalled();
   });
 
-  test("logs normalized slug warning when underscores present", async () => {
-    getDetailedTraceSpy.mockResolvedValue(sampleSpans);
-
-    const { context } = createMockContext();
-    const func = await viewCommand.loader();
-    // Underscores in the slug trigger normalized warning (line 172-173)
-    await func.call(
-      context,
-      { json: true, web: false, spans: 100 },
-      "test_org/test_project",
-      "aaaa1111bbbb2222cccc3333dddd4444"
-    );
-
-    // parseOrgProjectArg normalizes "test_org/test_project" → "test-org/test-project"
-    // and sets normalized=true, triggering the log.warn (line 173)
-    expect(getDetailedTraceSpy).toHaveBeenCalled();
-  });
-
   test("logs suggestion when first arg looks like issue short ID", async () => {
     // "CAM-82X" as first arg matches issue short ID pattern.
     // parseOrgProjectArg("CAM-82X") → project-search, so we mock findProjectsBySlug.
@@ -396,7 +396,8 @@ describe("viewCommand.func", () => {
     expect(getDetailedTraceSpy).toHaveBeenCalledWith(
       "test-org",
       traceIdFromEvent,
-      expect.any(Number)
+      expect.any(Number),
+      { additionalAttributes: undefined, projectId: undefined }
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
@@ -434,5 +435,149 @@ describe("viewCommand.func", () => {
     await expect(
       func.call(context, { json: false, web: false, spans: 100 }, "CLI-G5")
     ).rejects.toThrow(ContextError);
+  });
+
+  test("--json auto-enables detail fetching", async () => {
+    getDetailedTraceSpy.mockResolvedValue(sampleSpans);
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: true, web: false, spans: 100 },
+      "test-org/test-project",
+      "aaaa1111bbbb2222cccc3333dddd4444"
+    );
+
+    expect(fetchMultiSpanDetailsSpy).toHaveBeenCalled();
+  });
+
+  test("--full flag enables detail fetching in human mode", async () => {
+    getDetailedTraceSpy.mockResolvedValue(sampleSpans);
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: false, full: true, web: false, spans: 100 },
+      "test-org/test-project",
+      "aaaa1111bbbb2222cccc3333dddd4444"
+    );
+
+    expect(fetchMultiSpanDetailsSpy).toHaveBeenCalled();
+  });
+
+  test("human mode without --full does not fetch details", async () => {
+    getDetailedTraceSpy.mockResolvedValue(sampleSpans);
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: false, web: false, spans: 100 },
+      "test-org/test-project",
+      "aaaa1111bbbb2222cccc3333dddd4444"
+    );
+
+    expect(fetchMultiSpanDetailsSpy).not.toHaveBeenCalled();
+  });
+
+  test("--json output includes data dict when details are available", async () => {
+    getDetailedTraceSpy.mockResolvedValue(sampleSpans);
+    fetchMultiSpanDetailsSpy.mockResolvedValue(
+      new Map([
+        [
+          "span-root-001",
+          {
+            itemId: "span-root-001",
+            timestamp: "2024-01-30T13:32:15Z",
+            attributes: [
+              { name: "http.url", type: "str", value: "https://example.com" },
+              { name: "span.op", type: "str", value: "http.server" },
+            ],
+            meta: {},
+            links: null,
+          },
+        ],
+      ])
+    );
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: true, web: false, spans: 100 },
+      "test-org/test-project",
+      "aaaa1111bbbb2222cccc3333dddd4444"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    // Root span should have a data dict with filtered attributes
+    const rootSpan = parsed.spans[0];
+    expect(rootSpan.data).toBeDefined();
+    // http.url should be included (not in REDUNDANT_DETAIL_ATTRS)
+    expect(rootSpan.data["http.url"]).toBe("https://example.com");
+    // span.op should be filtered out (in REDUNDANT_DETAIL_ATTRS)
+    expect(rootSpan.data["span.op"]).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// flattenSpanTree
+// ============================================================================
+
+describe("flattenSpanTree", () => {
+  test("returns empty array for empty input", () => {
+    expect(flattenSpanTree([])).toEqual([]);
+  });
+
+  test("returns single span for single root", () => {
+    const span: TraceSpan = {
+      span_id: "a",
+      start_timestamp: 1,
+    };
+    const result = flattenSpanTree([span]);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.span_id).toBe("a");
+  });
+
+  test("returns all spans in depth-first order", () => {
+    const tree: TraceSpan[] = [
+      {
+        span_id: "root",
+        start_timestamp: 1,
+        children: [
+          {
+            span_id: "child-1",
+            start_timestamp: 2,
+            children: [{ span_id: "grandchild-1", start_timestamp: 3 }],
+          },
+          { span_id: "child-2", start_timestamp: 4 },
+        ],
+      },
+    ];
+    const result = flattenSpanTree(tree);
+    const ids = result.map((s) => s.span_id);
+    expect(ids).toEqual(["root", "child-1", "grandchild-1", "child-2"]);
+  });
+
+  test("handles multiple roots", () => {
+    const tree: TraceSpan[] = [
+      { span_id: "root-1", start_timestamp: 1 },
+      { span_id: "root-2", start_timestamp: 2 },
+    ];
+    const result = flattenSpanTree(tree);
+    expect(result).toHaveLength(2);
+    expect(result[0]?.span_id).toBe("root-1");
+    expect(result[1]?.span_id).toBe("root-2");
+  });
+
+  test("handles spans with empty children array", () => {
+    const tree: TraceSpan[] = [
+      { span_id: "root", start_timestamp: 1, children: [] },
+    ];
+    const result = flattenSpanTree(tree);
+    expect(result).toHaveLength(1);
   });
 });

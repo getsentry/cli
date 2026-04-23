@@ -10,6 +10,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { array, constantFrom, assert as fcAssert, property } from "fast-check";
 import { DEFAULT_SENTRY_URL } from "../../src/lib/constants.js";
 import { setAuthToken } from "../../src/lib/db/auth.js";
+import {
+  cacheProjectsForOrg,
+  clearProjectCache,
+  getCachedProjectBySlug,
+} from "../../src/lib/db/project-cache.js";
 import { setOrgRegion } from "../../src/lib/db/regions.js";
 import { AuthError, ResolutionError } from "../../src/lib/errors.js";
 import {
@@ -20,6 +25,7 @@ import {
   resolveOrgAndProject,
   resolveOrgsForListing,
   toNumericId,
+  tryFuzzyProjectRecovery,
 } from "../../src/lib/resolve-target.js";
 import { mockFetch, useTestConfigDir } from "../helpers.js";
 
@@ -176,12 +182,25 @@ describe("toNumericId", () => {
 describe("Environment variable resolution (SENTRY_ORG / SENTRY_PROJECT)", () => {
   useTestConfigDir("test-resolve-target-");
 
+  // Silence unmocked fetch calls from resolution cascade fall-through.
+  // Tests that set valid env vars short-circuit before fetch; tests that
+  // fall through (empty/whitespace env vars) trigger DSN detection and
+  // directory inference which call the API. A silent 404 prevents preload
+  // warnings while preserving the catch-and-continue behavior.
+  let originalFetch: typeof globalThis.fetch;
+
   beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify({ detail: "Not found" }), { status: 404 })
+    );
     delete process.env.SENTRY_ORG;
     delete process.env.SENTRY_PROJECT;
   });
 
   afterEach(() => {
+    globalThis.fetch = originalFetch;
     delete process.env.SENTRY_ORG;
     delete process.env.SENTRY_PROJECT;
   });
@@ -438,11 +457,19 @@ describe("fetchProjectId", () => {
 
   test("rethrows AuthError when not authenticated", async () => {
     // No auth token set — refreshToken() will throw AuthError
+    const saved = process.env.SENTRY_AUTH_TOKEN;
+    delete process.env.SENTRY_AUTH_TOKEN;
     setOrgRegion("test-org", DEFAULT_SENTRY_URL);
 
-    expect(fetchProjectId("test-org", "test-project")).rejects.toThrow(
-      AuthError
-    );
+    try {
+      await expect(fetchProjectId("test-org", "test-project")).rejects.toThrow(
+        AuthError
+      );
+    } finally {
+      if (saved !== undefined) {
+        process.env.SENTRY_AUTH_TOKEN = saved;
+      }
+    }
   });
 
   test("returns undefined on transient server error", async () => {
@@ -457,5 +484,263 @@ describe("fetchProjectId", () => {
 
     const result = await fetchProjectId("test-org", "test-project");
     expect(result).toBeUndefined();
+  });
+
+  test("returns cached project ID without hitting the API", async () => {
+    await setAuthToken("test-token");
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    clearProjectCache();
+    // Seed the cache via cacheProjectsForOrg (the `list:` key path) as
+    // `listProjects()` does in production.
+    cacheProjectsForOrg("test-org", "Test Org", [
+      { id: "999", slug: "cached-project", name: "Cached Project" },
+    ]);
+
+    let apiCalled = false;
+    globalThis.fetch = mockFetch(async () => {
+      apiCalled = true;
+      return new Response("should not be called", { status: 500 });
+    });
+
+    const result = await fetchProjectId("test-org", "cached-project");
+    expect(result).toBe(999);
+    expect(apiCalled).toBe(false);
+  });
+
+  test("writes the response to the project cache on a cache miss", async () => {
+    await setAuthToken("test-token");
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    clearProjectCache();
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/api/0/projects/test-org/fresh-project/")) {
+        return Response.json({
+          id: "1234",
+          slug: "fresh-project",
+          name: "Fresh Project",
+          organization: {
+            id: "500",
+            slug: "test-org",
+            name: "Test Org",
+          },
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    });
+
+    await fetchProjectId("test-org", "fresh-project");
+
+    // After the call, the cache should be populated so a subsequent call
+    // skips the API entirely.
+    const cached = getCachedProjectBySlug("test-org", "fresh-project");
+    expect(cached).toBeDefined();
+    expect(cached?.projectId).toBe("1234");
+    expect(cached?.projectName).toBe("Fresh Project");
+  });
+
+  test("falls through to API when the cache has no projectId (legacy rows)", async () => {
+    await setAuthToken("test-token");
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    clearProjectCache();
+    // Seed a cache entry WITHOUT a projectId (mirrors pre-schema-v7 rows).
+    const { setCachedProject } = await import(
+      "../../src/lib/db/project-cache.js"
+    );
+    setCachedProject("org-id", "proj-id", {
+      orgSlug: "test-org",
+      orgName: "Test Org",
+      projectSlug: "legacy-project",
+      projectName: "Legacy",
+    });
+
+    let apiCalled = false;
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/api/0/projects/test-org/legacy-project/")) {
+        apiCalled = true;
+        return Response.json({ id: "777", slug: "legacy-project" });
+      }
+      return new Response("Not found", { status: 404 });
+    });
+
+    const result = await fetchProjectId("test-org", "legacy-project");
+    expect(result).toBe(777);
+    expect(apiCalled).toBe(true);
+  });
+});
+
+// ============================================================================
+// tryFuzzyProjectRecovery
+//
+// Tests the discriminated-result fuzzy recovery function. Mocks
+// globalThis.fetch to control which projects the API returns per org.
+// ============================================================================
+
+describe("tryFuzzyProjectRecovery", () => {
+  useTestConfigDir("test-fuzzy-recovery-");
+
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(async () => {
+    originalFetch = globalThis.fetch;
+    await setAuthToken("test-token");
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  /**
+   * Build a mock fetch that responds to list-projects endpoints.
+   *
+   * @param projectsByOrg - Map of org slug → list of project slugs
+   */
+  function mockListProjects(
+    projectsByOrg: Record<string, string[]>
+  ): typeof fetch {
+    return mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const url = req.url;
+      // Match /organizations/<org>/projects/
+      const orgMatch = url.match(/\/organizations\/([^/]+)\/projects/);
+      if (orgMatch) {
+        const org = orgMatch[1] as string;
+        const slugs = projectsByOrg[org];
+        if (slugs) {
+          const projects = slugs.map((slug, i) => ({
+            id: String(i + 1),
+            slug,
+            name: slug,
+          }));
+          return Response.json(projects);
+        }
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    });
+  }
+
+  test("returns 'match' when exactly one similar project exists", async () => {
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    globalThis.fetch = mockListProjects({
+      "test-org": ["app-frontend", "app-backend", "admin-panel"],
+    });
+
+    const result = await tryFuzzyProjectRecovery("app-front", [
+      { slug: "test-org" },
+    ]);
+    expect(result.kind).toBe("match");
+    if (result.kind === "match") {
+      expect(result.project).toBe("app-frontend");
+      expect(result.org).toBe("test-org");
+    }
+  });
+
+  test("returns 'suggestions' when multiple similar projects exist", async () => {
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    globalThis.fetch = mockListProjects({
+      "test-org": ["app-frontend", "app-backend", "app-worker"],
+    });
+
+    const result = await tryFuzzyProjectRecovery("app", [{ slug: "test-org" }]);
+    expect(result.kind).toBe("suggestions");
+    if (result.kind === "suggestions") {
+      expect(result.suggestions.length).toBeGreaterThan(0);
+      expect(result.suggestions[0]).toContain("test-org");
+    }
+  });
+
+  test("returns 'none' when no similar projects exist", async () => {
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    globalThis.fetch = mockListProjects({
+      "test-org": ["completely-different-name"],
+    });
+
+    const result = await tryFuzzyProjectRecovery("zzz-no-match-zzz", [
+      { slug: "test-org" },
+    ]);
+    expect(result.kind).toBe("none");
+  });
+
+  test("returns 'none' when all orgs fail to respond", async () => {
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify({ detail: "Error" }), { status: 500 })
+    );
+
+    const result = await tryFuzzyProjectRecovery("some-slug", [
+      { slug: "test-org" },
+    ]);
+    expect(result.kind).toBe("none");
+  });
+
+  test("returns 'none' with empty orgs list", async () => {
+    const result = await tryFuzzyProjectRecovery("anything", []);
+    expect(result.kind).toBe("none");
+  });
+
+  test("searches across multiple orgs", async () => {
+    setOrgRegion("org-alpha", DEFAULT_SENTRY_URL);
+    setOrgRegion("org-beta", DEFAULT_SENTRY_URL);
+    globalThis.fetch = mockListProjects({
+      "org-alpha": ["web-client", "api-server"],
+      "org-beta": ["mobile-app", "web-portal"],
+    });
+
+    const result = await tryFuzzyProjectRecovery("web-portal", [
+      { slug: "org-alpha" },
+      { slug: "org-beta" },
+    ]);
+    expect(result.kind).toBe("match");
+    if (result.kind === "match") {
+      expect(result.project).toBe("web-portal");
+      expect(result.org).toBe("org-beta");
+    }
+  });
+
+  test("deduplicates slugs across orgs for fuzzy matching", async () => {
+    setOrgRegion("org-one", DEFAULT_SENTRY_URL);
+    setOrgRegion("org-two", DEFAULT_SENTRY_URL);
+    // Same project slug in two orgs — should return suggestions, not crash
+    globalThis.fetch = mockListProjects({
+      "org-one": ["shared-service"],
+      "org-two": ["shared-service"],
+    });
+
+    const result = await tryFuzzyProjectRecovery("shared-servic", [
+      { slug: "org-one" },
+      { slug: "org-two" },
+    ]);
+    // Both orgs have the matching slug, so it returns suggestions (not a
+    // single match) since there are 2 org-qualified entries
+    expect(result.kind).toBe("suggestions");
+  });
+
+  test("gracefully handles partial org failures", async () => {
+    setOrgRegion("good-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("bad-org", DEFAULT_SENTRY_URL);
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const url = req.url;
+      if (url.includes("good-org")) {
+        return Response.json([
+          { id: "1", slug: "target-project", name: "target-project" },
+        ]);
+      }
+      // bad-org returns error
+      return new Response(JSON.stringify({ detail: "Error" }), { status: 500 });
+    });
+
+    const result = await tryFuzzyProjectRecovery("target-project", [
+      { slug: "good-org" },
+      { slug: "bad-org" },
+    ]);
+    expect(result.kind).toBe("match");
+    if (result.kind === "match") {
+      expect(result.project).toBe("target-project");
+      expect(result.org).toBe("good-org");
+    }
   });
 });

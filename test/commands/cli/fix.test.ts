@@ -3,7 +3,7 @@
  *
  * Output goes through the structured CommandOutput/OutputError path, which
  * renders via the `output` config (stdout). For failure paths, `OutputError`
- * triggers `process.exit()` — tests mock it to capture the exit code.
+ * is thrown — tests catch it and check the exitCode property.
  *
  * Tests run non-TTY so plain mode applies: markdown is parsed and ANSI
  * stripped. Headings render without `###`, underscores are unescaped,
@@ -11,15 +11,7 @@
  */
 
 import { Database } from "bun:sqlite";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { chmodSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fixCommand } from "../../../src/commands/cli/fix.js";
@@ -29,6 +21,7 @@ import {
   generatePreMigrationTableDDL,
   initSchema,
 } from "../../../src/lib/db/schema.js";
+import { OutputError } from "../../../src/lib/errors.js";
 import { useTestConfigDir } from "../../helpers.js";
 
 /**
@@ -78,23 +71,10 @@ function createDatabaseWithMissingTables(
 }
 
 /**
- * Thrown by the mock `process.exit()` to halt execution without actually
- * exiting the process. The `code` field captures the requested exit code.
- */
-class MockExitError extends Error {
-  code: number;
-  constructor(code: number) {
-    super(`process.exit(${code})`);
-    this.code = code;
-  }
-}
-
-/**
  * Create a mock Stricli context that captures stdout output.
  *
  * The `buildCommand` wrapper renders structured output to `context.stdout`.
- * For failure paths (OutputError), it calls `process.exit()` — the mock
- * intercepts this and throws MockExitError to halt execution.
+ * For failure paths, `OutputError` is thrown after data is rendered.
  */
 function createContext() {
   const stdoutChunks: string[] = [];
@@ -120,30 +100,24 @@ const getTestDir = useTestConfigDir("fix-test-");
 
 /**
  * Run the fix command with the given flags and return captured output.
- * Mocks `process.exit()` so OutputError paths don't terminate the test.
+ * Catches `OutputError` to extract the exit code (data is already rendered
+ * to stdout before the throw).
  */
 async function runFix(dryRun: boolean) {
   const { context, getOutput } = createContext();
 
   let exitCode = 0;
-  const originalExit = process.exit;
-  process.exit = ((code?: number) => {
-    exitCode = code ?? 0;
-    throw new MockExitError(code ?? 0);
-  }) as typeof process.exit;
 
   try {
     const func = await fixCommand.loader();
     await func.call(context, { "dry-run": dryRun, json: false });
     // Successful return — exitCode stays 0
   } catch (err) {
-    if (err instanceof MockExitError) {
-      exitCode = err.code;
+    if (err instanceof OutputError) {
+      exitCode = err.exitCode;
     } else {
       throw err;
     }
-  } finally {
-    process.exit = originalExit;
   }
 
   return {
@@ -491,25 +465,7 @@ describe("sentry cli fix", () => {
 describe("sentry cli fix — ownership detection", () => {
   const getOwnershipTestDir = useTestConfigDir("fix-ownership-test-");
 
-  let exitMock: { restore: () => void; exitCode: number };
-
-  beforeEach(() => {
-    const originalExit = process.exit;
-    const state = {
-      exitCode: 0,
-      restore: () => {
-        process.exit = originalExit;
-      },
-    };
-    process.exit = ((code?: number) => {
-      state.exitCode = code ?? 0;
-      throw new MockExitError(code ?? 0);
-    }) as typeof process.exit;
-    exitMock = state;
-  });
-
   afterEach(() => {
-    exitMock.restore();
     closeDatabase();
   });
 
@@ -521,13 +477,16 @@ describe("sentry cli fix — ownership detection", () => {
   async function runFixWithUid(dryRun: boolean, getuid: () => number) {
     const { context, getOutput } = createContext();
     const getuidSpy = spyOn(process, "getuid").mockImplementation(getuid);
-    exitMock.exitCode = 0;
+
+    let exitCode = 0;
 
     try {
       const func = await fixCommand.loader();
       await func.call(context, { "dry-run": dryRun, json: false });
     } catch (err) {
-      if (!(err instanceof MockExitError)) {
+      if (err instanceof OutputError) {
+        exitCode = err.exitCode;
+      } else {
         throw err;
       }
     } finally {
@@ -536,7 +495,7 @@ describe("sentry cli fix — ownership detection", () => {
 
     return {
       output: getOutput(),
-      exitCode: exitMock.exitCode,
+      exitCode,
     };
   }
 

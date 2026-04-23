@@ -1,23 +1,25 @@
 {
   "name": "sentry",
-  "version": "0.21.0-dev.0",
+  "version": "0.29.0-dev.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/getsentry/cli.git"
   },
+  "main": "./dist/index.cjs",
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@biomejs/biome": "2.3.8",
     "@clack/prompts": "^0.11.0",
     "@mastra/client-js": "^1.4.0",
-    "@sentry/api": "^0.54.0",
-    "@sentry/node-core": "10.44.0",
+    "@sentry/api": "^0.113.0",
+    "@sentry/node-core": "10.47.0",
     "@sentry/sqlish": "^1.0.0",
     "@stricli/auto-complete": "^1.2.4",
     "@stricli/core": "^1.2.4",
     "@types/bun": "latest",
     "@types/http-cache-semantics": "^4.2.0",
     "@types/node": "^22",
+    "@types/picomatch": "^4.0.3",
     "@types/qrcode-terminal": "^0.12.2",
     "@types/semver": "^7.7.1",
     "binpunch": "^1.0.0",
@@ -29,8 +31,8 @@
     "http-cache-semantics": "^4.2.0",
     "ignore": "^7.0.5",
     "marked": "^15",
-    "openai": "^6.22.0",
     "p-limit": "^7.2.0",
+    "peggy": "^5.1.0",
     "picomatch": "^4.0.3",
     "pretty-ms": "^9.3.0",
     "qrcode-terminal": "^0.12.0",
@@ -43,41 +45,62 @@
     "wrap-ansi": "^10.0.0",
     "zod": "^3.24.0"
   },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.cts",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.cjs"
+    }
+  },
   "bin": {
     "sentry": "./dist/bin.cjs"
   },
   "description": "Sentry CLI - A command-line interface for using Sentry built by robots and humans for robots and humans",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12"
   },
   "files": [
-    "dist/bin.cjs"
+    "dist/bin.cjs",
+    "dist/index.cjs",
+    "dist/index.d.cts"
   ],
   "license": "FSL-1.1-Apache-2.0",
   "packageManager": "bun@1.3.11",
   "patchedDependencies": {
     "@stricli/core@1.2.5": "patches/@stricli%2Fcore@1.2.5.patch",
-    "@sentry/core@10.44.0": "patches/@sentry%2Fcore@10.44.0.patch",
-    "@sentry/node-core@10.44.0": "patches/@sentry%2Fnode-core@10.44.0.patch"
+    "@sentry/node-core@10.47.0": "patches/@sentry%2Fnode-core@10.47.0.patch",
+    "@sentry/core@10.47.0": "patches/@sentry%2Fcore@10.47.0.patch"
   },
   "scripts": {
-    "dev": "bun run generate:schema && bun run src/bin.ts",
-    "build": "bun run generate:schema && bun run script/build.ts --single",
-    "build:all": "bun run generate:schema && bun run script/build.ts",
-    "bundle": "bun run generate:schema && bun run script/bundle.ts",
-    "typecheck": "tsc --noEmit",
+    "dev": "bun run generate:schema && bun run generate:docs && bun run generate:sdk && bun run src/bin.ts",
+    "build": "bun run generate:schema && bun run generate:docs && bun run generate:sdk && bun run script/build.ts --single",
+    "build:all": "bun run generate:schema && bun run generate:docs && bun run generate:sdk && bun run script/build.ts",
+    "bundle": "bun run generate:schema && bun run generate:docs && bun run generate:sdk && bun run script/bundle.ts",
+    "typecheck": "bun run generate:docs && bun run generate:sdk && tsc --noEmit",
     "lint": "bunx ultracite check",
     "lint:fix": "bunx ultracite fix",
     "test": "bun run test:unit && bun run test:isolated",
-    "test:unit": "bun test --timeout 15000 test/lib test/commands test/types --coverage --coverage-reporter=lcov",
-    "test:isolated": "bun test --timeout 15000 test/isolated",
-    "test:e2e": "bun test --timeout 15000 test/e2e",
+    "test:unit": "bun run generate:docs && bun run generate:sdk && bun test --timeout 15000 test/lib test/commands test/types --coverage --coverage-reporter=lcov",
+    "test:isolated": "bun run generate:docs && bun run generate:sdk && bun test --timeout 15000 test/isolated",
+    "test:e2e": "bun run generate:docs && bun run generate:sdk && bun test --timeout 15000 test/e2e",
     "test:init-eval": "bun test test/init-eval --timeout 600000 --concurrency 6",
+    "generate:parser": "bun run script/generate-parser.ts",
+    "generate:sdk": "bun run script/generate-sdk.ts",
     "generate:skill": "bun run script/generate-skill.ts",
+    "generate:docs": "bun run generate:parser && bun run generate:command-docs && bun run generate:skill && bun run generate:docs-sections",
+    "generate:docs-sections": "bun run script/generate-docs-sections.ts",
     "generate:schema": "bun run script/generate-api-schema.ts",
-    "check:skill": "bun run script/check-skill.ts",
+    "generate:command-docs": "bun run script/generate-command-docs.ts",
+    "eval:skill": "bun run script/eval-skill.ts",
+    "bench": "bun run script/bench.ts",
+    "bench:save": "bun run script/bench.ts --save-baseline",
+    "bench:compare": "bun run script/bench.ts --compare",
+    "bench:sweep": "bun run script/bench-sweep.ts",
+    "check:fragments": "bun run script/check-fragments.ts",
     "check:deps": "bun run script/check-no-deps.ts",
-    "check:errors": "bun run script/check-error-patterns.ts"
+    "check:errors": "bun run script/check-error-patterns.ts",
+    "check:docs-sections": "bun run script/generate-docs-sections.ts --check"
   },
-  "type": "module"
+  "type": "module",
+  "types": "./dist/index.d.cts"
 }

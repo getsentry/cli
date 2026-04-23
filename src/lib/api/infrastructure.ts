@@ -6,10 +6,12 @@
  * other modules in `src/lib/api/` import from.
  */
 
+import { parseSentryLinkHeader } from "@sentry/api";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
 import type { z } from "zod";
 
+import { getEnv } from "../env.js";
 import { ApiError, AuthError, stringifyUnknown } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
 import {
@@ -17,6 +19,19 @@ import {
   getDefaultSdkConfig,
   getSdkConfig,
 } from "../sentry-client.js";
+
+/**
+ * Parse Sentry's RFC 5988 Link response header to extract pagination cursors.
+ *
+ * Sentry Link header format:
+ * `<url>; rel="next"; results="true"; cursor="1735689600000:0:0"`
+ *
+ * Thin alias over `@sentry/api`'s `parseSentryLinkHeader` — the SDK ships the
+ * canonical parser. We keep the `parseLinkHeader` name because multiple call
+ * sites import it under that name from the `api-client` barrel and because
+ * `unwrapPaginatedResult` below needs a local binding.
+ */
+export const parseLinkHeader = parseSentryLinkHeader;
 
 /** Options for raw API requests to Sentry endpoints. */
 export type ApiRequestOptions<T = unknown> = {
@@ -56,6 +71,7 @@ export function throwApiError(
     error && typeof error === "object" && "detail" in error
       ? stringifyUnknown((error as { detail: unknown }).detail)
       : stringifyUnknown(error);
+
   throw new ApiError(
     `${context}: ${status} ${response.statusText ?? "Unknown"}`,
     status,
@@ -164,29 +180,6 @@ export async function getOrgSdkConfig(orgSlug: string) {
 }
 
 /**
- * Extract the value of a named attribute from a Link header segment.
- * Parses `key="value"` pairs using string operations instead of regex
- * for robustness and performance.
- *
- * @param segment - A single Link header segment (e.g., `<url>; rel="next"; cursor="abc"`)
- * @param attr - The attribute name to extract (e.g., "rel", "cursor")
- * @returns The attribute value, or undefined if not found
- */
-function extractLinkAttr(segment: string, attr: string): string | undefined {
-  const prefix = `${attr}="`;
-  const start = segment.indexOf(prefix);
-  if (start === -1) {
-    return;
-  }
-  const valueStart = start + prefix.length;
-  const end = segment.indexOf('"', valueStart);
-  if (end === -1) {
-    return;
-  }
-  return segment.slice(valueStart, end);
-}
-
-/**
  * Maximum number of pages to follow when auto-paginating.
  *
  * Safety limit to prevent runaway pagination when the API returns an unexpectedly
@@ -196,7 +189,7 @@ function extractLinkAttr(segment: string, attr: string): string | undefined {
  */
 export const MAX_PAGINATION_PAGES = Math.max(
   1,
-  Number(process.env.SENTRY_MAX_PAGINATION_PAGES) || 50
+  Number(getEnv().SENTRY_MAX_PAGINATION_PAGES) || 50
 );
 
 /**
@@ -224,36 +217,6 @@ export type PaginatedResponse<T> = {
   /** Cursor for fetching the next page (undefined if no more pages) */
   nextCursor?: string;
 };
-
-/**
- * Parse Sentry's RFC 5988 Link response header to extract pagination cursors.
- *
- * Sentry Link header format:
- * `<url>; rel="next"; results="true"; cursor="1735689600000:0:0"`
- *
- * @param header - Raw Link header string
- * @returns Parsed pagination info with next cursor if available
- */
-export function parseLinkHeader(header: string | null): {
-  nextCursor?: string;
-} {
-  if (!header) {
-    return {};
-  }
-
-  // Split on comma to get individual link entries
-  for (const part of header.split(",")) {
-    const rel = extractLinkAttr(part, "rel");
-    const results = extractLinkAttr(part, "results");
-    const cursor = extractLinkAttr(part, "cursor");
-
-    if (rel === "next" && results === "true" && cursor) {
-      return { nextCursor: cursor };
-    }
-  }
-
-  return {};
-}
 
 /**
  * Make an authenticated request to a specific Sentry region.
@@ -308,6 +271,21 @@ export async function apiRequestToRegion<T>(
       `API request failed: ${response.status} ${response.statusText}`,
       response.status,
       detail,
+      endpoint
+    );
+  }
+
+  // 204 No Content / 205 Reset Content have no body by spec — calling
+  // response.json() on them throws SyntaxError. Callers that expect a
+  // body on success receive a clear ApiError here instead of crashing
+  // downstream on `data.<field>`. Callers that expect 204 (e.g. the
+  // bulk mutate endpoint returns 204 when no IDs match) should catch
+  // this ApiError and handle it explicitly.
+  if (response.status === 204 || response.status === 205) {
+    throw new ApiError(
+      `API returned ${response.status} ${response.statusText} (no body)`,
+      response.status,
+      "The server returned no content — the request may have matched no records.",
       endpoint
     );
   }

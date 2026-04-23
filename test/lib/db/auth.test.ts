@@ -9,14 +9,22 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  ANON_IDENTITY,
+  clearAuth,
   getActiveEnvVarName,
   getAuthConfig,
   getAuthToken,
+  getIdentityFingerprint,
+  getRawEnvToken,
   isAuthenticated,
   isEnvTokenActive,
   refreshToken,
+  resetAuthRowCache,
+  resetAuthTokenCache,
+  resetIdentityFingerprintCache,
   setAuthToken,
 } from "../../../src/lib/db/auth.js";
+import { getDatabase } from "../../../src/lib/db/index.js";
 import { useTestConfigDir } from "../../helpers.js";
 
 useTestConfigDir("auth-env-");
@@ -29,6 +37,9 @@ beforeEach(() => {
   savedSentryToken = process.env.SENTRY_TOKEN;
   delete process.env.SENTRY_AUTH_TOKEN;
   delete process.env.SENTRY_TOKEN;
+  resetIdentityFingerprintCache();
+  resetAuthTokenCache();
+  resetAuthRowCache();
 });
 
 afterEach(() => {
@@ -114,12 +125,32 @@ describe("env var auth: getActiveEnvVarName", () => {
 });
 
 describe("env var auth: refreshToken edge cases", () => {
-  test("env token skips stored token entirely", async () => {
-    setAuthToken("stored_token", -1, "refresh_token");
+  test("env token used when no stored OAuth exists", async () => {
     process.env.SENTRY_AUTH_TOKEN = "env_token";
     const result = await refreshToken();
     expect(result.token).toBe("env_token");
     expect(result.refreshed).toBe(false);
+  });
+
+  test("stored OAuth preferred over env token", async () => {
+    setAuthToken("stored_token", 3600);
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    const result = await refreshToken();
+    expect(result.token).toBe("stored_token");
+    expect(result.refreshed).toBe(false);
+  });
+
+  test("SENTRY_FORCE_ENV_TOKEN overrides stored OAuth in refreshToken", async () => {
+    setAuthToken("stored_token", 3600);
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    try {
+      process.env.SENTRY_FORCE_ENV_TOKEN = "1";
+      const result = await refreshToken();
+      expect(result.token).toBe("env_token");
+      expect(result.refreshed).toBe(false);
+    } finally {
+      delete process.env.SENTRY_FORCE_ENV_TOKEN;
+    }
   });
 
   test("has no expiresAt or expiresIn for env tokens", async () => {
@@ -127,5 +158,259 @@ describe("env var auth: refreshToken edge cases", () => {
     const result = await refreshToken();
     expect(result.expiresAt).toBeUndefined();
     expect(result.expiresIn).toBeUndefined();
+  });
+});
+
+describe("env var auth: getRawEnvToken", () => {
+  test("returns SENTRY_TOKEN when SENTRY_AUTH_TOKEN is unset", () => {
+    process.env.SENTRY_TOKEN = "fallback_token";
+    expect(getRawEnvToken()).toBe("fallback_token");
+  });
+
+  test("returns undefined when no env var is set", () => {
+    expect(getRawEnvToken()).toBeUndefined();
+  });
+});
+
+describe("OAuth-preferred auth (#646)", () => {
+  test("getAuthConfig prefers stored OAuth over env token", () => {
+    setAuthToken("stored_oauth", 3600);
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    const config = getAuthConfig();
+    expect(config?.source).toBe("oauth");
+    expect(config?.token).toBe("stored_oauth");
+  });
+
+  test("getAuthConfig falls back to env token when no stored OAuth", () => {
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    const config = getAuthConfig();
+    expect(config?.source).toBe("env:SENTRY_AUTH_TOKEN");
+    expect(config?.token).toBe("env_token");
+  });
+
+  test("getAuthToken skips expired stored token and falls to env", () => {
+    setAuthToken("expired_token", -1);
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    expect(getAuthToken()).toBe("env_token");
+  });
+
+  test("SENTRY_FORCE_ENV_TOKEN makes getAuthConfig prefer env token", () => {
+    setAuthToken("stored_oauth", 3600);
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    try {
+      process.env.SENTRY_FORCE_ENV_TOKEN = "1";
+      const config = getAuthConfig();
+      expect(config?.source).toBe("env:SENTRY_AUTH_TOKEN");
+      expect(config?.token).toBe("env_token");
+    } finally {
+      delete process.env.SENTRY_FORCE_ENV_TOKEN;
+    }
+  });
+});
+
+describe("clearAuth: integration with per-account caches", () => {
+  test("clearAuth drops issue_org_cache entries (prevents cross-account leakage)", async () => {
+    const { setCachedIssueOrg, getCachedIssueOrg } = await import(
+      "../../../src/lib/db/issue-org-cache.js"
+    );
+
+    // Seed a mapping as if a previous session resolved this issue.
+    await setAuthToken("test-token");
+    setCachedIssueOrg("12345", "previous-account-org");
+    expect(getCachedIssueOrg("12345")).toBe("previous-account-org");
+
+    await clearAuth();
+
+    // Mapping must be gone — otherwise the next account would leak into
+    // their `issue view` fallback routing.
+    expect(getCachedIssueOrg("12345")).toBeUndefined();
+  });
+});
+
+describe("getIdentityFingerprint", () => {
+  test("returns the anonymous fingerprint when no token is present", () => {
+    expect(getIdentityFingerprint()).toBe(ANON_IDENTITY);
+  });
+
+  test("returns a stable 16-char hex fingerprint for a given env token", () => {
+    process.env.SENTRY_AUTH_TOKEN = "sntrys_alice";
+    const fp1 = getIdentityFingerprint();
+    const fp2 = getIdentityFingerprint();
+    expect(fp1).toMatch(/^[0-9a-f]{16}$/);
+    expect(fp1).toBe(fp2);
+  });
+
+  test("different env tokens produce different fingerprints", () => {
+    process.env.SENTRY_AUTH_TOKEN = "sntrys_alice";
+    const aliceFp = getIdentityFingerprint();
+    process.env.SENTRY_AUTH_TOKEN = "sntrys_bob";
+    resetIdentityFingerprintCache();
+    const bobFp = getIdentityFingerprint();
+    expect(aliceFp).not.toBe(bobFp);
+  });
+
+  test("SENTRY_AUTH_TOKEN and SENTRY_TOKEN produce the same fingerprint", () => {
+    // Same secret value → same fingerprint regardless of which env var
+    // holds it (the variable name is not part of the identity).
+    process.env.SENTRY_AUTH_TOKEN = "same_token";
+    const authFp = getIdentityFingerprint();
+    delete process.env.SENTRY_AUTH_TOKEN;
+    process.env.SENTRY_TOKEN = "same_token";
+    resetIdentityFingerprintCache();
+    const legacyFp = getIdentityFingerprint();
+    expect(authFp).toBe(legacyFp);
+  });
+
+  test("OAuth refresh token is the identity root (stable across access-token rotation)", () => {
+    // Simulate two consecutive access tokens backed by the same refresh
+    // token — an hourly OAuth refresh must not churn the cache.
+    setAuthToken("access_token_1", 3600, "shared_refresh");
+    const fp1 = getIdentityFingerprint();
+    setAuthToken("access_token_2", 3600, "shared_refresh");
+    const fp2 = getIdentityFingerprint();
+    expect(fp1).toBe(fp2);
+  });
+
+  test("different OAuth refresh tokens produce different fingerprints", () => {
+    setAuthToken("access_token", 3600, "refresh_alice");
+    const aliceFp = getIdentityFingerprint();
+    setAuthToken("access_token", 3600, "refresh_bob");
+    const bobFp = getIdentityFingerprint();
+    expect(aliceFp).not.toBe(bobFp);
+  });
+
+  test("SENTRY_FORCE_ENV_TOKEN switches the fingerprint source to the env token", () => {
+    setAuthToken("stored_oauth", 3600, "stored_refresh");
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    const storedFp = getIdentityFingerprint();
+    try {
+      process.env.SENTRY_FORCE_ENV_TOKEN = "1";
+      resetIdentityFingerprintCache();
+      const envFp = getIdentityFingerprint();
+      expect(envFp).not.toBe(storedFp);
+    } finally {
+      delete process.env.SENTRY_FORCE_ENV_TOKEN;
+    }
+  });
+
+  test("env and OAuth fingerprints with the same secret value are distinct", () => {
+    // The `kind` prefix in hashIdentity keeps env/oauth namespaces
+    // distinct even when secrets happen to collide.
+    process.env.SENTRY_AUTH_TOKEN = "shared_secret";
+    const envFp = getIdentityFingerprint();
+    delete process.env.SENTRY_AUTH_TOKEN;
+    setAuthToken("shared_secret", 3600, "shared_secret");
+    const oauthFp = getIdentityFingerprint();
+    expect(envFp).not.toBe(oauthFp);
+  });
+
+  test("expired access-only OAuth token falls through to env token", () => {
+    // Mirrors getAuthConfig: an expired access token with no
+    // refresh_token is unusable — the API client sends the env token,
+    // so the fingerprint must match.
+    setAuthToken("expired_access", -1);
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    resetIdentityFingerprintCache();
+    const fp = getIdentityFingerprint();
+
+    // With no DB row, same env token should produce the same fingerprint.
+    setAuthToken("", -1);
+    resetIdentityFingerprintCache();
+    expect(getIdentityFingerprint()).toBe(fp);
+  });
+
+  test("expired access-only OAuth token with refresh_token uses the refresh token", () => {
+    // An expired access token + refresh_token is still usable; the
+    // fingerprint keys off the stable refresh_token.
+    setAuthToken("expired_access", -1, "live_refresh");
+    const fp = getIdentityFingerprint();
+    setAuthToken("fresh_access", 3600, "live_refresh");
+    expect(getIdentityFingerprint()).toBe(fp);
+  });
+});
+
+describe("getAuthToken memoization", () => {
+  test("returns cached value on repeated calls without re-reading the DB", () => {
+    setAuthToken("stored_token");
+    const first = getAuthToken();
+    expect(first).toBe("stored_token");
+
+    // Mutate the DB row directly behind getAuthToken's back — a cached
+    // read must not reflect this change until the cache is invalidated.
+    getDatabase().query("UPDATE auth SET token = 'mutated' WHERE id = 1").run();
+
+    // Still returns the cached value
+    expect(getAuthToken()).toBe("stored_token");
+
+    // After reset, the new value is read
+    resetAuthTokenCache();
+    expect(getAuthToken()).toBe("mutated");
+  });
+
+  test("caches the logged-out state (undefined) without re-reading", () => {
+    expect(getAuthToken()).toBeUndefined();
+
+    // Write a token directly to DB, bypassing setAuthToken. The cached
+    // undefined must persist until invalidated.
+    getDatabase()
+      .query("INSERT INTO auth (id, token, updated_at) VALUES (1, 'sneaky', ?)")
+      .run(Date.now());
+
+    expect(getAuthToken()).toBeUndefined();
+
+    resetAuthTokenCache();
+    expect(getAuthToken()).toBe("sneaky");
+  });
+
+  test("setAuthToken invalidates the cache", () => {
+    setAuthToken("token_a");
+    expect(getAuthToken()).toBe("token_a");
+
+    setAuthToken("token_b");
+    // No manual reset — setAuthToken must have invalidated the cache
+    expect(getAuthToken()).toBe("token_b");
+  });
+
+  test("clearAuth invalidates the cache", async () => {
+    setAuthToken("token_to_clear");
+    expect(getAuthToken()).toBe("token_to_clear");
+
+    await clearAuth();
+    expect(getAuthToken()).toBeUndefined();
+  });
+
+  test("env-var change requires manual cache reset (documented contract)", () => {
+    expect(getAuthToken()).toBeUndefined();
+
+    // Env mutation without reset: cache stays stale (by design).
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    expect(getAuthToken()).toBeUndefined();
+
+    resetAuthTokenCache();
+    expect(getAuthToken()).toBe("env_token");
+  });
+});
+
+describe("refreshToken row-read memoization", () => {
+  test("setAuthToken between refreshToken calls is reflected", async () => {
+    // refreshToken reads the full row; invalidation must propagate so the
+    // second call sees the freshly stored token.
+    setAuthToken("first_token", 3600, "refresh_1");
+    const r1 = await refreshToken();
+    expect(r1.token).toBe("first_token");
+
+    setAuthToken("second_token", 3600, "refresh_2");
+    const r2 = await refreshToken();
+    expect(r2.token).toBe("second_token");
+  });
+
+  test("clearAuth invalidates the row cache", async () => {
+    setAuthToken("will_be_cleared", 3600, "refresh_x");
+    const r1 = await refreshToken();
+    expect(r1.token).toBe("will_be_cleared");
+
+    await clearAuth();
+    // With nothing stored and no env var, refreshToken throws not_authenticated
+    await expect(refreshToken()).rejects.toThrow();
   });
 });

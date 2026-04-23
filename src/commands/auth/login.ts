@@ -9,6 +9,7 @@ import { buildCommand, numberParser } from "../../lib/command.js";
 import {
   clearAuth,
   getActiveEnvVarName,
+  hasStoredAuthCredentials,
   isAuthenticated,
   isEnvTokenActive,
   setAuthToken,
@@ -71,11 +72,15 @@ type LoginFlags = {
 async function handleExistingAuth(force: boolean): Promise<boolean> {
   if (isEnvTokenActive()) {
     const envVar = getActiveEnvVarName();
-    log.info(
-      `Authentication is provided via ${envVar} environment variable. ` +
-        `Unset ${envVar} to use OAuth-based login instead.`
+    log.warn(
+      `${envVar} is set in your environment (likely from build tooling).\n` +
+        "  OAuth credentials will be stored separately and used for CLI commands."
     );
-    return false;
+    // If no stored OAuth token exists, proceed directly to login
+    if (!hasStoredAuthCredentials()) {
+      return true;
+    }
+    // Fall through to the re-auth confirmation logic below
   }
 
   if (!force) {
@@ -107,6 +112,7 @@ async function handleExistingAuth(force: boolean): Promise<boolean> {
 }
 
 export const loginCommand = buildCommand({
+  auth: false,
   docs: {
     brief: "Authenticate with Sentry",
     fullDescription:
@@ -126,7 +132,7 @@ export const loginCommand = buildCommand({
         kind: "parsed",
         parse: numberParser,
         brief: "Timeout for OAuth flow in seconds (default: 900)",
-        // Stricli requires string defaults (raw CLI input); numberParser converts to number
+        // Stricli passes string defaults through parse(); numberParser converts to number
         default: "900",
       },
       force: {

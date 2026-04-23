@@ -217,12 +217,48 @@ describe("formatDuration", () => {
     expect(formatDuration(30)).toBe("0 minutes");
   });
 
-  test("property: duration formatting is consistent", async () => {
+  test("formats singular day", () => {
+    expect(formatDuration(86_400)).toBe("1 day");
+  });
+
+  test("formats plural days", () => {
+    expect(formatDuration(3 * 86_400)).toBe("3 days");
+  });
+
+  test("formats days and hours combined", () => {
+    expect(formatDuration(86_400 + 4 * 3600)).toBe("1 day and 4 hours");
+  });
+
+  test("formats days and singular hour", () => {
+    expect(formatDuration(2 * 86_400 + 3600)).toBe("2 days and 1 hour");
+  });
+
+  test("formats singular week", () => {
+    expect(formatDuration(7 * 86_400)).toBe("1 week");
+  });
+
+  test("formats plural weeks", () => {
+    expect(formatDuration(14 * 86_400)).toBe("2 weeks");
+  });
+
+  test("formats weeks and days combined", () => {
+    expect(formatDuration(25 * 86_400)).toBe("3 weeks and 4 days");
+  });
+
+  test("formats weeks and singular day", () => {
+    expect(formatDuration(8 * 86_400)).toBe("1 week and 1 day");
+  });
+
+  test("formats ~580 hours as days", () => {
+    // 580 hours = 24 days and 4 hours → 3 weeks and 3 days
+    expect(formatDuration(580 * 3600)).toBe("3 weeks and 3 days");
+  });
+
+  test("property: duration formatting always contains a time unit", async () => {
     await fcAssert(
-      property(nat({ max: 86_400 }), (seconds) => {
+      property(nat({ max: 86_400 * 60 }), (seconds) => {
         const result = formatDuration(seconds);
-        // Result should always contain "minute" or "hour"
-        expect(result).toMatch(/minute|hour/);
+        expect(result).toMatch(/minute|hour|day|week/);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );

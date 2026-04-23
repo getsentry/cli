@@ -9,19 +9,22 @@
  */
 
 import { DEFAULT_SENTRY_HOST } from "./constants.js";
+import { getEnv } from "./env.js";
 import { isSentrySaasUrl } from "./sentry-urls.js";
 
 /**
  * Components extracted from a Sentry web URL.
  *
- * All fields except `baseUrl` and `org` are optional — presence depends
- * on which URL pattern was matched.
+ * `baseUrl` is always present. `org` is present for most URL patterns but
+ * absent for share URLs on bare domains (e.g., `sentry.io/share/issue/...`).
+ * All other fields are optional — presence depends on which URL pattern
+ * was matched.
  */
 export type ParsedSentryUrl = {
   /** Scheme + host of the Sentry instance (e.g., "https://sentry.io" or "https://sentry.example.com") */
   baseUrl: string;
-  /** Organization slug from the URL path or subdomain */
-  org: string;
+  /** Organization slug from the URL path or subdomain (absent for share URLs without org context) */
+  org?: string;
   /** Issue identifier — numeric group ID (e.g., "32886") or short ID (e.g., "CLI-G") */
   issueId?: string;
   /** Event ID from /issues/{id}/events/{eventId}/ paths */
@@ -30,6 +33,8 @@ export type ParsedSentryUrl = {
   project?: string;
   /** Trace ID from /organizations/{org}/traces/{traceId}/ paths */
   traceId?: string;
+  /** Share ID from /share/issue/{shareId}/ paths (32-char hex string) */
+  shareId?: string;
 };
 
 /**
@@ -128,12 +133,36 @@ function matchSubdomainOrg(
     return { baseUrl, org, project: segments[2] };
   }
 
+  // /share/issue/{shareId}/ — share URL with org from subdomain
+  if (segments[0] === "share" && segments[1] === "issue" && segments[2]) {
+    return { baseUrl, org, shareId: segments[2] };
+  }
+
   // Bare org subdomain URL
   if (segments.length === 0) {
     return { baseUrl, org };
   }
 
   return null;
+}
+
+/**
+ * Try to match /share/issue/{shareId}/ path pattern.
+ *
+ * Catches share URLs on non-subdomain hosts (bare `sentry.io`, self-hosted).
+ * Subdomain share URLs (e.g., `gibush-kq.sentry.io/share/issue/...`) are
+ * handled by {@link matchSubdomainOrg} which extracts the org from the subdomain.
+ *
+ * @returns Parsed result or null if pattern doesn't match
+ */
+function matchSharePath(
+  baseUrl: string,
+  segments: string[]
+): ParsedSentryUrl | null {
+  if (segments[0] !== "share" || segments[1] !== "issue" || !segments[2]) {
+    return null;
+  }
+  return { baseUrl, shareId: segments[2] };
 }
 
 /**
@@ -145,11 +174,13 @@ function matchSubdomainOrg(
  * - `/settings/{org}/projects/{project}/`
  * - `/organizations/{org}/traces/{traceId}/`
  * - `/organizations/{org}/`
+ * - `/share/issue/{shareId}/`
  *
  * Also recognizes SaaS subdomain-style URLs:
  * - `https://{org}.sentry.io/issues/{id}/`
  * - `https://{org}.sentry.io/traces/{traceId}/`
  * - `https://{org}.sentry.io/issues/{id}/events/{eventId}/`
+ * - `https://{org}.sentry.io/share/issue/{shareId}/`
  *
  * @param input - Raw string that may or may not be a URL
  * @returns Parsed components, or null if input is not a recognized Sentry URL
@@ -173,7 +204,8 @@ export function parseSentryUrl(input: string): ParsedSentryUrl | null {
   return (
     matchOrganizationsPath(baseUrl, segments) ??
     matchSettingsPath(baseUrl, segments) ??
-    matchSubdomainOrg(baseUrl, url.hostname, segments)
+    matchSubdomainOrg(baseUrl, url.hostname, segments) ??
+    matchSharePath(baseUrl, segments)
   );
 }
 
@@ -189,15 +221,16 @@ export function parseSentryUrl(input: string): ParsedSentryUrl | null {
  * @param baseUrl - The scheme + host extracted from the URL (e.g., "https://sentry.example.com")
  */
 export function applySentryUrlContext(baseUrl: string): void {
+  const env = getEnv();
   if (isSentrySaasUrl(baseUrl)) {
     // Clear any self-hosted URL so API calls fall back to default SaaS routing.
     // Without this, a stale SENTRY_HOST/SENTRY_URL would route SaaS requests to the wrong host.
-    // biome-ignore lint/performance/noDelete: process.env requires delete to truly unset; assignment coerces to string in Node.js
-    delete process.env.SENTRY_HOST;
-    // biome-ignore lint/performance/noDelete: process.env requires delete to truly unset; assignment coerces to string in Node.js
-    delete process.env.SENTRY_URL;
+    // biome-ignore lint/performance/noDelete: env registry requires delete to truly unset; assignment coerces to string in Node.js
+    delete env.SENTRY_HOST;
+    // biome-ignore lint/performance/noDelete: env registry requires delete to truly unset; assignment coerces to string in Node.js
+    delete env.SENTRY_URL;
     return;
   }
-  process.env.SENTRY_HOST = baseUrl;
-  process.env.SENTRY_URL = baseUrl;
+  env.SENTRY_HOST = baseUrl;
+  env.SENTRY_URL = baseUrl;
 }

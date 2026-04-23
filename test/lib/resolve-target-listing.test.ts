@@ -129,6 +129,8 @@ describe("resolveOrgProjectTarget", () => {
       resolveTargetModule,
       "resolveOrgAndProject"
     );
+    // Pre-populate org region cache so resolveEffectiveOrg doesn't fetch
+    setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {

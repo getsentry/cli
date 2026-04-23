@@ -1,14 +1,31 @@
 name: Docs Preview
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'src/**'
+      - 'script/generate-command-docs.ts'
+      - 'script/generate-skill.ts'
+      - 'install'
+      - '.github/workflows/docs-preview.yml'
   pull_request:
     paths:
       - 'docs/**'
+      - 'src/**'
+      - 'script/generate-command-docs.ts'
+      - 'script/generate-skill.ts'
+      - 'install'
       - '.github/workflows/docs-preview.yml'
 
 permissions:
   contents: write
   pull-requests: write
+
+concurrency:
+  group: docs-preview-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   preview:
@@ -18,16 +35,62 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
 
+      # Astro 6 requires Node >= 22.12. Pin an explicit version so the docs
+      # build doesn't rely on whatever ships on the runner image.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - uses: actions/cache@v5
+        id: cache
+        with:
+          path: node_modules
+          key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
+
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Get CLI version
+        id: version
+        run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+
+      - name: Generate docs content
+        run: bun run generate:schema && bun run generate:docs
+
       - name: Build Docs for Preview
         working-directory: docs
         env:
-          # Override base path for PR preview (no /cli prefix since preview domain is different)
-          DOCS_BASE_PATH: /pr-preview/pr-${{ github.event.pull_request.number }}
+          DOCS_BASE_PATH: ${{ github.event_name == 'push'
+            && '/_preview/pr-main'
+            || format('/_preview/pr-{0}', github.event.pull_request.number) }}
+          PUBLIC_SENTRY_ENVIRONMENT: staging
+          SENTRY_RELEASE: ${{ steps.version.outputs.version }}
+          PUBLIC_SENTRY_RELEASE: ${{ steps.version.outputs.version }}
         run: |
           bun install --frozen-lockfile
           bun run build
 
+      - name: Inject debug IDs and upload sourcemaps
+        if: env.SENTRY_AUTH_TOKEN != ''
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: sentry
+          SENTRY_PROJECT: cli-website
+        run: |
+          bun run --bun src/bin.ts sourcemap inject docs/dist/
+          bun run --bun src/bin.ts sourcemap upload docs/dist/ \
+            --release "${{ steps.version.outputs.version }}" \
+            --url-prefix "~/"
+
+      # Remove .map files — uploaded to Sentry but shouldn't be deployed.
+      - name: Remove sourcemaps from output
+        run: find docs/dist -name '*.map' -delete
+
       - name: Ensure .nojekyll at gh-pages root
+        # Fork PRs can't push to the base repo (GITHUB_TOKEN is read-only on
+        # pull_request from forks). Skip the deploy but still run the build
+        # above so docs compilation errors surface.
+        if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -59,10 +122,14 @@ jobs:
           fi
 
       - name: Deploy Preview
+        # Same fork-PR guard as the .nojekyll step above.
+        if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
         uses: rossjrw/pr-preview-action@v1
         with:
           source-dir: docs/dist/
           preview-branch: gh-pages
-          umbrella-dir: pr-preview
+          umbrella-dir: _preview
           pages-base-url: cli.sentry.dev
-          action: auto
+          action: ${{ github.event_name == 'push' && 'deploy' || 'auto' }}
+          pr-number: ${{ github.event_name == 'push' && 'main' || github.event.pull_request.number }}
+          comment: ${{ github.event_name != 'push' }}

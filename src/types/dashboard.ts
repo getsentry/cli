@@ -26,7 +26,6 @@ import { logger } from "../lib/logger.js";
 export const WIDGET_TYPES = [
   "discover",
   "issue",
-  "metrics",
   "error-events",
   "transaction-like",
   "spans",
@@ -300,101 +299,6 @@ export const DiscoverAggregateFunctionSchema = z.enum(
 );
 
 /**
- * Valid display types per widget dataset.
- *
- * Source: sentry/static/app/views/dashboards/datasetConfig/ @ a42668e87cc8a0b7410ac2acecee6074c52f376f
- * Each entry mirrors `supportedDisplayTypes` from the corresponding config:
- *
- *   issues.tsx         https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/issues.tsx#L90-L95
- *   spans.tsx          https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/spans.tsx#L287-L297
- *   errors.tsx         https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/errors.tsx#L115-L123
- *   transactions.tsx   https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/transactions.tsx#L76-L84
- *   releases.tsx       https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/releases.tsx#L90-L98
- *   logs.tsx           https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/logs.tsx#L201-L209
- *   traceMetrics.tsx   https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/traceMetrics.tsx#L285-L291
- *   mobileAppSize.tsx  https://github.com/getsentry/sentry/blob/a42668e87cc8a0b7410ac2acecee6074c52f376f/static/app/views/dashboards/datasetConfig/mobileAppSize.tsx#L255
- *
- * stacked_area is included for datasets that support timeseries (not in Sentry's UI picker
- * but accepted by the API and handled by the CLI's query engine).
- * details and server_tree are spans-only internal display types.
- *
- * Four display types are intentionally absent from this map — they bypass Sentry's standard
- * dataset query system and carry no dataset constraints:
- *   text                 — renders markdown; no dataset or query involved; user-editable
- *   wheel                — Web Vitals ring chart; prebuilt dashboards only, not user-editable
- *   rage_and_dead_clicks — rage/dead click viz; prebuilt only, fetches its own data
- *   agents_traces_table  — AI agent traces; prebuilt only, fetches its own data
- * Source: static/app/views/dashboards/utils.tsx (widgetFetchesOwnData / isWidgetEditable)
- */
-export const DATASET_SUPPORTED_DISPLAY_TYPES = {
-  issue: ["table", "area", "line", "bar"],
-  spans: [
-    "area",
-    "bar",
-    "big_number",
-    "categorical_bar",
-    "line",
-    "stacked_area",
-    "table",
-    "top_n",
-    "details",
-    "server_tree",
-  ],
-  "error-events": [
-    "area",
-    "bar",
-    "big_number",
-    "categorical_bar",
-    "line",
-    "stacked_area",
-    "table",
-    "top_n",
-  ],
-  "transaction-like": [
-    "area",
-    "bar",
-    "big_number",
-    "categorical_bar",
-    "line",
-    "stacked_area",
-    "table",
-    "top_n",
-  ],
-  metrics: [
-    "area",
-    "bar",
-    "big_number",
-    "categorical_bar",
-    "line",
-    "stacked_area",
-    "table",
-    "top_n",
-  ],
-  logs: [
-    "area",
-    "bar",
-    "big_number",
-    "categorical_bar",
-    "line",
-    "stacked_area",
-    "table",
-    "top_n",
-  ],
-  discover: [
-    "area",
-    "bar",
-    "big_number",
-    "categorical_bar",
-    "line",
-    "stacked_area",
-    "table",
-    "top_n",
-  ],
-  tracemetrics: ["area", "bar", "big_number", "categorical_bar", "line"],
-  "preprod-app-size": ["line"],
-} as const satisfies Record<WidgetType, readonly string[]>;
-
-/**
  * Valid `is:` filter values for issue search conditions (--where flag).
  * Only valid when widgetType is "issue". Other datasets don't support `is:`.
  *
@@ -479,8 +383,27 @@ function extractFunctionName(aggregate: string): string {
 }
 
 /**
+ * Check whether a parsed aggregate uses the tracemetrics comma-separated format.
+ * Format: `aggregation(value,metric_name,metric_type,unit)`
+ * Example: `p50(value,completion.duration_ms,distribution,none)`
+ */
+function isTracemetricsAggregate(aggregate: string): boolean {
+  const parenIdx = aggregate.indexOf("(");
+  if (parenIdx < 0) {
+    return false;
+  }
+  const inner = aggregate.slice(parenIdx + 1, -1);
+  return inner.startsWith("value,") && inner.split(",").length === 4;
+}
+
+/**
  * Validate that all aggregate function names in a list are known.
  * Throws a ValidationError listing valid functions if any are invalid.
+ *
+ * For the `tracemetrics` dataset, aggregates must use the comma-separated
+ * format: `aggregation(value,metric_name,metric_type,unit)`. Standard
+ * span-style aggregates like `count()` or `p50(span.duration)` are
+ * invalid for tracemetrics.
  *
  * @param aggregates - Parsed aggregate strings (e.g. ["count()", "p95(span.duration)"])
  * @param dataset - Widget dataset, determines which function list to validate against
@@ -489,6 +412,27 @@ export function validateAggregateNames(
   aggregates: string[],
   dataset?: string
 ): void {
+  // tracemetrics uses a different aggregate format — validate structure, not function names
+  if (dataset === "tracemetrics") {
+    for (const agg of aggregates) {
+      if (!isTracemetricsAggregate(agg)) {
+        throw new ValidationError(
+          `Invalid tracemetrics aggregate "${agg}".\n\n` +
+            "tracemetrics queries must use the format: aggregation(value,metric_name,metric_type,unit)\n" +
+            "Example: p50(value,completion.duration_ms,distribution,none)\n\n" +
+            "Parameters:\n" +
+            "  - aggregation: avg, sum, count, p50, p75, p90, p95, p99, min, max\n" +
+            `  - value: literal string "value"\n` +
+            "  - metric_name: the name passed to Sentry.metrics.distribution/gauge/count\n" +
+            "  - metric_type: distribution, gauge, counter, set\n" +
+            "  - unit: none, byte, second, millisecond, etc. (must match SDK emission)",
+          "query"
+        );
+      }
+    }
+    return;
+  }
+
   const validFunctions: readonly string[] =
     dataset === "discover" || dataset === "error-events"
       ? DISCOVER_AGGREGATE_FUNCTIONS
@@ -578,7 +522,17 @@ export function prepareWidgetQueries(
 // ---------------------------------------------------------------------------
 
 /** Sentry dashboard grid column count */
-const GRID_COLUMNS = 6;
+export const GRID_COLUMNS = 6;
+
+/**
+ * Controls how the auto-placer positions new widgets in the grid.
+ *
+ * - `sequential` — Cursor-based append: place after the last widget,
+ *   wrap to a new row on overflow. Never backfills interior gaps.
+ * - `dense` — First-fit packing: scan top-to-bottom, left-to-right
+ *   and place in the first available gap. Produces compact layouts.
+ */
+export type WidgetLayoutMode = "sequential" | "dense";
 
 /** Default widget dimensions by displayType */
 const DEFAULT_WIDGET_SIZE: Partial<
@@ -591,6 +545,17 @@ const DEFAULT_WIDGET_SIZE: Partial<
   table: { w: 6, h: 2, minH: 2 },
 };
 const FALLBACK_SIZE = { w: 3, h: 2, minH: 2 };
+
+/**
+ * Fallback layout for widgets without an existing layout.
+ * Used when merging explicit layout flags over a widget that has no layout set.
+ * Position defaults to origin (0,0) with standard 3×2 dimensions.
+ */
+export const FALLBACK_LAYOUT: DashboardWidgetLayout = {
+  x: 0,
+  y: 0,
+  ...FALLBACK_SIZE,
+};
 
 /** Build a set of occupied grid cells and the max bottom edge from existing layouts. */
 function buildOccupiedGrid(widgets: DashboardWidget[]): {
@@ -631,39 +596,187 @@ function regionFits(
   return true;
 }
 
+/** Grid state computed from existing widget layouts */
+type OccupiedGrid = { occupied: Set<string>; maxY: number };
+
+/** Widget dimensions resolved from displayType */
+type WidgetSize = { w: number; h: number; minH: number };
+
+/**
+ * Dense (first-fit) placement: scan the grid top-to-bottom, left-to-right
+ * and place the widget in the first gap where it fits.
+ */
+function assignLayoutDense(
+  widget: DashboardWidget,
+  size: WidgetSize,
+  grid: OccupiedGrid
+): DashboardWidget {
+  const { w, h, minH } = size;
+  for (let y = 0; y <= grid.maxY; y++) {
+    for (let x = 0; x <= GRID_COLUMNS - w; x++) {
+      if (regionFits(grid.occupied, { px: x, py: y, w, h })) {
+        return { ...widget, layout: { x, y, w, h, minH } };
+      }
+    }
+  }
+  return { ...widget, layout: { x: 0, y: grid.maxY, w, h, minH } };
+}
+
+/**
+ * Find the layout of the last widget in the array that has one.
+ * Reverse-scans because the API preserves insertion order.
+ */
+function findLastLayout(
+  widgets: DashboardWidget[]
+): DashboardWidgetLayout | undefined {
+  for (let i = widgets.length - 1; i >= 0; i--) {
+    const layout = widgets[i]?.layout;
+    if (layout) {
+      return layout;
+    }
+  }
+}
+
+/**
+ * Sequential (cursor-based) placement: place the widget immediately to the
+ * right of the last existing widget on the same row. When the row overflows
+ * or the position overlaps a manually-placed widget, wrap to a fresh row
+ * below all existing content.
+ */
+function assignLayoutSequential(
+  widget: DashboardWidget,
+  existingWidgets: DashboardWidget[],
+  size: WidgetSize,
+  grid: OccupiedGrid
+): DashboardWidget {
+  const { w, h, minH } = size;
+  const lastLayout = findLastLayout(existingWidgets);
+
+  if (lastLayout) {
+    const cursorX = lastLayout.x + lastLayout.w;
+    const cursorY = lastLayout.y;
+
+    // Place at cursor if it fits within the grid and doesn't overlap
+    if (
+      cursorX + w <= GRID_COLUMNS &&
+      regionFits(grid.occupied, { px: cursorX, py: cursorY, w, h })
+    ) {
+      return { ...widget, layout: { x: cursorX, y: cursorY, w, h, minH } };
+    }
+  }
+
+  // Wrap to a new row below all existing content
+  return { ...widget, layout: { x: 0, y: grid.maxY, w, h, minH } };
+}
+
 /**
  * Assign a default layout to a widget if it doesn't already have one.
- * Packs the widget into the first available space in a 6-column grid,
- * scanning rows top-to-bottom and left-to-right.
+ *
+ * Two placement modes are available:
+ * - `"sequential"` (default) — Cursor-based append: the widget is placed
+ *   immediately after the last existing widget, wrapping to a new row when
+ *   the current row overflows. Interior gaps are never backfilled.
+ * - `"dense"` — First-fit packing: the widget is placed in the first
+ *   available gap, scanning top-to-bottom and left-to-right.
  *
  * @param widget - Widget that may be missing a layout
  * @param existingWidgets - Widgets already in the dashboard (used to compute placement)
+ * @param mode - Layout strategy (`"sequential"` or `"dense"`)
  * @returns Widget with layout guaranteed
  */
 export function assignDefaultLayout(
   widget: DashboardWidget,
-  existingWidgets: DashboardWidget[]
+  existingWidgets: DashboardWidget[],
+  mode: WidgetLayoutMode = "sequential"
 ): DashboardWidget {
   if (widget.layout) {
     return widget;
   }
 
-  const { w, h, minH } =
+  const size =
     DEFAULT_WIDGET_SIZE[widget.displayType as DisplayType] ?? FALLBACK_SIZE;
+  const grid = buildOccupiedGrid(existingWidgets);
 
-  const { occupied, maxY } = buildOccupiedGrid(existingWidgets);
-
-  // Scan rows to find the first position where the widget fits
-  for (let y = 0; y <= maxY; y++) {
-    for (let x = 0; x <= GRID_COLUMNS - w; x++) {
-      if (regionFits(occupied, { px: x, py: y, w, h })) {
-        return { ...widget, layout: { x, y, w, h, minH } };
-      }
-    }
+  if (mode === "dense") {
+    return assignLayoutDense(widget, size, grid);
   }
 
-  // No gap found — place below everything
-  return { ...widget, layout: { x: 0, y: maxY, w, h, minH } };
+  return assignLayoutSequential(widget, existingWidgets, size, grid);
+}
+
+// ---------------------------------------------------------------------------
+// Layout validation
+// ---------------------------------------------------------------------------
+
+/** Shared layout flags accepted by widget add and edit commands */
+export type WidgetLayoutFlags = {
+  readonly col?: number;
+  readonly row?: number;
+  readonly width?: number;
+  readonly height?: number;
+};
+
+/** Assert a layout value is a non-negative integer within an optional upper bound */
+function assertLayoutInt(
+  value: number,
+  flag: string,
+  min: number,
+  max?: number
+): void {
+  if (!Number.isInteger(value) || value < min) {
+    throw new ValidationError(
+      `--${flag} must be ${min === 0 ? "a non-negative" : "a positive"} integer (got ${value}).`,
+      flag
+    );
+  }
+  if (max !== undefined && value > max) {
+    throw new ValidationError(
+      `--${flag} must be ${min}–${max} (dashboard grid is ${GRID_COLUMNS} columns wide).`,
+      flag
+    );
+  }
+}
+
+/**
+ * Validate layout flag values against the 6-column dashboard grid.
+ *
+ * Checks that position and size values are within the valid range and
+ * that the widget fits within the grid columns. Validates each provided
+ * flag independently, and cross-validates x + width when both are known.
+ *
+ * @param flags - Layout flags from the command
+ * @param existing - Existing widget layout (used for cross-validation when only one dimension is provided)
+ */
+export function validateWidgetLayout(
+  flags: WidgetLayoutFlags,
+  existing?: DashboardWidgetLayout
+): void {
+  if (flags.col !== undefined) {
+    assertLayoutInt(flags.col, "col", 0, GRID_COLUMNS - 1);
+  }
+  if (flags.row !== undefined) {
+    assertLayoutInt(flags.row, "row", 0);
+  }
+  if (flags.width !== undefined) {
+    assertLayoutInt(flags.width, "width", 1, GRID_COLUMNS);
+  }
+  if (flags.height !== undefined) {
+    assertLayoutInt(flags.height, "height", 1);
+  }
+
+  // Cross-validate col + width doesn't overflow the grid
+  const effectiveX = flags.col ?? existing?.x;
+  const effectiveW = flags.width ?? existing?.w;
+  if (
+    effectiveX !== undefined &&
+    effectiveW !== undefined &&
+    effectiveX + effectiveW > GRID_COLUMNS
+  ) {
+    throw new ValidationError(
+      `Widget overflows the grid: col(${effectiveX}) + width(${effectiveW}) = ${effectiveX + effectiveW}, but the grid is ${GRID_COLUMNS} columns wide.`,
+      "col"
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -836,6 +949,12 @@ export type ScalarResult = {
   unit?: string | null;
 };
 
+/** Markdown text content for text widgets (no API query — content from widget.description) */
+export type TextResult = {
+  type: "text";
+  content: string;
+};
+
 /** Widget type not supported for data fetching */
 export type UnsupportedResult = {
   type: "unsupported";
@@ -855,6 +974,7 @@ export type ErrorResult = {
  * - `timeseries` → sparkline charts
  * - `table` → text table
  * - `scalar` → big number display
+ * - `text` → rendered markdown content
  * - `unsupported` → placeholder message
  * - `error` → error message
  */
@@ -862,6 +982,7 @@ export type WidgetDataResult =
   | TimeseriesResult
   | TableResult
   | ScalarResult
+  | TextResult
   | UnsupportedResult
   | ErrorResult;
 
@@ -872,7 +993,7 @@ export type WidgetDataResult =
 /**
  * Maps widget types to API dataset parameter values.
  *
- * Widget types that don't map to a dataset (issue, metrics, etc.)
+ * Widget types that don't map to a dataset (issue, preprod-app-size, etc.)
  * return null and are rendered as "unsupported".
  */
 const WIDGET_TYPE_TO_DATASET: Record<string, string> = {
@@ -881,6 +1002,7 @@ const WIDGET_TYPE_TO_DATASET: Record<string, string> = {
   "error-events": "errors",
   "transaction-like": "transactions",
   logs: "logs",
+  tracemetrics: "metricsEnhanced",
 };
 
 /**

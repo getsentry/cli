@@ -132,6 +132,27 @@ describe("normalizeEndpoint: path traversal hardening (#350)", () => {
       /Invalid/
     );
   });
+
+  test("strips newlines from multi-line pasted endpoints (CLI-FR)", () => {
+    expect(
+      normalizeEndpoint(
+        "organizations/my-org/issues/?\n  environment=Production&project=123"
+      )
+    ).toBe("organizations/my-org/issues/?environment=Production&project=123");
+  });
+
+  test("strips carriage returns and surrounding indentation", () => {
+    expect(normalizeEndpoint("organizations/my-org/\r\n  issues/")).toBe(
+      "organizations/my-org/issues/"
+    );
+  });
+
+  test("preserves tabs within segments (not line-break related)", () => {
+    // Tabs without adjacent line breaks are control chars — rejected
+    expect(() => normalizeEndpoint("organizations/\tmy-org/")).toThrow(
+      /Invalid/
+    );
+  });
 });
 
 describe("parseFieldKey error cases", () => {

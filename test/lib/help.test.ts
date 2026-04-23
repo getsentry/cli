@@ -7,7 +7,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { formatBanner } from "../../src/lib/banner.js";
-import { printCustomHelp } from "../../src/lib/help.js";
+import { introspectAllCommands, printCustomHelp } from "../../src/lib/help.js";
 import { useTestConfigDir } from "../helpers.js";
 
 /** Strip ANSI escape sequences for content assertions */
@@ -68,5 +68,49 @@ describe("printCustomHelp", () => {
     // useTestConfigDir provides a clean env with no auth token
     const output = stripAnsi(printCustomHelp());
     expect(output).toContain("sentry auth login");
+  });
+
+  test("includes an Environment Variables section with top-level vars", () => {
+    const output = stripAnsi(printCustomHelp());
+    expect(output).toContain("Environment Variables:");
+    // Highest-signal vars from the feedback issue must be surfaced.
+    expect(output).toContain("SENTRY_AUTH_TOKEN");
+    expect(output).toContain("SENTRY_FORCE_ENV_TOKEN");
+    expect(output).toContain("SENTRY_ORG");
+    expect(output).toContain("SENTRY_PROJECT");
+    expect(output).toContain("SENTRY_DSN");
+    expect(output).toContain("SENTRY_HOST");
+    expect(output).toContain("SENTRY_LOG_LEVEL");
+    expect(output).toContain("NO_COLOR");
+  });
+});
+
+describe("introspectAllCommands", () => {
+  useTestConfigDir("help-introspect-");
+
+  test("includes an envVars array with the top-level env vars", () => {
+    const result = introspectAllCommands();
+    expect(Array.isArray(result.envVars)).toBe(true);
+    const names = result.envVars.map((v) => v.name);
+    expect(names).toContain("SENTRY_AUTH_TOKEN");
+    expect(names).toContain("SENTRY_FORCE_ENV_TOKEN");
+    expect(names).toContain("SENTRY_ORG");
+    expect(names).toContain("SENTRY_PROJECT");
+    expect(names).toContain("SENTRY_DSN");
+    expect(names).toContain("SENTRY_HOST");
+    expect(names).toContain("SENTRY_LOG_LEVEL");
+    expect(names).toContain("NO_COLOR");
+  });
+
+  test("each envVars entry has a brief and description", () => {
+    const { envVars } = introspectAllCommands();
+    for (const v of envVars) {
+      expect(typeof v.name).toBe("string");
+      expect(v.name.length).toBeGreaterThan(0);
+      expect(typeof v.brief).toBe("string");
+      expect(v.brief.length).toBeGreaterThan(0);
+      expect(typeof v.description).toBe("string");
+      expect(v.description.length).toBeGreaterThan(0);
+    }
   });
 });

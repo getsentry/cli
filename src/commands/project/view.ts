@@ -6,15 +6,20 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { getProject, tryGetPrimaryDsn } from "../../lib/api-client.js";
+import {
+  getProject,
+  resolveOrgDisplayName,
+  tryGetPrimaryDsn,
+} from "../../lib/api-client.js";
 import {
   ProjectSpecificationType,
   parseOrgProjectArg,
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError, withAuthGuard } from "../../lib/errors.js";
+import { AuthError, ContextError, withAuthGuard } from "../../lib/errors.js";
 import { divider, formatProjectDetails } from "../../lib/formatters/index.js";
+import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
@@ -45,11 +50,12 @@ const USAGE_HINT = "sentry project view <org>/<project>";
  */
 function buildContextError(skippedSelfHosted?: number): ContextError {
   if (skippedSelfHosted) {
-    return new ContextError("Organization and project", USAGE_HINT, [
-      "Run from a directory with a Sentry-configured project",
-      "Set SENTRY_ORG and SENTRY_PROJECT (or SENTRY_DSN) environment variables",
-      `Found ${skippedSelfHosted} DSN(s) that could not be resolved — you may not have access to these projects`,
-    ]);
+    return new ContextError(
+      "Organization and project",
+      USAGE_HINT,
+      undefined,
+      `Found ${skippedSelfHosted} DSN(s) that could not be resolved — you may not have access to these projects`
+    );
   }
 
   return new ContextError("Organization and project", USAGE_HINT);
@@ -91,15 +97,16 @@ type ProjectWithDsn = {
 };
 
 /**
- * Fetch project details and keys for a single target.
- * Returns null on non-auth errors (e.g., no access to project).
- * Rethrows auth errors so they propagate to the user.
+ * Parallel project + DSN fetch for a single target.
+ *
+ * `AuthError` always propagates so the auto-login middleware fires.
+ * Other API failures rethrow so callers can choose to swallow
+ * (auto-detect) or surface (explicit/search) them.
  */
-async function fetchProjectDetails(
+async function fetchProjectAndDsn(
   target: ResolvedTarget
-): Promise<ProjectWithDsn | null> {
+): Promise<ProjectWithDsn> {
   const result = await withAuthGuard(async () => {
-    // Fetch project (skip if already fetched during resolution) and DSN in parallel
     const [project, dsn] = await Promise.all([
       target.projectData
         ? Promise.resolve(target.projectData)
@@ -108,7 +115,40 @@ async function fetchProjectDetails(
     ]);
     return { project, dsn };
   });
-  return result.ok ? result.value : null;
+  if (result.ok) {
+    return result.value;
+  }
+  throw result.error;
+}
+
+/**
+ * Fetch details, swallowing non-auth failures (auto-detect mode).
+ * `AuthError` still propagates for the auto-login middleware.
+ */
+async function fetchProjectDetails(
+  target: ResolvedTarget
+): Promise<ProjectWithDsn | null> {
+  try {
+    return await fetchProjectAndDsn(target);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    return null;
+  }
+}
+
+/**
+ * Fetch details, rethrowing API errors verbatim.
+ *
+ * Used for explicit/project-search targets: the user named the
+ * project, so surfacing the real 403/404 is more useful than the
+ * generic "Could not auto-detect" fallback (getsentry/cli#785 #8).
+ */
+function fetchProjectDetailsOrThrow(
+  target: ResolvedTarget
+): Promise<ProjectWithDsn> {
+  return fetchProjectAndDsn(target);
 }
 
 /** Result of fetching project details for multiple targets */
@@ -119,8 +159,8 @@ type FetchResult = {
 };
 
 /**
- * Fetch project details for all targets in parallel.
- * Filters out failed fetches while preserving target association.
+ * Fetch details for every auto-detected target in parallel, filtering
+ * out failures while preserving target association.
  */
 async function fetchAllProjectDetails(
   targets: ResolvedTarget[]
@@ -142,6 +182,50 @@ async function fetchAllProjectDetails(
   }
 
   return { projects, dsns, targets: validTargets };
+}
+
+/**
+ * Re-hydrate `organization.name` on a project entry.
+ *
+ * `getProject()` passes `?collapse=organization` so the server returns
+ * only `{id, slug}` for `organization` (~400-500ms faster). For JSON
+ * consumers that scrape `.organization.name`, we refill the field from
+ * the cached organizations list (or the slug as last resort) so the
+ * JSON output shape stays stable across CLI versions.
+ */
+function hydrateOrganizationName(entry: ProjectViewEntry): ProjectViewEntry {
+  if (!entry.organization || entry.organization.name) {
+    return entry;
+  }
+  return {
+    ...entry,
+    organization: {
+      ...entry.organization,
+      name: resolveOrgDisplayName(entry.organization.slug),
+    },
+  };
+}
+
+/**
+ * Build the JSON payload: strip `detectedFrom` (human-only), re-hydrate
+ * `organization.name`, and apply `--fields` filtering.
+ *
+ * Replaces the simpler `jsonExclude: ["detectedFrom"]` config so we can
+ * also restore `organization.name` that the collapsed API response omits.
+ */
+function jsonTransformProjectView(
+  entries: ProjectViewEntry[],
+  fields?: string[]
+): unknown {
+  const hydrated = entries.map((entry) => {
+    const { detectedFrom: _detectedFrom, ...rest } =
+      hydrateOrganizationName(entry);
+    return rest;
+  });
+  if (fields && fields.length > 0) {
+    return hydrated.map((item) => filterFields(item, fields));
+  }
+  return hydrated;
 }
 
 /**
@@ -186,7 +270,7 @@ export const viewCommand = buildCommand({
   },
   output: {
     human: formatProjectViewHuman,
-    jsonExclude: ["detectedFrom"],
+    jsonTransform: jsonTransformProjectView,
   },
   parameters: {
     positional: {
@@ -237,7 +321,8 @@ export const viewCommand = buildCommand({
         const resolved = await resolveProjectBySlug(
           parsed.projectSlug,
           USAGE_HINT,
-          `sentry project view <org>/${parsed.projectSlug}`
+          `sentry project view <org>/${parsed.projectSlug}`,
+          parsed.originalSlug
         );
         resolvedTargets = [
           {
@@ -280,9 +365,28 @@ export const viewCommand = buildCommand({
       return;
     }
 
-    // Fetch project details for all targets in parallel
-    const { projects, dsns, targets } =
-      await fetchAllProjectDetails(resolvedTargets);
+    // Auto-detect tolerates per-target failures (DSN scans may yield
+    // inaccessible targets); explicit/search rethrows so the real
+    // 403/404 surfaces instead of a misleading "not provided" error.
+    let projects: SentryProject[];
+    let dsns: (string | null)[];
+    let targets: ResolvedTarget[];
+
+    if (parsed.type === ProjectSpecificationType.AutoDetect) {
+      const fetched = await fetchAllProjectDetails(resolvedTargets);
+      projects = fetched.projects;
+      dsns = fetched.dsns;
+      targets = fetched.targets;
+    } else {
+      const firstTarget = resolvedTargets[0];
+      if (!firstTarget) {
+        throw buildContextError();
+      }
+      const detail = await fetchProjectDetailsOrThrow(firstTarget);
+      projects = [detail.project];
+      dsns = [detail.dsn];
+      targets = [firstTarget];
+    }
 
     if (projects.length === 0) {
       throw buildContextError();

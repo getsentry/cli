@@ -2,18 +2,25 @@
  * Wizard Runner
  *
  * Main suspend/resume loop that drives the remote Mastra workflow.
- * Each iteration: check status → if suspended, perform local-op or
+ * Each iteration: check status → if suspended, perform tool or
  * interactive prompt → resume with result → repeat.
  */
 
 import { randomBytes } from "node:crypto";
-import { cancel, confirm, intro, log, spinner } from "@clack/prompts";
+import { basename } from "node:path";
+import { cancel, confirm, intro, log } from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 import { captureException, getTraceData } from "@sentry/node-core/light";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
-import { getAuthToken } from "../db/auth.js";
+import { WizardError } from "../errors.js";
 import { terminalLink } from "../formatters/colors.js";
+import {
+  colorTag,
+  renderInlineMarkdown,
+  safeCodeSpan,
+  stripColorTags,
+} from "../formatters/markdown.js";
 import {
   abortIfCancelled,
   STEP_LABELS,
@@ -29,14 +36,23 @@ import {
 import { formatError, formatResult } from "./formatters.js";
 import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
-import { handleLocalOp, precomputeDirListing } from "./local-ops.js";
+import { resolveInitContext } from "./preflight.js";
+import { createWizardSpinner } from "./spinner.js";
+import { forwardFreshTtyToStdin } from "./stdin-reopen.js";
+import { describeTool, executeTool } from "./tools/registry.js";
 import type {
+  ResolvedInitContext,
   SuspendPayload,
   WizardOptions,
   WorkflowRunResult,
 } from "./types.js";
+import {
+  precomputeDirListing,
+  precomputeSentryDetection,
+  preReadCommonFiles,
+} from "./workflow-inputs.js";
 
-type Spinner = ReturnType<typeof spinner>;
+type Spinner = ReturnType<typeof createWizardSpinner>;
 
 type SpinState = { running: boolean };
 
@@ -45,7 +61,7 @@ type StepContext = {
   stepId: string;
   spin: Spinner;
   spinState: SpinState;
-  options: WizardOptions;
+  context: ResolvedInitContext;
 };
 
 function nextPhase(
@@ -58,35 +74,149 @@ function nextPhase(
   return names[Math.min(phase - 1, names.length - 1)] ?? "done";
 }
 
+/**
+ * Truncate a spinner message to fit within the terminal width.
+ * Leaves room for the spinner character and padding.
+ */
+function truncateForTerminal(message: string): string {
+  return message.split("\n").map(truncateLineForTerminal).join("\n");
+}
+
+function truncateLineForTerminal(line: string): string {
+  const maxWidth = (process.stdout.columns || 80) - 4;
+  const visibleLine = stripColorTags(line).replace(/`/g, "");
+  if (visibleLine.length <= maxWidth) {
+    return line;
+  }
+  let truncated = line.slice(0, maxWidth - 1);
+  const backtickCount = truncated.split("`").length - 1;
+  if (backtickCount % 2 !== 0) {
+    const lastBacktick = truncated.lastIndexOf("`");
+    truncated =
+      truncated.slice(0, lastBacktick) + truncated.slice(lastBacktick + 1);
+  }
+  return `${truncated}…`;
+}
+
+type ReadFilesDisplay = {
+  paths: string[];
+  phase: "reading" | "analyzing";
+};
+
+function formatReadFilesSummary(progress: ReadFilesDisplay): string {
+  const { paths, phase } = progress;
+  if (paths.length === 0) {
+    return phase === "analyzing" ? "Analyzing files..." : "Reading files...";
+  }
+
+  let header: string;
+  if (phase === "analyzing") {
+    header = paths.length === 1 ? "Analyzing file..." : "Analyzing files...";
+  } else {
+    header = paths.length === 1 ? "Reading file..." : "Reading files...";
+  }
+
+  const icon = readFilesStatusIcon(phase);
+  const displayPaths = compactDisplayPaths(paths);
+  const items = displayPaths.map((filePath, index) => {
+    const branch = index === paths.length - 1 ? "└─" : "├─";
+    return `${branch} ${icon} ${safeCodeSpan(filePath)}`;
+  });
+  return `${header}\n${items.join("\n")}`;
+}
+
+function readFilesStatusIcon(phase: ReadFilesDisplay["phase"]): string {
+  return phase === "analyzing"
+    ? colorTag("green", "✓")
+    : colorTag("yellow", "●");
+}
+
+function compactDisplayPaths(paths: string[]): string[] {
+  const basenameCounts = new Map<string, number>();
+  for (const filePath of paths) {
+    const name = basename(filePath);
+    basenameCounts.set(name, (basenameCounts.get(name) ?? 0) + 1);
+  }
+  return paths.map((filePath) => {
+    const name = basename(filePath);
+    return basenameCounts.get(name) === 1 ? name : filePath;
+  });
+}
+
+/**
+ * Build a follow-up spinner message after a tool succeeds and the CLI is
+ * waiting for the server to continue processing the returned data.
+ */
+function describePostTool(payload: SuspendPayload): string | undefined {
+  if (payload.type !== "tool") {
+    return;
+  }
+
+  switch (payload.operation) {
+    case "read-files":
+      return formatReadFilesSummary({
+        paths: payload.params.paths,
+        phase: "analyzing",
+      });
+    case "list-dir":
+      return "Analyzing directory structure...";
+    case "file-exists-batch":
+      return "Analyzing project files...";
+    default:
+      return;
+  }
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: suspend handling needs to branch across tool and interactive payload kinds
 async function handleSuspendedStep(
   ctx: StepContext,
   stepPhases: Map<string, number>,
   stepHistory: Map<string, Record<string, unknown>[]>
 ): Promise<Record<string, unknown>> {
-  const { payload, stepId, spin, spinState, options } = ctx;
+  const { payload, stepId, spin, spinState, context } = ctx;
   const label = STEP_LABELS[stepId] ?? stepId;
 
-  if (payload.type === "local-op") {
-    const detail = payload.operation ? ` (${payload.operation})` : "";
-    spin.message(`${label}${detail}...`);
+  if (payload.type === "tool") {
+    const message =
+      ("detail" in payload && typeof payload.detail === "string"
+        ? payload.detail
+        : undefined) ??
+      (payload.operation === "read-files"
+        ? formatReadFilesSummary({
+            paths: payload.params.paths,
+            phase: "reading",
+          })
+        : describeTool(payload));
+    spin.message(renderInlineMarkdown(truncateForTerminal(message)));
 
-    const localResult = await handleLocalOp(payload, options);
+    const toolResult = await executeTool(payload, context);
+
+    if (toolResult.message) {
+      spin.stop(renderInlineMarkdown(toolResult.message));
+      spin.start("Processing...");
+    } else {
+      const followUpMessage =
+        toolResult.ok === false ? undefined : describePostTool(payload);
+      if (followUpMessage) {
+        spin.message(
+          renderInlineMarkdown(truncateForTerminal(followUpMessage))
+        );
+      }
+    }
 
     const history = stepHistory.get(stepId) ?? [];
-    history.push(localResult);
+    history.push(toolResult);
     stepHistory.set(stepId, history);
 
     return {
-      ...localResult,
+      ...toolResult,
       _phase: nextPhase(stepPhases, stepId, ["read-files", "analyze", "done"]),
       _prevPhases: history.slice(0, -1),
     };
   }
 
   if (payload.type === "interactive") {
-    // In dry-run mode, verification always fails because no files were written
-    // (the server skips apply-patchset). Auto-continue since this is expected.
-    if (options.dryRun && stepId === VERIFY_CHANGES_STEP) {
+    if (context.dryRun && stepId === VERIFY_CHANGES_STEP) {
       return {
         action: "continue",
         _phase: nextPhase(stepPhases, stepId, ["apply"]),
@@ -96,7 +226,7 @@ async function handleSuspendedStep(
     spin.stop(label);
     spinState.running = false;
 
-    const interactiveResult = await handleInteractive(payload, options);
+    const interactiveResult = await handleInteractive(payload, context);
 
     spin.start("Processing...");
     spinState.running = true;
@@ -107,8 +237,6 @@ async function handleSuspendedStep(
     };
   }
 
-  // Unreachable: assertSuspendPayload validates the type before we get here.
-  // Kept as a defensive fallback.
   spin.stop("Error", 1);
   spinState.running = false;
   log.error(
@@ -143,17 +271,13 @@ function assertSuspendPayload(raw: unknown): SuspendPayload {
   const obj = raw as Record<string, unknown>;
   if (
     typeof obj.type !== "string" ||
-    !["local-op", "interactive"].includes(obj.type)
+    !["tool", "interactive"].includes(obj.type)
   ) {
     throw new Error(`Unknown suspend payload type: ${String(obj.type)}`);
   }
   return obj as SuspendPayload;
 }
 
-/**
- * Race a promise against a timeout. Rejects with a descriptive error
- * if the promise doesn't settle within `ms` milliseconds.
- */
 function withTimeout<T>(
   promise: Promise<T>,
   ms: number,
@@ -177,7 +301,6 @@ function withTimeout<T>(
   });
 }
 
-/** Returns `true` if the user confirmed, `false` if they declined. */
 async function confirmExperimental(yes: boolean): Promise<boolean> {
   if (yes) {
     return true;
@@ -190,21 +313,16 @@ async function confirmExperimental(yes: boolean): Promise<boolean> {
   return !!proceed;
 }
 
-/**
- * Pre-flight checks: TTY guard, banner, intro, and experimental warning.
- * Returns `true` when the wizard should continue, `false` to abort.
- */
 async function preamble(
   directory: string,
   yes: boolean,
   dryRun: boolean
 ): Promise<boolean> {
-  if (!(yes || process.stdin.isTTY)) {
-    process.stderr.write(
-      "Error: Interactive mode requires a terminal. Use --yes for non-interactive mode.\n"
+  if (!(yes || dryRun || process.stdin.isTTY)) {
+    throw new WizardError(
+      "Interactive mode requires a terminal. Use --yes for non-interactive mode.",
+      { rendered: false }
     );
-    process.exitCode = 1;
-    return false;
   }
 
   process.stderr.write(`\n${formatBanner()}\n\n`);
@@ -212,11 +330,9 @@ async function preamble(
 
   let confirmed: boolean;
   try {
-    confirmed = await confirmExperimental(yes);
+    confirmed = await confirmExperimental(yes || dryRun);
   } catch (err) {
     if (err instanceof WizardCancelledError) {
-      // Intentionally captured: track why users bail before completing
-      // instrumentation so we can improve the onboarding flow.
       captureException(err);
       process.exitCode = 0;
       return false;
@@ -233,7 +349,7 @@ async function preamble(
     log.warn("Dry-run mode: no files will be modified.");
   }
 
-  const gitOk = await checkGitStatus({ cwd: directory, yes });
+  const gitOk = await checkGitStatus({ cwd: directory, yes: yes || dryRun });
   if (!gitOk) {
     cancel("Setup cancelled.");
     process.exitCode = 0;
@@ -243,8 +359,23 @@ async function preamble(
   return true;
 }
 
-export async function runWizard(options: WizardOptions): Promise<void> {
-  const { directory, yes, dryRun, features } = options;
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard orchestration with error handling branches
+export async function runWizard(initialOptions: WizardOptions): Promise<void> {
+  // Bun's compiled binaries don't deliver keystrokes through TTY fds
+  // inherited via shell redirection (e.g. `curl | bash` →
+  // `exec sentry init </dev/tty` in install.sh). Open a fresh `/dev/tty` and
+  // forward its data events onto process.stdin so clack's prompts receive
+  // input. Also backfills process.stdin.isTTY when Bun leaves it undefined
+  // so clack's internal `isTTY && setRawMode(true)` gate still fires.
+  //
+  // The `using` declaration guarantees teardown on every exit path (success,
+  // return, throw) via the Disposable returned by forwardFreshTtyToStdin().
+  // No explicit try/finally needed — the compiler inserts the call for us.
+  // `_tty` binds the disposable's lifetime to this function scope; the
+  // leading underscore signals it's lifecycle-only and not read below.
+  using _tty = forwardFreshTtyToStdin();
+
+  const { directory, yes, dryRun, features } = initialOptions;
 
   if (!(await preamble(directory, yes, dryRun))) {
     return;
@@ -254,6 +385,14 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     "This wizard uses AI to analyze your project and configure Sentry." +
       `\nFor manual setup: ${terminalLink(SENTRY_DOCS_URL)}`
   );
+
+  const effectiveOptions = dryRun
+    ? { ...initialOptions, yes: true }
+    : initialOptions;
+  const context = await resolveInitContext(effectiveOptions);
+  if (!context) {
+    return;
+  }
 
   const tracingOptions = {
     traceId: randomBytes(16).toString("hex"),
@@ -267,12 +406,31 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     },
   };
 
-  const token = getAuthToken();
+  const token = context.authToken;
+
+  // AbortController bound to the MastraClient lifecycle. Aborting on
+  // teardown (success OR failure, via `using` below) cancels any in-flight
+  // fetches — releasing keep-alive sockets so the event loop drains and
+  // `sentry init` returns to the shell promptly. Without this, a stuck or
+  // idle socket in Bun's fetch dispatcher can hold the process alive past
+  // the wizard's natural exit.
+  const abortController = new AbortController();
+  using _mastraCleanup = {
+    [Symbol.dispose]: (): void => {
+      // AbortController.abort() is spec-idempotent, so no guard needed.
+      abortController.abort();
+    },
+  };
+
   const client = new MastraClient({
     baseUrl: MASTRA_API_URL,
     headers: token ? { Authorization: `Bearer ${token}` } : {},
+    abortSignal: abortController.signal,
     fetch: ((url, init) => {
       const traceData = getTraceData();
+      // Preserve `init.signal` via the spread — MastraClient may pass its
+      // own per-request signal, and the client-level `abortSignal` is
+      // forwarded through the same channel.
       return fetch(url, {
         ...init,
         headers: {
@@ -287,7 +445,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
   });
   const workflow = client.getWorkflow(WORKFLOW_ID);
 
-  const spin = spinner();
+  const spin = createWizardSpinner();
   const spinState: SpinState = { running: false };
 
   spin.start("Scanning project...");
@@ -296,13 +454,34 @@ export async function runWizard(options: WizardOptions): Promise<void> {
   let run: Awaited<ReturnType<typeof workflow.createRun>>;
   let result: WorkflowRunResult;
   try {
-    const dirListing = precomputeDirListing(directory);
+    const [dirListing, existingSentry] = await Promise.all([
+      precomputeDirListing(directory),
+      precomputeSentryDetection(directory).catch(() => null),
+    ]);
+    const fileCache = await preReadCommonFiles(directory, dirListing);
     spin.message("Connecting to wizard...");
     run = await workflow.createRun();
+    // Large shared context (dirListing, fileCache, existingSentry)
+    // travels via Mastra's workflow `initialState` instead of `inputData`.
+    // Keeping it on state means the server stores it exactly once per run
+    // rather than duplicating it across every step's output in the D1
+    // snapshot — which used to overflow the per-row size limit on big
+    // projects and surface as a cascading "workflow run was not suspended"
+    // error. See getsentry/cli-init-api#98.
     result = assertWorkflowResult(
       await withTimeout(
         run.startAsync({
-          inputData: { directory, yes, dryRun, features, dirListing },
+          inputData: {
+            directory,
+            yes,
+            dryRun,
+            features,
+          },
+          initialState: {
+            dirListing,
+            fileCache,
+            existingSentry: existingSentry?.data,
+          },
           tracingOptions,
         }),
         API_TIMEOUT_MS,
@@ -314,8 +493,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     spinState.running = false;
     log.error(errorMessage(err));
     cancel("Setup failed");
-    process.exitCode = 1;
-    return;
+    throw new WizardError(errorMessage(err));
   }
 
   const stepPhases = new Map<string, number>();
@@ -332,8 +510,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
         spinState.running = false;
         log.error(`No suspend payload found for step "${stepId}"`);
         cancel("Setup failed");
-        process.exitCode = 1;
-        return;
+        throw new WizardError(`No suspend payload found for step "${stepId}"`);
       }
 
       const resumeData = await handleSuspendedStep(
@@ -342,7 +519,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
           stepId: extracted.stepId,
           spin,
           spinState,
-          options,
+          context,
         },
         stepPhases,
         stepHistory
@@ -361,21 +538,27 @@ export async function runWizard(options: WizardOptions): Promise<void> {
       );
     }
   } catch (err) {
+    // A running spinner owns a live interval, so stop it before any early
+    // return or rethrow to avoid leaving the event loop artificially busy.
+    if (spinState.running) {
+      const [label, code] =
+        err instanceof WizardCancelledError
+          ? (["Cancelled", 0] as const)
+          : (["Error", 1] as const);
+      spin.stop(label, code);
+      spinState.running = false;
+    }
     if (err instanceof WizardCancelledError) {
-      // Intentionally captured: track why users bail before completing
-      // instrumentation so we can improve the onboarding flow.
       captureException(err);
       process.exitCode = 0;
       return;
     }
-    if (spinState.running) {
-      spin.stop("Error", 1);
-      spinState.running = false;
+    if (err instanceof WizardError) {
+      throw err;
     }
     log.error(errorMessage(err));
     cancel("Setup failed");
-    process.exitCode = 1;
-    return;
+    throw new WizardError(errorMessage(err));
   }
 
   handleFinalResult(result, spin, spinState);
@@ -394,14 +577,14 @@ function handleFinalResult(
       spinState.running = false;
     }
     formatError(result);
-    process.exitCode = 1;
-  } else {
-    if (spinState.running) {
-      spin.stop("Done");
-      spinState.running = false;
-    }
-    formatResult(result);
+    throw new WizardError("Workflow returned an error");
   }
+
+  if (spinState.running) {
+    spin.stop("Done");
+    spinState.running = false;
+  }
+  formatResult(result);
 }
 
 function extractSuspendPayload(

@@ -17,7 +17,7 @@ export type JudgeVerdict = {
 
 /**
  * Use an LLM judge to evaluate whether a **single feature** was correctly set
- * up by the wizard. Returns null if OPENAI_API_KEY is not set.
+ * up by the wizard. Returns null if ANTHROPIC_API_KEY is not set.
  *
  * `docsContent` is the pre-fetched plain-text documentation to include as
  * ground truth in the prompt.
@@ -28,16 +28,16 @@ export async function judgeFeature(
   feature: FeatureDoc,
   docsContent: string
 ): Promise<JudgeVerdict | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     console.log(
-      `  [judge:${feature.feature}] Skipping LLM judge (no OPENAI_API_KEY set)`
+      `  [judge:${feature.feature}] Skipping LLM judge (no ANTHROPIC_API_KEY set)`
     );
     return null;
   }
 
   // Restore real fetch — test preload mocks it to catch accidental network
-  // calls, but we need real HTTP for the OpenAI API.
+  // calls, but we need real HTTP for the Anthropic API.
   const realFetch = (globalThis as { __originalFetch?: typeof fetch })
     .__originalFetch;
   if (realFetch) {
@@ -45,8 +45,8 @@ export async function judgeFeature(
   }
 
   // Dynamic import so we don't fail when the package isn't installed
-  const { default: OpenAI } = await import("openai");
-  const client = new OpenAI({ apiKey });
+  const { default: Anthropic } = await import("@anthropic-ai/sdk");
+  const client = new Anthropic({ apiKey });
 
   const newFilesSection = Object.entries(result.newFiles)
     .map(([path, content]) => `### ${path}\n\`\`\`\n${content}\n\`\`\``)
@@ -86,13 +86,14 @@ Return ONLY valid JSON with this structure:
   "summary": "Brief overall assessment of ${feature.feature} setup"
 }`;
 
-  const response = await client.chat.completions.create({
-    model: "gpt-4o",
+  const response = await client.messages.create({
+    model: "claude-sonnet-4-6",
     max_tokens: 1024,
     messages: [{ role: "user", content: prompt }],
   });
 
-  const text = response.choices[0]?.message?.content ?? "";
+  const textBlock = response.content.find((b) => b.type === "text");
+  const text = textBlock?.text ?? "";
 
   // Extract JSON from response (handle markdown code blocks)
   const jsonMatch = text.match(/\{[\s\S]*\}/);

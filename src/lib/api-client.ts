@@ -36,6 +36,7 @@ export {
   findEventAcrossOrgs,
   getEvent,
   getLatestEvent,
+  listIssueEvents,
   type ResolvedEvent,
   resolveEventInOrg,
 } from "./api/events.js";
@@ -55,17 +56,28 @@ export {
   getIssue,
   getIssueByShortId,
   getIssueInOrg,
+  getSharedIssue,
   ISSUE_DETAIL_COLLAPSE,
   type IssueCollapseField,
   type IssueSort,
   type IssuesPage,
   listIssuesAllPages,
   listIssuesPaginated,
+  type MergeIssuesResult,
+  mergeIssues,
+  type ParsedResolveSpec,
+  parseResolveSpec,
+  RESOLVE_COMMIT_EXPLICIT_PREFIX,
+  RESOLVE_COMMIT_SENTINEL,
+  RESOLVE_NEXT_RELEASE_SENTINEL,
+  type ResolveCommitSpec,
+  type ResolveStatusDetails,
   tryGetIssueByShortId,
   updateIssueStatus,
 } from "./api/issues.js";
 export {
   getLogs,
+  type LogSortDirection,
   listLogs,
   listTraceLogs,
 } from "./api/logs.js";
@@ -77,7 +89,9 @@ export {
   listOrganizationsUncached,
 } from "./api/organizations.js";
 export {
+  type CreatedProjectDetails,
   createProject,
+  createProjectWithDsn,
   deleteProject,
   findProjectByDsnKey,
   findProjectsByPattern,
@@ -89,10 +103,29 @@ export {
   matchesWordBoundary,
   type ProjectSearchResult,
   type ProjectWithOrg,
+  resolveOrgDisplayName,
   tryGetPrimaryDsn,
 } from "./api/projects.js";
 export {
+  createRelease,
+  createReleaseDeploy,
+  deleteRelease,
+  getRelease,
+  type ListReleasesOptions,
+  listProjectEnvironments,
+  listReleaseDeploys,
+  listReleasesForProject,
+  listReleasesPaginated,
+  type ReleaseSortValue,
+  setCommitsAuto,
+  setCommitsLocal,
+  setCommitsWithRefs,
+  updateRelease,
+} from "./api/releases.js";
+export {
+  listAllRepositories,
   listRepositories,
+  listRepositoriesCached,
   listRepositoriesPaginated,
 } from "./api/repositories.js";
 export {
@@ -107,11 +140,20 @@ export {
   listTeams,
   listTeamsPaginated,
 } from "./api/teams.js";
+export type {
+  FetchMultiSpanDetailsOptions,
+  TraceItemAttribute,
+  TraceItemDetail,
+} from "./api/traces.js";
 export {
+  attributesToDict,
+  fetchMultiSpanDetails,
   getDetailedTrace,
+  getSpanDetails,
   listSpans,
   listTransactions,
   normalizeTraceSpan,
+  REDUNDANT_DETAIL_ATTRS,
 } from "./api/traces.js";
 export {
   getCustomerTrialInfo,

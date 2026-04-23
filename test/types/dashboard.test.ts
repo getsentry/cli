@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { ValidationError } from "../../src/lib/errors.js";
 import {
   assignDefaultLayout,
   type DashboardWidget,
@@ -18,6 +19,7 @@ import {
   EventsStatsDataPointSchema,
   EventsStatsSeriesSchema,
   EventsTableResponseSchema,
+  GRID_COLUMNS,
   IS_FILTER_VALUES,
   IsFilterValueSchema,
   mapWidgetTypeToDataset,
@@ -29,8 +31,11 @@ import {
   SpanAggregateFunctionSchema,
   stripWidgetServerFields,
   TABLE_DISPLAY_TYPES,
+  type TextResult,
   TIMESERIES_DISPLAY_TYPES,
+  validateWidgetLayout,
   WIDGET_TYPES,
+  type WidgetDataResult,
   type WidgetType,
 } from "../../src/types/dashboard.js";
 
@@ -48,7 +53,6 @@ describe("WIDGET_TYPES", () => {
     const expected: WidgetType[] = [
       "discover",
       "issue",
-      "metrics",
       "error-events",
       "transaction-like",
       "spans",
@@ -590,7 +594,7 @@ describe("assignDefaultLayout", () => {
     expect(result.layout!.h).toBe(1);
   });
 
-  test("widget in partially filled grid finds first gap", () => {
+  test("places after last widget on same row (default sequential mode)", () => {
     const existing: DashboardWidget[] = [
       {
         title: "Existing",
@@ -604,9 +608,194 @@ describe("assignDefaultLayout", () => {
     };
     const result = assignDefaultLayout(widget, existing);
     expect(result.layout).toBeDefined();
-    // Should be placed after the existing widget, not overlapping
+    // Cursor from last widget: (0+2, 0) = (2, 0)
     expect(result.layout!.x).toBe(2);
     expect(result.layout!.y).toBe(0);
+  });
+
+  // -- Sequential mode tests -----------------------------------------------
+
+  test("sequential: three same-size widgets fill a row left-to-right", () => {
+    const existing: DashboardWidget[] = [
+      {
+        title: "A",
+        displayType: "big_number",
+        layout: { x: 0, y: 0, w: 2, h: 1 },
+      },
+      {
+        title: "B",
+        displayType: "big_number",
+        layout: { x: 2, y: 0, w: 2, h: 1 },
+      },
+    ];
+    const result = assignDefaultLayout(
+      { title: "C", displayType: "big_number" },
+      existing
+    );
+    expect(result.layout).toMatchObject({ x: 4, y: 0, w: 2, h: 1 });
+  });
+
+  test("sequential: wraps to new row when cursor overflows grid width", () => {
+    const existing: DashboardWidget[] = [
+      {
+        title: "A",
+        displayType: "line",
+        layout: { x: 0, y: 0, w: 3, h: 2 },
+      },
+      {
+        title: "B",
+        displayType: "line",
+        layout: { x: 3, y: 0, w: 3, h: 2 },
+      },
+    ];
+    const result = assignDefaultLayout(
+      { title: "C", displayType: "line" },
+      existing
+    );
+    // cursor=(6,0) → 6+3=9 > 6, overflow → (0, 2)
+    expect(result.layout).toMatchObject({ x: 0, y: 2, w: 3, h: 2 });
+  });
+
+  test("sequential: does NOT backfill gap beside taller widget", () => {
+    const existing: DashboardWidget[] = [
+      {
+        title: "Chart",
+        displayType: "line",
+        layout: { x: 0, y: 0, w: 4, h: 2 },
+      },
+      {
+        title: "KPI-1",
+        displayType: "big_number",
+        layout: { x: 4, y: 0, w: 2, h: 1 },
+      },
+    ];
+    const result = assignDefaultLayout(
+      { title: "KPI-2", displayType: "big_number" },
+      existing
+    );
+    // Old greedy algorithm would place at (4,1) — the gap beside the line chart.
+    // Sequential mode wraps to below everything instead.
+    expect(result.layout).toMatchObject({ x: 0, y: 2 });
+  });
+
+  test("sequential: table (6x2) forces next widget to new row", () => {
+    const existing: DashboardWidget[] = [
+      {
+        title: "Table",
+        displayType: "table",
+        layout: { x: 0, y: 0, w: 6, h: 2 },
+      },
+    ];
+    const result = assignDefaultLayout(
+      { title: "Chart", displayType: "line" },
+      existing
+    );
+    // cursor=(6,0) → 6+3=9 > 6, overflow → (0, 2)
+    expect(result.layout).toMatchObject({ x: 0, y: 2, w: 3, h: 2 });
+  });
+
+  test("sequential: all existing widgets lack layouts → place at (0, 0)", () => {
+    const existing: DashboardWidget[] = [
+      { title: "No Layout 1", displayType: "line" },
+      { title: "No Layout 2", displayType: "bar" },
+    ];
+    const result = assignDefaultLayout(
+      { title: "New", displayType: "big_number" },
+      existing
+    );
+    expect(result.layout).toMatchObject({ x: 0, y: 0, w: 2, h: 1 });
+  });
+
+  test("sequential: uses earlier widget when last has no layout", () => {
+    const existing: DashboardWidget[] = [
+      {
+        title: "Has Layout",
+        displayType: "big_number",
+        layout: { x: 0, y: 0, w: 2, h: 1 },
+      },
+      { title: "No Layout", displayType: "line" },
+    ];
+    const result = assignDefaultLayout(
+      { title: "New", displayType: "big_number" },
+      existing
+    );
+    // Last with layout is at (0,0) w=2, cursor=(2,0)
+    expect(result.layout).toMatchObject({ x: 2, y: 0, w: 2, h: 1 });
+  });
+
+  test("sequential: cursor overlaps manually-placed widget → falls back to below", () => {
+    // B at (4,0) was placed before A in the array, simulating manual rearrangement.
+    // Last widget with layout = A at (0,0) w=3 → cursor = (3, 0).
+    // New big_number (2x1) at (3,0) would need (3,0) and (4,0).
+    // (4,0) is occupied by B → regionFits fails → fallback to (0, maxY=2).
+    const existing: DashboardWidget[] = [
+      {
+        title: "B",
+        displayType: "big_number",
+        layout: { x: 4, y: 0, w: 2, h: 2 },
+      },
+      {
+        title: "A",
+        displayType: "line",
+        layout: { x: 0, y: 0, w: 3, h: 2 },
+      },
+    ];
+    const result = assignDefaultLayout(
+      { title: "New", displayType: "big_number" },
+      existing
+    );
+    expect(result.layout).toMatchObject({ x: 0, y: 2 });
+  });
+
+  // -- Dense mode tests ----------------------------------------------------
+
+  test("dense: fills gap beside taller widget", () => {
+    const existing: DashboardWidget[] = [
+      {
+        title: "Chart",
+        displayType: "line",
+        layout: { x: 0, y: 0, w: 4, h: 2 },
+      },
+      {
+        title: "KPI-1",
+        displayType: "big_number",
+        layout: { x: 4, y: 0, w: 2, h: 1 },
+      },
+    ];
+    const result = assignDefaultLayout(
+      { title: "KPI-2", displayType: "big_number" },
+      existing,
+      "dense"
+    );
+    // Dense mode finds the gap at (4,1) beside the line chart
+    expect(result.layout).toMatchObject({ x: 4, y: 1, w: 2, h: 1 });
+  });
+
+  test("dense: finds first available gap top-to-bottom", () => {
+    const existing: DashboardWidget[] = [
+      {
+        title: "A",
+        displayType: "big_number",
+        layout: { x: 0, y: 0, w: 2, h: 1 },
+      },
+    ];
+    const result = assignDefaultLayout(
+      { title: "B", displayType: "big_number" },
+      existing,
+      "dense"
+    );
+    // First gap is at (2,0)
+    expect(result.layout).toMatchObject({ x: 2, y: 0 });
+  });
+
+  // -- Shared behavior tests -----------------------------------------------
+
+  test("unknown displayType uses fallback size 3x2", () => {
+    const result = assignDefaultLayout(
+      { title: "Custom", displayType: "some_future_type" } as DashboardWidget,
+      []
+    );
+    expect(result.layout).toMatchObject({ x: 0, y: 0, w: 3, h: 2 });
   });
 });
 
@@ -761,17 +950,100 @@ describe("mapWidgetTypeToDataset", () => {
     expect(mapWidgetTypeToDataset("error-events")).toBe("errors");
     expect(mapWidgetTypeToDataset("transaction-like")).toBe("transactions");
     expect(mapWidgetTypeToDataset("logs")).toBe("logs");
+    expect(mapWidgetTypeToDataset("tracemetrics")).toBe("metricsEnhanced");
   });
 
   test("returns null for unsupported widget types", () => {
     expect(mapWidgetTypeToDataset("issue")).toBeNull();
-    expect(mapWidgetTypeToDataset("metrics")).toBeNull();
-    expect(mapWidgetTypeToDataset("tracemetrics")).toBeNull();
     expect(mapWidgetTypeToDataset("preprod-app-size")).toBeNull();
   });
 
   test("returns null for undefined", () => {
     expect(mapWidgetTypeToDataset(undefined)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateWidgetLayout
+// ---------------------------------------------------------------------------
+
+describe("validateWidgetLayout", () => {
+  test("GRID_COLUMNS is 6", () => {
+    expect(GRID_COLUMNS).toBe(6);
+  });
+
+  test("accepts valid layout flags", () => {
+    expect(() =>
+      validateWidgetLayout({ col: 0, row: 0, width: 3, height: 2 })
+    ).not.toThrow();
+    expect(() =>
+      validateWidgetLayout({ col: 5, row: 10, width: 1, height: 1 })
+    ).not.toThrow();
+  });
+
+  test("accepts partial layout flags", () => {
+    expect(() => validateWidgetLayout({ col: 3 })).not.toThrow();
+    expect(() => validateWidgetLayout({ width: 6 })).not.toThrow();
+    expect(() => validateWidgetLayout({ height: 4 })).not.toThrow();
+  });
+
+  test("accepts empty flags (no layout change)", () => {
+    expect(() => validateWidgetLayout({})).not.toThrow();
+  });
+
+  test("rejects col >= GRID_COLUMNS", () => {
+    expect(() => validateWidgetLayout({ col: 6 })).toThrow(ValidationError);
+    expect(() => validateWidgetLayout({ col: 100 })).toThrow(ValidationError);
+  });
+
+  test("rejects negative col", () => {
+    expect(() => validateWidgetLayout({ col: -1 })).toThrow(ValidationError);
+  });
+
+  test("rejects negative row", () => {
+    expect(() => validateWidgetLayout({ row: -1 })).toThrow(ValidationError);
+  });
+
+  test("rejects width < 1", () => {
+    expect(() => validateWidgetLayout({ width: 0 })).toThrow(ValidationError);
+    expect(() => validateWidgetLayout({ width: -1 })).toThrow(ValidationError);
+  });
+
+  test("rejects width > GRID_COLUMNS", () => {
+    expect(() => validateWidgetLayout({ width: 7 })).toThrow(ValidationError);
+  });
+
+  test("rejects height < 1", () => {
+    expect(() => validateWidgetLayout({ height: 0 })).toThrow(ValidationError);
+    expect(() => validateWidgetLayout({ height: -1 })).toThrow(ValidationError);
+  });
+
+  test("rejects col + width > GRID_COLUMNS", () => {
+    expect(() => validateWidgetLayout({ col: 4, width: 4 })).toThrow(
+      ValidationError
+    );
+    expect(() => validateWidgetLayout({ col: 5, width: 2 })).toThrow(
+      ValidationError
+    );
+  });
+
+  test("allows col + width = GRID_COLUMNS (exactly fills)", () => {
+    expect(() => validateWidgetLayout({ col: 3, width: 3 })).not.toThrow();
+    expect(() => validateWidgetLayout({ col: 0, width: 6 })).not.toThrow();
+  });
+
+  test("cross-validates with existing layout", () => {
+    const existing = { x: 4, y: 0, w: 2, h: 1 };
+    // Changing only col=5 with existing w=2 → 5+2=7 > 6
+    expect(() => validateWidgetLayout({ col: 5 }, existing)).toThrow(
+      ValidationError
+    );
+    // Changing only width=3 with existing x=4 → 4+3=7 > 6
+    expect(() => validateWidgetLayout({ width: 3 }, existing)).toThrow(
+      ValidationError
+    );
+    // Valid: col=4 with existing w=2 → 4+2=6 ≤ 6
+    expect(() => validateWidgetLayout({ col: 4 }, existing)).not.toThrow();
   });
 });
 
@@ -790,5 +1062,31 @@ describe("display type sets", () => {
     expect(TABLE_DISPLAY_TYPES.has("table")).toBe(true);
     expect(TABLE_DISPLAY_TYPES.has("top_n")).toBe(true);
     expect(TABLE_DISPLAY_TYPES.has("line")).toBe(false);
+  });
+});
+
+describe("TextResult", () => {
+  test("satisfies WidgetDataResult discriminated union", () => {
+    const result: WidgetDataResult = {
+      type: "text",
+      content: "# Hello",
+    } satisfies TextResult;
+    expect(result.type).toBe("text");
+  });
+
+  test("is included in WidgetDataResult union", () => {
+    const results: WidgetDataResult[] = [
+      { type: "timeseries", series: [] },
+      { type: "table", columns: [], rows: [] },
+      { type: "scalar", value: 42 },
+      { type: "text", content: "some markdown" },
+      { type: "unsupported", reason: "not supported" },
+      { type: "error", message: "failed" },
+    ];
+    const textResult = results.find((r) => r.type === "text");
+    expect(textResult).toBeDefined();
+    if (textResult?.type === "text") {
+      expect(textResult.content).toBe("some markdown");
+    }
   });
 });

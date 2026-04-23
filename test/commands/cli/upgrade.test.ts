@@ -15,6 +15,7 @@ import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { run } from "@stricli/core";
 import { app } from "../../../src/app.js";
+import { isEbusyError } from "../../../src/commands/cli/upgrade.js";
 import type { SentryContext } from "../../../src/context.js";
 import { CLI_VERSION } from "../../../src/lib/constants.js";
 import {
@@ -993,5 +994,36 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (Bun.spawn spy)",
       "npm-installed sentry may still appear earlier in PATH"
     );
     expect(combined).toContain("npm uninstall -g sentry");
+  });
+});
+
+describe("isEbusyError", () => {
+  test("returns true for EBUSY errno error", () => {
+    const err = new Error("EBUSY: resource busy or locked, uv_spawn");
+    (err as NodeJS.ErrnoException).code = "EBUSY";
+    expect(isEbusyError(err)).toBe(true);
+  });
+
+  test("returns false for ENOENT", () => {
+    const err = new Error("ENOENT: no such file or directory");
+    (err as NodeJS.ErrnoException).code = "ENOENT";
+    expect(isEbusyError(err)).toBe(false);
+  });
+
+  test("returns false for EACCES", () => {
+    const err = new Error("EACCES: permission denied");
+    (err as NodeJS.ErrnoException).code = "EACCES";
+    expect(isEbusyError(err)).toBe(false);
+  });
+
+  test("returns false for non-Error values", () => {
+    expect(isEbusyError("EBUSY")).toBe(false);
+    expect(isEbusyError(null)).toBe(false);
+    expect(isEbusyError(undefined)).toBe(false);
+    expect(isEbusyError(42)).toBe(false);
+  });
+
+  test("returns false for Error without code", () => {
+    expect(isEbusyError(new Error("some error"))).toBe(false);
   });
 });

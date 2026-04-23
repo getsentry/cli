@@ -12,14 +12,23 @@
 import { chmodSync, statSync } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
+import { isMusl } from "./binary.js";
 import {
   CLI_VERSION,
+  getCliEnvironment,
   getConfiguredSentryUrl,
   SENTRY_CLI_DSN,
 } from "./constants.js";
 import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
-import { ApiError, AuthError } from "./errors.js";
-import { attachSentryReporter } from "./logger.js";
+import { detectAgent, detectAgentFromProcessTree } from "./detect-agent.js";
+import { getEnv } from "./env.js";
+import {
+  classifySilenced,
+  enrichEventWithGroupingTags,
+  reportCliError,
+} from "./error-reporting.js";
+import { ApiError } from "./errors.js";
+import { attachSentryReporter, logger } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 import { getRealUsername } from "./utils.js";
 
@@ -75,6 +84,70 @@ export function markSessionCrashed(): void {
   }
 }
 
+/** Env var that disables CLI telemetry when set to `"1"`. */
+export const TELEMETRY_ENV_VAR = "SENTRY_CLI_NO_TELEMETRY";
+
+/** Industry-standard env var for opting out of telemetry (consoledonottrack.com). */
+export const DO_NOT_TRACK_ENV_VAR = "DO_NOT_TRACK";
+
+/** Result of resolving the effective telemetry state */
+export type TelemetryEffective = {
+  /** Whether telemetry is enabled after applying all overrides */
+  enabled: boolean;
+  /**
+   * Which layer determined the result:
+   * - `"env:SENTRY_CLI_NO_TELEMETRY"` — env var opt-out
+   * - `"env:DO_NOT_TRACK"` — industry-standard opt-out
+   * - `"preference"` — persistent `sentry cli defaults telemetry` setting
+   * - `"default"` — no override, telemetry enabled by default
+   */
+  source: string;
+};
+
+/**
+ * Resolve the effective telemetry state with source attribution.
+ *
+ * Priority (highest to lowest):
+ * 1. `SENTRY_CLI_NO_TELEMETRY=1` — explicit CLI env var opt-out
+ * 2. `DO_NOT_TRACK=1` — industry standard (consoledonottrack.com)
+ * 3. SQLite persistent preference — `sentry cli defaults telemetry on/off`
+ * 4. Default: enabled
+ *
+ * The DB read is wrapped in try/catch — if the database is uninitialized
+ * or corrupted, we fall through to the default (enabled).
+ */
+export function computeTelemetryEffective(): TelemetryEffective {
+  if (getEnv()[TELEMETRY_ENV_VAR] === "1") {
+    return { enabled: false, source: `env:${TELEMETRY_ENV_VAR}` };
+  }
+
+  if (getEnv()[DO_NOT_TRACK_ENV_VAR] === "1") {
+    return { enabled: false, source: `env:${DO_NOT_TRACK_ENV_VAR}` };
+  }
+
+  try {
+    const { getTelemetryPreference } = require("./db/defaults.js") as {
+      getTelemetryPreference: () => boolean | undefined;
+    };
+    const pref = getTelemetryPreference();
+    if (pref !== undefined) {
+      return { enabled: pref, source: "preference" };
+    }
+  } catch {
+    // DB not initialized yet — fall through to default
+  }
+
+  return { enabled: true, source: "default" };
+}
+
+/**
+ * Convenience wrapper: returns just the boolean enabled state.
+ * Used by `withTelemetry()` and other call sites that only need the decision.
+ */
+export function isTelemetryEnabled(): boolean {
+  return computeTelemetryEffective().enabled;
+}
+
 /**
  * Wrap CLI execution with telemetry tracking.
  *
@@ -85,16 +158,20 @@ export function markSessionCrashed(): void {
  * sessions are reliably tracked even for unhandled rejections and other
  * paths that bypass this function's try/catch.
  *
- * Telemetry can be disabled via SENTRY_CLI_NO_TELEMETRY=1 env var.
+ * Telemetry can be disabled via:
+ * - `SENTRY_CLI_NO_TELEMETRY=1` environment variable
+ * - `DO_NOT_TRACK=1` environment variable (consoledonottrack.com)
+ * - `sentry cli defaults telemetry off` (persistent preference)
  *
  * @param callback - The CLI execution function to wrap, receives the span for naming
  * @returns The result of the callback
  */
 export async function withTelemetry<T>(
-  callback: (span: Span | undefined) => T | Promise<T>
+  callback: (span: Span | undefined) => T | Promise<T>,
+  options?: { libraryMode?: boolean }
 ): Promise<T> {
-  const enabled = process.env.SENTRY_CLI_NO_TELEMETRY !== "1";
-  const client = initSentry(enabled);
+  const enabled = isTelemetryEnabled();
+  const client = initSentry(enabled, options);
   if (!client?.getOptions().enabled) {
     return callback(undefined);
   }
@@ -112,6 +189,11 @@ export async function withTelemetry<T>(
       Sentry.metrics.distribution("completion.duration_ms", entry.durationMs, {
         attributes: { command_path: entry.commandPath },
       });
+      Sentry.metrics.distribution(
+        "completion.result_count",
+        entry.resultCount,
+        { attributes: { command_path: entry.commandPath } }
+      );
     }
   } catch {
     // Queue flush is non-essential
@@ -124,10 +206,11 @@ export async function withTelemetry<T>(
         try {
           return await callback(span);
         } catch (e) {
-          // Record 4xx API errors as span attributes instead of exceptions.
-          // These are user errors (wrong ID, no access) not CLI bugs, but
-          // recording on the span lets us detect volume spikes in Discover.
-          if (isClientApiError(e)) {
+          // Record user API errors (401–499) as span attributes instead of
+          // exceptions. These are user errors (wrong ID, no access), not CLI
+          // bugs. Recording on the span lets us detect volume spikes in Discover.
+          // 400 Bad Request is NOT filtered here — it's a CLI bug.
+          if (isUserApiError(e)) {
             recordApiErrorOnSpan(span, e as ApiError);
           }
           throw e;
@@ -137,13 +220,15 @@ export async function withTelemetry<T>(
       }
     );
   } catch (e) {
-    const isExpectedAuthState =
-      e instanceof AuthError &&
-      (e.reason === "not_authenticated" || e.reason === "expired");
-    // 4xx API errors are user errors (wrong ID, no access), not CLI bugs.
-    // They're recorded as span attributes above for volume-spike detection.
-    if (!(isExpectedAuthState || isClientApiError(e))) {
-      Sentry.captureException(e);
+    // Route through reportCliError so silencing (OutputError, expected-auth
+    // AuthError, 401–499 ApiError) and fingerprint normalization are applied
+    // consistently. Silenced errors emit a `cli.error.silenced` metric +
+    // optional structured log instead of creating a Sentry issue.
+    reportCliError(e);
+    // Only mark session crashed for errors that weren't silenced.
+    // Silenced errors (OutputError, expected AuthError, user 4xx ApiError)
+    // are expected states — marking them crashed would skew release-health.
+    if (!classifySilenced(e)) {
       markSessionCrashed();
     }
     throw e;
@@ -223,16 +308,19 @@ export function isEpipeError(event: Sentry.ErrorEvent): boolean {
 }
 
 /**
- * Check if an error is a client-side (4xx) API error.
+ * Check if an error is a user-caused (401–499) API error.
  *
- * 4xx errors are user errors — wrong issue IDs, no access, invalid input —
- * not CLI bugs. These should be recorded as span attributes for volume-spike
- * detection in Discover, but should NOT be captured as Sentry exceptions.
+ * 401–499 errors are user errors — wrong issue IDs, no access, rate limited —
+ * not CLI bugs. 400 Bad Request is **excluded** because it indicates the CLI
+ * constructed a malformed API request, which is a code defect.
+ *
+ * These should be recorded as span attributes for volume-spike detection in
+ * Discover, but should NOT be captured as Sentry exceptions.
  *
  * @internal Exported for testing
  */
-export function isClientApiError(error: unknown): boolean {
-  return error instanceof ApiError && error.status >= 400 && error.status < 500;
+export function isUserApiError(error: unknown): boolean {
+  return error instanceof ApiError && error.status > 400 && error.status < 500;
 }
 
 /**
@@ -260,6 +348,26 @@ const EXCLUDED_INTEGRATIONS = new Set([
   "ContextLines", // Reads source files - we rely on uploaded sourcemaps instead
   "LocalVariables", // Captures local variables - adds significant overhead
   "Modules", // Lists all loaded modules - unnecessary for CLI telemetry
+]);
+
+/**
+ * Integrations to exclude in library mode.
+ *
+ * Extends {@link EXCLUDED_INTEGRATIONS} with integrations that register
+ * global process listeners, monkey-patch builtins, or monitor child
+ * processes — all of which would pollute the host application's runtime.
+ */
+const LIBRARY_EXCLUDED_INTEGRATIONS = new Set([
+  ...EXCLUDED_INTEGRATIONS,
+  "OnUncaughtException", // process.on('uncaughtException')
+  "OnUnhandledRejection", // process.on('unhandledRejection')
+  "ProcessSession", // process.on('beforeExit') — anonymous handler, no cleanup
+  "Http", // diagnostics_channel + trace headers
+  "NodeFetch", // diagnostics_channel + trace headers
+  "FunctionToString", // wraps Function.prototype.toString
+  "ChildProcess", // monitors child processes
+  "NodeContext", // reads OS info
+  "NodeRuntimeMetrics", // runtime metrics timer would keep host event loop alive
 ]);
 
 /**
@@ -318,14 +426,94 @@ export function getSentryTracePropagationTargets(): (string | RegExp)[] {
  * Initialize Sentry for telemetry.
  *
  * @param enabled - Whether telemetry is enabled
+ * @param options - Optional configuration
+ * @param options.libraryMode - When true, strips all global-polluting
+ *   integrations (process listeners, HTTP trace headers, Function.prototype
+ *   patches) and disables logs/client reports to avoid timers and beforeExit
+ *   handlers. The caller is responsible for calling `client.flush()` manually.
  * @returns The Sentry client, or undefined if initialization failed
  *
  * @internal Exported for testing
  */
+
+/**
+ * Set the cli.libc Sentry tag on Linux (musl for Alpine, glibc for most distros).
+ * No-op on non-Linux — the concept doesn't apply to macOS/Windows.
+ * Extracted from initSentry to stay under the cognitive complexity limit.
+ */
+function setLibcTag(): void {
+  if (process.platform !== "linux") {
+    return;
+  }
+  Sentry.setTag("cli.libc", isMusl() ? "musl" : "glibc");
+}
+
 export function initSentry(
-  enabled: boolean
+  enabled: boolean,
+  options?: { libraryMode?: boolean }
 ): Sentry.LightNodeClient | undefined {
-  const environment = process.env.NODE_ENV ?? "development";
+  const libraryMode = options?.libraryMode ?? false;
+  const environment = getCliEnvironment();
+
+  /**
+   * Ensure frame paths are absolute so Sentry's symbolicator can match them.
+   *
+   * Bun compiled binaries with `sourcemap: "linked"` produce relative
+   * paths like `"dist-bin/bin.js"` in `Error.stack`. The symbolicator's
+   * `get_release_file_candidate_urls` generates `"~dist-bin/bin.js"` for
+   * relative paths (missing the `/` after `~`), which never matches
+   * uploaded artifacts at `"~/dist-bin/bin.js"`. Prepending `/` makes
+   * the candidate `"~/dist-bin/bin.js"` — a match.
+   */
+  /** True if the path is relative (no leading `/`, no scheme, not `native`). */
+  function isRelativePath(p: string): boolean {
+    if (p.startsWith("/") || p === "native") {
+      return false;
+    }
+    return !p.includes("://");
+  }
+
+  function ensureAbsolute(p: string): string {
+    // Normalize Windows backslashes to forward slashes for sourcemap URL
+    // matching. Bun on Windows produces paths like "dist-bin\bin.js" in
+    // Error.stack — the symbolicator expects forward slashes to match
+    // artifacts at "~/dist-bin/bin.js".
+    const normalized = p.replaceAll("\\", "/");
+    return isRelativePath(normalized) ? `/${normalized}` : normalized;
+  }
+
+  function normalizeExceptionFrames(event: Sentry.ErrorEvent): void {
+    for (const exc of event.exception?.values ?? []) {
+      for (const frame of exc.stacktrace?.frames ?? []) {
+        if (frame.abs_path) {
+          frame.abs_path = ensureAbsolute(frame.abs_path);
+        }
+        if (frame.filename) {
+          frame.filename = ensureAbsolute(frame.filename);
+        }
+      }
+    }
+  }
+
+  function normalizeDebugImages(event: Sentry.ErrorEvent): void {
+    for (const img of event.debug_meta?.images ?? []) {
+      if ("code_file" in img && typeof img.code_file === "string") {
+        img.code_file = ensureAbsolute(img.code_file);
+      }
+    }
+  }
+
+  function normalizeFramePaths(event: Sentry.ErrorEvent): void {
+    normalizeExceptionFrames(event);
+    normalizeDebugImages(event);
+  }
+
+  // Close the previous client to clean up its internal timers and beforeExit
+  // handlers (client report flusher interval, log flush listener). Without
+  // this, re-initializing the SDK (e.g., in tests) leaks setInterval handles
+  // that keep the event loop alive and prevent the process from exiting.
+  // close(0) removes listeners synchronously; we don't need to await the flush.
+  Sentry.getClient()?.close(0);
 
   const client = Sentry.init({
     dsn: SENTRY_CLI_DSN,
@@ -333,15 +521,37 @@ export function initSentry(
     // Keep default integrations but filter out ones that add overhead without benefit.
     // Important: Don't use defaultIntegrations: false as it may break debug ID support.
     // NodeSystemError is excluded on runtimes missing util.getSystemErrorMap (Bun) — CLI-K1.
-    integrations: (defaults) =>
-      defaults.filter(
+    // Library mode uses the extended exclusion set to avoid polluting the host process.
+    integrations: (defaults) => {
+      const excluded = libraryMode
+        ? LIBRARY_EXCLUDED_INTEGRATIONS
+        : EXCLUDED_INTEGRATIONS;
+      const filtered = defaults.filter(
         (integration) =>
-          !EXCLUDED_INTEGRATIONS.has(integration.name) &&
+          !excluded.has(integration.name) &&
           (integration.name !== "NodeSystemError" || hasGetSystemErrorMap)
-      ),
+      );
+
+      // Collect runtime metrics (CPU, memory, event loop) for non-library mode.
+      // Uses nodeRuntimeMetricsIntegration which degrades gracefully on Bun:
+      // monitorEventLoopDelay is try/caught, all other APIs are Bun-compatible.
+      // 5s interval for CLI — most commands complete in <10s.
+      if (!libraryMode) {
+        filtered.push(
+          Sentry.nodeRuntimeMetricsIntegration({ collectionIntervalMs: 5000 })
+        );
+      }
+
+      return filtered;
+    },
     environment,
-    // Enable Sentry structured logs for non-exception telemetry (e.g., unexpected input warnings)
-    enableLogs: true,
+    // Enable Sentry structured logs for non-exception telemetry (e.g., unexpected input warnings).
+    // Disabled when telemetry is off or in library mode — the SDK registers
+    // beforeExit handlers for log flushing that keep the event loop alive.
+    enableLogs: enabled && !libraryMode,
+    // Disable client reports when telemetry is off or in library mode — the SDK
+    // registers a setInterval + beforeExit handler that keep the event loop alive.
+    ...((libraryMode || !enabled) && { sendClientReports: false }),
     // Sample all events for CLI telemetry (low volume)
     tracesSampleRate: 1,
     sampleRate: 1,
@@ -365,9 +575,25 @@ export function initSentry(
         return null;
       }
 
-      return event;
+      // Normalize relative frame paths to absolute. Bun's compiled binaries
+      // with sourcemap: "linked" produce relative paths like "dist-bin/bin.js"
+      // in Error.stack. Sentry's symbolicator only matches absolute paths
+      // when generating tilde-prefixed URL candidates (e.g., "~/dist-bin/bin.js"),
+      // silently skipping resolution for relative paths.
+      normalizeFramePaths(event);
+
+      // Enrich events with cli_error.* tags for server-side fingerprint rules.
+      // reportCliError already sets these for command-level errors; this
+      // catches uncaught exceptions and best-effort background captures.
+      return enrichEventWithGroupingTags(event);
     },
   });
+
+  // Always remove our own previous handler on re-init.
+  if (currentBeforeExitHandler) {
+    process.removeListener("beforeExit", currentBeforeExitHandler);
+    currentBeforeExitHandler = null;
+  }
 
   if (client?.getOptions().enabled) {
     const isBun = typeof process.versions.bun !== "undefined";
@@ -392,6 +618,28 @@ export function initSentry(
     // Tag whether running in an interactive terminal or agent/CI environment
     Sentry.setTag("is_tty", !!process.stdout.isTTY);
 
+    // Tag the C library variant on Linux (musl vs glibc).
+    setLibcTag();
+
+    // Tag which AI agent (if any) is driving the CLI.
+    // Env var detection is sync (instant). If no env var matches, fire off
+    // async process tree detection in the background — it sets the tag
+    // before the transaction finishes without blocking CLI startup.
+    const agent = detectAgent();
+    if (agent) {
+      Sentry.setTag("agent", agent);
+    } else {
+      detectAgentFromProcessTree()
+        .then((processAgent) => {
+          if (processAgent) {
+            Sentry.setTag("agent", processAgent);
+          }
+        })
+        .catch((error) => {
+          logger.withTag("agent").warn("Process tree detection failed:", error);
+        });
+    }
+
     // Wire up consola → Sentry log forwarding now that the client is active
     attachSentryReporter();
 
@@ -403,14 +651,12 @@ export function initSentry(
     // paths that bypass withTelemetry's try/catch.
     // Ref: https://nodejs.org/api/process.html#event-beforeexit
     //
-    // Replace previous handler on re-init (e.g., auto-login retry calls
-    // withTelemetry → initSentry twice) to avoid duplicate handlers with
-    // independent re-entry guards and stale client references.
-    if (currentBeforeExitHandler) {
-      process.removeListener("beforeExit", currentBeforeExitHandler);
+    // Skipped in library mode — the host owns the process lifecycle.
+    // The library entry point calls client.flush() manually after completion.
+    if (!libraryMode) {
+      currentBeforeExitHandler = createBeforeExitHandler(client);
+      process.on("beforeExit", currentBeforeExitHandler);
     }
-    currentBeforeExitHandler = createBeforeExitHandler(client);
-    process.on("beforeExit", currentBeforeExitHandler);
   }
 
   return client;
@@ -544,6 +790,23 @@ export function setArgsContext(args: readonly unknown[]): void {
       typeof arg === "string" ? arg : JSON.stringify(arg)
     ),
     count: args.length,
+  });
+}
+
+/**
+ * Record a cache hit or miss as a distribution metric (0 or 100).
+ *
+ * Emitting 0 for miss and 100 for hit allows computing hit rate as
+ * `avg(value,cache.hit_rate,distribution,none)` on the tracemetrics
+ * dashboard — Sentry doesn't support division in widgets, so this
+ * pre-computed approach gives us percentages directly.
+ *
+ * @param cacheName - Identifier for the cache (e.g., "dsn", "project", "region", "http")
+ * @param hit - Whether the cache lookup was a hit
+ */
+export function recordCacheHit(cacheName: string, hit: boolean): void {
+  Sentry.metrics.distribution("cache.hit_rate", hit ? 100 : 0, {
+    attributes: { cache_name: cacheName },
   });
 }
 

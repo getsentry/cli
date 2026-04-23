@@ -24,6 +24,7 @@ import {
 import { buildDashboardUrl } from "../../lib/sentry-urls.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import type { DashboardDetail } from "../../types/dashboard.js";
+import { enrichDashboardError } from "./resolve.js";
 
 type CreateFlags = {
   readonly json: boolean;
@@ -100,7 +101,9 @@ async function resolveDashboardTarget(
     case "project-search": {
       const found = await resolveProjectBySlug(
         parsed.projectSlug,
-        "sentry dashboard create <org>/<project> <title>"
+        "sentry dashboard create <org>/<project> <title>",
+        undefined,
+        parsed.originalSlug
       );
       const pid = toNumericId(found.projectData.id);
       return {
@@ -152,6 +155,7 @@ export const createCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
+        placeholder: "org/project/title",
         brief: "[<org/project>] <title>",
         parse: String,
       },
@@ -169,7 +173,9 @@ export const createCommand = buildCommand({
       title,
       widgets: [],
       projects: projectIds.length > 0 ? projectIds : undefined,
-    });
+    }).catch((error: unknown) =>
+      enrichDashboardError(error, { orgSlug, operation: "create" })
+    );
     const url = buildDashboardUrl(orgSlug, dashboard.id);
 
     yield new CommandOutput({ ...dashboard, url } as CreateResult);

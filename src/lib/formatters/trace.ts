@@ -10,6 +10,8 @@ import type {
   TraceSpan,
   TransactionListItem,
 } from "../../types/index.js";
+import type { TraceItemDetail } from "../api/traces.js";
+import { REDUNDANT_DETAIL_ATTRS } from "../api/traces.js";
 import {
   colorTag,
   escapeMarkdownCell,
@@ -295,6 +297,8 @@ export type FlatSpan = {
   start_timestamp: number;
   project_slug?: string;
   transaction?: string;
+  /** Custom attributes from --fields (index signature) */
+  [key: string]: unknown;
 };
 
 /** Result of finding a span by ID in the tree */
@@ -378,11 +382,19 @@ export function translateSpanQuery(query: string): string {
 /**
  * Map a SpanListItem from the EAP spans endpoint to a FlatSpan for display.
  *
+ * When `extraFieldNames` are provided (from `--fields` API expansion), the
+ * corresponding values are copied from the raw API item into the flat span.
+ * Known output fields are never overwritten by extra fields.
+ *
  * @param item - Span item from the spans search API
+ * @param extraFieldNames - Additional API field names to copy into the flat span
  * @returns FlatSpan suitable for table display
  */
-export function spanListItemToFlatSpan(item: SpanListItem): FlatSpan {
-  return {
+export function spanListItemToFlatSpan(
+  item: SpanListItem,
+  extraFieldNames?: string[]
+): FlatSpan {
+  const flat: FlatSpan = {
     span_id: item.id,
     parent_span_id: item.parent_span ?? undefined,
     op: item["span.op"] ?? undefined,
@@ -392,7 +404,26 @@ export function spanListItemToFlatSpan(item: SpanListItem): FlatSpan {
     project_slug: item.project,
     transaction: item.transaction ?? undefined,
   };
+  if (extraFieldNames) {
+    const raw = item as Record<string, unknown>;
+    for (const name of extraFieldNames) {
+      if (name in raw && !(name in flat)) {
+        flat[name] = raw[name];
+      }
+    }
+  }
+  return flat;
 }
+
+/**
+ * Project column — auto-prepended when spans come from multiple projects.
+ * @see formatSpanTable
+ */
+const PROJECT_COLUMN: Column<FlatSpan> = {
+  header: "Project",
+  value: (s) => escapeMarkdownCell(s.project_slug || "—"),
+  minWidth: 8,
+};
 
 /** Column definitions for the flat span table */
 const SPAN_TABLE_COLUMNS: Column<FlatSpan>[] = [
@@ -426,16 +457,54 @@ const SPAN_TABLE_COLUMNS: Column<FlatSpan>[] = [
 ];
 
 /**
+ * Build dynamic columns for extra attributes requested via `--fields`.
+ *
+ * Each extra field gets a column whose value is stringified from the flat
+ * span's index-signature entry, falling back to "—" when absent.
+ */
+function buildExtraColumns(extraColumns: string[]): Column<FlatSpan>[] {
+  return extraColumns.map((name) => ({
+    header: name,
+    value: (s: FlatSpan) => {
+      const v = s[name];
+      if (v === undefined || v === null) {
+        return "—";
+      }
+      return escapeMarkdownCell(String(v));
+    },
+  }));
+}
+
+/**
  * Format a flat span list as a rendered table string.
+ *
+ * When spans come from multiple projects, a "Project" column is automatically
+ * prepended so the user can see which service each span belongs to.
+ *
+ * When `extraColumns` are provided, additional columns are appended after the
+ * standard columns for custom attributes requested via `--fields`.
  *
  * Prefer this in return-based command output pipelines.
  * Uses {@link formatTable} (return-based) internally.
  *
  * @param spans - Flat span array to display
+ * @param extraColumns - Additional column names from --fields API expansion
  * @returns Rendered table string
  */
-export function formatSpanTable(spans: FlatSpan[]): string {
-  return formatTable(spans, SPAN_TABLE_COLUMNS, { truncate: true });
+export function formatSpanTable(
+  spans: FlatSpan[],
+  extraColumns?: string[]
+): string {
+  // Auto-add Project column when spans come from multiple projects
+  const projects = new Set(spans.map((s) => s.project_slug).filter(Boolean));
+  const baseColumns =
+    projects.size > 1
+      ? [PROJECT_COLUMN, ...SPAN_TABLE_COLUMNS]
+      : SPAN_TABLE_COLUMNS;
+  const columns = extraColumns?.length
+    ? [...baseColumns, ...buildExtraColumns(extraColumns)]
+    : baseColumns;
+  return formatTable(spans, columns, { truncate: true });
 }
 
 /**
@@ -515,9 +584,16 @@ function formatAncestorChain(ancestors: TraceSpan[]): string {
 export function formatSpanDetails(
   span: TraceSpan,
   ancestors: TraceSpan[],
-  traceId: string
+  traceId: string,
+  detail?: TraceItemDetail
 ): string {
   const kvRows = buildSpanKvRows(span, traceId);
+
+  // Append custom attributes from trace-items endpoint when available
+  if (detail) {
+    appendAttributeRows(kvRows, detail);
+  }
+
   const md = `## Span \`${span.span_id}\`\n\n${mdKvTable(kvRows)}\n`;
   let output = renderMarkdown(md);
 
@@ -532,4 +608,36 @@ export function formatSpanDetails(
   }
 
   return output;
+}
+
+/** Max custom attributes to show in human output before truncation */
+const MAX_DISPLAY_ATTRS = 10;
+
+/**
+ * Append notable custom attributes from a TraceItemDetail to KV rows.
+ * Filters out redundant/internal attributes and truncates after a limit.
+ */
+function appendAttributeRows(
+  kvRows: [string, string][],
+  detail: TraceItemDetail
+): void {
+  const attrs = detail.attributes.filter(
+    (a) => !(REDUNDANT_DETAIL_ATTRS.has(a.name) || a.name.startsWith("tags["))
+  );
+  if (attrs.length === 0) {
+    return;
+  }
+
+  const shown = attrs.slice(0, MAX_DISPLAY_ATTRS);
+  for (const attr of shown) {
+    if (attr.value !== undefined && attr.value !== null && attr.value !== "") {
+      kvRows.push([attr.name, escapeMarkdownCell(String(attr.value))]);
+    }
+  }
+  if (attrs.length > MAX_DISPLAY_ATTRS) {
+    kvRows.push([
+      "...",
+      `${attrs.length - MAX_DISPLAY_ATTRS} more (use --json)`,
+    ]);
+  }
 }

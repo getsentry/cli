@@ -4,57 +4,32 @@
  * Handles the common pattern of JSON vs human-readable output
  * that appears in most CLI commands.
  *
- * Two usage modes:
+ * Declare formatting in {@link OutputConfig} on `buildCommand`, then
+ * yield data from the generator:
+ * ```ts
+ * buildCommand({
+ *   output: { human: formatUser },
+ *   async *func() { yield new CommandOutput(data); },
+ * })
+ * ```
+ * The wrapper reads `json`/`fields` from flags and applies formatting
+ * automatically. Generators return `{ hint }` for footer text.
  *
- * 1. **Imperative** — call {@link writeOutput} directly from the command:
- *    ```ts
- *    writeOutput(stdout, data, { json, formatHuman, hint });
- *    ```
- *
- * 2. **Yield-based** — declare formatting in {@link OutputConfig} on
- *    `buildCommand`, then yield data from the generator:
- *    ```ts
- *    buildCommand({
- *      output: { human: formatUser },
- *      async *func() { yield new CommandOutput(data); },
- *    })
- *    ```
- *    The wrapper reads `json`/`fields` from flags and applies formatting
- *    automatically. Generators return `{ hint }` for footer text.
- *
- * Both modes serialize the same data object to JSON and pass it to
- * `formatHuman` — there is no divergent-data path.
+ * The same data object is serialized to JSON and passed to the human
+ * formatter — there is no divergent-data path.
  */
 
+import type { ZodType } from "zod";
 import type { Writer } from "../../types/index.js";
 import { plainSafeMuted } from "./human.js";
-import { formatJson, writeJson } from "./json.js";
+import { filterFields, formatJson } from "./json.js";
 
 // ---------------------------------------------------------------------------
-// Shared option types
+// Zero-copy object capture (library mode)
 // ---------------------------------------------------------------------------
 
-/**
- * Options for {@link writeOutput} when JSON and human data share the same type.
- *
- * Most commands fetch data and then either serialize it to JSON or format it
- * for the terminal — use this form when the same object works for both paths.
- */
-type WriteOutputOptions<T> = {
-  /** Output JSON format instead of human-readable */
-  json: boolean;
-  /** Pre-parsed field paths to include in JSON output (from `--fields`) */
-  fields?: string[];
-  /** Function to format data as a rendered string */
-  formatHuman: (data: T) => string;
-  /** Short hint appended after human output (suppressed in JSON mode) */
-  hint?: string;
-  /** Footer hint shown after human output (suppressed in JSON mode) */
-  footer?: string;
-};
-
 // ---------------------------------------------------------------------------
-// Return-based output config (declared on buildCommand)
+// Output config (declared on buildCommand)
 // ---------------------------------------------------------------------------
 
 /**
@@ -158,6 +133,18 @@ export type OutputConfig<T> = {
    * When `jsonTransform` is set, `jsonExclude` is ignored.
    */
   jsonTransform?: (data: T, fields?: string[]) => unknown;
+  /**
+   * Zod schema describing the shape of JSON output (after transform/exclude).
+   *
+   * For list commands with {@link jsonTransform}, this should describe the
+   * **item** type (what `--fields` operates on), not the envelope.
+   *
+   * Used for:
+   * - `--help` output: appends available JSON fields to the command description
+   * - `sentry help <cmd>`: structured field documentation
+   * - `generate-skill.ts`: SKILL.md field tables for AI agents
+   */
+  schema?: ZodType;
 };
 
 /**
@@ -264,17 +251,18 @@ function applyJsonExclude(
 }
 
 /**
- * Write a JSON-transformed value to stdout.
+ * Write a final JSON object to stdout.
  *
- * `undefined` suppresses the chunk entirely (e.g. streaming text-only
- * chunks in JSON mode). All other values are serialized as a single
- * JSON line.
+ * When the writer supports zero-copy capture (library mode), the object
+ * is handed off directly without serialization. Otherwise it is
+ * JSON-stringified and written as a single line.
  */
-function writeTransformedJson(stdout: Writer, transformed: unknown): void {
-  if (transformed === undefined) {
+function emitJsonObject(stdout: Writer, obj: unknown): void {
+  if (stdout.captureObject) {
+    stdout.captureObject(obj);
     return;
   }
-  stdout.write(`${formatJson(transformed)}\n`);
+  stdout.write(`${formatJson(obj)}\n`);
 }
 
 /**
@@ -305,10 +293,20 @@ export function renderCommandOutput(
 ): void {
   if (ctx.json) {
     if (config.jsonTransform) {
-      writeTransformedJson(stdout, config.jsonTransform(data, ctx.fields));
+      const transformed = config.jsonTransform(data, ctx.fields);
+      if (transformed === undefined) {
+        return;
+      }
+      emitJsonObject(stdout, transformed);
       return;
     }
-    writeJson(stdout, applyJsonExclude(data, config.jsonExclude), ctx.fields);
+
+    const excluded = applyJsonExclude(data, config.jsonExclude);
+    const final =
+      ctx.fields && ctx.fields.length > 0
+        ? filterFields(excluded, ctx.fields)
+        : excluded;
+    emitJsonObject(stdout, final);
     return;
   }
 
@@ -320,36 +318,130 @@ export function renderCommandOutput(
 }
 
 // ---------------------------------------------------------------------------
-// Imperative output
+// Schema introspection
 // ---------------------------------------------------------------------------
 
 /**
- * Write formatted output to stdout based on output format.
+ * Field metadata extracted from a Zod schema for documentation.
  *
- * Handles the common JSON-vs-human pattern used across commands:
- * - JSON mode: serialize data with optional field filtering
- * - Human mode: call `formatHuman`, then optionally print `hint` and `footer`
+ * Populated by {@link extractSchemaFields} and consumed by:
+ * - `introspect.ts` → `CommandInfo.jsonFields`
+ * - `help.ts` → human help output
+ * - `generate-skill.ts` → SKILL.md field tables
  */
-export function writeOutput<T>(
-  stdout: Writer,
-  data: T,
-  options: WriteOutputOptions<T>
-): void {
-  if (options.json) {
-    writeJson(stdout, data, options.fields);
-    return;
+export type SchemaFieldInfo = {
+  /** Field name (top-level key in the JSON object) */
+  name: string;
+  /** Human-readable type string (e.g. "string", "number", "object", "string | null") */
+  type: string;
+  /** Description from `z.describe()` */
+  description?: string;
+  /** Whether the field is optional in the schema */
+  optional: boolean;
+};
+
+/**
+ * Map a Zod type's internal `typeName` to a human-readable string.
+ *
+ * Unwraps wrapper types (Optional, Nullable, Default) and builds a
+ * composite type string (e.g. "string | null" for ZodNullable<ZodString>).
+ */
+function zodTypeToString(schema: ZodType): { type: string; optional: boolean } {
+  const def = (schema as { _def?: { typeName?: string; innerType?: ZodType } })
+    ._def;
+  if (!def?.typeName) {
+    return { type: "unknown", optional: false };
   }
 
-  const text = options.formatHuman(data);
-  stdout.write(`${text}\n`);
-
-  if (options.hint) {
-    stdout.write(`\n${plainSafeMuted(options.hint)}\n`);
+  // Unwrap wrapper types recursively
+  if (def.typeName === "ZodOptional" && def.innerType) {
+    const inner = zodTypeToString(def.innerType);
+    return { type: inner.type, optional: true };
+  }
+  if (def.typeName === "ZodNullable" && def.innerType) {
+    const inner = zodTypeToString(def.innerType);
+    const nullableType = inner.type.includes(" | null")
+      ? inner.type
+      : `${inner.type} | null`;
+    return { type: nullableType, optional: inner.optional };
+  }
+  if (def.typeName === "ZodDefault" && def.innerType) {
+    return zodTypeToString(def.innerType);
   }
 
-  if (options.footer) {
-    writeFooter(stdout, options.footer);
+  const TYPE_MAP: Record<string, string> = {
+    ZodString: "string",
+    ZodNumber: "number",
+    ZodBoolean: "boolean",
+    ZodObject: "object",
+    ZodArray: "array",
+    ZodUnknown: "unknown",
+    ZodAny: "any",
+    ZodEnum: "string",
+  };
+
+  return { type: TYPE_MAP[def.typeName] ?? "unknown", optional: false };
+}
+
+/**
+ * Extract field metadata from a Zod object schema.
+ *
+ * Returns an array of {@link SchemaFieldInfo} describing each top-level
+ * field's name, type, description, and optionality. Returns an empty
+ * array for non-object schemas.
+ *
+ * @param schema - A Zod schema (typically `z.object({...})`)
+ */
+export function extractSchemaFields(schema: ZodType): SchemaFieldInfo[] {
+  const def = (
+    schema as {
+      _def?: { typeName?: string };
+      shape?: Record<string, ZodType>;
+    }
+  )._def;
+
+  if (def?.typeName !== "ZodObject") {
+    return [];
   }
+
+  const shape = (schema as { shape?: Record<string, ZodType> }).shape;
+  if (!shape) {
+    return [];
+  }
+
+  return Object.entries(shape).map(([name, fieldSchema]) => {
+    const { type, optional } = zodTypeToString(fieldSchema);
+    const fieldDef = (fieldSchema as { description?: string }).description;
+    return {
+      name,
+      type,
+      description: fieldDef,
+      optional,
+    };
+  });
+}
+
+/**
+ * Format schema fields as a help text block for `--help` output.
+ *
+ * Produces a compact field list like:
+ * ```
+ * JSON fields (use --json --fields to select):
+ *   id (string) — Numeric issue ID
+ *   count (string, optional) — Total event count
+ * ```
+ */
+export function formatSchemaForHelp(fields: SchemaFieldInfo[]): string {
+  if (fields.length === 0) {
+    return "";
+  }
+  const lines = ["JSON fields (use --json --fields to select):"];
+  for (const field of fields) {
+    const optStr = field.optional ? ", optional" : "";
+    const desc = field.description ? ` — ${field.description}` : "";
+    lines.push(`  ${field.name} (${field.type}${optStr})${desc}`);
+  }
+  return lines.join("\n");
 }
 
 /** Format footer text (muted in TTY, plain when piped, with surrounding newlines). */

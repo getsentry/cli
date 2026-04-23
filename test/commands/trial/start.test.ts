@@ -173,7 +173,7 @@ describe("trial start command", () => {
     const func = await startCommand.loader();
 
     await expect(func.call(context, { json: false }, "seer")).rejects.toThrow(
-      "Organization"
+      "organization"
     );
   });
 

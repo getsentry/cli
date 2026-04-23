@@ -9,9 +9,7 @@
 import type { SentryContext } from "../../context.js";
 import { getCurrentUser } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
-import { isAuthenticated } from "../../lib/db/auth.js";
 import { setUserInfo } from "../../lib/db/user.js";
-import { AuthError } from "../../lib/errors.js";
 import { formatUserIdentity } from "../../lib/formatters/index.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
@@ -45,10 +43,6 @@ export const whoamiCommand = buildCommand({
   },
   async *func(this: SentryContext, flags: WhoamiFlags) {
     applyFreshFlag(flags);
-
-    if (!isAuthenticated()) {
-      throw new AuthError("not_authenticated");
-    }
 
     const user = await getCurrentUser();
 

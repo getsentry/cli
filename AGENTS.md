@@ -61,6 +61,14 @@ bun run test:unit                        # Run unit tests only
 bun run test:e2e                         # Run e2e tests only
 ```
 
+## Rules: No Runtime Dependencies
+
+**CRITICAL**: All packages must be in `devDependencies`, never `dependencies`. Everything is bundled at build time via esbuild. CI enforces this with `bun run check:deps`.
+
+When adding a package, always use `bun add -d <package>` (the `-d` flag).
+
+When the `@sentry/api` SDK provides types for an API response, import them directly from `@sentry/api` instead of creating redundant Zod schemas in `src/types/sentry.ts`.
+
 ## Rules: Use Bun APIs
 
 **CRITICAL**: This project uses Bun as runtime. Always prefer Bun-native APIs over Node.js equivalents.
@@ -104,18 +112,25 @@ cli/
 │   ├── app.ts              # Stricli application setup
 │   ├── context.ts          # Dependency injection context
 │   ├── commands/           # CLI commands
-│   │   ├── auth/           # login, logout, status, refresh
-│   │   ├── event/          # view
-│   │   ├── issue/          # list, view, explain, plan
-│   │   ├── org/            # list, view
-│   │   ├── project/        # list, view
-│   │   ├── span/           # list, view
-│   │   ├── trace/          # list, view, logs
+│   │   ├── auth/           # login, logout, refresh, status, token, whoami
+│   │   ├── cli/            # defaults, feedback, fix, setup, upgrade
+│   │   ├── dashboard/      # list, view, create, widget (add, edit, delete)
+│   │   ├── event/          # list, view
+│   │   ├── issue/          # list, view, events, explain, plan, resolve, unresolve, merge
 │   │   ├── log/            # list, view
+│   │   ├── org/            # list, view
+│   │   ├── project/        # list, view, create, delete
+│   │   ├── release/        # list, view, create, finalize, delete, deploy, deploys, set-commits, propose-version
+│   │   ├── repo/           # list
+│   │   ├── sourcemap/      # inject, upload
+│   │   ├── span/           # list, view
+│   │   ├── team/           # list
+│   │   ├── trace/          # list, view, logs
 │   │   ├── trial/          # list, start
-│   │   ├── cli/            # fix, upgrade, feedback, setup
 │   │   ├── api.ts          # Direct API access command
-│   │   └── help.ts         # Help command
+│   │   ├── help.ts         # Help command
+│   │   ├── init.ts         # Initialize Sentry in your project (experimental)
+│   │   └── schema.ts       # Browse the Sentry API schema
 │   ├── lib/                # Shared utilities
 │   │   ├── command.ts      # buildCommand wrapper (telemetry + output)
 │   │   ├── api-client.ts   # Barrel re-export for API modules
@@ -261,6 +276,40 @@ export const myCommand = buildCommand({
 - The wrapper auto-injects `--json` and `--fields` flags. Do NOT add your own `json` flag.
 - Do NOT use `stdout.write()` or `if (flags.json)` branching — the wrapper handles it.
 
+### Route Maps (Stricli)
+
+Route groups use Stricli's `buildRouteMap` wrapped by `src/lib/route-map.ts`.
+
+**CRITICAL**: Import `buildRouteMap` from `../../lib/route-map.js`, **NEVER** from `@stricli/core` directly — the wrapper auto-injects standard subcommand aliases based on which route keys exist:
+
+| Route    | Auto-aliases   |
+|----------|----------------|
+| `list`   | `ls`           |
+| `view`   | `show`         |
+| `delete` | `remove`, `rm` |
+| `create` | `new`          |
+
+Manually specified aliases in `aliases` are merged with (and take precedence over) auto-generated ones. Do NOT manually add aliases that are already in the standard set above.
+
+```typescript
+import { buildRouteMap } from "../../lib/route-map.js";
+
+export const myRoute = buildRouteMap({
+  routes: {
+    list: listCommand,
+    view: viewCommand,
+    create: createCommand,
+  },
+  defaultCommand: "view",
+  // No need for aliases — ls, show, and new are auto-injected.
+  // Only add aliases for non-standard mappings:
+  // aliases: { custom: "list" },
+  docs: {
+    brief: "Manage my resources",
+  },
+});
+```
+
 ### Positional Arguments
 
 Use `parseSlashSeparatedArg` from `src/lib/arg-parsing.ts` for the standard `[<org>/<project>/]<id>` pattern. Required identifiers (trace IDs, span IDs) should be **positional args**, not flags.
@@ -287,6 +336,50 @@ All non-trivial human output must use the markdown rendering pipeline:
 - `isPlainOutput()` lives in `src/lib/formatters/plain-detect.ts` (re-exported from `markdown.ts` for compat)
 
 Reference: `formatters/trace.ts` (`formatAncestorChain`), `formatters/human.ts` (`plainSafeMuted`)
+
+### Create & Delete Command Standards
+
+Mutation (create/delete) commands use shared infrastructure from `src/lib/mutate-command.ts`,
+paralleling `list-command.ts` for list commands.
+
+**Delete commands** MUST use `buildDeleteCommand()` instead of `buildCommand()`. It:
+1. Auto-injects `--yes`, `--force`, `--dry-run` flags with `-y`, `-f`, `-n` aliases
+2. Runs a non-interactive safety guard before `func()` — refuses to proceed if
+   stdin is not a TTY and `--yes`/`--force` was not passed (dry-run bypasses)
+3. Options to skip specific injections (`noForceFlag`, `noDryRunFlag`, `noNonInteractiveGuard`)
+
+```typescript
+import { buildDeleteCommand, confirmByTyping, isConfirmationBypassed, requireExplicitTarget } from "../../lib/mutate-command.js";
+
+export const deleteCommand = buildDeleteCommand({
+  // Same args as buildCommand — flags/aliases auto-injected
+  async *func(this: SentryContext, flags, target) {
+    requireExplicitTarget(parsed, "Entity", "sentry entity delete <target>");
+    if (flags["dry-run"]) { yield preview; return; }
+    if (!isConfirmationBypassed(flags)) {
+      if (!await confirmByTyping(expected, promptMessage)) return;
+    }
+    await doDelete();
+  },
+});
+```
+
+**Create commands** import `DRY_RUN_FLAG` and `DRY_RUN_ALIASES` for consistent dry-run support:
+
+```typescript
+import { DRY_RUN_FLAG, DRY_RUN_ALIASES } from "../../lib/mutate-command.js";
+
+// In parameters:
+flags: { "dry-run": DRY_RUN_FLAG, team: { ... } },
+aliases: { ...DRY_RUN_ALIASES, t: "team" },
+```
+
+**Key utilities** in `mutate-command.ts`:
+- `isConfirmationBypassed(flags)` — true if `--yes` or `--force` is set
+- `guardNonInteractive(flags)` — throws in non-interactive mode without `--yes`
+- `confirmByTyping(expected, message)` — type-out confirmation prompt
+- `requireExplicitTarget(parsed, entityType, usage)` — blocks auto-detect for safety
+- `DESTRUCTIVE_FLAGS` / `DESTRUCTIVE_ALIASES` — spreadable bundles for manual use
 
 ### List Command Pagination
 
@@ -403,10 +496,14 @@ All normalize to lowercase. Throw `ValidationError` on invalid input.
 
 Use `"date"` for timestamp-based sort (not `"time"`). Export sort types from the API layer (e.g., `SpanSortValue` from `api/traces.ts`), import in commands. This matches `issue list`, `trace list`, and `span list`.
 
-### SKILL.md
+### Generated Docs & Skills
 
-- Run `bun run generate:skill` after changing any command parameters, flags, or docs.
-- CI check `bun run check:skill` will fail if SKILL.md is stale.
+All command docs and skill files are generated via `bun run generate:docs` (which runs `generate:command-docs` then `generate:skill`). This runs automatically as part of `dev`, `build`, `typecheck`, and `test` scripts.
+
+- **Command docs** (`docs/src/content/docs/commands/*.md`) are **gitignored** and generated from CLI metadata + hand-written fragments in `docs/src/fragments/commands/`.
+- **Skill files** (`plugins/sentry-cli/skills/sentry-cli/`) are **committed** (consumed by external plugin systems) and auto-committed by CI when stale.
+- Edit fragments in `docs/src/fragments/commands/` for custom examples and guides.
+- `bun run check:fragments` validates fragment ↔ route consistency.
 - Positional `placeholder` values must be descriptive: `"org/project/trace-id"` not `"args"`.
 
 ### Zod Schemas for Validation
@@ -887,87 +984,93 @@ mock.module("./some-module", () => ({
 | Add E2E tests | `test/e2e/` |
 | Test helpers | `test/model-based/helpers.ts` |
 | Add documentation | `docs/src/content/docs/` |
+| Hand-written command doc content | `docs/src/fragments/commands/` |
 
-<!-- This section is maintained by the coding agent via lore (https://github.com/BYK/opencode-lore) -->
+<!-- This section is maintained by the coding agent via lore (https://github.com/BYK/loreai) -->
 ## Long-term Knowledge
 
 ### Architecture
 
-<!-- lore:019ce2be-39f1-7ad9-a4c5-4506b62f689c -->
-* **api-client.ts split into domain modules under src/lib/api/**: The original monolithic \`src/lib/api-client.ts\` (1,977 lines) was split into 12 focused domain modules under \`src/lib/api/\`: infrastructure.ts (shared helpers, types, raw requests), organizations.ts, projects.ts, teams.ts, repositories.ts, issues.ts, events.ts, traces.ts, logs.ts, seer.ts, trials.ts, users.ts. The original \`api-client.ts\` was converted to a ~100-line barrel re-export file preserving all existing import paths. The \`biome.jsonc\` override for \`noBarrelFile\` already includes \`api-client.ts\`. When adding new API functions, place them in the appropriate domain module under \`src/lib/api/\`, not in the barrel file.
+<!-- lore:019d2c68-e14a-7bd2-aa25-4aabb481c08f -->
+* **Dashboard widget interval computed from terminal width and layout before API calls**: Dashboard widget interval from terminal width: \`computeOptimalInterval()\` in \`src/lib/api/dashboards.ts\` calculates chart interval before API calls. Formula: \`colWidth = floor(layout.w / 6 \* termWidth)\`, \`chartWidth = colWidth - 4 - gutterW\`, \`idealSeconds = periodSeconds / chartWidth\`. Snaps to nearest Sentry bucket (1m–1d). \`periodToSeconds()\` parses \`"24h"\`, \`"7d"\` etc. \`queryWidgetTimeseries\` uses \`params.interval ?? widget.interval\`.
 
-<!-- lore:019d0b69-1430-74f0-8e9a-426a5c7b321d -->
-* **Bun compiled binary sourcemap options and size impact**: Binary build (\`script/build.ts\`) uses two steps: (1) \`Bun.build()\` produces \`dist-bin/bin.js\` + \`.map\` with \`sourcemap: "linked"\` and minification. (2) \`Bun.build()\` with \`compile: true\` produces native binary — no sourcemap embedded. Bun's compiled binaries use \`/$bunfs/root/bin.js\` as the virtual path in stack traces. Sourcemap upload must use \`--url-prefix '/$bunfs/root/'\` so Sentry can match frames. The upload runs \`sentry-cli sourcemaps inject dist-bin/\` first (adds debug IDs), then uploads both JS and map. Bun's compile step strips comments (including \`//# debugId=\`), but debug ID matching still works via the injected runtime snippet + URL prefix matching. Size: +0.04 MB gzipped vs +2.30 MB for inline sourcemaps. Without \`SENTRY\_AUTH\_TOKEN\`, upload is skipped gracefully.
+<!-- lore:019cafbb-24ad-75a3-b037-5efbe6a1e85d -->
+* **DSN org prefix normalization in arg-parsing.ts**: DSN/numeric org prefix normalization — four code paths must all convert to slugs before API calls (many endpoints reject numeric org IDs with 404/403): (1) \`extractOrgIdFromHost\` strips \`o\` prefix during DSN parsing. (2) \`stripDsnOrgPrefix()\` handles user-typed \`o1081365/\` in \`parseOrgProjectArg()\`. (3) \`normalizeNumericOrg()\` in \`resolve-target.ts\` resolves bare numeric IDs via DB cache or uncached API call. (4) Dashboard's \`resolveOrgFromTarget()\` pipes through \`resolveEffectiveOrg()\`, also used by \`tryResolveRecoveryOrg()\` in hex-id-recovery.
 
-<!-- lore:019cb8ea-c6f0-75d8-bda7-e32b4e217f92 -->
-* **CLI telemetry DSN is public write-only — safe to embed in install script**: The CLI's Sentry DSN (\`SENTRY\_CLI\_DSN\` in \`src/lib/constants.ts\`) is a public write-only ingest key already baked into every binary. Safe to hardcode in install scripts. Opt-out: \`SENTRY\_CLI\_NO\_TELEMETRY=1\`.
+<!-- lore:019dabe5-3eee-73a9-83b4-edc56734696a -->
+* **env-registry.ts drives --help env var section + docs**: \`src/lib/env-registry.ts\` (\`ENV\_VAR\_REGISTRY\`) is the single source for all env vars the CLI honors. Entries have \`{name, description, example?, defaultValue?, installOnly?, topLevel?, briefDescription?}\`. \`topLevel: true\` + \`briefDescription\` surfaces in \`sentry --help\` Environment Variables section (via \`formatEnvVarsSection()\` in \`help.ts\`) and in \`sentry help --json\` as \`envVars\` array on the full-tree envelope. Docs generator consumes the full registry for \`configuration.md\`. When adding a new env var, add it here with \`installOnly: true\` if install-script-only. Reserve \`topLevel: true\` for core-path vars only (auth, targeting, URL, key display/logging).
 
-<!-- lore:019c978a-18b5-7a0d-a55f-b72f7789bdac -->
-* **cli.sentry.dev is served from gh-pages branch via GitHub Pages**: \`cli.sentry.dev\` is served from gh-pages branch via GitHub Pages. Craft's gh-pages target runs \`git rm -r -f .\` before extracting docs — persist extra files via \`postReleaseCommand\` in \`.craft.yml\`. Install script supports \`--channel nightly\`, downloading from the \`nightly\` release tag directly. version.json is only used by upgrade/version-check flow.
+<!-- lore:a1f33ceb-6116-4d29-b6d0-0dc9678e4341 -->
+* **Issue list auto-pagination beyond API's 100-item cap**: Sentry API silently caps \`limit\` at 100 per request. \`listIssuesAllPages()\` auto-paginates using Link headers, bounded by MAX\_PAGINATION\_PAGES (50). \`API\_MAX\_PER\_PAGE\` constant is shared across all paginated consumers. \`--limit\` means total results everywhere (max 1000, default 25). Org-all mode uses \`fetchOrgAllIssues()\`; explicit \`--cursor\` does single-page fetch to preserve cursor chain.
 
-<!-- lore:019cbe93-19b8-7776-9705-20bbde226599 -->
-* **Nightly delta upgrade buildNightlyPatchGraph fetches ALL patch tags — O(N) HTTP calls**: Delta upgrade in \`src/lib/delta-upgrade.ts\` supports stable (GitHub Releases) and nightly (GHCR) channels. \`filterAndSortChainTags\` filters \`patch-\*\` tags by version range using \`Bun.semver.order()\`. GHCR uses \`fetchWithRetry\` (10s timeout + 1 retry; blobs 30s) with optional \`signal?: AbortSignal\` combined via \`AbortSignal.any()\`. \`isExternalAbort(error, signal)\` skips retries for external aborts — critical for background prefetch. Patches cached to \`~/.sentry/patch-cache/\` (file-based, 7-day TTY). \`loadCachedChain\` stitches patches for multi-hop offline upgrades.
+<!-- lore:019d0846-17b2-7c58-9201-f5d2e255dcb0 -->
+* **resolveProjectBySlug carries full projectData to avoid redundant getProject calls**: resolveProjectBySlug carries full projectData to skip redundant API calls: Returns \`{ org, project, projectData: SentryProject }\` from \`findProjectsBySlug()\`. \`ResolvedOrgProject\`/\`ResolvedTarget\` have optional \`projectData?\` (populated only in project-search path). Downstream commands use \`resolved.projectData ?? await getProject(org, project)\` to save ~500-800ms.
 
-<!-- lore:2c3eb7ab-1341-4392-89fd-d81095cfe9c4 -->
-* **npm bundle requires Node.js >= 22 due to node:sqlite polyfill**: The npm package (dist/bin.cjs) requires Node.js >= 22 because the bun:sqlite polyfill uses \`node:sqlite\`. A runtime version guard in the esbuild banner catches this early. When writing esbuild banner strings in TS template literals, double-escape: \`\\\\\\\n\` in TS → \`\\\n\` in output → newline at runtime. Single \`\\\n\` produces a literal newline inside a JS string, causing SyntaxError.
+<!-- lore:019ca9c3-989c-7c8d-bcd0-9f308fd2c3d7 -->
+* **Sentry CLI markdown-first formatting pipeline replaces ad-hoc ANSI**: Formatters build CommonMark strings; \`renderMarkdown()\` renders to ANSI for TTY or raw markdown for non-TTY. Key helpers: \`colorTag()\`, \`mdKvTable()\`, \`mdRow()\`, \`mdTableHeader()\` (\`:\` suffix = right-aligned), \`renderTextTable()\`. \`isPlainOutput()\` checks \`SENTRY\_PLAIN\_OUTPUT\` > \`NO\_COLOR\` > \`!isTTY\`. Batch path: \`formatXxxTable()\`. Streaming path: \`StreamingTable\` (TTY) or raw markdown rows (plain). Both share \`buildXxxRowCells()\`.
 
-<!-- lore:019c972c-9f0f-75cd-9e24-9bdbb1ac03d6 -->
-* **Numeric issue ID resolution returns org:undefined despite API success**: Numeric issue ID resolution in \`resolveNumericIssue()\`: (1) try DSN/env/config for org, (2) if found use \`getIssueInOrg(org, id)\` with region routing, (3) else fall back to unscoped \`getIssue(id)\`, (4) extract org from \`issue.permalink\` via \`parseSentryUrl\` as final fallback. \`parseSentryUrl\` handles path-based (\`/organizations/{org}/...\`) and subdomain-style URLs. \`matchSubdomainOrg()\` filters region subdomains by requiring slug length > 2. Self-hosted uses path-based only.
+<!-- lore:019d3e86-a74e-7e27-92e1-8a59e43fd37f -->
+* **Sentry dashboard API rejects discover/transaction-like widget types — use spans**: Sentry API dataset gotchas: (1) Events/Explore API accepts \`spans\`, \`transactions\`, \`logs\`, \`errors\`, \`discover\`; \`spansIndexed\` is INVALID (500). Valid list in \`EVENTS\_API\_DATASETS\`. (2) Dashboard \`widgetType\`: \`discover\` and \`transaction-like\` rejected as deprecated — use \`spans\`. \`WIDGET\_TYPES\` (active) vs \`ALL\_WIDGET\_TYPES\` (includes deprecated for parsing). Tests use \`error-events\` not \`discover\`. (3) \`sort\` param only on \`spans\` dataset. (4) \`tracemetrics\` uses comma-separated aggregates; only line/area/bar/table/big\_number displays.
 
-<!-- lore:019ce0bb-f35d-7380-b661-8dc56f9938cf -->
-* **Seer trial prompt uses middleware layering in bin.ts error handling chain**: Error recovery middlewares in \`bin.ts\` are layered: \`main() → executeWithAutoAuth() → executeWithSeerTrialPrompt() → runCommand()\`. Seer trial prompts (for \`no\_budget\`/\`not\_enabled\`) caught by inner wrapper; auth errors bubble to outer. Auth retry goes through full chain. Trial API: \`GET /api/0/customers/{org}/\` → \`productTrials\[]\` (prefer \`seerUsers\`, fallback \`seerAutofix\`). Start: \`PUT /api/0/customers/{org}/product-trial/\`. SaaS-only; self-hosted 404s gracefully. \`ai\_disabled\` excluded. \`startSeerTrial\` accepts \`category\` from trial object — don't hardcode.
+<!-- lore:019cd2b7-bb98-730e-a0d3-ec25bfa6cf4c -->
+* **Sentry issue stats field: time-series controlled by groupStatsPeriod**: Issue stats and list layout: \`stats\` depends on \`groupStatsPeriod\` (\`""\`, \`"14d"\`, \`"24h"\`, \`"auto"\`). Critical: \`count\` is period-scoped — use \`lifetime.count\` for true total. \`--compact\` is tri-state (\`optional: true\`): explicit overrides, \`undefined\` triggers \`shouldAutoCompact(rowCount)\` — compact if \`3N + 3 > termHeight\`. TREND column hidden < 100 cols. Stricli boolean flags with \`optional: true\` produce \`boolean | undefined\` enabling this auto-detect pattern.
 
-<!-- lore:019d1f97-563d-72f0-80a9-accaa6d9b282 -->
-* **SQLite DB functions are synchronous — async signatures are historical artifacts**: All \`src/lib/db/\` functions do synchronous SQLite operations (both \`bun:sqlite\` and the \`node:sqlite\` polyfill's \`DatabaseSync\` are sync). Many functions still have \`async\` signatures — this is a historical artifact from PR #89 which migrated config storage from JSON files (using async \`Bun.file().text()\` / \`Bun.write()\`) to SQLite. The function signatures were preserved to minimize diff size and never cleaned up. These can safely be converted to synchronous. Exceptions that ARE legitimately async: \`clearAuth()\` (cache dir cleanup), \`getCachedDetection()\`/\`getCachedProjectRoot()\`/\`setCachedProjectRoot()\` (stat for mtime), \`refreshToken()\`/\`performTokenRefresh()\` (HTTP calls).
+<!-- lore:019da557-63d5-7c8a-9ce7-54e992f312ec -->
+* **Sentry log IDs are UUIDv7 — enables deterministic retention checks**: Sentry log IDs are UUIDv7 (first 12 hex = ms timestamp, version char \`7\` at pos 13). Traces/event IDs are NOT v7. \`decodeUuidV7Timestamp()\` and \`ageInDaysFromUuidV7()\` in \`src/lib/hex-id.ts\` return null for non-v7, safe to call unconditionally. Enables deterministic 'past retention' messages; wired in \`recoverHexId\` and \`log/view.ts#throwNotFoundError\`. \`RETENTION\_DAYS.log = 90\` in \`src/lib/retention.ts\`; traces/events are \`null\` (plan-dependent). \`LOG\_RETENTION\_PERIOD\` is DERIVED as \`\` \`${RETENTION\_DAYS.log}d\` \`\` — never hardcode \`'90d'\`. Shared hex primitives (\`HEX\_ID\_RE\`, \`SPAN\_ID\_RE\`, \`UUID\_DASH\_RE\`, \`LEADING\_HEX\_RE\`, \`MIDDLE\_ELLIPSIS\_RE\`, \`HexEntityType\`) live in \`hex-id.ts\`.
+
+<!-- lore:019d275c-7cf0-7e13-bdc8-10cbbdbda933 -->
+* **Stricli route errors are uninterceptable — only post-run detection works**: Stricli error gaps: (1) Route failures uninterceptable — Stricli writes stderr and returns \`ExitCode.UnknownCommand\` (-5 / 251 in Bun); only post-\`run()\` \`process.exitCode\` check works. (2) \`OutputError\` calls \`process.exit()\` immediately, bypassing telemetry. (3) \`defaultCommand: 'help'\` bypasses built-in fuzzy matching — fixed by \`resolveCommandPath()\` in \`introspect.ts\` using \`fuzzyMatch()\` (up to 3 suggestions); JSON includes \`suggestions\`. (4) Plural alias detection in \`app.ts\`.
+
+<!-- lore:019d4a08-22c3-765b-ba12-d91b29e9d497 -->
+* **Three Sentry APIs for span custom attributes with different capabilities**: Three Sentry span APIs with different attribute capabilities: (1) \`/trace/{traceId}/\` — hierarchical tree; \`additional\_attributes\` enumerates requested attrs; returns \`measurements\` (zero-filled on non-browser, stripped by \`filterSpanMeasurements()\`). (2) \`/projects/{org}/{project}/trace-items/{itemId}/\` — single span full detail; ALL attributes as \`{name,type,value}\[]\` automatically. (3) \`/events/?dataset=spans\&field=X\` — list/search; explicit \`field\` params. \`--fields\` flag filters JSON output AND requests extra API fields via \`extractExtraApiFields()\`; \`FIELD\_GROUP\_ALIASES\` supports shorthand expansion.
 
 ### Decision
 
-<!-- lore:019c99d5-69f2-74eb-8c86-411f8512801d -->
-* **Raw markdown output for non-interactive terminals, rendered for TTY**: Markdown-first output pipeline: custom renderer in \`src/lib/formatters/markdown.ts\` walks \`marked\` tokens to produce ANSI-styled output. Commands build CommonMark using helpers (\`mdKvTable()\`, \`mdRow()\`, \`colorTag()\`, \`escapeMarkdownCell()\`, \`safeCodeSpan()\`) and pass through \`renderMarkdown()\`. \`isPlainOutput()\` precedence: \`SENTRY\_PLAIN\_OUTPUT\` > \`NO\_COLOR\` > \`FORCE\_COLOR\` > \`!isTTY\`. \`--json\` always outputs JSON. Colors defined in \`COLORS\` object in \`colors.ts\`. Tests run non-TTY so assertions match raw CommonMark; use \`stripAnsi()\` helper for rendered-mode assertions.
+<!-- lore:019d799a-4809-7c54-b699-e2ae74c00227 -->
+* **400 Bad Request from Sentry API indicates a CLI bug, not a user error**: Telemetry 400 convention: 400 = CLI bug (capture to Sentry), 401-499 = user error (skip). \`isUserApiError()\` uses \`> 400\` (exclusive). \`isExpectedUserError()\` guard in \`app.ts\` skips ContextError, ResolutionError, ValidationError, SeerError, 401-499 ApiErrors. Captures 400, 5xx, unknown. Skipped errors → breadcrumbs. For \`ApiError\`, call \`Sentry.setContext('api\_error', {...})\` before \`captureException\` — SDK doesn't auto-capture custom properties.
 
-<!-- lore:00166785-609d-4ab5-911e-ee205d17b90c -->
-* **whoami should be separate from auth status command**: The \`sentry auth whoami\` command should be a dedicated command separate from \`sentry auth status\`. They serve different purposes: \`status\` shows everything about auth state (token, expiry, defaults, org verification), while \`whoami\` just shows user identity (name, email, username, ID) by fetching live from \`/auth/\` endpoint. \`sentry whoami\` should be a top-level alias (like \`sentry issues\` → \`sentry issue list\`). \`whoami\` should support \`--json\` for machine consumption and be lightweight — no credential verification, no defaults listing.
+<!-- lore:019d8741-f630-751f-9e60-6843f5aabfd9 -->
+* **CLI UX philosophy: auto-recover when intent is clear, warn gently**: UX principle: don't fail when intent is clear — do the intent and nudge via \`log.warn()\` to stderr. Keep errors in Sentry telemetry for visibility (e.g., SeerError for upsell tracking). Two recovery tiers: (1) auto-correct when semantics identical (AND→space), (2) auto-recover with warning when semantics differ (OR→space, warn about union→intersection). Only throw when intent can't be fulfilled. Model after \`gh\` CLI. AI agents are primary consumers constructing natural OR/AND queries.
+
+<!-- lore:019d88f1-bfb8-7eea-adbd-a5b92f15b7e0 -->
+* **Trace-related commands must handle project consistently across CLI**: Trace/log commands project scoping: \`getDetailedTrace\` accepts optional numeric \`projectId\` (not hardcoded \`-1\`); resolve slug→ID via \`getProject()\`. \`formatSimpleSpanTree\` shows orphan annotation only when \`projectFiltered\` is set. \`buildProjectQuery()\` in \`arg-parsing.ts\` prepends \`project:\<slug>\` to queries (used by \`trace/logs.ts\`, \`log/list.ts\`). Multi-project: \`--query 'project:\[cli,backend]'\`. Trace-logs endpoint (\`/organizations/{org}/trace-logs/\`) is org-scoped — uses \`resolveOrg()\`. Endpoint is PRIVATE (no \`@sentry/api\` types); hand-written \`TraceLogSchema\` in \`src/types/sentry.ts\` required.
 
 ### Gotcha
 
-<!-- lore:019c8ab6-d119-7365-9359-98ecf464b704 -->
-* **@sentry/api SDK passes Request object to custom fetch — headers lost on Node.js**: @sentry/api SDK calls \`\_fetch(request)\` with no init object. In \`authenticatedFetch\`, \`init\` is undefined so \`prepareHeaders\` creates empty headers — on Node.js this strips Content-Type (HTTP 415). Fix: fall back to \`input.headers\` when \`init\` is undefined. Use \`unwrapPaginatedResult\` (not \`unwrapResult\`) to access the Response's Link header for pagination. \`per\_page\` is not in SDK types; cast query to pass it at runtime.
+<!-- lore:019da644-b93f-776d-843d-05c3c1d3a193 -->
+* **Biome lint differs between local lint:fix and CI lint**: Biome \`lint:fix\` (local) differs from CI \`lint\` — auto-fix can hide issues CI still catches: (1) \`noPrecisionLoss\` on integer literals >2^53, (2) \`noIncrementDecrement\` on \`count++\`, (3) import ordering when a named import follows non-import runtime code. Formatter rewrites multi-line imports to single-line when they fit. Always run \`bun run lint\` before pushing. Use \`for...of\` destructuring or \`i += 1\` instead of \`++\`; use \`Number(string)\` or split literals instead of \`1\_735\_689\_600\_000\_000\_001\`.
 
-<!-- lore:019c9e98-7af4-7e25-95f4-fc06f7abf564 -->
-* **Bun binary build requires SENTRY\_CLIENT\_ID env var**: The build script (\`script/bundle.ts\`) requires \`SENTRY\_CLIENT\_ID\` environment variable and exits with code 1 if missing. When building locally, use \`bun run --env-file=.env.local build\` or set the env var explicitly. The binary build (\`bun run build\`) also needs it. Without it you get: \`Error: SENTRY\_CLIENT\_ID environment variable is required.\`
-
-<!-- lore:019c9776-e3dd-7632-88b8-358a19506218 -->
-* **GitHub immutable releases prevent rolling nightly tag pattern**: getsentry/cli has immutable GitHub releases — assets can't be modified and tags can NEVER be reused. Nightly builds publish to GHCR with versioned tags like \`nightly-0.14.0-dev.1772661724\`, not GitHub Releases or npm. \`fetchManifest()\` throws \`UpgradeError("network\_error")\` for both network failures and non-200 — callers must check message for HTTP 404/403. Craft with no \`preReleaseCommand\` silently skips \`bump-version.sh\` if only target is \`github\`.
-
-<!-- lore:019cb8c2-d7b5-780c-8a9f-d20001bc198f -->
-* **Install script: BSD sed and awk JSON parsing breaks OCI digest extraction**: The install script parses OCI manifests with awk (no jq). Key trap: BSD sed \`\n\` is literal, not newline. Fix: single awk pass tracking last-seen \`"digest"\`, printing when \`"org.opencontainers.image.title"\` matches target. The config digest (\`sha256:44136fa...\`) is a 2-byte \`{}\` blob — downloading it instead of the real binary causes \`gunzip: unexpected end of file\`.
-
-<!-- lore:019d0b04-ccec-7bd2-a5ca-732e7064cc1a -->
-* **Multi-region fan-out: distinguish all-403 from empty orgs with hasSuccessfulRegion flag**: In \`listOrganizationsUncached\` (\`src/lib/api/organizations.ts\`), \`Promise.allSettled\` collects multi-region results. Don't use \`flatResults.length === 0\` to detect all-regions-failed — a region returning 200 OK with zero orgs pushes nothing into \`flatResults\`. Track a \`hasSuccessfulRegion\` boolean on any \`"fulfilled"\` settlement. Only re-throw 403 \`ApiError\` when \`!hasSuccessfulRegion && lastScopeError\`.
-
-<!-- lore:019c969a-1c90-7041-88a8-4e4d9a51ebed -->
-* **Multiple mockFetch calls replace each other — use unified mocks for multi-endpoint tests**: Bun test mocking gotchas: (1) \`mockFetch()\` replaces \`globalThis.fetch\` — calling it twice replaces the first mock. Use a single unified fetch mock dispatching by URL pattern. (2) \`mock.module()\` pollutes the module registry for ALL subsequent test files. Tests using it must live in \`test/isolated/\` and run via \`test:isolated\`. This also causes \`delta-upgrade.test.ts\` to fail when run alongside \`test/isolated/delta-upgrade.test.ts\` — the isolated test's \`mock.module()\` replaces \`CLI\_VERSION\` for all subsequent files. (3) For \`Bun.spawn\`, use direct property assignment in \`beforeEach\`/\`afterEach\`.
-
-<!-- lore:019c9741-d78e-73b1-87c2-e360ef6c7475 -->
-* **useTestConfigDir without isolateProjectRoot causes DSN scanning of repo tree**: \`useTestConfigDir()\` creates temp dirs under \`.test-tmp/\` in the repo tree. Without \`{ isolateProjectRoot: true }\`, \`findProjectRoot\` walks up and finds the repo's \`.git\`, causing DSN detection to scan real source code and trigger network calls against test mocks (timeouts). Always pass \`isolateProjectRoot: true\` when tests exercise \`resolveOrg\`, \`detectDsn\`, or \`findProjectRoot\`.
+<!-- lore:019cc3e6-0cdd-7a53-9eb7-a284a3b4eb78 -->
+* **Bun mock.module for node:tty requires default export and class stubs**: Bun testing gotchas: (1) \`mock.module()\` for CJS built-ins (e.g. \`node:tty\`) needs \`default\` re-export plus named exports, declared top-level BEFORE \`await import()\`; lives in \`test/isolated/\`. (2) Destructuring imports capture binding at load; verify via call-count > 0. (3) \`Bun.mmap()\` always opens PROT\_WRITE — use \`new Uint8Array(await Bun.file(path).arrayBuffer())\` for read-only. (4) Wrap \`Bun.which()\` with optional \`pathEnv\` for deterministic testing. (5) Mocking \`@sentry/node-core/light\`: \`startSpan\` must pass mock span to callback — \`startSpan: (\_, fn) => fn({ setStatus(){}, setAttribute(){}, end(){} })\`.
 
 ### Pattern
 
-<!-- lore:019d0b36-5da2-750c-b26f-630a2927bd79 -->
-* **findProjectsByPattern as fuzzy fallback for exact slug misses**: When \`findProjectsBySlug\` returns empty (no exact match), use \`findProjectsByPattern\` as a fallback to suggest similar projects. \`findProjectsByPattern\` does bidirectional word-boundary matching (\`matchesWordBoundary\`) against all projects in all orgs — the same logic used for directory name inference. In the \`project-search\` handler, call it after the exact miss, format matches as \`\<org>/\<slug>\` suggestions in the \`ResolutionError\`. This avoids a dead-end error for typos like 'patagonai' when 'patagon-ai' exists. Note: \`findProjectsByPattern\` makes additional API calls (lists all projects per org), so only call it on the failure path.
+<!-- lore:019dabe5-3ef9-79c6-a712-bf83df30fe59 -->
+* **403 scope extraction via api-scope.ts helpers**: \`src/lib/api-scope.ts\` \`extractRequiredScopes(detail)\` scans Sentry 403 response detail (string or structured) for scope-like tokens (e.g. \`event:read\`, \`project:admin\`). Matches free-text and structured \`required\`/\`required\_scopes\` fields. Use in 403-enrichment paths instead of hardcoded generic scope lists; fall back to generic hint only when extraction returns empty. Wired into \`issue list\` \`build403Detail()\`, \`organizations.ts\` \`enrich403Error()\`.
 
-<!-- lore:019c972c-9f11-7c0d-96ce-3f8cc2641175 -->
-* **Org-scoped SDK calls follow getOrgSdkConfig + unwrapResult pattern**: All org-scoped API calls in src/lib/api-client.ts: (1) call \`getOrgSdkConfig(orgSlug)\` for regional URL + SDK config, (2) spread into SDK function: \`{ ...config, path: { organization\_id\_or\_slug: orgSlug, ... } }\`, (3) pass to \`unwrapResult(result, errorContext)\`. Shared helpers \`resolveAllTargets\`/\`resolveOrgAndProject\` must NOT call \`fetchProjectId\` — commands that need it enrich targets themselves.
+<!-- lore:019dafe1-a58b-777b-ab81-4a15e9c78ac0 -->
+* **buildApiUrl helper for safe Sentry API URL construction**: \`buildApiUrl(regionUrl, ...segments)\` in \`src/lib/api/infrastructure.ts\` composes Sentry API URLs. Owns \`/api/0/\` prefix, trailing slash, per-segment \`encodeURIComponent\`. Safety: slugs containing \`/\` get encoded correctly. Zero segments → \`base/api/0/\`. Replaces error-prone \`${base}/api/0/organizations/${encodeURIComponent(org)}/...\` patterns. Use for all URL-composition sites in domain API modules. Since #788 (cache identity scoping), all cache invalidation prefix construction uses it. \`stripTrailingSlash\` is no longer exported.
 
-<!-- lore:5ac4e219-ea1f-41cb-8e97-7e946f5848c0 -->
-* **PR workflow: wait for Seer and Cursor BugBot before resolving**: CI includes Seer Code Review and Cursor Bugbot as advisory checks (~2-3 min, only on ready-for-review PRs). Workflow: push → wait for all CI (including npm build) → check inline review comments from Seer/BugBot → fix valid findings → repeat. Bugbot sometimes catches real logic bugs, not just style — always review before merging. Use \`gh pr checks \<PR> --watch\` to monitor. Fetch comments via \`gh api repos/OWNER/REPO/pulls/NUM/comments\`.
+<!-- lore:019db6f8-468a-7d4f-82e9-c19de7cd6e7e -->
+* **fetchWithTimeout uses bare fetch reference for test mockability**: \`fetchWithTimeout\` in \`src/lib/sentry-client.ts\` calls \`fetch(input, ...)\` as a bare global reference — this is load-bearing for tests that swap \`globalThis.fetch\`. Do NOT refactor to capture \`fetch\` at module load (via destructuring or aliasing) — all tests using \`mockFetch()\` would silently fall through to real network. \`resetAuthenticatedFetch()\` in test \`beforeEach\` clears the authenticated-fetch singleton (for auth state), NOT the fetch mock itself. If refactoring, add explicit \`// must remain bare fetch() for test mockability\` comment.
 
-<!-- lore:019cb162-d3ad-7b05-ab4f-f87892d517a6 -->
-* **Shared pagination infrastructure: buildPaginationContextKey and parseCursorFlag**: Schema v12 replaced \`pagination\_cursors.cursor TEXT\` with \`cursor\_stack TEXT\` (JSON array) + \`page\_index INTEGER\`. Stack-based API in \`src/lib/db/pagination.ts\`: \`resolveCursor(flag, key, contextKey)\` maps keywords (next/prev/previous/first/last) to \`{cursor, direction}\`. \`advancePaginationState(key, contextKey, direction, nextCursor)\` pushes/pops the stack — back-then-forward truncates stale entries. \`hasPreviousPage(key, contextKey)\` checks \`page\_index > 0\`. \`clearPaginationState(key)\` removes state. \`parseCursorFlag\` in \`list-command.ts\` accepts next/prev/previous/first/last keywords. \`paginationHint()\` in \`org-list.ts\` builds bidirectional hints (\`-c prev | -c next\`). JSON envelope includes \`hasPrev\` boolean. All 7 list commands (trace, span, issue, project, team, repo, dashboard) use this stack API. \`resolveCursor()\` must be called inside \`org-all\` override closures.
+<!-- lore:019d9cc5-4cf2-7c88-97f7-936702d81ff9 -->
+* **I/O concurrency limits belong at the call site, not in generic combinators**: I/O concurrency limits belong at the call site, not in generic combinators. Pattern: module-scoped \`pLimit()\` with named constant (e.g., \`STAT\_CONCURRENCY = 32\` in \`project-root.ts\`, \`CACHE\_IO\_CONCURRENCY\` in \`response-cache.ts\`, \`pLimit(50)\` in \`code-scanner.ts\`). Keeps combinators pure, makes budget explicit at I/O boundary. stat() lighter than full reads — ~32 for stats vs ~50 for reads, well below macOS's 256 FD ceiling.
 
-<!-- lore:019cbd5f-ec35-7e2d-8386-6d3a67adf0cf -->
-* **Telemetry instrumentation pattern: withTracingSpan + captureException for handled errors**: For graceful-fallback operations, use \`withTracingSpan\` from \`src/lib/telemetry.ts\` for child spans and \`captureException\` from \`@sentry/bun\` (named import — Biome forbids namespace imports) with \`level: 'warning'\` for non-fatal errors. \`withTracingSpan\` uses \`onlyIfParent: true\` — no-op without active transaction. User-visible fallbacks use \`log.warn()\` not \`log.debug()\`. Several commands bypass telemetry by importing \`buildCommand\` from \`@stricli/core\` directly instead of \`../../lib/command.js\` (trace/list, trace/view, log/view, api.ts, help.ts).
+<!-- lore:019dabe5-3edd-773c-8c68-e382deb26191 -->
+* **Identity-scoped response cache via fingerprint mixin**: Identity-scoped response cache: \`buildCacheKey(method, url)\` mixes in memoized \`getIdentityFingerprint()\` (MD5 of \`kind|secret\` truncated to 16 hex; CodeQL dismissed — namespacing, not auth). \`CacheEntry\` persists identity so \`invalidateCachedResponsesMatching(prefix)\` skips other identities. Invalidation centralized at \`authenticatedFetch\` in \`sentry-client.ts\` — after 2xx non-GET, runs \`computeInvalidationPrefixes(fullUrl, getApiBaseUrl())\` walking hierarchy up to \`organizations/{org}/\` plus cross-endpoint rules via \`extra\`/\`extraAbsolute\` (control-silo vs region-silo). \*\*Contract: never throws\*\* — wrapped in try/catch. \`SKIP\_INVALIDATION\_PATTERNS\` short-circuits chunk-upload/assemble. \`clearAuth()\` dynamically imports \`clearResponseCache\` to break cycle. Always use prefix-match with trailing slash; exact-match removed. URL-only hook can't decode bulk mutations with IDs in query params (e.g. \`mergeIssues\`) — invalidate per-ID at caller.
 
-<!-- lore:019cc43d-e651-7154-a88e-1309c4a2a2b6 -->
-* **Testing Stricli command func() bodies via spyOn mocking**: To unit-test a Stricli command's \`func()\` body: (1) \`const func = await cmd.loader()\`, (2) \`func.call(mockContext, flags, ...args)\` with mock \`stdout\`, \`stderr\`, \`cwd\`, \`setContext\`. (3) \`spyOn\` namespace imports to mock dependencies (e.g., \`spyOn(apiClient, 'getLogs')\`). The \`loader()\` return type union causes \`.call()\` LSP errors — these are false positives that pass \`tsc --noEmit\`. When API functions are renamed (e.g., \`getLog\` → \`getLogs\`), update both spy target name AND mock return shape (single → array). Slug normalization (\`normalizeSlug\`) replaces underscores with dashes but does NOT lowercase — test assertions must match original casing (e.g., \`'CAM-82X'\` not \`'cam-82x'\`).
+<!-- lore:019da644-b93a-777a-9b28-5cc837ff3ae8 -->
+* **Isolated adapter coverage via fetch mocking in test/lib/**: To get CodeCov coverage on API-calling functions (e.g., hex-id-recovery adapters, api-client functions), write tests in \`test/lib/\*.coverage.test.ts\` or \`test/lib/\*.adapters.test.ts\` that mock \`globalThis.fetch\` via \`mockFetch()\` from \`test/helpers.js\`, call \`setAuthToken()\` + \`setOrgRegion()\` in \`beforeEach\`, and invoke the REAL function. Tests in \`test/e2e/\` or tests that stub the exports via \`spyOn\`/\`mock.module\` give ZERO coverage to the mocked function body. Use \`useTestConfigDir()\` for DB isolation. Pattern example: \`test/lib/api-client.coverage.test.ts\` and \`test/lib/hex-id-recovery.adapters.test.ts\`. Mock responses must include ALL Zod-required fields — minimal stubs fail schema validation with a noisy \`ApiError\`.
+
+<!-- lore:019dafa7-5dde-7000-89bc-3fd2e0f1356e -->
+* **Memoize identity fingerprint with test-reset hook + setAuthToken invalidation**: Memoize + test-reset pattern in src/lib/db/auth.ts: \`getIdentityFingerprint()\`, \`getAuthToken()\` (as \`cachedAuthToken\`), and the full auth row used by \`refreshToken()\` (as \`cachedAuthRow\`) are all memoized at module scope. Use wrapper-object sentinels \`{ value }\` to distinguish 'not cached' from 'cached as undefined' (logged out). Invalidate via \`reset\*Cache()\` exports at the only mutation points: \`setAuthToken()\` and \`clearAuth()\`. Safe under OAuth rotation (refresh\_token preserved) and 401 refresh (routes through setAuthToken). Tests mutating \`process.env.SENTRY\_AUTH\_TOKEN\` bypass the mutation hooks — must call reset functions manually in beforeEach and inside property-test bodies. \`useTestConfigDir\` calls all three resets in beforeEach/afterEach to prevent cross-file pollution in Bun's sequential test runner. Same memo+reset pattern mirrors \`resetUpdateNotificationState\`, \`resetCacheState\`, \`resetAuthHintState\`. Fixed N+1 SQL hits per API request (CLI-13V).
+
+<!-- lore:019d91ea-bb02-78d4-bf11-743b99f0ba6b -->
+* **Stricli parse functions can perform validation and sanitization at flag-parse time**: Stricli's \`parse\` fn on \`kind: "parsed"\` flags runs during argument parsing before \`func()\`. Can throw (including \`ValidationError\`) and log warnings. Uses: \`parseCursorFlag\`, \`sanitizeQuery\`, \`parsePeriod\` (returns \`TimeRange\`), \`parseSort\`/\`parseSortFlag\`, \`numberParser\`/\`parseLimit\`. Optional period flags: \`flags.period\` is \`TimeRange | undefined\` — commands default to \`TIME\_RANGE\_\*\` constants. \`formatTimeRangeFlag()\` converts back; \`appendPeriodHint()\` in \`time-range.ts\` encapsulates hint-building across 4+ commands.
+
+### Preference
+
+<!-- lore:019dafa7-5dee-7944-893b-5c5ca6e5cf92 -->
+* **Code review style: BYK values brevity; trim JSDoc essays aggressively**: BYK code-review style — brevity first: terse 1-3 line JSDoc; remove comments that restate code; don't wrap try/catch around no-throw helpers (but DO wrap post-success housekeeping like cache invalidation — defense-in-depth); MD5 over HMAC for non-auth hashing; no lazy imports without documented reason. Prefer \`\[...new Set(items)]\` over hand-rolled dedupe; \`toSpliced\` over spread+new-array; spread/slice over \`.unshift()\` on returned API objects. Direct questions drive simplification ('inputs never change, why not memoize?' → memoize+reset). Dismiss CodeQL false positives via \`gh api\` with rationale. 'Centralized mechanism' → file follow-up issue, not scope creep. Implement trivial reviewer suggestions in-PR rather than deferring. Run subagent self-review on merge-ready PRs — typical yield 1-3 items (stale PR descriptions, CI-only lint, doc drift). Take bot findings (Cursor Bugbot, Seer) seriously even after self-review approval — expect 4-6 rounds on subtle Unicode/regex/error-handling PRs.
 <!-- End lore-managed section -->

@@ -5,6 +5,7 @@
  * This is the highest priority source.
  */
 
+import { getEnv } from "../env.js";
 import { createDetectedDsn } from "./parser.js";
 import type { DetectedDsn } from "./types.js";
 
@@ -22,7 +23,7 @@ export const SENTRY_DSN_ENV = "SENTRY_DSN";
  * // { raw: "...", source: "env", projectId: "456", ... }
  */
 export function detectFromEnv(): DetectedDsn | null {
-  const dsn = process.env[SENTRY_DSN_ENV];
+  const dsn = getEnv()[SENTRY_DSN_ENV];
   if (!dsn) {
     return null;
   }

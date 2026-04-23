@@ -260,6 +260,7 @@ type SchemaFlags = {
 };
 
 export const schemaCommand = buildCommand({
+  auth: false,
   docs: {
     brief: "Browse the Sentry API schema",
     fullDescription:

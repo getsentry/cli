@@ -13,8 +13,8 @@ import { initCommand } from "../../src/commands/init.js";
 import * as projectsApi from "../../src/lib/api/projects.js";
 import { ContextError, ValidationError } from "../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as prefetchNs from "../../src/lib/init/prefetch.js";
-import { resetPrefetch } from "../../src/lib/init/prefetch.js";
+import * as prefetchNs from "../../src/lib/init/org-prefetch.js";
+import { resetPrefetch } from "../../src/lib/init/org-prefetch.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as wizardRunner from "../../src/lib/init/wizard-runner.js";
 
@@ -349,9 +349,13 @@ describe("init command func", () => {
       );
     });
 
-    test("invalid org slug (whitespace) throws", async () => {
+    test("org slug with whitespace is rejected by validateResourceId", async () => {
+      // Spaces in org slugs now hit validateResourceId and throw
+      // ValidationError — normalizeSlug no longer converts them.
       const ctx = makeContext();
-      expect(func.call(ctx, DEFAULT_FLAGS, "acme corp/")).rejects.toThrow();
+      await expect(func.call(ctx, DEFAULT_FLAGS, "acme corp/")).rejects.toThrow(
+        ValidationError
+      );
     });
   });
 

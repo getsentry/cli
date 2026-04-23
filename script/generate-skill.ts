@@ -7,7 +7,7 @@
  *
  * Produces:
  *   - SKILL.md: compact index with agent guidance + command summaries
- *   - references/*.md: full per-group command documentation
+ *   - references/*.md: full per-route command documentation
  *   - index.json: skill discovery manifest for .well-known
  *
  * Usage:
@@ -19,8 +19,28 @@
  *   docs/public/.well-known/skills/index.json
  */
 
-import { rmSync } from "node:fs";
-import { routes } from "../src/app.js";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import type { Token } from "marked";
+import { marked } from "marked";
+
+// Bootstrap: ensure the generated skill-content module exists before
+// importing the route tree (app.ts → agent-skills.ts → skill-content.ts).
+// On a fresh checkout the file won't exist, causing a module resolution
+// error. Write a minimal stub so the import resolves; the real content
+// is generated at the end of this script.
+// NOTE: This must run before the dynamic import() below because static
+// imports are hoisted by the runtime before any code executes.
+const SKILL_CONTENT_STUB = "src/generated/skill-content.ts";
+if (!existsSync(SKILL_CONTENT_STUB)) {
+  mkdirSync("src/generated", { recursive: true });
+  writeFileSync(
+    SKILL_CONTENT_STUB,
+    "export const SKILL_FILES: ReadonlyMap<string, string> = new Map();\n"
+  );
+}
+
+const { routes } = await import("../src/app.js");
+
 import type {
   CommandInfo,
   FlagInfo,
@@ -61,66 +81,6 @@ const PACKAGE_MANAGER_REGEX = /<PackageManagerCode[\s\S]*?npm="([^"]+)"/;
  */
 const SKILL_DESCRIPTION =
   "Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.";
-
-// ---------------------------------------------------------------------------
-// Route-to-Reference-File Mapping
-// ---------------------------------------------------------------------------
-
-/**
- * Maps route names to reference file names.
- * Related routes are grouped into a single file (e.g., trace + span → traces.md).
- * Routes not listed here get their own file based on route name.
- */
-const ROUTE_TO_REFERENCE: Record<string, string> = {
-  auth: "auth",
-  org: "organizations",
-  project: "projects",
-  issue: "issues",
-  event: "events",
-  api: "api",
-  dashboard: "dashboards",
-  team: "teams",
-  repo: "teams",
-  log: "logs",
-  trace: "traces",
-  span: "traces",
-  trial: "trials",
-  cli: "setup",
-  init: "setup",
-  schema: "setup",
-};
-
-/** Display titles for reference file groups */
-const REFERENCE_TITLES: Record<string, string> = {
-  auth: "Authentication Commands",
-  organizations: "Organization Commands",
-  projects: "Project Commands",
-  issues: "Issue Commands",
-  events: "Event Commands",
-  api: "API Command",
-  dashboards: "Dashboard Commands",
-  teams: "Team & Repository Commands",
-  logs: "Log Commands",
-  traces: "Trace & Span Commands",
-  trials: "Trial Commands",
-  setup: "CLI Setup Commands",
-};
-
-/** Brief descriptions for reference file frontmatter */
-const REFERENCE_DESCRIPTIONS: Record<string, string> = {
-  auth: "Authenticate with Sentry via OAuth or API tokens",
-  organizations: "List and view Sentry organizations",
-  projects: "Create, list, and manage Sentry projects",
-  issues: "List, view, and analyze Sentry issues with AI",
-  events: "View individual error events",
-  api: "Make arbitrary Sentry API requests",
-  dashboards: "List, view, and create Sentry dashboards",
-  teams: "List teams and repositories in a Sentry organization",
-  logs: "List and stream logs from Sentry projects",
-  traces: "List and inspect traces and spans for performance analysis",
-  trials: "List and start product trials",
-  setup: "Configure the CLI, install integrations, and manage upgrades",
-};
 
 /**
  * Preferred display order for routes in the SKILL.md index.
@@ -328,36 +288,115 @@ sentry auth status
 \`\`\``;
 }
 
-/** Regex to match command sections in docs (### `sentry ...`) */
-const COMMAND_SECTION_REGEX =
-  /###\s+`(sentry\s+\S+(?:\s+\S+)?)`\s*\n([\s\S]*?)(?=###\s+`|$)/g;
+/**
+ * Regex to extract the command path from a heading like `` `sentry issue list <org/project>` ``.
+ * Captures the words between `sentry` and the first `<` or closing backtick.
+ */
+const CMD_HEADING_RE = /^`sentry\s+(.*?)\s*(?:<[^>]*>.*)?`$/;
 
-/** Load examples for a specific command from docs */
+/** Append a code block to a map entry, creating the array if needed */
+function appendExample(
+  map: Map<string, string[]>,
+  key: string,
+  code: string
+): void {
+  const list = map.get(key) ?? [];
+  list.push(code);
+  map.set(key, list);
+}
+
+/**
+ * Collect all command paths from `### \`sentry ...\`` headings in a token list.
+ * Initializes each path with an empty array in the examples map.
+ */
+function collectCommandPaths(
+  tokens: Token[],
+  examples: Map<string, string[]>
+): string[] {
+  const paths: string[] = [];
+  for (const token of tokens) {
+    if (token.type !== "heading" || token.depth !== 3) {
+      continue;
+    }
+    const m = CMD_HEADING_RE.exec(token.text);
+    if (m) {
+      const cmdPath = `sentry ${m[1]}`;
+      paths.push(cmdPath);
+      if (!examples.has(cmdPath)) {
+        examples.set(cmdPath, []);
+      }
+    }
+  }
+  return paths;
+}
+
+/** Find the best command path match for a loose code block by content */
+function matchCodeToCommand(
+  code: string,
+  commandPaths: string[],
+  groupFallback: string
+): string | undefined {
+  return (
+    commandPaths.find((p) => code.includes(p)) ??
+    (code.includes(groupFallback) ? groupFallback : undefined)
+  );
+}
+
+/**
+ * Walk tokens sequentially and associate each bash code block with
+ * the appropriate command path — either by heading context or content matching.
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential token walk with type narrowing
+function associateCodeBlocks(
+  tokens: Token[],
+  commandPaths: string[],
+  commandGroup: string,
+  examples: Map<string, string[]>
+): void {
+  const groupFallback = `sentry ${commandGroup}`;
+  let currentCmd: string | null = null;
+
+  for (const token of tokens) {
+    if (token.type === "heading" && token.depth === 3) {
+      const m = CMD_HEADING_RE.exec(token.text);
+      currentCmd = m ? `sentry ${m[1]}` : null;
+    }
+    if (token.type !== "code" || token.lang !== "bash") {
+      continue;
+    }
+    const code = token.text.trim();
+    if (currentCmd && examples.has(currentCmd)) {
+      appendExample(examples, currentCmd, code);
+    } else {
+      const target = matchCodeToCommand(code, commandPaths, groupFallback);
+      if (target) {
+        appendExample(examples, target, code);
+      }
+    }
+  }
+}
+
+/**
+ * Load examples for a specific command group from docs using the `marked`
+ * AST parser. Walks the token tree to find command headings and associate
+ * bash code blocks with each command.
+ *
+ * Handles both auto-generated reference sections (`### \`sentry ...\`` headings)
+ * and hand-written custom sections (`## Examples` with descriptive headings)
+ * by matching code blocks to commands via heading context or content analysis.
+ */
 async function loadCommandExamples(
   commandGroup: string
 ): Promise<Map<string, string[]>> {
   const docContent = await loadDoc(`commands/${commandGroup}.md`);
-  const examples = new Map<string, string[]>();
   if (!docContent) {
-    return examples;
+    return new Map();
   }
-  const commandPattern = new RegExp(
-    COMMAND_SECTION_REGEX.source,
-    COMMAND_SECTION_REGEX.flags
-  );
-  let match = commandPattern.exec(docContent);
-  while (match !== null) {
-    const commandPath = match[1];
-    const sectionContent = match[2];
-    const codeBlocks = extractCodeBlocks(sectionContent, "bash");
-    if (codeBlocks.length > 0) {
-      examples.set(
-        commandPath,
-        codeBlocks.map((b) => b.code)
-      );
-    }
-    match = commandPattern.exec(docContent);
-  }
+
+  const tokens = marked.lexer(docContent);
+  const examples = new Map<string, string[]>();
+  const commandPaths = collectCommandPaths(tokens, examples);
+  associateCodeBlocks(tokens, commandPaths, commandGroup, examples);
   return examples;
 }
 
@@ -496,6 +535,22 @@ function generateFullCommandDoc(cmd: CommandInfo): string {
     }
   }
 
+  if (cmd.jsonFields && cmd.jsonFields.length > 0) {
+    lines.push("");
+    lines.push(
+      "**JSON Fields** (use `--json --fields` to select specific fields):"
+    );
+    lines.push("");
+    lines.push("| Field | Type | Description |");
+    lines.push("|-------|------|-------------|");
+    for (const field of cmd.jsonFields) {
+      // Escape pipe characters to avoid breaking the markdown table structure
+      const safeType = field.type.replaceAll("|", "\\|");
+      const safeDesc = (field.description ?? "").replaceAll("|", "\\|");
+      lines.push(`| \`${field.name}\` | ${safeType} | ${safeDesc} |`);
+    }
+  }
+
   if (cmd.examples.length > 0) {
     lines.push("");
     lines.push("**Examples:**");
@@ -508,11 +563,25 @@ function generateFullCommandDoc(cmd: CommandInfo): string {
   return lines.join("\n");
 }
 
+/** Known acronyms that should be fully uppercased in titles */
+const TITLE_ACRONYMS = new Set(["api", "cli"]);
+
+/** Capitalize a route name for display, uppercasing known acronyms */
+function capitalize(s: string): string {
+  if (TITLE_ACRONYMS.has(s)) {
+    return s.toUpperCase();
+  }
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 /**
- * Generate a complete reference file for a group of routes.
+ * Generate a complete reference file for a single route.
  *
- * @param refName - Reference file key (e.g., "issues", "traces")
- * @param groupRoutes - Routes belonging to this reference group
+ * Title and description are derived from route metadata — no manual
+ * mapping required. Each route produces its own reference file.
+ *
+ * @param refName - Reference file key (same as route name)
+ * @param groupRoutes - Single-element array with the route
  * @param version - CLI version for frontmatter
  */
 function generateReferenceFile(
@@ -520,9 +589,9 @@ function generateReferenceFile(
   groupRoutes: RouteInfo[],
   version: string
 ): string {
-  const title = REFERENCE_TITLES[refName] ?? `${refName} Commands`;
-  const description =
-    REFERENCE_DESCRIPTIONS[refName] ?? `Sentry CLI ${refName} commands`;
+  const route = groupRoutes[0];
+  const title = `${capitalize(refName)} Commands`;
+  const description = route.brief;
 
   const lines: string[] = [];
 
@@ -540,18 +609,13 @@ function generateReferenceFile(
   lines.push(`# ${title}`);
   lines.push("");
 
-  // Brief from each route
-  for (const route of groupRoutes) {
-    lines.push(route.brief);
-    lines.push("");
-  }
+  lines.push(route.brief);
+  lines.push("");
 
   // Full command docs
-  for (const route of groupRoutes) {
-    for (const cmd of route.commands) {
-      lines.push(generateFullCommandDoc(cmd));
-      lines.push("");
-    }
+  for (const cmd of route.commands) {
+    lines.push(generateFullCommandDoc(cmd));
+    lines.push("");
   }
 
   // Note about global flags
@@ -578,7 +642,7 @@ function generateCompactCommandLine(cmd: CommandInfo): string {
 
 /**
  * Generate the compact command reference section for SKILL.md.
- * Each route group gets a heading, brief, command list, and a pointer to the reference file.
+ * Each route gets a heading, brief, command list, and a pointer to its reference file.
  */
 function generateCompactCommandsSection(
   routeInfos: RouteInfo[],
@@ -595,8 +659,7 @@ function generateCompactCommandsSection(
       continue;
     }
 
-    const titleCase = route.name.charAt(0).toUpperCase() + route.name.slice(1);
-    lines.push(`### ${titleCase}`);
+    lines.push(`### ${capitalize(route.name)}`);
     lines.push("");
     lines.push(route.brief);
     lines.push("");
@@ -605,9 +668,8 @@ function generateCompactCommandsSection(
       lines.push(generateCompactCommandLine(cmd));
     }
 
-    // Add reference file pointer (fallback matches groupRoutesByReference)
-    const refName = ROUTE_TO_REFERENCE[route.name] ?? route.name;
-    const refFile = referenceFiles.get(refName);
+    // Add reference file pointer (1:1 route-to-file mapping)
+    const refFile = referenceFiles.get(route.name);
     if (refFile) {
       lines.push("");
       lines.push(`→ Full flags and examples: \`references/${refFile}\``);
@@ -667,8 +729,11 @@ async function generateSupplementarySections(): Promise<string> {
 type GeneratedFiles = Map<string, string>;
 
 /**
- * Group routes by their reference file mapping.
- * Returns a map of reference file name → array of routes.
+ * Map each route to its own reference file (1:1 mapping).
+ *
+ * Every visible route produces its own reference file, matching the
+ * strategy used by generate-command-docs.ts. This eliminates the
+ * need for manual route-to-reference mappings that can go stale.
  */
 function groupRoutesByReference(
   routeInfos: RouteInfo[]
@@ -678,16 +743,13 @@ function groupRoutesByReference(
     if (route.name === "help") {
       continue;
     }
-    const refName = ROUTE_TO_REFERENCE[route.name] ?? route.name;
-    const existing = groups.get(refName) ?? [];
-    existing.push(route);
-    groups.set(refName, existing);
+    groups.set(route.name, [route]);
   }
   return groups;
 }
 
 /**
- * Generate all skill files: SKILL.md index + per-group reference files.
+ * Generate all skill files: SKILL.md index + per-route reference files.
  *
  * @returns Map of relative file paths → content
  */
@@ -701,7 +763,7 @@ async function generateAllSkillFiles(
   const supplementary = await generateSupplementarySections();
   const agentGuidance = await loadAgentGuidance();
 
-  // Group routes into reference files
+  // Map each route to its own reference file (1:1)
   const routeGroups = groupRoutesByReference(routeInfos);
 
   // Generate reference files
@@ -814,10 +876,38 @@ for (const [relativePath, content] of files) {
 const indexJson = generateIndexJson(files);
 await Bun.write(INDEX_JSON_PATH, indexJson);
 
+// Generate src/generated/skill-content.ts with inlined file contents.
+// This embeds all skill files into the binary at build time so that
+// agent-skills.ts can install them without any network fetching.
+const SKILL_CONTENT_PATH = "src/generated/skill-content.ts";
+const skillEntries = [...files.entries()]
+  .sort(([a], [b]) => a.localeCompare(b))
+  .map(([path, content]) => {
+    const escaped = content
+      .replaceAll("\\", "\\\\")
+      .replaceAll("`", "\\`")
+      .replaceAll("${", "\\${");
+    return `  ["${path}", \`${escaped}\`],`;
+  })
+  .join("\n");
+
+const skillContentModule = `/**
+ * Embedded skill file contents for agent skill installation.
+ * Auto-generated by script/generate-skill.ts — do not edit manually.
+ */
+
+/** Map of relative path → file content for all skill files */
+export const SKILL_FILES: ReadonlyMap<string, string> = new Map([
+${skillEntries}
+]);
+`;
+
+await Bun.write(SKILL_CONTENT_PATH, skillContentModule);
+
 // Report what was generated
 const refCount = [...files.keys()].filter((k) =>
   k.startsWith("references/")
 ).length;
 console.log(
-  `Generated ${OUTPUT_PATH} + ${refCount} reference files + ${INDEX_JSON_PATH}`
+  `Generated ${OUTPUT_PATH} + ${refCount} reference files + ${INDEX_JSON_PATH} + ${SKILL_CONTENT_PATH}`
 );

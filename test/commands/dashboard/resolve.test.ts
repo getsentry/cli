@@ -7,15 +7,28 @@
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
+  applyGroupLimitAutoDefault,
+  autoDefaultGroupLimit,
+  DEFAULT_GROUP_BY_LIMIT,
+  enrichDashboardError,
+  normalizeDataset,
   parseDashboardListArgs,
   parseDashboardPositionalArgs,
   resolveDashboardId,
   resolveOrgFromTarget,
+  validateWidgetEnums,
 } from "../../../src/commands/dashboard/resolve.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { parseOrgProjectArg } from "../../../src/lib/arg-parsing.js";
-import { ContextError, ValidationError } from "../../../src/lib/errors.js";
+import {
+  ApiError,
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "../../../src/lib/errors.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as region from "../../../src/lib/region.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 
@@ -327,16 +340,23 @@ describe("resolveDashboardId", () => {
 
 describe("resolveOrgFromTarget", () => {
   let resolveOrgSpy: ReturnType<typeof spyOn>;
+  let resolveEffectiveOrgSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
+    // Default: resolveEffectiveOrg returns the input unchanged
+    resolveEffectiveOrgSpy = spyOn(
+      region,
+      "resolveEffectiveOrg"
+    ).mockImplementation((slug: string) => Promise.resolve(slug));
   });
 
   afterEach(() => {
     resolveOrgSpy.mockRestore();
+    resolveEffectiveOrgSpy.mockRestore();
   });
 
-  test("explicit type returns org directly", async () => {
+  test("explicit type normalizes org via resolveEffectiveOrg", async () => {
     const parsed = parseOrgProjectArg("my-org/my-project");
     const org = await resolveOrgFromTarget(
       parsed,
@@ -344,7 +364,20 @@ describe("resolveOrgFromTarget", () => {
       "sentry dashboard view"
     );
     expect(org).toBe("my-org");
+    expect(resolveEffectiveOrgSpy).toHaveBeenCalledWith("my-org");
     expect(resolveOrgSpy).not.toHaveBeenCalled();
+  });
+
+  test("explicit type with o-prefixed numeric ID resolves to slug", async () => {
+    resolveEffectiveOrgSpy.mockResolvedValue("my-org");
+    const parsed = parseOrgProjectArg("o1169445/my-project");
+    const org = await resolveOrgFromTarget(
+      parsed,
+      "/tmp",
+      "sentry dashboard list"
+    );
+    expect(org).toBe("my-org");
+    expect(resolveEffectiveOrgSpy).toHaveBeenCalledWith("o1169445");
   });
 
   test("auto-detect with null resolveOrg throws ContextError", async () => {
@@ -354,5 +387,296 @@ describe("resolveOrgFromTarget", () => {
     await expect(
       resolveOrgFromTarget(parsed, "/tmp", "sentry dashboard view")
     ).rejects.toThrow(ContextError);
+  });
+
+  test("auto-detect delegates to resolveOrg", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "detected-org" });
+    const parsed = parseOrgProjectArg(undefined);
+    const org = await resolveOrgFromTarget(
+      parsed,
+      "/tmp",
+      "sentry dashboard list"
+    );
+    expect(org).toBe("detected-org");
+    expect(resolveOrgSpy).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// enrichDashboardError
+// ---------------------------------------------------------------------------
+
+describe("enrichDashboardError", () => {
+  test("re-throws non-ApiError unchanged", () => {
+    const original = new Error("network failure");
+    expect(() =>
+      enrichDashboardError(original, { orgSlug: "my-org", operation: "list" })
+    ).toThrow(original);
+  });
+
+  test("re-throws ApiError with unhandled status unchanged", () => {
+    const original = new ApiError("rate limited", 429, "Too many requests");
+    expect(() =>
+      enrichDashboardError(original, { orgSlug: "my-org", operation: "list" })
+    ).toThrow(ApiError);
+    try {
+      enrichDashboardError(original, { orgSlug: "my-org", operation: "list" });
+    } catch (error) {
+      expect(error).toBe(original);
+    }
+  });
+
+  // -- 404 errors --
+
+  test("404 on list throws ResolutionError mentioning org", () => {
+    const apiErr = new ApiError("Not Found", 404);
+    try {
+      enrichDashboardError(apiErr, { orgSlug: "my-org", operation: "list" });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      expect(msg).toContain("'my-org'");
+      expect(msg).toContain("not found");
+      expect(msg).toContain("sentry dashboard list");
+      expect(msg).toContain("sentry org list");
+    }
+  });
+
+  test("404 on view with dashboardId throws ResolutionError for dashboard", () => {
+    const apiErr = new ApiError("Not Found", 404);
+    try {
+      enrichDashboardError(apiErr, {
+        orgSlug: "my-org",
+        dashboardId: "12345",
+        operation: "view",
+      });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      expect(msg).toContain("Dashboard 12345");
+      expect(msg).toContain("'my-org'");
+      expect(msg).toContain("not found");
+      expect(msg).toContain("sentry dashboard list");
+    }
+  });
+
+  test("404 on create without dashboardId throws ResolutionError for org", () => {
+    const apiErr = new ApiError("Not Found", 404);
+    try {
+      enrichDashboardError(apiErr, { orgSlug: "bad-org", operation: "create" });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      expect(msg).toContain("'bad-org'");
+      expect(msg).toContain("not found");
+    }
+  });
+
+  // -- 403 errors --
+
+  test("403 with dashboardId throws ResolutionError for dashboard access", () => {
+    const apiErr = new ApiError("Forbidden", 403, "No permission");
+    try {
+      enrichDashboardError(apiErr, {
+        orgSlug: "my-org",
+        dashboardId: "99",
+        operation: "view",
+      });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      expect(msg).toContain("Dashboard 99");
+      expect(msg).toContain("access denied");
+      expect(msg).toContain("No permission");
+    }
+  });
+
+  test("403 without dashboardId throws ResolutionError for org dashboards", () => {
+    const apiErr = new ApiError("Forbidden", 403);
+    try {
+      enrichDashboardError(apiErr, { orgSlug: "my-org", operation: "list" });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      expect(msg).toContain("Dashboards in 'my-org'");
+      expect(msg).toContain("access denied");
+    }
+  });
+
+  test("403 includes default detail when API provides none", () => {
+    const apiErr = new ApiError("Forbidden", 403);
+    try {
+      enrichDashboardError(apiErr, { orgSlug: "my-org", operation: "list" });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      expect(msg).toContain("You do not have permission.");
+    }
+  });
+
+  // -- 400 errors --
+
+  test("400 on update throws enriched ApiError with dashboard context", () => {
+    const apiErr = new ApiError("Bad Request", 400, "Invalid widget config");
+    try {
+      enrichDashboardError(apiErr, {
+        orgSlug: "my-org",
+        dashboardId: "42",
+        operation: "update",
+      });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      const msg = (error as ApiError).message;
+      expect(msg).toContain("Dashboard update failed");
+      expect(msg).toContain("'my-org'");
+      expect((error as ApiError).detail).toContain("Invalid widget config");
+    }
+  });
+
+  test("400 on non-update operation re-throws unchanged", () => {
+    const apiErr = new ApiError("Bad Request", 400, "some detail");
+    expect(() =>
+      enrichDashboardError(apiErr, { orgSlug: "my-org", operation: "list" })
+    ).toThrow(apiErr);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalizeDataset + validateWidgetEnums
+// ---------------------------------------------------------------------------
+
+describe("normalizeDataset", () => {
+  test("returns undefined for undefined input", () => {
+    expect(normalizeDataset(undefined)).toBeUndefined();
+  });
+
+  test("lowercases canonical values (pass-through)", () => {
+    expect(normalizeDataset("spans")).toBe("spans");
+    expect(normalizeDataset("error-events")).toBe("error-events");
+    expect(normalizeDataset("transaction-like")).toBe("transaction-like");
+    expect(normalizeDataset("tracemetrics")).toBe("tracemetrics");
+    expect(normalizeDataset("logs")).toBe("logs");
+    expect(normalizeDataset("issue")).toBe("issue");
+    expect(normalizeDataset("discover")).toBe("discover");
+  });
+
+  test("resolves error/errors aliases", () => {
+    expect(normalizeDataset("errors")).toBe("error-events");
+    expect(normalizeDataset("error")).toBe("error-events");
+  });
+
+  test("resolves transaction/transactions aliases", () => {
+    expect(normalizeDataset("transactions")).toBe("transaction-like");
+    expect(normalizeDataset("transaction")).toBe("transaction-like");
+  });
+
+  test("resolves metrics and metricsEnhanced aliases", () => {
+    expect(normalizeDataset("metrics")).toBe("tracemetrics");
+    expect(normalizeDataset("metricsEnhanced")).toBe("tracemetrics");
+  });
+
+  test("resolves log alias", () => {
+    expect(normalizeDataset("log")).toBe("logs");
+  });
+
+  test("case-insensitive matching", () => {
+    expect(normalizeDataset("Errors")).toBe("error-events");
+    expect(normalizeDataset("ERRORS")).toBe("error-events");
+    expect(normalizeDataset("SPANS")).toBe("spans");
+    expect(normalizeDataset("MetricsEnhanced")).toBe("tracemetrics");
+  });
+
+  test("returns lowercased unknown input unchanged for validator to reject", () => {
+    expect(normalizeDataset("unknown-dataset")).toBe("unknown-dataset");
+    expect(normalizeDataset("DoesNotExist")).toBe("doesnotexist");
+  });
+});
+
+describe("validateWidgetEnums (with normalizeDataset)", () => {
+  test("accepts a normalized alias without error", () => {
+    // Pipeline: caller runs normalizeDataset first, then passes the canonical
+    // value to validateWidgetEnums. This simulates the wiring in add/edit.
+    expect(() =>
+      validateWidgetEnums("bar", normalizeDataset("errors"))
+    ).not.toThrow();
+  });
+
+  test("rejects an unresolved alias when passed un-normalized", () => {
+    // Guard: forgetting to normalize surfaces as a ValidationError listing
+    // canonical values, not silent success.
+    expect(() => validateWidgetEnums("bar", "errors")).toThrow(ValidationError);
+  });
+
+  test("rejects unknown datasets (no such alias)", () => {
+    expect(() => validateWidgetEnums(undefined, "bogus-dataset")).toThrow(
+      ValidationError
+    );
+  });
+
+  test("rejects unknown display types", () => {
+    expect(() => validateWidgetEnums("pie-chart", undefined)).toThrow(
+      ValidationError
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// autoDefaultGroupLimit / applyGroupLimitAutoDefault
+// ---------------------------------------------------------------------------
+
+describe("autoDefaultGroupLimit", () => {
+  test("returns the provided limit when set", () => {
+    expect(autoDefaultGroupLimit(["browser.name"], 10)).toBe(10);
+  });
+
+  test("returns DEFAULT_GROUP_BY_LIMIT for grouped widgets with no limit", () => {
+    expect(autoDefaultGroupLimit(["browser.name"], undefined)).toBe(
+      DEFAULT_GROUP_BY_LIMIT
+    );
+    expect(autoDefaultGroupLimit(["browser.name"], null)).toBe(
+      DEFAULT_GROUP_BY_LIMIT
+    );
+  });
+
+  test("returns undefined for ungrouped widgets with no limit", () => {
+    expect(autoDefaultGroupLimit([], undefined)).toBeUndefined();
+    expect(autoDefaultGroupLimit([], null)).toBeUndefined();
+  });
+
+  test("preserves explicit limit even for ungrouped widgets", () => {
+    expect(autoDefaultGroupLimit([], 3)).toBe(3);
+  });
+});
+
+describe("applyGroupLimitAutoDefault", () => {
+  test("skips auto-default when --group-by not passed", () => {
+    // Auto-defaulted columns (e.g., ["issue"] for issue/table) should NOT
+    // trigger the auto-default limit — caller signals intent via userGroupBy.
+    expect(
+      applyGroupLimitAutoDefault(undefined, ["issue"], undefined)
+    ).toBeUndefined();
+  });
+
+  test("applies default when --group-by passed without limit", () => {
+    expect(
+      applyGroupLimitAutoDefault(["browser.name"], ["browser.name"], undefined)
+    ).toBe(DEFAULT_GROUP_BY_LIMIT);
+  });
+
+  test("preserves explicit limit", () => {
+    expect(
+      applyGroupLimitAutoDefault(["browser.name"], ["browser.name"], 25)
+    ).toBe(25);
+  });
+
+  test("empty --group-by is treated as not passed", () => {
+    expect(applyGroupLimitAutoDefault([], [], undefined)).toBeUndefined();
   });
 });

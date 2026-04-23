@@ -1,6 +1,406 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.28.1
+
+### Bug Fixes 🐛
+
+#### Init
+
+- Use isatty(0) for TTY detection and add diagnostic probe by @BYK in [#767](https://github.com/getsentry/cli/pull/767)
+- Reuse detected existing project data by @betegon in [#766](https://github.com/getsentry/cli/pull/766)
+- Ensure project reuse and spinner states by @MathurAditya724 in [#763](https://github.com/getsentry/cli/pull/763)
+
+#### Other
+
+- (arg-parsing) Accept underscores in Sentry slugs (#770) by @BYK in [#771](https://github.com/getsentry/cli/pull/771)
+- (ci) Scope build-binary and build-docs to production environment by @BYK in [#773](https://github.com/getsentry/cli/pull/773)
+- (dsn) Limit concurrent stat() calls in project root detection (CLI-19A) by @BYK in [#768](https://github.com/getsentry/cli/pull/768)
+- (project-create) Preserve ApiError type so 4xx errors are silenced by @BYK in [#775](https://github.com/getsentry/cli/pull/775)
+- (resolve-target) Reference original input in fuzzy-recovery warnings (#772) by @BYK in [#774](https://github.com/getsentry/cli/pull/774)
+- (telemetry) Reduce Sentry issue fragmentation with stable fingerprinting by @BYK in [#769](https://github.com/getsentry/cli/pull/769)
+
+### Internal Changes 🔧
+
+- Regenerate docs by @github-actions[bot] in [e02799c1](https://github.com/getsentry/cli/commit/e02799c1cb4a4c35ec981e1973a9b0dee78f2ae7)
+
+## 0.28.0
+
+### New Features ✨
+
+- (build) Add musl binaries for Alpine Linux support by @BYK in [#762](https://github.com/getsentry/cli/pull/762)
+- (custom-headers) Add SENTRY_CUSTOM_HEADERS for self-hosted proxy auth by @BYK in [#761](https://github.com/getsentry/cli/pull/761)
+- (init) Pre-supply existingSentry to eliminate roundtrip by @betegon in [#755](https://github.com/getsentry/cli/pull/755)
+
+### Bug Fixes 🐛
+
+- (arg-parsing) Normalize spaces in slugs and trim whitespace in issue IDs (CLI-14M, CLI-16M) by @BYK in [#757](https://github.com/getsentry/cli/pull/757)
+- (ci) Install libstdc++/libgcc for Alpine smoke test and add musl to PR matrix by @BYK in [#765](https://github.com/getsentry/cli/pull/765)
+- (search) Rewrite OR queries to in-list syntax across all --query commands (CLI-16J) by @BYK in [#758](https://github.com/getsentry/cli/pull/758)
+- (upgrade) Retry spawn on EBUSY for Windows Defender file locking (CLI-16E) by @BYK in [#756](https://github.com/getsentry/cli/pull/756)
+
+### Internal Changes 🔧
+
+- (init) Split tools and preflight by @betegon in [#764](https://github.com/getsentry/cli/pull/764)
+- (time-range) Parse --period at flag level via parsePeriod by @BYK in [#760](https://github.com/getsentry/cli/pull/760)
+- Regenerate docs by @github-actions[bot] in [34bf056d](https://github.com/getsentry/cli/commit/34bf056d0bca3cc90f0287dbda44bc1c140d64b2)
+
+## 0.27.0
+
+### New Features ✨
+
+- (cli) Add `sentry cli defaults` command for persistent settings by @BYK in [#721](https://github.com/getsentry/cli/pull/721)
+- (docs) Auto-generate driftable documentation sections by @BYK in [#739](https://github.com/getsentry/cli/pull/739)
+- (issue-list) Add search syntax docs, case-insensitive AND/OR, and JSON syntax reference by @BYK in [#738](https://github.com/getsentry/cli/pull/738)
+- (setup) Install agent skills for detected roots by @betegon in [#747](https://github.com/getsentry/cli/pull/747)
+- (trace) Consistent project filtering across trace commands (#737) by @BYK in [#743](https://github.com/getsentry/cli/pull/743)
+- (trace-view) Expose span attributes in trace and span views by @BYK in [#742](https://github.com/getsentry/cli/pull/742)
+
+### Bug Fixes 🐛
+
+#### Event View
+
+- Validate event ID format before API call (CLI-156) by @BYK in [#751](https://github.com/getsentry/cli/pull/751)
+- Add cross-org fallback when event not found by @BYK in [#744](https://github.com/getsentry/cli/pull/744)
+
+#### Init
+
+- Treat no-op edits as passthrough instead of throwing by @betegon in [#731](https://github.com/getsentry/cli/pull/731)
+- Remove JSON minification that breaks edit-based codemods by @betegon in [#719](https://github.com/getsentry/cli/pull/719)
+
+#### Issue List
+
+- Auto-recover when user passes issue short ID instead of project slug by @BYK in [#750](https://github.com/getsentry/cli/pull/750)
+- Auto-correct AND and reject OR in --query to prevent 400 by @BYK in [#727](https://github.com/getsentry/cli/pull/727)
+
+#### Resolve
+
+- Address review comments and add tests for fuzzy project recovery by @BYK in [#732](https://github.com/getsentry/cli/pull/732)
+- Fuzzy auto-recovery for project slug resolution by @BYK in [#728](https://github.com/getsentry/cli/pull/728)
+
+#### Upgrade
+
+- Contextual error messages for offline cache miss (CLI-13Z) by @BYK in [#752](https://github.com/getsentry/cli/pull/752)
+- Detect npm install method from node_modules path by @BYK in [#723](https://github.com/getsentry/cli/pull/723)
+- Add shell option on Windows for .cmd package managers by @BYK in [#722](https://github.com/getsentry/cli/pull/722)
+
+#### Other
+
+- (ci) Add retry logic to ORAS/bsdiff downloads and upgrade ORAS by @BYK in [#741](https://github.com/getsentry/cli/pull/741)
+- (dashboard) Remove overly restrictive dataset-display cross-validation by @BYK in [#720](https://github.com/getsentry/cli/pull/720)
+- (delta-upgrade) Filter non-versioned nightly tags from GHCR patch generation by @BYK in [#753](https://github.com/getsentry/cli/pull/753)
+- (errors) Improve ContextError wording for auto-detect failures by @BYK in [#726](https://github.com/getsentry/cli/pull/726)
+- (issue) Support share issue URLs by @BYK in [#718](https://github.com/getsentry/cli/pull/718)
+- (release-delete) Enrich error for releases with health data (CLI-14K) by @BYK in [#749](https://github.com/getsentry/cli/pull/749)
+- (telemetry) Rename isClientApiError to isUserApiError and exclude 400 by @BYK in [#729](https://github.com/getsentry/cli/pull/729)
+- Bug fixes from Sentry error monitoring (CLI-FR, CLI-RN) + auth default by @BYK in [#740](https://github.com/getsentry/cli/pull/740)
+
+### Internal Changes 🔧
+
+- Regenerate skill files by @github-actions[bot] in [ca16b2ff](https://github.com/getsentry/cli/commit/ca16b2ff3501fa65fc57f208e29e01d38b474eb8)
+
+## 0.26.1
+
+### Bug Fixes 🐛
+
+- (build) Normalize Windows backslash paths for sourcemap resolution by @BYK in [#714](https://github.com/getsentry/cli/pull/714)
+- (dashboard) Guard sort param by dataset in widget table queries by @BYK in [#715](https://github.com/getsentry/cli/pull/715)
+- (test) Silence "unexpected fetch call to" warnings in unit tests by @BYK in [#716](https://github.com/getsentry/cli/pull/716)
+
+## 0.26.0
+
+### New Features ✨
+
+#### Docs
+
+- Deploy main branch preview alongside PR previews by @BYK in [#707](https://github.com/getsentry/cli/pull/707)
+- Enable sourcemap upload, releases, and environment tracking by @BYK in [#705](https://github.com/getsentry/cli/pull/705)
+
+#### Init
+
+- Pre-read common config files to reduce round-trips by @betegon in [#704](https://github.com/getsentry/cli/pull/704)
+- Add grep and glob local-op handlers by @betegon in [#703](https://github.com/getsentry/cli/pull/703)
+- Add fuzzy edit replacers and edits-based apply-patchset by @betegon in [#698](https://github.com/getsentry/cli/pull/698)
+
+#### Other
+
+- (cli) Hoist global flags from any argv position and add -v alias by @BYK in [#709](https://github.com/getsentry/cli/pull/709)
+- (commands) Add buildRouteMap wrapper with standard subcommand aliases by @BYK in [#690](https://github.com/getsentry/cli/pull/690)
+- (config) Support .sentryclirc config file for per-directory defaults by @BYK in [#693](https://github.com/getsentry/cli/pull/693)
+- (install) Add SENTRY_INIT env var to run wizard after install by @betegon in [#685](https://github.com/getsentry/cli/pull/685)
+- (release) Surface adoption and health metrics in list and view (#463) by @BYK in [#680](https://github.com/getsentry/cli/pull/680)
+- (telemetry) Add agent detection tag for AI coding tools by @betegon in [#687](https://github.com/getsentry/cli/pull/687)
+
+### Bug Fixes 🐛
+
+#### Dashboard
+
+- Add --layout flag to widget add for predictable placement by @BYK in [#700](https://github.com/getsentry/cli/pull/700)
+- Render tracemetrics widgets in dashboard view by @BYK in [#695](https://github.com/getsentry/cli/pull/695)
+
+#### Init
+
+- Add size guard and deduplicate JSON minification in preReadCommonFiles by @betegon in [#713](https://github.com/getsentry/cli/pull/713)
+- Narrow command validation to actual shell injection vectors by @betegon in [#697](https://github.com/getsentry/cli/pull/697)
+
+#### Other
+
+- (build) Enable sourcemap resolution for compiled binaries by @BYK in [#701](https://github.com/getsentry/cli/pull/701)
+- (cache) --fresh flag now updates cache with fresh response by @BYK in [#708](https://github.com/getsentry/cli/pull/708)
+- (eval) Ground LLM judge with command reference to prevent false negatives by @BYK in [#712](https://github.com/getsentry/cli/pull/712)
+- (init,feedback) Default to tracing only in feature select and attach user email to feedback by @MathurAditya724 in [#688](https://github.com/getsentry/cli/pull/688)
+- (setup) Handle read-only .claude directory in sandboxed environments by @BYK in [#702](https://github.com/getsentry/cli/pull/702)
+- Inject auth token into generated .env.sentry-build-plugin files by @MathurAditya724 in [#706](https://github.com/getsentry/cli/pull/706)
+
+### Internal Changes 🔧
+
+- (docs) Gitignore generated command docs, extract fragments by @BYK in [#696](https://github.com/getsentry/cli/pull/696)
+- (eval) Replace OpenAI with Anthropic SDK in init-eval judge by @betegon in [#683](https://github.com/getsentry/cli/pull/683)
+- (init) Use markdown pipeline for spinner messages by @betegon in [#686](https://github.com/getsentry/cli/pull/686)
+- Regenerate skill files and command docs by @github-actions[bot] in [584ec0e0](https://github.com/getsentry/cli/commit/584ec0e001611873197c52a01156bef1c4fe9431)
+
+## 0.25.0
+
+### New Features ✨
+
+- (event) Add 'sentry event list' command for issue-scoped event listing by @BYK in [#671](https://github.com/getsentry/cli/pull/671)
+- (init) Add detect-sentry local-op for cross-language Sentry detection by @betegon in [#657](https://github.com/getsentry/cli/pull/657)
+- (issue) Add `sentry issue events` command (#632) by @BYK in [#654](https://github.com/getsentry/cli/pull/654)
+- (period) Support absolute date ranges in --period flag by @BYK in [#674](https://github.com/getsentry/cli/pull/674)
+
+### Bug Fixes 🐛
+
+#### Init
+
+- Run commands without shell to eliminate injection surface by @betegon in [#665](https://github.com/getsentry/cli/pull/665)
+- Use opendir for listDir and validate symlinks during traversal by @betegon in [#663](https://github.com/getsentry/cli/pull/663)
+- Rename 'Custom Metrics' feature label to 'Metrics' by @MathurAditya724 in [#659](https://github.com/getsentry/cli/pull/659)
+- Add reactFeatures to feature display info by @MathurAditya724 in [#658](https://github.com/getsentry/cli/pull/658)
+- Generate spinner messages from payload params instead of server detail by @MathurAditya724 in [#655](https://github.com/getsentry/cli/pull/655)
+
+#### Other
+
+- (auth) Fall back to OAuth when env token lacks endpoint permissions by @BYK in [#673](https://github.com/getsentry/cli/pull/673)
+- (errors) Separate informational notes from actionable alternatives in ContextError by @BYK in [#651](https://github.com/getsentry/cli/pull/651)
+- (skill-gen) Eliminate manual maps to prevent undocumented commands by @BYK in [#670](https://github.com/getsentry/cli/pull/670)
+- Three bug fixes from Sentry telemetry (CLI-SC, CLI-QZ, CLI-WD) by @cursor in [#664](https://github.com/getsentry/cli/pull/664)
+- Fix set-commits --auto, document release workflow pitfalls by @BYK in [#650](https://github.com/getsentry/cli/pull/650)
+
+### Internal Changes 🔧
+
+#### Init
+
+- Use shared YES_FLAG and add -y alias constant by @betegon in [#681](https://github.com/getsentry/cli/pull/681)
+- Reuse resolveOrCreateTeam for wizard team resolution by @betegon in [#679](https://github.com/getsentry/cli/pull/679)
+- Route wizard errors through framework error pipeline by @betegon in [#678](https://github.com/getsentry/cli/pull/678)
+- Use guardNonInteractive for TTY check by @betegon in [#677](https://github.com/getsentry/cli/pull/677)
+- Use shared DRY_RUN_FLAG and add -n alias by @betegon in [#676](https://github.com/getsentry/cli/pull/676)
+- Reuse resolveOrg for offline-first org detection by @betegon in [#666](https://github.com/getsentry/cli/pull/666)
+- Use mdKvTable and renderMarkdown for wizard summary by @betegon in [#661](https://github.com/getsentry/cli/pull/661)
+
+#### Other
+
+- Extract createProjectWithDsn to deduplicate project creation by @betegon in [#667](https://github.com/getsentry/cli/pull/667)
+- Regenerate skill files and command docs by @github-actions[bot] in [eb1b19e7](https://github.com/getsentry/cli/commit/eb1b19e70a31e44695e0b84b7ce76a7928f7c828)
+
+### Other
+
+- Update custom.css by @stevenplewis in [#653](https://github.com/getsentry/cli/pull/653)
+
+## 0.24.1
+
+### Bug Fixes 🐛
+
+- (ci) Fix set-commits --auto and add checkout/URL to sentry-release workflow by @BYK in [#649](https://github.com/getsentry/cli/pull/649)
+- (upgrade) Add blank lines around changelog in upgrade output by @BYK in [#642](https://github.com/getsentry/cli/pull/642)
+
+### Internal Changes 🔧
+
+- Restore sentry/ org prefix in sentry-release workflow by @BYK in [#648](https://github.com/getsentry/cli/pull/648)
+- Use production environment for sentry-release auth token by @BYK in [#645](https://github.com/getsentry/cli/pull/645)
+- Fix sentry-release workflow Node.js version and add manual trigger by @BYK in [#643](https://github.com/getsentry/cli/pull/643)
+- Regenerate skill files and command docs by @github-actions[bot] in [59c820e4](https://github.com/getsentry/cli/commit/59c820e430d04f4816b35cc463f4d08102512fa4)
+
+## 0.24.0
+
+### New Features ✨
+
+#### Telemetry
+
+- Add cache hit rate metric across all cache systems by @BYK in [#638](https://github.com/getsentry/cli/pull/638)
+- Add performance instrumentation and CLI Performance dashboard by @BYK in [#625](https://github.com/getsentry/cli/pull/625)
+- Upgrade Sentry SDK to 10.47.0 and enable runtime metrics by @BYK in [#622](https://github.com/getsentry/cli/pull/622)
+
+#### Other
+
+- (auth) Show token expiry in days/weeks instead of raw hours by @BYK in [#620](https://github.com/getsentry/cli/pull/620)
+- (ci) Add delta patch generation for stable releases by @BYK in [#618](https://github.com/getsentry/cli/pull/618)
+- (commands) Add shared helpers and buildDeleteCommand for mutation commands by @BYK in [#639](https://github.com/getsentry/cli/pull/639)
+- (dashboard) Render text widget markdown content in dashboard view by @BYK in [#624](https://github.com/getsentry/cli/pull/624)
+- (release) Add release command group and CI finalization by @BYK in [#628](https://github.com/getsentry/cli/pull/628)
+- (traces) Expose custom span attributes and improve agent guidance by @BYK in [#623](https://github.com/getsentry/cli/pull/623)
+- Improve unknown command UX with aliases, default routing, and suggestions by @BYK in [#635](https://github.com/getsentry/cli/pull/635)
+
+### Bug Fixes 🐛
+
+#### Telemetry
+
+- Exclude OutputError from Sentry exception capture (CLI-PK) by @BYK in [#629](https://github.com/getsentry/cli/pull/629)
+- Derive environment from CLI_VERSION instead of NODE_ENV by @BYK in [#627](https://github.com/getsentry/cli/pull/627)
+
+#### Other
+
+- (build) Use esbuild for binary bundling to fix minifier collision bug by @BYK in [#619](https://github.com/getsentry/cli/pull/619)
+- (ci) Restore GH_TOKEN for gh CLI steps in generate-patches by @BYK in [#634](https://github.com/getsentry/cli/pull/634)
+- (commands) Add regression test for Stricli numberParser defaults (#640) by @BYK in [#641](https://github.com/getsentry/cli/pull/641)
+- (init) Prompt for team selection when user belongs to multiple teams by @betegon in [#621](https://github.com/getsentry/cli/pull/621)
+- (polyfill) Add missing Bun API polyfills for npm distribution by @BYK in [#637](https://github.com/getsentry/cli/pull/637)
+- (upgrade) Remove "What's new" header from changelog output by @BYK in [#626](https://github.com/getsentry/cli/pull/626)
+
+### Documentation 📚
+
+- Add tracemetrics dataset guidance and validate aggregate format by @BYK in [#636](https://github.com/getsentry/cli/pull/636)
+
+### Internal Changes 🔧
+
+- (deps) Upgrade @sentry/api from 0.54.0 to 0.94.0 by @BYK in [#630](https://github.com/getsentry/cli/pull/630)
+- Remove stale debug-level stderr assertions and fix logger state leak by @BYK in [#631](https://github.com/getsentry/cli/pull/631)
+- Regenerate skill files and command docs by @github-actions[bot] in [e01b2520](https://github.com/getsentry/cli/commit/e01b2520ff6c858e032d2714e4e16168bdeef926)
+
+## 0.23.0
+
+### New Features ✨
+
+- (auth) Enforce auth by default in buildCommand by @betegon in [#611](https://github.com/getsentry/cli/pull/611)
+- (skill) Add eval framework to measure SKILL.md effectiveness by @BYK in [#602](https://github.com/getsentry/cli/pull/602)
+- (telemetry) Add seer.outcome span tag for Seer command metrics by @BYK in [#609](https://github.com/getsentry/cli/pull/609)
+- (upgrade) Show changelog summary during CLI upgrade by @BYK in [#594](https://github.com/getsentry/cli/pull/594)
+
+### Bug Fixes 🐛
+
+#### Upgrade
+
+- Prevent spinner freeze during delta patch application by @BYK in [#608](https://github.com/getsentry/cli/pull/608)
+- Indent changelog, add emoji to heading, hide empty sections by @BYK in [#604](https://github.com/getsentry/cli/pull/604)
+
+#### Other
+
+- (build) Disable identifier minification to fix marked crash by @betegon in [#617](https://github.com/getsentry/cli/pull/617)
+- (dashboard) Reject MRI queries with actionable tracemetrics guidance by @BYK in [#601](https://github.com/getsentry/cli/pull/601)
+- (init) Prompt/spinner ordering by @betegon in [#610](https://github.com/getsentry/cli/pull/610)
+- (skill) Avoid unnecessary auth, reinforce auto-detection, fix field examples by @BYK in [#599](https://github.com/getsentry/cli/pull/599)
+- (test) Fix CI hang, auth guard tests, and PR #610 test rewrite by @betegon in [#616](https://github.com/getsentry/cli/pull/616)
+- 2 bug fixes — subcommand crash, negative span depth, pagination JSON parse by @cursor in [#607](https://github.com/getsentry/cli/pull/607)
+
+### Documentation 📚
+
+- (skill) Document dashboard widget constraints and deprecated datasets by @BYK in [#605](https://github.com/getsentry/cli/pull/605)
+- Fix documentation gaps and embed skill files at build time by @cursor in [#606](https://github.com/getsentry/cli/pull/606)
+
+### Internal Changes 🔧
+
+- Regenerate skill files and command docs by @github-actions[bot] in [664362ca](https://github.com/getsentry/cli/commit/664362cab8a999b0f96bb62b9cfd648db846b0b5)
+
+## 0.22.0
+
+### New Features ✨
+
+- (dashboard) Add layout/position flags to widget edit and add commands by @BYK in [#591](https://github.com/getsentry/cli/pull/591)
+- (init) Surface server-provided detail in spinner messages by @MathurAditya724 in [#588](https://github.com/getsentry/cli/pull/588)
+- AsyncIterable streaming support for library SDK by @BYK in [#586](https://github.com/getsentry/cli/pull/586)
+
+### Bug Fixes 🐛
+
+#### Dashboard
+
+- Normalize numeric org IDs from DSN auto-detection by @BYK in [#593](https://github.com/getsentry/cli/pull/593)
+- Show actionable error messages instead of raw API errors by @BYK in [#592](https://github.com/getsentry/cli/pull/592)
+
+#### Other
+
+- (auth) Skip stale cached user info for env var tokens in `auth status` by @BYK in [#589](https://github.com/getsentry/cli/pull/589)
+- (upgrade) Move delta patch log.info outside spinner callback by @BYK in [#590](https://github.com/getsentry/cli/pull/590)
+
+### Internal Changes 🔧
+
+- Remove upstream issue templates for Sentry SDK light exports by @MathurAditya724 in [#596](https://github.com/getsentry/cli/pull/596)
+- Regenerate skill files and command docs by @github-actions[bot] in [0276f760](https://github.com/getsentry/cli/commit/0276f760f0d5b9596b8208a1066156eb935c04cb)
+
+## 0.21.0
+
+### New Features ✨
+
+#### Dashboard
+
+- Add pagination and glob filtering to dashboard list by @BYK in [#560](https://github.com/getsentry/cli/pull/560)
+- Add a full chart rendering engine for `sentry dashboard view` that transforms widget data into rich terminal visualizations. by @BYK in [#555](https://github.com/getsentry/cli/pull/555)
+
+#### Init
+
+- Propagate sentry-trace headers to wizard API calls by @betegon in [#567](https://github.com/getsentry/cli/pull/567)
+- Treat bare slug as new project name when not found by @BYK in [#554](https://github.com/getsentry/cli/pull/554)
+
+#### Other
+
+- (formatters) Colorize SQL in DB span descriptions by @BYK in [#546](https://github.com/getsentry/cli/pull/546)
+- (output) Add Zod schema registration to OutputConfig for self-documenting JSON fields by @BYK in [#582](https://github.com/getsentry/cli/pull/582)
+- (telemetry) Report unknown commands to Sentry by @BYK in [#563](https://github.com/getsentry/cli/pull/563)
+- Expose CLI as a programmatic library by @BYK in [#565](https://github.com/getsentry/cli/pull/565)
+- Bidirectional cursor pagination (-c next / -c prev) by @BYK in [#564](https://github.com/getsentry/cli/pull/564)
+- Add `sentry sourcemap inject` and `sentry sourcemap upload` commands by @BYK in [#547](https://github.com/getsentry/cli/pull/547)
+- Native debug ID injection and sourcemap upload by @BYK in [#543](https://github.com/getsentry/cli/pull/543)
+
+### Bug Fixes 🐛
+
+#### Dashboard
+
+- Fix table widget rendering and timeseries bar chart width by @BYK in [#584](https://github.com/getsentry/cli/pull/584)
+- Validate display types against all datasets by @betegon in [#577](https://github.com/getsentry/cli/pull/577)
+- Auto-clamp widget limit instead of erroring by @BYK in [#573](https://github.com/getsentry/cli/pull/573)
+- Default issue dataset table columns to ["issue"] by @betegon in [#570](https://github.com/getsentry/cli/pull/570)
+- Scale timeseries bar width to fill chart area by @BYK in [#562](https://github.com/getsentry/cli/pull/562)
+- Resolve dashboard by ID/slug in addition to title by @BYK in [#559](https://github.com/getsentry/cli/pull/559)
+
+#### Event
+
+- Detect SHORT-ID/EVENT-ID format in event view by @BYK in [#574](https://github.com/getsentry/cli/pull/574)
+- Auto-fallback to org-wide search when event 404s in project by @BYK in [#575](https://github.com/getsentry/cli/pull/575)
+
+#### Other
+
+- (api) Show meaningful message for network errors instead of '0 Unknown' by @BYK in [#572](https://github.com/getsentry/cli/pull/572)
+- (event-view) Auto-redirect issue short IDs in two-arg form (CLI-MP) by @BYK in [#558](https://github.com/getsentry/cli/pull/558)
+- (help) Show help when user passes `help` as positional arg by @BYK in [#561](https://github.com/getsentry/cli/pull/561)
+- (issue) Auto-redirect bare org slug to org-all mode in issue list by @BYK in [#576](https://github.com/getsentry/cli/pull/576)
+- (log) Use 30d default period and show newest logs first by @sergical in [#568](https://github.com/getsentry/cli/pull/568)
+- Reject @-selectors in parseOrgProjectArg with helpful redirect by @BYK in [#557](https://github.com/getsentry/cli/pull/557)
+
+### Documentation 📚
+
+- Add missing command pages for trace, span, sourcemap, repo, trial, schema by @sergical in [#569](https://github.com/getsentry/cli/pull/569)
+
+### Internal Changes 🔧
+
+#### Coverage
+
+- Use informational-patch input instead of sed hack by @BYK in [#544](https://github.com/getsentry/cli/pull/544)
+- Make checks informational on release branches by @BYK in [#541](https://github.com/getsentry/cli/pull/541)
+
+#### Event
+
+- Replace "latest" magic string with @latest sentinel constant by @BYK in [#583](https://github.com/getsentry/cli/pull/583)
+- Deduplicate span tree building into shared helper by @BYK in [#581](https://github.com/getsentry/cli/pull/581)
+
+#### Other
+
+- (api) Collapse stats on issue detail endpoints to save 100-300ms by @BYK in [#551](https://github.com/getsentry/cli/pull/551)
+- (ci) Upgrade GitHub Actions to Node 24 runtime by @BYK in [#542](https://github.com/getsentry/cli/pull/542)
+- (db) DRY up database layer with shared helpers and lint enforcement by @BYK in [#550](https://github.com/getsentry/cli/pull/550)
+- (docs) Polish sidebar, header, focus, and code block UX by @sergical in [#580](https://github.com/getsentry/cli/pull/580)
+- (issue-list) Use collapse parameter to skip unused Snuba queries by @BYK in [#545](https://github.com/getsentry/cli/pull/545)
+- Bump Bun from 1.3.9 to 1.3.11 by @BYK in [#552](https://github.com/getsentry/cli/pull/552)
+- Regenerate skill files by @github-actions[bot] in [ec1ffe28](https://github.com/getsentry/cli/commit/ec1ffe2810eb5054ac7aa81ba9dac7bfccedb1fd)
+
 ## 0.20.0
 
 ### New Features ✨

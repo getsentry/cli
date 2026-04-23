@@ -11,14 +11,21 @@ concurrency:
   cancel-in-progress: true
 
 # packages:write is needed for publish-nightly to push to GHCR
+# issues:write is needed for generate-patches to file issues on failure
 permissions:
   contents: read
+  issues: write
   packages: write
 
 env:
   # Commit timestamp used for deterministic nightly version strings.
   # Defined at workflow level so build-binary and publish-nightly always agree.
   COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
+  # SENTRY_CLIENT_ID is baked into the binary at build time. Fork PRs can't
+  # read repo vars (getsentry org policy); fall back to a dummy. The resulting
+  # binary is only smoke-tested (--help) and never shipped, so any non-empty
+  # value works; tests tolerate the dummy via test/preload.ts.
+  SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID || 'ci-fork-pr-dummy' }}
 
 jobs:
   changes:
@@ -40,8 +47,14 @@ jobs:
             skill:
               - 'src/**'
               - 'docs/**'
-              - 'plugins/**'
+              - 'package.json'
+              - 'README.md'
+              - 'DEVELOPMENT.md'
               - 'script/generate-skill.ts'
+              - 'script/generate-command-docs.ts'
+              - 'script/generate-docs-sections.ts'
+              - 'script/eval-skill.ts'
+              - 'test/skill-eval/**'
             code:
               - 'src/**'
               - 'test/**'
@@ -58,18 +71,21 @@ jobs:
           {
             echo 'matrix<<MATRIX_EOF'
             if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-              # PRs only need linux-x64 for smoke test and e2e — skip macOS/Windows
+              # PRs build linux-x64 (smoke test + e2e) and linux-x64-musl (Alpine smoke test)
               echo '{"include":[
-                {"target":"linux-x64", "os":"ubuntu-latest", "can-test":true}
+                {"target":"linux-x64",      "os":"ubuntu-latest", "can-test":true},
+                {"target":"linux-x64-musl", "os":"ubuntu-latest", "can-test":false}
               ]}'
             else
               # main, release/**, workflow_call: full cross-platform matrix
               echo '{"include":[
-                {"target":"darwin-arm64",  "os":"macos-latest",  "can-test":true},
-                {"target":"linux-x64",     "os":"ubuntu-latest", "can-test":true},
-                {"target":"windows-x64",   "os":"windows-latest","can-test":true},
-                {"target":"darwin-x64",    "os":"macos-latest",  "can-test":false},
-                {"target":"linux-arm64",   "os":"ubuntu-latest", "can-test":false}
+                {"target":"darwin-arm64",      "os":"macos-latest",  "can-test":true},
+                {"target":"linux-x64",         "os":"ubuntu-latest", "can-test":true},
+                {"target":"linux-x64-musl",    "os":"ubuntu-latest", "can-test":false},
+                {"target":"windows-x64",       "os":"windows-latest","can-test":true},
+                {"target":"darwin-x64",        "os":"macos-latest",  "can-test":false},
+                {"target":"linux-arm64",       "os":"ubuntu-latest", "can-test":false},
+                {"target":"linux-arm64-musl",  "os":"ubuntu-latest", "can-test":false}
               ]}'
             fi
             echo 'MATRIX_EOF'
@@ -84,8 +100,8 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Nightly version: ${VERSION}"
 
-  check-skill:
-    name: Check skill files
+  check-generated:
+    name: Validate generated files
     needs: [changes]
     if: needs.changes.outputs.skill == 'true'
     runs-on: ubuntu-latest
@@ -101,7 +117,11 @@ jobs:
       - uses: actions/checkout@v6
         with:
           token: ${{ steps.token.outputs.token || github.token }}
-          ref: ${{ github.head_ref || github.ref_name }}
+          # Same-repo PRs (token step succeeded): check out the branch head so
+          # the auto-commit step can push regenerated docs back. Fork PRs leave
+          # `ref` empty so checkout defaults to GITHUB_REF (the pull_request
+          # merge SHA, always fetchable from the base repo with github.token).
+          ref: ${{ steps.token.outcome == 'success' && (github.head_ref || github.ref_name) || '' }}
       - uses: oven-sh/setup-bun@v2
       - uses: actions/cache@v5
         id: cache
@@ -112,22 +132,39 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Generate API Schema
         run: bun run generate:schema
+      - name: Generate docs and skill files
+        run: bun run generate:docs
+      - name: Validate fragments
+        run: bun run check:fragments
       - name: Check skill files
-        id: check
-        run: bun run check:skill
-        continue-on-error: true
-      - name: Auto-commit regenerated skill files
-        if: steps.check.outcome == 'failure' && steps.token.outcome == 'success'
+        id: check-skill
+        run: |
+          if git diff --quiet plugins/sentry-cli/skills/sentry-cli/; then
+            echo "Skill files are up to date"
+          else
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            echo "Skill files are out of date"
+          fi
+      - name: Check docs sections
+        id: check-sections
+        run: |
+          if git diff --quiet DEVELOPMENT.md docs/src/content/docs/contributing.md docs/src/content/docs/self-hosted.md; then
+            echo "Docs sections are up to date"
+          else
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            echo "Docs sections are out of date"
+          fi
+      - name: Auto-commit regenerated files
+        if: (steps.check-skill.outputs.stale == 'true' || steps.check-sections.outputs.stale == 'true') && steps.token.outcome == 'success'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add plugins/sentry-cli/skills/sentry-cli/ docs/public/.well-known/skills/index.json
-          git commit -m "chore: regenerate skill files"
-          git push
-      - name: Fail for fork PRs with stale skill files
-        if: steps.check.outcome == 'failure' && steps.token.outcome != 'success'
+          git add plugins/sentry-cli/skills/sentry-cli/ DEVELOPMENT.md docs/src/content/docs/contributing.md docs/src/content/docs/self-hosted.md
+          git diff --cached --quiet || (git commit -m "chore: regenerate docs" && git push)
+      - name: Fail for fork PRs with stale generated files
+        if: (steps.check-skill.outputs.stale == 'true' || steps.check-sections.outputs.stale == 'true') && steps.token.outcome != 'success'
         run: |
-          echo "::error::Skill files are out of date. Run 'bun run generate:skill' locally and commit the result."
+          echo "::error::Generated files are out of date. Run 'bun run generate:docs' locally and commit the result."
           exit 1
 
   lint:
@@ -190,6 +227,10 @@ jobs:
     name: Build Binary (${{ matrix.target }})
     needs: [changes, lint, test-unit]
     runs-on: ${{ matrix.os }}
+    # SENTRY_AUTH_TOKEN is scoped to the production environment so sourcemap
+    # upload works on main/release branches. Without this, every binary build
+    # skips the upload and Sentry stack traces show minified names (e.g., xE).
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 'production' || '' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.build-targets) }}
@@ -225,8 +266,9 @@ jobs:
           mv package.json.tmp package.json
       - name: Build
         env:
-          SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
-          # Sourcemap upload to Sentry (non-fatal, skipped when token is absent)
+          # Environment-scoped (production) — must be set at step level to
+          # resolve correctly; workflow-level env evaluates before the job's
+          # environment: is applied.
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           # Set on main/release branches so build.ts runs binpunch + creates .gz
           RELEASE_BUILD: ${{ github.event_name != 'pull_request' && '1' || '' }}
@@ -240,6 +282,11 @@ jobs:
           else
             ./dist-bin/sentry-${{ matrix.target }} --help
           fi
+      - name: Smoke test (musl/Alpine)
+        if: matrix.target == 'linux-x64-musl'
+        run: |
+          docker run --rm -v "$PWD/dist-bin:/dist-bin:ro" alpine:latest \
+            sh -c "apk add --no-cache libstdc++ libgcc >/dev/null 2>&1 && /dist-bin/sentry-linux-x64-musl --help"
       - name: Upload binary artifact
         uses: actions/upload-artifact@v7
         with:
@@ -255,33 +302,22 @@ jobs:
           name: sentry-${{ matrix.target }}-gz
           path: dist-bin/*.gz
 
-  publish-nightly:
-    name: Publish Nightly to GHCR
-    # Only run on pushes to main, not on PRs or release branches
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+  generate-patches:
+    name: Generate Delta Patches
     needs: [changes, build-binary]
+    # Only on main (nightlies) and release branches (stable) — skip PRs
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
-      - name: Download compressed artifacts
-        uses: actions/download-artifact@v8
-        with:
-          pattern: sentry-*-gz
-          path: artifacts
-          merge-multiple: true
-
-      - name: Download uncompressed artifacts (for patch generation)
-        uses: actions/download-artifact@v8
-        with:
-          pattern: sentry-*
-          path: binaries
-          merge-multiple: true
-
       - name: Install ORAS CLI
+        # Only needed on main (to fetch previous nightly from GHCR)
+        if: github.ref == 'refs/heads/main'
         run: |
-          VERSION=1.2.3
-          EXPECTED_SHA256="b4efc97a91f471f323f193ea4b4d63d8ff443ca3aab514151a30751330852827"
+          VERSION=1.3.1
+          EXPECTED_SHA256="d52c4af76ce6a3ceb8579e51fb751a43ac051cca67f965f973a0b0e897a2bb86"
           TARBALL="oras_${VERSION}_linux_amd64.tar.gz"
-          curl -sfLo "$TARBALL" "https://github.com/oras-project/oras/releases/download/v${VERSION}/${TARBALL}"
+          curl --retry 3 --retry-delay 5 --retry-all-errors -sfLo "$TARBALL" "https://github.com/oras-project/oras/releases/download/v${VERSION}/${TARBALL}"
           echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
           tar -xz -C /usr/local/bin oras < "$TARBALL"
           rm "$TARBALL"
@@ -291,15 +327,232 @@ jobs:
           VERSION=0.1.19
           EXPECTED_SHA256="9f1ac75a133ee09883ad2096a86d57791513de5fc6f262dfadee8dcee94a71b9"
           TARBALL="zig-bsdiff-linux-x64.tar.gz"
-          curl -sfLo "$TARBALL" "https://github.com/blackboardsh/zig-bsdiff/releases/download/v${VERSION}/${TARBALL}"
+          curl --retry 3 --retry-delay 5 --retry-all-errors -sfLo "$TARBALL" "https://github.com/blackboardsh/zig-bsdiff/releases/download/v${VERSION}/${TARBALL}"
           echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
           tar -xz -C /usr/local/bin < "$TARBALL"
+          rm "$TARBALL"
+
+      - name: Download current binaries
+        uses: actions/download-artifact@v8
+        with:
+          # Use sentry-*-* to match platform binaries (sentry-linux-x64, etc.)
+          # and their -gz variants, but not sentry-patches
+          pattern: sentry-*-*
+          path: new-binaries
+          merge-multiple: true
+
+      - name: Download previous nightly binaries (main)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          VERSION="${{ needs.changes.outputs.nightly-version }}"
+          REPO="ghcr.io/getsentry/cli"
+
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
+
+          # Find previous nightly tag
+          TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-[0-9]' | sort -V || echo "")
+          PREV_TAG=""
+          for tag in $TAGS; do
+            # Current tag may not exist yet (publish-nightly hasn't run),
+            # but that's fine — we want the latest existing nightly tag
+            if [ "$tag" = "nightly-${VERSION}" ]; then
+              break
+            fi
+            PREV_TAG="$tag"
+          done
+
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous versioned nightly found, skipping patches"
+            exit 0
+          fi
+          echo "HAS_PREV=true" >> "$GITHUB_ENV"
+          echo "Previous nightly: ${PREV_TAG}"
+
+          # Download and decompress previous nightly binaries
+          mkdir -p old-binaries
+          PREV_MANIFEST_JSON=$(oras manifest fetch "${REPO}:${PREV_TAG}")
+          echo "$PREV_MANIFEST_JSON" | jq -r '.layers[] | select(.annotations["org.opencontainers.image.title"] | endswith(".gz")) | .annotations["org.opencontainers.image.title"] + " " + .digest' | while read -r filename digest; do
+            basename="${filename%.gz}"
+            echo "  Downloading previous ${basename}..."
+            oras blob fetch "${REPO}@${digest}" --output "old-binaries/${filename}"
+            gunzip -f "old-binaries/${filename}"
+          done
+
+      - name: Download previous release binaries (release/**)
+        if: startsWith(github.ref, 'refs/heads/release/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PREV_TAG=$(gh api "repos/${{ github.repository }}/releases?per_page=5" \
+            --jq '[.[] | select(.prerelease == false and .draft == false)] | .[0].tag_name // empty')
+
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous stable release found — skipping patch generation"
+            exit 0
+          fi
+          echo "HAS_PREV=true" >> "$GITHUB_ENV"
+          echo "Previous release: ${PREV_TAG}"
+
+          shopt -s nullglob
+          mkdir -p old-binaries
+          for gz in new-binaries/*.gz; do
+            name=$(basename "${gz%.gz}")
+            echo "  Downloading ${name}.gz from ${PREV_TAG}..."
+            gh release download "${PREV_TAG}" \
+              --repo "${{ github.repository }}" \
+              --pattern "${name}.gz" \
+              --dir old-binaries || echo "  Warning: not found, skipping"
+          done
+          gunzip old-binaries/*.gz 2>/dev/null || true
+
+      - name: Generate delta patches
+        if: env.HAS_PREV == 'true'
+        run: |
+          mkdir -p patches
+          GENERATED=0
+
+          for new_binary in new-binaries/sentry-*; do
+            name=$(basename "$new_binary")
+            case "$name" in *.gz) continue ;; esac
+
+            old_binary="old-binaries/${name}"
+            [ -f "$old_binary" ] || continue
+
+            echo "Generating patch: ${name}.patch"
+            bsdiff "$old_binary" "$new_binary" "patches/${name}.patch" --use-zstd
+
+            patch_size=$(stat --printf='%s' "patches/${name}.patch")
+            new_size=$(stat --printf='%s' "$new_binary")
+            ratio=$(awk "BEGIN { printf \"%.1f\", ($patch_size / $new_size) * 100 }")
+            echo "  ${patch_size} bytes (${ratio}% of binary)"
+            GENERATED=$((GENERATED + 1))
+          done
+
+          echo "Generated ${GENERATED} patches"
+
+      - name: Validate patch sizes
+        if: env.HAS_PREV == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Client rejects chains exceeding 60% of gzipped binary size
+          # (SIZE_THRESHOLD_RATIO in src/lib/delta-upgrade.ts). Use 50% here
+          # so single-step patches are caught with margin to spare.
+          MAX_RATIO: 50
+        run: |
+          shopt -s nullglob
+          OVERSIZED=""
+
+          for patch_file in patches/*.patch; do
+            name=$(basename "$patch_file" .patch)
+            gz_binary="new-binaries/${name}.gz"
+            [ -f "$gz_binary" ] || continue
+
+            patch_size=$(stat --printf='%s' "$patch_file")
+            gz_size=$(stat --printf='%s' "$gz_binary")
+            ratio=$(awk "BEGIN { printf \"%.0f\", ($patch_size / $gz_size) * 100 }")
+
+            if [ "$ratio" -gt "$MAX_RATIO" ]; then
+              echo "::error::Patch ${name}.patch is ${ratio}% of gzipped binary (limit: ${MAX_RATIO}%)"
+              OVERSIZED="$(printf '%s\n- `%s.patch`: %s%% of gzipped binary (%s / %s bytes)' "$OVERSIZED" "$name" "$ratio" "$patch_size" "$gz_size")"
+              rm "$patch_file"
+            fi
+          done
+
+          if [ -n "$OVERSIZED" ]; then
+            TITLE="Delta patch generation produced oversized patches"
+            BODY="$(cat <<ISSUE_EOF
+          The \`generate-patches\` job produced patches exceeding ${MAX_RATIO}% of gzipped binary size:
+          ${OVERSIZED}
+
+          These patches were **excluded** from the artifact upload. This usually means the old binary download failed (empty/wrong file).
+
+          **Branch:** \`${GITHUB_REF_NAME}\`
+          **Commit:** ${GITHUB_SHA}
+          **Run:** ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          ISSUE_EOF
+          )"
+
+            EXISTING=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$TITLE" --json number --jq '.[0].number // empty')
+            if [ -n "$EXISTING" ]; then
+              gh issue comment "$EXISTING" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+            else
+              gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY" --label bug
+            fi
+          fi
+
+      - name: Upload patch artifacts
+        if: env.HAS_PREV == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: sentry-patches
+          path: patches/*.patch
+
+      - name: File issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE="Delta patch generation failed"
+          BODY="The \`generate-patches\` job failed on [\`${GITHUB_REF_NAME}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}).
+
+          **Branch:** \`${GITHUB_REF_NAME}\`
+          **Commit:** ${GITHUB_SHA}
+          **Run:** ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          # Check for existing open issue with same title to avoid duplicates
+          EXISTING=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$TITLE" --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            echo "Issue #${EXISTING} already open, adding comment"
+            gh issue comment "$EXISTING" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY"
+          fi
+
+  publish-nightly:
+    name: Publish Nightly to GHCR
+    # Only run on pushes to main, not on PRs or release branches
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [changes, build-binary, generate-patches]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download compressed artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: sentry-*-gz
+          path: artifacts
+          merge-multiple: true
+
+      - name: Download uncompressed artifacts (for SHA-256 computation)
+        uses: actions/download-artifact@v8
+        with:
+          # Use sentry-*-* to match platform binaries (sentry-linux-x64, etc.)
+          # but not sentry-patches (which is downloaded separately)
+          pattern: sentry-*-*
+          path: binaries
+          merge-multiple: true
+
+      - name: Download patch artifacts
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        id: download-patches
+        with:
+          name: sentry-patches
+          path: patches
+
+      - name: Install ORAS CLI
+        run: |
+          VERSION=1.3.1
+          EXPECTED_SHA256="d52c4af76ce6a3ceb8579e51fb751a43ac051cca67f965f973a0b0e897a2bb86"
+          TARBALL="oras_${VERSION}_linux_amd64.tar.gz"
+          curl --retry 3 --retry-delay 5 --retry-all-errors -sfLo "$TARBALL" "https://github.com/oras-project/oras/releases/download/v${VERSION}/${TARBALL}"
+          echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
+          tar -xz -C /usr/local/bin oras < "$TARBALL"
           rm "$TARBALL"
 
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
 
-      - name: Push to GHCR
+      - name: Push binaries to GHCR
         # Push from inside the artifacts directory so ORAS records bare
         # filenames (e.g. "sentry-linux-x64.gz") as layer titles, not
         # "artifacts/sentry-linux-x64.gz". The CLI matches layers by
@@ -320,77 +573,49 @@ jobs:
           VERSION="${{ needs.changes.outputs.nightly-version }}"
           oras tag ghcr.io/getsentry/cli:nightly "nightly-${VERSION}"
 
-      - name: Generate and push delta patches
-        # Download the previous nightly's binaries, generate TRDIFF10 patches,
-        # and push a :patch-<version> manifest with SHA-256 annotations.
+      - name: Push delta patches to GHCR
+        # Upload pre-generated patches from generate-patches job as a
+        # :patch-<version> manifest with SHA-256 annotations.
         # Failure here is non-fatal — delta upgrades are optional.
+        if: steps.download-patches.outcome == 'success'
         continue-on-error: true
         run: |
           VERSION="${{ needs.changes.outputs.nightly-version }}"
           REPO="ghcr.io/getsentry/cli"
 
-          # Find the previous nightly by listing versioned tags and picking
-          # the one immediately before ours in version-sorted order.
-          TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-' | sort -V || echo "")
+          # Compute SHA-256 annotations from new binaries and collect patch files
+          shopt -s nullglob
+          ANNOTATIONS=""
+          PATCH_FILES=""
+          for patch_file in patches/*.patch; do
+            basename_patch=$(basename "$patch_file" .patch)
+            new_binary="binaries/${basename_patch}"
+            if [ -f "$new_binary" ]; then
+              sha256=$(sha256sum "$new_binary" | cut -d' ' -f1)
+              ANNOTATIONS="${ANNOTATIONS} --annotation sha256-${basename_patch}=${sha256}"
+            fi
+            PATCH_FILES="${PATCH_FILES} $(basename "$patch_file")"
+          done
+
+          if [ -z "$PATCH_FILES" ]; then
+            echo "No patches to push"
+            exit 0
+          fi
+
+          # Find from-version by listing GHCR nightly tags
+          TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-[0-9]' | sort -V || echo "")
           PREV_TAG=""
           for tag in $TAGS; do
-            if [ "$tag" = "nightly-${VERSION}" ]; then
-              break
-            fi
+            if [ "$tag" = "nightly-${VERSION}" ]; then break; fi
             PREV_TAG="$tag"
           done
 
           if [ -z "$PREV_TAG" ]; then
-            echo "No previous versioned nightly found, skipping patches"
+            echo "No previous nightly tag found, skipping patch push"
             exit 0
           fi
-
           PREV_VERSION="${PREV_TAG#nightly-}"
-          echo "Generating patches: ${PREV_VERSION} → ${VERSION}"
 
-          # Download previous nightly binaries
-          mkdir -p prev-binaries
-          PREV_MANIFEST_JSON=$(oras manifest fetch "${REPO}:${PREV_TAG}")
-          # Extract .gz layer digests and download + decompress each
-          echo "$PREV_MANIFEST_JSON" | jq -r '.layers[] | select(.annotations["org.opencontainers.image.title"] | endswith(".gz")) | .annotations["org.opencontainers.image.title"] + " " + .digest' | while read -r filename digest; do
-            basename="${filename%.gz}"
-            echo "  Downloading previous ${basename}..."
-            oras blob fetch "${REPO}@${digest}" --output "prev-binaries/${filename}"
-            gunzip -f "prev-binaries/${filename}"
-          done
-
-          # Generate patches and compute SHA-256 hashes of NEW binaries
-          mkdir -p patches
-          ANNOTATIONS=""
-          PATCH_FILES=""
-
-          for new_binary in binaries/sentry-*; do
-            basename=$(basename "$new_binary")
-            # Skip .gz files
-            case "$basename" in *.gz) continue ;; esac
-
-            old_binary="prev-binaries/${basename}"
-            if [ ! -f "$old_binary" ]; then
-              echo "  No previous binary for ${basename}, skipping"
-              continue
-            fi
-
-            patch_file="patches/${basename}.patch"
-            echo "  Generating patch for ${basename}..."
-            bsdiff "$old_binary" "$new_binary" "$patch_file" --use-zstd
-
-            # Compute SHA-256 of the NEW (target) binary for verification
-            sha256=$(sha256sum "$new_binary" | cut -d' ' -f1)
-            ANNOTATIONS="${ANNOTATIONS} --annotation sha256-${basename}=${sha256}"
-            PATCH_FILES="${PATCH_FILES} ${basename}.patch"
-          done
-
-          if [ -z "$PATCH_FILES" ]; then
-            echo "No patches generated"
-            exit 0
-          fi
-
-          # Push patch manifest with from-version and SHA-256 annotations
           cd patches
           eval oras push "${REPO}:patch-${VERSION}" \
             --artifact-type application/vnd.sentry.cli.patch \
@@ -402,7 +627,7 @@ jobs:
 
   test-e2e:
     name: E2E Tests
-    needs: [build-binary]
+    needs: [build-binary, changes]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -426,6 +651,9 @@ jobs:
       - name: E2E Tests
         env:
           SENTRY_CLI_BINARY: ${{ github.workspace }}/dist-bin/sentry-linux-x64
+          # Pass API key only when skill files changed — the skill-eval e2e test
+          # auto-skips when the key is absent, so non-skill PRs aren't affected.
+          ANTHROPIC_API_KEY: ${{ needs.changes.outputs.skill == 'true' && secrets.ANTHROPIC_API_KEY || '' }}
         run: bun run test:e2e
 
   build-npm:
@@ -452,7 +680,7 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Bundle
         env:
-          SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
+          # Environment-scoped (production) — see note in build-binary.
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: bun run bundle
       - name: Smoke test (Node.js)
@@ -467,21 +695,75 @@ jobs:
 
   build-docs:
     name: Build Docs
-    needs: [lint]
+    needs: [lint, build-binary]
     runs-on: ubuntu-latest
+    # SENTRY_AUTH_TOKEN is scoped to the production environment. Needed by
+    # the "Inject debug IDs and upload sourcemaps" step below.
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 'production' || '' }}
+    # Hoisted to job level (not step) so the `if: env.SENTRY_AUTH_TOKEN != ''`
+    # guard on the sourcemap-upload step can see it. Job-level env is resolved
+    # after `environment:` is applied, so the production-scoped secret resolves
+    # correctly.
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
+      # Astro 6 requires Node >= 22.12. Pin an explicit version so the docs
+      # build doesn't rely on whatever ships on the runner image.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - uses: actions/cache@v5
+        id: cache
+        with:
+          path: node_modules
+          key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bun install --frozen-lockfile
+      - name: Get CLI version
+        id: version
+        run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+      - name: Download compiled CLI binary
+        uses: actions/download-artifact@v8
+        with:
+          name: sentry-linux-x64
+          path: dist-bin
+      - name: Make binary executable
+        run: chmod +x dist-bin/sentry-linux-x64
+      - name: Generate docs content
+        run: bun run generate:schema && bun run generate:docs
       - name: Build Docs
         working-directory: docs
+        env:
+          PUBLIC_SENTRY_ENVIRONMENT: production
+          SENTRY_RELEASE: ${{ steps.version.outputs.version }}
+          PUBLIC_SENTRY_RELEASE: ${{ steps.version.outputs.version }}
         run: |
           bun install --frozen-lockfile
           bun run build
+      # Inject debug IDs and upload sourcemaps. The inject step adds
+      # //# debugId= and the _sentryDebugIds IIFE to deployed JS files.
+      # Both steps require SENTRY_AUTH_TOKEN (the CLI checks auth on startup).
+      - name: Inject debug IDs and upload sourcemaps
+        if: github.event_name == 'push' && env.SENTRY_AUTH_TOKEN != ''
+        env:
+          SENTRY_ORG: sentry
+          SENTRY_PROJECT: cli-website
+        run: |
+          ./dist-bin/sentry-linux-x64 sourcemap inject docs/dist/
+          ./dist-bin/sentry-linux-x64 sourcemap upload docs/dist/ \
+            --release "${{ steps.version.outputs.version }}" \
+            --url-prefix "~/"
+      # Remove .map files — they were uploaded to Sentry but shouldn't
+      # be deployed to production.
+      - name: Remove sourcemaps from output
+        run: find docs/dist -name '*.map' -delete
       - name: Package Docs
         run: |
           cp .nojekyll docs/dist/
           cd docs/dist && zip -r ../../gh-pages.zip .
-      - name: Upload artifact
+      - name: Upload docs artifact
         uses: actions/upload-artifact@v7
         with:
           name: gh-pages
@@ -490,15 +772,16 @@ jobs:
   ci-status:
     name: CI Status
     if: always()
-    needs: [changes, check-skill, build-binary, build-npm, build-docs, test-e2e, publish-nightly]
+    needs: [changes, check-generated, build-binary, build-npm, build-docs, test-e2e, generate-patches]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
       - name: Check CI status
         run: |
           # Check for explicit failures or cancellations in all jobs
-          # publish-nightly is skipped on PRs (if: github.ref == 'refs/heads/main') — that's expected
-          results="${{ needs.check-skill.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.publish-nightly.result }}"
+          # generate-patches is skipped on PRs — that's expected
+          # publish-nightly is excluded: it's infrastructure (GHCR push), not code quality
+          results="${{ needs.check-generated.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.generate-patches.result }}"
           for result in $results; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               echo "::error::CI failed"
@@ -512,9 +795,8 @@ jobs:
             echo "::error::CI failed - upstream job failed causing test-e2e to be skipped"
             exit 1
           fi
-          if [[ "${{ needs.changes.outputs.skill }}" == "true" && "${{ needs.check-skill.result }}" == "skipped" ]]; then
-            echo "::error::CI failed - upstream job failed causing check-skill to be skipped"
+          if [[ "${{ needs.changes.outputs.skill }}" == "true" && "${{ needs.check-generated.result }}" == "skipped" ]]; then
+            echo "::error::CI failed - upstream job failed causing check-generated to be skipped"
             exit 1
           fi
-
           echo "CI passed"

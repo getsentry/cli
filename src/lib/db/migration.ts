@@ -141,6 +141,8 @@ export function migrateFromJson(db: Database): void {
 
   try {
     if (oldConfig.auth?.token) {
+      // Direct write (not via setAuthToken) — safe only because migration
+      // runs during DB bootstrap, before getIdentityFingerprint() memoizes.
       db.query(`
         INSERT OR REPLACE INTO auth (id, token, refresh_token, expires_at, issued_at, updated_at)
         VALUES (1, ?, ?, ?, ?, ?)
@@ -153,15 +155,15 @@ export function migrateFromJson(db: Database): void {
       );
     }
 
-    if (oldConfig.defaults?.organization || oldConfig.defaults?.project) {
-      db.query(`
-        INSERT OR REPLACE INTO defaults (id, organization, project, updated_at)
-        VALUES (1, ?, ?, ?)
-      `).run(
-        oldConfig.defaults.organization ?? null,
-        oldConfig.defaults.project ?? null,
-        Date.now()
-      );
+    if (oldConfig.defaults?.organization) {
+      db.query(
+        "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)"
+      ).run("defaults.org", oldConfig.defaults.organization);
+    }
+    if (oldConfig.defaults?.project) {
+      db.query(
+        "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)"
+      ).run("defaults.project", oldConfig.defaults.project);
     }
 
     if (oldConfig.projectCache) {

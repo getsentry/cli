@@ -28,6 +28,7 @@ import * as apiClient from "../../../src/lib/api-client.js";
 import * as paginationDb from "../../../src/lib/db/pagination.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
+import { parsePeriod } from "../../../src/lib/time-range.js";
 
 const VALID_TRACE_ID = "aaaa1111bbbb2222cccc3333dddd4444";
 
@@ -213,7 +214,7 @@ describe("listCommand.func (trace mode)", () => {
       {
         limit: 25,
         sort: "date",
-        period: "7d",
+        period: parsePeriod("7d"),
         fresh: false,
       },
       VALID_TRACE_ID
@@ -243,7 +244,7 @@ describe("listCommand.func (trace mode)", () => {
         limit: 25,
         query: "op:db",
         sort: "date",
-        period: "7d",
+        period: parsePeriod("7d"),
         fresh: false,
       },
       VALID_TRACE_ID
@@ -268,7 +269,7 @@ describe("listCommand.func (trace mode)", () => {
       {
         limit: 25,
         sort: "date",
-        period: "7d",
+        period: parsePeriod("7d"),
         fresh: false,
       },
       `my-org/my-project/${VALID_TRACE_ID}`
@@ -307,7 +308,7 @@ describe("listCommand.func (trace mode)", () => {
       {
         limit: 25,
         sort: "date",
-        period: "7d",
+        period: parsePeriod("7d"),
         cursor: "1735689600:0:0",
         fresh: false,
       },
@@ -343,7 +344,7 @@ describe("listCommand.func (trace mode)", () => {
       {
         limit: 1,
         sort: "date",
-        period: "7d",
+        period: parsePeriod("7d"),
         json: true,
         fresh: false,
       },
@@ -376,7 +377,7 @@ describe("listCommand.func (trace mode)", () => {
       {
         limit: 1,
         sort: "date",
-        period: "7d",
+        period: parsePeriod("7d"),
         fresh: false,
       },
       VALID_TRACE_ID
@@ -396,7 +397,7 @@ describe("listCommand.func (trace mode)", () => {
       {
         limit: 25,
         sort: "date",
-        period: "24h",
+        period: parsePeriod("24h"),
         fresh: false,
       },
       VALID_TRACE_ID
@@ -495,7 +496,7 @@ describe("listCommand.func (project mode)", () => {
     await func.call(context, {
       limit: 25,
       sort: "date",
-      period: "7d",
+      period: parsePeriod("7d"),
       fresh: false,
     });
 
@@ -518,7 +519,7 @@ describe("listCommand.func (project mode)", () => {
       {
         limit: 25,
         sort: "date",
-        period: "7d",
+        period: parsePeriod("7d"),
         fresh: false,
       },
       "my-org/my-project"
@@ -544,7 +545,7 @@ describe("listCommand.func (project mode)", () => {
         limit: 25,
         query: "op:db duration:>100ms",
         sort: "date",
-        period: "7d",
+        period: parsePeriod("7d"),
         fresh: false,
       },
       "my-org/my-project"
@@ -569,7 +570,7 @@ describe("listCommand.func (project mode)", () => {
       {
         limit: 25,
         sort: "date",
-        period: "30d",
+        period: parsePeriod("30d"),
         fresh: false,
       },
       "my-org/my-project"
@@ -607,7 +608,7 @@ describe("listCommand.func (project mode)", () => {
       {
         limit: 25,
         sort: "date",
-        period: "7d",
+        period: parsePeriod("7d"),
         fresh: false,
       },
       "my-org/my-project"
@@ -637,7 +638,7 @@ describe("listCommand.func (project mode)", () => {
     await func.call(context, {
       limit: 1,
       sort: "date",
-      period: "7d",
+      period: parsePeriod("7d"),
       json: true,
       fresh: false,
     });
@@ -659,7 +660,7 @@ describe("listCommand.func (project mode)", () => {
       {
         limit: 25,
         sort: "date",
-        period: "7d",
+        period: parsePeriod("7d"),
         fresh: false,
       },
       "my-org/my-project"
@@ -689,7 +690,7 @@ describe("listCommand.func (project mode)", () => {
       {
         limit: 1,
         sort: "date",
-        period: "7d",
+        period: parsePeriod("7d"),
         fresh: false,
       },
       "my-org/my-project"

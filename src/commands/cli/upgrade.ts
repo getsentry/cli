@@ -36,12 +36,17 @@ import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import { withProgress } from "../../lib/polling.js";
 import {
+  type ChangelogSummary,
+  fetchChangelog,
+} from "../../lib/release-notes.js";
+import {
   detectInstallationMethod,
   executeUpgrade,
   fetchLatestVersion,
   getCurlInstallPaths,
   type InstallationMethod,
   NIGHTLY_TAG,
+  type OfflineMode,
   parseInstallationMethod,
   VERSION_PREFIX_REGEX,
   versionExists,
@@ -76,6 +81,8 @@ export type UpgradeResult = {
   offline?: boolean;
   /** Warnings to display (e.g., PATH shadowing from old package manager install) */
   warnings?: string[];
+  /** Changelog summary for the version range. Absent for offline or on fetch failure. */
+  changelog?: ChangelogSummary;
 };
 
 type UpgradeFlags = {
@@ -157,7 +164,7 @@ async function resolveTargetWithFallback(opts: {
    *  clearing the version cache before the offline path can read it). */
   persistChannelFn: () => void;
 }): Promise<
-  | { kind: "target"; target: string; offline: boolean }
+  | { kind: "target"; target: string; offline: OfflineMode }
   | { kind: "done"; result: UpgradeResult }
 > {
   const { resolveOpts, versionArg, offline, method, persistChannelFn } = opts;
@@ -177,7 +184,7 @@ async function resolveTargetWithFallback(opts: {
     const target = resolveOfflineTarget(versionArg);
     persistChannelFn();
     log.info(`Offline mode: using cached target ${target}`);
-    return { kind: "target", target, offline: true };
+    return { kind: "target", target, offline: "explicit" };
   }
 
   // Non-offline: persist channel upfront (no cache dependency)
@@ -203,7 +210,7 @@ async function resolveTargetWithFallback(opts: {
       const target = resolveOfflineTarget(versionArg);
       log.warn("Network unavailable, falling back to cached upgrade target");
       log.info(`Using cached target: ${target}`);
-      return { kind: "target", target, offline: true };
+      return { kind: "target", target, offline: "network-fallback" };
     } catch {
       // No cached version either — re-throw original network error
       throw error;
@@ -352,6 +359,108 @@ function buildCheckResult(opts: {
 }
 
 /**
+ * Maximum number of spawn attempts for the new binary.
+ *
+ * On Windows, Defender/SmartScreen may lock a newly-written executable for
+ * antivirus scanning after the file handle is closed. This causes EBUSY from
+ * uv_spawn. Retrying with backoff lets the scan complete without a fixed sleep.
+ */
+const SPAWN_MAX_ATTEMPTS = 5;
+
+/** Base delay (ms) between spawn retry attempts. Delay = attempt * base. */
+const SPAWN_RETRY_BASE_MS = 500;
+
+/**
+ * Check whether an error is an EBUSY system error from spawn.
+ *
+ * On Windows, Defender/SmartScreen locks newly-written executables for
+ * scanning. libuv's uv_spawn fails with EBUSY until the lock is released.
+ */
+export function isEbusyError(error: unknown): boolean {
+  return (
+    error instanceof Error && (error as NodeJS.ErrnoException).code === "EBUSY"
+  );
+}
+
+/**
+ * Check whether an error indicates the spawn target was not found.
+ *
+ * Bun surfaces a missing executable as `Executable not found in $PATH: "..."`
+ * without a standard `code` field on the Error, so we fall back to message
+ * matching. Node's `child_process.spawn` would use `code: "ENOENT"`.
+ */
+export function isEnoentSpawnError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    return true;
+  }
+  return error.message.includes("Executable not found in $PATH");
+}
+
+/**
+ * Spawn a binary with retry on EBUSY errors.
+ *
+ * On Windows, Defender/SmartScreen asynchronously scans newly-written
+ * executables after the file handle is closed. If the CLI spawns the
+ * binary before the scan completes, uv_spawn fails with EBUSY.
+ * This function retries with backoff to let the scan finish.
+ *
+ * On non-Windows platforms (or when Defender isn't active), the first
+ * attempt succeeds immediately with zero overhead.
+ *
+ * @returns Process exit code from the successful spawn
+ * @throws {UpgradeError} Reason `execution_failed` when the binary path
+ *   doesn't exist (Bun "Executable not found" or ENOENT), with an
+ *   actionable message instructing the user to rerun the upgrade.
+ * @throws The last EBUSY error if all attempts are exhausted
+ * @throws Immediately on other non-EBUSY errors (EACCES, etc.)
+ */
+async function spawnWithRetry(
+  binaryPath: string,
+  args: string[],
+  env: NodeJS.ProcessEnv | undefined
+): Promise<number> {
+  for (let attempt = 1; attempt <= SPAWN_MAX_ATTEMPTS; attempt++) {
+    try {
+      const proc = Bun.spawn([binaryPath, ...args], {
+        stdout: "inherit",
+        stderr: "inherit",
+        env,
+      });
+      return await proc.exited;
+    } catch (error) {
+      // Translate the opaque Bun "Executable not found" error into an
+      // actionable UpgradeError. This path triggers when the binary at
+      // `binaryPath` doesn't exist on disk when spawn is attempted (see
+      // CLI-1D3). `downloadBinaryToTemp`'s visibility-race retry loop
+      // normally catches this earlier, but this is a safety net for the
+      // `.download` file being removed between verification and spawn
+      // (e.g. manual cleanup by the user) or for future callers that
+      // pass a path not backed by the download pipeline.
+      if (isEnoentSpawnError(error)) {
+        throw new UpgradeError(
+          "execution_failed",
+          `Downloaded binary not found at ${binaryPath}. ` +
+            "The download may have been interrupted — rerun `sentry cli upgrade`."
+        );
+      }
+      if (!isEbusyError(error) || attempt === SPAWN_MAX_ATTEMPTS) {
+        throw error;
+      }
+      const delay = attempt * SPAWN_RETRY_BASE_MS;
+      log.warn(
+        `Binary is locked (antivirus scan?), retrying in ${delay}ms... (attempt ${attempt}/${SPAWN_MAX_ATTEMPTS})`
+      );
+      await Bun.sleep(delay);
+    }
+  }
+  // Unreachable — the loop either returns or throws
+  throw new UpgradeError("execution_failed", "Spawn retry loop exhausted");
+}
+
+/**
  * Spawn the new binary with `cli setup` to update completions, agent skills,
  * and record installation metadata.
  */
@@ -397,12 +506,7 @@ async function runSetupOnNewBinary(opts: SetupOptions): Promise<void> {
     ? { ...process.env, SENTRY_INSTALL_DIR: installDir }
     : undefined;
 
-  const proc = Bun.spawn([binaryPath, ...args], {
-    stdout: "inherit",
-    stderr: "inherit",
-    env,
-  });
-  const exitCode = await proc.exited;
+  const exitCode = await spawnWithRetry(binaryPath, args, env);
   if (exitCode !== 0) {
     throw new UpgradeError(
       "execution_failed",
@@ -421,7 +525,7 @@ async function executeStandardUpgrade(opts: {
   versionArg: string | undefined;
   target: string;
   execPath: string;
-  offline?: boolean;
+  offline?: OfflineMode;
   json?: boolean;
 }): Promise<void> {
   const { method, channel, versionArg, target, execPath, offline, json } = opts;
@@ -435,6 +539,11 @@ async function executeStandardUpgrade(opts: {
     { message: `Downloading ${target}...`, json },
     async () => executeUpgrade(method, target, downloadTag, offline)
   );
+
+  if (downloadResult?.patchBytes) {
+    const kb = (downloadResult.patchBytes / 1024).toFixed(1);
+    log.info(`Applied delta patch (${kb} KB downloaded)`);
+  }
 
   // Run setup on the new binary to update completions, agent skills,
   // and record installation metadata.
@@ -500,6 +609,12 @@ async function migrateToStandaloneForNightly(
     { message: `Downloading ${target}...`, json },
     async () => executeUpgrade("curl", target, downloadTag)
   );
+
+  if (downloadResult?.patchBytes) {
+    const kb = (downloadResult.patchBytes / 1024).toFixed(1);
+    log.info(`Applied delta patch (${kb} KB downloaded)`);
+  }
+
   if (!downloadResult) {
     throw new UpgradeError(
       "execution_failed",
@@ -581,7 +696,52 @@ function persistChannel(
   }
 }
 
+/**
+ * Start a best-effort changelog fetch in parallel with the binary download.
+ *
+ * Returns a promise that resolves to the changelog or undefined. Never
+ * throws — errors are swallowed so the upgrade is not blocked.
+ */
+function startChangelogFetch(
+  channel: ReleaseChannel,
+  currentVersion: string,
+  targetVersion: string,
+  offline: OfflineMode
+): Promise<ChangelogSummary | undefined> {
+  if (offline || currentVersion === targetVersion) {
+    return Promise.resolve(undefined);
+  }
+  return fetchChangelog({
+    channel,
+    fromVersion: currentVersion,
+    toVersion: targetVersion,
+  })
+    .then((result) => result ?? undefined)
+    .catch(() => undefined as undefined);
+}
+
+/**
+ * Build a check-only result with optional changelog, ready to yield.
+ */
+async function buildCheckResultWithChangelog(opts: {
+  target: string;
+  versionArg: string | undefined;
+  method: InstallationMethod;
+  channel: ReleaseChannel;
+  flags: UpgradeFlags;
+  offline: OfflineMode;
+  changelogPromise: Promise<ChangelogSummary | undefined>;
+}): Promise<UpgradeResult> {
+  const result = buildCheckResult(opts);
+  if (opts.offline) {
+    result.offline = true;
+  }
+  result.changelog = await opts.changelogPromise;
+  return result;
+}
+
 export const upgradeCommand = buildCommand({
+  auth: false,
   docs: {
     brief: "Update the Sentry CLI to the latest version",
     fullDescription:
@@ -661,25 +821,48 @@ export const upgradeCommand = buildCommand({
             persistChannel(channel, channelChanged, version),
         })
     );
+    // Early exit for check-only (online) and up-to-date results.
     if (resolved.kind === "done") {
-      return yield new CommandOutput(resolved.result);
+      const result = resolved.result;
+      // For --check with a version diff, fetch changelog before returning.
+      if (
+        result.action === "checked" &&
+        result.currentVersion !== result.targetVersion
+      ) {
+        result.changelog = await startChangelogFetch(
+          channel,
+          CLI_VERSION,
+          result.targetVersion,
+          false
+        );
+      }
+      return yield new CommandOutput(result);
     }
 
     const { target, offline } = resolved;
 
-    // --check with offline just reports the cached version
+    // Start changelog fetch early — it runs in parallel with the download.
+    const changelogPromise = startChangelogFetch(
+      channel,
+      CLI_VERSION,
+      target,
+      offline
+    );
+
+    // --check with offline fallback: resolveTargetWithFallback returns
+    // kind: "target" for offline check, so guard against actual upgrade.
     if (flags.check) {
-      const checkResult = buildCheckResult({
-        target,
-        versionArg,
-        method,
-        channel,
-        flags,
-      });
-      if (offline) {
-        checkResult.offline = true;
-      }
-      return yield new CommandOutput(checkResult);
+      return yield new CommandOutput(
+        await buildCheckResultWithChangelog({
+          target,
+          versionArg,
+          method,
+          channel,
+          flags,
+          offline,
+          changelogPromise,
+        })
+      );
     }
 
     // Skip if already on target — unless forced or switching channels
@@ -691,44 +874,36 @@ export const upgradeCommand = buildCommand({
         channel,
         method,
         forced: false,
-        offline: offline || undefined,
+        offline: offline ? true : undefined,
       } satisfies UpgradeResult);
     }
     const downgrade = isDowngrade(CLI_VERSION, target);
     log.debug(`${downgrade ? "Downgrading" : "Upgrading"} to ${target}`);
 
-    // Nightly is GitHub-only. If the current install method is not curl,
-    // migrate to a standalone binary first then return — the migration
-    // handles setup internally.
+    // Perform the actual upgrade
+    let warnings: string[] | undefined;
     if (channel === "nightly" && method !== "curl") {
-      const warnings = await migrateToStandaloneForNightly(
+      // Nightly is GitHub-only. If the current install method is not curl,
+      // migrate to a standalone binary — the migration handles setup internally.
+      warnings = await migrateToStandaloneForNightly(
         method,
         target,
         versionArg,
         flags.json
       );
-      yield new CommandOutput({
-        action: downgrade ? "downgraded" : "upgraded",
-        currentVersion: CLI_VERSION,
-        targetVersion: target,
-        channel,
+    } else {
+      await executeStandardUpgrade({
         method,
-        forced: flags.force,
-        warnings,
-      } satisfies UpgradeResult);
-      return;
+        channel,
+        versionArg,
+        target,
+        execPath: this.process.execPath,
+        offline,
+        json: flags.json,
+      });
     }
 
-    await executeStandardUpgrade({
-      method,
-      channel,
-      versionArg,
-      target,
-      execPath: this.process.execPath,
-      offline,
-      json: flags.json,
-    });
-
+    const changelog = await changelogPromise;
     yield new CommandOutput({
       action: downgrade ? "downgraded" : "upgraded",
       currentVersion: CLI_VERSION,
@@ -736,7 +911,9 @@ export const upgradeCommand = buildCommand({
       channel,
       method,
       forced: flags.force,
-      offline: offline || undefined,
+      offline: offline ? true : undefined,
+      warnings,
+      changelog,
     } satisfies UpgradeResult);
     return;
   },

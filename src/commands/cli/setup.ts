@@ -8,6 +8,7 @@
 
 import { existsSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { captureException } from "@sentry/node-core/light";
 import type { SentryContext } from "../../context.js";
 import { installAgentSkills } from "../../lib/agent-skills.js";
 import {
@@ -279,14 +280,15 @@ async function handleCompletions(
 /**
  * Handle agent skill installation for AI coding assistants.
  *
- * Detects supported agents (currently Claude Code) and installs the
- * version-pinned skill file. Silent when no agent is detected.
+ * Detects supported agent roots (currently `~/.agents` and `~/.claude`)
+ * and installs the version-pinned skill files. Silent when no compatible
+ * agent root is detected.
  *
  * Only produces output when the skill file is freshly created. Subsequent
  * runs (e.g. after upgrade) silently update without printing.
  */
 async function handleAgentSkills(homeDir: string, emit: Logger) {
-  const location = await installAgentSkills(homeDir, CLI_VERSION);
+  const location = await installAgentSkills(homeDir);
 
   if (location?.created) {
     emit(`Agent skills: Installed to ${location.path}`);
@@ -331,6 +333,10 @@ async function bestEffort(
     await fn();
   } catch (error) {
     warn(stepName, error);
+    captureException(error, {
+      level: "warning",
+      tags: { "setup.step": stepName },
+    });
   }
 }
 
@@ -428,13 +434,14 @@ async function runConfigurationSteps(opts: ConfigStepOptions) {
 }
 
 export const setupCommand = buildCommand({
+  auth: false,
   docs: {
     brief: "Configure shell integration",
     fullDescription:
       "Sets up shell integration for the Sentry CLI:\n\n" +
       "- Adds binary directory to PATH (if not already in PATH)\n" +
       "- Installs shell completions (bash, zsh, fish)\n" +
-      "- Installs agent skills for AI coding assistants (e.g., Claude Code)\n" +
+      "- Installs agent skills for detected AI coding assistants\n" +
       "- Records installation metadata for upgrades\n\n" +
       "With --install, also handles binary placement from a temporary\n" +
       "download location (used by the install script and upgrade command).\n\n" +

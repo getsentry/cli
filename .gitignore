@@ -18,6 +18,10 @@ coverage-isolated
 
 # test artifacts
 *.junit.xml
+test/skill-eval/results.json
+
+# local bench baselines — machine-specific, not for version control
+.bench/
 
 # logs
 logs
@@ -54,6 +58,16 @@ docs/.astro
 
 # Generated files (rebuilt at build time)
 src/generated/
+src/sdk.generated.ts
+src/sdk.generated.d.cts
+
+# Generated docs pages (rebuilt from fragments + CLI introspection / env registry)
+docs/src/content/docs/commands/
+docs/src/content/docs/configuration.md
+
+# Generated discovery manifest (rebuilt by generate:skill, served via symlinked skill files)
+docs/public/.well-known/skills/index.json
 
 # OpenCode
 .opencode/
+opencode.json*

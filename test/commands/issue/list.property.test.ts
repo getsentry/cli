@@ -494,3 +494,7 @@ describe("property: buildProjectAliasMap", () => {
     expect(Object.keys(entries).length).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// sanitizeQuery — property tests moved to test/lib/search-query.property.test.ts
+// ---------------------------------------------------------------------------

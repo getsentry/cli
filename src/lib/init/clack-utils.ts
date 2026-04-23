@@ -43,7 +43,7 @@ const FEATURE_INFO: Record<string, { label: string; hint: string }> = {
     hint: "Code-level performance insights",
   },
   logs: { label: "Logging", hint: "Structured log ingestion" },
-  metrics: { label: "Custom Metrics", hint: "Track custom business metrics" },
+  metrics: { label: "Metrics", hint: "Track business metrics" },
   sourceMaps: {
     label: "Source Maps",
     hint: "See original source code in production errors",
@@ -59,6 +59,10 @@ const FEATURE_INFO: Record<string, { label: string; hint: string }> = {
   userFeedback: {
     label: "User Feedback",
     hint: "Collect in-app user feedback and reports",
+  },
+  reactFeatures: {
+    label: "React Features",
+    hint: "Redux, component tracking, source maps, and integrations",
   },
 };
 
@@ -81,6 +85,7 @@ const FEATURE_DISPLAY_ORDER = [
   "crons",
   "aiMonitoring",
   "userFeedback",
+  "reactFeatures",
 ];
 
 /** Sort features into canonical display order for the multi-select prompt. */

@@ -37,13 +37,16 @@ import {
   numberParser as stricliNumberParser,
 } from "@stricli/core";
 import type { Writer } from "../types/index.js";
-import { CliError, OutputError } from "./errors.js";
+import { getAuthConfig } from "./db/auth.js";
+import { AuthError, CliError, OutputError } from "./errors.js";
 import { warning } from "./formatters/colors.js";
 import { parseFieldsList } from "./formatters/json.js";
 import {
   ClearScreen,
   CommandOutput,
   type CommandReturn,
+  extractSchemaFields,
+  formatSchemaForHelp,
   type HumanRenderer,
   type OutputConfig,
   renderCommandOutput,
@@ -51,13 +54,14 @@ import {
   writeFooter,
 } from "./formatters/output.js";
 import { isPlainOutput } from "./formatters/plain-detect.js";
+import { GLOBAL_FLAGS } from "./global-flags.js";
 import {
   LOG_LEVEL_NAMES,
   type LogLevelName,
   parseLogLevel,
   setLogLevel,
 } from "./logger.js";
-import { setArgsContext, setFlagContext } from "./telemetry.js";
+import { setArgsContext, setFlagContext, withTracing } from "./telemetry.js";
 
 /**
  * Parse a string input as a number.
@@ -148,6 +152,19 @@ type LocalCommandBuilderArguments<
    */
   // biome-ignore lint/suspicious/noExplicitAny: Variance erasure — OutputConfig<T>.human is contravariant in T, but the builder erases T because it doesn't know the output type. Using `any` allows commands to declare OutputConfig<SpecificType> while the wrapper handles it generically.
   readonly output?: OutputConfig<any>;
+  /**
+   * Whether the command requires authentication. Defaults to `true`.
+   *
+   * When `true` (the default), the command throws `AuthError("not_authenticated")`
+   * before executing if no credentials exist at all (no token or refresh token
+   * in the DB or env vars). Expired tokens with a valid refresh token pass the
+   * guard — the API client handles silent refresh. The auto-auth middleware in
+   * `cli.ts` catches the error and triggers the login flow.
+   *
+   * Set to `false` for commands that intentionally work without a token
+   * (e.g. `auth login`, `auth logout`, `auth status`, `help`, `cli upgrade`).
+   */
+  readonly auth?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -250,6 +267,10 @@ export function applyLoggingFlags(
  * 4. Captures flag values and positional arguments as Sentry telemetry context
  * 5. When `output` has an {@link OutputConfig}, injects `--json` and `--fields`
  *    flags, pre-parses `--fields`, and auto-renders the command's `{ data }` return
+ * 6. Enforces authentication by default — throws `AuthError("not_authenticated")`
+ *    before the command runs if no credentials exist at all (expired tokens with
+ *    a refresh token pass through so the API client can silently refresh). Opt out with `auth: false`
+ *    for commands that intentionally work without a token (e.g. `auth login`, `help`)
  *
  * When a command already defines its own `verbose` flag (e.g. the `api` command
  * uses `--verbose` for HTTP request/response output), the injected `VERBOSE_FLAG`
@@ -267,6 +288,52 @@ export function applyLoggingFlags(
  *   plus an optional `output` mode
  * @returns A fully-wrapped Stricli Command
  */
+
+/**
+ * Build the `--fields` flag definition, enriched with available field names
+ * when a schema is registered on the output config.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: OutputConfig type is erased at the builder level
+function buildFieldsFlag(outputConfig?: OutputConfig<any>) {
+  if (!outputConfig?.schema) {
+    return FIELDS_FLAG;
+  }
+  const schemaFields = extractSchemaFields(outputConfig.schema);
+  if (schemaFields.length === 0) {
+    return FIELDS_FLAG;
+  }
+  const fieldNames = schemaFields.map((f) => f.name).join(", ");
+  return {
+    ...FIELDS_FLAG,
+    brief: `${FIELDS_FLAG.brief}. Available: ${fieldNames}`,
+  };
+}
+
+/**
+ * Enrich command docs with a JSON fields section when a schema is registered.
+ * Appends available field names and types to `fullDescription` so they appear
+ * in Stricli's `--help` output.
+ */
+function enrichDocsWithSchema(
+  docs: CommandDocumentation,
+  // biome-ignore lint/suspicious/noExplicitAny: OutputConfig type is erased at the builder level
+  outputConfig?: OutputConfig<any>
+): CommandDocumentation {
+  if (!outputConfig?.schema) {
+    return docs;
+  }
+  const schemaFields = extractSchemaFields(outputConfig.schema);
+  if (schemaFields.length === 0) {
+    return docs;
+  }
+  const jsonFieldsDoc = formatSchemaForHelp(schemaFields);
+  const baseFull = docs.fullDescription ?? docs.brief;
+  return {
+    ...docs,
+    fullDescription: `${baseFull}\n\n${jsonFieldsDoc}`,
+  };
+}
+
 export function buildCommand<
   const FLAGS extends BaseFlags = NonNullable<unknown>,
   const ARGS extends BaseArgs = [],
@@ -276,6 +343,7 @@ export function buildCommand<
 ): Command<CONTEXT> {
   const originalFunc = builderArgs.func;
   const outputConfig = builderArgs.output;
+  const requiresAuth = builderArgs.auth !== false;
 
   // Merge logging flags into the command's flag definitions.
   // Quoted keys produce kebab-case CLI flags: "log-level" → --log-level
@@ -303,11 +371,32 @@ export function buildCommand<
     if (!commandOwnsJson) {
       mergedFlags.json = JSON_FLAG;
     }
-    // --fields is always injected (no command defines its own)
-    mergedFlags.fields = FIELDS_FLAG;
+    mergedFlags.fields = buildFieldsFlag(outputConfig);
   }
 
-  const mergedParams = { ...existingParams, flags: mergedFlags };
+  // Enrich fullDescription with JSON fields when schema is registered.
+  // This makes field info visible in Stricli's --help output.
+  const enrichedDocs = enrichDocsWithSchema(builderArgs.docs, outputConfig);
+
+  // Inject short aliases for global flags (e.g., -v → --verbose).
+  // Derived from the shared GLOBAL_FLAGS definition so adding a new
+  // global flag with a short alias automatically propagates here.
+  const existingAliases = (existingParams.aliases ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const mergedAliases: Record<string, unknown> = { ...existingAliases };
+  for (const gf of GLOBAL_FLAGS) {
+    if (gf.short && !(gf.name in existingFlags || gf.short in mergedAliases)) {
+      mergedAliases[gf.short] = gf.name;
+    }
+  }
+
+  const mergedParams = {
+    ...existingParams,
+    flags: mergedFlags,
+    aliases: mergedAliases,
+  };
 
   /**
    * If the yielded value is a {@link CommandOutput}, render it via
@@ -396,8 +485,8 @@ export function buildCommand<
 
   /**
    * When a command throws a {@link CliError} and a positional arg was
-   * `"help"`, the user likely intended `--help`. Show the command's
-   * help instead of the confusing error.
+   * `"help"`, `"--h"`, or `"-help"`, the user likely intended `--help`.
+   * Show the command's help instead of the confusing error.
    *
    * Only fires as **error recovery** — if the command succeeds with a
    * legitimate value like a project named "help", this never runs.
@@ -422,7 +511,10 @@ export function buildCommand<
     if (!(err instanceof CliError) || err instanceof OutputError) {
       return false;
     }
-    if (args.length === 0 || !args.some((a) => a === "help")) {
+    if (
+      args.length === 0 ||
+      !args.some((a) => a === "help" || a === "--h" || a === "-help")
+    ) {
       return false;
     }
     if (!ctx.commandPrefix) {
@@ -446,6 +538,7 @@ export function buildCommand<
 
   // Wrap func to intercept logging flags, capture telemetry, then call original.
   // The wrapper is an async function that iterates the generator returned by func.
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Central framework wrapper — flag cleanup, env-based JSON, output rendering, and error handling are all tightly coupled.
   const wrappedFunc = async function (
     this: CONTEXT,
     flags: Record<string, unknown>,
@@ -462,6 +555,14 @@ export function buildCommand<
       setArgsContext(args);
     }
 
+    // Environment-based JSON mode (used by library entry point)
+    if (outputConfig && !cleanFlags.json) {
+      const env = (this as unknown as { env?: NodeJS.ProcessEnv }).env;
+      if (env?.SENTRY_OUTPUT_FORMAT === "json") {
+        cleanFlags.json = true;
+      }
+    }
+
     const stdout = (this as unknown as { stdout: Writer }).stdout;
 
     // Reset per-invocation state
@@ -474,10 +575,10 @@ export function buildCommand<
       : undefined;
 
     // OutputError handler: render data through the output system, then
-    // exit with the error's code. Stricli overwrites process.exitCode = 0
-    // after successful returns, so process.exit() is the only way to
-    // preserve a non-zero code. This lives in the framework — commands
-    // simply `throw new OutputError(data)`.
+    // re-throw so the exit code propagates. Stricli's
+    // exceptionWhileRunningCommand intercepts OutputError and re-throws
+    // it without formatting, so both bin.ts and index.ts can set
+    // exitCode from the caught error.
     const handleOutputError = (err: unknown): never => {
       if (err instanceof OutputError && outputConfig) {
         // Only render if there's actual data to show
@@ -489,7 +590,7 @@ export function buildCommand<
             renderer
           );
         }
-        process.exit(err.exitCode);
+        throw err;
       }
       throw err;
     };
@@ -497,21 +598,39 @@ export function buildCommand<
     // Iterate the generator using manual .next() instead of for-await-of
     // so we can capture the return value (done: true result). The return
     // value carries the final `hint` — for-await-of discards it.
+    //
+    // Auth guard is inside the try block so that maybeRecoverWithHelp can
+    // intercept the AuthError when "help" appears as a positional arg (e.g.
+    // `sentry issue list help`). Without this, the auth prompt would fire
+    // before the help-recovery path could show the command's help text.
     try {
-      const generator = originalFunc.call(
-        this,
-        cleanFlags as FLAGS,
-        ...(args as unknown as ARGS)
-      );
-      let result = await generator.next();
-      while (!result.done) {
-        handleYieldedValue(stdout, result.value, cleanFlags, renderer);
-        result = await generator.next();
+      if (requiresAuth && !getAuthConfig()) {
+        throw new AuthError("not_authenticated");
       }
 
-      // Generator completed successfully — finalize with hint.
-      const returned = result.value as CommandReturn | undefined;
-      writeFinalization(stdout, returned?.hint, cleanFlags.json, renderer);
+      // Execution phase: core command logic, API calls, org/project resolution
+      const returned = await withTracing(
+        "exec",
+        "cli.command.exec",
+        async () => {
+          const generator = originalFunc.call(
+            this,
+            cleanFlags as FLAGS,
+            ...(args as unknown as ARGS)
+          );
+          let result = await generator.next();
+          while (!result.done) {
+            handleYieldedValue(stdout, result.value, cleanFlags, renderer);
+            result = await generator.next();
+          }
+          return result.value as CommandReturn | undefined;
+        }
+      );
+
+      // Render phase: output finalization
+      await withTracing("render", "cli.command.render", () => {
+        writeFinalization(stdout, returned?.hint, cleanFlags.json, renderer);
+      });
     } catch (err) {
       // Finalize before error handling to close streaming state
       // (e.g., table footer). No hint since the generator didn't
@@ -545,9 +664,20 @@ export function buildCommand<
   // hidden flags) and `func` (wrapping with telemetry/output logic),
   // which breaks the original FLAGS/ARGS type alignment that Stricli's
   // `CommandBuilderArguments` enforces via `NoInfer`.
-  return stricliCommand({
+  const cmd = stricliCommand({
     ...builderArgs,
+    docs: enrichedDocs,
     parameters: mergedParams,
     func: wrappedFunc,
   } as unknown as StricliBuilderArgs<CONTEXT>);
+
+  // Attach the JSON schema to the built command as a non-standard property.
+  // introspect.ts reads this to populate CommandInfo.jsonFields for help
+  // output and SKILL.md generation.
+  if (outputConfig?.schema) {
+    (cmd as unknown as Record<string, unknown>).__jsonSchema =
+      outputConfig.schema;
+  }
+
+  return cmd;
 }

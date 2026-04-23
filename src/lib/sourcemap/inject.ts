@@ -5,8 +5,10 @@
  * then injects Sentry debug IDs into each pair.
  */
 
-import { readdir, readFile, stat } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { resolve as resolvePath } from "node:path";
+import { NODE_MODULES_DIRNAME } from "../constants.js";
+import { walkFiles } from "../scan/index.js";
 import { EXISTING_DEBUGID_RE, injectDebugId } from "./debug-id.js";
 
 /** Default JavaScript file extensions to scan. */
@@ -92,28 +94,46 @@ async function findCompanionMap(jsPath: string): Promise<string | undefined> {
 
 /**
  * Recursively discover JS files with companion .map files.
+ *
+ * Uses the shared `walkFiles` engine from `src/lib/scan/` for
+ * directory traversal. Sourcemap injection targets build output
+ * directories — so we:
+ *
+ * - Disable `respectGitignore` (build outputs like `dist/` are
+ *   typically gitignored; the walker would otherwise prune them).
+ * - Skip dotfiles + `node_modules` only (via `SOURCEMAP_SKIP_DIRS`);
+ *   the walker's `DEFAULT_SKIP_DIRS` is too broad — it prunes
+ *   `dist`/`build`/`.next` etc., which are exactly the dirs users
+ *   want to scan into.
+ * - Disable the `maxFileSize` cap. The walker defaults to 256 KB,
+ *   but webpack / rollup / Next.js bundles routinely exceed that.
+ *   The old hand-rolled `readdir` loop had no size limit; silently
+ *   dropping large JS files would skip debug-ID injection on the
+ *   exact bundles users care about most.
  */
+const SOURCEMAP_SKIP_DIRS: readonly string[] = [NODE_MODULES_DIRNAME];
+
 async function discoverFilePairs(
   dir: string,
   extensions: Set<string>
 ): Promise<FilePair[]> {
+  // `walkFiles` requires an absolute cwd. CLI callers pass
+  // user-supplied positional args like `./dist` directly through to
+  // `injectDirectory`, so we resolve here rather than push the
+  // requirement up to every caller.
+  const absDir = resolvePath(dir);
   const pairs: FilePair[] = [];
-  const entries = await readdir(dir, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const fullPath = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      // Skip node_modules and hidden directories
-      if (entry.name === "node_modules" || entry.name.startsWith(".")) {
-        continue;
-      }
-      const subPairs = await discoverFilePairs(fullPath, extensions);
-      pairs.push(...subPairs);
-    } else if (entry.isFile() && extensions.has(extname(entry.name))) {
-      const mapPath = await findCompanionMap(fullPath);
-      if (mapPath) {
-        pairs.push({ jsPath: fullPath, mapPath });
-      }
+  for await (const entry of walkFiles({
+    cwd: absDir,
+    extensions,
+    alwaysSkipDirs: SOURCEMAP_SKIP_DIRS,
+    hidden: false,
+    respectGitignore: false,
+    maxFileSize: Number.POSITIVE_INFINITY,
+  })) {
+    const mapPath = await findCompanionMap(entry.absolutePath);
+    if (mapPath) {
+      pairs.push({ jsPath: entry.absolutePath, mapPath });
     }
   }
   return pairs;

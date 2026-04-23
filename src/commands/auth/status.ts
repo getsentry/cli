@@ -11,7 +11,9 @@ import {
   type AuthConfig,
   type AuthSource,
   ENV_SOURCE_PREFIX,
+  getActiveEnvVarName,
   getAuthConfig,
+  getRawEnvToken,
   isAuthenticated,
 } from "../../lib/db/auth.js";
 import {
@@ -77,6 +79,13 @@ export type AuthStatusData = {
     /** Error message if verification failed */
     error?: string;
   };
+  /** Environment variable token info (present when SENTRY_AUTH_TOKEN or SENTRY_TOKEN is set) */
+  envToken?: {
+    /** Name of the env var (e.g., "SENTRY_AUTH_TOKEN") */
+    envVar: string;
+    /** Whether the env token is the effective auth source (vs bypassed for OAuth) */
+    active: boolean;
+  };
 };
 
 /**
@@ -138,6 +147,7 @@ async function verifyCredentials(): Promise<AuthStatusData["verification"]> {
 }
 
 export const statusCommand = buildCommand({
+  auth: false,
   docs: {
     brief: "View authentication status",
     fullDescription:
@@ -170,14 +180,26 @@ export const statusCommand = buildCommand({
       });
     }
 
-    // Build the user info
-    const userInfo = getUserInfo();
-    const user = userInfo
-      ? {
-          name: userInfo.name,
-          email: userInfo.email,
-          username: userInfo.username,
-        }
+    // Env var tokens may belong to a different user/instance than the cached
+    // user_info (populated by a prior login or whoami). Skip the cache for env
+    // sources to avoid displaying stale identity.
+    let user: AuthStatusData["user"];
+    if (!fromEnv) {
+      const userInfo = getUserInfo();
+      user = userInfo
+        ? {
+            name: userInfo.name,
+            email: userInfo.email,
+            username: userInfo.username,
+          }
+        : undefined;
+    }
+
+    // Check for env token regardless of whether it's the active source
+    // (it may be set but bypassed because stored OAuth takes priority)
+    const rawEnv = getRawEnvToken();
+    const envTokenData: AuthStatusData["envToken"] = rawEnv
+      ? { envVar: getActiveEnvVarName(), active: fromEnv }
       : undefined;
 
     const data: AuthStatusData = {
@@ -188,8 +210,15 @@ export const statusCommand = buildCommand({
       token: collectTokenInfo(auth, flags["show-token"]),
       defaults: collectDefaults(),
       verification: await verifyCredentials(),
+      envToken: envTokenData,
     };
 
-    return yield new CommandOutput(data);
+    yield new CommandOutput(data);
+
+    if (fromEnv) {
+      return {
+        hint: "Run `sentry auth whoami` to see which user this token belongs to",
+      };
+    }
   },
 });

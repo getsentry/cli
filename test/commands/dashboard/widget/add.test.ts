@@ -212,38 +212,6 @@ describe("dashboard widget add", () => {
     expect(err.message).toContain("Unknown aggregate function");
   });
 
-  test("throws ValidationError for big_number with issue dataset", async () => {
-    const { context } = createMockContext();
-    const func = await addCommand.loader();
-
-    const err = await func
-      .call(
-        context,
-        { json: false, display: "big_number", dataset: "issue" },
-        "123",
-        "Unresolved Count"
-      )
-      .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toContain('"issue" dataset supports');
-  });
-
-  test("allows line/area/bar with issue dataset", async () => {
-    const { context } = createMockContext();
-    const func = await addCommand.loader();
-
-    for (const display of ["line", "area", "bar"]) {
-      updateDashboardSpy.mockClear();
-      await func.call(
-        context,
-        { json: false, display, dataset: "issue" },
-        "123",
-        "Issues Over Time"
-      );
-      expect(updateDashboardSpy).toHaveBeenCalledTimes(1);
-    }
-  });
-
   test("issue line dataset does not default columns", async () => {
     const { context } = createMockContext();
     const func = await addCommand.loader();
@@ -276,6 +244,134 @@ describe("dashboard widget add", () => {
     expect(addedWidget.queries[0].orderby).toBe("-count()");
   });
 
+  test("resolves dataset alias 'errors' to 'error-events' in PUT body", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "big_number",
+        dataset: "errors",
+        query: ["count"],
+      },
+      "123",
+      "Error Count"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.widgetType).toBe("error-events");
+  });
+
+  test("resolves dataset alias 'transactions' to 'transaction-like'", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "line",
+        dataset: "transactions",
+        query: ["count"],
+      },
+      "123",
+      "Transactions Over Time"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.widgetType).toBe("transaction-like");
+  });
+
+  test("resolves dataset alias 'metricsEnhanced' to 'tracemetrics'", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "line",
+        dataset: "metricsEnhanced",
+        query: ["p50(value,completion.duration_ms,distribution,none)"],
+      },
+      "123",
+      "Latency"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.widgetType).toBe("tracemetrics");
+  });
+
+  test("dataset alias is resolved BEFORE dataset-aware aggregate validation", async () => {
+    // failure_rate is only valid for error-events/discover. With the alias
+    // "errors", dataset-aware validation must see "error-events" (canonical)
+    // before deciding whether to accept the aggregate.
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "big_number",
+        dataset: "errors",
+        query: ["failure_rate"],
+      },
+      "123",
+      "Failure Rate"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.widgetType).toBe("error-events");
+    expect(addedWidget.queries[0].aggregates).toEqual(["failure_rate()"]);
+  });
+
+  test("case-insensitive dataset values are accepted", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "big_number",
+        dataset: "ERRORS",
+        query: ["count"],
+      },
+      "123",
+      "Errors"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.widgetType).toBe("error-events");
+  });
+
+  test("rejects unknown --dataset with canonical list", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+
+    const err = await func
+      .call(
+        context,
+        {
+          json: false,
+          display: "big_number",
+          dataset: "bogus-dataset",
+          query: ["count"],
+        },
+        "123",
+        "Bad"
+      )
+      .catch((e: Error) => e);
+
+    expect(err).toBeInstanceOf(ValidationError);
+    // Error message surfaces the normalized (lowercased) value.
+    expect(err.message).toContain("bogus-dataset");
+    expect(err.message).toContain("Valid datasets:");
+  });
+
   test("issue dataset respects explicit --group-by over default", async () => {
     const { context } = createMockContext();
     const func = await addCommand.loader();
@@ -286,6 +382,7 @@ describe("dashboard widget add", () => {
         display: "table",
         dataset: "issue",
         "group-by": ["project"],
+        limit: 5,
       },
       "123",
       "Issues by Project"
@@ -296,79 +393,103 @@ describe("dashboard widget add", () => {
     expect(addedWidget.queries[0].columns).toEqual(["project"]);
   });
 
-  // preprod-app-size: line only
-  // https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/mobileAppSize.tsx#L255
-  test("throws ValidationError for table with preprod-app-size dataset", async () => {
-    const { context } = createMockContext();
-    const func = await addCommand.loader();
-    const err = await func
-      .call(
-        context,
-        { json: false, display: "table", dataset: "preprod-app-size" },
-        "123",
-        "App Size"
-      )
-      .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toContain('"preprod-app-size" dataset supports');
-  });
+  // -------------------------------------------------------------------------
+  // Layout flag tests
+  // -------------------------------------------------------------------------
 
-  test("allows line with preprod-app-size dataset", async () => {
+  test("uses explicit layout when --col --row --width --height provided", async () => {
     const { context } = createMockContext();
     const func = await addCommand.loader();
     await func.call(
       context,
-      { json: false, display: "line", dataset: "preprod-app-size" },
+      {
+        json: false,
+        display: "line",
+        query: ["count"],
+        col: 0,
+        row: 5,
+        width: 6,
+        height: 3,
+      },
       "123",
-      "App Size"
+      "Full Width Widget"
     );
-    expect(updateDashboardSpy).toHaveBeenCalledTimes(1);
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.layout.x).toBe(0);
+    expect(addedWidget.layout.y).toBe(5);
+    expect(addedWidget.layout.w).toBe(6);
+    expect(addedWidget.layout.h).toBe(3);
   });
 
-  // tracemetrics: no table or top_n
-  // https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/traceMetrics.tsx#L285-L291
-  test("throws ValidationError for table with tracemetrics dataset", async () => {
-    const { context } = createMockContext();
-    const func = await addCommand.loader();
-    const err = await func
-      .call(
-        context,
-        { json: false, display: "table", dataset: "tracemetrics" },
-        "123",
-        "Trace Metrics"
-      )
-      .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toContain('"tracemetrics" dataset supports');
-  });
-
-  // spans: only dataset supporting details and server_tree
-  // https://github.com/getsentry/sentry/blob/a42668e/static/app/views/dashboards/datasetConfig/spans.tsx#L287-L297
-  test("allows details display with spans dataset", async () => {
+  test("partial layout flags override auto-layout defaults", async () => {
     const { context } = createMockContext();
     const func = await addCommand.loader();
     await func.call(
       context,
-      { json: false, display: "details", dataset: "spans" },
+      {
+        json: false,
+        display: "big_number",
+        query: ["count"],
+        col: 4,
+      },
       "123",
-      "Span Details"
+      "Positioned Counter"
     );
-    expect(updateDashboardSpy).toHaveBeenCalledTimes(1);
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    // x overridden, other values from auto-layout defaults for big_number (w:2, h:1)
+    expect(addedWidget.layout.x).toBe(4);
+    expect(addedWidget.layout.w).toBe(2);
+    expect(addedWidget.layout.h).toBe(1);
   });
 
-  test("throws ValidationError for details display with non-spans dataset", async () => {
+  test("throws ValidationError for width > 6", async () => {
     const { context } = createMockContext();
     const func = await addCommand.loader();
     const err = await func
       .call(
         context,
-        { json: false, display: "details", dataset: "logs" },
+        { json: false, display: "line", query: ["count"], width: 7 },
         "123",
-        "Details"
+        "Too Wide"
       )
       .catch((e: Error) => e);
     expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toContain('"logs" dataset supports');
+    expect(err.message).toContain("--width");
+  });
+
+  test("throws ValidationError when --col overflows with auto-layout default width", async () => {
+    // table display defaults to w=6, so --col 1 would produce x=1 + w=6 = 7 > 6
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    const err = await func
+      .call(
+        context,
+        { json: false, display: "table", query: ["count"], col: 1 },
+        "123",
+        "Wide Table"
+      )
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain("overflows the grid");
+  });
+
+  test("throws ValidationError for negative row", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    const err = await func
+      .call(
+        context,
+        { json: false, display: "line", query: ["count"], row: -1 },
+        "123",
+        "Bad Y"
+      )
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain("--row");
   });
 
   test("auto-defaults orderby when group-by + limit provided", async () => {
@@ -390,5 +511,145 @@ describe("dashboard widget add", () => {
     const body = updateDashboardSpy.mock.calls[0]?.[2];
     const addedWidget = body.widgets.at(-1);
     expect(addedWidget.queries[0].orderby).toBe("-count()");
+  });
+
+  test("auto-defaults --limit to 5 when --group-by is used without --limit", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "line",
+        query: ["count"],
+        "group-by": ["browser.name"],
+      },
+      "123",
+      "Top Browsers"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.limit).toBe(5);
+    expect(addedWidget.queries[0].columns).toEqual(["browser.name"]);
+    expect(addedWidget.queries[0].orderby).toBe("-count()");
+  });
+
+  test("explicit --limit wins over auto-default for grouped widgets", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "bar",
+        query: ["count"],
+        "group-by": ["browser.name"],
+        limit: 10,
+      },
+      "123",
+      "Top Browsers"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.limit).toBe(10);
+  });
+
+  test("ungrouped widget does not get an auto-default limit", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      { json: false, display: "big_number", query: ["count"] },
+      "123",
+      "Total Count"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.limit).toBeUndefined();
+  });
+
+  test("issue-dataset table default columns do NOT trigger auto-default limit", async () => {
+    // Regression guard: the issue/table combo auto-defaults columns to
+    // ["issue"] but should not auto-default a limit — existing widgets of
+    // this shape may legitimately have no limit.
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      { json: false, display: "table", dataset: "issue" },
+      "123",
+      "Top Issues"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    expect(addedWidget.limit).toBeUndefined();
+  });
+
+  // -- Layout mode flag tests -----------------------------------------------
+
+  test("--layout dense passes dense mode to auto-placer", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      { json: false, display: "big_number", query: ["count"], layout: "dense" },
+      "123",
+      "Dense Widget"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    // Existing widgets: big_number at (0,0,2,1) and table at (2,0,4,2).
+    // Dense mode finds the first gap. The gap at (0,1) fits a 2x1 big_number.
+    expect(addedWidget.layout.x).toBe(0);
+    expect(addedWidget.layout.y).toBe(1);
+  });
+
+  test("--layout sequential (default) uses sequential placement", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    await func.call(
+      context,
+      {
+        json: false,
+        display: "big_number",
+        query: ["count"],
+        layout: "sequential",
+      },
+      "123",
+      "Sequential Widget"
+    );
+
+    const body = updateDashboardSpy.mock.calls[0]?.[2];
+    const addedWidget = body.widgets.at(-1);
+    // Existing widgets: big_number at (0,0,2,1) and table at (2,0,4,2).
+    // Last widget is table at x=2,w=4 → cursor=(6,0) → 6+2=8 > 6 → wrap to (0,2).
+    expect(addedWidget.layout.x).toBe(0);
+    expect(addedWidget.layout.y).toBe(2);
+  });
+
+  test("--layout invalid rejects with ValidationError", async () => {
+    const { context } = createMockContext();
+    const func = await addCommand.loader();
+    const err = await func
+      .call(
+        context,
+        {
+          json: false,
+          display: "big_number",
+          query: ["count"],
+          layout: "invalid",
+        },
+        "123",
+        "Bad Layout"
+      )
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect((err as ValidationError).message).toContain("--layout");
   });
 });

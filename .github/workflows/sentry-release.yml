@@ -1,0 +1,83 @@
+name: Sentry Release
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g., 0.24.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  finalize:
+    name: Finalize Sentry Release
+    runs-on: ubuntu-latest
+    environment: production
+    # Skip pre-releases (nightlies, dev versions) on automatic trigger;
+    # always run on manual dispatch.
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    env:
+      # Secret is scoped to the "production" environment — the job needs
+      # `environment: production` above to access it.
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      # Tag names are bare semver (e.g., "0.24.0", no "v" prefix),
+      # matching the Sentry.init() release value and sourcemap uploads.
+      VERSION: ${{ github.event.release.tag_name || inputs.version }}
+    steps:
+      # Full checkout needed for set-commits --auto (discovers git remote + HEAD).
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # The sentry npm package requires Node.js >= 22.12 — pin an explicit
+      # version so this job doesn't depend on the runner image's default.
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install CLI
+        run: npm install -g "sentry@${VERSION}"
+
+      # "sentry/${VERSION}" = org-slug/version (e.g., org=sentry, version=0.24.0).
+      # The org/ prefix is how org is specified — it is NOT part of the version.
+      # The version portion must match Sentry.init({ release }) exactly.
+      - name: Create release
+        run: sentry release create "sentry/${VERSION}" --project cli,cli-website
+
+      # --auto matches the local origin remote against Sentry repo integrations.
+      # continue-on-error: integration may not be configured for all orgs.
+      - name: Set commits
+        continue-on-error: true
+        run: sentry release set-commits "sentry/${VERSION}" --auto
+
+      - name: Finalize release
+        run: sentry release finalize "sentry/${VERSION}"
+
+      - name: Create deploy
+        run: >-
+          sentry release deploy "sentry/${VERSION}" production
+          --url "https://github.com/${{ github.repository }}/releases/tag/${VERSION}"
+
+      - name: File issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "Sentry release finalization failed for ${VERSION}" \
+            --body "The [Sentry Release workflow](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) failed for version \`${VERSION}\`.
+
+          Trigger: \`${{ github.event_name }}\`
+
+          Please investigate and re-run manually if needed:
+          \`\`\`
+          gh workflow run sentry-release.yml -f version=${VERSION}
+          \`\`\`" \
+            --label bug

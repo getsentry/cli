@@ -33,6 +33,7 @@ import {
   resolveNightlyDelta,
   resolveStableChain,
   resolveStableDelta,
+  validateChainStep,
 } from "../../src/lib/delta-upgrade.js";
 import type { OciManifest } from "../../src/lib/ghcr.js";
 
@@ -699,6 +700,93 @@ describe("filterAndSortChainTags", () => {
       "0.0.0-dev.102"
     );
     expect(result).toEqual(["patch-0.0.0-dev.102"]);
+  });
+});
+
+// validateChainStep
+
+describe("validateChainStep", () => {
+  const PATCH_LAYER_NAME = `${getPlatformBinaryName()}.patch`;
+
+  function makeLayer(
+    title: string,
+    size: number
+  ): OciManifest["layers"][number] {
+    return {
+      digest: `sha256:${title.replace(/\W/g, "")}`,
+      mediaType: "application/octet-stream",
+      size,
+      annotations: { "org.opencontainers.image.title": title },
+    };
+  }
+
+  test("returns version-mismatch when from-version differs", () => {
+    const manifest = makePatchManifest("0.1.0", {}, [
+      makeLayer(PATCH_LAYER_NAME, 500),
+    ]);
+    const result = validateChainStep(manifest, {
+      expectedFrom: "0.0.9",
+      patchLayerName: PATCH_LAYER_NAME,
+      sizeLimit: 100_000,
+    });
+    expect(result).toEqual({
+      ok: false,
+      failure: {
+        reason: "version-mismatch",
+        expected: "0.0.9",
+        actual: "0.1.0",
+      },
+    });
+  });
+
+  test("returns missing-layer when platform layer is absent", () => {
+    const manifest = makePatchManifest("0.0.9", {}, [
+      makeLayer("sentry-other-platform.patch", 500),
+    ]);
+    const result = validateChainStep(manifest, {
+      expectedFrom: "0.0.9",
+      patchLayerName: PATCH_LAYER_NAME,
+      sizeLimit: 100_000,
+    });
+    expect(result).toEqual({
+      ok: false,
+      failure: { reason: "missing-layer", layerName: PATCH_LAYER_NAME },
+    });
+  });
+
+  test("returns size-exceeded when layer exceeds budget", () => {
+    const manifest = makePatchManifest("0.0.9", {}, [
+      makeLayer(PATCH_LAYER_NAME, 200_000),
+    ]);
+    const result = validateChainStep(manifest, {
+      expectedFrom: "0.0.9",
+      patchLayerName: PATCH_LAYER_NAME,
+      sizeLimit: 100_000,
+    });
+    expect(result).toEqual({
+      ok: false,
+      failure: {
+        reason: "size-exceeded",
+        layerSize: 200_000,
+        budget: 100_000,
+      },
+    });
+  });
+
+  test("returns ok with digest and size on success", () => {
+    const manifest = makePatchManifest("0.0.9", {}, [
+      makeLayer(PATCH_LAYER_NAME, 500),
+    ]);
+    const result = validateChainStep(manifest, {
+      expectedFrom: "0.0.9",
+      patchLayerName: PATCH_LAYER_NAME,
+      sizeLimit: 100_000,
+    });
+    expect(result).toEqual({
+      ok: true,
+      digest: `sha256:${PATCH_LAYER_NAME.replace(/\W/g, "")}`,
+      size: 500,
+    });
   });
 });
 

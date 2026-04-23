@@ -23,11 +23,22 @@ import {
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { ApiError, ContextError, ResolutionError } from "../../lib/errors.js";
+import {
+  ApiError,
+  AuthError,
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "../../lib/errors.js";
 import { formatEventDetails } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
-import { HEX_ID_RE, normalizeHexId } from "../../lib/hex-id.js";
+import { HEX_ID_RE, normalizeHexId, validateHexId } from "../../lib/hex-id.js";
+import {
+  handleRecoveryResult,
+  recoverHexId,
+  resolveRecoveryOrg,
+} from "../../lib/hex-id-recovery.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -106,6 +117,12 @@ function jsonTransformEventView(
 const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
 
 /**
+ * Sentinel eventId for "fetch the latest event for this issue."
+ * Uses the @-prefix convention from {@link IssueSelector} magic selectors.
+ */
+const LATEST_EVENT_SENTINEL = "@latest";
+
+/**
  * Parse a single positional arg for event view, handling issue short ID
  * detection both in bare form ("BRUNCHIE-APP-29") and org-prefixed form
  * ("figma/FULLSCREEN-2RN").
@@ -128,7 +145,7 @@ function parseSingleArg(arg: string): ParsedPositionalArgs {
       // Use "org/" (trailing slash) to signal OrgAll mode so downstream
       // parseOrgProjectArg interprets this as an org, not a project search.
       return {
-        eventId: "latest",
+        eventId: LATEST_EVENT_SENTINEL,
         targetArg: `${beforeSlash}/`,
         issueShortId: afterSlash,
       };
@@ -159,7 +176,7 @@ function parseSingleArg(arg: string): ParsedPositionalArgs {
   // Detect bare issue short ID passed as event ID (e.g., "BRUNCHIE-APP-29").
   if (!targetArg && looksLikeIssueShortId(eventId)) {
     return {
-      eventId: "latest",
+      eventId: LATEST_EVENT_SENTINEL,
       targetArg: undefined,
       issueShortId: eventId,
     };
@@ -214,17 +231,17 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
   const urlParsed = parseSentryUrl(first);
   if (urlParsed) {
     applySentryUrlContext(urlParsed.baseUrl);
-    if (urlParsed.eventId) {
+    if (urlParsed.eventId && urlParsed.org) {
       // Event URL: pass org as OrgAll target ("{org}/").
       // Event URLs don't contain a project slug, so viewCommand falls
       // back to auto-detect for the project while keeping the org context.
       return { eventId: urlParsed.eventId, targetArg: `${urlParsed.org}/` };
     }
-    if (urlParsed.issueId) {
+    if (urlParsed.issueId && urlParsed.org) {
       // Issue URL without event ID — fetch the latest event for this issue.
-      // Use a placeholder eventId; the caller uses issueId to fetch via getLatestEvent.
+      // The caller uses issueId to fetch via getLatestEvent.
       return {
-        eventId: "latest",
+        eventId: LATEST_EVENT_SENTINEL,
         targetArg: `${urlParsed.org}/`,
         issueId: urlParsed.issueId,
       };
@@ -258,7 +275,7 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
   // are uppercase). The second arg is ignored since we fetch the latest event.
   if (looksLikeIssueShortId(first)) {
     return {
-      eventId: "latest",
+      eventId: LATEST_EVENT_SENTINEL,
       targetArg: undefined,
       issueShortId: first,
       warning: `'${first}' is an issue short ID, not a project slug. Ignoring second argument '${second}'.`,
@@ -267,6 +284,43 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
 
   // Two or more args - first is target, second is event ID
   return { eventId: second, targetArg: first };
+}
+
+/**
+ * Validate the raw event ID via `validateHexId`, falling back to
+ * `recoverHexId` + `handleRecoveryResult` when validation fails.
+ *
+ * Returns the usable event ID (original, stripped, fuzzy-recovered, or
+ * cross-entity-redirected). Throws the original or augmented error when
+ * recovery can't produce a usable ID.
+ *
+ * Skips validation entirely when the event ID is a sentinel (`LATEST_EVENT_SENTINEL`)
+ * or when the caller already resolved via an issue URL / short ID path —
+ * those cases look up the event through issue lookup, not by hex ID.
+ */
+async function validateAndRecoverEventId(
+  rawEventId: string,
+  parsed: ReturnType<typeof parseOrgProjectArg>,
+  skipValidation: boolean
+): Promise<string> {
+  if (skipValidation) {
+    return rawEventId;
+  }
+  try {
+    return validateHexId(rawEventId, "event ID");
+  } catch (err) {
+    if (!(err instanceof ValidationError)) {
+      throw err;
+    }
+    const recoveryOrg = await resolveRecoveryOrg(parsed);
+    const recoveryCtx = recoveryOrg ?? { org: "", project: undefined };
+    const result = await recoverHexId(rawEventId, "event", recoveryCtx);
+    return handleRecoveryResult(result, err, {
+      entityType: "event",
+      canonicalCommand: `sentry event view ${recoveryCtx.org || "<org>"}/${recoveryCtx.project ?? "<project>"}/<id>`,
+      logTag: "event.view",
+    });
+  }
 }
 
 /**
@@ -317,7 +371,8 @@ export async function resolveEventTarget(
       const resolved = await resolveProjectBySlug(
         parsed.projectSlug,
         USAGE_HINT,
-        `sentry event view <org>/${parsed.projectSlug} ${eventId}`
+        `sentry event view <org>/${parsed.projectSlug} ${eventId}`,
+        parsed.originalSlug
       );
       return {
         org: resolved.org,
@@ -405,6 +460,29 @@ export async function resolveAutoDetectTarget(
 }
 
 /**
+ * Build {@link EventViewData} from a pre-fetched event, optionally
+ * including span tree data. Shared by all event-fetch paths so the
+ * span-tree assembly logic lives in one place.
+ *
+ * @param org - Organization slug (needed for span tree API call)
+ * @param event - Already-fetched event
+ * @param spans - Span tree depth (0 = skip)
+ */
+async function buildEventViewData(
+  org: string,
+  event: SentryEvent,
+  spans: number
+): Promise<EventViewData> {
+  const spanTreeResult =
+    spans > 0 ? await getSpanTreeLines(org, event, spans) : undefined;
+  const trace =
+    spanTreeResult?.success && spanTreeResult.traceId
+      ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans ?? [] }
+      : null;
+  return { event, trace, spanTreeLines: spanTreeResult?.lines };
+}
+
+/**
  * Fetch the latest event for an issue URL and build the output data.
  * Extracted from func() to reduce cyclomatic complexity.
  */
@@ -414,15 +492,72 @@ async function fetchLatestEventData(
   spans: number
 ): Promise<EventViewData> {
   const event = await getLatestEvent(org, issueId);
-  const spanTreeResult =
-    spans > 0 ? await getSpanTreeLines(org, event, spans) : undefined;
+  return buildEventViewData(org, event, spans);
+}
 
-  const trace =
-    spanTreeResult?.success && spanTreeResult.traceId
-      ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans ?? [] }
-      : null;
+/**
+ * Try to find an event via cross-project and cross-org fallbacks.
+ *
+ * 1. Same-org fallback: tries the eventids resolution endpoint within `org`.
+ * 2. Cross-org fallback: fans out to all accessible orgs (skipping `org`).
+ *
+ * Returns the event and logs a warning when found in a different location,
+ * or returns null if the event cannot be found anywhere.
+ */
+async function tryEventFallbacks(
+  org: string,
+  project: string,
+  eventId: string
+): Promise<SentryEvent | null> {
+  // Same-org fallback: try cross-project lookup within the specified org.
+  // Handles wrong-project resolution from DSN auto-detect or config defaults.
+  // Track whether the search completed so we can skip the org in cross-org
+  // only when we got a definitive "not found" (not a transient failure).
+  let sameOrgSearched = false;
+  try {
+    const resolved = await resolveEventInOrg(org, eventId);
+    sameOrgSearched = true;
+    if (resolved) {
+      logger.warn(
+        `Event not found in ${org}/${project}, but found in ${resolved.org}/${resolved.project}.`
+      );
+      return resolved.event;
+    }
+  } catch (sameOrgError) {
+    // Propagate auth errors — they indicate a global problem (expired token)
+    if (sameOrgError instanceof AuthError) {
+      throw sameOrgError;
+    }
+    // Transient failure — don't mark org as searched so cross-org retries it
+  }
 
-  return { event, trace, spanTreeLines: spanTreeResult?.lines };
+  // Cross-org fallback: the event may exist in a different organization.
+  // Only exclude the org if the same-org search completed successfully
+  // (returned null). If it threw a transient error, let cross-org retry it.
+  try {
+    const crossOrg = await findEventAcrossOrgs(eventId, {
+      excludeOrgs: sameOrgSearched ? [org] : undefined,
+    });
+    if (crossOrg) {
+      // Use project-scoped phrasing when found in same org (different project)
+      // to avoid the contradictory "not found in 'org', found in org/project".
+      const location = `${crossOrg.org}/${crossOrg.project}`;
+      const prefix =
+        crossOrg.org === org
+          ? `Event not found in ${org}/${project}`
+          : `Event not found in '${org}'`;
+      logger.warn(`${prefix}, but found in ${location}.`);
+      return crossOrg.event;
+    }
+  } catch (fallbackError) {
+    // Propagate auth errors — they indicate a global problem (expired token)
+    if (fallbackError instanceof AuthError) {
+      throw fallbackError;
+    }
+    // Swallow transient errors — continue to suggestions
+  }
+
+  return null;
 }
 
 /**
@@ -430,12 +565,11 @@ async function fetchLatestEventData(
  *
  * The generic "Failed to get event: 404 Not Found" is the most common
  * event view failure (CLI-6F, 54 users). This wrapper adds context about
- * data retention, ID format, and cross-project lookup.
+ * data retention, ID format, and cross-project/cross-org lookup.
  *
- * When the project-scoped fetch returns 404, automatically tries the
- * org-wide eventids resolution endpoint as a fallback. This handles the
- * common case where DSN auto-detection or config defaults resolve to
- * the wrong project within the correct org (CLI-KW, 9 users).
+ * When the project-scoped fetch returns 404, automatically tries:
+ * 1. Org-wide eventids resolution (wrong project within correct org)
+ * 2. Cross-org search across all accessible orgs (wrong org entirely)
  *
  * @param prefetchedEvent - Already-resolved event (from cross-org lookup), or null
  * @param org - Organization slug
@@ -456,26 +590,15 @@ export async function fetchEventWithContext(
     return await getEvent(org, project, eventId);
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) {
-      // Auto-fallback: try cross-project lookup within the same org.
-      // Handles wrong-project resolution from DSN auto-detect or config defaults.
-      // Wrapped in try-catch so that fallback failures (500s, network errors)
-      // don't mask the helpful ResolutionError with suggestions.
-      try {
-        const resolved = await resolveEventInOrg(org, eventId);
-        if (resolved) {
-          logger.warn(
-            `Event not found in ${org}/${project}, but found in ${resolved.org}/${resolved.project}.`
-          );
-          return resolved.event;
-        }
-      } catch {
-        // Fallback failed (network, 500, etc.) — continue to suggestions
+      const fallback = await tryEventFallbacks(org, project, eventId);
+      if (fallback) {
+        return fallback;
       }
 
       const suggestions = [
-        "The event may have been deleted due to data retention policies",
-        "Verify the event ID is a 32-character hex string (e.g., a1b2c3d4...)",
-        `The event was not found in any project in '${org}'`,
+        "The ID format is valid but no matching event was found in any accessible organization",
+        "Check that you are querying the right org/project — the ID may belong to a different one",
+        "Events past your plan's retention window are no longer retrievable",
       ];
 
       // Nudge the user when the event ID looks like an issue short ID
@@ -515,26 +638,6 @@ async function resolveIssueShortIdEvent(
 ): Promise<EventViewData> {
   const issue = await getIssueByShortId(org, issueShortId);
   return fetchLatestEventData(org, issue.id, spans);
-}
-
-/**
- * Fetch a specific event by ID (not latest) and build full EventViewData
- * including optional span tree. Used by the SHORT-ID/EVENT-ID path.
- */
-async function fetchSpecificEventData(
-  org: string,
-  project: string,
-  eventId: string,
-  spans: number
-): Promise<EventViewData> {
-  const event = await getEvent(org, project, eventId);
-  const spanTreeResult =
-    spans > 0 ? await getSpanTreeLines(org, event, spans) : undefined;
-  const trace =
-    spanTreeResult?.success && spanTreeResult.traceId
-      ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans ?? [] }
-      : null;
-  return { event, trace, spanTreeLines: spanTreeResult?.lines };
 }
 
 /** Result from an issue-based shortcut (URL or short ID) */
@@ -598,7 +701,7 @@ async function resolveIssueShortcut(
 
     // When the user specified a specific event ID (SHORT-ID/EVENT-ID),
     // resolve the issue to get the project, then fetch the specific event.
-    if (eventId !== "latest") {
+    if (eventId !== LATEST_EVENT_SENTINEL) {
       const issue = await getIssueByShortId(resolved.org, issueShortId);
       const issueProject = issue.project?.slug;
       if (!issueProject) {
@@ -609,12 +712,8 @@ async function resolveIssueShortcut(
           ["Specify the project explicitly to view this event"]
         );
       }
-      const data = await fetchSpecificEventData(
-        resolved.org,
-        issueProject,
-        eventId,
-        spans
-      );
+      const event = await getEvent(resolved.org, issueProject, eventId);
+      const data = await buildEventViewData(resolved.org, event, spans);
       return {
         org: resolved.org,
         data,
@@ -658,7 +757,7 @@ export const viewCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
-        placeholder: "args",
+        placeholder: "org/project/event-id",
         brief:
           "[<org>/<project>] <event-id> - Target (optional) and event ID (required)",
         parse: String,
@@ -682,16 +781,18 @@ export const viewCommand = buildCommand({
     const log = logger.withTag("event.view");
 
     // Parse positional args
-    const { eventId, targetArg, warning, issueId, issueShortId } =
-      parsePositionalArgs(args);
-    if (warning) {
-      log.warn(warning);
+    const parsedArgs = parsePositionalArgs(args);
+    if (parsedArgs.warning) {
+      log.warn(parsedArgs.warning);
     }
+    const { targetArg, issueId, issueShortId } = parsedArgs;
+    let { eventId } = parsedArgs;
+
     const parsed = parseOrgProjectArg(targetArg);
 
     // Handle issue-based shortcuts (issue URLs and short IDs) before
-    // normal event resolution. When eventId is "latest", fetches the
-    // latest event; otherwise fetches the specific event.
+    // normal event resolution. When eventId is LATEST_EVENT_SENTINEL,
+    // fetches the latest event; otherwise fetches the specific event.
     const issueShortcut = await resolveIssueShortcut({
       parsed,
       eventId,
@@ -714,6 +815,15 @@ export const viewCommand = buildCommand({
       yield new CommandOutput(issueShortcut.data);
       return { hint: issueShortcut.hint };
     }
+
+    // Validate + attempt recovery. `skipValidation` is true when the ID is
+    // the LATEST_EVENT_SENTINEL or when resolveIssueShortcut already handled
+    // the request (issueId / issueShortId paths).
+    const skipValidation =
+      eventId === LATEST_EVENT_SENTINEL ||
+      issueId !== undefined ||
+      issueShortId !== undefined;
+    eventId = await validateAndRecoverEventId(eventId, parsed, skipValidation);
 
     const target = await resolveEventTarget({
       parsed,
@@ -739,22 +849,9 @@ export const viewCommand = buildCommand({
       eventId
     );
 
-    // Fetch span tree data (for both JSON and human output)
-    // Skip when spans=0 (disabled via --spans no or --spans 0)
-    const spanTreeResult =
-      flags.spans > 0
-        ? await getSpanTreeLines(target.org, event, flags.spans)
-        : undefined;
+    const viewData = await buildEventViewData(target.org, event, flags.spans);
 
-    const trace = spanTreeResult?.success
-      ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
-      : null;
-
-    yield new CommandOutput({
-      event,
-      trace,
-      spanTreeLines: spanTreeResult?.lines,
-    });
+    yield new CommandOutput(viewData);
     return {
       hint: target.detectedFrom
         ? `Detected from ${target.detectedFrom}`

@@ -65,16 +65,18 @@ describe("parseSlashSeparatedTraceTarget", () => {
     }
   });
 
-  test("normalizes underscores in slugs", () => {
+  test("preserves underscores in slugs (see #770)", () => {
+    // Sentry accepts underscores in project slugs, so they must flow
+    // through the trace-target parser unchanged.
     const result = parseSlashSeparatedTraceTarget(
       `my_org/my_project/${VALID_TRACE_ID}`,
       HINT
     );
     expect(result.type).toBe("explicit");
     if (result.type === "explicit") {
-      expect(result.org).toBe("my-org");
-      expect(result.project).toBe("my-project");
-      expect(result.normalized).toBe(true);
+      expect(result.org).toBe("my_org");
+      expect(result.project).toBe("my_project");
+      expect(result.normalized).toBeUndefined();
     }
   });
 

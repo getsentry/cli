@@ -9,7 +9,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
-
+import { isEnoentSpawnError } from "../../src/commands/cli/upgrade.js";
 import {
   acquireLock,
   getBinaryDownloadUrl,
@@ -24,6 +24,8 @@ import {
 import { UpgradeError } from "../../src/lib/errors.js";
 import {
   detectInstallationMethod,
+  detectPackageManagerFromPath,
+  downloadBinaryToTemp,
   executeUpgrade,
   fetchLatestFromGitHub,
   fetchLatestFromNpm,
@@ -266,6 +268,14 @@ describe("UpgradeError", () => {
     expect(error.reason).toBe("unsupported_operation");
     expect(error.message).toBe(
       "This operation is not supported for this installation method."
+    );
+  });
+
+  test("creates error with default message for offline_cache_miss", () => {
+    const error = new UpgradeError("offline_cache_miss");
+    expect(error.reason).toBe("offline_cache_miss");
+    expect(error.message).toBe(
+      "Cannot upgrade offline — no pre-downloaded update is available."
     );
   });
 
@@ -708,6 +718,147 @@ describe("Homebrew detection (detectInstallationMethod)", () => {
     // non-Cellar path because that triggers the slow package-manager fallthrough.
     expect("/home/user/.sentry/bin/sentry".includes("/Cellar/")).toBe(false);
     expect("/opt/homebrew/bin/sentry".includes("/Cellar/")).toBe(false);
+  });
+});
+
+describe("detectPackageManagerFromPath", () => {
+  let originalArgv: string[];
+
+  beforeEach(() => {
+    originalArgv = [...process.argv];
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+  });
+
+  test("detects npm from node_modules path", () => {
+    process.argv[1] = join(
+      "/usr/local/lib",
+      "node_modules",
+      "sentry",
+      "dist",
+      "bin.cjs"
+    );
+    expect(detectPackageManagerFromPath()).toBe("npm");
+  });
+
+  test("detects pnpm from .pnpm directory layout", () => {
+    process.argv[1] = join(
+      "/usr/local/lib",
+      "node_modules",
+      ".pnpm",
+      "sentry@0.27.0",
+      "node_modules",
+      "sentry",
+      "dist",
+      "bin.cjs"
+    );
+    expect(detectPackageManagerFromPath()).toBe("pnpm");
+  });
+
+  test("detects bun from .bun global install path", () => {
+    process.argv[1] = join(
+      homedir(),
+      ".bun",
+      "install",
+      "global",
+      "node_modules",
+      "sentry",
+      "dist",
+      "bin.cjs"
+    );
+    expect(detectPackageManagerFromPath()).toBe("bun");
+  });
+
+  test("detects npm from NVM-managed path with node_modules", () => {
+    // Mimics the CLI-Y1 bug report layout (NVM + Laravel Herd)
+    process.argv[1] = join(
+      homedir(),
+      "config",
+      "herd",
+      "bin",
+      "nvm",
+      "v24.2.0",
+      "node_modules",
+      "sentry",
+      "dist",
+      "index.cjs"
+    );
+    expect(detectPackageManagerFromPath()).toBe("npm");
+  });
+
+  test("returns null when argv[1] is undefined", () => {
+    process.argv = [process.argv[0]];
+    expect(detectPackageManagerFromPath()).toBeNull();
+  });
+
+  test("returns null for Bun compiled binary (argv[1] is CLI arg)", () => {
+    process.argv[1] = "issue";
+    expect(detectPackageManagerFromPath()).toBeNull();
+  });
+
+  test("returns null for dev mode source path", () => {
+    process.argv[1] = join("/home", "user", "cli", "src", "bin.ts");
+    expect(detectPackageManagerFromPath()).toBeNull();
+  });
+});
+
+describe("detectInstallationMethod — node_modules path fallback", () => {
+  useTestConfigDir("test-detect-path-");
+
+  let originalArgv: string[];
+  let originalExecPath: string;
+
+  beforeEach(() => {
+    originalArgv = [...process.argv];
+    originalExecPath = process.execPath;
+    // Typical Node.js execPath — not Homebrew, not curl
+    Object.defineProperty(process, "execPath", {
+      value: "/usr/bin/node",
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    Object.defineProperty(process, "execPath", {
+      value: originalExecPath,
+      configurable: true,
+    });
+    clearInstallInfo();
+  });
+
+  test("stored info takes priority over path-based detection", async () => {
+    // If DB says "yarn", respect it even if path says node_modules
+    setInstallInfo({ method: "yarn", path: "/old/path", version: "0.0.1" });
+    process.argv[1] = join(
+      "/usr/local/lib",
+      "node_modules",
+      "sentry",
+      "dist",
+      "bin.cjs"
+    );
+
+    const method = await detectInstallationMethod();
+    expect(method).toBe("yarn");
+  });
+
+  test("Homebrew still takes priority over node_modules path", async () => {
+    process.argv[1] = join(
+      "/usr/local/lib",
+      "node_modules",
+      "sentry",
+      "dist",
+      "bin.cjs"
+    );
+    Object.defineProperty(process, "execPath", {
+      value: "/opt/homebrew/Cellar/sentry/1.2.3/bin/sentry",
+      configurable: true,
+    });
+
+    const method = await detectInstallationMethod();
+    expect(method).toBe("brew");
   });
 });
 
@@ -1327,5 +1478,228 @@ describe("executeUpgrade with curl method (nightly)", () => {
     // Verify decompressed content matches original
     const content = await Bun.file(result!.tempBinaryPath).arrayBuffer();
     expect(new Uint8Array(content)).toEqual(mockBinaryContent);
+  });
+});
+
+describe("downloadBinaryToTemp offline errors", () => {
+  const offlineBinDir = join(TEST_TMP_DIR, "upgrade-offline-test");
+  const offlineInstallPath = join(offlineBinDir, "sentry");
+
+  beforeEach(() => {
+    clearInstallInfo();
+    mkdirSync(offlineBinDir, { recursive: true });
+    setInstallInfo({
+      method: "curl",
+      path: offlineInstallPath,
+      version: "0.0.0",
+    });
+  });
+
+  afterEach(async () => {
+    globalThis.fetch = originalFetch;
+    const paths = getCurlInstallPaths();
+    for (const p of [
+      paths.installPath,
+      paths.tempPath,
+      paths.oldPath,
+      paths.lockPath,
+    ]) {
+      try {
+        await unlink(p);
+      } catch {
+        // Ignore
+      }
+    }
+    clearInstallInfo();
+  });
+
+  test("explicit offline: throws offline_cache_miss with actionable message", async () => {
+    try {
+      await downloadBinaryToTemp("0.26.1", undefined, "explicit");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(UpgradeError);
+      const upgradeError = error as UpgradeError;
+      expect(upgradeError.reason).toBe("offline_cache_miss");
+      expect(upgradeError.message).toContain("in offline mode");
+      expect(upgradeError.message).toContain("without `--offline`");
+      expect(upgradeError.message).not.toContain("cached patches");
+    }
+  });
+
+  test("network fallback: throws offline_cache_miss with connection message", async () => {
+    try {
+      await downloadBinaryToTemp("0.26.1", undefined, "network-fallback");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(UpgradeError);
+      const upgradeError = error as UpgradeError;
+      expect(upgradeError.reason).toBe("offline_cache_miss");
+      expect(upgradeError.message).toContain("network is unavailable");
+      expect(upgradeError.message).toContain("Check your internet connection");
+      expect(upgradeError.message).not.toContain("cached patches");
+    }
+  });
+});
+
+// Regression coverage for CLI-1D3: when the full download silently produces
+// a missing or empty file, `downloadBinaryToTemp` polls with exponential
+// backoff (letting a Windows filesystem-visibility race self-heal), then
+// fails with an actionable `UpgradeError` if the file never appears.
+describe("downloadBinaryToTemp verifies download integrity (CLI-1D3)", () => {
+  const verifyBinDir = join(TEST_TMP_DIR, "upgrade-verify-test");
+  const verifyInstallPath = join(verifyBinDir, "sentry");
+
+  beforeEach(() => {
+    clearInstallInfo();
+    mkdirSync(verifyBinDir, { recursive: true });
+    setInstallInfo({
+      method: "curl",
+      path: verifyInstallPath,
+      version: "0.0.0",
+    });
+  });
+
+  afterEach(async () => {
+    globalThis.fetch = originalFetch;
+    const paths = getCurlInstallPaths();
+    for (const p of [
+      paths.installPath,
+      paths.tempPath,
+      paths.oldPath,
+      paths.lockPath,
+    ]) {
+      try {
+        await unlink(p);
+      } catch {
+        // Ignore
+      }
+    }
+    clearInstallInfo();
+  });
+
+  test("throws execution_failed UpgradeError after retry budget is exhausted", async () => {
+    // Serve an empty gzip payload. The outer stream completes cleanly, so
+    // neither fetchWithUpgradeError nor streamDecompressToFile throws —
+    // but `destPath` ends up with zero bytes. The verification loop polls
+    // 5 times (~3.1s cumulative) before giving up with an actionable
+    // error; without it the caller would spawn the empty file and fail
+    // with "Executable not found in $PATH" (the CLI-1D3 symptom).
+    const emptyGzip = Bun.gzipSync(new Uint8Array(0));
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.endsWith(".gz")) {
+        return new Response(emptyGzip, { status: 200 });
+      }
+      return new Response("Not Found", { status: 404 });
+    });
+
+    try {
+      await downloadBinaryToTemp("0.26.1");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(UpgradeError);
+      const upgradeError = error as UpgradeError;
+      expect(upgradeError.reason).toBe("execution_failed");
+      expect(upgradeError.message).toContain("missing or empty");
+      expect(upgradeError.message).toContain("sentry cli upgrade");
+    }
+  }, 10_000);
+
+  test("releases the download lock when verification fails", async () => {
+    const emptyGzip = Bun.gzipSync(new Uint8Array(0));
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.endsWith(".gz")) {
+        return new Response(emptyGzip, { status: 200 });
+      }
+      return new Response("Not Found", { status: 404 });
+    });
+
+    await expect(downloadBinaryToTemp("0.26.1")).rejects.toThrow(UpgradeError);
+
+    // The lock must be released so a subsequent retry can acquire it.
+    // acquireLock throws UpgradeError("Another upgrade is already in progress")
+    // when a live lock exists; if the previous failure released it correctly
+    // this call succeeds silently.
+    const { lockPath } = getCurlInstallPaths();
+    expect(() => acquireLock(lockPath)).not.toThrow();
+    releaseLock(lockPath);
+  }, 10_000);
+
+  test("recovers when the binary becomes visible during the retry window", async () => {
+    // Simulate a Windows filesystem-visibility race: the download writes
+    // an empty file, but good bytes become visible a short time later.
+    // The polling loop's exponential backoff observes the non-empty file
+    // on a subsequent attempt and returns without throwing.
+    //
+    // To keep the ordering deterministic under CI load, the "delayed
+    // writer" first waits until the empty download file is visible on
+    // disk (proving streamDecompressToFile has finished) before writing
+    // the good bytes. Otherwise a slow CI could let our Bun.write land
+    // before the download completes and get clobbered by the empty write.
+    const mockBinaryContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]); // ELF
+    const emptyGzip = Bun.gzipSync(new Uint8Array(0));
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.endsWith(".gz")) {
+        return new Response(emptyGzip, { status: 200 });
+      }
+      return new Response("Not Found", { status: 404 });
+    });
+
+    const { tempPath } = getCurlInstallPaths();
+    const delayedWrite = (async () => {
+      // Wait for the empty download to land on disk first, so we
+      // overwrite it instead of racing it.
+      for (let i = 0; i < 200; i++) {
+        if (await Bun.file(tempPath).exists()) {
+          break;
+        }
+        await Bun.sleep(10);
+      }
+      // Give the probe loop at least one zero-byte observation so the
+      // recovery branch (attempt > 1) actually fires.
+      await Bun.sleep(150);
+      await Bun.write(tempPath, mockBinaryContent);
+    })();
+
+    const result = await downloadBinaryToTemp("0.26.1");
+    expect(result.tempBinaryPath).toBe(tempPath);
+    await delayedWrite;
+
+    // Verify the good bytes survived — catches the regression where a
+    // late download completion clobbers the delayed write.
+    const onDisk = new Uint8Array(await Bun.file(tempPath).arrayBuffer());
+    expect(onDisk).toEqual(mockBinaryContent);
+
+    // Release the lock so afterEach cleanup runs cleanly.
+    releaseLock(result.lockPath);
+  }, 10_000);
+});
+
+// CLI-1D3 tail: even if the verification in downloadBinaryToTemp is
+// somehow bypassed (e.g. manual `rm` of .download between verification
+// and spawn), `spawnWithRetry` translates the opaque "Executable not
+// found in $PATH" into an actionable UpgradeError.
+describe("isEnoentSpawnError", () => {
+  test("detects Bun's 'Executable not found in $PATH' error", () => {
+    const err = new Error(
+      `Executable not found in $PATH: "C:\\Users\\x\\.local\\bin\\sentry.exe.download"`
+    );
+    expect(isEnoentSpawnError(err)).toBe(true);
+  });
+
+  test("detects Node's ENOENT errno code", () => {
+    const err: NodeJS.ErrnoException = new Error("spawn ENOENT");
+    err.code = "ENOENT";
+    expect(isEnoentSpawnError(err)).toBe(true);
+  });
+
+  test("returns false for unrelated errors", () => {
+    expect(isEnoentSpawnError(new Error("EBUSY: file locked"))).toBe(false);
+    expect(isEnoentSpawnError(new Error("permission denied"))).toBe(false);
+    expect(isEnoentSpawnError("string error")).toBe(false);
+    expect(isEnoentSpawnError(null)).toBe(false);
   });
 });

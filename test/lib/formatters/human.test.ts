@@ -817,4 +817,34 @@ describe("formatUpgradeResult", () => {
       expect(result).not.toContain("(from");
     });
   });
+
+  test("changelog is separated from metadata by a blank line", () => {
+    withPlain(() => {
+      const result = formatUpgradeResult({
+        action: "upgraded",
+        currentVersion: "0.5.0",
+        targetVersion: "0.6.0",
+        channel: "stable",
+        method: "curl",
+        forced: false,
+        changelog: {
+          fromVersion: "0.5.0",
+          toVersion: "0.6.0",
+          sections: [
+            { category: "features", markdown: "- add cool feature (#1)" },
+          ],
+          totalItems: 1,
+          truncated: false,
+          originalCount: 1,
+        },
+      });
+      // Blank line between metadata and changelog heading
+      expect(result).toContain("Channel: stable\n\n");
+      // Changelog content present
+      expect(result).toContain("New Features");
+      expect(result).toContain("add cool feature (#1)");
+      // Trailing newline after changelog
+      expect(result).toMatch(/\n$/);
+    });
+  });
 });

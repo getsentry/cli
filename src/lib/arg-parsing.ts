@@ -6,9 +6,10 @@
  * project list) and single-item commands (issue view, explain, plan).
  */
 
+import type { LogSortDirection } from "./api/logs.js";
 import { ContextError, ValidationError } from "./errors.js";
 import { validateResourceId } from "./input-validation.js";
-import { logger } from "./logger.js";
+
 import type { ParsedSentryUrl } from "./sentry-url-parser.js";
 import { applySentryUrlContext, parseSentryUrl } from "./sentry-url-parser.js";
 import { isAllDigits } from "./utils.js";
@@ -18,57 +19,33 @@ import { isAllDigits } from "./utils.js";
 // ---------------------------------------------------------------------------
 
 /**
- * Normalize a Sentry slug by replacing underscores with dashes.
+ * Normalize a Sentry slug from user input.
  *
- * Sentry enforces that organization and project slugs use dashes, never
- * underscores. Users frequently type underscores by mistake (e.g.,
- * `selfbase_admin_backend` instead of `selfbase-admin-backend`).
+ * After the removal of underscore normalization (#771) and the move to
+ * display-name matching for space-containing inputs (#772), this function
+ * is effectively a no-op — valid slug characters pass through unchanged.
+ * It remains as a stable call-site for future normalization rules.
+ *
+ * Spaces are handled separately: {@link looksLikeDisplayName} detects them
+ * and the parsing layer routes to a display-name search path that skips
+ * slug validation and API lookup entirely.
  *
  * @param slug - Raw slug string from CLI input
- * @returns Normalized slug and whether normalization was applied
- *
- * @example
- * normalizeSlug("selfbase_admin_backend")  // { slug: "selfbase-admin-backend", normalized: true }
- * normalizeSlug("my-project")              // { slug: "my-project", normalized: false }
+ * @returns The slug unchanged with `normalized: false`
  */
 export function normalizeSlug(slug: string): {
   slug: string;
   normalized: boolean;
 } {
-  if (slug.includes("_")) {
-    return { slug: slug.replace(/_/g, "-"), normalized: true };
-  }
   return { slug, normalized: false };
 }
 
-const log = logger.withTag("arg-parsing");
-
 /**
- * Emit a warning when slug normalization replaced underscores with dashes.
- * Called internally by {@link parseOrgProjectArg} — callers do not need to
- * check `parsed.normalized` themselves.
+ * Check if a string looks like a display name rather than a slug.
+ * Display names contain spaces, which are never valid in slugs.
  */
-function warnNormalized(
-  parsed: Exclude<ParsedOrgProject, { type: "auto-detect" }>
-): void {
-  let slug: string;
-  switch (parsed.type) {
-    case "explicit":
-      slug = `${parsed.org}/${parsed.project}`;
-      break;
-    case "org-all":
-      slug = `${parsed.org}/`;
-      break;
-    case "project-search":
-      slug = parsed.projectSlug;
-      break;
-    default:
-      return;
-  }
-
-  log.warn(
-    `Normalized slug to '${slug}' (Sentry slugs use dashes, never underscores)`
-  );
+function looksLikeDisplayName(input: string): boolean {
+  return input.includes(" ");
 }
 
 // ---------------------------------------------------------------------------
@@ -242,13 +219,17 @@ export function detectSwappedTrialArgs(
  * Used by commands that need API-side limiting (trace list, log list) where
  * the value is passed directly to the API as `per_page`.
  *
+ * Defaults match the shared constants {@link LIST_MIN_LIMIT} (1) and
+ * {@link LIST_MAX_LIMIT} (1000) from `list-command.ts`.
+ *
  * @param value - Raw string input from CLI flag
- * @param min - Minimum allowed value (inclusive)
- * @param max - Maximum allowed value (inclusive)
+ * @param min - Minimum allowed value (inclusive, default: 1)
+ * @param max - Maximum allowed value (inclusive, default: 1000)
  * @returns Parsed integer
  * @throws {Error} If value is NaN or outside [min, max]
  *
  * @example
+ * validateLimit("50")           // 50  (uses defaults 1–1000)
  * validateLimit("50", 1, 1000)  // 50
  * validateLimit("0", 1, 1000)   // throws
  * validateLimit("abc", 1, 1000) // throws
@@ -256,9 +237,35 @@ export function detectSwappedTrialArgs(
 export function validateLimit(value: string, min = 1, max = 1000): number {
   const num = Number.parseInt(value, 10);
   if (Number.isNaN(num) || num < min || num > max) {
-    throw new Error(`--limit must be between ${min} and ${max}`);
+    throw new ValidationError(
+      `--limit must be between ${min} and ${max}`,
+      "limit"
+    );
   }
   return num;
+}
+
+// ---------------------------------------------------------------------------
+// Log sort direction parsing (shared by log list, trace logs)
+// ---------------------------------------------------------------------------
+
+const VALID_LOG_SORT_DIRECTIONS: readonly LogSortDirection[] = [
+  "newest",
+  "oldest",
+];
+
+/**
+ * Parse --sort flag value for log commands.
+ * @throws Error if value is not "newest" or "oldest"
+ */
+export function parseLogSort(value: string): LogSortDirection {
+  if (!VALID_LOG_SORT_DIRECTIONS.includes(value as LogSortDirection)) {
+    throw new ValidationError(
+      `Invalid sort value. Must be one of: ${VALID_LOG_SORT_DIRECTIONS.join(", ")}`,
+      "sort"
+    );
+  }
+  return value as LogSortDirection;
 }
 
 /** Default span depth when no value is provided */
@@ -339,36 +346,48 @@ export const ProjectSpecificationType = {
  * Parsed result from an org/project positional argument.
  * Discriminated union based on the `type` field.
  *
- * When `normalized` is true, the slug contained underscores that were
- * auto-corrected to dashes. Callers should emit a warning via `log.warn()`.
+ * When `normalized` is true, the slug was auto-corrected from display-name
+ * form (spaces → dashes with lowercasing). Underscores are preserved — Sentry
+ * allows underscored project slugs and the CLI must not rewrite them.
  */
 export type ParsedOrgProject =
   | {
       type: typeof ProjectSpecificationType.Explicit;
       org: string;
       project: string;
-      /** True if any slug was normalized (underscores → dashes) */
+      /** True if any slug was normalized */
       normalized?: boolean;
     }
   | {
       type: typeof ProjectSpecificationType.OrgAll;
       org: string;
-      /** True if org slug was normalized (underscores → dashes) */
+      /** True if org slug was normalized */
       normalized?: boolean;
     }
   | {
       type: typeof ProjectSpecificationType.ProjectSearch;
       projectSlug: string;
-      /** True if project slug was normalized (underscores → dashes) */
+      /** True if project slug was normalized */
       normalized?: boolean;
+      /**
+       * Pre-normalization input when {@link normalized} is `true`.
+       * Used by the resolution layer to produce user-friendly messages
+       * that reference what the user actually typed rather than the
+       * intermediate normalized form.
+       */
+      originalSlug?: string;
     }
   | { type: typeof ProjectSpecificationType.AutoDetect };
 
 /**
  * Map a parsed Sentry URL to a ParsedOrgProject.
  * If the URL contains a project slug, returns explicit; otherwise org-all.
+ * Share URLs without org context fall back to auto-detect.
  */
 function orgProjectFromUrl(parsed: ParsedSentryUrl): ParsedOrgProject {
+  if (!parsed.org) {
+    return { type: "auto-detect" };
+  }
   if (parsed.project) {
     return { type: "explicit", org: parsed.org, project: parsed.project };
   }
@@ -377,11 +396,27 @@ function orgProjectFromUrl(parsed: ParsedSentryUrl): ParsedOrgProject {
 
 /**
  * Map a parsed Sentry URL to a ParsedIssueArg.
- * Handles numeric group IDs and short IDs (e.g., "CLI-G") from the URL path.
+ * Handles share URLs, numeric group IDs, and short IDs (e.g., "CLI-G") from the URL path.
  */
 function issueArgFromUrl(parsed: ParsedSentryUrl): ParsedIssueArg | null {
+  // Share URL → resolve via public share API
+  if (parsed.shareId) {
+    return {
+      type: "share",
+      shareId: parsed.shareId,
+      org: parsed.org,
+      baseUrl: parsed.baseUrl,
+    };
+  }
+
   const { issueId } = parsed;
   if (!issueId) {
+    return null;
+  }
+
+  // Non-share URLs always have org from their matchers; guard narrows the type
+  const { org } = parsed;
+  if (!org) {
     return null;
   }
 
@@ -389,7 +424,7 @@ function issueArgFromUrl(parsed: ParsedSentryUrl): ParsedIssueArg | null {
   if (isAllDigits(issueId)) {
     return {
       type: "explicit-org-numeric",
-      org: parsed.org,
+      org,
       numericId: issueId,
     };
   }
@@ -403,7 +438,7 @@ function issueArgFromUrl(parsed: ParsedSentryUrl): ParsedIssueArg | null {
       // Lowercase project slug — Sentry slugs are always lowercase.
       return {
         type: "explicit",
-        org: parsed.org,
+        org,
         project: project.toLowerCase(),
         suffix,
       };
@@ -413,7 +448,7 @@ function issueArgFromUrl(parsed: ParsedSentryUrl): ParsedIssueArg | null {
   // No dash — treat as suffix-only with org context
   return {
     type: "explicit-org-suffix",
-    org: parsed.org,
+    org,
     suffix: issueId.toUpperCase(),
   };
 }
@@ -464,23 +499,31 @@ function parseSlashOrgProject(input: string): ParsedOrgProject {
   if (!rawOrg) {
     // "/cli" → search for project across all orgs
     if (!rawProject) {
-      throw new Error(
+      throw new ValidationError(
         'Invalid format: "/" requires a project slug (e.g., "/cli")'
       );
     }
     rejectAtSelector(rawProject, "project slug");
-    validateResourceId(rawProject, "project slug");
+    if (looksLikeDisplayName(rawProject)) {
+      // Spaces → display name, not a slug. Skip slug validation and let
+      // the resolution layer do a fuzzy name-based search.
+      return {
+        type: "project-search",
+        projectSlug: rawProject,
+        originalSlug: rawProject,
+      };
+    }
     const np = normalizeSlug(rawProject);
+    validateResourceId(np.slug, "project slug");
     return {
       type: "project-search",
       projectSlug: np.slug,
-      ...(np.normalized && { normalized: true }),
     };
   }
 
   rejectAtSelector(rawOrg, "organization slug");
-  validateResourceId(rawOrg, "organization slug");
   const no = normalizeSlug(rawOrg);
+  validateResourceId(no.slug, "organization slug");
 
   if (!rawProject) {
     // "sentry/" → list all projects in org
@@ -493,8 +536,8 @@ function parseSlashOrgProject(input: string): ParsedOrgProject {
 
   // "sentry/cli" → explicit org and project
   rejectAtSelector(rawProject, "project slug");
-  validateResourceId(rawProject, "project slug");
   const np = normalizeSlug(rawProject);
+  validateResourceId(np.slug, "project slug");
   const normalized = no.normalized || np.normalized;
   return {
     type: "explicit",
@@ -545,17 +588,22 @@ export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
   } else {
     // No slash → search for project across all orgs
     rejectAtSelector(trimmed, "project slug");
-    validateResourceId(trimmed, "project slug");
-    const np = normalizeSlug(trimmed);
-    parsed = {
-      type: "project-search",
-      projectSlug: np.slug,
-      ...(np.normalized && { normalized: true }),
-    };
-  }
-
-  if (parsed.type !== "auto-detect" && parsed.normalized) {
-    warnNormalized(parsed);
+    if (looksLikeDisplayName(trimmed)) {
+      // Spaces → display name, not a slug. Skip slug validation and let
+      // the resolution layer do a fuzzy name-based search.
+      parsed = {
+        type: "project-search",
+        projectSlug: trimmed,
+        originalSlug: trimmed,
+      };
+    } else {
+      const np = normalizeSlug(trimmed);
+      validateResourceId(np.slug, "project slug");
+      parsed = {
+        type: "project-search",
+        projectSlug: np.slug,
+      };
+    }
   }
 
   return parsed;
@@ -611,7 +659,8 @@ export type ParsedIssueArg =
   | { type: "explicit-org-numeric"; org: string; numericId: string }
   | { type: "project-search"; projectSlug: string; suffix: string }
   | { type: "suffix-only"; suffix: string }
-  | { type: "selector"; selector: IssueSelector; org?: string };
+  | { type: "selector"; selector: IssueSelector; org?: string }
+  | { type: "share"; shareId: string; org?: string; baseUrl: string };
 
 /**
  * Parse a CLI issue argument into its component parts.
@@ -660,8 +709,9 @@ function parseMultiSlashIssueArg(
   const remainder = rest.slice(slashIdx + 1);
 
   if (!(project && remainder)) {
-    throw new Error(
-      `Invalid issue format: "${arg}". Missing project or issue ID segment.`
+    throw new ValidationError(
+      `Invalid issue format: "${arg}". Missing project or issue ID segment.`,
+      "issue"
     );
   }
 
@@ -736,14 +786,16 @@ function parseAfterSlash(
     const suffix = rest.slice(lastDash + 1).toUpperCase();
 
     if (!project) {
-      throw new Error(
-        `Invalid issue format: "${arg}". Cannot use trailing slash before suffix.`
+      throw new ValidationError(
+        `Invalid issue format: "${arg}". Cannot use trailing slash before suffix.`,
+        "issue"
       );
     }
 
     if (!suffix) {
-      throw new Error(
-        `Invalid issue format: "${arg}". Missing suffix after dash.`
+      throw new ValidationError(
+        `Invalid issue format: "${arg}". Missing suffix after dash.`,
+        "issue"
       );
     }
 
@@ -765,8 +817,9 @@ function parseWithSlash(arg: string): ParsedIssueArg {
   const rest = arg.slice(slashIdx + 1);
 
   if (!rest) {
-    throw new Error(
-      `Invalid issue format: "${arg}". Missing issue ID after slash.`
+    throw new ValidationError(
+      `Invalid issue format: "${arg}". Missing issue ID after slash.`,
+      "issue"
     );
   }
 
@@ -791,14 +844,16 @@ function parseWithDash(arg: string): ParsedIssueArg {
   const suffix = arg.slice(lastDash + 1).toUpperCase();
 
   if (!projectSlug) {
-    throw new Error(
-      `Invalid issue format: "${arg}". Missing project before suffix.`
+    throw new ValidationError(
+      `Invalid issue format: "${arg}". Missing project before suffix.`,
+      "issue"
     );
   }
 
   if (!suffix) {
-    throw new Error(
-      `Invalid issue format: "${arg}". Missing suffix after dash.`
+    throw new ValidationError(
+      `Invalid issue format: "${arg}". Missing suffix after dash.`,
+      "issue"
     );
   }
 
@@ -835,19 +890,26 @@ export function parseSlashSeparatedArg(
   idLabel: string,
   usageHint: string
 ): { id: string; targetArg: string | undefined } {
-  const slashIdx = arg.indexOf("/");
+  // Trim whitespace — agents may pass trailing newlines
+  const trimmed = arg.trim();
+
+  if (!trimmed) {
+    throw new ContextError(idLabel, usageHint, []);
+  }
+
+  const slashIdx = trimmed.indexOf("/");
 
   if (slashIdx === -1) {
     // No slashes — plain ID. Skip validation here because callers may
     // do further processing (e.g., splitting newline-separated IDs).
     // Downstream validators like validateHexId or validateTraceId provide
     // format-specific validation.
-    return { id: arg, targetArg: undefined };
+    return { id: trimmed, targetArg: undefined };
   }
 
   // IDs are hex and never contain "/" — this must be a structured
   // "org/project/id" or "org/project" (missing ID)
-  const lastSlashIdx = arg.lastIndexOf("/");
+  const lastSlashIdx = trimmed.lastIndexOf("/");
 
   if (slashIdx === lastSlashIdx) {
     // Exactly one slash: "org/project" without ID
@@ -855,8 +917,8 @@ export function parseSlashSeparatedArg(
   }
 
   // Two+ slashes: split on last "/" → target + id
-  const targetArg = arg.slice(0, lastSlashIdx);
-  const id = arg.slice(lastSlashIdx + 1);
+  const targetArg = trimmed.slice(0, lastSlashIdx);
+  const id = trimmed.slice(lastSlashIdx + 1);
 
   if (!id) {
     throw new ContextError(idLabel, usageHint, []);
@@ -870,8 +932,18 @@ export function parseSlashSeparatedArg(
 }
 
 export function parseIssueArg(arg: string): ParsedIssueArg {
+  // Trim whitespace — agents may pass trailing newlines (CLI-16M)
+  const input = arg.trim();
+
+  if (!input) {
+    throw new ValidationError(
+      "Issue identifier is empty after trimming whitespace.",
+      "issue identifier"
+    );
+  }
+
   // 0. URL detection — extract issue ID from Sentry web URLs
-  const urlParsed = parseSentryUrl(arg);
+  const urlParsed = parseSentryUrl(input);
   if (urlParsed) {
     applySentryUrlContext(urlParsed.baseUrl);
     const result = issueArgFromUrl(urlParsed);
@@ -887,13 +959,13 @@ export function parseIssueArg(arg: string): ParsedIssueArg {
 
   // 1. Magic @ selectors — detect before any other parsing.
   // Supports bare `@latest` and org-prefixed `sentry/@latest`.
-  if (arg.includes("@")) {
-    const slashIdx = arg.indexOf("/");
-    const selectorPart = slashIdx === -1 ? arg : arg.slice(slashIdx + 1);
+  if (input.includes("@")) {
+    const slashIdx = input.indexOf("/");
+    const selectorPart = slashIdx === -1 ? input : input.slice(slashIdx + 1);
     const selector = parseSelector(selectorPart);
     if (selector) {
       if (slashIdx !== -1) {
-        const org = normalizeSlug(arg.slice(0, slashIdx)).slug;
+        const org = normalizeSlug(input.slice(0, slashIdx)).slug;
         validateResourceId(org, "organization slug");
         return { type: "selector", selector, org };
       }
@@ -906,24 +978,46 @@ export function parseIssueArg(arg: string): ParsedIssueArg {
   // Validate raw input against injection characters before parsing.
   // Slashes are allowed (they're structural separators), but ?, #, %, whitespace,
   // and control characters are never valid in issue identifiers.
-  validateResourceId(arg.replace(/\//g, ""), "issue identifier");
+  validateResourceId(input.replace(/\//g, ""), "issue identifier");
 
   // 2. Pure numeric → direct fetch by ID
-  if (isAllDigits(arg)) {
-    return { type: "numeric", id: arg };
+  if (isAllDigits(input)) {
+    return { type: "numeric", id: input };
   }
 
   // 3. Has slash → check slash FIRST (takes precedence over dashes)
   // This ensures "my-org/123" parses as org="my-org", not project="my"
-  if (arg.includes("/")) {
-    return parseWithSlash(arg);
+  if (input.includes("/")) {
+    return parseWithSlash(input);
   }
 
   // 4. Has dash but no slash → split on last "-" for project-suffix
-  if (arg.includes("-")) {
-    return parseWithDash(arg);
+  if (input.includes("-")) {
+    return parseWithDash(input);
   }
 
   // 5. No dash, no slash → suffix only (needs DSN context)
-  return { type: "suffix-only", suffix: arg.toUpperCase() };
+  return { type: "suffix-only", suffix: input.toUpperCase() };
+}
+
+// ---------------------------------------------------------------------------
+// Query helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Prepend `project:{slug}` to a query string when a project filter is specified.
+ * Returns the original query unchanged when no project is given.
+ *
+ * Used by trace-scoped commands (`trace logs`, `log list` trace mode) to apply
+ * the project from `org/project/trace-id` positional syntax as an API filter.
+ */
+export function buildProjectQuery(
+  query: string | undefined,
+  projectFilter: string | undefined
+): string | undefined {
+  if (!projectFilter) {
+    return query;
+  }
+  const pf = `project:${projectFilter}`;
+  return query ? `${pf} ${query}` : pf;
 }

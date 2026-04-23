@@ -22,11 +22,20 @@ import { logger } from "../../lib/logger.js";
 import { withProgress } from "../../lib/polling.js";
 import { resolveOrgRegion } from "../../lib/region.js";
 import { buildDashboardUrl } from "../../lib/sentry-urls.js";
+import {
+  formatTimeRangeFlag,
+  PERIOD_BRIEF,
+  parsePeriod,
+  TIME_RANGE_24H,
+  type TimeRange,
+  timeRangeToSeconds,
+} from "../../lib/time-range.js";
 import type {
   DashboardWidget,
   WidgetDataResult,
 } from "../../types/dashboard.js";
 import {
+  enrichDashboardError,
   parseDashboardPositionalArgs,
   resolveDashboardId,
   resolveOrgFromTarget,
@@ -42,7 +51,7 @@ type ViewFlags = {
   readonly web: boolean;
   readonly fresh: boolean;
   readonly refresh?: number;
-  readonly period?: string;
+  readonly period?: TimeRange;
   readonly json: boolean;
   readonly fields?: string[];
 };
@@ -112,6 +121,9 @@ function buildViewData(
       title: w.title,
       displayType: w.displayType,
       widgetType: w.widgetType,
+      description: (w as Record<string, unknown>).description as
+        | string
+        | undefined,
       layout: w.layout,
       queries: w.queries,
       data: widgetResults.get(i) ?? {
@@ -120,6 +132,22 @@ function buildViewData(
       },
     })),
   };
+}
+
+/**
+ * Resolve the effective time range for a dashboard view.
+ *
+ * Priority: explicit --period flag > dashboard's saved period > 24h default.
+ * Dashboard period is a raw string from the API that needs parsing.
+ */
+function resolveViewTimeRange(
+  flagPeriod: TimeRange | undefined,
+  dashboardPeriod: string | null | undefined
+): TimeRange {
+  if (flagPeriod) {
+    return flagPeriod;
+  }
+  return dashboardPeriod ? parsePeriod(dashboardPeriod) : TIME_RANGE_24H;
 }
 
 export const viewCommand = buildCommand({
@@ -149,6 +177,7 @@ export const viewCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
+        placeholder: "org/project/dashboard",
         brief: "[<org/project>] <dashboard-id-or-title>",
         parse: String,
       },
@@ -169,8 +198,8 @@ export const viewCommand = buildCommand({
       },
       period: {
         kind: "parsed",
-        parse: String,
-        brief: 'Time period override (e.g., "24h", "7d", "14d")',
+        parse: parsePeriod,
+        brief: PERIOD_BRIEF,
         optional: true,
       },
     },
@@ -199,10 +228,22 @@ export const viewCommand = buildCommand({
     const dashboard = await withProgress(
       { message: "Fetching dashboard...", json: flags.json },
       () => getDashboard(orgSlug, dashboardId)
+    ).catch((error: unknown) =>
+      enrichDashboardError(error, {
+        orgSlug,
+        dashboardId,
+        operation: "view",
+      })
     );
 
     const regionUrl = await resolveOrgRegion(orgSlug);
-    const period = flags.period ?? dashboard.period ?? "24h";
+    const timeRange = resolveViewTimeRange(flags.period, dashboard.period);
+    const periodSeconds = timeRangeToSeconds(timeRange);
+    // WidgetQueryOptions uses `period` (not `statsPeriod`) for the relative field
+    const widgetTimeOpts =
+      timeRange.type === "relative"
+        ? { period: timeRange.period }
+        : { start: timeRange.start, end: timeRange.end };
     const widgets = dashboard.widgets ?? [];
 
     if (flags.refresh !== undefined) {
@@ -218,6 +259,13 @@ export const viewCommand = buildCommand({
       const stop = () => controller.abort();
       process.once("SIGINT", stop);
 
+      // Library mode: honor external abort signal (e.g., consumer break)
+      const externalSignal = (this.process as { abortSignal?: AbortSignal })
+        ?.abortSignal;
+      if (externalSignal) {
+        externalSignal.addEventListener("abort", stop, { once: true });
+      }
+
       let isFirstRender = true;
 
       try {
@@ -226,12 +274,12 @@ export const viewCommand = buildCommand({
             regionUrl,
             orgSlug,
             dashboard,
-            { period }
+            { ...widgetTimeOpts, periodSeconds }
           );
 
           // Build output data before clearing so clear→render is instantaneous
           const viewData = buildViewData(dashboard, widgetData, widgets, {
-            period,
+            period: formatTimeRangeFlag(timeRange),
             url,
           });
 
@@ -253,11 +301,18 @@ export const viewCommand = buildCommand({
     // ── Single fetch mode ──
     const widgetData = await withProgress(
       { message: "Querying widget data...", json: flags.json },
-      () => queryAllWidgets(regionUrl, orgSlug, dashboard, { period })
+      () =>
+        queryAllWidgets(regionUrl, orgSlug, dashboard, {
+          ...widgetTimeOpts,
+          periodSeconds,
+        })
     );
 
     yield new CommandOutput(
-      buildViewData(dashboard, widgetData, widgets, { period, url })
+      buildViewData(dashboard, widgetData, widgets, {
+        period: formatTimeRangeFlag(timeRange),
+        url,
+      })
     );
     return { hint: `Dashboard: ${url}` };
   },

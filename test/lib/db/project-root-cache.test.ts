@@ -5,7 +5,7 @@
  */
 
 import { beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   clearProjectRootCache,
@@ -54,9 +54,11 @@ describe("getCachedProjectRoot", () => {
     const before = await getCachedProjectRoot(testProjectDir);
     expect(before).toBeDefined();
 
-    // Wait a moment and add a new file to change directory mtime
-    await Bun.sleep(10);
+    // Add a new file and set dir mtime to cachedMtime + 5s
     writeFileSync(join(testProjectDir, "new-file.txt"), "test");
+    const cachedMtime = statSync(testProjectDir).mtimeMs;
+    const futureTime = new Date(cachedMtime + 5000);
+    utimesSync(testProjectDir, futureTime, futureTime);
 
     // Cache should be invalidated
     const after = await getCachedProjectRoot(testProjectDir);

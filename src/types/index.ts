@@ -70,6 +70,7 @@ export type {
   DeviceContext,
   ExceptionEntry,
   ExceptionValue,
+  IssueEvent,
   IssueLevel,
   IssueStatus,
   LogsResponse,
@@ -80,11 +81,13 @@ export type {
   Region,
   RepositoryProvider,
   RequestEntry,
+  SentryDeploy,
   SentryEvent,
   SentryIssue,
   SentryLog,
   SentryOrganization,
   SentryProject,
+  SentryRelease,
   SentryRepository,
   SentryTeam,
   SentryUser,
@@ -106,10 +109,12 @@ export {
   DetailedSentryLogSchema,
   ISSUE_LEVELS,
   ISSUE_STATUSES,
+  IssueEventSchema,
   LogsResponseSchema,
   ProductTrialSchema,
   RegionSchema,
   RepositoryProviderSchema,
+  SentryIssueSchema,
   SentryLogSchema,
   SentryRepositorySchema,
   SentryTeamSchema,
@@ -132,4 +137,9 @@ export {
  */
 export type Writer = {
   write(data: string): void;
+  /**
+   * Zero-copy object capture for library mode.
+   * When set, JSON objects are passed directly instead of serialized.
+   */
+  captureObject?: (obj: unknown) => void;
 };

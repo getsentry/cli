@@ -11,9 +11,9 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as Sentry from "@sentry/node-core/light";
 import {
   buildApplication,
-  buildRouteMap,
   type CommandContext,
   run,
+  text_en,
 } from "@stricli/core";
 import {
   applyLoggingFlags,
@@ -27,6 +27,7 @@ import {
 import { OutputError } from "../../src/lib/errors.js";
 import { CommandOutput } from "../../src/lib/formatters/output.js";
 import { LOG_LEVEL_NAMES, logger, setLogLevel } from "../../src/lib/logger.js";
+import { buildRouteMap } from "../../src/lib/route-map.js";
 
 /** Minimal context for test commands */
 type TestContext = CommandContext & {
@@ -74,6 +75,7 @@ function createTestContext() {
 describe("buildCommand", () => {
   test("builds a valid command object", () => {
     const command = buildCommand({
+      auth: false,
       docs: { brief: "Test command" },
       parameters: {
         flags: {
@@ -89,6 +91,7 @@ describe("buildCommand", () => {
 
   test("handles commands with empty parameters", () => {
     const command = buildCommand({
+      auth: false,
       docs: { brief: "Simple command" },
       parameters: {},
       async *func() {
@@ -126,6 +129,7 @@ describe("buildCommand telemetry integration", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       parameters: {
         flags: {
@@ -164,8 +168,47 @@ describe("buildCommand telemetry integration", () => {
     expect(setTagSpy).toHaveBeenCalledWith("flag.limit", "50");
   });
 
+  test("passes string defaults through parse() — numberParser default is number at runtime", async () => {
+    let receivedFlags: Record<string, unknown> | null = null;
+
+    const command = buildCommand<{ limit: number }, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {
+        flags: {
+          limit: {
+            kind: "parsed",
+            parse: numberParser,
+            brief: "Limit",
+            default: "10",
+          },
+        },
+      },
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(this: TestContext, flags: { limit: number }) {
+        receivedFlags = flags as unknown as Record<string, unknown>;
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    // Run WITHOUT --limit to exercise the default path
+    await run(app, ["test"], ctx as TestContext);
+
+    expect(receivedFlags).not.toBeNull();
+    // Critical: must be number 10, not string "10"
+    expect(receivedFlags!.limit).toBe(10);
+    expect(typeof receivedFlags!.limit).toBe("number");
+  });
+
   test("skips false boolean flags in telemetry", async () => {
     const command = buildCommand<{ json: boolean }, [], TestContext>({
+      auth: false,
       docs: { brief: "Test" },
       parameters: {
         flags: {
@@ -197,6 +240,7 @@ describe("buildCommand telemetry integration", () => {
     let calledArgs: unknown = null;
 
     const command = buildCommand<Record<string, never>, [string], TestContext>({
+      auth: false,
       docs: { brief: "Test" },
       parameters: {
         positional: {
@@ -234,6 +278,7 @@ describe("buildCommand telemetry integration", () => {
     let capturedStdout = false;
 
     const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
       docs: { brief: "Test" },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
@@ -259,6 +304,7 @@ describe("buildCommand telemetry integration", () => {
     let executed = false;
 
     const command = buildCommand<{ delay: number }, [], TestContext>({
+      auth: false,
       docs: { brief: "Test" },
       parameters: {
         flags: {
@@ -367,8 +413,19 @@ describe("applyLoggingFlags", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildCommand", () => {
+  let originalLevel: number;
+
+  beforeEach(() => {
+    originalLevel = logger.level;
+  });
+
+  afterEach(() => {
+    setLogLevel(originalLevel);
+  });
+
   test("builds a valid command object", () => {
     const command = buildCommand({
+      auth: false,
       docs: { brief: "Test command" },
       parameters: {
         flags: {
@@ -386,6 +443,7 @@ describe("buildCommand", () => {
     let calledFlags: Record<string, unknown> | null = null;
 
     const command = buildCommand<{ json: boolean }, [], TestContext>({
+      auth: false,
       docs: { brief: "Test" },
       parameters: {
         flags: {
@@ -416,87 +474,76 @@ describe("buildCommand", () => {
   });
 
   test("--verbose sets logger to debug level", async () => {
-    const originalLevel = logger.level;
-    try {
-      const command = buildCommand<Record<string, never>, [], TestContext>({
-        docs: { brief: "Test" },
-        parameters: {},
-        async *func() {
-          // no-op
-        },
-      });
+    const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {},
+      async *func() {
+        // no-op
+      },
+    });
 
-      const routeMap = buildRouteMap({
-        routes: { test: command },
-        docs: { brief: "Test app" },
-      });
-      const app = buildApplication(routeMap, { name: "test" });
-      const ctx = createTestContext();
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
 
-      await run(app, ["test", "--verbose"], ctx as TestContext);
+    await run(app, ["test", "--verbose"], ctx as TestContext);
 
-      expect(logger.level).toBe(4); // debug
-    } finally {
-      setLogLevel(originalLevel);
-    }
+    expect(logger.level).toBe(4); // debug
   });
 
   test("--log-level sets logger to specified level", async () => {
-    const originalLevel = logger.level;
-    try {
-      const command = buildCommand<Record<string, never>, [], TestContext>({
-        docs: { brief: "Test" },
-        parameters: {},
-        async *func() {
-          // no-op
-        },
-      });
+    const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {},
+      async *func() {
+        // no-op
+      },
+    });
 
-      const routeMap = buildRouteMap({
-        routes: { test: command },
-        docs: { brief: "Test app" },
-      });
-      const app = buildApplication(routeMap, { name: "test" });
-      const ctx = createTestContext();
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
 
-      await run(app, ["test", "--log-level", "trace"], ctx as TestContext);
+    await run(app, ["test", "--log-level", "trace"], ctx as TestContext);
 
-      expect(logger.level).toBe(5); // trace
-    } finally {
-      setLogLevel(originalLevel);
-    }
+    expect(logger.level).toBe(5); // trace
   });
 
   test("--log-level=value (equals form) works", async () => {
-    const originalLevel = logger.level;
-    try {
-      const command = buildCommand<Record<string, never>, [], TestContext>({
-        docs: { brief: "Test" },
-        parameters: {},
-        async *func() {
-          // no-op
-        },
-      });
+    const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {},
+      async *func() {
+        // no-op
+      },
+    });
 
-      const routeMap = buildRouteMap({
-        routes: { test: command },
-        docs: { brief: "Test app" },
-      });
-      const app = buildApplication(routeMap, { name: "test" });
-      const ctx = createTestContext();
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
 
-      await run(app, ["test", "--log-level=error"], ctx as TestContext);
+    await run(app, ["test", "--log-level=error"], ctx as TestContext);
 
-      expect(logger.level).toBe(0); // error
-    } finally {
-      setLogLevel(originalLevel);
-    }
+    expect(logger.level).toBe(0); // error
   });
 
   test("strips logging flags from func's flags parameter", async () => {
     let receivedFlags: Record<string, unknown> | null = null;
 
     const command = buildCommand<{ limit: number }, [], TestContext>({
+      auth: false,
       docs: { brief: "Test" },
       parameters: {
         flags: {
@@ -535,101 +582,92 @@ describe("buildCommand", () => {
   });
 
   test("preserves command's own --verbose flag when already defined", async () => {
-    const originalLevel = logger.level;
     let receivedFlags: Record<string, unknown> | null = null;
 
-    try {
-      // Simulates the api command: defines its own --verbose with HTTP semantics
-      const command = buildCommand<
-        { verbose: boolean; silent: boolean },
-        [],
-        TestContext
-      >({
-        docs: { brief: "Test" },
-        parameters: {
-          flags: {
-            verbose: {
-              kind: "boolean",
-              brief: "Show HTTP details",
-              default: false,
-            },
-            silent: {
-              kind: "boolean",
-              brief: "Suppress output",
-              default: false,
-            },
+    // Simulates the api command: defines its own --verbose with HTTP semantics
+    const command = buildCommand<
+      { verbose: boolean; silent: boolean },
+      [],
+      TestContext
+    >({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {
+        flags: {
+          verbose: {
+            kind: "boolean",
+            brief: "Show HTTP details",
+            default: false,
+          },
+          silent: {
+            kind: "boolean",
+            brief: "Suppress output",
+            default: false,
           },
         },
-        // biome-ignore lint/correctness/useYield: test command — no output to yield
-        async *func(
-          this: TestContext,
-          flags: { verbose: boolean; silent: boolean }
-        ) {
-          receivedFlags = flags as unknown as Record<string, unknown>;
-        },
-      });
+      },
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(
+        this: TestContext,
+        flags: { verbose: boolean; silent: boolean }
+      ) {
+        receivedFlags = flags as unknown as Record<string, unknown>;
+      },
+    });
 
-      const routeMap = buildRouteMap({
-        routes: { test: command },
-        docs: { brief: "Test app" },
-      });
-      const app = buildApplication(routeMap, { name: "test" });
-      const ctx = createTestContext();
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
 
-      await run(
-        app,
-        ["test", "--verbose", "--log-level", "trace"],
-        ctx as TestContext
-      );
+    await run(
+      app,
+      ["test", "--verbose", "--log-level", "trace"],
+      ctx as TestContext
+    );
 
-      // Command's own --verbose is passed through (not stripped)
-      expect(receivedFlags).toBeDefined();
-      expect(receivedFlags!.verbose).toBe(true);
-      expect(receivedFlags!.silent).toBe(false);
-      // --log-level is always stripped (it's ours)
-      expect(receivedFlags!["log-level"]).toBeUndefined();
-      // --verbose also sets debug-level logging as a side-effect
-      // but --log-level=trace takes priority
-      expect(logger.level).toBe(5); // trace
-    } finally {
-      setLogLevel(originalLevel);
-    }
+    // Command's own --verbose is passed through (not stripped)
+    expect(receivedFlags).toBeDefined();
+    expect(receivedFlags!.verbose).toBe(true);
+    expect(receivedFlags!.silent).toBe(false);
+    // --log-level is always stripped (it's ours)
+    expect(receivedFlags!["log-level"]).toBeUndefined();
+    // --verbose also sets debug-level logging as a side-effect
+    // but --log-level=trace takes priority
+    expect(logger.level).toBe(5); // trace
   });
 
   test("command's own --verbose sets debug log level as side-effect", async () => {
-    const originalLevel = logger.level;
-
-    try {
-      const command = buildCommand<{ verbose: boolean }, [], TestContext>({
-        docs: { brief: "Test" },
-        parameters: {
-          flags: {
-            verbose: {
-              kind: "boolean",
-              brief: "Show HTTP details",
-              default: false,
-            },
+    const command = buildCommand<{ verbose: boolean }, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {
+        flags: {
+          verbose: {
+            kind: "boolean",
+            brief: "Show HTTP details",
+            default: false,
           },
         },
-        async *func() {
-          // no-op
-        },
-      });
+      },
+      async *func() {
+        // no-op
+      },
+    });
 
-      const routeMap = buildRouteMap({
-        routes: { test: command },
-        docs: { brief: "Test app" },
-      });
-      const app = buildApplication(routeMap, { name: "test" });
-      const ctx = createTestContext();
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
 
-      await run(app, ["test", "--verbose"], ctx as TestContext);
+    await run(app, ["test", "--verbose"], ctx as TestContext);
 
-      // Even though verbose is command-owned, it triggers debug-level logging
-      expect(logger.level).toBe(4); // debug
-    } finally {
-      setLogLevel(originalLevel);
-    }
+    // Even though verbose is command-owned, it triggers debug-level logging
+    expect(logger.level).toBe(4); // debug
   });
 });
 
@@ -664,6 +702,16 @@ describe("FIELDS_FLAG", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildCommand output config", () => {
+  let originalLevel: number;
+
+  beforeEach(() => {
+    originalLevel = logger.level;
+  });
+
+  afterEach(() => {
+    setLogLevel(originalLevel);
+  });
+
   test("injects --json flag when output: 'json'", async () => {
     let receivedFlags: Record<string, unknown> | null = null;
 
@@ -672,6 +720,7 @@ describe("buildCommand output config", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: { human: () => "unused" },
       parameters: {
@@ -715,6 +764,7 @@ describe("buildCommand output config", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: { human: () => "unused" },
       parameters: {},
@@ -754,6 +804,7 @@ describe("buildCommand output config", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: { human: () => "unused" },
       parameters: {},
@@ -792,6 +843,7 @@ describe("buildCommand output config", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: { human: () => "unused" },
       parameters: {},
@@ -823,6 +875,7 @@ describe("buildCommand output config", () => {
 
     // Command WITHOUT output config — --json should be rejected by Stricli
     const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
       docs: { brief: "Test" },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
@@ -856,6 +909,7 @@ describe("buildCommand output config", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: { human: () => "unused" },
       parameters: {
@@ -899,6 +953,7 @@ describe("buildCommand output config", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: { human: () => "unused" },
       parameters: {},
@@ -940,6 +995,7 @@ describe("buildCommand output config", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: { human: () => "unused" },
       parameters: {
@@ -994,6 +1050,7 @@ describe("buildCommand return-based output", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: {
         human: (d: { name: string; role: string }) => `${d.name} (${d.role})`,
@@ -1022,6 +1079,7 @@ describe("buildCommand return-based output", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: {
         human: (d: { name: string; role: string }) => `${d.name} (${d.role})`,
@@ -1051,6 +1109,7 @@ describe("buildCommand return-based output", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: {
         human: (d: { id: number; name: string; role: string }) => `${d.name}`,
@@ -1082,6 +1141,7 @@ describe("buildCommand return-based output", () => {
   test("shows hint in human mode, suppresses in JSON mode", async () => {
     const makeCommand = () =>
       buildCommand<{ json: boolean; fields?: string[] }, [], TestContext>({
+        auth: false,
         docs: { brief: "Test" },
         output: {
           human: (d: { value: number }) => `Value: ${d.value}`,
@@ -1129,6 +1189,7 @@ describe("buildCommand return-based output", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: {
         human: () => "unused",
@@ -1157,6 +1218,7 @@ describe("buildCommand return-based output", () => {
 
   test("data return is ignored without output config", async () => {
     const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
       docs: { brief: "Test" },
       // Deliberately no output config
       parameters: {},
@@ -1186,6 +1248,7 @@ describe("buildCommand return-based output", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: {
         human: (d: { name: string }) => `Hello, ${d.name}!`,
@@ -1216,6 +1279,7 @@ describe("buildCommand return-based output", () => {
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: {
         human: (d: Array<{ id: number }>) => d.map(((x) => x.id).join(", ")),
@@ -1245,6 +1309,7 @@ describe("buildCommand return-based output", () => {
   test("hint shown in human mode only", async () => {
     const makeCommand = () =>
       buildCommand<{ json: boolean; fields?: string[] }, [], TestContext>({
+        auth: false,
         docs: { brief: "Test" },
         output: {
           human: (d: { org: string }) => `Org: ${d.org}`,
@@ -1278,14 +1343,12 @@ describe("buildCommand return-based output", () => {
   });
 
   test("OutputError renders data and exits with error code", async () => {
-    let exitCalledWith: number | undefined;
-    const originalExit = process.exit;
-
     const command = buildCommand<
       { json: boolean; fields?: string[] },
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: {
         human: (d: { error: string }) => `Error: ${d.error}`,
@@ -1301,42 +1364,40 @@ describe("buildCommand return-based output", () => {
       routes: { test: command },
       docs: { brief: "Test app" },
     });
-    const app = buildApplication(routeMap, { name: "test" });
+    // Re-throw OutputError from Stricli's error handler (matches production app.ts)
+    const app = buildApplication(routeMap, {
+      name: "test",
+      localization: {
+        loadText: () => ({
+          ...text_en,
+          exceptionWhileRunningCommand: (exc: unknown) => {
+            if (exc instanceof OutputError) throw exc;
+            return text_en.exceptionWhileRunningCommand(exc, false);
+          },
+        }),
+      },
+    });
     const ctx = createTestContext();
 
-    // Mock process.exit — must throw to prevent fall-through since
-    // the real process.exit() is typed as `never`
-    class MockExit extends Error {
-      code: number;
-      constructor(code: number) {
-        super(`process.exit(${code})`);
-        this.code = code;
-      }
-    }
-    process.exit = ((code?: number) => {
-      exitCalledWith = code;
-      throw new MockExit(code ?? 0);
-    }) as typeof process.exit;
-
+    // OutputError is now thrown (not process.exit) — catch it
     try {
       await run(app, ["test"], ctx as TestContext);
-    } finally {
-      process.exit = originalExit;
+      expect.unreachable("Expected OutputError to be thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(OutputError);
+      expect((err as OutputError).exitCode).toBe(1);
     }
-    expect(exitCalledWith).toBe(1);
-    // Output was rendered BEFORE exit
+    // Output was rendered BEFORE the throw
     expect(ctx.output.join("")).toContain("Error: not found");
   });
 
   test("OutputError renders JSON in --json mode", async () => {
-    let exitCalledWith: number | undefined;
-    const originalExit = process.exit;
-
     const command = buildCommand<
       { json: boolean; fields?: string[] },
       [],
       TestContext
     >({
+      auth: false,
       docs: { brief: "Test" },
       output: {
         human: (d: { error: string }) => `Error: ${d.error}`,
@@ -1352,27 +1413,29 @@ describe("buildCommand return-based output", () => {
       routes: { test: command },
       docs: { brief: "Test app" },
     });
-    const app = buildApplication(routeMap, { name: "test" });
+    // Re-throw OutputError from Stricli's error handler (matches production app.ts)
+    const app = buildApplication(routeMap, {
+      name: "test",
+      localization: {
+        loadText: () => ({
+          ...text_en,
+          exceptionWhileRunningCommand: (exc: unknown) => {
+            if (exc instanceof OutputError) throw exc;
+            return text_en.exceptionWhileRunningCommand(exc, false);
+          },
+        }),
+      },
+    });
     const ctx = createTestContext();
 
-    class MockExit extends Error {
-      code: number;
-      constructor(code: number) {
-        super(`process.exit(${code})`);
-        this.code = code;
-      }
-    }
-    process.exit = ((code?: number) => {
-      exitCalledWith = code;
-      throw new MockExit(code ?? 0);
-    }) as typeof process.exit;
-
+    // OutputError is now thrown (not process.exit) — catch it
     try {
       await run(app, ["test", "--json"], ctx as TestContext);
-    } finally {
-      process.exit = originalExit;
+      expect.unreachable("Expected OutputError to be thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(OutputError);
+      expect((err as OutputError).exitCode).toBe(1);
     }
-    expect(exitCalledWith).toBe(1);
     const jsonOutput = JSON.parse(ctx.output.join(""));
     expect(jsonOutput).toEqual({ error: "not found" });
   });

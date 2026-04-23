@@ -22,18 +22,25 @@ import {
 import * as apiClient from "../../../src/lib/api-client.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
-import { setDefaults } from "../../../src/lib/db/defaults.js";
+import {
+  setDefaultOrganization,
+  setDefaultProject,
+} from "../../../src/lib/db/defaults.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as paginationDb from "../../../src/lib/db/pagination.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import { ApiError, ResolutionError } from "../../../src/lib/errors.js";
+import type { TimeRange } from "../../../src/lib/time-range.js";
+import { parsePeriod } from "../../../src/lib/time-range.js";
 import { mockFetch, useTestConfigDir } from "../../helpers.js";
 
 type ListFlags = {
   readonly query?: string;
   readonly limit: number;
   readonly sort: "date" | "new" | "freq" | "user";
+  readonly period: TimeRange;
   readonly json: boolean;
+  readonly cursor?: string;
 };
 
 /** Command function type extracted from loader result */
@@ -55,7 +62,8 @@ beforeEach(async () => {
   func = (await listCommand.loader()) as unknown as ListFunc;
   await setAuthToken("test-token");
   setOrgRegion("test-org", DEFAULT_SENTRY_URL);
-  setDefaults("test-org", "test-project");
+  setDefaultOrganization("test-org");
+  setDefaultProject("test-project");
 });
 
 afterEach(() => {
@@ -119,7 +127,7 @@ function mockIssue(overrides?: Record<string, unknown>) {
 
 describe("issue list: error propagation", () => {
   test("throws ApiError (not plain Error) when all fetches fail with 400", async () => {
-    // Uses default org/project from setDefaults("test-org", "test-project")
+    // Uses default org/project from setDefaultOrganization/setDefaultProject
     // listIssues hits: /api/0/organizations/test-org/issues/?query=project:test-project
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
@@ -139,7 +147,12 @@ describe("issue list: error propagation", () => {
     const { context } = createContext();
 
     try {
-      await func.call(context, { limit: 10, sort: "date", json: false });
+      await func.call(context, {
+        limit: 10,
+        sort: "date",
+        period: parsePeriod("90d"),
+        json: false,
+      });
       expect.unreachable("Should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(ApiError);
@@ -167,7 +180,12 @@ describe("issue list: error propagation", () => {
     const { context } = createContext();
 
     try {
-      await func.call(context, { limit: 10, sort: "date", json: false });
+      await func.call(context, {
+        limit: 10,
+        sort: "date",
+        period: parsePeriod("90d"),
+        json: false,
+      });
       expect.unreachable("Should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(ApiError);
@@ -194,7 +212,12 @@ describe("issue list: error propagation", () => {
     const { context } = createContext();
 
     try {
-      await func.call(context, { limit: 10, sort: "date", json: false });
+      await func.call(context, {
+        limit: 10,
+        sort: "date",
+        period: parsePeriod("90d"),
+        json: false,
+      });
       expect.unreachable("Should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(ApiError);
@@ -222,7 +245,12 @@ describe("issue list: error propagation", () => {
     const { context } = createContext();
 
     try {
-      await func.call(context, { limit: 10, sort: "date", json: false });
+      await func.call(context, {
+        limit: 10,
+        sort: "date",
+        period: parsePeriod("90d"),
+        json: false,
+      });
       expect.unreachable("Should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(ApiError);
@@ -273,7 +301,7 @@ describe("issue list: org-as-project detection", () => {
       // Bare slug "acme-corp" triggers project-search mode
       await func.call(
         context,
-        { limit: 10, sort: "date", json: false },
+        { limit: 10, sort: "date", period: parsePeriod("90d"), json: false },
         "acme-corp"
       );
       expect.unreachable("Should have thrown ResolutionError");
@@ -360,7 +388,11 @@ describe("issue list: partial failure handling", () => {
 
     // project-search for "myproj" — finds it in org-one and org-two, creating
     // two per-project targets; org-one succeeds, org-two fails → partial failure
-    await func.call(context, { limit: 10, sort: "date", json: true }, "myproj");
+    await func.call(
+      context,
+      { limit: 10, sort: "date", period: parsePeriod("90d"), json: true },
+      "myproj"
+    );
 
     const output = JSON.parse(stdout.output);
     expect(output).toHaveProperty("data");
@@ -433,7 +465,7 @@ describe("issue list: partial failure handling", () => {
       // project-search for "myproj" — org-one succeeds, org-two gets 403 → partial failure
       await func.call(
         context,
-        { limit: 10, sort: "date", json: false },
+        { limit: 10, sort: "date", period: parsePeriod("90d"), json: false },
         "myproj"
       );
 
@@ -465,7 +497,12 @@ describe("issue list: partial failure handling", () => {
 
     const { context, stdout } = createContext();
 
-    await func.call(context, { limit: 10, sort: "date", json: true });
+    await func.call(context, {
+      limit: 10,
+      sort: "date",
+      period: parsePeriod("90d"),
+      json: true,
+    });
 
     const output = JSON.parse(stdout.output);
     // Multi-target mode always wraps in {data, hasMore} for consistency with org-all mode
@@ -557,7 +594,13 @@ describe("issue list: org-all mode (cursor pagination)", () => {
       await expect(
         orgAllFunc.call(
           context,
-          { limit: 10, sort: "date", json: false, cursor: "1735689600:0:0" },
+          {
+            limit: 10,
+            sort: "date",
+            period: parsePeriod("90d"),
+            json: false,
+            cursor: "1735689600:0:0",
+          },
           "test-org/test-project"
         )
       ).resolves.toBeUndefined();
@@ -581,7 +624,7 @@ describe("issue list: org-all mode (cursor pagination)", () => {
     const { context, stdoutWrite } = createOrgAllContext();
     await orgAllFunc.call(
       context,
-      { limit: 10, sort: "date", json: true },
+      { limit: 10, sort: "date", period: parsePeriod("90d"), json: true },
       "my-org/"
     );
 
@@ -607,7 +650,7 @@ describe("issue list: org-all mode (cursor pagination)", () => {
     const { context, stdoutWrite } = createOrgAllContext();
     await orgAllFunc.call(
       context,
-      { limit: 10, sort: "date", json: true },
+      { limit: 10, sort: "date", period: parsePeriod("90d"), json: true },
       "my-org/"
     );
 
@@ -633,7 +676,7 @@ describe("issue list: org-all mode (cursor pagination)", () => {
     const { context, stdoutWrite } = createOrgAllContext();
     await orgAllFunc.call(
       context,
-      { limit: 10, sort: "date", json: false },
+      { limit: 10, sort: "date", period: parsePeriod("90d"), json: false },
       "my-org/"
     );
 
@@ -658,7 +701,7 @@ describe("issue list: org-all mode (cursor pagination)", () => {
     const { context, stdoutWrite } = createOrgAllContext();
     await orgAllFunc.call(
       context,
-      { limit: 10, sort: "date", json: false },
+      { limit: 10, sort: "date", period: parsePeriod("90d"), json: false },
       "my-org/"
     );
 
@@ -687,7 +730,13 @@ describe("issue list: org-all mode (cursor pagination)", () => {
     const { context } = createOrgAllContext();
     await orgAllFunc.call(
       context,
-      { limit: 10, sort: "date", json: false, cursor: "last" },
+      {
+        limit: 10,
+        sort: "date",
+        period: parsePeriod("90d"),
+        json: false,
+        cursor: "last",
+      },
       "my-org/"
     );
 
@@ -712,7 +761,13 @@ describe("issue list: org-all mode (cursor pagination)", () => {
     await expect(
       orgAllFunc.call(
         context,
-        { limit: 10, sort: "date", json: false, cursor: "last" },
+        {
+          limit: 10,
+          sort: "date",
+          period: parsePeriod("90d"),
+          json: false,
+          cursor: "last",
+        },
         "my-org/"
       )
     ).rejects.toThrow("No next page saved");
@@ -733,7 +788,13 @@ describe("issue list: org-all mode (cursor pagination)", () => {
     const { context } = createOrgAllContext();
     await orgAllFunc.call(
       context,
-      { limit: 10, sort: "date", json: false, cursor: "explicit:cursor:val" },
+      {
+        limit: 10,
+        sort: "date",
+        period: parsePeriod("90d"),
+        json: false,
+        cursor: "explicit:cursor:val",
+      },
       "my-org/"
     );
 
@@ -880,7 +941,11 @@ describe("issue list: Phase 2 budget redistribution", () => {
     const { context, stdout } = createContext();
 
     // project-search: finds "myproj" in both orgs, limit=6 triggers Phase 2
-    await func.call(context, { limit: 6, sort: "date", json: true }, "myproj");
+    await func.call(
+      context,
+      { limit: 6, sort: "date", period: parsePeriod("90d"), json: true },
+      "myproj"
+    );
 
     const output = JSON.parse(stdout.output);
     expect(output).toHaveProperty("data");
@@ -914,7 +979,7 @@ describe("issue list: compound cursor resume", () => {
 
     // Build the context key matching buildMultiTargetContextKey for a single target
     const fingerprint = "test-org/proj-a";
-    const contextKey = `host:${host}|type:multi:${fingerprint}|sort:date|period:${escapeContextKeyValue("90d")}`;
+    const contextKey = `host:${host}|type:multi:${fingerprint}|sort:date|period:${escapeContextKeyValue("rel:90d")}`;
     // Set up pagination state so "last"/"next" resolves to "resume-cursor:0:0"
     advancePaginationState(
       PAGINATION_KEY,
@@ -977,7 +1042,13 @@ describe("issue list: compound cursor resume", () => {
     // Explicit mode with cursor="last" → resolves compound cursor from DB
     await func.call(
       context,
-      { limit: 10, sort: "date", json: true, cursor: "last" },
+      {
+        limit: 10,
+        sort: "date",
+        period: parsePeriod("90d"),
+        json: true,
+        cursor: "last",
+      },
       "test-org/proj-a"
     );
 
@@ -1054,7 +1125,7 @@ describe("issue list: collapse parameter optimization", () => {
     const { context } = createOrgAllContext();
     await orgAllFunc.call(
       context,
-      { limit: 10, sort: "date", json: false },
+      { limit: 10, sort: "date", period: parsePeriod("90d"), json: false },
       "my-org/"
     );
 
@@ -1082,7 +1153,7 @@ describe("issue list: collapse parameter optimization", () => {
     const { context } = createOrgAllContext();
     await orgAllFunc.call(
       context,
-      { limit: 10, sort: "date", json: true },
+      { limit: 10, sort: "date", period: parsePeriod("90d"), json: true },
       "my-org/"
     );
 
@@ -1108,7 +1179,7 @@ describe("issue list: collapse parameter optimization", () => {
     const { context } = createOrgAllContext();
     await orgAllFunc.call(
       context,
-      { limit: 10, sort: "date", json: true },
+      { limit: 10, sort: "date", period: parsePeriod("90d"), json: true },
       "my-org/"
     );
 
@@ -1118,3 +1189,7 @@ describe("issue list: collapse parameter optimization", () => {
     expect(options?.groupStatsPeriod).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// sanitizeQuery — tests moved to test/lib/search-query.test.ts
+// ---------------------------------------------------------------------------

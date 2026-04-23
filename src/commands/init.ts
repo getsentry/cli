@@ -23,10 +23,16 @@ import { findProjectsBySlug } from "../lib/api/projects.js";
 import { looksLikePath, parseOrgProjectArg } from "../lib/arg-parsing.js";
 import { buildCommand } from "../lib/command.js";
 import { ContextError, ValidationError } from "../lib/errors.js";
-import { warmOrgDetection } from "../lib/init/prefetch.js";
+import { warmOrgDetection } from "../lib/init/org-prefetch.js";
 import { runWizard } from "../lib/init/wizard-runner.js";
 import { validateResourceId } from "../lib/input-validation.js";
 import { logger } from "../lib/logger.js";
+import {
+  DRY_RUN_ALIASES,
+  DRY_RUN_FLAG,
+  YES_ALIASES,
+  YES_FLAG,
+} from "../lib/mutate-command.js";
 
 const log = logger.withTag("init");
 
@@ -98,7 +104,7 @@ function classifyArgs(
  *
  * For `project-search` (bare slug), searches for an existing project first.
  * If not found, treats the slug as a **new project name** to create —
- * org will be resolved later by the wizard's `resolveOrgSlug()`.
+ * org will be resolved later by init preflight before the workflow starts.
  * If the slug matches an org name, treats it as org-only (like `slug/`).
  */
 async function resolveTarget(targetArg: string | undefined): Promise<{
@@ -148,7 +154,7 @@ async function resolveTarget(targetArg: string | undefined): Promise<{
       }
 
       // Truly not found — treat as the name for a new project to create.
-      // Org will be resolved later by the wizard via resolveOrgSlug().
+      // Org will be resolved later by init preflight before the workflow starts.
       log.info(
         `No existing project "${parsed.projectSlug}" found — will create a new project with this name.`
       );
@@ -158,7 +164,7 @@ async function resolveTarget(targetArg: string | undefined): Promise<{
       return { org: undefined, project: undefined };
     default: {
       const _exhaustive: never = parsed;
-      throw new ContextError("Target", String(_exhaustive));
+      throw new ContextError("Target", String(_exhaustive), []);
     }
   }
 }
@@ -204,21 +210,13 @@ export const initCommand = buildCommand<
       ],
     },
     flags: {
-      yes: {
-        kind: "boolean",
-        brief: "Non-interactive mode (accept defaults)",
-        default: false,
-      },
-      "dry-run": {
-        kind: "boolean",
-        brief: "Preview changes without applying them",
-        default: false,
-      },
+      yes: { ...YES_FLAG, brief: "Non-interactive mode (accept defaults)" },
+      "dry-run": DRY_RUN_FLAG,
       features: {
         kind: "parsed",
         parse: String,
         brief:
-          "Features to enable: errors,tracing,logs,replay,metrics,profiling,sourcemaps,crons,ai-monitoring,user-feedback",
+          "Features to enable: errors,tracing,logs,replay,profiling,ai-monitoring,user-feedback",
         variadic: true,
         optional: true,
       },
@@ -230,7 +228,8 @@ export const initCommand = buildCommand<
       },
     },
     aliases: {
-      y: "yes",
+      ...DRY_RUN_ALIASES,
+      ...YES_ALIASES,
       t: "team",
     },
   },
@@ -270,7 +269,8 @@ export const initCommand = buildCommand<
       warmOrgDetection(targetDir);
     }
 
-    // 6. Run the wizard
+    // 6. Run the wizard. It owns the temporary `/dev/tty` forwarding used
+    //    for `curl | bash` flows and tears it down on every exit path.
     await runWizard({
       directory: targetDir,
       yes: flags.yes,
@@ -280,5 +280,41 @@ export const initCommand = buildCommand<
       org: explicitOrg,
       project: explicitProject,
     });
+
+    // 7. Force-exit safety net for a Bun libuv refcount bug.
+    //
+    // On Bun 1.3.11, combining our fresh `/dev/tty` ReadStream (needed for
+    // the `curl | bash` TTY-delivery workaround in stdin-reopen.ts) with
+    // clack's internal `readline.createInterface(process.stdin)` leaks a
+    // libuv handle that NO userland cleanup releases:
+    // `process.stdin.{pause,destroy,close}`, `rl.close()`,
+    // `removeAllListeners`, and every combination of the above all leave
+    // the event loop ref'd. `process.stdin.unref` is `undefined` on Bun.
+    // The wizard prints "Sentry SDK installed successfully!" and the
+    // process then hangs until the user presses a key (which wakes libuv).
+    //
+    // PRs #802, #824, #825, and #831 each fixed a legit contributing cause
+    // (ReadStream ref, `using` teardown, MastraClient sockets, stream
+    // flowing state) and should all stay — but none address the underlying
+    // Bun refcount bug because that's not a userland issue. PR #782's
+    // original `process.exit(0)` workaround was removed on the assumption
+    // that natural drain would work after the other fixes; it doesn't.
+    //
+    // Safety net: schedule a force-exit with `.unref()` so the timer
+    // itself doesn't hold the loop. If the loop drains naturally (future
+    // Bun versions, non-TTY flows, `--yes` with no prompts), the timer
+    // never fires and the process exits normally. If the Bun bug bites,
+    // the timer fires after a 100ms grace period — imperceptible to
+    // the user and enough for Sentry telemetry + stdio flushes to
+    // complete first.
+    //
+    // Skipped under `bun test` (which sets `NODE_ENV=test`) because the
+    // test runner calls `initCommand.func` directly; an unref'd timer
+    // would still fire and terminate the runner mid-suite.
+    if (process.env.NODE_ENV !== "test") {
+      setTimeout(() => {
+        process.exit(process.exitCode ?? 0);
+      }, 100).unref();
+    }
   },
 });

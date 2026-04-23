@@ -8,9 +8,10 @@ import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import {
   clearAuth,
+  ENV_SOURCE_PREFIX,
   getActiveEnvVarName,
+  getAuthConfig,
   isAuthenticated,
-  isEnvTokenActive,
 } from "../../lib/db/auth.js";
 import { getDbPath } from "../../lib/db/index.js";
 import { AuthError } from "../../lib/errors.js";
@@ -28,6 +29,7 @@ export type LogoutResult = {
 };
 
 export const logoutCommand = buildCommand({
+  auth: false,
   docs: {
     brief: "Log out of Sentry",
     fullDescription:
@@ -45,7 +47,8 @@ export const logoutCommand = buildCommand({
       });
     }
 
-    if (isEnvTokenActive()) {
+    const auth = getAuthConfig();
+    if (auth?.source.startsWith(ENV_SOURCE_PREFIX)) {
       const envVar = getActiveEnvVarName();
       throw new AuthError(
         "invalid",

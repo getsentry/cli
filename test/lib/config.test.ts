@@ -4,7 +4,7 @@
  * Integration tests for SQLite-based config storage.
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -18,7 +18,8 @@ import {
 import {
   getDefaultOrganization,
   getDefaultProject,
-  setDefaults,
+  setDefaultOrganization,
+  setDefaultProject,
 } from "../../src/lib/db/defaults.js";
 import {
   CONFIG_DIR_ENV_VAR,
@@ -46,6 +47,17 @@ import { useTestConfigDir } from "../helpers.js";
  * the env var in afterEach (never deleting it).
  */
 const getConfigDir = useTestConfigDir("test-config-");
+
+let savedAuthToken: string | undefined;
+beforeEach(() => {
+  savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
+  delete process.env.SENTRY_AUTH_TOKEN;
+});
+afterEach(() => {
+  if (savedAuthToken !== undefined) {
+    process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
+  }
+});
 
 describe("auth token management", () => {
   test("setAuthToken stores token", async () => {
@@ -111,43 +123,45 @@ describe("auth token management", () => {
 });
 
 describe("defaults management", () => {
-  test("setDefaults stores organization", async () => {
-    setDefaults("my-org");
+  test("setDefaultOrganization stores organization", async () => {
+    setDefaultOrganization("my-org");
 
     const org = getDefaultOrganization();
     expect(org).toBe("my-org");
   });
 
-  test("setDefaults stores project", async () => {
-    setDefaults(undefined, "my-project");
+  test("setDefaultProject stores project", async () => {
+    setDefaultProject("my-project");
 
     const project = getDefaultProject();
     expect(project).toBe("my-project");
   });
 
-  test("setDefaults stores both org and project", async () => {
-    setDefaults("my-org", "my-project");
+  test("individual setters store both org and project", async () => {
+    setDefaultOrganization("my-org");
+    setDefaultProject("my-project");
 
     expect(getDefaultOrganization()).toBe("my-org");
     expect(getDefaultProject()).toBe("my-project");
   });
 
-  test("setDefaults preserves existing defaults", async () => {
-    setDefaults("org1", "project1");
-    setDefaults("org2"); // Only update org
+  test("individual setters preserve other defaults", async () => {
+    setDefaultOrganization("org1");
+    setDefaultProject("project1");
+    setDefaultOrganization("org2"); // Only update org
 
     expect(getDefaultOrganization()).toBe("org2");
     expect(getDefaultProject()).toBe("project1");
   });
 
-  test("getDefaultOrganization returns undefined when not set", async () => {
+  test("getDefaultOrganization returns null when not set", async () => {
     const org = getDefaultOrganization();
-    expect(org).toBeUndefined();
+    expect(org).toBeNull();
   });
 
-  test("getDefaultProject returns undefined when not set", async () => {
+  test("getDefaultProject returns null when not set", async () => {
     const project = getDefaultProject();
-    expect(project).toBeUndefined();
+    expect(project).toBeNull();
   });
 });
 

@@ -7,7 +7,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { chmodSync, realpathSync, unlinkSync } from "node:fs";
+import { chmodSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, sep } from "node:path";
 import {
@@ -24,7 +24,7 @@ import {
   KNOWN_CURL_DIRS,
   releaseLock,
 } from "./binary.js";
-import { CLI_VERSION } from "./constants.js";
+import { CLI_VERSION, NODE_MODULES_DIRNAME } from "./constants.js";
 import { getInstallInfo, setInstallInfo } from "./db/install-info.js";
 import type { ReleaseChannel } from "./db/release-channel.js";
 import { attemptDeltaUpgrade, type DeltaResult } from "./delta-upgrade.js";
@@ -56,6 +56,15 @@ export type InstallationMethod =
 
 /** Package managers that can be used for global installs */
 type PackageManager = "npm" | "pnpm" | "bun" | "yarn";
+
+/**
+ * How the current upgrade reached the offline code path.
+ *
+ * - `false` — online upgrade (network available)
+ * - `"explicit"` — user passed `--offline` flag
+ * - `"network-fallback"` — network failed, auto-fell back to cache
+ */
+export type OfflineMode = false | "explicit" | "network-fallback";
 
 // Constants
 
@@ -129,6 +138,10 @@ export function startCleanupOldBinary(): void {
 /**
  * Run a shell command and capture stdout.
  *
+ * On Windows, package managers (npm, pnpm, yarn) are `.cmd` batch files.
+ * `spawn()` without `shell: true` cannot execute `.cmd` files (ENOENT),
+ * so we route through cmd.exe on Windows.
+ *
  * @param command - Command to execute
  * @param args - Command arguments
  * @returns stdout content and exit code
@@ -140,6 +153,7 @@ function runCommand(
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args, {
       stdio: ["ignore", "pipe", "pipe"],
+      shell: process.platform === "win32",
     });
 
     let stdout = "";
@@ -201,6 +215,47 @@ function isHomebrewInstall(): boolean {
 }
 
 /**
+ * Detect package manager from the script path in process.argv[1].
+ *
+ * When the CLI is installed via npm/pnpm/yarn/bun as a global package,
+ * Node.js sets process.argv[1] to the script entry point inside
+ * node_modules (e.g., ".../node_modules/sentry/dist/bin.cjs").
+ * This is a fast, authoritative signal that avoids the slow and
+ * fragile subprocess-based detection (which fails on Windows where
+ * package manager executables are .cmd files not found by spawn()).
+ *
+ * pnpm is distinguished by its unique ".pnpm" directory inside node_modules.
+ * bun global installs live under ~/.bun/ (detected via ".bun" segment).
+ * All other node_modules layouts (npm, yarn) default to "npm".
+ *
+ * @returns Package manager name, or null if not running from node_modules
+ */
+export function detectPackageManagerFromPath(): PackageManager | null {
+  const scriptPath = process.argv[1];
+  if (!scriptPath) {
+    return null;
+  }
+
+  const segments = scriptPath.split(sep);
+  if (!segments.includes(NODE_MODULES_DIRNAME)) {
+    return null;
+  }
+
+  // pnpm uses a distinctive .pnpm directory inside node_modules
+  if (segments.includes(".pnpm")) {
+    return "pnpm";
+  }
+
+  // bun global installs live under ~/.bun/install/global/node_modules/
+  if (segments.includes(".bun")) {
+    return "bun";
+  }
+
+  // Default to npm for other node_modules installations (npm, yarn classic)
+  return "npm";
+}
+
+/**
  * Legacy detection for existing installs that don't have stored install info.
  * Checks known curl install paths and package managers.
  *
@@ -223,6 +278,15 @@ async function detectLegacyInstallationMethod(): Promise<InstallationMethod> {
     }
   }
 
+  // Fallback: if all subprocess calls failed (e.g. Windows ENOENT where
+  // .cmd files aren't found by spawn()), detect from node_modules path.
+  // Placed after subprocess calls so that yarn is correctly detected on
+  // platforms where subprocess detection works (macOS/Linux).
+  const pmFromPath = detectPackageManagerFromPath();
+  if (pmFromPath) {
+    return pmFromPath;
+  }
+
   return "unknown";
 }
 
@@ -230,9 +294,10 @@ async function detectLegacyInstallationMethod(): Promise<InstallationMethod> {
  * Detect how the CLI was installed.
  *
  * Priority:
- * 1. Check stored install info in DB (fast path)
- * 2. Fall back to legacy detection for existing installs
- * 3. Auto-save detected method for future runs
+ * 1. Homebrew — cheap realpath check, overrides stale stored info
+ * 2. Stored install info in DB (fast path)
+ * 3. Legacy detection: curl paths → subprocess calls → node_modules path
+ * 4. Auto-save detected method for future runs
  *
  * @returns Detected installation method, or "unknown" if unable to determine
  */
@@ -244,22 +309,27 @@ export async function detectInstallationMethod(): Promise<InstallationMethod> {
     return "brew";
   }
 
-  // 1. Check stored info (fast path for non-Homebrew installs)
+  // Check stored info (fast path for non-Homebrew installs)
   const stored = getInstallInfo();
   if (stored?.method) {
     return stored.method;
   }
 
-  // 2. Legacy detection for existing installs (pre-setup command)
+  // Legacy detection for existing installs (pre-setup command)
   const legacyMethod = await detectLegacyInstallationMethod();
 
-  // 3. Auto-save detected method for future runs
+  // Auto-save detected method for future runs (best-effort —
+  // a read-only or broken DB shouldn't block detection)
   if (legacyMethod !== "unknown") {
-    setInstallInfo({
-      method: legacyMethod,
-      path: process.execPath,
-      version: CLI_VERSION,
-    });
+    try {
+      setInstallInfo({
+        method: legacyMethod,
+        path: process.execPath,
+        version: CLI_VERSION,
+      });
+    } catch {
+      log.debug("Failed to persist install info (DB may be read-only)");
+    }
   }
 
   return legacyMethod;
@@ -461,6 +531,8 @@ export type DownloadResult = {
   tempBinaryPath: string;
   /** Path to the lock file held during download (caller must release after child exits) */
   lockPath: string;
+  /** Size of delta patch in bytes, when delta upgrade was used instead of full download */
+  patchBytes?: number;
 };
 
 /**
@@ -589,6 +661,79 @@ async function downloadStableToPath(
 }
 
 /**
+ * Max probe attempts before giving up. Six probes run with five sleeps
+ * in between, yielding ~3.1s total wall-clock budget (see backoff table
+ * on {@link waitForBinaryVisible}).
+ */
+const VERIFY_MAX_ATTEMPTS = 6;
+
+/** Base delay (ms) between verify attempts. Doubles each retry. */
+const VERIFY_BASE_DELAY_MS = 100;
+
+/**
+ * Stat the downloaded file, tolerating absence.
+ *
+ * Returns the file size when the path is present, a regular file, and
+ * has non-zero size. Returns `null` otherwise so the caller can poll.
+ */
+function probeBinaryFile(path: string): number | null {
+  const stats = statSync(path, { throwIfNoEntry: false });
+  if (stats?.isFile() && stats.size > 0) {
+    return stats.size;
+  }
+  return null;
+}
+
+/**
+ * Wait for a freshly written binary to become visible by path.
+ *
+ * On Windows + Bun 1.3.9 (CLI-1D3), streaming writes via `Bun.file().writer()`
+ * can return from `writer.end()` before the OS surfaces the file by path.
+ * A subsequent `Bun.spawn` then fails with `Executable not found in $PATH`.
+ * Polling with exponential backoff lets the transient visibility race
+ * self-heal without prompting the user to manually retry.
+ *
+ * Backoff table (6 probes, 5 sleeps, cumulative worst case 3.1s):
+ *
+ * | Attempt | Probe at | Sleep after |
+ * |---------|----------|-------------|
+ * | 1       | 0 ms     | 100 ms      |
+ * | 2       | 100 ms   | 200 ms      |
+ * | 3       | 300 ms   | 400 ms      |
+ * | 4       | 700 ms   | 800 ms      |
+ * | 5       | 1500 ms  | 1600 ms     |
+ * | 6       | 3100 ms  | —           |
+ *
+ * @param path - Absolute path to the downloaded binary
+ * @returns Size of the verified file in bytes
+ * @throws {UpgradeError} When the file never becomes visible or stays empty
+ */
+async function waitForBinaryVisible(path: string): Promise<number> {
+  for (let attempt = 1; attempt <= VERIFY_MAX_ATTEMPTS; attempt++) {
+    const size = probeBinaryFile(path);
+    if (size !== null) {
+      if (attempt > 1) {
+        log.debug(`Binary became visible after ${attempt} attempts`);
+      }
+      return size;
+    }
+    if (attempt === VERIFY_MAX_ATTEMPTS) {
+      break;
+    }
+    const delay = VERIFY_BASE_DELAY_MS * 2 ** (attempt - 1);
+    log.debug(
+      `Downloaded binary not yet visible at ${path}, retrying in ${delay}ms (attempt ${attempt}/${VERIFY_MAX_ATTEMPTS})`
+    );
+    await Bun.sleep(delay);
+  }
+  throw new UpgradeError(
+    "execution_failed",
+    `Downloaded binary is missing or empty at ${path}. ` +
+      "This is usually transient — rerun `sentry cli upgrade` to retry."
+  );
+}
+
+/**
  * Download the new binary to a temporary path and return its location.
  * Used by the upgrade command to download before spawning setup --install.
  *
@@ -617,7 +762,7 @@ async function downloadStableToPath(
 export async function downloadBinaryToTemp(
   version: string,
   downloadTag?: string,
-  offline?: boolean
+  offline?: OfflineMode
 ): Promise<DownloadResult> {
   const { tempPath, lockPath } = getCurlInstallPaths();
 
@@ -633,19 +778,33 @@ export async function downloadBinaryToTemp(
 
     // Try delta upgrade first — downloads tiny patches instead of full binary.
     // Falls back to full download on any failure (missing patches, hash mismatch, etc.)
-    const deltaResult = await tryDeltaUpgrade(version, tempPath, offline);
+    const deltaResult = await tryDeltaUpgrade(version, tempPath, !!offline);
+    let patchBytes: number | undefined;
     if (deltaResult) {
-      const kb = (deltaResult.patchBytes / 1024).toFixed(1);
-      log.info(`Applied delta patch (${kb} KB downloaded)`);
+      patchBytes = deltaResult.patchBytes;
     } else if (offline) {
       throw new UpgradeError(
-        "network_error",
-        `No cached patches available for upgrade to ${version}. Run 'sentry cli upgrade' with network access first.`
+        "offline_cache_miss",
+        offline === "explicit"
+          ? `Cannot upgrade to ${version} in offline mode — no pre-downloaded update is available. ` +
+              "Run `sentry cli upgrade` without `--offline` to download the update directly."
+          : `Cannot upgrade to ${version} — the network is unavailable and no pre-downloaded update was found. ` +
+              "Check your internet connection and try again."
       );
     } else {
       log.debug("Downloading full binary");
       await downloadFullBinary(version, downloadTag, tempPath);
     }
+
+    // Verify the download produced a real, non-empty file before the caller
+    // spawns it. Seen on Windows + Bun 1.3.9 (CLI-1D3): streaming writes via
+    // `Bun.file(path).writer()` can return without surfacing the file by
+    // path, leaving `Bun.spawn` to fail with an opaque
+    // `Executable not found in $PATH: "...sentry.exe.download"`. Poll with
+    // exponential backoff so a transient filesystem-visibility race
+    // self-heals without asking the user to rerun.
+    const verifiedSize = await waitForBinaryVisible(tempPath);
+    log.debug(`Downloaded binary verified (${verifiedSize} bytes)`);
 
     // Clear consumed patch cache — patches for the old version are useless
     // after the binary has been updated (whether via delta or full download).
@@ -658,7 +817,7 @@ export async function downloadBinaryToTemp(
       chmodSync(tempPath, 0o755);
     }
 
-    return { tempBinaryPath: tempPath, lockPath };
+    return { tempBinaryPath: tempPath, lockPath, patchBytes };
   } catch (error) {
     releaseLock(lockPath);
     throw error;
@@ -721,6 +880,7 @@ function executeUpgradeHomebrew(): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn("brew", ["upgrade", "getsentry/tools/sentry"], {
       stdio: "inherit",
+      shell: process.platform === "win32",
     });
 
     proc.on("close", (code) => {
@@ -761,7 +921,12 @@ function executeUpgradePackageManager(
         ? ["global", "add", `sentry@${version}`]
         : ["install", "-g", `sentry@${version}`];
 
-    const proc = spawn(pm, args, { stdio: "inherit" });
+    // npm/pnpm/yarn are .cmd batch files on Windows; spawn() without
+    // shell: true cannot execute .cmd files (ENOENT).
+    const proc = spawn(pm, args, {
+      stdio: "inherit",
+      shell: process.platform === "win32",
+    });
 
     proc.on("close", (code) => {
       if (code === 0) {
@@ -806,7 +971,7 @@ export async function executeUpgrade(
   method: InstallationMethod,
   version: string,
   downloadTag?: string,
-  offline?: boolean
+  offline?: OfflineMode
 ): Promise<DownloadResult | null> {
   switch (method) {
     case "curl":

@@ -169,7 +169,8 @@ describe("viewCommand.func", () => {
     expect(resolveProjectBySlugSpy).toHaveBeenCalledWith(
       "frontend",
       "sentry project view <org>/<project>",
-      "sentry project view <org>/frontend"
+      "sentry project view <org>/frontend",
+      undefined
     );
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
@@ -251,21 +252,68 @@ describe("viewCommand.func", () => {
     }
   });
 
-  test("non-auth API error is skipped silently", async () => {
-    getProjectSpy.mockRejectedValue(new Error("404 Not Found"));
+  test("non-auth API error on explicit target is rethrown verbatim", async () => {
+    // Previously the error was swallowed and a generic
+    // "Could not auto-detect organization and project" ContextError
+    // was raised — confusing because the user provided the target
+    // explicitly (getsentry/cli#785 item #8). The actual API error
+    // must bubble up so the user sees the real cause (404/403/etc.).
+    const apiErr = new Error("404 Not Found");
+    getProjectSpy.mockRejectedValue(apiErr);
     getProjectKeysSpy.mockResolvedValue(sampleKeys);
 
     const { context } = createMockContext();
     const func = await viewCommand.loader();
 
-    // The project fetch fails with a non-auth error, so it's filtered out.
-    // With no successful results, buildContextError is thrown.
     await expect(
       func.call(context, { json: false, web: false }, "my-org/bad-project")
-    ).rejects.toThrow(ContextError);
+    ).rejects.toThrow("404 Not Found");
 
-    // getProject was called (it just failed)
     expect(getProjectSpy).toHaveBeenCalledWith("my-org", "bad-project");
+  });
+
+  test("non-auth API error on project-search target is rethrown verbatim", async () => {
+    resolveProjectBySlugSpy.mockResolvedValue({
+      org: "acme",
+      project: "frontend",
+    });
+    const apiErr = new Error("403 Forbidden");
+    getProjectSpy.mockRejectedValue(apiErr);
+    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+
+    await expect(
+      func.call(context, { json: false, web: false }, "frontend")
+    ).rejects.toThrow("403 Forbidden");
+  });
+
+  test("non-auth API error on auto-detect target is swallowed (multi-target recovery)", async () => {
+    // For auto-detect — which may surface multiple DSN-discovered
+    // targets — per-target failures are still tolerated: one
+    // inaccessible DSN must not block the rest of the results. When
+    // all targets fail and the set ends up empty, the original
+    // ContextError is still the right surface.
+    resolveAllTargetsSpy.mockResolvedValue({
+      targets: [
+        {
+          org: "my-org",
+          project: "inaccessible",
+          orgDisplay: "my-org",
+          projectDisplay: "inaccessible",
+        },
+      ],
+    });
+    getProjectSpy.mockRejectedValue(new Error("403 Forbidden"));
+    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+
+    await expect(
+      func.call(context, { json: false, web: false })
+    ).rejects.toThrow(ContextError);
   });
 
   test("auth error from API is rethrown", async () => {
@@ -278,5 +326,86 @@ describe("viewCommand.func", () => {
     await expect(
       func.call(context, { json: false, web: false }, "my-org/test-project")
     ).rejects.toThrow(AuthError);
+  });
+
+  test("JSON output re-hydrates organization.name when API response omits it", async () => {
+    // Collapsed API response: `organization.name` is absent. The command's
+    // jsonTransform must refill it via `resolveOrgDisplayName()` so scripts
+    // / agents that scrape `.organization.name` continue to see a value.
+    getProjectSpy.mockResolvedValue({
+      ...sampleProject,
+      organization: { id: "1", slug: "my-org" },
+    });
+    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(context, { json: true, web: false }, "my-org/test-project");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed[0].organization.slug).toBe("my-org");
+    // Fallback to slug when no cached display name is available
+    expect(parsed[0].organization.name).toBe("my-org");
+  });
+
+  test("JSON output preserves organization.name when API response includes it", async () => {
+    // Self-hosted / older Sentry ignore `?collapse=organization` and return
+    // the full payload — don't clobber `name` when it's already set.
+    getProjectSpy.mockResolvedValue({
+      ...sampleProject,
+      organization: { id: "1", slug: "my-org", name: "My Organization" },
+    });
+    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(context, { json: true, web: false }, "my-org/test-project");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed[0].organization.name).toBe("My Organization");
+  });
+
+  test("JSON output still strips detectedFrom (human-only field)", async () => {
+    getProjectSpy.mockResolvedValue(sampleProject);
+    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(context, { json: true, web: false }, "my-org/test-project");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed[0]).not.toHaveProperty("detectedFrom");
+  });
+
+  test("JSON output honours --fields filter", async () => {
+    getProjectSpy.mockResolvedValue({
+      ...sampleProject,
+      organization: { id: "1", slug: "my-org" },
+    });
+    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await viewCommand.loader();
+    // `fields` is auto-injected by the buildCommand wrapper; pass through
+    // the flag shape the wrapper would forward.
+    await func.call(
+      context,
+      {
+        json: true,
+        web: false,
+        fields: ["slug", "organization.slug"],
+      },
+      "my-org/test-project"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed[0]).toEqual({
+      slug: "test-project",
+      organization: { slug: "my-org" },
+    });
   });
 });

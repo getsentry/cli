@@ -1,4 +1,4 @@
-import { buildRouteMap } from "@stricli/core";
+import { buildRouteMap } from "../../lib/route-map.js";
 import { loginCommand } from "./login.js";
 import { logoutCommand } from "./logout.js";
 import { refreshCommand } from "./refresh.js";
@@ -15,6 +15,7 @@ export const authRoute = buildRouteMap({
     token: tokenCommand,
     whoami: whoamiCommand,
   },
+  defaultCommand: "status",
   docs: {
     brief: "Authenticate with Sentry",
     fullDescription:

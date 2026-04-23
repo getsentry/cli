@@ -459,7 +459,7 @@ describe("dashboard list command", () => {
     const func = await listCommand.loader();
 
     await expect(func.call(context, defaultFlags())).rejects.toThrow(
-      "Organization"
+      "organization"
     );
   });
 });

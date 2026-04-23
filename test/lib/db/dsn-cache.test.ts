@@ -5,7 +5,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   clearDsnCache,
@@ -312,12 +312,15 @@ describe("getCachedDetection", () => {
     const before = await getCachedDetection(testProjectDir);
     expect(before).toBeDefined();
 
-    // Wait a moment and modify the source file
-    await Bun.sleep(10);
+    // Modify source file and set mtime to cachedMtime + 5s to guarantee
+    // a detectable difference regardless of OS clock resolution.
+    const srcFile = join(testProjectDir, "src/app.ts");
     writeFileSync(
-      join(testProjectDir, "src/app.ts"),
+      srcFile,
       'const DSN = "https://changed@o123.ingest.sentry.io/789";'
     );
+    const futureTime = new Date(sourceMtimes["src/app.ts"] + 5000);
+    utimesSync(srcFile, futureTime, futureTime);
 
     // Cache should be invalidated
     const after = await getCachedDetection(testProjectDir);
@@ -373,9 +376,10 @@ describe("getCachedDetection", () => {
     const before = await getCachedDetection(testProjectDir);
     expect(before).toBeDefined();
 
-    // Wait and add a new file to change directory mtime
-    await Bun.sleep(10);
+    // Add a new file and set root dir mtime to cachedMtime + 5s
     writeFileSync(join(testProjectDir, "new-file.txt"), "test");
+    const futureTime = new Date(rootDirMtime + 5000);
+    utimesSync(testProjectDir, futureTime, futureTime);
 
     // Cache should be invalidated
     const after = await getCachedDetection(testProjectDir);
@@ -407,12 +411,11 @@ describe("getCachedDetection", () => {
     const before = await getCachedDetection(testProjectDir);
     expect(before).toBeDefined();
 
-    // Wait and add a new file to src/ to change its mtime
-    await Bun.sleep(10);
-    writeFileSync(
-      join(testProjectDir, "src/new-config.ts"),
-      "export default {}"
-    );
+    // Add a new file to src/ and set mtime to cachedMtime + 5s
+    const srcDir = join(testProjectDir, "src");
+    writeFileSync(join(srcDir, "new-config.ts"), "export default {}");
+    const futureTime = new Date(srcDirMtime + 5000);
+    utimesSync(srcDir, futureTime, futureTime);
 
     // Cache should be invalidated because src/ mtime changed
     const after = await getCachedDetection(testProjectDir);

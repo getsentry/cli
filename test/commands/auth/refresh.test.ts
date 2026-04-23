@@ -84,6 +84,9 @@ describe("refreshCommand.func", () => {
 
   test("env token (SENTRY_TOKEN): throws AuthError with SENTRY_TOKEN in message", async () => {
     isEnvTokenActiveSpy.mockReturnValue(true);
+    // Clear SENTRY_AUTH_TOKEN so SENTRY_TOKEN takes priority
+    const savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
+    delete process.env.SENTRY_AUTH_TOKEN;
     // Set env var directly — getActiveEnvVarName() reads env vars via getEnvToken()
     process.env.SENTRY_TOKEN = "sntrys_token_456";
 
@@ -99,6 +102,9 @@ describe("refreshCommand.func", () => {
       expect((err as AuthError).message).not.toContain("SENTRY_AUTH_TOKEN");
     } finally {
       delete process.env.SENTRY_TOKEN;
+      if (savedAuthToken !== undefined) {
+        process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
+      }
     }
 
     expect(refreshTokenSpy).not.toHaveBeenCalled();

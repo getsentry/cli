@@ -54,7 +54,11 @@ import { paginationHint } from "./list-command.js";
 import { logger } from "./logger.js";
 import { withProgress } from "./polling.js";
 import { resolveEffectiveOrg } from "./region.js";
-import { resolveOrgsForListing } from "./resolve-target.js";
+import {
+  type ProjectNotFoundOutcome,
+  resolveOrgsForListing,
+  triageProjectNotFound,
+} from "./resolve-target.js";
 import { setOrgProjectContext } from "./telemetry.js";
 
 const log = logger.withTag("org-list");
@@ -272,6 +276,13 @@ export type OrgListConfig<TEntity, TWithOrg> = ListCommandMeta & {
    *   project's parent org.
    */
   listForProject?: (orgSlug: string, projectSlug: string) => Promise<TEntity[]>;
+
+  /**
+   * Zod schema describing the JSON output shape of each list item.
+   * Forwarded to `OutputConfig.schema` by `buildOrgListCommand` so
+   * `--help`, `sentry help`, and SKILL.md can document available fields.
+   */
+  schema?: import("zod").ZodType;
 };
 
 /** Extract a specific variant from the {@link ParsedOrgProject} union by its `type` discriminant. */
@@ -725,26 +736,42 @@ export async function handleExplicitProject<TEntity, TWithOrg>(
  *
  * Returns a {@link ListResult} with items and hint text.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: multi-mode dispatch with recovery is inherently branchy
 export async function handleProjectSearch<TEntity, TWithOrg>(
   config: OrgListConfig<TEntity, TWithOrg>,
   projectSlug: string,
   options: {
     flags: BaseListFlags;
     orgAllFallback?: (orgSlug: string) => Promise<ListResult<TWithOrg>>;
-  }
+    /** Original user input before normalization — for clearer messages. */
+    originalSlug?: string;
+  },
+  /** Guard against infinite recursion from fuzzy recovery. */
+  _isRecoveryAttempt = false
 ): Promise<ListResult<TWithOrg>> {
-  const { flags, orgAllFallback } = options;
-  const { projects: matches, orgs } = await withProgress(
-    {
-      message: `Fetching ${config.entityPlural} (up to ${flags.limit})...`,
-      json: flags.json,
-    },
-    () => findProjectsBySlug(projectSlug)
-  );
+  const { flags, orgAllFallback, originalSlug } = options;
+  /** Display label: the user's raw input when available, otherwise the slug. */
+  const displaySlug = originalSlug ?? projectSlug;
+  // When the input is a display name (originalSlug set, contains spaces),
+  // skip the slug-based API lookup and go straight to name-based matching.
+  const isDisplayName = originalSlug !== undefined;
+  const { projects: matches, orgs } = isDisplayName
+    ? { projects: [], orgs: await listOrganizations() }
+    : await withProgress(
+        {
+          message: `Fetching ${config.entityPlural} (up to ${flags.limit})...`,
+          json: flags.json,
+        },
+        () => findProjectsBySlug(projectSlug)
+      );
 
   if (matches.length === 0) {
-    const matchingOrg = orgs.find((o) => o.slug === projectSlug);
-    if (matchingOrg) {
+    // Skip triage on recovery attempts to prevent infinite recursion.
+    const outcome: ProjectNotFoundOutcome = _isRecoveryAttempt
+      ? { kind: "not-found", displaySlug, suggestions: [] }
+      : await triageProjectNotFound(projectSlug, orgs, originalSlug);
+
+    if (outcome.kind === "org-match") {
       if (orgAllFallback) {
         log.warn(
           `'${projectSlug}' is an organization, not a project. ` +
@@ -763,15 +790,28 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
       );
     }
 
+    if (outcome.kind === "fuzzy-match") {
+      // Don't pass originalSlug on the recovery call — the recovered slug
+      // is a real slug that should go through the normal slug-based lookup.
+      return handleProjectSearch(
+        config,
+        outcome.project,
+        { ...options, originalSlug: undefined },
+        true
+      );
+    }
+
     if (flags.json) {
       return { items: [] };
     }
-    // Use ResolutionError — the user provided a project slug but it wasn't found.
+
     throw new ResolutionError(
-      `Project '${projectSlug}'`,
+      `Project '${displaySlug}'`,
       "not found",
       `${config.commandPrefix} <org>/${projectSlug}`,
-      ["No project with this slug found in any accessible organization"]
+      outcome.suggestions.length > 0
+        ? outcome.suggestions
+        : ["No project with this slug found in any accessible organization"]
     );
   }
 
@@ -884,6 +924,7 @@ function buildDefaultHandlers<TEntity, TWithOrg>(
       handleProjectSearch(config, ctx.parsed.projectSlug, {
         flags: ctx.flags,
         orgAllFallback: (orgSlug) => runOrgAll(config, orgSlug, ctx.flags),
+        originalSlug: ctx.parsed.originalSlug,
       }),
 
     "org-all": (ctx) => {

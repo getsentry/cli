@@ -16,10 +16,16 @@ import {
   assignDefaultLayout,
   type DashboardDetail,
   type DashboardWidget,
+  FALLBACK_LAYOUT,
   prepareDashboardForUpdate,
+  validateWidgetLayout,
+  type WidgetLayoutFlags,
+  type WidgetLayoutMode,
 } from "../../../types/dashboard.js";
 import {
   buildWidgetFromFlags,
+  enrichDashboardError,
+  normalizeDataset,
   parseDashboardPositionalArgs,
   resolveDashboardId,
   resolveOrgFromTarget,
@@ -27,11 +33,13 @@ import {
   type WidgetQueryFlags,
 } from "../resolve.js";
 
-type AddFlags = WidgetQueryFlags & {
-  readonly display: string;
-  readonly json: boolean;
-  readonly fields?: string[];
-};
+type AddFlags = WidgetQueryFlags &
+  WidgetLayoutFlags & {
+    readonly display: string;
+    readonly layout: string;
+    readonly json: boolean;
+    readonly fields?: string[];
+  };
 
 type AddResult = {
   dashboard: DashboardDetail;
@@ -88,7 +96,9 @@ export const addCommand = buildCommand({
       "  count()        → count()         (parens passthrough)\n\n" +
       "Sort shorthand (--sort flag):\n" +
       "  count          → count()         (ascending)\n" +
-      "  -count         → -count()        (descending)",
+      "  -count         → -count()        (descending)\n\n" +
+      "Layout flags (--col/-x, --row/-y, --width, --height) control widget position\n" +
+      "and size in the 6-column dashboard grid. Omitted values use auto-layout.",
   },
   output: {
     human: formatWidgetAdded,
@@ -97,6 +107,7 @@ export const addCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
+        placeholder: "org/project/dashboard/title",
         brief: "[<org/project>] <dashboard> <title>",
         parse: String,
       },
@@ -111,7 +122,8 @@ export const addCommand = buildCommand({
       dataset: {
         kind: "parsed",
         parse: String,
-        brief: "Widget dataset (default: spans)",
+        brief:
+          "Widget dataset (default: spans). Accepts canonical names and API synonyms: spans, error-events/errors, transaction-like/transactions, tracemetrics/metrics, logs, issue, discover",
         optional: true,
       },
       query: {
@@ -146,6 +158,36 @@ export const addCommand = buildCommand({
         brief: "Result limit",
         optional: true,
       },
+      col: {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Grid column position (0-based, 0–5)",
+        optional: true,
+      },
+      row: {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Grid row position (0-based)",
+        optional: true,
+      },
+      width: {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Widget width in grid columns (1–6)",
+        optional: true,
+      },
+      height: {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Widget height in grid rows (min 1)",
+        optional: true,
+      },
+      layout: {
+        kind: "parsed",
+        parse: String,
+        brief: "Layout mode: sequential (append in order) or dense (fill gaps)",
+        default: "sequential",
+      },
     },
     aliases: {
       d: "display",
@@ -154,6 +196,9 @@ export const addCommand = buildCommand({
       g: "group-by",
       s: "sort",
       n: "limit",
+      l: "layout",
+      x: "col",
+      y: "row",
     },
   },
   async *func(this: SentryContext, flags: AddFlags, ...args: string[]) {
@@ -161,8 +206,14 @@ export const addCommand = buildCommand({
 
     const { dashboardArgs, title } = parseAddPositionalArgs(args);
 
+    // Resolve dataset aliases (e.g. "errors" → "error-events") once, up front.
+    // Every downstream consumer — enum validation, dataset-aware aggregate
+    // validation, the PUT body — must see the canonical name, so we thread
+    // the normalized value and never reference flags.dataset below.
+    const dataset = normalizeDataset(flags.dataset);
+
     // Validate enums before any network calls (fail fast)
-    validateWidgetEnums(flags.display, flags.dataset);
+    validateWidgetEnums(flags.display, dataset);
 
     const { dashboardRef, targetArg } =
       parseDashboardPositionalArgs(dashboardArgs);
@@ -177,7 +228,7 @@ export const addCommand = buildCommand({
     let newWidget = buildWidgetFromFlags({
       title,
       display: flags.display,
-      dataset: flags.dataset,
+      dataset,
       query: flags.query,
       where: flags.where,
       groupBy: flags["group-by"],
@@ -185,13 +236,75 @@ export const addCommand = buildCommand({
       limit: flags.limit,
     });
 
-    // GET current dashboard → append widget with auto-layout → PUT
-    const current = await getDashboard(orgSlug, dashboardId);
+    // Validate layout mode before any network calls
+    if (
+      flags.layout &&
+      flags.layout !== "sequential" &&
+      flags.layout !== "dense"
+    ) {
+      throw new ValidationError(
+        `Invalid --layout mode "${flags.layout}". Valid values: sequential, dense`,
+        "layout"
+      );
+    }
+    const layoutMode: WidgetLayoutMode =
+      flags.layout === "dense" ? "dense" : "sequential";
+
+    // Validate individual layout flag ranges before any network calls
+    // (catches --col -1, --width 7, etc. early without needing the dashboard)
+    validateWidgetLayout(flags);
+
+    // GET current dashboard → append widget with layout → PUT
+    const current = await getDashboard(orgSlug, dashboardId).catch(
+      (error: unknown) =>
+        enrichDashboardError(error, { orgSlug, dashboardId, operation: "view" })
+    );
     const updateBody = prepareDashboardForUpdate(current);
-    newWidget = assignDefaultLayout(newWidget, updateBody.widgets);
+
+    // Always run auto-layout first to get default position and dimensions,
+    // then override with any explicit user flags.
+    newWidget = assignDefaultLayout(newWidget, updateBody.widgets, layoutMode);
+
+    const hasExplicitLayout =
+      flags.col !== undefined ||
+      flags.row !== undefined ||
+      flags.width !== undefined ||
+      flags.height !== undefined;
+
+    if (hasExplicitLayout) {
+      const baseLayout = newWidget.layout ?? FALLBACK_LAYOUT;
+      newWidget = {
+        ...newWidget,
+        layout: {
+          ...baseLayout,
+          ...(flags.col !== undefined && { x: flags.col }),
+          ...(flags.row !== undefined && { y: flags.row }),
+          ...(flags.width !== undefined && { w: flags.width }),
+          ...(flags.height !== undefined && { h: flags.height }),
+        },
+      };
+      // Re-validate the merged layout to catch cross-dimensional overflow
+      // (e.g., --col 5 on a table widget with auto-width 6 → 5+6=11 > 6)
+      const finalLayout = newWidget.layout ?? baseLayout;
+      validateWidgetLayout(
+        { col: finalLayout.x, width: finalLayout.w },
+        finalLayout
+      );
+    }
+
     updateBody.widgets.push(newWidget);
 
-    const updated = await updateDashboard(orgSlug, dashboardId, updateBody);
+    const updated = await updateDashboard(
+      orgSlug,
+      dashboardId,
+      updateBody
+    ).catch((error: unknown) =>
+      enrichDashboardError(error, {
+        orgSlug,
+        dashboardId,
+        operation: "update",
+      })
+    );
     const url = buildDashboardUrl(orgSlug, dashboardId);
 
     yield new CommandOutput({

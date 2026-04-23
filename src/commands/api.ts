@@ -5,6 +5,8 @@
  * Similar to 'gh api' for GitHub.
  */
 
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
+import * as Sentry from "@sentry/node-core/light";
 import type { SentryContext } from "../context.js";
 import { buildSearchParams, rawApiRequest } from "../lib/api-client.js";
 import { buildCommand } from "../lib/command.js";
@@ -15,6 +17,9 @@ import { logger } from "../lib/logger.js";
 import { getDefaultSdkConfig } from "../lib/sentry-client.js";
 
 const log = logger.withTag("api");
+
+/** Strips line breaks and surrounding indentation from copy-pasted endpoints. */
+const LINE_BREAK_PATTERN = /[ \t]*[\r\n]+[ \t]*/g;
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
 
@@ -83,11 +88,21 @@ export function parseMethod(value: string): HttpMethod {
  * @internal Exported for testing
  */
 export function normalizeEndpoint(endpoint: string): string {
-  // Reject path traversal and control characters before processing
-  validateEndpoint(endpoint);
+  // Strip line breaks and surrounding indentation from copy-pasted
+  // endpoints. Users often paste multi-line URLs from docs or scripts,
+  // producing newlines and indentation (CLI-FR, 215 events).
+  // Other control characters (NUL, etc.) are left for validateEndpoint
+  // to reject — those indicate corruption, not copy-paste.
+  const cleaned = endpoint.replace(LINE_BREAK_PATTERN, "").trim();
+  if (cleaned !== endpoint) {
+    log.warn("Stripped line breaks from endpoint (copy-paste artifact)");
+  }
+
+  // Reject path traversal and remaining control characters after cleaning
+  validateEndpoint(cleaned);
 
   // Remove leading slash if present (rawApiRequest handles the base URL)
-  let trimmed = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
+  let trimmed = cleaned.startsWith("/") ? cleaned.slice(1) : cleaned;
 
   // Strip api/0/ prefix if user accidentally included it — the base URL
   // already includes /api/0/, so keeping it would produce a doubled path
@@ -1036,6 +1051,28 @@ export async function resolveBody(
 
 // Command Definition
 
+/**
+ * Record API error attributes on the active telemetry span.
+ *
+ * Since `OutputError` is excluded from `Sentry.captureException` (it signals
+ * an intentional non-zero exit, not a CLI bug), these span attributes are the
+ * only telemetry signal for `sentry api` HTTP errors. They're queryable in
+ * Discover via `api_error.status`, matching the pattern used by
+ * `recordApiErrorOnSpan` for `ApiError`-based errors in other commands.
+ */
+function recordApiErrorAttributes(
+  status: number,
+  endpoint: string,
+  method: string
+): void {
+  const span = Sentry.getActiveSpan();
+  if (span) {
+    span.setAttribute("api_error.status", status);
+    span.setAttribute("api_error.endpoint", endpoint);
+    span.setAttribute("api_error.method", method);
+  }
+}
+
 /** Log outgoing request details in `> ` curl-verbose style. */
 function logRequest(
   method: string,
@@ -1170,14 +1207,21 @@ export const apiCommand = buildCommand({
     const normalizedEndpoint = normalizeEndpoint(endpoint);
 
     // Detect whether normalizeEndpoint stripped the api/0/ prefix (CLI-K1).
-    // normalizeEndpoint only adds at most 1 char (trailing slash), so if the
-    // normalized result is shorter than the raw input, the prefix was stripped.
-    const rawLen = endpoint.startsWith("/")
-      ? endpoint.length - 1
-      : endpoint.length;
-    if (normalizedEndpoint.length < rawLen) {
-      log.warn(
-        "Endpoint includes the /api/0/ prefix which is added automatically — stripping it to avoid a doubled path"
+    // Compare against the cleaned endpoint (line breaks removed, trimmed,
+    // leading slash removed) since normalizeEndpoint also strips copy-paste
+    // artifacts before the api/0/ check. Without this, line-break removal
+    // alone would shrink the length and trigger a false api/0/ warning.
+    const cleaned = endpoint.replace(LINE_BREAK_PATTERN, "").trim();
+    const baseLen = cleaned.startsWith("/")
+      ? cleaned.length - 1
+      : cleaned.length;
+    if (normalizedEndpoint.length < baseLen) {
+      // Silent auto-fix — not a warning. Users commonly copy/paste URLs
+      // that include the /api/0/ prefix; we strip it transparently and
+      // only surface the detail at debug level for troubleshooting
+      // (getsentry/cli#785 item #11).
+      log.debug(
+        "Stripped /api/0/ prefix from endpoint (auto-added by the API client)"
       );
     }
     const { body, params } = await resolveBody(flags, stdin);
@@ -1215,6 +1259,17 @@ export const apiCommand = buildCommand({
 
     if (verbose) {
       logResponse(response);
+    }
+
+    // Record API error attributes on the active span for Discover queryability.
+    // OutputError is excluded from Sentry.captureException (it's an intentional
+    // non-zero exit, not a bug), so span attributes are the only telemetry signal.
+    if (isError) {
+      recordApiErrorAttributes(
+        response.status,
+        normalizedEndpoint,
+        flags.method
+      );
     }
 
     // Silent mode — no output, just exit code

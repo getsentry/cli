@@ -1,13 +1,13 @@
 ---
 name: sentry-cli-auth
-version: 0.21.0-dev.0
-description: Authenticate with Sentry via OAuth or API tokens
+version: 0.29.0-dev.0
+description: Authenticate with Sentry
 requires:
   bins: ["sentry"]
   auth: true
 ---
 
-# Authentication Commands
+# Auth Commands
 
 Authenticate with Sentry
 
@@ -23,13 +23,11 @@ Authenticate with Sentry
 **Examples:**
 
 ```bash
-# OAuth device flow (recommended)
 sentry auth login
 
-# Using an API token
-sentry auth login --token YOUR_TOKEN
+sentry auth login --token YOUR_SENTRY_API_TOKEN
 
-SENTRY_URL=https://sentry.example.com SENTRY_CLIENT_ID=your-client-id sentry auth login
+SENTRY_URL=https://sentry.example.com sentry auth login
 
 SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
 ```
@@ -69,11 +67,23 @@ View authentication status
 
 ```bash
 sentry auth status
+
+# Show the raw token
+sentry auth status --show-token
+
+# View current user
+sentry auth whoami
 ```
 
 ### `sentry auth token`
 
 Print the stored authentication token
+
+**Examples:**
+
+```bash
+sentry auth token
+```
 
 ### `sentry auth whoami`
 

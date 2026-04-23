@@ -33,7 +33,7 @@ type Completion = {
 /**
  * Main entry point for `sentry __complete`.
  *
- * Called from the bin.ts fast-path. Parses the shell words to determine
+ * Called from the cli.ts fast-path. Parses the shell words to determine
  * what kind of completion is needed, queries the cache, and writes
  * results to stdout.
  *
@@ -89,9 +89,13 @@ export function handleComplete(args: string[]): void {
  */
 export const ORG_PROJECT_COMMANDS = new Set([
   "issue list",
+  "issue events",
   "issue view",
   "issue explain",
   "issue plan",
+  "issue resolve",
+  "issue unresolve",
+  "issue merge",
   "project list",
   "project view",
   "project delete",
@@ -102,9 +106,12 @@ export const ORG_PROJECT_COMMANDS = new Set([
   "span list",
   "span view",
   "event view",
+  "event list",
   "log list",
   "log view",
   "dashboard list",
+  "dashboard view",
+  "dashboard create",
 ]);
 
 /**
@@ -114,6 +121,14 @@ export const ORG_PROJECT_COMMANDS = new Set([
  */
 export const ORG_ONLY_COMMANDS = new Set([
   "org view",
+  "release list",
+  "release view",
+  "release create",
+  "release finalize",
+  "release delete",
+  "release deploy",
+  "release deploys",
+  "release set-commits",
   "team list",
   "repo list",
   "trial list",

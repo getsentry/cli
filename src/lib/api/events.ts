@@ -1,23 +1,28 @@
 /**
  * Event API functions
  *
- * Functions for retrieving and resolving Sentry events.
+ * Functions for retrieving, listing, and resolving Sentry events.
  */
 
 import {
+  listAnIssue_sEvents,
   retrieveAnEventForAProject,
   retrieveAnIssueEvent,
   resolveAnEventId as sdkResolveAnEventId,
 } from "@sentry/api";
 import pLimit from "p-limit";
 
-import type { SentryEvent } from "../../types/index.js";
+import type { IssueEvent, SentryEvent } from "../../types/index.js";
 
 import { ApiError, AuthError } from "../errors.js";
 
 import {
+  API_MAX_PER_PAGE,
   getOrgSdkConfig,
+  MAX_PAGINATION_PAGES,
   ORG_FANOUT_CONCURRENCY,
+  type PaginatedResponse,
+  unwrapPaginatedResult,
   unwrapResult,
 } from "./infrastructure.js";
 import { listOrganizations } from "./organizations.js";
@@ -116,6 +121,12 @@ export async function resolveEventInOrg(
   }
 }
 
+/** Options for {@link findEventAcrossOrgs}. */
+export type FindEventAcrossOrgsOptions = {
+  /** Org slugs to skip (already searched by the caller). */
+  excludeOrgs?: string[];
+};
+
 /**
  * Search for an event across all accessible organizations by event ID.
  *
@@ -123,11 +134,19 @@ export async function resolveEventInOrg(
  * Returns the first match found, or null if the event is not accessible.
  *
  * @param eventId - The event ID (UUID) to look up
+ * @param options - Optional settings (e.g., orgs to skip)
  */
 export async function findEventAcrossOrgs(
-  eventId: string
+  eventId: string,
+  options?: FindEventAcrossOrgsOptions
 ): Promise<ResolvedEvent | null> {
-  const orgs = await listOrganizations();
+  const excludeSet = options?.excludeOrgs
+    ? new Set(options.excludeOrgs)
+    : undefined;
+  const allOrgs = await listOrganizations();
+  const orgs = excludeSet
+    ? allOrgs.filter((o) => !excludeSet.has(o.slug))
+    : allOrgs;
 
   const limit = pLimit(ORG_FANOUT_CONCURRENCY);
   const results = await Promise.allSettled(
@@ -151,4 +170,94 @@ export async function findEventAcrossOrgs(
     }
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Issue event listing
+// ---------------------------------------------------------------------------
+
+/** Options for {@link listIssueEvents}. */
+export type ListIssueEventsOptions = {
+  /** Max items to return (total across all auto-paginated pages). @default 25 */
+  limit?: number;
+  /** Search query (Sentry search syntax). */
+  query?: string;
+  /** Include full event body (stacktraces, breadcrumbs). */
+  full?: boolean;
+  /** Pagination cursor from a previous response. */
+  cursor?: string;
+  /** Relative time period (e.g., "7d", "24h"). Overrides start/end on the API. */
+  statsPeriod?: string;
+  /** Absolute start datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  start?: string;
+  /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  end?: string;
+};
+
+/**
+ * List events for a specific issue.
+ *
+ * Uses the SDK's `listAnIssue_sEvents` endpoint with region-aware routing.
+ * When `limit` exceeds {@link API_MAX_PER_PAGE} (100), auto-paginates through
+ * multiple API calls to fill the requested limit, bounded by {@link MAX_PAGINATION_PAGES}.
+ *
+ * @param orgSlug - Organization slug for region routing
+ * @param issueId - Numeric issue ID
+ * @param options - Query and pagination options
+ * @returns Paginated response with events array and optional next cursor
+ */
+export async function listIssueEvents(
+  orgSlug: string,
+  issueId: string,
+  options: ListIssueEventsOptions = {}
+): Promise<PaginatedResponse<IssueEvent[]>> {
+  const { limit = 25, query, full, cursor, statsPeriod, start, end } = options;
+
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const allEvents: IssueEvent[] = [];
+  let currentCursor = cursor;
+  let nextCursor: string | undefined;
+
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
+    const result = await listAnIssue_sEvents({
+      ...config,
+      path: {
+        organization_id_or_slug: orgSlug,
+        issue_id: Number(issueId),
+      },
+      query: {
+        query: query || undefined,
+        full,
+        cursor: currentCursor,
+        statsPeriod,
+        start,
+        end,
+      },
+    });
+
+    const paginated = unwrapPaginatedResult(
+      result as
+        | { data: IssueEvent[]; error: undefined }
+        | { data: undefined; error: unknown },
+      "Failed to list issue events"
+    );
+
+    allEvents.push(...(paginated.data as IssueEvent[]));
+    nextCursor = paginated.nextCursor;
+
+    if (allEvents.length >= limit || !nextCursor) {
+      break;
+    }
+    currentCursor = nextCursor;
+  }
+
+  // Trim to exact limit. Unlike listIssuesAllPages (which controls per_page),
+  // the issue events endpoint has no per-page parameter, so the API may return
+  // more items than requested. We preserve nextCursor so the command-level
+  // cursor stack can navigate to subsequent pages.
+  const trimmed =
+    allEvents.length > limit ? allEvents.slice(0, limit) : allEvents;
+
+  return { data: trimmed, nextCursor };
 }

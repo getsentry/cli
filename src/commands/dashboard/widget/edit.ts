@@ -16,29 +16,37 @@ import {
   type DashboardDetail,
   type DashboardWidget,
   type DashboardWidgetQuery,
+  FALLBACK_LAYOUT,
   parseAggregate,
   parseSortExpression,
   parseWidgetInput,
   prepareDashboardForUpdate,
   prepareWidgetQueries,
   validateAggregateNames,
+  validateWidgetLayout,
+  type WidgetLayoutFlags,
 } from "../../../types/dashboard.js";
 import {
+  applyGroupLimitAutoDefault,
+  enrichDashboardError,
+  normalizeDataset,
   parseDashboardPositionalArgs,
   resolveDashboardId,
   resolveOrgFromTarget,
   resolveWidgetIndex,
+  validateSortReferencesAggregate,
   validateWidgetEnums,
   type WidgetQueryFlags,
 } from "../resolve.js";
 
-type EditFlags = WidgetQueryFlags & {
-  readonly index?: number;
-  readonly title?: string;
-  readonly "new-title"?: string;
-  readonly json: boolean;
-  readonly fields?: string[];
-};
+type EditFlags = WidgetQueryFlags &
+  WidgetLayoutFlags & {
+    readonly index?: number;
+    readonly title?: string;
+    readonly "new-title"?: string;
+    readonly json: boolean;
+    readonly fields?: string[];
+  };
 
 type EditResult = {
   dashboard: DashboardDetail;
@@ -72,15 +80,39 @@ function mergeQueries(
   ];
 }
 
-/** Build the replacement widget object by merging flags over existing */
-function buildReplacement(
-  flags: EditFlags,
+/** Merge layout flags over existing layout, returning the result or the existing layout unchanged */
+function mergeLayout(
+  flags: WidgetLayoutFlags,
   existing: DashboardWidget
-): DashboardWidget {
-  const mergedQueries = mergeQueries(flags, existing.queries?.[0]);
+): DashboardWidget["layout"] {
+  const hasChange =
+    flags.col !== undefined ||
+    flags.row !== undefined ||
+    flags.width !== undefined ||
+    flags.height !== undefined;
 
-  // Validate aggregates when query or dataset changes — prevents broken widgets
-  // (e.g. switching --dataset from discover to spans with discover-only aggregates)
+  if (!hasChange) {
+    return existing.layout;
+  }
+
+  return {
+    ...(existing.layout ?? FALLBACK_LAYOUT),
+    ...(flags.col !== undefined && { x: flags.col }),
+    ...(flags.row !== undefined && { y: flags.row }),
+    ...(flags.width !== undefined && { w: flags.width }),
+    ...(flags.height !== undefined && { h: flags.height }),
+  };
+}
+
+/**
+ * Validate enum and aggregate constraints on the effective (merged) widget state.
+ * Extracted from buildReplacement to stay under Biome's complexity limit.
+ */
+function validateEnumsAndAggregates(
+  flags: EditFlags,
+  existing: DashboardWidget,
+  mergedQueries: DashboardWidgetQuery[] | undefined
+): void {
   const newDataset = flags.dataset ?? existing.widgetType;
   const aggregatesToValidate =
     mergedQueries?.[0]?.aggregates ?? existing.queries?.[0]?.aggregates;
@@ -88,24 +120,59 @@ function buildReplacement(
     validateAggregateNames(aggregatesToValidate, newDataset);
   }
 
-  const limit = flags.limit !== undefined ? flags.limit : existing.limit;
-
-  const effectiveDisplay = flags.display ?? existing.displayType;
-  const effectiveDataset = flags.dataset ?? existing.widgetType;
-
-  // Re-validate after merging with existing values. validateWidgetEnums only
-  // checks the cross-constraint when both args are provided, so it misses
-  // e.g. `--dataset preprod-app-size` on a widget that's already `table`.
-  // validateWidgetEnums itself skips untracked display types (text, wheel, etc.).
   if (flags.display || flags.dataset) {
+    const effectiveDisplay = flags.display ?? existing.displayType;
+    const effectiveDataset = flags.dataset ?? existing.widgetType;
     validateWidgetEnums(effectiveDisplay, effectiveDataset);
   }
+}
+
+/**
+ * Validate sort constraints on the effective (merged) widget state.
+ *
+ * Only runs when the user explicitly passes --sort — not when merely changing
+ * --query (which may leave the existing auto-defaulted sort stale), and not
+ * when preserving existing widget state which may predate these validations.
+ */
+function validateQueryConstraints(
+  flags: EditFlags,
+  existing: DashboardWidget,
+  mergedQueries: DashboardWidgetQuery[] | undefined
+): void {
+  if (!flags.sort) {
+    return;
+  }
+  const orderby = mergedQueries?.[0]?.orderby ?? existing.queries?.[0]?.orderby;
+  const aggregates =
+    mergedQueries?.[0]?.aggregates ?? existing.queries?.[0]?.aggregates ?? [];
+  if (orderby && aggregates.length > 0) {
+    validateSortReferencesAggregate(orderby, aggregates);
+  }
+}
+
+/** Build the replacement widget object by merging flags over existing */
+function buildReplacement(
+  flags: EditFlags,
+  existing: DashboardWidget
+): DashboardWidget {
+  const mergedQueries = mergeQueries(flags, existing.queries?.[0]);
+  const baseLimit = flags.limit !== undefined ? flags.limit : existing.limit;
+  const columns =
+    mergedQueries?.[0]?.columns ?? existing.queries?.[0]?.columns ?? [];
+  const limit = applyGroupLimitAutoDefault(
+    flags["group-by"],
+    columns,
+    baseLimit
+  );
+
+  validateEnumsAndAggregates(flags, existing, mergedQueries);
+  validateQueryConstraints(flags, existing, mergedQueries);
 
   const raw: Record<string, unknown> = {
     title: flags["new-title"] ?? existing.title,
-    displayType: effectiveDisplay,
+    displayType: flags.display ?? existing.displayType,
     queries: mergedQueries ?? existing.queries,
-    layout: existing.layout,
+    layout: mergeLayout(flags, existing),
   };
   // Only set widgetType if explicitly provided via --dataset or already on the widget.
   // Avoids parseWidgetInput defaulting to "spans" for widgets without a widgetType.
@@ -114,7 +181,7 @@ function buildReplacement(
   } else if (existing.widgetType) {
     raw.widgetType = existing.widgetType;
   }
-  if (limit !== undefined) {
+  if (limit !== undefined && limit !== null) {
     raw.limit = limit;
   }
 
@@ -129,10 +196,13 @@ export const editCommand = buildCommand({
       "The dashboard can be specified by numeric ID or title.\n" +
       "Identify the widget by --index (0-based) or --title.\n" +
       "Only provided flags are changed — omitted values are preserved.\n\n" +
+      "Layout flags (--col/-x, --row/-y, --width, --height) control widget position\n" +
+      "and size in the 6-column dashboard grid.\n\n" +
       "Examples:\n" +
       "  sentry dashboard widget edit 12345 --title 'Error Rate' --display bar\n" +
       "  sentry dashboard widget edit 'My Dashboard' --index 0 --query p95:span.duration\n" +
-      "  sentry dashboard widget edit 12345 --title 'Old Name' --new-title 'New Name'",
+      "  sentry dashboard widget edit 12345 --title 'Old Name' --new-title 'New Name'\n" +
+      "  sentry dashboard widget edit 12345 --index 0 --col 0 --row 0 --width 6 --height 2",
   },
   output: {
     human: formatWidgetEdited,
@@ -141,6 +211,7 @@ export const editCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
+        placeholder: "org/project/dashboard",
         brief: "[<org/project>] <dashboard-id-or-title>",
         parse: String,
       },
@@ -174,7 +245,8 @@ export const editCommand = buildCommand({
       dataset: {
         kind: "parsed",
         parse: String,
-        brief: "Widget dataset (default: spans)",
+        brief:
+          "Widget dataset (default: spans). Accepts canonical names and API synonyms: spans, error-events/errors, transaction-like/transactions, tracemetrics/metrics, logs, issue, discover",
         optional: true,
       },
       query: {
@@ -209,6 +281,30 @@ export const editCommand = buildCommand({
         brief: "Result limit",
         optional: true,
       },
+      col: {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Grid column position (0-based, 0–5)",
+        optional: true,
+      },
+      row: {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Grid row position (0-based)",
+        optional: true,
+      },
+      width: {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Widget width in grid columns (1–6)",
+        optional: true,
+      },
+      height: {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Widget height in grid rows (min 1)",
+        optional: true,
+      },
     },
     aliases: {
       i: "index",
@@ -219,6 +315,8 @@ export const editCommand = buildCommand({
       g: "group-by",
       s: "sort",
       n: "limit",
+      x: "col",
+      y: "row",
     },
   },
   async *func(this: SentryContext, flags: EditFlags, ...args: string[]) {
@@ -233,7 +331,19 @@ export const editCommand = buildCommand({
       );
     }
 
-    validateWidgetEnums(flags.display, flags.dataset);
+    // Resolve dataset aliases (e.g. "errors" → "error-events") once, up front.
+    // Replace flags.dataset with the canonical value so every downstream
+    // consumer — validateEnumsAndAggregates, validateAggregateNames, and the
+    // PUT body — sees the normalized name. Without this, dataset-aware
+    // aggregate validation (e.g. failure_rate for error-events) would fail
+    // when the user passes --dataset errors.
+    const normalizedDataset = normalizeDataset(flags.dataset);
+    const normalizedFlags: EditFlags =
+      normalizedDataset === flags.dataset
+        ? flags
+        : { ...flags, dataset: normalizedDataset };
+
+    validateWidgetEnums(normalizedFlags.display, normalizedFlags.dataset);
 
     const { dashboardRef, targetArg } = parseDashboardPositionalArgs(args);
     const parsed = parseOrgProjectArg(targetArg);
@@ -245,16 +355,48 @@ export const editCommand = buildCommand({
     const dashboardId = await resolveDashboardId(orgSlug, dashboardRef);
 
     // GET current dashboard → find widget → merge changes → PUT
-    const current = await getDashboard(orgSlug, dashboardId);
+    const current = await getDashboard(orgSlug, dashboardId).catch(
+      (error: unknown) =>
+        enrichDashboardError(error, { orgSlug, dashboardId, operation: "view" })
+    );
     const widgets = current.widgets ?? [];
-    const widgetIndex = resolveWidgetIndex(widgets, flags.index, flags.title);
+    const widgetIndex = resolveWidgetIndex(
+      widgets,
+      normalizedFlags.index,
+      normalizedFlags.title
+    );
 
     const updateBody = prepareDashboardForUpdate(current);
     const existing = updateBody.widgets[widgetIndex] as DashboardWidget;
-    const replacement = buildReplacement(flags, existing);
+
+    // Validate individual layout flag ranges early (catches --col -1, --width 7, etc.)
+    validateWidgetLayout(normalizedFlags, existing.layout);
+
+    const replacement = buildReplacement(normalizedFlags, existing);
+
+    // Re-validate the final merged layout when the existing widget had no layout
+    // and FALLBACK_LAYOUT was used — the early check couldn't cross-validate
+    // because the fallback dimensions weren't known yet.
+    if (replacement.layout && !existing.layout) {
+      validateWidgetLayout(
+        { col: replacement.layout.x, width: replacement.layout.w },
+        replacement.layout
+      );
+    }
+
     updateBody.widgets[widgetIndex] = replacement;
 
-    const updated = await updateDashboard(orgSlug, dashboardId, updateBody);
+    const updated = await updateDashboard(
+      orgSlug,
+      dashboardId,
+      updateBody
+    ).catch((error: unknown) =>
+      enrichDashboardError(error, {
+        orgSlug,
+        dashboardId,
+        operation: "update",
+      })
+    );
     const url = buildDashboardUrl(orgSlug, dashboardId);
 
     yield new CommandOutput({

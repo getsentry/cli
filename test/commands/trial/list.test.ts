@@ -232,7 +232,7 @@ describe("trial list command", () => {
 
     await expect(
       func.call(context, { json: false }, undefined)
-    ).rejects.toThrow("Organization");
+    ).rejects.toThrow("organization");
   });
 
   test("includes hint about starting trial when available product trials exist", async () => {

@@ -1,4 +1,4 @@
-import { buildRouteMap } from "@stricli/core";
+import { buildRouteMap } from "../../lib/route-map.js";
 import { createCommand } from "./create.js";
 import { listCommand } from "./list.js";
 import { viewCommand } from "./view.js";
@@ -11,6 +11,7 @@ export const dashboardRoute = buildRouteMap({
     create: createCommand,
     widget: widgetRoute,
   },
+  defaultCommand: "view",
   docs: {
     brief: "Manage Sentry dashboards",
     fullDescription:

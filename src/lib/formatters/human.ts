@@ -28,6 +28,7 @@ import type {
   TraceSpan,
   Writer,
 } from "../../types/index.js";
+import { resolveOrgDisplayName } from "../api-client.js";
 import { withSerializeSpan } from "../telemetry.js";
 import { type FixabilityTier, muted } from "./colors.js";
 import {
@@ -1126,6 +1127,18 @@ function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
  */
 const MAX_ROOT_SPANS = 50;
 
+/** Options for {@link formatSimpleSpanTree}. */
+type SpanTreeOptions = {
+  /**
+   * When true, the tree was produced by a project-filtered API call.
+   * Root spans with `parent_span_id` are annotated as having a parent
+   * in another project. Without this flag the annotation is suppressed
+   * because root spans in unfiltered traces can legitimately have
+   * `parent_span_id` at service boundaries.
+   */
+  projectFiltered?: boolean;
+};
+
 /**
  * Format trace as a simple tree with "op — description (duration)" per span.
  * Durations are shown when available, omitted otherwise.
@@ -1136,12 +1149,14 @@ const MAX_ROOT_SPANS = 50;
  * @param traceId - The trace ID for the header
  * @param spans - Root-level spans from the /trace/ API
  * @param maxDepth - Maximum nesting depth to display (default: unlimited). 0 = disabled, Infinity = unlimited.
+ * @param options - Optional display options (e.g., project filter indicator)
  * @returns Array of formatted lines ready for display
  */
 export function formatSimpleSpanTree(
   traceId: string,
   spans: TraceSpan[],
-  maxDepth = Number.MAX_SAFE_INTEGER
+  maxDepth = Number.MAX_SAFE_INTEGER,
+  options: SpanTreeOptions = {}
 ): string[] {
   return withSerializeSpan("formatSimpleSpanTree", () => {
     // maxDepth = 0 means disabled (caller should skip, but handle gracefully)
@@ -1159,6 +1174,15 @@ export function formatSimpleSpanTree(
     lines.push(plainSafeMuted("─── Span Tree ───"));
     lines.push("");
     lines.push(`${plainSafeMuted("Trace —")} ${traceId}`);
+
+    // When API filters by project, root spans may have a parent_span_id
+    // pointing to a span in another project that wasn't returned.
+    // Only show this annotation when a project filter is active — in
+    // unfiltered traces, root spans at service boundaries legitimately
+    // have parent_span_id without implying missing data.
+    if (options.projectFiltered && spans.some((s) => s.parent_span_id)) {
+      lines.push(plainSafeMuted("⤴ parent span in another project"));
+    }
 
     const totalRootSpans = spans.length;
     const truncated = totalRootSpans > MAX_ROOT_SPANS;
@@ -1514,9 +1538,13 @@ export function formatProjectDetails(
     kvRows.push(["Created", new Date(project.dateCreated).toLocaleString()]);
   }
   if (project.organization) {
+    const orgName = resolveOrgDisplayName(
+      project.organization.slug,
+      project.organization.name
+    );
     kvRows.push([
       "Organization",
-      `${escapeMarkdownInline(project.organization.name)} (${safeCodeSpan(project.organization.slug)})`,
+      `${escapeMarkdownInline(orgName)} (${safeCodeSpan(project.organization.slug)})`,
     ]);
   }
   if (project.firstEvent) {
@@ -1600,21 +1628,44 @@ export function maskToken(token: string): string {
  * @param seconds - Duration in seconds
  * @returns Human-readable duration (e.g., "5 minutes", "2 hours", "1 hour and 30 minutes")
  */
+/** Format a count with its unit, handling singular/plural */
+function pluralUnit(count: number, unit: string): string {
+  return `${count} ${unit}${count !== 1 ? "s" : ""}`;
+}
+
+/** Format a major + minor unit pair, omitting minor when zero */
+function durationPair(
+  major: number,
+  majorUnit: string,
+  minor: number,
+  minorUnit: string
+): string {
+  if (minor === 0) {
+    return pluralUnit(major, majorUnit);
+  }
+  return `${pluralUnit(major, majorUnit)} and ${pluralUnit(minor, minorUnit)}`;
+}
+
 export function formatDuration(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
 
   if (minutes < 60) {
-    return `${minutes} minute${minutes !== 1 ? "s" : ""}`;
+    return pluralUnit(minutes, "minute");
   }
 
   const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
 
-  if (remainingMinutes === 0) {
-    return `${hours} hour${hours !== 1 ? "s" : ""}`;
+  if (hours < 24) {
+    return durationPair(hours, "hour", minutes % 60, "minute");
   }
 
-  return `${hours} hour${hours !== 1 ? "s" : ""} and ${remainingMinutes} minute${remainingMinutes !== 1 ? "s" : ""}`;
+  const days = Math.floor(hours / 24);
+
+  if (days < 7) {
+    return durationPair(days, "day", hours % 24, "hour");
+  }
+
+  return durationPair(Math.floor(days / 7), "week", days % 7, "day");
 }
 
 /**
@@ -1803,6 +1854,10 @@ export function formatAuthStatus(data: AuthStatusData): string {
     lines.push(mdKvTable(authRows));
   }
 
+  if (data.envToken) {
+    lines.push(formatEnvTokenSection(data.envToken));
+  }
+
   if (data.defaults) {
     lines.push(formatDefaultsSection(data.defaults));
   }
@@ -1812,6 +1867,24 @@ export function formatAuthStatus(data: AuthStatusData): string {
   }
 
   return renderMarkdown(lines.join("\n"));
+}
+
+/**
+ * Format the env token status section.
+ * Shows whether the env token is active or bypassed, and how many endpoints
+ * have been marked insufficient.
+ */
+function formatEnvTokenSection(
+  envToken: NonNullable<AuthStatusData["envToken"]>
+): string {
+  const status = envToken.active
+    ? "active"
+    : "set but not used (using OAuth credentials)";
+  const rows: [string, string][] = [
+    ["Env var", safeCodeSpan(envToken.envVar)],
+    ["Status", status],
+  ];
+  return `\n${mdKvTable(rows, "Environment Token")}`;
 }
 
 // Project Creation Formatting
@@ -2080,6 +2153,101 @@ export function formatFixResult(data: FixResult): string {
 /** Structured upgrade result (imported from the command module) */
 type UpgradeResult = import("../../commands/cli/upgrade.js").UpgradeResult;
 
+/** Category → markdown heading for changelog sections */
+type ChangeCategory = import("../release-notes.js").ChangeCategory;
+
+/** Heading text for each changelog category */
+const CATEGORY_HEADINGS: Record<ChangeCategory, string> = {
+  features: "#### New Features ✨",
+  fixes: "#### Bug Fixes 🐛",
+  performance: "#### Performance ⚡",
+};
+
+/**
+ * Max terminal height multiplier for changelog clamping.
+ *
+ * When the total rendered changelog would exceed this fraction of the
+ * terminal height, items are truncated to keep output scannable.
+ */
+const CHANGELOG_HEIGHT_FACTOR = 1.3;
+
+/** Lines consumed by the upgrade status header/metadata above the changelog */
+const CHANGELOG_HEADER_OVERHEAD = 6;
+
+/** Minimum rendered changelog lines to show even on tiny terminals */
+const MIN_CHANGELOG_LINES = 5;
+
+/** Default max rendered lines for non-TTY output (no terminal height available) */
+const DEFAULT_MAX_CHANGELOG_LINES = 30;
+
+/**
+ * Compute the maximum number of changelog lines based on terminal height.
+ *
+ * Uses ~1.3x the terminal height minus header overhead. Returns a generous
+ * default for non-TTY output where terminal height is unknown.
+ */
+function getMaxChangelogLines(): number {
+  // process.stdout.rows is allowed in formatters (not in command files)
+  const termHeight = process.stdout.rows;
+  if (!termHeight) {
+    return DEFAULT_MAX_CHANGELOG_LINES;
+  }
+  return Math.max(
+    MIN_CHANGELOG_LINES,
+    Math.floor(termHeight * CHANGELOG_HEIGHT_FACTOR) - CHANGELOG_HEADER_OVERHEAD
+  );
+}
+
+/**
+ * Format the changelog section as markdown for rendering.
+ *
+ * Re-serializes the filtered section markdown with category headings so
+ * that `renderMarkdown()` applies consistent heading/list styling.
+ * Clamps the rendered output to fit ~1.3x the terminal height.
+ *
+ * @param data - Upgrade result with changelog
+ * @returns Rendered changelog string, or empty string if no changelog
+ */
+function formatChangelog(data: UpgradeResult): string {
+  if (!data.changelog || data.changelog.sections.length === 0) {
+    return "";
+  }
+
+  const { changelog } = data;
+  const lines: string[] = [""];
+
+  for (const section of changelog.sections) {
+    lines.push(CATEGORY_HEADINGS[section.category]);
+    lines.push(section.markdown);
+  }
+
+  if (changelog.truncated) {
+    const more = changelog.originalCount - changelog.totalItems;
+    lines.push(
+      `<muted>...and ${more} more changes — https://github.com/getsentry/cli/releases</muted>`
+    );
+  }
+
+  // Render through the markdown pipeline, then clamp to terminal height
+  const rendered = renderMarkdown(lines.join("\n"));
+  const renderedLines = rendered.split("\n");
+  const maxLines = getMaxChangelogLines();
+
+  if (renderedLines.length <= maxLines) {
+    return rendered;
+  }
+
+  // Truncate and add a "more" indicator
+  const clamped = renderedLines.slice(0, maxLines);
+  const remaining = changelog.originalCount - changelog.totalItems;
+  const moreText =
+    remaining > 0
+      ? "...and more — https://github.com/getsentry/cli/releases"
+      : "...truncated — https://github.com/getsentry/cli/releases";
+  clamped.push(isPlainOutput() ? moreText : muted(moreText));
+  return clamped.join("\n");
+}
+
 /** Action descriptions for human-readable output */
 const ACTION_DESCRIPTIONS: Record<UpgradeResult["action"], string> = {
   upgraded: "Upgraded",
@@ -2159,7 +2327,15 @@ export function formatUpgradeResult(data: UpgradeResult): string {
     }
   }
 
-  return renderMarkdown(lines.join("\n"));
+  const result = renderMarkdown(lines.join("\n"));
+
+  // Append changelog if available
+  const changelogOutput = formatChangelog(data);
+  if (changelogOutput) {
+    return `${result}\n\n${changelogOutput}\n`;
+  }
+
+  return result;
 }
 
 // Dashboard formatters
@@ -2191,6 +2367,36 @@ export function formatWidgetAdded(result: {
   const widgetCount = result.dashboard.widgets?.length ?? 0;
   const lines: string[] = [
     `Added widget '${escapeMarkdownInline(result.widget.title)}' to dashboard (now ${widgetCount} widgets)`,
+  ];
+  const layoutLine = formatWidgetLayoutLine(result.widget);
+  if (layoutLine) {
+    lines.push("", layoutLine);
+  }
+  lines.push("", `URL: ${result.url}`);
+  return renderMarkdown(lines.join("\n"));
+}
+
+/**
+ * Format a widget deletion result for human-readable output.
+ * Supports dry-run mode — shows what would be removed without removing it.
+ */
+export function formatWidgetDeleted(result: {
+  dashboard: DashboardDetail;
+  widgetTitle: string;
+  url: string;
+  dryRun?: boolean;
+}): string {
+  const widgetCount = result.dashboard.widgets?.length ?? 0;
+  if (result.dryRun) {
+    const lines: string[] = [
+      `Would remove widget '${escapeMarkdownInline(result.widgetTitle)}' from dashboard (currently ${widgetCount} widgets)`,
+      "",
+      `URL: ${result.url}`,
+    ];
+    return renderMarkdown(lines.join("\n"));
+  }
+  const lines: string[] = [
+    `Removed widget '${escapeMarkdownInline(result.widgetTitle)}' from dashboard (now ${widgetCount} widgets)`,
     "",
     `URL: ${result.url}`,
   ];
@@ -2198,20 +2404,15 @@ export function formatWidgetAdded(result: {
 }
 
 /**
- * Format a widget deletion result for human-readable output.
+ * Format widget layout as a compact "position (x,y) size w×h" string.
+ * Returns empty string if the widget has no layout.
  */
-export function formatWidgetDeleted(result: {
-  dashboard: DashboardDetail;
-  widgetTitle: string;
-  url: string;
-}): string {
-  const widgetCount = result.dashboard.widgets?.length ?? 0;
-  const lines: string[] = [
-    `Removed widget '${escapeMarkdownInline(result.widgetTitle)}' from dashboard (now ${widgetCount} widgets)`,
-    "",
-    `URL: ${result.url}`,
-  ];
-  return renderMarkdown(lines.join("\n"));
+function formatWidgetLayoutLine(widget: DashboardWidget): string {
+  if (!widget.layout) {
+    return "";
+  }
+  const { x, y, w, h } = widget.layout;
+  return `Layout: position (${x},${y}), size ${w}×${h}`;
 }
 
 /**
@@ -2224,8 +2425,91 @@ export function formatWidgetEdited(result: {
 }): string {
   const lines: string[] = [
     `Updated widget '${escapeMarkdownInline(result.widget.title)}' in dashboard ${result.dashboard.id}`,
-    "",
-    `URL: ${result.url}`,
   ];
+  const layoutLine = formatWidgetLayoutLine(result.widget);
+  if (layoutLine) {
+    lines.push("", layoutLine);
+  }
+  lines.push("", `URL: ${result.url}`);
   return renderMarkdown(lines.join("\n"));
+}
+
+// ---------------------------------------------------------------------------
+// CLI Defaults Formatting
+// ---------------------------------------------------------------------------
+
+/** Structured defaults command result (imported from the command module) */
+type DefaultsResult = import("../../commands/cli/defaults.js").DefaultsResult;
+
+/** Display labels for each default key */
+const DEFAULT_LABELS: Record<string, string> = {
+  organization: "Organization",
+  project: "Project",
+  telemetry: "Telemetry",
+  url: "URL",
+  headers: "Headers",
+};
+
+/**
+ * Describe the effective telemetry source for display.
+ * Shows when an env var overrides the stored preference.
+ */
+function telemetryOverrideNote(
+  effective: DefaultsResult["telemetryEffective"]
+): string {
+  if (!effective?.source.startsWith("env:")) {
+    return "";
+  }
+  const envVar = effective.source.slice("env:".length);
+  return ` ${colorTag("muted", `(overridden: disabled via ${envVar})`)}`;
+}
+
+/** Build the rows for the "show" mode of the defaults command. */
+function buildDefaultsShowRows(data: DefaultsResult): [string, string][] {
+  const d = data.defaults;
+  const notSet = colorTag("muted", "not set");
+  const telLabel = d.telemetry ?? "on (default)";
+
+  return [
+    ["Organization", d.organization ? safeCodeSpan(d.organization) : notSet],
+    ["Project", d.project ? safeCodeSpan(d.project) : notSet],
+    [
+      "Telemetry",
+      `${escapeMarkdownInline(String(telLabel))}${telemetryOverrideNote(data.telemetryEffective)}`,
+    ],
+    ["URL", d.url ? safeCodeSpan(d.url) : notSet],
+    ["Headers", d.headers ? safeCodeSpan(d.headers) : notSet],
+  ];
+}
+
+/**
+ * Format defaults command result as rendered markdown.
+ */
+export function formatDefaultsResult(data: DefaultsResult): string {
+  switch (data.action) {
+    case "show":
+      return renderMarkdown(mdKvTable(buildDefaultsShowRows(data), "Defaults"));
+
+    case "set": {
+      const label =
+        DEFAULT_LABELS[data.changed?.key ?? ""] ?? data.changed?.key;
+      return renderMarkdown(
+        `${colorTag("green", "✓")} Default ${escapeMarkdownInline(label ?? "setting")} set to ${safeCodeSpan(String(data.changed?.newValue))}`
+      );
+    }
+
+    case "clear": {
+      const label =
+        DEFAULT_LABELS[data.changed?.key ?? ""] ?? data.changed?.key;
+      return renderMarkdown(
+        `${colorTag("green", "✓")} Default ${escapeMarkdownInline(label ?? "setting")} cleared`
+      );
+    }
+
+    case "clear-all":
+      return renderMarkdown(`${colorTag("green", "✓")} All defaults cleared`);
+
+    default:
+      return "";
+  }
 }

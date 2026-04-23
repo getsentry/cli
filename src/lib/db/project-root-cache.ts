@@ -10,6 +10,7 @@
 
 import { stat } from "node:fs/promises";
 import type { ProjectRootReason } from "../dsn/project-root.js";
+import { recordCacheHit } from "../telemetry.js";
 import { getDatabase, maybeCleanupCaches } from "./index.js";
 import { runUpsert } from "./utils.js";
 
@@ -58,6 +59,7 @@ export async function getCachedProjectRoot(
     .get(cwd) as ProjectRootCacheRow | undefined;
 
   if (!row) {
+    recordCacheHit("project-root", false);
     return;
   }
 
@@ -67,6 +69,7 @@ export async function getCachedProjectRoot(
   if (now > row.ttl_expires_at) {
     // Cache expired, delete it
     db.query("DELETE FROM project_root_cache WHERE cwd = ?").run(cwd);
+    recordCacheHit("project-root", false);
     return;
   }
 
@@ -78,15 +81,17 @@ export async function getCachedProjectRoot(
     if (currentMtime !== row.cwd_mtime) {
       // Directory structure changed, invalidate cache
       db.query("DELETE FROM project_root_cache WHERE cwd = ?").run(cwd);
+      recordCacheHit("project-root", false);
       return;
     }
   } catch {
     // Directory doesn't exist or can't stat - invalidate cache
     db.query("DELETE FROM project_root_cache WHERE cwd = ?").run(cwd);
+    recordCacheHit("project-root", false);
     return;
   }
 
-  // Cache is valid - update last access time would be here if we tracked it
+  recordCacheHit("project-root", true);
   return {
     projectRoot: row.project_root,
     reason: row.reason as ProjectRootReason,

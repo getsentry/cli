@@ -9,6 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  getCliEnvironment,
   getConfiguredSentryUrl,
   normalizeUrl,
 } from "../../src/lib/constants.js";
@@ -79,6 +80,28 @@ describe("normalizeUrl", () => {
     expect(normalizeUrl("https://sentry.example.com/")).toBe(
       "https://sentry.example.com/"
     );
+  });
+});
+
+describe("getCliEnvironment", () => {
+  test("returns 'development' in dev mode (no build injection)", () => {
+    // CLI_VERSION is "0.0.0-dev" when SENTRY_CLI_VERSION is not injected
+    expect(getCliEnvironment()).toBe("development");
+  });
+
+  test("returns 'development' for '0.0.0-dev'", () => {
+    expect(getCliEnvironment("0.0.0-dev")).toBe("development");
+  });
+
+  test("returns 'nightly' for nightly versions", () => {
+    expect(getCliEnvironment("0.24.0-dev.1740000000")).toBe("nightly");
+    expect(getCliEnvironment("1.0.0-dev.1700000000")).toBe("nightly");
+  });
+
+  test("returns 'production' for stable versions", () => {
+    expect(getCliEnvironment("0.20.0")).toBe("production");
+    expect(getCliEnvironment("1.0.0")).toBe("production");
+    expect(getCliEnvironment("0.23.0")).toBe("production");
   });
 });
 

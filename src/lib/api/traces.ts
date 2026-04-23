@@ -4,6 +4,8 @@
  * Functions for retrieving detailed traces, listing transactions, and listing spans.
  */
 
+import pLimit from "p-limit";
+
 import {
   type SpanListItem,
   type SpansResponse,
@@ -14,6 +16,7 @@ import {
   TransactionsResponseSchema,
 } from "../../types/index.js";
 
+import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
 import { isAllDigits } from "../utils.js";
 
@@ -23,20 +26,95 @@ import {
   parseLinkHeader,
 } from "./infrastructure.js";
 
+const log = logger.withTag("api.traces");
+
+// ---------------------------------------------------------------------------
+// Trace item (span) detail types
+// ---------------------------------------------------------------------------
+
+/**
+ * Attribute names from the trace-items detail endpoint that duplicate
+ * fields already shown in the standard span output (KV table, JSON core
+ * fields) or are EAP storage internals with no diagnostic value.
+ *
+ * Shared between `span view` (JSON `data` dict) and `formatSpanDetails`
+ * (human KV rows) to keep filtering consistent.
+ */
+export const REDUNDANT_DETAIL_ATTRS = new Set([
+  // Timing / storage internals
+  "precise.start_ts",
+  "precise.finish_ts",
+  "received",
+  "hash",
+  "project_id",
+  "client_sample_rate",
+  "server_sample_rate",
+  // Already shown in standard span fields
+  "is_transaction",
+  "span.duration",
+  "span.self_time",
+  "span.op",
+  "span.name",
+  "span.description",
+  "span.category",
+  "parent_span",
+  "transaction",
+  "transaction.op",
+  "transaction.event_id",
+  "transaction.span_id",
+  "trace",
+  "trace.status",
+  "segment.name",
+  "origin",
+  "platform",
+  "sdk.name",
+  "sdk.version",
+  "environment",
+]);
+
+/** A single attribute returned by the trace-items detail endpoint */
+export type TraceItemAttribute = {
+  name: string;
+  type: "str" | "int" | "float" | "bool";
+  value: string | number | boolean;
+};
+
+/** Response from GET /projects/{org}/{project}/trace-items/{itemId}/ */
+export type TraceItemDetail = {
+  itemId: string;
+  timestamp: string;
+  attributes: TraceItemAttribute[];
+  meta: Record<string, unknown>;
+  links: unknown;
+};
+
+/** Options for {@link getDetailedTrace}. */
+type GetDetailedTraceOptions = {
+  /** Extra attribute names to include on each span */
+  additionalAttributes?: string[];
+  /** Numeric project ID to filter spans. Omit or -1 for all projects. */
+  projectId?: number;
+};
+
 /**
  * Get detailed trace with nested children structure.
  * This is an internal endpoint not covered by the public API.
  * Uses region-aware routing for multi-region support.
  *
+ * When `projectId` is provided, the API returns only spans belonging to that
+ * project. Pass `-1` (or omit) to fetch spans from all projects.
+ *
  * @param orgSlug - Organization slug
  * @param traceId - The trace ID (from event.contexts.trace.trace_id)
  * @param timestamp - Unix timestamp (seconds) from the event's dateCreated
+ * @param options - Optional additional attributes and project filter
  * @returns Array of root spans with nested children
  */
 export async function getDetailedTrace(
   orgSlug: string,
   traceId: string,
-  timestamp: number
+  timestamp: number,
+  options: GetDetailedTraceOptions = {}
 ): Promise<TraceSpan[]> {
   const regionUrl = await resolveOrgRegion(orgSlug);
 
@@ -47,12 +125,128 @@ export async function getDetailedTrace(
       params: {
         timestamp,
         limit: 10_000,
-        project: -1,
+        project: options.projectId ?? -1,
+        additional_attributes: options.additionalAttributes,
       },
     }
   );
   return data.map(normalizeTraceSpan);
 }
+
+/**
+ * Fetch full attribute details for a single span.
+ *
+ * Uses the trace-items detail endpoint which returns ALL span attributes
+ * without requiring the caller to enumerate them. This is the same endpoint
+ * the Sentry frontend uses in the span detail sidebar.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @param spanId - The 16-char hex span ID
+ * @param traceId - The parent trace ID (required for lookup)
+ * @returns Full span detail with all attributes
+ */
+export async function getSpanDetails(
+  orgSlug: string,
+  projectSlug: string,
+  spanId: string,
+  traceId: string
+): Promise<TraceItemDetail> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+
+  const { data } = await apiRequestToRegion<TraceItemDetail>(
+    regionUrl,
+    `/projects/${orgSlug}/${projectSlug}/trace-items/${spanId}/`,
+    {
+      params: {
+        trace_id: traceId,
+        item_type: "spans",
+      },
+    }
+  );
+  return data;
+}
+
+// ---------------------------------------------------------------------------
+// Shared span detail helpers
+// ---------------------------------------------------------------------------
+
+/** Concurrency for parallel detail fetches (shared between trace/span view) */
+const SPAN_DETAIL_CONCURRENCY = 15;
+
+/**
+ * Convert a trace-items attribute array into a key-value dict,
+ * filtering out attributes already shown in the standard span fields
+ * and EAP storage internals (tags[], precise timestamps, etc.).
+ */
+export function attributesToDict(
+  attributes: TraceItemDetail["attributes"]
+): Record<string, unknown> {
+  return Object.fromEntries(
+    attributes
+      .filter(
+        (a) =>
+          !(REDUNDANT_DETAIL_ATTRS.has(a.name) || a.name.startsWith("tags["))
+      )
+      .map((a) => [a.name, a.value])
+  );
+}
+
+/** Options for {@link fetchMultiSpanDetails} */
+export type FetchMultiSpanDetailsOptions = {
+  /** Organization slug */
+  org: string;
+  /** Project slug to use when a span has no project_slug */
+  fallbackProject: string;
+  /** The parent trace ID (required by the API) */
+  traceId: string;
+  /** Callback fired after each successful fetch for progress reporting */
+  onProgress?: (done: number, total: number) => void;
+};
+
+/**
+ * Fetch full attribute details for multiple spans in parallel.
+ *
+ * Uses p-limit to cap concurrency at {@link SPAN_DETAIL_CONCURRENCY}.
+ * Failures for individual spans are logged as warnings — callers
+ * still get partial results for the spans that succeeded.
+ *
+ * @param spans - Spans to fetch details for (must have span_id and optionally project_slug)
+ * @param options - Org, project, traceId, and optional progress callback
+ * @returns Map of span_id to detail
+ */
+export async function fetchMultiSpanDetails(
+  spans: Array<{ span_id: string; project_slug?: string }>,
+  options: FetchMultiSpanDetailsOptions
+): Promise<Map<string, TraceItemDetail>> {
+  const { org, fallbackProject, traceId, onProgress } = options;
+  const limit = pLimit(SPAN_DETAIL_CONCURRENCY);
+  const details = new Map<string, TraceItemDetail>();
+  let completed = 0;
+  const total = spans.length;
+
+  await limit.map(spans, async (span) => {
+    try {
+      const detail = await getSpanDetails(
+        org,
+        span.project_slug || fallbackProject,
+        span.span_id,
+        traceId
+      );
+      details.set(span.span_id, detail);
+    } catch {
+      log.warn(`Could not fetch details for span ${span.span_id}`);
+    }
+    completed += 1;
+    onProgress?.(completed, total);
+  });
+
+  return details;
+}
+
+// ---------------------------------------------------------------------------
+// Normalization
+// ---------------------------------------------------------------------------
 
 /**
  * The trace detail API (`/trace/{id}/`) returns each span's unique identifier
@@ -92,6 +286,10 @@ type ListTransactionsOptions = {
   statsPeriod?: string;
   /** Pagination cursor to resume from a previous page */
   cursor?: string;
+  /** Absolute start datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  start?: string;
+  /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  end?: string;
 };
 
 /**
@@ -133,7 +331,12 @@ export async function listTransactions(
           // omitting the parameter.
           query: fullQuery || undefined,
           per_page: options.limit || 10,
-          statsPeriod: options.statsPeriod ?? "7d",
+          statsPeriod:
+            options.start || options.end
+              ? undefined
+              : (options.statsPeriod ?? "7d"),
+          start: options.start,
+          end: options.end,
           sort:
             options.sort === "duration"
               ? "-transaction.duration"
@@ -177,6 +380,12 @@ type ListSpansOptions = {
   statsPeriod?: string;
   /** Pagination cursor to resume from a previous page */
   cursor?: string;
+  /** Additional field names to request from the API beyond SPAN_FIELDS */
+  extraFields?: string[];
+  /** Absolute start datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  start?: string;
+  /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  end?: string;
 };
 
 /**
@@ -197,6 +406,10 @@ export async function listSpans(
   const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
   const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
 
+  const fields = options.extraFields?.length
+    ? SPAN_FIELDS.concat(options.extraFields)
+    : SPAN_FIELDS;
+
   const regionUrl = await resolveOrgRegion(orgSlug);
 
   const { data: response, headers } = await apiRequestToRegion<SpansResponse>(
@@ -205,11 +418,16 @@ export async function listSpans(
     {
       params: {
         dataset: "spans",
-        field: SPAN_FIELDS,
+        field: fields,
         project: isNumericProject ? projectSlug : undefined,
         query: fullQuery || undefined,
         per_page: options.limit || 10,
-        statsPeriod: options.statsPeriod ?? "7d",
+        statsPeriod:
+          options.start || options.end
+            ? undefined
+            : (options.statsPeriod ?? "7d"),
+        start: options.start,
+        end: options.end,
         sort: options.sort === "duration" ? "-span.duration" : "-timestamp",
         cursor: options.cursor,
       },

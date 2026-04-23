@@ -4,7 +4,7 @@
  * List and explore individual spans within distributed traces or across projects.
  */
 
-import { buildRouteMap } from "@stricli/core";
+import { buildRouteMap } from "../../lib/route-map.js";
 import { listCommand } from "./list.js";
 import { viewCommand } from "./view.js";
 
@@ -13,6 +13,7 @@ export const spanRoute = buildRouteMap({
     list: listCommand,
     view: viewCommand,
   },
+  defaultCommand: "view",
   docs: {
     brief: "List and view spans in projects or traces",
     fullDescription:

@@ -9,8 +9,8 @@
  * 1. Parse name arg → extract org prefix if present (e.g., "acme/my-app")
  * 2. Resolve org → CLI flag > env vars > config defaults > DSN auto-detection
  * 3. Resolve team → `--team` flag > auto-select single team > auto-create if empty
- * 4. Call `createProject` API
- * 5. Fetch DSN (best-effort) and display results
+ * 4. Call `createProjectWithDsn` (creates project, fetches DSN, builds URL)
+ * 5. Display results
  *
  * When the team is auto-selected or auto-created, the output includes a note
  * so the user knows which team was used and how to change it.
@@ -18,9 +18,9 @@
 
 import type { SentryContext } from "../../context.js";
 import {
-  createProject,
+  type CreatedProjectDetails,
+  createProjectWithDsn,
   listTeams,
-  tryGetPrimaryDsn,
 } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
@@ -40,6 +40,7 @@ import { CommandOutput } from "../../lib/formatters/output.js";
 import { buildMarkdownTable, type Column } from "../../lib/formatters/table.js";
 import { renderTextTable } from "../../lib/formatters/text-table.js";
 import { logger } from "../../lib/logger.js";
+import { DRY_RUN_ALIASES, DRY_RUN_FLAG } from "../../lib/mutate-command.js";
 import {
   COMMON_PLATFORMS,
   isValidPlatform,
@@ -48,12 +49,10 @@ import {
 import { resolveOrg } from "../../lib/resolve-target.js";
 import {
   buildOrgNotFoundError,
-  type ResolvedTeam,
+  type ResolvedConcreteTeam,
   resolveOrCreateTeam,
 } from "../../lib/resolve-team.js";
-import { buildProjectUrl } from "../../lib/sentry-urls.js";
 import { slugify } from "../../lib/utils.js";
-import type { SentryProject } from "../../types/index.js";
 
 const log = logger.withTag("project.create");
 
@@ -226,7 +225,7 @@ async function handleCreateProject404(opts: {
 }
 
 /**
- * Create a project with user-friendly error handling.
+ * Create a project (with DSN + URL) with user-friendly error handling.
  * Wraps API errors with actionable messages instead of raw HTTP status codes.
  */
 async function createProjectWithErrors(opts: {
@@ -235,10 +234,10 @@ async function createProjectWithErrors(opts: {
   name: string;
   platform: string;
   detectedFrom?: string;
-}): Promise<SentryProject> {
+}): Promise<CreatedProjectDetails> {
   const { orgSlug, teamSlug, name, platform } = opts;
   try {
-    return await createProject(orgSlug, teamSlug, { name, platform });
+    return await createProjectWithDsn(orgSlug, teamSlug, { name, platform });
   } catch (error) {
     if (error instanceof ApiError) {
       if (error.status === 409) {
@@ -252,11 +251,23 @@ async function createProjectWithErrors(opts: {
         throw new CliError(buildPlatformError(`${orgSlug}/${name}`, platform));
       }
       if (error.status === 404) {
-        return await handleCreateProject404(opts);
+        // handleCreateProject404 always throws — cast needed because
+        // createProjectWithDsn's return type differs from SentryProject
+        return await (handleCreateProject404(opts) as never);
       }
-      throw new CliError(
-        `Failed to create project '${name}' in ${orgSlug}.\n\n` +
-          `API error (${error.status}): ${error.detail ?? error.message}`
+      // Re-throw as ApiError (not CliError) so the 401–499 user-error
+      // silencing in error-reporting.ts applies — e.g. 403 "Your organization
+      // has disabled this feature for members" is a permission issue, not a
+      // CLI bug. 5xx and network errors still get captured.
+      //
+      // The message is kept short — ApiError.format() appends `detail` and
+      // `endpoint` on separate lines, so embedding them in the message would
+      // duplicate the output.
+      throw new ApiError(
+        `Failed to create project '${name}' in ${orgSlug} (HTTP ${error.status}).`,
+        error.status,
+        error.detail,
+        error.endpoint
       );
     }
     throw error;
@@ -312,14 +323,9 @@ export const createCommand = buildCommand({
         brief: "Team to create the project under",
         optional: true,
       },
-      "dry-run": {
-        kind: "boolean",
-        brief:
-          "Validate inputs and show what would be created without creating it",
-        default: false,
-      },
+      "dry-run": DRY_RUN_FLAG,
     },
-    aliases: { t: "team", n: "dry-run" },
+    aliases: { ...DRY_RUN_ALIASES, t: "team" },
   },
   async *func(
     this: SentryContext,
@@ -364,13 +370,13 @@ export const createCommand = buildCommand({
         name = parsed.projectSlug;
         break;
       case "org-all":
-        throw new ContextError("Project name", USAGE_HINT);
+        throw new ContextError("Project name", USAGE_HINT, []);
       case "auto-detect":
         // Shouldn't happen — nameArg is a required positional
-        throw new ContextError("Project name", USAGE_HINT);
+        throw new ContextError("Project name", USAGE_HINT, []);
       default: {
         const _exhaustive: never = parsed;
-        throw new ContextError("Project name", String(_exhaustive));
+        throw new ContextError("Project name", String(_exhaustive), []);
       }
     }
 
@@ -384,7 +390,7 @@ export const createCommand = buildCommand({
     const orgSlug = resolved.org;
 
     // Resolve team — auto-creates a team if the org has none
-    const team: ResolvedTeam = await resolveOrCreateTeam(orgSlug, {
+    const team: ResolvedConcreteTeam = await resolveOrCreateTeam(orgSlug, {
       team: flags.team,
       detectedFrom: resolved.detectedFrom,
       usageHint: USAGE_HINT,
@@ -411,17 +417,14 @@ export const createCommand = buildCommand({
       return yield new CommandOutput(result);
     }
 
-    // Create the project
-    const project = await createProjectWithErrors({
+    // Create the project, fetch DSN, and build URL
+    const { project, dsn, url } = await createProjectWithErrors({
       orgSlug,
       teamSlug: team.slug,
       name,
       platform,
       detectedFrom: resolved.detectedFrom,
     });
-
-    // Fetch DSN (best-effort)
-    const dsn = await tryGetPrimaryDsn(orgSlug, project.slug);
 
     const result: ProjectCreatedResult = {
       project,
@@ -430,7 +433,7 @@ export const createCommand = buildCommand({
       teamSource: team.source,
       requestedPlatform: platform,
       dsn,
-      url: buildProjectUrl(orgSlug, project.slug),
+      url,
       slugDiverged: project.slug !== expectedSlug,
       expectedSlug,
     };

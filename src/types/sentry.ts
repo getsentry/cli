@@ -15,10 +15,13 @@
 
 import type {
   IssueEventDetailsResponse,
+  DeployResponse as SdkDeployResponse,
   RetrieveAnIssueResponse as SdkIssueDetail,
   ListOrganizations as SdkOrganizationList,
   ProjectKey as SdkProjectKey,
   OrganizationProjectResponseDict as SdkProjectList,
+  OrgReleaseResponse as SdkReleaseResponse,
+  BaseTeam as SdkTeam,
 } from "@sentry/api";
 import { z } from "zod";
 
@@ -55,11 +58,19 @@ export type SentryProject = Partial<SdkProjectListItem> & {
   id: string;
   slug: string;
   name: string;
-  /** Organization context (present in detail responses, absent in list) */
+  /**
+   * Organization context (present in detail responses, absent in list).
+   *
+   * `name` is optional because `getProject()` passes `?collapse=organization`
+   * to skip full-org serialization on the server (~400-500ms faster). The
+   * collapsed payload only carries `{id, slug}`. Callers needing a display
+   * name should use `resolveOrgDisplayName()` which falls back to the
+   * cached organizations list.
+   */
   organization?: {
     id: string;
     slug: string;
-    name: string;
+    name?: string;
     [key: string]: unknown;
   };
   /** Project status (returned by API but not in the OpenAPI spec) */
@@ -68,8 +79,40 @@ export type SentryProject = Partial<SdkProjectListItem> & {
 
 // Issue Constants
 
-export const ISSUE_STATUSES = ["resolved", "unresolved", "ignored"] as const;
+/**
+ * Runtime-iterable tuple of issue status values, tied to the SDK's literal
+ * union in both directions:
+ *
+ * - `satisfies readonly NonNullable<SdkIssueDetail["status"]>[]` catches
+ *   **removals/renames** in the SDK union (a tuple entry that no longer
+ *   exists in the union fails to assign).
+ * - `_IssueStatusParity` below catches **additions** in the SDK union
+ *   (an SDK status missing from our tuple makes the conditional type
+ *   reduce to `never` instead of `true`).
+ *
+ * Together they fail typechecking on any drift, forcing the tuple and the
+ * SDK union to stay in sync.
+ */
+export const ISSUE_STATUSES = [
+  "resolved",
+  "unresolved",
+  "ignored",
+] as const satisfies readonly NonNullable<SdkIssueDetail["status"]>[];
 export type IssueStatus = (typeof ISSUE_STATUSES)[number];
+
+/**
+ * Compile-time exhaustiveness check for `ISSUE_STATUSES`.
+ * If the SDK ever adds a status that isn't in the tuple, this resolves to
+ * `never` and the assignment fails to typecheck. The tuple-wrapping
+ * (`[X] extends [Y]`) prevents distributive inference so the check fires
+ * on the union as a whole.
+ */
+type _IssueStatusParity = [NonNullable<SdkIssueDetail["status"]>] extends [
+  IssueStatus,
+]
+  ? true
+  : never;
+const _ISSUE_STATUS_PARITY: _IssueStatusParity = true;
 
 export const ISSUE_LEVELS = [
   "fatal",
@@ -121,6 +164,75 @@ export type SentryIssue = Omit<Partial<SdkIssueDetail>, "metadata"> & {
   seerFixabilityScore?: number | null;
 };
 
+/**
+ * Zod schema describing the key fields of a {@link SentryIssue} for JSON output.
+ *
+ * This is a documentation-oriented schema — it describes the commonly-available
+ * fields that appear in `--json` output, used by the help system and SKILL.md
+ * generation to inform agents and users about available `--fields` selections.
+ *
+ * Not a validation schema — the actual API response may include additional
+ * SDK-derived fields not listed here. Fields listed as optional may still be
+ * present in most responses; optionality reflects the TypeScript type.
+ */
+export const SentryIssueSchema = z
+  .object({
+    id: z.string().describe("Numeric issue ID"),
+    shortId: z.string().describe("Human-readable short ID (e.g. PROJ-ABC)"),
+    title: z.string().describe("Issue title"),
+    culprit: z.string().optional().describe("Culprit string"),
+    count: z.string().optional().describe("Total event count"),
+    userCount: z.number().optional().describe("Number of affected users"),
+    firstSeen: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("First occurrence (ISO 8601)"),
+    lastSeen: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Most recent occurrence (ISO 8601)"),
+    level: z.string().optional().describe("Severity level"),
+    status: z.string().optional().describe("Issue status"),
+    priority: z.string().optional().describe("Triage priority"),
+    platform: z.string().optional().describe("Platform"),
+    permalink: z.string().optional().describe("URL to the issue in Sentry"),
+    project: z
+      .object({
+        id: z.string(),
+        name: z.string(),
+        slug: z.string(),
+      })
+      .optional()
+      .describe("Project info"),
+    metadata: z
+      .object({
+        type: z.string().optional(),
+        value: z.string().optional(),
+        filename: z.string().optional(),
+        function: z.string().optional(),
+      })
+      .optional()
+      .describe("Issue metadata"),
+    assignedTo: z
+      .unknown()
+      .nullable()
+      .optional()
+      .describe("Assigned user or team"),
+    substatus: z.string().nullable().optional().describe("Issue substatus"),
+    isUnhandled: z
+      .boolean()
+      .optional()
+      .describe("Whether the issue is unhandled"),
+    seerFixabilityScore: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Seer AI fixability score (0-1)"),
+  })
+  .describe("Sentry issue");
+
 // Event
 
 /**
@@ -169,6 +281,93 @@ export type SentryEvent = Omit<
   /** URL/function where the error occurred (not in OpenAPI spec for events) */
   culprit?: string | null;
 };
+
+// Issue Event (list endpoint)
+
+/**
+ * A lightweight event from the issue events list endpoint.
+ *
+ * This is a subset of the full event detail — the list endpoint returns
+ * minimal event metadata without stacktraces, breadcrumbs, or contexts.
+ * Use {@link SentryEvent} for full event details from the detail endpoint.
+ */
+export type IssueEvent = {
+  /** Internal event ID (numeric string) */
+  id: string;
+  /** Event type (e.g., "error", "default", "transaction") */
+  "event.type": string;
+  /** The group (issue) ID this event belongs to */
+  groupID: string | null;
+  /** UUID-format event ID */
+  eventID: string;
+  /** Project ID (numeric string) */
+  projectID: string;
+  /** Event message */
+  message: string;
+  /** Event title (typically the error type + message) */
+  title: string;
+  /** Source location (file:line) where the event originated */
+  location: string | null;
+  /** The culprit (function/module that caused the error) */
+  culprit: string | null;
+  /** User context if available */
+  user: {
+    id?: string | null;
+    email?: string | null;
+    username?: string | null;
+    ip_address?: string | null;
+    name?: string | null;
+  } | null;
+  /** Event tags */
+  tags: Array<{ key: string; value: string }>;
+  /** Platform (e.g., "python", "javascript") */
+  platform: string | null;
+  /** ISO 8601 timestamp when the event was created */
+  dateCreated: string;
+  /** Crash file URL if available */
+  crashFile: string | null;
+  /** Event metadata */
+  metadata: Record<string, unknown> | null;
+};
+
+/**
+ * Zod schema for {@link IssueEvent} — used for `--fields` documentation in `--help`.
+ */
+export const IssueEventSchema = z
+  .object({
+    id: z.string().describe("Internal event ID"),
+    "event.type": z
+      .string()
+      .describe("Event type (error, default, transaction)"),
+    groupID: z.string().nullable().describe("Group (issue) ID"),
+    eventID: z.string().describe("UUID-format event ID"),
+    projectID: z.string().describe("Project ID"),
+    message: z.string().describe("Event message"),
+    title: z.string().describe("Event title"),
+    location: z.string().nullable().describe("Source location (file:line)"),
+    culprit: z.string().nullable().describe("Culprit function/module"),
+    user: z
+      .object({
+        id: z.string().nullish().describe("User ID"),
+        email: z.string().nullish().describe("User email"),
+        username: z.string().nullish().describe("Username"),
+        ip_address: z.string().nullish().describe("IP address"),
+        name: z.string().nullish().describe("User display name"),
+      })
+      .nullable()
+      .describe("User context"),
+    tags: z
+      .array(z.object({ key: z.string(), value: z.string() }))
+      .describe("Event tags"),
+    platform: z
+      .string()
+      .nullable()
+      .describe("Platform (python, javascript, etc.)"),
+    dateCreated: z.string().describe("ISO 8601 creation timestamp"),
+    crashFile: z.string().nullable().describe("Crash file URL"),
+    metadata: z.record(z.unknown()).nullable().describe("Event metadata"),
+  })
+  .describe("Issue event (list endpoint)");
 
 // Project Keys (DSN)
 
@@ -283,36 +482,34 @@ export const ISSUE_SUBSTATUSES = [
 ] as const;
 export type IssueSubstatus = (typeof ISSUE_SUBSTATUSES)[number];
 
-// Release (embedded in Issue)
+// Release
 
-export const ReleaseSchema = z
-  .object({
-    id: z.number().optional(),
-    version: z.string(),
-    shortVersion: z.string().optional(),
-    status: z.string().optional(),
-    dateCreated: z.string().optional(),
-    dateReleased: z.string().nullable().optional(),
-    ref: z.string().nullable().optional(),
-    url: z.string().nullable().optional(),
-    commitCount: z.number().optional(),
-    deployCount: z.number().optional(),
-    authors: z.array(z.unknown()).optional(),
-    projects: z
-      .array(
-        z
-          .object({
-            id: z.union([z.string(), z.number()]),
-            slug: z.string(),
-            name: z.string(),
-          })
-          .passthrough()
-      )
-      .optional(),
-  })
-  .passthrough();
+/**
+ * A Sentry release.
+ *
+ * Based on the `@sentry/api` org-release response type (`OrgReleaseResponse`).
+ * Only `version` is unconditionally required; all other SDK fields (id, status,
+ * versionInfo, data, authors, projects, ...) are widened to optional so test
+ * fixtures and partial API responses can omit them without casts.
+ */
+export type SentryRelease = Partial<SdkReleaseResponse> & {
+  version: string;
+};
 
-export type Release = z.infer<typeof ReleaseSchema>;
+// Deploy
+
+/**
+ * A Sentry deploy.
+ *
+ * Based on the `@sentry/api` deploy response type (`DeployResponse`).
+ * Core identifiers are required; timestamps and display fields are widened
+ * to optional so test mocks can omit `dateStarted`, `dateFinished`, `name`,
+ * and `url`.
+ */
+export type SentryDeploy = Partial<SdkDeployResponse> & {
+  id: string;
+  environment: string;
+};
 
 // Issue
 
@@ -363,6 +560,28 @@ export type TraceSpan = {
   event_id?: string;
   /** Nested child spans */
   children?: TraceSpan[];
+  /** Span name (often same as op) */
+  name?: string;
+  /** Always "span" for EAP spans */
+  event_type?: string;
+  /** Whether this span is a transaction boundary */
+  is_transaction?: boolean;
+  /** Transaction event ID */
+  transaction_id?: string;
+  /** SDK that produced this span */
+  sdk_name?: string;
+  /** Profile ID (empty string when not profiled) */
+  profile_id?: string;
+  /** Profiler ID (empty string when not profiled) */
+  profiler_id?: string;
+  /** Web vitals and performance measurements (keyed by measurement name) */
+  measurements?: Record<string, number>;
+  /** Extra attributes requested via `additional_attributes` query param */
+  additional_attributes?: Record<string, unknown>;
+  /** Error issues attached to this span */
+  errors?: unknown[];
+  /** Performance issue occurrences on this span */
+  occurrences?: unknown[];
 };
 
 // Stack Frame & Exception Entry
@@ -485,19 +704,29 @@ export type RequestEntry = {
 export const SentryLogSchema = z
   .object({
     /** Unique identifier for deduplication */
-    "sentry.item_id": z.string(),
+    "sentry.item_id": z.string().describe("Unique log entry ID"),
     /** ISO timestamp of the log entry */
-    timestamp: z.string(),
+    timestamp: z.string().describe("Log timestamp (ISO 8601)"),
     /** Nanosecond-precision timestamp for accurate ordering and filtering.
      * Coerced from string because the API may return large integers as strings
      * to avoid precision loss beyond Number.MAX_SAFE_INTEGER. */
-    timestamp_precise: z.coerce.number(),
+    timestamp_precise: z.coerce
+      .number()
+      .describe("Nanosecond-precision timestamp"),
     /** Log message content */
-    message: z.string().nullable().optional(),
+    message: z.string().nullable().optional().describe("Log message"),
     /** Log severity level (error, warning, info, debug, etc.) */
-    severity: z.string().nullable().optional(),
+    severity: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Severity level (error, warning, info, debug)"),
     /** Trace ID for correlation with traces */
-    trace: z.string().nullable().optional(),
+    trace: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Trace ID for correlation"),
   })
   .passthrough();
 
@@ -646,17 +875,17 @@ export type TraceLogsResponse = z.infer<typeof TraceLogsResponseSchema>;
 export const TransactionListItemSchema = z
   .object({
     /** Trace ID this transaction belongs to */
-    trace: z.string(),
+    trace: z.string().describe("Trace ID"),
     /** Event ID of the transaction */
-    id: z.string(),
+    id: z.string().describe("Event ID"),
     /** Transaction name (e.g., "GET /api/users") */
-    transaction: z.string(),
+    transaction: z.string().describe("Transaction name"),
     /** ISO timestamp of the transaction */
-    timestamp: z.string(),
+    timestamp: z.string().describe("Timestamp (ISO 8601)"),
     /** Transaction duration in milliseconds */
-    "transaction.duration": z.number(),
+    "transaction.duration": z.number().describe("Duration (ms)"),
     /** Project slug */
-    project: z.string(),
+    project: z.string().describe("Project slug"),
   })
   .passthrough();
 
@@ -678,15 +907,19 @@ export type TransactionsResponse = z.infer<typeof TransactionsResponseSchema>;
 /** A single span item from the EAP spans search endpoint */
 export const SpanListItemSchema = z
   .object({
-    id: z.string(),
-    parent_span: z.string().nullable().optional(),
-    "span.op": z.string().nullable().optional(),
-    description: z.string().nullable().optional(),
-    "span.duration": z.number().nullable().optional(),
-    timestamp: z.string(),
-    project: z.string(),
-    transaction: z.string().nullable().optional(),
-    trace: z.string(),
+    id: z.string().describe("Span ID"),
+    parent_span: z.string().nullable().optional().describe("Parent span ID"),
+    "span.op": z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Span operation (e.g. http.client, db)"),
+    description: z.string().nullable().optional().describe("Span description"),
+    "span.duration": z.number().nullable().optional().describe("Duration (ms)"),
+    timestamp: z.string().describe("Timestamp (ISO 8601)"),
+    project: z.string().describe("Project slug"),
+    transaction: z.string().nullable().optional().describe("Transaction name"),
+    trace: z.string().describe("Trace ID"),
   })
   .passthrough();
 
@@ -719,16 +952,20 @@ export type RepositoryProvider = z.infer<typeof RepositoryProviderSchema>;
 export const SentryRepositorySchema = z
   .object({
     // Core identifiers (required)
-    id: z.string(),
-    name: z.string(),
-    url: z.string().nullable(),
-    provider: RepositoryProviderSchema,
-    status: z.string(),
+    id: z.string().describe("Repository ID"),
+    name: z.string().describe("Repository name"),
+    url: z.string().nullable().describe("Repository URL"),
+    provider: RepositoryProviderSchema.describe("Version control provider"),
+    status: z.string().describe("Integration status"),
     // Optional metadata
-    dateCreated: z.string().optional(),
-    integrationId: z.string().optional(),
-    externalSlug: z.string().nullable().optional(),
-    externalId: z.string().nullable().optional(),
+    dateCreated: z.string().optional().describe("Creation date (ISO 8601)"),
+    integrationId: z.string().optional().describe("Integration ID"),
+    externalSlug: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("External slug (e.g. org/repo)"),
+    externalId: z.string().nullable().optional().describe("External ID"),
   })
   .passthrough();
 
@@ -740,35 +977,57 @@ export type SentryRepository = z.infer<typeof SentryRepositorySchema>;
 export const SentryTeamSchema = z
   .object({
     // Core identifiers (required)
-    id: z.string(),
-    slug: z.string(),
-    name: z.string(),
+    id: z.string().describe("Team ID"),
+    slug: z.string().describe("Team slug"),
+    name: z.string().describe("Team name"),
     // Optional metadata
-    dateCreated: z.string().optional(),
-    isMember: z.boolean().optional(),
-    teamRole: z.string().nullable().optional(),
-    memberCount: z.number().optional(),
+    dateCreated: z.string().optional().describe("Creation date (ISO 8601)"),
+    isMember: z.boolean().optional().describe("Whether you are a member"),
+    teamRole: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Your role in the team"),
+    memberCount: z.number().optional().describe("Number of members"),
   })
   .passthrough();
 
-export type SentryTeam = z.infer<typeof SentryTeamSchema>;
+/**
+ * A Sentry team.
+ *
+ * Based on the `@sentry/api` `BaseTeam` type. Only core identifiers are
+ * required; other SDK fields (dateCreated, isMember, teamRole, flags, access,
+ * hasAccess, isPending, memberCount, avatar) are widened to optional so test
+ * mocks and partial list-endpoint responses can omit them.
+ *
+ * `SentryTeamSchema` above is kept separately as the `--fields` / SKILL.md
+ * documentation schema — it is NOT used for runtime validation (team list
+ * responses are cast `as unknown as SentryTeam[]` in `api/teams.ts`), so the
+ * schema and type are allowed to diverge: the schema curates a user-facing
+ * subset of fields, the type follows the SDK's structural superset.
+ */
+export type SentryTeam = Partial<SdkTeam> & {
+  id: string;
+  slug: string;
+  name: string;
+};
 
 // Product Trials
 
 /** A product trial from the customer endpoint */
 export const ProductTrialSchema = z.object({
   /** Trial category (e.g., "seerUsers", "seerAutofix") */
-  category: z.string(),
+  category: z.string().describe("Trial category (e.g. seerUsers, seerAutofix)"),
   /** ISO date when the trial started, null if not started */
-  startDate: z.string().nullable(),
+  startDate: z.string().nullable().describe("Start date (ISO 8601)"),
   /** ISO date when the trial ends, null if not started */
-  endDate: z.string().nullable(),
+  endDate: z.string().nullable().describe("End date (ISO 8601)"),
   /** Reason code for the trial */
-  reasonCode: z.number(),
+  reasonCode: z.number().describe("Reason code"),
   /** Whether the trial has been activated */
-  isStarted: z.boolean(),
+  isStarted: z.boolean().describe("Whether the trial has started"),
   /** Duration of the trial in days, null if unknown */
-  lengthDays: z.number().nullable(),
+  lengthDays: z.number().nullable().describe("Trial duration in days"),
 });
 
 export type ProductTrial = z.infer<typeof ProductTrialSchema>;

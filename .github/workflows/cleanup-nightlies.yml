@@ -34,7 +34,7 @@ jobs:
           REPO="ghcr.io/getsentry/cli"
 
           # List all nightly-* tags sorted by version, oldest first
-          NIGHTLY_TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-' | sort -V || echo "")
+          NIGHTLY_TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-[0-9]' | sort -V || echo "")
           if [ -z "$NIGHTLY_TAGS" ]; then
             NIGHTLY_COUNT=0
           else

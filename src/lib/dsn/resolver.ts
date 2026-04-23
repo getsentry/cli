@@ -9,6 +9,7 @@ import {
   findProjectByDsnKey,
   listOrganizations,
   listProjects,
+  resolveOrgDisplayName,
 } from "../api-client.js";
 import { getCachedDsn, updateCachedResolution } from "../db/dsn-cache.js";
 import { getDsnSourceDescription } from "./detector.js";
@@ -65,7 +66,10 @@ export async function resolveProject(
 
     const resolved: ResolvedProjectInfo = {
       orgSlug: project.organization.slug,
-      orgName: project.organization.name,
+      orgName: resolveOrgDisplayName(
+        project.organization.slug,
+        project.organization.name
+      ),
       projectSlug: project.slug,
       projectName: project.name,
     };

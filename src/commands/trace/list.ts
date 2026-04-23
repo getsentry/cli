@@ -18,6 +18,9 @@ import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   buildListCommand,
+  LIST_DEFAULT_LIMIT,
+  LIST_MAX_LIMIT,
+  LIST_MIN_LIMIT,
   LIST_PERIOD_FLAG,
   PERIOD_ALIASES,
   paginationHint,
@@ -25,13 +28,23 @@ import {
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
-import type { TransactionListItem } from "../../types/index.js";
+import { sanitizeQuery } from "../../lib/search-query.js";
+import {
+  appendPeriodHint,
+  serializeTimeRange,
+  type TimeRange,
+  timeRangeToApiParams,
+} from "../../lib/time-range.js";
+import {
+  type TransactionListItem,
+  TransactionListItemSchema,
+} from "../../types/index.js";
 
 type ListFlags = {
   readonly limit: number;
   readonly query?: string;
   readonly sort: "date" | "duration";
-  readonly period: string;
+  readonly period: TimeRange;
   readonly json: boolean;
   readonly cursor?: string;
   readonly fresh: boolean;
@@ -64,15 +77,6 @@ type TraceListResult = {
 /** Accepted values for the --sort flag */
 const VALID_SORT_VALUES: SortValue[] = ["date", "duration"];
 
-/** Maximum allowed value for --limit flag */
-const MAX_LIMIT = 1000;
-
-/** Minimum allowed value for --limit flag */
-const MIN_LIMIT = 1;
-
-/** Default number of traces to show */
-const DEFAULT_LIMIT = 20;
-
 /** Command name used in resolver error messages */
 const COMMAND_NAME = "trace list";
 
@@ -94,9 +98,7 @@ function appendTraceFlags(
   if (flags.query) {
     parts.push(`-q "${flags.query}"`);
   }
-  if (flags.period !== DEFAULT_PERIOD) {
-    parts.push(`--period ${flags.period}`);
-  }
+  appendPeriodHint(parts, flags.period, DEFAULT_PERIOD);
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
 }
 
@@ -122,7 +124,7 @@ function prevPageHint(
  * Parse --limit flag, delegating range validation to shared utility.
  */
 function parseLimit(value: string): number {
-  return validateLimit(value, MIN_LIMIT, MAX_LIMIT);
+  return validateLimit(value, LIST_MIN_LIMIT, LIST_MAX_LIMIT);
 }
 
 /**
@@ -210,6 +212,7 @@ export const listCommand = buildListCommand("trace", {
   output: {
     human: formatTraceListHuman,
     jsonTransform: jsonTransformTraceList,
+    schema: TransactionListItemSchema,
   },
   parameters: {
     positional: {
@@ -227,12 +230,12 @@ export const listCommand = buildListCommand("trace", {
       limit: {
         kind: "parsed",
         parse: parseLimit,
-        brief: `Number of traces (${MIN_LIMIT}-${MAX_LIMIT})`,
-        default: String(DEFAULT_LIMIT),
+        brief: `Number of traces (${LIST_MIN_LIMIT}-${LIST_MAX_LIMIT})`,
+        default: String(LIST_DEFAULT_LIMIT),
       },
       query: {
         kind: "parsed",
-        parse: String,
+        parse: sanitizeQuery,
         brief: "Search query (Sentry search syntax)",
         optional: true,
       },
@@ -253,6 +256,8 @@ export const listCommand = buildListCommand("trace", {
   },
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
     const { cwd } = this;
+    const timeRange = flags.period;
+    const { query } = flags;
 
     // Resolve org/project from positional arg, config, or DSN auto-detection
     const { org, project } = await resolveOrgProjectFromArg(
@@ -263,8 +268,8 @@ export const listCommand = buildListCommand("trace", {
     // Build context key and resolve cursor for pagination
     const contextKey = buildPaginationContextKey("trace", `${org}/${project}`, {
       sort: flags.sort,
-      q: flags.query,
-      period: flags.period,
+      q: query,
+      period: serializeTimeRange(timeRange),
     });
     const { cursor, direction } = resolveCursor(
       flags.cursor,
@@ -279,11 +284,11 @@ export const listCommand = buildListCommand("trace", {
       },
       () =>
         listTransactions(org, project, {
-          query: flags.query,
+          query,
           limit: flags.limit,
           sort: flags.sort,
           cursor,
-          statsPeriod: flags.period,
+          ...timeRangeToApiParams(timeRange),
         })
     );
 

@@ -102,13 +102,14 @@ describe("ConfigError", () => {
 });
 
 describe("ContextError", () => {
-  test("format() includes usage hints with default alternatives", () => {
+  test("format() uses auto-detect headline when alternatives omitted", () => {
     const err = new ContextError("Organization", "sentry org list");
     const formatted = err.format();
-    expect(formatted).toContain("Organization is required.");
+    expect(formatted).toContain("Could not auto-detect organization.");
+    expect(formatted).toContain("Provide it explicitly:");
     expect(formatted).toContain("sentry org list");
     expect(formatted).toContain(
-      "Run from a directory with a Sentry-configured project"
+      "Run from a directory with a Sentry DSN in source code or .env files"
     );
     expect(formatted).toContain(
       "Set SENTRY_ORG and SENTRY_PROJECT (or SENTRY_DSN) environment variables"
@@ -130,6 +131,53 @@ describe("ContextError", () => {
     const formatted = err.format();
     expect(formatted).toContain("Resource is required.");
     expect(formatted).not.toContain("Or:");
+  });
+
+  test("format() includes note section after alternatives", () => {
+    const err = new ContextError(
+      "Organization",
+      "sentry org list",
+      undefined,
+      "Found 2 DSN(s) that could not be resolved"
+    );
+    const formatted = err.format();
+    expect(formatted).toContain("Could not auto-detect organization.");
+    // Default alternatives are present
+    expect(formatted).toContain("Or:");
+    expect(formatted).toContain(
+      "Run from a directory with a Sentry DSN in source code or .env files"
+    );
+    // Note appears as a separate section
+    expect(formatted).toContain(
+      "Note: Found 2 DSN(s) that could not be resolved"
+    );
+    // Note appears after alternatives
+    const orIndex = formatted.indexOf("Or:");
+    const noteIndex = formatted.indexOf("Note:");
+    expect(noteIndex).toBeGreaterThan(orIndex);
+  });
+
+  test("format() includes note without alternatives", () => {
+    const err = new ContextError(
+      "Resource",
+      "sentry resource get",
+      [],
+      "Some diagnostic info"
+    );
+    const formatted = err.format();
+    expect(formatted).toContain("Resource is required.");
+    expect(formatted).not.toContain("Or:");
+    expect(formatted).toContain("Note: Some diagnostic info");
+  });
+
+  test("note field is stored on instance", () => {
+    const err = new ContextError(
+      "Organization",
+      "sentry org list",
+      undefined,
+      "test note"
+    );
+    expect(err.note).toBe("test note");
   });
 });
 

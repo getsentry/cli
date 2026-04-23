@@ -32,10 +32,25 @@ import {
   type OrgListConfig,
 } from "./org-list.js";
 import { disableResponseCache } from "./response-cache.js";
+import { PERIOD_BRIEF, parsePeriod } from "./time-range.js";
 
 // ---------------------------------------------------------------------------
 // Level A: shared parameter / flag definitions
 // ---------------------------------------------------------------------------
+
+/**
+ * Absolute maximum items a list command will return.
+ *
+ * The Sentry API silently caps `per_page` at 100; commands auto-paginate
+ * to fill larger limits but stop at this ceiling for practical CLI use.
+ */
+export const LIST_MAX_LIMIT = 1000;
+
+/** Minimum allowed value for `--limit` across all list commands. */
+export const LIST_MIN_LIMIT = 1;
+
+/** Default number of items returned by list commands when `--limit` is omitted. */
+export const LIST_DEFAULT_LIMIT = 25;
 
 /**
  * Positional `org/project` parameter shared by all list commands.
@@ -252,11 +267,13 @@ export function paginationHint(opts: {
  * Build the `--limit` / `-n` flag for a list command.
  *
  * @param entityPlural - Plural entity name used in the brief (e.g. "teams")
- * @param defaultValue - Default limit as a string (default: "30")
+ * @param defaultValue - Default limit as a string — Stricli passes it through
+ *   numberParser at runtime, so the command receives a number
+ *   (default: {@link LIST_DEFAULT_LIMIT})
  */
 export function buildListLimitFlag(
   entityPlural: string,
-  defaultValue = "30"
+  defaultValue = String(LIST_DEFAULT_LIMIT)
 ): {
   kind: "parsed";
   parse: typeof numberParser;
@@ -275,10 +292,16 @@ export function buildListLimitFlag(
  * The `--period` / `-t` flag for list commands that query time-bounded data.
  *
  * Controls the `statsPeriod` parameter sent to the Sentry Events API.
- * Accepts Sentry duration strings like `"1h"`, `"24h"`, `"7d"`, `"30d"`.
+ * Accepts relative durations (`"7d"`, `"24h"`), date ranges
+ * (`"2024-01-01..2024-02-01"`), and comparison operators (`">=2024-01-01"`).
+ *
+ * Stricli calls `parsePeriod` on both user input and the default value,
+ * so `flags.period` is always a `TimeRange` object — no manual
+ * `parsePeriod()` call needed in `func()`.
  *
  * Default is `"7d"` (7 days). Commands that need a different default (e.g.,
- * `issue list` uses `"90d"`) should define their own flag inline.
+ * `issue list` uses `"90d"`) should define their own flag inline with
+ * `parse: parsePeriod`.
  *
  * @example
  * ```ts
@@ -288,8 +311,8 @@ export function buildListLimitFlag(
  */
 export const LIST_PERIOD_FLAG = {
   kind: "parsed" as const,
-  parse: String,
-  brief: 'Time period (e.g., "1h", "24h", "7d", "30d")',
+  parse: parsePeriod,
+  brief: PERIOD_BRIEF,
   default: "7d",
 };
 
@@ -319,6 +342,31 @@ export const LIST_BASE_ALIASES: Aliases<string> = { n: "limit", c: "cursor" };
 let _subcommandsByRoute: Map<string, Set<string>> | undefined;
 
 /**
+ * Entry shape returned by Stricli's getAllEntries().
+ * `aliases` is always present at runtime (empty array when none),
+ * but typed as optional for defensive safety.
+ */
+type RouteEntry = {
+  name: { original: string };
+  aliases?: readonly string[];
+  target: unknown;
+};
+
+/** Collect all subcommand names and aliases from a route group's children. */
+function collectChildNames(parent: {
+  getAllEntries: () => readonly RouteEntry[];
+}): Set<string> {
+  const names = new Set<string>();
+  for (const child of parent.getAllEntries()) {
+    names.add(child.name.original);
+    for (const alias of child.aliases ?? []) {
+      names.add(alias);
+    }
+  }
+  return names;
+}
+
+/**
  * Get the subcommand names for a given singular route (e.g. "project" → {"list", "view"}).
  *
  * Lazily walks the Stricli route map on first call. Uses `require()` to break
@@ -329,27 +377,18 @@ function getSubcommandsForRoute(routeName: string): Set<string> {
     _subcommandsByRoute = new Map();
 
     const { routes } = require("../app.js") as {
-      routes: {
-        getAllEntries: () => readonly {
-          name: { original: string };
-          target: unknown;
-        }[];
-      };
+      routes: { getAllEntries: () => readonly RouteEntry[] };
     };
 
     for (const entry of routes.getAllEntries()) {
       const target = entry.target as unknown as Record<string, unknown>;
       if (typeof target?.getAllEntries === "function") {
-        const children = (
-          target.getAllEntries as () => readonly {
-            name: { original: string };
-          }[]
-        )();
-        const names = new Set<string>();
-        for (const child of children) {
-          names.add(child.name.original);
-        }
-        _subcommandsByRoute.set(entry.name.original, names);
+        _subcommandsByRoute.set(
+          entry.name.original,
+          collectChildNames(
+            target as { getAllEntries: () => readonly RouteEntry[] }
+          )
+        );
       }
     }
   }
@@ -464,6 +503,7 @@ export function buildListCommand<
     readonly func: ListCommandFunction<FLAGS, ARGS, CONTEXT>;
     // biome-ignore lint/suspicious/noExplicitAny: OutputConfig is generic but type is erased at the builder level
     readonly output?: OutputConfig<any>;
+    readonly auth?: boolean;
   },
   options?: ListCommandOptions
 ): Command<CONTEXT> {
@@ -609,6 +649,7 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
       human: (result: ListResult<TWithOrg>) => formatListHuman(result, config),
       jsonTransform: (result: ListResult<TWithOrg>, fields?: string[]) =>
         jsonTransformListResult(result, fields),
+      schema: config.schema,
     } satisfies OutputConfig<ListResult<TWithOrg>>,
     parameters: {
       positional: LIST_TARGET_POSITIONAL,

@@ -69,8 +69,7 @@ describe("property: buildCacheKey", () => {
   test("produces a 64-char hex string (SHA-256)", () => {
     fcAssert(
       property(methodArb, sentryUrlArb, (method, url) => {
-        const key = buildCacheKey(method, url);
-        expect(key).toMatch(/^[0-9a-f]{64}$/);
+        expect(buildCacheKey(method, url)).toMatch(/^[0-9a-f]{64}$/);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -79,9 +78,7 @@ describe("property: buildCacheKey", () => {
   test("is deterministic — same inputs produce same key", () => {
     fcAssert(
       property(methodArb, sentryUrlArb, (method, url) => {
-        const key1 = buildCacheKey(method, url);
-        const key2 = buildCacheKey(method, url);
-        expect(key1).toBe(key2);
+        expect(buildCacheKey(method, url)).toBe(buildCacheKey(method, url));
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -90,9 +87,7 @@ describe("property: buildCacheKey", () => {
   test("different methods produce different keys for same URL", () => {
     fcAssert(
       property(sentryUrlArb, (url) => {
-        const getKey = buildCacheKey("GET", url);
-        const postKey = buildCacheKey("POST", url);
-        expect(getKey).not.toBe(postKey);
+        expect(buildCacheKey("GET", url)).not.toBe(buildCacheKey("POST", url));
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -106,9 +101,7 @@ describe("property: buildCacheKey", () => {
         (base, path) => {
           const url1 = `${base}/api/0/${path}?a=1&b=2&c=3`;
           const url2 = `${base}/api/0/${path}?c=3&a=1&b=2`;
-          const key1 = buildCacheKey("GET", url1);
-          const key2 = buildCacheKey("GET", url2);
-          expect(key1).toBe(key2);
+          expect(buildCacheKey("GET", url1)).toBe(buildCacheKey("GET", url2));
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -118,9 +111,7 @@ describe("property: buildCacheKey", () => {
   test("method comparison is case-insensitive", () => {
     fcAssert(
       property(sentryUrlArb, (url) => {
-        const key1 = buildCacheKey("get", url);
-        const key2 = buildCacheKey("GET", url);
-        expect(key1).toBe(key2);
+        expect(buildCacheKey("get", url)).toBe(buildCacheKey("GET", url));
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -192,6 +183,12 @@ describe("property: classifyUrl", () => {
   test("trace URLs with 32-char hex IDs are immutable", () => {
     const traceId = "a".repeat(32);
     const url = `https://us.sentry.io/api/0/organizations/myorg/trace/${traceId}/`;
+    expect(classifyUrl(url)).toBe("immutable");
+  });
+
+  test("trace-items (span detail) URLs are immutable", () => {
+    const url =
+      "https://us.sentry.io/api/0/projects/org/proj/trace-items/a1b2c3d4e5f67890/?trace_id=abc&item_type=spans";
     expect(classifyUrl(url)).toBe("immutable");
   });
 

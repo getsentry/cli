@@ -4,7 +4,7 @@
  * View and explore distributed traces from Sentry projects.
  */
 
-import { buildRouteMap } from "@stricli/core";
+import { buildRouteMap } from "../../lib/route-map.js";
 import { listCommand } from "./list.js";
 import { logsCommand } from "./logs.js";
 import { viewCommand } from "./view.js";
@@ -15,6 +15,7 @@ export const traceRoute = buildRouteMap({
     view: viewCommand,
     logs: logsCommand,
   },
+  defaultCommand: "view",
   docs: {
     brief: "View distributed traces",
     fullDescription:

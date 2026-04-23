@@ -31,7 +31,7 @@ import {
 import type { ParsedOrgProject } from "../../../src/lib/arg-parsing.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { clearAuth, setAuthToken } from "../../../src/lib/db/auth.js";
-import { setDefaults } from "../../../src/lib/db/defaults.js";
+import { setDefaultOrganization } from "../../../src/lib/db/defaults.js";
 import {
   advancePaginationState,
   getPaginationState,
@@ -970,7 +970,16 @@ describe("fetchOrgProjectsSafe", () => {
     // Clear auth token so the API client throws AuthError before making any request
     await clearAuth();
 
-    await expect(fetchOrgProjectsSafe("myorg")).rejects.toThrow(AuthError);
+    const savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
+    delete process.env.SENTRY_AUTH_TOKEN;
+
+    try {
+      await expect(fetchOrgProjectsSafe("myorg")).rejects.toThrow(AuthError);
+    } finally {
+      if (savedAuthToken !== undefined) {
+        process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
+      }
+    }
   });
 });
 
@@ -1152,7 +1161,7 @@ describe("handleAutoDetect", () => {
 
   test("fast path: uses single-page fetch for single org without platform filter", async () => {
     // Set default org to trigger single-org resolution
-    setDefaults("test-org");
+    setDefaultOrganization("test-org");
     globalThis.fetch = mockProjectFetch(sampleProjects);
 
     const result = await handleAutoDetect("/tmp/test-project", {
@@ -1167,7 +1176,7 @@ describe("handleAutoDetect", () => {
   });
 
   test("fast path: shows truncation message when server has more results", async () => {
-    setDefaults("test-org");
+    setDefaultOrganization("test-org");
     globalThis.fetch = mockProjectFetch(sampleProjects, {
       hasMore: true,
       nextCursor: "1735689600000:0:0",
@@ -1185,7 +1194,7 @@ describe("handleAutoDetect", () => {
   });
 
   test("fast path: includes hasMore and jsonExtra hint when server has more results", async () => {
-    setDefaults("test-org");
+    setDefaultOrganization("test-org");
     globalThis.fetch = mockProjectFetch(sampleProjects, {
       hasMore: true,
       nextCursor: "1735689600000:0:0",
@@ -1206,7 +1215,7 @@ describe("handleAutoDetect", () => {
   });
 
   test("fast path: non-auth API errors return empty results instead of throwing", async () => {
-    setDefaults("test-org");
+    setDefaultOrganization("test-org");
     // Mock returns 403 for projects endpoint (stale org, no access)
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1230,22 +1239,31 @@ describe("handleAutoDetect", () => {
   });
 
   test("fast path: AuthError still propagates", async () => {
-    setDefaults("test-org");
+    setDefaultOrganization("test-org");
     // Clear auth so getAuthToken() throws AuthError before any fetch
     await clearAuth();
 
-    await expect(
-      handleAutoDetect("/tmp/test-project", {
-        limit: 30,
-        json: true,
-        fresh: false,
-      })
-    ).rejects.toThrow(AuthError);
+    const savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
+    delete process.env.SENTRY_AUTH_TOKEN;
+
+    try {
+      await expect(
+        handleAutoDetect("/tmp/test-project", {
+          limit: 30,
+          json: true,
+          fresh: false,
+        })
+      ).rejects.toThrow(AuthError);
+    } finally {
+      if (savedAuthToken !== undefined) {
+        process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
+      }
+    }
   });
 
   test("slow path: uses full fetch when platform filter is active", async () => {
     // Set default org — but platform filter forces slow path
-    setDefaults("test-org");
+    setDefaultOrganization("test-org");
     globalThis.fetch = mockProjectFetch(sampleProjects);
 
     const result = await handleAutoDetect("/tmp/test-project", {

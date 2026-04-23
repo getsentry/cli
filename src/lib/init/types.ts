@@ -4,31 +4,59 @@ export type DirEntry = {
   type: "file" | "directory";
 };
 
+export type ExistingProjectData = {
+  orgSlug: string;
+  projectSlug: string;
+  projectId: string;
+  dsn: string;
+  url: string;
+};
+
 export type WizardOptions = {
   directory: string;
   yes: boolean;
   dryRun: boolean;
   features?: string[];
-  /** Explicit team slug to create the project under. Skips team resolution. */
   team?: string;
-  /** Explicit org slug from CLI arg (e.g., "acme" from "acme/my-app"). Skips interactive org selection. */
   org?: string;
-  /** Explicit project name from CLI arg (e.g., "my-app" from "acme/my-app"). Overrides wizard-detected name. */
   project?: string;
 };
 
-// Local-op suspend payloads
+export type ResolvedInitContext = {
+  directory: string;
+  yes: boolean;
+  dryRun: boolean;
+  features?: string[];
+  org: string;
+  /**
+   * Resolved team slug for init operations.
+   * Omitted when init defers empty-org auto-creation until project creation.
+   */
+  team?: string;
+  project?: string;
+  authToken?: string;
+  existingProject?: ExistingProjectData;
+};
 
-export type LocalOpPayload =
+export type InteractiveContext = Pick<ResolvedInitContext, "yes" | "dryRun">;
+
+// Tool suspend payloads
+export type ToolPayload =
   | ListDirPayload
   | ReadFilesPayload
   | FileExistsBatchPayload
   | RunCommandsPayload
   | ApplyPatchsetPayload
-  | CreateSentryProjectPayload;
+  | GrepPayload
+  | GlobPayload
+  | CreateSentryProjectPayload
+  | EnsureSentryProjectPayload
+  | DetectSentryPayload;
+
+export type ToolOperation = ToolPayload["operation"];
 
 export type ListDirPayload = {
-  type: "local-op";
+  type: "tool";
   operation: "list-dir";
   cwd: string;
   params: {
@@ -40,7 +68,7 @@ export type ListDirPayload = {
 };
 
 export type ReadFilesPayload = {
-  type: "local-op";
+  type: "tool";
   operation: "read-files";
   cwd: string;
   params: {
@@ -50,7 +78,7 @@ export type ReadFilesPayload = {
 };
 
 export type FileExistsBatchPayload = {
-  type: "local-op";
+  type: "tool";
   operation: "file-exists-batch";
   cwd: string;
   params: {
@@ -59,7 +87,7 @@ export type FileExistsBatchPayload = {
 };
 
 export type RunCommandsPayload = {
-  type: "local-op";
+  type: "tool";
   operation: "run-commands";
   cwd: string;
   params: {
@@ -68,22 +96,74 @@ export type RunCommandsPayload = {
   };
 };
 
+export type GrepSearch = {
+  pattern: string;
+  path?: string;
+  include?: string;
+  /**
+   * Case-insensitive match. Default: false (case-sensitive, matching
+   * `rg`'s default). A leading `(?i)` inline flag in `pattern` has
+   * the same effect — callers can use either.
+   *
+   * No current Mastra server invocation sets this field; reserving
+   * it here means the server can start sending it without a CLI
+   * update. The underlying scan engine natively supports it.
+   */
+  caseInsensitive?: boolean;
+  /**
+   * Multiline mode: when true (default), `^` and `$` match at line
+   * boundaries within the file — grep/rg semantics. When false, they
+   * anchor to the buffer start/end — strict JS `RegExp` semantics.
+   * Rarely needs to be set.
+   */
+  multiline?: boolean;
+};
+
+export type GrepPayload = {
+  type: "tool";
+  operation: "grep";
+  cwd: string;
+  params: {
+    searches: GrepSearch[];
+    maxResultsPerSearch?: number;
+  };
+};
+
+export type GlobPayload = {
+  type: "tool";
+  operation: "glob";
+  cwd: string;
+  params: {
+    patterns: string[];
+    path?: string;
+    maxResults?: number;
+  };
+};
+
+export type PatchEdit = {
+  oldString: string;
+  newString: string;
+};
+
+export type ApplyPatchsetPatch =
+  | { path: string; action: "create"; patch: string }
+  | { path: string; action: "modify"; edits: PatchEdit[] }
+  | { path: string; action: "delete"; patch?: string };
+
 export type ApplyPatchsetPayload = {
-  type: "local-op";
+  type: "tool";
   operation: "apply-patchset";
   cwd: string;
   params: {
-    patches: Array<{
-      path: string;
-      action: "create" | "modify" | "delete";
-      patch: string;
-    }>;
+    patches: ApplyPatchsetPatch[];
   };
 };
 
 export type CreateSentryProjectPayload = {
-  type: "local-op";
+  type: "tool";
   operation: "create-sentry-project";
+  /** Human-readable spinner hint from the server (≤ 120 chars, sensitive values redacted). */
+  detail?: string;
   cwd: string;
   params: {
     name: string;
@@ -91,14 +171,34 @@ export type CreateSentryProjectPayload = {
   };
 };
 
-export type LocalOpResult = {
+export type EnsureSentryProjectPayload = {
+  type: "tool";
+  operation: "ensure-sentry-project";
+  /** Human-readable spinner hint from the server (≤ 120 chars, sensitive values redacted). */
+  detail?: string;
+  cwd: string;
+  params: {
+    name: string;
+    platform: string;
+  };
+};
+
+export type DetectSentryPayload = {
+  type: "tool";
+  operation: "detect-sentry";
+  detail?: string;
+  cwd: string;
+  params: Record<string, never>;
+};
+
+export type ToolResult = {
   ok: boolean;
   error?: string;
+  message?: string;
   data?: unknown;
 };
 
-// Wizard output — typed shape of the `result` field returned by the server
-
+// Wizard output
 export type WizardOutput = {
   platform?: string;
   projectDir?: string;
@@ -112,8 +212,7 @@ export type WizardOutput = {
   message?: string;
 };
 
-// Interactive suspend payloads
-
+// Interactive payloads
 export type InteractivePayload =
   | SelectPayload
   | MultiSelectPayload
@@ -141,11 +240,7 @@ export type ConfirmPayload = {
   prompt: string;
 };
 
-// Combined suspend payload — either a local-op or an interactive prompt
-
-export type SuspendPayload = LocalOpPayload | InteractivePayload;
-
-// Workflow run result
+export type SuspendPayload = ToolPayload | InteractivePayload;
 
 export type WorkflowRunResult = {
   status: "suspended" | "success" | "failed";

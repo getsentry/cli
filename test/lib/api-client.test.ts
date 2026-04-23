@@ -108,6 +108,17 @@ describe("401 retry behavior", () => {
   // Note: These tests use rawApiRequest which goes to control silo (sentry.io)
   // and supports 401 retry with token refresh.
 
+  let savedAuthToken: string | undefined;
+  beforeEach(() => {
+    savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
+    delete process.env.SENTRY_AUTH_TOKEN;
+  });
+  afterEach(() => {
+    if (savedAuthToken !== undefined) {
+      process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
+    }
+  });
+
   test("retries request with new token on 401 response", async () => {
     const requests: RequestLog[] = [];
 
@@ -1841,5 +1852,144 @@ describe("getLogs", () => {
 
     // Results from both batches should be flattened
     expect(result).toHaveLength(2);
+  });
+});
+
+describe("getProject", () => {
+  test("sends ?collapse=organization query parameter", async () => {
+    const { getProject } = await import("../../src/lib/api-client.js");
+
+    // Seed region cache so the SDK targets us.sentry.io without /users/me/regions/
+    setOrgRegions([
+      {
+        slug: "acme",
+        regionUrl: DEFAULT_SENTRY_URL,
+        orgId: "42",
+        orgName: "Acme Corp",
+      },
+    ]);
+
+    const capturedUrls: string[] = [];
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      capturedUrls.push(req.url);
+
+      if (req.url.includes("/projects/acme/frontend/")) {
+        return new Response(
+          JSON.stringify({
+            id: "101",
+            slug: "frontend",
+            name: "Frontend",
+            // Collapsed response: no `name` on organization
+            organization: { id: "42", slug: "acme" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const project = await getProject("acme", "frontend");
+
+    expect(project.slug).toBe("frontend");
+    expect(project.organization?.slug).toBe("acme");
+
+    // Verify the outgoing URL carries ?collapse=organization
+    const projectRequest = capturedUrls.find((u) =>
+      u.includes("/projects/acme/frontend/")
+    );
+    expect(projectRequest).toBeDefined();
+    const parsed = new URL(projectRequest as string);
+    expect(parsed.searchParams.get("collapse")).toBe("organization");
+  });
+
+  test("tolerates collapsed response missing organization.name", async () => {
+    const { getProject } = await import("../../src/lib/api-client.js");
+
+    setOrgRegions([
+      {
+        slug: "acme",
+        regionUrl: DEFAULT_SENTRY_URL,
+        orgId: "42",
+        orgName: "Acme Corp",
+      },
+    ]);
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+
+      if (req.url.includes("/projects/acme/frontend/")) {
+        return new Response(
+          JSON.stringify({
+            id: "101",
+            slug: "frontend",
+            name: "Frontend",
+            organization: { id: "42", slug: "acme" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const project = await getProject("acme", "frontend");
+
+    // `name` is optional on collapsed responses
+    expect(project.organization?.name).toBeUndefined();
+    expect(project.organization?.slug).toBe("acme");
+  });
+});
+
+describe("resolveOrgDisplayName", () => {
+  test("prefers explicit name when provided", async () => {
+    const { resolveOrgDisplayName } = await import(
+      "../../src/lib/api-client.js"
+    );
+
+    expect(resolveOrgDisplayName("acme", "Acme Corp")).toBe("Acme Corp");
+  });
+
+  test("falls back to cached org name when explicit name is absent", async () => {
+    const { resolveOrgDisplayName } = await import(
+      "../../src/lib/api-client.js"
+    );
+
+    setOrgRegions([
+      {
+        slug: "acme",
+        regionUrl: DEFAULT_SENTRY_URL,
+        orgId: "42",
+        orgName: "Acme Corp",
+      },
+    ]);
+
+    expect(resolveOrgDisplayName("acme")).toBe("Acme Corp");
+  });
+
+  test("falls back to slug when no cache entry exists", async () => {
+    const { resolveOrgDisplayName } = await import(
+      "../../src/lib/api-client.js"
+    );
+
+    // Empty cache — no entry for this slug
+    expect(resolveOrgDisplayName("unknown-org")).toBe("unknown-org");
+  });
+
+  test("falls back to slug when explicit name is empty string", async () => {
+    const { resolveOrgDisplayName } = await import(
+      "../../src/lib/api-client.js"
+    );
+
+    // Empty string is falsy, so the cache/slug fallback kicks in
+    expect(resolveOrgDisplayName("unknown-org", "")).toBe("unknown-org");
   });
 });

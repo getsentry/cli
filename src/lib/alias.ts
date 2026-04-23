@@ -5,8 +5,8 @@
  * Used by issue list to create short identifiers like "e" for "spotlight-electron".
  */
 
-import type { ResolvedTarget } from "./resolve-target.js";
 import type { ProjectAliasEntry } from "../types/index.js";
+import type { ResolvedTarget } from "./resolve-target.js";
 
 /**
  * Find the common word prefix shared by strings that have word boundaries.

@@ -1,17 +1,8 @@
-/**
- * Wizard Runner Unit Tests
- *
- * Tests for the init wizard runner using spyOn on namespace imports
- * (no mock.module) so these run under test:unit and contribute to
- * lcov coverage.
- */
-
 import {
   afterEach,
   beforeEach,
   describe,
   expect,
-  jest,
   mock,
   spyOn,
   test,
@@ -21,8 +12,8 @@ import * as clack from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as banner from "../../../src/lib/banner.js";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as auth from "../../../src/lib/db/auth.js";
+import { WizardError } from "../../../src/lib/errors.js";
+import { WizardCancelledError } from "../../../src/lib/init/clack-utils.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as fmt from "../../../src/lib/init/formatters.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
@@ -30,17 +21,31 @@ import * as git from "../../../src/lib/init/git.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as inter from "../../../src/lib/init/interactive.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as ops from "../../../src/lib/init/local-ops.js";
+import * as preflight from "../../../src/lib/init/preflight.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as initSpinner from "../../../src/lib/init/spinner.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as stdinReopen from "../../../src/lib/init/stdin-reopen.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as registry from "../../../src/lib/init/tools/registry.js";
 import type {
+  ResolvedInitContext,
+  ToolPayload,
   WizardOptions,
   WorkflowRunResult,
 } from "../../../src/lib/init/types.js";
 import { runWizard } from "../../../src/lib/init/wizard-runner.js";
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as workflowInputs from "../../../src/lib/init/workflow-inputs.js";
 
 const noop = () => {
   /* suppress output */
+};
+
+const spinnerMock = {
+  start: mock(),
+  stop: mock(),
+  message: mock(),
 };
 
 function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
@@ -52,689 +57,591 @@ function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
   };
 }
 
-// ── Spy declarations ────────────────────────────────────────────────────────
-
-// clack
-let isCancelSpy: ReturnType<typeof spyOn>;
-let introSpy: ReturnType<typeof spyOn>;
-let confirmSpy: ReturnType<typeof spyOn>;
-let logInfoSpy: ReturnType<typeof spyOn>;
-let logWarnSpy: ReturnType<typeof spyOn>;
-let logErrorSpy: ReturnType<typeof spyOn>;
-let cancelSpy: ReturnType<typeof spyOn>;
-let spinnerSpy: ReturnType<typeof spyOn>;
-
-// git
-let checkGitStatusSpy: ReturnType<typeof spyOn>;
-
-// deps
-let getAuthTokenSpy: ReturnType<typeof spyOn>;
-let formatBannerSpy: ReturnType<typeof spyOn>;
-let formatResultSpy: ReturnType<typeof spyOn>;
-let formatErrorSpy: ReturnType<typeof spyOn>;
-let handleLocalOpSpy: ReturnType<typeof spyOn>;
-let precomputeDirListingSpy: ReturnType<typeof spyOn>;
-let handleInteractiveSpy: ReturnType<typeof spyOn>;
-
-// MastraClient
-let getWorkflowSpy: ReturnType<typeof spyOn>;
-
-// stderr
-let stderrSpy: ReturnType<typeof spyOn>;
-
-// ── Mock workflow run ───────────────────────────────────────────────────────
+function makeContext(
+  overrides?: Partial<ResolvedInitContext>
+): ResolvedInitContext {
+  return {
+    directory: "/tmp/test",
+    yes: true,
+    dryRun: false,
+    org: "acme",
+    team: "platform",
+    authToken: "test-token",
+    ...overrides,
+  };
+}
 
 let mockStartResult: WorkflowRunResult;
 let mockResumeResults: WorkflowRunResult[];
-let resumeCallCount: number;
-let mockRun: {
-  startAsync: ReturnType<typeof mock>;
-  resumeAsync: ReturnType<typeof mock>;
-};
+let resumeCallCount = 0;
+let startAsyncMock: ReturnType<typeof mock>;
 
-const spinnerMock = {
-  start: mock(),
-  stop: mock(),
-  message: mock(),
-};
+let introSpy: ReturnType<typeof spyOn>;
+let confirmSpy: ReturnType<typeof spyOn>;
+let cancelSpy: ReturnType<typeof spyOn>;
+let logInfoSpy: ReturnType<typeof spyOn>;
+let logWarnSpy: ReturnType<typeof spyOn>;
+let logErrorSpy: ReturnType<typeof spyOn>;
+let spinnerSpy: ReturnType<typeof spyOn>;
 
-function setupWorkflowSpy() {
-  mockRun = {
-    startAsync: mock(() => Promise.resolve(mockStartResult)),
+let formatBannerSpy: ReturnType<typeof spyOn>;
+let formatResultSpy: ReturnType<typeof spyOn>;
+let formatErrorSpy: ReturnType<typeof spyOn>;
+let checkGitStatusSpy: ReturnType<typeof spyOn>;
+let handleInteractiveSpy: ReturnType<typeof spyOn>;
+let resolveInitContextSpy: ReturnType<typeof spyOn>;
+let describeToolSpy: ReturnType<typeof spyOn>;
+let executeToolSpy: ReturnType<typeof spyOn>;
+let precomputeDirListingSpy: ReturnType<typeof spyOn>;
+let preReadCommonFilesSpy: ReturnType<typeof spyOn>;
+let precomputeSentryDetectionSpy: ReturnType<typeof spyOn>;
+let closeFreshTtyForwardingSpy: ReturnType<typeof spyOn>;
+let getWorkflowSpy: ReturnType<typeof spyOn>;
+let stderrSpy: ReturnType<typeof spyOn>;
+/**
+ * ClientOptions captured from each MastraClient instance constructed by
+ * runWizard. Used by the MastraClient lifecycle suite to assert that the
+ * `abortSignal` passed at construction time is aborted on teardown.
+ */
+let capturedClientOptions: { abortSignal?: AbortSignal }[] = [];
+
+beforeEach(() => {
+  mockStartResult = { status: "success", result: { platform: "React" } };
+  mockResumeResults = [];
+  resumeCallCount = 0;
+  process.exitCode = 0;
+
+  introSpy = spyOn(clack, "intro").mockImplementation(noop);
+  confirmSpy = spyOn(clack, "confirm").mockResolvedValue(true);
+  cancelSpy = spyOn(clack, "cancel").mockImplementation(noop);
+  logInfoSpy = spyOn(clack.log, "info").mockImplementation(noop);
+  logWarnSpy = spyOn(clack.log, "warn").mockImplementation(noop);
+  logErrorSpy = spyOn(clack.log, "error").mockImplementation(noop);
+  spinnerSpy = spyOn(initSpinner, "createWizardSpinner").mockReturnValue(
+    spinnerMock as any
+  );
+
+  spinnerMock.start.mockClear();
+  spinnerMock.stop.mockClear();
+  spinnerMock.message.mockClear();
+
+  formatBannerSpy = spyOn(banner, "formatBanner").mockReturnValue("BANNER");
+  formatResultSpy = spyOn(fmt, "formatResult").mockImplementation(noop);
+  formatErrorSpy = spyOn(fmt, "formatError").mockImplementation(noop);
+  checkGitStatusSpy = spyOn(git, "checkGitStatus").mockResolvedValue(true);
+  handleInteractiveSpy = spyOn(inter, "handleInteractive").mockResolvedValue({
+    action: "continue",
+  });
+  resolveInitContextSpy = spyOn(
+    preflight,
+    "resolveInitContext"
+  ).mockResolvedValue(makeContext());
+  describeToolSpy = spyOn(registry, "describeTool").mockReturnValue(
+    "Running tool..."
+  );
+  executeToolSpy = spyOn(registry, "executeTool").mockResolvedValue({
+    ok: true,
+    data: { results: [] },
+  });
+  precomputeDirListingSpy = spyOn(
+    workflowInputs,
+    "precomputeDirListing"
+  ).mockResolvedValue([]);
+  preReadCommonFilesSpy = spyOn(
+    workflowInputs,
+    "preReadCommonFiles"
+  ).mockResolvedValue({});
+  precomputeSentryDetectionSpy = spyOn(
+    workflowInputs,
+    "precomputeSentryDetection"
+  ).mockResolvedValue({
+    ok: true,
+    data: { status: "none", signals: [] },
+  });
+  closeFreshTtyForwardingSpy = spyOn(stdinReopen, "closeFreshTtyForwarding");
+  stderrSpy = spyOn(process.stderr, "write").mockImplementation(
+    () => true as any
+  );
+
+  startAsyncMock = mock(() => Promise.resolve(mockStartResult));
+  const run = {
+    startAsync: startAsyncMock,
     resumeAsync: mock(() => {
       const result = mockResumeResults[resumeCallCount] ?? {
-        status: "success" as const,
+        status: "success",
       };
       resumeCallCount += 1;
       return Promise.resolve(result);
     }),
   };
-
-  const mockWorkflow = {
-    createRun: mock(() => Promise.resolve(mockRun)),
+  const workflow = {
+    createRun: mock(() => Promise.resolve(run)),
   };
-
-  getWorkflowSpy = spyOn(MastraClient.prototype, "getWorkflow").mockReturnValue(
-    mockWorkflow as any
-  );
-
-  return { mockWorkflow };
-}
-
-// ── Setup / Teardown ────────────────────────────────────────────────────────
-
-beforeEach(() => {
-  mockStartResult = { status: "success" };
-  mockResumeResults = [];
-  resumeCallCount = 0;
-  process.exitCode = 0;
-
-  // clack spies
-  isCancelSpy = spyOn(clack, "isCancel").mockImplementation(
-    (v: unknown) => v === Symbol.for("cancel")
-  );
-  introSpy = spyOn(clack, "intro").mockImplementation(noop);
-  confirmSpy = spyOn(clack, "confirm").mockResolvedValue(true);
-  logInfoSpy = spyOn(clack.log, "info").mockImplementation(noop);
-  logWarnSpy = spyOn(clack.log, "warn").mockImplementation(noop);
-  logErrorSpy = spyOn(clack.log, "error").mockImplementation(noop);
-  cancelSpy = spyOn(clack, "cancel").mockImplementation(noop);
-  spinnerSpy = spyOn(clack, "spinner").mockReturnValue(spinnerMock as any);
-
-  // Reset spinner mock call counts
-  spinnerMock.start.mockClear();
-  spinnerMock.stop.mockClear();
-  spinnerMock.message.mockClear();
-
-  // git spy — default: pass all checks
-  checkGitStatusSpy = spyOn(git, "checkGitStatus").mockResolvedValue(true);
-
-  // dep spies
-  getAuthTokenSpy = spyOn(auth, "getAuthToken").mockReturnValue("fake-token");
-  formatBannerSpy = spyOn(banner, "formatBanner").mockReturnValue("BANNER");
-  formatResultSpy = spyOn(fmt, "formatResult").mockImplementation(noop);
-  formatErrorSpy = spyOn(fmt, "formatError").mockImplementation(noop);
-  handleLocalOpSpy = spyOn(ops, "handleLocalOp").mockResolvedValue({
-    ok: true,
-    data: { results: [] },
+  capturedClientOptions = [];
+  getWorkflowSpy = spyOn(
+    MastraClient.prototype,
+    "getWorkflow"
+  ).mockImplementation(function (this: MastraClient) {
+    // `this` is the MastraClient instance. `BaseResource.options` holds the
+    // full ClientOptions passed to the constructor — including abortSignal.
+    capturedClientOptions.push(
+      (this as unknown as { options: { abortSignal?: AbortSignal } }).options
+    );
+    return workflow as any;
   });
-  precomputeDirListingSpy = spyOn(ops, "precomputeDirListing").mockReturnValue(
-    []
-  );
-  handleInteractiveSpy = spyOn(inter, "handleInteractive").mockResolvedValue({
-    action: "continue",
-  });
-
-  // stderr spy (suppress banner output)
-  stderrSpy = spyOn(process.stderr, "write").mockImplementation(
-    () => true as any
-  );
-
-  // MastraClient
-  setupWorkflowSpy();
 });
 
 afterEach(() => {
-  isCancelSpy.mockRestore();
   introSpy.mockRestore();
   confirmSpy.mockRestore();
+  cancelSpy.mockRestore();
   logInfoSpy.mockRestore();
   logWarnSpy.mockRestore();
   logErrorSpy.mockRestore();
-  cancelSpy.mockRestore();
   spinnerSpy.mockRestore();
 
-  checkGitStatusSpy.mockRestore();
-  getAuthTokenSpy.mockRestore();
   formatBannerSpy.mockRestore();
   formatResultSpy.mockRestore();
   formatErrorSpy.mockRestore();
-  handleLocalOpSpy.mockRestore();
-  precomputeDirListingSpy.mockRestore();
+  checkGitStatusSpy.mockRestore();
   handleInteractiveSpy.mockRestore();
-
-  stderrSpy.mockRestore();
+  resolveInitContextSpy.mockRestore();
+  describeToolSpy.mockRestore();
+  executeToolSpy.mockRestore();
+  precomputeDirListingSpy.mockRestore();
+  preReadCommonFilesSpy.mockRestore();
+  precomputeSentryDetectionSpy.mockRestore();
+  closeFreshTtyForwardingSpy.mockRestore();
   getWorkflowSpy.mockRestore();
+  stderrSpy.mockRestore();
 
   process.exitCode = 0;
 });
 
-// ── Tests ───────────────────────────────────────────────────────────────────
-
 describe("runWizard", () => {
-  describe("success path", () => {
-    test("calls formatResult when workflow completes successfully", async () => {
-      mockStartResult = { status: "success", result: { platform: "React" } };
+  test("formats successful results", async () => {
+    await runWizard(makeOptions());
 
-      await runWizard(makeOptions());
+    expect(formatResultSpy).toHaveBeenCalled();
+    expect(formatErrorSpy).not.toHaveBeenCalled();
+    expect(spinnerMock.stop).toHaveBeenCalledWith("Done");
+    expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
+  });
 
-      expect(formatResultSpy).toHaveBeenCalled();
-      expect(formatErrorSpy).not.toHaveBeenCalled();
-      expect(spinnerMock.stop).toHaveBeenCalledWith("Done");
+  test("throws when stdin is not a TTY without --yes", async () => {
+    const originalIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: false,
+      configurable: true,
+    });
+
+    await expect(runWizard(makeOptions({ yes: false }))).rejects.toThrow(
+      WizardError
+    );
+
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: originalIsTTY,
+      configurable: true,
     });
   });
 
-  describe("TTY check", () => {
-    test("writes error to stderr when not TTY and not --yes", async () => {
-      const origIsTTY = process.stdin.isTTY;
-      Object.defineProperty(process.stdin, "isTTY", {
-        value: false,
-        configurable: true,
-      });
+  test("passes dry-run as non-interactive into preflight", async () => {
+    await runWizard(makeOptions({ dryRun: true, yes: false }));
 
-      await runWizard(makeOptions({ yes: false }));
-
-      Object.defineProperty(process.stdin, "isTTY", {
-        value: origIsTTY,
-        configurable: true,
-      });
-
-      const written = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
-      expect(written).toContain("Interactive mode requires a terminal");
-      expect(process.exitCode).toBe(1);
-    });
+    expect(resolveInitContextSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ dryRun: true, yes: true })
+    );
+    expect(logWarnSpy).toHaveBeenCalled();
   });
 
-  describe("experimental warning", () => {
-    test("shows experimental warning and proceeds on confirm", async () => {
-      const origIsTTY = process.stdin.isTTY;
-      Object.defineProperty(process.stdin, "isTTY", {
-        value: true,
-        configurable: true,
-      });
+  test("stops before workflow creation when preflight returns null", async () => {
+    resolveInitContextSpy.mockResolvedValue(null);
 
-      mockStartResult = { status: "success" };
+    await runWizard(makeOptions());
 
-      await runWizard(makeOptions({ yes: false }));
-
-      Object.defineProperty(process.stdin, "isTTY", {
-        value: origIsTTY,
-        configurable: true,
-      });
-
-      expect(confirmSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: expect.stringContaining("EXPERIMENTAL"),
-        })
-      );
-      expect(formatResultSpy).toHaveBeenCalled();
-    });
-
-    test("skips experimental warning with --yes", async () => {
-      mockStartResult = { status: "success" };
-
-      await runWizard(makeOptions({ yes: true }));
-
-      expect(confirmSpy).not.toHaveBeenCalled();
-      expect(formatResultSpy).toHaveBeenCalled();
-    });
-
-    test("exits cleanly when user presses Ctrl+C on experimental warning", async () => {
-      const origIsTTY = process.stdin.isTTY;
-      Object.defineProperty(process.stdin, "isTTY", {
-        value: true,
-        configurable: true,
-      });
-
-      confirmSpy.mockResolvedValue(Symbol.for("cancel"));
-
-      await runWizard(makeOptions({ yes: false }));
-
-      Object.defineProperty(process.stdin, "isTTY", {
-        value: origIsTTY,
-        configurable: true,
-      });
-
-      expect(cancelSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Setup cancelled")
-      );
-      expect(process.exitCode).toBe(0);
-      expect(formatResultSpy).not.toHaveBeenCalled();
-    });
-
-    test("exits cleanly when user declines experimental warning", async () => {
-      const origIsTTY = process.stdin.isTTY;
-      Object.defineProperty(process.stdin, "isTTY", {
-        value: true,
-        configurable: true,
-      });
-
-      confirmSpy.mockResolvedValue(false);
-
-      await runWizard(makeOptions({ yes: false }));
-
-      Object.defineProperty(process.stdin, "isTTY", {
-        value: origIsTTY,
-        configurable: true,
-      });
-
-      expect(cancelSpy).toHaveBeenCalledWith("Setup cancelled.");
-      expect(process.exitCode).toBe(0);
-      expect(formatResultSpy).not.toHaveBeenCalled();
-    });
+    expect(getWorkflowSpy).not.toHaveBeenCalled();
+    expect(formatResultSpy).not.toHaveBeenCalled();
+    // Early-return paths must still tear down TTY forwarding via `using`.
+    expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
   });
 
-  describe("connection error", () => {
-    test("times out if startAsync hangs", async () => {
-      jest.useFakeTimers();
+  test("aborts cleanly when git safety check fails", async () => {
+    checkGitStatusSpy.mockResolvedValue(false);
 
-      const hangingRun = {
-        startAsync: mock(
-          () =>
-            new Promise(() => {
-              /* never resolves */
-            })
+    await runWizard(makeOptions());
+
+    expect(cancelSpy).toHaveBeenCalledWith("Setup cancelled.");
+    expect(getWorkflowSpy).not.toHaveBeenCalled();
+    // Early-return paths must still tear down TTY forwarding via `using`.
+    expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("dispatches tool payloads through the registry", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["npm install @sentry/node"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["install-deps"]],
+      steps: {
+        "install-deps": { suspendPayload: payload },
+      },
+    };
+    mockResumeResults = [{ status: "success" }];
+
+    await runWizard(makeOptions());
+
+    expect(describeToolSpy).toHaveBeenCalledWith(payload);
+    expect(executeToolSpy).toHaveBeenCalledWith(payload, makeContext());
+    expect(spinnerMock.message).toHaveBeenCalledWith("Running tool...");
+  });
+
+  test("dispatches interactive payloads to the prompt handler", async () => {
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["pick-feature"]],
+      steps: {
+        "pick-feature": {
+          suspendPayload: {
+            type: "interactive",
+            kind: "confirm",
+            prompt: "Continue?",
+          },
+        },
+      },
+    };
+    mockResumeResults = [{ status: "success" }];
+
+    await runWizard(makeOptions());
+
+    expect(handleInteractiveSpy).toHaveBeenCalledWith(
+      {
+        type: "interactive",
+        kind: "confirm",
+        prompt: "Continue?",
+      },
+      makeContext()
+    );
+  });
+
+  test("skips verify-changes interactive prompts during dry-run", async () => {
+    resolveInitContextSpy.mockResolvedValue(makeContext({ dryRun: true }));
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["verify-changes"]],
+      steps: {
+        "verify-changes": {
+          suspendPayload: {
+            type: "interactive",
+            kind: "confirm",
+            prompt: "Verify changes?",
+          },
+        },
+      },
+    };
+    mockResumeResults = [{ status: "success" }];
+
+    await runWizard(makeOptions({ dryRun: true }));
+
+    expect(handleInteractiveSpy).not.toHaveBeenCalled();
+  });
+
+  test("surfaces malformed suspend payload types", async () => {
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["detect-platform"]],
+      steps: {
+        "detect-platform": {
+          suspendPayload: {
+            type: "unknown",
+            operation: "list-dir",
+            cwd: "/tmp/test",
+            params: { path: "." },
+          },
+        },
+      },
+    };
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+  });
+
+  test("fails when a suspended step has no payload", async () => {
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["detect-platform"]],
+      steps: {
+        "detect-platform": {},
+      },
+    };
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+  });
+
+  test("tears down forwarding and stops the spinner on tool errors", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["npm install @sentry/node"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["install-deps"]],
+      steps: {
+        "install-deps": { suspendPayload: payload },
+      },
+    };
+    executeToolSpy.mockRejectedValue(new Error("boom"));
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+
+    expect(spinnerMock.stop).toHaveBeenCalledWith("Error", 1);
+    expect(cancelSpy).toHaveBeenCalledWith("Setup failed");
+    expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("tears down forwarding and stops the spinner on cancellation", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["npm install @sentry/node"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["install-deps"]],
+      steps: {
+        "install-deps": { suspendPayload: payload },
+      },
+    };
+    executeToolSpy.mockRejectedValue(new WizardCancelledError());
+
+    await runWizard(makeOptions());
+
+    expect(process.exitCode).toBe(0);
+    expect(spinnerMock.stop).toHaveBeenCalledWith("Cancelled", 0);
+    expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("tears down forwarding when a WizardError is rethrown from a tool", async () => {
+    // The reordered catch block stops the spinner BEFORE the WizardError
+    // rethrow branch, so any WizardError thrown from handleSuspendedStep
+    // (e.g. tool handlers, malformed payloads) must still release the TTY
+    // handle via `using` teardown.
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["npm install @sentry/node"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["install-deps"]],
+      steps: {
+        "install-deps": { suspendPayload: payload },
+      },
+    };
+    executeToolSpy.mockRejectedValue(
+      new WizardError("tool rejected by server")
+    );
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+
+    expect(spinnerMock.stop).toHaveBeenCalledWith("Error", 1);
+    expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("shows a multiline tree while reading files and then analyzing them", async () => {
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["detect-platform"]],
+      steps: {
+        "detect-platform": {
+          suspendPayload: {
+            type: "tool",
+            operation: "read-files",
+            cwd: "/tmp/test",
+            params: {
+              paths: ["src/settings.py", "src/urls.py"],
+            },
+          },
+        },
+      },
+    };
+    mockResumeResults = [{ status: "success" }];
+
+    await runWizard(makeOptions());
+
+    const messages = spinnerMock.message.mock.calls.map((call: string[]) =>
+      call[0]?.replace(
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escape sequences
+        /\x1b\[[^m]*m/g,
+        ""
+      )
+    );
+    expect(messages).toContain(
+      "Reading files...\n├─ ● settings.py\n└─ ● urls.py"
+    );
+    expect(messages).toContain(
+      "Analyzing files...\n├─ ✓ settings.py\n└─ ✓ urls.py"
+    );
+  });
+
+  test("passes precomputed dirListing/fileCache/existingSentry via initialState, not inputData", async () => {
+    const dirListing = [
+      { name: "package.json", path: "package.json", type: "file" as const },
+    ];
+    const fileCache = { "package.json": '{"name":"app"}' };
+    const detectedSentry = { status: "none" as const, signals: [] };
+
+    precomputeDirListingSpy.mockResolvedValue(dirListing);
+    preReadCommonFilesSpy.mockResolvedValue(fileCache);
+    precomputeSentryDetectionSpy.mockResolvedValue({
+      ok: true,
+      data: detectedSentry,
+    });
+
+    await runWizard(makeOptions());
+
+    expect(startAsyncMock).toHaveBeenCalledTimes(1);
+    const call = startAsyncMock.mock.calls[0] as
+      | [
+          {
+            inputData?: Record<string, unknown>;
+            initialState?: Record<string, unknown>;
+          },
+        ]
+      | undefined;
+    expect(call).toBeDefined();
+    const args = call?.[0] ?? {};
+
+    // Large shared context lives on state, not on inputData.
+    expect(args.inputData).not.toHaveProperty("dirListing");
+    expect(args.inputData).not.toHaveProperty("fileCache");
+    expect(args.inputData).not.toHaveProperty("existingSentry");
+    expect(args.initialState?.dirListing).toEqual(dirListing);
+    expect(args.initialState?.fileCache).toEqual(fileCache);
+    expect(args.initialState?.existingSentry).toEqual(detectedSentry);
+  });
+
+  test("renders tool result messages via the spinner stop state", async () => {
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["ensure-sentry-project"]],
+      steps: {
+        "ensure-sentry-project": {
+          suspendPayload: {
+            type: "tool",
+            operation: "create-sentry-project",
+            cwd: "/tmp/test",
+            params: { name: "my-app", platform: "javascript-react" },
+          },
+        },
+      },
+    };
+    executeToolSpy.mockResolvedValue({
+      ok: true,
+      message: "Using existing project",
+      data: {},
+    });
+    mockResumeResults = [{ status: "success" }];
+
+    await runWizard(makeOptions());
+
+    expect(spinnerMock.stop).toHaveBeenCalledWith("Using existing project");
+  });
+});
+
+describe("runWizard — MastraClient lifecycle", () => {
+  test("aborts the MastraClient signal after a successful run", async () => {
+    await runWizard(makeOptions());
+
+    expect(capturedClientOptions).toHaveLength(1);
+    const signal = capturedClientOptions[0]?.abortSignal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    // Using the non-null assertion safely — we asserted toBeInstanceOf above.
+    expect((signal as AbortSignal).aborted).toBe(true);
+  });
+
+  test("aborts the MastraClient signal when a tool throws", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["npm install @sentry/node"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["install-deps"]],
+      steps: {
+        "install-deps": { suspendPayload: payload },
+      },
+    };
+    executeToolSpy.mockRejectedValue(new Error("tool blew up"));
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+
+    expect(capturedClientOptions).toHaveLength(1);
+    const signal = capturedClientOptions[0]?.abortSignal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect((signal as AbortSignal).aborted).toBe(true);
+  });
+
+  test("aborts the MastraClient signal on cancellation", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["npm install @sentry/node"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["install-deps"]],
+      steps: {
+        "install-deps": { suspendPayload: payload },
+      },
+    };
+    executeToolSpy.mockRejectedValue(new WizardCancelledError());
+
+    await runWizard(makeOptions());
+
+    expect(capturedClientOptions).toHaveLength(1);
+    const signal = capturedClientOptions[0]?.abortSignal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect((signal as AbortSignal).aborted).toBe(true);
+  });
+
+  test("signal is live (not pre-aborted) while the wizard is running", async () => {
+    // `getWorkflow` runs BEFORE `startAsync` (client.getWorkflow is called
+    // synchronously right after `new MastraClient(...)`), so the signal
+    // observed at that time is the same instance that in-flight fetches
+    // would see during the wizard. If the signal were somehow pre-aborted
+    // at construction, it would be aborted here too. This proves the
+    // `using _mastraCleanup` disposable does NOT fire until teardown.
+    let abortedAtConstruction: boolean | undefined;
+    getWorkflowSpy.mockImplementation(function (this: MastraClient) {
+      const opts = (
+        this as unknown as { options: { abortSignal?: AbortSignal } }
+      ).options;
+      capturedClientOptions.push(opts);
+      abortedAtConstruction = opts.abortSignal?.aborted;
+      return {
+        createRun: mock(() =>
+          Promise.resolve({
+            startAsync: startAsyncMock,
+            resumeAsync: mock(() => Promise.resolve({ status: "success" })),
+          })
         ),
-        resumeAsync: mock(),
-      };
-      const hangingWorkflow = {
-        createRun: mock(() => Promise.resolve(hangingRun)),
-      };
-      getWorkflowSpy.mockReturnValue(hangingWorkflow as any);
-
-      const { API_TIMEOUT_MS } = await import(
-        "../../../src/lib/init/constants.js"
-      );
-
-      const promise = runWizard(makeOptions());
-
-      // Flush microtasks so runWizard reaches the withTimeout setTimeout.
-      // preamble() → confirmExperimental() → checkGitStatus() → createRun()
-      // each need a tick.
-      for (let i = 0; i < 10; i++) await Promise.resolve();
-
-      // Advance past the timeout
-      jest.advanceTimersByTime(API_TIMEOUT_MS);
-
-      await promise;
-
-      expect(logErrorSpy).toHaveBeenCalled();
-      const errorMsg: string = logErrorSpy.mock.calls[0][0];
-      expect(errorMsg).toContain("timed out");
-      expect(process.exitCode).toBe(1);
-
-      jest.useRealTimers();
+      } as any;
     });
 
-    test("handles startAsync rejection gracefully", async () => {
-      const failingRun = {
-        startAsync: mock(() => Promise.reject(new Error("Connection refused"))),
-        resumeAsync: mock(),
-      };
-      const mockWorkflow = {
-        createRun: mock(() => Promise.resolve(failingRun)),
-      };
-      getWorkflowSpy.mockReturnValue(mockWorkflow as any);
+    await runWizard(makeOptions());
 
-      await runWizard(makeOptions());
-
-      expect(logErrorSpy).toHaveBeenCalledWith("Connection refused");
-      expect(cancelSpy).toHaveBeenCalledWith("Setup failed");
-      expect(process.exitCode).toBe(1);
-    });
-  });
-
-  describe("workflow failure", () => {
-    test("calls formatError when status is failed", async () => {
-      mockStartResult = { status: "failed", error: "workflow exploded" };
-
-      await runWizard(makeOptions());
-
-      expect(formatErrorSpy).toHaveBeenCalled();
-      expect(formatResultSpy).not.toHaveBeenCalled();
-      expect(process.exitCode).toBe(1);
-    });
-  });
-
-  describe("success with exitCode", () => {
-    test("treats success with exitCode as error", async () => {
-      mockStartResult = {
-        status: "success",
-        result: { exitCode: 10 },
-      };
-
-      await runWizard(makeOptions());
-
-      expect(formatErrorSpy).toHaveBeenCalled();
-      expect(process.exitCode).toBe(1);
-    });
-  });
-
-  describe("dry-run mode", () => {
-    test("shows dry-run warning on start", async () => {
-      mockStartResult = { status: "success" };
-
-      await runWizard(makeOptions({ dryRun: true }));
-
-      expect(logWarnSpy).toHaveBeenCalled();
-      const warnMsg: string = logWarnSpy.mock.calls[0][0];
-      expect(warnMsg).toContain("Dry-run");
-    });
-  });
-
-  describe("git safety check", () => {
-    test("calls checkGitStatus with directory and yes from options", async () => {
-      mockStartResult = { status: "success" };
-
-      await runWizard(makeOptions({ directory: "/my/project", yes: true }));
-
-      expect(checkGitStatusSpy).toHaveBeenCalledWith({
-        cwd: "/my/project",
-        yes: true,
-      });
-    });
-
-    test("aborts gracefully when checkGitStatus returns false", async () => {
-      checkGitStatusSpy.mockResolvedValue(false);
-      const origIsTTY = process.stdin.isTTY;
-      Object.defineProperty(process.stdin, "isTTY", {
-        value: true,
-        configurable: true,
-      });
-
-      await runWizard(makeOptions({ yes: false }));
-
-      Object.defineProperty(process.stdin, "isTTY", {
-        value: origIsTTY,
-        configurable: true,
-      });
-
-      expect(cancelSpy).toHaveBeenCalledWith("Setup cancelled.");
-      expect(process.exitCode).toBe(0);
-      // Should not proceed to workflow
-      expect(getWorkflowSpy).not.toHaveBeenCalled();
-    });
-
-    test("continues to workflow when checkGitStatus returns true", async () => {
-      checkGitStatusSpy.mockResolvedValue(true);
-      mockStartResult = { status: "success" };
-
-      await runWizard(makeOptions());
-
-      expect(checkGitStatusSpy).toHaveBeenCalled();
-      expect(formatResultSpy).toHaveBeenCalled();
-    });
-  });
-
-  describe("suspend/resume loop", () => {
-    test("dispatches local-op payload to handleLocalOp", async () => {
-      mockStartResult = {
-        status: "suspended",
-        suspended: [["detect-platform"]],
-        steps: {
-          "detect-platform": {
-            suspendPayload: {
-              type: "local-op",
-              operation: "list-dir",
-              cwd: "/app",
-              params: { path: "." },
-            },
-          },
-        },
-      };
-      mockResumeResults = [{ status: "success" }];
-
-      await runWizard(makeOptions());
-
-      expect(handleLocalOpSpy).toHaveBeenCalled();
-      const payload = handleLocalOpSpy.mock.calls[0][0] as {
-        type: string;
-        operation: string;
-      };
-      expect(payload.type).toBe("local-op");
-      expect(payload.operation).toBe("list-dir");
-    });
-
-    test("dispatches interactive payload to handleInteractive", async () => {
-      mockStartResult = {
-        status: "suspended",
-        suspended: [["select-features"]],
-        steps: {
-          "select-features": {
-            suspendPayload: {
-              type: "interactive",
-              kind: "multi-select",
-              prompt: "Select features",
-              availableFeatures: ["errorMonitoring"],
-            },
-          },
-        },
-      };
-      mockResumeResults = [{ status: "success" }];
-
-      await runWizard(makeOptions());
-
-      expect(handleInteractiveSpy).toHaveBeenCalled();
-      const payload = handleInteractiveSpy.mock.calls[0][0] as {
-        type: string;
-        kind: string;
-      };
-      expect(payload.type).toBe("interactive");
-      expect(payload.kind).toBe("multi-select");
-    });
-
-    test("auto-continues verify-changes in dry-run mode", async () => {
-      mockStartResult = {
-        status: "suspended",
-        suspended: [["verify-changes"]],
-        steps: {
-          "verify-changes": {
-            suspendPayload: {
-              type: "interactive",
-              kind: "confirm",
-              prompt: "Changes look good?",
-            },
-          },
-        },
-      };
-      mockResumeResults = [{ status: "success" }];
-
-      await runWizard(makeOptions({ dryRun: true }));
-
-      expect(handleInteractiveSpy).not.toHaveBeenCalled();
-    });
-
-    test("handles unknown suspend payload type", async () => {
-      mockStartResult = {
-        status: "suspended",
-        suspended: [["some-step"]],
-        steps: {
-          "some-step": {
-            suspendPayload: { type: "alien", data: 42 },
-          },
-        },
-      };
-
-      await runWizard(makeOptions());
-
-      expect(logErrorSpy).toHaveBeenCalled();
-      const errorMsg: string = logErrorSpy.mock.calls[0][0];
-      expect(errorMsg).toContain("alien");
-      expect(process.exitCode).toBe(1);
-    });
-
-    test("handles missing suspend payload", async () => {
-      mockStartResult = {
-        status: "suspended",
-        suspended: [["empty-step"]],
-        steps: {},
-      };
-
-      await runWizard(makeOptions());
-
-      expect(logErrorSpy).toHaveBeenCalled();
-      const errorMsg: string = logErrorSpy.mock.calls[0][0];
-      expect(errorMsg).toContain("No suspend payload");
-      expect(process.exitCode).toBe(1);
-    });
-
-    test("non-WizardCancelledError in catch triggers log.error + cancel", async () => {
-      handleLocalOpSpy.mockImplementation(() => Promise.reject("string error"));
-
-      mockStartResult = {
-        status: "suspended",
-        suspended: [["detect-platform"]],
-        steps: {
-          "detect-platform": {
-            suspendPayload: {
-              type: "local-op",
-              operation: "list-dir",
-              cwd: "/app",
-              params: { path: "." },
-            },
-          },
-        },
-      };
-
-      await runWizard(makeOptions());
-
-      expect(logErrorSpy).toHaveBeenCalledWith("string error");
-      expect(cancelSpy).toHaveBeenCalledWith("Setup failed");
-      expect(process.exitCode).toBe(1);
-    });
-
-    test("falls back to result.suspendPayload when step payload missing", async () => {
-      mockStartResult = {
-        status: "suspended",
-        suspended: [["unknown-step"]],
-        steps: {},
-        suspendPayload: {
-          type: "local-op",
-          operation: "read-files",
-          cwd: "/app",
-          params: { paths: ["package.json"] },
-        },
-      };
-      mockResumeResults = [{ status: "success" }];
-
-      await runWizard(makeOptions());
-
-      expect(handleLocalOpSpy).toHaveBeenCalled();
-    });
-
-    test("falls back to iterating steps when stepId key not found", async () => {
-      mockStartResult = {
-        status: "suspended",
-        suspended: [["step-a"]],
-        steps: {
-          "step-b": {
-            suspendPayload: {
-              type: "local-op",
-              operation: "read-files",
-              cwd: "/app",
-              params: { paths: ["index.ts"] },
-            },
-          },
-        },
-      };
-      mockResumeResults = [{ status: "success" }];
-
-      await runWizard(makeOptions());
-
-      expect(handleLocalOpSpy).toHaveBeenCalled();
-      // resumeAsync should be called with the actual key ("step-b"), not the
-      // original stepId ("step-a") from result.suspended
-      expect(mockRun.resumeAsync).toHaveBeenCalledWith(
-        expect.objectContaining({ step: "step-b" })
-      );
-    });
-
-    test("handles multiple suspend/resume iterations", async () => {
-      mockStartResult = {
-        status: "suspended",
-        suspended: [["detect-platform"]],
-        steps: {
-          "detect-platform": {
-            suspendPayload: {
-              type: "local-op",
-              operation: "list-dir",
-              cwd: "/app",
-              params: { path: "." },
-            },
-          },
-        },
-      };
-      mockResumeResults = [
-        {
-          status: "suspended",
-          suspended: [["select-features"]],
-          steps: {
-            "select-features": {
-              suspendPayload: {
-                type: "interactive",
-                kind: "multi-select",
-                prompt: "Select features",
-                availableFeatures: ["errorMonitoring"],
-              },
-            },
-          },
-        },
-        { status: "success" },
-      ];
-
-      await runWizard(makeOptions());
-
-      expect(handleLocalOpSpy).toHaveBeenCalledTimes(1);
-      expect(handleInteractiveSpy).toHaveBeenCalledTimes(1);
-      expect(formatResultSpy).toHaveBeenCalled();
-    });
-  });
-
-  describe("malformed server responses", () => {
-    test("rejects non-object response from startAsync", async () => {
-      const badRun = {
-        startAsync: mock(() => Promise.resolve("not an object")),
-        resumeAsync: mock(),
-      };
-      const badWorkflow = {
-        createRun: mock(() => Promise.resolve(badRun)),
-      };
-      getWorkflowSpy.mockReturnValue(badWorkflow as any);
-
-      await runWizard(makeOptions());
-
-      expect(logErrorSpy).toHaveBeenCalledWith(
-        "Invalid workflow response: expected object"
-      );
-      expect(process.exitCode).toBe(1);
-    });
-
-    test("rejects response with invalid status", async () => {
-      const badRun = {
-        startAsync: mock(() =>
-          Promise.resolve({ status: "banana", result: {} })
-        ),
-        resumeAsync: mock(),
-      };
-      const badWorkflow = {
-        createRun: mock(() => Promise.resolve(badRun)),
-      };
-      getWorkflowSpy.mockReturnValue(badWorkflow as any);
-
-      await runWizard(makeOptions());
-
-      expect(logErrorSpy).toHaveBeenCalledWith(
-        "Unexpected workflow status: banana"
-      );
-      expect(process.exitCode).toBe(1);
-    });
-
-    test("rejects null response from startAsync", async () => {
-      const badRun = {
-        startAsync: mock(() => Promise.resolve(null)),
-        resumeAsync: mock(),
-      };
-      const badWorkflow = {
-        createRun: mock(() => Promise.resolve(badRun)),
-      };
-      getWorkflowSpy.mockReturnValue(badWorkflow as any);
-
-      await runWizard(makeOptions());
-
-      expect(logErrorSpy).toHaveBeenCalledWith(
-        "Invalid workflow response: expected object"
-      );
-      expect(process.exitCode).toBe(1);
-    });
+    expect(abortedAtConstruction).toBe(false);
+    // And teardown aborted it by the time the wizard returned.
+    expect(capturedClientOptions[0]?.abortSignal?.aborted).toBe(true);
   });
 });

@@ -12,10 +12,11 @@
  */
 
 import type { Database } from "bun:sqlite";
+import { getEnv } from "../env.js";
 import { stringifyUnknown } from "../errors.js";
 import { logger } from "../logger.js";
 
-export const CURRENT_SCHEMA_VERSION = 12;
+export const CURRENT_SCHEMA_VERSION = 15;
 
 /** Environment variable to disable auto-repair */
 const NO_AUTO_REPAIR_ENV = "SENTRY_CLI_NO_AUTO_REPAIR";
@@ -67,18 +68,7 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
       },
     },
   },
-  defaults: {
-    columns: {
-      id: { type: "INTEGER", primaryKey: true, check: "id = 1" },
-      organization: { type: "TEXT" },
-      project: { type: "TEXT" },
-      updated_at: {
-        type: "INTEGER",
-        notNull: true,
-        default: "(unixepoch() * 1000)",
-      },
-    },
-  },
+
   project_cache: {
     columns: {
       cache_key: { type: "TEXT", primaryKey: true },
@@ -196,6 +186,49 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
       id: { type: "INTEGER", primaryKey: true, check: "id = 1" },
       instance_id: { type: "TEXT", notNull: true },
       created_at: {
+        type: "INTEGER",
+        notNull: true,
+        default: "(unixepoch() * 1000)",
+      },
+    },
+  },
+  repo_cache: {
+    columns: {
+      // Composite PK (org_slug) — one row per org caches the full repo list
+      org_slug: { type: "TEXT", primaryKey: true },
+      // JSON array of SentryRepository — stored as blob since we re-hydrate
+      // the whole list on cache hit (no per-repo lookups). Keeps the cache
+      // simple and matches the typical usage pattern (match git origin →
+      // find one repo by name/url).
+      repos_json: { type: "TEXT", notNull: true },
+      cached_at: {
+        type: "INTEGER",
+        notNull: true,
+        default: "(unixepoch() * 1000)",
+      },
+    },
+  },
+  /**
+   * Mapping from numeric issue group IDs to organization slugs.
+   *
+   * Populated after `sentry issue view <numeric-id>` falls back to the legacy
+   * unscoped `/api/0/issues/{id}/` endpoint and extracts the org from the
+   * response permalink. Subsequent runs consult this cache to route directly
+   * via the org-scoped endpoint, avoiding the redundant unscoped lookup
+   * flagged as a "Consecutive HTTP" performance issue in Sentry.
+   *
+   * Entries are best-effort: a stale mapping (issue moved / deleted / access
+   * revoked) causes a 404 on the cached org call, which the caller evicts and
+   * falls back from. Cleared on logout (scoped to the current user's
+   * permissions).
+   */
+  issue_org_cache: {
+    columns: {
+      // Numeric issue group ID (e.g., "7413562541"). TEXT to sidestep the
+      // 2^53 JavaScript number limit if Sentry's group IDs ever exceed it.
+      issue_id: { type: "TEXT", primaryKey: true },
+      org_slug: { type: "TEXT", notNull: true },
+      cached_at: {
         type: "INTEGER",
         notNull: true,
         default: "(unixepoch() * 1000)",
@@ -608,7 +641,7 @@ export function tryRepairAndRetry<T>(
   error: unknown
 ): RepairAttemptResult<T> {
   // Skip repair if disabled via environment variable
-  if (process.env[NO_AUTO_REPAIR_ENV] === "1") {
+  if (getEnv()[NO_AUTO_REPAIR_ENV] === "1") {
     return { attempted: false };
   }
 
@@ -683,6 +716,7 @@ function getSchemaVersion(db: Database): number {
  * - Column renames (requires data copy in SQLite)
  * - Complex constraints
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential migration steps are inherently linear
 export function runMigrations(db: Database): void {
   const currentVersion = getSchemaVersion(db);
 
@@ -767,6 +801,42 @@ export function runMigrations(db: Database): void {
       db.exec("DROP TABLE pagination_cursors");
     }
     db.exec(EXPECTED_TABLES.pagination_cursors as string);
+  }
+
+  // Migration 12 -> 13: Consolidate defaults into metadata KV table.
+  // The single-row `defaults` table was never written by production code.
+  // Move any data (from JSON migration or manual DB edits) to metadata,
+  // then drop the table. New defaults use metadata keys: defaults.org,
+  // defaults.project, defaults.telemetry, defaults.url.
+  if (currentVersion < 13 && tableExists(db, "defaults")) {
+    const row = db
+      .query("SELECT organization, project FROM defaults WHERE id = 1")
+      .get() as { organization: string | null; project: string | null } | null;
+    if (row?.organization) {
+      db.query(
+        "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)"
+      ).run("defaults.org", row.organization);
+    }
+    if (row?.project) {
+      db.query(
+        "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)"
+      ).run("defaults.project", row.project);
+    }
+    db.exec("DROP TABLE defaults");
+  }
+
+  // Migration 13 -> 14: Add repo_cache table for offline Sentry repository
+  // lookups (used by `issue resolve --in @commit` to match git origin →
+  // Sentry-registered repo without an extra API round trip).
+  if (currentVersion < 14) {
+    db.exec(EXPECTED_TABLES.repo_cache as string);
+  }
+
+  // Migration 14 -> 15: Add issue_org_cache table for numeric-id → org
+  // mappings used by `issue view <numeric-id>` to skip the legacy unscoped
+  // `/api/0/issues/{id}/` endpoint on repeat runs.
+  if (currentVersion < 15) {
+    db.exec(EXPECTED_TABLES.issue_org_cache as string);
   }
 
   if (currentVersion < CURRENT_SCHEMA_VERSION) {

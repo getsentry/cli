@@ -89,16 +89,35 @@ export class ZipWriter {
   /**
    * Create a new {@link ZipWriter} that writes to the given path.
    *
-   * The file is created (or truncated) immediately. The caller must
-   * eventually call {@link finalize} to produce a valid archive and
-   * release the file handle.
+   * The file is created (or truncated) immediately. An 8-byte source
+   * bundle header (`SYSB` magic + version 2) is written first — this
+   * is required by Sentry's symbolicator which uses the `symbolic`
+   * crate's `SourceBundle::test()` to identify valid bundles. Without
+   * this header, the symbolicator silently skips the archive and
+   * reports `js_no_source` / `missing_source`.
+   *
+   * The caller must eventually call {@link finalize} to produce a
+   * valid archive and release the file handle.
    *
    * @param outputPath - Filesystem path for the output ZIP file.
    * @returns A ready-to-use writer instance.
    */
   static async create(outputPath: string): Promise<ZipWriter> {
     const fh = await open(outputPath, "w");
-    return new ZipWriter(fh);
+    const writer = new ZipWriter(fh);
+
+    // Write the SourceBundle magic header before any ZIP data.
+    // Format: 4-byte magic "SYSB" + 4-byte LE version (2).
+    // Sentry's symbolicator uses the `symbolic` crate to parse artifact
+    // bundles. Without this header, `SourceBundle::test()` rejects the
+    // archive and the symbolicator cannot extract files from it.
+    const header = Buffer.alloc(8);
+    header.write("SYSB", 0, 4, "ascii");
+    header.writeUInt32LE(2, 4);
+    await fh.write(header, 0, header.length);
+    writer.offset = 8;
+
+    return writer;
   }
 
   /**

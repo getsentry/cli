@@ -366,11 +366,6 @@ describe("parseIssueArg and parseOrgProjectArg consistency", () => {
   });
 });
 
-// Arbitrary for strings that may contain underscores (slug-like with underscores)
-const slugLikeWithUnderscoresArb = stringMatching(
-  /^[a-z][a-z0-9_-]{0,20}[a-z0-9]$/
-);
-
 /** Generates all-lowercase slug-like strings with at least one dash */
 const lowercaseSlugWithDashArb = stringMatching(
   /^[a-z][a-z0-9]*(-[a-z][a-z0-9]*)+$/
@@ -385,43 +380,37 @@ const withSlashArb = stringMatching(/^[a-zA-Z0-9]+\/[a-zA-Z0-9]+$/);
 /** Generates strings without slashes */
 const noSlashArb = stringMatching(/^[a-zA-Z0-9-]{1,20}$/);
 
-describe("normalizeSlug properties", () => {
-  test("idempotent: normalizing twice yields same slug as normalizing once", async () => {
+/** Generates display-name-like strings with spaces (e.g., "My Project") */
+const displayNameLikeArb = stringMatching(/^[A-Za-z][A-Za-z0-9 _-]{0,20}$/);
+
+describe("normalizeSlug properties (no-op)", () => {
+  test("always returns the input unchanged", async () => {
     await fcAssert(
-      property(slugLikeWithUnderscoresArb, (input) => {
+      property(displayNameLikeArb, (input) => {
+        const result = normalizeSlug(input);
+        expect(result.slug).toBe(input);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("normalized is always false", async () => {
+    await fcAssert(
+      property(displayNameLikeArb, (input) => {
+        const result = normalizeSlug(input);
+        expect(result.normalized).toBe(false);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("idempotent: normalizing twice yields same result as normalizing once", async () => {
+    await fcAssert(
+      property(displayNameLikeArb, (input) => {
         const first = normalizeSlug(input);
         const second = normalizeSlug(first.slug);
         expect(second.slug).toBe(first.slug);
-      }),
-      { numRuns: DEFAULT_NUM_RUNS }
-    );
-  });
-
-  test("normalized is true iff input contained underscores", async () => {
-    await fcAssert(
-      property(slugLikeWithUnderscoresArb, (input) => {
-        const result = normalizeSlug(input);
-        expect(result.normalized).toBe(input.includes("_"));
-      }),
-      { numRuns: DEFAULT_NUM_RUNS }
-    );
-  });
-
-  test("result slug never contains underscores", async () => {
-    await fcAssert(
-      property(slugLikeWithUnderscoresArb, (input) => {
-        const result = normalizeSlug(input);
-        expect(result.slug.includes("_")).toBe(false);
-      }),
-      { numRuns: DEFAULT_NUM_RUNS }
-    );
-  });
-
-  test("length is preserved (underscore and dash are both 1 char)", async () => {
-    await fcAssert(
-      property(slugLikeWithUnderscoresArb, (input) => {
-        const result = normalizeSlug(input);
-        expect(result.slug.length).toBe(input.length);
+        expect(second.normalized).toBe(first.normalized);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );

@@ -9,9 +9,21 @@
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
 import type { SentryContext } from "../../context.js";
-import { listLogs, listTraceLogs } from "../../lib/api-client.js";
-import { validateLimit } from "../../lib/arg-parsing.js";
-import { AuthError, stringifyUnknown } from "../../lib/errors.js";
+import {
+  type LogSortDirection,
+  listLogs,
+  listTraceLogs,
+} from "../../lib/api-client.js";
+import {
+  buildProjectQuery,
+  parseLogSort,
+  validateLimit,
+} from "../../lib/arg-parsing.js";
+import {
+  AuthError,
+  stringifyUnknown,
+  ValidationError,
+} from "../../lib/errors.js";
 import {
   buildLogRowCells,
   createLogStreamingTable,
@@ -29,23 +41,36 @@ import {
 import type { StreamingTable } from "../../lib/formatters/text-table.js";
 import {
   buildListCommand,
+  LIST_MAX_LIMIT,
+  LIST_MIN_LIMIT,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
 import { withProgress } from "../../lib/polling.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
+import { sanitizeQuery } from "../../lib/search-query.js";
+import {
+  PERIOD_BRIEF,
+  parsePeriod,
+  TIME_RANGE_14D,
+  TIME_RANGE_30D,
+  type TimeRange,
+  timeRangeToApiParams,
+} from "../../lib/time-range.js";
 import {
   parseDualModeArgs,
   resolveTraceOrg,
   warnIfNormalized,
 } from "../../lib/trace-target.js";
 import { getUpdateNotification } from "../../lib/version-check.js";
+import { SentryLogSchema } from "../../types/index.js";
 
 type ListFlags = {
   readonly limit: number;
   readonly query?: string;
   readonly follow?: number;
-  readonly period?: string;
+  readonly period?: TimeRange;
+  readonly sort: LogSortDirection;
   readonly json: boolean;
   readonly fresh: boolean;
   readonly fields?: string[];
@@ -69,15 +94,6 @@ type LogListResult = {
 /** Output yielded by log list: either a batch (single-fetch) or an individual item (follow). */
 type LogOutput = LogLike | LogListResult;
 
-/** Maximum allowed value for --limit flag */
-const MAX_LIMIT = 1000;
-
-/** Minimum allowed value for --limit flag */
-const MIN_LIMIT = 1;
-
-/** Default number of log entries to show */
-const DEFAULT_LIMIT = 100;
-
 /** Default poll interval in seconds for --follow mode */
 const DEFAULT_POLL_INTERVAL = 2;
 
@@ -85,16 +101,13 @@ const DEFAULT_POLL_INTERVAL = 2;
 const COMMAND_NAME = "log list";
 
 /** Usage hint for trace mode error messages */
-const TRACE_USAGE_HINT = "sentry log list [<org>/]<trace-id>";
-
-/** Default time period for trace-logs queries */
-const DEFAULT_TRACE_PERIOD = "14d";
+const TRACE_USAGE_HINT = "sentry log list [<org>/[<project>/]]<trace-id>";
 
 /**
  * Parse --limit flag, delegating range validation to shared utility.
  */
 function parseLimit(value: string): number {
-  return validateLimit(value, MIN_LIMIT, MAX_LIMIT);
+  return validateLimit(value, LIST_MIN_LIMIT, LIST_MAX_LIMIT);
 }
 
 /**
@@ -154,9 +167,6 @@ function parseLogListArgs(
   return parseDualModeArgs(args, TRACE_USAGE_HINT);
 }
 
-/** Default time period for project-scoped log queries */
-const DEFAULT_PROJECT_PERIOD = "90d";
-
 /**
  * Execute a single fetch of logs (non-streaming mode).
  *
@@ -166,28 +176,34 @@ const DEFAULT_PROJECT_PERIOD = "90d";
 async function executeSingleFetch(
   org: string,
   project: string,
-  flags: ListFlags
+  flags: ListFlags,
+  timeRange: TimeRange
 ): Promise<FetchResult> {
-  const period = flags.period ?? DEFAULT_PROJECT_PERIOD;
   const logs = await listLogs(org, project, {
     query: flags.query,
     limit: flags.limit,
-    statsPeriod: period,
+    ...timeRangeToApiParams(timeRange),
+    sort: flags.sort,
   });
 
-  if (logs.length === 0) {
-    return { result: { logs: [], hasMore: false }, hint: "No logs found." };
-  }
+  const periodLabel =
+    timeRange.type === "relative"
+      ? `in the last ${timeRange.period}`
+      : "in the specified range";
 
-  // Reverse for chronological order (API returns newest first, tail shows oldest first)
-  const chronological = [...logs].reverse();
+  if (logs.length === 0) {
+    return {
+      result: { logs: [], hasMore: false },
+      hint: `No logs found ${periodLabel}.`,
+    };
+  }
 
   const hasMore = logs.length >= flags.limit;
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"}.`;
   const tip = hasMore ? " Use --limit to show more, or -f to follow." : "";
 
   return {
-    result: { logs: chronological, hasMore },
+    result: { logs, hasMore },
     hint: `${countText}${tip}`,
   };
 }
@@ -246,6 +262,11 @@ type FollowGeneratorConfig<T extends LogLike> = {
    * Use this to seed dedup state (e.g., tracking seen log IDs).
    */
   onInitialLogs?: (logs: T[]) => void;
+  /**
+   * External abort signal (library mode). When aborted, the follow
+   * generator stops on the next poll cycle. Complements SIGINT handling.
+   */
+  abortSignal?: AbortSignal;
 };
 
 /** Find the highest timestamp_precise in a batch, or undefined if none have it. */
@@ -333,10 +354,15 @@ async function* generateFollowLogs<T extends LogLike>(
   // timestamp_precise is nanoseconds; Date.now() is milliseconds → convert
   let lastTimestamp = Date.now() * 1_000_000;
 
-  // AbortController for clean SIGINT handling
+  // AbortController for clean SIGINT handling + library mode abort
   const controller = new AbortController();
   const stop = () => controller.abort();
   process.once("SIGINT", stop);
+
+  // Library mode: honor external abort signal (e.g., consumer break)
+  if (config.abortSignal) {
+    config.abortSignal.addEventListener("abort", stop, { once: true });
+  }
 
   try {
     // Initial fetch
@@ -413,9 +439,20 @@ async function* yieldTraceFollowItems<T extends LogLike>(
   }
 }
 
+/** Options for {@link executeTraceSingleFetch}. */
+type TraceFetchOptions = {
+  flags: ListFlags;
+  timeRange: TimeRange;
+  /** Project slug for API-level filtering (from org/project/trace-id syntax) */
+  projectFilter?: string;
+};
+
 /**
  * Execute a single fetch of trace-filtered logs (non-streaming, trace mode).
  * Uses the dedicated trace-logs endpoint which is org-scoped.
+ *
+ * When `projectFilter` is provided, `project:{slug}` is prepended to the query
+ * for API-level filtering, and the hint includes a copy-pasteable unfiltered command.
  *
  * Returns the fetched logs, trace ID, and a human-readable hint.
  * The caller (via the output config) handles rendering to stdout.
@@ -423,36 +460,46 @@ async function* yieldTraceFollowItems<T extends LogLike>(
 async function executeTraceSingleFetch(
   org: string,
   traceId: string,
-  flags: ListFlags
+  options: TraceFetchOptions
 ): Promise<FetchResult> {
-  // Use the explicit period if set, otherwise default to 14d for trace mode.
-  // The flag is optional (no default) so undefined means "not explicitly set".
-  const period = flags.period ?? DEFAULT_TRACE_PERIOD;
-
+  const { flags, timeRange, projectFilter } = options;
+  const query = buildProjectQuery(flags.query, projectFilter);
   const logs = await listTraceLogs(org, traceId, {
-    query: flags.query,
+    query,
     limit: flags.limit,
-    statsPeriod: period,
+    ...timeRangeToApiParams(timeRange),
+    sort: flags.sort,
   });
+
+  const periodLabel =
+    timeRange.type === "relative"
+      ? `in the last ${timeRange.period}`
+      : "in the specified range";
 
   if (logs.length === 0) {
     return {
       result: { logs: [], traceId, hasMore: false },
       hint:
-        `No logs found for trace ${traceId} in the last ${period}.\n\n` +
+        `No logs found for trace ${traceId} ${periodLabel}.\n\n` +
         "Try 'sentry trace logs' for more options (e.g., --period 30d).",
     };
   }
-
-  const chronological = [...logs].reverse();
 
   const hasMore = logs.length >= flags.limit;
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"} for trace ${traceId}.`;
   const tip = hasMore ? " Use --limit to show more." : "";
 
+  // Build hint with real values for easy copy-paste
+  let hint = `${countText}${tip}`;
+  if (projectFilter) {
+    hint += `\nFiltered to project '${projectFilter}'. Full trace logs: sentry log list ${org}/${traceId}`;
+  } else {
+    hint += `\nFilter by project: sentry log list ${org}/<project>/${traceId}`;
+  }
+
   return {
-    result: { logs: chronological, traceId, hasMore },
-    hint: `${countText}${tip}`,
+    result: { logs, traceId, hasMore },
+    hint,
   };
 }
 
@@ -598,6 +645,7 @@ export const listCommand = buildListCommand(
     output: {
       human: createLogRenderer,
       jsonTransform: jsonTransformLogOutput,
+      schema: SentryLogSchema,
     },
     parameters: {
       positional: {
@@ -613,13 +661,14 @@ export const listCommand = buildListCommand(
         limit: {
           kind: "parsed",
           parse: parseLimit,
-          brief: `Number of log entries (${MIN_LIMIT}-${MAX_LIMIT})`,
-          default: String(DEFAULT_LIMIT),
+          brief: `Number of log entries (${LIST_MIN_LIMIT}-${LIST_MAX_LIMIT})`,
+          default: "100", // Logs are high-volume; 25 is too stingy for debugging
         },
         query: {
           kind: "parsed",
-          parse: String,
-          brief: "Filter query (Sentry search syntax)",
+          parse: sanitizeQuery,
+          brief:
+            'Filter query (e.g., "level:error", "project:backend", "project:[a,b]")',
           optional: true,
         },
         follow: {
@@ -631,10 +680,15 @@ export const listCommand = buildListCommand(
         },
         period: {
           kind: "parsed",
-          parse: String,
-          brief:
-            'Time period (e.g., "90d", "14d", "24h"). Default: 90d (project mode), 14d (trace mode)',
+          parse: parsePeriod,
+          brief: PERIOD_BRIEF,
           optional: true,
+        },
+        sort: {
+          kind: "parsed",
+          parse: parseLogSort,
+          brief: 'Sort order: "newest" (default) or "oldest"',
+          default: "newest",
         },
       },
       aliases: {
@@ -642,12 +696,35 @@ export const listCommand = buildListCommand(
         q: "query",
         f: "follow",
         t: "period",
+        s: "sort",
       },
     },
     async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {
+      if (flags.follow && flags.sort === "oldest") {
+        throw new ValidationError(
+          '--sort "oldest" cannot be used with --follow. Follow mode streams new logs as they arrive.',
+          "sort"
+        );
+      }
+
       const { cwd } = this;
 
       const parsed = parseLogListArgs(args);
+
+      // Resolve mode-dependent default period
+      const timeRange =
+        flags.period ??
+        (parsed.mode === "trace" ? TIME_RANGE_14D : TIME_RANGE_30D);
+
+      // Follow mode streams live events via short polling intervals —
+      // absolute date ranges are silently ignored, so reject them entirely.
+      if (flags.follow && timeRange.type === "absolute") {
+        throw new ValidationError(
+          "--follow cannot be used with an absolute date range. " +
+            "Use a relative duration (e.g., --period 1h) or omit --period.",
+          "period"
+        );
+      }
 
       if (parsed.mode === "trace") {
         // Trace mode: use the org-scoped trace-logs endpoint.
@@ -657,6 +734,14 @@ export const listCommand = buildListCommand(
           cwd,
           TRACE_USAGE_HINT
         );
+
+        // Capture explicit project for API-level filtering
+        const projectFilter =
+          parsed.parsed.type === "explicit" ? parsed.parsed.project : undefined;
+
+        // Prepend project filter to the query when user explicitly specified a project
+        const traceQuery = buildProjectQuery(flags.query, projectFilter);
+
         if (flags.follow) {
           // Banner (suppressed in JSON mode)
           writeFollowBanner(
@@ -671,9 +756,11 @@ export const listCommand = buildListCommand(
           const generator = generateFollowLogs({
             flags,
             onDiagnostic: (msg) => logger.warn(msg),
+            abortSignal: (this.process as { abortSignal?: AbortSignal })
+              ?.abortSignal,
             fetch: (statsPeriod) =>
               listTraceLogs(org, traceId, {
-                query: flags.query,
+                query: traceQuery,
                 limit: flags.limit,
                 statsPeriod,
               }),
@@ -710,7 +797,12 @@ export const listCommand = buildListCommand(
             message: `Fetching logs (up to ${flags.limit})...`,
             json: flags.json,
           },
-          () => executeTraceSingleFetch(org, traceId, flags)
+          () =>
+            executeTraceSingleFetch(org, traceId, {
+              flags,
+              timeRange,
+              projectFilter,
+            })
         );
         yield new CommandOutput(result);
         return { hint };
@@ -733,6 +825,8 @@ export const listCommand = buildListCommand(
           const generator = generateFollowLogs({
             flags,
             onDiagnostic: (msg) => logger.warn(msg),
+            abortSignal: (this.process as { abortSignal?: AbortSignal })
+              ?.abortSignal,
             fetch: (statsPeriod, afterTimestamp) =>
               listLogs(org, project, {
                 query: flags.query,
@@ -752,7 +846,7 @@ export const listCommand = buildListCommand(
             message: `Fetching logs (up to ${flags.limit})...`,
             json: flags.json,
           },
-          () => executeSingleFetch(org, project, flags)
+          () => executeSingleFetch(org, project, flags, timeRange)
         );
         yield new CommandOutput(result);
         return { hint };

@@ -20,13 +20,13 @@ import {
   type ScalarResult,
   TABLE_DISPLAY_TYPES,
   type TableResult,
+  type TextResult,
   TIMESERIES_DISPLAY_TYPES,
   type TimeseriesResult,
   type WidgetDataResult,
 } from "../../types/dashboard.js";
 import { stringifyUnknown } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
-import { invalidateCachedResponse } from "../response-cache.js";
 
 import {
   apiRequestToRegion,
@@ -124,14 +124,6 @@ export async function updateDashboard(
     method: "PUT",
     body,
   });
-
-  // Invalidate cached GET for this dashboard so subsequent view commands
-  // return fresh data instead of the pre-mutation cached response.
-  const normalizedBase = regionUrl.endsWith("/")
-    ? regionUrl.slice(0, -1)
-    : regionUrl;
-  await invalidateCachedResponse(`${normalizedBase}/api/0${path}`);
-
   return data;
 }
 
@@ -143,11 +135,110 @@ export async function updateDashboard(
 type WidgetQueryOptions = {
   /** Override the dashboard's time period (e.g., "24h", "7d") */
   period?: string;
+  /** Absolute start datetime (ISO-8601). Mutually exclusive with period. */
+  start?: string;
+  /** Absolute end datetime (ISO-8601). Mutually exclusive with period. */
+  end?: string;
+  /** Pre-computed total seconds for interval computation (for absolute ranges). */
+  periodSeconds?: number;
   /** Filter by environment(s) — from dashboard.environment */
   environment?: string[];
   /** Filter by project ID(s) — from dashboard.projects */
   project?: number[];
 };
+
+// ---------------------------------------------------------------------------
+// Optimal interval computation
+// ---------------------------------------------------------------------------
+
+/** Sentry dashboard grid columns (must match formatter GRID_COLS). */
+const GRID_COLS = 6;
+
+/** Overhead subtracted from widget column width to get chart area. */
+const CHART_WIDTH_OVERHEAD = 12;
+
+/** Minimum terminal width — mirrors formatter MIN_TERM_WIDTH. */
+const MIN_TERM_WIDTH = 80;
+
+/** Fallback terminal width for non-TTY — mirrors formatter DEFAULT_TERM_WIDTH. */
+const DEFAULT_TERM_WIDTH = 100;
+
+const PERIOD_UNITS: Record<string, number> = {
+  s: 1,
+  m: 60,
+  h: 3600,
+  d: 86_400,
+  w: 604_800,
+};
+
+const PERIOD_RE = /^(\d+)([smhdw])$/;
+
+/** Parse a Sentry period string (e.g., "24h", "7d") into seconds. */
+export function periodToSeconds(period: string): number | undefined {
+  const match = PERIOD_RE.exec(period);
+  if (!match) {
+    return;
+  }
+  const value = Number(match[1]);
+  const unit = PERIOD_UNITS[match[2] ?? ""];
+  if (!unit) {
+    return;
+  }
+  return value * unit;
+}
+
+/**
+ * Valid Sentry API interval values, ascending.
+ * The API accepts these specific bucket sizes for events-stats.
+ */
+const VALID_INTERVALS = ["1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d"];
+
+/**
+ * Compute the optimal API interval for a timeseries widget.
+ *
+ * Derives the ideal bucket size from the time period and estimated chart
+ * width in terminal columns. Picks the largest valid Sentry interval that
+ * produces at least `chartWidth` data points, ensuring barWidth stays at 1.
+ */
+export function computeOptimalInterval(
+  statsPeriod: string | undefined,
+  widget: DashboardWidget,
+  periodSeconds?: number
+): string | undefined {
+  const totalSeconds =
+    periodSeconds ?? (statsPeriod ? periodToSeconds(statsPeriod) : undefined);
+  if (!totalSeconds) {
+    return widget.interval;
+  }
+
+  // Estimate chart width from widget layout and terminal size.
+  // Use DEFAULT_TERM_WIDTH as fallback for non-TTY (matches formatter).
+  const termWidth = Math.max(
+    MIN_TERM_WIDTH,
+    process.stdout.columns || DEFAULT_TERM_WIDTH
+  );
+  const layoutW = widget.layout?.w ?? GRID_COLS;
+  const chartWidth =
+    Math.floor((layoutW / GRID_COLS) * termWidth) - CHART_WIDTH_OVERHEAD;
+
+  if (chartWidth <= 0) {
+    return widget.interval;
+  }
+
+  // Ideal seconds per bucket: period / chartWidth
+  const idealSeconds = totalSeconds / chartWidth;
+
+  // Pick the largest valid interval <= idealSeconds (so we get enough points)
+  let best: string | undefined;
+  for (const iv of VALID_INTERVALS) {
+    const ivSeconds = periodToSeconds(iv);
+    if (ivSeconds && ivSeconds <= idealSeconds) {
+      best = iv;
+    }
+  }
+
+  return best ?? VALID_INTERVALS[0];
+}
 
 /**
  * Parse an events-stats response into a normalized timeseries result.
@@ -233,14 +324,30 @@ type WidgetQueryParams = {
   regionUrl: string;
   orgSlug: string;
   widget: DashboardWidget;
-  statsPeriod: string;
+  /** Relative period (e.g., "24h"). Omit when using absolute start/end. */
+  statsPeriod?: string;
+  /** Absolute start datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  start?: string;
+  /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  end?: string;
+  /** Pre-computed total seconds for interval computation (for absolute ranges). */
+  periodSeconds?: number;
   options?: WidgetQueryOptions;
 };
 
 async function queryWidgetTimeseries(
   params: WidgetQueryParams
 ): Promise<TimeseriesResult> {
-  const { regionUrl, orgSlug, widget, statsPeriod, options = {} } = params;
+  const {
+    regionUrl,
+    orgSlug,
+    widget,
+    statsPeriod,
+    start,
+    end,
+    periodSeconds,
+    options = {},
+  } = params;
   const allSeries: TimeseriesResult["series"] = [];
 
   for (const query of widget.queries ?? []) {
@@ -254,6 +361,9 @@ async function queryWidgetTimeseries(
       query: query.conditions || undefined,
       dataset: dataset ?? undefined,
       statsPeriod,
+      start,
+      end,
+      interval: computeOptimalInterval(statsPeriod, widget, periodSeconds),
       environment: options.environment,
       project: options.project?.map(String),
     };
@@ -298,7 +408,15 @@ async function queryWidgetTimeseries(
 async function queryWidgetTable(
   params: WidgetQueryParams
 ): Promise<TableResult> {
-  const { regionUrl, orgSlug, widget, statsPeriod, options = {} } = params;
+  const {
+    regionUrl,
+    orgSlug,
+    widget,
+    statsPeriod,
+    start,
+    end,
+    options = {},
+  } = params;
   const query = widget.queries?.[0];
   const fields = query?.fields ?? [
     ...(query?.columns ?? []),
@@ -315,7 +433,11 @@ async function queryWidgetTable(
         query: query?.conditions || undefined,
         dataset: dataset ?? undefined,
         statsPeriod,
-        sort: query?.orderby || undefined,
+        start,
+        end,
+        // sort is only supported on the spans dataset —
+        // errors/discover endpoints reject it with 400.
+        sort: dataset === "spans" ? query?.orderby || undefined : undefined,
         per_page: widget.limit ?? 10,
         environment: options.environment,
         project: options.project?.map(String),
@@ -350,6 +472,16 @@ async function queryWidgetData(
   params: WidgetQueryParams
 ): Promise<WidgetDataResult> {
   const { widget } = params;
+
+  // Text widgets carry markdown in `description`, no API query needed
+  if (widget.displayType === "text") {
+    const description = (widget as Record<string, unknown>).description;
+    return {
+      type: "text",
+      content: typeof description === "string" ? description : "",
+    } satisfies TextResult;
+  }
+
   const dataset = mapWidgetTypeToDataset(widget.widgetType);
   if (!dataset) {
     return {
@@ -440,7 +572,12 @@ export async function queryAllWidgets(
   options: WidgetQueryOptions = {}
 ): Promise<Map<number, WidgetDataResult>> {
   const widgets = dashboard.widgets ?? [];
-  const statsPeriod = options.period ?? dashboard.period ?? "24h";
+  // When absolute start/end are provided, skip relative statsPeriod —
+  // the API treats them as mutually exclusive.
+  const statsPeriod =
+    options.start || options.end
+      ? undefined
+      : (options.period ?? dashboard.period ?? "24h");
 
   // Merge dashboard-level filters with caller overrides
   const mergedOptions: WidgetQueryOptions = {
@@ -465,6 +602,9 @@ export async function queryAllWidgets(
           orgSlug,
           widget,
           statsPeriod,
+          start: options.start,
+          end: options.end,
+          periodSeconds: options.periodSeconds,
           options: mergedOptions,
         })
       )

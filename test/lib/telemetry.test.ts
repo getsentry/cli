@@ -5,16 +5,24 @@
  */
 
 import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as Sentry from "@sentry/node-core/light";
-import { ApiError, AuthError } from "../../src/lib/errors.js";
+import { ApiError, AuthError, OutputError } from "../../src/lib/errors.js";
 import {
   createTracedDatabase,
   getSentryTracePropagationTargets,
   initSentry,
-  isClientApiError,
+  isUserApiError,
   recordApiErrorOnSpan,
   resetReadonlyWarning,
   setArgsContext,
@@ -30,6 +38,23 @@ import {
   withTracingSpan,
 } from "../../src/lib/telemetry.js";
 
+// Snapshot beforeExit listeners before any test calls initSentry(true).
+// The ProcessSession integration registers an anonymous handler via setupOnce
+// that has no cleanup mechanism. After all tests, we remove any listeners
+// that weren't present before to prevent the Bun test runner from hanging.
+const preTestListeners = new Set(process.rawListeners("beforeExit"));
+
+afterAll(() => {
+  for (const listener of process.rawListeners("beforeExit")) {
+    if (!preTestListeners.has(listener)) {
+      process.removeListener(
+        "beforeExit",
+        listener as (...args: unknown[]) => void
+      );
+    }
+  }
+});
+
 describe("initSentry", () => {
   test("returns client with enabled=false when disabled", () => {
     const client = initSentry(false);
@@ -42,11 +67,10 @@ describe("initSentry", () => {
     expect(client?.getOptions().enabled).toBe(true);
   });
 
-  test("uses process.env.NODE_ENV for environment", () => {
+  test("derives environment from CLI_VERSION via getCliEnvironment()", () => {
     const client = initSentry(true);
-    expect(client?.getOptions().environment).toBe(
-      process.env.NODE_ENV ?? "development"
-    );
+    // In test/dev mode, CLI_VERSION is "0.0.0-dev" → "development"
+    expect(client?.getOptions().environment).toBe("development");
   });
 
   test("uses 0.0.0-dev version when SENTRY_CLI_VERSION is not defined", () => {
@@ -184,54 +208,158 @@ describe("withTelemetry", () => {
       const result = await withTelemetry(() => 42);
       expect(result).toBe(42);
     });
+
+    test("does not capture OutputError (intentional exit-code mechanism)", async () => {
+      const captureSpy = spyOn(Sentry, "captureException");
+      const error = new OutputError(null);
+      await expect(
+        withTelemetry(() => {
+          throw error;
+        })
+      ).rejects.toThrow(error);
+      expect(captureSpy).not.toHaveBeenCalled();
+      captureSpy.mockRestore();
+    });
+
+    test("does not capture OutputError with data", async () => {
+      const captureSpy = spyOn(Sentry, "captureException");
+      const error = new OutputError({ error: "not found" });
+      await expect(
+        withTelemetry(() => {
+          throw error;
+        })
+      ).rejects.toThrow(error);
+      expect(captureSpy).not.toHaveBeenCalled();
+      captureSpy.mockRestore();
+    });
+
+    test("emits cli.error.silenced metric for user API errors", async () => {
+      const metricSpy = spyOn(Sentry.metrics, "distribution");
+      const captureSpy = spyOn(Sentry, "captureException");
+      const error = new ApiError(
+        "Not found",
+        404,
+        "detail",
+        "/api/0/organizations/foo/"
+      );
+      await expect(
+        withTelemetry(() => {
+          throw error;
+        })
+      ).rejects.toThrow(error);
+      // Silenced: no captureException
+      expect(captureSpy).not.toHaveBeenCalled();
+      // Metric emitted with normalized endpoint attribute
+      const silencedCall = metricSpy.mock.calls.find(
+        (c) => c[0] === "cli.error.silenced"
+      );
+      expect(silencedCall).toBeDefined();
+      expect(silencedCall?.[2]).toMatchObject({
+        attributes: expect.objectContaining({
+          error_class: "ApiError",
+          reason: "api_user_error",
+          api_status: 404,
+        }),
+      });
+      metricSpy.mockRestore();
+      captureSpy.mockRestore();
+    });
+
+    test("captures 5xx ApiError with fingerprint applied", async () => {
+      const captureSpy = spyOn(Sentry, "captureException");
+      const withScopeSpy = spyOn(Sentry, "withScope");
+      const error = new ApiError(
+        "Server error",
+        500,
+        "Internal",
+        "/api/0/organizations/foo/"
+      );
+      await expect(
+        withTelemetry(() => {
+          throw error;
+        })
+      ).rejects.toThrow(error);
+      // Captured via reportCliError → Sentry.withScope
+      expect(withScopeSpy).toHaveBeenCalled();
+      expect(captureSpy).toHaveBeenCalledWith(error);
+      withScopeSpy.mockRestore();
+      captureSpy.mockRestore();
+    });
+
+    test("captures ContextError with fingerprint (no silencing)", async () => {
+      const captureSpy = spyOn(Sentry, "captureException");
+      const metricSpy = spyOn(Sentry.metrics, "distribution");
+      const { ContextError } = await import("../../src/lib/errors.js");
+      const error = new ContextError(
+        "Organization and project",
+        "sentry issue view <org>/<project>/<id>"
+      );
+      await expect(
+        withTelemetry(() => {
+          throw error;
+        })
+      ).rejects.toThrow(error);
+      expect(captureSpy).toHaveBeenCalledWith(error);
+      // No silencing metric for captured errors
+      const silencedCall = metricSpy.mock.calls.find(
+        (c) => c[0] === "cli.error.silenced"
+      );
+      expect(silencedCall).toBeUndefined();
+      captureSpy.mockRestore();
+      metricSpy.mockRestore();
+    });
   });
 });
 
-describe("isClientApiError", () => {
-  test("returns true for 400 Bad Request", () => {
-    expect(isClientApiError(new ApiError("Bad request", 400))).toBe(true);
+describe("isUserApiError", () => {
+  test("returns false for 400 Bad Request (CLI bug, not user error)", () => {
+    expect(isUserApiError(new ApiError("Bad request", 400))).toBe(false);
+  });
+
+  test("returns true for 401 Unauthorized", () => {
+    expect(isUserApiError(new ApiError("Unauthorized", 401))).toBe(true);
   });
 
   test("returns true for 403 Forbidden", () => {
-    expect(isClientApiError(new ApiError("Forbidden", 403, "No access"))).toBe(
+    expect(isUserApiError(new ApiError("Forbidden", 403, "No access"))).toBe(
       true
     );
   });
 
   test("returns true for 404 Not Found", () => {
     expect(
-      isClientApiError(new ApiError("Not found", 404, "Issue not found"))
+      isUserApiError(new ApiError("Not found", 404, "Issue not found"))
     ).toBe(true);
   });
 
   test("returns true for 429 Too Many Requests", () => {
-    expect(isClientApiError(new ApiError("Rate limited", 429))).toBe(true);
+    expect(isUserApiError(new ApiError("Rate limited", 429))).toBe(true);
   });
 
   test("returns false for 500 Internal Server Error", () => {
-    expect(isClientApiError(new ApiError("Server error", 500))).toBe(false);
+    expect(isUserApiError(new ApiError("Server error", 500))).toBe(false);
   });
 
   test("returns false for 502 Bad Gateway", () => {
-    expect(isClientApiError(new ApiError("Bad gateway", 502))).toBe(false);
+    expect(isUserApiError(new ApiError("Bad gateway", 502))).toBe(false);
   });
 
   test("returns false for non-ApiError", () => {
-    expect(isClientApiError(new Error("generic error"))).toBe(false);
+    expect(isUserApiError(new Error("generic error"))).toBe(false);
   });
 
   test("returns false for AuthError", () => {
-    expect(isClientApiError(new AuthError("not_authenticated"))).toBe(false);
+    expect(isUserApiError(new AuthError("not_authenticated"))).toBe(false);
   });
 
   test("returns false for null/undefined", () => {
-    expect(isClientApiError(null)).toBe(false);
-    expect(isClientApiError(undefined)).toBe(false);
+    expect(isUserApiError(null)).toBe(false);
+    expect(isUserApiError(undefined)).toBe(false);
   });
 
   test("returns false for non-Error objects", () => {
-    expect(isClientApiError({ status: 404 })).toBe(false);
-    expect(isClientApiError("404")).toBe(false);
+    expect(isUserApiError({ status: 404 })).toBe(false);
+    expect(isUserApiError("404")).toBe(false);
   });
 });
 

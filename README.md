@@ -19,7 +19,7 @@
 ### Install Script (Recommended)
 
 ```bash
-curl -fsSL https://cli.sentry.dev/install | bash
+curl https://cli.sentry.dev/install -fsS | bash
 ```
 
 ### Homebrew
@@ -68,20 +68,46 @@ sentry issue plan PROJ-ABC
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `sentry auth` | Login, logout, check authentication status |
-| `sentry org` | List and view organizations |
-| `sentry project` | List and view projects |
-| `sentry issue` | List, view, explain, and plan issues |
-| `sentry event` | View event details |
-| `sentry api` | Make direct API requests |
-
-For detailed documentation, visit [cli.sentry.dev](https://cli.sentry.dev).
+Run `sentry --help` to see all available commands, or browse the [command reference](https://cli.sentry.dev/commands/).
 
 ## Configuration
 
 Credentials are stored in `~/.sentry/` with restricted permissions (mode 600).
+
+## Library Usage
+
+Use Sentry CLI programmatically in Node.js (≥22) or Bun without spawning a subprocess:
+
+```typescript
+import createSentrySDK from "sentry";
+
+const sdk = createSentrySDK({ token: "sntrys_..." });
+
+// Typed methods for every CLI command
+const orgs = await sdk.org.list();
+const issues = await sdk.issue.list({ orgProject: "acme/frontend", limit: 5 });
+const issue = await sdk.issue.view({ issue: "ACME-123" });
+
+// Nested commands
+await sdk.dashboard.widget.add({ display: "line", query: "count" }, "my-org/my-dashboard");
+
+// Escape hatch for any CLI command
+const version = await sdk.run("--version");
+const text = await sdk.run("issue", "list", "-l", "5");
+```
+
+Options (all optional):
+- `token` — Auth token. Falls back to `SENTRY_AUTH_TOKEN` / `SENTRY_TOKEN` env vars.
+- `url` — Sentry instance URL for self-hosted (e.g., `"sentry.example.com"`).
+- `org` — Default organization slug (avoids passing it on every call).
+- `project` — Default project slug.
+- `text` — Return human-readable string instead of parsed JSON (affects `run()` only).
+- `cwd` — Working directory for DSN auto-detection. Defaults to `process.cwd()`.
+- `signal` — `AbortSignal` to cancel streaming commands (`--follow`, `--refresh`).
+
+Streaming commands return `AsyncIterable` — use `for await...of` and `break` to stop.
+
+Errors are thrown as `SentryError` with `.exitCode` and `.stderr`.
 
 ---
 

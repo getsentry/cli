@@ -1,41 +1,39 @@
 /**
- * Git Safety Checks
+ * Git Safety Checks for Init Wizard
  *
  * Pre-flight checks to verify the user is in a git repo with a clean
  * working tree before the init wizard starts modifying files.
+ *
+ * Low-level git primitives live in `src/lib/git.ts`. This module
+ * re-exports them for backward compatibility and adds the interactive
+ * `checkGitStatus` orchestrator (coupled to `@clack/prompts` UI).
  */
 
 import { confirm, isCancel, log } from "@clack/prompts";
+import {
+  getUncommittedFiles,
+  isInsideGitWorkTree as isInsideWorkTree,
+} from "../git.js";
 
 /** Maximum number of uncommitted files to display before truncating. */
 const MAX_DISPLAYED_FILES = 5;
 
+/**
+ * Check if the current directory is inside a git work tree.
+ * Thin wrapper that adapts the `{cwd}` object signature expected by the init wizard.
+ */
 export function isInsideGitWorkTree(opts: { cwd: string }): boolean {
-  const result = Bun.spawnSync(["git", "rev-parse", "--is-inside-work-tree"], {
-    stdout: "ignore",
-    stderr: "ignore",
-    cwd: opts.cwd,
-  });
-  return result.success;
+  return isInsideWorkTree(opts.cwd);
 }
 
+/**
+ * Get uncommitted or untracked files formatted for display.
+ * Thin wrapper that adapts the `{cwd}` object signature expected by the init wizard.
+ */
 export function getUncommittedOrUntrackedFiles(opts: {
   cwd: string;
 }): string[] {
-  const result = Bun.spawnSync(["git", "status", "--porcelain=v1"], {
-    stdout: "pipe",
-    stderr: "ignore",
-    cwd: opts.cwd,
-  });
-  if (!(result.success && result.stdout)) {
-    return [];
-  }
-  return result.stdout
-    .toString()
-    .trimEnd()
-    .split("\n")
-    .filter((line) => line.length > 0)
-    .map((line) => `- ${line.trimEnd()}`);
+  return getUncommittedFiles(opts.cwd);
 }
 
 /**

@@ -32,6 +32,7 @@ import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import {
   ApiError,
+  AuthError,
   ContextError,
   ResolutionError,
   ValidationError,
@@ -67,14 +68,14 @@ describe("parsePositionalArgs", () => {
 
     test("detects issue short ID and sets issueShortId", () => {
       const result = parsePositionalArgs(["BRUNCHIE-APP-29"]);
-      expect(result.eventId).toBe("latest");
+      expect(result.eventId).toBe("@latest");
       expect(result.targetArg).toBeUndefined();
       expect(result.issueShortId).toBe("BRUNCHIE-APP-29");
     });
 
     test("detects short issue ID like CLI-G", () => {
       const result = parsePositionalArgs(["CLI-G"]);
-      expect(result.eventId).toBe("latest");
+      expect(result.eventId).toBe("@latest");
       expect(result.issueShortId).toBe("CLI-G");
     });
 
@@ -86,7 +87,7 @@ describe("parsePositionalArgs", () => {
 
     test("detects org/ISSUE-SHORT-ID pattern (CLI-9K)", () => {
       const result = parsePositionalArgs(["figma/FULLSCREEN-2RN"]);
-      expect(result.eventId).toBe("latest");
+      expect(result.eventId).toBe("@latest");
       // Trailing slash signals OrgAll mode so downstream resolves org correctly
       expect(result.targetArg).toBe("figma/");
       expect(result.issueShortId).toBe("FULLSCREEN-2RN");
@@ -94,7 +95,7 @@ describe("parsePositionalArgs", () => {
 
     test("detects org/CLI-G pattern", () => {
       const result = parsePositionalArgs(["sentry/CLI-G"]);
-      expect(result.eventId).toBe("latest");
+      expect(result.eventId).toBe("@latest");
       expect(result.targetArg).toBe("sentry/");
       expect(result.issueShortId).toBe("CLI-G");
     });
@@ -128,7 +129,7 @@ describe("parsePositionalArgs", () => {
     test("org/SHORT-ID takes precedence over SHORT-ID/EVENT-ID", () => {
       // "figma/FULLSCREEN-2RN" → org + issue, not issue + event
       const result = parsePositionalArgs(["figma/FULLSCREEN-2RN"]);
-      expect(result.eventId).toBe("latest");
+      expect(result.eventId).toBe("@latest");
       expect(result.targetArg).toBe("figma/");
       expect(result.issueShortId).toBe("FULLSCREEN-2RN");
     });
@@ -169,7 +170,7 @@ describe("parsePositionalArgs", () => {
         "abc123def456",
       ]);
       expect(result.issueShortId).toBe("JAVASCRIPT-NUXT-52");
-      expect(result.eventId).toBe("latest");
+      expect(result.eventId).toBe("@latest");
       expect(result.targetArg).toBeUndefined();
       expect(result.warning).toContain("issue short ID");
     });
@@ -177,7 +178,7 @@ describe("parsePositionalArgs", () => {
     test("auto-redirects simple issue short ID like CAM-82X", () => {
       const result = parsePositionalArgs(["CAM-82X", "95fd7f5a"]);
       expect(result.issueShortId).toBe("CAM-82X");
-      expect(result.eventId).toBe("latest");
+      expect(result.eventId).toBe("@latest");
       expect(result.targetArg).toBeUndefined();
       expect(result.warning).toContain("issue short ID");
     });
@@ -304,7 +305,7 @@ describe("parsePositionalArgs", () => {
         "https://sentry.io/organizations/my-org/issues/32886/",
       ]);
       expect(result.issueId).toBe("32886");
-      expect(result.eventId).toBe("latest");
+      expect(result.eventId).toBe("@latest");
       expect(result.targetArg).toBe("my-org/");
     });
 
@@ -786,8 +787,9 @@ describe("viewCommand.func", () => {
   let openInBrowserSpy: ReturnType<typeof spyOn>;
   let resolveProjectBySlugSpy: ReturnType<typeof spyOn>;
 
+  const VALID_EVENT_ID = "abc123def456abc123def456abc123de";
   const sampleEvent: SentryEvent = {
-    eventID: "abc123def456",
+    eventID: VALID_EVENT_ID,
     title: "Error: test",
     metadata: {},
     contexts: {},
@@ -832,11 +834,11 @@ describe("viewCommand.func", () => {
 
     const { context } = createMockContext();
     const func = await viewCommand.loader();
-    // "abc123def456" has no slash, "test-org/test-proj" has slash → swap detected
+    // Valid 32-char hex has no slash, "test-org/test-proj" has slash → swap detected
     await func.call(
       context,
       { json: true, web: false, spans: 0 },
-      "abc123def456",
+      VALID_EVENT_ID,
       "test-org/test-proj"
     );
 
@@ -903,12 +905,36 @@ describe("viewCommand.func", () => {
       context,
       { json: true, web: false, spans: 0 },
       "test_org/test_proj",
-      "abc123def456"
+      VALID_EVENT_ID
     );
 
     // parseOrgProjectArg normalizes "test_org/test_proj" → "test-org/test-proj"
     // and sets normalized=true, triggering the warning path (line 343-345)
     expect(getEventSpy).toHaveBeenCalled();
+  });
+
+  test("throws error for flag-like event ID (--h)", async () => {
+    // With recovery enabled, validation is deferred until after org
+    // resolution. For a bare event ID in auto-detect mode, `resolveOrgAndProject`
+    // runs first — in unit tests without a fixture it fails immediately,
+    // and the original ValidationError re-emerges via the recovery path.
+    // The behavior under test is "a malformed ID still produces an error",
+    // not the exact class — that's covered by hex-id unit tests.
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+
+    await expect(
+      func.call(context, { json: false, web: false, spans: 0 }, "--h")
+    ).rejects.toThrow();
+  });
+
+  test("throws error for non-hex event ID", async () => {
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+
+    await expect(
+      func.call(context, { json: false, web: false, spans: 0 }, "not-a-hex-id")
+    ).rejects.toThrow();
   });
 });
 
@@ -978,15 +1004,152 @@ describe("fetchEventWithContext", () => {
     expect(result).toBe(resolvedEvent);
   });
 
-  test("throws ResolutionError when both project-scoped and org-wide fail", async () => {
+  test("throws ResolutionError when project-scoped, org-wide, and cross-org all fail", async () => {
     spyOn(apiClient, "getEvent").mockRejectedValue(
       new ApiError("Not found", 404)
     );
     spyOn(apiClient, "resolveEventInOrg").mockResolvedValue(null);
+    spyOn(apiClient, "findEventAcrossOrgs").mockResolvedValue(null);
 
     await expect(
       fetchEventWithContext(null, "my-org", "my-project", "abc123")
     ).rejects.toThrow(ResolutionError);
+  });
+
+  test("falls back to cross-org search when org-wide returns null", async () => {
+    spyOn(apiClient, "getEvent").mockRejectedValue(
+      new ApiError("Not found", 404)
+    );
+    spyOn(apiClient, "resolveEventInOrg").mockResolvedValue(null);
+    const crossOrgEvent = {
+      ...mockEvent,
+      eventID: "found-in-other-org",
+    } as unknown as SentryEvent;
+    spyOn(apiClient, "findEventAcrossOrgs").mockResolvedValue({
+      org: "other-org",
+      project: "other-project",
+      event: crossOrgEvent,
+    });
+
+    const result = await fetchEventWithContext(
+      null,
+      "my-org",
+      "my-project",
+      "abc123"
+    );
+    expect(result).toBe(crossOrgEvent);
+  });
+
+  test("cross-org fallback passes excludeOrgs when same-org search succeeded", async () => {
+    spyOn(apiClient, "getEvent").mockRejectedValue(
+      new ApiError("Not found", 404)
+    );
+    // Same-org search completed successfully (returned null = definitive "not found")
+    spyOn(apiClient, "resolveEventInOrg").mockResolvedValue(null);
+    const findSpy = spyOn(apiClient, "findEventAcrossOrgs").mockResolvedValue(
+      null
+    );
+
+    await expect(
+      fetchEventWithContext(null, "my-org", "my-project", "abc123")
+    ).rejects.toThrow(ResolutionError);
+
+    expect(findSpy).toHaveBeenCalledWith("abc123", {
+      excludeOrgs: ["my-org"],
+    });
+  });
+
+  test("cross-org does not exclude org when same-org search threw", async () => {
+    spyOn(apiClient, "getEvent").mockRejectedValue(
+      new ApiError("Not found", 404)
+    );
+    // Same-org search threw a transient error — org was NOT definitively searched
+    spyOn(apiClient, "resolveEventInOrg").mockRejectedValue(
+      new Error("500 Internal Server Error")
+    );
+    const findSpy = spyOn(apiClient, "findEventAcrossOrgs").mockResolvedValue(
+      null
+    );
+
+    await expect(
+      fetchEventWithContext(null, "my-org", "my-project", "abc123")
+    ).rejects.toThrow(ResolutionError);
+
+    // excludeOrgs should be undefined so cross-org retries the same org
+    expect(findSpy).toHaveBeenCalledWith("abc123", {
+      excludeOrgs: undefined,
+    });
+  });
+
+  test("swallows non-auth cross-org errors and throws ResolutionError", async () => {
+    spyOn(apiClient, "getEvent").mockRejectedValue(
+      new ApiError("Not found", 404)
+    );
+    spyOn(apiClient, "resolveEventInOrg").mockResolvedValue(null);
+    spyOn(apiClient, "findEventAcrossOrgs").mockRejectedValue(
+      new Error("Network timeout")
+    );
+
+    await expect(
+      fetchEventWithContext(null, "my-org", "my-project", "abc123")
+    ).rejects.toThrow(ResolutionError);
+  });
+
+  test("propagates AuthError from cross-org fallback", async () => {
+    spyOn(apiClient, "getEvent").mockRejectedValue(
+      new ApiError("Not found", 404)
+    );
+    spyOn(apiClient, "resolveEventInOrg").mockResolvedValue(null);
+    spyOn(apiClient, "findEventAcrossOrgs").mockRejectedValue(
+      new AuthError("expired", "Token expired")
+    );
+
+    await expect(
+      fetchEventWithContext(null, "my-org", "my-project", "abc123")
+    ).rejects.toThrow(AuthError);
+  });
+
+  test("propagates AuthError from same-org fallback", async () => {
+    spyOn(apiClient, "getEvent").mockRejectedValue(
+      new ApiError("Not found", 404)
+    );
+    spyOn(apiClient, "resolveEventInOrg").mockRejectedValue(
+      new AuthError("expired", "Token expired")
+    );
+    const findSpy = spyOn(apiClient, "findEventAcrossOrgs");
+
+    await expect(
+      fetchEventWithContext(null, "my-org", "my-project", "abc123")
+    ).rejects.toThrow(AuthError);
+    // Cross-org should never be attempted when auth is broken
+    expect(findSpy).not.toHaveBeenCalled();
+  });
+
+  test("tries cross-org fallback even when org-wide search throws", async () => {
+    spyOn(apiClient, "getEvent").mockRejectedValue(
+      new ApiError("Not found", 404)
+    );
+    spyOn(apiClient, "resolveEventInOrg").mockRejectedValue(
+      new Error("500 Internal Server Error")
+    );
+    const crossOrgEvent = {
+      ...mockEvent,
+      eventID: "found-cross-org",
+    } as unknown as SentryEvent;
+    const findSpy = spyOn(apiClient, "findEventAcrossOrgs").mockResolvedValue({
+      org: "other-org",
+      project: "other-project",
+      event: crossOrgEvent,
+    });
+
+    const result = await fetchEventWithContext(
+      null,
+      "my-org",
+      "my-project",
+      "abc123"
+    );
+    expect(result).toBe(crossOrgEvent);
+    expect(findSpy).toHaveBeenCalled();
   });
 
   test("propagates non-404 errors without fallback", async () => {

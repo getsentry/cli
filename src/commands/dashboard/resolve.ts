@@ -11,13 +11,19 @@ import {
   listDashboardsPaginated,
 } from "../../lib/api-client.js";
 import type { parseOrgProjectArg } from "../../lib/arg-parsing.js";
-import { ContextError, ValidationError } from "../../lib/errors.js";
+import {
+  ApiError,
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "../../lib/errors.js";
 import { fuzzyMatch } from "../../lib/fuzzy.js";
+import { logger } from "../../lib/logger.js";
+import { resolveEffectiveOrg } from "../../lib/region.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import { isAllDigits } from "../../lib/utils.js";
 import {
-  DATASET_SUPPORTED_DISPLAY_TYPES,
   type DashboardWidget,
   DISPLAY_TYPES,
   parseAggregate,
@@ -26,7 +32,6 @@ import {
   prepareWidgetQueries,
   validateAggregateNames,
   WIDGET_TYPES,
-  type WidgetType,
 } from "../../types/dashboard.js";
 
 /** Shared widget query flags used by `add` and `edit` commands */
@@ -59,9 +64,11 @@ export async function resolveOrgFromTarget(
 ): Promise<string> {
   switch (parsed.type) {
     case "explicit":
-    case "org-all":
-      setOrgProjectContext([parsed.org], []);
-      return parsed.org;
+    case "org-all": {
+      const org = await resolveEffectiveOrg(parsed.org);
+      setOrgProjectContext([org], []);
+      return org;
+    }
     case "project-search":
     case "auto-detect": {
       // resolveOrg already sets telemetry context
@@ -232,7 +239,9 @@ export async function resolveDashboardId(
     const { data, nextCursor } = await listDashboardsPaginated(orgSlug, {
       perPage: API_MAX_PER_PAGE,
       cursor,
-    });
+    }).catch((error: unknown) =>
+      enrichDashboardError(error, { orgSlug, operation: "list" })
+    );
     // Match by ID/slug first (e.g. "default-overview"), then fall back to title
     const match =
       data.find((d) => d.id.toLowerCase() === lowerRef) ??
@@ -306,6 +315,176 @@ export function resolveWidgetIndex(
 }
 
 /**
+ * Validate that a sort expression references an aggregate present in the query.
+ * The Sentry API returns 400 when the sort field isn't in the widget's aggregates.
+ *
+ * @param orderby - Parsed sort expression (e.g., "-count()", "p90(span.duration)")
+ * @param aggregates - Parsed aggregate expressions from the query
+ */
+export function validateSortReferencesAggregate(
+  orderby: string,
+  aggregates: string[]
+): void {
+  // Strip leading "-" for descending sorts
+  const sortAgg = orderby.startsWith("-") ? orderby.slice(1) : orderby;
+  if (!aggregates.includes(sortAgg)) {
+    throw new ValidationError(
+      `Sort expression "${orderby}" references "${sortAgg}" which is not in the query.\n\n` +
+        "The --sort field must be one of the aggregate expressions in --query.\n" +
+        `Current aggregates: ${aggregates.join(", ")}\n\n` +
+        `Either add "${sortAgg}" to --query or sort by an existing aggregate.`,
+      "sort"
+    );
+  }
+}
+
+/**
+ * Default limit for grouped widgets.
+ *
+ * Matches the Sentry UI default for grouped widgets. The Sentry API rejects
+ * grouped widgets without a limit, so the CLI transparently applies this
+ * value when the user passes --group-by without --limit instead of erroring.
+ */
+export const DEFAULT_GROUP_BY_LIMIT = 5;
+
+/**
+ * Compute the limit to use for a grouped widget.
+ *
+ * Returns the provided limit when set. When the widget has group-by columns
+ * and no limit, returns `DEFAULT_GROUP_BY_LIMIT` so the API accepts the
+ * widget. Otherwise returns `undefined` (ungrouped widgets don't need a limit).
+ *
+ * Callers should `log.info` when the auto-default is applied so users
+ * understand why their request accepted without an explicit limit.
+ *
+ * @param columns - Group-by columns (empty for ungrouped widgets)
+ * @param limit - User-provided or existing limit (undefined/null if unset)
+ * @returns Effective limit, or `undefined` when no limit is needed
+ */
+export function autoDefaultGroupLimit(
+  columns: string[],
+  limit: number | null | undefined
+): number | undefined {
+  if (limit !== undefined && limit !== null) {
+    return limit;
+  }
+  if (columns.length > 0) {
+    return DEFAULT_GROUP_BY_LIMIT;
+  }
+  return;
+}
+
+const log = logger.withTag("dashboard");
+
+/**
+ * Apply the group-by limit auto-default for a user-initiated --group-by.
+ *
+ * Only fires when the user explicitly passed --group-by (not for auto-defaulted
+ * columns like the `["issue"]` default for issue-dataset tables — those widgets
+ * work without a limit). Emits `log.info` when the auto-default takes effect so
+ * users see why their command accepted without an explicit --limit.
+ *
+ * @param userGroupBy - The raw --group-by flag (undefined when not passed)
+ * @param columns - Effective columns after any defaulting
+ * @param limit - User-provided or existing limit (undefined/null if unset)
+ * @returns Effective limit to use in the widget payload
+ */
+export function applyGroupLimitAutoDefault(
+  userGroupBy: string[] | undefined,
+  columns: string[],
+  limit: number | null | undefined
+): number | null | undefined {
+  if (!userGroupBy || userGroupBy.length === 0) {
+    return limit;
+  }
+  const effective = autoDefaultGroupLimit(columns, limit);
+  if (effective !== limit && effective !== undefined) {
+    log.info(
+      `Auto-defaulting --limit to ${DEFAULT_GROUP_BY_LIMIT} for grouped widget. Pass --limit <n> to override.`
+    );
+    return effective;
+  }
+  return limit;
+}
+
+/**
+ * Known aggregatable fields for the spans dataset.
+ *
+ * Span attributes (e.g., dsn.files_collected, resolve.method) are key-value
+ * metadata and cannot be used as aggregate fields — only in --where or --group-by.
+ * This set covers built-in numeric fields that support aggregation.
+ * Measurements (http.*, cache.*, etc.) are project-specific and may not be
+ * exhaustive — we warn instead of error for unknown fields.
+ */
+const KNOWN_SPAN_AGGREGATE_FIELDS = new Set([
+  "span.duration",
+  "span.self_time",
+  "http.response_content_length",
+  "http.decoded_response_content_length",
+  "http.response_transfer_size",
+  "cache.item_size",
+]);
+
+/**
+ * Aggregate functions that require numeric measurement fields.
+ * Functions like count_unique, any, count accept non-numeric columns
+ * (e.g., transaction, span.op) and should not trigger the warning.
+ */
+const NUMERIC_AGGREGATE_FUNCTIONS = new Set([
+  "avg",
+  "sum",
+  "min",
+  "max",
+  "p50",
+  "p75",
+  "p90",
+  "p95",
+  "p99",
+  "p100",
+  "percentile",
+]);
+
+/**
+ * Warn when a numeric aggregate function (avg, sum, p50, etc.) is applied
+ * to a field that isn't a known aggregatable span measurement. Functions
+ * like count_unique(transaction) or any(span.op) accept non-numeric
+ * columns and are not checked.
+ *
+ * Only checks for the spans dataset.
+ */
+function warnUnknownAggregateFields(
+  aggregates: string[],
+  dataset: string | undefined
+): void {
+  if (dataset && dataset !== "spans") {
+    return;
+  }
+  for (const agg of aggregates) {
+    const parenIdx = agg.indexOf("(");
+    if (parenIdx < 0) {
+      continue;
+    }
+    const fn = agg.slice(0, parenIdx);
+    // Only check numeric aggregate functions — count_unique, any, etc. accept any column
+    if (!NUMERIC_AGGREGATE_FUNCTIONS.has(fn)) {
+      continue;
+    }
+    const inner = agg.slice(parenIdx + 1, -1);
+    if (!inner) {
+      continue;
+    }
+    if (!KNOWN_SPAN_AGGREGATE_FIELDS.has(inner)) {
+      log.warn(
+        `Aggregate field "${inner}" in "${agg}" is not a known aggregatable span field. ` +
+          "Span attributes (custom tags) cannot be used with numeric aggregates — " +
+          "use them in --where or --group-by instead. " +
+          `Known numeric fields: ${[...KNOWN_SPAN_AGGREGATE_FIELDS].join(", ")}`
+      );
+    }
+  }
+}
+
+/**
  * Build a widget from user-provided flag values.
  *
  * Shared between `dashboard widget add` and `dashboard widget edit`.
@@ -326,6 +505,7 @@ export function buildWidgetFromFlags(opts: {
 }): DashboardWidget {
   const aggregates = (opts.query ?? ["count"]).map(parseAggregate);
   validateAggregateNames(aggregates, opts.dataset);
+  warnUnknownAggregateFields(aggregates, opts.dataset);
 
   // Issue table widgets need at least one column or the Sentry UI shows "Columns: None".
   // Default to ["issue"] for table display only — timeseries (line/area/bar) don't use columns.
@@ -338,6 +518,12 @@ export function buildWidgetFromFlags(opts: {
   let orderby = opts.sort ? parseSortExpression(opts.sort) : undefined;
   if (columns.length > 0 && !orderby && aggregates.length > 0) {
     orderby = `-${aggregates[0]}`;
+  }
+
+  const limit = applyGroupLimitAutoDefault(opts.groupBy, columns, opts.limit);
+
+  if (orderby) {
+    validateSortReferencesAggregate(orderby, aggregates);
   }
 
   const raw = {
@@ -353,16 +539,176 @@ export function buildWidgetFromFlags(opts: {
         name: "",
       },
     ],
-    ...(opts.limit !== undefined && { limit: opts.limit }),
+    ...(limit !== undefined && { limit }),
   };
   return prepareWidgetQueries(parseWidgetInput(raw));
+}
+
+/** Context for enriching dashboard API errors with actionable messages */
+export type DashboardErrorContext = {
+  /** Organization slug (when known) */
+  orgSlug?: string;
+  /** Dashboard ID (when known) */
+  dashboardId?: string;
+  /** The operation being performed, for error messages */
+  operation: "list" | "view" | "create" | "update";
+};
+
+/** Build an enriched error for a 404 response on a dashboard API call */
+function build404Error(ctx: DashboardErrorContext, org: string): never {
+  if (ctx.operation === "list") {
+    throw new ResolutionError(
+      `Organization ${org}`,
+      "not found or has no dashboards",
+      "sentry dashboard list <org>/",
+      [
+        "Verify the organization slug with: sentry org list",
+        "Check that you have access to the organization",
+      ]
+    );
+  }
+  const listHint = `sentry dashboard list ${ctx.orgSlug ?? "<org>"}/`;
+  if (ctx.dashboardId) {
+    throw new ResolutionError(
+      `Dashboard ${ctx.dashboardId} in ${org}`,
+      "not found",
+      listHint,
+      [
+        "The dashboard may have been deleted",
+        "Check the dashboard ID or title with: sentry dashboard list",
+      ]
+    );
+  }
+  // Generic 404 for create or other operations
+  throw new ResolutionError(
+    `Organization ${org}`,
+    "not found",
+    "sentry org list",
+    ["Verify the organization slug and your access"]
+  );
+}
+
+/** Build an enriched error for a 403 response on a dashboard API call */
+function build403Error(
+  ctx: DashboardErrorContext,
+  org: string,
+  detail: string | undefined
+): never {
+  const message = detail ?? "You do not have permission.";
+  if (ctx.dashboardId) {
+    throw new ResolutionError(
+      `Dashboard ${ctx.dashboardId} in ${org}`,
+      "access denied",
+      `sentry dashboard list ${ctx.orgSlug ?? "<org>"}/`,
+      [message, "Check your organization membership and role"]
+    );
+  }
+  throw new ResolutionError(
+    `Dashboards in ${org}`,
+    "access denied",
+    "sentry org list",
+    [message, "Check your organization membership and role"]
+  );
+}
+
+/**
+ * Enrich an API error from a dashboard command with actionable suggestions.
+ *
+ * Catches 404, 403, and 400 errors and converts them to `ResolutionError`
+ * or enriched `ApiError` instances with hints about what to try next.
+ * Re-throws non-`ApiError` and unhandled statuses unchanged.
+ *
+ * @param error - The caught error
+ * @param ctx - Context about the operation for building error messages
+ */
+export function enrichDashboardError(
+  error: unknown,
+  ctx: DashboardErrorContext
+): never {
+  if (!(error instanceof ApiError)) {
+    throw error;
+  }
+
+  const org = ctx.orgSlug ? `'${ctx.orgSlug}'` : "this organization";
+
+  if (error.status === 404) {
+    build404Error(ctx, org);
+  }
+
+  if (error.status === 403) {
+    build403Error(ctx, org, error.detail);
+  }
+
+  // 400 on update — likely invalid widget config; preserve API detail
+  if (error.status === 400 && ctx.operation === "update") {
+    throw new ApiError(
+      `Dashboard update failed in ${org}`,
+      error.status,
+      error.detail ??
+        "The API rejected the request. Check widget configuration.",
+      error.endpoint
+    );
+  }
+
+  throw error;
+}
+
+/**
+ * User-facing dataset synonyms resolved to the canonical Sentry widget type.
+ *
+ * The Sentry API/UI and docs surface names like `errors` and `transactions`
+ * but widget types use `error-events` and `transaction-like`. The CLI accepts
+ * both forms so users copying from docs or using API-dataset terminology
+ * don't have to translate.
+ *
+ * Keys are lowercase; matching is case-insensitive via {@link normalizeDataset}.
+ */
+const DATASET_ALIASES: Record<string, string> = {
+  error: "error-events",
+  errors: "error-events",
+  transaction: "transaction-like",
+  transactions: "transaction-like",
+  log: "logs",
+  // `metrics` and `metricsEnhanced` both alias to the canonical `tracemetrics`.
+  // `metricsEnhanced` is the value surfaced by the events API dataset param
+  // (see WIDGET_TYPE_TO_DATASET in types/dashboard.ts) and may appear in docs.
+  metrics: "tracemetrics",
+  metricsenhanced: "tracemetrics",
+};
+
+/**
+ * Normalize a user-provided `--dataset` value to the canonical widget type.
+ *
+ * - Case-insensitive (e.g. `Errors`, `ERRORS` → `error-events`).
+ * - Maps known synonyms via {@link DATASET_ALIASES}.
+ * - Returns the lower-cased input unchanged if no alias matches (the enum
+ *   check in {@link validateWidgetEnums} will reject unknown values).
+ * - Returns `undefined` for `undefined` input.
+ *
+ * Must be called once, up-front, and the result threaded through every
+ * downstream consumer (aggregate validator, warnings, PUT body). Leaving
+ * an un-normalized value in `flags.dataset` causes dataset-specific
+ * aggregate validation (e.g. `failure_rate` for `error-events`) to see
+ * the alias instead of the canonical name and reject valid inputs.
+ */
+export function normalizeDataset(dataset?: string): string | undefined {
+  if (dataset === undefined) {
+    return;
+  }
+  const lower = dataset.toLowerCase();
+  return DATASET_ALIASES[lower] ?? lower;
 }
 
 /**
  * Validate --display and --dataset flag values against known enums.
  *
+ * Callers MUST pass a dataset value already normalized via
+ * {@link normalizeDataset} so aliases and casing don't leak into the
+ * enum check. This function does not mutate or resolve aliases itself —
+ * it is a pure validator.
+ *
  * @param display - Display type flag value
- * @param dataset - Dataset flag value
+ * @param dataset - Dataset flag value (already normalized)
  */
 export function validateWidgetEnums(display?: string, dataset?: string): void {
   if (
@@ -383,20 +729,6 @@ export function validateWidgetEnums(display?: string, dataset?: string): void {
       "dataset"
     );
   }
-  if (display && dataset) {
-    // Untracked display types (text, wheel, rage_and_dead_clicks, agents_traces_table)
-    // bypass Sentry's dataset query system entirely — no dataset constraint applies.
-    const isTrackedDisplay = Object.values(
-      DATASET_SUPPORTED_DISPLAY_TYPES
-    ).some((types) => (types as readonly string[]).includes(display));
-    if (isTrackedDisplay) {
-      const supported = DATASET_SUPPORTED_DISPLAY_TYPES[dataset as WidgetType];
-      if (supported && !(supported as readonly string[]).includes(display)) {
-        throw new ValidationError(
-          `The "${dataset}" dataset supports: ${supported.join(", ")}. Got: "${display}".`,
-          "display"
-        );
-      }
-    }
-  }
+  // The Sentry backend validates displayType and widgetType as independent enums —
+  // any valid display type is accepted with any valid dataset. No cross-validation needed.
 }

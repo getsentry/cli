@@ -1,292 +1,129 @@
 /**
- * Language-Agnostic Code Scanner
+ * Language-agnostic DSN code scanner.
  *
- * Scans source code for Sentry DSNs using a simple grep-based approach.
- * This replaces the language-specific detectors with a unified scanner that:
+ * Owns the DSN-specific policy (URL regex, comment-line filtering,
+ * host validation, package-path inference). File walking, gitignore
+ * handling, extension filtering, bounded concurrency, and worker-pool
+ * dispatch are delegated to `src/lib/scan/`.
  *
- * 1. Greps for DSN URL pattern directly: https://KEY@HOST/PROJECT_ID
- * 2. Filters out DSNs appearing in commented lines
- * 3. Respects .gitignore using the `ignore` package
- * 4. Validates DSN hosts (SaaS when no SENTRY_URL, or self-hosted host when set)
- * 5. Scans concurrently with p-limit for performance
- * 6. Skips large files and known non-source directories
+ * ### Flow
+ *
+ * `scanCodeForDsns` routes through `collectGrep(DSN_PATTERN, ...)`.
+ * Each emitted `GrepMatch` is one line containing a DSN-like URL;
+ * the scanner post-filters matches on the main thread (comment-line
+ * check, host validation, dedup). `sourceMtimes` / `dirMtimes` are
+ * populated via `recordMtimes: true` + the `onDirectoryVisit` hook
+ * in a single traversal.
+ *
+ * `scanCodeForFirstDsn` deliberately avoids the worker pool — the
+ * pool's ~20ms startup cost dwarfs the work for a stop-on-first scan
+ * that typically finds its target in the first few files. Uses a
+ * direct `walkFiles` loop instead.
+ *
+ * Both the `CodeScanResult` shape and the result-map semantics are
+ * cache-contract-stable — `src/lib/db/dsn-cache.ts` verifies entries
+ * against the filesystem, so changing keys/values requires bumping
+ * the cache schema.
  */
 
-import type { Dirent } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
-// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
-import * as Sentry from "@sentry/node-core/light";
-import ignore, { type Ignore } from "ignore";
-import pLimit from "p-limit";
 import { DEFAULT_SENTRY_HOST, getConfiguredSentryUrl } from "../constants.js";
 import { ConfigError } from "../errors.js";
 import { logger } from "../logger.js";
+import { collectGrep, normalizePath, walkFiles } from "../scan/index.js";
 import { withTracingSpan } from "../telemetry.js";
 import { createDetectedDsn, inferPackagePath, parseDsn } from "./parser.js";
+import { DSN_MAX_DEPTH, dsnScanOptions } from "./scan-options.js";
 import type { DetectedDsn } from "./types.js";
-import { MONOREPO_ROOTS } from "./types.js";
 
-/** Scoped logger for DSN code scanning */
 const log = logger.withTag("dsn-scan");
 
 /**
- * Result of scanning code for DSNs, including mtimes for caching.
+ * Result of scanning code for DSNs. Shape is cache-contract-stable
+ * — `src/lib/db/dsn-cache.ts` uses it directly.
  */
 export type CodeScanResult = {
-  /** All detected DSNs */
   dsns: DetectedDsn[];
-  /** Map of source file paths to their mtimes (only files containing DSNs) */
+  /**
+   * Map of source file paths (POSIX, relative to cwd) → mtime.
+   * Only files containing at least one validated DSN. The cache
+   * verifier uses this to detect "source file touched since last scan".
+   */
   sourceMtimes: Record<string, number>;
-  /** Mtimes of scanned directories (for detecting new files added to subdirs) */
+  /**
+   * Map of scanned directories (POSIX, relative to cwd; `.` for the
+   * root) → floored `stat.mtimeMs`. The verifier uses this to detect
+   * "files added to a scanned dir since last scan".
+   */
   dirMtimes: Record<string, number>;
 };
 
-/**
- * Maximum file size to scan (256KB).
- * Files larger than this are skipped as they're unlikely to be source files
- * with DSN configuration.
- *
- * Note: This check happens during file processing rather than collection to
- * avoid extra stat() calls. Bun.file().size is a cheap operation once we
- * have the file handle.
- */
-const MAX_FILE_SIZE = 256 * 1024;
-
-/**
- * Concurrency limit for file reads.
- * Balances performance with file descriptor limits.
- */
-const CONCURRENCY_LIMIT = 50;
-
-/**
- * Maximum depth to scan from project root.
- * Depth 0 = files in root directory
- * Depth 3 = files in third-level subdirectories (e.g., src/lib/config/sentry.ts)
- *
- * In monorepos, depth resets to 0 when entering a package directory
- * (e.g., packages/spotlight/), giving each package its own depth budget.
- */
-const MAX_SCAN_DEPTH = 3;
-
-/**
- * Directories that are always skipped regardless of .gitignore.
- * These are common dependency/build/cache directories that should never contain DSNs.
- * Added to the gitignore instance as built-in patterns.
- */
-const ALWAYS_SKIP_DIRS = [
-  // Version control
-  ".git",
-  ".hg",
-  ".svn",
-  // IDE/Editor
-  ".idea",
-  ".vscode",
-  ".cursor",
-  // Node.js
-  "node_modules",
-  // Test directories (contain fixture DSNs, not real configuration)
-  "test",
-  "tests",
-  "__mocks__",
-  "fixtures",
-  "__fixtures__",
-  // Python
-  "__pycache__",
-  ".pytest_cache",
-  ".mypy_cache",
-  ".ruff_cache",
-  "venv",
-  ".venv",
-  // Java/Kotlin/Gradle
-  "build",
-  "target",
-  ".gradle",
-  // Go
-  "vendor",
-  // Ruby
-  ".bundle",
-  // General build outputs
-  "dist",
-  "out",
-  ".next",
-  ".nuxt",
-  ".output",
-  "coverage",
-];
-
-/**
- * File extensions to scan for DSNs.
- * Covers source code, config files, and data formats that might contain DSNs.
- */
-const TEXT_EXTENSIONS = new Set([
-  // JavaScript/TypeScript ecosystem
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".cjs",
-  ".astro",
-  ".vue",
-  ".svelte",
-  // Python
-  ".py",
-  // Go
-  ".go",
-  // Ruby
-  ".rb",
-  ".erb",
-  // PHP
-  ".php",
-  // JVM languages
-  ".java",
-  ".kt",
-  ".kts",
-  ".scala",
-  ".groovy",
-  // .NET languages
-  ".cs",
-  ".fs",
-  ".vb",
-  // Rust
-  ".rs",
-  // Swift/Objective-C
-  ".swift",
-  ".m",
-  ".mm",
-  // Dart/Flutter
-  ".dart",
-  // Elixir/Erlang
-  ".ex",
-  ".exs",
-  ".erl",
-  // Lua
-  ".lua",
-  // Config/data formats
-  ".json",
-  ".yaml",
-  ".yml",
-  ".toml",
-  ".xml",
-  ".properties",
-  ".config",
-]);
-
-/**
- * Common comment prefixes to detect commented-out DSNs.
- * Lines starting with these (after trimming whitespace) are ignored.
- */
+/** Comment prefixes — lines starting with any of these are ignored. */
 const COMMENT_PREFIXES = ["//", "#", "--", "<!--", "/*", "*", "'''", '"""'];
 
 /**
- * Normalize path separators to forward slashes for cross-platform consistency.
- * On POSIX systems, this is a no-op (identity function).
- * On Windows, converts backslashes to forward slashes.
+ * Sentry DSN URL pattern. Supports both formats:
+ * - `https://{PUBLIC_KEY}@{HOST}/{PROJECT_ID}`
+ * - `https://{PUBLIC_KEY}:{SECRET_KEY}@{HOST}/{PROJECT_ID}`
  *
- * This is needed for:
- * 1. The `ignore` package pattern matching (requires forward slashes)
- * 2. inferPackagePath() which splits by "/"
- * 3. Consistent sourcePath values in DetectedDsn objects
- */
-const normalizePath: (p: string) => string =
-  path.sep === path.posix.sep
-    ? (x) => x
-    : (x) => x.replaceAll(path.sep, path.posix.sep);
-
-/**
- * Check if a relative path is a monorepo package directory.
- * Returns true for paths like "packages/frontend", "apps/server", etc.
- * (exactly 2 segments where the first matches a MONOREPO_ROOTS entry)
- */
-function isMonorepoPackageDir(relativePath: string): boolean {
-  const segments = relativePath.split("/");
-  return (
-    segments.length === 2 &&
-    MONOREPO_ROOTS.includes(segments[0] as (typeof MONOREPO_ROOTS)[number])
-  );
-}
-
-/**
- * Pattern to match Sentry DSN URLs.
- * Captures the full DSN including protocol, public key, optional secret key, host, and project ID.
- *
- * Formats supported:
- * - https://{PUBLIC_KEY}@{HOST}/{PROJECT_ID}
- * - https://{PUBLIC_KEY}:{SECRET_KEY}@{HOST}/{PROJECT_ID}
- *
- * Examples:
- * - https://abc123def456@o123456.ingest.us.sentry.io/4507654321
- * - https://abc123def456:secret789@sentry.example.com/123
- *
- * The public key is typically a 32-character hex string, but we accept any
- * alphanumeric string to support test fixtures and edge cases.
- *
- * Note: Uses 'g' and 'i' flags. When used with String.matchAll(), the iterator
- * always starts from the beginning regardless of lastIndex, so no reset needed.
+ * Used with `String.matchAll`, which always iterates from the start
+ * regardless of `lastIndex`.
  */
 const DSN_PATTERN =
   /https?:\/\/[a-z0-9]+(?::[a-z0-9]+)?@[a-z0-9.-]+(?:\.[a-z]+|:[0-9]+)\/\d+/gi;
 
 /**
- * Extract DSN URLs from file content, filtering out those in commented lines.
+ * Case-insensitive probe for the DSN scheme prefix. Every DSN starts
+ * with some casing of `http`, so a file without the substring has
+ * zero candidates and can skip the `matchAll` scan entirely. `/i` is
+ * required for correctness: mixed-case schemes like `Https://` or
+ * `hTtP://` would slip through a two-indexOf (lowercase + uppercase)
+ * probe.
+ */
+const HTTP_SCHEME_PROBE = /http/i;
+
+/**
+ * Extract DSN URLs from file content, filtering out commented lines
+ * and hosts that don't match the configured Sentry instance.
  *
- * Algorithm:
- * 1. Find all DSN matches in the content using regex
- * 2. For each match, find the line it appears on
- * 3. Check if that line is commented out
- * 4. Validate the DSN host is acceptable
- *
- * @param content - File content to scan
- * @param limit - Maximum number of DSNs to return (undefined = no limit)
- * @returns Array of unique DSN strings found in non-commented lines
+ * @param content - File content to scan.
+ * @param limit - Stop after this many unique DSNs. Unbounded when omitted.
+ * @returns Unique DSN strings in file order.
  */
 export function extractDsnsFromContent(
   content: string,
   limit?: number
 ): string[] {
-  const dsns = new Set<string>();
+  if (!HTTP_SCHEME_PROBE.test(content)) {
+    return [];
+  }
 
-  // Find all potential DSN matches
+  const dsns = new Set<string>();
   for (const match of content.matchAll(DSN_PATTERN)) {
     const dsn = match[0];
-    const matchIndex = match.index;
-
-    // Skip if we've already found this DSN
     if (dsns.has(dsn)) {
       continue;
     }
-
-    // Find the line this match appears on by looking backwards for newline
+    const matchIndex = match.index;
     const lineStart = content.lastIndexOf("\n", matchIndex) + 1;
     const lineEnd = content.indexOf("\n", matchIndex);
     const line = content.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
-
-    // Skip if the line is commented
     if (isCommentedLine(line.trim())) {
       continue;
     }
-
-    // Validate it's a DSN with an acceptable host
     if (isValidDsnHost(dsn)) {
       dsns.add(dsn);
-
-      // Early exit if we've reached the limit
       if (limit !== undefined && dsns.size >= limit) {
         break;
       }
     }
   }
-
   return [...dsns];
 }
 
 /**
- * Extract the first DSN from file content.
- * Used by cache verification to check if a DSN is still present in a file.
- *
- * @param content - File content
- * @returns First DSN found or null
+ * Extract the first DSN from file content. Used by cache verification
+ * to check if a DSN is still present in a file.
  */
 export function extractFirstDsnFromContent(content: string): string | null {
   const dsns = extractDsnsFromContent(content, 1);
@@ -294,37 +131,81 @@ export function extractFirstDsnFromContent(content: string): string | null {
 }
 
 /**
- * Scan a directory for all DSNs in source code files.
- *
- * Respects .gitignore, skips large files, and limits depth.
- * Returns all unique DSNs found across all files, plus mtimes for caching.
- *
- * @param cwd - Directory to scan
- * @returns Object with detected DSNs and source file mtimes
+ * Scan a directory for all DSNs in source code files. Respects nested
+ * `.gitignore`, skips large files, and limits depth via
+ * `dsnScanOptions()`. Returns unique DSNs plus mtime maps for cache
+ * invalidation.
  */
 export function scanCodeForDsns(cwd: string): Promise<CodeScanResult> {
-  return scanDirectory(cwd, false);
+  return scanDirectory(cwd);
 }
 
 /**
- * Scan a directory and return the first DSN found.
- *
- * Optimized for the common case of single-project repositories.
- * Stops scanning as soon as a valid DSN is found.
- *
- * @param cwd - Directory to scan
- * @returns First detected DSN or null if none found
+ * Scan a directory and return the first DSN found. Optimized for
+ * single-project repositories — deliberately avoids the worker pool
+ * (pool startup dwarfs the work on a stop-on-first scan).
  */
-export async function scanCodeForFirstDsn(
-  cwd: string
-): Promise<DetectedDsn | null> {
-  const { dsns } = await scanDirectory(cwd, true);
-  return dsns[0] ?? null;
+export function scanCodeForFirstDsn(cwd: string): Promise<DetectedDsn | null> {
+  return withTracingSpan(
+    "scanCodeForFirstDsn",
+    "dsn.detect.code",
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: walker loop + read + extract + validate + span-status error branch is inherently branchy
+    async (span) => {
+      let filesScanned = 0;
+      try {
+        for await (const entry of walkFiles({
+          cwd,
+          ...dsnScanOptions(),
+          // Early-exit consumer: we `return` on the first DSN-bearing
+          // file. The parallel walker's channel adds ~7ms per-file
+          // overhead; the serial walker uses a direct `yield` so
+          // `break` cuts immediately. Measured 2ms (serial) vs ~75ms
+          // (parallel) on the large bench fixture.
+          concurrency: 1,
+        })) {
+          filesScanned += 1;
+          let content: string;
+          try {
+            content = await Bun.file(entry.absolutePath).text();
+          } catch {
+            continue;
+          }
+          const raw = extractFirstDsnFromContent(content);
+          if (raw === null) {
+            continue;
+          }
+          const detected = createDetectedDsn(
+            raw,
+            "code",
+            entry.relativePath,
+            inferPackagePath(entry.relativePath)
+          );
+          if (detected !== null) {
+            span.setAttribute("dsn.files_scanned", filesScanned);
+            span.setAttribute("dsn.dsns_found", 1);
+            return detected;
+          }
+        }
+        span.setAttribute("dsn.files_scanned", filesScanned);
+        span.setAttribute("dsn.dsns_found", 0);
+        return null;
+      } catch (error) {
+        if (error instanceof ConfigError) {
+          throw error;
+        }
+        span.setStatus({ code: 2, message: "Directory scan failed" });
+        log.debug(`scanCodeForFirstDsn failed: ${String(error)}`);
+        return null;
+      }
+    },
+    {
+      "dsn.scan_dir": cwd,
+      "dsn.stop_on_first": true,
+      "dsn.max_depth": DSN_MAX_DEPTH,
+    }
+  );
 }
 
-/**
- * Check if a line is commented out based on common comment prefixes.
- */
 function isCommentedLine(trimmedLine: string): boolean {
   return COMMENT_PREFIXES.some((prefix) => trimmedLine.startsWith(prefix));
 }
@@ -332,22 +213,19 @@ function isCommentedLine(trimmedLine: string): boolean {
 /**
  * Get the expected Sentry host for DSN validation.
  *
- * When SENTRY_URL is set (self-hosted), only DSNs matching that host are valid.
- * When not set (SaaS), only *.sentry.io DSNs are valid.
+ * Self-hosted (SENTRY_URL set): only DSNs matching the configured
+ * host are valid. SaaS: only `*.sentry.io` DSNs are valid.
  *
- * @throws {ConfigError} If SENTRY_URL is set but not a valid URL
- * @returns The expected host domain for DSN validation
+ * @throws {ConfigError} If SENTRY_URL is set but not a valid URL.
  */
 function getExpectedHost(): string {
   const sentryUrl = getConfiguredSentryUrl();
 
   if (sentryUrl) {
-    // Self-hosted: only accept DSNs matching the configured host
     try {
       const url = new URL(sentryUrl);
       return url.host;
     } catch {
-      // Invalid SENTRY_HOST/SENTRY_URL - throw immediately since nothing will work
       throw new ConfigError(
         `SENTRY_HOST/SENTRY_URL "${sentryUrl}" is not a valid URL`,
         "Set SENTRY_HOST/SENTRY_URL to a valid URL (e.g., https://sentry.example.com) or unset it to use sentry.io"
@@ -355,373 +233,151 @@ function getExpectedHost(): string {
     }
   }
 
-  // SaaS: only accept *.sentry.io
   return DEFAULT_SENTRY_HOST;
 }
 
 /**
- * Validate that a DSN has an acceptable Sentry host.
- *
- * When SENTRY_URL is set (self-hosted): DSNs matching host or any subdomain are valid
- * When SENTRY_URL is not set (SaaS): only *.sentry.io DSNs are valid
- *
- * This ensures we don't detect SaaS DSNs when configured for self-hosted
- * (they can't be queried against a self-hosted instance) and vice versa.
+ * Validate that a DSN has an acceptable Sentry host. Accepts exact
+ * match or any subdomain. Prevents SaaS DSNs from being detected on
+ * self-hosted instances (and vice versa).
  */
 function isValidDsnHost(dsn: string): boolean {
   const parsed = parseDsn(dsn);
   if (!parsed) {
     return false;
   }
-
   const expectedHost = getExpectedHost();
-
-  // Accept exact match or any subdomain for both SaaS and self-hosted
-  // e.g., for sentry.io: accept sentry.io or o123.ingest.us.sentry.io
-  // e.g., for sentry.example.com: accept sentry.example.com or ingest.sentry.example.com
   return (
     parsed.host === expectedHost || parsed.host.endsWith(`.${expectedHost}`)
   );
 }
 
 /**
- * Create an ignore instance with built-in skip directories and .gitignore rules.
+ * Main full-scan implementation. Delegates the walker + grep work to
+ * `collectGrep`; post-filters matches for comments and host validation
+ * on the main thread.
  */
-async function createIgnoreFilter(cwd: string): Promise<Ignore> {
-  const ig = ignore();
-
-  // Add built-in skip directories first
-  ig.add(ALWAYS_SKIP_DIRS);
-
-  // Then add .gitignore rules if present
-  try {
-    const gitignorePath = path.join(cwd, ".gitignore");
-    const content = await Bun.file(gitignorePath).text();
-    ig.add(content);
-  } catch {
-    // No .gitignore, that's fine
-  }
-
-  return ig;
-}
-
-/**
- * Check if a file should be scanned based on its extension.
- */
-function shouldScanFile(filename: string): boolean {
-  const ext = path.extname(filename);
-  return ext !== "" && TEXT_EXTENSIONS.has(ext);
-}
-
-/**
- * Safely read directory entries, returning empty array on error.
- */
-async function safeReaddir(dir: string): Promise<Dirent[]> {
-  try {
-    return await readdir(dir, { withFileTypes: true });
-  } catch {
-    // Can't read directory (permissions, etc.) - skip it
-    return [];
-  }
-}
-
-/** Result of file collection */
-type CollectResult = {
-  files: string[];
-  /** Mtimes of scanned directories (for detecting new files) */
-  dirMtimes: Record<string, number>;
-};
-
-/**
- * Get directory mtime safely using node:fs/promises stat.
- * Must use stat() from node:fs/promises (not Bun.file()) for directories.
- */
-async function getDirMtime(dir: string): Promise<number> {
-  try {
-    const stats = await stat(dir);
-    return Math.floor(stats.mtimeMs);
-  } catch {
-    return 0;
-  }
-}
-
-/**
- * Collect files to scan from a directory using manual recursive walk.
- *
- * Unlike readdir with recursive: true, this implementation checks ignore rules
- * BEFORE traversing into directories, avoiding unnecessary traversal of large
- * ignored directories like node_modules.
- *
- * Also collects mtimes of all scanned directories for cache invalidation
- * (detects when new files are added to subdirectories).
- *
- * @param cwd - Root directory to scan
- * @param ig - Ignore filter instance
- * @returns Files and directory mtimes
- */
-async function collectFiles(cwd: string, ig: Ignore): Promise<CollectResult> {
-  const files: string[] = [];
-  const dirMtimes: Record<string, number> = {};
-
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: recursive directory walk is inherently complex but straightforward
-  async function walk(dir: string, depth: number): Promise<void> {
-    if (depth > MAX_SCAN_DEPTH) {
-      return;
-    }
-
-    // Track this directory's mtime for cache invalidation
-    const relativeDirPath = normalizePath(path.relative(cwd, dir)) || ".";
-    dirMtimes[relativeDirPath] = await getDirMtime(dir);
-
-    const entries = await safeReaddir(dir);
-
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      const relativePath = normalizePath(path.relative(cwd, fullPath));
-
-      // Check ignore rules BEFORE traversing - prevents walking into node_modules, etc.
-      if (ig.ignores(relativePath)) {
-        continue;
-      }
-
-      if (entry.isDirectory()) {
-        const nextDepth = isMonorepoPackageDir(relativePath) ? 0 : depth + 1;
-        await walk(fullPath, nextDepth);
-      } else if (entry.isFile() && shouldScanFile(entry.name)) {
-        files.push(relativePath);
-      }
-    }
-  }
-
-  await walk(cwd, 0);
-  return { files, dirMtimes };
-}
-
-/** Result from processing a single file */
-type FileProcessResult = {
-  dsns: DetectedDsn[];
-  /** File mtime in ms, only set if DSNs were found */
-  mtime?: number;
-};
-
-/**
- * Process a single file and extract DSNs.
- *
- * Note on Bun.file().size and lastModified: These are lazy properties that read
- * file metadata (via stat) only when accessed, not the file content. This is
- * cheaper than a separate stat() call since it uses the already-created file handle.
- *
- * @param cwd - Root directory
- * @param relativePath - Path relative to cwd
- * @param limit - Maximum DSNs to extract (undefined = no limit)
- * @returns Object with detected DSNs and mtime (if DSNs found)
- */
-async function processFile(
-  cwd: string,
-  relativePath: string,
-  limit?: number
-): Promise<FileProcessResult> {
-  const filepath = path.join(cwd, relativePath);
-
-  try {
-    const file = Bun.file(filepath);
-
-    // Skip large files (Bun.file().size reads metadata, not content)
-    if (file.size > MAX_FILE_SIZE) {
-      log.debug(`Skipping large file: ${relativePath} (${file.size} bytes)`);
-      return { dsns: [] };
-    }
-
-    const content = await file.text();
-    const dsnStrings = extractDsnsFromContent(content, limit);
-
-    if (dsnStrings.length === 0) {
-      return { dsns: [] };
-    }
-
-    const packagePath = inferPackagePath(relativePath);
-
-    // Map DSN strings to DetectedDsn objects, filtering out any that fail to parse
-    const dsns = dsnStrings
-      .map((dsn) => createDetectedDsn(dsn, "code", relativePath, packagePath))
-      .filter((d): d is DetectedDsn => d !== null);
-
-    // Return mtime only if we found valid DSNs (for cache invalidation)
-    return dsns.length > 0 ? { dsns, mtime: file.lastModified } : { dsns: [] };
-  } catch (error) {
-    // Re-throw configuration errors - they indicate user misconfiguration
-    // that should be surfaced rather than silently ignored
-    if (error instanceof ConfigError) {
-      throw error;
-    }
-    // For file system errors (ENOENT, EACCES, EPERM, etc.), return empty result
-    log.debug(`Cannot read file: ${relativePath}`);
-    return { dsns: [] };
-  }
-}
-
-/**
- * State for concurrent DSN scanning.
- */
-type ScanState = {
-  results: Map<string, DetectedDsn>;
-  /** Map of source file paths to their mtimes (only files containing DSNs) */
-  sourceMtimes: Record<string, number>;
-  filesScanned: number;
-  earlyExit: boolean;
-};
-
-/**
- * Process a file and add found DSNs to the scan state.
- * Returns true if early exit should be triggered.
- */
-async function processFileAndCollect(
-  cwd: string,
-  file: string,
-  stopOnFirst: boolean,
-  state: ScanState
-): Promise<boolean> {
-  state.filesScanned += 1;
-  const { dsns, mtime } = await processFile(
-    cwd,
-    file,
-    stopOnFirst ? 1 : undefined
-  );
-
-  // Record mtime for files that contain DSNs (for cache invalidation)
-  if (mtime !== undefined && dsns.length > 0) {
-    state.sourceMtimes[file] = mtime;
-  }
-
-  for (const dsn of dsns) {
-    if (!state.results.has(dsn.raw)) {
-      state.results.set(dsn.raw, dsn);
-      // When stopOnFirst is true, processFile returns at most 1 DSN per file.
-      // This check triggers early exit when we find the first *unique* DSN,
-      // handling the case where the same DSN appears in multiple files.
-      if (stopOnFirst) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-/**
- * Scan files concurrently and collect DSNs.
- *
- * @param cwd - Root directory
- * @param files - Files to scan (relative paths)
- * @param stopOnFirst - Whether to stop after finding the first DSN
- * @returns Map of DSNs (keyed by raw string), source mtimes, and count of files scanned
- */
-async function scanFilesForDsns(
-  cwd: string,
-  files: string[],
-  stopOnFirst: boolean
-): Promise<{
-  results: Map<string, DetectedDsn>;
-  sourceMtimes: Record<string, number>;
-  filesScanned: number;
-}> {
-  const limit = pLimit(CONCURRENCY_LIMIT);
-  const state: ScanState = {
-    results: new Map(),
-    sourceMtimes: {},
-    filesScanned: 0,
-    earlyExit: false,
-  };
-
-  // Create a rate-limited processor that handles early exit.
-  // Note: we intentionally do NOT use limit.clearQueue() because it causes
-  // the promises for cleared items to never settle, hanging Promise.all forever.
-  // Instead, queued tasks check state.earlyExit and return immediately.
-  const processWithLimit = (file: string) =>
-    limit(async () => {
-      if (state.earlyExit) {
-        return;
-      }
-
-      const shouldExit = await processFileAndCollect(
-        cwd,
-        file,
-        stopOnFirst,
-        state
-      );
-
-      if (shouldExit) {
-        state.earlyExit = true;
-      }
-    });
-
-  await Promise.all(files.map(processWithLimit));
-
-  return {
-    results: state.results,
-    sourceMtimes: state.sourceMtimes,
-    filesScanned: state.filesScanned,
-  };
-}
-
-/**
- * Main scan implementation with Sentry performance tracing and metrics.
- */
-function scanDirectory(
-  cwd: string,
-  stopOnFirst: boolean
-): Promise<CodeScanResult> {
+function scanDirectory(cwd: string): Promise<CodeScanResult> {
   return withTracingSpan(
     "scanCodeForDsns",
     "dsn.detect.code",
     async (span) => {
-      // Create ignore filter with built-in patterns and .gitignore
-      const ig = await createIgnoreFilter(cwd);
+      const sourceMtimes: Record<string, number> = {};
+      const dirMtimes: Record<string, number> = {};
+      const seen = new Map<string, DetectedDsn>();
+      // Dedup set for mtime recording. `grepFiles` emits one match
+      // per line, so a file with 3 DSN-containing lines would trigger
+      // 3 redundant writes to `sourceMtimes` without this gate.
+      const filesSeenForMtime = new Set<string>();
 
-      // Collect all files to scan (also collects directory mtimes)
-      let collectResult: CollectResult;
       try {
-        collectResult = await collectFiles(cwd, ig);
-      } catch {
+        const { matches, stats } = await collectGrep({
+          cwd,
+          pattern: DSN_PATTERN,
+          ...dsnScanOptions(),
+          recordMtimes: true,
+          onDirectoryVisit: (absDir, mtimeMs) => {
+            const rel = normalizePath(path.relative(cwd, absDir)) || ".";
+            dirMtimes[rel] = mtimeMs;
+          },
+          // Disable line truncation — the default (2000 chars) would
+          // silently drop DSNs past column ~1900 on long minified
+          // lines because `processMatch` re-runs `DSN_PATTERN` on
+          // `match.line` and the pattern-terminating `/\d+` can't
+          // survive a `…` suffix. Memory is bounded by the walker's
+          // 256 KB `maxFileSize`.
+          maxLineLength: Number.POSITIVE_INFINITY,
+        });
+
+        for (const match of matches) {
+          processMatch(match, { seen, sourceMtimes, filesSeenForMtime });
+        }
+
+        span.setAttribute("dsn.files_collected", stats.filesRead);
+        span.setAttributes({
+          "dsn.files_scanned": stats.filesRead,
+          "dsn.dsns_found": seen.size,
+        });
+
+        return { dsns: [...seen.values()], sourceMtimes, dirMtimes };
+      } catch (error) {
+        if (error instanceof ConfigError) {
+          throw error;
+        }
+        // Unexpected walk failure: return empty maps so the cache
+        // verifier forces a full rescan on next attempt. A partial
+        // `dirMtimes` would silently bless unvisited dirs.
         span.setStatus({ code: 2, message: "Directory scan failed" });
         return { dsns: [], sourceMtimes: {}, dirMtimes: {} };
       }
-
-      const { files, dirMtimes } = collectResult;
-
-      span.setAttribute("dsn.files_collected", files.length);
-      Sentry.metrics.distribution("dsn.files_collected", files.length, {
-        attributes: { stop_on_first: stopOnFirst },
-      });
-
-      if (files.length === 0) {
-        return { dsns: [], sourceMtimes: {}, dirMtimes };
-      }
-
-      // Scan files
-      const { results, sourceMtimes, filesScanned } = await scanFilesForDsns(
-        cwd,
-        files,
-        stopOnFirst
-      );
-
-      span.setAttributes({
-        "dsn.files_scanned": filesScanned,
-        "dsn.dsns_found": results.size,
-      });
-
-      Sentry.metrics.distribution("dsn.files_scanned", filesScanned, {
-        attributes: { stop_on_first: stopOnFirst },
-      });
-      Sentry.metrics.distribution("dsn.dsns_found", results.size, {
-        attributes: { stop_on_first: stopOnFirst },
-      });
-
-      return { dsns: [...results.values()], sourceMtimes, dirMtimes };
     },
     {
       "dsn.scan_dir": cwd,
-      "dsn.stop_on_first": stopOnFirst,
-      "dsn.max_depth": MAX_SCAN_DEPTH,
+      "dsn.stop_on_first": false,
+      "dsn.max_depth": DSN_MAX_DEPTH,
     }
   );
+}
+
+type MatchProcessingContext = {
+  seen: Map<string, DetectedDsn>;
+  sourceMtimes: Record<string, number>;
+  filesSeenForMtime: Set<string>;
+};
+
+/**
+ * Process one `GrepMatch`: skip commented lines, extract all DSNs on
+ * the line, validate hosts, dedup into `seen`, and record the file's
+ * mtime in `sourceMtimes` on first-match-per-file.
+ */
+function processMatch(
+  match: {
+    path: string;
+    absolutePath: string;
+    line: string;
+    mtime?: number;
+  },
+  ctx: MatchProcessingContext
+): void {
+  if (isCommentedLine(match.line.trim())) {
+    return;
+  }
+  const dsns = extractDsnsOnLine(match.line);
+  if (dsns.length === 0) {
+    return;
+  }
+  const packagePath = inferPackagePath(match.path);
+  let fileHadValidDsn = false;
+  for (const raw of dsns) {
+    const detected = createDetectedDsn(raw, "code", match.path, packagePath);
+    if (detected === null) {
+      continue;
+    }
+    fileHadValidDsn = true;
+    if (!ctx.seen.has(raw)) {
+      ctx.seen.set(raw, detected);
+    }
+  }
+  if (fileHadValidDsn && !ctx.filesSeenForMtime.has(match.absolutePath)) {
+    ctx.filesSeenForMtime.add(match.absolutePath);
+    if (match.mtime !== undefined) {
+      ctx.sourceMtimes[match.path] = match.mtime;
+    }
+  }
+}
+
+/**
+ * Extract DSN URLs from a single line's text. Mirrors
+ * `extractDsnsFromContent` but without the file-level scheme probe
+ * (grep already handles that).
+ */
+function extractDsnsOnLine(line: string): string[] {
+  const dsns: string[] = [];
+  for (const m of line.matchAll(DSN_PATTERN)) {
+    const raw = m[0];
+    if (!dsns.includes(raw) && isValidDsnHost(raw)) {
+      dsns.push(raw);
+    }
+  }
+  return dsns;
 }

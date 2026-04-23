@@ -22,8 +22,8 @@
           "options": {
             "paths": {
               "@stricli/core": {
-                "importNames": ["buildCommand"],
-                "message": "Import buildCommand from '../lib/command.js' instead. The wrapper injects telemetry, --log-level, and --verbose."
+                "importNames": ["buildCommand", "buildRouteMap"],
+                "message": "Import buildCommand from '../lib/command.js' and buildRouteMap from '../lib/route-map.js' instead. The wrappers inject telemetry and standard subcommand aliases."
               }
             }
           }
@@ -67,12 +67,14 @@
       }
     },
     {
+      // src/index.ts is the library entry point — re-exports SentryError, SentryOptions, SentrySDK
       // db/index.ts exports db connection utilities - not a barrel file but triggers the rule
       // api-client.ts is a barrel that re-exports from src/lib/api/ domain modules
       // to preserve the existing import path for all consumers
       // markdown.ts re-exports isPlainOutput from plain-detect.ts for backward compat
       // script/debug-id.ts re-exports from src/lib/sourcemap/debug-id.ts for build scripts
       "includes": [
+        "src/index.ts",
         "src/lib/db/index.ts",
         "src/lib/api-client.ts",
         "src/lib/formatters/markdown.ts",
@@ -87,8 +89,8 @@
       }
     },
     {
-      // command.ts is the canonical wrapper — it must import buildCommand from @stricli/core
-      "includes": ["src/lib/command.ts"],
+      // command.ts and route-map.ts are the canonical wrappers — they must import from @stricli/core
+      "includes": ["src/lib/command.ts", "src/lib/route-map.ts"],
       "linter": {
         "rules": {
           "style": {
@@ -109,8 +111,8 @@
               "options": {
                 "paths": {
                   "@stricli/core": {
-                    "importNames": ["buildCommand"],
-                    "message": "Import buildCommand from '../lib/command.js' instead. The wrapper injects telemetry, --log-level, and --verbose."
+                    "importNames": ["buildCommand", "buildRouteMap"],
+                    "message": "Import buildCommand from '../lib/command.js' and buildRouteMap from '../lib/route-map.js' instead. The wrappers inject telemetry and standard subcommand aliases."
                   },
                   "chalk": {
                     "message": "Use colorTag() from formatters/markdown.js for colored output. Raw chalk bypasses the plain-output pipeline (NO_COLOR, SENTRY_PLAIN_OUTPUT)."

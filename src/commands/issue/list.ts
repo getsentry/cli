@@ -15,15 +15,16 @@ import {
   listIssuesAllPages,
   listIssuesPaginated,
 } from "../../lib/api-client.js";
-import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
+import { extractRequiredScopes } from "../../lib/api-scope.js";
+import {
+  looksLikeIssueShortId,
+  parseOrgProjectArg,
+} from "../../lib/arg-parsing.js";
+
 import { getActiveEnvVarName, isEnvTokenActive } from "../../lib/db/auth.js";
 import {
   advancePaginationState,
-  buildMultiTargetContextKey,
   buildPaginationContextKey,
-  CURSOR_SEP,
-  decodeCompoundCursor,
-  encodeCompoundCursor,
   hasPreviousPage,
   resolveCursor,
 } from "../../lib/db/pagination.js";
@@ -52,6 +53,7 @@ import {
   buildListCommand,
   buildListLimitFlag,
   LIST_BASE_ALIASES,
+  LIST_MAX_LIMIT,
   LIST_TARGET_POSITIONAL,
   paginationHint,
   parseCursorFlag,
@@ -68,11 +70,26 @@ import {
   trimWithGroupGuarantee,
 } from "../../lib/org-list.js";
 import { withProgress } from "../../lib/polling.js";
+import type { ResolvedTarget } from "../../lib/resolve-target.js";
 import {
-  type ResolvedTarget,
-  resolveTargetsFromParsedArg,
-} from "../../lib/resolve-target.js";
-import type { SentryIssue, Writer } from "../../types/index.js";
+  SEARCH_SYNTAX_REFERENCE,
+  sanitizeQuery,
+} from "../../lib/search-query.js";
+import {
+  appendPeriodHint,
+  formatTimeRangeFlag,
+  PERIOD_BRIEF,
+  parsePeriod,
+  serializeTimeRange,
+  type TimeRange,
+  timeRangeToApiParams,
+} from "../../lib/time-range.js";
+import {
+  type SentryIssue,
+  SentryIssueSchema,
+  type Writer,
+} from "../../types/index.js";
+import { resolveIssue } from "./utils.js";
 
 /** Command key for pagination cursor storage */
 export const PAGINATION_KEY = "issue-list";
@@ -81,7 +98,7 @@ type ListFlags = {
   readonly query?: string;
   readonly limit: number;
   readonly sort: "date" | "new" | "freq" | "user";
-  readonly period: string;
+  readonly period: TimeRange;
   readonly json: boolean;
   readonly cursor?: string;
   readonly fresh: boolean;
@@ -119,12 +136,6 @@ const VALID_SORT_VALUES: SortValue[] = ["date", "new", "freq", "user"];
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry issue list <org>/<project>";
-
-/**
- * Maximum --limit value (user-facing ceiling for practical CLI response times).
- * Auto-pagination can theoretically fetch more, but 1000 keeps responses reasonable.
- */
-const MAX_LIMIT = 1000;
 
 /** Options returned by {@link buildListApiOptions}. */
 type ListApiOptions = {
@@ -189,6 +200,8 @@ function parseSort(value: string): SortValue {
   }
   return value as SortValue;
 }
+
+// Query sanitization (AND/OR handling) is in src/lib/search-query.ts
 
 /**
  * Format the issue list header with column titles.
@@ -305,6 +318,10 @@ async function fetchIssuesForTarget(
     limit: number;
     sort: SortValue;
     statsPeriod?: string;
+    /** Absolute start datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+    start?: string;
+    /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+    end?: string;
     /** Resume from this cursor (Phase 2 redistribution or next-page resume). */
     startCursor?: string;
     onPage?: (fetched: number, limit: number) => void;
@@ -322,6 +339,8 @@ async function fetchIssuesForTarget(
         ...options,
         projectId: target.projectId,
         groupStatsPeriod: options.groupStatsPeriod,
+        start: options.start,
+        end: options.end,
       }
     );
     return { target, issues, hasMore: !!nextCursor, nextCursor };
@@ -390,6 +409,10 @@ type BudgetFetchOptions = {
   limit: number;
   sort: SortValue;
   statsPeriod?: string;
+  /** Absolute start datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  start?: string;
+  /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
+  end?: string;
   /** Per-target cursors from a previous page (compound cursor resume). */
   startCursors?: Map<string, string>;
   /** Pre-computed collapse fields for API performance. @see {@link buildListApiOptions} */
@@ -503,9 +526,7 @@ function appendIssueFlags(base: string, flags: ListFlags): string {
   if (flags.query) {
     parts.push(`-q "${flags.query}"`);
   }
-  if (flags.period && flags.period !== "90d") {
-    parts.push(`-t ${flags.period}`);
-  }
+  appendPeriodHint(parts, flags.period, DEFAULT_PERIOD, "-t");
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
 }
 
@@ -525,11 +546,16 @@ function prevPageHint(org: string, flags: ListFlags): string {
  */
 async function fetchOrgAllIssues(
   org: string,
-  flags: Pick<ListFlags, "query" | "limit" | "sort" | "period" | "json">,
-  cursor: string | undefined,
-  onPage?: (fetched: number, limit: number) => void
+  flags: Pick<ListFlags, "query" | "limit" | "sort" | "json">,
+  timeRange: TimeRange,
+  options: {
+    cursor?: string;
+    onPage?: (fetched: number, limit: number) => void;
+  }
 ): Promise<IssuesPage> {
   const apiOpts = buildListApiOptions(flags.json);
+  const timeParams = timeRangeToApiParams(timeRange);
+  const { cursor, onPage } = options;
 
   // When resuming with --cursor, fetch a single page so the cursor chain stays intact.
   if (cursor) {
@@ -539,7 +565,7 @@ async function fetchOrgAllIssues(
       cursor,
       perPage,
       sort: flags.sort,
-      statsPeriod: flags.period,
+      ...timeParams,
       groupStatsPeriod: apiOpts.groupStatsPeriod,
       collapse: apiOpts.collapse,
     });
@@ -551,7 +577,7 @@ async function fetchOrgAllIssues(
     query: flags.query,
     limit: flags.limit,
     sort: flags.sort,
-    statsPeriod: flags.period,
+    ...timeParams,
     groupStatsPeriod: apiOpts.groupStatsPeriod,
     collapse: apiOpts.collapse,
     onPage,
@@ -563,6 +589,7 @@ async function fetchOrgAllIssues(
 type OrgAllIssuesOptions = {
   org: string;
   flags: ListFlags;
+  timeRange: TimeRange;
 };
 
 /**
@@ -575,11 +602,11 @@ type OrgAllIssuesOptions = {
 async function handleOrgAllIssues(
   options: OrgAllIssuesOptions
 ): Promise<IssueListResult> {
-  const { org, flags } = options;
+  const { org, flags, timeRange } = options;
   // Encode sort + query in context key so cursors from different searches don't collide.
   const contextKey = buildPaginationContextKey("org", org, {
     sort: flags.sort,
-    period: flags.period ?? "90d",
+    period: serializeTimeRange(timeRange),
     q: flags.query,
   });
   const { cursor, direction } = resolveCursor(
@@ -596,11 +623,13 @@ async function handleOrgAllIssues(
         json: flags.json,
       },
       (setMessage) =>
-        fetchOrgAllIssues(org, flags, cursor, (fetched, limit) =>
-          setMessage(
-            `Fetching issues, ${fetched} and counting (up to ${limit})...`
-          )
-        )
+        fetchOrgAllIssues(org, flags, timeRange, {
+          cursor,
+          onPage: (fetched, limit) =>
+            setMessage(
+              `Fetching issues, ${fetched} and counting (up to ${limit})...`
+            ),
+        })
     );
   } catch (error) {
     throw enrichIssueListError(error, flags);
@@ -670,6 +699,7 @@ type ResolvedTargetsOptions = {
   parsed: ReturnType<typeof parseOrgProjectArg>;
   flags: ListFlags;
   cwd: string;
+  timeRange: TimeRange;
 };
 
 /** Default --period value (used to detect user-implicit vs explicit). */
@@ -705,7 +735,7 @@ function build400Detail(
     );
   }
 
-  if (!flags.period || flags.period === DEFAULT_PERIOD) {
+  if (formatTimeRangeFlag(flags.period) === DEFAULT_PERIOD) {
     suggestions.push("Try a shorter time range: --period 14d or --period 24h");
   }
 
@@ -759,27 +789,52 @@ function enrichIssueListError(
 }
 
 /**
+ * Default scopes mentioned when the API response doesn't tell us which
+ * scope is missing. These are the minimum the issue-list endpoint needs
+ * — surfaced verbatim from the previous hardcoded message so the
+ * fallback behavior matches the pre-fix UX.
+ */
+const DEFAULT_ISSUE_LIST_SCOPES = "org:read, project:read";
+
+/**
  * Build an enriched error detail for 403 Forbidden responses.
  *
  * Only mentions token scopes when using a custom env-var token
  * (SENTRY_AUTH_TOKEN / SENTRY_TOKEN) since the regular `sentry auth login`
  * OAuth flow always grants the required scopes.
  *
+ * When the API's detail payload names the required scope(s) explicitly
+ * (see {@link extractRequiredScopes}) we surface that list instead of
+ * the hardcoded default — this is the fix for getsentry/cli#785 item #9
+ * where a token missing `event:read` was told it might be missing
+ * `org:read, project:read` (which it actually had).
+ *
  * @param originalDetail - The API response detail (may be undefined)
  * @returns Enhanced detail string with suggestions
  */
-function build403Detail(originalDetail: string | undefined): string {
+function build403Detail(originalDetail: unknown): string {
   const lines: string[] = [];
 
-  if (originalDetail) {
+  if (typeof originalDetail === "string" && originalDetail) {
     lines.push(originalDetail, "");
   }
 
   lines.push("Suggestions:");
 
   if (isEnvTokenActive()) {
+    const scopes = extractRequiredScopes(originalDetail);
+    const scopeList =
+      scopes.length > 0 ? scopes.join(", ") : DEFAULT_ISSUE_LIST_SCOPES;
+    // When the API was explicit about what's missing, frame the hint
+    // as a definite statement ("is missing") rather than a hedged
+    // "may lack" — this is the user-visible payoff of parsing the
+    // response.
+    const leader =
+      scopes.length > 0
+        ? `Your ${getActiveEnvVarName()} token is missing the required scope(s)`
+        : `Your ${getActiveEnvVarName()} token may lack the required scopes`;
     lines.push(
-      `  • Your ${getActiveEnvVarName()} token may lack the required scopes (org:read, project:read)`,
+      `  • ${leader} (${scopeList})`,
       "  • Check token scopes at: https://sentry.io/settings/auth-tokens/"
     );
   } else {
@@ -803,7 +858,7 @@ function build403Detail(originalDetail: string | undefined): string {
 async function handleResolvedTargets(
   options: ResolvedTargetsOptions
 ): Promise<IssueListResult> {
-  const { parsed, flags, cwd } = options;
+  const { parsed, flags, cwd, timeRange } = options;
 
   const { targets, footer, skippedSelfHosted, detectedDsns } =
     await resolveTargetsFromParsedArg(parsed, {
@@ -815,21 +870,20 @@ async function handleResolvedTargets(
 
   if (targets.length === 0) {
     if (skippedSelfHosted) {
-      throw new ContextError("Organization and project", USAGE_HINT, [
-        `Found ${skippedSelfHosted} DSN(s) that could not be resolved`,
-        "You may not have access to these projects, or you can specify the target explicitly",
-      ]);
+      throw new ContextError(
+        "Organization and project",
+        USAGE_HINT,
+        undefined,
+        `Found ${skippedSelfHosted} DSN(s) that could not be resolved — you may not have access to these projects`
+      );
     }
     throw new ContextError("Organization and project", USAGE_HINT);
   }
 
   // Build a compound cursor context key that encodes the full target set +
   // search parameters so a cursor from one search is never reused for another.
-  const contextKey = buildMultiTargetContextKey(targets, {
-    sort: flags.sort,
-    query: flags.query,
-    period: flags.period,
-  });
+  <<<<<<< HEAD
+  const contextKey = buildMultiTargetContextKey(targets, flags, timeRange);
 
   // Resolve per-target start cursors from the stored compound cursor (--cursor resume).
   // Sorted target keys must match the order used in buildMultiTargetContextKey.
@@ -879,7 +933,7 @@ async function handleResolvedTargets(
           query: flags.query,
           limit: flags.limit,
           sort: flags.sort,
-          statsPeriod: flags.period,
+          ...timeRangeToApiParams(timeRange),
           startCursors,
           collapse: apiOpts.collapse,
           groupStatsPeriod: apiOpts.groupStatsPeriod,
@@ -1046,7 +1100,7 @@ async function handleResolvedTargets(
 
   let moreHint: string | undefined;
   if (hasMoreToShow) {
-    const higherLimit = Math.min(flags.limit * 2, MAX_LIMIT);
+    const higherLimit = Math.min(flags.limit * 2, LIST_MAX_LIMIT);
     const canIncreaseLimit = higherLimit > flags.limit;
     const actionParts: string[] = [];
     if (canIncreaseLimit) {
@@ -1101,7 +1155,7 @@ export const __testing = {
   compareDates,
   parseSort,
   CURSOR_SEP,
-  MAX_LIMIT,
+  MAX_LIMIT: LIST_MAX_LIMIT,
   VALID_SORT_VALUES,
 };
 
@@ -1161,22 +1215,42 @@ function formatIssueListHuman(result: IssueListResult): string {
   return parts.join("");
 }
 
+// Search syntax reference lives in src/lib/search-query.ts
+
 /**
- * Transform an {@link IssueListResult} into the JSON output format.
+ * JSON transform for issue list that conditionally injects search syntax.
  *
- * Paginated responses produce a `{ data, hasMore, nextCursor?, errors? }` envelope.
- * Non-paginated responses produce a flat `[...]` array.
- * Field filtering is applied per-element inside `data`, not to the wrapper.
+ * Delegates to shared `jsonTransformListResult` for envelope handling.
+ * Adds `_searchSyntax` only when the result set is empty — that's when
+ * users/agents most likely need query help (bad query, wrong syntax).
+ * Avoids bloating every successful response with static metadata.
  */
-// JSON transform delegates to the shared jsonTransformListResult in org-list.ts.
-// IssueListResult extends ListResult<SentryIssue>, so the shared function handles
-// all envelope fields (hasMore, nextCursor, errors, jsonExtra) uniformly.
-const jsonTransformIssueList = jsonTransformListResult;
+function jsonTransformIssueList(
+  result: IssueListResult,
+  fields?: string[]
+): unknown {
+  const transformed = jsonTransformListResult(result, fields);
+  // Only inject into empty paginated envelopes — helps agents discover
+  // query syntax when their search returned nothing.
+  if (
+    transformed &&
+    typeof transformed === "object" &&
+    !Array.isArray(transformed)
+  ) {
+    const envelope = transformed as Record<string, unknown>;
+    const data = envelope.data;
+    if (Array.isArray(data) && data.length === 0) {
+      envelope._searchSyntax = SEARCH_SYNTAX_REFERENCE;
+    }
+  }
+  return transformed;
+}
 
 /** Output configuration for the issue list command. */
 const issueListOutput: OutputConfig<IssueListResult> = {
   human: formatIssueListHuman,
   jsonTransform: jsonTransformIssueList,
+  schema: SentryIssueSchema,
 };
 
 // ---------------------------------------------------------------------------
@@ -1201,6 +1275,16 @@ export const listCommand = buildListCommand("issue", {
       "Use --cursor / -c next / -c prev to paginate through larger result sets.\n\n" +
       "By default, only issues with activity in the last 90 days are shown. " +
       "Use --period to adjust (e.g. --period 24h, --period 14d).\n\n" +
+      "Query syntax (--query flag):\n" +
+      "  Terms are space-separated and implicitly ANDed together.\n" +
+      "  AND/OR operators are NOT supported. Use alternatives:\n" +
+      "    key:[val1,val2]   # in-list: matches val1 OR val2 for one key\n" +
+      "    *term*            # wildcard matching\n" +
+      "  Filters:  key:value, !key:value (negation), key:>N, key:<N\n" +
+      '  Quoted:   message:"exact phrase with spaces"\n' +
+      "  Built-in: is:unresolved, is:resolved, assigned:me, has:user\n" +
+      "  Dates:    age:-24h (last 24h), firstSeen:+7d (older than 7d)\n" +
+      "  Docs:     https://docs.sentry.io/concepts/search/\n\n" +
       "Alias: `sentry issues` → `sentry issue list`",
   },
   output: issueListOutput,
@@ -1209,11 +1293,11 @@ export const listCommand = buildListCommand("issue", {
     flags: {
       query: {
         kind: "parsed",
-        parse: String,
-        brief: "Search query (Sentry search syntax)",
+        parse: sanitizeQuery,
+        brief: "Search query (Sentry syntax, implicit AND, no OR operator)",
         optional: true,
       },
-      limit: buildListLimitFlag("issues", "25"),
+      limit: buildListLimitFlag("issues"),
       sort: {
         kind: "parsed",
         parse: parseSort,
@@ -1222,8 +1306,8 @@ export const listCommand = buildListCommand("issue", {
       },
       period: {
         kind: "parsed",
-        parse: String,
-        brief: "Time period for issue activity (e.g. 24h, 14d, 90d)",
+        parse: parsePeriod,
+        brief: PERIOD_BRIEF,
         default: "90d",
       },
       cursor: {
@@ -1248,8 +1332,46 @@ export const listCommand = buildListCommand("issue", {
   },
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
     const { cwd } = this;
+    const log = logger.withTag("issue.list");
 
     const parsed = parseOrgProjectArg(target);
+
+    // Auto-recover: user passed an issue short ID (e.g., "ARMAX-3E") instead
+    // of a project slug. Their intent is unambiguous — resolve and show it.
+    if (
+      parsed.type === "project-search" &&
+      looksLikeIssueShortId(parsed.projectSlug)
+    ) {
+      const shortId = parsed.projectSlug;
+      log.warn(
+        `'${shortId}' is an issue short ID, not a project slug. Showing the issue.`
+      );
+      const { org, issue } = await resolveIssue({
+        issueArg: shortId,
+        cwd,
+        command: "view",
+      });
+      const displayRows: IssueTableRow[] = [
+        {
+          issue,
+          orgSlug: org ?? "",
+          formatOptions: {
+            projectSlug: issue.project?.slug ?? "",
+            isMultiProject: false,
+          },
+        },
+      ];
+      yield new CommandOutput({
+        items: [issue],
+        displayRows,
+        title: `Issue ${issue.shortId}`,
+        footerMode: "none",
+        compact: true,
+      } satisfies IssueListResult);
+      return {
+        hint: `Tip: Use 'sentry issue view ${shortId}' for full details`,
+      };
+    }
 
     // Validate --limit range. Auto-pagination handles the API's 100-per-page
     // cap transparently, but we cap the total at MAX_LIMIT for practical CLI
@@ -1257,19 +1379,22 @@ export const listCommand = buildListCommand("issue", {
     if (flags.limit < 1) {
       throw new ValidationError("--limit must be at least 1.", "limit");
     }
-    if (flags.limit > MAX_LIMIT) {
+    if (flags.limit > LIST_MAX_LIMIT) {
       throw new ValidationError(
-        `--limit cannot exceed ${MAX_LIMIT}. ` +
+        `--limit cannot exceed ${LIST_MAX_LIMIT}. ` +
           "Use --cursor to paginate through larger result sets.",
         "limit"
       );
     }
+
+    const timeRange = flags.period;
 
     // biome-ignore lint/suspicious/noExplicitAny: shared handler accepts any mode variant
     const resolveAndHandle: ModeHandler<any> = (ctx) =>
       handleResolvedTargets({
         ...ctx,
         flags,
+        timeRange,
       });
 
     const result = (await dispatchOrgScopedList({
@@ -1292,6 +1417,7 @@ export const listCommand = buildListCommand("issue", {
           handleOrgAllIssues({
             org: ctx.parsed.org,
             flags,
+            timeRange,
           }),
       },
     })) as IssueListResult;

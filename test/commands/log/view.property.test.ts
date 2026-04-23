@@ -24,24 +24,24 @@ const logIdArb = stringMatching(/^[a-f0-9]{32}$/);
 const slugArb = stringMatching(/^[a-z][a-z0-9-]{1,20}[a-z0-9]$/);
 
 describe("parsePositionalArgs properties", () => {
-  test("single valid log ID: returns it in logIds with undefined targetArg", async () => {
+  test("single valid log ID: returns it in rawLogIds with undefined targetArg", async () => {
     await fcAssert(
       property(logIdArb, (input) => {
         const result = parsePositionalArgs([input]);
-        expect(result.logIds).toEqual([input]);
+        expect(result.rawLogIds).toEqual([input]);
         expect(result.targetArg).toBeUndefined();
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("single arg org/project/logId: splits into target and logIds", async () => {
+  test("single arg org/project/logId: splits into target and rawLogIds", async () => {
     await fcAssert(
       property(tuple(slugArb, slugArb, logIdArb), ([org, project, logId]) => {
         const combined = `${org}/${project}/${logId}`;
         const result = parsePositionalArgs([combined]);
         expect(result.targetArg).toBe(`${org}/${project}`);
-        expect(result.logIds).toEqual([logId]);
+        expect(result.rawLogIds).toEqual([logId]);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -58,25 +58,25 @@ describe("parsePositionalArgs properties", () => {
     );
   });
 
-  test("two args (target + logId): first is targetArg, second is in logIds", async () => {
+  test("two args (target + logId): first is targetArg, second is in rawLogIds", async () => {
     await fcAssert(
       property(tuple(slugArb, logIdArb), ([slug, logId]) => {
         const result = parsePositionalArgs([slug, logId]);
         expect(result.targetArg).toBe(slug);
-        expect(result.logIds).toEqual([logId]);
+        expect(result.rawLogIds).toEqual([logId]);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("org/project target + logId: correctly splits target and logIds", async () => {
+  test("org/project target + logId: correctly splits target and rawLogIds", async () => {
     await fcAssert(
       property(tuple(slugArb, slugArb, logIdArb), ([org, project, logId]) => {
         const target = `${org}/${project}`;
         const result = parsePositionalArgs([target, logId]);
 
         expect(result.targetArg).toBe(target);
-        expect(result.logIds).toEqual([logId]);
+        expect(result.rawLogIds).toEqual([logId]);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -91,7 +91,7 @@ describe("parsePositionalArgs properties", () => {
           const result = parsePositionalArgs(args);
 
           expect(result.targetArg).toBe(slug);
-          expect(result.logIds).toEqual(ids);
+          expect(result.rawLogIds).toEqual(ids);
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -107,7 +107,7 @@ describe("parsePositionalArgs properties", () => {
           const result = parsePositionalArgs([slug, combined]);
 
           expect(result.targetArg).toBe(slug);
-          expect(result.logIds).toEqual(ids);
+          expect(result.rawLogIds).toEqual(ids);
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -129,12 +129,12 @@ describe("parsePositionalArgs properties", () => {
     expect(() => parsePositionalArgs([])).toThrow(ContextError);
   });
 
-  test("result always has non-empty logIds array", async () => {
+  test("result always has non-empty rawLogIds array", async () => {
     await fcAssert(
       property(tuple(slugArb, logIdArb), ([slug, logId]) => {
         const result = parsePositionalArgs([slug, logId]);
-        expect(result.logIds.length).toBeGreaterThan(0);
-        for (const id of result.logIds) {
+        expect(result.rawLogIds.length).toBeGreaterThan(0);
+        for (const id of result.rawLogIds) {
           expect(typeof id).toBe("string");
         }
       }),

@@ -59,19 +59,25 @@ When creating your Sentry OAuth application:
 
 - **Redirect URI**: Not required for device flow
 - **Scopes**: The CLI requests these scopes:
-  - `project:read`, `project:write`
+<!-- GENERATED:START oauth-scopes -->
+  - `project:read`, `project:write`, `project:admin`
   - `org:read`
   - `event:read`, `event:write`
   - `member:read`
-  - `team:read`
+  - `team:read`, `team:write`
+<!-- GENERATED:END oauth-scopes -->
 
 ## Environment Variables
 
-| Variable           | Description                                           | Default              |
-| ------------------ | ----------------------------------------------------- | -------------------- |
-| `SENTRY_CLIENT_ID` | Sentry OAuth app client ID                            | (required)           |
-| `SENTRY_HOST`      | Sentry instance URL (for self-hosted, takes precedence) | `https://sentry.io`  |
-| `SENTRY_URL`       | Alias for `SENTRY_HOST`                               | `https://sentry.io`  |
+| Variable                | Description                                                      | Default              |
+| ----------------------- | ---------------------------------------------------------------- | -------------------- |
+| `SENTRY_CLIENT_ID`      | Sentry OAuth app client ID                                       | (required for build) |
+| `SENTRY_HOST`           | Sentry instance URL (for self-hosted, takes precedence)          | `https://sentry.io`  |
+| `SENTRY_URL`            | Alias for `SENTRY_HOST`                                          | `https://sentry.io`  |
+| `SENTRY_AUTH_TOKEN`     | API token for non-interactive use (lower priority than stored OAuth by default) | —     |
+| `SENTRY_FORCE_ENV_TOKEN`| Force env token to take priority over stored OAuth token         | —                    |
+| `SENTRY_CLI_NO_TELEMETRY`| Disable CLI telemetry (error tracking)                          | —                    |
+| `SENTRY_LOG_LEVEL`      | Diagnostic log level (`error`, `warn`, `log`, `info`, `debug`, `trace`) | `info`        |
 
 ## Building
 
