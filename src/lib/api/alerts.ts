@@ -76,6 +76,27 @@ export async function listIssueAlertsPaginated(
   return { data, nextCursor };
 }
 
+/**
+ * Get a single issue alert rule by ID.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @param ruleId - Alert rule ID
+ * @returns The issue alert rule
+ */
+export async function getIssueAlertRule(
+  orgSlug: string,
+  projectSlug: string,
+  ruleId: string
+): Promise<IssueAlertRule> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<IssueAlertRule>(
+    regionUrl,
+    `/projects/${orgSlug}/${projectSlug}/rules/${ruleId}/`
+  );
+  return data;
+}
+
 // ---------------------------------------------------------------------------
 // Metric alerts
 // ---------------------------------------------------------------------------
@@ -99,4 +120,23 @@ export async function listMetricAlertsPaginated(
   );
   const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
   return { data, nextCursor };
+}
+
+/**
+ * Get a single metric alert rule by ID.
+ *
+ * @param orgSlug - Organization slug
+ * @param ruleId - Alert rule ID
+ * @returns The metric alert rule
+ */
+export async function getMetricAlertRule(
+  orgSlug: string,
+  ruleId: string
+): Promise<MetricAlertRule> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<MetricAlertRule>(
+    regionUrl,
+    `/organizations/${orgSlug}/alert-rules/${ruleId}/`
+  );
+  return data;
 }

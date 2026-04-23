@@ -49,6 +49,7 @@ cli/
 │   ├── app.ts          # Stricli application setup
 │   ├── context.ts      # Dependency injection context
 │   ├── commands/       # CLI commands
+│   │   ├── alert/       # list, view, list, view
 │   │   ├── auth/        # login, logout, refresh, status, token, whoami
 │   │   ├── cli/         # defaults, feedback, fix, setup, upgrade
 │   │   ├── dashboard/   # list, view, create, add, edit, delete

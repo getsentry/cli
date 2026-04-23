@@ -889,7 +889,11 @@ async function handleResolvedTargets(
 
   // Build a compound cursor context key that encodes the full target set +
   // search parameters so a cursor from one search is never reused for another.
-  const contextKey = buildMultiTargetContextKey(targets, flags, timeRange);
+  const contextKey = buildMultiTargetContextKey(targets, {
+    sort: flags.sort,
+    query: flags.query,
+    period: serializeTimeRange(timeRange),
+  });
 
   // Resolve per-target start cursors from the stored compound cursor (--cursor resume).
   // Sorted target keys must match the order used in buildMultiTargetContextKey.

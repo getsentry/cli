@@ -20,6 +20,8 @@
  */
 
 export {
+  getIssueAlertRule,
+  getMetricAlertRule,
   type IssueAlertRule,
   listIssueAlertsPaginated,
   listMetricAlertsPaginated,
