@@ -13,24 +13,29 @@
  *
  * Worker → Main:
  * - `{ type: "ready" }` once on startup.
- * - `{ type: "result", ints: Uint32Array, linePool: string }` per
- *   request. `ints.buffer` is transferred (zero-copy); `linePool`
- *   is cloned.
+ * - `{ type: "result", ints: Uint32Array, linePoolBytes: Uint8Array }`
+ *   per request. Both buffers are transferred (zero-copy).
  *
  * ## Match encoding
  *
  * Each match is 4 consecutive `u32`s in `ints`:
  *   [0] pathIdx     index into the input `paths` array
  *   [1] lineNum     1-based line number
- *   [2] lineOffset  character offset into `linePool`
+ *   [2] lineOffset  character offset into the decoded line pool
  *   [3] lineLength  character length of the line (post-truncation)
  *
- * Structured-clone of `GrepMatch[]` for 215k matches costs ~200ms.
- * Binary-packed form + shared `linePool` string drops that to
- * ~2–3ms.
+ * The line pool is built as a JS string on the worker, UTF-8 encoded
+ * just before `postMessage`, and decoded back on the main side.
+ * Offsets stay in UTF-16 code-unit space; the encode/decode round
+ * trip preserves `.length` for all valid code points. Shipping the
+ * pool as a transferable `Uint8Array` keeps both buffers on
+ * `postMessage`'s zero-copy path — mixing a string with a
+ * transferable falls back to the slow structured-clone path in Bun.
  */
 
 const { readFileSync } = require("node:fs");
+
+const textEncoder = new TextEncoder();
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: hot regex loop with literal gate + line counter + line-bound extraction + per-file cap is inherently branchy
 self.onmessage = (event) => {
@@ -85,7 +90,15 @@ self.onmessage = (event) => {
       const lineEnd = lineEndRaw === -1 ? content.length : lineEndRaw;
       let line = content.slice(lineStart, lineEnd);
       if (line.length > maxLineLength) {
-        line = `${line.slice(0, maxLineLength - 1)}\u2026`;
+        // Back off if the cut lands on a high surrogate — splitting
+        // a pair leaves a lone half that `TextEncoder.encode`
+        // replaces with U+FFFD on the wire.
+        let cut = maxLineLength - 1;
+        const lastCode = line.charCodeAt(cut - 1);
+        if (lastCode >= 0xd8_00 && lastCode <= 0xdb_ff) {
+          cut -= 1;
+        }
+        line = `${line.slice(0, cut)}\u2026`;
       }
 
       const lineOffset = linePool.length;
@@ -105,9 +118,10 @@ self.onmessage = (event) => {
   }
 
   const packed = new Uint32Array(ints);
+  const linePoolBytes = textEncoder.encode(linePool);
   self.postMessage(
-    { type: "result", ints: packed, linePool },
-    { transfer: [packed.buffer] }
+    { type: "result", ints: packed, linePoolBytes },
+    { transfer: [packed.buffer, linePoolBytes.buffer] }
   );
 };
 

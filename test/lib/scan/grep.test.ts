@@ -80,6 +80,78 @@ describe("collectGrep — basic matching", () => {
       cleanup();
     }
   });
+
+  test("preserves non-ASCII / multi-byte UTF-8 in matched lines", async () => {
+    const { cwd, cleanup } = makeSandbox({
+      "a.txt": "héllo wörld TARGET here\npréfix TARGET 你好世界\n",
+      "b.txt": "emoji 🙂 TARGET 🎉 end\nmath ∑ ∞ TARGET ∂\n",
+      "c.txt": "astral 𝒜 TARGET 𝕏 𝔸\n",
+    });
+    try {
+      const { matches } = await collectGrep({ cwd, pattern: "TARGET" });
+      expect(matches.map((m) => m.line).sort()).toEqual([
+        "astral 𝒜 TARGET 𝕏 𝔸",
+        "emoji 🙂 TARGET 🎉 end",
+        "héllo wörld TARGET here",
+        "math ∑ ∞ TARGET ∂",
+        "préfix TARGET 你好世界",
+      ]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("truncation at a surrogate-pair boundary doesn't leak U+FFFD", async () => {
+    // Regression: `maxLineLength` truncation used to slice on a
+    // code-unit boundary, which could split a pair and leave a lone
+    // high surrogate that `TextEncoder` replaces with U+FFFD.
+    const { cwd, cleanup } = makeSandbox({
+      "a.txt": "TARGET🙂trailing content beyond the cutoff\n",
+    });
+    try {
+      const { matches } = await collectGrep({
+        cwd,
+        pattern: "TARGET",
+        maxLineLength: 8,
+      });
+      expect(matches).toHaveLength(1);
+      const line = matches[0]?.line ?? "";
+      expect(line.startsWith("TARGET")).toBe(true);
+      expect(line.endsWith("\u2026")).toBe(true);
+      expect(line.includes("\uFFFD")).toBe(false);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("UTF-8 BOM at the start of a file preserves line offsets", async () => {
+    // Regression: the decoder defaults to `ignoreBOM: false`, which
+    // silently strips a leading U+FEFF. A BOM-prefixed source file
+    // would put U+FEFF at pool index 0 on the worker side; without
+    // `ignoreBOM: true` on the main-side decoder, the decoded pool is
+    // one code unit shorter than the worker's offsets assume, and
+    // every line in that batch shifts left by one character.
+    const { cwd, cleanup } = makeSandbox({});
+    try {
+      const body = "TARGET first\nTARGET second\nTARGET third\n";
+      const bytes = new Uint8Array(3 + body.length);
+      bytes[0] = 0xef;
+      bytes[1] = 0xbb;
+      bytes[2] = 0xbf;
+      bytes.set(new TextEncoder().encode(body), 3);
+      writeFileSync(join(cwd, "bom.txt"), bytes);
+      const { matches } = await collectGrep({ cwd, pattern: "TARGET" });
+      // The first line keeps the BOM (that's what's in the source
+      // file); lines 2 and 3 are intact — no bleed-through.
+      expect(matches.map((m) => m.line)).toEqual([
+        "\uFEFFTARGET first",
+        "TARGET second",
+        "TARGET third",
+      ]);
+    } finally {
+      cleanup();
+    }
+  });
 });
 
 describe("collectGrep — case sensitivity", () => {
