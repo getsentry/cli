@@ -99,7 +99,6 @@ type MetricAlertRow = { rule: MetricAlertRule; orgSlug: string };
 type MetricAlertListResult = ListResult<MetricAlertRule> & {
   displayRows?: MetricAlertRow[];
   title?: string;
-  footerMode?: "single" | "multi" | "none";
   moreHint?: string;
   footer?: string;
 };
@@ -199,6 +198,11 @@ async function runPhase2(
   }
 }
 
+/** True if any org in phase 1 still has additional pages to fetch. */
+function phase1HasMore(phase1: FetchResult[]): boolean {
+  return phase1.some((r) => r.success && r.data.hasMore);
+}
+
 /**
  * Fetch metric alert rules from multiple orgs within a global limit budget.
  *
@@ -234,7 +238,7 @@ async function fetchWithBudget(
   if (surplus <= 0) {
     return {
       results: phase1,
-      hasMore: phase1.some((r) => r.success && r.data.hasMore),
+      hasMore: phase1HasMore(phase1),
     };
   }
 
@@ -247,7 +251,10 @@ async function fetchWithBudget(
   }
 
   if (expandableIndices.length === 0) {
-    return { results: phase1, hasMore: false };
+    return {
+      results: phase1,
+      hasMore: phase1HasMore(phase1),
+    };
   }
 
   await runPhase2(orgs, phase1, expandableIndices, surplus);
@@ -262,7 +269,7 @@ async function fetchWithBudget(
 
   return {
     results: phase1,
-    hasMore: phase1.some((r) => r.success && r.data.hasMore),
+    hasMore: phase1HasMore(phase1),
   };
 }
 
@@ -430,7 +437,6 @@ async function handleResolvedOrgs(
     );
   }
 
-  const isMultiOrg = validResults.length > 1;
   const isSingleOrg = validResults.length === 1;
   const firstOrg = validResults[0]?.orgSlug;
 
@@ -463,13 +469,6 @@ async function handleResolvedOrgs(
       ? `Metric alert rules in ${firstOrg}`
       : `Metric alert rules from ${validResults.length} organizations`;
 
-  let footerMode: "single" | "multi" | "none" = "none";
-  if (isMultiOrg) {
-    footerMode = "multi";
-  } else if (isSingleOrg) {
-    footerMode = "single";
-  }
-
   let moreHint: string | undefined;
   if (hasMoreToShow) {
     const higherLimit = Math.min(flags.limit * 2, MAX_LIMIT);
@@ -496,7 +495,6 @@ async function handleResolvedOrgs(
     hasPrev,
     displayRows,
     title,
-    footerMode,
     moreHint,
     footer,
   };
@@ -681,6 +679,7 @@ export const __testing = {
   encodeCompoundCursor,
   decodeCompoundCursor,
   buildMultiOrgContextKey,
+  phase1HasMore,
   CURSOR_SEP,
   MAX_LIMIT,
 };

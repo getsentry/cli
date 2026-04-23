@@ -105,7 +105,6 @@ type AlertRuleRow = { rule: IssueAlertRule; target: ResolvedTarget };
 type IssueAlertListResult = ListResult<IssueAlertRule> & {
   displayRows?: AlertRuleRow[];
   title?: string;
-  footerMode?: "single" | "multi" | "none";
   moreHint?: string;
   footer?: string;
 };
@@ -216,6 +215,11 @@ async function runPhase2(
   }
 }
 
+/** True if any target in phase 1 still has additional pages to fetch. */
+function phase1HasMore(phase1: FetchResult[]): boolean {
+  return phase1.some((r) => r.success && r.data.hasMore);
+}
+
 /**
  * Fetch alert rules from multiple targets within a global limit budget.
  *
@@ -251,7 +255,7 @@ async function fetchWithBudget(
   if (surplus <= 0) {
     return {
       results: phase1,
-      hasMore: phase1.some((r) => r.success && r.data.hasMore),
+      hasMore: phase1HasMore(phase1),
     };
   }
 
@@ -264,7 +268,10 @@ async function fetchWithBudget(
   }
 
   if (expandableIndices.length === 0) {
-    return { results: phase1, hasMore: false };
+    return {
+      results: phase1,
+      hasMore: phase1HasMore(phase1),
+    };
   }
 
   await runPhase2(targets, phase1, expandableIndices, { surplus, options });
@@ -279,7 +286,7 @@ async function fetchWithBudget(
 
   return {
     results: phase1,
-    hasMore: phase1.some((r) => r.success && r.data.hasMore),
+    hasMore: phase1HasMore(phase1),
   };
 }
 
@@ -476,13 +483,6 @@ async function handleResolvedTargets(
       ? `Issue alert rules in ${firstTarget.orgDisplay}/${firstTarget.projectDisplay}`
       : `Issue alert rules from ${validResults.length} projects`;
 
-  let footerMode: "single" | "multi" | "none" = "none";
-  if (isMultiProject) {
-    footerMode = "multi";
-  } else if (isSingleProject) {
-    footerMode = "single";
-  }
-
   let moreHint: string | undefined;
   if (hasMoreToShow) {
     const higherLimit = Math.min(flags.limit * 2, MAX_LIMIT);
@@ -509,7 +509,6 @@ async function handleResolvedTargets(
     hasPrev,
     displayRows,
     title,
-    footerMode,
     moreHint,
     footer,
   };
@@ -691,6 +690,7 @@ export const __testing = {
   decodeCompoundCursor,
   buildMultiTargetContextKey,
   buildProjectAliasMap,
+  phase1HasMore,
   CURSOR_SEP,
   MAX_LIMIT,
 };

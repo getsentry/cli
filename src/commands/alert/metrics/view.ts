@@ -10,6 +10,7 @@ import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { openInBrowser } from "../../../lib/browser.js";
 import { buildCommand } from "../../../lib/command.js";
 import {
+  ApiError,
   ContextError,
   ResolutionError,
   ValidationError,
@@ -33,64 +34,62 @@ type MetricAlertViewResult = {
   rule: MetricAlertRule;
 };
 
+/**
+ * Parse `org/<rule-id-or-name>` (one slash), or bare `rule-id-or-name` for auto-detect.
+ * Trailing-only org is invalid (empty ref).
+ */
 function parseMetricViewArg(arg: string): {
   ref: string;
   targetArg: string | undefined;
 } {
-  if (!arg.includes("/")) {
-    return { ref: arg.trim(), targetArg: undefined };
+  const trimmed = arg.trim();
+  if (!trimmed) {
+    throw new ValidationError(
+      `Rule id or name is required.\nUse: ${USAGE_HINT}`,
+      "rule"
+    );
   }
 
-  const slash = arg.lastIndexOf("/");
-  const targetPart = arg.slice(0, slash).trim();
-  const ref = arg.slice(slash + 1).trim();
+  if (!trimmed.includes("/")) {
+    return { ref: trimmed, targetArg: undefined };
+  }
+
+  const lastSlash = trimmed.lastIndexOf("/");
+  const targetPart = trimmed.slice(0, lastSlash).trim();
+  const ref = trimmed.slice(lastSlash + 1).trim();
   if (!ref) {
     throw new ValidationError(
-      `Invalid rule reference '${arg}'.\nUse: ${USAGE_HINT}`
+      `Invalid rule reference '${arg}' (missing id or name after org).\nUse: ${USAGE_HINT}`,
+      "rule"
     );
   }
   return { ref, targetArg: targetPart || undefined };
 }
 
-async function findRuleByName(
-  orgSlug: string,
-  ref: string
-): Promise<MetricAlertRule | null> {
+function isNotFoundApiError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
+}
+
+async function listAllMetricRulesForOrg(
+  orgSlug: string
+): Promise<MetricAlertRule[]> {
   const all: MetricAlertRule[] = [];
   let cursor: string | undefined;
-
   for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
     const { data, nextCursor } = await listMetricAlertsPaginated(orgSlug, {
       perPage: API_MAX_PER_PAGE,
       cursor,
     });
     all.push(...data);
-
-    const exact = data.find(
-      (rule) => rule.name.toLowerCase() === ref.toLowerCase()
-    );
-    if (exact) {
-      return exact;
-    }
-
     if (!nextCursor) {
       break;
     }
     cursor = nextCursor;
   }
-
-  if (all.length === 0) {
-    return null;
-  }
-
-  const names = all.map((rule) => rule.name);
-  const [match] = fuzzyMatch(ref, names, { maxResults: 1 });
-  if (!match) {
-    return null;
-  }
-  return all.find((rule) => rule.name === match) ?? null;
+  return all;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: per-org list + name resolution + disambiguation (same as issues view)
 async function resolveMetricAlertRule(
   orgSlugs: string[],
   ref: string
@@ -101,8 +100,11 @@ async function resolveMetricAlertRule(
       try {
         const rule = await getMetricAlertRule(orgSlug, ref);
         hits.push({ orgSlug, rule });
-      } catch {
-        // Continue searching other orgs.
+      } catch (e) {
+        if (isNotFoundApiError(e)) {
+          continue;
+        }
+        throw e;
       }
     }
 
@@ -123,10 +125,18 @@ async function resolveMetricAlertRule(
   }
 
   const hits: MetricAlertViewResult[] = [];
+  const allNames: string[] = [];
+
   for (const orgSlug of orgSlugs) {
-    const rule = await findRuleByName(orgSlug, ref);
-    if (rule) {
-      hits.push({ orgSlug, rule });
+    const rules = await listAllMetricRulesForOrg(orgSlug);
+    for (const r of rules) {
+      allNames.push(r.name);
+    }
+    const exact = rules.find(
+      (rule) => rule.name.toLowerCase() === ref.toLowerCase()
+    );
+    if (exact) {
+      hits.push({ orgSlug, rule: exact });
     }
   }
 
@@ -137,6 +147,17 @@ async function resolveMetricAlertRule(
     throw new ValidationError(
       `Alert rule name '${ref}' matched multiple organizations.\n` +
         "Use an explicit target: sentry alert metrics view <org>/<rule-id-or-name>"
+    );
+  }
+
+  const uniqueNames = [...new Set(allNames)];
+  const similar = fuzzyMatch(ref, uniqueNames, { maxResults: 5 });
+  if (similar.length > 0) {
+    const lines = similar.map((n) => `  ${n}`).join("\n");
+    throw new ValidationError(
+      `No metric alert rule named '${ref}' in the selected organization(s).\n\n` +
+        `Did you mean:\n${lines}`,
+      "rule"
     );
   }
 

@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { listCommand } from "../../../../src/commands/alert/issues/list.js";
+import {
+  __testing,
+  listCommand,
+} from "../../../../src/commands/alert/issues/list.js";
 import { DEFAULT_SENTRY_URL } from "../../../../src/lib/constants.js";
 import { setAuthToken } from "../../../../src/lib/db/auth.js";
 import {
@@ -157,5 +160,34 @@ describe("alert issues list pagination", () => {
     const parsed = JSON.parse(stdout.output);
     expect(parsed.data).toEqual([]);
     expect(parsed.hasMore).toBe(true);
+  });
+});
+
+/**
+ * `phase1HasMore` is shared (same `some(success && hasMore)` logic) in metrics list;
+ * unit tests live here only to avoid duplicating the same cases across both files.
+ */
+describe("alert issues list __testing", () => {
+  const { phase1HasMore } = __testing;
+  const sampleTarget = {
+    org: "a",
+    project: "b",
+    orgDisplay: "a",
+    projectDisplay: "b",
+  };
+
+  test("phase1HasMore: OR of per-target hasMore, ignores failed fetches", () => {
+    const success = (hasMore: boolean) => ({
+      success: true as const,
+      data: { hasMore, rules: [] as const, target: sampleTarget },
+    });
+    expect(phase1HasMore([success(false), success(true)])).toBe(true);
+    expect(phase1HasMore([success(false), success(false)])).toBe(false);
+    expect(
+      phase1HasMore([
+        { success: false, error: new Error("nope") },
+        success(true),
+      ])
+    ).toBe(true);
   });
 });

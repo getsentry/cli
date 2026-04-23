@@ -10,6 +10,7 @@ import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { openInBrowser } from "../../../lib/browser.js";
 import { buildCommand } from "../../../lib/command.js";
 import {
+  ApiError,
   ContextError,
   ResolutionError,
   ValidationError,
@@ -36,32 +37,53 @@ type IssueAlertViewResult = {
   rule: IssueAlertRule;
 };
 
+/**
+ * Parse `org/project/<rule-id-or-name>` (two+ slashes) or a bare `rule-id-or-name` (no slashes).
+ * A single `org/project` (exactly one slash) is invalid — the rule id or name is required.
+ */
 function parseIssueViewArg(arg: string): {
   ref: string;
   targetArg: string | undefined;
 } {
-  if (!arg.includes("/")) {
-    return { ref: arg.trim(), targetArg: undefined };
+  const trimmed = arg.trim();
+  if (!trimmed) {
+    throw new ValidationError(
+      `Rule id or name is required.\nUse: ${USAGE_HINT}`,
+      "rule"
+    );
   }
 
-  const slash = arg.lastIndexOf("/");
-  const targetPart = arg.slice(0, slash).trim();
-  const ref = arg.slice(slash + 1).trim();
+  const slashCount = [...trimmed].filter((c) => c === "/").length;
+  if (slashCount === 0) {
+    return { ref: trimmed, targetArg: undefined };
+  }
+  if (slashCount === 1) {
+    throw new ValidationError(
+      `Missing rule id or name after the project (got '${trimmed}').\n` +
+        `Use: ${USAGE_HINT}\n` +
+        `Example: ${trimmed}/<rule-id-or-name>`,
+      "rule"
+    );
+  }
+
+  const lastSlash = trimmed.lastIndexOf("/");
+  const targetPart = trimmed.slice(0, lastSlash).trim();
+  const ref = trimmed.slice(lastSlash + 1).trim();
   if (!ref) {
     throw new ValidationError(
-      `Invalid rule reference '${arg}'.\nUse: ${USAGE_HINT}`
+      `Invalid rule reference '${arg}'.\nUse: ${USAGE_HINT}`,
+      "rule"
     );
   }
   return { ref, targetArg: targetPart || undefined };
 }
 
-async function findRuleByName(
-  target: ResolvedTarget,
-  ref: string
-): Promise<IssueAlertRule | null> {
+/** List all issue alert rules for a project (paginated). */
+async function listAllIssueRulesForTarget(
+  target: ResolvedTarget
+): Promise<IssueAlertRule[]> {
   const all: IssueAlertRule[] = [];
   let cursor: string | undefined;
-
   for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
     const { data, nextCursor } = await listIssueAlertsPaginated(
       target.org,
@@ -69,32 +91,19 @@ async function findRuleByName(
       { perPage: API_MAX_PER_PAGE, cursor }
     );
     all.push(...data);
-
-    const exact = data.find(
-      (rule) => rule.name.toLowerCase() === ref.toLowerCase()
-    );
-    if (exact) {
-      return exact;
-    }
-
     if (!nextCursor) {
       break;
     }
     cursor = nextCursor;
   }
-
-  if (all.length === 0) {
-    return null;
-  }
-
-  const names = all.map((rule) => rule.name);
-  const [match] = fuzzyMatch(ref, names, { maxResults: 1 });
-  if (!match) {
-    return null;
-  }
-  return all.find((rule) => rule.name === match) ?? null;
+  return all;
 }
 
+function isNotFoundApiError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: per-target list + name resolution + disambiguation (same as metrics view)
 async function resolveIssueAlertRule(
   targets: ResolvedTarget[],
   ref: string
@@ -105,8 +114,11 @@ async function resolveIssueAlertRule(
       try {
         const rule = await getIssueAlertRule(target.org, target.project, ref);
         hits.push({ target, rule });
-      } catch {
-        // Best effort across targets.
+      } catch (e) {
+        if (isNotFoundApiError(e)) {
+          continue;
+        }
+        throw e;
       }
     }
 
@@ -127,10 +139,18 @@ async function resolveIssueAlertRule(
   }
 
   const hits: IssueAlertViewResult[] = [];
+  const allRuleNames: string[] = [];
+
   for (const target of targets) {
-    const rule = await findRuleByName(target, ref);
-    if (rule) {
-      hits.push({ target, rule });
+    const rules = await listAllIssueRulesForTarget(target);
+    for (const r of rules) {
+      allRuleNames.push(r.name);
+    }
+    const exact = rules.find(
+      (rule) => rule.name.toLowerCase() === ref.toLowerCase()
+    );
+    if (exact) {
+      hits.push({ target, rule: exact });
     }
   }
 
@@ -141,6 +161,17 @@ async function resolveIssueAlertRule(
     throw new ValidationError(
       `Alert rule name '${ref}' matched multiple projects.\n` +
         "Use an explicit target: sentry alert issues view <org>/<project>/<rule-id-or-name>"
+    );
+  }
+
+  const uniqueNames = [...new Set(allRuleNames)];
+  const similar = fuzzyMatch(ref, uniqueNames, { maxResults: 5 });
+  if (similar.length > 0) {
+    const lines = similar.map((n) => `  ${n}`).join("\n");
+    throw new ValidationError(
+      `No issue alert rule named '${ref}' in the selected project(s).\n\n` +
+        `Did you mean:\n${lines}`,
+      "rule"
     );
   }
 
