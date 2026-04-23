@@ -7,13 +7,10 @@ import {
   API_MAX_PER_PAGE,
   getIssueAlertRule,
   type IssueAlertRule,
+  isNotFoundApiError,
   listIssueAlertsPaginated,
 } from "../../../lib/api-client.js";
-import {
-  ApiError,
-  ResolutionError,
-  ValidationError,
-} from "../../../lib/errors.js";
+import { ResolutionError, ValidationError } from "../../../lib/errors.js";
 import { fuzzyMatch } from "../../../lib/fuzzy.js";
 import type { ResolvedTarget } from "../../../lib/resolve-target.js";
 import { isAllDigits } from "../../../lib/utils.js";
@@ -86,10 +83,6 @@ export async function listAllIssueRulesForTarget(
     cursor = nextCursor;
   }
   return all;
-}
-
-function isNotFoundApiError(error: unknown): boolean {
-  return error instanceof ApiError && error.status === 404;
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: per-target list + name resolution

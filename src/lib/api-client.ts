@@ -40,6 +40,7 @@ export {
   queryAllWidgets,
   updateDashboard,
 } from "./api/dashboards.js";
+export { isNotFoundApiError } from "./api/error-guards.js";
 export {
   findEventAcrossOrgs,
   getEvent,

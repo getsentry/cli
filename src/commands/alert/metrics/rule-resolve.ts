@@ -6,14 +6,11 @@ import { MAX_PAGINATION_PAGES } from "../../../lib/api/infrastructure.js";
 import {
   API_MAX_PER_PAGE,
   getMetricAlertRule,
+  isNotFoundApiError,
   listMetricAlertsPaginated,
   type MetricAlertRule,
 } from "../../../lib/api-client.js";
-import {
-  ApiError,
-  ResolutionError,
-  ValidationError,
-} from "../../../lib/errors.js";
+import { ResolutionError, ValidationError } from "../../../lib/errors.js";
 import { fuzzyMatch } from "../../../lib/fuzzy.js";
 import { isAllDigits } from "../../../lib/utils.js";
 
@@ -55,10 +52,6 @@ export function parseMetricRuleArg(
     );
   }
   return { ref, targetArg: targetPart || undefined };
-}
-
-function isNotFoundApiError(error: unknown): boolean {
-  return error instanceof ApiError && error.status === 404;
 }
 
 export async function listAllMetricRulesForOrg(

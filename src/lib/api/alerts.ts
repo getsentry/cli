@@ -77,6 +77,20 @@ export async function listIssueAlertsPaginated(
   return { data, nextCursor };
 }
 
+/** Single GET for project issue alert rule (typed or full JSON for PUT). */
+async function fetchIssueAlertRuleJson(
+  orgSlug: string,
+  projectSlug: string,
+  ruleId: string
+): Promise<Record<string, unknown>> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<Record<string, unknown>>(
+    regionUrl,
+    `projects/${orgSlug}/${projectSlug}/rules/${encodeURIComponent(ruleId)}/`
+  );
+  return data;
+}
+
 /**
  * Get a single issue alert rule by ID.
  *
@@ -90,12 +104,8 @@ export async function getIssueAlertRule(
   projectSlug: string,
   ruleId: string
 ): Promise<IssueAlertRule> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data } = await apiRequestToRegion<IssueAlertRule>(
-    regionUrl,
-    `/projects/${orgSlug}/${projectSlug}/rules/${ruleId}/`
-  );
-  return data;
+  const data = await fetchIssueAlertRuleJson(orgSlug, projectSlug, ruleId);
+  return data as IssueAlertRule;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +133,19 @@ export async function listMetricAlertsPaginated(
   return { data, nextCursor };
 }
 
+/** Single GET for org metric alert rule (typed or full JSON for PUT). */
+async function fetchMetricAlertRuleJson(
+  orgSlug: string,
+  ruleId: string
+): Promise<Record<string, unknown>> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<Record<string, unknown>>(
+    regionUrl,
+    `organizations/${orgSlug}/alert-rules/${encodeURIComponent(ruleId)}/`
+  );
+  return data;
+}
+
 /**
  * Get a single metric alert rule by ID.
  *
@@ -134,12 +157,8 @@ export async function getMetricAlertRule(
   orgSlug: string,
   ruleId: string
 ): Promise<MetricAlertRule> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data } = await apiRequestToRegion<MetricAlertRule>(
-    regionUrl,
-    `/organizations/${orgSlug}/alert-rules/${ruleId}/`
-  );
-  return data;
+  const data = await fetchMetricAlertRuleJson(orgSlug, ruleId);
+  return data as MetricAlertRule;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,17 +186,12 @@ export async function deleteIssueAlertRule(
 /**
  * Full document for PUT (includes conditions, actions, etc. from the API).
  */
-export async function getIssueAlertRuleDocument(
+export function getIssueAlertRuleDocument(
   orgSlug: string,
   projectSlug: string,
   ruleId: string
 ): Promise<Record<string, unknown>> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data } = await apiRequestToRegion<Record<string, unknown>>(
-    regionUrl,
-    `projects/${orgSlug}/${projectSlug}/rules/${encodeURIComponent(ruleId)}/`
-  );
-  return data;
+  return fetchIssueAlertRuleJson(orgSlug, projectSlug, ruleId);
 }
 
 /**
@@ -217,16 +231,11 @@ export async function deleteMetricAlertRule(
   );
 }
 
-export async function getMetricAlertRuleDocument(
+export function getMetricAlertRuleDocument(
   orgSlug: string,
   ruleId: string
 ): Promise<Record<string, unknown>> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data } = await apiRequestToRegion<Record<string, unknown>>(
-    regionUrl,
-    `organizations/${orgSlug}/alert-rules/${encodeURIComponent(ruleId)}/`
-  );
-  return data;
+  return fetchMetricAlertRuleJson(orgSlug, ruleId);
 }
 
 export async function putMetricAlertRule(
