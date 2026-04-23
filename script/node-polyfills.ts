@@ -7,7 +7,7 @@ import {
   spawnSync as nodeSpawnSync,
 } from "node:child_process";
 import { statSync } from "node:fs";
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, readFile, stat, writeFile } from "node:fs/promises";
 // node:sqlite is imported lazily inside NodeDatabasePolyfill to avoid
 // crashing on Node.js versions without node:sqlite support when the
 // bundle is loaded as a library (the consumer may never use SQLite).
@@ -127,6 +127,8 @@ const BunPolyfill = {
           return false;
         }
       },
+      // Follows symlinks (stat, not lstat) — matches Bun.file().stat() semantics.
+      stat: stat.bind(null, path),
       text(): Promise<string> {
         return readFile(path, "utf-8");
       },

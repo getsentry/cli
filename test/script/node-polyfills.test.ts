@@ -20,6 +20,7 @@ import {
   spawnSync as nodeSpawnSync,
 } from "node:child_process";
 import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -339,6 +340,8 @@ function polyfillFile(path: string) {
         return 0;
       }
     },
+    // Follows symlinks (stat, not lstat) — matches Bun.file().stat() semantics.
+    stat: stat.bind(null, path),
   };
 }
 
@@ -412,6 +415,80 @@ describe("file polyfill size and lastModified", () => {
   test("lastModified returns 0 for non-existent file", () => {
     const pf = polyfillFile("/tmp/__nonexistent_file_polyfill_test__");
     expect(pf.lastModified).toBe(0);
+  });
+});
+
+describe("file polyfill stat() (CLI-1EA, CLI-1EB regression)", () => {
+  test("stat() resolves to a Stats object with isFile()=true for a regular file", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "polyfill-file-stat-"));
+    const filePath = join(tmpDir, "regular.txt");
+    try {
+      writeFileSync(filePath, "hello");
+      const pf = polyfillFile(filePath);
+      const stats = await pf.stat();
+      expect(stats.isFile()).toBe(true);
+      expect(stats.isDirectory()).toBe(false);
+    } finally {
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  test("stat() reports a directory as !isFile()", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "polyfill-file-stat-"));
+    try {
+      const pf = polyfillFile(tmpDir);
+      const stats = await pf.stat();
+      expect(stats.isFile()).toBe(false);
+      expect(stats.isDirectory()).toBe(true);
+    } finally {
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  test("stat() throws ENOENT for a non-existent path", async () => {
+    const pf = polyfillFile("/tmp/__nonexistent_polyfill_stat_test__");
+    try {
+      await pf.stat();
+      throw new Error("expected stat() to throw");
+    } catch (err) {
+      expect((err as NodeJS.ErrnoException).code).toBe("ENOENT");
+    }
+  });
+
+  test("stat() follows symlinks (returns target type, not lstat)", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "polyfill-file-stat-"));
+    const targetPath = join(tmpDir, "target.txt");
+    const linkPath = join(tmpDir, "link.txt");
+    try {
+      writeFileSync(targetPath, "data");
+      // Create a symlink link.txt → target.txt
+      execSync(
+        `ln -s ${JSON.stringify(targetPath)} ${JSON.stringify(linkPath)}`
+      );
+      const pf = polyfillFile(linkPath);
+      const stats = await pf.stat();
+      // stat (not lstat) follows the symlink to the regular file target.
+      expect(stats.isFile()).toBe(true);
+      expect(stats.isSymbolicLink()).toBe(false);
+    } finally {
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  test("stat() is consistent with Bun.file().stat()", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "polyfill-file-stat-"));
+    const filePath = join(tmpDir, "compare.txt");
+    try {
+      writeFileSync(filePath, "compare");
+      const pf = polyfillFile(filePath);
+      const polyfillStats = await pf.stat();
+      const bunStats = await Bun.file(filePath).stat();
+      expect(polyfillStats.isFile()).toBe(bunStats.isFile());
+      expect(polyfillStats.isDirectory()).toBe(bunStats.isDirectory());
+      expect(polyfillStats.size).toBe(bunStats.size);
+    } finally {
+      rmSync(tmpDir, { recursive: true });
+    }
   });
 });
 
