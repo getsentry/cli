@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-dashboard
-version: 0.28.1
+version: 0.29.0
 description: Manage Sentry dashboards
 requires:
   bins: ["sentry"]
@@ -76,7 +76,7 @@ Add a widget to a dashboard
 
 **Flags:**
 - `-d, --display <value> - Display type (big_number, line, area, bar, table, stacked_area, top_n, text, categorical_bar, details, wheel, rage_and_dead_clicks, server_tree, agents_traces_table)`
-- `--dataset <value> - Widget dataset (default: spans)`
+- `--dataset <value> - Widget dataset (default: spans). Accepts canonical names and API synonyms: spans, error-events/errors, transaction-like/transactions, tracemetrics/metrics, logs, issue, discover`
 - `-q, --query <value>... - Aggregate expression (e.g. count, p95:span.duration)`
 - `-w, --where <value> - Search conditions filter (e.g. is:unresolved)`
 - `-g, --group-by <value>... - Group-by column (repeatable)`
@@ -122,7 +122,7 @@ Edit a widget in a dashboard
 - `-t, --title <value> - Widget title to match`
 - `--new-title <value> - New widget title`
 - `-d, --display <value> - Display type (big_number, line, area, bar, table, stacked_area, top_n, text, categorical_bar, details, wheel, rage_and_dead_clicks, server_tree, agents_traces_table)`
-- `--dataset <value> - Widget dataset (default: spans)`
+- `--dataset <value> - Widget dataset (default: spans). Accepts canonical names and API synonyms: spans, error-events/errors, transaction-like/transactions, tracemetrics/metrics, logs, issue, discover`
 - `-q, --query <value>... - Aggregate expression (e.g. count, p95:span.duration)`
 - `-w, --where <value> - Search conditions filter (e.g. is:unresolved)`
 - `-g, --group-by <value>... - Group-by column (repeatable)`
