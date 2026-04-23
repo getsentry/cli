@@ -29,15 +29,23 @@ describe("pickUploadEncoding", () => {
 describe("encodeChunk", () => {
   const payload = Buffer.from("hello chunk-upload world".repeat(128));
 
-  test("gzip encoding round-trips via node:zlib gunzip", async () => {
+  test("gzip encoding emits gzip magic bytes and round-trips", async () => {
     const encoded = await encodeChunk(payload, "gzip");
     expect(encoded.byteLength).toBeLessThan(payload.byteLength);
+    // gzip magic: 1f 8b
+    expect(encoded[0]).toBe(0x1f);
+    expect(encoded[1]).toBe(0x8b);
     expect(Buffer.from(gunzipSync(encoded)).equals(payload)).toBe(true);
   });
 
-  test("zstd encoding round-trips via Bun.zstdDecompressSync", async () => {
+  test("zstd encoding emits zstd magic bytes and round-trips", async () => {
     const encoded = await encodeChunk(payload, "zstd");
     expect(encoded.byteLength).toBeLessThan(payload.byteLength);
+    // zstd magic: 28 b5 2f fd (little-endian 0xFD2FB528)
+    expect(encoded[0]).toBe(0x28);
+    expect(encoded[1]).toBe(0xb5);
+    expect(encoded[2]).toBe(0x2f);
+    expect(encoded[3]).toBe(0xfd);
     const decoded = Bun.zstdDecompressSync(encoded);
     expect(Buffer.from(decoded).equals(payload)).toBe(true);
   });
