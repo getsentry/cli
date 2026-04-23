@@ -37,7 +37,6 @@ type StdinHandle = {
 type InstalledState = {
   fresh: ReadStream;
   dataListener: (chunk: Buffer) => void;
-  errorListener: () => void;
   original: {
     setRawMode: StdinHandle["setRawMode"];
     pause: StdinHandle["pause"];
@@ -199,11 +198,14 @@ export function forwardFreshTtyToStdin(
   // A ReadStream without an `error` listener crashes the process when it
   // emits (e.g. terminal disconnected, SSH dropped). The wizard can't
   // recover from a dead TTY, so silently drop — the next operation that
-  // actually needs input will fail with a more meaningful error.
-  const errorListener = (): void => {
+  // actually needs input will fail with a more meaningful error. The
+  // listener stays attached across teardown intentionally: Bun can
+  // asynchronously emit `'error'` (EBADF) after `destroy()` closes the
+  // underlying fd, and an unhandled error on the stream crashes the
+  // process. Keeping the listener attached absorbs any late emission.
+  fresh.on("error", (): void => {
     // intentionally empty
-  };
-  fresh.on("error", errorListener);
+  });
 
   // setRawMode issues a TCSETS ioctl on the underlying TTY device. The device
   // is shared between the broken fd 0 and the fresh fd, but the broken fd's
@@ -234,7 +236,6 @@ export function forwardFreshTtyToStdin(
   installedState = {
     fresh,
     dataListener,
-    errorListener,
     original,
     previousIsTty,
     backfilledIsTty,
@@ -278,10 +279,9 @@ export function closeFreshTtyForwarding(): void {
   }
 
   // Pause before destroy so no queued read callback tries to deliver bytes
-  // after the stream has been torn down. Keep the original `errorListener`
-  // attached across destroy — Bun may asynchronously emit `'error'` (EBADF)
-  // after destroy when the underlying fd closes, and an unhandled error on
-  // the stream crashes the process.
+  // after the stream has been torn down. The error listener installed at
+  // setup time stays attached across destroy — see the comment at the
+  // install site for why.
   fresh.pause();
   fresh.destroy();
 
