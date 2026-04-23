@@ -6,22 +6,6 @@
  *
  * Instead of managing client instances, we pass configuration per-request
  * through the SDK function options (baseUrl, fetch, headers).
- *
- * ## Retry safety (CLI-1D6)
- *
- * The retry loop must feed `fetch` a fresh `(input, init)` pair per attempt
- * because fetch consumes the request body on attempt 1. Reusing a consumed
- * `Request` (or a streamed `init.body`) on retry throws
- * `TypeError: Request body already used`, which used to surface as
- * "Unable to reach Sentry API. Cause: Request body already used" after a
- * timeout followed by retry. `buildAttemptFactory` materializes the body
- * once so every retry sees a readable copy.
- *
- * ## Per-endpoint timeouts
- *
- * Known-slow endpoints (e.g. Seer autofix) can exceed the default 30 s
- * per-request timeout. `ENDPOINT_TIMEOUT_OVERRIDES` lets us raise the
- * ceiling for specific paths without touching call sites.
  */
 
 import { getTraceData } from "@sentry/node-core/light";
@@ -49,36 +33,18 @@ const log = logger.withTag("http");
 const REQUEST_TIMEOUT_MS = 30_000;
 
 /**
- * Per-endpoint timeout overrides.
- *
- * Known-slow Sentry endpoints whose server-side processing can exceed
- * the default 30 s request timeout. Matched against the request URL's
- * pathname; the first matching pattern wins, falling back to
- * {@link REQUEST_TIMEOUT_MS}.
- *
- * Seer autofix POSTs trigger root-cause analysis / solution planning on
- * the server and can take up to ~2 minutes before returning the run_id
- * (see CLI-1D6). Subsequent polling of the same endpoint is short-lived
- * and fits easily under the 30 s default, but the initial POST must be
- * given room to breathe.
- *
- * To add a new entry: append `{ pattern, timeoutMs, reason }`. Keep the
- * pattern conservative (match only the exact slow endpoint, not broad
- * prefixes) so unrelated endpoints don't accidentally inherit a long
- * timeout.
+ * Per-endpoint timeout overrides, matched against the request URL's
+ * pathname (first match wins, otherwise {@link REQUEST_TIMEOUT_MS}).
  */
 type TimeoutOverride = {
   pattern: RegExp;
   timeoutMs: number;
-  reason: string;
 };
 
 const ENDPOINT_TIMEOUT_OVERRIDES: TimeoutOverride[] = [
-  {
-    pattern: /\/autofix\/?(?:\?|$)/,
-    timeoutMs: 120_000,
-    reason: "Seer autofix trigger/plan",
-  },
+  // Seer autofix POSTs trigger server-side root-cause analysis /
+  // solution planning and can take up to ~2 minutes (see CLI-1D6).
+  { pattern: /\/autofix\/?(?:\?|$)/, timeoutMs: 120_000 },
 ];
 
 /** Maximum retry attempts for failed requests */
@@ -93,12 +59,7 @@ const RETRYABLE_STATUS_CODES = [408, 429, 500, 502, 503, 504];
 /** Header to mark requests as retries, preventing infinite token refresh loops */
 const RETRY_MARKER_HEADER = "x-sentry-cli-retry";
 
-/**
- * Symbol marker for aborts caused by our own per-request timeout (as opposed
- * to the caller's external abort signal). Stamped onto the thrown error so
- * the retry loop can classify it and surface a {@link TimeoutError} with a
- * clear message instead of the opaque "Network error" envelope.
- */
+/** Stamped on thrown errors caused by our own per-request timeout. */
 const INTERNAL_TIMEOUT_MARKER = Symbol("sentry-cli:internal-timeout");
 
 /** Calculate exponential backoff delay, capped at MAX_BACKOFF_MS */
@@ -208,21 +169,9 @@ function linkAbortSignal(
   signal.addEventListener("abort", () => controller.abort(), { once: true });
 }
 
-/**
- * Resolve the effective timeout for a request.
- *
- * Consults {@link ENDPOINT_TIMEOUT_OVERRIDES} using the URL's pathname;
- * falls back to {@link REQUEST_TIMEOUT_MS}. If the URL string cannot be
- * parsed (shouldn't happen in practice — our callers always pass absolute
- * URLs), the raw string is used for matching so overrides still apply.
- */
+/** Resolve the per-request timeout for a URL via {@link ENDPOINT_TIMEOUT_OVERRIDES}. */
 function resolveTimeoutMs(fullUrl: string): number {
-  let pathname = fullUrl;
-  try {
-    pathname = new URL(fullUrl).pathname;
-  } catch {
-    // Fall through: match against the raw input.
-  }
+  const pathname = extractUrlPath(fullUrl);
   for (const entry of ENDPOINT_TIMEOUT_OVERRIDES) {
     if (entry.pattern.test(pathname)) {
       return entry.timeoutMs;
@@ -231,10 +180,6 @@ function resolveTimeoutMs(fullUrl: string): number {
   return REQUEST_TIMEOUT_MS;
 }
 
-/**
- * True if the error was caused by our internal per-request timeout
- * (as opposed to a user-initiated abort or another network error).
- */
 function isInternalTimeout(error: unknown): boolean {
   return (
     typeof error === "object" &&
@@ -243,16 +188,6 @@ function isInternalTimeout(error: unknown): boolean {
   );
 }
 
-/**
- * Execute a single fetch attempt with timeout.
- *
- * If the per-request timeout fires before the response arrives, the
- * resulting `AbortError` is tagged with {@link INTERNAL_TIMEOUT_MARKER}
- * and the effective `timeoutMs` so the retry loop can distinguish it
- * from a user abort or generic network error.
- *
- * @returns The Response, or throws on network/timeout errors
- */
 type FetchWithTimeoutArgs = {
   input: Request | string | URL;
   init: RequestInit | undefined;
@@ -261,6 +196,11 @@ type FetchWithTimeoutArgs = {
   timeoutMs: number;
 };
 
+/**
+ * Execute a single fetch attempt with timeout. If the timeout fires, the
+ * thrown error is tagged with {@link INTERNAL_TIMEOUT_MARKER} so the retry
+ * loop can distinguish it from a user abort or network error.
+ */
 async function fetchWithTimeout({
   input,
   init,
@@ -284,18 +224,11 @@ async function fetchWithTimeout({
     });
   } catch (error) {
     if (timedOut) {
-      // Tag the error so handleFetchError can classify it. We attach the
-      // marker onto the caught error directly when possible so downstream
-      // consumers can still inspect the original stack trace.
-      const tagged = error instanceof Error ? error : new Error(String(error));
-      Object.defineProperty(tagged, INTERNAL_TIMEOUT_MARKER, {
-        value: true,
-        enumerable: false,
-      });
-      Object.defineProperty(tagged, "timeoutMs", {
-        value: timeoutMs,
-        enumerable: false,
-      });
+      const tagged = (
+        error instanceof Error ? error : new Error(String(error))
+      ) as Error & { [INTERNAL_TIMEOUT_MARKER]?: true; timeoutMs?: number };
+      tagged[INTERNAL_TIMEOUT_MARKER] = true;
+      tagged.timeoutMs = timeoutMs;
       throw tagged;
     }
     throw error;
@@ -332,14 +265,9 @@ async function handleResponse(
 }
 
 /**
- * Decide what to do with a fetch error.
- *
- * - User aborts propagate immediately (unchanged original error).
- * - Internal timeouts are retryable for non-last attempts; on the last
- *   attempt we surface a {@link TimeoutError} with a friendly message so
- *   callers see "Request timed out after Ns." instead of the generic
- *   "Network error" wrapper.
- * - Other errors retry until the last attempt, then propagate.
+ * Decide what to do with a fetch error. User aborts and an internal
+ * timeout on the last attempt throw immediately; other errors retry
+ * until the last attempt, then propagate.
  */
 function handleFetchError(
   error: unknown,
@@ -467,44 +395,29 @@ function authHeaders(token: string | undefined): Record<string, string> {
   return token ? { authorization: `Bearer ${token}` } : {};
 }
 
-/**
- * Per-attempt `(input, init)` factory.
- *
- * Returns a fresh pair on every invocation so retries never reuse a
- * consumed request body. See the file header comment (CLI-1D6).
- */
 type AttemptInputFactory = () => {
   input: Request | string | URL;
   init: RequestInit | undefined;
 };
 
 /**
- * Build an attempt factory that yields a fresh, body-readable `(input, init)`
- * pair per retry.
+ * Build an attempt factory that yields a fresh, body-readable
+ * `(input, init)` pair per retry. `fetch` consumes a request body on
+ * attempt 1; without this cloning every retry after a timeout / 5xx /
+ * 401-refresh would throw `TypeError: Request body already used` (CLI-1D6).
  *
- * The SDK calls our authenticated fetch with a `Request` object whose body
- * is a stream that fetch consumes on the first attempt; our own
- * `apiRequestToRegion`/`rawApiRequest` call it with a string URL and a
- * primitive `init.body` (typically a JSON string). Both shapes need
- * different treatment:
- *
- * - **Request input**: clone per attempt. `Request.clone()` tees the body
- *   stream so each retry gets an independent readable copy.
- * - **String/URL input + primitive body** (string, ArrayBuffer, TypedArray,
- *   or no body): already re-usable; pass through unchanged. This is the
- *   hot path for all of our non-SDK call sites — no allocation on retry.
- * - **Stream/Blob/FormData body**: materialize once to an ArrayBuffer so
- *   subsequent attempts read the same bytes. Defensive path; currently
- *   unused by our call sites but keeps the invariant airtight.
+ * `Request` inputs clone per attempt; primitive bodies (string /
+ * ArrayBuffer / TypedArray / none) pass through — the hot path for all
+ * non-SDK call sites. Streams / Blobs / FormData are drained once to an
+ * ArrayBuffer so subsequent attempts see the same bytes.
  */
 async function buildAttemptFactory(
   input: Request | string | URL,
   init: RequestInit | undefined
 ): Promise<AttemptInputFactory> {
   if (input instanceof Request) {
-    // Cast mirrors the cacheResponse pattern: Bun's `Request` adds
-    // toJSON/count/getAll that the DOM lib's Request type doesn't carry
-    // through `.clone()`, but at runtime the clone is a fully-usable Request.
+    // Cast: Bun's `Request` has extras (toJSON/count/getAll) that `.clone()`
+    // drops from the DOM type — runtime shape is unaffected.
     return () => ({ input: input.clone() as unknown as Request, init });
   }
 
@@ -519,11 +432,6 @@ async function buildAttemptFactory(
     return () => ({ input, init });
   }
 
-  // Stream / Blob / FormData / URLSearchParams — drain once to an ArrayBuffer
-  // so every retry attempt can reuse the same bytes. `new Response(body)`
-  // accepts every valid BodyInit and normalizes to an ArrayBuffer. The cast
-  // is needed because `BodyInit` isn't globally available without the DOM
-  // lib, but at runtime any valid `RequestInit.body` is a valid `BodyInit`.
   const snapshot = await new Response(
     body as ConstructorParameters<typeof Response>[0]
   ).arrayBuffer();
@@ -779,25 +687,14 @@ export function resetAuthenticatedFetch(): void {
   cachedFetch = null;
 }
 
-/**
- * Resolve the effective per-request timeout for a URL.
- *
- * Exported for tests and for introspection. The 30 s default is returned
- * unless the URL matches an {@link ENDPOINT_TIMEOUT_OVERRIDES} pattern.
- */
-export function getRequestTimeoutMs(fullUrl: string): number {
+/** @internal Test-only — see {@link ENDPOINT_TIMEOUT_OVERRIDES}. */
+export function __resolveRequestTimeoutMsForTests(fullUrl: string): number {
   return resolveTimeoutMs(fullUrl);
 }
 
 /**
- * Test-only helper: temporarily prepend a timeout override and return a
- * disposer that restores the original list.
- *
- * Lets tests exercise the real timeout → `TimeoutError` path without
- * having to wait 30 s for the default timeout to fire. Prepended (not
- * appended) so the injected pattern always wins over existing entries.
- *
- * @internal
+ * @internal Test-only — temporarily prepend a timeout override. The returned
+ * disposer restores the original list.
  */
 export function __injectTimeoutOverrideForTests(
   override: TimeoutOverride
