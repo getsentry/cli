@@ -383,6 +383,23 @@ export function isEbusyError(error: unknown): boolean {
 }
 
 /**
+ * Check whether an error indicates the spawn target was not found.
+ *
+ * Bun surfaces a missing executable as `Executable not found in $PATH: "..."`
+ * without a standard `code` field on the Error, so we fall back to message
+ * matching. Node's `child_process.spawn` would use `code: "ENOENT"`.
+ */
+export function isEnoentSpawnError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    return true;
+  }
+  return error.message.includes("Executable not found in $PATH");
+}
+
+/**
  * Spawn a binary with retry on EBUSY errors.
  *
  * On Windows, Defender/SmartScreen asynchronously scans newly-written
@@ -394,8 +411,11 @@ export function isEbusyError(error: unknown): boolean {
  * attempt succeeds immediately with zero overhead.
  *
  * @returns Process exit code from the successful spawn
+ * @throws {UpgradeError} Reason `execution_failed` when the binary path
+ *   doesn't exist (Bun "Executable not found" or ENOENT), with an
+ *   actionable message instructing the user to rerun the upgrade.
  * @throws The last EBUSY error if all attempts are exhausted
- * @throws Immediately on non-EBUSY errors (ENOENT, EACCES, etc.)
+ * @throws Immediately on other non-EBUSY errors (EACCES, etc.)
  */
 async function spawnWithRetry(
   binaryPath: string,
@@ -411,6 +431,21 @@ async function spawnWithRetry(
       });
       return await proc.exited;
     } catch (error) {
+      // Translate the opaque Bun "Executable not found" error into an
+      // actionable UpgradeError. This path triggers when the binary at
+      // `binaryPath` doesn't exist on disk when spawn is attempted (see
+      // CLI-1D3). `downloadBinaryToTemp`'s visibility-race retry loop
+      // normally catches this earlier, but this is a safety net for the
+      // `.download` file being removed between verification and spawn
+      // (e.g. manual cleanup by the user) or for future callers that
+      // pass a path not backed by the download pipeline.
+      if (isEnoentSpawnError(error)) {
+        throw new UpgradeError(
+          "execution_failed",
+          `Downloaded binary not found at ${binaryPath}. ` +
+            "The download may have been interrupted — rerun `sentry cli upgrade`."
+        );
+      }
       if (!isEbusyError(error) || attempt === SPAWN_MAX_ATTEMPTS) {
         throw error;
       }
