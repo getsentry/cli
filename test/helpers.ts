@@ -8,7 +8,11 @@ import { afterEach, beforeEach } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { resetAuthRowCache, resetAuthTokenCache } from "../src/lib/db/auth.js";
+import {
+  resetAuthRowCache,
+  resetAuthTokenCache,
+  resetIdentityFingerprintCache,
+} from "../src/lib/db/auth.js";
 import { CONFIG_DIR_ENV_VAR, closeDatabase } from "../src/lib/db/index.js";
 
 // biome-ignore lint/performance/noBarrelFile: re-exporting a single constant, not a barrel
@@ -109,6 +113,7 @@ export function useTestConfigDir(
     // Fresh DB — drop module-scoped auth caches from the previous test.
     resetAuthTokenCache();
     resetAuthRowCache();
+    resetIdentityFingerprintCache();
     dir = await createTestConfigDir(prefix, options);
     process.env[CONFIG_DIR_ENV_VAR] = dir;
   });
@@ -117,6 +122,7 @@ export function useTestConfigDir(
     closeDatabase();
     resetAuthTokenCache();
     resetAuthRowCache();
+    resetIdentityFingerprintCache();
     // Always restore the previous value — never delete.
     // Deleting process.env.SENTRY_CONFIG_DIR causes failures in test files
     // that load after this afterEach runs, because their module-level code
