@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-dashboard
-version: 0.30.0-dev.0
+version: 0.29.1
 description: Manage Sentry dashboards
 requires:
   bins: ["sentry"]
