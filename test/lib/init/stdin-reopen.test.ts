@@ -35,6 +35,21 @@ function makePtmxFd(): { fd: number } {
 }
 
 /**
+ * Assign `process.stdin.isTTY` via `Object.defineProperty` so the test
+ * works regardless of whether the runtime defined `isTTY` as writable or
+ * readonly. On CI (Node/Bun with piped stdin), `isTTY` is a non-writable
+ * property and bare assignment throws `TypeError: Attempted to assign to
+ * readonly property`. `defineProperty` overrides the descriptor in-place.
+ */
+function setIsTTY(value: boolean | undefined): void {
+  Object.defineProperty(process.stdin, "isTTY", {
+    value,
+    writable: true,
+    configurable: true,
+  });
+}
+
+/**
  * `bun test` runs with piped stdin, so `process.stdin.setRawMode` is
  * typically `undefined` (the method only exists on real TTY streams).
  * The production code captures these methods at install time via
@@ -169,7 +184,7 @@ describe("forwardFreshTtyToStdin → closeFreshTtyForwarding round trip", () => 
     const previousIsTty = stdin.isTTY;
 
     // Force the backfill branch by clearing isTTY up-front.
-    stdin.isTTY = undefined;
+    setIsTTY(undefined);
 
     try {
       const handle = forwardFreshTtyToStdin({
@@ -184,7 +199,7 @@ describe("forwardFreshTtyToStdin → closeFreshTtyForwarding round trip", () => 
       // Teardown restored to the pre-install value (undefined).
       expect(stdin.isTTY).toBeUndefined();
     } finally {
-      stdin.isTTY = previousIsTty;
+      setIsTTY(previousIsTty);
     }
   });
 
@@ -192,7 +207,7 @@ describe("forwardFreshTtyToStdin → closeFreshTtyForwarding round trip", () => 
     const { fd } = makePtmxFd();
     const stdin = process.stdin as { isTTY?: boolean };
     const previousIsTty = stdin.isTTY;
-    stdin.isTTY = true;
+    setIsTTY(true);
 
     try {
       const handle = forwardFreshTtyToStdin({
@@ -206,7 +221,7 @@ describe("forwardFreshTtyToStdin → closeFreshTtyForwarding round trip", () => 
       // backfilledIsTty was false, so teardown must not touch isTTY.
       expect(stdin.isTTY).toBe(true);
     } finally {
-      stdin.isTTY = previousIsTty;
+      setIsTTY(previousIsTty);
     }
   });
 
@@ -263,7 +278,7 @@ describe("forwardFreshTtyToStdin → closeFreshTtyForwarding round trip", () => 
       // Primary disposal now actually tears down.
       h1[Symbol.dispose]();
     } finally {
-      stdin.isTTY = previousIsTty;
+      setIsTTY(previousIsTty);
     }
   });
 

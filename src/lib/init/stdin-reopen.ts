@@ -172,10 +172,19 @@ export function forwardFreshTtyToStdin(
   // call on `input.isTTY`, so without this backfill the patched setRawMode
   // below is never invoked and the fresh fd stays in canonical mode
   // (line-buffered, no keypresses).
+  //
+  // Use `Object.defineProperty` rather than plain assignment because on
+  // some Node/Bun runtimes `process.stdin.isTTY` is defined as a
+  // non-writable property (notably when stdin is not a TTY) — bare
+  // `stdin.isTTY = …` throws a TypeError in strict mode in that case.
   const previousIsTty = process.stdin.isTTY;
   let backfilledIsTty = false;
   if (process.stdin.isTTY === undefined) {
-    (process.stdin as { isTTY?: boolean }).isTTY = true;
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      writable: true,
+      configurable: true,
+    });
     backfilledIsTty = true;
   }
 
@@ -283,6 +292,10 @@ export function closeFreshTtyForwarding(): void {
   stdinHandle._read = original.read;
 
   if (backfilledIsTty) {
-    (process.stdin as { isTTY?: boolean }).isTTY = previousIsTty;
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: previousIsTty,
+      writable: true,
+      configurable: true,
+    });
   }
 }
