@@ -35,12 +35,50 @@ function getAuthenticatedFetch(): typeof fetch {
   return getSdkConfig(REGION_URL).fetch as typeof fetch;
 }
 
+/**
+ * Extract the URL string from any fetch input (Request, URL, or string).
+ */
+function urlOf(input: Parameters<typeof fetch>[0]): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  if (input instanceof URL) {
+    return input.href;
+  }
+  return input.url;
+}
+
+/**
+ * Wrap a mock handler so it only counts / reacts to requests whose URL
+ * contains `marker`. Any other `globalThis.fetch` call that happens to
+ * fire during the test (e.g. async work leaked from a previous file)
+ * is delegated to the caller-visible `originalFetch` (typically the
+ * preload.ts blocker) so foreign calls don't pollute this test's
+ * assertions. See CI run 24835339085 for the original flake.
+ */
+function scopedFetchMock(
+  marker: string,
+  handler: (
+    input: Parameters<typeof fetch>[0],
+    init?: RequestInit
+  ) => Promise<Response>
+): typeof fetch {
+  const captured = originalFetch;
+  return mockFetch(async (input, init) => {
+    if (!urlOf(input).includes(marker)) {
+      return await captured(input, init);
+    }
+    return await handler(input, init);
+  });
+}
+
 describe("fetchWithRetry / buildAttemptFactory", () => {
   test("retries a POST with a string body without re-consuming the body", async () => {
+    const marker = "__test_string_body__";
     const seen: string[] = [];
     let callCount = 0;
 
-    globalThis.fetch = mockFetch(async (_input, init) => {
+    globalThis.fetch = scopedFetchMock(marker, async (_input, init) => {
       callCount += 1;
       const body = init?.body;
       if (typeof body === "string") {
@@ -60,11 +98,14 @@ describe("fetchWithRetry / buildAttemptFactory", () => {
     });
 
     const authFetch = getAuthenticatedFetch();
-    const res = await authFetch("https://us.sentry.io/api/0/organizations/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ slug: "acme" }),
-    });
+    const res = await authFetch(
+      `${REGION_URL}/api/0/${marker}/organizations/`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: "acme" }),
+      }
+    );
 
     expect(res.status).toBe(200);
     expect(callCount).toBe(2);
@@ -77,10 +118,11 @@ describe("fetchWithRetry / buildAttemptFactory", () => {
   test("retries a POST built from a Request object without consuming its body", async () => {
     // SDK path: @sentry/api hands us a Request as the sole argument.
     // Pre-fix: attempt 2 saw a consumed body stream.
+    const marker = "__test_request_body__";
     let callCount = 0;
     const seen: string[] = [];
 
-    globalThis.fetch = mockFetch(async (input) => {
+    globalThis.fetch = scopedFetchMock(marker, async (input) => {
       callCount += 1;
       if (input instanceof Request) {
         seen.push(await input.clone().text());
@@ -97,14 +139,11 @@ describe("fetchWithRetry / buildAttemptFactory", () => {
     });
 
     const payload = JSON.stringify({ stopping_point: "root_cause" });
-    const request = new Request(
-      "https://us.sentry.io/api/0/organizations/acme/issues/1/autofix/",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: payload,
-      }
-    );
+    const request = new Request(`${REGION_URL}/api/0/${marker}/autofix/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+    });
 
     const authFetch = getAuthenticatedFetch();
     const res = await authFetch(request);
@@ -117,10 +156,11 @@ describe("fetchWithRetry / buildAttemptFactory", () => {
   test("retries with a ReadableStream body by materializing once", async () => {
     // Streams are consumed on first read; without up-front materialization
     // attempt 2 would see an undefined body.
+    const marker = "__test_stream_body__";
     let callCount = 0;
     const seen: string[] = [];
 
-    globalThis.fetch = mockFetch(async (_input, init) => {
+    globalThis.fetch = scopedFetchMock(marker, async (_input, init) => {
       callCount += 1;
       const body = init?.body;
       if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) {
@@ -151,7 +191,7 @@ describe("fetchWithRetry / buildAttemptFactory", () => {
     const authFetch = getAuthenticatedFetch();
     // Node's fetch requires duplex: "half" for streamed bodies; Bun accepts
     // it as a no-op.
-    const res = await authFetch("https://us.sentry.io/api/0/streamed/", {
+    const res = await authFetch(`${REGION_URL}/api/0/${marker}/streamed/`, {
       method: "POST",
       body: stream,
       duplex: "half",
@@ -169,11 +209,12 @@ describe("fetchWithRetry / buildAttemptFactory", () => {
     // `fetch` derives from the FormData body. Sourcemap chunk upload
     // (src/lib/api/sourcemaps.ts) sends FormData through this path;
     // without correct handling even the first upload attempt fails.
+    const marker = "__test_formdata_body__";
     let callCount = 0;
     const contentTypes: (string | null)[] = [];
     const bodies: string[] = [];
 
-    globalThis.fetch = mockFetch(async (input, init) => {
+    globalThis.fetch = scopedFetchMock(marker, async (input, init) => {
       callCount += 1;
       const req = new Request(input as string, init);
       contentTypes.push(req.headers.get("content-type"));
@@ -194,7 +235,7 @@ describe("fetchWithRetry / buildAttemptFactory", () => {
     );
 
     const authFetch = getAuthenticatedFetch();
-    const res = await authFetch("https://us.sentry.io/api/0/chunks/", {
+    const res = await authFetch(`${REGION_URL}/api/0/${marker}/chunks/`, {
       method: "POST",
       body: form,
     });
@@ -221,14 +262,15 @@ describe("fetchWithRetry / buildAttemptFactory", () => {
 describe("fetchWithTimeout internal timeout classification", () => {
   test("surfaces TimeoutError on the last attempt when our own timeout fires", async () => {
     // Inject a tiny timeout so we don't wait 30 s for the default to fire.
+    const marker = "___timeout-test___";
     const restore = __injectTimeoutOverrideForTests({
-      pattern: /\/___timeout-test___\//,
+      pattern: new RegExp(`/${marker}/`),
       timeoutMs: 50,
     });
 
     try {
       let calls = 0;
-      globalThis.fetch = mockFetch(async (_input, init) => {
+      globalThis.fetch = scopedFetchMock(marker, async (_input, init) => {
         calls += 1;
         return await new Promise<Response>((_resolve, reject) => {
           const signal = init?.signal;
@@ -251,7 +293,7 @@ describe("fetchWithTimeout internal timeout classification", () => {
       const authFetch = getAuthenticatedFetch();
       let thrown: unknown;
       try {
-        await authFetch("https://us.sentry.io/___timeout-test___/");
+        await authFetch(`${REGION_URL}/${marker}/`);
       } catch (err) {
         thrown = err;
       }
@@ -270,8 +312,9 @@ describe("fetchWithTimeout internal timeout classification", () => {
 
 describe("user abort passthrough", () => {
   test("external AbortSignal.abort() propagates the original AbortError", async () => {
+    const marker = "__test_user_abort__";
     let fetchCalled = false;
-    globalThis.fetch = mockFetch(async (_input, init) => {
+    globalThis.fetch = scopedFetchMock(marker, async (_input, init) => {
       fetchCalled = true;
       return await new Promise<Response>((_resolve, reject) => {
         const signal = init?.signal;
@@ -289,7 +332,7 @@ describe("user abort passthrough", () => {
 
     const controller = new AbortController();
     const authFetch = getAuthenticatedFetch();
-    const promise = authFetch("https://us.sentry.io/api/0/organizations/", {
+    const promise = authFetch(`${REGION_URL}/api/0/${marker}/organizations/`, {
       signal: controller.signal,
     });
     setTimeout(() => controller.abort(), 10);
