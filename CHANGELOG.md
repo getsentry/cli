@@ -1,6 +1,17 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.29.1
+
+### Bug Fixes 🐛
+
+- (polyfill) Add missing Bun.file().stat() shim for npm distribution by @BYK in [#838](https://github.com/getsentry/cli/pull/838)
+
+### Internal Changes 🔧
+
+- (deps) Bump Bun from 1.3.11 to 1.3.13 by @BYK in [#837](https://github.com/getsentry/cli/pull/837)
+- Regenerate docs by @github-actions[bot] in [ff574c98](https://github.com/getsentry/cli/commit/ff574c983076aab38f1e657d9623bdee0c85ec65)
+
 ## 0.29.0
 
 ### Security 🔒
