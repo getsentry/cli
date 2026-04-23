@@ -62,12 +62,7 @@ afterEach(() => {
   }
 });
 
-/**
- * Invalidate the auth caches between property iterations. `getAuthToken` /
- * `refreshToken` memoize their row reads; mutating `process.env` or DB state
- * directly bypasses the internal invalidation hooks (same contract documented
- * on `resetIdentityFingerprintCache`).
- */
+/** Invalidate between property iterations — env-var mutations bypass setAuthToken. */
 function resetAuthCaches() {
   resetAuthTokenCache();
   resetAuthRowCache();

@@ -106,9 +106,7 @@ export function useTestConfigDir(
   beforeEach(async () => {
     savedConfigDir = process.env[CONFIG_DIR_ENV_VAR];
     closeDatabase();
-    // Module-scoped auth caches persist across tests. Pointing
-    // SENTRY_CONFIG_DIR at a fresh directory means a different DB — any
-    // cached token/row from the previous test is now stale.
+    // Fresh DB — drop module-scoped auth caches from the previous test.
     resetAuthTokenCache();
     resetAuthRowCache();
     dir = await createTestConfigDir(prefix, options);
@@ -117,8 +115,6 @@ export function useTestConfigDir(
 
   afterEach(async () => {
     closeDatabase();
-    // Invalidate again on teardown: the next test may not use this helper
-    // and would otherwise see a stale cache from this test's mutations.
     resetAuthTokenCache();
     resetAuthRowCache();
     // Always restore the previous value — never delete.

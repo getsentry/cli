@@ -301,8 +301,7 @@ class SetEnvAuthTokenCommand implements AsyncCommand<DbModel, RealDb> {
 
   async run(model: DbModel, _real: RealDb): Promise<void> {
     process.env.SENTRY_AUTH_TOKEN = this.token;
-    // Env mutation bypasses setAuthToken — manually invalidate the auth caches
-    // (contract documented on resetAuthTokenCache / resetAuthRowCache).
+    // Env mutation bypasses setAuthToken's invalidation.
     resetAuthTokenCache();
     resetAuthRowCache();
     // Model stores trimmed value — matches real getEnvToken() which trims
@@ -787,8 +786,6 @@ describe("model-based: database layer", () => {
         const savedSentryToken = process.env.SENTRY_TOKEN;
         delete process.env.SENTRY_AUTH_TOKEN;
         delete process.env.SENTRY_TOKEN;
-        // Reset auth caches — fresh isolated DB has no auth row; prior test
-        // runs in this process may have left a stale token in the memo cell.
         resetAuthTokenCache();
         resetAuthRowCache();
         try {
@@ -925,7 +922,6 @@ describe("model-based: database layer", () => {
         const cleanup = createIsolatedDbContext();
         const savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
         delete process.env.SENTRY_AUTH_TOKEN;
-        // Fresh DB but module-scoped auth caches persist across runs.
         resetAuthTokenCache();
         resetAuthRowCache();
         try {

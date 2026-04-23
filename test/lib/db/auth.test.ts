@@ -348,7 +348,6 @@ describe("getAuthToken memoization", () => {
   });
 
   test("caches the logged-out state (undefined) without re-reading", () => {
-    // Cache the "no token" state
     expect(getAuthToken()).toBeUndefined();
 
     // Write a token directly to DB, bypassing setAuthToken. The cached
@@ -381,14 +380,12 @@ describe("getAuthToken memoization", () => {
   });
 
   test("env-var change requires manual cache reset (documented contract)", () => {
-    // No env token, no DB token → undefined cached
     expect(getAuthToken()).toBeUndefined();
 
-    // Mutating env mid-run without reset: cache is stale (by design).
+    // Env mutation without reset: cache stays stale (by design).
     process.env.SENTRY_AUTH_TOKEN = "env_token";
     expect(getAuthToken()).toBeUndefined();
 
-    // After reset the env token is picked up
     resetAuthTokenCache();
     expect(getAuthToken()).toBe("env_token");
   });

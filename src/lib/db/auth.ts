@@ -153,12 +153,7 @@ export function getAuthConfig(): AuthConfig | undefined {
   return;
 }
 
-/**
- * Memoized token. Wrapper distinguishes "not cached" (`undefined` outer) from
- * "cached as logged-out" (`{ value: undefined }`). Invalidated on every auth
- * mutation point (`setAuthToken`, `clearAuth`); tests that mutate env vars
- * mid-test call {@link resetAuthTokenCache}.
- */
+/** Memoized token. Wrapper distinguishes "not cached" from "cached as undefined". */
 let cachedAuthToken: { value: string | undefined } | undefined;
 
 /**
@@ -166,10 +161,6 @@ let cachedAuthToken: { value: string | undefined } | undefined;
  *
  * Default: checks the DB first (stored OAuth wins), then falls back to env vars.
  * With `SENTRY_FORCE_ENV_TOKEN=1`: checks env vars first (old behavior).
- *
- * Memoized. The cache is invalidated on every auth mutation (`setAuthToken`,
- * `clearAuth`), making it safe under OAuth access-token rotation and 401-
- * triggered refresh — both paths route writes through `setAuthToken`.
  */
 export function getAuthToken(): string | undefined {
   if (cachedAuthToken !== undefined) {
@@ -222,19 +213,9 @@ export function resetAuthTokenCache(): void {
   cachedAuthToken = undefined;
 }
 
-/**
- * Memoized full auth row. Used by {@link refreshToken} to avoid a second
- * `SELECT * FROM auth` per API call. Wrapper distinguishes "not cached" from
- * "cached as no-row" (logged out). Invalidated at the same mutation points as
- * {@link cachedAuthToken}.
- */
+/** Memoized full auth row for {@link refreshToken}. Same wrapper contract as {@link cachedAuthToken}. */
 let cachedAuthRow: { value: AuthRow | undefined } | undefined;
 
-/**
- * Read the full auth row with memoization. Internal helper for
- * {@link refreshToken}; external callers should use {@link getAuthToken} or
- * {@link getAuthConfig}.
- */
 function getCachedAuthRow(): AuthRow | undefined {
   if (cachedAuthRow !== undefined) {
     return cachedAuthRow.value;
@@ -277,8 +258,8 @@ export function setAuthToken(
       ["id"]
     );
   });
-  // Auth row changed — drop the memoized fingerprint, token, and row so the
-  // next read reflects the new row.
+  // Auth row changed — drop memoized fingerprint, token, and row so the next
+  // read reflects the new row.
   resetIdentityFingerprintCache();
   resetAuthTokenCache();
   resetAuthRowCache();
