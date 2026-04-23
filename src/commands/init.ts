@@ -279,5 +279,30 @@ export const initCommand = buildCommand<
       org: explicitOrg,
       project: explicitProject,
     });
+
+    // 7. macOS-only force-exit safety net.
+    //
+    // On Darwin, `runWizard` installs the `/dev/tty` forwarding workaround
+    // from stdin-reopen.ts to get keystrokes through to clack. That
+    // workaround opens a second `tty.ReadStream` which leaks a libuv
+    // handle on Bun 1.3.11 — no userland cleanup releases it (upstream
+    // oven-sh/bun#29126). After the wizard returns the event loop stays
+    // ref'd and the process hangs until the user presses a key.
+    //
+    // The .unref() timer doesn't hold the loop itself, so it's a no-op in
+    // the happy path (Linux: no workaround installed, loop drains
+    // naturally; `--yes` on Darwin: no prompts, no keystroke issue, may
+    // still drain naturally). On the Darwin hang path, it force-exits
+    // after a 100ms grace window — imperceptible to the user and enough
+    // for Sentry telemetry + stdio flushes to complete first.
+    //
+    // Skipped under `bun test` (which sets NODE_ENV=test automatically)
+    // because the test runner calls `initCommand.func` directly; an
+    // unref'd timer would still fire and terminate the runner mid-suite.
+    if (process.platform === "darwin" && process.env.NODE_ENV !== "test") {
+      setTimeout(() => {
+        process.exit(process.exitCode ?? 0);
+      }, 100).unref();
+    }
   },
 });
