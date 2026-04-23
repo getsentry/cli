@@ -188,7 +188,7 @@ export const editCommand = buildCommand({
       },
       "action-match": {
         kind: "parsed",
-        parse: (value) => parseMatchMode(value, "action-match"),
+        parse: (value: string) => parseMatchMode(value, "action-match"),
         optional: true,
         brief: "Condition/action match mode: all or any",
       },
@@ -213,7 +213,7 @@ export const editCommand = buildCommand({
       },
       "filter-match": {
         kind: "parsed",
-        parse: (value) => parseMatchMode(value, "filter-match"),
+        parse: (value: string) => parseMatchMode(value, "filter-match"),
         optional: true,
         brief: "Filter match mode: all or any",
       },

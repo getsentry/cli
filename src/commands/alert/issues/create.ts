@@ -109,7 +109,7 @@ export const createCommand = buildCommand({
       },
       "action-match": {
         kind: "parsed",
-        parse: (value) => parseMatchMode(value, "action-match"),
+        parse: (value: string) => parseMatchMode(value, "action-match"),
         optional: true,
         brief: "Condition/action match mode: all or any",
       },
@@ -134,7 +134,7 @@ export const createCommand = buildCommand({
       },
       "filter-match": {
         kind: "parsed",
-        parse: (value) => parseMatchMode(value, "filter-match"),
+        parse: (value: string) => parseMatchMode(value, "filter-match"),
         optional: true,
         brief: "Filter match mode: all or any",
       },
@@ -191,7 +191,7 @@ export const createCommand = buildCommand({
         "target"
       );
     }
-    const target = targets[0];
+    const target = targets[0] as (typeof targets)[number];
 
     const body: Record<string, unknown> = {
       name: flags.name,

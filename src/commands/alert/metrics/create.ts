@@ -181,7 +181,7 @@ export const createCommand = buildCommand({
         "target"
       );
     }
-    const orgSlug = orgSlugs[0];
+    const orgSlug = orgSlugs[0] as string;
 
     const body: Record<string, unknown> = {
       name: flags.name,

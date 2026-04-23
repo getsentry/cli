@@ -77,7 +77,11 @@ export function parseJsonObjectList(
   }
 
   if (values.length === 1) {
-    const parsed = parseJsonValue(values[0], field);
+    const onlyValue = values[0];
+    if (onlyValue === undefined) {
+      return;
+    }
+    const parsed = parseJsonValue(onlyValue, field);
     if (Array.isArray(parsed)) {
       return parsed.map((entry) => toObject(entry, field));
     }
