@@ -10,7 +10,12 @@
  * 2. Build artifact bundle ZIP (streaming to disk via {@link ZipWriter})
  * 3. Split ZIP into chunks, compute SHA-1 checksums
  * 4. POST assemble request → server reports missing chunks
- * 5. Upload missing chunks in parallel (gzip-compressed, multipart/form-data)
+ * 5. Upload missing chunks in parallel as multipart/form-data. When the
+ *    server advertises a codec in `compression`, chunks are compressed
+ *    per-request and the codec is announced via `Content-Encoding`. Codec
+ *    preference is `zstd` > `gzip` > plain. Newer servers advertise both;
+ *    older servers advertise only `gzip`; the `chunk-upload.no-compression`
+ *    kill-switch makes the list empty.
  * 6. Poll assemble endpoint until complete
  */
 
@@ -23,12 +28,14 @@ import { gzip as gzipCb } from "node:zlib";
 import pLimit from "p-limit";
 import { z } from "zod";
 import { ApiError } from "../errors.js";
+import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
 import { getSdkConfig } from "../sentry-client.js";
 import { ZipWriter } from "../sourcemap/zip.js";
 import { apiRequestToRegion } from "./infrastructure.js";
 
 const gzipAsync = promisify(gzipCb);
+const log = logger.withTag("api.sourcemaps");
 
 // ── Schemas ─────────────────────────────────────────────────────────
 
@@ -145,6 +152,132 @@ export async function getChunkUploadOptions(
     { schema: ChunkServerOptionsSchema }
   );
   return data;
+}
+
+/**
+ * Codecs the CLI knows how to emit, in order of preference.
+ *
+ * `zstd` is the forward-looking codec: advertised only by servers that
+ * implement `Content-Encoding`-based detection. `gzip` is the legacy
+ * codec supported by every Sentry server since forever; we still send
+ * it under the original `file_gzip` multipart field name so that
+ * pre-zstd servers -- which ignore `Content-Encoding` -- keep working.
+ */
+const UPLOAD_CODECS = ["zstd", "gzip"] as const;
+export type UploadEncoding = (typeof UPLOAD_CODECS)[number];
+
+/**
+ * Select the most efficient upload codec the server advertises, or
+ * `undefined` for plain (uncompressed) uploads when the server opts out
+ * of compression (e.g. the `chunk-upload.no-compression` kill-switch)
+ * or advertises only codecs we don't implement.
+ *
+ * Exported for testing.
+ */
+export function pickUploadEncoding(
+  compression: string[]
+): UploadEncoding | undefined {
+  for (const codec of UPLOAD_CODECS) {
+    if (compression.includes(codec)) {
+      return codec;
+    }
+  }
+  if (compression.length > 0) {
+    log.debug(
+      `server advertised unsupported codecs [${compression.join(", ")}]; falling back to plain upload`
+    );
+  }
+  return;
+}
+
+/**
+ * Compress a chunk buffer with the chosen codec. Exported for testing.
+ *
+ * Both codecs run off-thread (Bun's zstd worker and libuv's zlib thread
+ * pool), so a chunk being compressed doesn't block the event loop --
+ * with `concurrency=8`, eight uploads truly compress in parallel.
+ */
+export async function encodeChunk(
+  buf: Buffer,
+  encoding: UploadEncoding | undefined
+): Promise<Uint8Array> {
+  if (encoding === "zstd") {
+    // L3 is libzstd's default; passed explicitly for self-documenting
+    // code. L9+ trades ~14% size for 4x compress time and forces the
+    // server's decoder to allocate 15-30 MiB of window state -- not
+    // worth it once decode cost is counted.
+    return await Bun.zstdCompress(buf, { level: 3 });
+  }
+  if (encoding === "gzip") {
+    // zlib default (L6). Counter-intuitively, lower levels (L1/L5)
+    // DEcompress SLOWER on the server (sparser Huffman codes); L9
+    // costs ~2x the compress CPU for no meaningful size win.
+    return await gzipAsync(buf);
+  }
+  return buf;
+}
+
+/**
+ * Read a single chunk from the staging ZIP, compress it with the server's
+ * preferred codec, and POST it to the chunk-upload endpoint.
+ *
+ * Wire format by codec (driven by {@link pickUploadEncoding}):
+ *  - `zstd`  -> `Content-Encoding: zstd` + `file` multipart field.
+ *               Only works against servers that opted in via
+ *               `Content-Encoding` detection (getsentry/sentry#113760+).
+ *  - `gzip`  -> LEGACY `file_gzip` multipart field, NO `Content-Encoding`
+ *               header. Works with every server that advertises `gzip`,
+ *               including pre-zstd self-hosted deployments.
+ *  - plain   -> `file` multipart field, no `Content-Encoding`.
+ *
+ * NB: never emit `Content-Encoding: gzip` alongside the `file_gzip`
+ * field -- zstd-aware servers reject that combination (400) to avoid
+ * ambiguity.
+ */
+async function uploadChunk(params: {
+  chunk: ChunkInfo;
+  tmpZipPath: string;
+  encoding: UploadEncoding | undefined;
+  fetch: (url: string, init: RequestInit) => Promise<Response>;
+  url: string;
+}): Promise<void> {
+  const { chunk, tmpZipPath, encoding, fetch: authFetch, url } = params;
+
+  const chunkFh = await open(tmpZipPath, "r");
+  let buf: Buffer;
+  try {
+    buf = Buffer.alloc(chunk.size);
+    await chunkFh.read(buf, 0, chunk.size, chunk.offset);
+  } finally {
+    await chunkFh.close();
+  }
+
+  const payload = await encodeChunk(buf, encoding);
+
+  // gzip uses the legacy `file_gzip` field for backwards compatibility
+  // with pre-zstd servers; zstd and plain use the standard `file` field.
+  const fieldName = encoding === "gzip" ? "file_gzip" : "file";
+  const form = new FormData();
+  form.append(
+    fieldName,
+    new Blob([payload], { type: "application/octet-stream" }),
+    chunk.sha1
+  );
+
+  const init: RequestInit = { method: "POST", body: form };
+  if (encoding === "zstd") {
+    init.headers = { "Content-Encoding": "zstd" };
+  }
+
+  const response = await authFetch(url, init);
+  if (!response.ok) {
+    throw new ApiError(
+      `Chunk upload failed: ${response.status} ${response.statusText}`,
+      response.status,
+      await response.text().catch(() => ""),
+      url
+    );
+  }
 }
 
 /**
@@ -344,47 +477,22 @@ async function uploadArtifactBundle(opts: {
   const missingChunks = chunks.filter((c) => missingSet.has(c.sha1));
 
   if (missingChunks.length > 0) {
+    const encoding = pickUploadEncoding(serverOptions.compression);
     const limit = pLimit(serverOptions.concurrency);
-    const useGzip = serverOptions.compression.includes("gzip");
     // Use the CLI's authenticated fetch for chunk uploads
     const { fetch: authFetch } = getSdkConfig(regionUrl);
 
     await Promise.all(
       missingChunks.map((chunk) =>
-        limit(async () => {
-          const chunkFh = await open(tmpZipPath, "r");
-          let buf: Buffer;
-          try {
-            buf = Buffer.alloc(chunk.size);
-            await chunkFh.read(buf, 0, chunk.size, chunk.offset);
-          } finally {
-            await chunkFh.close();
-          }
-
-          const payload = useGzip ? await gzipAsync(buf) : buf;
-          const fieldName = useGzip ? "file_gzip" : "file";
-
-          const form = new FormData();
-          form.append(
-            fieldName,
-            new Blob([payload], { type: "application/octet-stream" }),
-            chunk.sha1
-          );
-
-          const response = await authFetch(serverOptions.url, {
-            method: "POST",
-            body: form,
-          });
-
-          if (!response.ok) {
-            throw new ApiError(
-              `Chunk upload failed: ${response.status} ${response.statusText}`,
-              response.status,
-              await response.text().catch(() => ""),
-              serverOptions.url
-            );
-          }
-        })
+        limit(() =>
+          uploadChunk({
+            chunk,
+            tmpZipPath,
+            encoding,
+            fetch: authFetch,
+            url: serverOptions.url,
+          })
+        )
       )
     );
   }
