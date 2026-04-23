@@ -9,7 +9,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
-
+import { isEnoentSpawnError } from "../../src/commands/cli/upgrade.js";
 import {
   acquireLock,
   getBinaryDownloadUrl,
@@ -1539,5 +1539,167 @@ describe("downloadBinaryToTemp offline errors", () => {
       expect(upgradeError.message).toContain("Check your internet connection");
       expect(upgradeError.message).not.toContain("cached patches");
     }
+  });
+});
+
+// Regression coverage for CLI-1D3: when the full download silently produces
+// a missing or empty file, `downloadBinaryToTemp` polls with exponential
+// backoff (letting a Windows filesystem-visibility race self-heal), then
+// fails with an actionable `UpgradeError` if the file never appears.
+describe("downloadBinaryToTemp verifies download integrity (CLI-1D3)", () => {
+  const verifyBinDir = join(TEST_TMP_DIR, "upgrade-verify-test");
+  const verifyInstallPath = join(verifyBinDir, "sentry");
+
+  beforeEach(() => {
+    clearInstallInfo();
+    mkdirSync(verifyBinDir, { recursive: true });
+    setInstallInfo({
+      method: "curl",
+      path: verifyInstallPath,
+      version: "0.0.0",
+    });
+  });
+
+  afterEach(async () => {
+    globalThis.fetch = originalFetch;
+    const paths = getCurlInstallPaths();
+    for (const p of [
+      paths.installPath,
+      paths.tempPath,
+      paths.oldPath,
+      paths.lockPath,
+    ]) {
+      try {
+        await unlink(p);
+      } catch {
+        // Ignore
+      }
+    }
+    clearInstallInfo();
+  });
+
+  test("throws execution_failed UpgradeError after retry budget is exhausted", async () => {
+    // Serve an empty gzip payload. The outer stream completes cleanly, so
+    // neither fetchWithUpgradeError nor streamDecompressToFile throws —
+    // but `destPath` ends up with zero bytes. The verification loop polls
+    // 5 times (~3.1s cumulative) before giving up with an actionable
+    // error; without it the caller would spawn the empty file and fail
+    // with "Executable not found in $PATH" (the CLI-1D3 symptom).
+    const emptyGzip = Bun.gzipSync(new Uint8Array(0));
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.endsWith(".gz")) {
+        return new Response(emptyGzip, { status: 200 });
+      }
+      return new Response("Not Found", { status: 404 });
+    });
+
+    try {
+      await downloadBinaryToTemp("0.26.1");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(UpgradeError);
+      const upgradeError = error as UpgradeError;
+      expect(upgradeError.reason).toBe("execution_failed");
+      expect(upgradeError.message).toContain("missing or empty");
+      expect(upgradeError.message).toContain("sentry cli upgrade");
+    }
+  }, 10_000);
+
+  test("releases the download lock when verification fails", async () => {
+    const emptyGzip = Bun.gzipSync(new Uint8Array(0));
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.endsWith(".gz")) {
+        return new Response(emptyGzip, { status: 200 });
+      }
+      return new Response("Not Found", { status: 404 });
+    });
+
+    await expect(downloadBinaryToTemp("0.26.1")).rejects.toThrow(UpgradeError);
+
+    // The lock must be released so a subsequent retry can acquire it.
+    // acquireLock throws UpgradeError("Another upgrade is already in progress")
+    // when a live lock exists; if the previous failure released it correctly
+    // this call succeeds silently.
+    const { lockPath } = getCurlInstallPaths();
+    expect(() => acquireLock(lockPath)).not.toThrow();
+    releaseLock(lockPath);
+  }, 10_000);
+
+  test("recovers when the binary becomes visible during the retry window", async () => {
+    // Simulate a Windows filesystem-visibility race: the download writes
+    // an empty file, but good bytes become visible a short time later.
+    // The polling loop's exponential backoff observes the non-empty file
+    // on a subsequent attempt and returns without throwing.
+    //
+    // To keep the ordering deterministic under CI load, the "delayed
+    // writer" first waits until the empty download file is visible on
+    // disk (proving streamDecompressToFile has finished) before writing
+    // the good bytes. Otherwise a slow CI could let our Bun.write land
+    // before the download completes and get clobbered by the empty write.
+    const mockBinaryContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]); // ELF
+    const emptyGzip = Bun.gzipSync(new Uint8Array(0));
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.endsWith(".gz")) {
+        return new Response(emptyGzip, { status: 200 });
+      }
+      return new Response("Not Found", { status: 404 });
+    });
+
+    const { tempPath } = getCurlInstallPaths();
+    const delayedWrite = (async () => {
+      // Wait for the empty download to land on disk first, so we
+      // overwrite it instead of racing it.
+      for (let i = 0; i < 200; i++) {
+        if (await Bun.file(tempPath).exists()) {
+          break;
+        }
+        await Bun.sleep(10);
+      }
+      // Give the probe loop at least one zero-byte observation so the
+      // recovery branch (attempt > 1) actually fires.
+      await Bun.sleep(150);
+      await Bun.write(tempPath, mockBinaryContent);
+    })();
+
+    const result = await downloadBinaryToTemp("0.26.1");
+    expect(result.tempBinaryPath).toBe(tempPath);
+    await delayedWrite;
+
+    // Verify the good bytes survived — catches the regression where a
+    // late download completion clobbers the delayed write.
+    const onDisk = new Uint8Array(await Bun.file(tempPath).arrayBuffer());
+    expect(onDisk).toEqual(mockBinaryContent);
+
+    // Release the lock so afterEach cleanup runs cleanly.
+    releaseLock(result.lockPath);
+  }, 10_000);
+});
+
+// CLI-1D3 tail: even if the verification in downloadBinaryToTemp is
+// somehow bypassed (e.g. manual `rm` of .download between verification
+// and spawn), `spawnWithRetry` translates the opaque "Executable not
+// found in $PATH" into an actionable UpgradeError.
+describe("isEnoentSpawnError", () => {
+  test("detects Bun's 'Executable not found in $PATH' error", () => {
+    const err = new Error(
+      `Executable not found in $PATH: "C:\\Users\\x\\.local\\bin\\sentry.exe.download"`
+    );
+    expect(isEnoentSpawnError(err)).toBe(true);
+  });
+
+  test("detects Node's ENOENT errno code", () => {
+    const err: NodeJS.ErrnoException = new Error("spawn ENOENT");
+    err.code = "ENOENT";
+    expect(isEnoentSpawnError(err)).toBe(true);
+  });
+
+  test("returns false for unrelated errors", () => {
+    expect(isEnoentSpawnError(new Error("EBUSY: file locked"))).toBe(false);
+    expect(isEnoentSpawnError(new Error("permission denied"))).toBe(false);
+    expect(isEnoentSpawnError("string error")).toBe(false);
+    expect(isEnoentSpawnError(null)).toBe(false);
   });
 });

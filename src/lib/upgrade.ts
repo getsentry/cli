@@ -7,7 +7,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { chmodSync, realpathSync, unlinkSync } from "node:fs";
+import { chmodSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, sep } from "node:path";
 import {
@@ -661,6 +661,79 @@ async function downloadStableToPath(
 }
 
 /**
+ * Max probe attempts before giving up. Six probes run with five sleeps
+ * in between, yielding ~3.1s total wall-clock budget (see backoff table
+ * on {@link waitForBinaryVisible}).
+ */
+const VERIFY_MAX_ATTEMPTS = 6;
+
+/** Base delay (ms) between verify attempts. Doubles each retry. */
+const VERIFY_BASE_DELAY_MS = 100;
+
+/**
+ * Stat the downloaded file, tolerating absence.
+ *
+ * Returns the file size when the path is present, a regular file, and
+ * has non-zero size. Returns `null` otherwise so the caller can poll.
+ */
+function probeBinaryFile(path: string): number | null {
+  const stats = statSync(path, { throwIfNoEntry: false });
+  if (stats?.isFile() && stats.size > 0) {
+    return stats.size;
+  }
+  return null;
+}
+
+/**
+ * Wait for a freshly written binary to become visible by path.
+ *
+ * On Windows + Bun 1.3.9 (CLI-1D3), streaming writes via `Bun.file().writer()`
+ * can return from `writer.end()` before the OS surfaces the file by path.
+ * A subsequent `Bun.spawn` then fails with `Executable not found in $PATH`.
+ * Polling with exponential backoff lets the transient visibility race
+ * self-heal without prompting the user to manually retry.
+ *
+ * Backoff table (6 probes, 5 sleeps, cumulative worst case 3.1s):
+ *
+ * | Attempt | Probe at | Sleep after |
+ * |---------|----------|-------------|
+ * | 1       | 0 ms     | 100 ms      |
+ * | 2       | 100 ms   | 200 ms      |
+ * | 3       | 300 ms   | 400 ms      |
+ * | 4       | 700 ms   | 800 ms      |
+ * | 5       | 1500 ms  | 1600 ms     |
+ * | 6       | 3100 ms  | —           |
+ *
+ * @param path - Absolute path to the downloaded binary
+ * @returns Size of the verified file in bytes
+ * @throws {UpgradeError} When the file never becomes visible or stays empty
+ */
+async function waitForBinaryVisible(path: string): Promise<number> {
+  for (let attempt = 1; attempt <= VERIFY_MAX_ATTEMPTS; attempt++) {
+    const size = probeBinaryFile(path);
+    if (size !== null) {
+      if (attempt > 1) {
+        log.debug(`Binary became visible after ${attempt} attempts`);
+      }
+      return size;
+    }
+    if (attempt === VERIFY_MAX_ATTEMPTS) {
+      break;
+    }
+    const delay = VERIFY_BASE_DELAY_MS * 2 ** (attempt - 1);
+    log.debug(
+      `Downloaded binary not yet visible at ${path}, retrying in ${delay}ms (attempt ${attempt}/${VERIFY_MAX_ATTEMPTS})`
+    );
+    await Bun.sleep(delay);
+  }
+  throw new UpgradeError(
+    "execution_failed",
+    `Downloaded binary is missing or empty at ${path}. ` +
+      "This is usually transient — rerun `sentry cli upgrade` to retry."
+  );
+}
+
+/**
  * Download the new binary to a temporary path and return its location.
  * Used by the upgrade command to download before spawning setup --install.
  *
@@ -722,6 +795,16 @@ export async function downloadBinaryToTemp(
       log.debug("Downloading full binary");
       await downloadFullBinary(version, downloadTag, tempPath);
     }
+
+    // Verify the download produced a real, non-empty file before the caller
+    // spawns it. Seen on Windows + Bun 1.3.9 (CLI-1D3): streaming writes via
+    // `Bun.file(path).writer()` can return without surfacing the file by
+    // path, leaving `Bun.spawn` to fail with an opaque
+    // `Executable not found in $PATH: "...sentry.exe.download"`. Poll with
+    // exponential backoff so a transient filesystem-visibility race
+    // self-heals without asking the user to rerun.
+    const verifiedSize = await waitForBinaryVisible(tempPath);
+    log.debug(`Downloaded binary verified (${verifiedSize} bytes)`);
 
     // Clear consumed patch cache — patches for the old version are useless
     // after the binary has been updated (whether via delta or full download).
