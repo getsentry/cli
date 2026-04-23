@@ -49,6 +49,23 @@ sentry alert issues view my-org/my-project/12345
 sentry alert issues view my-org/my-project/"Error Spike"
 ```
 
+### `sentry alert issues delete <org/project/rule-id-or-name>`
+
+Delete an issue alert rule
+
+**Flags:**
+- `-y, --yes - Skip confirmation prompt`
+- `-f, --force - Force the operation without confirmation`
+- `-n, --dry-run - Show what would happen without making changes`
+
+### `sentry alert issues edit <org/project/rule-id-or-name>`
+
+Edit an issue alert rule
+
+**Flags:**
+- `--name <value> - New rule name`
+- `--status <value> - Rule status: active or disabled`
+
 ### `sentry alert metrics list <org/project>`
 
 List metric alert rules
@@ -83,5 +100,22 @@ sentry alert metrics view my-org/67890
 # View by name
 sentry alert metrics view my-org/"P95 latency alert"
 ```
+
+### `sentry alert metrics delete <org/rule-id-or-name>`
+
+Delete a metric alert rule
+
+**Flags:**
+- `-y, --yes - Skip confirmation prompt`
+- `-f, --force - Force the operation without confirmation`
+- `-n, --dry-run - Show what would happen without making changes`
+
+### `sentry alert metrics edit <org/rule-id-or-name>`
+
+Edit a metric alert rule
+
+**Flags:**
+- `--name <value> - New rule name`
+- `--status <value> - active or disabled`
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
