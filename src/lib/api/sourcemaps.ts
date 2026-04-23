@@ -175,30 +175,6 @@ export function pickUploadEncoding(
 }
 
 /**
- * Compression levels are tuned to minimize CPU + memory on BOTH sides of
- * the wire -- the CLI that compresses and the server that decompresses.
- * Benchmarked on a real 8 MiB sourcemap chunk produced by this CLI's own
- * build (see bench in PR notes).
- *
- * zstd L3 (libzstd's default): compresses 8 MiB sourcemap to 1.70 MiB in
- * 52 ms (CLI) and decompresses in 13 ms with ~zero RSS growth (server).
- * Higher zstd levels are counter-productive for the server: L15+ encode
- * with a larger window, forcing the decoder to allocate 15-30+ MiB of
- * state, and decompression time goes UP (27-30 ms) despite only saving
- * 4-10% on the wire. L3 is Pareto-optimal on both sides.
- *
- * gzip: we intentionally use zlib's default (level 6) rather than picking
- * a specific level. Counter-intuitively, the server decompresses gzip L6
- * payloads ~40% faster than L5 (22 ms vs. 37 ms) because the higher-level
- * encoder produces smaller, denser Huffman codes that decode more
- * efficiently. L9 gives no meaningful size win for ~2.4x the compress
- * time, and L1/L3 are slower to DEcompress while shipping 10-20% more
- * bytes. The zlib default is the right balance. gzip only fires as a
- * fallback against pre-zstd servers; new traffic takes the zstd path.
- */
-const ZSTD_COMPRESSION_LEVEL = 3;
-
-/**
  * Compress a chunk buffer with the chosen codec. Exported for testing.
  */
 export async function encodeChunk(
@@ -206,12 +182,14 @@ export async function encodeChunk(
   encoding: UploadEncoding | undefined
 ): Promise<Uint8Array> {
   if (encoding === "zstd") {
-    return Bun.zstdCompressSync(buf, { level: ZSTD_COMPRESSION_LEVEL });
+    // L3 (libzstd default). Higher levels balloon the server's decoder
+    // memory (L15+ needs 15-30 MiB state) for single-digit % size wins.
+    return Bun.zstdCompressSync(buf, { level: 3 });
   }
   if (encoding === "gzip") {
-    // zlib's default (level 6). See note on ZSTD_COMPRESSION_LEVEL above --
-    // lower levels are slower to decompress on the server side, defeating
-    // the goal.
+    // zlib default (L6). Lower levels (L1/L5) are actually SLOWER to
+    // decompress on the server (sparser Huffman codes); L9 costs 2x the
+    // compress CPU for no meaningful size win.
     return await gzipAsync(buf);
   }
   return buf;
