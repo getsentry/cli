@@ -270,8 +270,7 @@ export const initCommand = buildCommand<
     }
 
     // 6. Run the wizard. It owns the temporary `/dev/tty` forwarding used
-    //    for `curl | bash` flows and tears it down on every exit path, so
-    //    init can return naturally once its own refs are released.
+    //    for `curl | bash` flows and tears it down on every exit path.
     await runWizard({
       directory: targetDir,
       yes: flags.yes,
@@ -281,5 +280,41 @@ export const initCommand = buildCommand<
       org: explicitOrg,
       project: explicitProject,
     });
+
+    // 7. Force-exit safety net for a Bun libuv refcount bug.
+    //
+    // On Bun 1.3.11, combining our fresh `/dev/tty` ReadStream (needed for
+    // the `curl | bash` TTY-delivery workaround in stdin-reopen.ts) with
+    // clack's internal `readline.createInterface(process.stdin)` leaks a
+    // libuv handle that NO userland cleanup releases:
+    // `process.stdin.{pause,destroy,close}`, `rl.close()`,
+    // `removeAllListeners`, and every combination of the above all leave
+    // the event loop ref'd. `process.stdin.unref` is `undefined` on Bun.
+    // The wizard prints "Sentry SDK installed successfully!" and the
+    // process then hangs until the user presses a key (which wakes libuv).
+    //
+    // PRs #802, #824, #825, and #831 each fixed a legit contributing cause
+    // (ReadStream ref, `using` teardown, MastraClient sockets, stream
+    // flowing state) and should all stay — but none address the underlying
+    // Bun refcount bug because that's not a userland issue. PR #782's
+    // original `process.exit(0)` workaround was removed on the assumption
+    // that natural drain would work after the other fixes; it doesn't.
+    //
+    // Safety net: schedule a force-exit with `.unref()` so the timer
+    // itself doesn't hold the loop. If the loop drains naturally (future
+    // Bun versions, non-TTY flows, `--yes` with no prompts), the timer
+    // never fires and the process exits normally. If the Bun bug bites,
+    // the timer fires after a 100ms grace period — imperceptible to
+    // the user and enough for Sentry telemetry + stdio flushes to
+    // complete first.
+    //
+    // Skipped under `bun test` (which sets `NODE_ENV=test`) because the
+    // test runner calls `initCommand.func` directly; an unref'd timer
+    // would still fire and terminate the runner mid-suite.
+    if (process.env.NODE_ENV !== "test") {
+      setTimeout(() => {
+        process.exit(process.exitCode ?? 0);
+      }, 100).unref();
+    }
   },
 });
