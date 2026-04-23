@@ -20,12 +20,18 @@
  */
 
 export {
+  deleteIssueAlertRule,
+  deleteMetricAlertRule,
   getIssueAlertRule,
+  getIssueAlertRuleDocument,
   getMetricAlertRule,
+  getMetricAlertRuleDocument,
   type IssueAlertRule,
   listIssueAlertsPaginated,
   listMetricAlertsPaginated,
   type MetricAlertRule,
+  putIssueAlertRule,
+  putMetricAlertRule,
 } from "./api/alerts.js";
 export {
   createDashboard,
@@ -47,6 +53,7 @@ export {
   type ApiRequestOptions,
   apiRequest,
   apiRequestToRegion,
+  apiRequestToRegionNoContent,
   buildSearchParams,
   ORG_FANOUT_CONCURRENCY,
   type PaginatedResponse,

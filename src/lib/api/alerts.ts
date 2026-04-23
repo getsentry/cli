@@ -9,6 +9,7 @@
 import { resolveOrgRegion } from "../region.js";
 import {
   apiRequestToRegion,
+  apiRequestToRegionNoContent,
   type PaginatedResponse,
   parseLinkHeader,
 } from "./infrastructure.js";
@@ -137,6 +138,107 @@ export async function getMetricAlertRule(
   const { data } = await apiRequestToRegion<MetricAlertRule>(
     regionUrl,
     `/organizations/${orgSlug}/alert-rules/${ruleId}/`
+  );
+  return data;
+}
+
+// ---------------------------------------------------------------------------
+// Issue alert write operations
+// ---------------------------------------------------------------------------
+
+/**
+ * Delete an issue (project) alert rule.
+ *
+ * Succeeds with 204 No Content and no response body.
+ */
+export async function deleteIssueAlertRule(
+  orgSlug: string,
+  projectSlug: string,
+  ruleId: string
+): Promise<void> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  await apiRequestToRegionNoContent(
+    regionUrl,
+    `projects/${orgSlug}/${projectSlug}/rules/${encodeURIComponent(ruleId)}/`,
+    { method: "DELETE" }
+  );
+}
+
+/**
+ * Full document for PUT (includes conditions, actions, etc. from the API).
+ */
+export async function getIssueAlertRuleDocument(
+  orgSlug: string,
+  projectSlug: string,
+  ruleId: string
+): Promise<Record<string, unknown>> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<Record<string, unknown>>(
+    regionUrl,
+    `projects/${orgSlug}/${projectSlug}/rules/${encodeURIComponent(ruleId)}/`
+  );
+  return data;
+}
+
+/**
+ * Replace an issue alert rule (Sentry PUT is a full replacement).
+ */
+export async function putIssueAlertRule(
+  orgSlug: string,
+  projectSlug: string,
+  ruleId: string,
+  body: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<Record<string, unknown>>(
+    regionUrl,
+    `projects/${orgSlug}/${projectSlug}/rules/${encodeURIComponent(ruleId)}/`,
+    { method: "PUT", body }
+  );
+  return data;
+}
+
+// ---------------------------------------------------------------------------
+// Metric alert (org) write operations
+// ---------------------------------------------------------------------------
+
+/**
+ * Delete a metric (organization) alert rule. May return 202 with no body.
+ */
+export async function deleteMetricAlertRule(
+  orgSlug: string,
+  ruleId: string
+): Promise<void> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  await apiRequestToRegionNoContent(
+    regionUrl,
+    `organizations/${orgSlug}/alert-rules/${encodeURIComponent(ruleId)}/`,
+    { method: "DELETE" }
+  );
+}
+
+export async function getMetricAlertRuleDocument(
+  orgSlug: string,
+  ruleId: string
+): Promise<Record<string, unknown>> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<Record<string, unknown>>(
+    regionUrl,
+    `organizations/${orgSlug}/alert-rules/${encodeURIComponent(ruleId)}/`
+  );
+  return data;
+}
+
+export async function putMetricAlertRule(
+  orgSlug: string,
+  ruleId: string,
+  body: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<Record<string, unknown>>(
+    regionUrl,
+    `organizations/${orgSlug}/alert-rules/${encodeURIComponent(ruleId)}/`,
+    { method: "PUT", body }
   );
   return data;
 }
