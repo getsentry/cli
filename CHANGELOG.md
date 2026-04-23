@@ -1,6 +1,93 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.29.0
+
+### Security 🔒
+
+- (deps) Upgrade docs to Astro 6 / Starlight 0.38 by @BYK in [#816](https://github.com/getsentry/cli/pull/816)
+
+### New Features ✨
+
+- (auth) Hint when env token is shadowed by stored OAuth (#785) by @BYK in [#790](https://github.com/getsentry/cli/pull/790)
+- (cache) Scope response cache per active identity (#785) by @BYK in [#788](https://github.com/getsentry/cli/pull/788)
+- (help) Add Environment Variables section to branded help (#785) by @BYK in [#786](https://github.com/getsentry/cli/pull/786)
+- (issue) Add resolve, unresolve (reopen), and merge commands by @BYK in [#778](https://github.com/getsentry/cli/pull/778)
+- (scan) Pure-TS ripgrep-compatible scanner + DSN migration + perf overhaul by @BYK in [#791](https://github.com/getsentry/cli/pull/791)
+- (sourcemap-upload) Add zstd compression support by @BYK in [#823](https://github.com/getsentry/cli/pull/823)
+
+### Bug Fixes 🐛
+
+#### Dashboard
+
+- Auto-default --limit for grouped widgets (CLI-WW) by @BYK in [#799](https://github.com/getsentry/cli/pull/799)
+- Accept dataset aliases (errors, transactions, metrics) (CLI-JG) by @BYK in [#800](https://github.com/getsentry/cli/pull/800)
+
+#### Init
+
+- Restore /dev/tty workaround on macOS only by @BYK in [#836](https://github.com/getsentry/cli/pull/836)
+- Add force-exit safety net for Bun fresh+readline hang by @BYK in [#833](https://github.com/getsentry/cli/pull/833)
+- Release stdin handle to unblock event loop on wizard exit by @BYK in [#831](https://github.com/getsentry/cli/pull/831)
+- Cancel in-flight Mastra requests on teardown by @BYK in [#825](https://github.com/getsentry/cli/pull/825)
+- Harden /dev/tty teardown and adopt Symbol.dispose by @BYK in [#824](https://github.com/getsentry/cli/pull/824)
+- Release /dev/tty handle on all exit paths by @betegon in [#802](https://github.com/getsentry/cli/pull/802)
+- Send dirListing/fileCache/existingSentry via initialState by @betegon in [#796](https://github.com/getsentry/cli/pull/796)
+- Force process exit after wizard completes by @betegon in [#782](https://github.com/getsentry/cli/pull/782)
+
+#### Other
+
+- (api) Clone request body per retry + classify timeouts (CLI-1D6) by @BYK in [#829](https://github.com/getsentry/cli/pull/829)
+- (arg-parsing) Throw ValidationError (not raw Error) for format errors by @BYK in [#793](https://github.com/getsentry/cli/pull/793)
+- (dsn) Skip non-regular env files during detection by @elucid in [#806](https://github.com/getsentry/cli/pull/806)
+- (error-reporting) Fall back to message prefix for ValidationError without field by @BYK in [#776](https://github.com/getsentry/cli/pull/776)
+- (errors) Surface real API errors and granular scopes in 403s (#785) by @BYK in [#789](https://github.com/getsentry/cli/pull/789)
+- (hex-id) Auto-recover malformed hex IDs in view commands (CLI-16G) by @BYK in [#777](https://github.com/getsentry/cli/pull/777)
+- (upgrade) Verify downloaded binary exists before spawn (CLI-1D3) by @BYK in [#827](https://github.com/getsentry/cli/pull/827)
+- (ux) Rate-limit update banner and silence /api/0/ auto-fix (#785) by @BYK in [#787](https://github.com/getsentry/cli/pull/787)
+
+### Documentation 📚
+
+- Fix auth token precedence, update stale architecture tree, and documentation audit report by @cursor in [#783](https://github.com/getsentry/cli/pull/783)
+
+### Internal Changes 🔧
+
+#### Deps
+
+- Bump @sentry/node-core to 10.50.0 by @BYK in [#834](https://github.com/getsentry/cli/pull/834)
+- Drop Node 20 support, pin CI Node 24 for docs build by @BYK in [#817](https://github.com/getsentry/cli/pull/817)
+- Upgrade @sentry/api 0.94.0 -> 0.113.0 + type cleanup by @BYK in [#803](https://github.com/getsentry/cli/pull/803)
+
+#### Init
+
+- Remove /dev/tty forwarding workaround and force-exit safety net by @BYK in [#835](https://github.com/getsentry/cli/pull/835)
+- Tighten list-dir hot loop + emit POSIX paths by @BYK in [#815](https://github.com/getsentry/cli/pull/815)
+- Migrate grep/glob tools to src/lib/scan/ by @BYK in [#797](https://github.com/getsentry/cli/pull/797)
+- Trim deprecated --features help entries by @MathurAditya724 in [#781](https://github.com/getsentry/cli/pull/781)
+
+#### Scan
+
+- Transport grep worker line pool as bytes by @BYK in [#826](https://github.com/getsentry/cli/pull/826)
+- Fast-path known-binary extensions in classifyByExtension by @BYK in [#822](https://github.com/getsentry/cli/pull/822)
+- Dual-path walker — parallel bulk, serial early-exit by @BYK in [#821](https://github.com/getsentry/cli/pull/821)
+- Parallel grep via worker pool with binary-transferable matches by @BYK in [#807](https://github.com/getsentry/cli/pull/807)
+- Rewrite walker hot path with sync I/O + manual string ops by @BYK in [#805](https://github.com/getsentry/cli/pull/805)
+- Literal prefilter + lazy line counting in readAndGrep by @BYK in [#804](https://github.com/getsentry/cli/pull/804)
+
+#### Other
+
+- (api) Pass ?collapse=organization on project detail fetches by @BYK in [#818](https://github.com/getsentry/cli/pull/818)
+- (auth) Memoize getAuthToken and refreshToken row read (CLI-13V) by @BYK in [#828](https://github.com/getsentry/cli/pull/828)
+- (cache) Centralize mutation invalidation at the HTTP layer (#792) by @BYK in [#801](https://github.com/getsentry/cli/pull/801)
+- (fs) Add safeReadFile helper for FIFO-safe config reads by @BYK in [#819](https://github.com/getsentry/cli/pull/819)
+- (issue) Skip redundant API lookups via project+issue-org caches by @BYK in [#794](https://github.com/getsentry/cli/pull/794)
+- (scan,dsn) Trim session cruft from comment-heavy files by @BYK in [#810](https://github.com/getsentry/cli/pull/810)
+- (sentry-client) Scope fetch mocks to a per-test URL marker by @BYK in [#832](https://github.com/getsentry/cli/pull/832)
+- (sourcemap) Migrate discoverFilePairs to walkFiles by @BYK in [#811](https://github.com/getsentry/cli/pull/811)
+- Skip docs preview deploy on fork PRs by @BYK in [#814](https://github.com/getsentry/cli/pull/814)
+- Unblock fork PRs (SENTRY_CLIENT_ID fallback + fork-safe checkout) by @BYK in [#813](https://github.com/getsentry/cli/pull/813)
+- Disable Bun autoload of .env and bunfig.toml in compiled CLI by @BYK in [#808](https://github.com/getsentry/cli/pull/808)
+- Regenerate docs by @github-actions[bot] in [58a84035](https://github.com/getsentry/cli/commit/58a8403504e1cf30e6bd8e302f5e042f1a83393e)
+
 ## 0.28.1
 
 ### Bug Fixes 🐛
