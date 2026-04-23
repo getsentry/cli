@@ -105,7 +105,7 @@ export function getCliEnvironment(version: string = CLI_VERSION): string {
  * Generate the User-Agent string for API requests.
  * Format: sentry-cli/<version> (<os>-<arch>) <runtime>/<version>
  *
- * @example "sentry-cli/0.5.0 (linux-x64) bun/1.3.3"
+ * @example "sentry-cli/0.5.0 (linux-x64) bun/1.3.13"
  * @example "sentry-cli/0.5.0 (darwin-arm64) node/22.12.0"
  */
 export function getUserAgent(): string {

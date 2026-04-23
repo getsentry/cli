@@ -133,7 +133,7 @@ describe("compareReports", () => {
   const baseline: BenchReport = {
     version: 1,
     generatedAt: "2026-01-01T00:00:00.000Z",
-    runtime: { bun: "1.3.11", platform: "linux", arch: "x64", cpus: 8 },
+    runtime: { bun: "1.3.13", platform: "linux", arch: "x64", cpus: 8 },
     entries: [
       {
         fixture: "synthetic/small",

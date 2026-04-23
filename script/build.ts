@@ -326,11 +326,12 @@ async function compileTarget(target: BuildTarget): Promise<boolean> {
       // identifier renaming collision bug (oven-sh/bun#14585).
       minify: { whitespace: true, syntax: true, identifiers: false },
       // NOTE: `bytecode: true` would move JS parse cost from startup to
-      // build time, but as of Bun 1.3.11 it crashes our ESM bundle at
-      // runtime with "Expected CommonJS module to have a function wrapper"
-      // before any of our code runs. Likely related to oven-sh/bun#21097 /
-      // #23490. Revisit once Bun's bytecode path stabilizes for our two-
-      // step esbuild-then-compile pipeline.
+      // build time, but as of Bun 1.3.13 it still crashes our ESM bundle
+      // at runtime with "Expected CommonJS module to have a function
+      // wrapper" before any of our code runs (esbuild emits ESM at line
+      // 126; the bytecode loader mis-caches it as CJS). Tracks
+      // oven-sh/bun#21097 / #23490. Retested on Bun 1.3.13; still broken.
+      // Revisit once Bun's bytecode path supports ESM under compile.
     });
 
     if (!result.success) {
