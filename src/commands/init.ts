@@ -270,39 +270,49 @@ export const initCommand = buildCommand<
     }
 
     // 6. Run the wizard.
-    await runWizard({
-      directory: targetDir,
-      yes: flags.yes,
-      dryRun: flags["dry-run"],
-      features: featuresList,
-      team: flags.team,
-      org: explicitOrg,
-      project: explicitProject,
-    });
-
-    // 7. macOS-only force-exit safety net.
     //
-    // On Darwin, `runWizard` installs the `/dev/tty` forwarding workaround
-    // from stdin-reopen.ts to get keystrokes through to clack. That
-    // workaround opens a second `tty.ReadStream` which leaks a libuv
-    // handle on Bun 1.3.11 — no userland cleanup releases it (upstream
-    // oven-sh/bun#29126). After the wizard returns the event loop stays
-    // ref'd and the process hangs until the user presses a key.
-    //
-    // The .unref() timer doesn't hold the loop itself, so it's a no-op in
-    // the happy path (Linux: no workaround installed, loop drains
-    // naturally; `--yes` on Darwin: no prompts, no keystroke issue, may
-    // still drain naturally). On the Darwin hang path, it force-exits
-    // after a 100ms grace window — imperceptible to the user and enough
-    // for Sentry telemetry + stdio flushes to complete first.
-    //
-    // Skipped under `bun test` (which sets NODE_ENV=test automatically)
-    // because the test runner calls `initCommand.func` directly; an
-    // unref'd timer would still fire and terminate the runner mid-suite.
-    if (process.platform === "darwin" && process.env.NODE_ENV !== "test") {
-      setTimeout(() => {
-        process.exit(process.exitCode ?? 0);
-      }, 100).unref();
+    // Wrapped in try/finally so the macOS force-exit safety net (step 7)
+    // is scheduled on every exit path: success, WizardError, user cancel,
+    // and any other thrown error. Without finally, a thrown WizardError
+    // would skip the timer and the process would hang on the error
+    // display — exactly what Cursor Bugbot flagged on an earlier revision.
+    try {
+      await runWizard({
+        directory: targetDir,
+        yes: flags.yes,
+        dryRun: flags["dry-run"],
+        features: featuresList,
+        team: flags.team,
+        org: explicitOrg,
+        project: explicitProject,
+      });
+    } finally {
+      // 7. macOS-only force-exit safety net.
+      //
+      // On Darwin, `runWizard` installs the `/dev/tty` forwarding
+      // workaround from stdin-reopen.ts to get keystrokes through to
+      // clack. That workaround opens a second `tty.ReadStream` which
+      // leaks a libuv handle on Bun 1.3.11 — no userland cleanup
+      // releases it (upstream oven-sh/bun#29126). After `runWizard`
+      // returns (or throws), the event loop stays ref'd and the process
+      // hangs until the user presses a key.
+      //
+      // The .unref() timer doesn't hold the loop itself, so it's a no-op
+      // in the happy path (Linux: no workaround installed, loop drains
+      // naturally; `--yes` on Darwin: no prompts, no keystroke issue,
+      // may still drain naturally). On the Darwin hang path, it
+      // force-exits after a 100ms grace window — imperceptible to the
+      // user and enough for Sentry telemetry + stdio flushes to
+      // complete first.
+      //
+      // Skipped under `bun test` (which sets NODE_ENV=test automatically)
+      // because the test runner calls `initCommand.func` directly; an
+      // unref'd timer would still fire and terminate the runner mid-suite.
+      if (process.platform === "darwin" && process.env.NODE_ENV !== "test") {
+        setTimeout(() => {
+          process.exit(process.exitCode ?? 0);
+        }, 100).unref();
+      }
     }
   },
 });
