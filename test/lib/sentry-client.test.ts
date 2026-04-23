@@ -161,6 +161,61 @@ describe("fetchWithRetry / buildAttemptFactory", () => {
     expect(callCount).toBe(2);
     expect(seen).toEqual(["streamed-body", "streamed-body"]);
   });
+
+  test("retries a FormData body without losing the multipart boundary", async () => {
+    // Regression for a Cursor Bugbot finding: materializing FormData to
+    // an ArrayBuffer drops the auto-negotiated
+    // `Content-Type: multipart/form-data; boundary=...` header that
+    // `fetch` derives from the FormData body. Sourcemap chunk upload
+    // (src/lib/api/sourcemaps.ts) sends FormData through this path;
+    // without correct handling even the first upload attempt fails.
+    let callCount = 0;
+    const contentTypes: (string | null)[] = [];
+    const bodies: string[] = [];
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      callCount += 1;
+      const req = new Request(input as string, init);
+      contentTypes.push(req.headers.get("content-type"));
+      bodies.push(await req.text());
+      if (callCount === 1) {
+        return new Response("retry me", { status: 503 });
+      }
+      return new Response("", { status: 200 });
+    });
+
+    const form = new FormData();
+    form.append(
+      "file",
+      new Blob([new Uint8Array([1, 2, 3, 4])], {
+        type: "application/octet-stream",
+      }),
+      "chunk.bin"
+    );
+
+    const authFetch = getAuthenticatedFetch();
+    const res = await authFetch("https://us.sentry.io/api/0/chunks/", {
+      method: "POST",
+      body: form,
+    });
+
+    expect(res.status).toBe(200);
+    expect(callCount).toBe(2);
+    // Both attempts must carry a well-formed multipart Content-Type.
+    // Bun picks a fresh boundary per serialization, so the two
+    // headers differ — the invariant is that each attempt's
+    // header+body is internally consistent, and that
+    // Content-Type is never lost to a raw `application/octet-stream`
+    // or missing header (the pre-fix failure mode).
+    for (const ct of contentTypes) {
+      expect(ct).toMatch(/^multipart\/form-data; boundary=.+/u);
+    }
+    // And both attempts carried the same FormData contents.
+    for (const body of bodies) {
+      expect(body).toContain('name="file"');
+      expect(body).toContain("chunk.bin");
+    }
+  });
 });
 
 describe("fetchWithTimeout internal timeout classification", () => {

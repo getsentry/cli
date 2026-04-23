@@ -406,10 +406,14 @@ type AttemptInputFactory = () => {
  * attempt 1; without this cloning every retry after a timeout / 5xx /
  * 401-refresh would throw `TypeError: Request body already used` (CLI-1D6).
  *
- * `Request` inputs clone per attempt; primitive bodies (string /
- * ArrayBuffer / TypedArray / none) pass through — the hot path for all
- * non-SDK call sites. Streams / Blobs / FormData are drained once to an
- * ArrayBuffer so subsequent attempts see the same bytes.
+ * `Request` inputs clone per attempt. Bodies that `fetch` re-reads on
+ * each call (string / ArrayBuffer / TypedArray / Blob / FormData /
+ * URLSearchParams / none) pass through unchanged — this is the hot path
+ * for every non-SDK call site, and importantly preserves the auto-
+ * negotiated `Content-Type: multipart/form-data; boundary=...` header
+ * that `fetch` derives from `FormData` bodies (sourcemap chunk upload).
+ * A bare `ReadableStream` is the only single-use body shape, so it's
+ * drained once to an `ArrayBuffer`.
  */
 async function buildAttemptFactory(
   input: Request | string | URL,
@@ -422,20 +426,12 @@ async function buildAttemptFactory(
   }
 
   const body = init?.body;
-  if (
-    body === undefined ||
-    body === null ||
-    typeof body === "string" ||
-    body instanceof ArrayBuffer ||
-    ArrayBuffer.isView(body)
-  ) {
-    return () => ({ input, init });
+  if (body instanceof ReadableStream) {
+    const snapshot = await new Response(body).arrayBuffer();
+    return () => ({ input, init: { ...init, body: snapshot } });
   }
 
-  const snapshot = await new Response(
-    body as ConstructorParameters<typeof Response>[0]
-  ).arrayBuffer();
-  return () => ({ input, init: { ...init, body: snapshot } });
+  return () => ({ input, init });
 }
 
 /**
