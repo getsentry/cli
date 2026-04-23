@@ -318,6 +318,94 @@ describe("forwardFreshTtyToStdin → closeFreshTtyForwarding round trip", () => 
     // was set (covers the termios-restore try/catch).
     expect(() => closeFreshTtyForwarding()).not.toThrow();
   });
+
+  test("teardown invokes restored pause to release stdin handle", () => {
+    // Regression for CLI-1DD: post-wizard `sentry init` hang. Our no-op
+    // pause patch (installed to dodge Bun's fd-0 EINVAL) silently
+    // swallowed clack's `rl.close() → input.pause()` call, leaving stdin
+    // ref'd. Teardown must invoke the restored original so the libuv
+    // event loop can drain.
+    const { fd } = makePtmxFd();
+
+    // Replace the beforeEach stub with a counting spy BEFORE install so
+    // the install captures it as `original.pause`.
+    let pauseCalls = 0;
+    const pauseSpy = (): NodeJS.ReadStream => {
+      pauseCalls += 1;
+      return process.stdin;
+    };
+    (process.stdin as unknown as { pause: () => NodeJS.ReadStream }).pause =
+      pauseSpy;
+
+    const handle = forwardFreshTtyToStdin({
+      isTty: () => true,
+      openTty: () => fd,
+    });
+    expect(handle).toBeDefined();
+
+    // During install, process.stdin.pause is the patched no-op — clack's
+    // internal `rl.close() → input.pause()` would hit the no-op and the
+    // spy would never fire. Simulate that:
+    expect(process.stdin.pause).not.toBe(pauseSpy);
+    process.stdin.pause();
+    expect(pauseCalls).toBe(0);
+
+    closeFreshTtyForwarding();
+
+    // After teardown: pause is restored to our spy AND teardown invoked
+    // it exactly once to release the libuv handle.
+    expect(process.stdin.pause).toBe(pauseSpy);
+    expect(pauseCalls).toBe(1);
+  });
+
+  test("stdin is not flowing after teardown (releases event loop)", () => {
+    // Integration regression for CLI-1DD. Observes the actual stream
+    // state transition that blocks the event loop. Without the fix,
+    // `readableFlowing` stays `true` post-teardown and the process hangs
+    // until a keypress.
+    const { fd } = makePtmxFd();
+
+    // Route install's `original.pause` capture at the real
+    // `Readable.prototype.pause`, not the beforeEach no-op stub — so
+    // that invoking it actually transitions `readableFlowing: true → false`.
+    // Same for `.resume()`: used below to simulate clack's implicit flow.
+    const { Readable } = require("node:stream") as typeof import("node:stream");
+    const stdinMut = process.stdin as unknown as {
+      pause: () => NodeJS.ReadStream;
+      resume: () => NodeJS.ReadStream;
+    };
+    stdinMut.pause = Readable.prototype.pause as () => NodeJS.ReadStream;
+    stdinMut.resume = Readable.prototype.resume as () => NodeJS.ReadStream;
+
+    // Put stdin into flowing mode. This is effectively what clack does
+    // indirectly via `readline.createInterface()` → `input.resume()`.
+    process.stdin.resume();
+
+    try {
+      expect(
+        (process.stdin as { readableFlowing?: boolean | null }).readableFlowing
+      ).toBe(true);
+
+      const handle = forwardFreshTtyToStdin({
+        isTty: () => true,
+        openTty: () => fd,
+      });
+      expect(handle).toBeDefined();
+
+      closeFreshTtyForwarding();
+
+      // `readableFlowing` values: null (initial), true (flowing), false
+      // (paused). After teardown we must be NOT true — otherwise the
+      // libuv event loop stays alive.
+      expect(
+        (process.stdin as { readableFlowing?: boolean | null }).readableFlowing
+      ).not.toBe(true);
+    } finally {
+      // Defensive: ensure we don't leak a flowing-mode stdin into the
+      // next test even if an expectation above threw.
+      Readable.prototype.pause.call(process.stdin);
+    }
+  });
 });
 
 describe("using-declaration semantics", () => {

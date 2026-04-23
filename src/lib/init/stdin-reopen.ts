@@ -291,6 +291,25 @@ export function closeFreshTtyForwarding(): void {
   stdinHandle.resume = original.resume;
   stdinHandle._read = original.read;
 
+  // Release the libuv handle on fd 0. Clack's prompt lifecycle relies on
+  // `rl.close() → rl.pause() → this.input.pause()` to pause stdin, but we
+  // replaced `process.stdin.pause` with a no-op at install time (needed to
+  // dodge Bun's fd-0 EINVAL on pause/resume transitions — see the comment
+  // at the install site). So by the time we get here, stdin is still in
+  // flowing/ref'd mode from `readline.createInterface()`'s internal
+  // `input.resume()` — which keeps the libuv event loop alive indefinitely
+  // after the wizard returns, manifesting as a post-wizard hang until the
+  // user presses a key. Now that the original `.pause()` is restored,
+  // invoke it directly so stock Node/Bun cleanup can finish. Idempotent:
+  // safe when stdin was already paused.
+  try {
+    original.pause.call(process.stdin);
+  } catch {
+    // Defensive: swallow errors from runtimes that throw if stdin is
+    // already destroyed. This is end-of-lifecycle cleanup; nothing
+    // downstream needs stdin.
+  }
+
   if (backfilledIsTty) {
     Object.defineProperty(process.stdin, "isTTY", {
       value: previousIsTty,
