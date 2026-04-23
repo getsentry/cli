@@ -36,6 +36,8 @@ import {
   getAuthToken,
   isAuthenticated,
   isEnvTokenActive,
+  resetAuthRowCache,
+  resetAuthTokenCache,
   setAuthToken,
 } from "../../../src/lib/db/auth.js";
 import {
@@ -299,6 +301,10 @@ class SetEnvAuthTokenCommand implements AsyncCommand<DbModel, RealDb> {
 
   async run(model: DbModel, _real: RealDb): Promise<void> {
     process.env.SENTRY_AUTH_TOKEN = this.token;
+    // Env mutation bypasses setAuthToken — manually invalidate the auth caches
+    // (contract documented on resetAuthTokenCache / resetAuthRowCache).
+    resetAuthTokenCache();
+    resetAuthRowCache();
     // Model stores trimmed value — matches real getEnvToken() which trims
     const trimmed = this.token.trim();
     model.envAuthToken = trimmed || null;
@@ -312,6 +318,8 @@ class ClearEnvAuthTokenCommand implements AsyncCommand<DbModel, RealDb> {
 
   async run(model: DbModel, _real: RealDb): Promise<void> {
     delete process.env.SENTRY_AUTH_TOKEN;
+    resetAuthTokenCache();
+    resetAuthRowCache();
     model.envAuthToken = null;
   }
 
@@ -329,6 +337,8 @@ class SetEnvSentryTokenCommand implements AsyncCommand<DbModel, RealDb> {
 
   async run(model: DbModel, _real: RealDb): Promise<void> {
     process.env.SENTRY_TOKEN = this.token;
+    resetAuthTokenCache();
+    resetAuthRowCache();
     // Model stores trimmed value — matches real getEnvToken() which trims
     const trimmed = this.token.trim();
     model.envSentryToken = trimmed || null;
@@ -342,6 +352,8 @@ class ClearEnvSentryTokenCommand implements AsyncCommand<DbModel, RealDb> {
 
   async run(model: DbModel, _real: RealDb): Promise<void> {
     delete process.env.SENTRY_TOKEN;
+    resetAuthTokenCache();
+    resetAuthRowCache();
     model.envSentryToken = null;
   }
 
@@ -775,6 +787,10 @@ describe("model-based: database layer", () => {
         const savedSentryToken = process.env.SENTRY_TOKEN;
         delete process.env.SENTRY_AUTH_TOKEN;
         delete process.env.SENTRY_TOKEN;
+        // Reset auth caches — fresh isolated DB has no auth row; prior test
+        // runs in this process may have left a stale token in the memo cell.
+        resetAuthTokenCache();
+        resetAuthRowCache();
         try {
           const setup = () => ({
             model: createEmptyModel(),
@@ -909,6 +925,9 @@ describe("model-based: database layer", () => {
         const cleanup = createIsolatedDbContext();
         const savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
         delete process.env.SENTRY_AUTH_TOKEN;
+        // Fresh DB but module-scoped auth caches persist across runs.
+        resetAuthTokenCache();
+        resetAuthRowCache();
         try {
           // Set token that expires immediately (negative expiresIn)
           setAuthToken(token, -1);

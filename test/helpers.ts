@@ -8,6 +8,7 @@ import { afterEach, beforeEach } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { resetAuthRowCache, resetAuthTokenCache } from "../src/lib/db/auth.js";
 import { CONFIG_DIR_ENV_VAR, closeDatabase } from "../src/lib/db/index.js";
 
 // biome-ignore lint/performance/noBarrelFile: re-exporting a single constant, not a barrel
@@ -105,12 +106,21 @@ export function useTestConfigDir(
   beforeEach(async () => {
     savedConfigDir = process.env[CONFIG_DIR_ENV_VAR];
     closeDatabase();
+    // Module-scoped auth caches persist across tests. Pointing
+    // SENTRY_CONFIG_DIR at a fresh directory means a different DB — any
+    // cached token/row from the previous test is now stale.
+    resetAuthTokenCache();
+    resetAuthRowCache();
     dir = await createTestConfigDir(prefix, options);
     process.env[CONFIG_DIR_ENV_VAR] = dir;
   });
 
   afterEach(async () => {
     closeDatabase();
+    // Invalidate again on teardown: the next test may not use this helper
+    // and would otherwise see a stale cache from this test's mutations.
+    resetAuthTokenCache();
+    resetAuthRowCache();
     // Always restore the previous value — never delete.
     // Deleting process.env.SENTRY_CONFIG_DIR causes failures in test files
     // that load after this afterEach runs, because their module-level code
