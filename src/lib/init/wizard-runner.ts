@@ -38,6 +38,7 @@ import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
 import { resolveInitContext } from "./preflight.js";
 import { createWizardSpinner } from "./spinner.js";
+import { forwardFreshTtyToStdin } from "./stdin-reopen.js";
 import { describeTool, executeTool } from "./tools/registry.js";
 import type {
   ResolvedInitContext,
@@ -360,6 +361,29 @@ async function preamble(
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard orchestration with error handling branches
 export async function runWizard(initialOptions: WizardOptions): Promise<void> {
+  // macOS-only: Bun's compiled binaries on Darwin don't deliver keystrokes
+  // through TTY fds inherited via shell redirection (`curl | bash` →
+  // `exec sentry init </dev/tty` in install.sh), so clack prompts hang
+  // forever at the first question. The workaround in stdin-reopen.ts opens
+  // a fresh `/dev/tty` and forwards its data events onto process.stdin.
+  //
+  // The bug is fixed on Linux (verified via PTY harness in PR #835) — we
+  // skip the workaround there because it has a side cost: a libuv handle
+  // leak that requires `initCommand.func`'s `setTimeout().unref()` safety
+  // net to force-exit cleanly. Keep the install narrow.
+  //
+  // The `using` declaration guarantees teardown on every exit path via the
+  // Disposable returned by forwardFreshTtyToStdin(). On non-Darwin, the
+  // disposable is a no-op (install short-circuits on platform check).
+  using _tty =
+    process.platform === "darwin"
+      ? forwardFreshTtyToStdin()
+      : {
+          [Symbol.dispose]: (): void => {
+            // intentionally empty — workaround not installed on this platform
+          },
+        };
+
   const { directory, yes, dryRun, features } = initialOptions;
 
   if (!(await preamble(directory, yes, dryRun))) {
