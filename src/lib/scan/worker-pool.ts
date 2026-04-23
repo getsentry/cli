@@ -34,8 +34,11 @@ export type WorkerGrepRequest = {
 export type WorkerGrepResult = {
   /** Packed 4-u32-per-match (pathIdx, lineNum, lineOffset, lineLength). */
   ints: Uint32Array;
-  /** Concatenated line text, indexed by `ints[i*4 + 2]` and `+3`. */
-  linePool: string;
+  /**
+   * Concatenated line text as UTF-8 bytes. Decoded on the main side;
+   * `ints[i*4 + 2]` / `+3` index into the decoded string.
+   */
+  linePoolBytes: Uint8Array;
 };
 
 /**
@@ -169,7 +172,7 @@ export function getWorkerPool(): WorkerPool {
       if (pw.inflight === 0) {
         unrefWorker(pw.worker);
       }
-      next.resolve({ ints: data.ints, linePool: data.linePool });
+      next.resolve({ ints: data.ints, linePoolBytes: data.linePoolBytes });
     });
     w.addEventListener("error", (err) => {
       pw.alive = false;
@@ -271,8 +274,18 @@ export function terminatePool(): void {
   }
 }
 
+// `ignoreBOM: true` is load-bearing: without it the decoder silently
+// strips a leading U+FEFF, which desynchronises every `lineOffset` /
+// `lineLength` index the worker stored against the pre-encode pool
+// length. A BOM-prefixed source file lands a U+FEFF at pool index 0,
+// and with default (BOM-eating) decode the whole batch's lines would
+// shift left by one code unit. `fatal: false` (default) keeps
+// replacement-char behavior intact for any invalid sequences — the
+// worker's round-trip can't produce them, but it's the safer default.
+const LINE_POOL_DECODER = new TextDecoder("utf-8", { ignoreBOM: true });
+
 /**
- * Decode a worker's packed `{ints, linePool}` into `GrepMatch[]`,
+ * Decode a worker's packed `{ints, linePoolBytes}` into `GrepMatch[]`,
  * reconstructing path fields from the caller's `paths` / `relPaths`.
  *
  * Optional `mtimes` is a parallel per-path array; when provided,
@@ -285,7 +298,8 @@ export function decodeWorkerMatches(
   relPaths: readonly string[],
   mtimes: readonly number[] | null = null
 ): GrepMatch[] {
-  const { ints, linePool } = result;
+  const { ints, linePoolBytes } = result;
+  const linePool = LINE_POOL_DECODER.decode(linePoolBytes);
   const matches: GrepMatch[] = [];
   const count = Math.floor(ints.length / 4);
   for (let i = 0; i < count; i += 1) {
