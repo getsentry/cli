@@ -1,4 +1,4 @@
-import { buildRouteMap } from "@stricli/core";
+import { buildRouteMap } from "../../lib/route-map.js";
 import { issuesRoute } from "./issues/index.js";
 import { metricsRoute } from "./metrics/index.js";
 
