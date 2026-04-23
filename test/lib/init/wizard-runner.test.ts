@@ -98,6 +98,12 @@ let precomputeSentryDetectionSpy: ReturnType<typeof spyOn>;
 let closeFreshTtyForwardingSpy: ReturnType<typeof spyOn>;
 let getWorkflowSpy: ReturnType<typeof spyOn>;
 let stderrSpy: ReturnType<typeof spyOn>;
+/**
+ * ClientOptions captured from each MastraClient instance constructed by
+ * runWizard. Used by the MastraClient lifecycle suite to assert that the
+ * `abortSignal` passed at construction time is aborted on teardown.
+ */
+let capturedClientOptions: { abortSignal?: AbortSignal }[] = [];
 
 beforeEach(() => {
   mockStartResult = { status: "success", result: { platform: "React" } };
@@ -171,9 +177,18 @@ beforeEach(() => {
   const workflow = {
     createRun: mock(() => Promise.resolve(run)),
   };
-  getWorkflowSpy = spyOn(MastraClient.prototype, "getWorkflow").mockReturnValue(
-    workflow as any
-  );
+  capturedClientOptions = [];
+  getWorkflowSpy = spyOn(
+    MastraClient.prototype,
+    "getWorkflow"
+  ).mockImplementation(function (this: MastraClient) {
+    // `this` is the MastraClient instance. `BaseResource.options` holds the
+    // full ClientOptions passed to the constructor — including abortSignal.
+    capturedClientOptions.push(
+      (this as unknown as { options: { abortSignal?: AbortSignal } }).options
+    );
+    return workflow as any;
+  });
 });
 
 afterEach(() => {
@@ -537,5 +552,96 @@ describe("runWizard", () => {
     await runWizard(makeOptions());
 
     expect(spinnerMock.stop).toHaveBeenCalledWith("Using existing project");
+  });
+});
+
+describe("runWizard — MastraClient lifecycle", () => {
+  test("aborts the MastraClient signal after a successful run", async () => {
+    await runWizard(makeOptions());
+
+    expect(capturedClientOptions).toHaveLength(1);
+    const signal = capturedClientOptions[0]?.abortSignal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    // Using the non-null assertion safely — we asserted toBeInstanceOf above.
+    expect((signal as AbortSignal).aborted).toBe(true);
+  });
+
+  test("aborts the MastraClient signal when a tool throws", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["npm install @sentry/node"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["install-deps"]],
+      steps: {
+        "install-deps": { suspendPayload: payload },
+      },
+    };
+    executeToolSpy.mockRejectedValue(new Error("tool blew up"));
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+
+    expect(capturedClientOptions).toHaveLength(1);
+    const signal = capturedClientOptions[0]?.abortSignal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect((signal as AbortSignal).aborted).toBe(true);
+  });
+
+  test("aborts the MastraClient signal on cancellation", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["npm install @sentry/node"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["install-deps"]],
+      steps: {
+        "install-deps": { suspendPayload: payload },
+      },
+    };
+    executeToolSpy.mockRejectedValue(new WizardCancelledError());
+
+    await runWizard(makeOptions());
+
+    expect(capturedClientOptions).toHaveLength(1);
+    const signal = capturedClientOptions[0]?.abortSignal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect((signal as AbortSignal).aborted).toBe(true);
+  });
+
+  test("signal is live (not pre-aborted) while the wizard is running", async () => {
+    // `getWorkflow` runs BEFORE `startAsync` (client.getWorkflow is called
+    // synchronously right after `new MastraClient(...)`), so the signal
+    // observed at that time is the same instance that in-flight fetches
+    // would see during the wizard. If the signal were somehow pre-aborted
+    // at construction, it would be aborted here too. This proves the
+    // `using _mastraCleanup` disposable does NOT fire until teardown.
+    let abortedAtConstruction: boolean | undefined;
+    getWorkflowSpy.mockImplementation(function (this: MastraClient) {
+      const opts = (
+        this as unknown as { options: { abortSignal?: AbortSignal } }
+      ).options;
+      capturedClientOptions.push(opts);
+      abortedAtConstruction = opts.abortSignal?.aborted;
+      return {
+        createRun: mock(() =>
+          Promise.resolve({
+            startAsync: startAsyncMock,
+            resumeAsync: mock(() => Promise.resolve({ status: "success" })),
+          })
+        ),
+      } as any;
+    });
+
+    await runWizard(makeOptions());
+
+    expect(abortedAtConstruction).toBe(false);
+    // And teardown aborted it by the time the wizard returned.
+    expect(capturedClientOptions[0]?.abortSignal?.aborted).toBe(true);
   });
 });
