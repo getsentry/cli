@@ -10,6 +10,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   ANON_IDENTITY,
+  clearAuth,
   getActiveEnvVarName,
   getAuthConfig,
   getAuthToken,
@@ -18,9 +19,12 @@ import {
   isAuthenticated,
   isEnvTokenActive,
   refreshToken,
+  resetAuthRowCache,
+  resetAuthTokenCache,
   resetIdentityFingerprintCache,
   setAuthToken,
 } from "../../../src/lib/db/auth.js";
+import { getDatabase } from "../../../src/lib/db/index.js";
 import { useTestConfigDir } from "../../helpers.js";
 
 useTestConfigDir("auth-env-");
@@ -34,6 +38,8 @@ beforeEach(() => {
   delete process.env.SENTRY_AUTH_TOKEN;
   delete process.env.SENTRY_TOKEN;
   resetIdentityFingerprintCache();
+  resetAuthTokenCache();
+  resetAuthRowCache();
 });
 
 afterEach(() => {
@@ -204,7 +210,6 @@ describe("OAuth-preferred auth (#646)", () => {
 
 describe("clearAuth: integration with per-account caches", () => {
   test("clearAuth drops issue_org_cache entries (prevents cross-account leakage)", async () => {
-    const { clearAuth } = await import("../../../src/lib/db/auth.js");
     const { setCachedIssueOrg, getCachedIssueOrg } = await import(
       "../../../src/lib/db/issue-org-cache.js"
     );
@@ -321,5 +326,91 @@ describe("getIdentityFingerprint", () => {
     const fp = getIdentityFingerprint();
     setAuthToken("fresh_access", 3600, "live_refresh");
     expect(getIdentityFingerprint()).toBe(fp);
+  });
+});
+
+describe("getAuthToken memoization", () => {
+  test("returns cached value on repeated calls without re-reading the DB", () => {
+    setAuthToken("stored_token");
+    const first = getAuthToken();
+    expect(first).toBe("stored_token");
+
+    // Mutate the DB row directly behind getAuthToken's back — a cached
+    // read must not reflect this change until the cache is invalidated.
+    getDatabase().query("UPDATE auth SET token = 'mutated' WHERE id = 1").run();
+
+    // Still returns the cached value
+    expect(getAuthToken()).toBe("stored_token");
+
+    // After reset, the new value is read
+    resetAuthTokenCache();
+    expect(getAuthToken()).toBe("mutated");
+  });
+
+  test("caches the logged-out state (undefined) without re-reading", () => {
+    expect(getAuthToken()).toBeUndefined();
+
+    // Write a token directly to DB, bypassing setAuthToken. The cached
+    // undefined must persist until invalidated.
+    getDatabase()
+      .query("INSERT INTO auth (id, token, updated_at) VALUES (1, 'sneaky', ?)")
+      .run(Date.now());
+
+    expect(getAuthToken()).toBeUndefined();
+
+    resetAuthTokenCache();
+    expect(getAuthToken()).toBe("sneaky");
+  });
+
+  test("setAuthToken invalidates the cache", () => {
+    setAuthToken("token_a");
+    expect(getAuthToken()).toBe("token_a");
+
+    setAuthToken("token_b");
+    // No manual reset — setAuthToken must have invalidated the cache
+    expect(getAuthToken()).toBe("token_b");
+  });
+
+  test("clearAuth invalidates the cache", async () => {
+    setAuthToken("token_to_clear");
+    expect(getAuthToken()).toBe("token_to_clear");
+
+    await clearAuth();
+    expect(getAuthToken()).toBeUndefined();
+  });
+
+  test("env-var change requires manual cache reset (documented contract)", () => {
+    expect(getAuthToken()).toBeUndefined();
+
+    // Env mutation without reset: cache stays stale (by design).
+    process.env.SENTRY_AUTH_TOKEN = "env_token";
+    expect(getAuthToken()).toBeUndefined();
+
+    resetAuthTokenCache();
+    expect(getAuthToken()).toBe("env_token");
+  });
+});
+
+describe("refreshToken row-read memoization", () => {
+  test("setAuthToken between refreshToken calls is reflected", async () => {
+    // refreshToken reads the full row; invalidation must propagate so the
+    // second call sees the freshly stored token.
+    setAuthToken("first_token", 3600, "refresh_1");
+    const r1 = await refreshToken();
+    expect(r1.token).toBe("first_token");
+
+    setAuthToken("second_token", 3600, "refresh_2");
+    const r2 = await refreshToken();
+    expect(r2.token).toBe("second_token");
+  });
+
+  test("clearAuth invalidates the row cache", async () => {
+    setAuthToken("will_be_cleared", 3600, "refresh_x");
+    const r1 = await refreshToken();
+    expect(r1.token).toBe("will_be_cleared");
+
+    await clearAuth();
+    // With nothing stored and no env var, refreshToken throws not_authenticated
+    await expect(refreshToken()).rejects.toThrow();
   });
 });

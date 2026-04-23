@@ -153,6 +153,9 @@ export function getAuthConfig(): AuthConfig | undefined {
   return;
 }
 
+/** Memoized token. Wrapper distinguishes "not cached" from "cached as undefined". */
+let cachedAuthToken: { value: string | undefined } | undefined;
+
 /**
  * Get the active auth token.
  *
@@ -160,6 +163,15 @@ export function getAuthConfig(): AuthConfig | undefined {
  * With `SENTRY_FORCE_ENV_TOKEN=1`: checks env vars first (old behavior).
  */
 export function getAuthToken(): string | undefined {
+  if (cachedAuthToken !== undefined) {
+    return cachedAuthToken.value;
+  }
+  const value = computeAuthToken();
+  cachedAuthToken = { value };
+  return value;
+}
+
+function computeAuthToken(): string | undefined {
   const forceEnv = getEnv().SENTRY_FORCE_ENV_TOKEN?.trim();
   if (forceEnv) {
     const envToken = getEnvToken();
@@ -196,6 +208,31 @@ export function getAuthToken(): string | undefined {
   return;
 }
 
+/** Reset the memoized auth token. Tests only — call between auth-state mutations. */
+export function resetAuthTokenCache(): void {
+  cachedAuthToken = undefined;
+}
+
+/** Memoized full auth row for {@link refreshToken}. Same wrapper contract as {@link cachedAuthToken}. */
+let cachedAuthRow: { value: AuthRow | undefined } | undefined;
+
+function getCachedAuthRow(): AuthRow | undefined {
+  if (cachedAuthRow !== undefined) {
+    return cachedAuthRow.value;
+  }
+  const db = getDatabase();
+  const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
+    | AuthRow
+    | undefined;
+  cachedAuthRow = { value: row };
+  return row;
+}
+
+/** Reset the memoized auth row. Tests only — call between auth-state mutations. */
+export function resetAuthRowCache(): void {
+  cachedAuthRow = undefined;
+}
+
 export function setAuthToken(
   token: string,
   expiresIn?: number,
@@ -221,9 +258,11 @@ export function setAuthToken(
       ["id"]
     );
   });
-  // Auth row changed — drop the memoized fingerprint so the next
-  // `getIdentityFingerprint()` call reflects the new row.
+  // Auth row changed — drop memoized fingerprint, token, and row so the next
+  // read reflects the new row.
   resetIdentityFingerprintCache();
+  resetAuthTokenCache();
+  resetAuthRowCache();
 }
 
 export async function clearAuth(): Promise<void> {
@@ -239,6 +278,8 @@ export async function clearAuth(): Promise<void> {
     clearAllIssueOrgCache();
   });
   resetIdentityFingerprintCache();
+  resetAuthTokenCache();
+  resetAuthRowCache();
 
   // Dynamic import avoids the auth→response-cache→auth cycle.
   try {
@@ -424,10 +465,7 @@ export async function refreshToken(
   const { force = false } = options;
   const { AuthError } = await import("../errors.js");
 
-  const db = getDatabase();
-  const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
-    | AuthRow
-    | undefined;
+  const row = getCachedAuthRow();
 
   if (!row?.token) {
     // No stored token — try env token as fallback
