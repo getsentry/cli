@@ -582,39 +582,34 @@ describe("runWizard — MastraClient lifecycle", () => {
     expect((signal as AbortSignal).aborted).toBe(true);
   });
 
-  test("forwards a live abortSignal to MastraClient at construction", async () => {
-    // Before the wizard exits, the signal MUST NOT yet be aborted — the
-    // MastraClient is using it for in-flight fetches throughout the run.
-    // We observe this by checking the signal state inside the workflow
-    // handler (which executes while the wizard's `using` scope is active).
-    let signalDuringRun: AbortSignal | undefined;
-    startAsyncMock = mock(() => {
-      signalDuringRun = capturedClientOptions[0]?.abortSignal;
-      return Promise.resolve(mockStartResult);
-    });
-    // Re-rig the workflow mock to use the new startAsyncMock.
-    const workflow = {
-      createRun: mock(() =>
-        Promise.resolve({
-          startAsync: startAsyncMock,
-          resumeAsync: mock(() => Promise.resolve({ status: "success" })),
-        })
-      ),
-    };
+  test("signal is live (not pre-aborted) while the wizard is running", async () => {
+    // `getWorkflow` runs BEFORE `startAsync` (client.getWorkflow is called
+    // synchronously right after `new MastraClient(...)`), so the signal
+    // observed at that time is the same instance that in-flight fetches
+    // would see during the wizard. If the signal were somehow pre-aborted
+    // at construction, it would be aborted here too. This proves the
+    // `using _mastraCleanup` disposable does NOT fire until teardown.
+    let abortedAtConstruction: boolean | undefined;
     getWorkflowSpy.mockImplementation(function (this: MastraClient) {
-      capturedClientOptions.push(
-        (this as unknown as { options: { abortSignal?: AbortSignal } }).options
-      );
-      return workflow as any;
+      const opts = (
+        this as unknown as { options: { abortSignal?: AbortSignal } }
+      ).options;
+      capturedClientOptions.push(opts);
+      abortedAtConstruction = opts.abortSignal?.aborted;
+      return {
+        createRun: mock(() =>
+          Promise.resolve({
+            startAsync: startAsyncMock,
+            resumeAsync: mock(() => Promise.resolve({ status: "success" })),
+          })
+        ),
+      } as any;
     });
 
     await runWizard(makeOptions());
 
-    expect(signalDuringRun).toBeInstanceOf(AbortSignal);
-    // Signal was live at time of fetch dispatch. Post-run assertion in
-    // other tests proves it's aborted by teardown.
-    // (The .aborted state at capture time can race with the synchronous
-    // wizard completion path in tests that resolve instantly, so we only
-    // assert the signal identity is correct here.)
+    expect(abortedAtConstruction).toBe(false);
+    // And teardown aborted it by the time the wizard returned.
+    expect(capturedClientOptions[0]?.abortSignal?.aborted).toBe(true);
   });
 });

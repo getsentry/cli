@@ -424,11 +424,8 @@ async function runWizardInner(initialOptions: WizardOptions): Promise<void> {
   const abortController = new AbortController();
   using _mastraCleanup = {
     [Symbol.dispose]: (): void => {
-      // Guard against double-abort — calling abort() on an already-aborted
-      // signal is a no-op in Node/Bun, but explicit check documents intent.
-      if (!abortController.signal.aborted) {
-        abortController.abort();
-      }
+      // AbortController.abort() is spec-idempotent, so no guard needed.
+      abortController.abort();
     },
   };
 
