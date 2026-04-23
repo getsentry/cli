@@ -2,6 +2,17 @@
 
 ## Examples
 
+### Create an issue alert rule
+
+```bash
+# Create an issue alert rule with inline JSON condition/action
+sentry alert issues create my-org/my-project \
+  --name "Error Spike" \
+  --condition '{"id":"sentry.rules.conditions.first_seen_event.FirstSeenEventCondition"}' \
+  --action '{"id":"sentry.mail.actions.NotifyEmailAction","targetType":"Team","targetIdentifier":1}' \
+  --action-match any
+```
+
 ### List issue alert rules
 
 ```bash
@@ -22,6 +33,29 @@ sentry alert issues view my-org/my-project/12345
 sentry alert issues view my-org/my-project/"Error Spike"
 ```
 
+### Edit and delete an issue alert rule
+
+```bash
+# Edit issue alert name/status
+sentry alert issues edit my-org/my-project/12345 --name "Prod Error Spike" --status disabled
+
+# Delete with preview
+sentry alert issues delete my-org/my-project/12345 --dry-run
+```
+
+### Create a metric alert rule
+
+```bash
+# Create an organization metric alert rule
+sentry alert metrics create my-org \
+  --name "P95 Latency" \
+  --query "environment:prod" \
+  --aggregate "p95(transaction.duration)" \
+  --dataset transactions \
+  --time-window 5 \
+  --trigger '{"alertThreshold":500,"actions":[{"id":"sentry.mail.actions.NotifyEmailAction","targetType":"Team","targetIdentifier":1}]}'
+```
+
 ### List metric alert rules
 
 ```bash
@@ -37,4 +71,14 @@ sentry alert metrics view my-org/67890
 
 # View by name
 sentry alert metrics view my-org/"P95 latency alert"
+```
+
+### Edit and delete a metric alert rule
+
+```bash
+# Edit metric alert query/window
+sentry alert metrics edit my-org/67890 --query "environment:prod event.type:error" --time-window 15
+
+# Delete without prompt
+sentry alert metrics delete my-org/67890 --yes
 ```

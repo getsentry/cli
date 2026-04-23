@@ -20,6 +20,8 @@
  */
 
 export {
+  createIssueAlertRule,
+  createMetricAlertRule,
   deleteIssueAlertRule,
   deleteMetricAlertRule,
   getIssueAlertRule,

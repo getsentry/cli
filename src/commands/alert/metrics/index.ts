@@ -1,4 +1,5 @@
 import { buildRouteMap } from "../../../lib/route-map.js";
+import { createCommand } from "./create.js";
 import { deleteCommand } from "./delete.js";
 import { editCommand } from "./edit.js";
 import { listCommand } from "./list.js";
@@ -8,6 +9,7 @@ export const metricsRoute = buildRouteMap({
   routes: {
     list: listCommand,
     view: viewCommand,
+    create: createCommand,
     delete: deleteCommand,
     edit: editCommand,
   },
@@ -18,8 +20,9 @@ export const metricsRoute = buildRouteMap({
       "Commands:\n" +
       "  list    List metric alert rules\n" +
       "  view    View metric alert rule details\n" +
+      "  create  Create a metric alert rule\n" +
       "  delete  Delete a metric alert rule\n" +
-      "  edit    Update a metric alert rule (name, status)",
+      "  edit    Update a metric alert rule",
     hideRoute: {},
   },
 });

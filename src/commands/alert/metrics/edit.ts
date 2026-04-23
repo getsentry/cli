@@ -10,10 +10,19 @@ import {
   putMetricAlertRule,
 } from "../../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
-import { buildCommand } from "../../../lib/command.js";
+import { buildCommand, numberParser } from "../../../lib/command.js";
 import { ContextError, ValidationError } from "../../../lib/errors.js";
 import { CommandOutput } from "../../../lib/formatters/output.js";
 import { resolveTargetsFromParsedArg } from "../../../lib/resolve-target.js";
+import {
+  normalizeProjectList,
+  parseJsonObjectList,
+  parseStatusFlag,
+  statusToMetricValue,
+  validateMetricDataset,
+  validateMetricTimeWindow,
+  validateMetricTriggers,
+} from "../mutation-utils.js";
 import { parseMetricRuleArg, resolveMetricAlertRule } from "./rule-resolve.js";
 
 const USAGE_HINT =
@@ -22,35 +31,120 @@ const USAGE_HINT =
 type EditFlags = {
   readonly name?: string;
   readonly status?: "active" | "disabled" | undefined;
+  readonly query?: string;
+  readonly aggregate?: string;
+  readonly dataset?: string;
+  readonly "time-window"?: number;
+  readonly trigger?: string[];
+  readonly project?: string[];
+  readonly environment?: string;
+  readonly owner?: string;
   readonly json: boolean;
   readonly fields?: string[];
 };
 
-type EditResult = {
+type EditResult = Record<string, unknown> & {
   org: string;
   id: string;
-  name: string;
-  status: "active" | "disabled";
 };
 
-function metricStatusParser(
-  s: string | undefined
-): "active" | "disabled" | undefined {
-  if (s === undefined || s === "") {
-    return;
-  }
-  const v = s.toLowerCase().trim();
-  if (v === "active" || v === "disabled") {
-    return v;
-  }
-  throw new ValidationError(
-    `Status must be 'active' or 'disabled' (got ${JSON.stringify(s)}).`,
-    "status"
+function hasMetricMutations(flags: EditFlags): boolean {
+  return (
+    flags.name !== undefined ||
+    flags.status !== undefined ||
+    flags.query !== undefined ||
+    flags.aggregate !== undefined ||
+    flags.dataset !== undefined ||
+    flags["time-window"] !== undefined ||
+    flags.trigger !== undefined ||
+    flags.project !== undefined ||
+    flags.environment !== undefined ||
+    flags.owner !== undefined
   );
 }
 
+function validateMetricEditFlags(flags: EditFlags): void {
+  if (!hasMetricMutations(flags)) {
+    throw new ValidationError(
+      "Pass at least one editable field (for example --name or --status).",
+      "name"
+    );
+  }
+}
+
+function applyMetricCoreFields(
+  body: Record<string, unknown>,
+  flags: EditFlags
+): Record<string, unknown> {
+  if (flags.name !== undefined) {
+    body.name = flags.name;
+  }
+  if (flags.status !== undefined) {
+    body.status = statusToMetricValue(flags.status);
+  }
+  if (flags.query !== undefined) {
+    if (!flags.query.trim()) {
+      throw new ValidationError("query cannot be empty.", "query");
+    }
+    body.query = flags.query;
+  }
+  if (flags.aggregate !== undefined) {
+    if (!flags.aggregate.trim()) {
+      throw new ValidationError("aggregate cannot be empty.", "aggregate");
+    }
+    body.aggregate = flags.aggregate;
+  }
+  if (flags.dataset !== undefined) {
+    const dataset = flags.dataset.trim().toLowerCase();
+    validateMetricDataset(dataset);
+    body.dataset = dataset;
+  }
+  if (flags["time-window"] !== undefined) {
+    validateMetricTimeWindow(flags["time-window"]);
+    body.timeWindow = flags["time-window"];
+  }
+  return body;
+}
+
+function applyMetricOptionalFields(
+  body: Record<string, unknown>,
+  flags: EditFlags
+): Record<string, unknown> {
+  if (flags.trigger !== undefined) {
+    body.triggers = parseJsonObjectList(flags.trigger, "trigger");
+  }
+  if (flags.project !== undefined) {
+    body.projects = normalizeProjectList(flags.project) ?? [];
+  }
+  if (flags.environment !== undefined) {
+    body.environment =
+      flags.environment.trim() === "" ? null : flags.environment;
+  }
+  if (flags.owner !== undefined) {
+    body.owner = flags.owner.trim() === "" ? null : flags.owner;
+  }
+  return body;
+}
+
+function validateMetricBody(body: Record<string, unknown>): void {
+  validateMetricTriggers(
+    body.triggers as Record<string, unknown>[] | undefined
+  );
+  validateMetricDataset(String(body.dataset ?? ""));
+  validateMetricTimeWindow(Number(body.timeWindow ?? 0));
+  if (typeof body.query !== "string" || body.query.trim() === "") {
+    throw new ValidationError("query must be present and non-empty.", "query");
+  }
+  if (typeof body.aggregate !== "string" || body.aggregate.trim() === "") {
+    throw new ValidationError(
+      "aggregate must be present and non-empty.",
+      "aggregate"
+    );
+  }
+}
+
 function formatEdited(r: EditResult): string {
-  return `Updated metric alert rule ${r.id} in ${r.org}: ${r.name} (${r.status}).`;
+  return `Updated metric alert rule ${r.id} in ${r.org}: ${String(r.name)} (${String(r.status)}).`;
 }
 
 export const editCommand = buildCommand({
@@ -61,7 +155,8 @@ export const editCommand = buildCommand({
       "Status 'active' enables the rule; 'disabled' sets it to disabled (API status 1).\n\n" +
       "Examples:\n" +
       "  sentry alert metrics edit my-org/9 --name 'Error budget'\n" +
-      "  sentry alert metrics edit my-org/9 --status disabled",
+      "  sentry alert metrics edit my-org/9 --status disabled\n" +
+      "  sentry alert metrics edit my-org/9 --time-window 15 --dataset transactions",
   },
   output: {
     human: formatEdited,
@@ -87,20 +182,70 @@ export const editCommand = buildCommand({
       },
       status: {
         kind: "parsed",
-        parse: metricStatusParser,
+        parse: parseStatusFlag,
         optional: true,
         brief: "active or disabled",
       },
+      query: {
+        kind: "parsed",
+        parse: String,
+        optional: true,
+        brief: "Metric query filter",
+      },
+      aggregate: {
+        kind: "parsed",
+        parse: String,
+        optional: true,
+        brief: "Aggregate expression",
+      },
+      dataset: {
+        kind: "parsed",
+        parse: String,
+        optional: true,
+        brief:
+          "Dataset (errors, transactions, sessions, events, spans, metrics)",
+      },
+      "time-window": {
+        kind: "parsed",
+        parse: numberParser,
+        optional: true,
+        brief: "Evaluation window in minutes",
+      },
+      trigger: {
+        kind: "parsed",
+        parse: String,
+        variadic: true,
+        optional: true,
+        brief: "Trigger object JSON (repeatable, or pass one JSON array)",
+      },
+      project: {
+        kind: "parsed",
+        parse: String,
+        variadic: true,
+        optional: true,
+        brief: "Project slug filter (repeatable or comma-separated)",
+      },
+      environment: {
+        kind: "parsed",
+        parse: String,
+        optional: true,
+        brief: "Environment value (pass empty string to clear)",
+      },
+      owner: {
+        kind: "parsed",
+        parse: String,
+        optional: true,
+        brief: "Owner value (pass empty string to clear)",
+      },
+    },
+    aliases: {
+      t: "trigger",
+      p: "project",
     },
   },
   async *func(this: SentryContext, flags: EditFlags, arg: string) {
     const { cwd } = this;
-    if (flags.name === undefined && flags.status === undefined) {
-      throw new ValidationError(
-        "Pass at least one of --name or --status to edit the rule.",
-        "name"
-      );
-    }
+    validateMetricEditFlags(flags);
     const { ref, targetArg } = parseMetricRuleArg(arg, USAGE_HINT);
     const parsed = parseOrgProjectArg(targetArg);
     const { targets } = await resolveTargetsFromParsedArg(parsed, {
@@ -118,25 +263,17 @@ export const editCommand = buildCommand({
     );
     const body = {
       ...(await getMetricAlertRuleDocument(orgSlug, rule.id)),
-    };
-    if (flags.name !== undefined) {
-      body.name = flags.name;
-    }
-    if (flags.status === "active") {
-      body.status = 0;
-    } else if (flags.status === "disabled") {
-      body.status = 1;
-    }
+    } as Record<string, unknown>;
+    applyMetricCoreFields(body, flags);
+    applyMetricOptionalFields(body, flags);
+    validateMetricBody(body);
     const updated = await putMetricAlertRule(orgSlug, rule.id, body);
-    const name = String(updated.name ?? rule.name);
-    const st = updated.status;
-    const status: "active" | "disabled" =
-      st === 0 || st === "0" ? "active" : "disabled";
     yield new CommandOutput({
+      ...updated,
       org: orgSlug,
       id: String(updated.id ?? rule.id),
-      name,
-      status,
+      status:
+        updated.status === 0 || updated.status === "0" ? "active" : "disabled",
     } satisfies EditResult);
   },
 });

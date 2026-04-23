@@ -212,6 +212,23 @@ export async function putIssueAlertRule(
   return data;
 }
 
+/**
+ * Create an issue (project) alert rule.
+ */
+export async function createIssueAlertRule(
+  orgSlug: string,
+  projectSlug: string,
+  body: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<Record<string, unknown>>(
+    regionUrl,
+    `projects/${orgSlug}/${projectSlug}/rules/`,
+    { method: "POST", body }
+  );
+  return data;
+}
+
 // ---------------------------------------------------------------------------
 // Metric alert (org) write operations
 // ---------------------------------------------------------------------------
@@ -248,6 +265,22 @@ export async function putMetricAlertRule(
     regionUrl,
     `organizations/${orgSlug}/alert-rules/${encodeURIComponent(ruleId)}/`,
     { method: "PUT", body }
+  );
+  return data;
+}
+
+/**
+ * Create a metric (organization) alert rule.
+ */
+export async function createMetricAlertRule(
+  orgSlug: string,
+  body: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<Record<string, unknown>>(
+    regionUrl,
+    `organizations/${orgSlug}/alert-rules/`,
+    { method: "POST", body }
   );
   return data;
 }
