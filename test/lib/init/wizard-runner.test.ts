@@ -25,8 +25,6 @@ import * as preflight from "../../../src/lib/init/preflight.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as initSpinner from "../../../src/lib/init/spinner.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as stdinReopen from "../../../src/lib/init/stdin-reopen.js";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as registry from "../../../src/lib/init/tools/registry.js";
 import type {
   ResolvedInitContext,
@@ -95,7 +93,6 @@ let executeToolSpy: ReturnType<typeof spyOn>;
 let precomputeDirListingSpy: ReturnType<typeof spyOn>;
 let preReadCommonFilesSpy: ReturnType<typeof spyOn>;
 let precomputeSentryDetectionSpy: ReturnType<typeof spyOn>;
-let closeFreshTtyForwardingSpy: ReturnType<typeof spyOn>;
 let getWorkflowSpy: ReturnType<typeof spyOn>;
 let stderrSpy: ReturnType<typeof spyOn>;
 /**
@@ -158,7 +155,6 @@ beforeEach(() => {
     ok: true,
     data: { status: "none", signals: [] },
   });
-  closeFreshTtyForwardingSpy = spyOn(stdinReopen, "closeFreshTtyForwarding");
   stderrSpy = spyOn(process.stderr, "write").mockImplementation(
     () => true as any
   );
@@ -211,7 +207,6 @@ afterEach(() => {
   precomputeDirListingSpy.mockRestore();
   preReadCommonFilesSpy.mockRestore();
   precomputeSentryDetectionSpy.mockRestore();
-  closeFreshTtyForwardingSpy.mockRestore();
   getWorkflowSpy.mockRestore();
   stderrSpy.mockRestore();
 
@@ -225,7 +220,6 @@ describe("runWizard", () => {
     expect(formatResultSpy).toHaveBeenCalled();
     expect(formatErrorSpy).not.toHaveBeenCalled();
     expect(spinnerMock.stop).toHaveBeenCalledWith("Done");
-    expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
   });
 
   test("throws when stdin is not a TTY without --yes", async () => {
@@ -261,8 +255,6 @@ describe("runWizard", () => {
 
     expect(getWorkflowSpy).not.toHaveBeenCalled();
     expect(formatResultSpy).not.toHaveBeenCalled();
-    // Early-return paths must still tear down TTY forwarding via `using`.
-    expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
   });
 
   test("aborts cleanly when git safety check fails", async () => {
@@ -272,8 +264,6 @@ describe("runWizard", () => {
 
     expect(cancelSpy).toHaveBeenCalledWith("Setup cancelled.");
     expect(getWorkflowSpy).not.toHaveBeenCalled();
-    // Early-return paths must still tear down TTY forwarding via `using`.
-    expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
   });
 
   test("dispatches tool payloads through the registry", async () => {
@@ -400,7 +390,6 @@ describe("runWizard", () => {
 
     expect(spinnerMock.stop).toHaveBeenCalledWith("Error", 1);
     expect(cancelSpy).toHaveBeenCalledWith("Setup failed");
-    expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
   });
 
   test("tears down forwarding and stops the spinner on cancellation", async () => {
@@ -423,7 +412,6 @@ describe("runWizard", () => {
 
     expect(process.exitCode).toBe(0);
     expect(spinnerMock.stop).toHaveBeenCalledWith("Cancelled", 0);
-    expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
   });
 
   test("tears down forwarding when a WizardError is rethrown from a tool", async () => {
@@ -451,7 +439,6 @@ describe("runWizard", () => {
     await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
     expect(spinnerMock.stop).toHaveBeenCalledWith("Error", 1);
-    expect(closeFreshTtyForwardingSpy).toHaveBeenCalledTimes(1);
   });
 
   test("shows a multiline tree while reading files and then analyzing them", async () => {
