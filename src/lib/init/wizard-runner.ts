@@ -38,10 +38,7 @@ import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
 import { resolveInitContext } from "./preflight.js";
 import { createWizardSpinner } from "./spinner.js";
-import {
-  closeFreshTtyForwarding,
-  forwardFreshTtyToStdin,
-} from "./stdin-reopen.js";
+import { forwardFreshTtyToStdin } from "./stdin-reopen.js";
 import { describeTool, executeTool } from "./tools/registry.js";
 import type {
   ResolvedInitContext,
@@ -321,14 +318,6 @@ async function preamble(
   yes: boolean,
   dryRun: boolean
 ): Promise<boolean> {
-  // Bun's compiled binaries don't deliver keystrokes through TTY fds
-  // inherited via shell redirection (e.g. `curl | bash` →
-  // `exec sentry init </dev/tty` in install.sh). Open a fresh `/dev/tty` and
-  // forward its data events onto process.stdin so clack's prompts receive
-  // input. Also backfills process.stdin.isTTY when Bun leaves it undefined
-  // so clack's internal `isTTY && setRawMode(true)` gate still fires.
-  forwardFreshTtyToStdin();
-
   if (!(yes || dryRun || process.stdin.isTTY)) {
     throw new WizardError(
       "Interactive mode requires a terminal. Use --yes for non-interactive mode.",
@@ -370,18 +359,22 @@ async function preamble(
   return true;
 }
 
-export async function runWizard(initialOptions: WizardOptions): Promise<void> {
-  try {
-    await runWizardInner(initialOptions);
-  } finally {
-    // The wizard owns the temporary `/dev/tty` forwarding installed in
-    // preamble(), so teardown must run on every exit path.
-    closeFreshTtyForwarding();
-  }
-}
-
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard orchestration with error handling branches
-async function runWizardInner(initialOptions: WizardOptions): Promise<void> {
+export async function runWizard(initialOptions: WizardOptions): Promise<void> {
+  // Bun's compiled binaries don't deliver keystrokes through TTY fds
+  // inherited via shell redirection (e.g. `curl | bash` →
+  // `exec sentry init </dev/tty` in install.sh). Open a fresh `/dev/tty` and
+  // forward its data events onto process.stdin so clack's prompts receive
+  // input. Also backfills process.stdin.isTTY when Bun leaves it undefined
+  // so clack's internal `isTTY && setRawMode(true)` gate still fires.
+  //
+  // The `using` declaration guarantees teardown on every exit path (success,
+  // return, throw) via the Disposable returned by forwardFreshTtyToStdin().
+  // No explicit try/finally needed — the compiler inserts the call for us.
+  // `_tty` binds the disposable's lifetime to this function scope; the
+  // leading underscore signals it's lifecycle-only and not read below.
+  using _tty = forwardFreshTtyToStdin();
+
   const { directory, yes, dryRun, features } = initialOptions;
 
   if (!(await preamble(directory, yes, dryRun))) {
