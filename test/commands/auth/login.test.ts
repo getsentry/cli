@@ -1,16 +1,14 @@
 /**
  * Login Command Tests
  *
- * Unit tests for the --token and --force authentication paths in src/commands/auth/login.ts.
- * Uses spyOn to mock api-client, db/auth, db/user, and interactive-login
- * to cover all branches without real HTTP calls or database access.
+ * Unit tests for the --token, --force, and interactive TTY re-authentication
+ * paths in src/commands/auth/login.ts. Uses spyOn to mock api-client, db/auth,
+ * db/user, and interactive-login to cover all branches without real HTTP
+ * calls or database access.
  *
- * Status messages go through consola (→ stderr). Logger message content is NOT
- * asserted here because mock.module in login-reauth.test.ts can replace the
- * logger module globally. Tests verify behavior via spy assertions instead.
- *
- * Tests that require isatty(0) to return true (interactive TTY prompt tests)
- * live in test/isolated/login-reauth.test.ts to avoid mock.module pollution.
+ * The interactive TTY prompt tests use mock.module() at the top of this file
+ * to stub node:tty (so isatty(0) returns true) and the logger module (so
+ * `.prompt()` is controllable).
  */
 
 import {
@@ -22,7 +20,65 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import { loginCommand } from "../../../src/commands/auth/login.js";
+
+// Mock isatty to simulate interactive terminal for the re-auth prompt path.
+// Bun's ESM wrapper for CJS built-ins exposes `default` + `ReadStream` +
+// `WriteStream` — all must be present.
+const mockIsatty = mock(() => false);
+class FakeReadStream {}
+class FakeWriteStream {}
+const ttyExports = {
+  isatty: mockIsatty,
+  ReadStream: FakeReadStream,
+  WriteStream: FakeWriteStream,
+};
+mock.module("node:tty", () => ({
+  ...ttyExports,
+  default: ttyExports,
+}));
+
+/** No-op placeholder for unused logger methods. */
+function noop() {
+  // intentional no-op
+}
+
+// Mock the logger module to intercept the .prompt() call made by the
+// module-scoped `log = logger.withTag("auth.login")` in login.ts.
+const mockPrompt = mock((): Promise<boolean | symbol> => Promise.resolve(true));
+const fakeLog: {
+  prompt: typeof mockPrompt;
+  info: ReturnType<typeof mock>;
+  warn: ReturnType<typeof mock>;
+  error: ReturnType<typeof mock>;
+  debug: ReturnType<typeof mock>;
+  success: ReturnType<typeof mock>;
+  withTag: () => typeof fakeLog;
+} = {
+  prompt: mockPrompt,
+  info: mock(noop),
+  warn: mock(noop),
+  error: mock(noop),
+  debug: mock(noop),
+  success: mock(noop),
+  withTag: () => fakeLog,
+};
+mock.module("../../../src/lib/logger.js", () => ({
+  logger: fakeLog,
+  setLogLevel: mock(noop),
+  attachSentryReporter: mock(noop),
+  LOG_LEVEL_NAMES: ["error", "warn", "log", "info", "debug", "trace"],
+  LOG_LEVEL_ENV_VAR: "SENTRY_LOG_LEVEL",
+  parseLogLevel: (name: string) => {
+    const levels = ["error", "warn", "log", "info", "debug", "trace"];
+    const idx = levels.indexOf(name.toLowerCase().trim());
+    return idx === -1 ? 3 : idx;
+  },
+  getEnvLogLevel: () => null,
+}));
+
+// Dynamic import: must run AFTER mock.module() so login.ts picks up fakeLog.
+const { loginCommand } = await import("../../../src/commands/auth/login.js");
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
@@ -54,9 +110,9 @@ const SAMPLE_USER = {
  *
  * `getStdout()` returns rendered command output (human formatter → context.stdout).
  *
- * Logger messages (early-exit diagnostics) are NOT captured here because
- * mock.module in login-reauth.test.ts can replace the logger module globally.
- * Tests for logger message content live in test/isolated/login-reauth.test.ts.
+ * Logger messages (early-exit diagnostics) go through the fakeLog mocked at
+ * the top of this file. Tests that care about specific prompt content inspect
+ * `mockPrompt.mock.calls` directly.
  */
 function createContext() {
   const stdoutChunks: string[] = [];
@@ -347,5 +403,179 @@ describe("loginCommand.func --token path", () => {
 
     // Env token no longer blocks — login proceeds
     expect(runInteractiveLoginSpy).toHaveBeenCalled();
+  });
+});
+
+/**
+ * Tests for the interactive TTY re-authentication prompt.
+ *
+ * Uses the module-level `mock.module()` on node:tty (so `isatty(0)` returns
+ * true) and the logger (so `.prompt()` is controllable).
+ */
+describe("login re-authentication interactive prompt", () => {
+  let isAuthenticatedSpy: ReturnType<typeof spyOn>;
+  let isEnvTokenActiveSpy: ReturnType<typeof spyOn>;
+  let clearAuthSpy: ReturnType<typeof spyOn>;
+  let runInteractiveLoginSpy: ReturnType<typeof spyOn>;
+  let getUserInfoSpy: ReturnType<typeof spyOn>;
+  let listOrgsUncachedSpy: ReturnType<typeof spyOn>;
+  let func: LoginFunc;
+
+  function createPromptContext() {
+    return {
+      stdout: { write: mock(() => true) },
+      stderr: { write: mock(() => true) },
+      cwd: "/tmp",
+    };
+  }
+
+  beforeEach(async () => {
+    isAuthenticatedSpy = spyOn(dbAuth, "isAuthenticated");
+    isEnvTokenActiveSpy = spyOn(dbAuth, "isEnvTokenActive");
+    clearAuthSpy = spyOn(dbAuth, "clearAuth");
+    runInteractiveLoginSpy = spyOn(interactiveLogin, "runInteractiveLogin");
+    getUserInfoSpy = spyOn(dbUser, "getUserInfo");
+    // Prevent warmOrgCache() fire-and-forget from hitting real fetch.
+    listOrgsUncachedSpy = spyOn(apiClient, "listOrganizationsUncached");
+    listOrgsUncachedSpy.mockResolvedValue([]);
+
+    // Defaults
+    isEnvTokenActiveSpy.mockReturnValue(false);
+    clearAuthSpy.mockResolvedValue(undefined);
+    runInteractiveLoginSpy.mockResolvedValue(true);
+    mockIsatty.mockReturnValue(true);
+    mockPrompt.mockClear();
+
+    func = (await loginCommand.loader()) as unknown as LoginFunc;
+  });
+
+  afterEach(() => {
+    isAuthenticatedSpy.mockRestore();
+    isEnvTokenActiveSpy.mockRestore();
+    clearAuthSpy.mockRestore();
+    runInteractiveLoginSpy.mockRestore();
+    getUserInfoSpy.mockRestore();
+    listOrgsUncachedSpy.mockRestore();
+    mockIsatty.mockReturnValue(false);
+  });
+
+  test("shows prompt with user identity when authenticated on TTY", async () => {
+    isAuthenticatedSpy.mockReturnValue(true);
+    getUserInfoSpy.mockReturnValue({
+      userId: "42",
+      name: "Jane Doe",
+      email: "jane@example.com",
+    });
+    mockPrompt.mockResolvedValue(true);
+
+    const context = createPromptContext();
+    await func.call(context, { force: false, timeout: 900 });
+
+    expect(mockPrompt).toHaveBeenCalledTimes(1);
+    const promptMessage = (mockPrompt.mock.calls[0] as unknown as string[])[0];
+    expect(promptMessage).toContain("Jane Doe");
+    expect(promptMessage).toContain("jane@example.com");
+    expect(promptMessage).toContain("Re-authenticate?");
+  });
+
+  test("shows 'current user' fallback when no cached user info", async () => {
+    isAuthenticatedSpy.mockReturnValue(true);
+    getUserInfoSpy.mockReturnValue(undefined);
+    mockPrompt.mockResolvedValue(true);
+
+    const context = createPromptContext();
+    await func.call(context, { force: false, timeout: 900 });
+
+    expect(mockPrompt).toHaveBeenCalledTimes(1);
+    const promptMessage = (mockPrompt.mock.calls[0] as unknown as string[])[0];
+    expect(promptMessage).toContain("current user");
+  });
+
+  test("confirm: clears auth and proceeds to login", async () => {
+    isAuthenticatedSpy.mockReturnValue(true);
+    getUserInfoSpy.mockReturnValue(undefined);
+    mockPrompt.mockResolvedValue(true);
+
+    const context = createPromptContext();
+    await func.call(context, { force: false, timeout: 900 });
+
+    expect(clearAuthSpy).toHaveBeenCalled();
+    expect(runInteractiveLoginSpy).toHaveBeenCalled();
+  });
+
+  test("decline: returns without re-auth", async () => {
+    isAuthenticatedSpy.mockReturnValue(true);
+    getUserInfoSpy.mockReturnValue(undefined);
+    mockPrompt.mockResolvedValue(false);
+
+    const context = createPromptContext();
+    await func.call(context, { force: false, timeout: 900 });
+
+    expect(mockPrompt).toHaveBeenCalled();
+    expect(clearAuthSpy).not.toHaveBeenCalled();
+    expect(runInteractiveLoginSpy).not.toHaveBeenCalled();
+  });
+
+  test("cancel (Ctrl+C): returns without re-auth", async () => {
+    isAuthenticatedSpy.mockReturnValue(true);
+    getUserInfoSpy.mockReturnValue(undefined);
+    // consola returns Symbol(clack:cancel) on Ctrl+C — truthy but not `true`.
+    mockPrompt.mockResolvedValue(Symbol("clack:cancel"));
+
+    const context = createPromptContext();
+    await func.call(context, { force: false, timeout: 900 });
+
+    expect(mockPrompt).toHaveBeenCalled();
+    expect(clearAuthSpy).not.toHaveBeenCalled();
+    expect(runInteractiveLoginSpy).not.toHaveBeenCalled();
+  });
+
+  test("--force skips prompt even on TTY", async () => {
+    isAuthenticatedSpy.mockReturnValue(true);
+    getUserInfoSpy.mockReturnValue(undefined);
+
+    const context = createPromptContext();
+    await func.call(context, { force: true, timeout: 900 });
+
+    expect(mockPrompt).not.toHaveBeenCalled();
+    expect(clearAuthSpy).toHaveBeenCalled();
+    expect(runInteractiveLoginSpy).toHaveBeenCalled();
+  });
+
+  test("confirm + --token: clears auth and re-authenticates with token", async () => {
+    isAuthenticatedSpy.mockReturnValue(true);
+    getUserInfoSpy.mockReturnValue(undefined);
+    mockPrompt.mockResolvedValue(true);
+
+    const setAuthTokenSpy = spyOn(dbAuth, "setAuthToken");
+    setAuthTokenSpy.mockImplementation(noop);
+    const getUserRegionsSpy = spyOn(apiClient, "getUserRegions");
+    getUserRegionsSpy.mockResolvedValue([]);
+    const getCurrentUserSpy = spyOn(apiClient, "getCurrentUser");
+    getCurrentUserSpy.mockResolvedValue({
+      id: "42",
+      name: "Jane",
+      username: "jane",
+      email: "jane@example.com",
+    });
+    const setUserInfoSpy = spyOn(dbUser, "setUserInfo");
+    setUserInfoSpy.mockReturnValue(undefined);
+
+    const context = createPromptContext();
+    try {
+      await func.call(context, {
+        token: "new-token",
+        force: false,
+        timeout: 900,
+      });
+
+      expect(clearAuthSpy).toHaveBeenCalled();
+      expect(setAuthTokenSpy).toHaveBeenCalledWith("new-token");
+    } finally {
+      setAuthTokenSpy.mockRestore();
+      getUserRegionsSpy.mockRestore();
+      getCurrentUserSpy.mockRestore();
+      setUserInfoSpy.mockRestore();
+    }
   });
 });

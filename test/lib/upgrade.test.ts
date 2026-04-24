@@ -2,13 +2,119 @@
  * Upgrade Module Tests
  *
  * Tests for upgrade detection and logic.
+ *
+ * The `executeUpgrade` and `detectInstallationMethod` subprocess tests use
+ * `mock.module("node:child_process", ...)` at the top of this file to
+ * intercept `spawn()` calls via a swappable `spawnImpl`. Non-spawn exports
+ * pass through to the real `node:child_process`.
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
+import {
+  execFile,
+  execFileSync,
+  execSync,
+  fork,
+  spawnSync,
+} from "node:child_process";
+import { EventEmitter } from "node:events";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
+
+// ---------------------------------------------------------------------------
+// Fake ChildProcess helpers used by the subprocess-based upgrade tests.
+// ---------------------------------------------------------------------------
+
+type FakeStdio = {
+  on: (event: string, cb: (chunk: Buffer) => void) => FakeStdio;
+  resume: () => void;
+};
+
+type FakeProc = EventEmitter & {
+  stdout: FakeStdio;
+  stderr: FakeStdio;
+};
+
+/** No-op placeholder for stream methods we don't exercise. */
+function noopStream() {
+  // intentional no-op
+}
+
+/**
+ * Build a minimal fake ChildProcess EventEmitter that emits 'close'
+ * with the given exit code after a microtask tick.
+ */
+function fakeProcess(exitCode: number, stdoutData = ""): FakeProc {
+  const emitter = new EventEmitter() as FakeProc;
+
+  const listeners: Array<(chunk: Buffer) => void> = [];
+  emitter.stdout = {
+    on: (_event: string, cb: (chunk: Buffer) => void) => {
+      listeners.push(cb);
+      return emitter.stdout;
+    },
+    resume: noopStream,
+  };
+  emitter.stderr = {
+    on: (_event: string, _cb: (chunk: Buffer) => void) => emitter.stderr,
+    resume: noopStream,
+  };
+
+  queueMicrotask(() => {
+    if (stdoutData) {
+      for (const cb of listeners) {
+        cb(Buffer.from(stdoutData));
+      }
+    }
+    emitter.emit("close", exitCode);
+  });
+
+  return emitter;
+}
+
+/** Build a fake ChildProcess that emits an 'error' event instead of closing. */
+function fakeErrorProcess(message: string): FakeProc {
+  const emitter = new EventEmitter() as FakeProc;
+  emitter.stdout = {
+    on: (_e: string, _cb: (chunk: Buffer) => void) => emitter.stdout,
+    resume: noopStream,
+  };
+  emitter.stderr = {
+    on: (_e: string, _cb: (chunk: Buffer) => void) => emitter.stderr,
+    resume: noopStream,
+  };
+  queueMicrotask(() => emitter.emit("error", new Error(message)));
+  return emitter;
+}
+
+// Swappable spawn implementation. Individual tests replace this before
+// calling the code under test. Must be declared before mock.module() so the
+// returned closure captures the live binding.
+let spawnImpl: (cmd: string, args: string[], opts: object) => FakeProc = () =>
+  fakeProcess(0);
+
+mock.module("node:child_process", () => ({
+  execFile,
+  execFileSync,
+  execSync,
+  fork,
+  spawnSync,
+  spawn: (cmd: string, args: string[], opts: object) =>
+    spawnImpl(cmd, args, opts),
+}));
+
+// Dynamic imports: must run AFTER mock.module() so upgrade.ts picks up the
+// mocked spawn.
 import { isEnoentSpawnError } from "../../src/commands/cli/upgrade.js";
 import {
   acquireLock,
@@ -22,7 +128,8 @@ import {
   setInstallInfo,
 } from "../../src/lib/db/install-info.js";
 import { UpgradeError } from "../../src/lib/errors.js";
-import {
+
+const {
   detectInstallationMethod,
   detectPackageManagerFromPath,
   downloadBinaryToTemp,
@@ -35,7 +142,8 @@ import {
   parseInstallationMethod,
   startCleanupOldBinary,
   versionExists,
-} from "../../src/lib/upgrade.js";
+} = await import("../../src/lib/upgrade.js");
+
 import { TEST_TMP_DIR, useTestConfigDir } from "../helpers.js";
 
 // Store original fetch for restoration
@@ -1701,5 +1809,248 @@ describe("isEnoentSpawnError", () => {
     expect(isEnoentSpawnError(new Error("permission denied"))).toBe(false);
     expect(isEnoentSpawnError("string error")).toBe(false);
     expect(isEnoentSpawnError(null)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// executeUpgrade — brew
+// ---------------------------------------------------------------------------
+
+describe("executeUpgrade (brew)", () => {
+  test("returns null on successful brew upgrade", async () => {
+    spawnImpl = () => fakeProcess(0);
+    expect(await executeUpgrade("brew", "1.0.0")).toBeNull();
+  });
+
+  test("throws UpgradeError on non-zero brew exit", async () => {
+    spawnImpl = () => fakeProcess(1);
+    try {
+      await executeUpgrade("brew", "1.0.0");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(UpgradeError);
+      expect((err as UpgradeError).reason).toBe("execution_failed");
+      expect((err as UpgradeError).message).toContain("exit code 1");
+    }
+  });
+
+  test("throws UpgradeError on brew spawn error", async () => {
+    spawnImpl = () => fakeErrorProcess("brew not found");
+    try {
+      await executeUpgrade("brew", "1.0.0");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(UpgradeError);
+      expect((err as UpgradeError).reason).toBe("execution_failed");
+      expect((err as UpgradeError).message).toContain("brew not found");
+    }
+  });
+
+  test("invokes brew with correct arguments", async () => {
+    let capturedCmd = "";
+    let capturedArgs: string[] = [];
+    let capturedOpts: object = {};
+    spawnImpl = (cmd, args, opts) => {
+      capturedCmd = cmd;
+      capturedArgs = args;
+      capturedOpts = opts;
+      return fakeProcess(0);
+    };
+    await executeUpgrade("brew", "1.0.0");
+    expect(capturedCmd).toBe("brew");
+    expect(capturedArgs).toEqual(["upgrade", "getsentry/tools/sentry"]);
+    expect(capturedOpts).toHaveProperty("shell", process.platform === "win32");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// executeUpgrade — package managers (npm, pnpm, bun, yarn)
+// ---------------------------------------------------------------------------
+
+describe("executeUpgrade (package managers)", () => {
+  test("npm: returns null on success", async () => {
+    spawnImpl = () => fakeProcess(0);
+    expect(await executeUpgrade("npm", "1.0.0")).toBeNull();
+  });
+
+  test("npm: uses correct install arguments", async () => {
+    let capturedCmd = "";
+    let capturedArgs: string[] = [];
+    let capturedOpts: object = {};
+    spawnImpl = (cmd, args, opts) => {
+      capturedCmd = cmd;
+      capturedArgs = args;
+      capturedOpts = opts;
+      return fakeProcess(0);
+    };
+    await executeUpgrade("npm", "1.2.3");
+    expect(capturedCmd).toBe("npm");
+    expect(capturedArgs).toEqual(["install", "-g", "sentry@1.2.3"]);
+    expect(capturedOpts).toHaveProperty("shell", process.platform === "win32");
+  });
+
+  test("pnpm: uses correct install arguments", async () => {
+    let capturedArgs: string[] = [];
+    spawnImpl = (_cmd, args) => {
+      capturedArgs = args;
+      return fakeProcess(0);
+    };
+    await executeUpgrade("pnpm", "1.2.3");
+    expect(capturedArgs).toEqual(["install", "-g", "sentry@1.2.3"]);
+  });
+
+  test("bun: uses correct install arguments", async () => {
+    let capturedArgs: string[] = [];
+    spawnImpl = (_cmd, args) => {
+      capturedArgs = args;
+      return fakeProcess(0);
+    };
+    await executeUpgrade("bun", "1.2.3");
+    expect(capturedArgs).toEqual(["install", "-g", "sentry@1.2.3"]);
+  });
+
+  test("yarn: uses 'global add' arguments", async () => {
+    let capturedCmd = "";
+    let capturedArgs: string[] = [];
+    let capturedOpts: object = {};
+    spawnImpl = (cmd, args, opts) => {
+      capturedCmd = cmd;
+      capturedArgs = args;
+      capturedOpts = opts;
+      return fakeProcess(0);
+    };
+    await executeUpgrade("yarn", "1.2.3");
+    expect(capturedCmd).toBe("yarn");
+    expect(capturedArgs).toEqual(["global", "add", "sentry@1.2.3"]);
+    expect(capturedOpts).toHaveProperty("shell", process.platform === "win32");
+  });
+
+  test("npm: throws UpgradeError on non-zero exit", async () => {
+    spawnImpl = () => fakeProcess(1);
+    try {
+      await executeUpgrade("npm", "1.0.0");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(UpgradeError);
+      expect((err as UpgradeError).reason).toBe("execution_failed");
+      expect((err as UpgradeError).message).toContain("npm install failed");
+    }
+  });
+
+  test("npm: throws UpgradeError on spawn error", async () => {
+    spawnImpl = () => fakeErrorProcess("npm not found");
+    try {
+      await executeUpgrade("npm", "1.0.0");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(UpgradeError);
+      expect((err as UpgradeError).reason).toBe("execution_failed");
+      expect((err as UpgradeError).message).toContain("npm not found");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// executeUpgrade — unknown method (default switch case)
+// ---------------------------------------------------------------------------
+
+describe("executeUpgrade (unknown method)", () => {
+  test("throws UpgradeError with unknown_method reason", async () => {
+    try {
+      await executeUpgrade("unknown" as never, "1.0.0");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(UpgradeError);
+      expect((err as UpgradeError).reason).toBe("unknown_method");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runCommand via isInstalledWith (indirect coverage of runCommand)
+// ---------------------------------------------------------------------------
+
+describe("detectInstallationMethod — legacy pm detection via isInstalledWith", () => {
+  useTestConfigDir("test-detect-legacy-");
+
+  let originalExecPath: string;
+
+  beforeEach(() => {
+    originalExecPath = process.execPath;
+    // Non-Homebrew, non-known-curl execPath so detection falls through to pm checks
+    Object.defineProperty(process, "execPath", {
+      value: "/usr/bin/sentry",
+      configurable: true,
+    });
+    clearInstallInfo();
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, "execPath", {
+      value: originalExecPath,
+      configurable: true,
+    });
+    clearInstallInfo();
+  });
+
+  test("detects npm when 'npm list -g sentry' output includes 'sentry@'", async () => {
+    let capturedOpts: object = {};
+    spawnImpl = (_cmd, args, opts) => {
+      capturedOpts = opts;
+      return fakeProcess(0, args.includes("sentry") ? "sentry@1.0.0" : "");
+    };
+    const method = await detectInstallationMethod();
+    expect(method).toBe("npm");
+    // runCommand passes shell: true on Windows for .cmd compatibility
+    expect(capturedOpts).toHaveProperty("shell", process.platform === "win32");
+  });
+
+  test("detects yarn when 'yarn global list' output includes 'sentry@'", async () => {
+    // npm is checked first — make npm/pnpm/bun return empty; only yarn matches
+    spawnImpl = (cmd) => {
+      if (cmd === "yarn") return fakeProcess(0, "sentry@1.0.0");
+      return fakeProcess(0, "");
+    };
+    const method = await detectInstallationMethod();
+    expect(method).toBe("yarn");
+  });
+
+  test("returns 'unknown' when no package manager lists sentry", async () => {
+    spawnImpl = () => fakeProcess(0, ""); // all return empty stdout
+    const method = await detectInstallationMethod();
+    expect(method).toBe("unknown");
+  });
+
+  test("returns 'unknown' when all package manager spawns error", async () => {
+    spawnImpl = () => fakeErrorProcess("command not found");
+    const method = await detectInstallationMethod();
+    expect(method).toBe("unknown");
+  });
+
+  test("auto-saves detected method when non-unknown", async () => {
+    spawnImpl = (_cmd, args) =>
+      fakeProcess(0, args.includes("sentry") ? "sentry@2.0.0" : "");
+    await detectInstallationMethod();
+    // After detection, install info should be auto-saved with method=npm
+    const { getInstallInfo } = await import("../../src/lib/db/install-info.js");
+    const stored = getInstallInfo();
+    expect(stored?.method).toBe("npm");
+  });
+
+  test("returns stored method on second call (auto-save fast path)", async () => {
+    // First call: npm detected and auto-saved
+    spawnImpl = (_cmd, args) =>
+      fakeProcess(0, args.includes("sentry") ? "sentry@1.0.0" : "");
+    await detectInstallationMethod();
+
+    // Second call: spawn should not be called again (stored info takes precedence)
+    let spawnCalled = false;
+    spawnImpl = () => {
+      spawnCalled = true;
+      return fakeProcess(0, "sentry@1.0.0");
+    };
+    const method = await detectInstallationMethod();
+    expect(method).toBe("npm");
+    expect(spawnCalled).toBe(false);
   });
 });

@@ -14,10 +14,67 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import {
-  parsePositionalArgs,
-  viewCommand,
-} from "../../../src/commands/log/view.js";
+
+// Mock isatty to simulate an interactive terminal for the --web prompt path.
+// Bun's ESM wrapper for CJS built-ins exposes a `default` re-export plus
+// `ReadStream` / `WriteStream` — all must be present or Bun throws
+// "Missing 'default' export in module 'node:tty'".
+const mockIsatty = mock(() => false);
+class FakeReadStream {}
+class FakeWriteStream {}
+const ttyExports = {
+  isatty: mockIsatty,
+  ReadStream: FakeReadStream,
+  WriteStream: FakeWriteStream,
+};
+mock.module("node:tty", () => ({
+  ...ttyExports,
+  default: ttyExports,
+}));
+
+/** No-op placeholder for unused logger methods. */
+function noop() {
+  // intentional no-op
+}
+
+// Mock the logger module to intercept the .prompt() call made by the
+// module-scoped `log = logger.withTag("log-view")` in view.ts.
+const mockPrompt = mock(() => Promise.resolve(true));
+const fakeLog: {
+  prompt: typeof mockPrompt;
+  warn: ReturnType<typeof mock>;
+  info: ReturnType<typeof mock>;
+  error: ReturnType<typeof mock>;
+  debug: ReturnType<typeof mock>;
+  withTag: () => typeof fakeLog;
+} = {
+  prompt: mockPrompt,
+  warn: mock(noop),
+  info: mock(noop),
+  error: mock(noop),
+  debug: mock(noop),
+  withTag: () => fakeLog,
+};
+mock.module("../../../src/lib/logger.js", () => ({
+  logger: fakeLog,
+  setLogLevel: mock(noop),
+  attachSentryReporter: mock(noop),
+  LOG_LEVEL_NAMES: ["error", "warn", "log", "info", "debug", "trace"],
+  LOG_LEVEL_ENV_VAR: "SENTRY_LOG_LEVEL",
+  parseLogLevel: (name: string) => {
+    const levels = ["error", "warn", "log", "info", "debug", "trace"];
+    const idx = levels.indexOf(name.toLowerCase().trim());
+    return idx === -1 ? 3 : idx;
+  },
+  getEnvLogLevel: () => null,
+}));
+
+// Dynamic import: must load AFTER mock.module() registrations above so the
+// `log = logger.withTag(...)` binding inside view.ts picks up fakeLog.
+const { parsePositionalArgs, viewCommand } = await import(
+  "../../../src/commands/log/view.js"
+);
+
 import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
@@ -532,5 +589,102 @@ describe("viewCommand.func", () => {
       expect(msg).toContain("past the 90-day log retention");
       expect(msg).not.toContain("was sent within the last 90 days");
     }
+  });
+});
+
+/**
+ * Tests for the --web interactive prompt path.
+ *
+ * Uses the module-level `mock.module()` on `node:tty` and the logger (set at
+ * the top of this file) to simulate an interactive terminal and control the
+ * prompt response.
+ */
+describe("log view --web interactive prompt", () => {
+  const PROMPT_ID1 = "aaaa1111bbbb2222cccc3333dddd4444";
+  const PROMPT_ID2 = "1111222233334444555566667777aaaa";
+  let openInBrowserSpy: ReturnType<typeof spyOn>;
+
+  function createPromptMockContext() {
+    const stdoutWrite = mock(() => true);
+    return {
+      context: {
+        stdout: { write: stdoutWrite },
+        stderr: { write: mock(() => true) },
+        cwd: "/tmp",
+      },
+      stdoutWrite,
+    };
+  }
+
+  beforeEach(() => {
+    openInBrowserSpy = spyOn(browser, "openInBrowser");
+    mockIsatty.mockReturnValue(true);
+    mockPrompt.mockClear();
+  });
+
+  afterEach(() => {
+    openInBrowserSpy.mockRestore();
+    mockIsatty.mockReturnValue(false);
+  });
+
+  test("prompts and opens all tabs when user confirms", async () => {
+    mockPrompt.mockResolvedValue(true);
+    openInBrowserSpy.mockResolvedValue(undefined);
+
+    const { context } = createPromptMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: false, web: true },
+      "my-org/proj",
+      PROMPT_ID1,
+      PROMPT_ID2
+    );
+
+    expect(mockPrompt).toHaveBeenCalled();
+    expect(openInBrowserSpy).toHaveBeenCalledTimes(2);
+    const url1 = openInBrowserSpy.mock.calls[0][0] as string;
+    const url2 = openInBrowserSpy.mock.calls[1][0] as string;
+    expect(url1).toContain(PROMPT_ID1);
+    expect(url2).toContain(PROMPT_ID2);
+  });
+
+  test("prompts and aborts when user declines", async () => {
+    mockPrompt.mockResolvedValue(false);
+    openInBrowserSpy.mockResolvedValue(undefined);
+
+    const { context } = createPromptMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: false, web: true },
+      "my-org/proj",
+      PROMPT_ID1,
+      PROMPT_ID2
+    );
+
+    expect(mockPrompt).toHaveBeenCalled();
+    expect(openInBrowserSpy).not.toHaveBeenCalled();
+  });
+
+  test("aborts when user cancels prompt with Ctrl+C (truthy Symbol)", async () => {
+    // consola returns Symbol(clack:cancel) on Ctrl+C — truthy but not `true`.
+    // Cast needed because the mock is typed as boolean but consola actually
+    // returns a Symbol on cancel.
+    mockPrompt.mockResolvedValue(Symbol("clack:cancel") as unknown as boolean);
+    openInBrowserSpy.mockResolvedValue(undefined);
+
+    const { context } = createPromptMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: false, web: true },
+      "my-org/proj",
+      PROMPT_ID1,
+      PROMPT_ID2
+    );
+
+    expect(mockPrompt).toHaveBeenCalled();
+    expect(openInBrowserSpy).not.toHaveBeenCalled();
   });
 });

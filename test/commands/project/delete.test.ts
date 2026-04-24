@@ -2,12 +2,10 @@
  * Project Delete Command Tests
  *
  * Tests for the project delete command in src/commands/project/delete.ts.
- * Uses spyOn to mock api-client and resolve-target to test
- * the func() body without real HTTP calls or database access.
- *
- * Note: Interactive prompt (type-out confirmation) tests live in
- * test/isolated/project-delete-confirm.test.ts because they require
- * mock.module() to override node:tty and the logger module.
+ * Uses spyOn to mock api-client and resolve-target for the func() body
+ * without real HTTP calls or database access. The interactive type-out
+ * confirmation tests use mock.module() on node:tty and the logger module
+ * to control the prompt.
  */
 
 import {
@@ -19,7 +17,70 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import { deleteCommand } from "../../../src/commands/project/delete.js";
+
+// Mock isatty so deleteCommand's non-interactive guard passes.
+// Bun's ESM wrapper for CJS built-ins exposes `default` + `ReadStream` +
+// `WriteStream` — all must be present.
+const mockIsatty = mock(() => false);
+class FakeReadStream {}
+class FakeWriteStream {}
+const ttyExports = {
+  isatty: mockIsatty,
+  ReadStream: FakeReadStream,
+  WriteStream: FakeWriteStream,
+};
+mock.module("node:tty", () => ({
+  ...ttyExports,
+  default: ttyExports,
+}));
+
+/** No-op placeholder for unused logger methods. */
+function noop() {
+  // intentional no-op
+}
+
+// Mock the logger to intercept the .prompt() call made by the module-scoped
+// `log = logger.withTag("project.delete")` inside delete.ts.
+const mockPrompt = mock(
+  (): Promise<string | symbol> => Promise.resolve("acme-corp/my-app")
+);
+const fakeLog: {
+  prompt: typeof mockPrompt;
+  info: ReturnType<typeof mock>;
+  warn: ReturnType<typeof mock>;
+  error: ReturnType<typeof mock>;
+  debug: ReturnType<typeof mock>;
+  success: ReturnType<typeof mock>;
+  withTag: () => typeof fakeLog;
+} = {
+  prompt: mockPrompt,
+  info: mock(noop),
+  warn: mock(noop),
+  error: mock(noop),
+  debug: mock(noop),
+  success: mock(noop),
+  withTag: () => fakeLog,
+};
+mock.module("../../../src/lib/logger.js", () => ({
+  logger: fakeLog,
+  setLogLevel: mock(noop),
+  attachSentryReporter: mock(noop),
+  LOG_LEVEL_NAMES: ["error", "warn", "log", "info", "debug", "trace"],
+  LOG_LEVEL_ENV_VAR: "SENTRY_LOG_LEVEL",
+  parseLogLevel: (name: string) => {
+    const levels = ["error", "warn", "log", "info", "debug", "trace"];
+    const idx = levels.indexOf(name.toLowerCase().trim());
+    return idx === -1 ? 3 : idx;
+  },
+  getEnvLogLevel: () => null,
+}));
+
+// Dynamic import: must run AFTER mock.module() so the module-scoped logger
+// binding inside delete.ts picks up fakeLog.
+const { deleteCommand } = await import(
+  "../../../src/commands/project/delete.js"
+);
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { ApiError, ContextError } from "../../../src/lib/errors.js";
@@ -316,5 +377,135 @@ describe("project delete", () => {
     );
 
     expect(deleteProjectSpy).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Tests for the interactive type-out confirmation prompt.
+ *
+ * These rely on `mock.module()` at the top of this file to stub `node:tty`
+ * (so `isatty(0)` returns true) and the logger (so `.prompt()` returns a
+ * controllable value).
+ */
+describe("project delete — interactive confirmation", () => {
+  let getProjectSpy: ReturnType<typeof spyOn>;
+  let deleteProjectSpy: ReturnType<typeof spyOn>;
+  let resolveOrgProjectTargetSpy: ReturnType<typeof spyOn>;
+
+  function createPromptMockContext() {
+    const stdoutWrite = mock(() => true);
+    return {
+      context: {
+        stdout: { write: stdoutWrite },
+        stderr: { write: mock(() => true) },
+        cwd: "/tmp",
+      },
+      stdoutWrite,
+    };
+  }
+
+  beforeEach(() => {
+    mockIsatty.mockReturnValue(true);
+    getProjectSpy = spyOn(apiClient, "getProject");
+    deleteProjectSpy = spyOn(apiClient, "deleteProject");
+    resolveOrgProjectTargetSpy = spyOn(
+      resolveTarget,
+      "resolveOrgProjectTarget"
+    );
+
+    getProjectSpy.mockResolvedValue(sampleProject);
+    deleteProjectSpy.mockResolvedValue(undefined);
+    resolveOrgProjectTargetSpy.mockResolvedValue({
+      org: "acme-corp",
+      project: "my-app",
+    });
+
+    mockPrompt.mockClear();
+    fakeLog.info.mockClear();
+  });
+
+  afterEach(() => {
+    getProjectSpy.mockRestore();
+    deleteProjectSpy.mockRestore();
+    resolveOrgProjectTargetSpy.mockRestore();
+    mockIsatty.mockReturnValue(false);
+  });
+
+  test("proceeds when user types exact org/project", async () => {
+    mockPrompt.mockResolvedValue("acme-corp/my-app");
+
+    const { context, stdoutWrite } = createPromptMockContext();
+    const func = await deleteCommand.loader();
+    await func.call(
+      context,
+      { yes: false, "dry-run": false },
+      "acme-corp/my-app"
+    );
+
+    expect(deleteProjectSpy).toHaveBeenCalledWith("acme-corp", "my-app");
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("Deleted project");
+  });
+
+  test("cancels when user types wrong value", async () => {
+    mockPrompt.mockResolvedValue("wrong-org/wrong-project");
+
+    const { context } = createPromptMockContext();
+    const func = await deleteCommand.loader();
+    await func.call(
+      context,
+      { yes: false, "dry-run": false },
+      "acme-corp/my-app"
+    );
+
+    expect(deleteProjectSpy).not.toHaveBeenCalled();
+    expect(fakeLog.info).toHaveBeenCalledWith("Cancelled.");
+  });
+
+  test("cancels when user presses Ctrl+C (Symbol)", async () => {
+    // consola returns Symbol(clack:cancel) on Ctrl+C — truthy but not a string.
+    mockPrompt.mockResolvedValue(Symbol("clack:cancel"));
+
+    const { context } = createPromptMockContext();
+    const func = await deleteCommand.loader();
+    await func.call(
+      context,
+      { yes: false, "dry-run": false },
+      "acme-corp/my-app"
+    );
+
+    expect(deleteProjectSpy).not.toHaveBeenCalled();
+    expect(fakeLog.info).toHaveBeenCalledWith("Cancelled.");
+  });
+
+  test("cancels when user submits empty string", async () => {
+    mockPrompt.mockResolvedValue("");
+
+    const { context } = createPromptMockContext();
+    const func = await deleteCommand.loader();
+    await func.call(
+      context,
+      { yes: false, "dry-run": false },
+      "acme-corp/my-app"
+    );
+
+    expect(deleteProjectSpy).not.toHaveBeenCalled();
+  });
+
+  test("prompt message includes project name and expected input", async () => {
+    mockPrompt.mockResolvedValue("acme-corp/my-app");
+
+    const { context } = createPromptMockContext();
+    const func = await deleteCommand.loader();
+    await func.call(
+      context,
+      { yes: false, "dry-run": false },
+      "acme-corp/my-app"
+    );
+
+    expect(mockPrompt).toHaveBeenCalledWith(
+      expect.stringContaining("acme-corp/my-app"),
+      expect.objectContaining({ type: "text" })
+    );
   });
 });
