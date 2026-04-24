@@ -21,6 +21,7 @@ import {
   assertDirectoryReadable,
   buildEmptyDiscoveryError,
   diagnoseEmptyDiscovery,
+  discoverFilePairs,
   injectDirectory,
 } from "../../lib/sourcemap/inject.js";
 
@@ -116,18 +117,17 @@ export const uploadCommand = buildCommand({
     },
     dir: string
   ) {
-    // Validate the directory BEFORE resolving org/project so a
-    // missing/typoed path or a bundler misconfiguration produces the
-    // right error even when the user has no Sentry credentials
-    // configured locally. Non-existent directories get a distinct
-    // message; empty/misconfigured directories get the bundler-oriented
-    // diagnostic. See src/lib/sourcemap/inject.ts for the helpers.
+    // Phase 1 — read-only validation. Runs BEFORE `injectDirectory`
+    // (which writes to disk) and BEFORE `resolveOrgAndProject` (which
+    // may fail on missing credentials). This keeps the command
+    // side-effect-free on every error path, so a user whose upload
+    // fails for any reason (typoed path, missing creds, bundler
+    // misconfig) doesn't end up with partially-injected debug IDs and
+    // a rewritten `.map` file.
     await assertDirectoryReadable(dir);
+    const pairs = await discoverFilePairs(dir);
 
-    // Discover and inject debug IDs into JS + sourcemap pairs
-    const results = await injectDirectory(dir);
-
-    if (results.length === 0 && !flags["allow-empty"]) {
+    if (pairs.length === 0 && !flags["allow-empty"]) {
       // Silent misconfigurations (e.g., the bundler didn't emit .map
       // files) used to succeed with "0 uploaded". That makes post-deploy
       // Sentry events unsymbolicated with no build-time signal. Default
@@ -141,7 +141,8 @@ export const uploadCommand = buildCommand({
     // Resolve org/project via the standard cascade. Runs AFTER the
     // directory check so local/unauthenticated invocations still get the
     // actionable bundler-oriented error instead of "Organization and
-    // project are required".
+    // project are required", but BEFORE the actual debug-ID injection
+    // so we never mutate user files on a doomed run.
     const resolved = await resolveOrgAndProject({
       cwd: this.cwd,
       usageHint: USAGE_HINT,
@@ -151,9 +152,9 @@ export const uploadCommand = buildCommand({
     }
     const { org, project } = resolved;
 
-    if (results.length === 0) {
-      // --allow-empty path: succeed silently for callers that
-      // legitimately invoke upload on potentially-empty directories.
+    if (pairs.length === 0) {
+      // --allow-empty path: nothing to do. Don't recommend running
+      // `sentry sourcemap inject` — we'd hit the same empty-dir state.
       yield new CommandOutput<UploadCommandResult>({
         org,
         project,
@@ -161,9 +162,17 @@ export const uploadCommand = buildCommand({
         filesUploaded: 0,
       });
       return {
-        hint: "No JS + sourcemap pairs found. Run `sentry sourcemap inject` first.",
+        hint:
+          "No JS + sourcemap pairs found in the target directory. " +
+          "If this is unexpected, check your bundler emits .map files.",
       };
     }
+
+    // Phase 2 — mutating work. Inject debug IDs into each pair. Only
+    // runs once we know (a) the directory exists, (b) it has pairs, and
+    // (c) Sentry credentials are resolved. `injectDirectory` is
+    // idempotent on re-runs (skips files that already carry a debug ID).
+    const results = await injectDirectory(dir);
 
     const urlPrefix = flags["url-prefix"] ?? "~/";
 

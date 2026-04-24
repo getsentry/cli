@@ -73,7 +73,7 @@ export async function injectDirectory(
 }
 
 /** A discovered JS + sourcemap pair. */
-type FilePair = { jsPath: string; mapPath: string };
+export type FilePair = { jsPath: string; mapPath: string };
 
 /**
  * Check if a path has a companion .map file.
@@ -114,9 +114,18 @@ async function findCompanionMap(jsPath: string): Promise<string | undefined> {
  */
 const SOURCEMAP_SKIP_DIRS: readonly string[] = [NODE_MODULES_DIRNAME];
 
-async function discoverFilePairs(
+/**
+ * Discovery pass with no side effects — returns the list of JS +
+ * sourcemap pairs without injecting debug IDs. Exposed so the
+ * `sentry sourcemap upload` command can run a read-only emptiness
+ * check (and emit the bundler-oriented diagnostic) BEFORE calling
+ * {@link injectDirectory} — which writes to disk and would otherwise
+ * leave partial state when upload subsequently fails on credentials
+ * resolution.
+ */
+export async function discoverFilePairs(
   dir: string,
-  extensions: Set<string>
+  extensions: Set<string> = DEFAULT_EXTENSIONS
 ): Promise<FilePair[]> {
   // `walkFiles` requires an absolute cwd. CLI callers pass
   // user-supplied positional args like `./dist` directly through to

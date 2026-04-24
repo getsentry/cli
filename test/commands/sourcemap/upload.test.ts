@@ -296,6 +296,28 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
     }
   });
 
+  test("error path does not mutate files (js-only dir)", async () => {
+    // Regression guard for the Bugbot finding that led to the
+    // discover-first refactor: previously `injectDirectory` ran BEFORE
+    // the emptiness check, so a js-only dir got debug IDs written into
+    // every JS before the bundler-misconfig error fired. Now discovery
+    // is a read-only pass; injection only runs when we've decided
+    // upload will proceed.
+    mkdirSync(join(dir, "_astro"));
+    const jsPath = join(dir, "_astro", "app.js");
+    const original = "console.log(1)\n";
+    writeFileSync(jsPath, original);
+    const { ctx } = makeContext();
+    await expect(runFunc(func, ctx, {}, dir)).rejects.toBeInstanceOf(
+      ValidationError
+    );
+    // File must be unchanged — no debug ID IIFE, no sourcemap comment.
+    const after = await Bun.file(jsPath).text();
+    expect(after).toBe(original);
+    expect(after).not.toContain("_sentryDebugIds");
+    expect(after).not.toContain("sentry-dbid");
+  });
+
   test("happy path: directory with JS+map pair invokes uploadSourcemaps", async () => {
     // Prove the guard doesn't false-positive on a real upload path, and
     // that we reach the API call with sensible artifact files.
