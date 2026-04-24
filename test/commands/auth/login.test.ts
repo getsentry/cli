@@ -580,7 +580,12 @@ describe("login re-authentication interactive prompt", () => {
       });
 
       expect(clearAuthSpy).toHaveBeenCalled();
-      expect(setAuthTokenSpy).toHaveBeenCalledWith("new-token");
+      // Token stored with host scope (4th arg = { host: ... })
+      expect(setAuthTokenSpy).toHaveBeenCalled();
+      expect(setAuthTokenSpy.mock.calls[0]?.[0]).toBe("new-token");
+      expect(setAuthTokenSpy.mock.calls[0]?.[3]).toMatchObject({
+        host: expect.any(String),
+      });
     } finally {
       setAuthTokenSpy.mockRestore();
       getUserRegionsSpy.mockRestore();

@@ -162,17 +162,17 @@ describe("isHostTrusted", () => {
     expect(isHostTrusted("not a url", "https://sentry.io")).toBe(false);
   });
 
-  test("port-suffix sharing: sentry.io:8443 NOT trusted as SaaS (non-default port)", () => {
-    // A non-default-port sentry.io request can't be authenticated as regular
-    // SaaS — treat it as a different origin. (This protects against exotic
-    // attack shapes where an attacker hosts on sentry.io:1234.)
+  test("SaaS equivalence accepts any port on sentry.io (current behavior)", () => {
+    // `isSentrySaasUrl` classifies by hostname only, so a non-default port
+    // on sentry.io (e.g. sentry.io:8443) still falls into the SaaS trust
+    // class. In practice Sentry SaaS is always on 443; DNS-poisoning
+    // attacks that redirect sentry.io to attacker infrastructure are
+    // outside the CLI's threat model (they would also compromise the
+    // browser that established trust with the token-issuing server). If
+    // we ever want to tighten this to port-equality for SaaS, adjust
+    // `isSentrySaasUrl` to consult port — this test will then flip.
     expect(isHostTrusted("https://sentry.io:8443/", "https://sentry.io")).toBe(
       true
     );
-    // NOTE: this asserts the CURRENT behavior. sentry.io with a different
-    // port still parses as a SaaS hostname, so the SaaS-equivalence branch
-    // accepts it. In practice SaaS is always on 443, and a compromised
-    // DNS pointing sentry.io somewhere else is outside the CLI's threat
-    // model (it would also compromise the browser).
   });
 });

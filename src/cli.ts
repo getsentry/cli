@@ -12,6 +12,7 @@
 
 import { getEnv } from "./lib/env.js";
 import { captureEnvTokenHost } from "./lib/env-token-host.js";
+import { CliError } from "./lib/errors.js";
 import { applySentryCliRcEnvShim } from "./lib/sentryclirc.js";
 
 /**
@@ -477,10 +478,25 @@ export async function startCli(): Promise<void> {
 
   // Walk up from CWD once to find project root AND .sentryclirc config.
   // Caches both so later findProjectRoot / loadSentryCliRc calls are hits.
-  // Non-fatal — the CLI can still work via env vars and DSN detection.
+  //
+  // Most failures here are non-fatal (unreadable rc file, missing project
+  // markers) — the CLI can still work via env vars and DSN detection.
+  //
+  // BUT: `applySentryCliRcEnvShim` (invoked by preloadProjectContext) throws
+  // `CliError` when a `.sentryclirc` URL doesn't match the active token's
+  // scoped host — this is an explicit, actionable security-fix rejection
+  // that MUST be surfaced to the user. Silently swallowing it would leave
+  // the user running commands with either the wrong routing or confused by
+  // silently-ignored config. Let CliError propagate to the top-level
+  // handler which formats it and exits non-zero.
   try {
     await preloadProjectContext(process.cwd());
-  } catch {
+  } catch (err) {
+    if (err instanceof CliError) {
+      process.stderr.write(`${err.format()}\n`);
+      process.exitCode = err.exitCode;
+      return;
+    }
     // Gracefully degrade: project context is optional for CLI operation.
   }
 
