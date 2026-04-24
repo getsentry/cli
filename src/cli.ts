@@ -21,7 +21,31 @@ import { applySentryCliRcEnvShim } from "./lib/sentryclirc.js";
  * org/project defaults and env shim). Caches both results so later calls
  * to `findProjectRoot` and `loadSentryCliRc` are cache hits.
  */
-async function preloadProjectContext(cwd: string): Promise<void> {
+/**
+ * Detect whether the invocation is an `auth login` / `auth logout` command
+ * so the `.sentryclirc` URL-trust check can be bypassed. These are the
+ * only commands that establish or tear down host trust, and they must
+ * run even when the user is inside a repo whose `.sentryclirc` mismatches
+ * their current token — otherwise onboarding to a new self-hosted
+ * instance from such a repo becomes impossible (chicken-and-egg).
+ *
+ * Positive-match only: unknown commands, `auth status`/`whoami`/etc. all
+ * keep the guard enabled (they need credentials scoped to the active
+ * host). Also matches top-level aliases if any exist (currently just
+ * `auth login`/`auth logout` — expand if the route map grows).
+ */
+function isTrustChangingCommand(args: readonly string[]): boolean {
+  const [cmd, sub] = args;
+  if (cmd !== "auth") {
+    return false;
+  }
+  return sub === "login" || sub === "logout";
+}
+
+async function preloadProjectContext(
+  cwd: string,
+  args: readonly string[]
+): Promise<void> {
   // CRITICAL: Snapshot the env-token host BEFORE anything that could mutate
   // `env.SENTRY_HOST`/`env.SENTRY_URL` (the .sentryclirc shim or the default
   // URL fallback below). This pins the trust scope for env-var tokens like
@@ -44,8 +68,14 @@ async function preloadProjectContext(cwd: string): Promise<void> {
   });
 
   // Apply .sentryclirc env shim (token, URL) — sentryclirc cache was
-  // populated as a side effect of findProjectRoot's walk
-  await applySentryCliRcEnvShim(cwd);
+  // populated as a side effect of findProjectRoot's walk.
+  //
+  // Skip URL trust check for `auth login` / `auth logout` so users can
+  // onboard to / switch away from a new host from inside a repo that
+  // ships its own `.sentryclirc` with a different URL.
+  await applySentryCliRcEnvShim(cwd, {
+    skipUrlTrustCheck: isTrustChangingCommand(args),
+  });
 
   // Apply persistent URL default (lower priority than env vars and .sentryclirc).
   // Same mechanism as .sentryclirc — writes to env.SENTRY_URL so all downstream
@@ -490,7 +520,7 @@ export async function startCli(): Promise<void> {
   // silently-ignored config. Let CliError propagate to the top-level
   // handler which formats it and exits non-zero.
   try {
-    await preloadProjectContext(process.cwd());
+    await preloadProjectContext(process.cwd(), args);
   } catch (err) {
     if (err instanceof CliError) {
       process.stderr.write(`${err.format()}\n`);

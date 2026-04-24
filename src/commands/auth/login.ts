@@ -72,7 +72,8 @@ type LoginFlags = {
  *
  * Exported indirectly via the command's `parse` callback.
  */
-function parseLoginUrl(raw: string): string {
+/** @internal exported for testing */
+export function parseLoginUrl(raw: string): string {
   const prefixed = normalizeUrl(raw);
   if (!prefixed) {
     throw new ValidationError("--url cannot be empty", "url");
@@ -89,13 +90,19 @@ function parseLoginUrl(raw: string): string {
  * device-flow and token-refresh endpoints hit the requested host. Returns
  * the normalized URL so callers can record it with {@link setAuthToken}.
  */
-function applyLoginUrl(url: string | undefined): string {
+/** @internal exported for testing */
+export function applyLoginUrl(url: string | undefined): string {
   if (!url) {
-    // Preserve existing env / .sentryclirc resolution
+    // Preserve existing env / .sentryclirc resolution. Normalize through
+    // `normalizeUrl` first so bare hostnames like `SENTRY_HOST=sentry.acme.com`
+    // (a documented shell-export pattern) get the `https://` prefix before
+    // `normalizeOrigin` tries to parse them — otherwise `new URL()` rejects
+    // the bare hostname and we silently fall back to SaaS, which would
+    // mis-scope the stored token.
     const env = getEnv();
-    return (
-      normalizeOrigin(env.SENTRY_HOST || env.SENTRY_URL) ?? DEFAULT_SENTRY_URL
-    );
+    const raw = env.SENTRY_HOST || env.SENTRY_URL;
+    const prefixed = normalizeUrl(raw);
+    return (prefixed && normalizeOrigin(prefixed)) ?? DEFAULT_SENTRY_URL;
   }
   const env = getEnv();
   env.SENTRY_HOST = url;

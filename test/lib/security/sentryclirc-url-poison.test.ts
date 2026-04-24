@@ -146,4 +146,28 @@ describe("CVE: .sentryclirc URL credential exfiltration", () => {
     expect(process.env.SENTRY_HOST).toBe("https://sentry.example.com");
     expect(process.env.SENTRY_URL).toBeUndefined();
   });
+
+  test("skipUrlTrustCheck bypasses the guard (used for auth login/logout bootstrap)", async () => {
+    // Onboarding scenario: fresh install, user `cd`s into a self-hosted
+    // monorepo shipping its own `.sentryclirc`, runs `sentry auth login
+    // --url <url>`. The shim must NOT block — otherwise the login
+    // command is chicken-and-egg.
+    delete process.env.SENTRY_HOST;
+    delete process.env.SENTRY_URL;
+    writeRc(testDir, "[defaults]\nurl = https://sentry.example.com\n");
+
+    // With bypass — proceeds and applies the rc URL as the login target.
+    await applySentryCliRcEnvShim(testDir, { skipUrlTrustCheck: true });
+    expect(process.env.SENTRY_URL).toBe("https://sentry.example.com");
+  });
+
+  test("skipUrlTrustCheck does NOT bypass for SaaS (no behavior change for SaaS)", async () => {
+    // SaaS is always admitted regardless of bypass flag — trivial no-op.
+    delete process.env.SENTRY_HOST;
+    delete process.env.SENTRY_URL;
+    writeRc(testDir, "[defaults]\nurl = https://sentry.io\n");
+
+    await applySentryCliRcEnvShim(testDir, { skipUrlTrustCheck: false });
+    expect(process.env.SENTRY_URL).toBe("https://sentry.io");
+  });
 });

@@ -594,3 +594,81 @@ describe("login re-authentication interactive prompt", () => {
     }
   });
 });
+
+describe("applyLoginUrl (host resolution)", () => {
+  let savedHost: string | undefined;
+  let savedUrl: string | undefined;
+
+  beforeEach(() => {
+    savedHost = process.env.SENTRY_HOST;
+    savedUrl = process.env.SENTRY_URL;
+    delete process.env.SENTRY_HOST;
+    delete process.env.SENTRY_URL;
+  });
+
+  afterEach(() => {
+    if (savedHost !== undefined) {
+      process.env.SENTRY_HOST = savedHost;
+    } else {
+      delete process.env.SENTRY_HOST;
+    }
+    if (savedUrl !== undefined) {
+      process.env.SENTRY_URL = savedUrl;
+    } else {
+      delete process.env.SENTRY_URL;
+    }
+  });
+
+  test("explicit --url takes precedence and writes env", async () => {
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    const host = applyLoginUrl("https://sentry.example.com");
+    expect(host).toBe("https://sentry.example.com");
+    expect(process.env.SENTRY_HOST).toBe("https://sentry.example.com");
+    expect(process.env.SENTRY_URL).toBe("https://sentry.example.com");
+  });
+
+  test("no --url + no env falls back to SaaS default", async () => {
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    expect(applyLoginUrl(undefined)).toBe("https://sentry.io");
+  });
+
+  test("no --url + SENTRY_HOST with scheme uses env host", async () => {
+    process.env.SENTRY_HOST = "https://sentry.acme.com";
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    expect(applyLoginUrl(undefined)).toBe("https://sentry.acme.com");
+  });
+
+  test("no --url + bare hostname SENTRY_HOST prefixes https:// (bug fix)", async () => {
+    // Regression: applyLoginUrl previously called normalizeOrigin directly
+    // on bare hostnames. new URL("sentry.acme.com") throws → silent fallback
+    // to SaaS default → token mis-scoped.
+    process.env.SENTRY_HOST = "sentry.acme.com";
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    expect(applyLoginUrl(undefined)).toBe("https://sentry.acme.com");
+  });
+
+  test("no --url + bare hostname SENTRY_URL prefixes https://", async () => {
+    process.env.SENTRY_URL = "sentry.acme.com";
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    expect(applyLoginUrl(undefined)).toBe("https://sentry.acme.com");
+  });
+
+  test("SENTRY_HOST takes precedence over SENTRY_URL", async () => {
+    process.env.SENTRY_HOST = "https://host.example.com";
+    process.env.SENTRY_URL = "https://url.example.com";
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    expect(applyLoginUrl(undefined)).toBe("https://host.example.com");
+  });
+});

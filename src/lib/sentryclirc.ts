@@ -317,6 +317,22 @@ export function loadSentryCliRc(cwd: string): Promise<SentryCliRcConfig> {
 }
 
 /**
+ * Options for {@link applySentryCliRcEnvShim}.
+ *
+ * @property skipUrlTrustCheck - Bypass the host-scoping trust check on the
+ *   rc URL. Used for trust-establishment/teardown commands (`auth login`,
+ *   `auth logout`) which must run regardless of whether a repo-local or
+ *   home-dir rc file mismatches the current token's host — otherwise
+ *   onboarding to a new self-hosted instance from inside a repo that
+ *   ships its own `.sentryclirc` becomes impossible. The rc URL is still
+ *   applied (so login targets the rc-specified instance if no `--url` is
+ *   passed), but the mismatch throw is skipped.
+ */
+export type ApplySentryCliRcEnvShimOptions = {
+  skipUrlTrustCheck?: boolean;
+};
+
+/**
  * Apply env shim for `.sentryclirc` token and URL fields.
  *
  * Maps config file values to environment variables so the existing
@@ -327,8 +343,12 @@ export function loadSentryCliRc(cwd: string): Promise<SentryCliRcConfig> {
  * Call this once, early in the CLI boot process (before any auth or API calls).
  *
  * @param cwd - Current working directory for config file lookup
+ * @param options - See {@link ApplySentryCliRcEnvShimOptions}
  */
-export async function applySentryCliRcEnvShim(cwd: string): Promise<void> {
+export async function applySentryCliRcEnvShim(
+  cwd: string,
+  options?: ApplySentryCliRcEnvShimOptions
+): Promise<void> {
   const config = await loadSentryCliRc(cwd);
   const env = getEnv();
 
@@ -358,7 +378,13 @@ export async function applySentryCliRcEnvShim(cwd: string): Promise<void> {
     // `sentry auth login --url <url>` explicitly.
     //
     // SaaS URLs in rc files are always honored — nothing to leak.
-    if (!isSentrySaasUrl(config.url)) {
+    //
+    // Bypass (skipUrlTrustCheck): commands that establish or tear down
+    // trust (`auth login`, `auth logout`) must run even when a rc URL
+    // mismatches the current token — otherwise a repo-local rc makes
+    // onboarding to a new self-hosted instance impossible (chicken-and-
+    // egg). The caller (cli.ts) decides when to bypass based on argv.
+    if (!(options?.skipUrlTrustCheck || isSentrySaasUrl(config.url))) {
       const tokenHost = getActiveTokenHost();
       if (!(tokenHost && isHostTrusted(config.url, tokenHost))) {
         const source = config.sources.url
