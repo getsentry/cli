@@ -5,6 +5,7 @@
 import { createHash } from "node:crypto";
 import { DEFAULT_SENTRY_URL, getConfiguredSentryUrl } from "../constants.js";
 import { getEnv } from "../env.js";
+import { getEnvTokenHost } from "../env-token-host.js";
 import { logger } from "../logger.js";
 import { withDbSpan } from "../telemetry.js";
 import { normalizeOrigin } from "../token-host.js";
@@ -37,19 +38,34 @@ const log = logger.withTag("auth");
 /**
  * Lazy migration for rows created before schema v16 (NULL `host`).
  *
- * Writes the currently-configured host (`SENTRY_HOST`/`SENTRY_URL`, or SaaS
- * default) into the row. One-time per row, logged at `info` so users see it
- * in their first command after upgrade.
+ * Writes the user's BOOT-TIME env host (`SENTRY_HOST`/`SENTRY_URL`
+ * snapshotted before `.sentryclirc` shim runs) into the row. Using the
+ * boot snapshot — not the current `getConfiguredSentryUrl()` — avoids
+ * two failure modes:
  *
- * Users who had `SENTRY_HOST` correctly configured at upgrade time are
- * migrated cleanly. Users with the wrong host configured can recover with
- * `sentry auth logout && sentry auth login` against the intended instance.
+ * 1. **Self-hosted user in legitimate `.sentryclirc` repo** (what Seer
+ *    flagged): if migration ran from `applySentryCliRcEnvShim` BEFORE
+ *    the shim wrote `env.SENTRY_URL`, `getConfiguredSentryUrl()` would
+ *    return undefined → token incorrectly migrated to SaaS default,
+ *    breaking the user's auth until `sentry auth logout && login`.
+ * 2. **Self-hosted user in ATTACKER-repo**: if migration ran AFTER the
+ *    shim wrote a poisoned `env.SENTRY_URL`, the token would be
+ *    migrated to the attacker's host. Pre-v16 stored tokens are
+ *    typically SaaS or whatever the user's SHELL exported — the boot
+ *    snapshot captures that correctly.
+ *
+ * `getEnvTokenHost()` returns the boot snapshot (`SENTRY_HOST`/
+ * `SENTRY_URL` at `captureEnvTokenHost` time, defaulting to SaaS).
+ * Users with the wrong shell env at upgrade time can recover with
+ * `sentry auth logout && sentry auth login`.
  *
  * Returns the migrated host string (never NULL on return).
  */
 function migrateNullHost(row: AuthRow): string {
-  const configured = getConfiguredSentryUrl();
-  const migratedHost = normalizeOrigin(configured ?? DEFAULT_SENTRY_URL);
+  // Use the boot-time env snapshot (captured BEFORE the .sentryclirc
+  // shim could poison env.SENTRY_URL). See function JSDoc for rationale.
+  const bootHost = getEnvTokenHost();
+  const migratedHost = normalizeOrigin(bootHost);
   const host = migratedHost ?? DEFAULT_SENTRY_URL;
   try {
     withDbSpan("migrateAuthHost", () => {

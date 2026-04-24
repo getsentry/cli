@@ -38,7 +38,7 @@ import {
 } from "../../lib/interactive-login.js";
 import { logger } from "../../lib/logger.js";
 import { clearResponseCache } from "../../lib/response-cache.js";
-import { isSentrySaasUrl } from "../../lib/sentry-urls.js";
+import { isSaaSTrustOrigin } from "../../lib/sentry-urls.js";
 import {
   hasLoginTrustAnchor,
   normalizeOrigin,
@@ -122,7 +122,11 @@ function refuseLoginToUntrustedHost(
   flags: LoginFlags,
   effectiveHost: string
 ): void {
-  if (flags.url || isSentrySaasUrl(effectiveHost) || hasLoginTrustAnchor()) {
+  // Use STRICT `isSaaSTrustOrigin` (https + default port) — consistent
+  // with `applySentryUrlContext`, `applySentryCliRcEnvShim`, and
+  // `isHostTrusted`. A crafted rc with `http://sentry.io` must NOT
+  // bypass this guard just because the hostname is SaaS.
+  if (flags.url || isSaaSTrustOrigin(effectiveHost) || hasLoginTrustAnchor()) {
     return;
   }
   const tokenHint = flags.token ? " --token <token>" : "";
@@ -151,7 +155,11 @@ function persistLoginUrlAsDefault(
   flagUrl: string | undefined,
   effectiveHost: string
 ): void {
-  if (!flagUrl || isSentrySaasUrl(effectiveHost)) {
+  // Use STRICT `isSaaSTrustOrigin` — `http://sentry.io` and
+  // `https://sentry.io:8443` should NOT be treated as SaaS for
+  // persistence purposes (they'd break routing for subsequent
+  // commands). Consistent with the trust-check sites.
+  if (!flagUrl || isSaaSTrustOrigin(effectiveHost)) {
     return;
   }
   try {

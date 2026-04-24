@@ -74,15 +74,24 @@ describe("db/auth host scoping", () => {
     expect(getStoredAuthHost()).toBe("https://sentry.acme.com");
   });
 
-  test("lazy migration: NULL host is backfilled from configured host on first access", () => {
+  test("lazy migration: NULL host is backfilled from BOOT-TIME env on first access", async () => {
     // Simulate a pre-v16 row: direct INSERT bypassing setAuthToken
     const db = getDatabase();
     db.query(
       "INSERT OR REPLACE INTO auth (id, token, host, updated_at) VALUES (1, 'legacy-token', NULL, ?)"
     ).run(Date.now());
 
+    // Simulate the boot ordering: SHELL-exports SENTRY_HOST, then
+    // captureEnvTokenHost snapshots it. Migration reads this snapshot
+    // (not the current env, which could be rc-poisoned by the shim).
+    const { captureEnvTokenHost, resetEnvTokenHostForTesting } = await import(
+      "../../../src/lib/env-token-host.js"
+    );
+    resetEnvTokenHostForTesting();
     const prevHost = process.env.SENTRY_HOST;
     process.env.SENTRY_HOST = "https://legacy-configured.example.com";
+    captureEnvTokenHost();
+
     try {
       expect(getStoredAuthHost()).toBe("https://legacy-configured.example.com");
       // Second call reads the now-populated host
@@ -98,19 +107,26 @@ describe("db/auth host scoping", () => {
       } else {
         process.env.SENTRY_HOST = prevHost;
       }
+      resetEnvTokenHostForTesting();
     }
   });
 
-  test("lazy migration: NULL host with no configured host falls back to SaaS", () => {
+  test("lazy migration: NULL host + no boot-time env falls back to SaaS", async () => {
     const db = getDatabase();
     db.query(
       "INSERT OR REPLACE INTO auth (id, token, host, updated_at) VALUES (1, 'legacy-token', NULL, ?)"
     ).run(Date.now());
 
+    const { captureEnvTokenHost, resetEnvTokenHostForTesting } = await import(
+      "../../../src/lib/env-token-host.js"
+    );
+    resetEnvTokenHostForTesting();
     const prevHost = process.env.SENTRY_HOST;
     const prevUrl = process.env.SENTRY_URL;
     delete process.env.SENTRY_HOST;
     delete process.env.SENTRY_URL;
+    captureEnvTokenHost(); // captures DEFAULT_SENTRY_URL (SaaS)
+
     try {
       expect(getStoredAuthHost()).toBe("https://sentry.io");
     } finally {
@@ -120,6 +136,49 @@ describe("db/auth host scoping", () => {
       if (prevUrl !== undefined) {
         process.env.SENTRY_URL = prevUrl;
       }
+      resetEnvTokenHostForTesting();
+    }
+  });
+
+  test("lazy migration: ignores rc-poisoned current env (uses boot snapshot instead)", async () => {
+    // Critical regression: previously migration called getConfiguredSentryUrl()
+    // which reads CURRENT env. If .sentryclirc shim wrote env.SENTRY_URL
+    // before migration fired, the token would be migrated to the
+    // rc-sourced (potentially attacker) host. Now migration uses the
+    // boot snapshot so rc writes don't affect it.
+    const db = getDatabase();
+    db.query(
+      "INSERT OR REPLACE INTO auth (id, token, host, updated_at) VALUES (1, 'legacy-token', NULL, ?)"
+    ).run(Date.now());
+
+    const { captureEnvTokenHost, resetEnvTokenHostForTesting } = await import(
+      "../../../src/lib/env-token-host.js"
+    );
+    resetEnvTokenHostForTesting();
+    const prevHost = process.env.SENTRY_HOST;
+    const prevUrl = process.env.SENTRY_URL;
+    delete process.env.SENTRY_HOST;
+    delete process.env.SENTRY_URL;
+    captureEnvTokenHost(); // snapshots SaaS default
+
+    // Simulate rc shim writing env.SENTRY_URL AFTER boot
+    process.env.SENTRY_URL = "https://rc-sourced.example.com";
+
+    try {
+      // Must migrate to the BOOT snapshot (SaaS), not the rc-sourced URL
+      expect(getStoredAuthHost()).toBe("https://sentry.io");
+    } finally {
+      if (prevHost !== undefined) {
+        process.env.SENTRY_HOST = prevHost;
+      } else {
+        delete process.env.SENTRY_HOST;
+      }
+      if (prevUrl !== undefined) {
+        process.env.SENTRY_URL = prevUrl;
+      } else {
+        delete process.env.SENTRY_URL;
+      }
+      resetEnvTokenHostForTesting();
     }
   });
 

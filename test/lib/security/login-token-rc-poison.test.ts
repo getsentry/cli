@@ -50,12 +50,40 @@ type LoginFlags = {
 
 type LoginFunc = (this: unknown, flags: LoginFlags) => Promise<void>;
 
+const noop = () => {
+  // write sinks in test context
+};
+
 function createContext() {
   return {
-    stdout: { write: () => undefined },
-    stderr: { write: () => undefined },
+    stdout: { write: noop },
+    stderr: { write: noop },
     cwd: "/tmp",
   };
+}
+
+function extractUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  if (input instanceof URL) {
+    return input.href;
+  }
+  return input.url;
+}
+
+/**
+ * Check if a URL's hostname exactly matches one of the given hostnames.
+ * Use in preference to `.includes()` substring matching — a crafted
+ * URL like `https://evil.com.attacker.com/` would pass a substring
+ * check on `"evil.com"` and produce a false security assurance.
+ */
+function urlHostnameIn(url: string, hostnames: string[]): boolean {
+  try {
+    return hostnames.includes(new URL(url).hostname);
+  } catch {
+    return false;
+  }
 }
 
 describe("CVE: auth login --token with rc-poisoned env.SENTRY_URL", () => {
@@ -74,18 +102,15 @@ describe("CVE: auth login --token with rc-poisoned env.SENTRY_URL", () => {
     // Intercept fetch to assert no outbound requests on the attacker path.
     fetchCalls = [];
     originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-            ? input.href
-            : input.url;
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => {
       const headers = new Headers(
         init?.headers ?? (input instanceof Request ? input.headers : undefined)
       );
       fetchCalls.push({
-        url,
+        url: extractUrl(input),
         authorization: headers.get("Authorization"),
       });
       throw new Error("test: unexpected fetch");
@@ -130,7 +155,7 @@ describe("CVE: auth login --token with rc-poisoned env.SENTRY_URL", () => {
     );
     expect(leaked).toEqual([]);
     // And no requests to the attacker at all
-    const toEvil = fetchCalls.filter((c) => c.url.includes("evil.com"));
+    const toEvil = fetchCalls.filter((c) => urlHostnameIn(c.url, ["evil.com"]));
     expect(toEvil).toEqual([]);
   });
 
@@ -149,7 +174,7 @@ describe("CVE: auth login --token with rc-poisoned env.SENTRY_URL", () => {
       func.call(context, { force: false, timeout: 900 })
     ).rejects.toBeInstanceOf(HostScopeError);
 
-    const toEvil = fetchCalls.filter((c) => c.url.includes("evil.com"));
+    const toEvil = fetchCalls.filter((c) => urlHostnameIn(c.url, ["evil.com"]));
     expect(toEvil).toEqual([]);
   });
 
@@ -176,10 +201,10 @@ describe("CVE: auth login --token with rc-poisoned env.SENTRY_URL", () => {
       })
     ).rejects.toThrow(); // our fetch mock throws
 
-    const toEvil = fetchCalls.filter((c) => c.url.includes("evil.com"));
+    const toEvil = fetchCalls.filter((c) => urlHostnameIn(c.url, ["evil.com"]));
     expect(toEvil).toEqual([]);
     const toIntended = fetchCalls.filter((c) =>
-      c.url.includes("sentry.example.com")
+      urlHostnameIn(c.url, ["sentry.example.com"])
     );
     expect(toIntended.length).toBeGreaterThan(0);
   });
@@ -204,7 +229,7 @@ describe("CVE: auth login --token with rc-poisoned env.SENTRY_URL", () => {
     ).rejects.toThrow(); // mock fetch throws
 
     const toAttacker = fetchCalls.filter(
-      (c) => c.url.includes("evil.com") || !c.url.includes("sentry.acme.com")
+      (c) => !urlHostnameIn(c.url, ["sentry.acme.com"])
     );
     expect(toAttacker).toEqual([]);
   });
