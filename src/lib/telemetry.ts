@@ -30,6 +30,7 @@ import {
 import { ApiError } from "./errors.js";
 import { attachSentryReporter, logger } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
+import { makeCompressedTransport } from "./telemetry/zstd-transport.js";
 import { getRealUsername } from "./utils.js";
 
 export type { Span } from "@sentry/core";
@@ -518,6 +519,11 @@ export function initSentry(
   const client = Sentry.init({
     dsn: SENTRY_CLI_DSN,
     enabled,
+    // Compress outgoing envelopes with zstd (level 3) instead of gzip —
+    // smaller payloads, faster compress/decompress on both sides.
+    // Automatic gzip fallback when running on Node < 22.15 without the
+    // `Bun.zstdCompress` polyfill (see script/node-polyfills.ts).
+    transport: makeCompressedTransport,
     // Keep default integrations but filter out ones that add overhead without benefit.
     // Important: Don't use defaultIntegrations: false as it may break debug ID support.
     // NodeSystemError is excluded on runtimes missing util.getSystemErrorMap (Bun) — CLI-K1.

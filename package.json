@@ -96,6 +96,7 @@
     "bench:save": "bun run script/bench.ts --save-baseline",
     "bench:compare": "bun run script/bench.ts --compare",
     "bench:sweep": "bun run script/bench-sweep.ts",
+    "bench:transport": "bun run script/bench-transport.ts",
     "check:fragments": "bun run script/check-fragments.ts",
     "check:deps": "bun run script/check-no-deps.ts",
     "check:errors": "bun run script/check-error-patterns.ts",
