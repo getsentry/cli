@@ -189,7 +189,7 @@ jobs:
       - run: bun run check:errors
 
   test-unit:
-    name: Unit Tests
+    name: Unit Tests (${{ matrix.shard }}/${{ strategy.job-total }})
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -198,6 +198,10 @@ jobs:
       actions: read
       pull-requests: write
       statuses: write
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
@@ -211,12 +215,15 @@ jobs:
       - name: Generate API Schema
         run: bun run generate:schema
       - name: Unit Tests
-        run: bun run test:unit
+        run: bun run test:unit -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
       - name: Coverage Report
         uses: getsentry/codecov-action@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           files: ./coverage/lcov.info
+          # Each shard uploads its own partial coverage report under a
+          # shard-scoped flag. Codecov merges them server-side.
+          flags: unit-shard-${{ matrix.shard }}
           informational-patch: ${{ github.event_name == 'push' }}
 
   build-binary:
