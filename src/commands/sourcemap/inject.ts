@@ -7,6 +7,7 @@
 
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
+import { ValidationError } from "../../lib/errors.js";
 import {
   colorTag,
   mdKvTable,
@@ -88,11 +89,19 @@ export const injectCommand = buildCommand({
         optional: true,
         default: false,
       },
+      "allow-empty": {
+        kind: "boolean",
+        brief:
+          "Exit successfully when no JS + sourcemap pairs are discovered " +
+          "(default: error out to catch silent build misconfigurations)",
+        optional: true,
+        default: false,
+      },
     },
   },
   async *func(
     this: SentryContext,
-    flags: { ext?: string; "dry-run"?: boolean },
+    flags: { ext?: string; "dry-run"?: boolean; "allow-empty"?: boolean },
     dir: string
   ) {
     const extensions = flags.ext?.split(",").map((e) => e.trim());
@@ -100,6 +109,19 @@ export const injectCommand = buildCommand({
       extensions,
       dryRun: flags["dry-run"],
     });
+
+    // Guard against silent misconfigurations: zero *discovered* pairs almost
+    // always means the bundler didn't emit .map files. This is distinct from
+    // zero *injected* (which is legitimate when every pair already has a
+    // debug ID — the idempotent re-run case). Callers that legitimately
+    // invoke inject on potentially-empty directories can pass --allow-empty.
+    if (results.length === 0 && !flags["allow-empty"]) {
+      throw new ValidationError(
+        `No JS + sourcemap pairs found in '${dir}'. Ensure your bundler ` +
+          "emits sourcemaps (e.g., Vite: `build.sourcemap: 'hidden'`), or " +
+          "pass --allow-empty to suppress this error."
+      );
+    }
 
     const modified = results.filter((r) => r.injected).length;
     const skipped = results.length - modified;

@@ -18,6 +18,7 @@ Inject debug IDs into JavaScript files and sourcemaps
 **Flags:**
 - `--ext <value> - Comma-separated file extensions to process (default: .js,.cjs,.mjs)`
 - `--dry-run - Show what would be modified without writing`
+- `--allow-empty - Exit successfully when no JS + sourcemap pairs are discovered (default: error out to catch silent build misconfigurations)`
 
 **Examples:**
 
@@ -39,6 +40,7 @@ Upload sourcemaps to Sentry
 **Flags:**
 - `--release <value> - Release version to associate with the upload`
 - `--url-prefix <value> - URL prefix for uploaded files (default: ~/) - (default: "~/")`
+- `--allow-empty - Exit successfully when no sourcemap pairs are found (default: error out to catch silent build misconfigurations)`
 
 **Examples:**
 

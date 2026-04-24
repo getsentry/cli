@@ -14,9 +14,17 @@ export default defineConfig({
   // Generate sourcemaps for Sentry. "hidden" produces .map files without
   // adding //# sourceMappingURL comments to the output (the debug IDs
   // injected post-build by `sentry sourcemap inject` are used instead).
+  //
+  // Astro 6 uses Vite 7's Environments API and reads `sourcemap` from
+  // `vite.environments.{client,ssr}.build.sourcemap` (see
+  // astro/dist/core/build/static-build.js), falling back to `false` — NOT
+  // to legacy top-level `vite.build.sourcemap`. We set it on both
+  // environments to cover both the client bundle (what `sentry sourcemap
+  // inject/upload` operates on) and SSR output.
   vite: {
-    build: {
-      sourcemap: "hidden",
+    environments: {
+      client: { build: { sourcemap: "hidden" } },
+      ssr: { build: { sourcemap: "hidden" } },
     },
   },
   integrations: [

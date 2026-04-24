@@ -13,7 +13,7 @@ import {
   uploadSourcemaps,
 } from "../../lib/api/sourcemaps.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError } from "../../lib/errors.js";
+import { ContextError, ValidationError } from "../../lib/errors.js";
 import { mdKvTable, renderMarkdown } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
@@ -87,11 +87,23 @@ export const uploadCommand = buildCommand({
         optional: true,
         default: "~/",
       },
+      "allow-empty": {
+        kind: "boolean",
+        brief:
+          "Exit successfully when no sourcemap pairs are found (default: " +
+          "error out to catch silent build misconfigurations)",
+        optional: true,
+        default: false,
+      },
     },
   },
   async *func(
     this: SentryContext,
-    flags: { release?: string; "url-prefix"?: string },
+    flags: {
+      release?: string;
+      "url-prefix"?: string;
+      "allow-empty"?: boolean;
+    },
     dir: string
   ) {
     // Resolve org/project via the standard cascade
@@ -108,6 +120,19 @@ export const uploadCommand = buildCommand({
     const results = await injectDirectory(dir);
 
     if (results.length === 0) {
+      // Silent misconfigurations (e.g., the bundler didn't emit .map files)
+      // used to succeed with "0 uploaded". That makes post-deploy Sentry
+      // events unsymbolicated with no build-time signal. Default to erroring
+      // out so CI fails loudly; `--allow-empty` preserves the old behavior
+      // for callers that legitimately invoke upload on potentially-empty
+      // directories.
+      if (!flags["allow-empty"]) {
+        throw new ValidationError(
+          `No JS + sourcemap pairs found in '${dir}'. Ensure your bundler ` +
+            "emits sourcemaps (e.g., Vite: `build.sourcemap: 'hidden'`), or " +
+            "pass --allow-empty to suppress this error."
+        );
+      }
       yield new CommandOutput<UploadCommandResult>({
         org,
         project,
