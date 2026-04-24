@@ -38,27 +38,40 @@ export async function applyPatchset(
   }
 
   const applied: Array<{ path: string; action: string }> = [];
+  const failed: Array<{ path: string; action: string; error: string }> = [];
 
   for (const patch of payload.params.patches) {
-    const absPath = safePath(payload.cwd, patch.path);
+    try {
+      const absPath = safePath(payload.cwd, patch.path);
 
-    if (patch.action === "modify") {
-      try {
-        await fs.promises.access(absPath);
-      } catch {
-        return {
-          ok: false,
-          error: `Cannot modify "${patch.path}": file does not exist`,
-          data: { applied },
-        };
+      if (patch.action === "modify") {
+        try {
+          await fs.promises.access(absPath);
+        } catch {
+          throw new Error(`Cannot modify "${patch.path}": file does not exist`);
+        }
       }
-    }
 
-    await applySinglePatch(absPath, patch, context.authToken);
-    applied.push({ path: patch.path, action: patch.action });
+      await applySinglePatch(absPath, patch, context.authToken);
+      applied.push({ path: patch.path, action: patch.action });
+    } catch (error) {
+      failed.push({
+        path: patch.path,
+        action: patch.action,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
-  return { ok: true, data: { applied } };
+  if (failed.length > 0) {
+    return {
+      ok: false,
+      error: `Applied ${applied.length} of ${applied.length + failed.length} patches; ${failed.length} failed.`,
+      data: { applied, failed },
+    };
+  }
+
+  return { ok: true, data: { applied, failed: [] } };
 }
 
 function applyPatchsetDryRun(payload: ApplyPatchsetPayload): ToolResult {
@@ -75,7 +88,7 @@ function applyPatchsetDryRun(payload: ApplyPatchsetPayload): ToolResult {
     applied.push({ path: patch.path, action: patch.action });
   }
 
-  return { ok: true, data: { applied } };
+  return { ok: true, data: { applied, failed: [] } };
 }
 
 async function applySinglePatch(
