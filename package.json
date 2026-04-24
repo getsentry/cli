@@ -80,7 +80,7 @@
     "lint": "bunx ultracite check",
     "lint:fix": "bunx ultracite fix",
     "test": "bun run test:unit",
-    "test:unit": "bun run generate:docs && bun run generate:sdk && bun test --timeout 15000 --isolate --parallel test/lib test/commands test/types test/isolated --coverage --coverage-reporter=lcov",
+    "test:unit": "bun run generate:docs && bun run generate:sdk && bun test --timeout 15000 --isolate --parallel test/lib test/commands test/types --coverage --coverage-reporter=lcov",
     "test:changed": "bun run generate:docs && bun run generate:sdk && bun test --timeout 15000 --isolate --changed",
     "test:e2e": "bun run generate:docs && bun run generate:sdk && bun test --timeout 15000 test/e2e",
     "test:init-eval": "bun test test/init-eval --timeout 600000 --concurrency 6",

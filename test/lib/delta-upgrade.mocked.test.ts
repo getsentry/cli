@@ -1,12 +1,14 @@
 /**
- * Integration tests for delta upgrade orchestration
+ * Integration tests for delta upgrade orchestration with a non-dev CLI_VERSION.
  *
- * These tests use mock.module() to override CLI_VERSION from constants.js
- * so that canAttemptDelta() passes its dev-build guard. They are isolated
- * in a separate directory to run independently and avoid interfering with
- * other test files.
+ * These tests use `mock.module()` to override `CLI_VERSION` from constants.js
+ * so that `canAttemptDelta()` passes its dev-build guard (the real `CLI_VERSION`
+ * is "0.0.0-dev" in test mode, which short-circuits the orchestrator).
  *
- * Run with: bun test test/isolated/delta-upgrade.test.ts
+ * Kept as a sibling file to `delta-upgrade.test.ts` because its
+ * `mock.module()` would invert the assumptions of the dev-mode null-return
+ * tests in that file. Under `bun test --isolate` each file gets a fresh
+ * module graph, so the mocks here don't leak.
  */
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";

@@ -1,20 +1,23 @@
 /**
- * Integration tests for resolve-target utilities
+ * Unit tests for resolve-target utilities with mocked collaborators.
  *
- * These tests use mock.module() which affects global module state.
- * They are isolated in a separate directory to run independently
- * and avoid interfering with other test files.
+ * These tests use `mock.module()` to stub out every dependency (DB caches,
+ * DSN detection, api-client). This gives tight control over return values
+ * at each decision point, at the cost of not exercising the real DB/HTTP
+ * paths — those are covered by `resolve-target.test.ts` (real DB + mocked
+ * fetch).
  *
- * Run with: bun test test/isolated
+ * Keeping this as a separate file from `resolve-target.test.ts` so the two
+ * mocking strategies don't cross-contaminate: `bun test --isolate` gives
+ * each file a fresh module graph, so the mocks here don't leak into the
+ * real-DB integration tests.
  */
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
-// IMPORTANT: Import the real formatMultipleProjectsFooter from its source file
-// (not the barrel dsn/index.js). We pass this through the mock below so that
-// if Bun leaks the mock.module() into other test files (which it does — see
-// https://github.com/getsentry/cli/issues/258), the leaked version still has
-// the real behavior instead of a simplified stub.
+// Import the real formatMultipleProjectsFooter from its source file (not the
+// barrel dsn/index.js), then pass it through the mock below so the mocked
+// barrel still returns the real implementation for this export.
 import { formatMultipleProjectsFooter } from "../../src/lib/dsn/errors.js";
 
 // ============================================================================
