@@ -20,7 +20,11 @@ import { getDbPath } from "../../lib/db/index.js";
 import { getUserInfo, setUserInfo } from "../../lib/db/user.js";
 import { getEnv } from "../../lib/env.js";
 import { getEnvTokenHost } from "../../lib/env-token-host.js";
-import { AuthError, ValidationError } from "../../lib/errors.js";
+import {
+  AuthError,
+  HostScopeError,
+  ValidationError,
+} from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
 import {
   formatDuration,
@@ -36,6 +40,7 @@ import { logger } from "../../lib/logger.js";
 import { clearResponseCache } from "../../lib/response-cache.js";
 import { isSentrySaasUrl } from "../../lib/sentry-urls.js";
 import {
+  hasLoginTrustAnchor,
   normalizeOrigin,
   registerLoginTrustAnchor,
 } from "../../lib/token-host.js";
@@ -89,6 +94,44 @@ export function parseLoginUrl(raw: string): string {
     throw new ValidationError(`--url is not a valid URL: ${raw}`, "url");
   }
   return origin;
+}
+
+/**
+ * CVE defense: refuse `auth login` when the effective host was sourced
+ * from an untrusted channel.
+ *
+ * Context: `applySentryCliRcEnvShim` admits `auth login` with
+ * `skipUrlTrustCheck: true` so users can onboard to new instances from
+ * inside a repo that ships a `.sentryclirc` url (chicken-and-egg
+ * otherwise). That bypass lets the shim write `env.SENTRY_URL` from an
+ * untrusted rc file. If the user then runs `sentry auth login --token X`
+ * (no `--url`), `applyLoginUrl(undefined)` would return the rc-sourced
+ * host and we'd send the user-supplied API token — or initiate an
+ * OAuth device flow — against the attacker.
+ *
+ * `applyLoginUrl` only registers a login trust anchor when the host
+ * comes from a trusted source (explicit `--url` flag or boot-time env
+ * snapshot, captured BEFORE the rc shim runs). So "anchor not
+ * registered" is the load-bearing signal that the host is untrusted.
+ *
+ * Skipped for:
+ * - SaaS hosts (no credential leak possible on SaaS routing).
+ * - Explicit `--url` (user's argv, always trusted).
+ */
+function refuseLoginToUntrustedHost(
+  flags: LoginFlags,
+  effectiveHost: string
+): void {
+  if (flags.url || isSentrySaasUrl(effectiveHost) || hasLoginTrustAnchor()) {
+    return;
+  }
+  const tokenHint = flags.token ? " --token <token>" : "";
+  throw new HostScopeError(
+    `Refusing to log in against ${effectiveHost}: this URL was configured by a .sentryclirc file in the current or parent directory, not by your shell environment.\n` +
+      "If you trust this host, pass it explicitly:\n" +
+      `  sentry auth login --url ${effectiveHost}${tokenHint}\n` +
+      "Otherwise, remove the [defaults] url line from the .sentryclirc file."
+  );
 }
 
 /**
@@ -289,6 +332,7 @@ export const loginCommand = buildCommand({
     // host) remains valid, breaking every subsequent command. Only
     // persist after the login has actually succeeded.
     const effectiveHost = applyLoginUrl(flags.url);
+    refuseLoginToUntrustedHost(flags, effectiveHost);
 
     // Check if already authenticated and handle re-authentication
     if (isAuthenticated()) {

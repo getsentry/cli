@@ -185,6 +185,19 @@ export function registerLoginTrustAnchor(url: string): void {
 }
 
 /**
+ * Whether the current process has an explicit login trust anchor set.
+ *
+ * Used by the login command to decide whether the resolved effective
+ * host (from `applyLoginUrl`) came from a trusted source. The anchor is
+ * only registered by `applyLoginUrl` when the effective host matches
+ * either the explicit `--url` flag or the boot-time env snapshot — so
+ * "anchor present" ↔ "host comes from a trusted source".
+ */
+export function hasLoginTrustAnchor(): boolean {
+  return loginTrustAnchor !== undefined;
+}
+
+/**
  * Reset the login-time trust anchor. Tests only.
  * @internal
  */
