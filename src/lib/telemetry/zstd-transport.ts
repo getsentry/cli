@@ -155,7 +155,7 @@ function shouldFallbackToDefault(
   if (!proxy) {
     return false;
   }
-  return !isNoProxyExempt(url, proxy);
+  return !isNoProxyExempt(url);
 }
 
 /**
@@ -277,8 +277,12 @@ async function performRequest(
   });
 }
 
-/** Coerce `string | Uint8Array` into a single contiguous Buffer. */
-function normalizeBody(body: string | Uint8Array): Buffer {
+/**
+ * Coerce `string | Uint8Array` into a single contiguous Buffer.
+ *
+ * @internal Exported for tests.
+ */
+export function normalizeBody(body: string | Uint8Array): Buffer {
   if (typeof body === "string") {
     return Buffer.from(body, "utf-8");
   }
@@ -299,8 +303,10 @@ type CompressResult = {
  * Apply the pre-selected codec iff the body is large enough to benefit.
  * Under threshold → passthrough with `encoding: "none"` (matches SDK
  * default behavior).
+ *
+ * @internal Exported for tests.
  */
-async function maybeCompress(
+export async function maybeCompress(
   buf: Buffer,
   encoding: Exclude<TransportEncoding, "none">
 ): Promise<CompressResult> {
@@ -349,8 +355,10 @@ export function hasZstdSupport(): boolean {
  * Mirror the SDK's `applyNoProxyOption`: returns true iff the target
  * URL matches an entry in `NO_PROXY` / `no_proxy`, in which case the
  * proxy should be ignored.
+ *
+ * @internal Exported for tests.
  */
-function isNoProxyExempt(urlSegments: URL, _proxy: string): boolean {
+export function isNoProxyExempt(urlSegments: URL): boolean {
   const noProxy = process.env.no_proxy ?? process.env.NO_PROXY;
   if (!noProxy) {
     return false;

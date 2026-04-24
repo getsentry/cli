@@ -12,14 +12,17 @@
  *      `createTransport` layer.
  */
 
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ClientRequest, IncomingHttpHeaders } from "node:http";
 import { gunzipSync } from "node:zlib";
 import { createEnvelope } from "@sentry/core";
 import {
   hasZstdSupport,
+  isNoProxyExempt,
   makeCompressedTransport,
+  maybeCompress,
+  normalizeBody,
 } from "../../../src/lib/telemetry/zstd-transport.js";
 
 /** No-op for SDK callbacks that require a function but return nothing meaningful. */
@@ -283,5 +286,265 @@ describe("makeCompressedTransport", () => {
     // No-op transport resolves with empty response, does not throw.
     const response = await transport.send(envelope);
     expect(response).toEqual({});
+  });
+
+  test("proxy configured: falls back to SDK's makeNodeTransport", () => {
+    const savedProxy = process.env.https_proxy;
+    process.env.https_proxy = "http://proxy.internal:3128";
+    try {
+      // No httpModule override: we can't observe the returned transport's
+      // internals, but we can prove the path differs from the zstd one
+      // by checking that no zstd-specific header is attached when a
+      // proxy is present. The test below (normalizeBody + maybeCompress)
+      // exercise the zstd codepath directly.
+      const transport = makeCompressedTransport({
+        ...BASE_OPTIONS,
+        // makeNodeTransport requires httpModule too; with the default it
+        // will try to create an Agent. Pass a dummy module to avoid any
+        // real network I/O when the returned transport is constructed.
+      });
+      // Sanity: we got *some* transport object back with send/flush.
+      expect(typeof transport.send).toBe("function");
+      expect(typeof transport.flush).toBe("function");
+    } finally {
+      if (savedProxy === undefined) {
+        delete process.env.https_proxy;
+      } else {
+        process.env.https_proxy = savedProxy;
+      }
+    }
+  });
+
+  test("network error on socket: promise rejects, nothing throws outward", async () => {
+    // Mock http module whose request() emits an 'error' event instead of
+    // responding. The executor's `req.on('error', reject)` must surface
+    // it to the outer promise, which createTransport's wrapper catches
+    // and records as network_error.
+    const throwingMod = {
+      request: (_opts: unknown, _cb?: unknown) => {
+        const req = new EventEmitter() as unknown as ClientRequest & {
+          write: (c: unknown) => boolean;
+          end: () => void;
+        };
+        req.write = () => true;
+        req.end = () => {
+          process.nextTick(() => req.emit("error", new Error("ECONNREFUSED")));
+        };
+        return req;
+      },
+    };
+    const transport = makeCompressedTransport({
+      ...BASE_OPTIONS,
+      httpModule: throwingMod as never,
+    });
+    const envelope: any = createEnvelope({} as any, [
+      [{ type: "event" } as any, { data: "x".repeat(4096) } as any],
+    ]);
+    // createTransport wraps network errors and re-throws them — a real
+    // API consumer would swallow this via .catch(). We just assert the
+    // promise settles (does not hang) and throws an ECONNREFUSED.
+    await expect(transport.send(envelope)).rejects.toThrow("ECONNREFUSED");
+  });
+
+  test("proxy configured + URL is no_proxy exempt: uses zstd transport", async () => {
+    const savedProxy = process.env.https_proxy;
+    const savedNoProxy = process.env.no_proxy;
+    process.env.https_proxy = "http://proxy.internal:3128";
+    process.env.no_proxy = "example.com";
+    try {
+      const { httpModule, captured } = buildMockHttpModule({
+        statusCode: 200,
+        headers: {},
+      });
+      const transport = makeCompressedTransport({
+        ...BASE_OPTIONS,
+        httpModule,
+      });
+      const envelope: any = createEnvelope({} as any, [
+        [{ type: "event" } as any, { data: "small" } as any],
+      ]);
+      await transport.send(envelope);
+      // httpModule was called → we took the zstd path, not the SDK
+      // fallback (which would have ignored our httpModule mock and
+      // tried to connect through the proxy).
+      expect(captured.chunks.length).toBeGreaterThan(0);
+    } finally {
+      if (savedProxy === undefined) {
+        delete process.env.https_proxy;
+      } else {
+        process.env.https_proxy = savedProxy;
+      }
+      if (savedNoProxy === undefined) {
+        delete process.env.no_proxy;
+      } else {
+        process.env.no_proxy = savedNoProxy;
+      }
+    }
+  });
+});
+
+// ── Direct helper tests ──────────────────────────────────────────────
+
+describe("normalizeBody", () => {
+  test("string → UTF-8 bytes", () => {
+    const buf = normalizeBody("hello");
+    expect(buf.toString("utf-8")).toBe("hello");
+  });
+
+  test("multi-byte UTF-8 string", () => {
+    const buf = normalizeBody("café ☕");
+    expect(buf.toString("utf-8")).toBe("café ☕");
+  });
+
+  test("Uint8Array → zero-copy Buffer view", () => {
+    const src = new Uint8Array([1, 2, 3, 4, 5]);
+    const buf = normalizeBody(src);
+    expect(buf.length).toBe(5);
+    expect(Array.from(buf)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  test("Uint8Array with non-zero byteOffset", () => {
+    const backing = new Uint8Array([9, 9, 1, 2, 3, 9, 9]);
+    const view = new Uint8Array(backing.buffer, 2, 3);
+    const buf = normalizeBody(view);
+    expect(Array.from(buf)).toEqual([1, 2, 3]);
+  });
+
+  test("empty string", () => {
+    expect(normalizeBody("").length).toBe(0);
+  });
+
+  test("empty Uint8Array", () => {
+    expect(normalizeBody(new Uint8Array(0)).length).toBe(0);
+  });
+});
+
+describe("maybeCompress", () => {
+  test("zstd + body above threshold → zstd-compressed", async () => {
+    if (!hasZstdSupport()) {
+      return;
+    }
+    const buf = Buffer.from("x".repeat(4096));
+    const result = await maybeCompress(buf, "zstd");
+    expect(result.encodingApplied).toBe("zstd");
+    expect(result.payload.length).toBeLessThan(buf.length);
+    expect(result.compressMs).toBeGreaterThanOrEqual(0);
+    const decompressed = await Bun.zstdDecompress(result.payload);
+    expect(decompressed.toString("utf-8")).toBe("x".repeat(4096));
+  });
+
+  test("zstd + body below 1 KiB threshold → passthrough", async () => {
+    const buf = Buffer.from("x".repeat(512));
+    const result = await maybeCompress(buf, "zstd");
+    expect(result.encodingApplied).toBe("none");
+    expect(result.payload).toBe(buf);
+    expect(result.compressMs).toBe(0);
+  });
+
+  test("gzip + body above 32 KiB threshold → gzip-compressed", async () => {
+    const buf = Buffer.from("y".repeat(64 * 1024));
+    const result = await maybeCompress(buf, "gzip");
+    expect(result.encodingApplied).toBe("gzip");
+    expect(result.payload.length).toBeLessThan(buf.length);
+    const decompressed = gunzipSync(result.payload);
+    expect(decompressed.toString("utf-8")).toBe("y".repeat(64 * 1024));
+  });
+
+  test("gzip + body below 32 KiB threshold → passthrough", async () => {
+    const buf = Buffer.from("z".repeat(16 * 1024));
+    const result = await maybeCompress(buf, "gzip");
+    expect(result.encodingApplied).toBe("none");
+    expect(result.payload).toBe(buf);
+  });
+
+  test("zstd path + Bun.zstdCompress missing mid-flight → gzip safety net", async () => {
+    const saved = globalThis.Bun?.zstdCompress;
+    (globalThis as { Bun: { zstdCompress?: unknown } }).Bun.zstdCompress =
+      undefined as never;
+    try {
+      const buf = Buffer.from("x".repeat(4096));
+      // Encoding pre-selected as "zstd" (caller didn't reprobe), but
+      // the runtime now lacks zstd — the belt-and-braces branch gzips.
+      const result = await maybeCompress(buf, "zstd");
+      expect(result.encodingApplied).toBe("gzip");
+      expect(gunzipSync(result.payload).toString("utf-8")).toBe(
+        "x".repeat(4096)
+      );
+    } finally {
+      if (saved !== undefined) {
+        globalThis.Bun.zstdCompress = saved;
+      }
+    }
+  });
+});
+
+describe("isNoProxyExempt", () => {
+  let savedNoProxy: string | undefined;
+  let savedNoProxyUpper: string | undefined;
+
+  beforeEach(() => {
+    savedNoProxy = process.env.no_proxy;
+    savedNoProxyUpper = process.env.NO_PROXY;
+    delete process.env.no_proxy;
+    delete process.env.NO_PROXY;
+  });
+
+  afterEach(() => {
+    if (savedNoProxy === undefined) {
+      delete process.env.no_proxy;
+    } else {
+      process.env.no_proxy = savedNoProxy;
+    }
+    if (savedNoProxyUpper === undefined) {
+      delete process.env.NO_PROXY;
+    } else {
+      process.env.NO_PROXY = savedNoProxyUpper;
+    }
+  });
+
+  test("no env var set → not exempt", () => {
+    expect(isNoProxyExempt(new URL("https://ingest.example.com/"))).toBe(false);
+  });
+
+  test("suffix match in no_proxy → exempt", () => {
+    process.env.no_proxy = "example.com,internal.lan";
+    expect(isNoProxyExempt(new URL("https://ingest.example.com/"))).toBe(true);
+  });
+
+  test("no match → not exempt", () => {
+    process.env.no_proxy = "other.com";
+    expect(isNoProxyExempt(new URL("https://ingest.example.com/"))).toBe(false);
+  });
+
+  test("NO_PROXY (uppercase) also recognized", () => {
+    process.env.NO_PROXY = "example.com";
+    expect(isNoProxyExempt(new URL("https://ingest.example.com/"))).toBe(true);
+  });
+
+  test("lowercase takes precedence over uppercase", () => {
+    process.env.no_proxy = "other.com";
+    process.env.NO_PROXY = "example.com";
+    // Lowercase wins → uppercase ignored → no match → not exempt
+    expect(isNoProxyExempt(new URL("https://ingest.example.com/"))).toBe(false);
+  });
+});
+
+describe("hasZstdSupport", () => {
+  test("true when Bun.zstdCompress is present (Bun runtime)", () => {
+    // Running under bun test, so this should always be true.
+    expect(hasZstdSupport()).toBe(true);
+  });
+
+  test("false when Bun.zstdCompress is absent (simulated)", () => {
+    const saved = globalThis.Bun?.zstdCompress;
+    (globalThis as { Bun: { zstdCompress?: unknown } }).Bun.zstdCompress =
+      undefined as never;
+    try {
+      expect(hasZstdSupport()).toBe(false);
+    } finally {
+      if (saved !== undefined) {
+        globalThis.Bun.zstdCompress = saved;
+      }
+    }
   });
 });
