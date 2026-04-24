@@ -34,7 +34,10 @@ import {
 import { logger } from "../../lib/logger.js";
 import { clearResponseCache } from "../../lib/response-cache.js";
 import { isSentrySaasUrl } from "../../lib/sentry-urls.js";
-import { normalizeOrigin } from "../../lib/token-host.js";
+import {
+  normalizeOrigin,
+  registerLoginTrustAnchor,
+} from "../../lib/token-host.js";
 
 const log = logger.withTag("auth.login");
 
@@ -138,6 +141,12 @@ export function applyLoginUrl(url: string | undefined): string {
   const env = getEnv();
   env.SENTRY_HOST = url;
   env.SENTRY_URL = url;
+  // Register the explicit `--url` as a login-time trust anchor so that
+  // `applyCustomHeaders` attaches `SENTRY_CUSTOM_HEADERS` during the
+  // OAuth device flow — required for onboarding to IAP-protected
+  // self-hosted instances. Safe because `--url` is user-supplied via
+  // shell argv (same trust boundary as env vars in our threat model).
+  registerLoginTrustAnchor(url);
   return url;
 }
 

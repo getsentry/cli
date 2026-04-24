@@ -150,6 +150,49 @@ export function getActiveTokenHost(): string | undefined {
 const trustedRegionOrigins = new Set<string>();
 
 /**
+ * Process-local explicit login-time trust anchor — set when the user
+ * invokes `sentry auth login --url <url>`. The `--url` flag comes from
+ * the user's shell invocation, i.e. the same trust boundary as env vars,
+ * so it's safe to treat as a trust anchor during the login flow when no
+ * token yet exists.
+ *
+ * Distinct from the env-token-host snapshot (which is for scoping the
+ * env-token's credentials) — this is specifically for the no-token
+ * login-time window where `applyCustomHeaders` would otherwise fail
+ * closed and break onboarding to IAP-protected self-hosted instances.
+ */
+let loginTrustAnchor: string | undefined;
+
+/**
+ * Register an explicit login-time trust anchor from `sentry auth login --url`.
+ *
+ * Called by `applyLoginUrl` when the user passes `--url <url>`. The anchor
+ * is process-local (never persisted) and is consulted by
+ * {@link isRequestOriginTrusted} in the no-token window so that OAuth
+ * device flow requests against an IAP-protected self-hosted instance can
+ * carry `SENTRY_CUSTOM_HEADERS`.
+ *
+ * Safe because the `--url` flag value is user-supplied via shell argv,
+ * matching the threat model's trust boundary for env vars (anyone who
+ * can supply `--url` can already read `SENTRY_AUTH_TOKEN` from the same
+ * shell).
+ */
+export function registerLoginTrustAnchor(url: string): void {
+  const origin = normalizeOrigin(url);
+  if (origin) {
+    loginTrustAnchor = origin;
+  }
+}
+
+/**
+ * Reset the login-time trust anchor. Tests only.
+ * @internal
+ */
+export function resetLoginTrustAnchorForTesting(): void {
+  loginTrustAnchor = undefined;
+}
+
+/**
  * Register region URLs the control silo just told us about as part of
  * the active token's trust class.
  *
@@ -228,5 +271,43 @@ export function isRequestOriginTrusted(
       return true;
     }
   }
+  return false;
+}
+
+/**
+ * Check whether a request URL is trusted for the purpose of attaching
+ * `SENTRY_CUSTOM_HEADERS` (IAP tokens, mTLS headers, etc.).
+ *
+ * Extends {@link isRequestOriginTrusted} with the login-time trust anchor
+ * (`sentry auth login --url`) so that the OAuth device flow against an
+ * IAP-protected self-hosted instance can carry custom headers during the
+ * no-token bootstrap window. Without this extension, first-time login
+ * against such an instance would fail because the IAP proxy blocks the
+ * unauthenticated device-code request.
+ *
+ * Why this is safe: the `--url` flag is user-supplied via shell argv —
+ * same trust boundary as env vars per the threat model. An attacker who
+ * can supply `--url` can already read `SENTRY_AUTH_TOKEN` from the same
+ * shell. The critical property is that this extension is ONLY consulted
+ * when no token exists (so there's nothing worse than IAP-token leak to
+ * guard against here), and is NOT consulted from the `.sentryclirc`
+ * bypass path (rc URL → `env.SENTRY_URL` writes do not register as a
+ * login trust anchor; only explicit `--url` argv does).
+ *
+ * Returns `false` when no trust anchor exists at all — fail closed.
+ */
+export function isRequestOriginTrustedForCustomHeaders(
+  requestInput: string | URL | Request | undefined | null
+): boolean {
+  // Token-present path is the same as the primary trust check.
+  if (getActiveTokenHost()) {
+    return isRequestOriginTrusted(requestInput);
+  }
+  // No-token bootstrap path: require an explicit login trust anchor
+  // (set by `applyLoginUrl` when `--url` was passed).
+  if (loginTrustAnchor) {
+    return isHostTrusted(requestInput, loginTrustAnchor);
+  }
+  // No anchor of any kind → fail closed.
   return false;
 }

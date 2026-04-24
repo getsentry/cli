@@ -152,4 +152,53 @@ describe("CVE: custom-headers leak (share URL + auth-login bypass)", () => {
     applyCustomHeaders(headers, "https://sentry.acme.com/api/0/organizations/");
     expect(headers.get("X-IAP-Token")).toBe("legit");
   });
+
+  test("IAP onboarding: 'auth login --url' registers a trust anchor so custom headers attach during OAuth device flow", async () => {
+    // Scenario: first-time self-hosted login with IAP protection.
+    // User runs `sentry auth login --url https://sentry.acme.com` before
+    // having any token. The device-code request MUST carry the IAP
+    // token or the IAP proxy will block it.
+    delete process.env.SENTRY_AUTH_TOKEN;
+    delete process.env.SENTRY_TOKEN;
+    process.env.SENTRY_CUSTOM_HEADERS = "X-IAP-Token: legit";
+
+    // `applyLoginUrl` (from login command) registers the trust anchor
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    applyLoginUrl("https://sentry.acme.com");
+
+    const headers = new Headers();
+    applyCustomHeaders(headers, "https://sentry.acme.com/oauth/device/code/");
+    // Legitimate IAP token attaches — this is the onboarding case
+    expect(headers.get("X-IAP-Token")).toBe("legit");
+
+    // Cleanup the anchor so subsequent tests aren't affected
+    const { resetLoginTrustAnchorForTesting } = await import(
+      "../../../src/lib/token-host.js"
+    );
+    resetLoginTrustAnchorForTesting();
+  });
+
+  test("Attacker .sentryclirc does NOT register a login trust anchor (rc bypass still fails closed)", async () => {
+    // This is the critical distinguishing test: the .sentryclirc shim
+    // writes env.SENTRY_URL via the skipUrlTrustCheck bypass, but it
+    // does NOT call registerLoginTrustAnchor. So no-token
+    // applyCustomHeaders must still fail closed even though SENTRY_URL
+    // is set.
+    delete process.env.SENTRY_AUTH_TOKEN;
+    delete process.env.SENTRY_TOKEN;
+    process.env.SENTRY_CUSTOM_HEADERS = "X-IAP-Token: secret";
+    process.env.SENTRY_URL = "https://evil.com"; // simulating rc shim write
+    // Intentionally NOT calling applyLoginUrl — attacker flow doesn't
+
+    const { resetLoginTrustAnchorForTesting } = await import(
+      "../../../src/lib/token-host.js"
+    );
+    resetLoginTrustAnchorForTesting();
+
+    const headers = new Headers();
+    applyCustomHeaders(headers, "https://evil.com/oauth/device/code/");
+    expect(headers.get("X-IAP-Token")).toBeNull();
+  });
 });

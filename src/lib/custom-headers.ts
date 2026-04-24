@@ -27,7 +27,7 @@ import { getEnv } from "./env.js";
 import { ConfigError } from "./errors.js";
 import { logger } from "./logger.js";
 import { isSentrySaasUrl } from "./sentry-urls.js";
-import { getActiveTokenHost, isRequestOriginTrusted } from "./token-host.js";
+import { isRequestOriginTrustedForCustomHeaders } from "./token-host.js";
 
 const log = logger.withTag("custom-headers");
 
@@ -243,27 +243,21 @@ export function applyCustomHeaders(
     return;
   }
 
-  // Fail-closed: no token = no trust anchor. See function-level JSDoc for
-  // rationale. This prevents custom headers from leaking during the
-  // `auth login` rc-URL bypass where SENTRY_URL is attacker-controlled.
-  const tokenHost = getActiveTokenHost();
-  if (!tokenHost) {
+  // Scope via `isRequestOriginTrustedForCustomHeaders`:
+  // - Token present → check against token's trust class (same as Bearer path).
+  // - No token + explicit `--url` login anchor → check against anchor.
+  //   This is the IAP-protected self-hosted onboarding case: first-time
+  //   `auth login --url <self-hosted>` must carry SENTRY_CUSTOM_HEADERS
+  //   so the IAP proxy admits the OAuth device-code request.
+  // - No token and no anchor → fail closed. This blocks the auth-login
+  //   rc-URL bypass: attacker's .sentryclirc writes SENTRY_URL but does
+  //   NOT register a login trust anchor, so headers don't attach.
+  if (!isRequestOriginTrustedForCustomHeaders(requestUrl)) {
     if (!untrustedDestinationWarningLogged) {
       untrustedDestinationWarningLogged = true;
       log.warn(
-        "Skipping custom headers because no active Sentry credentials are configured. " +
-          "Run 'sentry auth login --url <url>' first."
-      );
-    }
-    return;
-  }
-
-  if (!isRequestOriginTrusted(requestUrl)) {
-    if (!untrustedDestinationWarningLogged) {
-      untrustedDestinationWarningLogged = true;
-      log.warn(
-        `Skipping custom headers for request to untrusted host (expected ${tokenHost}). ` +
-          "If this is legitimate, log in against the intended instance."
+        "Skipping custom headers for request to untrusted host. " +
+          "If this is legitimate, run 'sentry auth login --url <url>' against the intended instance."
       );
     }
     return;
