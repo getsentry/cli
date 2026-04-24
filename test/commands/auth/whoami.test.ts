@@ -22,7 +22,7 @@ import * as apiClient from "../../../src/lib/api-client.js";
 import * as dbAuth from "../../../src/lib/db/auth.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbUser from "../../../src/lib/db/user.js";
-import { AuthError } from "../../../src/lib/errors.js";
+import { ApiError, AuthError, CliError } from "../../../src/lib/errors.js";
 
 type WhoamiFlags = { readonly json: boolean };
 
@@ -45,6 +45,12 @@ const ID_ONLY_USER = {
   id: "7",
 };
 
+/**
+ * OAuth-style token used when the test doesn't care about token type and
+ * just needs `getAuthToken()` to return something non-org/non-user-PAT.
+ */
+const OAUTH_TOKEN = "17faa5dfa5e64d5a9b3e8bf7c4d5e6f7a8b9c0d1e2f3a4b567ee";
+
 function createContext() {
   const output: string[] = [];
   const context = {
@@ -66,19 +72,25 @@ function createContext() {
 
 describe("whoamiCommand.func", () => {
   let isAuthenticatedSpy: ReturnType<typeof spyOn>;
+  let getAuthTokenSpy: ReturnType<typeof spyOn>;
   let getCurrentUserSpy: ReturnType<typeof spyOn>;
   let setUserInfoSpy: ReturnType<typeof spyOn>;
   let func: WhoamiFunc;
 
   beforeEach(async () => {
     isAuthenticatedSpy = spyOn(dbAuth, "isAuthenticated");
+    getAuthTokenSpy = spyOn(dbAuth, "getAuthToken");
     getCurrentUserSpy = spyOn(apiClient, "getCurrentUser");
     setUserInfoSpy = spyOn(dbUser, "setUserInfo");
+    // Default token type: OAuth (not org, not PAT). Tests that need a
+    // different type override this mock within their own block.
+    getAuthTokenSpy.mockReturnValue(OAUTH_TOKEN);
     func = (await whoamiCommand.loader()) as unknown as WhoamiFunc;
   });
 
   afterEach(() => {
     isAuthenticatedSpy.mockRestore();
+    getAuthTokenSpy.mockRestore();
     getCurrentUserSpy.mockRestore();
     setUserInfoSpy.mockRestore();
   });
@@ -93,6 +105,10 @@ describe("whoamiCommand.func", () => {
       getAuthConfigSpy = spyOn(dbAuth, "getAuthConfig").mockReturnValue(
         undefined
       );
+      // With no stored auth, getAuthToken returns undefined, and the
+      // natural AuthError bubbles up from getCurrentUser().
+      getAuthTokenSpy.mockReturnValue(undefined);
+      getCurrentUserSpy.mockRejectedValue(new AuthError("not_authenticated"));
     });
 
     afterEach(() => {
@@ -110,8 +126,6 @@ describe("whoamiCommand.func", () => {
       await expect(func.call(context, { json: false })).rejects.toBeInstanceOf(
         AuthError
       );
-
-      expect(getCurrentUserSpy).not.toHaveBeenCalled();
     });
 
     test("does not call setUserInfo when not authenticated", async () => {
@@ -126,6 +140,96 @@ describe("whoamiCommand.func", () => {
       }
 
       expect(setUserInfoSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("org auth token short-circuit", () => {
+    test("throws CliError with actionable message and skips API call", async () => {
+      getAuthTokenSpy.mockReturnValue("sntrys_abc123def456");
+
+      const { context } = createContext();
+
+      // The thrown error must be a CliError (so the framework formats it),
+      // and must NOT be an AuthError (no auto-login trigger).
+      const promise = func.call(context, { json: false });
+      await expect(promise).rejects.toBeInstanceOf(CliError);
+      await expect(promise).rejects.not.toBeInstanceOf(AuthError);
+
+      expect(getCurrentUserSpy).not.toHaveBeenCalled();
+      expect(setUserInfoSpy).not.toHaveBeenCalled();
+    });
+
+    test("error message points to auth status and org list", async () => {
+      getAuthTokenSpy.mockReturnValue("sntrys_abc");
+
+      const { context } = createContext();
+
+      try {
+        await func.call(context, { json: false });
+        throw new Error("expected CliError");
+      } catch (err) {
+        expect(err).toBeInstanceOf(CliError);
+        const msg = (err as CliError).message;
+        expect(msg).toContain("Organization auth tokens");
+        expect(msg.toLowerCase()).toContain("user");
+        expect(msg).toContain("sentry auth status");
+        expect(msg).toContain("sentry org list");
+      }
+    });
+  });
+
+  describe("user PAT (sntryu_) passes through", () => {
+    test("sntryu_ token calls getCurrentUser normally", async () => {
+      getAuthTokenSpy.mockReturnValue("sntryu_personaltoken");
+      getCurrentUserSpy.mockResolvedValue(FULL_USER);
+      setUserInfoSpy.mockReturnValue(undefined);
+
+      const { context, getOutput } = createContext();
+      await func.call(context, { json: false });
+
+      expect(getCurrentUserSpy).toHaveBeenCalled();
+      expect(getOutput()).toContain("Jane Doe");
+    });
+  });
+
+  describe("400 Bad Request on /auth/", () => {
+    test("translates ApiError(400) to AuthError(invalid) with skipAutoAuth", async () => {
+      getCurrentUserSpy.mockRejectedValue(
+        new ApiError("API request failed: 400 Bad Request", 400, "", "/auth/")
+      );
+
+      const { context } = createContext();
+
+      try {
+        await func.call(context, { json: false });
+        throw new Error("expected AuthError");
+      } catch (err) {
+        expect(err).toBeInstanceOf(AuthError);
+        const authErr = err as AuthError;
+        expect(authErr.reason).toBe("invalid");
+        expect(authErr.skipAutoAuth).toBe(true);
+        expect(authErr.message).toContain("sentry auth login");
+        expect(authErr.message).toContain("sentry auth status");
+      }
+    });
+
+    test("non-400 ApiError rethrows unchanged", async () => {
+      const original = new ApiError(
+        "API request failed: 500 Internal Server Error",
+        500,
+        "boom",
+        "/auth/"
+      );
+      getCurrentUserSpy.mockRejectedValue(original);
+
+      const { context } = createContext();
+
+      try {
+        await func.call(context, { json: false });
+        throw new Error("expected ApiError");
+      } catch (err) {
+        expect(err).toBe(original);
+      }
     });
   });
 
