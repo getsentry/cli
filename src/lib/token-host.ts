@@ -27,6 +27,7 @@ import {
   getStoredAuthHost,
   hasUsableStoredToken,
 } from "./db/auth.js";
+import { getKnownRegionUrls } from "./db/regions.js";
 import { getEnv } from "./env.js";
 import { getEnvTokenHost } from "./env-token-host.js";
 import { isSentrySaasUrl } from "./sentry-urls.js";
@@ -133,4 +134,96 @@ export function getActiveTokenHost(): string | undefined {
   }
 
   return;
+}
+
+/**
+ * Process-local allow-list of region URLs discovered from authenticated
+ * control-silo responses (e.g., `/users/me/regions/`). Extends the
+ * trust class before region URLs are persisted to `org_regions`.
+ *
+ * Populated by {@link registerTrustedRegionUrls}; cleared on auth changes
+ * via {@link resetTrustedRegionUrlsForTesting}.
+ */
+const trustedRegionOrigins = new Set<string>();
+
+/**
+ * Register region URLs the control silo just told us about as part of
+ * the active token's trust class.
+ *
+ * This is called from the region-discovery code path
+ * (`listOrganizationsUncached` after `getUserRegions`) to extend the
+ * trust scope BEFORE the subsequent fan-out fetches those regions.
+ * Without this, the fan-out's first request to each regional URL would
+ * fail the host-scoping guard because the URL hasn't yet been persisted
+ * to the `org_regions` cache.
+ *
+ * URLs are normalized to origins; invalid URLs are silently skipped.
+ */
+export function registerTrustedRegionUrls(urls: readonly string[]): void {
+  for (const url of urls) {
+    const origin = normalizeOrigin(url);
+    if (origin) {
+      trustedRegionOrigins.add(origin);
+    }
+  }
+}
+
+/**
+ * Reset the process-local region-URL allow-list. Tests only.
+ * @internal
+ */
+export function resetTrustedRegionUrlsForTesting(): void {
+  trustedRegionOrigins.clear();
+}
+
+/**
+ * Check whether a request's origin is trusted under the active token's
+ * scope, including dynamically-discovered regional silos.
+ *
+ * Trust sources (any match → trusted):
+ * 1. Exact origin match against `getActiveTokenHost()` (the control silo
+ *    the token was issued against).
+ * 2. SaaS-equivalence: if both the token and the candidate are SaaS hosts
+ *    (`*.sentry.io`), they share the SaaS trust class.
+ * 3. Region-URL extension: if the control silo told us (via an
+ *    authenticated response) that an org lives at a particular region
+ *    URL, that URL is part of the same trust class. This is how SaaS
+ *    routes `us.sentry.io`/`de.sentry.io` in production and how test
+ *    harnesses with separate localhost ports per region work.
+ *
+ * Returns `true` when there is no active token — callers must guard
+ * against this themselves if they want to refuse unauthenticated
+ * requests to mismatched hosts. In practice, if there's no token we
+ * have no credentials to leak, so the trust check is vacuously true.
+ */
+export function isRequestOriginTrusted(
+  requestInput: string | URL | Request | undefined | null
+): boolean {
+  const tokenHost = getActiveTokenHost();
+  if (!tokenHost) {
+    // No token = nothing to protect. Routing-only calls proceed.
+    return true;
+  }
+  if (isHostTrusted(requestInput, tokenHost)) {
+    return true;
+  }
+  // Region-URL extension: any origin the control silo has told us about
+  // in an authenticated response is part of the trust class.
+  const requestOrigin = normalizeOrigin(requestInput);
+  if (!requestOrigin) {
+    return false;
+  }
+  // Check process-local allow-list first (hot path; populated on region
+  // discovery).
+  if (trustedRegionOrigins.has(requestOrigin)) {
+    return true;
+  }
+  // Fall back to persisted region cache for regions discovered in a
+  // previous invocation.
+  for (const regionUrl of getKnownRegionUrls()) {
+    if (normalizeOrigin(regionUrl) === requestOrigin) {
+      return true;
+    }
+  }
+  return false;
 }

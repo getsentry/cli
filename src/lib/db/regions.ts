@@ -169,6 +169,37 @@ export function getAllOrgRegions(): Map<string, string> {
   return new Map(rows.map((row) => [row.org_slug, row.region_url]));
 }
 
+/**
+ * Get the distinct region URLs currently cached.
+ *
+ * Used by the host-scoping trust check to extend trust from the
+ * control silo (where the token was issued) to regional silos that
+ * the control silo itself directed us to. In production on SaaS,
+ * these are `us.sentry.io`/`de.sentry.io` etc. (already covered by
+ * the SaaS-equivalence class). For self-hosted, these are typically
+ * empty. For test harnesses that use separate localhost ports per
+ * region, these extend the trust class to the regional mock servers
+ * that the control silo's mock response pointed at.
+ *
+ * This is safe because the region URLs in this table are populated
+ * exclusively from authenticated responses from the token's issuing
+ * host — the control silo is already the trust anchor, and it's
+ * telling us which regions are part of the same account.
+ *
+ * Returns an empty array if the DB isn't available (no-throw contract).
+ */
+export function getKnownRegionUrls(): string[] {
+  try {
+    const db = getDatabase();
+    const rows = db
+      .query(`SELECT DISTINCT region_url FROM ${TABLE}`)
+      .all() as Pick<OrgRegionRow, "region_url">[];
+    return rows.map((r) => r.region_url);
+  } catch {
+    return [];
+  }
+}
+
 /** Cached org entry with the fields needed to reconstruct a SentryOrganization. */
 export type CachedOrg = {
   slug: string;

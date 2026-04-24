@@ -125,6 +125,12 @@ export function createE2EContext(
      * Write auth token directly to this context's database.
      * This bypasses the global process.env to avoid race conditions
      * when multiple test files run in parallel.
+     *
+     * Scopes the token to this context's `serverUrl` (the mock server) so
+     * the host-scoping fetch-layer guard admits the request — without this,
+     * the stored token would default to SaaS (DEFAULT_SENTRY_URL) while
+     * `ctx.run` points `SENTRY_URL` at the mock server, causing the guard
+     * to refuse to attach credentials.
      */
     async setAuthToken(token: string): Promise<void> {
       mkdirSync(configDir, { recursive: true, mode: 0o700 });
@@ -134,7 +140,7 @@ export function createE2EContext(
         const { setAuthToken: dbSetAuthToken } =
           require("../src/lib/db/auth.js");
         const { closeDatabase } = require("../src/lib/db/index.js");
-        await dbSetAuthToken(token);
+        await dbSetAuthToken(token, undefined, undefined, { host: serverUrl });
         closeDatabase();
       } finally {
         if (prevDir !== undefined) {

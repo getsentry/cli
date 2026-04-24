@@ -25,7 +25,7 @@ import {
 import { withHttpSpan } from "./telemetry.js";
 import {
   getActiveTokenHost,
-  isHostTrusted,
+  isRequestOriginTrusted,
   normalizeOrigin,
 } from "./token-host.js";
 
@@ -135,10 +135,10 @@ async function fetchWithConnectionError(
  * without going through the entry-point guards.
  */
 function assertRefreshHostTrusted(): void {
-  const tokenHost = getActiveTokenHost();
   const refreshUrl = getSentryUrl();
-  const refreshOrigin = normalizeOrigin(refreshUrl);
-  if (tokenHost && !isHostTrusted(refreshOrigin, tokenHost)) {
+  if (!isRequestOriginTrusted(refreshUrl)) {
+    const refreshOrigin = normalizeOrigin(refreshUrl);
+    const tokenHost = getActiveTokenHost();
     throw new CliError(
       `Refusing to send OAuth refresh token to ${refreshOrigin ?? "<unknown host>"}: active token is scoped to ${tokenHost}.\n` +
         "Run 'sentry auth login --url <url>' against the intended instance, " +

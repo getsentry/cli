@@ -28,7 +28,7 @@ import {
 import { withTracingSpan } from "./telemetry.js";
 import {
   getActiveTokenHost,
-  isHostTrusted,
+  isRequestOriginTrusted,
   normalizeOrigin,
 } from "./token-host.js";
 
@@ -109,10 +109,10 @@ function prepareHeaders(
   // URL-arg / rc-shim entry points, but any future code path that writes
   // SENTRY_HOST/SENTRY_URL without going through those guards is still caught
   // here: we refuse to attach `Authorization` to a request whose origin
-  // doesn't match the active token's scoped host. See token-host.ts.
-  const tokenHost = getActiveTokenHost();
-  const requestOrigin = normalizeOrigin(input);
-  if (tokenHost && !isHostTrusted(requestOrigin, tokenHost)) {
+  // isn't part of the active token's trust class. See token-host.ts.
+  if (!isRequestOriginTrusted(input)) {
+    const requestOrigin = normalizeOrigin(input);
+    const tokenHost = getActiveTokenHost();
     throw new CliError(
       `Refusing to send credentials to ${requestOrigin ?? "<unknown host>"}: active token is scoped to ${tokenHost}.\n` +
         "Run 'sentry auth login --url <url>' against the intended instance, " +

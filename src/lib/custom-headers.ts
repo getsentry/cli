@@ -27,7 +27,11 @@ import { getEnv } from "./env.js";
 import { ConfigError } from "./errors.js";
 import { logger } from "./logger.js";
 import { isSentrySaasUrl } from "./sentry-urls.js";
-import { getActiveTokenHost, isHostTrusted } from "./token-host.js";
+import {
+  getActiveTokenHost,
+  isHostTrusted,
+  isRequestOriginTrusted,
+} from "./token-host.js";
 
 const log = logger.withTag("custom-headers");
 
@@ -251,12 +255,20 @@ export function applyCustomHeaders(
     return;
   }
 
-  const trustedHost = getTrustedHostForCustomHeaders();
-  if (!isHostTrusted(requestUrl, trustedHost)) {
+  // Prefer the active-token scope (which includes discovered region URLs)
+  // when a token is present — this matches the fetch-layer trust check.
+  // When no token is present, fall back to the configured host (only
+  // relevant for unauthenticated endpoints like shared-issue resolve).
+  const tokenHost = getActiveTokenHost();
+  const trusted = tokenHost
+    ? isRequestOriginTrusted(requestUrl)
+    : isHostTrusted(requestUrl, getTrustedHostForCustomHeaders());
+  if (!trusted) {
     if (!untrustedDestinationWarningLogged) {
       untrustedDestinationWarningLogged = true;
+      const expected = tokenHost ?? getTrustedHostForCustomHeaders();
       log.warn(
-        `Skipping custom headers for request to untrusted host (expected ${trustedHost}). ` +
+        `Skipping custom headers for request to untrusted host (expected ${expected}). ` +
           "If this is legitimate, configure SENTRY_HOST or log in against the intended instance."
       );
     }

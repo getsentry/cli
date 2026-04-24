@@ -166,6 +166,7 @@ export async function listOrganizationsUncached(): Promise<
   SentryOrganization[]
 > {
   const { setOrgRegions } = await import("../db/regions.js");
+  const { registerTrustedRegionUrls } = await import("../token-host.js");
 
   // Self-hosted instances may not have the regions endpoint (404)
   const regionsResult = await withAuthGuard(() => getUserRegions());
@@ -186,6 +187,13 @@ export async function listOrganizationsUncached(): Promise<
     );
     return orgs;
   }
+
+  // Extend the trust class to include the regions the control silo just
+  // told us about. Without this, the next fan-out call would fail the
+  // host-scoping guard because the region URLs haven't been persisted to
+  // org_regions yet (that happens below after we've collected results).
+  // See token-host.ts::isRequestOriginTrusted.
+  registerTrustedRegionUrls(regions.map((r) => r.url));
 
   const settled = await Promise.allSettled(
     regions.map(async (region) => {
@@ -234,6 +242,9 @@ export async function listOrganizationsUncached(): Promise<
     orgRole: (r.org as Record<string, unknown>).orgRole as string | undefined,
   }));
   setOrgRegions(regionEntries);
+  // Also register any per-org regionUrl from links (may differ from the
+  // `/users/me/regions/` response when the SDK returns a more specific URL).
+  registerTrustedRegionUrls(regionEntries.map((e) => e.regionUrl));
 
   return orgs;
 }
