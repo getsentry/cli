@@ -753,7 +753,7 @@ Tests that need a database or config directory **must** use `useTestConfigDir()`
 - `const baseDir = process.env[CONFIG_DIR_ENV_VAR]!` at module scope — This captures a value that may be stale
 - Manual `beforeEach`/`afterEach` that sets/deletes `SENTRY_CONFIG_DIR`
 
-**Why**: Bun runs test files **sequentially in one thread** (load → run all tests → load next file). If your `afterEach` deletes the env var, the next file's module-level code reads `undefined`, causing `TypeError: The "paths[0]" property must be of type string`.
+**Why**: Bun's test runner uses `--isolate --parallel` (see `test:unit` in `package.json`), so each test file runs in a fresh global environment within a worker process. That bounds most cross-file leaks to a single worker, but `process.env` is still shared within a file's lifecycle — if your `afterEach` deletes the env var, the next describe/test's module-level code (or a beforeEach that re-reads env) gets `undefined`, causing `TypeError: The "paths[0]" property must be of type string`. Also, `TEST_TMP_DIR` is namespaced by `BUN_TEST_WORKER_ID` in `test/constants.ts` so parallel workers don't wipe each other's temp state during preload.
 
 ```typescript
 // CORRECT: Use the helper
