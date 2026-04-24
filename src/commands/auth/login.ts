@@ -243,8 +243,14 @@ export const loginCommand = buildCommand({
     // refresh, token validation) targets the requested instance. The
     // effective host is also passed to `setAuthToken` so the stored token
     // is scoped correctly.
+    //
+    // IMPORTANT: do NOT persist the default URL yet — the user can still
+    // abort via the re-auth prompt (handleExistingAuth) or the OAuth
+    // device-flow timeout. Persisting early would leave the default URL
+    // pointing at the new host while the old token (scoped to the old
+    // host) remains valid, breaking every subsequent command. Only
+    // persist after the login has actually succeeded.
     const effectiveHost = applyLoginUrl(flags.url);
-    persistLoginUrlAsDefault(flags.url, effectiveHost);
 
     // Check if already authenticated and handle re-authentication
     if (isAuthenticated()) {
@@ -280,6 +286,9 @@ export const loginCommand = buildCommand({
         );
       }
 
+      // Login succeeded — persist default URL for subsequent invocations.
+      persistLoginUrlAsDefault(flags.url, effectiveHost);
+
       // Fetch and cache user info via /auth/ (works with all token types).
       // A transient failure here must not block login — the token is already valid.
       const result: LoginResult = {
@@ -311,6 +320,8 @@ export const loginCommand = buildCommand({
     });
 
     if (result) {
+      // Login succeeded — persist default URL for subsequent invocations.
+      persistLoginUrlAsDefault(flags.url, effectiveHost);
       // Warm the org + region cache so the first real command is fast.
       // Fire-and-forget — login already succeeded, caching is best-effort.
       warmOrgCache();
