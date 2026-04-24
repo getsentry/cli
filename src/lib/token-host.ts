@@ -21,12 +21,7 @@
  * See `.opencode/plans/1777023782662-proud-circuit.md` for the full rationale.
  */
 
-import { DEFAULT_SENTRY_URL } from "./constants.js";
-import {
-  getRawEnvToken,
-  getStoredAuthHost,
-  hasUsableStoredToken,
-} from "./db/auth.js";
+import { getRawEnvToken, getUsableStoredTokenHost } from "./db/auth.js";
 import { getKnownRegionUrls } from "./db/regions.js";
 import { getEnv } from "./env.js";
 import { getEnvTokenHost } from "./env-token-host.js";
@@ -126,9 +121,14 @@ export function getActiveTokenHost(): string | undefined {
     return getEnvTokenHost();
   }
 
-  // 2. Stored OAuth (with lazy migration) takes precedence when present
-  if (hasUsableStoredToken()) {
-    return getStoredAuthHost() ?? DEFAULT_SENTRY_URL;
+  // 2. Stored OAuth (with lazy migration) takes precedence when present.
+  // Use the atomic `getUsableStoredTokenHost()` helper so a concurrent
+  // `clearAuth()` can't interleave between an "is there a usable token?"
+  // check and a "read its host" call and produce an inconsistent
+  // fallback. Single DB read inside a span — atomic within the process.
+  const storedHost = getUsableStoredTokenHost();
+  if (storedHost) {
+    return storedHost;
   }
 
   // 3. Env token as fallback

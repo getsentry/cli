@@ -274,6 +274,40 @@ export function hasUsableStoredToken(): boolean {
   }
 }
 
+/**
+ * Atomically check usability AND retrieve the stored host, in a single
+ * DB read. Used by `getActiveTokenHost` so that a concurrent
+ * `clearAuth()` (library mode) can't interleave between a
+ * `hasUsableStoredToken()` check and a `getStoredAuthHost()` read,
+ * producing an inconsistent "usable but undefined host" fallback.
+ *
+ * Returns `undefined` when no usable stored token exists. When present,
+ * returns the normalized host string (migrating pre-v16 NULL rows on
+ * first access, same as {@link getStoredAuthHost}).
+ */
+export function getUsableStoredTokenHost(): string | undefined {
+  try {
+    return withDbSpan("getUsableStoredTokenHost", () => {
+      const db = getDatabase();
+      const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
+        | AuthRow
+        | undefined;
+      if (!row?.token) {
+        return;
+      }
+      if (row.expires_at && Date.now() > row.expires_at && !row.refresh_token) {
+        return;
+      }
+      if (row.host) {
+        return row.host;
+      }
+      return migrateNullHost(row);
+    });
+  } catch {
+    return;
+  }
+}
+
 /** Memoized token. Wrapper distinguishes "not cached" from "cached as undefined". */
 let cachedAuthToken: { value: string | undefined } | undefined;
 
