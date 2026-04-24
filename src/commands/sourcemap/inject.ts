@@ -7,7 +7,6 @@
 
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
-import { ValidationError } from "../../lib/errors.js";
 import {
   colorTag,
   mdKvTable,
@@ -15,6 +14,9 @@ import {
 } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
+  assertDirectoryReadable,
+  buildEmptyDiscoveryError,
+  diagnoseEmptyDiscovery,
   type InjectResult,
   injectDirectory,
 } from "../../lib/sourcemap/inject.js";
@@ -56,10 +58,15 @@ export const injectCommand = buildCommand({
       "Scans a directory for .js/.mjs/.cjs files and their companion .map files, " +
       "then injects Sentry debug IDs for reliable sourcemap resolution.\n\n" +
       "The injection is idempotent — files that already have debug IDs are skipped.\n\n" +
+      "Exits with an error if zero JS + sourcemap pairs are discovered " +
+      "(typical cause: bundler not emitting .map files). Pass " +
+      "--allow-empty to suppress this check for directories that may " +
+      "legitimately be empty.\n\n" +
       "Usage:\n" +
       "  sentry sourcemap inject ./dist\n" +
       "  sentry sourcemap inject ./build --ext .js,.mjs\n" +
-      "  sentry sourcemap inject ./out --dry-run",
+      "  sentry sourcemap inject ./out --dry-run\n" +
+      "  sentry sourcemap inject ./maybe-empty --allow-empty",
   },
   output: {
     human: formatInjectResult,
@@ -104,23 +111,25 @@ export const injectCommand = buildCommand({
     flags: { ext?: string; "dry-run"?: boolean; "allow-empty"?: boolean },
     dir: string
   ) {
+    // Distinct errors for "directory missing" vs "directory empty/
+    // misconfigured" — see src/lib/sourcemap/inject.ts.
+    await assertDirectoryReadable(dir);
+
     const extensions = flags.ext?.split(",").map((e) => e.trim());
     const results = await injectDirectory(dir, {
       extensions,
       dryRun: flags["dry-run"],
     });
 
-    // Guard against silent misconfigurations: zero *discovered* pairs almost
-    // always means the bundler didn't emit .map files. This is distinct from
-    // zero *injected* (which is legitimate when every pair already has a
-    // debug ID — the idempotent re-run case). Callers that legitimately
-    // invoke inject on potentially-empty directories can pass --allow-empty.
+    // Guard against silent misconfigurations: zero *discovered* pairs
+    // almost always means the bundler didn't emit .map files. This is
+    // distinct from zero *injected* (which is legitimate when every
+    // pair already has a debug ID — the idempotent re-run case).
+    // Callers that legitimately invoke inject on potentially-empty
+    // directories can pass --allow-empty.
     if (results.length === 0 && !flags["allow-empty"]) {
-      throw new ValidationError(
-        `No JS + sourcemap pairs found in '${dir}'. Ensure your bundler ` +
-          "emits sourcemaps (e.g., Vite: `build.sourcemap: 'hidden'`), or " +
-          "pass --allow-empty to suppress this error."
-      );
+      const diag = await diagnoseEmptyDiscovery(dir, { extensions });
+      throw buildEmptyDiscoveryError(dir, diag);
     }
 
     const modified = results.filter((r) => r.injected).length;

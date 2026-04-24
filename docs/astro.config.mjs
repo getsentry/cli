@@ -18,9 +18,14 @@ export default defineConfig({
   // Astro 6 uses Vite 7's Environments API and reads `sourcemap` from
   // `vite.environments.{client,ssr}.build.sourcemap` (see
   // astro/dist/core/build/static-build.js), falling back to `false` — NOT
-  // to legacy top-level `vite.build.sourcemap`. We set it on both
-  // environments to cover both the client bundle (what `sentry sourcemap
-  // inject/upload` operates on) and SSR output.
+  // the legacy top-level `vite.build.sourcemap`. The silent Astro-5→6
+  // migration was the root cause of the cli.sentry.dev sourcemap upload
+  // going dark from 2026-04-22 to 2026-04-24 (see #845, fixed in #846).
+  //
+  // We set it on the `client` environment (which produces `dist/_astro/`
+  // — what `sentry sourcemap inject/upload docs/dist/` operates on). The
+  // `ssr` line is a no-op today because this site is static-only, but
+  // guards against regressions if a server adapter is added later.
   vite: {
     environments: {
       client: { build: { sourcemap: "hidden" } },

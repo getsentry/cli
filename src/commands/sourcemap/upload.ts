@@ -13,11 +13,16 @@ import {
   uploadSourcemaps,
 } from "../../lib/api/sourcemaps.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError, ValidationError } from "../../lib/errors.js";
+import { ContextError } from "../../lib/errors.js";
 import { mdKvTable, renderMarkdown } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
-import { injectDirectory } from "../../lib/sourcemap/inject.js";
+import {
+  assertDirectoryReadable,
+  buildEmptyDiscoveryError,
+  diagnoseEmptyDiscovery,
+  injectDirectory,
+} from "../../lib/sourcemap/inject.js";
 
 /** Result type for the upload command. */
 type UploadCommandResult = {
@@ -54,10 +59,15 @@ export const uploadCommand = buildCommand({
       "debug-ID-based matching.\n\n" +
       "Automatically injects debug IDs into any files that don't already have them.\n" +
       "Org/project are auto-detected from DSN, env vars, or config defaults.\n\n" +
+      "Exits with an error if zero JS + sourcemap pairs are discovered " +
+      "(typical cause: bundler not emitting .map files). Pass " +
+      "--allow-empty to suppress this check for directories that may " +
+      "legitimately be empty.\n\n" +
       "Usage:\n" +
       "  sentry sourcemap upload ./dist\n" +
       "  sentry sourcemap upload ./dist --release 1.0.0\n" +
-      "  sentry sourcemap upload ./dist --url-prefix '~/static/js/'",
+      "  sentry sourcemap upload ./dist --url-prefix '~/static/js/'\n" +
+      "  sentry sourcemap upload ./maybe-empty --allow-empty",
   },
   output: {
     human: formatUploadResult,
@@ -106,7 +116,32 @@ export const uploadCommand = buildCommand({
     },
     dir: string
   ) {
-    // Resolve org/project via the standard cascade
+    // Validate the directory BEFORE resolving org/project so a
+    // missing/typoed path or a bundler misconfiguration produces the
+    // right error even when the user has no Sentry credentials
+    // configured locally. Non-existent directories get a distinct
+    // message; empty/misconfigured directories get the bundler-oriented
+    // diagnostic. See src/lib/sourcemap/inject.ts for the helpers.
+    await assertDirectoryReadable(dir);
+
+    // Discover and inject debug IDs into JS + sourcemap pairs
+    const results = await injectDirectory(dir);
+
+    if (results.length === 0 && !flags["allow-empty"]) {
+      // Silent misconfigurations (e.g., the bundler didn't emit .map
+      // files) used to succeed with "0 uploaded". That makes post-deploy
+      // Sentry events unsymbolicated with no build-time signal. Default
+      // to erroring out so CI fails loudly; `--allow-empty` preserves
+      // the old behavior for callers that legitimately invoke upload on
+      // potentially-empty directories.
+      const diag = await diagnoseEmptyDiscovery(dir);
+      throw buildEmptyDiscoveryError(dir, diag);
+    }
+
+    // Resolve org/project via the standard cascade. Runs AFTER the
+    // directory check so local/unauthenticated invocations still get the
+    // actionable bundler-oriented error instead of "Organization and
+    // project are required".
     const resolved = await resolveOrgAndProject({
       cwd: this.cwd,
       usageHint: USAGE_HINT,
@@ -116,23 +151,9 @@ export const uploadCommand = buildCommand({
     }
     const { org, project } = resolved;
 
-    // Discover and inject debug IDs into JS + sourcemap pairs
-    const results = await injectDirectory(dir);
-
     if (results.length === 0) {
-      // Silent misconfigurations (e.g., the bundler didn't emit .map files)
-      // used to succeed with "0 uploaded". That makes post-deploy Sentry
-      // events unsymbolicated with no build-time signal. Default to erroring
-      // out so CI fails loudly; `--allow-empty` preserves the old behavior
-      // for callers that legitimately invoke upload on potentially-empty
-      // directories.
-      if (!flags["allow-empty"]) {
-        throw new ValidationError(
-          `No JS + sourcemap pairs found in '${dir}'. Ensure your bundler ` +
-            "emits sourcemaps (e.g., Vite: `build.sourcemap: 'hidden'`), or " +
-            "pass --allow-empty to suppress this error."
-        );
-      }
+      // --allow-empty path: succeed silently for callers that
+      // legitimately invoke upload on potentially-empty directories.
       yield new CommandOutput<UploadCommandResult>({
         org,
         project,

@@ -53,6 +53,8 @@ sentry sourcemap upload ./dist --release 1.0.0
 
 # Set a custom URL prefix
 sentry sourcemap upload ./dist --url-prefix '~/static/js/'
+
+sentry sourcemap upload ./dist --allow-empty
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

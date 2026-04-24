@@ -8,6 +8,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 import { NODE_MODULES_DIRNAME } from "../constants.js";
+import { ValidationError } from "../errors.js";
 import { walkFiles } from "../scan/index.js";
 import { EXISTING_DEBUGID_RE, injectDebugId } from "./debug-id.js";
 
@@ -137,4 +138,141 @@ async function discoverFilePairs(
     }
   }
   return pairs;
+}
+
+/**
+ * Validate that `dir` is an existing directory readable for sourcemap
+ * discovery, and classify what's inside for diagnostic purposes when the
+ * scan returns zero pairs. Used by `sentry sourcemap inject` /
+ * `sourcemap upload` to produce actionable error messages instead of the
+ * generic "no pairs found" that hid the getsentry/cli docs-site silent
+ * failure mode (Astro 6 stopped emitting `.map` files; CI stayed green).
+ *
+ * Separate from `injectDirectory` so:
+ * - The upload command can stat the directory BEFORE resolving
+ *   org/project, producing the bundler-oriented error even when the
+ *   user has no Sentry credentials configured.
+ * - The diagnostic walk is skipped on the happy path (pairs > 0).
+ *
+ * @throws ValidationError if `dir` doesn't exist or isn't a directory.
+ */
+export async function assertDirectoryReadable(dir: string): Promise<void> {
+  try {
+    const s = await stat(dir);
+    if (!s.isDirectory()) {
+      throw new ValidationError(
+        `Path '${dir}' is not a directory.`,
+        "directory"
+      );
+    }
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      throw err;
+    }
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      throw new ValidationError(
+        `Directory '${dir}' does not exist.`,
+        "directory"
+      );
+    }
+    // EACCES, EPERM, etc. — surface the underlying system error.
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new ValidationError(
+      `Cannot read directory '${dir}': ${msg}`,
+      "directory"
+    );
+  }
+}
+
+/**
+ * Diagnostic counts for a directory that produced zero JS + sourcemap
+ * pairs. Used to tailor the error message to the specific failure mode
+ * the user is hitting (see callers in `src/commands/sourcemap/`).
+ */
+export type DiscoveryDiagnostic = {
+  /** Total `.js`/`.cjs`/`.mjs` files encountered. */
+  jsFiles: number;
+  /** Total `.map` files encountered. */
+  mapFiles: number;
+};
+
+/**
+ * Scan a directory for JS and map files separately to diagnose why the
+ * primary pair-discovery returned zero results. Cheap (same walker,
+ * single pass); only called on the error path.
+ */
+export async function diagnoseEmptyDiscovery(
+  dir: string,
+  options: InjectDirectoryOptions = {}
+): Promise<DiscoveryDiagnostic> {
+  const jsExtensions = options.extensions
+    ? new Set(options.extensions.map((e) => (e.startsWith(".") ? e : `.${e}`)))
+    : DEFAULT_EXTENSIONS;
+  const absDir = resolvePath(dir);
+  let jsFiles = 0;
+  let mapFiles = 0;
+  for await (const entry of walkFiles({
+    cwd: absDir,
+    // Pass both sets of extensions in one walk to avoid a second traversal.
+    extensions: new Set([...jsExtensions, ".map"]),
+    alwaysSkipDirs: SOURCEMAP_SKIP_DIRS,
+    hidden: false,
+    respectGitignore: false,
+    maxFileSize: Number.POSITIVE_INFINITY,
+  })) {
+    if (entry.absolutePath.endsWith(".map")) {
+      mapFiles += 1;
+    } else {
+      jsFiles += 1;
+    }
+  }
+  return { jsFiles, mapFiles };
+}
+
+/**
+ * Build an actionable error message for the zero-pairs case, tailored to
+ * which side of the JS/map pairing is missing. Shared between the inject
+ * and upload commands so the wording stays consistent.
+ */
+export function buildEmptyDiscoveryError(
+  dir: string,
+  diag: DiscoveryDiagnostic
+): ValidationError {
+  const { jsFiles, mapFiles } = diag;
+  if (jsFiles === 0 && mapFiles === 0) {
+    return new ValidationError(
+      `Directory '${dir}' contains no JS or sourcemap files. ` +
+        "Check the path points at your build output, or pass " +
+        "--allow-empty to suppress this error.",
+      "directory"
+    );
+  }
+  if (jsFiles > 0 && mapFiles === 0) {
+    return new ValidationError(
+      `Found ${jsFiles} JS file(s) in '${dir}' but no companion .map ` +
+        "files. Your bundler is not emitting sourcemaps. For Vite/Astro: " +
+        "`vite.environments.client.build.sourcemap: 'hidden'`. For webpack: " +
+        "`devtool: 'hidden-source-map'`. Pass --allow-empty to suppress.",
+      "directory"
+    );
+  }
+  if (mapFiles > 0 && jsFiles === 0) {
+    return new ValidationError(
+      `Found ${mapFiles} .map file(s) in '${dir}' but no companion JS ` +
+        "files. Ensure your build emits both JS and maps to the same " +
+        "directory. Pass --allow-empty to suppress.",
+      "directory"
+    );
+  }
+  // Both sides have files but no pairs matched by basename — e.g.
+  // hash-renamed JS paired with a stable-name map, or maps in a sibling
+  // `maps/` dir.
+  return new ValidationError(
+    `Found ${jsFiles} JS and ${mapFiles} .map file(s) in '${dir}' but ` +
+      "no JS file has a matching `<name>.map` companion. Check that your " +
+      "bundler emits JS and sourcemaps with matching basenames. Pass " +
+      "--allow-empty to suppress.",
+    "directory"
+  );
 }
