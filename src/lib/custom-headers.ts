@@ -21,12 +21,13 @@
  * ```
  */
 
-import { getConfiguredSentryUrl } from "./constants.js";
+import { DEFAULT_SENTRY_URL, getConfiguredSentryUrl } from "./constants.js";
 import { getDefaultHeaders } from "./db/defaults.js";
 import { getEnv } from "./env.js";
 import { ConfigError } from "./errors.js";
 import { logger } from "./logger.js";
 import { isSentrySaasUrl } from "./sentry-urls.js";
+import { getActiveTokenHost, isHostTrusted } from "./token-host.js";
 
 const log = logger.withTag("custom-headers");
 
@@ -65,6 +66,12 @@ let cachedRawSource: string | undefined;
 
 /** Whether the SaaS warning has already been logged this session. */
 let saasWarningLogged = false;
+
+/**
+ * Whether the untrusted-destination warning has already been logged this
+ * session. Prevents log spam when a command fans out many requests.
+ */
+let untrustedDestinationWarningLogged = false;
 
 /**
  * Parse a raw custom headers string into validated name/value pairs.
@@ -195,15 +202,67 @@ export function getCustomHeaders(): readonly [string, string][] {
 }
 
 /**
- * Apply custom headers to a `Headers` instance.
+ * Resolve the origin we treat as "ours" for custom-header scoping.
  *
- * Reads from the env var or SQLite defaults, validates, and sets each header.
- * No-op when no custom headers are configured or when targeting SaaS.
+ * Precedence:
+ *   1. Active token's scoped host (from stored OAuth or env-token snapshot)
+ *   2. Currently-configured `SENTRY_HOST`/`SENTRY_URL`
+ *   3. SaaS default (`https://sentry.io`)
+ *
+ * Custom headers are unauthenticated from the CLI's perspective — they're
+ * attached regardless of whether we have a bearer token — but they contain
+ * trust-bearing material (IAP tokens, mTLS headers, etc.) that must not leak
+ * to a non-trusted host. Without an active token, we still have to pick a
+ * trust anchor; the configured host is the next-best signal.
+ */
+function getTrustedHostForCustomHeaders(): string {
+  return getActiveTokenHost() ?? getConfiguredSentryUrl() ?? DEFAULT_SENTRY_URL;
+}
+
+/**
+ * Apply custom headers to a `Headers` instance, scoped to a request URL.
+ *
+ * Reads from the env var or SQLite defaults, validates, and sets each header,
+ * but ONLY when `requestUrl`'s origin matches the trusted host (active token
+ * scope or configured `SENTRY_HOST`, with SaaS equivalence).
+ *
+ * This is the third-report CVE fix: `getSharedIssue` fetches from a `baseUrl`
+ * extracted from user-provided share URLs, and previously would attach
+ * `SENTRY_CUSTOM_HEADERS` (e.g. IAP tokens) to any host matching the
+ * non-SaaS / self-hosted heuristic. The URL-arg entry-point guard
+ * (`applySentryUrlContext`) is the primary fix, but scoping headers at their
+ * attachment point defends against any code path that bypasses that guard.
+ *
+ * No-op when no custom headers are configured, when targeting SaaS, or when
+ * the request URL doesn't match the trusted host.
  *
  * @param headers - The `Headers` instance to modify in-place
+ * @param requestUrl - The destination URL (string, URL, or Request) whose
+ *   origin will be compared to the trusted host. When this parameter is
+ *   omitted (legacy callers), the headers are NOT applied — we fail closed
+ *   to avoid unintentional leaks from refactors that forgot to pass the URL.
  */
-export function applyCustomHeaders(headers: Headers): void {
+export function applyCustomHeaders(
+  headers: Headers,
+  requestUrl: string | URL | Request
+): void {
   const customHeaders = getCustomHeaders();
+  if (customHeaders.length === 0) {
+    return;
+  }
+
+  const trustedHost = getTrustedHostForCustomHeaders();
+  if (!isHostTrusted(requestUrl, trustedHost)) {
+    if (!untrustedDestinationWarningLogged) {
+      untrustedDestinationWarningLogged = true;
+      log.warn(
+        `Skipping custom headers for request to untrusted host (expected ${trustedHost}). ` +
+          "If this is legitimate, configure SENTRY_HOST or log in against the intended instance."
+      );
+    }
+    return;
+  }
+
   for (const [name, value] of customHeaders) {
     headers.set(name, value);
   }
@@ -217,4 +276,5 @@ export function _resetCustomHeadersCache(): void {
   cachedHeaders = undefined;
   cachedRawSource = undefined;
   saasWarningLogged = false;
+  untrustedDestinationWarningLogged = false;
 }

@@ -6,6 +6,7 @@ import {
   listOrganizationsUncached,
 } from "../../lib/api-client.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
+import { DEFAULT_SENTRY_URL, normalizeUrl } from "../../lib/constants.js";
 import {
   clearAuth,
   getActiveEnvVarName,
@@ -16,7 +17,8 @@ import {
 } from "../../lib/db/auth.js";
 import { getDbPath } from "../../lib/db/index.js";
 import { getUserInfo, setUserInfo } from "../../lib/db/user.js";
-import { AuthError } from "../../lib/errors.js";
+import { getEnv } from "../../lib/env.js";
+import { AuthError, ValidationError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
 import {
   formatDuration,
@@ -30,6 +32,7 @@ import {
 } from "../../lib/interactive-login.js";
 import { logger } from "../../lib/logger.js";
 import { clearResponseCache } from "../../lib/response-cache.js";
+import { normalizeOrigin } from "../../lib/token-host.js";
 
 const log = logger.withTag("auth.login");
 
@@ -56,7 +59,49 @@ type LoginFlags = {
   readonly token?: string;
   readonly timeout: number;
   readonly force: boolean;
+  readonly url?: string;
 };
+
+/**
+ * Normalize and validate the `--url` flag value.
+ *
+ * Accepts bare hostnames (`sentry.example.com`) and full URLs
+ * (`https://sentry.example.com`). Returns the normalized origin
+ * (`https://sentry.example.com`). Throws {@link ValidationError} on
+ * unparseable input.
+ *
+ * Exported indirectly via the command's `parse` callback.
+ */
+function parseLoginUrl(raw: string): string {
+  const prefixed = normalizeUrl(raw);
+  if (!prefixed) {
+    throw new ValidationError("--url cannot be empty", "url");
+  }
+  const origin = normalizeOrigin(prefixed);
+  if (!origin) {
+    throw new ValidationError(`--url is not a valid URL: ${raw}`, "url");
+  }
+  return origin;
+}
+
+/**
+ * When `--url` is passed, set `env.SENTRY_HOST` and `env.SENTRY_URL` so the
+ * device-flow and token-refresh endpoints hit the requested host. Returns
+ * the normalized URL so callers can record it with {@link setAuthToken}.
+ */
+function applyLoginUrl(url: string | undefined): string {
+  if (!url) {
+    // Preserve existing env / .sentryclirc resolution
+    const env = getEnv();
+    return (
+      normalizeOrigin(env.SENTRY_HOST || env.SENTRY_URL) ?? DEFAULT_SENTRY_URL
+    );
+  }
+  const env = getEnv();
+  env.SENTRY_HOST = url;
+  env.SENTRY_URL = url;
+  return url;
+}
 
 /**
  * Handle the case where the user is already authenticated.
@@ -118,7 +163,11 @@ export const loginCommand = buildCommand({
     fullDescription:
       "Log in to Sentry using OAuth or an API token.\n\n" +
       "The OAuth flow uses a device code - you'll be given a code to enter at a URL.\n" +
-      "Alternatively, use --token to authenticate with an existing API token.",
+      "Alternatively, use --token to authenticate with an existing API token.\n\n" +
+      "For self-hosted Sentry, pass --url <url> to authenticate against that\n" +
+      "instance. This is the ONLY way to trust a new Sentry host — URL\n" +
+      "arguments and config files are refused when they don't match the\n" +
+      "currently-authenticated host.",
   },
   parameters: {
     flags: {
@@ -140,10 +189,24 @@ export const loginCommand = buildCommand({
         brief: "Re-authenticate without prompting",
         default: false,
       },
+      url: {
+        kind: "parsed",
+        parse: parseLoginUrl,
+        brief:
+          "Sentry instance URL to authenticate against (e.g. https://sentry.example.com). " +
+          "Required for self-hosted; defaults to SaaS (https://sentry.io).",
+        optional: true,
+      },
     },
   },
   output: { human: formatLoginResult },
   async *func(this: SentryContext, flags: LoginFlags) {
+    // Apply `--url` first so all downstream auth code (device flow, token
+    // refresh, token validation) targets the requested instance. The
+    // effective host is also passed to `setAuthToken` so the stored token
+    // is scoped correctly.
+    const effectiveHost = applyLoginUrl(flags.url);
+
     // Check if already authenticated and handle re-authentication
     if (isAuthenticated()) {
       const shouldProceed = await handleExistingAuth(flags.force);
@@ -161,8 +224,10 @@ export const loginCommand = buildCommand({
 
     // Token-based authentication
     if (flags.token) {
-      // Save token first, then validate by fetching user regions
-      await setAuthToken(flags.token);
+      // Save token first (with host scope), then validate by fetching user regions
+      await setAuthToken(flags.token, undefined, undefined, {
+        host: effectiveHost,
+      });
 
       // Validate token by fetching user regions
       try {
@@ -201,7 +266,7 @@ export const loginCommand = buildCommand({
       return yield new CommandOutput(result);
     }
 
-    // OAuth device flow
+    // OAuth device flow (host scope recorded via completeOAuthFlow → setAuthToken)
     const result = await runInteractiveLogin({
       timeout: flags.timeout * 1000,
     });

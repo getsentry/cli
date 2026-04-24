@@ -240,7 +240,13 @@ describe("loginCommand.func --token path", () => {
       timeout: 900,
     });
 
-    expect(setAuthTokenSpy).toHaveBeenCalledWith("my-token");
+    // Token stored with host scope (host resolved from SENTRY_HOST/SENTRY_URL
+    // or default SaaS — see setAuthToken in db/auth.ts).
+    expect(setAuthTokenSpy).toHaveBeenCalled();
+    expect(setAuthTokenSpy.mock.calls[0]?.[0]).toBe("my-token");
+    expect(setAuthTokenSpy.mock.calls[0]?.[3]).toMatchObject({
+      host: expect.any(String),
+    });
     expect(getCurrentUserSpy).toHaveBeenCalled();
     expect(setUserInfoSpy).toHaveBeenCalledWith({
       userId: "42",
@@ -385,7 +391,11 @@ describe("loginCommand.func --token path", () => {
     });
 
     expect(clearAuthSpy).toHaveBeenCalled();
-    expect(setAuthTokenSpy).toHaveBeenCalledWith("new-token");
+    expect(setAuthTokenSpy).toHaveBeenCalled();
+    expect(setAuthTokenSpy.mock.calls[0]?.[0]).toBe("new-token");
+    expect(setAuthTokenSpy.mock.calls[0]?.[3]).toMatchObject({
+      host: expect.any(String),
+    });
     expect(getStdout()).toContain("Authenticated");
   });
 

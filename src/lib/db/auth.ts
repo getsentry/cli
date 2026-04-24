@@ -3,8 +3,11 @@
  */
 
 import { createHash } from "node:crypto";
+import { DEFAULT_SENTRY_URL, getConfiguredSentryUrl } from "../constants.js";
 import { getEnv } from "../env.js";
+import { logger } from "../logger.js";
 import { withDbSpan } from "../telemetry.js";
+import { normalizeOrigin } from "../token-host.js";
 import { getDatabase } from "./index.js";
 import { clearAllIssueOrgCache } from "./issue-org-cache.js";
 import { runUpsert } from "./utils.js";
@@ -21,7 +24,47 @@ type AuthRow = {
   expires_at: number | null;
   issued_at: number | null;
   updated_at: number;
+  /**
+   * Origin URL the token was issued against (e.g., `https://sentry.io` or
+   * `https://sentry.example.com`). NULL for rows written before schema v16;
+   * lazily migrated by `migrateNullHostIfPresent` on first access.
+   */
+  host: string | null;
 };
+
+const log = logger.withTag("auth");
+
+/**
+ * Lazy migration for rows created before schema v16 (NULL `host`).
+ *
+ * Writes the currently-configured host (`SENTRY_HOST`/`SENTRY_URL`, or SaaS
+ * default) into the row. One-time per row, logged at `info` so users see it
+ * in their first command after upgrade.
+ *
+ * Users who had `SENTRY_HOST` correctly configured at upgrade time are
+ * migrated cleanly. Users with the wrong host configured can recover with
+ * `sentry auth logout && sentry auth login` against the intended instance.
+ *
+ * Returns the migrated host string (never NULL on return).
+ */
+function migrateNullHost(row: AuthRow): string {
+  const configured = getConfiguredSentryUrl();
+  const migratedHost = normalizeOrigin(configured ?? DEFAULT_SENTRY_URL);
+  const host = migratedHost ?? DEFAULT_SENTRY_URL;
+  try {
+    withDbSpan("migrateAuthHost", () => {
+      const db = getDatabase();
+      db.query("UPDATE auth SET host = ? WHERE id = 1").run(host);
+    });
+    log.info(`Migrated stored credentials to host-scoped model: ${host}`);
+  } catch {
+    // Non-fatal: if the migration write fails, callers still get a
+    // well-formed host from this function. The migration will retry
+    // on the next access.
+  }
+  row.host = host;
+  return host;
+}
 
 /** Prefix for environment variable auth sources in {@link AuthSource} */
 export const ENV_SOURCE_PREFIX = "env:";
@@ -153,6 +196,68 @@ export function getAuthConfig(): AuthConfig | undefined {
   return;
 }
 
+/**
+ * Read the host the stored OAuth token is scoped to.
+ *
+ * Lazy-migrates NULL hosts (rows from before schema v16) to the currently-
+ * configured host on first access. Returns `undefined` when no stored token
+ * exists — callers should fall through to the env-token host snapshot.
+ *
+ * This function is intentionally tolerant of "no DB" errors (tests that
+ * bypass DB init). On DB failure, returns `undefined` and trust-scoping
+ * falls back to the caller's default behavior.
+ */
+export function getStoredAuthHost(): string | undefined {
+  try {
+    return withDbSpan("getStoredAuthHost", () => {
+      const db = getDatabase();
+      const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
+        | AuthRow
+        | undefined;
+      if (!row?.token) {
+        return;
+      }
+      if (row.host) {
+        return row.host;
+      }
+      // Lazy migration for pre-v16 rows
+      return migrateNullHost(row);
+    });
+  } catch {
+    return;
+  }
+}
+
+/**
+ * Check whether a usable stored token exists in the auth row.
+ *
+ * Mirrors the "usable" criteria in `getAuthConfig`: a token is usable if it
+ * has a bearer value AND (no expiry, OR not expired, OR expired-with-refresh).
+ *
+ * Used by {@link getActiveTokenHost} to decide whether to prefer stored
+ * OAuth's host over the env-token snapshot.
+ */
+export function hasUsableStoredToken(): boolean {
+  try {
+    return withDbSpan("hasUsableStoredToken", () => {
+      const db = getDatabase();
+      const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
+        | AuthRow
+        | undefined;
+      if (!row?.token) {
+        return false;
+      }
+      // Match getAuthConfig's filter: expired-no-refresh rows are unusable
+      if (row.expires_at && Date.now() > row.expires_at && !row.refresh_token) {
+        return false;
+      }
+      return true;
+    });
+  } catch {
+    return false;
+  }
+}
+
 /** Memoized token. Wrapper distinguishes "not cached" from "cached as undefined". */
 let cachedAuthToken: { value: string | undefined } | undefined;
 
@@ -233,16 +338,47 @@ export function resetAuthRowCache(): void {
   cachedAuthRow = undefined;
 }
 
+/**
+ * Options for persisting a token.
+ *
+ * @property host - Origin URL the token was issued against. When omitted on
+ *   an update (e.g., access-token refresh), the existing row's host is
+ *   preserved. When omitted on a fresh write, defaults to the
+ *   currently-configured host (`SENTRY_HOST`/`SENTRY_URL`) or `DEFAULT_SENTRY_URL`.
+ */
+export type SetAuthTokenOptions = {
+  host?: string;
+};
+
 export function setAuthToken(
   token: string,
   expiresIn?: number,
-  newRefreshToken?: string
+  newRefreshToken?: string,
+  options?: SetAuthTokenOptions
 ): void {
   withDbSpan("setAuthToken", () => {
     const db = getDatabase();
     const now = Date.now();
     const expiresAt = expiresIn ? now + expiresIn * 1000 : null;
     const issuedAt = expiresIn ? now : null;
+
+    // Host resolution precedence:
+    //   1. Explicit `options.host` (login command, tests)
+    //   2. Existing row's `host` (refresh flow preserves the original scope)
+    //   3. Currently-configured host (getConfiguredSentryUrl)
+    //   4. SaaS default
+    // Always normalized to scheme+host[+port] via normalizeOrigin.
+    const existingHost = (
+      db.query("SELECT host FROM auth WHERE id = 1").get() as
+        | { host: string | null }
+        | undefined
+    )?.host;
+    const rawHost =
+      options?.host ??
+      existingHost ??
+      getConfiguredSentryUrl() ??
+      DEFAULT_SENTRY_URL;
+    const host = normalizeOrigin(rawHost) ?? DEFAULT_SENTRY_URL;
 
     runUpsert(
       db,
@@ -254,6 +390,7 @@ export function setAuthToken(
         expires_at: expiresAt,
         issued_at: issuedAt,
         updated_at: now,
+        host,
       },
       ["id"]
     );

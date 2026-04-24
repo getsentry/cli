@@ -382,17 +382,32 @@ describe("parseSentryUrl", () => {
 });
 
 describe("applySentryUrlContext", () => {
+  // Host-scoping: applySentryUrlContext honors non-SaaS URLs ONLY when the
+  // destination matches the active token's scoped host (with SaaS
+  // equivalence). Mismatches throw CliError so credentials can't leak to an
+  // attacker-chosen host.
+  //
+  // The test preload (test/preload.ts) sets `SENTRY_AUTH_TOKEN` scoped to
+  // SaaS by default. To simulate a self-hosted-authenticated user, set
+  // `SENTRY_HOST` BEFORE the module loads (which pins the env-token's scope)
+  // and use `resetEnvTokenHostForTesting()` between cases.
   let originalSentryUrl: string | undefined;
   let originalSentryHost: string | undefined;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     originalSentryUrl = process.env.SENTRY_URL;
     originalSentryHost = process.env.SENTRY_HOST;
     delete process.env.SENTRY_URL;
     delete process.env.SENTRY_HOST;
+    // Reset env-token-host capture so each test can re-pin based on the
+    // SENTRY_HOST they set (or leave unset → SaaS default).
+    const { resetEnvTokenHostForTesting } = await import(
+      "../../src/lib/env-token-host.js"
+    );
+    resetEnvTokenHostForTesting();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (originalSentryUrl !== undefined) {
       process.env.SENTRY_URL = originalSentryUrl;
     } else {
@@ -403,12 +418,29 @@ describe("applySentryUrlContext", () => {
     } else {
       delete process.env.SENTRY_HOST;
     }
+    const { resetEnvTokenHostForTesting } = await import(
+      "../../src/lib/env-token-host.js"
+    );
+    resetEnvTokenHostForTesting();
   });
 
-  test("sets both SENTRY_HOST and SENTRY_URL for self-hosted instance", () => {
+  test("writes env when non-SaaS URL matches token-scoped host", () => {
+    // Pin env-token to the self-hosted instance via SENTRY_HOST before
+    // calling captureEnvTokenHost() (implicit on first getEnvTokenHost call).
+    process.env.SENTRY_HOST = "https://sentry.example.com";
     applySentryUrlContext("https://sentry.example.com");
     expect(process.env.SENTRY_HOST).toBe("https://sentry.example.com");
     expect(process.env.SENTRY_URL).toBe("https://sentry.example.com");
+  });
+
+  test("throws CliError for non-SaaS URL that does not match token host", () => {
+    // Env-token defaults to SaaS (no SENTRY_HOST set), so a self-hosted URL
+    // is a host-scope mismatch → CliError, env untouched.
+    expect(() => applySentryUrlContext("https://sentry.example.com")).toThrow(
+      /does not match|sentry auth login --url/
+    );
+    expect(process.env.SENTRY_HOST).toBeUndefined();
+    expect(process.env.SENTRY_URL).toBeUndefined();
   });
 
   test("does not set SENTRY_HOST or SENTRY_URL for SaaS (sentry.io)", () => {
@@ -423,15 +455,22 @@ describe("applySentryUrlContext", () => {
     expect(process.env.SENTRY_URL).toBeUndefined();
   });
 
-  test("overrides existing env vars (parsed URL takes precedence)", () => {
+  test("throws on mismatch even when SENTRY_HOST is pre-set to a different host", () => {
+    // Token scoped to existing.example.com; URL-arg points at sentry.other.com.
+    // Primary guard refuses to re-scope by writing the new host — only
+    // `sentry auth login --url` may change scope.
     process.env.SENTRY_HOST = "https://existing.example.com";
     process.env.SENTRY_URL = "https://existing.example.com";
-    applySentryUrlContext("https://sentry.other.com");
-    expect(process.env.SENTRY_HOST).toBe("https://sentry.other.com");
-    expect(process.env.SENTRY_URL).toBe("https://sentry.other.com");
+    expect(() => applySentryUrlContext("https://sentry.other.com")).toThrow(
+      /does not match|sentry auth login --url/
+    );
+    // Existing env left intact — throw happens before any write.
+    expect(process.env.SENTRY_HOST).toBe("https://existing.example.com");
+    expect(process.env.SENTRY_URL).toBe("https://existing.example.com");
   });
 
-  test("sets both env vars for self-hosted with port", () => {
+  test("writes env for self-hosted URL with port when it matches token host", () => {
+    process.env.SENTRY_HOST = "https://sentry.acme.internal:9000";
     applySentryUrlContext("https://sentry.acme.internal:9000");
     expect(process.env.SENTRY_HOST).toBe("https://sentry.acme.internal:9000");
     expect(process.env.SENTRY_URL).toBe("https://sentry.acme.internal:9000");

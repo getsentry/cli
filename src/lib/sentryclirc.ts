@@ -21,8 +21,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { getConfigDir } from "./db/index.js";
 import { getEnv } from "./env.js";
+import { CliError } from "./errors.js";
 import { parseIni } from "./ini.js";
 import { logger } from "./logger.js";
+import { buildUrlMismatchMessage } from "./sentry-url-parser.js";
+import { isSentrySaasUrl } from "./sentry-urls.js";
+import { getActiveTokenHost, isHostTrusted } from "./token-host.js";
 import { walkUpFrom } from "./walk-up.js";
 
 const log = logger.withTag("sentryclirc");
@@ -342,6 +346,30 @@ export async function applySentryCliRcEnvShim(cwd: string): Promise<void> {
   }
 
   if (config.url && !env.SENTRY_HOST?.trim() && !env.SENTRY_URL?.trim()) {
+    // Host-scoping trust check (see plan
+    // .opencode/plans/1777023782662-proud-circuit.md). `.sentryclirc` files
+    // — both repo-local and global `~/.sentryclirc` — are untrusted as
+    // trust-establishment sources (repos ship them; CI writes home dirs).
+    // A URL in any rc file is honored only when it matches the active
+    // token's scoped host. Otherwise we refuse: silently routing requests
+    // to a host the credentials don't match either leaks credentials (if
+    // the fetch layer didn't also guard them) or produces confusing 401s
+    // at best. Users who need to trust a new host must run
+    // `sentry auth login --url <url>` explicitly.
+    //
+    // SaaS URLs in rc files are always honored — nothing to leak.
+    if (!isSentrySaasUrl(config.url)) {
+      const tokenHost = getActiveTokenHost();
+      if (!(tokenHost && isHostTrusted(config.url, tokenHost))) {
+        const source = config.sources.url
+          ? `Config at ${config.sources.url}`
+          : `${CONFIG_FILENAME} [defaults] url`;
+        throw new CliError(
+          buildUrlMismatchMessage(source, config.url, tokenHost)
+        );
+      }
+    }
+
     log.debug(
       `Setting SENTRY_URL from ${CONFIG_FILENAME} (${config.sources.url})`
     );

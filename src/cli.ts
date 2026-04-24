@@ -11,6 +11,7 @@
  */
 
 import { getEnv } from "./lib/env.js";
+import { captureEnvTokenHost } from "./lib/env-token-host.js";
 import { applySentryCliRcEnvShim } from "./lib/sentryclirc.js";
 
 /**
@@ -20,6 +21,15 @@ import { applySentryCliRcEnvShim } from "./lib/sentryclirc.js";
  * to `findProjectRoot` and `loadSentryCliRc` are cache hits.
  */
 async function preloadProjectContext(cwd: string): Promise<void> {
+  // CRITICAL: Snapshot the env-token host BEFORE anything that could mutate
+  // `env.SENTRY_HOST`/`env.SENTRY_URL` (the .sentryclirc shim or the default
+  // URL fallback below). This pins the trust scope for env-var tokens like
+  // SENTRY_AUTH_TOKEN to whatever the user's shell actually set — not to a
+  // value injected by a repo-local config file. See
+  // src/lib/env-token-host.ts and the plan at
+  // .opencode/plans/1777023782662-proud-circuit.md for rationale.
+  captureEnvTokenHost();
+
   // Dynamic import keeps the heavy DSN/DB modules out of the completion fast-path
   const [{ findProjectRoot }, { setCachedProjectRoot }] = await Promise.all([
     import("./lib/dsn/project-root.js"),

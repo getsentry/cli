@@ -110,19 +110,26 @@ describe("parseOrgProjectArg", () => {
     });
   });
 
-  // URL integration tests — applySentryUrlContext may set SENTRY_HOST/SENTRY_URL as a side effect
+  // URL integration tests — applySentryUrlContext may set SENTRY_HOST/SENTRY_URL as a side effect.
+  // Host-scoping: non-SaaS URLs now require the token to be scoped to the
+  // same host. Tests that pass self-hosted URLs must set SENTRY_HOST before
+  // running so the env-token-host snapshot matches.
   describe("Sentry URL inputs", () => {
     let savedSentryUrl: string | undefined;
     let savedSentryHost: string | undefined;
 
-    beforeEach(() => {
+    beforeEach(async () => {
       savedSentryUrl = process.env.SENTRY_URL;
       savedSentryHost = process.env.SENTRY_HOST;
       delete process.env.SENTRY_URL;
       delete process.env.SENTRY_HOST;
+      const { resetEnvTokenHostForTesting } = await import(
+        "../../src/lib/env-token-host.js"
+      );
+      resetEnvTokenHostForTesting();
     });
 
-    afterEach(() => {
+    afterEach(async () => {
       if (savedSentryUrl !== undefined) {
         process.env.SENTRY_URL = savedSentryUrl;
       } else {
@@ -133,6 +140,10 @@ describe("parseOrgProjectArg", () => {
       } else {
         delete process.env.SENTRY_HOST;
       }
+      const { resetEnvTokenHostForTesting } = await import(
+        "../../src/lib/env-token-host.js"
+      );
+      resetEnvTokenHostForTesting();
     });
 
     test("issue URL returns org-all", () => {
@@ -167,7 +178,9 @@ describe("parseOrgProjectArg", () => {
       });
     });
 
-    test("self-hosted URL extracts org", () => {
+    test("self-hosted URL extracts org when token is scoped to that host", () => {
+      // Pin env-token to sentry.example.com so the URL-arg's host matches.
+      process.env.SENTRY_HOST = "https://sentry.example.com";
       expect(
         parseOrgProjectArg(
           "https://sentry.example.com/organizations/acme-corp/issues/99/"
@@ -176,6 +189,15 @@ describe("parseOrgProjectArg", () => {
         type: "org-all",
         org: "acme-corp",
       });
+    });
+
+    test("self-hosted URL throws when token is scoped to a different host", () => {
+      // No SENTRY_HOST set → env-token defaults to SaaS → mismatch on self-hosted URL.
+      expect(() =>
+        parseOrgProjectArg(
+          "https://sentry.example.com/organizations/acme-corp/issues/99/"
+        )
+      ).toThrow(/does not match|sentry auth login --url/);
     });
   });
 
@@ -422,7 +444,8 @@ describe("parseIssueArg", () => {
       });
     });
 
-    test("self-hosted issue URL with query params", () => {
+    test("self-hosted issue URL with query params (requires matching token host)", () => {
+      process.env.SENTRY_HOST = "https://sentry.example.com";
       expect(
         parseIssueArg(
           "https://sentry.example.com/organizations/acme/issues/32886/?project=2"
@@ -503,7 +526,8 @@ describe("parseIssueArg", () => {
       });
     });
 
-    test("self-hosted share URL returns share type", () => {
+    test("self-hosted share URL returns share type (requires matching token host)", () => {
+      process.env.SENTRY_HOST = "https://sentry.example.com";
       expect(
         parseIssueArg(
           "https://sentry.example.com/share/issue/aabbccdd11223344aabbccdd11223344/"

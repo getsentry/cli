@@ -258,19 +258,25 @@ describe("parsePositionalArgs", () => {
     });
   });
 
-  // URL integration tests — applySentryUrlContext may set SENTRY_HOST/SENTRY_URL as a side effect
+  // URL integration tests — applySentryUrlContext may set SENTRY_HOST/SENTRY_URL as a side effect.
+  // Host-scoping: self-hosted URLs now require the token to be scoped to the
+  // same host. Tests seed SENTRY_HOST before parsing so env-token-host matches.
   describe("Sentry URL inputs", () => {
     let savedSentryUrl: string | undefined;
     let savedSentryHost: string | undefined;
 
-    beforeEach(() => {
+    beforeEach(async () => {
       savedSentryUrl = process.env.SENTRY_URL;
       savedSentryHost = process.env.SENTRY_HOST;
       delete process.env.SENTRY_URL;
       delete process.env.SENTRY_HOST;
+      const { resetEnvTokenHostForTesting } = await import(
+        "../../../src/lib/env-token-host.js"
+      );
+      resetEnvTokenHostForTesting();
     });
 
-    afterEach(() => {
+    afterEach(async () => {
       if (savedSentryUrl !== undefined) {
         process.env.SENTRY_URL = savedSentryUrl;
       } else {
@@ -281,6 +287,10 @@ describe("parsePositionalArgs", () => {
       } else {
         delete process.env.SENTRY_HOST;
       }
+      const { resetEnvTokenHostForTesting } = await import(
+        "../../../src/lib/env-token-host.js"
+      );
+      resetEnvTokenHostForTesting();
     });
 
     test("event URL extracts eventId and passes org as OrgAll target", () => {
@@ -291,7 +301,8 @@ describe("parsePositionalArgs", () => {
       expect(result.targetArg).toBe("my-org/");
     });
 
-    test("self-hosted event URL extracts eventId, passes org, sets SENTRY_URL", () => {
+    test("self-hosted event URL extracts eventId, passes org, sets SENTRY_URL (requires matching token host)", () => {
+      process.env.SENTRY_HOST = "https://sentry.example.com";
       const result = parsePositionalArgs([
         "https://sentry.example.com/organizations/acme/issues/999/events/deadbeef/",
       ]);

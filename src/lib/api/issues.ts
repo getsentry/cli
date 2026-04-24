@@ -669,7 +669,9 @@ export async function getSharedIssue(
 ): Promise<{ groupID: string }> {
   const url = `${baseUrl}/api/0/shared/issues/${encodeURIComponent(shareId)}/`;
   const headers = new Headers({ "Content-Type": "application/json" });
-  applyCustomHeaders(headers);
+  // URL-scoped: headers only attach when `url`'s origin matches the trusted
+  // host, so IAP tokens etc. can't leak to an attacker-controlled share URL.
+  applyCustomHeaders(headers, url);
   const response = await fetch(url, { headers });
 
   if (!response.ok) {
