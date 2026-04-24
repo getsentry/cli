@@ -11,7 +11,7 @@
 import { DEFAULT_SENTRY_HOST } from "./constants.js";
 import { getEnv } from "./env.js";
 import { HostScopeError } from "./errors.js";
-import { isSentrySaasUrl } from "./sentry-urls.js";
+import { isSaaSTrustOrigin } from "./sentry-urls.js";
 import { getActiveTokenHost, isHostTrusted } from "./token-host.js";
 
 /**
@@ -237,7 +237,11 @@ export function parseSentryUrl(input: string): ParsedSentryUrl | null {
  */
 export function applySentryUrlContext(baseUrl: string): void {
   const env = getEnv();
-  if (isSentrySaasUrl(baseUrl)) {
+  // SaaS trust fast-path uses the STRICT check (https + default port).
+  // A crafted `http://sentry.io/...` or `https://sentry.io:8443/...` must
+  // NOT be silently treated as SaaS and routed without the trust check —
+  // matches the `isHostTrusted` semantics downstream.
+  if (isSaaSTrustOrigin(baseUrl)) {
     // Clear any self-hosted URL so API calls fall back to default SaaS routing.
     // Without this, a stale SENTRY_HOST/SENTRY_URL would route SaaS requests to the wrong host.
     // biome-ignore lint/performance/noDelete: env registry requires delete to truly unset; assignment coerces to string in Node.js
@@ -247,7 +251,10 @@ export function applySentryUrlContext(baseUrl: string): void {
     return;
   }
 
-  // Non-SaaS URL — enforce host-scoping.
+  // Not a strict-SaaS origin — enforce host-scoping. This catches:
+  //   - Non-SaaS hostnames (`sentry.example.com`)
+  //   - "SaaS-looking" hostnames with non-default scheme/port
+  //     (`http://sentry.io`, `https://sentry.io:8443`)
   const tokenHost = getActiveTokenHost();
   if (!(tokenHost && isHostTrusted(baseUrl, tokenHost))) {
     throw new HostScopeError(

@@ -25,7 +25,7 @@ import { HostScopeError } from "./errors.js";
 import { parseIni } from "./ini.js";
 import { logger } from "./logger.js";
 import { buildUrlMismatchMessage } from "./sentry-url-parser.js";
-import { isSentrySaasUrl } from "./sentry-urls.js";
+import { isSaaSTrustOrigin } from "./sentry-urls.js";
 import { getActiveTokenHost, isHostTrusted } from "./token-host.js";
 import { walkUpFrom } from "./walk-up.js";
 
@@ -384,7 +384,15 @@ export async function applySentryCliRcEnvShim(
     // mismatches the current token — otherwise a repo-local rc makes
     // onboarding to a new self-hosted instance impossible (chicken-and-
     // egg). The caller (cli.ts) decides when to bypass based on argv.
-    if (!(options?.skipUrlTrustCheck || isSentrySaasUrl(config.url))) {
+    //
+    // SaaS bypass uses the STRICT `isSaaSTrustOrigin` (requires https +
+    // default port). Using the lax `isSentrySaasUrl` here would let a
+    // crafted rc URL like `http://sentry.io` or `https://sentry.io:8443`
+    // skip the primary guard even though the trust-check semantics
+    // (`isHostTrusted` → `isSaaSTrustOrigin`) reject them downstream —
+    // creating inconsistent "primary guard weaker than fetch-layer
+    // guard" behavior.
+    if (!(options?.skipUrlTrustCheck || isSaaSTrustOrigin(config.url))) {
       const tokenHost = getActiveTokenHost();
       if (!(tokenHost && isHostTrusted(config.url, tokenHost))) {
         const source = config.sources.url

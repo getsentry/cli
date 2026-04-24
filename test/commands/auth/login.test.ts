@@ -672,3 +672,108 @@ describe("applyLoginUrl (host resolution)", () => {
     expect(applyLoginUrl(undefined)).toBe("https://host.example.com");
   });
 });
+
+describe("applyLoginUrl (trust anchor registration)", () => {
+  let savedHost: string | undefined;
+  let savedUrl: string | undefined;
+
+  beforeEach(async () => {
+    savedHost = process.env.SENTRY_HOST;
+    savedUrl = process.env.SENTRY_URL;
+    delete process.env.SENTRY_HOST;
+    delete process.env.SENTRY_URL;
+    const { resetEnvTokenHostForTesting } = await import(
+      "../../../src/lib/env-token-host.js"
+    );
+    const { resetLoginTrustAnchorForTesting } = await import(
+      "../../../src/lib/token-host.js"
+    );
+    resetEnvTokenHostForTesting();
+    resetLoginTrustAnchorForTesting();
+  });
+
+  afterEach(async () => {
+    if (savedHost !== undefined) {
+      process.env.SENTRY_HOST = savedHost;
+    } else {
+      delete process.env.SENTRY_HOST;
+    }
+    if (savedUrl !== undefined) {
+      process.env.SENTRY_URL = savedUrl;
+    } else {
+      delete process.env.SENTRY_URL;
+    }
+    const { resetEnvTokenHostForTesting } = await import(
+      "../../../src/lib/env-token-host.js"
+    );
+    const { resetLoginTrustAnchorForTesting } = await import(
+      "../../../src/lib/token-host.js"
+    );
+    resetEnvTokenHostForTesting();
+    resetLoginTrustAnchorForTesting();
+  });
+
+  test("explicit --url registers trust anchor (user-supplied argv is trusted)", async () => {
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    const { isRequestOriginTrustedForCustomHeaders } = await import(
+      "../../../src/lib/token-host.js"
+    );
+    applyLoginUrl("https://sentry.acme.com");
+    expect(
+      isRequestOriginTrustedForCustomHeaders(
+        "https://sentry.acme.com/oauth/device/code/"
+      )
+    ).toBe(true);
+  });
+
+  test("SENTRY_HOST from boot env registers trust anchor (shell export is trusted)", async () => {
+    process.env.SENTRY_HOST = "https://sentry.acme.com";
+    const { captureEnvTokenHost } = await import(
+      "../../../src/lib/env-token-host.js"
+    );
+    captureEnvTokenHost();
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    const { isRequestOriginTrustedForCustomHeaders } = await import(
+      "../../../src/lib/token-host.js"
+    );
+    applyLoginUrl(undefined);
+    expect(
+      isRequestOriginTrustedForCustomHeaders(
+        "https://sentry.acme.com/oauth/device/code/"
+      )
+    ).toBe(true);
+  });
+
+  test("rc-poisoned SENTRY_URL does NOT register trust anchor (attacker path)", async () => {
+    // Boot: no env set → env-token-host captures SaaS default
+    const { captureEnvTokenHost } = await import(
+      "../../../src/lib/env-token-host.js"
+    );
+    captureEnvTokenHost();
+
+    // Simulate .sentryclirc shim writing env.SENTRY_URL AFTER boot (the
+    // skipUrlTrustCheck bypass on auth login). This is the attacker path.
+    process.env.SENTRY_URL = "https://evil.com";
+
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    const { isRequestOriginTrustedForCustomHeaders } = await import(
+      "../../../src/lib/token-host.js"
+    );
+    applyLoginUrl(undefined);
+
+    // The rc-sourced host doesn't match boot env (which was empty →
+    // SaaS default) → NOT registered as trust anchor.
+    // applyCustomHeaders against evil.com must fail closed.
+    expect(
+      isRequestOriginTrustedForCustomHeaders(
+        "https://evil.com/oauth/device/code/"
+      )
+    ).toBe(false);
+  });
+});

@@ -19,6 +19,7 @@ import { setDefaultUrl } from "../../lib/db/defaults.js";
 import { getDbPath } from "../../lib/db/index.js";
 import { getUserInfo, setUserInfo } from "../../lib/db/user.js";
 import { getEnv } from "../../lib/env.js";
+import { getEnvTokenHost } from "../../lib/env-token-host.js";
 import { AuthError, ValidationError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
 import {
@@ -91,11 +92,6 @@ export function parseLoginUrl(raw: string): string {
 }
 
 /**
- * When `--url` is passed, set `env.SENTRY_HOST` and `env.SENTRY_URL` so the
- * device-flow and token-refresh endpoints hit the requested host. Returns
- * the normalized URL so callers can record it with {@link setAuthToken}.
- */
-/**
  * Persist the `--url` host as the stored default so subsequent CLI
  * invocations route to the correct host without requiring the user to
  * also export `SENTRY_HOST`. SaaS is the implicit default (not stored
@@ -124,30 +120,63 @@ function persistLoginUrlAsDefault(
   }
 }
 
-/** @internal exported for testing */
+/**
+ * When `--url` is passed, set `env.SENTRY_HOST` and `env.SENTRY_URL` so the
+ * device-flow and token-refresh endpoints hit the requested host.
+ *
+ * Returns the effective host (normalized origin) so callers can record it
+ * with {@link setAuthToken}.
+ *
+ * Also registers the effective host as the login-time trust anchor so
+ * `applyCustomHeaders` attaches `SENTRY_CUSTOM_HEADERS` during the OAuth
+ * device flow — required for onboarding to IAP-protected self-hosted
+ * instances. Registration is CONDITIONAL on the source of the host being
+ * trustworthy:
+ *
+ * - `--url <url>` (explicit flag) → always trusted (user's shell argv)
+ * - `SENTRY_HOST`/`SENTRY_URL` env at BOOT → trusted (user's shell export,
+ *   captured before the `.sentryclirc` shim could mutate env). Source:
+ *   {@link getEnvTokenHost} snapshot.
+ * - Current `env.SENTRY_HOST`/`SENTRY_URL` post-shim → NOT trusted.
+ *   `.sentryclirc` writes happen through `applySentryCliRcEnvShim` with
+ *   `skipUrlTrustCheck: true` on login — we must not promote that
+ *   rc-sourced value to a trust anchor.
+ *
+ * The function still resolves the effective host from current env for
+ * the OAuth flow's routing, but only registers the anchor when the host
+ * matches either the explicit flag or the boot-time env snapshot.
+ */
 export function applyLoginUrl(url: string | undefined): string {
-  if (!url) {
+  const env = getEnv();
+  let effectiveHost: string;
+  let registerAnchor: boolean;
+
+  if (url) {
+    env.SENTRY_HOST = url;
+    env.SENTRY_URL = url;
+    effectiveHost = url;
+    registerAnchor = true;
+  } else {
     // Preserve existing env / .sentryclirc resolution. Normalize through
     // `normalizeUrl` first so bare hostnames like `SENTRY_HOST=sentry.acme.com`
     // (a documented shell-export pattern) get the `https://` prefix before
     // `normalizeOrigin` tries to parse them — otherwise `new URL()` rejects
-    // the bare hostname and we silently fall back to SaaS, which would
-    // mis-scope the stored token.
-    const env = getEnv();
+    // the bare hostname and we silently fall back to SaaS.
     const raw = env.SENTRY_HOST || env.SENTRY_URL;
     const prefixed = normalizeUrl(raw);
-    return (prefixed && normalizeOrigin(prefixed)) ?? DEFAULT_SENTRY_URL;
+    effectiveHost =
+      (prefixed && normalizeOrigin(prefixed)) ?? DEFAULT_SENTRY_URL;
+    // Only register the anchor if the resolved host matches the
+    // boot-time env snapshot. If they differ, it means the rc shim wrote
+    // env.SENTRY_URL after boot — NOT a trusted source.
+    const bootHost = getEnvTokenHost();
+    registerAnchor = effectiveHost === bootHost;
   }
-  const env = getEnv();
-  env.SENTRY_HOST = url;
-  env.SENTRY_URL = url;
-  // Register the explicit `--url` as a login-time trust anchor so that
-  // `applyCustomHeaders` attaches `SENTRY_CUSTOM_HEADERS` during the
-  // OAuth device flow — required for onboarding to IAP-protected
-  // self-hosted instances. Safe because `--url` is user-supplied via
-  // shell argv (same trust boundary as env vars in our threat model).
-  registerLoginTrustAnchor(url);
-  return url;
+
+  if (registerAnchor) {
+    registerLoginTrustAnchor(effectiveHost);
+  }
+  return effectiveHost;
 }
 
 /**
