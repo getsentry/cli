@@ -11,7 +11,7 @@ import { getCurrentUser } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
 import { getAuthToken } from "../../lib/db/auth.js";
 import { setUserInfo } from "../../lib/db/user.js";
-import { ApiError, AuthError, CliError } from "../../lib/errors.js";
+import { ApiError, AuthError, ResolutionError } from "../../lib/errors.js";
 import { formatUserIdentity } from "../../lib/formatters/index.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
@@ -92,17 +92,14 @@ export const whoamiCommand = buildCommand({
     // letting the request fail with a confusing 400.
     const token = getAuthToken();
     if (token && classifySentryToken(token) === "org-auth-token") {
-      throw new CliError(
+      throw new ResolutionError(
+        "Organization auth tokens (sntrys_...)",
+        "are not tied to a user — `whoami` needs a user-scoped credential",
+        "sentry auth status",
         [
-          "Organization auth tokens (sntrys_...) are not tied to a user.",
-          "",
-          "The `whoami` command only works with user-scoped credentials",
-          "(OAuth tokens from `sentry auth login` or personal access tokens).",
-          "",
-          "Try:",
-          "  sentry auth status   — show which token is active and its scope",
-          "  sentry org list      — list organizations this token can access",
-        ].join("\n")
+          "Use an OAuth token from `sentry auth login` or a personal access token",
+          "Run `sentry org list` to list organizations this token can access",
+        ]
       );
     }
 

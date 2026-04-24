@@ -22,7 +22,12 @@ import * as apiClient from "../../../src/lib/api-client.js";
 import * as dbAuth from "../../../src/lib/db/auth.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbUser from "../../../src/lib/db/user.js";
-import { ApiError, AuthError, CliError } from "../../../src/lib/errors.js";
+import {
+  ApiError,
+  AuthError,
+  CliError,
+  ResolutionError,
+} from "../../../src/lib/errors.js";
 
 type WhoamiFlags = { readonly json: boolean };
 
@@ -144,14 +149,16 @@ describe("whoamiCommand.func", () => {
   });
 
   describe("org auth token short-circuit", () => {
-    test("throws CliError with actionable message and skips API call", async () => {
+    test("throws ResolutionError and skips API call", async () => {
       getAuthTokenSpy.mockReturnValue("sntrys_abc123def456");
 
       const { context } = createContext();
 
-      // The thrown error must be a CliError (so the framework formats it),
-      // and must NOT be an AuthError (no auto-login trigger).
+      // ResolutionError extends CliError; must NOT be an AuthError so the
+      // framework doesn't trigger the auto-login flow for a valid-but-wrong
+      // token type.
       const promise = func.call(context, { json: false });
+      await expect(promise).rejects.toBeInstanceOf(ResolutionError);
       await expect(promise).rejects.toBeInstanceOf(CliError);
       await expect(promise).rejects.not.toBeInstanceOf(AuthError);
 
@@ -166,10 +173,10 @@ describe("whoamiCommand.func", () => {
 
       try {
         await func.call(context, { json: false });
-        throw new Error("expected CliError");
+        throw new Error("expected ResolutionError");
       } catch (err) {
-        expect(err).toBeInstanceOf(CliError);
-        const msg = (err as CliError).message;
+        expect(err).toBeInstanceOf(ResolutionError);
+        const msg = (err as ResolutionError).message;
         expect(msg).toContain("Organization auth tokens");
         expect(msg.toLowerCase()).toContain("user");
         expect(msg).toContain("sentry auth status");
