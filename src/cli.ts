@@ -22,6 +22,42 @@ import { applySentryCliRcEnvShim } from "./lib/sentryclirc.js";
  * to `findProjectRoot` and `loadSentryCliRc` are cache hits.
  */
 /**
+ * Extract positional argv tokens, skipping any `--flag[=value]` or `-f` tokens
+ * (and their companion value when present) so command detection is robust
+ * against global flags that may precede or interleave with the command path.
+ *
+ * Heuristic rules (conservative — false positives on unknown flags lead to
+ * extra positionals being kept, which is safe for our matching):
+ * - `--flag=value`, `--flag`, `-f` → skip the flag itself.
+ * - `--` is a positional-only separator; everything after it is positional.
+ * - For bare `--flag` / `-f` (no `=`), we can't reliably know whether the
+ *   next token is a value or a positional — we DON'T consume it, erring on
+ *   the side of finding the command. Our matching still works because the
+ *   relevant commands (`auth login` / `auth logout`) don't use a dangling
+ *   flag value that looks like `auth`.
+ */
+/** @internal exported for testing */
+export function extractPositionals(args: readonly string[]): string[] {
+  const positionals: string[] = [];
+  let sawDoubleDash = false;
+  for (const token of args) {
+    if (sawDoubleDash) {
+      positionals.push(token);
+      continue;
+    }
+    if (token === "--") {
+      sawDoubleDash = true;
+      continue;
+    }
+    if (token.startsWith("-") && token.length > 1) {
+      continue;
+    }
+    positionals.push(token);
+  }
+  return positionals;
+}
+
+/**
  * Detect whether the invocation is an `auth login` / `auth logout` command
  * so the `.sentryclirc` URL-trust check can be bypassed. These are the
  * only commands that establish or tear down host trust, and they must
@@ -33,9 +69,15 @@ import { applySentryCliRcEnvShim } from "./lib/sentryclirc.js";
  * keep the guard enabled (they need credentials scoped to the active
  * host). Also matches top-level aliases if any exist (currently just
  * `auth login`/`auth logout` — expand if the route map grows).
+ *
+ * Robust against leading/trailing global flags via {@link extractPositionals}
+ * so that `sentry --foo auth login` (or any other arrangement) still
+ * triggers the bypass.
  */
-function isTrustChangingCommand(args: readonly string[]): boolean {
-  const [cmd, sub] = args;
+/** @internal exported for testing */
+export function isTrustChangingCommand(args: readonly string[]): boolean {
+  const positionals = extractPositionals(args);
+  const [cmd, sub] = positionals;
   if (cmd !== "auth") {
     return false;
   }
