@@ -21,7 +21,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { getConfigDir } from "./db/index.js";
 import { getEnv } from "./env.js";
-import { CliError } from "./errors.js";
+import { HostScopeError } from "./errors.js";
 import { parseIni } from "./ini.js";
 import { logger } from "./logger.js";
 import { buildUrlMismatchMessage } from "./sentry-url-parser.js";
@@ -390,7 +390,7 @@ export async function applySentryCliRcEnvShim(
         const source = config.sources.url
           ? `Config at ${config.sources.url}`
           : `${CONFIG_FILENAME} [defaults] url`;
-        throw new CliError(
+        throw new HostScopeError(
           buildUrlMismatchMessage(source, config.url, tokenHost)
         );
       }

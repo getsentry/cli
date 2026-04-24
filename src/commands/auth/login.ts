@@ -15,6 +15,7 @@ import {
   isEnvTokenActive,
   setAuthToken,
 } from "../../lib/db/auth.js";
+import { setDefaultUrl } from "../../lib/db/defaults.js";
 import { getDbPath } from "../../lib/db/index.js";
 import { getUserInfo, setUserInfo } from "../../lib/db/user.js";
 import { getEnv } from "../../lib/env.js";
@@ -32,6 +33,7 @@ import {
 } from "../../lib/interactive-login.js";
 import { logger } from "../../lib/logger.js";
 import { clearResponseCache } from "../../lib/response-cache.js";
+import { isSentrySaasUrl } from "../../lib/sentry-urls.js";
 import { normalizeOrigin } from "../../lib/token-host.js";
 
 const log = logger.withTag("auth.login");
@@ -90,6 +92,35 @@ export function parseLoginUrl(raw: string): string {
  * device-flow and token-refresh endpoints hit the requested host. Returns
  * the normalized URL so callers can record it with {@link setAuthToken}.
  */
+/**
+ * Persist the `--url` host as the stored default so subsequent CLI
+ * invocations route to the correct host without requiring the user to
+ * also export `SENTRY_HOST`. SaaS is the implicit default (not stored
+ * — users don't need it, and storing it would shadow future SaaS-default
+ * changes). Only persist when `--url` was explicitly passed: inheriting
+ * from env/rc already persists through those channels, so writing here
+ * would be redundant at best and conflict-prone at worst with `sentry
+ * cli defaults url`.
+ *
+ * Non-fatal on DB failure — the stored token's `host` column is the
+ * authoritative source of trust; default URL is a routing convenience.
+ */
+function persistLoginUrlAsDefault(
+  flagUrl: string | undefined,
+  effectiveHost: string
+): void {
+  if (!flagUrl || isSentrySaasUrl(effectiveHost)) {
+    return;
+  }
+  try {
+    setDefaultUrl(effectiveHost);
+  } catch {
+    log.debug(
+      `Could not persist default URL to DB; host is recorded on the stored token. Set SENTRY_HOST or run 'sentry cli defaults url ${effectiveHost}' if subsequent commands route incorrectly.`
+    );
+  }
+}
+
 /** @internal exported for testing */
 export function applyLoginUrl(url: string | undefined): string {
   if (!url) {
@@ -213,6 +244,7 @@ export const loginCommand = buildCommand({
     // effective host is also passed to `setAuthToken` so the stored token
     // is scoped correctly.
     const effectiveHost = applyLoginUrl(flags.url);
+    persistLoginUrlAsDefault(flags.url, effectiveHost);
 
     // Check if already authenticated and handle re-authentication
     if (isAuthenticated()) {

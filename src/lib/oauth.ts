@@ -18,9 +18,9 @@ import { getEnv } from "./env.js";
 import {
   ApiError,
   AuthError,
-  CliError,
   ConfigError,
   DeviceFlowError,
+  HostScopeError,
 } from "./errors.js";
 import { withHttpSpan } from "./telemetry.js";
 import {
@@ -139,7 +139,7 @@ function assertRefreshHostTrusted(): void {
   if (!isRequestOriginTrusted(refreshUrl)) {
     const refreshOrigin = normalizeOrigin(refreshUrl);
     const tokenHost = getActiveTokenHost();
-    throw new CliError(
+    throw new HostScopeError(
       `Refusing to send OAuth refresh token to ${refreshOrigin ?? "<unknown host>"}: active token is scoped to ${tokenHost}.\n` +
         "Run 'sentry auth login --url <url>' against the intended instance, " +
         "or unset SENTRY_HOST to use credentials for a different host."

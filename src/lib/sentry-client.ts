@@ -18,7 +18,7 @@ import {
 } from "./constants.js";
 import { applyCustomHeaders } from "./custom-headers.js";
 import { getAuthToken, refreshToken } from "./db/auth.js";
-import { CliError, TimeoutError } from "./errors.js";
+import { HostScopeError, TimeoutError } from "./errors.js";
 import { logger } from "./logger.js";
 import {
   getCachedResponse,
@@ -113,7 +113,7 @@ function prepareHeaders(
   if (!isRequestOriginTrusted(input)) {
     const requestOrigin = normalizeOrigin(input);
     const tokenHost = getActiveTokenHost();
-    throw new CliError(
+    throw new HostScopeError(
       `Refusing to send credentials to ${requestOrigin ?? "<unknown host>"}: active token is scoped to ${tokenHost}.\n` +
         "Run 'sentry auth login --url <url>' against the intended instance, " +
         "or unset SENTRY_AUTH_TOKEN/SENTRY_HOST to use credentials for a different host."

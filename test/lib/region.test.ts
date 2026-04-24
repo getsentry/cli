@@ -219,7 +219,13 @@ describe("resolveOrgRegion", () => {
   });
 
   test("uses SENTRY_URL as fallback for self-hosted", async () => {
+    // The test's beforeEach stored an OAuth row with host = SaaS (since
+    // SENTRY_URL was unset at store time). Re-scope the stored token to
+    // the self-hosted host so the fetch-layer guard admits the request.
     process.env.SENTRY_URL = "https://sentry.mycompany.com";
+    await setAuthToken("test-token", undefined, undefined, {
+      host: "https://sentry.mycompany.com",
+    });
 
     // Mock fetch to fail (no multi-region on self-hosted)
     const originalFetch = globalThis.fetch;

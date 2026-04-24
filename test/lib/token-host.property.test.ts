@@ -87,6 +87,31 @@ describe("property: SaaS equivalence is reflexive + symmetric", () => {
   });
 });
 
+describe("property: SaaS trust-class rejects http:// and non-default ports", () => {
+  test("http:// sentry.io subdomain is NEVER trusted as SaaS", () => {
+    fcAssert(
+      property(saasSubdomainArb, (subdomain) => {
+        expect(isHostTrusted(`http://${subdomain}/`, "https://sentry.io")).toBe(
+          false
+        );
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("non-default port on sentry.io is NEVER trusted as SaaS", () => {
+    fcAssert(
+      property(saasSubdomainArb, (subdomain) => {
+        // Port 8443 is never default for https (443) or http (80).
+        expect(
+          isHostTrusted(`https://${subdomain}:8443/`, "https://sentry.io")
+        ).toBe(false);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
 describe("property: non-SaaS hosts require exact origin match", () => {
   test("non-SaaS host never trusts a different non-SaaS host", () => {
     fcAssert(

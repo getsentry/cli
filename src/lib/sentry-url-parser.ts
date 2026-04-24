@@ -10,7 +10,7 @@
 
 import { DEFAULT_SENTRY_HOST } from "./constants.js";
 import { getEnv } from "./env.js";
-import { CliError } from "./errors.js";
+import { HostScopeError } from "./errors.js";
 import { isSentrySaasUrl } from "./sentry-urls.js";
 import { getActiveTokenHost, isHostTrusted } from "./token-host.js";
 
@@ -250,7 +250,7 @@ export function applySentryUrlContext(baseUrl: string): void {
   // Non-SaaS URL — enforce host-scoping.
   const tokenHost = getActiveTokenHost();
   if (!(tokenHost && isHostTrusted(baseUrl, tokenHost))) {
-    throw new CliError(
+    throw new HostScopeError(
       buildUrlMismatchMessage("URL argument", baseUrl, tokenHost)
     );
   }

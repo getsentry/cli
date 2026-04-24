@@ -30,7 +30,7 @@ import {
 import { getKnownRegionUrls } from "./db/regions.js";
 import { getEnv } from "./env.js";
 import { getEnvTokenHost } from "./env-token-host.js";
-import { isSentrySaasUrl } from "./sentry-urls.js";
+import { isSaaSTrustOrigin } from "./sentry-urls.js";
 
 /**
  * Normalize a URL (or fetch input) to its canonical origin form.
@@ -93,8 +93,11 @@ export function isHostTrusted(
     return true;
   }
   // SaaS equivalence: if the trusted host is SaaS and the candidate is also
-  // SaaS, they share the same trust class. Non-SaaS must match exactly.
-  if (isSentrySaasUrl(trustedOrigin) && isSentrySaasUrl(candidateOrigin)) {
+  // SaaS, they share the same trust class. Both must satisfy the STRICT
+  // trust-origin check (https + default port) — an http:// or non-default-port
+  // URL pointing at `sentry.io` is not legitimate and must not inherit SaaS
+  // trust even if the hostname alone matches.
+  if (isSaaSTrustOrigin(trustedOrigin) && isSaaSTrustOrigin(candidateOrigin)) {
     return true;
   }
   return false;

@@ -41,10 +41,18 @@ function isSaaS(): boolean {
 }
 
 /**
- * Check if a URL is a Sentry SaaS domain.
+ * Check if a URL is a Sentry SaaS domain (hostname check only).
  *
- * Used to determine if multi-region support should be enabled and to
- * validate region URLs before sending authenticated requests.
+ * Used for routing decisions: which URLs are multi-region-eligible, which
+ * are self-hosted, whether telemetry should route to SaaS, etc. Matches
+ * on hostname alone — scheme and port are NOT checked, so this accepts
+ * e.g. `http://sentry.io` and `https://sentry.io:8443` even though those
+ * aren't legitimate production SaaS addresses. That's intentional for
+ * routing (test harnesses occasionally use these).
+ *
+ * For TRUST decisions (deciding whether a SaaS-scoped token is valid for
+ * a given origin), use {@link isSaaSTrustOrigin} which additionally
+ * requires https scheme and default port.
  *
  * @param url - URL string to validate
  * @returns true if the hostname is sentry.io or a subdomain of sentry.io
@@ -52,6 +60,42 @@ function isSaaS(): boolean {
 export function isSentrySaasUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
+    return (
+      parsed.hostname === DEFAULT_SENTRY_HOST ||
+      parsed.hostname.endsWith(`.${DEFAULT_SENTRY_HOST}`)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if a URL is a Sentry SaaS origin for TRUST purposes.
+ *
+ * Stricter than {@link isSentrySaasUrl}: additionally requires
+ * - scheme = `https:` (production SaaS is HTTPS-only; `http://sentry.io`
+ *   is never legitimate and a crafted plaintext URL must NOT inherit
+ *   SaaS trust)
+ * - port = default (empty `port` in WHATWG URL means the scheme's
+ *   default port; any explicit non-default port indicates either a
+ *   crafted URL or DNS redirect we don't trust)
+ *
+ * Used by the host-scoping trust check (`token-host.ts::isHostTrusted`)
+ * to decide SaaS equivalence. Keep in sync with {@link isSentrySaasUrl}
+ * when adding new trust classes.
+ *
+ * @param url - URL string to validate
+ * @returns true only if the URL is a strictly-SaaS origin
+ */
+export function isSaaSTrustOrigin(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") {
+      return false;
+    }
+    if (parsed.port !== "") {
+      return false;
+    }
     return (
       parsed.hostname === DEFAULT_SENTRY_HOST ||
       parsed.hostname.endsWith(`.${DEFAULT_SENTRY_HOST}`)

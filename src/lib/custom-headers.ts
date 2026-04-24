@@ -21,17 +21,13 @@
  * ```
  */
 
-import { DEFAULT_SENTRY_URL, getConfiguredSentryUrl } from "./constants.js";
+import { getConfiguredSentryUrl } from "./constants.js";
 import { getDefaultHeaders } from "./db/defaults.js";
 import { getEnv } from "./env.js";
 import { ConfigError } from "./errors.js";
 import { logger } from "./logger.js";
 import { isSentrySaasUrl } from "./sentry-urls.js";
-import {
-  getActiveTokenHost,
-  isHostTrusted,
-  isRequestOriginTrusted,
-} from "./token-host.js";
+import { getActiveTokenHost, isRequestOriginTrusted } from "./token-host.js";
 
 const log = logger.withTag("custom-headers");
 
@@ -206,29 +202,11 @@ export function getCustomHeaders(): readonly [string, string][] {
 }
 
 /**
- * Resolve the origin we treat as "ours" for custom-header scoping.
- *
- * Precedence:
- *   1. Active token's scoped host (from stored OAuth or env-token snapshot)
- *   2. Currently-configured `SENTRY_HOST`/`SENTRY_URL`
- *   3. SaaS default (`https://sentry.io`)
- *
- * Custom headers are unauthenticated from the CLI's perspective — they're
- * attached regardless of whether we have a bearer token — but they contain
- * trust-bearing material (IAP tokens, mTLS headers, etc.) that must not leak
- * to a non-trusted host. Without an active token, we still have to pick a
- * trust anchor; the configured host is the next-best signal.
- */
-function getTrustedHostForCustomHeaders(): string {
-  return getActiveTokenHost() ?? getConfiguredSentryUrl() ?? DEFAULT_SENTRY_URL;
-}
-
-/**
  * Apply custom headers to a `Headers` instance, scoped to a request URL.
  *
  * Reads from the env var or SQLite defaults, validates, and sets each header,
- * but ONLY when `requestUrl`'s origin matches the trusted host (active token
- * scope or configured `SENTRY_HOST`, with SaaS equivalence).
+ * but ONLY when `requestUrl`'s origin matches the active token's trust class
+ * (token host + SaaS equivalence + dynamically-discovered regional silos).
  *
  * This is the third-report CVE fix: `getSharedIssue` fetches from a `baseUrl`
  * extracted from user-provided share URLs, and previously would attach
@@ -237,14 +215,24 @@ function getTrustedHostForCustomHeaders(): string {
  * (`applySentryUrlContext`) is the primary fix, but scoping headers at their
  * attachment point defends against any code path that bypasses that guard.
  *
- * No-op when no custom headers are configured, when targeting SaaS, or when
- * the request URL doesn't match the trusted host.
+ * ## Fail-closed: no token → no headers
+ *
+ * When no token is active, there is no established trust anchor. We DO NOT
+ * fall back to `getConfiguredSentryUrl()` because that value can itself be
+ * attacker-controlled (e.g. during the `auth login` bypass flow, the rc URL
+ * has been written to `env.SENTRY_URL` without trust-checking — see
+ * `sentryclirc.ts::applySentryCliRcEnvShim` and the `skipUrlTrustCheck`
+ * option). Trusting the configured URL in that window would let an attacker
+ * establish trust simply by dropping a `.sentryclirc` in a repo the user
+ * cloned. Failing closed means IAP tokens etc. never attach to unauthenticated
+ * requests. This is the correct behavior: `SENTRY_CUSTOM_HEADERS` is an
+ * authenticated-proxy feature, and users who need it configure it alongside a
+ * token (so `getActiveTokenHost()` returns truthy by the time they hit a
+ * custom-header code path).
  *
  * @param headers - The `Headers` instance to modify in-place
  * @param requestUrl - The destination URL (string, URL, or Request) whose
- *   origin will be compared to the trusted host. When this parameter is
- *   omitted (legacy callers), the headers are NOT applied — we fail closed
- *   to avoid unintentional leaks from refactors that forgot to pass the URL.
+ *   origin will be compared to the active token's trust class.
  */
 export function applyCustomHeaders(
   headers: Headers,
@@ -255,21 +243,27 @@ export function applyCustomHeaders(
     return;
   }
 
-  // Prefer the active-token scope (which includes discovered region URLs)
-  // when a token is present — this matches the fetch-layer trust check.
-  // When no token is present, fall back to the configured host (only
-  // relevant for unauthenticated endpoints like shared-issue resolve).
+  // Fail-closed: no token = no trust anchor. See function-level JSDoc for
+  // rationale. This prevents custom headers from leaking during the
+  // `auth login` rc-URL bypass where SENTRY_URL is attacker-controlled.
   const tokenHost = getActiveTokenHost();
-  const trusted = tokenHost
-    ? isRequestOriginTrusted(requestUrl)
-    : isHostTrusted(requestUrl, getTrustedHostForCustomHeaders());
-  if (!trusted) {
+  if (!tokenHost) {
     if (!untrustedDestinationWarningLogged) {
       untrustedDestinationWarningLogged = true;
-      const expected = tokenHost ?? getTrustedHostForCustomHeaders();
       log.warn(
-        `Skipping custom headers for request to untrusted host (expected ${expected}). ` +
-          "If this is legitimate, configure SENTRY_HOST or log in against the intended instance."
+        "Skipping custom headers because no active Sentry credentials are configured. " +
+          "Run 'sentry auth login --url <url>' first."
+      );
+    }
+    return;
+  }
+
+  if (!isRequestOriginTrusted(requestUrl)) {
+    if (!untrustedDestinationWarningLogged) {
+      untrustedDestinationWarningLogged = true;
+      log.warn(
+        `Skipping custom headers for request to untrusted host (expected ${tokenHost}). ` +
+          "If this is legitimate, log in against the intended instance."
       );
     }
     return;
