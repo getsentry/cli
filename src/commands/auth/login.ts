@@ -40,7 +40,7 @@ import { logger } from "../../lib/logger.js";
 import { clearResponseCache } from "../../lib/response-cache.js";
 import { isSaaSTrustOrigin } from "../../lib/sentry-urls.js";
 import {
-  hasLoginTrustAnchor,
+  isLoginTrustAnchorFor,
   normalizeOrigin,
   registerLoginTrustAnchor,
 } from "../../lib/token-host.js";
@@ -103,7 +103,11 @@ function refuseLoginToUntrustedHost(
   flags: LoginFlags,
   effectiveHost: string
 ): void {
-  if (flags.url || isSaaSTrustOrigin(effectiveHost) || hasLoginTrustAnchor()) {
+  if (
+    flags.url ||
+    isSaaSTrustOrigin(effectiveHost) ||
+    isLoginTrustAnchorFor(effectiveHost)
+  ) {
     return;
   }
   const tokenHint = flags.token ? " --token <token>" : "";

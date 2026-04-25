@@ -117,6 +117,16 @@ export function hasLoginTrustAnchor(): boolean {
   return loginTrustAnchor !== undefined;
 }
 
+/**
+ * Whether the current process's login trust anchor matches `host` under the
+ * host-scoping trust model (exact origin or SaaS equivalence). Used by the
+ * login command to verify the anchor was registered for THIS login attempt's
+ * host, not a stale anchor from a prior call in library/test mode.
+ */
+export function isLoginTrustAnchorFor(host: string): boolean {
+  return isHostTrusted(host, loginTrustAnchor);
+}
+
 /** @internal exported for testing */
 export function resetLoginTrustAnchorForTesting(): void {
   loginTrustAnchor = undefined;

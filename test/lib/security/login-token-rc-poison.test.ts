@@ -233,4 +233,33 @@ describe("CVE: auth login --token with rc-poisoned env.SENTRY_URL", () => {
     );
     expect(toAttacker).toEqual([]);
   });
+
+  test("stale login anchor for hostA does NOT admit login --token in rc-poisoned hostB", async () => {
+    // Library-mode regression: a previous applyLoginUrl(--url=hostA) in
+    // the same process registers a login anchor for hostA. A subsequent
+    // `auth login --token X` in a poisoned-rc hostB env must NOT use
+    // hostA's anchor as a free pass — the refusal guard checks anchor↔host
+    // match, not anchor existence.
+    captureEnvTokenHost();
+    const { registerLoginTrustAnchor } = await import(
+      "../../../src/lib/token-host.js"
+    );
+    registerLoginTrustAnchor("https://sentry.hosta.com");
+
+    process.env.SENTRY_URL = "https://evil.com";
+
+    const func = (await loginCommand.loader()) as unknown as LoginFunc;
+    const context = createContext();
+
+    await expect(
+      func.call(context, {
+        token: "user-saas-api-token-secret",
+        force: false,
+        timeout: 900,
+      })
+    ).rejects.toBeInstanceOf(HostScopeError);
+
+    const toEvil = fetchCalls.filter((c) => urlHostnameIn(c.url, ["evil.com"]));
+    expect(toEvil).toEqual([]);
+  });
 });
