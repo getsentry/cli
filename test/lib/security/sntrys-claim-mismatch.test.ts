@@ -65,7 +65,26 @@ describe("CVE defense-in-depth: sntrys_ claim vs request mismatch", () => {
     const { resetEnvTokenHostForTesting } = await import(
       "../../../src/lib/env-token-host.js"
     );
+    const { resetTrustedRegionUrlsForTesting } = await import(
+      "../../../src/lib/token-host.js"
+    );
+    const {
+      resetAuthTokenCache,
+      resetAuthRowCache,
+      resetIdentityFingerprintCache,
+    } = await import("../../../src/lib/db/auth.js");
+    // Clear the GET response cache between tests so a cached 200 from
+    // a prior test's identical URL doesn't short-circuit the fetch
+    // wrapper (which would leave `fetchCalls` empty).
+    const { clearResponseCache } = await import(
+      "../../../src/lib/response-cache.js"
+    );
     resetEnvTokenHostForTesting();
+    resetTrustedRegionUrlsForTesting();
+    resetAuthTokenCache();
+    resetAuthRowCache();
+    resetIdentityFingerprintCache();
+    await clearResponseCache();
 
     fetchCalls = [];
     originalFetch = globalThis.fetch;
@@ -96,7 +115,11 @@ describe("CVE defense-in-depth: sntrys_ claim vs request mismatch", () => {
     const { resetEnvTokenHostForTesting } = await import(
       "../../../src/lib/env-token-host.js"
     );
+    const { resetTrustedRegionUrlsForTesting } = await import(
+      "../../../src/lib/token-host.js"
+    );
     resetEnvTokenHostForTesting();
+    resetTrustedRegionUrlsForTesting();
     globalThis.fetch = originalFetch;
   });
 
@@ -115,11 +138,11 @@ describe("CVE defense-in-depth: sntrys_ claim vs request mismatch", () => {
     captureEnvTokenHost();
 
     // Direct request to sentry.secondhost.com (matches env scope but NOT the claim).
-    const { apiRequest } = await import(
+    const { apiRequestToRegion } = await import(
       "../../../src/lib/api/infrastructure.js"
     );
     await expect(
-      apiRequest("https://sentry.secondhost.com/api/0/organizations/", {
+      apiRequestToRegion("https://sentry.secondhost.com", "/organizations/", {
         method: "GET",
       })
     ).rejects.toThrow(/embedded claim|sentry\.firsthost\.com/i);
@@ -144,13 +167,55 @@ describe("CVE defense-in-depth: sntrys_ claim vs request mismatch", () => {
     captureEnvTokenHost();
 
     // Request to the host the claim agrees with → bearer attaches.
-    const { apiRequest } = await import(
+    const { apiRequestToRegion } = await import(
       "../../../src/lib/api/infrastructure.js"
     );
-    await apiRequest("https://sentry.acme.com/api/0/organizations/", {
+    await apiRequestToRegion("https://sentry.acme.com", "/organizations/", {
       method: "GET",
     });
 
+    expect(fetchCalls).toHaveLength(1);
+    expect(fetchCalls[0]?.auth).toContain("Bearer ");
+  });
+
+  test("self-hosted multi-region: claim check honors region URL extension", async () => {
+    // Regression: previously the claim check used raw `isHostTrusted`,
+    // which only honors exact-origin + SaaS equivalence. For self-hosted
+    // multi-region setups, the claim's url points at the control silo
+    // but fan-out goes to regional silos discovered via
+    // `/users/me/regions/`. The fix uses `isHostTrustedForClaim` which
+    // also consults the region-URL extension.
+    process.env.SENTRY_AUTH_TOKEN = mintSntrysToken({
+      iat: 1_700_000_000,
+      url: "https://sentry.acme.com",
+      org: "x",
+    });
+    process.env.SENTRY_HOST = "https://sentry.acme.com";
+    const { captureEnvTokenHost } = await import(
+      "../../../src/lib/env-token-host.js"
+    );
+    captureEnvTokenHost();
+
+    // Simulate: control silo's /users/me/regions/ told us about a
+    // regional silo at https://us.sentry.acme.com.
+    const { registerTrustedRegionUrls } = await import(
+      "../../../src/lib/token-host.js"
+    );
+    registerTrustedRegionUrls(["https://us.sentry.acme.com"]);
+
+    // Request to the regional silo (NOT the claim's url) must succeed
+    // because the region URL is part of the same trust class.
+    const { apiRequestToRegion } = await import(
+      "../../../src/lib/api/infrastructure.js"
+    );
+    await apiRequestToRegion(
+      "https://us.sentry.acme.com",
+      "/organizations/",
+      { method: "GET" }
+    );
+
+    // Request fired with the bearer token attached. Cleanup of the
+    // in-process region allow-list happens in afterEach.
     expect(fetchCalls).toHaveLength(1);
     expect(fetchCalls[0]?.auth).toContain("Bearer ");
   });
@@ -165,10 +230,10 @@ describe("CVE defense-in-depth: sntrys_ claim vs request mismatch", () => {
     );
     captureEnvTokenHost();
 
-    const { apiRequest } = await import(
+    const { apiRequestToRegion } = await import(
       "../../../src/lib/api/infrastructure.js"
     );
-    await apiRequest("https://sentry.acme.com/api/0/organizations/", {
+    await apiRequestToRegion("https://sentry.acme.com", "/organizations/", {
       method: "GET",
     });
 
@@ -178,10 +243,12 @@ describe("CVE defense-in-depth: sntrys_ claim vs request mismatch", () => {
 });
 
 describe("UX path: env-token-host falls back to sntrys_ claim url", () => {
-  let saved: Record<string, string | undefined>;
+  // These tests check the captureEnvTokenHost snapshot — no fetch
+  // mocking needed.
+  let savedUx: Record<string, string | undefined>;
 
   beforeEach(async () => {
-    saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+    savedUx = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
     for (const k of ENV_KEYS) {
       delete process.env[k];
     }
@@ -193,7 +260,7 @@ describe("UX path: env-token-host falls back to sntrys_ claim url", () => {
 
   afterEach(async () => {
     for (const k of ENV_KEYS) {
-      const v = saved[k];
+      const v = savedUx[k];
       if (v !== undefined) {
         process.env[k] = v;
       } else {

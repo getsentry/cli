@@ -29,7 +29,7 @@ import { withTracingSpan } from "./telemetry.js";
 import { getSntrysClaimUrl } from "./token-claims.js";
 import {
   getActiveTokenHost,
-  isHostTrusted,
+  isHostTrustedForClaim,
   isRequestOriginTrusted,
   normalizeOrigin,
 } from "./token-host.js";
@@ -130,11 +130,17 @@ function prepareHeaders(
   // `isRequestOriginTrusted` check above wouldn't fire because both
   // `auth.host` and the request origin agree — only the claim disagrees.
   //
+  // Use `isHostTrustedForClaim` (NOT raw `isHostTrusted`) so that
+  // self-hosted multi-region setups still work: the claim's url points
+  // at the control silo, but legitimate fan-out requests go to regional
+  // silos that the control silo told us about. Without the region
+  // extension, this check would break those legitimate requests.
+  //
   // The claim is UNSIGNED (see `token-claims.ts` JSDoc), so this is a
   // best-effort hint, not a primary security signal. Fail-open on parse
   // errors (parseSntrysClaim returns undefined → no extra check).
   const claimUrl = getSntrysClaimUrl(token);
-  if (claimUrl && !isHostTrusted(input, claimUrl)) {
+  if (claimUrl && !isHostTrustedForClaim(input, claimUrl)) {
     const requestOrigin = normalizeOrigin(input);
     throw new HostScopeError(
       `Refusing to send credentials to ${requestOrigin ?? "<unknown host>"}: the active token's embedded claim says it was issued by ${claimUrl}, which doesn't match this request's host.\n` +

@@ -278,6 +278,34 @@ export function resetTrustedRegionUrlsForTesting(): void {
  * requests to mismatched hosts. In practice, if there's no token we
  * have no credentials to leak, so the trust check is vacuously true.
  */
+/**
+ * Internal helper: check whether `requestOrigin` is trusted as a
+ * region-URL extension of `anchorHost`.
+ *
+ * Used by both {@link isRequestOriginTrusted} (where the anchor is the
+ * active token's `auth.host`) and {@link isHostTrustedForClaim} (where
+ * the anchor is the unsigned `sntrys_` claim's url).
+ *
+ * The region URLs in the process-local allow-list and the persisted
+ * `org_regions` cache were discovered via authenticated responses from
+ * the control silo. They're part of the same trust class as that silo,
+ * so any anchor that should already trust the silo also trusts those
+ * regions.
+ */
+function isTrustedRegionExtension(requestOrigin: string): boolean {
+  // Process-local allow-list (hot path; populated on region discovery).
+  if (trustedRegionOrigins.has(requestOrigin)) {
+    return true;
+  }
+  // Persisted region cache from previous invocations.
+  for (const regionUrl of getKnownRegionUrls()) {
+    if (normalizeOrigin(regionUrl) === requestOrigin) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function isRequestOriginTrusted(
   requestInput: string | URL | Request | undefined | null
 ): boolean {
@@ -295,19 +323,39 @@ export function isRequestOriginTrusted(
   if (!requestOrigin) {
     return false;
   }
-  // Check process-local allow-list first (hot path; populated on region
-  // discovery).
-  if (trustedRegionOrigins.has(requestOrigin)) {
+  return isTrustedRegionExtension(requestOrigin);
+}
+
+/**
+ * Check whether `requestInput` is trusted to receive credentials for a
+ * `sntrys_` token whose embedded claim's `url` is `claimUrl`.
+ *
+ * Like {@link isRequestOriginTrusted}, but anchors on the (unsigned)
+ * claim url instead of `getActiveTokenHost()`. Honors:
+ *
+ * - Exact origin match (claim says A, request to A → ✓).
+ * - SaaS equivalence (claim says `sentry.io`, request to `us.sentry.io` → ✓).
+ * - Region-URL extension (claim says `sentry.acme.com`, request to a
+ *   regional silo of `sentry.acme.com` discovered via the control silo's
+ *   `/users/me/regions/` → ✓).
+ *
+ * The region extension is what makes this not break self-hosted
+ * multi-region setups when the user has a `sntrys_` token: the claim's
+ * `url` points at the control silo, but fan-out requests legitimately
+ * go to regional silos that the same control silo told us about.
+ */
+export function isHostTrustedForClaim(
+  requestInput: string | URL | Request | undefined | null,
+  claimUrl: string
+): boolean {
+  if (isHostTrusted(requestInput, claimUrl)) {
     return true;
   }
-  // Fall back to persisted region cache for regions discovered in a
-  // previous invocation.
-  for (const regionUrl of getKnownRegionUrls()) {
-    if (normalizeOrigin(regionUrl) === requestOrigin) {
-      return true;
-    }
+  const requestOrigin = normalizeOrigin(requestInput);
+  if (!requestOrigin) {
+    return false;
   }
-  return false;
+  return isTrustedRegionExtension(requestOrigin);
 }
 
 /**
