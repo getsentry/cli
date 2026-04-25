@@ -17,14 +17,21 @@ import { ContextError } from "../../lib/errors.js";
 import { mdKvTable, renderMarkdown } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
-import { injectDirectory } from "../../lib/sourcemap/inject.js";
+import {
+  assertDirectoryReadable,
+  buildEmptyDiscoveryError,
+  diagnoseEmptyDiscovery,
+  discoverFilePairs,
+  injectDirectory,
+} from "../../lib/sourcemap/inject.js";
 
 /** Result type for the upload command. */
 type UploadCommandResult = {
-  /** Organization slug. */
-  org: string;
-  /** Project slug. */
-  project: string;
+  /** Organization slug. Omitted when --allow-empty short-circuits before
+   * org/project resolution. */
+  org?: string;
+  /** Project slug. Omitted in the same short-circuit case. */
+  project?: string;
   /** Release version, if provided. */
   release?: string;
   /** Number of file pairs uploaded. */
@@ -33,11 +40,14 @@ type UploadCommandResult = {
 
 /** Format human-readable output for upload results. */
 function formatUploadResult(data: UploadCommandResult): string {
-  const rows: [string, string][] = [
-    ["Organization", data.org],
-    ["Project", data.project],
-    ["Files uploaded", String(data.filesUploaded)],
-  ];
+  const rows: [string, string][] = [];
+  if (data.org) {
+    rows.push(["Organization", data.org]);
+  }
+  if (data.project) {
+    rows.push(["Project", data.project]);
+  }
+  rows.push(["Files uploaded", String(data.filesUploaded)]);
   if (data.release) {
     rows.push(["Release", data.release]);
   }
@@ -54,10 +64,15 @@ export const uploadCommand = buildCommand({
       "debug-ID-based matching.\n\n" +
       "Automatically injects debug IDs into any files that don't already have them.\n" +
       "Org/project are auto-detected from DSN, env vars, or config defaults.\n\n" +
+      "Exits with an error if zero JS + sourcemap pairs are discovered " +
+      "(typical cause: bundler not emitting .map files). Pass " +
+      "--allow-empty to suppress this check for directories that may " +
+      "legitimately be empty.\n\n" +
       "Usage:\n" +
       "  sentry sourcemap upload ./dist\n" +
       "  sentry sourcemap upload ./dist --release 1.0.0\n" +
-      "  sentry sourcemap upload ./dist --url-prefix '~/static/js/'",
+      "  sentry sourcemap upload ./dist --url-prefix '~/static/js/'\n" +
+      "  sentry sourcemap upload ./maybe-empty --allow-empty",
   },
   output: {
     human: formatUploadResult,
@@ -87,14 +102,50 @@ export const uploadCommand = buildCommand({
         optional: true,
         default: "~/",
       },
+      "allow-empty": {
+        kind: "boolean",
+        brief:
+          "Exit successfully when no JS + sourcemap pairs are found " +
+          "(default: error out to catch silent build misconfigurations)",
+        optional: true,
+        default: false,
+      },
     },
   },
   async *func(
     this: SentryContext,
-    flags: { release?: string; "url-prefix"?: string },
+    flags: {
+      release?: string;
+      "url-prefix"?: string;
+      "allow-empty"?: boolean;
+    },
     dir: string
   ) {
-    // Resolve org/project via the standard cascade
+    // Validate the directory and discover pairs read-only first so we
+    // don't write debug IDs when the upload won't proceed (empty dir,
+    // typoed path, missing credentials).
+    await assertDirectoryReadable(dir);
+    const pairs = await discoverFilePairs(dir);
+
+    if (pairs.length === 0) {
+      if (!flags["allow-empty"]) {
+        const diag = await diagnoseEmptyDiscovery(dir);
+        throw buildEmptyDiscoveryError(dir, diag);
+      }
+      // --allow-empty: nothing to upload, so don't require Sentry
+      // credentials. This makes the flag actually usable in the
+      // library-only / conditional-release-skip cases the docs name.
+      yield new CommandOutput<UploadCommandResult>({
+        release: flags.release,
+        filesUploaded: 0,
+      });
+      return {
+        hint:
+          "No JS + sourcemap pairs found in the target directory. " +
+          "If this is unexpected, check your bundler emits .map files.",
+      };
+    }
+
     const resolved = await resolveOrgAndProject({
       cwd: this.cwd,
       usageHint: USAGE_HINT,
@@ -104,20 +155,7 @@ export const uploadCommand = buildCommand({
     }
     const { org, project } = resolved;
 
-    // Discover and inject debug IDs into JS + sourcemap pairs
     const results = await injectDirectory(dir);
-
-    if (results.length === 0) {
-      yield new CommandOutput<UploadCommandResult>({
-        org,
-        project,
-        release: flags.release,
-        filesUploaded: 0,
-      });
-      return {
-        hint: "No JS + sourcemap pairs found. Run `sentry sourcemap inject` first.",
-      };
-    }
 
     const urlPrefix = flags["url-prefix"] ?? "~/";
 

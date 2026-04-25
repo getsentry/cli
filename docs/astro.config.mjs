@@ -14,9 +14,14 @@ export default defineConfig({
   // Generate sourcemaps for Sentry. "hidden" produces .map files without
   // adding //# sourceMappingURL comments to the output (the debug IDs
   // injected post-build by `sentry sourcemap inject` are used instead).
+  //
+  // Astro 6 / Vite 7 reads `sourcemap` from
+  // `vite.environments.{client,ssr}.build.sourcemap` (Environments API),
+  // not the legacy top-level `vite.build.sourcemap`.
   vite: {
-    build: {
-      sourcemap: "hidden",
+    environments: {
+      client: { build: { sourcemap: "hidden" } },
+      ssr: { build: { sourcemap: "hidden" } },
     },
   },
   integrations: [
