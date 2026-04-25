@@ -468,6 +468,16 @@ export async function clearAuth(): Promise<void> {
   resetAuthTokenCache();
   resetAuthRowCache();
 
+  // Evict in-process trust extensions (region URLs from `getUserRegions`,
+  // login-time trust anchor) that were scoped to the now-cleared identity.
+  // Dynamic import to avoid the auth ↔ token-host cycle.
+  try {
+    const { clearTrustedHostState } = await import("../token-host.js");
+    clearTrustedHostState();
+  } catch {
+    // Non-fatal: token-host may not load in some test paths
+  }
+
   // Dynamic import avoids the auth→response-cache→auth cycle.
   try {
     const { clearResponseCache } = await import("../response-cache.js");

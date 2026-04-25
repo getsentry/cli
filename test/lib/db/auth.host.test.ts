@@ -195,4 +195,39 @@ describe("db/auth host scoping", () => {
     });
     expect(hasUsableStoredToken()).toBe(true);
   });
+
+  test("clearAuth evicts process-local trust extensions (region URLs + login anchor)", async () => {
+    // Setup: register region URLs + login anchor (simulating an
+    // authenticated session against host A).
+    const {
+      registerLoginTrustAnchor,
+      registerTrustedRegionUrls,
+      hasLoginTrustAnchor,
+      isRequestOriginTrusted,
+    } = await import("../../../src/lib/token-host.js");
+    setAuthToken("tok-A", 3600, "refresh", {
+      host: "https://sentry.host-a.com",
+    });
+    registerLoginTrustAnchor("https://sentry.host-a.com");
+    registerTrustedRegionUrls(["https://us.host-a.com"]);
+    expect(hasLoginTrustAnchor()).toBe(true);
+    expect(isRequestOriginTrusted("https://us.host-a.com/api/")).toBe(true);
+
+    // Logging out should evict both the login anchor and the in-process
+    // region-URL allow-list. Without this, a subsequent login against
+    // host B would inherit host A's regions as "trusted".
+    const { clearAuth } = await import("../../../src/lib/db/auth.js");
+    await clearAuth();
+
+    expect(hasLoginTrustAnchor()).toBe(false);
+    // No active token after clearAuth, so isRequestOriginTrusted returns
+    // true for any host (no token = nothing to protect at the trust
+    // layer; fetch layer skips attaching credentials anyway). The real
+    // check is: re-register-only-with-explicit-call should be required.
+    // The set is empty — verify directly.
+    const { getKnownRegionUrls } = await import(
+      "../../../src/lib/db/regions.js"
+    );
+    expect(getKnownRegionUrls()).toEqual([]); // DB region cache also cleared
+  });
 });

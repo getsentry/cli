@@ -272,6 +272,19 @@ describe("applySentryCliRcEnvShim", () => {
     expect(readEnv("SENTRY_URL")).toBe("https://sentry.io");
   });
 
+  test("normalizes bare-hostname rc url before SaaS / scope checks", async () => {
+    // Regression: `url = sentry.io` (no scheme) used to throw inside
+    // `new URL(...)` deep in the SaaS check. The shim now normalizes
+    // the rc url through `normalizeUrl` first so bare hostnames are
+    // accepted as the equivalent `https://sentry.io`.
+    delete process.env.SENTRY_HOST;
+    delete process.env.SENTRY_URL;
+    writeRcFile(testDir, "[defaults]\nurl = sentry.io\n");
+
+    await applySentryCliRcEnvShim(testDir);
+    expect(readEnv("SENTRY_URL")).toBe("https://sentry.io");
+  });
+
   test("throws CliError when non-SaaS rc url does not match active token's scoped host", async () => {
     // Env-token defaults to SaaS (no SENTRY_HOST set at capture time).
     // Any non-SaaS rc url is therefore a mismatch → CliError, env untouched.

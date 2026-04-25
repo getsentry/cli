@@ -19,6 +19,7 @@
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { normalizeUrl } from "./constants.js";
 import { getConfigDir } from "./db/index.js";
 import { getEnv } from "./env.js";
 import { HostScopeError } from "./errors.js";
@@ -345,6 +346,59 @@ export type ApplySentryCliRcEnvShimOptions = {
  * @param cwd - Current working directory for config file lookup
  * @param options - See {@link ApplySentryCliRcEnvShimOptions}
  */
+/**
+ * Apply the rc-sourced url to env, gated by host-scoping trust check.
+ *
+ * Extracted from {@link applySentryCliRcEnvShim} to keep the main
+ * function under the cognitive-complexity limit. See the comment in
+ * the call site for the trust-check rationale.
+ */
+function applyRcUrlIfTrusted(
+  config: SentryCliRcConfig,
+  env: NodeJS.ProcessEnv,
+  options?: ApplySentryCliRcEnvShimOptions
+): void {
+  // Normalize the rc-sourced url BEFORE passing it to URL-parsers like
+  // `isSaaSTrustOrigin`. A user who writes `url = sentry.io` (bare
+  // hostname, no scheme) would otherwise fail `new URL(...)` and the
+  // SaaS bypass / trust check would both reject the entry, breaking
+  // legitimate SaaS rc configs.
+  const normalizedRcUrl = config.url ? normalizeUrl(config.url) : undefined;
+  if (
+    !(normalizedRcUrl && !env.SENTRY_HOST?.trim() && !env.SENTRY_URL?.trim())
+  ) {
+    return;
+  }
+
+  // Host-scoping trust check. `.sentryclirc` files — both repo-local
+  // and global — are untrusted as trust-establishment sources (repos
+  // ship them; CI writes home dirs). A URL in any rc file is honored
+  // only when it matches the active token's scoped host.
+  //
+  // SaaS bypass uses the STRICT `isSaaSTrustOrigin` (requires https +
+  // default port) — matches `isHostTrusted` semantics downstream.
+  //
+  // `skipUrlTrustCheck`: commands that establish or tear down trust
+  // (`auth login`, `auth logout`) bypass this so onboarding from a
+  // poisoned-rc repo isn't chicken-and-egg.
+  if (!(options?.skipUrlTrustCheck || isSaaSTrustOrigin(normalizedRcUrl))) {
+    const tokenHost = getActiveTokenHost();
+    if (!(tokenHost && isHostTrusted(normalizedRcUrl, tokenHost))) {
+      const source = config.sources.url
+        ? `Config at ${config.sources.url}`
+        : `${CONFIG_FILENAME} [defaults] url`;
+      throw new HostScopeError(
+        buildUrlMismatchMessage(source, normalizedRcUrl, tokenHost)
+      );
+    }
+  }
+
+  log.debug(
+    `Setting SENTRY_URL from ${CONFIG_FILENAME} (${config.sources.url})`
+  );
+  env.SENTRY_URL = normalizedRcUrl;
+}
+
 export async function applySentryCliRcEnvShim(
   cwd: string,
   options?: ApplySentryCliRcEnvShimOptions
@@ -365,50 +419,7 @@ export async function applySentryCliRcEnvShim(
     env.SENTRY_AUTH_TOKEN = config.token;
   }
 
-  if (config.url && !env.SENTRY_HOST?.trim() && !env.SENTRY_URL?.trim()) {
-    // Host-scoping trust check (see plan
-    // .opencode/plans/1777023782662-proud-circuit.md). `.sentryclirc` files
-    // — both repo-local and global `~/.sentryclirc` — are untrusted as
-    // trust-establishment sources (repos ship them; CI writes home dirs).
-    // A URL in any rc file is honored only when it matches the active
-    // token's scoped host. Otherwise we refuse: silently routing requests
-    // to a host the credentials don't match either leaks credentials (if
-    // the fetch layer didn't also guard them) or produces confusing 401s
-    // at best. Users who need to trust a new host must run
-    // `sentry auth login --url <url>` explicitly.
-    //
-    // SaaS URLs in rc files are always honored — nothing to leak.
-    //
-    // Bypass (skipUrlTrustCheck): commands that establish or tear down
-    // trust (`auth login`, `auth logout`) must run even when a rc URL
-    // mismatches the current token — otherwise a repo-local rc makes
-    // onboarding to a new self-hosted instance impossible (chicken-and-
-    // egg). The caller (cli.ts) decides when to bypass based on argv.
-    //
-    // SaaS bypass uses the STRICT `isSaaSTrustOrigin` (requires https +
-    // default port). Using the lax `isSentrySaasUrl` here would let a
-    // crafted rc URL like `http://sentry.io` or `https://sentry.io:8443`
-    // skip the primary guard even though the trust-check semantics
-    // (`isHostTrusted` → `isSaaSTrustOrigin`) reject them downstream —
-    // creating inconsistent "primary guard weaker than fetch-layer
-    // guard" behavior.
-    if (!(options?.skipUrlTrustCheck || isSaaSTrustOrigin(config.url))) {
-      const tokenHost = getActiveTokenHost();
-      if (!(tokenHost && isHostTrusted(config.url, tokenHost))) {
-        const source = config.sources.url
-          ? `Config at ${config.sources.url}`
-          : `${CONFIG_FILENAME} [defaults] url`;
-        throw new HostScopeError(
-          buildUrlMismatchMessage(source, config.url, tokenHost)
-        );
-      }
-    }
-
-    log.debug(
-      `Setting SENTRY_URL from ${CONFIG_FILENAME} (${config.sources.url})`
-    );
-    env.SENTRY_URL = config.url;
-  }
+  applyRcUrlIfTrusted(config, env, options);
 }
 
 /**

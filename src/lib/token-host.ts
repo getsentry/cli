@@ -228,6 +228,29 @@ export function registerTrustedRegionUrls(urls: readonly string[]): void {
 }
 
 /**
+ * Clear the process-local region-URL allow-list AND the login-time
+ * trust anchor.
+ *
+ * Called from `clearAuth()` to evict trust-extension state that was
+ * specific to the now-cleared identity. Without this, in long-running
+ * library-mode processes that log out and log back in (against a
+ * potentially different host), regional URLs and the login anchor
+ * from the previous identity would persist into the new session,
+ * silently widening the trust class. The fetch-layer guard would
+ * still reject mismatched requests via `auth.host`, but
+ * `isRequestOriginTrusted` would incorrectly admit a stale region
+ * URL — adding visible noise rather than a security failure, but
+ * worth fixing for clean state semantics.
+ *
+ * Also exposed as `resetTrustedRegionUrlsForTesting` for tests that
+ * want to reset state between cases.
+ */
+export function clearTrustedHostState(): void {
+  trustedRegionOrigins.clear();
+  loginTrustAnchor = undefined;
+}
+
+/**
  * Reset the process-local region-URL allow-list. Tests only.
  * @internal
  */
