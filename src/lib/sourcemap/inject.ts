@@ -115,13 +115,10 @@ async function findCompanionMap(jsPath: string): Promise<string | undefined> {
 const SOURCEMAP_SKIP_DIRS: readonly string[] = [NODE_MODULES_DIRNAME];
 
 /**
- * Discovery pass with no side effects — returns the list of JS +
- * sourcemap pairs without injecting debug IDs. Exposed so the
- * `sentry sourcemap upload` command can run a read-only emptiness
- * check (and emit the bundler-oriented diagnostic) BEFORE calling
- * {@link injectDirectory} — which writes to disk and would otherwise
- * leave partial state when upload subsequently fails on credentials
- * resolution.
+ * Read-only discovery pass — returns the list of JS + sourcemap pairs
+ * without injecting debug IDs. Used as a pre-check by the upload
+ * command so the directory isn't mutated when the upload won't
+ * proceed (empty dir, missing credentials, etc.).
  */
 export async function discoverFilePairs(
   dir: string,
@@ -150,20 +147,9 @@ export async function discoverFilePairs(
 }
 
 /**
- * Validate that `dir` is an existing directory readable for sourcemap
- * discovery, and classify what's inside for diagnostic purposes when the
- * scan returns zero pairs. Used by `sentry sourcemap inject` /
- * `sourcemap upload` to produce actionable error messages instead of the
- * generic "no pairs found" that hid the getsentry/cli docs-site silent
- * failure mode (Astro 6 stopped emitting `.map` files; CI stayed green).
- *
- * Separate from `injectDirectory` so:
- * - The upload command can stat the directory BEFORE resolving
- *   org/project, producing the bundler-oriented error even when the
- *   user has no Sentry credentials configured.
- * - The diagnostic walk is skipped on the happy path (pairs > 0).
- *
- * @throws ValidationError if `dir` doesn't exist or isn't a directory.
+ * Throw {@link ValidationError} if `dir` doesn't exist or isn't a
+ * readable directory. Distinct messages per failure mode so the user
+ * gets a useful pointer instead of "no sourcemaps found".
  */
 export async function assertDirectoryReadable(dir: string): Promise<void> {
   try {
@@ -185,7 +171,6 @@ export async function assertDirectoryReadable(dir: string): Promise<void> {
         "directory"
       );
     }
-    // EACCES, EPERM, etc. — surface the underlying system error.
     const msg = err instanceof Error ? err.message : String(err);
     throw new ValidationError(
       `Cannot read directory '${dir}': ${msg}`,
@@ -195,36 +180,39 @@ export async function assertDirectoryReadable(dir: string): Promise<void> {
 }
 
 /**
- * Diagnostic counts for a directory that produced zero JS + sourcemap
- * pairs. Used to tailor the error message to the specific failure mode
- * the user is hitting (see callers in `src/commands/sourcemap/`).
+ * Counts of JS and `.map` files in a directory, used by
+ * {@link buildEmptyDiscoveryError} to tailor the zero-pairs error.
  */
 export type DiscoveryDiagnostic = {
-  /** Total `.js`/`.cjs`/`.mjs` files encountered. */
   jsFiles: number;
-  /** Total `.map` files encountered. */
   mapFiles: number;
 };
 
 /**
- * Scan a directory for JS and map files separately to diagnose why the
- * primary pair-discovery returned zero results. Cheap (same walker,
- * single pass); only called on the error path.
+ * Count JS and `.map` files in a single walker pass. Only called on
+ * the zero-pairs error path.
  */
 export async function diagnoseEmptyDiscovery(
   dir: string,
   options: InjectDirectoryOptions = {}
 ): Promise<DiscoveryDiagnostic> {
-  const jsExtensions = options.extensions
-    ? new Set(options.extensions.map((e) => (e.startsWith(".") ? e : `.${e}`)))
-    : DEFAULT_EXTENSIONS;
+  // Build one set covering JS extensions + `.map` so the walker visits
+  // both in a single pass.
+  const extensions = new Set<string>(DEFAULT_EXTENSIONS);
+  if (options.extensions) {
+    extensions.clear();
+    for (const e of options.extensions) {
+      extensions.add(e.startsWith(".") ? e : `.${e}`);
+    }
+  }
+  extensions.add(".map");
+
   const absDir = resolvePath(dir);
   let jsFiles = 0;
   let mapFiles = 0;
   for await (const entry of walkFiles({
     cwd: absDir,
-    // Pass both sets of extensions in one walk to avoid a second traversal.
-    extensions: new Set([...jsExtensions, ".map"]),
+    extensions,
     alwaysSkipDirs: SOURCEMAP_SKIP_DIRS,
     hidden: false,
     respectGitignore: false,
@@ -240,9 +228,8 @@ export async function diagnoseEmptyDiscovery(
 }
 
 /**
- * Build an actionable error message for the zero-pairs case, tailored to
- * which side of the JS/map pairing is missing. Shared between the inject
- * and upload commands so the wording stays consistent.
+ * Build an actionable error for the zero-pairs case, tailored to
+ * which side of the JS/map pairing is missing.
  */
 export function buildEmptyDiscoveryError(
   dir: string,
@@ -274,9 +261,6 @@ export function buildEmptyDiscoveryError(
       "directory"
     );
   }
-  // Both sides have files but no pairs matched by basename — e.g.
-  // hash-renamed JS paired with a stable-name map, or maps in a sibling
-  // `maps/` dir.
   return new ValidationError(
     `Found ${jsFiles} JS and ${mapFiles} .map file(s) in '${dir}' but ` +
       "no JS file has a matching `<name>.map` companion. Check that your " +
