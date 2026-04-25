@@ -267,6 +267,20 @@ export async function apiRequestToRegion<T>(
     } catch {
       detail = response.statusText;
     }
+    // Attach a small allowlisted subset of response headers to the Sentry
+    // event as context. This lets us distinguish Sentry-app 4xx/5xx (which
+    // ship a `{"detail": "..."}` JSON body and `content-type: application/json`)
+    // from CDN / WAF / edge 4xx (Cloudflare / proxy) that return empty or HTML
+    // bodies — a gap that previously made empty-`detail` events like CLI-1AZ
+    // impossible to triage without user-side repro.
+    Sentry.setContext("api_response_headers", {
+      "content-type": response.headers.get("content-type"),
+      "content-length": response.headers.get("content-length"),
+      server: response.headers.get("server"),
+      "cf-ray": response.headers.get("cf-ray"),
+      "x-sentry-error": response.headers.get("x-sentry-error"),
+      "www-authenticate": response.headers.get("www-authenticate"),
+    });
     throw new ApiError(
       `API request failed: ${response.status} ${response.statusText}`,
       response.status,
