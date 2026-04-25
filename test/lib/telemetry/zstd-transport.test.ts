@@ -289,24 +289,34 @@ describe("makeCompressedTransport", () => {
     expect(response).toEqual({});
   });
 
-  test("proxy configured: falls back to SDK's makeNodeTransport", () => {
+  test("proxy configured: falls back to SDK's makeNodeTransport (no zstd applied)", async () => {
     const savedProxy = process.env.https_proxy;
     process.env.https_proxy = "http://proxy.internal:3128";
     try {
-      // No httpModule override: we can't observe the returned transport's
-      // internals, but we can prove the path differs from the zstd one
-      // by checking that no zstd-specific header is attached when a
-      // proxy is present. The test below (normalizeBody + maybeCompress)
-      // exercise the zstd codepath directly.
+      // The SDK's makeNodeTransport also honors options.httpModule, so
+      // we can route both paths through our mock and tell them apart by
+      // the Content-Encoding header on the wire: the zstd path sets it
+      // for any body > 1 KiB, while the SDK default only sets gzip for
+      // bodies > 32 KiB. A 4 KiB body therefore distinguishes the two
+      // — zstd path stamps "zstd", SDK path stamps nothing.
+      const { httpModule, captured } = buildMockHttpModule({
+        statusCode: 200,
+        headers: {},
+      });
       const transport = makeCompressedTransport({
         ...BASE_OPTIONS,
-        // makeNodeTransport requires httpModule too; with the default it
-        // will try to create an Agent. Pass a dummy module to avoid any
-        // real network I/O when the returned transport is constructed.
+        httpModule,
       });
-      // Sanity: we got *some* transport object back with send/flush.
-      expect(typeof transport.send).toBe("function");
-      expect(typeof transport.flush).toBe("function");
+      const envelope: any = createEnvelope({} as any, [
+        [{ type: "event" } as any, { data: "x".repeat(4096) } as any],
+      ]);
+      await transport.send(envelope);
+
+      const headers = captured.options.headers as Record<string, string>;
+      expect(headers["content-encoding"]).toBeUndefined();
+      // And the wire body is the raw envelope (not zstd-compressed).
+      const wire = Buffer.concat(captured.chunks);
+      expect(wire.toString("utf-8")).toContain('"type":"event"');
     } finally {
       if (savedProxy === undefined) {
         delete process.env.https_proxy;

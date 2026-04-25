@@ -124,12 +124,31 @@ export function makeCompressedTransport(
   });
   const httpModule = options.httpModule ?? nativeHttpModule;
   const encoding: SelectedEncoding = hasZstdSupport() ? "zstd" : "gzip";
-  const executor = createCompressingExecutor({
-    options,
-    httpModule,
-    agent,
-    encoding,
-  });
+  const hostnameIsIPv6 = urlSegments.hostname.startsWith("[");
+  const hostname = hostnameIsIPv6
+    ? urlSegments.hostname.slice(1, -1)
+    : urlSegments.hostname;
+  const path = `${urlSegments.pathname}${urlSegments.search}`;
+
+  const executor: TransportRequestExecutor = (request: TransportRequest) =>
+    new Promise<TransportMakeRequestResponse>((resolve, reject) => {
+      suppressTracing(() => {
+        performRequest({
+          request,
+          options,
+          httpModule,
+          agent,
+          encoding,
+          hostname,
+          path,
+          port: urlSegments.port,
+          protocol: urlSegments.protocol,
+        })
+          .then(resolve)
+          .catch(reject);
+      });
+    });
+
   return createTransport(options, executor);
 }
 
@@ -163,42 +182,6 @@ export function shouldFallbackToDefault(
     return false;
   }
   return !isNoProxyExempt(url);
-}
-
-/**
- * @internal Exported for tests. Builds the bare HTTP executor without
- * any of `makeCompressedTransport`'s URL / proxy / agent plumbing — the
- * caller supplies a fully resolved {@link http.Agent} and the {@link
- * http.request}-compatible module to use.
- */
-export function createCompressingExecutor(args: {
-  options: NodeTransportOptions;
-  httpModule: NonNullable<NodeTransportOptions["httpModule"]>;
-  agent: http.Agent;
-  encoding: SelectedEncoding;
-}): TransportRequestExecutor {
-  const { options, httpModule, agent, encoding } = args;
-  const { hostname, pathname, port, protocol, search } = new URL(options.url);
-  const hostnameIsIPv6 = hostname.startsWith("[");
-
-  return (request: TransportRequest) =>
-    new Promise<TransportMakeRequestResponse>((resolve, reject) => {
-      suppressTracing(() => {
-        performRequest({
-          request,
-          options,
-          httpModule,
-          agent,
-          encoding,
-          hostname: hostnameIsIPv6 ? hostname.slice(1, -1) : hostname,
-          path: `${pathname}${search}`,
-          port,
-          protocol,
-        })
-          .then(resolve)
-          .catch(reject);
-      });
-    });
 }
 
 type PerformRequestArgs = {

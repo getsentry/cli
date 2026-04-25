@@ -5,17 +5,9 @@
  * transport at it, and verifies the wire-level behavior: the request
  * body is zstd-compressed, the `Content-Encoding` header is correct,
  * and the body decompresses back to a valid envelope.
- *
- * Uses `useTestConfigDir()` for DB isolation (see AGENTS.md).
  */
 
-import { afterAll, describe, expect, test } from "bun:test";
-
-/** No-op for SDK callbacks that require a function but return nothing meaningful. */
-function noop(): void {
-  // intentionally empty
-}
-
+import { afterEach, describe, expect, test } from "bun:test";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createEnvelope } from "@sentry/core";
@@ -23,12 +15,23 @@ import {
   hasZstdSupport,
   makeCompressedTransport,
 } from "../../../src/lib/telemetry/zstd-transport.js";
-import { useTestConfigDir } from "../../helpers.js";
+
+/** No-op for SDK callbacks that require a function but return nothing meaningful. */
+function noop(): void {
+  // intentionally empty
+}
 
 type CapturedRequest = {
   headers: IncomingMessage["headers"];
   body: Buffer;
 };
+
+/**
+ * Track every server we start so they can be closed in teardown.
+ * Without this, a `let server` shared across tests is overwritten by
+ * the second test before the first one is closed — silent socket leak.
+ */
+const startedServers: Server[] = [];
 
 function startMockIngest(
   responder: (req: IncomingMessage) => {
@@ -36,7 +39,6 @@ function startMockIngest(
     headers?: Record<string, string | string[]>;
   }
 ): Promise<{
-  server: Server;
   url: string;
   captures: CapturedRequest[];
 }> {
@@ -51,12 +53,12 @@ function startMockIngest(
       res.end();
     });
   });
+  startedServers.push(server);
 
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       const addr = server.address() as AddressInfo;
       resolve({
-        server,
         url: `http://127.0.0.1:${addr.port}/api/0/envelope/`,
         captures,
       });
@@ -64,13 +66,18 @@ function startMockIngest(
   });
 }
 
-useTestConfigDir("zstd-transport-e2e-");
-
 describe("makeCompressedTransport (e2e)", () => {
-  let server: Server | undefined;
-
-  afterAll(() => {
-    server?.close();
+  afterEach(async () => {
+    // Close every server started in this test, in parallel. Lets the
+    // event loop drain naturally instead of relying on process exit.
+    await Promise.all(
+      startedServers.splice(0).map(
+        (s) =>
+          new Promise<void>((resolve) => {
+            s.close(() => resolve());
+          })
+      )
+    );
   });
 
   test("sends zstd-encoded envelope; server decompresses back to original", async () => {
@@ -78,14 +85,9 @@ describe("makeCompressedTransport (e2e)", () => {
       return;
     }
 
-    const {
-      server: srv,
-      url,
-      captures,
-    } = await startMockIngest(() => ({
+    const { url, captures } = await startMockIngest(() => ({
       statusCode: 200,
     }));
-    server = srv;
 
     const transport = makeCompressedTransport({
       url,
@@ -115,18 +117,13 @@ describe("makeCompressedTransport (e2e)", () => {
   });
 
   test("rate-limit headers flow back into createTransport wrapper", async () => {
-    const {
-      server: srv,
-      url,
-      captures,
-    } = await startMockIngest(() => ({
+    const { url, captures } = await startMockIngest(() => ({
       statusCode: 429,
       headers: {
         "retry-after": "60",
         "x-sentry-rate-limits": "60:error:organization",
       },
     }));
-    server = srv;
 
     const transport = makeCompressedTransport({
       url,
