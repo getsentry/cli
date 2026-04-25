@@ -31,7 +31,7 @@ import { ApiError } from "../errors.js";
 import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
 import { getSdkConfig } from "../sentry-client.js";
-import { ZipWriter } from "../sourcemap/zip.js";
+import { type ZipCompression, ZipWriter } from "../sourcemap/zip.js";
 import { apiRequestToRegion } from "./infrastructure.js";
 
 const gzipAsync = promisify(gzipCb);
@@ -288,12 +288,22 @@ async function uploadChunk(params: {
  *
  * @param outputPath - Where to write the ZIP file
  * @param files - Source files and sourcemaps to include
- * @param options - Bundle metadata (org, project, release)
+ * @param options.org / project / release - Bundle metadata
+ * @param options.compression - ZIP entry compression. Use `"stored"`
+ *   when the wire layer will compress the chunks (zstd or gzip);
+ *   compressing twice wastes CPU and barely helps wire size.
+ *   Defaults to `"deflate"` so callers without a wire codec still
+ *   ship reasonably-sized payloads.
  */
 export async function buildArtifactBundle(
   outputPath: string,
   files: ArtifactFile[],
-  options: { org: string; project: string; release?: string }
+  options: {
+    org: string;
+    project: string;
+    release?: string;
+    compression?: ZipCompression;
+  }
 ): Promise<void> {
   // Build manifest.json
   const filesManifest: Record<
@@ -329,7 +339,9 @@ export async function buildArtifactBundle(
   });
 
   // Stream ZIP entries to disk
-  const zip = await ZipWriter.create(outputPath);
+  const zip = await ZipWriter.create(outputPath, {
+    compression: options.compression,
+  });
   try {
     await zip.addEntry("manifest.json", Buffer.from(manifest, "utf-8"));
 
@@ -396,16 +408,31 @@ export async function uploadSourcemaps(options: UploadOptions): Promise<void> {
   // Step 1: Get chunk upload configuration
   const serverOptions = await getChunkUploadOptions(org);
 
+  // Pick the wire codec up-front so the ZIP can skip its own
+  // compression pass when the wire layer will handle it. Re-compressing
+  // an already-DEFLATE'd ZIP with zstd/gzip burns CPU for ~0% wire
+  // savings; STORED + zstd saves both CPU and a few percent wire bytes.
+  // Without a wire codec (kill-switch / unsupported codecs) we keep
+  // DEFLATE so the ZIP itself stays small.
+  const encoding = pickUploadEncoding(serverOptions.compression);
+  const zipCompression: ZipCompression = encoding ? "stored" : "deflate";
+
   // Step 2: Build artifact bundle ZIP to a temp file, then upload
   const tmpZipPath = join(tmpdir(), `sentry-artifact-bundle-${Date.now()}.zip`);
   try {
-    await buildArtifactBundle(tmpZipPath, files, { org, project, release });
+    await buildArtifactBundle(tmpZipPath, files, {
+      org,
+      project,
+      release,
+      compression: zipCompression,
+    });
     await uploadArtifactBundle({
       tmpZipPath,
       org,
       project,
       release,
       serverOptions,
+      encoding,
     });
   } finally {
     // Always clean up the temp file
@@ -428,8 +455,9 @@ async function uploadArtifactBundle(opts: {
   project: string;
   release: string | undefined;
   serverOptions: ChunkServerOptions;
+  encoding: UploadEncoding | undefined;
 }): Promise<void> {
-  const { tmpZipPath, org, project, release, serverOptions } = opts;
+  const { tmpZipPath, org, project, release, serverOptions, encoding } = opts;
   // Step 3: Split into chunks, hash each chunk + compute overall checksum
   const { chunks, overallChecksum } = await hashChunks(
     tmpZipPath,
@@ -477,7 +505,6 @@ async function uploadArtifactBundle(opts: {
   const missingChunks = chunks.filter((c) => missingSet.has(c.sha1));
 
   if (missingChunks.length > 0) {
-    const encoding = pickUploadEncoding(serverOptions.compression);
     const limit = pLimit(serverOptions.concurrency);
     // Use the CLI's authenticated fetch for chunk uploads
     const { fetch: authFetch } = getSdkConfig(regionUrl);
