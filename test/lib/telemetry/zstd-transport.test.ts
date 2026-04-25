@@ -429,7 +429,6 @@ describe("maybeCompress", () => {
     const result = await maybeCompress(buf, "zstd");
     expect(result.encodingApplied).toBe("zstd");
     expect(result.payload.length).toBeLessThan(buf.length);
-    expect(result.compressMs).toBeGreaterThanOrEqual(0);
     const decompressed = await Bun.zstdDecompress(result.payload);
     expect(decompressed.toString("utf-8")).toBe("x".repeat(4096));
   });
@@ -439,7 +438,6 @@ describe("maybeCompress", () => {
     const result = await maybeCompress(buf, "zstd");
     expect(result.encodingApplied).toBe("none");
     expect(result.payload).toBe(buf);
-    expect(result.compressMs).toBe(0);
   });
 
   test("gzip + body above 32 KiB threshold → gzip-compressed", async () => {

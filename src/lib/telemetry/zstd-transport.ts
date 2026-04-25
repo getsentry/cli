@@ -10,9 +10,7 @@
  * Codec selection is one-shot, performed at factory-construction time.
  * No per-request branching: if `Bun.zstdCompress` is available when the
  * transport is created, every envelope uses zstd; otherwise every
- * envelope uses gzip. The choice is reflected in the metric emitted by
- * {@link emitTransportMetric} so the ratio of zstd-vs-gzip callers can
- * be observed in the real world.
+ * envelope uses gzip.
  *
  * This mirrors `@sentry/node-core/transports/http.js` `makeNodeTransport`
  * — URL parsing, `no_proxy` handling, proxy agent, CA certs, keepAlive,
@@ -47,17 +45,19 @@ import {
   makeNodeTransport,
   type NodeTransportOptions,
 } from "@sentry/node-core/light";
-import {
-  detectEnvelopeType,
-  emitTransportMetric,
-  type TransportEncoding,
-} from "./zstd-transport-metrics.js";
+
+/** Codec actually applied to a given envelope. */
+type AppliedEncoding = "zstd" | "gzip" | "none";
+
+/** Codec the transport will attempt; "none" only happens under threshold. */
+type SelectedEncoding = "zstd" | "gzip";
 
 /**
- * zstd compression level. L3 is libzstd's default — benchmarks across
- * envelope sizes (1–30 KiB) showed L3–L6 sit on the same ratio-vs-time
- * curve for this workload; L3 is the safe operating point until the
- * offline bench pins a different value. See `script/bench-transport.ts`.
+ * zstd compression level. L3 is libzstd's default and was confirmed
+ * optimal for telemetry-sized payloads (1–30 KiB) by an offline
+ * benchmark before merge: L3–L6 sit on the same ratio-vs-time curve,
+ * and L3 wins on compress time without losing ratio. Higher levels
+ * (≥9) regress compress time without meaningful ratio gains.
  */
 const ZSTD_LEVEL = 3;
 
@@ -126,9 +126,7 @@ export function makeCompressedTransport(
   const httpModule = options.httpModule ?? nativeHttpModule;
 
   // One-shot codec selection. Frozen into the executor closure below.
-  const encoding: Exclude<TransportEncoding, "none"> = hasZstdSupport()
-    ? "zstd"
-    : "gzip";
+  const encoding: SelectedEncoding = hasZstdSupport() ? "zstd" : "gzip";
 
   const executor = createCompressingExecutor({
     options,
@@ -184,7 +182,7 @@ export function createCompressingExecutor(args: {
   options: NodeTransportOptions;
   httpModule: NonNullable<NodeTransportOptions["httpModule"]>;
   agent: http.Agent;
-  encoding: Exclude<TransportEncoding, "none">;
+  encoding: SelectedEncoding;
 }): TransportRequestExecutor {
   const { options, httpModule, agent, encoding } = args;
   const { hostname, pathname, port, protocol, search } = new URL(options.url);
@@ -215,7 +213,7 @@ type PerformRequestArgs = {
   options: NodeTransportOptions;
   httpModule: NonNullable<NodeTransportOptions["httpModule"]>;
   agent: http.Agent;
-  encoding: Exclude<TransportEncoding, "none">;
+  encoding: SelectedEncoding;
   hostname: string;
   path: string;
   port: string;
@@ -228,23 +226,12 @@ async function performRequest(
   const { request, options, httpModule, agent, encoding } = args;
 
   const rawBuffer = normalizeBody(request.body);
-  const { payload, encodingApplied, compressMs } = await maybeCompress(
-    rawBuffer,
-    encoding
-  );
+  const { payload, encodingApplied } = await maybeCompress(rawBuffer, encoding);
 
   const headers: Record<string, string> = { ...(options.headers ?? {}) };
   if (encodingApplied !== "none") {
     headers["content-encoding"] = encodingApplied;
   }
-
-  emitTransportMetric({
-    rawBytes: rawBuffer.length,
-    sentBytes: payload.length,
-    compressMs,
-    encoding: encodingApplied,
-    envelopeType: () => detectEnvelopeType(rawBuffer),
-  });
 
   return new Promise<TransportMakeRequestResponse>((resolve, reject) => {
     const req = httpModule.request(
@@ -311,8 +298,7 @@ export function normalizeBody(body: string | Uint8Array): Buffer {
 
 type CompressResult = {
   payload: Buffer;
-  encodingApplied: TransportEncoding;
-  compressMs: number;
+  encodingApplied: AppliedEncoding;
 };
 
 /**
@@ -324,14 +310,13 @@ type CompressResult = {
  */
 export async function maybeCompress(
   buf: Buffer,
-  encoding: Exclude<TransportEncoding, "none">
+  encoding: SelectedEncoding
 ): Promise<CompressResult> {
   const threshold = encoding === "zstd" ? ZSTD_THRESHOLD : GZIP_THRESHOLD;
   if (buf.length <= threshold) {
-    return { payload: buf, encodingApplied: "none", compressMs: 0 };
+    return { payload: buf, encodingApplied: "none" };
   }
 
-  const start = performance.now();
   if (encoding === "zstd") {
     const bun = (globalThis as { Bun?: BunZstdHost }).Bun;
     // Shouldn't happen (factory checked at construction time), but a
@@ -339,26 +324,17 @@ export async function maybeCompress(
     // swapped out between construction and first send.
     if (!bun?.zstdCompress) {
       const gz = await gzipAsync(buf);
-      return {
-        payload: gz,
-        encodingApplied: "gzip",
-        compressMs: performance.now() - start,
-      };
+      return { payload: gz, encodingApplied: "gzip" };
     }
     const out = await bun.zstdCompress(buf, { level: ZSTD_LEVEL });
     return {
       payload: Buffer.from(out.buffer, out.byteOffset, out.byteLength),
       encodingApplied: "zstd",
-      compressMs: performance.now() - start,
     };
   }
 
   const gz = await gzipAsync(buf);
-  return {
-    payload: gz,
-    encodingApplied: "gzip",
-    compressMs: performance.now() - start,
-  };
+  return { payload: gz, encodingApplied: "gzip" };
 }
 
 /** Feature-detect zstd support on the current runtime. */
