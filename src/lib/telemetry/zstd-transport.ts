@@ -92,21 +92,21 @@ type BunZstdHost = {
 
 const gzipAsync = promisify(gzipCb);
 
-/** Factory — see module docs. */
+/**
+ * Factory for the SDK's `Sentry.init({ transport })` option.
+ *
+ * Falls back to `makeNodeTransport` when a proxy is configured (the SDK
+ * owns CONNECT tunneling) or when the DSN URL is unparseable. Otherwise
+ * picks a one-shot codec — zstd if available, gzip otherwise — and
+ * wires up an executor.
+ */
 export function makeCompressedTransport(
   options: NodeTransportOptions
 ): Transport {
-  // When a proxy is configured (via options.proxy or http_proxy /
-  // https_proxy env vars and not overridden by no_proxy), fall back to
-  // the SDK's default makeNodeTransport — it owns the CONNECT-tunneling
-  // HttpsProxyAgent. Proxy users thus continue to get gzip (the SDK
-  // default), but correctness wins over micro-optimizing an edge case.
   let urlSegments: URL;
   try {
     urlSegments = new URL(options.url);
   } catch {
-    // Mirror makeNodeTransport: return a no-op transport on bad URL so
-    // the SDK doesn't throw at init time on misconfigured DSNs.
     return createTransport(options, () => Promise.resolve({}));
   }
 
@@ -122,19 +122,14 @@ export function makeCompressedTransport(
     maxSockets: 30,
     timeout: 2000,
   });
-
   const httpModule = options.httpModule ?? nativeHttpModule;
-
-  // One-shot codec selection. Frozen into the executor closure below.
   const encoding: SelectedEncoding = hasZstdSupport() ? "zstd" : "gzip";
-
   const executor = createCompressingExecutor({
     options,
     httpModule,
     agent,
     encoding,
   });
-
   return createTransport(options, executor);
 }
 
@@ -162,9 +157,7 @@ export function shouldFallbackToDefault(
   const httpProxy = process.env.http_proxy ?? process.env.HTTP_PROXY;
   const httpsProxy = process.env.https_proxy ?? process.env.HTTPS_PROXY;
   const envProxy = isHttps ? httpsProxy : httpProxy;
-  // SDK precedent: HTTPS connections fall back to http_proxy as a last
-  // resort. We mirror that so a user configured for the SDK's default
-  // transport gets identical proxy semantics here.
+  // SDK precedent: HTTPS falls back to http_proxy as a last resort.
   const proxy = options.proxy || envProxy || httpProxy;
   if (!proxy) {
     return false;
@@ -246,17 +239,12 @@ async function performRequest(
         ca: options.caCerts,
       },
       (res) => {
-        res.on("data", () => {
-          // Drain socket
-        });
-        res.on("end", () => {
-          // Drain socket
-        });
+        // Drain the response body
+        res.on("data", drain);
+        res.on("end", drain);
         res.setEncoding("utf8");
-
         const retryAfterHeader = res.headers["retry-after"] ?? null;
         const rateLimitsHeader = res.headers["x-sentry-rate-limits"] ?? null;
-
         resolve({
           statusCode: res.statusCode,
           headers: {
@@ -270,18 +258,19 @@ async function performRequest(
         });
       }
     );
-
     req.on("error", reject);
-    // Single-shot write. `payload` is already a complete Buffer in
-    // memory (compressed or not), so piping a fresh Readable through
-    // avoids the SDK's stream-gzip dance without changing the wire
-    // behavior — `http.ClientRequest` still sees a body it can send.
     Readable.from(payload).pipe(req);
   });
 }
 
+/** No-op used to drain HTTP response bodies. */
+function drain(): void {
+  // intentionally empty
+}
+
 /**
- * Coerce `string | Uint8Array` into a single contiguous Buffer.
+ * Coerce `string | Uint8Array` into a contiguous Buffer (zero-copy for
+ * Uint8Array; UTF-8 encoded for strings).
  *
  * @internal Exported for tests.
  */
@@ -289,10 +278,6 @@ export function normalizeBody(body: string | Uint8Array): Buffer {
   if (typeof body === "string") {
     return Buffer.from(body, "utf-8");
   }
-  // Buffer.from(view) copies; but Buffer.from(view.buffer, byteOffset,
-  // byteLength) is zero-copy and gives us a Buffer that aliases the
-  // original bytes — exactly what we want before handing off to the
-  // compression worker.
   return Buffer.from(body.buffer, body.byteOffset, body.byteLength);
 }
 
@@ -318,10 +303,9 @@ export async function maybeCompress(
   }
 
   if (encoding === "zstd") {
+    // Belt-and-braces — `Bun` may have been swapped out between
+    // construction and first send. Fall through to gzip if so.
     const bun = (globalThis as { Bun?: BunZstdHost }).Bun;
-    // Shouldn't happen (factory checked at construction time), but a
-    // belt-and-braces fallback to gzip keeps us correct if `Bun` is
-    // swapped out between construction and first send.
     if (!bun?.zstdCompress) {
       const gz = await gzipAsync(buf);
       return { payload: gz, encodingApplied: "gzip" };
