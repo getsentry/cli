@@ -1,29 +1,11 @@
 /**
  * Defense-in-depth: `sntrys_` token claim vs request-origin mismatch.
  *
- * The `sntrys_` org-auth-token format embeds an unsigned `url` claim
- * (see `src/lib/token-claims.ts`). When a token's claim and the request
- * origin disagree, the fetch-layer guard refuses to attach the token —
- * even if the more general host-scoping check (against `auth.host` /
- * env-token-snapshot) would pass.
- *
- * The realistic case this defends:
- *
- * - User has accounts on instances A and B (e.g. consultant working on
- *   two customers' Sentry deployments).
- * - User has a token issued by A (claim says `url: A`).
- * - User runs the CLI in a context routed to B (e.g. a `.sentryclirc`
- *   in customer-B's repo says `url = B`, and the user has previously
- *   logged in against B so `auth.host` agrees with B).
- * - Without claim check: the bearer token from A would be sent to B
- *   because `auth.host` matches the request origin. Token leaks to B.
- * - With claim check: claim says A, request goes to B → guard fires
- *   before the token is attached.
- *
- * The claim is unsigned plaintext base64, so this catches HONEST
- * misconfigurations more than malicious attacks. A real attacker can
- * forge the claim. See `src/lib/token-claims.ts` JSDoc for the trust
- * contract.
+ * The fetch-layer guard refuses to attach a `sntrys_` token when its
+ * embedded `url` claim disagrees with the request origin. Defends users
+ * with access to multiple Sentry instances against routing one
+ * instance's token to another. Claim is unsigned (see token-claims.ts),
+ * so this catches honest misconfigurations more than malicious attacks.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";

@@ -108,10 +108,8 @@ function prepareHeaders(
   token: string
 ): Headers {
   // Host-scoping guard (defense in depth). Primary rejection happens at the
-  // URL-arg / rc-shim entry points, but any future code path that writes
-  // SENTRY_HOST/SENTRY_URL without going through those guards is still caught
-  // here: we refuse to attach `Authorization` to a request whose origin
-  // isn't part of the active token's trust class. See token-host.ts.
+  // URL-arg / rc-shim entry points; this catches any code path that mutated
+  // SENTRY_HOST/SENTRY_URL without going through those guards.
   if (!isRequestOriginTrusted(input)) {
     const requestOrigin = normalizeOrigin(input);
     const tokenHost = getActiveTokenHost();
@@ -122,23 +120,10 @@ function prepareHeaders(
     );
   }
 
-  // Belt-and-suspenders: if the bearer token is a `sntrys_` org-auth-token
-  // with a parseable `url` claim, verify the request origin matches the
-  // claim. This catches the (rare) case where a user has access to multiple
-  // Sentry instances and the stored `auth.host` ends up pointing at one
-  // instance while the token's claim points at another. The primary
-  // `isRequestOriginTrusted` check above wouldn't fire because both
-  // `auth.host` and the request origin agree — only the claim disagrees.
-  //
-  // Use `isHostTrustedForClaim` (NOT raw `isHostTrusted`) so that
-  // self-hosted multi-region setups still work: the claim's url points
-  // at the control silo, but legitimate fan-out requests go to regional
-  // silos that the control silo told us about. Without the region
-  // extension, this check would break those legitimate requests.
-  //
-  // The claim is UNSIGNED (see `token-claims.ts` JSDoc), so this is a
-  // best-effort hint, not a primary security signal. Fail-open on parse
-  // errors (parseSntrysClaim returns undefined → no extra check).
+  // sntrys_ claim check — defense-in-depth for users with access to
+  // multiple Sentry instances. The claim is unsigned (see token-claims.ts);
+  // fail-open on parse errors. Uses isHostTrustedForClaim so multi-region
+  // fan-out via the control silo's region URLs still works.
   const claimUrl = getSntrysClaimUrl(token);
   if (claimUrl && !isHostTrustedForClaim(input, claimUrl)) {
     const requestOrigin = normalizeOrigin(input);
@@ -172,9 +157,8 @@ function prepareHeaders(
     headers.set("baggage", traceData.baggage);
   }
 
-  // Inject user-configured custom headers for self-hosted proxies (IAP, mTLS,
-  // etc.). Scoped to the request URL so IAP tokens don't leak to an attacker's
-  // host even on unauthenticated endpoints (see CVE in plan).
+  // Inject user-configured custom headers for self-hosted proxies (IAP,
+  // mTLS, etc.) — scoped to the request URL.
   applyCustomHeaders(headers, input);
 
   return headers;

@@ -74,14 +74,8 @@ type LoginFlags = {
 };
 
 /**
- * Normalize and validate the `--url` flag value.
- *
- * Accepts bare hostnames (`sentry.example.com`) and full URLs
- * (`https://sentry.example.com`). Returns the normalized origin
- * (`https://sentry.example.com`). Throws {@link ValidationError} on
- * unparseable input.
- *
- * Exported indirectly via the command's `parse` callback.
+ * Normalize and validate the `--url` flag value. Accepts bare hostnames
+ * and full URLs; returns the normalized origin.
  */
 /** @internal exported for testing */
 export function parseLoginUrl(raw: string): string {
@@ -97,35 +91,18 @@ export function parseLoginUrl(raw: string): string {
 }
 
 /**
- * CVE defense: refuse `auth login` when the effective host was sourced
- * from an untrusted channel.
+ * Refuse `auth login` when the effective host was sourced from an untrusted
+ * channel (i.e. the rc-shim bypass wrote env.SENTRY_URL but no trust anchor
+ * was registered). Without this, `sentry auth login --token X` in a
+ * poisoned-rc repo would send the user's API token to the attacker.
  *
- * Context: `applySentryCliRcEnvShim` admits `auth login` with
- * `skipUrlTrustCheck: true` so users can onboard to new instances from
- * inside a repo that ships a `.sentryclirc` url (chicken-and-egg
- * otherwise). That bypass lets the shim write `env.SENTRY_URL` from an
- * untrusted rc file. If the user then runs `sentry auth login --token X`
- * (no `--url`), `applyLoginUrl(undefined)` would return the rc-sourced
- * host and we'd send the user-supplied API token — or initiate an
- * OAuth device flow — against the attacker.
- *
- * `applyLoginUrl` only registers a login trust anchor when the host
- * comes from a trusted source (explicit `--url` flag or boot-time env
- * snapshot, captured BEFORE the rc shim runs). So "anchor not
- * registered" is the load-bearing signal that the host is untrusted.
- *
- * Skipped for:
- * - SaaS hosts (no credential leak possible on SaaS routing).
- * - Explicit `--url` (user's argv, always trusted).
+ * `applyLoginUrl` only registers an anchor when the host comes from a
+ * trusted source, so "no anchor" is the load-bearing signal here.
  */
 function refuseLoginToUntrustedHost(
   flags: LoginFlags,
   effectiveHost: string
 ): void {
-  // Use STRICT `isSaaSTrustOrigin` (https + default port) — consistent
-  // with `applySentryUrlContext`, `applySentryCliRcEnvShim`, and
-  // `isHostTrusted`. A crafted rc with `http://sentry.io` must NOT
-  // bypass this guard just because the hostname is SaaS.
   if (flags.url || isSaaSTrustOrigin(effectiveHost) || hasLoginTrustAnchor()) {
     return;
   }
@@ -139,26 +116,15 @@ function refuseLoginToUntrustedHost(
 }
 
 /**
- * Persist the `--url` host as the stored default so subsequent CLI
- * invocations route to the correct host without requiring the user to
- * also export `SENTRY_HOST`. SaaS is the implicit default (not stored
- * — users don't need it, and storing it would shadow future SaaS-default
- * changes). Only persist when `--url` was explicitly passed: inheriting
- * from env/rc already persists through those channels, so writing here
- * would be redundant at best and conflict-prone at worst with `sentry
- * cli defaults url`.
- *
- * Non-fatal on DB failure — the stored token's `host` column is the
- * authoritative source of trust; default URL is a routing convenience.
+ * Persist a non-SaaS `--url` host as the stored default so subsequent CLI
+ * invocations route correctly without requiring `SENTRY_HOST`. Only writes
+ * when `--url` was explicitly passed; env/rc-sourced values persist
+ * through those channels. Non-fatal on DB failure.
  */
 function persistLoginUrlAsDefault(
   flagUrl: string | undefined,
   effectiveHost: string
 ): void {
-  // Use STRICT `isSaaSTrustOrigin` — `http://sentry.io` and
-  // `https://sentry.io:8443` should NOT be treated as SaaS for
-  // persistence purposes (they'd break routing for subsequent
-  // commands). Consistent with the trust-check sites.
   if (!flagUrl || isSaaSTrustOrigin(effectiveHost)) {
     return;
   }
@@ -172,30 +138,14 @@ function persistLoginUrlAsDefault(
 }
 
 /**
- * When `--url` is passed, set `env.SENTRY_HOST` and `env.SENTRY_URL` so the
- * device-flow and token-refresh endpoints hit the requested host.
+ * When `--url` is passed, set `env.SENTRY_HOST`/`env.SENTRY_URL` so the
+ * device flow and token refresh hit the requested host. Returns the
+ * effective host so callers can record it with {@link setAuthToken}.
  *
- * Returns the effective host (normalized origin) so callers can record it
- * with {@link setAuthToken}.
- *
- * Also registers the effective host as the login-time trust anchor so
- * `applyCustomHeaders` attaches `SENTRY_CUSTOM_HEADERS` during the OAuth
- * device flow — required for onboarding to IAP-protected self-hosted
- * instances. Registration is CONDITIONAL on the source of the host being
- * trustworthy:
- *
- * - `--url <url>` (explicit flag) → always trusted (user's shell argv)
- * - `SENTRY_HOST`/`SENTRY_URL` env at BOOT → trusted (user's shell export,
- *   captured before the `.sentryclirc` shim could mutate env). Source:
- *   {@link getEnvTokenHost} snapshot.
- * - Current `env.SENTRY_HOST`/`SENTRY_URL` post-shim → NOT trusted.
- *   `.sentryclirc` writes happen through `applySentryCliRcEnvShim` with
- *   `skipUrlTrustCheck: true` on login — we must not promote that
- *   rc-sourced value to a trust anchor.
- *
- * The function still resolves the effective host from current env for
- * the OAuth flow's routing, but only registers the anchor when the host
- * matches either the explicit flag or the boot-time env snapshot.
+ * Also registers a login trust anchor (consumed by {@link applyCustomHeaders}
+ * for IAP onboarding) — but only when the host comes from a trusted source:
+ * explicit `--url` argv, or env vars matching the boot-time snapshot. An
+ * rc-shim-poisoned env value (post-boot mutation) is NOT registered.
  */
 export function applyLoginUrl(url: string | undefined): string {
   const env = getEnv();
@@ -208,20 +158,14 @@ export function applyLoginUrl(url: string | undefined): string {
     effectiveHost = url;
     registerAnchor = true;
   } else {
-    // Preserve existing env / .sentryclirc resolution. Normalize through
-    // `normalizeUrl` first so bare hostnames like `SENTRY_HOST=sentry.acme.com`
-    // (a documented shell-export pattern) get the `https://` prefix before
-    // `normalizeOrigin` tries to parse them — otherwise `new URL()` rejects
-    // the bare hostname and we silently fall back to SaaS.
+    // Bare hostnames need https:// prefix before normalizeOrigin's URL parse.
     const raw = env.SENTRY_HOST || env.SENTRY_URL;
     const prefixed = normalizeUrl(raw);
     effectiveHost =
       (prefixed && normalizeOrigin(prefixed)) ?? DEFAULT_SENTRY_URL;
-    // Only register the anchor if the resolved host matches the
-    // boot-time env snapshot. If they differ, it means the rc shim wrote
-    // env.SENTRY_URL after boot — NOT a trusted source.
-    const bootHost = getEnvTokenHost();
-    registerAnchor = effectiveHost === bootHost;
+    // Trust the env value only if it matches the boot snapshot — i.e. the
+    // user's shell, not a post-boot rc-shim write.
+    registerAnchor = effectiveHost === getEnvTokenHost();
   }
 
   if (registerAnchor) {
@@ -328,17 +272,9 @@ export const loginCommand = buildCommand({
   },
   output: { human: formatLoginResult },
   async *func(this: SentryContext, flags: LoginFlags) {
-    // Apply `--url` first so all downstream auth code (device flow, token
-    // refresh, token validation) targets the requested instance. The
-    // effective host is also passed to `setAuthToken` so the stored token
-    // is scoped correctly.
-    //
-    // IMPORTANT: do NOT persist the default URL yet — the user can still
-    // abort via the re-auth prompt (handleExistingAuth) or the OAuth
-    // device-flow timeout. Persisting early would leave the default URL
-    // pointing at the new host while the old token (scoped to the old
-    // host) remains valid, breaking every subsequent command. Only
-    // persist after the login has actually succeeded.
+    // Apply --url first so the device flow / token refresh target the
+    // requested instance. Default URL persistence is deferred until login
+    // succeeds — see persistLoginUrlAsDefault calls below.
     const effectiveHost = applyLoginUrl(flags.url);
     refuseLoginToUntrustedHost(flags, effectiveHost);
 

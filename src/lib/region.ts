@@ -87,12 +87,10 @@ async function resolveOrgRegionUncached(orgSlug: string): Promise<string> {
 
     const regionUrl = response.data?.links?.regionUrl ?? baseUrl;
 
-    // Cache for future use
+    // Cache for future use. setOrgRegion also extends the in-process
+    // trust class so the subsequent request to this region passes the
+    // fetch-layer guard without needing a separate registration call.
     setOrgRegion(orgSlug, regionUrl);
-    // Extend the in-process trust class to include this region so the
-    // subsequent request uses it without tripping the fetch-layer guard.
-    const { registerTrustedRegionUrls } = await import("./token-host.js");
-    registerTrustedRegionUrls([regionUrl]);
 
     return regionUrl;
   });

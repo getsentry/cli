@@ -97,10 +97,8 @@ async function fetchWithConnectionError(
   url: string,
   init: RequestInit
 ): Promise<Response> {
-  // Inject custom headers for self-hosted proxies (IAP, mTLS, etc.).
-  // `applyCustomHeaders` is URL-scoped — headers only attach when `url`
-  // matches the trusted host, so IAP tokens can't leak to an attacker's
-  // host even on unauthenticated OAuth endpoints.
+  // Inject custom headers for self-hosted proxies (IAP, mTLS, etc.) —
+  // URL-scoped so they don't leak to untrusted hosts.
   const merged = new Headers(init.headers);
   applyCustomHeaders(merged, url);
   const effectiveInit: RequestInit = { ...init, headers: merged };
@@ -126,13 +124,9 @@ async function fetchWithConnectionError(
 }
 
 /**
- * Guard the OAuth token refresh path: refuse to POST a refresh token to a
- * host that doesn't match the active token's scope.
- *
- * Defense-in-depth — the URL-arg / rc-shim entry points already reject
- * mismatched hosts before we get here. This is the belt-and-suspenders layer
- * that catches any future code path that writes SENTRY_HOST/SENTRY_URL
- * without going through the entry-point guards.
+ * Refuse to POST a refresh token to a host that doesn't match the active
+ * token's scope. Defense-in-depth for the rare case where SENTRY_HOST/URL
+ * was mutated without going through the URL-arg / rc-shim guards.
  */
 function assertRefreshHostTrusted(): void {
   const refreshUrl = getSentryUrl();
@@ -348,12 +342,9 @@ export async function performDeviceFlow(
 }
 
 /**
- * Complete the OAuth flow by storing the token in the database.
- *
- * The token is scoped to the host the OAuth flow targeted (read via
- * {@link getSentryUrl}, which reflects `SENTRY_HOST`/`SENTRY_URL` at this
- * moment — set by `auth login --url` or user env). Scoping the token at
- * issuance time is what makes the fetch-layer trust check work.
+ * Complete the OAuth flow by storing the token in the database. The token
+ * is scoped to {@link getSentryUrl} so the fetch-layer trust check refuses
+ * to attach it to other hosts.
  *
  * @param tokenResponse - The token response from performDeviceFlow
  */
@@ -391,8 +382,6 @@ export function refreshAccessToken(
     );
   }
 
-  // Defense-in-depth host scoping: refuse to send the refresh token to a
-  // host the active token isn't scoped for. See assertRefreshHostTrusted.
   assertRefreshHostTrusted();
 
   return withHttpSpan("POST", "/oauth/token/", async () => {

@@ -16,25 +16,10 @@ import { CliError } from "./lib/errors.js";
 import { applySentryCliRcEnvShim } from "./lib/sentryclirc.js";
 
 /**
- * Preload project context: walk up from `cwd` once, finding both the
- * project root (for DSN detection) and `.sentryclirc` config (for
- * org/project defaults and env shim). Caches both results so later calls
- * to `findProjectRoot` and `loadSentryCliRc` are cache hits.
- */
-/**
- * Extract positional argv tokens, skipping any `--flag[=value]` or `-f` tokens
- * (and their companion value when present) so command detection is robust
- * against global flags that may precede or interleave with the command path.
- *
- * Heuristic rules (conservative — false positives on unknown flags lead to
- * extra positionals being kept, which is safe for our matching):
- * - `--flag=value`, `--flag`, `-f` → skip the flag itself.
- * - `--` is a positional-only separator; everything after it is positional.
- * - For bare `--flag` / `-f` (no `=`), we can't reliably know whether the
- *   next token is a value or a positional — we DON'T consume it, erring on
- *   the side of finding the command. Our matching still works because the
- *   relevant commands (`auth login` / `auth logout`) don't use a dangling
- *   flag value that looks like `auth`.
+ * Extract positional argv tokens, skipping `--flag[=value]` and short `-f`
+ * tokens. Conservative — bare `--flag` (no `=`) doesn't consume the next
+ * token, which keeps it as a positional. That's safe for our matching since
+ * `auth login`/`auth logout` don't take a flag-value that looks like `auth`.
  */
 /** @internal exported for testing */
 export function extractPositionals(args: readonly string[]): string[] {
@@ -58,21 +43,13 @@ export function extractPositionals(args: readonly string[]): string[] {
 }
 
 /**
- * Detect whether the invocation is an `auth login` / `auth logout` command
- * so the `.sentryclirc` URL-trust check can be bypassed. These are the
- * only commands that establish or tear down host trust, and they must
- * run even when the user is inside a repo whose `.sentryclirc` mismatches
- * their current token — otherwise onboarding to a new self-hosted
- * instance from such a repo becomes impossible (chicken-and-egg).
+ * Detect `auth login` / `auth logout` so the `.sentryclirc` URL-trust check
+ * can be bypassed. These are the only commands that establish or tear down
+ * host trust, and they must run even when a repo-local `.sentryclirc`
+ * mismatches the current token (chicken-and-egg otherwise).
  *
- * Positive-match only: unknown commands, `auth status`/`whoami`/etc. all
- * keep the guard enabled (they need credentials scoped to the active
- * host). Also matches top-level aliases if any exist (currently just
- * `auth login`/`auth logout` — expand if the route map grows).
- *
- * Robust against leading/trailing global flags via {@link extractPositionals}
- * so that `sentry --foo auth login` (or any other arrangement) still
- * triggers the bypass.
+ * Robust against global flags via {@link extractPositionals} so e.g.
+ * `sentry --foo auth login` still matches.
  */
 /** @internal exported for testing */
 export function isTrustChangingCommand(args: readonly string[]): boolean {
@@ -84,17 +61,19 @@ export function isTrustChangingCommand(args: readonly string[]): boolean {
   return sub === "login" || sub === "logout";
 }
 
+/**
+ * Preload project context: walk up from `cwd` once, finding both the
+ * project root (for DSN detection) and `.sentryclirc` config (for
+ * org/project defaults and env shim). Caches both results so later calls
+ * to `findProjectRoot` and `loadSentryCliRc` are cache hits.
+ */
 async function preloadProjectContext(
   cwd: string,
   args: readonly string[]
 ): Promise<void> {
-  // CRITICAL: Snapshot the env-token host BEFORE anything that could mutate
-  // `env.SENTRY_HOST`/`env.SENTRY_URL` (the .sentryclirc shim or the default
-  // URL fallback below). This pins the trust scope for env-var tokens like
-  // SENTRY_AUTH_TOKEN to whatever the user's shell actually set — not to a
-  // value injected by a repo-local config file. See
-  // src/lib/env-token-host.ts and the plan at
-  // .opencode/plans/1777023782662-proud-circuit.md for rationale.
+  // Snapshot env-token host BEFORE anything mutates env.SENTRY_HOST/URL
+  // (the .sentryclirc shim or the default-URL fallback below). Pins the
+  // env-token's trust scope to the user's shell, not a repo-local file.
   captureEnvTokenHost();
 
   // Dynamic import keeps the heavy DSN/DB modules out of the completion fast-path
@@ -109,12 +88,10 @@ async function preloadProjectContext(
     reason: result.reason,
   });
 
-  // Apply .sentryclirc env shim (token, URL) — sentryclirc cache was
-  // populated as a side effect of findProjectRoot's walk.
-  //
-  // Skip URL trust check for `auth login` / `auth logout` so users can
-  // onboard to / switch away from a new host from inside a repo that
-  // ships its own `.sentryclirc` with a different URL.
+  // Apply .sentryclirc env shim (token, URL) — cache was populated as a
+  // side effect of findProjectRoot's walk. Bypass the URL trust check for
+  // auth login/logout so onboarding from a repo with a different rc URL
+  // isn't chicken-and-egg.
   await applySentryCliRcEnvShim(cwd, {
     skipUrlTrustCheck: isTrustChangingCommand(args),
   });
@@ -550,17 +527,9 @@ export async function startCli(): Promise<void> {
 
   // Walk up from CWD once to find project root AND .sentryclirc config.
   // Caches both so later findProjectRoot / loadSentryCliRc calls are hits.
-  //
   // Most failures here are non-fatal (unreadable rc file, missing project
-  // markers) — the CLI can still work via env vars and DSN detection.
-  //
-  // BUT: `applySentryCliRcEnvShim` (invoked by preloadProjectContext) throws
-  // `CliError` when a `.sentryclirc` URL doesn't match the active token's
-  // scoped host — this is an explicit, actionable security-fix rejection
-  // that MUST be surfaced to the user. Silently swallowing it would leave
-  // the user running commands with either the wrong routing or confused by
-  // silently-ignored config. Let CliError propagate to the top-level
-  // handler which formats it and exits non-zero.
+  // markers), but `CliError` from the rc shim's host-scoping check is an
+  // actionable rejection that must surface to the user.
   try {
     await preloadProjectContext(process.cwd(), args);
   } catch (err) {
@@ -569,7 +538,7 @@ export async function startCli(): Promise<void> {
       process.exitCode = err.exitCode;
       return;
     }
-    // Gracefully degrade: project context is optional for CLI operation.
+    // Gracefully degrade: project context is optional.
   }
 
   return runCli(args).catch((err) => {

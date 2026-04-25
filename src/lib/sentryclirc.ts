@@ -317,52 +317,28 @@ export function loadSentryCliRc(cwd: string): Promise<SentryCliRcConfig> {
   return promise;
 }
 
-/**
- * Options for {@link applySentryCliRcEnvShim}.
- *
- * @property skipUrlTrustCheck - Bypass the host-scoping trust check on the
- *   rc URL. Used for trust-establishment/teardown commands (`auth login`,
- *   `auth logout`) which must run regardless of whether a repo-local or
- *   home-dir rc file mismatches the current token's host — otherwise
- *   onboarding to a new self-hosted instance from inside a repo that
- *   ships its own `.sentryclirc` becomes impossible. The rc URL is still
- *   applied (so login targets the rc-specified instance if no `--url` is
- *   passed), but the mismatch throw is skipped.
- */
 export type ApplySentryCliRcEnvShimOptions = {
+  /**
+   * Bypass the host-scoping trust check on the rc URL. Used for `auth
+   * login` / `auth logout` so onboarding from a repo with a different
+   * rc URL isn't chicken-and-egg. The rc URL is still applied to env.
+   */
   skipUrlTrustCheck?: boolean;
 };
 
 /**
- * Apply env shim for `.sentryclirc` token and URL fields.
- *
- * Maps config file values to environment variables so the existing
- * auth and URL resolution code picks them up without changes:
- * - `[auth] token` → `SENTRY_AUTH_TOKEN` (if neither `SENTRY_AUTH_TOKEN` nor `SENTRY_TOKEN` is set)
- * - `[defaults] url` → `SENTRY_URL` (if both `SENTRY_HOST` and `SENTRY_URL` are unset)
- *
- * Call this once, early in the CLI boot process (before any auth or API calls).
- *
- * @param cwd - Current working directory for config file lookup
- * @param options - See {@link ApplySentryCliRcEnvShimOptions}
- */
-/**
- * Apply the rc-sourced url to env, gated by host-scoping trust check.
- *
- * Extracted from {@link applySentryCliRcEnvShim} to keep the main
- * function under the cognitive-complexity limit. See the comment in
- * the call site for the trust-check rationale.
+ * Apply the rc-sourced url to env, gated by the host-scoping trust check.
+ * `.sentryclirc` files (repo-local or global) are untrusted as trust
+ * sources — the URL is honored only when it matches the active token's
+ * scoped host (or under `skipUrlTrustCheck` for auth login/logout).
  */
 function applyRcUrlIfTrusted(
   config: SentryCliRcConfig,
   env: NodeJS.ProcessEnv,
   options?: ApplySentryCliRcEnvShimOptions
 ): void {
-  // Normalize the rc-sourced url BEFORE passing it to URL-parsers like
-  // `isSaaSTrustOrigin`. A user who writes `url = sentry.io` (bare
-  // hostname, no scheme) would otherwise fail `new URL(...)` and the
-  // SaaS bypass / trust check would both reject the entry, breaking
-  // legitimate SaaS rc configs.
+  // Normalize bare hostnames (`url = sentry.io`) before passing through
+  // URL parsers — otherwise `new URL(...)` would reject them.
   const normalizedRcUrl = config.url ? normalizeUrl(config.url) : undefined;
   if (
     !(normalizedRcUrl && !env.SENTRY_HOST?.trim() && !env.SENTRY_URL?.trim())
@@ -370,17 +346,9 @@ function applyRcUrlIfTrusted(
     return;
   }
 
-  // Host-scoping trust check. `.sentryclirc` files — both repo-local
-  // and global — are untrusted as trust-establishment sources (repos
-  // ship them; CI writes home dirs). A URL in any rc file is honored
-  // only when it matches the active token's scoped host.
-  //
-  // SaaS bypass uses the STRICT `isSaaSTrustOrigin` (requires https +
-  // default port) — matches `isHostTrusted` semantics downstream.
-  //
-  // `skipUrlTrustCheck`: commands that establish or tear down trust
-  // (`auth login`, `auth logout`) bypass this so onboarding from a
-  // poisoned-rc repo isn't chicken-and-egg.
+  // SaaS bypass uses the strict trust-origin check (https + default port)
+  // to match isHostTrusted semantics downstream — `http://sentry.io` and
+  // `:8443` must NOT be silently treated as SaaS.
   if (!(options?.skipUrlTrustCheck || isSaaSTrustOrigin(normalizedRcUrl))) {
     const tokenHost = getActiveTokenHost();
     if (!(tokenHost && isHostTrusted(normalizedRcUrl, tokenHost))) {
@@ -399,6 +367,16 @@ function applyRcUrlIfTrusted(
   env.SENTRY_URL = normalizedRcUrl;
 }
 
+/**
+ * Apply env shim for `.sentryclirc` token and URL fields.
+ *
+ * Maps config file values to environment variables so the existing
+ * auth and URL resolution code picks them up without changes:
+ * - `[auth] token` → `SENTRY_AUTH_TOKEN` (if neither `SENTRY_AUTH_TOKEN` nor `SENTRY_TOKEN` is set)
+ * - `[defaults] url` → `SENTRY_URL` (if both `SENTRY_HOST` and `SENTRY_URL` are unset)
+ *
+ * Call this once, early in the CLI boot process (before any auth or API calls).
+ */
 export async function applySentryCliRcEnvShim(
   cwd: string,
   options?: ApplySentryCliRcEnvShimOptions

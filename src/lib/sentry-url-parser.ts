@@ -212,38 +212,24 @@ export function parseSentryUrl(input: string): ParsedSentryUrl | null {
 }
 
 /**
- * Configure `SENTRY_URL` for self-hosted instances detected from a parsed URL.
+ * Configure `SENTRY_URL` for self-hosted instances detected from a parsed
+ * URL, with a host-scoping trust check.
  *
- * Host-scoping trust check (see plan
- * `.opencode/plans/1777023782662-proud-circuit.md`):
+ * SaaS URLs proceed (credentials scoped to SaaS are valid for any sentry.io
+ * subdomain). Non-SaaS URLs require the active token's host to match —
+ * otherwise throws `HostScopeError`. Only `sentry auth login --url <url>`
+ * establishes trust for a new non-SaaS host.
  *
- * - SaaS URLs (`*.sentry.io`) always proceed. Credentials scoped to SaaS are
- *   valid for any regional silo or org subdomain, so there's nothing to leak.
- * - Non-SaaS URLs require the trust check: if any active token exists, its
- *   scoped host MUST match `baseUrl` (with SaaS equivalence for tokens that
- *   happen to be SaaS, though non-SaaS baseUrl never matches SaaS tokens).
- *   Mismatch or no-token-at-all → throw `CliError`. Only `sentry auth login
- *   --url <url>` establishes trust for a new host.
- *
- * This closes the reported CVE class where a URL argument like
- * `sentry issue view https://evil.com/...` would unconditionally set
- * `env.SENTRY_HOST`, causing the subsequent authenticated request to leak
- * the bearer (and potentially refresh) token to the attacker.
- *
- * @param baseUrl - The scheme + host extracted from the URL (e.g., "https://sentry.example.com")
- * @throws {CliError} When `baseUrl` is non-SaaS and doesn't match the active
- *   token's scoped host, or when no token is stored/configured and the URL
- *   is non-SaaS.
+ * @param baseUrl - The scheme + host extracted from the URL
+ * @throws {HostScopeError} On non-SaaS URL that doesn't match the token
  */
 export function applySentryUrlContext(baseUrl: string): void {
   const env = getEnv();
-  // SaaS trust fast-path uses the STRICT check (https + default port).
-  // A crafted `http://sentry.io/...` or `https://sentry.io:8443/...` must
-  // NOT be silently treated as SaaS and routed without the trust check —
-  // matches the `isHostTrusted` semantics downstream.
+  // Strict SaaS check (https + default port) matches isHostTrusted
+  // semantics downstream — `http://sentry.io` and `:8443` must not bypass
+  // the trust check.
   if (isSaaSTrustOrigin(baseUrl)) {
     // Clear any self-hosted URL so API calls fall back to default SaaS routing.
-    // Without this, a stale SENTRY_HOST/SENTRY_URL would route SaaS requests to the wrong host.
     // biome-ignore lint/performance/noDelete: env registry requires delete to truly unset; assignment coerces to string in Node.js
     delete env.SENTRY_HOST;
     // biome-ignore lint/performance/noDelete: env registry requires delete to truly unset; assignment coerces to string in Node.js
@@ -251,10 +237,6 @@ export function applySentryUrlContext(baseUrl: string): void {
     return;
   }
 
-  // Not a strict-SaaS origin — enforce host-scoping. This catches:
-  //   - Non-SaaS hostnames (`sentry.example.com`)
-  //   - "SaaS-looking" hostnames with non-default scheme/port
-  //     (`http://sentry.io`, `https://sentry.io:8443`)
   const tokenHost = getActiveTokenHost();
   if (!(tokenHost && isHostTrusted(baseUrl, tokenHost))) {
     throw new HostScopeError(
@@ -268,13 +250,7 @@ export function applySentryUrlContext(baseUrl: string): void {
 
 /**
  * Build the standard "host mismatch" error message used by
- * {@link applySentryUrlContext} and (re-exported for) the `.sentryclirc` shim.
- *
- * @param source - Short human-readable description of where the URL came from
- *   (e.g., `"URL argument"`, `"Config at /path/to/.sentryclirc"`).
- * @param baseUrl - The URL that doesn't match the active token.
- * @param tokenHost - The active token's scoped host, or `undefined` when no
- *   token exists (the "no token" case needs a different action hint).
+ * {@link applySentryUrlContext} and the `.sentryclirc` shim.
  */
 export function buildUrlMismatchMessage(
   source: string,

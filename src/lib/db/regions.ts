@@ -10,11 +10,95 @@
  * look up by `org_id = '1081365'` → get the slug).
  */
 
+import { normalizeOrigin } from "../sentry-urls.js";
 import { recordCacheHit } from "../telemetry.js";
 import { getDatabase } from "./index.js";
 import { runUpsert } from "./utils.js";
 
 const TABLE = "org_regions";
+
+/**
+ * Process-local trust extension: origins that were vouched for by the
+ * active token's issuing host (via `/users/me/regions/` responses or
+ * `org_regions` table entries from prior invocations). Used by the
+ * fetch-layer trust check in `token-host.ts` to admit requests to
+ * regional silos that share the token's trust class.
+ *
+ * Lazy-seeded from the persisted table on first read so that on cold
+ * start (with cached orgs from a previous CLI invocation) we don't
+ * re-fetch regions just to extend trust.
+ */
+const trustedRegionOrigins = new Set<string>();
+let trustedRegionOriginsSeeded = false;
+
+function seedTrustedRegionOriginsIfNeeded(): void {
+  if (trustedRegionOriginsSeeded) {
+    return;
+  }
+  trustedRegionOriginsSeeded = true;
+  try {
+    const db = getDatabase();
+    const rows = db
+      .query(`SELECT DISTINCT region_url FROM ${TABLE}`)
+      .all() as Pick<OrgRegionRow, "region_url">[];
+    for (const row of rows) {
+      const origin = normalizeOrigin(row.region_url);
+      if (origin) {
+        trustedRegionOrigins.add(origin);
+      }
+    }
+  } catch {
+    // No DB / no table yet — first-run callers will populate via
+    // setOrgRegion(s) or registerTrustedRegionUrls.
+  }
+}
+
+/**
+ * Register region URLs the control silo just told us about. Used to
+ * extend the trust scope BEFORE region URLs are persisted (the fan-out
+ * step needs trust to be admitted before we have results to write).
+ *
+ * Also called automatically by {@link setOrgRegion} and
+ * {@link setOrgRegions} so persistent and in-process state stay in sync.
+ */
+export function registerTrustedRegionUrls(urls: readonly string[]): void {
+  for (const url of urls) {
+    const origin = normalizeOrigin(url);
+    if (origin) {
+      trustedRegionOrigins.add(origin);
+    }
+  }
+}
+
+/**
+ * Whether `origin` was vouched for by the active token's issuing host.
+ * Lazy-seeds from `org_regions` on first call.
+ */
+export function isTrustedRegionOrigin(origin: string): boolean {
+  seedTrustedRegionOriginsIfNeeded();
+  return trustedRegionOrigins.has(origin);
+}
+
+/**
+ * Clear the in-process trust extension. Called from `clearAuth()` to
+ * evict region extensions tied to the now-cleared identity.
+ *
+ * Does NOT clear the login trust anchor in `token-host.ts` — that
+ * represents the current `auth login` command's intent and is needed
+ * after clearAuth runs during re-auth.
+ */
+export function clearTrustedHostState(): void {
+  trustedRegionOrigins.clear();
+  // Force re-seed on next read in case the caller deletes table rows
+  // (clearOrgRegions) between this clear and the next access.
+  trustedRegionOriginsSeeded = false;
+}
+
+/** @internal exported for testing */
+export function resetTrustedRegionUrlsForTesting(): void {
+  trustedRegionOrigins.clear();
+  trustedRegionOriginsSeeded = false;
+}
 
 /** When true, getCachedOrganizations() returns empty (forces API fetch). */
 let orgCacheDisabled = false;
@@ -105,6 +189,7 @@ export function setOrgRegion(orgSlug: string, regionUrl: string): void {
     { org_slug: orgSlug, region_url: regionUrl, updated_at: now },
     ["org_slug"]
   );
+  registerTrustedRegionUrls([regionUrl]);
 }
 
 /**
@@ -143,6 +228,7 @@ export function setOrgRegions(entries: OrgRegionEntry[]): void {
       runUpsert(db, TABLE, row, ["org_slug"]);
     }
   })();
+  registerTrustedRegionUrls(entries.map((e) => e.regionUrl));
 }
 
 /**
@@ -152,6 +238,7 @@ export function setOrgRegions(entries: OrgRegionEntry[]): void {
 export function clearOrgRegions(): void {
   const db = getDatabase();
   db.query(`DELETE FROM ${TABLE}`).run();
+  clearTrustedHostState();
 }
 
 /**
@@ -167,37 +254,6 @@ export function getAllOrgRegions(): Map<string, string> {
     .all() as Pick<OrgRegionRow, "org_slug" | "region_url">[];
 
   return new Map(rows.map((row) => [row.org_slug, row.region_url]));
-}
-
-/**
- * Get the distinct region URLs currently cached.
- *
- * Used by the host-scoping trust check to extend trust from the
- * control silo (where the token was issued) to regional silos that
- * the control silo itself directed us to. In production on SaaS,
- * these are `us.sentry.io`/`de.sentry.io` etc. (already covered by
- * the SaaS-equivalence class). For self-hosted, these are typically
- * empty. For test harnesses that use separate localhost ports per
- * region, these extend the trust class to the regional mock servers
- * that the control silo's mock response pointed at.
- *
- * This is safe because the region URLs in this table are populated
- * exclusively from authenticated responses from the token's issuing
- * host — the control silo is already the trust anchor, and it's
- * telling us which regions are part of the same account.
- *
- * Returns an empty array if the DB isn't available (no-throw contract).
- */
-export function getKnownRegionUrls(): string[] {
-  try {
-    const db = getDatabase();
-    const rows = db
-      .query(`SELECT DISTINCT region_url FROM ${TABLE}`)
-      .all() as Pick<OrgRegionRow, "region_url">[];
-    return rows.map((r) => r.region_url);
-  } catch {
-    return [];
-  }
 }
 
 /** Cached org entry with the fields needed to reconstruct a SentryOrganization. */

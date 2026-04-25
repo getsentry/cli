@@ -1,19 +1,14 @@
 /**
- * CVE regression: custom-headers leak via share URL (CVE #3) and via the
- * `auth login` bypass (new leak vector discovered in PR #844 review).
+ * CVE regression: custom-headers leak via share URL and via the
+ * `auth login` rc-URL bypass.
  *
- * This is the dedicated test file for `applyCustomHeaders` trust scoping.
+ * Tests `applyCustomHeaders` trust scoping. Two attack shapes:
+ * 1. Share URL: `getSharedIssue(https://evil.com, ...)` — headers must
+ *    not attach to URLs that don't match the active token.
+ * 2. auth login bypass: when `env.SENTRY_URL` is rc-poisoned and no
+ *    token is active yet, headers must fail closed.
+ *
  * See also `fetch-layer-guard.test.ts` for the Bearer-token path.
- *
- * Attack shapes covered:
- * 1. **Share URL**: `getSharedIssue(https://evil.com, ...)` — the URL-arg
- *    entry-point guard catches most paths, but if something ever calls
- *    `applyCustomHeaders` with a URL mismatching the active token, no
- *    headers must leak.
- * 2. **auth login bypass**: during `auth login`, `env.SENTRY_URL` may be
- *    attacker-controlled (rc URL written by `skipUrlTrustCheck: true`).
- *    When there's no active token yet, `applyCustomHeaders` must fail
- *    closed instead of falling back to `getConfiguredSentryUrl()`.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";

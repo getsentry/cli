@@ -207,26 +207,25 @@ describe("db/auth host scoping", () => {
     // and IAP-protected re-authentication would fail. The anchor is
     // process-local and overwritten by the NEXT applyLoginUrl, so we
     // don't need to clear it on logout.
-    const {
-      registerLoginTrustAnchor,
-      registerTrustedRegionUrls,
-      hasLoginTrustAnchor,
-    } = await import("../../../src/lib/token-host.js");
+    const { hasLoginTrustAnchor, registerLoginTrustAnchor } = await import(
+      "../../../src/lib/token-host.js"
+    );
+    const { isTrustedRegionOrigin, registerTrustedRegionUrls } = await import(
+      "../../../src/lib/db/regions.js"
+    );
     setAuthToken("tok-A", 3600, "refresh", {
       host: "https://sentry.host-a.com",
     });
     registerLoginTrustAnchor("https://sentry.host-a.com");
     registerTrustedRegionUrls(["https://us.host-a.com"]);
     expect(hasLoginTrustAnchor()).toBe(true);
+    expect(isTrustedRegionOrigin("https://us.host-a.com")).toBe(true);
 
     const { clearAuth } = await import("../../../src/lib/db/auth.js");
     await clearAuth();
 
     // Region-URL allow-list cleared (was identity-specific).
-    const { getKnownRegionUrls } = await import(
-      "../../../src/lib/db/regions.js"
-    );
-    expect(getKnownRegionUrls()).toEqual([]); // DB region cache cleared
+    expect(isTrustedRegionOrigin("https://us.host-a.com")).toBe(false);
     // Login anchor PRESERVED (the `auth login --url` flow sets this
     // BEFORE clearAuth runs and needs it AFTER for the device flow).
     expect(hasLoginTrustAnchor()).toBe(true);

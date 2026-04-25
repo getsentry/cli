@@ -1,7 +1,7 @@
 /**
  * CVE regression: `sentry auth login --token X` in a `.sentryclirc`-poisoned repo.
  *
- * Attack path (discovered in the second security subagent review):
+ * Attack path:
  *
  * 1. User has a SaaS API token from `https://sentry.io/settings/auth-tokens/`.
  * 2. User has no `SENTRY_HOST`/`SENTRY_URL` in their shell (SaaS default).

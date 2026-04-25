@@ -7,10 +7,11 @@ import { DEFAULT_SENTRY_URL, getConfiguredSentryUrl } from "../constants.js";
 import { getEnv } from "../env.js";
 import { getEnvTokenHost } from "../env-token-host.js";
 import { logger } from "../logger.js";
+import { normalizeOrigin } from "../sentry-urls.js";
 import { withDbSpan } from "../telemetry.js";
-import { normalizeOrigin } from "../token-host.js";
 import { getDatabase } from "./index.js";
 import { clearAllIssueOrgCache } from "./issue-org-cache.js";
+import { clearTrustedHostState } from "./regions.js";
 import { runUpsert } from "./utils.js";
 
 /** Refresh when less than 10% of token lifetime remains */
@@ -38,32 +39,16 @@ const log = logger.withTag("auth");
 /**
  * Lazy migration for rows created before schema v16 (NULL `host`).
  *
- * Writes the user's BOOT-TIME env host (`SENTRY_HOST`/`SENTRY_URL`
- * snapshotted before `.sentryclirc` shim runs) into the row. Using the
- * boot snapshot — not the current `getConfiguredSentryUrl()` — avoids
- * two failure modes:
+ * Uses the BOOT-TIME env snapshot (`getEnvTokenHost`), captured before the
+ * `.sentryclirc` shim could mutate env. Reading the current env directly
+ * would either default self-hosted users to SaaS (when the shim hasn't run
+ * yet) or migrate to a poisoned rc URL (when it has).
  *
- * 1. **Self-hosted user in legitimate `.sentryclirc` repo** (what Seer
- *    flagged): if migration ran from `applySentryCliRcEnvShim` BEFORE
- *    the shim wrote `env.SENTRY_URL`, `getConfiguredSentryUrl()` would
- *    return undefined → token incorrectly migrated to SaaS default,
- *    breaking the user's auth until `sentry auth logout && login`.
- * 2. **Self-hosted user in ATTACKER-repo**: if migration ran AFTER the
- *    shim wrote a poisoned `env.SENTRY_URL`, the token would be
- *    migrated to the attacker's host. Pre-v16 stored tokens are
- *    typically SaaS or whatever the user's SHELL exported — the boot
- *    snapshot captures that correctly.
- *
- * `getEnvTokenHost()` returns the boot snapshot (`SENTRY_HOST`/
- * `SENTRY_URL` at `captureEnvTokenHost` time, defaulting to SaaS).
- * Users with the wrong shell env at upgrade time can recover with
- * `sentry auth logout && sentry auth login`.
- *
- * Returns the migrated host string (never NULL on return).
+ * Users whose shell env was wrong at upgrade time can recover with
+ * `sentry auth logout && sentry auth login`. Returns the migrated host
+ * (never NULL on return).
  */
 function migrateNullHost(row: AuthRow): string {
-  // Use the boot-time env snapshot (captured BEFORE the .sentryclirc
-  // shim could poison env.SENTRY_URL). See function JSDoc for rationale.
   const bootHost = getEnvTokenHost();
   const migratedHost = normalizeOrigin(bootHost);
   const host = migratedHost ?? DEFAULT_SENTRY_URL;
@@ -467,16 +452,8 @@ export async function clearAuth(): Promise<void> {
   resetIdentityFingerprintCache();
   resetAuthTokenCache();
   resetAuthRowCache();
-
-  // Evict in-process trust extensions (region URLs from `getUserRegions`,
-  // login-time trust anchor) that were scoped to the now-cleared identity.
-  // Dynamic import to avoid the auth ↔ token-host cycle.
-  try {
-    const { clearTrustedHostState } = await import("../token-host.js");
-    clearTrustedHostState();
-  } catch {
-    // Non-fatal: token-host may not load in some test paths
-  }
+  // Evict in-process trust extensions tied to the now-cleared identity.
+  clearTrustedHostState();
 
   // Dynamic import avoids the auth→response-cache→auth cycle.
   try {

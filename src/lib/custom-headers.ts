@@ -67,10 +67,7 @@ let cachedRawSource: string | undefined;
 /** Whether the SaaS warning has already been logged this session. */
 let saasWarningLogged = false;
 
-/**
- * Whether the untrusted-destination warning has already been logged this
- * session. Prevents log spam when a command fans out many requests.
- */
+/** Whether the untrusted-destination warning has already been logged. */
 let untrustedDestinationWarningLogged = false;
 
 /**
@@ -206,33 +203,15 @@ export function getCustomHeaders(): readonly [string, string][] {
  *
  * Reads from the env var or SQLite defaults, validates, and sets each header,
  * but ONLY when `requestUrl`'s origin matches the active token's trust class
- * (token host + SaaS equivalence + dynamically-discovered regional silos).
+ * (or, in the no-token bootstrap window, the explicit `--url` login anchor).
+ * This prevents `SENTRY_CUSTOM_HEADERS` (IAP tokens, mTLS headers) from
+ * leaking to a host the user didn't authenticate against.
  *
- * This is the third-report CVE fix: `getSharedIssue` fetches from a `baseUrl`
- * extracted from user-provided share URLs, and previously would attach
- * `SENTRY_CUSTOM_HEADERS` (e.g. IAP tokens) to any host matching the
- * non-SaaS / self-hosted heuristic. The URL-arg entry-point guard
- * (`applySentryUrlContext`) is the primary fix, but scoping headers at their
- * attachment point defends against any code path that bypasses that guard.
- *
- * ## Fail-closed: no token → no headers
- *
- * When no token is active, there is no established trust anchor. We DO NOT
- * fall back to `getConfiguredSentryUrl()` because that value can itself be
- * attacker-controlled (e.g. during the `auth login` bypass flow, the rc URL
- * has been written to `env.SENTRY_URL` without trust-checking — see
- * `sentryclirc.ts::applySentryCliRcEnvShim` and the `skipUrlTrustCheck`
- * option). Trusting the configured URL in that window would let an attacker
- * establish trust simply by dropping a `.sentryclirc` in a repo the user
- * cloned. Failing closed means IAP tokens etc. never attach to unauthenticated
- * requests. This is the correct behavior: `SENTRY_CUSTOM_HEADERS` is an
- * authenticated-proxy feature, and users who need it configure it alongside a
- * token (so `getActiveTokenHost()` returns truthy by the time they hit a
- * custom-header code path).
+ * Fails closed when no token and no login anchor are present — see
+ * {@link isRequestOriginTrustedForCustomHeaders}.
  *
  * @param headers - The `Headers` instance to modify in-place
- * @param requestUrl - The destination URL (string, URL, or Request) whose
- *   origin will be compared to the active token's trust class.
+ * @param requestUrl - The destination URL whose origin is checked
  */
 export function applyCustomHeaders(
   headers: Headers,
@@ -243,15 +222,6 @@ export function applyCustomHeaders(
     return;
   }
 
-  // Scope via `isRequestOriginTrustedForCustomHeaders`:
-  // - Token present → check against token's trust class (same as Bearer path).
-  // - No token + explicit `--url` login anchor → check against anchor.
-  //   This is the IAP-protected self-hosted onboarding case: first-time
-  //   `auth login --url <self-hosted>` must carry SENTRY_CUSTOM_HEADERS
-  //   so the IAP proxy admits the OAuth device-code request.
-  // - No token and no anchor → fail closed. This blocks the auth-login
-  //   rc-URL bypass: attacker's .sentryclirc writes SENTRY_URL but does
-  //   NOT register a login trust anchor, so headers don't attach.
   if (!isRequestOriginTrustedForCustomHeaders(requestUrl)) {
     if (!untrustedDestinationWarningLogged) {
       untrustedDestinationWarningLogged = true;

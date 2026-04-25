@@ -106,6 +106,32 @@ export function isSaaSTrustOrigin(url: string): boolean {
 }
 
 /**
+ * Normalize a URL (or fetch input) to its canonical origin
+ * (`scheme://host[:port]`). Returns `undefined` for inputs that don't parse
+ * as URLs.
+ */
+export function normalizeOrigin(
+  input: string | URL | Request | undefined | null
+): string | undefined {
+  if (input === null || input === undefined) {
+    return;
+  }
+  let raw: string;
+  if (typeof input === "string") {
+    raw = input;
+  } else if (input instanceof URL) {
+    raw = input.href;
+  } else {
+    raw = input.url;
+  }
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return;
+  }
+}
+
+/**
  * Build URL to view an organization in Sentry.
  *
  * @param orgSlug - Organization slug
