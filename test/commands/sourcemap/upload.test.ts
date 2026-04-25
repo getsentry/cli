@@ -222,6 +222,18 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
     ).resolves.toBeUndefined();
   });
 
+  test("empty directory with --allow-empty: does not require credentials", async () => {
+    // The library-only / conditional-release-skip cases named in the
+    // docs may run without DSN/org/project context. With nothing to
+    // upload, the command must not insist on resolving them.
+    delete process.env.SENTRY_ORG;
+    delete process.env.SENTRY_PROJECT;
+    const ctx = makeContext();
+    await expect(
+      func.call(ctx, { "allow-empty": true }, dir)
+    ).resolves.toBeUndefined();
+  });
+
   test("directory with .js files but no .map files: throws", async () => {
     mkdirSync(join(dir, "_astro"));
     writeFileSync(join(dir, "_astro", "app.js"), "console.log(1)\n");

@@ -27,10 +27,11 @@ import {
 
 /** Result type for the upload command. */
 type UploadCommandResult = {
-  /** Organization slug. */
-  org: string;
-  /** Project slug. */
-  project: string;
+  /** Organization slug. Omitted when --allow-empty short-circuits before
+   * org/project resolution. */
+  org?: string;
+  /** Project slug. Omitted in the same short-circuit case. */
+  project?: string;
   /** Release version, if provided. */
   release?: string;
   /** Number of file pairs uploaded. */
@@ -39,11 +40,14 @@ type UploadCommandResult = {
 
 /** Format human-readable output for upload results. */
 function formatUploadResult(data: UploadCommandResult): string {
-  const rows: [string, string][] = [
-    ["Organization", data.org],
-    ["Project", data.project],
-    ["Files uploaded", String(data.filesUploaded)],
-  ];
+  const rows: [string, string][] = [];
+  if (data.org) {
+    rows.push(["Organization", data.org]);
+  }
+  if (data.project) {
+    rows.push(["Project", data.project]);
+  }
+  rows.push(["Files uploaded", String(data.filesUploaded)]);
   if (data.release) {
     rows.push(["Release", data.release]);
   }
@@ -123,9 +127,23 @@ export const uploadCommand = buildCommand({
     await assertDirectoryReadable(dir);
     const pairs = await discoverFilePairs(dir);
 
-    if (pairs.length === 0 && !flags["allow-empty"]) {
-      const diag = await diagnoseEmptyDiscovery(dir);
-      throw buildEmptyDiscoveryError(dir, diag);
+    if (pairs.length === 0) {
+      if (!flags["allow-empty"]) {
+        const diag = await diagnoseEmptyDiscovery(dir);
+        throw buildEmptyDiscoveryError(dir, diag);
+      }
+      // --allow-empty: nothing to upload, so don't require Sentry
+      // credentials. This makes the flag actually usable in the
+      // library-only / conditional-release-skip cases the docs name.
+      yield new CommandOutput<UploadCommandResult>({
+        release: flags.release,
+        filesUploaded: 0,
+      });
+      return {
+        hint:
+          "No JS + sourcemap pairs found in the target directory. " +
+          "If this is unexpected, check your bundler emits .map files.",
+      };
     }
 
     const resolved = await resolveOrgAndProject({
@@ -136,20 +154,6 @@ export const uploadCommand = buildCommand({
       throw new ContextError("Organization and project", USAGE_HINT);
     }
     const { org, project } = resolved;
-
-    if (pairs.length === 0) {
-      yield new CommandOutput<UploadCommandResult>({
-        org,
-        project,
-        release: flags.release,
-        filesUploaded: 0,
-      });
-      return {
-        hint:
-          "No JS + sourcemap pairs found in the target directory. " +
-          "If this is unexpected, check your bundler emits .map files.",
-      };
-    }
 
     const results = await injectDirectory(dir);
 
