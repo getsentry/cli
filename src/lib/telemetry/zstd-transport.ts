@@ -144,14 +144,30 @@ export function makeCompressedTransport(
  * True iff a proxy is configured for this URL and not exempted by
  * no_proxy. When true, the caller falls back to the SDK's default
  * transport (which handles CONNECT tunneling).
+ *
+ * Mirrors `@sentry/node-core/transports/http.js` `applyNoProxyOption`'s
+ * proxy-resolution priority:
+ *   - http  → `options.proxy` | `http_proxy`
+ *   - https → `options.proxy` | `https_proxy` | `http_proxy`
+ *
+ * Both upper- and lowercase env vars are recognized so behavior matches
+ * cURL / Node ecosystem convention. Lowercase wins when both are set,
+ * staying consistent with the SDK and {@link isNoProxyExempt}.
+ *
+ * @internal Exported for tests.
  */
-function shouldFallbackToDefault(
+export function shouldFallbackToDefault(
   url: URL,
   options: NodeTransportOptions
 ): boolean {
   const isHttps = url.protocol === "https:";
-  const envProxy = isHttps ? process.env.https_proxy : process.env.http_proxy;
-  const proxy = options.proxy || envProxy || process.env.http_proxy;
+  const httpProxy = process.env.http_proxy ?? process.env.HTTP_PROXY;
+  const httpsProxy = process.env.https_proxy ?? process.env.HTTPS_PROXY;
+  const envProxy = isHttps ? httpsProxy : httpProxy;
+  // SDK precedent: HTTPS connections fall back to http_proxy as a last
+  // resort. We mirror that so a user configured for the SDK's default
+  // transport gets identical proxy semantics here.
+  const proxy = options.proxy || envProxy || httpProxy;
   if (!proxy) {
     return false;
   }

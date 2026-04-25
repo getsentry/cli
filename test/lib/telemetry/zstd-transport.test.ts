@@ -23,6 +23,7 @@ import {
   makeCompressedTransport,
   maybeCompress,
   normalizeBody,
+  shouldFallbackToDefault,
 } from "../../../src/lib/telemetry/zstd-transport.js";
 
 /** No-op for SDK callbacks that require a function but return nothing meaningful. */
@@ -561,5 +562,86 @@ describe("hasZstdSupport", () => {
         globalThis.Bun.zstdCompress = saved;
       }
     }
+  });
+});
+
+describe("shouldFallbackToDefault", () => {
+  const PROXY_VARS = [
+    "http_proxy",
+    "HTTP_PROXY",
+    "https_proxy",
+    "HTTPS_PROXY",
+    "no_proxy",
+    "NO_PROXY",
+  ] as const;
+  const saved: Partial<Record<(typeof PROXY_VARS)[number], string>> = {};
+
+  beforeEach(() => {
+    for (const k of PROXY_VARS) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
+  });
+
+  afterEach(() => {
+    for (const k of PROXY_VARS) {
+      const v = saved[k];
+      if (v === undefined) {
+        delete process.env[k];
+      } else {
+        process.env[k] = v;
+      }
+    }
+  });
+
+  const opts = { url: "https://ingest.example.com/", recordDroppedEvent: noop };
+  const httpsUrl = new URL("https://ingest.example.com/");
+  const httpUrl = new URL("http://ingest.example.com/");
+
+  test("no proxy configured → no fallback", () => {
+    expect(shouldFallbackToDefault(httpsUrl, opts)).toBe(false);
+  });
+
+  test("options.proxy wins → fallback", () => {
+    expect(
+      shouldFallbackToDefault(httpsUrl, {
+        ...opts,
+        proxy: "http://proxy.internal:3128",
+      })
+    ).toBe(true);
+  });
+
+  test("lowercase https_proxy → fallback (HTTPS URL)", () => {
+    process.env.https_proxy = "http://proxy.internal:3128";
+    expect(shouldFallbackToDefault(httpsUrl, opts)).toBe(true);
+  });
+
+  test("uppercase HTTPS_PROXY → fallback (HTTPS URL)", () => {
+    process.env.HTTPS_PROXY = "http://proxy.internal:3128";
+    expect(shouldFallbackToDefault(httpsUrl, opts)).toBe(true);
+  });
+
+  test("lowercase wins over uppercase when both are set", () => {
+    process.env.https_proxy = "http://winning.proxy:3128";
+    process.env.HTTPS_PROXY = "http://losing.proxy:3128";
+    // Both trigger fallback; this just asserts the lookup doesn't
+    // crash on duplicate vars and that the function still returns true.
+    expect(shouldFallbackToDefault(httpsUrl, opts)).toBe(true);
+  });
+
+  test("HTTPS URL falls back to http_proxy when https_proxy is unset (matches SDK precedent)", () => {
+    process.env.http_proxy = "http://proxy.internal:3128";
+    expect(shouldFallbackToDefault(httpsUrl, opts)).toBe(true);
+  });
+
+  test("uppercase HTTP_PROXY → fallback (http URL)", () => {
+    process.env.HTTP_PROXY = "http://proxy.internal:3128";
+    expect(shouldFallbackToDefault(httpUrl, opts)).toBe(true);
+  });
+
+  test("uppercase NO_PROXY exemption keeps zstd path even with proxy set", () => {
+    process.env.HTTPS_PROXY = "http://proxy.internal:3128";
+    process.env.NO_PROXY = "example.com";
+    expect(shouldFallbackToDefault(httpsUrl, opts)).toBe(false);
   });
 });
