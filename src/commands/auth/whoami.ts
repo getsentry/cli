@@ -11,7 +11,7 @@ import { getCurrentUser } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
 import { getAuthToken } from "../../lib/db/auth.js";
 import { setUserInfo } from "../../lib/db/user.js";
-import { ApiError, AuthError, ResolutionError } from "../../lib/errors.js";
+import { ResolutionError } from "../../lib/errors.js";
 import { formatUserIdentity } from "../../lib/formatters/index.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
@@ -26,43 +26,6 @@ type WhoamiFlags = {
   readonly fresh: boolean;
   readonly fields?: string[];
 };
-
-/**
- * Translate an `ApiError` from `/auth/` into something actionable.
- *
- * The Sentry backend historically returned `400 Bad Request` (not 401/403)
- * from `GET /api/0/auth/` for valid Bearer tokens because
- * `AuthIndexEndpoint` excluded `UserAuthTokenAuthentication` from its
- * authenticators — tokens were silently ignored and the handler returned
- * 400 with an empty body. Fixed server-side by getsentry/sentry#112853,
- * but CLIs in the wild must still degrade gracefully while the fix rolls
- * out across SaaS tiers and self-hosted.
- *
- * We translate 400 into an `AuthError("invalid")` with `skipAutoAuth: true`
- * — a silent token refresh wouldn't help (the token is valid, the endpoint
- * is refusing to parse it), and triggering auto-login on the whoami
- * command itself would loop. Non-400 errors rethrow unchanged so existing
- * 401/403/5xx handling applies.
- */
-function translateWhoamiApiError(error: unknown): never {
-  if (error instanceof ApiError && error.status === 400) {
-    throw new AuthError(
-      "invalid",
-      [
-        "Sentry returned 400 Bad Request for whoami.",
-        "",
-        "This usually means the auth endpoint temporarily rejected the token.",
-        "A known server-side fix is rolling out (getsentry/sentry#112853).",
-        "",
-        "Try:",
-        "  sentry auth status   — verify your token via a different endpoint",
-        "  sentry auth login    — refresh or re-authenticate",
-      ].join("\n"),
-      { skipAutoAuth: true }
-    );
-  }
-  throw error;
-}
 
 export const whoamiCommand = buildCommand({
   docs: {
@@ -86,10 +49,11 @@ export const whoamiCommand = buildCommand({
 
     // Org auth tokens (`sntrys_...`) are not user-scoped — there is no
     // single user to return for them. The backend `/auth/` endpoint also
-    // rejects this prefix (`UserAuthTokenAuthentication.accepts_auth`
+    // rejects this prefix: `UserAuthTokenAuthentication.accepts_auth`
     // excludes it, and `OrgAuthTokenAuthentication` is not wired up to
-    // this endpoint). Short-circuit with a clear message instead of
-    // letting the request fail with a confusing 400.
+    // this endpoint (getsentry/sentry#112853 added user-token auth only).
+    // Short-circuit with a clear message instead of letting the request
+    // fail with a confusing 400.
     const token = getAuthToken();
     if (token && classifySentryToken(token) === "org-auth-token") {
       throw new ResolutionError(
@@ -103,12 +67,7 @@ export const whoamiCommand = buildCommand({
       );
     }
 
-    let user: Awaited<ReturnType<typeof getCurrentUser>>;
-    try {
-      user = await getCurrentUser();
-    } catch (error) {
-      translateWhoamiApiError(error);
-    }
+    const user = await getCurrentUser();
 
     // Keep cached user info up to date. Non-fatal: display must succeed even
     // if the DB write fails (read-only filesystem, corrupted database, etc.).

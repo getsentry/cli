@@ -23,7 +23,6 @@ import * as dbAuth from "../../../src/lib/db/auth.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbUser from "../../../src/lib/db/user.js";
 import {
-  ApiError,
   AuthError,
   CliError,
   ResolutionError,
@@ -196,47 +195,6 @@ describe("whoamiCommand.func", () => {
 
       expect(getCurrentUserSpy).toHaveBeenCalled();
       expect(getOutput()).toContain("Jane Doe");
-    });
-  });
-
-  describe("400 Bad Request on /auth/", () => {
-    test("translates ApiError(400) to AuthError(invalid) with skipAutoAuth", async () => {
-      getCurrentUserSpy.mockRejectedValue(
-        new ApiError("API request failed: 400 Bad Request", 400, "", "/auth/")
-      );
-
-      const { context } = createContext();
-
-      try {
-        await func.call(context, { json: false });
-        throw new Error("expected AuthError");
-      } catch (err) {
-        expect(err).toBeInstanceOf(AuthError);
-        const authErr = err as AuthError;
-        expect(authErr.reason).toBe("invalid");
-        expect(authErr.skipAutoAuth).toBe(true);
-        expect(authErr.message).toContain("sentry auth login");
-        expect(authErr.message).toContain("sentry auth status");
-      }
-    });
-
-    test("non-400 ApiError rethrows unchanged", async () => {
-      const original = new ApiError(
-        "API request failed: 500 Internal Server Error",
-        500,
-        "boom",
-        "/auth/"
-      );
-      getCurrentUserSpy.mockRejectedValue(original);
-
-      const { context } = createContext();
-
-      try {
-        await func.call(context, { json: false });
-        throw new Error("expected ApiError");
-      } catch (err) {
-        expect(err).toBe(original);
-      }
     });
   });
 
