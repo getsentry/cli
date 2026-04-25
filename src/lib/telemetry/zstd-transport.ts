@@ -356,6 +356,9 @@ export function hasZstdSupport(): boolean {
  * URL matches an entry in `NO_PROXY` / `no_proxy`, in which case the
  * proxy should be ignored.
  *
+ * Whitespace around comma-separated entries is trimmed — `"a.com, b.com"`
+ * is a common config style and both entries should match.
+ *
  * @internal Exported for tests.
  */
 export function isNoProxyExempt(urlSegments: URL): boolean {
@@ -365,6 +368,8 @@ export function isNoProxyExempt(urlSegments: URL): boolean {
   }
   return noProxy
     .split(",")
+    .map((ex) => ex.trim())
+    .filter((ex) => ex.length > 0)
     .some(
       (ex) => urlSegments.host.endsWith(ex) || urlSegments.hostname.endsWith(ex)
     );

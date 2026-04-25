@@ -527,6 +527,21 @@ describe("isNoProxyExempt", () => {
     // Lowercase wins → uppercase ignored → no match → not exempt
     expect(isNoProxyExempt(new URL("https://ingest.example.com/"))).toBe(false);
   });
+
+  test("trims whitespace around comma-separated entries", () => {
+    // Common config style: `"a.com, b.com"` — both entries should match
+    // even with the leading space after the comma.
+    process.env.no_proxy = "other.com, ingest.example.com";
+    expect(isNoProxyExempt(new URL("https://ingest.example.com/"))).toBe(true);
+  });
+
+  test("ignores empty entries (trailing comma, double comma)", () => {
+    process.env.no_proxy = "other.com,, , example.com,";
+    expect(isNoProxyExempt(new URL("https://ingest.example.com/"))).toBe(true);
+    // Empty entry must not match every host (would be true if `endsWith("")`
+    // were ever evaluated).
+    expect(isNoProxyExempt(new URL("https://other-host.test/"))).toBe(false);
+  });
 });
 
 describe("hasZstdSupport", () => {
