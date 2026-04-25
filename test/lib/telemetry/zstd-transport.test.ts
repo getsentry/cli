@@ -543,6 +543,26 @@ describe("isNoProxyExempt", () => {
     // were ever evaluated).
     expect(isNoProxyExempt(new URL("https://other-host.test/"))).toBe(false);
   });
+
+  test("'*' wildcard exempts all hosts", () => {
+    process.env.no_proxy = "*";
+    expect(isNoProxyExempt(new URL("https://ingest.example.com/"))).toBe(true);
+    expect(isNoProxyExempt(new URL("https://anything.test/"))).toBe(true);
+    expect(isNoProxyExempt(new URL("http://192.0.2.1:8080/"))).toBe(true);
+  });
+
+  test("'*' wildcard alongside other entries still exempts everything", () => {
+    process.env.no_proxy = "specific.com, *, other.com";
+    expect(isNoProxyExempt(new URL("https://unrelated.test/"))).toBe(true);
+  });
+
+  test("literal '*' in a host name does not get matched as wildcard", () => {
+    // The wildcard check requires `*` to be a standalone entry.
+    // A bizarre value like `"*.example.com"` is treated as a literal
+    // suffix: `endsWith("*.example.com")` is false for normal hosts.
+    process.env.no_proxy = "*.example.com";
+    expect(isNoProxyExempt(new URL("https://foo.example.com/"))).toBe(false);
+  });
 });
 
 describe("hasZstdSupport", () => {

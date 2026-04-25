@@ -372,8 +372,13 @@ export function hasZstdSupport(): boolean {
  * URL matches an entry in `NO_PROXY` / `no_proxy`, in which case the
  * proxy should be ignored.
  *
- * Whitespace around comma-separated entries is trimmed — `"a.com, b.com"`
- * is a common config style and both entries should match.
+ * Slightly more permissive than the SDK:
+ *   - Whitespace around comma-separated entries is trimmed
+ *     (`"a.com, b.com"` is common; SDK does not trim).
+ *   - The `"*"` wildcard means "bypass proxy for all hosts" — a
+ *     convention from cURL / Go tooling that the SDK currently
+ *     ignores (would route through the proxy regardless). We honor
+ *     it so users with `no_proxy="*"` keep the zstd path.
  *
  * @internal Exported for tests.
  */
@@ -382,11 +387,14 @@ export function isNoProxyExempt(urlSegments: URL): boolean {
   if (!noProxy) {
     return false;
   }
-  return noProxy
+  const entries = noProxy
     .split(",")
     .map((ex) => ex.trim())
-    .filter((ex) => ex.length > 0)
-    .some(
-      (ex) => urlSegments.host.endsWith(ex) || urlSegments.hostname.endsWith(ex)
-    );
+    .filter((ex) => ex.length > 0);
+  if (entries.includes("*")) {
+    return true;
+  }
+  return entries.some(
+    (ex) => urlSegments.host.endsWith(ex) || urlSegments.hostname.endsWith(ex)
+  );
 }
