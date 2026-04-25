@@ -196,14 +196,21 @@ describe("db/auth host scoping", () => {
     expect(hasUsableStoredToken()).toBe(true);
   });
 
-  test("clearAuth evicts process-local trust extensions (region URLs + login anchor)", async () => {
-    // Setup: register region URLs + login anchor (simulating an
-    // authenticated session against host A).
+  test("clearAuth evicts region-URL allow-list but PRESERVES login trust anchor", async () => {
+    // The login anchor is set by `applyLoginUrl` at the start of the
+    // `auth login` command lifecycle. When the user runs `auth login
+    // --url <new-host>` while already authenticated, the flow is:
+    //   1. applyLoginUrl — registers the new login trust anchor
+    //   2. handleExistingAuth — calls clearAuth() if user confirms
+    //   3. login proceeds — needs the anchor for IAP custom headers
+    // If clearAuth wiped the anchor at step 2, step 3 would lose it
+    // and IAP-protected re-authentication would fail. The anchor is
+    // process-local and overwritten by the NEXT applyLoginUrl, so we
+    // don't need to clear it on logout.
     const {
       registerLoginTrustAnchor,
       registerTrustedRegionUrls,
       hasLoginTrustAnchor,
-      isRequestOriginTrusted,
     } = await import("../../../src/lib/token-host.js");
     setAuthToken("tok-A", 3600, "refresh", {
       host: "https://sentry.host-a.com",
@@ -211,23 +218,17 @@ describe("db/auth host scoping", () => {
     registerLoginTrustAnchor("https://sentry.host-a.com");
     registerTrustedRegionUrls(["https://us.host-a.com"]);
     expect(hasLoginTrustAnchor()).toBe(true);
-    expect(isRequestOriginTrusted("https://us.host-a.com/api/")).toBe(true);
 
-    // Logging out should evict both the login anchor and the in-process
-    // region-URL allow-list. Without this, a subsequent login against
-    // host B would inherit host A's regions as "trusted".
     const { clearAuth } = await import("../../../src/lib/db/auth.js");
     await clearAuth();
 
-    expect(hasLoginTrustAnchor()).toBe(false);
-    // No active token after clearAuth, so isRequestOriginTrusted returns
-    // true for any host (no token = nothing to protect at the trust
-    // layer; fetch layer skips attaching credentials anyway). The real
-    // check is: re-register-only-with-explicit-call should be required.
-    // The set is empty — verify directly.
+    // Region-URL allow-list cleared (was identity-specific).
     const { getKnownRegionUrls } = await import(
       "../../../src/lib/db/regions.js"
     );
-    expect(getKnownRegionUrls()).toEqual([]); // DB region cache also cleared
+    expect(getKnownRegionUrls()).toEqual([]); // DB region cache cleared
+    // Login anchor PRESERVED (the `auth login --url` flow sets this
+    // BEFORE clearAuth runs and needs it AFTER for the device flow).
+    expect(hasLoginTrustAnchor()).toBe(true);
   });
 });

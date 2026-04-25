@@ -228,26 +228,33 @@ export function registerTrustedRegionUrls(urls: readonly string[]): void {
 }
 
 /**
- * Clear the process-local region-URL allow-list AND the login-time
- * trust anchor.
+ * Clear the process-local region-URL allow-list.
  *
- * Called from `clearAuth()` to evict trust-extension state that was
+ * Called from `clearAuth()` to evict region-URL extensions that were
  * specific to the now-cleared identity. Without this, in long-running
  * library-mode processes that log out and log back in (against a
- * potentially different host), regional URLs and the login anchor
- * from the previous identity would persist into the new session,
- * silently widening the trust class. The fetch-layer guard would
- * still reject mismatched requests via `auth.host`, but
- * `isRequestOriginTrusted` would incorrectly admit a stale region
- * URL — adding visible noise rather than a security failure, but
- * worth fixing for clean state semantics.
+ * potentially different host), regional URLs from the previous
+ * identity would persist into the new session, silently widening the
+ * trust class.
  *
- * Also exposed as `resetTrustedRegionUrlsForTesting` for tests that
- * want to reset state between cases.
+ * IMPORTANT: this does NOT clear `loginTrustAnchor`. The login anchor
+ * is set by `applyLoginUrl` at the start of the `auth login` command
+ * to capture the user's `--url` (or env-snapshot) intent — it lives
+ * for the duration of THAT login attempt, not the prior session.
+ *
+ * Specifically, when a user runs `sentry auth login --url <new-host>`
+ * while already authenticated, the order is:
+ *   1. applyLoginUrl       — registers login trust anchor (user's intent)
+ *   2. handleExistingAuth   — calls clearAuth() if user confirms re-auth
+ *   3. (login proceeds)     — needs the anchor for IAP custom headers etc.
+ *
+ * If clearAuth wiped the anchor at step 2, step 3 would lose it and
+ * IAP-protected re-authentication would break. Cursor caught this
+ * regression — review-cycle fix.
  */
 export function clearTrustedHostState(): void {
   trustedRegionOrigins.clear();
-  loginTrustAnchor = undefined;
+  // Intentionally NOT clearing loginTrustAnchor — see JSDoc above.
 }
 
 /**
