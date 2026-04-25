@@ -8,6 +8,10 @@ import {
 } from "node:child_process";
 import { statSync } from "node:fs";
 import { access, readFile, stat, writeFile } from "node:fs/promises";
+import { promisify } from "node:util";
+// biome-ignore lint/performance/noNamespaceImport: runtime access to optional `zstdCompress`/`zstdDecompress` exports
+import * as zlibModule from "node:zlib";
+import { constants as zlibConstants } from "node:zlib";
 // node:sqlite is imported lazily inside NodeDatabasePolyfill to avoid
 // crashing on Node.js versions without node:sqlite support when the
 // bundle is loaded as a library (the consumer may never use SQLite).
@@ -283,5 +287,67 @@ const BunPolyfill = {
     order: semverCompare,
   },
 };
+
+/**
+ * Coerce arbitrary compression input (string, ArrayBuffer, TypedArray)
+ * into a contiguous Buffer without copying where possible.
+ */
+function toBufferForCompression(
+  data: NodeJS.TypedArray | Buffer | string | ArrayBuffer
+): Buffer {
+  if (typeof data === "string") {
+    return Buffer.from(data, "utf-8");
+  }
+  if (data instanceof ArrayBuffer) {
+    return Buffer.from(data);
+  }
+  return Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+}
+
+// Feature-detected zstd polyfill. `node:zlib.zstdCompress` lands in Node
+// 22.15; we do NOT install the polyfill below on older Node because
+// Bun.zstdCompress's absence lets the telemetry transport's runtime
+// probe fall back to gzip cleanly (see src/lib/telemetry/zstd-transport.ts).
+//
+// Kept out of the BunPolyfill literal so the `typeof Bun.zstdCompress`
+// probe genuinely returns `"undefined"` on older runtimes — assigning
+// a noop stub would defeat the feature-detect.
+const zlibOptionalZstdCompress = (zlibModule as { zstdCompress?: unknown })
+  .zstdCompress;
+const zlibOptionalZstdDecompress = (zlibModule as { zstdDecompress?: unknown })
+  .zstdDecompress;
+
+if (
+  typeof zlibOptionalZstdCompress === "function" &&
+  typeof zlibOptionalZstdDecompress === "function"
+) {
+  const nodeZstdCompress = promisify(
+    zlibOptionalZstdCompress as (
+      buf: Buffer,
+      options: { params?: Record<number, number> },
+      cb: (err: Error | null, result: Buffer) => void
+    ) => void
+  );
+  const nodeZstdDecompress = promisify(
+    zlibOptionalZstdDecompress as (
+      buf: Buffer,
+      cb: (err: Error | null, result: Buffer) => void
+    ) => void
+  );
+
+  (BunPolyfill as unknown as { zstdCompress: unknown }).zstdCompress = (
+    data: NodeJS.TypedArray | Buffer | string | ArrayBuffer,
+    opts?: { level?: number }
+  ): Promise<Buffer> =>
+    nodeZstdCompress(toBufferForCompression(data), {
+      params: {
+        [zlibConstants.ZSTD_c_compressionLevel]: opts?.level ?? 3,
+      },
+    });
+
+  (BunPolyfill as unknown as { zstdDecompress: unknown }).zstdDecompress = (
+    data: NodeJS.TypedArray | Buffer | string | ArrayBuffer
+  ): Promise<Buffer> => nodeZstdDecompress(toBufferForCompression(data));
+}
 
 globalThis.Bun = BunPolyfill as typeof Bun;
