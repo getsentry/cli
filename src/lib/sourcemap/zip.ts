@@ -5,8 +5,10 @@
  * compressed data is held in memory at a time. Produces valid ZIP
  * archives that can be extracted by standard tools (unzip, 7z, etc.).
  *
- * Uses raw DEFLATE (method 8) for compression and the CRC-32
- * function from `node:zlib` for checksums.
+ * Per-archive compression method (DEFLATE or STORED) is chosen at
+ * {@link ZipWriter.create} time. STORED is preferred when the
+ * caller will compress the bytes again at the wire layer (e.g.
+ * chunk-upload with zstd) — see {@link ZipCompression}.
  */
 
 import type { FileHandle } from "node:fs/promises";
@@ -58,12 +60,22 @@ type EntryRecord = {
 };
 
 /**
+ * Per-archive compression strategy. `"deflate"` mirrors the original
+ * behavior; `"stored"` skips entry compression entirely and is the
+ * right choice when the bytes will be re-compressed by an outer codec
+ * (e.g. chunk-upload with zstd/gzip on the wire). Compressing an
+ * already-compressed payload is wasted CPU and can even slightly
+ * inflate the output.
+ */
+export type ZipCompression = "deflate" | "stored";
+
+/**
  * Streaming ZIP archive writer.
  *
- * Entries are compressed and flushed to disk one at a time via
- * {@link addEntry}, keeping peak memory proportional to a single
- * file's compressed output. Call {@link finalize} after all entries
- * have been added to write the central directory and close the file.
+ * Entries are written to disk one at a time via {@link addEntry},
+ * keeping peak memory proportional to a single entry's payload. Call
+ * {@link finalize} after all entries have been added to write the
+ * central directory and close the file.
  *
  * @example
  * ```ts
@@ -82,8 +94,11 @@ export class ZipWriter {
 
   private readonly fh: FileHandle;
 
-  private constructor(fh: FileHandle) {
+  private readonly compression: ZipCompression;
+
+  private constructor(fh: FileHandle, compression: ZipCompression) {
     this.fh = fh;
+    this.compression = compression;
   }
 
   /**
@@ -100,11 +115,17 @@ export class ZipWriter {
    * valid archive and release the file handle.
    *
    * @param outputPath - Filesystem path for the output ZIP file.
+   * @param options.compression - Per-entry compression method
+   *   (`"deflate"` default; `"stored"` to skip compression — see
+   *   {@link ZipCompression}).
    * @returns A ready-to-use writer instance.
    */
-  static async create(outputPath: string): Promise<ZipWriter> {
+  static async create(
+    outputPath: string,
+    options: { compression?: ZipCompression } = {}
+  ): Promise<ZipWriter> {
     const fh = await open(outputPath, "w");
-    const writer = new ZipWriter(fh);
+    const writer = new ZipWriter(fh, options.compression ?? "deflate");
 
     // Write the SourceBundle magic header before any ZIP data.
     // Format: 4-byte magic "SYSB" + 4-byte LE version (2).
@@ -136,9 +157,9 @@ export class ZipWriter {
   /**
    * Add a file entry to the archive.
    *
-   * The data is compressed with raw DEFLATE and written to disk
-   * immediately, so only one entry's compressed payload is buffered
-   * at a time.
+   * The data is written using the writer's configured compression
+   * method (DEFLATE or STORED). Empty entries are always STORED
+   * because some extractors mishandle DEFLATE of empty input.
    *
    * @param name - File path inside the archive (forward-slash separated).
    * @param data - Uncompressed file contents.
@@ -147,8 +168,7 @@ export class ZipWriter {
     const nameBytes = Buffer.from(name, "utf-8");
     const checksum = crc32(data);
 
-    // Use STORE for empty files (DEFLATE of empty input can confuse extractors)
-    const useStore = data.length === 0;
+    const useStore = this.compression === "stored" || data.length === 0;
     const method = useStore ? METHOD_STORE : METHOD_DEFLATE;
     const payload = useStore ? data : await deflateRaw(data);
 
