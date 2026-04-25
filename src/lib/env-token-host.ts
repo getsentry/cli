@@ -29,7 +29,9 @@
  */
 
 import { DEFAULT_SENTRY_URL, normalizeUrl } from "./constants.js";
+import { getRawEnvToken } from "./db/auth.js";
 import { getEnv } from "./env.js";
+import { getSntrysClaimUrl } from "./token-claims.js";
 import { normalizeOrigin } from "./token-host.js";
 
 /**
@@ -61,15 +63,49 @@ function readEnvHost(): string | undefined {
  * `getDefaultUrl` fallback in `preloadProjectContext`. Idempotent: second
  * and subsequent calls are no-ops.
  *
- * Defaults to `DEFAULT_SENTRY_URL` (SaaS) when neither env var is set.
+ * Resolution order:
+ *   1. `SENTRY_HOST` / `SENTRY_URL` env (user's shell — fully trusted).
+ *   2. `sntrys_<base64>_<secret>` token claim's `url` field, when the env
+ *      token is a parseable org-auth-token AND the env doesn't already
+ *      provide a host. This is a UX fallback: a user who exported only
+ *      `SENTRY_AUTH_TOKEN` (forgot `SENTRY_HOST`) still gets routed
+ *      correctly. The claim is plaintext-unsigned (see
+ *      `src/lib/token-claims.ts` JSDoc), so this is a "best-effort hint,
+ *      not a security primitive" — fail-open on parse errors. Source:
+ *      `getsentry/sentry/src/sentry/utils/security/orgauthtoken_token.py`.
+ *      Tracked as #848 — folded into this PR for completeness.
+ *   3. `DEFAULT_SENTRY_URL` (SaaS) — the original default.
+ *
+ * Why the claim is safe to consult here despite being unsigned:
+ *
+ * - For LEGITIMATE org-auth tokens, the `url` field is authoritative —
+ *   the real Sentry server wrote it at issuance time.
+ * - For ATTACKER-FORGED tokens (someone tricked the user into pasting
+ *   their token), the user has already authorized the attacker's server
+ *   directly — out of threat model. Reading the forged claim doesn't
+ *   create a new attack vector.
+ * - `SENTRY_HOST`/`SENTRY_URL` from env always wins (step 1 above), so
+ *   a user's explicit shell config is never overridden by the claim.
  */
 export function captureEnvTokenHost(): void {
   if (pinnedHost !== undefined) {
     return;
   }
   const fromEnv = readEnvHost();
-  const host = fromEnv ? normalizeOrigin(fromEnv) : undefined;
-  pinnedHost = host ?? DEFAULT_SENTRY_URL;
+  const envHost = fromEnv ? normalizeOrigin(fromEnv) : undefined;
+  if (envHost) {
+    pinnedHost = envHost;
+    return;
+  }
+  // Env didn't set a host — fall back to the env-token's `sntrys_` claim
+  // if one is parseable. See function JSDoc for trust rationale.
+  const claimUrl = getSntrysClaimUrl(getRawEnvToken());
+  const claimHost = claimUrl ? normalizeOrigin(claimUrl) : undefined;
+  if (claimHost) {
+    pinnedHost = claimHost;
+    return;
+  }
+  pinnedHost = DEFAULT_SENTRY_URL;
 }
 
 /**

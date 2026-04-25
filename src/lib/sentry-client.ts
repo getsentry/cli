@@ -26,8 +26,10 @@ import {
   storeCachedResponse,
 } from "./response-cache.js";
 import { withTracingSpan } from "./telemetry.js";
+import { getSntrysClaimUrl } from "./token-claims.js";
 import {
   getActiveTokenHost,
+  isHostTrusted,
   isRequestOriginTrusted,
   normalizeOrigin,
 } from "./token-host.js";
@@ -117,6 +119,27 @@ function prepareHeaders(
       `Refusing to send credentials to ${requestOrigin ?? "<unknown host>"}: active token is scoped to ${tokenHost}.\n` +
         "Run 'sentry auth login --url <url>' against the intended instance, " +
         "or unset SENTRY_AUTH_TOKEN/SENTRY_HOST to use credentials for a different host."
+    );
+  }
+
+  // Belt-and-suspenders: if the bearer token is a `sntrys_` org-auth-token
+  // with a parseable `url` claim, verify the request origin matches the
+  // claim. This catches the (rare) case where a user has access to multiple
+  // Sentry instances and the stored `auth.host` ends up pointing at one
+  // instance while the token's claim points at another. The primary
+  // `isRequestOriginTrusted` check above wouldn't fire because both
+  // `auth.host` and the request origin agree — only the claim disagrees.
+  //
+  // The claim is UNSIGNED (see `token-claims.ts` JSDoc), so this is a
+  // best-effort hint, not a primary security signal. Fail-open on parse
+  // errors (parseSntrysClaim returns undefined → no extra check).
+  const claimUrl = getSntrysClaimUrl(token);
+  if (claimUrl && !isHostTrusted(input, claimUrl)) {
+    const requestOrigin = normalizeOrigin(input);
+    throw new HostScopeError(
+      `Refusing to send credentials to ${requestOrigin ?? "<unknown host>"}: the active token's embedded claim says it was issued by ${claimUrl}, which doesn't match this request's host.\n` +
+        "Run 'sentry auth login --url <url>' against the intended instance, " +
+        "or unset SENTRY_AUTH_TOKEN to use a different token."
     );
   }
 
