@@ -151,9 +151,9 @@ describe.each([
 
 describe("ZipWriter compression mode", () => {
   // The local file header records the entry's compression method at
-  // offset 8 (16-bit LE): 0 = STORED, 8 = DEFLATE. Same field in the
-  // central directory header at offset 10. We assert against both so
-  // any drift between local and central headers fails loudly.
+  // offset 8 (16-bit LE): 0 = STORED, 8 = DEFLATE. Drift between this
+  // and the central directory copy would surface as an `unzip -p`
+  // failure in the extraction tests below.
   const SYSB_HEADER_BYTES = 8;
   const LOCAL_HEADER_METHOD_OFFSET = SYSB_HEADER_BYTES + 8;
 
