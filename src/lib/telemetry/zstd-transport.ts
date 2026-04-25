@@ -304,9 +304,14 @@ export async function maybeCompress(
 
   if (encoding === "zstd") {
     // Belt-and-braces — `Bun` may have been swapped out between
-    // construction and first send. Fall through to gzip if so.
+    // construction and first send. Fall through to gzip if so, but
+    // re-apply the gzip threshold so mid-sized bodies (1-32 KiB) don't
+    // get compressed when the SDK default would have shipped them raw.
     const bun = (globalThis as { Bun?: BunZstdHost }).Bun;
     if (!bun?.zstdCompress) {
+      if (buf.length <= GZIP_THRESHOLD) {
+        return { payload: buf, encodingApplied: "none" };
+      }
       const gz = await gzipAsync(buf);
       return { payload: gz, encodingApplied: "gzip" };
     }

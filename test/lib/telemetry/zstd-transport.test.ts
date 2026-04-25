@@ -456,19 +456,41 @@ describe("maybeCompress", () => {
     expect(result.payload).toBe(buf);
   });
 
-  test("zstd path + Bun.zstdCompress missing mid-flight → gzip safety net", async () => {
+  test("zstd path + Bun.zstdCompress missing mid-flight + >32 KiB → gzip safety net", async () => {
     const saved = globalThis.Bun?.zstdCompress;
     (globalThis as { Bun: { zstdCompress?: unknown } }).Bun.zstdCompress =
       undefined as never;
     try {
-      const buf = Buffer.from("x".repeat(4096));
+      const buf = Buffer.from("x".repeat(64 * 1024));
       // Encoding pre-selected as "zstd" (caller didn't reprobe), but
       // the runtime now lacks zstd — the belt-and-braces branch gzips.
       const result = await maybeCompress(buf, "zstd");
       expect(result.encodingApplied).toBe("gzip");
       expect(gunzipSync(result.payload).toString("utf-8")).toBe(
-        "x".repeat(4096)
+        "x".repeat(64 * 1024)
       );
+    } finally {
+      if (saved !== undefined) {
+        globalThis.Bun.zstdCompress = saved;
+      }
+    }
+  });
+
+  test("zstd path + Bun.zstdCompress missing mid-flight + 1-32 KiB → passthrough (matches SDK default)", async () => {
+    // Edge case: caller selected "zstd" because Bun.zstdCompress was
+    // present at construction, but the global got swapped out before
+    // the first send. For bodies between ZSTD_THRESHOLD (1 KiB) and
+    // GZIP_THRESHOLD (32 KiB) we MUST pass them through uncompressed,
+    // matching the SDK's default-transport behavior. Otherwise we'd
+    // gzip bodies the SDK would have shipped raw.
+    const saved = globalThis.Bun?.zstdCompress;
+    (globalThis as { Bun: { zstdCompress?: unknown } }).Bun.zstdCompress =
+      undefined as never;
+    try {
+      const buf = Buffer.from("x".repeat(8 * 1024));
+      const result = await maybeCompress(buf, "zstd");
+      expect(result.encodingApplied).toBe("none");
+      expect(result.payload).toBe(buf);
     } finally {
       if (saved !== undefined) {
         globalThis.Bun.zstdCompress = saved;
