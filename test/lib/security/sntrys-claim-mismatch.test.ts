@@ -208,11 +208,9 @@ describe("CVE defense-in-depth: sntrys_ claim vs request mismatch", () => {
     const { apiRequestToRegion } = await import(
       "../../../src/lib/api/infrastructure.js"
     );
-    await apiRequestToRegion(
-      "https://us.sentry.acme.com",
-      "/organizations/",
-      { method: "GET" }
-    );
+    await apiRequestToRegion("https://us.sentry.acme.com", "/organizations/", {
+      method: "GET",
+    });
 
     // Request fired with the bearer token attached. Cleanup of the
     // in-process region allow-list happens in afterEach.
