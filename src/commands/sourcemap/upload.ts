@@ -101,8 +101,8 @@ export const uploadCommand = buildCommand({
       "allow-empty": {
         kind: "boolean",
         brief:
-          "Exit successfully when no sourcemap pairs are found (default: " +
-          "error out to catch silent build misconfigurations)",
+          "Exit successfully when no JS + sourcemap pairs are found " +
+          "(default: error out to catch silent build misconfigurations)",
         optional: true,
         default: false,
       },

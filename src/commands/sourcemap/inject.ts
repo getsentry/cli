@@ -100,7 +100,7 @@ export const injectCommand = buildCommand({
       "allow-empty": {
         kind: "boolean",
         brief:
-          "Exit successfully when no JS + sourcemap pairs are discovered " +
+          "Exit successfully when no JS + sourcemap pairs are found " +
           "(default: error out to catch silent build misconfigurations)",
         optional: true,
         default: false,
@@ -112,10 +112,10 @@ export const injectCommand = buildCommand({
     flags: { ext?: string; "dry-run"?: boolean; "allow-empty"?: boolean },
     dir: string
   ) {
-    // Phase 1 — read-only validation. Distinct errors for "directory
-    // missing" vs "directory empty/misconfigured". Discovery runs
-    // without side effects so we never write debug IDs into files when
-    // the upstream state is doomed (empty dir, typo'd path).
+    // Discover pairs read-only first so we don't error after partially
+    // mutating files. Zero *discovered* pairs (distinct from zero
+    // *injected* — the idempotent re-run case) almost always means a
+    // missing-.map bundler misconfiguration; --allow-empty opts out.
     await assertDirectoryReadable(dir);
 
     const extensions = flags.ext?.split(",").map((e) => e.trim());
@@ -123,21 +123,12 @@ export const injectCommand = buildCommand({
       ? new Set(extensions.map((e) => (e.startsWith(".") ? e : `.${e}`)))
       : undefined;
 
-    // Guard against silent misconfigurations: zero *discovered* pairs
-    // almost always means the bundler didn't emit .map files. This is
-    // distinct from zero *injected* (which is legitimate when every
-    // pair already has a debug ID — the idempotent re-run case).
-    // Callers that legitimately invoke inject on potentially-empty
-    // directories can pass --allow-empty.
     const pairs = await discoverFilePairs(dir, extSet);
     if (pairs.length === 0 && !flags["allow-empty"]) {
       const diag = await diagnoseEmptyDiscovery(dir, { extensions });
       throw buildEmptyDiscoveryError(dir, diag);
     }
 
-    // Phase 2 — mutating work (skipped in dry-run). The second pass
-    // through `injectDirectory` re-walks the directory; this is cheap
-    // relative to the sourcemap parsing/rewriting it does per pair.
     const results = await injectDirectory(dir, {
       extensions,
       dryRun: flags["dry-run"],

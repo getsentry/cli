@@ -198,13 +198,9 @@ export async function diagnoseEmptyDiscovery(
 ): Promise<DiscoveryDiagnostic> {
   // Build one set covering JS extensions + `.map` so the walker visits
   // both in a single pass.
-  const extensions = new Set<string>(DEFAULT_EXTENSIONS);
-  if (options.extensions) {
-    extensions.clear();
-    for (const e of options.extensions) {
-      extensions.add(e.startsWith(".") ? e : `.${e}`);
-    }
-  }
+  const extensions = options.extensions
+    ? new Set(options.extensions.map((e) => (e.startsWith(".") ? e : `.${e}`)))
+    : new Set(DEFAULT_EXTENSIONS);
   extensions.add(".map");
 
   const absDir = resolvePath(dir);
