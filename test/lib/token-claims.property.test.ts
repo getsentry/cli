@@ -24,14 +24,10 @@ import {
   tuple,
 } from "fast-check";
 import { parseSntrysClaim } from "../../src/lib/token-claims.js";
+import { mintSntrysToken } from "../helpers.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
-/** Mint a sntrys_ token shape (matches server format). */
-function mint(payload: Record<string, unknown>): string {
-  const json = JSON.stringify(payload);
-  const b64 = Buffer.from(json, "utf8").toString("base64").replace(/=+$/, "");
-  return `sntrys_${b64}_secret-tail`;
-}
+const mint = mintSntrysToken;
 
 /** Arbitrary URL-shaped string (https://<host>) */
 const httpsUrlArb = stringMatching(

@@ -18,31 +18,15 @@ import {
   parseOrgProjectArg,
 } from "../../../src/lib/arg-parsing.js";
 import { resetEnvTokenHostForTesting } from "../../../src/lib/env-token-host.js";
+import { useEnvSandbox } from "../../helpers.js";
 
 const ENV_KEYS = ["SENTRY_HOST", "SENTRY_URL"] as const;
 
 describe("CVE: URL argument credential exfiltration", () => {
-  let saved: Record<string, string | undefined>;
+  useEnvSandbox(ENV_KEYS);
 
-  beforeEach(() => {
-    saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
-    for (const k of ENV_KEYS) {
-      delete process.env[k];
-    }
-    resetEnvTokenHostForTesting();
-  });
-
-  afterEach(() => {
-    for (const k of ENV_KEYS) {
-      const v = saved[k];
-      if (v !== undefined) {
-        process.env[k] = v;
-      } else {
-        delete process.env[k];
-      }
-    }
-    resetEnvTokenHostForTesting();
-  });
+  beforeEach(resetEnvTokenHostForTesting);
+  afterEach(resetEnvTokenHostForTesting);
 
   test("parseIssueArg with attacker URL throws before env is poisoned (SaaS-scoped token)", () => {
     // preload sets SENTRY_AUTH_TOKEN; env-token defaults to SaaS.

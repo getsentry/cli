@@ -9,6 +9,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  extractFetchUrl,
+  mintSntrysToken,
+  resetHostScopingState,
+  useEnvSandbox,
+} from "../../helpers.js";
 
 const ENV_KEYS = [
   "SENTRY_AUTH_TOKEN",
@@ -17,39 +23,14 @@ const ENV_KEYS = [
   "SENTRY_URL",
 ] as const;
 
-/** Mint a sntrys_ token shape for testing (matches server format). */
-function mintSntrysToken(payload: Record<string, unknown>): string {
-  const json = JSON.stringify(payload);
-  const b64 = Buffer.from(json, "utf8").toString("base64").replace(/=+$/, "");
-  return `sntrys_${b64}_secret-tail-for-test`;
-}
-
-function extractUrl(input: RequestInfo | URL): string {
-  if (typeof input === "string") {
-    return input;
-  }
-  if (input instanceof URL) {
-    return input.href;
-  }
-  return input.url;
-}
-
 describe("CVE defense-in-depth: sntrys_ claim vs request mismatch", () => {
-  let saved: Record<string, string | undefined>;
+  useEnvSandbox(ENV_KEYS);
+
   let fetchCalls: { url: string; auth: string | null }[];
   let originalFetch: typeof globalThis.fetch;
 
   beforeEach(async () => {
-    saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
-    for (const k of ENV_KEYS) {
-      delete process.env[k];
-    }
-    const { resetEnvTokenHostForTesting } = await import(
-      "../../../src/lib/env-token-host.js"
-    );
-    const { resetTrustedRegionUrlsForTesting } = await import(
-      "../../../src/lib/token-host.js"
-    );
+    await resetHostScopingState();
     const {
       resetAuthTokenCache,
       resetAuthRowCache,
@@ -61,8 +42,6 @@ describe("CVE defense-in-depth: sntrys_ claim vs request mismatch", () => {
     const { clearResponseCache } = await import(
       "../../../src/lib/response-cache.js"
     );
-    resetEnvTokenHostForTesting();
-    resetTrustedRegionUrlsForTesting();
     resetAuthTokenCache();
     resetAuthRowCache();
     resetIdentityFingerprintCache();
@@ -78,7 +57,7 @@ describe("CVE defense-in-depth: sntrys_ claim vs request mismatch", () => {
         init?.headers ?? (input instanceof Request ? input.headers : undefined)
       );
       fetchCalls.push({
-        url: extractUrl(input),
+        url: extractFetchUrl(input),
         auth: headers.get("Authorization"),
       });
       return new Response("{}", { status: 200 });
@@ -86,22 +65,7 @@ describe("CVE defense-in-depth: sntrys_ claim vs request mismatch", () => {
   });
 
   afterEach(async () => {
-    for (const k of ENV_KEYS) {
-      const v = saved[k];
-      if (v !== undefined) {
-        process.env[k] = v;
-      } else {
-        delete process.env[k];
-      }
-    }
-    const { resetEnvTokenHostForTesting } = await import(
-      "../../../src/lib/env-token-host.js"
-    );
-    const { resetTrustedRegionUrlsForTesting } = await import(
-      "../../../src/lib/token-host.js"
-    );
-    resetEnvTokenHostForTesting();
-    resetTrustedRegionUrlsForTesting();
+    await resetHostScopingState();
     globalThis.fetch = originalFetch;
   });
 
@@ -225,33 +189,10 @@ describe("CVE defense-in-depth: sntrys_ claim vs request mismatch", () => {
 describe("UX path: env-token-host falls back to sntrys_ claim url", () => {
   // These tests check the captureEnvTokenHost snapshot — no fetch
   // mocking needed.
-  let savedUx: Record<string, string | undefined>;
+  useEnvSandbox(ENV_KEYS);
 
-  beforeEach(async () => {
-    savedUx = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
-    for (const k of ENV_KEYS) {
-      delete process.env[k];
-    }
-    const { resetEnvTokenHostForTesting } = await import(
-      "../../../src/lib/env-token-host.js"
-    );
-    resetEnvTokenHostForTesting();
-  });
-
-  afterEach(async () => {
-    for (const k of ENV_KEYS) {
-      const v = savedUx[k];
-      if (v !== undefined) {
-        process.env[k] = v;
-      } else {
-        delete process.env[k];
-      }
-    }
-    const { resetEnvTokenHostForTesting } = await import(
-      "../../../src/lib/env-token-host.js"
-    );
-    resetEnvTokenHostForTesting();
-  });
+  beforeEach(resetHostScopingState);
+  afterEach(resetHostScopingState);
 
   test("self-hosted user with sntrys_ token but no SENTRY_HOST → snapshot uses claim", async () => {
     // User pasted a sntrys_ token from their self-hosted UI but didn't

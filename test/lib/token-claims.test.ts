@@ -17,22 +17,7 @@ import {
   getSntrysClaimUrl,
   parseSntrysClaim,
 } from "../../src/lib/token-claims.js";
-
-/**
- * Mint a `sntrys_` token shape with a given JSON payload. Mirrors the
- * server's `generate_token` (standard base64, ascii encoding). The
- * trailing secret is a placeholder — its content is irrelevant to
- * parsing.
- */
-function mintSntrysToken(payload: Record<string, unknown>): string {
-  const json = JSON.stringify(payload);
-  const b64 = Buffer.from(json, "utf8").toString("base64");
-  // Server uses `b64encode(...).rstrip("=")`, but stripping `=` isn't
-  // semantically required for parsing — Buffer.from(base64) handles
-  // both padded and unpadded inputs. Use unpadded to be realistic.
-  const stripped = b64.replace(/=+$/, "");
-  return `sntrys_${stripped}_some-random-secret-tail`;
-}
+import { mintSntrysToken } from "../helpers.js";
 
 describe("parseSntrysClaim", () => {
   test("extracts url + region_url from a well-formed token", () => {

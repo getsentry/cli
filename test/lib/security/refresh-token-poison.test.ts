@@ -15,29 +15,17 @@ import {
   resetEnvTokenHostForTesting,
 } from "../../../src/lib/env-token-host.js";
 import { refreshAccessToken } from "../../../src/lib/oauth.js";
+import { extractFetchUrl, useEnvSandbox } from "../../helpers.js";
 
 const ENV_KEYS = ["SENTRY_HOST", "SENTRY_URL", "SENTRY_CLIENT_ID"] as const;
 
-function extractUrl(input: RequestInfo | URL): string {
-  if (typeof input === "string") {
-    return input;
-  }
-  if (input instanceof URL) {
-    return input.href;
-  }
-  return input.url;
-}
-
 describe("CVE defense-in-depth: refresh token", () => {
-  let saved: Record<string, string | undefined>;
+  useEnvSandbox(ENV_KEYS);
+
   let fetchCalls: string[];
   let originalFetch: typeof globalThis.fetch;
 
   beforeEach(() => {
-    saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
-    for (const k of ENV_KEYS) {
-      delete process.env[k];
-    }
     // A client ID is required for refreshAccessToken to proceed past the
     // config check. We want it to reach (and fail at) the host assertion.
     process.env.SENTRY_CLIENT_ID = "test-client-id";
@@ -46,20 +34,12 @@ describe("CVE defense-in-depth: refresh token", () => {
     fetchCalls = [];
     originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      fetchCalls.push(extractUrl(input));
+      fetchCalls.push(extractFetchUrl(input));
       throw new Error("test: unexpected fetch");
     }) as typeof fetch;
   });
 
   afterEach(() => {
-    for (const k of ENV_KEYS) {
-      const v = saved[k];
-      if (v !== undefined) {
-        process.env[k] = v;
-      } else {
-        delete process.env[k];
-      }
-    }
     resetEnvTokenHostForTesting();
     globalThis.fetch = originalFetch;
   });

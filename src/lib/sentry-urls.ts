@@ -9,6 +9,7 @@ import {
   DEFAULT_SENTRY_HOST,
   DEFAULT_SENTRY_URL,
   getConfiguredSentryUrl,
+  normalizeUrl,
 } from "./constants.js";
 
 /**
@@ -108,7 +109,8 @@ export function isSaaSTrustOrigin(url: string): boolean {
 /**
  * Normalize a URL (or fetch input) to its canonical origin
  * (`scheme://host[:port]`). Returns `undefined` for inputs that don't parse
- * as URLs.
+ * as URLs. Bare hostnames are NOT accepted — use {@link normalizeUserInputToOrigin}
+ * for user-supplied strings that may be bare hostnames.
  */
 export function normalizeOrigin(
   input: string | URL | Request | undefined | null
@@ -129,6 +131,21 @@ export function normalizeOrigin(
   } catch {
     return;
   }
+}
+
+/**
+ * Normalize a user-supplied string (env var, CLI flag, rc file value) to a
+ * canonical origin. Accepts bare hostnames (`sentry.acme.com`) by prefixing
+ * with `https://` via {@link normalizeUrl} before parsing.
+ *
+ * Returns `undefined` for empty/whitespace input or strings that still fail
+ * to parse after the prefix.
+ */
+export function normalizeUserInputToOrigin(
+  input: string | undefined
+): string | undefined {
+  const prefixed = normalizeUrl(input);
+  return prefixed ? normalizeOrigin(prefixed) : undefined;
 }
 
 /**

@@ -27,12 +27,13 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { loginCommand } from "../../../src/commands/auth/login.js";
-import {
-  captureEnvTokenHost,
-  resetEnvTokenHostForTesting,
-} from "../../../src/lib/env-token-host.js";
+import { captureEnvTokenHost } from "../../../src/lib/env-token-host.js";
 import { HostScopeError } from "../../../src/lib/errors.js";
-import { resetLoginTrustAnchorForTesting } from "../../../src/lib/token-host.js";
+import {
+  extractFetchUrl,
+  resetHostScopingState,
+  useEnvSandbox,
+} from "../../helpers.js";
 
 const ENV_KEYS = [
   "SENTRY_HOST",
@@ -62,16 +63,6 @@ function createContext() {
   };
 }
 
-function extractUrl(input: RequestInfo | URL): string {
-  if (typeof input === "string") {
-    return input;
-  }
-  if (input instanceof URL) {
-    return input.href;
-  }
-  return input.url;
-}
-
 /**
  * Check if a URL's hostname exactly matches one of the given hostnames.
  * Use in preference to `.includes()` substring matching — a crafted
@@ -87,17 +78,13 @@ function urlHostnameIn(url: string, hostnames: string[]): boolean {
 }
 
 describe("CVE: auth login --token with rc-poisoned env.SENTRY_URL", () => {
-  let saved: Record<string, string | undefined>;
+  useEnvSandbox(ENV_KEYS);
+
   let fetchCalls: { url: string; authorization: string | null }[];
   let originalFetch: typeof globalThis.fetch;
 
-  beforeEach(() => {
-    saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
-    for (const k of ENV_KEYS) {
-      delete process.env[k];
-    }
-    resetEnvTokenHostForTesting();
-    resetLoginTrustAnchorForTesting();
+  beforeEach(async () => {
+    await resetHostScopingState();
 
     // Intercept fetch to assert no outbound requests on the attacker path.
     fetchCalls = [];
@@ -110,24 +97,15 @@ describe("CVE: auth login --token with rc-poisoned env.SENTRY_URL", () => {
         init?.headers ?? (input instanceof Request ? input.headers : undefined)
       );
       fetchCalls.push({
-        url: extractUrl(input),
+        url: extractFetchUrl(input),
         authorization: headers.get("Authorization"),
       });
       throw new Error("test: unexpected fetch");
     }) as typeof fetch;
   });
 
-  afterEach(() => {
-    for (const k of ENV_KEYS) {
-      const v = saved[k];
-      if (v !== undefined) {
-        process.env[k] = v;
-      } else {
-        delete process.env[k];
-      }
-    }
-    resetEnvTokenHostForTesting();
-    resetLoginTrustAnchorForTesting();
+  afterEach(async () => {
+    await resetHostScopingState();
     globalThis.fetch = originalFetch;
   });
 

@@ -17,6 +17,7 @@ import {
   applyCustomHeaders,
 } from "../../../src/lib/custom-headers.js";
 import { resetEnvTokenHostForTesting } from "../../../src/lib/env-token-host.js";
+import { useEnvSandbox } from "../../helpers.js";
 
 const ENV_KEYS = [
   "SENTRY_HOST",
@@ -25,26 +26,14 @@ const ENV_KEYS = [
 ] as const;
 
 describe("CVE defense-in-depth: fetch layer refuses mismatched hosts", () => {
-  let saved: Record<string, string | undefined>;
+  useEnvSandbox(ENV_KEYS);
 
   beforeEach(() => {
-    saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
-    for (const k of ENV_KEYS) {
-      delete process.env[k];
-    }
     resetEnvTokenHostForTesting();
     _resetCustomHeadersCache();
   });
 
   afterEach(() => {
-    for (const k of ENV_KEYS) {
-      const v = saved[k];
-      if (v !== undefined) {
-        process.env[k] = v;
-      } else {
-        delete process.env[k];
-      }
-    }
     resetEnvTokenHostForTesting();
     _resetCustomHeadersCache();
   });

@@ -14,31 +14,14 @@ import {
   getEnvTokenHost,
   resetEnvTokenHostForTesting,
 } from "../../src/lib/env-token-host.js";
+import { useEnvSandbox } from "../helpers.js";
 
 const ENV_KEYS = ["SENTRY_HOST", "SENTRY_URL"] as const;
 
 describe("env-token-host", () => {
-  let saved: Record<string, string | undefined>;
-
-  beforeEach(() => {
-    saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
-    for (const k of ENV_KEYS) {
-      delete process.env[k];
-    }
-    resetEnvTokenHostForTesting();
-  });
-
-  afterEach(() => {
-    for (const k of ENV_KEYS) {
-      const v = saved[k];
-      if (v !== undefined) {
-        process.env[k] = v;
-      } else {
-        delete process.env[k];
-      }
-    }
-    resetEnvTokenHostForTesting();
-  });
+  useEnvSandbox(ENV_KEYS);
+  beforeEach(resetEnvTokenHostForTesting);
+  afterEach(resetEnvTokenHostForTesting);
 
   test("defaults to SaaS when neither SENTRY_HOST nor SENTRY_URL is set", () => {
     captureEnvTokenHost();

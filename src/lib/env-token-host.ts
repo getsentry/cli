@@ -19,33 +19,23 @@
  *   4. getDefaultUrl() fallback   ← may write env.SENTRY_URL
  */
 
-import { DEFAULT_SENTRY_URL, normalizeUrl } from "./constants.js";
+import { DEFAULT_SENTRY_URL } from "./constants.js";
 import { getRawEnvToken } from "./db/auth.js";
 import { getEnv } from "./env.js";
+import { normalizeUserInputToOrigin } from "./sentry-urls.js";
 import { getSntrysClaimUrl } from "./token-claims.js";
-import { normalizeOrigin } from "./token-host.js";
 
 /** Pinned host. `undefined` means not yet captured. */
 let pinnedHost: string | undefined;
-
-/**
- * Read `env.SENTRY_HOST` then `env.SENTRY_URL` directly. NOT via
- * `getConfiguredSentryUrl` (which also consults `.sentryclirc`-sourced values
- * we haven't yet decided to trust). Bare hostnames are prefixed with `https://`
- * via `normalizeUrl` to match the rest of the codebase.
- */
-function readEnvHost(): string | undefined {
-  const env = getEnv();
-  const raw = env.SENTRY_HOST?.trim() || env.SENTRY_URL?.trim();
-  return normalizeUrl(raw);
-}
 
 /**
  * Snapshot the env-token's scoping host. Idempotent — second and subsequent
  * calls are no-ops.
  *
  * Resolution order:
- * 1. `SENTRY_HOST`/`SENTRY_URL` from env (user's shell — trusted).
+ * 1. `SENTRY_HOST`/`SENTRY_URL` from env (user's shell — trusted). Reads env
+ *    directly; NOT via `getConfiguredSentryUrl` which also consults
+ *    `.sentryclirc`-sourced values we haven't yet decided to trust.
  * 2. `sntrys_` token claim's `url` (UX fallback for self-hosted users who
  *    only set `SENTRY_AUTH_TOKEN`). The claim is unsigned; see
  *    `token-claims.ts`. Env always wins over claim.
@@ -55,15 +45,17 @@ export function captureEnvTokenHost(): void {
   if (pinnedHost !== undefined) {
     return;
   }
-  const fromEnv = readEnvHost();
-  const envHost = fromEnv ? normalizeOrigin(fromEnv) : undefined;
+  const env = getEnv();
+  const envHost = normalizeUserInputToOrigin(
+    env.SENTRY_HOST?.trim() || env.SENTRY_URL?.trim()
+  );
   if (envHost) {
     pinnedHost = envHost;
     return;
   }
-  const claimUrl = getSntrysClaimUrl(getRawEnvToken());
-  const claimHost = claimUrl ? normalizeOrigin(claimUrl) : undefined;
-  pinnedHost = claimHost ?? DEFAULT_SENTRY_URL;
+  pinnedHost =
+    normalizeUserInputToOrigin(getSntrysClaimUrl(getRawEnvToken())) ??
+    DEFAULT_SENTRY_URL;
 }
 
 /**

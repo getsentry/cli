@@ -38,7 +38,10 @@ import {
 } from "../../lib/interactive-login.js";
 import { logger } from "../../lib/logger.js";
 import { clearResponseCache } from "../../lib/response-cache.js";
-import { isSaaSTrustOrigin } from "../../lib/sentry-urls.js";
+import {
+  isSaaSTrustOrigin,
+  normalizeUserInputToOrigin,
+} from "../../lib/sentry-urls.js";
 import {
   isLoginTrustAnchorFor,
   normalizeOrigin,
@@ -162,11 +165,9 @@ export function applyLoginUrl(url: string | undefined): string {
     effectiveHost = url;
     registerAnchor = true;
   } else {
-    // Bare hostnames need https:// prefix before normalizeOrigin's URL parse.
-    const raw = env.SENTRY_HOST || env.SENTRY_URL;
-    const prefixed = normalizeUrl(raw);
     effectiveHost =
-      (prefixed && normalizeOrigin(prefixed)) ?? DEFAULT_SENTRY_URL;
+      normalizeUserInputToOrigin(env.SENTRY_HOST || env.SENTRY_URL) ??
+      DEFAULT_SENTRY_URL;
     // Trust the env value only if it matches the boot snapshot — i.e. the
     // user's shell, not a post-boot rc-shim write.
     registerAnchor = effectiveHost === getEnvTokenHost();

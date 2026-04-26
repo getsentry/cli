@@ -29,13 +29,10 @@ import {
 } from "../../../src/lib/sentryclirc.js";
 import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
 
-const ENV_KEYS = [
-  "SENTRY_AUTH_TOKEN",
-  "SENTRY_TOKEN",
-  "SENTRY_HOST",
-  "SENTRY_URL",
-  "SENTRY_CONFIG_DIR",
-] as const;
+// Don't use useEnvSandbox here: these tests depend on preload's
+// SENTRY_AUTH_TOKEN being present (so getActiveTokenHost() returns a host)
+// while still controlling SENTRY_HOST/URL/CONFIG_DIR per-test.
+const ENV_KEYS = ["SENTRY_HOST", "SENTRY_URL", "SENTRY_CONFIG_DIR"] as const;
 
 function writeRc(dir: string, content: string): void {
   writeFileSync(join(dir, CONFIG_FILENAME), content, "utf-8");
