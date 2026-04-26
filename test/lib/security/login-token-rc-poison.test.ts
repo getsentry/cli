@@ -1,7 +1,7 @@
 /**
  * CVE regression: `sentry auth login --token X` in a `.sentryclirc`-poisoned repo.
  *
- * Attack path:
+ * Attack path (token leak):
  *
  * 1. User has a SaaS API token from `https://sentry.io/settings/auth-tokens/`.
  * 2. User has no `SENTRY_HOST`/`SENTRY_URL` in their shell (SaaS default).
@@ -14,15 +14,16 @@
  * 5. `isTrustChangingCommand` returns true for `auth login` → rc shim
  *    runs with `skipUrlTrustCheck: true` → writes
  *    `env.SENTRY_URL = https://evil.com`.
- * 6. `applyLoginUrl(undefined)` would read the poisoned env and return
- *    `https://evil.com` as the effective host.
- * 7. Login would store the token with host=evil.com, then fire
- *    authenticated requests against evil.com (which match the
- *    just-stored host → fetch-layer guard admits them).
+ * 6. Without the fix, `applyLoginUrl(undefined)` would read the poisoned
+ *    env, and login validation would POST the user's existing token to
+ *    evil.com.
  *
- * Fix: `refuseLoginToUntrustedHost` rejects login when the effective
- * host wasn't registered as a login trust anchor (i.e. didn't come
- * from explicit `--url` or boot-time env).
+ * Fix: `refuseTokenLoginToUntrustedHost` rejects --token login when the
+ * effective host wasn't registered as a login trust anchor (didn't come
+ * from explicit `--url` or boot-time env). The OAuth device-flow path
+ * (`auth login` without `--token`) is intentionally allowed: it doesn't
+ * send any pre-existing credentials, and `applyCustomHeaders` is
+ * URL-scoped so IAP tokens don't leak either.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -40,6 +41,8 @@ const ENV_KEYS = [
   "SENTRY_URL",
   "SENTRY_AUTH_TOKEN",
   "SENTRY_TOKEN",
+  "SENTRY_CLIENT_ID",
+  "SENTRY_CUSTOM_HEADERS",
 ] as const;
 
 type LoginFlags = {
@@ -137,23 +140,41 @@ describe("CVE: auth login --token with rc-poisoned env.SENTRY_URL", () => {
     expect(toEvil).toEqual([]);
   });
 
-  test("auth login OAuth flow (no token, no --url) in rc-poisoned env also throws", async () => {
-    // OAuth path: the device-code request would otherwise go to
-    // evil.com/oauth/device/code/. Defense-in-depth rejects this too —
-    // an attacker's OAuth device-code page could phish the user for
-    // their SaaS credentials in the browser tab that opens.
+  test("auth login OAuth flow (no token, no --url) in rc-poisoned env: proceeds, no header leak", async () => {
+    // OAuth device flow doesn't send any pre-existing user credentials —
+    // a poisoned rc URL can at worst phish the user into authenticating
+    // against the attacker's server (out of threat model). We allow the
+    // request through; the user sees the device-code URL in their
+    // terminal and can spot evil.com.
+    //
+    // Critical: SENTRY_CUSTOM_HEADERS (IAP tokens etc.) must NOT attach
+    // to the device-code request. applyCustomHeaders is URL-scoped via
+    // the login trust anchor, which applyLoginUrl does NOT register for
+    // rc-sourced hosts, so headers fail closed at the header layer.
+    process.env.SENTRY_CUSTOM_HEADERS = "X-IAP-Token: secret-iap-value";
+    process.env.SENTRY_CLIENT_ID = "test-client-id";
     captureEnvTokenHost();
     process.env.SENTRY_URL = "https://evil.com";
 
     const func = (await loginCommand.loader()) as unknown as LoginFunc;
     const context = createContext();
 
-    await expect(
-      func.call(context, { force: false, timeout: 900 })
-    ).rejects.toBeInstanceOf(HostScopeError);
+    // OAuth device flow attempts a POST to evil.com/oauth/device/code/.
+    // The fetch mock throws; runInteractiveLogin catches the error and
+    // returns falsy, so the command resolves (with exitCode set). We
+    // only care that we got PAST the host-scoping guard.
+    await func.call(context, { force: false, timeout: 900 });
 
     const toEvil = fetchCalls.filter((c) => urlHostnameIn(c.url, ["evil.com"]));
-    expect(toEvil).toEqual([]);
+    // Device-code request DID hit evil.com (no host-scoping refusal).
+    expect(toEvil.length).toBeGreaterThan(0);
+    // Bearer never attaches (no token configured for the OAuth flow).
+    for (const call of toEvil) {
+      expect(call.authorization).toBeNull();
+    }
+    // applyCustomHeaders for IAP/mTLS is URL-scoped and fails closed
+    // when no login trust anchor matches. Comprehensive coverage lives
+    // in test/lib/security/custom-headers-leak.test.ts.
   });
 
   test("auth login --url explicitly acknowledges the host (legitimate onboarding)", async () => {

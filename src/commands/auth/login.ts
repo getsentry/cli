@@ -94,30 +94,39 @@ export function parseLoginUrl(raw: string): string {
 }
 
 /**
- * Refuse `auth login` when the effective host was sourced from an untrusted
- * channel (i.e. the rc-shim bypass wrote env.SENTRY_URL but no trust anchor
- * was registered). Without this, `sentry auth login --token X` in a
- * poisoned-rc repo would send the user's API token to the attacker.
+ * Refuse `auth login --token X` when the effective host came from an
+ * untrusted channel (rc-shim bypass wrote env.SENTRY_URL with no matching
+ * trust anchor). Without this, `auth login --token <user-real-token>` in a
+ * poisoned-rc repo would POST the user's existing API token to the
+ * attacker's host during validation — a real credential leak.
  *
- * `applyLoginUrl` only registers an anchor when the host comes from a
- * trusted source, so "no anchor" is the load-bearing signal here.
+ * The OAuth device-flow path (`auth login` without `--token`) is
+ * intentionally NOT refused: it doesn't send any pre-existing credentials
+ * to the host, so a poisoned rc can at worst phish the user into creating
+ * a new account on the attacker's server (out of threat model — "user
+ * authorizes malicious server themselves"). `applyCustomHeaders` is
+ * URL-scoped at the header layer, so IAP/mTLS headers don't leak either.
+ *
+ * `applyLoginUrl` only registers a trust anchor when the host comes from a
+ * trusted source (`--url` flag or boot-time env snapshot), so "no matching
+ * anchor" is the load-bearing signal.
  */
-function refuseLoginToUntrustedHost(
+function refuseTokenLoginToUntrustedHost(
   flags: LoginFlags,
   effectiveHost: string
 ): void {
   if (
+    !flags.token ||
     flags.url ||
     isSaaSTrustOrigin(effectiveHost) ||
     isLoginTrustAnchorFor(effectiveHost)
   ) {
     return;
   }
-  const tokenHint = flags.token ? " --token <token>" : "";
   throw new HostScopeError(
-    `Refusing to log in against ${effectiveHost}: this URL was configured by a .sentryclirc file in the current or parent directory, not by your shell environment.\n` +
+    `Refusing to send --token to ${effectiveHost}: this URL was configured by a .sentryclirc file in the current or parent directory, not by your shell environment.\n` +
       "If you trust this host, pass it explicitly:\n" +
-      `  sentry auth login --url ${effectiveHost}${tokenHint}\n` +
+      `  sentry auth login --url ${effectiveHost} --token <token>\n` +
       "Otherwise, remove the [defaults] url line from the .sentryclirc file."
   );
 }
@@ -281,7 +290,7 @@ export const loginCommand = buildCommand({
     // requested instance. Default URL persistence is deferred until login
     // succeeds — see persistLoginUrlAsDefault calls below.
     const effectiveHost = applyLoginUrl(flags.url);
-    refuseLoginToUntrustedHost(flags, effectiveHost);
+    refuseTokenLoginToUntrustedHost(flags, effectiveHost);
 
     // Check if already authenticated and handle re-authentication
     if (isAuthenticated()) {
