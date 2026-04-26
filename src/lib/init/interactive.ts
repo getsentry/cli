@@ -1,19 +1,13 @@
 /**
  * Interactive Dispatcher
  *
- * Handles interactive prompts from the remote workflow.
- * Supports select, multi-select, and confirm prompts.
- * Respects --yes flag for non-interactive mode.
+ * Handles `prompt_request` actions from the workflow.
+ * Supports select, multi-select, and confirm prompts. Respects --yes.
  */
 
 import { confirm, log, multiselect, select } from "@clack/prompts";
 import chalk from "chalk";
-import {
-  abortIfCancelled,
-  featureHint,
-  featureLabel,
-  sortFeatures,
-} from "./clack-utils.js";
+import { abortIfCancelled } from "./clack-utils.js";
 import { REQUIRED_FEATURE } from "./constants.js";
 import type {
   ConfirmPayload,
@@ -63,14 +57,11 @@ async function handleSelect(
 
   const selected = await select({
     message: payload.prompt,
-    options: items.map((item, i) => {
-      const app = apps[i];
-      return {
-        value: item,
-        label: item,
-        hint: app?.framework ?? undefined,
-      };
-    }),
+    options: items.map((item, i) => ({
+      value: item,
+      label: item,
+      hint: apps[i]?.framework ?? undefined,
+    })),
   });
 
   return { selectedApp: abortIfCancelled(selected) };
@@ -89,30 +80,23 @@ async function handleMultiSelect(
   const hasRequired = available.includes(REQUIRED_FEATURE);
 
   if (options.yes) {
-    log.info(
-      `Auto-selected all features: ${available.map(featureLabel).join(", ")}`
-    );
+    log.info(`Auto-selected all features: ${available.join(", ")}`);
     return { features: available };
   }
 
-  const optional = sortFeatures(
-    available.filter((f) => f !== REQUIRED_FEATURE)
-  );
+  const optional = available.filter((f) => f !== REQUIRED_FEATURE);
 
   if (optional.length === 0) {
     if (hasRequired) {
-      log.info(`${featureLabel(REQUIRED_FEATURE)} is always included.`);
+      log.info("Error monitoring is always included.");
     }
     return { features: hasRequired ? [REQUIRED_FEATURE] : [] };
   }
 
-  const hints: string[] = [];
-  // Use clack's vertical bar character so hint lines align with the option lines below
   const bar = chalk.gray("\u2502");
+  const hints: string[] = [];
   if (hasRequired) {
-    hints.push(
-      `${bar}  ${chalk.dim(`${featureLabel(REQUIRED_FEATURE)} is always included`)}`
-    );
+    hints.push(`${bar}  ${chalk.dim("Error monitoring is always included")}`);
   }
   hints.push(`${bar}  ${chalk.dim("space=toggle, a=all, enter=confirm")}`);
 
@@ -120,10 +104,8 @@ async function handleMultiSelect(
     message: `${payload.prompt}\n${hints.join("\n")}`,
     options: optional.map((feature) => ({
       value: feature,
-      label: featureLabel(feature),
-      hint: featureHint(feature),
+      label: feature,
     })),
-    initialValues: optional.filter((f) => f === "performanceMonitoring"),
     required: false,
   });
 

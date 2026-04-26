@@ -1,9 +1,9 @@
 /**
  * sentry init
  *
- * Initialize Sentry in a project using the remote wizard workflow.
- * Communicates with the Mastra API via suspend/resume to perform
- * local filesystem operations and interactive prompts.
+ * Initialize Sentry in a project using the remote wizard.
+ * Starts a Vercel Workflow that runs a Claude Agent SDK session in a
+ * sandbox and bridges file/command operations back to this CLI.
  *
  * Supports two optional positionals with smart disambiguation:
  *   sentry init                       — auto-detect everything, dir = cwd
@@ -24,7 +24,7 @@ import { looksLikePath, parseOrgProjectArg } from "../lib/arg-parsing.js";
 import { buildCommand } from "../lib/command.js";
 import { ContextError, ValidationError } from "../lib/errors.js";
 import { warmOrgDetection } from "../lib/init/org-prefetch.js";
-import { runWizard } from "../lib/init/wizard-runner.js";
+import { runInit } from "../lib/init/init-runner.js";
 import { validateResourceId } from "../lib/input-validation.js";
 import { logger } from "../lib/logger.js";
 import {
@@ -277,7 +277,7 @@ export const initCommand = buildCommand<
     // would skip the timer and the process would hang on the error
     // display — exactly what Cursor Bugbot flagged on an earlier revision.
     try {
-      await runWizard({
+      await runInit({
         directory: targetDir,
         yes: flags.yes,
         dryRun: flags["dry-run"],
@@ -289,11 +289,11 @@ export const initCommand = buildCommand<
     } finally {
       // 7. macOS-only force-exit safety net.
       //
-      // On Darwin, `runWizard` installs the `/dev/tty` forwarding
+      // On Darwin, `runInit` installs the `/dev/tty` forwarding
       // workaround from stdin-reopen.ts to get keystrokes through to
       // clack. That workaround opens a second `tty.ReadStream` which
       // leaks a libuv handle on Bun 1.3.11 — no userland cleanup
-      // releases it (upstream oven-sh/bun#29126). After `runWizard`
+      // releases it (upstream oven-sh/bun#29126). After `runInit`
       // returns (or throws), the event loop stays ref'd and the process
       // hangs until the user presses a key.
       //

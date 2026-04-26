@@ -8,12 +8,7 @@ import { cancel, log, outro } from "@clack/prompts";
 import { terminalLink } from "../formatters/colors.js";
 import { colorTag, mdKvTable, renderMarkdown } from "../formatters/markdown.js";
 import { featureLabel } from "./clack-utils.js";
-import {
-  EXIT_DEPENDENCY_INSTALL_FAILED,
-  EXIT_PLATFORM_NOT_DETECTED,
-  EXIT_VERIFICATION_FAILED,
-} from "./constants.js";
-import type { WizardOutput, WorkflowRunResult } from "./types.js";
+import type { InitErrorEvent, WizardOutput } from "./types.js";
 
 type ChangedFile = NonNullable<WizardOutput["changedFiles"]>[number];
 
@@ -160,8 +155,7 @@ function buildSummary(output: WizardOutput): string {
   return sections.join("\n\n");
 }
 
-export function formatResult(result: WorkflowRunResult): void {
-  const output: WizardOutput = result.result ?? {};
+export function formatResult(output: WizardOutput): void {
   const md = buildSummary(output);
 
   if (md.length > 0) {
@@ -182,32 +176,17 @@ export function formatResult(result: WorkflowRunResult): void {
   outro("Sentry SDK installed successfully!");
 }
 
-export function formatError(result: WorkflowRunResult): void {
-  const inner = result.result;
-  const message =
-    result.error ?? inner?.message ?? "Wizard failed with an unknown error";
-  const exitCode = inner?.exitCode ?? 1;
+export function formatError(error: InitErrorEvent): void {
+  log.error(error.message);
 
-  log.error(String(message));
-
-  if (exitCode === EXIT_PLATFORM_NOT_DETECTED) {
-    log.warn(
-      "Hint: Could not detect your project's platform. Check that the directory contains a valid project."
-    );
-  } else if (exitCode === EXIT_DEPENDENCY_INSTALL_FAILED) {
-    const commands = inner?.commands;
-    if (commands?.length) {
-      log.warn(
-        `You can install dependencies manually:\n${commands.map((cmd) => `  $ ${cmd}`).join("\n")}`
-      );
+  if (error.output?.warnings?.length) {
+    for (const w of error.output.warnings) {
+      log.warn(w);
     }
-  } else if (exitCode === EXIT_VERIFICATION_FAILED) {
-    log.warn("Hint: Fix the verification issues and run 'sentry init' again.");
   }
 
-  const docsUrl = inner?.docsUrl;
-  if (docsUrl) {
-    log.info(`Docs: ${terminalLink(docsUrl)}`);
+  if (error.docsUrl) {
+    log.info(`Docs: ${terminalLink(error.docsUrl)}`);
   }
 
   cancel("Setup failed");

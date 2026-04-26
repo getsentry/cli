@@ -1,8 +1,8 @@
 /**
  * Tests for the `sentry init` command entry point.
  *
- * Uses spyOn on the wizard-runner and projects API namespaces to
- * capture runWizard calls and mock findProjectsBySlug without
+ * Uses spyOn on the init-runner and projects API namespaces to
+ * capture runInit calls and mock findProjectsBySlug without
  * mock.module (which leaks across test files).
  */
 
@@ -13,10 +13,10 @@ import { initCommand } from "../../src/commands/init.js";
 import * as projectsApi from "../../src/lib/api/projects.js";
 import { ContextError, ValidationError } from "../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as initRunner from "../../src/lib/init/init-runner.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as prefetchNs from "../../src/lib/init/org-prefetch.js";
 import { resetPrefetch } from "../../src/lib/init/org-prefetch.js";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as wizardRunner from "../../src/lib/init/wizard-runner.js";
 
 /** Minimal org shape for mock returns */
 const MOCK_ORG = { id: "1", slug: "resolved-org", name: "Resolved Org" };
@@ -27,7 +27,7 @@ function mockProject(slug: string, orgSlug = "resolved-org") {
 }
 
 let capturedArgs: Record<string, unknown> | undefined;
-let runWizardSpy: ReturnType<typeof spyOn>;
+let runInitSpy: ReturnType<typeof spyOn>;
 let findProjectsSpy: ReturnType<typeof spyOn>;
 let warmSpy: ReturnType<typeof spyOn>;
 
@@ -57,7 +57,7 @@ const DEFAULT_FLAGS = { yes: true, "dry-run": false } as const;
 beforeEach(() => {
   capturedArgs = undefined;
   resetPrefetch();
-  runWizardSpy = spyOn(wizardRunner, "runWizard").mockImplementation(
+  runInitSpy = spyOn(initRunner, "runInit").mockImplementation(
     (args: Record<string, unknown>) => {
       capturedArgs = args;
       return Promise.resolve();
@@ -79,7 +79,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  runWizardSpy.mockRestore();
+  runInitSpy.mockRestore();
   findProjectsSpy.mockRestore();
   warmSpy.mockRestore();
   resetPrefetch();

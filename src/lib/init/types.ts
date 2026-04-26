@@ -40,7 +40,8 @@ export type ResolvedInitContext = {
 
 export type InteractiveContext = Pick<ResolvedInitContext, "yes" | "dryRun">;
 
-// Tool suspend payloads
+// ── Tool payloads (unchanged — used by `lib/init/tools/registry.ts`). ──
+
 export type ToolPayload =
   | ListDirPayload
   | ReadFilesPayload
@@ -100,22 +101,7 @@ export type GrepSearch = {
   pattern: string;
   path?: string;
   include?: string;
-  /**
-   * Case-insensitive match. Default: false (case-sensitive, matching
-   * `rg`'s default). A leading `(?i)` inline flag in `pattern` has
-   * the same effect — callers can use either.
-   *
-   * No current Mastra server invocation sets this field; reserving
-   * it here means the server can start sending it without a CLI
-   * update. The underlying scan engine natively supports it.
-   */
   caseInsensitive?: boolean;
-  /**
-   * Multiline mode: when true (default), `^` and `$` match at line
-   * boundaries within the file — grep/rg semantics. When false, they
-   * anchor to the buffer start/end — strict JS `RegExp` semantics.
-   * Rarely needs to be set.
-   */
   multiline?: boolean;
 };
 
@@ -162,7 +148,6 @@ export type ApplyPatchsetPayload = {
 export type CreateSentryProjectPayload = {
   type: "tool";
   operation: "create-sentry-project";
-  /** Human-readable spinner hint from the server (≤ 120 chars, sensitive values redacted). */
   detail?: string;
   cwd: string;
   params: {
@@ -174,7 +159,6 @@ export type CreateSentryProjectPayload = {
 export type EnsureSentryProjectPayload = {
   type: "tool";
   operation: "ensure-sentry-project";
-  /** Human-readable spinner hint from the server (≤ 120 chars, sensitive values redacted). */
   detail?: string;
   cwd: string;
   params: {
@@ -198,7 +182,8 @@ export type ToolResult = {
   data?: unknown;
 };
 
-// Wizard output
+// ── Wizard output ──────────────────────────────────────────────────
+
 export type WizardOutput = {
   platform?: string;
   projectDir?: string;
@@ -212,11 +197,7 @@ export type WizardOutput = {
   message?: string;
 };
 
-// Interactive payloads
-export type InteractivePayload =
-  | SelectPayload
-  | MultiSelectPayload
-  | ConfirmPayload;
+// ── Interactive payloads (the agent asks the user via a prompt). ──
 
 export type SelectPayload = {
   type: "interactive";
@@ -240,13 +221,92 @@ export type ConfirmPayload = {
   prompt: string;
 };
 
-export type SuspendPayload = ToolPayload | InteractivePayload;
+export type InteractivePayload =
+  | SelectPayload
+  | MultiSelectPayload
+  | ConfirmPayload;
 
-export type WorkflowRunResult = {
-  status: "suspended" | "success" | "failed";
-  suspended?: string[][];
-  steps?: Record<string, { suspendPayload?: unknown }>;
-  suspendPayload?: unknown;
-  result?: WizardOutput;
-  error?: string;
+// ── /api/init request body ────────────────────────────────────────
+
+export type InitStartInput = {
+  directory: string;
+  yes: boolean;
+  dryRun: boolean;
+  features?: string[];
+  org?: string;
+  team?: string;
+  project?: string;
+  existingProject?: ExistingProjectData;
+  sentryAuthToken?: string;
+  cliVersion: string;
 };
+
+// ── Local-action resume body (CLI -> server). ─────────────────────
+
+export type InitActionResumeBody =
+  | { ok: true; output: Record<string, unknown> }
+  | {
+      ok: false;
+      error: {
+        message: string;
+        code?: string;
+        details?: unknown;
+      };
+    };
+
+// ── Stream events emitted by the workflow (server -> CLI). ─────────
+
+export type InitStatusEvent = {
+  type: "status";
+  message: string;
+  phase?: string;
+};
+
+export type InitActionRequestEvent = {
+  type: "action_request";
+  actionId: string;
+  kind: "tool" | "prompt";
+  name: string;
+  description?: string;
+  payload: unknown;
+};
+
+export type InitActionResultEvent = {
+  type: "action_result";
+  actionId: string;
+  ok: boolean;
+  summary?: string;
+};
+
+export type InitWarningEvent = {
+  type: "warning";
+  message: string;
+};
+
+export type InitSummaryEvent = {
+  type: "summary";
+  output: WizardOutput;
+};
+
+export type InitErrorEvent = {
+  type: "error";
+  message: string;
+  exitCode?: number;
+  docsUrl?: string;
+  commands?: string[];
+  output?: WizardOutput;
+};
+
+export type InitDoneEvent = {
+  type: "done";
+  ok: boolean;
+};
+
+export type InitEvent =
+  | InitStatusEvent
+  | InitActionRequestEvent
+  | InitActionResultEvent
+  | InitWarningEvent
+  | InitSummaryEvent
+  | InitErrorEvent
+  | InitDoneEvent;
