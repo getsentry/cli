@@ -107,7 +107,7 @@ export const STEP_LABELS: Record<string, string> = {
   "check-existing-sentry": "Checking for existing Sentry installation",
   "detect-platform": "Detecting platform and framework",
   "ensure-sentry-project": "Setting up Sentry project",
-  "select-features": "Selecting features",
+  "propose-features": "Selecting features",
   "install-deps": "Installing dependencies",
   "plan-codemods": "Planning code modifications",
   "apply-codemods": "Applying code modifications",

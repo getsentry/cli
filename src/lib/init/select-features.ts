@@ -1,17 +1,31 @@
 /**
- * Feature selection for `sentry init`.
+ * Sentry feature catalog (CLI side).
  *
- * In `--yes` mode we accept the flag-provided list (or empty if not
- * given). Interactively, we present a multi-select. `errorMonitoring`
- * is always implicit — never shown — and is tracked in
+ * Feature SELECTION is now agent-driven: the sandboxed Claude agent
+ * analyses the project + docs and calls a `propose_features` MCP tool
+ * that bridges back to the CLI as a tailored multi-select. This file
+ * no longer contains an upfront prompt — it owns:
+ *
+ *   - `FEATURE_LABELS`: the human-readable label/hint per id, used by
+ *     [interactive.ts](./interactive.ts) when rendering the agent's
+ *     multi-select.
+ *   - `SELECTABLE_FEATURE_IDS`: the canonical ID set, kept in lockstep
+ *     with the server's `KNOWN_FEATURES` (minus `errorMonitoring`).
+ *   - `normaliseFromFlag`: parses the `--features` flag into canonical
+ *     IDs (handles aliases like `replay`, `tracing`, etc.). The result
+ *     is sent to the server as `InitStartInput.features` and tells the
+ *     agent to skip its own proposal.
+ *
+ * `errorMonitoring` is implicit and is tracked separately in
  * [REQUIRED_FEATURE](./constants.ts).
  */
 
-import { isCancel, multiselect } from "@clack/prompts";
-import { WizardCancelledError } from "./clack-utils.js";
-
-const FEATURE_LABELS: Record<string, { label: string; hint: string }> = {
+export const FEATURE_LABELS: Record<string, { label: string; hint: string }> = {
   tracing: {
+    label: "Performance Monitoring (Tracing)",
+    hint: "Distributed transaction and span tracing",
+  },
+  performanceMonitoring: {
     label: "Performance Monitoring (Tracing)",
     hint: "Distributed transaction and span tracing",
   },
@@ -40,10 +54,15 @@ const FEATURE_LABELS: Record<string, { label: string; hint: string }> = {
     label: "Cron Monitoring",
     hint: "Monitor scheduled / recurring jobs",
   },
+  metrics: {
+    label: "Metrics",
+    hint: "Custom counters, distributions, gauges",
+  },
 };
 
 const SORT_ORDER = [
   "tracing",
+  "performanceMonitoring",
   "logs",
   "sessionReplay",
   "profiling",
@@ -51,9 +70,10 @@ const SORT_ORDER = [
   "userFeedback",
   "sourceMaps",
   "crons",
+  "metrics",
 ];
 
-function sortFeatures(ids: string[]): string[] {
+export function sortFeatures(ids: string[]): string[] {
   return [...ids].sort(
     (a, b) =>
       (SORT_ORDER.indexOf(a) === -1
@@ -66,11 +86,12 @@ function sortFeatures(ids: string[]): string[] {
 }
 
 /**
- * Feature ids the wizard knows how to install. Kept in sync with the
- * server-side `FEATURES` map (`apps/server/src/agent/src/features.ts`).
- * "errorMonitoring" is implicit and not listed.
+ * Feature ids the wizard knows how to install. Kept in lockstep with the
+ * server-side `KNOWN_FEATURES` (minus `errorMonitoring`, which is
+ * implicit). `interactive.ts` looks up labels for IDs the agent proposes
+ * via `FEATURE_LABELS`; unknown IDs fall back to the raw id.
  */
-const SELECTABLE_FEATURE_IDS = [
+export const SELECTABLE_FEATURE_IDS = [
   "tracing",
   "logs",
   "sessionReplay",
@@ -79,13 +100,14 @@ const SELECTABLE_FEATURE_IDS = [
   "userFeedback",
   "sourceMaps",
   "crons",
+  "metrics",
+  "performanceMonitoring",
 ] as const;
 
 export type SelectableFeatureId = (typeof SELECTABLE_FEATURE_IDS)[number];
 
 const ALIASES: Record<string, SelectableFeatureId> = {
   errors: "tracing", // backward-compat
-  performanceMonitoring: "tracing",
   performance: "tracing",
   trace: "tracing",
   log: "logs",
@@ -101,35 +123,12 @@ const ALIASES: Record<string, SelectableFeatureId> = {
   cron: "crons",
 };
 
-export async function selectFeatures(opts: {
-  yes: boolean;
-  fromFlag?: string[];
-}): Promise<string[]> {
-  const flagSelected = normaliseFromFlag(opts.fromFlag);
-  if (opts.yes) {
-    return sortFeatures(flagSelected);
-  }
-  if (flagSelected.length > 0) {
-    return sortFeatures(flagSelected);
-  }
-
-  const choice = await multiselect<SelectableFeatureId>({
-    message:
-      "Select Sentry features to enable. Error monitoring is always on.",
-    options: SELECTABLE_FEATURE_IDS.map((id) => ({
-      value: id,
-      label: FEATURE_LABELS[id]?.label ?? id,
-      hint: FEATURE_LABELS[id]?.hint,
-    })),
-    required: false,
-  });
-  if (isCancel(choice)) {
-    throw new WizardCancelledError();
-  }
-  return sortFeatures(choice as string[]);
-}
-
-function normaliseFromFlag(features?: string[]): SelectableFeatureId[] {
+/**
+ * Normalise the `--features <list>` flag into canonical IDs. Aliases
+ * (`replay`, `tracing`, …) are resolved; unknown values are silently
+ * dropped (the agent only acts on IDs it recognises).
+ */
+export function normaliseFromFlag(features?: string[]): SelectableFeatureId[] {
   if (!features || features.length === 0) {
     return [];
   }
@@ -147,8 +146,6 @@ function normaliseFromFlag(features?: string[]): SelectableFeatureId[] {
     if (aliased) {
       out.add(aliased);
     }
-    // Silently drop unknowns — the agent will only act on selectedFeatures
-    // it recognises anyway.
   }
   return [...out];
 }

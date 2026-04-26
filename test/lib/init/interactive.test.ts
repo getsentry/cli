@@ -287,6 +287,66 @@ describe("handleMultiSelect", () => {
     expect(values).not.toContain("errorMonitoring");
     expect(values).toContain("performanceMonitoring");
   });
+
+  test("renders FEATURE_LABELS for agent-proposed IDs (propose-features flow)", async () => {
+    multiselectSpy.mockImplementation(
+      () => Promise.resolve(["tracing", "sessionReplay"]) as any
+    );
+
+    await handleInteractive(
+      {
+        type: "interactive",
+        prompt:
+          "Pick the Sentry features to enable for this project.\n\n" +
+          "Why these features are relevant:\n" +
+          "- tracing (recommended): Next.js detected\n" +
+          "- sessionReplay: browser app",
+        kind: "multi-select",
+        availableFeatures: ["tracing", "sessionReplay"],
+      },
+      makeOptions({ yes: false })
+    );
+
+    const call = multiselectSpy.mock.calls[0][0] as {
+      message: string;
+      options: Array<{ value: string; label: string; hint?: string }>;
+    };
+
+    // Agent's "Why these features are relevant" body is rendered verbatim.
+    expect(call.message).toContain("Why these features are relevant:");
+    expect(call.message).toContain(
+      "- tracing (recommended): Next.js detected"
+    );
+
+    // Labels come from FEATURE_LABELS, not raw IDs.
+    const tracing = call.options.find((o) => o.value === "tracing");
+    const replay = call.options.find((o) => o.value === "sessionReplay");
+    expect(tracing?.label).toBe("Performance Monitoring (Tracing)");
+    expect(replay?.label).toBe("Session Replay");
+    expect(replay?.hint).toContain("browsers only");
+  });
+
+  test("sorts agent-proposed IDs into the canonical display order", async () => {
+    multiselectSpy.mockImplementation(() => Promise.resolve([]) as any);
+
+    await handleInteractive(
+      {
+        type: "interactive",
+        prompt: "Pick features",
+        kind: "multi-select",
+        // Agent sends in arbitrary order
+        availableFeatures: ["crons", "tracing", "logs", "sourceMaps"],
+      },
+      makeOptions({ yes: false })
+    );
+
+    const call = multiselectSpy.mock.calls[0][0] as {
+      options: Array<{ value: string }>;
+    };
+    const values = call.options.map((o: { value: string }) => o.value);
+    // tracing < logs < sourceMaps < crons in SORT_ORDER
+    expect(values).toEqual(["tracing", "logs", "sourceMaps", "crons"]);
+  });
 });
 
 describe("handleConfirm", () => {

@@ -9,6 +9,7 @@ import { confirm, log, multiselect, select } from "@clack/prompts";
 import chalk from "chalk";
 import { abortIfCancelled } from "./clack-utils.js";
 import { REQUIRED_FEATURE } from "./constants.js";
+import { FEATURE_LABELS, sortFeatures } from "./select-features.js";
 import type {
   ConfirmPayload,
   InteractiveContext,
@@ -67,6 +68,14 @@ async function handleSelect(
   return { selectedApp: abortIfCancelled(selected) };
 }
 
+function featureLabel(id: string): string {
+  return FEATURE_LABELS[id]?.label ?? id;
+}
+
+function featureHint(id: string): string | undefined {
+  return FEATURE_LABELS[id]?.hint;
+}
+
 async function handleMultiSelect(
   payload: MultiSelectPayload,
   options: InteractiveContext
@@ -78,13 +87,20 @@ async function handleMultiSelect(
   }
 
   const hasRequired = available.includes(REQUIRED_FEATURE);
+  // The agent calls this prompt as `propose-features` after analysing the
+  // project + docs. The IDs in `available` are exactly what the agent
+  // proposed (errorMonitoring is excluded by the tool's contract). We
+  // treat any other multi-select that happens to include errorMonitoring
+  // the same way.
 
   if (options.yes) {
-    log.info(`Auto-selected all features: ${available.join(", ")}`);
+    log.info(
+      `Auto-selected all features: ${available.map(featureLabel).join(", ")}`
+    );
     return { features: available };
   }
 
-  const optional = available.filter((f) => f !== REQUIRED_FEATURE);
+  const optional = sortFeatures(available.filter((f) => f !== REQUIRED_FEATURE));
 
   if (optional.length === 0) {
     if (hasRequired) {
@@ -100,11 +116,15 @@ async function handleMultiSelect(
   }
   hints.push(`${bar}  ${chalk.dim("space=toggle, a=all, enter=confirm")}`);
 
+  // Show the agent's prompt body verbatim — it already contains the
+  // "Why these features are relevant: …" reasons block built by the
+  // sandboxed `propose_features` tool.
   const selected = await multiselect({
     message: `${payload.prompt}\n${hints.join("\n")}`,
     options: optional.map((feature) => ({
       value: feature,
-      label: feature,
+      label: featureLabel(feature),
+      hint: featureHint(feature),
     })),
     required: false,
   });

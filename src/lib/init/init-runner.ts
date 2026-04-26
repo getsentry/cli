@@ -34,7 +34,7 @@ import { formatError, formatResult } from "./formatters.js";
 import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
 import { resolveInitContext } from "./preflight.js";
-import { selectFeatures } from "./select-features.js";
+import { normaliseFromFlag } from "./select-features.js";
 import { createWizardSpinner } from "./spinner.js";
 import { forwardFreshTtyToStdin } from "./stdin-reopen.js";
 import {
@@ -427,17 +427,18 @@ export async function runInit(initialOptions: WizardOptions): Promise<void> {
 
   // Resolve / create the Sentry project so the workflow has a real DSN.
   const project = await ensureSentryProject(context);
-  // Pick features (or use the --features flag).
-  const selectedFeatures = await selectFeatures({
-    yes: context.yes,
-    fromFlag: context.features,
-  });
+  // Feature selection is agent-driven: the in-sandbox Claude analyses the
+  // project + Sentry docs and proposes only the features that apply via
+  // the `propose_features` MCP tool, which bridges back here as a
+  // multi-select. The `--features` flag is a non-interactive override:
+  // when present, the agent skips its own proposal.
+  const overrideFeatures = normaliseFromFlag(context.features);
 
   const startInput: InitStartInput = {
     directory,
     yes,
     dryRun,
-    features: selectedFeatures,
+    ...(overrideFeatures.length > 0 ? { features: overrideFeatures } : {}),
     org: project.orgSlug,
     team: project.teamSlug,
     project: project.projectSlug,
