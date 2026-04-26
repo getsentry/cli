@@ -94,39 +94,45 @@ export function parseLoginUrl(raw: string): string {
 }
 
 /**
- * Refuse `auth login --token X` when the effective host came from an
- * untrusted channel (rc-shim bypass wrote env.SENTRY_URL with no matching
- * trust anchor). Without this, `auth login --token <user-real-token>` in a
- * poisoned-rc repo would POST the user's existing API token to the
- * attacker's host during validation — a real credential leak.
+ * Refuse `auth login` against a host that came from an untrusted channel
+ * (rc-shim bypass wrote env.SENTRY_URL with no matching trust anchor).
  *
- * The OAuth device-flow path (`auth login` without `--token`) is
- * intentionally NOT refused: it doesn't send any pre-existing credentials
- * to the host, so a poisoned rc can at worst phish the user into creating
- * a new account on the attacker's server (out of threat model — "user
- * authorizes malicious server themselves"). `applyCustomHeaders` is
- * URL-scoped at the header layer, so IAP/mTLS headers don't leak either.
+ * Two distinct attack shapes are blocked here:
  *
- * `applyLoginUrl` only registers a trust anchor when the host comes from a
- * trusted source (`--url` flag or boot-time env snapshot), so "no matching
- * anchor" is the load-bearing signal.
+ * 1. **Token leak (`auth login --token X`)**: without the refusal, login
+ *    validation POSTs the user's existing API token to the attacker's
+ *    host — direct credential exfiltration.
+ *
+ * 2. **Phishing (`auth login` OAuth device flow)**: the CLI directs the
+ *    user's browser to `<attacker-host>/oauth/authorize/...`. A
+ *    homograph / look-alike domain plus a Sentry-cloned login page can
+ *    capture the user's SSO credentials (Google, GitHub, etc.) — much
+ *    worse than a single token leak because it compromises every
+ *    service the SSO covers. `.sentryclirc` is a stealthy phishing
+ *    vector because it slips through code review more easily than a
+ *    `curl evil.com` would.
+ *
+ * `applyLoginUrl` only registers a trust anchor when the host comes from
+ * a trusted source (`--url` flag or boot-time env snapshot), so "no
+ * matching anchor" is the load-bearing signal that the host arrived via
+ * an untrusted channel.
  */
-function refuseTokenLoginToUntrustedHost(
+function refuseLoginToUntrustedHost(
   flags: LoginFlags,
   effectiveHost: string
 ): void {
   if (
-    !flags.token ||
     flags.url ||
     isSaaSTrustOrigin(effectiveHost) ||
     isLoginTrustAnchorFor(effectiveHost)
   ) {
     return;
   }
+  const tokenHint = flags.token ? " --token <token>" : "";
   throw new HostScopeError(
-    `Refusing to send --token to ${effectiveHost}: this URL was configured by a .sentryclirc file in the current or parent directory, not by your shell environment.\n` +
+    `Refusing to log in against ${effectiveHost}: this URL was configured by a .sentryclirc file in the current or parent directory, not by your shell environment.\n` +
       "If you trust this host, pass it explicitly:\n" +
-      `  sentry auth login --url ${effectiveHost} --token <token>\n` +
+      `  sentry auth login --url ${effectiveHost}${tokenHint}\n` +
       "Otherwise, remove the [defaults] url line from the .sentryclirc file."
   );
 }
@@ -290,7 +296,7 @@ export const loginCommand = buildCommand({
     // requested instance. Default URL persistence is deferred until login
     // succeeds — see persistLoginUrlAsDefault calls below.
     const effectiveHost = applyLoginUrl(flags.url);
-    refuseTokenLoginToUntrustedHost(flags, effectiveHost);
+    refuseLoginToUntrustedHost(flags, effectiveHost);
 
     // Check if already authenticated and handle re-authentication
     if (isAuthenticated()) {

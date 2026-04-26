@@ -1,29 +1,30 @@
 /**
- * CVE regression: `sentry auth login --token X` in a `.sentryclirc`-poisoned repo.
+ * CVE regression: `sentry auth login` in a `.sentryclirc`-poisoned repo.
  *
- * Attack path (token leak):
+ * Two attack shapes are blocked by `refuseLoginToUntrustedHost`:
  *
+ * **Token leak** (`auth login --token X`):
  * 1. User has a SaaS API token from `https://sentry.io/settings/auth-tokens/`.
- * 2. User has no `SENTRY_HOST`/`SENTRY_URL` in their shell (SaaS default).
- * 3. User `cd`s into an attacker repo with `.sentryclirc`:
- *      [defaults]
- *      url = https://evil.com
- * 4. User runs the documented CI pattern:
- *      sentry auth login --token $SENTRY_API_TOKEN
- *    (no `--url`).
- * 5. `isTrustChangingCommand` returns true for `auth login` → rc shim
- *    runs with `skipUrlTrustCheck: true` → writes
- *    `env.SENTRY_URL = https://evil.com`.
- * 6. Without the fix, `applyLoginUrl(undefined)` would read the poisoned
- *    env, and login validation would POST the user's existing token to
- *    evil.com.
+ * 2. User cd's into an attacker repo with `.sentryclirc` setting
+ *    `url = https://evil.com`.
+ * 3. User runs `sentry auth login --token $SENTRY_API_TOKEN` (no --url).
+ * 4. The rc shim writes `env.SENTRY_URL = evil.com` (skipUrlTrustCheck is
+ *    on for `auth login`). Without the refusal, login validation would
+ *    POST the user's token to evil.com.
  *
- * Fix: `refuseTokenLoginToUntrustedHost` rejects --token login when the
- * effective host wasn't registered as a login trust anchor (didn't come
- * from explicit `--url` or boot-time env). The OAuth device-flow path
- * (`auth login` without `--token`) is intentionally allowed: it doesn't
- * send any pre-existing credentials, and `applyCustomHeaders` is
- * URL-scoped so IAP tokens don't leak either.
+ * **Phishing** (`auth login` OAuth device flow, no --token):
+ * 1. Same poisoned-rc setup.
+ * 2. User runs `sentry auth login` to set up Sentry per the repo's README.
+ * 3. CLI prints the device-code URL pointing at evil.com. With a
+ *    homograph or look-alike domain (e.g. `sentry-io.example-attacker.com`),
+ *    the user opens it without scrutiny and authenticates with their
+ *    SSO credentials at the attacker's cloned login page. SSO leak is
+ *    worse than a single token leak — it compromises every service the
+ *    SSO covers.
+ *
+ * Fix: `refuseLoginToUntrustedHost` rejects login (both --token and
+ * OAuth paths) when the effective host wasn't registered as a login
+ * trust anchor (didn't come from explicit `--url` or boot-time env).
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -140,41 +141,25 @@ describe("CVE: auth login --token with rc-poisoned env.SENTRY_URL", () => {
     expect(toEvil).toEqual([]);
   });
 
-  test("auth login OAuth flow (no token, no --url) in rc-poisoned env: proceeds, no header leak", async () => {
-    // OAuth device flow doesn't send any pre-existing user credentials —
-    // a poisoned rc URL can at worst phish the user into authenticating
-    // against the attacker's server (out of threat model). We allow the
-    // request through; the user sees the device-code URL in their
-    // terminal and can spot evil.com.
-    //
-    // Critical: SENTRY_CUSTOM_HEADERS (IAP tokens etc.) must NOT attach
-    // to the device-code request. applyCustomHeaders is URL-scoped via
-    // the login trust anchor, which applyLoginUrl does NOT register for
-    // rc-sourced hosts, so headers fail closed at the header layer.
-    process.env.SENTRY_CUSTOM_HEADERS = "X-IAP-Token: secret-iap-value";
-    process.env.SENTRY_CLIENT_ID = "test-client-id";
+  test("auth login OAuth flow (no token, no --url) in rc-poisoned env: refused before browser open", async () => {
+    // Phishing defense: the OAuth device flow would otherwise direct
+    // the user's browser to <attacker>/oauth/authorize/... A homograph
+    // domain plus a Sentry-cloned login page can capture SSO
+    // credentials. Refusing here keeps the user from opening the
+    // attacker URL in the first place — much stronger than relying on
+    // them to spot the malicious URL in terminal output.
     captureEnvTokenHost();
     process.env.SENTRY_URL = "https://evil.com";
 
     const func = (await loginCommand.loader()) as unknown as LoginFunc;
     const context = createContext();
 
-    // OAuth device flow attempts a POST to evil.com/oauth/device/code/.
-    // The fetch mock throws; runInteractiveLogin catches the error and
-    // returns falsy, so the command resolves (with exitCode set). We
-    // only care that we got PAST the host-scoping guard.
-    await func.call(context, { force: false, timeout: 900 });
+    await expect(
+      func.call(context, { force: false, timeout: 900 })
+    ).rejects.toBeInstanceOf(HostScopeError);
 
     const toEvil = fetchCalls.filter((c) => urlHostnameIn(c.url, ["evil.com"]));
-    // Device-code request DID hit evil.com (no host-scoping refusal).
-    expect(toEvil.length).toBeGreaterThan(0);
-    // Bearer never attaches (no token configured for the OAuth flow).
-    for (const call of toEvil) {
-      expect(call.authorization).toBeNull();
-    }
-    // applyCustomHeaders for IAP/mTLS is URL-scoped and fails closed
-    // when no login trust anchor matches. Comprehensive coverage lives
-    // in test/lib/security/custom-headers-leak.test.ts.
+    expect(toEvil).toEqual([]);
   });
 
   test("auth login --url explicitly acknowledges the host (legitimate onboarding)", async () => {
