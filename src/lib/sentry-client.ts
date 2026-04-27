@@ -25,7 +25,6 @@ import {
   invalidateCachedResponsesMatching,
   storeCachedResponse,
 } from "./response-cache.js";
-import { buildUrlMismatchMessage } from "./sentry-url-parser.js";
 import { normalizeOrigin } from "./sentry-urls.js";
 import { withTracingSpan } from "./telemetry.js";
 import { parseSntrysClaim } from "./token-claims.js";
@@ -113,11 +112,9 @@ function prepareHeaders(
   // SENTRY_HOST/SENTRY_URL without going through those guards.
   if (!isRequestOriginTrusted(input)) {
     throw new HostScopeError(
-      buildUrlMismatchMessage(
-        "Credentials",
-        normalizeOrigin(input) ?? "<unknown host>",
-        getActiveTokenHost()
-      )
+      "Credentials",
+      normalizeOrigin(input) ?? "<unknown host>",
+      getActiveTokenHost()
     );
   }
 
@@ -128,11 +125,9 @@ function prepareHeaders(
   const claimUrl = parseSntrysClaim(token)?.url;
   if (claimUrl && !isHostTrustedForClaim(input, claimUrl)) {
     throw new HostScopeError(
-      buildUrlMismatchMessage(
-        "Credentials",
-        normalizeOrigin(input) ?? "<unknown host>",
-        claimUrl
-      )
+      "Credentials",
+      normalizeOrigin(input) ?? "<unknown host>",
+      claimUrl
     );
   }
 

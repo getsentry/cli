@@ -22,7 +22,6 @@ import {
   DeviceFlowError,
   HostScopeError,
 } from "./errors.js";
-import { buildUrlMismatchMessage } from "./sentry-url-parser.js";
 import { normalizeOrigin } from "./sentry-urls.js";
 import { withHttpSpan } from "./telemetry.js";
 import { getActiveTokenHost, isRequestOriginTrusted } from "./token-host.js";
@@ -130,11 +129,9 @@ function assertRefreshHostTrusted(): void {
   const refreshUrl = getSentryUrl();
   if (!isRequestOriginTrusted(refreshUrl)) {
     throw new HostScopeError(
-      buildUrlMismatchMessage(
-        "OAuth refresh token",
-        normalizeOrigin(refreshUrl) ?? "<unknown host>",
-        getActiveTokenHost()
-      )
+      "OAuth refresh token",
+      normalizeOrigin(refreshUrl) ?? "<unknown host>",
+      getActiveTokenHost()
     );
   }
 }

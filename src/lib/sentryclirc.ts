@@ -25,7 +25,6 @@ import { getEnv } from "./env.js";
 import { HostScopeError } from "./errors.js";
 import { parseIni } from "./ini.js";
 import { logger } from "./logger.js";
-import { buildUrlMismatchMessage } from "./sentry-url-parser.js";
 import { isSaaSTrustOrigin } from "./sentry-urls.js";
 import { getActiveTokenHost, isHostTrusted } from "./token-host.js";
 import { walkUpFrom } from "./walk-up.js";
@@ -382,9 +381,7 @@ export async function assertRcUrlTrusted(cwd: string): Promise<void> {
   const source = config.sources.url
     ? `Config at ${config.sources.url}`
     : `${CONFIG_FILENAME} [defaults] url`;
-  throw new HostScopeError(
-    buildUrlMismatchMessage(source, normalizedRcUrl, tokenHost)
-  );
+  throw new HostScopeError(source, normalizedRcUrl, tokenHost);
 }
 
 /**

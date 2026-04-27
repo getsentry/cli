@@ -239,43 +239,9 @@ export function applySentryUrlContext(baseUrl: string): void {
 
   const tokenHost = getActiveTokenHost();
   if (!(tokenHost && isHostTrusted(baseUrl, tokenHost))) {
-    throw new HostScopeError(
-      buildUrlMismatchMessage("URL argument", baseUrl, tokenHost)
-    );
+    throw new HostScopeError("URL argument", baseUrl, tokenHost);
   }
 
   env.SENTRY_HOST = baseUrl;
   env.SENTRY_URL = baseUrl;
-}
-
-/**
- * Build a host-scoping mismatch error message. Used by every guard site
- * that rejects a request/route because the destination doesn't match the
- * active token's scope.
- *
- * @param source - What's being refused (e.g. `"URL argument"`,
- *   `"Config at /path/.sentryclirc"`, `"credentials"`,
- *   `"OAuth refresh token"`).
- * @param destinationUrl - The URL that doesn't match the token.
- * @param tokenHost - The active token's scoped host, or `undefined` when
- *   no token is configured (needs a different action hint).
- */
-export function buildUrlMismatchMessage(
-  source: string,
-  destinationUrl: string,
-  tokenHost: string | undefined
-): string {
-  if (tokenHost === undefined) {
-    return (
-      `${source}: ${destinationUrl}\n` +
-      "Refusing to route requests to this host because no Sentry credentials are configured for it.\n" +
-      `To use this host, run: sentry auth login --url ${destinationUrl}`
-    );
-  }
-  return (
-    `${source}: ${destinationUrl}\n` +
-    `Refusing to route requests here because it doesn't match the host your Sentry credentials are for (${tokenHost}).\n` +
-    `To use this host, run: sentry auth login --url ${destinationUrl}\n` +
-    "To keep using your current credentials, remove this URL override."
-  );
 }

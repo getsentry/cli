@@ -40,13 +40,36 @@ export class CliError extends Error {
  *
  * Distinct from plain `CliError` so that `withAuthGuard` can re-throw these
  * (like `AuthError`) while still swallowing `ApiError` and other transient
- * failures. Swallowing a host-scope violation would hide a security-fix
- * rejection behind a misleading "no results" return, and the caller might
- * fall back to a second authenticated request that ALSO trips the guard.
+ * failures.
+ *
+ * Two construction forms:
+ * - `new HostScopeError(source, destinationUrl, tokenHost)` — standard
+ *   mismatch message used by most guard sites.
+ * - `new HostScopeError(message)` — freeform message for the login-command
+ *   refusal (different shape: "confirm with --url", not a mismatch).
  */
 export class HostScopeError extends CliError {
-  constructor(message: string) {
-    super(message);
+  constructor(
+    sourceOrMessage: string,
+    destinationUrl?: string,
+    tokenHost?: string | undefined
+  ) {
+    if (destinationUrl === undefined) {
+      super(sourceOrMessage);
+    } else if (tokenHost === undefined) {
+      super(
+        `${sourceOrMessage}: ${destinationUrl}\n` +
+          "Refusing to route requests to this host because no Sentry credentials are configured for it.\n" +
+          `To use this host, run: sentry auth login --url ${destinationUrl}`
+      );
+    } else {
+      super(
+        `${sourceOrMessage}: ${destinationUrl}\n` +
+          `Refusing to route requests here because it doesn't match the host your Sentry credentials are for (${tokenHost}).\n` +
+          `To use this host, run: sentry auth login --url ${destinationUrl}\n` +
+          "To keep using your current credentials, remove this URL override."
+      );
+    }
     this.name = "HostScopeError";
   }
 }
