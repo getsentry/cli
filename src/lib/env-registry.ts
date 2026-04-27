@@ -83,6 +83,16 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
     topLevel: true,
     briefDescription: "DSN used to auto-detect org + project.",
   },
+  // -- Release --
+  {
+    name: "SENTRY_RELEASE",
+    description:
+      "Explicit release version for `sentry release propose-version`. When set, " +
+      "the command returns this value immediately without checking CI environment " +
+      "variables or local git history. Useful in CI pipelines where the release " +
+      "version is determined by a prior step.",
+    example: "1.0.0",
+  },
   // -- URL --
   {
     name: "SENTRY_HOST",

@@ -65,6 +65,46 @@ sentry org list
 
 If you pass a self-hosted Sentry URL as a command argument (e.g., an issue or event URL), the CLI detects the instance automatically.
 
+## Proxy / IAP Configuration
+
+If your self-hosted instance is behind a reverse proxy, identity-aware proxy (IAP), or requires custom authentication headers, use the `SENTRY_CUSTOM_HEADERS` environment variable to inject headers into every CLI request (including OAuth flows):
+
+```bash
+export SENTRY_CUSTOM_HEADERS="X-Custom-Auth:my-token,X-Forwarded-For:10.0.0.1"
+```
+
+Headers are specified as comma-separated `key:value` pairs.
+
+## `.sentryclirc` Config File
+
+You can also configure your self-hosted instance using a `.sentryclirc` file instead of environment variables. This is especially useful for teams sharing a repository:
+
+```ini
+[defaults]
+org = my-org
+project = my-project
+url = https://sentry.example.com
+
+[auth]
+token = sntrys_...
+```
+
+The `[defaults] url` field is equivalent to `SENTRY_HOST`. The `[auth] token` field is equivalent to `SENTRY_AUTH_TOKEN`. See [Configuration](./configuration/#configuration-file-sentryclirc) for details on config file resolution.
+
+## Multi-Region
+
+Multi-region fan-out (automatic routing to `us.sentry.io`, `de.sentry.io`, etc.) is **disabled** for self-hosted instances. All API requests are sent directly to the configured `SENTRY_HOST` URL.
+
+## Token Precedence
+
+When both a stored OAuth token (from `sentry auth login`) and an environment variable token (`SENTRY_AUTH_TOKEN`) exist, the stored OAuth token takes priority by default because it supports automatic refresh. To force the environment variable token to be used instead, set:
+
+```bash
+export SENTRY_FORCE_ENV_TOKEN=1
+```
+
+This is useful in CI pipelines or when switching between self-hosted instances.
+
 ## Relevant Environment Variables
 
 | Variable | Description |
@@ -72,6 +112,8 @@ If you pass a self-hosted Sentry URL as a command argument (e.g., an issue or ev
 | `SENTRY_HOST` | Base URL of your Sentry instance (takes precedence over `SENTRY_URL`) |
 | `SENTRY_URL` | Alias for `SENTRY_HOST` |
 | `SENTRY_CLIENT_ID` | Client ID of your public OAuth application |
+| `SENTRY_CUSTOM_HEADERS` | Custom HTTP headers for proxy/IAP (comma-separated `key:value` pairs) |
+| `SENTRY_FORCE_ENV_TOKEN` | Force env token over stored OAuth token |
 | `SENTRY_ORG` | Default organization slug |
 | `SENTRY_PROJECT` | Default project slug (supports `org/project` format) |
 

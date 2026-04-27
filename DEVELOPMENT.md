@@ -69,6 +69,8 @@ When creating your Sentry OAuth application:
 
 ## Environment Variables
 
+The table below lists the most common development variables. For the complete reference (including `SENTRY_CONFIG_DIR`, `SENTRY_PLAIN_OUTPUT`, `SENTRY_NO_CACHE`, and others), see the generated [Configuration](https://cli.sentry.dev/configuration/) page.
+
 | Variable                | Description                                                      | Default              |
 | ----------------------- | ---------------------------------------------------------------- | -------------------- |
 | `SENTRY_CLIENT_ID`      | Sentry OAuth app client ID                                       | (required for build) |
@@ -78,6 +80,7 @@ When creating your Sentry OAuth application:
 | `SENTRY_FORCE_ENV_TOKEN`| Force env token to take priority over stored OAuth token         | —                    |
 | `SENTRY_CLI_NO_TELEMETRY`| Disable CLI telemetry (error tracking)                          | —                    |
 | `SENTRY_LOG_LEVEL`      | Diagnostic log level (`error`, `warn`, `log`, `info`, `debug`, `trace`) | `info`        |
+| `SENTRY_CONFIG_DIR`     | Override credentials/cache directory                             | `~/.sentry/`         |
 
 ## Building
 

@@ -72,11 +72,11 @@ Run `sentry --help` to see all available commands, or browse the [command refere
 
 ## Configuration
 
-Credentials are stored in `~/.sentry/` with restricted permissions (mode 600).
+Credentials are stored in `~/.sentry/` with restricted permissions (mode 600). The CLI also reads `.sentryclirc` config files (INI format) for org/project defaults — see the [Configuration docs](https://cli.sentry.dev/configuration/).
 
 ## Library Usage
 
-Use Sentry CLI programmatically in Node.js (≥22) or Bun without spawning a subprocess:
+Use Sentry CLI programmatically in Node.js (≥22.12) or Bun without spawning a subprocess:
 
 ```typescript
 import createSentrySDK from "sentry";
@@ -115,7 +115,7 @@ Errors are thrown as `SentryError` with `.exitCode` and `.stderr`.
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) v1.0+
+- [Bun](https://bun.sh) v1.3+
 
 ### Setup
 
@@ -142,7 +142,9 @@ bun run build        # Build for current platform
 bun run typecheck    # Type checking
 bun run lint         # Check for issues
 bun run lint:fix     # Auto-fix issues
-bun test             # Run tests
+bun run test:unit    # Run unit tests
+bun run test:e2e     # Run end-to-end tests
+bun run generate:docs # Regenerate command docs and skills
 ```
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for detailed setup and [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
