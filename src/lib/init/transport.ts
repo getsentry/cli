@@ -17,6 +17,7 @@ import { readNdjsonStream } from "./stream-parser.js";
 import type {
   InitActionResumeBody,
   InitStartInput,
+  InitStatusResponse,
 } from "./types.js";
 
 type InitTransportOptions = {
@@ -219,6 +220,29 @@ export async function resumeInitAction(
     path: `/api/init/actions/${encodeURIComponent(actionId)}`,
     timeoutMs: resolved.requestTimeoutMs,
   });
+}
+
+/**
+ * Fetch the workflow run's terminal/intermediate state. Mirrors
+ * birthday-card-generator/components/form.tsx:338-351 `fetchRunStatus`
+ * and is used by `handleStreamClosure` to decide whether to reconnect
+ * to the NDJSON stream or terminate the wizard.
+ *
+ *   GET /api/init/:runId  ->  InitStatusResponse
+ */
+export async function fetchRunStatus(
+  runId: string,
+  options: InitTransportOptions = {}
+): Promise<InitStatusResponse> {
+  const resolved = resolveTransportOptions(options);
+  const response = await requestInitApi({
+    label: "Init status",
+    method: "GET",
+    options,
+    path: `/api/init/${encodeURIComponent(runId)}`,
+    timeoutMs: resolved.requestTimeoutMs,
+  });
+  return (await response.json()) as InitStatusResponse;
 }
 
 export { readNdjsonStream };

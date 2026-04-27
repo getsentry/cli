@@ -228,6 +228,24 @@ export type InteractivePayload =
 
 // ── /api/init request body ────────────────────────────────────────
 
+/**
+ * Snapshot of the user's project captured locally before the workflow
+ * starts. Embedded in the agent's user prompt so phase 1 doesn't need
+ * to round-trip through the bridge for `list_dir` / `read_files`.
+ */
+export type InitProjectContext = {
+  /** Recursive listing capped at depth 3 / 500 entries (POSIX paths). */
+  dirListing: DirEntry[];
+  /** path -> content (null when too big / unreadable). */
+  configFiles: Record<string, string | null>;
+  /** Heuristic check for an existing Sentry installation. */
+  existingSentry: {
+    status: "none" | "installed";
+    signals: string[];
+    dsn?: string;
+  };
+};
+
 export type InitStartInput = {
   directory: string;
   yes: boolean;
@@ -239,6 +257,7 @@ export type InitStartInput = {
   existingProject?: ExistingProjectData;
   sentryAuthToken?: string;
   cliVersion: string;
+  projectContext?: InitProjectContext;
 };
 
 // ── Local-action resume body (CLI -> server). ─────────────────────
@@ -302,6 +321,16 @@ export type InitDoneEvent = {
   ok: boolean;
 };
 
+/**
+ * Server-side stream keepalive. Emitted every ~30s by the workflow's
+ * NDJSON wrapper to prevent Bun/undici's fetch-body idle timer from
+ * dropping the connection during long agent steps. The CLI advances
+ * its `nextStartIndex` cursor for the chunk and otherwise ignores it.
+ */
+export type InitHeartbeatEvent = {
+  type: "heartbeat";
+};
+
 export type InitEvent =
   | InitStatusEvent
   | InitActionRequestEvent
@@ -309,4 +338,31 @@ export type InitEvent =
   | InitWarningEvent
   | InitSummaryEvent
   | InitErrorEvent
-  | InitDoneEvent;
+  | InitDoneEvent
+  | InitHeartbeatEvent;
+
+// ── Run status response (CLI <- server, GET /api/init/:runId). ────
+
+/**
+ * Mirror of the server's `initStatusResponseSchema`. Returned by
+ * `GET /api/init/:runId` and consumed by `fetchRunStatus` to decide
+ * whether to reconnect to the stream or terminate the wizard.
+ */
+export type InitStatusResponse = {
+  runId?: string;
+  status:
+    | "queued"
+    | "running"
+    | "waiting_for_action"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  output?: WizardOutput;
+  error?: {
+    message: string;
+    commands?: string[];
+    docsUrl?: string;
+    exitCode?: number;
+    output?: WizardOutput;
+  };
+};

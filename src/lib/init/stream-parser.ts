@@ -56,6 +56,11 @@ export function assertInitEvent(raw: unknown): InitEvent {
         throw new Error("Invalid done event");
       }
       return raw as InitEvent;
+    case "heartbeat":
+      // Server-side stream keepalive (see InitHeartbeatEvent). No
+      // payload to validate; the runner advances `nextStartIndex` and
+      // otherwise ignores it.
+      return raw as InitEvent;
     default:
       throw new Error(`Unknown init event type: ${String(raw.type)}`);
   }

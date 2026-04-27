@@ -26,7 +26,8 @@ import {
 } from "./clack-utils.js";
 import {
   INIT_API_URL,
-  MAX_STREAM_RECONNECTS,
+  MAX_RECONNECT_DELAY_MS,
+  MAX_STATUS_FAILURES,
   SENTRY_DOCS_URL,
 } from "./constants.js";
 import { ensureSentryProject } from "./ensure-project.js";
@@ -35,9 +36,11 @@ import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
 import { resolveInitContext } from "./preflight.js";
 import { normaliseFromFlag } from "./select-features.js";
+import { precomputeProjectContext } from "./workflow-inputs.js";
 import { createWizardSpinner } from "./spinner.js";
 import { forwardFreshTtyToStdin } from "./stdin-reopen.js";
 import {
+  fetchRunStatus,
   openInitStream,
   readNdjsonStream,
   resumeInitAction,
@@ -51,6 +54,7 @@ import type {
   InitErrorEvent,
   InitEvent,
   InitStartInput,
+  InitStatusResponse,
   InteractivePayload,
   ResolvedInitContext,
   ToolPayload,
@@ -80,19 +84,7 @@ function sleepMs(ms: number): Promise<void> {
 }
 
 function nextReconnectDelay(attempt: number): number {
-  return Math.min(250 * 2 ** attempt, 4_000);
-}
-
-function describeStreamReadError(error: unknown): string {
-  const message = errorMessage(error);
-  if (
-    message.includes("Invalid ") ||
-    message.includes("Unknown init event type") ||
-    message.includes("JSON")
-  ) {
-    return `Malformed init stream event: ${message}`;
-  }
-  return `Init stream read failed: ${message}`;
+  return Math.min(250 * 2 ** attempt, MAX_RECONNECT_DELAY_MS);
 }
 
 function errorMessage(err: unknown): string {
@@ -240,6 +232,11 @@ async function handleEvent(
     case "done":
       state.done = event;
       return;
+    case "heartbeat":
+      // Server-side keepalive. `nextStartIndex` was already bumped at
+      // the top of this function, so reconnects skip the heartbeat
+      // chunk on replay; nothing else to do.
+      return;
     case "action_result":
       if (event.summary) {
         spin.message(renderInlineMarkdown(truncateForTerminal(event.summary)));
@@ -330,59 +327,153 @@ async function preamble(
 }
 
 /**
- * Read the workflow's NDJSON stream until we receive `done` or `error`.
- *
- * Bun's `fetch` raises a bare TimeoutError on long-idle SSE bodies; the
- * server uses `Cache-Control: no-store` but doesn't issue keepalive
- * pings. Whenever a read returns zero new events we treat the stream as
- * dropped and reconnect with `?startIndex=state.nextStartIndex` (the
- * server replays from there). Capped at MAX_STREAM_RECONNECTS
- * consecutive empty reconnects with exponential backoff.
+ * Per-stream context plumbed through the consume / closure / resume
+ * helpers. The shape mirrors `birthday-card-generator/components/form.tsx`
+ * (refs + setters in React, plain values for us). `state` is the same
+ * `StreamState` we mutate from `handleEvent`; `statusFailures` counts
+ * consecutive `fetchRunStatus` failures so we can escalate sensibly
+ * when the SERVER is unreachable (vs the stream just going idle).
  */
-async function consumeStreamUntilTerminal(args: {
-  runId: string;
+type StreamCtx = {
   context: ResolvedInitContext;
   spin: Spinner;
   spinState: SpinState;
   state: StreamState;
-}): Promise<void> {
-  let reconnectAttempt = 0;
-  let currentResponse = await openInitStream(args.runId, {
-    baseUrl: INIT_API_URL,
-    startIndex: args.state.nextStartIndex,
-  });
+  statusFailures: number;
+};
 
-  while (!(args.state.done || args.state.finalError)) {
-    let eventCount: number;
-    try {
-      eventCount = await readNdjsonStream(currentResponse, async (event) => {
-        await handleEvent(event, args.context, args.spin, args.spinState, args.state);
-      });
-    } catch (error) {
-      throw new Error(describeStreamReadError(error));
-    }
+/**
+ * Read the workflow's NDJSON body until it ends (cleanly OR with an
+ * error), then hand off to `handleStreamClosure` to decide what's
+ * next. Mirrors `birthday-card-generator/components/form.tsx:398-440`
+ * `consumeStream`.
+ *
+ * Crucially, a thrown read is NOT treated as fatal: long-running
+ * workflows go idle (Bun/undici fetch-body timeout, transient network
+ * drops) and the canonical recovery is `fetchRunStatus` + `resumeRun`
+ * — which is exactly what `handleStreamClosure` does.
+ */
+async function consumeStream(
+  response: Response,
+  runId: string,
+  ctx: StreamCtx
+): Promise<void> {
+  try {
+    await readNdjsonStream(response, async (event) => {
+      await handleEvent(
+        event,
+        ctx.context,
+        ctx.spin,
+        ctx.spinState,
+        ctx.state
+      );
+    });
+  } catch {
+    // Stream errored mid-read (idle timeout / network blip). Same
+    // recovery as a clean close: ask the run for its status and let
+    // `handleStreamClosure` decide.
+  }
+  await handleStreamClosure(runId, ctx);
+}
 
-    if (args.state.done || args.state.finalError) return;
+/**
+ * The stream just ended. Read the run's status to decide whether to
+ * reconnect or terminate. Mirrors `birthday-card-generator/components/
+ * form.tsx:353-396` `handleStreamClosure`. Status is the source of
+ * truth for "are we done"; the local stream is just a transport.
+ */
+async function handleStreamClosure(
+  runId: string,
+  ctx: StreamCtx
+): Promise<void> {
+  if (ctx.state.done || ctx.state.finalError) return;
 
-    reconnectAttempt = eventCount === 0 ? reconnectAttempt + 1 : 0;
-    if (reconnectAttempt > MAX_STREAM_RECONNECTS) {
+  let payload: InitStatusResponse;
+  try {
+    payload = await fetchRunStatus(runId, { baseUrl: INIT_API_URL });
+    ctx.statusFailures = 0;
+  } catch (error) {
+    ctx.statusFailures += 1;
+    if (ctx.statusFailures > MAX_STATUS_FAILURES) {
       throw new Error(
-        `Init stream disconnected too many times without new events (${MAX_STREAM_RECONNECTS})`
+        `Lost contact with the init server: ${errorMessage(error)}`
       );
     }
-
-    args.spin.message("Connection interrupted. Reconnecting...");
-    await sleepMs(nextReconnectDelay(reconnectAttempt));
-
-    try {
-      currentResponse = await openInitStream(args.runId, {
-        baseUrl: INIT_API_URL,
-        startIndex: args.state.nextStartIndex,
-      });
-    } catch (error) {
-      throw new Error(`Failed to reconnect to the init stream: ${errorMessage(error)}`);
-    }
+    ctx.spin.message("Reconnecting...");
+    await sleepMs(nextReconnectDelay(ctx.statusFailures));
+    await resumeRun(runId, ctx);
+    return;
   }
+
+  if (
+    payload.status === "running" ||
+    payload.status === "queued" ||
+    payload.status === "waiting_for_action"
+  ) {
+    ctx.spin.message("Reconnecting...");
+    // Match birthday-card-generator's 1s pacing between reconnects.
+    await sleepMs(1_000);
+    await resumeRun(runId, ctx);
+    return;
+  }
+
+  if (payload.status === "completed") {
+    if (!ctx.state.finalOutput && payload.output) {
+      ctx.state.finalOutput = payload.output;
+    }
+    ctx.state.done = { type: "done", ok: true };
+    return;
+  }
+
+  // failed | cancelled
+  ctx.state.finalError = {
+    type: "error",
+    message:
+      payload.error?.message ??
+      (payload.status === "cancelled"
+        ? "The workflow was cancelled before it finished."
+        : "The workflow stopped before it could finish."),
+    ...(payload.error?.commands ? { commands: payload.error.commands } : {}),
+    ...(payload.error?.docsUrl ? { docsUrl: payload.error.docsUrl } : {}),
+    ...(payload.error?.exitCode !== undefined
+      ? { exitCode: payload.error.exitCode }
+      : {}),
+    ...(payload.error?.output ? { output: payload.error.output } : {}),
+  };
+}
+
+/**
+ * Re-open the NDJSON stream at the current `nextStartIndex` and hand
+ * back to `consumeStream`. Mirrors `birthday-card-generator/components/
+ * form.tsx:442-478` `resumeRun`, with one difference: their resume
+ * surfaces an open failure to the UI as a terminal error (their
+ * workflow is short). Ours runs for 30+ minutes, so a transient
+ * server-side flap (5xx, undici TCP reset) is treated the same as a
+ * `fetchRunStatus` failure: count against `MAX_STATUS_FAILURES`,
+ * sleep with backoff, and recurse back into `handleStreamClosure`.
+ * That helper re-checks status (so we still terminate cleanly if the
+ * run actually went terminal during the hiccup) and calls us again.
+ */
+async function resumeRun(runId: string, ctx: StreamCtx): Promise<void> {
+  let response: Response;
+  try {
+    response = await openInitStream(runId, {
+      baseUrl: INIT_API_URL,
+      startIndex: ctx.state.nextStartIndex,
+    });
+    ctx.statusFailures = 0;
+  } catch (error) {
+    ctx.statusFailures += 1;
+    if (ctx.statusFailures > MAX_STATUS_FAILURES) {
+      throw new Error(
+        `Failed to reconnect to the init stream: ${errorMessage(error)}`
+      );
+    }
+    ctx.spin.message("Reconnecting...");
+    await sleepMs(nextReconnectDelay(ctx.statusFailures));
+    return handleStreamClosure(runId, ctx);
+  }
+  await consumeStream(response, runId, ctx);
 }
 
 function buildFinalError(
@@ -434,6 +525,11 @@ export async function runInit(initialOptions: WizardOptions): Promise<void> {
   // when present, the agent skips its own proposal.
   const overrideFeatures = normaliseFromFlag(context.features);
 
+  // Pre-compute the project structure + common config files locally so
+  // the agent has phase-1 context on its very first turn — no bridge
+  // round-trip needed for the initial list_dir / read_files calls.
+  const projectContext = await precomputeProjectContext(directory);
+
   const startInput: InitStartInput = {
     directory,
     yes,
@@ -451,6 +547,7 @@ export async function runInit(initialOptions: WizardOptions): Promise<void> {
     },
     sentryAuthToken: context.authToken,
     cliVersion: CLI_VERSION,
+    projectContext,
   };
 
   const spin = createWizardSpinner();
@@ -476,13 +573,18 @@ export async function runInit(initialOptions: WizardOptions): Promise<void> {
   }
 
   try {
-    await consumeStreamUntilTerminal({
-      runId,
+    const ctx: StreamCtx = {
       context,
       spin,
       spinState,
       state,
+      statusFailures: 0,
+    };
+    const initialResponse = await openInitStream(runId, {
+      baseUrl: INIT_API_URL,
+      startIndex: state.nextStartIndex,
     });
+    await consumeStream(initialResponse, runId, ctx);
   } catch (error) {
     if (error instanceof WizardCancelledError) {
       captureException(error);
