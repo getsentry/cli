@@ -44,11 +44,16 @@ export const ENV_FILES = [
 ] as const;
 
 /**
- * Pattern to match SENTRY_DSN in .env files.
- * Handles: SENTRY_DSN=value, SENTRY_DSN="value", SENTRY_DSN='value'
- * Also handles trailing comments: SENTRY_DSN=value # comment
+ * Pattern to match Sentry DSN variables in .env files.
+ * Handles the canonical `SENTRY_DSN` as well as framework-prefixed variants
+ * commonly used by Next.js, Vite, CRA, Expo, Nuxt, and others:
+ *   NEXT_PUBLIC_SENTRY_DSN, REACT_APP_SENTRY_DSN, VITE_SENTRY_DSN,
+ *   EXPO_PUBLIC_SENTRY_DSN, NUXT_PUBLIC_SENTRY_DSN, etc.
+ *
+ * Handles: VAR=value, VAR="value", VAR='value'
+ * Also handles trailing comments: VAR=value # comment
  */
-const ENV_DSN_PATTERN = /^SENTRY_DSN\s*=\s*(['"]?)(.+?)\1\s*(?:#.*)?$/;
+const ENV_DSN_PATTERN = /^(?:\w+_)?SENTRY_DSN\s*=\s*(['"]?)(.+?)\1\s*(?:#.*)?$/;
 
 /**
  * Extract SENTRY_DSN value from .env file content.

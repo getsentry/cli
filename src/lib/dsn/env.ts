@@ -13,7 +13,22 @@ import type { DetectedDsn } from "./types.js";
 export const SENTRY_DSN_ENV = "SENTRY_DSN";
 
 /**
- * Detect DSN from environment variable.
+ * Framework-prefixed env var names that commonly hold a Sentry DSN.
+ * Checked in order after `SENTRY_DSN` (canonical name has priority).
+ */
+const FRAMEWORK_DSN_VARS = [
+  "NEXT_PUBLIC_SENTRY_DSN",
+  "REACT_APP_SENTRY_DSN",
+  "VITE_SENTRY_DSN",
+  "EXPO_PUBLIC_SENTRY_DSN",
+  "NUXT_PUBLIC_SENTRY_DSN",
+] as const;
+
+/**
+ * Detect DSN from environment variables.
+ *
+ * Checks `SENTRY_DSN` first (canonical), then common framework-prefixed
+ * variants (NEXT_PUBLIC_SENTRY_DSN, REACT_APP_SENTRY_DSN, etc.).
  *
  * @returns Detected DSN or null if not set/invalid
  *
@@ -23,10 +38,19 @@ export const SENTRY_DSN_ENV = "SENTRY_DSN";
  * // { raw: "...", source: "env", projectId: "456", ... }
  */
 export function detectFromEnv(): DetectedDsn | null {
-  const dsn = getEnv()[SENTRY_DSN_ENV];
-  if (!dsn) {
-    return null;
+  const env = getEnv();
+
+  const canonical = env[SENTRY_DSN_ENV];
+  if (canonical) {
+    return createDetectedDsn(canonical, "env");
   }
 
-  return createDetectedDsn(dsn, "env");
+  for (const varName of FRAMEWORK_DSN_VARS) {
+    const value = env[varName];
+    if (value) {
+      return createDetectedDsn(value, "env");
+    }
+  }
+
+  return null;
 }
