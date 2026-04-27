@@ -6,14 +6,29 @@
  * `env.SENTRY_HOST`/`env.SENTRY_URL` (specifically before
  * `applySentryCliRcEnvShim` writes from a `.sentryclirc` file).
  *
- * The shell that launched us is at the same trust boundary as
- * `SENTRY_AUTH_TOKEN` itself (anyone who can set `SENTRY_HOST` can also read
- * the token), so other env vars are trusted. `.sentryclirc` files are NOT —
- * they're writable by repo authors and CI environments with weaker integrity
- * than the token.
+ * Trust model for the snapshot source:
+ *
+ * - `SENTRY_HOST`/`SENTRY_URL` from env are NOT unconditionally trusted.
+ *   In layered CI environments (e.g. GitHub Actions `$GITHUB_ENV`), a
+ *   low-privilege step can write env vars that a later high-privilege step
+ *   inherits — without having read access to `SENTRY_AUTH_TOKEN`. So
+ *   env-host and env-token may have different integrity levels.
+ *
+ * - For `sntrys_` org-auth tokens, the embedded `url` claim is the
+ *   authoritative source: the real Sentry server wrote it at issuance
+ *   time, and it can't be overridden by env injection. The claim wins
+ *   over env when both are present.
+ *
+ * - For non-`sntrys_` tokens (no claim), env is the only signal
+ *   available. The residual risk in layered-CI is documented in the PR
+ *   description as a workflow-design concern; recommendation is to use
+ *   `sntrys_` tokens in CI.
+ *
+ * - `.sentryclirc` files are never consulted here — they have weaker
+ *   integrity than either env or token claims.
  *
  * Boot ordering (see `src/cli.ts::preloadProjectContext`):
- *   1. captureEnvTokenHost()      ← this module, env-only, synchronous
+ *   1. captureEnvTokenHost()      ← this module, env + claim, synchronous
  *   2. findProjectRoot            ← populates .sentryclirc cache
  *   3. applySentryCliRcEnvShim    ← may write env.SENTRY_URL
  *   4. getDefaultUrl() fallback   ← may write env.SENTRY_URL
@@ -33,29 +48,31 @@ let pinnedHost: string | undefined;
  * calls are no-ops.
  *
  * Resolution order:
- * 1. `SENTRY_HOST`/`SENTRY_URL` from env (user's shell — trusted). Reads env
- *    directly; NOT via `getConfiguredSentryUrl` which also consults
- *    `.sentryclirc`-sourced values we haven't yet decided to trust.
- * 2. `sntrys_` token claim's `url` (UX fallback for self-hosted users who
- *    only set `SENTRY_AUTH_TOKEN`). The claim is unsigned; see
- *    `token-claims.ts`. Env always wins over claim.
+ * 1. `sntrys_` token claim's `url` — authoritative for org-auth tokens.
+ *    Immune to env injection because the claim is embedded in the token
+ *    bytes (which the attacker can't read in layered-CI attacks).
+ * 2. `SENTRY_HOST`/`SENTRY_URL` from env — fallback for non-`sntrys_`
+ *    tokens that don't carry a claim.
  * 3. `DEFAULT_SENTRY_URL` (SaaS).
  */
 export function captureEnvTokenHost(): void {
   if (pinnedHost !== undefined) {
     return;
   }
+  // Claim first: for sntrys_ tokens, the embedded url is authoritative.
+  const claimHost = normalizeUserInputToOrigin(
+    getSntrysClaimUrl(getRawEnvToken())
+  );
+  if (claimHost) {
+    pinnedHost = claimHost;
+    return;
+  }
+  // Env fallback: for non-sntrys_ tokens (no claim available).
   const env = getEnv();
   const envHost = normalizeUserInputToOrigin(
     env.SENTRY_HOST?.trim() || env.SENTRY_URL?.trim()
   );
-  if (envHost) {
-    pinnedHost = envHost;
-    return;
-  }
-  pinnedHost =
-    normalizeUserInputToOrigin(getSntrysClaimUrl(getRawEnvToken())) ??
-    DEFAULT_SENTRY_URL;
+  pinnedHost = envHost ?? DEFAULT_SENTRY_URL;
 }
 
 /**

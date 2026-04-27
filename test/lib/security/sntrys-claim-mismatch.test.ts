@@ -215,10 +215,11 @@ describe("UX path: env-token-host falls back to sntrys_ claim url", () => {
     expect(getEnvTokenHost()).toBe("https://sentry.selfhosted.example.com");
   });
 
-  test("explicit SENTRY_HOST wins over claim (env trumps claim)", async () => {
-    // CRITICAL: even though the claim says A, an explicit SENTRY_HOST
-    // from the user's shell is authoritative. The claim is a fallback,
-    // not an override.
+  test("sntrys_ claim wins over SENTRY_HOST (immune to env injection)", async () => {
+    // The claim is authoritative for sntrys_ tokens. Even when
+    // SENTRY_HOST is set (legitimately or via CI env injection), the
+    // snapshot uses the claim — it's the only value the token's
+    // issuing server can vouch for.
     process.env.SENTRY_AUTH_TOKEN = mintSntrysToken({
       iat: 1_700_000_000,
       url: "https://sentry.firsthost.com",
@@ -231,7 +232,7 @@ describe("UX path: env-token-host falls back to sntrys_ claim url", () => {
     );
     captureEnvTokenHost();
 
-    expect(getEnvTokenHost()).toBe("https://sentry.secondhost.com");
+    expect(getEnvTokenHost()).toBe("https://sentry.firsthost.com");
   });
 
   test("non-sntrys_ token + no SENTRY_HOST → snapshot falls back to SaaS default", async () => {
