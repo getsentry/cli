@@ -45,8 +45,8 @@ sentry init acme/my-app
 # Assign a team when creating a new project
 sentry init acme/ --team backend
 
-# Enable specific features
-sentry init --features profiling,replay
+# Skip the agent-driven feature picker and use a fixed list (CI / non-interactive)
+sentry init --features tracing,replay,sourcemaps
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
