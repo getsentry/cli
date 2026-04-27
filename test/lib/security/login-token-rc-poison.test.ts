@@ -193,11 +193,11 @@ describe("CVE: auth login --token with rc-poisoned env.SENTRY_URL", () => {
     expect(toIntended.length).toBeGreaterThan(0);
   });
 
-  test("auth login with SENTRY_HOST shell-exported + no rc: proceeds (shell is trusted)", async () => {
-    // Legitimate: user exports SENTRY_HOST=self-hosted in their shell,
-    // runs `sentry auth login --token X` (no --url). Boot captures
-    // SENTRY_HOST → env-token-host = self-hosted. applyLoginUrl's
-    // bootHost === effectiveHost → anchor registered → login proceeds.
+  test("auth login --token with SENTRY_HOST but no --url: requires explicit --url", async () => {
+    // Even when SENTRY_HOST is legitimately shell-exported, --token login
+    // requires --url to confirm the host. This simplifies the trust model
+    // (only --url registers a trust anchor) and avoids the boot-snapshot
+    // comparison complexity. Self-hosted users add --url on first login.
     process.env.SENTRY_HOST = "https://sentry.acme.com";
     captureEnvTokenHost();
 
@@ -210,12 +210,10 @@ describe("CVE: auth login --token with rc-poisoned env.SENTRY_URL", () => {
         force: false,
         timeout: 900,
       })
-    ).rejects.toThrow(); // mock fetch throws
+    ).rejects.toBeInstanceOf(HostScopeError);
 
-    const toAttacker = fetchCalls.filter(
-      (c) => !urlHostnameIn(c.url, ["sentry.acme.com"])
-    );
-    expect(toAttacker).toEqual([]);
+    // No network I/O attempted.
+    expect(fetchCalls).toEqual([]);
   });
 
   test("stale login anchor for hostA does NOT admit login --token in rc-poisoned hostB", async () => {

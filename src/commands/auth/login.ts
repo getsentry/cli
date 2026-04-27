@@ -19,7 +19,6 @@ import { setDefaultUrl } from "../../lib/db/defaults.js";
 import { getDbPath } from "../../lib/db/index.js";
 import { getUserInfo, setUserInfo } from "../../lib/db/user.js";
 import { getEnv } from "../../lib/env.js";
-import { getEnvTokenHost } from "../../lib/env-token-host.js";
 import {
   AuthError,
   HostScopeError,
@@ -130,10 +129,9 @@ function refuseLoginToUntrustedHost(
   }
   const tokenHint = flags.token ? " --token <token>" : "";
   throw new HostScopeError(
-    `Refusing to log in against ${effectiveHost}: this URL was configured by a .sentryclirc file in the current or parent directory, not by your shell environment.\n` +
-      "If you trust this host, pass it explicitly:\n" +
-      `  sentry auth login --url ${effectiveHost}${tokenHint}\n` +
-      "Otherwise, remove the [defaults] url line from the .sentryclirc file."
+    `Refusing to log in against ${effectiveHost} without explicit --url.\n` +
+      "Pass the host explicitly to confirm you trust it:\n" +
+      `  sentry auth login --url ${effectiveHost}${tokenHint}`
   );
 }
 
@@ -164,34 +162,26 @@ function persistLoginUrlAsDefault(
  * device flow and token refresh hit the requested host. Returns the
  * effective host so callers can record it with {@link setAuthToken}.
  *
- * Also registers a login trust anchor (consumed by {@link applyCustomHeaders}
- * for IAP onboarding) — but only when the host comes from a trusted source:
- * explicit `--url` argv, or env vars matching the boot-time snapshot. An
- * rc-shim-poisoned env value (post-boot mutation) is NOT registered.
+ * Registers a login trust anchor (consumed by {@link applyCustomHeaders}
+ * for IAP onboarding) only when `--url` is explicitly passed — the user's
+ * argv is the only trusted source for this. When `--url` is absent, the
+ * effective host comes from current env (which may have been written by the
+ * `.sentryclirc` shim) and is NOT registered as a trust anchor.
  */
 export function applyLoginUrl(url: string | undefined): string {
   const env = getEnv();
-  let effectiveHost: string;
-  let registerAnchor: boolean;
 
   if (url) {
     env.SENTRY_HOST = url;
     env.SENTRY_URL = url;
-    effectiveHost = url;
-    registerAnchor = true;
-  } else {
-    effectiveHost =
-      normalizeUserInputToOrigin(env.SENTRY_HOST || env.SENTRY_URL) ??
-      DEFAULT_SENTRY_URL;
-    // Trust the env value only if it matches the boot snapshot — i.e. the
-    // user's shell, not a post-boot rc-shim write.
-    registerAnchor = effectiveHost === getEnvTokenHost();
+    registerLoginTrustAnchor(url);
+    return url;
   }
 
-  if (registerAnchor) {
-    registerLoginTrustAnchor(effectiveHost);
-  }
-  return effectiveHost;
+  return (
+    normalizeUserInputToOrigin(env.SENTRY_HOST || env.SENTRY_URL) ??
+    DEFAULT_SENTRY_URL
+  );
 }
 
 /**
