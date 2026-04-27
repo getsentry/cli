@@ -64,6 +64,14 @@ export async function listOrganizationsInRegion(
 
   try {
     const data = unwrapResult(result, "Failed to list organizations");
+    if (!Array.isArray(data)) {
+      throw new ApiError(
+        "Failed to list organizations: unexpected response format",
+        0,
+        `Expected an array from ${regionUrl}/api/0/organizations/ but received ${typeof data}. ` +
+          "This may indicate an incompatible self-hosted Sentry version or a proxy interfering with the response."
+      );
+    }
     return data as unknown as SentryOrganization[];
   } catch (error) {
     // Enrich 403 errors with contextual guidance (CLI-89, 24 users).
