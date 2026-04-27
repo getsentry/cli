@@ -36,6 +36,14 @@ type AuthRow = {
 
 const log = logger.withTag("auth");
 
+/** Read the single auth row. Returns `undefined` when no row exists. */
+function getAuthRow(): AuthRow | undefined {
+  const db = getDatabase();
+  return db.query("SELECT * FROM auth WHERE id = 1").get() as
+    | AuthRow
+    | undefined;
+}
+
 /**
  * Lazy migration for rows created before schema v16 (NULL `host`).
  *
@@ -161,10 +169,7 @@ export function getAuthConfig(): AuthConfig | undefined {
   }
 
   const dbConfig = withDbSpan("getAuthConfig", () => {
-    const db = getDatabase();
-    const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
-      | AuthRow
-      | undefined;
+    const row = getAuthRow();
 
     if (!row?.token) {
       return;
@@ -211,10 +216,7 @@ export function getAuthConfig(): AuthConfig | undefined {
 export function getStoredAuthHost(): string | undefined {
   try {
     return withDbSpan("getStoredAuthHost", () => {
-      const db = getDatabase();
-      const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
-        | AuthRow
-        | undefined;
+      const row = getAuthRow();
       if (!row?.token) {
         return;
       }
@@ -241,10 +243,7 @@ export function getStoredAuthHost(): string | undefined {
 export function hasUsableStoredToken(): boolean {
   try {
     return withDbSpan("hasUsableStoredToken", () => {
-      const db = getDatabase();
-      const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
-        | AuthRow
-        | undefined;
+      const row = getAuthRow();
       if (!row?.token) {
         return false;
       }
@@ -273,10 +272,7 @@ export function hasUsableStoredToken(): boolean {
 export function getUsableStoredTokenHost(): string | undefined {
   try {
     return withDbSpan("getUsableStoredTokenHost", () => {
-      const db = getDatabase();
-      const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
-        | AuthRow
-        | undefined;
+      const row = getAuthRow();
       if (!row?.token) {
         return;
       }
@@ -321,10 +317,7 @@ function computeAuthToken(): string | undefined {
   }
 
   const dbToken = withDbSpan("getAuthToken", () => {
-    const db = getDatabase();
-    const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
-      | AuthRow
-      | undefined;
+    const row = getAuthRow();
 
     if (!row?.token) {
       return;
@@ -360,10 +353,7 @@ function getCachedAuthRow(): AuthRow | undefined {
   if (cachedAuthRow !== undefined) {
     return cachedAuthRow.value;
   }
-  const db = getDatabase();
-  const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
-    | AuthRow
-    | undefined;
+  const row = getAuthRow();
   cachedAuthRow = { value: row };
   return row;
 }
@@ -562,10 +552,7 @@ function hashIdentity(kind: string, secret: string): string {
  * when an env token is present.
  */
 export function hasStoredAuthCredentials(): boolean {
-  const db = getDatabase();
-  const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
-    | AuthRow
-    | undefined;
+  const row = getAuthRow();
   if (!row?.token) {
     return false;
   }
