@@ -1039,12 +1039,12 @@ describe("buildBodyFromInput", () => {
     }
   });
 
-  test("throws for non-existent file", async () => {
+  test("throws ValidationError for non-existent file", async () => {
     const mockStdin = createMockStdin("");
 
     await expect(
       buildBodyFromInput("/nonexistent/path/file.json", mockStdin)
-    ).rejects.toThrow(/File not found/);
+    ).rejects.toBeInstanceOf(ValidationError);
   });
 });
 
