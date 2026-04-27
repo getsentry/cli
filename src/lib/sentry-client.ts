@@ -25,6 +25,7 @@ import {
   invalidateCachedResponsesMatching,
   storeCachedResponse,
 } from "./response-cache.js";
+import { buildUrlMismatchMessage } from "./sentry-url-parser.js";
 import { withTracingSpan } from "./telemetry.js";
 import { getSntrysClaimUrl } from "./token-claims.js";
 import {
@@ -111,12 +112,12 @@ function prepareHeaders(
   // URL-arg / rc-shim entry points; this catches any code path that mutated
   // SENTRY_HOST/SENTRY_URL without going through those guards.
   if (!isRequestOriginTrusted(input)) {
-    const requestOrigin = normalizeOrigin(input);
-    const tokenHost = getActiveTokenHost();
     throw new HostScopeError(
-      `Refusing to send credentials to ${requestOrigin ?? "<unknown host>"}: active token is scoped to ${tokenHost}.\n` +
-        "Run 'sentry auth login --url <url>' against the intended instance, " +
-        "or unset SENTRY_AUTH_TOKEN/SENTRY_HOST to use credentials for a different host."
+      buildUrlMismatchMessage(
+        "Credentials",
+        normalizeOrigin(input) ?? "<unknown host>",
+        getActiveTokenHost()
+      )
     );
   }
 
@@ -126,11 +127,12 @@ function prepareHeaders(
   // fan-out via the control silo's region URLs still works.
   const claimUrl = getSntrysClaimUrl(token);
   if (claimUrl && !isHostTrustedForClaim(input, claimUrl)) {
-    const requestOrigin = normalizeOrigin(input);
     throw new HostScopeError(
-      `Refusing to send credentials to ${requestOrigin ?? "<unknown host>"}: the active token's embedded claim says it was issued by ${claimUrl}, which doesn't match this request's host.\n` +
-        "Run 'sentry auth login --url <url>' against the intended instance, " +
-        "or unset SENTRY_AUTH_TOKEN to use a different token."
+      buildUrlMismatchMessage(
+        "Credentials",
+        normalizeOrigin(input) ?? "<unknown host>",
+        claimUrl
+      )
     );
   }
 

@@ -22,6 +22,7 @@ import {
   DeviceFlowError,
   HostScopeError,
 } from "./errors.js";
+import { buildUrlMismatchMessage } from "./sentry-url-parser.js";
 import { withHttpSpan } from "./telemetry.js";
 import {
   getActiveTokenHost,
@@ -131,12 +132,12 @@ async function fetchWithConnectionError(
 function assertRefreshHostTrusted(): void {
   const refreshUrl = getSentryUrl();
   if (!isRequestOriginTrusted(refreshUrl)) {
-    const refreshOrigin = normalizeOrigin(refreshUrl);
-    const tokenHost = getActiveTokenHost();
     throw new HostScopeError(
-      `Refusing to send OAuth refresh token to ${refreshOrigin ?? "<unknown host>"}: active token is scoped to ${tokenHost}.\n` +
-        "Run 'sentry auth login --url <url>' against the intended instance, " +
-        "or unset SENTRY_HOST to use credentials for a different host."
+      buildUrlMismatchMessage(
+        "OAuth refresh token",
+        normalizeOrigin(refreshUrl) ?? "<unknown host>",
+        getActiveTokenHost()
+      )
     );
   }
 }
