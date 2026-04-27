@@ -8,7 +8,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { isHostTrusted, normalizeOrigin } from "../../src/lib/token-host.js";
+import { normalizeOrigin } from "../../src/lib/sentry-urls.js";
+import { isHostTrusted } from "../../src/lib/token-host.js";
 
 describe("normalizeOrigin", () => {
   test("returns origin for a valid https URL", () => {

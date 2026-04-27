@@ -24,6 +24,7 @@ import {
 } from "../../../src/lib/env-token-host.js";
 import {
   applySentryCliRcEnvShim,
+  assertRcUrlTrusted,
   CONFIG_FILENAME,
   clearSentryCliRcCache,
 } from "../../../src/lib/sentryclirc.js";
@@ -75,16 +76,20 @@ describe("CVE: .sentryclirc URL credential exfiltration", () => {
     delete process.env.SENTRY_HOST;
     delete process.env.SENTRY_URL;
     // SENTRY_AUTH_TOKEN is already set by test/preload.ts
+    // Capture env-token host BEFORE the shim mutates env (mirrors boot
+    // ordering in cli.ts::preloadProjectContext).
+    captureEnvTokenHost();
     writeRc(testDir, "[defaults]\nurl = https://evil.com\n");
 
-    await expect(applySentryCliRcEnvShim(testDir)).rejects.toThrow(
+    // Shim applies the URL unconditionally — the trust check is deferred.
+    await applySentryCliRcEnvShim(testDir);
+    expect(process.env.SENTRY_URL).toBe("https://evil.com");
+
+    // Critical: assertRcUrlTrusted must throw, blocking any credentialed
+    // request via buildCommand's wrapper.
+    await expect(assertRcUrlTrusted(testDir)).rejects.toThrow(
       /does not match|sentry auth login --url/
     );
-
-    // Critical: env must remain unpoisoned so no credentialed request
-    // will be sent to evil.com.
-    expect(process.env.SENTRY_URL).toBeUndefined();
-    expect(process.env.SENTRY_HOST).toBeUndefined();
   });
 
   test("global-style .sentryclirc with attacker URL is rejected too (no 'global is trusted' bypass)", async () => {
@@ -93,14 +98,15 @@ describe("CVE: .sentryclirc URL credential exfiltration", () => {
     // global) must NOT be a trust-establishment pathway.
     delete process.env.SENTRY_HOST;
     delete process.env.SENTRY_URL;
+    captureEnvTokenHost();
     // Write the rc in the config dir (SENTRY_CONFIG_DIR is set above).
     // That's treated as a "global" path by the shim's scope tagging.
     writeRc(testDir, "[defaults]\nurl = https://evil.com\n");
 
-    await expect(applySentryCliRcEnvShim(testDir)).rejects.toThrow(
+    await applySentryCliRcEnvShim(testDir);
+    await expect(assertRcUrlTrusted(testDir)).rejects.toThrow(
       /does not match|sentry auth login --url/
     );
-    expect(process.env.SENTRY_URL).toBeUndefined();
   });
 
   test("SaaS URL in .sentryclirc proceeds (no credential leak possible to SaaS)", async () => {
@@ -144,27 +150,20 @@ describe("CVE: .sentryclirc URL credential exfiltration", () => {
     expect(process.env.SENTRY_URL).toBeUndefined();
   });
 
-  test("skipUrlTrustCheck bypasses the guard (used for auth login/logout bootstrap)", async () => {
-    // Onboarding scenario: fresh install, user `cd`s into a self-hosted
-    // monorepo shipping its own `.sentryclirc`, runs `sentry auth login
-    // --url <url>`. The shim must NOT block — otherwise the login
-    // command is chicken-and-egg.
+  test("shim applies rc URL unconditionally; assertRcUrlTrusted is the gate", async () => {
+    // The shim always writes the rc URL to env (for routing). The trust
+    // check is deferred to assertRcUrlTrusted, which buildCommand calls
+    // after Stricli identifies the command. Commands that opt out
+    // (auth login/logout via skipRcUrlCheck: true) never call it.
     delete process.env.SENTRY_HOST;
     delete process.env.SENTRY_URL;
     writeRc(testDir, "[defaults]\nurl = https://sentry.example.com\n");
 
-    // With bypass — proceeds and applies the rc URL as the login target.
-    await applySentryCliRcEnvShim(testDir, { skipUrlTrustCheck: true });
+    await applySentryCliRcEnvShim(testDir);
+    // URL applied to env (no trust check at this stage).
     expect(process.env.SENTRY_URL).toBe("https://sentry.example.com");
-  });
 
-  test("skipUrlTrustCheck does NOT bypass for SaaS (no behavior change for SaaS)", async () => {
-    // SaaS is always admitted regardless of bypass flag — trivial no-op.
-    delete process.env.SENTRY_HOST;
-    delete process.env.SENTRY_URL;
-    writeRc(testDir, "[defaults]\nurl = https://sentry.io\n");
-
-    await applySentryCliRcEnvShim(testDir, { skipUrlTrustCheck: false });
-    expect(process.env.SENTRY_URL).toBe("https://sentry.io");
+    // The trust check is the deferred gate — would throw for non-matching
+    // hosts. Already covered by the other tests in this file.
   });
 });

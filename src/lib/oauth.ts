@@ -23,12 +23,9 @@ import {
   HostScopeError,
 } from "./errors.js";
 import { buildUrlMismatchMessage } from "./sentry-url-parser.js";
+import { normalizeOrigin } from "./sentry-urls.js";
 import { withHttpSpan } from "./telemetry.js";
-import {
-  getActiveTokenHost,
-  isRequestOriginTrusted,
-  normalizeOrigin,
-} from "./token-host.js";
+import { getActiveTokenHost, isRequestOriginTrusted } from "./token-host.js";
 
 /**
  * Get the Sentry instance URL for OAuth endpoints.

@@ -1,8 +1,3 @@
-// biome-ignore-all lint/performance/noBarrelFile: re-exports unify the
-// host-trust model surface across token-host.ts (logic), db/regions.ts
-// (region-URL trust extension state), and sentry-urls.ts (URL helpers).
-// The split exists to avoid an import cycle, not to expand surface.
-
 /**
  * Host-Scoped Token Trust Model
  *
@@ -18,8 +13,6 @@
  *   any `*.sentry.io` subdomain. Non-SaaS hosts match exactly — no subdomain
  *   suffix matching (a `sentry.acme.com` token does NOT match
  *   `sentry.acme.evil.com`).
- *
- * See `.opencode/plans/1777023782662-proud-circuit.md` for full rationale.
  */
 
 import { getRawEnvToken, getUsableStoredTokenHost } from "./db/auth.js";
@@ -27,16 +20,6 @@ import { isTrustedRegionOrigin } from "./db/regions.js";
 import { getEnv } from "./env.js";
 import { getEnvTokenHost } from "./env-token-host.js";
 import { isSaaSTrustOrigin, normalizeOrigin } from "./sentry-urls.js";
-
-// Re-export so existing callers don't churn — these symbols live in their
-// natural home modules to avoid an import cycle, but they're conceptually
-// part of the host-trust surface this module documents.
-export {
-  clearTrustedHostState,
-  registerTrustedRegionUrls,
-  resetTrustedRegionUrlsForTesting,
-} from "./db/regions.js";
-export { normalizeOrigin } from "./sentry-urls.js";
 
 /**
  * Check whether `candidate` matches `trusted` under the host-scoping trust
@@ -68,27 +51,20 @@ export function isHostTrusted(
 /**
  * Resolve the origin of the currently active Sentry token, if any.
  *
- * Precedence mirrors {@link getAuthConfig}:
- * 1. `SENTRY_FORCE_ENV_TOKEN` + env token present → env-token host snapshot
- * 2. Stored OAuth row (with lazy NULL-host migration) → row host
- * 3. Env token present → env-token host snapshot
- * 4. No token → `undefined`
+ * Mirrors {@link getAuthConfig}'s precedence: stored OAuth wins over env
+ * token unless `SENTRY_FORCE_ENV_TOKEN` is set.
  */
 export function getActiveTokenHost(): string | undefined {
-  const forceEnv = getEnv().SENTRY_FORCE_ENV_TOKEN?.trim();
-  if (forceEnv && getRawEnvToken()) {
-    return getEnvTokenHost();
+  const hasEnvToken = !!getRawEnvToken();
+  const forceEnv = hasEnvToken && !!getEnv().SENTRY_FORCE_ENV_TOKEN?.trim();
+
+  if (!forceEnv) {
+    const storedHost = getUsableStoredTokenHost();
+    if (storedHost) {
+      return storedHost;
+    }
   }
-  // Atomic read avoids a TOCTOU window between "is there a usable token?"
-  // and "read its host".
-  const storedHost = getUsableStoredTokenHost();
-  if (storedHost) {
-    return storedHost;
-  }
-  if (getRawEnvToken()) {
-    return getEnvTokenHost();
-  }
-  return;
+  return hasEnvToken ? getEnvTokenHost() : undefined;
 }
 
 /**
@@ -129,9 +105,23 @@ export function resetLoginTrustAnchorForTesting(): void {
 }
 
 /**
- * Check whether a request's origin is trusted under the active token's scope,
- * including dynamically-discovered regional silos. Returns `true` when no
- * token is active (nothing to protect).
+ * Check whether a request's origin is trusted for a given anchor host,
+ * including dynamically-discovered regional silos.
+ */
+function isOriginTrustedFor(
+  requestInput: string | URL | Request | undefined | null,
+  anchorHost: string
+): boolean {
+  if (isHostTrusted(requestInput, anchorHost)) {
+    return true;
+  }
+  const requestOrigin = normalizeOrigin(requestInput);
+  return requestOrigin !== undefined && isTrustedRegionOrigin(requestOrigin);
+}
+
+/**
+ * Check whether a request's origin is trusted under the active token's scope.
+ * Returns `true` when no token is active (nothing to protect).
  */
 export function isRequestOriginTrusted(
   requestInput: string | URL | Request | undefined | null
@@ -140,28 +130,18 @@ export function isRequestOriginTrusted(
   if (!tokenHost) {
     return true;
   }
-  if (isHostTrusted(requestInput, tokenHost)) {
-    return true;
-  }
-  const requestOrigin = normalizeOrigin(requestInput);
-  return requestOrigin !== undefined && isTrustedRegionOrigin(requestOrigin);
+  return isOriginTrustedFor(requestInput, tokenHost);
 }
 
 /**
- * Like {@link isRequestOriginTrusted}, but anchored on the (unsigned) `sntrys_`
- * claim url instead of `getActiveTokenHost()`. Honors region-URL extension so
- * self-hosted multi-region setups still work — claim points at the control
- * silo, fan-out goes to regions discovered via `/users/me/regions/`.
+ * Like {@link isRequestOriginTrusted}, but anchored on the `sntrys_` claim
+ * url instead of `getActiveTokenHost()`.
  */
 export function isHostTrustedForClaim(
   requestInput: string | URL | Request | undefined | null,
   claimUrl: string
 ): boolean {
-  if (isHostTrusted(requestInput, claimUrl)) {
-    return true;
-  }
-  const requestOrigin = normalizeOrigin(requestInput);
-  return requestOrigin !== undefined && isTrustedRegionOrigin(requestOrigin);
+  return isOriginTrustedFor(requestInput, claimUrl);
 }
 
 /**

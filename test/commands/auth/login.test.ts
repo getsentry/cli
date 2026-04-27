@@ -133,6 +133,21 @@ function createContext() {
   return { context, getStdout };
 }
 
+/** Assert setAuthToken was called with the expected token and a host option. */
+function expectTokenStored(
+  spy: ReturnType<typeof spyOn>,
+  expectedToken: string
+): void {
+  // biome-ignore lint/suspicious/noMisplacedAssertion: shared helper
+  expect(spy).toHaveBeenCalled();
+  // biome-ignore lint/suspicious/noMisplacedAssertion: shared helper
+  expect(spy.mock.calls[0]?.[0]).toBe(expectedToken);
+  // biome-ignore lint/suspicious/noMisplacedAssertion: shared helper
+  expect(spy.mock.calls[0]?.[3]).toMatchObject({
+    host: expect.any(String),
+  });
+}
+
 describe("loginCommand.func --token path", () => {
   let isAuthenticatedSpy: ReturnType<typeof spyOn>;
   let isEnvTokenActiveSpy: ReturnType<typeof spyOn>;
@@ -242,11 +257,7 @@ describe("loginCommand.func --token path", () => {
 
     // Token stored with host scope (host resolved from SENTRY_HOST/SENTRY_URL
     // or default SaaS — see setAuthToken in db/auth.ts).
-    expect(setAuthTokenSpy).toHaveBeenCalled();
-    expect(setAuthTokenSpy.mock.calls[0]?.[0]).toBe("my-token");
-    expect(setAuthTokenSpy.mock.calls[0]?.[3]).toMatchObject({
-      host: expect.any(String),
-    });
+    expectTokenStored(setAuthTokenSpy, "my-token");
     expect(getCurrentUserSpy).toHaveBeenCalled();
     expect(setUserInfoSpy).toHaveBeenCalledWith({
       userId: "42",
@@ -391,11 +402,7 @@ describe("loginCommand.func --token path", () => {
     });
 
     expect(clearAuthSpy).toHaveBeenCalled();
-    expect(setAuthTokenSpy).toHaveBeenCalled();
-    expect(setAuthTokenSpy.mock.calls[0]?.[0]).toBe("new-token");
-    expect(setAuthTokenSpy.mock.calls[0]?.[3]).toMatchObject({
-      host: expect.any(String),
-    });
+    expectTokenStored(setAuthTokenSpy, "new-token");
     expect(getStdout()).toContain("Authenticated");
   });
 
@@ -581,11 +588,7 @@ describe("login re-authentication interactive prompt", () => {
 
       expect(clearAuthSpy).toHaveBeenCalled();
       // Token stored with host scope (4th arg = { host: ... })
-      expect(setAuthTokenSpy).toHaveBeenCalled();
-      expect(setAuthTokenSpy.mock.calls[0]?.[0]).toBe("new-token");
-      expect(setAuthTokenSpy.mock.calls[0]?.[3]).toMatchObject({
-        host: expect.any(String),
-      });
+      expectTokenStored(setAuthTokenSpy, "new-token");
     } finally {
       setAuthTokenSpy.mockRestore();
       getUserRegionsSpy.mockRestore();
@@ -756,7 +759,7 @@ describe("applyLoginUrl (trust anchor registration)", () => {
     captureEnvTokenHost();
 
     // Simulate .sentryclirc shim writing env.SENTRY_URL AFTER boot (the
-    // skipUrlTrustCheck bypass on auth login). This is the attacker path.
+    // auth login has skipRcUrlCheck: true). This is the attacker path.
     process.env.SENTRY_URL = "https://evil.com";
 
     const { applyLoginUrl } = await import(

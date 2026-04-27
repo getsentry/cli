@@ -91,15 +91,8 @@ export function isSentrySaasUrl(url: string): boolean {
 export function isSaaSTrustOrigin(url: string): boolean {
   try {
     const parsed = new URL(url);
-    if (parsed.protocol !== "https:") {
-      return false;
-    }
-    if (parsed.port !== "") {
-      return false;
-    }
     return (
-      parsed.hostname === DEFAULT_SENTRY_HOST ||
-      parsed.hostname.endsWith(`.${DEFAULT_SENTRY_HOST}`)
+      parsed.protocol === "https:" && parsed.port === "" && isSentrySaasUrl(url)
     );
   } catch {
     return false;

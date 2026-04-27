@@ -145,7 +145,7 @@ describe("CVE defense-in-depth: sntrys_ claim vs request mismatch", () => {
     // Simulate: control silo's /users/me/regions/ told us about a
     // regional silo at https://us.sentry.acme.com.
     const { registerTrustedRegionUrls } = await import(
-      "../../../src/lib/token-host.js"
+      "../../../src/lib/db/regions.js"
     );
     registerTrustedRegionUrls(["https://us.sentry.acme.com"]);
 

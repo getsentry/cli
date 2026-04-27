@@ -39,11 +39,11 @@ import { logger } from "../../lib/logger.js";
 import { clearResponseCache } from "../../lib/response-cache.js";
 import {
   isSaaSTrustOrigin,
+  normalizeOrigin,
   normalizeUserInputToOrigin,
 } from "../../lib/sentry-urls.js";
 import {
   isLoginTrustAnchorFor,
-  normalizeOrigin,
   registerLoginTrustAnchor,
 } from "../../lib/token-host.js";
 
@@ -239,6 +239,7 @@ async function handleExistingAuth(force: boolean): Promise<boolean> {
 
 export const loginCommand = buildCommand({
   auth: false,
+  skipRcUrlCheck: true,
   docs: {
     brief: "Authenticate with Sentry",
     fullDescription:

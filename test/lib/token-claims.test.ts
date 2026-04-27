@@ -13,10 +13,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import {
-  getSntrysClaimUrl,
-  parseSntrysClaim,
-} from "../../src/lib/token-claims.js";
+import { parseSntrysClaim } from "../../src/lib/token-claims.js";
 import { mintSntrysToken } from "../helpers.js";
 
 describe("parseSntrysClaim", () => {
@@ -43,15 +40,6 @@ describe("parseSntrysClaim", () => {
       url: "https://sentry.acme.com",
       regionUrl: undefined,
     });
-  });
-
-  test("getSntrysClaimUrl convenience returns just the url", () => {
-    const token = mintSntrysToken({
-      iat: 1_700_000_000,
-      url: "https://sentry.io",
-      org: "x",
-    });
-    expect(getSntrysClaimUrl(token)).toBe("https://sentry.io");
   });
 
   test("returns undefined for non-sntrys_ tokens", () => {

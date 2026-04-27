@@ -4,10 +4,15 @@
  * Format: `sntrys_<base64(JSON{iat, url, region_url, org})>_<random-secret>`
  * (server-side: getsentry/sentry `orgauthtoken_token.py`).
  *
- * The claim is **NOT signed** — anyone can craft a sntrys_ string with any
- * `url` they want. Use this as a defense-in-depth signal or a UX hint, NEVER
- * as a primary trust source. The boot-time env snapshot
- * (`captureEnvTokenHost`) and the `auth.host` column remain authoritative.
+ * The claim is **NOT signed** — anyone can forge a `sntrys_` string with any
+ * `url`. However, for legitimate tokens the claim IS authoritative: the real
+ * server wrote it at issuance time, and it's immune to env-injection attacks
+ * (the attacker who can poison `SENTRY_HOST` via `$GITHUB_ENV` can't read or
+ * modify the token bytes). `captureEnvTokenHost` uses the claim as the
+ * primary trust source for `sntrys_` tokens, ahead of env vars.
+ *
+ * The forgery risk is accepted: an attacker who can supply a forged token has
+ * already compromised the credential itself (out of threat model).
  */
 
 const SNTRYS_PREFIX = "sntrys_";
@@ -57,7 +62,7 @@ export function parseSntrysClaim(
     return;
   }
 
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+  if (!parsed || typeof parsed !== "object") {
     return;
   }
   const obj = parsed as Record<string, unknown>;
@@ -78,11 +83,4 @@ export function parseSntrysClaim(
       : undefined;
 
   return { url, regionUrl };
-}
-
-/** Convenience wrapper: returns just the `url` claim, or `undefined`. */
-export function getSntrysClaimUrl(
-  token: string | undefined
-): string | undefined {
-  return parseSntrysClaim(token)?.url;
 }

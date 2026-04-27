@@ -16,61 +16,12 @@ import { CliError } from "./lib/errors.js";
 import { applySentryCliRcEnvShim } from "./lib/sentryclirc.js";
 
 /**
- * Extract positional argv tokens, skipping `--flag[=value]` and short `-f`
- * tokens. Conservative — bare `--flag` (no `=`) doesn't consume the next
- * token, which keeps it as a positional. That's safe for our matching since
- * `auth login`/`auth logout` don't take a flag-value that looks like `auth`.
- */
-/** @internal exported for testing */
-export function extractPositionals(args: readonly string[]): string[] {
-  const positionals: string[] = [];
-  let sawDoubleDash = false;
-  for (const token of args) {
-    if (sawDoubleDash) {
-      positionals.push(token);
-      continue;
-    }
-    if (token === "--") {
-      sawDoubleDash = true;
-      continue;
-    }
-    if (token.startsWith("-") && token.length > 1) {
-      continue;
-    }
-    positionals.push(token);
-  }
-  return positionals;
-}
-
-/**
- * Detect `auth login` / `auth logout` so the `.sentryclirc` URL-trust check
- * can be bypassed. These are the only commands that establish or tear down
- * host trust, and they must run even when a repo-local `.sentryclirc`
- * mismatches the current token (chicken-and-egg otherwise).
- *
- * Robust against global flags via {@link extractPositionals} so e.g.
- * `sentry --foo auth login` still matches.
- */
-/** @internal exported for testing */
-export function isTrustChangingCommand(args: readonly string[]): boolean {
-  const positionals = extractPositionals(args);
-  const [cmd, sub] = positionals;
-  if (cmd !== "auth") {
-    return false;
-  }
-  return sub === "login" || sub === "logout";
-}
-
-/**
  * Preload project context: walk up from `cwd` once, finding both the
  * project root (for DSN detection) and `.sentryclirc` config (for
  * org/project defaults and env shim). Caches both results so later calls
  * to `findProjectRoot` and `loadSentryCliRc` are cache hits.
  */
-async function preloadProjectContext(
-  cwd: string,
-  args: readonly string[]
-): Promise<void> {
+async function preloadProjectContext(cwd: string): Promise<void> {
   // Snapshot env-token host BEFORE anything mutates env.SENTRY_HOST/URL
   // (the .sentryclirc shim or the default-URL fallback below). Pins the
   // env-token's trust scope to the user's shell, not a repo-local file.
@@ -88,17 +39,12 @@ async function preloadProjectContext(
     reason: result.reason,
   });
 
-  // Apply .sentryclirc env shim (token, URL) — cache was populated as a
-  // side effect of findProjectRoot's walk. Bypass the URL trust check for
-  // auth login/logout so onboarding from a repo with a different rc URL
-  // isn't chicken-and-egg.
-  await applySentryCliRcEnvShim(cwd, {
-    skipUrlTrustCheck: isTrustChangingCommand(args),
-  });
+  // Apply .sentryclirc env shim (token + URL). The URL trust check is
+  // deferred to buildCommand's wrapper where commands can opt out via
+  // skipRcUrlCheck (used by auth login/logout).
+  await applySentryCliRcEnvShim(cwd);
 
   // Apply persistent URL default (lower priority than env vars and .sentryclirc).
-  // Same mechanism as .sentryclirc — writes to env.SENTRY_URL so all downstream
-  // URL resolution code picks it up automatically.
   const env = getEnv();
   if (!(env.SENTRY_HOST?.trim() || env.SENTRY_URL?.trim())) {
     try {
@@ -531,7 +477,7 @@ export async function startCli(): Promise<void> {
   // markers), but `CliError` from the rc shim's host-scoping check is an
   // actionable rejection that must surface to the user.
   try {
-    await preloadProjectContext(process.cwd(), args);
+    await preloadProjectContext(process.cwd());
   } catch (err) {
     if (err instanceof CliError) {
       process.stderr.write(`${err.format()}\n`);

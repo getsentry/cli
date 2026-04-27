@@ -26,13 +26,13 @@ import {
   storeCachedResponse,
 } from "./response-cache.js";
 import { buildUrlMismatchMessage } from "./sentry-url-parser.js";
+import { normalizeOrigin } from "./sentry-urls.js";
 import { withTracingSpan } from "./telemetry.js";
-import { getSntrysClaimUrl } from "./token-claims.js";
+import { parseSntrysClaim } from "./token-claims.js";
 import {
   getActiveTokenHost,
   isHostTrustedForClaim,
   isRequestOriginTrusted,
-  normalizeOrigin,
 } from "./token-host.js";
 
 const log = logger.withTag("http");
@@ -125,7 +125,7 @@ function prepareHeaders(
   // multiple Sentry instances. The claim is unsigned (see token-claims.ts);
   // fail-open on parse errors. Uses isHostTrustedForClaim so multi-region
   // fan-out via the control silo's region URLs still works.
-  const claimUrl = getSntrysClaimUrl(token);
+  const claimUrl = parseSntrysClaim(token)?.url;
   if (claimUrl && !isHostTrustedForClaim(input, claimUrl)) {
     throw new HostScopeError(
       buildUrlMismatchMessage(

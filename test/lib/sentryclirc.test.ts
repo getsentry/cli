@@ -9,9 +9,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { closeDatabase } from "../../src/lib/db/index.js";
-import { resetEnvTokenHostForTesting } from "../../src/lib/env-token-host.js";
+import {
+  captureEnvTokenHost,
+  resetEnvTokenHostForTesting,
+} from "../../src/lib/env-token-host.js";
 import {
   applySentryCliRcEnvShim,
+  assertRcUrlTrusted,
   CONFIG_FILENAME,
   clearSentryCliRcCache,
   loadSentryCliRc,
@@ -285,20 +289,25 @@ describe("applySentryCliRcEnvShim", () => {
     expect(readEnv("SENTRY_URL")).toBe("https://sentry.io");
   });
 
-  test("throws CliError when non-SaaS rc url does not match active token's scoped host", async () => {
+  test("assertRcUrlTrusted throws when non-SaaS rc url does not match active token's scoped host", async () => {
     // Env-token defaults to SaaS (no SENTRY_HOST set at capture time).
-    // Any non-SaaS rc url is therefore a mismatch → CliError, env untouched.
-    // This closes the CVE where a committed .sentryclirc could redirect
-    // requests + token to an attacker host.
+    // Any non-SaaS rc url is therefore a mismatch → CliError. This closes
+    // the CVE where a committed .sentryclirc could redirect requests +
+    // token to an attacker host. The shim itself applies the URL
+    // unconditionally; the trust check lives in assertRcUrlTrusted, called
+    // by buildCommand's wrapper.
     delete process.env.SENTRY_HOST;
     delete process.env.SENTRY_URL;
+    // Capture env-token host BEFORE shim mutates env (mirrors boot order).
+    captureEnvTokenHost();
     writeRcFile(testDir, "[defaults]\nurl = https://evil.example.com\n");
 
-    await expect(applySentryCliRcEnvShim(testDir)).rejects.toThrow(
+    await applySentryCliRcEnvShim(testDir);
+    expect(readEnv("SENTRY_URL")).toBe("https://evil.example.com");
+
+    await expect(assertRcUrlTrusted(testDir)).rejects.toThrow(
       /does not match|sentry auth login --url/
     );
-    expect(readEnv("SENTRY_URL")).toBeUndefined();
-    expect(readEnv("SENTRY_HOST")).toBeUndefined();
   });
 
   test("does not set SENTRY_URL when SENTRY_HOST is set", async () => {

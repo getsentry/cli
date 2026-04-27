@@ -38,7 +38,7 @@ import { DEFAULT_SENTRY_URL } from "./constants.js";
 import { getRawEnvToken } from "./db/auth.js";
 import { getEnv } from "./env.js";
 import { normalizeUserInputToOrigin } from "./sentry-urls.js";
-import { getSntrysClaimUrl } from "./token-claims.js";
+import { parseSntrysClaim } from "./token-claims.js";
 
 /** Pinned host. `undefined` means not yet captured. */
 let pinnedHost: string | undefined;
@@ -61,7 +61,7 @@ export function captureEnvTokenHost(): void {
   }
   // Claim first: for sntrys_ tokens, the embedded url is authoritative.
   const claimHost = normalizeUserInputToOrigin(
-    getSntrysClaimUrl(getRawEnvToken())
+    parseSntrysClaim(getRawEnvToken())?.url
   );
   if (claimHost) {
     pinnedHost = claimHost;

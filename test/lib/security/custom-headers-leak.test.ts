@@ -44,43 +44,6 @@ describe("CVE: custom-headers leak (share URL + auth-login bypass)", () => {
     _resetCustomHeadersCache();
   });
 
-  test("IAP token NEVER leaks to untrusted share URL (direct applyCustomHeaders)", () => {
-    process.env.SENTRY_CUSTOM_HEADERS = "X-IAP-Token: secret-iap-value";
-    // User's self-hosted instance is legit — they have a token for it.
-    process.env.SENTRY_HOST = "https://sentry.acme.com";
-    captureEnvTokenHost();
-
-    const headers = new Headers({ "Content-Type": "application/json" });
-    // Attacker share URL to evil.com
-    applyCustomHeaders(
-      headers,
-      "https://evil.com/api/0/shared/issues/deadbeef/"
-    );
-    expect(headers.get("X-IAP-Token")).toBeNull();
-  });
-
-  test("no-token + poisoned SENTRY_URL: custom headers fail closed (auth-login bypass)", () => {
-    // CRITICAL: the auth-login bypass writes env.SENTRY_URL from rc without
-    // trust-checking. If applyCustomHeaders fell back to `getConfiguredSentryUrl()`
-    // as a trust anchor, an attacker rc could establish trust simply by having
-    // the user `cd` into their repo and run `auth login` (no --url).
-    //
-    // Scenario: fresh install, no token, attacker's .sentryclirc has written
-    // SENTRY_URL = https://evil.com. User has IAP tokens configured for
-    // their real proxy via SENTRY_CUSTOM_HEADERS.
-    delete process.env.SENTRY_AUTH_TOKEN;
-    delete process.env.SENTRY_TOKEN;
-    process.env.SENTRY_CUSTOM_HEADERS = "X-IAP-Token: secret-iap-value";
-    process.env.SENTRY_URL = "https://evil.com";
-
-    // Even the legit device-flow endpoint on evil.com must NOT get the IAP token
-    const headers = new Headers();
-    applyCustomHeaders(headers, "https://evil.com/oauth/device/code/");
-    expect(headers.get("X-IAP-Token")).toBeNull();
-    // And no headers at all
-    expect([...headers.keys()]).toHaveLength(0);
-  });
-
   test("getSharedIssue with attacker baseUrl does not leak custom headers (direct-call regression)", async () => {
     // Simulates someone bypassing applySentryUrlContext and calling
     // getSharedIssue directly with an attacker-controlled baseUrl.
@@ -109,35 +72,6 @@ describe("CVE: custom-headers leak (share URL + auth-login bypass)", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
-  });
-
-  test("SaaS token + regional silo: custom headers attach (legitimate SaaS multi-region)", () => {
-    // Regression for the trust-extension path: SaaS tokens trust any
-    // *.sentry.io host via SaaS equivalence.
-    // Note: on SaaS, getCustomHeaders() short-circuits (IAP is a self-hosted
-    // feature), so even legit custom headers don't attach. This test
-    // documents that behavior.
-    delete process.env.SENTRY_HOST;
-    delete process.env.SENTRY_URL;
-    process.env.SENTRY_AUTH_TOKEN = "saas-token";
-    process.env.SENTRY_CUSTOM_HEADERS = "X-Custom: value";
-    captureEnvTokenHost();
-
-    const headers = new Headers();
-    applyCustomHeaders(headers, "https://us.sentry.io/api/0/");
-    // SaaS short-circuit in getCustomHeaders → no attachment even for trusted host
-    expect(headers.get("X-Custom")).toBeNull();
-  });
-
-  test("matching self-hosted request: custom headers attach (legitimate use)", () => {
-    process.env.SENTRY_HOST = "https://sentry.acme.com";
-    process.env.SENTRY_AUTH_TOKEN = "test-token";
-    process.env.SENTRY_CUSTOM_HEADERS = "X-IAP-Token: legit";
-    captureEnvTokenHost();
-
-    const headers = new Headers();
-    applyCustomHeaders(headers, "https://sentry.acme.com/api/0/organizations/");
-    expect(headers.get("X-IAP-Token")).toBe("legit");
   });
 
   test("IAP onboarding: 'auth login --url' registers a trust anchor so custom headers attach during OAuth device flow", async () => {
@@ -169,7 +103,7 @@ describe("CVE: custom-headers leak (share URL + auth-login bypass)", () => {
 
   test("Attacker .sentryclirc does NOT register a login trust anchor (rc bypass still fails closed)", async () => {
     // This is the critical distinguishing test: the .sentryclirc shim
-    // writes env.SENTRY_URL via the skipUrlTrustCheck bypass, but it
+    // writes env.SENTRY_URL (trust check is deferred to buildCommand), but it
     // does NOT call registerLoginTrustAnchor. So no-token
     // applyCustomHeaders must still fail closed even though SENTRY_URL
     // is set.

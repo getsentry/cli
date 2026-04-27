@@ -18,7 +18,8 @@ import {
   stringMatching,
   tuple,
 } from "fast-check";
-import { isHostTrusted, normalizeOrigin } from "../../src/lib/token-host.js";
+import { normalizeOrigin } from "../../src/lib/sentry-urls.js";
+import { isHostTrusted } from "../../src/lib/token-host.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
 // Arbitraries
