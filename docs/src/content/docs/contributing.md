@@ -65,6 +65,7 @@ cli/
 │   │   ├── trace/       # list, view, logs
 │   │   ├── trial/       # list, start
 │   │   ├── api.ts       # Make an authenticated API request
+│   │   ├── explore.ts   # Query aggregate event data (Explore)
 │   │   ├── help.ts      # Help command
 │   │   ├── init.ts      # Initialize Sentry in your project (experimental)
 │   │   └── schema.ts    # Browse the Sentry API schema

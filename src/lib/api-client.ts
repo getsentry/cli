@@ -27,6 +27,10 @@ export {
   updateDashboard,
 } from "./api/dashboards.js";
 export {
+  type ExploreQueryOptions,
+  queryEvents,
+} from "./api/discover.js";
+export {
   findEventAcrossOrgs,
   getEvent,
   getLatestEvent,
