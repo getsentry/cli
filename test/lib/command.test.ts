@@ -28,6 +28,7 @@ import {
 import { OutputError } from "../../src/lib/errors.js";
 import { CommandOutput } from "../../src/lib/formatters/output.js";
 import { LOG_LEVEL_NAMES, logger, setLogLevel } from "../../src/lib/logger.js";
+import { resolveOrgAndProject } from "../../src/lib/resolve-target.js";
 import { buildRouteMap } from "../../src/lib/route-map.js";
 
 /** Minimal context for test commands */
@@ -1505,6 +1506,26 @@ describe("applyOrgProjectFlags", () => {
     expect(process.env.SENTRY_ORG).toBeUndefined();
     expect(process.env.SENTRY_PROJECT).toBeUndefined();
   });
+
+  test("trims whitespace from flag values before writing", () => {
+    applyOrgProjectFlags("  my-org  ", "  my-proj  ", false, false);
+    expect(process.env.SENTRY_ORG).toBe("my-org");
+    expect(process.env.SENTRY_PROJECT).toBe("my-proj");
+  });
+
+  test("treats empty string as not provided — preserves existing env var", () => {
+    process.env.SENTRY_ORG = "preserved-org";
+    applyOrgProjectFlags("", undefined, false, false);
+    // Empty string must NOT clobber a real pre-existing env var
+    expect(process.env.SENTRY_ORG).toBe("preserved-org");
+  });
+
+  test("treats whitespace-only as not provided — preserves existing env var", () => {
+    process.env.SENTRY_PROJECT = "preserved-proj";
+    applyOrgProjectFlags(undefined, "   ", false, false);
+    // Whitespace-only must NOT clobber a real pre-existing env var
+    expect(process.env.SENTRY_PROJECT).toBe("preserved-proj");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1706,5 +1727,68 @@ describe("buildCommand --org/--project compat flags", () => {
     await run(app, ["test", "--org=my-org"], ctx as TestContext);
 
     expect(process.env.SENTRY_ORG).toBe("my-org");
+  });
+
+  test("--project overwrites existing SENTRY_PROJECT", async () => {
+    process.env.SENTRY_PROJECT = "original-proj";
+
+    const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {},
+      async *func() {
+        // no-op
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    await run(app, ["test", "--project", "new-proj"], ctx as TestContext);
+
+    expect(process.env.SENTRY_PROJECT).toBe("new-proj");
+  });
+
+  test("--org/--project values flow into resolveOrgAndProject (end-to-end)", async () => {
+    // Integration test: verifies the full plumbing from CLI flag → env var
+    // → resolveFromEnvVars (priority #2 in the resolution chain). This is the
+    // contract this PR exists to deliver: LLM-generated `--org foo --project
+    // bar` should make org/project resolution succeed without an explicit
+    // positional arg.
+    let resolved: Awaited<ReturnType<typeof resolveOrgAndProject>> = null;
+
+    const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {},
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(this: TestContext) {
+        resolved = await resolveOrgAndProject({ cwd: "/tmp" });
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    await run(
+      app,
+      ["test", "--org", "flag-org", "--project", "flag-proj"],
+      ctx as TestContext
+    );
+
+    expect(resolved).not.toBeNull();
+    expect(resolved?.org).toBe("flag-org");
+    expect(resolved?.project).toBe("flag-proj");
+    // detectedFrom proves the resolution went through the env-var path,
+    // not some other branch.
+    expect(resolved?.detectedFrom).toContain("env var");
   });
 });

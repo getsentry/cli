@@ -300,6 +300,11 @@ const orgProjectLog = logger.withTag("compat-flags");
  * priority #2 (env vars). Overwrites existing env vars because explicit
  * CLI flags are highest-priority user intent.
  *
+ * Empty and whitespace-only values are treated as "not provided" — they
+ * fall through to the rest of the resolution chain rather than overwriting
+ * a real pre-existing env var with garbage. This matters for LLM-generated
+ * commands that occasionally emit `--org ""` or stray whitespace.
+ *
  * Skipped when the command defines its own `--org` / `--project` flag
  * (e.g., `release create --project`) — those are passed through to `func()`.
  */
@@ -310,13 +315,15 @@ export function applyOrgProjectFlags(
   commandOwnsProject: boolean
 ): void {
   const env = getEnv();
-  if (org && !commandOwnsOrg) {
-    orgProjectLog.debug(`--org flag → SENTRY_ORG=${org}`);
-    env.SENTRY_ORG = org;
+  const orgTrimmed = org?.trim();
+  const projectTrimmed = project?.trim();
+  if (orgTrimmed && !commandOwnsOrg) {
+    orgProjectLog.debug(`--org flag → SENTRY_ORG=${orgTrimmed}`);
+    env.SENTRY_ORG = orgTrimmed;
   }
-  if (project && !commandOwnsProject) {
-    orgProjectLog.debug(`--project flag → SENTRY_PROJECT=${project}`);
-    env.SENTRY_PROJECT = project;
+  if (projectTrimmed && !commandOwnsProject) {
+    orgProjectLog.debug(`--project flag → SENTRY_PROJECT=${projectTrimmed}`);
+    env.SENTRY_PROJECT = projectTrimmed;
   }
 }
 
