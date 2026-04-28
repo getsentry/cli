@@ -3,30 +3,31 @@
  *
  * Picks the appropriate `WizardUI` implementation based on runtime
  * environment and CLI flags. This is the single chokepoint for UI
- * selection — every part of the init wizard goes through `getUI()`
+ * selection — every part of the init wizard goes through `getUIAsync()`
  * rather than instantiating implementations directly.
  *
  * Selection priority (highest first):
  *
- * 1. `SENTRY_INIT_TUI=0` or `forceLegacy` — force the legacy non-OpenTUI
- *    path (`LoggingUI` for non-interactive, `ClackUI` for interactive).
- *    Debug escape hatch for users who hit a TUI bug.
- * 2. `--yes` flag set, OR stdin/stdout is not a TTY — force `LoggingUI`
- *    regardless of the requested UI mode.
- * 3. Running outside the Bun-compiled binary (i.e. on Node) — fall back
- *    to `ClackUI` for interactive contexts. OpenTUI ships native Zig
- *    bindings that the npm `dist/bin.cjs` distribution can't load.
- * 4. `--tui` (or `SENTRY_INIT_TUI=1`) and on Bun binary → `OpenTuiUI`.
- * 5. Default — `ClackUI` until PR 4 flips this to `OpenTuiUI`.
+ * 1. `--yes` flag set, OR stdin/stdout is not a TTY — `LoggingUI`
+ *    (CI / piped input). Prompt methods throw, so callers must
+ *    pre-resolve every choice up-front.
+ * 2. `SENTRY_INIT_TUI=0` or `--no-tui` — `LoggingUI`. Acts as a debug
+ *    escape hatch when the OpenTUI path misbehaves. In an interactive
+ *    context this means the wizard becomes effectively non-interactive
+ *    (any prompt aborts), so users hitting this path will need to set
+ *    every choice via flags or rely on auto-detection.
+ * 3. Running outside the Bun-compiled binary (i.e. on Node) — also
+ *    `LoggingUI`. OpenTUI ships native Zig bindings that the npm
+ *    `dist/bin.cjs` distribution can't load. The npm package's
+ *    `--help` output and onboarding docs direct users to the Bun
+ *    binary for the interactive `sentry init` experience.
+ * 4. Default (Bun binary, interactive, no opt-out) — `OpenTuiUI`.
  *
- * This module exposes both a sync `getUI()` (returns whatever doesn't
- * require an async load — `ClackUI`/`LoggingUI`) and an async
- * `getUIAsync()` that can return `OpenTuiUI` after the lazy
- * `@opentui/core` import resolves. Wizard call sites should use
- * `getUIAsync()` when they want the new TUI.
+ * The previous `ClackUI` implementation was removed in PR 4 once the
+ * OpenTUI implementation became the default. `@clack/prompts` is no
+ * longer a dependency.
  */
 
-import { ClackUI } from "./clack-ui.js";
 import { LoggingUI } from "./logging-ui.js";
 import type { WizardUI } from "./types.js";
 
@@ -39,16 +40,9 @@ export type UIFactoryOptions = {
   yes: boolean;
   /**
    * True when the user explicitly opted out of the new TUI via
-   * `--no-tui` or the wizard is otherwise unable to use it. This lets
-   * the caller force `ClackUI`/`LoggingUI` without poking env vars.
+   * `--no-tui`. Forces `LoggingUI`.
    */
   forceLegacy?: boolean;
-  /**
-   * True when the user explicitly opted into the new TUI via `--tui`.
-   * Ignored on the npm/Node distribution (where OpenTUI's native
-   * bindings aren't available) and in non-interactive contexts.
-   */
-  preferTui?: boolean;
 };
 
 /**
@@ -57,7 +51,7 @@ export type UIFactoryOptions = {
  * distribution. The `Bun` global only exists in the Bun runtime.
  *
  * Exported for the test suite — production callers should go through
- * `getUI()` / `getUIAsync()`.
+ * `getUIAsync()`.
  */
 export function isBunRuntime(): boolean {
   return (
@@ -78,11 +72,15 @@ export function isInteractiveTerminal(): boolean {
 }
 
 /**
- * Returns `true` when the `LoggingUI` should be used regardless of any
- * other signal — i.e. we're in a non-interactive context.
+ * Returns `true` when the `LoggingUI` should be used — i.e. we're in
+ * a non-interactive context, the user opted out of the TUI, the env
+ * var override is set, or the runtime can't load OpenTUI.
  */
 function shouldUseLogging(opts: UIFactoryOptions): boolean {
   if (process.env.SENTRY_INIT_TUI === "0") {
+    return true;
+  }
+  if (opts.forceLegacy) {
     return true;
   }
   if (opts.yes) {
@@ -91,70 +89,35 @@ function shouldUseLogging(opts: UIFactoryOptions): boolean {
   if (!isInteractiveTerminal()) {
     return true;
   }
-  return false;
-}
-
-/**
- * Decide whether the caller wants the OpenTUI implementation.
- *
- * This is true only when the user explicitly opted in (`--tui` flag or
- * `SENTRY_INIT_TUI=1`), the runtime is the Bun binary, and the
- * `forceLegacy` escape hatch is not set.
- */
-function shouldUseOpenTui(opts: UIFactoryOptions): boolean {
-  if (opts.forceLegacy) {
-    return false;
-  }
   if (!isBunRuntime()) {
-    return false;
-  }
-  if (opts.preferTui === true) {
-    return true;
-  }
-  if (process.env.SENTRY_INIT_TUI === "1") {
     return true;
   }
   return false;
 }
 
 /**
- * Synchronous factory — never returns `OpenTuiUI` because that
- * implementation requires an async `import("@opentui/core")`. Use
- * `getUIAsync()` to opt into the OpenTUI path.
+ * Async factory — picks `OpenTuiUI` for interactive runs on the Bun
+ * binary, otherwise `LoggingUI`. The async form exists because
+ * instantiating `OpenTuiUI` requires a lazy `import("@opentui/core")`
+ * (the package isn't bundled into the npm/Node distribution and would
+ * crash if statically imported there).
  *
- * Callers should treat the return value as an `AsyncDisposable` and use
- * `await using ui = getUI(...)` to guarantee teardown on every exit
- * path.
- */
-export function getUI(opts: UIFactoryOptions): WizardUI {
-  if (shouldUseLogging(opts)) {
-    return new LoggingUI();
-  }
-  return new ClackUI();
-}
-
-/**
- * Async factory — picks `OpenTuiUI` when the user opted in and the
- * runtime supports it, otherwise delegates to `getUI()`.
- *
- * The async form exists because instantiating `OpenTuiUI` requires a
- * lazy `import("@opentui/core")` (the package isn't bundled into the
- * npm/Node distribution and would crash if statically imported there).
+ * Callers should treat the return value as an `AsyncDisposable` and
+ * use `await using ui = await getUIAsync(...)` to guarantee teardown
+ * on every exit path.
  */
 export async function getUIAsync(opts: UIFactoryOptions): Promise<WizardUI> {
   if (shouldUseLogging(opts)) {
     return new LoggingUI();
   }
-  if (shouldUseOpenTui(opts)) {
-    try {
-      const { createOpenTuiUI } = await import("./opentui-ui.js");
-      return await createOpenTuiUI();
-    } catch {
-      // Fall through to ClackUI so a missing/broken native binding
-      // doesn't take down the wizard. The caller can opt into a
-      // hard-fail by checking `--tui` themselves and calling
-      // `createOpenTuiUI()` directly.
-    }
+  try {
+    const { createOpenTuiUI } = await import("./opentui-ui.js");
+    return await createOpenTuiUI();
+  } catch {
+    // Fall through to LoggingUI so a missing/broken native binding
+    // doesn't take down the wizard. This branch is unreachable on a
+    // correctly built Bun binary — it exists as a safety net for
+    // unusual runtime environments where the import fails.
+    return new LoggingUI();
   }
-  return new ClackUI();
 }

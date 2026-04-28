@@ -1,20 +1,27 @@
 /**
- * Tests for getUI() — verifies the runtime-detection rules pick the
- * right WizardUI implementation.
+ * Tests for getUIAsync() — verifies the runtime-detection rules pick
+ * the right WizardUI implementation.
  *
- * The factory's selection logic depends on three signals:
+ * The factory's selection logic depends on four signals:
  *   - `SENTRY_INIT_TUI` env var
  *   - `--yes` flag (passed in via opts)
+ *   - `--no-tui` (mapped to `forceLegacy`)
  *   - stdin/stdout TTY state
+ *   - whether the runtime is the Bun-compiled binary
  *
  * We patch the env and `process.stdin.isTTY` / `process.stdout.isTTY`
- * around each test so the assertions are deterministic.
+ * around each test so the assertions are deterministic. The
+ * Bun-runtime branch is exercised by leaving `isBunRuntime()` to its
+ * real return value — the test runner is invoked via `bun test` so
+ * the Bun global is present and `getUIAsync` can attempt the OpenTUI
+ * path. To keep tests fast and TTY-independent we use the
+ * `forceLegacy` / non-TTY / `--yes` paths to assert `LoggingUI` is
+ * returned without ever spinning up a real renderer.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { ClackUI } from "../../../../src/lib/init/ui/clack-ui.js";
 import {
-  getUI,
+  getUIAsync,
   isInteractiveTerminal,
 } from "../../../../src/lib/init/ui/factory.js";
 import { LoggingUI } from "../../../../src/lib/init/ui/logging-ui.js";
@@ -50,11 +57,6 @@ function restore(snap: TerminalSnapshot): void {
   }
 }
 
-function setInteractive(interactive: boolean): void {
-  (process.stdin as { isTTY: boolean }).isTTY = interactive;
-  (process.stdout as { isTTY: boolean }).isTTY = interactive;
-}
-
 let saved: TerminalSnapshot;
 
 beforeEach(() => {
@@ -68,7 +70,8 @@ afterEach(() => {
 
 describe("isInteractiveTerminal", () => {
   test("returns true when both stdin and stdout are TTYs", () => {
-    setInteractive(true);
+    (process.stdin as { isTTY: boolean }).isTTY = true;
+    (process.stdout as { isTTY: boolean }).isTTY = true;
     expect(isInteractiveTerminal()).toBe(true);
   });
 
@@ -85,52 +88,47 @@ describe("isInteractiveTerminal", () => {
   });
 });
 
-describe("getUI selection", () => {
-  test("returns LoggingUI when --yes is set, even on a TTY", () => {
-    setInteractive(true);
-    const ui = getUI({ yes: true });
+describe("getUIAsync selection", () => {
+  test("returns LoggingUI when --yes is set, even on a TTY", async () => {
+    (process.stdin as { isTTY: boolean }).isTTY = true;
+    (process.stdout as { isTTY: boolean }).isTTY = true;
+    const ui = await getUIAsync({ yes: true });
     expect(ui).toBeInstanceOf(LoggingUI);
   });
 
-  test("returns LoggingUI when stdin is not a TTY", () => {
+  test("returns LoggingUI when stdin is not a TTY", async () => {
     (process.stdin as { isTTY: boolean }).isTTY = false;
     (process.stdout as { isTTY: boolean }).isTTY = true;
-    const ui = getUI({ yes: false });
+    const ui = await getUIAsync({ yes: false });
     expect(ui).toBeInstanceOf(LoggingUI);
   });
 
-  test("returns LoggingUI when stdout is not a TTY", () => {
+  test("returns LoggingUI when stdout is not a TTY", async () => {
     (process.stdin as { isTTY: boolean }).isTTY = true;
     (process.stdout as { isTTY: boolean }).isTTY = false;
-    const ui = getUI({ yes: false });
+    const ui = await getUIAsync({ yes: false });
     expect(ui).toBeInstanceOf(LoggingUI);
   });
 
-  test("returns LoggingUI when SENTRY_INIT_TUI=0 even on interactive TTY", () => {
-    setInteractive(true);
+  test("returns LoggingUI when SENTRY_INIT_TUI=0 even on interactive TTY", async () => {
+    (process.stdin as { isTTY: boolean }).isTTY = true;
+    (process.stdout as { isTTY: boolean }).isTTY = true;
     process.env[ENV_KEY] = "0";
-    const ui = getUI({ yes: false });
+    const ui = await getUIAsync({ yes: false });
     expect(ui).toBeInstanceOf(LoggingUI);
   });
 
-  test("returns ClackUI on interactive TTY without --yes", () => {
-    setInteractive(true);
-    const ui = getUI({ yes: false });
-    expect(ui).toBeInstanceOf(ClackUI);
+  test("returns LoggingUI when forceLegacy is set on interactive TTY", async () => {
+    (process.stdin as { isTTY: boolean }).isTTY = true;
+    (process.stdout as { isTTY: boolean }).isTTY = true;
+    const ui = await getUIAsync({ yes: false, forceLegacy: true });
+    expect(ui).toBeInstanceOf(LoggingUI);
   });
 
-  test("returns ClackUI when forceLegacy is set on interactive TTY", () => {
-    setInteractive(true);
-    const ui = getUI({ yes: false, forceLegacy: true });
-    expect(ui).toBeInstanceOf(ClackUI);
-  });
-
-  test("forceLegacy does not override the non-interactive guard", () => {
-    // Even with forceLegacy, a non-TTY context must use LoggingUI —
-    // ClackUI would attempt to read stdin and hang.
+  test("forceLegacy preserves the LoggingUI choice in non-interactive contexts too", async () => {
     (process.stdin as { isTTY: boolean }).isTTY = false;
     (process.stdout as { isTTY: boolean }).isTTY = false;
-    const ui = getUI({ yes: false, forceLegacy: true });
+    const ui = await getUIAsync({ yes: false, forceLegacy: true });
     expect(ui).toBeInstanceOf(LoggingUI);
   });
 });

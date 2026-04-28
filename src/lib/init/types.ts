@@ -21,15 +21,12 @@ export type WizardOptions = {
   org?: string;
   project?: string;
   /**
-   * Opt into the experimental OpenTUI full-screen UI. Mapped from the
-   * `--tui` CLI flag. Ignored on the npm/Node distribution and in
-   * non-interactive contexts (`--yes`, piped stdin/stdout).
-   */
-  tui?: boolean;
-  /**
-   * Force the legacy non-OpenTUI UI path (`ClackUI` interactively,
-   * `LoggingUI` non-interactively). Mapped from `--no-tui`. Acts as
-   * an escape hatch when the OpenTUI path misbehaves.
+   * Force the non-OpenTUI fallback (`LoggingUI`). Mapped from
+   * `--no-tui`. Acts as an escape hatch when the OpenTUI path
+   * misbehaves; in an interactive run this effectively disables
+   * prompts (any prompt path will throw a `LoggingUIPromptError`),
+   * so users hitting this flag should also pass `--yes` or set
+   * every choice via flags.
    */
   forceLegacyUi?: boolean;
 };

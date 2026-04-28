@@ -4,23 +4,24 @@
  * Defines the I/O surface used by the init wizard. Concrete implementations
  * provide the actual rendering:
  *
- * - `ClackUI`     — current `@clack/prompts`-based interactive UI (default
- *                   while the OpenTUI port is in progress).
- * - `OpenTuiUI`   — alternate-buffer full-screen UI built on `@opentui/core`
- *                   (Bun-binary only; lands in PR3).
- * - `LoggingUI`   — plain stdout/stderr writes for CI, `--yes`, and non-TTY
- *                   environments. Prompts throw — non-interactive callers
- *                   must supply defaults.
+ * - `OpenTuiUI`   — alternate-buffer full-screen UI built on `@opentui/core`.
+ *                   Default for interactive runs on the Bun-compiled binary.
+ * - `LoggingUI`   — plain stdout/stderr writes for CI, `--yes`, non-TTY
+ *                   environments, the npm/Node distribution, and the
+ *                   `--no-tui` escape hatch. Prompts throw —
+ *                   non-interactive callers must supply defaults.
+ *
+ * The factory in `factory.ts` picks an implementation per run.
  *
  * Goals:
- *   1. Mirror clack's API shape so call sites need minimal changes during
- *      the migration.
- *   2. Use a shared cancellation symbol (`CANCELLED`) so all implementations
- *      can signal cancellation uniformly. Callers wrap prompt results with
- *      `abortIfCancelled()` (in `clack-utils.ts`) which re-throws as
- *      `WizardCancelledError`.
- *   3. Stay lean — adopt PostHog wizard's `WizardUI` shape for visual
- *      look-and-feel only, without the screen router / nanostore / health
+ *   1. Stable prompt API surface so the wizard itself never changes when
+ *      we swap implementations.
+ *   2. Use a shared cancellation symbol (`CANCELLED`) so all
+ *      implementations can signal cancellation uniformly. Callers wrap
+ *      prompt results with `abortIfCancelled()` (in `clack-utils.ts`)
+ *      which re-throws as `WizardCancelledError`.
+ *   3. Stay lean — visual look-and-feel inspiration from PostHog wizard's
+ *      `WizardUI` pattern, without the screen router / nanostore / health
  *      check overlays.
  */
 

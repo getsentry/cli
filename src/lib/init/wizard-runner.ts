@@ -396,15 +396,14 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
           },
         };
 
-  const { directory, yes, dryRun, features, tui, forceLegacyUi } =
-    initialOptions;
+  const { directory, yes, dryRun, features, forceLegacyUi } = initialOptions;
 
   // Construct the UI once for the entire run; tear down on every exit
-  // path via `await using`. `getUIAsync()` picks the right
-  // implementation based on TTY state, `--yes`, and the `--tui` opt-in.
+  // path via `await using`. The factory picks `OpenTuiUI` for
+  // interactive runs on the Bun binary and `LoggingUI` everywhere else
+  // (CI, `--yes`, `--no-tui`, npm/Node distribution).
   await using ui = await getUIAsync({
     yes,
-    preferTui: tui,
     forceLegacy: forceLegacyUi,
   });
 

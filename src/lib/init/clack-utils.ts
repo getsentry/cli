@@ -1,19 +1,14 @@
 /**
  * Wizard Utilities
  *
- * Shared cancellation/error helpers and feature labels for the init
- * wizard. Originally a clack-specific utility module — the name is
- * preserved for now to keep diffs minimal across PRs while the UI
- * layer is migrated. PR 4 renames this file to `wizard-utils.ts` after
- * the clack dependency is removed.
+ * Shared cancellation helpers and feature labels for the init wizard.
  *
- * `abortIfCancelled()` recognises **both** the new `WizardUI`
- * cancellation sentinel and clack's legacy cancel symbol — the latter
- * because `ClackUI` returns the unified sentinel but downstream callers
- * may still receive raw clack symbols during the migration window.
+ * The file name is preserved (vs. renaming to `wizard-utils.ts`) to
+ * keep the diff in PR 4 focused on the clack removal — the next
+ * cleanup PR can do the rename. Despite the historical name nothing
+ * here references clack any more.
  */
 
-import { isCancel as clackIsCancel } from "./clack-plain.js";
 import { isCancelled } from "./ui/types.js";
 
 export class WizardCancelledError extends Error {
@@ -27,17 +22,13 @@ export class WizardCancelledError extends Error {
  * Coerce a possibly-cancelled prompt result into the resolved value, or
  * throw `WizardCancelledError` on cancellation.
  *
- * Recognises the unified `CANCELLED` sentinel from `ui/types.ts`. Also
- * recognises clack's legacy cancel symbol so callers that still touch
- * clack directly continue to work during PR 2.
- *
  * The return type uses `Exclude<T, symbol>` so callers passing a union
  * that includes a symbol member (e.g. `string[] | typeof CANCELLED`)
  * receive the narrowed non-symbol type back — TypeScript otherwise
  * widens `T` to the full union and refuses to call array methods on it.
  */
 export function abortIfCancelled<T>(value: T): Exclude<T, symbol> {
-  if (isCancelled(value) || clackIsCancel(value)) {
+  if (isCancelled(value)) {
     throw new WizardCancelledError();
   }
   return value as Exclude<T, symbol>;
