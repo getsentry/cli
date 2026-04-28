@@ -1,81 +1,78 @@
 /**
  * Formatters Tests
  *
- * Tests for the init wizard output formatters. Since formatResult and
- * formatError write to clack's output, we capture calls via spyOn on
- * the imported @clack/prompts module.
+ * Tests for the init wizard output formatters. Uses `MockUI` to capture
+ * every UI call without going through clack.
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as clack from "@clack/prompts";
+import { describe, expect, test } from "bun:test";
 import { formatError, formatResult } from "../../../src/lib/init/formatters.js";
+import { createMockUI, type MockCall } from "./ui/mock-ui.js";
 
-// Spy on clack functions to capture arguments without replacing them
-let logMessageSpy: ReturnType<typeof spyOn>;
-let outroSpy: ReturnType<typeof spyOn>;
-let cancelSpy: ReturnType<typeof spyOn>;
-let logInfoSpy: ReturnType<typeof spyOn>;
-let logWarnSpy: ReturnType<typeof spyOn>;
-let logErrorSpy: ReturnType<typeof spyOn>;
+function logMessage(calls: MockCall[]): string | undefined {
+  const call = calls.find((c) => c.kind === "log.message");
+  return call?.kind === "log.message" ? call.message : undefined;
+}
 
-const noop = () => {
-  /* suppress clack output */
-};
+function warnMessages(calls: MockCall[]): string[] {
+  return calls
+    .filter(
+      (c): c is Extract<MockCall, { kind: "log.warn" }> => c.kind === "log.warn"
+    )
+    .map((c) => c.message);
+}
 
-let savedPlainOutput: string | undefined;
+function errorMessages(calls: MockCall[]): string[] {
+  return calls
+    .filter(
+      (c): c is Extract<MockCall, { kind: "log.error" }> =>
+        c.kind === "log.error"
+    )
+    .map((c) => c.message);
+}
 
-beforeEach(() => {
-  // Force rich output so clack-plain.ts delegates to real clack (spied below)
-  savedPlainOutput = process.env.SENTRY_PLAIN_OUTPUT;
-  process.env.SENTRY_PLAIN_OUTPUT = "0";
-
-  logMessageSpy = spyOn(clack.log, "message").mockImplementation(noop);
-  outroSpy = spyOn(clack, "outro").mockImplementation(noop);
-  cancelSpy = spyOn(clack, "cancel").mockImplementation(noop);
-  logInfoSpy = spyOn(clack.log, "info").mockImplementation(noop);
-  logWarnSpy = spyOn(clack.log, "warn").mockImplementation(noop);
-  logErrorSpy = spyOn(clack.log, "error").mockImplementation(noop);
-});
-
-afterEach(() => {
-  logMessageSpy.mockRestore();
-  outroSpy.mockRestore();
-  cancelSpy.mockRestore();
-  logInfoSpy.mockRestore();
-  logWarnSpy.mockRestore();
-  logErrorSpy.mockRestore();
-
-  if (savedPlainOutput === undefined) {
-    delete process.env.SENTRY_PLAIN_OUTPUT;
-  } else {
-    process.env.SENTRY_PLAIN_OUTPUT = savedPlainOutput;
-  }
-});
+function infoMessages(calls: MockCall[]): string[] {
+  return calls
+    .filter(
+      (c): c is Extract<MockCall, { kind: "log.info" }> => c.kind === "log.info"
+    )
+    .map((c) => c.message);
+}
 
 describe("formatResult", () => {
   test("displays summary with all fields and a nested changed-files tree", () => {
-    formatResult({
-      status: "success",
-      result: {
-        platform: "Next.js",
-        projectDir: "/app",
-        features: ["errorMonitoring", "performanceMonitoring"],
-        commands: ["npm install @sentry/nextjs"],
-        sentryProjectUrl: "https://sentry.io/project",
-        docsUrl: "https://docs.sentry.io",
-        changedFiles: [
-          { action: "modify", path: "next.config.js" },
-          { action: "create", path: "src/app/instrumentation-client.ts" },
-          { action: "modify", path: "src/app/layout.tsx" },
-          { action: "delete", path: "src/old-sentry.js" },
-        ],
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          projectDir: "/app",
+          features: ["errorMonitoring", "performanceMonitoring"],
+          commands: ["npm install @sentry/nextjs"],
+          sentryProjectUrl: "https://sentry.io/project",
+          docsUrl: "https://docs.sentry.io",
+          changedFiles: [
+            { action: "modify", path: "next.config.js" },
+            { action: "create", path: "src/app/instrumentation-client.ts" },
+            { action: "modify", path: "src/app/layout.tsx" },
+            { action: "delete", path: "src/old-sentry.js" },
+          ],
+        },
       },
-    });
+      ui
+    );
 
-    expect(logMessageSpy).toHaveBeenCalledTimes(1);
-    const content: string = logMessageSpy.mock.calls[0][0];
+    const content = logMessage(calls);
+    expect(content).toBeDefined();
+    if (!content) {
+      throw new Error("expected log.message call");
+    }
 
+    // `formatResult` passes raw markdown to `ui.log.message` — color tags
+    // (`<green>+</green>`, `<red>-</red>`, `<yellow>\~</yellow>`) survive
+    // verbatim because the WizardUI implementation owns rendering. The
+    // assertions match the unrendered markdown source.
     expect(content).toContain("Next.js");
     expect(content).toContain("/app");
     expect(content).toContain("Error Monitoring");
@@ -91,102 +88,121 @@ describe("formatResult", () => {
     expect(content).toContain("Changed files\n├─ src/");
     expect(content).toContain("├─ src/");
     expect(content).toContain("│  ├─ app/");
-    expect(content).toContain("│  │  ├─ + instrumentation-client.ts");
-    expect(content).toContain("│  │  └─ ~ layout.tsx");
-    expect(content).toContain("└─ ~ next.config.js");
+    expect(content).toContain(
+      "│  │  ├─ <green>+</green> instrumentation-client.ts"
+    );
+    expect(content).toContain("│  │  └─ <yellow>\\~</yellow> layout.tsx");
+    expect(content).toContain("└─ <yellow>\\~</yellow> next.config.js");
     const changedFilesSection = content.slice(content.indexOf("Changed files"));
     expect(changedFilesSection).toContain("│");
-    expect(content).not.toContain("`");
   });
 
   test("skips summary when result has no summary fields", () => {
-    formatResult({ status: "success" });
+    const { ui, calls } = createMockUI();
+    formatResult({ status: "success" }, ui);
 
-    expect(logMessageSpy).not.toHaveBeenCalled();
-    expect(outroSpy).toHaveBeenCalled();
+    expect(logMessage(calls)).toBeUndefined();
+    expect(calls.some((c) => c.kind === "outro")).toBe(true);
   });
 
   test("displays warnings when present", () => {
-    formatResult({
-      status: "success",
-      result: {
-        warnings: ["Source maps not configured", "Missing DSN"],
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          warnings: ["Source maps not configured", "Missing DSN"],
+        },
       },
-    });
+      ui
+    );
 
-    expect(logWarnSpy).toHaveBeenCalledTimes(2);
-    expect(logWarnSpy.mock.calls[0][0]).toBe("Source maps not configured");
-    expect(logWarnSpy.mock.calls[1][0]).toBe("Missing DSN");
+    const warns = warnMessages(calls);
+    expect(warns).toContain("Source maps not configured");
+    expect(warns).toContain("Missing DSN");
   });
 
   test("unwraps nested result property", () => {
-    formatResult({ status: "success", result: { platform: "React" } });
+    const { ui, calls } = createMockUI();
+    formatResult({ status: "success", result: { platform: "React" } }, ui);
 
-    const content: string = logMessageSpy.mock.calls[0][0];
-    expect(content).toContain("React");
+    expect(logMessage(calls)).toContain("React");
   });
 });
 
 describe("formatError", () => {
   test("logs the error message", () => {
-    formatError({ status: "failed", error: "Connection timed out" });
+    const { ui, calls } = createMockUI();
+    formatError({ status: "failed", error: "Connection timed out" }, ui);
 
-    expect(logErrorSpy).toHaveBeenCalledWith("Connection timed out");
-    expect(cancelSpy).toHaveBeenCalledWith("Setup failed");
+    expect(errorMessages(calls)).toContain("Connection timed out");
+    const cancel = calls.find((c) => c.kind === "cancel");
+    expect(cancel?.kind === "cancel" && cancel.message).toBe("Setup failed");
   });
 
   test("extracts message from nested result.message", () => {
-    formatError({ status: "failed", result: { message: "Inner failure" } });
+    const { ui, calls } = createMockUI();
+    formatError({ status: "failed", result: { message: "Inner failure" } }, ui);
 
-    expect(logErrorSpy).toHaveBeenCalledWith("Inner failure");
+    expect(errorMessages(calls)).toContain("Inner failure");
   });
 
   test("falls back to unknown error when no message available", () => {
-    formatError({ status: "failed" });
+    const { ui, calls } = createMockUI();
+    formatError({ status: "failed" }, ui);
 
-    expect(logErrorSpy).toHaveBeenCalledWith(
+    expect(errorMessages(calls)).toContain(
       "Wizard failed with an unknown error"
     );
   });
 
   test("shows platform hint for detection failure exit code (20)", () => {
-    formatError({ status: "failed", result: { exitCode: 20 } });
+    const { ui, calls } = createMockUI();
+    formatError({ status: "failed", result: { exitCode: 20 } }, ui);
 
-    const warnMsg: string = logWarnSpy.mock.calls[0][0];
-    expect(warnMsg).toContain("platform");
+    expect(warnMessages(calls).some((m) => m.includes("platform"))).toBe(true);
   });
 
   test("shows manual install commands for dependency failure (30)", () => {
-    formatError({
-      status: "failed",
-      result: {
-        exitCode: 30,
-        commands: ["npm install @sentry/node"],
+    const { ui, calls } = createMockUI();
+    formatError(
+      {
+        status: "failed",
+        result: {
+          exitCode: 30,
+          commands: ["npm install @sentry/node"],
+        },
       },
-    });
+      ui
+    );
 
-    const warnMsg: string = logWarnSpy.mock.calls[0][0];
-    expect(warnMsg).toContain("$ npm install @sentry/node");
+    expect(
+      warnMessages(calls).some((m) => m.includes("$ npm install @sentry/node"))
+    ).toBe(true);
   });
 
   test("shows verification hint for exit code 50", () => {
-    formatError({ status: "failed", result: { exitCode: 50 } });
+    const { ui, calls } = createMockUI();
+    formatError({ status: "failed", result: { exitCode: 50 } }, ui);
 
-    const warnMsg: string = logWarnSpy.mock.calls[0][0];
-    expect(warnMsg).toContain("verification");
+    expect(warnMessages(calls).some((m) => m.includes("verification"))).toBe(
+      true
+    );
   });
 
   test("shows docs URL when present", () => {
-    formatError({
-      status: "failed",
-      result: { docsUrl: "https://docs.sentry.io/platforms/react/" },
-    });
+    const { ui, calls } = createMockUI();
+    formatError(
+      {
+        status: "failed",
+        result: { docsUrl: "https://docs.sentry.io/platforms/react/" },
+      },
+      ui
+    );
 
-    const infoCalls = logInfoSpy.mock.calls.map((c) => String(c[0]));
+    const infos = infoMessages(calls);
     expect(
-      infoCalls.some((s) =>
-        s.includes("https://docs.sentry.io/platforms/react/")
-      )
+      infos.some((s) => s.includes("https://docs.sentry.io/platforms/react/"))
     ).toBe(true);
   });
 });

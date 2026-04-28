@@ -1,12 +1,16 @@
 /**
  * Output Formatters
  *
- * Format wizard results and errors for terminal display using clack.
+ * Format wizard results and errors for terminal display.
+ *
+ * All UI I/O goes through the injected `WizardUI` — the human-readable
+ * markdown is built here, then handed off as a single string per call.
+ * `WizardUI.log.message` is responsible for rendering the markdown
+ * (terminal-styled in `ClackUI`/`OpenTuiUI`, plain text in `LoggingUI`).
  */
 
 import { terminalLink } from "../formatters/colors.js";
-import { colorTag, mdKvTable, renderMarkdown } from "../formatters/markdown.js";
-import { cancel, log, outro } from "./clack-plain.js";
+import { colorTag, mdKvTable } from "../formatters/markdown.js";
 import { featureLabel } from "./clack-utils.js";
 import {
   EXIT_DEPENDENCY_INSTALL_FAILED,
@@ -14,6 +18,7 @@ import {
   EXIT_VERIFICATION_FAILED,
 } from "./constants.js";
 import type { WizardOutput, WorkflowRunResult } from "./types.js";
+import type { WizardUI } from "./ui/types.js";
 
 type ChangedFile = NonNullable<WizardOutput["changedFiles"]>[number];
 
@@ -160,55 +165,57 @@ function buildSummary(output: WizardOutput): string {
   return sections.join("\n\n");
 }
 
-export function formatResult(result: WorkflowRunResult): void {
+export function formatResult(result: WorkflowRunResult, ui: WizardUI): void {
   const output: WizardOutput = result.result ?? {};
   const md = buildSummary(output);
 
   if (md.length > 0) {
-    log.message(renderMarkdown(md));
+    ui.log.message(md);
   }
 
   if (output.warnings?.length) {
     for (const w of output.warnings) {
-      log.warn(w);
+      ui.log.warn(w);
     }
   }
 
-  log.info("Please review the changes above before committing.");
-  log.info(
+  ui.log.info("Please review the changes above before committing.");
+  ui.log.info(
     "You're one of the first to try the new setup wizard! Run `sentry cli feedback` to let us know how it went."
   );
 
-  outro("Sentry SDK installed successfully!");
+  ui.outro("Sentry SDK installed successfully!");
 }
 
-export function formatError(result: WorkflowRunResult): void {
+export function formatError(result: WorkflowRunResult, ui: WizardUI): void {
   const inner = result.result;
   const message =
     result.error ?? inner?.message ?? "Wizard failed with an unknown error";
   const exitCode = inner?.exitCode ?? 1;
 
-  log.error(String(message));
+  ui.log.error(String(message));
 
   if (exitCode === EXIT_PLATFORM_NOT_DETECTED) {
-    log.warn(
+    ui.log.warn(
       "Hint: Could not detect your project's platform. Check that the directory contains a valid project."
     );
   } else if (exitCode === EXIT_DEPENDENCY_INSTALL_FAILED) {
     const commands = inner?.commands;
     if (commands?.length) {
-      log.warn(
+      ui.log.warn(
         `You can install dependencies manually:\n${commands.map((cmd) => `  $ ${cmd}`).join("\n")}`
       );
     }
   } else if (exitCode === EXIT_VERIFICATION_FAILED) {
-    log.warn("Hint: Fix the verification issues and run 'sentry init' again.");
+    ui.log.warn(
+      "Hint: Fix the verification issues and run 'sentry init' again."
+    );
   }
 
   const docsUrl = inner?.docsUrl;
   if (docsUrl) {
-    log.info(`Docs: ${terminalLink(docsUrl)}`);
+    ui.log.info(`Docs: ${terminalLink(docsUrl)}`);
   }
 
-  cancel("Setup failed");
+  ui.cancel("Setup failed");
 }

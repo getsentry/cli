@@ -6,14 +6,17 @@
  *
  * Low-level git primitives live in `src/lib/git.ts`. This module
  * re-exports them for backward compatibility and adds the interactive
- * `checkGitStatus` orchestrator (coupled to `@clack/prompts` UI).
+ * `checkGitStatus` orchestrator. All UI I/O is routed through the
+ * injected `WizardUI` so the same code drives clack, OpenTUI, and the
+ * non-interactive `LoggingUI` paths.
  */
 
 import {
   getUncommittedFiles,
   isInsideGitWorkTree as isInsideWorkTree,
 } from "../git.js";
-import { confirm, isCancel, log } from "./clack-plain.js";
+import type { WizardUI } from "./ui/types.js";
+import { isCancelled } from "./ui/types.js";
 
 /** Maximum number of uncommitted files to display before truncating. */
 const MAX_DISPLAYED_FILES = 5;
@@ -43,24 +46,25 @@ export function getUncommittedOrUntrackedFiles(opts: {
 export async function checkGitStatus(opts: {
   cwd: string;
   yes: boolean;
+  ui: WizardUI;
 }): Promise<boolean> {
-  const { cwd, yes } = opts;
+  const { cwd, yes, ui } = opts;
 
   if (!isInsideGitWorkTree({ cwd })) {
     if (yes) {
-      log.warn(
+      ui.log.warn(
         "You are not inside a git repository. Unable to revert changes if something goes wrong."
       );
       return true;
     }
-    const proceed = await confirm({
+    const proceed = await ui.confirm({
       message:
         "You are not inside a git repository. Unable to revert changes if something goes wrong. Continue?",
     });
-    if (isCancel(proceed)) {
+    if (isCancelled(proceed)) {
       return false;
     }
-    return !!proceed;
+    return Boolean(proceed);
   }
 
   const uncommitted = getUncommittedOrUntrackedFiles({ cwd });
@@ -72,19 +76,19 @@ export async function checkGitStatus(opts: {
     }
     const fileList = displayed.join("\n");
     if (yes) {
-      log.warn(
+      ui.log.warn(
         `You have uncommitted or untracked files:\n${fileList}\nProceeding anyway (--yes).`
       );
       return true;
     }
-    log.warn(`You have uncommitted or untracked files:\n${fileList}`);
-    const proceed = await confirm({
+    ui.log.warn(`You have uncommitted or untracked files:\n${fileList}`);
+    const proceed = await ui.confirm({
       message: "Continue with uncommitted changes?",
     });
-    if (isCancel(proceed)) {
+    if (isCancelled(proceed)) {
       return false;
     }
-    return !!proceed;
+    return Boolean(proceed);
   }
 
   return true;

@@ -7,8 +7,6 @@ import {
   spyOn,
   test,
 } from "bun:test";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as clack from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as banner from "../../../src/lib/banner.js";
@@ -23,8 +21,6 @@ import * as inter from "../../../src/lib/init/interactive.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as preflight from "../../../src/lib/init/preflight.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as initSpinner from "../../../src/lib/init/spinner.js";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as registry from "../../../src/lib/init/tools/registry.js";
 import type {
   ResolvedInitContext,
@@ -32,19 +28,37 @@ import type {
   WizardOptions,
   WorkflowRunResult,
 } from "../../../src/lib/init/types.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as uiFactory from "../../../src/lib/init/ui/factory.js";
+import type {
+  SpinnerHandle,
+  WizardUI,
+} from "../../../src/lib/init/ui/types.js";
 import { runWizard } from "../../../src/lib/init/wizard-runner.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as workflowInputs from "../../../src/lib/init/workflow-inputs.js";
+import { createMockUI, type MockCall } from "./ui/mock-ui.js";
 
 const noop = () => {
   /* suppress output */
 };
 
-const spinnerMock = {
+/**
+ * Per-test reference to the spinner mock. The wizard-runner calls
+ * `ui.spinner()` exactly once and reuses the handle for the entire run,
+ * so we expose a singleton with mock fns the test cases can assert on.
+ */
+const spinnerMock: SpinnerHandle & {
+  start: ReturnType<typeof mock>;
+  stop: ReturnType<typeof mock>;
+  message: ReturnType<typeof mock>;
+} = {
   start: mock(),
   stop: mock(),
   message: mock(),
 };
+
+let mockUICalls: MockCall[];
 
 function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
   return {
@@ -74,14 +88,7 @@ let mockResumeResults: WorkflowRunResult[];
 let resumeCallCount = 0;
 let startAsyncMock: ReturnType<typeof mock>;
 
-let introSpy: ReturnType<typeof spyOn>;
-let confirmSpy: ReturnType<typeof spyOn>;
-let cancelSpy: ReturnType<typeof spyOn>;
-let logInfoSpy: ReturnType<typeof spyOn>;
-let logWarnSpy: ReturnType<typeof spyOn>;
-let logErrorSpy: ReturnType<typeof spyOn>;
-let spinnerSpy: ReturnType<typeof spyOn>;
-
+let getUISpy: ReturnType<typeof spyOn>;
 let formatBannerSpy: ReturnType<typeof spyOn>;
 let formatResultSpy: ReturnType<typeof spyOn>;
 let formatErrorSpy: ReturnType<typeof spyOn>;
@@ -114,19 +121,25 @@ beforeEach(() => {
   resumeCallCount = 0;
   process.exitCode = 0;
 
-  introSpy = spyOn(clack, "intro").mockImplementation(noop);
-  confirmSpy = spyOn(clack, "confirm").mockResolvedValue(true);
-  cancelSpy = spyOn(clack, "cancel").mockImplementation(noop);
-  logInfoSpy = spyOn(clack.log, "info").mockImplementation(noop);
-  logWarnSpy = spyOn(clack.log, "warn").mockImplementation(noop);
-  logErrorSpy = spyOn(clack.log, "error").mockImplementation(noop);
-  spinnerSpy = spyOn(initSpinner, "createWizardSpinner").mockReturnValue(
-    spinnerMock as any
-  );
-
   spinnerMock.start.mockClear();
   spinnerMock.stop.mockClear();
   spinnerMock.message.mockClear();
+
+  // The wizard runner constructs a UI via `getUI()`. Replace it with a
+  // MockUI whose spinner() returns the shared `spinnerMock` so tests can
+  // assert on lifecycle calls.
+  const { ui, calls, respond } = createMockUI();
+  mockUICalls = calls;
+  // Pre-load a confirm response so the experimental confirm prompt
+  // resolves to "true" by default — the legacy default before MockUI.
+  // Tests that exercise `--yes` skip this prompt entirely; the response
+  // sits unused on the queue and is harmless.
+  respond.confirm(true);
+  const wrapped: WizardUI = {
+    ...ui,
+    spinner: () => spinnerMock,
+  };
+  getUISpy = spyOn(uiFactory, "getUI").mockReturnValue(wrapped);
 
   formatBannerSpy = spyOn(banner, "formatBanner").mockReturnValue("BANNER");
   formatResultSpy = spyOn(fmt, "formatResult").mockImplementation(noop);
@@ -194,14 +207,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  introSpy.mockRestore();
-  confirmSpy.mockRestore();
-  cancelSpy.mockRestore();
-  logInfoSpy.mockRestore();
-  logWarnSpy.mockRestore();
-  logErrorSpy.mockRestore();
-  spinnerSpy.mockRestore();
-
+  getUISpy.mockRestore();
   formatBannerSpy.mockRestore();
   formatResultSpy.mockRestore();
   formatErrorSpy.mockRestore();
@@ -224,6 +230,26 @@ afterEach(() => {
     process.env.SENTRY_PLAIN_OUTPUT = savedPlainOutput;
   }
 });
+
+function lastCancelMessage(): string | undefined {
+  for (let i = mockUICalls.length - 1; i >= 0; i--) {
+    const call = mockUICalls[i];
+    if (call?.kind === "cancel") {
+      return call.message;
+    }
+  }
+  return;
+}
+
+function lastWarn(): string | undefined {
+  for (let i = mockUICalls.length - 1; i >= 0; i--) {
+    const call = mockUICalls[i];
+    if (call?.kind === "log.warn") {
+      return call.message;
+    }
+  }
+  return;
+}
 
 describe("runWizard", () => {
   test("formats successful results", async () => {
@@ -255,9 +281,10 @@ describe("runWizard", () => {
     await runWizard(makeOptions({ dryRun: true, yes: false }));
 
     expect(resolveInitContextSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ dryRun: true, yes: true })
+      expect.objectContaining({ dryRun: true, yes: true }),
+      expect.anything()
     );
-    expect(logWarnSpy).toHaveBeenCalled();
+    expect(lastWarn()).toContain("Dry-run");
   });
 
   test("stops before workflow creation when preflight returns null", async () => {
@@ -274,7 +301,7 @@ describe("runWizard", () => {
 
     await runWizard(makeOptions());
 
-    expect(cancelSpy).toHaveBeenCalledWith("Setup cancelled.");
+    expect(lastCancelMessage()).toBe("Setup cancelled.");
     expect(getWorkflowSpy).not.toHaveBeenCalled();
   });
 
@@ -325,7 +352,8 @@ describe("runWizard", () => {
         kind: "confirm",
         prompt: "Continue?",
       },
-      makeContext()
+      makeContext(),
+      expect.anything()
     );
   });
 
@@ -401,7 +429,7 @@ describe("runWizard", () => {
     await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
     expect(spinnerMock.stop).toHaveBeenCalledWith("Error", 1);
-    expect(cancelSpy).toHaveBeenCalledWith("Setup failed");
+    expect(lastCancelMessage()).toBe("Setup failed");
   });
 
   test("tears down forwarding and stops the spinner on cancellation", async () => {

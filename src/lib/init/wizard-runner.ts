@@ -4,6 +4,11 @@
  * Main suspend/resume loop that drives the remote Mastra workflow.
  * Each iteration: check status → if suspended, perform tool or
  * interactive prompt → resume with result → repeat.
+ *
+ * All UI I/O — banners, spinners, logs, prompts, outro — flows through
+ * a single `WizardUI` instance constructed by `getUI()`. The runner
+ * itself is implementation-agnostic: it works the same against
+ * `ClackUI`, `LoggingUI`, and the upcoming OpenTUI implementation.
  */
 
 import { randomBytes } from "node:crypto";
@@ -37,7 +42,6 @@ import { formatError, formatResult } from "./formatters.js";
 import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
 import { resolveInitContext } from "./preflight.js";
-import { createWizardSpinner } from "./spinner.js";
 import { forwardFreshTtyToStdin } from "./stdin-reopen.js";
 import { describeTool, executeTool } from "./tools/registry.js";
 import type {
@@ -46,22 +50,23 @@ import type {
   WizardOptions,
   WorkflowRunResult,
 } from "./types.js";
+import { getUI } from "./ui/factory.js";
+import type { SpinnerHandle, WizardUI } from "./ui/types.js";
 import {
   precomputeDirListing,
   precomputeSentryDetection,
   preReadCommonFiles,
 } from "./workflow-inputs.js";
 
-type Spinner = ReturnType<typeof createWizardSpinner>;
-
 type SpinState = { running: boolean };
 
 type StepContext = {
   payload: SuspendPayload;
   stepId: string;
-  spin: Spinner;
+  spin: SpinnerHandle;
   spinState: SpinState;
   context: ResolvedInitContext;
+  ui: WizardUI;
 };
 
 function nextPhase(
@@ -173,7 +178,7 @@ async function handleSuspendedStep(
   stepPhases: Map<string, number>,
   stepHistory: Map<string, Record<string, unknown>[]>
 ): Promise<Record<string, unknown>> {
-  const { payload, stepId, spin, spinState, context } = ctx;
+  const { payload, stepId, spin, spinState, context, ui } = ctx;
   const label = STEP_LABELS[stepId] ?? stepId;
 
   if (payload.type === "tool") {
@@ -226,7 +231,7 @@ async function handleSuspendedStep(
     spin.stop(label);
     spinState.running = false;
 
-    const interactiveResult = await handleInteractive(payload, context);
+    const interactiveResult = await handleInteractive(payload, context, ui);
 
     spin.start("Processing...");
     spinState.running = true;
@@ -239,10 +244,10 @@ async function handleSuspendedStep(
 
   spin.stop("Error", 1);
   spinState.running = false;
-  log.error(
+  ui.log.error(
     `Unknown suspend payload type "${(payload as { type: string }).type}"`
   );
-  cancel("Setup failed");
+  ui.cancel("Setup failed");
   throw new WizardCancelledError();
 }
 
@@ -301,22 +306,25 @@ function withTimeout<T>(
   });
 }
 
-async function confirmExperimental(yes: boolean): Promise<boolean> {
+async function confirmExperimental(
+  yes: boolean,
+  ui: WizardUI
+): Promise<boolean> {
   if (yes) {
     return true;
   }
-  const proceed = await confirm({
+  const proceed = await ui.confirm({
     message:
       "EXPERIMENTAL: This feature is experimental and may modify your code. Continue?",
   });
-  abortIfCancelled(proceed);
-  return !!proceed;
+  return Boolean(abortIfCancelled(proceed));
 }
 
 async function preamble(
   directory: string,
   yes: boolean,
-  dryRun: boolean
+  dryRun: boolean,
+  ui: WizardUI
 ): Promise<boolean> {
   if (!(yes || dryRun || process.stdin.isTTY)) {
     throw new WizardError(
@@ -326,11 +334,11 @@ async function preamble(
   }
 
   process.stderr.write(`\n${formatBanner()}\n\n`);
-  intro("sentry init");
+  ui.intro("sentry init");
 
   let confirmed: boolean;
   try {
-    confirmed = await confirmExperimental(yes || dryRun);
+    confirmed = await confirmExperimental(yes || dryRun, ui);
   } catch (err) {
     if (err instanceof WizardCancelledError) {
       captureException(err);
@@ -340,18 +348,22 @@ async function preamble(
     throw err;
   }
   if (!confirmed) {
-    cancel("Setup cancelled.");
+    ui.cancel("Setup cancelled.");
     process.exitCode = 0;
     return false;
   }
 
   if (dryRun) {
-    log.warn("Dry-run mode: no files will be modified.");
+    ui.log.warn("Dry-run mode: no files will be modified.");
   }
 
-  const gitOk = await checkGitStatus({ cwd: directory, yes: yes || dryRun });
+  const gitOk = await checkGitStatus({
+    cwd: directory,
+    yes: yes || dryRun,
+    ui,
+  });
   if (!gitOk) {
-    cancel("Setup cancelled.");
+    ui.cancel("Setup cancelled.");
     process.exitCode = 0;
     return false;
   }
@@ -386,11 +398,16 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
 
   const { directory, yes, dryRun, features } = initialOptions;
 
-  if (!(await preamble(directory, yes, dryRun))) {
+  // Construct the UI once for the entire run; tear down on every exit
+  // path via `await using`. `getUI()` picks the right implementation
+  // based on TTY state and `--yes`.
+  await using ui = getUI({ yes });
+
+  if (!(await preamble(directory, yes, dryRun, ui))) {
     return;
   }
 
-  log.info(
+  ui.log.info(
     "This wizard uses AI to analyze your project and configure Sentry." +
       `\nFor manual setup: ${terminalLink(SENTRY_DOCS_URL)}`
   );
@@ -398,7 +415,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   const effectiveOptions = dryRun
     ? { ...initialOptions, yes: true }
     : initialOptions;
-  const context = await resolveInitContext(effectiveOptions);
+  const context = await resolveInitContext(effectiveOptions, ui);
   if (!context) {
     return;
   }
@@ -454,7 +471,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   });
   const workflow = client.getWorkflow(WORKFLOW_ID);
 
-  const spin = createWizardSpinner();
+  const spin = ui.spinner();
   const spinState: SpinState = { running: false };
 
   spin.start("Scanning project...");
@@ -500,8 +517,8 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   } catch (err) {
     spin.stop("Connection failed", 1);
     spinState.running = false;
-    log.error(errorMessage(err));
-    cancel("Setup failed");
+    ui.log.error(errorMessage(err));
+    ui.cancel("Setup failed");
     throw new WizardError(errorMessage(err));
   }
 
@@ -517,8 +534,8 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       if (!extracted) {
         spin.stop("Error", 1);
         spinState.running = false;
-        log.error(`No suspend payload found for step "${stepId}"`);
-        cancel("Setup failed");
+        ui.log.error(`No suspend payload found for step "${stepId}"`);
+        ui.cancel("Setup failed");
         throw new WizardError(`No suspend payload found for step "${stepId}"`);
       }
 
@@ -529,6 +546,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
           spin,
           spinState,
           context,
+          ui,
         },
         stepPhases,
         stepHistory
@@ -565,18 +583,19 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     if (err instanceof WizardError) {
       throw err;
     }
-    log.error(errorMessage(err));
-    cancel("Setup failed");
+    ui.log.error(errorMessage(err));
+    ui.cancel("Setup failed");
     throw new WizardError(errorMessage(err));
   }
 
-  handleFinalResult(result, spin, spinState);
+  handleFinalResult(result, spin, spinState, ui);
 }
 
 function handleFinalResult(
   result: WorkflowRunResult,
-  spin: Spinner,
-  spinState: SpinState
+  spin: SpinnerHandle,
+  spinState: SpinState,
+  ui: WizardUI
 ): void {
   const hasError = result.status !== "success" || result.result?.exitCode;
 
@@ -585,7 +604,7 @@ function handleFinalResult(
       spin.stop("Failed", 1);
       spinState.running = false;
     }
-    formatError(result);
+    formatError(result, ui);
     throw new WizardError("Workflow returned an error");
   }
 
@@ -593,7 +612,7 @@ function handleFinalResult(
     spin.stop("Done");
     spinState.running = false;
   }
-  formatResult(result);
+  formatResult(result, ui);
 }
 
 function extractSuspendPayload(

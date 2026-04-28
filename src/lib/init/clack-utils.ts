@@ -1,12 +1,20 @@
 /**
- * Clack Utilities
+ * Wizard Utilities
  *
- * Shared helpers for the clack-based init wizard UI.
+ * Shared cancellation/error helpers and feature labels for the init
+ * wizard. Originally a clack-specific utility module — the name is
+ * preserved for now to keep diffs minimal across PRs while the UI
+ * layer is migrated. PR 4 renames this file to `wizard-utils.ts` after
+ * the clack dependency is removed.
+ *
+ * `abortIfCancelled()` recognises **both** the new `WizardUI`
+ * cancellation sentinel and clack's legacy cancel symbol — the latter
+ * because `ClackUI` returns the unified sentinel but downstream callers
+ * may still receive raw clack symbols during the migration window.
  */
 
-import { terminalLink } from "../formatters/colors.js";
-import { cancel, isCancel } from "./clack-plain.js";
-import { SENTRY_DOCS_URL } from "./constants.js";
+import { isCancel as clackIsCancel } from "./clack-plain.js";
+import { isCancelled } from "./ui/types.js";
 
 export class WizardCancelledError extends Error {
   constructor() {
@@ -15,14 +23,24 @@ export class WizardCancelledError extends Error {
   }
 }
 
-export function abortIfCancelled<T>(value: T | symbol): T {
-  if (isCancel(value)) {
-    cancel(
-      `Setup cancelled. You can visit ${terminalLink(SENTRY_DOCS_URL)} to set up manually.`
-    );
+/**
+ * Coerce a possibly-cancelled prompt result into the resolved value, or
+ * throw `WizardCancelledError` on cancellation.
+ *
+ * Recognises the unified `CANCELLED` sentinel from `ui/types.ts`. Also
+ * recognises clack's legacy cancel symbol so callers that still touch
+ * clack directly continue to work during PR 2.
+ *
+ * The return type uses `Exclude<T, symbol>` so callers passing a union
+ * that includes a symbol member (e.g. `string[] | typeof CANCELLED`)
+ * receive the narrowed non-symbol type back — TypeScript otherwise
+ * widens `T` to the full union and refuses to call array methods on it.
+ */
+export function abortIfCancelled<T>(value: T): Exclude<T, symbol> {
+  if (isCancelled(value) || clackIsCancel(value)) {
     throw new WizardCancelledError();
   }
-  return value as T;
+  return value as Exclude<T, symbol>;
 }
 
 const FEATURE_INFO: Record<string, { label: string; hint: string }> = {
