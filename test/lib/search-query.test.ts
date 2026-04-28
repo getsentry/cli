@@ -381,20 +381,31 @@ describe("tryRepairQuery: auto-repair malformed syntax", () => {
 });
 
 describe("sanitizeQuery: auto-repair integration", () => {
-  test("auto-repairs trailing comma in in-list and parses successfully", () => {
-    // This would previously fail PEG parsing and pass through as-is → 400
+  test("trailing comma before ] is valid PEG syntax — no repair needed", () => {
+    // The PEG parser accepts trailing commas before ], so this parses fine
+    // and passes through without repair.
     const result = sanitizeQuery("level:[error,warning,]");
     expect(result).toBe("level:[error,warning,]");
-    // The repaired query parses successfully — no error
   });
 
-  test("auto-repairs wrong delimiter and produces valid query", () => {
-    // error.http.status_code:[401,403,429,500,) → error.http.status_code:[401,403,429,500]
+  test("auto-repairs wrong closing delimiter ) and returns fixed query", () => {
+    // The ) closing delimiter fails PEG parsing, triggering auto-repair
+    const result = sanitizeQuery("level:[error,warning,)");
+    expect(result).toBe("level:[error,warning]");
+  });
+
+  test("auto-repairs complex filter with wrong delimiter in longer query", () => {
     const result = sanitizeQuery(
       "is:unresolved error.http.status_code:[401,403,429,500,)"
     );
-    // The repaired query parses successfully (no throw)
-    expect(typeof result).toBe("string");
-    expect(result).not.toContain(",)");
+    expect(result).toBe(
+      "is:unresolved error.http.status_code:[401,403,429,500]"
+    );
+  });
+
+  test("unfixable malformed query passes through to API", () => {
+    // Completely broken syntax that tryRepairQuery can't fix
+    const result = sanitizeQuery("((( broken");
+    expect(result).toBe("((( broken");
   });
 });
