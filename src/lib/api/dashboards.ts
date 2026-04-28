@@ -65,9 +65,7 @@ export async function listDashboardsPaginated(
   });
 
   return unwrapPaginatedResult<DashboardListItem[]>(
-    result as
-      | { data: DashboardListItem[]; error: undefined }
-      | { data: undefined; error: unknown },
+    result,
     "Failed to list dashboards"
   );
 }
@@ -87,12 +85,10 @@ export async function getDashboard(
 
   const result = await retrieveAnOrganization_sCustomDashboard({
     ...config,
-    // SDK schema requires dashboard_id: number, but the API accepts string
-    // IDs verbatim in the URL path. The CLI uses strings throughout.
     path: {
       organization_id_or_slug: orgSlug,
-      dashboard_id: dashboardId,
-    } as unknown as { organization_id_or_slug: string; dashboard_id: number },
+      dashboard_id: dashboardId as unknown as number,
+    },
   });
 
   const data = unwrapResult(result, `Failed to get dashboard '${dashboardId}'`);
@@ -115,8 +111,6 @@ export async function createDashboard(
   const result = await createANewDashboardForAnOrganization({
     ...config,
     path: { organization_id_or_slug: orgSlug },
-    // API accepts both camelCase and snake_case at runtime per OpenAPI doc;
-    // SDK type is strictly snake_case while CLI bodies use camelCase.
     body: body as unknown as Parameters<
       typeof createANewDashboardForAnOrganization
     >[0]["body"],
@@ -150,14 +144,10 @@ export async function updateDashboard(
 
   const result = await editAnOrganization_sCustomDashboard({
     ...config,
-    // SDK schema requires dashboard_id: number, but the API accepts string
-    // IDs verbatim in the URL path. The CLI uses strings throughout.
     path: {
       organization_id_or_slug: orgSlug,
-      dashboard_id: dashboardId,
-    } as unknown as { organization_id_or_slug: string; dashboard_id: number },
-    // API accepts both camelCase and snake_case at runtime per OpenAPI doc;
-    // SDK type is strictly snake_case while CLI bodies use camelCase.
+      dashboard_id: dashboardId as unknown as number,
+    },
     body: body as unknown as Parameters<
       typeof editAnOrganization_sCustomDashboard
     >[0]["body"],
