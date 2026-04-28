@@ -120,6 +120,23 @@ export function parsePositionalArgs(args: string[]): {
 
   // Two or more args — first is target, rest are log IDs.
   // Each arg may contain newlines (split them).
+
+  // Check issue short ID first — it takes precedence over swap detection
+  // because `detectSwappedViewArgs` also fires for `CAM-82X my-org/project`
+  // (first has no "/", second has "/"), but the user's intent is clearly
+  // to view an issue, not to swap log-view arguments.
+  if (looksLikeIssueShortId(first)) {
+    const rawLogIds = args.slice(1).flatMap(splitLogIds);
+    if (rawLogIds.length === 0) {
+      throw new ContextError("Log ID", USAGE_HINT, []);
+    }
+    return {
+      rawLogIds,
+      targetArg: first,
+      suggestion: `Did you mean: sentry issue view ${first}`,
+    };
+  }
+
   // biome-ignore lint/style/noNonNullAssertion: length >= 2 guarantees index 1 exists
   const second = args[1]!;
 
@@ -146,11 +163,8 @@ export function parsePositionalArgs(args: string[]): {
   if (rawLogIds.length === 0) {
     throw new ContextError("Log ID", USAGE_HINT, []);
   }
-  const suggestion = looksLikeIssueShortId(first)
-    ? `Did you mean: sentry issue view ${first}`
-    : undefined;
 
-  return { rawLogIds, targetArg: first, suggestion };
+  return { rawLogIds, targetArg: first };
 }
 
 /**

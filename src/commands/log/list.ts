@@ -883,6 +883,7 @@ export const listCommand = buildListCommand(
                 limit: flags.limit,
                 statsPeriod,
                 afterTimestamp,
+                extraFields: flags.fields,
               }),
             extractNew: (logs) => logs,
           });

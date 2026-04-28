@@ -198,8 +198,17 @@ export function createLogStreamingTable(
     true,
     ...(extraColumns ?? []).map(() => true),
   ];
+  // Extend hint rows with placeholder values for extra columns so the
+  // StreamingTable width estimator allocates reasonable space for them.
+  const hintRows = extraColumns?.length
+    ? LOG_HINT_ROWS.map((row) => [
+        ...row,
+        ...extraColumns.map(() => "example_value_123"),
+      ])
+    : LOG_HINT_ROWS;
+
   return new StreamingTable(cols, {
-    hintRows: LOG_HINT_ROWS,
+    hintRows,
     shrinkable,
     truncate: false,
     ...options,
