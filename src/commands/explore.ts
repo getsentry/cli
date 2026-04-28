@@ -83,6 +83,14 @@ const VALID_DATASETS = [
   "discover",
 ];
 
+/**
+ * Reverse map from API-level dataset name → canonical user-facing name.
+ * Used by pagination hints so they emit `--dataset metrics` not `--dataset metricsEnhanced`.
+ */
+const API_TO_USER_DATASET: Record<string, string> = Object.fromEntries(
+  VALID_DATASETS.map((name) => [DATASET_ALIASES[name] ?? name, name])
+);
+
 /** Sentry field types that should be right-aligned and formatted as numbers */
 const NUMERIC_FIELD_TYPES = new Set([
   "integer",
@@ -254,7 +262,8 @@ function formatExploreHuman(data: ExploreData): string {
   const columns = buildColumns(fieldNames, data.meta?.fields, data.meta?.units);
 
   const scope = data.project ? `${data.org}/${data.project}` : data.org;
-  const header = `Querying ${data.dataset} in ${scope}:\n\n`;
+  const displayDataset = API_TO_USER_DATASET[data.dataset] ?? data.dataset;
+  const header = `Querying ${displayDataset} in ${scope}:\n\n`;
   return header + formatTable(data.data, columns);
 }
 
@@ -293,7 +302,9 @@ function appendFlagHints(
 ): string {
   const parts: string[] = [];
   if (flags.dataset !== DEFAULT_DATASET) {
-    parts.push(`--dataset ${flags.dataset}`);
+    // Emit user-facing name, not API-level name (e.g. "metrics" not "metricsEnhanced")
+    const displayDataset = API_TO_USER_DATASET[flags.dataset] ?? flags.dataset;
+    parts.push(`--dataset ${displayDataset}`);
   }
   if (flags.sort) {
     parts.push(`--sort ${flags.sort}`);
