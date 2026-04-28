@@ -68,7 +68,6 @@ export type ActivePrompt =
 
 export type WizardSnapshot = {
   bannerRows: { content: string; color: string }[];
-  intro: string;
   logs: LogEntry[];
   spinner: SpinnerState;
   prompt: ActivePrompt | null;
@@ -92,7 +91,6 @@ export class WizardStore {
   constructor(initial: Partial<WizardSnapshot> = {}) {
     this.snapshot = {
       bannerRows: initial.bannerRows ?? [],
-      intro: initial.intro ?? "",
       logs: initial.logs ?? [],
       spinner: initial.spinner ?? { active: false, frame: 0, message: "" },
       prompt: initial.prompt ?? null,
@@ -112,10 +110,6 @@ export class WizardStore {
 
   setBanner(rows: { content: string; color: string }[]): void {
     this.update({ bannerRows: rows });
-  }
-
-  setIntro(text: string): void {
-    this.update({ intro: text });
   }
 
   appendLog(severity: LogSeverity, text: string): LogEntry {

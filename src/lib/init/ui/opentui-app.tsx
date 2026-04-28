@@ -116,13 +116,12 @@ export function App({ store }: AppProps): React.ReactNode {
       flexDirection="column"
       flexGrow={1}
       padding={1}
-      title=" Sentry init "
+      title=" sentry init "
       titleAlignment="left"
     >
       <box flexDirection="row" flexGrow={1} gap={showSidebar ? 2 : 0}>
         <MainColumn
           bannerRows={snapshot.bannerRows}
-          intro={snapshot.intro}
           logs={snapshot.logs}
           prompt={snapshot.prompt}
           spinner={snapshot.spinner}
@@ -138,7 +137,6 @@ export function App({ store }: AppProps): React.ReactNode {
 
 type MainColumnProps = {
   bannerRows: { content: string; color: string }[];
-  intro: string;
   logs: LogEntry[];
   spinner: SpinnerState;
   prompt: ActivePrompt | null;
@@ -147,7 +145,6 @@ type MainColumnProps = {
 
 function MainColumn({
   bannerRows,
-  intro,
   logs,
   spinner,
   prompt,
@@ -155,7 +152,7 @@ function MainColumn({
 }: MainColumnProps): React.ReactNode {
   return (
     <box flexDirection="column" flexGrow={1}>
-      <Header bannerRows={bannerRows} intro={intro} />
+      <Header bannerRows={bannerRows} />
       <Divider />
       <box flexDirection="column" flexGrow={1}>
         {logs.map((log) => (
@@ -171,11 +168,13 @@ function MainColumn({
 
 function Header({
   bannerRows,
-  intro,
 }: {
   bannerRows: { content: string; color: string }[];
-  intro: string;
 }): React.ReactNode {
+  // The box already advertises "sentry init" in its top border title,
+  // and the banner itself reads "SENTRY", so we don't repeat the
+  // command name underneath the banner. Earlier versions had an
+  // intro line here ("▸ sentry init") which felt redundant.
   return (
     <box flexDirection="column" flexShrink={0}>
       {bannerRows.map((row, i) => (
@@ -186,11 +185,6 @@ function Header({
           {row.content}
         </text>
       ))}
-      {intro ? (
-        <text fg={ACCENT} marginTop={1}>
-          ▸ {intro}
-        </text>
-      ) : null}
     </box>
   );
 }

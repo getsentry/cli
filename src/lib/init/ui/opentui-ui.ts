@@ -74,22 +74,25 @@ const BANNER_ROWS = [
 ];
 
 /**
- * Glyph map for transcript replay (post-dispose stderr write). Kept in
- * sync with the icons rendered in `opentui-app.tsx`.
+ * Log severities recognised by the OpenTUI UI. Kept narrowly typed so
+ * callers can't pass arbitrary strings into `appendLog`. Mirrors the
+ * keys of `ICON_BY_SEVERITY` in `opentui-app.tsx`.
  */
-const TRANSCRIPT_GLYPHS = {
-  info: "●",
-  warn: "▲",
-  error: "✖",
-  success: "✔",
-  message: " ",
-} as const;
+type LogSeverity = "info" | "warn" | "error" | "success" | "message";
 
-const TRANSCRIPT_STOP_GLYPHS: Record<SpinnerExitCode, string> = {
-  0: "✔",
-  1: "✖",
-  2: "▲",
-};
+/**
+ * Severity returned for a spinner stop given its exit code.
+ *   0 → success, 1 → error, 2 → warn.
+ */
+function severityForStopCode(code: SpinnerExitCode): LogSeverity {
+  if (code === 1) {
+    return "error";
+  }
+  if (code === 2) {
+    return "warn";
+  }
+  return "success";
+}
 
 /**
  * Async factory for `OpenTuiUI`. Imports `@opentui/core`,
@@ -158,12 +161,27 @@ export class OpenTuiUI implements WizardUI {
   private tipIndex = 0;
   private activePromptCancel: (() => void) | undefined;
   /**
-   * Append-only transcript of every log/intro/outro/cancel line and
-   * the final summary. On dispose we replay it to stderr after the
-   * renderer destroys the alternate screen, so users see the wizard's
-   * output in their scrollback.
+   * Final wizard outcome captured by the bridge.
+   *
+   * The OpenTUI alternate-screen buffer is wiped the moment
+   * `renderer.destroy()` runs, so anything we want the user to see in
+   * their scrollback has to be re-emitted to stderr after destroy.
+   * Earlier versions replayed every log/intro/outro line — that
+   * produced a noisy wall of `▸ sentry init`, `● This wizard uses
+   * AI…`, and intermediate spinner stops. We now keep just enough
+   * state to print a focused completion report:
+   *
+   *   - `outroMessage` — the success line (set by `outro()`).
+   *   - `failureMessage` — the error/cancel line (set by `cancel()`
+   *     or by `log.error()` for a fatal abort).
+   *   - The store's `summary` snapshot — already structured.
+   *
+   * Whichever pair is populated wins on dispose. If neither is set
+   * (e.g. early abort before any outcome was recorded) we print
+   * nothing, matching the previous "no transcript" behavior.
    */
-  private readonly transcript: string[] = [];
+  private outroMessage: string | undefined;
+  private failureMessage: string | undefined;
 
   constructor(
     // biome-ignore lint/suspicious/noExplicitAny: dynamic-import boundary
@@ -187,36 +205,30 @@ export class OpenTuiUI implements WizardUI {
     // embedded escape codes).
   }
 
-  intro(title: string): void {
-    const clean = stripAnsi(title);
-    this.store.setIntro(clean);
-    this.transcript.push(`▸ ${clean}`);
+  intro(_title: string): void {
+    // No-op. The box's top-border title and the gradient banner
+    // already announce the wizard; an extra "▸ sentry init" line
+    // underneath felt redundant in user feedback. We keep the method
+    // on the interface for parity with `LoggingUI`, where the
+    // command-line shell makes a separate intro line useful.
   }
 
   outro(message: string): void {
-    this.appendLog("success", message);
+    // Show the success line live in the log pane, and remember it for
+    // the post-dispose scrollback report.
+    const clean = stripAnsi(message);
+    this.appendLog("success", clean);
+    this.outroMessage = clean;
   }
 
   cancel(message: string): void {
-    this.appendLog("error", message);
+    const clean = stripAnsi(message);
+    this.appendLog("error", clean);
+    this.failureMessage = clean;
   }
 
   summary(summary: WizardSummary): void {
     this.store.setSummary(summary);
-    // Push a compact textual version onto the transcript so the
-    // post-dispose stderr replay has something to show.
-    this.transcript.push("");
-    for (const field of summary.fields) {
-      this.transcript.push(`  ${field.label}: ${field.value}`);
-    }
-    if (summary.changedFiles && summary.changedFiles.length > 0) {
-      this.transcript.push("");
-      this.transcript.push("  Changed files:");
-      for (const file of summary.changedFiles) {
-        const glyph = changedFileGlyph(file.action);
-        this.transcript.push(`    ${glyph} ${file.path}`);
-      }
-    }
   }
 
   // ── Logging ───────────────────────────────────────────────────────
@@ -259,18 +271,7 @@ export class OpenTuiUI implements WizardUI {
         // Promote the spinner's final state into the log pane so it
         // survives subsequent `start()` calls.
         if (finalMessage) {
-          const glyph = TRANSCRIPT_STOP_GLYPHS[code];
-          // Map the spinner stop code back to a log severity for the
-          // visible row. 0 = success, 1 = error, 2 = warn.
-          const severity = severityForStopCode(code);
-          this.appendLog(severity, finalMessage);
-          // Override the transcript line with the stop glyph (which
-          // visually matches the live spinner code (`appendLog` would
-          // have used the severity-based glyph, which is the same in
-          // practice but keeping the mapping explicit avoids a future
-          // drift bug).
-          this.transcript[this.transcript.length - 1] =
-            `${glyph} ${finalMessage}`;
+          this.appendLog(severityForStopCode(code), finalMessage);
         }
       },
     };
@@ -384,22 +385,57 @@ export class OpenTuiUI implements WizardUI {
     } catch {
       // Ignore.
     }
-    if (this.transcript.length > 0) {
-      process.stderr.write(`${this.transcript.join("\n")}\n`);
+    const report = this.buildPostDisposeReport();
+    if (report) {
+      process.stderr.write(`${report}\n`);
     }
     return Promise.resolve();
   }
 
+  /**
+   * Build the compact scrollback report shown after `destroy()` wipes
+   * the alternate screen. Three shapes:
+   *
+   *   - Success: outro line + summary fields + changed files.
+   *   - Failure: cancel/error line on its own.
+   *   - Empty:   no useful state captured (early abort, etc.) — return
+   *              `undefined` and the caller skips the stderr write.
+   *
+   * Failure wins over success if both are set (e.g. error mid-run
+   * after a partial summary was emitted).
+   */
+  private buildPostDisposeReport(): string | undefined {
+    if (this.failureMessage) {
+      return `\n✖  ${this.failureMessage}`;
+    }
+    if (!this.outroMessage) {
+      return;
+    }
+    const lines: string[] = ["", `✔  ${this.outroMessage}`];
+    const summary = this.store.getSnapshot().summary;
+    if (summary && summary.fields.length > 0) {
+      lines.push("");
+      const labelWidth = Math.max(
+        ...summary.fields.map((field) => field.label.length)
+      );
+      for (const field of summary.fields) {
+        lines.push(`   ${field.label.padEnd(labelWidth)}  ${field.value}`);
+      }
+    }
+    if (summary?.changedFiles && summary.changedFiles.length > 0) {
+      lines.push("");
+      lines.push("   Changed files");
+      for (const file of summary.changedFiles) {
+        lines.push(`     ${changedFileGlyph(file.action)} ${file.path}`);
+      }
+    }
+    return lines.join("\n");
+  }
+
   // ── Internal helpers ──────────────────────────────────────────────
 
-  private appendLog(
-    severity: keyof typeof TRANSCRIPT_GLYPHS,
-    message: string
-  ): void {
-    const clean = stripAnsi(message);
-    this.store.appendLog(severity, clean);
-    const glyph = TRANSCRIPT_GLYPHS[severity];
-    this.transcript.push(`${glyph} ${clean}`);
+  private appendLog(severity: LogSeverity, message: string): void {
+    this.store.appendLog(severity, stripAnsi(message));
   }
 
   private startTipRotation(): void {
@@ -434,22 +470,6 @@ export class OpenTuiUI implements WizardUI {
       }
     );
   }
-}
-
-/**
- * Map a spinner stop code back to the matching log severity.
- * Stop code 0 → success, 1 → error, 2 → warn.
- */
-function severityForStopCode(
-  code: SpinnerExitCode
-): keyof typeof TRANSCRIPT_GLYPHS {
-  if (code === 1) {
-    return "error";
-  }
-  if (code === 2) {
-    return "warn";
-  }
-  return "success";
 }
 
 function changedFileGlyph(action: string): string {
