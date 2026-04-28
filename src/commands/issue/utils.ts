@@ -456,9 +456,7 @@ async function resolveSelector(
       `Selector '${selector}'`,
       "no unresolved issues found",
       `sentry issue list ${orgSlug}/ -q "is:resolved"`,
-      [
-        `The ${label} issue selector only matches unresolved issues.`,
-      ]
+      [`The ${label} issue selector only matches unresolved issues.`]
     );
   }
 
