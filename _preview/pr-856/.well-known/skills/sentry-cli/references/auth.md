@@ -19,6 +19,7 @@ Authenticate with Sentry
 - `--token <value> - Authenticate using an API token instead of OAuth`
 - `--timeout <value> - Timeout for OAuth flow in seconds (default: 900) - (default: "900")`
 - `--force - Re-authenticate without prompting`
+- `--url <value> - Sentry instance URL to authenticate against (e.g. https://sentry.example.com). Required for self-hosted; defaults to SaaS (https://sentry.io).`
 
 **Examples:**
 
