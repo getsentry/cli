@@ -344,11 +344,8 @@ function resolveSort(
   dataset: string,
   explicitSort?: string
 ): string | undefined {
-  const sort =
-    explicitSort ??
-    (findFirstAggregate(fieldList)
-      ? `-${findFirstAggregate(fieldList)}`
-      : undefined);
+  const firstAgg = findFirstAggregate(fieldList);
+  const sort = explicitSort ?? (firstAgg ? `-${firstAgg}` : undefined);
 
   if (dataset === "spans") {
     return sort;
