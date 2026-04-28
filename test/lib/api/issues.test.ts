@@ -305,7 +305,9 @@ describe("listIssuesPaginated: query length guard", () => {
 
   test("rejects excessively long query strings with ValidationError", async () => {
     // Generate a query longer than 4096 characters
-    const longQuery = "id:" + Array.from({ length: 500 }, (_, i) => `PROJ-${i}`).join(" OR id:");
+    const longQuery =
+      "id:" +
+      Array.from({ length: 500 }, (_, i) => `PROJ-${i}`).join(" OR id:");
 
     await expect(
       listIssuesPaginated("test-org", "test-project", { query: longQuery })
@@ -316,7 +318,9 @@ describe("listIssuesPaginated: query length guard", () => {
     const longQuery = "x".repeat(5000);
 
     try {
-      await listIssuesPaginated("test-org", "test-project", { query: longQuery });
+      await listIssuesPaginated("test-org", "test-project", {
+        query: longQuery,
+      });
       expect.unreachable("should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(ValidationError);
