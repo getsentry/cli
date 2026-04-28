@@ -250,8 +250,18 @@ async function handleCompletions(
     return lines;
   }
 
-  // sh/ash are minimal POSIX shells — completions aren't expected
-  if (shell.type === "sh" || shell.type === "ash") {
+  // Shells with native completion support (bash/zsh/fish) return null only
+  // when the target directory is not writable (permission error handled
+  // inside installCompletions). Don't fall through to the bash fallback —
+  // that would misleadingly say the shell "is not directly supported".
+  // sh/ash are minimal POSIX shells — completions aren't expected either.
+  if (
+    shell.type === "bash" ||
+    shell.type === "zsh" ||
+    shell.type === "fish" ||
+    shell.type === "sh" ||
+    shell.type === "ash"
+  ) {
     return [];
   }
 

@@ -862,9 +862,10 @@ describe("sentry cli setup", () => {
       expect(getOutput()).toContain("Agent skills:");
     });
 
-    test("bestEffort catches errors from steps and setup still completes", async () => {
-      // Make the completions dir unwritable so installCompletions() fails.
-      // bestEffort() must catch the error and continue — setup still completes.
+    test("setup completes gracefully when completion directory is not writable", async () => {
+      // Make the completions dir unwritable so Bun.write() can't write the
+      // completion script. installCompletions() catches the permission error
+      // and returns null — setup completes without error or warning.
       const { chmodSync: chmod } = await import("node:fs");
       const homeDir = join(testDir, "home");
       const xdgData = join(homeDir, ".local", "share");
@@ -891,9 +892,13 @@ describe("sentry cli setup", () => {
       );
 
       const combined = getOutput();
-      // Setup must complete even though the completions step threw —
-      // the warning appears in the formatted output
-      expect(combined).toContain("Shell completions failed");
+      // installCompletions handles permission errors gracefully and returns
+      // null, so bestEffort never sees an error — no failure message appears
+      expect(combined).not.toContain("Shell completions failed");
+      // No misleading fallback message for a supported shell (zsh)
+      expect(combined).not.toContain("not directly supported");
+      // Setup still completes successfully
+      expect(combined).not.toContain("error");
 
       chmod(zshDir, 0o755);
     });
