@@ -758,6 +758,17 @@ describe("parseIssueArg", () => {
         suffix: "4P",
       });
     });
+
+    test("org/project:suffix falls through to slash parsing", () => {
+      // When input has both slash and colon, slash parsing takes precedence
+      // because parseWithColon returns null for slash-containing project parts.
+      // "CLI:W9" has no dash, so parseAfterSlash returns explicit-org-suffix.
+      expect(parseIssueArg("sentry/CLI:W9")).toEqual({
+        type: "explicit-org-suffix",
+        org: "sentry",
+        suffix: "CLI:W9",
+      });
+    });
   });
 
   describe("magic @ selectors", () => {

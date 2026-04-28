@@ -850,8 +850,9 @@ function parseWithColon(arg: string): ParsedIssueArg | null {
   const projectPart = arg.slice(0, colonIdx);
   const idPart = arg.slice(colonIdx + 1);
 
-  // Both parts must be non-empty
-  if (!(projectPart && idPart)) {
+  // Both parts must be non-empty, and project part must not contain a slash
+  // (slashes indicate org/project notation which should be handled by parseWithSlash)
+  if (!(projectPart && idPart) || projectPart.includes("/")) {
     return null;
   }
 
