@@ -4,11 +4,13 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  buildLogRowCells,
   createLogStreamingTable,
   formatLogDetails,
   formatLogRow,
   formatLogsHeader,
   formatLogTable,
+  getLogId,
 } from "../../../src/lib/formatters/log.js";
 import type { DetailedSentryLog, SentryLog } from "../../../src/types/index.js";
 
@@ -154,9 +156,10 @@ describe("formatLogRow (rendered mode)", () => {
 
 describe("createLogStreamingTable", () => {
   test("header() contains column titles and box-drawing borders", () => {
-    const table = createLogStreamingTable({ maxWidth: 80 });
+    const table = createLogStreamingTable({ maxWidth: 120 });
     const result = table.header();
 
+    expect(result).toContain("ID");
     expect(result).toContain("Timestamp");
     expect(result).toContain("Level");
     expect(result).toContain("Message");
@@ -166,9 +169,15 @@ describe("createLogStreamingTable", () => {
   });
 
   test("row() renders cells with side borders", () => {
-    const table = createLogStreamingTable({ maxWidth: 80 });
-    const result = table.row(["2026-01-15 10:00:00", "ERROR", "something"]);
+    const table = createLogStreamingTable({ maxWidth: 120 });
+    const result = table.row([
+      "ace106b2",
+      "2026-01-15 10:00:00",
+      "ERROR",
+      "something",
+    ]);
 
+    expect(result).toContain("ace106b2");
     expect(result).toContain("2026-01-15 10:00:00");
     expect(result).toContain("ERROR");
     expect(result).toContain("something");
@@ -177,7 +186,7 @@ describe("createLogStreamingTable", () => {
   });
 
   test("footer() renders bottom border", () => {
-    const table = createLogStreamingTable({ maxWidth: 80 });
+    const table = createLogStreamingTable({ maxWidth: 120 });
     const result = table.footer();
 
     expect(result).toContain("─");
@@ -185,28 +194,41 @@ describe("createLogStreamingTable", () => {
   });
 
   test("ends with newline", () => {
-    const table = createLogStreamingTable({ maxWidth: 80 });
+    const table = createLogStreamingTable({ maxWidth: 120 });
     expect(table.header()).toEndWith("\n");
-    expect(table.row(["a", "b", "c"])).toEndWith("\n");
+    expect(table.row(["a", "b", "c", "d"])).toEndWith("\n");
     expect(table.footer()).toEndWith("\n");
+  });
+
+  test("accepts extra columns", () => {
+    const table = createLogStreamingTable({ maxWidth: 160 }, [
+      "email",
+      "user_id",
+    ]);
+    const result = table.header();
+
+    expect(result).toContain("email");
+    expect(result).toContain("user_id");
   });
 });
 
 describe("formatLogRow (plain mode)", () => {
   usePlainMode();
 
-  test("emits a markdown table row", () => {
+  test("emits a markdown table row with 4 columns", () => {
     const log = createTestLog();
     const result = formatLogRow(log);
-    expect(result).toMatch(/^\|.+\|.+\|.+\|\n$/);
+    // 4 columns: ID | Timestamp | Level | Message
+    expect(result).toMatch(/^\|.+\|.+\|.+\|.+\|\n$/);
   });
 
-  test("contains timestamp, severity, message", () => {
+  test("contains log ID prefix, timestamp, severity, message", () => {
     const log = createTestLog({
       severity: "error",
       message: "connection failed",
     });
     const result = formatLogRow(log);
+    expect(result).toContain("test-id-"); // first 8 chars of "test-id-123"
     expect(result).toContain("connection failed");
     expect(result).toContain("ERROR");
     expect(result).toMatch(/\d{4}-\d{2}-\d{2}/);
@@ -235,20 +257,33 @@ describe("formatLogRow (plain mode)", () => {
     const result = formatLogRow(createTestLog());
     expect(result).toEndWith("\n");
   });
+
+  test("renders extra fields as additional columns", () => {
+    const log = { ...createTestLog(), email: "user@example.com" };
+    const result = formatLogRow(log, true, ["email"]);
+    expect(result).toContain("user@example.com");
+  });
 });
 
 describe("formatLogsHeader (plain mode)", () => {
   usePlainMode();
 
-  test("emits markdown table header and separator", () => {
+  test("emits markdown table header and separator with ID column", () => {
     const result = formatLogsHeader();
     // Plain mode produces mdTableHeader output (no bold markup), followed by separator
-    expect(result).toContain("| Timestamp | Level | Message |");
-    expect(result).toContain("| --- | --- | --- |");
+    expect(result).toContain("| ID | Timestamp | Level | Message |");
+    expect(result).toContain("| --- | --- | --- | --- |");
   });
 
   test("ends with newline", () => {
     expect(formatLogsHeader()).toEndWith("\n");
+  });
+
+  test("includes extra columns when provided", () => {
+    const result = formatLogsHeader(["email", "user_id"]);
+    expect(result).toContain(
+      "| ID | Timestamp | Level | Message | email | user_id |"
+    );
   });
 });
 
@@ -408,10 +443,63 @@ describe("formatLogDetails", () => {
   });
 });
 
+describe("getLogId", () => {
+  test("returns sentry.item_id when present", () => {
+    expect(getLogId({ "sentry.item_id": "abc123", timestamp: "" })).toBe(
+      "abc123"
+    );
+  });
+
+  test("falls back to id when sentry.item_id is absent", () => {
+    expect(getLogId({ id: "trace-log-id", timestamp: "" })).toBe(
+      "trace-log-id"
+    );
+  });
+
+  test("returns empty string when neither is present", () => {
+    expect(getLogId({ timestamp: "" })).toBe("");
+  });
+});
+
+describe("buildLogRowCells", () => {
+  test("returns 4 base cells (ID, Timestamp, Level, Message)", () => {
+    const log = createTestLog();
+    const cells = buildLogRowCells(log);
+    expect(cells.length).toBe(4);
+  });
+
+  test("first cell contains short log ID", () => {
+    const log = createTestLog();
+    const cells = buildLogRowCells(log);
+    // First 8 chars of "test-id-123"
+    expect(stripAnsi(cells[0])).toContain("test-id-");
+  });
+
+  test("appends extra field cells when provided", () => {
+    const log = { ...createTestLog(), email: "user@example.com" };
+    const cells = buildLogRowCells(log, true, true, ["email"]);
+    expect(cells.length).toBe(5);
+    expect(cells[4]).toContain("user@example.com");
+  });
+
+  test("extra field shows empty for null values", () => {
+    const log = createTestLog();
+    const cells = buildLogRowCells(log, true, true, ["nonexistent"]);
+    expect(cells.length).toBe(5);
+    expect(cells[4]).toBe("");
+  });
+});
+
 describe("formatLogTable", () => {
   test("returns a string", () => {
     const result = formatLogTable([createTestLog()]);
     expect(typeof result).toBe("string");
+  });
+
+  test("includes log ID in output", () => {
+    const result = stripAnsi(formatLogTable([createTestLog()]));
+    // First 8 chars of "test-id-123"
+    expect(result).toContain("test-id-");
   });
 
   test("includes all log messages", () => {
@@ -441,5 +529,12 @@ describe("formatLogTable", () => {
   test("handles empty messages", () => {
     const result = formatLogTable([createTestLog({ message: "" })]);
     expect(typeof result).toBe("string");
+  });
+
+  test("includes extra field columns when provided", () => {
+    const log = { ...createTestLog(), email: "hi@ex.co" };
+    const result = stripAnsi(formatLogTable([log], true, ["email"]));
+    expect(result).toContain("email");
+    expect(result).toContain("hi@ex.co");
   });
 });

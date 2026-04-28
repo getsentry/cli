@@ -9,6 +9,7 @@ import { isatty } from "node:tty";
 import type { SentryContext } from "../../context.js";
 import { getLogs } from "../../lib/api-client.js";
 import {
+  detectSwappedViewArgs,
   looksLikeIssueShortId,
   parseOrgProjectArg,
   parseSlashSeparatedArg,
@@ -119,14 +120,32 @@ export function parsePositionalArgs(args: string[]): {
 
   // Two or more args — first is target, rest are log IDs.
   // Each arg may contain newlines (split them).
+  // biome-ignore lint/style/noNonNullAssertion: length >= 2 guarantees index 1 exists
+  const second = args[1]!;
+
+  // Detect swapped args: first arg is a hex-like ID, second contains "/"
+  // (e.g., `sentry log view ace106b2 myorg/myproject`). Auto-swap and warn.
+  const swapWarning = detectSwappedViewArgs(first, second);
+  if (swapWarning) {
+    const swappedLogIds = args
+      .flatMap(splitLogIds)
+      .filter((id) => !id.includes("/"));
+    const swappedTarget = [first, ...args.slice(1)].find((a) =>
+      a.includes("/")
+    );
+    if (swappedTarget && swappedLogIds.length > 0) {
+      return {
+        rawLogIds: swappedLogIds,
+        targetArg: swappedTarget,
+        suggestion: swapWarning,
+      };
+    }
+  }
+
   const rawLogIds = args.slice(1).flatMap(splitLogIds);
   if (rawLogIds.length === 0) {
     throw new ContextError("Log ID", USAGE_HINT, []);
   }
-  // Swap detection is not useful here: log IDs cannot contain "/", so
-  // detectSwappedViewArgs (which checks for "/" in the second arg) can
-  // never trigger. We still check for issue short IDs in the first (target)
-  // position.
   const suggestion = looksLikeIssueShortId(first)
     ? `Did you mean: sentry issue view ${first}`
     : undefined;

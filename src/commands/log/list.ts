@@ -89,6 +89,8 @@ type LogListResult = {
   traceId?: string;
   /** Whether more results are available beyond the limit */
   hasMore: boolean;
+  /** Extra field names requested via `--fields`, used to render additional columns in human mode. */
+  extraFields?: string[];
 };
 
 /** Output yielded by log list: either a batch (single-fetch) or an individual item (follow). */
@@ -136,6 +138,8 @@ type LogLike = {
    * TraceLog uses `id`, SentryLog uses `sentry.item_id` (via passthrough).
    * Present on TraceLog which is the only type used in follow mode dedup. */
   id?: string;
+  /** Unique log entry ID from Explore/Events API. */
+  "sentry.item_id"?: string;
   timestamp: string;
   /** Nanosecond-precision timestamp used for dedup in follow mode.
    * Optional because TraceLog may omit it when the API response doesn't include it. */
@@ -143,6 +147,8 @@ type LogLike = {
   severity?: string | null;
   message?: string | null;
   trace?: string | null;
+  /** Allow arbitrary extra fields from `--fields` to flow through. */
+  [key: string]: unknown;
 };
 
 /** Result from a single fetch: logs to yield + hint for the footer. */
@@ -184,6 +190,7 @@ async function executeSingleFetch(
     limit: flags.limit,
     ...timeRangeToApiParams(timeRange),
     sort: flags.sort,
+    extraFields: flags.fields,
   });
 
   const periodLabel =
@@ -191,9 +198,11 @@ async function executeSingleFetch(
       ? `in the last ${timeRange.period}`
       : "in the specified range";
 
+  const extraFields = flags.fields?.length ? flags.fields : undefined;
+
   if (logs.length === 0) {
     return {
-      result: { logs: [], hasMore: false },
+      result: { logs: [], hasMore: false, extraFields },
       hint: `No logs found ${periodLabel}.`,
     };
   }
@@ -203,7 +212,7 @@ async function executeSingleFetch(
   const tip = hasMore ? " Use --limit to show more, or -f to follow." : "";
 
   return {
-    result: { logs, hasMore },
+    result: { logs, hasMore, extraFields },
     hint: `${countText}${tip}`,
   };
 }
@@ -288,20 +297,28 @@ function maxTimestamp(logs: LogLike[]): number | undefined {
  *
  * When a StreamingTable is provided (TTY mode), renders rows through the
  * bordered table. Otherwise falls back to plain markdown rows.
+ *
+ * @param logs - Log entries to render
+ * @param includeTrace - Whether to append trace-ID suffix to messages
+ * @param table - Optional streaming table for TTY mode
+ * @param extraFields - Additional field names to render as extra columns
  */
 function renderLogRows(
   logs: LogLike[],
   includeTrace: boolean,
-  table?: StreamingTable
+  table?: StreamingTable,
+  extraFields?: string[]
 ): string {
   let text = "";
   for (const log of logs) {
     if (table) {
       text += table.row(
-        buildLogRowCells(log, true, includeTrace).map(renderInlineMarkdown)
+        buildLogRowCells(log, true, includeTrace, extraFields).map(
+          renderInlineMarkdown
+        )
       );
     } else {
-      text += formatLogRow(log, includeTrace);
+      text += formatLogRow(log, includeTrace, extraFields);
     }
   }
   return text;
@@ -541,53 +558,86 @@ function writeFollowBanner(
  * Discriminates between {@link LogListResult} (single-fetch or first trace
  * follow batch) and bare {@link LogLike} items (follow mode).
  */
+/** Shared discriminator for log output type. */
+function isLogListResult(data: LogOutput): data is LogListResult {
+  return "logs" in data && Array.isArray((data as LogListResult).logs);
+}
+
+/** Mutable state for the log renderer, extracted to reduce cognitive complexity. */
+type LogRendererState = {
+  table: StreamingTable | undefined;
+  includeTrace: boolean;
+  headerEmitted: boolean;
+  extraFields: string[] | undefined;
+};
+
+/** Initialize table and column settings on the first non-empty render. */
+function initFirstRender(
+  state: LogRendererState,
+  data: LogOutput,
+  plain: boolean
+): void {
+  if (isLogListResult(data)) {
+    if (data.traceId) {
+      state.includeTrace = false;
+    }
+    state.extraFields = data.extraFields;
+  }
+  state.table = plain
+    ? undefined
+    : createLogStreamingTable({}, state.extraFields);
+  state.headerEmitted = true;
+}
+
 function createLogRenderer(): HumanRenderer<LogOutput> {
   const plain = isPlainOutput();
-  const table: StreamingTable | undefined = plain
-    ? undefined
-    : createLogStreamingTable();
-  let includeTrace = true; // default: show trace column
-  let headerEmitted = false;
-
-  function isBatch(data: LogOutput): data is LogListResult {
-    return "logs" in data && Array.isArray((data as LogListResult).logs);
-  }
+  const state: LogRendererState = {
+    table: undefined,
+    includeTrace: true,
+    headerEmitted: false,
+    extraFields: undefined,
+  };
 
   return {
     render(data: LogOutput): string {
-      const logs: LogLike[] = isBatch(data) ? data.logs : [data];
+      const logs: LogLike[] = isLogListResult(data) ? data.logs : [data];
       if (logs.length === 0) {
         return "";
       }
 
-      // First non-empty call: determine includeTrace and emit header
-      if (!headerEmitted) {
-        if (isBatch(data) && data.traceId) {
-          includeTrace = false;
-        }
-        headerEmitted = true;
-        let text = table ? table.header() : formatLogsHeader();
-        text += renderLogRows(logs, includeTrace, table);
+      if (!state.headerEmitted) {
+        initFirstRender(state, data, plain);
+        let text = state.table
+          ? state.table.header()
+          : formatLogsHeader(state.extraFields);
+        text += renderLogRows(
+          logs,
+          state.includeTrace,
+          state.table,
+          state.extraFields
+        );
         return text.trimEnd();
       }
 
-      return renderLogRows(logs, includeTrace, table).trimEnd();
+      return renderLogRows(
+        logs,
+        state.includeTrace,
+        state.table,
+        state.extraFields
+      ).trimEnd();
     },
 
     finalize(hint?: string): string {
       let text = "";
 
-      // Close the streaming table if header was emitted
-      if (headerEmitted && table) {
-        text += table.footer();
+      if (state.headerEmitted && state.table) {
+        text += state.table.footer();
       }
 
       if (hint) {
-        if (headerEmitted) {
-          // Logs were rendered — show hint as a muted footer
+        if (state.headerEmitted) {
           text += `${text ? "\n" : ""}${formatFooter(hint)}`;
         } else {
-          // No logs rendered — show hint as primary output (e.g., "No logs found.")
           text += `${hint}\n`;
         }
       }
@@ -605,9 +655,9 @@ function createLogRenderer(): HumanRenderer<LogOutput> {
  * with `data` and `hasMore`; follow mode yields one JSON object per line (JSONL).
  */
 function jsonTransformLogOutput(data: LogOutput, fields?: string[]): unknown {
-  if ("logs" in data && Array.isArray((data as LogListResult).logs)) {
+  if (isLogListResult(data)) {
     // Batch (single-fetch): return envelope with data + hasMore
-    const logList = data as LogListResult;
+    const logList = data;
     const items =
       fields && fields.length > 0
         ? logList.logs.map((log) => filterFields(log, fields))
