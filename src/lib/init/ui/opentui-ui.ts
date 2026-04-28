@@ -151,8 +151,19 @@ export async function createOpenTuiUI(): Promise<OpenTuiUI> {
   // this goes through the embedded-file path rather than a plain
   // `import("./opentui-app.js")`. The cast preserves typing against
   // the source module so `app.App` keeps its component signature.
+  //
+  // The `?bridge=1` query string is load-bearing. Without it Bun's
+  // module loader hits a cache entry created by the static
+  // `with { type: "file" }` import above (same absolute path) and
+  // returns a synthetic `{ __esModule, default: undefined }` shape
+  // instead of evaluating the `.tsx` as a module — `app.App`
+  // becomes `undefined` and React throws "Element type is invalid".
+  // The query string forces a distinct cache key while resolving to
+  // the same on-disk file, so the .tsx is parsed and exports
+  // populate normally. Confirmed on Bun 1.3.13 (dev) and inside
+  // Bun-compiled binaries (the `/$bunfs/…` runtime path).
   const app = (await import(
-    opentuiAppPath
+    `${opentuiAppPath}?bridge=1`
   )) as typeof import("./opentui-app.js");
 
   const renderer = await core.createCliRenderer({
