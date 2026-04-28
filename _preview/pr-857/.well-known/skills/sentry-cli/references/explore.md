@@ -20,7 +20,7 @@ Query aggregate event data (Explore)
 - `-d, --dataset <value> - Dataset to query (errors, spans, metrics, logs) - (default: "errors")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-s, --sort <value> - Sort field (prefix with - for desc, e.g., "-count()")`
-- `-n, --limit <value> - Number of rows (1-1000) - (default: "25")`
+- `-n, --limit <value> - Number of rows (1-100) - (default: "25")`
 - `-t, --period <value> - Time range: "7d", "2026-03-01..2026-04-01", ">=2026-03-01" - (default: "24h")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
@@ -48,22 +48,21 @@ sentry explore my-org/cli -F title -F "count()" -F "count_unique(user)" \
 sentry explore my-org/cli -F title -F "count()" \
   -q "error.type:TypeError" --period 1h
 
-# Transaction p50/p95 by endpoint
-sentry explore my-org/cli -F transaction \
-  -F "p50(transaction.duration)" -F "p95(transaction.duration)" \
-  --dataset transactions --period 1h
+# Span operation latency by route
+sentry explore my-org/cli -F span.op -F "p50(span.duration)" \
+  -F "p95(span.duration)" --dataset spans --period 1h
 
-# Slowest transactions
-sentry explore my-org/cli -F transaction -F "avg(transaction.duration)" \
-  --dataset transactions
-
-# Span operations by count
-sentry explore my-org/cli -F span.op -F "count()" \
-  --dataset spans --period 1h
-
-# Sort by count (sort is supported on spans dataset)
+# Top spans by count
 sentry explore my-org/cli -F span.op -F "count()" \
   --dataset spans --sort "-count()"
+
+# Custom metric aggregations
+sentry explore my-org/cli -F transaction -F "avg(measurements.fcp)" \
+  --dataset metrics --period 24h
+
+# Log severity counts in the last hour
+sentry explore my-org/cli -F severity -F "count()" \
+  --dataset logs --period 1h
 
 # Pipe to jq for filtering
 sentry explore my-org/cli -F title -F "count()" --json | jq '.data[:5]'
