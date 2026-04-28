@@ -895,6 +895,8 @@ describe("sentry cli setup", () => {
       // installCompletions handles permission errors gracefully and returns
       // null, so bestEffort never sees an error — no failure message appears
       expect(combined).not.toContain("Shell completions failed");
+      // No misleading fallback message for a supported shell (zsh)
+      expect(combined).not.toContain("not directly supported");
       // Setup still completes successfully
       expect(combined).not.toContain("error");
 
