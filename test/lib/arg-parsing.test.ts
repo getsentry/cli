@@ -693,6 +693,84 @@ describe("parseIssueArg", () => {
     });
   });
 
+  // Colon-separated issue args — users type PROJECT:SHORTID or PROJECT:NUMERICID
+  describe("colon-separated issue args (CLI-PH)", () => {
+    test("PROJECT:SUFFIX returns project-search", () => {
+      expect(parseIssueArg("CHATEX:W9")).toEqual({
+        type: "project-search",
+        projectSlug: "chatex",
+        suffix: "W9",
+      });
+    });
+
+    test("PROJECT:PROJECT-SUFFIX extracts suffix from last dash", () => {
+      expect(parseIssueArg("CHATEX:CHATEX-W9")).toEqual({
+        type: "project-search",
+        projectSlug: "chatex",
+        suffix: "W9",
+      });
+    });
+
+    test("PROJECT:PROJECT-SUFFIX with multi-hyphen project", () => {
+      expect(parseIssueArg("CHATEX:CHATEX-12A")).toEqual({
+        type: "project-search",
+        projectSlug: "chatex",
+        suffix: "12A",
+      });
+    });
+
+    test("MULTI-PROJECT:NUMERICID returns numeric", () => {
+      expect(parseIssueArg("MYAH-FRONTEND:115562020")).toEqual({
+        type: "numeric",
+        id: "115562020",
+      });
+    });
+
+    test("PROJECT:NUMERICID returns numeric", () => {
+      expect(parseIssueArg("CLI:123456789")).toEqual({
+        type: "numeric",
+        id: "123456789",
+      });
+    });
+
+    test("colon with empty project falls through to normal parsing", () => {
+      // ":W9" has empty project part — parseWithColon returns null,
+      // falls through to normal parsing (no slash, no dash → suffix-only)
+      expect(parseIssueArg(":W9")).toEqual({
+        type: "suffix-only",
+        suffix: ":W9",
+      });
+    });
+
+    test("colon with empty suffix falls through to normal parsing", () => {
+      // "CLI:" has empty id part — parseWithColon returns null,
+      // falls through to normal parsing (no slash, no dash → suffix-only)
+      expect(parseIssueArg("CLI:")).toEqual({
+        type: "suffix-only",
+        suffix: "CLI:",
+      });
+    });
+
+    test("multi-hyphen project with colon-separated short ID", () => {
+      expect(parseIssueArg("ARES-BACKEND:4P")).toEqual({
+        type: "project-search",
+        projectSlug: "ares-backend",
+        suffix: "4P",
+      });
+    });
+
+    test("org/project:suffix falls through to slash parsing", () => {
+      // When input has both slash and colon, slash parsing takes precedence
+      // because parseWithColon returns null for slash-containing project parts.
+      // "CLI:W9" has no dash, so parseAfterSlash returns explicit-org-suffix.
+      expect(parseIssueArg("sentry/CLI:W9")).toEqual({
+        type: "explicit-org-suffix",
+        org: "sentry",
+        suffix: "CLI:W9",
+      });
+    });
+  });
+
   describe("magic @ selectors", () => {
     test("@latest returns selector type", () => {
       expect(parseIssueArg("@latest")).toEqual({
