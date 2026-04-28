@@ -386,11 +386,21 @@ function MultiSelectPrompt({
   );
   const [highlighted, setHighlighted] = useState<number>(0);
 
+  // Checkbox-style markers — `[✔]` reads as "selected" almost
+  // universally, and the bracketed shape gives the eye a clear
+  // alignment column. The select renderable doesn't expose
+  // per-character coloring, so the green of the check has to come
+  // from the surrounding row's color — but that requires the row
+  // to be selected, which conflicts with the focus-highlight color.
+  // We settle for monochrome glyphs in the option label and rely
+  // on the (n/N selected) counter below for the at-a-glance state.
   const decoratedOptions = prompt.options.map((option) => ({
-    name: `${selected.has(option.value) ? "◉" : "◯"} ${option.label}`,
+    name: `${selected.has(option.value) ? "[✔]" : "[ ]"} ${option.label}`,
     description: option.hint ?? "",
     value: option.value,
   }));
+  const selectedCount = selected.size;
+  const totalCount = prompt.options.length;
 
   useKeyboard((event) => {
     if (event.name === "space") {
@@ -422,7 +432,12 @@ function MultiSelectPrompt({
   return (
     <box flexDirection="column" flexShrink={0} gap={1} marginTop={1}>
       <text fg={FOREGROUND}>{prompt.message}</text>
-      <text fg={MUTED}>space toggle · enter confirm · esc cancel</text>
+      <box flexDirection="row" flexShrink={0} gap={2}>
+        <text fg={MUTED}>space toggle · enter confirm · esc cancel</text>
+        <text fg={ACCENT}>
+          {selectedCount}/{totalCount} selected
+        </text>
+      </box>
       <select
         descriptionColor={MUTED}
         focused

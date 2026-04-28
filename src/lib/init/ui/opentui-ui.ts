@@ -32,9 +32,20 @@
  * at module-load time.
  */
 
+import chalk from "chalk";
 import { stripAnsi } from "../../formatters/plain-detect.js";
 import { WizardStore } from "./opentui-store.js";
 import { SENTRY_TIPS } from "./sentry-tips.js";
+
+// Brand palette mirrored from `opentui-app.tsx` — kept in sync so the
+// post-dispose stderr report (rendered via chalk, not OpenTUI) feels
+// like a continuation of the wizard's live screen rather than a
+// separate, plainer surface.
+const REPORT_MUTED = "#6E6C7E";
+const REPORT_SUCCESS = "#86EFAC";
+const REPORT_ERROR = "#F87171";
+const REPORT_WARN = "#FBBF24";
+
 import {
   CANCELLED,
   type Cancelled,
@@ -403,15 +414,26 @@ export class OpenTuiUI implements WizardUI {
    *
    * Failure wins over success if both are set (e.g. error mid-run
    * after a partial summary was emitted).
+   *
+   * The report is colored via chalk (not OpenTUI) — by the time it
+   * runs, `renderer.destroy()` has already restored the main screen
+   * and chalk's TTY detection picks up where it left off. Keeping
+   * the palette aligned with the live UI's brand colors makes the
+   * scrollback handoff feel intentional.
    */
   private buildPostDisposeReport(): string | undefined {
     if (this.failureMessage) {
-      return `\n✖  ${this.failureMessage}`;
+      const icon = chalk.hex(REPORT_ERROR)("✖");
+      return `\n${icon}  ${chalk.hex(REPORT_ERROR).bold(this.failureMessage)}`;
     }
     if (!this.outroMessage) {
       return;
     }
-    const lines: string[] = ["", `✔  ${this.outroMessage}`];
+    const successIcon = chalk.hex(REPORT_SUCCESS)("✔");
+    const lines: string[] = [
+      "",
+      `${successIcon}  ${chalk.bold(this.outroMessage)}`,
+    ];
     const summary = this.store.getSnapshot().summary;
     if (summary && summary.fields.length > 0) {
       lines.push("");
@@ -419,14 +441,15 @@ export class OpenTuiUI implements WizardUI {
         ...summary.fields.map((field) => field.label.length)
       );
       for (const field of summary.fields) {
-        lines.push(`   ${field.label.padEnd(labelWidth)}  ${field.value}`);
+        const label = chalk.hex(REPORT_MUTED)(field.label.padEnd(labelWidth));
+        lines.push(`   ${label}  ${field.value}`);
       }
     }
     if (summary?.changedFiles && summary.changedFiles.length > 0) {
       lines.push("");
-      lines.push("   Changed files");
+      lines.push(`   ${chalk.hex(REPORT_MUTED).bold("Changed files")}`);
       for (const file of summary.changedFiles) {
-        lines.push(`     ${changedFileGlyph(file.action)} ${file.path}`);
+        lines.push(`     ${changedFileGlyphColored(file.action)} ${file.path}`);
       }
     }
     return lines.join("\n");
@@ -472,12 +495,19 @@ export class OpenTuiUI implements WizardUI {
   }
 }
 
-function changedFileGlyph(action: string): string {
+/**
+ * Colored glyph for a changed-files row in the post-dispose report.
+ * The plain ASCII variant lives in `logging-ui.ts` for the
+ * non-interactive CI path. We keep both copies (vs. extracting a
+ * shared module) because each impl wants different rendering — chalk
+ * here, raw text there — and the helpers are tiny.
+ */
+function changedFileGlyphColored(action: string): string {
   if (action === "create") {
-    return "+";
+    return chalk.hex(REPORT_SUCCESS)("+");
   }
   if (action === "delete") {
-    return "−";
+    return chalk.hex(REPORT_ERROR)("−");
   }
-  return "~";
+  return chalk.hex(REPORT_WARN)("~");
 }

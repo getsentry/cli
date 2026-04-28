@@ -313,9 +313,15 @@ async function confirmExperimental(
   if (yes) {
     return true;
   }
+  // The wizard modifies files on disk. Keep the prompt short — the
+  // tone used to be "EXPERIMENTAL: …" in all caps, which felt
+  // alarming. The friendlier wording still telegraphs that the
+  // wizard will edit code, and gives an obvious abort path before
+  // anything happens.
   const proceed = await ui.confirm({
     message:
-      "EXPERIMENTAL: This feature is experimental and may modify your code. Continue?",
+      "Ready to set up Sentry? The wizard will edit files in this directory.",
+    initialValue: true,
   });
   return Boolean(abortIfCancelled(proceed));
 }
