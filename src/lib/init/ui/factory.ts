@@ -8,20 +8,22 @@
  *
  * Selection priority (highest first):
  *
- * 1. `SENTRY_INIT_TUI=0` — force `LoggingUI` (debug escape hatch).
- * 2. `--yes` flag set, OR stdin is not a TTY, OR stdout is not a TTY —
- *    force `LoggingUI` (CI / piped input).
- * 3. Running on the npm/Node distribution (not the Bun-compiled binary)
- *    — force `LoggingUI`. OpenTUI is Bun-only and the Node `dist/bin.cjs`
- *    has no native binding for it. (Note: `OpenTuiUI` itself doesn't land
- *    until PR3 — until then this branch falls through to `ClackUI` because
- *    clack works on both runtimes.)
- * 4. `SENTRY_INIT_TUI=1` — force the new TUI (once `OpenTuiUI` exists).
- * 5. Default — `ClackUI` (today). PR4 flips this to `OpenTuiUI` once the
- *    full-screen renderer is ready.
+ * 1. `SENTRY_INIT_TUI=0` or `forceLegacy` — force the legacy non-OpenTUI
+ *    path (`LoggingUI` for non-interactive, `ClackUI` for interactive).
+ *    Debug escape hatch for users who hit a TUI bug.
+ * 2. `--yes` flag set, OR stdin/stdout is not a TTY — force `LoggingUI`
+ *    regardless of the requested UI mode.
+ * 3. Running outside the Bun-compiled binary (i.e. on Node) — fall back
+ *    to `ClackUI` for interactive contexts. OpenTUI ships native Zig
+ *    bindings that the npm `dist/bin.cjs` distribution can't load.
+ * 4. `--tui` (or `SENTRY_INIT_TUI=1`) and on Bun binary → `OpenTuiUI`.
+ * 5. Default — `ClackUI` until PR 4 flips this to `OpenTuiUI`.
  *
- * `--no-tui` flag handling lives in `src/commands/init.ts` and maps to
- * `SENTRY_INIT_TUI=0` before this factory runs.
+ * This module exposes both a sync `getUI()` (returns whatever doesn't
+ * require an async load — `ClackUI`/`LoggingUI`) and an async
+ * `getUIAsync()` that can return `OpenTuiUI` after the lazy
+ * `@opentui/core` import resolves. Wizard call sites should use
+ * `getUIAsync()` when they want the new TUI.
  */
 
 import { ClackUI } from "./clack-ui.js";
@@ -41,6 +43,12 @@ export type UIFactoryOptions = {
    * the caller force `ClackUI`/`LoggingUI` without poking env vars.
    */
   forceLegacy?: boolean;
+  /**
+   * True when the user explicitly opted into the new TUI via `--tui`.
+   * Ignored on the npm/Node distribution (where OpenTUI's native
+   * bindings aren't available) and in non-interactive contexts.
+   */
+  preferTui?: boolean;
 };
 
 /**
@@ -49,7 +57,7 @@ export type UIFactoryOptions = {
  * distribution. The `Bun` global only exists in the Bun runtime.
  *
  * Exported for the test suite — production callers should go through
- * `getUI()`.
+ * `getUI()` / `getUIAsync()`.
  */
 export function isBunRuntime(): boolean {
   return (
@@ -87,24 +95,66 @@ function shouldUseLogging(opts: UIFactoryOptions): boolean {
 }
 
 /**
- * Construct the `WizardUI` instance for this run.
+ * Decide whether the caller wants the OpenTUI implementation.
+ *
+ * This is true only when the user explicitly opted in (`--tui` flag or
+ * `SENTRY_INIT_TUI=1`), the runtime is the Bun binary, and the
+ * `forceLegacy` escape hatch is not set.
+ */
+function shouldUseOpenTui(opts: UIFactoryOptions): boolean {
+  if (opts.forceLegacy) {
+    return false;
+  }
+  if (!isBunRuntime()) {
+    return false;
+  }
+  if (opts.preferTui === true) {
+    return true;
+  }
+  if (process.env.SENTRY_INIT_TUI === "1") {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Synchronous factory — never returns `OpenTuiUI` because that
+ * implementation requires an async `import("@opentui/core")`. Use
+ * `getUIAsync()` to opt into the OpenTUI path.
  *
  * Callers should treat the return value as an `AsyncDisposable` and use
  * `await using ui = getUI(...)` to guarantee teardown on every exit
- * path. Both current implementations have a no-op disposer, but
- * `OpenTuiUI` (PR3) will rely on the dispose protocol to restore the
- * main screen buffer and stop its render loop.
+ * path.
  */
 export function getUI(opts: UIFactoryOptions): WizardUI {
   if (shouldUseLogging(opts)) {
     return new LoggingUI();
   }
-  // PR1: interactive runs use ClackUI on both Bun and Node.
-  // PR3 will replace this branch with `new OpenTuiUI()` when on the
-  // Bun-compiled binary, falling back to ClackUI on Node — and PR4
-  // removes ClackUI altogether.
-  if (opts.forceLegacy) {
-    return new ClackUI();
+  return new ClackUI();
+}
+
+/**
+ * Async factory — picks `OpenTuiUI` when the user opted in and the
+ * runtime supports it, otherwise delegates to `getUI()`.
+ *
+ * The async form exists because instantiating `OpenTuiUI` requires a
+ * lazy `import("@opentui/core")` (the package isn't bundled into the
+ * npm/Node distribution and would crash if statically imported there).
+ */
+export async function getUIAsync(opts: UIFactoryOptions): Promise<WizardUI> {
+  if (shouldUseLogging(opts)) {
+    return new LoggingUI();
+  }
+  if (shouldUseOpenTui(opts)) {
+    try {
+      const { createOpenTuiUI } = await import("./opentui-ui.js");
+      return await createOpenTuiUI();
+    } catch {
+      // Fall through to ClackUI so a missing/broken native binding
+      // doesn't take down the wizard. The caller can opt into a
+      // hard-fail by checking `--tui` themselves and calling
+      // `createOpenTuiUI()` directly.
+    }
   }
   return new ClackUI();
 }

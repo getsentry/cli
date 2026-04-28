@@ -50,7 +50,7 @@ import type {
   WizardOptions,
   WorkflowRunResult,
 } from "./types.js";
-import { getUI } from "./ui/factory.js";
+import { getUIAsync } from "./ui/factory.js";
 import type { SpinnerHandle, WizardUI } from "./ui/types.js";
 import {
   precomputeDirListing,
@@ -396,12 +396,17 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
           },
         };
 
-  const { directory, yes, dryRun, features } = initialOptions;
+  const { directory, yes, dryRun, features, tui, forceLegacyUi } =
+    initialOptions;
 
   // Construct the UI once for the entire run; tear down on every exit
-  // path via `await using`. `getUI()` picks the right implementation
-  // based on TTY state and `--yes`.
-  await using ui = getUI({ yes });
+  // path via `await using`. `getUIAsync()` picks the right
+  // implementation based on TTY state, `--yes`, and the `--tui` opt-in.
+  await using ui = await getUIAsync({
+    yes,
+    preferTui: tui,
+    forceLegacy: forceLegacyUi,
+  });
 
   if (!(await preamble(directory, yes, dryRun, ui))) {
     return;

@@ -139,7 +139,7 @@ beforeEach(() => {
     ...ui,
     spinner: () => spinnerMock,
   };
-  getUISpy = spyOn(uiFactory, "getUI").mockReturnValue(wrapped);
+  getUISpy = spyOn(uiFactory, "getUIAsync").mockResolvedValue(wrapped);
 
   formatBannerSpy = spyOn(banner, "formatBanner").mockReturnValue("BANNER");
   formatResultSpy = spyOn(fmt, "formatResult").mockImplementation(noop);
