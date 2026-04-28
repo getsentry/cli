@@ -62,26 +62,32 @@ const DEFAULT_PERIOD = "24h";
 /** Command key for pagination cursor storage */
 const PAGINATION_KEY = "explore";
 
-/** Valid dataset values and their API-level names */
+/**
+ * Dataset aliases: user-facing name → API-level dataset name.
+ *
+ * All entries are accepted as `--dataset` values. `VALID_DATASETS` controls
+ * which appear in `--help` and validation error messages.
+ */
 const DATASET_ALIASES: Record<string, string> = {
   errors: "errors",
   error: "errors",
-  transactions: "transactions",
-  transaction: "transactions",
   spans: "spans",
   span: "spans",
   metrics: "metricsEnhanced",
+  logs: "logs",
+  log: "logs",
+  // Deprecated but still functional — hidden from help
+  transactions: "transactions",
+  transaction: "transactions",
   discover: "discover",
 };
 
-/** Canonical dataset names for display */
-const VALID_DATASETS = [
-  "errors",
-  "transactions",
-  "spans",
-  "metrics",
-  "discover",
-];
+/**
+ * User-facing dataset names shown in `--help` and validation errors.
+ * Deprecated datasets (transactions, discover) are omitted from the display
+ * list but still work as `--dataset` values via `DATASET_ALIASES`.
+ */
+const VALID_DATASETS = ["errors", "spans", "metrics", "logs"];
 
 /**
  * Reverse map from API-level dataset name → canonical user-facing name.
@@ -440,11 +446,10 @@ export const exploreCommand = buildListCommand("explore", {
       "aggregates (count(), count_unique(user), p50(transaction.duration)),\n" +
       "and equations. Results are returned as a table.\n\n" +
       "Datasets:\n" +
-      "  errors         Error events (default)\n" +
-      "  transactions   Transaction events\n" +
-      "  spans          Span data\n" +
-      "  metrics        Custom metrics (metricsEnhanced)\n" +
-      "  discover       Legacy discover dataset\n\n" +
+      "  errors   Error events (default)\n" +
+      "  spans    Span data\n" +
+      "  metrics  Custom metrics\n" +
+      "  logs     Log entries\n\n" +
       "Targets:\n" +
       "  <org>/<project>  Filter by project (auto-adds project:<slug> to query)\n" +
       "  <org>/           All projects in org\n" +
