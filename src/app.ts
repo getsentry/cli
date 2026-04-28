@@ -13,6 +13,7 @@ import { dashboardRoute } from "./commands/dashboard/index.js";
 import { listCommand as dashboardListCommand } from "./commands/dashboard/list.js";
 import { eventRoute } from "./commands/event/index.js";
 import { listCommand as eventListCommand } from "./commands/event/list.js";
+import { exploreCommand } from "./commands/explore.js";
 import { helpCommand } from "./commands/help.js";
 import { initCommand } from "./commands/init.js";
 import { issueRoute } from "./commands/issue/index.js";
@@ -90,6 +91,7 @@ export const routes = buildRouteMap({
     issue: issueRoute,
     event: eventRoute,
     events: eventListCommand,
+    explore: exploreCommand,
     log: logRoute,
     sourcemap: sourcemapRoute,
     sourcemaps: sourcemapRoute,

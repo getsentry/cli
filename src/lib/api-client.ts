@@ -26,6 +26,7 @@ export {
   queryAllWidgets,
   updateDashboard,
 } from "./api/dashboards.js";
+export { queryEvents } from "./api/discover.js";
 export {
   findEventAcrossOrgs,
   getEvent,
