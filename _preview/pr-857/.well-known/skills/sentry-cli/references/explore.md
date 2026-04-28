@@ -17,11 +17,11 @@ Query aggregate event data (Explore)
 
 **Flags:**
 - `-F, --field <value>... - API field or aggregate (repeatable). E.g., title, "count()", "p50(transaction.duration)"`
-- `-d, --dataset <value> - Dataset to query (errors, transactions, spans, discover) - (default: "errors")`
+- `-d, --dataset <value> - Dataset to query (errors, transactions, spans, metrics, discover) - (default: "errors")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-s, --sort <value> - Sort field (prefix with - for desc, e.g., "-count()")`
 - `-n, --limit <value> - Number of rows (1-1000) - (default: "25")`
-- `-t, --period <value> - Time range: "7d", "2026-03-01..2026-04-01", ">=2026-03-01" - (default: "7d")`
+- `-t, --period <value> - Time range: "7d", "2026-03-01..2026-04-01", ">=2026-03-01" - (default: "24h")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
