@@ -29,7 +29,7 @@ import { getInstallInfo, setInstallInfo } from "./db/install-info.js";
 import type { ReleaseChannel } from "./db/release-channel.js";
 import { attemptDeltaUpgrade, type DeltaResult } from "./delta-upgrade.js";
 import { AbortError, UpgradeError } from "./errors.js";
-import { formatCompactWithUnit } from "./formatters/numbers.js";
+import { formatBytes } from "./formatters/numbers.js";
 import {
   downloadNightlyBlob,
   fetchManifest,
@@ -805,9 +805,7 @@ export async function downloadBinaryToTemp(
     // exponential backoff so a transient filesystem-visibility race
     // self-heals without asking the user to rerun.
     const verifiedSize = await waitForBinaryVisible(tempPath);
-    log.debug(
-      `Binary verified (${formatCompactWithUnit(verifiedSize, "byte")})`
-    );
+    log.debug(`Binary verified (${formatBytes(verifiedSize)})`);
 
     // Clear consumed patch cache — patches for the old version are useless
     // after the binary has been updated (whether via delta or full download).

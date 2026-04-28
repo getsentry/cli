@@ -32,7 +32,7 @@ import {
 import { getVersionCheckInfo } from "../../lib/db/version-check.js";
 import { UpgradeError } from "../../lib/errors.js";
 import { formatUpgradeResult } from "../../lib/formatters/human.js";
-import { formatCompactWithUnit } from "../../lib/formatters/numbers.js";
+import { formatBytes } from "../../lib/formatters/numbers.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import { withProgress } from "../../lib/polling.js";
@@ -543,7 +543,7 @@ async function executeStandardUpgrade(opts: {
 
   if (downloadResult?.patchBytes) {
     log.info(
-      `Applied delta patch (${formatCompactWithUnit(downloadResult.patchBytes, "byte")} downloaded)`
+      `Applied delta patch (${formatBytes(downloadResult.patchBytes)} downloaded)`
     );
   }
 
@@ -614,7 +614,7 @@ async function migrateToStandaloneForNightly(
 
   if (downloadResult?.patchBytes) {
     log.info(
-      `Applied delta patch (${formatCompactWithUnit(downloadResult.patchBytes, "byte")} downloaded)`
+      `Applied delta patch (${formatBytes(downloadResult.patchBytes)} downloaded)`
     );
   }
 
