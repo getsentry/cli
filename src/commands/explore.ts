@@ -249,10 +249,16 @@ function jsonTransformExplore(data: ExploreData, fields?: string[]): unknown {
 // Pagination hints
 // ---------------------------------------------------------------------------
 
+/** Default limit value matching the flag default for hint comparison */
+const DEFAULT_LIMIT = 25;
+
 /** Append active non-default flags to a base command string */
 function appendFlagHints(
   base: string,
-  flags: Pick<ExploreFlags, "dataset" | "sort" | "query" | "period" | "field">
+  flags: Pick<
+    ExploreFlags,
+    "dataset" | "sort" | "query" | "period" | "field" | "limit"
+  >
 ): string {
   const parts: string[] = [];
   if (flags.dataset !== DEFAULT_DATASET) {
@@ -270,6 +276,9 @@ function appendFlagHints(
     for (const f of fieldList) {
       parts.push(`-F "${f}"`);
     }
+  }
+  if (flags.limit !== DEFAULT_LIMIT) {
+    parts.push(`--limit ${flags.limit}`);
   }
   appendPeriodHint(parts, flags.period, DEFAULT_PERIOD);
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
