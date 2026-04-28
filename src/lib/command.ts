@@ -37,6 +37,7 @@ import {
   numberParser as stricliNumberParser,
 } from "@stricli/core";
 import type { Writer } from "../types/index.js";
+import { appendCacheHint } from "./cache-hint.js";
 import { getAuthConfig } from "./db/auth.js";
 import { getEnv } from "./env.js";
 import { AuthError, CliError, OutputError } from "./errors.js";
@@ -768,9 +769,14 @@ export function buildCommand<
         }
       );
 
-      // Render phase: output finalization
+      // Render phase: output finalization.
+      // Append cache-age hint automatically so every command gets
+      // "cached · 3m ago · use -f to refresh" when data was cached.
+      // Skip bare `return;` paths (e.g. `--web` which opens a browser
+      // without yielding) — no rendered output should mean no footer.
+      const finalHint = returned ? appendCacheHint(returned.hint) : undefined;
       await withTracing("render", "cli.command.render", () => {
-        writeFinalization(stdout, returned?.hint, cleanFlags.json, renderer);
+        writeFinalization(stdout, finalHint, cleanFlags.json, renderer);
       });
     } catch (err) {
       // Finalize before error handling to close streaming state

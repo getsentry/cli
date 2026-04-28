@@ -21,6 +21,7 @@ import { getAuthToken, refreshToken } from "./db/auth.js";
 import { HostScopeError, TimeoutError } from "./errors.js";
 import { logger } from "./logger.js";
 import {
+  clearLastCacheHitAge,
   getCachedResponse,
   invalidateCachedResponsesMatching,
   storeCachedResponse,
@@ -548,6 +549,10 @@ function createAuthenticatedFetch(): (
     input: Request | string | URL,
     init?: RequestInit
   ): Promise<Response> {
+    // Reset cache-hit age so it reflects only this request's outcome.
+    // Commands read it after their primary API call to show cache-age hints.
+    clearLastCacheHitAge();
+
     // Once-per-process hint when env-var auth token is shadowed by a
     // stored OAuth login. Runs here (rather than at command entry) so
     // the hint only fires for commands that actually exercise auth —
