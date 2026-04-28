@@ -154,7 +154,6 @@ function parseDataset(value: string): string {
   return resolved;
 }
 
-/** Parse --limit flag with range validation */
 /**
  * Parse --limit flag. Capped at `API_MAX_PER_PAGE` (100) since the Events
  * API silently caps `per_page` server-side and `queryEvents` does not yet
