@@ -293,6 +293,19 @@ await Bun.write("./dist/index.d.cts", TYPE_DECLARATIONS);
 console.log("  -> dist/bin.cjs (CLI wrapper)");
 console.log("  -> dist/index.d.cts (type declarations)");
 
+// Clean up the `opentui-app.tsx` sidecar that the text-import-plugin
+// drops into `dist/` when it sees the `with { type: "file" }` import
+// in `src/lib/init/ui/opentui-ui.ts`. The npm distribution doesn't
+// run the OpenTuiUI factory at all (it's gated to the Bun binary),
+// so the sidecar is unused — and it's not in `package.json#files`
+// either, so it wouldn't ship even without this cleanup. Removing
+// it just keeps the local `dist/` directory tidy.
+try {
+  await unlink("./dist/opentui-app.tsx");
+} catch {
+  // Sidecar may not exist (e.g. plugin path not exercised) — fine.
+}
+
 // Calculate bundle size (only the main bundle, not source maps)
 const bundleOutput = result.metafile?.outputs["dist/index.cjs"];
 const bundleSize = bundleOutput?.bytes ?? 0;

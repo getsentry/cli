@@ -28,7 +28,7 @@
  *      Bun's runtime (not bundler), which doesn't have the bug.
  */
 
-import { copyFileSync, readFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, dirname, resolve as resolvePath } from "node:path";
 import type { Plugin } from "esbuild";
 
@@ -53,6 +53,15 @@ export const textImportPlugin: Plugin = {
         // it up from the new location. The copy is needed because
         // Bun.compile resolves imports relative to the bundle file's
         // directory at compile time, not the original source.
+        //
+        // The npm bundle path (`script/bundle.ts`) also reaches this
+        // branch — `opentui-ui.ts` has the import at module top —
+        // but `@opentui/*` and `react` are externalized there, so
+        // the OpenTuiUI factory never runs and the embedded copy is
+        // unused at runtime. We still produce it because esbuild
+        // resolves all reachable imports regardless of whether they
+        // execute. The `mkdirSync` below guards against the
+        // bundle's `outdir` not yet existing when the plugin fires.
         const sourcePath = resolvePath(args.resolveDir, args.path);
         const outdir = build.initialOptions.outdir
           ? resolvePath(build.initialOptions.outdir)
@@ -60,6 +69,7 @@ export const textImportPlugin: Plugin = {
         const filename = basename(sourcePath);
         const copyPath = resolvePath(outdir, filename);
         try {
+          mkdirSync(outdir, { recursive: true });
           copyFileSync(sourcePath, copyPath);
         } catch (err) {
           // Surface the failure so the build fails visibly rather
