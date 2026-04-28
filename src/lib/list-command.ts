@@ -264,6 +264,39 @@ export function paginationHint(opts: {
 }
 
 /**
+ * Append `-q "<query>"` to a hint-flag parts array when the user passed `--query`.
+ *
+ * Standard helper for pagination-hint builders that need to preserve the
+ * active search filter. Quotes are added unconditionally to handle queries
+ * containing spaces.
+ */
+export function appendQueryHint(
+  parts: string[],
+  query: string | undefined
+): void {
+  if (query) {
+    parts.push(`-q "${query}"`);
+  }
+}
+
+/**
+ * Append `--sort <value>` to a hint-flag parts array when the sort differs
+ * from the command's default.
+ *
+ * Stringly-typed to support both raw API sort strings (e.g. `"-count()"`)
+ * and command-specific enum values (e.g. `"date" | "duration"`).
+ */
+export function appendSortHint(
+  parts: string[],
+  sort: string | undefined,
+  defaultSort?: string
+): void {
+  if (sort && sort !== defaultSort) {
+    parts.push(`--sort ${sort}`);
+  }
+}
+
+/**
  * Build the `--limit` / `-n` flag for a list command.
  *
  * @param entityPlural - Plural entity name used in the brief (e.g. "teams")

@@ -21,11 +21,12 @@ import {
 } from "../lib/db/pagination.js";
 import { ContextError, ValidationError } from "../lib/errors.js";
 import { filterFields } from "../lib/formatters/json.js";
-import { escapeMarkdownCell } from "../lib/formatters/markdown.js";
-import { appendUnitSuffix, formatNumber } from "../lib/formatters/numbers.js";
+import { buildMetaColumns } from "../lib/formatters/meta-table.js";
 import { CommandOutput } from "../lib/formatters/output.js";
-import { type Column, formatTable } from "../lib/formatters/table.js";
+import { formatTable } from "../lib/formatters/table.js";
 import {
+  appendQueryHint,
+  appendSortHint,
   buildListCommand,
   LIST_MAX_LIMIT,
   PERIOD_ALIASES,
@@ -86,25 +87,18 @@ const DATASET_ALIASES: Record<string, string> = {
  * User-facing dataset names shown in `--help` and validation errors.
  * Deprecated datasets (transactions, discover) are omitted from the display
  * list but still work as `--dataset` values via `DATASET_ALIASES`.
+ *
+ * Set preserves insertion order for the join-based help/error rendering.
  */
-const VALID_DATASETS = ["errors", "spans", "metrics", "logs"];
+const VALID_DATASETS = new Set(["errors", "spans", "metrics", "logs"]);
 
 /**
  * Reverse map from API-level dataset name → canonical user-facing name.
  * Used by pagination hints so they emit `--dataset metrics` not `--dataset metricsEnhanced`.
  */
-const API_TO_USER_DATASET: Record<string, string> = Object.fromEntries(
-  VALID_DATASETS.map((name) => [DATASET_ALIASES[name] ?? name, name])
+const API_TO_USER_DATASET = new Map(
+  Array.from(VALID_DATASETS, (name) => [DATASET_ALIASES[name] ?? name, name])
 );
-
-/** Sentry field types that should be right-aligned and formatted as numbers */
-const NUMERIC_FIELD_TYPES = new Set([
-  "integer",
-  "number",
-  "duration",
-  "percentage",
-  "size",
-]);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -154,7 +148,7 @@ function parseDataset(value: string): string {
   const resolved = DATASET_ALIASES[lower];
   if (!resolved) {
     throw new ValidationError(
-      `Invalid dataset "${value}". Must be one of: ${VALID_DATASETS.join(", ")}`,
+      `Invalid dataset "${value}". Must be one of: ${[...VALID_DATASETS].join(", ")}`,
       "dataset"
     );
   }
@@ -164,60 +158,6 @@ function parseDataset(value: string): string {
 /** Parse --limit flag with range validation */
 function parseLimit(value: string): number {
   return validateLimit(value, 1, LIST_MAX_LIMIT);
-}
-
-// ---------------------------------------------------------------------------
-// Formatting helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Format a cell value based on its type metadata.
- *
- * Uses type hints from the API response `meta.fields` to apply appropriate
- * formatting: numbers with grouping, durations with units, etc.
- */
-function formatCellValue(
-  value: unknown,
-  fieldType?: string,
-  unit?: string | null
-): string {
-  if (value === null || value === undefined) {
-    return "—";
-  }
-  if (typeof value === "number") {
-    if (fieldType === "duration" || fieldType === "size") {
-      return appendUnitSuffix(formatNumber(value), unit);
-    }
-    if (fieldType === "percentage") {
-      return `${formatNumber(value * 100)}%`;
-    }
-    return formatNumber(value);
-  }
-  return escapeMarkdownCell(String(value));
-}
-
-/**
- * Build dynamic table columns from the API response metadata.
- *
- * Each field in the response becomes a column. Numeric fields are right-aligned.
- */
-function buildColumns(
-  fieldNames: string[],
-  fieldTypes?: Record<string, string>,
-  fieldUnits?: Record<string, string | null>
-): Column<Record<string, unknown>>[] {
-  return fieldNames.map((name) => {
-    const fieldType = fieldTypes?.[name];
-    const unit = fieldUnits?.[name];
-    const isNumeric = fieldType ? NUMERIC_FIELD_TYPES.has(fieldType) : false;
-
-    return {
-      header: name.toUpperCase(),
-      value: (row) => formatCellValue(row[name], fieldType, unit),
-      align: isNumeric ? ("right" as const) : ("left" as const),
-      truncate: !isNumeric,
-    };
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -265,10 +205,14 @@ function formatExploreHuman(data: ExploreData): string {
   }
 
   const fieldNames = orderFieldNames(data.requestedFields, data);
-  const columns = buildColumns(fieldNames, data.meta?.fields, data.meta?.units);
+  const columns = buildMetaColumns(
+    fieldNames,
+    data.meta?.fields,
+    data.meta?.units
+  );
 
   const scope = data.project ? `${data.org}/${data.project}` : data.org;
-  const displayDataset = API_TO_USER_DATASET[data.dataset] ?? data.dataset;
+  const displayDataset = API_TO_USER_DATASET.get(data.dataset) ?? data.dataset;
   const header = `Querying ${displayDataset} in ${scope}:\n\n`;
   return header + formatTable(data.data, columns);
 }
@@ -309,15 +253,12 @@ function appendFlagHints(
   const parts: string[] = [];
   if (flags.dataset !== DEFAULT_DATASET) {
     // Emit user-facing name, not API-level name (e.g. "metrics" not "metricsEnhanced")
-    const displayDataset = API_TO_USER_DATASET[flags.dataset] ?? flags.dataset;
+    const displayDataset =
+      API_TO_USER_DATASET.get(flags.dataset) ?? flags.dataset;
     parts.push(`--dataset ${displayDataset}`);
   }
-  if (flags.sort) {
-    parts.push(`--sort ${flags.sort}`);
-  }
-  if (flags.query) {
-    parts.push(`-q "${flags.query}"`);
-  }
+  appendSortHint(parts, flags.sort);
+  appendQueryHint(parts, flags.query);
   // Include --field flags when non-default
   const fieldList = flags.field ?? [];
   const currentFieldStr = fieldList.join(",");
@@ -349,7 +290,7 @@ type ExploreTarget = {
 };
 
 /** Usage hint shown when target resolution fails */
-const USAGE_HINT = "sentry explore [<org>/[<project>]]";
+const USAGE_HINT = "sentry explore <target>";
 
 /**
  * Resolve the explore target to an org slug and optional project filter.
@@ -492,7 +433,7 @@ export const exploreCommand = buildListCommand("explore", {
       dataset: {
         kind: "parsed",
         parse: parseDataset,
-        brief: `Dataset to query (${VALID_DATASETS.join(", ")})`,
+        brief: `Dataset to query (${[...VALID_DATASETS].join(", ")})`,
         default: DEFAULT_DATASET,
       },
       query: {
