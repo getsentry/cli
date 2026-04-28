@@ -30,7 +30,7 @@
  * the imperative side decoupled from React's lifecycle.
  */
 
-import { useKeyboard } from "@opentui/react";
+import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useState, useSyncExternalStore } from "react";
 import type {
   ActivePrompt,
@@ -73,8 +73,32 @@ export type AppProps = {
 };
 
 /**
+ * Width of the sidebar's outer box, including its border + padding.
+ * Used both as the renderable's `width` prop and as part of the
+ * minimum-terminal-width threshold below which we hide the sidebar.
+ */
+const SIDEBAR_WIDTH = 36;
+
+/**
+ * Minimum terminal columns required to show the sidebar alongside the
+ * main column. Below this we drop the sidebar entirely so the banner,
+ * log lines, and prompts get the full row width.
+ *
+ * Reasoning: the banner is ~55 chars wide, the outer wizard chrome
+ * eats 2 cols of border + 2 cols of padding (4 total), the inner gap
+ * between columns is 2, plus the sidebar's own 36 cols → 55 + 4 + 2 +
+ * 36 = 97. We round up slightly to leave room for prompts and longer
+ * log lines without wrapping ugly.
+ */
+const SIDEBAR_BREAKPOINT = 100;
+
+/**
  * Root component. Subscribes to the store once at the top, then drills
  * the snapshot fields into individual presentational components.
+ *
+ * The sidebar auto-hides on narrow terminals (see `SIDEBAR_BREAKPOINT`)
+ * — `useTerminalDimensions` re-renders on resize, so dragging a
+ * window between widths flips the layout live.
  */
 export function App({ store }: AppProps): React.ReactNode {
   const snapshot = useSyncExternalStore(
@@ -82,6 +106,8 @@ export function App({ store }: AppProps): React.ReactNode {
     store.getSnapshot,
     store.getSnapshot
   );
+  const { width } = useTerminalDimensions();
+  const showSidebar = width >= SIDEBAR_BREAKPOINT;
 
   return (
     <box
@@ -93,7 +119,7 @@ export function App({ store }: AppProps): React.ReactNode {
       title=" Sentry init "
       titleAlignment="left"
     >
-      <box flexDirection="row" flexGrow={1} gap={2}>
+      <box flexDirection="row" flexGrow={1} gap={showSidebar ? 2 : 0}>
         <MainColumn
           bannerRows={snapshot.bannerRows}
           intro={snapshot.intro}
@@ -102,7 +128,7 @@ export function App({ store }: AppProps): React.ReactNode {
           spinner={snapshot.spinner}
           summary={snapshot.summary}
         />
-        <Sidebar tipIndex={snapshot.tipIndex} />
+        {showSidebar ? <Sidebar tipIndex={snapshot.tipIndex} /> : null}
       </box>
     </box>
   );
@@ -436,7 +462,7 @@ function Sidebar({ tipIndex }: { tipIndex: number }): React.ReactNode {
       padding={1}
       title=" Did you know? "
       titleAlignment="left"
-      width={36}
+      width={SIDEBAR_WIDTH}
     >
       <text fg={ACCENT}>{tip.title}</text>
       <text fg={FOREGROUND}>{tip.body}</text>
