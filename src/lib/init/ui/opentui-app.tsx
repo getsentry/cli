@@ -335,6 +335,16 @@ function SelectPrompt({
 }: {
   prompt: Extract<ActivePrompt, { kind: "select" }>;
 }): React.ReactNode {
+  // OpenTUI's SelectRenderable allocates 2 rows per option when
+  // `showDescription` is on (1 for the label + 1 for the hint),
+  // 1 row otherwise. Allocating the wrong height clips visible
+  // rows behind the scroll. We size based on the actual line cost
+  // and cap at the screen-friendly maxima the wizard expects
+  // (8 fully-shown items for select, 10 for multiselect).
+  const hasDescriptions = prompt.options.some((option) => option.hint);
+  const linesPerItem = hasDescriptions ? 2 : 1;
+  const maxVisibleItems = 8;
+  const visibleItems = Math.min(prompt.options.length, maxVisibleItems);
   return (
     <box flexDirection="column" flexShrink={0} gap={1} marginTop={1}>
       <text fg={FOREGROUND}>{prompt.message}</text>
@@ -342,7 +352,7 @@ function SelectPrompt({
         descriptionColor={MUTED}
         focused
         focusedTextColor={FOREGROUND}
-        height={Math.min(prompt.options.length + 1, 8)}
+        height={visibleItems * linesPerItem}
         onSelect={(_index, option) => {
           if (option) {
             prompt.resolve(String(option.value));
@@ -356,8 +366,8 @@ function SelectPrompt({
         selectedBackgroundColor={ACCENT}
         selectedIndex={prompt.initialIndex}
         selectedTextColor="#FFFFFF"
-        showDescription
-        showScrollIndicator={prompt.options.length > 8}
+        showDescription={hasDescriptions}
+        showScrollIndicator={prompt.options.length > maxVisibleItems}
         textColor={FOREGROUND}
       />
     </box>
@@ -429,6 +439,15 @@ function MultiSelectPrompt({
     }
   });
 
+  // Same height arithmetic as SelectPrompt — see comment there. The
+  // multiselect cap is slightly higher (10 vs 8 visible items)
+  // because feature lists tend to be longer than disambiguation
+  // selects.
+  const hasDescriptions = prompt.options.some((option) => option.hint);
+  const linesPerItem = hasDescriptions ? 2 : 1;
+  const maxVisibleItems = 10;
+  const visibleItems = Math.min(prompt.options.length, maxVisibleItems);
+
   return (
     <box flexDirection="column" flexShrink={0} gap={1} marginTop={1}>
       <text fg={FOREGROUND}>{prompt.message}</text>
@@ -442,13 +461,13 @@ function MultiSelectPrompt({
         descriptionColor={MUTED}
         focused
         focusedTextColor={FOREGROUND}
-        height={Math.min(prompt.options.length + 2, 10)}
+        height={visibleItems * linesPerItem}
         onChange={(index) => setHighlighted(index)}
         options={decoratedOptions}
         selectedBackgroundColor={ACCENT}
         selectedTextColor="#FFFFFF"
-        showDescription
-        showScrollIndicator={prompt.options.length > 10}
+        showDescription={hasDescriptions}
+        showScrollIndicator={prompt.options.length > maxVisibleItems}
         textColor={FOREGROUND}
       />
     </box>

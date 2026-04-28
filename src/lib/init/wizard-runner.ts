@@ -313,17 +313,32 @@ async function confirmExperimental(
   if (yes) {
     return true;
   }
-  // The wizard modifies files on disk. Keep the prompt short — the
-  // tone used to be "EXPERIMENTAL: …" in all caps, which felt
-  // alarming. The friendlier wording still telegraphs that the
-  // wizard will edit code, and gives an obvious abort path before
-  // anything happens.
-  const proceed = await ui.confirm({
+  // The wizard modifies files on disk. We use `select` rather than
+  // `confirm` so the cancel path can carry a muted, explicit hint
+  // ("exits without changes") — the previous binary yes/no felt
+  // ambiguous about what "no" did. The earlier wording used an
+  // all-caps "EXPERIMENTAL:" prefix which read like a warning the
+  // user had to dismiss; this version frames the question as a
+  // sanity check before the wizard does work.
+  const choice = await ui.select<"continue" | "exit">({
     message:
-      "Ready to set up Sentry? The wizard will edit files in this directory.",
-    initialValue: true,
+      "This is experimental and will modify files in this directory. Continue?",
+    options: [
+      {
+        value: "continue",
+        label: "Yes, continue",
+        hint: "wizard will detect your stack and apply changes",
+      },
+      {
+        value: "exit",
+        label: "No, exit",
+        hint: "exits without making any changes",
+      },
+    ],
+    initialValue: "continue",
   });
-  return Boolean(abortIfCancelled(proceed));
+  const resolved = abortIfCancelled(choice);
+  return resolved === "continue";
 }
 
 async function preamble(
