@@ -1,0 +1,169 @@
+/**
+ * WizardUI Abstraction Layer
+ *
+ * Defines the I/O surface used by the init wizard. Concrete implementations
+ * provide the actual rendering:
+ *
+ * - `ClackUI`     — current `@clack/prompts`-based interactive UI (default
+ *                   while the OpenTUI port is in progress).
+ * - `OpenTuiUI`   — alternate-buffer full-screen UI built on `@opentui/core`
+ *                   (Bun-binary only; lands in PR3).
+ * - `LoggingUI`   — plain stdout/stderr writes for CI, `--yes`, and non-TTY
+ *                   environments. Prompts throw — non-interactive callers
+ *                   must supply defaults.
+ *
+ * Goals:
+ *   1. Mirror clack's API shape so call sites need minimal changes during
+ *      the migration.
+ *   2. Use a shared cancellation symbol (`CANCELLED`) so all implementations
+ *      can signal cancellation uniformly. Callers wrap prompt results with
+ *      `abortIfCancelled()` (in `clack-utils.ts`) which re-throws as
+ *      `WizardCancelledError`.
+ *   3. Stay lean — adopt PostHog wizard's `WizardUI` shape for visual
+ *      look-and-feel only, without the screen router / nanostore / health
+ *      check overlays.
+ */
+
+/** Sentinel symbol returned by prompt methods when the user cancels. */
+export const CANCELLED: unique symbol = Symbol.for(
+  "sentry-cli:wizard-ui:cancelled"
+);
+export type Cancelled = typeof CANCELLED;
+
+/** Type guard for the shared cancellation sentinel. */
+export function isCancelled(value: unknown): value is Cancelled {
+  return value === CANCELLED;
+}
+
+/**
+ * Spinner exit status.
+ *
+ * - `0` — success (rendered as a green diamond / "Done")
+ * - `1` — error   (rendered as a red square)
+ * - `2` — warning (rendered as a yellow triangle)
+ */
+export type SpinnerExitCode = 0 | 1 | 2;
+
+/**
+ * Multi-line spinner handle.
+ *
+ * Mirrors the existing `WizardSpinner` shape in `src/lib/init/spinner.ts`
+ * so the long-running suspend/resume loop in `wizard-runner.ts` can swap
+ * implementations without changing its control flow.
+ */
+export type SpinnerHandle = {
+  /** Begin spinning with an optional initial message. */
+  start(message?: string): void;
+  /** Update the message in place while spinning. */
+  message(message?: string): void;
+  /**
+   * Stop spinning and finalize the block with `message`. The exit `code`
+   * controls the icon (0 ok, 1 error, 2 warn).
+   */
+  stop(message?: string, code?: SpinnerExitCode): void;
+};
+
+/**
+ * Inline log API. Each method renders a single line (or markdown-rendered
+ * block, in the case of `message`). In `LoggingUI` these go straight to
+ * stdout/stderr; in TUI implementations they accumulate in a scrollable
+ * pane.
+ */
+export type WizardLog = {
+  /** Informational — neutral icon. */
+  info(message: string): void;
+  /** Warning — yellow icon. */
+  warn(message: string): void;
+  /** Error — red icon. */
+  error(message: string): void;
+  /** Success — green icon. */
+  success(message: string): void;
+  /** Plain markdown-rendered block (no icon). */
+  message(message: string): void;
+};
+
+/** Single option in a `select` / `multiselect` prompt. */
+export type SelectOption<T extends string> = {
+  value: T;
+  label: string;
+  hint?: string;
+};
+
+/** Args for `select`. */
+export type SelectOptions<T extends string> = {
+  message: string;
+  options: SelectOption<T>[];
+  initialValue?: T;
+};
+
+/** Args for `multiselect`. */
+export type MultiSelectOptions<T extends string> = {
+  message: string;
+  options: SelectOption<T>[];
+  initialValues?: T[];
+  required?: boolean;
+};
+
+/** Args for `confirm`. */
+export type ConfirmOptions = {
+  message: string;
+  initialValue?: boolean;
+};
+
+/**
+ * The full I/O surface used by the init wizard.
+ *
+ * Implementations MUST be safe to dispose via the async dispose protocol —
+ * `using ui = getUI(...)` semantics in callers tear down renderers, restore
+ * the main screen buffer, and release any held TTY resources.
+ */
+export type WizardUI = AsyncDisposable & {
+  // ── Lifecycle messages ────────────────────────────────────────────
+
+  /** Display the wizard intro banner / heading. */
+  intro(title: string): void;
+
+  /** Display the success outro line. Called on a successful run. */
+  outro(message: string): void;
+
+  /**
+   * Display a cancellation outro line. Called on user-cancelled or aborted
+   * runs (analogous to clack's `cancel()`).
+   */
+  cancel(message: string): void;
+
+  // ── Logging ───────────────────────────────────────────────────────
+
+  log: WizardLog;
+
+  // ── Spinner ───────────────────────────────────────────────────────
+
+  /**
+   * Create a fresh spinner handle. Implementations may share a single
+   * underlying spinner widget across calls — callers should not assume
+   * each `spinner()` returns an independent renderable.
+   */
+  spinner(): SpinnerHandle;
+
+  // ── Prompts ───────────────────────────────────────────────────────
+
+  /**
+   * Single-choice select. Returns the selected value, or {@link CANCELLED}
+   * if the user aborted (Ctrl+C / Escape).
+   */
+  select<T extends string>(opts: SelectOptions<T>): Promise<T | Cancelled>;
+
+  /**
+   * Multi-choice select. Returns the selected values, or {@link CANCELLED}
+   * if the user aborted.
+   */
+  multiselect<T extends string>(
+    opts: MultiSelectOptions<T>
+  ): Promise<T[] | Cancelled>;
+
+  /**
+   * Yes/no confirm. Returns the boolean answer, or {@link CANCELLED} if
+   * the user aborted.
+   */
+  confirm(opts: ConfirmOptions): Promise<boolean | Cancelled>;
+};
