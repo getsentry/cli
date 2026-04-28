@@ -457,9 +457,7 @@ async function resolveSelector(
       "no unresolved issues found",
       `sentry issue list ${orgSlug}/ -q "is:resolved"`,
       [
-        `No unresolved issues found in org '${orgSlug}'.`,
         `The ${label} issue selector only matches unresolved issues.`,
-        `Use -q "is:resolved" to see resolved issues instead.`,
       ]
     );
   }
