@@ -30,10 +30,13 @@
  * the imperative side decoupled from React's lifecycle.
  */
 
+import { basename } from "node:path";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useState, useSyncExternalStore } from "react";
+import { buildFileTree, type FileTreeRow, flattenTree } from "./file-tree.js";
 import type {
   ActivePrompt,
+  FileReadEntry,
   LogEntry,
   LogSeverity,
   SpinnerState,
@@ -127,7 +130,12 @@ export function App({ store }: AppProps): React.ReactNode {
           spinner={snapshot.spinner}
           summary={snapshot.summary}
         />
-        {showSidebar ? <Sidebar tipIndex={snapshot.tipIndex} /> : null}
+        {showSidebar ? (
+          <Sidebar
+            filesRead={snapshot.filesRead}
+            tipIndex={snapshot.tipIndex}
+          />
+        ) : null}
       </box>
     </box>
   );
@@ -277,31 +285,55 @@ function SummaryPanel({
         </box>
       ) : null}
       {summary.changedFiles !== undefined && summary.changedFiles.length > 0 ? (
-        <box flexDirection="column" flexShrink={0} marginTop={1}>
-          <text fg={MUTED}>Changed files</text>
-          {summary.changedFiles.map((file) => (
-            <ChangedFileRow file={file} key={file.path} />
-          ))}
-        </box>
+        <ChangedFilesTree files={summary.changedFiles} />
       ) : null}
     </box>
   );
 }
 
-function ChangedFileRow({
-  file,
+/**
+ * Render the changed-files list as a nested directory tree. Files
+ * sharing a parent directory collapse into a single group, and the
+ * box-drawing prefix (`├─` / `└─` / `│  `) tracks ancestor pipes the
+ * way `tree(1)` does. The tree shape is computed by `buildFileTree`
+ * — this component is purely presentational.
+ */
+function ChangedFilesTree({
+  files,
 }: {
-  file: { action: string; path: string };
+  files: { action: string; path: string }[];
 }): React.ReactNode {
-  const { glyph, color } = changedFileStyle(file.action);
+  const tree = buildFileTree(files);
+  const rows = flattenTree(tree);
+  return (
+    <box flexDirection="column" flexShrink={0} marginTop={1}>
+      <text fg={MUTED}>Changed files</text>
+      {rows.map((row, i) => (
+        // Tree rows are positionally stable for a given summary —
+        // the tree is rebuilt fresh each render from immutable
+        // `files`, so the index makes a fine key.
+        // biome-ignore lint/suspicious/noArrayIndexKey: positional tree rows
+        <FileTreeLine key={i} row={row} />
+      ))}
+    </box>
+  );
+}
+
+function FileTreeLine({ row }: { row: FileTreeRow }): React.ReactNode {
+  if (row.kind === "directory") {
+    return (
+      <box flexDirection="row" flexShrink={0}>
+        <text fg={MUTED}>{`${row.prefix}${row.branch} `}</text>
+        <text fg={FOREGROUND}>{row.label}</text>
+      </box>
+    );
+  }
+  const { glyph, color } = changedFileStyle(row.action ?? "modify");
   return (
     <box flexDirection="row" flexShrink={0}>
-      <text fg={color} width={3}>
-        {glyph}
-      </text>
-      <text fg={FOREGROUND} flexGrow={1}>
-        {file.path}
-      </text>
+      <text fg={MUTED}>{`${row.prefix}${row.branch} `}</text>
+      <text fg={color}>{`${glyph} `}</text>
+      <text fg={FOREGROUND}>{row.label}</text>
     </box>
   );
 }
@@ -476,7 +508,97 @@ function MultiSelectPrompt({
 
 // ────────────────────────────── Sidebar ───────────────────────────────
 
-function Sidebar({ tipIndex }: { tipIndex: number }): React.ReactNode {
+function Sidebar({
+  filesRead,
+  tipIndex,
+}: {
+  filesRead: FileReadEntry[];
+  tipIndex: number;
+}): React.ReactNode {
+  return (
+    <box flexDirection="column" flexShrink={0} gap={1} width={SIDEBAR_WIDTH}>
+      <FilesAnalyzedPanel filesRead={filesRead} />
+      <TipPanel tipIndex={tipIndex} />
+    </box>
+  );
+}
+
+/**
+ * Maximum number of file rows the sidebar shows. Anything beyond this
+ * collapses into a `+ N more` line so the panel doesn't push the
+ * tips off-screen on shorter terminals.
+ */
+const FILES_PANEL_VISIBLE_ROWS = 10;
+
+/**
+ * Persistent "Files analyzed" panel — shows every file the wizard has
+ * read from disk during the session, with a status icon (yellow ●
+ * while reading, green ✔ once analyzed). Replaces the previous
+ * spinner-message approach where each batch flashed for half a second.
+ *
+ * The panel is suppressed entirely when no reads have been recorded
+ * yet (so it doesn't draw an empty box at startup).
+ */
+function FilesAnalyzedPanel({
+  filesRead,
+}: {
+  filesRead: FileReadEntry[];
+}): React.ReactNode {
+  if (filesRead.length === 0) {
+    return null;
+  }
+  const visible = filesRead.slice(-FILES_PANEL_VISIBLE_ROWS);
+  const overflow = filesRead.length - visible.length;
+  const analyzed = filesRead.filter(
+    (entry) => entry.status === "analyzed"
+  ).length;
+  return (
+    <box
+      borderColor={MUTED}
+      borderStyle="rounded"
+      flexDirection="column"
+      flexShrink={0}
+      padding={1}
+      title=" Files analyzed "
+      titleAlignment="left"
+    >
+      <text fg={MUTED}>
+        {analyzed}/{filesRead.length} read
+      </text>
+      <box flexDirection="column" flexShrink={0} marginTop={1}>
+        {visible.map((entry) => (
+          <FileReadRow entry={entry} key={entry.path} />
+        ))}
+      </box>
+      {overflow > 0 ? (
+        <text fg={MUTED} marginTop={1}>
+          + {overflow} more
+        </text>
+      ) : null}
+    </box>
+  );
+}
+
+function FileReadRow({ entry }: { entry: FileReadEntry }): React.ReactNode {
+  const isAnalyzed = entry.status === "analyzed";
+  const glyph = isAnalyzed ? "✔" : "●";
+  const color = isAnalyzed ? COLOR_SUCCESS : COLOR_WARN;
+  // Show the basename for compactness — full paths blow past the
+  // sidebar's 36-col width regularly. The tooltip-equivalent (full
+  // path) is unavailable in OpenTUI, so leave the narrow display.
+  return (
+    <box flexDirection="row" flexShrink={0}>
+      <text fg={color} width={2}>
+        {glyph}
+      </text>
+      <text fg={FOREGROUND} flexGrow={1}>
+        {basename(entry.path)}
+      </text>
+    </box>
+  );
+}
+
+function TipPanel({ tipIndex }: { tipIndex: number }): React.ReactNode {
   const tip = SENTRY_TIPS[tipIndex % SENTRY_TIPS.length] as SentryTip;
   const total = SENTRY_TIPS.length;
   const oneIndexed = (tipIndex % total) + 1;
@@ -485,12 +607,12 @@ function Sidebar({ tipIndex }: { tipIndex: number }): React.ReactNode {
       borderColor={MUTED}
       borderStyle="rounded"
       flexDirection="column"
+      flexGrow={1}
       flexShrink={0}
       gap={1}
       padding={1}
       title=" Did you know? "
       titleAlignment="left"
-      width={SIDEBAR_WIDTH}
     >
       <text fg={ACCENT}>{tip.title}</text>
       <text fg={FOREGROUND}>{tip.body}</text>

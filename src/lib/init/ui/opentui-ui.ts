@@ -34,6 +34,7 @@
 
 import chalk from "chalk";
 import { stripAnsi } from "../../formatters/plain-detect.js";
+import { buildFileTree, flattenTree } from "./file-tree.js";
 import { WizardStore } from "./opentui-store.js";
 import { SENTRY_TIPS } from "./sentry-tips.js";
 
@@ -242,6 +243,14 @@ export class OpenTuiUI implements WizardUI {
     this.store.setSummary(summary);
   }
 
+  recordFilesReading(paths: string[]): void {
+    this.store.recordFilesReading(paths);
+  }
+
+  markFilesAnalyzed(paths: string[]): void {
+    this.store.markFilesAnalyzed(paths);
+  }
+
   // ── Logging ───────────────────────────────────────────────────────
 
   log: WizardLog = {
@@ -448,8 +457,9 @@ export class OpenTuiUI implements WizardUI {
     if (summary?.changedFiles && summary.changedFiles.length > 0) {
       lines.push("");
       lines.push(`   ${chalk.hex(REPORT_MUTED).bold("Changed files")}`);
-      for (const file of summary.changedFiles) {
-        lines.push(`     ${changedFileGlyphColored(file.action)} ${file.path}`);
+      const tree = buildFileTree(summary.changedFiles);
+      for (const row of flattenTree(tree)) {
+        lines.push(formatTreeRowChalk(row));
       }
     }
     return lines.join("\n");
@@ -510,4 +520,24 @@ function changedFileGlyphColored(action: string): string {
     return chalk.hex(REPORT_ERROR)("−");
   }
   return chalk.hex(REPORT_WARN)("~");
+}
+
+/**
+ * Render a single `FileTreeRow` for the post-dispose stderr report.
+ * Directories show only the box-drawing branch + label; files add
+ * the action glyph (colored).
+ */
+function formatTreeRowChalk(row: {
+  prefix: string;
+  branch: string;
+  kind: "file" | "directory";
+  label: string;
+  action?: string;
+}): string {
+  const branch = chalk.hex(REPORT_MUTED)(`${row.prefix}${row.branch}`);
+  if (row.kind === "directory") {
+    return `     ${branch} ${row.label}`;
+  }
+  const glyph = changedFileGlyphColored(row.action ?? "modify");
+  return `     ${branch} ${glyph} ${row.label}`;
 }

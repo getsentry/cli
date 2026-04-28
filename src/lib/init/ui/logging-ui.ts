@@ -22,6 +22,7 @@ import {
   renderInlineMarkdown,
   renderMarkdown,
 } from "../../formatters/markdown.js";
+import { buildFileTree, flattenTree } from "./file-tree.js";
 import type {
   ConfirmOptions,
   MultiSelectOptions,
@@ -110,11 +111,11 @@ export class LoggingUI implements WizardUI {
     if (summary.changedFiles && summary.changedFiles.length > 0) {
       this.writeLine(this.stdout, "");
       this.writeLine(this.stdout, "  Changed files:");
-      for (const file of summary.changedFiles) {
-        this.writeLine(
-          this.stdout,
-          `    ${changedFileGlyph(file.action)} ${file.path}`
-        );
+      // Render as a directory tree so collapsed common prefixes match
+      // what the OpenTuiUI panel + post-dispose stderr report show.
+      const tree = buildFileTree(summary.changedFiles);
+      for (const row of flattenTree(tree)) {
+        this.writeLine(this.stdout, `    ${formatTreeRowPlain(row)}`);
       }
     }
   }
@@ -220,6 +221,26 @@ function changedFileGlyph(action: string): string {
     return "−";
   }
   return "~";
+}
+
+/**
+ * Render a single `FileTreeRow` for the LoggingUI's stdout summary.
+ * No colors — same shape as the OpenTuiUI / post-dispose tree, but
+ * box-drawing characters and glyphs ship as plain text so CI logs
+ * stay greppable.
+ */
+function formatTreeRowPlain(row: {
+  prefix: string;
+  branch: string;
+  kind: "file" | "directory";
+  label: string;
+  action?: string;
+}): string {
+  const branchPart = `${row.prefix}${row.branch}`;
+  if (row.kind === "directory") {
+    return `${branchPart} ${row.label}`;
+  }
+  return `${branchPart} ${changedFileGlyph(row.action ?? "modify")} ${row.label}`;
 }
 
 function stopPrefix(code: SpinnerExitCode): string {

@@ -34,6 +34,17 @@ export type SpinnerState = {
   message: string;
 };
 
+/**
+ * One entry in the persistent "Files analyzed" panel — every file the
+ * wizard has read from disk during the session. Status transitions
+ * `reading` → `analyzed` once the tool returns. Renderers paint the
+ * matching icon.
+ */
+export type FileReadEntry = {
+  path: string;
+  status: "reading" | "analyzed";
+};
+
 /** Generic option shape passed to mounted prompts. */
 export type PromptOption = {
   value: string;
@@ -75,6 +86,15 @@ export type WizardSnapshot = {
   tipIndex: number;
   /** Final structured summary, rendered after the workflow completes. */
   summary: WizardSummary | null;
+  /**
+   * Persistent list of every file the wizard has read from disk. Each
+   * entry carries a status that transitions `reading` → `analyzed` as
+   * the workflow progresses. Used by the live "Files analyzed" panel
+   * so the user can see what context the wizard inspected — without
+   * the previous spinner-message approach, which flashed each batch
+   * for half a second before the next tool overwrote it.
+   */
+  filesRead: FileReadEntry[];
 };
 
 export type Listener = () => void;
@@ -96,6 +116,7 @@ export class WizardStore {
       prompt: initial.prompt ?? null,
       tipIndex: initial.tipIndex ?? 0,
       summary: initial.summary ?? null,
+      filesRead: initial.filesRead ?? [],
     };
   }
 
@@ -169,6 +190,50 @@ export class WizardStore {
 
   setSummary(summary: WizardSummary | null): void {
     this.update({ summary });
+  }
+
+  /**
+   * Record that the wizard is currently reading a batch of files.
+   * Existing entries (read in earlier batches) keep their status so
+   * the "Files analyzed" panel preserves history; new entries land
+   * with status `reading` and flip to `analyzed` via
+   * `markFilesAnalyzed()` when the tool returns.
+   */
+  recordFilesReading(paths: string[]): void {
+    if (paths.length === 0) {
+      return;
+    }
+    const byPath = new Map(
+      this.snapshot.filesRead.map((entry) => [entry.path, entry])
+    );
+    for (const path of paths) {
+      const existing = byPath.get(path);
+      // Don't downgrade an already-analyzed entry back to `reading`
+      // if the same file is read again later in the run.
+      if (!existing || existing.status === "reading") {
+        byPath.set(path, { path, status: "reading" });
+      }
+    }
+    this.update({ filesRead: [...byPath.values()] });
+  }
+
+  /**
+   * Flip the matching entries in `filesRead` from `reading` to
+   * `analyzed`. Paths not present in the store are added as
+   * pre-analyzed (defensive — covers tools that return file lists
+   * without a prior `recordFilesReading` call).
+   */
+  markFilesAnalyzed(paths: string[]): void {
+    if (paths.length === 0) {
+      return;
+    }
+    const byPath = new Map(
+      this.snapshot.filesRead.map((entry) => [entry.path, entry])
+    );
+    for (const path of paths) {
+      byPath.set(path, { path, status: "analyzed" });
+    }
+    this.update({ filesRead: [...byPath.values()] });
   }
 
   // ── Internal ──────────────────────────────────────────────────────

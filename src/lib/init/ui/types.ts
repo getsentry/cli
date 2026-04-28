@@ -171,6 +171,22 @@ export type WizardUI = AsyncDisposable & {
    */
   cancel(message: string): void;
 
+  /**
+   * Notify the UI that the wizard is reading the listed files from
+   * disk. Optional — implementations that don't track reads (e.g.
+   * `LoggingUI`) leave this undefined. `OpenTuiUI` uses it to populate
+   * a persistent "Files analyzed" panel so the user can see what
+   * context the AI looked at, instead of losing it in a half-second
+   * spinner flash.
+   */
+  recordFilesReading?(paths: string[]): void;
+
+  /**
+   * Notify the UI that the previously-recorded files have finished
+   * being analyzed. Same optional contract as `recordFilesReading`.
+   */
+  markFilesAnalyzed?(paths: string[]): void;
+
   // ── Logging ───────────────────────────────────────────────────────
 
   log: WizardLog;

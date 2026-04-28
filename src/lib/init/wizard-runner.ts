@@ -194,6 +194,16 @@ async function handleSuspendedStep(
         : describeTool(payload));
     spin.message(renderInlineMarkdown(truncateForTerminal(message)));
 
+    // Persistent "Files analyzed" panel (OpenTuiUI only — `LoggingUI`
+    // leaves these methods undefined). The previous flow showed a
+    // half-second tree of files in the spinner before the next tool
+    // overwrote it; users couldn't see what context the wizard
+    // looked at. We feed the read paths into the panel before the
+    // tool runs, then mark them analyzed afterwards.
+    if (payload.operation === "read-files") {
+      ui.recordFilesReading?.(payload.params.paths);
+    }
+
     const toolResult = await executeTool(payload, context);
 
     if (toolResult.message) {
@@ -207,6 +217,10 @@ async function handleSuspendedStep(
           renderInlineMarkdown(truncateForTerminal(followUpMessage))
         );
       }
+    }
+
+    if (payload.operation === "read-files" && toolResult.ok !== false) {
+      ui.markFilesAnalyzed?.(payload.params.paths);
     }
 
     const history = stepHistory.get(stepId) ?? [];
