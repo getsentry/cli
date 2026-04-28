@@ -455,10 +455,11 @@ async function resolveSelector(
     throw new ResolutionError(
       `Selector '${selector}'`,
       "no unresolved issues found",
-      commandHint,
+      `sentry issue list ${orgSlug}/ -q ""`,
       [
         `No unresolved issues found in org '${orgSlug}'.`,
         `The ${label} issue selector only matches unresolved issues.`,
+        `Use -q "" to list all issues regardless of status.`,
       ]
     );
   }

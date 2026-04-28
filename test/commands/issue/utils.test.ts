@@ -1991,6 +1991,8 @@ describe("resolveOrgAndIssueId: magic @ selectors", () => {
     expect(err).toBeInstanceOf(ResolutionError);
     expect(String(err)).toContain("no unresolved issues found");
     expect(String(err)).toContain("most recent");
+    expect(String(err)).toContain("sentry issue list");
+    expect(String(err)).toContain('-q ""');
   });
 
   test("throws ContextError when org cannot be resolved for bare @selector", async () => {
