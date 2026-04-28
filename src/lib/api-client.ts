@@ -20,12 +20,29 @@
  */
 
 export {
+  createIssueAlertRule,
+  createMetricAlertRule,
+  deleteIssueAlertRule,
+  deleteMetricAlertRule,
+  getIssueAlertRule,
+  getIssueAlertRuleDocument,
+  getMetricAlertRule,
+  getMetricAlertRuleDocument,
+  type IssueAlertRule,
+  listIssueAlertsPaginated,
+  listMetricAlertsPaginated,
+  type MetricAlertRule,
+  putIssueAlertRule,
+  putMetricAlertRule,
+} from "./api/alerts.js";
+export {
   createDashboard,
   getDashboard,
   listDashboardsPaginated,
   queryAllWidgets,
   updateDashboard,
 } from "./api/dashboards.js";
+export { isNotFoundApiError } from "./api/error-guards.js";
 export {
   findEventAcrossOrgs,
   getEvent,
@@ -39,6 +56,7 @@ export {
   type ApiRequestOptions,
   apiRequest,
   apiRequestToRegion,
+  apiRequestToRegionNoContent,
   buildSearchParams,
   ORG_FANOUT_CONCURRENCY,
   type PaginatedResponse,

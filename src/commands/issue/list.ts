@@ -6,29 +6,29 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { buildOrgAwareAliases } from "../../lib/alias.js";
+import { buildProjectAliasMap } from "../../lib/alias.js";
 import {
   API_MAX_PER_PAGE,
   buildIssueListCollapse,
-  findProjectsByPattern,
-  findProjectsBySlug,
-  getProject,
   type IssueCollapseField,
   type IssuesPage,
   listIssuesAllPages,
   listIssuesPaginated,
-  listProjects,
 } from "../../lib/api-client.js";
 import { extractRequiredScopes } from "../../lib/api-scope.js";
 import {
   looksLikeIssueShortId,
   parseOrgProjectArg,
 } from "../../lib/arg-parsing.js";
+
 import { getActiveEnvVarName, isEnvTokenActive } from "../../lib/db/auth.js";
 import {
   advancePaginationState,
+  buildMultiTargetContextKey,
   buildPaginationContextKey,
-  escapeContextKeyValue,
+  CURSOR_SEP,
+  decodeCompoundCursor,
+  encodeCompoundCursor,
   hasPreviousPage,
   resolveCursor,
 } from "../../lib/db/pagination.js";
@@ -40,7 +40,6 @@ import { createDsnFingerprint } from "../../lib/dsn/index.js";
 import {
   ApiError,
   ContextError,
-  ResolutionError,
   ValidationError,
   withAuthGuard,
 } from "../../lib/errors.js";
@@ -67,24 +66,22 @@ import {
 import { logger } from "../../lib/logger.js";
 import {
   dispatchOrgScopedList,
+  type FetchResult as FetchResultOf,
   jsonTransformListResult,
   type ListCommandMeta,
   type ListResult,
   type ModeHandler,
+  trimWithGroupGuarantee,
 } from "../../lib/org-list.js";
 import { withProgress } from "../../lib/polling.js";
 import {
-  fetchProjectId,
   type ResolvedTarget,
-  resolveAllTargets,
-  toNumericId,
+  resolveTargetsFromParsedArg,
 } from "../../lib/resolve-target.js";
 import {
   SEARCH_SYNTAX_REFERENCE,
   sanitizeQuery,
 } from "../../lib/search-query.js";
-import { getApiBaseUrl } from "../../lib/sentry-client.js";
-import { setOrgProjectContext } from "../../lib/telemetry.js";
 import {
   appendPeriodHint,
   formatTimeRangeFlag,
@@ -95,7 +92,6 @@ import {
   timeRangeToApiParams,
 } from "../../lib/time-range.js";
 import {
-  type ProjectAliasEntry,
   type SentryIssue,
   SentryIssueSchema,
   type Writer,
@@ -249,49 +245,6 @@ function formatListFooter(mode: "single" | "multi" | "none"): string {
   nextCursor?: string;
 };
 
-/** Result of building project aliases */
-/** @internal */ export type AliasMapResult = {
-  aliasMap: Map<string, string>;
-  entries: Record<string, ProjectAliasEntry>;
-};
-
-/**
- * Build project alias map using shortest unique prefix of project slug.
- * Handles cross-org slug collisions by prefixing with org abbreviation.
- * Strips common word prefix before computing unique prefixes for cleaner aliases.
- *
- * Single org examples:
- *   spotlight-electron, spotlight-website, spotlight → e, w, s
- *   frontend, functions, backend → fr, fu, b
- *
- * Cross-org collision example:
- *   org1/dashboard, org2/dashboard → o1/d, o2/d
- */
-function buildProjectAliasMap(results: IssueListFetchResult[]): AliasMapResult {
-  const entries: Record<string, ProjectAliasEntry> = {};
-
-  // Build org-aware aliases that handle cross-org collisions
-  const pairs = results.map((r) => ({
-    org: r.target.org,
-    project: r.target.project,
-  }));
-  const { aliasMap } = buildOrgAwareAliases(pairs);
-
-  // Build entries record for storage
-  for (const result of results) {
-    const key = `${result.target.org}/${result.target.project}`;
-    const alias = aliasMap.get(key);
-    if (alias) {
-      entries[alias] = {
-        orgSlug: result.target.org,
-        projectSlug: result.target.project,
-      };
-    }
-  }
-
-  return { aliasMap, entries };
-}
-
 /**
  * Attach formatting options to each issue based on alias map.
  *
@@ -355,183 +308,7 @@ function getComparator(
   }
 }
 
-type FetchResult =
-  | { success: true; data: IssueListFetchResult }
-  | { success: false; error: Error };
-
-/** Result of resolving targets from parsed argument */
-type TargetResolutionResult = {
-  targets: ResolvedTarget[];
-  footer?: string;
-  skippedSelfHosted?: number;
-  detectedDsns?: import("../../lib/dsn/index.js").DetectedDsn[];
-};
-
-/**
- * Resolve targets based on parsed org/project argument.
- *
- * Handles all four cases:
- * - auto-detect: Use DSN detection / config defaults
- * - explicit: Single org/project target
- * - org-all: All projects in specified org
- * - project-search: Find project across all orgs
- */
-async function resolveTargetsFromParsedArg(
-  parsed: ReturnType<typeof parseOrgProjectArg>,
-  cwd: string
-): Promise<TargetResolutionResult> {
-  switch (parsed.type) {
-    case "auto-detect": {
-      // Use existing resolution logic (DSN detection, config defaults)
-      const result = await resolveAllTargets({ cwd, usageHint: USAGE_HINT });
-      // DSN-detected and directory-inferred targets already carry a projectId.
-      // Env var / config-default paths return targets without one, so enrich
-      // them now using the project API. Any failure silently falls back to
-      // slug-based querying — the target was already resolved, so we never
-      // surface a ResolutionError here (that's only for the explicit case).
-      result.targets = await Promise.all(
-        result.targets.map(async (t) => {
-          if (t.projectId !== undefined) {
-            return t;
-          }
-          try {
-            const info = await getProject(t.org, t.project);
-            const id = toNumericId(info.id);
-            return id !== undefined ? { ...t, projectId: id } : t;
-          } catch {
-            return t;
-          }
-        })
-      );
-      return result;
-    }
-
-    case "explicit": {
-      // Single explicit target — fetch project ID for API query param
-      // Telemetry context is set by dispatchOrgScopedList before this handler runs.
-      const projectId = await fetchProjectId(parsed.org, parsed.project);
-      return {
-        targets: [
-          {
-            org: parsed.org,
-            project: parsed.project,
-            projectId,
-            orgDisplay: parsed.org,
-            projectDisplay: parsed.project,
-          },
-        ],
-      };
-    }
-
-    case "org-all": {
-      // List all projects in the specified org
-      // Telemetry context is set by dispatchOrgScopedList before this handler runs.
-      const projects = await listProjects(parsed.org);
-      const targets: ResolvedTarget[] = projects.map((p) => ({
-        org: parsed.org,
-        project: p.slug,
-        projectId: toNumericId(p.id),
-        orgDisplay: parsed.org,
-        projectDisplay: p.name,
-      }));
-
-      if (targets.length === 0) {
-        throw new ResolutionError(
-          `Organization '${parsed.org}'`,
-          "has no accessible projects",
-          `sentry project list ${parsed.org}/`,
-          ["Check that you have access to projects in this organization"]
-        );
-      }
-
-      return {
-        targets,
-        footer:
-          targets.length > 1
-            ? `Showing issues from ${targets.length} projects in ${parsed.org}`
-            : undefined,
-      };
-    }
-
-    case "project-search": {
-      // Issue short IDs are intercepted early in func() and auto-recovered
-      // (see the looksLikeIssueShortId check above dispatchOrgScopedList).
-
-      // Find project across all orgs
-      const { projects: matches, orgs } = await findProjectsBySlug(
-        parsed.projectSlug
-      );
-
-      if (matches.length === 0) {
-        // Check if the slug matches an organization — common mistake.
-        // The orgSlugMatchBehavior: "redirect" pre-check handles this for
-        // cached orgs (hot path). This is the cold-cache fallback: org
-        // isn't cached yet, so the pre-check couldn't fire. We throw a
-        // ResolutionError with a hint — after this command, the org will
-        // be cached and future runs will auto-redirect.
-        const isOrg = orgs.some((o) => o.slug === parsed.projectSlug);
-        if (isOrg) {
-          throw new ResolutionError(
-            `'${parsed.projectSlug}'`,
-            "is an organization, not a project",
-            `sentry issue list ${parsed.projectSlug}/`,
-            [
-              `List projects: sentry project list ${parsed.projectSlug}/`,
-              `Specify a project: sentry issue list ${parsed.projectSlug}/<project>`,
-            ]
-          );
-        }
-
-        // Try word-boundary matching to suggest similar projects (CLI-A4, 16 users).
-        // Uses the same findProjectsByPattern used by directory name inference.
-        // Only runs on the error path, so the extra API cost is acceptable.
-        const similar = await findProjectsByPattern(parsed.projectSlug);
-        const suggestions: string[] = [];
-        if (similar.length > 0) {
-          const names = similar
-            .slice(0, 3)
-            .map((p) => `'${p.orgSlug}/${p.slug}'`);
-          suggestions.push(`Similar projects: ${names.join(", ")}`);
-        }
-        suggestions.push(
-          "No project with this slug found in any accessible organization"
-        );
-        throw new ResolutionError(
-          `Project '${parsed.projectSlug}'`,
-          "not found",
-          "sentry project list",
-          suggestions
-        );
-      }
-
-      const targets: ResolvedTarget[] = matches.map((m) => ({
-        org: m.orgSlug,
-        project: m.slug,
-        projectId: toNumericId(m.id),
-        orgDisplay: m.orgSlug,
-        projectDisplay: m.name,
-      }));
-
-      const uniqueOrgs = [...new Set(targets.map((t) => t.org))];
-      const uniqueProjects = [...new Set(targets.map((t) => t.project))];
-      setOrgProjectContext(uniqueOrgs, uniqueProjects);
-
-      return {
-        targets,
-        footer:
-          matches.length > 1
-            ? `Found '${parsed.projectSlug}' in ${matches.length} organizations`
-            : undefined,
-      };
-    }
-
-    default: {
-      // TypeScript exhaustiveness check - this should never be reached
-      const _exhaustiveCheck: never = parsed;
-      throw new Error(`Unexpected parsed type: ${_exhaustiveCheck}`);
-    }
-  }
-}
+type FetchResult = FetchResultOf<IssueListFetchResult>;
 
 /**
  * Fetch issues for a single target project.
@@ -732,111 +509,17 @@ async function fetchWithBudget(
 }
 
 /**
- * Trim an array of issues to the global limit while guaranteeing at least one
- * issue per project (when possible).
- *
- * Algorithm:
- * 1. Walk the globally-sorted list, taking the first issue from each unseen
- *    project until `limit` slots are filled or all projects are represented.
- * 2. Fill remaining slots from the top of the sorted list, skipping already-
- *    selected issues.
- * 3. Return the final set in original sorted order.
- *
- * When there are more projects than the limit, the projects whose first issue
- * ranks highest in the sorted order get representation.
- *
- * @param issues - Globally sorted array (input order is preserved in output)
- * @param limit - Maximum number of issues to return
- * @returns Trimmed array in the same sorted order
+ * Trim issues to the global limit while guaranteeing at least one issue per
+ * project. Thin wrapper around {@link trimWithGroupGuarantee} for `IssueTableRow`.
  */
 function trimWithProjectGuarantee(
   issues: IssueTableRow[],
   limit: number
 ): IssueTableRow[] {
-  if (issues.length <= limit) {
-    return issues;
-  }
-
-  const seenProjects = new Set<string>();
-  const guaranteed = new Set<number>();
-
-  // Pass 1: pick one representative per project from the sorted list
-  for (let i = 0; i < issues.length && guaranteed.size < limit; i++) {
-    // biome-ignore lint/style/noNonNullAssertion: i is within bounds
-    const projectKey = `${issues[i]!.orgSlug}/${issues[i]!.formatOptions.projectSlug ?? ""}`;
-    if (!seenProjects.has(projectKey)) {
-      seenProjects.add(projectKey);
-      guaranteed.add(i);
-    }
-  }
-
-  // Pass 2: fill remaining budget from the top of the sorted list
-  const selected = new Set<number>(guaranteed);
-  for (let i = 0; i < issues.length && selected.size < limit; i++) {
-    selected.add(i);
-  }
-
-  // Return in original sorted order
-  return issues.filter((_, i) => selected.has(i));
-}
-
-/** Separator for compound cursor entries (pipe — not present in Sentry cursors). */
-const CURSOR_SEP = "|";
-
-/**
- * Encode per-target cursors as a pipe-separated string for storage.
- *
- * The position of each entry matches the **sorted** target order encoded in
- * the context key fingerprint, so we only need to store the cursor values —
- * no org/project metadata is needed in the cursor string itself.
- *
- * Empty string = project exhausted (no more pages).
- *
- * @example "1735689600:0:0||1735689601:0:0" — 3 targets, middle one exhausted
- */
-function encodeCompoundCursor(cursors: (string | null)[]): string {
-  return cursors.map((c) => c ?? "").join(CURSOR_SEP);
-}
-
-/**
- * Decode a compound cursor string back to an array of per-target cursors.
- *
- * Returns `null` for exhausted entries (empty segments) and `string` for active
- * cursors. Returns an empty array if `raw` is empty or looks like a legacy
- * JSON cursor (starts with `[`), causing a fresh start.
- */
-function decodeCompoundCursor(raw: string): (string | null)[] {
-  // Guard against legacy JSON compound cursors or corrupted data
-  if (!raw || raw.startsWith("[")) {
-    return [];
-  }
-  return raw.split(CURSOR_SEP).map((s) => (s === "" ? null : s));
-}
-
-/**
- * Build a compound cursor context key that encodes the full target set, sort,
- * query, and period so that a cursor from one search is never reused for a
- * different search.
- */
-function buildMultiTargetContextKey(
-  targets: ResolvedTarget[],
-  flags: Pick<ListFlags, "sort" | "query">,
-  timeRange: TimeRange
-): string {
-  const host = getApiBaseUrl();
-  const targetFingerprint = targets
-    .map((t) => `${t.org}/${t.project}`)
-    .sort()
-    .join(",");
-  const escapedQuery = flags.query
-    ? escapeContextKeyValue(flags.query)
-    : undefined;
-  const escapedPeriod = escapeContextKeyValue(serializeTimeRange(timeRange));
-  const escapedSort = escapeContextKeyValue(flags.sort);
-  return (
-    `host:${host}|type:multi:${targetFingerprint}` +
-    `|sort:${escapedSort}|period:${escapedPeriod}` +
-    (escapedQuery ? `|q:${escapedQuery}` : "")
+  return trimWithGroupGuarantee(
+    issues,
+    limit,
+    (r) => `${r.orgSlug}/${r.formatOptions.projectSlug ?? ""}`
   );
 }
 
@@ -1185,7 +868,12 @@ async function handleResolvedTargets(
   const { parsed, flags, cwd, timeRange } = options;
 
   const { targets, footer, skippedSelfHosted, detectedDsns } =
-    await resolveTargetsFromParsedArg(parsed, cwd);
+    await resolveTargetsFromParsedArg(parsed, {
+      cwd,
+      usageHint: USAGE_HINT,
+      enrichProjectIds: true,
+      checkIssueShortId: true,
+    });
 
   if (targets.length === 0) {
     if (skippedSelfHosted) {
@@ -1201,7 +889,11 @@ async function handleResolvedTargets(
 
   // Build a compound cursor context key that encodes the full target set +
   // search parameters so a cursor from one search is never reused for another.
-  const contextKey = buildMultiTargetContextKey(targets, flags, timeRange);
+  const contextKey = buildMultiTargetContextKey(targets, {
+    sort: flags.sort,
+    query: flags.query,
+    period: serializeTimeRange(timeRange),
+  });
 
   // Resolve per-target start cursors from the stored compound cursor (--cursor resume).
   // Sorted target keys must match the order used in buildMultiTargetContextKey.

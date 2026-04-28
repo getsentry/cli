@@ -49,20 +49,21 @@ cli/
 │   ├── app.ts          # Stricli application setup
 │   ├── context.ts      # Dependency injection context
 │   ├── commands/       # CLI commands
+│   │   ├── alert/       # create, delete, edit, list, view
 │   │   ├── auth/        # login, logout, refresh, status, token, whoami
 │   │   ├── cli/         # defaults, feedback, fix, setup, upgrade
-│   │   ├── dashboard/   # list, view, create, add, edit, delete
-│   │   ├── event/       # view, list
-│   │   ├── issue/       # list, events, explain, plan, view, resolve, unresolve, merge
+│   │   ├── dashboard/   # add, create, delete, edit, list, view
+│   │   ├── event/       # list, view
+│   │   ├── issue/       # events, explain, list, merge, plan, resolve, unresolve, view
 │   │   ├── log/         # list, view
 │   │   ├── org/         # list, view
 │   │   ├── project/     # create, delete, list, view
-│   │   ├── release/     # list, view, create, finalize, delete, deploy, deploys, set-commits, propose-version
+│   │   ├── release/     # create, delete, deploy, deploys, finalize, list, propose-version, set-commits, view
 │   │   ├── repo/        # list
 │   │   ├── sourcemap/   # inject, upload
 │   │   ├── span/        # list, view
 │   │   ├── team/        # list
-│   │   ├── trace/       # list, view, logs
+│   │   ├── trace/       # list, logs, view
 │   │   ├── trial/       # list, start
 │   │   ├── api.ts       # Make an authenticated API request
 │   │   ├── help.ts      # Help command
