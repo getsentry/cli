@@ -20,6 +20,7 @@ Initialize Sentry in your project (experimental)
 - `-n, --dry-run - Show what would happen without making changes`
 - `--features <value>... - Features to enable: errors,tracing,logs,replay,profiling,ai-monitoring,user-feedback`
 - `-t, --team <value> - Team slug to create the project under`
+- `--tui - Use the OpenTUI full-screen interface (default on the Bun binary). Pass --no-tui to disable.`
 
 **Examples:**
 
