@@ -30,6 +30,7 @@ import {
 } from "./binary.js";
 import { applyPatch } from "./bspatch.js";
 import { CLI_VERSION } from "./constants.js";
+import { formatBytes } from "./formatters/numbers.js";
 import {
   downloadLayerBlob,
   fetchManifest,
@@ -1017,7 +1018,7 @@ async function resolveAndApplyDelta(
   if (cached) {
     Sentry.getActiveSpan()?.setAttribute("delta.source", "cache");
     log.debug(
-      `Using cached patches: ${cached.patches.length} patch(es), ${cached.totalSize} bytes total`
+      `Using cached patches: ${cached.patches.length} patch(es), ${formatBytes(cached.totalSize)} total`
     );
     return await applyChainAndReturn(cached, oldBinaryPath, destPath);
   }
@@ -1034,7 +1035,7 @@ async function resolveAndApplyDelta(
   const chain = await resolveFromNetwork();
   if (chain) {
     log.debug(
-      `Resolved ${channel} chain: ${chain.patches.length} patch(es), ${chain.totalSize} bytes total`
+      `Resolved ${channel} chain: ${chain.patches.length} patch(es), ${formatBytes(chain.totalSize)} total`
     );
   }
   if (!chain) {

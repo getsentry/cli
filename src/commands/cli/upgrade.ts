@@ -32,6 +32,7 @@ import {
 import { getVersionCheckInfo } from "../../lib/db/version-check.js";
 import { UpgradeError } from "../../lib/errors.js";
 import { formatUpgradeResult } from "../../lib/formatters/human.js";
+import { formatBytes } from "../../lib/formatters/numbers.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import { withProgress } from "../../lib/polling.js";
@@ -541,8 +542,9 @@ async function executeStandardUpgrade(opts: {
   );
 
   if (downloadResult?.patchBytes) {
-    const kb = (downloadResult.patchBytes / 1024).toFixed(1);
-    log.info(`Applied delta patch (${kb} KB downloaded)`);
+    log.info(
+      `Applied delta patch (${formatBytes(downloadResult.patchBytes)} downloaded)`
+    );
   }
 
   // Run setup on the new binary to update completions, agent skills,
@@ -611,8 +613,9 @@ async function migrateToStandaloneForNightly(
   );
 
   if (downloadResult?.patchBytes) {
-    const kb = (downloadResult.patchBytes / 1024).toFixed(1);
-    log.info(`Applied delta patch (${kb} KB downloaded)`);
+    log.info(
+      `Applied delta patch (${formatBytes(downloadResult.patchBytes)} downloaded)`
+    );
   }
 
   if (!downloadResult) {
