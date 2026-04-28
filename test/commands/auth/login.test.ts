@@ -133,6 +133,21 @@ function createContext() {
   return { context, getStdout };
 }
 
+/** Assert setAuthToken was called with the expected token and a host option. */
+function expectTokenStored(
+  spy: ReturnType<typeof spyOn>,
+  expectedToken: string
+): void {
+  // biome-ignore lint/suspicious/noMisplacedAssertion: shared helper
+  expect(spy).toHaveBeenCalled();
+  // biome-ignore lint/suspicious/noMisplacedAssertion: shared helper
+  expect(spy.mock.calls[0]?.[0]).toBe(expectedToken);
+  // biome-ignore lint/suspicious/noMisplacedAssertion: shared helper
+  expect(spy.mock.calls[0]?.[3]).toMatchObject({
+    host: expect.any(String),
+  });
+}
+
 describe("loginCommand.func --token path", () => {
   let isAuthenticatedSpy: ReturnType<typeof spyOn>;
   let isEnvTokenActiveSpy: ReturnType<typeof spyOn>;
@@ -240,7 +255,9 @@ describe("loginCommand.func --token path", () => {
       timeout: 900,
     });
 
-    expect(setAuthTokenSpy).toHaveBeenCalledWith("my-token");
+    // Token stored with host scope (host resolved from SENTRY_HOST/SENTRY_URL
+    // or default SaaS — see setAuthToken in db/auth.ts).
+    expectTokenStored(setAuthTokenSpy, "my-token");
     expect(getCurrentUserSpy).toHaveBeenCalled();
     expect(setUserInfoSpy).toHaveBeenCalledWith({
       userId: "42",
@@ -385,7 +402,7 @@ describe("loginCommand.func --token path", () => {
     });
 
     expect(clearAuthSpy).toHaveBeenCalled();
-    expect(setAuthTokenSpy).toHaveBeenCalledWith("new-token");
+    expectTokenStored(setAuthTokenSpy, "new-token");
     expect(getStdout()).toContain("Authenticated");
   });
 
@@ -570,12 +587,196 @@ describe("login re-authentication interactive prompt", () => {
       });
 
       expect(clearAuthSpy).toHaveBeenCalled();
-      expect(setAuthTokenSpy).toHaveBeenCalledWith("new-token");
+      // Token stored with host scope (4th arg = { host: ... })
+      expectTokenStored(setAuthTokenSpy, "new-token");
     } finally {
       setAuthTokenSpy.mockRestore();
       getUserRegionsSpy.mockRestore();
       getCurrentUserSpy.mockRestore();
       setUserInfoSpy.mockRestore();
     }
+  });
+});
+
+describe("applyLoginUrl (host resolution)", () => {
+  let savedHost: string | undefined;
+  let savedUrl: string | undefined;
+
+  beforeEach(() => {
+    savedHost = process.env.SENTRY_HOST;
+    savedUrl = process.env.SENTRY_URL;
+    delete process.env.SENTRY_HOST;
+    delete process.env.SENTRY_URL;
+  });
+
+  afterEach(() => {
+    if (savedHost !== undefined) {
+      process.env.SENTRY_HOST = savedHost;
+    } else {
+      delete process.env.SENTRY_HOST;
+    }
+    if (savedUrl !== undefined) {
+      process.env.SENTRY_URL = savedUrl;
+    } else {
+      delete process.env.SENTRY_URL;
+    }
+  });
+
+  test("explicit --url takes precedence and writes env", async () => {
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    const host = applyLoginUrl("https://sentry.example.com");
+    expect(host).toBe("https://sentry.example.com");
+    expect(process.env.SENTRY_HOST).toBe("https://sentry.example.com");
+    expect(process.env.SENTRY_URL).toBe("https://sentry.example.com");
+  });
+
+  test("no --url + no env falls back to SaaS default", async () => {
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    expect(applyLoginUrl(undefined)).toBe("https://sentry.io");
+  });
+
+  test("no --url + SENTRY_HOST with scheme uses env host", async () => {
+    process.env.SENTRY_HOST = "https://sentry.acme.com";
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    expect(applyLoginUrl(undefined)).toBe("https://sentry.acme.com");
+  });
+
+  test("no --url + bare hostname SENTRY_HOST prefixes https:// (bug fix)", async () => {
+    // Regression: applyLoginUrl previously called normalizeOrigin directly
+    // on bare hostnames. new URL("sentry.acme.com") throws → silent fallback
+    // to SaaS default → token mis-scoped.
+    process.env.SENTRY_HOST = "sentry.acme.com";
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    expect(applyLoginUrl(undefined)).toBe("https://sentry.acme.com");
+  });
+
+  test("no --url + bare hostname SENTRY_URL prefixes https://", async () => {
+    process.env.SENTRY_URL = "sentry.acme.com";
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    expect(applyLoginUrl(undefined)).toBe("https://sentry.acme.com");
+  });
+
+  test("SENTRY_HOST takes precedence over SENTRY_URL", async () => {
+    process.env.SENTRY_HOST = "https://host.example.com";
+    process.env.SENTRY_URL = "https://url.example.com";
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    expect(applyLoginUrl(undefined)).toBe("https://host.example.com");
+  });
+});
+
+describe("applyLoginUrl (trust anchor registration)", () => {
+  let savedHost: string | undefined;
+  let savedUrl: string | undefined;
+
+  beforeEach(async () => {
+    savedHost = process.env.SENTRY_HOST;
+    savedUrl = process.env.SENTRY_URL;
+    delete process.env.SENTRY_HOST;
+    delete process.env.SENTRY_URL;
+    const { resetEnvTokenHostForTesting } = await import(
+      "../../../src/lib/env-token-host.js"
+    );
+    const { resetLoginTrustAnchorForTesting } = await import(
+      "../../../src/lib/token-host.js"
+    );
+    resetEnvTokenHostForTesting();
+    resetLoginTrustAnchorForTesting();
+  });
+
+  afterEach(async () => {
+    if (savedHost !== undefined) {
+      process.env.SENTRY_HOST = savedHost;
+    } else {
+      delete process.env.SENTRY_HOST;
+    }
+    if (savedUrl !== undefined) {
+      process.env.SENTRY_URL = savedUrl;
+    } else {
+      delete process.env.SENTRY_URL;
+    }
+    const { resetEnvTokenHostForTesting } = await import(
+      "../../../src/lib/env-token-host.js"
+    );
+    const { resetLoginTrustAnchorForTesting } = await import(
+      "../../../src/lib/token-host.js"
+    );
+    resetEnvTokenHostForTesting();
+    resetLoginTrustAnchorForTesting();
+  });
+
+  test("explicit --url registers trust anchor (user-supplied argv is trusted)", async () => {
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    const { isRequestOriginTrustedForCustomHeaders } = await import(
+      "../../../src/lib/token-host.js"
+    );
+    applyLoginUrl("https://sentry.acme.com");
+    expect(
+      isRequestOriginTrustedForCustomHeaders(
+        "https://sentry.acme.com/oauth/device/code/"
+      )
+    ).toBe(true);
+  });
+
+  test("SENTRY_HOST from boot env registers trust anchor (shell export is trusted)", async () => {
+    process.env.SENTRY_HOST = "https://sentry.acme.com";
+    const { captureEnvTokenHost } = await import(
+      "../../../src/lib/env-token-host.js"
+    );
+    captureEnvTokenHost();
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    const { isRequestOriginTrustedForCustomHeaders } = await import(
+      "../../../src/lib/token-host.js"
+    );
+    applyLoginUrl(undefined);
+    expect(
+      isRequestOriginTrustedForCustomHeaders(
+        "https://sentry.acme.com/oauth/device/code/"
+      )
+    ).toBe(true);
+  });
+
+  test("rc-poisoned SENTRY_URL does NOT register trust anchor (attacker path)", async () => {
+    // Boot: no env set → env-token-host captures SaaS default
+    const { captureEnvTokenHost } = await import(
+      "../../../src/lib/env-token-host.js"
+    );
+    captureEnvTokenHost();
+
+    // Simulate .sentryclirc shim writing env.SENTRY_URL AFTER boot (the
+    // auth login has skipRcUrlCheck: true). This is the attacker path.
+    process.env.SENTRY_URL = "https://evil.com";
+
+    const { applyLoginUrl } = await import(
+      "../../../src/commands/auth/login.js"
+    );
+    const { isRequestOriginTrustedForCustomHeaders } = await import(
+      "../../../src/lib/token-host.js"
+    );
+    applyLoginUrl(undefined);
+
+    // The rc-sourced host doesn't match boot env (which was empty →
+    // SaaS default) → NOT registered as trust anchor.
+    // applyCustomHeaders against evil.com must fail closed.
+    expect(
+      isRequestOriginTrustedForCustomHeaders(
+        "https://evil.com/oauth/device/code/"
+      )
+    ).toBe(false);
   });
 });

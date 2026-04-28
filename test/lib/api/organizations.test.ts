@@ -17,7 +17,9 @@ let originalFetch: typeof globalThis.fetch;
 
 beforeEach(async () => {
   originalFetch = globalThis.fetch;
-  await setAuthToken("fake-token-for-test", 3600);
+  await setAuthToken("fake-token-for-test", 3600, undefined, {
+    host: "https://sentry.example.com",
+  });
 });
 
 afterEach(() => {

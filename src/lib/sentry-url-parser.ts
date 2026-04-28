@@ -10,7 +10,9 @@
 
 import { DEFAULT_SENTRY_HOST } from "./constants.js";
 import { getEnv } from "./env.js";
-import { isSentrySaasUrl } from "./sentry-urls.js";
+import { HostScopeError } from "./errors.js";
+import { isSaaSTrustOrigin } from "./sentry-urls.js";
+import { getActiveTokenHost, isHostTrusted } from "./token-host.js";
 
 /**
  * Components extracted from a Sentry web URL.
@@ -210,27 +212,36 @@ export function parseSentryUrl(input: string): ParsedSentryUrl | null {
 }
 
 /**
- * Configure `SENTRY_URL` for self-hosted instances detected from a parsed URL.
+ * Configure `SENTRY_URL` for self-hosted instances detected from a parsed
+ * URL, with a host-scoping trust check.
  *
- * Sets the env var when the URL is NOT a Sentry SaaS domain (*.sentry.io),
- * since SaaS uses multi-region routing instead.
+ * SaaS URLs proceed (credentials scoped to SaaS are valid for any sentry.io
+ * subdomain). Non-SaaS URLs require the active token's host to match —
+ * otherwise throws `HostScopeError`. Only `sentry auth login --url <url>`
+ * establishes trust for a new non-SaaS host.
  *
- * The parsed URL always takes precedence over any existing `SENTRY_URL` value
- * because an explicit URL argument is the strongest signal of user intent.
- *
- * @param baseUrl - The scheme + host extracted from the URL (e.g., "https://sentry.example.com")
+ * @param baseUrl - The scheme + host extracted from the URL
+ * @throws {HostScopeError} On non-SaaS URL that doesn't match the token
  */
 export function applySentryUrlContext(baseUrl: string): void {
   const env = getEnv();
-  if (isSentrySaasUrl(baseUrl)) {
+  // Strict SaaS check (https + default port) matches isHostTrusted
+  // semantics downstream — `http://sentry.io` and `:8443` must not bypass
+  // the trust check.
+  if (isSaaSTrustOrigin(baseUrl)) {
     // Clear any self-hosted URL so API calls fall back to default SaaS routing.
-    // Without this, a stale SENTRY_HOST/SENTRY_URL would route SaaS requests to the wrong host.
     // biome-ignore lint/performance/noDelete: env registry requires delete to truly unset; assignment coerces to string in Node.js
     delete env.SENTRY_HOST;
     // biome-ignore lint/performance/noDelete: env registry requires delete to truly unset; assignment coerces to string in Node.js
     delete env.SENTRY_URL;
     return;
   }
+
+  const tokenHost = getActiveTokenHost();
+  if (!(tokenHost && isHostTrusted(baseUrl, tokenHost))) {
+    throw new HostScopeError("URL argument", baseUrl, tokenHost);
+  }
+
   env.SENTRY_HOST = baseUrl;
   env.SENTRY_URL = baseUrl;
 }

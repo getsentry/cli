@@ -12,11 +12,19 @@ import {
   TokenResponseSchema,
 } from "../types/index.js";
 import { DEFAULT_SENTRY_URL, getConfiguredSentryUrl } from "./constants.js";
-import { getCustomHeaders } from "./custom-headers.js";
+import { applyCustomHeaders } from "./custom-headers.js";
 import { setAuthToken } from "./db/auth.js";
 import { getEnv } from "./env.js";
-import { ApiError, AuthError, ConfigError, DeviceFlowError } from "./errors.js";
+import {
+  ApiError,
+  AuthError,
+  ConfigError,
+  DeviceFlowError,
+  HostScopeError,
+} from "./errors.js";
+import { normalizeOrigin } from "./sentry-urls.js";
 import { withHttpSpan } from "./telemetry.js";
+import { getActiveTokenHost, isRequestOriginTrusted } from "./token-host.js";
 
 /**
  * Get the Sentry instance URL for OAuth endpoints.
@@ -86,16 +94,11 @@ async function fetchWithConnectionError(
   url: string,
   init: RequestInit
 ): Promise<Response> {
-  // Inject custom headers for self-hosted proxies (IAP, mTLS, etc.)
-  let effectiveInit = init;
-  const customHeaders = getCustomHeaders();
-  if (customHeaders.length > 0) {
-    const merged = new Headers(init.headers);
-    for (const [name, value] of customHeaders) {
-      merged.set(name, value);
-    }
-    effectiveInit = { ...init, headers: merged };
-  }
+  // Inject custom headers for self-hosted proxies (IAP, mTLS, etc.) —
+  // URL-scoped so they don't leak to untrusted hosts.
+  const merged = new Headers(init.headers);
+  applyCustomHeaders(merged, url);
+  const effectiveInit: RequestInit = { ...init, headers: merged };
 
   try {
     return await fetch(url, effectiveInit);
@@ -114,6 +117,22 @@ async function fetchWithConnectionError(
       );
     }
     throw error;
+  }
+}
+
+/**
+ * Refuse to POST a refresh token to a host that doesn't match the active
+ * token's scope. Defense-in-depth for the rare case where SENTRY_HOST/URL
+ * was mutated without going through the URL-arg / rc-shim guards.
+ */
+function assertRefreshHostTrusted(): void {
+  const refreshUrl = getSentryUrl();
+  if (!isRequestOriginTrusted(refreshUrl)) {
+    throw new HostScopeError(
+      "OAuth refresh token",
+      normalizeOrigin(refreshUrl) ?? "<unknown host>",
+      getActiveTokenHost()
+    );
   }
 }
 
@@ -318,7 +337,9 @@ export async function performDeviceFlow(
 }
 
 /**
- * Complete the OAuth flow by storing the token in the database.
+ * Complete the OAuth flow by storing the token in the database. The token
+ * is scoped to {@link getSentryUrl} so the fetch-layer trust check refuses
+ * to attach it to other hosts.
  *
  * @param tokenResponse - The token response from performDeviceFlow
  */
@@ -328,7 +349,8 @@ export async function completeOAuthFlow(
   await setAuthToken(
     tokenResponse.access_token,
     tokenResponse.expires_in,
-    tokenResponse.refresh_token
+    tokenResponse.refresh_token,
+    { host: getSentryUrl() }
   );
 }
 
@@ -340,7 +362,7 @@ export async function completeOAuthFlow(
  * @param token - The API token to store
  */
 export async function setApiToken(token: string): Promise<void> {
-  await setAuthToken(token);
+  await setAuthToken(token, undefined, undefined, { host: getSentryUrl() });
 }
 
 /** Refresh an access token using a refresh token. */
@@ -354,6 +376,8 @@ export function refreshAccessToken(
       "Set SENTRY_CLIENT_ID environment variable or use a pre-built binary"
     );
   }
+
+  assertRefreshHostTrusted();
 
   return withHttpSpan("POST", "/oauth/token/", async () => {
     const response = await fetchWithConnectionError(

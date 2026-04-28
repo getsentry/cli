@@ -19,10 +19,14 @@
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { normalizeUrl } from "./constants.js";
 import { getConfigDir } from "./db/index.js";
 import { getEnv } from "./env.js";
+import { HostScopeError } from "./errors.js";
 import { parseIni } from "./ini.js";
 import { logger } from "./logger.js";
+import { isSaaSTrustOrigin } from "./sentry-urls.js";
+import { getActiveTokenHost, isHostTrusted } from "./token-host.js";
 import { walkUpFrom } from "./walk-up.js";
 
 const log = logger.withTag("sentryclirc");
@@ -320,16 +324,16 @@ export function loadSentryCliRc(cwd: string): Promise<SentryCliRcConfig> {
  * - `[auth] token` → `SENTRY_AUTH_TOKEN` (if neither `SENTRY_AUTH_TOKEN` nor `SENTRY_TOKEN` is set)
  * - `[defaults] url` → `SENTRY_URL` (if both `SENTRY_HOST` and `SENTRY_URL` are unset)
  *
- * Call this once, early in the CLI boot process (before any auth or API calls).
+ * The URL is applied unconditionally at boot — the trust check is deferred
+ * to {@link assertRcUrlTrusted}, which `buildCommand` calls after Stricli
+ * identifies the command (so the command can opt out via `skipRcUrlCheck`).
  *
- * @param cwd - Current working directory for config file lookup
+ * Call this once, early in the CLI boot process (before any auth or API calls).
  */
 export async function applySentryCliRcEnvShim(cwd: string): Promise<void> {
   const config = await loadSentryCliRc(cwd);
   const env = getEnv();
 
-  // Only set token if neither SENTRY_AUTH_TOKEN nor SENTRY_TOKEN is set,
-  // since both env vars rank above .sentryclirc in the auth chain.
   if (
     config.token &&
     !env.SENTRY_AUTH_TOKEN?.trim() &&
@@ -341,12 +345,43 @@ export async function applySentryCliRcEnvShim(cwd: string): Promise<void> {
     env.SENTRY_AUTH_TOKEN = config.token;
   }
 
-  if (config.url && !env.SENTRY_HOST?.trim() && !env.SENTRY_URL?.trim()) {
+  const normalizedRcUrl = config.url ? normalizeUrl(config.url) : undefined;
+  if (normalizedRcUrl && !env.SENTRY_HOST?.trim() && !env.SENTRY_URL?.trim()) {
     log.debug(
       `Setting SENTRY_URL from ${CONFIG_FILENAME} (${config.sources.url})`
     );
-    env.SENTRY_URL = config.url;
+    env.SENTRY_URL = normalizedRcUrl;
   }
+}
+
+/**
+ * Validate that the rc-sourced URL (if any) matches the active token's
+ * scoped host. Called by `buildCommand` after Stricli identifies the
+ * command — commands that establish or tear down trust (`auth login`,
+ * `auth logout`) opt out via `skipRcUrlCheck: true`.
+ *
+ * No-op when: no rc URL was loaded, the rc URL is SaaS, or the rc URL
+ * matches the active token's host.
+ *
+ * @throws {HostScopeError} On non-SaaS URL that doesn't match the token
+ */
+export async function assertRcUrlTrusted(cwd: string): Promise<void> {
+  const config = await loadSentryCliRc(cwd);
+  const normalizedRcUrl = config.url ? normalizeUrl(config.url) : undefined;
+  // No rc URL or SaaS rc URL → always trusted (no credential leak risk).
+  if (!normalizedRcUrl || isSaaSTrustOrigin(normalizedRcUrl)) {
+    return;
+  }
+  // Non-SaaS rc URL: must match active token's host. No token at all is
+  // also a refusal — the rc URL by itself isn't a trust source.
+  const tokenHost = getActiveTokenHost();
+  if (tokenHost && isHostTrusted(normalizedRcUrl, tokenHost)) {
+    return;
+  }
+  const source = config.sources.url
+    ? `Config at ${config.sources.url}`
+    : `${CONFIG_FILENAME} [defaults] url`;
+  throw new HostScopeError(source, normalizedRcUrl, tokenHost);
 }
 
 /**

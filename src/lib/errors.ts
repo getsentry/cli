@@ -34,6 +34,47 @@ export class CliError extends Error {
 }
 
 /**
+ * Host-scoping trust violation — thrown by the fetch-layer and entry-point
+ * guards when a request's destination doesn't match the active token's
+ * scoped host.
+ *
+ * Distinct from plain `CliError` so that `withAuthGuard` can re-throw these
+ * (like `AuthError`) while still swallowing `ApiError` and other transient
+ * failures.
+ *
+ * Two construction forms:
+ * - `new HostScopeError(source, destinationUrl, tokenHost)` — standard
+ *   mismatch message used by most guard sites.
+ * - `new HostScopeError(message)` — freeform message for the login-command
+ *   refusal (different shape: "confirm with --url", not a mismatch).
+ */
+export class HostScopeError extends CliError {
+  constructor(
+    sourceOrMessage: string,
+    destinationUrl?: string,
+    tokenHost?: string | undefined
+  ) {
+    if (destinationUrl === undefined) {
+      super(sourceOrMessage);
+    } else if (tokenHost === undefined) {
+      super(
+        `${sourceOrMessage}: ${destinationUrl}\n` +
+          "Refusing to route requests to this host because no Sentry credentials are configured for it.\n" +
+          `To use this host, run: sentry auth login --url ${destinationUrl}`
+      );
+    } else {
+      super(
+        `${sourceOrMessage}: ${destinationUrl}\n` +
+          `Refusing to route requests here because it doesn't match the host your Sentry credentials are for (${tokenHost}).\n` +
+          `To use this host, run: sentry auth login --url ${destinationUrl}\n` +
+          "To keep using your current credentials, remove this URL override."
+      );
+    }
+    this.name = "HostScopeError";
+  }
+}
+
+/**
  * API request errors from Sentry.
  *
  * @param message - Error summary
@@ -606,18 +647,26 @@ export type AuthGuardFailure = { ok: false; error: unknown };
 export type AuthGuardResult<T> = AuthGuardSuccess<T> | AuthGuardFailure;
 
 /**
- * Execute an async operation, rethrowing {@link AuthError} while capturing
- * all other failures in a discriminated result.
+ * Execute an async operation, rethrowing {@link AuthError} and
+ * {@link HostScopeError} while capturing all other failures in a
+ * discriminated result.
  *
  * This is the standard "safe fetch" pattern used throughout the CLI:
- * auth errors must propagate so the auto-login flow in bin.ts can
- * trigger, but transient failures (network, 404, permissions) should
- * degrade gracefully. Callers inspect `result.ok` to decide what to do
- * and have access to the caught error via `result.error` when needed.
+ *
+ * - `AuthError` propagates so the auto-login flow in bin.ts can trigger.
+ * - `HostScopeError` propagates so the user sees the security-fix
+ *   rejection with its actionable message. Without this, host-scoping
+ *   violations would be silently swallowed into "no results" and the
+ *   caller might fall back to a second authenticated request that ALSO
+ *   trips the guard (doubling the log noise and masking the root cause).
+ *
+ * Transient failures (network, `ApiError` for 4xx/5xx, permissions) are
+ * captured in `{ ok: false, error }` so callers can degrade gracefully.
  *
  * @param fn - Async operation that may throw
- * @returns `{ ok: true, value }` on success, `{ ok: false, error }` on non-auth failure
+ * @returns `{ ok: true, value }` on success, `{ ok: false, error }` on transient failure
  * @throws {AuthError} Always re-thrown so the auto-login flow can trigger
+ * @throws {HostScopeError} Always re-thrown so host-scoping rejections surface to the user
  */
 export async function withAuthGuard<T>(
   fn: () => Promise<T>
@@ -625,7 +674,7 @@ export async function withAuthGuard<T>(
   try {
     return { ok: true, value: await fn() };
   } catch (error) {
-    if (error instanceof AuthError) {
+    if (error instanceof AuthError || error instanceof HostScopeError) {
       throw error;
     }
     return { ok: false, error };

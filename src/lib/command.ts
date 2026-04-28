@@ -165,6 +165,14 @@ type LocalCommandBuilderArguments<
    * (e.g. `auth login`, `auth logout`, `auth status`, `help`, `cli upgrade`).
    */
   readonly auth?: boolean;
+  /**
+   * Skip the `.sentryclirc` URL trust check. Defaults to `false`.
+   *
+   * Set to `true` for commands that establish or tear down host trust
+   * (`auth login`, `auth logout`) — they must run even when a
+   * repo-local `.sentryclirc` URL mismatches the current token.
+   */
+  readonly skipRcUrlCheck?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -344,6 +352,7 @@ export function buildCommand<
   const originalFunc = builderArgs.func;
   const outputConfig = builderArgs.output;
   const requiresAuth = builderArgs.auth !== false;
+  const skipRcUrlCheck = builderArgs.skipRcUrlCheck === true;
 
   // Merge logging flags into the command's flag definitions.
   // Quoted keys produce kebab-case CLI flags: "log-level" → --log-level
@@ -606,6 +615,13 @@ export function buildCommand<
     try {
       if (requiresAuth && !getAuthConfig()) {
         throw new AuthError("not_authenticated");
+      }
+
+      // Validate rc-sourced URL against the active token's host. Deferred
+      // to here (instead of boot) so commands can opt out via skipRcUrlCheck.
+      if (!skipRcUrlCheck && "cwd" in this) {
+        const { assertRcUrlTrusted } = await import("./sentryclirc.js");
+        await assertRcUrlTrusted(this.cwd as string);
       }
 
       // Execution phase: core command logic, API calls, org/project resolution

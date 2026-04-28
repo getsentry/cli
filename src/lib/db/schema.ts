@@ -16,7 +16,7 @@ import { getEnv } from "../env.js";
 import { stringifyUnknown } from "../errors.js";
 import { logger } from "../logger.js";
 
-export const CURRENT_SCHEMA_VERSION = 15;
+export const CURRENT_SCHEMA_VERSION = 16;
 
 /** Environment variable to disable auto-repair */
 const NO_AUTO_REPAIR_ENV = "SENTRY_CLI_NO_AUTO_REPAIR";
@@ -66,6 +66,11 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
         notNull: true,
         default: "(unixepoch() * 1000)",
       },
+      // Origin URL (scheme://host[:port]) this token was issued against.
+      // Enforced at the fetch layer: credentials are only attached to requests
+      // whose origin matches this host (with SaaS equivalence). Nullable for
+      // rows created before schema v16; migrated lazily in getAuthConfig.
+      host: { type: "TEXT", addedInVersion: 16 },
     },
   },
 
@@ -837,6 +842,15 @@ export function runMigrations(db: Database): void {
   // `/api/0/issues/{id}/` endpoint on repeat runs.
   if (currentVersion < 15) {
     db.exec(EXPECTED_TABLES.issue_org_cache as string);
+  }
+
+  // Migration 15 -> 16: Add host column to auth table for host-scoped tokens.
+  // The column is NULL for existing rows; getAuthConfig lazily backfills it
+  // with the currently-configured host on first access after upgrade, so
+  // users who already have SENTRY_HOST/SENTRY_URL set at upgrade time are
+  // migrated cleanly to the host-scoped model.
+  if (currentVersion < 16) {
+    addColumnIfMissing(db, "auth", "host", "TEXT");
   }
 
   if (currentVersion < CURRENT_SCHEMA_VERSION) {

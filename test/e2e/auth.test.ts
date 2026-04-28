@@ -79,7 +79,14 @@ describe("sentry auth login --token", () => {
   test(
     "stores valid API token",
     async () => {
-      const result = await ctx.run(["auth", "login", "--token", TEST_TOKEN]);
+      const result = await ctx.run([
+        "auth",
+        "login",
+        "--token",
+        TEST_TOKEN,
+        "--url",
+        ctx.serverUrl,
+      ]);
 
       // Login messages go to stderr via consola
       const output = result.stdout + result.stderr;
@@ -153,12 +160,14 @@ describe("sentry auth logout", () => {
   test(
     "clears stored auth",
     async () => {
-      // First login
+      // First login (--url required for non-SaaS mock server)
       const loginResult = await ctx.run([
         "auth",
         "login",
         "--token",
         TEST_TOKEN,
+        "--url",
+        ctx.serverUrl,
       ]);
       expect(loginResult.exitCode).toBe(0);
 

@@ -18,14 +18,21 @@ import {
 } from "./constants.js";
 import { applyCustomHeaders } from "./custom-headers.js";
 import { getAuthToken, refreshToken } from "./db/auth.js";
-import { TimeoutError } from "./errors.js";
+import { HostScopeError, TimeoutError } from "./errors.js";
 import { logger } from "./logger.js";
 import {
   getCachedResponse,
   invalidateCachedResponsesMatching,
   storeCachedResponse,
 } from "./response-cache.js";
+import { normalizeOrigin } from "./sentry-urls.js";
 import { withTracingSpan } from "./telemetry.js";
+import { parseSntrysClaim } from "./token-claims.js";
+import {
+  getActiveTokenHost,
+  isHostTrustedForClaim,
+  isRequestOriginTrusted,
+} from "./token-host.js";
 
 const log = logger.withTag("http");
 
@@ -100,6 +107,30 @@ function prepareHeaders(
   init: RequestInit | undefined,
   token: string
 ): Headers {
+  // Host-scoping guard (defense in depth). Primary rejection happens at the
+  // URL-arg / rc-shim entry points; this catches any code path that mutated
+  // SENTRY_HOST/SENTRY_URL without going through those guards.
+  if (!isRequestOriginTrusted(input)) {
+    throw new HostScopeError(
+      "Credentials",
+      normalizeOrigin(input) ?? "<unknown host>",
+      getActiveTokenHost()
+    );
+  }
+
+  // sntrys_ claim check — defense-in-depth for users with access to
+  // multiple Sentry instances. The claim is unsigned (see token-claims.ts);
+  // fail-open on parse errors. Uses isHostTrustedForClaim so multi-region
+  // fan-out via the control silo's region URLs still works.
+  const claimUrl = parseSntrysClaim(token)?.url;
+  if (claimUrl && !isHostTrustedForClaim(input, claimUrl)) {
+    throw new HostScopeError(
+      "Credentials",
+      normalizeOrigin(input) ?? "<unknown host>",
+      claimUrl
+    );
+  }
+
   // When the SDK calls fetch(request) with no init, read headers from the Request
   // object to preserve Content-Type. On Node.js, fetch(request, {headers}) replaces
   // the Request's headers entirely per spec, so we must carry them forward explicitly.
@@ -123,8 +154,9 @@ function prepareHeaders(
     headers.set("baggage", traceData.baggage);
   }
 
-  // Inject user-configured custom headers for self-hosted proxies (IAP, mTLS, etc.)
-  applyCustomHeaders(headers);
+  // Inject user-configured custom headers for self-hosted proxies (IAP,
+  // mTLS, etc.) — scoped to the request URL.
+  applyCustomHeaders(headers, input);
 
   return headers;
 }

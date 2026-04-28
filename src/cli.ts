@@ -11,6 +11,8 @@
  */
 
 import { getEnv } from "./lib/env.js";
+import { captureEnvTokenHost } from "./lib/env-token-host.js";
+import { CliError } from "./lib/errors.js";
 import { applySentryCliRcEnvShim } from "./lib/sentryclirc.js";
 
 /**
@@ -20,6 +22,11 @@ import { applySentryCliRcEnvShim } from "./lib/sentryclirc.js";
  * to `findProjectRoot` and `loadSentryCliRc` are cache hits.
  */
 async function preloadProjectContext(cwd: string): Promise<void> {
+  // Snapshot env-token host BEFORE anything mutates env.SENTRY_HOST/URL
+  // (the .sentryclirc shim or the default-URL fallback below). Pins the
+  // env-token's trust scope to the user's shell, not a repo-local file.
+  captureEnvTokenHost();
+
   // Dynamic import keeps the heavy DSN/DB modules out of the completion fast-path
   const [{ findProjectRoot }, { setCachedProjectRoot }] = await Promise.all([
     import("./lib/dsn/project-root.js"),
@@ -32,13 +39,12 @@ async function preloadProjectContext(cwd: string): Promise<void> {
     reason: result.reason,
   });
 
-  // Apply .sentryclirc env shim (token, URL) — sentryclirc cache was
-  // populated as a side effect of findProjectRoot's walk
+  // Apply .sentryclirc env shim (token + URL). The URL trust check is
+  // deferred to buildCommand's wrapper where commands can opt out via
+  // skipRcUrlCheck (used by auth login/logout).
   await applySentryCliRcEnvShim(cwd);
 
   // Apply persistent URL default (lower priority than env vars and .sentryclirc).
-  // Same mechanism as .sentryclirc — writes to env.SENTRY_URL so all downstream
-  // URL resolution code picks it up automatically.
   const env = getEnv();
   if (!(env.SENTRY_HOST?.trim() || env.SENTRY_URL?.trim())) {
     try {
@@ -467,11 +473,18 @@ export async function startCli(): Promise<void> {
 
   // Walk up from CWD once to find project root AND .sentryclirc config.
   // Caches both so later findProjectRoot / loadSentryCliRc calls are hits.
-  // Non-fatal — the CLI can still work via env vars and DSN detection.
+  // Most failures here are non-fatal (unreadable rc file, missing project
+  // markers), but `CliError` from the rc shim's host-scoping check is an
+  // actionable rejection that must surface to the user.
   try {
     await preloadProjectContext(process.cwd());
-  } catch {
-    // Gracefully degrade: project context is optional for CLI operation.
+  } catch (err) {
+    if (err instanceof CliError) {
+      process.stderr.write(`${err.format()}\n`);
+      process.exitCode = err.exitCode;
+      return;
+    }
+    // Gracefully degrade: project context is optional.
   }
 
   return runCli(args).catch((err) => {

@@ -138,3 +138,86 @@ export function useTestConfigDir(
 
   return () => dir;
 }
+
+/**
+ * Save/restore a set of `process.env` keys around each test in a `describe`
+ * block. Saved values are restored verbatim in `afterEach`; missing keys are
+ * deleted on restore. Each test starts with all listed keys cleared.
+ *
+ * Use for security/host-scoping tests where env vars influence the code path
+ * being tested. Keeps the boilerplate `Object.fromEntries(KEYS.map(...))`
+ * out of every test file.
+ *
+ * Must be called at module scope or inside a `describe()` block.
+ */
+export function useEnvSandbox(keys: readonly string[]): void {
+  let saved: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+    for (const k of keys) {
+      delete process.env[k];
+    }
+  });
+
+  afterEach(() => {
+    for (const k of keys) {
+      const v = saved[k];
+      if (v !== undefined) {
+        process.env[k] = v;
+      } else {
+        delete process.env[k];
+      }
+    }
+  });
+}
+
+/**
+ * Reset the in-process host-scoping state (env-token snapshot, login trust
+ * anchor, region-URL trust extension). Tests that mutate any of these
+ * should call this in `beforeEach` and `afterEach` to avoid bleeding state
+ * between cases.
+ */
+export async function resetHostScopingState(): Promise<void> {
+  const [
+    { resetEnvTokenHostForTesting },
+    regions,
+    { resetLoginTrustAnchorForTesting },
+  ] = await Promise.all([
+    import("../src/lib/env-token-host.js"),
+    import("../src/lib/db/regions.js"),
+    import("../src/lib/token-host.js"),
+  ]);
+  resetEnvTokenHostForTesting();
+  regions.resetTrustedRegionUrlsForTesting();
+  resetLoginTrustAnchorForTesting();
+}
+
+/**
+ * Mint a `sntrys_<base64-payload>_<secret>` token shape for tests, matching
+ * the server's `generate_token` format
+ * (`getsentry/sentry/src/sentry/utils/security/orgauthtoken_token.py`).
+ *
+ * The secret tail is a fixed placeholder — its content is irrelevant to
+ * parsing. Padding `=` is stripped to match the server's `b64encode().rstrip("=")`.
+ */
+export function mintSntrysToken(payload: Record<string, unknown>): string {
+  const json = JSON.stringify(payload);
+  const b64 = Buffer.from(json, "utf8").toString("base64").replace(/=+$/, "");
+  return `sntrys_${b64}_test-secret-tail`;
+}
+
+/**
+ * Extract the URL string from a fetch input (`string | URL | Request`).
+ * Used by tests that intercept `globalThis.fetch` and assert on the
+ * destination URLs of captured calls.
+ */
+export function extractFetchUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  if (input instanceof URL) {
+    return input.href;
+  }
+  return input.url;
+}

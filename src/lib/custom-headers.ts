@@ -27,6 +27,7 @@ import { getEnv } from "./env.js";
 import { ConfigError } from "./errors.js";
 import { logger } from "./logger.js";
 import { isSentrySaasUrl } from "./sentry-urls.js";
+import { isRequestOriginTrustedForCustomHeaders } from "./token-host.js";
 
 const log = logger.withTag("custom-headers");
 
@@ -65,6 +66,9 @@ let cachedRawSource: string | undefined;
 
 /** Whether the SaaS warning has already been logged this session. */
 let saasWarningLogged = false;
+
+/** Whether the untrusted-destination warning has already been logged. */
+let untrustedDestinationWarningLogged = false;
 
 /**
  * Parse a raw custom headers string into validated name/value pairs.
@@ -195,15 +199,40 @@ export function getCustomHeaders(): readonly [string, string][] {
 }
 
 /**
- * Apply custom headers to a `Headers` instance.
+ * Apply custom headers to a `Headers` instance, scoped to a request URL.
  *
- * Reads from the env var or SQLite defaults, validates, and sets each header.
- * No-op when no custom headers are configured or when targeting SaaS.
+ * Reads from the env var or SQLite defaults, validates, and sets each header,
+ * but ONLY when `requestUrl`'s origin matches the active token's trust class
+ * (or, in the no-token bootstrap window, the explicit `--url` login anchor).
+ * This prevents `SENTRY_CUSTOM_HEADERS` (IAP tokens, mTLS headers) from
+ * leaking to a host the user didn't authenticate against.
+ *
+ * Fails closed when no token and no login anchor are present — see
+ * {@link isRequestOriginTrustedForCustomHeaders}.
  *
  * @param headers - The `Headers` instance to modify in-place
+ * @param requestUrl - The destination URL whose origin is checked
  */
-export function applyCustomHeaders(headers: Headers): void {
+export function applyCustomHeaders(
+  headers: Headers,
+  requestUrl: string | URL | Request
+): void {
   const customHeaders = getCustomHeaders();
+  if (customHeaders.length === 0) {
+    return;
+  }
+
+  if (!isRequestOriginTrustedForCustomHeaders(requestUrl)) {
+    if (!untrustedDestinationWarningLogged) {
+      untrustedDestinationWarningLogged = true;
+      log.warn(
+        "Skipping custom headers for request to untrusted host. " +
+          "If this is legitimate, run 'sentry auth login --url <url>' against the intended instance."
+      );
+    }
+    return;
+  }
+
   for (const [name, value] of customHeaders) {
     headers.set(name, value);
   }
@@ -217,4 +246,5 @@ export function _resetCustomHeadersCache(): void {
   cachedHeaders = undefined;
   cachedRawSource = undefined;
   saasWarningLogged = false;
+  untrustedDestinationWarningLogged = false;
 }
