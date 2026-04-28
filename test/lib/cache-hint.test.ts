@@ -15,6 +15,7 @@ import {
 import {
   clearLastCacheHitAge,
   getLastCacheHitAge,
+  setLastCacheHitAgeForTesting,
 } from "../../src/lib/response-cache.js";
 
 describe("formatAge", () => {
@@ -60,6 +61,24 @@ describe("formatCacheHint", () => {
     expect(getLastCacheHitAge()).toBeUndefined();
     expect(formatCacheHint()).toBeUndefined();
   });
+
+  test("returns formatted hint when cache hit recorded (3m)", () => {
+    setLastCacheHitAgeForTesting(180_000);
+    expect(formatCacheHint()).toBe("cached · 3m ago · use -f to refresh");
+    clearLastCacheHitAge();
+  });
+
+  test("returns formatted hint when cache hit recorded (just now)", () => {
+    setLastCacheHitAgeForTesting(0);
+    expect(formatCacheHint()).toBe("cached · just now · use -f to refresh");
+    clearLastCacheHitAge();
+  });
+
+  test("returns formatted hint when cache hit recorded (2h)", () => {
+    setLastCacheHitAgeForTesting(2 * 60 * 60_000);
+    expect(formatCacheHint()).toBe("cached · 2h ago · use -f to refresh");
+    clearLastCacheHitAge();
+  });
 });
 
 describe("appendCacheHint", () => {
@@ -71,5 +90,28 @@ describe("appendCacheHint", () => {
   test("returns existing hint unchanged when no cache hit", () => {
     clearLastCacheHitAge();
     expect(appendCacheHint("Tip: use -v")).toBe("Tip: use -v");
+  });
+
+  test("returns just the cache hint when no existing hint", () => {
+    setLastCacheHitAgeForTesting(180_000);
+    expect(appendCacheHint(undefined)).toBe(
+      "cached · 3m ago · use -f to refresh"
+    );
+    clearLastCacheHitAge();
+  });
+
+  test("joins existing and cache hints with ' | ' separator", () => {
+    setLastCacheHitAgeForTesting(180_000);
+    expect(appendCacheHint("Showing 5 issues")).toBe(
+      "Showing 5 issues | cached · 3m ago · use -f to refresh"
+    );
+    clearLastCacheHitAge();
+  });
+
+  test("treats empty existing hint as falsy (no separator)", () => {
+    setLastCacheHitAgeForTesting(180_000);
+    // Empty string is falsy — appendCacheHint returns just the cache hint.
+    expect(appendCacheHint("")).toBe("cached · 3m ago · use -f to refresh");
+    clearLastCacheHitAge();
   });
 });

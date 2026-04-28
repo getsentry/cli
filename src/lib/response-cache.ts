@@ -345,6 +345,16 @@ export function clearLastCacheHitAge(): void {
   lastCacheHitAgeMs = undefined;
 }
 
+/**
+ * Set the last cache-hit age directly. Test-only — production code paths
+ * set this implicitly via {@link getCachedResponse} on a real cache hit.
+ *
+ * @internal Exported for testing
+ */
+export function setLastCacheHitAgeForTesting(ageMs: number): void {
+  lastCacheHitAgeMs = ageMs;
+}
+
 // ---------------------------------------------------------------------------
 // Cache bypass control
 // ---------------------------------------------------------------------------

@@ -772,7 +772,9 @@ export function buildCommand<
       // Render phase: output finalization.
       // Append cache-age hint automatically so every command gets
       // "cached · 3m ago · use -f to refresh" when data was cached.
-      const finalHint = appendCacheHint(returned?.hint);
+      // Skip bare `return;` paths (e.g. `--web` which opens a browser
+      // without yielding) — no rendered output should mean no footer.
+      const finalHint = returned ? appendCacheHint(returned.hint) : undefined;
       await withTracing("render", "cli.command.render", () => {
         writeFinalization(stdout, finalHint, cleanFlags.json, renderer);
       });

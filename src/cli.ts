@@ -149,6 +149,28 @@ type ErrorMiddleware = (
 ) => Promise<void>;
 
 /**
+ * Rewrite top-level `--help` / `-h` to invoke the branded help command.
+ *
+ * Stricli's built-in `--help` at the root level renders a terse template
+ * without the Flags or Environment Variables sections. By rewriting to
+ * `["help", ...]`, the args flow through `defaultCommand: "help"` →
+ * `helpCommand` → `printCustomHelp()`, which shows the branded output.
+ *
+ * Subcommand help (e.g. `sentry issue --help`) is left to Stricli since
+ * it renders command-specific flags and usage.
+ */
+function rewriteTopLevelHelp(args: string[]): string[] {
+  const nonFlagArgs = args.filter((a) => !a.startsWith("-"));
+  const isTopLevel =
+    nonFlagArgs.length === 0 &&
+    (args.includes("--help") || args.includes("-h"));
+  if (!isTopLevel) {
+    return args;
+  }
+  return ["help", ...args.filter((a) => a !== "--help" && a !== "-h")];
+}
+
+/**
  * Full CLI execution with telemetry, middleware, and error recovery.
  *
  * All heavy imports are loaded here (not at module top level) so the
@@ -402,8 +424,10 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     maybeCheckForUpdateInBackground();
   }
 
+  const effectiveArgs = rewriteTopLevelHelp(hoistedArgs);
+
   try {
-    await executor(hoistedArgs);
+    await executor(effectiveArgs);
 
     // When Stricli can't match a subcommand in a route group (e.g.,
     // `sentry dashboard help`), it writes "No command registered for `help`"

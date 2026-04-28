@@ -48,6 +48,10 @@ export function formatAge(ms: number): string {
  * Build a cache-age hint string, or `undefined` when the last request was
  * not served from cache.
  *
+ * When multiple API calls run in parallel (e.g. `Promise.all`), the
+ * displayed age corresponds to whichever resolves last — acceptable
+ * since all hits share similar ages in practice.
+ *
  * Example output: `"cached · 3m ago · use -f to refresh"`
  */
 export function formatCacheHint(): string | undefined {
