@@ -11,6 +11,7 @@ import { join } from "node:path";
 import {
   resetAuthRowCache,
   resetAuthTokenCache,
+  resetHasStoredCredsCache,
   resetIdentityFingerprintCache,
 } from "../src/lib/db/auth.js";
 import { CONFIG_DIR_ENV_VAR, closeDatabase } from "../src/lib/db/index.js";
@@ -113,6 +114,7 @@ export function useTestConfigDir(
     // Fresh DB — drop module-scoped auth caches from the previous test.
     resetAuthTokenCache();
     resetAuthRowCache();
+    resetHasStoredCredsCache();
     resetIdentityFingerprintCache();
     dir = await createTestConfigDir(prefix, options);
     process.env[CONFIG_DIR_ENV_VAR] = dir;
@@ -122,6 +124,7 @@ export function useTestConfigDir(
     closeDatabase();
     resetAuthTokenCache();
     resetAuthRowCache();
+    resetHasStoredCredsCache();
     resetIdentityFingerprintCache();
     // Always restore the previous value — never delete.
     // Deleting process.env.SENTRY_CONFIG_DIR causes failures in test files
