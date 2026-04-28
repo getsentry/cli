@@ -362,7 +362,7 @@ function resolveSort(
 /** Build the result hint string from pagination state and row count */
 function buildResultHint(rowCount: number, nav: string): string | undefined {
   if (rowCount === 0 && nav) {
-    return `No results on this page. ${nav}`;
+    return nav;
   }
   if (rowCount > 0) {
     const countText = `Showing ${rowCount} result${rowCount === 1 ? "" : "s"}.`;
