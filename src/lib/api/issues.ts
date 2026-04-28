@@ -28,6 +28,17 @@ import {
 const TRAILING_SLASH_RE = /\/$/;
 
 /**
+ * Maximum length for the search query parameter (before URL encoding).
+ *
+ * Most HTTP servers/load balancers limit total URL length to ~8KB.
+ * With URL encoding overhead (~3x for non-ASCII) and other query params
+ * (project, cursor, sort, collapse, statsPeriod), 4KB for the query
+ * value alone is a safe threshold. Exceeding this causes the Sentry API
+ * to return 400 Bad Request with no actionable detail.
+ */
+const MAX_QUERY_LENGTH = 4096;
+
+/**
  * Sort options for issue listing, derived from the @sentry/api SDK types.
  * Uses the SDK type directly for compile-time safety against parameter drift.
  */
@@ -137,6 +148,22 @@ export async function listIssuesPaginated(
     projectFilter = `project:${projectSlug}`;
   }
   const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
+
+  // Guard against excessively long query strings that would cause the API
+  // server to reject the request with 400 Bad Request. Most HTTP servers
+  // limit URL length to ~8KB; with URL encoding overhead, a 4KB query
+  // value is a safe threshold. This provides a clearer error message than
+  // the API's generic "400 Bad Request" response.
+  if (fullQuery.length > MAX_QUERY_LENGTH) {
+    throw new ValidationError(
+      `Query is too long (${fullQuery.length} characters, max ${MAX_QUERY_LENGTH}).\n` +
+        "  Try narrowing your search:\n" +
+        "  • Use fewer OR terms\n" +
+        "  • Filter by time range with --period 14d\n" +
+        "  • Use project-level filters instead of listing individual IDs",
+      "query"
+    );
+  }
 
   const config = await getOrgSdkConfig(orgSlug);
 

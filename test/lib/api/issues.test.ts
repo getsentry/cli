@@ -7,6 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  listIssuesPaginated,
   mergeIssues,
   parseResolveSpec,
   RESOLVE_COMMIT_EXPLICIT_PREFIX,
@@ -291,6 +292,51 @@ describe("mergeIssues: cross-origin legacy cache", () => {
 
     for (const id of ["100", "200", "300"]) {
       expect(await getCachedResponse("GET", legacyUrl(id), {})).toBeUndefined();
+    }
+  });
+});
+
+describe("listIssuesPaginated: query length guard", () => {
+  useTestConfigDir("issues-query-len-");
+
+  beforeEach(async () => {
+    await setAuthToken("test-token", 3600, "test-refresh");
+  });
+
+  test("rejects excessively long query strings with ValidationError", async () => {
+    // Generate a query longer than 4096 characters
+    const longQuery = "id:" + Array.from({ length: 500 }, (_, i) => `PROJ-${i}`).join(" OR id:");
+
+    await expect(
+      listIssuesPaginated("test-org", "test-project", { query: longQuery })
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  test("rejects long query with helpful message", async () => {
+    const longQuery = "x".repeat(5000);
+
+    try {
+      await listIssuesPaginated("test-org", "test-project", { query: longQuery });
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as ValidationError).message).toContain("Query is too long");
+      expect((error as ValidationError).message).toContain("max 4096");
+    }
+  });
+
+  test("accepts queries within the length limit", async () => {
+    const shortQuery = "is:unresolved level:error";
+
+    // This will fail at the API level (no mock), but it should NOT
+    // throw ValidationError — it should get past the length check
+    try {
+      await listIssuesPaginated("test-org", "test-project", {
+        query: shortQuery,
+      });
+    } catch (error) {
+      // Expected: API error (no mock fetch), but NOT a ValidationError
+      expect(error).not.toBeInstanceOf(ValidationError);
     }
   });
 });
