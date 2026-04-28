@@ -292,7 +292,7 @@ export function appendSortHint(
   defaultSort?: string
 ): void {
   if (sort && sort !== defaultSort) {
-    parts.push(`--sort ${sort}`);
+    parts.push(`--sort "${sort}"`);
   }
 }
 
