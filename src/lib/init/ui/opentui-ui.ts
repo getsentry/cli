@@ -107,6 +107,32 @@ function severityForStopCode(code: SpinnerExitCode): LogSeverity {
 }
 
 /**
+ * Embed `opentui-app.tsx` as a Bun-compile file resource.
+ *
+ * `with { type: "file" }` tells Bun.compile to copy the raw .tsx
+ * bytes into the binary's virtual filesystem and replace the import
+ * specifier with the embedded path string at runtime. The
+ * `text-import-plugin.ts` polyfill in `script/build.ts` mirrors this
+ * for the esbuild step (copies the file alongside the bundle and
+ * leaves the import external).
+ *
+ * Why this indirection? The React tree statically imports
+ * `react` + `@opentui/react`. When Bun.compile bundles those imports
+ * through its `__commonJS` + `__esm` async-init wrappers it generates
+ * malformed code (a TDZ `init_react` symbol embedded in expression
+ * scope), and the resulting binary crashes at startup with a parse
+ * error. Embedding the .tsx as raw bytes pushes the React resolution
+ * to Bun's runtime — which doesn't have the bug — at the cost of a
+ * small first-invocation parse overhead.
+ *
+ * The npm/Node distribution never reaches `createOpenTuiUI()` (the
+ * factory routes there only on the Bun binary), so this import is
+ * harmless for the npm bundle.
+ */
+// @ts-expect-error: `with { type: "file" }` is Bun-specific and not yet typed in @types/bun
+import opentuiAppPath from "./opentui-app.tsx" with { type: "file" };
+
+/**
  * Async factory for `OpenTuiUI`. Imports `@opentui/core`,
  * `@opentui/react`, `react`, and the local `App` component lazily,
  * mounts the React tree, and returns the bridge instance. Throws if
@@ -121,7 +147,13 @@ export async function createOpenTuiUI(): Promise<OpenTuiUI> {
   const core = await import("@opentui/core");
   const reactBindings = await import("@opentui/react");
   const react = await import("react");
-  const app = await import("./opentui-app.js");
+  // See the comment on the `opentuiAppPath` import above for why
+  // this goes through the embedded-file path rather than a plain
+  // `import("./opentui-app.js")`. The cast preserves typing against
+  // the source module so `app.App` keeps its component signature.
+  const app = (await import(
+    opentuiAppPath
+  )) as typeof import("./opentui-app.js");
 
   const renderer = await core.createCliRenderer({
     exitOnCtrlC: false,

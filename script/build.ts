@@ -124,7 +124,34 @@ async function bundleJs(): Promise<boolean> {
       platform: "node",
       target: "esnext",
       format: "esm",
-      external: ["bun:*"],
+      // Externalize the OpenTUI + React stack from the esbuild
+      // bundling step. Two reasons:
+      //
+      //   1. `@opentui/core` ships Bun-specific
+      //      `import "..." with { type: "file" }` syntax for
+      //      tree-sitter assets (`*.scm`, `*.wasm`) that esbuild
+      //      doesn't understand. Bun.compile downstream resolves
+      //      them natively and embeds the assets into the binary.
+      //
+      //   2. `react`'s CJS jsx-runtime, when pulled into esbuild's
+      //      `__commonJS` wrappers and re-bundled by Bun.compile,
+      //      produces malformed output containing a TDZ
+      //      `init_react` symbol embedded in the wrong scope. We
+      //      sidestep this by keeping React out of esbuild AND
+      //      reaching it only through the embedded `opentui-app.tsx`
+      //      asset (see `src/lib/init/ui/opentui-ui.ts`'s
+      //      `with { type: "file" }` import) — Bun's runtime
+      //      resolves React fresh at first invocation, outside the
+      //      buggy bundler path.
+      external: [
+        "bun:*",
+        "@opentui/core",
+        "@opentui/core/*",
+        "@opentui/react",
+        "@opentui/react/*",
+        "react",
+        "react/*",
+      ],
       sourcemap: "linked",
       // Minify syntax and whitespace but NOT identifiers. Bun.build
       minify: true,
@@ -480,8 +507,12 @@ async function build(): Promise<void> {
   // Step 3: Upload the composed sourcemap to Sentry (after compilation)
   await uploadSourcemapToSentry();
 
-  // Clean up intermediate bundle (only the binaries are artifacts)
-  await $`rm -f ${BUNDLE_JS} ${SOURCEMAP_FILE}`;
+  // Clean up intermediate bundle (only the binaries are artifacts).
+  // The `opentui-app.tsx` copy comes from the text-import-plugin's
+  // `with { type: "file" }` handling — it gets embedded into the
+  // compiled binary, so the sidecar copy is no longer needed once
+  // every target has compiled.
+  await $`rm -f ${BUNDLE_JS} ${SOURCEMAP_FILE} dist-bin/opentui-app.tsx`;
 
   // Summary
   console.log(`\n${"=".repeat(40)}`);
