@@ -121,6 +121,15 @@ export type ConfirmOptions = {
 export type WizardUI = AsyncDisposable & {
   // ── Lifecycle messages ────────────────────────────────────────────
 
+  /**
+   * Display the multi-line ASCII banner. Implementations decide where
+   * the banner appears: `OpenTuiUI` paints it inside its alternate-
+   * screen header (the call may be a no-op if the header already shows
+   * it), while `LoggingUI` writes the pre-styled ANSI string to stderr.
+   * Always called once, before `intro()`.
+   */
+  banner(art: string): void;
+
   /** Display the wizard intro banner / heading. */
   intro(title: string): void;
 

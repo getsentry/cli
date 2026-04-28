@@ -333,10 +333,15 @@ async function preamble(
     );
   }
 
-  // Push the banner through the UI so OpenTuiUI's alternate-screen
-  // buffer captures it. Writing to stderr directly would land on the
-  // main screen and be hidden by OpenTUI's screen takeover.
-  ui.log.message(formatBanner());
+  // Banner rendering is delegated to the UI implementation:
+  //   - `OpenTuiUI` paints the banner inside its alternate-screen
+  //     header, gradient-colored row by row, and treats `banner()` as
+  //     a no-op (the layout already includes it).
+  //   - `LoggingUI` writes a plain ANSI version to stderr.
+  // Calling it on `ui` directly avoids the previous bug where a raw
+  // `process.stderr.write` was hidden behind OpenTUI's alternate-
+  // screen takeover.
+  ui.banner(formatBanner());
   ui.intro("sentry init");
 
   let confirmed: boolean;

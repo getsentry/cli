@@ -24,6 +24,7 @@ import {
 } from "../../../../src/lib/init/ui/types.js";
 
 export type MockCall =
+  | { kind: "banner"; art: string }
   | { kind: "intro"; title: string }
   | { kind: "outro"; message: string }
   | { kind: "cancel"; message: string }
@@ -105,6 +106,7 @@ export function createMockUI(): {
   }
 
   const ui: WizardUI = {
+    banner: (art) => calls.push({ kind: "banner", art }),
     intro: (title) => calls.push({ kind: "intro", title }),
     outro: (message) => calls.push({ kind: "outro", message }),
     cancel: (message) => calls.push({ kind: "cancel", message }),

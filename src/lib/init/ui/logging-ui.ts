@@ -80,6 +80,12 @@ export class LoggingUI implements WizardUI {
 
   // ── Lifecycle ─────────────────────────────────────────────────────
 
+  banner(art: string): void {
+    // Plain stderr write, no markdown rendering — the banner already
+    // contains its own ANSI styling and shouldn't be re-processed.
+    this.stderr.write(`\n${art}\n\n`);
+  }
+
   intro(title: string): void {
     this.writeLine(this.stdout, title);
   }

@@ -3,46 +3,55 @@
  * `@opentui/core`.
  *
  * The renderer takes over the terminal in alternate-screen mode for the
- * duration of the run, restoring the main screen on dispose. The layout
- * is a vertical flex column:
+ * duration of the run, restoring the main screen on dispose.
  *
- *   ┌──────────────────────────────────────────┐
- *   │ Header (intro title)                     │
- *   ├──────────────────────────────────────────┤
- *   │ Log pane (scrollable, append-only)       │
- *   │   info: ...                              │
- *   │   warn: ...                              │
- *   │   ...                                    │
- *   ├──────────────────────────────────────────┤
- *   │ Spinner block (single line, animated)    │
- *   ├──────────────────────────────────────────┤
- *   │ Prompt area (transient — Select/Input)   │
- *   └──────────────────────────────────────────┘
+ * Visual layout:
  *
- * Prompt methods mount a focused Select renderable into the prompt
- * area, await user input, then unmount it. Cancellation (Ctrl+C or
- * Escape) resolves with the shared `CANCELLED` sentinel.
+ *   ╔══════════════════════════════════════════════════════════════╗
+ *   ║  ███████╗███████╗███╗   ██╗████████╗██████╗ ██╗   ██╗        ║  banner
+ *   ║  ██╔════╝██╔════╝████╗  ██║╚══██╔══╝██╔══██╗╚██╗ ██╔╝        ║  (gradient,
+ *   ║  ███████╗█████╗  ██╔██╗ ██║   ██║   ██████╔╝ ╚████╔╝         ║   one Text
+ *   ║  ╚════██║██╔══╝  ██║╚██╗██║   ██║   ██╔══██╗  ╚██╔╝          ║   per row)
+ *   ║  ███████║███████╗██║ ╚████║   ██║   ██║  ██║   ██║           ║
+ *   ║  ╚══════╝╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝   ╚═╝           ║
+ *   ║                                                              ║
+ *   ║  ▸ sentry init                                               ║  intro
+ *   ╠══════════════════════════════════════════════════════════════╣
+ *   ║                                                              ║
+ *   ║  ●  Auto-confirmed: continuing                               ║  log pane
+ *   ║  ●  Detected platform: javascript-react                      ║  (icon-prefixed,
+ *   ║  ▲  Source maps not configured                               ║   colored)
+ *   ║                                                              ║
+ *   ║  ◒  Installing dependencies…                                 ║  spinner
+ *   ║                                                              ║
+ *   ║  Which organization should the project be created in?        ║  prompt area
+ *   ║   ▸ acme                                                     ║  (transient)
+ *   ║     beta                                                     ║
+ *   ╚══════════════════════════════════════════════════════════════╝
+ *
+ * ## Implementation notes
+ *
+ * **Renderable classes, not VNode factories.** `Box()`/`Text()`/`Select()`
+ * factories return `ProxiedVNode`s that queue mutations into a
+ * `__pendingCalls` array; those calls only flush at instantiation time.
+ * Mutating a stored VNode reference after first render is a no-op. We
+ * use `BoxRenderable` / `TextRenderable` / `SelectRenderable`
+ * constructors directly so we have live instances we can mutate in
+ * place for spinner ticks, log appends, prompt mount/unmount.
+ *
+ * **No ANSI in `content`.** OpenTUI's `TextRenderable` treats its
+ * `content` string as opaque text — embedded ANSI escape sequences are
+ * drawn as literal characters, producing the "jagged" look. We strip
+ * ANSI from incoming messages and apply colors via the `fg` prop on
+ * separate `TextRenderable`s (one per styled span when needed).
  *
  * **Bun-only.** OpenTUI's native bindings ship as Zig — they don't run
  * on the npm/Node distribution. The factory in `factory.ts` only routes
- * here when running inside the Bun-compiled binary; on Node it falls
- * back to `LoggingUI`. Importing this module on Node will fail at
- * runtime when the OpenTUI native loader can't find its binary.
+ * here when running inside the Bun-compiled binary.
  *
- * **Lazy import.** The `@opentui/core` import is dynamic — `getUIAsync()`
- * builds an `OpenTuiUI` instance asynchronously so the npm bundle
- * (which excludes `@opentui/core` from the bundle graph) doesn't see
- * the import at module-load time.
- *
- * **Why Renderable classes, not the `Box()`/`Text()` factories.** The
- * factory functions return `VNode` proxies that queue mutations into a
- * `__pendingCalls` array. Those queued calls only flush at instantiation
- * time (when the VNode gets added to a parent). Subsequent mutations on
- * the stored VNode reference never reach the live Renderable instance,
- * so `vnode.content = "x"` is a no-op after first render. Instantiating
- * `BoxRenderable` / `TextRenderable` / `SelectRenderable` directly
- * bypasses the proxy and gives us live instances we can mutate in place
- * for the spinner tick, log appends, and prompt mount/unmount cycles.
+ * **Lazy import.** The `@opentui/core` import is dynamic so the npm
+ * bundle (which excludes `@opentui/core` from the bundle graph)
+ * doesn't see the import at module-load time.
  */
 
 import type {
@@ -52,7 +61,7 @@ import type {
   SelectRenderable as SelectRenderableType,
   TextRenderable as TextRenderableType,
 } from "@opentui/core";
-import { renderInlineMarkdown } from "../../formatters/markdown.js";
+import { stripAnsi } from "../../formatters/plain-detect.js";
 import {
   CANCELLED,
   type Cancelled,
@@ -66,18 +75,64 @@ import {
   type WizardUI,
 } from "./types.js";
 
-// Spinner frames are kept identical to `src/lib/init/spinner.ts` so the
-// tempo and visual rhythm match the legacy LoggingUI users' expectations.
+// ──────────────────────────── Visual constants ────────────────────────
+
+/** Sentry brand purple (used for spinner and accent text). */
+const ACCENT = "#A77DC3";
+/** Muted gray for the chrome border and dim secondary text. */
+const MUTED = "#6E6C7E";
+/** Bright text on dark background. */
+const FOREGROUND = "#E8E6F0";
+
+const COLOR_INFO = "#7DD3FC"; // light blue
+const COLOR_WARN = "#FBBF24"; // amber
+const COLOR_ERROR = "#F87171"; // soft red
+const COLOR_SUCCESS = "#86EFAC"; // mint green
+const COLOR_DIM = MUTED;
+
+/** Sentry banner ASCII rows (kept in sync with `src/lib/banner.ts`). */
+const BANNER_ROWS = [
+  "  ███████╗███████╗███╗   ██╗████████╗██████╗ ██╗   ██╗",
+  "  ██╔════╝██╔════╝████╗  ██║╚══██╔══╝██╔══██╗╚██╗ ██╔╝",
+  "  ███████╗█████╗  ██╔██╗ ██║   ██║   ██████╔╝ ╚████╔╝ ",
+  "  ╚════██║██╔══╝  ██║╚██╗██║   ██║   ██╔══██╗  ╚██╔╝  ",
+  "  ███████║███████╗██║ ╚████║   ██║   ██║  ██║   ██║   ",
+  "  ╚══════╝╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝   ╚═╝   ",
+];
+
+/** Vertical purple gradient applied row-by-row to the banner. */
+const BANNER_GRADIENT = [
+  "#B4A4DE",
+  "#9C84D4",
+  "#8468C8",
+  "#6C4EBA",
+  "#5538A8",
+  "#432B8A",
+];
+
+/** Spinner frames; matches `src/lib/init/spinner.ts` cadence. */
 const SPINNER_FRAMES = process.platform.startsWith("win")
   ? ["●", "o", "O", "0"]
   : ["◒", "◐", "◓", "◑"];
 const SPINNER_INTERVAL_MS = process.platform.startsWith("win") ? 80 : 120;
 
-const STOP_ICONS: Record<SpinnerExitCode, string> = {
-  0: "◆",
-  1: "■",
-  2: "▲",
+/** Glyph + color for each log severity. */
+const LOG_STYLES: Record<keyof WizardLog, { icon: string; color: string }> = {
+  info: { icon: "●", color: COLOR_INFO },
+  warn: { icon: "▲", color: COLOR_WARN },
+  error: { icon: "✖", color: COLOR_ERROR },
+  success: { icon: "✔", color: COLOR_SUCCESS },
+  message: { icon: " ", color: FOREGROUND },
 };
+
+/** Spinner stop icons + colors. Stays consistent with the live frames. */
+const STOP_STYLES: Record<SpinnerExitCode, { icon: string; color: string }> = {
+  0: { icon: "✔", color: COLOR_SUCCESS },
+  1: { icon: "✖", color: COLOR_ERROR },
+  2: { icon: "▲", color: COLOR_WARN },
+};
+
+// ───────────────────────────── Type plumbing ──────────────────────────
 
 /**
  * OpenTUI Renderable classes used by this module. Resolved once via
@@ -115,6 +170,8 @@ export async function createOpenTuiUI(): Promise<OpenTuiUI> {
   return new OpenTuiUI(renderer, mod);
 }
 
+// ──────────────────────────── Implementation ──────────────────────────
+
 /**
  * Full-screen WizardUI. See module doc for layout and lifecycle.
  *
@@ -125,9 +182,12 @@ export async function createOpenTuiUI(): Promise<OpenTuiUI> {
 export class OpenTuiUI implements WizardUI {
   private readonly renderer: CliRenderer;
   private readonly classes: OpenTuiClasses;
-  private readonly headerLine: TextRenderableType;
+  private readonly headerBox: BoxRenderableType;
+  private readonly headerIntro: TextRenderableType;
   private readonly logPane: BoxRenderableType;
-  private readonly spinnerLine: TextRenderableType;
+  private readonly spinnerWrap: BoxRenderableType;
+  private readonly spinnerIcon: TextRenderableType;
+  private readonly spinnerText: TextRenderableType;
   private readonly promptArea: BoxRenderableType;
   private spinnerActive = false;
   private spinnerTimer: ReturnType<typeof setInterval> | undefined;
@@ -144,8 +204,7 @@ export class OpenTuiUI implements WizardUI {
    * Append-only transcript of every log/intro/outro/cancel line. On
    * dispose we write these to stderr after destroying the renderer
    * (which restores the main screen) so the user actually sees the
-   * wizard's output in their scrollback. Without this the alternate-
-   * screen takeover hides everything the moment `destroy()` returns.
+   * wizard's output in their scrollback.
    */
   private readonly transcript: string[] = [];
 
@@ -155,24 +214,91 @@ export class OpenTuiUI implements WizardUI {
     const ctx = renderer.root.ctx;
     const { BoxRenderable, TextRenderable } = classes;
 
-    // Build the four-region column layout. The log pane gets `flexGrow`
-    // so it consumes any vertical space left over after the fixed-size
-    // header / spinner / prompt rows.
+    // Outer chrome — single rounded border around the whole wizard area
+    // so the alternate-screen takeover feels intentional rather than
+    // raw text floating on a void.
     const root = new BoxRenderable(ctx, {
       flexDirection: "column",
       flexGrow: 1,
+      borderStyle: "rounded",
+      border: true,
+      borderColor: MUTED,
+      padding: 1,
     });
-    this.headerLine = new TextRenderable(ctx, { content: "" });
+
+    // Header: banner (one Text per row, gradient-colored) + an intro line
+    // that the runner fills in via `intro()`.
+    this.headerBox = new BoxRenderable(ctx, {
+      flexDirection: "column",
+      flexShrink: 0,
+    });
+    for (const [i, row] of BANNER_ROWS.entries()) {
+      const bannerLine = new TextRenderable(ctx, {
+        content: row,
+        fg: BANNER_GRADIENT[i] ?? BANNER_GRADIENT[0],
+      });
+      this.headerBox.add(bannerLine);
+    }
+    this.headerIntro = new TextRenderable(ctx, {
+      content: "",
+      fg: ACCENT,
+      marginTop: 1,
+    });
+    this.headerBox.add(this.headerIntro);
+
+    // A muted divider line between the header and the live area below.
+    // OpenTUI doesn't ship a horizontal-rule renderable, so we settle
+    // for a thin Box with a top border.
+    const divider = new BoxRenderable(ctx, {
+      borderStyle: "single",
+      border: ["top"],
+      borderColor: MUTED,
+      height: 1,
+      flexShrink: 0,
+      marginTop: 1,
+      marginBottom: 1,
+    });
+
+    // Log pane: scrolling-feeling area where every appended line lands.
+    // `flexGrow: 1` lets it absorb leftover vertical space.
     this.logPane = new BoxRenderable(ctx, {
       flexDirection: "column",
       flexGrow: 1,
+      gap: 0,
     });
-    this.spinnerLine = new TextRenderable(ctx, { content: "" });
-    this.promptArea = new BoxRenderable(ctx, { flexDirection: "column" });
 
-    root.add(this.headerLine);
+    // Spinner row: icon (gets recolored on stop) and message side-by-side
+    // so the message can word-wrap independently of the icon.
+    this.spinnerWrap = new BoxRenderable(ctx, {
+      flexDirection: "row",
+      flexShrink: 0,
+      marginTop: 1,
+    });
+    this.spinnerIcon = new TextRenderable(ctx, {
+      content: "",
+      fg: ACCENT,
+      width: 3,
+    });
+    this.spinnerText = new TextRenderable(ctx, {
+      content: "",
+      fg: FOREGROUND,
+      flexGrow: 1,
+    });
+    this.spinnerWrap.add(this.spinnerIcon);
+    this.spinnerWrap.add(this.spinnerText);
+
+    // Prompt area: prompts mount their own message + Select in here and
+    // tear it down on resolution.
+    this.promptArea = new BoxRenderable(ctx, {
+      flexDirection: "column",
+      flexShrink: 0,
+      marginTop: 1,
+    });
+
+    root.add(this.headerBox);
+    root.add(divider);
     root.add(this.logPane);
-    root.add(this.spinnerLine);
+    root.add(this.spinnerWrap);
     root.add(this.promptArea);
     renderer.root.add(root);
 
@@ -181,28 +307,34 @@ export class OpenTuiUI implements WizardUI {
 
   // ── Lifecycle ─────────────────────────────────────────────────────
 
+  banner(_art: string): void {
+    // No-op — the alternate-screen header already paints the banner
+    // with the proper gradient. The runner-supplied ANSI string is
+    // discarded because OpenTUI can't render embedded escape codes.
+  }
+
   intro(title: string): void {
-    const rendered = renderInlineMarkdown(title);
-    this.headerLine.content = rendered;
-    this.transcript.push(rendered);
+    const clean = stripAnsi(title);
+    this.headerIntro.content = `▸ ${clean}`;
+    this.transcript.push(`▸ ${clean}`);
   }
 
   outro(message: string): void {
-    this.appendLog(`✓ ${message}`);
+    this.appendLine("success", message);
   }
 
   cancel(message: string): void {
-    this.appendLog(`✗ ${message}`);
+    this.appendLine("error", message);
   }
 
   // ── Logging ───────────────────────────────────────────────────────
 
   log: WizardLog = {
-    info: (message) => this.appendLog(`info: ${message}`),
-    warn: (message) => this.appendLog(`warn: ${message}`),
-    error: (message) => this.appendLog(`error: ${message}`),
-    success: (message) => this.appendLog(`✓ ${message}`),
-    message: (message) => this.appendLog(message),
+    info: (message) => this.appendLine("info", message),
+    warn: (message) => this.appendLine("warn", message),
+    error: (message) => this.appendLine("error", message),
+    success: (message) => this.appendLine("success", message),
+    message: (message) => this.appendLine("message", message),
   };
 
   // ── Spinner ───────────────────────────────────────────────────────
@@ -212,7 +344,8 @@ export class OpenTuiUI implements WizardUI {
       start: (message?: string) => {
         this.spinnerActive = true;
         this.spinnerFrame = 0;
-        this.spinnerMessage = message ?? "";
+        this.spinnerMessage = stripAnsi(message ?? "");
+        this.spinnerIcon.fg = ACCENT;
         this.renderSpinnerFrame();
         if (!this.spinnerTimer) {
           this.spinnerTimer = setInterval(() => {
@@ -223,7 +356,7 @@ export class OpenTuiUI implements WizardUI {
       },
       message: (message?: string) => {
         if (this.spinnerActive && message !== undefined) {
-          this.spinnerMessage = message;
+          this.spinnerMessage = stripAnsi(message);
           this.renderSpinnerFrame();
         }
       },
@@ -236,13 +369,15 @@ export class OpenTuiUI implements WizardUI {
           clearInterval(this.spinnerTimer);
           this.spinnerTimer = undefined;
         }
-        const finalMessage = message ?? this.spinnerMessage;
+        const finalMessage = message ? stripAnsi(message) : this.spinnerMessage;
+        // Promote the spinner's final state into the scrollable log so
+        // it survives the next `start()` call, then clear the live row.
         if (finalMessage) {
-          // Emit the final state into the scrollable log so it survives
-          // subsequent spinner re-uses, then clear the live spinner row.
-          this.appendLog(`${STOP_ICONS[code]} ${finalMessage}`);
+          const style = STOP_STYLES[code];
+          this.appendStyledLine(style.icon, style.color, finalMessage);
         }
-        this.spinnerLine.content = "";
+        this.spinnerIcon.content = "";
+        this.spinnerText.content = "";
         this.spinnerMessage = "";
       },
     };
@@ -263,8 +398,8 @@ export class OpenTuiUI implements WizardUI {
   ): Promise<T[] | Cancelled> {
     // Multi-select is built on top of `Select` with augmented labels
     // ("[x] foo" vs "[ ] foo") and custom keypress handling: space
-    // toggles, enter confirms. This avoids needing a separate
-    // multi-select renderable, which OpenTUI doesn't ship.
+    // toggles, enter confirms. OpenTUI doesn't ship a multi-select
+    // renderable so we do this in userland.
     return this.runMultiSelectPrompt({
       message: opts.message,
       options: opts.options,
@@ -298,9 +433,7 @@ export class OpenTuiUI implements WizardUI {
     // `destroy()` switches the terminal back from the alternate screen
     // to the main screen, which wipes everything OpenTUI rendered.
     // Replay the transcript to stderr so the wizard's intro/log lines
-    // appear in the user's scrollback after exit. Stderr (rather than
-    // stdout) keeps human-readable progress out of pipeable wizard
-    // output for any downstream consumers.
+    // appear in the user's scrollback after exit.
     try {
       this.renderer.destroy();
     } catch {
@@ -314,21 +447,45 @@ export class OpenTuiUI implements WizardUI {
 
   // ── Internal helpers ──────────────────────────────────────────────
 
-  private appendLog(text: string): void {
-    const { TextRenderable } = this.classes;
-    const rendered = renderInlineMarkdown(text);
-    const line = new TextRenderable(this.renderer.root.ctx, {
-      content: rendered,
+  /**
+   * Append a single styled log line — a row Box with a colored icon
+   * cell on the left and the message text on the right. Each line
+   * also gets pushed onto the transcript (sans color codes — they
+   * wouldn't survive the scrollback handoff anyway).
+   */
+  private appendLine(severity: keyof WizardLog, message: string): void {
+    const { icon, color } = LOG_STYLES[severity];
+    const clean = stripAnsi(message);
+    this.appendStyledLine(icon, color, clean);
+  }
+
+  private appendStyledLine(icon: string, color: string, text: string): void {
+    const { BoxRenderable, TextRenderable } = this.classes;
+    const ctx = this.renderer.root.ctx;
+    const row = new BoxRenderable(ctx, {
+      flexDirection: "row",
+      flexShrink: 0,
     });
-    this.logPane.add(line);
-    this.transcript.push(rendered);
+    const iconCell = new TextRenderable(ctx, {
+      content: icon,
+      fg: color,
+      width: 3,
+    });
+    const textCell = new TextRenderable(ctx, {
+      content: text,
+      fg: FOREGROUND,
+      flexGrow: 1,
+    });
+    row.add(iconCell);
+    row.add(textCell);
+    this.logPane.add(row);
+    this.transcript.push(`${icon} ${text}`);
   }
 
   private renderSpinnerFrame(): void {
     const frame = SPINNER_FRAMES[this.spinnerFrame] ?? SPINNER_FRAMES[0] ?? "•";
-    this.spinnerLine.content = renderInlineMarkdown(
-      `${frame}  ${this.spinnerMessage}`
-    );
+    this.spinnerIcon.content = frame;
+    this.spinnerText.content = this.spinnerMessage;
   }
 
   /**
@@ -360,21 +517,33 @@ export class OpenTuiUI implements WizardUI {
             )
           : 0;
 
-      const wrapper = new BoxRenderable(ctx, { flexDirection: "column" });
+      const wrapper = new BoxRenderable(ctx, {
+        flexDirection: "column",
+        gap: 1,
+      });
       const messageNode = new TextRenderable(ctx, {
-        content: renderInlineMarkdown(opts.message),
+        content: stripAnsi(opts.message),
+        fg: FOREGROUND,
       });
       const selectNode = new SelectRenderable(ctx, {
         options: tuiOptions,
         selectedIndex: initialIndex,
         height: Math.min(opts.options.length + 1, 8),
+        textColor: FOREGROUND,
+        focusedTextColor: FOREGROUND,
+        selectedBackgroundColor: ACCENT,
+        selectedTextColor: "#FFFFFF",
+        descriptionColor: COLOR_DIM,
+        showScrollIndicator: opts.options.length > 8,
+        showDescription: true,
       });
       wrapper.add(messageNode);
       wrapper.add(selectNode);
       this.promptArea.add(wrapper);
 
-      // SelectRenderable extends Renderable which is an EventEmitter.
-      // `itemSelected` fires when the user presses enter on an option.
+      // SelectRenderable extends Renderable (an EventEmitter). The
+      // `itemSelected` event fires when the user presses enter on an
+      // option.
       selectNode.focus();
       selectNode.on(
         "itemSelected",
@@ -406,29 +575,43 @@ export class OpenTuiUI implements WizardUI {
 
       const buildTuiOptions = (): OpenTuiSelectOption[] =>
         opts.options.map((option) => ({
-          name: `[${selected.has(option.value) ? "x" : " "}] ${option.label}`,
+          name: `${selected.has(option.value) ? "◉" : "◯"} ${option.label}`,
           description: option.hint ?? "",
           value: option.value,
         }));
 
-      const wrapper = new BoxRenderable(ctx, { flexDirection: "column" });
+      const wrapper = new BoxRenderable(ctx, {
+        flexDirection: "column",
+        gap: 1,
+      });
       const messageNode = new TextRenderable(ctx, {
-        content: renderInlineMarkdown(
-          `${opts.message}\n(space to toggle, enter to confirm)`
-        ),
+        content: stripAnsi(opts.message),
+        fg: FOREGROUND,
+      });
+      const hintNode = new TextRenderable(ctx, {
+        content: "space toggle · enter confirm · esc cancel",
+        fg: COLOR_DIM,
       });
       const selectNode = new SelectRenderable(ctx, {
         options: buildTuiOptions(),
         height: Math.min(opts.options.length + 2, 10),
+        textColor: FOREGROUND,
+        focusedTextColor: FOREGROUND,
+        selectedBackgroundColor: ACCENT,
+        selectedTextColor: "#FFFFFF",
+        descriptionColor: COLOR_DIM,
+        showScrollIndicator: opts.options.length > 10,
+        showDescription: true,
       });
       wrapper.add(messageNode);
+      wrapper.add(hintNode);
       wrapper.add(selectNode);
       this.promptArea.add(wrapper);
 
       const selectRenderable = selectNode as SelectRenderableType & {
         getSelectedOption: () => OpenTuiSelectOption | null;
         // `setOptions` is how SelectRenderable updates its visible options
-        // — used here to redraw the [x]/[ ] markers when the user toggles.
+        // — used here to redraw the marker glyph when the user toggles.
         setOptions?: (options: OpenTuiSelectOption[]) => void;
       };
       selectRenderable.focus();
