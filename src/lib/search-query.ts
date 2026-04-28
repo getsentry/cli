@@ -341,14 +341,32 @@ export function sanitizeQuery(query: string | undefined): string | undefined {
     return query;
   }
 
+  // Track whether we auto-repaired the query so we return the repaired
+  // version (not the original) if no further rewriting is needed.
+  let effectiveQuery = query;
   let nodes: SearchNode[];
   try {
     nodes = parse(query);
   } catch {
-    // Malformed query (unmatched parens, etc.) — pass through to the API
-    // which will return a proper 400 with details. Don't crash with a raw
-    // SyntaxError from the PEG parser.
-    return query;
+    // Malformed query — attempt common repairs before passing through.
+    // AI agents frequently produce slightly malformed search syntax that
+    // has clear intent (e.g., trailing commas in in-list filters).
+    const repaired = tryRepairQuery(query);
+    if (repaired !== query) {
+      log.warn(
+        `Auto-repaired search query syntax. Running query: "${repaired}"`
+      );
+      effectiveQuery = repaired;
+      // Re-parse the repaired query — if it still fails, pass through
+      // to the API which returns a proper 400 with details.
+      try {
+        nodes = parse(repaired);
+      } catch {
+        return repaired;
+      }
+    } else {
+      return query;
+    }
   }
 
   // Check for OR inside paren groups first — these are opaque and can't
@@ -382,7 +400,7 @@ export function sanitizeQuery(query: string | undefined): string | undefined {
     return sanitized;
   }
 
-  return query;
+  return effectiveQuery;
 }
 
 /**
@@ -480,6 +498,44 @@ export const SEARCH_SYNTAX_REFERENCE = {
 };
 
 // ---------------------------------------------------------------------------
+// Query repair
+// ---------------------------------------------------------------------------
+
+/**
+ * Pattern matching in-list filters with trailing comma before the closing
+ * bracket, e.g., `key:[val1,val2,]` → `key:[val1,val2]`.
+ * Also catches wrong closing delimiter: `key:[val1,val2,)` → `key:[val1,val2]`.
+ */
+const TRAILING_COMMA_IN_LIST_RE = /\[([^\]]*),\s*[\])](?=\s|$)/g;
+
+/** Trailing comma at end of captured group content */
+const TRAILING_COMMA_RE = /,\s*$/;
+
+/**
+ * Attempt common repairs on a malformed search query.
+ *
+ * AI agents and users frequently produce queries with minor syntax errors
+ * that have clear intent. Rather than failing with a cryptic 400, we repair
+ * what we can and warn. Current repairs:
+ *
+ * 1. Trailing commas in in-list filters: `key:[a,b,]` → `key:[a,b]`
+ * 2. Wrong closing delimiter: `key:[a,b,)` → `key:[a,b]`
+ *
+ * Returns the original query unchanged if no repairs were applicable.
+ */
+function tryRepairQuery(query: string): string {
+  let repaired = query;
+
+  // Fix trailing commas and wrong closing delimiters in in-list filters
+  repaired = repaired.replace(
+    TRAILING_COMMA_IN_LIST_RE,
+    (_match, inner: string) => `[${inner.replace(TRAILING_COMMA_RE, "")}]`
+  );
+
+  return repaired;
+}
+
+// ---------------------------------------------------------------------------
 // Test exports
 // ---------------------------------------------------------------------------
 
@@ -492,4 +548,5 @@ export const __testing = {
   tryRewriteOr,
   serializeNode,
   serializeNodes,
+  tryRepairQuery,
 };
