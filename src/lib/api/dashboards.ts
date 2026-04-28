@@ -5,6 +5,12 @@
  * query functions for rendering dashboard widgets with actual data.
  */
 
+import {
+  createANewDashboardForAnOrganization,
+  editAnOrganization_sCustomDashboard,
+  listAnOrganization_sCustomDashboards,
+  retrieveAnOrganization_sCustomDashboard,
+} from "@sentry/api";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
 
@@ -26,13 +32,14 @@ import {
   type WidgetDataResult,
 } from "../../types/dashboard.js";
 import { stringifyUnknown } from "../errors.js";
-import { resolveOrgRegion } from "../region.js";
 
 import {
   apiRequestToRegion,
+  getOrgSdkConfig,
   ORG_FANOUT_CONCURRENCY,
   type PaginatedResponse,
-  parseLinkHeader,
+  unwrapPaginatedResult,
+  unwrapResult,
 } from "./infrastructure.js";
 
 /**
@@ -49,14 +56,18 @@ export async function listDashboardsPaginated(
   orgSlug: string,
   options: { perPage?: number; cursor?: string } = {}
 ): Promise<PaginatedResponse<DashboardListItem[]>> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data, headers } = await apiRequestToRegion<DashboardListItem[]>(
-    regionUrl,
-    `/organizations/${orgSlug}/dashboards/`,
-    { params: { per_page: options.perPage, cursor: options.cursor } }
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await listAnOrganization_sCustomDashboards({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    query: { per_page: options.perPage, cursor: options.cursor },
+  });
+
+  return unwrapPaginatedResult<DashboardListItem[]>(
+    result,
+    "Failed to list dashboards"
   );
-  const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
-  return { data, nextCursor };
 }
 
 /**
@@ -70,12 +81,18 @@ export async function getDashboard(
   orgSlug: string,
   dashboardId: string
 ): Promise<DashboardDetail> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data } = await apiRequestToRegion<DashboardDetail>(
-    regionUrl,
-    `/organizations/${orgSlug}/dashboards/${dashboardId}/`
-  );
-  return data;
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await retrieveAnOrganization_sCustomDashboard({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      dashboard_id: dashboardId as unknown as number,
+    },
+  });
+
+  const data = unwrapResult(result, `Failed to get dashboard '${dashboardId}'`);
+  return data as unknown as DashboardDetail;
 }
 
 /**
@@ -89,13 +106,18 @@ export async function createDashboard(
   orgSlug: string,
   body: { title: string; widgets?: DashboardWidget[]; projects?: number[] }
 ): Promise<DashboardDetail> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data } = await apiRequestToRegion<DashboardDetail>(
-    regionUrl,
-    `/organizations/${orgSlug}/dashboards/`,
-    { method: "POST", body }
-  );
-  return data;
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await createANewDashboardForAnOrganization({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    body: body as unknown as Parameters<
+      typeof createANewDashboardForAnOrganization
+    >[0]["body"],
+  });
+
+  const data = unwrapResult(result, "Failed to create dashboard");
+  return data as unknown as DashboardDetail;
 }
 
 /**
@@ -118,13 +140,24 @@ export async function updateDashboard(
     period?: string | null;
   }
 ): Promise<DashboardDetail> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const path = `/organizations/${orgSlug}/dashboards/${dashboardId}/`;
-  const { data } = await apiRequestToRegion<DashboardDetail>(regionUrl, path, {
-    method: "PUT",
-    body,
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await editAnOrganization_sCustomDashboard({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      dashboard_id: dashboardId as unknown as number,
+    },
+    body: body as unknown as Parameters<
+      typeof editAnOrganization_sCustomDashboard
+    >[0]["body"],
   });
-  return data;
+
+  const data = unwrapResult(
+    result,
+    `Failed to update dashboard '${dashboardId}'`
+  );
+  return data as unknown as DashboardDetail;
 }
 
 // ---------------------------------------------------------------------------
