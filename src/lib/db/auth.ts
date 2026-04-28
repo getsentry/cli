@@ -346,6 +346,9 @@ export function resetAuthTokenCache(): void {
   cachedAuthToken = undefined;
 }
 
+/** Memoized result for {@link hasStoredAuthCredentials}. Same wrapper contract as {@link cachedAuthToken}. */
+let cachedHasStoredCreds: { value: boolean } | undefined;
+
 /** Memoized full auth row for {@link refreshToken}. Same wrapper contract as {@link cachedAuthToken}. */
 let cachedAuthRow: { value: AuthRow | undefined } | undefined;
 
@@ -361,6 +364,11 @@ function getCachedAuthRow(): AuthRow | undefined {
 /** Reset the memoized auth row. Tests only — call between auth-state mutations. */
 export function resetAuthRowCache(): void {
   cachedAuthRow = undefined;
+}
+
+/** Reset the memoized stored-credentials flag. Tests only — call between auth-state mutations. */
+export function resetHasStoredCredsCache(): void {
+  cachedHasStoredCreds = undefined;
 }
 
 /**
@@ -420,11 +428,12 @@ export function setAuthToken(
       ["id"]
     );
   });
-  // Auth row changed — drop memoized fingerprint, token, and row so the next
-  // read reflects the new row.
+  // Auth row changed — drop memoized fingerprint, token, row, and
+  // stored-credentials flag so the next read reflects the new row.
   resetIdentityFingerprintCache();
   resetAuthTokenCache();
   resetAuthRowCache();
+  resetHasStoredCredsCache();
 }
 
 export async function clearAuth(): Promise<void> {
@@ -442,6 +451,7 @@ export async function clearAuth(): Promise<void> {
   resetIdentityFingerprintCache();
   resetAuthTokenCache();
   resetAuthRowCache();
+  resetHasStoredCredsCache();
   // Evict in-process trust extensions tied to the now-cleared identity.
   clearTrustedHostState();
 
@@ -548,20 +558,30 @@ function hashIdentity(kind: string, secret: string): string {
  * - A non-expired token, or
  * - An expired token with a refresh token (will be refreshed on next use)
  *
+ * Memoized within the process. Reset on {@link setAuthToken} and
+ * {@link clearAuth} mutations. Tests call {@link resetHasStoredCredsCache}
+ * between cases.
+ *
  * Used by the login command to decide whether to prompt for re-authentication
  * when an env token is present.
  */
 export function hasStoredAuthCredentials(): boolean {
+  if (cachedHasStoredCreds !== undefined) {
+    return cachedHasStoredCreds.value;
+  }
   const row = getAuthRow();
-  if (!row?.token) {
-    return false;
+  let result = false;
+  if (row?.token) {
+    // Non-expired token
+    if (!row.expires_at || Date.now() <= row.expires_at) {
+      result = true;
+    } else {
+      // Expired but has refresh token — will be refreshed on next use
+      result = !!row.refresh_token;
+    }
   }
-  // Non-expired token
-  if (!row.expires_at || Date.now() <= row.expires_at) {
-    return true;
-  }
-  // Expired but has refresh token — will be refreshed on next use
-  return !!row.refresh_token;
+  cachedHasStoredCreds = { value: result };
+  return result;
 }
 
 export type RefreshTokenOptions = {
