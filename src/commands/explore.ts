@@ -7,7 +7,7 @@
  */
 
 import type { SentryContext } from "../context.js";
-import { queryEvents } from "../lib/api-client.js";
+import { API_MAX_PER_PAGE, queryEvents } from "../lib/api-client.js";
 import {
   buildProjectQuery,
   parseOrgProjectArg,
@@ -28,7 +28,6 @@ import {
   appendQueryHint,
   appendSortHint,
   buildListCommand,
-  LIST_MAX_LIMIT,
   PERIOD_ALIASES,
   paginationHint,
 } from "../lib/list-command.js";
@@ -105,7 +104,7 @@ const API_TO_USER_DATASET = new Map(
 // ---------------------------------------------------------------------------
 
 type ExploreFlags = {
-  readonly field: string[];
+  readonly field?: string[];
   readonly dataset: string;
   readonly query?: string;
   readonly sort?: string;
@@ -156,8 +155,13 @@ function parseDataset(value: string): string {
 }
 
 /** Parse --limit flag with range validation */
+/**
+ * Parse --limit flag. Capped at `API_MAX_PER_PAGE` (100) since the Events
+ * API silently caps `per_page` server-side and `queryEvents` does not yet
+ * auto-paginate. Tracked for follow-up in #861.
+ */
 function parseLimit(value: string): number {
-  return validateLimit(value, 1, LIST_MAX_LIMIT);
+  return validateLimit(value, 1, API_MAX_PER_PAGE);
 }
 
 // ---------------------------------------------------------------------------
@@ -199,7 +203,8 @@ function orderFieldNames(
 /** Format explore results for human-readable terminal output */
 function formatExploreHuman(data: ExploreData): string {
   if (data.data.length === 0) {
-    return data.hasMore
+    // Empty page mid-pagination (more or prev pages exist) vs. truly no results.
+    return data.hasMore || data.hasPrev
       ? "No results on this page."
       : "No results matched the query.";
   }
@@ -396,8 +401,8 @@ export const exploreCommand = buildListCommand("explore", {
       "Examples:\n" +
       '  sentry explore my-org/cli -F title -F "count()"\n' +
       '  sentry explore my-org/ -F title -F "count()" -F "count_unique(user)" --period 1h\n' +
-      "  sentry explore my-org/cli -F transaction " +
-      '-F "p50(transaction.duration)" --dataset transactions\n' +
+      '  sentry explore my-org/cli -F span.op -F "p50(span.duration)" ' +
+      "--dataset spans\n" +
       '  sentry explore -F span.op -F "count()" --dataset spans --period 1h\n' +
       "  sentry explore --json",
   },
@@ -448,7 +453,7 @@ export const exploreCommand = buildListCommand("explore", {
       limit: {
         kind: "parsed",
         parse: parseLimit,
-        brief: `Number of rows (1-${LIST_MAX_LIMIT})`,
+        brief: `Number of rows (1-${API_MAX_PER_PAGE})`,
         default: "25",
       },
       period: {

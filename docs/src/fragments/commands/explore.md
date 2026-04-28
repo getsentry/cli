@@ -30,29 +30,32 @@ sentry explore my-org/cli -F title -F "count()" \
   -q "error.type:TypeError" --period 1h
 ```
 
-### Transaction queries
+### Span queries (performance)
 
 ```bash
-# Transaction p50/p95 by endpoint
-sentry explore my-org/cli -F transaction \
-  -F "p50(transaction.duration)" -F "p95(transaction.duration)" \
-  --dataset transactions --period 1h
+# Span operation latency by route
+sentry explore my-org/cli -F span.op -F "p50(span.duration)" \
+  -F "p95(span.duration)" --dataset spans --period 1h
 
-# Slowest transactions
-sentry explore my-org/cli -F transaction -F "avg(transaction.duration)" \
-  --dataset transactions
-```
-
-### Span queries
-
-```bash
-# Span operations by count
-sentry explore my-org/cli -F span.op -F "count()" \
-  --dataset spans --period 1h
-
-# Sort by count (sort is supported on spans dataset)
+# Top spans by count
 sentry explore my-org/cli -F span.op -F "count()" \
   --dataset spans --sort "-count()"
+```
+
+### Metrics
+
+```bash
+# Custom metric aggregations
+sentry explore my-org/cli -F transaction -F "avg(measurements.fcp)" \
+  --dataset metrics --period 24h
+```
+
+### Logs
+
+```bash
+# Log severity counts in the last hour
+sentry explore my-org/cli -F severity -F "count()" \
+  --dataset logs --period 1h
 ```
 
 ### JSON output for scripting
