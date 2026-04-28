@@ -35,10 +35,10 @@ export type SpinnerState = {
 };
 
 /**
- * One entry in the persistent "Files analyzed" panel — every file the
- * wizard has read from disk during the session. Status transitions
- * `reading` → `analyzed` once the tool returns. Renderers paint the
- * matching icon.
+ * One entry tracking a file the wizard has read from disk during the
+ * session. Status transitions `reading` → `analyzed` once the tool
+ * returns. Surfaced by the inline file-read status line in `OpenTuiUI`
+ * (see `FileReadStatus` in `opentui-app.tsx`).
  */
 export type FileReadEntry = {
   path: string;
@@ -89,10 +89,11 @@ export type WizardSnapshot = {
   /**
    * Persistent list of every file the wizard has read from disk. Each
    * entry carries a status that transitions `reading` → `analyzed` as
-   * the workflow progresses. Used by the live "Files analyzed" panel
-   * so the user can see what context the wizard inspected — without
-   * the previous spinner-message approach, which flashed each batch
-   * for half a second before the next tool overwrote it.
+   * the workflow progresses. Surfaced by the inline file-read status
+   * line in `OpenTuiUI` so the user can see what context the wizard
+   * inspected — without the previous spinner-message approach, which
+   * flashed each batch for half a second before the next tool
+   * overwrote it.
    */
   filesRead: FileReadEntry[];
 };
@@ -195,7 +196,7 @@ export class WizardStore {
   /**
    * Record that the wizard is currently reading a batch of files.
    * Existing entries (read in earlier batches) keep their status so
-   * the "Files analyzed" panel preserves history; new entries land
+   * the file-read status line preserves history; new entries land
    * with status `reading` and flip to `analyzed` via
    * `markFilesAnalyzed()` when the tool returns.
    */

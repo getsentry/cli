@@ -12,14 +12,18 @@
  *   ┌─ Sentry init ──────────────────────────────────────────────────┐
  *   │  ╔═══════════════════════════╗  ╔══════════════════════════╗   │
  *   │  ║  banner                   ║  ║  Did you know?           ║   │
- *   │  ║  ▸ sentry init            ║  ║  ──────────────          ║   │
- *   │  ║  ──────────                ║  ║  <tip title>             ║   │
- *   │  ║  ●  log line              ║  ║  <tip body, wrapped>     ║   │
- *   │  ║  ▲  log line              ║  ║                          ║   │
+ *   │  ║  ──────────                ║  ║  ──────────────          ║   │
+ *   │  ║  ●  log line              ║  ║  <tip title>             ║   │
+ *   │  ║  ▲  log line              ║  ║  <tip body, wrapped>     ║   │
+ *   │  ║  ◐  Reading foo.ts (3)    ║  ║                          ║   │
  *   │  ║  ◒  spinner...            ║  ║  Tip 3 of 12             ║   │
  *   │  ║  <prompt area>            ║  ╚══════════════════════════╝   │
  *   │  ╚═══════════════════════════╝                                 │
  *   └────────────────────────────────────────────────────────────────┘
+ *
+ * The file-read status line is a single transient row above the
+ * spinner — replaces the previous bordered "Files analyzed" panel
+ * that pushed the tip card off-screen on shorter terminals.
  *
  * Why an external store rather than React state owned by the App?
  * The `WizardUI` interface is imperative (the wizard runner calls
@@ -125,17 +129,13 @@ export function App({ store }: AppProps): React.ReactNode {
       <box flexDirection="row" flexGrow={1} gap={showSidebar ? 2 : 0}>
         <MainColumn
           bannerRows={snapshot.bannerRows}
+          filesRead={snapshot.filesRead}
           logs={snapshot.logs}
           prompt={snapshot.prompt}
           spinner={snapshot.spinner}
           summary={snapshot.summary}
         />
-        {showSidebar ? (
-          <Sidebar
-            filesRead={snapshot.filesRead}
-            tipIndex={snapshot.tipIndex}
-          />
-        ) : null}
+        {showSidebar ? <Sidebar tipIndex={snapshot.tipIndex} /> : null}
       </box>
     </box>
   );
@@ -145,6 +145,7 @@ export function App({ store }: AppProps): React.ReactNode {
 
 type MainColumnProps = {
   bannerRows: { content: string; color: string }[];
+  filesRead: FileReadEntry[];
   logs: LogEntry[];
   spinner: SpinnerState;
   prompt: ActivePrompt | null;
@@ -153,11 +154,16 @@ type MainColumnProps = {
 
 function MainColumn({
   bannerRows,
+  filesRead,
   logs,
   spinner,
   prompt,
   summary,
 }: MainColumnProps): React.ReactNode {
+  // Hide the file-read status once the wizard finishes — the summary
+  // panel is the canonical "what happened" surface at that point, and
+  // a stale "47 files analyzed" line below it would just be noise.
+  const showFileStatus = !summary && filesRead.length > 0;
   return (
     <box flexDirection="column" flexGrow={1}>
       <Header bannerRows={bannerRows} />
@@ -167,6 +173,7 @@ function MainColumn({
           <LogLine entry={log} key={log.id} />
         ))}
       </box>
+      {showFileStatus ? <FileReadStatus filesRead={filesRead} /> : null}
       {spinner.active ? <SpinnerRow state={spinner} /> : null}
       {summary ? <SummaryPanel summary={summary} /> : null}
       {prompt ? <PromptArea prompt={prompt} /> : null}
@@ -237,6 +244,67 @@ function SpinnerRow({ state }: { state: SpinnerState }): React.ReactNode {
       </text>
       <text fg={FOREGROUND} flexGrow={1}>
         {state.message}
+      </text>
+    </box>
+  );
+}
+
+/**
+ * Single-line file-read status, shown above the spinner. Replaces the
+ * old bordered "Files analyzed" sidebar panel which had a fixed
+ * `flexShrink={0}` height of ~13 rows and pushed the tip card off-
+ * screen on shorter terminals.
+ *
+ * Rendering rules:
+ *   - If any file is currently `reading`: show a yellow ● glyph plus
+ *     up to two recent basenames and the running counter, e.g.
+ *     `● Reading package.json, sentry.config.ts (3/12 analyzed)`.
+ *   - Otherwise: collapse to a green ✔ recap, e.g.
+ *     `✔ Analyzed 12 files`.
+ *
+ * The component never wraps to a second line — long basenames are
+ * truncated by the terminal, which is fine: the goal is a glance-able
+ * indicator, not a log.
+ */
+function FileReadStatus({
+  filesRead,
+}: {
+  filesRead: FileReadEntry[];
+}): React.ReactNode {
+  const reading = filesRead.filter((entry) => entry.status === "reading");
+  const analyzed = filesRead.length - reading.length;
+
+  if (reading.length > 0) {
+    // Show the most-recent 2 basenames being read; anything more turns
+    // into a `+ N more` hint so the line stays single-row.
+    const recent = reading.slice(-2).map((entry) => basename(entry.path));
+    const overflow = reading.length - recent.length;
+    const namesPart =
+      overflow > 0
+        ? `${recent.join(", ")} + ${overflow} more`
+        : recent.join(", ");
+    return (
+      <box flexDirection="row" flexShrink={0} marginTop={1}>
+        <text fg={COLOR_WARN} width={3}>
+          ●
+        </text>
+        <text fg={FOREGROUND} flexGrow={1}>
+          Reading {namesPart}
+        </text>
+        <text fg={MUTED}>
+          {analyzed}/{filesRead.length} analyzed
+        </text>
+      </box>
+    );
+  }
+
+  return (
+    <box flexDirection="row" flexShrink={0} marginTop={1}>
+      <text fg={COLOR_SUCCESS} width={3}>
+        ✔
+      </text>
+      <text fg={MUTED} flexGrow={1}>
+        Analyzed {analyzed} {analyzed === 1 ? "file" : "files"}
       </text>
     </box>
   );
@@ -508,92 +576,16 @@ function MultiSelectPrompt({
 
 // ────────────────────────────── Sidebar ───────────────────────────────
 
-function Sidebar({
-  filesRead,
-  tipIndex,
-}: {
-  filesRead: FileReadEntry[];
-  tipIndex: number;
-}): React.ReactNode {
+/**
+ * The sidebar now hosts a single panel — "Did you know?". The previous
+ * "Files analyzed" panel was hoisted out into a one-line
+ * {@link FileReadStatus} indicator above the spinner so it can't push
+ * the tip card off-screen.
+ */
+function Sidebar({ tipIndex }: { tipIndex: number }): React.ReactNode {
   return (
-    <box flexDirection="column" flexShrink={0} gap={1} width={SIDEBAR_WIDTH}>
-      <FilesAnalyzedPanel filesRead={filesRead} />
+    <box flexDirection="column" flexShrink={0} width={SIDEBAR_WIDTH}>
       <TipPanel tipIndex={tipIndex} />
-    </box>
-  );
-}
-
-/**
- * Maximum number of file rows the sidebar shows. Anything beyond this
- * collapses into a `+ N more` line so the panel doesn't push the
- * tips off-screen on shorter terminals.
- */
-const FILES_PANEL_VISIBLE_ROWS = 10;
-
-/**
- * Persistent "Files analyzed" panel — shows every file the wizard has
- * read from disk during the session, with a status icon (yellow ●
- * while reading, green ✔ once analyzed). Replaces the previous
- * spinner-message approach where each batch flashed for half a second.
- *
- * The panel is suppressed entirely when no reads have been recorded
- * yet (so it doesn't draw an empty box at startup).
- */
-function FilesAnalyzedPanel({
-  filesRead,
-}: {
-  filesRead: FileReadEntry[];
-}): React.ReactNode {
-  if (filesRead.length === 0) {
-    return null;
-  }
-  const visible = filesRead.slice(-FILES_PANEL_VISIBLE_ROWS);
-  const overflow = filesRead.length - visible.length;
-  const analyzed = filesRead.filter(
-    (entry) => entry.status === "analyzed"
-  ).length;
-  return (
-    <box
-      borderColor={MUTED}
-      borderStyle="rounded"
-      flexDirection="column"
-      flexShrink={0}
-      padding={1}
-      title=" Files analyzed "
-      titleAlignment="left"
-    >
-      <text fg={MUTED}>
-        {analyzed}/{filesRead.length} read
-      </text>
-      <box flexDirection="column" flexShrink={0} marginTop={1}>
-        {visible.map((entry) => (
-          <FileReadRow entry={entry} key={entry.path} />
-        ))}
-      </box>
-      {overflow > 0 ? (
-        <text fg={MUTED} marginTop={1}>
-          + {overflow} more
-        </text>
-      ) : null}
-    </box>
-  );
-}
-
-function FileReadRow({ entry }: { entry: FileReadEntry }): React.ReactNode {
-  const isAnalyzed = entry.status === "analyzed";
-  const glyph = isAnalyzed ? "✔" : "●";
-  const color = isAnalyzed ? COLOR_SUCCESS : COLOR_WARN;
-  // Show the basename for compactness — full paths blow past the
-  // sidebar's 36-col width regularly. The tooltip-equivalent (full
-  // path) is unavailable in OpenTUI, so leave the narrow display.
-  return (
-    <box flexDirection="row" flexShrink={0}>
-      <text fg={color} width={2}>
-        {glyph}
-      </text>
-      <text fg={FOREGROUND} flexGrow={1}>
-        {basename(entry.path)}
-      </text>
     </box>
   );
 }

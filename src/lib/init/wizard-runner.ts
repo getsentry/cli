@@ -194,12 +194,12 @@ async function handleSuspendedStep(
         : describeTool(payload));
     spin.message(renderInlineMarkdown(truncateForTerminal(message)));
 
-    // Persistent "Files analyzed" panel (OpenTuiUI only — `LoggingUI`
+    // Inline file-read status line (OpenTuiUI only — `LoggingUI`
     // leaves these methods undefined). The previous flow showed a
     // half-second tree of files in the spinner before the next tool
     // overwrote it; users couldn't see what context the wizard
-    // looked at. We feed the read paths into the panel before the
-    // tool runs, then mark them analyzed afterwards.
+    // looked at. We feed the read paths into the status indicator
+    // before the tool runs, then mark them analyzed afterwards.
     if (payload.operation === "read-files") {
       ui.recordFilesReading?.(payload.params.paths);
     }
