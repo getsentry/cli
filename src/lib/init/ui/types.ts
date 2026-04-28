@@ -112,6 +112,28 @@ export type ConfirmOptions = {
 };
 
 /**
+ * Structured completion summary handed to `WizardUI.summary()`.
+ *
+ * Keeping this as data (vs. pre-rendered markdown) lets each
+ * implementation choose its own presentation:
+ *   - `LoggingUI` writes a compact two-column key/value listing to
+ *     stdout, plus a flat list of changed files.
+ *   - `OpenTuiUI` mounts a colored panel inside the alternate-screen
+ *     layout with proper alignment and per-action glyphs.
+ *
+ * Previously `formatResult` built terminal markdown and called
+ * `ui.log.message(markdown)` — this leaked literal `<color>` tags
+ * into the OpenTUI panel because OpenTUI's `TextRenderable` has no
+ * markdown parser, only a `stripAnsi` step.
+ */
+export type WizardSummary = {
+  /** Flat list of `<label>: <value>` rows (e.g. Platform, Directory). */
+  fields: { label: string; value: string }[];
+  /** Optional list of files the wizard added/edited/removed. */
+  changedFiles?: { action: string; path: string }[];
+};
+
+/**
  * The full I/O surface used by the init wizard.
  *
  * Implementations MUST be safe to dispose via the async dispose protocol —
@@ -132,6 +154,13 @@ export type WizardUI = AsyncDisposable & {
 
   /** Display the wizard intro banner / heading. */
   intro(title: string): void;
+
+  /**
+   * Render a structured completion summary. See {@link WizardSummary}.
+   * Implementations are free to choose layout — there's no markdown
+   * involved so OpenTUI doesn't have to parse anything.
+   */
+  summary(summary: WizardSummary): void;
 
   /** Display the success outro line. Called on a successful run. */
   outro(message: string): void;

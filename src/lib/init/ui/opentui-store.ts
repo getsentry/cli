@@ -1,0 +1,223 @@
+/**
+ * OpenTuiUI State Store
+ *
+ * Tiny external store that bridges the imperative `WizardUI` methods
+ * to React's render loop. The `OpenTuiUI` class mutates this store
+ * (intro text, log entries, spinner state, active prompt) and the
+ * React `App` subscribes via `useSyncExternalStore`.
+ *
+ * This avoids the alternative of holding component state inside the
+ * `App` itself and exposing setter callbacks back to the class — which
+ * would create a chicken-and-egg between mounting the React tree and
+ * binding the WizardUI instance.
+ *
+ * The store is intentionally minimal: snapshots are plain immutable
+ * objects so React's default `Object.is` reference check is enough
+ * to detect changes.
+ */
+
+import type { SpinnerExitCode, WizardSummary } from "./types.js";
+
+export type LogSeverity = "info" | "warn" | "error" | "success" | "message";
+
+export type LogEntry = {
+  /** Stable id used as React key. Monotonic per store instance. */
+  id: number;
+  severity: LogSeverity;
+  text: string;
+};
+
+export type SpinnerState = {
+  active: boolean;
+  /** The spinner frame index. Bumped by the renderer's interval. */
+  frame: number;
+  message: string;
+};
+
+/** Generic option shape passed to mounted prompts. */
+export type PromptOption = {
+  value: string;
+  label: string;
+  hint?: string;
+};
+
+/**
+ * Discriminated union for the currently-mounted prompt. `null` when no
+ * prompt is active. Each variant carries the data the matching React
+ * component needs plus a `resolve` callback that the component invokes
+ * with the user's choice (or with `null` to indicate cancellation —
+ * the bridge in `opentui-ui.ts` translates `null` to the shared
+ * `CANCELLED` sentinel before handing the value back to the wizard).
+ */
+export type ActivePrompt =
+  | {
+      kind: "select";
+      message: string;
+      options: PromptOption[];
+      initialIndex: number;
+      resolve: (value: string | null) => void;
+    }
+  | {
+      kind: "multiselect";
+      message: string;
+      options: PromptOption[];
+      initialSelected: string[];
+      required: boolean;
+      resolve: (values: string[] | null) => void;
+    };
+
+export type WizardSnapshot = {
+  bannerRows: { content: string; color: string }[];
+  intro: string;
+  logs: LogEntry[];
+  spinner: SpinnerState;
+  prompt: ActivePrompt | null;
+  /** Index of the currently-displayed Sentry tip in the sidebar. */
+  tipIndex: number;
+  /** Final structured summary, rendered after the workflow completes. */
+  summary: WizardSummary | null;
+};
+
+export type Listener = () => void;
+
+/**
+ * Minimal external store with the React 18+ `useSyncExternalStore`
+ * subscription contract.
+ */
+export class WizardStore {
+  private snapshot: WizardSnapshot;
+  private nextLogId = 1;
+  private readonly listeners = new Set<Listener>();
+
+  constructor(initial: Partial<WizardSnapshot> = {}) {
+    this.snapshot = {
+      bannerRows: initial.bannerRows ?? [],
+      intro: initial.intro ?? "",
+      logs: initial.logs ?? [],
+      spinner: initial.spinner ?? { active: false, frame: 0, message: "" },
+      prompt: initial.prompt ?? null,
+      tipIndex: initial.tipIndex ?? 0,
+      summary: initial.summary ?? null,
+    };
+  }
+
+  getSnapshot = (): WizardSnapshot => this.snapshot;
+
+  subscribe = (listener: Listener): (() => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+
+  // ── Mutators ──────────────────────────────────────────────────────
+
+  setBanner(rows: { content: string; color: string }[]): void {
+    this.update({ bannerRows: rows });
+  }
+
+  setIntro(text: string): void {
+    this.update({ intro: text });
+  }
+
+  appendLog(severity: LogSeverity, text: string): LogEntry {
+    const entry: LogEntry = {
+      id: this.nextLogId,
+      severity,
+      text,
+    };
+    this.nextLogId += 1;
+    this.update({ logs: [...this.snapshot.logs, entry] });
+    return entry;
+  }
+
+  startSpinner(message: string): void {
+    this.update({
+      spinner: { active: true, frame: 0, message },
+    });
+  }
+
+  setSpinnerMessage(message: string): void {
+    if (!this.snapshot.spinner.active) {
+      return;
+    }
+    this.update({
+      spinner: { ...this.snapshot.spinner, message },
+    });
+  }
+
+  tickSpinner(): void {
+    if (!this.snapshot.spinner.active) {
+      return;
+    }
+    this.update({
+      spinner: {
+        ...this.snapshot.spinner,
+        frame: this.snapshot.spinner.frame + 1,
+      },
+    });
+  }
+
+  stopSpinner(): void {
+    this.update({
+      spinner: { active: false, frame: 0, message: "" },
+    });
+  }
+
+  setPrompt(prompt: ActivePrompt | null): void {
+    this.update({ prompt });
+  }
+
+  setTipIndex(index: number): void {
+    if (this.snapshot.tipIndex === index) {
+      return;
+    }
+    this.update({ tipIndex: index });
+  }
+
+  setSummary(summary: WizardSummary | null): void {
+    this.update({ summary });
+  }
+
+  // ── Internal ──────────────────────────────────────────────────────
+
+  /**
+   * Replace the snapshot (immutable update), then notify all
+   * subscribers. Listeners are called synchronously — fine for the
+   * single-React-root setup the wizard uses.
+   */
+  private update(patch: Partial<WizardSnapshot>): void {
+    this.snapshot = { ...this.snapshot, ...patch };
+    for (const listener of this.listeners) {
+      listener();
+    }
+  }
+
+  // Severity-to-prefix mapping kept here (alongside the entry type) so
+  // both the React renderer and the post-dispose stderr replay agree on
+  // the format. Used by `OpenTuiUI` when assembling its transcript.
+  static prefixFor(severity: LogSeverity, code?: SpinnerExitCode): string {
+    if (severity === "message") {
+      return " ";
+    }
+    if (severity === "info") {
+      return "●";
+    }
+    if (severity === "warn") {
+      return "▲";
+    }
+    if (severity === "error") {
+      return "✖";
+    }
+    if (severity === "success") {
+      return "✔";
+    }
+    // Spinner stop codes get mapped through this same function for
+    // transcript replay; default to the success glyph.
+    if (code === 1) {
+      return "✖";
+    }
+    if (code === 2) {
+      return "▲";
+    }
+    return "✔";
+  }
+}

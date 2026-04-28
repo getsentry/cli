@@ -29,6 +29,7 @@ import type {
   SpinnerExitCode,
   SpinnerHandle,
   WizardLog,
+  WizardSummary,
   WizardUI,
 } from "./types.js";
 
@@ -88,6 +89,34 @@ export class LoggingUI implements WizardUI {
 
   intro(title: string): void {
     this.writeLine(this.stdout, title);
+  }
+
+  summary(summary: WizardSummary): void {
+    if (summary.fields.length === 0 && !summary.changedFiles?.length) {
+      return;
+    }
+    // Compact two-column key/value listing — one line per field. The
+    // label is right-padded to a stable width so the values align in
+    // the user's terminal even without a tabulated renderer.
+    const labelWidth = Math.max(
+      ...summary.fields.map((field) => field.label.length),
+      0
+    );
+    this.writeLine(this.stdout, "");
+    for (const field of summary.fields) {
+      const padded = field.label.padEnd(labelWidth);
+      this.writeLine(this.stdout, `  ${padded}  ${field.value}`);
+    }
+    if (summary.changedFiles && summary.changedFiles.length > 0) {
+      this.writeLine(this.stdout, "");
+      this.writeLine(this.stdout, "  Changed files:");
+      for (const file of summary.changedFiles) {
+        this.writeLine(
+          this.stdout,
+          `    ${changedFileGlyph(file.action)} ${file.path}`
+        );
+      }
+    }
   }
 
   outro(message: string): void {
@@ -176,6 +205,21 @@ export class LoggingUI implements WizardUI {
   private renderInline(message: string): string {
     return renderInlineMarkdown(message);
   }
+}
+
+/**
+ * Map a change action ("create" | "delete" | "modify" | other) to a
+ * single-character glyph. Plain ASCII so it stays readable on
+ * terminals without unicode rendering.
+ */
+function changedFileGlyph(action: string): string {
+  if (action === "create") {
+    return "+";
+  }
+  if (action === "delete") {
+    return "−";
+  }
+  return "~";
 }
 
 function stopPrefix(code: SpinnerExitCode): string {

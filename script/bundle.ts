@@ -215,15 +215,23 @@ const result = await build({
     // Replace import.meta.url with the injected shim variable for CJS
     "import.meta.url": "import_meta_url",
   },
-  // Externalize Node.js built-ins, plus `@opentui/core`. OpenTUI ships
-  // native Zig bindings that only load under the Bun runtime, so the
-  // npm/Node distribution must NOT bundle it. The factory in
-  // `src/lib/init/ui/factory.ts` lazy-imports it and falls back to
-  // ClackUI on import failure, so marking it external here means a
-  // Node user simply gets the legacy UI without a crash. The Bun
-  // compile (script/build.ts) bundles it via Bun.build's `compile`
-  // step, where the native loader is available.
-  external: ["node:*", "@opentui/core", "@opentui/core/*"],
+  // Externalize Node.js built-ins, plus the OpenTUI + React stack.
+  // OpenTUI ships native Zig bindings that only load under the Bun
+  // runtime, so the npm/Node distribution must NOT bundle them. The
+  // factory in `src/lib/init/ui/factory.ts` lazy-imports the OpenTUI
+  // path and falls back to LoggingUI on import failure, so marking
+  // these external means a Node user simply gets the non-TUI flow
+  // without a crash. The Bun compile (`script/build.ts`) bundles
+  // them into the native binary, where the loader is available.
+  external: [
+    "node:*",
+    "@opentui/core",
+    "@opentui/core/*",
+    "@opentui/react",
+    "@opentui/react/*",
+    "react",
+    "react/*",
+  ],
   metafile: true,
   plugins,
 });

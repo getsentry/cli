@@ -2,16 +2,23 @@
  * Formatters Tests
  *
  * Tests for the init wizard output formatters. Uses `MockUI` to capture
- * every UI call without going through clack.
+ * every UI call.
+ *
+ * The previous implementation pushed pre-rendered markdown through
+ * `ui.log.message`; these tests asserted on raw markdown strings. The
+ * new implementation hands a structured `WizardSummary` to
+ * `ui.summary()`, so the assertions look at fields and changedFiles
+ * instead of rendered markup.
  */
 
 import { describe, expect, test } from "bun:test";
 import { formatError, formatResult } from "../../../src/lib/init/formatters.js";
+import type { WizardSummary } from "../../../src/lib/init/ui/types.js";
 import { createMockUI, type MockCall } from "./ui/mock-ui.js";
 
-function logMessage(calls: MockCall[]): string | undefined {
-  const call = calls.find((c) => c.kind === "log.message");
-  return call?.kind === "log.message" ? call.message : undefined;
+function summaryCall(calls: MockCall[]): WizardSummary | undefined {
+  const call = calls.find((c) => c.kind === "summary");
+  return call?.kind === "summary" ? call.summary : undefined;
 }
 
 function warnMessages(calls: MockCall[]): string[] {
@@ -40,7 +47,7 @@ function infoMessages(calls: MockCall[]): string[] {
 }
 
 describe("formatResult", () => {
-  test("displays summary with all fields and a nested changed-files tree", () => {
+  test("emits a structured summary with all fields and the changed-files list", () => {
     const { ui, calls } = createMockUI();
     formatResult(
       {
@@ -63,45 +70,37 @@ describe("formatResult", () => {
       ui
     );
 
-    const content = logMessage(calls);
-    expect(content).toBeDefined();
-    if (!content) {
-      throw new Error("expected log.message call");
+    const summary = summaryCall(calls);
+    expect(summary).toBeDefined();
+    if (!summary) {
+      throw new Error("expected summary call");
     }
 
-    // `formatResult` passes raw markdown to `ui.log.message` — color tags
-    // (`<green>+</green>`, `<red>-</red>`, `<yellow>\~</yellow>`) survive
-    // verbatim because the WizardUI implementation owns rendering. The
-    // assertions match the unrendered markdown source.
-    expect(content).toContain("Next.js");
-    expect(content).toContain("/app");
-    expect(content).toContain("Error Monitoring");
-    expect(content).toContain("Performance Monitoring");
-    expect(content).toContain("npm install @sentry/nextjs");
-    expect(content).toContain("Changed files");
-    expect(content).toContain("src/");
-    expect(content).toContain("app/");
-    expect(content).toContain("instrumentation-client.ts");
-    expect(content).toContain("layout.tsx");
-    expect(content).toContain("old-sentry.js");
-    expect(content).toContain("next.config.js");
-    expect(content).toContain("Changed files\n├─ src/");
-    expect(content).toContain("├─ src/");
-    expect(content).toContain("│  ├─ app/");
-    expect(content).toContain(
-      "│  │  ├─ <green>+</green> instrumentation-client.ts"
-    );
-    expect(content).toContain("│  │  └─ <yellow>\\~</yellow> layout.tsx");
-    expect(content).toContain("└─ <yellow>\\~</yellow> next.config.js");
-    const changedFilesSection = content.slice(content.indexOf("Changed files"));
-    expect(changedFilesSection).toContain("│");
+    // Field order matches the source iteration in `buildSummary`.
+    expect(summary.fields).toEqual([
+      { label: "Platform", value: "Next.js" },
+      { label: "Directory", value: "/app" },
+      {
+        label: "Features",
+        value: "Error Monitoring, Performance Monitoring (Tracing)",
+      },
+      { label: "Commands", value: "npm install @sentry/nextjs" },
+      { label: "Project", value: "https://sentry.io/project" },
+      { label: "Docs", value: "https://docs.sentry.io" },
+    ]);
+    expect(summary.changedFiles).toEqual([
+      { action: "modify", path: "next.config.js" },
+      { action: "create", path: "src/app/instrumentation-client.ts" },
+      { action: "modify", path: "src/app/layout.tsx" },
+      { action: "delete", path: "src/old-sentry.js" },
+    ]);
   });
 
-  test("skips summary when result has no summary fields", () => {
+  test("skips the summary call when result has no summary-worthy fields", () => {
     const { ui, calls } = createMockUI();
     formatResult({ status: "success" }, ui);
 
-    expect(logMessage(calls)).toBeUndefined();
+    expect(summaryCall(calls)).toBeUndefined();
     expect(calls.some((c) => c.kind === "outro")).toBe(true);
   });
 
@@ -126,7 +125,48 @@ describe("formatResult", () => {
     const { ui, calls } = createMockUI();
     formatResult({ status: "success", result: { platform: "React" } }, ui);
 
-    expect(logMessage(calls)).toContain("React");
+    const summary = summaryCall(calls);
+    expect(summary?.fields).toContainEqual({
+      label: "Platform",
+      value: "React",
+    });
+  });
+
+  test("omits changedFiles when empty", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "React",
+          changedFiles: [],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary).toBeDefined();
+    expect(summary?.changedFiles).toBeUndefined();
+  });
+
+  test("emits a summary with only changedFiles when no fields are populated", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          changedFiles: [{ action: "create", path: "instrument.ts" }],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary).toEqual({
+      fields: [],
+      changedFiles: [{ action: "create", path: "instrument.ts" }],
+    });
   });
 });
 

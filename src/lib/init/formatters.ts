@@ -1,16 +1,21 @@
 /**
  * Output Formatters
  *
- * Format wizard results and errors for terminal display.
+ * Translate the raw workflow result into the structured `WizardSummary`
+ * the UI implementations render. The previous version assembled
+ * terminal-flavored markdown (color tags, an aligned key/value table,
+ * a tree of changed files) and pushed it through `ui.log.message`.
+ * That worked for `LoggingUI` (which calls `renderMarkdown`) but
+ * showed literal markup like `<yellow>~</yellow>` and pipe-cells in
+ * `OpenTuiUI` because TextRenderable can't parse markdown — only
+ * strip ANSI.
  *
- * All UI I/O goes through the injected `WizardUI` — the human-readable
- * markdown is built here, then handed off as a single string per call.
- * `WizardUI.log.message` is responsible for rendering the markdown
- * (terminal-styled in `ClackUI`/`OpenTuiUI`, plain text in `LoggingUI`).
+ * Now `formatResult` calls `ui.summary(structuredData)` and lets each
+ * implementation decide how to lay it out. `formatError` still uses
+ * `ui.log.*` because errors are short enough to live as plain text.
  */
 
 import { terminalLink } from "../formatters/colors.js";
-import { colorTag, mdKvTable } from "../formatters/markdown.js";
 import { featureLabel } from "./clack-utils.js";
 import {
   EXIT_DEPENDENCY_INSTALL_FAILED,
@@ -18,159 +23,61 @@ import {
   EXIT_VERIFICATION_FAILED,
 } from "./constants.js";
 import type { WizardOutput, WorkflowRunResult } from "./types.js";
-import type { WizardUI } from "./ui/types.js";
+import type { WizardSummary, WizardUI } from "./ui/types.js";
 
-type ChangedFile = NonNullable<WizardOutput["changedFiles"]>[number];
+/**
+ * Build the structured summary handed to `ui.summary()`.
+ *
+ * Returns `null` when there's nothing useful to display — the caller
+ * skips the summary call entirely in that case so empty panels don't
+ * appear.
+ */
+function buildSummary(output: WizardOutput): WizardSummary | null {
+  const fields: WizardSummary["fields"] = [];
 
-type FileTreeNode = {
-  name: string;
-  path?: string;
-  action?: string;
-  children: Map<string, FileTreeNode>;
-};
-
-function fileActionIcon(action: string): string {
-  if (action === "create") {
-    return colorTag("green", "+");
-  }
-  if (action === "delete") {
-    return colorTag("red", "-");
-  }
-  return colorTag("yellow", "\\~");
-}
-
-function createFileTreeNode(name: string): FileTreeNode {
-  return { name, children: new Map<string, FileTreeNode>() };
-}
-
-function splitChangedFilePath(filePath: string): string[] {
-  return filePath
-    .replaceAll("\\", "/")
-    .split("/")
-    .filter((segment) => segment.length > 0);
-}
-
-function buildChangedFilesTree(changedFiles: ChangedFile[]): FileTreeNode {
-  const root = createFileTreeNode("");
-
-  for (const file of changedFiles) {
-    const parts = splitChangedFilePath(file.path);
-    let current = root;
-
-    for (const [index, part] of parts.entries()) {
-      let child = current.children.get(part);
-      if (!child) {
-        child = createFileTreeNode(part);
-        current.children.set(part, child);
-      }
-
-      if (index === parts.length - 1) {
-        child.path = file.path;
-        child.action = file.action;
-      }
-
-      current = child;
-    }
-  }
-
-  return root;
-}
-
-function sortTreeEntries(entries: FileTreeNode[]): FileTreeNode[] {
-  return [...entries].sort((left, right) => {
-    const leftIsDir = left.children.size > 0 && !left.action;
-    const rightIsDir = right.children.size > 0 && !right.action;
-
-    if (leftIsDir !== rightIsDir) {
-      return leftIsDir ? -1 : 1;
-    }
-
-    return left.name.localeCompare(right.name);
-  });
-}
-
-function renderChangedFileNode(
-  node: FileTreeNode,
-  prefix: string,
-  isLast: boolean
-): string[] {
-  const lines: string[] = [];
-  const label = node.action ? node.name : `${node.name}/`;
-  const branch = isLast ? "└─" : "├─";
-
-  if (node.action) {
-    lines.push(`${prefix}${branch} ${fileActionIcon(node.action)} ${label}`);
-  } else {
-    lines.push(`${prefix}${branch} ${label}`);
-  }
-
-  const children = sortTreeEntries([...node.children.values()]);
-  const childPrefix = `${prefix}${isLast ? "   " : "│  "}`;
-  for (const [index, child] of children.entries()) {
-    lines.push(
-      ...renderChangedFileNode(
-        child,
-        childPrefix,
-        index === children.length - 1
-      )
-    );
-  }
-
-  return lines;
-}
-
-function formatChangedFilesTree(changedFiles: ChangedFile[]): string {
-  const root = buildChangedFilesTree(changedFiles);
-  const entries = sortTreeEntries([...root.children.values()]);
-
-  return entries
-    .flatMap((entry, index) =>
-      renderChangedFileNode(entry, "", index === entries.length - 1)
-    )
-    .join("\n");
-}
-
-function buildSummary(output: WizardOutput): string {
-  const sections: string[] = [];
-
-  const kvRows: [string, string][] = [];
   if (output.platform) {
-    kvRows.push(["Platform", output.platform]);
+    fields.push({ label: "Platform", value: output.platform });
   }
   if (output.projectDir) {
-    kvRows.push(["Directory", output.projectDir]);
+    fields.push({ label: "Directory", value: output.projectDir });
   }
   if (output.features?.length) {
-    kvRows.push(["Features", output.features.map(featureLabel).join(", ")]);
+    fields.push({
+      label: "Features",
+      value: output.features.map(featureLabel).join(", "),
+    });
   }
   if (output.commands?.length) {
-    kvRows.push(["Commands", output.commands.join("; ")]);
+    fields.push({
+      label: "Commands",
+      value: output.commands.join("; "),
+    });
   }
   if (output.sentryProjectUrl) {
-    kvRows.push(["Project", output.sentryProjectUrl]);
+    fields.push({ label: "Project", value: output.sentryProjectUrl });
   }
   if (output.docsUrl) {
-    kvRows.push(["Docs", output.docsUrl]);
+    fields.push({ label: "Docs", value: output.docsUrl });
   }
 
-  if (kvRows.length > 0) {
-    sections.push(mdKvTable(kvRows));
+  const changedFiles = output.changedFiles ?? [];
+
+  if (fields.length === 0 && changedFiles.length === 0) {
+    return null;
   }
 
-  const changedFiles = output.changedFiles;
-  if (changedFiles?.length) {
-    sections.push(`Changed files\n${formatChangedFilesTree(changedFiles)}`);
-  }
-
-  return sections.join("\n\n");
+  return {
+    fields,
+    ...(changedFiles.length > 0 ? { changedFiles } : {}),
+  };
 }
 
 export function formatResult(result: WorkflowRunResult, ui: WizardUI): void {
   const output: WizardOutput = result.result ?? {};
-  const md = buildSummary(output);
+  const summary = buildSummary(output);
 
-  if (md.length > 0) {
-    ui.log.message(md);
+  if (summary) {
+    ui.summary(summary);
   }
 
   if (output.warnings?.length) {

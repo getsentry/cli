@@ -20,12 +20,14 @@ import {
   type SpinnerExitCode,
   type SpinnerHandle,
   type WizardLog,
+  type WizardSummary,
   type WizardUI,
 } from "../../../../src/lib/init/ui/types.js";
 
 export type MockCall =
   | { kind: "banner"; art: string }
   | { kind: "intro"; title: string }
+  | { kind: "summary"; summary: WizardSummary }
   | { kind: "outro"; message: string }
   | { kind: "cancel"; message: string }
   | { kind: "log.info"; message: string }
@@ -108,6 +110,7 @@ export function createMockUI(): {
   const ui: WizardUI = {
     banner: (art) => calls.push({ kind: "banner", art }),
     intro: (title) => calls.push({ kind: "intro", title }),
+    summary: (summary) => calls.push({ kind: "summary", summary }),
     outro: (message) => calls.push({ kind: "outro", message }),
     cancel: (message) => calls.push({ kind: "cancel", message }),
     log,
