@@ -7,7 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   extractCommandTree,
@@ -166,6 +166,46 @@ describe("completions", () => {
       const second = await installCompletions("bash", testDir);
       expect(second!.created).toBe(false);
       expect(second!.path).toBe(first!.path);
+    });
+
+    test("returns null when directory creation fails with EACCES", async () => {
+      // Create a read-only parent directory so mkdir inside it fails
+      const restrictedDir = join(testDir, "restricted");
+      mkdirSync(restrictedDir, { recursive: true, mode: 0o755 });
+      // Make it non-writable so child directory creation fails
+      chmodSync(restrictedDir, 0o444);
+
+      try {
+        // XDG_DATA_HOME points into the restricted directory
+        const result = await installCompletions(
+          "bash",
+          "/nonexistent",
+          join(restrictedDir, "subdir")
+        );
+        expect(result).toBeNull();
+      } finally {
+        // Restore write permission for cleanup
+        chmodSync(restrictedDir, 0o755);
+      }
+    });
+
+    test("returns null when parent directory is read-only (EPERM scenario)", async () => {
+      // Simulate the macOS EPERM scenario: a parent directory exists but
+      // we can't create subdirectories inside it
+      const lockedParent = join(testDir, "locked");
+      mkdirSync(lockedParent, { recursive: true });
+      chmodSync(lockedParent, 0o555);
+
+      try {
+        const result = await installCompletions(
+          "zsh",
+          "/nonexistent",
+          join(lockedParent, "deep", "nested")
+        );
+        expect(result).toBeNull();
+      } finally {
+        chmodSync(lockedParent, 0o755);
+      }
     });
   });
 });
