@@ -19,27 +19,38 @@
  *   │ Prompt area (transient — Select/Input)   │
  *   └──────────────────────────────────────────┘
  *
- * Prompt methods mount a focused Select / Input renderable into the
- * prompt area, await user input, then unmount it. Cancellation (Ctrl+C
- * or Escape) resolves with the shared `CANCELLED` sentinel.
+ * Prompt methods mount a focused Select renderable into the prompt
+ * area, await user input, then unmount it. Cancellation (Ctrl+C or
+ * Escape) resolves with the shared `CANCELLED` sentinel.
  *
  * **Bun-only.** OpenTUI's native bindings ship as Zig — they don't run
  * on the npm/Node distribution. The factory in `factory.ts` only routes
  * here when running inside the Bun-compiled binary; on Node it falls
- * back to `ClackUI`. Importing this module on Node will fail at runtime
- * when the OpenTUI native loader can't find its binary.
+ * back to `LoggingUI`. Importing this module on Node will fail at
+ * runtime when the OpenTUI native loader can't find its binary.
  *
- * **Lazy import.** The `@opentui/core` import is dynamic — `getUI()`
+ * **Lazy import.** The `@opentui/core` import is dynamic — `getUIAsync()`
  * builds an `OpenTuiUI` instance asynchronously so the npm bundle
  * (which excludes `@opentui/core` from the bundle graph) doesn't see
  * the import at module-load time.
+ *
+ * **Why Renderable classes, not the `Box()`/`Text()` factories.** The
+ * factory functions return `VNode` proxies that queue mutations into a
+ * `__pendingCalls` array. Those queued calls only flush at instantiation
+ * time (when the VNode gets added to a parent). Subsequent mutations on
+ * the stored VNode reference never reach the live Renderable instance,
+ * so `vnode.content = "x"` is a no-op after first render. Instantiating
+ * `BoxRenderable` / `TextRenderable` / `SelectRenderable` directly
+ * bypasses the proxy and gives us live instances we can mutate in place
+ * for the spinner tick, log appends, and prompt mount/unmount cycles.
  */
 
 import type {
+  BoxRenderable as BoxRenderableType,
   CliRenderer,
   SelectOption as OpenTuiSelectOption,
-  SelectRenderable,
-  TextNodeRenderable,
+  SelectRenderable as SelectRenderableType,
+  TextRenderable as TextRenderableType,
 } from "@opentui/core";
 import { renderInlineMarkdown } from "../../formatters/markdown.js";
 import {
@@ -56,7 +67,7 @@ import {
 } from "./types.js";
 
 // Spinner frames are kept identical to `src/lib/init/spinner.ts` so the
-// tempo and visual rhythm match `ClackUI` users' expectations.
+// tempo and visual rhythm match the legacy LoggingUI users' expectations.
 const SPINNER_FRAMES = process.platform.startsWith("win")
   ? ["●", "o", "O", "0"]
   : ["◒", "◐", "◓", "◑"];
@@ -69,22 +80,25 @@ const STOP_ICONS: Record<SpinnerExitCode, string> = {
 };
 
 /**
- * OpenTUI factories used by this module. Resolved once via dynamic
- * import in `OpenTuiUI.create()` so the `@opentui/core` import never
- * runs synchronously at module-load time on the npm/Node distribution.
- *
- * The factory return types are intentionally `any` — OpenTUI's vnode
- * proxy types are deeply nested generics that don't add safety here
- * (the factories are immediately wrapped in our own helpers and the
- * resulting renderables are treated as opaque tree nodes).
+ * OpenTUI Renderable classes used by this module. Resolved once via
+ * dynamic import in `createOpenTuiUI()` so the `@opentui/core` import
+ * never runs synchronously at module-load time on the npm/Node
+ * distribution.
  */
-// biome-ignore lint/suspicious/noExplicitAny: see comment above
-type RenderableNode = any;
-type OpenTuiFactories = {
+type OpenTuiClasses = {
   createCliRenderer: (config?: unknown) => Promise<CliRenderer>;
-  Box: (props?: unknown, ...children: RenderableNode[]) => RenderableNode;
-  Text: (props?: unknown, ...children: RenderableNode[]) => RenderableNode;
-  Select: (props?: unknown, ...children: RenderableNode[]) => RenderableNode;
+  BoxRenderable: new (
+    ctx: unknown,
+    options: Record<string, unknown>
+  ) => BoxRenderableType;
+  TextRenderable: new (
+    ctx: unknown,
+    options: Record<string, unknown>
+  ) => TextRenderableType;
+  SelectRenderable: new (
+    ctx: unknown,
+    options: Record<string, unknown>
+  ) => SelectRenderableType;
 };
 
 /**
@@ -93,7 +107,7 @@ type OpenTuiFactories = {
  * bindings are missing (e.g. accidentally invoked from Node).
  */
 export async function createOpenTuiUI(): Promise<OpenTuiUI> {
-  const mod = (await import("@opentui/core")) as unknown as OpenTuiFactories;
+  const mod = (await import("@opentui/core")) as unknown as OpenTuiClasses;
   const renderer = await mod.createCliRenderer({
     exitOnCtrlC: false,
     screenMode: "alternate-screen",
@@ -109,11 +123,12 @@ export async function createOpenTuiUI(): Promise<OpenTuiUI> {
  * be called directly by feature code.
  */
 export class OpenTuiUI implements WizardUI {
-  private readonly logLines: TextNodeRenderable[] = [];
-  private readonly logPane: RenderableNode;
-  private readonly spinnerLine: RenderableNode;
-  private readonly promptArea: RenderableNode;
-  private readonly headerLine: RenderableNode;
+  private readonly renderer: CliRenderer;
+  private readonly classes: OpenTuiClasses;
+  private readonly headerLine: TextRenderableType;
+  private readonly logPane: BoxRenderableType;
+  private readonly spinnerLine: TextRenderableType;
+  private readonly promptArea: BoxRenderableType;
   private spinnerActive = false;
   private spinnerTimer: ReturnType<typeof setInterval> | undefined;
   private spinnerFrame = 0;
@@ -125,23 +140,35 @@ export class OpenTuiUI implements WizardUI {
    */
   private activePromptResolver: ((value: unknown) => void) | undefined;
   private cancelHandlerInstalled = false;
+  /**
+   * Append-only transcript of every log/intro/outro/cancel line. On
+   * dispose we write these to stderr after destroying the renderer
+   * (which restores the main screen) so the user actually sees the
+   * wizard's output in their scrollback. Without this the alternate-
+   * screen takeover hides everything the moment `destroy()` returns.
+   */
+  private readonly transcript: string[] = [];
 
-  private readonly renderer: CliRenderer;
-  private readonly factories: OpenTuiFactories;
-
-  constructor(renderer: CliRenderer, factories: OpenTuiFactories) {
+  constructor(renderer: CliRenderer, classes: OpenTuiClasses) {
     this.renderer = renderer;
-    this.factories = factories;
-    const { Box, Text } = factories;
+    this.classes = classes;
+    const ctx = renderer.root.ctx;
+    const { BoxRenderable, TextRenderable } = classes;
 
     // Build the four-region column layout. The log pane gets `flexGrow`
     // so it consumes any vertical space left over after the fixed-size
     // header / spinner / prompt rows.
-    const root = Box({ flexDirection: "column", flexGrow: 1 });
-    this.headerLine = Text({ content: "" });
-    this.logPane = Text({ content: "", flexGrow: 1 });
-    this.spinnerLine = Text({ content: "" });
-    this.promptArea = Box({ flexDirection: "column" });
+    const root = new BoxRenderable(ctx, {
+      flexDirection: "column",
+      flexGrow: 1,
+    });
+    this.headerLine = new TextRenderable(ctx, { content: "" });
+    this.logPane = new BoxRenderable(ctx, {
+      flexDirection: "column",
+      flexGrow: 1,
+    });
+    this.spinnerLine = new TextRenderable(ctx, { content: "" });
+    this.promptArea = new BoxRenderable(ctx, { flexDirection: "column" });
 
     root.add(this.headerLine);
     root.add(this.logPane);
@@ -155,7 +182,9 @@ export class OpenTuiUI implements WizardUI {
   // ── Lifecycle ─────────────────────────────────────────────────────
 
   intro(title: string): void {
-    this.headerLine.content = renderInlineMarkdown(title);
+    const rendered = renderInlineMarkdown(title);
+    this.headerLine.content = rendered;
+    this.transcript.push(rendered);
   }
 
   outro(message: string): void {
@@ -266,14 +295,19 @@ export class OpenTuiUI implements WizardUI {
       clearInterval(this.spinnerTimer);
       this.spinnerTimer = undefined;
     }
-    // `destroy()` is idempotent and synchronous in OpenTUI's renderer,
-    // but we wrap in Promise to satisfy the AsyncDisposable contract
-    // and to leave room for future async teardown work (e.g. drain the
-    // render queue).
+    // `destroy()` switches the terminal back from the alternate screen
+    // to the main screen, which wipes everything OpenTUI rendered.
+    // Replay the transcript to stderr so the wizard's intro/log lines
+    // appear in the user's scrollback after exit. Stderr (rather than
+    // stdout) keeps human-readable progress out of pipeable wizard
+    // output for any downstream consumers.
     try {
       this.renderer.destroy();
     } catch {
       // Ignore — disposal must never throw.
+    }
+    if (this.transcript.length > 0) {
+      process.stderr.write(`${this.transcript.join("\n")}\n`);
     }
     return Promise.resolve();
   }
@@ -281,12 +315,13 @@ export class OpenTuiUI implements WizardUI {
   // ── Internal helpers ──────────────────────────────────────────────
 
   private appendLog(text: string): void {
-    const { Text } = this.factories;
-    const line = Text({
-      content: renderInlineMarkdown(text),
-    }) as unknown as TextNodeRenderable;
-    this.logLines.push(line);
+    const { TextRenderable } = this.classes;
+    const rendered = renderInlineMarkdown(text);
+    const line = new TextRenderable(this.renderer.root.ctx, {
+      content: rendered,
+    });
     this.logPane.add(line);
+    this.transcript.push(rendered);
   }
 
   private renderSpinnerFrame(): void {
@@ -297,7 +332,7 @@ export class OpenTuiUI implements WizardUI {
   }
 
   /**
-   * Mount a `Select` renderable in the prompt area, wait for the user
+   * Mount a `SelectRenderable` in the prompt area, wait for the user
    * to pick an option (or cancel), then clean up.
    */
   private runSelectPrompt<T extends string>(opts: {
@@ -306,7 +341,8 @@ export class OpenTuiUI implements WizardUI {
     initialValue?: T;
   }): Promise<T | Cancelled> {
     return new Promise((resolve) => {
-      const { Box, Text, Select } = this.factories;
+      const { BoxRenderable, TextRenderable, SelectRenderable } = this.classes;
+      const ctx = this.renderer.root.ctx;
       this.activePromptResolver = resolve as (value: unknown) => void;
 
       const tuiOptions: OpenTuiSelectOption[] = opts.options.map((option) => ({
@@ -324,25 +360,23 @@ export class OpenTuiUI implements WizardUI {
             )
           : 0;
 
-      const messageNode = Text({
+      const wrapper = new BoxRenderable(ctx, { flexDirection: "column" });
+      const messageNode = new TextRenderable(ctx, {
         content: renderInlineMarkdown(opts.message),
       });
-      const selectNode = Select({
+      const selectNode = new SelectRenderable(ctx, {
         options: tuiOptions,
         selectedIndex: initialIndex,
         height: Math.min(opts.options.length + 1, 8),
       });
-
-      const wrapper = Box({ flexDirection: "column" });
       wrapper.add(messageNode);
       wrapper.add(selectNode);
       this.promptArea.add(wrapper);
 
       // SelectRenderable extends Renderable which is an EventEmitter.
       // `itemSelected` fires when the user presses enter on an option.
-      const selectRenderable = selectNode as unknown as SelectRenderable;
-      selectRenderable.focus();
-      selectRenderable.on(
+      selectNode.focus();
+      selectNode.on(
         "itemSelected",
         (_index: number, option: OpenTuiSelectOption) => {
           this.tearDownPrompt(wrapper);
@@ -353,9 +387,9 @@ export class OpenTuiUI implements WizardUI {
   }
 
   /**
-   * Mount a `Select` with augmented labels and custom keypress handling
-   * to support multi-select. Space toggles the highlighted option;
-   * Enter confirms the selection set.
+   * Mount a `SelectRenderable` with augmented labels and custom
+   * keypress handling to support multi-select. Space toggles the
+   * highlighted option; Enter confirms the selection set.
    */
   private runMultiSelectPrompt<T extends string>(opts: {
     message: string;
@@ -364,7 +398,8 @@ export class OpenTuiUI implements WizardUI {
     required: boolean;
   }): Promise<T[] | Cancelled> {
     return new Promise((resolve) => {
-      const { Box, Text, Select } = this.factories;
+      const { BoxRenderable, TextRenderable, SelectRenderable } = this.classes;
+      const ctx = this.renderer.root.ctx;
       this.activePromptResolver = resolve as (value: unknown) => void;
 
       const selected = new Set<T>(opts.initial);
@@ -376,21 +411,21 @@ export class OpenTuiUI implements WizardUI {
           value: option.value,
         }));
 
-      const messageNode = Text({
+      const wrapper = new BoxRenderable(ctx, { flexDirection: "column" });
+      const messageNode = new TextRenderable(ctx, {
         content: renderInlineMarkdown(
           `${opts.message}\n(space to toggle, enter to confirm)`
         ),
       });
-      const selectNode = Select({
+      const selectNode = new SelectRenderable(ctx, {
         options: buildTuiOptions(),
         height: Math.min(opts.options.length + 2, 10),
       });
-      const wrapper = Box({ flexDirection: "column" });
       wrapper.add(messageNode);
       wrapper.add(selectNode);
       this.promptArea.add(wrapper);
 
-      const selectRenderable = selectNode as unknown as SelectRenderable & {
+      const selectRenderable = selectNode as SelectRenderableType & {
         getSelectedOption: () => OpenTuiSelectOption | null;
         // `setOptions` is how SelectRenderable updates its visible options
         // — used here to redraw the [x]/[ ] markers when the user toggles.
@@ -444,7 +479,7 @@ export class OpenTuiUI implements WizardUI {
    * The `activePromptResolver` is cleared so that a follow-up Ctrl+C
    * doesn't fire the resolver a second time.
    */
-  private tearDownPrompt(wrapper: RenderableNode): void {
+  private tearDownPrompt(wrapper: BoxRenderableType): void {
     try {
       this.promptArea.remove(wrapper.id);
     } catch {

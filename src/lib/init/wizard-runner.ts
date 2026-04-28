@@ -333,7 +333,10 @@ async function preamble(
     );
   }
 
-  process.stderr.write(`\n${formatBanner()}\n\n`);
+  // Push the banner through the UI so OpenTuiUI's alternate-screen
+  // buffer captures it. Writing to stderr directly would land on the
+  // main screen and be hidden by OpenTUI's screen takeover.
+  ui.log.message(formatBanner());
   ui.intro("sentry init");
 
   let confirmed: boolean;
