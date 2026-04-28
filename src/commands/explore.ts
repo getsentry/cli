@@ -28,7 +28,6 @@ import { type Column, formatTable } from "../lib/formatters/table.js";
 import {
   buildListCommand,
   LIST_MAX_LIMIT,
-  LIST_PERIOD_FLAG,
   PERIOD_ALIASES,
   paginationHint,
 } from "../lib/list-command.js";
@@ -38,6 +37,8 @@ import { resolveOrg, resolveProjectBySlug } from "../lib/resolve-target.js";
 import { sanitizeQuery } from "../lib/search-query.js";
 import {
   appendPeriodHint,
+  PERIOD_BRIEF,
+  parsePeriod,
   serializeTimeRange,
   type TimeRange,
   timeRangeToApiParams,
@@ -69,11 +70,18 @@ const DATASET_ALIASES: Record<string, string> = {
   transaction: "transactions",
   spans: "spans",
   span: "spans",
+  metrics: "metricsEnhanced",
   discover: "discover",
 };
 
 /** Canonical dataset names for display */
-const VALID_DATASETS = ["errors", "transactions", "spans", "discover"];
+const VALID_DATASETS = [
+  "errors",
+  "transactions",
+  "spans",
+  "metrics",
+  "discover",
+];
 
 /** Sentry field types that should be right-aligned and formatted as numbers */
 const NUMERIC_FIELD_TYPES = new Set([
@@ -424,6 +432,7 @@ export const exploreCommand = buildListCommand("explore", {
       "  errors         Error events (default)\n" +
       "  transactions   Transaction events\n" +
       "  spans          Span data\n" +
+      "  metrics        Custom metrics (metricsEnhanced)\n" +
       "  discover       Legacy discover dataset\n\n" +
       "Targets:\n" +
       "  <org>/<project>  Filter by project (auto-adds project:<slug> to query)\n" +
@@ -488,7 +497,12 @@ export const exploreCommand = buildListCommand("explore", {
         brief: `Number of rows (1-${LIST_MAX_LIMIT})`,
         default: "25",
       },
-      period: LIST_PERIOD_FLAG,
+      period: {
+        kind: "parsed" as const,
+        parse: parsePeriod,
+        brief: PERIOD_BRIEF,
+        default: DEFAULT_PERIOD,
+      },
     },
     aliases: {
       ...PERIOD_ALIASES,
