@@ -836,6 +836,53 @@ function parseWithSlash(arg: string): ParsedIssueArg {
 }
 
 /**
+ * Parse issue arg containing a colon as a project:identifier separator.
+ *
+ * Handles formats like:
+ * - `PROJECT:SUFFIX` → project-search with suffix
+ * - `PROJECT:PROJECT-SUFFIX` → project-search, extracts suffix from last dash
+ * - `PROJECT:NUMERICID` → numeric lookup (project context ignored)
+ *
+ * Returns null if the colon is not a valid separator (e.g., empty parts).
+ */
+function parseWithColon(arg: string): ParsedIssueArg | null {
+  const colonIdx = arg.indexOf(":");
+  const projectPart = arg.slice(0, colonIdx);
+  const idPart = arg.slice(colonIdx + 1);
+
+  // Both parts must be non-empty
+  if (!(projectPart && idPart)) {
+    return null;
+  }
+
+  // Numeric ID part → direct numeric lookup (project context not needed)
+  if (isAllDigits(idPart)) {
+    return { type: "numeric", id: idPart };
+  }
+
+  // ID part contains a dash → likely a full short ID like "PROJECT-SUFFIX"
+  // Extract just the suffix from the last dash
+  if (idPart.includes("-")) {
+    const lastDash = idPart.lastIndexOf("-");
+    const suffix = idPart.slice(lastDash + 1).toUpperCase();
+    if (suffix) {
+      return {
+        type: "project-search",
+        projectSlug: projectPart.toLowerCase(),
+        suffix,
+      };
+    }
+  }
+
+  // Plain suffix (no dash) → use as-is
+  return {
+    type: "project-search",
+    projectSlug: projectPart.toLowerCase(),
+    suffix: idPart.toUpperCase(),
+  };
+}
+
+/**
  * Parse issue arg with dash but no slash (project-suffix).
  */
 function parseWithDash(arg: string): ParsedIssueArg {
@@ -931,6 +978,7 @@ export function parseSlashSeparatedArg(
   return { id, targetArg };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: issue ID parsing has many format branches by design
 export function parseIssueArg(arg: string): ParsedIssueArg {
   // Trim whitespace — agents may pass trailing newlines (CLI-16M)
   const input = arg.trim();
@@ -983,6 +1031,20 @@ export function parseIssueArg(arg: string): ParsedIssueArg {
   // 2. Pure numeric → direct fetch by ID
   if (isAllDigits(input)) {
     return { type: "numeric", id: input };
+  }
+
+  // 2b. Colon separator — treat as project:identifier notation.
+  // Users sometimes type "PROJECT:SHORTID" or "PROJECT:NUMERICID" where
+  // the colon separates the project slug from the issue identifier.
+  // e.g., "CHATEX:CHATEX-W9" → project=chatex, suffix=W9
+  //       "MYAH-FRONTEND:115562020" → numeric ID 115562020
+  //       "CHATEX:W9" → project=chatex, suffix=W9
+  if (input.includes(":")) {
+    const colonResult = parseWithColon(input);
+    if (colonResult) {
+      return colonResult;
+    }
+    // Colon not parseable as project:id — fall through to normal parsing
   }
 
   // 3. Has slash → check slash FIRST (takes precedence over dashes)
