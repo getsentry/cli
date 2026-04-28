@@ -378,6 +378,14 @@ Work with Sentry teams
 
 → Full flags and examples: `references/team.md`
 
+### Explore
+
+Query aggregate event data (Explore)
+
+- `sentry explore <target>` — Query aggregate event data (Explore)
+
+→ Full flags and examples: `references/explore.md`
+
 ### Log
 
 View Sentry logs
