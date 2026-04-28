@@ -232,17 +232,24 @@ describe("formatError", () => {
 
   test("shows docs URL when present", () => {
     const { ui, calls } = createMockUI();
+    const docsUrl = "https://docs.sentry.io/platforms/react/";
     formatError(
       {
         status: "failed",
-        result: { docsUrl: "https://docs.sentry.io/platforms/react/" },
+        result: { docsUrl },
       },
       ui
     );
 
-    const infos = infoMessages(calls);
-    expect(
-      infos.some((s) => s.includes("https://docs.sentry.io/platforms/react/"))
-    ).toBe(true);
+    // Pull every URL out of the info messages and check the docs URL
+    // is among them. The previous `String.prototype.includes` form
+    // tripped CodeQL's "incomplete URL substring sanitization" rule —
+    // this regex-based extraction makes the URL-matching intent
+    // explicit (and silences the false positive).
+    const urlRe = /https?:\/\/[^\s)]+/g;
+    const seenUrls = infoMessages(calls).flatMap(
+      (msg) => msg.match(urlRe) ?? []
+    );
+    expect(seenUrls).toContain(docsUrl);
   });
 });

@@ -33,6 +33,26 @@
   },
   "overrides": [
     {
+      // The React-hook lint rules infer "this is a hook" from the
+      // `use*` naming convention. We have a couple of test helpers
+      // (`useTestConfigDir`, `useEnvSandbox`) that share the prefix
+      // by coincidence — they register `beforeEach`/`afterEach` and
+      // have nothing to do with React. Without these overrides every
+      // call site lights up `useHookAtTopLevel` since making the
+      // tsconfig JSX-aware (for `OpenTuiUI`) flipped the rule on.
+      // The actual React tree lives in `src/lib/init/ui/opentui-app.tsx`
+      // and keeps the rule active.
+      "includes": ["test/**/*.ts", "src/**/*.ts", "!src/**/*.tsx"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "useHookAtTopLevel": "off",
+            "useExhaustiveDependencies": "off"
+          }
+        }
+      }
+    },
+    {
       "includes": ["test/**/*.ts"],
       "linter": {
         "rules": {
