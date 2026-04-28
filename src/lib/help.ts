@@ -30,6 +30,56 @@ type HelpCommand = {
   description: string;
 };
 
+// ---------------------------------------------------------------------------
+// Common flags — surfaced in the branded `sentry --help` output
+// ---------------------------------------------------------------------------
+
+/**
+ * Metadata for a flag shown in the top-level help.
+ *
+ * Only the highest-signal flags belong here — per-command flags are
+ * documented in each command's own `--help`.
+ */
+type CommonFlagEntry = {
+  /** Long flag name with `--` prefix (e.g., `"--json"`). */
+  long: string;
+  /** Short alias with `-` prefix, or `undefined` if none. */
+  short?: string;
+  /** One-line description for the branded help. */
+  description: string;
+};
+
+/**
+ * Flags surfaced in the branded `sentry` help output.
+ *
+ * Includes both truly global flags (injected into every command) and
+ * widely-used flags present on most list/view commands.
+ */
+const COMMON_FLAGS: readonly CommonFlagEntry[] = [
+  {
+    long: "--json",
+    description: "Output as JSON (with --fields to select)",
+  },
+  {
+    long: "--fresh",
+    short: "-f",
+    description: "Bypass cache and fetch fresh data",
+  },
+  {
+    long: "--verbose",
+    short: "-v",
+    description: "Enable debug logging",
+  },
+  {
+    long: "--help",
+    description: "Show help for a command",
+  },
+  {
+    long: "--version",
+    description: "Show version",
+  },
+];
+
 /**
  * Generate the commands list dynamically from Stricli's route structure.
  * This ensures help text stays in sync with actual registered commands.
@@ -101,6 +151,27 @@ function formatCommands(commands: HelpCommand[]): string {
 }
 
 /**
+ * Format the common flags list with aligned descriptions.
+ *
+ * Renders flag names (with optional short alias) left-aligned and
+ * descriptions right-aligned, styled identically to the env-var section.
+ */
+function formatCommonFlags(): string {
+  if (COMMON_FLAGS.length === 0) {
+    return "";
+  }
+  const padding = 4;
+  const labels = COMMON_FLAGS.map((f) =>
+    f.short ? `${f.short}, ${f.long}` : `    ${f.long}`
+  );
+  const maxLabelLength = Math.max(...labels.map((l) => l.length));
+  return COMMON_FLAGS.map((f, i) => {
+    const labelPadded = (labels[i] ?? "").padEnd(maxLabelLength + padding);
+    return `    ${cyan(labelPadded)}${muted(f.description)}`;
+  }).join("\n");
+}
+
+/**
  * Format the top-level environment variable list with aligned descriptions.
  *
  * Source of truth: `TOP_LEVEL_ENV_VARS` in `env-registry.ts`. Keep this
@@ -146,6 +217,14 @@ export function printCustomHelp(): string {
   lines.push(formatCommands(generateCommands()));
   lines.push("");
 
+  // Common flags
+  const flags = formatCommonFlags();
+  if (flags) {
+    lines.push(`  ${muted("Flags:")}`);
+    lines.push(flags);
+    lines.push("");
+  }
+
   // Environment variables (auto-generated from env-registry)
   const envVars = formatEnvVars();
   if (envVars) {
@@ -188,6 +267,18 @@ export type HelpEnvVarInfo = {
 };
 
 /**
+ * Metadata for a common flag as exposed to JSON callers of `sentry help --json`.
+ */
+export type HelpFlagInfo = {
+  /** Long flag name including `--` prefix (e.g. `"--json"`). */
+  long: string;
+  /** Short alias including `-` prefix (e.g. `"-f"`), or undefined if none. */
+  short?: string;
+  /** One-line description. */
+  description: string;
+};
+
+/**
  * Result of introspecting the CLI.
  * Yielded as CommandOutput — JSON mode serializes directly, human mode
  * passes through {@link formatHelpHuman}.
@@ -196,7 +287,13 @@ export type HelpEnvVarInfo = {
  * it's stripped from JSON output via `jsonExclude`.
  */
 export type HelpJsonResult =
-  | ({ routes: RouteInfo[]; envVars: HelpEnvVarInfo[] } & { _banner?: string })
+  | ({
+      routes: RouteInfo[];
+      envVars: HelpEnvVarInfo[];
+      flags: HelpFlagInfo[];
+    } & {
+      _banner?: string;
+    })
   | CommandInfo
   | RouteInfo
   | { error: string; suggestions?: string[] };
@@ -219,18 +316,34 @@ function buildTopLevelEnvVars(): HelpEnvVarInfo[] {
 }
 
 /**
+ * Build the common flags list for JSON output.
+ *
+ * Exposes the same entries shown in the branded help so that consumers
+ * (AI agents, docs tooling) can discover them programmatically.
+ */
+function buildCommonFlags(): HelpFlagInfo[] {
+  return COMMON_FLAGS.map((f) => ({
+    long: f.long,
+    short: f.short,
+    description: f.description,
+  }));
+}
+
+/**
  * Introspect the full command tree.
  * Returns all visible routes with all flags included, plus the top-level
- * environment variables recognized by the CLI.
+ * environment variables and common flags recognized by the CLI.
  */
 export function introspectAllCommands(): {
   routes: RouteInfo[];
   envVars: HelpEnvVarInfo[];
+  flags: HelpFlagInfo[];
 } {
   const routeMap = routes as unknown as RouteMap;
   return {
     routes: extractAllRoutes(routeMap),
     envVars: buildTopLevelEnvVars(),
+    flags: buildCommonFlags(),
   };
 }
 
@@ -379,6 +492,32 @@ function formatGroupHuman(group: RouteInfo): string {
 }
 
 /**
+ * Format the full command tree (without banner) as human-readable text.
+ * Includes flags and env-var sections when present.
+ */
+function formatFullTreeHuman(data: {
+  routes: RouteInfo[];
+  envVars?: HelpEnvVarInfo[];
+  flags?: HelpFlagInfo[];
+}): string {
+  const lines: string[] = [data.routes.map(formatGroupHuman).join("\n\n")];
+  if (data.flags && data.flags.length > 0) {
+    lines.push("", "Flags:");
+    for (const f of data.flags) {
+      const label = f.short ? `${f.short}, ${f.long}` : f.long;
+      lines.push(`  ${label} — ${f.description}`);
+    }
+  }
+  if (data.envVars && data.envVars.length > 0) {
+    lines.push("", "Environment Variables:");
+    for (const v of data.envVars) {
+      lines.push(`  ${v.name} — ${v.brief}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+/**
  * Human renderer for help introspection data.
  *
  * Formats structured introspection objects as readable CLI output:
@@ -413,19 +552,9 @@ export function formatHelpHuman(data: HelpJsonResult): string {
   }
 
   // Full tree without banner (shouldn't happen in practice — the help
-  // command always attaches one). Keep the envVars in sync anyway.
+  // command always attaches one). Keep the envVars/flags in sync anyway.
   if ("routes" in data) {
-    const routesText = data.routes.map(formatGroupHuman).join("\n\n");
-    if ("envVars" in data && data.envVars.length > 0) {
-      const lines = [
-        routesText,
-        "",
-        "Environment Variables:",
-        ...data.envVars.map((v) => `  ${v.name} — ${v.brief}`),
-      ];
-      return lines.join("\n");
-    }
-    return routesText;
+    return formatFullTreeHuman(data);
   }
 
   return "";
