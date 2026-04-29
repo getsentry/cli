@@ -41,7 +41,7 @@ import { formatError, formatResult } from "./formatters.js";
 import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
 import { resolveInitContext } from "./preflight.js";
-import { forwardFreshTtyToStdin } from "./stdin-reopen.js";
+
 import { describeTool, executeTool } from "./tools/registry.js";
 import type {
   ResolvedInitContext,
@@ -415,28 +415,22 @@ async function preamble(
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard orchestration with error handling branches
 export async function runWizard(initialOptions: WizardOptions): Promise<void> {
-  // macOS-only: Bun's compiled binaries on Darwin don't deliver keystrokes
-  // through TTY fds inherited via shell redirection (`curl | bash` →
-  // `exec sentry init </dev/tty` in install.sh), so clack prompts hang
-  // forever at the first question. The workaround in stdin-reopen.ts opens
-  // a fresh `/dev/tty` and forwards its data events onto process.stdin.
+  // Note: a previous `forwardFreshTtyToStdin()` call lived here as a
+  // macOS-only workaround for clack reading from a broken inherited
+  // stdin fd (PRs #824/#831/#833/#835). It's gone now because:
   //
-  // The bug is fixed on Linux (verified via PTY harness in PR #835) — we
-  // skip the workaround there because it has a side cost: a libuv handle
-  // leak that requires `initCommand.func`'s `setTimeout().unref()` safety
-  // net to force-exit cleanly. Keep the install narrow.
+  //   1. `LoggingUI` doesn't read from stdin at all (its prompts
+  //      throw without `--yes`).
+  //   2. `InkUI` opens its own fresh `/dev/tty` ReadStream and
+  //      passes it directly to Ink's `stdin` option, sidestepping
+  //      both the macOS clack bug and a separate Bun/Ink stdin bug
+  //      (oven-sh/bun#6862, vadimdemedes/ink#636) where Bun's
+  //      `process.stdin` accepts `setRawMode(true)` but never
+  //      delivers `readable` events.
   //
-  // The `using` declaration guarantees teardown on every exit path via the
-  // Disposable returned by forwardFreshTtyToStdin(). On non-Darwin, the
-  // disposable is a no-op (install short-circuits on platform check).
-  using _tty =
-    process.platform === "darwin"
-      ? forwardFreshTtyToStdin()
-      : {
-          [Symbol.dispose]: (): void => {
-            // intentionally empty — workaround not installed on this platform
-          },
-        };
+  // The `forwardFreshTtyToStdin` function is preserved in
+  // `stdin-reopen.ts` for future callers (and its tests) but no
+  // longer wired into the wizard.
 
   const { directory, yes, dryRun, features, forceLegacyUi } = initialOptions;
 

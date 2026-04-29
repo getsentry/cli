@@ -309,21 +309,21 @@ export const initCommand = buildCommand<
     } finally {
       // 7. macOS-only force-exit safety net.
       //
-      // On Darwin, `runWizard` installs the `/dev/tty` forwarding
-      // workaround from stdin-reopen.ts to get keystrokes through to
-      // clack. That workaround opens a second `tty.ReadStream` which
-      // leaks a libuv handle on Bun 1.3.11 — no userland cleanup
-      // releases it (upstream oven-sh/bun#29126). After `runWizard`
-      // returns (or throws), the event loop stays ref'd and the process
-      // hangs until the user presses a key.
+      // On Darwin, `InkUI` opens a fresh `/dev/tty` `tty.ReadStream`
+      // (so Ink's `useInput` actually receives keystrokes — Bun's
+      // `process.stdin` doesn't deliver `readable` events properly,
+      // see oven-sh/bun#6862 / vadimdemedes/ink#636). The fresh
+      // stream is destroyed in the InkUI dispose path, but Bun's
+      // libuv handle for it can linger past `destroy()` on Darwin
+      // (oven-sh/bun#29126), keeping the event loop ref'd so the
+      // process hangs until the user presses a key.
       //
       // The .unref() timer doesn't hold the loop itself, so it's a no-op
-      // in the happy path (Linux: no workaround installed, loop drains
-      // naturally; `--yes` on Darwin: no prompts, no keystroke issue,
-      // may still drain naturally). On the Darwin hang path, it
-      // force-exits after a 100ms grace window — imperceptible to the
-      // user and enough for Sentry telemetry + stdio flushes to
-      // complete first.
+      // in the happy path (Linux: handle drains naturally; `--yes`
+      // on Darwin: LoggingUI doesn't open /dev/tty, may still drain
+      // naturally). On the Darwin hang path, it force-exits after a
+      // 100ms grace window — imperceptible to the user and enough
+      // for Sentry telemetry + stdio flushes to complete first.
       //
       // Skipped under `bun test` (which sets NODE_ENV=test automatically)
       // because the test runner calls `initCommand.func` directly; an

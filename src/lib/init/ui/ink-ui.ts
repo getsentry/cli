@@ -11,27 +11,41 @@
  *
  * Why Ink rather than OpenTUI?
  *
- *   - **Runs on Node.** OpenTUI's renderer is Zig-compiled and only
- *     loadable from Bun's `bun:ffi`. The npm/Node distribution of
- *     the CLI couldn't use it, so half the user base got a
- *     plain-text fallback. Ink is pure JS + React, so this same
- *     UI runs everywhere the CLI does.
  *   - **No native binary cost.** The OpenTUI implementation added
  *     ~10.7 MB to the compiled Bun binary (the `libopentui.so`
- *     plus the ~12k-line generated FFI bindings). Ink + companions
- *     add ~1–2 MB and are pure JS, so they bundle cleanly.
+ *     plus the ~12k-line generated FFI bindings). Ink is pure JS,
+ *     so it bundles cleanly with no platform-specific peer
+ *     packages.
  *   - **Inline rendering.** Ink writes incrementally to stdout, so
  *     log lines naturally end up in the user's scrollback. OpenTUI
  *     needed an alternate-screen buffer + a post-dispose stderr
  *     replay to leave any trace of the run behind.
  *
- * **Lazy import.** `ink`, `ink-spinner`, `ink-select-input`, and
- * `react` are all dynamically imported by `createInkUI()` so the
- * npm bundle (which excludes them from the bundle graph) never sees
- * the imports at module-load time. This keeps the `LoggingUI` path
- * cheap to instantiate when interactive UI is not needed.
+ * **Stdin workaround for Bun.** Ink listens for `readable` events
+ * on its `stdin` option (default `process.stdin`) and calls
+ * `stdin.read()` to consume bytes. Bun's compiled binaries have a
+ * long-standing bug — `process.stdin` accepts `setRawMode(true)` but
+ * never delivers `readable` events for terminal input
+ * (oven-sh/bun#6862, vadimdemedes/ink#636, both still open). The
+ * symptom: the wizard renders fine but arrow keys, Enter, and
+ * Ctrl+C all do nothing.
+ *
+ * Workaround: open a fresh `/dev/tty` `ReadStream` ourselves and
+ * pass it to Ink as the `stdin` option. The fresh stream's
+ * `readable` events fire correctly because the file-descriptor
+ * inheritance bug only affects fd 0, not fds we open inside the
+ * process. We close the stream on dispose to release the libuv
+ * handle.
+ *
+ * **Lazy import.** `ink`, `ink-spinner`, and `react` are all
+ * dynamically imported by `createInkUI()` so the npm bundle (which
+ * excludes them from the bundle graph) never sees the imports at
+ * module-load time. This keeps the `LoggingUI` path cheap to
+ * instantiate when interactive UI is not needed.
  */
 
+import { openSync } from "node:fs";
+import { ReadStream } from "node:tty";
 import chalk from "chalk";
 import { stripAnsi } from "../../formatters/plain-detect.js";
 import { buildFileTree, flattenTree } from "./file-tree.js";
@@ -132,6 +146,22 @@ function severityForStopCode(code: SpinnerExitCode): LogSeverity {
 import inkAppPath from "./ink-app.tsx" with { type: "file" };
 
 /**
+ * Open a fresh `/dev/tty` `ReadStream` for Ink to consume. Returns
+ * `null` when `/dev/tty` isn't available (non-TTY environment, or
+ * platforms that don't expose it — Windows). The caller falls back
+ * to `process.stdin` in that case, which works on Node but is
+ * broken in Bun-compiled binaries (see module docstring).
+ */
+function openFreshTtyForInk(): ReadStream | null {
+  try {
+    const fd = openSync("/dev/tty", "r");
+    return new ReadStream(fd);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Async factory for `InkUI`. Imports `ink`, `react`, and the local
  * `App` component lazily, mounts the React tree, and returns the
  * bridge instance. Throws if Ink can't be loaded (e.g. missing peer
@@ -161,6 +191,13 @@ export async function createInkUI(): Promise<InkUI> {
     })),
   });
 
+  // Open a fresh /dev/tty so Ink's `readable` event listener
+  // actually fires — see the module docstring for the Bun bug
+  // details. We hold onto the stream so we can close it on dispose
+  // (libuv otherwise keeps the handle alive and the process can't
+  // exit cleanly).
+  const freshStdin = openFreshTtyForInk();
+
   // Ink's render returns a handle with `unmount()` and
   // `waitUntilExit()`. We don't await `waitUntilExit` here because
   // the wizard drives lifecycle imperatively from the runner; the
@@ -168,18 +205,30 @@ export async function createInkUI(): Promise<InkUI> {
   // finishes (success or failure).
   //
   // `exitOnCtrlC: false` lets us route Ctrl+C through the prompt
-  // cancellation path (`installCancelHandler`) instead of yanking
-  // the process down mid-spinner.
+  // cancellation path (the SelectPrompt / MultiSelectPrompt
+  // `useInput` handlers detect `\x03` and resolve with `null`)
+  // instead of yanking the process down mid-spinner.
   //
   // `patchConsole: false` keeps `console.*` calls flowing to the
   // real stdout — Sentry SDK breadcrumbs, debug logs, etc. would
   // otherwise be swallowed by Ink's render loop.
-  const instance = ink.render(react.createElement(app.App, { store }), {
+  const renderOptions: {
+    exitOnCtrlC: boolean;
+    patchConsole: boolean;
+    stdin?: ReadStream;
+  } = {
     exitOnCtrlC: false,
     patchConsole: false,
-  });
+  };
+  if (freshStdin) {
+    renderOptions.stdin = freshStdin;
+  }
+  const instance = ink.render(
+    react.createElement(app.App, { store }),
+    renderOptions
+  );
 
-  return new InkUI(instance, store);
+  return new InkUI(instance, store, freshStdin);
 }
 
 /**
@@ -209,6 +258,14 @@ type InkInstance = {
 export class InkUI implements WizardUI {
   private readonly instance: InkInstance;
   private readonly store: WizardStore;
+  /**
+   * Fresh `/dev/tty` stream Ink reads from. We own this — closing
+   * it on dispose lets the libuv handle drain so `process.exit` (or
+   * a natural exit) actually fires. `null` when `/dev/tty` couldn't
+   * be opened (Windows, sandboxed environments) — Ink falls back to
+   * `process.stdin` in that case.
+   */
+  private readonly freshStdin: ReadStream | null;
   private tipTimer: ReturnType<typeof setInterval> | undefined;
   private tipIndex = 0;
   private activePromptCancel: (() => void) | undefined;
@@ -225,9 +282,14 @@ export class InkUI implements WizardUI {
   private outroMessage: string | undefined;
   private failureMessage: string | undefined;
 
-  constructor(instance: InkInstance, store: WizardStore) {
+  constructor(
+    instance: InkInstance,
+    store: WizardStore,
+    freshStdin: ReadStream | null
+  ) {
     this.instance = instance;
     this.store = store;
+    this.freshStdin = freshStdin;
     this.startTipRotation();
     this.installCancelHandler();
   }
@@ -414,6 +476,24 @@ export class InkUI implements WizardUI {
     } catch {
       // Ignore — disposal must never throw.
     }
+    if (this.freshStdin) {
+      // Restore termios before destroying the stream — Ink may have
+      // left raw mode enabled if `useInput` was active when we
+      // unmounted. Without this the user's shell shows an echo-less
+      // session after a crash. Best-effort: the stream may already
+      // be torn down from a prior error.
+      try {
+        this.freshStdin.setRawMode(false);
+      } catch {
+        // intentionally empty — stream already closed
+      }
+      try {
+        this.freshStdin.pause();
+        this.freshStdin.destroy();
+      } catch {
+        // intentionally empty
+      }
+    }
     const report = this.buildPostDisposeReport();
     if (report) {
       process.stderr.write(`${report}\n`);
@@ -488,16 +568,16 @@ export class InkUI implements WizardUI {
   }
 
   /**
-   * Wire the global Ctrl+C / Escape handler. Cooperative
-   * cancellation — resolve the active prompt with `CANCELLED`
-   * rather than yanking the process down, so `wizard-runner.ts`
-   * can drive its normal cleanup path (telemetry, exit code, etc.).
+   * Fallback SIGINT handler for the (rare) windows where raw mode
+   * is OFF and Node's terminal layer DOES deliver SIGINT for
+   * Ctrl+C. The primary Ctrl+C handling lives inside Ink's
+   * `useInput` (see `ink-app.tsx`'s top-level App component): in
+   * raw mode, Node sends `\x03` as a byte instead of SIGINT.
    *
-   * Ink's `useInput` only fires inside a focused component; we want
-   * cancellation to work even when no prompt is mounted (e.g.
-   * during a spinner). Hook into the process-level SIGINT instead
-   * — `exitOnCtrlC: false` on the render call ensures Ink doesn't
-   * intercept first.
+   * This handler covers the brief window between InkUI
+   * construction and the first `useInput` listener being mounted,
+   * plus any time raw mode flickers off (Ink toggles it in a
+   * useEffect when the listener count drops to zero).
    */
   private installCancelHandler(): void {
     const handler = () => {

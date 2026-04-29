@@ -152,6 +152,22 @@ export function App({ store }: AppProps): React.ReactNode {
   const { columns, rows } = useTerminalSize();
   const showSidebar = columns >= SIDEBAR_BREAKPOINT;
 
+  // Global Ctrl+C catcher. In raw mode Node doesn't emit SIGINT for
+  // `\x03` — Ink delivers it as `input === "c"` with `key.ctrl` set
+  // when a `useInput` listener is mounted. Each prompt's own
+  // `useInput` already handles cancellation, but during a spinner
+  // (no prompt) there's no input listener at all, so Ctrl+C would
+  // otherwise be silently dropped. This top-level listener fills
+  // that gap by exiting the process cleanly. Active prompts also
+  // see the same input event (Ink dispatches to all `useInput`
+  // listeners), and their `prompt.resolve(null)` runs before this
+  // exit so the wizard runner's WizardCancelledError propagates.
+  useInput((input, key) => {
+    if (key.ctrl && input === "c" && !snapshot.prompt) {
+      process.exit(130);
+    }
+  });
+
   return (
     <Box
       borderColor={MUTED}
@@ -502,7 +518,7 @@ function SelectPrompt({
     Math.min(Math.max(prompt.initialIndex, 0), Math.max(0, totalCount - 1))
   );
 
-  useInput((_input, key) => {
+  useInput((input, key) => {
     if (key.upArrow) {
       setHighlighted((idx) => (idx === 0 ? totalCount - 1 : idx - 1));
       return;
@@ -511,9 +527,11 @@ function SelectPrompt({
       setHighlighted((idx) => (idx + 1) % totalCount);
       return;
     }
-    if (key.escape) {
-      // Cooperative cancel — resolves the prompt with `null`, which
-      // the bridge translates to `CANCELLED`.
+    if (key.escape || (key.ctrl && input === "c")) {
+      // Cooperative cancel — Esc, or Ctrl+C in raw mode where Node
+      // doesn't deliver SIGINT. Resolves the prompt with `null`,
+      // which the bridge translates to `CANCELLED` and the wizard
+      // runner unwinds via `WizardCancelledError`.
       prompt.resolve(null);
       return;
     }
@@ -612,9 +630,10 @@ function MultiSelectPrompt({
       setHighlighted((idx) => (idx + 1) % totalCount);
       return;
     }
-    if (key.escape) {
-      // Cooperative cancel — resolves with `null`, which the bridge
-      // translates to `CANCELLED`.
+    if (key.escape || (key.ctrl && input === "c")) {
+      // Cooperative cancel — Esc, or Ctrl+C in raw mode where Node
+      // doesn't deliver SIGINT. Resolves with `null`, which the
+      // bridge translates to `CANCELLED`.
       prompt.resolve(null);
       return;
     }
