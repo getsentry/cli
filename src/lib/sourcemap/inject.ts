@@ -5,12 +5,16 @@
  * then injects Sentry debug IDs into each pair.
  */
 
-import { readFile, stat } from "node:fs/promises";
-import { resolve as resolvePath } from "node:path";
+import { open, readFile, stat } from "node:fs/promises";
+import { dirname, relative, resolve as resolvePath } from "node:path";
+import ignore from "ignore";
 import { NODE_MODULES_DIRNAME } from "../constants.js";
 import { ValidationError } from "../errors.js";
+import { logger } from "../logger.js";
 import { walkFiles } from "../scan/index.js";
 import { EXISTING_DEBUGID_RE, injectDebugId } from "./debug-id.js";
+
+const log = logger.withTag("sourcemap.inject");
 
 /** Default JavaScript file extensions to scan. */
 const DEFAULT_EXTENSIONS = new Set([".js", ".cjs", ".mjs"]);
@@ -33,6 +37,10 @@ export type InjectDirectoryOptions = {
   extensions?: string[];
   /** If true, report what would be modified without writing. */
   dryRun?: boolean;
+  /** Glob patterns (gitignore-style) to exclude from processing. */
+  ignorePatterns?: string[];
+  /** Pre-built ignore matcher (takes precedence over ignorePatterns). */
+  ignoreMatcher?: ReturnType<typeof ignore>;
 };
 
 /**
@@ -53,7 +61,9 @@ export async function injectDirectory(
     ? new Set(options.extensions.map((e) => (e.startsWith(".") ? e : `.${e}`)))
     : DEFAULT_EXTENSIONS;
 
-  const filePairs = await discoverFilePairs(dir, extensions);
+  const ig =
+    options.ignoreMatcher ?? (await buildIgnoreMatcher(options.ignorePatterns));
+  const filePairs = await discoverFilePairs(dir, extensions, ig);
 
   const results: InjectResult[] = [];
   for (const { jsPath, mapPath } of filePairs) {
@@ -76,20 +86,114 @@ export async function injectDirectory(
 export type FilePair = { jsPath: string; mapPath: string };
 
 /**
- * Check if a path has a companion .map file.
+ * Regex matching `//# sourceMappingURL=<url>` or `//@ sourceMappingURL=<url>`.
  *
- * @returns The map path if the companion exists, undefined otherwise.
+ * Must be the last non-empty line in the file. We search from the tail
+ * to avoid false positives from string literals in bundled code (e.g.
+ * terser/babel template literals that contain the directive as text).
+ */
+const SOURCE_MAPPING_URL_RE = /\/\/[#@]\s*sourceMappingURL\s*=\s*(\S+)\s*$/m;
+
+/**
+ * Read the last ~512 bytes of a file efficiently.
+ *
+ * We only need the very end of the JS file to find the
+ * `sourceMappingURL` directive. Reading just the tail avoids
+ * loading multi-megabyte bundles into memory.
+ */
+async function readFileTail(filePath: string, maxBytes = 512): Promise<string> {
+  const fh = await open(filePath, "r");
+  try {
+    const fstat = await fh.stat();
+    const fileSize = fstat.size;
+    if (fileSize === 0) {
+      return "";
+    }
+    const readSize = Math.min(maxBytes, fileSize);
+    const offset = fileSize - readSize;
+    const buf = Buffer.alloc(readSize);
+    await fh.read(buf, 0, readSize, offset);
+    return buf.toString("utf-8");
+  } finally {
+    await fh.close();
+  }
+}
+
+/**
+ * Extract the `sourceMappingURL` value from the tail of a JS file.
+ *
+ * Returns `undefined` if no directive is found.
+ */
+async function extractSourceMappingUrl(
+  jsPath: string
+): Promise<string | undefined> {
+  try {
+    const tail = await readFileTail(jsPath);
+    const match = tail.match(SOURCE_MAPPING_URL_RE);
+    return match?.[1];
+  } catch {
+    return;
+  }
+}
+
+/**
+ * Check if a file exists and is a regular file.
+ */
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    const s = await stat(path);
+    return s.isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Find the companion sourcemap for a JS file.
+ *
+ * Resolution order:
+ * 1. Convention: `<jsPath>.map` on disk
+ * 2. `//# sourceMappingURL=<relative-path>` directive in the JS file
+ *    (only external file references — `data:` URLs are logged and skipped)
+ *
+ * @returns The map path if a companion exists, undefined otherwise.
  */
 async function findCompanionMap(jsPath: string): Promise<string | undefined> {
-  const mapPath = `${jsPath}.map`;
-  try {
-    const mapStat = await stat(mapPath);
-    if (mapStat.isFile()) {
-      return mapPath;
-    }
-  } catch {
-    // No companion .map file — skip
+  // Fast path: convention-based naming (most bundlers use this)
+  const conventionPath = `${jsPath}.map`;
+  if (await fileExists(conventionPath)) {
+    return conventionPath;
   }
+
+  // Slow path: parse sourceMappingURL from the file tail
+  const url = await extractSourceMappingUrl(jsPath);
+  if (!url) {
+    return;
+  }
+
+  // Skip data: URLs (inline sourcemaps) — we can't inject debug IDs
+  // into inline sourcemaps without re-encoding the entire base64 blob
+  // back into the JS file. Log and move on.
+  if (url.startsWith("data:")) {
+    log.debug(
+      `skipping inline sourcemap in ${jsPath} (data: URL not supported for injection)`
+    );
+    return;
+  }
+
+  // Skip absolute URLs (http/https) — can't inject into remote maps
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    log.debug(`skipping remote sourcemap URL in ${jsPath}: ${url}`);
+    return;
+  }
+
+  // Resolve relative path against the JS file's directory
+  const jsDir = dirname(jsPath);
+  const resolvedMapPath = resolvePath(jsDir, url);
+  if (await fileExists(resolvedMapPath)) {
+    return resolvedMapPath;
+  }
+
   return;
 }
 
@@ -115,6 +219,40 @@ async function findCompanionMap(jsPath: string): Promise<string | undefined> {
 const SOURCEMAP_SKIP_DIRS: readonly string[] = [NODE_MODULES_DIRNAME];
 
 /**
+ * Build an `ignore` matcher from user-provided patterns and/or an
+ * ignore-file path. Returns `undefined` when no patterns are active.
+ */
+export async function buildIgnoreMatcher(
+  patterns?: string[],
+  ignoreFilePath?: string
+): Promise<ReturnType<typeof ignore> | undefined> {
+  const hasPatterns = patterns && patterns.length > 0;
+  if (!(hasPatterns || ignoreFilePath)) {
+    return;
+  }
+  const ig = ignore();
+  if (hasPatterns) {
+    ig.add(patterns);
+  }
+  if (ignoreFilePath) {
+    try {
+      const content = await readFile(ignoreFilePath, "utf-8");
+      ig.add(content);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        throw new ValidationError(
+          `Ignore file '${ignoreFilePath}' does not exist.`,
+          "ignore-file"
+        );
+      }
+      throw err;
+    }
+  }
+  return ig;
+}
+
+/**
  * Read-only discovery pass — returns the list of JS + sourcemap pairs
  * without injecting debug IDs. Used as a pre-check by the upload
  * command so the directory isn't mutated when the upload won't
@@ -122,7 +260,8 @@ const SOURCEMAP_SKIP_DIRS: readonly string[] = [NODE_MODULES_DIRNAME];
  */
 export async function discoverFilePairs(
   dir: string,
-  extensions: Set<string> = DEFAULT_EXTENSIONS
+  extensions: Set<string> = DEFAULT_EXTENSIONS,
+  ignoreMatcher?: ReturnType<typeof ignore>
 ): Promise<FilePair[]> {
   // `walkFiles` requires an absolute cwd. CLI callers pass
   // user-supplied positional args like `./dist` directly through to
@@ -138,6 +277,13 @@ export async function discoverFilePairs(
     respectGitignore: false,
     maxFileSize: Number.POSITIVE_INFINITY,
   })) {
+    if (ignoreMatcher) {
+      // Use POSIX relative path for gitignore-style matching
+      const rel = relative(absDir, entry.absolutePath).replaceAll("\\", "/");
+      if (ignoreMatcher.ignores(rel)) {
+        continue;
+      }
+    }
     const mapPath = await findCompanionMap(entry.absolutePath);
     if (mapPath) {
       pairs.push({ jsPath: entry.absolutePath, mapPath });

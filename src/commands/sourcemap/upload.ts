@@ -20,6 +20,7 @@ import { resolveOrgAndProject } from "../../lib/resolve-target.js";
 import {
   assertDirectoryReadable,
   buildEmptyDiscoveryError,
+  buildIgnoreMatcher,
   diagnoseEmptyDiscovery,
   discoverFilePairs,
   injectDirectory,
@@ -34,6 +35,8 @@ type UploadCommandResult = {
   project?: string;
   /** Release version, if provided. */
   release?: string;
+  /** Distribution identifier, if provided. */
+  dist?: string;
   /** Number of file pairs uploaded. */
   filesUploaded: number;
 };
@@ -51,10 +54,53 @@ function formatUploadResult(data: UploadCommandResult): string {
   if (data.release) {
     rows.push(["Release", data.release]);
   }
+  if (data.dist) {
+    rows.push(["Dist", data.dist]);
+  }
   return renderMarkdown(mdKvTable(rows));
 }
 
 const USAGE_HINT = "sentry sourcemap upload <directory>";
+
+/**
+ * Compute the longest common directory prefix across a list of paths.
+ *
+ * Only strips at directory boundaries (slashes), so
+ * `["a/b/c.js", "a/b/d.js"]` yields `"a/b/"` rather than `"a/b/"`.
+ * Returns `""` when paths share no common directory prefix.
+ */
+function computeCommonPrefix(paths: string[]): string {
+  if (paths.length === 0) {
+    return "";
+  }
+  const sorted = [...paths].sort();
+  const first = sorted[0];
+  const last = sorted.at(-1);
+  if (!(first && last)) {
+    return "";
+  }
+  let common = 0;
+  for (let i = 0; i < first.length && i < last.length; i += 1) {
+    if (first[i] !== last[i]) {
+      break;
+    }
+    if (first[i] === "/") {
+      common = i + 1;
+    }
+  }
+  return first.slice(0, common);
+}
+
+/**
+ * Strip a prefix from a file path. If the path doesn't start with
+ * the prefix, returns it unchanged.
+ */
+function stripPrefix(path: string, prefix: string): string {
+  if (prefix && path.startsWith(prefix)) {
+    return path.slice(prefix.length);
+  }
+  return path;
+}
 
 export const uploadCommand = buildCommand({
   docs: {
@@ -71,7 +117,10 @@ export const uploadCommand = buildCommand({
       "Usage:\n" +
       "  sentry sourcemap upload ./dist\n" +
       "  sentry sourcemap upload ./dist --release 1.0.0\n" +
+      "  sentry sourcemap upload ./dist --release 1.0.0 --dist 12345\n" +
       "  sentry sourcemap upload ./dist --url-prefix '~/static/js/'\n" +
+      "  sentry sourcemap upload ./dist --no-rewrite\n" +
+      "  sentry sourcemap upload ./dist --ext .js,.mjs\n" +
       "  sentry sourcemap upload ./maybe-empty --allow-empty",
   },
   output: {
@@ -95,12 +144,57 @@ export const uploadCommand = buildCommand({
         brief: "Release version to associate with the upload",
         optional: true,
       },
+      dist: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "Distribution identifier to disambiguate builds within a release",
+        optional: true,
+      },
       "url-prefix": {
         kind: "parsed",
         parse: String,
         brief: "URL prefix for uploaded files (default: ~/)",
         optional: true,
         default: "~/",
+      },
+      ext: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "Comma-separated file extensions to process (default: .js,.cjs,.mjs)",
+        optional: true,
+      },
+      ignore: {
+        kind: "parsed",
+        parse: String,
+        brief: "Glob pattern to exclude (gitignore-style, repeatable)",
+        optional: true,
+      },
+      "ignore-file": {
+        kind: "parsed",
+        parse: String,
+        brief: "Path to a file with gitignore-style patterns to exclude",
+        optional: true,
+      },
+      "strip-prefix": {
+        kind: "parsed",
+        parse: String,
+        brief: "Strip a prefix from uploaded file paths (e.g. 'build/')",
+        optional: true,
+      },
+      "strip-common-prefix": {
+        kind: "boolean",
+        brief:
+          "Automatically strip the longest common path prefix from all files",
+        optional: true,
+        default: false,
+      },
+      "no-rewrite": {
+        kind: "boolean",
+        brief: "Upload files as-is without injecting debug IDs",
+        optional: true,
+        default: false,
       },
       "allow-empty": {
         kind: "boolean",
@@ -116,7 +210,14 @@ export const uploadCommand = buildCommand({
     this: SentryContext,
     flags: {
       release?: string;
+      dist?: string;
       "url-prefix"?: string;
+      ext?: string;
+      ignore?: string;
+      "ignore-file"?: string;
+      "strip-prefix"?: string;
+      "strip-common-prefix"?: boolean;
+      "no-rewrite"?: boolean;
       "allow-empty"?: boolean;
     },
     dir: string
@@ -125,11 +226,25 @@ export const uploadCommand = buildCommand({
     // don't write debug IDs when the upload won't proceed (empty dir,
     // typoed path, missing credentials).
     await assertDirectoryReadable(dir);
-    const pairs = await discoverFilePairs(dir);
+
+    const extensions = flags.ext?.split(",").map((e) => e.trim());
+    const extSet = extensions
+      ? new Set(extensions.map((e) => (e.startsWith(".") ? e : `.${e}`)))
+      : undefined;
+
+    const ignorePatterns = flags.ignore
+      ? flags.ignore.split(",").map((p) => p.trim())
+      : undefined;
+    const ignoreMatcher = await buildIgnoreMatcher(
+      ignorePatterns,
+      flags["ignore-file"]
+    );
+
+    const pairs = await discoverFilePairs(dir, extSet, ignoreMatcher);
 
     if (pairs.length === 0) {
       if (!flags["allow-empty"]) {
-        const diag = await diagnoseEmptyDiscovery(dir);
+        const diag = await diagnoseEmptyDiscovery(dir, { extensions });
         throw buildEmptyDiscoveryError(dir, diag);
       }
       // --allow-empty: nothing to upload, so don't require Sentry
@@ -137,6 +252,7 @@ export const uploadCommand = buildCommand({
       // library-only / conditional-release-skip cases the docs name.
       yield new CommandOutput<UploadCommandResult>({
         release: flags.release,
+        dist: flags.dist,
         filesUploaded: 0,
       });
       return {
@@ -155,36 +271,57 @@ export const uploadCommand = buildCommand({
     }
     const { org, project } = resolved;
 
-    const results = await injectDirectory(dir);
+    const results = flags["no-rewrite"]
+      ? pairs.map((p) => ({ ...p, injected: false, debugId: "" }))
+      : await injectDirectory(dir, {
+          extensions,
+          ignoreMatcher,
+        });
 
     const urlPrefix = flags["url-prefix"] ?? "~/";
 
     // Build artifact file list with paths relative to the upload directory
     const resolvedDir = resolve(dir);
+
+    // Compute prefix to strip from relative paths
+    let pathPrefixToStrip = flags["strip-prefix"] ?? "";
+    if (flags["strip-common-prefix"]) {
+      const allRelative = results.flatMap(({ jsPath, mapPath }) => [
+        relative(resolvedDir, jsPath).replaceAll("\\", "/"),
+        relative(resolvedDir, mapPath).replaceAll("\\", "/"),
+      ]);
+      pathPrefixToStrip = computeCommonPrefix(allRelative);
+    }
+
     const artifactFiles: ArtifactFile[] = results.flatMap(
       ({ jsPath, mapPath, debugId }) => {
         // Normalize to forward slashes for URLs (handles Windows backslashes)
-        const jsRelative = relative(resolvedDir, jsPath).replaceAll("\\", "/");
-        const mapRelative = relative(resolvedDir, mapPath).replaceAll(
-          "\\",
-          "/"
-        );
+        let jsRelative = relative(resolvedDir, jsPath).replaceAll("\\", "/");
+        let mapRelative = relative(resolvedDir, mapPath).replaceAll("\\", "/");
+
+        if (pathPrefixToStrip) {
+          jsRelative = stripPrefix(jsRelative, pathPrefixToStrip);
+          mapRelative = stripPrefix(mapRelative, pathPrefixToStrip);
+        }
+
         const mapBasename = basename(mapPath);
         return [
           {
             path: jsPath,
-            debugId,
+            // Empty debugId when --no-rewrite: files uploaded without debug IDs,
+            // relying on release/URL-based matching instead.
+            ...(debugId ? { debugId } : {}),
             type: "minified_source" as const,
             url: `${urlPrefix}${jsRelative}`,
             sourcemapFilename: mapBasename,
           },
           {
             path: mapPath,
-            debugId,
+            ...(debugId ? { debugId } : {}),
             type: "source_map" as const,
             url: `${urlPrefix}${mapRelative}`,
           },
-        ];
+        ] satisfies ArtifactFile[];
       }
     );
 
@@ -192,6 +329,7 @@ export const uploadCommand = buildCommand({
       org,
       project,
       release: flags.release,
+      dist: flags.dist,
       files: artifactFiles,
     });
 
@@ -199,6 +337,7 @@ export const uploadCommand = buildCommand({
       org,
       project,
       release: flags.release,
+      dist: flags.dist,
       filesUploaded: results.length,
     });
   },

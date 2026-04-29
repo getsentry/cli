@@ -16,6 +16,7 @@ import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   assertDirectoryReadable,
   buildEmptyDiscoveryError,
+  buildIgnoreMatcher,
   diagnoseEmptyDiscovery,
   discoverFilePairs,
   type InjectResult,
@@ -91,6 +92,18 @@ export const injectCommand = buildCommand({
           "Comma-separated file extensions to process (default: .js,.cjs,.mjs)",
         optional: true,
       },
+      ignore: {
+        kind: "parsed",
+        parse: String,
+        brief: "Glob pattern to exclude (gitignore-style, repeatable)",
+        optional: true,
+      },
+      "ignore-file": {
+        kind: "parsed",
+        parse: String,
+        brief: "Path to a file with gitignore-style patterns to exclude",
+        optional: true,
+      },
       "dry-run": {
         kind: "boolean",
         brief: "Show what would be modified without writing",
@@ -109,7 +122,13 @@ export const injectCommand = buildCommand({
   },
   async *func(
     this: SentryContext,
-    flags: { ext?: string; "dry-run"?: boolean; "allow-empty"?: boolean },
+    flags: {
+      ext?: string;
+      ignore?: string;
+      "ignore-file"?: string;
+      "dry-run"?: boolean;
+      "allow-empty"?: boolean;
+    },
     dir: string
   ) {
     // Discover pairs read-only first so we don't error after partially
@@ -123,7 +142,15 @@ export const injectCommand = buildCommand({
       ? new Set(extensions.map((e) => (e.startsWith(".") ? e : `.${e}`)))
       : undefined;
 
-    const pairs = await discoverFilePairs(dir, extSet);
+    const ignorePatterns = flags.ignore
+      ? flags.ignore.split(",").map((p) => p.trim())
+      : undefined;
+    const ignoreMatcher = await buildIgnoreMatcher(
+      ignorePatterns,
+      flags["ignore-file"]
+    );
+
+    const pairs = await discoverFilePairs(dir, extSet, ignoreMatcher);
     if (pairs.length === 0 && !flags["allow-empty"]) {
       const diag = await diagnoseEmptyDiscovery(dir, { extensions });
       throw buildEmptyDiscoveryError(dir, diag);
@@ -131,6 +158,7 @@ export const injectCommand = buildCommand({
 
     const results = await injectDirectory(dir, {
       extensions,
+      ignorePatterns,
       dryRun: flags["dry-run"],
     });
 
