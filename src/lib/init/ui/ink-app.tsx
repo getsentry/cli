@@ -47,7 +47,6 @@
  */
 
 import { Box, Text, useInput, useStdout } from "ink";
-import SelectInput from "ink-select-input";
 import Spinner from "ink-spinner";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import {
@@ -474,30 +473,83 @@ function PromptArea({ prompt }: { prompt: ActivePrompt }): React.ReactNode {
   return <MultiSelectPrompt prompt={prompt} />;
 }
 
+/**
+ * Single-select prompt rendered via Ink's `useInput` directly
+ * (rather than through `ink-select-input`).
+ *
+ * Why hand-rolled?
+ *   - `ink-select-input`'s items array is recreated on every parent
+ *     render, which races with its internal `useEffect` that resets
+ *     `selectedIndex` on items-change. Under our store-driven
+ *     re-render cadence (tip rotation, log lines, file-read
+ *     updates) the cursor would never settle and arrow keys felt
+ *     unresponsive.
+ *   - Sharing the rendering pattern with {@link MultiSelectPrompt}
+ *     keeps the visual styling consistent: same cursor glyph,
+ *     same accent color, same hint placement.
+ *
+ * Keyboard:
+ *   - up/down  → move the cursor (wraps top↔bottom)
+ *   - enter    → commit the highlighted option
+ */
 function SelectPrompt({
   prompt,
 }: {
   prompt: Extract<ActivePrompt, { kind: "select" }>;
 }): React.ReactNode {
-  // Build the items array once per options change. `ink-select-input`
-  // keys items by `key` (or falls back to `value`) so we explicitly
-  // set `key` to dodge a duplicate-key warning when two options share
-  // a label but differ in `value`.
-  const items = prompt.options.map((option) => ({
-    key: option.value,
-    label: option.hint ? `${option.label}  ${option.hint}` : option.label,
-    value: option.value,
-  }));
+  const totalCount = prompt.options.length;
+  const [highlighted, setHighlighted] = useState<number>(() =>
+    Math.min(Math.max(prompt.initialIndex, 0), Math.max(0, totalCount - 1))
+  );
+
+  useInput((_input, key) => {
+    if (key.upArrow) {
+      setHighlighted((idx) => (idx === 0 ? totalCount - 1 : idx - 1));
+      return;
+    }
+    if (key.downArrow) {
+      setHighlighted((idx) => (idx + 1) % totalCount);
+      return;
+    }
+    if (key.escape) {
+      // Cooperative cancel — resolves the prompt with `null`, which
+      // the bridge translates to `CANCELLED`.
+      prompt.resolve(null);
+      return;
+    }
+    if (key.return) {
+      const current = prompt.options[highlighted];
+      if (current) {
+        prompt.resolve(current.value);
+      }
+    }
+  });
+
   return (
     <Box flexDirection="column" flexShrink={0} gap={1} marginTop={1}>
       <Text>{prompt.message}</Text>
-      <SelectInput
-        initialIndex={prompt.initialIndex}
-        items={items}
-        onSelect={(item) => {
-          prompt.resolve(String(item.value));
-        }}
-      />
+      <Box flexDirection="column">
+        {prompt.options.map((option, idx) => {
+          const isCursor = idx === highlighted;
+          let cursor = " ";
+          let labelColor = MUTED;
+          if (isCursor) {
+            cursor = "›";
+            labelColor = "white";
+          }
+          return (
+            <Box flexDirection="row" key={option.value}>
+              <Box width={2}>
+                <Text color={ACCENT}>{cursor}</Text>
+              </Box>
+              <Text color={labelColor}>{option.label}</Text>
+              {option.hint !== undefined && option.hint !== "" ? (
+                <Text color={MUTED}> {option.hint}</Text>
+              ) : null}
+            </Box>
+          );
+        })}
+      </Box>
     </Box>
   );
 }
@@ -524,6 +576,33 @@ function MultiSelectPrompt({
   const [highlighted, setHighlighted] = useState<number>(0);
   const totalCount = prompt.options.length;
 
+  const toggleAt = (idx: number) => {
+    const current = prompt.options[idx];
+    if (!current) {
+      return;
+    }
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(current.value)) {
+        next.delete(current.value);
+      } else {
+        next.add(current.value);
+      }
+      return next;
+    });
+  };
+
+  const commit = () => {
+    if (prompt.required && selected.size === 0) {
+      return;
+    }
+    // Preserve source option order in the returned array.
+    const ordered = prompt.options
+      .map((option) => option.value)
+      .filter((value) => selected.has(value));
+    prompt.resolve(ordered);
+  };
+
   useInput((input, key) => {
     if (key.upArrow) {
       setHighlighted((idx) => (idx === 0 ? totalCount - 1 : idx - 1));
@@ -533,31 +612,18 @@ function MultiSelectPrompt({
       setHighlighted((idx) => (idx + 1) % totalCount);
       return;
     }
+    if (key.escape) {
+      // Cooperative cancel — resolves with `null`, which the bridge
+      // translates to `CANCELLED`.
+      prompt.resolve(null);
+      return;
+    }
     if (input === " ") {
-      const current = prompt.options[highlighted];
-      if (!current) {
-        return;
-      }
-      setSelected((prev) => {
-        const next = new Set(prev);
-        if (next.has(current.value)) {
-          next.delete(current.value);
-        } else {
-          next.add(current.value);
-        }
-        return next;
-      });
+      toggleAt(highlighted);
       return;
     }
     if (key.return) {
-      if (prompt.required && selected.size === 0) {
-        return;
-      }
-      // Preserve source option order in the returned array.
-      const ordered = prompt.options
-        .map((option) => option.value)
-        .filter((value) => selected.has(value));
-      prompt.resolve(ordered);
+      commit();
     }
   });
 

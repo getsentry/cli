@@ -232,8 +232,6 @@ const result = await build({
     "node:*",
     "ink",
     "ink-spinner",
-    "ink-select-input",
-    "ink-text-input",
     "react",
     "react/*",
     "react-reconciler",

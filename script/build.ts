@@ -140,8 +140,6 @@ async function bundleJs(): Promise<boolean> {
         "bun:*",
         "ink",
         "ink-spinner",
-        "ink-select-input",
-        "ink-text-input",
         "react",
         "react/*",
         "react-reconciler",

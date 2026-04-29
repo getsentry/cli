@@ -111,9 +111,9 @@ function severityForStopCode(code: SpinnerExitCode): LogSeverity {
  * leaves the import external).
  *
  * Why this indirection? `ink-app.tsx` statically imports `ink`,
- * `ink-spinner`, `ink-select-input`, and `react`. When Bun.compile
- * bundles those packages through its CJS-wrapping path the output
- * mangles their dev-build IIFEs (it injects `__promiseAll` runtime
+ * `ink-spinner`, and `react`. When Bun.compile bundles those
+ * packages through its CJS-wrapping path the output mangles their
+ * dev-build IIFEs (it injects `__promiseAll` runtime
  * helpers in positions the wrappers don't tolerate, producing a
  * `SyntaxError: Unexpected identifier '__promiseAll'` at startup
  * inside e.g. `react/cjs/react-jsx-runtime.development.js` or
