@@ -383,11 +383,8 @@ function throwNotFoundError(
   }
 
   // Multiple IDs — compute the retention suffix once per ID so both the
-  // inline annotation and the "any expired?" check reuse the same decode.
+  // ID list and the "any expired?" check reuse the same decode.
   const suffixed = logIds.map((id) => ({ id, suffix: retentionSuffix(id) }));
-  const annotated = suffixed
-    .map(({ id, suffix }) => ` - \`${id}\`${suffix}`)
-    .join("\n");
   const anyExpired = suffixed.some(({ suffix }) => suffix !== "");
   const idList = suffixed.map(({ id, suffix }) => `${id}${suffix}`);
   let hint: string;
