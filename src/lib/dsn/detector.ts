@@ -407,6 +407,8 @@ export function getDsnSourceDescription(dsn: DetectedDsn): string {
       return dsn.sourcePath ?? "config file";
     case "code":
       return dsn.sourcePath ?? "source code";
+    case "inferred":
+      return "directory name inference";
     default:
       return "unknown source";
   }

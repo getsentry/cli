@@ -416,5 +416,19 @@ describe("DSN Detector (New Module)", () => {
 
       expect(getDsnSourceDescription(dsn)).toBe("src/instrumentation.ts");
     });
+
+    test("describes inferred source", () => {
+      const dsn = {
+        raw: "https://key@o1.ingest.sentry.io/1",
+        source: "inferred" as const,
+        protocol: "https",
+        publicKey: "key",
+        host: "o1.ingest.sentry.io",
+        projectId: "1",
+        orgId: "1",
+      };
+
+      expect(getDsnSourceDescription(dsn)).toBe("directory name inference");
+    });
   });
 });
