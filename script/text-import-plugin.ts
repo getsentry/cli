@@ -15,17 +15,10 @@
  *   runtime.
  *
  * Used by `script/build.ts` (single-file executable) and
- * `script/bundle.ts` (CJS library bundle) so:
- *
- *   1. The grep-worker source in `src/lib/scan/worker-pool.ts` loads
- *      correctly in both dev and compiled builds (`text` branch).
- *   2. `src/lib/init/ui/opentui-app.tsx` ships embedded into the
- *      Bun binary as a file resource (`file` branch). `OpenTuiUI`
- *      then `await import(path)`s it at runtime, sidestepping a Bun
- *      bundler bug that mangles React's CJS jsx-runtime wrapping
- *      when reached through static imports inside `__commonJS`
- *      scope. Embedding the .tsx as raw bytes pushes resolution to
- *      Bun's runtime (not bundler), which doesn't have the bug.
+ * `script/bundle.ts` (CJS library bundle) so the grep-worker source
+ * in `src/lib/scan/worker-pool.ts` loads correctly in both dev and
+ * compiled builds (`text` branch). The `file` branch is kept for
+ * future use; today no source file goes through it.
  */
 
 import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
@@ -54,14 +47,9 @@ export const textImportPlugin: Plugin = {
         // Bun.compile resolves imports relative to the bundle file's
         // directory at compile time, not the original source.
         //
-        // The npm bundle path (`script/bundle.ts`) also reaches this
-        // branch — `opentui-ui.ts` has the import at module top —
-        // but `@opentui/*` and `react` are externalized there, so
-        // the OpenTuiUI factory never runs and the embedded copy is
-        // unused at runtime. We still produce it because esbuild
-        // resolves all reachable imports regardless of whether they
-        // execute. The `mkdirSync` below guards against the
-        // bundle's `outdir` not yet existing when the plugin fires.
+        // `mkdirSync` guards against the bundle's `outdir` not yet
+        // existing when the plugin fires — esbuild creates the
+        // outdir lazily on first write.
         const sourcePath = resolvePath(args.resolveDir, args.path);
         const outdir = build.initialOptions.outdir
           ? resolvePath(build.initialOptions.outdir)

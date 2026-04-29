@@ -2,18 +2,20 @@
  * Tests for getUIAsync() — verifies the runtime-detection rules pick
  * the right WizardUI implementation.
  *
- * The factory's selection logic depends on four signals:
+ * The factory's selection logic depends on five signals:
  *   - `SENTRY_INIT_TUI` env var
  *   - `--yes` flag (passed in via opts)
  *   - `--no-tui` (mapped to `forceLegacy`)
  *   - stdin/stdout TTY state
- *   - whether the runtime is the Bun-compiled binary
+ *   - whether the runtime is the Bun-compiled binary (Ink is
+ *     gated to Bun because its top-level-await usage doesn't
+ *     bundle into our CJS npm distribution).
  *
  * We patch the env and `process.stdin.isTTY` / `process.stdout.isTTY`
  * around each test so the assertions are deterministic. The
  * Bun-runtime branch is exercised by leaving `isBunRuntime()` to its
  * real return value — the test runner is invoked via `bun test` so
- * the Bun global is present and `getUIAsync` can attempt the OpenTUI
+ * the Bun global is present and `getUIAsync` can attempt the Ink
  * path. To keep tests fast and TTY-independent we use the
  * `forceLegacy` / non-TTY / `--yes` paths to assert `LoggingUI` is
  * returned without ever spinning up a real renderer.

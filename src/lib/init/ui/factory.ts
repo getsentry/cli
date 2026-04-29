@@ -12,20 +12,25 @@
  *    (CI / piped input). Prompt methods throw, so callers must
  *    pre-resolve every choice up-front.
  * 2. `SENTRY_INIT_TUI=0` or `--no-tui` — `LoggingUI`. Acts as a debug
- *    escape hatch when the OpenTUI path misbehaves. In an interactive
+ *    escape hatch when the Ink path misbehaves. In an interactive
  *    context this means the wizard becomes effectively non-interactive
  *    (any prompt aborts), so users hitting this path will need to set
  *    every choice via flags or rely on auto-detection.
  * 3. Running outside the Bun-compiled binary (i.e. on Node) — also
- *    `LoggingUI`. OpenTUI ships native Zig bindings that the npm
- *    `dist/bin.cjs` distribution can't load. The npm package's
- *    `--help` output and onboarding docs direct users to the Bun
- *    binary for the interactive `sentry init` experience.
- * 4. Default (Bun binary, interactive, no opt-out) — `OpenTuiUI`.
+ *    `LoggingUI`. Ink uses top-level await in its reconciler and the
+ *    `yoga-layout` dependency, which esbuild can't emit in our CJS
+ *    bundle, so the npm distribution can't load Ink at runtime. The
+ *    Bun binary embeds Ink + React + ink-app.tsx via
+ *    `with { type: "file" }`, sidestepping the bundler entirely. The
+ *    npm package's `--help` output and onboarding docs direct users
+ *    to the Bun binary for the interactive `sentry init` experience.
+ * 4. Default (Bun binary, interactive, no opt-out) — `InkUI`.
  *
- * The previous `ClackUI` implementation was removed in PR 4 once the
- * OpenTUI implementation became the default. `@clack/prompts` is no
- * longer a dependency.
+ * Implementation history:
+ *   - PR 4: replaced `ClackUI` with `OpenTuiUI` as the default.
+ *   - This PR: replaced `OpenTuiUI` with `InkUI`. OpenTUI's Zig
+ *     bindings added ~10.7 MB to the binary; Ink + React + companions
+ *     add a fraction of that and use no native code.
  */
 
 import { LoggingUI } from "./logging-ui.js";
@@ -47,8 +52,9 @@ export type UIFactoryOptions = {
 
 /**
  * Detect whether the CLI is running inside the Bun-compiled binary
- * (where OpenTUI's native bindings are present) vs. the npm/Node
- * distribution. The `Bun` global only exists in the Bun runtime.
+ * (where the embedded `ink-app.tsx` resource is reachable) vs. the
+ * npm/Node distribution. The `Bun` global only exists in the Bun
+ * runtime.
  *
  * Exported for the test suite — production callers should go through
  * `getUIAsync()`.
@@ -74,7 +80,7 @@ export function isInteractiveTerminal(): boolean {
 /**
  * Returns `true` when the `LoggingUI` should be used — i.e. we're in
  * a non-interactive context, the user opted out of the TUI, the env
- * var override is set, or the runtime can't load OpenTUI.
+ * var override is set, or the runtime can't load Ink.
  */
 function shouldUseLogging(opts: UIFactoryOptions): boolean {
   if (process.env.SENTRY_INIT_TUI === "0") {
@@ -96,11 +102,11 @@ function shouldUseLogging(opts: UIFactoryOptions): boolean {
 }
 
 /**
- * Async factory — picks `OpenTuiUI` for interactive runs on the Bun
+ * Async factory — picks `InkUI` for interactive runs on the Bun
  * binary, otherwise `LoggingUI`. The async form exists because
- * instantiating `OpenTuiUI` requires a lazy `import("@opentui/core")`
- * (the package isn't bundled into the npm/Node distribution and would
- * crash if statically imported there).
+ * instantiating `InkUI` requires a lazy `import("ink")` (the package
+ * isn't bundled into the npm/Node distribution and would fail to
+ * resolve if statically imported there).
  *
  * Callers should treat the return value as an `AsyncDisposable` and
  * use `await using ui = await getUIAsync(...)` to guarantee teardown
@@ -111,13 +117,14 @@ export async function getUIAsync(opts: UIFactoryOptions): Promise<WizardUI> {
     return new LoggingUI();
   }
   try {
-    const { createOpenTuiUI } = await import("./opentui-ui.js");
-    return await createOpenTuiUI();
+    const { createInkUI } = await import("./ink-ui.js");
+    return await createInkUI();
   } catch {
-    // Fall through to LoggingUI so a missing/broken native binding
-    // doesn't take down the wizard. This branch is unreachable on a
-    // correctly built Bun binary — it exists as a safety net for
-    // unusual runtime environments where the import fails.
+    // Fall through to LoggingUI so a missing/broken Ink install
+    // doesn't take down the wizard. This branch should be
+    // unreachable on a correctly built Bun binary — it exists as
+    // a safety net for unusual runtime environments where the
+    // import fails.
     return new LoggingUI();
   }
 }

@@ -46,11 +46,13 @@ type InitFlags = {
   readonly features?: string[];
   readonly team?: string;
   /**
-   * Default `true` (OpenTUI is the default UI). Stricli auto-generates
-   * a negated `--no-tui` flag that flips this to `false` — that's the
-   * escape hatch users invoke when the OpenTUI path misbehaves. The
-   * positive `--tui` flag is also accepted for symmetry but is a no-op
-   * versus the default.
+   * Default `true` (Ink is the default UI on the Bun binary). Stricli
+   * auto-generates a negated `--no-tui` flag that flips this to
+   * `false` — that's the escape hatch users invoke when the Ink path
+   * misbehaves (e.g. on unusual terminal emulators). The positive
+   * `--tui` flag is also accepted for symmetry but is a no-op versus
+   * the default. On the npm/Node distribution this flag has no
+   * effect; the factory always picks `LoggingUI` there.
    */
   readonly tui: boolean;
 };
@@ -237,7 +239,7 @@ export const initCommand = buildCommand<
       tui: {
         kind: "boolean",
         brief:
-          "Use the OpenTUI full-screen interface (default on the Bun binary). Pass --no-tui to disable.",
+          "Use the Ink-based interactive UI (default on the Bun binary). Pass --no-tui to fall back to plain log output.",
         default: true,
       },
     },

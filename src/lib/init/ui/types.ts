@@ -4,8 +4,11 @@
  * Defines the I/O surface used by the init wizard. Concrete implementations
  * provide the actual rendering:
  *
- * - `OpenTuiUI`   — alternate-buffer full-screen UI built on `@opentui/core`.
- *                   Default for interactive runs on the Bun-compiled binary.
+ * - `InkUI`       — Ink-based React UI. Default for interactive runs on
+ *                   the Bun-compiled binary. Ink is pure JS but uses
+ *                   top-level await internally, which esbuild can't emit
+ *                   in our CJS npm bundle — so the npm/Node distribution
+ *                   falls back to `LoggingUI` instead.
  * - `LoggingUI`   — plain stdout/stderr writes for CI, `--yes`, non-TTY
  *                   environments, the npm/Node distribution, and the
  *                   `--no-tui` escape hatch. Prompts throw —

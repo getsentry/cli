@@ -1,52 +1,41 @@
 /**
- * OpenTuiUI — React-based full-screen `WizardUI` implementation.
+ * InkUI — Ink-based `WizardUI` implementation.
  *
- * The class itself is a thin bridge between the imperative `WizardUI`
+ * The class is a thin bridge between the imperative `WizardUI`
  * surface (which the wizard runner calls into) and a React tree
- * mounted via `@opentui/react`'s `createRoot`. State lives in a
- * `WizardStore` (see `opentui-store.ts`) that React subscribes to via
+ * mounted via Ink's `render()`. State lives in a `WizardStore`
+ * (see `wizard-store.ts`) that React subscribes to via
  * `useSyncExternalStore`. Each method on this class translates a
  * single imperative call into one or more store mutations; React
  * re-renders.
  *
- * Why React rather than imperative Renderable mutation?
+ * Why Ink rather than OpenTUI?
  *
- *   - Multi-select with toggle state was racy under direct
- *     `SelectRenderable.setOptions()` calls — keystrokes could land
- *     between the toggle and the redraw, leaving the visible markers
- *     out of sync with the internal set.
- *   - The Sentry-tips sidebar rotates on a timer; React's prop diff
- *     handles the swap with no manual `text.content =` plumbing.
- *   - The completion summary uses structured data (key/value rows,
- *     changed-files list) rather than pre-rendered markdown, which
- *     OpenTUI's TextRenderable can't display correctly. React's
- *     declarative composition is the natural way to lay it out.
+ *   - **Runs on Node.** OpenTUI's renderer is Zig-compiled and only
+ *     loadable from Bun's `bun:ffi`. The npm/Node distribution of
+ *     the CLI couldn't use it, so half the user base got a
+ *     plain-text fallback. Ink is pure JS + React, so this same
+ *     UI runs everywhere the CLI does.
+ *   - **No native binary cost.** The OpenTUI implementation added
+ *     ~10.7 MB to the compiled Bun binary (the `libopentui.so`
+ *     plus the ~12k-line generated FFI bindings). Ink + companions
+ *     add ~1–2 MB and are pure JS, so they bundle cleanly.
+ *   - **Inline rendering.** Ink writes incrementally to stdout, so
+ *     log lines naturally end up in the user's scrollback. OpenTUI
+ *     needed an alternate-screen buffer + a post-dispose stderr
+ *     replay to leave any trace of the run behind.
  *
- * **Bun-only.** OpenTUI's native bindings ship as Zig — they don't run
- * on the npm/Node distribution. The factory in `factory.ts` only
- * routes here when running inside the Bun-compiled binary.
- *
- * **Lazy import.** `@opentui/core`, `@opentui/react`, and `react` are
- * all dynamically imported by `createOpenTuiUI()` so the npm bundle
- * (which excludes them from the bundle graph) never sees the imports
- * at module-load time.
+ * **Lazy import.** `ink`, `ink-spinner`, `ink-select-input`, and
+ * `react` are all dynamically imported by `createInkUI()` so the
+ * npm bundle (which excludes them from the bundle graph) never sees
+ * the imports at module-load time. This keeps the `LoggingUI` path
+ * cheap to instantiate when interactive UI is not needed.
  */
 
 import chalk from "chalk";
 import { stripAnsi } from "../../formatters/plain-detect.js";
 import { buildFileTree, flattenTree } from "./file-tree.js";
-import { WizardStore } from "./opentui-store.js";
 import { SENTRY_TIPS } from "./sentry-tips.js";
-
-// Brand palette mirrored from `opentui-app.tsx` — kept in sync so the
-// post-dispose stderr report (rendered via chalk, not OpenTUI) feels
-// like a continuation of the wizard's live screen rather than a
-// separate, plainer surface.
-const REPORT_MUTED = "#6E6C7E";
-const REPORT_SUCCESS = "#86EFAC";
-const REPORT_ERROR = "#F87171";
-const REPORT_WARN = "#FBBF24";
-
 import {
   CANCELLED,
   type Cancelled,
@@ -59,9 +48,15 @@ import {
   type WizardSummary,
   type WizardUI,
 } from "./types.js";
+import { WizardStore } from "./wizard-store.js";
 
-/** Spinner cadence — matches `LoggingUI`/legacy spinner cadence. */
-const SPINNER_INTERVAL_MS = process.platform.startsWith("win") ? 80 : 120;
+// Brand palette mirrored from `ink-app.tsx` so the post-dispose
+// success/failure echo (rendered via chalk after Ink unmounts) feels
+// like a continuation of the live screen.
+const REPORT_MUTED = "#6E6C7E";
+const REPORT_SUCCESS = "#86EFAC";
+const REPORT_ERROR = "#F87171";
+const REPORT_WARN = "#FBBF24";
 
 /** Tip rotation cadence in the sidebar — slow enough to read each tip. */
 const TIP_ROTATE_INTERVAL_MS = 8000;
@@ -86,9 +81,8 @@ const BANNER_ROWS = [
 ];
 
 /**
- * Log severities recognised by the OpenTUI UI. Kept narrowly typed so
- * callers can't pass arbitrary strings into `appendLog`. Mirrors the
- * keys of `ICON_BY_SEVERITY` in `opentui-app.tsx`.
+ * Log severities recognised by InkUI. Mirrors the keys of
+ * `ICON_BY_SEVERITY` in `ink-app.tsx`.
  */
 type LogSeverity = "info" | "warn" | "error" | "success" | "message";
 
@@ -107,7 +101,7 @@ function severityForStopCode(code: SpinnerExitCode): LogSeverity {
 }
 
 /**
- * Embed `opentui-app.tsx` as a Bun-compile file resource.
+ * Embed `ink-app.tsx` as a Bun-compile file resource.
  *
  * `with { type: "file" }` tells Bun.compile to copy the raw .tsx
  * bytes into the binary's virtual filesystem and replace the import
@@ -116,60 +110,49 @@ function severityForStopCode(code: SpinnerExitCode): LogSeverity {
  * for the esbuild step (copies the file alongside the bundle and
  * leaves the import external).
  *
- * Why this indirection? The React tree statically imports
- * `react` + `@opentui/react`. When Bun.compile bundles those imports
- * through its `__commonJS` + `__esm` async-init wrappers it generates
- * malformed code (a TDZ `init_react` symbol embedded in expression
- * scope), and the resulting binary crashes at startup with a parse
- * error. Embedding the .tsx as raw bytes pushes the React resolution
- * to Bun's runtime — which doesn't have the bug — at the cost of a
- * small first-invocation parse overhead.
+ * Why this indirection? `ink-app.tsx` statically imports `ink`,
+ * `ink-spinner`, `ink-select-input`, and `react`. When Bun.compile
+ * bundles those packages through its CJS-wrapping path the output
+ * mangles their dev-build IIFEs (it injects `__promiseAll` runtime
+ * helpers in positions the wrappers don't tolerate, producing a
+ * `SyntaxError: Unexpected identifier '__promiseAll'` at startup
+ * inside e.g. `react/cjs/react-jsx-runtime.development.js` or
+ * `ink/build/parse-keypress.js`). Embedding the .tsx as raw bytes
+ * pushes resolution to Bun's runtime — which doesn't have the bug
+ * — at the cost of a small first-invocation parse overhead.
  *
- * The npm/Node distribution never reaches `createOpenTuiUI()` (the
- * factory routes there only on the Bun binary), so this import is
- * harmless for the npm bundle.
+ * The npm/Node distribution never reaches `createInkUI()` (the
+ * factory routes there only on the Bun binary because Ink uses
+ * top-level await that esbuild can't emit in our CJS bundle), so
+ * the embedded file is unused on Node. We still produce it because
+ * the static import is unconditional; the bundle.ts cleanup step
+ * `unlink`s the unused sidecar after bundling.
  */
 // @ts-expect-error: `with { type: "file" }` is Bun-specific and not yet typed in @types/bun
-import opentuiAppPath from "./opentui-app.tsx" with { type: "file" };
+import inkAppPath from "./ink-app.tsx" with { type: "file" };
 
 /**
- * Async factory for `OpenTuiUI`. Imports `@opentui/core`,
- * `@opentui/react`, `react`, and the local `App` component lazily,
- * mounts the React tree, and returns the bridge instance. Throws if
- * any of the native bindings are missing (e.g. accidentally invoked
- * from Node).
+ * Async factory for `InkUI`. Imports `ink`, `react`, and the local
+ * `App` component lazily, mounts the React tree, and returns the
+ * bridge instance. Throws if Ink can't be loaded (e.g. missing peer
+ * deps).
  */
-export async function createOpenTuiUI(): Promise<OpenTuiUI> {
-  // Serialize the imports — `@opentui/react` re-exports core
-  // primitives via its own bundle and the parallel-import path
-  // tripped a TDZ error inside their `chunk-*.js` because the
-  // re-export landed before core's class declarations.
-  const core = await import("@opentui/core");
-  const reactBindings = await import("@opentui/react");
+export async function createInkUI(): Promise<InkUI> {
+  const ink = await import("ink");
   const react = await import("react");
-  // See the comment on the `opentuiAppPath` import above for why
-  // this goes through the embedded-file path rather than a plain
-  // `import("./opentui-app.js")`. The cast preserves typing against
-  // the source module so `app.App` keeps its component signature.
-  //
   // The `?bridge=1` query string is load-bearing. Without it Bun's
   // module loader hits a cache entry created by the static
   // `with { type: "file" }` import above (same absolute path) and
   // returns a synthetic `{ __esModule, default: undefined }` shape
-  // instead of evaluating the `.tsx` as a module — `app.App`
+  // instead of evaluating the .tsx as a module — `app.App`
   // becomes `undefined` and React throws "Element type is invalid".
   // The query string forces a distinct cache key while resolving to
   // the same on-disk file, so the .tsx is parsed and exports
   // populate normally. Confirmed on Bun 1.3.13 (dev) and inside
   // Bun-compiled binaries (the `/$bunfs/…` runtime path).
   const app = (await import(
-    `${opentuiAppPath}?bridge=1`
-  )) as typeof import("./opentui-app.js");
-
-  const renderer = await core.createCliRenderer({
-    exitOnCtrlC: false,
-    screenMode: "alternate-screen",
-  });
+    `${inkAppPath}?bridge=1`
+  )) as typeof import("./ink-app.js");
 
   const store = new WizardStore({
     bannerRows: BANNER_ROWS.map((content, i) => ({
@@ -178,74 +161,72 @@ export async function createOpenTuiUI(): Promise<OpenTuiUI> {
     })),
   });
 
-  const root = reactBindings.createRoot(renderer);
-  // `react.createElement` is the typed JSX factory; we cast the App
-  // component reference so TypeScript accepts the `{ store }` props
-  // bag without dragging the React types into the bridge module.
-  root.render(react.createElement(app.App, { store }));
+  // Ink's render returns a handle with `unmount()` and
+  // `waitUntilExit()`. We don't await `waitUntilExit` here because
+  // the wizard drives lifecycle imperatively from the runner; the
+  // dispose path calls `unmount()` directly when the workflow
+  // finishes (success or failure).
+  //
+  // `exitOnCtrlC: false` lets us route Ctrl+C through the prompt
+  // cancellation path (`installCancelHandler`) instead of yanking
+  // the process down mid-spinner.
+  //
+  // `patchConsole: false` keeps `console.*` calls flowing to the
+  // real stdout — Sentry SDK breadcrumbs, debug logs, etc. would
+  // otherwise be swallowed by Ink's render loop.
+  const instance = ink.render(react.createElement(app.App, { store }), {
+    exitOnCtrlC: false,
+    patchConsole: false,
+  });
 
-  // Cast the root to our local `RenderRoot` shape. The shape matches
-  // structurally (`render(node)` + `unmount()`); the cast just opts
-  // out of React's stricter `ReactNode` parameter to keep the
-  // imperative bridge free of React types.
-  return new OpenTuiUI(renderer, root as unknown as RenderRoot, store);
+  return new InkUI(instance, store);
 }
 
-// Locally-scoped type aliases for the bridge — these all come from
-// dynamic imports so we keep them as `unknown`-ish constraints rather
-// than depending on the upstream packages' types directly.
-type RenderRoot = {
-  render: (node: unknown) => void;
+/**
+ * Subset of the Ink `Instance` type we actually use.
+ *
+ * Defined structurally rather than imported from `ink` so the
+ * dynamic-import boundary in `createInkUI` doesn't leak Ink types
+ * into the rest of the bridge module. `rerender` takes
+ * `react.ReactNode` upstream; we widen it to a generic function
+ * type and only ever call `unmount`/`waitUntilExit` from the bridge
+ * anyway.
+ */
+type InkInstance = {
   unmount: () => void;
+  waitUntilExit: () => Promise<unknown>;
+  // biome-ignore lint/suspicious/noExplicitAny: dynamic-import boundary
+  rerender: (node: any) => void;
 };
 
 // ──────────────────────────── Implementation ──────────────────────────
 
 /**
- * Bridge between the imperative `WizardUI` surface and the React
+ * Bridge between the imperative `WizardUI` surface and the Ink
  * `App` component. Mutations land in the `WizardStore`; React
  * re-renders.
  */
-export class OpenTuiUI implements WizardUI {
-  // biome-ignore lint/suspicious/noExplicitAny: dynamic-import boundary
-  private readonly renderer: any;
-  private readonly root: RenderRoot;
+export class InkUI implements WizardUI {
+  private readonly instance: InkInstance;
   private readonly store: WizardStore;
-  private spinnerTimer: ReturnType<typeof setInterval> | undefined;
   private tipTimer: ReturnType<typeof setInterval> | undefined;
   private tipIndex = 0;
   private activePromptCancel: (() => void) | undefined;
+  private cancelHandler: (() => void) | undefined;
   /**
    * Final wizard outcome captured by the bridge.
    *
-   * The OpenTUI alternate-screen buffer is wiped the moment
-   * `renderer.destroy()` runs, so anything we want the user to see in
-   * their scrollback has to be re-emitted to stderr after destroy.
-   * Earlier versions replayed every log/intro/outro line — that
-   * produced a noisy wall of `▸ sentry init`, `● This wizard uses
-   * AI…`, and intermediate spinner stops. We now keep just enough
-   * state to print a focused completion report:
-   *
-   *   - `outroMessage` — the success line (set by `outro()`).
-   *   - `failureMessage` — the error/cancel line (set by `cancel()`
-   *     or by `log.error()` for a fatal abort).
-   *   - The store's `summary` snapshot — already structured.
-   *
-   * Whichever pair is populated wins on dispose. If neither is set
-   * (e.g. early abort before any outcome was recorded) we print
-   * nothing, matching the previous "no transcript" behavior.
+   * Ink renders inline so the log lines naturally land in scrollback
+   * — we don't need to replay a transcript on dispose. We do echo
+   * a final success/failure summary line after `unmount()` so the
+   * user has a clear "what happened" signal at the bottom of the
+   * scrollback.
    */
   private outroMessage: string | undefined;
   private failureMessage: string | undefined;
 
-  constructor(
-    // biome-ignore lint/suspicious/noExplicitAny: dynamic-import boundary
-    renderer: any,
-    root: RenderRoot,
-    store: WizardStore
-  ) {
-    this.renderer = renderer;
-    this.root = root;
+  constructor(instance: InkInstance, store: WizardStore) {
+    this.instance = instance;
     this.store = store;
     this.startTipRotation();
     this.installCancelHandler();
@@ -254,23 +235,17 @@ export class OpenTuiUI implements WizardUI {
   // ── Lifecycle ─────────────────────────────────────────────────────
 
   banner(_art: string): void {
-    // No-op — `App` paints the banner inside its alternate-screen
-    // header from the gradient rows pre-loaded into the store. The
-    // runner-supplied ANSI string is discarded (OpenTUI can't render
-    // embedded escape codes).
+    // No-op — the App paints the banner inside its header from the
+    // gradient rows pre-loaded into the store. The runner-supplied
+    // ANSI string is discarded.
   }
 
   intro(_title: string): void {
-    // No-op. The box's top-border title and the gradient banner
-    // already announce the wizard; an extra "▸ sentry init" line
-    // underneath felt redundant in user feedback. We keep the method
-    // on the interface for parity with `LoggingUI`, where the
-    // command-line shell makes a separate intro line useful.
+    // No-op. The outer box already has a title-bar feel via the
+    // banner; an extra "▸ sentry init" line felt redundant.
   }
 
   outro(message: string): void {
-    // Show the success line live in the log pane, and remember it for
-    // the post-dispose scrollback report.
     const clean = stripAnsi(message);
     this.appendLog("success", clean);
     this.outroMessage = clean;
@@ -318,11 +293,6 @@ export class OpenTuiUI implements WizardUI {
       start: (message?: string) => {
         const clean = stripAnsi(message ?? "");
         this.store.startSpinner(clean);
-        if (!this.spinnerTimer) {
-          this.spinnerTimer = setInterval(() => {
-            this.store.tickSpinner();
-          }, SPINNER_INTERVAL_MS);
-        }
       },
       message: (message?: string) => {
         if (message !== undefined) {
@@ -330,16 +300,10 @@ export class OpenTuiUI implements WizardUI {
         }
       },
       stop: (message?: string, code: SpinnerExitCode = 0) => {
-        if (this.spinnerTimer) {
-          clearInterval(this.spinnerTimer);
-          this.spinnerTimer = undefined;
-        }
         const finalMessage = message
           ? stripAnsi(message)
           : this.store.getSnapshot().spinner.message;
         this.store.stopSpinner();
-        // Promote the spinner's final state into the log pane so it
-        // survives subsequent `start()` calls.
         if (finalMessage) {
           this.appendLog(severityForStopCode(code), finalMessage);
         }
@@ -437,23 +401,18 @@ export class OpenTuiUI implements WizardUI {
   // ── Disposal ──────────────────────────────────────────────────────
 
   [Symbol.asyncDispose](): Promise<void> {
-    if (this.spinnerTimer) {
-      clearInterval(this.spinnerTimer);
-      this.spinnerTimer = undefined;
-    }
     if (this.tipTimer) {
       clearInterval(this.tipTimer);
       this.tipTimer = undefined;
     }
-    try {
-      this.root.unmount();
-    } catch {
-      // Ignore — disposal must never throw.
+    if (this.cancelHandler) {
+      process.removeListener("SIGINT", this.cancelHandler);
+      this.cancelHandler = undefined;
     }
     try {
-      this.renderer.destroy();
+      this.instance.unmount();
     } catch {
-      // Ignore.
+      // Ignore — disposal must never throw.
     }
     const report = this.buildPostDisposeReport();
     if (report) {
@@ -463,22 +422,19 @@ export class OpenTuiUI implements WizardUI {
   }
 
   /**
-   * Build the compact scrollback report shown after `destroy()` wipes
-   * the alternate screen. Three shapes:
+   * Build a compact final summary echoed to stderr after Ink
+   * unmounts. Ink's inline rendering means the run's log lines are
+   * already in the user's scrollback; this report just emphasises
+   * the outcome so it's the last thing on screen.
    *
+   * Three shapes:
    *   - Success: outro line + summary fields + changed files.
    *   - Failure: cancel/error line on its own.
-   *   - Empty:   no useful state captured (early abort, etc.) — return
-   *              `undefined` and the caller skips the stderr write.
+   *   - Empty:   no useful state captured (early abort, etc.) —
+   *              return `undefined` and the caller skips the
+   *              stderr write.
    *
-   * Failure wins over success if both are set (e.g. error mid-run
-   * after a partial summary was emitted).
-   *
-   * The report is colored via chalk (not OpenTUI) — by the time it
-   * runs, `renderer.destroy()` has already restored the main screen
-   * and chalk's TTY detection picks up where it left off. Keeping
-   * the palette aligned with the live UI's brand colors makes the
-   * scrollback handoff feel intentional.
+   * Failure wins over success if both are set.
    */
   private buildPostDisposeReport(): string | undefined {
     if (this.failureMessage) {
@@ -532,35 +488,39 @@ export class OpenTuiUI implements WizardUI {
   }
 
   /**
-   * Wire the global Ctrl+C / Escape handler. Cooperative cancellation
-   * — resolve the active prompt with `CANCELLED` rather than yanking
-   * the process down, so `wizard-runner.ts` can drive its normal
-   * cleanup path (telemetry, exit code, etc.).
+   * Wire the global Ctrl+C / Escape handler. Cooperative
+   * cancellation — resolve the active prompt with `CANCELLED`
+   * rather than yanking the process down, so `wizard-runner.ts`
+   * can drive its normal cleanup path (telemetry, exit code, etc.).
+   *
+   * Ink's `useInput` only fires inside a focused component; we want
+   * cancellation to work even when no prompt is mounted (e.g.
+   * during a spinner). Hook into the process-level SIGINT instead
+   * — `exitOnCtrlC: false` on the render call ensures Ink doesn't
+   * intercept first.
    */
   private installCancelHandler(): void {
-    this.renderer.keyInput.on(
-      "keypress",
-      (event: { name: string; ctrl?: boolean }) => {
-        const isCancel =
-          (event.ctrl && event.name === "c") || event.name === "escape";
-        if (!isCancel) {
-          return;
-        }
-        const cancelFn = this.activePromptCancel;
-        if (cancelFn) {
-          cancelFn();
-        }
+    const handler = () => {
+      const cancelFn = this.activePromptCancel;
+      if (cancelFn) {
+        cancelFn();
+        return;
       }
-    );
+      // No active prompt — surface a clean cancel message so the
+      // wizard runner's catch-WizardCancelledError path triggers.
+      // We don't `process.exit` here; the caller decides.
+      this.failureMessage = "Setup cancelled.";
+      this.instance.unmount();
+    };
+    this.cancelHandler = handler;
+    process.on("SIGINT", handler);
   }
 }
 
 /**
  * Colored glyph for a changed-files row in the post-dispose report.
  * The plain ASCII variant lives in `logging-ui.ts` for the
- * non-interactive CI path. We keep both copies (vs. extracting a
- * shared module) because each impl wants different rendering — chalk
- * here, raw text there — and the helpers are tiny.
+ * non-interactive CI path.
  */
 function changedFileGlyphColored(action: string): string {
   if (action === "create") {

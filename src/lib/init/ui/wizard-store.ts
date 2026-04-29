@@ -1,8 +1,8 @@
 /**
- * OpenTuiUI State Store
+ * Wizard UI State Store
  *
  * Tiny external store that bridges the imperative `WizardUI` methods
- * to React's render loop. The `OpenTuiUI` class mutates this store
+ * to React's render loop. The `InkUI` class mutates this store
  * (intro text, log entries, spinner state, active prompt) and the
  * React `App` subscribes via `useSyncExternalStore`.
  *
@@ -14,6 +14,9 @@
  * The store is intentionally minimal: snapshots are plain immutable
  * objects so React's default `Object.is` reference check is enough
  * to detect changes.
+ *
+ * Originally written for OpenTUI; the data shape ported one-to-one to
+ * Ink because nothing here is specific to OpenTUI's component model.
  */
 
 import {
@@ -43,7 +46,7 @@ export type SpinnerState = {
  * One entry tracking a file the wizard has read from disk during the
  * session. Status transitions `reading` → `analyzed` once the tool
  * returns. Surfaced by the inline file-read status line in `OpenTuiUI`
- * (see `FileReadStatus` in `opentui-app.tsx`).
+ * (see `FileReadStatus` in `ink-app.tsx`).
  */
 export type FileReadEntry = {
   path: string;
@@ -88,7 +91,7 @@ export type PromptOption = {
  * prompt is active. Each variant carries the data the matching React
  * component needs plus a `resolve` callback that the component invokes
  * with the user's choice (or with `null` to indicate cancellation —
- * the bridge in `opentui-ui.ts` translates `null` to the shared
+ * the bridge in `ink-ui.ts` translates `null` to the shared
  * `CANCELLED` sentinel before handing the value back to the wizard).
  */
 export type ActivePrompt =

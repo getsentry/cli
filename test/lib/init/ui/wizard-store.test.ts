@@ -1,5 +1,5 @@
 /**
- * Tests for the OpenTUI wizard store's step-progress state.
+ * Tests for the wizard store's step-progress state.
  *
  * Covers:
  *   - canonical pre-population from CHECKLIST_VISIBLE_STEPS
@@ -8,8 +8,8 @@
  *   - idempotent re-entry (a step suspending multiple times)
  *   - protection against `skipped` clobbering completed entries
  *
- * The OpenTUI app itself is not tested here — see the React tree
- * verification via direct `createOpenTuiUI()` invocation in
+ * The Ink app itself is not tested here — see the React tree
+ * verification via direct `createInkUI()` invocation in
  * dev/binary builds. This test file focuses on the pure data layer.
  */
 
@@ -18,7 +18,7 @@ import {
   CANONICAL_STEP_ORDER,
   CHECKLIST_VISIBLE_STEPS,
 } from "../../../../src/lib/init/clack-utils.js";
-import { WizardStore } from "../../../../src/lib/init/ui/opentui-store.js";
+import { WizardStore } from "../../../../src/lib/init/ui/wizard-store.js";
 
 describe("WizardStore step progress", () => {
   test("pre-populates the checklist from CHECKLIST_VISIBLE_STEPS", () => {
