@@ -8,18 +8,14 @@
 
 import type { SentryContext } from "../context.js";
 import { queryEvents } from "../lib/api-client.js";
-import {
-  buildProjectQuery,
-  parseOrgProjectArg,
-  validateLimit,
-} from "../lib/arg-parsing.js";
+import { buildProjectQuery, validateLimit } from "../lib/arg-parsing.js";
 import {
   advancePaginationState,
   buildPaginationContextKey,
   hasPreviousPage,
   resolveCursor,
 } from "../lib/db/pagination.js";
-import { ContextError, ValidationError } from "../lib/errors.js";
+import { ValidationError } from "../lib/errors.js";
 import { filterFields } from "../lib/formatters/json.js";
 import { buildMetaColumns } from "../lib/formatters/meta-table.js";
 import { CommandOutput } from "../lib/formatters/output.js";
@@ -34,7 +30,7 @@ import {
 } from "../lib/list-command.js";
 import { logger } from "../lib/logger.js";
 import { withProgress } from "../lib/polling.js";
-import { resolveOrg, resolveProjectBySlug } from "../lib/resolve-target.js";
+import { resolveOrgOptionalProjectFromArg } from "../lib/resolve-target.js";
 import { sanitizeQuery } from "../lib/search-query.js";
 import {
   appendPeriodHint,
@@ -292,62 +288,6 @@ function findFirstAggregate(fieldList: string[]): string | undefined {
   return fieldList.find((f) => f.includes("(") && f.includes(")"));
 }
 
-// ---------------------------------------------------------------------------
-// Org resolution helper — extracted from func() for complexity
-// ---------------------------------------------------------------------------
-
-/** Resolved explore target: org slug + optional project filter */
-type ExploreTarget = {
-  org: string;
-  project?: string;
-};
-
-/** Usage hint shown when target resolution fails */
-const USAGE_HINT = "sentry explore <target>";
-
-/**
- * Resolve the explore target to an org slug and optional project filter.
- *
- * Semantics:
- * - `<org>/<project>` → explicit org with project filter (adds `project:slug` to query)
- * - `<org>/` → org-all mode (no project filter)
- * - `<project>` (bare) → fuzzy-search across all orgs for the project
- * - undefined → auto-detect from DSN/config
- */
-async function resolveExploreTarget(
-  target: string | undefined,
-  cwd: string
-): Promise<ExploreTarget> {
-  const parsed = parseOrgProjectArg(target);
-
-  if (parsed.type === "explicit") {
-    return { org: parsed.org, project: parsed.project };
-  }
-  if (parsed.type === "org-all") {
-    return { org: parsed.org };
-  }
-  if (parsed.type === "project-search") {
-    // Bare slug — search across orgs to find the project
-    const found = await resolveProjectBySlug(
-      parsed.projectSlug,
-      USAGE_HINT,
-      `sentry explore <org>/${parsed.projectSlug}`,
-      parsed.originalSlug
-    );
-    return { org: found.org, project: found.project };
-  }
-
-  // auto-detect: resolve org only
-  const resolved = await resolveOrg({ cwd });
-  if (!resolved) {
-    throw new ContextError("Organization", USAGE_HINT, [
-      "SENTRY_ORG environment variable",
-      "sentry cli defaults",
-    ]);
-  }
-  return { org: resolved.org };
-}
-
 /**
  * Determine the effective sort value, accounting for dataset restrictions.
  * Sort is only supported on the `spans` dataset.
@@ -482,7 +422,11 @@ export const exploreCommand = buildListCommand("explore", {
   },
   async *func(this: SentryContext, flags: ExploreFlags, target?: string) {
     const { cwd } = this;
-    const { org, project } = await resolveExploreTarget(target, cwd);
+    const { org, project } = await resolveOrgOptionalProjectFromArg(
+      target,
+      cwd,
+      "explore"
+    );
 
     const fieldList =
       flags.field && flags.field.length > 0 ? flags.field : DEFAULT_FIELDS;
