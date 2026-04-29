@@ -302,10 +302,7 @@ console.log("  -> dist/index.d.cts (type declarations)");
 // `package.json#files` either, so they wouldn't ship even without
 // this cleanup. Removing them just keeps the local `dist/`
 // directory tidy.
-for (const sidecar of [
-  "./dist/opentui-app.tsx",
-  "./dist/dashboard-app.tsx",
-]) {
+for (const sidecar of ["./dist/opentui-app.tsx", "./dist/dashboard-app.tsx"]) {
   try {
     await unlink(sidecar);
   } catch {

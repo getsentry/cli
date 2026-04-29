@@ -178,11 +178,19 @@ export async function renderDashboardTui(
   try {
     const root = reactBindings.createRoot(renderer);
     root.render(react.createElement(app.App, { data, termWidth: width }));
-    // React's reconciler commits asynchronously — give it a tick
-    // to flush before we ask the renderer to draw. Without this
-    // the React tree's children haven't been added to
-    // `renderer.root` yet and `captureCharFrame()` returns blank
-    // rows.
+    // React's reconciler commits asynchronously and the OpenTUI
+    // adapter may queue layout work on top of that. Render twice
+    // with a microtask wait between calls — the first
+    // `renderOnce()` flushes pending layout effects so the React
+    // tree's children are added to `renderer.root`; the second
+    // captures the now-fully-laid-out frame. Without this
+    // double-render `captureCharFrame()` returns blank rows on
+    // slower CI runners (locally a single render usually works
+    // because event-loop turns are faster).
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    await renderOnce();
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 0);
     });
