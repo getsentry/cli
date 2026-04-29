@@ -572,6 +572,14 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   const stepPhases = new Map<string, number>();
   const stepHistory = new Map<string, Record<string, unknown>[]>();
 
+  // Track which step the runner is currently suspended on so the
+  // OpenTUI sidebar checklist can flip rows as the workflow advances.
+  // A single step can suspend multiple times (read-files → analyze →
+  // done); `setStep("...", "in_progress")` is idempotent in the
+  // store, and we only fire the `completed` transition when the
+  // active step changes.
+  let activeStepId: string | undefined;
+
   try {
     while (result.status === "suspended") {
       const stepPath = result.suspended?.at(0) ?? [];
@@ -581,10 +589,23 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       if (!extracted) {
         spin.stop("Error", 1);
         spinState.running = false;
+        if (activeStepId) {
+          ui.setStep?.(activeStepId, "failed");
+        }
         ui.log.error(`No suspend payload found for step "${stepId}"`);
         ui.cancel("Setup failed");
         throw new WizardError(`No suspend payload found for step "${stepId}"`);
       }
+
+      // Step transition: if the active step just changed, mark the
+      // previous one completed before flipping this one to
+      // in_progress. The store back-fills any earlier `pending`
+      // entries as `skipped` on the in_progress transition.
+      if (activeStepId && activeStepId !== extracted.stepId) {
+        ui.setStep?.(activeStepId, "completed");
+      }
+      activeStepId = extracted.stepId;
+      ui.setStep?.(extracted.stepId, "in_progress");
 
       const resumeData = await handleSuspendedStep(
         {
@@ -623,9 +644,16 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       spinState.running = false;
     }
     if (err instanceof WizardCancelledError) {
+      // Cancellation is a clean exit, not a failure — leave the
+      // active step as `in_progress` rather than flipping it to
+      // failed; the post-dispose report shows the cancel message
+      // instead.
       captureException(err);
       process.exitCode = 0;
       return;
+    }
+    if (activeStepId) {
+      ui.setStep?.(activeStepId, "failed");
     }
     if (err instanceof WizardError) {
       throw err;
@@ -633,6 +661,15 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     ui.log.error(errorMessage(err));
     ui.cancel("Setup failed");
     throw new WizardError(errorMessage(err));
+  }
+
+  // Workflow exited the suspend loop successfully — mark the last
+  // active step (if any) as completed before the final-result handler
+  // emits its outcome line. Status === "success" implies the final
+  // step finished; failure paths run through the catch above and
+  // already marked the step `failed`.
+  if (activeStepId && result.status === "success") {
+    ui.setStep?.(activeStepId, "completed");
   }
 
   handleFinalResult(result, spin, spinState, ui);

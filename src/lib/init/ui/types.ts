@@ -187,6 +187,28 @@ export type WizardUI = AsyncDisposable & {
    */
   markFilesAnalyzed?(paths: string[]): void;
 
+  /**
+   * Notify the UI that a workflow step has changed status. Optional —
+   * `LoggingUI` leaves this undefined since the running log already
+   * narrates progress. `OpenTuiUI` uses it to drive the static
+   * progress checklist in the sidebar.
+   *
+   * Status semantics:
+   *   - `"in_progress"` — the runner just suspended on this step.
+   *     Idempotent: a step that suspends multiple times (read-files
+   *     followed by analyze, etc.) only flips to in_progress once.
+   *   - `"completed"`   — the runner has resumed past this step.
+   *   - `"failed"`      — the runner aborted while this step was
+   *     active.
+   *   - `"skipped"`     — the workflow's branching skipped this step
+   *     entirely. In practice the store back-fills this implicitly
+   *     when a later step starts, so callers rarely need to pass it.
+   */
+  setStep?(
+    stepId: string,
+    status: "in_progress" | "completed" | "failed" | "skipped"
+  ): void;
+
   // ── Logging ───────────────────────────────────────────────────────
 
   log: WizardLog;

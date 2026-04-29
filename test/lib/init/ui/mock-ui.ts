@@ -45,7 +45,14 @@ export type MockCall =
       options: string[];
       initialValues?: string[];
     }
-  | { kind: "confirm"; message: string; initialValue?: boolean };
+  | { kind: "confirm"; message: string; initialValue?: boolean }
+  | { kind: "recordFilesReading"; paths: string[] }
+  | { kind: "markFilesAnalyzed"; paths: string[] }
+  | {
+      kind: "setStep";
+      stepId: string;
+      status: "in_progress" | "completed" | "failed" | "skipped";
+    };
 
 /**
  * Programmable prompt response. `value` is what the impl returns when
@@ -113,6 +120,12 @@ export function createMockUI(): {
     summary: (summary) => calls.push({ kind: "summary", summary }),
     outro: (message) => calls.push({ kind: "outro", message }),
     cancel: (message) => calls.push({ kind: "cancel", message }),
+    recordFilesReading: (paths) =>
+      calls.push({ kind: "recordFilesReading", paths }),
+    markFilesAnalyzed: (paths) =>
+      calls.push({ kind: "markFilesAnalyzed", paths }),
+    setStep: (stepId, status) =>
+      calls.push({ kind: "setStep", stepId, status }),
     log,
     spinner,
     select: (opts: SelectOptions<string>) => {

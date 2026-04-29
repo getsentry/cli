@@ -37,13 +37,19 @@
 import { basename } from "node:path";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useState, useSyncExternalStore } from "react";
-import { buildFileTree, type FileTreeRow, flattenTree } from "./file-tree.js";
+import {
+  buildFileTree,
+  buildReadTree,
+  type FileTreeRow,
+  flattenTree,
+} from "./file-tree.js";
 import type {
   ActivePrompt,
   FileReadEntry,
   LogEntry,
   LogSeverity,
   SpinnerState,
+  StepEntry,
   WizardStore,
 } from "./opentui-store.js";
 import { SENTRY_TIPS, type SentryTip } from "./sentry-tips.js";
@@ -100,6 +106,25 @@ const SIDEBAR_WIDTH = 36;
 const SIDEBAR_BREAKPOINT = 100;
 
 /**
+ * Fixed height for the tip card. Pinned (rather than `flexGrow`) so
+ * the panels below it (progress checklist, files-read tree) can never
+ * push the tip out of view as more content streams in. Sized to fit:
+ *
+ *   1 row  – top border
+ *   1 row  – top padding
+ *   1 row  – tip title
+ *   1 row  – gap
+ *   4 rows – tip body (wrapping room)
+ *   1 row  – bottom padding (filler before counter)
+ *   1 row  – "Tip n of N" counter
+ *   1 row  – bottom padding
+ *   1 row  – bottom border
+ *
+ * Bumping this knob is cheap; no other layout depends on it directly.
+ */
+const TIP_PANEL_HEIGHT = 12;
+
+/**
  * Root component. Subscribes to the store once at the top, then drills
  * the snapshot fields into individual presentational components.
  *
@@ -132,10 +157,17 @@ export function App({ store }: AppProps): React.ReactNode {
           filesRead={snapshot.filesRead}
           logs={snapshot.logs}
           prompt={snapshot.prompt}
+          showFileReadInline={!showSidebar}
           spinner={snapshot.spinner}
           summary={snapshot.summary}
         />
-        {showSidebar ? <Sidebar tipIndex={snapshot.tipIndex} /> : null}
+        {showSidebar ? (
+          <Sidebar
+            filesRead={snapshot.filesRead}
+            steps={snapshot.steps}
+            tipIndex={snapshot.tipIndex}
+          />
+        ) : null}
       </box>
     </box>
   );
@@ -150,6 +182,13 @@ type MainColumnProps = {
   spinner: SpinnerState;
   prompt: ActivePrompt | null;
   summary: WizardSummary | null;
+  /**
+   * Whether to render the inline file-read status row above the
+   * spinner. We only show this when the sidebar is hidden (narrow
+   * terminals); otherwise the sidebar's `FilesPanel` gives a richer
+   * tree view and the inline row would be a noisy duplicate.
+   */
+  showFileReadInline: boolean;
 };
 
 function MainColumn({
@@ -159,11 +198,12 @@ function MainColumn({
   spinner,
   prompt,
   summary,
+  showFileReadInline,
 }: MainColumnProps): React.ReactNode {
   // Hide the file-read status once the wizard finishes — the summary
   // panel is the canonical "what happened" surface at that point, and
   // a stale "47 files analyzed" line below it would just be noise.
-  const showFileStatus = !summary && filesRead.length > 0;
+  const showFileStatus = showFileReadInline && !summary && filesRead.length > 0;
   return (
     <box flexDirection="column" flexGrow={1}>
       <Header bannerRows={bannerRows} />
@@ -577,15 +617,33 @@ function MultiSelectPrompt({
 // ────────────────────────────── Sidebar ───────────────────────────────
 
 /**
- * The sidebar now hosts a single panel — "Did you know?". The previous
- * "Files analyzed" panel was hoisted out into a one-line
- * {@link FileReadStatus} indicator above the spinner so it can't push
- * the tip card off-screen.
+ * The sidebar stacks three panels top-to-bottom:
+ *
+ *   1. {@link TipPanel} — fixed height (`TIP_PANEL_HEIGHT`). Pinned so
+ *      it can never be squashed by the panels below.
+ *   2. {@link ProgressPanel} — auto height (one row per visible step).
+ *      Bounded by `CHECKLIST_VISIBLE_STEPS.length` (~9 rows).
+ *   3. {@link FilesPanel} — `flexGrow=1`, scrollable. Consumes
+ *      whatever vertical space is left over.
+ *
+ * On narrow terminals (`width < SIDEBAR_BREAKPOINT`) the whole
+ * sidebar is hidden by the parent App; the inline `FileReadStatus`
+ * line in `MainColumn` takes over the file-read indicator role.
  */
-function Sidebar({ tipIndex }: { tipIndex: number }): React.ReactNode {
+function Sidebar({
+  tipIndex,
+  steps,
+  filesRead,
+}: {
+  tipIndex: number;
+  steps: StepEntry[];
+  filesRead: FileReadEntry[];
+}): React.ReactNode {
   return (
-    <box flexDirection="column" flexShrink={0} width={SIDEBAR_WIDTH}>
+    <box flexDirection="column" flexShrink={0} gap={1} width={SIDEBAR_WIDTH}>
       <TipPanel tipIndex={tipIndex} />
+      <ProgressPanel steps={steps} />
+      <FilesPanel filesRead={filesRead} />
     </box>
   );
 }
@@ -599,9 +657,9 @@ function TipPanel({ tipIndex }: { tipIndex: number }): React.ReactNode {
       borderColor={MUTED}
       borderStyle="rounded"
       flexDirection="column"
-      flexGrow={1}
       flexShrink={0}
       gap={1}
+      height={TIP_PANEL_HEIGHT}
       padding={1}
       title=" Did you know? "
       titleAlignment="left"
@@ -614,4 +672,172 @@ function TipPanel({ tipIndex }: { tipIndex: number }): React.ReactNode {
       </text>
     </box>
   );
+}
+
+/**
+ * Static checklist of workflow steps. Each row reflects a
+ * `StepEntry.status`:
+ *
+ *   - `pending`     — muted ◯
+ *   - `in_progress` — accent ▶
+ *   - `completed`   — success ✓
+ *   - `skipped`     — muted-dim ◌ (lighter than pending so the eye
+ *     can tell "we walked past this" from "we haven't reached this
+ *     yet")
+ *   - `failed`      — error ✖
+ *
+ * The label cell is sized to fit the 36-col sidebar after the
+ * 2-col border + 2-col padding + 2-col glyph cell.
+ */
+function ProgressPanel({ steps }: { steps: StepEntry[] }): React.ReactNode {
+  const completedCount = steps.filter(
+    (entry) => entry.status === "completed"
+  ).length;
+  const totalCount = steps.length;
+  return (
+    <box
+      borderColor={MUTED}
+      borderStyle="rounded"
+      flexDirection="column"
+      flexShrink={0}
+      paddingLeft={1}
+      paddingRight={1}
+      title={` Progress (${completedCount}/${totalCount}) `}
+      titleAlignment="left"
+    >
+      {steps.map((entry) => (
+        <ProgressRow entry={entry} key={entry.id} />
+      ))}
+    </box>
+  );
+}
+
+function ProgressRow({ entry }: { entry: StepEntry }): React.ReactNode {
+  const { glyph, glyphColor, labelColor } = progressStyle(entry.status);
+  return (
+    <box flexDirection="row" flexShrink={0}>
+      <text fg={glyphColor} width={2}>
+        {glyph}
+      </text>
+      <text fg={labelColor} flexGrow={1}>
+        {entry.label}
+      </text>
+    </box>
+  );
+}
+
+function progressStyle(status: StepEntry["status"]): {
+  glyph: string;
+  glyphColor: string;
+  labelColor: string;
+} {
+  if (status === "in_progress") {
+    return { glyph: "▶", glyphColor: ACCENT, labelColor: FOREGROUND };
+  }
+  if (status === "completed") {
+    return { glyph: "✓", glyphColor: COLOR_SUCCESS, labelColor: MUTED };
+  }
+  if (status === "failed") {
+    return { glyph: "✖", glyphColor: COLOR_ERROR, labelColor: COLOR_ERROR };
+  }
+  if (status === "skipped") {
+    return { glyph: "◌", glyphColor: MUTED, labelColor: MUTED };
+  }
+  // pending
+  return { glyph: "◯", glyphColor: MUTED, labelColor: MUTED };
+}
+
+/**
+ * Scrollable directory tree of every file the wizard has read. Uses
+ * `<scrollbox>` (OpenTUI's `ScrollBoxRenderable`) with sticky-bottom
+ * tracking — newly-read files always come into view, like a
+ * `tail -f`.
+ *
+ * Visual rules:
+ *   - Directories: muted gray box-drawing branches + name with `/`.
+ *   - Active reads (`status === "reading"`): accent purple `◐` glyph,
+ *     foreground filename. The eye picks these out instantly.
+ *   - Analyzed (`status === "analyzed"`): muted-green `✓` glyph,
+ *     dimmed filename. Done work recedes; in-flight work pops.
+ *
+ * Hidden when no files have been recorded yet — the empty box would
+ * just be visual noise during the auth/discover phase.
+ */
+function FilesPanel({
+  filesRead,
+}: {
+  filesRead: FileReadEntry[];
+}): React.ReactNode {
+  if (filesRead.length === 0) {
+    return null;
+  }
+  const tree = buildReadTree(filesRead);
+  const rows = flattenTree(tree);
+  const analyzedCount = filesRead.filter(
+    (entry) => entry.status === "analyzed"
+  ).length;
+  return (
+    <box
+      borderColor={MUTED}
+      borderStyle="rounded"
+      flexDirection="column"
+      flexGrow={1}
+      flexShrink={1}
+      title={` Files analyzed (${analyzedCount}/${filesRead.length}) `}
+      titleAlignment="left"
+    >
+      <scrollbox
+        contentOptions={{ flexDirection: "column" }}
+        flexGrow={1}
+        scrollY
+        stickyScroll
+        stickyStart="bottom"
+      >
+        {rows.map((row, i) => (
+          // Tree rows are positionally stable for a given filesRead
+          // snapshot — `buildReadTree` walks `filesRead` in insertion
+          // order and never reorders, so the index makes a fine key.
+          // biome-ignore lint/suspicious/noArrayIndexKey: positional read-tree rows
+          <ReadTreeLine key={i} row={row} />
+        ))}
+      </scrollbox>
+    </box>
+  );
+}
+
+/**
+ * One row of the files-read tree. Mirrors {@link FileTreeLine} but
+ * styled for the read-progress flavour (status icons + dim-on-done)
+ * rather than the changed-files flavour (action glyphs).
+ */
+function ReadTreeLine({ row }: { row: FileTreeRow }): React.ReactNode {
+  if (row.kind === "directory") {
+    return (
+      <box flexDirection="row" flexShrink={0}>
+        <text fg={MUTED}>{`${row.prefix}${row.branch} `}</text>
+        <text fg={FOREGROUND}>{row.label}</text>
+      </box>
+    );
+  }
+  const { glyph, glyphColor, labelColor } = readStatusStyle(row.status);
+  return (
+    <box flexDirection="row" flexShrink={0}>
+      <text fg={MUTED}>{`${row.prefix}${row.branch} `}</text>
+      <text fg={glyphColor}>{`${glyph} `}</text>
+      <text fg={labelColor}>{row.label}</text>
+    </box>
+  );
+}
+
+function readStatusStyle(status: FileTreeRow["status"]): {
+  glyph: string;
+  glyphColor: string;
+  labelColor: string;
+} {
+  if (status === "reading") {
+    return { glyph: "◐", glyphColor: ACCENT, labelColor: FOREGROUND };
+  }
+  // "analyzed" or undefined (defensive — should never appear for
+  // file rows but treat as analyzed)
+  return { glyph: "✓", glyphColor: COLOR_SUCCESS, labelColor: MUTED };
 }

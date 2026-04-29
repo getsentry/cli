@@ -123,3 +123,79 @@ export const STEP_LABELS: Record<string, string> = {
   "verify-changes": "Verifying changes",
   "open-sentry-ui": "Finishing up",
 };
+
+/**
+ * Canonical execution order of the wizard's workflow steps.
+ *
+ * Used by the OpenTUI sidebar's progress checklist as the static
+ * pre-rendered list. The wizard advertises step transitions via
+ * `WizardUI.setStep(...)`; the store back-fills any earlier
+ * `pending` rows as `skipped` when a later step starts (the workflow
+ * can only move forward, so a later transition implies any earlier
+ * pending step was bypassed by an `if`-branch in the workflow).
+ *
+ * Order must match the actual Mastra workflow order or the back-fill
+ * logic will mis-mark steps as skipped.
+ */
+export const CANONICAL_STEP_ORDER: readonly string[] = [
+  "discover-context",
+  "select-target-app",
+  "resolve-dir",
+  "check-existing-sentry",
+  "detect-platform",
+  "ensure-sentry-project",
+  "select-features",
+  "install-deps",
+  "plan-codemods",
+  "apply-codemods",
+  "verify-changes",
+  "open-sentry-ui",
+];
+
+/**
+ * Subset of {@link CANONICAL_STEP_ORDER} surfaced in the progress
+ * checklist. The OpenTUI sidebar is 36 cols wide and shares vertical
+ * space with the tip card and the files-read panel, so showing all
+ * 12 step rows would push the files panel off-screen on shorter
+ * terminals.
+ *
+ * The hidden steps (`select-target-app`, `resolve-dir`,
+ * `check-existing-sentry`) are plumbing — users care that "Setting up
+ * Sentry project" happened, not that we resolved their working
+ * directory along the way.
+ */
+export const CHECKLIST_VISIBLE_STEPS: readonly string[] = [
+  "discover-context",
+  "detect-platform",
+  "ensure-sentry-project",
+  "select-features",
+  "install-deps",
+  "plan-codemods",
+  "apply-codemods",
+  "verify-changes",
+  "open-sentry-ui",
+];
+
+/**
+ * Sidebar-friendly abbreviations of {@link STEP_LABELS}. The full
+ * labels stay the source-of-truth for the spinner message in the main
+ * column; only the 36-col sidebar checklist uses these.
+ *
+ * Falls back to the full label if a step isn't listed here.
+ */
+export const STEP_LABELS_SHORT: Record<string, string> = {
+  "discover-context": "Analyzing project",
+  "detect-platform": "Detecting platform",
+  "ensure-sentry-project": "Setting up project",
+  "select-features": "Selecting features",
+  "install-deps": "Installing deps",
+  "plan-codemods": "Planning changes",
+  "apply-codemods": "Applying changes",
+  "verify-changes": "Verifying changes",
+  "open-sentry-ui": "Finishing up",
+};
+
+/** Resolve a step id to its sidebar checklist label. */
+export function shortStepLabel(stepId: string): string {
+  return STEP_LABELS_SHORT[stepId] ?? STEP_LABELS[stepId] ?? stepId;
+}

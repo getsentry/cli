@@ -18,6 +18,16 @@ export type ChangedFile = {
   path: string;
 };
 
+/**
+ * One entry in the read-files tree. `status` mirrors the
+ * `FileReadEntry.status` shape from the wizard store so the OpenTUI
+ * `FilesPanel` can render an at-a-glance icon per row.
+ */
+export type ReadFile = {
+  path: string;
+  status: "reading" | "analyzed";
+};
+
 export type FileTreeNode = {
   /** Path segment for this node (e.g. "src", "router.tsx"). */
   name: string;
@@ -28,6 +38,13 @@ export type FileTreeNode = {
   path?: string;
   /** Action recorded by the workflow — only on leaf nodes. */
   action?: string;
+  /**
+   * Read-progress status for the leaf — only set when the tree is
+   * built from read entries (vs. changed files, which carry `action`
+   * instead). Mutually exclusive with {@link FileTreeNode.action} in
+   * practice; consumers branch on whichever is populated.
+   */
+  status?: "reading" | "analyzed";
   children: FileTreeNode[];
 };
 
@@ -51,8 +68,13 @@ export type FileTreeRow = {
   label: string;
   /** Full path — only set on `file` rows. */
   path?: string;
-  /** Action — only set on `file` rows. */
+  /** Action — only set on `file` rows from a changed-files tree. */
   action?: string;
+  /**
+   * Read-progress status — only set on `file` rows from a read-files
+   * tree. Mutually exclusive with `action` in practice.
+   */
+  status?: "reading" | "analyzed";
 };
 
 function splitPath(filePath: string): string[] {
@@ -153,7 +175,14 @@ function rowFor(
   prefix: string,
   isLast: boolean
 ): FileTreeRow {
-  const isFile = Boolean(node.action);
+  // Files are leaves that carry either a change `action` (from
+  // `buildFileTree`) or a read `status` (from `buildReadTree`). A
+  // node with neither but a `path` set is also a file — covers
+  // future tree builders that don't tag leaves.
+  const isFile =
+    Boolean(node.action) ||
+    Boolean(node.status) ||
+    (node.path !== undefined && node.children.length === 0);
   return {
     prefix,
     branch: isLast ? "└─" : "├─",
@@ -161,5 +190,49 @@ function rowFor(
     label: isFile ? node.name : `${node.name}/`,
     ...(node.path !== undefined ? { path: node.path } : {}),
     ...(node.action !== undefined ? { action: node.action } : {}),
+    ...(node.status !== undefined ? { status: node.status } : {}),
   };
+}
+
+/**
+ * Build a directory tree from the wizard's read-files list. Mirrors
+ * {@link buildFileTree} but tags leaves with `status` instead of
+ * `action`.
+ *
+ * Insertion order is preserved (no sort) so newly-read files always
+ * land at the bottom of their parent directory — gives the OpenTUI
+ * `FilesPanel`'s sticky-bottom scrollbox a stable "tail -f" feel.
+ */
+export function buildReadTree(files: ReadFile[]): FileTreeNode {
+  const root: FileTreeNode = { name: "", children: [] };
+  const childIndex = new WeakMap<FileTreeNode, Map<string, FileTreeNode>>();
+  childIndex.set(root, new Map());
+
+  for (const file of files) {
+    const parts = splitPath(file.path);
+    let current = root;
+
+    for (const [index, part] of parts.entries()) {
+      const map = childIndex.get(current) ?? new Map<string, FileTreeNode>();
+      let child = map.get(part);
+      if (!child) {
+        child = { name: part, children: [] };
+        map.set(part, child);
+        childIndex.set(current, map);
+        childIndex.set(child, new Map());
+        current.children.push(child);
+      }
+
+      if (index === parts.length - 1) {
+        child.path = file.path;
+        child.status = file.status;
+      }
+
+      current = child;
+    }
+  }
+
+  // Deliberately no `sortRecursive(root)` — keep insertion order so
+  // sticky-bottom scrollbox tracking feels right.
+  return root;
 }

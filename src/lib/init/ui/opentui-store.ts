@@ -16,6 +16,11 @@
  * to detect changes.
  */
 
+import {
+  CANONICAL_STEP_ORDER,
+  CHECKLIST_VISIBLE_STEPS,
+  shortStepLabel,
+} from "../clack-utils.js";
 import type { SpinnerExitCode, WizardSummary } from "./types.js";
 
 export type LogSeverity = "info" | "warn" | "error" | "success" | "message";
@@ -43,6 +48,32 @@ export type SpinnerState = {
 export type FileReadEntry = {
   path: string;
   status: "reading" | "analyzed";
+};
+
+/**
+ * Status of a single workflow step in the sidebar progress checklist.
+ *
+ *   - `pending`     — runner hasn't reached this step yet.
+ *   - `in_progress` — runner is suspended on this step.
+ *   - `completed`   — runner has resumed past this step.
+ *   - `skipped`     — workflow's branching bypassed this step
+ *                     (back-filled implicitly when a later step starts).
+ *   - `failed`      — runner aborted while this step was active.
+ */
+export type StepStatus =
+  | "pending"
+  | "in_progress"
+  | "completed"
+  | "skipped"
+  | "failed";
+
+/** One row in the sidebar progress checklist. */
+export type StepEntry = {
+  /** Mastra step id (e.g. `"discover-context"`). */
+  id: string;
+  /** Sidebar-friendly short label (already abbreviated). */
+  label: string;
+  status: StepStatus;
 };
 
 /** Generic option shape passed to mounted prompts. */
@@ -96,6 +127,15 @@ export type WizardSnapshot = {
    * overwrote it.
    */
   filesRead: FileReadEntry[];
+  /**
+   * Workflow step progress checklist. Pre-populated from
+   * `CHECKLIST_VISIBLE_STEPS` with every entry as `pending`; the
+   * runner advertises status changes via `WizardUI.setStep()` and
+   * the store updates the matching entry in place. Steps not present
+   * in the visible-step allowlist (e.g. `select-target-app`,
+   * `resolve-dir`) are silently ignored so the sidebar stays compact.
+   */
+  steps: StepEntry[];
 };
 
 export type Listener = () => void;
@@ -118,6 +158,13 @@ export class WizardStore {
       tipIndex: initial.tipIndex ?? 0,
       summary: initial.summary ?? null,
       filesRead: initial.filesRead ?? [],
+      steps:
+        initial.steps ??
+        CHECKLIST_VISIBLE_STEPS.map((id) => ({
+          id,
+          label: shortStepLabel(id),
+          status: "pending" as StepStatus,
+        })),
     };
   }
 
@@ -219,6 +266,45 @@ export class WizardStore {
   }
 
   /**
+   * Update the status of a workflow step in the sidebar progress
+   * checklist.
+   *
+   * Behavior:
+   *
+   *   - If `id` is not in {@link CHECKLIST_VISIBLE_STEPS}, the call is
+   *     a no-op — keeps the sidebar compact for plumbing-only steps.
+   *
+   *   - When transitioning a step to `in_progress`, any earlier
+   *     `pending` step (per {@link CANONICAL_STEP_ORDER}) is
+   *     back-filled to `skipped`. The workflow can only move forward,
+   *     so an earlier pending step that the runner walked past was
+   *     bypassed by an `if`-branch.
+   *
+   *   - Re-entering an already-`in_progress` step is a no-op (a step
+   *     can suspend multiple times — read-files, analyze, etc. — and
+   *     the checklist should only flip on the first entry).
+   *
+   *   - `completed` / `failed` always overwrite. `skipped` only
+   *     applies if the step is currently `pending` (avoid clobbering
+   *     a completed step).
+   */
+  setStepStatus(id: string, status: StepStatus): void {
+    const canonicalIndex = CANONICAL_STEP_ORDER.indexOf(id);
+
+    let nextSteps = this.snapshot.steps;
+    if (status === "in_progress" && canonicalIndex >= 0) {
+      nextSteps = backfillSkippedSteps(nextSteps, canonicalIndex);
+    }
+    if (CHECKLIST_VISIBLE_STEPS.includes(id)) {
+      nextSteps = applyStepStatus(nextSteps, id, status);
+    }
+
+    if (nextSteps !== this.snapshot.steps) {
+      this.update({ steps: nextSteps });
+    }
+  }
+
+  /**
    * Flip the matching entries in `filesRead` from `reading` to
    * `analyzed`. Paths not present in the store are added as
    * pre-analyzed (defensive — covers tools that return file lists
@@ -280,4 +366,71 @@ export class WizardStore {
     }
     return "✔";
   }
+}
+
+/**
+ * Back-fill any `pending` step whose canonical position is earlier
+ * than `startedIndex` to `skipped`. The workflow can only move
+ * forward, so a still-pending earlier step that the runner walked
+ * past was bypassed by an `if`-branch.
+ *
+ * Returns the original array reference if nothing changed — the
+ * store relies on this to skip subscriber notifications for no-op
+ * mutations.
+ */
+function backfillSkippedSteps(
+  steps: StepEntry[],
+  startedIndex: number
+): StepEntry[] {
+  let changed = false;
+  const candidate = steps.map((entry) => {
+    if (entry.status !== "pending") {
+      return entry;
+    }
+    const entryIndex = CANONICAL_STEP_ORDER.indexOf(entry.id);
+    if (entryIndex >= 0 && entryIndex < startedIndex) {
+      changed = true;
+      return { ...entry, status: "skipped" as StepStatus };
+    }
+    return entry;
+  });
+  return changed ? candidate : steps;
+}
+
+/**
+ * Apply a status update to the matching step entry, with idempotency
+ * and clobber-protection rules:
+ *
+ *   - Re-entering an already-`in_progress` step is a no-op (the same
+ *     step can suspend multiple times).
+ *   - Explicit `skipped` only wins when the row is currently
+ *     `pending` — protects against accidentally clobbering a
+ *     completed step.
+ *   - `completed` / `failed` always overwrite.
+ *
+ * Returns the original array reference when the update is a no-op
+ * so subscribers aren't notified.
+ */
+function applyStepStatus(
+  steps: StepEntry[],
+  id: string,
+  status: StepStatus
+): StepEntry[] {
+  const targetIndex = steps.findIndex((entry) => entry.id === id);
+  if (targetIndex === -1) {
+    return steps;
+  }
+  const current = steps[targetIndex];
+  if (!current) {
+    return steps;
+  }
+  if (status === current.status) {
+    return steps;
+  }
+  if (status === "skipped" && current.status !== "pending") {
+    return steps;
+  }
+  const updated = [...steps];
+  updated[targetIndex] = { ...current, status };
+  return updated;
 }

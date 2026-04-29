@@ -294,6 +294,13 @@ export class OpenTuiUI implements WizardUI {
     this.store.markFilesAnalyzed(paths);
   }
 
+  setStep(
+    stepId: string,
+    status: "in_progress" | "completed" | "failed" | "skipped"
+  ): void {
+    this.store.setStepStatus(stepId, status);
+  }
+
   // ── Logging ───────────────────────────────────────────────────────
 
   log: WizardLog = {
