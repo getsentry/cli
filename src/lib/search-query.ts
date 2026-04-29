@@ -353,9 +353,6 @@ export function sanitizeQuery(query: string | undefined): string | undefined {
     // has clear intent (e.g., trailing commas in in-list filters).
     const repaired = tryRepairQuery(query);
     if (repaired !== query) {
-      log.warn(
-        `Auto-repaired search query syntax. Running query: "${repaired}"`
-      );
       effectiveQuery = repaired;
       // Re-parse the repaired query — if it still fails, pass through
       // to the API which returns a proper 400 with details.
@@ -364,6 +361,10 @@ export function sanitizeQuery(query: string | undefined): string | undefined {
       } catch {
         return repaired;
       }
+      // Log only after confirming the repair produced valid syntax
+      log.warn(
+        `Auto-repaired search query syntax. Running query: "${repaired}"`
+      );
     } else {
       return query;
     }
