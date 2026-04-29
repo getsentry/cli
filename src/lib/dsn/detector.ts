@@ -322,12 +322,6 @@ async function verifyCachedDsn(
   cwd: string,
   cached: CachedDsnEntry
 ): Promise<DetectedDsn | null> {
-  // API-sourced entries from project creation have no file to verify.
-  // Trust the cached DSN — it came from the Sentry API, not a local file.
-  if (cached.source === "create") {
-    return createDetectedDsn(cached.dsn, cached.source);
-  }
-
   // Env var source (lowest priority) - check for higher-priority sources
   if (cached.source === "env") {
     return verifyEnvVarCache(cwd, cached);
@@ -413,8 +407,6 @@ export function getDsnSourceDescription(dsn: DetectedDsn): string {
       return dsn.sourcePath ?? "config file";
     case "code":
       return dsn.sourcePath ?? "source code";
-    case "create":
-      return "project creation";
     case "inferred":
       return "directory name inference";
     default:

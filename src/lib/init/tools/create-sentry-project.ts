@@ -1,6 +1,4 @@
-import { resolveOrgDisplayName } from "../../api/projects.js";
 import { createProjectWithDsn } from "../../api-client.js";
-import { setCachedDsn } from "../../db/dsn-cache.js";
 import { resolveOrCreateTeam } from "../../resolve-team.js";
 import { slugify } from "../../utils.js";
 import { tryGetExistingProjectData } from "../existing-project.js";
@@ -21,7 +19,7 @@ export async function createSentryProject(
   payload: CreateSentryProjectPayload | EnsureSentryProjectPayload,
   context: Pick<
     ToolContext,
-    "directory" | "dryRun" | "existingProject" | "org" | "team" | "project"
+    "dryRun" | "existingProject" | "org" | "team" | "project"
   >
 ): Promise<ToolResult> {
   const name = context.project ?? payload.params.name;
@@ -82,28 +80,6 @@ export async function createSentryProject(
         platform: payload.params.platform,
       }
     );
-
-    // Seed DSN cache for this directory so subsequent commands skip detection
-    if (dsn) {
-      try {
-        setCachedDsn(context.directory, {
-          dsn,
-          projectId: project.id,
-          source: "create",
-          resolved: {
-            orgSlug: context.org,
-            orgName: resolveOrgDisplayName(
-              context.org,
-              project.organization?.name
-            ),
-            projectSlug: project.slug,
-            projectName: project.name,
-          },
-        });
-      } catch {
-        // Best-effort — don't let cache failures break init
-      }
-    }
 
     return {
       ok: true,
