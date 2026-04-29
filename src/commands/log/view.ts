@@ -9,6 +9,7 @@ import { isatty } from "node:tty";
 import type { SentryContext } from "../../context.js";
 import { getLogs } from "../../lib/api-client.js";
 import {
+  detectSwappedViewArgs,
   looksLikeIssueShortId,
   parseOrgProjectArg,
   parseSlashSeparatedArg,
@@ -119,19 +120,46 @@ export function parsePositionalArgs(args: string[]): {
 
   // Two or more args — first is target, rest are log IDs.
   // Each arg may contain newlines (split them).
+
+  // Check issue short ID first — it takes precedence over swap detection
+  // because `detectSwappedViewArgs` also fires for `CAM-82X my-org/project`
+  // (first has no "/", second has "/"), but the user's intent is clearly
+  // to view an issue, not to swap log-view arguments.
+  if (looksLikeIssueShortId(first)) {
+    const rawLogIds = args.slice(1).flatMap(splitLogIds);
+    if (rawLogIds.length === 0) {
+      throw new ContextError("Log ID", USAGE_HINT, []);
+    }
+    return {
+      rawLogIds,
+      targetArg: first,
+      suggestion: `Did you mean: sentry issue view ${first}`,
+    };
+  }
+
+  // biome-ignore lint/style/noNonNullAssertion: length >= 2 guarantees index 1 exists
+  const second = args[1]!;
+
+  // Detect swapped args: exactly two args where first has no "/" and second
+  // does (e.g., `sentry log view ace106b2 myorg/myproject`). Only fires for
+  // the two-arg case to avoid silently dropping extra args in multi-arg use.
+  if (args.length === 2) {
+    const swapWarning = detectSwappedViewArgs(first, second);
+    if (swapWarning) {
+      return {
+        rawLogIds: splitLogIds(first),
+        targetArg: second,
+        suggestion: swapWarning,
+      };
+    }
+  }
+
   const rawLogIds = args.slice(1).flatMap(splitLogIds);
   if (rawLogIds.length === 0) {
     throw new ContextError("Log ID", USAGE_HINT, []);
   }
-  // Swap detection is not useful here: log IDs cannot contain "/", so
-  // detectSwappedViewArgs (which checks for "/" in the second arg) can
-  // never trigger. We still check for issue short IDs in the first (target)
-  // position.
-  const suggestion = looksLikeIssueShortId(first)
-    ? `Did you mean: sentry issue view ${first}`
-    : undefined;
 
-  return { rawLogIds, targetArg: first, suggestion };
+  return { rawLogIds, targetArg: first };
 }
 
 /**

@@ -64,6 +64,13 @@ type ListLogsOptions = {
   start?: string;
   /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
   end?: string;
+  /**
+   * Additional fields to request from the ourlogs dataset.
+   * These are merged with the default fields (duplicates removed)
+   * and returned in the API response alongside standard fields.
+   * Used by `--fields` to surface custom structured log attributes.
+   */
+  extraFields?: string[];
 };
 
 /**
@@ -93,12 +100,20 @@ export async function listLogs(
 
   const config = await getOrgSdkConfig(orgSlug);
 
+  // Merge extra fields (from --fields) with the default set, deduplicating
+  const fields = options.extraFields?.length
+    ? [
+        ...LOG_FIELDS,
+        ...options.extraFields.filter((f) => !LOG_FIELDS.includes(f)),
+      ]
+    : LOG_FIELDS;
+
   const result = await queryExploreEventsInTableFormat({
     ...config,
     path: { organization_id_or_slug: orgSlug },
     query: {
       dataset: "logs",
-      field: LOG_FIELDS,
+      field: fields,
       project: isNumericProject ? [Number(projectSlug)] : undefined,
       query: fullQuery || undefined,
       per_page: options.limit || API_MAX_PER_PAGE,
