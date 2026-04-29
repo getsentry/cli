@@ -13,6 +13,7 @@ import {
   expect,
   test,
 } from "bun:test";
+import { EXIT } from "../../src/lib/errors.js";
 import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import {
@@ -50,7 +51,7 @@ describe("sentry org list", () => {
   test("requires authentication", async () => {
     const result = await ctx.run(["org", "list"]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.AUTH_NOT_AUTHENTICATED);
     expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
   });
 
@@ -88,7 +89,7 @@ describe("sentry project list", () => {
   test("requires authentication", async () => {
     const result = await ctx.run(["project", "list"]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.AUTH_NOT_AUTHENTICATED);
     expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
   });
 
@@ -140,7 +141,7 @@ describe("sentry org view", () => {
   test("requires authentication", async () => {
     const result = await ctx.run(["org", "view", TEST_ORG]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.AUTH_NOT_AUTHENTICATED);
     expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
   });
 
@@ -179,7 +180,7 @@ describe("sentry org view", () => {
 
       const result = await ctx.run(["org", "view", "nonexistent-org-12345"]);
 
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode).toBe(EXIT.API);
       expect(result.stderr + result.stdout).toMatch(/not found|error|404/i);
     },
     { timeout: 15_000 }
@@ -194,7 +195,7 @@ describe("sentry project view", () => {
       `${TEST_ORG}/${TEST_PROJECT}`,
     ]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.AUTH_NOT_AUTHENTICATED);
     expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
   });
 
@@ -203,7 +204,7 @@ describe("sentry project view", () => {
 
     const result = await ctx.run(["project", "view"]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.CONTEXT_MISSING);
     expect(result.stderr + result.stdout).toMatch(/organization|project/i);
   });
 
@@ -212,7 +213,7 @@ describe("sentry project view", () => {
 
     const result = await ctx.run(["project", "view", `${TEST_ORG}/`]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.CONTEXT_MISSING);
     // Should show error with usage hint
     const output = result.stderr + result.stdout;
     expect(output).toMatch(/specific project is required/i);
@@ -306,7 +307,7 @@ describe("sentry project view", () => {
         `${TEST_ORG}/nonexistent-project-12345`,
       ]);
 
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode).toBe(EXIT.API);
       expect(result.stderr + result.stdout).toMatch(/not found|error|404/i);
     },
     { timeout: 15_000 }

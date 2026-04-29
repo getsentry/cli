@@ -12,7 +12,7 @@ import { MastraClient } from "@mastra/client-js";
 import { captureException, getTraceData } from "@sentry/node-core/light";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
-import { WizardError } from "../errors.js";
+import { EXIT, WizardError } from "../errors.js";
 import { terminalLink } from "../formatters/colors.js";
 import {
   colorTag,
@@ -28,6 +28,9 @@ import {
 } from "./clack-utils.js";
 import {
   API_TIMEOUT_MS,
+  EXIT_DEPENDENCY_INSTALL_FAILED,
+  EXIT_PLATFORM_NOT_DETECTED,
+  EXIT_VERIFICATION_FAILED,
   MASTRA_API_URL,
   SENTRY_DOCS_URL,
   VERIFY_CHANGES_STEP,
@@ -586,7 +589,11 @@ function handleFinalResult(
       spinState.running = false;
     }
     formatError(result);
-    throw new WizardError("Workflow returned an error");
+
+    // Map workflow-internal exit codes to semantic EXIT.* constants
+    const workflowCode = result.result?.exitCode;
+    const exitCode = mapWorkflowExitCode(workflowCode);
+    throw new WizardError("Workflow returned an error", { exitCode });
   }
 
   if (spinState.running) {
@@ -594,6 +601,31 @@ function handleFinalResult(
     spinState.running = false;
   }
   formatResult(result);
+}
+
+/**
+ * Map a workflow-internal exit code to a semantic EXIT.* constant.
+ *
+ * The remote workflow uses its own code scheme (20=platform not detected,
+ * 30=deps failed, 40/41=codemod failed, 50=verification). We translate
+ * these into the CLI's decade-based exit codes so scripts can distinguish
+ * wizard failure categories.
+ */
+function mapWorkflowExitCode(workflowCode: number | undefined): number {
+  switch (workflowCode) {
+    case EXIT_PLATFORM_NOT_DETECTED:
+      return EXIT.CONFIG;
+    case EXIT_DEPENDENCY_INSTALL_FAILED:
+      return EXIT.WIZARD_DEPS;
+    // 40/41 are server-side only (codemod plan/apply) — not in constants.ts
+    case 40:
+    case 41:
+      return EXIT.WIZARD_CODEMOD;
+    case EXIT_VERIFICATION_FAILED:
+      return EXIT.WIZARD_VERIFY;
+    default:
+      return EXIT.WIZARD;
+  }
 }
 
 function extractSuspendPayload(

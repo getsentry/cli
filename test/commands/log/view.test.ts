@@ -581,8 +581,8 @@ describe("viewCommand.func", () => {
       );
       expect.unreachable("Should have thrown");
     } catch (err) {
-      expect(err).toBeInstanceOf(ValidationError);
-      const msg = (err as ValidationError).message;
+      expect(err).toBeInstanceOf(ResolutionError);
+      const msg = (err as ResolutionError).message;
       // Retention-aware wording replaces the generic "was sent within 90 days"
       expect(msg).toContain("past the 90-day log retention");
       expect(msg).not.toContain("was sent within the last 90 days");

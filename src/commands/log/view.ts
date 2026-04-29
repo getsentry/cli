@@ -16,7 +16,11 @@ import {
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError, ValidationError } from "../../lib/errors.js";
+import {
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "../../lib/errors.js";
 import { formatLogDetails } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
@@ -345,7 +349,7 @@ function retentionSuffix(logId: string): string {
  * @param logIds - Requested IDs
  * @param org - Organization slug
  * @param project - Project slug
- * @throws {ValidationError} Always
+ * @throws {ResolutionError} Always
  */
 function throwNotFoundError(
   logIds: string[],
@@ -356,33 +360,47 @@ function throwNotFoundError(
   // edit in `retention.ts` keeps this message in sync with the
   // deterministic retention-aware path.
   const retentionDays = RETENTION_DAYS.log;
-  const genericHint = retentionDays
-    ? `Make sure the log IDs are correct and were sent within the last ${retentionDays} days.`
-    : "Make sure the log IDs are correct.";
 
   if (logIds.length === 1) {
     const id = logIds[0] ?? "";
     const suffix = retentionSuffix(id);
-    const hint = suffix
-      ? `This log is no longer retrievable.${suffix}`
-      : genericHint.replace("log IDs are correct", "log ID is correct");
-    throw new ValidationError(
-      `No log found with ID "${id}" in ${org}/${project}.\n\n${hint}`
+    let suggestions: string[];
+    if (suffix) {
+      suggestions = [`This log is no longer retrievable.${suffix}`];
+    } else if (retentionDays) {
+      suggestions = [
+        `Make sure the log ID is correct and was sent within the last ${retentionDays} days`,
+      ];
+    } else {
+      suggestions = ["Make sure the log ID is correct"];
+    }
+    throw new ResolutionError(
+      `Log '${id}'`,
+      `not found in ${org}/${project}`,
+      `sentry log view ${org}/${project}/${id}`,
+      suggestions
     );
   }
 
   // Multiple IDs — compute the retention suffix once per ID so both the
-  // inline annotation and the "any expired?" check reuse the same decode.
+  // ID list and the "any expired?" check reuse the same decode.
   const suffixed = logIds.map((id) => ({ id, suffix: retentionSuffix(id) }));
-  const annotated = suffixed
-    .map(({ id, suffix }) => ` - \`${id}\`${suffix}`)
-    .join("\n");
   const anyExpired = suffixed.some(({ suffix }) => suffix !== "");
-  const hint = anyExpired
-    ? "Expired log IDs are no longer retrievable. Check non-expired IDs and re-run."
-    : genericHint;
-  throw new ValidationError(
-    `No logs found with any of the following IDs in ${org}/${project}:\n${annotated}\n\n${hint}`
+  const idList = suffixed.map(({ id, suffix }) => `${id}${suffix}`);
+  let hint: string;
+  if (anyExpired) {
+    hint =
+      "Expired log IDs are no longer retrievable — check non-expired IDs and re-run";
+  } else if (retentionDays) {
+    hint = `Make sure the log IDs are correct and were sent within the last ${retentionDays} days`;
+  } else {
+    hint = "Make sure the log IDs are correct";
+  }
+  throw new ResolutionError(
+    `${idList.length} log(s)`,
+    `not found in ${org}/${project}`,
+    hint,
+    idList.map((id) => `ID: ${id}`)
   );
 }
 

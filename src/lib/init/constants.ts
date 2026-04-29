@@ -11,7 +11,9 @@ export const MAX_OUTPUT_BYTES = 65_536; // 64KB stdout/stderr truncation
 export const DEFAULT_COMMAND_TIMEOUT_MS = 120_000; // 2 minutes
 export const API_TIMEOUT_MS = 120_000; // 2 minutes timeout for Mastra API calls
 
-// Exit codes returned by the remote workflow
+// Exit codes returned by the remote workflow.
+// These are internal to the workflow protocol — they're mapped to EXIT.*
+// constants (from src/lib/errors.ts) before reaching process exit.
 export const EXIT_PLATFORM_NOT_DETECTED = 20;
 export const EXIT_DEPENDENCY_INSTALL_FAILED = 30;
 export const EXIT_VERIFICATION_FAILED = 50;

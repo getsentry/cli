@@ -563,17 +563,27 @@ All CLI errors extend the `CliError` base class from `src/lib/errors.ts`:
 
 ```typescript
 // Error hierarchy in src/lib/errors.ts
-CliError (base)
-├── ApiError (HTTP/API failures - status, detail, endpoint)
-├── AuthError (authentication - reason: 'not_authenticated' | 'expired' | 'invalid')
-├── ConfigError (configuration - suggestion?)
-├── ContextError (missing context - resource, command, alternatives)
-├── ResolutionError (value provided but not found - resource, headline, hint, suggestions)
-├── ValidationError (input validation - field?)
-├── DeviceFlowError (OAuth flow - code)
-├── SeerError (Seer AI - reason: 'not_enabled' | 'no_budget' | 'ai_disabled')
-└── UpgradeError (upgrade - reason: 'unknown_method' | 'network_error' | 'execution_failed' | 'version_not_found')
+// Exit codes are defined in the EXIT constant object — use EXIT.* constants
+// when constructing errors, never hardcode numeric exit codes outside errors.ts.
+CliError (base, exitCode=1)
+├── HostScopeError (exitCode=13)
+├── ApiError (exitCode=30 — HTTP/API failures)
+├── AuthError (exitCode=10–12 by reason — 'not_authenticated' | 'expired' | 'invalid')
+├── ConfigError (exitCode=20 — configuration/DSN)
+├── OutputError (exitCode=60 — data rendered, but operation failed)
+├── ContextError (exitCode=22 — missing context)
+├── ResolutionError (exitCode=23 — value provided but not found)
+├── ValidationError (exitCode=21 — input validation)
+├── DeviceFlowError (exitCode=51 — OAuth flow)
+├── SeerError (exitCode=40–42 by reason — 'not_enabled' | 'no_budget' | 'ai_disabled')
+├── TimeoutError (exitCode=31 — operation timed out)
+├── UpgradeError (exitCode=50 — upgrade failures)
+└── WizardError (exitCode=61–64 by workflow step — init wizard error)
 ```
+
+> Exit code ranges: 1x=auth, 2x=input/config, 3x=API/network, 4x=feature/billing,
+> 5x=operations, 6x=command-specific. See `EXIT` in `src/lib/errors.ts` and
+> https://cli.sentry.dev/exit-codes/ for the full reference.
 
 **Choosing between ContextError, ResolutionError, and ValidationError:**
 

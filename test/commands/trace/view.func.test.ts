@@ -28,7 +28,11 @@ import * as apiClient from "../../../src/lib/api-client.js";
 import * as browser from "../../../src/lib/browser.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
-import { ContextError, ValidationError } from "../../../src/lib/errors.js";
+import {
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { TraceSpan } from "../../../src/types/sentry.js";
@@ -206,7 +210,7 @@ describe("viewCommand.func", () => {
     expect(output).toContain("Filtered to project");
   });
 
-  test("throws ValidationError when no spans found", async () => {
+  test("throws ResolutionError when no spans found", async () => {
     getDetailedTraceSpy.mockResolvedValue([]);
 
     const { context } = createMockContext();
@@ -219,7 +223,7 @@ describe("viewCommand.func", () => {
         "test-org/test-project",
         "00000000000000000000000000000000"
       )
-    ).rejects.toThrow(ValidationError);
+    ).rejects.toThrow(ResolutionError);
   });
 
   test("error message contains trace ID when not found", async () => {
@@ -237,8 +241,8 @@ describe("viewCommand.func", () => {
       );
       expect.unreachable("Should have thrown");
     } catch (error) {
-      expect(error).toBeInstanceOf(ValidationError);
-      expect((error as ValidationError).message).toContain(
+      expect(error).toBeInstanceOf(ResolutionError);
+      expect((error as ResolutionError).message).toContain(
         "deadbeef12345678deadbeef12345678"
       );
     }

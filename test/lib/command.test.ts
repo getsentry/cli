@@ -25,7 +25,7 @@ import {
   numberParser,
   VERBOSE_FLAG,
 } from "../../src/lib/command.js";
-import { OutputError } from "../../src/lib/errors.js";
+import { EXIT, OutputError } from "../../src/lib/errors.js";
 import { CommandOutput } from "../../src/lib/formatters/output.js";
 import { LOG_LEVEL_NAMES, logger, setLogLevel } from "../../src/lib/logger.js";
 import { resolveOrgAndProject } from "../../src/lib/resolve-target.js";
@@ -1387,7 +1387,7 @@ describe("buildCommand return-based output", () => {
       expect.unreachable("Expected OutputError to be thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(OutputError);
-      expect((err as OutputError).exitCode).toBe(1);
+      expect((err as OutputError).exitCode).toBe(EXIT.OUTPUT_ERROR);
     }
     // Output was rendered BEFORE the throw
     expect(ctx.output.join("")).toContain("Error: not found");
@@ -1436,7 +1436,7 @@ describe("buildCommand return-based output", () => {
       expect.unreachable("Expected OutputError to be thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(OutputError);
-      expect((err as OutputError).exitCode).toBe(1);
+      expect((err as OutputError).exitCode).toBe(EXIT.OUTPUT_ERROR);
     }
     const jsonOutput = JSON.parse(ctx.output.join(""));
     expect(jsonOutput).toEqual({ error: "not found" });
