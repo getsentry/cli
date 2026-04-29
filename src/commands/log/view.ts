@@ -367,7 +367,9 @@ function throwNotFoundError(
     const suggestions = suffix
       ? [`This log is no longer retrievable.${suffix}`]
       : retentionDays
-        ? [`Make sure the log ID is correct and was sent within the last ${retentionDays} days`]
+        ? [
+            `Make sure the log ID is correct and was sent within the last ${retentionDays} days`,
+          ]
         : ["Make sure the log ID is correct"];
     throw new ResolutionError(
       `Log '${id}'`,
@@ -385,9 +387,13 @@ function throwNotFoundError(
     .join("\n");
   const anyExpired = suffixed.some(({ suffix }) => suffix !== "");
   const suggestions = anyExpired
-    ? ["Expired log IDs are no longer retrievable — check non-expired IDs and re-run"]
+    ? [
+        "Expired log IDs are no longer retrievable — check non-expired IDs and re-run",
+      ]
     : retentionDays
-      ? [`Make sure the log IDs are correct and were sent within the last ${retentionDays} days`]
+      ? [
+          `Make sure the log IDs are correct and were sent within the last ${retentionDays} days`,
+        ]
       : ["Make sure the log IDs are correct"];
   throw new ResolutionError(
     "Logs",
