@@ -74,7 +74,7 @@ describe("sentry api", () => {
 
       const result = await ctx.run(["api", "nonexistent-endpoint-12345/"]);
 
-      expect(result.exitCode).toBe(EXIT.API);
+      expect(result.exitCode).toBe(EXIT.OUTPUT_ERROR);
     },
     { timeout: 15_000 }
   );
@@ -103,7 +103,7 @@ describe("sentry api", () => {
         "--silent",
       ]);
 
-      expect(result.exitCode).toBe(EXIT.API);
+      expect(result.exitCode).toBe(EXIT.OUTPUT_ERROR);
       expect(result.stdout).toBe("");
     },
     { timeout: 15_000 }
@@ -123,7 +123,7 @@ describe("sentry api", () => {
       ]);
 
       // Method not allowed or similar error - just checking it processes the flag
-      expect(result.exitCode).toBe(EXIT.API);
+      expect(result.exitCode).toBe(EXIT.OUTPUT_ERROR);
     },
     { timeout: 15_000 }
   );
@@ -160,7 +160,7 @@ describe("sentry api", () => {
       const result = await ctx.run(["api", "organizations/", "-X", "POST"]);
 
       // POST on list endpoint typically returns 405 or similar error
-      expect(result.exitCode).toBe(EXIT.API);
+      expect(result.exitCode).toBe(EXIT.OUTPUT_ERROR);
     },
     { timeout: 15_000 }
   );
@@ -234,7 +234,7 @@ describe("sentry api", () => {
       ]);
 
       // Will fail with 404 or similar, but the flag should be processed
-      expect(result.exitCode).toBe(EXIT.API);
+      expect(result.exitCode).toBe(EXIT.OUTPUT_ERROR);
     },
     { timeout: 15_000 }
   );
@@ -302,7 +302,7 @@ describe("sentry api", () => {
 
       // Should get a server error (405 Method Not Allowed or 400 Bad Request),
       // not a client-side error about body handling
-      expect(result.exitCode).toBe(EXIT.API);
+      expect(result.exitCode).toBe(EXIT.OUTPUT_ERROR);
       // The error should be from the API, not a TypeError about body
       expect(result.stdout + result.stderr).not.toMatch(/cannot have body/i);
     },
