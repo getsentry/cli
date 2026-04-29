@@ -269,7 +269,7 @@ describe("sentry log view", () => {
       "deadbeefdeadbeefdeadbeefdeadbeef",
     ]);
 
-    expect(result.exitCode).toBe(EXIT.VALIDATION);
+    expect(result.exitCode).toBe(EXIT.RESOLUTION);
     expect(result.stderr + result.stdout).toMatch(/not found|no log/i);
   });
 });

@@ -22,9 +22,9 @@ import {
 } from "../../src/lib/errors.js";
 
 describe("CliError", () => {
-  test("has default exit code of 1", () => {
+  test("has default exit code of EXIT.GENERAL", () => {
     const err = new CliError("Something went wrong");
-    expect(err.exitCode).toBe(1);
+    expect(err.exitCode).toBe(EXIT.GENERAL);
     expect(err.message).toBe("Something went wrong");
   });
 

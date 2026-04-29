@@ -191,9 +191,7 @@ describe("sentry trace view", () => {
       "00000000000000000000000000000000",
     ]);
 
-    // Trace API returns 200 with empty array for non-existent traces,
-    // so the command throws ValidationError (not ApiError)
-    expect(result.exitCode).toBe(EXIT.VALIDATION);
+    expect(result.exitCode).toBe(EXIT.RESOLUTION);
     expect(result.stderr + result.stdout).toMatch(/not found|no trace/i);
   });
 });

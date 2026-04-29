@@ -74,13 +74,20 @@ elif 10 <= result.returncode <= 19:
     print("Auth error — run: sentry auth login")
 elif 20 <= result.returncode <= 29:
     print("Input/config error")
-elif result.returncode == 30:
-    print("API error")
+elif 30 <= result.returncode <= 39:
+    print("API/network error")
+elif 40 <= result.returncode <= 49:
+    print("Feature not available")
 ```
 
 ## Notes
 
 - Exit codes below 128 are safe from collision with Unix signal exits (128+N).
+- The `sentry api` command renders API error responses to stdout and exits
+  with code 60 (Output Error), not 30 (API Error). This matches the `gh api`
+  convention — the error response body is useful output. Parse the HTTP status
+  from `--verbose` output or the JSON error body if you need to distinguish
+  API error categories.
 - The `sentry init` wizard uses its own exit codes (10, 20, 30, 50) for
   remote workflow step failures. These are internal to the wizard and wrapped
   into exit code 61 (Wizard Error) before reaching the process exit.

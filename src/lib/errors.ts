@@ -101,7 +101,7 @@ export const EXIT = {
 export class CliError extends Error {
   readonly exitCode: number;
 
-  constructor(message: string, exitCode = 1) {
+  constructor(message: string, exitCode: number = EXIT.GENERAL) {
     super(message);
     this.name = "CliError";
     this.exitCode = exitCode;
