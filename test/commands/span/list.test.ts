@@ -411,6 +411,31 @@ describe("listCommand.func (trace mode)", () => {
       })
     );
   });
+
+  test("trace mode passes allProjects: true to listSpans", async () => {
+    listSpansSpy.mockResolvedValue({ data: [], nextCursor: undefined });
+
+    const { context } = createContext();
+
+    await func.call(
+      context,
+      {
+        limit: 25,
+        sort: "date",
+        period: parsePeriod("7d"),
+        fresh: false,
+      },
+      VALID_TRACE_ID
+    );
+
+    expect(listSpansSpy).toHaveBeenCalledWith(
+      "test-org",
+      "test-project",
+      expect.objectContaining({
+        allProjects: true,
+      })
+    );
+  });
 });
 
 // ============================================================================
@@ -668,6 +693,27 @@ describe("listCommand.func (project mode)", () => {
 
     const output = getStdout();
     expect(output).toContain("No spans matched the query.");
+  });
+
+  test("project mode does not pass allProjects to listSpans", async () => {
+    listSpansSpy.mockResolvedValue({ data: [], nextCursor: undefined });
+
+    const { context } = createContext();
+
+    await func.call(
+      context,
+      {
+        limit: 25,
+        sort: "date",
+        period: parsePeriod("7d"),
+        fresh: false,
+      },
+      "my-org/my-project"
+    );
+
+    const callArgs = listSpansSpy.mock.calls[0];
+    const options = callArgs[2];
+    expect(options.allProjects).toBeUndefined();
   });
 
   test("hint shows -c next with project target when more pages available", async () => {
