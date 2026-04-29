@@ -389,23 +389,21 @@ function throwNotFoundError(
     .map(({ id, suffix }) => ` - \`${id}\`${suffix}`)
     .join("\n");
   const anyExpired = suffixed.some(({ suffix }) => suffix !== "");
-  let suggestions: string[];
+  const idList = suffixed.map(({ id, suffix }) => `${id}${suffix}`);
+  let hint: string;
   if (anyExpired) {
-    suggestions = [
-      "Expired log IDs are no longer retrievable — check non-expired IDs and re-run",
-    ];
+    hint =
+      "Expired log IDs are no longer retrievable — check non-expired IDs and re-run";
   } else if (retentionDays) {
-    suggestions = [
-      `Make sure the log IDs are correct and were sent within the last ${retentionDays} days`,
-    ];
+    hint = `Make sure the log IDs are correct and were sent within the last ${retentionDays} days`;
   } else {
-    suggestions = ["Make sure the log IDs are correct"];
+    hint = "Make sure the log IDs are correct";
   }
   throw new ResolutionError(
-    "Logs",
-    `not found in ${org}/${project}:\n${annotated}`,
-    `sentry log view ${org}/${project}/ <log-id>`,
-    suggestions
+    `${idList.length} log(s)`,
+    `not found in ${org}/${project}`,
+    hint,
+    idList.map((id) => `ID: ${id}`)
   );
 }
 

@@ -241,10 +241,10 @@ describe("viewCommand.func", () => {
       } catch (error) {
         expect(error).toBeInstanceOf(ResolutionError);
         const msg = (error as ResolutionError).message;
-        expect(msg).toContain("Logs not found in my-org/proj:");
-        // Each ID should appear in a markdown list item
-        expect(msg).toContain(` - \`${ID1}\``);
-        expect(msg).toContain(` - \`${ID2}\``);
+        expect(msg).toContain("not found in my-org/proj");
+        // Each ID should appear in the suggestions
+        expect(msg).toContain(ID1);
+        expect(msg).toContain(ID2);
       }
     });
   });

@@ -565,7 +565,7 @@ export const viewCommand = buildCommand({
       throw new ResolutionError(
         `Trace '${traceId}'`,
         "not found",
-        `sentry trace view ${org}/${traceId}`,
+        `sentry trace view ${org}/${project}/${traceId}`,
         [
           "Check that you are querying the right org/project",
           "The trace may be past your plan's retention window",
