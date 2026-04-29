@@ -712,17 +712,21 @@ function Sidebar({
   filesRead: FileReadEntry[];
   terminalRows: number;
 }): React.ReactNode {
-  // Reserve space for the tip card (12 rows incl. border + padding)
-  // and the progress checklist (steps + 4 rows of border + title).
-  // Whatever remains, capped at MAX_FILE_ROWS, goes to the files panel.
-  const tipReserved = 12;
-  const progressReserved = steps.length + 4;
+  // Reserve space for the tip card (~9 rows including its border)
+  // and the progress checklist (steps + 3 rows of border + title).
+  // Whatever remains, clamped between MIN/MAX_FILE_ROWS, goes to
+  // the files panel as its viewport.
+  const tipReserved = 9;
+  const progressReserved = steps.length + 3;
   const fileBudget = Math.max(
     MIN_FILE_ROWS,
     Math.min(MAX_FILE_ROWS, terminalRows - tipReserved - progressReserved - 2)
   );
+  // No `gap` between panels — the rounded borders touch edge-to-edge,
+  // which reads as a single chrome region rather than three floating
+  // cards with empty rows between them.
   return (
-    <Box flexDirection="column" flexShrink={0} gap={1} width={SIDEBAR_WIDTH}>
+    <Box flexDirection="column" flexShrink={0} width={SIDEBAR_WIDTH}>
       <TipPanel tipIndex={tipIndex} />
       <ProgressPanel steps={steps} />
       <FilesPanel filesRead={filesRead} maxRows={fileBudget} />
@@ -734,6 +738,10 @@ function TipPanel({ tipIndex }: { tipIndex: number }): React.ReactNode {
   const tip = SENTRY_TIPS[tipIndex % SENTRY_TIPS.length] as SentryTip;
   const total = SENTRY_TIPS.length;
   const oneIndexed = (tipIndex % total) + 1;
+  // The rounded box's top border carries the title (Ink's `title`
+  // prop). Body and counter follow with no inner margins — the
+  // border + 1-cell padding on each side already separates the
+  // content from the chrome.
   return (
     <Box
       borderColor={MUTED}
@@ -742,20 +750,13 @@ function TipPanel({ tipIndex }: { tipIndex: number }): React.ReactNode {
       flexShrink={0}
       paddingX={1}
     >
-      <Box marginBottom={1}>
-        <Text bold color={ACCENT}>
-          Did you know?
-        </Text>
-      </Box>
-      <Text color={ACCENT}>{tip.title}</Text>
-      <Box marginTop={1}>
-        <Text>{tip.body}</Text>
-      </Box>
-      <Box marginTop={1}>
-        <Text color={MUTED}>
-          Tip {oneIndexed} of {total}
-        </Text>
-      </Box>
+      <Text bold color={ACCENT}>
+        {tip.title}
+      </Text>
+      <Text>{tip.body}</Text>
+      <Text color={MUTED}>
+        Tip {oneIndexed} of {total} · Did you know?
+      </Text>
     </Box>
   );
 }
@@ -783,11 +784,9 @@ function ProgressPanel({ steps }: { steps: StepEntry[] }): React.ReactNode {
       flexShrink={0}
       paddingX={1}
     >
-      <Box marginBottom={1}>
-        <Text bold color={ACCENT}>
-          Progress ({completedCount}/{totalCount})
-        </Text>
-      </Box>
+      <Text bold color={ACCENT}>
+        Progress ({completedCount}/{totalCount})
+      </Text>
       {steps.map((entry) => (
         <ProgressRow entry={entry} key={entry.id} />
       ))}
@@ -845,6 +844,19 @@ function progressStyle(entry: StepEntry): {
  * Hidden until at least one file has been recorded — the empty box
  * would just be visual noise during the auth/discover phase.
  */
+/**
+ * Render the read-files tree inside a fixed-height viewport that
+ * acts like a tail-`f` window: the most recent rows are always
+ * visible, with a `↑ N earlier` indicator at the top when older
+ * rows have scrolled out of view.
+ *
+ * Why no real scroller? Ink doesn't ship a native scrollbox
+ * primitive, and a third-party one would mean wiring focus
+ * management (PgUp/PgDn while a prompt is mounted, etc.) — too
+ * much complexity for what's effectively a status indicator.
+ * Tail-window UX matches what the user actually wants: see what
+ * the wizard is reading right now.
+ */
 function FilesPanel({
   filesRead,
   maxRows,
@@ -857,8 +869,17 @@ function FilesPanel({
   }
   const tree = buildReadTree(filesRead);
   const rows = flattenTree(tree);
-  const truncated = rows.length > maxRows;
-  const visible = truncated ? rows.slice(rows.length - maxRows) : rows;
+  // The header takes 1 row of the panel's vertical budget; reserve
+  // it so the file rows don't get squeezed.
+  const fileRowBudget = Math.max(1, maxRows - 1);
+  const truncated = rows.length > fileRowBudget;
+  // When truncated, the truncation indicator itself takes one row,
+  // so the actual visible file count is one less.
+  const visibleFileRows = truncated ? fileRowBudget - 1 : fileRowBudget;
+  const visible = truncated
+    ? rows.slice(rows.length - visibleFileRows)
+    : rows;
+  const hidden = rows.length - visible.length;
   const analyzedCount = filesRead.filter(
     (entry) => entry.status === "analyzed"
   ).length;
@@ -870,13 +891,11 @@ function FilesPanel({
       flexShrink={0}
       paddingX={1}
     >
-      <Box marginBottom={1}>
-        <Text bold color={ACCENT}>
-          Files analyzed ({analyzedCount}/{filesRead.length})
-        </Text>
-      </Box>
+      <Text bold color={ACCENT}>
+        Files analyzed ({analyzedCount}/{filesRead.length})
+      </Text>
       {truncated ? (
-        <Text color={MUTED}>… {rows.length - maxRows} earlier</Text>
+        <Text color={MUTED}>↑ {hidden} earlier (scrolled)</Text>
       ) : null}
       {visible.map((row, i) => (
         // Tree rows are positionally stable for a given filesRead

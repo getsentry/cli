@@ -238,14 +238,21 @@ export async function createInkUI(): Promise<InkUI> {
  * dynamic-import boundary in `createInkUI` doesn't leak Ink types
  * into the rest of the bridge module. `rerender` takes
  * `react.ReactNode` upstream; we widen it to a generic function
- * type and only ever call `unmount`/`waitUntilExit` from the bridge
- * anyway.
+ * type and only ever call `unmount`/`waitUntilExit`/`clear` from
+ * the bridge anyway.
  */
 type InkInstance = {
   unmount: () => void;
   waitUntilExit: () => Promise<unknown>;
   // biome-ignore lint/suspicious/noExplicitAny: dynamic-import boundary
   rerender: (node: any) => void;
+  /**
+   * Clears Ink's last rendered output from the terminal. We call
+   * this on dispose so the final post-dispose chalk summary is
+   * the only thing left on screen — without it the bordered
+   * wizard box stays above the summary, which looked redundant.
+   */
+  clear: () => void;
 };
 
 // ──────────────────────────── Implementation ──────────────────────────
@@ -471,6 +478,17 @@ export class InkUI implements WizardUI {
       process.removeListener("SIGINT", this.cancelHandler);
       this.cancelHandler = undefined;
     }
+    // Clear Ink's last rendered output BEFORE unmount so the
+    // bordered wizard box doesn't linger above the post-dispose
+    // chalk summary. `clear()` rewinds the cursor to the top of
+    // Ink's output region and overwrites the rows with blanks;
+    // the subsequent stderr write places the summary at that
+    // position, becoming the only visible chrome.
+    try {
+      this.instance.clear();
+    } catch {
+      // Ignore — clear is best-effort.
+    }
     try {
       this.instance.unmount();
     } catch {
@@ -496,7 +514,11 @@ export class InkUI implements WizardUI {
     }
     const report = this.buildPostDisposeReport();
     if (report) {
-      process.stderr.write(`${report}\n`);
+      // Write to stdout (not stderr) so the summary lands in the
+      // same stream as the cleared Ink output. Mixing stderr in
+      // would risk an extra line break or out-of-order interleave
+      // depending on shell pipe handling.
+      process.stdout.write(`${report}\n`);
     }
     return Promise.resolve();
   }
