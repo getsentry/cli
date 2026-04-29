@@ -876,9 +876,7 @@ function FilesPanel({
   // When truncated, the truncation indicator itself takes one row,
   // so the actual visible file count is one less.
   const visibleFileRows = truncated ? fileRowBudget - 1 : fileRowBudget;
-  const visible = truncated
-    ? rows.slice(rows.length - visibleFileRows)
-    : rows;
+  const visible = truncated ? rows.slice(rows.length - visibleFileRows) : rows;
   const hidden = rows.length - visible.length;
   const analyzedCount = filesRead.filter(
     (entry) => entry.status === "analyzed"
