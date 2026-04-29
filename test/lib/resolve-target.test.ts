@@ -838,6 +838,7 @@ describe("resolveOrgOptionalProjectTarget", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(ContextError);
       expect((err as ContextError).message).toContain("Organization");
+      expect((err as ContextError).command).toContain("explore");
     }
   });
 });
