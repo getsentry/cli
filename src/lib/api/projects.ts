@@ -21,7 +21,10 @@ import type {
   SentryProject,
 } from "../../types/index.js";
 
-import { cacheProjectsForOrg } from "../db/project-cache.js";
+import {
+  cacheProjectsForOrg,
+  setCachedProjectByDsnKey,
+} from "../db/project-cache.js";
 import { getCachedOrganizations } from "../db/regions.js";
 import { type AuthGuardSuccess, withAuthGuard } from "../errors.js";
 import { logger } from "../logger.js";
@@ -177,10 +180,26 @@ export type CreatedProjectDetails = {
 };
 
 /**
+ * Extract the public key from a Sentry DSN URL.
+ * DSN format: https://<public_key>@<host>/<project_id>
+ */
+function extractPublicKeyFromDsn(dsn: string): string | null {
+  try {
+    const url = new URL(dsn);
+    return url.username || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Create a project, fetch its DSN, and build its dashboard URL.
  *
  * Shared core used by both `sentry project create` and `sentry init`.
  * Callers handle their own error wrapping and team resolution.
+ *
+ * After creation, seeds the project cache and DSN-based project cache
+ * so subsequent commands skip redundant API lookups.
  */
 export async function createProjectWithDsn(
   orgSlug: string,
@@ -190,6 +209,35 @@ export async function createProjectWithDsn(
   const project = await createProject(orgSlug, teamSlug, body);
   const dsn = await tryGetPrimaryDsn(orgSlug, project.slug);
   const url = buildProjectUrl(orgSlug, project.slug);
+
+  // Seed project cache so subsequent commands skip redundant API lookups
+  try {
+    const orgName = resolveOrgDisplayName(orgSlug, project.organization?.name);
+    cacheProjectsForOrg(orgSlug, orgName, [
+      { id: project.id, slug: project.slug, name: project.name },
+    ]);
+  } catch {
+    // Best-effort — don't let cache failures break project creation
+  }
+
+  // Also seed the DSN-based project cache for DSN resolution
+  if (dsn) {
+    try {
+      const publicKey = extractPublicKeyFromDsn(dsn);
+      if (publicKey) {
+        setCachedProjectByDsnKey(publicKey, {
+          orgSlug,
+          orgName: resolveOrgDisplayName(orgSlug, project.organization?.name),
+          projectSlug: project.slug,
+          projectName: project.name,
+          projectId: project.id,
+        });
+      }
+    } catch {
+      // Best-effort — don't let cache failures break project creation
+    }
+  }
+
   return { project, dsn, url };
 }
 
