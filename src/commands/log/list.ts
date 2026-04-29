@@ -409,15 +409,6 @@ async function* generateFollowLogs<T extends LogLike>(
 }
 
 /**
- * Consume a follow-mode generator, yielding each log individually.
- *
- * In JSON mode each yield becomes one JSONL line. In human mode the
- * stateful renderer accumulates rows into the streaming table.
- *
- * The generator returns when SIGINT fires — the wrapper's `finalize()`
- * callback handles closing the streaming table.
- */
-/**
  * Consume a project-scoped follow-mode generator, yielding items individually.
  *
  * When `extraFields` is provided, the first non-empty batch is yielded as a
