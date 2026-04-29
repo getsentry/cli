@@ -25,6 +25,7 @@ import {
   ValidationError,
 } from "../../lib/errors.js";
 import {
+  type LogLike as BaseLogLike,
   buildLogRowCells,
   createLogStreamingTable,
   formatLogRow,
@@ -130,25 +131,13 @@ function parseFollow(value: string): number {
 }
 
 /**
- * Shape shared by both SentryLog and TraceLog — the minimum fields
- * needed for table rendering and follow-mode dedup tracking.
+ * Extends the base {@link BaseLogLike} from formatters with the
+ * `timestamp_precise` field needed for follow-mode dedup tracking.
  */
-type LogLike = {
-  /** Unique log entry ID — used for dedup in trace follow mode.
-   * TraceLog uses `id`, SentryLog uses `sentry.item_id` (via passthrough).
-   * Present on TraceLog which is the only type used in follow mode dedup. */
-  id?: string;
-  /** Unique log entry ID from Explore/Events API. */
-  "sentry.item_id"?: string;
-  timestamp: string;
+type LogLike = BaseLogLike & {
   /** Nanosecond-precision timestamp used for dedup in follow mode.
    * Optional because TraceLog may omit it when the API response doesn't include it. */
   timestamp_precise?: number;
-  severity?: string | null;
-  message?: string | null;
-  trace?: string | null;
-  /** Allow arbitrary extra fields from `--fields` to flow through. */
-  [key: string]: unknown;
 };
 
 /** Result from a single fetch: logs to yield + hint for the footer. */
@@ -678,6 +667,16 @@ function jsonTransformLogOutput(data: LogOutput, fields?: string[]): unknown {
   return fields && fields.length > 0 ? filterFields(data, fields) : data;
 }
 
+/** Validate flag combinations that are invalid regardless of mode. */
+function validateFollowFlags(flags: ListFlags): void {
+  if (flags.follow && flags.sort === "oldest") {
+    throw new ValidationError(
+      '--sort "oldest" cannot be used with --follow. Follow mode streams new logs as they arrive.',
+      "sort"
+    );
+  }
+}
+
 export const listCommand = buildListCommand(
   "log",
   {
@@ -760,12 +759,7 @@ export const listCommand = buildListCommand(
       },
     },
     async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {
-      if (flags.follow && flags.sort === "oldest") {
-        throw new ValidationError(
-          '--sort "oldest" cannot be used with --follow. Follow mode streams new logs as they arrive.',
-          "sort"
-        );
-      }
+      validateFollowFlags(flags);
 
       const { cwd } = this;
 
@@ -794,6 +788,14 @@ export const listCommand = buildListCommand(
           cwd,
           TRACE_USAGE_HINT
         );
+
+        // Warn if --fields was passed — the trace-logs endpoint has a fixed
+        // field set and doesn't support arbitrary extra fields.
+        if (flags.fields?.length) {
+          logger.warn(
+            "--fields is not supported for trace-scoped log queries. Use project-scoped mode instead."
+          );
+        }
 
         // Capture explicit project for API-level filtering
         const projectFilter =

@@ -62,12 +62,22 @@ export type LogLike = {
  * Extract the canonical log entry ID from either log shape.
  *
  * Explore/Events logs use `sentry.item_id`; trace-logs use `id`.
+ * Uses typeof guards because the index signature on {@link LogLike}
+ * widens named properties to `unknown`.
  *
  * @param log - Any {@link LogLike} log entry
  * @returns The log entry's unique ID, or empty string if neither field is present
  */
 export function getLogId(log: LogLike): string {
-  return (log["sentry.item_id"] as string) ?? (log.id as string) ?? "";
+  const itemId = log["sentry.item_id"];
+  if (typeof itemId === "string") {
+    return itemId;
+  }
+  const id = log.id;
+  if (typeof id === "string") {
+    return id;
+  }
+  return "";
 }
 
 /**

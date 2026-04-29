@@ -140,20 +140,15 @@ export function parsePositionalArgs(args: string[]): {
   // biome-ignore lint/style/noNonNullAssertion: length >= 2 guarantees index 1 exists
   const second = args[1]!;
 
-  // Detect swapped args: first arg is a hex-like ID, second contains "/"
-  // (e.g., `sentry log view ace106b2 myorg/myproject`). Auto-swap and warn.
-  const swapWarning = detectSwappedViewArgs(first, second);
-  if (swapWarning) {
-    const swappedLogIds = args
-      .flatMap(splitLogIds)
-      .filter((id) => !id.includes("/"));
-    const swappedTarget = [first, ...args.slice(1)].find((a) =>
-      a.includes("/")
-    );
-    if (swappedTarget && swappedLogIds.length > 0) {
+  // Detect swapped args: exactly two args where first has no "/" and second
+  // does (e.g., `sentry log view ace106b2 myorg/myproject`). Only fires for
+  // the two-arg case to avoid silently dropping extra args in multi-arg use.
+  if (args.length === 2) {
+    const swapWarning = detectSwappedViewArgs(first, second);
+    if (swapWarning) {
       return {
-        rawLogIds: swappedLogIds,
-        targetArg: swappedTarget,
+        rawLogIds: splitLogIds(first),
+        targetArg: second,
         suggestion: swapWarning,
       };
     }
