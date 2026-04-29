@@ -21,7 +21,9 @@ import { resolveOrgRegion } from "../region.js";
 import { isAllDigits } from "../utils.js";
 
 import {
+  API_MAX_PER_PAGE,
   apiRequestToRegion,
+  MAX_PAGINATION_PAGES,
   type PaginatedResponse,
   parseLinkHeader,
 } from "./infrastructure.js";
@@ -293,30 +295,23 @@ type ListTransactionsOptions = {
 };
 
 /**
- * List recent transactions for a project.
- * Uses the Explore/Events API with dataset=transactions.
+ * Fetch a single page of transactions from the Explore/Events endpoint.
  *
- * Handles project slug vs numeric ID automatically:
- * - Numeric IDs are passed as the `project` parameter
- * - Slugs are added to the query string as `project:{slug}`
- *
- * @param orgSlug - Organization slug
- * @param projectSlug - Project slug or numeric ID
- * @param options - Query options (query, limit, sort, statsPeriod, cursor)
- * @returns Paginated response with transaction items and optional next cursor
+ * Internal helper used by {@link listTransactions} for both single-page and
+ * multi-page (auto-paginating) fetches.
  */
-export async function listTransactions(
+// biome-ignore lint/nursery/useMaxParams: internal helper mirrors the public API surface
+async function fetchTransactionsPage(
+  regionUrl: string,
   orgSlug: string,
   projectSlug: string,
-  options: ListTransactionsOptions = {}
+  options: ListTransactionsOptions,
+  perPage: number
 ): Promise<PaginatedResponse<TransactionListItem[]>> {
   const isNumericProject = isAllDigits(projectSlug);
   const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
   const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
 
-  const regionUrl = await resolveOrgRegion(orgSlug);
-
-  // Use raw request: the SDK's dataset type doesn't include "transactions"
   const { data: response, headers } =
     await apiRequestToRegion<TransactionsResponse>(
       regionUrl,
@@ -330,7 +325,7 @@ export async function listTransactions(
           // sending `query=` causes the Sentry API to behave differently than
           // omitting the parameter.
           query: fullQuery || undefined,
-          per_page: options.limit || 10,
+          per_page: perPage,
           statsPeriod:
             options.start || options.end
               ? undefined
@@ -349,6 +344,72 @@ export async function listTransactions(
 
   const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
   return { data: response.data, nextCursor };
+}
+
+/**
+ * List recent transactions for a project.
+ * Uses the Explore/Events API with dataset=transactions.
+ *
+ * Handles project slug vs numeric ID automatically:
+ * - Numeric IDs are passed as the `project` parameter
+ * - Slugs are added to the query string as `project:{slug}`
+ *
+ * When `limit` exceeds {@link API_MAX_PER_PAGE}, transparently fetches multiple
+ * pages using cursor-based pagination (bounded by {@link MAX_PAGINATION_PAGES}).
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug or numeric ID
+ * @param options - Query options (query, limit, sort, statsPeriod, cursor)
+ * @returns Paginated response with transaction items and optional next cursor
+ */
+export async function listTransactions(
+  orgSlug: string,
+  projectSlug: string,
+  options: ListTransactionsOptions = {}
+): Promise<PaginatedResponse<TransactionListItem[]>> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const limit = options.limit || 10;
+  const perPage = Math.min(limit, API_MAX_PER_PAGE);
+
+  // Fast path: single-page fetch when limit fits in one API page
+  if (limit <= API_MAX_PER_PAGE) {
+    return fetchTransactionsPage(
+      regionUrl,
+      orgSlug,
+      projectSlug,
+      options,
+      perPage
+    );
+  }
+
+  // Multi-page: accumulate rows across pages up to the requested limit
+  const allRows: TransactionListItem[] = [];
+  let cursor: string | undefined = options.cursor;
+
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
+    const result = await fetchTransactionsPage(
+      regionUrl,
+      orgSlug,
+      projectSlug,
+      { ...options, cursor },
+      perPage
+    );
+
+    allRows.push(...result.data);
+
+    // Stop when we've reached the requested limit or there are no more pages
+    if (allRows.length >= limit || !result.nextCursor) {
+      if (allRows.length > limit) {
+        return { data: allRows.slice(0, limit) };
+      }
+      return { data: allRows, nextCursor: result.nextCursor };
+    }
+
+    cursor = result.nextCursor;
+  }
+
+  // Safety limit reached — return what we have, no nextCursor
+  return { data: allRows.slice(0, limit) };
 }
 
 // Span listing
@@ -391,18 +452,18 @@ type ListSpansOptions = {
 };
 
 /**
- * List spans using the EAP spans search endpoint.
- * Uses the Explore/Events API with dataset=spans.
+ * Fetch a single page of spans from the Explore/Events endpoint.
  *
- * @param orgSlug - Organization slug
- * @param projectSlug - Project slug or numeric ID
- * @param options - Query options (query, limit, sort, statsPeriod, cursor)
- * @returns Paginated response with span items and optional next cursor
+ * Internal helper used by {@link listSpans} for both single-page and
+ * multi-page (auto-paginating) fetches.
  */
-export async function listSpans(
+// biome-ignore lint/nursery/useMaxParams: internal helper mirrors the public API surface
+async function fetchSpansPage(
+  regionUrl: string,
   orgSlug: string,
   projectSlug: string,
-  options: ListSpansOptions = {}
+  options: ListSpansOptions,
+  perPage: number
 ): Promise<PaginatedResponse<SpanListItem[]>> {
   const isNumericProject = isAllDigits(projectSlug);
   let projectFilter: string;
@@ -418,8 +479,6 @@ export async function listSpans(
   const fields = options.extraFields?.length
     ? SPAN_FIELDS.concat(options.extraFields)
     : SPAN_FIELDS;
-
-  const regionUrl = await resolveOrgRegion(orgSlug);
 
   let projectParam: string | undefined;
   if (options.allProjects) {
@@ -437,7 +496,7 @@ export async function listSpans(
         field: fields,
         project: projectParam,
         query: fullQuery || undefined,
-        per_page: options.limit || 10,
+        per_page: perPage,
         statsPeriod:
           options.start || options.end
             ? undefined
@@ -453,4 +512,60 @@ export async function listSpans(
 
   const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
   return { data: response.data, nextCursor };
+}
+
+/**
+ * List spans using the EAP spans search endpoint.
+ * Uses the Explore/Events API with dataset=spans.
+ *
+ * When `limit` exceeds {@link API_MAX_PER_PAGE}, transparently fetches multiple
+ * pages using cursor-based pagination (bounded by {@link MAX_PAGINATION_PAGES}).
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug or numeric ID
+ * @param options - Query options (query, limit, sort, statsPeriod, cursor)
+ * @returns Paginated response with span items and optional next cursor
+ */
+export async function listSpans(
+  orgSlug: string,
+  projectSlug: string,
+  options: ListSpansOptions = {}
+): Promise<PaginatedResponse<SpanListItem[]>> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const limit = options.limit || 10;
+  const perPage = Math.min(limit, API_MAX_PER_PAGE);
+
+  // Fast path: single-page fetch when limit fits in one API page
+  if (limit <= API_MAX_PER_PAGE) {
+    return fetchSpansPage(regionUrl, orgSlug, projectSlug, options, perPage);
+  }
+
+  // Multi-page: accumulate rows across pages up to the requested limit
+  const allRows: SpanListItem[] = [];
+  let cursor: string | undefined = options.cursor;
+
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
+    const result = await fetchSpansPage(
+      regionUrl,
+      orgSlug,
+      projectSlug,
+      { ...options, cursor },
+      perPage
+    );
+
+    allRows.push(...result.data);
+
+    // Stop when we've reached the requested limit or there are no more pages
+    if (allRows.length >= limit || !result.nextCursor) {
+      if (allRows.length > limit) {
+        return { data: allRows.slice(0, limit) };
+      }
+      return { data: allRows, nextCursor: result.nextCursor };
+    }
+
+    cursor = result.nextCursor;
+  }
+
+  // Safety limit reached — return what we have, no nextCursor
+  return { data: allRows.slice(0, limit) };
 }
