@@ -322,9 +322,9 @@ async function verifyCachedDsn(
   cwd: string,
   cached: CachedDsnEntry
 ): Promise<DetectedDsn | null> {
-  // API-sourced entries (e.g. project creation) have no file to verify.
+  // API-sourced entries from project creation have no file to verify.
   // Trust the cached DSN — it came from the Sentry API, not a local file.
-  if (cached.source === "create" || cached.source === "inferred") {
+  if (cached.source === "create") {
     return createDetectedDsn(cached.dsn, cached.source);
   }
 
