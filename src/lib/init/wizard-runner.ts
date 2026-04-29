@@ -28,6 +28,9 @@ import {
 } from "./clack-utils.js";
 import {
   API_TIMEOUT_MS,
+  EXIT_DEPENDENCY_INSTALL_FAILED,
+  EXIT_PLATFORM_NOT_DETECTED,
+  EXIT_VERIFICATION_FAILED,
   MASTRA_API_URL,
   SENTRY_DOCS_URL,
   VERIFY_CHANGES_STEP,
@@ -610,14 +613,15 @@ function handleFinalResult(
  */
 function mapWorkflowExitCode(workflowCode: number | undefined): number {
   switch (workflowCode) {
-    case 20:
+    case EXIT_PLATFORM_NOT_DETECTED:
       return EXIT.CONFIG;
-    case 30:
+    case EXIT_DEPENDENCY_INSTALL_FAILED:
       return EXIT.WIZARD_DEPS;
+    // 40/41 are server-side only (codemod plan/apply) — not in constants.ts
     case 40:
     case 41:
       return EXIT.WIZARD_CODEMOD;
-    case 50:
+    case EXIT_VERIFICATION_FAILED:
       return EXIT.WIZARD_VERIFY;
     default:
       return EXIT.WIZARD;
