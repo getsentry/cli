@@ -1,6 +1,57 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.30.0
+
+### Security 🔒
+
+- Scope tokens to hosts to prevent credential exfiltration by @BYK in [#844](https://github.com/getsentry/cli/pull/844)
+
+### New Features ✨
+
+- (docs) Auto-generate driftable doc sections (supersedes #851) by @BYK in [#873](https://github.com/getsentry/cli/pull/873)
+- (explore) Auto-paginate queryEvents to support --limit > 100 by @BYK in [#874](https://github.com/getsentry/cli/pull/874)
+- (help) Add common flags section and cache-age hints (#785) by @BYK in [#859](https://github.com/getsentry/cli/pull/859)
+- (telemetry) Compress outgoing Sentry envelopes with zstd by @BYK in [#843](https://github.com/getsentry/cli/pull/843)
+- Standardize exit codes across all CLI commands by @BYK in [#882](https://github.com/getsentry/cli/pull/882)
+- Add `sentry explore` command for aggregate event queries by @BYK in [#857](https://github.com/getsentry/cli/pull/857)
+- Add hidden --org/--project global flags for LLM compatibility by @BYK in [#856](https://github.com/getsentry/cli/pull/856)
+
+### Bug Fixes 🐛
+
+#### Api
+
+- Throw ValidationError for user-input failures in api command (CLI-1GC) by @BYK in [#855](https://github.com/getsentry/cli/pull/855)
+- Guard listOrganizations against non-array SDK responses (CLI-1CQ) by @BYK in [#854](https://github.com/getsentry/cli/pull/854)
+
+#### Other
+
+- (arg-parsing) Handle colon-separated issue identifiers (CLI-PH) by @BYK in [#868](https://github.com/getsentry/cli/pull/868)
+- (auth) Short-circuit whoami for org auth tokens (CLI-1AZ) by @BYK in [#841](https://github.com/getsentry/cli/pull/841)
+- (completions) Handle permission errors gracefully in installCompletions (CLI-1A5) by @BYK in [#867](https://github.com/getsentry/cli/pull/867)
+- (init) Suppress raw ANSI escape sequences when output is piped by @BYK in [#879](https://github.com/getsentry/cli/pull/879)
+- (log) Add ID column, --fields in human mode, and swapped-arg recovery by @BYK in [#871](https://github.com/getsentry/cli/pull/871)
+- (search-query) Make normalizeQuery quote-aware to prevent corrupting quoted values by @BYK in [#881](https://github.com/getsentry/cli/pull/881)
+- (sourcemap) Error on zero pairs + restore docs sourcemap emission by @BYK in [#846](https://github.com/getsentry/cli/pull/846)
+- (span-list) Query all projects in trace mode for cross-project traces by @BYK in [#878](https://github.com/getsentry/cli/pull/878)
+- (telemetry) Skip os.cpus() in NodeContext to prevent crash on restricted systems (CLI-1ED) by @BYK in [#876](https://github.com/getsentry/cli/pull/876)
+- (test) Isolate repositories test to prevent response cache bleed by @BYK in [#864](https://github.com/getsentry/cli/pull/864)
+- Auto-repair malformed search queries and fix telemetry object serialization (CLI-FA) by @BYK in [#872](https://github.com/getsentry/cli/pull/872)
+- Use human-readable byte sizes in upgrade verbose output by @BYK in [#866](https://github.com/getsentry/cli/pull/866)
+- Replace dead-end @latest selector error hint with actionable alternative (CLI-1ET) by @BYK in [#865](https://github.com/getsentry/cli/pull/865)
+
+### Internal Changes 🔧
+
+- (api) Migrate dashboards.ts CRUD to SDK functions by @MathurAditya724 in [#863](https://github.com/getsentry/cli/pull/863)
+- (auth) Memoize hasStoredAuthCredentials to avoid per-request SQL read by @BYK in [#869](https://github.com/getsentry/cli/pull/869)
+- (search-query) Generic normalizeQuery pipeline for pre-parse query repair (CLI-FA) by @BYK in [#880](https://github.com/getsentry/cli/pull/880)
+- (sourcemap-upload) Skip ZIP-level DEFLATE when wire codec compresses (62% CPU, 5.9% wire) by @BYK in [#849](https://github.com/getsentry/cli/pull/849)
+- Cache resolved project info after create and init by @BYK in [#877](https://github.com/getsentry/cli/pull/877)
+- Generalize resolveOrgProjectTarget to support org-all mode by @BYK in [#875](https://github.com/getsentry/cli/pull/875)
+- Collapse test/isolated/ into test/lib and test/commands by @BYK in [#840](https://github.com/getsentry/cli/pull/840)
+- Adopt bun test --isolate --parallel for ~2.9x CI speedup by @BYK in [#839](https://github.com/getsentry/cli/pull/839)
+- Regenerate docs by @github-actions[bot] in [c0693387](https://github.com/getsentry/cli/commit/c069338731d79c8780dbf6f1af27c0a012469c94)
+
 ## 0.29.1
 
 ### Bug Fixes 🐛
