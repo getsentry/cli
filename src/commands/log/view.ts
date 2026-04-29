@@ -364,13 +364,16 @@ function throwNotFoundError(
   if (logIds.length === 1) {
     const id = logIds[0] ?? "";
     const suffix = retentionSuffix(id);
-    const suggestions = suffix
-      ? [`This log is no longer retrievable.${suffix}`]
-      : retentionDays
-        ? [
-            `Make sure the log ID is correct and was sent within the last ${retentionDays} days`,
-          ]
-        : ["Make sure the log ID is correct"];
+    let suggestions: string[];
+    if (suffix) {
+      suggestions = [`This log is no longer retrievable.${suffix}`];
+    } else if (retentionDays) {
+      suggestions = [
+        `Make sure the log ID is correct and was sent within the last ${retentionDays} days`,
+      ];
+    } else {
+      suggestions = ["Make sure the log ID is correct"];
+    }
     throw new ResolutionError(
       `Log '${id}'`,
       `not found in ${org}/${project}`,
@@ -386,15 +389,18 @@ function throwNotFoundError(
     .map(({ id, suffix }) => ` - \`${id}\`${suffix}`)
     .join("\n");
   const anyExpired = suffixed.some(({ suffix }) => suffix !== "");
-  const suggestions = anyExpired
-    ? [
-        "Expired log IDs are no longer retrievable — check non-expired IDs and re-run",
-      ]
-    : retentionDays
-      ? [
-          `Make sure the log IDs are correct and were sent within the last ${retentionDays} days`,
-        ]
-      : ["Make sure the log IDs are correct"];
+  let suggestions: string[];
+  if (anyExpired) {
+    suggestions = [
+      "Expired log IDs are no longer retrievable — check non-expired IDs and re-run",
+    ];
+  } else if (retentionDays) {
+    suggestions = [
+      `Make sure the log IDs are correct and were sent within the last ${retentionDays} days`,
+    ];
+  } else {
+    suggestions = ["Make sure the log IDs are correct"];
+  }
   throw new ResolutionError(
     "Logs",
     `not found in ${org}/${project}:\n${annotated}`,
