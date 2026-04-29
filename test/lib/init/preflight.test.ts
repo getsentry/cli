@@ -42,8 +42,13 @@ let getAuthTokenSpy: ReturnType<typeof spyOn>;
 let resolveOrCreateTeamSpy: ReturnType<typeof spyOn>;
 let detectDsnSpy: ReturnType<typeof spyOn>;
 let resolveDsnByPublicKeySpy: ReturnType<typeof spyOn>;
+let savedPlainOutput: string | undefined;
 
 beforeEach(() => {
+  // Force rich output so clack-plain.ts delegates to real clack (spied below)
+  savedPlainOutput = process.env.SENTRY_PLAIN_OUTPUT;
+  process.env.SENTRY_PLAIN_OUTPUT = "0";
+
   selectSpy = spyOn(clack, "select").mockResolvedValue("existing");
   isCancelSpy = spyOn(clack, "isCancel").mockImplementation(
     (value: unknown) => value === Symbol.for("cancel")
@@ -98,6 +103,12 @@ afterEach(() => {
   detectDsnSpy.mockRestore();
   resolveDsnByPublicKeySpy.mockRestore();
   process.exitCode = 0;
+
+  if (savedPlainOutput === undefined) {
+    delete process.env.SENTRY_PLAIN_OUTPUT;
+  } else {
+    process.env.SENTRY_PLAIN_OUTPUT = savedPlainOutput;
+  }
 });
 
 describe("resolveInitContext", () => {

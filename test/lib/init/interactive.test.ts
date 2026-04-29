@@ -23,6 +23,7 @@ let logErrorSpy: ReturnType<typeof spyOn>;
 let logWarnSpy: ReturnType<typeof spyOn>;
 let cancelSpy: ReturnType<typeof spyOn>;
 let isCancelSpy: ReturnType<typeof spyOn>;
+let savedPlainOutput: string | undefined;
 
 function makeOptions(
   overrides?: Partial<InteractiveContext>
@@ -35,6 +36,10 @@ function makeOptions(
 }
 
 beforeEach(() => {
+  // Force rich output so clack-plain.ts delegates to real clack (spied below)
+  savedPlainOutput = process.env.SENTRY_PLAIN_OUTPUT;
+  process.env.SENTRY_PLAIN_OUTPUT = "0";
+
   selectSpy = spyOn(clack, "select").mockImplementation(
     () => Promise.resolve("default") as any
   );
@@ -62,6 +67,12 @@ afterEach(() => {
   logWarnSpy.mockRestore();
   cancelSpy.mockRestore();
   isCancelSpy.mockRestore();
+
+  if (savedPlainOutput === undefined) {
+    delete process.env.SENTRY_PLAIN_OUTPUT;
+  } else {
+    process.env.SENTRY_PLAIN_OUTPUT = savedPlainOutput;
+  }
 });
 
 describe("handleInteractive dispatcher", () => {

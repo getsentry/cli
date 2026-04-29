@@ -8,7 +8,6 @@
 
 import { randomBytes } from "node:crypto";
 import { basename } from "node:path";
-import { cancel, confirm, intro, log } from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 import { captureException, getTraceData } from "@sentry/node-core/light";
 import { formatBanner } from "../banner.js";
@@ -21,6 +20,7 @@ import {
   safeCodeSpan,
   stripColorTags,
 } from "../formatters/markdown.js";
+import { cancel, confirm, intro, log } from "./clack-plain.js";
 import {
   abortIfCancelled,
   STEP_LABELS,

@@ -4,9 +4,9 @@
  * Format wizard results and errors for terminal display using clack.
  */
 
-import { cancel, log, outro } from "@clack/prompts";
 import { terminalLink } from "../formatters/colors.js";
 import { colorTag, mdKvTable, renderMarkdown } from "../formatters/markdown.js";
+import { cancel, log, outro } from "./clack-plain.js";
 import { featureLabel } from "./clack-utils.js";
 import {
   EXIT_DEPENDENCY_INSTALL_FAILED,

@@ -4,8 +4,8 @@
  * Shared helpers for the clack-based init wizard UI.
  */
 
-import { cancel, isCancel } from "@clack/prompts";
 import { terminalLink } from "../formatters/colors.js";
+import { cancel, isCancel } from "./clack-plain.js";
 import { SENTRY_DOCS_URL } from "./constants.js";
 
 export class WizardCancelledError extends Error {

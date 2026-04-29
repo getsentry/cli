@@ -102,7 +102,13 @@ let stderrSpy: ReturnType<typeof spyOn>;
  */
 let capturedClientOptions: { abortSignal?: AbortSignal }[] = [];
 
+let savedPlainOutput: string | undefined;
+
 beforeEach(() => {
+  // Force rich output so clack-plain.ts delegates to real clack (spied below)
+  savedPlainOutput = process.env.SENTRY_PLAIN_OUTPUT;
+  process.env.SENTRY_PLAIN_OUTPUT = "0";
+
   mockStartResult = { status: "success", result: { platform: "React" } };
   mockResumeResults = [];
   resumeCallCount = 0;
@@ -211,6 +217,12 @@ afterEach(() => {
   stderrSpy.mockRestore();
 
   process.exitCode = 0;
+
+  if (savedPlainOutput === undefined) {
+    delete process.env.SENTRY_PLAIN_OUTPUT;
+  } else {
+    process.env.SENTRY_PLAIN_OUTPUT = savedPlainOutput;
+  }
 });
 
 describe("runWizard", () => {
@@ -463,11 +475,15 @@ describe("runWizard", () => {
     await runWizard(makeOptions());
 
     const messages = spinnerMock.message.mock.calls.map((call: string[]) =>
-      call[0]?.replace(
-        // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escape sequences
-        /\x1b\[[^m]*m/g,
-        ""
-      )
+      call[0]
+        ?.replace(
+          // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escape sequences
+          /\x1b\[[^m]*m/g,
+          ""
+        )
+        // Normalize whitespace left behind by code span padding
+        .replace(/[ \t]+$/gm, "")
+        .replace(/ {2,}/g, " ")
     );
     expect(messages).toContain(
       "Reading files...\n├─ ● settings.py\n└─ ● urls.py"

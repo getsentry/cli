@@ -9,11 +9,11 @@
  * `checkGitStatus` orchestrator (coupled to `@clack/prompts` UI).
  */
 
-import { confirm, isCancel, log } from "@clack/prompts";
 import {
   getUncommittedFiles,
   isInsideGitWorkTree as isInsideWorkTree,
 } from "../git.js";
+import { confirm, isCancel, log } from "./clack-plain.js";
 
 /** Maximum number of uncommitted files to display before truncating. */
 const MAX_DISPLAYED_FILES = 5;

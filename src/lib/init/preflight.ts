@@ -1,10 +1,10 @@
-import { cancel, isCancel, log, select } from "@clack/prompts";
 import type { SentryTeam } from "../../types/index.js";
 import { listOrganizations } from "../api-client.js";
 import { getAuthToken } from "../db/auth.js";
 import { WizardError } from "../errors.js";
 import { resolveOrCreateTeam } from "../resolve-team.js";
 import { slugify } from "../utils.js";
+import { cancel, isCancel, log, select } from "./clack-plain.js";
 import { WizardCancelledError } from "./clack-utils.js";
 import { tryGetExistingProjectData } from "./existing-project.js";
 import { resolveOrgPrefetched } from "./org-prefetch.js";
