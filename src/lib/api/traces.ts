@@ -386,6 +386,8 @@ type ListSpansOptions = {
   start?: string;
   /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
   end?: string;
+  /** When true, search across all projects (sends project=-1). Used for trace mode. */
+  allProjects?: boolean;
 };
 
 /**
@@ -403,7 +405,14 @@ export async function listSpans(
   options: ListSpansOptions = {}
 ): Promise<PaginatedResponse<SpanListItem[]>> {
   const isNumericProject = isAllDigits(projectSlug);
-  const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
+  let projectFilter: string;
+  if (options.allProjects) {
+    projectFilter = "";
+  } else if (isNumericProject) {
+    projectFilter = "";
+  } else {
+    projectFilter = `project:${projectSlug}`;
+  }
   const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
 
   const fields = options.extraFields?.length
@@ -412,6 +421,13 @@ export async function listSpans(
 
   const regionUrl = await resolveOrgRegion(orgSlug);
 
+  let projectParam: string | undefined;
+  if (options.allProjects) {
+    projectParam = "-1";
+  } else if (isNumericProject) {
+    projectParam = projectSlug;
+  }
+
   const { data: response, headers } = await apiRequestToRegion<SpansResponse>(
     regionUrl,
     `/organizations/${orgSlug}/events/`,
@@ -419,7 +435,7 @@ export async function listSpans(
       params: {
         dataset: "spans",
         field: fields,
-        project: isNumericProject ? projectSlug : undefined,
+        project: projectParam,
         query: fullQuery || undefined,
         per_page: options.limit || 10,
         statsPeriod:
