@@ -368,7 +368,7 @@ const LIBRARY_EXCLUDED_INTEGRATIONS = new Set([
   "NodeFetch", // diagnostics_channel + trace headers
   "FunctionToString", // wraps Function.prototype.toString
   "ChildProcess", // monitors child processes
-  "NodeContext", // reads OS info
+  "Context", // reads OS info — name is "Context" in SDK, not "NodeContext"
   "NodeRuntimeMetrics", // runtime metrics timer would keep host event loop alive
 ]);
 
