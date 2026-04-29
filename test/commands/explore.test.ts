@@ -19,6 +19,7 @@ import { exploreCommand } from "../../src/commands/explore.js";
 import * as apiClient from "../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as paginationDb from "../../src/lib/db/pagination.js";
+import { ContextError } from "../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../src/lib/resolve-target.js";
 import { parsePeriod } from "../../src/lib/time-range.js";
@@ -71,8 +72,7 @@ const MOCK_EVENTS_RESPONSE = {
 };
 
 let queryEventsSpy: ReturnType<typeof spyOn>;
-let resolveOrgSpy: ReturnType<typeof spyOn>;
-let resolveProjectBySlugSpy: ReturnType<typeof spyOn>;
+let resolveTargetSpy: ReturnType<typeof spyOn>;
 let resolveCursorSpy: ReturnType<typeof spyOn>;
 let advancePaginationStateSpy: ReturnType<typeof spyOn>;
 let hasPreviousPageSpy: ReturnType<typeof spyOn>;
@@ -86,16 +86,9 @@ beforeEach(async () => {
     nextCursor: undefined,
   });
 
-  resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
-  resolveOrgSpy.mockResolvedValue({ org: "test-org" });
-
-  // Default: bare-slug lookups resolve to test-org/test-project
-  resolveProjectBySlugSpy = spyOn(resolveTarget, "resolveProjectBySlug");
-  resolveProjectBySlugSpy.mockResolvedValue({
-    org: "test-org",
-    project: "test-project",
-    projectData: {} as never,
-  });
+  // Default: resolveOrgOptionalProjectFromArg returns org-only (auto-detect)
+  resolveTargetSpy = spyOn(resolveTarget, "resolveOrgOptionalProjectFromArg");
+  resolveTargetSpy.mockResolvedValue({ org: "test-org" });
 
   resolveCursorSpy = spyOn(paginationDb, "resolveCursor").mockReturnValue({
     cursor: undefined,
@@ -112,8 +105,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   queryEventsSpy.mockRestore();
-  resolveOrgSpy.mockRestore();
-  resolveProjectBySlugSpy.mockRestore();
+  resolveTargetSpy.mockRestore();
   resolveCursorSpy.mockRestore();
   advancePaginationStateSpy.mockRestore();
   hasPreviousPageSpy.mockRestore();
@@ -130,11 +122,16 @@ const DEFAULT_FLAGS = {
 describe("sentry explore", () => {
   describe("target resolution", () => {
     test("`<org>/` uses org without project filter", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "my-org" });
       const { context } = createContext();
 
       await func.call(context, DEFAULT_FLAGS, "my-org/");
 
-      // No resolveOrg call needed — org-all parses directly
+      expect(resolveTargetSpy).toHaveBeenCalledWith(
+        "my-org/",
+        "/tmp/test-explore",
+        "explore"
+      );
       expect(queryEventsSpy).toHaveBeenCalledWith(
         "my-org",
         expect.objectContaining({ query: undefined })
@@ -142,6 +139,7 @@ describe("sentry explore", () => {
     });
 
     test("`<org>/<project>` adds project:<slug> to query automatically", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "my-org", project: "cli" });
       const { context } = createContext();
 
       await func.call(context, DEFAULT_FLAGS, "my-org/cli");
@@ -153,6 +151,7 @@ describe("sentry explore", () => {
     });
 
     test("`<org>/<project>` with --query merges project filter and user query", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "my-org", project: "cli" });
       const { context } = createContext();
 
       await func.call(
@@ -168,15 +167,18 @@ describe("sentry explore", () => {
     });
 
     test("bare slug resolves project across orgs and adds project filter", async () => {
+      resolveTargetSpy.mockResolvedValue({
+        org: "test-org",
+        project: "test-project",
+      });
       const { context } = createContext();
 
       await func.call(context, DEFAULT_FLAGS, "cli");
 
-      expect(resolveProjectBySlugSpy).toHaveBeenCalledWith(
+      expect(resolveTargetSpy).toHaveBeenCalledWith(
         "cli",
-        expect.any(String),
-        expect.any(String),
-        undefined
+        "/tmp/test-explore",
+        "explore"
       );
       expect(queryEventsSpy).toHaveBeenCalledWith(
         "test-org",
@@ -185,12 +187,15 @@ describe("sentry explore", () => {
     });
 
     test("auto-detects org when no target provided", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       const { context } = createContext();
 
       await func.call(context, DEFAULT_FLAGS);
 
-      expect(resolveOrgSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ cwd: "/tmp/test-explore" })
+      expect(resolveTargetSpy).toHaveBeenCalledWith(
+        undefined,
+        "/tmp/test-explore",
+        "explore"
       );
       expect(queryEventsSpy).toHaveBeenCalledWith(
         "test-org",
@@ -198,8 +203,13 @@ describe("sentry explore", () => {
       );
     });
 
-    test("throws ContextError when auto-detect fails", async () => {
-      resolveOrgSpy.mockResolvedValue(null);
+    test("throws ContextError when resolution fails", async () => {
+      resolveTargetSpy.mockRejectedValue(
+        new ContextError("Organization", "sentry explore <target>", [
+          "SENTRY_ORG environment variable",
+          "sentry cli defaults",
+        ])
+      );
       const { context } = createContext();
 
       await expect(func.call(context, DEFAULT_FLAGS)).rejects.toThrow(
@@ -210,6 +220,7 @@ describe("sentry explore", () => {
 
   describe("API call parameters", () => {
     test("passes default fields and dataset when none specified", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       const { context } = createContext();
 
       await func.call(context, DEFAULT_FLAGS, "test-org/");
@@ -224,6 +235,7 @@ describe("sentry explore", () => {
     });
 
     test("passes custom fields from --field flag", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       const { context } = createContext();
 
       await func.call(
@@ -244,6 +256,7 @@ describe("sentry explore", () => {
     });
 
     test("passes custom dataset", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       const { context } = createContext();
 
       await func.call(
@@ -259,6 +272,7 @@ describe("sentry explore", () => {
     });
 
     test("passes user query unchanged when no project filter", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       const { context } = createContext();
 
       await func.call(
@@ -274,6 +288,7 @@ describe("sentry explore", () => {
     });
 
     test("passes limit", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       const { context } = createContext();
 
       await func.call(context, { ...DEFAULT_FLAGS, limit: 100 }, "test-org/");
@@ -287,6 +302,7 @@ describe("sentry explore", () => {
 
   describe("sort handling", () => {
     test("auto-sorts by first aggregate descending for non-spans", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       const { context } = createContext();
 
       await func.call(context, DEFAULT_FLAGS, "test-org/");
@@ -300,6 +316,7 @@ describe("sentry explore", () => {
     });
 
     test("applies explicit sort on spans dataset", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       const { context } = createContext();
 
       await func.call(
@@ -315,6 +332,7 @@ describe("sentry explore", () => {
     });
 
     test("omits sort for non-spans dataset even when auto-detected", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       const { context } = createContext();
 
       await func.call(
@@ -332,6 +350,7 @@ describe("sentry explore", () => {
 
   describe("output", () => {
     test("renders human-readable table with results", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       const { context, getStdout } = createContext();
 
       await func.call(context, DEFAULT_FLAGS, "test-org/");
@@ -342,6 +361,7 @@ describe("sentry explore", () => {
     });
 
     test("includes project in human header when target is org/project", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "my-org", project: "cli" });
       const { context, getStdout } = createContext();
 
       await func.call(context, DEFAULT_FLAGS, "my-org/cli");
@@ -350,6 +370,7 @@ describe("sentry explore", () => {
     });
 
     test("preserves user --field order in table columns", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       // API returns fields in a different order than requested
       queryEventsSpy.mockResolvedValue({
         data: {
@@ -392,6 +413,7 @@ describe("sentry explore", () => {
     });
 
     test("renders JSON output with envelope", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       const { context, getStdout } = createContext();
 
       await func.call(context, { ...DEFAULT_FLAGS, json: true }, "test-org/");
@@ -405,6 +427,7 @@ describe("sentry explore", () => {
     });
 
     test("shows empty message when no results", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       queryEventsSpy.mockResolvedValue({
         data: { data: [], meta: { fields: {} } },
         nextCursor: undefined,
@@ -419,6 +442,7 @@ describe("sentry explore", () => {
 
   describe("pagination", () => {
     test("includes nextCursor in JSON when more results available", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       queryEventsSpy.mockResolvedValue({
         data: MOCK_EVENTS_RESPONSE,
         nextCursor: "1735689600:0:1",
@@ -433,6 +457,7 @@ describe("sentry explore", () => {
     });
 
     test("advances pagination state after query", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       queryEventsSpy.mockResolvedValue({
         data: MOCK_EVENTS_RESPONSE,
         nextCursor: "cursor123",
