@@ -46,6 +46,20 @@ The `sentry` CLI follows conventions from well-known tools — if you're familia
 - Never store or log authentication tokens — the CLI manages credentials automatically
 - If the CLI reports the wrong org/project, override with explicit `<org>/<project>` arguments
 
+### Exit Codes
+
+The CLI uses semantic exit codes. Key ranges for agents:
+
+| Range | Meaning | Agent Action |
+|-------|---------|-------------|
+| 0 | Success | Proceed normally |
+| 10–19 | Auth error | Prompt user to run `sentry auth login` |
+| 20–29 | Input error | Check command arguments and retry |
+| 30–39 | API error | Retry or report to user |
+| 40–49 | Feature unavailable | Inform user about plan/settings |
+
+See [Exit Codes](/exit-codes/) for the complete reference.
+
 ### Workflow Patterns
 
 #### Investigate an Issue

@@ -13,6 +13,7 @@ import {
   expect,
   test,
 } from "bun:test";
+import { EXIT } from "../../src/lib/errors.js";
 import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import { createSentryMockServer, TEST_TOKEN } from "../mocks/routes.js";
@@ -47,7 +48,7 @@ describe("sentry api", () => {
   test("requires authentication", async () => {
     const result = await ctx.run(["api", "organizations/"]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.AUTH_NOT_AUTHENTICATED);
     expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
   });
 
@@ -73,7 +74,7 @@ describe("sentry api", () => {
 
       const result = await ctx.run(["api", "nonexistent-endpoint-12345/"]);
 
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode).toBe(EXIT.API);
     },
     { timeout: 15_000 }
   );
@@ -102,7 +103,7 @@ describe("sentry api", () => {
         "--silent",
       ]);
 
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode).toBe(EXIT.API);
       expect(result.stdout).toBe("");
     },
     { timeout: 15_000 }
@@ -122,7 +123,7 @@ describe("sentry api", () => {
       ]);
 
       // Method not allowed or similar error - just checking it processes the flag
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode).toBe(EXIT.API);
     },
     { timeout: 15_000 }
   );
@@ -159,7 +160,7 @@ describe("sentry api", () => {
       const result = await ctx.run(["api", "organizations/", "-X", "POST"]);
 
       // POST on list endpoint typically returns 405 or similar error
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode).toBe(EXIT.API);
     },
     { timeout: 15_000 }
   );
@@ -233,7 +234,7 @@ describe("sentry api", () => {
       ]);
 
       // Will fail with 404 or similar, but the flag should be processed
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode).toBe(EXIT.API);
     },
     { timeout: 15_000 }
   );
@@ -250,7 +251,7 @@ describe("sentry api", () => {
         "/nonexistent/file.json",
       ]);
 
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode).toBe(EXIT.VALIDATION);
       expect(result.stderr + result.stdout).toMatch(/file not found/i);
     },
     { timeout: 15_000 }
@@ -301,7 +302,7 @@ describe("sentry api", () => {
 
       // Should get a server error (405 Method Not Allowed or 400 Bad Request),
       // not a client-side error about body handling
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode).toBe(EXIT.API);
       // The error should be from the API, not a TypeError about body
       expect(result.stdout + result.stderr).not.toMatch(/cannot have body/i);
     },
@@ -324,7 +325,7 @@ describe("sentry api", () => {
         "-",
       ]);
 
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode).toBe(EXIT.VALIDATION);
       expect(result.stderr + result.stdout).toMatch(
         /--data.*--input|--input.*--data/i
       );
@@ -348,7 +349,7 @@ describe("sentry api", () => {
         "slug=my-org",
       ]);
 
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode).toBe(EXIT.VALIDATION);
       expect(result.stderr + result.stdout).toMatch(
         /--data.*--field|--field.*--data/i
       );
@@ -372,7 +373,7 @@ describe("sentry api", () => {
         "slug=my-org",
       ]);
 
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode).toBe(EXIT.VALIDATION);
       expect(result.stderr + result.stdout).toMatch(
         /--data.*--field|--field.*--data/i
       );

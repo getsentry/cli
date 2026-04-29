@@ -13,6 +13,7 @@ import {
   expect,
   test,
 } from "bun:test";
+import { EXIT } from "../../src/lib/errors.js";
 import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import { createSentryMockServer, TEST_TOKEN } from "../mocks/routes.js";
@@ -47,7 +48,7 @@ describe("sentry auth status", () => {
     // Error message may be in stdout or stderr depending on CLI framework
     const output = result.stdout + result.stderr;
     expect(output).toMatch(/not authenticated/i);
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.AUTH_NOT_AUTHENTICATED);
   });
 
   test("shows authenticated with valid token", async () => {
@@ -109,7 +110,7 @@ describe("sentry auth login --token", () => {
       "invalid-token-12345",
     ]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.AUTH_HOST_SCOPE);
     expect(result.stderr + result.stdout).toMatch(
       /invalid|unauthorized|error/i
     );
@@ -122,7 +123,7 @@ describe("sentry auth whoami", () => {
 
     const output = result.stdout + result.stderr;
     expect(output).toMatch(/not authenticated/i);
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.AUTH_NOT_AUTHENTICATED);
   });
 
   test("shows current user identity", async () => {

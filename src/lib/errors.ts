@@ -2,6 +2,25 @@
  * CLI Error Hierarchy
  *
  * Unified error classes for consistent error handling across the CLI.
+ *
+ * ## Exit Code Ranges
+ *
+ * Each error class maps to a semantic exit code so scripts and agents can
+ * react to failure categories without parsing stderr. Codes are grouped
+ * into decades inspired by HTTP status semantics:
+ *
+ * | Range | Category          | HTTP Analogy         |
+ * |-------|-------------------|----------------------|
+ * | 0     | Success           | 200 OK               |
+ * | 1     | General error     | 500 Internal         |
+ * | 10–19 | Auth & identity   | 401/403              |
+ * | 20–29 | Input & config    | 400/404/422          |
+ * | 30–39 | API & network     | 502/503/504          |
+ * | 40–49 | Feature/billing   | 402/451              |
+ * | 50–59 | Operations        | —                    |
+ * | 60–69 | Command-specific  | —                    |
+ *
+ * @see https://cli.sentry.dev/exit-codes/ for full reference
  */
 
 import {
@@ -9,6 +28,69 @@ import {
   buildOrgSettingsUrl,
   buildSeerSettingsUrl,
 } from "./sentry-urls.js";
+
+// ---------------------------------------------------------------------------
+// Exit code constants
+// ---------------------------------------------------------------------------
+
+/**
+ * Semantic exit codes for all CLI error classes.
+ *
+ * Grouped into decades so scripts can match on ranges:
+ * `if code >= 10 && code < 20 → auth problem`.
+ *
+ * All codes stay below 128 to avoid collision with Unix signal exits (128+N).
+ */
+export const EXIT = {
+  /** Catch-all for unexpected errors */
+  GENERAL: 1,
+
+  // 10–19: Auth & identity (HTTP 401/403 family)
+  /** Not authenticated — run `sentry auth login` */
+  AUTH_NOT_AUTHENTICATED: 10,
+  /** Token expired — re-authenticate */
+  AUTH_EXPIRED: 11,
+  /** Token invalid / rejected */
+  AUTH_INVALID: 12,
+  /** Request blocked by host-scope trust check */
+  AUTH_HOST_SCOPE: 13,
+
+  // 20–29: Input & config (HTTP 400/404/422 family)
+  /** Configuration or DSN error */
+  CONFIG: 20,
+  /** Input validation failed */
+  VALIDATION: 21,
+  /** Required context (org, project, etc.) missing */
+  CONTEXT_MISSING: 22,
+  /** User-provided value could not be resolved */
+  RESOLUTION: 23,
+
+  // 30–39: API & network (HTTP 502/503/504 family)
+  /** Sentry API returned an error */
+  API: 30,
+  /** Operation timed out */
+  TIMEOUT: 31,
+
+  // 40–49: Feature / billing (HTTP 402/451 family)
+  /** Seer not enabled for the organization */
+  SEER_NOT_ENABLED: 40,
+  /** Seer requires a paid plan */
+  SEER_NO_BUDGET: 41,
+  /** AI features disabled by org admin */
+  SEER_AI_DISABLED: 42,
+
+  // 50–59: Operations
+  /** CLI upgrade failed */
+  UPGRADE: 50,
+  /** OAuth device flow error */
+  DEVICE_FLOW: 51,
+
+  // 60–69: Command-specific
+  /** Command produced output but should exit non-zero */
+  OUTPUT_ERROR: 60,
+  /** Init wizard error */
+  WIZARD: 61,
+} as const;
 
 /**
  * Base class for all CLI errors.
@@ -55,19 +137,21 @@ export class HostScopeError extends CliError {
     tokenHost?: string | undefined
   ) {
     if (destinationUrl === undefined) {
-      super(sourceOrMessage);
+      super(sourceOrMessage, EXIT.AUTH_HOST_SCOPE);
     } else if (tokenHost === undefined) {
       super(
         `${sourceOrMessage}: ${destinationUrl}\n` +
           "Refusing to route requests to this host because no Sentry credentials are configured for it.\n" +
-          `To use this host, run: sentry auth login --url ${destinationUrl}`
+          `To use this host, run: sentry auth login --url ${destinationUrl}`,
+        EXIT.AUTH_HOST_SCOPE
       );
     } else {
       super(
         `${sourceOrMessage}: ${destinationUrl}\n` +
           `Refusing to route requests here because it doesn't match the host your Sentry credentials are for (${tokenHost}).\n` +
           `To use this host, run: sentry auth login --url ${destinationUrl}\n` +
-          "To keep using your current credentials, remove this URL override."
+          "To keep using your current credentials, remove this URL override.",
+        EXIT.AUTH_HOST_SCOPE
       );
     }
     this.name = "HostScopeError";
@@ -93,7 +177,7 @@ export class ApiError extends CliError {
     detail?: string,
     endpoint?: string
   ) {
-    super(message);
+    super(message, EXIT.API);
     this.name = "ApiError";
     this.status = status;
     this.detail = detail;
@@ -143,7 +227,12 @@ export class AuthError extends CliError {
         "Authentication expired. Run 'sentry auth login' to re-authenticate.",
       invalid: "Invalid authentication token.",
     };
-    super(message ?? defaultMessages[reason]);
+    const exitCodes: Record<AuthErrorReason, number> = {
+      not_authenticated: EXIT.AUTH_NOT_AUTHENTICATED,
+      expired: EXIT.AUTH_EXPIRED,
+      invalid: EXIT.AUTH_INVALID,
+    };
+    super(message ?? defaultMessages[reason], exitCodes[reason]);
     this.name = "AuthError";
     this.reason = reason;
     this.skipAutoAuth = options?.skipAutoAuth ?? false;
@@ -160,7 +249,7 @@ export class ConfigError extends CliError {
   readonly suggestion?: string;
 
   constructor(message: string, suggestion?: string) {
-    super(message);
+    super(message, EXIT.CONFIG);
     this.name = "ConfigError";
     this.suggestion = suggestion;
   }
@@ -188,7 +277,7 @@ export class OutputError extends CliError {
   readonly data: unknown;
 
   constructor(data: unknown) {
-    super("", 1);
+    super("", EXIT.OUTPUT_ERROR);
     this.name = "OutputError";
     this.data = data;
   }
@@ -322,7 +411,8 @@ export class ContextError extends CliError {
       buildContextMessage(resource, command, resolvedAlternatives, {
         note,
         isAutoDetect,
-      })
+      }),
+      EXIT.CONTEXT_MISSING
     );
     this.name = "ContextError";
     this.resource = resource;
@@ -381,7 +471,10 @@ export class ResolutionError extends CliError {
     hint: string,
     suggestions: string[] = []
   ) {
-    super(buildResolutionMessage(resource, headline, hint, suggestions));
+    super(
+      buildResolutionMessage(resource, headline, hint, suggestions),
+      EXIT.RESOLUTION
+    );
     this.name = "ResolutionError";
     this.resource = resource;
     this.headline = headline;
@@ -404,7 +497,7 @@ export class ValidationError extends CliError {
   readonly field?: string;
 
   constructor(message: string, field?: string) {
-    super(message);
+    super(message, EXIT.VALIDATION);
     this.name = "ValidationError";
     this.field = field;
   }
@@ -420,7 +513,7 @@ export class DeviceFlowError extends CliError {
   readonly code: string;
 
   constructor(code: string, description?: string) {
-    super(description ?? code);
+    super(description ?? code, EXIT.DEVICE_FLOW);
     this.name = "DeviceFlowError";
     this.code = code;
   }
@@ -457,7 +550,7 @@ export class UpgradeError extends CliError {
       offline_cache_miss:
         "Cannot upgrade offline — no pre-downloaded update is available.",
     };
-    super(message ?? defaultMessages[reason]);
+    super(message ?? defaultMessages[reason], EXIT.UPGRADE);
     this.name = "UpgradeError";
     this.reason = reason;
   }
@@ -483,7 +576,12 @@ export class SeerError extends CliError {
       no_budget: "Seer requires a paid plan.",
       ai_disabled: "AI features are disabled for this organization.",
     };
-    super(messages[reason]);
+    const exitCodes: Record<SeerErrorReason, number> = {
+      not_enabled: EXIT.SEER_NOT_ENABLED,
+      no_budget: EXIT.SEER_NO_BUDGET,
+      ai_disabled: EXIT.SEER_AI_DISABLED,
+    };
+    super(messages[reason], exitCodes[reason]);
     this.name = "SeerError";
     this.reason = reason;
     this.orgSlug = orgSlug;
@@ -535,7 +633,7 @@ export class TimeoutError extends CliError {
   readonly hint?: string;
 
   constructor(message: string, hint?: string) {
-    super(message);
+    super(message, EXIT.TIMEOUT);
     this.name = "TimeoutError";
     this.hint = hint;
   }
@@ -558,7 +656,7 @@ export class WizardError extends CliError {
   readonly rendered: boolean;
 
   constructor(message: string, options?: { rendered?: boolean }) {
-    super(message);
+    super(message, EXIT.WIZARD);
     this.name = "WizardError";
     this.rendered = options?.rendered ?? true;
   }

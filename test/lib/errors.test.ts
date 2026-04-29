@@ -6,13 +6,18 @@ import {
   ConfigError,
   ContextError,
   DeviceFlowError,
+  EXIT,
   formatError,
   getExitCode,
+  HostScopeError,
+  OutputError,
   ResolutionError,
   SeerError,
   stringifyUnknown,
+  TimeoutError,
   UpgradeError,
   ValidationError,
+  WizardError,
   withAuthGuard,
 } from "../../src/lib/errors.js";
 
@@ -250,7 +255,7 @@ describe("ResolutionError", () => {
     );
     expect(err).toBeInstanceOf(CliError);
     expect(err.name).toBe("ResolutionError");
-    expect(err.exitCode).toBe(1);
+    expect(err.exitCode).toBe(EXIT.RESOLUTION);
   });
 });
 
@@ -470,6 +475,100 @@ describe("getExitCode", () => {
   test("returns 1 for non-errors", () => {
     expect(getExitCode("string")).toBe(1);
     expect(getExitCode(null)).toBe(1);
+  });
+});
+
+describe("exit codes", () => {
+  test("CliError base defaults to EXIT.GENERAL (1)", () => {
+    expect(new CliError("err").exitCode).toBe(EXIT.GENERAL);
+  });
+
+  test("AuthError maps reasons to exit codes", () => {
+    expect(new AuthError("not_authenticated").exitCode).toBe(
+      EXIT.AUTH_NOT_AUTHENTICATED
+    );
+    expect(new AuthError("expired").exitCode).toBe(EXIT.AUTH_EXPIRED);
+    expect(new AuthError("invalid").exitCode).toBe(EXIT.AUTH_INVALID);
+  });
+
+  test("HostScopeError has exit code AUTH_HOST_SCOPE", () => {
+    // Freeform message form
+    expect(new HostScopeError("blocked").exitCode).toBe(EXIT.AUTH_HOST_SCOPE);
+    // URL mismatch form (no tokenHost)
+    expect(
+      new HostScopeError("Request", "https://other.sentry.io").exitCode
+    ).toBe(EXIT.AUTH_HOST_SCOPE);
+    // URL mismatch form (with tokenHost)
+    expect(
+      new HostScopeError(
+        "Request",
+        "https://other.sentry.io",
+        "https://sentry.io"
+      ).exitCode
+    ).toBe(EXIT.AUTH_HOST_SCOPE);
+  });
+
+  test("ApiError has exit code API", () => {
+    expect(new ApiError("fail", 500).exitCode).toBe(EXIT.API);
+  });
+
+  test("ConfigError has exit code CONFIG", () => {
+    expect(new ConfigError("bad config").exitCode).toBe(EXIT.CONFIG);
+  });
+
+  test("ValidationError has exit code VALIDATION", () => {
+    expect(new ValidationError("bad input").exitCode).toBe(EXIT.VALIDATION);
+  });
+
+  test("ContextError has exit code CONTEXT_MISSING", () => {
+    expect(new ContextError("Organization", "sentry org list").exitCode).toBe(
+      EXIT.CONTEXT_MISSING
+    );
+  });
+
+  test("ResolutionError has exit code RESOLUTION", () => {
+    expect(
+      new ResolutionError("X", "not found", "sentry x view").exitCode
+    ).toBe(EXIT.RESOLUTION);
+  });
+
+  test("DeviceFlowError has exit code DEVICE_FLOW", () => {
+    expect(new DeviceFlowError("slow_down").exitCode).toBe(EXIT.DEVICE_FLOW);
+  });
+
+  test("UpgradeError has exit code UPGRADE", () => {
+    expect(new UpgradeError("network_error").exitCode).toBe(EXIT.UPGRADE);
+  });
+
+  test("SeerError maps reasons to exit codes", () => {
+    expect(new SeerError("not_enabled").exitCode).toBe(EXIT.SEER_NOT_ENABLED);
+    expect(new SeerError("no_budget").exitCode).toBe(EXIT.SEER_NO_BUDGET);
+    expect(new SeerError("ai_disabled").exitCode).toBe(EXIT.SEER_AI_DISABLED);
+  });
+
+  test("TimeoutError has exit code TIMEOUT", () => {
+    expect(new TimeoutError("timed out").exitCode).toBe(EXIT.TIMEOUT);
+  });
+
+  test("OutputError has exit code OUTPUT_ERROR", () => {
+    expect(new OutputError({ items: [] }).exitCode).toBe(EXIT.OUTPUT_ERROR);
+  });
+
+  test("WizardError has exit code WIZARD", () => {
+    expect(new WizardError("wizard failed").exitCode).toBe(EXIT.WIZARD);
+  });
+
+  test("EXIT values are all unique", () => {
+    const values = Object.values(EXIT);
+    expect(new Set(values).size).toBe(values.length);
+  });
+
+  test("EXIT values are all positive integers below 128", () => {
+    for (const [, code] of Object.entries(EXIT)) {
+      expect(code).toBeGreaterThan(0);
+      expect(code).toBeLessThan(128);
+      expect(Number.isInteger(code)).toBe(true);
+    }
   });
 });
 
