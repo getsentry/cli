@@ -11,7 +11,6 @@
  */
 
 import chalk from "chalk";
-import { confirm, log, multiselect, select } from "./clack-plain.js";
 import {
   abortIfCancelled,
   featureHint,

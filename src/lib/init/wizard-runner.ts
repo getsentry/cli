@@ -25,7 +25,6 @@ import {
   safeCodeSpan,
   stripColorTags,
 } from "../formatters/markdown.js";
-import { cancel, confirm, intro, log } from "./clack-plain.js";
 import {
   abortIfCancelled,
   STEP_LABELS,
