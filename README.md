@@ -76,7 +76,9 @@ Credentials are stored in `~/.sentry/` with restricted permissions (mode 600).
 
 ## Library Usage
 
-Use Sentry CLI programmatically in Node.js (≥22) or Bun without spawning a subprocess:
+<!-- GENERATED:START library-prereq -->
+Use Sentry CLI programmatically in Node.js (≥22.12) or Bun without spawning a subprocess:
+<!-- GENERATED:END library-prereq -->
 
 ```typescript
 import createSentrySDK from "sentry";
@@ -115,7 +117,9 @@ Errors are thrown as `SentryError` with `.exitCode` and `.stderr`.
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) v1.0+
+<!-- GENERATED:START dev-prereq -->
+- [Bun](https://bun.sh) v1.3+
+<!-- GENERATED:END dev-prereq -->
 
 ### Setup
 
@@ -137,13 +141,17 @@ bun run --env-file=.env.local src/bin.ts --help
 
 ### Scripts
 
+<!-- GENERATED:START dev-scripts -->
 ```bash
-bun run build        # Build for current platform
-bun run typecheck    # Type checking
-bun run lint         # Check for issues
-bun run lint:fix     # Auto-fix issues
-bun test             # Run tests
+bun run build         # Build for current platform
+bun run typecheck     # Type checking
+bun run lint          # Check for issues
+bun run lint:fix      # Auto-fix issues
+bun run test:unit     # Run unit tests
+bun run test:e2e      # Run end-to-end tests
+bun run generate:docs # Regenerate command docs and skills
 ```
+<!-- GENERATED:END dev-scripts -->
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for detailed setup and [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 

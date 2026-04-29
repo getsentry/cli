@@ -9,7 +9,9 @@ We welcome contributions to the Sentry CLI! This guide will help you get started
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) runtime (v1.0 or later)
+<!-- GENERATED:START dev-prereq -->
+- [Bun](https://bun.sh) runtime (v1.3 or later)
+<!-- GENERATED:END dev-prereq -->
 - Git
 
 ### Getting Started

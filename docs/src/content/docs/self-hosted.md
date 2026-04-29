@@ -67,12 +67,16 @@ If you pass a self-hosted Sentry URL as a command argument (e.g., an issue or ev
 
 ## Relevant Environment Variables
 
+<!-- GENERATED:START self-hosted-env-vars -->
 | Variable | Description |
 |----------|-------------|
 | `SENTRY_HOST` | Base URL of your Sentry instance (takes precedence over `SENTRY_URL`) |
 | `SENTRY_URL` | Alias for `SENTRY_HOST` |
 | `SENTRY_CLIENT_ID` | Client ID of your public OAuth application |
+| `SENTRY_CUSTOM_HEADERS` | Custom HTTP headers for proxy/IAP (semicolon-separated `Name: Value` pairs) |
+| `SENTRY_FORCE_ENV_TOKEN` | Force env token over stored OAuth token |
 | `SENTRY_ORG` | Default organization slug |
 | `SENTRY_PROJECT` | Default project slug (supports `org/project` format) |
+<!-- GENERATED:END self-hosted-env-vars -->
 
 See [Configuration](./configuration/) for the full environment variable reference.

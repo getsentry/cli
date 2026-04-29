@@ -26,6 +26,10 @@ export type EnvVarEntry = {
   topLevel?: boolean;
   /** Short one-line description used in the branded help summary. Falls back to `description` when absent. */
   briefDescription?: string;
+  /** Include in the self-hosted.md env var table. */
+  selfHosted?: boolean;
+  /** Include in the DEVELOPMENT.md env var table. One-line description for the table cell. */
+  devGuide?: string;
 };
 
 /**
@@ -44,6 +48,8 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
     example: "sntrys_YOUR_TOKEN_HERE",
     topLevel: true,
     briefDescription: "Auth token used for API requests (CI, scripts).",
+    devGuide:
+      "API token for non-interactive use (lower priority than stored OAuth by default)",
   },
   {
     name: "SENTRY_TOKEN",
@@ -57,6 +63,8 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
     example: "1",
     topLevel: true,
     briefDescription: "Prefer the env-var token over a stored OAuth login.",
+    selfHosted: true,
+    devGuide: "Force env token to take priority over stored OAuth token",
   },
   // -- Targeting --
   {
@@ -66,6 +74,7 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
     example: "my-org",
     topLevel: true,
     briefDescription: "Default organization slug.",
+    selfHosted: true,
   },
   {
     name: "SENTRY_PROJECT",
@@ -74,6 +83,7 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
     example: "my-org/my-project",
     topLevel: true,
     briefDescription: "Default project slug (or `org/project`).",
+    selfHosted: true,
   },
   {
     name: "SENTRY_DSN",
@@ -82,6 +92,16 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
     example: "https://key@o123.ingest.us.sentry.io/456",
     topLevel: true,
     briefDescription: "DSN used to auto-detect org + project.",
+  },
+  // -- Release --
+  {
+    name: "SENTRY_RELEASE",
+    description:
+      "Explicit release version for `sentry release propose-version`. When set, " +
+      "the command returns this value immediately without checking CI environment " +
+      "variables or local git history. Useful in CI pipelines where the release " +
+      "version is determined by a prior step.",
+    example: "1.0.0",
   },
   // -- URL --
   {
@@ -92,18 +112,24 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
     defaultValue: "https://sentry.io",
     topLevel: true,
     briefDescription: "Base URL of your Sentry instance (self-hosted).",
+    selfHosted: true,
+    devGuide: "Sentry instance URL (for self-hosted, takes precedence)",
   },
   {
     name: "SENTRY_URL",
     description:
       "Alias for `SENTRY_HOST`. If both are set, `SENTRY_HOST` takes precedence.",
     defaultValue: "https://sentry.io",
+    selfHosted: true,
+    devGuide: "Alias for `SENTRY_HOST`",
   },
   {
     name: "SENTRY_CLIENT_ID",
     description:
       "Client ID of a public OAuth application on your Sentry instance. **Required for [self-hosted Sentry](./self-hosted/)** (26.1.0+) to use `sentry auth login` with the device flow. See the [Self-Hosted guide](./self-hosted/#1-create-a-public-oauth-application) for how to create one.",
     example: "your-oauth-client-id",
+    selfHosted: true,
+    devGuide: "Sentry OAuth app client ID",
   },
   // -- Custom headers --
   {
@@ -116,6 +142,7 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
       "(e.g., Google IAP, Cloudflare Access).\n\n" +
       "Can also be set persistently with `sentry cli defaults headers`.",
     example: '"X-IAP-Token: my-proxy-token"',
+    selfHosted: true,
   },
   // -- Paths --
   {
@@ -124,6 +151,7 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
       "Override the directory where the CLI stores its database (credentials, caches, defaults). Defaults to `~/.sentry/`.",
     example: "/path/to/config",
     defaultValue: "~/.sentry/",
+    devGuide: "Override credentials/cache directory",
   },
   {
     name: "SENTRY_INSTALL_DIR",
@@ -183,12 +211,15 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
     defaultValue: "info",
     topLevel: true,
     briefDescription: "Log verbosity (error, warn, info, debug, trace).",
+    devGuide:
+      "Diagnostic log level (`error`, `warn`, `log`, `info`, `debug`, `trace`)",
   },
   {
     name: "SENTRY_CLI_NO_TELEMETRY",
     description:
       "Disable CLI telemetry (error tracking for the CLI itself). The CLI sends anonymized error reports to help improve reliability — set this to opt out.",
     example: "1",
+    devGuide: "Disable CLI telemetry (error tracking)",
   },
   {
     name: "SENTRY_CLI_NO_UPDATE_CHECK",
