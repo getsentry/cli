@@ -346,6 +346,7 @@ export function recordApiErrorOnSpan(span: Span, error: ApiError): void {
  */
 const EXCLUDED_INTEGRATIONS = new Set([
   "Console", // Captures console output - too noisy for CLI
+  "Context", // Replaced below with cpu: false to avoid os.cpus() crash (CLI-1ED)
   "ContextLines", // Reads source files - we rely on uploaded sourcemaps instead
   "LocalVariables", // Captures local variables - adds significant overhead
   "Modules", // Lists all loaded modules - unnecessary for CLI telemetry
@@ -537,6 +538,14 @@ export function initSentry(
           !excluded.has(integration.name) &&
           (integration.name !== "NodeSystemError" || hasGetSystemErrorMap)
       );
+
+      // Re-add Context integration with cpu: false to avoid os.cpus() crash
+      // on systems where /proc/cpuinfo is not accessible (CLI-1ED).
+      if (!libraryMode) {
+        filtered.push(
+          Sentry.nodeContextIntegration({ device: { cpu: false } })
+        );
+      }
 
       // Collect runtime metrics (CPU, memory, event loop) for non-library mode.
       // Uses nodeRuntimeMetricsIntegration which degrades gracefully on Bun:
