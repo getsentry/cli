@@ -714,6 +714,28 @@ export function setOrgProjectContext(orgs: string[], projects: string[]): void {
 const SENSITIVE_FLAGS = new Set(["token"]);
 
 /**
+ * Convert a flag value to a telemetry tag string.
+ *
+ * Handles booleans, objects (JSON-serialized to avoid "[object Object]"),
+ * and primitives. Truncates to 200 chars for Sentry tag limits.
+ */
+function flagValueToTag(value: unknown): string {
+  if (typeof value === "boolean") {
+    return String(value);
+  }
+  // Arrays serialize as comma-separated strings (matching existing behavior)
+  if (Array.isArray(value)) {
+    return String(value).slice(0, 200);
+  }
+  // Non-array objects (e.g., TimeRange) must be JSON-serialized to avoid
+  // "[object Object]" from String()
+  if (typeof value === "object" && value !== null) {
+    return JSON.stringify(value).slice(0, 200);
+  }
+  return String(value).slice(0, 200);
+}
+
+/**
  * Set command flags as telemetry tags.
  *
  * Converts flag names from camelCase to kebab-case and sets them as tags
@@ -771,10 +793,7 @@ export function setFlagContext(flags: Record<string, unknown>): void {
     }
 
     // Set the tag with flag. prefix
-    // For booleans, just set "true"; for other types, convert to string
-    const tagValue =
-      typeof value === "boolean" ? "true" : String(value).slice(0, 200); // Truncate long values
-    Sentry.setTag(`flag.${kebabKey}`, tagValue);
+    Sentry.setTag(`flag.${kebabKey}`, flagValueToTag(value));
   }
 }
 
