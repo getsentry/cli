@@ -721,7 +721,7 @@ const SENSITIVE_FLAGS = new Set(["token"]);
  */
 function flagValueToTag(value: unknown): string {
   if (typeof value === "boolean") {
-    return "true";
+    return String(value);
   }
   // Arrays serialize as comma-separated strings (matching existing behavior)
   if (Array.isArray(value)) {
