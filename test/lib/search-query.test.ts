@@ -14,7 +14,7 @@ import { describe, expect, test } from "bun:test";
 import { ValidationError } from "../../src/lib/errors.js";
 import { __testing, sanitizeQuery } from "../../src/lib/search-query.js";
 
-const { normalizeQuery } = __testing;
+const { normalizeQuery, transformUnquoted } = __testing;
 
 // ---------------------------------------------------------------------------
 // Passthrough (no operators)
@@ -390,6 +390,66 @@ describe("normalizeQuery: pre-parse text normalization", () => {
       // Two filters — each should be repaired independently
       expect(normalizeQuery("a:[1,) b:[2,)")).toBe("a:[1] b:[2]");
     });
+  });
+
+  describe("quote awareness", () => {
+    test("does not modify bracket content inside double quotes", () => {
+      expect(normalizeQuery('message:"error [500,] found"')).toBe(
+        'message:"error [500,] found"'
+      );
+    });
+
+    test("does not modify mismatched brackets inside quotes", () => {
+      expect(normalizeQuery('message:"codes [401,403,)"')).toBe(
+        'message:"codes [401,403,)"'
+      );
+    });
+
+    test("repairs unquoted filter but preserves quoted content", () => {
+      expect(
+        normalizeQuery('level:[error,warning,) message:"[trailing,]"')
+      ).toBe('level:[error,warning] message:"[trailing,]"');
+    });
+
+    test("handles multiple quoted regions", () => {
+      expect(normalizeQuery('a:"[1,]" level:[x,) b:"[2,]"')).toBe(
+        'a:"[1,]" level:[x] b:"[2,]"'
+      );
+    });
+
+    test("handles escaped quotes inside quoted strings", () => {
+      // The input has backslash-escaped quotes inside the quoted value:
+      // message:"say \"hello [500,]\"" level:[a,]
+      const input = 'message:"say \\"hello [500,]\\"" level:[a,]';
+      const expected = 'message:"say \\"hello [500,]\\"" level:[a]';
+      expect(normalizeQuery(input)).toBe(expected);
+    });
+  });
+});
+
+describe("transformUnquoted", () => {
+  const upper = (s: string) => s.toUpperCase();
+
+  test("transforms entire string when no quotes present", () => {
+    expect(transformUnquoted("hello world", upper)).toBe("HELLO WORLD");
+  });
+
+  test("preserves quoted segments", () => {
+    expect(transformUnquoted('hello "world" foo', upper)).toBe(
+      'HELLO "world" FOO'
+    );
+  });
+
+  test("handles string that is entirely quoted", () => {
+    expect(transformUnquoted('"hello world"', upper)).toBe('"hello world"');
+  });
+
+  test("handles adjacent quoted segments", () => {
+    expect(transformUnquoted('"a""b"', upper)).toBe('"a""b"');
+  });
+
+  test("handles empty string", () => {
+    expect(transformUnquoted("", upper)).toBe("");
   });
 });
 

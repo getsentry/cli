@@ -511,27 +511,82 @@ const BALANCED_BRACKET_RE = /\[[^\]]*\]/g;
 const TRAILING_LIST_COMMA_RE = /,\s*\]$/;
 
 /**
+ * Pattern that splits a query into alternating unquoted / quoted segments.
+ *
+ * Matches double-quoted strings (including escaped quotes inside them).
+ * Between matches is unquoted text that can be safely normalized.
+ */
+const QUOTED_SEGMENT_RE = /"(?:[^"\\]|\\.)*"/g;
+
+/**
  * Normalize a search query by applying a pipeline of text repairs.
  *
  * Runs on every query BEFORE PEG parsing. Each pass is a small, focused
  * transform that fixes a common agent/user mistake. The pipeline is ordered
  * from most common to least common pattern.
  *
+ * Quoted regions (`"..."`) are preserved verbatim — only unquoted text is
+ * normalized. This prevents `message:"error [500,] found"` from being
+ * corrupted.
+ *
  * Returns the original query unchanged if no repairs were applicable.
  */
 function normalizeQuery(query: string): string {
-  let q = query;
+  return transformUnquoted(query, (segment) => {
+    let q = segment;
 
-  // 1. Fix mismatched closing delimiters: `[a,b,)` → `[a,b]`
-  //    The `)` is a common typo/autocomplete artifact.
-  q = fixMismatchedBrackets(q);
+    // 1. Fix mismatched closing delimiters: `[a,b,)` → `[a,b]`
+    //    The `)` is a common typo/autocomplete artifact.
+    q = fixMismatchedBrackets(q);
 
-  // 2. Strip trailing commas in in-list: `[a,b,]` → `[a,b]`
-  q = stripTrailingListCommas(q);
+    // 2. Strip trailing commas in in-list: `[a,b,]` → `[a,b]`
+    q = stripTrailingListCommas(q);
 
-  // Future passes can be added here (e.g., quote balancing, date normalization)
+    // Future passes can be added here (e.g., date normalization)
 
-  return q;
+    return q;
+  });
+}
+
+/**
+ * Apply a transform function only to the unquoted segments of a query.
+ *
+ * Splits the query at double-quoted boundaries, applies `fn` to each
+ * unquoted segment, and re-assembles with the quoted segments untouched.
+ */
+function transformUnquoted(
+  query: string,
+  fn: (unquoted: string) => string
+): string {
+  // Fast path: no quotes → transform the whole string
+  if (!query.includes('"')) {
+    return fn(query);
+  }
+
+  const parts: string[] = [];
+  let lastIndex = 0;
+
+  // Reset the regex state for each call (global regex)
+  QUOTED_SEGMENT_RE.lastIndex = 0;
+  let match = QUOTED_SEGMENT_RE.exec(query);
+
+  while (match !== null) {
+    // Unquoted segment before this quoted match
+    if (match.index > lastIndex) {
+      parts.push(fn(query.slice(lastIndex, match.index)));
+    }
+    // Quoted segment — preserved as-is
+    parts.push(match[0]);
+    lastIndex = match.index + match[0].length;
+    match = QUOTED_SEGMENT_RE.exec(query);
+  }
+
+  // Trailing unquoted segment after last quote
+  if (lastIndex < query.length) {
+    parts.push(fn(query.slice(lastIndex)));
+  }
+
+  return parts.join("");
 }
 
 /**
@@ -573,4 +628,5 @@ export const __testing = {
   serializeNode,
   serializeNodes,
   normalizeQuery,
+  transformUnquoted,
 };
