@@ -1,3 +1,4 @@
+import { resolveOrgDisplayName } from "../../api/projects.js";
 import { createProjectWithDsn } from "../../api-client.js";
 import { setCachedDsn } from "../../db/dsn-cache.js";
 import { resolveOrCreateTeam } from "../../resolve-team.js";
@@ -91,7 +92,10 @@ export async function createSentryProject(
           source: "create",
           resolved: {
             orgSlug: context.org,
-            orgName: context.org, // best-effort — slug as fallback
+            orgName: resolveOrgDisplayName(
+              context.org,
+              project.organization?.name
+            ),
             projectSlug: project.slug,
             projectName: project.name,
           },

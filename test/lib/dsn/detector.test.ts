@@ -7,7 +7,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { clearDsnCache, getCachedDsn } from "../../../src/lib/db/dsn-cache.js";
+import {
+  clearDsnCache,
+  getCachedDsn,
+  setCachedDsn,
+} from "../../../src/lib/db/dsn-cache.js";
 import {
   detectAllDsns,
   detectDsn,
@@ -213,6 +217,34 @@ describe("DSN Detector (New Module)", () => {
       expect(updatedCache?.source).toBe("code");
     });
 
+    test("returns cached DSN with source 'create' without file verification", async () => {
+      const dsn = "https://abc123@o1.ingest.us.sentry.io/42";
+
+      // Seed the cache as if `sentry init` had just created the project
+      setCachedDsn(testDir, {
+        dsn,
+        projectId: "42",
+        source: "create",
+        resolved: {
+          orgSlug: "test-org",
+          orgName: "Test Org",
+          projectSlug: "my-project",
+          projectName: "My Project",
+        },
+      });
+
+      // detectDsn should return the cached entry (no file to verify)
+      const result = await detectDsn(testDir);
+      expect(result).not.toBeNull();
+      expect(result?.raw).toBe(dsn);
+      expect(result?.source).toBe("create");
+
+      // Resolved info from cache should be preserved
+      expect(result?.resolved?.orgSlug).toBe("test-org");
+      expect(result?.resolved?.orgName).toBe("Test Org");
+      expect(result?.resolved?.projectSlug).toBe("my-project");
+    });
+
     test("skips node_modules and dist directories", async () => {
       const nodeModulesDsn = "https://nm@o111.ingest.sentry.io/111";
       const distDsn = "https://dist@o222.ingest.sentry.io/222";
@@ -415,6 +447,34 @@ describe("DSN Detector (New Module)", () => {
       };
 
       expect(getDsnSourceDescription(dsn)).toBe("src/instrumentation.ts");
+    });
+
+    test("describes create source", () => {
+      const dsn = {
+        raw: "https://key@o1.ingest.sentry.io/1",
+        source: "create" as const,
+        protocol: "https",
+        publicKey: "key",
+        host: "o1.ingest.sentry.io",
+        projectId: "1",
+        orgId: "1",
+      };
+
+      expect(getDsnSourceDescription(dsn)).toBe("project creation");
+    });
+
+    test("describes inferred source", () => {
+      const dsn = {
+        raw: "https://key@o1.ingest.sentry.io/1",
+        source: "inferred" as const,
+        protocol: "https",
+        publicKey: "key",
+        host: "o1.ingest.sentry.io",
+        projectId: "1",
+        orgId: "1",
+      };
+
+      expect(getDsnSourceDescription(dsn)).toBe("directory name inference");
     });
   });
 });
