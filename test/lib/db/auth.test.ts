@@ -447,7 +447,9 @@ describe("hasStoredAuthCredentials memoization", () => {
     // Write directly to DB without going through setAuthToken
     // (simulates a code path the cache doesn't know about).
     const db = getDatabase();
-    db.query("INSERT OR REPLACE INTO auth (id, token) VALUES (1, 'sneaky')").run();
+    db.query(
+      "INSERT OR REPLACE INTO auth (id, token) VALUES (1, 'sneaky')"
+    ).run();
 
     // Cache still returns stale false
     expect(hasStoredAuthCredentials()).toBe(false);
