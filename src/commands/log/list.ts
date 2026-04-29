@@ -417,12 +417,31 @@ async function* generateFollowLogs<T extends LogLike>(
  * The generator returns when SIGINT fires — the wrapper's `finalize()`
  * callback handles closing the streaming table.
  */
+/**
+ * Consume a project-scoped follow-mode generator, yielding items individually.
+ *
+ * When `extraFields` is provided, the first non-empty batch is yielded as a
+ * {@link LogListResult} so the human renderer can discover the extra columns
+ * and create a table with the right headers. Subsequent items are yielded
+ * bare for proper JSONL streaming.
+ */
 async function* yieldFollowItems<T extends LogLike>(
-  generator: AsyncGenerator<T[], void, undefined>
-): AsyncGenerator<CommandOutput<T>, void, undefined> {
+  generator: AsyncGenerator<T[], void, undefined>,
+  extraFields?: string[]
+): AsyncGenerator<CommandOutput<LogOutput>, void, undefined> {
+  let contextSent = !extraFields?.length;
   for await (const batch of generator) {
-    for (const item of batch) {
-      yield new CommandOutput(item);
+    if (!contextSent && batch.length > 0) {
+      yield new CommandOutput<LogOutput>({
+        logs: batch,
+        hasMore: false,
+        extraFields,
+      });
+      contextSent = true;
+    } else {
+      for (const item of batch) {
+        yield new CommandOutput<LogOutput>(item);
+      }
     }
   }
 }
@@ -888,7 +907,7 @@ export const listCommand = buildListCommand(
             extractNew: (logs) => logs,
           });
 
-          yield* yieldFollowItems(generator);
+          yield* yieldFollowItems(generator, flags.fields);
           return;
         }
 
