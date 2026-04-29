@@ -7,7 +7,7 @@
  */
 
 import type { SentryContext } from "../context.js";
-import { API_MAX_PER_PAGE, queryEvents } from "../lib/api-client.js";
+import { queryEvents } from "../lib/api-client.js";
 import {
   buildProjectQuery,
   parseOrgProjectArg,
@@ -28,6 +28,7 @@ import {
   appendQueryHint,
   appendSortHint,
   buildListCommand,
+  LIST_MAX_LIMIT,
   PERIOD_ALIASES,
   paginationHint,
 } from "../lib/list-command.js";
@@ -155,12 +156,11 @@ function parseDataset(value: string): string {
 }
 
 /**
- * Parse --limit flag. Capped at `API_MAX_PER_PAGE` (100) since the Events
- * API silently caps `per_page` server-side and `queryEvents` does not yet
- * auto-paginate. Tracked for follow-up in #861.
+ * Parse --limit flag. Capped at {@link LIST_MAX_LIMIT} (1000).
+ * `queryEvents` auto-paginates when the limit exceeds the API's per-page cap.
  */
 function parseLimit(value: string): number {
-  return validateLimit(value, 1, API_MAX_PER_PAGE);
+  return validateLimit(value, 1, LIST_MAX_LIMIT);
 }
 
 // ---------------------------------------------------------------------------
@@ -461,7 +461,7 @@ export const exploreCommand = buildListCommand("explore", {
       limit: {
         kind: "parsed",
         parse: parseLimit,
-        brief: `Number of rows (1-${API_MAX_PER_PAGE})`,
+        brief: `Number of rows (1-${LIST_MAX_LIMIT})`,
         default: "25",
       },
       period: {
