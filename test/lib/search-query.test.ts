@@ -369,18 +369,6 @@ describe("normalizeQuery: pre-parse text normalization", () => {
     });
   });
 
-  describe("whitespace normalization", () => {
-    test("collapses runs of spaces", () => {
-      expect(normalizeQuery("is:unresolved  level:error")).toBe(
-        "is:unresolved level:error"
-      );
-    });
-
-    test("trims leading and trailing whitespace", () => {
-      expect(normalizeQuery("  is:unresolved  ")).toBe("is:unresolved");
-    });
-  });
-
   describe("passthrough", () => {
     test("leaves valid queries unchanged", () => {
       expect(normalizeQuery("level:[error,warning]")).toBe(
@@ -424,11 +412,6 @@ describe("sanitizeQuery: normalization integration", () => {
     expect(result).toBe(
       "is:unresolved error.http.status_code:[401,403,429,500]"
     );
-  });
-
-  test("collapses double-spaces in query", () => {
-    const result = sanitizeQuery("is:unresolved  level:error");
-    expect(result).toBe("is:unresolved level:error");
   });
 
   test("unfixable malformed query passes through to API", () => {

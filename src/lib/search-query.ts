@@ -496,16 +496,14 @@ export const SEARCH_SYNTAX_REFERENCE = {
 // ---------------------------------------------------------------------------
 
 /**
- * In-list filter with wrong closing delimiter or trailing comma.
- * Matches `key:[a,b,)` and `key:[a,b,]` — captures the inner values.
+ * In-list filter with wrong closing delimiter `)`.
+ * Matches `key:[a,b,)` — captures the inner values. Does NOT match `[a,b,]`
+ * (handled separately by {@link stripTrailingListCommas} via balanced brackets).
  */
-const MALFORMED_IN_LIST_RE = /\[([^[\]]*),\s*[\])](?=\s|$)/g;
+const MALFORMED_IN_LIST_RE = /\[([^[\]]*),\s*\)(?=\s|$)/g;
 
 /** Trailing comma at end of captured group content */
 const TRAILING_COMMA_RE = /,\s*$/;
-
-/** Runs of multiple spaces — collapsed to single space */
-const MULTI_SPACE_RE = / {2,}/g;
 
 /** Balanced `[...]` block — used to skip well-formed in-list filters */
 const BALANCED_BRACKET_RE = /\[[^\]]*\]/g;
@@ -532,8 +530,7 @@ function normalizeQuery(query: string): string {
   // 2. Strip trailing commas in in-list: `[a,b,]` → `[a,b]`
   q = stripTrailingListCommas(q);
 
-  // 3. Collapse runs of whitespace (agents sometimes double-space)
-  q = q.replace(MULTI_SPACE_RE, " ").trim();
+  // Future passes can be added here (e.g., quote balancing, date normalization)
 
   return q;
 }
