@@ -23,7 +23,13 @@ const noop = () => {
   /* suppress clack output */
 };
 
+let savedPlainOutput: string | undefined;
+
 beforeEach(() => {
+  // Force rich output so clack-plain.ts delegates to real clack (spied below)
+  savedPlainOutput = process.env.SENTRY_PLAIN_OUTPUT;
+  process.env.SENTRY_PLAIN_OUTPUT = "0";
+
   logMessageSpy = spyOn(clack.log, "message").mockImplementation(noop);
   outroSpy = spyOn(clack, "outro").mockImplementation(noop);
   cancelSpy = spyOn(clack, "cancel").mockImplementation(noop);
@@ -39,6 +45,12 @@ afterEach(() => {
   logInfoSpy.mockRestore();
   logWarnSpy.mockRestore();
   logErrorSpy.mockRestore();
+
+  if (savedPlainOutput === undefined) {
+    delete process.env.SENTRY_PLAIN_OUTPUT;
+  } else {
+    process.env.SENTRY_PLAIN_OUTPUT = savedPlainOutput;
+  }
 });
 
 describe("formatResult", () => {

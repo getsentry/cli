@@ -18,8 +18,13 @@ let getUncommittedFilesSpy: ReturnType<typeof spyOn>;
 let confirmSpy: ReturnType<typeof spyOn>;
 let isCancelSpy: ReturnType<typeof spyOn>;
 let logWarnSpy: ReturnType<typeof spyOn>;
+let savedPlainOutput: string | undefined;
 
 beforeEach(() => {
+  // Force rich output so clack-plain.ts delegates to real clack (spied below)
+  savedPlainOutput = process.env.SENTRY_PLAIN_OUTPUT;
+  process.env.SENTRY_PLAIN_OUTPUT = "0";
+
   isInsideWorkTreeSpy = spyOn(gitLib, "isInsideGitWorkTree");
   getUncommittedFilesSpy = spyOn(gitLib, "getUncommittedFiles");
   confirmSpy = spyOn(clack, "confirm").mockResolvedValue(true);
@@ -35,6 +40,12 @@ afterEach(() => {
   confirmSpy.mockRestore();
   isCancelSpy.mockRestore();
   logWarnSpy.mockRestore();
+
+  if (savedPlainOutput === undefined) {
+    delete process.env.SENTRY_PLAIN_OUTPUT;
+  } else {
+    process.env.SENTRY_PLAIN_OUTPUT = savedPlainOutput;
+  }
 });
 
 describe("isInsideGitWorkTree", () => {
