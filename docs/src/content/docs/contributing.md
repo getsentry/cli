@@ -70,6 +70,7 @@ cli/
 │   │   ├── explore.ts   # Query aggregate event data (Explore)
 │   │   ├── help.ts      # Help command
 │   │   ├── init.ts      # Initialize Sentry in your project (experimental)
+│   │   ├── local.ts     # Run a local Spotlight sidecar to capture dev SDK events
 │   │   └── schema.ts    # Browse the Sentry API schema
 │   ├── lib/            # Shared utilities
 │   └── types/          # TypeScript types and Zod schemas
