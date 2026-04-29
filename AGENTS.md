@@ -578,7 +578,7 @@ CliError (base, exitCode=1)
 ├── SeerError (exitCode=40–42 by reason — 'not_enabled' | 'no_budget' | 'ai_disabled')
 ├── TimeoutError (exitCode=31 — operation timed out)
 ├── UpgradeError (exitCode=50 — upgrade failures)
-└── WizardError (exitCode=61 — init wizard error)
+└── WizardError (exitCode=61–64 by workflow step — init wizard error)
 ```
 
 > Exit code ranges: 1x=auth, 2x=input/config, 3x=API/network, 4x=feature/billing,

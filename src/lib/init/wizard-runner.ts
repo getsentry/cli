@@ -12,7 +12,7 @@ import { MastraClient } from "@mastra/client-js";
 import { captureException, getTraceData } from "@sentry/node-core/light";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
-import { WizardError } from "../errors.js";
+import { EXIT, WizardError } from "../errors.js";
 import { terminalLink } from "../formatters/colors.js";
 import {
   colorTag,
@@ -586,7 +586,11 @@ function handleFinalResult(
       spinState.running = false;
     }
     formatError(result);
-    throw new WizardError("Workflow returned an error");
+
+    // Map workflow-internal exit codes to semantic EXIT.* constants
+    const workflowCode = result.result?.exitCode;
+    const exitCode = mapWorkflowExitCode(workflowCode);
+    throw new WizardError("Workflow returned an error", { exitCode });
   }
 
   if (spinState.running) {
@@ -594,6 +598,30 @@ function handleFinalResult(
     spinState.running = false;
   }
   formatResult(result);
+}
+
+/**
+ * Map a workflow-internal exit code to a semantic EXIT.* constant.
+ *
+ * The remote workflow uses its own code scheme (20=platform not detected,
+ * 30=deps failed, 40/41=codemod failed, 50=verification). We translate
+ * these into the CLI's decade-based exit codes so scripts can distinguish
+ * wizard failure categories.
+ */
+function mapWorkflowExitCode(workflowCode: number | undefined): number {
+  switch (workflowCode) {
+    case 20:
+      return EXIT.CONFIG;
+    case 30:
+      return EXIT.WIZARD_DEPS;
+    case 40:
+    case 41:
+      return EXIT.WIZARD_CODEMOD;
+    case 50:
+      return EXIT.WIZARD_VERIFY;
+    default:
+      return EXIT.WIZARD;
+  }
 }
 
 function extractSuspendPayload(

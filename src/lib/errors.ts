@@ -88,8 +88,14 @@ export const EXIT = {
   // 60–69: Command-specific
   /** Command produced output but should exit non-zero */
   OUTPUT_ERROR: 60,
-  /** Init wizard error */
+  /** Init wizard error (generic) */
   WIZARD: 61,
+  /** Init wizard: dependency installation failed */
+  WIZARD_DEPS: 62,
+  /** Init wizard: codemod plan or apply failed */
+  WIZARD_CODEMOD: 63,
+  /** Init wizard: user stopped after verification */
+  WIZARD_VERIFY: 64,
 } as const;
 
 /**
@@ -655,8 +661,11 @@ export class TimeoutError extends CliError {
 export class WizardError extends CliError {
   readonly rendered: boolean;
 
-  constructor(message: string, options?: { rendered?: boolean }) {
-    super(message, EXIT.WIZARD);
+  constructor(
+    message: string,
+    options?: { rendered?: boolean; exitCode?: number }
+  ) {
+    super(message, options?.exitCode ?? EXIT.WIZARD);
     this.name = "WizardError";
     this.rendered = options?.rendered ?? true;
   }

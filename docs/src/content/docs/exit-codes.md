@@ -42,6 +42,9 @@ react to failure categories without parsing stderr.
 | 51 | Device Flow Error | OAuth device authorization flow failed |
 | 60 | Output Error | Command produced output but the operation failed |
 | 61 | Wizard Error | Interactive setup wizard encountered an error |
+| 62 | Wizard Deps | Wizard dependency installation failed |
+| 63 | Wizard Codemod | Wizard codemod plan or apply failed |
+| 64 | Wizard Verify | User stopped wizard after verification step |
 
 ## Scripting Examples
 
@@ -88,9 +91,10 @@ elif 40 <= result.returncode <= 49:
   convention — the error response body is useful output. Parse the HTTP status
   from `--verbose` output or the JSON error body if you need to distinguish
   API error categories.
-- The `sentry init` wizard uses its own exit codes (10, 20, 30, 50) for
-  remote workflow step failures. These are internal to the wizard and wrapped
-  into exit code 61 (Wizard Error) before reaching the process exit.
+- The `sentry init` wizard maps its internal workflow exit codes to CLI
+  exit codes: platform not detected → 20 (Config), dependency install
+  failed → 62 (Wizard Deps), codemod failed → 63 (Wizard Codemod),
+  verification stopped → 64 (Wizard Verify), other → 61 (Wizard).
 - [Stricli](https://bloomberg.github.io/stricli/) (the CLI framework) uses
   negative exit codes (-5 to -1) for framework-level errors like unknown
   commands or invalid arguments. These appear as 251–255 in unsigned form.
