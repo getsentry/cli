@@ -1,6 +1,6 @@
 ---
 name: sentry-cli
-version: 0.29.1
+version: 0.30.0
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 requires:
   bins: ["sentry"]
@@ -45,6 +45,22 @@ The `sentry` CLI follows conventions from well-known tools — if you're familia
 - For mutations, verify the org/project context looks correct in the command output before proceeding with further changes
 - Never store or log authentication tokens — the CLI manages credentials automatically
 - If the CLI reports the wrong org/project, override with explicit `<org>/<project>` arguments
+
+### Exit Codes
+
+The CLI uses semantic exit codes. Key ranges for agents:
+
+| Range | Meaning | Agent Action |
+|-------|---------|-------------|
+| 0 | Success | Proceed normally |
+| 10–19 | Auth error | Prompt user to run `sentry auth login` |
+| 20–29 | Input error | Check command arguments and retry |
+| 30–39 | API error | Retry or report to user |
+| 40–49 | Feature unavailable | Inform user about plan/settings |
+| 50–59 | Operation error | Report to user |
+| 60–69 | Command-specific | Check stderr for details |
+
+See [Exit Codes](/exit-codes/) for the complete reference.
 
 ### Workflow Patterns
 
@@ -377,6 +393,14 @@ Work with Sentry teams
 - `sentry team list <org/project>` — List teams
 
 → Full flags and examples: `references/team.md`
+
+### Explore
+
+Query aggregate event data (Explore)
+
+- `sentry explore <target>` — Query aggregate event data (Explore)
+
+→ Full flags and examples: `references/explore.md`
 
 ### Log
 

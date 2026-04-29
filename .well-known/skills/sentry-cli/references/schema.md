@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-schema
-version: 0.29.1
+version: 0.30.0
 description: Browse the Sentry API schema
 requires:
   bins: ["sentry"]

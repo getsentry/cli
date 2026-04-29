@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-cli
-version: 0.29.1
+version: 0.30.0
 description: CLI-related commands
 requires:
   bins: ["sentry"]

@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-sourcemap
-version: 0.29.1
+version: 0.30.0
 description: Manage sourcemaps
 requires:
   bins: ["sentry"]
@@ -18,6 +18,7 @@ Inject debug IDs into JavaScript files and sourcemaps
 **Flags:**
 - `--ext <value> - Comma-separated file extensions to process (default: .js,.cjs,.mjs)`
 - `--dry-run - Show what would be modified without writing`
+- `--allow-empty - Exit successfully when no JS + sourcemap pairs are found (default: error out to catch silent build misconfigurations)`
 
 **Examples:**
 
@@ -39,6 +40,7 @@ Upload sourcemaps to Sentry
 **Flags:**
 - `--release <value> - Release version to associate with the upload`
 - `--url-prefix <value> - URL prefix for uploaded files (default: ~/) - (default: "~/")`
+- `--allow-empty - Exit successfully when no JS + sourcemap pairs are found (default: error out to catch silent build misconfigurations)`
 
 **Examples:**
 
@@ -51,6 +53,8 @@ sentry sourcemap upload ./dist --release 1.0.0
 
 # Set a custom URL prefix
 sentry sourcemap upload ./dist --url-prefix '~/static/js/'
+
+sentry sourcemap upload ./dist --allow-empty
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
