@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-explore
-version: 0.30.0
+version: 0.31.0-dev.0
 description: Query aggregate event data (Explore)
 requires:
   bins: ["sentry"]

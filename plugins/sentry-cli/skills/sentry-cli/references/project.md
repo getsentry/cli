@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-project
-version: 0.30.0
+version: 0.31.0-dev.0
 description: Work with Sentry projects
 requires:
   bins: ["sentry"]
