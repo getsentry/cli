@@ -506,7 +506,7 @@ export const SEARCH_SYNTAX_REFERENCE = {
  * bracket, e.g., `key:[val1,val2,]` → `key:[val1,val2]`.
  * Also catches wrong closing delimiter: `key:[val1,val2,)` → `key:[val1,val2]`.
  */
-const TRAILING_COMMA_IN_LIST_RE = /\[([^\[\]]*),\s*[\])](?=\s|$)/g;
+const TRAILING_COMMA_IN_LIST_RE = /\[([^[\]]*),\s*[\])](?=\s|$)/g;
 
 /** Trailing comma at end of captured group content */
 const TRAILING_COMMA_RE = /,\s*$/;
