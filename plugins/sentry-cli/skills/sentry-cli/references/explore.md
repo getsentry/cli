@@ -20,7 +20,7 @@ Query aggregate event data (Explore)
 - `-d, --dataset <value> - Dataset to query (errors, spans, metrics, logs) - (default: "errors")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-s, --sort <value> - Sort field (prefix with - for desc, e.g., "-count()")`
-- `-n, --limit <value> - Number of rows (1-100) - (default: "25")`
+- `-n, --limit <value> - Number of rows (1-1000) - (default: "25")`
 - `-t, --period <value> - Time range: "7d", "2026-03-01..2026-04-01", ">=2026-03-01" - (default: "24h")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`

@@ -219,4 +219,153 @@ describe("queryEvents", () => {
 
     expect(result.nextCursor).toBeUndefined();
   });
+
+  // ---------------------------------------------------------------------------
+  // Auto-pagination tests (limit > API_MAX_PER_PAGE)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Helper to mock sequential fetch responses for multi-page tests.
+   * Each call to fetch returns the next response in the queue.
+   */
+  function mockSequential(
+    responses: Array<{ body: unknown; headers?: Record<string, string> }>
+  ): { getCapturedUrls: () => string[] } {
+    const capturedUrls: string[] = [];
+    let callIndex = 0;
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input!, init);
+      capturedUrls.push(req.url);
+
+      const resp = responses[callIndex]!;
+      callIndex += 1;
+
+      return new Response(JSON.stringify(resp.body), {
+        status: 200,
+        headers: { "Content-Type": "application/json", ...resp.headers },
+      });
+    });
+
+    return { getCapturedUrls: () => capturedUrls };
+  }
+
+  /** Generate N rows of fake event data */
+  function makeRows(n: number): Record<string, unknown>[] {
+    return Array.from({ length: n }, (_, i) => ({
+      title: `Error ${i}`,
+      "count()": 100 - i,
+    }));
+  }
+
+  const PAGE_META = {
+    fields: { title: "string", "count()": "integer" },
+    units: {},
+  };
+
+  test("auto-paginates when limit exceeds API_MAX_PER_PAGE", async () => {
+    const { getCapturedUrls } = mockSequential([
+      {
+        body: { data: makeRows(100), meta: PAGE_META },
+        headers: {
+          Link: `<https://us.sentry.io/api/0/next/>; rel="next"; results="true"; cursor="0:100:0"`,
+        },
+      },
+      {
+        body: { data: makeRows(50), meta: PAGE_META },
+        headers: {
+          Link: `<https://us.sentry.io/api/0/next/>; rel="next"; results="false"; cursor=""`,
+        },
+      },
+    ]);
+
+    const result = await queryEvents("my-org", {
+      fields: ["title", "count()"],
+      limit: 150,
+    });
+
+    expect(result.data.data).toHaveLength(150);
+    expect(result.data.meta?.fields).toEqual(PAGE_META.fields);
+    expect(result.nextCursor).toBeUndefined();
+    expect(getCapturedUrls()).toHaveLength(2);
+  });
+
+  test("trims results and drops nextCursor when overshoot", async () => {
+    mockSequential([
+      {
+        body: { data: makeRows(100), meta: PAGE_META },
+        headers: {
+          Link: `<https://us.sentry.io/api/0/next/>; rel="next"; results="true"; cursor="0:100:0"`,
+        },
+      },
+      {
+        body: { data: makeRows(100), meta: PAGE_META },
+        headers: {
+          Link: `<https://us.sentry.io/api/0/next/>; rel="next"; results="true"; cursor="0:200:0"`,
+        },
+      },
+    ]);
+
+    const result = await queryEvents("my-org", {
+      fields: ["title", "count()"],
+      limit: 120,
+    });
+
+    expect(result.data.data).toHaveLength(120);
+    expect(result.nextCursor).toBeUndefined();
+  });
+
+  test("single-page fast path when limit <= API_MAX_PER_PAGE", async () => {
+    const { getCapturedUrls } = mockSequential([
+      {
+        body: { data: makeRows(50), meta: PAGE_META },
+        headers: {
+          Link: `<https://us.sentry.io/api/0/next/>; rel="next"; results="false"; cursor=""`,
+        },
+      },
+    ]);
+
+    const result = await queryEvents("my-org", {
+      fields: ["title"],
+      limit: 50,
+    });
+
+    expect(result.data.data).toHaveLength(50);
+    expect(getCapturedUrls()).toHaveLength(1);
+    expect(getCapturedUrls()[0]).toContain("per_page=50");
+  });
+
+  test("preserves meta from first page across multi-page fetch", async () => {
+    const firstPageMeta = {
+      fields: { title: "string", "count()": "integer" },
+      units: { "count()": null },
+    };
+    const secondPageMeta = {
+      fields: { title: "string", "count()": "integer" },
+      units: { "count()": null },
+    };
+
+    mockSequential([
+      {
+        body: { data: makeRows(100), meta: firstPageMeta },
+        headers: {
+          Link: `<https://us.sentry.io/api/0/next/>; rel="next"; results="true"; cursor="0:100:0"`,
+        },
+      },
+      {
+        body: { data: makeRows(50), meta: secondPageMeta },
+        headers: {
+          Link: `<https://us.sentry.io/api/0/next/>; rel="next"; results="false"; cursor=""`,
+        },
+      },
+    ]);
+
+    const result = await queryEvents("my-org", {
+      fields: ["title", "count()"],
+      limit: 150,
+    });
+
+    // Meta should come from the first page
+    expect(result.data.meta).toEqual(firstPageMeta);
+  });
 });
