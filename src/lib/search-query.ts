@@ -346,7 +346,6 @@ export function sanitizeQuery(query: string | undefined): string | undefined {
   // These fix common patterns that agents/users produce, regardless of
   // whether the PEG parser would accept them.
   const normalized = normalizeQuery(query);
-  const effectiveQuery = normalized;
 
   let nodes: SearchNode[];
   try {
@@ -394,7 +393,7 @@ export function sanitizeQuery(query: string | undefined): string | undefined {
     return sanitized;
   }
 
-  return effectiveQuery;
+  return normalized;
 }
 
 /**
