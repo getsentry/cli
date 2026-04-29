@@ -25,15 +25,24 @@ export function isAllDigits(str: string): boolean {
  * Aligned with Sentry's canonical implementation:
  * https://github.com/getsentry/sentry/blob/master/static/app/utils/slugify.tsx
  *
- * @example slugify("My Cool App") // "my-cool-app"
- * @example slugify("my-app")      // "my-app"
- * @example slugify("Café Project") // "cafe-project"
- * @example slugify("my_app")      // "my_app"
+ * Diverges from Sentry's frontend canonical version in one place: `/` and `\`
+ * are normalized to a space before invalid-character stripping, so structural
+ * separators (npm scopes, monorepo path segments) become hyphens instead of
+ * being silently dropped. Without this, `@scope/pkg` would slugify to
+ * `scopepkg` instead of `scope-pkg`.
+ *
+ * @example slugify("My Cool App")    // "my-cool-app"
+ * @example slugify("my-app")         // "my-app"
+ * @example slugify("Café Project")   // "cafe-project"
+ * @example slugify("my_app")         // "my_app"
+ * @example slugify("@t3tools/web")   // "t3tools-web"
+ * @example slugify("packages/api")   // "packages-api"
  */
 export function slugify(name: string): string {
   return name
     .normalize("NFKD")
     .toLowerCase()
+    .replace(/[\\/]+/g, " ")
     .replace(/[^a-z0-9_\s-]/g, "")
     .replace(/[-\s]+/g, "-")
     .replace(/^-|-$/g, "");
