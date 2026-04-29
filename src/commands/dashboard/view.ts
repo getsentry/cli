@@ -97,6 +97,11 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
 
 /**
  * Build the DashboardViewData from a dashboard and its widget query results.
+ *
+ * The returned object is also passed through {@link tryPreRenderTui}
+ * before being yielded so the OpenTUI string lives on the data
+ * itself — keeps the human renderer synchronous while letting us
+ * await the async OpenTUI rendering in the command body.
  */
 function buildViewData(
   dashboard: {
@@ -132,6 +137,53 @@ function buildViewData(
       },
     })),
   };
+}
+
+/**
+ * Try to pre-render the dashboard with OpenTUI. Returns the
+ * passed-in data with `rendered` populated on success; returns
+ * the original data unchanged on failure (e.g. on the npm/Node
+ * distribution where OpenTUI's native bindings can't load).
+ *
+ * Skipped entirely in JSON mode — JSON output uses the raw data
+ * shape, so there's no point spending the render cycles.
+ *
+ * **Lazy import.** `dashboard-tui.js` is loaded via dynamic
+ * `await import()` (rather than a top-level `import` statement)
+ * so its module-level `with { type: "file" }` resolution and
+ * heavy OpenTUI dependencies never load when this command isn't
+ * the one being run. Tests that walk the Stricli route map (via
+ * `app.ts`) would otherwise eagerly evaluate the OpenTUI side
+ * effects and fail with module-cache-collision errors the same
+ * way the wizard's `OpenTuiUI` did before its `?bridge=1` fix.
+ */
+async function tryPreRenderTui(
+  data: DashboardViewData,
+  flags: ViewFlags
+): Promise<DashboardViewData> {
+  if (flags.json) {
+    return data;
+  }
+  try {
+    const { renderDashboardTui } = await import(
+      "../../lib/formatters/dashboard-tui.js"
+    );
+    const rendered = await renderDashboardTui(data);
+    return { ...data, rendered };
+  } catch (err) {
+    // Fall back to the plain-text formatter. The human renderer
+    // checks `data.rendered === undefined` and uses
+    // `formatDashboardWithData` in that case. We log at debug
+    // level so a missing-binding diagnosis is recoverable; we
+    // don't surface to the user because the fallback is fully
+    // functional.
+    logger.debug(
+      `OpenTUI dashboard render unavailable, using plain-text fallback: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+    return data;
+  }
 }
 
 /**
@@ -172,6 +224,11 @@ export const viewCommand = buildCommand({
   },
   output: {
     human: createDashboardViewRenderer,
+    // `rendered` is the pre-baked OpenTUI ANSI string that the
+    // human renderer prints directly. Strip it from JSON output —
+    // machine consumers want the structured widget data, not a
+    // pre-formatted screen capture.
+    jsonExclude: ["rendered"],
   },
   parameters: {
     positional: {
@@ -277,11 +334,18 @@ export const viewCommand = buildCommand({
             { ...widgetTimeOpts, periodSeconds }
           );
 
-          // Build output data before clearing so clear→render is instantaneous
-          const viewData = buildViewData(dashboard, widgetData, widgets, {
-            period: formatTimeRangeFlag(timeRange),
-            url,
-          });
+          // Build output data before clearing so clear→render is
+          // instantaneous. `tryPreRenderTui` runs the OpenTUI
+          // pipeline (Bun binary) or short-circuits to the
+          // plain-text fallback (Node) — either way we yield a
+          // `CommandOutput` carrying ready-to-print state.
+          const viewData = await tryPreRenderTui(
+            buildViewData(dashboard, widgetData, widgets, {
+              period: formatTimeRangeFlag(timeRange),
+              url,
+            }),
+            flags
+          );
 
           if (!isFirstRender) {
             yield new ClearScreen();
@@ -309,10 +373,13 @@ export const viewCommand = buildCommand({
     );
 
     yield new CommandOutput(
-      buildViewData(dashboard, widgetData, widgets, {
-        period: formatTimeRangeFlag(timeRange),
-        url,
-      })
+      await tryPreRenderTui(
+        buildViewData(dashboard, widgetData, widgets, {
+          period: formatTimeRangeFlag(timeRange),
+          url,
+        }),
+        flags
+      )
     );
     return { hint: `Dashboard: ${url}` };
   },

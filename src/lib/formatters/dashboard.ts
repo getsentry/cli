@@ -40,6 +40,19 @@ export type DashboardViewData = {
   dateCreated?: string;
   environment?: string[];
   widgets: DashboardViewWidget[];
+  /**
+   * Pre-rendered terminal output produced by the OpenTUI React app
+   * in `dashboard-tui.ts`. Set in the `dashboard view` command's
+   * async `func()` when OpenTUI is available (Bun-compiled
+   * binary); left undefined when OpenTUI fails to load (npm/Node
+   * distribution), in which case the human renderer falls back to
+   * the plain-text framebuffer in this module.
+   *
+   * Excluded from JSON output via `jsonExclude` on the command's
+   * output config so machine-readable mode isn't polluted with
+   * a pre-rendered ANSI string.
+   */
+  rendered?: string;
 };
 
 /** A widget with its resolved data result */
@@ -1536,8 +1549,16 @@ function renderPlaceholderContent(message: string): string[] {
  *
  * Returns raw content lines (no title, no border). The caller handles
  * border wrapping and height enforcement.
+ *
+ * Exported for the OpenTUI dashboard app (`dashboard-app.tsx`),
+ * which lays out borders and grid via OpenTUI's flexbox primitives
+ * but reuses these per-widget content helpers as-is. The returned
+ * lines may contain chalk-styled ANSI escape sequences when
+ * `isPlainOutput()` is false; OpenTUI's `<text>` strips those, so
+ * the OpenTUI side calls `stripAnsi()` before rendering and applies
+ * its own colors via `fg` props.
  */
-function renderContentLines(opts: {
+export function renderContentLines(opts: {
   widget: DashboardViewWidget;
   innerWidth: number;
   contentHeight: number;
@@ -1852,6 +1873,14 @@ export function formatDashboardWithData(data: DashboardViewData): string {
 export function createDashboardViewRenderer(): HumanRenderer<DashboardViewData> {
   return {
     render(data: DashboardViewData): string {
+      // When the command pre-rendered with OpenTUI (Bun binary),
+      // we use that directly. The npm/Node distribution can't
+      // load OpenTUI's native bindings; in that case
+      // `data.rendered` is undefined and we fall through to the
+      // legacy plain-text framebuffer.
+      if (data.rendered !== undefined) {
+        return data.rendered;
+      }
       return formatDashboardWithData(data);
     },
 

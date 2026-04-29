@@ -293,17 +293,24 @@ await Bun.write("./dist/index.d.cts", TYPE_DECLARATIONS);
 console.log("  -> dist/bin.cjs (CLI wrapper)");
 console.log("  -> dist/index.d.cts (type declarations)");
 
-// Clean up the `opentui-app.tsx` sidecar that the text-import-plugin
-// drops into `dist/` when it sees the `with { type: "file" }` import
-// in `src/lib/init/ui/opentui-ui.ts`. The npm distribution doesn't
-// run the OpenTuiUI factory at all (it's gated to the Bun binary),
-// so the sidecar is unused — and it's not in `package.json#files`
-// either, so it wouldn't ship even without this cleanup. Removing
-// it just keeps the local `dist/` directory tidy.
-try {
-  await unlink("./dist/opentui-app.tsx");
-} catch {
-  // Sidecar may not exist (e.g. plugin path not exercised) — fine.
+// Clean up the `*-app.tsx` sidecars that the text-import-plugin
+// drops into `dist/` when it sees the `with { type: "file" }`
+// imports in `src/lib/init/ui/opentui-ui.ts` (wizard) and
+// `src/lib/formatters/dashboard-tui.ts` (dashboard view). The npm
+// distribution gates both factories to the Bun binary, so the
+// sidecars are unused at runtime — and they're not in
+// `package.json#files` either, so they wouldn't ship even without
+// this cleanup. Removing them just keeps the local `dist/`
+// directory tidy.
+for (const sidecar of [
+  "./dist/opentui-app.tsx",
+  "./dist/dashboard-app.tsx",
+]) {
+  try {
+    await unlink(sidecar);
+  } catch {
+    // Sidecar may not exist (e.g. plugin path not exercised) — fine.
+  }
 }
 
 // Calculate bundle size (only the main bundle, not source maps)

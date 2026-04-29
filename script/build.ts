@@ -508,11 +508,11 @@ async function build(): Promise<void> {
   await uploadSourcemapToSentry();
 
   // Clean up intermediate bundle (only the binaries are artifacts).
-  // The `opentui-app.tsx` copy comes from the text-import-plugin's
-  // `with { type: "file" }` handling — it gets embedded into the
-  // compiled binary, so the sidecar copy is no longer needed once
+  // The `*-app.tsx` copies come from the text-import-plugin's
+  // `with { type: "file" }` handling — they get embedded into the
+  // compiled binary, so the sidecar copies aren't needed once
   // every target has compiled.
-  await $`rm -f ${BUNDLE_JS} ${SOURCEMAP_FILE} dist-bin/opentui-app.tsx`;
+  await $`rm -f ${BUNDLE_JS} ${SOURCEMAP_FILE} dist-bin/opentui-app.tsx dist-bin/dashboard-app.tsx`;
 
   // Summary
   console.log(`\n${"=".repeat(40)}`);
