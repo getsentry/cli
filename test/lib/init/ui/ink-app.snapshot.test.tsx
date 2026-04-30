@@ -46,6 +46,8 @@ const TIP_HEADER_RE = /Did you know\?/;
 const PROGRESS_HEADER_RE = /Progress/;
 const PROGRESS_HEADER_BOUND_RE = /Progress\b/;
 const DIVIDER_RUNS_RE = /(─+)/g;
+const FILES_HEADER_PINNED_RE = /Files analyzed\s+\d+\/\d+/;
+const FILES_HEADER_UNPINNED_RE = /Files analyzed\s+↑\s+\d+\/\d+/;
 
 const FRAME_SETTLE_MS = 80;
 
@@ -190,6 +192,41 @@ describe("Ink App snapshot", () => {
     const dividerLength = unique[1] ?? 0;
     expect(dividerLength).toBeGreaterThanOrEqual(50);
     expect(dividerLength).toBeLessThanOrEqual(56);
+  });
+
+  test("FilesPanel renders scrollbar when content exceeds viewport", async () => {
+    // Drop ~30 file paths into the store so the read-tree exceeds
+    // the panel's viewport (capped at MAX_FILE_ROWS = 14, minus 1
+    // for the header). The visual scrollbar should appear; with
+    // the panel pinned to the bottom (default state), the `█`
+    // thumb sits at the bottom of the track.
+    const fewStore = new WizardStore({ bannerRows: bannerRows() });
+    fewStore.recordFilesReading(["package.json", "src/index.ts"]);
+    const fewFrame = (await renderApp(fewStore, 120)).allOutput();
+    const baselineThumbs = (fewFrame.match(/█/g) ?? []).length;
+
+    const manyStore = new WizardStore({ bannerRows: bannerRows() });
+    const paths: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      paths.push(`src/dir${Math.floor(i / 5)}/file${i}.ts`);
+    }
+    manyStore.recordFilesReading(paths);
+    manyStore.markFilesAnalyzed(paths.slice(0, 18));
+    const manyFrame = (await renderApp(manyStore, 120)).allOutput();
+    const scrollingThumbs = (manyFrame.match(/█/g) ?? []).length;
+
+    // The banner art uses `█` glyphs too (same codepoint as the
+    // scrollbar thumb), so we can't assert presence/absence
+    // against a fixed pattern. But the many-files frame must
+    // contain MORE `█`s than the few-files frame — those extras
+    // are the scrollbar thumb cells.
+    expect(scrollingThumbs).toBeGreaterThan(baselineThumbs);
+    // Header shows pinned-to-bottom format ("Files analyzed
+    // N/M", no `↑` prefix). The unpinned format only appears
+    // after the user scrolls back manually — keyboard scrolling
+    // can't be exercised from `bun test` without a raw-mode TTY.
+    expect(manyFrame).toMatch(FILES_HEADER_PINNED_RE);
+    expect(manyFrame).not.toMatch(FILES_HEADER_UNPINNED_RE);
   });
 
   test("Ctrl+C path uses requestCancel via store, never bare process.exit", () => {

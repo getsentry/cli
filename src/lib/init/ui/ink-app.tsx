@@ -48,7 +48,7 @@
 
 import { Box, Text, useInput, useStdout } from "ink";
 import Spinner from "ink-spinner";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   buildFileTree,
   buildReadTree,
@@ -201,6 +201,7 @@ export function App({ store }: AppProps): React.ReactNode {
         {showSidebar ? (
           <Sidebar
             filesRead={snapshot.filesRead}
+            hasActivePrompt={snapshot.prompt !== null}
             steps={snapshot.steps}
             terminalRows={rows}
             tipIndex={snapshot.tipIndex}
@@ -741,11 +742,13 @@ function Sidebar({
   steps,
   filesRead,
   terminalRows,
+  hasActivePrompt,
 }: {
   tipIndex: number;
   steps: StepEntry[];
   filesRead: FileReadEntry[];
   terminalRows: number;
+  hasActivePrompt: boolean;
 }): React.ReactNode {
   // Reserve space for the tip card (~9 rows including its border)
   // and the progress checklist (steps + 3 rows of border + title).
@@ -764,7 +767,11 @@ function Sidebar({
     <Box flexDirection="column" flexShrink={0} width={SIDEBAR_WIDTH}>
       <TipPanel tipIndex={tipIndex} />
       <ProgressPanel steps={steps} />
-      <FilesPanel filesRead={filesRead} maxRows={fileBudget} />
+      <FilesPanel
+        filesRead={filesRead}
+        hasActivePrompt={hasActivePrompt}
+        maxRows={fileBudget}
+      />
     </Box>
   );
 }
@@ -881,17 +888,26 @@ function progressStyle(entry: StepEntry): {
 }
 
 /**
- * Read-files tree, rendered inside a fixed-height tail-`f`-style
- * viewport: the most recent rows are always visible, with a
- * `↑ N earlier` indicator at the top when older rows have scrolled
- * out of view.
+ * Read-files tree, rendered inside a fixed-height viewport with a
+ * visual scrollbar on the right edge and keyboard-driven scroll-back.
  *
- * Why no real scroller? Ink doesn't ship a native scrollbox
- * primitive, and a third-party one would mean wiring focus
- * management (PgUp/PgDn while a prompt is mounted, etc.) — too
- * much complexity for what's effectively a status indicator.
- * Tail-window UX matches what the user actually wants: see what
- * the wizard is reading right now.
+ * Auto-follow ("pinned to bottom") mode is the default — newly-read
+ * files always come into view, like `tail -f`. The user can scroll
+ * back through history with arrow keys / PgUp / PgDn / Home; pressing
+ * End or Esc re-pins to the bottom. While unpinned, new file reads
+ * don't snap the viewport; the user keeps their place in the
+ * scrollback.
+ *
+ * Keyboard:
+ *   - ↑ / ↓     — scroll one row
+ *   - PgUp / PgDn — scroll one viewport
+ *   - Home      — jump to oldest entry
+ *   - End / Esc — re-pin to latest (bottom)
+ *
+ * The keyboard handler is gated on `!hasActivePrompt` so it doesn't
+ * fight the active select/multi-select prompt's own `useInput`. When
+ * a prompt is up, the panel still renders correctly — the user just
+ * can't scroll until the prompt resolves.
  *
  * Visual rules:
  *   - Directories: muted gray box-drawing branches + name with `/`.
@@ -899,6 +915,9 @@ function progressStyle(entry: StepEntry): {
  *     normal-color filename. The eye picks these out instantly.
  *   - Analyzed (`status === "analyzed"`): green `✓` glyph, dimmed
  *     filename. Done work recedes; in-flight work pops.
+ *   - Right-edge scrollbar: full-height `│` track with a `█` thumb
+ *     showing the visible window's position relative to total rows.
+ *     Hidden when content fits the viewport.
  *
  * Hidden until at least one file has been recorded — the empty box
  * would just be visual noise during the auth/discover phase.
@@ -906,27 +925,137 @@ function progressStyle(entry: StepEntry): {
 function FilesPanel({
   filesRead,
   maxRows,
+  hasActivePrompt,
 }: {
   filesRead: FileReadEntry[];
   maxRows: number;
+  hasActivePrompt: boolean;
 }): React.ReactNode {
+  // Scroll state: `pinnedToBottom` true means viewport tracks the
+  // newest rows automatically as files arrive. `offset` is the
+  // number of rows scrolled UP from the bottom — only meaningful
+  // when not pinned. Both are pure UI state, owned by this
+  // component (not the wizard store) — they're "what the user is
+  // looking at", not "what the wizard is doing".
+  const [pinnedToBottom, setPinnedToBottom] = useState(true);
+  const [offset, setOffset] = useState(0);
+
+  const tree = buildReadTree(filesRead);
+  const rows = flattenTree(tree);
+  const totalRows = rows.length;
+
+  // Header takes 1 row of the vertical budget; reserve it. The
+  // remainder is the viewport for file rows.
+  const viewport = Math.max(1, maxRows - 1);
+  const canScroll = totalRows > viewport;
+
+  // Clamp offset to valid range — protects against shrinking the
+  // tree (e.g. a re-scan with fewer files) leaving a stale offset
+  // beyond the new totalRows.
+  const maxOffset = Math.max(0, totalRows - viewport);
+  const effectiveOffset = pinnedToBottom ? 0 : Math.min(offset, maxOffset);
+
+  // Visible window: when pinned, the last `viewport` rows. When
+  // scrolled up by `effectiveOffset`, slide the window up by that
+  // many rows from the bottom.
+  const sliceEnd = totalRows - effectiveOffset;
+  const sliceStart = Math.max(0, sliceEnd - viewport);
+  const visible = rows.slice(sliceStart, sliceEnd);
+
+  // Track the previous totalRows so we can detect "new files
+  // arrived while the user was scrolled up" — in that case we keep
+  // the user's place by bumping `offset` to compensate. Without
+  // this, new arrivals would shift the user's view by the number
+  // of new rows.
+  //
+  // Also clamps `offset` to the new `maxOffset` when the tree
+  // shrinks (e.g. a re-scan with fewer files): without the clamp,
+  // a stale offset beyond the new maxOffset would still display
+  // correctly via `effectiveOffset`, but the underlying state
+  // would be wrong and one PgDn would feel inert.
+  const prevTotalRef = useRef(totalRows);
+  useEffect(() => {
+    const prev = prevTotalRef.current;
+    prevTotalRef.current = totalRows;
+    if (pinnedToBottom) {
+      return;
+    }
+    const newMax = Math.max(0, totalRows - viewport);
+    if (totalRows > prev) {
+      setOffset((current) => Math.min(newMax, current + (totalRows - prev)));
+    } else if (totalRows < prev) {
+      setOffset((current) => Math.min(current, newMax));
+    }
+  }, [totalRows, viewport, pinnedToBottom]);
+
+  useInput(
+    (_input, key) => {
+      if (!canScroll) {
+        return;
+      }
+      if (key.upArrow) {
+        setPinnedToBottom(false);
+        setOffset((current) => Math.min(maxOffset, current + 1));
+        return;
+      }
+      if (key.downArrow) {
+        setOffset((current) => {
+          const next = Math.max(0, current - 1);
+          if (next === 0) {
+            setPinnedToBottom(true);
+          }
+          return next;
+        });
+        return;
+      }
+      if (key.pageUp) {
+        setPinnedToBottom(false);
+        setOffset((current) => Math.min(maxOffset, current + viewport));
+        return;
+      }
+      if (key.pageDown) {
+        setOffset((current) => {
+          const next = Math.max(0, current - viewport);
+          if (next === 0) {
+            setPinnedToBottom(true);
+          }
+          return next;
+        });
+        return;
+      }
+      // Home → jump to oldest (top of scrollback). End / Esc →
+      // re-pin to latest (bottom). Esc doubles as "stop scrolling"
+      // because users reach for it instinctively to undo a
+      // navigation mistake.
+      if (key.home) {
+        setPinnedToBottom(false);
+        setOffset(maxOffset);
+        return;
+      }
+      if (key.end || key.escape) {
+        setPinnedToBottom(true);
+        setOffset(0);
+      }
+    },
+    { isActive: !hasActivePrompt }
+  );
+
+  // The store's `filesRead` array is mutated by the bridge — guard
+  // against rendering an empty panel during the brief window
+  // before the first `recordFilesReading` call.
   if (filesRead.length === 0) {
     return null;
   }
-  const tree = buildReadTree(filesRead);
-  const rows = flattenTree(tree);
-  // The header takes 1 row of the panel's vertical budget; reserve
-  // it so the file rows don't get squeezed.
-  const fileRowBudget = Math.max(1, maxRows - 1);
-  const truncated = rows.length > fileRowBudget;
-  // When truncated, the truncation indicator itself takes one row,
-  // so the actual visible file count is one less.
-  const visibleFileRows = truncated ? fileRowBudget - 1 : fileRowBudget;
-  const visible = truncated ? rows.slice(rows.length - visibleFileRows) : rows;
-  const hidden = rows.length - visible.length;
+
   const analyzedCount = filesRead.filter(
     (entry) => entry.status === "analyzed"
   ).length;
+  // Pad out the visible window so the panel stays a consistent
+  // height even when totalRows < viewport. Without this, the
+  // scrollbar column on the right would render shorter than the
+  // content column, leaving a ragged right edge.
+  const padding = Math.max(0, viewport - visible.length);
+
   return (
     <Box
       borderColor={MUTED}
@@ -940,16 +1069,78 @@ function FilesPanel({
           Files analyzed
         </Text>
         <Text color={MUTED}>
+          {pinnedToBottom ? "" : "↑ "}
           {analyzedCount}/{filesRead.length}
         </Text>
       </Box>
-      {truncated ? <Text color={MUTED}>↑ {hidden} earlier</Text> : null}
-      {visible.map((row, i) => (
-        // Tree rows are positionally stable for a given filesRead
-        // snapshot — `buildReadTree` walks `filesRead` in insertion
-        // order and never reorders, so the index makes a fine key.
-        // biome-ignore lint/suspicious/noArrayIndexKey: positional read-tree rows
-        <ReadTreeLine key={i} row={row} />
+      <Box flexDirection="row">
+        <Box flexDirection="column" flexGrow={1}>
+          {visible.map((row, i) => (
+            // Tree rows are positionally stable for a given
+            // filesRead snapshot — `buildReadTree` walks
+            // `filesRead` in insertion order and never reorders,
+            // so the index makes a fine key.
+            // biome-ignore lint/suspicious/noArrayIndexKey: positional read-tree rows
+            <ReadTreeLine key={`r${i}`} row={row} />
+          ))}
+          {Array.from({ length: padding }, (_, i) => (
+            // Empty filler rows — keep the panel a consistent
+            // height when content underflows the viewport.
+            // biome-ignore lint/suspicious/noArrayIndexKey: positional filler
+            <Text key={`p${i}`}> </Text>
+          ))}
+        </Box>
+        {canScroll ? (
+          <Scrollbar
+            offset={effectiveOffset}
+            totalRows={totalRows}
+            viewport={viewport}
+          />
+        ) : null}
+      </Box>
+    </Box>
+  );
+}
+
+/**
+ * Vertical scrollbar drawn as a 1-column track of `│` characters
+ * with a `█` thumb showing the visible window's position. The
+ * thumb size scales with the ratio of `viewport / totalRows`,
+ * minimum 1 row so it never disappears entirely.
+ *
+ * `offset` is the number of rows scrolled UP from the bottom (0 =
+ * pinned to bottom). The thumb's vertical position grows as
+ * `offset` grows, with offset `maxOffset` putting it at the top.
+ */
+function Scrollbar({
+  offset,
+  totalRows,
+  viewport,
+}: {
+  offset: number;
+  totalRows: number;
+  viewport: number;
+}): React.ReactNode {
+  const maxOffset = Math.max(1, totalRows - viewport);
+  const thumbSize = Math.max(1, Math.floor((viewport * viewport) / totalRows));
+  const trackSpan = Math.max(1, viewport - thumbSize);
+  // Bottom of viewport corresponds to offset=0 (thumb at bottom).
+  // Top of viewport corresponds to offset=maxOffset (thumb at top).
+  // Linearly interpolate between the two.
+  const thumbStart = Math.round(((maxOffset - offset) / maxOffset) * trackSpan);
+  const cells = Array.from({ length: viewport }, (_v, i) => {
+    const inThumb = i >= thumbStart && i < thumbStart + thumbSize;
+    return inThumb ? "█" : "│";
+  });
+  return (
+    <Box flexDirection="column" flexShrink={0} marginLeft={1}>
+      {cells.map((cell, i) => (
+        // Scrollbar cells are positional, stable, and never
+        // reordered — the index key is correct here.
+        // biome-ignore lint/suspicious/noArrayIndexKey: positional scrollbar
+        <Text color={MUTED} key={i}>
+          {cell}
+        </Text>
       ))}
     </Box>
   );
