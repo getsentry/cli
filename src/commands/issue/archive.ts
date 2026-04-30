@@ -318,21 +318,31 @@ export const archiveCommand = buildCommand({
     brief: "Archive (ignore) an issue",
     fullDescription:
       "Archive an issue, suppressing alerts until an optional condition is met.\n\n" +
-      "Without --until, the issue is archived forever. Use --until to set\n" +
-      "a condition for automatic unarchival:\n\n" +
-      "  --until auto              Archive until Sentry detects a spike\n" +
-      "  --until 30m               Archive for 30 minutes\n" +
-      "  --until 7d                Archive for 7 days\n" +
-      "  --until 2026-12-31        Archive until a specific date\n" +
-      "  --until 10x               Archive until 10 more events\n" +
-      "  --until 10u               Archive until 10 more users affected\n" +
-      "  --until 10x/5m            Archive until 10 events within 5 minutes\n" +
-      "  --until 10users/2hours    Same, verbose form\n\n" +
+      "Without --until, the issue is archived forever (equivalent to 'Archive Forever'\n" +
+      "in the Sentry UI). Use --until to control when the issue automatically unarchives.\n\n" +
+      "Modes:\n" +
+      "  (no --until)     Archive forever — fully silenced, no automatic unarchival\n" +
+      "  --until auto     Smart detection — unarchives when Sentry detects a spike in\n" +
+      "                   event frequency (recommended for most use cases)\n" +
+      "  --until <time>   Duration-based — unarchives after a fixed time period\n" +
+      "  --until <N>x     Count-based — unarchives after N more events occur\n" +
+      "  --until <N>u     User-based — unarchives after N more users are affected\n\n" +
+      "Time formats: 30m (minutes), 1h (hours), 7d (days), 1w (weeks),\n" +
+      "              or ISO dates like 2026-12-31\n\n" +
+      "Compound conditions — add a time window with /:\n" +
+      "  --until 10x/5m   Unarchive when 10 events occur within 5 minutes\n" +
+      "  --until 5u/1h    Unarchive when 5 users are affected within 1 hour\n\n" +
+      "Verbose forms are also accepted: 10events, 10users, 30minutes, 2hours, 7days\n\n" +
       "Examples:\n" +
-      "  sentry issue archive CLI-12Z\n" +
-      "  sentry issue archive CLI-12Z --until auto\n" +
-      "  sentry issue archive CLI-12Z --until 1h\n" +
-      "  sentry issue archive CLI-12Z --until 100x/1h",
+      "  sentry issue archive CLI-12Z                  # Archive forever\n" +
+      "  sentry issue archive CLI-12Z --until auto     # Smart spike detection\n" +
+      "  sentry issue archive CLI-12Z -u auto          # Same (short alias)\n" +
+      "  sentry issue archive CLI-12Z --until 1h       # Archive for 1 hour\n" +
+      "  sentry issue archive CLI-12Z --until 7d       # Archive for 7 days\n" +
+      "  sentry issue archive CLI-12Z --until 100x     # Until 100 more events\n" +
+      "  sentry issue archive CLI-12Z --until 100x/1h  # 100 events within 1 hour\n" +
+      "  sentry issue archive CLI-12Z --until 10u/1d   # 10 users within 1 day\n" +
+      "  sentry issue ignore CLI-12Z --until auto      # 'ignore' alias works too",
   },
   output: {
     human: formatArchived,

@@ -212,6 +212,37 @@ Archive (ignore) an issue
 **Flags:**
 - `-u, --until <value> - Condition for unarchival: auto, 30m, 10x, 10u, 10x/5m, etc.`
 
+**Examples:**
+
+```bash
+# Archive forever (fully silenced)
+sentry issue archive CLI-G5
+
+# Smart detection — unarchives when Sentry detects a spike in event frequency
+sentry issue archive CLI-G5 --until auto
+
+# Duration-based
+sentry issue archive CLI-G5 --until 1h    # 1 hour
+sentry issue archive CLI-G5 --until 7d    # 7 days
+sentry issue archive CLI-G5 --until 2026-12-31  # specific date
+
+# Count-based — unarchive after N more events
+sentry issue archive CLI-G5 --until 100x
+
+# User-based — unarchive after N more users affected
+sentry issue archive CLI-G5 --until 10u
+
+# Compound — count within a time window
+sentry issue archive CLI-G5 --until 100x/1h   # 100 events within 1 hour
+sentry issue archive CLI-G5 --until 10u/1d    # 10 users within 1 day
+
+# Verbose forms also work
+sentry issue archive CLI-G5 --until 10events/2hours
+
+# 'ignore' is an alias for 'archive'
+sentry issue ignore CLI-G5 --until auto
+```
+
 ### `sentry issue merge <issue...>`
 
 Merge 2+ issues into a single canonical group
