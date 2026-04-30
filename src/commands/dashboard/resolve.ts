@@ -728,7 +728,7 @@ export async function enrichDashboardError(
   }
 
   if (error.status === 403) {
-    build403Error(ctx, org, error.detail);
+    return build403Error(ctx, org, error.detail);
   }
 
   // 400 on create/update — preserve API detail (plan limits, invalid config)
