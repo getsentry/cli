@@ -10,15 +10,25 @@ import {
   type IgnoreStatusDetails,
   updateIssueStatus,
 } from "../../lib/api-client.js";
-import { buildCommand, numberParser } from "../../lib/command.js";
+import { buildCommand } from "../../lib/command.js";
 import { ValidationError } from "../../lib/errors.js";
 import { formatIssueDetails, muted } from "../../lib/formatters/index.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import type { SentryIssue } from "../../types/index.js";
+import type { IssueSubstatus } from "../../types/sentry.js";
 import { issueIdPositional, resolveIssue } from "./utils.js";
 
 const log = logger.withTag("issue.archive");
+
+/** Parse a flag value as a positive integer (≥ 1). */
+function parsePositiveInt(raw: string): number {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new ValidationError(`expected a positive integer, got '${raw}'`);
+  }
+  return n;
+}
 
 const COMMAND = "archive";
 
@@ -39,7 +49,7 @@ function formatArchived(issue: SentryIssue): string {
 
 /** Validate flag dependencies and compute substatus + statusDetails. */
 function resolveArchiveOptions(flags: ArchiveFlags): {
-  substatus: string;
+  substatus: IssueSubstatus;
   statusDetails?: IgnoreStatusDetails;
 } {
   if (flags.window !== undefined && flags.count === undefined) {
@@ -121,32 +131,32 @@ export const archiveCommand = buildCommand({
       },
       duration: {
         kind: "parsed",
-        parse: numberParser,
+        parse: parsePositiveInt,
         brief: "Ignore for this many minutes",
         optional: true,
       },
       count: {
         kind: "parsed",
-        parse: numberParser,
+        parse: parsePositiveInt,
         brief: "Ignore until this many more events occur",
         optional: true,
       },
       window: {
         kind: "parsed",
-        parse: numberParser,
+        parse: parsePositiveInt,
         brief:
           "Time window in minutes for --count (events must occur within this window)",
         optional: true,
       },
       users: {
         kind: "parsed",
-        parse: numberParser,
+        parse: parsePositiveInt,
         brief: "Ignore until this many more users are affected",
         optional: true,
       },
       "user-window": {
         kind: "parsed",
-        parse: numberParser,
+        parse: parsePositiveInt,
         brief:
           "Time window in minutes for --users (users must be affected within this window)",
         optional: true,
@@ -163,7 +173,7 @@ export const archiveCommand = buildCommand({
     });
 
     const updated = await updateIssueStatus(issue.id, "ignored", {
-      ...(statusDetails ? { statusDetails } : {}),
+      statusDetails,
       substatus,
       orgSlug: org,
     });

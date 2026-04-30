@@ -8,6 +8,7 @@ import type { ListAnOrganizationSissuesData } from "@sentry/api";
 import { listAnOrganization_sIssues } from "@sentry/api";
 
 import type { SentryIssue } from "../../types/index.js";
+import type { IssueSubstatus } from "../../types/sentry.js";
 
 import { applyCustomHeaders } from "../custom-headers.js";
 import { ApiError, ValidationError } from "../errors.js";
@@ -552,10 +553,11 @@ export type IgnoreStatusDetails = {
 /**
  * Update an issue's status.
  *
- * When `status === "resolved"`, optional `statusDetails` can pin the fix
- * to a release or commit (see {@link ResolveStatusDetails}). Without
- * `statusDetails`, the issue is resolved immediately with no regression
- * tracking — equivalent to clicking "Resolve" in the Sentry UI.
+ * - `"resolved"` — optional `statusDetails` can pin the fix to a release
+ *   or commit (see {@link ResolveStatusDetails}).
+ * - `"ignored"` — optional `substatus` controls archive granularity;
+ *   optional `statusDetails` sets conditions (see {@link IgnoreStatusDetails}).
+ * - `"unresolved"` — reopens the issue; no additional options needed.
  *
  * When `options.orgSlug` is provided, the request is routed to that org's
  * region via the org-scoped endpoint. Without it, falls back to the legacy
@@ -566,8 +568,8 @@ export async function updateIssueStatus(
   status: "resolved" | "unresolved" | "ignored",
   options?: {
     statusDetails?: ResolveStatusDetails | IgnoreStatusDetails;
-    /** Substatus for archive granularity: `archived_until_escalating`, `archived_until_condition_met`, `archived_forever`. */
-    substatus?: string;
+    /** Substatus for archive granularity. */
+    substatus?: IssueSubstatus;
     orgSlug?: string;
   }
 ): Promise<SentryIssue> {
