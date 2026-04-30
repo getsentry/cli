@@ -17,7 +17,7 @@ Inject debug IDs into JavaScript files and sourcemaps
 
 **Flags:**
 - `--ext <value> - Comma-separated file extensions to process (default: .js,.cjs,.mjs)`
-- `--ignore <value> - Glob pattern to exclude (gitignore-style, repeatable)`
+- `--ignore <value> - Comma-separated glob patterns to exclude (gitignore-style)`
 - `--ignore-file <value> - Path to a file with gitignore-style patterns to exclude`
 - `--dry-run - Show what would be modified without writing`
 - `--allow-empty - Exit successfully when no JS + sourcemap pairs are found (default: error out to catch silent build misconfigurations)`
@@ -44,7 +44,7 @@ Upload sourcemaps to Sentry
 - `--dist <value> - Distribution identifier to disambiguate builds within a release`
 - `--url-prefix <value> - URL prefix for uploaded files (default: ~/) - (default: "~/")`
 - `--ext <value> - Comma-separated file extensions to process (default: .js,.cjs,.mjs)`
-- `--ignore <value> - Glob pattern to exclude (gitignore-style, repeatable)`
+- `--ignore <value> - Comma-separated glob patterns to exclude (gitignore-style)`
 - `--ignore-file <value> - Path to a file with gitignore-style patterns to exclude`
 - `--strip-prefix <value> - Strip a prefix from uploaded file paths (e.g. 'build/')`
 - `--strip-common-prefix - Automatically strip the longest common path prefix from all files`
