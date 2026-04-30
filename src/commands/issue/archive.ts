@@ -11,6 +11,7 @@ import {
   updateIssueStatus,
 } from "../../lib/api-client.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
+import { ValidationError } from "../../lib/errors.js";
 import { formatIssueDetails, muted } from "../../lib/formatters/index.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
@@ -89,6 +90,18 @@ export const archiveCommand = buildCommand({
   },
   async *func(this: SentryContext, flags: ArchiveFlags, issueArg: string) {
     const { cwd } = this;
+
+    // Validate dependent flag combinations
+    if (flags.window !== undefined && flags.count === undefined) {
+      throw new ValidationError(
+        "--window requires --count (time window is only meaningful with an event count threshold)"
+      );
+    }
+    if (flags["user-window"] !== undefined && flags.users === undefined) {
+      throw new ValidationError(
+        "--user-window requires --users (time window is only meaningful with a user count threshold)"
+      );
+    }
 
     const { org, issue } = await resolveIssue({
       issueArg,
