@@ -20,13 +20,35 @@ import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 /** Characters valid in agent names (lowercase alphanum + hyphens). */
 const agentNameChars = "abcdefghijklmnopqrstuvwxyz0123456789-";
 
-/** Generate valid-looking agent names (lowercase, no leading/trailing dash). */
+/**
+ * Values treated as boolean-ish garbage by normalizeAgent.
+ * Excluded from the agent name arbitrary to prevent false failures
+ * in compound tests where version/role extraction is asserted.
+ */
+const GARBAGE_NAMES = new Set([
+  "0",
+  "1",
+  "true",
+  "false",
+  "yes",
+  "no",
+  "on",
+  "off",
+]);
+
+/** Generate valid-looking agent names (lowercase, no leading/trailing dash, not garbage). */
 const agentNameArb = array(constantFrom(...agentNameChars.split("")), {
   minLength: 2,
   maxLength: 20,
 })
   .map((chars) => chars.join(""))
-  .filter((s) => /^[a-z]/.test(s) && !s.endsWith("-") && !s.includes("--"));
+  .filter(
+    (s) =>
+      /^[a-z]/.test(s) &&
+      !s.endsWith("-") &&
+      !s.includes("--") &&
+      !GARBAGE_NAMES.has(s)
+  );
 
 /** Generate semver-ish version strings. */
 const versionArb = tuple(
