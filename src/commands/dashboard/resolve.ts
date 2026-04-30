@@ -636,6 +636,13 @@ export function enrichDashboardError(
   }
 
   if (error.status === 403) {
+    // Centralized 403 enrichment (infrastructure.ts) already added
+    // scope/token hints. Re-throw the enriched ApiError directly —
+    // passing the multi-line enriched detail into build403Error would
+    // nest it as a single messy bullet in a ResolutionError.
+    if (error.enriched403) {
+      throw error;
+    }
     build403Error(ctx, org, error.detail);
   }
 
