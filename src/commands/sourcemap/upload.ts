@@ -69,9 +69,8 @@ const USAGE_HINT = "sentry sourcemap upload <directory>";
 /**
  * Compute the longest common directory prefix across a list of paths.
  *
- * Only strips at directory boundaries (slashes), so
- * `["a/b/c.js", "a/b/d.js"]` yields `"a/b/"` rather than `"a/b/"`.
- * Returns `""` when paths share no common directory prefix.
+ * Strips at directory boundaries only — `["a/bc.js", "a/bd.js"]`
+ * yields `"a/"` (not `"a/b"`). Returns `""` when no common dir prefix.
  */
 function computeCommonPrefix(paths: string[]): string {
   if (paths.length === 0) {

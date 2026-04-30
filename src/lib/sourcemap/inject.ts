@@ -195,9 +195,13 @@ async function findCompanionMap(jsPath: string): Promise<string | undefined> {
     return;
   }
 
+  // Strip query strings and fragments (e.g. "app.js.map?v=abc123")
+  // that bundlers like Vite/Rollup may append.
+  const cleanUrl = url.split("?")[0].split("#")[0];
+
   // Resolve relative path against the JS file's directory
   const jsDir = dirname(jsPath);
-  const resolvedMapPath = resolvePath(jsDir, url);
+  const resolvedMapPath = resolvePath(jsDir, cleanUrl);
   if (await fileExists(resolvedMapPath)) {
     return resolvedMapPath;
   }

@@ -87,8 +87,8 @@ export type ArtifactFile = {
    */
   url: string;
   /**
-   * Optional associated sourcemap filename (for minified_source entries).
-   * Just the basename, e.g., `"bin.js.map"`.
+   * Optional sourcemap reference for the `Sourcemap` header (minified_source entries).
+   * Relative URL from the JS file to its map, e.g., `"bin.js.map"` or `"maps/app.js.map"`.
    */
   sourcemapFilename?: string;
 };
