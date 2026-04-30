@@ -262,6 +262,13 @@ export const uploadCommand = buildCommand({
       };
     }
 
+    // Validate mutually exclusive flags before any file mutation
+    if (flags["strip-prefix"] && flags["strip-common-prefix"]) {
+      throw new ValidationError(
+        "--strip-prefix and --strip-common-prefix are mutually exclusive"
+      );
+    }
+
     const resolved = await resolveOrgAndProject({
       cwd: this.cwd,
       usageHint: USAGE_HINT,
@@ -282,13 +289,6 @@ export const uploadCommand = buildCommand({
 
     // Build artifact file list with paths relative to the upload directory
     const resolvedDir = resolve(dir);
-
-    // Compute prefix to strip from relative paths (mutually exclusive)
-    if (flags["strip-prefix"] && flags["strip-common-prefix"]) {
-      throw new ValidationError(
-        "--strip-prefix and --strip-common-prefix are mutually exclusive"
-      );
-    }
     let pathPrefixToStrip = flags["strip-prefix"] ?? "";
     if (flags["strip-common-prefix"]) {
       const allRelative = results.flatMap(({ jsPath, mapPath }) => [
