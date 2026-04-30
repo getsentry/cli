@@ -6,7 +6,8 @@
  * env vars, config defaults) — no slash-separated arg parsing needed.
  */
 
-import { dirname, relative, resolve } from "node:path";
+import { relative, resolve } from "node:path";
+import { dirname as posixDirname, relative as posixRelative } from "node:path/posix";
 import type { SentryContext } from "../../context.js";
 import {
   type ArtifactFile,
@@ -310,11 +311,11 @@ export const uploadCommand = buildCommand({
         }
 
         // Sourcemap header is resolved relative to the JS file's URL.
-        // Use relative path from JS dir to map file so cross-directory
-        // maps (e.g. maps/bundle.js.map) link correctly.
-        const sourcemapRef = relative(dirname(jsPath), mapPath).replaceAll(
-          "\\",
-          "/"
+        // Compute from post-strip URL-space paths so --strip-prefix
+        // doesn't break the reference.
+        const sourcemapRef = posixRelative(
+          posixDirname(jsRelative),
+          mapRelative
         );
         return [
           {
