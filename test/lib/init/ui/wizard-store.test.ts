@@ -148,3 +148,66 @@ describe("WizardStore step progress", () => {
     expect(notifications).toBe(2);
   });
 });
+
+/**
+ * Cancellation callback contract.
+ *
+ * The Ink App reads `snapshot.requestCancel` from inside its
+ * top-level `useInput` handler when no prompt is mounted (spinner
+ * window). The bridge (`InkUI`) registers the callback at
+ * construction and clears it on teardown so a stale Ink dispatch
+ * after unmount can't re-enter cancellation.
+ */
+describe("WizardStore.setRequestCancel", () => {
+  test("starts undefined so an early Ctrl+C is a no-op", () => {
+    const store = new WizardStore();
+    expect(store.getSnapshot().requestCancel).toBeUndefined();
+  });
+
+  test("registers a callback and exposes it on the snapshot", () => {
+    const store = new WizardStore();
+    const cancel = () => {
+      /* no-op */
+    };
+    store.setRequestCancel(cancel);
+    expect(store.getSnapshot().requestCancel).toBe(cancel);
+  });
+
+  test("clears the callback on teardown by passing undefined", () => {
+    const store = new WizardStore();
+    store.setRequestCancel(() => {
+      /* no-op */
+    });
+    store.setRequestCancel(undefined);
+    expect(store.getSnapshot().requestCancel).toBeUndefined();
+  });
+
+  test("setting the same callback reference twice is a no-op", () => {
+    // Avoid React re-render churn when the bridge re-registers the
+    // same callback (idempotency for cheap callers).
+    const store = new WizardStore();
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+    const cancel = () => {
+      /* no-op */
+    };
+    store.setRequestCancel(cancel);
+    store.setRequestCancel(cancel);
+    unsubscribe();
+    expect(notifications).toBe(1);
+  });
+
+  test("invocation runs the registered callback", () => {
+    // The store doesn't invoke the callback itself — the App does
+    // — but verify the wiring lets callers reach the function.
+    const store = new WizardStore();
+    let invoked = 0;
+    store.setRequestCancel(() => {
+      invoked += 1;
+    });
+    store.getSnapshot().requestCancel?.();
+    expect(invoked).toBe(1);
+  });
+});

@@ -14,9 +14,6 @@
  * The store is intentionally minimal: snapshots are plain immutable
  * objects so React's default `Object.is` reference check is enough
  * to detect changes.
- *
- * Originally written for OpenTUI; the data shape ported one-to-one to
- * Ink because nothing here is specific to OpenTUI's component model.
  */
 
 import {
@@ -45,8 +42,9 @@ export type SpinnerState = {
 /**
  * One entry tracking a file the wizard has read from disk during the
  * session. Status transitions `reading` → `analyzed` once the tool
- * returns. Surfaced by the inline file-read status line in `OpenTuiUI`
- * (see `FileReadStatus` in `ink-app.tsx`).
+ * returns. Surfaced by the inline file-read status line and sidebar
+ * tree in the Ink app (see `FileReadStatus` and `FilesPanel` in
+ * `ink-app.tsx`).
  */
 export type FileReadEntry = {
   path: string;
@@ -124,7 +122,7 @@ export type WizardSnapshot = {
    * Persistent list of every file the wizard has read from disk. Each
    * entry carries a status that transitions `reading` → `analyzed` as
    * the workflow progresses. Surfaced by the inline file-read status
-   * line in `OpenTuiUI` so the user can see what context the wizard
+   * line in the Ink UI so the user can see what context the wizard
    * inspected — without the previous spinner-message approach, which
    * flashed each batch for half a second before the next tool
    * overwrote it.
@@ -139,6 +137,17 @@ export type WizardSnapshot = {
    * `resolve-dir`) are silently ignored so the sidebar stays compact.
    */
   steps: StepEntry[];
+  /**
+   * Cancellation callback wired up by the bridge (`InkUI`) so the
+   * App's top-level Ctrl+C catcher can route through the same
+   * teardown path as SIGINT and prompt cancellation. `undefined`
+   * after teardown to short-circuit any stale events Ink might
+   * dispatch on the way out.
+   *
+   * Snapshotted on the store rather than passed via React props so
+   * the App doesn't have to thread a callback through every layer.
+   */
+  requestCancel: (() => void) | undefined;
 };
 
 export type Listener = () => void;
@@ -168,6 +177,7 @@ export class WizardStore {
           label: shortStepLabel(id),
           status: "pending" as StepStatus,
         })),
+      requestCancel: initial.requestCancel,
     };
   }
 
@@ -241,6 +251,21 @@ export class WizardStore {
 
   setSummary(summary: WizardSummary | null): void {
     this.update({ summary });
+  }
+
+  /**
+   * Register (or clear) the cooperative cancel callback. The Ink App
+   * subscribes to the snapshot and calls this from its top-level
+   * Ctrl+C `useInput` handler when no prompt is mounted (typical
+   * spinner / network-call window). Set to `undefined` on teardown
+   * so a stale event from Ink's render pipeline doesn't re-enter
+   * cancellation.
+   */
+  setRequestCancel(callback: (() => void) | undefined): void {
+    if (this.snapshot.requestCancel === callback) {
+      return;
+    }
+    this.update({ requestCancel: callback });
   }
 
   /**
@@ -341,8 +366,8 @@ export class WizardStore {
   }
 
   // Severity-to-prefix mapping kept here (alongside the entry type) so
-  // both the React renderer and the post-dispose stderr replay agree on
-  // the format. Used by `OpenTuiUI` when assembling its transcript.
+  // both the React renderer and the post-dispose summary report agree
+  // on the format.
   static prefixFor(severity: LogSeverity, code?: SpinnerExitCode): string {
     if (severity === "message") {
       return " ";

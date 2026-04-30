@@ -158,13 +158,20 @@ export function App({ store }: AppProps): React.ReactNode {
   // `useInput` already handles cancellation, but during a spinner
   // (no prompt) there's no input listener at all, so Ctrl+C would
   // otherwise be silently dropped. This top-level listener fills
-  // that gap by exiting the process cleanly. Active prompts also
-  // see the same input event (Ink dispatches to all `useInput`
-  // listeners), and their `prompt.resolve(null)` runs before this
-  // exit so the wizard runner's WizardCancelledError propagates.
+  // that gap by routing through `store.requestCancel` — the bridge
+  // (`InkUI`) registers a callback that performs the full teardown
+  // sequence (clear → unmount → restore termios → destroy stdin →
+  // emit summary) before `process.exit(130)`. Calling
+  // `process.exit` directly here would skip that cleanup and leave
+  // the user's terminal in raw mode (#885 review).
+  //
+  // When a prompt IS active, `snapshot.prompt` is non-null and the
+  // prompt's own `useInput` already handles Ctrl+C via its
+  // resolve(null) cancellation path; we explicitly skip in that
+  // case so we don't double-fire.
   useInput((input, key) => {
     if (key.ctrl && input === "c" && !snapshot.prompt) {
-      process.exit(130);
+      snapshot.requestCancel?.();
     }
   });
 
@@ -180,6 +187,12 @@ export function App({ store }: AppProps): React.ReactNode {
           bannerRows={snapshot.bannerRows}
           filesRead={snapshot.filesRead}
           logs={snapshot.logs}
+          mainColumnWidth={
+            // 4 cols outer chrome (border + paddingX=1 each side);
+            // when the sidebar is visible, also subtract its width
+            // plus the row gap of 2 cols.
+            showSidebar ? columns - 4 - SIDEBAR_WIDTH - 2 : columns - 4
+          }
           prompt={snapshot.prompt}
           showFileReadInline={!showSidebar}
           spinner={snapshot.spinner}
@@ -240,6 +253,8 @@ type MainColumnProps = {
   spinner: SpinnerState;
   prompt: ActivePrompt | null;
   summary: WizardSummary | null;
+  /** Available width inside the main column, used by the divider. */
+  mainColumnWidth: number;
   /**
    * Whether to render the inline file-read status row above the
    * spinner. We only show this when the sidebar is hidden (narrow
@@ -256,6 +271,7 @@ function MainColumn({
   spinner,
   prompt,
   summary,
+  mainColumnWidth,
   showFileReadInline,
 }: MainColumnProps): React.ReactNode {
   // Hide the file-read status once the wizard finishes — the summary
@@ -265,7 +281,7 @@ function MainColumn({
   return (
     <Box flexDirection="column" flexGrow={1}>
       <Header bannerRows={bannerRows} />
-      <Divider />
+      <Divider mainColumnWidth={mainColumnWidth} />
       <Box flexDirection="column">
         {logs.map((log) => (
           <LogLine entry={log} key={log.id} />
@@ -298,10 +314,29 @@ function Header({
   );
 }
 
-function Divider(): React.ReactNode {
+/**
+ * Horizontal rule used to separate the banner from the log/spinner
+ * area. Width tracks the available main-column width so the rule
+ * doesn't truncate when the sidebar is visible (~36 cols + gap)
+ * nor look stubby when the main column has the full terminal.
+ *
+ * Width budget:
+ *   - 4 cols outer chrome (1 border + 1 padding on each side)
+ *   - 38 cols sidebar + gap when visible (`SIDEBAR_WIDTH + 2`)
+ *   - 2 cols safety so the line never bleeds into the right border
+ *
+ * Capped at 56 so a ridiculously wide terminal still looks balanced
+ * (matches the banner row width of 55 chars).
+ */
+function Divider({
+  mainColumnWidth,
+}: {
+  mainColumnWidth: number;
+}): React.ReactNode {
+  const width = Math.max(20, Math.min(mainColumnWidth - 2, 56));
   return (
     <Box marginBottom={1} marginTop={1}>
-      <Text color={MUTED}>{"─".repeat(50)}</Text>
+      <Text color={MUTED}>{"─".repeat(width)}</Text>
     </Box>
   );
 }
@@ -738,10 +773,14 @@ function TipPanel({ tipIndex }: { tipIndex: number }): React.ReactNode {
   const tip = SENTRY_TIPS[tipIndex % SENTRY_TIPS.length] as SentryTip;
   const total = SENTRY_TIPS.length;
   const oneIndexed = (tipIndex % total) + 1;
-  // The rounded box's top border carries the title (Ink's `title`
-  // prop). Body and counter follow with no inner margins — the
-  // border + 1-cell padding on each side already separates the
-  // content from the chrome.
+  // Three-row layout:
+  //   1. Section header (faint, eyebrow-style) — anchors the panel's
+  //      identity without consuming the border real estate Ink
+  //      can't draw a title onto.
+  //   2. Tip title (bold, accent) — the highlight row.
+  //   3. Tip body, then a right-aligned "Tip n of N" counter at the
+  //      bottom so the counter doesn't compete with the title for
+  //      the eye.
   return (
     <Box
       borderColor={MUTED}
@@ -750,13 +789,18 @@ function TipPanel({ tipIndex }: { tipIndex: number }): React.ReactNode {
       flexShrink={0}
       paddingX={1}
     >
+      <Text bold color={MUTED}>
+        Did you know?
+      </Text>
       <Text bold color={ACCENT}>
         {tip.title}
       </Text>
       <Text>{tip.body}</Text>
-      <Text color={MUTED}>
-        Tip {oneIndexed} of {total} · Did you know?
-      </Text>
+      <Box justifyContent="flex-end">
+        <Text color={MUTED}>
+          Tip {oneIndexed} of {total}
+        </Text>
+      </Box>
     </Box>
   );
 }
@@ -776,6 +820,10 @@ function ProgressPanel({ steps }: { steps: StepEntry[] }): React.ReactNode {
     (entry) => entry.status === "completed"
   ).length;
   const totalCount = steps.length;
+  // Eyebrow header on the left, completion ratio right-aligned so
+  // the eye can scan one column for "where am I" and the other for
+  // "how far along". Matches the layout pattern used in TipPanel
+  // and FilesPanel.
   return (
     <Box
       borderColor={MUTED}
@@ -784,9 +832,14 @@ function ProgressPanel({ steps }: { steps: StepEntry[] }): React.ReactNode {
       flexShrink={0}
       paddingX={1}
     >
-      <Text bold color={ACCENT}>
-        Progress ({completedCount}/{totalCount})
-      </Text>
+      <Box justifyContent="space-between">
+        <Text bold color={MUTED}>
+          Progress
+        </Text>
+        <Text color={MUTED}>
+          {completedCount}/{totalCount}
+        </Text>
+      </Box>
       {steps.map((entry) => (
         <ProgressRow entry={entry} key={entry.id} />
       ))}
@@ -828,11 +881,17 @@ function progressStyle(entry: StepEntry): {
 }
 
 /**
- * Read-files tree. Ink doesn't have a scrollbox primitive, so when
- * the tree exceeds `maxRows` we render the **last** N rows (a
- * tail-`f`-style window). For most runs the tree fits without
- * truncation; long analyze sequences just push older entries off
- * the top while keeping the active reads visible.
+ * Read-files tree, rendered inside a fixed-height tail-`f`-style
+ * viewport: the most recent rows are always visible, with a
+ * `↑ N earlier` indicator at the top when older rows have scrolled
+ * out of view.
+ *
+ * Why no real scroller? Ink doesn't ship a native scrollbox
+ * primitive, and a third-party one would mean wiring focus
+ * management (PgUp/PgDn while a prompt is mounted, etc.) — too
+ * much complexity for what's effectively a status indicator.
+ * Tail-window UX matches what the user actually wants: see what
+ * the wizard is reading right now.
  *
  * Visual rules:
  *   - Directories: muted gray box-drawing branches + name with `/`.
@@ -843,19 +902,6 @@ function progressStyle(entry: StepEntry): {
  *
  * Hidden until at least one file has been recorded — the empty box
  * would just be visual noise during the auth/discover phase.
- */
-/**
- * Render the read-files tree inside a fixed-height viewport that
- * acts like a tail-`f` window: the most recent rows are always
- * visible, with a `↑ N earlier` indicator at the top when older
- * rows have scrolled out of view.
- *
- * Why no real scroller? Ink doesn't ship a native scrollbox
- * primitive, and a third-party one would mean wiring focus
- * management (PgUp/PgDn while a prompt is mounted, etc.) — too
- * much complexity for what's effectively a status indicator.
- * Tail-window UX matches what the user actually wants: see what
- * the wizard is reading right now.
  */
 function FilesPanel({
   filesRead,
@@ -889,12 +935,15 @@ function FilesPanel({
       flexShrink={0}
       paddingX={1}
     >
-      <Text bold color={ACCENT}>
-        Files analyzed ({analyzedCount}/{filesRead.length})
-      </Text>
-      {truncated ? (
-        <Text color={MUTED}>↑ {hidden} earlier (scrolled)</Text>
-      ) : null}
+      <Box justifyContent="space-between">
+        <Text bold color={MUTED}>
+          Files analyzed
+        </Text>
+        <Text color={MUTED}>
+          {analyzedCount}/{filesRead.length}
+        </Text>
+      </Box>
+      {truncated ? <Text color={MUTED}>↑ {hidden} earlier</Text> : null}
       {visible.map((row, i) => (
         // Tree rows are positionally stable for a given filesRead
         // snapshot — `buildReadTree` walks `filesRead` in insertion

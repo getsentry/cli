@@ -278,6 +278,22 @@ export class InkUI implements WizardUI {
   private activePromptCancel: (() => void) | undefined;
   private cancelHandler: (() => void) | undefined;
   /**
+   * Guard so `tearDown()` runs at most once even when called from
+   * multiple paths (Ctrl+C in a spinner, then SIGINT, then
+   * `[Symbol.asyncDispose]` on the wizard-runner exit). Calling
+   * `unmount()` on an already-unmounted Ink instance throws on some
+   * Ink versions; running raw-mode restoration on a destroyed stream
+   * also throws. The flag short-circuits before either can happen.
+   */
+  private torndown = false;
+  /**
+   * Guard so `requestCancel()` runs its no-active-prompt branch at
+   * most once. With this flag set, a subsequent Ctrl+C / SIGINT
+   * becomes a no-op rather than re-entering teardown — the user is
+   * already on the way out.
+   */
+  private cancelRequested = false;
+  /**
    * Final wizard outcome captured by the bridge.
    *
    * Ink renders inline so the log lines naturally land in scrollback
@@ -299,6 +315,13 @@ export class InkUI implements WizardUI {
     this.freshStdin = freshStdin;
     this.startTipRotation();
     this.installCancelHandler();
+    // Hand the App a reference to `requestCancel` via the store so
+    // the top-level `useInput` Ctrl+C catcher in `ink-app.tsx` can
+    // route through the same teardown path as SIGINT and prompt
+    // cancellation. Without this the App would have to call
+    // `process.exit(130)` directly — bypassing termios restoration
+    // and leaking the `/dev/tty` handle.
+    this.store.setRequestCancel(() => this.requestCancel());
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────
@@ -470,6 +493,39 @@ export class InkUI implements WizardUI {
   // ── Disposal ──────────────────────────────────────────────────────
 
   [Symbol.asyncDispose](): Promise<void> {
+    this.tearDown();
+    return Promise.resolve();
+  }
+
+  /**
+   * Idempotent teardown. Safe to call from `[Symbol.asyncDispose]`,
+   * from `requestCancel()`, or from a SIGINT handler racing both. The
+   * `torndown` guard short-circuits second (and later) entries so we
+   * never call `unmount()` on an already-unmounted Ink instance or
+   * `setRawMode(false)` on an already-destroyed stream — both throw
+   * on some platforms.
+   *
+   * Order matters:
+   *   1. Stop the tip-rotation interval (libuv timer ref).
+   *   2. Detach SIGINT listener (we don't want a second Ctrl+C
+   *      re-entering this path while we're in the middle of it).
+   *   3. `instance.clear()` — rewinds Ink's render region so the
+   *      post-dispose chalk summary lands in place of the live
+   *      wizard chrome rather than below it.
+   *   4. `instance.unmount()` — releases React reconciler resources.
+   *   5. Restore termios on the fresh `/dev/tty` stream, then
+   *      `pause()` + `destroy()` so libuv can drain the handle and
+   *      the process can exit naturally.
+   *   6. Emit the post-dispose summary to stdout (success outro or
+   *      failure cancel line, matching the live screen's palette).
+   *
+   * Every step is wrapped in try/catch — disposal must never throw.
+   */
+  private tearDown(): void {
+    if (this.torndown) {
+      return;
+    }
+    this.torndown = true;
     if (this.tipTimer) {
       clearInterval(this.tipTimer);
       this.tipTimer = undefined;
@@ -478,38 +534,30 @@ export class InkUI implements WizardUI {
       process.removeListener("SIGINT", this.cancelHandler);
       this.cancelHandler = undefined;
     }
-    // Clear Ink's last rendered output BEFORE unmount so the
-    // bordered wizard box doesn't linger above the post-dispose
-    // chalk summary. `clear()` rewinds the cursor to the top of
-    // Ink's output region and overwrites the rows with blanks;
-    // the subsequent stderr write places the summary at that
-    // position, becoming the only visible chrome.
+    // Detach the cancel callback from the store so a stale Ctrl+C
+    // routed through the App after teardown can't re-enter.
+    this.store.setRequestCancel(undefined);
     try {
       this.instance.clear();
     } catch {
-      // Ignore — clear is best-effort.
+      // best-effort
     }
     try {
       this.instance.unmount();
     } catch {
-      // Ignore — disposal must never throw.
+      // best-effort
     }
     if (this.freshStdin) {
-      // Restore termios before destroying the stream — Ink may have
-      // left raw mode enabled if `useInput` was active when we
-      // unmounted. Without this the user's shell shows an echo-less
-      // session after a crash. Best-effort: the stream may already
-      // be torn down from a prior error.
       try {
         this.freshStdin.setRawMode(false);
       } catch {
-        // intentionally empty — stream already closed
+        // stream already torn down
       }
       try {
         this.freshStdin.pause();
         this.freshStdin.destroy();
       } catch {
-        // intentionally empty
+        // stream already destroyed
       }
     }
     const report = this.buildPostDisposeReport();
@@ -520,7 +568,59 @@ export class InkUI implements WizardUI {
       // depending on shell pipe handling.
       process.stdout.write(`${report}\n`);
     }
-    return Promise.resolve();
+  }
+
+  /**
+   * Cooperative cancellation entry point. Called from three places:
+   *
+   *   1. The App's top-level `useInput` Ctrl+C catcher (when no
+   *      prompt is mounted — typically during a spinner / network
+   *      call). Routed via `store.requestCancel()`.
+   *   2. The SIGINT process listener (covers raw-mode-off windows
+   *      where Node delivers SIGINT instead of `\x03`).
+   *   3. (Indirectly) prompt cancellation, when an active prompt's
+   *      own `useInput` resolves with `null`. That path doesn't go
+   *      through `requestCancel` directly because the prompt's
+   *      promise resolution drives the wizard runner's
+   *      `WizardCancelledError` flow, which then runs
+   *      `[Symbol.asyncDispose]` → `tearDown()` naturally.
+   *
+   * If a prompt IS active, we delegate to its cancel callback and
+   * return without exiting — the wizard runner will catch the
+   * resulting `WizardCancelledError` and exit cleanly via the
+   * `await using` path.
+   *
+   * If no prompt is active (spinner case), we tear down immediately
+   * and `process.exit(130)`. We can't route through the runner
+   * because it's blocked on `await executeTool(...)` or
+   * `await run.resumeAsync(...)` — there's nothing waiting to throw
+   * into. Exit code 130 is the SIGINT convention; the terminal is
+   * fully restored before exit so the user's shell prompt comes
+   * back cleanly.
+   *
+   * Idempotent: a second Ctrl+C while teardown is in progress is a
+   * no-op (the `cancelRequested` flag short-circuits).
+   */
+  requestCancel(): void {
+    const promptCancel = this.activePromptCancel;
+    if (promptCancel) {
+      // Prompt path — let the runner unwind via WizardCancelledError.
+      // Don't tear down here; the `await using` in the runner will
+      // call us back through `[Symbol.asyncDispose]`.
+      promptCancel();
+      return;
+    }
+    if (this.cancelRequested) {
+      return;
+    }
+    this.cancelRequested = true;
+    this.failureMessage = "Setup cancelled.";
+    this.tearDown();
+    // Match the SIGINT convention so shells (and CI) see a
+    // distinguishable exit. The runner's `await using` won't get a
+    // chance to run after this, but tearDown above already did all
+    // the cleanup that path would have performed.
+    process.exit(130);
   }
 
   /**
@@ -600,22 +700,20 @@ export class InkUI implements WizardUI {
    * construction and the first `useInput` listener being mounted,
    * plus any time raw mode flickers off (Ink toggles it in a
    * useEffect when the listener count drops to zero).
+   *
+   * Both this handler and the App's `useInput` Ctrl+C path funnel
+   * into `requestCancel()` so the cancellation flow has a single
+   * implementation. `process.once` rather than `process.on` so a
+   * second SIGINT arriving while teardown runs falls through to
+   * Node's default handler (immediate exit) — protects against a
+   * stuck teardown holding the user hostage.
    */
   private installCancelHandler(): void {
     const handler = () => {
-      const cancelFn = this.activePromptCancel;
-      if (cancelFn) {
-        cancelFn();
-        return;
-      }
-      // No active prompt — surface a clean cancel message so the
-      // wizard runner's catch-WizardCancelledError path triggers.
-      // We don't `process.exit` here; the caller decides.
-      this.failureMessage = "Setup cancelled.";
-      this.instance.unmount();
+      this.requestCancel();
     };
     this.cancelHandler = handler;
-    process.on("SIGINT", handler);
+    process.once("SIGINT", handler);
   }
 }
 
