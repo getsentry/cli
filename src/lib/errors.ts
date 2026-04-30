@@ -177,17 +177,27 @@ export class ApiError extends CliError {
   readonly detail?: string;
   readonly endpoint?: string;
 
+  /**
+   * Set by centralized 403 enrichment in `infrastructure.ts`.
+   * Command-layer code can check this to avoid double-enriching
+   * the error detail with scope/token hints.
+   */
+  readonly enriched403: boolean;
+
+  // biome-ignore lint/nursery/useMaxParams: established 4-param shape; enriched403 is a defaulted extension
   constructor(
     message: string,
     status: number,
     detail?: string,
-    endpoint?: string
+    endpoint?: string,
+    enriched403 = false
   ) {
     super(message, EXIT.API);
     this.name = "ApiError";
     this.status = status;
     this.detail = detail;
     this.endpoint = endpoint;
+    this.enriched403 = enriched403;
   }
 
   override format(): string {

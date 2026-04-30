@@ -363,7 +363,7 @@ export function timeRangeToApiParams(range: TimeRange): TimeRangeApiParams {
     params.end = new Date().toISOString();
   } else if (params.end && !params.start) {
     const endDate = new Date(params.end);
-    endDate.setDate(endDate.getDate() - 90);
+    endDate.setUTCDate(endDate.getUTCDate() - 90);
     params.start = endDate.toISOString();
   }
   return params;
