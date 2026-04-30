@@ -293,7 +293,13 @@ export const uploadCommand = buildCommand({
 
     // Build artifact file list with paths relative to the upload directory
     const resolvedDir = resolve(dir);
+    // Normalize --strip-prefix to end with "/" so it strips at directory
+    // boundaries. Without this, "build" would strip from "build/app.js"
+    // leaving "/app.js" instead of "app.js".
     let pathPrefixToStrip = flags["strip-prefix"] ?? "";
+    if (pathPrefixToStrip && !pathPrefixToStrip.endsWith("/")) {
+      pathPrefixToStrip = `${pathPrefixToStrip}/`;
+    }
     if (flags["strip-common-prefix"]) {
       const allRelative = results.flatMap(({ jsPath, mapPath }) => [
         relative(resolvedDir, jsPath).replaceAll("\\", "/"),
