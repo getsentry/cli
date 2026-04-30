@@ -416,9 +416,17 @@ async function throwRawApiError(
     const text = await response.text();
     try {
       const parsed = JSON.parse(text) as { detail?: string };
-      detail = parsed.detail ?? JSON.stringify(parsed);
+      // Prefer the explicit `detail` field; fall back to the full JSON
+      // for non-403 errors (useful for debugging). For 403s, pass
+      // undefined so enrich403Detail stands alone without a noisy
+      // `{"detail":null}` prefix.
+      if (typeof parsed.detail === "string") {
+        detail = parsed.detail;
+      } else if (response.status !== 403) {
+        detail = JSON.stringify(parsed);
+      }
     } catch {
-      detail = text;
+      detail = text || undefined;
     }
   } catch {
     detail = response.statusText;
