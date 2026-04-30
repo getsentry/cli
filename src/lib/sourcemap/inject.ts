@@ -196,8 +196,18 @@ async function findCompanionMap(jsPath: string): Promise<string | undefined> {
   }
 
   // Strip query strings and fragments (e.g. "app.js.map?v=abc123")
-  // that bundlers like Vite/Rollup may append.
-  const cleanUrl = url.split("?")[0].split("#")[0];
+  // that bundlers like Vite/Rollup may append. indexOf returns -1 when
+  // no delimiter is found, and slice(0, -1) would chop the last char —
+  // so only slice when the delimiter actually exists.
+  let cleanUrl = url;
+  const qIdx = cleanUrl.indexOf("?");
+  if (qIdx !== -1) {
+    cleanUrl = cleanUrl.slice(0, qIdx);
+  }
+  const hIdx = cleanUrl.indexOf("#");
+  if (hIdx !== -1) {
+    cleanUrl = cleanUrl.slice(0, hIdx);
+  }
 
   // Resolve relative path against the JS file's directory
   const jsDir = dirname(jsPath);
