@@ -210,12 +210,7 @@ Reopen a resolved issue
 Archive (ignore) an issue
 
 **Flags:**
-- `--until-escalating - Archive until the issue escalates (spikes in frequency)`
-- `--duration <value> - Ignore for this many minutes`
-- `--count <value> - Ignore until this many more events occur`
-- `--window <value> - Time window in minutes for --count (events must occur within this window)`
-- `--users <value> - Ignore until this many more users are affected`
-- `--user-window <value> - Time window in minutes for --users (users must be affected within this window)`
+- `-u, --until <value> - Condition for unarchival: auto, 30m, 10x, 10u, 10x/5m, etc.`
 
 ### `sentry issue merge <issue...>`
 

@@ -46,8 +46,8 @@ export type TimeRangeApiParams = {
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Seconds per unit for relative period computation */
-const UNIT_SECONDS: Record<string, number> = {
+/** Seconds per unit for relative period computation. @internal Exported for reuse in duration parsers. */
+export const UNIT_SECONDS: Record<string, number> = {
   s: 1,
   m: 60,
   h: 3600,
@@ -82,7 +82,7 @@ export const PERIOD_BRIEF = `Time range: "7d", "${EXAMPLE_START}..${EXAMPLE_END}
  * Try to parse a relative period string (e.g., "7d") into its numeric value and unit.
  * Returns null if the string isn't a valid relative period.
  */
-function parseRelativeParts(
+export function parseRelativeParts(
   value: string
 ): { value: number; unit: string } | null {
   if (value.length < 2) {
