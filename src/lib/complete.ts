@@ -95,6 +95,7 @@ export const ORG_PROJECT_COMMANDS = new Set([
   "issue plan",
   "issue resolve",
   "issue unresolve",
+  "issue archive",
   "issue merge",
   "project list",
   "project view",

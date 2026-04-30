@@ -546,11 +546,26 @@ export function parseResolveSpec(
  * region via the org-scoped endpoint. Without it, falls back to the legacy
  * global `/issues/{id}/` endpoint (works but not region-aware).
  */
+/**
+ * Ignore/archive conditions for {@link updateIssueStatus}.
+ *
+ * - `ignoreDuration` — ignore for N minutes
+ * - `ignoreCount` / `ignoreWindow` — ignore until N events in M minutes
+ * - `ignoreUserCount` / `ignoreUserWindow` — ignore until N users in M minutes
+ */
+export type IgnoreStatusDetails = {
+  ignoreDuration?: number;
+  ignoreCount?: number;
+  ignoreWindow?: number;
+  ignoreUserCount?: number;
+  ignoreUserWindow?: number;
+};
+
 export async function updateIssueStatus(
   issueId: string,
   status: "resolved" | "unresolved" | "ignored",
   options?: {
-    statusDetails?: ResolveStatusDetails;
+    statusDetails?: ResolveStatusDetails | IgnoreStatusDetails;
     orgSlug?: string;
   }
 ): Promise<SentryIssue> {
