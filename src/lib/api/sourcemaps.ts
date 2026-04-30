@@ -74,8 +74,8 @@ export type AssembleResponse = z.infer<typeof AssembleResponseSchema>;
 export type ArtifactFile = {
   /** Filesystem path to the file. */
   path: string;
-  /** Debug ID injected into this file (from {@link injectDebugId}). */
-  debugId: string;
+  /** Debug ID injected into this file (from {@link injectDebugId}). Omitted when uploading without rewriting. */
+  debugId?: string;
   /**
    * File type for the manifest.
    * `"minified_source"` for JS files, `"source_map"` for .map files.
@@ -101,6 +101,8 @@ export type UploadOptions = {
   project: string;
   /** Release version (optional — debug IDs can work without releases). */
   release?: string;
+  /** Distribution identifier (optional — disambiguates builds within a release). */
+  dist?: string;
   /** Files to upload (must already have debug IDs injected). */
   files: ArtifactFile[];
 };
@@ -302,6 +304,7 @@ export async function buildArtifactBundle(
     org: string;
     project: string;
     release?: string;
+    dist?: string;
     compression?: ZipCompression;
   }
 ): Promise<void> {
@@ -317,9 +320,10 @@ export async function buildArtifactBundle(
 
   for (const file of files) {
     const bundlePath = urlToBundlePath(file.url);
-    const headers: Record<string, string> = {
-      "debug-id": file.debugId,
-    };
+    const headers: Record<string, string> = {};
+    if (file.debugId) {
+      headers["debug-id"] = file.debugId;
+    }
     if (file.sourcemapFilename) {
       headers.Sourcemap = file.sourcemapFilename;
     }
@@ -335,6 +339,7 @@ export async function buildArtifactBundle(
     org: options.org,
     project: options.project,
     ...(options.release ? { release: options.release } : {}),
+    ...(options.dist ? { dist: options.dist } : {}),
     files: filesManifest,
   });
 
@@ -403,7 +408,7 @@ export async function hashChunks(
  * @throws {ApiError} If the upload or assembly fails
  */
 export async function uploadSourcemaps(options: UploadOptions): Promise<void> {
-  const { org, project, release, files } = options;
+  const { org, project, release, dist, files } = options;
 
   // Step 1: Get chunk upload configuration
   const serverOptions = await getChunkUploadOptions(org);
@@ -424,6 +429,7 @@ export async function uploadSourcemaps(options: UploadOptions): Promise<void> {
       org,
       project,
       release,
+      dist,
       compression: zipCompression,
     });
     await uploadArtifactBundle({
@@ -431,6 +437,7 @@ export async function uploadSourcemaps(options: UploadOptions): Promise<void> {
       org,
       project,
       release,
+      dist,
       serverOptions,
       encoding,
     });
@@ -454,10 +461,12 @@ async function uploadArtifactBundle(opts: {
   org: string;
   project: string;
   release: string | undefined;
+  dist: string | undefined;
   serverOptions: ChunkServerOptions;
   encoding: UploadEncoding | undefined;
 }): Promise<void> {
-  const { tmpZipPath, org, project, release, serverOptions, encoding } = opts;
+  const { tmpZipPath, org, project, release, dist, serverOptions, encoding } =
+    opts;
   // Step 3: Split into chunks, hash each chunk + compute overall checksum
   const { chunks, overallChecksum } = await hashChunks(
     tmpZipPath,
@@ -472,6 +481,7 @@ async function uploadArtifactBundle(opts: {
     chunks: chunks.map((c: ChunkInfo) => c.sha1),
     projects: [project],
     ...(release ? { version: release } : {}),
+    ...(dist ? { dist } : {}),
   };
 
   const assembleEndpoint = `organizations/${org}/artifactbundle/assemble/`;
