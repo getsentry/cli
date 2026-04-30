@@ -6,8 +6,8 @@
  * Respects --yes flag for non-interactive mode.
  *
  * All UI I/O goes through the injected `WizardUI` so the dispatcher
- * works identically against `ClackUI` (interactive), `LoggingUI` (CI),
- * and the upcoming OpenTUI implementation.
+ * works identically against `InkUI` (interactive Bun binary) and
+ * `LoggingUI` (CI / npm fallback).
  */
 
 import chalk from "chalk";

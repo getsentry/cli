@@ -7,8 +7,8 @@
  * Low-level git primitives live in `src/lib/git.ts`. This module
  * re-exports them for backward compatibility and adds the interactive
  * `checkGitStatus` orchestrator. All UI I/O is routed through the
- * injected `WizardUI` so the same code drives clack, OpenTUI, and the
- * non-interactive `LoggingUI` paths.
+ * injected `WizardUI` so the same code drives `InkUI` (interactive)
+ * and `LoggingUI` (CI / npm) paths.
  */
 
 import {

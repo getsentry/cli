@@ -5,10 +5,10 @@
  * the UI implementations render. The previous version assembled
  * terminal-flavored markdown (color tags, an aligned key/value table,
  * a tree of changed files) and pushed it through `ui.log.message`.
- * That worked for `LoggingUI` (which calls `renderMarkdown`) but
- * showed literal markup like `<yellow>~</yellow>` and pipe-cells in
- * `OpenTuiUI` because TextRenderable can't parse markdown — only
- * strip ANSI.
+ * That worked for `LoggingUI` (which calls `renderMarkdown`) but the
+ * earlier TUI showed literal markup like `<yellow>~</yellow>` and
+ * pipe-cells because the underlying text primitive couldn't parse
+ * markdown — only strip ANSI.
  *
  * Now `formatResult` calls `ui.summary(structuredData)` and lets each
  * implementation decide how to lay it out. `formatError` still uses

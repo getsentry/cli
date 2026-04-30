@@ -112,7 +112,7 @@ export class LoggingUI implements WizardUI {
       this.writeLine(this.stdout, "");
       this.writeLine(this.stdout, "  Changed files:");
       // Render as a directory tree so collapsed common prefixes match
-      // what the OpenTuiUI panel + post-dispose stderr report show.
+      // what the InkUI panel + post-dispose summary report show.
       const tree = buildFileTree(summary.changedFiles);
       for (const row of flattenTree(tree)) {
         this.writeLine(this.stdout, `    ${formatTreeRowPlain(row)}`);
@@ -225,7 +225,7 @@ function changedFileGlyph(action: string): string {
 
 /**
  * Render a single `FileTreeRow` for the LoggingUI's stdout summary.
- * No colors — same shape as the OpenTuiUI / post-dispose tree, but
+ * No colors — same shape as the InkUI / post-dispose tree, but
  * box-drawing characters and glyphs ship as plain text so CI logs
  * stay greppable.
  */

@@ -8,7 +8,7 @@
  * All UI I/O — banners, spinners, logs, prompts, outro — flows through
  * a single `WizardUI` instance constructed by `getUI()`. The runner
  * itself is implementation-agnostic: it works the same against
- * `ClackUI`, `LoggingUI`, and the upcoming OpenTUI implementation.
+ * `LoggingUI` (CI / npm) and `InkUI` (interactive Bun binary).
  */
 
 import { randomBytes } from "node:crypto";
@@ -193,7 +193,7 @@ async function handleSuspendedStep(
         : describeTool(payload));
     spin.message(renderInlineMarkdown(truncateForTerminal(message)));
 
-    // Inline file-read status line (OpenTuiUI only — `LoggingUI`
+    // Inline / sidebar file-read status (`InkUI` only — `LoggingUI`
     // leaves these methods undefined). The previous flow showed a
     // half-second tree of files in the spinner before the next tool
     // overwrote it; users couldn't see what context the wizard
@@ -368,13 +368,14 @@ async function preamble(
   }
 
   // Banner rendering is delegated to the UI implementation:
-  //   - `OpenTuiUI` paints the banner inside its alternate-screen
-  //     header, gradient-colored row by row, and treats `banner()` as
-  //     a no-op (the layout already includes it).
+  //   - `InkUI` paints the banner from a pre-loaded gradient at the
+  //     top of its layout and treats this call as a no-op (the
+  //     layout already includes it).
   //   - `LoggingUI` writes a plain ANSI version to stderr.
   // Calling it on `ui` directly avoids the previous bug where a raw
   // `process.stderr.write` was hidden behind OpenTUI's alternate-
-  // screen takeover.
+  // screen takeover (no longer applicable post-Ink, but `ui.banner`
+  // remains the canonical entry point).
   ui.banner(formatBanner());
   ui.intro("sentry init");
 
@@ -435,9 +436,9 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   const { directory, yes, dryRun, features, forceLegacyUi } = initialOptions;
 
   // Construct the UI once for the entire run; tear down on every exit
-  // path via `await using`. The factory picks `OpenTuiUI` for
-  // interactive runs on the Bun binary and `LoggingUI` everywhere else
-  // (CI, `--yes`, `--no-tui`, npm/Node distribution).
+  // path via `await using`. The factory picks `InkUI` for interactive
+  // runs on the Bun binary and `LoggingUI` everywhere else (CI,
+  // `--yes`, `--no-tui`, npm/Node distribution).
   await using ui = await getUIAsync({
     yes,
     forceLegacy: forceLegacyUi,
@@ -566,8 +567,8 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   const stepHistory = new Map<string, Record<string, unknown>[]>();
 
   // Track which step the runner is currently suspended on so the
-  // OpenTUI sidebar checklist can flip rows as the workflow advances.
-  // A single step can suspend multiple times (read-files → analyze →
+  // sidebar checklist can flip rows as the workflow advances. A
+  // single step can suspend multiple times (read-files → analyze →
   // done); `setStep("...", "in_progress")` is idempotent in the
   // store, and we only fire the `completed` transition when the
   // active step changes.

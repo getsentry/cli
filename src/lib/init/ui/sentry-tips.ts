@@ -2,7 +2,7 @@
  * Sentry Tips
  *
  * Curated set of short product facts shown rotating in the sidebar of
- * `OpenTuiUI` while the wizard runs. Each tip should:
+ * the Ink sidebar while the wizard runs. Each tip should:
  *
  *   - fit comfortably in ~36 columns (the sidebar width) when wrapped
  *   - mention a concrete capability the user can apply after onboarding

@@ -121,13 +121,13 @@ export type ConfirmOptions = {
  * implementation choose its own presentation:
  *   - `LoggingUI` writes a compact two-column key/value listing to
  *     stdout, plus a flat list of changed files.
- *   - `OpenTuiUI` mounts a colored panel inside the alternate-screen
- *     layout with proper alignment and per-action glyphs.
+ *   - `InkUI` mounts a colored panel below the log stream with
+ *     proper alignment and per-action glyphs.
  *
  * Previously `formatResult` built terminal markdown and called
  * `ui.log.message(markdown)` — this leaked literal `<color>` tags
- * into the OpenTUI panel because OpenTUI's `TextRenderable` has no
- * markdown parser, only a `stripAnsi` step.
+ * because the TUI's text renderer had no markdown parser, only a
+ * `stripAnsi` step.
  */
 export type WizardSummary = {
   /** Flat list of `<label>: <value>` rows (e.g. Platform, Directory). */
@@ -148,10 +148,10 @@ export type WizardUI = AsyncDisposable & {
 
   /**
    * Display the multi-line ASCII banner. Implementations decide where
-   * the banner appears: `OpenTuiUI` paints it inside its alternate-
-   * screen header (the call may be a no-op if the header already shows
-   * it), while `LoggingUI` writes the pre-styled ANSI string to stderr.
-   * Always called once, before `intro()`.
+   * the banner appears: `InkUI` paints it from a pre-loaded gradient
+   * inside its layout (the call is a no-op there), while `LoggingUI`
+   * writes the pre-styled ANSI string to stderr. Always called once,
+   * before `intro()`.
    */
   banner(art: string): void;
 
@@ -161,7 +161,7 @@ export type WizardUI = AsyncDisposable & {
   /**
    * Render a structured completion summary. See {@link WizardSummary}.
    * Implementations are free to choose layout — there's no markdown
-   * involved so OpenTUI doesn't have to parse anything.
+   * involved so the Ink renderer doesn't have to parse anything.
    */
   summary(summary: WizardSummary): void;
 
@@ -177,10 +177,11 @@ export type WizardUI = AsyncDisposable & {
   /**
    * Notify the UI that the wizard is reading the listed files from
    * disk. Optional — implementations that don't track reads (e.g.
-   * `LoggingUI`) leave this undefined. `OpenTuiUI` uses it to drive
-   * a single-line file-read status indicator above the spinner, so
-   * the user can see what context the AI looked at instead of
-   * losing it in a half-second spinner flash.
+   * `LoggingUI`) leave this undefined. `InkUI` uses it to drive both
+   * the inline file-read status line on narrow terminals and the
+   * sidebar `FilesPanel` tree on wider ones, so the user can see what
+   * context the AI looked at instead of losing it in a half-second
+   * spinner flash.
    */
   recordFilesReading?(paths: string[]): void;
 
@@ -193,8 +194,8 @@ export type WizardUI = AsyncDisposable & {
   /**
    * Notify the UI that a workflow step has changed status. Optional —
    * `LoggingUI` leaves this undefined since the running log already
-   * narrates progress. `OpenTuiUI` uses it to drive the static
-   * progress checklist in the sidebar.
+   * narrates progress. `InkUI` uses it to drive the static progress
+   * checklist in the sidebar.
    *
    * Status semantics:
    *   - `"in_progress"` — the runner just suspended on this step.

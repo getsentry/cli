@@ -127,7 +127,7 @@ export const STEP_LABELS: Record<string, string> = {
 /**
  * Canonical execution order of the wizard's workflow steps.
  *
- * Used by the OpenTUI sidebar's progress checklist as the static
+ * Used by the Ink sidebar's progress checklist as the static
  * pre-rendered list. The wizard advertises step transitions via
  * `WizardUI.setStep(...)`; the store back-fills any earlier
  * `pending` rows as `skipped` when a later step starts (the workflow
@@ -154,7 +154,7 @@ export const CANONICAL_STEP_ORDER: readonly string[] = [
 
 /**
  * Subset of {@link CANONICAL_STEP_ORDER} surfaced in the progress
- * checklist. The OpenTUI sidebar is 36 cols wide and shares vertical
+ * checklist. The Ink sidebar is 36 cols wide and shares vertical
  * space with the tip card and the files-read panel, so showing all
  * 12 step rows would push the files panel off-screen on shorter
  * terminals.

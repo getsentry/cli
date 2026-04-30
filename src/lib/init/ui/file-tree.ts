@@ -1,16 +1,17 @@
 /**
  * Changed-files tree builder.
  *
- * Both `OpenTuiUI`'s React `<SummaryPanel>` and `LoggingUI.summary()`
- * (plus the post-dispose stderr report) want a nested directory tree
- * view of the wizard's changed files — collapses common prefixes and
- * makes the actual scope of edits visible at a glance.
+ * Both `InkUI`'s React `<SummaryPanel>` / `<FilesPanel>` and
+ * `LoggingUI.summary()` (plus the post-dispose chalk report) want a
+ * nested directory tree view of the wizard's changed files —
+ * collapses common prefixes and makes the actual scope of edits
+ * visible at a glance.
  *
  * The pre-React formatter built this with `colorTag()` markdown tags
- * (`<green>+</green>`); the new TUI can't render those because OpenTUI
- * strips ANSI from `TextRenderable.content`. Keeping the tree as
- * pure data plus a flat render-list lets each renderer attach its
- * own colors / box-drawing.
+ * (`<green>+</green>`); the TUI couldn't render those because the
+ * text renderer stripped ANSI/markdown. Keeping the tree as pure
+ * data plus a flat render-list lets each renderer attach its own
+ * colors / box-drawing.
  */
 
 export type ChangedFile = {
@@ -20,7 +21,7 @@ export type ChangedFile = {
 
 /**
  * One entry in the read-files tree. `status` mirrors the
- * `FileReadEntry.status` shape from the wizard store so the OpenTUI
+ * `FileReadEntry.status` shape from the wizard store so the Ink
  * `FilesPanel` can render an at-a-glance icon per row.
  */
 export type ReadFile = {
@@ -200,8 +201,8 @@ function rowFor(
  * `action`.
  *
  * Insertion order is preserved (no sort) so newly-read files always
- * land at the bottom of their parent directory — gives the OpenTUI
- * `FilesPanel`'s sticky-bottom scrollbox a stable "tail -f" feel.
+ * land at the bottom of their parent directory — gives the Ink
+ * `FilesPanel`'s tail-window viewport a stable "tail -f" feel.
  */
 export function buildReadTree(files: ReadFile[]): FileTreeNode {
   const root: FileTreeNode = { name: "", children: [] };
