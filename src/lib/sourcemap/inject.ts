@@ -6,7 +6,7 @@
  */
 
 import { open, readFile, stat } from "node:fs/promises";
-import { dirname, relative, resolve as resolvePath } from "node:path";
+import { dirname, relative, resolve as resolvePath, sep } from "node:path";
 import ignore from "ignore";
 import { NODE_MODULES_DIRNAME } from "../constants.js";
 import { ValidationError } from "../errors.js";
@@ -298,7 +298,8 @@ export async function discoverFilePairs(
       // upload directory (e.g. "../../other/app.js.map"). Convention-based
       // maps (foo.js.map) are always adjacent so they're inherently safe.
       // Trailing separator prevents prefix collisions (e.g. /dist vs /dist-backup).
-      const dirPrefix = absDir.endsWith("/") ? absDir : `${absDir}/`;
+      // Use path.sep for Windows compatibility (backslash separators).
+      const dirPrefix = absDir.endsWith(sep) ? absDir : `${absDir}${sep}`;
       if (!mapPath.startsWith(dirPrefix)) {
         log.debug(
           `skipping sourcemap outside directory: ${mapPath} (resolved from ${entry.absolutePath})`
