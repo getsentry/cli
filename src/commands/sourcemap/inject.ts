@@ -95,7 +95,7 @@ export const injectCommand = buildCommand({
       ignore: {
         kind: "parsed",
         parse: String,
-        brief: "Glob pattern to exclude (gitignore-style, repeatable)",
+        brief: "Comma-separated glob patterns to exclude (gitignore-style)",
         optional: true,
       },
       "ignore-file": {
