@@ -566,12 +566,17 @@ export async function updateIssueStatus(
   status: "resolved" | "unresolved" | "ignored",
   options?: {
     statusDetails?: ResolveStatusDetails | IgnoreStatusDetails;
+    /** Substatus for archive granularity: `archived_until_escalating`, `archived_until_condition_met`, `archived_forever`. */
+    substatus?: string;
     orgSlug?: string;
   }
 ): Promise<SentryIssue> {
   const body: Record<string, unknown> = { status };
   if (options?.statusDetails) {
     body.statusDetails = options.statusDetails;
+  }
+  if (options?.substatus) {
+    body.substatus = options.substatus;
   }
 
   if (options?.orgSlug) {

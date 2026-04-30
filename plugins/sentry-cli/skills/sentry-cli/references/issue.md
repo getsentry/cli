@@ -210,6 +210,7 @@ Reopen a resolved issue
 Archive (ignore) an issue
 
 **Flags:**
+- `--until-escalating - Archive until the issue escalates (spikes in frequency)`
 - `--duration <value> - Ignore for this many minutes`
 - `--count <value> - Ignore until this many more events occur`
 - `--window <value> - Time window in minutes for --count (events must occur within this window)`

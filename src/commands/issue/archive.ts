@@ -25,6 +25,7 @@ const COMMAND = "archive";
 type ArchiveFlags = {
   readonly json: boolean;
   readonly fields?: string[];
+  readonly "until-escalating"?: boolean;
   readonly duration?: number;
   readonly count?: number;
   readonly window?: number;
@@ -36,14 +37,72 @@ function formatArchived(issue: SentryIssue): string {
   return `${muted("Archived")}\n\n${formatIssueDetails(issue)}`;
 }
 
+/** Validate flag dependencies and compute substatus + statusDetails. */
+function resolveArchiveOptions(flags: ArchiveFlags): {
+  substatus: string;
+  statusDetails?: IgnoreStatusDetails;
+} {
+  if (flags.window !== undefined && flags.count === undefined) {
+    throw new ValidationError(
+      "--window requires --count (time window is only meaningful with an event count threshold)"
+    );
+  }
+  if (flags["user-window"] !== undefined && flags.users === undefined) {
+    throw new ValidationError(
+      "--user-window requires --users (time window is only meaningful with a user count threshold)"
+    );
+  }
+
+  const hasConditionFlags =
+    flags.duration !== undefined ||
+    flags.count !== undefined ||
+    flags.users !== undefined;
+
+  if (flags["until-escalating"] && hasConditionFlags) {
+    throw new ValidationError(
+      "--until-escalating cannot be combined with --duration, --count, or --users"
+    );
+  }
+
+  if (flags["until-escalating"]) {
+    return { substatus: "archived_until_escalating" };
+  }
+  if (!hasConditionFlags) {
+    return { substatus: "archived_forever" };
+  }
+
+  const details: IgnoreStatusDetails = {};
+  if (flags.duration !== undefined) {
+    details.ignoreDuration = flags.duration;
+  }
+  if (flags.count !== undefined) {
+    details.ignoreCount = flags.count;
+  }
+  if (flags.window !== undefined) {
+    details.ignoreWindow = flags.window;
+  }
+  if (flags.users !== undefined) {
+    details.ignoreUserCount = flags.users;
+  }
+  if (flags["user-window"] !== undefined) {
+    details.ignoreUserWindow = flags["user-window"];
+  }
+  return { substatus: "archived_until_condition_met", statusDetails: details };
+}
+
 export const archiveCommand = buildCommand({
   docs: {
     brief: "Archive (ignore) an issue",
     fullDescription:
-      "Archive an issue, suppressing alerts until an optional condition is met.\n" +
-      "Without any duration/count flags, the issue is archived indefinitely.\n\n" +
+      "Archive an issue, suppressing alerts until an optional condition is met.\n\n" +
+      "Archive modes:\n" +
+      "  (no flags)           Archive forever\n" +
+      "  --until-escalating   Archive until a spike in event frequency\n" +
+      "  --duration <mins>    Archive for a fixed time period\n" +
+      "  --count/--users      Archive until a threshold is reached\n\n" +
       "Examples:\n" +
       "  sentry issue archive CLI-12Z\n" +
+      "  sentry issue archive CLI-12Z --until-escalating\n" +
       "  sentry issue archive CLI-12Z --duration 60\n" +
       "  sentry issue archive CLI-12Z --count 100 --window 60\n" +
       "  sentry issue archive CLI-12Z --users 10",
@@ -54,6 +113,12 @@ export const archiveCommand = buildCommand({
   parameters: {
     positional: issueIdPositional,
     flags: {
+      "until-escalating": {
+        kind: "boolean",
+        brief: "Archive until the issue escalates (spikes in frequency)",
+        optional: true,
+        default: false,
+      },
       duration: {
         kind: "parsed",
         parse: numberParser,
@@ -89,47 +154,17 @@ export const archiveCommand = buildCommand({
     },
   },
   async *func(this: SentryContext, flags: ArchiveFlags, issueArg: string) {
-    const { cwd } = this;
-
-    // Validate dependent flag combinations
-    if (flags.window !== undefined && flags.count === undefined) {
-      throw new ValidationError(
-        "--window requires --count (time window is only meaningful with an event count threshold)"
-      );
-    }
-    if (flags["user-window"] !== undefined && flags.users === undefined) {
-      throw new ValidationError(
-        "--user-window requires --users (time window is only meaningful with a user count threshold)"
-      );
-    }
+    const { substatus, statusDetails } = resolveArchiveOptions(flags);
 
     const { org, issue } = await resolveIssue({
       issueArg,
-      cwd,
+      cwd: this.cwd,
       command: COMMAND,
     });
 
-    const statusDetails: IgnoreStatusDetails = {};
-    if (flags.duration !== undefined) {
-      statusDetails.ignoreDuration = flags.duration;
-    }
-    if (flags.count !== undefined) {
-      statusDetails.ignoreCount = flags.count;
-    }
-    if (flags.window !== undefined) {
-      statusDetails.ignoreWindow = flags.window;
-    }
-    if (flags.users !== undefined) {
-      statusDetails.ignoreUserCount = flags.users;
-    }
-    if (flags["user-window"] !== undefined) {
-      statusDetails.ignoreUserWindow = flags["user-window"];
-    }
-
-    const hasDetails = Object.keys(statusDetails).length > 0;
-
     const updated = await updateIssueStatus(issue.id, "ignored", {
-      ...(hasDetails ? { statusDetails } : {}),
+      ...(statusDetails ? { statusDetails } : {}),
+      substatus,
       orgSlug: org,
     });
 
