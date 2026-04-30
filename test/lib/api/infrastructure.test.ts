@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { throwApiError } from "../../../src/lib/api/infrastructure.js";
 import { ApiError } from "../../../src/lib/errors.js";
 
@@ -97,5 +97,143 @@ describe("throwApiError", () => {
       expect(apiError.message).toBe("Failed to get event: Network error");
       expect(apiError.detail).toContain("ECONNREFUSED");
     }
+  });
+
+  test("non-403 errors do not get enriched", () => {
+    const mockResponse = new Response("", {
+      status: 404,
+      statusText: "Not Found",
+    });
+
+    try {
+      throwApiError(
+        { detail: "Resource not found" },
+        mockResponse,
+        "Failed to get org"
+      );
+    } catch (error) {
+      const apiError = error as ApiError;
+      expect(apiError.enriched403).toBe(false);
+      expect(apiError.detail).toBe("Resource not found");
+    }
+  });
+
+  describe("403 enrichment", () => {
+    // Test preload sets SENTRY_AUTH_TOKEN, so isEnvTokenActive() returns true
+    // by default in these tests.
+
+    test("enriches 403 with env-var token hints", () => {
+      const mockResponse = new Response("", {
+        status: 403,
+        statusText: "Forbidden",
+      });
+
+      try {
+        throwApiError(
+          { detail: "You do not have permission to perform this action." },
+          mockResponse,
+          "Failed to get organization"
+        );
+      } catch (error) {
+        const apiError = error as ApiError;
+        expect(apiError.enriched403).toBe(true);
+        expect(apiError.status).toBe(403);
+        expect(apiError.detail).toContain(
+          "You do not have permission to perform this action."
+        );
+        expect(apiError.detail).toContain("SENTRY_AUTH_TOKEN");
+        expect(apiError.detail).toContain(
+          "https://sentry.io/settings/auth-tokens/"
+        );
+      }
+    });
+
+    test("extracts specific scope names when present in detail", () => {
+      const mockResponse = new Response("", {
+        status: 403,
+        statusText: "Forbidden",
+      });
+
+      try {
+        throwApiError(
+          {
+            detail:
+              "You do not have permission. Required scope: org:read, project:read",
+          },
+          mockResponse,
+          "Failed to list issues"
+        );
+      } catch (error) {
+        const apiError = error as ApiError;
+        expect(apiError.enriched403).toBe(true);
+        expect(apiError.detail).toContain(
+          "missing the required scope(s) 'org:read', 'project:read'"
+        );
+      }
+    });
+
+    test("uses generic scope hint when no scope names in detail", () => {
+      const mockResponse = new Response("", {
+        status: 403,
+        statusText: "Forbidden",
+      });
+
+      try {
+        throwApiError(
+          { detail: "You do not have permission to perform this action." },
+          mockResponse,
+          "Failed to get organization"
+        );
+      } catch (error) {
+        const apiError = error as ApiError;
+        expect(apiError.detail).toContain(
+          "may lack the required scope for this operation"
+        );
+      }
+    });
+
+    describe("with OAuth token (no env var)", () => {
+      let savedToken: string | undefined;
+
+      beforeEach(() => {
+        savedToken = process.env.SENTRY_AUTH_TOKEN;
+        delete process.env.SENTRY_AUTH_TOKEN;
+        delete process.env.SENTRY_TOKEN;
+      });
+
+      afterEach(() => {
+        if (savedToken !== undefined) {
+          process.env.SENTRY_AUTH_TOKEN = savedToken;
+        } else {
+          delete process.env.SENTRY_AUTH_TOKEN;
+        }
+      });
+
+      test("suggests re-authentication for OAuth tokens", () => {
+        const mockResponse = new Response("", {
+          status: 403,
+          statusText: "Forbidden",
+        });
+
+        try {
+          throwApiError(
+            {
+              detail: "You do not have permission to perform this action.",
+            },
+            mockResponse,
+            "Failed to get organization"
+          );
+        } catch (error) {
+          const apiError = error as ApiError;
+          expect(apiError.enriched403).toBe(true);
+          expect(apiError.detail).toContain(
+            "You may not have access to this resource."
+          );
+          expect(apiError.detail).toContain("sentry auth login");
+          // Should NOT mention SENTRY_AUTH_TOKEN
+          expect(apiError.detail).not.toContain("SENTRY_AUTH_TOKEN");
+        }
+      });
+    });
   });
 });
