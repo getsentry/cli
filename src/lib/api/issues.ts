@@ -535,18 +535,6 @@ export function parseResolveSpec(
 }
 
 /**
- * Update an issue's status.
- *
- * When `status === "resolved"`, optional `statusDetails` can pin the fix
- * to a release or commit (see {@link ResolveStatusDetails}). Without
- * `statusDetails`, the issue is resolved immediately with no regression
- * tracking — equivalent to clicking "Resolve" in the Sentry UI.
- *
- * When `options.orgSlug` is provided, the request is routed to that org's
- * region via the org-scoped endpoint. Without it, falls back to the legacy
- * global `/issues/{id}/` endpoint (works but not region-aware).
- */
-/**
  * Ignore/archive conditions for {@link updateIssueStatus}.
  *
  * - `ignoreDuration` — ignore for N minutes
@@ -561,6 +549,18 @@ export type IgnoreStatusDetails = {
   ignoreUserWindow?: number;
 };
 
+/**
+ * Update an issue's status.
+ *
+ * When `status === "resolved"`, optional `statusDetails` can pin the fix
+ * to a release or commit (see {@link ResolveStatusDetails}). Without
+ * `statusDetails`, the issue is resolved immediately with no regression
+ * tracking — equivalent to clicking "Resolve" in the Sentry UI.
+ *
+ * When `options.orgSlug` is provided, the request is routed to that org's
+ * region via the org-scoped endpoint. Without it, falls back to the legacy
+ * global `/issues/{id}/` endpoint (works but not region-aware).
+ */
 export async function updateIssueStatus(
   issueId: string,
   status: "resolved" | "unresolved" | "ignored",
