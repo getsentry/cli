@@ -192,7 +192,7 @@ describe("throwApiError", () => {
       }
     });
 
-    test("handles undefined detail without producing 'undefined' string", () => {
+    test("handles undefined detail without producing noise", () => {
       const mockResponse = new Response("", {
         status: 403,
         statusText: "Forbidden",
@@ -209,12 +209,13 @@ describe("throwApiError", () => {
         expect(apiError.enriched403).toBe(true);
         // Should contain enrichment hints
         expect(apiError.detail).toContain("SENTRY_AUTH_TOKEN");
-        // Should NOT contain the literal string "undefined" as output
-        expect(apiError.detail).not.toMatch(/^undefined\n/);
+        // Should NOT contain noisy fallback strings
+        expect(apiError.detail).not.toMatch(/^undefined/);
+        expect(apiError.detail).not.toContain("{}");
       }
     });
 
-    test("handles null detail without producing 'null' string", () => {
+    test("handles null detail without producing noise", () => {
       const mockResponse = new Response("", {
         status: 403,
         statusText: "Forbidden",
@@ -230,7 +231,9 @@ describe("throwApiError", () => {
         const apiError = error as ApiError;
         expect(apiError.enriched403).toBe(true);
         expect(apiError.detail).toContain("SENTRY_AUTH_TOKEN");
-        expect(apiError.detail).not.toMatch(/^null\n/);
+        // Should NOT contain noisy fallback strings
+        expect(apiError.detail).not.toMatch(/^null/);
+        expect(apiError.detail).not.toContain('{"detail":null}');
       }
     });
 

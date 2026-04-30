@@ -114,19 +114,20 @@ export function throwApiError(
     error && typeof error === "object" && "detail" in error
       ? (error as { detail: unknown }).detail
       : undefined;
+  const hasUsableDetail = rawDetail !== null && rawDetail !== undefined;
   // When the API returns `{ detail: null }` or `{ detail: undefined }`,
-  // fall back to stringifying the whole error object rather than producing
-  // the misleading string literal "undefined" / "null".
-  const detail =
-    rawDetail !== null && rawDetail !== undefined
-      ? stringifyUnknown(rawDetail)
-      : stringifyUnknown(error);
+  // fall back to stringifying the whole error object for non-403 errors
+  // (useful for debugging). For 403s, pass undefined to enrich403Detail
+  // so the enrichment stands alone without a noisy `{}` prefix.
+  const detail = hasUsableDetail
+    ? stringifyUnknown(rawDetail)
+    : stringifyUnknown(error);
 
   const is403 = status === 403;
   throw new ApiError(
     `${context}: ${status} ${response.statusText ?? "Unknown"}`,
     status,
-    is403 ? enrich403Detail(detail) : detail,
+    is403 ? enrich403Detail(hasUsableDetail ? detail : undefined) : detail,
     undefined,
     is403
   );
