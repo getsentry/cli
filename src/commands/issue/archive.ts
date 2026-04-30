@@ -10,7 +10,7 @@ import {
   type IgnoreStatusDetails,
   updateIssueStatus,
 } from "../../lib/api-client.js";
-import { buildCommand } from "../../lib/command.js";
+import { buildCommand, numberParser } from "../../lib/command.js";
 import { formatIssueDetails, muted } from "../../lib/formatters/index.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
@@ -55,32 +55,32 @@ export const archiveCommand = buildCommand({
     flags: {
       duration: {
         kind: "parsed",
-        parse: Number,
+        parse: numberParser,
         brief: "Ignore for this many minutes",
         optional: true,
       },
       count: {
         kind: "parsed",
-        parse: Number,
+        parse: numberParser,
         brief: "Ignore until this many more events occur",
         optional: true,
       },
       window: {
         kind: "parsed",
-        parse: Number,
+        parse: numberParser,
         brief:
           "Time window in minutes for --count (events must occur within this window)",
         optional: true,
       },
       users: {
         kind: "parsed",
-        parse: Number,
+        parse: numberParser,
         brief: "Ignore until this many more users are affected",
         optional: true,
       },
       "user-window": {
         kind: "parsed",
-        parse: Number,
+        parse: numberParser,
         brief:
           "Time window in minutes for --users (users must be affected within this window)",
         optional: true,
