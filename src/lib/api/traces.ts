@@ -23,7 +23,7 @@ import { isAllDigits } from "../utils.js";
 import {
   API_MAX_PER_PAGE,
   apiRequestToRegion,
-  MAX_PAGINATION_PAGES,
+  autoPaginate,
   type PaginatedResponse,
   parseLinkHeader,
 } from "./infrastructure.js";
@@ -371,45 +371,18 @@ export async function listTransactions(
   const limit = options.limit || 10;
   const perPage = Math.min(limit, API_MAX_PER_PAGE);
 
-  // Fast path: single-page fetch when limit fits in one API page
-  if (limit <= API_MAX_PER_PAGE) {
-    return fetchTransactionsPage(
-      regionUrl,
-      orgSlug,
-      projectSlug,
-      options,
-      perPage
-    );
-  }
-
-  // Multi-page: accumulate rows across pages up to the requested limit
-  const allRows: TransactionListItem[] = [];
-  let cursor: string | undefined = options.cursor;
-
-  for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
-    const result = await fetchTransactionsPage(
-      regionUrl,
-      orgSlug,
-      projectSlug,
-      { ...options, cursor },
-      perPage
-    );
-
-    allRows.push(...result.data);
-
-    // Stop when we've reached the requested limit or there are no more pages
-    if (allRows.length >= limit || !result.nextCursor) {
-      if (allRows.length > limit) {
-        return { data: allRows.slice(0, limit) };
-      }
-      return { data: allRows, nextCursor: result.nextCursor };
-    }
-
-    cursor = result.nextCursor;
-  }
-
-  // Safety limit reached — return what we have, no nextCursor
-  return { data: allRows.slice(0, limit) };
+  return autoPaginate(
+    (cursor) =>
+      fetchTransactionsPage(
+        regionUrl,
+        orgSlug,
+        projectSlug,
+        { ...options, cursor },
+        perPage
+      ),
+    limit,
+    options.cursor
+  );
 }
 
 // Span listing
@@ -535,37 +508,16 @@ export async function listSpans(
   const limit = options.limit || 10;
   const perPage = Math.min(limit, API_MAX_PER_PAGE);
 
-  // Fast path: single-page fetch when limit fits in one API page
-  if (limit <= API_MAX_PER_PAGE) {
-    return fetchSpansPage(regionUrl, orgSlug, projectSlug, options, perPage);
-  }
-
-  // Multi-page: accumulate rows across pages up to the requested limit
-  const allRows: SpanListItem[] = [];
-  let cursor: string | undefined = options.cursor;
-
-  for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
-    const result = await fetchSpansPage(
-      regionUrl,
-      orgSlug,
-      projectSlug,
-      { ...options, cursor },
-      perPage
-    );
-
-    allRows.push(...result.data);
-
-    // Stop when we've reached the requested limit or there are no more pages
-    if (allRows.length >= limit || !result.nextCursor) {
-      if (allRows.length > limit) {
-        return { data: allRows.slice(0, limit) };
-      }
-      return { data: allRows, nextCursor: result.nextCursor };
-    }
-
-    cursor = result.nextCursor;
-  }
-
-  // Safety limit reached — return what we have, no nextCursor
-  return { data: allRows.slice(0, limit) };
+  return autoPaginate(
+    (cursor) =>
+      fetchSpansPage(
+        regionUrl,
+        orgSlug,
+        projectSlug,
+        { ...options, cursor },
+        perPage
+      ),
+    limit,
+    options.cursor
+  );
 }

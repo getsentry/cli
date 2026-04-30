@@ -219,6 +219,54 @@ export type PaginatedResponse<T> = {
 };
 
 /**
+ * Auto-paginate across multiple API pages, accumulating results up to `limit`.
+ *
+ * Calls `fetchPage` repeatedly until enough rows are collected or pages are
+ * exhausted. Caps at {@link MAX_PAGINATION_PAGES} to prevent runaway loops.
+ *
+ * The caller is responsible for baking `perPage` into the `fetchPage` closure
+ * (typically `Math.min(limit, API_MAX_PER_PAGE)`). This helper only manages
+ * cursor chaining and row accumulation.
+ *
+ * @param fetchPage - Async function that fetches a single page given a cursor
+ * @param limit - Total number of items to collect
+ * @param initialCursor - Optional starting cursor
+ * @returns Accumulated items with optional nextCursor from the last page
+ */
+export async function autoPaginate<T>(
+  fetchPage: (cursor: string | undefined) => Promise<PaginatedResponse<T[]>>,
+  limit: number,
+  initialCursor?: string
+): Promise<PaginatedResponse<T[]>> {
+  // Fast path: single-page fetch when limit fits in one API page
+  if (limit <= API_MAX_PER_PAGE) {
+    return fetchPage(initialCursor);
+  }
+
+  // Multi-page: accumulate rows across pages up to the requested limit
+  const allRows: T[] = [];
+  let cursor: string | undefined = initialCursor;
+
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
+    const result = await fetchPage(cursor);
+    allRows.push(...result.data);
+
+    if (allRows.length >= limit || !result.nextCursor) {
+      // Overshot — trim and drop nextCursor (cursor would skip items)
+      if (allRows.length > limit) {
+        return { data: allRows.slice(0, limit) };
+      }
+      return { data: allRows, nextCursor: result.nextCursor };
+    }
+
+    cursor = result.nextCursor;
+  }
+
+  // Safety limit reached — return what we have, no nextCursor
+  return { data: allRows.slice(0, limit) };
+}
+
+/**
  * Make an authenticated request to a specific Sentry region.
  * Returns both parsed response data and raw headers for pagination support.
  * Used for internal endpoints not covered by @sentry/api SDK functions.

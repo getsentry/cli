@@ -40,6 +40,7 @@ export {
   type ApiRequestOptions,
   apiRequest,
   apiRequestToRegion,
+  autoPaginate,
   buildSearchParams,
   ORG_FANOUT_CONCURRENCY,
   type PaginatedResponse,
