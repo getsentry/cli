@@ -110,9 +110,16 @@ export function throwApiError(
   }
 
   const status = response.status;
-  const detail =
+  const rawDetail =
     error && typeof error === "object" && "detail" in error
-      ? stringifyUnknown((error as { detail: unknown }).detail)
+      ? (error as { detail: unknown }).detail
+      : undefined;
+  // When the API returns `{ detail: null }` or `{ detail: undefined }`,
+  // fall back to stringifying the whole error object rather than producing
+  // the misleading string literal "undefined" / "null".
+  const detail =
+    rawDetail !== null && rawDetail !== undefined
+      ? stringifyUnknown(rawDetail)
       : stringifyUnknown(error);
 
   const is403 = status === 403;

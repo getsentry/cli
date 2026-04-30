@@ -192,20 +192,69 @@ describe("throwApiError", () => {
       }
     });
 
+    test("handles undefined detail without producing 'undefined' string", () => {
+      const mockResponse = new Response("", {
+        status: 403,
+        statusText: "Forbidden",
+      });
+
+      try {
+        throwApiError(
+          { detail: undefined },
+          mockResponse,
+          "Failed to get organization"
+        );
+      } catch (error) {
+        const apiError = error as ApiError;
+        expect(apiError.enriched403).toBe(true);
+        // Should contain enrichment hints
+        expect(apiError.detail).toContain("SENTRY_AUTH_TOKEN");
+        // Should NOT contain the literal string "undefined" as output
+        expect(apiError.detail).not.toMatch(/^undefined\n/);
+      }
+    });
+
+    test("handles null detail without producing 'null' string", () => {
+      const mockResponse = new Response("", {
+        status: 403,
+        statusText: "Forbidden",
+      });
+
+      try {
+        throwApiError(
+          { detail: null },
+          mockResponse,
+          "Failed to get organization"
+        );
+      } catch (error) {
+        const apiError = error as ApiError;
+        expect(apiError.enriched403).toBe(true);
+        expect(apiError.detail).toContain("SENTRY_AUTH_TOKEN");
+        expect(apiError.detail).not.toMatch(/^null\n/);
+      }
+    });
+
     describe("with OAuth token (no env var)", () => {
+      let savedAuthToken: string | undefined;
       let savedToken: string | undefined;
 
       beforeEach(() => {
-        savedToken = process.env.SENTRY_AUTH_TOKEN;
+        savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
+        savedToken = process.env.SENTRY_TOKEN;
         delete process.env.SENTRY_AUTH_TOKEN;
         delete process.env.SENTRY_TOKEN;
       });
 
       afterEach(() => {
-        if (savedToken !== undefined) {
-          process.env.SENTRY_AUTH_TOKEN = savedToken;
+        if (savedAuthToken !== undefined) {
+          process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
         } else {
           delete process.env.SENTRY_AUTH_TOKEN;
+        }
+        if (savedToken !== undefined) {
+          process.env.SENTRY_TOKEN = savedToken;
+        } else {
+          delete process.env.SENTRY_TOKEN;
         }
       });
 
