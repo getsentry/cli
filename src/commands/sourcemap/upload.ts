@@ -7,7 +7,10 @@
  */
 
 import { relative, resolve } from "node:path";
-import { dirname as posixDirname, relative as posixRelative } from "node:path/posix";
+import {
+  dirname as posixDirname,
+  relative as posixRelative,
+} from "node:path/posix";
 import type { SentryContext } from "../../context.js";
 import {
   type ArtifactFile,
