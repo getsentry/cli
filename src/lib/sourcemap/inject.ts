@@ -297,7 +297,9 @@ export async function discoverFilePairs(
       // Guard against sourceMappingURL directives that resolve outside the
       // upload directory (e.g. "../../other/app.js.map"). Convention-based
       // maps (foo.js.map) are always adjacent so they're inherently safe.
-      if (!mapPath.startsWith(absDir)) {
+      // Trailing separator prevents prefix collisions (e.g. /dist vs /dist-backup).
+      const dirPrefix = absDir.endsWith("/") ? absDir : `${absDir}/`;
+      if (!mapPath.startsWith(dirPrefix)) {
         log.debug(
           `skipping sourcemap outside directory: ${mapPath} (resolved from ${entry.absolutePath})`
         );

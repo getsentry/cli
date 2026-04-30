@@ -6,7 +6,7 @@
  * env vars, config defaults) — no slash-separated arg parsing needed.
  */
 
-import { basename, relative, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import type { SentryContext } from "../../context.js";
 import {
   type ArtifactFile,
@@ -309,7 +309,13 @@ export const uploadCommand = buildCommand({
           mapRelative = stripPrefix(mapRelative, pathPrefixToStrip);
         }
 
-        const mapBasename = basename(mapPath);
+        // Sourcemap header is resolved relative to the JS file's URL.
+        // Use relative path from JS dir to map file so cross-directory
+        // maps (e.g. maps/bundle.js.map) link correctly.
+        const sourcemapRef = relative(dirname(jsPath), mapPath).replaceAll(
+          "\\",
+          "/"
+        );
         return [
           {
             path: jsPath,
@@ -318,7 +324,7 @@ export const uploadCommand = buildCommand({
             ...(debugId ? { debugId } : {}),
             type: "minified_source" as const,
             url: `${urlPrefix}${jsRelative}`,
-            sourcemapFilename: mapBasename,
+            sourcemapFilename: sourcemapRef,
           },
           {
             path: mapPath,
