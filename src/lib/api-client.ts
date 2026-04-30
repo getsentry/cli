@@ -53,6 +53,7 @@ export {
   getIssueByShortId,
   getIssueInOrg,
   getSharedIssue,
+  type IgnoreStatusDetails,
   ISSUE_DETAIL_COLLAPSE,
   type IssueCollapseField,
   type IssueSort,
