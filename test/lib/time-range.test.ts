@@ -297,7 +297,7 @@ describe("timeRangeToApiParams", () => {
     expect(params.start).toBeDefined();
     const startDate = new Date(params.start!);
     const expectedStart = new Date("2024-02-01T23:59:59Z");
-    expectedStart.setDate(expectedStart.getDate() - 90);
+    expectedStart.setUTCDate(expectedStart.getUTCDate() - 90);
     expect(startDate.toISOString()).toBe(expectedStart.toISOString());
   });
 });
