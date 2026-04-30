@@ -639,10 +639,13 @@ export function enrichDashboardError(
     build403Error(ctx, org, error.detail);
   }
 
-  // 400 on update — likely invalid widget config; preserve API detail
-  if (error.status === 400 && ctx.operation === "update") {
+  // 400 on create/update — preserve API detail (plan limits, invalid config)
+  if (
+    error.status === 400 &&
+    (ctx.operation === "create" || ctx.operation === "update")
+  ) {
     throw new ApiError(
-      `Dashboard update failed in ${org}`,
+      `Dashboard ${ctx.operation} failed in ${org}`,
       error.status,
       error.detail ??
         "The API rejected the request. Check widget configuration.",

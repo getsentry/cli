@@ -540,7 +540,27 @@ describe("enrichDashboardError", () => {
     }
   });
 
-  test("400 on non-update operation re-throws unchanged", () => {
+  test("400 on create throws enriched ApiError with plan limit detail", () => {
+    const apiErr = new ApiError(
+      "Bad Request",
+      400,
+      "You may not exceed 10 dashboards on your current plan."
+    );
+    try {
+      enrichDashboardError(apiErr, { orgSlug: "my-org", operation: "create" });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      const msg = (error as ApiError).message;
+      expect(msg).toContain("Dashboard create failed");
+      expect(msg).toContain("'my-org'");
+      expect((error as ApiError).detail).toContain(
+        "You may not exceed 10 dashboards"
+      );
+    }
+  });
+
+  test("400 on non-create/update operation re-throws unchanged", () => {
     const apiErr = new ApiError("Bad Request", 400, "some detail");
     expect(() =>
       enrichDashboardError(apiErr, { orgSlug: "my-org", operation: "list" })
