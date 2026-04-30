@@ -357,6 +357,15 @@ export function timeRangeToApiParams(range: TimeRange): TimeRangeApiParams {
   if (range.end) {
     params.end = range.end;
   }
+  // Fill missing boundary — the Sentry API requires both start and end
+  // when absolute dates are used, otherwise it returns 400.
+  if (params.start && !params.end) {
+    params.end = new Date().toISOString();
+  } else if (params.end && !params.start) {
+    const endDate = new Date(params.end);
+    endDate.setDate(endDate.getDate() - 90);
+    params.start = endDate.toISOString();
+  }
   return params;
 }
 
