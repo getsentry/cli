@@ -301,7 +301,7 @@ export async function resolveDashboardId(
     const { data, nextCursor } = await listDashboardsPaginated(orgSlug, {
       perPage: API_MAX_PER_PAGE,
       cursor,
-    }).catch((error: unknown) =>
+    }).catch(async (error: unknown) =>
       enrichDashboardError(error, { orgSlug, operation: "list" })
     );
     // Match by ID/slug first (e.g. "default-overview"), then fall back to title
@@ -654,8 +654,8 @@ async function build404Error(
           perPage: MAX_404_SUGGESTIONS,
         });
         if (data.length > 0) {
-          const lines = data.map((d) => `  ${d.id}  ${d.title}`);
-          alternatives.push(`\nAvailable dashboards:\n${lines.join("\n")}`);
+          const lines = data.map((d) => `    ${d.id}  ${d.title}`);
+          alternatives.push(`Available dashboards:\n${lines.join("\n")}`);
         }
       } catch {
         // Suggestion fetch failed — don't mask the original error
@@ -721,7 +721,10 @@ export async function enrichDashboardError(
   const org = ctx.orgSlug ? `'${ctx.orgSlug}'` : "this organization";
 
   if (error.status === 404) {
-    await build404Error(ctx, org);
+    // Awaited explicitly so the linter doesn't flag a missing `await` in this
+    // async function, and so a future non-throwing codepath in build404Error
+    // wouldn't silently fall through.
+    return await build404Error(ctx, org);
   }
 
   if (error.status === 403) {
