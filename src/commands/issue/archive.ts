@@ -365,7 +365,7 @@ export const archiveCommand = buildCommand({
     let substatus: IssueSubstatus = "archived_forever";
     let statusDetails: IgnoreStatusDetails | undefined;
 
-    if (flags.until) {
+    if (flags.until !== undefined) {
       const spec = parseUntilSpec(flags.until);
       const opts = specToApiOptions(spec);
       substatus = opts.substatus;
