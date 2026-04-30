@@ -37,6 +37,8 @@ export type ParsedSentryUrl = {
   traceId?: string;
   /** Share ID from /share/issue/{shareId}/ paths (32-char hex string) */
   shareId?: string;
+  /** Dashboard ID from /dashboard/{id}/ paths (numeric string) */
+  dashboardId?: string;
 };
 
 /**
@@ -66,6 +68,11 @@ function matchOrganizationsPath(
     return { baseUrl, org, traceId: segments[3] };
   }
 
+  // /organizations/{org}/dashboard/{id}/
+  if (segments[2] === "dashboard" && segments[3]) {
+    return { baseUrl, org, dashboardId: segments[3] };
+  }
+
   // /organizations/{org}/ (org only)
   return { baseUrl, org };
 }
@@ -89,6 +96,45 @@ function matchSettingsPath(
   }
 
   return { baseUrl, org: segments[1], project: segments[3] };
+}
+
+/**
+ * Match the path portion of a SaaS subdomain-style URL against known patterns.
+ *
+ * Extracts entity-specific fields (issueId, traceId, dashboardId, etc.)
+ * from the path segments. Returns a partial result to merge with org/baseUrl,
+ * or null if no pattern matches.
+ */
+function matchSubdomainPath(
+  segments: string[]
+): Omit<ParsedSentryUrl, "baseUrl" | "org"> | null {
+  // /issues/{id}/ (optionally with /events/{eventId}/)
+  if (segments[0] === "issues" && segments[1]) {
+    const eventId =
+      segments[2] === "events" && segments[3] ? segments[3] : undefined;
+    return { issueId: segments[1], eventId };
+  }
+  // /traces/{traceId}/
+  if (segments[0] === "traces" && segments[1]) {
+    return { traceId: segments[1] };
+  }
+  // /settings/projects/{project}/ (org-scoped subdomain settings URL)
+  if (segments[0] === "settings" && segments[1] === "projects" && segments[2]) {
+    return { project: segments[2] };
+  }
+  // /dashboard/{id}/
+  if (segments[0] === "dashboard" && segments[1]) {
+    return { dashboardId: segments[1] };
+  }
+  // /share/issue/{shareId}/
+  if (segments[0] === "share" && segments[1] === "issue" && segments[2]) {
+    return { shareId: segments[2] };
+  }
+  // Bare org subdomain URL (no path segments)
+  if (segments.length === 0) {
+    return {};
+  }
+  return null;
 }
 
 /**
@@ -118,34 +164,11 @@ function matchSubdomainOrg(
     return null;
   }
 
-  // /issues/{id}/ (optionally with /events/{eventId}/)
-  if (segments[0] === "issues" && segments[1]) {
-    const eventId =
-      segments[2] === "events" && segments[3] ? segments[3] : undefined;
-    return { baseUrl, org, issueId: segments[1], eventId };
+  const pathResult = matchSubdomainPath(segments);
+  if (!pathResult) {
+    return null;
   }
-
-  // /traces/{traceId}/
-  if (segments[0] === "traces" && segments[1]) {
-    return { baseUrl, org, traceId: segments[1] };
-  }
-
-  // /settings/projects/{project}/ (org-scoped subdomain settings URL)
-  if (segments[0] === "settings" && segments[1] === "projects" && segments[2]) {
-    return { baseUrl, org, project: segments[2] };
-  }
-
-  // /share/issue/{shareId}/ — share URL with org from subdomain
-  if (segments[0] === "share" && segments[1] === "issue" && segments[2]) {
-    return { baseUrl, org, shareId: segments[2] };
-  }
-
-  // Bare org subdomain URL
-  if (segments.length === 0) {
-    return { baseUrl, org };
-  }
-
-  return null;
+  return { baseUrl, org, ...pathResult };
 }
 
 /**
@@ -175,6 +198,7 @@ function matchSharePath(
  * - `/organizations/{org}/issues/{id}/events/{eventId}/`
  * - `/settings/{org}/projects/{project}/`
  * - `/organizations/{org}/traces/{traceId}/`
+ * - `/organizations/{org}/dashboard/{id}/`
  * - `/organizations/{org}/`
  * - `/share/issue/{shareId}/`
  *
@@ -182,6 +206,7 @@ function matchSharePath(
  * - `https://{org}.sentry.io/issues/{id}/`
  * - `https://{org}.sentry.io/traces/{traceId}/`
  * - `https://{org}.sentry.io/issues/{id}/events/{eventId}/`
+ * - `https://{org}.sentry.io/dashboard/{id}/`
  * - `https://{org}.sentry.io/share/issue/{shareId}/`
  *
  * @param input - Raw string that may or may not be a URL

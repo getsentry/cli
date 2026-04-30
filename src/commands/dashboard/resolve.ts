@@ -21,6 +21,10 @@ import { fuzzyMatch } from "../../lib/fuzzy.js";
 import { logger } from "../../lib/logger.js";
 import { resolveEffectiveOrg } from "../../lib/region.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
+import {
+  applySentryUrlContext,
+  parseSentryUrl,
+} from "../../lib/sentry-url-parser.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import { isAllDigits } from "../../lib/utils.js";
 import {
@@ -87,12 +91,63 @@ export async function resolveOrgFromTarget(
   }
 }
 
+/** Result of URL-based dashboard arg extraction */
+type DashboardArgResult = {
+  dashboardRef: string;
+  targetArg: string | undefined;
+};
+
+/**
+ * Try to extract dashboard ref + org from a Sentry URL.
+ *
+ * Calls `applySentryUrlContext` for host-scoping trust checks on non-SaaS URLs.
+ * Returns null if the input isn't a recognized Sentry URL.
+ */
+function tryExtractDashboardUrl(
+  first: string,
+  args: string[]
+): DashboardArgResult | null {
+  const urlParsed = parseSentryUrl(first);
+  if (!urlParsed) {
+    return null;
+  }
+  applySentryUrlContext(urlParsed.baseUrl);
+  if (urlParsed.dashboardId) {
+    log.warn(
+      `Extracted dashboard ID ${urlParsed.dashboardId} from URL` +
+        (urlParsed.org ? ` (org: ${urlParsed.org})` : "")
+    );
+    return {
+      dashboardRef: urlParsed.dashboardId,
+      targetArg: urlParsed.org ? `${urlParsed.org}/` : undefined,
+    };
+  }
+  // URL recognized but no dashboardId — use org context if available
+  if (urlParsed.org) {
+    log.warn(`Extracted org '${urlParsed.org}' from URL`);
+    if (args.length >= 2) {
+      return {
+        dashboardRef: args[1] as string,
+        targetArg: `${urlParsed.org}/`,
+      };
+    }
+    throw new ValidationError(
+      "Dashboard ID or title is required.\n\n" +
+        "The URL provided contains an org but no dashboard ID.\n" +
+        `Try: sentry dashboard view ${urlParsed.org}/ <id-or-title>`,
+      "dashboard"
+    );
+  }
+  return null;
+}
+
 /**
  * Parse a dashboard reference and optional target from array positional args.
  *
  * Handles:
  * - `<id-or-title>` — single arg (auto-detect org)
  * - `<target> <id-or-title>` — explicit target + dashboard ref
+ * - Full Sentry dashboard URL — extracts org + dashboard ID
  *
  * When two args are provided and the first is a bare slug (no `/`), it is
  * normalized to `slug/` so `parseOrgProjectArg` treats it as an org-all
@@ -101,25 +156,32 @@ export async function resolveOrgFromTarget(
  * @param args - Raw positional arguments
  * @returns Dashboard reference string and optional target arg
  */
-export function parseDashboardPositionalArgs(args: string[]): {
-  dashboardRef: string;
-  targetArg: string | undefined;
-} {
+export function parseDashboardPositionalArgs(
+  args: string[]
+): DashboardArgResult {
   if (args.length === 0) {
     throw new ValidationError(
       "Dashboard ID or title is required.",
       "dashboard"
     );
   }
+
+  const first = args[0] as string;
+
+  // URL detection — extract org + dashboard ID from pasted Sentry URLs
+  const urlResult = tryExtractDashboardUrl(first, args);
+  if (urlResult) {
+    return urlResult;
+  }
+
   if (args.length === 1) {
     return {
-      dashboardRef: args[0] as string,
+      dashboardRef: first,
       targetArg: undefined,
     };
   }
   // Normalize bare org slug → org/ (dashboards are org-scoped)
-  const raw = args[0] as string;
-  const target = raw.includes("/") ? raw : `${raw}/`;
+  const target = first.includes("/") ? first : `${first}/`;
   return {
     dashboardRef: args[1] as string,
     targetArg: target,
@@ -554,8 +616,20 @@ export type DashboardErrorContext = {
   operation: "list" | "view" | "create" | "update";
 };
 
-/** Build an enriched error for a 404 response on a dashboard API call */
-function build404Error(ctx: DashboardErrorContext, org: string): never {
+/** Maximum number of dashboard suggestions to show in 404 errors */
+const MAX_404_SUGGESTIONS = 5;
+
+/**
+ * Build an enriched error for a 404 response on a dashboard API call.
+ *
+ * When a numeric dashboard ID is not found, fetches available dashboards
+ * from the org and includes up to {@link MAX_404_SUGGESTIONS} as suggestions
+ * so the user (or AI agent) can see what's actually available.
+ */
+async function build404Error(
+  ctx: DashboardErrorContext,
+  org: string
+): Promise<never> {
   if (ctx.operation === "list") {
     throw new ResolutionError(
       `Organization ${org}`,
@@ -569,14 +643,29 @@ function build404Error(ctx: DashboardErrorContext, org: string): never {
   }
   const listHint = `sentry dashboard list ${ctx.orgSlug ?? "<org>"}/`;
   if (ctx.dashboardId) {
+    // Fetch available dashboards to suggest alternatives
+    const alternatives = [
+      "The dashboard may have been deleted",
+      "Check the dashboard ID or title with: sentry dashboard list",
+    ];
+    if (ctx.orgSlug) {
+      try {
+        const { data } = await listDashboardsPaginated(ctx.orgSlug, {
+          perPage: MAX_404_SUGGESTIONS,
+        });
+        if (data.length > 0) {
+          const lines = data.map((d) => `  ${d.id}  ${d.title}`);
+          alternatives.push(`\nAvailable dashboards:\n${lines.join("\n")}`);
+        }
+      } catch {
+        // Suggestion fetch failed — don't mask the original error
+      }
+    }
     throw new ResolutionError(
       `Dashboard ${ctx.dashboardId} in ${org}`,
       "not found",
       listHint,
-      [
-        "The dashboard may have been deleted",
-        "Check the dashboard ID or title with: sentry dashboard list",
-      ]
+      alternatives
     );
   }
   // Generic 404 for create or other operations
@@ -621,10 +710,10 @@ function build403Error(
  * @param error - The caught error
  * @param ctx - Context about the operation for building error messages
  */
-export function enrichDashboardError(
+export async function enrichDashboardError(
   error: unknown,
   ctx: DashboardErrorContext
-): never {
+): Promise<never> {
   if (!(error instanceof ApiError)) {
     throw error;
   }
@@ -632,7 +721,7 @@ export function enrichDashboardError(
   const org = ctx.orgSlug ? `'${ctx.orgSlug}'` : "this organization";
 
   if (error.status === 404) {
-    build404Error(ctx, org);
+    await build404Error(ctx, org);
   }
 
   if (error.status === 403) {

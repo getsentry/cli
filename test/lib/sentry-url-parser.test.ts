@@ -185,6 +185,41 @@ describe("parseSentryUrl", () => {
     });
   });
 
+  describe("dashboard URLs", () => {
+    test("/organizations/{org}/dashboard/{id}/", () => {
+      const result = parseSentryUrl(
+        "https://sentry.io/organizations/my-org/dashboard/4326879/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.io",
+        org: "my-org",
+        dashboardId: "4326879",
+      });
+    });
+
+    test("self-hosted dashboard URL", () => {
+      const result = parseSentryUrl(
+        "https://sentry.example.com/organizations/devops/dashboard/12345/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.example.com",
+        org: "devops",
+        dashboardId: "12345",
+      });
+    });
+
+    test("dashboard URL without trailing slash", () => {
+      const result = parseSentryUrl(
+        "https://sentry.io/organizations/my-org/dashboard/999"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.io",
+        org: "my-org",
+        dashboardId: "999",
+      });
+    });
+  });
+
   describe("project settings URLs", () => {
     test("/settings/{org}/projects/{project}/", () => {
       const result = parseSentryUrl(
@@ -241,6 +276,17 @@ describe("parseSentryUrl", () => {
         baseUrl: "https://my-org.sentry.io",
         org: "my-org",
         traceId: "a4d1aae7216b47ff8117cf4e09ce9d0a",
+      });
+    });
+
+    test("dashboard URL extracts org from subdomain", () => {
+      const result = parseSentryUrl(
+        "https://sentry-sdks.sentry.io/dashboard/4326879/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry-sdks.sentry.io",
+        org: "sentry-sdks",
+        dashboardId: "4326879",
       });
     });
 
