@@ -7,6 +7,23 @@
  * bindings so it falls back to the plain-text renderer in
  * `dashboard.ts` (the same one that's been there pre-TUI).
  *
+ * Two render modes:
+ *
+ *   1. **Static** — mounted via `createTestRenderer` from
+ *      `dashboard-tui.ts` for one-shot capture. The keyboard
+ *      hooks fire against an off-screen renderer that has no
+ *      input source, so they're effectively no-ops; the App
+ *      renders the initial store state and we capture it.
+ *
+ *   2. **Interactive** — mounted via `createCliRenderer` from
+ *      `dashboard-runtime.ts` for a live, keyboard-driven session.
+ *      The same App reads / mutates the store in response to
+ *      user input. Tab cycles widget focus; Enter drills down
+ *      on the focused widget; `?` toggles help; `q` / Ctrl+C
+ *      dispatches a `quit` action; `t` / `r` / `R` / `o`
+ *      dispatch period-change / refresh / auto-refresh-toggle /
+ *      browser-open actions for the runtime to service.
+ *
  * Layout strategy:
  *
  *   The Sentry dashboard grid is 6 columns wide with widgets at
@@ -40,11 +57,14 @@
  * OpenTUI is buying us — comes out right.
  */
 
+import { useKeyboard } from "@opentui/react";
+import { useSyncExternalStore } from "react";
 import {
   type DashboardViewData,
   type DashboardViewWidget,
   renderContentLines,
 } from "./dashboard.js";
+import type { DashboardStore } from "./dashboard-store.js";
 import { stripAnsi } from "./plain-detect.js";
 
 // ────────────────────────── Visual constants ─────────────────────────
@@ -59,7 +79,7 @@ const FOREGROUND = "#E8E6F0";
 const CYAN = "#7DD3FC";
 /** Green for big numbers, success states, and bar fills. */
 const GREEN = "#86EFAC";
-/** Yellow for environment badges. */
+/** Yellow for environment badges + auto-refresh ON state. */
 const YELLOW = "#FBBF24";
 /** Red for errors. */
 const ERROR = "#F87171";
@@ -73,23 +93,217 @@ const LINES_PER_UNIT = 6;
 /** Bold attribute bit for OpenTUI's `attributes` prop. */
 const BOLD = 1;
 
+// Keyboard handler — extracted to a top-level function so the
+// `useKeyboard` callback in `App` stays under the cognitive-
+// complexity ceiling biome enforces. Split across three phase
+// helpers (`handleEscape`, `handleHelpOverlay`, `handleDrilldown`,
+// `handleGridKey`) so each piece owns one overlay's input.
+//
+// Exported for unit testing — the live `useKeyboard` flow can't
+// be exercised from `bun test` without mounting a real renderer,
+// so `dashboard-app.handlers.test.ts` calls these directly with
+// synthetic events.
+
+export type KeyEventLike = {
+  name: string;
+  ctrl?: boolean;
+  shift?: boolean;
+  sequence?: string;
+};
+
+export type KeyboardSnapshot = {
+  drilldownActive: boolean;
+  helpOverlayActive: boolean;
+};
+
+/**
+ * Top-level keyboard dispatch. Routes the event to the phase
+ * handler appropriate for the current overlay state, with two
+ * universal short-circuits:
+ *
+ *   1. **Ctrl+C** — quits unconditionally, regardless of overlay.
+ *   2. **Esc** — staged dismissal: close drilldown if active, else
+ *      close help, else quit. Mirrors the `vim` / `less` "back
+ *      out one layer at a time" convention.
+ */
+export function handleKey(
+  event: KeyEventLike,
+  snapshot: KeyboardSnapshot,
+  store: DashboardStore
+): void {
+  if (event.ctrl && event.name === "c") {
+    store.dispatch({ kind: "quit" });
+    return;
+  }
+  if (event.name === "escape") {
+    handleEscape(snapshot, store);
+    return;
+  }
+  if (snapshot.helpOverlayActive) {
+    handleHelpKey(event, store);
+    return;
+  }
+  if (snapshot.drilldownActive) {
+    handleDrilldownKey(event, store);
+    return;
+  }
+  handleGridKey(event, store);
+}
+
+function handleEscape(snapshot: KeyboardSnapshot, store: DashboardStore): void {
+  if (snapshot.drilldownActive) {
+    store.exitDrilldown();
+    return;
+  }
+  if (snapshot.helpOverlayActive) {
+    store.exitHelp();
+    return;
+  }
+  store.dispatch({ kind: "quit" });
+}
+
+function handleHelpKey(event: KeyEventLike, store: DashboardStore): void {
+  if (event.name === "?" || event.sequence === "?") {
+    store.toggleHelp();
+    return;
+  }
+  if (event.name === "q") {
+    store.dispatch({ kind: "quit" });
+  }
+}
+
+function handleDrilldownKey(event: KeyEventLike, store: DashboardStore): void {
+  if (event.name === "return" || event.name === "enter") {
+    store.exitDrilldown();
+    return;
+  }
+  if (event.name === "q") {
+    store.dispatch({ kind: "quit" });
+  }
+}
+
+/**
+ * Grid-mode bindings. `?` toggles help, `q` quits, Tab/arrows
+ * cycle widget focus, Enter drills into the focused widget, and
+ * `t` / `r` / `R` / `o` dispatch period-cycle / refresh /
+ * auto-refresh-toggle / browser-open actions. Capital R is
+ * detected via either `shift: true` or the literal sequence "R"
+ * because terminal emulators differ in how they report it.
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keyboard dispatch is inherently a flat switch over many independent keys; splitting further would just spread one case across multiple files
+function handleGridKey(event: KeyEventLike, store: DashboardStore): void {
+  const name = event.name;
+  if (name === "?" || event.sequence === "?") {
+    store.toggleHelp();
+    return;
+  }
+  if (name === "q") {
+    store.dispatch({ kind: "quit" });
+    return;
+  }
+  if ((name === "tab" && event.shift) || name === "backtab") {
+    store.cycleFocus("backward");
+    return;
+  }
+  if (name === "tab" || name === "right" || name === "down") {
+    store.cycleFocus("forward");
+    return;
+  }
+  if (name === "left" || name === "up") {
+    store.cycleFocus("backward");
+    return;
+  }
+  if (name === "return" || name === "enter") {
+    store.toggleDrilldown();
+    return;
+  }
+  if (name === "t") {
+    store.dispatch({ kind: "cycle-period" });
+    return;
+  }
+  if ((name === "r" && event.shift) || event.sequence === "R") {
+    store.dispatch({ kind: "toggle-auto-refresh" });
+    return;
+  }
+  if (name === "r") {
+    store.dispatch({ kind: "refresh" });
+    return;
+  }
+  if (name === "o") {
+    store.dispatch({ kind: "open-in-browser" });
+  }
+}
+
 // ────────────────────────────── App entry ────────────────────────────
 
 export type AppProps = {
-  data: DashboardViewData;
+  store: DashboardStore;
   /** Total terminal width to lay out within. */
   termWidth: number;
 };
 
 /**
- * Root component. Renders the dashboard header, then the widget
- * grid stacked underneath.
+ * Root component. Subscribes once at the top, then drills snapshot
+ * fields into presentational children. Holds the global keyboard
+ * handler that maps user keystrokes to store mutations or action
+ * dispatches.
+ *
+ * The keyboard handler stays at the App level (rather than per
+ * widget) for two reasons:
+ *
+ *   1. OpenTUI's `useKeyboard` registers with the renderer's global
+ *      key bus. Per-widget hooks would all fire for every keystroke
+ *      regardless of focus — there's no built-in "focused element
+ *      receives input" routing — so we'd need to gate each
+ *      handler with `if (focusedIndex === thisIndex)` anyway.
+ *   2. The same handler needs to coordinate between focus
+ *      navigation, drilldown toggle, help overlay, and action
+ *      dispatch, all of which depend on the current overlay state
+ *      (e.g. Esc closes drilldown if active, else closes help, else
+ *      quits). Centralised handler keeps the priority order
+ *      legible.
  */
-export function App({ data, termWidth }: AppProps): React.ReactNode {
+export function App({ store, termWidth }: AppProps): React.ReactNode {
+  const snapshot = useSyncExternalStore(
+    store.subscribe,
+    store.getSnapshot,
+    store.getSnapshot
+  );
+
+  useKeyboard((event) => {
+    handleKey(event, snapshot, store);
+  });
+
+  // Drilldown takes over the entire screen — header still renders
+  // for context but the grid is replaced by the focused widget's
+  // expanded content.
+  if (snapshot.drilldownActive && snapshot.focusedWidgetIndex >= 0) {
+    return (
+      <box flexDirection="column" flexGrow={1}>
+        <Header
+          data={snapshot.data}
+          snapshot={snapshot}
+          termWidth={termWidth}
+        />
+        <Drilldown
+          termWidth={termWidth}
+          widget={snapshot.data.widgets[snapshot.focusedWidgetIndex]}
+        />
+        <StatusBar snapshot={snapshot} />
+      </box>
+    );
+  }
+
   return (
     <box flexDirection="column" flexGrow={1}>
-      <Header data={data} termWidth={termWidth} />
-      <WidgetGrid termWidth={termWidth} widgets={data.widgets} />
+      <Header data={snapshot.data} snapshot={snapshot} termWidth={termWidth} />
+      <WidgetGrid
+        focusedIndex={snapshot.focusedWidgetIndex}
+        termWidth={termWidth}
+        widgets={snapshot.data.widgets}
+      />
+      {snapshot.helpOverlayActive ? <HelpOverlay /> : null}
+      <StatusBar snapshot={snapshot} />
     </box>
   );
 }
@@ -98,14 +312,26 @@ export function App({ data, termWidth }: AppProps): React.ReactNode {
 
 /**
  * Compact dashboard header: bold title, cyan period badge, optional
- * yellow environment badge, then a muted underline rule the full
- * width of the terminal.
+ * yellow environment badge, an auto-refresh / fetching indicator
+ * when relevant, then a muted underline rule the full width of the
+ * terminal.
+ *
+ * The period shown is `snapshot.currentPeriod` (which the runtime
+ * keeps in sync with the most-recent fetch) rather than
+ * `data.period` — important when the user cycles via `t` and the
+ * data hasn't yet returned.
  */
 function Header({
   data,
+  snapshot,
   termWidth,
 }: {
   data: DashboardViewData;
+  snapshot: {
+    currentPeriod: string;
+    fetching: boolean;
+    autoRefreshEnabled: boolean;
+  };
   termWidth: number;
 }): React.ReactNode {
   const hasEnv = Boolean(data.environment?.length);
@@ -117,11 +343,23 @@ function Header({
           {data.title}
         </span>
         <span fg={FOREGROUND}>{"  "}</span>
-        <span fg={CYAN}>{`[${data.period}]`}</span>
+        <span fg={CYAN}>{`[${snapshot.currentPeriod}]`}</span>
         {hasEnv ? (
           <>
             <span fg={FOREGROUND}>{"  "}</span>
             <span fg={YELLOW}>{envText}</span>
+          </>
+        ) : null}
+        {snapshot.autoRefreshEnabled ? (
+          <>
+            <span fg={FOREGROUND}>{"  "}</span>
+            <span fg={GREEN}>● live</span>
+          </>
+        ) : null}
+        {snapshot.fetching ? (
+          <>
+            <span fg={FOREGROUND}>{"  "}</span>
+            <span fg={ACCENT}>refreshing…</span>
           </>
         ) : null}
       </text>
@@ -137,55 +375,63 @@ function Header({
  * render the rows top-to-bottom. Widgets without a `layout` are
  * appended at the end as full-width rows — covers older
  * dashboards that pre-date Sentry's grid layout.
+ *
+ * Threads `focusedIndex` (an index into the original `widgets`
+ * array, before bucketing) down to each `Widget` so the focused
+ * one gets the accent border treatment.
  */
 function WidgetGrid({
   widgets,
   termWidth,
+  focusedIndex,
 }: {
   widgets: DashboardViewWidget[];
   termWidth: number;
+  focusedIndex: number;
 }): React.ReactNode {
-  // Bucket widgets by their starting y position.
-  const rows = new Map<number, DashboardViewWidget[]>();
-  const orphans: DashboardViewWidget[] = [];
+  // Bucket widgets by their starting y position. Track the
+  // original index alongside each entry so we can pass it to the
+  // Widget component for focus comparison.
+  type Indexed = { widget: DashboardViewWidget; index: number };
+  const rows = new Map<number, Indexed[]>();
+  const orphans: Indexed[] = [];
 
-  for (const widget of widgets) {
+  for (const [i, widget] of widgets.entries()) {
+    const indexed: Indexed = { widget, index: i };
     if (widget.layout) {
       const key = widget.layout.y;
       const bucket = rows.get(key);
       if (bucket) {
-        bucket.push(widget);
+        bucket.push(indexed);
       } else {
-        rows.set(key, [widget]);
+        rows.set(key, [indexed]);
       }
     } else {
-      orphans.push(widget);
+      orphans.push(indexed);
     }
   }
 
-  // Sort row keys ascending; within a row, widgets sort by x.
   const sortedRowKeys = [...rows.keys()].sort((a, b) => a - b);
 
   return (
     <box flexDirection="column">
       {sortedRowKeys.map((y) => {
         const rowWidgets = (rows.get(y) ?? []).sort(
-          (a, b) => (a.layout?.x ?? 0) - (b.layout?.x ?? 0)
+          (a, b) => (a.widget.layout?.x ?? 0) - (b.widget.layout?.x ?? 0)
         );
         return (
           <WidgetRow
+            focusedIndex={focusedIndex}
             key={`row-${y}`}
             termWidth={termWidth}
             widgets={rowWidgets}
           />
         );
       })}
-      {orphans.map((widget, i) => (
+      {orphans.map(({ widget, index }) => (
         <Widget
-          // Orphan widgets lack a stable id — index is fine, the
-          // list is built once per render from immutable input.
-          // biome-ignore lint/suspicious/noArrayIndexKey: positional orphans
-          key={`orphan-${i}`}
+          focused={focusedIndex === index}
+          key={`orphan-${index}`}
           widget={widget}
           width={termWidth}
         />
@@ -203,18 +449,21 @@ function WidgetGrid({
 function WidgetRow({
   widgets,
   termWidth,
+  focusedIndex,
 }: {
-  widgets: DashboardViewWidget[];
+  widgets: { widget: DashboardViewWidget; index: number }[];
   termWidth: number;
+  focusedIndex: number;
 }): React.ReactNode {
   return (
     <box flexDirection="row" flexShrink={0} marginBottom={1}>
-      {widgets.map((widget) => {
+      {widgets.map(({ widget, index }) => {
         const w = widget.layout?.w ?? GRID_COLS;
         const widgetWidth = Math.floor((w / GRID_COLS) * termWidth);
         return (
           <Widget
-            key={`${widget.layout?.x ?? 0}-${widget.title}`}
+            focused={focusedIndex === index}
+            key={`${widget.layout?.x ?? 0}-${widget.title}-${index}`}
             widget={widget}
             width={widgetWidth}
           />
@@ -231,13 +480,20 @@ function WidgetRow({
  * `title` prop carries the widget title (Ink-style). Content height
  * is `layout.h * LINES_PER_UNIT` to mirror the Sentry web grid's
  * vertical units.
+ *
+ * Focused widgets get the accent purple border + bold title so
+ * the user can tell at a glance which widget Tab will operate on
+ * next. Unfocused widgets stay muted gray — the contrast is the
+ * key affordance.
  */
 function Widget({
   widget,
   width,
+  focused,
 }: {
   widget: DashboardViewWidget;
   width: number;
+  focused: boolean;
 }): React.ReactNode {
   const layoutH = widget.layout?.h ?? 1;
   const totalHeight = layoutH * LINES_PER_UNIT;
@@ -258,16 +514,19 @@ function Widget({
   });
   const lines = rawLines.map(stripAnsi);
 
+  const borderColor = focused ? ACCENT : MUTED;
+  const titleText = focused ? `▸ ${widget.title}` : widget.title;
+
   return (
     <box
-      borderColor={MUTED}
+      borderColor={borderColor}
       borderStyle="rounded"
       flexDirection="column"
       flexShrink={0}
       height={totalHeight}
       paddingLeft={1}
       paddingRight={1}
-      title={` ${widget.title} `}
+      title={` ${titleText} `}
       titleAlignment="left"
       width={width}
     >
@@ -370,4 +629,220 @@ function rowStylingFor(type: DashboardViewWidget["data"]["type"]): (
   }
   // text / default — plain foreground.
   return () => ({ fg: FOREGROUND, attrs: 0 });
+}
+
+// ───────────────────────────── Drilldown ─────────────────────────────
+
+/**
+ * Full-screen detail view of a single widget. Replaces the grid
+ * when active; the user gets:
+ *
+ *   - Full terminal width for content (vs. the proportional
+ *     fraction the grid view allotted).
+ *   - More vertical space for the per-widget content lines —
+ *     useful for tables (more rows visible) and timeseries
+ *     (taller bar charts).
+ *   - The original query info from `widget.queries` rendered
+ *     beneath the body so the user can see what's being shown.
+ */
+function Drilldown({
+  widget,
+  termWidth,
+}: {
+  widget: DashboardViewWidget | undefined;
+  termWidth: number;
+}): React.ReactNode {
+  if (!widget) {
+    return (
+      <box flexDirection="column" flexGrow={1}>
+        <text fg={MUTED}>No widget selected.</text>
+      </box>
+    );
+  }
+
+  // Drilldown gets the full main-area width minus 4 cells for the
+  // outer border + padding, and a generous height (the runtime
+  // sizes the renderer to fit). `renderContentLines` will return
+  // as many lines as content needs up to `contentHeight`.
+  const innerWidth = Math.max(0, termWidth - 4);
+  const contentHeight = 24;
+  const rawLines = renderContentLines({
+    widget,
+    innerWidth,
+    contentHeight,
+  });
+  const lines = rawLines.map(stripAnsi);
+  const queryLines = formatQueryLines(widget);
+
+  return (
+    <box flexDirection="column" flexGrow={1}>
+      <box
+        borderColor={ACCENT}
+        borderStyle="rounded"
+        flexDirection="column"
+        flexShrink={0}
+        paddingLeft={1}
+        paddingRight={1}
+        title={` ▸ ${widget.title} `}
+        titleAlignment="left"
+        width={termWidth}
+      >
+        <WidgetContentRows
+          lines={lines}
+          type={widget.data.type}
+          widget={widget}
+        />
+      </box>
+      {queryLines.length > 0 ? (
+        <box
+          borderColor={MUTED}
+          borderStyle="rounded"
+          flexDirection="column"
+          flexShrink={0}
+          marginTop={1}
+          paddingLeft={1}
+          paddingRight={1}
+          title=" Queries "
+          titleAlignment="left"
+          width={termWidth}
+        >
+          {queryLines.map((line, i) => (
+            // Query lines are positional and pure of widget input.
+            // biome-ignore lint/suspicious/noArrayIndexKey: positional query rows
+            <text fg={MUTED} key={i}>
+              {line}
+            </text>
+          ))}
+        </box>
+      ) : null}
+    </box>
+  );
+}
+
+/**
+ * Format the widget's queries into compact one-liners for the
+ * drilldown query panel. Each entry shows the optional name, the
+ * conditions, and the comma-separated aggregates / fields. Empty
+ * fields are skipped so noisy "name: " prefixes don't show up
+ * for unnamed queries.
+ */
+function formatQueryLines(widget: DashboardViewWidget): string[] {
+  if (!widget.queries || widget.queries.length === 0) {
+    return [];
+  }
+  return widget.queries.map((q, i) => {
+    const parts: string[] = [];
+    if (q.name) {
+      parts.push(`[${q.name}]`);
+    } else {
+      parts.push(`[query ${i + 1}]`);
+    }
+    if (q.conditions) {
+      parts.push(q.conditions);
+    }
+    const aggregates = (q.aggregates ?? []).filter(Boolean).join(", ");
+    if (aggregates) {
+      parts.push(`aggregates: ${aggregates}`);
+    }
+    const columns = (q.columns ?? []).filter(Boolean).join(", ");
+    if (columns) {
+      parts.push(`columns: ${columns}`);
+    }
+    return parts.join("  ");
+  });
+}
+
+// ──────────────────────────── Help overlay ───────────────────────────
+
+/**
+ * Help overlay listing the keybindings. Rendered in-flow at the
+ * bottom of the App (rather than absolutely positioned) because
+ * OpenTUI's flex layout doesn't have a portal primitive. Visually
+ * acts as a status panel that pops up when `?` is pressed.
+ */
+function HelpOverlay(): React.ReactNode {
+  const bindings: { key: string; action: string }[] = [
+    { key: "Tab / →", action: "Next widget" },
+    { key: "Shift+Tab / ←", action: "Previous widget" },
+    { key: "Enter", action: "Drill into focused widget" },
+    { key: "Esc", action: "Back / quit" },
+    { key: "t", action: "Cycle time period" },
+    { key: "r", action: "Refresh now" },
+    { key: "R", action: "Toggle auto-refresh" },
+    { key: "o", action: "Open in browser" },
+    { key: "?", action: "Toggle this help" },
+    { key: "q / Ctrl+C", action: "Quit" },
+  ];
+  // The longest key column drives the alignment; +2 cells of
+  // padding so the action text breathes.
+  const keyWidth = Math.max(...bindings.map((b) => b.key.length)) + 2;
+  return (
+    <box
+      borderColor={ACCENT}
+      borderStyle="rounded"
+      flexDirection="column"
+      flexShrink={0}
+      marginTop={1}
+      paddingLeft={1}
+      paddingRight={1}
+      title=" Keybindings "
+      titleAlignment="left"
+    >
+      {bindings.map((b) => (
+        <text key={b.key}>
+          <span fg={ACCENT}>{b.key.padEnd(keyWidth)}</span>
+          <span fg={FOREGROUND}>{b.action}</span>
+        </text>
+      ))}
+    </box>
+  );
+}
+
+// ───────────────────────────── Status bar ────────────────────────────
+
+/**
+ * Compact one-line status bar at the bottom of the screen showing
+ * the most useful keybindings. Appears in both grid and drilldown
+ * modes (the bindings list adapts).
+ *
+ * Why pin it to the bottom? Discoverability. Without a visible
+ * cue, first-time users won't know they can press `?` to learn
+ * about the rest of the keys, and the dashboard would feel like
+ * a static page that just happens to take stdin.
+ */
+function StatusBar({
+  snapshot,
+}: {
+  snapshot: {
+    drilldownActive: boolean;
+    helpOverlayActive: boolean;
+    autoRefreshEnabled: boolean;
+    fetchError: string | null;
+  };
+}): React.ReactNode {
+  let hint: string;
+  if (snapshot.helpOverlayActive) {
+    hint = "Esc / ? to close";
+  } else if (snapshot.drilldownActive) {
+    hint = "Esc to return  ·  q to quit";
+  } else {
+    hint =
+      "Tab focus  ·  Enter drill  ·  t period  ·  r refresh  ·  R auto  ·  o browser  ·  ? help  ·  q quit";
+  }
+  return (
+    <box
+      border={["top"]}
+      borderColor={MUTED}
+      borderStyle="single"
+      flexDirection="row"
+      flexShrink={0}
+      marginTop={1}
+      paddingTop={0}
+    >
+      <text fg={MUTED}>{hint}</text>
+      {snapshot.fetchError ? (
+        <text fg={ERROR}>{`  ✖ ${snapshot.fetchError}`}</text>
+      ) : null}
+    </box>
+  );
 }

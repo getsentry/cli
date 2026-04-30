@@ -41,6 +41,39 @@ import {
   resolveOrgFromTarget,
 } from "./resolve.js";
 
+/**
+ * True when the dashboard should mount the interactive Bun-binary
+ * TUI rather than the static one-shot renderer. Requires a
+ * real TTY on both stdin (for keystrokes) and stdout (for the
+ * alternate-screen takeover) AND non-JSON output mode AND the
+ * Bun runtime (where the OpenTUI bindings can load).
+ *
+ * Stays a function rather than a boolean so the test suite can
+ * mock TTY-ness per-test without import-order timing issues.
+ *
+ * The `stdout` argument is the Writer from `SentryContext`. We
+ * read `.isTTY` via a structural type because the `Writer` shape
+ * deliberately omits TTY metadata to keep library-mode consumers
+ * pluggable — but in practice the production stdout is
+ * `process.stdout` and exposes the flag.
+ */
+function isInteractiveContext(
+  flags: ViewFlags,
+  stdin: NodeJS.ReadStream,
+  stdout: { isTTY?: boolean }
+): boolean {
+  if (flags.json) {
+    return false;
+  }
+  if (!(stdin.isTTY && stdout.isTTY)) {
+    return false;
+  }
+  // The Bun-compiled binary exposes `process.versions.bun`. The
+  // npm/Node distribution doesn't. The interactive runtime
+  // imports OpenTUI which only loads under Bun.
+  return typeof process.versions.bun === "string";
+}
+
 /** Default auto-refresh interval in seconds */
 const DEFAULT_REFRESH_INTERVAL = 60;
 
@@ -202,6 +235,103 @@ function resolveViewTimeRange(
   return dashboardPeriod ? parsePeriod(dashboardPeriod) : TIME_RANGE_24H;
 }
 
+/**
+ * Inputs for the interactive dashboard runtime. Bundled into a
+ * single object so the helper can stay readable instead of
+ * threading 9+ positional args.
+ */
+type InteractiveContext = {
+  regionUrl: string;
+  orgSlug: string;
+  url: string;
+  dashboard: Awaited<ReturnType<typeof getDashboard>>;
+  widgets: DashboardWidget[];
+  widgetTimeOpts:
+    | { period: string }
+    | { start: string | undefined; end: string | undefined };
+  /**
+   * Seconds covered by the current period. `undefined` is the
+   * legitimate "couldn't compute" return from `timeRangeToSeconds`
+   * for malformed absolute ranges; downstream API code accepts
+   * undefined and falls back to its own period parsing.
+   */
+  periodSeconds: number | undefined;
+  timeRange: TimeRange;
+  /** From `flags.refresh` — undefined when auto-refresh is off. */
+  refreshSeconds: number | undefined;
+};
+
+/**
+ * Fetch initial widget data and hand off to the OpenTUI runtime.
+ *
+ * Returns `true` when the runtime took over and ran to user-quit;
+ * the caller should `return` from `func()` immediately. Returns
+ * `false` when the runtime is unavailable (npm/Node distribution,
+ * unusual environment) so the caller can fall through to the
+ * non-interactive path.
+ *
+ * Lazy-imports `dashboard-runtime.js` for the same reason
+ * `tryPreRenderTui` lazy-imports `dashboard-tui.js`: keep
+ * OpenTUI references out of the npm bundle's static module
+ * graph.
+ */
+async function tryRunInteractive(ctx: InteractiveContext): Promise<boolean> {
+  // Initial fetch happens before mounting the renderer so any
+  // error (auth, 404, network) surfaces in the normal stderr
+  // stream rather than getting wiped by the alternate-screen
+  // takeover.
+  const initialWidgetData = await withProgress(
+    { message: "Querying widget data...", json: false },
+    () =>
+      queryAllWidgets(ctx.regionUrl, ctx.orgSlug, ctx.dashboard, {
+        ...ctx.widgetTimeOpts,
+        periodSeconds: ctx.periodSeconds,
+      })
+  );
+  const initialData = buildViewData(
+    ctx.dashboard,
+    initialWidgetData,
+    ctx.widgets,
+    { period: formatTimeRangeFlag(ctx.timeRange), url: ctx.url }
+  );
+
+  try {
+    const { runInteractiveDashboard } = await import(
+      "../../lib/formatters/dashboard-runtime.js"
+    );
+    await runInteractiveDashboard({
+      initialData,
+      initialPeriod: formatTimeRangeFlag(ctx.timeRange),
+      orgSlug: ctx.orgSlug,
+      fetch: async ({ period }) => {
+        const fresh = await queryAllWidgets(
+          ctx.regionUrl,
+          ctx.orgSlug,
+          ctx.dashboard,
+          { period, periodSeconds: timeRangeToSeconds(parsePeriod(period)) }
+        );
+        return buildViewData(ctx.dashboard, fresh, ctx.widgets, {
+          period,
+          url: ctx.url,
+        });
+      },
+      autoRefreshIntervalMs:
+        ctx.refreshSeconds !== undefined
+          ? ctx.refreshSeconds * 1000
+          : undefined,
+      initialAutoRefresh: ctx.refreshSeconds !== undefined,
+    });
+    return true;
+  } catch (err) {
+    logger.debug(
+      `Interactive dashboard unavailable, falling back to static render: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+    return false;
+  }
+}
+
 export const viewCommand = buildCommand({
   docs: {
     brief: "View a dashboard",
@@ -262,6 +392,7 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, w: "web", r: "refresh", t: "period" },
   },
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential dispatch across web/interactive/refresh-poll/single-fetch modes is inherently flat; further splitting would spread one logical flow across multiple helpers without simplifying the branching
   async *func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
     const { cwd } = this;
@@ -302,6 +433,40 @@ export const viewCommand = buildCommand({
         ? { period: timeRange.period }
         : { start: timeRange.start, end: timeRange.end };
     const widgets = dashboard.widgets ?? [];
+
+    // Interactive path — Bun binary, real TTY, non-JSON. Mounts a
+    // long-lived OpenTUI app that owns the alternate screen until
+    // the user quits. The `--refresh N` flag becomes "start with
+    // auto-refresh enabled at N-second interval"; without it,
+    // auto-refresh starts off and the user can toggle with `R`.
+    if (
+      isInteractiveContext(
+        flags,
+        this.stdin,
+        // The Writer type doesn't expose `isTTY` (kept abstract
+        // for library-mode consumers), but the production stdout
+        // is `process.stdout` and does. Cast to read the flag
+        // without coupling Writer to Node's stream shape.
+        this.stdout as unknown as { isTTY?: boolean }
+      )
+    ) {
+      const handled = await tryRunInteractive({
+        regionUrl,
+        orgSlug,
+        url,
+        dashboard,
+        widgets,
+        widgetTimeOpts,
+        periodSeconds,
+        timeRange,
+        refreshSeconds: flags.refresh,
+      });
+      if (handled) {
+        return;
+      }
+      // tryRunInteractive returned false → fall through to the
+      // non-interactive paths below.
+    }
 
     if (flags.refresh !== undefined) {
       // ── Refresh mode: poll and re-render ──

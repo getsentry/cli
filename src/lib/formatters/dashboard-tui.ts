@@ -39,7 +39,6 @@
  */
 
 import type { DashboardViewData } from "./dashboard.js";
-
 /**
  * Embed `dashboard-app.tsx` as a Bun-compile file resource.
  *
@@ -54,6 +53,7 @@ import type { DashboardViewData } from "./dashboard.js";
  */
 // @ts-expect-error: `with { type: "file" }` is Bun-specific and not yet typed in @types/bun
 import dashboardAppPath from "./dashboard-app.tsx" with { type: "file" };
+import { DashboardStore } from "./dashboard-store.js";
 
 /** Default rendering width when stdout dimensions can't be detected. */
 const DEFAULT_WIDTH = 100;
@@ -175,9 +175,20 @@ export async function renderDashboardTui(
       useThread: false,
     });
 
+  // The static path uses the same React App as the interactive
+  // path (`dashboard-runtime.ts`). Construct a single-shot store
+  // wrapping the data; `useKeyboard` hooks register against the
+  // test renderer's key bus but never fire because we don't drive
+  // any keystrokes — the App renders its initial snapshot and we
+  // capture that.
+  const store = new DashboardStore({
+    data,
+    currentPeriod: data.period,
+  });
+
   try {
     const root = reactBindings.createRoot(renderer);
-    root.render(react.createElement(app.App, { data, termWidth: width }));
+    root.render(react.createElement(app.App, { store, termWidth: width }));
     // React's reconciler commits asynchronously and the OpenTUI
     // adapter may queue layout work on top of that. Render twice
     // with a microtask wait between calls — the first
