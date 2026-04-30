@@ -294,6 +294,15 @@ export async function discoverFilePairs(
     }
     const mapPath = await findCompanionMap(entry.absolutePath);
     if (mapPath) {
+      // Guard against sourceMappingURL directives that resolve outside the
+      // upload directory (e.g. "../../other/app.js.map"). Convention-based
+      // maps (foo.js.map) are always adjacent so they're inherently safe.
+      if (!mapPath.startsWith(absDir)) {
+        log.debug(
+          `skipping sourcemap outside directory: ${mapPath} (resolved from ${entry.absolutePath})`
+        );
+        continue;
+      }
       pairs.push({ jsPath: entry.absolutePath, mapPath });
     }
   }
