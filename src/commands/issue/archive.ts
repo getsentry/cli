@@ -308,8 +308,10 @@ function specToApiOptions(spec: UntilSpec): {
             : {}),
         },
       };
-    default:
-      return { substatus: "archived_forever" };
+    default: {
+      const _exhaustive: never = spec;
+      return _exhaustive;
+    }
   }
 }
 
