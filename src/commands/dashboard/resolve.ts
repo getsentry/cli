@@ -134,7 +134,7 @@ function tryExtractDashboardUrl(
     throw new ValidationError(
       "Dashboard ID or title is required.\n\n" +
         "The URL provided contains an org but no dashboard ID.\n" +
-        `Try: sentry dashboard view ${urlParsed.org}/ <id-or-title>`,
+        `Try: sentry dashboard <command> ${urlParsed.org}/ <id-or-title>`,
       "dashboard"
     );
   }
@@ -208,10 +208,49 @@ export function parseDashboardPositionalArgs(
  * @param args - Raw positional arguments
  * @returns Target arg for org resolution and optional title filter glob
  */
-export function parseDashboardListArgs(args: string[]): {
+/** Result of URL-based list arg extraction */
+type ListArgResult = {
   targetArg: string | undefined;
   titleFilter: string | undefined;
-} {
+};
+
+/**
+ * Try to extract org context from a Sentry URL in dashboard list args.
+ *
+ * When the URL contains a dashboard ID, throws a helpful error suggesting
+ * `sentry dashboard view` instead. When only an org is present, extracts
+ * it as the target.
+ */
+function tryExtractListUrl(
+  first: string,
+  remaining: string[]
+): ListArgResult | null {
+  const urlParsed = parseSentryUrl(first);
+  if (!urlParsed) {
+    return null;
+  }
+  applySentryUrlContext(urlParsed.baseUrl);
+  if (urlParsed.dashboardId) {
+    const orgPrefix = urlParsed.org ? `${urlParsed.org}/ ` : "";
+    const orgSuffix = urlParsed.org ? ` ${urlParsed.org}/` : "";
+    const orgNote = urlParsed.org ? ` in '${urlParsed.org}'` : "";
+    throw new ValidationError(
+      "This looks like a dashboard URL. To view a specific dashboard:\n\n" +
+        `  sentry dashboard view ${orgPrefix}${urlParsed.dashboardId}\n\n` +
+        `To list dashboards${orgNote}:\n\n` +
+        `  sentry dashboard list${orgSuffix}`,
+      "dashboard"
+    );
+  }
+  if (urlParsed.org) {
+    log.warn(`Extracted org '${urlParsed.org}' from URL`);
+    const titleFilter = remaining.length > 0 ? remaining.join(" ") : undefined;
+    return { targetArg: `${urlParsed.org}/`, titleFilter };
+  }
+  return null;
+}
+
+export function parseDashboardListArgs(args: string[]): ListArgResult {
   // buildListCommand's interceptSubcommand may replace args[0] with undefined
   // when the first positional matches a subcommand name (e.g. "view", "create").
   // Filter those out so we don't crash on .includes("/").
@@ -221,6 +260,13 @@ export function parseDashboardListArgs(args: string[]): {
   if (filtered.length === 0) {
     return { targetArg: undefined, titleFilter: undefined };
   }
+
+  // URL detection — extract org or suggest `view` for dashboard-specific URLs
+  const urlResult = tryExtractListUrl(filtered[0] as string, filtered.slice(1));
+  if (urlResult) {
+    return urlResult;
+  }
+
   if (filtered.length >= 2) {
     // First arg is the target, remaining args are joined as the filter.
     // This handles unquoted multi-word titles: `my-org/ CLI Health` arrives

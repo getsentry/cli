@@ -217,6 +217,41 @@ describe("parseDashboardListArgs", () => {
     expect(result.targetArg).toBe("my-org/my-project/");
     expect(result.titleFilter).toBeUndefined();
   });
+
+  // -- URL handling --
+
+  test("dashboard URL throws ValidationError suggesting view command", () => {
+    expect(() =>
+      parseDashboardListArgs([
+        "https://sentry-sdks.sentry.io/dashboard/4326879/",
+      ])
+    ).toThrow(ValidationError);
+    try {
+      parseDashboardListArgs([
+        "https://sentry-sdks.sentry.io/dashboard/4326879/",
+      ]);
+    } catch (error) {
+      const msg = (error as ValidationError).message;
+      expect(msg).toContain("sentry dashboard view");
+      expect(msg).toContain("4326879");
+      expect(msg).toContain("sentry-sdks");
+    }
+  });
+
+  test("org-only URL extracts org as target", () => {
+    const result = parseDashboardListArgs(["https://my-org.sentry.io/"]);
+    expect(result.targetArg).toBe("my-org/");
+    expect(result.titleFilter).toBeUndefined();
+  });
+
+  test("org-only URL with second arg uses it as title filter", () => {
+    const result = parseDashboardListArgs([
+      "https://my-org.sentry.io/",
+      "Error*",
+    ]);
+    expect(result.targetArg).toBe("my-org/");
+    expect(result.titleFilter).toBe("Error*");
+  });
 });
 
 // ---------------------------------------------------------------------------
