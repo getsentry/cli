@@ -281,7 +281,7 @@ Authenticate with Sentry
 - `sentry auth refresh` — Refresh your authentication token
 - `sentry auth status` — View authentication status
 - `sentry auth token` — Print the stored authentication token
-- `sentry auth whoami` — Show the currently authenticated user
+- `sentry auth whoami` — Show the currently authenticated identity
 
 → Full flags and examples: `references/auth.md`
 
