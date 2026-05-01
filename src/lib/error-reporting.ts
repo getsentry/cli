@@ -102,18 +102,21 @@ function recordSilencedError(error: unknown, reason: SilenceReason): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Strip quoted substrings and numeric/hex IDs from a resource string to
- * produce a stable "kind" for grouping.
+ * Strip quoted substrings, numeric/hex IDs, and org/project paths from a
+ * resource string to produce a stable "kind" for grouping.
  *
  * `"Project 'my-app' not found"` → `"Project not found"`
  * `"Issue 7420431306 not found."` → `"Issue not found."`
+ * `"Issue 19 not found."` → `"Issue not found."`
+ * `"not found in neurio/installer-app"` → `"not found"`
  */
 export function extractResourceKind(resource: string): string {
   return resource
     .replace(/'[^']*'/g, "")
     .replace(/"[^"]*"/g, "")
     .replace(/\b[0-9a-f]{16,32}\b/gi, "")
-    .replace(/\b\d{6,}\b/g, "")
+    .replace(/\bin\s+[\w-]+\/[\w-]+/g, "")
+    .replace(/\b\d+\b/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }

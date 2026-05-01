@@ -30,8 +30,8 @@ const hexIdArb = stringMatching(/^[0-9a-f]{32}$/).filter(
   (s) => s.length === 32
 );
 
-/** Arbitrary numeric id in the issue-id range (>= 6 digits). */
-const numericIdArb = integer({ min: 100_000, max: 9_999_999_999 }).map(String);
+/** Arbitrary numeric id across the full range (small issue IDs to large). */
+const numericIdArb = integer({ min: 1, max: 9_999_999_999 }).map(String);
 
 describe("extractResourceKind — property tests", () => {
   test("single-quoted slug produces same kind for any slug", () => {
@@ -100,6 +100,31 @@ describe("extractResourceKind — property tests", () => {
           extractResourceKind(
             `Project '${p2}' not found in organization '${o2}'`
           )
+        );
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("org/project path in headline is stripped for any org/project", () => {
+    fcAssert(
+      property(slugArb, slugArb, slugArb, slugArb, (o1, p1, o2, p2) => {
+        expect(extractResourceKind(`not found in ${o1}/${p1}`)).toBe(
+          extractResourceKind(`not found in ${o2}/${p2}`)
+        );
+        expect(extractResourceKind(`not found in ${o1}/${p1}`)).toBe(
+          "not found"
+        );
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("small numeric IDs are stripped just like large ones", () => {
+    fcAssert(
+      property(integer({ min: 1, max: 99 }), numericIdArb, (small, large) => {
+        expect(extractResourceKind(`Issue ${small} not found.`)).toBe(
+          extractResourceKind(`Issue ${large} not found.`)
         );
       }),
       { numRuns: DEFAULT_NUM_RUNS }
