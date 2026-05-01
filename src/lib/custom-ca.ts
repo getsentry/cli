@@ -90,13 +90,18 @@ function resolve(): void {
   }
   hasResolved = true;
 
+  // Build the source list. getDefaultCaCert() reads SQLite — if the DB
+  // is broken, fall through to env var sources instead of aborting.
+  let storedPath = "";
+  try {
+    storedPath = getDefaultCaCert() ?? "";
+  } catch {
+    log.debug("Failed to read stored ca-cert default from database");
+  }
+
   const env = getEnv();
   const sources: { path: string; source: CaSource; label: string }[] = [
-    {
-      path: getDefaultCaCert() ?? "",
-      source: "default",
-      label: "stored default",
-    },
+    { path: storedPath, source: "default", label: "stored default" },
     {
       path: env.NODE_EXTRA_CA_CERTS?.trim() ?? "",
       source: "env",
