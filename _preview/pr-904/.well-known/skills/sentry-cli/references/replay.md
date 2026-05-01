@@ -1,0 +1,107 @@
+---
+name: sentry-cli-replay
+version: 0.31.0-dev.0
+description: Search and inspect Session Replays
+requires:
+  bins: ["sentry"]
+  auth: true
+---
+
+# Replay Commands
+
+Search and inspect Session Replays
+
+### `sentry replay list <org/project>`
+
+List recent Session Replays
+
+**Flags:**
+- `-n, --limit <value> - Number of replays (1-1000) - (default: "25")`
+- `-q, --query <value> - Search query (Sentry replay search syntax)`
+- `-s, --sort <value> - Sort by: date, oldest, duration, errors, segments, activity - (default: "date")`
+- `-t, --period <value> - Time range: "7d", "2026-04-01..2026-05-01", ">=2026-04-01" - (default: "7d")`
+- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+- `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
+
+**JSON Fields** (use `--json --fields` to select specific fields):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `activity` | number \| null | Replay activity score |
+| `browser` | object | Browser metadata |
+| `count_dead_clicks` | number \| null | Dead click count |
+| `count_errors` | number \| null | Associated error count |
+| `count_infos` | number \| null | Info event count |
+| `count_rage_clicks` | number \| null | Rage click count |
+| `count_segments` | number \| null | Recording segment count |
+| `count_urls` | number \| null | Visited URL count |
+| `count_warnings` | number \| null | Warning event count |
+| `device` | object | Device metadata |
+| `dist` | string \| null | Distribution |
+| `duration` | number \| null | Replay duration in seconds |
+| `environment` | string \| null | Environment |
+| `error_ids` | array | Linked error IDs |
+| `finished_at` | string \| null | Replay finish timestamp |
+| `has_viewed` | boolean \| null | Whether the current user has viewed the replay |
+| `id` | string | Replay ID |
+| `info_ids` | array | Linked info event IDs |
+| `is_archived` | boolean \| null | Archived flag |
+| `os` | object | Operating system metadata |
+| `platform` | string \| null | Platform |
+| `project_id` | string \| null | Numeric project ID |
+| `releases` | array | Associated releases |
+| `sdk` | object | SDK metadata |
+| `started_at` | string \| null | Replay start timestamp |
+| `tags` | unknown | Replay tags |
+| `trace_ids` | array | Linked trace IDs |
+| `urls` | array | Visited URLs |
+| `user` | object | User metadata |
+| `warning_ids` | array | Linked warning event IDs |
+
+### `sentry replay view <org/project/replay-id...>`
+
+View a Session Replay
+
+**Flags:**
+- `-w, --web - Open in browser`
+- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+
+**JSON Fields** (use `--json --fields` to select specific fields):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `activity` | number \| null | Replay activity score |
+| `browser` | object | Browser metadata |
+| `count_dead_clicks` | number \| null | Dead click count |
+| `count_errors` | number \| null | Associated error count |
+| `count_infos` | number \| null | Info event count |
+| `count_rage_clicks` | number \| null | Rage click count |
+| `count_segments` | number \| null | Recording segment count |
+| `count_urls` | number \| null | Visited URL count |
+| `count_warnings` | number \| null | Warning event count |
+| `device` | object | Device metadata |
+| `dist` | string \| null | Distribution |
+| `duration` | number \| null | Replay duration in seconds |
+| `environment` | string \| null | Environment |
+| `error_ids` | array | Linked error IDs |
+| `finished_at` | string \| null | Replay finish timestamp |
+| `has_viewed` | boolean \| null | Whether the current user has viewed the replay |
+| `id` | string | Replay ID |
+| `info_ids` | array | Linked info event IDs |
+| `is_archived` | boolean \| null | Archived flag |
+| `os` | object | Operating system metadata |
+| `platform` | string \| null | Platform |
+| `project_id` | string \| null | Numeric project ID |
+| `releases` | array | Associated releases |
+| `sdk` | object | SDK metadata |
+| `started_at` | string \| null | Replay start timestamp |
+| `tags` | unknown | Replay tags |
+| `trace_ids` | array | Linked trace IDs |
+| `urls` | array | Visited URLs |
+| `user` | object | User metadata |
+| `warning_ids` | array | Linked warning event IDs |
+| `clicks` | array | Replay click summaries |
+| `ota_updates` | object | OTA update metadata |
+| `replay_type` | string \| null | Replay type |
+
+All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
