@@ -12,6 +12,25 @@ describe("getReplayRequestFields", () => {
       "trace_ids",
     ]);
   });
+
+  test("requests backing array fields for convenience replay columns", () => {
+    expect(
+      getReplayRequestFields([
+        "error_id",
+        "info_id",
+        "release",
+        "screen",
+        "warning_id",
+      ])
+    ).toEqual([
+      "id",
+      "error_ids",
+      "info_ids",
+      "releases",
+      "urls",
+      "warning_ids",
+    ]);
+  });
 });
 
 describe("isSupportedReplayField", () => {

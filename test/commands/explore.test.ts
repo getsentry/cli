@@ -439,6 +439,33 @@ describe("sentry explore", () => {
         expect.objectContaining({ sort: "-started_at" })
       );
     });
+
+    test("requests canonical replay API fields for default replay columns", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      await func.call(
+        context,
+        { ...DEFAULT_FLAGS, dataset: "replays" },
+        "test-org/"
+      );
+
+      expect(listReplaysSpy).toHaveBeenCalledWith(
+        "test-org",
+        expect.objectContaining({
+          fields: [
+            "id",
+            "started_at",
+            "duration",
+            "count_errors",
+            "count_rage_clicks",
+            "count_dead_clicks",
+            "urls",
+            "user",
+          ],
+        })
+      );
+    });
   });
 
   describe("output", () => {

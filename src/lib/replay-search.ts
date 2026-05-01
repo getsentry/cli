@@ -5,18 +5,10 @@ type ReplayFieldResolver = (replay: ReplayLike) => unknown;
 
 const REPLAY_FIELD_ALIASES = {
   count_screens: "count_urls",
-  error_id: "error_ids",
-  info_id: "info_ids",
-  release: "releases",
-  screen: "urls",
   screens: "urls",
   seen_by_me: "has_viewed",
-  trace: "trace_ids",
-  trace_id: "trace_ids",
-  url: "urls",
   "user.ip_address": "user.ip",
   viewed_by_me: "has_viewed",
-  warning_id: "warning_ids",
 } as const satisfies Record<string, string>;
 
 function normalizeReplayField(field: string): string {
@@ -158,6 +150,18 @@ function replayRequestRoot(field: string): string {
       return "sdk";
     case "count_traces":
       return "trace_ids";
+    case "error_id":
+      return "error_ids";
+    case "info_id":
+      return "info_ids";
+    case "release":
+      return "releases";
+    case "screen":
+    case "url":
+      return "urls";
+    case "trace":
+    case "trace_id":
+      return "trace_ids";
     case "user.email":
     case "user.geo.city":
     case "user.geo.country_code":
@@ -167,6 +171,8 @@ function replayRequestRoot(field: string): string {
     case "user.ip":
     case "user.username":
       return "user";
+    case "warning_id":
+      return "warning_ids";
     default:
       return normalized;
   }
