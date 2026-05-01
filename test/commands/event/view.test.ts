@@ -1364,6 +1364,18 @@ describe("collectEventIds", () => {
     const ids = collectEventIds("abc123", ["bad1", "bad2"]);
     expect(ids).toEqual(["abc123"]);
   });
+
+  test("deduplicates event IDs", () => {
+    const ids = collectEventIds("60c277e6c73f41c58ca46231b46dc0f8", [
+      "60c277e6c73f41c58ca46231b46dc0f8", // same as primary
+      "722e1158dfa147ec90ed831c4d096ae7",
+      "722e1158dfa147ec90ed831c4d096ae7", // duplicate extra
+    ]);
+    expect(ids).toEqual([
+      "60c277e6c73f41c58ca46231b46dc0f8",
+      "722e1158dfa147ec90ed831c4d096ae7",
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------

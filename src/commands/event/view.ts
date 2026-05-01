@@ -821,6 +821,7 @@ export function collectEventIds(
   primaryId: string,
   extraIds: string[] | undefined
 ): string[] {
+  const seen = new Set<string>([primaryId]);
   const allIds = [primaryId];
   if (!extraIds || extraIds.length === 0) {
     return allIds;
@@ -828,7 +829,11 @@ export function collectEventIds(
   const log = logger.withTag("event.view");
   for (const rawId of extraIds) {
     try {
-      allIds.push(validateHexId(rawId, "Event ID"));
+      const validated = validateHexId(rawId, "Event ID");
+      if (!seen.has(validated)) {
+        seen.add(validated);
+        allIds.push(validated);
+      }
     } catch {
       log.info(`Skipping invalid event ID: ${rawId}`);
     }
