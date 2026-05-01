@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export type ReplayTags = Record<string, string[]>;
+
 /**
  * User geo metadata attached to a replay.
  */
@@ -89,7 +91,7 @@ export const ReplayOtaUpdatesSchema = z
 export const ReplayTagsSchema = z
   .record(z.array(z.string()))
   .catch({})
-  .describe("Replay tags");
+  .describe("Replay tags") as z.ZodType<ReplayTags>;
 
 /**
  * Known root fields that the replay list endpoint accepts in repeated `field=`
@@ -131,91 +133,103 @@ export const REPLAY_LIST_FIELDS = [
   "warning_ids",
 ] as const;
 
+function replayNullableNumber(description: string) {
+  return z.number().nullable().optional().describe(description);
+}
+
+function replayNullableString(description: string) {
+  return z.string().nullable().optional().describe(description);
+}
+
+function replayNullableBoolean(description: string) {
+  return z.boolean().nullable().optional().describe(description);
+}
+
+function replayNullishObject<T extends z.ZodTypeAny>(
+  schema: T,
+  description: string
+) {
+  return schema.nullish().describe(description);
+}
+
+function replayStringArray() {
+  return z.array(z.string());
+}
+
+function replayStringArrayWithFallback() {
+  return replayStringArray().catch([]);
+}
+
+function buildReplayListItemShape<
+  TErrorIds extends z.ZodTypeAny,
+  TInfoIds extends z.ZodTypeAny,
+  TProjectId extends z.ZodTypeAny,
+  TTags extends z.ZodTypeAny,
+  TTraceIds extends z.ZodTypeAny,
+  TUrls extends z.ZodTypeAny,
+  TWarningIds extends z.ZodTypeAny,
+>(fields: {
+  errorIds: TErrorIds;
+  infoIds: TInfoIds;
+  projectId: TProjectId;
+  tags: TTags;
+  traceIds: TTraceIds;
+  urls: TUrls;
+  warningIds: TWarningIds;
+}) {
+  return {
+    activity: replayNullableNumber("Replay activity score"),
+    browser: replayNullishObject(ReplayBrowserSchema, "Browser metadata"),
+    count_dead_clicks: replayNullableNumber("Dead click count"),
+    count_errors: replayNullableNumber("Associated error count"),
+    count_infos: replayNullableNumber("Info event count"),
+    count_rage_clicks: replayNullableNumber("Rage click count"),
+    count_segments: replayNullableNumber("Recording segment count"),
+    count_urls: replayNullableNumber("Visited URL count"),
+    count_warnings: replayNullableNumber("Warning event count"),
+    device: replayNullishObject(ReplayDeviceSchema, "Device metadata"),
+    dist: replayNullableString("Distribution"),
+    duration: replayNullableNumber("Replay duration in seconds"),
+    environment: replayNullableString("Environment"),
+    error_ids: fields.errorIds.describe("Linked error IDs"),
+    finished_at: replayNullableString("Replay finish timestamp"),
+    has_viewed: replayNullableBoolean(
+      "Whether the current user has viewed the replay"
+    ),
+    id: z.string().describe("Replay ID"),
+    info_ids: fields.infoIds.describe("Linked info event IDs"),
+    is_archived: replayNullableBoolean("Archived flag"),
+    os: replayNullishObject(ReplayOsSchema, "Operating system metadata"),
+    platform: replayNullableString("Platform"),
+    project_id: fields.projectId.describe("Numeric project ID"),
+    releases: replayStringArray().optional().describe("Associated releases"),
+    sdk: replayNullishObject(ReplaySdkSchema, "SDK metadata"),
+    started_at: replayNullableString("Replay start timestamp"),
+    tags: fields.tags.describe("Replay tags"),
+    trace_ids: fields.traceIds.describe("Linked trace IDs"),
+    urls: fields.urls.describe("Visited URLs"),
+    user: replayNullishObject(ReplayUserSchema, "User metadata"),
+    warning_ids: fields.warningIds.describe("Linked warning event IDs"),
+  };
+}
+
 /**
  * A single replay row returned by the organization replay index endpoint.
  *
  * Duration is in seconds, matching the backend replay interchange format.
  */
 export const ReplayListItemSchema = z
-  .object({
-    activity: z
-      .number()
-      .nullable()
-      .optional()
-      .describe("Replay activity score"),
-    browser: ReplayBrowserSchema.nullish().describe("Browser metadata"),
-    count_dead_clicks: z
-      .number()
-      .nullable()
-      .optional()
-      .describe("Dead click count"),
-    count_errors: z
-      .number()
-      .nullable()
-      .optional()
-      .describe("Associated error count"),
-    count_infos: z.number().nullable().optional().describe("Info event count"),
-    count_rage_clicks: z
-      .number()
-      .nullable()
-      .optional()
-      .describe("Rage click count"),
-    count_segments: z
-      .number()
-      .nullable()
-      .optional()
-      .describe("Recording segment count"),
-    count_urls: z.number().nullable().optional().describe("Visited URL count"),
-    count_warnings: z
-      .number()
-      .nullable()
-      .optional()
-      .describe("Warning event count"),
-    device: ReplayDeviceSchema.nullish().describe("Device metadata"),
-    dist: z.string().nullable().optional().describe("Distribution"),
-    duration: z
-      .number()
-      .nullable()
-      .optional()
-      .describe("Replay duration in seconds"),
-    environment: z.string().nullable().optional().describe("Environment"),
-    error_ids: z.array(z.string()).catch([]).describe("Linked error IDs"),
-    finished_at: z
-      .string()
-      .nullable()
-      .optional()
-      .describe("Replay finish timestamp"),
-    has_viewed: z
-      .boolean()
-      .nullable()
-      .optional()
-      .describe("Whether the current user has viewed the replay"),
-    id: z.string().describe("Replay ID"),
-    info_ids: z.array(z.string()).catch([]).describe("Linked info event IDs"),
-    is_archived: z.boolean().nullable().optional().describe("Archived flag"),
-    os: ReplayOsSchema.nullish().describe("Operating system metadata"),
-    platform: z.string().nullable().optional().describe("Platform"),
-    project_id: z
-      .union([z.string(), z.number()])
-      .nullable()
-      .optional()
-      .describe("Numeric project ID"),
-    releases: z.array(z.string()).optional().describe("Associated releases"),
-    sdk: ReplaySdkSchema.nullish().describe("SDK metadata"),
-    started_at: z
-      .string()
-      .nullable()
-      .optional()
-      .describe("Replay start timestamp"),
-    tags: ReplayTagsSchema.describe("Replay tags"),
-    trace_ids: z.array(z.string()).catch([]).describe("Linked trace IDs"),
-    urls: z.array(z.string()).catch([]).describe("Visited URLs"),
-    user: ReplayUserSchema.nullish().describe("User metadata"),
-    warning_ids: z
-      .array(z.string())
-      .catch([])
-      .describe("Linked warning event IDs"),
-  })
+  .object(
+    buildReplayListItemShape({
+      errorIds: replayStringArrayWithFallback(),
+      infoIds: replayStringArrayWithFallback(),
+      projectId: z.union([z.string(), z.number()]).nullable().optional(),
+      tags: ReplayTagsSchema,
+      traceIds: replayStringArrayWithFallback(),
+      urls: replayStringArrayWithFallback(),
+      warningIds: replayStringArrayWithFallback(),
+    })
+  )
   .passthrough()
   .describe("Replay list row");
 
@@ -259,78 +273,17 @@ export const ReplayDetailsResponseSchema = z
  * legacy/nullish payload variants from archived replay rows.
  */
 export const ReplayListItemOutputSchema = z
-  .object({
-    activity: z
-      .number()
-      .nullable()
-      .optional()
-      .describe("Replay activity score"),
-    browser: ReplayBrowserSchema.nullish().describe("Browser metadata"),
-    count_dead_clicks: z
-      .number()
-      .nullable()
-      .optional()
-      .describe("Dead click count"),
-    count_errors: z
-      .number()
-      .nullable()
-      .optional()
-      .describe("Associated error count"),
-    count_infos: z.number().nullable().optional().describe("Info event count"),
-    count_rage_clicks: z
-      .number()
-      .nullable()
-      .optional()
-      .describe("Rage click count"),
-    count_segments: z
-      .number()
-      .nullable()
-      .optional()
-      .describe("Recording segment count"),
-    count_urls: z.number().nullable().optional().describe("Visited URL count"),
-    count_warnings: z
-      .number()
-      .nullable()
-      .optional()
-      .describe("Warning event count"),
-    device: ReplayDeviceSchema.nullish().describe("Device metadata"),
-    dist: z.string().nullable().optional().describe("Distribution"),
-    duration: z
-      .number()
-      .nullable()
-      .optional()
-      .describe("Replay duration in seconds"),
-    environment: z.string().nullable().optional().describe("Environment"),
-    error_ids: z.array(z.string()).describe("Linked error IDs"),
-    finished_at: z
-      .string()
-      .nullable()
-      .optional()
-      .describe("Replay finish timestamp"),
-    has_viewed: z
-      .boolean()
-      .nullable()
-      .optional()
-      .describe("Whether the current user has viewed the replay"),
-    id: z.string().describe("Replay ID"),
-    info_ids: z.array(z.string()).describe("Linked info event IDs"),
-    is_archived: z.boolean().nullable().optional().describe("Archived flag"),
-    os: ReplayOsSchema.nullish().describe("Operating system metadata"),
-    platform: z.string().nullable().optional().describe("Platform"),
-    project_id: z.string().nullable().optional().describe("Numeric project ID"),
-    releases: z.array(z.string()).optional().describe("Associated releases"),
-    sdk: ReplaySdkSchema.nullish().describe("SDK metadata"),
-    started_at: z
-      .string()
-      .nullable()
-      .optional()
-      .describe("Replay start timestamp"),
-    tags: z.record(z.array(z.string())).describe("Replay tags"),
-    trace_ids: z.array(z.string()).describe("Linked trace IDs"),
-    urls: z.array(z.string()).describe("Visited URLs"),
-    user: ReplayUserSchema.nullish().describe("User metadata"),
-    warning_ids: z.array(z.string()).describe("Linked warning event IDs"),
-  })
+  .object(
+    buildReplayListItemShape({
+      errorIds: replayStringArray(),
+      infoIds: replayStringArray(),
+      projectId: z.string().nullable().optional(),
+      tags: z.record(z.array(z.string())),
+      traceIds: replayStringArray(),
+      urls: replayStringArray(),
+      warningIds: replayStringArray(),
+    })
+  )
   .describe("Replay list row");
 
 /** Documentation-oriented replay detail schema used for command metadata. */

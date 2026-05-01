@@ -23,12 +23,9 @@ function getReplayIdFromReplayContext(
   event: Pick<SentryEvent, "contexts">
 ): string | undefined {
   const replayContext = event.contexts?.replay;
-  if (!replayContext || typeof replayContext !== "object") {
-    return;
-  }
-
-  const replayId = (replayContext as { replay_id?: unknown }).replay_id;
-  return typeof replayId === "string" ? replayId : undefined;
+  return typeof replayContext?.replay_id === "string"
+    ? replayContext.replay_id
+    : undefined;
 }
 
 /**

@@ -111,6 +111,7 @@ export type {
   ProductTrial,
   ProjectKey,
   Region,
+  ReplayContext,
   RepositoryProvider,
   RequestEntry,
   SentryDeploy,

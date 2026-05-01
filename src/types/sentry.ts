@@ -256,6 +256,7 @@ export type SentryEvent = Omit<
     browser?: BrowserContext;
     os?: OsContext;
     device?: DeviceContext;
+    replay?: ReplayContext;
     [key: string]: unknown;
   } | null;
   /** Date the event was created (not in OpenAPI spec) */
@@ -465,6 +466,12 @@ export type DeviceContext = {
   model?: string;
   brand?: string;
   type?: "device";
+  [key: string]: unknown;
+};
+
+/** Replay context from event.contexts.replay */
+export type ReplayContext = {
+  replay_id?: string;
   [key: string]: unknown;
 };
 
