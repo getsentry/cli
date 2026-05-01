@@ -72,8 +72,11 @@ function matchOrganizationsPath(
   }
 
   const replayPath = matchReplayPath(segments, 2);
-  if (replayPath || isReplayPathPrefix(segments, 2)) {
-    return replayPath ? { baseUrl, org, ...replayPath } : null;
+  if (replayPath.status === "detail") {
+    return { baseUrl, org, replayId: replayPath.replayId };
+  }
+  if (replayPath.status === "invalid") {
+    return null;
   }
 
   // /organizations/{org}/dashboard/{id}/
@@ -106,14 +109,6 @@ function matchSettingsPath(
   return { baseUrl, org: segments[1], project: segments[3] };
 }
 
-function isReplayPathPrefix(segments: string[], startIndex: number): boolean {
-  return (
-    (segments[startIndex] === "explore" &&
-      segments[startIndex + 1] === "replays") ||
-    segments[startIndex] === "replays"
-  );
-}
-
 /**
  * Match the path portion of a SaaS subdomain-style URL against known patterns.
  *
@@ -136,8 +131,14 @@ function matchSubdomainPath(
   }
 
   const replayPath = matchReplayPath(segments, 0);
-  if (replayPath || isReplayPathPrefix(segments, 0)) {
-    return replayPath;
+  if (replayPath.status === "detail") {
+    return { replayId: replayPath.replayId };
+  }
+  if (replayPath.status === "invalid") {
+    return null;
+  }
+  if (replayPath.status === "list") {
+    return {};
   }
   return matchSubdomainTailPath(segments);
 }
@@ -167,7 +168,9 @@ function matchSubdomainTailPath(
 function matchReplayPath(
   segments: string[],
   startIndex: number
-): Pick<ParsedSentryUrl, "replayId"> | null {
+):
+  | { status: "absent" | "list" | "invalid" }
+  | { status: "detail"; replayId: string } {
   let replayId: string | undefined;
 
   if (
@@ -177,24 +180,19 @@ function matchReplayPath(
     replayId = segments[startIndex + 2];
   } else if (segments[startIndex] === "replays") {
     replayId = segments[startIndex + 1];
+  } else {
+    return { status: "absent" };
   }
 
-  if (!(replayId && HEX_ID_RE.test(replayId))) {
-    return null;
+  if (!replayId) {
+    return { status: "list" };
   }
 
-  if (
-    segments[startIndex] === "explore" &&
-    segments[startIndex + 1] === "replays"
-  ) {
-    return { replayId };
+  if (!HEX_ID_RE.test(replayId)) {
+    return { status: "invalid" };
   }
 
-  if (segments[startIndex] === "replays") {
-    return { replayId };
-  }
-
-  return null;
+  return { status: "detail", replayId };
 }
 
 /**

@@ -219,6 +219,26 @@ describe("parseSentryUrl", () => {
       });
     });
 
+    test("falls back to org for replay listing URL", () => {
+      const result = parseSentryUrl(
+        "https://sentry.io/organizations/my-org/explore/replays/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.io",
+        org: "my-org",
+      });
+    });
+
+    test("falls back to org for legacy replay listing URL", () => {
+      const result = parseSentryUrl(
+        "https://sentry.io/organizations/my-org/replays/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.io",
+        org: "my-org",
+      });
+    });
+
     test("rejects non-hex replay ID on explore path", () => {
       expect(
         parseSentryUrl(
@@ -241,6 +261,14 @@ describe("parseSentryUrl", () => {
           "https://my-org.sentry.io/explore/replays/some-random-page/"
         )
       ).toBeNull();
+    });
+
+    test("falls back to org for subdomain replay listing URL", () => {
+      const result = parseSentryUrl("https://my-org.sentry.io/explore/replays/");
+      expect(result).toEqual({
+        baseUrl: "https://my-org.sentry.io",
+        org: "my-org",
+      });
     });
   });
 
