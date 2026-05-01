@@ -45,7 +45,7 @@ export const issueRoute = buildRouteMap({
       "  sentry issue view @latest\n" +
       "  sentry issue events CLI-G\n" +
       "  sentry issue resolve CLI-12Z --in 0.26.1\n" +
-      "  sentry issue archive CLI-AB --duration 60\n" +
+      "  sentry issue archive CLI-AB --until auto\n" +
       "  sentry issue merge CLI-K9 CLI-15H CLI-15N\n" +
       "  sentry issue explain @most_frequent\n" +
       "  sentry issue plan my-org/@latest\n\n" +

@@ -210,12 +210,38 @@ Reopen a resolved issue
 Archive (ignore) an issue
 
 **Flags:**
-- `--until-escalating - Archive until the issue escalates (spikes in frequency)`
-- `--duration <value> - Ignore for this many minutes`
-- `--count <value> - Ignore until this many more events occur`
-- `--window <value> - Time window in minutes for --count (events must occur within this window)`
-- `--users <value> - Ignore until this many more users are affected`
-- `--user-window <value> - Time window in minutes for --users (users must be affected within this window)`
+- `-u, --until <value> - Condition for unarchival: auto, 30m, 10x, 10u, 10x/5m, etc.`
+
+**Examples:**
+
+```bash
+# Archive forever (fully silenced)
+sentry issue archive CLI-G5
+
+# Smart detection — unarchives when Sentry detects a spike in event frequency
+sentry issue archive CLI-G5 --until auto
+
+# Duration-based
+sentry issue archive CLI-G5 --until 1h    # 1 hour
+sentry issue archive CLI-G5 --until 7d    # 7 days
+sentry issue archive CLI-G5 --until 2026-12-31  # specific date
+
+# Count-based — unarchive after N more events
+sentry issue archive CLI-G5 --until 100x
+
+# User-based — unarchive after N more users affected
+sentry issue archive CLI-G5 --until 10u
+
+# Compound — count within a time window
+sentry issue archive CLI-G5 --until 100x/1h   # 100 events within 1 hour
+sentry issue archive CLI-G5 --until 10u/1d    # 10 users within 1 day
+
+# Verbose forms also work
+sentry issue archive CLI-G5 --until 10events/2hours
+
+# 'ignore' is an alias for 'archive'
+sentry issue ignore CLI-G5 --until auto
+```
 
 ### `sentry issue merge <issue...>`
 
