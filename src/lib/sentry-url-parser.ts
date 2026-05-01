@@ -11,6 +11,7 @@
 import { DEFAULT_SENTRY_HOST } from "./constants.js";
 import { getEnv } from "./env.js";
 import { HostScopeError } from "./errors.js";
+import { HEX_ID_RE } from "./hex-id.js";
 import { isSaaSTrustOrigin } from "./sentry-urls.js";
 import { getActiveTokenHost, isHostTrusted } from "./token-host.js";
 
@@ -74,6 +75,9 @@ function matchOrganizationsPath(
   if (replayPath) {
     return { baseUrl, org, ...replayPath };
   }
+  if (isReplayPathPrefix(segments, 2)) {
+    return null;
+  }
 
   // /organizations/{org}/dashboard/{id}/
   if (segments[2] === "dashboard" && segments[3]) {
@@ -105,6 +109,14 @@ function matchSettingsPath(
   return { baseUrl, org: segments[1], project: segments[3] };
 }
 
+function isReplayPathPrefix(segments: string[], startIndex: number): boolean {
+  return (
+    (segments[startIndex] === "explore" &&
+      segments[startIndex + 1] === "replays") ||
+    segments[startIndex] === "replays"
+  );
+}
+
 /**
  * Match the path portion of a SaaS subdomain-style URL against known patterns.
  *
@@ -130,6 +142,9 @@ function matchSubdomainPath(
   if (replayPath) {
     return replayPath;
   }
+  if (isReplayPathPrefix(segments, 0)) {
+    return null;
+  }
   // /settings/projects/{project}/ (org-scoped subdomain settings URL)
   if (segments[0] === "settings" && segments[1] === "projects" && segments[2]) {
     return { project: segments[2] };
@@ -153,16 +168,26 @@ function matchReplayPath(
   segments: string[],
   startIndex: number
 ): Pick<ParsedSentryUrl, "replayId"> | null {
-  if (
-    segments[startIndex] === "explore" &&
-    segments[startIndex + 1] === "replays" &&
-    segments[startIndex + 2]
-  ) {
-    return { replayId: segments[startIndex + 2] };
+  const replayId =
+    segments[startIndex] === "explore" && segments[startIndex + 1] === "replays"
+      ? segments[startIndex + 2]
+      : segments[startIndex] === "replays"
+        ? segments[startIndex + 1]
+        : undefined;
+
+  if (!replayId || !HEX_ID_RE.test(replayId)) {
+    return null;
   }
 
-  if (segments[startIndex] === "replays" && segments[startIndex + 1]) {
-    return { replayId: segments[startIndex + 1] };
+  if (
+    segments[startIndex] === "explore" &&
+    segments[startIndex + 1] === "replays"
+  ) {
+    return { replayId };
+  }
+
+  if (segments[startIndex] === "replays") {
+    return { replayId };
   }
 
   return null;

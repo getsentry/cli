@@ -218,6 +218,30 @@ describe("parseSentryUrl", () => {
         replayId: "346789a703f6454384f1de473b8b9fcc",
       });
     });
+
+    test("rejects non-hex replay ID on explore path", () => {
+      expect(
+        parseSentryUrl(
+          "https://sentry.io/organizations/my-org/explore/replays/some-random-page/"
+        )
+      ).toBeNull();
+    });
+
+    test("rejects non-hex replay ID on legacy path", () => {
+      expect(
+        parseSentryUrl(
+          "https://sentry.io/organizations/my-org/replays/some-random-page/"
+        )
+      ).toBeNull();
+    });
+
+    test("rejects non-hex replay ID on subdomain explore path", () => {
+      expect(
+        parseSentryUrl(
+          "https://my-org.sentry.io/explore/replays/some-random-page/"
+        )
+      ).toBeNull();
+    });
   });
 
   describe("dashboard URLs", () => {
