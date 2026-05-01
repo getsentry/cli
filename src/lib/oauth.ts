@@ -12,6 +12,12 @@ import {
   TokenResponseSchema,
 } from "../types/index.js";
 import { DEFAULT_SENTRY_URL, getConfiguredSentryUrl } from "./constants.js";
+import {
+  buildTlsErrorDetail,
+  getCustomTlsOptions,
+  isTlsCertError,
+  warnIfSaasWithEnvCa,
+} from "./custom-ca.js";
 import { applyCustomHeaders } from "./custom-headers.js";
 import { setAuthToken } from "./db/auth.js";
 import { getEnv } from "./env.js";
@@ -101,13 +107,30 @@ async function fetchWithConnectionError(
   const effectiveInit: RequestInit = { ...init, headers: merged };
 
   try {
-    return await fetch(url, effectiveInit);
+    const customTls = getCustomTlsOptions();
+    if (customTls) {
+      warnIfSaasWithEnvCa(url);
+    }
+
+    return await fetch(url, { ...effectiveInit, ...customTls });
   } catch (error) {
+    if (!(error instanceof Error)) {
+      throw error;
+    }
+
+    // TLS certificate errors — give actionable guidance
+    if (isTlsCertError(error)) {
+      throw new ApiError(
+        `TLS certificate error connecting to ${getSentryUrl()}`,
+        0,
+        buildTlsErrorDetail(error)
+      );
+    }
+
     const isConnectionError =
-      error instanceof Error &&
-      (error.message.includes("ECONNREFUSED") ||
-        error.message.includes("fetch failed") ||
-        error.message.includes("network"));
+      error.message.includes("ECONNREFUSED") ||
+      error.message.includes("fetch failed") ||
+      error.message.includes("network");
 
     if (isConnectionError) {
       throw new ApiError(

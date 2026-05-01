@@ -16,9 +16,15 @@ import {
   getConfiguredSentryUrl,
   getUserAgent,
 } from "./constants.js";
+import {
+  buildTlsErrorDetail,
+  getCustomTlsOptions,
+  isTlsCertError,
+  warnIfSaasWithEnvCa,
+} from "./custom-ca.js";
 import { applyCustomHeaders } from "./custom-headers.js";
 import { getAuthToken, refreshToken } from "./db/auth.js";
-import { HostScopeError, TimeoutError } from "./errors.js";
+import { ApiError, HostScopeError, TimeoutError } from "./errors.js";
 import { logger } from "./logger.js";
 import {
   clearLastCacheHitAge,
@@ -250,10 +256,19 @@ async function fetchWithTimeout({
   linkAbortSignal(externalSignal, controller);
 
   try {
+    // Spread custom TLS options (CA certs for corporate proxies).
+    // On Bun, this passes `tls: { ca }` to fetch(); on Node, the
+    // extra property is harmless (Node honors NODE_EXTRA_CA_CERTS natively).
+    const customTls = getCustomTlsOptions();
+    if (customTls) {
+      warnIfSaasWithEnvCa(extractFullUrl(input));
+    }
+
     return await fetch(input, {
       ...init,
       headers,
       signal: controller.signal,
+      ...customTls,
     });
   } catch (error) {
     if (timedOut) {
@@ -299,8 +314,9 @@ async function handleResponse(
 
 /**
  * Decide what to do with a fetch error. User aborts and an internal
- * timeout on the last attempt throw immediately; other errors retry
- * until the last attempt, then propagate.
+ * timeout on the last attempt throw immediately; TLS cert errors throw
+ * immediately with actionable guidance (retrying is pointless); other
+ * errors retry until the last attempt, then propagate.
  */
 function handleFetchError(
   error: unknown,
@@ -310,6 +326,19 @@ function handleFetchError(
   if (isUserAbort(error, signal)) {
     return { action: "throw", error };
   }
+
+  // TLS certificate errors are deterministic — don't retry
+  if (isTlsCertError(error)) {
+    return {
+      action: "throw",
+      error: new ApiError(
+        "TLS certificate error",
+        0,
+        buildTlsErrorDetail(error as Error)
+      ),
+    };
+  }
+
   if (isInternalTimeout(error) && isLastAttempt) {
     const timeoutMs =
       (error as { timeoutMs?: number }).timeoutMs ?? REQUEST_TIMEOUT_MS;
