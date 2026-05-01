@@ -2448,6 +2448,7 @@ const DEFAULT_LABELS: Record<string, string> = {
   telemetry: "Telemetry",
   url: "URL",
   headers: "Headers",
+  "ca-cert": "CA Certificate",
 };
 
 /**
@@ -2479,6 +2480,7 @@ function buildDefaultsShowRows(data: DefaultsResult): [string, string][] {
     ],
     ["URL", d.url ? safeCodeSpan(d.url) : notSet],
     ["Headers", d.headers ? safeCodeSpan(d.headers) : notSet],
+    ["CA Certificate", d["ca-cert"] ? safeCodeSpan(d["ca-cert"]) : notSet],
   ];
 }
 
