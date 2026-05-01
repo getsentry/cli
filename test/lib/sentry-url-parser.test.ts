@@ -185,6 +185,41 @@ describe("parseSentryUrl", () => {
     });
   });
 
+  describe("replay URLs", () => {
+    test("/organizations/{org}/explore/replays/{replayId}/", () => {
+      const result = parseSentryUrl(
+        "https://sentry.io/organizations/my-org/explore/replays/346789a703f6454384f1de473b8b9fcc/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.io",
+        org: "my-org",
+        replayId: "346789a703f6454384f1de473b8b9fcc",
+      });
+    });
+
+    test("legacy /organizations/{org}/replays/{replayId}/", () => {
+      const result = parseSentryUrl(
+        "https://sentry.io/organizations/my-org/replays/346789a703f6454384f1de473b8b9fcc/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.io",
+        org: "my-org",
+        replayId: "346789a703f6454384f1de473b8b9fcc",
+      });
+    });
+
+    test("self-hosted replay URL", () => {
+      const result = parseSentryUrl(
+        "https://sentry.example.com/organizations/acme-corp/explore/replays/346789a703f6454384f1de473b8b9fcc/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.example.com",
+        org: "acme-corp",
+        replayId: "346789a703f6454384f1de473b8b9fcc",
+      });
+    });
+  });
+
   describe("dashboard URLs", () => {
     test("/organizations/{org}/dashboard/{id}/", () => {
       const result = parseSentryUrl(
@@ -276,6 +311,28 @@ describe("parseSentryUrl", () => {
         baseUrl: "https://my-org.sentry.io",
         org: "my-org",
         traceId: "a4d1aae7216b47ff8117cf4e09ce9d0a",
+      });
+    });
+
+    test("replay URL extracts org from subdomain", () => {
+      const result = parseSentryUrl(
+        "https://my-org.sentry.io/explore/replays/346789a703f6454384f1de473b8b9fcc/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://my-org.sentry.io",
+        org: "my-org",
+        replayId: "346789a703f6454384f1de473b8b9fcc",
+      });
+    });
+
+    test("legacy replay URL extracts org from subdomain", () => {
+      const result = parseSentryUrl(
+        "https://my-org.sentry.io/replays/346789a703f6454384f1de473b8b9fcc/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://my-org.sentry.io",
+        org: "my-org",
+        replayId: "346789a703f6454384f1de473b8b9fcc",
       });
     });
 

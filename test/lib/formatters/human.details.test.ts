@@ -792,17 +792,56 @@ describe("formatEventDetails", () => {
     const result = stripAnsi(
       formatEventDetails(
         createMockEvent({
-          tags: [{ key: "replayId", value: "replay-uuid-123" }],
+          tags: [
+            {
+              key: "replayId",
+              value: "346789a703f6454384f1de473b8b9fcc",
+            },
+          ],
         }),
         "Latest Event",
         "https://acme.sentry.io/issues/789/"
       )
     );
     expect(result).toContain("Replay");
-    expect(result).toContain("replay-uuid-123");
+    expect(result).toContain("346789a703f6454384f1de473b8b9fcc");
     expect(result).toContain(
-      "https://acme.sentry.io/explore/replays/replay-uuid-123/"
+      "https://acme.sentry.io/explore/replays/346789a703f6454384f1de473b8b9fcc/"
     );
+  });
+
+  test("includes replay link from replay.id tag", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          tags: [
+            {
+              key: "replay.id",
+              value: "346789a703f6454384f1de473b8b9fcc",
+            },
+          ],
+        }),
+        "Latest Event",
+        "https://acme.sentry.io/issues/789/"
+      )
+    );
+    expect(result).toContain("346789a703f6454384f1de473b8b9fcc");
+  });
+
+  test("includes replay link from replay context", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          contexts: {
+            replay: { replay_id: "346789a703f6454384f1de473b8b9fcc" },
+          },
+          tags: [],
+        }),
+        "Latest Event",
+        "https://acme.sentry.io/issues/789/"
+      )
+    );
+    expect(result).toContain("346789a703f6454384f1de473b8b9fcc");
   });
 
   test("includes tags when present", () => {

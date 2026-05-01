@@ -22,7 +22,7 @@ export const ReplayUserSchema = z
     email: z.string().nullish().describe("Email"),
     ip: z.string().nullish().describe("IP address"),
     display_name: z.string().nullish().describe("Display name"),
-    geo: ReplayGeoSchema.optional().describe("Geo metadata"),
+    geo: ReplayGeoSchema.nullish().describe("Geo metadata"),
   })
   .passthrough();
 
@@ -84,12 +84,12 @@ export const ReplayOtaUpdatesSchema = z
  * Replay tags keyed by tag name.
  *
  * Archived replay rows sometimes return an empty array instead of a tag map,
- * so the schema accepts both shapes.
+ * so the schema falls back to an empty tag object for those placeholders.
  */
-export const ReplayTagsSchema = z.union([
-  z.record(z.array(z.string())).describe("Replay tags"),
-  z.array(z.unknown()).describe("Archived replay tags placeholder"),
-]);
+export const ReplayTagsSchema = z
+  .record(z.array(z.string()))
+  .catch({})
+  .describe("Replay tags");
 
 /**
  * Known root fields that the replay list endpoint accepts in repeated `field=`
@@ -143,7 +143,7 @@ export const ReplayListItemSchema = z
       .nullable()
       .optional()
       .describe("Replay activity score"),
-    browser: ReplayBrowserSchema.optional().describe("Browser metadata"),
+    browser: ReplayBrowserSchema.nullish().describe("Browser metadata"),
     count_dead_clicks: z
       .number()
       .nullable()
@@ -171,7 +171,7 @@ export const ReplayListItemSchema = z
       .nullable()
       .optional()
       .describe("Warning event count"),
-    device: ReplayDeviceSchema.optional().describe("Device metadata"),
+    device: ReplayDeviceSchema.nullish().describe("Device metadata"),
     dist: z.string().nullable().optional().describe("Distribution"),
     duration: z
       .number()
@@ -179,7 +179,7 @@ export const ReplayListItemSchema = z
       .optional()
       .describe("Replay duration in seconds"),
     environment: z.string().nullable().optional().describe("Environment"),
-    error_ids: z.array(z.string()).optional().describe("Linked error IDs"),
+    error_ids: z.array(z.string()).catch([]).describe("Linked error IDs"),
     finished_at: z
       .string()
       .nullable()
@@ -191,25 +191,29 @@ export const ReplayListItemSchema = z
       .optional()
       .describe("Whether the current user has viewed the replay"),
     id: z.string().describe("Replay ID"),
-    info_ids: z.array(z.string()).optional().describe("Linked info event IDs"),
+    info_ids: z.array(z.string()).catch([]).describe("Linked info event IDs"),
     is_archived: z.boolean().nullable().optional().describe("Archived flag"),
-    os: ReplayOsSchema.optional().describe("Operating system metadata"),
+    os: ReplayOsSchema.nullish().describe("Operating system metadata"),
     platform: z.string().nullable().optional().describe("Platform"),
-    project_id: z.string().nullable().optional().describe("Numeric project ID"),
+    project_id: z
+      .union([z.string(), z.number()])
+      .nullable()
+      .optional()
+      .describe("Numeric project ID"),
     releases: z.array(z.string()).optional().describe("Associated releases"),
-    sdk: ReplaySdkSchema.optional().describe("SDK metadata"),
+    sdk: ReplaySdkSchema.nullish().describe("SDK metadata"),
     started_at: z
       .string()
       .nullable()
       .optional()
       .describe("Replay start timestamp"),
-    tags: ReplayTagsSchema.optional().describe("Replay tags"),
-    trace_ids: z.array(z.string()).optional().describe("Linked trace IDs"),
-    urls: z.array(z.string()).optional().describe("Visited URLs"),
-    user: ReplayUserSchema.optional().describe("User metadata"),
+    tags: ReplayTagsSchema.describe("Replay tags"),
+    trace_ids: z.array(z.string()).catch([]).describe("Linked trace IDs"),
+    urls: z.array(z.string()).catch([]).describe("Visited URLs"),
+    user: ReplayUserSchema.nullish().describe("User metadata"),
     warning_ids: z
       .array(z.string())
-      .optional()
+      .catch([])
       .describe("Linked warning event IDs"),
   })
   .passthrough()
@@ -230,9 +234,7 @@ export const ReplayDetailsSchema = ReplayListItemSchema.extend({
     .array(ReplayClickSchema)
     .optional()
     .describe("Replay click summaries"),
-  ota_updates: ReplayOtaUpdatesSchema.optional().describe(
-    "OTA update metadata"
-  ),
+  ota_updates: ReplayOtaUpdatesSchema.nullish().describe("OTA update metadata"),
   replay_type: z.string().nullable().optional().describe("Replay type"),
 }).describe("Replay details");
 
@@ -250,6 +252,102 @@ export const ReplayDetailsResponseSchema = z
   })
   .passthrough();
 
+/**
+ * Documentation-oriented replay list schema used for `--help` and SKILL docs.
+ *
+ * Keeps the field types explicit even though the runtime parser accepts a few
+ * legacy/nullish payload variants from archived replay rows.
+ */
+export const ReplayListItemOutputSchema = z
+  .object({
+    activity: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Replay activity score"),
+    browser: ReplayBrowserSchema.nullish().describe("Browser metadata"),
+    count_dead_clicks: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Dead click count"),
+    count_errors: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Associated error count"),
+    count_infos: z.number().nullable().optional().describe("Info event count"),
+    count_rage_clicks: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Rage click count"),
+    count_segments: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Recording segment count"),
+    count_urls: z.number().nullable().optional().describe("Visited URL count"),
+    count_warnings: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Warning event count"),
+    device: ReplayDeviceSchema.nullish().describe("Device metadata"),
+    dist: z.string().nullable().optional().describe("Distribution"),
+    duration: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Replay duration in seconds"),
+    environment: z.string().nullable().optional().describe("Environment"),
+    error_ids: z.array(z.string()).describe("Linked error IDs"),
+    finished_at: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Replay finish timestamp"),
+    has_viewed: z
+      .boolean()
+      .nullable()
+      .optional()
+      .describe("Whether the current user has viewed the replay"),
+    id: z.string().describe("Replay ID"),
+    info_ids: z.array(z.string()).describe("Linked info event IDs"),
+    is_archived: z.boolean().nullable().optional().describe("Archived flag"),
+    os: ReplayOsSchema.nullish().describe("Operating system metadata"),
+    platform: z.string().nullable().optional().describe("Platform"),
+    project_id: z.string().nullable().optional().describe("Numeric project ID"),
+    releases: z.array(z.string()).optional().describe("Associated releases"),
+    sdk: ReplaySdkSchema.nullish().describe("SDK metadata"),
+    started_at: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Replay start timestamp"),
+    tags: z.record(z.array(z.string())).describe("Replay tags"),
+    trace_ids: z.array(z.string()).describe("Linked trace IDs"),
+    urls: z.array(z.string()).describe("Visited URLs"),
+    user: ReplayUserSchema.nullish().describe("User metadata"),
+    warning_ids: z.array(z.string()).describe("Linked warning event IDs"),
+  })
+  .describe("Replay list row");
+
+/** Documentation-oriented replay detail schema used for command metadata. */
+export const ReplayDetailsOutputSchema = ReplayListItemOutputSchema.extend({
+  clicks: z
+    .array(ReplayClickSchema)
+    .optional()
+    .describe("Replay click summaries"),
+  ota_updates: ReplayOtaUpdatesSchema.nullish().describe("OTA update metadata"),
+  replay_type: z.string().nullable().optional().describe("Replay type"),
+}).describe("Replay details");
+
+/** Replay IDs keyed by resource identifier (issue ID, trace ID, replay ID). */
+export const ReplayIdsByResourceSchema = z
+  .record(z.string(), z.array(z.string()))
+  .describe("Replay IDs grouped by resource identifier");
+
 export type ReplayGeo = z.infer<typeof ReplayGeoSchema>;
 export type ReplayUser = z.infer<typeof ReplayUserSchema>;
 export type ReplayBrowser = z.infer<typeof ReplayBrowserSchema>;
@@ -261,3 +359,4 @@ export type ReplayListItem = z.infer<typeof ReplayListItemSchema>;
 export type ReplayDetails = z.infer<typeof ReplayDetailsSchema>;
 export type ReplayListResponse = z.infer<typeof ReplayListResponseSchema>;
 export type ReplayDetailsResponse = z.infer<typeof ReplayDetailsResponseSchema>;
+export type ReplayIdsByResource = z.infer<typeof ReplayIdsByResourceSchema>;

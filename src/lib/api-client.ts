@@ -123,6 +123,7 @@ export {
 export {
   getReplay,
   type ListReplaysOptions,
+  listReplayIdsForIssue,
   listReplays,
   type ReplaySortValue,
 } from "./api/replays.js";

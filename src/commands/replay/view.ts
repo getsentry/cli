@@ -27,10 +27,15 @@ import {
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
+import { normalizeReplayId } from "../../lib/replay-id.js";
 import { resolveOrgOptionalProjectFromArg } from "../../lib/resolve-target.js";
+import {
+  applySentryUrlContext,
+  parseSentryUrl,
+} from "../../lib/sentry-url-parser.js";
 import { buildReplayUrl } from "../../lib/sentry-urls.js";
 import type { ReplayDetails } from "../../types/index.js";
-import { ReplayDetailsSchema } from "../../types/index.js";
+import { ReplayDetailsOutputSchema } from "../../types/index.js";
 
 type ViewFlags = {
   readonly json: boolean;
@@ -47,9 +52,8 @@ type ParsedPositionalArgs = {
 
 type MarkdownRow = [string, string];
 
-const USAGE_HINT = "sentry replay view [<org>/<project>/]<replay-id>";
-const REPLAY_ID_SEGMENT_RE = /^[0-9a-fA-F-]{16,36}$/;
-
+const USAGE_HINT =
+  "sentry replay view [<org>/<project>/]<replay-id> | <replay-url>";
 function pluralize(value: number, singular: string): string {
   return `${value} ${singular}${value === 1 ? "" : "s"}`;
 }
@@ -93,7 +97,7 @@ function parseSingleArg(arg: string): ParsedPositionalArgs {
   if (slashIdx !== -1 && trimmed.indexOf("/", slashIdx + 1) === -1) {
     const org = trimmed.slice(0, slashIdx);
     const replaySegment = trimmed.slice(slashIdx + 1);
-    if (!(replaySegment && REPLAY_ID_SEGMENT_RE.test(replaySegment))) {
+    if (!(replaySegment && normalizeReplayId(replaySegment))) {
       throw new ContextError("Replay ID", USAGE_HINT, []);
     }
     return { replayId: replaySegment, targetArg: `${org}/` };
@@ -115,6 +119,7 @@ function parseSingleArg(arg: string): ParsedPositionalArgs {
  * - `<org>/<replay-id>`
  * - `<org>/<project>/<replay-id>`
  * - `<target> <replay-id>`
+ * - `<replay-url>`
  */
 export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
   if (args.length === 0) {
@@ -124,6 +129,17 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
   const first = args[0];
   if (!first) {
     throw new ContextError("Replay ID", USAGE_HINT, []);
+  }
+
+  const urlParsed = parseSentryUrl(first);
+  if (urlParsed) {
+    applySentryUrlContext(urlParsed.baseUrl);
+    if (urlParsed.replayId && urlParsed.org) {
+      return { replayId: urlParsed.replayId, targetArg: `${urlParsed.org}/` };
+    }
+    throw new ContextError("Replay ID", USAGE_HINT, [
+      "Pass a replay URL: https://sentry.io/organizations/{org}/explore/replays/{replayId}/",
+    ]);
   }
 
   if (args.length === 1) {
@@ -248,7 +264,13 @@ function buildReplayOverviewRows(replay: ReplayDetails): MarkdownRow[] {
     "Platform",
     replay.platform ? escapeMarkdownCell(replay.platform) : undefined
   );
-  pushMarkdownRow(rows, "Project ID", replay.project_id ?? undefined);
+  pushMarkdownRow(
+    rows,
+    "Project ID",
+    replay.project_id !== null && replay.project_id !== undefined
+      ? String(replay.project_id)
+      : undefined
+  );
   pushMarkdownRow(
     rows,
     "Replay Type",
@@ -357,11 +379,7 @@ function pushListSection(
 }
 
 function pushTagsSection(lines: string[], replay: ReplayDetails): void {
-  if (
-    !replay.tags ||
-    Array.isArray(replay.tags) ||
-    Object.keys(replay.tags).length === 0
-  ) {
+  if (Object.keys(replay.tags).length === 0) {
     return;
   }
 
@@ -410,26 +428,27 @@ export const viewCommand = buildCommand({
       "Replay ID formats:\n" +
       "  <replay-id>              - auto-detect org from config or DSN\n" +
       "  <org>/<replay-id>        - explicit organization\n" +
-      "  <org>/<project>/<id>     - explicit org/project context\n\n" +
+      "  <org>/<project>/<id>     - explicit org/project context\n" +
+      "  <replay-url>             - parse org and replay ID from a Sentry URL\n\n" +
       "Examples:\n" +
       "  sentry replay view 346789a703f6454384f1de473b8b9fcc\n" +
       "  sentry replay view sentry/346789a703f6454384f1de473b8b9fcc\n" +
       "  sentry replay view sentry/cli/346789a703f6454384f1de473b8b9fcc\n" +
+      "  sentry replay view https://sentry.io/organizations/sentry/explore/replays/346789a703f6454384f1de473b8b9fcc/\n" +
       "  sentry replay view --web sentry/346789a703f6454384f1de473b8b9fcc",
   },
   output: {
     human: formatReplayDetails,
     jsonTransform: (replay: ReplayDetails, fields?: string[]) =>
       fields && fields.length > 0 ? filterFields(replay, fields) : replay,
-    schema: ReplayDetailsSchema,
+    schema: ReplayDetailsOutputSchema,
   },
   parameters: {
     positional: {
       kind: "array",
       parameter: {
-        placeholder: "org/project/replay-id",
-        brief:
-          "[<org>/<project>] <replay-id> - Target (optional) and replay ID (required)",
+        placeholder: "replay-id-or-url",
+        brief: "[<org>/<project>] <replay-id> or <replay-url>",
         parse: String,
       },
     },

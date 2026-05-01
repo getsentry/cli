@@ -5,7 +5,7 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { getLatestEvent } from "../../lib/api-client.js";
+import { getLatestEvent, listReplayIdsForIssue } from "../../lib/api-client.js";
 import { spansFlag } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
@@ -14,6 +14,7 @@ import {
   formatIssueDetails,
   isPlainOutput,
   muted,
+  renderMarkdown,
 } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
@@ -22,6 +23,7 @@ import {
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
+import { collectReplayIds, getReplayIdFromEvent } from "../../lib/replay-id.js";
 import { getSpanTreeLines } from "../../lib/span-tree.js";
 import type { SentryEvent, SentryIssue } from "../../types/index.js";
 import { issueIdPositional, resolveIssue } from "./utils.js";
@@ -53,14 +55,61 @@ async function tryGetLatestEvent(
   }
 }
 
+/**
+ * Try to fetch replay IDs related to an issue.
+ * Returns an empty array if the fetch fails (non-blocking).
+ */
+async function tryListReplayIdsForIssue(
+  orgSlug: string,
+  issueId: string
+): Promise<string[]> {
+  try {
+    return await listReplayIdsForIssue(orgSlug, issueId);
+  } catch {
+    return [];
+  }
+}
+
 /** Return type for issue view — includes all data both renderers need */
 type IssueViewData = {
+  org: string | null;
   issue: SentryIssue;
   event: SentryEvent | null;
+  replayIds: string[];
   trace: { traceId: string; spans: unknown[] } | null;
   /** Pre-formatted span tree lines for human output (not serialized) */
   spanTreeLines?: string[];
 };
+
+const MAX_REPLAY_IDS_SHOWN = 3;
+
+function formatReplaySection(org: string | null, replayIds: string[]): string {
+  if (replayIds.length === 0) {
+    return "";
+  }
+
+  const visibleReplayIds = replayIds.slice(0, MAX_REPLAY_IDS_SHOWN);
+  const lines = ["### Related Replays", ""];
+
+  for (const replayId of visibleReplayIds) {
+    if (org) {
+      lines.push(
+        `- \`${replayId}\` (view: \`sentry replay view ${org}/${replayId}\`)`
+      );
+    } else {
+      lines.push(`- \`${replayId}\``);
+    }
+  }
+
+  const remainingCount = replayIds.length - visibleReplayIds.length;
+  if (remainingCount > 0) {
+    lines.push(
+      `- ${remainingCount} more related replay${remainingCount === 1 ? "" : "s"}`
+    );
+  }
+
+  return renderMarkdown(lines.join("\n"));
+}
 
 /**
  * Format issue view data for human-readable terminal output.
@@ -69,6 +118,9 @@ type IssueViewData = {
  */
 function formatIssueView(data: IssueViewData): string {
   const parts: string[] = [];
+  const eventReplayId = data.event
+    ? getReplayIdFromEvent(data.event)
+    : undefined;
 
   parts.push(formatIssueDetails(data.issue));
 
@@ -76,6 +128,14 @@ function formatIssueView(data: IssueViewData): string {
     parts.push(
       formatEventDetails(data.event, "Latest Event", data.issue.permalink)
     );
+  }
+
+  const additionalReplayIds = eventReplayId
+    ? data.replayIds.filter((replayId) => replayId !== eventReplayId)
+    : data.replayIds;
+  const replaySection = formatReplaySection(data.org, additionalReplayIds);
+  if (replaySection) {
+    parts.push(replaySection);
   }
 
   if (data.spanTreeLines && data.spanTreeLines.length > 0) {
@@ -89,9 +149,9 @@ function formatIssueView(data: IssueViewData): string {
  * Transform issue view data for JSON output.
  *
  * Flattens the issue as the primary object so that `--fields shortId,title`
- * works directly on issue properties. The `event` and `trace` enrichment
- * data are attached as nested keys, accessible via `--fields event.id`
- * or `--fields trace.traceId`.
+ * works directly on issue properties. The `event`, `trace`, `org`, and
+ * `replayIds` enrichment data are attached as sibling keys, accessible via
+ * `--fields event.id`, `--fields trace.traceId`, or `--fields replayIds`.
  *
  * Without this transform, `--fields shortId` would return `{}` because
  * the raw yield shape is `{ issue, event, trace }` and `shortId` lives
@@ -101,8 +161,14 @@ function jsonTransformIssueView(
   data: IssueViewData,
   fields?: string[]
 ): unknown {
-  const { issue, event, trace } = data;
-  const result: Record<string, unknown> = { ...issue, event, trace };
+  const { issue, event, org, replayIds, trace } = data;
+  const result: Record<string, unknown> = {
+    ...issue,
+    event,
+    org,
+    replayIds,
+    trace,
+  };
   if (fields && fields.length > 0) {
     return filterFields(result, fields);
   }
@@ -161,9 +227,16 @@ export const viewCommand = buildCommand({
     }
 
     // Fetch the latest event for full context (requires org slug)
-    const event = orgSlug
-      ? await tryGetLatestEvent(orgSlug, issue.id)
-      : undefined;
+    const [event, relatedReplayIds] = orgSlug
+      ? await Promise.all([
+          tryGetLatestEvent(orgSlug, issue.id),
+          tryListReplayIdsForIssue(orgSlug, issue.id),
+        ])
+      : [undefined, []];
+    const replayIds = collectReplayIds([
+      event ? getReplayIdFromEvent(event) : undefined,
+      ...relatedReplayIds,
+    ]);
 
     // Fetch span tree data (for both JSON and human output)
     // Skip when spans=0 (disabled via --spans no or --spans 0)
@@ -191,8 +264,10 @@ export const viewCommand = buildCommand({
       : null;
 
     yield new CommandOutput({
+      org: orgSlug ?? null,
       issue,
       event: event ?? null,
+      replayIds,
       trace,
       spanTreeLines,
     });

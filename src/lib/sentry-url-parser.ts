@@ -1,7 +1,7 @@
 /**
  * Sentry URL Parser
  *
- * Extracts org, project, issue, event, and trace identifiers from Sentry web URLs.
+ * Extracts org, project, issue, event, replay, and trace identifiers from Sentry web URLs.
  * Supports both SaaS (*.sentry.io) and self-hosted instances.
  *
  * For self-hosted URLs, also configures the SENTRY_URL environment variable
@@ -35,6 +35,8 @@ export type ParsedSentryUrl = {
   project?: string;
   /** Trace ID from /organizations/{org}/traces/{traceId}/ paths */
   traceId?: string;
+  /** Replay ID from replay detail URLs */
+  replayId?: string;
   /** Share ID from /share/issue/{shareId}/ paths (32-char hex string) */
   shareId?: string;
   /** Dashboard ID from /dashboard/{id}/ paths (numeric string) */
@@ -66,6 +68,11 @@ function matchOrganizationsPath(
   // /organizations/{org}/traces/{traceId}/
   if (segments[2] === "traces" && segments[3]) {
     return { baseUrl, org, traceId: segments[3] };
+  }
+
+  const replayPath = matchReplayPath(segments, 2);
+  if (replayPath) {
+    return { baseUrl, org, ...replayPath };
   }
 
   // /organizations/{org}/dashboard/{id}/
@@ -118,6 +125,11 @@ function matchSubdomainPath(
   if (segments[0] === "traces" && segments[1]) {
     return { traceId: segments[1] };
   }
+
+  const replayPath = matchReplayPath(segments, 0);
+  if (replayPath) {
+    return replayPath;
+  }
   // /settings/projects/{project}/ (org-scoped subdomain settings URL)
   if (segments[0] === "settings" && segments[1] === "projects" && segments[2]) {
     return { project: segments[2] };
@@ -134,6 +146,25 @@ function matchSubdomainPath(
   if (segments.length === 0) {
     return {};
   }
+  return null;
+}
+
+function matchReplayPath(
+  segments: string[],
+  startIndex: number
+): Pick<ParsedSentryUrl, "replayId"> | null {
+  if (
+    segments[startIndex] === "explore" &&
+    segments[startIndex + 1] === "replays" &&
+    segments[startIndex + 2]
+  ) {
+    return { replayId: segments[startIndex + 2] };
+  }
+
+  if (segments[startIndex] === "replays" && segments[startIndex + 1]) {
+    return { replayId: segments[startIndex + 1] };
+  }
+
   return null;
 }
 
@@ -198,6 +229,8 @@ function matchSharePath(
  * - `/organizations/{org}/issues/{id}/events/{eventId}/`
  * - `/settings/{org}/projects/{project}/`
  * - `/organizations/{org}/traces/{traceId}/`
+ * - `/organizations/{org}/explore/replays/{replayId}/`
+ * - `/organizations/{org}/replays/{replayId}/`
  * - `/organizations/{org}/dashboard/{id}/`
  * - `/organizations/{org}/`
  * - `/share/issue/{shareId}/`
@@ -205,6 +238,8 @@ function matchSharePath(
  * Also recognizes SaaS subdomain-style URLs:
  * - `https://{org}.sentry.io/issues/{id}/`
  * - `https://{org}.sentry.io/traces/{traceId}/`
+ * - `https://{org}.sentry.io/explore/replays/{replayId}/`
+ * - `https://{org}.sentry.io/replays/{replayId}/`
  * - `https://{org}.sentry.io/issues/{id}/events/{eventId}/`
  * - `https://{org}.sentry.io/dashboard/{id}/`
  * - `https://{org}.sentry.io/share/issue/{shareId}/`

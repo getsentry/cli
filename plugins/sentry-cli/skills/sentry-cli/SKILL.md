@@ -368,7 +368,7 @@ Manage Sentry dashboards
 Search and inspect Session Replays
 
 - `sentry replay list <org/project>` — List recent Session Replays
-- `sentry replay view <org/project/replay-id...>` — View a Session Replay
+- `sentry replay view <replay-id-or-url...>` — View a Session Replay
 
 → Full flags and examples: `references/replay.md`
 

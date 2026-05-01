@@ -4,11 +4,15 @@
  * Functions for listing and retrieving Session Replays.
  */
 
+import type { z } from "zod";
 import {
   REPLAY_LIST_FIELDS,
   type ReplayDetails,
+  type ReplayDetailsResponse,
   ReplayDetailsResponseSchema,
+  ReplayIdsByResourceSchema,
   type ReplayListItem,
+  type ReplayListResponse,
   ReplayListResponseSchema,
 } from "../../types/index.js";
 
@@ -57,6 +61,23 @@ type FetchReplayPageOptions = {
   cursor?: string;
 };
 
+function normalizeReplayProjectId<
+  T extends { project_id?: string | number | null },
+>(replay: T): T {
+  if (
+    replay.project_id === null ||
+    replay.project_id === undefined ||
+    typeof replay.project_id === "string"
+  ) {
+    return replay;
+  }
+
+  return {
+    ...replay,
+    project_id: String(replay.project_id),
+  };
+}
+
 /**
  * Fetch a single page of replays from the organization replay index.
  */
@@ -84,12 +105,15 @@ async function fetchReplayPage(
         start: options.start,
         end: options.end,
       },
-      schema: ReplayListResponseSchema,
+      schema: ReplayListResponseSchema as z.ZodType<ReplayListResponse>,
     }
   );
 
   const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
-  return { data: data.data, nextCursor };
+  return {
+    data: data.data.map(normalizeReplayProjectId),
+    nextCursor,
+  };
 }
 
 /**
@@ -125,8 +149,35 @@ export async function getReplay(
     regionUrl,
     `/organizations/${orgSlug}/replays/${replayId}/`,
     {
-      schema: ReplayDetailsResponseSchema,
+      schema: ReplayDetailsResponseSchema as z.ZodType<ReplayDetailsResponse>,
     }
   );
-  return data.data;
+  return normalizeReplayProjectId(data.data);
+}
+
+/**
+ * List replay IDs related to a single issue.
+ */
+export async function listReplayIdsForIssue(
+  orgSlug: string,
+  issueId: string | number
+): Promise<string[]> {
+  const normalizedIssueId = String(issueId);
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion(
+    regionUrl,
+    `/organizations/${orgSlug}/replay-count/`,
+    {
+      params: {
+        data_source: "discover",
+        project: "-1",
+        query: `issue.id:[${normalizedIssueId}]`,
+        returnIds: true,
+        statsPeriod: "90d",
+      },
+      schema: ReplayIdsByResourceSchema,
+    }
+  );
+
+  return data[normalizedIssueId] ?? [];
 }

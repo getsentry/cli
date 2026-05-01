@@ -44,7 +44,7 @@ import {
 } from "../../lib/time-range.js";
 import {
   type ReplayListItem,
-  ReplayListItemSchema,
+  ReplayListItemOutputSchema,
 } from "../../types/index.js";
 
 type ListFlags = {
@@ -189,7 +189,10 @@ const REPLAY_COLUMNS: Column<ReplayListItem>[] = [
   },
   {
     header: "PROJECT",
-    value: (replay) => replay.project_id ?? "—",
+    value: (replay) =>
+      replay.project_id !== null && replay.project_id !== undefined
+        ? String(replay.project_id)
+        : "—",
     minWidth: 7,
   },
 ];
@@ -288,7 +291,7 @@ export const listCommand = buildListCommand("replay", {
   output: {
     human: formatReplayListHuman,
     jsonTransform: jsonTransformReplayList,
-    schema: ReplayListItemSchema,
+    schema: ReplayListItemOutputSchema,
   },
   parameters: {
     positional: {

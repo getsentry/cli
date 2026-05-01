@@ -46,9 +46,15 @@ describe("listCommand.func", () => {
       count_errors: 2,
       count_segments: 5,
       duration: 125,
+      error_ids: [],
+      info_ids: [],
       started_at: "2025-01-30T14:32:15+00:00",
+      tags: {},
       project_id: "42",
+      trace_ids: [],
+      urls: [],
       user: { display_name: "Test User" },
+      warning_ids: [],
     },
   ];
 

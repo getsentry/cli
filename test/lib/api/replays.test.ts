@@ -3,7 +3,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { getReplay, listReplays } from "../../../src/lib/api/replays.js";
+import {
+  getReplay,
+  listReplayIdsForIssue,
+  listReplays,
+} from "../../../src/lib/api/replays.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
@@ -152,5 +156,90 @@ describe("getReplay", () => {
     );
     expect(replay.id).toBe(REPLAY_ID);
     expect(replay.count_errors).toBe(2);
+  });
+
+  test("normalizes archived replay payload oddities", async () => {
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: {
+              ...replayRow(),
+              error_ids: undefined,
+              info_ids: undefined,
+              project_id: 42,
+              tags: [],
+              trace_ids: undefined,
+              urls: null,
+              warning_ids: undefined,
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+    );
+
+    const replay = await getReplay("test-org", REPLAY_ID);
+
+    expect(replay.project_id).toBe("42");
+    expect(replay.tags).toEqual({});
+    expect(replay.urls).toEqual([]);
+    expect(replay.error_ids).toEqual([]);
+    expect(replay.info_ids).toEqual([]);
+    expect(replay.trace_ids).toEqual([]);
+    expect(replay.warning_ids).toEqual([]);
+  });
+});
+
+describe("listReplayIdsForIssue", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(async () => {
+    originalFetch = globalThis.fetch;
+    await setAuthToken("test-token");
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test("calls the replay-count endpoint with the issue query", async () => {
+    let capturedUrl = "";
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input!, init);
+      capturedUrl = req.url;
+      return new Response(
+        JSON.stringify({
+          "12345": [
+            "346789a703f6454384f1de473b8b9fcc",
+            "aaaaaaaa03f6454384f1de473b8b9fcc",
+          ],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    });
+
+    const replayIds = await listReplayIdsForIssue("test-org", "12345");
+    const url = new URL(capturedUrl);
+
+    expect(url.pathname).toContain(
+      "/api/0/organizations/test-org/replay-count/"
+    );
+    expect(url.searchParams.get("returnIds")).toBe("true");
+    expect(url.searchParams.get("query")).toBe("issue.id:[12345]");
+    expect(url.searchParams.get("data_source")).toBe("discover");
+    expect(url.searchParams.get("statsPeriod")).toBe("90d");
+    expect(url.searchParams.getAll("project")).toEqual(["-1"]);
+    expect(replayIds).toEqual([
+      "346789a703f6454384f1de473b8b9fcc",
+      "aaaaaaaa03f6454384f1de473b8b9fcc",
+    ]);
   });
 });

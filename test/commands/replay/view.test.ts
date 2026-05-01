@@ -36,10 +36,15 @@ function sampleReplay(overrides: Partial<ReplayDetails> = {}): ReplayDetails {
     count_errors: 2,
     count_segments: 5,
     duration: 125,
+    error_ids: [],
+    info_ids: [],
     started_at: "2025-01-30T14:32:15+00:00",
+    tags: {},
     project_id: "42",
     trace_ids: ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+    urls: [],
     user: { display_name: "Test User" },
+    warning_ids: [],
     ...overrides,
   };
 }
@@ -61,6 +66,22 @@ describe("parsePositionalArgs", () => {
     const result = parsePositionalArgs([`test-org/cli/${REPLAY_ID}`]);
     expect(result.replayId).toBe(REPLAY_ID);
     expect(result.targetArg).toBe("test-org/cli");
+  });
+
+  test("parses replay URL", () => {
+    const result = parsePositionalArgs([
+      `https://sentry.io/organizations/test-org/explore/replays/${REPLAY_ID}/`,
+    ]);
+    expect(result.replayId).toBe(REPLAY_ID);
+    expect(result.targetArg).toBe("test-org/");
+  });
+
+  test("parses legacy replay URL", () => {
+    const result = parsePositionalArgs([
+      `https://test-org.sentry.io/replays/${REPLAY_ID}/`,
+    ]);
+    expect(result.replayId).toBe(REPLAY_ID);
+    expect(result.targetArg).toBe("test-org/");
   });
 
   test("detects swapped args", () => {
@@ -131,6 +152,23 @@ describe("viewCommand.func", () => {
       context,
       { json: false, web: true, fresh: false },
       `test-org/${REPLAY_ID}`
+    );
+
+    expect(openInBrowserSpy).toHaveBeenCalledWith(
+      "https://test-org.sentry.io/explore/replays/346789a703f6454384f1de473b8b9fcc/",
+      "replay"
+    );
+  });
+
+  test("opens the replay URL target from a replay URL with --web", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: undefined });
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: false, web: true, fresh: false },
+      `https://sentry.io/organizations/test-org/explore/replays/${REPLAY_ID}/`
     );
 
     expect(openInBrowserSpy).toHaveBeenCalledWith(

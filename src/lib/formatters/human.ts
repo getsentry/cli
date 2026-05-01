@@ -29,6 +29,7 @@ import type {
   Writer,
 } from "../../types/index.js";
 import { resolveOrgDisplayName } from "../api-client.js";
+import { getReplayIdFromEvent } from "../replay-id.js";
 import { withSerializeSpan } from "../telemetry.js";
 import { type FixabilityTier, muted } from "./colors.js";
 import {
@@ -1319,20 +1320,20 @@ function buildReplayMarkdown(
   event: SentryEvent,
   issuePermalink?: string
 ): string {
-  const replayTag = event.tags?.find((t) => t.key === "replayId");
-  if (!replayTag?.value) {
+  const replayId = getReplayIdFromEvent(event);
+  if (!replayId) {
     return "";
   }
 
   const lines: string[] = [];
   lines.push("### Replay");
   lines.push("");
-  lines.push(`**ID:** \`${replayTag.value}\``);
+  lines.push(`**ID:** \`${replayId}\``);
 
   if (issuePermalink) {
     const match = BASE_URL_REGEX.exec(issuePermalink);
     if (match?.[1]) {
-      lines.push(`**Link:** ${match[1]}/explore/replays/${replayTag.value}/`);
+      lines.push(`**Link:** ${match[1]}/explore/replays/${replayId}/`);
     }
   }
 

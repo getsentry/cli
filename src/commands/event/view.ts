@@ -49,6 +49,7 @@ import {
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
 import { resolveEffectiveOrg } from "../../lib/region.js";
+import { getReplayIdFromEvent } from "../../lib/replay-id.js";
 import {
   resolveOrg,
   resolveOrgAndProject,
@@ -153,7 +154,7 @@ export function jsonTransformEventView(
  * Build a CLI-native replay hint when the event is linked to a replay.
  */
 function replayHint(org: string, event: SentryEvent): string | undefined {
-  const replayId = event.tags?.find((tag) => tag.key === "replayId")?.value;
+  const replayId = getReplayIdFromEvent(event);
   return replayId
     ? `Related replay: sentry replay view ${org}/${replayId}`
     : undefined;
