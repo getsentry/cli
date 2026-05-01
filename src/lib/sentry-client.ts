@@ -260,7 +260,7 @@ async function fetchWithTimeout({
     // Spread custom TLS options (CA certs for corporate proxies).
     // On Bun, this passes `tls: { ca }` to fetch(); on Node, the
     // extra property is harmless (Node honors NODE_EXTRA_CA_CERTS natively).
-    const customTls = await getCustomTlsOptions();
+    const customTls = getCustomTlsOptions();
     if (customTls) {
       warnIfSaasWithEnvCa(extractFullUrl(input));
     }

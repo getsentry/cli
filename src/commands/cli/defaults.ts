@@ -11,11 +11,11 @@
  * - `ca-cert` — path to PEM file with custom CA certificates
  */
 
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { normalizeUrl } from "../../lib/constants.js";
+import { readCaCertFile } from "../../lib/custom-ca.js";
 import { parseCustomHeaders } from "../../lib/custom-headers.js";
 import {
   clearAllDefaults,
@@ -153,20 +153,9 @@ const DEFAULTS_REGISTRY: Record<DefaultKey, DefaultHandler> = {
         );
       }
       const resolved = resolve(trimmed);
-      let content: string;
-      try {
-        content = readFileSync(resolved, "utf-8");
-      } catch {
-        throw new ValidationError(
-          `CA certificate file not found or not readable: ${resolved}`,
-          "ca-cert"
-        );
-      }
-      if (!content.includes("-----BEGIN CERTIFICATE-----")) {
-        throw new ValidationError(
-          "File does not contain PEM certificate data (expected -----BEGIN CERTIFICATE-----).",
-          "ca-cert"
-        );
+      const result = readCaCertFile(resolved);
+      if (!result.ok) {
+        throw new ValidationError(result.reason, "ca-cert");
       }
       setDefaultCaCert(resolved);
     },

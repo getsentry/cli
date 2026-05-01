@@ -156,46 +156,46 @@ describe("custom CA loading", () => {
     }
   });
 
-  test("returns undefined when no CAs configured", async () => {
-    const result = await getCustomTlsOptions();
+  test("returns undefined when no CAs configured", () => {
+    const result = getCustomTlsOptions();
     expect(result).toBeUndefined();
     expect(getCustomCaSource()).toBe("none");
   });
 
-  test("loads CA from stored default (highest priority)", async () => {
+  test("loads CA from stored default (highest priority)", () => {
     const certPath = join(getConfigDir(), "ca.pem");
     writeFileSync(certPath, CERT_PEM);
     setDefaultCaCert(certPath);
 
-    const result = await getCustomTlsOptions();
+    const result = getCustomTlsOptions();
     expect(result).toBeDefined();
     expect(result?.tls.ca).toBe(CERT_PEM);
     expect(getCustomCaSource()).toBe("default");
   });
 
-  test("loads CA from NODE_EXTRA_CA_CERTS", async () => {
+  test("loads CA from NODE_EXTRA_CA_CERTS", () => {
     const certPath = join(getConfigDir(), "extra-ca.pem");
     writeFileSync(certPath, CERT_PEM);
     process.env.NODE_EXTRA_CA_CERTS = certPath;
 
-    const result = await getCustomTlsOptions();
+    const result = getCustomTlsOptions();
     expect(result).toBeDefined();
     expect(result?.tls.ca).toBe(CERT_PEM);
     expect(getCustomCaSource()).toBe("env");
   });
 
-  test("loads CA from SSL_CERT_FILE as fallback", async () => {
+  test("loads CA from SSL_CERT_FILE as fallback", () => {
     const certPath = join(getConfigDir(), "ssl-cert.pem");
     writeFileSync(certPath, CERT_PEM);
     process.env.SSL_CERT_FILE = certPath;
 
-    const result = await getCustomTlsOptions();
+    const result = getCustomTlsOptions();
     expect(result).toBeDefined();
     expect(result?.tls.ca).toBe(CERT_PEM);
     expect(getCustomCaSource()).toBe("env");
   });
 
-  test("stored default takes priority over env vars", async () => {
+  test("stored default takes priority over env vars", () => {
     const defaultPath = join(getConfigDir(), "default-ca.pem");
     const envPath = join(getConfigDir(), "env-ca.pem");
     writeFileSync(defaultPath, CERT_PEM);
@@ -206,12 +206,12 @@ describe("custom CA loading", () => {
     setDefaultCaCert(defaultPath);
     process.env.NODE_EXTRA_CA_CERTS = envPath;
 
-    const result = await getCustomTlsOptions();
+    const result = getCustomTlsOptions();
     expect(result?.tls.ca).toBe(CERT_PEM);
     expect(getCustomCaSource()).toBe("default");
   });
 
-  test("NODE_EXTRA_CA_CERTS takes priority over SSL_CERT_FILE", async () => {
+  test("NODE_EXTRA_CA_CERTS takes priority over SSL_CERT_FILE", () => {
     const extraPath = join(getConfigDir(), "extra.pem");
     const sslPath = join(getConfigDir(), "ssl.pem");
     writeFileSync(extraPath, CERT_PEM);
@@ -222,37 +222,37 @@ describe("custom CA loading", () => {
     process.env.NODE_EXTRA_CA_CERTS = extraPath;
     process.env.SSL_CERT_FILE = sslPath;
 
-    const result = await getCustomTlsOptions();
+    const result = getCustomTlsOptions();
     expect(result?.tls.ca).toBe(CERT_PEM);
   });
 
-  test("returns undefined when cert file does not exist", async () => {
+  test("returns undefined when cert file does not exist", () => {
     process.env.NODE_EXTRA_CA_CERTS = "/nonexistent/path/ca.pem";
 
-    const result = await getCustomTlsOptions();
+    const result = getCustomTlsOptions();
     expect(result).toBeUndefined();
     expect(getCustomCaSource()).toBe("none");
   });
 
-  test("returns undefined when cert file is not valid PEM", async () => {
+  test("returns undefined when cert file is not valid PEM", () => {
     const certPath = join(getConfigDir(), "not-pem.txt");
     writeFileSync(certPath, "this is not a PEM file");
     process.env.NODE_EXTRA_CA_CERTS = certPath;
 
-    const result = await getCustomTlsOptions();
+    const result = getCustomTlsOptions();
     expect(result).toBeUndefined();
     expect(getCustomCaSource()).toBe("none");
   });
 
-  test("caches result across calls", async () => {
+  test("caches result across calls", () => {
     const certPath = join(getConfigDir(), "cached.pem");
     writeFileSync(certPath, CERT_PEM);
     process.env.NODE_EXTRA_CA_CERTS = certPath;
 
-    const first = await getCustomTlsOptions();
+    const first = getCustomTlsOptions();
     // Even if env var changes, cached result stays
     process.env.NODE_EXTRA_CA_CERTS = "/different/path";
-    const second = await getCustomTlsOptions();
+    const second = getCustomTlsOptions();
     expect(first).toBe(second);
   });
 });
@@ -290,22 +290,22 @@ describe("warnIfSaasWithEnvCa", () => {
     }
   });
 
-  test("does not warn for stored default CAs targeting SaaS", async () => {
+  test("does not warn for stored default CAs targeting SaaS", () => {
     const certPath = join(getConfigDir(), "ca.pem");
     writeFileSync(certPath, CERT_PEM);
     setDefaultCaCert(certPath);
-    await getCustomTlsOptions();
+    getCustomTlsOptions();
 
     // Should not throw or warn — source is "default" not "env"
     warnIfSaasWithEnvCa("https://us.sentry.io/api/0/organizations/");
     expect(getCustomCaSource()).toBe("default");
   });
 
-  test("does not warn for env CAs targeting self-hosted", async () => {
+  test("does not warn for env CAs targeting self-hosted", () => {
     const certPath = join(getConfigDir(), "ca.pem");
     writeFileSync(certPath, CERT_PEM);
     process.env.NODE_EXTRA_CA_CERTS = certPath;
-    await getCustomTlsOptions();
+    getCustomTlsOptions();
 
     // Self-hosted URL — no warning
     warnIfSaasWithEnvCa("https://sentry.example.com/api/0/");

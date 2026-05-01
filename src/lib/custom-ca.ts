@@ -30,105 +30,104 @@ export type CaSource = "default" | "env" | "none";
 /** Cached resolved state — computed once per process */
 let resolved: { tls: { ca: string } } | undefined;
 let resolvedSource: CaSource = "none";
-let resolvePromise: Promise<void> | null = null;
+let hasResolved = false;
 let warnedSaas = false;
+
+/**
+ * Validate and read a CA certificate PEM file synchronously.
+ * Returns `{ ok: true, content }` on success or `{ ok: false, reason }` on failure.
+ *
+ * Used by both the eager validation in `sentry cli defaults ca-cert` and
+ * the lazy loading in `resolve()` — single source of truth for PEM validation.
+ */
+export function readCaCertFile(
+  path: string
+): { ok: true; content: string } | { ok: false; reason: string } {
+  const { readFileSync } = require("node:fs") as typeof import("node:fs");
+  let content: string;
+  try {
+    content = readFileSync(path, "utf-8");
+  } catch {
+    return {
+      ok: false,
+      reason: `CA certificate file not found or not readable: ${path}`,
+    };
+  }
+  if (!content.includes("-----BEGIN CERTIFICATE-----")) {
+    return {
+      ok: false,
+      reason:
+        "File does not contain PEM certificate data (expected -----BEGIN CERTIFICATE-----).",
+    };
+  }
+  return { ok: true, content };
+}
 
 /**
  * Attempt to read a PEM file. Returns the file contents on success,
  * or undefined if the file doesn't exist or can't be read.
  * Never throws — a missing CA file shouldn't crash the CLI.
  */
-async function tryReadPem(path: string): Promise<string | undefined> {
-  try {
-    const file = Bun.file(path);
-    if (!(await file.exists())) {
-      log.warn(`CA certificate file not found: ${path}`);
-      return;
-    }
-    const content = await file.text();
-    if (!content.includes("-----BEGIN")) {
-      log.warn(
-        `CA certificate file does not appear to contain PEM data: ${path}`
-      );
-      return;
-    }
-    return content;
-  } catch {
-    log.warn(`Failed to read CA certificate file: ${path}`);
+function tryReadPem(path: string): string | undefined {
+  const result = readCaCertFile(path);
+  if (!result.ok) {
+    log.warn(result.reason);
     return;
   }
+  return result.content;
 }
 
 /**
- * Resolve custom CA certificates (inner implementation).
+ * Resolve custom CA certificates. Runs once per process.
  *
- * Priority:
- * 1. Stored default (`sentry cli defaults ca-cert`)
- * 2. `NODE_EXTRA_CA_CERTS` env var
- * 3. `SSL_CERT_FILE` env var
+ * Tries sources in priority order: stored default, NODE_EXTRA_CA_CERTS,
+ * SSL_CERT_FILE. First readable PEM wins.
  */
-async function resolveInner(): Promise<void> {
-  // 1. Stored default — highest priority, silences SaaS warning
-  const storedPath = getDefaultCaCert();
-  if (storedPath) {
-    const pem = await tryReadPem(storedPath);
-    if (pem) {
-      resolved = { tls: { ca: pem } };
-      resolvedSource = "default";
-      log.debug(`Loaded CA certificates from stored default: ${storedPath}`);
-      return;
-    }
-    // Stored path is stale/invalid — fall through to env vars
+function resolve(): void {
+  if (hasResolved) {
+    return;
   }
+  hasResolved = true;
 
-  // 2. NODE_EXTRA_CA_CERTS
   const env = getEnv();
-  const extraCerts = env.NODE_EXTRA_CA_CERTS?.trim();
-  if (extraCerts) {
-    const pem = await tryReadPem(extraCerts);
+  const sources: { path: string; source: CaSource; label: string }[] = [
+    {
+      path: getDefaultCaCert() ?? "",
+      source: "default",
+      label: "stored default",
+    },
+    {
+      path: env.NODE_EXTRA_CA_CERTS?.trim() ?? "",
+      source: "env",
+      label: "NODE_EXTRA_CA_CERTS",
+    },
+    {
+      path: env.SSL_CERT_FILE?.trim() ?? "",
+      source: "env",
+      label: "SSL_CERT_FILE",
+    },
+  ];
+
+  for (const { path, source, label } of sources) {
+    if (!path) {
+      continue;
+    }
+    const pem = tryReadPem(path);
     if (pem) {
       resolved = { tls: { ca: pem } };
-      resolvedSource = "env";
-      log.debug(
-        `Loaded CA certificates from NODE_EXTRA_CA_CERTS: ${extraCerts}`
-      );
+      resolvedSource = source;
+      log.debug(`Loaded CA certificates from ${label}: ${path}`);
       return;
     }
   }
-
-  // 3. SSL_CERT_FILE
-  const sslCertFile = env.SSL_CERT_FILE?.trim();
-  if (sslCertFile) {
-    const pem = await tryReadPem(sslCertFile);
-    if (pem) {
-      resolved = { tls: { ca: pem } };
-      resolvedSource = "env";
-      log.debug(`Loaded CA certificates from SSL_CERT_FILE: ${sslCertFile}`);
-      return;
-    }
-  }
-}
-
-/**
- * Resolve custom CA certificates. All concurrent callers await the same
- * promise so the second caller never sees stale `undefined` while I/O
- * is in flight.
- */
-function resolve(): Promise<void> {
-  if (!resolvePromise) {
-    resolvePromise = resolveInner();
-  }
-  return resolvePromise;
 }
 
 /**
  * Get the `tls` options to spread into Bun's `fetch()` call.
  * Returns undefined when no custom CAs are configured.
  */
-export async function getCustomTlsOptions(): Promise<
-  { tls: { ca: string } } | undefined
-> {
-  await resolve();
+export function getCustomTlsOptions(): { tls: { ca: string } } | undefined {
+  resolve();
   return resolved;
 }
 
@@ -216,6 +215,6 @@ export function getTlsCertErrorMessage(error: unknown): string | undefined {
 export function __resetForTests(): void {
   resolved = undefined;
   resolvedSource = "none";
-  resolvePromise = null;
+  hasResolved = false;
   warnedSaas = false;
 }

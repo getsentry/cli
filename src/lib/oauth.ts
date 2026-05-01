@@ -106,7 +106,7 @@ async function fetchWithConnectionError(
   const effectiveInit: RequestInit = { ...init, headers: merged };
 
   try {
-    const customTls = await getCustomTlsOptions();
+    const customTls = getCustomTlsOptions();
     if (customTls) {
       warnIfSaasWithEnvCa(url);
     }
