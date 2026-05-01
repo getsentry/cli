@@ -186,11 +186,7 @@ function inferReplayFieldType(field: string): string {
   if (field === "duration") {
     return "duration";
   }
-  if (
-    field === "activity" ||
-    field === "count_screens" ||
-    field.startsWith("count_")
-  ) {
+  if (field === "activity" || field.startsWith("count_")) {
     return "integer";
   }
   return "string";

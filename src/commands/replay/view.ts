@@ -681,7 +681,9 @@ function pushTagsSection(lines: string[], replay: ReplayDetails): void {
   lines.push("");
   lines.push("### Tags");
   lines.push("");
-  for (const [key, values] of Object.entries(replay.tags).sort()) {
+  for (const [key, values] of Object.entries(replay.tags).sort(([a], [b]) =>
+    a.localeCompare(b)
+  )) {
     lines.push(
       `- \`${escapeMarkdownInline(key)}\`: ${values.map((value) => `\`${escapeMarkdownInline(value)}\``).join(", ")}`
     );

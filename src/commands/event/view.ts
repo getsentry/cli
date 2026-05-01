@@ -164,6 +164,7 @@ function joinHintParts(parts: Array<string | undefined>): string | undefined {
   const hints = parts.filter((part): part is string => Boolean(part));
   return hints.length > 0 ? hints.join(" | ") : undefined;
 }
+
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
 
