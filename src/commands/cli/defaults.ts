@@ -11,6 +11,8 @@
  * - `ca-cert` — path to PEM file with custom CA certificates
  */
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { normalizeUrl } from "../../lib/constants.js";
@@ -150,11 +152,9 @@ const DEFAULTS_REGISTRY: Record<DefaultKey, DefaultHandler> = {
           "ca-cert"
         );
       }
-      const { resolve } = require("node:path") as typeof import("node:path");
       const resolved = resolve(trimmed);
       let content: string;
       try {
-        const { readFileSync } = require("node:fs") as typeof import("node:fs");
         content = readFileSync(resolved, "utf-8");
       } catch {
         throw new ValidationError(

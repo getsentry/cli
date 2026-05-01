@@ -267,10 +267,12 @@ describe("warnIfSaasWithEnvCa", () => {
     "-----BEGIN CERTIFICATE-----\nMIIBxyz...\n-----END CERTIFICATE-----\n";
 
   let savedNodeExtra: string | undefined;
+  let savedSslCert: string | undefined;
 
   beforeEach(() => {
     __resetForTests();
     savedNodeExtra = process.env.NODE_EXTRA_CA_CERTS;
+    savedSslCert = process.env.SSL_CERT_FILE;
     delete process.env.NODE_EXTRA_CA_CERTS;
     delete process.env.SSL_CERT_FILE;
   });
@@ -280,6 +282,11 @@ describe("warnIfSaasWithEnvCa", () => {
       process.env.NODE_EXTRA_CA_CERTS = savedNodeExtra;
     } else {
       delete process.env.NODE_EXTRA_CA_CERTS;
+    }
+    if (savedSslCert !== undefined) {
+      process.env.SSL_CERT_FILE = savedSslCert;
+    } else {
+      delete process.env.SSL_CERT_FILE;
     }
   });
 
