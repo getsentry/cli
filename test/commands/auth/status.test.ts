@@ -63,6 +63,7 @@ function createContext() {
 
 describe("statusCommand.func", () => {
   let getAuthConfigSpy: ReturnType<typeof spyOn>;
+  let getAuthTokenSpy: ReturnType<typeof spyOn>;
   let isAuthenticatedSpy: ReturnType<typeof spyOn>;
   let getUserInfoSpy: ReturnType<typeof spyOn>;
   let getDefaultOrgSpy: ReturnType<typeof spyOn>;
@@ -73,6 +74,7 @@ describe("statusCommand.func", () => {
 
   beforeEach(async () => {
     getAuthConfigSpy = spyOn(dbAuth, "getAuthConfig");
+    getAuthTokenSpy = spyOn(dbAuth, "getAuthToken");
     isAuthenticatedSpy = spyOn(dbAuth, "isAuthenticated");
     getUserInfoSpy = spyOn(dbUser, "getUserInfo");
     getDefaultOrgSpy = spyOn(dbDefaults, "getDefaultOrganization");
@@ -81,6 +83,7 @@ describe("statusCommand.func", () => {
     listOrgsSpy = spyOn(apiClient, "listOrganizationsUncached");
 
     // Defaults that most tests override
+    getAuthTokenSpy.mockReturnValue("fake-oauth-token");
     getUserInfoSpy.mockReturnValue(null);
     getDefaultOrgSpy.mockReturnValue(null);
     getDefaultProjectSpy.mockReturnValue(null);
@@ -92,6 +95,7 @@ describe("statusCommand.func", () => {
 
   afterEach(() => {
     getAuthConfigSpy.mockRestore();
+    getAuthTokenSpy.mockRestore();
     isAuthenticatedSpy.mockRestore();
     getUserInfoSpy.mockRestore();
     getDefaultOrgSpy.mockRestore();
@@ -265,6 +269,34 @@ describe("statusCommand.func", () => {
       await func.call(context, { ...humanFlags, "show-token": true });
 
       expect(getOutput()).toContain("sntrys_env_token_123_long_enough");
+    });
+
+    test("hint says 'organization' for sntrys_ env tokens", async () => {
+      getAuthConfigSpy.mockReturnValue({
+        token: "sntrys_env_token_123",
+        source: "env:SENTRY_AUTH_TOKEN",
+      });
+      isAuthenticatedSpy.mockReturnValue(true);
+      getAuthTokenSpy.mockReturnValue("sntrys_env_token_123");
+
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
+
+      expect(getOutput()).toContain("organization");
+    });
+
+    test("hint says 'user' for non-sntrys_ env tokens", async () => {
+      getAuthConfigSpy.mockReturnValue({
+        token: "some_oauth_env_token",
+        source: "env:SENTRY_AUTH_TOKEN",
+      });
+      isAuthenticatedSpy.mockReturnValue(true);
+      getAuthTokenSpy.mockReturnValue("some_oauth_env_token");
+
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
+
+      expect(getOutput()).toContain("which user");
     });
   });
 

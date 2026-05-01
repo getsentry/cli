@@ -27,6 +27,7 @@ import {
   CliError,
   ResolutionError,
 } from "../../../src/lib/errors.js";
+import { mintSntrysToken } from "../../helpers.js";
 
 type WhoamiFlags = { readonly json: boolean };
 
@@ -54,6 +55,27 @@ const ID_ONLY_USER = {
  * just needs `getAuthToken()` to return something non-org/non-user-PAT.
  */
 const OAUTH_TOKEN = "17faa5dfa5e64d5a9b3e8bf7c4d5e6f7a8b9c0d1e2f3a4b567ee";
+
+/** Well-formed sntrys_ token with parseable claim. */
+const ORG_TOKEN = mintSntrysToken({
+  iat: 1_700_000_000,
+  url: "https://sentry.acme.com",
+  region_url: "https://us.sentry.acme.com",
+  org: "acme",
+});
+
+/** Well-formed sntrys_ token without org field (older tokens). */
+const ORG_TOKEN_NO_ORG = mintSntrysToken({
+  iat: 1_700_000_000,
+  url: "https://sentry.io",
+  region_url: "https://us.sentry.io",
+});
+
+/** sntrys_ token whose claim lacks iat — parseSntrysClaim returns undefined. */
+const MALFORMED_ORG_TOKEN = mintSntrysToken({
+  url: "https://sentry.acme.com",
+  org: "acme",
+});
 
 function createContext() {
   const output: string[] = [];
@@ -147,15 +169,68 @@ describe("whoamiCommand.func", () => {
     });
   });
 
-  describe("org auth token short-circuit", () => {
-    test("throws ResolutionError and skips API call", async () => {
-      getAuthTokenSpy.mockReturnValue("sntrys_abc123def456");
+  describe("org auth token — well-formed claim", () => {
+    beforeEach(() => {
+      getAuthTokenSpy.mockReturnValue(ORG_TOKEN);
+    });
+
+    test("yields org identity instead of calling the API", async () => {
+      const { context, getOutput } = createContext();
+      await func.call(context, { json: false });
+
+      expect(getCurrentUserSpy).not.toHaveBeenCalled();
+      expect(setUserInfoSpy).not.toHaveBeenCalled();
+      const out = getOutput();
+      expect(out).toContain("Organization auth token");
+      expect(out).toContain("acme");
+      expect(out).toContain("https://sentry.acme.com");
+    });
+
+    test("JSON output includes type, organization, url, and regionUrl", async () => {
+      const { context, getOutput } = createContext();
+      await func.call(context, { json: true });
+
+      const parsed = JSON.parse(getOutput());
+      expect(parsed.type).toBe("org-auth-token");
+      expect(parsed.organization).toBe("acme");
+      expect(parsed.url).toBe("https://sentry.acme.com");
+      expect(parsed.regionUrl).toBe("https://us.sentry.acme.com");
+    });
+  });
+
+  describe("org auth token — well-formed claim without org field", () => {
+    beforeEach(() => {
+      getAuthTokenSpy.mockReturnValue(ORG_TOKEN_NO_ORG);
+    });
+
+    test("yields output without organization row", async () => {
+      const { context, getOutput } = createContext();
+      await func.call(context, { json: false });
+
+      expect(getCurrentUserSpy).not.toHaveBeenCalled();
+      const out = getOutput();
+      expect(out).toContain("Organization auth token");
+      expect(out).toContain("https://sentry.io");
+      expect(out).not.toContain("acme");
+    });
+
+    test("JSON output omits organization when claim has no org", async () => {
+      const { context, getOutput } = createContext();
+      await func.call(context, { json: true });
+
+      const parsed = JSON.parse(getOutput());
+      expect(parsed.type).toBe("org-auth-token");
+      expect(parsed).not.toHaveProperty("organization");
+      expect(parsed.url).toBe("https://sentry.io");
+    });
+  });
+
+  describe("org auth token — malformed claim", () => {
+    test("throws ResolutionError when claim parsing fails", async () => {
+      getAuthTokenSpy.mockReturnValue(MALFORMED_ORG_TOKEN);
 
       const { context } = createContext();
 
-      // ResolutionError extends CliError; must NOT be an AuthError so the
-      // framework doesn't trigger the auto-login flow for a valid-but-wrong
-      // token type.
       const promise = func.call(context, { json: false });
       await expect(promise).rejects.toBeInstanceOf(ResolutionError);
       await expect(promise).rejects.toBeInstanceOf(CliError);
@@ -166,7 +241,7 @@ describe("whoamiCommand.func", () => {
     });
 
     test("error message points to auth status and org list", async () => {
-      getAuthTokenSpy.mockReturnValue("sntrys_abc");
+      getAuthTokenSpy.mockReturnValue(MALFORMED_ORG_TOKEN);
 
       const { context } = createContext();
 

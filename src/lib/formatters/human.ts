@@ -1610,6 +1610,31 @@ export function formatUserIdentity(user: UserIdentityInput): string {
   return `user ${finalId}`;
 }
 
+/** Data shape yielded by `whoami` for `sntrys_` org auth tokens. */
+export type OrgTokenIdentity = {
+  type: "org-auth-token";
+  organization?: string;
+  url: string;
+  regionUrl?: string;
+};
+
+/**
+ * Format org-auth-token identity for `sentry auth whoami`.
+ * Renders "Organization: <slug> (<url>)" or just the URL when slug is unknown.
+ */
+export function formatOrgTokenIdentity(data: OrgTokenIdentity): string {
+  const rows: Array<readonly [string, string]> = [];
+  rows.push(["Token type", "Organization auth token"]);
+  if (data.organization) {
+    rows.push(["Organization", data.organization]);
+  }
+  rows.push(["Instance", data.url]);
+  if (data.regionUrl) {
+    rows.push(["Region", data.regionUrl]);
+  }
+  return renderMarkdown(mdKvTable(rows));
+}
+
 // Token Formatting
 
 /**
