@@ -1,6 +1,46 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.31.0
+
+### New Features ✨
+
+#### Issue
+
+- Replace individual archive flags with unified --until by @BYK in [#898](https://github.com/getsentry/cli/pull/898)
+- Add archive command for ignoring/archiving issues by @BYK in [#891](https://github.com/getsentry/cli/pull/891)
+
+#### Other
+
+- (sourcemap) Add parity flags and sourceMappingURL following by @BYK in [#890](https://github.com/getsentry/cli/pull/890)
+- (telemetry) Normalize agent tag into structured agent/version/role fields by @BYK in [#896](https://github.com/getsentry/cli/pull/896)
+
+### Bug Fixes 🐛
+
+#### Api
+
+- Centralize 403 Forbidden enrichment with actionable hints (CLI-1JG) by @BYK in [#892](https://github.com/getsentry/cli/pull/892)
+- Cap per_page at 100 and fill open-ended date ranges by @BYK in [#884](https://github.com/getsentry/cli/pull/884)
+
+#### Dashboard
+
+- Add URL auto-recovery and 404 suggestions (CLI-1K0) by @BYK in [#895](https://github.com/getsentry/cli/pull/895)
+- Enrich 400 errors on create to surface plan-limit messages (CLI-1J8) by @BYK in [#893](https://github.com/getsentry/cli/pull/893)
+
+#### Other
+
+- (db) Handle null row in getInstanceId re-fetch (CLI-1J0) by @BYK in [#900](https://github.com/getsentry/cli/pull/900)
+- (init) Preserve scope/path separators in project slugs by @MathurAditya724 in [#886](https://github.com/getsentry/cli/pull/886)
+- (telemetry) Strip small IDs and org/project paths in ResolutionError grouping by @BYK in [#902](https://github.com/getsentry/cli/pull/902)
+- (test) Prevent detect-agent property test flake by @BYK in [#899](https://github.com/getsentry/cli/pull/899)
+- (time-range) Use UTC date methods for 90-day backfill calculation by @BYK in [#897](https://github.com/getsentry/cli/pull/897)
+- (tls) Support custom CA certificates for corporate proxies (CLI-1K6) by @BYK in [#901](https://github.com/getsentry/cli/pull/901)
+
+### Internal Changes 🔧
+
+- Regenerate docs by @github-actions[bot] in [43045b86](https://github.com/getsentry/cli/commit/43045b86dd5f1c48d20e463781fef348eed38ad1)
+- Regenerate docs by @github-actions[bot] in [19646a19](https://github.com/getsentry/cli/commit/19646a19271720da42184eaba059f235c67c8a8c)
+
 ## 0.30.0
 
 ### Security 🔒
