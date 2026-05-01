@@ -17,9 +17,8 @@ import {
   getUserAgent,
 } from "./constants.js";
 import {
-  getCustomCaSource,
+  buildTlsErrorDetail,
   getCustomTlsOptions,
-  getTlsCertErrorMessage,
   isTlsCertError,
   warnIfSaasWithEnvCa,
 } from "./custom-ca.js";
@@ -314,35 +313,6 @@ async function handleResponse(
 }
 
 /**
- * Build a user-friendly error message for TLS certificate failures.
- * Walks `error.cause` to extract the root TLS error (Node.js wraps
- * TLS errors in `TypeError: fetch failed`).
- */
-function buildTlsErrorMessage(error: Error, hasCustomCa: boolean): string {
-  const cause = getTlsCertErrorMessage(error) ?? error.message;
-
-  if (hasCustomCa) {
-    return (
-      `TLS certificate verification failed: ${cause}\n\n` +
-      "  Custom CA certificates are loaded but verification still failed.\n" +
-      "  The certificate file may not contain the correct CA for this server.\n\n" +
-      "  Check that your CA bundle includes the certificate authority used by\n" +
-      "  your network proxy or Sentry instance."
-    );
-  }
-
-  return (
-    `TLS certificate verification failed: ${cause}\n\n` +
-    "  This usually means your network uses a TLS-intercepting proxy\n" +
-    "  (corporate firewall, VPN) with a private certificate authority.\n\n" +
-    "  To fix this, point the CLI to your CA certificate bundle:\n" +
-    "    sentry cli defaults ca-cert /path/to/corporate-ca.pem\n\n" +
-    "  Or set the NODE_EXTRA_CA_CERTS environment variable:\n" +
-    "    export NODE_EXTRA_CA_CERTS=/path/to/corporate-ca.pem"
-  );
-}
-
-/**
  * Decide what to do with a fetch error. User aborts and an internal
  * timeout on the last attempt throw immediately; TLS cert errors throw
  * immediately with actionable guidance (retrying is pointless); other
@@ -351,8 +321,7 @@ function buildTlsErrorMessage(error: Error, hasCustomCa: boolean): string {
 function handleFetchError(
   error: unknown,
   signal: AbortSignal | undefined | null,
-  isLastAttempt: boolean,
-  hasCustomCa = false
+  isLastAttempt: boolean
 ): AttemptResult {
   if (isUserAbort(error, signal)) {
     return { action: "throw", error };
@@ -365,7 +334,7 @@ function handleFetchError(
       error: new ApiError(
         "TLS certificate error",
         0,
-        buildTlsErrorMessage(error as Error, hasCustomCa)
+        buildTlsErrorDetail(error as Error)
       ),
     };
   }
@@ -689,12 +658,7 @@ async function executeAttempt({
     });
     return handleResponse(response, headers, isLastAttempt);
   } catch (error) {
-    return handleFetchError(
-      error,
-      init?.signal,
-      isLastAttempt,
-      getCustomCaSource() !== "none"
-    );
+    return handleFetchError(error, init?.signal, isLastAttempt);
   }
 }
 

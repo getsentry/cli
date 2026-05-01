@@ -30,6 +30,7 @@ export type CaSource = "default" | "env" | "none";
 /** Cached resolved state — computed once per process */
 let resolved: { tls: { ca: string } } | undefined;
 let resolvedSource: CaSource = "none";
+let resolvedLabel = "";
 let hasResolved = false;
 let warnedSaas = false;
 
@@ -116,6 +117,7 @@ function resolve(): void {
     if (pem) {
       resolved = { tls: { ca: pem } };
       resolvedSource = source;
+      resolvedLabel = label;
       log.debug(`Loaded CA certificates from ${label}: ${path}`);
       return;
     }
@@ -133,6 +135,7 @@ export function getCustomTlsOptions(): { tls: { ca: string } } | undefined {
 
 /** Get the source of the loaded CA certificates. */
 export function getCustomCaSource(): CaSource {
+  resolve();
   return resolvedSource;
 }
 
@@ -151,12 +154,8 @@ export function warnIfSaasWithEnvCa(targetUrl: string): void {
   }
   warnedSaas = true;
 
-  const envVar = getEnv().NODE_EXTRA_CA_CERTS?.trim()
-    ? "NODE_EXTRA_CA_CERTS"
-    : "SSL_CERT_FILE";
-
   log.warn(
-    `Using custom CA certificates from ${envVar} for sentry.io connections.\n` +
+    `Using custom CA certificates from ${resolvedLabel} for sentry.io connections.\n` +
       "  If you intended this (e.g. corporate proxy), silence this warning:\n" +
       "    sentry cli defaults ca-cert /path/to/cert.pem"
   );
@@ -197,8 +196,10 @@ export function isTlsCertError(error: unknown): boolean {
  * callers display it instead of the generic wrapper.
  */
 export function getTlsCertErrorMessage(error: unknown): string | undefined {
+  const seen = new Set<unknown>();
   let current: unknown = error;
-  while (current instanceof Error) {
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
     const msg = current.message;
     if (TLS_ERROR_PATTERNS.some((pattern) => msg.includes(pattern))) {
       return msg;
@@ -209,12 +210,46 @@ export function getTlsCertErrorMessage(error: unknown): string | undefined {
 }
 
 /**
- * Reset all cached state. Test-only — not exported from the public API.
+ * Build a user-friendly error detail for TLS certificate failures.
+ * Walks `error.cause` to extract the root TLS error (Node.js wraps
+ * TLS errors in `TypeError: fetch failed`).
+ *
+ * When custom CAs are already loaded, the message says "still failed"
+ * so the user knows to check their bundle — not re-run the same setup.
+ */
+export function buildTlsErrorDetail(error: Error): string {
+  const cause = getTlsCertErrorMessage(error) ?? error.message;
+  const hasCustomCa = getCustomCaSource() !== "none";
+
+  if (hasCustomCa) {
+    return (
+      `TLS certificate verification failed: ${cause}\n\n` +
+      "  Custom CA certificates are loaded but verification still failed.\n" +
+      "  The certificate file may not contain the correct CA for this server.\n\n" +
+      "  Check that your CA bundle includes the certificate authority used by\n" +
+      "  your network proxy or Sentry instance."
+    );
+  }
+
+  return (
+    `TLS certificate verification failed: ${cause}\n\n` +
+    "  This usually means your network uses a TLS-intercepting proxy\n" +
+    "  (corporate firewall, VPN) with a private certificate authority.\n\n" +
+    "  To fix this, point the CLI to your CA certificate bundle:\n" +
+    "    sentry cli defaults ca-cert /path/to/corporate-ca.pem\n\n" +
+    "  Or set the NODE_EXTRA_CA_CERTS environment variable:\n" +
+    "    export NODE_EXTRA_CA_CERTS=/path/to/corporate-ca.pem"
+  );
+}
+
+/**
+ * Reset all cached state. Exported for test isolation only.
  * @internal
  */
 export function __resetForTests(): void {
   resolved = undefined;
   resolvedSource = "none";
+  resolvedLabel = "";
   hasResolved = false;
   warnedSaas = false;
 }
