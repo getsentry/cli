@@ -84,6 +84,8 @@ type SingleEventViewData = {
  */
 type EventViewData = {
   events: SingleEventViewData[];
+  /** Number of events originally requested (before partial failures) */
+  requestedCount: number;
 };
 
 /**
@@ -136,7 +138,9 @@ export function jsonTransformEventView(
     return result;
   };
 
-  if (data.events.length === 1) {
+  // Use requestedCount (not events.length) to decide the shape so that
+  // partial failures don't non-deterministically switch from array to object.
+  if (data.requestedCount <= 1) {
     const [first] = data.events;
     if (first) {
       return transform(first);
@@ -974,7 +978,10 @@ export const viewCommand = buildCommand({
         );
         return;
       }
-      yield new CommandOutput({ events: [issueShortcut.data] });
+      yield new CommandOutput({
+        events: [issueShortcut.data],
+        requestedCount: 1,
+      });
       return { hint: issueShortcut.hint };
     }
 
@@ -1021,7 +1028,10 @@ export const viewCommand = buildCommand({
       )
     );
 
-    yield new CommandOutput({ events: viewDataEntries });
+    yield new CommandOutput({
+      events: viewDataEntries,
+      requestedCount: allEventIds.length,
+    });
     return {
       hint: target.detectedFrom
         ? `Detected from ${target.detectedFrom}`

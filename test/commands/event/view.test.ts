@@ -1388,6 +1388,7 @@ describe("formatEventView", () => {
   test("renders single event", () => {
     const result = formatEventView({
       events: [{ event: mockEvent("abc123"), trace: null }],
+      requestedCount: 1,
     });
     expect(result).toContain("abc123");
   });
@@ -1398,6 +1399,7 @@ describe("formatEventView", () => {
         { event: mockEvent("event1"), trace: null },
         { event: mockEvent("event2"), trace: null },
       ],
+      requestedCount: 2,
     });
     expect(result).toContain("event1");
     expect(result).toContain("---");
@@ -1413,6 +1415,7 @@ describe("formatEventView", () => {
           spanTreeLines: ["  span-1 (50ms)", "    span-2 (20ms)"],
         },
       ],
+      requestedCount: 1,
     });
     expect(result).toContain("span-1 (50ms)");
     expect(result).toContain("span-2 (20ms)");
@@ -1433,6 +1436,7 @@ describe("jsonTransformEventView", () => {
   test("returns flat object for single event", () => {
     const result = jsonTransformEventView({
       events: [{ event: mockEvent("abc123"), trace: null }],
+      requestedCount: 1,
     });
     expect(result).toEqual(
       expect.objectContaining({ eventID: "abc123", trace: null })
@@ -1447,6 +1451,7 @@ describe("jsonTransformEventView", () => {
         { event: mockEvent("event1"), trace: null },
         { event: mockEvent("event2"), trace: null },
       ],
+      requestedCount: 2,
     });
     expect(Array.isArray(result)).toBe(true);
     const arr = result as Record<string, unknown>[];
@@ -1455,9 +1460,23 @@ describe("jsonTransformEventView", () => {
     expect(arr[1]).toEqual(expect.objectContaining({ eventID: "event2" }));
   });
 
+  test("returns array when multiple requested but some failed", () => {
+    // Requested 3, only 1 succeeded — still array (CLI-1HT deterministic shape)
+    const result = jsonTransformEventView({
+      events: [{ event: mockEvent("event1"), trace: null }],
+      requestedCount: 3,
+    });
+    expect(Array.isArray(result)).toBe(true);
+    const arr = result as Record<string, unknown>[];
+    expect(arr).toHaveLength(1);
+  });
+
   test("applies field filtering for single event", () => {
     const result = jsonTransformEventView(
-      { events: [{ event: mockEvent("abc123"), trace: null }] },
+      {
+        events: [{ event: mockEvent("abc123"), trace: null }],
+        requestedCount: 1,
+      },
       ["eventID"]
     );
     expect(result).toEqual({ eventID: "abc123" });
@@ -1470,6 +1489,7 @@ describe("jsonTransformEventView", () => {
           { event: mockEvent("event1"), trace: null },
           { event: mockEvent("event2"), trace: null },
         ],
+        requestedCount: 2,
       },
       ["eventID"]
     );
