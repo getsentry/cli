@@ -185,9 +185,8 @@ const TLS_ERROR_PATTERNS = [
 export function isTlsCertError(error: unknown): boolean {
   let current: unknown = error;
   while (current instanceof Error) {
-    if (
-      TLS_ERROR_PATTERNS.some((pattern) => current.message.includes(pattern))
-    ) {
+    const msg = current.message;
+    if (TLS_ERROR_PATTERNS.some((pattern) => msg.includes(pattern))) {
       return true;
     }
     current = current.cause;
