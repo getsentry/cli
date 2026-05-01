@@ -632,5 +632,18 @@ describe("sentry explore", () => {
         )
       ).rejects.toThrow(ValidationError);
     });
+
+    test("rejects replay detail-only fields on the replay dataset", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      await expect(
+        func.call(
+          context,
+          { ...DEFAULT_FLAGS, dataset: "replays", field: ["replay_type"] },
+          "test-org/"
+        )
+      ).rejects.toThrow(ValidationError);
+    });
   });
 });

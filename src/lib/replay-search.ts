@@ -110,7 +110,6 @@ const REPLAY_FIELD_RESOLVERS: Record<string, ReplayFieldResolver> = {
   project_id: (replay) => replay.project_id,
   release: (replay) => firstValue(replay.releases),
   releases: (replay) => replay.releases,
-  replay_type: (replay) => replay.replay_type,
   screen: (replay) => firstValue(replay.urls),
   screens: (replay) => replay.urls,
   sdk: (replay) => replay.sdk?.name,

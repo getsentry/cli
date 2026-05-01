@@ -526,8 +526,11 @@ export const exploreCommand = buildListCommand("explore", {
     const environment = parseReplayEnvironmentFilter(flags.environment);
     const replaySort =
       dataset === "replays" ? resolveReplaySort(flags.sort) : undefined;
-    const effectiveSort =
-      replaySort ?? resolveExploreSort(fieldList, dataset, flags.sort);
+    const eventSort =
+      dataset === "replays"
+        ? undefined
+        : resolveExploreSort(fieldList, dataset, flags.sort);
+    const paginationSort = dataset === "replays" ? replaySort : eventSort;
 
     if (dataset !== "replays" && environment) {
       throw new ValidationError(
@@ -564,7 +567,7 @@ export const exploreCommand = buildListCommand("explore", {
         env: environment?.join(","),
         fields: fieldList.join(","),
         q: flags.query,
-        sort: effectiveSort,
+        sort: paginationSort,
         period: serializeTimeRange(timeRange),
       }
     );
@@ -602,7 +605,7 @@ export const exploreCommand = buildListCommand("explore", {
           fields: fieldList,
           dataset,
           query: apiQuery,
-          sort: effectiveSort,
+          sort: eventSort,
           limit: flags.limit,
           cursor,
           ...timeRangeToApiParams(timeRange),
