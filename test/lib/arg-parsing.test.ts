@@ -15,6 +15,7 @@ import {
   parseIssueArg,
   parseOrgProjectArg,
   parseSlashSeparatedArg,
+  splitNewlineArg,
 } from "../../src/lib/arg-parsing.js";
 import { stripDsnOrgPrefix } from "../../src/lib/dsn/index.js";
 import { ValidationError } from "../../src/lib/errors.js";
@@ -1295,5 +1296,38 @@ describe("parseSlashSeparatedArg: whitespace trimming", () => {
       "sentry event view <id>"
     );
     expect(result).toEqual({ id: "a9b4ad2c", targetArg: undefined });
+  });
+
+  test("preserves newlines in no-slash path (log view splits downstream)", () => {
+    const result = parseSlashSeparatedArg(
+      "abc123\ndef456",
+      "Log ID",
+      "sentry log view <id>"
+    );
+    // No-slash path must NOT strip newlines — log view splits them downstream
+    expect(result.id).toBe("abc123\ndef456");
+    expect(result.targetArg).toBeUndefined();
+  });
+});
+
+describe("splitNewlineArg", () => {
+  test("splits on newlines and trims each part", () => {
+    expect(splitNewlineArg("abc\n def \nghi")).toEqual(["abc", "def", "ghi"]);
+  });
+
+  test("filters out empty lines", () => {
+    expect(splitNewlineArg("abc\n\n\ndef")).toEqual(["abc", "def"]);
+  });
+
+  test("handles CRLF", () => {
+    expect(splitNewlineArg("abc\r\ndef")).toEqual(["abc", "def"]);
+  });
+
+  test("returns single element for no newlines", () => {
+    expect(splitNewlineArg("abc123")).toEqual(["abc123"]);
+  });
+
+  test("returns empty array for whitespace-only input", () => {
+    expect(splitNewlineArg("  \n  \n  ")).toEqual([]);
   });
 });

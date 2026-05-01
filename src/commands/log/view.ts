@@ -13,6 +13,7 @@ import {
   looksLikeIssueShortId,
   parseOrgProjectArg,
   parseSlashSeparatedArg,
+  splitNewlineArg,
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
@@ -58,21 +59,6 @@ type ViewFlags = {
 const USAGE_HINT = "sentry log view <org>/<project> <log-id> [<log-id>...]";
 
 /**
- * Split a raw argument into individual log IDs.
- * Handles newline-separated IDs within a single argument (common when
- * piping or pasting from other tools).
- *
- * @param arg - Raw positional argument
- * @returns Array of non-empty trimmed strings
- */
-function splitLogIds(arg: string): string[] {
-  return arg
-    .split("\n")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-/**
  * Parse positional arguments for log view.
  * Handles:
  * - `<log-id>` — single log ID (auto-detect org/project)
@@ -115,7 +101,7 @@ export function parsePositionalArgs(args: string[]): {
       "Log ID",
       USAGE_HINT
     );
-    const rawLogIds = splitLogIds(id);
+    const rawLogIds = splitNewlineArg(id);
     if (rawLogIds.length === 0) {
       throw new ContextError("Log ID", USAGE_HINT, []);
     }
@@ -130,7 +116,7 @@ export function parsePositionalArgs(args: string[]): {
   // (first has no "/", second has "/"), but the user's intent is clearly
   // to view an issue, not to swap log-view arguments.
   if (looksLikeIssueShortId(first)) {
-    const rawLogIds = args.slice(1).flatMap(splitLogIds);
+    const rawLogIds = args.slice(1).flatMap(splitNewlineArg);
     if (rawLogIds.length === 0) {
       throw new ContextError("Log ID", USAGE_HINT, []);
     }
@@ -151,14 +137,14 @@ export function parsePositionalArgs(args: string[]): {
     const swapWarning = detectSwappedViewArgs(first, second);
     if (swapWarning) {
       return {
-        rawLogIds: splitLogIds(first),
+        rawLogIds: splitNewlineArg(first),
         targetArg: second,
         suggestion: swapWarning,
       };
     }
   }
 
-  const rawLogIds = args.slice(1).flatMap(splitLogIds);
+  const rawLogIds = args.slice(1).flatMap(splitNewlineArg);
   if (rawLogIds.length === 0) {
     throw new ContextError("Log ID", USAGE_HINT, []);
   }
