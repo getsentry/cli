@@ -643,6 +643,7 @@ describe("sentry explore", () => {
       );
       expect(output).not.toContain('-F "id"');
       expect(output).not.toContain('-F "started_at"');
+      expect(output).not.toContain('--sort "-started_at"');
     });
   });
 

@@ -315,13 +315,15 @@ function appendFlagHints(
   >
 ): string {
   const parts: string[] = [];
+  const defaultSort =
+    flags.dataset === "replays" ? DEFAULT_REPLAY_SORT : undefined;
   if (flags.dataset !== DEFAULT_DATASET) {
     // Emit user-facing name, not API-level name (e.g. "metrics" not "metricsEnhanced")
     const displayDataset =
       API_TO_USER_DATASET.get(flags.dataset) ?? flags.dataset;
     parts.push(`--dataset ${displayDataset}`);
   }
-  appendSortHint(parts, flags.sort);
+  appendSortHint(parts, flags.sort, defaultSort);
   appendQueryHint(parts, flags.query);
   // Include --field flags when non-default
   const fieldList = flags.field ?? [];

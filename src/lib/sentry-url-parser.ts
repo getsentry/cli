@@ -72,11 +72,8 @@ function matchOrganizationsPath(
   }
 
   const replayPath = matchReplayPath(segments, 2);
-  if (replayPath) {
-    return { baseUrl, org, ...replayPath };
-  }
-  if (isReplayPathPrefix(segments, 2)) {
-    return null;
+  if (replayPath || isReplayPathPrefix(segments, 2)) {
+    return replayPath ? { baseUrl, org, ...replayPath } : null;
   }
 
   // /organizations/{org}/dashboard/{id}/
@@ -139,12 +136,15 @@ function matchSubdomainPath(
   }
 
   const replayPath = matchReplayPath(segments, 0);
-  if (replayPath) {
+  if (replayPath || isReplayPathPrefix(segments, 0)) {
     return replayPath;
   }
-  if (isReplayPathPrefix(segments, 0)) {
-    return null;
-  }
+  return matchSubdomainTailPath(segments);
+}
+
+function matchSubdomainTailPath(
+  segments: string[]
+): Omit<ParsedSentryUrl, "baseUrl" | "org"> | null {
   // /settings/projects/{project}/ (org-scoped subdomain settings URL)
   if (segments[0] === "settings" && segments[1] === "projects" && segments[2]) {
     return { project: segments[2] };
@@ -168,14 +168,18 @@ function matchReplayPath(
   segments: string[],
   startIndex: number
 ): Pick<ParsedSentryUrl, "replayId"> | null {
-  const replayId =
-    segments[startIndex] === "explore" && segments[startIndex + 1] === "replays"
-      ? segments[startIndex + 2]
-      : segments[startIndex] === "replays"
-        ? segments[startIndex + 1]
-        : undefined;
+  let replayId: string | undefined;
 
-  if (!replayId || !HEX_ID_RE.test(replayId)) {
+  if (
+    segments[startIndex] === "explore" &&
+    segments[startIndex + 1] === "replays"
+  ) {
+    replayId = segments[startIndex + 2];
+  } else if (segments[startIndex] === "replays") {
+    replayId = segments[startIndex + 1];
+  }
+
+  if (!(replayId && HEX_ID_RE.test(replayId))) {
     return null;
   }
 
