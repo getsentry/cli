@@ -20,10 +20,17 @@ const SNTRYS_PREFIX = "sntrys_";
 /** 2 KB cap. Real tokens are ~150-300 bytes; cap defends the auth hot path. */
 const MAX_TOKEN_LENGTH = 2048;
 
+/** Return a non-empty string from a parsed claim field, or `undefined`. */
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
+}
+
 /** Subset of `sntrys_` payload fields we care about. */
 export type SntrysClaim = {
   url: string;
   regionUrl?: string;
+  /** Organization slug embedded in the token at issuance time. */
+  org?: string;
 };
 
 /**
@@ -77,10 +84,8 @@ export function parseSntrysClaim(
     return;
   }
 
-  const regionUrl =
-    typeof obj.region_url === "string" && obj.region_url
-      ? obj.region_url
-      : undefined;
+  const regionUrl = optionalString(obj.region_url);
+  const org = optionalString(obj.org);
 
-  return { url, regionUrl };
+  return { url, regionUrl, org };
 }

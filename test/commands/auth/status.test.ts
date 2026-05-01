@@ -63,6 +63,7 @@ function createContext() {
 
 describe("statusCommand.func", () => {
   let getAuthConfigSpy: ReturnType<typeof spyOn>;
+  let getAuthTokenSpy: ReturnType<typeof spyOn>;
   let isAuthenticatedSpy: ReturnType<typeof spyOn>;
   let getUserInfoSpy: ReturnType<typeof spyOn>;
   let getDefaultOrgSpy: ReturnType<typeof spyOn>;
@@ -73,6 +74,7 @@ describe("statusCommand.func", () => {
 
   beforeEach(async () => {
     getAuthConfigSpy = spyOn(dbAuth, "getAuthConfig");
+    getAuthTokenSpy = spyOn(dbAuth, "getAuthToken");
     isAuthenticatedSpy = spyOn(dbAuth, "isAuthenticated");
     getUserInfoSpy = spyOn(dbUser, "getUserInfo");
     getDefaultOrgSpy = spyOn(dbDefaults, "getDefaultOrganization");
@@ -81,6 +83,7 @@ describe("statusCommand.func", () => {
     listOrgsSpy = spyOn(apiClient, "listOrganizationsUncached");
 
     // Defaults that most tests override
+    getAuthTokenSpy.mockReturnValue("fake-oauth-token");
     getUserInfoSpy.mockReturnValue(null);
     getDefaultOrgSpy.mockReturnValue(null);
     getDefaultProjectSpy.mockReturnValue(null);
@@ -92,6 +95,7 @@ describe("statusCommand.func", () => {
 
   afterEach(() => {
     getAuthConfigSpy.mockRestore();
+    getAuthTokenSpy.mockRestore();
     isAuthenticatedSpy.mockRestore();
     getUserInfoSpy.mockRestore();
     getDefaultOrgSpy.mockRestore();
