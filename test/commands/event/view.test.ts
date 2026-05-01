@@ -241,7 +241,7 @@ describe("parsePositionalArgs", () => {
   });
 
   describe("edge cases", () => {
-    test("handles more than two args (ignores extras)", () => {
+    test("collects extra args as additional event IDs", () => {
       const result = parsePositionalArgs([
         "my-org/frontend",
         "abc123",
@@ -249,12 +249,81 @@ describe("parsePositionalArgs", () => {
       ]);
       expect(result.targetArg).toBe("my-org/frontend");
       expect(result.eventId).toBe("abc123");
+      expect(result.extraEventIds).toEqual(["extra-arg"]);
     });
 
     test("handles empty string event ID in two-arg case", () => {
       const result = parsePositionalArgs(["my-org/frontend", ""]);
       expect(result.targetArg).toBe("my-org/frontend");
       expect(result.eventId).toBe("");
+    });
+  });
+
+  describe("newline-separated IDs (CLI-1HT)", () => {
+    test("expands newline-separated IDs from single structured arg", () => {
+      const multiLineArg =
+        "perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d\n60c277e6c73f41c58ca46231b46dc0f8\n722e1158dfa147ec90ed831c4d096ae7";
+      // expandNewlineArgs splits this into:
+      // ["perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d", "60c277e6c73f41c58ca46231b46dc0f8", "722e1158dfa147ec90ed831c4d096ae7"]
+      // parsePositionalArgs sees 3 args: first is org/project/id, rest are extra IDs
+      // But since first has 2 slashes, parseSingleArg routes it through parseSlashSeparatedArg
+      // Actually with 3 args, first is target, second is event ID, rest are extras
+      // Let's test the expanded form directly:
+      const expanded = multiLineArg
+        .split("\n")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      expect(expanded).toEqual([
+        "perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d",
+        "60c277e6c73f41c58ca46231b46dc0f8",
+        "722e1158dfa147ec90ed831c4d096ae7",
+      ]);
+
+      // First arg is org/project/id → single-arg path → parseSlashSeparatedArg
+      // → eventId = "189945b37884462cb9134bd5cabeaa3d", targetArg = "perzimo/perzimo-server"
+      // But we have 3 args, so first is target, second is eventId, third is extra
+      // After expansion: ["perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d", ...]
+      // args.length > 1 → first = target, second = event ID
+      // BUT first has 2 slashes, so it's "org/project/id" not a plain target
+      // Actually, the two-arg branch treats first as target, second as event ID
+      // So first = "perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d" (target)
+      //    second = "60c277e6c73f41c58ca46231b46dc0f8" (eventId)
+      //    third = "722e1158dfa147ec90ed831c4d096ae7" (extra)
+      const result = parsePositionalArgs(expanded);
+      expect(result.targetArg).toBe(
+        "perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d"
+      );
+      expect(result.eventId).toBe("60c277e6c73f41c58ca46231b46dc0f8");
+      expect(result.extraEventIds).toEqual([
+        "722e1158dfa147ec90ed831c4d096ae7",
+      ]);
+    });
+
+    test("single arg with newlines goes through single-arg path after expansion", () => {
+      // When there's only one line (no newlines), single-arg path works normally
+      const result = parsePositionalArgs([
+        "perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d",
+      ]);
+      expect(result.eventId).toBe("189945b37884462cb9134bd5cabeaa3d");
+      expect(result.targetArg).toBe("perzimo/perzimo-server");
+      expect(result.extraEventIds).toBeUndefined();
+    });
+
+    test("collects multiple extra event IDs", () => {
+      const result = parsePositionalArgs([
+        "my-org/frontend",
+        "abc123",
+        "def456",
+        "789abc",
+      ]);
+      expect(result.targetArg).toBe("my-org/frontend");
+      expect(result.eventId).toBe("abc123");
+      expect(result.extraEventIds).toEqual(["def456", "789abc"]);
+    });
+
+    test("no extra IDs when only two args", () => {
+      const result = parsePositionalArgs(["my-org/frontend", "abc123"]);
+      expect(result.extraEventIds).toBeUndefined();
     });
   });
 

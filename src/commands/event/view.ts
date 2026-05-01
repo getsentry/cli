@@ -4,12 +4,14 @@
  * View detailed information about a Sentry event.
  */
 
+import pLimit from "p-limit";
 import type { SentryContext } from "../../context.js";
 import {
   findEventAcrossOrgs,
   getEvent,
   getIssueByShortId,
   getLatestEvent,
+  ORG_FANOUT_CONCURRENCY,
   type ResolvedEvent,
   resolveEventInOrg,
 } from "../../lib/api-client.js";
@@ -67,8 +69,8 @@ type ViewFlags = {
   readonly fields?: string[];
 };
 
-/** Return type for event view — includes all data both renderers need */
-type EventViewData = {
+/** Return type for a single event — includes all data both renderers need */
+type SingleEventViewData = {
   event: SentryEvent;
   trace: { traceId: string; spans: unknown[] } | null;
   /** Pre-formatted span tree lines for human output (not serialized) */
@@ -76,17 +78,32 @@ type EventViewData = {
 };
 
 /**
+ * Output type for event view — supports both single and multi-event.
+ * Multi-event output occurs when agents paste newline-separated IDs.
+ */
+type EventViewData = {
+  events: SingleEventViewData[];
+};
+
+/**
  * Format event view data for human-readable terminal output.
  *
- * Renders event details and optional span tree.
+ * Renders event details and optional span tree. Multiple events
+ * are separated by horizontal rules.
  */
 function formatEventView(data: EventViewData): string {
   const parts: string[] = [];
 
-  parts.push(formatEventDetails(data.event, `Event ${data.event.eventID}`));
+  for (const entry of data.events) {
+    if (parts.length > 0) {
+      parts.push("\n---\n");
+    }
 
-  if (data.spanTreeLines && data.spanTreeLines.length > 0) {
-    parts.push(data.spanTreeLines.join("\n"));
+    parts.push(formatEventDetails(entry.event, `Event ${entry.event.eventID}`));
+
+    if (entry.spanTreeLines && entry.spanTreeLines.length > 0) {
+      parts.push(entry.spanTreeLines.join("\n"));
+    }
   }
 
   return parts.join("\n");
@@ -95,26 +112,64 @@ function formatEventView(data: EventViewData): string {
 /**
  * Transform event view data for JSON output.
  *
- * Flattens the event as the primary object so that `--fields eventID,title`
- * works directly on event properties. The `trace` enrichment data is
- * attached as a nested key, accessible via `--fields trace.traceId`.
+ * For single-event output, flattens the event as the primary object so that
+ * `--fields eventID,title` works directly on event properties. The `trace`
+ * enrichment data is attached as a nested key.
  *
- * Without this transform, `--fields eventID` would return `{}` because
- * the raw yield shape is `{ event, trace }` and `eventID` lives inside `event`.
+ * For multi-event output, returns an array of flattened event objects.
+ * This preserves backward compatibility: single-event callers still get
+ * a flat object, while multi-event callers get an array.
  */
 function jsonTransformEventView(
   data: EventViewData,
   fields?: string[]
 ): unknown {
-  const { event, trace } = data;
-  const result: Record<string, unknown> = { ...event, trace };
-  if (fields && fields.length > 0) {
-    return filterFields(result, fields);
+  const transform = (entry: SingleEventViewData): Record<string, unknown> => {
+    const result: Record<string, unknown> = {
+      ...entry.event,
+      trace: entry.trace,
+    };
+    if (fields && fields.length > 0) {
+      return filterFields(result, fields) as Record<string, unknown>;
+    }
+    return result;
+  };
+
+  if (data.events.length === 1) {
+    const [first] = data.events;
+    if (first) {
+      return transform(first);
+    }
   }
-  return result;
+  return data.events.map(transform);
 }
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
+
+/**
+ * Split a single argument on newlines into individual IDs.
+ *
+ * Agents (Codex, Claude) sometimes paste multiple event IDs as a single
+ * newline-separated argument (CLI-1HT). This mirrors `log view`'s
+ * `splitLogIds` helper.
+ */
+function splitOnNewlines(arg: string): string[] {
+  return arg
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * Expand positional args by splitting each on newlines.
+ *
+ * When an agent pastes `"org/project/id1\nid2\nid3"` as a single arg,
+ * this produces `["org/project/id1", "id2", "id3"]` — the first retains
+ * the org/project prefix so `parsePositionalArgs` can extract the target.
+ */
+function expandNewlineArgs(args: string[]): string[] {
+  return args.flatMap(splitOnNewlines);
+}
 
 /**
  * Sentinel eventId for "fetch the latest event for this issue."
@@ -195,6 +250,8 @@ type ParsedPositionalArgs = {
   issueShortId?: string;
   /** Warning message if arguments appear to be in the wrong order */
   warning?: string;
+  /** Additional event IDs from newline-separated input or extra positional args */
+  extraEventIds?: string[];
 };
 
 /**
@@ -282,8 +339,10 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
     };
   }
 
-  // Two or more args - first is target, second is event ID
-  return { eventId: second, targetArg: first };
+  // Two or more args - first is target, second is event ID.
+  // Any additional args are extra event IDs (from newline-separated input).
+  const extraEventIds = args.length > 2 ? args.slice(2) : undefined;
+  return { eventId: second, targetArg: first, extraEventIds };
 }
 
 /**
@@ -468,11 +527,11 @@ export async function resolveAutoDetectTarget(
  * @param event - Already-fetched event
  * @param spans - Span tree depth (0 = skip)
  */
-async function buildEventViewData(
+async function buildSingleEventViewData(
   org: string,
   event: SentryEvent,
   spans: number
-): Promise<EventViewData> {
+): Promise<SingleEventViewData> {
   const spanTreeResult =
     spans > 0 ? await getSpanTreeLines(org, event, spans) : undefined;
   const trace =
@@ -490,9 +549,9 @@ async function fetchLatestEventData(
   org: string,
   issueId: string,
   spans: number
-): Promise<EventViewData> {
+): Promise<SingleEventViewData> {
   const event = await getLatestEvent(org, issueId);
-  return buildEventViewData(org, event, spans);
+  return buildSingleEventViewData(org, event, spans);
 }
 
 /**
@@ -635,7 +694,7 @@ async function resolveIssueShortIdEvent(
   issueShortId: string,
   org: string,
   spans: number
-): Promise<EventViewData> {
+): Promise<SingleEventViewData> {
   const issue = await getIssueByShortId(org, issueShortId);
   return fetchLatestEventData(org, issue.id, spans);
 }
@@ -643,7 +702,7 @@ async function resolveIssueShortIdEvent(
 /** Result from an issue-based shortcut (URL or short ID) */
 type IssueShortcutResult = {
   org: string;
-  data: EventViewData;
+  data: SingleEventViewData;
   hint: string;
 };
 
@@ -713,7 +772,7 @@ async function resolveIssueShortcut(
         );
       }
       const event = await getEvent(resolved.org, issueProject, eventId);
-      const data = await buildEventViewData(resolved.org, event, spans);
+      const data = await buildSingleEventViewData(resolved.org, event, spans);
       return {
         org: resolved.org,
         data,
@@ -739,15 +798,109 @@ async function resolveIssueShortcut(
   return null;
 }
 
+/**
+ * Validate extra event IDs from newline-expanded agent input.
+ *
+ * Skips invalid IDs with an info log — agent-pasted lists may contain
+ * garbage (partial lines, headers, etc).
+ *
+ * @param extraIds - Raw extra event IDs to validate
+ * @param primaryId - Already-validated primary event ID
+ * @returns All valid event IDs (primary + validated extras)
+ */
+function collectEventIds(
+  primaryId: string,
+  extraIds: string[] | undefined
+): string[] {
+  const allIds = [primaryId];
+  if (!extraIds || extraIds.length === 0) {
+    return allIds;
+  }
+  const log = logger.withTag("event.view");
+  for (const rawId of extraIds) {
+    try {
+      allIds.push(validateHexId(rawId, "Event ID"));
+    } catch {
+      log.info(`Skipping invalid event ID: ${rawId}`);
+    }
+  }
+  return allIds;
+}
+
+/** Options for fetching multiple events in parallel */
+type FetchMultipleOptions = {
+  /** Event IDs to fetch */
+  eventIds: string[];
+  /** Organization slug */
+  org: string;
+  /** Project slug */
+  project: string;
+  /** Pre-fetched event for the primary ID (from cross-project resolution) */
+  prefetchedEvent: SentryEvent | null;
+  /** The primary event ID (may have a prefetched event) */
+  primaryId: string;
+};
+
+/**
+ * Fetch multiple events with bounded concurrency, collecting successes
+ * and warning on failures.
+ *
+ * Uses {@link ORG_FANOUT_CONCURRENCY} (5) to avoid overwhelming the API
+ * when agents paste dozens of IDs.
+ *
+ * When all fetches fail, re-throws the error from the primary (first) event.
+ */
+async function fetchMultipleEvents(
+  options: FetchMultipleOptions
+): Promise<SentryEvent[]> {
+  const { eventIds, org, project, prefetchedEvent, primaryId } = options;
+  const log = logger.withTag("event.view");
+  const limit = pLimit(ORG_FANOUT_CONCURRENCY);
+
+  const results = await Promise.allSettled(
+    eventIds.map((id) =>
+      limit(() =>
+        fetchEventWithContext(
+          id === primaryId ? prefetchedEvent : null,
+          org,
+          project,
+          id
+        )
+      )
+    )
+  );
+
+  const events: SentryEvent[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    if (result?.status === "fulfilled") {
+      events.push(result.value);
+    } else if (result?.status === "rejected") {
+      log.warn(`Failed to fetch event ${eventIds[i]}: ${result.reason}`);
+    }
+  }
+
+  if (events.length === 0) {
+    const firstResult = results[0];
+    if (firstResult?.status === "rejected") {
+      throw firstResult.reason;
+    }
+  }
+
+  return events;
+}
+
 export const viewCommand = buildCommand({
   docs: {
-    brief: "View details of a specific event",
+    brief: "View details of one or more events",
     fullDescription:
-      "View detailed information about a Sentry event by its ID.\n\n" +
+      "View detailed information about Sentry events by their IDs.\n\n" +
       "Target specification:\n" +
-      "  sentry event view <event-id>              # auto-detect from DSN or config\n" +
-      "  sentry event view <org>/<proj> <event-id> # explicit org and project\n" +
-      "  sentry event view <project> <event-id>    # find project across all orgs",
+      "  sentry event view <event-id>                         # auto-detect from DSN or config\n" +
+      "  sentry event view <org>/<proj> <event-id> [<id>...]  # explicit org and project\n" +
+      "  sentry event view <project> <event-id> [<id>...]     # find project across all orgs\n\n" +
+      "Multiple event IDs can be passed as separate arguments or newline-separated\n" +
+      "within a single argument (handy when piping from other commands).",
   },
   output: {
     human: formatEventView,
@@ -759,7 +912,7 @@ export const viewCommand = buildCommand({
       parameter: {
         placeholder: "org/project/event-id",
         brief:
-          "[<org>/<project>] <event-id> - Target (optional) and event ID (required)",
+          "[<org>/<project>] <event-id> [<event-id>...] - Target (optional) and one or more event IDs",
         parse: String,
       },
     },
@@ -780,12 +933,16 @@ export const viewCommand = buildCommand({
 
     const log = logger.withTag("event.view");
 
+    // Expand newline-separated args — agents paste multiple event IDs
+    // as a single newline-separated argument (CLI-1HT).
+    const expandedArgs = expandNewlineArgs(args);
+
     // Parse positional args
-    const parsedArgs = parsePositionalArgs(args);
+    const parsedArgs = parsePositionalArgs(expandedArgs);
     if (parsedArgs.warning) {
       log.warn(parsedArgs.warning);
     }
-    const { targetArg, issueId, issueShortId } = parsedArgs;
+    const { targetArg, issueId, issueShortId, extraEventIds } = parsedArgs;
     let { eventId } = parsedArgs;
 
     const parsed = parseOrgProjectArg(targetArg);
@@ -812,7 +969,7 @@ export const viewCommand = buildCommand({
         );
         return;
       }
-      yield new CommandOutput(issueShortcut.data);
+      yield new CommandOutput({ events: [issueShortcut.data] });
       return { hint: issueShortcut.hint };
     }
 
@@ -840,18 +997,26 @@ export const viewCommand = buildCommand({
       return;
     }
 
-    // Use the pre-fetched event when cross-project resolution already fetched it,
-    // avoiding a redundant API call.
-    const event = await fetchEventWithContext(
-      target.prefetchedEvent ?? null,
-      target.org,
-      target.project,
-      eventId
+    // Collect all event IDs (primary + validated extras from newline expansion)
+    const allEventIds = collectEventIds(eventId, extraEventIds);
+
+    // Fetch all events in parallel, warning on individual failures
+    const fetchedEvents = await fetchMultipleEvents({
+      eventIds: allEventIds,
+      org: target.org,
+      project: target.project,
+      prefetchedEvent: target.prefetchedEvent ?? null,
+      primaryId: eventId,
+    });
+
+    // Build view data for each event in parallel
+    const viewDataEntries = await Promise.all(
+      fetchedEvents.map((event) =>
+        buildSingleEventViewData(target.org, event, flags.spans)
+      )
     );
 
-    const viewData = await buildEventViewData(target.org, event, flags.spans);
-
-    yield new CommandOutput(viewData);
+    yield new CommandOutput({ events: viewDataEntries });
     return {
       hint: target.detectedFrom
         ? `Detected from ${target.detectedFrom}`

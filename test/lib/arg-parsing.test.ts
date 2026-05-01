@@ -1296,4 +1296,15 @@ describe("parseSlashSeparatedArg: whitespace trimming", () => {
     );
     expect(result).toEqual({ id: "a9b4ad2c", targetArg: undefined });
   });
+
+  test("preserves newlines in no-slash path (log view splits downstream)", () => {
+    const result = parseSlashSeparatedArg(
+      "abc123\ndef456",
+      "Log ID",
+      "sentry log view <id>"
+    );
+    // No-slash path must NOT strip newlines — log view splits them downstream
+    expect(result.id).toBe("abc123\ndef456");
+    expect(result.targetArg).toBeUndefined();
+  });
 });
