@@ -30,10 +30,7 @@ import {
 import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
-import {
-  ProjectSpecificationType,
-  splitNewlineArg,
-} from "../../../src/lib/arg-parsing.js";
+import { ProjectSpecificationType } from "../../../src/lib/arg-parsing.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as browser from "../../../src/lib/browser.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
@@ -1250,31 +1247,7 @@ describe("fetchEventWithContext", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// splitOnNewlines
-// ---------------------------------------------------------------------------
-
-describe("splitNewlineArg", () => {
-  test("splits on newlines and trims each part", () => {
-    expect(splitNewlineArg("abc\n def \nghi")).toEqual(["abc", "def", "ghi"]);
-  });
-
-  test("filters out empty lines", () => {
-    expect(splitNewlineArg("abc\n\n\ndef")).toEqual(["abc", "def"]);
-  });
-
-  test("handles CRLF", () => {
-    expect(splitNewlineArg("abc\r\ndef")).toEqual(["abc", "def"]);
-  });
-
-  test("returns single element for no newlines", () => {
-    expect(splitNewlineArg("abc123")).toEqual(["abc123"]);
-  });
-
-  test("returns empty array for whitespace-only input", () => {
-    expect(splitNewlineArg("  \n  \n  ")).toEqual([]);
-  });
-});
+// Note: splitNewlineArg is tested in test/lib/arg-parsing.test.ts
 
 // ---------------------------------------------------------------------------
 // expandNewlineArgs

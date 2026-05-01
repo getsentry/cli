@@ -1010,6 +1010,11 @@ export const viewCommand = buildCommand({
     }
 
     if (flags.web) {
+      if (extraEventIds && extraEventIds.length > 0) {
+        log.warn(
+          "--web only opens the first event; extra event IDs are ignored."
+        );
+      }
       await openInBrowser(buildEventSearchUrl(target.org, eventId), "event");
       return;
     }
