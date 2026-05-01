@@ -28,7 +28,7 @@ List recent Session Replays
 | Field | Type | Description |
 |-------|------|-------------|
 | `activity` | number \| null | Replay activity score |
-| `browser` | object | Browser metadata |
+| `browser` | object \| null | Browser metadata |
 | `count_dead_clicks` | number \| null | Dead click count |
 | `count_errors` | number \| null | Associated error count |
 | `count_infos` | number \| null | Info event count |
@@ -36,7 +36,7 @@ List recent Session Replays
 | `count_segments` | number \| null | Recording segment count |
 | `count_urls` | number \| null | Visited URL count |
 | `count_warnings` | number \| null | Warning event count |
-| `device` | object | Device metadata |
+| `device` | object \| null | Device metadata |
 | `dist` | string \| null | Distribution |
 | `duration` | number \| null | Replay duration in seconds |
 | `environment` | string \| null | Environment |
@@ -46,16 +46,16 @@ List recent Session Replays
 | `id` | string | Replay ID |
 | `info_ids` | array | Linked info event IDs |
 | `is_archived` | boolean \| null | Archived flag |
-| `os` | object | Operating system metadata |
+| `os` | object \| null | Operating system metadata |
 | `platform` | string \| null | Platform |
 | `project_id` | string \| null | Numeric project ID |
 | `releases` | array | Associated releases |
-| `sdk` | object | SDK metadata |
+| `sdk` | object \| null | SDK metadata |
 | `started_at` | string \| null | Replay start timestamp |
 | `tags` | unknown | Replay tags |
 | `trace_ids` | array | Linked trace IDs |
 | `urls` | array | Visited URLs |
-| `user` | object | User metadata |
+| `user` | object \| null | User metadata |
 | `warning_ids` | array | Linked warning event IDs |
 
 **Examples:**
@@ -78,7 +78,7 @@ sentry replay list my-org/frontend -c prev
 sentry replay list my-org/frontend --json
 ```
 
-### `sentry replay view <org/project/replay-id...>`
+### `sentry replay view <replay-id-or-url...>`
 
 View a Session Replay
 
@@ -91,7 +91,7 @@ View a Session Replay
 | Field | Type | Description |
 |-------|------|-------------|
 | `activity` | number \| null | Replay activity score |
-| `browser` | object | Browser metadata |
+| `browser` | object \| null | Browser metadata |
 | `count_dead_clicks` | number \| null | Dead click count |
 | `count_errors` | number \| null | Associated error count |
 | `count_infos` | number \| null | Info event count |
@@ -99,7 +99,7 @@ View a Session Replay
 | `count_segments` | number \| null | Recording segment count |
 | `count_urls` | number \| null | Visited URL count |
 | `count_warnings` | number \| null | Warning event count |
-| `device` | object | Device metadata |
+| `device` | object \| null | Device metadata |
 | `dist` | string \| null | Distribution |
 | `duration` | number \| null | Replay duration in seconds |
 | `environment` | string \| null | Environment |
@@ -109,19 +109,19 @@ View a Session Replay
 | `id` | string | Replay ID |
 | `info_ids` | array | Linked info event IDs |
 | `is_archived` | boolean \| null | Archived flag |
-| `os` | object | Operating system metadata |
+| `os` | object \| null | Operating system metadata |
 | `platform` | string \| null | Platform |
 | `project_id` | string \| null | Numeric project ID |
 | `releases` | array | Associated releases |
-| `sdk` | object | SDK metadata |
+| `sdk` | object \| null | SDK metadata |
 | `started_at` | string \| null | Replay start timestamp |
 | `tags` | unknown | Replay tags |
 | `trace_ids` | array | Linked trace IDs |
 | `urls` | array | Visited URLs |
-| `user` | object | User metadata |
+| `user` | object \| null | User metadata |
 | `warning_ids` | array | Linked warning event IDs |
 | `clicks` | array | Replay click summaries |
-| `ota_updates` | object | OTA update metadata |
+| `ota_updates` | object \| null | OTA update metadata |
 | `replay_type` | string \| null | Replay type |
 
 **Examples:**
