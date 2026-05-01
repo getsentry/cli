@@ -13,16 +13,25 @@ import type { DetectedDsn } from "./types.js";
 export const SENTRY_DSN_ENV = "SENTRY_DSN";
 
 /**
+ * Framework-specific env var prefixes that expose values to client-side code.
+ * Used to build both the runtime env var checklist and the .env file regex
+ * so that both detection paths match the same set of variable names.
+ */
+export const FRAMEWORK_ENV_PREFIXES = [
+  "NEXT_PUBLIC_",
+  "REACT_APP_",
+  "VITE_",
+  "EXPO_PUBLIC_",
+  "NUXT_PUBLIC_",
+] as const;
+
+/**
  * Framework-prefixed env var names that commonly hold a Sentry DSN.
  * Checked in order after `SENTRY_DSN` (canonical name has priority).
  */
-const FRAMEWORK_DSN_VARS = [
-  "NEXT_PUBLIC_SENTRY_DSN",
-  "REACT_APP_SENTRY_DSN",
-  "VITE_SENTRY_DSN",
-  "EXPO_PUBLIC_SENTRY_DSN",
-  "NUXT_PUBLIC_SENTRY_DSN",
-] as const;
+const FRAMEWORK_DSN_VARS = FRAMEWORK_ENV_PREFIXES.map(
+  (prefix) => `${prefix}SENTRY_DSN`
+);
 
 /**
  * Detect DSN from environment variables.
