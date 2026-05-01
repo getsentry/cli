@@ -87,7 +87,7 @@ const SORT_MAP: Record<ReplaySortKey, ReplaySortValue> = {
   activity: "-activity",
 };
 
-const DEFAULT_PERIOD = "7d";
+const DEFAULT_PERIOD = LIST_PERIOD_FLAG.default;
 const DEFAULT_SORT: ReplaySortValue = SORT_MAP.date;
 const PAGINATION_KEY = "replay-list";
 const COMMAND_NAME = "replay list";

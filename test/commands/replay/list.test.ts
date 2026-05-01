@@ -16,6 +16,7 @@ import { listCommand, parseSort } from "../../../src/commands/replay/list.js";
 import * as apiClient from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as paginationDb from "../../../src/lib/db/pagination.js";
+import { LIST_PERIOD_FLAG } from "../../../src/lib/list-command.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import { parsePeriod } from "../../../src/lib/time-range.js";
@@ -182,5 +183,30 @@ describe("listCommand.func", () => {
     expect(output).toContain("Test User");
     expect(output).toContain("Showing 1 replay.");
     expect(output).toContain("sentry replay view test-org/");
+  });
+
+  test("omits --period in next-page hints for the shared default period", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    listReplaysSpy.mockResolvedValue({
+      data: sampleReplays,
+      nextCursor: "0:25:0",
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      {
+        limit: 25,
+        json: false,
+        period: parsePeriod(LIST_PERIOD_FLAG.default),
+        sort: "-started_at",
+      },
+      "test-org/cli"
+    );
+
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    expect(output).toContain("sentry replay list test-org/cli -c next");
+    expect(output).not.toContain("--period");
   });
 });
