@@ -270,6 +270,34 @@ describe("statusCommand.func", () => {
 
       expect(getOutput()).toContain("sntrys_env_token_123_long_enough");
     });
+
+    test("hint says 'organization' for sntrys_ env tokens", async () => {
+      getAuthConfigSpy.mockReturnValue({
+        token: "sntrys_env_token_123",
+        source: "env:SENTRY_AUTH_TOKEN",
+      });
+      isAuthenticatedSpy.mockReturnValue(true);
+      getAuthTokenSpy.mockReturnValue("sntrys_env_token_123");
+
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
+
+      expect(getOutput()).toContain("organization");
+    });
+
+    test("hint says 'user' for non-sntrys_ env tokens", async () => {
+      getAuthConfigSpy.mockReturnValue({
+        token: "some_oauth_env_token",
+        source: "env:SENTRY_AUTH_TOKEN",
+      });
+      isAuthenticatedSpy.mockReturnValue(true);
+      getAuthTokenSpy.mockReturnValue("some_oauth_env_token");
+
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
+
+      expect(getOutput()).toContain("which user");
+    });
   });
 
   describe("env var token (SENTRY_TOKEN)", () => {

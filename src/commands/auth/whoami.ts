@@ -50,7 +50,7 @@ function formatWhoami(
 
 export const whoamiCommand = buildCommand({
   docs: {
-    brief: "Show the currently authenticated user",
+    brief: "Show the currently authenticated identity",
     fullDescription:
       "Display the identity behind the current authentication token.\n\n" +
       "For user-scoped tokens (OAuth, personal access tokens), this fetches " +
