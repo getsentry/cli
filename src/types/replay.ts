@@ -165,6 +165,7 @@ function buildReplayListItemShape<
   TInfoIds extends z.ZodTypeAny,
   TOtaUpdates extends z.ZodTypeAny,
   TProjectId extends z.ZodTypeAny,
+  TReleases extends z.ZodTypeAny,
   TTags extends z.ZodTypeAny,
   TTraceIds extends z.ZodTypeAny,
   TUrls extends z.ZodTypeAny,
@@ -174,6 +175,7 @@ function buildReplayListItemShape<
   infoIds: TInfoIds;
   otaUpdates: TOtaUpdates;
   projectId: TProjectId;
+  releases: TReleases;
   tags: TTags;
   traceIds: TTraceIds;
   urls: TUrls;
@@ -205,7 +207,7 @@ function buildReplayListItemShape<
     ota_updates: fields.otaUpdates.describe("OTA update metadata"),
     platform: replayNullableString("Platform"),
     project_id: fields.projectId.describe("Numeric project ID"),
-    releases: replayStringArray().optional().describe("Associated releases"),
+    releases: fields.releases.describe("Associated releases"),
     sdk: replayNullishObject(ReplaySdkSchema, "SDK metadata"),
     started_at: replayNullableString("Replay start timestamp"),
     tags: fields.tags.describe("Replay tags"),
@@ -231,6 +233,7 @@ export const ReplayListItemSchema = z
         "OTA update metadata"
       ),
       projectId: z.union([z.string(), z.number()]).nullable().optional(),
+      releases: replayStringArrayWithFallback(),
       tags: ReplayTagsSchema,
       traceIds: replayStringArrayWithFallback(),
       urls: replayStringArrayWithFallback(),
@@ -290,6 +293,7 @@ export const ReplayListItemOutputSchema = z
       infoIds: replayStringArray(),
       otaUpdates: ReplayOtaUpdatesSchema.nullish(),
       projectId: z.string().nullable().optional(),
+      releases: replayStringArray(),
       tags: z.record(z.array(z.string())),
       traceIds: replayStringArray(),
       urls: replayStringArray(),

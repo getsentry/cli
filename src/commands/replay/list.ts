@@ -177,13 +177,13 @@ const REPLAY_COLUMNS: Column<ReplayListItem>[] = [
     minWidth: 10,
   },
   {
-    header: "ERRORS:",
+    header: "ERRORS",
     value: (replay) => formatCount(replay.count_errors),
     align: "right",
     minWidth: 6,
   },
   {
-    header: "SEGMENTS:",
+    header: "SEGMENTS",
     value: (replay) => formatCount(replay.count_segments),
     align: "right",
     minWidth: 8,

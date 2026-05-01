@@ -197,6 +197,7 @@ describe("getReplay", () => {
               error_ids: undefined,
               info_ids: undefined,
               project_id: 42,
+              releases: null,
               tags: [],
               trace_ids: undefined,
               urls: null,
@@ -214,6 +215,7 @@ describe("getReplay", () => {
 
     expect(replay.project_id).toBe("42");
     expect(replay.tags).toEqual({});
+    expect(replay.releases).toEqual([]);
     expect(replay.urls).toEqual([]);
     expect(replay.error_ids).toEqual([]);
     expect(replay.info_ids).toEqual([]);

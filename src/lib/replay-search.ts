@@ -138,6 +138,8 @@ function replayRequestRoot(field: string): string {
     case "sdk.name":
     case "sdk.version":
       return "sdk";
+    case "count_traces":
+      return "trace_ids";
     case "user.email":
     case "user.geo.city":
     case "user.geo.country_code":

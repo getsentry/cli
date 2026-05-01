@@ -352,6 +352,28 @@ describe("sentry explore", () => {
       });
       expect(queryEventsSpy).not.toHaveBeenCalled();
     });
+
+    test("requests trace_ids when replay fields derive count_traces", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      await func.call(
+        context,
+        {
+          ...DEFAULT_FLAGS,
+          dataset: "replays",
+          field: ["id", "count_traces"],
+        },
+        "test-org/"
+      );
+
+      expect(listReplaysSpy).toHaveBeenCalledWith(
+        "test-org",
+        expect.objectContaining({
+          fields: ["id", "trace_ids"],
+        })
+      );
+    });
   });
 
   describe("sort handling", () => {
