@@ -400,7 +400,7 @@ async function fullScanFirst(cwd: string): Promise<DetectedDsn | null> {
 export function getDsnSourceDescription(dsn: DetectedDsn): string {
   switch (dsn.source) {
     case "env":
-      return `${SENTRY_DSN_ENV} environment variable`;
+      return `${dsn.sourcePath ?? SENTRY_DSN_ENV} environment variable`;
     case "env_file":
       return dsn.sourcePath ?? ".env file";
     case "config":
