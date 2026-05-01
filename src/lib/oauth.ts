@@ -14,7 +14,7 @@ import {
 import { DEFAULT_SENTRY_URL, getConfiguredSentryUrl } from "./constants.js";
 import {
   getCustomTlsOptions,
-  isTlsCertError,
+  getTlsCertErrorMessage,
   warnIfSaasWithEnvCa,
 } from "./custom-ca.js";
 import { applyCustomHeaders } from "./custom-headers.js";
@@ -118,11 +118,12 @@ async function fetchWithConnectionError(
     }
 
     // TLS certificate errors — give actionable guidance
-    if (isTlsCertError(error)) {
+    const tlsMsg = getTlsCertErrorMessage(error);
+    if (tlsMsg) {
       throw new ApiError(
         `TLS certificate error connecting to ${getSentryUrl()}`,
         0,
-        `TLS certificate verification failed: ${error.message}\n\n` +
+        `TLS certificate verification failed: ${tlsMsg}\n\n` +
           "  To fix this, point the CLI to your CA certificate bundle:\n" +
           "    sentry cli defaults ca-cert /path/to/corporate-ca.pem\n\n" +
           "  Or set the NODE_EXTRA_CA_CERTS environment variable:\n" +

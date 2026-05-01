@@ -19,6 +19,7 @@ import {
 import {
   getCustomCaSource,
   getCustomTlsOptions,
+  getTlsCertErrorMessage,
   isTlsCertError,
   warnIfSaasWithEnvCa,
 } from "./custom-ca.js";
@@ -314,10 +315,11 @@ async function handleResponse(
 
 /**
  * Build a user-friendly error message for TLS certificate failures.
- * Content varies based on whether custom CAs are already loaded.
+ * Walks `error.cause` to extract the root TLS error (Node.js wraps
+ * TLS errors in `TypeError: fetch failed`).
  */
 function buildTlsErrorMessage(error: Error, hasCustomCa: boolean): string {
-  const cause = error.message;
+  const cause = getTlsCertErrorMessage(error) ?? error.message;
 
   if (hasCustomCa) {
     return (

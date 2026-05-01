@@ -164,17 +164,20 @@ export function warnIfSaasWithEnvCa(targetUrl: string): void {
 }
 
 /**
- * TLS certificate error patterns from BoringSSL (Bun), OpenSSL (Node), and
- * common TLS libraries. These are deterministic — retrying won't help.
+ * TLS certificate CA trust error patterns — errors that indicate the
+ * server's certificate chain cannot be verified against known CAs.
+ * These are fixable by providing a custom CA bundle.
+ *
+ * Excludes `CERT_HAS_EXPIRED` and `ERR_TLS_CERT_ALTNAME_INVALID` which
+ * are not CA trust issues (expired cert / hostname mismatch) and would
+ * produce misleading "add your CA cert" guidance.
  */
 const TLS_ERROR_PATTERNS = [
   "unable to get local issuer certificate",
   "unable to verify the first certificate",
   "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
-  "CERT_HAS_EXPIRED",
   "DEPTH_ZERO_SELF_SIGNED_CERT",
   "SELF_SIGNED_CERT_IN_CHAIN",
-  "ERR_TLS_CERT_ALTNAME_INVALID",
 ] as const;
 
 /**
@@ -183,15 +186,27 @@ const TLS_ERROR_PATTERNS = [
  * in `TypeError: fetch failed` with the real error in `.cause`.
  */
 export function isTlsCertError(error: unknown): boolean {
+  return getTlsCertErrorMessage(error) !== undefined;
+}
+
+/**
+ * Walk the error cause chain and return the message of the first error
+ * that matches a TLS CA trust pattern, or undefined if none match.
+ *
+ * Node.js `fetch` wraps TLS errors in `TypeError: fetch failed` with
+ * the real error in `.cause` — this finds the root TLS message so
+ * callers display it instead of the generic wrapper.
+ */
+export function getTlsCertErrorMessage(error: unknown): string | undefined {
   let current: unknown = error;
   while (current instanceof Error) {
     const msg = current.message;
     if (TLS_ERROR_PATTERNS.some((pattern) => msg.includes(pattern))) {
-      return true;
+      return msg;
     }
     current = current.cause;
   }
-  return false;
+  return;
 }
 
 /**

@@ -12,6 +12,7 @@ import {
   __resetForTests,
   getCustomCaSource,
   getCustomTlsOptions,
+  getTlsCertErrorMessage,
   isTlsCertError,
   warnIfSaasWithEnvCa,
 } from "../../src/lib/custom-ca.js";
@@ -41,8 +42,14 @@ describe("isTlsCertError", () => {
     );
   });
 
-  test("detects CERT_HAS_EXPIRED", () => {
-    expect(isTlsCertError(new Error("CERT_HAS_EXPIRED"))).toBe(true);
+  test("does NOT detect CERT_HAS_EXPIRED (not a CA trust issue)", () => {
+    expect(isTlsCertError(new Error("CERT_HAS_EXPIRED"))).toBe(false);
+  });
+
+  test("does NOT detect ERR_TLS_CERT_ALTNAME_INVALID (not a CA trust issue)", () => {
+    expect(isTlsCertError(new Error("ERR_TLS_CERT_ALTNAME_INVALID"))).toBe(
+      false
+    );
   });
 
   test("detects DEPTH_ZERO_SELF_SIGNED_CERT", () => {
@@ -51,12 +58,6 @@ describe("isTlsCertError", () => {
 
   test("detects SELF_SIGNED_CERT_IN_CHAIN", () => {
     expect(isTlsCertError(new Error("SELF_SIGNED_CERT_IN_CHAIN"))).toBe(true);
-  });
-
-  test("detects ERR_TLS_CERT_ALTNAME_INVALID", () => {
-    expect(isTlsCertError(new Error("ERR_TLS_CERT_ALTNAME_INVALID"))).toBe(
-      true
-    );
   });
 
   test("detects pattern within larger message", () => {
@@ -74,6 +75,19 @@ describe("isTlsCertError", () => {
     expect(isTlsCertError(new Error("fetch failed"))).toBe(false);
     expect(isTlsCertError(new Error("timeout"))).toBe(false);
     expect(isTlsCertError(new Error("network error"))).toBe(false);
+  });
+
+  test("getTlsCertErrorMessage extracts root cause from wrapped error", () => {
+    const cause = new Error("unable to get local issuer certificate");
+    const wrapper = new TypeError("fetch failed");
+    wrapper.cause = cause;
+    expect(getTlsCertErrorMessage(wrapper)).toBe(
+      "unable to get local issuer certificate"
+    );
+  });
+
+  test("getTlsCertErrorMessage returns undefined for non-TLS errors", () => {
+    expect(getTlsCertErrorMessage(new Error("ECONNREFUSED"))).toBeUndefined();
   });
 
   test("detects TLS error wrapped in error.cause (Node.js fetch pattern)", () => {
