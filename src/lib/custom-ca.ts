@@ -151,6 +151,7 @@ export function getCustomCaSource(): CaSource {
  * explicit user acknowledgment and do NOT trigger this warning.
  */
 export function warnIfSaasWithEnvCa(targetUrl: string): void {
+  resolve();
   if (warnedSaas || resolvedSource !== "env") {
     return;
   }
