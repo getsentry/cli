@@ -12,6 +12,7 @@
  * - repositories: repository listing
  * - issues: issue listing, lookup, status updates
  * - events: event retrieval and resolution
+ * - replays: replay listing and detail lookup
  * - traces: trace details and transactions
  * - logs: log listing, detailed fetch, trace-logs
  * - seer: Seer AI root cause analysis and planning
@@ -78,6 +79,12 @@ export {
   listLogs,
   listTraceLogs,
 } from "./api/logs.js";
+export {
+  getReplay,
+  listReplays,
+  type ListReplaysOptions,
+  type ReplaySortValue,
+} from "./api/replays.js";
 export {
   getOrganization,
   getUserRegions,

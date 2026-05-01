@@ -1332,7 +1332,7 @@ function buildReplayMarkdown(
   if (issuePermalink) {
     const match = BASE_URL_REGEX.exec(issuePermalink);
     if (match?.[1]) {
-      lines.push(`**Link:** ${match[1]}/replays/${replayTag.value}/`);
+      lines.push(`**Link:** ${match[1]}/explore/replays/${replayTag.value}/`);
     }
   }
 

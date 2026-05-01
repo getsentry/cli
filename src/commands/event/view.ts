@@ -148,6 +148,16 @@ export function jsonTransformEventView(
   }
   return data.events.map(transform);
 }
+
+/**
+ * Build a CLI-native replay hint when the event is linked to a replay.
+ */
+function replayHint(org: string, event: SentryEvent): string | undefined {
+  const replayId = event.tags?.find((tag) => tag.key === "replayId")?.value;
+  return replayId
+    ? `Related replay: sentry replay view ${org}/${replayId}`
+    : undefined;
+}
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
 
@@ -987,7 +997,14 @@ export const viewCommand = buildCommand({
         events: [issueShortcut.data],
         requestedCount: 1,
       });
-      return { hint: issueShortcut.hint };
+      return {
+        hint: [
+          issueShortcut.hint,
+          replayHint(issueShortcut.org, issueShortcut.data.event),
+        ]
+          .filter(Boolean)
+          .join(" | "),
+      };
     }
 
     // Validate + attempt recovery. `skipValidation` is true when the ID is
@@ -1043,9 +1060,14 @@ export const viewCommand = buildCommand({
       requestedCount: allEventIds.length,
     });
     return {
-      hint: target.detectedFrom
-        ? `Detected from ${target.detectedFrom}`
-        : undefined,
+      hint: [
+        target.detectedFrom
+          ? `Detected from ${target.detectedFrom}`
+          : undefined,
+        replayHint(target.org, event),
+      ]
+        .filter(Boolean)
+        .join(" | "),
     };
   },
 });

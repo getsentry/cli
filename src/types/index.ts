@@ -34,6 +34,34 @@ export {
   DashboardWidgetQuerySchema,
   DashboardWidgetSchema,
 } from "./dashboard.js";
+// Replay types and schemas
+export type {
+  ReplayBrowser,
+  ReplayDetails,
+  ReplayDetailsResponse,
+  ReplayDevice,
+  ReplayGeo,
+  ReplayListItem,
+  ReplayListResponse,
+  ReplayOs,
+  ReplayOtaUpdates,
+  ReplaySdk,
+  ReplayUser,
+} from "./replay.js";
+export {
+  ReplayBrowserSchema,
+  ReplayDetailsResponseSchema,
+  ReplayDetailsSchema,
+  ReplayDeviceSchema,
+  ReplayGeoSchema,
+  ReplayListItemSchema,
+  ReplayListResponseSchema,
+  REPLAY_LIST_FIELDS,
+  ReplayOsSchema,
+  ReplayOtaUpdatesSchema,
+  ReplaySdkSchema,
+  ReplayUserSchema,
+} from "./replay.js";
 // OAuth types and schemas
 export type {
   DeviceCodeResponse,
