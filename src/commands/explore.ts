@@ -41,6 +41,7 @@ import {
   getReplayRequestFields,
   isSupportedReplayField,
   listSupportedReplayFields,
+  parseReplayEnvironmentFilter,
 } from "../lib/replay-search.js";
 import { resolveOrgOptionalProjectFromArg } from "../lib/resolve-target.js";
 import { sanitizeQuery } from "../lib/search-query.js";
@@ -179,19 +180,6 @@ function parseDataset(value: string): string {
  */
 function parseLimit(value: string): number {
   return validateLimit(value, 1, LIST_MAX_LIMIT);
-}
-
-function parseEnvironmentFilter(
-  values: readonly string[] | undefined
-): string[] | undefined {
-  const parsed = values
-    ? [...values]
-        .flatMap((value) => value.split(","))
-        .map((value) => value.trim())
-        .filter(Boolean)
-    : [];
-
-  return parsed.length > 0 ? parsed : undefined;
 }
 
 function inferReplayFieldType(field: string): string {
@@ -535,7 +523,7 @@ export const exploreCommand = buildListCommand("explore", {
       fieldList = flags.field;
     }
     const timeRange = flags.period;
-    const environment = parseEnvironmentFilter(flags.environment);
+    const environment = parseReplayEnvironmentFilter(flags.environment);
     const replaySort =
       dataset === "replays" ? resolveReplaySort(flags.sort) : undefined;
     const effectiveSort =

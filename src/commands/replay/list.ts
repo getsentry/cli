@@ -38,7 +38,10 @@ import {
   targetPatternExplanation,
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
-import { getReplayUserLabel } from "../../lib/replay-search.js";
+import {
+  getReplayUserLabel,
+  parseReplayEnvironmentFilter,
+} from "../../lib/replay-search.js";
 import { resolveOrgOptionalProjectFromArg } from "../../lib/resolve-target.js";
 import { sanitizeQuery } from "../../lib/search-query.js";
 import {
@@ -90,19 +93,6 @@ const COMMAND_NAME = "replay list";
 
 function parseLimit(value: string): number {
   return validateLimit(value, LIST_MIN_LIMIT, LIST_MAX_LIMIT);
-}
-
-function parseEnvironmentFilter(
-  values: readonly string[] | undefined
-): string[] | undefined {
-  const parsed = values
-    ? [...values]
-        .flatMap((value) => value.split(","))
-        .map((value) => value.trim())
-        .filter(Boolean)
-    : [];
-
-  return parsed.length > 0 ? parsed : undefined;
 }
 
 /**
@@ -358,7 +348,7 @@ export const listCommand = buildListCommand("replay", {
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
     const { cwd } = this;
     const timeRange = flags.period;
-    const environment = parseEnvironmentFilter(flags.environment);
+    const environment = parseReplayEnvironmentFilter(flags.environment);
     const { query } = flags;
 
     const resolved = await resolveOrgOptionalProjectFromArg(

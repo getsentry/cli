@@ -31,6 +31,20 @@ export const DEFAULT_REPLAY_EXPLORE_FIELDS = [
   "user.email",
 ] as const;
 
+/** Parse repeatable and comma-separated replay environment filters. */
+export function parseReplayEnvironmentFilter(
+  values: readonly string[] | undefined
+): string[] | undefined {
+  const parsed = values
+    ? [...values]
+        .flatMap((value) => value.split(","))
+        .map((value) => value.trim())
+        .filter(Boolean)
+    : [];
+
+  return parsed.length > 0 ? parsed : undefined;
+}
+
 function firstValue<T>(values: T[] | undefined): T | undefined {
   return values && values.length > 0 ? values[0] : undefined;
 }
