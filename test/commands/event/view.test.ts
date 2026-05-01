@@ -15,11 +15,17 @@ import {
   test,
 } from "bun:test";
 import {
+  collectEventIds,
+  expandNewlineArgs,
   fetchEventWithContext,
+  fetchMultipleEvents,
+  formatEventView,
+  jsonTransformEventView,
   parsePositionalArgs,
   resolveAutoDetectTarget,
   resolveEventTarget,
   resolveOrgAllTarget,
+  splitOnNewlines,
   viewCommand,
 } from "../../../src/commands/event/view.js";
 import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
@@ -1242,5 +1248,359 @@ describe("fetchEventWithContext", () => {
       fetchEventWithContext(null, "my-org", "my-project", "abc123")
     ).rejects.toThrow("Server error");
     expect(resolveEventSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// splitOnNewlines
+// ---------------------------------------------------------------------------
+
+describe("splitOnNewlines", () => {
+  test("splits on newlines and trims each part", () => {
+    expect(splitOnNewlines("abc\n def \nghi")).toEqual(["abc", "def", "ghi"]);
+  });
+
+  test("filters out empty lines", () => {
+    expect(splitOnNewlines("abc\n\n\ndef")).toEqual(["abc", "def"]);
+  });
+
+  test("handles CRLF", () => {
+    expect(splitOnNewlines("abc\r\ndef")).toEqual(["abc", "def"]);
+  });
+
+  test("returns single element for no newlines", () => {
+    expect(splitOnNewlines("abc123")).toEqual(["abc123"]);
+  });
+
+  test("returns empty array for whitespace-only input", () => {
+    expect(splitOnNewlines("  \n  \n  ")).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// expandNewlineArgs
+// ---------------------------------------------------------------------------
+
+describe("expandNewlineArgs", () => {
+  test("expands newline-separated args into flat array", () => {
+    expect(expandNewlineArgs(["org/proj/id1\nid2\nid3"])).toEqual([
+      "org/proj/id1",
+      "id2",
+      "id3",
+    ]);
+  });
+
+  test("passes through args without newlines", () => {
+    expect(expandNewlineArgs(["org/proj", "eventid"])).toEqual([
+      "org/proj",
+      "eventid",
+    ]);
+  });
+
+  test("handles mixed args with and without newlines", () => {
+    expect(expandNewlineArgs(["org/proj", "id1\nid2"])).toEqual([
+      "org/proj",
+      "id1",
+      "id2",
+    ]);
+  });
+
+  test("handles empty array", () => {
+    expect(expandNewlineArgs([])).toEqual([]);
+  });
+
+  test("real Codex pattern: org/project/id with many newline-separated IDs", () => {
+    const codexArg = [
+      "perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d",
+      "60c277e6c73f41c58ca46231b46dc0f8",
+      "722e1158dfa147ec90ed831c4d096ae7",
+    ].join("\n");
+    expect(expandNewlineArgs([codexArg])).toEqual([
+      "perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d",
+      "60c277e6c73f41c58ca46231b46dc0f8",
+      "722e1158dfa147ec90ed831c4d096ae7",
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// collectEventIds
+// ---------------------------------------------------------------------------
+
+describe("collectEventIds", () => {
+  test("returns only primary ID when no extras", () => {
+    expect(collectEventIds("abc123", undefined)).toEqual(["abc123"]);
+  });
+
+  test("returns only primary ID when extras is empty", () => {
+    expect(collectEventIds("abc123", [])).toEqual(["abc123"]);
+  });
+
+  test("validates and collects valid extra hex IDs", () => {
+    const ids = collectEventIds("abc123", [
+      "60c277e6c73f41c58ca46231b46dc0f8",
+      "722e1158dfa147ec90ed831c4d096ae7",
+    ]);
+    expect(ids).toEqual([
+      "abc123",
+      "60c277e6c73f41c58ca46231b46dc0f8",
+      "722e1158dfa147ec90ed831c4d096ae7",
+    ]);
+  });
+
+  test("skips invalid extra IDs silently", () => {
+    const ids = collectEventIds("abc123", [
+      "60c277e6c73f41c58ca46231b46dc0f8",
+      "not-a-hex-id",
+      "722e1158dfa147ec90ed831c4d096ae7",
+    ]);
+    expect(ids).toEqual([
+      "abc123",
+      "60c277e6c73f41c58ca46231b46dc0f8",
+      "722e1158dfa147ec90ed831c4d096ae7",
+    ]);
+  });
+
+  test("skips all invalid extras", () => {
+    const ids = collectEventIds("abc123", ["bad1", "bad2"]);
+    expect(ids).toEqual(["abc123"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parsePositionalArgs: extraEventIds collection
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// formatEventView
+// ---------------------------------------------------------------------------
+
+describe("formatEventView", () => {
+  const mockEvent = (id: string) =>
+    ({
+      eventID: id,
+      title: `Error ${id}`,
+      context: {},
+      contexts: {},
+      entries: [],
+      tags: [],
+    }) as unknown as import("../../../src/types/sentry.js").SentryEvent;
+
+  test("renders single event", () => {
+    const result = formatEventView({
+      events: [{ event: mockEvent("abc123"), trace: null }],
+    });
+    expect(result).toContain("abc123");
+  });
+
+  test("renders multiple events separated by horizontal rule", () => {
+    const result = formatEventView({
+      events: [
+        { event: mockEvent("event1"), trace: null },
+        { event: mockEvent("event2"), trace: null },
+      ],
+    });
+    expect(result).toContain("event1");
+    expect(result).toContain("---");
+    expect(result).toContain("event2");
+  });
+
+  test("includes span tree lines when present", () => {
+    const result = formatEventView({
+      events: [
+        {
+          event: mockEvent("abc123"),
+          trace: null,
+          spanTreeLines: ["  span-1 (50ms)", "    span-2 (20ms)"],
+        },
+      ],
+    });
+    expect(result).toContain("span-1 (50ms)");
+    expect(result).toContain("span-2 (20ms)");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// jsonTransformEventView
+// ---------------------------------------------------------------------------
+
+describe("jsonTransformEventView", () => {
+  const mockEvent = (id: string) =>
+    ({
+      eventID: id,
+      title: `Error ${id}`,
+    }) as unknown as import("../../../src/types/sentry.js").SentryEvent;
+
+  test("returns flat object for single event", () => {
+    const result = jsonTransformEventView({
+      events: [{ event: mockEvent("abc123"), trace: null }],
+    });
+    expect(result).toEqual(
+      expect.objectContaining({ eventID: "abc123", trace: null })
+    );
+    // Should NOT be an array
+    expect(Array.isArray(result)).toBe(false);
+  });
+
+  test("returns array for multiple events", () => {
+    const result = jsonTransformEventView({
+      events: [
+        { event: mockEvent("event1"), trace: null },
+        { event: mockEvent("event2"), trace: null },
+      ],
+    });
+    expect(Array.isArray(result)).toBe(true);
+    const arr = result as Record<string, unknown>[];
+    expect(arr).toHaveLength(2);
+    expect(arr[0]).toEqual(expect.objectContaining({ eventID: "event1" }));
+    expect(arr[1]).toEqual(expect.objectContaining({ eventID: "event2" }));
+  });
+
+  test("applies field filtering for single event", () => {
+    const result = jsonTransformEventView(
+      { events: [{ event: mockEvent("abc123"), trace: null }] },
+      ["eventID"]
+    );
+    expect(result).toEqual({ eventID: "abc123" });
+  });
+
+  test("applies field filtering for multiple events", () => {
+    const result = jsonTransformEventView(
+      {
+        events: [
+          { event: mockEvent("event1"), trace: null },
+          { event: mockEvent("event2"), trace: null },
+        ],
+      },
+      ["eventID"]
+    );
+    expect(result).toEqual([{ eventID: "event1" }, { eventID: "event2" }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchMultipleEvents
+// ---------------------------------------------------------------------------
+
+describe("fetchMultipleEvents", () => {
+  const mockEvent = (id: string) =>
+    ({
+      eventID: id,
+      title: `Error ${id}`,
+    }) as unknown as import("../../../src/types/sentry.js").SentryEvent;
+
+  test("fetches single event successfully", async () => {
+    const event = mockEvent("abc123");
+    spyOn(apiClient, "getEvent").mockResolvedValue(event);
+
+    const result = await fetchMultipleEvents({
+      eventIds: ["abc123"],
+      org: "my-org",
+      project: "my-project",
+      prefetchedEvent: null,
+      primaryId: "abc123",
+    });
+    expect(result).toEqual([event]);
+  });
+
+  test("uses prefetched event for primary ID", async () => {
+    const prefetched = mockEvent("abc123");
+
+    const result = await fetchMultipleEvents({
+      eventIds: ["abc123"],
+      org: "my-org",
+      project: "my-project",
+      prefetchedEvent: prefetched,
+      primaryId: "abc123",
+    });
+    expect(result).toEqual([prefetched]);
+  });
+
+  test("fetches multiple events in parallel", async () => {
+    const event1 = mockEvent("event1");
+    const event2 = mockEvent("event2");
+    spyOn(apiClient, "getEvent").mockImplementation(
+      (_org: string, _proj: string, id: string) =>
+        Promise.resolve(id === "event1" ? event1 : event2)
+    );
+
+    const result = await fetchMultipleEvents({
+      eventIds: ["event1", "event2"],
+      org: "my-org",
+      project: "my-project",
+      prefetchedEvent: null,
+      primaryId: "event1",
+    });
+    expect(result).toHaveLength(2);
+    expect(result[0]?.eventID).toBe("event1");
+    expect(result[1]?.eventID).toBe("event2");
+  });
+
+  test("warns on individual fetch failures and continues", async () => {
+    const event1 = mockEvent("event1");
+    spyOn(apiClient, "getEvent").mockImplementation(
+      (_org: string, _proj: string, id: string) =>
+        id === "event1"
+          ? Promise.resolve(event1)
+          : Promise.reject(new Error("not found"))
+    );
+
+    const result = await fetchMultipleEvents({
+      eventIds: ["event1", "event2"],
+      org: "my-org",
+      project: "my-project",
+      prefetchedEvent: null,
+      primaryId: "event1",
+    });
+    // Only the successful event is returned
+    expect(result).toEqual([event1]);
+  });
+
+  test("re-throws primary event error when all fetches fail", async () => {
+    const error = new ApiError("Server error", 500);
+    spyOn(apiClient, "getEvent").mockRejectedValue(error);
+
+    await expect(
+      fetchMultipleEvents({
+        eventIds: ["event1", "event2"],
+        org: "my-org",
+        project: "my-project",
+        prefetchedEvent: null,
+        primaryId: "event1",
+      })
+    ).rejects.toThrow("Server error");
+  });
+});
+
+describe("parsePositionalArgs: extraEventIds", () => {
+  test("no extras for single arg", () => {
+    const result = parsePositionalArgs(["abc123"]);
+    expect(result.extraEventIds).toBeUndefined();
+  });
+
+  test("no extras for two args", () => {
+    const result = parsePositionalArgs(["my-org/proj", "abc123"]);
+    expect(result.extraEventIds).toBeUndefined();
+  });
+
+  test("collects extras for three+ args", () => {
+    const result = parsePositionalArgs([
+      "my-org/proj",
+      "abc123",
+      "def456",
+      "ghi789",
+    ]);
+    expect(result.extraEventIds).toEqual(["def456", "ghi789"]);
+  });
+
+  test("collects extras when args are swapped", () => {
+    // When swap is detected: first looks like hex ID, second looks like target
+    const result = parsePositionalArgs([
+      "abc123def456abc123def456abc123de",
+      "test-org/test-proj",
+      "extra1",
+    ]);
+    expect(result.warning).toBeDefined();
+    expect(result.extraEventIds).toEqual(["extra1"]);
   });
 });

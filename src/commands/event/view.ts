@@ -91,7 +91,7 @@ type EventViewData = {
  * Renders event details and optional span tree. Multiple events
  * are separated by horizontal rules.
  */
-function formatEventView(data: EventViewData): string {
+export function formatEventView(data: EventViewData): string {
   const parts: string[] = [];
 
   for (const entry of data.events) {
@@ -120,7 +120,7 @@ function formatEventView(data: EventViewData): string {
  * This preserves backward compatibility: single-event callers still get
  * a flat object, while multi-event callers get an array.
  */
-function jsonTransformEventView(
+export function jsonTransformEventView(
   data: EventViewData,
   fields?: string[]
 ): unknown {
@@ -153,7 +153,7 @@ const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
  * newline-separated argument (CLI-1HT). This mirrors `log view`'s
  * `splitLogIds` helper.
  */
-function splitOnNewlines(arg: string): string[] {
+export function splitOnNewlines(arg: string): string[] {
   return arg
     .split("\n")
     .map((s) => s.trim())
@@ -167,7 +167,7 @@ function splitOnNewlines(arg: string): string[] {
  * this produces `["org/project/id1", "id2", "id3"]` — the first retains
  * the org/project prefix so `parsePositionalArgs` can extract the target.
  */
-function expandNewlineArgs(args: string[]): string[] {
+export function expandNewlineArgs(args: string[]): string[] {
   return args.flatMap(splitOnNewlines);
 }
 
@@ -274,6 +274,7 @@ type ParsedPositionalArgs = {
  *
  * @returns Parsed event ID and optional target arg
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: positional arg parsing has many format branches by design
 export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
   if (args.length === 0) {
     throw new ContextError("Event ID", USAGE_HINT, []);
@@ -323,7 +324,13 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
   // Detect swapped args: user put ID first and target second
   const swapWarning = detectSwappedViewArgs(first, second);
   if (swapWarning) {
-    return { eventId: first, targetArg: second, warning: swapWarning };
+    const extraEventIds = args.length > 2 ? args.slice(2) : undefined;
+    return {
+      eventId: first,
+      targetArg: second,
+      warning: swapWarning,
+      extraEventIds,
+    };
   }
 
   // Detect issue short ID passed as first arg (e.g., "CAM-82X 95fd7f5a").
@@ -808,7 +815,7 @@ async function resolveIssueShortcut(
  * @param primaryId - Already-validated primary event ID
  * @returns All valid event IDs (primary + validated extras)
  */
-function collectEventIds(
+export function collectEventIds(
   primaryId: string,
   extraIds: string[] | undefined
 ): string[] {
@@ -850,7 +857,7 @@ type FetchMultipleOptions = {
  *
  * When all fetches fail, re-throws the error from the primary (first) event.
  */
-async function fetchMultipleEvents(
+export async function fetchMultipleEvents(
   options: FetchMultipleOptions
 ): Promise<SentryEvent[]> {
   const { eventIds, org, project, prefetchedEvent, primaryId } = options;
