@@ -90,10 +90,12 @@ function parseSingleArg(arg: string): ParsedPositionalArgs {
   if (slashIdx !== -1 && trimmed.indexOf("/", slashIdx + 1) === -1) {
     const org = trimmed.slice(0, slashIdx);
     const replaySegment = trimmed.slice(slashIdx + 1);
-    if (!(replaySegment && normalizeReplayId(replaySegment))) {
+    const normalizedReplayId =
+      replaySegment && normalizeReplayId(replaySegment);
+    if (!normalizedReplayId) {
       throw new ContextError("Replay ID", USAGE_HINT, []);
     }
-    return { replayId: replaySegment, targetArg: `${org}/` };
+    return { replayId: normalizedReplayId, targetArg: `${org}/` };
   }
 
   const { id: replayId, targetArg } = parseSlashSeparatedArg(

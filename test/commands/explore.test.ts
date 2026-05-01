@@ -347,11 +347,34 @@ describe("sentry explore", () => {
         fields: ["id", "user", "count_errors", "urls"],
         limit: 25,
         projectSlugs: ["cli"],
-        query: undefined,
+        query: "project:cli",
         sort: "-count_errors",
         statsPeriod: "24h",
       });
       expect(queryEventsSpy).not.toHaveBeenCalled();
+    });
+
+    test("merges replay query text with the target project filter", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+      const { context } = createContext();
+
+      await func.call(
+        context,
+        {
+          ...DEFAULT_FLAGS,
+          dataset: "replays",
+          query: "count_errors:>0",
+        },
+        "test-org/cli"
+      );
+
+      expect(listReplaysSpy).toHaveBeenCalledWith(
+        "test-org",
+        expect.objectContaining({
+          projectSlugs: ["cli"],
+          query: "project:cli count_errors:>0",
+        })
+      );
     });
 
     test("requests trace_ids when replay fields derive count_traces", async () => {

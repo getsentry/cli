@@ -20,7 +20,10 @@ import { LIST_PERIOD_FLAG } from "../../../src/lib/list-command.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import { parsePeriod } from "../../../src/lib/time-range.js";
-import type { ReplayListItem } from "../../../src/types/index.js";
+import {
+  REPLAY_LIST_FIELDS,
+  type ReplayListItem,
+} from "../../../src/types/index.js";
 
 describe("parseSort", () => {
   test("accepts supported sort values", () => {
@@ -113,6 +116,7 @@ describe("listCommand.func", () => {
 
     expect(listReplaysSpy).toHaveBeenCalledWith("test-org", {
       environment: undefined,
+      fields: [...REPLAY_LIST_FIELDS],
       limit: 25,
       projectSlugs: ["cli"],
       query: undefined,
@@ -152,6 +156,7 @@ describe("listCommand.func", () => {
 
     expect(listReplaysSpy).toHaveBeenCalledWith("test-org", {
       environment: ["production", "canary", "staging"],
+      fields: [...REPLAY_LIST_FIELDS],
       limit: 25,
       projectSlugs: ["cli"],
       query: undefined,

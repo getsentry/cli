@@ -62,6 +62,14 @@ describe("parsePositionalArgs", () => {
     expect(result.targetArg).toBe("test-org/");
   });
 
+  test("normalizes dashed org/replay-id shorthand", () => {
+    const result = parsePositionalArgs([
+      "test-org/346789a7-03f6-4543-84f1-de473b8b9fcc",
+    ]);
+    expect(result.replayId).toBe(REPLAY_ID);
+    expect(result.targetArg).toBe("test-org/");
+  });
+
   test("parses org/project/replay-id form", () => {
     const result = parsePositionalArgs([`test-org/cli/${REPLAY_ID}`]);
     expect(result.replayId).toBe(REPLAY_ID);

@@ -555,10 +555,7 @@ export const exploreCommand = buildListCommand("explore", {
 
     // When a project is in the target, prepend `project:<slug>` to the query
     // so the API filters server-side. Mirrors `trace logs` / `log list` behavior.
-    const apiQuery =
-      dataset === "replays"
-        ? flags.query
-        : buildProjectQuery(flags.query, project);
+    const apiQuery = buildProjectQuery(flags.query, project);
 
     // Pagination context includes project so different scopes don't share state
     const contextKey = buildPaginationContextKey(
@@ -592,7 +589,7 @@ export const exploreCommand = buildListCommand("explore", {
             fields: getReplayRequestFields(fieldList),
             limit: flags.limit,
             projectSlugs: project ? [project] : undefined,
-            query: flags.query,
+            query: apiQuery,
             sort: replaySort,
             ...timeRangeToApiParams(timeRange),
           });
