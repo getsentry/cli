@@ -76,6 +76,29 @@ describe("isTlsCertError", () => {
     expect(isTlsCertError(new Error("network error"))).toBe(false);
   });
 
+  test("detects TLS error wrapped in error.cause (Node.js fetch pattern)", () => {
+    const cause = new Error("unable to get local issuer certificate");
+    const wrapper = new TypeError("fetch failed");
+    wrapper.cause = cause;
+    expect(isTlsCertError(wrapper)).toBe(true);
+  });
+
+  test("detects deeply nested error.cause chain", () => {
+    const root = new Error("SELF_SIGNED_CERT_IN_CHAIN");
+    const mid = new Error("request failed");
+    mid.cause = root;
+    const outer = new TypeError("fetch failed");
+    outer.cause = mid;
+    expect(isTlsCertError(outer)).toBe(true);
+  });
+
+  test("returns false for non-TLS error.cause", () => {
+    const cause = new Error("ECONNREFUSED");
+    const wrapper = new TypeError("fetch failed");
+    wrapper.cause = cause;
+    expect(isTlsCertError(wrapper)).toBe(false);
+  });
+
   test("returns false for non-Error values", () => {
     expect(isTlsCertError("unable to get local issuer certificate")).toBe(
       false

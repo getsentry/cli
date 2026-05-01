@@ -30,7 +30,7 @@ export type CaSource = "default" | "env" | "none";
 /** Cached resolved state — computed once per process */
 let resolved: { tls: { ca: string } } | undefined;
 let resolvedSource: CaSource = "none";
-let hasResolved = false;
+let resolvePromise: Promise<void> | null = null;
 let warnedSaas = false;
 
 /**
@@ -60,19 +60,14 @@ async function tryReadPem(path: string): Promise<string | undefined> {
 }
 
 /**
- * Resolve custom CA certificates. Cached after first call.
+ * Resolve custom CA certificates (inner implementation).
  *
  * Priority:
  * 1. Stored default (`sentry cli defaults ca-cert`)
  * 2. `NODE_EXTRA_CA_CERTS` env var
  * 3. `SSL_CERT_FILE` env var
  */
-async function resolve(): Promise<void> {
-  if (hasResolved) {
-    return;
-  }
-  hasResolved = true;
-
+async function resolveInner(): Promise<void> {
   // 1. Stored default — highest priority, silences SaaS warning
   const storedPath = getDefaultCaCert();
   if (storedPath) {
@@ -112,6 +107,18 @@ async function resolve(): Promise<void> {
       return;
     }
   }
+}
+
+/**
+ * Resolve custom CA certificates. All concurrent callers await the same
+ * promise so the second caller never sees stale `undefined` while I/O
+ * is in flight.
+ */
+function resolve(): Promise<void> {
+  if (!resolvePromise) {
+    resolvePromise = resolveInner();
+  }
+  return resolvePromise;
 }
 
 /**
@@ -170,13 +177,22 @@ const TLS_ERROR_PATTERNS = [
   "ERR_TLS_CERT_ALTNAME_INVALID",
 ] as const;
 
-/** Check if an error is a TLS certificate verification failure. */
+/**
+ * Check if an error is a TLS certificate verification failure.
+ * Walks `error.cause` to handle Node.js `fetch` which wraps TLS errors
+ * in `TypeError: fetch failed` with the real error in `.cause`.
+ */
 export function isTlsCertError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
+  let current: unknown = error;
+  while (current instanceof Error) {
+    if (
+      TLS_ERROR_PATTERNS.some((pattern) => current.message.includes(pattern))
+    ) {
+      return true;
+    }
+    current = current.cause;
   }
-  const msg = error.message;
-  return TLS_ERROR_PATTERNS.some((pattern) => msg.includes(pattern));
+  return false;
 }
 
 /**
@@ -186,6 +202,6 @@ export function isTlsCertError(error: unknown): boolean {
 export function __resetForTests(): void {
   resolved = undefined;
   resolvedSource = "none";
-  hasResolved = false;
+  resolvePromise = null;
   warnedSaas = false;
 }
