@@ -11,7 +11,7 @@
 import { DEFAULT_SENTRY_HOST } from "./constants.js";
 import { getEnv } from "./env.js";
 import { HostScopeError } from "./errors.js";
-import { HEX_ID_RE } from "./hex-id.js";
+import { normalizeReplayId } from "./replay-id.js";
 import { isSaaSTrustOrigin } from "./sentry-urls.js";
 import { getActiveTokenHost, isHostTrusted } from "./token-host.js";
 
@@ -188,11 +188,12 @@ function matchReplayPath(
     return { status: "list" };
   }
 
-  if (!HEX_ID_RE.test(replayId)) {
+  const normalizedReplayId = normalizeReplayId(replayId);
+  if (!normalizedReplayId) {
     return { status: "invalid" };
   }
 
-  return { status: "detail", replayId };
+  return { status: "detail", replayId: normalizedReplayId };
 }
 
 /**

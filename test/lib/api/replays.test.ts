@@ -73,6 +73,7 @@ describe("listReplays", () => {
     expect(url.searchParams.get("statsPeriod")).toBe("24h");
     expect(url.searchParams.get("per_page")).toBe("25");
     expect(url.searchParams.getAll("field")).toContain("id");
+    expect(url.searchParams.getAll("field")).toContain("ota_updates");
     expect(url.searchParams.getAll("field")).toContain("user");
     expect(result.data).toHaveLength(1);
     expect(result.nextCursor).toBe("0:25:0");

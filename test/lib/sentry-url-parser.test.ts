@@ -219,6 +219,17 @@ describe("parseSentryUrl", () => {
       });
     });
 
+    test("normalizes uppercase replay IDs in replay URLs", () => {
+      const result = parseSentryUrl(
+        "https://sentry.io/organizations/my-org/explore/replays/346789A703F6454384F1DE473B8B9FCC/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.io",
+        org: "my-org",
+        replayId: "346789a703f6454384f1de473b8b9fcc",
+      });
+    });
+
     test("falls back to org for replay listing URL", () => {
       const result = parseSentryUrl(
         "https://sentry.io/organizations/my-org/explore/replays/"
