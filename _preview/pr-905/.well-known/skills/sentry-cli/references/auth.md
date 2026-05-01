@@ -88,7 +88,7 @@ sentry auth token
 
 ### `sentry auth whoami`
 
-Show the currently authenticated user
+Show the currently authenticated identity
 
 **Flags:**
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
