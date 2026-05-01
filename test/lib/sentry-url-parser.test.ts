@@ -264,7 +264,9 @@ describe("parseSentryUrl", () => {
     });
 
     test("falls back to org for subdomain replay listing URL", () => {
-      const result = parseSentryUrl("https://my-org.sentry.io/explore/replays/");
+      const result = parseSentryUrl(
+        "https://my-org.sentry.io/explore/replays/"
+      );
       expect(result).toEqual({
         baseUrl: "https://my-org.sentry.io",
         org: "my-org",
