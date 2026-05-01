@@ -19,7 +19,7 @@ List issues in a project
 - `-q, --query <value> - Search query (Sentry syntax, implicit AND, no OR operator)`
 - `-n, --limit <value> - Maximum number of issues to list - (default: "25")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
-- `-t, --period <value> - Time range: "7d", "2026-03-01..2026-04-01", ">=2026-03-01" - (default: "90d")`
+- `-t, --period <value> - Time range: "7d", "2026-04-01..2026-05-01", ">=2026-04-01" - (default: "90d")`
 - `-c, --cursor <value> - Pagination cursor (use "next" for next page, "prev" for previous)`
 - `--compact - Single-line rows for compact output (auto-detects if omitted)`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
@@ -87,7 +87,7 @@ List events for a specific issue
 - `-n, --limit <value> - Number of events (1-1000) - (default: "25")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `--full - Include full event body (stacktraces)`
-- `-t, --period <value> - Time range: "7d", "2026-03-01..2026-04-01", ">=2026-03-01" - (default: "7d")`
+- `-t, --period <value> - Time range: "7d", "2026-04-01..2026-05-01", ">=2026-04-01" - (default: "7d")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
@@ -204,6 +204,44 @@ sentry issue reopen CLI-G5   # alias
 ### `sentry issue unresolve <issue>`
 
 Reopen a resolved issue
+
+### `sentry issue archive <issue>`
+
+Archive (ignore) an issue
+
+**Flags:**
+- `-u, --until <value> - Condition for unarchival: auto, 30m, 10x, 10u, 10x/5m, etc.`
+
+**Examples:**
+
+```bash
+# Archive forever (fully silenced)
+sentry issue archive CLI-G5
+
+# Smart detection — unarchives when Sentry detects a spike in event frequency
+sentry issue archive CLI-G5 --until auto
+
+# Duration-based
+sentry issue archive CLI-G5 --until 1h    # 1 hour
+sentry issue archive CLI-G5 --until 7d    # 7 days
+sentry issue archive CLI-G5 --until 2026-12-31  # specific date
+
+# Count-based — unarchive after N more events
+sentry issue archive CLI-G5 --until 100x
+
+# User-based — unarchive after N more users affected
+sentry issue archive CLI-G5 --until 10u
+
+# Compound — count within a time window
+sentry issue archive CLI-G5 --until 100x/1h   # 100 events within 1 hour
+sentry issue archive CLI-G5 --until 10u/1d    # 10 users within 1 day
+
+# Verbose forms also work
+sentry issue archive CLI-G5 --until 10events/2hours
+
+# 'ignore' is an alias for 'archive'
+sentry issue ignore CLI-G5 --until auto
+```
 
 ### `sentry issue merge <issue...>`
 
