@@ -18,7 +18,12 @@ import {
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { ApiError, ContextError, ResolutionError } from "../../lib/errors.js";
+import {
+  ApiError,
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "../../lib/errors.js";
 import {
   escapeMarkdownCell,
   escapeMarkdownInline,
@@ -120,6 +125,12 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
   if (args.length === 0) {
     throw new ContextError("Replay ID", USAGE_HINT, []);
   }
+  if (args.length > 2) {
+    throw new ValidationError(
+      `Too many positional arguments (got ${args.length}, expected at most 2).\n\nUsage: ${USAGE_HINT}`,
+      "positional"
+    );
+  }
 
   const first = args[0];
   if (!first) {
@@ -149,8 +160,9 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
   const warning =
     args.length === 2 ? detectSwappedViewArgs(first, second) : null;
   if (warning) {
+    const normalizedReplayId = normalizeReplayId(first) ?? first;
     return {
-      replayId: first,
+      replayId: normalizedReplayId,
       targetArg: second,
       warning,
     };

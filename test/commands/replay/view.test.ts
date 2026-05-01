@@ -23,6 +23,7 @@ import {
   ApiError,
   ContextError,
   ResolutionError,
+  ValidationError,
 } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
@@ -101,6 +102,12 @@ describe("parsePositionalArgs", () => {
 
   test("throws ContextError for org/project with no replay ID", () => {
     expect(() => parsePositionalArgs(["test-org/cli"])).toThrow(ContextError);
+  });
+
+  test("throws ValidationError for extra positional args", () => {
+    expect(() =>
+      parsePositionalArgs(["test-org/cli", REPLAY_ID, "extra-arg"])
+    ).toThrow(ValidationError);
   });
 });
 
