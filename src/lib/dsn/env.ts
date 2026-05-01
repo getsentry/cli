@@ -40,15 +40,14 @@ const FRAMEWORK_DSN_VARS = [
 export function detectFromEnv(): DetectedDsn | null {
   const env = getEnv();
 
-  const canonical = env[SENTRY_DSN_ENV];
-  if (canonical) {
-    return createDetectedDsn(canonical, "env");
-  }
-
-  for (const varName of FRAMEWORK_DSN_VARS) {
+  const allVars = [SENTRY_DSN_ENV, ...FRAMEWORK_DSN_VARS];
+  for (const varName of allVars) {
     const value = env[varName];
     if (value) {
-      return createDetectedDsn(value, "env");
+      const detected = createDetectedDsn(value, "env", varName);
+      if (detected) {
+        return detected;
+      }
     }
   }
 
