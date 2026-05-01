@@ -17,6 +17,7 @@
  * threat model discussion.
  */
 
+import { rootCertificates } from "node:tls";
 import { getDefaultCaCert } from "./db/defaults.js";
 import { getEnv } from "./env.js";
 import { logger } from "./logger.js";
@@ -120,7 +121,11 @@ function resolve(): void {
     }
     const pem = tryReadPem(path);
     if (pem) {
-      resolved = { tls: { ca: pem } };
+      // Bun's tls.ca replaces the default Mozilla CA bundle, so we must
+      // concatenate the custom CA with the built-in root certificates
+      // to preserve additive NODE_EXTRA_CA_CERTS semantics.
+      const combined = [...rootCertificates, pem].join("\n");
+      resolved = { tls: { ca: combined } };
       resolvedSource = source;
       resolvedLabel = label;
       log.debug(`Loaded CA certificates from ${label}: ${path}`);

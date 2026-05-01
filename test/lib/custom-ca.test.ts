@@ -169,7 +169,9 @@ describe("custom CA loading", () => {
 
     const result = getCustomTlsOptions();
     expect(result).toBeDefined();
-    expect(result?.tls.ca).toBe(CERT_PEM);
+    // Custom CA is concatenated with root certificates (additive semantics)
+    expect(result?.tls.ca).toContain(CERT_PEM);
+    expect(result?.tls.ca).toContain("-----BEGIN CERTIFICATE-----");
     expect(getCustomCaSource()).toBe("default");
   });
 
@@ -180,7 +182,7 @@ describe("custom CA loading", () => {
 
     const result = getCustomTlsOptions();
     expect(result).toBeDefined();
-    expect(result?.tls.ca).toBe(CERT_PEM);
+    expect(result?.tls.ca).toContain(CERT_PEM);
     expect(getCustomCaSource()).toBe("env");
   });
 
@@ -191,39 +193,39 @@ describe("custom CA loading", () => {
 
     const result = getCustomTlsOptions();
     expect(result).toBeDefined();
-    expect(result?.tls.ca).toBe(CERT_PEM);
+    expect(result?.tls.ca).toContain(CERT_PEM);
     expect(getCustomCaSource()).toBe("env");
   });
 
   test("stored default takes priority over env vars", () => {
     const defaultPath = join(getConfigDir(), "default-ca.pem");
     const envPath = join(getConfigDir(), "env-ca.pem");
+    const ENV_PEM =
+      "-----BEGIN CERTIFICATE-----\nDIFFERENT\n-----END CERTIFICATE-----\n";
     writeFileSync(defaultPath, CERT_PEM);
-    writeFileSync(
-      envPath,
-      "-----BEGIN CERTIFICATE-----\nDIFFERENT\n-----END CERTIFICATE-----\n"
-    );
+    writeFileSync(envPath, ENV_PEM);
     setDefaultCaCert(defaultPath);
     process.env.NODE_EXTRA_CA_CERTS = envPath;
 
     const result = getCustomTlsOptions();
-    expect(result?.tls.ca).toBe(CERT_PEM);
+    expect(result?.tls.ca).toContain(CERT_PEM);
+    expect(result?.tls.ca).not.toContain("DIFFERENT");
     expect(getCustomCaSource()).toBe("default");
   });
 
   test("NODE_EXTRA_CA_CERTS takes priority over SSL_CERT_FILE", () => {
     const extraPath = join(getConfigDir(), "extra.pem");
     const sslPath = join(getConfigDir(), "ssl.pem");
+    const SSL_PEM =
+      "-----BEGIN CERTIFICATE-----\nSSLONLY\n-----END CERTIFICATE-----\n";
     writeFileSync(extraPath, CERT_PEM);
-    writeFileSync(
-      sslPath,
-      "-----BEGIN CERTIFICATE-----\nSSL\n-----END CERTIFICATE-----\n"
-    );
+    writeFileSync(sslPath, SSL_PEM);
     process.env.NODE_EXTRA_CA_CERTS = extraPath;
     process.env.SSL_CERT_FILE = sslPath;
 
     const result = getCustomTlsOptions();
-    expect(result?.tls.ca).toBe(CERT_PEM);
+    expect(result?.tls.ca).toContain(CERT_PEM);
+    expect(result?.tls.ca).not.toContain("SSLONLY");
   });
 
   test("returns undefined when cert file does not exist", () => {
