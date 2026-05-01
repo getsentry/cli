@@ -12,11 +12,7 @@ import {
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import {
-  ApiError,
-  ContextError,
-  ResolutionError,
-} from "../../lib/errors.js";
+import { ApiError, ContextError, ResolutionError } from "../../lib/errors.js";
 import {
   escapeMarkdownCell,
   escapeMarkdownInline,
@@ -48,6 +44,8 @@ type ParsedPositionalArgs = {
   targetArg: string | undefined;
   warning?: string;
 };
+
+type MarkdownRow = [string, string];
 
 const USAGE_HINT = "sentry replay view [<org>/<project>/]<replay-id>";
 const REPLAY_ID_SEGMENT_RE = /^[0-9a-fA-F-]{16,36}$/;
@@ -94,11 +92,11 @@ function parseSingleArg(arg: string): ParsedPositionalArgs {
   const slashIdx = trimmed.indexOf("/");
   if (slashIdx !== -1 && trimmed.indexOf("/", slashIdx + 1) === -1) {
     const org = trimmed.slice(0, slashIdx);
-    const replayId = trimmed.slice(slashIdx + 1);
-    if (!replayId || !REPLAY_ID_SEGMENT_RE.test(replayId)) {
+    const replaySegment = trimmed.slice(slashIdx + 1);
+    if (!(replaySegment && REPLAY_ID_SEGMENT_RE.test(replaySegment))) {
       throw new ContextError("Replay ID", USAGE_HINT, []);
     }
-    return { replayId, targetArg: `${org}/` };
+    return { replayId: replaySegment, targetArg: `${org}/` };
   }
 
   const { id: replayId, targetArg } = parseSlashSeparatedArg(
@@ -172,179 +170,226 @@ function formatList(values: string[] | undefined): string | undefined {
   return values.map((value) => `- \`${value}\``).join("\n");
 }
 
+function pushMarkdownRow(
+  rows: MarkdownRow[],
+  label: string,
+  value: string | undefined
+): void {
+  if (!value) {
+    return;
+  }
+  rows.push([label, value]);
+}
+
+function formatYesNo(value: boolean | null | undefined): string | undefined {
+  if (value === null || value === undefined) {
+    return;
+  }
+  return value ? "Yes" : "No";
+}
+
+function formatNullableCount(
+  value: number | null | undefined
+): string | undefined {
+  if (value === null || value === undefined) {
+    return;
+  }
+  return String(value);
+}
+
+function formatJoinedMarkdown(
+  values: Array<string | null | undefined>
+): string | undefined {
+  const joined = values.filter(Boolean).join(" ");
+  return joined ? escapeMarkdownCell(joined) : undefined;
+}
+
+function formatReplayLocation(replay: ReplayDetails): string | undefined {
+  const geo = replay.user?.geo;
+  if (!geo) {
+    return;
+  }
+
+  const location = [geo.city, geo.region, geo.country_code]
+    .filter(Boolean)
+    .join(", ");
+  return location ? escapeMarkdownCell(location) : undefined;
+}
+
+function buildReplayOverviewRows(replay: ReplayDetails): MarkdownRow[] {
+  const rows: MarkdownRow[] = [["Replay ID", `\`${replay.id}\``]];
+
+  pushMarkdownRow(
+    rows,
+    "Started",
+    replay.started_at ? new Date(replay.started_at).toLocaleString() : undefined
+  );
+  pushMarkdownRow(
+    rows,
+    "Finished",
+    replay.finished_at
+      ? new Date(replay.finished_at).toLocaleString()
+      : undefined
+  );
+  pushMarkdownRow(
+    rows,
+    "Duration",
+    replay.duration !== null && replay.duration !== undefined
+      ? formatReplayDuration(replay.duration)
+      : undefined
+  );
+  pushMarkdownRow(
+    rows,
+    "Environment",
+    replay.environment ? escapeMarkdownCell(replay.environment) : undefined
+  );
+  pushMarkdownRow(
+    rows,
+    "Platform",
+    replay.platform ? escapeMarkdownCell(replay.platform) : undefined
+  );
+  pushMarkdownRow(rows, "Project ID", replay.project_id ?? undefined);
+  pushMarkdownRow(
+    rows,
+    "Replay Type",
+    replay.replay_type ? escapeMarkdownCell(replay.replay_type) : undefined
+  );
+  pushMarkdownRow(rows, "Archived", formatYesNo(replay.is_archived));
+  pushMarkdownRow(rows, "Viewed", formatYesNo(replay.has_viewed));
+  pushMarkdownRow(rows, "Errors", formatNullableCount(replay.count_errors));
+  pushMarkdownRow(rows, "Segments", formatNullableCount(replay.count_segments));
+  pushMarkdownRow(
+    rows,
+    "Rage Clicks",
+    formatNullableCount(replay.count_rage_clicks)
+  );
+  pushMarkdownRow(
+    rows,
+    "Dead Clicks",
+    formatNullableCount(replay.count_dead_clicks)
+  );
+
+  return rows;
+}
+
+function buildReplayUserRows(replay: ReplayDetails): MarkdownRow[] {
+  const rows: MarkdownRow[] = [];
+  const userLabel = replayUserLabel(replay);
+  pushMarkdownRow(
+    rows,
+    "User",
+    userLabel ? escapeMarkdownCell(userLabel) : undefined
+  );
+  pushMarkdownRow(
+    rows,
+    "Email",
+    replay.user?.email ? escapeMarkdownCell(replay.user.email) : undefined
+  );
+  pushMarkdownRow(
+    rows,
+    "IP",
+    replay.user?.ip ? escapeMarkdownCell(replay.user.ip) : undefined
+  );
+  pushMarkdownRow(rows, "Location", formatReplayLocation(replay));
+  return rows;
+}
+
+function buildReplayClientRows(replay: ReplayDetails): MarkdownRow[] {
+  const rows: MarkdownRow[] = [];
+  pushMarkdownRow(
+    rows,
+    "Browser",
+    formatJoinedMarkdown([replay.browser?.name, replay.browser?.version])
+  );
+  pushMarkdownRow(
+    rows,
+    "OS",
+    formatJoinedMarkdown([replay.os?.name, replay.os?.version])
+  );
+  pushMarkdownRow(
+    rows,
+    "Device",
+    formatJoinedMarkdown([
+      replay.device?.brand,
+      replay.device?.family,
+      replay.device?.name,
+      replay.device?.model_id,
+    ])
+  );
+  pushMarkdownRow(
+    rows,
+    "SDK",
+    formatJoinedMarkdown([replay.sdk?.name, replay.sdk?.version])
+  );
+  pushMarkdownRow(
+    rows,
+    "Dist",
+    replay.dist ? escapeMarkdownCell(replay.dist) : undefined
+  );
+  return rows;
+}
+
+function pushKvSection(
+  lines: string[],
+  rows: MarkdownRow[],
+  title?: string
+): void {
+  if (rows.length === 0) {
+    return;
+  }
+  lines.push("");
+  lines.push(mdKvTable(rows, title));
+}
+
+function pushListSection(
+  lines: string[],
+  title: string,
+  values: string[] | undefined
+): void {
+  const content = formatList(values);
+  if (!content) {
+    return;
+  }
+  lines.push("");
+  lines.push(`### ${title}`);
+  lines.push("");
+  lines.push(content);
+}
+
+function pushTagsSection(lines: string[], replay: ReplayDetails): void {
+  if (
+    !replay.tags ||
+    Array.isArray(replay.tags) ||
+    Object.keys(replay.tags).length === 0
+  ) {
+    return;
+  }
+
+  lines.push("");
+  lines.push("### Tags");
+  lines.push("");
+  for (const [key, values] of Object.entries(replay.tags).sort()) {
+    lines.push(
+      `- \`${escapeMarkdownInline(key)}\`: ${values.map((value) => `\`${escapeMarkdownInline(value)}\``).join(", ")}`
+    );
+  }
+}
+
 function formatReplayDetails(replay: ReplayDetails): string {
   const lines: string[] = [];
-  const kvRows: [string, string][] = [["Replay ID", `\`${replay.id}\``]];
-
-  if (replay.started_at) {
-    kvRows.push(["Started", new Date(replay.started_at).toLocaleString()]);
-  }
-  if (replay.finished_at) {
-    kvRows.push(["Finished", new Date(replay.finished_at).toLocaleString()]);
-  }
-  if (replay.duration !== null && replay.duration !== undefined) {
-    kvRows.push(["Duration", formatReplayDuration(replay.duration)]);
-  }
-  if (replay.environment) {
-    kvRows.push(["Environment", escapeMarkdownCell(replay.environment)]);
-  }
-  if (replay.platform) {
-    kvRows.push(["Platform", escapeMarkdownCell(replay.platform)]);
-  }
-  if (replay.project_id) {
-    kvRows.push(["Project ID", replay.project_id]);
-  }
-  if (replay.replay_type) {
-    kvRows.push(["Replay Type", escapeMarkdownCell(replay.replay_type)]);
-  }
-  if (replay.is_archived !== undefined && replay.is_archived !== null) {
-    kvRows.push(["Archived", replay.is_archived ? "Yes" : "No"]);
-  }
-  if (replay.has_viewed !== undefined && replay.has_viewed !== null) {
-    kvRows.push(["Viewed", replay.has_viewed ? "Yes" : "No"]);
-  }
-  if (replay.count_errors !== null && replay.count_errors !== undefined) {
-    kvRows.push(["Errors", String(replay.count_errors)]);
-  }
-  if (replay.count_segments !== null && replay.count_segments !== undefined) {
-    kvRows.push(["Segments", String(replay.count_segments)]);
-  }
-  if (
-    replay.count_rage_clicks !== null &&
-    replay.count_rage_clicks !== undefined
-  ) {
-    kvRows.push(["Rage Clicks", String(replay.count_rage_clicks)]);
-  }
-  if (
-    replay.count_dead_clicks !== null &&
-    replay.count_dead_clicks !== undefined
-  ) {
-    kvRows.push(["Dead Clicks", String(replay.count_dead_clicks)]);
-  }
 
   lines.push(`## Replay \`${replay.id.slice(0, 8)}\``);
   lines.push("");
-  lines.push(mdKvTable(kvRows));
+  lines.push(mdKvTable(buildReplayOverviewRows(replay)));
 
-  const userRows: [string, string][] = [];
-  if (replayUserLabel(replay)) {
-    userRows.push(["User", escapeMarkdownCell(replayUserLabel(replay) ?? "")]);
-  }
-  if (replay.user?.email) {
-    userRows.push(["Email", escapeMarkdownCell(replay.user.email)]);
-  }
-  if (replay.user?.ip) {
-    userRows.push(["IP", escapeMarkdownCell(replay.user.ip)]);
-  }
-  if (replay.user?.geo) {
-    const geoParts = [
-      replay.user.geo.city,
-      replay.user.geo.region,
-      replay.user.geo.country_code,
-    ].filter(Boolean);
-    if (geoParts.length > 0) {
-      userRows.push(["Location", escapeMarkdownCell(geoParts.join(", "))]);
-    }
-  }
-  if (userRows.length > 0) {
-    lines.push("");
-    lines.push(mdKvTable(userRows, "User"));
-  }
+  pushKvSection(lines, buildReplayUserRows(replay), "User");
+  pushKvSection(lines, buildReplayClientRows(replay), "Client");
 
-  const clientRows: [string, string][] = [];
-  if (replay.browser?.name || replay.browser?.version) {
-    clientRows.push([
-      "Browser",
-      escapeMarkdownCell(
-        [replay.browser.name, replay.browser.version].filter(Boolean).join(" ")
-      ),
-    ]);
-  }
-  if (replay.os?.name || replay.os?.version) {
-    clientRows.push([
-      "OS",
-      escapeMarkdownCell(
-        [replay.os.name, replay.os.version].filter(Boolean).join(" ")
-      ),
-    ]);
-  }
-  if (replay.device?.family || replay.device?.name || replay.device?.model_id) {
-    clientRows.push([
-      "Device",
-      escapeMarkdownCell(
-        [
-          replay.device.brand,
-          replay.device.family,
-          replay.device.name,
-          replay.device.model_id,
-        ]
-          .filter(Boolean)
-          .join(" ")
-      ),
-    ]);
-  }
-  if (replay.sdk?.name || replay.sdk?.version) {
-    clientRows.push([
-      "SDK",
-      escapeMarkdownCell(
-        [replay.sdk.name, replay.sdk.version].filter(Boolean).join(" ")
-      ),
-    ]);
-  }
-  if (replay.dist) {
-    clientRows.push(["Dist", escapeMarkdownCell(replay.dist)]);
-  }
-  if (clientRows.length > 0) {
-    lines.push("");
-    lines.push(mdKvTable(clientRows, "Client"));
-  }
-
-  const releases = formatList(replay.releases);
-  if (releases) {
-    lines.push("");
-    lines.push("### Releases");
-    lines.push("");
-    lines.push(releases);
-  }
-
-  const urls = formatList(replay.urls);
-  if (urls) {
-    lines.push("");
-    lines.push("### URLs");
-    lines.push("");
-    lines.push(urls);
-  }
-
-  const traces = formatList(replay.trace_ids);
-  if (traces) {
-    lines.push("");
-    lines.push("### Trace IDs");
-    lines.push("");
-    lines.push(traces);
-  }
-
-  const errors = formatList(replay.error_ids);
-  if (errors) {
-    lines.push("");
-    lines.push("### Error IDs");
-    lines.push("");
-    lines.push(errors);
-  }
-
-  if (
-    replay.tags &&
-    !Array.isArray(replay.tags) &&
-    Object.keys(replay.tags).length
-  ) {
-    lines.push("");
-    lines.push("### Tags");
-    lines.push("");
-    for (const [key, values] of Object.entries(replay.tags).sort()) {
-      lines.push(
-        `- \`${escapeMarkdownInline(key)}\`: ${values.map((value) => `\`${escapeMarkdownInline(value)}\``).join(", ")}`
-      );
-    }
-  }
+  pushListSection(lines, "Releases", replay.releases);
+  pushListSection(lines, "URLs", replay.urls);
+  pushListSection(lines, "Trace IDs", replay.trace_ids);
+  pushListSection(lines, "Error IDs", replay.error_ids);
+  pushTagsSection(lines, replay);
 
   return renderMarkdown(lines.join("\n"));
 }

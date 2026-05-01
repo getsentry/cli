@@ -187,6 +187,7 @@ describe("proposeCompletions: Stricli integration", () => {
     "event",
     "org",
     "project",
+    "replay",
     "dashboard",
     "trace",
     "span",

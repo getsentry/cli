@@ -101,6 +101,8 @@ export const ORG_PROJECT_COMMANDS = new Set([
   "project view",
   "project delete",
   "project create",
+  "replay list",
+  "replay view",
   "trace list",
   "trace view",
   "trace logs",

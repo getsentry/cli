@@ -138,7 +138,11 @@ export const REPLAY_LIST_FIELDS = [
  */
 export const ReplayListItemSchema = z
   .object({
-    activity: z.number().nullable().optional().describe("Replay activity score"),
+    activity: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Replay activity score"),
     browser: ReplayBrowserSchema.optional().describe("Browser metadata"),
     count_dead_clicks: z
       .number()
@@ -191,11 +195,7 @@ export const ReplayListItemSchema = z
     is_archived: z.boolean().nullable().optional().describe("Archived flag"),
     os: ReplayOsSchema.optional().describe("Operating system metadata"),
     platform: z.string().nullable().optional().describe("Platform"),
-    project_id: z
-      .string()
-      .nullable()
-      .optional()
-      .describe("Numeric project ID"),
+    project_id: z.string().nullable().optional().describe("Numeric project ID"),
     releases: z.array(z.string()).optional().describe("Associated releases"),
     sdk: ReplaySdkSchema.optional().describe("SDK metadata"),
     started_at: z
@@ -226,13 +226,14 @@ export const ReplayClickSchema = z
  * Full replay metadata returned by the replay detail endpoint.
  */
 export const ReplayDetailsSchema = ReplayListItemSchema.extend({
-  clicks: z.array(ReplayClickSchema).optional().describe("Replay click summaries"),
-  ota_updates: ReplayOtaUpdatesSchema.optional().describe("OTA update metadata"),
-  replay_type: z
-    .string()
-    .nullable()
+  clicks: z
+    .array(ReplayClickSchema)
     .optional()
-    .describe("Replay type"),
+    .describe("Replay click summaries"),
+  ota_updates: ReplayOtaUpdatesSchema.optional().describe(
+    "OTA update metadata"
+  ),
+  replay_type: z.string().nullable().optional().describe("Replay type"),
 }).describe("Replay details");
 
 /** Envelope returned by the replay index endpoint. */

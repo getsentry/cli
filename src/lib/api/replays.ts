@@ -6,10 +6,10 @@
 
 import {
   REPLAY_LIST_FIELDS,
-  ReplayDetailsResponseSchema,
   type ReplayDetails,
-  ReplayListResponseSchema,
+  ReplayDetailsResponseSchema,
   type ReplayListItem,
+  ReplayListResponseSchema,
 } from "../../types/index.js";
 
 import { resolveOrgRegion } from "../region.js";
@@ -51,16 +51,21 @@ export type ListReplaysOptions = {
   end?: string;
 };
 
+type FetchReplayPageOptions = {
+  options: ListReplaysOptions;
+  perPage: number;
+  cursor?: string;
+};
+
 /**
  * Fetch a single page of replays from the organization replay index.
  */
 async function fetchReplayPage(
   regionUrl: string,
   orgSlug: string,
-  options: ListReplaysOptions,
-  perPage: number,
-  cursor?: string
+  page: FetchReplayPageOptions
 ): Promise<PaginatedResponse<ReplayListItem[]>> {
+  const { cursor, options, perPage } = page;
   const { data, headers } = await apiRequestToRegion(
     regionUrl,
     `/organizations/${orgSlug}/replays/`,
@@ -101,7 +106,8 @@ export async function listReplays(
   const regionUrl = await resolveOrgRegion(orgSlug);
 
   return autoPaginate(
-    (cursor) => fetchReplayPage(regionUrl, orgSlug, options, perPage, cursor),
+    (cursor) =>
+      fetchReplayPage(regionUrl, orgSlug, { options, perPage, cursor }),
     limit,
     options.cursor
   );

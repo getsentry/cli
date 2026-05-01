@@ -66,10 +66,7 @@ describe("listCommand.func", () => {
 
   beforeEach(() => {
     listReplaysSpy = spyOn(apiClient, "listReplays");
-    resolveTargetSpy = spyOn(
-      resolveTarget,
-      "resolveOrgOptionalProjectFromArg"
-    );
+    resolveTargetSpy = spyOn(resolveTarget, "resolveOrgOptionalProjectFromArg");
     resolveCursorSpy = spyOn(paginationDb, "resolveCursor").mockReturnValue({
       cursor: undefined,
       direction: "next" as const,
@@ -131,7 +128,12 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { limit: 25, json: false, period: parsePeriod("7d"), sort: "-started_at" },
+      {
+        limit: 25,
+        json: false,
+        period: parsePeriod("7d"),
+        sort: "-started_at",
+      },
       "test-org/cli"
     );
 

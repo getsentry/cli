@@ -4,7 +4,6 @@
  * List Session Replays from Sentry.
  */
 
-import type { Column } from "../../lib/formatters/table.js";
 import type { SentryContext } from "../../context.js";
 import { listReplays, type ReplaySortValue } from "../../lib/api-client.js";
 import { validateLimit } from "../../lib/arg-parsing.js";
@@ -21,6 +20,7 @@ import {
 } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
+import type { Column } from "../../lib/formatters/table.js";
 import {
   appendQueryHint,
   appendSortHint,
@@ -29,8 +29,8 @@ import {
   LIST_MAX_LIMIT,
   LIST_MIN_LIMIT,
   LIST_PERIOD_FLAG,
-  paginationHint,
   PERIOD_ALIASES,
+  paginationHint,
   targetPatternExplanation,
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
@@ -42,7 +42,10 @@ import {
   type TimeRange,
   timeRangeToApiParams,
 } from "../../lib/time-range.js";
-import { type ReplayListItem, ReplayListItemSchema } from "../../types/index.js";
+import {
+  type ReplayListItem,
+  ReplayListItemSchema,
+} from "../../types/index.js";
 
 type ListFlags = {
   readonly limit: number;

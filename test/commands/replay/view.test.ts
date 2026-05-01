@@ -94,10 +94,7 @@ describe("viewCommand.func", () => {
 
   beforeEach(() => {
     getReplaySpy = spyOn(apiClient, "getReplay");
-    resolveTargetSpy = spyOn(
-      resolveTarget,
-      "resolveOrgOptionalProjectFromArg"
-    );
+    resolveTargetSpy = spyOn(resolveTarget, "resolveOrgOptionalProjectFromArg");
     openInBrowserSpy = spyOn(browser, "openInBrowser").mockResolvedValue();
   });
 
@@ -113,7 +110,11 @@ describe("viewCommand.func", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await viewCommand.loader();
-    await func.call(context, { json: true, web: false, fresh: false }, REPLAY_ID);
+    await func.call(
+      context,
+      { json: true, web: false, fresh: false },
+      REPLAY_ID
+    );
 
     const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
     const parsed = JSON.parse(output);

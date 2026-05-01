@@ -800,7 +800,9 @@ describe("formatEventDetails", () => {
     );
     expect(result).toContain("Replay");
     expect(result).toContain("replay-uuid-123");
-    expect(result).toContain("https://acme.sentry.io/replays/replay-uuid-123/");
+    expect(result).toContain(
+      "https://acme.sentry.io/explore/replays/replay-uuid-123/"
+    );
   });
 
   test("includes tags when present", () => {

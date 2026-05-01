@@ -80,12 +80,6 @@ export {
   listTraceLogs,
 } from "./api/logs.js";
 export {
-  getReplay,
-  listReplays,
-  type ListReplaysOptions,
-  type ReplaySortValue,
-} from "./api/replays.js";
-export {
   getOrganization,
   getUserRegions,
   listOrganizations,
@@ -126,6 +120,12 @@ export {
   setCommitsWithRefs,
   updateRelease,
 } from "./api/releases.js";
+export {
+  getReplay,
+  type ListReplaysOptions,
+  listReplays,
+  type ReplaySortValue,
+} from "./api/replays.js";
 export {
   listAllRepositories,
   listRepositories,
