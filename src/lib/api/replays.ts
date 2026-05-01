@@ -14,6 +14,8 @@ import {
   type ReplayListItem,
   type ReplayListResponse,
   ReplayListResponseSchema,
+  type ReplayRecordingSegments,
+  ReplayRecordingSegmentsSchema,
 } from "../../types/index.js";
 
 import { resolveOrgRegion } from "../region.js";
@@ -26,14 +28,51 @@ import {
   parseLinkHeader,
 } from "./infrastructure.js";
 
-/** Sort values supported by the CLI replay list command. */
-export type ReplaySortValue =
-  | "-started_at"
-  | "started_at"
-  | "-duration"
-  | "-count_errors"
-  | "-count_segments"
-  | "-activity";
+/** Replay sort field names supported by the backend replay index endpoint. */
+export const REPLAY_SORT_FIELDS = [
+  "activity",
+  "browser",
+  "browser.name",
+  "browser.version",
+  "count_dead_clicks",
+  "count_errors",
+  "count_infos",
+  "count_rage_clicks",
+  "count_screens",
+  "count_urls",
+  "count_warnings",
+  "device.brand",
+  "device.family",
+  "device.model",
+  "device.name",
+  "dist",
+  "duration",
+  "finished_at",
+  "os",
+  "os.name",
+  "os.version",
+  "platform",
+  "project_id",
+  "sdk.name",
+  "started_at",
+  "user.email",
+  "user.id",
+  "user.username",
+] as const;
+
+/** Sort values supported by the backend replay index endpoint. */
+export type ReplaySortField = (typeof REPLAY_SORT_FIELDS)[number];
+export type ReplaySortValue = ReplaySortField | `-${ReplaySortField}`;
+
+const REPLAY_SORT_VALUES = new Set<string>([
+  ...REPLAY_SORT_FIELDS,
+  ...REPLAY_SORT_FIELDS.map((field) => `-${field}`),
+]);
+
+/** Return whether a sort string is supported by the replay index endpoint. */
+export function isReplaySortValue(value: string): value is ReplaySortValue {
+  return REPLAY_SORT_VALUES.has(value);
+}
 
 /** Options for {@link listReplays}. */
 export type ListReplaysOptions = {
@@ -41,6 +80,10 @@ export type ListReplaysOptions = {
   limit?: number;
   /** Structured replay query using Sentry search syntax. */
   query?: string;
+  /** Optional environment filter(s). */
+  environment?: string[];
+  /** Response fields to request from the replay endpoint. */
+  fields?: string[];
   /** Project slugs to filter by. */
   projectSlugs?: string[];
   /** Sort expression for the replay index endpoint. */
@@ -93,7 +136,11 @@ async function fetchReplayPage(
     {
       params: {
         cursor,
-        field: [...REPLAY_LIST_FIELDS],
+        environment: options.environment,
+        field:
+          options.fields && options.fields.length > 0
+            ? options.fields
+            : [...REPLAY_LIST_FIELDS],
         per_page: perPage,
         projectSlug: options.projectSlugs,
         query: options.query,
@@ -153,6 +200,30 @@ export async function getReplay(
     }
   );
   return normalizeReplayProjectId(data.data);
+}
+
+/**
+ * Fetch replay recording segments for a single replay.
+ *
+ * Uses the project-scoped replay endpoint because recording segments are
+ * partitioned by project. `download=true` matches the frontend contract and
+ * returns the parsed segment payload directly.
+ */
+export async function getReplayRecordingSegments(
+  orgSlug: string,
+  projectSlugOrId: string,
+  replayId: string
+): Promise<ReplayRecordingSegments> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<ReplayRecordingSegments>(
+    regionUrl,
+    `/projects/${orgSlug}/${projectSlugOrId}/replays/${replayId}/recording-segments/`,
+    {
+      params: { download: true },
+      schema: ReplayRecordingSegmentsSchema,
+    }
+  );
+  return data;
 }
 
 /**

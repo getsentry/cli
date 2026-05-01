@@ -7,7 +7,12 @@
  */
 
 import type { SentryContext } from "../context.js";
-import { queryEvents } from "../lib/api-client.js";
+import {
+  isReplaySortValue,
+  listReplays,
+  queryEvents,
+  type ReplaySortValue,
+} from "../lib/api-client.js";
 import { buildProjectQuery, validateLimit } from "../lib/arg-parsing.js";
 import {
   advancePaginationState,
@@ -30,6 +35,13 @@ import {
 } from "../lib/list-command.js";
 import { logger } from "../lib/logger.js";
 import { withProgress } from "../lib/polling.js";
+import {
+  DEFAULT_REPLAY_EXPLORE_FIELDS,
+  getReplayFieldValue,
+  getReplayRequestFields,
+  isSupportedReplayField,
+  listSupportedReplayFields,
+} from "../lib/replay-search.js";
 import { resolveOrgOptionalProjectFromArg } from "../lib/resolve-target.js";
 import { sanitizeQuery } from "../lib/search-query.js";
 import {
@@ -52,6 +64,7 @@ const DEFAULT_FIELDS = ["title", "count()"];
 
 /** Default dataset */
 const DEFAULT_DATASET = "errors";
+const DEFAULT_REPLAY_SORT = "-started_at";
 
 /** Default time period */
 const DEFAULT_PERIOD = "24h";
@@ -73,6 +86,8 @@ const DATASET_ALIASES: Record<string, string> = {
   metrics: "metricsEnhanced",
   logs: "logs",
   log: "logs",
+  replays: "replays",
+  replay: "replays",
   // Deprecated but still functional — hidden from help
   transactions: "transactions",
   transaction: "transactions",
@@ -86,7 +101,13 @@ const DATASET_ALIASES: Record<string, string> = {
  *
  * Set preserves insertion order for the join-based help/error rendering.
  */
-const VALID_DATASETS = new Set(["errors", "spans", "metrics", "logs"]);
+const VALID_DATASETS = new Set([
+  "errors",
+  "spans",
+  "metrics",
+  "logs",
+  "replays",
+]);
 
 /**
  * Reverse map from API-level dataset name → canonical user-facing name.
@@ -103,6 +124,7 @@ const API_TO_USER_DATASET = new Map(
 type ExploreFlags = {
   readonly field?: string[];
   readonly dataset: string;
+  readonly environment?: readonly string[];
   readonly query?: string;
   readonly sort?: string;
   readonly period: TimeRange;
@@ -157,6 +179,54 @@ function parseDataset(value: string): string {
  */
 function parseLimit(value: string): number {
   return validateLimit(value, 1, LIST_MAX_LIMIT);
+}
+
+function parseEnvironmentFilter(
+  values: readonly string[] | undefined
+): string[] | undefined {
+  const parsed = values
+    ? [...values]
+        .flatMap((value) => value.split(","))
+        .map((value) => value.trim())
+        .filter(Boolean)
+    : [];
+
+  return parsed.length > 0 ? parsed : undefined;
+}
+
+function inferReplayFieldType(field: string): string {
+  if (field === "duration") {
+    return "duration";
+  }
+  if (
+    field === "activity" ||
+    field === "count_screens" ||
+    field.startsWith("count_")
+  ) {
+    return "integer";
+  }
+  return "string";
+}
+
+function buildReplayExploreResponse(
+  fields: string[],
+  replays: Awaited<ReturnType<typeof listReplays>>["data"]
+): { data: Record<string, unknown>[]; meta: NonNullable<ExploreData["meta"]> } {
+  return {
+    data: replays.map((replay) =>
+      Object.fromEntries(
+        fields.map((field) => [field, getReplayFieldValue(replay, field)])
+      )
+    ),
+    meta: {
+      fields: Object.fromEntries(
+        fields.map((field) => [field, inferReplayFieldType(field)])
+      ),
+      units: Object.fromEntries(
+        fields.map((field) => [field, field === "duration" ? "s" : null])
+      ),
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -253,7 +323,7 @@ function appendFlagHints(
   base: string,
   flags: Pick<
     ExploreFlags,
-    "dataset" | "sort" | "query" | "period" | "field" | "limit"
+    "dataset" | "environment" | "sort" | "query" | "period" | "field" | "limit"
   >
 ): string {
   const parts: string[] = [];
@@ -276,6 +346,11 @@ function appendFlagHints(
   if (flags.limit !== DEFAULT_LIMIT) {
     parts.push(`--limit ${flags.limit}`);
   }
+  if (flags.environment && flags.environment.length > 0) {
+    for (const environment of flags.environment) {
+      parts.push(`-e "${environment}"`);
+    }
+  }
   appendPeriodHint(parts, flags.period, DEFAULT_PERIOD);
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
 }
@@ -288,11 +363,23 @@ function findFirstAggregate(fieldList: string[]): string | undefined {
   return fieldList.find((f) => f.includes("(") && f.includes(")"));
 }
 
+/** Validate and normalize replay sort values. */
+function resolveReplaySort(explicitSort?: string): ReplaySortValue {
+  const sort = explicitSort ?? DEFAULT_REPLAY_SORT;
+  if (!isReplaySortValue(sort)) {
+    throw new ValidationError(
+      `Invalid replay sort "${sort}". Use a replay sort like ${DEFAULT_REPLAY_SORT} or -count_errors.`,
+      "sort"
+    );
+  }
+  return sort;
+}
+
 /**
- * Determine the effective sort value, accounting for dataset restrictions.
+ * Determine the effective sort value for non-replay explore datasets.
  * Sort is only supported on the `spans` dataset.
  */
-function resolveSort(
+function resolveExploreSort(
   fieldList: string[],
   dataset: string,
   explicitSort?: string
@@ -340,7 +427,8 @@ export const exploreCommand = buildListCommand("explore", {
       "  errors   Error events (default)\n" +
       "  spans    Span data\n" +
       "  metrics  Custom metrics\n" +
-      "  logs     Log entries\n\n" +
+      "  logs     Log entries\n" +
+      "  replays  Session replay search\n\n" +
       "Targets:\n" +
       "  <org>/<project>  Filter by project (auto-adds project:<slug> to query)\n" +
       "  <org>/           All projects in org\n" +
@@ -351,6 +439,7 @@ export const exploreCommand = buildListCommand("explore", {
       '  sentry explore my-org/ -F title -F "count()" -F "count_unique(user)" --period 1h\n' +
       '  sentry explore my-org/cli -F span.op -F "p50(span.duration)" ' +
       "--dataset spans\n" +
+      "  sentry explore my-org/cli --dataset replays -F id -F user.email -F count_errors\n" +
       '  sentry explore -F span.op -F "count()" --dataset spans --period 1h\n' +
       "  sentry explore --json",
   },
@@ -398,6 +487,14 @@ export const exploreCommand = buildListCommand("explore", {
         brief: 'Sort field (prefix with - for desc, e.g., "-count()")',
         optional: true,
       },
+      environment: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "Replay environment filter for --dataset replays (repeatable, comma-separated)",
+        variadic: true,
+        optional: true,
+      },
       limit: {
         kind: "parsed",
         parse: parseLimit,
@@ -413,6 +510,7 @@ export const exploreCommand = buildListCommand("explore", {
     },
     aliases: {
       ...PERIOD_ALIASES,
+      e: "environment",
       F: "field",
       d: "dataset",
       q: "query",
@@ -428,15 +526,46 @@ export const exploreCommand = buildListCommand("explore", {
       "explore"
     );
 
-    const fieldList =
-      flags.field && flags.field.length > 0 ? flags.field : DEFAULT_FIELDS;
     const dataset = flags.dataset;
+    let fieldList = DEFAULT_FIELDS;
+    if (dataset === "replays") {
+      fieldList = [...DEFAULT_REPLAY_EXPLORE_FIELDS];
+    }
+    if (flags.field && flags.field.length > 0) {
+      fieldList = flags.field;
+    }
     const timeRange = flags.period;
-    const effectiveSort = resolveSort(fieldList, dataset, flags.sort);
+    const environment = parseEnvironmentFilter(flags.environment);
+    const replaySort =
+      dataset === "replays" ? resolveReplaySort(flags.sort) : undefined;
+    const effectiveSort =
+      replaySort ?? resolveExploreSort(fieldList, dataset, flags.sort);
+
+    if (dataset !== "replays" && environment) {
+      throw new ValidationError(
+        "--environment is only supported with --dataset replays. Use environment:... inside --query for other datasets.",
+        "environment"
+      );
+    }
+
+    if (dataset === "replays") {
+      const unsupportedField = fieldList.find(
+        (field) => !isSupportedReplayField(field)
+      );
+      if (unsupportedField) {
+        throw new ValidationError(
+          `Unsupported replay field "${unsupportedField}". Supported fields include: ${listSupportedReplayFields().slice(0, 12).join(", ")}...`,
+          "field"
+        );
+      }
+    }
 
     // When a project is in the target, prepend `project:<slug>` to the query
     // so the API filters server-side. Mirrors `trace logs` / `log list` behavior.
-    const apiQuery = buildProjectQuery(flags.query, project);
+    const apiQuery =
+      dataset === "replays"
+        ? flags.query
+        : buildProjectQuery(flags.query, project);
 
     // Pagination context includes project so different scopes don't share state
     const contextKey = buildPaginationContextKey(
@@ -444,6 +573,7 @@ export const exploreCommand = buildListCommand("explore", {
       project ? `${org}/${project}` : org,
       {
         dataset,
+        env: environment?.join(","),
         fields: fieldList.join(","),
         q: flags.query,
         sort: effectiveSort,
@@ -461,8 +591,26 @@ export const exploreCommand = buildListCommand("explore", {
         message: `Querying ${dataset} in ${project ? `${org}/${project}` : org}...`,
         json: flags.json,
       },
-      () =>
-        queryEvents(org, {
+      async () => {
+        if (dataset === "replays") {
+          const replayResponse = await listReplays(org, {
+            cursor,
+            environment,
+            fields: getReplayRequestFields(fieldList),
+            limit: flags.limit,
+            projectSlugs: project ? [project] : undefined,
+            query: flags.query,
+            sort: replaySort,
+            ...timeRangeToApiParams(timeRange),
+          });
+
+          return {
+            data: buildReplayExploreResponse(fieldList, replayResponse.data),
+            nextCursor: replayResponse.nextCursor,
+          };
+        }
+
+        return queryEvents(org, {
           fields: fieldList,
           dataset,
           query: apiQuery,
@@ -470,7 +618,8 @@ export const exploreCommand = buildListCommand("explore", {
           limit: flags.limit,
           cursor,
           ...timeRangeToApiParams(timeRange),
-        })
+        });
+      }
     );
 
     advancePaginationState(PAGINATION_KEY, contextKey, direction, nextCursor);

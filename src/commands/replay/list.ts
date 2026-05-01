@@ -5,7 +5,11 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { listReplays, type ReplaySortValue } from "../../lib/api-client.js";
+import {
+  isReplaySortValue,
+  listReplays,
+  type ReplaySortValue,
+} from "../../lib/api-client.js";
 import { validateLimit } from "../../lib/arg-parsing.js";
 import {
   advancePaginationState,
@@ -34,6 +38,7 @@ import {
   targetPatternExplanation,
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
+import { getReplayUserLabel } from "../../lib/replay-search.js";
 import { resolveOrgOptionalProjectFromArg } from "../../lib/resolve-target.js";
 import { sanitizeQuery } from "../../lib/search-query.js";
 import {
@@ -48,6 +53,7 @@ import {
 } from "../../types/index.js";
 
 type ListFlags = {
+  readonly environment?: readonly string[];
   readonly limit: number;
   readonly query?: string;
   readonly sort: ReplaySortValue;
@@ -67,20 +73,13 @@ type ReplayListResult = {
   project?: string;
 };
 
-type ReplaySortKey =
-  | "date"
-  | "oldest"
-  | "duration"
-  | "errors"
-  | "segments"
-  | "activity";
+type ReplaySortKey = "date" | "oldest" | "duration" | "errors" | "activity";
 
 const SORT_MAP: Record<ReplaySortKey, ReplaySortValue> = {
   date: "-started_at",
   oldest: "started_at",
   duration: "-duration",
   errors: "-count_errors",
-  segments: "-count_segments",
   activity: "-activity",
 };
 
@@ -93,18 +92,37 @@ function parseLimit(value: string): number {
   return validateLimit(value, LIST_MIN_LIMIT, LIST_MAX_LIMIT);
 }
 
+function parseEnvironmentFilter(
+  values: readonly string[] | undefined
+): string[] | undefined {
+  const parsed = values
+    ? [...values]
+        .flatMap((value) => value.split(","))
+        .map((value) => value.trim())
+        .filter(Boolean)
+    : [];
+
+  return parsed.length > 0 ? parsed : undefined;
+}
+
 /**
  * Parse user-facing replay sort values into API sort expressions.
  */
 export function parseSort(value: string): ReplaySortValue {
-  const normalized = value.toLowerCase() as ReplaySortKey;
+  const trimmed = value.trim();
+  const normalized = trimmed.toLowerCase() as ReplaySortKey;
   const mapped = SORT_MAP[normalized];
-  if (!mapped) {
-    throw new Error(
-      `Invalid sort value. Must be one of: ${Object.keys(SORT_MAP).join(", ")}`
-    );
+  if (mapped) {
+    return mapped;
   }
-  return mapped;
+
+  if (isReplaySortValue(trimmed)) {
+    return trimmed;
+  }
+
+  throw new Error(
+    `Invalid sort value. Must be one of: ${Object.keys(SORT_MAP).join(", ")} or a replay sort like -count_rage_clicks`
+  );
 }
 
 function formatCount(value: number | null | undefined): string {
@@ -138,18 +156,7 @@ function formatReplayDuration(seconds: number | null | undefined): string {
 }
 
 function replayUserLabel(replay: ReplayListItem): string {
-  const user = replay.user;
-  if (!user) {
-    return "—";
-  }
-  return (
-    user.display_name ??
-    user.username ??
-    user.email ??
-    user.id ??
-    user.ip ??
-    "—"
-  );
+  return getReplayUserLabel(replay) ?? "—";
 }
 
 const REPLAY_COLUMNS: Column<ReplayListItem>[] = [
@@ -203,11 +210,16 @@ function formatScope(org: string, project?: string): string {
 
 function appendReplayFlags(
   base: string,
-  flags: Pick<ListFlags, "query" | "sort" | "period">
+  flags: Pick<ListFlags, "environment" | "query" | "sort" | "period">
 ): string {
   const parts: string[] = [];
   appendQueryHint(parts, flags.query);
   appendSortHint(parts, flags.sort, DEFAULT_SORT);
+  if (flags.environment && flags.environment.length > 0) {
+    for (const environment of flags.environment) {
+      parts.push(`-e "${environment}"`);
+    }
+  }
   appendPeriodHint(parts, flags.period, DEFAULT_PERIOD);
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
 }
@@ -215,7 +227,7 @@ function appendReplayFlags(
 function nextPageHint(
   org: string,
   project: string | undefined,
-  flags: Pick<ListFlags, "query" | "sort" | "period">
+  flags: Pick<ListFlags, "environment" | "query" | "sort" | "period">
 ): string {
   return appendReplayFlags(
     `sentry replay list ${formatScope(org, project)} -c next`,
@@ -226,7 +238,7 @@ function nextPageHint(
 function prevPageHint(
   org: string,
   project: string | undefined,
-  flags: Pick<ListFlags, "query" | "sort" | "period">
+  flags: Pick<ListFlags, "environment" | "query" | "sort" | "period">
 ): string {
   return appendReplayFlags(
     `sentry replay list ${formatScope(org, project)} -c prev`,
@@ -285,6 +297,7 @@ export const listCommand = buildListCommand("replay", {
       "  sentry replay list sentry/cli --limit 50\n" +
       "  sentry replay list sentry/cli --sort duration\n" +
       '  sentry replay list sentry/cli -q "user.email:foo@example.com"\n' +
+      "  sentry replay list sentry/cli -e production -e canary\n" +
       "  sentry replay list sentry/cli --period 24h\n\n" +
       "Alias: `sentry replays` → `sentry replay list`",
   },
@@ -318,16 +331,25 @@ export const listCommand = buildListCommand("replay", {
         brief: "Search query (Sentry replay search syntax)",
         optional: true,
       },
+      environment: {
+        kind: "parsed",
+        parse: String,
+        brief: "Filter by environment (repeatable, comma-separated)",
+        variadic: true,
+        optional: true,
+      },
       sort: {
         kind: "parsed",
         parse: parseSort,
-        brief: "Sort by: date, oldest, duration, errors, segments, activity",
+        brief:
+          "Sort by: date, oldest, duration, errors, activity, or a raw replay sort field",
         default: "date",
       },
       period: LIST_PERIOD_FLAG,
     },
     aliases: {
       ...PERIOD_ALIASES,
+      e: "environment",
       n: "limit",
       q: "query",
       s: "sort",
@@ -336,6 +358,7 @@ export const listCommand = buildListCommand("replay", {
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
     const { cwd } = this;
     const timeRange = flags.period;
+    const environment = parseEnvironmentFilter(flags.environment);
     const { query } = flags;
 
     const resolved = await resolveOrgOptionalProjectFromArg(
@@ -348,6 +371,7 @@ export const listCommand = buildListCommand("replay", {
       "replay",
       formatScope(resolved.org, resolved.project),
       {
+        env: environment?.join(","),
         sort: flags.sort,
         q: query,
         period: serializeTimeRange(timeRange),
@@ -366,6 +390,7 @@ export const listCommand = buildListCommand("replay", {
       },
       () =>
         listReplays(resolved.org, {
+          environment,
           limit: flags.limit,
           query,
           projectSlugs: resolved.project ? [resolved.project] : undefined,

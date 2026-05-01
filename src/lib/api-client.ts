@@ -122,9 +122,13 @@ export {
 } from "./api/releases.js";
 export {
   getReplay,
+  getReplayRecordingSegments,
+  isReplaySortValue,
   type ListReplaysOptions,
   listReplayIdsForIssue,
   listReplays,
+  REPLAY_SORT_FIELDS,
+  type ReplaySortField,
   type ReplaySortValue,
 } from "./api/replays.js";
 export {
@@ -155,6 +159,7 @@ export {
   fetchMultiSpanDetails,
   getDetailedTrace,
   getSpanDetails,
+  getTraceMeta,
   listSpans,
   listTransactions,
   normalizeTraceSpan,

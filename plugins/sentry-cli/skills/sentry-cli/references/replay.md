@@ -18,7 +18,8 @@ List recent Session Replays
 **Flags:**
 - `-n, --limit <value> - Number of replays (1-1000) - (default: "25")`
 - `-q, --query <value> - Search query (Sentry replay search syntax)`
-- `-s, --sort <value> - Sort by: date, oldest, duration, errors, segments, activity - (default: "date")`
+- `-e, --environment <value>... - Filter by environment (repeatable, comma-separated)`
+- `-s, --sort <value> - Sort by: date, oldest, duration, errors, activity, or a raw replay sort field - (default: "date")`
 - `-t, --period <value> - Time range: "7d", "2026-04-01..2026-05-01", ">=2026-04-01" - (default: "7d")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
@@ -47,6 +48,7 @@ List recent Session Replays
 | `info_ids` | array | Linked info event IDs |
 | `is_archived` | boolean \| null | Archived flag |
 | `os` | object \| null | Operating system metadata |
+| `ota_updates` | object \| null | OTA update metadata |
 | `platform` | string \| null | Platform |
 | `project_id` | string \| null | Numeric project ID |
 | `releases` | array | Associated releases |
@@ -90,7 +92,7 @@ View a Session Replay
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `activity` | number \| null | Replay activity score |
+| `activity` | array | Summarized replay activity |
 | `browser` | object \| null | Browser metadata |
 | `count_dead_clicks` | number \| null | Dead click count |
 | `count_errors` | number \| null | Associated error count |
@@ -110,6 +112,7 @@ View a Session Replay
 | `info_ids` | array | Linked info event IDs |
 | `is_archived` | boolean \| null | Archived flag |
 | `os` | object \| null | Operating system metadata |
+| `ota_updates` | object \| null | OTA update metadata |
 | `platform` | string \| null | Platform |
 | `project_id` | string \| null | Numeric project ID |
 | `releases` | array | Associated releases |
@@ -121,8 +124,10 @@ View a Session Replay
 | `user` | object \| null | User metadata |
 | `warning_ids` | array | Linked warning event IDs |
 | `clicks` | array | Replay click summaries |
-| `ota_updates` | object \| null | OTA update metadata |
 | `replay_type` | string \| null | Replay type |
+| `org` | string | Organization slug |
+| `relatedIssues` | array | Replay-related issues |
+| `relatedTraces` | array | Replay-related traces |
 
 **Examples:**
 

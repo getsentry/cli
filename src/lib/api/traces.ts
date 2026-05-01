@@ -10,6 +10,8 @@ import {
   type SpanListItem,
   type SpansResponse,
   SpansResponseSchema,
+  type TraceMeta,
+  TraceMetaSchema,
   type TraceSpan,
   type TransactionListItem,
   type TransactionsResponse,
@@ -164,6 +166,31 @@ export async function getSpanDetails(
         trace_id: traceId,
         item_type: "spans",
       },
+    }
+  );
+  return data;
+}
+
+/**
+ * Fetch high-level metadata for a trace.
+ *
+ * Uses the org-scoped trace-meta endpoint to retrieve counts for spans, errors,
+ * logs, and performance issues. This is useful for lightweight trace
+ * references without fetching the full trace tree.
+ */
+export async function getTraceMeta(
+  orgSlug: string,
+  traceId: string,
+  statsPeriod = "14d"
+): Promise<TraceMeta> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+
+  const { data } = await apiRequestToRegion<TraceMeta>(
+    regionUrl,
+    `/organizations/${orgSlug}/trace-meta/${traceId}/`,
+    {
+      params: { statsPeriod },
+      schema: TraceMetaSchema,
     }
   );
   return data;

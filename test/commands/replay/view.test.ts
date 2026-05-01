@@ -97,7 +97,11 @@ describe("parsePositionalArgs", () => {
 });
 
 describe("viewCommand.func", () => {
+  let getProjectSpy: ReturnType<typeof spyOn>;
   let getReplaySpy: ReturnType<typeof spyOn>;
+  let getReplayRecordingSegmentsSpy: ReturnType<typeof spyOn>;
+  let getTraceMetaSpy: ReturnType<typeof spyOn>;
+  let listIssuesPaginatedSpy: ReturnType<typeof spyOn>;
   let resolveTargetSpy: ReturnType<typeof spyOn>;
   let openInBrowserSpy: ReturnType<typeof spyOn>;
 
@@ -114,20 +118,64 @@ describe("viewCommand.func", () => {
   }
 
   beforeEach(() => {
+    getProjectSpy = spyOn(apiClient, "getProject").mockResolvedValue({
+      id: "42",
+      slug: "cli",
+      name: "CLI",
+    });
     getReplaySpy = spyOn(apiClient, "getReplay");
+    getReplayRecordingSegmentsSpy = spyOn(
+      apiClient,
+      "getReplayRecordingSegments"
+    ).mockResolvedValue([
+      [
+        {
+          timestamp: 1_735_500_000_000,
+          data: { href: "/checkout" },
+        },
+      ],
+    ]);
+    getTraceMetaSpy = spyOn(apiClient, "getTraceMeta").mockResolvedValue({
+      errors: 2,
+      logs: 4,
+      performance_issues: 1,
+      span_count: 8,
+      span_count_map: {},
+      transaction_child_count_map: [],
+    });
+    listIssuesPaginatedSpy = spyOn(
+      apiClient,
+      "listIssuesPaginated"
+    ).mockResolvedValue({
+      data: [
+        {
+          id: "100",
+          shortId: "CLI-123",
+          title: "Checkout error",
+        },
+      ],
+    });
     resolveTargetSpy = spyOn(resolveTarget, "resolveOrgOptionalProjectFromArg");
     openInBrowserSpy = spyOn(browser, "openInBrowser").mockResolvedValue();
   });
 
   afterEach(() => {
+    getProjectSpy.mockRestore();
     getReplaySpy.mockRestore();
+    getReplayRecordingSegmentsSpy.mockRestore();
+    getTraceMetaSpy.mockRestore();
+    listIssuesPaginatedSpy.mockRestore();
     resolveTargetSpy.mockRestore();
     openInBrowserSpy.mockRestore();
   });
 
   test("renders JSON output", async () => {
     resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
-    getReplaySpy.mockResolvedValue(sampleReplay());
+    getReplaySpy.mockResolvedValue(
+      sampleReplay({
+        error_ids: ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+      })
+    );
 
     const { context, stdoutWrite } = createMockContext();
     const func = await viewCommand.loader();
@@ -140,6 +188,10 @@ describe("viewCommand.func", () => {
     const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
     const parsed = JSON.parse(output);
     expect(parsed.id).toBe(REPLAY_ID);
+    expect(parsed.org).toBe("test-org");
+    expect(parsed.activity[0]?.label).toBe("page.view");
+    expect(parsed.relatedIssues[0]?.shortId).toBe("CLI-123");
+    expect(parsed.relatedTraces[0]?.spanCount).toBe(8);
     expect(parsed.trace_ids[0]).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
   });
 
@@ -189,5 +241,42 @@ describe("viewCommand.func", () => {
     await expect(
       func.call(context, { json: false, web: false, fresh: false }, REPLAY_ID)
     ).rejects.toThrow(ResolutionError);
+  });
+
+  test("rejects replays outside the explicit project scope", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    getReplaySpy.mockResolvedValue(sampleReplay({ project_id: "999" }));
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+
+    await expect(
+      func.call(context, { json: false, web: false, fresh: false }, REPLAY_ID)
+    ).rejects.toThrow(ResolutionError);
+  });
+
+  test("renders activity and related sections in human output", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    getReplaySpy.mockResolvedValue(
+      sampleReplay({
+        error_ids: ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+        urls: ["/checkout"],
+      })
+    );
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: false, web: false, fresh: false },
+      REPLAY_ID
+    );
+
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    expect(output).toContain("Activity");
+    expect(output).toContain("page.view");
+    expect(output).toContain("Related");
+    expect(output).toContain("CLI-123");
+    expect(output).toContain("sentry trace view test-org/");
   });
 });

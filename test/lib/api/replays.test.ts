@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   getReplay,
+  getReplayRecordingSegments,
   listReplayIdsForIssue,
   listReplays,
 } from "../../../src/lib/api/replays.js";
@@ -75,6 +76,34 @@ describe("listReplays", () => {
     expect(url.searchParams.getAll("field")).toContain("user");
     expect(result.data).toHaveLength(1);
     expect(result.nextCursor).toBe("0:25:0");
+  });
+
+  test("passes replay environment filters and custom field selection", async () => {
+    let capturedUrl = "";
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input!, init);
+      capturedUrl = req.url;
+      return new Response(JSON.stringify({ data: [replayRow()] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    await listReplays("test-org", {
+      environment: ["production", "canary"],
+      fields: ["id", "user", "urls"],
+      limit: 10,
+      sort: "-count_rage_clicks",
+    });
+
+    const url = new URL(capturedUrl);
+    expect(url.searchParams.getAll("environment")).toEqual([
+      "production",
+      "canary",
+    ]);
+    expect(url.searchParams.getAll("field")).toEqual(["id", "user", "urls"]);
+    expect(url.searchParams.get("sort")).toBe("-count_rage_clicks");
   });
 
   test("auto-paginates when limit exceeds the API cap", async () => {
@@ -190,6 +219,46 @@ describe("getReplay", () => {
     expect(replay.info_ids).toEqual([]);
     expect(replay.trace_ids).toEqual([]);
     expect(replay.warning_ids).toEqual([]);
+  });
+});
+
+describe("getReplayRecordingSegments", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(async () => {
+    originalFetch = globalThis.fetch;
+    await setAuthToken("test-token");
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test("calls the project replay recording-segments endpoint", async () => {
+    let capturedUrl = "";
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input!, init);
+      capturedUrl = req.url;
+      return new Response(JSON.stringify([[{ timestamp: 1 }]]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const segments = await getReplayRecordingSegments(
+      "test-org",
+      "42",
+      REPLAY_ID
+    );
+
+    const url = new URL(capturedUrl);
+    expect(url.pathname).toContain(
+      `/api/0/projects/test-org/42/replays/${REPLAY_ID}/recording-segments/`
+    );
+    expect(url.searchParams.get("download")).toBe("true");
+    expect(segments).toEqual([[{ timestamp: 1 }]]);
   });
 });
 

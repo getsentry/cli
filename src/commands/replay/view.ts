@@ -5,7 +5,13 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { getReplay } from "../../lib/api-client.js";
+import {
+  getProject,
+  getReplay,
+  getReplayRecordingSegments,
+  getTraceMeta,
+  listIssuesPaginated,
+} from "../../lib/api-client.js";
 import {
   detectSwappedViewArgs,
   parseSlashSeparatedArg,
@@ -28,14 +34,21 @@ import {
   FRESH_FLAG,
 } from "../../lib/list-command.js";
 import { normalizeReplayId } from "../../lib/replay-id.js";
+import { getReplayUserLabel } from "../../lib/replay-search.js";
 import { resolveOrgOptionalProjectFromArg } from "../../lib/resolve-target.js";
 import {
   applySentryUrlContext,
   parseSentryUrl,
 } from "../../lib/sentry-url-parser.js";
 import { buildReplayUrl } from "../../lib/sentry-urls.js";
-import type { ReplayDetails } from "../../types/index.js";
-import { ReplayDetailsOutputSchema } from "../../types/index.js";
+import type {
+  ReplayActivityEvent,
+  ReplayDetails,
+  ReplayRecordingSegments,
+  ReplayRelatedIssue,
+  ReplayRelatedTrace,
+} from "../../types/index.js";
+import { ReplayViewOutputSchema } from "../../types/index.js";
 
 type ViewFlags = {
   readonly json: boolean;
@@ -50,10 +63,21 @@ type ParsedPositionalArgs = {
   warning?: string;
 };
 
+type ReplayViewData = {
+  org: string;
+  replay: ReplayDetails;
+  activity: ReplayActivityEvent[];
+  relatedIssues: ReplayRelatedIssue[];
+  relatedTraces: ReplayRelatedTrace[];
+};
+
 type MarkdownRow = [string, string];
 
 const USAGE_HINT =
   "sentry replay view [<org>/<project>/]<replay-id> | <replay-url>";
+const MAX_ACTIVITY_EVENTS = 6;
+const MAX_RELATED_ERRORS = 3;
+const MAX_RELATED_TRACES = 2;
 function pluralize(value: number, singular: string): string {
   return `${value} ${singular}${value === 1 ? "" : "s"}`;
 }
@@ -164,19 +188,306 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
   return { replayId: second, targetArg: first };
 }
 
-function replayUserLabel(replay: ReplayDetails): string | undefined {
-  const user = replay.user;
-  if (!user) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function formatRelativeOffset(milliseconds: number): string {
+  const seconds = Math.max(0, Math.round(milliseconds / 1000));
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes < 60) {
+    return remainingSeconds > 0
+      ? `${minutes}m ${remainingSeconds}s`
+      : `${minutes}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
+function getEventTimestampMillis(value: unknown): number | null {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
+
+function firstString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function compactDetails(values: Array<string | null>): string[] {
+  return values.filter((value): value is string => value !== null);
+}
+
+function summarizePerformanceSpan(
+  payload: Record<string, unknown> | null
+): Omit<ReplayActivityEvent, "timestampMs"> | null {
+  const op = firstString(payload?.op);
+  const description = firstString(payload?.description);
+  const durationMs =
+    isRecord(payload?.data) && typeof payload.data.duration === "number"
+      ? payload.data.duration
+      : null;
+
+  if (!(description || op)) {
+    return null;
+  }
+
+  return {
+    label: op ?? "performanceSpan",
+    details: compactDetails([
+      description ? `description=${description}` : null,
+      durationMs !== null ? `duration_ms=${durationMs}` : null,
+    ]),
+  };
+}
+
+function summarizeClickLikeEvent(
+  label: string,
+  payload: Record<string, unknown> | null,
+  includeLabel = false
+): Omit<ReplayActivityEvent, "timestampMs"> {
+  const selector = firstString(payload?.selector);
+  const clickLabel = firstString(payload?.label);
+
+  return {
+    label,
+    details: compactDetails([
+      selector ? `selector=${selector}` : null,
+      includeLabel && clickLabel ? `label=${clickLabel}` : null,
+    ]),
+  };
+}
+
+function summarizeBreadcrumb(
+  payload: Record<string, unknown> | null
+): Omit<ReplayActivityEvent, "timestampMs"> | null {
+  const category = firstString(payload?.category);
+  const message = firstString(payload?.message);
+  if (!(category || message)) {
+    return null;
+  }
+
+  return {
+    label: category ?? "breadcrumb",
+    details: compactDetails([message ? `message=${message}` : null]),
+  };
+}
+
+const TAGGED_REPLAY_EVENT_SUMMARIZERS: Record<
+  string,
+  (
+    payload: Record<string, unknown> | null
+  ) => Omit<ReplayActivityEvent, "timestampMs"> | null
+> = {
+  breadcrumb: summarizeBreadcrumb,
+  click: (payload: Record<string, unknown> | null) =>
+    summarizeClickLikeEvent("click", payload, true),
+  deadClick: (payload: Record<string, unknown> | null) =>
+    summarizeClickLikeEvent("dead.click", payload),
+  performanceSpan: summarizePerformanceSpan,
+  rageClick: (payload: Record<string, unknown> | null) =>
+    summarizeClickLikeEvent("rage.click", payload),
+};
+
+function summarizeTaggedReplayEvent(
+  tag: string,
+  payload: Record<string, unknown> | null
+): Omit<ReplayActivityEvent, "timestampMs"> | null {
+  const summarize = TAGGED_REPLAY_EVENT_SUMMARIZERS[tag];
+  return summarize ? summarize(payload) : null;
+}
+
+function summarizeReplayEvent(event: unknown): ReplayActivityEvent | null {
+  if (!isRecord(event)) {
+    return null;
+  }
+
+  const timestampMs = getEventTimestampMillis(event.timestamp);
+  const data = isRecord(event.data) ? event.data : null;
+  const tag = typeof data?.tag === "string" ? data.tag : "";
+  const payload = isRecord(data?.payload) ? data.payload : null;
+
+  if (tag) {
+    const replayEvent = summarizeTaggedReplayEvent(tag, payload);
+    if (replayEvent) {
+      return { timestampMs, ...replayEvent };
+    }
+  }
+
+  const href = firstString(data?.href);
+  if (href) {
+    return {
+      timestampMs,
+      label: "page.view",
+      details: [`href=${href}`],
+    };
+  }
+
+  return null;
+}
+
+function extractReplayActivityEvents(
+  segments: ReplayRecordingSegments | null
+): ReplayActivityEvent[] {
+  if (!segments) {
+    return [];
+  }
+
+  const events: ReplayActivityEvent[] = [];
+  for (const segment of segments) {
+    for (const event of segment) {
+      const replayEvent = summarizeReplayEvent(event);
+      if (replayEvent) {
+        events.push(replayEvent);
+      }
+      if (events.length >= MAX_ACTIVITY_EVENTS) {
+        return events;
+      }
+    }
+  }
+
+  return events;
+}
+
+type ReplayProjectScope = {
+  org: string;
+  project?: string;
+  expectedProjectId?: string;
+  replayId: string;
+  replay: ReplayDetails;
+};
+
+async function validateReplayProjectScope(
+  scope: ReplayProjectScope
+): Promise<void> {
+  const { expectedProjectId, org, project, replay, replayId } = scope;
+  if (!project) {
     return;
   }
-  return (
-    user.display_name ??
-    user.username ??
-    user.email ??
-    user.id ??
-    user.ip ??
-    undefined
+
+  const projectId = expectedProjectId ?? (await getProject(org, project)).id;
+  if (
+    replay.project_id === null ||
+    replay.project_id === undefined ||
+    String(projectId) !== String(replay.project_id)
+  ) {
+    throw new ResolutionError(
+      `Replay '${replayId}'`,
+      `is not in project '${project}'`,
+      `sentry replay view ${org}/${project}/${replayId}`,
+      [
+        `Open the org-scoped replay instead: sentry replay view ${org}/${replayId}`,
+      ]
+    );
+  }
+}
+
+async function fetchReplayActivity(
+  org: string,
+  replay: ReplayDetails
+): Promise<ReplayActivityEvent[]> {
+  if (
+    replay.is_archived ||
+    !replay.project_id ||
+    (replay.count_segments ?? 0) <= 0
+  ) {
+    return [];
+  }
+
+  try {
+    const segments = await getReplayRecordingSegments(
+      org,
+      String(replay.project_id),
+      replay.id
+    );
+    return extractReplayActivityEvents(segments);
+  } catch {
+    return [];
+  }
+}
+
+function fetchRelatedReplayIssues(
+  org: string,
+  replay: ReplayDetails
+): Promise<ReplayRelatedIssue[]> {
+  const eventIds = replay.error_ids.slice(0, MAX_RELATED_ERRORS);
+
+  return Promise.all(
+    eventIds.map(async (eventId) => {
+      try {
+        const page = await listIssuesPaginated(org, "", {
+          query: eventId,
+          perPage: 1,
+        });
+        const issue = page.data[0];
+        return {
+          eventId,
+          issueId: issue?.id ?? null,
+          shortId: issue?.shortId ?? null,
+          title: issue?.title ?? null,
+        };
+      } catch {
+        return { eventId, issueId: null, shortId: null, title: null };
+      }
+    })
   );
+}
+
+function fetchRelatedReplayTraces(
+  org: string,
+  replay: ReplayDetails
+): Promise<ReplayRelatedTrace[]> {
+  const traceIds = replay.trace_ids.slice(0, MAX_RELATED_TRACES);
+
+  return Promise.all(
+    traceIds.map(async (traceId) => {
+      try {
+        const meta = await getTraceMeta(org, traceId);
+        return {
+          traceId,
+          errorCount: meta.errors,
+          logCount: meta.logs,
+          performanceIssueCount: meta.performance_issues,
+          spanCount: meta.span_count,
+        };
+      } catch {
+        return {
+          traceId,
+          errorCount: null,
+          logCount: null,
+          performanceIssueCount: null,
+          spanCount: null,
+        };
+      }
+    })
+  );
+}
+
+async function enrichReplayView(
+  org: string,
+  replay: ReplayDetails
+): Promise<
+  Pick<ReplayViewData, "activity" | "relatedIssues" | "relatedTraces">
+> {
+  const [activity, relatedIssues, relatedTraces] = await Promise.all([
+    fetchReplayActivity(org, replay),
+    fetchRelatedReplayIssues(org, replay),
+    fetchRelatedReplayTraces(org, replay),
+  ]);
+
+  return { activity, relatedIssues, relatedTraces };
 }
 
 function formatList(values: string[] | undefined): string | undefined {
@@ -232,8 +543,12 @@ function formatReplayLocation(replay: ReplayDetails): string | undefined {
   return location ? escapeMarkdownCell(location) : undefined;
 }
 
-function buildReplayOverviewRows(replay: ReplayDetails): MarkdownRow[] {
+function buildReplayOverviewRows(
+  org: string,
+  replay: ReplayDetails
+): MarkdownRow[] {
   const rows: MarkdownRow[] = [["Replay ID", `\`${replay.id}\``]];
+  pushMarkdownRow(rows, "Link", buildReplayUrl(org, replay.id));
 
   pushMarkdownRow(
     rows,
@@ -296,7 +611,7 @@ function buildReplayOverviewRows(replay: ReplayDetails): MarkdownRow[] {
 
 function buildReplayUserRows(replay: ReplayDetails): MarkdownRow[] {
   const rows: MarkdownRow[] = [];
-  const userLabel = replayUserLabel(replay);
+  const userLabel = getReplayUserLabel(replay);
   pushMarkdownRow(
     rows,
     "User",
@@ -393,12 +708,107 @@ function pushTagsSection(lines: string[], replay: ReplayDetails): void {
   }
 }
 
-function formatReplayDetails(replay: ReplayDetails): string {
+function pushActivitySection(
+  lines: string[],
+  replay: ReplayDetails,
+  activity: ReplayActivityEvent[]
+): void {
+  lines.push("");
+  lines.push("### Activity");
+  lines.push("");
+
+  if (replay.is_archived) {
+    lines.push("Recording is archived and not available for playback.");
+    return;
+  }
+
+  if (activity.length === 0) {
+    lines.push("No activity events recorded.");
+    return;
+  }
+
+  const startTime = activity[0]?.timestampMs ?? null;
+  for (const event of activity) {
+    const prefix =
+      event.timestampMs !== null && startTime !== null
+        ? `${formatRelativeOffset(event.timestampMs - startTime)} · `
+        : "";
+    const details =
+      event.details.length > 0
+        ? ` · ${event.details.map((detail) => escapeMarkdownInline(detail)).join(" · ")}`
+        : "";
+    lines.push(`- ${prefix}\`${escapeMarkdownInline(event.label)}\`${details}`);
+  }
+}
+
+function formatRelatedIssueLine(
+  org: string,
+  issue: ReplayRelatedIssue
+): string {
+  if (!(issue.shortId && issue.title)) {
+    return `- Event \`${issue.eventId}\``;
+  }
+
+  return `- \`${issue.shortId}\`: ${escapeMarkdownInline(issue.title)} (view: \`sentry issue view ${org}/${issue.shortId}\`)`;
+}
+
+function buildRelatedTraceStats(trace: ReplayRelatedTrace): string[] {
+  return [
+    trace.spanCount !== null && trace.spanCount !== undefined
+      ? `${trace.spanCount} spans`
+      : null,
+    trace.errorCount !== null && trace.errorCount !== undefined
+      ? `${trace.errorCount} errors`
+      : null,
+    trace.logCount !== null && trace.logCount !== undefined
+      ? `${trace.logCount} logs`
+      : null,
+    trace.performanceIssueCount !== null &&
+    trace.performanceIssueCount !== undefined
+      ? `${trace.performanceIssueCount} perf issues`
+      : null,
+  ].filter((value): value is string => value !== null);
+}
+
+function formatRelatedTraceLine(
+  org: string,
+  trace: ReplayRelatedTrace
+): string {
+  const stats = buildRelatedTraceStats(trace);
+  const suffix = stats.length > 0 ? ` (${stats.join(", ")})` : "";
+  return `- Trace \`${trace.traceId}\`${suffix} (view: \`sentry trace view ${org}/${trace.traceId}\`)`;
+}
+
+function pushRelatedSection(
+  lines: string[],
+  org: string,
+  relatedIssues: ReplayRelatedIssue[],
+  relatedTraces: ReplayRelatedTrace[]
+): void {
+  if (relatedIssues.length === 0 && relatedTraces.length === 0) {
+    return;
+  }
+
+  lines.push("");
+  lines.push("### Related");
+  lines.push("");
+
+  for (const issue of relatedIssues) {
+    lines.push(formatRelatedIssueLine(org, issue));
+  }
+
+  for (const trace of relatedTraces) {
+    lines.push(formatRelatedTraceLine(org, trace));
+  }
+}
+
+function formatReplayDetails(data: ReplayViewData): string {
+  const { activity, org, relatedIssues, relatedTraces, replay } = data;
   const lines: string[] = [];
 
   lines.push(`## Replay \`${replay.id.slice(0, 8)}\``);
   lines.push("");
-  lines.push(mdKvTable(buildReplayOverviewRows(replay)));
+  lines.push(mdKvTable(buildReplayOverviewRows(org, replay)));
 
   pushKvSection(lines, buildReplayUserRows(replay), "User");
   pushKvSection(lines, buildReplayClientRows(replay), "Client");
@@ -407,16 +817,24 @@ function formatReplayDetails(replay: ReplayDetails): string {
   pushListSection(lines, "URLs", replay.urls);
   pushListSection(lines, "Trace IDs", replay.trace_ids);
   pushListSection(lines, "Error IDs", replay.error_ids);
+  pushActivitySection(lines, replay, activity);
+  pushRelatedSection(lines, org, relatedIssues, relatedTraces);
   pushTagsSection(lines, replay);
 
   return renderMarkdown(lines.join("\n"));
 }
 
-function replayHint(org: string, replay: ReplayDetails): string | undefined {
-  const traceId = replay.trace_ids?.[0];
+function replayHint(data: ReplayViewData): string | undefined {
+  const traceId = data.replay.trace_ids?.[0];
   if (traceId) {
-    return `Related trace: sentry trace view ${org}/${traceId}`;
+    return `Related trace: sentry trace view ${data.org}/${traceId}`;
   }
+
+  const issue = data.relatedIssues[0];
+  if (issue?.shortId) {
+    return `Related issue: sentry issue view ${data.org}/${issue.shortId}`;
+  }
+
   return;
 }
 
@@ -439,9 +857,19 @@ export const viewCommand = buildCommand({
   },
   output: {
     human: formatReplayDetails,
-    jsonTransform: (replay: ReplayDetails, fields?: string[]) =>
-      fields && fields.length > 0 ? filterFields(replay, fields) : replay,
-    schema: ReplayDetailsOutputSchema,
+    jsonTransform: (data: ReplayViewData, fields?: string[]) => {
+      const result: Record<string, unknown> = {
+        ...data.replay,
+        org: data.org,
+        activity: data.activity,
+        relatedIssues: data.relatedIssues,
+        relatedTraces: data.relatedTraces,
+      };
+      return fields && fields.length > 0
+        ? filterFields(result, fields)
+        : result;
+    },
+    schema: ReplayViewOutputSchema,
   },
   parameters: {
     positional: {
@@ -501,7 +929,22 @@ export const viewCommand = buildCommand({
       throw error;
     }
 
-    yield new CommandOutput(replay);
-    return { hint: replayHint(resolved.org, replay) };
+    await validateReplayProjectScope({
+      org: resolved.org,
+      project: resolved.project,
+      expectedProjectId: resolved.projectData?.id,
+      replayId,
+      replay,
+    });
+
+    const enrichment = await enrichReplayView(resolved.org, replay);
+    const data: ReplayViewData = {
+      org: resolved.org,
+      replay,
+      ...enrichment,
+    };
+
+    yield new CommandOutput(data);
+    return { hint: replayHint(data) };
   },
 });

@@ -47,6 +47,7 @@ export {
 } from "./oauth.js";
 // Replay types and schemas
 export type {
+  ReplayActivityEvent,
   ReplayBrowser,
   ReplayDetails,
   ReplayDetailsResponse,
@@ -57,11 +58,15 @@ export type {
   ReplayListResponse,
   ReplayOs,
   ReplayOtaUpdates,
+  ReplayRecordingSegments,
+  ReplayRelatedIssue,
+  ReplayRelatedTrace,
   ReplaySdk,
   ReplayUser,
 } from "./replay.js";
 export {
   REPLAY_LIST_FIELDS,
+  ReplayActivityEventSchema,
   ReplayBrowserSchema,
   ReplayDetailsOutputSchema,
   ReplayDetailsResponseSchema,
@@ -74,8 +79,12 @@ export {
   ReplayListResponseSchema,
   ReplayOsSchema,
   ReplayOtaUpdatesSchema,
+  ReplayRecordingSegmentsSchema,
+  ReplayRelatedIssueSchema,
+  ReplayRelatedTraceSchema,
   ReplaySdkSchema,
   ReplayUserSchema,
+  ReplayViewOutputSchema,
 } from "./replay.js";
 export type {
   AutofixResponse,
@@ -131,6 +140,7 @@ export type {
   TraceContext,
   TraceLog,
   TraceLogsResponse,
+  TraceMeta,
   TraceSpan,
   TransactionListItem,
   TransactionsResponse,
@@ -156,6 +166,7 @@ export {
   SpansResponseSchema,
   TraceLogSchema,
   TraceLogsResponseSchema,
+  TraceMetaSchema,
   TransactionListItemSchema,
   TransactionsResponseSchema,
   UserRegionsResponseSchema,

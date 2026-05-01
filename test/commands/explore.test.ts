@@ -19,7 +19,7 @@ import { exploreCommand } from "../../src/commands/explore.js";
 import * as apiClient from "../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as paginationDb from "../../src/lib/db/pagination.js";
-import { ContextError } from "../../src/lib/errors.js";
+import { ContextError, ValidationError } from "../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../src/lib/resolve-target.js";
 import { parsePeriod } from "../../src/lib/time-range.js";
@@ -71,7 +71,26 @@ const MOCK_EVENTS_RESPONSE = {
   },
 };
 
+const MOCK_REPLAYS_RESPONSE = [
+  {
+    id: "346789a703f6454384f1de473b8b9fcc",
+    count_dead_clicks: 1,
+    count_errors: 2,
+    count_rage_clicks: 3,
+    duration: 125,
+    error_ids: ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+    info_ids: [],
+    started_at: "2025-01-30T14:32:15+00:00",
+    tags: {},
+    trace_ids: ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+    urls: ["/checkout"],
+    user: { email: "user@example.com" },
+    warning_ids: [],
+  },
+];
+
 let queryEventsSpy: ReturnType<typeof spyOn>;
+let listReplaysSpy: ReturnType<typeof spyOn>;
 let resolveTargetSpy: ReturnType<typeof spyOn>;
 let resolveCursorSpy: ReturnType<typeof spyOn>;
 let advancePaginationStateSpy: ReturnType<typeof spyOn>;
@@ -83,6 +102,11 @@ beforeEach(async () => {
   queryEventsSpy = spyOn(apiClient, "queryEvents");
   queryEventsSpy.mockResolvedValue({
     data: MOCK_EVENTS_RESPONSE,
+    nextCursor: undefined,
+  });
+  listReplaysSpy = spyOn(apiClient, "listReplays");
+  listReplaysSpy.mockResolvedValue({
+    data: MOCK_REPLAYS_RESPONSE,
     nextCursor: undefined,
   });
 
@@ -105,6 +129,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   queryEventsSpy.mockRestore();
+  listReplaysSpy.mockRestore();
   resolveTargetSpy.mockRestore();
   resolveCursorSpy.mockRestore();
   advancePaginationStateSpy.mockRestore();
@@ -298,6 +323,35 @@ describe("sentry explore", () => {
         expect.objectContaining({ limit: 100 })
       );
     });
+
+    test("routes replay dataset queries through the replay index API", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+      const { context } = createContext();
+
+      await func.call(
+        context,
+        {
+          ...DEFAULT_FLAGS,
+          dataset: "replays",
+          environment: ["production,canary"],
+          field: ["id", "user.email", "count_errors", "url"],
+          sort: "-count_errors",
+        },
+        "test-org/cli"
+      );
+
+      expect(listReplaysSpy).toHaveBeenCalledWith("test-org", {
+        cursor: undefined,
+        environment: ["production", "canary"],
+        fields: ["id", "user", "count_errors", "urls"],
+        limit: 25,
+        projectSlugs: ["cli"],
+        query: undefined,
+        sort: "-count_errors",
+        statsPeriod: "24h",
+      });
+      expect(queryEventsSpy).not.toHaveBeenCalled();
+    });
   });
 
   describe("sort handling", () => {
@@ -344,6 +398,22 @@ describe("sentry explore", () => {
       expect(queryEventsSpy).toHaveBeenCalledWith(
         "test-org",
         expect.objectContaining({ sort: undefined })
+      );
+    });
+
+    test("defaults replay dataset sort to -started_at", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      await func.call(
+        context,
+        { ...DEFAULT_FLAGS, dataset: "replays" },
+        "test-org/"
+      );
+
+      expect(listReplaysSpy).toHaveBeenCalledWith(
+        "test-org",
+        expect.objectContaining({ sort: "-started_at" })
       );
     });
   });
@@ -426,6 +496,31 @@ describe("sentry explore", () => {
       expect(parsed.meta).toBeDefined();
     });
 
+    test("renders replay dataset JSON output with flattened replay rows", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context, getStdout } = createContext();
+
+      await func.call(
+        context,
+        {
+          ...DEFAULT_FLAGS,
+          dataset: "replays",
+          field: ["id", "user.email", "count_errors", "url"],
+          json: true,
+        },
+        "test-org/"
+      );
+
+      const parsed = JSON.parse(getStdout());
+      expect(parsed.dataset).toBe("replays");
+      expect(parsed.data[0]).toEqual({
+        id: "346789a703f6454384f1de473b8b9fcc",
+        "user.email": "user@example.com",
+        count_errors: 2,
+        url: "/checkout",
+      });
+    });
+
     test("shows empty message when no results", async () => {
       resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       queryEventsSpy.mockResolvedValue({
@@ -472,6 +567,21 @@ describe("sentry explore", () => {
         "next",
         "cursor123"
       );
+    });
+  });
+
+  describe("validation", () => {
+    test("rejects --environment on non-replay datasets", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      await expect(
+        func.call(
+          context,
+          { ...DEFAULT_FLAGS, environment: ["production"] },
+          "test-org/"
+        )
+      ).rejects.toThrow(ValidationError);
     });
   });
 });

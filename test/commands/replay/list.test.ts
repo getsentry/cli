@@ -26,6 +26,7 @@ describe("parseSort", () => {
     expect(parseSort("date")).toBe("-started_at");
     expect(parseSort("duration")).toBe("-duration");
     expect(parseSort("errors")).toBe("-count_errors");
+    expect(parseSort("-count_rage_clicks")).toBe("-count_rage_clicks");
   });
 
   test("throws for invalid sort value", () => {
@@ -110,6 +111,7 @@ describe("listCommand.func", () => {
     );
 
     expect(listReplaysSpy).toHaveBeenCalledWith("test-org", {
+      environment: undefined,
       limit: 25,
       projectSlugs: ["cli"],
       query: undefined,
@@ -124,6 +126,38 @@ describe("listCommand.func", () => {
     expect(parsed.hasPrev).toBe(false);
     expect(parsed.nextCursor).toBe("0:25:0");
     expect(parsed.data[0].id).toBe(sampleReplays[0]?.id);
+  });
+
+  test("passes replay environment filters through to the API", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    listReplaysSpy.mockResolvedValue({
+      data: sampleReplays,
+      nextCursor: undefined,
+    });
+
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      {
+        environment: ["production,canary", "staging"],
+        limit: 25,
+        json: true,
+        period: parsePeriod("7d"),
+        sort: "-started_at",
+      },
+      "test-org/cli"
+    );
+
+    expect(listReplaysSpy).toHaveBeenCalledWith("test-org", {
+      environment: ["production", "canary", "staging"],
+      limit: 25,
+      projectSlugs: ["cli"],
+      query: undefined,
+      sort: "-started_at",
+      cursor: undefined,
+      statsPeriod: "7d",
+    });
   });
 
   test("renders human output with a replay hint", async () => {
