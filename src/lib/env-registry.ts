@@ -175,6 +175,24 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
     example: "1",
     installOnly: true,
   },
+  // -- TLS / Certificates --
+  {
+    name: "NODE_EXTRA_CA_CERTS",
+    description:
+      "Path to a PEM file containing additional CA certificates to trust. " +
+      "Useful behind corporate TLS-intercepting proxies (Zscaler, Netskope, etc.).\n\n" +
+      "Can also be set persistently with `sentry cli defaults ca-cert`.",
+    example: "/path/to/corporate-ca.pem",
+    selfHosted: true,
+  },
+  {
+    name: "SSL_CERT_FILE",
+    description:
+      "Fallback path to a PEM CA certificate bundle. " +
+      "Read when `NODE_EXTRA_CA_CERTS` is not set.",
+    example: "/etc/ssl/certs/ca-certificates.crt",
+    selfHosted: true,
+  },
   // -- Display --
   {
     name: "SENTRY_PLAIN_OUTPUT",

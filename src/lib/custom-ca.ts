@@ -1,0 +1,191 @@
+/**
+ * Custom CA certificate loading for corporate TLS proxies.
+ *
+ * Reads CA bundles from (in priority order):
+ * 1. `sentry cli defaults ca-cert` (stored path in SQLite)
+ * 2. `NODE_EXTRA_CA_CERTS` env var
+ * 3. `SSL_CERT_FILE` env var
+ *
+ * Returns a `tls` options object for Bun's `fetch()`. On the Node.js npm
+ * distribution, Node natively honors `NODE_EXTRA_CA_CERTS` so the extra
+ * `tls.ca` option is harmless (ignored by Node's fetch).
+ *
+ * Security model: When the CA source is an env var (not a stored default)
+ * AND the target is SaaS (`*.sentry.io`), a one-time warning is logged.
+ * `sentry cli defaults ca-cert` silences the warning — the user has
+ * explicitly acknowledged the custom CA. See CLI-1K6 plan for the full
+ * threat model discussion.
+ */
+
+import { getDefaultCaCert } from "./db/defaults.js";
+import { getEnv } from "./env.js";
+import { logger } from "./logger.js";
+import { isSentrySaasUrl } from "./sentry-urls.js";
+
+const log = logger.withTag("tls");
+
+/** Where the loaded CA came from */
+export type CaSource = "default" | "env" | "none";
+
+/** Cached resolved state — computed once per process */
+let resolved: { tls: { ca: string } } | undefined;
+let resolvedSource: CaSource = "none";
+let hasResolved = false;
+let warnedSaas = false;
+
+/**
+ * Attempt to read a PEM file. Returns the file contents on success,
+ * or undefined if the file doesn't exist or can't be read.
+ * Never throws — a missing CA file shouldn't crash the CLI.
+ */
+async function tryReadPem(path: string): Promise<string | undefined> {
+  try {
+    const file = Bun.file(path);
+    if (!(await file.exists())) {
+      log.warn(`CA certificate file not found: ${path}`);
+      return;
+    }
+    const content = await file.text();
+    if (!content.includes("-----BEGIN")) {
+      log.warn(
+        `CA certificate file does not appear to contain PEM data: ${path}`
+      );
+      return;
+    }
+    return content;
+  } catch {
+    log.warn(`Failed to read CA certificate file: ${path}`);
+    return;
+  }
+}
+
+/**
+ * Resolve custom CA certificates. Cached after first call.
+ *
+ * Priority:
+ * 1. Stored default (`sentry cli defaults ca-cert`)
+ * 2. `NODE_EXTRA_CA_CERTS` env var
+ * 3. `SSL_CERT_FILE` env var
+ */
+async function resolve(): Promise<void> {
+  if (hasResolved) {
+    return;
+  }
+  hasResolved = true;
+
+  // 1. Stored default — highest priority, silences SaaS warning
+  const storedPath = getDefaultCaCert();
+  if (storedPath) {
+    const pem = await tryReadPem(storedPath);
+    if (pem) {
+      resolved = { tls: { ca: pem } };
+      resolvedSource = "default";
+      log.debug(`Loaded CA certificates from stored default: ${storedPath}`);
+      return;
+    }
+    // Stored path is stale/invalid — fall through to env vars
+  }
+
+  // 2. NODE_EXTRA_CA_CERTS
+  const env = getEnv();
+  const extraCerts = env.NODE_EXTRA_CA_CERTS?.trim();
+  if (extraCerts) {
+    const pem = await tryReadPem(extraCerts);
+    if (pem) {
+      resolved = { tls: { ca: pem } };
+      resolvedSource = "env";
+      log.debug(
+        `Loaded CA certificates from NODE_EXTRA_CA_CERTS: ${extraCerts}`
+      );
+      return;
+    }
+  }
+
+  // 3. SSL_CERT_FILE
+  const sslCertFile = env.SSL_CERT_FILE?.trim();
+  if (sslCertFile) {
+    const pem = await tryReadPem(sslCertFile);
+    if (pem) {
+      resolved = { tls: { ca: pem } };
+      resolvedSource = "env";
+      log.debug(`Loaded CA certificates from SSL_CERT_FILE: ${sslCertFile}`);
+      return;
+    }
+  }
+}
+
+/**
+ * Get the `tls` options to spread into Bun's `fetch()` call.
+ * Returns undefined when no custom CAs are configured.
+ */
+export async function getCustomTlsOptions(): Promise<
+  { tls: { ca: string } } | undefined
+> {
+  await resolve();
+  return resolved;
+}
+
+/** Get the source of the loaded CA certificates. */
+export function getCustomCaSource(): CaSource {
+  return resolvedSource;
+}
+
+/**
+ * Log a one-time warning when env-sourced CAs are used for SaaS targets.
+ *
+ * Stored defaults (via `sentry cli defaults ca-cert`) are treated as
+ * explicit user acknowledgment and do NOT trigger this warning.
+ */
+export function warnIfSaasWithEnvCa(targetUrl: string): void {
+  if (warnedSaas || resolvedSource !== "env") {
+    return;
+  }
+  if (!isSentrySaasUrl(targetUrl)) {
+    return;
+  }
+  warnedSaas = true;
+
+  const envVar = getEnv().NODE_EXTRA_CA_CERTS?.trim()
+    ? "NODE_EXTRA_CA_CERTS"
+    : "SSL_CERT_FILE";
+
+  log.warn(
+    `Using custom CA certificates from ${envVar} for sentry.io connections.\n` +
+      "  If you intended this (e.g. corporate proxy), silence this warning:\n" +
+      "    sentry cli defaults ca-cert /path/to/cert.pem"
+  );
+}
+
+/**
+ * TLS certificate error patterns from BoringSSL (Bun), OpenSSL (Node), and
+ * common TLS libraries. These are deterministic — retrying won't help.
+ */
+const TLS_ERROR_PATTERNS = [
+  "unable to get local issuer certificate",
+  "unable to verify the first certificate",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "CERT_HAS_EXPIRED",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+] as const;
+
+/** Check if an error is a TLS certificate verification failure. */
+export function isTlsCertError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const msg = error.message;
+  return TLS_ERROR_PATTERNS.some((pattern) => msg.includes(pattern));
+}
+
+/**
+ * Reset all cached state. Test-only — not exported from the public API.
+ * @internal
+ */
+export function __resetForTests(): void {
+  resolved = undefined;
+  resolvedSource = "none";
+  hasResolved = false;
+  warnedSaas = false;
+}

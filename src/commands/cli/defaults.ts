@@ -3,11 +3,12 @@
  *
  * View and manage persistent CLI default settings.
  *
- * Supports four defaults:
+ * Supports these defaults:
  * - `org` / `organization` — default organization slug
  * - `project` — default project slug
  * - `telemetry` — telemetry preference (on/off)
  * - `url` — Sentry instance URL (for self-hosted)
+ * - `ca-cert` — path to PEM file with custom CA certificates
  */
 
 import type { SentryContext } from "../../context.js";
@@ -18,11 +19,13 @@ import {
   clearAllDefaults,
   type DefaultsState,
   getAllDefaults,
+  getDefaultCaCert,
   getDefaultHeaders,
   getDefaultOrganization,
   getDefaultProject,
   getDefaultUrl,
   getTelemetryPreference,
+  setDefaultCaCert,
   setDefaultHeaders,
   setDefaultOrganization,
   setDefaultProject,
@@ -47,7 +50,13 @@ import { computeTelemetryEffective } from "../../lib/telemetry.js";
 // ---------------------------------------------------------------------------
 
 /** Canonical key names matching DefaultsState fields */
-type DefaultKey = "organization" | "project" | "telemetry" | "url" | "headers";
+type DefaultKey =
+  | "organization"
+  | "project"
+  | "telemetry"
+  | "url"
+  | "headers"
+  | "ca-cert";
 
 /** Handler for reading, writing, and clearing a single default */
 type DefaultHandler = {
@@ -131,6 +140,38 @@ const DEFAULTS_REGISTRY: Record<DefaultKey, DefaultHandler> = {
     },
     clear: () => setDefaultHeaders(null),
   },
+  "ca-cert": {
+    get: getDefaultCaCert,
+    set: (value) => {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        throw new ValidationError(
+          "CA certificate path cannot be empty.",
+          "ca-cert"
+        );
+      }
+      const { resolve } = require("node:path") as typeof import("node:path");
+      const resolved = resolve(trimmed);
+      let content: string;
+      try {
+        const { readFileSync } = require("node:fs") as typeof import("node:fs");
+        content = readFileSync(resolved, "utf-8");
+      } catch {
+        throw new ValidationError(
+          `CA certificate file not found or not readable: ${resolved}`,
+          "ca-cert"
+        );
+      }
+      if (!content.includes("-----BEGIN CERTIFICATE-----")) {
+        throw new ValidationError(
+          "File does not contain PEM certificate data (expected -----BEGIN CERTIFICATE-----).",
+          "ca-cert"
+        );
+      }
+      setDefaultCaCert(resolved);
+    },
+    clear: () => setDefaultCaCert(null),
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -140,6 +181,9 @@ const DEFAULTS_REGISTRY: Record<DefaultKey, DefaultHandler> = {
 /** Shorthand aliases for canonical keys (e.g., "org" → "organization") */
 const KEY_ALIASES: Partial<Record<string, DefaultKey>> = {
   org: "organization",
+  ca: "ca-cert",
+  cert: "ca-cert",
+  "ca-certs": "ca-cert",
 };
 
 /** Resolve a user-provided key string to a canonical key, or null if unknown */
@@ -196,6 +240,7 @@ export const defaultsCommand = buildCommand({
       "sentry cli defaults telemetry off      # Disable telemetry\n" +
       "sentry cli defaults url https://...    # Set Sentry URL (self-hosted)\n" +
       "sentry cli defaults headers 'X-IAP: t'  # Set custom headers (self-hosted)\n" +
+      "sentry cli defaults ca-cert /path/to/ca.pem  # Trust a custom CA certificate\n" +
       "sentry cli defaults org --clear        # Clear a specific default\n" +
       "sentry cli defaults --clear --yes      # Clear all defaults\n" +
       "```\n\n" +
@@ -206,7 +251,8 @@ export const defaultsCommand = buildCommand({
       "| `project` | Default project slug |\n" +
       "| `telemetry` | Telemetry preference (on/off, yes/no, true/false, 1/0) |\n" +
       "| `url` | Sentry instance URL (for self-hosted installations) |\n" +
-      "| `headers` | Custom HTTP headers for self-hosted proxies (semicolon-separated `Name: Value`) |",
+      "| `headers` | Custom HTTP headers for self-hosted proxies (semicolon-separated `Name: Value`) |\n" +
+      "| `ca-cert` | Path to PEM file with custom CA certificates (for corporate proxies) |",
   },
   output: {
     human: formatDefaultsResult,
@@ -260,7 +306,7 @@ export const defaultsCommand = buildCommand({
         guardNonInteractive(flags);
         if (!isConfirmationBypassed(flags)) {
           const confirmed = await log.prompt(
-            "This will clear all defaults (organization, project, telemetry, URL, headers). Continue?",
+            "This will clear all defaults (organization, project, telemetry, URL, headers, ca-cert). Continue?",
             { type: "confirm" }
           );
           if (confirmed !== true) {

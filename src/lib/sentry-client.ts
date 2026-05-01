@@ -16,9 +16,15 @@ import {
   getConfiguredSentryUrl,
   getUserAgent,
 } from "./constants.js";
+import {
+  getCustomCaSource,
+  getCustomTlsOptions,
+  isTlsCertError,
+  warnIfSaasWithEnvCa,
+} from "./custom-ca.js";
 import { applyCustomHeaders } from "./custom-headers.js";
 import { getAuthToken, refreshToken } from "./db/auth.js";
-import { HostScopeError, TimeoutError } from "./errors.js";
+import { ApiError, HostScopeError, TimeoutError } from "./errors.js";
 import { logger } from "./logger.js";
 import {
   clearLastCacheHitAge,
@@ -250,10 +256,19 @@ async function fetchWithTimeout({
   linkAbortSignal(externalSignal, controller);
 
   try {
+    // Spread custom TLS options (CA certs for corporate proxies).
+    // On Bun, this passes `tls: { ca }` to fetch(); on Node, the
+    // extra property is harmless (Node honors NODE_EXTRA_CA_CERTS natively).
+    const customTls = await getCustomTlsOptions();
+    if (customTls) {
+      warnIfSaasWithEnvCa(extractFullUrl(input));
+    }
+
     return await fetch(input, {
       ...init,
       headers,
       signal: controller.signal,
+      ...customTls,
     });
   } catch (error) {
     if (timedOut) {
@@ -298,18 +313,61 @@ async function handleResponse(
 }
 
 /**
+ * Build a user-friendly error message for TLS certificate failures.
+ * Content varies based on whether custom CAs are already loaded.
+ */
+function buildTlsErrorMessage(error: Error, hasCustomCa: boolean): string {
+  const cause = error.message;
+
+  if (hasCustomCa) {
+    return (
+      `TLS certificate verification failed: ${cause}\n\n` +
+      "  Custom CA certificates are loaded but verification still failed.\n" +
+      "  The certificate file may not contain the correct CA for this server.\n\n" +
+      "  Check that your CA bundle includes the certificate authority used by\n" +
+      "  your network proxy or Sentry instance."
+    );
+  }
+
+  return (
+    `TLS certificate verification failed: ${cause}\n\n` +
+    "  This usually means your network uses a TLS-intercepting proxy\n" +
+    "  (corporate firewall, VPN) with a private certificate authority.\n\n" +
+    "  To fix this, point the CLI to your CA certificate bundle:\n" +
+    "    sentry cli defaults ca-cert /path/to/corporate-ca.pem\n\n" +
+    "  Or set the NODE_EXTRA_CA_CERTS environment variable:\n" +
+    "    export NODE_EXTRA_CA_CERTS=/path/to/corporate-ca.pem"
+  );
+}
+
+/**
  * Decide what to do with a fetch error. User aborts and an internal
- * timeout on the last attempt throw immediately; other errors retry
- * until the last attempt, then propagate.
+ * timeout on the last attempt throw immediately; TLS cert errors throw
+ * immediately with actionable guidance (retrying is pointless); other
+ * errors retry until the last attempt, then propagate.
  */
 function handleFetchError(
   error: unknown,
   signal: AbortSignal | undefined | null,
-  isLastAttempt: boolean
+  isLastAttempt: boolean,
+  hasCustomCa = false
 ): AttemptResult {
   if (isUserAbort(error, signal)) {
     return { action: "throw", error };
   }
+
+  // TLS certificate errors are deterministic — don't retry
+  if (isTlsCertError(error)) {
+    return {
+      action: "throw",
+      error: new ApiError(
+        "TLS certificate error",
+        0,
+        buildTlsErrorMessage(error as Error, hasCustomCa)
+      ),
+    };
+  }
+
   if (isInternalTimeout(error) && isLastAttempt) {
     const timeoutMs =
       (error as { timeoutMs?: number }).timeoutMs ?? REQUEST_TIMEOUT_MS;
@@ -629,7 +687,12 @@ async function executeAttempt({
     });
     return handleResponse(response, headers, isLastAttempt);
   } catch (error) {
-    return handleFetchError(error, init?.signal, isLastAttempt);
+    return handleFetchError(
+      error,
+      init?.signal,
+      isLastAttempt,
+      getCustomCaSource() !== "none"
+    );
   }
 }
 

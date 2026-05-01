@@ -77,6 +77,8 @@ If you pass a self-hosted Sentry URL as a command argument (e.g., an issue or ev
 | `SENTRY_FORCE_ENV_TOKEN` | Force env token over stored OAuth token |
 | `SENTRY_ORG` | Default organization slug |
 | `SENTRY_PROJECT` | Default project slug (supports `org/project` format) |
+| `NODE_EXTRA_CA_CERTS` | Path to PEM file with additional CA certificates (for corporate proxies) |
+| `SSL_CERT_FILE` | Fallback CA certificate bundle path |
 <!-- GENERATED:END self-hosted-env-vars -->
 
 See [Configuration](./configuration/) for the full environment variable reference.
