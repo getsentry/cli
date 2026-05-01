@@ -22,6 +22,7 @@ import {
   parseOrgProjectArg,
   parseSlashSeparatedArg,
   spansFlag,
+  splitNewlineArg,
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
@@ -147,20 +148,6 @@ export function jsonTransformEventView(
 const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
 
 /**
- * Split a single argument on newlines into individual IDs.
- *
- * Agents (Codex, Claude) sometimes paste multiple event IDs as a single
- * newline-separated argument (CLI-1HT). This mirrors `log view`'s
- * `splitLogIds` helper.
- */
-export function splitOnNewlines(arg: string): string[] {
-  return arg
-    .split("\n")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-/**
  * Expand positional args by splitting each on newlines.
  *
  * When an agent pastes `"org/project/id1\nid2\nid3"` as a single arg,
@@ -168,7 +155,7 @@ export function splitOnNewlines(arg: string): string[] {
  * the org/project prefix so `parsePositionalArgs` can extract the target.
  */
 export function expandNewlineArgs(args: string[]): string[] {
-  return args.flatMap(splitOnNewlines);
+  return args.flatMap(splitNewlineArg);
 }
 
 /**
@@ -313,6 +300,17 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
 
   if (args.length === 1) {
     return parseSingleArg(first);
+  }
+
+  // When newline expansion splits "org/project/id1\nid2" into multiple args,
+  // the first arg is "org/project/id1" (2+ slashes). Route it through the
+  // single-arg path to correctly extract org/project vs id, then collect the
+  // remaining args as extra event IDs (CLI-1HT).
+  const slashCount = (first.match(/\//g) ?? []).length;
+  if (slashCount >= 2) {
+    const parsed = parseSingleArg(first);
+    const extraEventIds = args.slice(1);
+    return { ...parsed, extraEventIds };
   }
 
   const second = args[1];

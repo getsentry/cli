@@ -13,6 +13,7 @@ import {
   looksLikeIssueShortId,
   parseOrgProjectArg,
   parseSlashSeparatedArg,
+  splitNewlineArg,
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
@@ -65,12 +66,8 @@ const USAGE_HINT = "sentry log view <org>/<project> <log-id> [<log-id>...]";
  * @param arg - Raw positional argument
  * @returns Array of non-empty trimmed strings
  */
-function splitLogIds(arg: string): string[] {
-  return arg
-    .split("\n")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
+/** @deprecated Use {@link splitNewlineArg} from arg-parsing.ts */
+const splitLogIds = splitNewlineArg;
 
 /**
  * Parse positional arguments for log view.

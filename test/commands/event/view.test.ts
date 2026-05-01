@@ -25,13 +25,15 @@ import {
   resolveAutoDetectTarget,
   resolveEventTarget,
   resolveOrgAllTarget,
-  splitOnNewlines,
   viewCommand,
 } from "../../../src/commands/event/view.js";
 import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
-import { ProjectSpecificationType } from "../../../src/lib/arg-parsing.js";
+import {
+  ProjectSpecificationType,
+  splitNewlineArg,
+} from "../../../src/lib/arg-parsing.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as browser from "../../../src/lib/browser.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
@@ -269,38 +271,20 @@ describe("parsePositionalArgs", () => {
     test("expands newline-separated IDs from single structured arg", () => {
       const multiLineArg =
         "perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d\n60c277e6c73f41c58ca46231b46dc0f8\n722e1158dfa147ec90ed831c4d096ae7";
-      // expandNewlineArgs splits this into:
-      // ["perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d", "60c277e6c73f41c58ca46231b46dc0f8", "722e1158dfa147ec90ed831c4d096ae7"]
-      // parsePositionalArgs sees 3 args: first is org/project/id, rest are extra IDs
-      // But since first has 2 slashes, parseSingleArg routes it through parseSlashSeparatedArg
-      // Actually with 3 args, first is target, second is event ID, rest are extras
-      // Let's test the expanded form directly:
-      const expanded = multiLineArg
-        .split("\n")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
+      const expanded = expandNewlineArgs([multiLineArg]);
       expect(expanded).toEqual([
         "perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d",
         "60c277e6c73f41c58ca46231b46dc0f8",
         "722e1158dfa147ec90ed831c4d096ae7",
       ]);
 
-      // First arg is org/project/id → single-arg path → parseSlashSeparatedArg
-      // → eventId = "189945b37884462cb9134bd5cabeaa3d", targetArg = "perzimo/perzimo-server"
-      // But we have 3 args, so first is target, second is eventId, third is extra
-      // After expansion: ["perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d", ...]
-      // args.length > 1 → first = target, second = event ID
-      // BUT first has 2 slashes, so it's "org/project/id" not a plain target
-      // Actually, the two-arg branch treats first as target, second as event ID
-      // So first = "perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d" (target)
-      //    second = "60c277e6c73f41c58ca46231b46dc0f8" (eventId)
-      //    third = "722e1158dfa147ec90ed831c4d096ae7" (extra)
+      // First arg has 2+ slashes → routed through single-arg path to correctly
+      // extract org/project and first event ID, remaining become extraEventIds.
       const result = parsePositionalArgs(expanded);
-      expect(result.targetArg).toBe(
-        "perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d"
-      );
-      expect(result.eventId).toBe("60c277e6c73f41c58ca46231b46dc0f8");
+      expect(result.targetArg).toBe("perzimo/perzimo-server");
+      expect(result.eventId).toBe("189945b37884462cb9134bd5cabeaa3d");
       expect(result.extraEventIds).toEqual([
+        "60c277e6c73f41c58ca46231b46dc0f8",
         "722e1158dfa147ec90ed831c4d096ae7",
       ]);
     });
@@ -313,6 +297,21 @@ describe("parsePositionalArgs", () => {
       expect(result.eventId).toBe("189945b37884462cb9134bd5cabeaa3d");
       expect(result.targetArg).toBe("perzimo/perzimo-server");
       expect(result.extraEventIds).toBeUndefined();
+    });
+
+    test("first arg with 2+ slashes routes through single-arg path and collects extras", () => {
+      // Simulates expanded "org/project/id1\nid2\nid3" → 3 args
+      const result = parsePositionalArgs([
+        "perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d",
+        "60c277e6c73f41c58ca46231b46dc0f8",
+        "722e1158dfa147ec90ed831c4d096ae7",
+      ]);
+      expect(result.eventId).toBe("189945b37884462cb9134bd5cabeaa3d");
+      expect(result.targetArg).toBe("perzimo/perzimo-server");
+      expect(result.extraEventIds).toEqual([
+        "60c277e6c73f41c58ca46231b46dc0f8",
+        "722e1158dfa147ec90ed831c4d096ae7",
+      ]);
     });
 
     test("collects multiple extra event IDs", () => {
@@ -1255,25 +1254,25 @@ describe("fetchEventWithContext", () => {
 // splitOnNewlines
 // ---------------------------------------------------------------------------
 
-describe("splitOnNewlines", () => {
+describe("splitNewlineArg", () => {
   test("splits on newlines and trims each part", () => {
-    expect(splitOnNewlines("abc\n def \nghi")).toEqual(["abc", "def", "ghi"]);
+    expect(splitNewlineArg("abc\n def \nghi")).toEqual(["abc", "def", "ghi"]);
   });
 
   test("filters out empty lines", () => {
-    expect(splitOnNewlines("abc\n\n\ndef")).toEqual(["abc", "def"]);
+    expect(splitNewlineArg("abc\n\n\ndef")).toEqual(["abc", "def"]);
   });
 
   test("handles CRLF", () => {
-    expect(splitOnNewlines("abc\r\ndef")).toEqual(["abc", "def"]);
+    expect(splitNewlineArg("abc\r\ndef")).toEqual(["abc", "def"]);
   });
 
   test("returns single element for no newlines", () => {
-    expect(splitOnNewlines("abc123")).toEqual(["abc123"]);
+    expect(splitNewlineArg("abc123")).toEqual(["abc123"]);
   });
 
   test("returns empty array for whitespace-only input", () => {
-    expect(splitOnNewlines("  \n  \n  ")).toEqual([]);
+    expect(splitNewlineArg("  \n  \n  ")).toEqual([]);
   });
 });
 

@@ -1088,3 +1088,19 @@ export function buildProjectQuery(
   const pf = `project:${projectFilter}`;
   return query ? `${pf} ${query}` : pf;
 }
+
+/**
+ * Split a single argument on newlines into individual entries.
+ *
+ * Agents sometimes paste multiple IDs as a single newline-separated
+ * argument. This utility trims each line and discards empty ones.
+ *
+ * @param arg - Raw argument string, possibly containing newlines
+ * @returns Non-empty trimmed lines
+ */
+export function splitNewlineArg(arg: string): string[] {
+  return arg
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
