@@ -709,7 +709,10 @@ function pushActivitySection(
     return;
   }
 
-  const startTime = activity[0]?.timestampMs ?? null;
+  const startTime =
+    getEventTimestampMillis(replay.started_at) ??
+    activity[0]?.timestampMs ??
+    null;
   for (const event of activity) {
     const prefix =
       event.timestampMs !== null && startTime !== null

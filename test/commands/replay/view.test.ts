@@ -311,4 +311,32 @@ describe("viewCommand.func", () => {
     expect(output).toContain("CLI-123");
     expect(output).toContain("sentry trace view test-org/");
   });
+
+  test("anchors activity offsets to the replay start time", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    getReplaySpy.mockResolvedValue(
+      sampleReplay({
+        started_at: "2025-01-01T00:00:00.000Z",
+      })
+    );
+    getReplayRecordingSegmentsSpy.mockResolvedValue([
+      [
+        {
+          timestamp: Date.parse("2025-01-01T00:00:05.000Z"),
+          data: { href: "/checkout" },
+        },
+      ],
+    ]);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: false, web: false, fresh: false },
+      REPLAY_ID
+    );
+
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    expect(output).toContain("5s");
+  });
 });

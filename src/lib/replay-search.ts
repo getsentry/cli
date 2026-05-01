@@ -19,6 +19,12 @@ const REPLAY_FIELD_ALIASES = {
   warning_id: "warning_ids",
 } as const satisfies Record<string, string>;
 
+function normalizeReplayField(field: string): string {
+  return Object.hasOwn(REPLAY_FIELD_ALIASES, field)
+    ? REPLAY_FIELD_ALIASES[field as keyof typeof REPLAY_FIELD_ALIASES]
+    : field;
+}
+
 /** Default field set for replay rows shown in `sentry explore --dataset replays`. */
 export const DEFAULT_REPLAY_EXPLORE_FIELDS = [
   "id",
@@ -133,8 +139,7 @@ const REPLAY_FIELD_RESOLVERS: Record<string, ReplayFieldResolver> = {
 };
 
 function replayRequestRoot(field: string): string {
-  const normalized: string =
-    REPLAY_FIELD_ALIASES[field as keyof typeof REPLAY_FIELD_ALIASES] ?? field;
+  const normalized = normalizeReplayField(field);
 
   switch (normalized) {
     case "browser.name":
