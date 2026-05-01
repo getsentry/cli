@@ -4,7 +4,6 @@
  * Reads CA bundles from (in priority order):
  * 1. `sentry cli defaults ca-cert` (stored path in SQLite)
  * 2. `NODE_EXTRA_CA_CERTS` env var
- * 3. `SSL_CERT_FILE` env var
  *
  * Returns a `tls` options object for Bun's `fetch()`. On the Node.js npm
  * distribution, Node natively honors `NODE_EXTRA_CA_CERTS` so the extra
@@ -22,6 +21,20 @@ import { getDefaultCaCert } from "./db/defaults.js";
 import { getEnv } from "./env.js";
 import { logger } from "./logger.js";
 import { isSentrySaasUrl } from "./sentry-urls.js";
+
+/**
+ * Node 24+ exposes `tls.setDefaultCACertificates()` which modifies the
+ * process-wide CA trust store — including for `fetch()`. On Node 22 the
+ * function doesn't exist, and on Bun we use the per-request `tls.ca`
+ * option instead.
+ */
+const setDefaultCACertificates: ((certs: string[]) => void) | undefined =
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  (
+    require("node:tls") as {
+      setDefaultCACertificates?: (certs: string[]) => void;
+    }
+  ).setDefaultCACertificates;
 
 const log = logger.withTag("tls");
 
@@ -80,10 +93,28 @@ function tryReadPem(path: string): string | undefined {
 }
 
 /**
+ * On Node 24+, inject the custom CA into the process-wide TLS trust store
+ * so Node's built-in `fetch()` (which ignores the Bun-specific `tls` option)
+ * also uses the custom CAs. On Node 22 this is a no-op; those users rely
+ * on `NODE_EXTRA_CA_CERTS` which Node handles natively.
+ */
+function injectIntoNodeTls(customPem: string): void {
+  if (typeof setDefaultCACertificates !== "function") {
+    return;
+  }
+  try {
+    setDefaultCACertificates([...rootCertificates, customPem]);
+    log.debug("Injected custom CA into Node.js TLS trust store");
+  } catch (err) {
+    log.debug(`Failed to set Node.js default CA certificates: ${err}`);
+  }
+}
+
+/**
  * Resolve custom CA certificates. Runs once per process.
  *
- * Tries sources in priority order: stored default, NODE_EXTRA_CA_CERTS,
- * SSL_CERT_FILE. First readable PEM wins.
+ * Tries sources in priority order: stored default, NODE_EXTRA_CA_CERTS.
+ * First readable PEM wins.
  */
 function resolve(): void {
   if (hasResolved) {
@@ -108,11 +139,6 @@ function resolve(): void {
       source: "env",
       label: "NODE_EXTRA_CA_CERTS",
     },
-    {
-      path: env.SSL_CERT_FILE?.trim() ?? "",
-      source: "env",
-      label: "SSL_CERT_FILE",
-    },
   ];
 
   for (const { path, source, label } of sources) {
@@ -129,6 +155,7 @@ function resolve(): void {
       resolvedSource = source;
       resolvedLabel = label;
       log.debug(`Loaded CA certificates from ${label}: ${path}`);
+      injectIntoNodeTls(pem);
       return;
     }
   }

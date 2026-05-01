@@ -366,7 +366,6 @@ const SELF_HOSTED_TABLE_ENTRIES: readonly [string, string][] = [
     "NODE_EXTRA_CA_CERTS",
     "Path to PEM file with additional CA certificates (for corporate proxies)",
   ],
-  ["SSL_CERT_FILE", "Fallback CA certificate bundle path"],
 ];
 
 /**

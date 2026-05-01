@@ -133,14 +133,11 @@ describe("custom CA loading", () => {
     "-----BEGIN CERTIFICATE-----\nMIIBxyz...\n-----END CERTIFICATE-----\n";
 
   let savedNodeExtra: string | undefined;
-  let savedSslCert: string | undefined;
 
   beforeEach(() => {
     __resetForTests();
     savedNodeExtra = process.env.NODE_EXTRA_CA_CERTS;
-    savedSslCert = process.env.SSL_CERT_FILE;
     delete process.env.NODE_EXTRA_CA_CERTS;
-    delete process.env.SSL_CERT_FILE;
   });
 
   afterEach(() => {
@@ -148,11 +145,6 @@ describe("custom CA loading", () => {
       process.env.NODE_EXTRA_CA_CERTS = savedNodeExtra;
     } else {
       delete process.env.NODE_EXTRA_CA_CERTS;
-    }
-    if (savedSslCert !== undefined) {
-      process.env.SSL_CERT_FILE = savedSslCert;
-    } else {
-      delete process.env.SSL_CERT_FILE;
     }
   });
 
@@ -186,17 +178,6 @@ describe("custom CA loading", () => {
     expect(getCustomCaSource()).toBe("env");
   });
 
-  test("loads CA from SSL_CERT_FILE as fallback", () => {
-    const certPath = join(getConfigDir(), "ssl-cert.pem");
-    writeFileSync(certPath, CERT_PEM);
-    process.env.SSL_CERT_FILE = certPath;
-
-    const result = getCustomTlsOptions();
-    expect(result).toBeDefined();
-    expect(result?.tls.ca).toContain(CERT_PEM);
-    expect(getCustomCaSource()).toBe("env");
-  });
-
   test("stored default takes priority over env vars", () => {
     const defaultPath = join(getConfigDir(), "default-ca.pem");
     const envPath = join(getConfigDir(), "env-ca.pem");
@@ -211,21 +192,6 @@ describe("custom CA loading", () => {
     expect(result?.tls.ca).toContain(CERT_PEM);
     expect(result?.tls.ca).not.toContain("DIFFERENT");
     expect(getCustomCaSource()).toBe("default");
-  });
-
-  test("NODE_EXTRA_CA_CERTS takes priority over SSL_CERT_FILE", () => {
-    const extraPath = join(getConfigDir(), "extra.pem");
-    const sslPath = join(getConfigDir(), "ssl.pem");
-    const SSL_PEM =
-      "-----BEGIN CERTIFICATE-----\nSSLONLY\n-----END CERTIFICATE-----\n";
-    writeFileSync(extraPath, CERT_PEM);
-    writeFileSync(sslPath, SSL_PEM);
-    process.env.NODE_EXTRA_CA_CERTS = extraPath;
-    process.env.SSL_CERT_FILE = sslPath;
-
-    const result = getCustomTlsOptions();
-    expect(result?.tls.ca).toContain(CERT_PEM);
-    expect(result?.tls.ca).not.toContain("SSLONLY");
   });
 
   test("returns undefined when cert file does not exist", () => {
@@ -269,14 +235,11 @@ describe("warnIfSaasWithEnvCa", () => {
     "-----BEGIN CERTIFICATE-----\nMIIBxyz...\n-----END CERTIFICATE-----\n";
 
   let savedNodeExtra: string | undefined;
-  let savedSslCert: string | undefined;
 
   beforeEach(() => {
     __resetForTests();
     savedNodeExtra = process.env.NODE_EXTRA_CA_CERTS;
-    savedSslCert = process.env.SSL_CERT_FILE;
     delete process.env.NODE_EXTRA_CA_CERTS;
-    delete process.env.SSL_CERT_FILE;
   });
 
   afterEach(() => {
@@ -284,11 +247,6 @@ describe("warnIfSaasWithEnvCa", () => {
       process.env.NODE_EXTRA_CA_CERTS = savedNodeExtra;
     } else {
       delete process.env.NODE_EXTRA_CA_CERTS;
-    }
-    if (savedSslCert !== undefined) {
-      process.env.SSL_CERT_FILE = savedSslCert;
-    } else {
-      delete process.env.SSL_CERT_FILE;
     }
   });
 

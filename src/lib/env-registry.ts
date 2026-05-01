@@ -185,14 +185,6 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
     example: "/path/to/corporate-ca.pem",
     selfHosted: true,
   },
-  {
-    name: "SSL_CERT_FILE",
-    description:
-      "Fallback path to a PEM CA certificate bundle. " +
-      "Read when `NODE_EXTRA_CA_CERTS` is not set.",
-    example: "/etc/ssl/certs/ca-certificates.crt",
-    selfHosted: true,
-  },
   // -- Display --
   {
     name: "SENTRY_PLAIN_OUTPUT",
