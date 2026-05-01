@@ -20,6 +20,7 @@ import * as apiClient from "../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as paginationDb from "../../src/lib/db/pagination.js";
 import { ContextError, ValidationError } from "../../src/lib/errors.js";
+import { DEFAULT_REPLAY_EXPLORE_FIELDS } from "../../src/lib/replay-search.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../src/lib/resolve-target.js";
 import { parsePeriod } from "../../src/lib/time-range.js";
@@ -589,6 +590,32 @@ describe("sentry explore", () => {
         "next",
         "cursor123"
       );
+    });
+
+    test("omits replay default fields from pagination hints", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      listReplaysSpy.mockResolvedValue({
+        data: MOCK_REPLAYS_RESPONSE,
+        nextCursor: "cursor123",
+      });
+      const { context, getStdout } = createContext();
+
+      await func.call(
+        context,
+        {
+          ...DEFAULT_FLAGS,
+          dataset: "replays",
+          field: [...DEFAULT_REPLAY_EXPLORE_FIELDS],
+        },
+        "test-org/"
+      );
+
+      const output = getStdout();
+      expect(output).toContain(
+        "sentry explore test-org/ -c next --dataset replays"
+      );
+      expect(output).not.toContain('-F "id"');
+      expect(output).not.toContain('-F "started_at"');
     });
   });
 

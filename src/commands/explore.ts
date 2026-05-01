@@ -306,6 +306,10 @@ function jsonTransformExplore(data: ExploreData, fields?: string[]): unknown {
 /** Default limit value matching the flag default for hint comparison */
 const DEFAULT_LIMIT = 25;
 
+function defaultFieldsForDataset(dataset: string): readonly string[] {
+  return dataset === "replays" ? DEFAULT_REPLAY_EXPLORE_FIELDS : DEFAULT_FIELDS;
+}
+
 /** Append active non-default flags to a base command string */
 function appendFlagHints(
   base: string,
@@ -326,7 +330,10 @@ function appendFlagHints(
   // Include --field flags when non-default
   const fieldList = flags.field ?? [];
   const currentFieldStr = fieldList.join(",");
-  if (currentFieldStr !== DEFAULT_FIELDS.join(",") && fieldList.length > 0) {
+  if (
+    currentFieldStr !== defaultFieldsForDataset(flags.dataset).join(",") &&
+    fieldList.length > 0
+  ) {
     for (const f of fieldList) {
       parts.push(`-F "${f}"`);
     }
@@ -515,10 +522,7 @@ export const exploreCommand = buildListCommand("explore", {
     );
 
     const dataset = flags.dataset;
-    let fieldList = DEFAULT_FIELDS;
-    if (dataset === "replays") {
-      fieldList = [...DEFAULT_REPLAY_EXPLORE_FIELDS];
-    }
+    let fieldList = [...defaultFieldsForDataset(dataset)];
     if (flags.field && flags.field.length > 0) {
       fieldList = flags.field;
     }

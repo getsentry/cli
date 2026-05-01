@@ -193,6 +193,14 @@ describe("viewCommand.func", () => {
     expect(parsed.relatedIssues[0]?.shortId).toBe("CLI-123");
     expect(parsed.relatedTraces[0]?.spanCount).toBe(8);
     expect(parsed.trace_ids[0]).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    expect(listIssuesPaginatedSpy).toHaveBeenCalledWith(
+      "test-org",
+      "",
+      expect.objectContaining({
+        perPage: 1,
+        query: "event.id:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      })
+    );
   });
 
   test("opens the replay in the browser with --web", async () => {

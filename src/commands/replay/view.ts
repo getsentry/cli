@@ -408,7 +408,7 @@ function fetchRelatedReplayIssues(
     eventIds.map(async (eventId) => {
       try {
         const page = await listIssuesPaginated(org, "", {
-          query: eventId,
+          query: `event.id:${eventId}`,
           perPage: 1,
         });
         const issue = page.data[0];
