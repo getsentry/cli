@@ -159,6 +159,11 @@ function replayHint(org: string, event: SentryEvent): string | undefined {
     ? `Related replay: sentry replay view ${org}/${replayId}`
     : undefined;
 }
+
+function joinHintParts(parts: Array<string | undefined>): string | undefined {
+  const hints = parts.filter((part): part is string => Boolean(part));
+  return hints.length > 0 ? hints.join(" | ") : undefined;
+}
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
 
@@ -999,12 +1004,10 @@ export const viewCommand = buildCommand({
         requestedCount: 1,
       });
       return {
-        hint: [
+        hint: joinHintParts([
           issueShortcut.hint,
           replayHint(issueShortcut.org, issueShortcut.data.event),
-        ]
-          .filter(Boolean)
-          .join(" | "),
+        ]),
       };
     }
 
@@ -1061,14 +1064,12 @@ export const viewCommand = buildCommand({
       requestedCount: allEventIds.length,
     });
     return {
-      hint: [
+      hint: joinHintParts([
         target.detectedFrom
           ? `Detected from ${target.detectedFrom}`
           : undefined,
         replayHint(target.org, event),
-      ]
-        .filter(Boolean)
-        .join(" | "),
+      ]),
     };
   },
 });

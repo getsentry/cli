@@ -38,6 +38,7 @@ import {
   targetPatternExplanation,
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
+import { formatReplayDurationCompact } from "../../lib/replay-duration.js";
 import {
   getReplayUserLabel,
   parseReplayEnvironmentFilter,
@@ -119,32 +120,6 @@ function formatCount(value: number | null | undefined): string {
   return value === null || value === undefined ? "0" : String(value);
 }
 
-function formatReplayDuration(seconds: number | null | undefined): string {
-  if (seconds === null || seconds === undefined) {
-    return "—";
-  }
-  const rounded = Math.max(0, Math.round(seconds));
-  if (rounded < 60) {
-    return `${rounded}s`;
-  }
-  if (rounded < 3600) {
-    const minutes = Math.floor(rounded / 60);
-    const remaining = rounded % 60;
-    return remaining > 0 ? `${minutes}m ${remaining}s` : `${minutes}m`;
-  }
-  if (rounded < 86_400) {
-    const hours = Math.floor(rounded / 3600);
-    const remainingMinutes = Math.floor((rounded % 3600) / 60);
-    return remainingMinutes > 0
-      ? `${hours}h ${remainingMinutes}m`
-      : `${hours}h`;
-  }
-
-  const days = Math.floor(rounded / 86_400);
-  const remainingHours = Math.floor((rounded % 86_400) / 3600);
-  return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
-}
-
 function replayUserLabel(replay: ReplayListItem): string {
   return getReplayUserLabel(replay) ?? "—";
 }
@@ -163,7 +138,7 @@ const REPLAY_COLUMNS: Column<ReplayListItem>[] = [
   },
   {
     header: "DURATION",
-    value: (replay) => formatReplayDuration(replay.duration),
+    value: (replay) => formatReplayDurationCompact(replay.duration),
     minWidth: 10,
   },
   {

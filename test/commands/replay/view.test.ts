@@ -255,6 +255,30 @@ describe("viewCommand.func", () => {
     ).rejects.toThrow(ResolutionError);
   });
 
+  test("allows archived replays with no project ID in explicit project scope", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    getReplaySpy.mockResolvedValue(
+      sampleReplay({
+        count_segments: 0,
+        is_archived: true,
+        project_id: null,
+      })
+    );
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: true, web: false, fresh: false },
+      REPLAY_ID
+    );
+
+    expect(getProjectSpy).not.toHaveBeenCalled();
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed.is_archived).toBe(true);
+  });
+
   test("renders activity and related sections in human output", async () => {
     resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
     getReplaySpy.mockResolvedValue(

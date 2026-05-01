@@ -33,6 +33,7 @@ import {
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
+import { formatReplayDurationVerbose } from "../../lib/replay-duration.js";
 import { normalizeReplayId } from "../../lib/replay-id.js";
 import { getReplayUserLabel } from "../../lib/replay-search.js";
 import { resolveOrgOptionalProjectFromArg } from "../../lib/resolve-target.js";
@@ -78,38 +79,6 @@ const USAGE_HINT =
 const MAX_ACTIVITY_EVENTS = 6;
 const MAX_RELATED_ERRORS = 3;
 const MAX_RELATED_TRACES = 2;
-function pluralize(value: number, singular: string): string {
-  return `${value} ${singular}${value === 1 ? "" : "s"}`;
-}
-
-function formatReplayDuration(seconds: number): string {
-  const rounded = Math.max(0, Math.round(seconds));
-  if (rounded < 60) {
-    return pluralize(rounded, "second");
-  }
-
-  const minutes = Math.floor(rounded / 60);
-  const remainingSeconds = rounded % 60;
-  if (minutes < 60) {
-    return remainingSeconds > 0
-      ? `${pluralize(minutes, "minute")} and ${pluralize(remainingSeconds, "second")}`
-      : pluralize(minutes, "minute");
-  }
-
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  if (hours < 24) {
-    return remainingMinutes > 0
-      ? `${pluralize(hours, "hour")} and ${pluralize(remainingMinutes, "minute")}`
-      : pluralize(hours, "hour");
-  }
-
-  const days = Math.floor(hours / 24);
-  const remainingHours = hours % 24;
-  return remainingHours > 0
-    ? `${pluralize(days, "day")} and ${pluralize(remainingHours, "hour")}`
-    : pluralize(days, "day");
-}
 
 function parseSingleArg(arg: string): ParsedPositionalArgs {
   const trimmed = arg.trim();
@@ -377,12 +346,23 @@ async function validateReplayProjectScope(
     return;
   }
 
+  if (replay.project_id === null || replay.project_id === undefined) {
+    if (replay.is_archived) {
+      return;
+    }
+
+    throw new ResolutionError(
+      `Replay '${replayId}'`,
+      "has no project association",
+      `sentry replay view ${org}/${project}/${replayId}`,
+      [
+        `Open the org-scoped replay instead: sentry replay view ${org}/${replayId}`,
+      ]
+    );
+  }
+
   const projectId = expectedProjectId ?? (await getProject(org, project)).id;
-  if (
-    replay.project_id === null ||
-    replay.project_id === undefined ||
-    String(projectId) !== String(replay.project_id)
-  ) {
+  if (String(projectId) !== String(replay.project_id)) {
     throw new ResolutionError(
       `Replay '${replayId}'`,
       `is not in project '${project}'`,
@@ -566,7 +546,7 @@ function buildReplayOverviewRows(
     rows,
     "Duration",
     replay.duration !== null && replay.duration !== undefined
-      ? formatReplayDuration(replay.duration)
+      ? formatReplayDurationVerbose(replay.duration)
       : undefined
   );
   pushMarkdownRow(
