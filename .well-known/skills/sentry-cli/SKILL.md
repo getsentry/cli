@@ -1,6 +1,6 @@
 ---
 name: sentry-cli
-version: 0.30.0
+version: 0.31.0
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 requires:
   bins: ["sentry"]
@@ -316,6 +316,7 @@ Manage Sentry issues
 - `sentry issue view <issue>` — View details of a specific issue
 - `sentry issue resolve <issue>` — Mark an issue as resolved
 - `sentry issue unresolve <issue>` — Reopen a resolved issue
+- `sentry issue archive <issue>` — Archive (ignore) an issue
 - `sentry issue merge <issue...>` — Merge 2+ issues into a single canonical group
 
 → Full flags and examples: `references/issue.md`
