@@ -1,4 +1,9 @@
-import type { ReplayDetails, ReplayListItem } from "../types/index.js";
+import type {
+  ReplayDetails,
+  ReplayListItem,
+  SentryEvent,
+} from "../types/index.js";
+import { tryNormalizeHexId } from "./hex-id.js";
 
 type ReplayLike = ReplayListItem | ReplayDetails;
 type ReplayFieldResolver = (replay: ReplayLike) => unknown;
@@ -212,4 +217,64 @@ export function getReplayFieldValue(
     throw new Error(`Unsupported replay field: ${field}`);
   }
   return resolver(replay);
+}
+
+// ---------------------------------------------------------------------------
+// Replay ID extraction from events
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract the replay ID from the event's `contexts.replay` object.
+ */
+function getReplayIdFromReplayContext(
+  event: Pick<SentryEvent, "contexts">
+): string | undefined {
+  const replayContext = event.contexts?.replay;
+  return typeof replayContext?.replay_id === "string"
+    ? replayContext.replay_id
+    : undefined;
+}
+
+/**
+ * Extract the best replay ID from an event's known replay linkage fields.
+ *
+ * Checks both event tags (`replayId`, `replay.id`) and the replay context.
+ * Returns the first valid, normalized replay ID found.
+ */
+export function getReplayIdFromEvent(
+  event: Pick<SentryEvent, "contexts" | "tags">
+): string | undefined {
+  const tagReplayId = event.tags?.find(
+    (tag) => tag.key === "replayId" || tag.key === "replay.id"
+  )?.value;
+
+  return collectReplayIds([
+    tagReplayId,
+    getReplayIdFromReplayContext(event),
+  ])[0];
+}
+
+/**
+ * Normalize and deduplicate replay IDs while preserving first-seen order.
+ *
+ * Each value is passed through {@link tryNormalizeHexId} — invalid or
+ * duplicate IDs are silently dropped.
+ */
+export function collectReplayIds(
+  values: Iterable<string | null | undefined>
+): string[] {
+  const seen = new Set<string>();
+  const replayIds: string[] = [];
+
+  for (const value of values) {
+    const replayId = tryNormalizeHexId(value);
+    if (!replayId || seen.has(replayId)) {
+      continue;
+    }
+
+    seen.add(replayId);
+    replayIds.push(replayId);
+  }
+
+  return replayIds;
 }

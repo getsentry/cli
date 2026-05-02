@@ -29,7 +29,7 @@ import type {
   Writer,
 } from "../../types/index.js";
 import { resolveOrgDisplayName } from "../api-client.js";
-import { getReplayIdFromEvent } from "../replay-id.js";
+import { getReplayIdFromEvent } from "../replay-search.js";
 import { withSerializeSpan } from "../telemetry.js";
 import { type FixabilityTier, muted } from "./colors.js";
 import {

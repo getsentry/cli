@@ -23,7 +23,10 @@ import {
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
-import { collectReplayIds, getReplayIdFromEvent } from "../../lib/replay-id.js";
+import {
+  collectReplayIds,
+  getReplayIdFromEvent,
+} from "../../lib/replay-search.js";
 import { getSpanTreeLines } from "../../lib/span-tree.js";
 import type { SentryEvent, SentryIssue } from "../../types/index.js";
 import { issueIdPositional, resolveIssue } from "./utils.js";

@@ -25,6 +25,7 @@ import {
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import type { Column } from "../../lib/formatters/table.js";
+import { formatDurationCompact } from "../../lib/formatters/time-utils.js";
 import {
   appendQueryHint,
   appendSortHint,
@@ -38,7 +39,6 @@ import {
   targetPatternExplanation,
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
-import { formatReplayDurationCompact } from "../../lib/replay-duration.js";
 import {
   getReplayUserLabel,
   parseReplayEnvironmentFilter,
@@ -139,7 +139,7 @@ const REPLAY_COLUMNS: Column<ReplayListItem>[] = [
   },
   {
     header: "DURATION",
-    value: (replay) => formatReplayDurationCompact(replay.duration),
+    value: (replay) => formatDurationCompact(replay.duration),
     minWidth: 10,
   },
   {

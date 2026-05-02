@@ -32,14 +32,16 @@ import {
 } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
-import { validateHexId } from "../../lib/hex-id.js";
+import {
+  formatDurationCompactMs,
+  formatDurationVerbose,
+} from "../../lib/formatters/time-utils.js";
+import { tryNormalizeHexId, validateHexId } from "../../lib/hex-id.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
-import { formatReplayDurationVerbose } from "../../lib/replay-duration.js";
-import { normalizeReplayId } from "../../lib/replay-id.js";
 import { getReplayUserLabel } from "../../lib/replay-search.js";
 import { resolveOrgOptionalProjectFromArg } from "../../lib/resolve-target.js";
 import {
@@ -96,7 +98,7 @@ function parseSingleArg(arg: string): ParsedPositionalArgs {
     const org = trimmed.slice(0, slashIdx);
     const replaySegment = trimmed.slice(slashIdx + 1);
     const normalizedReplayId =
-      replaySegment && normalizeReplayId(replaySegment);
+      replaySegment && tryNormalizeHexId(replaySegment);
     if (!normalizedReplayId) {
       throw new ContextError("Replay ID", USAGE_HINT, []);
     }
@@ -160,7 +162,7 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
   const warning =
     args.length === 2 ? detectSwappedViewArgs(first, second) : null;
   if (warning) {
-    const normalizedReplayId = normalizeReplayId(first) ?? first;
+    const normalizedReplayId = tryNormalizeHexId(first) ?? first;
     return {
       replayId: normalizedReplayId,
       targetArg: second,
@@ -173,25 +175,6 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
-}
-
-function formatRelativeOffset(milliseconds: number): string {
-  const seconds = Math.max(0, Math.round(milliseconds / 1000));
-  if (seconds < 60) {
-    return `${seconds}s`;
-  }
-
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  if (minutes < 60) {
-    return remainingSeconds > 0
-      ? `${minutes}m ${remainingSeconds}s`
-      : `${minutes}m`;
-  }
-
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
 
 function getEventTimestampMillis(value: unknown): number | null {
@@ -560,7 +543,7 @@ function buildReplayOverviewRows(
     rows,
     "Duration",
     replay.duration !== null && replay.duration !== undefined
-      ? formatReplayDurationVerbose(replay.duration)
+      ? formatDurationVerbose(replay.duration)
       : undefined
   );
   pushMarkdownRow(
@@ -730,7 +713,7 @@ function pushActivitySection(
   for (const event of activity) {
     const prefix =
       event.timestampMs !== null && startTime !== null
-        ? `${formatRelativeOffset(event.timestampMs - startTime)} · `
+        ? `${formatDurationCompactMs(event.timestampMs - startTime)} · `
         : "";
     const details =
       event.details.length > 0

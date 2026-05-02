@@ -49,7 +49,7 @@ import {
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
 import { resolveEffectiveOrg } from "../../lib/region.js";
-import { getReplayIdFromEvent } from "../../lib/replay-id.js";
+import { getReplayIdFromEvent } from "../../lib/replay-search.js";
 import {
   resolveOrg,
   resolveOrgAndProject,
@@ -1069,7 +1069,7 @@ export const viewCommand = buildCommand({
         target.detectedFrom
           ? `Detected from ${target.detectedFrom}`
           : undefined,
-        replayHint(target.org, event),
+        fetchedEvents[0] ? replayHint(target.org, fetchedEvents[0]) : undefined,
       ]),
     };
   },

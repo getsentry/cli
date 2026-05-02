@@ -98,6 +98,27 @@ export function normalizeHexId(value: string): string {
 }
 
 /**
+ * Non-throwing variant of {@link normalizeHexId} that returns `undefined`
+ * for falsy input or input that doesn't normalize to a valid 32-char hex ID.
+ *
+ * Useful when the caller wants to silently discard invalid IDs (e.g.,
+ * collecting replay IDs from event tags where bad values are expected).
+ *
+ * @param value - Raw string, or null/undefined
+ * @returns Normalized 32-char lowercase hex ID, or undefined
+ */
+export function tryNormalizeHexId(
+  value: string | null | undefined
+): string | undefined {
+  if (!value) {
+    return;
+  }
+
+  const normalized = normalizeHexId(value.trim());
+  return HEX_ID_RE.test(normalized) ? normalized : undefined;
+}
+
+/**
  * Validate that a string is a 32-character hexadecimal ID.
  * Trims whitespace and normalizes to lowercase before validation.
  *
