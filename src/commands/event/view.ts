@@ -434,8 +434,9 @@ type ResolveTargetOptions = {
  *
  * Handles all target types (explicit, search, org-all, auto-detect)
  * including cross-project fallback via the eventids endpoint.
+ *
+ * @internal Exported for testing
  */
-/** @internal Exported for testing */
 export async function resolveEventTarget(
   options: ResolveTargetOptions
 ): Promise<ResolvedEventTarget | null> {
@@ -487,8 +488,9 @@ export async function resolveEventTarget(
  * Throws a ContextError if the event is not found in the given org, with a
  * message that names the org so the error is not misleading.
  * Propagates auth/network errors from resolveEventInOrg.
+ *
+ * @internal Exported for testing
  */
-/** @internal Exported for testing */
 export async function resolveOrgAllTarget(
   org: string,
   eventId: string,
@@ -514,8 +516,9 @@ export async function resolveOrgAllTarget(
 /**
  * Resolve target via auto-detect cascade, falling back to cross-project
  * event search across all accessible orgs.
+ *
+ * @internal Exported for testing
  */
-/** @internal Exported for testing */
 export async function resolveAutoDetectTarget(
   eventId: string,
   cwd: string

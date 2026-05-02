@@ -347,14 +347,14 @@ describe("sentry explore", () => {
         fields: ["id", "user", "count_errors", "urls"],
         limit: 25,
         projectSlugs: ["cli"],
-        query: "project:cli",
+        query: undefined,
         sort: "-count_errors",
         statsPeriod: "24h",
       });
       expect(queryEventsSpy).not.toHaveBeenCalled();
     });
 
-    test("merges replay query text with the target project filter", async () => {
+    test("passes replay query text without project: prefix (uses projectSlugs instead)", async () => {
       resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
       const { context } = createContext();
 
@@ -372,7 +372,7 @@ describe("sentry explore", () => {
         "test-org",
         expect.objectContaining({
           projectSlugs: ["cli"],
-          query: "project:cli count_errors:>0",
+          query: "count_errors:>0",
         })
       );
     });
