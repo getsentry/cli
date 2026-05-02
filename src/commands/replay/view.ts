@@ -24,25 +24,21 @@ import {
   ResolutionError,
   ValidationError,
 } from "../../lib/errors.js";
-import {
-  escapeMarkdownCell,
-  escapeMarkdownInline,
-  mdKvTable,
-  renderMarkdown,
-} from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
-  formatDurationCompactMs,
-  formatDurationVerbose,
-} from "../../lib/formatters/time-utils.js";
+  extractReplayActivityEvents,
+  formatReplayDetails,
+  type ReplayViewData,
+  replayHint,
+} from "../../lib/formatters/replay.js";
 import { tryNormalizeHexId, validateHexId } from "../../lib/hex-id.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
-import { getReplayUserLabel } from "../../lib/replay-search.js";
+import { logger } from "../../lib/logger.js";
 import { resolveOrgOptionalProjectFromArg } from "../../lib/resolve-target.js";
 import {
   applySentryUrlContext,
@@ -52,7 +48,6 @@ import { buildReplayUrl } from "../../lib/sentry-urls.js";
 import type {
   ReplayActivityEvent,
   ReplayDetails,
-  ReplayRecordingSegments,
   ReplayRelatedIssue,
   ReplayRelatedTrace,
 } from "../../types/index.js";
@@ -71,21 +66,13 @@ type ParsedPositionalArgs = {
   warning?: string;
 };
 
-type ReplayViewData = {
-  org: string;
-  replay: ReplayDetails;
-  activity: ReplayActivityEvent[];
-  relatedIssues: ReplayRelatedIssue[];
-  relatedTraces: ReplayRelatedTrace[];
-};
-
-type MarkdownRow = [string, string];
-
 const USAGE_HINT =
   "sentry replay view [<org>/<project>/]<replay-id> | <replay-url>";
 const MAX_ACTIVITY_EVENTS = 6;
 const MAX_RELATED_ERRORS = 3;
 const MAX_RELATED_TRACES = 2;
+
+const log = logger.withTag("replay.view");
 
 function parseSingleArg(arg: string): ParsedPositionalArgs {
   const trimmed = arg.trim();
@@ -93,6 +80,10 @@ function parseSingleArg(arg: string): ParsedPositionalArgs {
     throw new ContextError("Replay ID", USAGE_HINT, []);
   }
 
+  // Handle <org>/<replay-id> shorthand — must check before parseSlashSeparatedArg
+  // because replay IDs are 32-char hex strings that look valid to the generic
+  // slash parser's ID extraction, but with only one slash the "project" segment
+  // would be wrongly treated as the ID.
   const slashIdx = trimmed.indexOf("/");
   if (slashIdx !== -1 && trimmed.indexOf("/", slashIdx + 1) === -1) {
     const org = trimmed.slice(0, slashIdx);
@@ -173,160 +164,6 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
   return { replayId: second, targetArg: first };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function getEventTimestampMillis(value: unknown): number | null {
-  if (typeof value === "number") {
-    return value;
-  }
-  if (typeof value === "string") {
-    const parsed = Date.parse(value);
-    return Number.isNaN(parsed) ? null : parsed;
-  }
-  return null;
-}
-
-function firstString(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function compactDetails(values: Array<string | null>): string[] {
-  return values.filter((value): value is string => value !== null);
-}
-
-function summarizePerformanceSpan(
-  payload: Record<string, unknown> | null
-): Omit<ReplayActivityEvent, "timestampMs"> | null {
-  const op = firstString(payload?.op);
-  const description = firstString(payload?.description);
-  const durationMs =
-    isRecord(payload?.data) && typeof payload.data.duration === "number"
-      ? payload.data.duration
-      : null;
-
-  if (!(description || op)) {
-    return null;
-  }
-
-  return {
-    label: op ?? "performanceSpan",
-    details: compactDetails([
-      description ? `description=${description}` : null,
-      durationMs !== null ? `duration_ms=${durationMs}` : null,
-    ]),
-  };
-}
-
-function summarizeClickLikeEvent(
-  label: string,
-  payload: Record<string, unknown> | null,
-  includeLabel = false
-): Omit<ReplayActivityEvent, "timestampMs"> {
-  const selector = firstString(payload?.selector);
-  const clickLabel = firstString(payload?.label);
-
-  return {
-    label,
-    details: compactDetails([
-      selector ? `selector=${selector}` : null,
-      includeLabel && clickLabel ? `label=${clickLabel}` : null,
-    ]),
-  };
-}
-
-function summarizeBreadcrumb(
-  payload: Record<string, unknown> | null
-): Omit<ReplayActivityEvent, "timestampMs"> | null {
-  const category = firstString(payload?.category);
-  const message = firstString(payload?.message);
-  if (!(category || message)) {
-    return null;
-  }
-
-  return {
-    label: category ?? "breadcrumb",
-    details: compactDetails([message ? `message=${message}` : null]),
-  };
-}
-
-const TAGGED_REPLAY_EVENT_SUMMARIZERS: Record<
-  string,
-  (
-    payload: Record<string, unknown> | null
-  ) => Omit<ReplayActivityEvent, "timestampMs"> | null
-> = {
-  breadcrumb: summarizeBreadcrumb,
-  click: (payload: Record<string, unknown> | null) =>
-    summarizeClickLikeEvent("click", payload, true),
-  deadClick: (payload: Record<string, unknown> | null) =>
-    summarizeClickLikeEvent("dead.click", payload),
-  performanceSpan: summarizePerformanceSpan,
-  rageClick: (payload: Record<string, unknown> | null) =>
-    summarizeClickLikeEvent("rage.click", payload),
-};
-
-function summarizeTaggedReplayEvent(
-  tag: string,
-  payload: Record<string, unknown> | null
-): Omit<ReplayActivityEvent, "timestampMs"> | null {
-  const summarize = TAGGED_REPLAY_EVENT_SUMMARIZERS[tag];
-  return summarize ? summarize(payload) : null;
-}
-
-function summarizeReplayEvent(event: unknown): ReplayActivityEvent | null {
-  if (!isRecord(event)) {
-    return null;
-  }
-
-  const timestampMs = getEventTimestampMillis(event.timestamp);
-  const data = isRecord(event.data) ? event.data : null;
-  const tag = typeof data?.tag === "string" ? data.tag : "";
-  const payload = isRecord(data?.payload) ? data.payload : null;
-
-  if (tag) {
-    const replayEvent = summarizeTaggedReplayEvent(tag, payload);
-    if (replayEvent) {
-      return { timestampMs, ...replayEvent };
-    }
-  }
-
-  const href = firstString(data?.href);
-  if (href) {
-    return {
-      timestampMs,
-      label: "page.view",
-      details: [`href=${href}`],
-    };
-  }
-
-  return null;
-}
-
-function extractReplayActivityEvents(
-  segments: ReplayRecordingSegments | null
-): ReplayActivityEvent[] {
-  if (!segments) {
-    return [];
-  }
-
-  const events: ReplayActivityEvent[] = [];
-  for (const segment of segments) {
-    for (const event of segment) {
-      const replayEvent = summarizeReplayEvent(event);
-      if (replayEvent) {
-        events.push(replayEvent);
-      }
-      if (events.length >= MAX_ACTIVITY_EVENTS) {
-        return events;
-      }
-    }
-  }
-
-  return events;
-}
-
 type ReplayProjectScope = {
   org: string;
   project?: string;
@@ -389,12 +226,19 @@ async function fetchReplayActivity(
       String(replay.project_id),
       replay.id
     );
-    return extractReplayActivityEvents(segments);
-  } catch {
+    return extractReplayActivityEvents(segments, MAX_ACTIVITY_EVENTS);
+  } catch (error) {
+    log.debug("Failed to fetch replay recording segments", error);
     return [];
   }
 }
 
+/**
+ * Fetch related issue metadata for replay-linked error event IDs.
+ *
+ * Uses org-wide issue search (`project = ""`) because replays may span
+ * multiple projects within the same organization.
+ */
 function fetchRelatedReplayIssues(
   org: string,
   replay: ReplayDetails
@@ -415,7 +259,8 @@ function fetchRelatedReplayIssues(
           shortId: issue?.shortId ?? null,
           title: issue?.title ?? null,
         };
-      } catch {
+      } catch (error) {
+        log.debug(`Failed to resolve issue for event ${eventId}`, error);
         return { eventId, issueId: null, shortId: null, title: null };
       }
     })
@@ -439,7 +284,8 @@ function fetchRelatedReplayTraces(
           performanceIssueCount: meta.performance_issues,
           spanCount: meta.span_count,
         };
-      } catch {
+      } catch (error) {
+        log.debug(`Failed to fetch trace meta for ${traceId}`, error);
         return {
           traceId,
           errorCount: null,
@@ -465,359 +311,6 @@ async function enrichReplayView(
   ]);
 
   return { activity, relatedIssues, relatedTraces };
-}
-
-function formatList(values: string[] | undefined): string | undefined {
-  if (!values || values.length === 0) {
-    return;
-  }
-  return values.map((value) => `- \`${value}\``).join("\n");
-}
-
-function pushMarkdownRow(
-  rows: MarkdownRow[],
-  label: string,
-  value: string | undefined
-): void {
-  if (!value) {
-    return;
-  }
-  rows.push([label, value]);
-}
-
-function formatYesNo(value: boolean | null | undefined): string | undefined {
-  if (value === null || value === undefined) {
-    return;
-  }
-  return value ? "Yes" : "No";
-}
-
-function formatNullableCount(
-  value: number | null | undefined
-): string | undefined {
-  if (value === null || value === undefined) {
-    return;
-  }
-  return String(value);
-}
-
-function formatJoinedMarkdown(
-  values: Array<string | null | undefined>
-): string | undefined {
-  const joined = values.filter(Boolean).join(" ");
-  return joined ? escapeMarkdownCell(joined) : undefined;
-}
-
-function formatReplayLocation(replay: ReplayDetails): string | undefined {
-  const geo = replay.user?.geo;
-  if (!geo) {
-    return;
-  }
-
-  const location = [geo.city, geo.region, geo.country_code]
-    .filter(Boolean)
-    .join(", ");
-  return location ? escapeMarkdownCell(location) : undefined;
-}
-
-function buildReplayOverviewRows(
-  org: string,
-  replay: ReplayDetails
-): MarkdownRow[] {
-  const rows: MarkdownRow[] = [["Replay ID", `\`${replay.id}\``]];
-  pushMarkdownRow(rows, "Link", buildReplayUrl(org, replay.id));
-
-  pushMarkdownRow(
-    rows,
-    "Started",
-    replay.started_at ? new Date(replay.started_at).toLocaleString() : undefined
-  );
-  pushMarkdownRow(
-    rows,
-    "Finished",
-    replay.finished_at
-      ? new Date(replay.finished_at).toLocaleString()
-      : undefined
-  );
-  pushMarkdownRow(
-    rows,
-    "Duration",
-    replay.duration !== null && replay.duration !== undefined
-      ? formatDurationVerbose(replay.duration)
-      : undefined
-  );
-  pushMarkdownRow(
-    rows,
-    "Environment",
-    replay.environment ? escapeMarkdownCell(replay.environment) : undefined
-  );
-  pushMarkdownRow(
-    rows,
-    "Platform",
-    replay.platform ? escapeMarkdownCell(replay.platform) : undefined
-  );
-  pushMarkdownRow(
-    rows,
-    "Project ID",
-    replay.project_id !== null && replay.project_id !== undefined
-      ? String(replay.project_id)
-      : undefined
-  );
-  pushMarkdownRow(
-    rows,
-    "Replay Type",
-    replay.replay_type ? escapeMarkdownCell(replay.replay_type) : undefined
-  );
-  pushMarkdownRow(rows, "Archived", formatYesNo(replay.is_archived));
-  pushMarkdownRow(rows, "Viewed", formatYesNo(replay.has_viewed));
-  pushMarkdownRow(rows, "Errors", formatNullableCount(replay.count_errors));
-  pushMarkdownRow(rows, "Segments", formatNullableCount(replay.count_segments));
-  pushMarkdownRow(
-    rows,
-    "Rage Clicks",
-    formatNullableCount(replay.count_rage_clicks)
-  );
-  pushMarkdownRow(
-    rows,
-    "Dead Clicks",
-    formatNullableCount(replay.count_dead_clicks)
-  );
-
-  return rows;
-}
-
-function buildReplayUserRows(replay: ReplayDetails): MarkdownRow[] {
-  const rows: MarkdownRow[] = [];
-  const userLabel = getReplayUserLabel(replay);
-  pushMarkdownRow(
-    rows,
-    "User",
-    userLabel ? escapeMarkdownCell(userLabel) : undefined
-  );
-  pushMarkdownRow(
-    rows,
-    "Email",
-    replay.user?.email ? escapeMarkdownCell(replay.user.email) : undefined
-  );
-  pushMarkdownRow(
-    rows,
-    "IP",
-    replay.user?.ip ? escapeMarkdownCell(replay.user.ip) : undefined
-  );
-  pushMarkdownRow(rows, "Location", formatReplayLocation(replay));
-  return rows;
-}
-
-function buildReplayClientRows(replay: ReplayDetails): MarkdownRow[] {
-  const rows: MarkdownRow[] = [];
-  pushMarkdownRow(
-    rows,
-    "Browser",
-    formatJoinedMarkdown([replay.browser?.name, replay.browser?.version])
-  );
-  pushMarkdownRow(
-    rows,
-    "OS",
-    formatJoinedMarkdown([replay.os?.name, replay.os?.version])
-  );
-  pushMarkdownRow(
-    rows,
-    "Device",
-    formatJoinedMarkdown([
-      replay.device?.brand,
-      replay.device?.family,
-      replay.device?.name,
-      replay.device?.model_id,
-    ])
-  );
-  pushMarkdownRow(
-    rows,
-    "SDK",
-    formatJoinedMarkdown([replay.sdk?.name, replay.sdk?.version])
-  );
-  pushMarkdownRow(
-    rows,
-    "Dist",
-    replay.dist ? escapeMarkdownCell(replay.dist) : undefined
-  );
-  return rows;
-}
-
-function pushKvSection(
-  lines: string[],
-  rows: MarkdownRow[],
-  title?: string
-): void {
-  if (rows.length === 0) {
-    return;
-  }
-  lines.push("");
-  lines.push(mdKvTable(rows, title));
-}
-
-function pushListSection(
-  lines: string[],
-  title: string,
-  values: string[] | undefined
-): void {
-  const content = formatList(values);
-  if (!content) {
-    return;
-  }
-  lines.push("");
-  lines.push(`### ${title}`);
-  lines.push("");
-  lines.push(content);
-}
-
-function pushTagsSection(lines: string[], replay: ReplayDetails): void {
-  if (Object.keys(replay.tags).length === 0) {
-    return;
-  }
-
-  lines.push("");
-  lines.push("### Tags");
-  lines.push("");
-  for (const [key, values] of Object.entries(replay.tags).sort(([a], [b]) =>
-    a.localeCompare(b)
-  )) {
-    lines.push(
-      `- \`${escapeMarkdownInline(key)}\`: ${values.map((value) => `\`${escapeMarkdownInline(value)}\``).join(", ")}`
-    );
-  }
-}
-
-function pushActivitySection(
-  lines: string[],
-  replay: ReplayDetails,
-  activity: ReplayActivityEvent[]
-): void {
-  lines.push("");
-  lines.push("### Activity");
-  lines.push("");
-
-  if (replay.is_archived) {
-    lines.push("Recording is archived and not available for playback.");
-    return;
-  }
-
-  if (activity.length === 0) {
-    lines.push("No activity events recorded.");
-    return;
-  }
-
-  const startTime =
-    getEventTimestampMillis(replay.started_at) ??
-    activity[0]?.timestampMs ??
-    null;
-  for (const event of activity) {
-    const prefix =
-      event.timestampMs !== null && startTime !== null
-        ? `${formatDurationCompactMs(event.timestampMs - startTime)} · `
-        : "";
-    const details =
-      event.details.length > 0
-        ? ` · ${event.details.map((detail) => escapeMarkdownInline(detail)).join(" · ")}`
-        : "";
-    lines.push(`- ${prefix}\`${escapeMarkdownInline(event.label)}\`${details}`);
-  }
-}
-
-function formatRelatedIssueLine(
-  org: string,
-  issue: ReplayRelatedIssue
-): string {
-  if (!(issue.shortId && issue.title)) {
-    return `- Event \`${issue.eventId}\``;
-  }
-
-  return `- \`${issue.shortId}\`: ${escapeMarkdownInline(issue.title)} (view: \`sentry issue view ${org}/${issue.shortId}\`)`;
-}
-
-function buildRelatedTraceStats(trace: ReplayRelatedTrace): string[] {
-  return [
-    trace.spanCount !== null && trace.spanCount !== undefined
-      ? `${trace.spanCount} spans`
-      : null,
-    trace.errorCount !== null && trace.errorCount !== undefined
-      ? `${trace.errorCount} errors`
-      : null,
-    trace.logCount !== null && trace.logCount !== undefined
-      ? `${trace.logCount} logs`
-      : null,
-    trace.performanceIssueCount !== null &&
-    trace.performanceIssueCount !== undefined
-      ? `${trace.performanceIssueCount} perf issues`
-      : null,
-  ].filter((value): value is string => value !== null);
-}
-
-function formatRelatedTraceLine(
-  org: string,
-  trace: ReplayRelatedTrace
-): string {
-  const stats = buildRelatedTraceStats(trace);
-  const suffix = stats.length > 0 ? ` (${stats.join(", ")})` : "";
-  return `- Trace \`${trace.traceId}\`${suffix} (view: \`sentry trace view ${org}/${trace.traceId}\`)`;
-}
-
-function pushRelatedSection(
-  lines: string[],
-  org: string,
-  relatedIssues: ReplayRelatedIssue[],
-  relatedTraces: ReplayRelatedTrace[]
-): void {
-  if (relatedIssues.length === 0 && relatedTraces.length === 0) {
-    return;
-  }
-
-  lines.push("");
-  lines.push("### Related");
-  lines.push("");
-
-  for (const issue of relatedIssues) {
-    lines.push(formatRelatedIssueLine(org, issue));
-  }
-
-  for (const trace of relatedTraces) {
-    lines.push(formatRelatedTraceLine(org, trace));
-  }
-}
-
-function formatReplayDetails(data: ReplayViewData): string {
-  const { activity, org, relatedIssues, relatedTraces, replay } = data;
-  const lines: string[] = [];
-
-  lines.push(`## Replay \`${replay.id.slice(0, 8)}\``);
-  lines.push("");
-  lines.push(mdKvTable(buildReplayOverviewRows(org, replay)));
-
-  pushKvSection(lines, buildReplayUserRows(replay), "User");
-  pushKvSection(lines, buildReplayClientRows(replay), "Client");
-
-  pushListSection(lines, "Releases", replay.releases);
-  pushListSection(lines, "URLs", replay.urls);
-  pushListSection(lines, "Trace IDs", replay.trace_ids);
-  pushListSection(lines, "Error IDs", replay.error_ids);
-  pushActivitySection(lines, replay, activity);
-  pushRelatedSection(lines, org, relatedIssues, relatedTraces);
-  pushTagsSection(lines, replay);
-
-  return renderMarkdown(lines.join("\n"));
-}
-
-function replayHint(data: ReplayViewData): string | undefined {
-  const traceId = data.replay.trace_ids?.[0];
-  if (traceId) {
-    return `Related trace: sentry trace view ${data.org}/${traceId}`;
-  }
-
-  const issue = data.relatedIssues[0];
-  if (issue?.shortId) {
-    return `Related issue: sentry issue view ${data.org}/${issue.shortId}`;
-  }
-
-  return;
 }
 
 export const viewCommand = buildCommand({
@@ -878,7 +371,7 @@ export const viewCommand = buildCommand({
 
     const parsedArgs = parsePositionalArgs(args);
     if (parsedArgs.warning) {
-      this.stderr.write(`${parsedArgs.warning}\n`);
+      log.warn(parsedArgs.warning);
     }
 
     const replayId = validateHexId(parsedArgs.replayId, "replay ID");

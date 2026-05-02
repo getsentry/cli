@@ -104,6 +104,12 @@ type FetchReplayPageOptions = {
   cursor?: string;
 };
 
+/**
+ * Coerce numeric project_id to string for consistent downstream handling.
+ *
+ * The replay API returns project_id as a number but the CLI and output
+ * schemas normalize it to a string for uniform comparisons and display.
+ */
 function normalizeReplayProjectId<
   T extends { project_id?: string | number | null },
 >(replay: T): T {
