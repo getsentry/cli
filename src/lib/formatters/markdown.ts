@@ -278,7 +278,6 @@ function renderCodespan(token: Tokens.Codespan): string {
 /**
  * Render a single inline token to an ANSI string.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: inline token switch is inherently branchy
 function renderOneInline(token: Token): string {
   switch (token.type) {
     case "strong":

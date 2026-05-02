@@ -12,9 +12,9 @@ import * as clack from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as banner from "../../../src/lib/banner.js";
-import { WizardError } from "../../../src/lib/errors.js";
 import { ENV_VAR_AGENTS } from "../../../src/lib/detect-agent.js";
 import { setEnv } from "../../../src/lib/env.js";
+import { WizardError } from "../../../src/lib/errors.js";
 import { WizardCancelledError } from "../../../src/lib/init/clack-utils.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as fmt from "../../../src/lib/init/formatters.js";
