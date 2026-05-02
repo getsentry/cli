@@ -11,7 +11,6 @@ import {
   isReplaySortValue,
   listReplays,
   queryEvents,
-  type ReplaySortValue,
 } from "../lib/api-client.js";
 import { buildProjectQuery, validateLimit } from "../lib/arg-parsing.js";
 import {
@@ -356,40 +355,129 @@ function findFirstAggregate(fieldList: string[]): string | undefined {
   return fieldList.find((f) => f.includes("(") && f.includes(")"));
 }
 
-/** Validate and normalize replay sort values. */
-function resolveReplaySort(explicitSort?: string): ReplaySortValue {
-  const sort = explicitSort ?? DEFAULT_REPLAY_SORT;
-  if (!isReplaySortValue(sort)) {
-    throw new ValidationError(
-      `Invalid replay sort "${sort}". Use a replay sort like ${DEFAULT_REPLAY_SORT} or -count_errors.`,
-      "sort"
-    );
-  }
-  return sort;
-}
+// ---------------------------------------------------------------------------
+// Dataset configuration
+// ---------------------------------------------------------------------------
 
 /**
- * Determine the effective sort value for non-replay explore datasets.
- * Sort is only supported on the `spans` dataset.
+ * Dataset-specific configuration resolved before the main query loop.
+ *
+ * Centralizes all replay vs. non-replay branching so the main `func` body
+ * reads linearly without `dataset === "replays"` checks.
  */
-function resolveExploreSort(
-  fieldList: string[],
-  dataset: string,
-  explicitSort?: string
-): string | undefined {
-  const firstAgg = findFirstAggregate(fieldList);
-  const sort = explicitSort ?? (firstAgg ? `-${firstAgg}` : undefined);
+type DatasetConfig = {
+  /** The effective sort value for pagination context and API calls. */
+  sort: string | undefined;
+  /** The API query string (with or without `project:` prefix). */
+  query: string | undefined;
+  /** Execute the dataset-specific API query. */
+  fetch: (params: {
+    cursor: string | undefined;
+    limit: number;
+    timeRange: TimeRange;
+  }) => Promise<{
+    data: { data: Record<string, unknown>[]; meta?: ExploreData["meta"] };
+    nextCursor?: string;
+  }>;
+};
 
-  if (dataset === "spans") {
-    return sort;
+/**
+ * Resolve dataset-specific configuration: sort, query, validation, and fetch.
+ *
+ * For the `replays` dataset this validates fields, resolves replay-specific
+ * sort, and returns a fetch function that calls `listReplays`. For all other
+ * datasets it validates environment usage, resolves explore sort (spans-only),
+ * prepends `project:<slug>` to the query, and returns a `queryEvents` fetch.
+ */
+function resolveDatasetConfig(params: {
+  dataset: string;
+  fieldList: string[];
+  flags: ExploreFlags;
+  org: string;
+  project: string | undefined;
+  environment: string[] | undefined;
+}): DatasetConfig {
+  const { dataset, fieldList, flags, org, project, environment } = params;
+
+  if (dataset === "replays") {
+    const unsupportedField = fieldList.find(
+      (field) => !isSupportedReplayField(field)
+    );
+    if (unsupportedField) {
+      throw new ValidationError(
+        `Unsupported replay field "${unsupportedField}". Supported fields include: ${listSupportedReplayFields().slice(0, 12).join(", ")}...`,
+        "field"
+      );
+    }
+
+    const sort = flags.sort ?? DEFAULT_REPLAY_SORT;
+    if (!isReplaySortValue(sort)) {
+      throw new ValidationError(
+        `Invalid replay sort "${sort}". Use a replay sort like ${DEFAULT_REPLAY_SORT} or -count_errors.`,
+        "sort"
+      );
+    }
+
+    return {
+      sort,
+      query: flags.query,
+      fetch: async ({ cursor, limit, timeRange }) => {
+        const replayResponse = await listReplays(org, {
+          cursor,
+          environment,
+          fields: getReplayRequestFields(fieldList),
+          limit,
+          projectSlugs: project ? [project] : undefined,
+          query: flags.query,
+          sort,
+          ...timeRangeToApiParams(timeRange),
+        });
+        return {
+          data: buildReplayExploreResponse(fieldList, replayResponse.data),
+          nextCursor: replayResponse.nextCursor,
+        };
+      },
+    };
   }
-  // Warn only when user explicitly passed --sort on a non-spans dataset
-  if (sort && explicitSort) {
-    log.warn(
-      `--sort is only supported on the spans dataset. Ignoring sort for ${dataset}.`
+
+  // Non-replay datasets
+  if (environment) {
+    throw new ValidationError(
+      "--environment is only supported with --dataset replays. Use environment:... inside --query for other datasets.",
+      "environment"
     );
   }
-  return;
+
+  const firstAgg = findFirstAggregate(fieldList);
+  const rawSort = flags.sort ?? (firstAgg ? `-${firstAgg}` : undefined);
+  let sort: string | undefined;
+  if (dataset === "spans") {
+    sort = rawSort;
+  } else {
+    // Warn only when user explicitly passed --sort on a non-spans dataset
+    if (rawSort && flags.sort) {
+      log.warn(
+        `--sort is only supported on the spans dataset. Ignoring sort for ${dataset}.`
+      );
+    }
+    sort = undefined;
+  }
+
+  const query = buildProjectQuery(flags.query, project);
+  return {
+    sort,
+    query,
+    fetch: async ({ cursor, limit, timeRange }) =>
+      queryEvents(org, {
+        fields: fieldList,
+        dataset,
+        query,
+        sort,
+        limit,
+        cursor,
+        ...timeRangeToApiParams(timeRange),
+      }),
+  };
 }
 
 /** Build the result hint string from pagination state and row count */
@@ -526,43 +614,16 @@ export const exploreCommand = buildListCommand("explore", {
     }
     const timeRange = flags.period;
     const environment = parseReplayEnvironmentFilter(flags.environment);
-    const replaySort =
-      dataset === "replays" ? resolveReplaySort(flags.sort) : undefined;
-    const eventSort =
-      dataset === "replays"
-        ? undefined
-        : resolveExploreSort(fieldList, dataset, flags.sort);
-    const paginationSort = dataset === "replays" ? replaySort : eventSort;
 
-    if (dataset !== "replays" && environment) {
-      throw new ValidationError(
-        "--environment is only supported with --dataset replays. Use environment:... inside --query for other datasets.",
-        "environment"
-      );
-    }
+    const config = resolveDatasetConfig({
+      dataset,
+      fieldList,
+      flags,
+      org,
+      project,
+      environment,
+    });
 
-    if (dataset === "replays") {
-      const unsupportedField = fieldList.find(
-        (field) => !isSupportedReplayField(field)
-      );
-      if (unsupportedField) {
-        throw new ValidationError(
-          `Unsupported replay field "${unsupportedField}". Supported fields include: ${listSupportedReplayFields().slice(0, 12).join(", ")}...`,
-          "field"
-        );
-      }
-    }
-
-    // When a project is in the target, prepend `project:<slug>` to the query
-    // so the API filters server-side. Mirrors `trace logs` / `log list` behavior.
-    // Replays use the `projectSlugs` API param for project filtering instead of
-    // the `project:` query prefix — skip `buildProjectQuery` for that dataset.
-    const apiQuery =
-      dataset === "replays"
-        ? flags.query
-        : buildProjectQuery(flags.query, project);
-
-    // Pagination context includes project so different scopes don't share state
     const contextKey = buildPaginationContextKey(
       "explore",
       project ? `${org}/${project}` : org,
@@ -571,7 +632,7 @@ export const exploreCommand = buildListCommand("explore", {
         env: environment?.join(","),
         fields: fieldList.join(","),
         q: flags.query,
-        sort: paginationSort,
+        sort: config.sort,
         period: serializeTimeRange(timeRange),
       }
     );
@@ -586,42 +647,13 @@ export const exploreCommand = buildListCommand("explore", {
         message: `Querying ${dataset} in ${project ? `${org}/${project}` : org}...`,
         json: flags.json,
       },
-      async () => {
-        if (dataset === "replays") {
-          const replayResponse = await listReplays(org, {
-            cursor,
-            environment,
-            fields: getReplayRequestFields(fieldList),
-            limit: flags.limit,
-            projectSlugs: project ? [project] : undefined,
-            query: apiQuery,
-            sort: replaySort,
-            ...timeRangeToApiParams(timeRange),
-          });
-
-          return {
-            data: buildReplayExploreResponse(fieldList, replayResponse.data),
-            nextCursor: replayResponse.nextCursor,
-          };
-        }
-
-        return queryEvents(org, {
-          fields: fieldList,
-          dataset,
-          query: apiQuery,
-          sort: eventSort,
-          limit: flags.limit,
-          cursor,
-          ...timeRangeToApiParams(timeRange),
-        });
-      }
+      () => config.fetch({ cursor, limit: flags.limit, timeRange })
     );
 
     advancePaginationState(PAGINATION_KEY, contextKey, direction, nextCursor);
     const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
     const hasMore = !!nextCursor;
 
-    // Pagination hints preserve the original target shape (org/ vs org/project)
     const baseTarget = project ? `${org}/${project}` : `${org}/`;
     const nav = paginationHint({
       hasPrev,
