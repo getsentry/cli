@@ -60,6 +60,7 @@ cli/
 │   │   ├── org/         # list, view
 │   │   ├── project/     # create, delete, list, view
 │   │   ├── release/     # list, view, create, finalize, delete, deploy, deploys, set-commits, propose-version
+│   │   ├── replay/      # list, view
 │   │   ├── repo/        # list
 │   │   ├── sourcemap/   # inject, upload
 │   │   ├── span/        # list, view

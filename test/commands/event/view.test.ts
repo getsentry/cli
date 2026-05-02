@@ -928,6 +928,27 @@ describe("viewCommand.func", () => {
     expect(getEventSpy).toHaveBeenCalled();
   });
 
+  test("returns undefined hint when there is no detection or replay hint", async () => {
+    getEventSpy.mockResolvedValue(sampleEvent);
+    getSpanTreeLinesSpy.mockResolvedValue({
+      lines: [],
+      spans: null,
+      traceId: null,
+      success: false,
+    });
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+    const result = await func.call(
+      context,
+      { json: true, web: false, spans: 0 },
+      "test-org/test-proj",
+      VALID_EVENT_ID
+    );
+
+    expect(result?.hint).toBeUndefined();
+  });
+
   test("auto-redirects issue short ID in two-arg form via issueShortId path", async () => {
     // "CAM-82X" as first arg matches looksLikeIssueShortId → sets issueShortId,
     // NOT targetArg. The resolveIssueShortcut path fetches the latest event.

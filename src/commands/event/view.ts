@@ -49,6 +49,7 @@ import {
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
 import { resolveEffectiveOrg } from "../../lib/region.js";
+import { getReplayIdFromEvent } from "../../lib/replay-search.js";
 import {
   resolveOrg,
   resolveOrgAndProject,
@@ -148,6 +149,22 @@ export function jsonTransformEventView(
   }
   return data.events.map(transform);
 }
+
+/**
+ * Build a CLI-native replay hint when the event is linked to a replay.
+ */
+function replayHint(org: string, event: SentryEvent): string | undefined {
+  const replayId = getReplayIdFromEvent(event);
+  return replayId
+    ? `Related replay: sentry replay view ${org}/${replayId}`
+    : undefined;
+}
+
+function joinHintParts(parts: Array<string | undefined>): string | undefined {
+  const hints = parts.filter((part): part is string => Boolean(part));
+  return hints.length > 0 ? hints.join(" | ") : undefined;
+}
+
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
 
@@ -417,8 +434,9 @@ type ResolveTargetOptions = {
  *
  * Handles all target types (explicit, search, org-all, auto-detect)
  * including cross-project fallback via the eventids endpoint.
+ *
+ * @internal Exported for testing
  */
-/** @internal Exported for testing */
 export async function resolveEventTarget(
   options: ResolveTargetOptions
 ): Promise<ResolvedEventTarget | null> {
@@ -470,8 +488,9 @@ export async function resolveEventTarget(
  * Throws a ContextError if the event is not found in the given org, with a
  * message that names the org so the error is not misleading.
  * Propagates auth/network errors from resolveEventInOrg.
+ *
+ * @internal Exported for testing
  */
-/** @internal Exported for testing */
 export async function resolveOrgAllTarget(
   org: string,
   eventId: string,
@@ -497,8 +516,9 @@ export async function resolveOrgAllTarget(
 /**
  * Resolve target via auto-detect cascade, falling back to cross-project
  * event search across all accessible orgs.
+ *
+ * @internal Exported for testing
  */
-/** @internal Exported for testing */
 export async function resolveAutoDetectTarget(
   eventId: string,
   cwd: string
@@ -987,7 +1007,12 @@ export const viewCommand = buildCommand({
         events: [issueShortcut.data],
         requestedCount: 1,
       });
-      return { hint: issueShortcut.hint };
+      return {
+        hint: joinHintParts([
+          issueShortcut.hint,
+          replayHint(issueShortcut.org, issueShortcut.data.event),
+        ]),
+      };
     }
 
     // Validate + attempt recovery. `skipValidation` is true when the ID is
@@ -1043,9 +1068,12 @@ export const viewCommand = buildCommand({
       requestedCount: allEventIds.length,
     });
     return {
-      hint: target.detectedFrom
-        ? `Detected from ${target.detectedFrom}`
-        : undefined,
+      hint: joinHintParts([
+        target.detectedFrom
+          ? `Detected from ${target.detectedFrom}`
+          : undefined,
+        fetchedEvents[0] ? replayHint(target.org, fetchedEvents[0]) : undefined,
+      ]),
     };
   },
 });
