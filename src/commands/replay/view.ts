@@ -74,6 +74,14 @@ const MAX_RELATED_TRACES = 2;
 
 const log = logger.withTag("replay.view");
 
+/**
+ * Parse a single positional argument as a replay target.
+ *
+ * Handles bare replay IDs, `<org>/<replay-id>`, `<org>/<project>/<replay-id>`,
+ * and Sentry replay URLs. The single-slash case (`org/id`) needs special
+ * handling because 32-char hex replay IDs look valid to the generic
+ * `parseSlashSeparatedArg` which would misinterpret the org as a project.
+ */
 function parseSingleArg(arg: string): ParsedPositionalArgs {
   const trimmed = arg.trim();
   if (!trimmed) {

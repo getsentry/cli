@@ -1,3 +1,10 @@
+/**
+ * Replay Search
+ *
+ * Field resolution, normalization, and replay ID extraction utilities
+ * shared by replay commands and explore --dataset replays.
+ */
+
 import type {
   ReplayDetails,
   ReplayListItem,
@@ -8,6 +15,7 @@ import { tryNormalizeHexId } from "./hex-id.js";
 type ReplayLike = ReplayListItem | ReplayDetails;
 type ReplayFieldResolver = (replay: ReplayLike) => unknown;
 
+/** Maps user-facing field aliases to canonical replay API field names. */
 const REPLAY_FIELD_ALIASES = {
   count_screens: "count_urls",
   screens: "urls",
@@ -16,6 +24,7 @@ const REPLAY_FIELD_ALIASES = {
   viewed_by_me: "has_viewed",
 } as const satisfies Record<string, string>;
 
+/** Resolve a field alias to its canonical API name, or pass through as-is. */
 function normalizeReplayField(field: string): string {
   return Object.hasOwn(REPLAY_FIELD_ALIASES, field)
     ? REPLAY_FIELD_ALIASES[field as keyof typeof REPLAY_FIELD_ALIASES]

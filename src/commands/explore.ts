@@ -181,6 +181,7 @@ function parseLimit(value: string): number {
   return validateLimit(value, 1, LIST_MAX_LIMIT);
 }
 
+/** Infer a Discover-style column type for a replay field (used for table alignment). */
 function inferReplayFieldType(field: string): string {
   if (field === "duration") {
     return "duration";
