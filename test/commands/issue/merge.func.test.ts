@@ -46,15 +46,13 @@ function makeMockIssue(overrides?: Partial<SentryIssue>): SentryIssue {
 
 function createMockContext() {
   const stdoutWrite = mock(() => true);
-  const stderrWrite = mock(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
-      stderr: { write: stderrWrite },
+      stderr: { write: mock(() => true) },
       cwd: "/tmp",
     },
     stdoutWrite,
-    stderrWrite,
   };
 }
 
@@ -312,13 +310,25 @@ describe("mergeCommand.func()", () => {
     // User asked for CLI-B, but Sentry picked CLI-A (e.g. larger by count)
     mergeSpy.mockResolvedValue({ parent: "10A", children: ["10B"] });
 
-    const { context, stderrWrite } = createMockContext();
-    const func = await mergeCommand.loader();
-    await func.call(context, { json: false, into: "CLI-B" }, "CLI-A", "CLI-B");
+    // Warning now goes through log.warn() (consola → process.stderr), not
+    // this.stderr.write(). Spy on process.stderr.write to capture it.
+    const stderrSpy = spyOn(process.stderr, "write");
+    try {
+      const { context } = createMockContext();
+      const func = await mergeCommand.loader();
+      await func.call(
+        context,
+        { json: false, into: "CLI-B" },
+        "CLI-A",
+        "CLI-B"
+      );
 
-    const stderr = stderrWrite.mock.calls.map((c) => String(c[0])).join("");
-    expect(stderr).toContain("--into 'CLI-B' was a preference");
-    expect(stderr).toContain("CLI-A as the canonical parent");
+      const stderr = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
+      expect(stderr).toContain("--into 'CLI-B' was a preference");
+      expect(stderr).toContain("CLI-A as the canonical parent");
+    } finally {
+      stderrSpy.mockRestore();
+    }
   });
 
   test("does not warn when --into preference was honored", async () => {
@@ -334,12 +344,22 @@ describe("mergeCommand.func()", () => {
     // User asked for CLI-B, Sentry agreed.
     mergeSpy.mockResolvedValue({ parent: "10B", children: ["10A"] });
 
-    const { context, stderrWrite } = createMockContext();
-    const func = await mergeCommand.loader();
-    await func.call(context, { json: false, into: "CLI-B" }, "CLI-A", "CLI-B");
+    const stderrSpy = spyOn(process.stderr, "write");
+    try {
+      const { context } = createMockContext();
+      const func = await mergeCommand.loader();
+      await func.call(
+        context,
+        { json: false, into: "CLI-B" },
+        "CLI-A",
+        "CLI-B"
+      );
 
-    const stderr = stderrWrite.mock.calls.map((c) => String(c[0])).join("");
-    expect(stderr).not.toContain("--into");
+      const stderr = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
+      expect(stderr).not.toContain("--into");
+    } finally {
+      stderrSpy.mockRestore();
+    }
   });
 
   test("rejects duplicate issue IDs after resolution (same issue in multiple forms)", async () => {

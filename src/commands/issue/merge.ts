@@ -29,7 +29,7 @@ import {
   ResolutionError,
   ValidationError,
 } from "../../lib/errors.js";
-import { muted, warning } from "../../lib/formatters/index.js";
+import { muted } from "../../lib/formatters/index.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import { buildIssueUrl } from "../../lib/sentry-urls.js";
@@ -313,9 +313,9 @@ export const mergeCommand = buildCommand({
 
     if (requestedParentId && requestedParentId !== raw.parent) {
       const requestedShortId = idToShort.get(requestedParentId) ?? flags.into;
-      this.stderr.write(
-        `${warning("Warning:")} --into '${requestedShortId}' was a preference, not a guarantee. ` +
-          `Sentry selected ${parentShortId} as the canonical parent based on event count.\n`
+      log.warn(
+        `--into '${requestedShortId}' was a preference, not a guarantee. ` +
+          `Sentry selected ${parentShortId} as the canonical parent based on event count.`
       );
     }
 
