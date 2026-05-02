@@ -363,6 +363,15 @@ Manage Sentry dashboards
 
 → Full flags and examples: `references/dashboard.md`
 
+### Replay
+
+Search and inspect Session Replays
+
+- `sentry replay list <org/project>` — List recent Session Replays
+- `sentry replay view <replay-id-or-url...>` — View a Session Replay
+
+→ Full flags and examples: `references/replay.md`
+
 ### Release
 
 Work with Sentry releases
