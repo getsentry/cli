@@ -13,7 +13,7 @@ View and list Sentry events
 
 ### `sentry event view <org/project/event-id...>`
 
-View details of a specific event
+View details of one or more events
 
 **Flags:**
 - `-w, --web - Open in browser`
