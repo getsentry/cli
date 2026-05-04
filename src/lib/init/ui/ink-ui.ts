@@ -644,7 +644,10 @@ export class InkUI implements WizardUI {
     // distinguishable exit. The runner's `await using` won't get a
     // chance to run after this, but tearDown above already did all
     // the cleanup that path would have performed.
-    process.exit(130);
+    // Defer exit by one tick so the event loop can flush the
+    // stdout writes from tearDown (alternate-screen escape +
+    // cancellation report) before the process terminates.
+    setImmediate(() => process.exit(130));
   }
 
   /**
