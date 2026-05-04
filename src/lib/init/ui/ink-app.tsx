@@ -390,13 +390,8 @@ function StatusScreen({
   const showTips = terminalRows >= 24;
 
   return (
-    <Box flexDirection="row" flexGrow={1} flexShrink={1}>
-      <Box
-        flexDirection="column"
-        flexGrow={1}
-        overflow="hidden"
-        paddingRight={1}
-      >
+    <Box flexDirection="row" flexGrow={1} flexShrink={1} gap={1}>
+      <Box flexDirection="column" flexGrow={1} overflow="hidden">
         <ActivityPane
           bannerRows={bannerRows}
           logs={logs}
