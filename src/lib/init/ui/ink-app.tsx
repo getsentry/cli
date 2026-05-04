@@ -219,17 +219,7 @@ export function App({ store }: AppProps): React.ReactNode {
     </Box>
   );
 
-  return (
-    <Box
-      alignItems="center"
-      flexDirection="column"
-      height={rows}
-      justifyContent="flex-start"
-      width={columns}
-    >
-      {inner}
-    </Box>
-  );
+  return inner;
 }
 
 // ────────────────────────────── Layout helpers ────────────────────────
