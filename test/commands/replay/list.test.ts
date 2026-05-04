@@ -63,6 +63,19 @@ describe("listCommand.func", () => {
     },
   ];
 
+  function replayWithIndex(index: number): ReplayListItem {
+    return {
+      ...sampleReplays[0]!,
+      id: index.toString(16).padStart(32, "0"),
+    };
+  }
+
+  function replayPage(start: number, count: number): ReplayListItem[] {
+    return Array.from({ length: count }, (_, offset) =>
+      replayWithIndex(start + offset)
+    );
+  }
+
   function createMockContext() {
     const stdoutWrite = mock(() => true);
     return {
@@ -463,6 +476,110 @@ describe("listCommand.func", () => {
     expect(parsed.data).toHaveLength(1);
     expect(parsed.data[0].id).toBe("22222222222222222222222222222222");
     expect(parsed.nextCursor).toBe("0:100:0");
+  });
+
+  test("caps unfiltered replay API page size when filling large limits", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    listReplaysSpy
+      .mockResolvedValueOnce({
+        data: replayPage(0, apiClient.API_MAX_PER_PAGE),
+        nextCursor: "0:100:0",
+      })
+      .mockResolvedValueOnce({
+        data: replayPage(100, apiClient.API_MAX_PER_PAGE),
+        nextCursor: "0:200:0",
+      })
+      .mockResolvedValueOnce({
+        data: replayPage(200, apiClient.API_MAX_PER_PAGE),
+        nextCursor: "0:300:0",
+      });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      {
+        limit: 250,
+        json: true,
+        period: parsePeriod("7d"),
+        sort: "-started_at",
+      },
+      "test-org/cli"
+    );
+
+    expect(listReplaysSpy).toHaveBeenCalledTimes(3);
+    for (const [callIndex, cursor] of [
+      undefined,
+      "0:100:0",
+      "0:200:0",
+    ].entries()) {
+      expect(listReplaysSpy).toHaveBeenNthCalledWith(
+        callIndex + 1,
+        "test-org",
+        {
+          environment: undefined,
+          fields: [...REPLAY_LIST_FIELDS],
+          limit: apiClient.API_MAX_PER_PAGE,
+          projectSlugs: ["cli"],
+          query: undefined,
+          sort: "-started_at",
+          cursor,
+          statsPeriod: "7d",
+        }
+      );
+    }
+
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    const parsed = JSON.parse(output);
+    const lastReplay = replayWithIndex(249);
+    expect(parsed.data).toHaveLength(250);
+    expect(parsed.data[249].id).toBe(lastReplay.id);
+    expect(parsed.nextCursor).toBe(`0:200:0|${lastReplay.id}`);
+  });
+
+  test("resumes from a mid-page cursor for unfiltered replays", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    resolveCursorSpy.mockReturnValueOnce({
+      cursor: `0:200:0|${replayWithIndex(249).id}`,
+      direction: "next" as const,
+    });
+    listReplaysSpy.mockResolvedValueOnce({
+      data: replayPage(200, apiClient.API_MAX_PER_PAGE),
+      nextCursor: "0:300:0",
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      {
+        cursor: "next",
+        limit: 25,
+        json: true,
+        period: parsePeriod("7d"),
+        sort: "-started_at",
+      },
+      "test-org/cli"
+    );
+
+    expect(listReplaysSpy).toHaveBeenCalledWith("test-org", {
+      environment: undefined,
+      fields: [...REPLAY_LIST_FIELDS],
+      limit: apiClient.API_MAX_PER_PAGE,
+      projectSlugs: ["cli"],
+      query: undefined,
+      sort: "-started_at",
+      cursor: "0:200:0",
+      statsPeriod: "7d",
+    });
+
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    const parsed = JSON.parse(output);
+    const lastReplay = replayWithIndex(274);
+    expect(parsed.data).toHaveLength(25);
+    expect(parsed.data[0].id).toBe(replayWithIndex(250).id);
+    expect(parsed.data[24].id).toBe(lastReplay.id);
+    expect(parsed.nextCursor).toBe(`0:200:0|${lastReplay.id}`);
   });
 
   test("uses one server URL prefilter for positional path filters", async () => {

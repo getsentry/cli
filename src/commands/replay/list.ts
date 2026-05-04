@@ -296,7 +296,7 @@ type FetchReplayListOptions = {
   timeRange: TimeRange;
 };
 
-type FilteredPageResult = {
+type ReplayPageResult = {
   filled: boolean;
   cursorToStore: string | undefined;
 };
@@ -313,7 +313,7 @@ function replayStartIndex(
   return afterIndex === -1 ? 0 : afterIndex + 1;
 }
 
-function processFilteredReplayPage(
+function processReplayPage(
   pageReplays: ReplayListItem[],
   results: ReplayListItem[],
   flags: ListFlags,
@@ -322,11 +322,10 @@ function processFilteredReplayPage(
     afterReplayId: string | undefined;
     nextCursor: string | undefined;
   }
-): FilteredPageResult {
+): ReplayPageResult {
   const startIndex = replayStartIndex(pageReplays, options.afterReplayId);
 
-  for (let index = startIndex; index < pageReplays.length; index += 1) {
-    const replay = pageReplays[index] as ReplayListItem;
+  for (const replay of pageReplays.slice(startIndex)) {
     if (!replayMatchesClientFilters(replay, flags)) {
       continue;
     }
@@ -351,12 +350,16 @@ async function fetchReplayListForCommand(
   options: FetchReplayListOptions
 ): Promise<{ replays: ReplayListItem[]; nextCursor?: string }> {
   const { environment, flags, org, project, query, timeRange } = options;
-  const shouldFillClientFilteredLimit = hasClientSideFilters(flags);
-  const requestedServerLimit = shouldFillClientFilteredLimit
-    ? API_MAX_PER_PAGE
-    : flags.limit;
-  const replays: ReplayListItem[] = [];
   const decodedCursor = decodeReplayCursor(options.cursor);
+  const hasClientFilters = hasClientSideFilters(flags);
+  const needsFullPageScan =
+    hasClientFilters || Boolean(decodedCursor.afterReplayId);
+  const shouldFetchMultiplePages =
+    needsFullPageScan || flags.limit > API_MAX_PER_PAGE;
+  const requestedServerLimit = needsFullPageScan
+    ? API_MAX_PER_PAGE
+    : Math.min(flags.limit, API_MAX_PER_PAGE);
+  const replays: ReplayListItem[] = [];
   let pageCursor = decodedCursor.serverCursor;
   let afterReplayId = decodedCursor.afterReplayId;
   let cursorToStore: string | undefined;
@@ -373,23 +376,18 @@ async function fetchReplayListForCommand(
       ...timeRangeToApiParams(timeRange),
     });
 
-    if (!shouldFillClientFilteredLimit) {
+    if (!shouldFetchMultiplePages) {
       return {
         replays: pageResult.data.slice(0, flags.limit),
         nextCursor: pageResult.nextCursor,
       };
     }
 
-    const processed = processFilteredReplayPage(
-      pageResult.data,
-      replays,
-      flags,
-      {
-        serverCursor: pageCursor,
-        afterReplayId,
-        nextCursor: pageResult.nextCursor,
-      }
-    );
+    const processed = processReplayPage(pageResult.data, replays, flags, {
+      serverCursor: pageCursor,
+      afterReplayId,
+      nextCursor: pageResult.nextCursor,
+    });
     afterReplayId = undefined;
 
     if (processed.filled) {
