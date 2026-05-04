@@ -173,4 +173,27 @@ describe("replay event list", () => {
     expect(JSON.parse(lines[0]!).kind).toBe("navigation");
     expect(JSON.parse(lines[1]!).kind).toBe("click");
   });
+
+  test("rejects before or after windows without around", async () => {
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+
+    await expect(
+      func.call(
+        context,
+        {
+          before: 5000,
+          fresh: false,
+          json: true,
+          jsonl: false,
+          limit: 10,
+          raw: false,
+        },
+        `test-org/cli/${REPLAY_ID}`
+      )
+    ).rejects.toThrow("--before and --after require --around");
+
+    expect(getReplaySpy).not.toHaveBeenCalled();
+    expect(getReplayRecordingSegmentsSpy).not.toHaveBeenCalled();
+  });
 });

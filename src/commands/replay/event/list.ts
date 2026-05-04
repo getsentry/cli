@@ -128,6 +128,12 @@ function resolveWindow(flags: EventListFlags): {
   }
 
   if (flags.around === undefined) {
+    if (flags.before !== undefined || flags.after !== undefined) {
+      throw new ValidationError(
+        "--before and --after require --around",
+        flags.before !== undefined ? "before" : "after"
+      );
+    }
     return { fromMs: flags.from, toMs: flags.to };
   }
 
@@ -350,6 +356,8 @@ export const listCommand = buildCommand({
   async *func(this: SentryContext, flags: EventListFlags, ...args: string[]) {
     validateJsonlMode(flags);
     applyFreshFlag(flags);
+    const kinds = parseEventKinds(flags.kind);
+    const window = resolveWindow(flags);
 
     const parsedArgs = parseReplayTargetArgs(args, USAGE_HINT);
     const replayId = validateHexId(parsedArgs.replayId, "replay ID");
@@ -386,8 +394,6 @@ export const listCommand = buildCommand({
       json: flags.json,
     });
 
-    const kinds = parseEventKinds(flags.kind);
-    const window = resolveWindow(flags);
     const allEvents = extractNormalizedReplayEvents(replay, segments, {
       includeRaw: flags.raw,
     });
