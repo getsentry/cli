@@ -379,22 +379,11 @@ function StatusScreen({
           summary={summary}
         />
       </Box>
-      <VerticalSeparator />
       <Box flexDirection="column" overflow="hidden" width="40%">
         <TipPanel tipIndex={tipIndex} />
         <Box height={1} />
         <ProgressPanel steps={steps} />
       </Box>
-    </Box>
-  );
-}
-
-// ────────────────────── Vertical Separator ───────────────────────────
-
-function VerticalSeparator(): React.ReactNode {
-  return (
-    <Box flexDirection="column" flexShrink={0} width={1}>
-      <Text color={MUTED_DIM}>{ICONS.verticalLine}</Text>
     </Box>
   );
 }
