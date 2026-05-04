@@ -226,12 +226,19 @@ export async function createInkUI(): Promise<InkUI> {
   // Enter the alternate screen buffer so the wizard occupies the full
   // terminal. On exit, Ink restores the original scrollback.
   process.stdout.write("\x1b[?1049h");
-  const instance = ink.render(
-    react.createElement(app.App, { store }),
-    renderOptions
-  );
+  try {
+    const instance = ink.render(
+      react.createElement(app.App, { store }),
+      renderOptions
+    );
 
-  return new InkUI(instance, store, freshStdin);
+    return new InkUI(instance, store, freshStdin);
+  } catch (error) {
+    // Restore the terminal if Ink rendering or UI init fails,
+    // otherwise the user is stuck in the alternate screen buffer.
+    process.stdout.write("\x1b[?1049l");
+    throw error;
+  }
 }
 
 /**
