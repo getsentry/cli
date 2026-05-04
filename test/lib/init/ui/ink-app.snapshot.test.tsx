@@ -133,9 +133,9 @@ describe("Ink App snapshot", () => {
 
     const frame = (await renderApp(store, 60)).allOutput();
     expect(frame).toContain("Narrow terminal");
-    // At < 80 cols the SplitView collapses — no tip panel, but tasks
-    // still render in single-column mode.
-    expect(frame).toMatch(TASKS_HEADER_RE);
+    // At < 80 cols the sidebar is hidden — only the main content
+    // area renders in single-column mode.
+    expect(frame).toMatch(STATUS_TAB_RE);
   });
 
   test("status bar shows messages", async () => {

@@ -114,6 +114,7 @@ export function App({ store }: AppProps): React.ReactNode {
 
   const width = getContentWidth(columns);
   const contentHeight = Math.max(5, rows - 3);
+  const isWide = width >= 80;
 
   useInput((input, key) => {
     if (key.ctrl && input === "c" && !snapshot.prompt) {
@@ -184,31 +185,37 @@ export function App({ store }: AppProps): React.ReactNode {
       <Box flexDirection="column" flexGrow={1} paddingTop={1}>
         <Box flexDirection="column" height={contentHeight}>
           <Box
-            flexDirection="column"
+            flexDirection="row"
             flexGrow={1}
             flexShrink={1}
+            gap={isWide ? 1 : 0}
             overflow="hidden"
           >
-            {activeTab === 0 ? (
-              <StatusScreen
-                bannerRows={snapshot.bannerRows}
+            <Box flexDirection="column" flexGrow={1} overflow="hidden">
+              {activeTab === 0 ? (
+                <ActivityPane
+                  bannerRows={snapshot.bannerRows}
+                  logs={snapshot.logs}
+                  prompt={snapshot.prompt}
+                  spinner={snapshot.spinner}
+                  summary={snapshot.summary}
+                />
+              ) : (
+                <FilesScreen
+                  filesRead={snapshot.filesRead}
+                  hasActivePrompt={snapshot.prompt !== null}
+                  terminalRows={rows}
+                />
+              )}
+            </Box>
+            {isWide ? (
+              <Sidebar
                 learnState={snapshot.learnState}
-                logs={snapshot.logs}
-                prompt={snapshot.prompt}
-                spinner={snapshot.spinner}
                 steps={snapshot.steps}
-                summary={snapshot.summary}
                 terminalRows={rows}
                 tipIndex={snapshot.tipIndex}
-                width={width}
               />
-            ) : (
-              <FilesScreen
-                filesRead={snapshot.filesRead}
-                hasActivePrompt={snapshot.prompt !== null}
-                terminalRows={rows}
-              />
-            )}
+            ) : null}
           </Box>
 
           {snapshot.overlay ? (
@@ -341,75 +348,33 @@ function KeyboardHintsBar({ hints }: { hints: KeyHint[] }): React.ReactNode {
   );
 }
 
-// ─────────────────────────── Status Screen ────────────────────────────
+// ────────────────────────────── Sidebar ───────────────────────────────
 
-function StatusScreen({
-  bannerRows,
-  steps,
-  tipIndex,
-  spinner,
-  logs,
-  prompt,
-  summary,
-  terminalRows,
-  width,
+function Sidebar({
   learnState,
+  steps,
+  terminalRows,
+  tipIndex,
 }: {
-  bannerRows: { content: string; color: string }[];
-  steps: StepEntry[];
-  tipIndex: number;
-  spinner: SpinnerState;
-  logs: LogEntry[];
-  prompt: ActivePrompt | null;
-  summary: WizardSummary | null;
-  terminalRows: number;
-  width: number;
   learnState: LearnState;
+  steps: StepEntry[];
+  terminalRows: number;
+  tipIndex: number;
 }): React.ReactNode {
-  const isWide = width >= 80;
-
-  if (!isWide) {
-    return (
-      <Box flexDirection="column" flexGrow={1}>
-        <ProgressPanel steps={steps} />
-        <Box height={1} />
-        <ActivityPane
-          bannerRows={bannerRows}
-          logs={logs}
-          prompt={prompt}
-          spinner={spinner}
-          summary={summary}
-        />
-      </Box>
-    );
-  }
-
   const showTips = terminalRows >= 24;
-
   return (
-    <Box flexDirection="row" flexGrow={1} flexShrink={1} gap={1}>
-      <Box flexDirection="column" flexGrow={1} overflow="hidden">
-        <ActivityPane
-          bannerRows={bannerRows}
-          logs={logs}
-          prompt={prompt}
-          spinner={spinner}
-          summary={summary}
-        />
-      </Box>
-      <Box flexDirection="column" overflow="hidden" width="40%">
-        {showTips ? (
-          <>
-            {learnState.complete ? (
-              <TipPanel tipIndex={tipIndex} />
-            ) : (
-              <LearnPanel learnState={learnState} />
-            )}
-            <Box height={1} />
-          </>
-        ) : null}
-        <ProgressPanel steps={steps} />
-      </Box>
+    <Box flexDirection="column" overflow="hidden" width="40%">
+      {showTips ? (
+        <>
+          {learnState.complete ? (
+            <TipPanel tipIndex={tipIndex} />
+          ) : (
+            <LearnPanel learnState={learnState} />
+          )}
+          <Box height={1} />
+        </>
+      ) : null}
+      <ProgressPanel steps={steps} />
     </Box>
   );
 }
