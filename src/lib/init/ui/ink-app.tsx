@@ -56,8 +56,6 @@ import type {
 
 /** Sentry blurple — primary brand accent. */
 const ACCENT = "#7553FF";
-/** Light lavender — readable text on blurple backgrounds. */
-const ACCENT_DIM = "#E8E1FF";
 const MUTED = "gray";
 const MUTED_DIM = "#555555";
 /** Sentry purple — spinners, in-progress states. */
@@ -162,8 +160,7 @@ export function App({ store }: AppProps): React.ReactNode {
 
   const inner = (
     <Box flexDirection="column" height={rows} width={width}>
-      <TitleBar width={width} />
-      <Box flexDirection="column" flexGrow={1} paddingX={1}>
+      <Box flexDirection="column" flexGrow={1} paddingTop={1} paddingX={1}>
         <Box flexDirection="column" height={contentHeight}>
           <Box
             flexDirection="column"
@@ -246,25 +243,6 @@ function useTerminalSize(): { columns: number; rows: number } {
     };
   }, [stdout]);
   return size;
-}
-
-// ──────────────────────────── Title Bar ──────────────────────────────
-
-function TitleBar({ width }: { width: number }): React.ReactNode {
-  const title = ` ${ICONS.diamond} Sentry Init Wizard`;
-  const right = " sentry.io ";
-  const gap = Math.max(0, width - title.length - right.length);
-  const padding = " ".repeat(gap);
-
-  return (
-    <Box overflow="hidden" width={width}>
-      <Text backgroundColor={ACCENT} bold color={ACCENT_DIM}>
-        {title}
-        {padding}
-        {right}
-      </Text>
-    </Box>
-  );
 }
 
 // ──────────────────────────── Status Bar ──────────────────────────────

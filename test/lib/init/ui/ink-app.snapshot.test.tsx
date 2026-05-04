@@ -20,7 +20,6 @@ import { App } from "../../../../src/lib/init/ui/ink-app.js";
 import { WizardStore } from "../../../../src/lib/init/ui/wizard-store.js";
 
 // Top-level regex literals (biome `useTopLevelRegex`).
-const TITLE_BAR_RE = /Sentry Init Wizard/;
 const TIP_HEADER_RE = /Did you know\?/;
 const TASKS_HEADER_RE = /Tasks\b/;
 const STATUS_TAB_RE = /Status/;
@@ -116,8 +115,6 @@ describe("Ink App snapshot", () => {
     store.markFilesAnalyzed(["package.json"]);
 
     const frame = (await renderApp(store, 120)).allOutput();
-    // TitleBar renders at the top.
-    expect(frame).toMatch(TITLE_BAR_RE);
     // Status tab is the default, so we see the tips + tasks panels.
     expect(frame).toMatch(TIP_HEADER_RE);
     expect(frame).toMatch(TASKS_HEADER_RE);
@@ -137,7 +134,6 @@ describe("Ink App snapshot", () => {
     store.appendLog("info", "Narrow terminal");
 
     const frame = (await renderApp(store, 60)).allOutput();
-    expect(frame).toMatch(TITLE_BAR_RE);
     expect(frame).toContain("Narrow terminal");
     // At < 80 cols the SplitView collapses — no tip panel, but tasks
     // still render in single-column mode.
