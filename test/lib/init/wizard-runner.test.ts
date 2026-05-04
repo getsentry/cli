@@ -12,6 +12,8 @@ import * as clack from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as banner from "../../../src/lib/banner.js";
+import { ENV_VAR_AGENTS } from "../../../src/lib/detect-agent.js";
+import { setEnv } from "../../../src/lib/env.js";
 import { WizardError } from "../../../src/lib/errors.js";
 import { WizardCancelledError } from "../../../src/lib/init/clack-utils.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
@@ -223,6 +225,9 @@ afterEach(() => {
   } else {
     process.env.SENTRY_PLAIN_OUTPUT = savedPlainOutput;
   }
+
+  // Restore the env sandbox in case any test used setEnv without try/finally.
+  setEnv(process.env);
 });
 
 describe("runWizard", () => {
@@ -276,6 +281,44 @@ describe("runWizard", () => {
 
     expect(cancelSpy).toHaveBeenCalledWith("Setup cancelled.");
     expect(getWorkflowSpy).not.toHaveBeenCalled();
+  });
+
+  test("suppresses the ASCII art banner when an agent is detected", async () => {
+    setEnv({ ...process.env, CLAUDE_CODE: "1" } as NodeJS.ProcessEnv);
+    try {
+      await runWizard(makeOptions());
+    } finally {
+      setEnv(process.env);
+    }
+
+    expect(formatBannerSpy).not.toHaveBeenCalled();
+    expect(stderrSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("BANNER")
+    );
+  });
+
+  test("prints the ASCII art banner when no agent is detected", async () => {
+    // Strip all agent-detection env vars so detectAgent() returns undefined
+    // even when running inside an agent environment (e.g. OpenCode in CI).
+    const agentKeys = new Set([
+      "AI_AGENT",
+      "AGENT",
+      "CLAUDECODE",
+      "CLAUDE_CODE",
+      ...ENV_VAR_AGENTS.keys(),
+    ]);
+    const cleanEnv = Object.fromEntries(
+      Object.entries(process.env).filter(([k]) => !agentKeys.has(k))
+    );
+    setEnv(cleanEnv as NodeJS.ProcessEnv);
+    try {
+      await runWizard(makeOptions());
+    } finally {
+      setEnv(process.env);
+    }
+
+    expect(formatBannerSpy).toHaveBeenCalled();
+    expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining("BANNER"));
   });
 
   test("dispatches tool payloads through the registry", async () => {

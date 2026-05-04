@@ -12,6 +12,7 @@ import { MastraClient } from "@mastra/client-js";
 import { captureException, getTraceData } from "@sentry/node-core/light";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
+import { detectAgent } from "../detect-agent.js";
 import { EXIT, WizardError } from "../errors.js";
 import { terminalLink } from "../formatters/colors.js";
 import {
@@ -328,7 +329,11 @@ async function preamble(
     );
   }
 
-  process.stderr.write(`\n${formatBanner()}\n\n`);
+  // Suppress the ASCII art banner for agent-driven runs — it wastes tokens
+  // and adds noise to structured output without providing value to the agent.
+  if (!detectAgent()) {
+    process.stderr.write(`\n${formatBanner()}\n\n`);
+  }
   intro("sentry init");
 
   let confirmed: boolean;
