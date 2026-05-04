@@ -10,29 +10,25 @@
 - Add packages with `bun add -d <package>` only; this repo does not use runtime `dependencies`.
 
 ## Commands
-| Task | Command |
-|------|---------|
-| Setup | `bun install` |
-| Run CLI | `bun run dev -- <args>` |
-| Run with local env | `bun run --env-file=.env.local src/bin.ts <args>` |
-| Typecheck | `bun run typecheck` |
-| Lint | `bun run lint` / `bun run lint:fix` |
-| Unit tests | `bun run test:unit` |
-| E2E tests | `bun run test:e2e` |
-| One test file | `bun test path/to/file.test.ts --timeout 15000 --isolate` |
-| Metadata checks | `bun run check:fragments`; `bun run check:errors`; `bun run check:deps` |
+- Setup: `bun install`
+- Run CLI: `bun run dev -- <args>`
+- Run with local env: `bun run --env-file=.env.local src/bin.ts <args>`
+- Typecheck: `bun run typecheck`
+- Lint: `bun run lint`; fix with `bun run lint:fix`
+- Unit tests: `bun run test:unit`
+- E2E tests: `bun run test:e2e`
+- One test file: `bun test path/to/file.test.ts --timeout 15000 --isolate`
+- Metadata checks: `bun run check:fragments`; `bun run check:errors`; `bun run check:deps`
 
 ## Task References
-| Need | File |
-|------|------|
-| Runtime APIs, packages, Node distribution | `policies/runtime-and-deps.md` |
-| Commands, routes, mutations | `policies/cli-command-design.md` |
-| Human output, JSON output, errors | `policies/output-and-errors.md` |
-| Cursor pagination for list commands | `policies/pagination.md` |
-| Test style and isolation | `policies/testing.md` |
-| Generated docs, skills, schemas | `policies/generated-artifacts.md` |
-| Local CLI smoke testing | `playbooks/local-cli-testing.md` |
-| Edge-case implementation notes | `policies/implementation-notes.md` |
+- Runtime APIs, packages, Node distribution: `policies/runtime-and-deps.md`
+- Commands, routes, mutations: `policies/cli-command-design.md`
+- Human output, JSON output, errors: `policies/output-and-errors.md`
+- Cursor pagination for list commands: `policies/pagination.md`
+- Test style and isolation: `policies/testing.md`
+- Generated docs, skills, schemas: `policies/generated-artifacts.md`
+- Local CLI smoke testing: `playbooks/local-cli-testing.md`
+- Edge-case implementation notes: `policies/implementation-notes.md`
 
 ## Key Conventions
 - Command code uses repo wrappers: `buildCommand`, `buildListCommand`, `buildDeleteCommand`, and `buildRouteMap`.
@@ -44,19 +40,17 @@
 - Prefer `@sentry/api` response types when available instead of duplicating API schemas.
 
 ## File Map
-| Area | Path |
-|------|------|
-| Commands | `src/commands/<domain>/` |
-| API modules | `src/lib/api/` |
-| Formatters | `src/lib/formatters/` |
-| Shared command helpers | `src/lib/command.ts`, `src/lib/list-command.ts`, `src/lib/mutate-command.ts` |
-| Org/project resolution | `src/lib/resolve-target.ts`, `src/lib/org-list.ts` |
-| DSN detection | `src/lib/dsn/` |
-| SQLite/cache code | `src/lib/db/` |
-| Types and schemas | `src/types/` |
-| Tests | `test/` mirrors `src/` |
-| Command doc fragments | `docs/src/fragments/commands/` |
-| Generated plugin skill | `plugins/sentry-cli/skills/sentry-cli/` |
+- Commands: `src/commands/<domain>/`
+- API modules: `src/lib/api/`
+- Formatters: `src/lib/formatters/`
+- Shared command helpers: `src/lib/command.ts`, `src/lib/list-command.ts`, `src/lib/mutate-command.ts`
+- Org/project resolution: `src/lib/resolve-target.ts`, `src/lib/org-list.ts`
+- DSN detection: `src/lib/dsn/`
+- SQLite/cache code: `src/lib/db/`
+- Types and schemas: `src/types/`
+- Tests: `test/` mirrors `src/`
+- Command doc fragments: `docs/src/fragments/commands/`
+- Generated plugin skill: `plugins/sentry-cli/skills/sentry-cli/`
 
 ## Commit Attribution
 AI commits MUST include:
