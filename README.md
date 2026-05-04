@@ -133,10 +133,10 @@ bun install
 
 ```bash
 # Run CLI in development mode
-bun run dev --help
+bun run cli --help
 
 # With environment variables
-bun run --env-file=.env.local src/bin.ts --help
+bun run --env-file=.env.local cli --help
 ```
 
 ### Scripts
