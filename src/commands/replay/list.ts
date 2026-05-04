@@ -5,7 +5,9 @@
  */
 
 import type { SentryContext } from "../../context.js";
+import { MAX_PAGINATION_PAGES } from "../../lib/api/infrastructure.js";
 import {
+  API_MAX_PER_PAGE,
   isReplaySortValue,
   listReplays,
   type ReplaySortValue,
@@ -228,6 +230,83 @@ function replayMatchesRouteFilters(
     return false;
   }
   return true;
+}
+
+function hasClientSideFilters(flags: ListFlags): boolean {
+  return Boolean(
+    flags.path ||
+      flags["entry-path"] ||
+      flags["exit-path"] ||
+      flags.friction ||
+      flags["problem-only"]
+  );
+}
+
+function replayMatchesClientFilters(
+  replay: ReplayListItem,
+  flags: ListFlags
+): boolean {
+  if (!replayMatchesRouteFilters(replay, flags)) {
+    return false;
+  }
+  if (flags["problem-only"]) {
+    return hasErrorOrWarningSignals(replay);
+  }
+  return flags.friction ? hasFrictionSignals(replay) : true;
+}
+
+type FetchReplayListOptions = {
+  cursor?: string;
+  environment?: string[];
+  flags: ListFlags;
+  org: string;
+  project?: string;
+  query?: string;
+  timeRange: TimeRange;
+};
+
+async function fetchReplayListForCommand(
+  options: FetchReplayListOptions
+): Promise<{ replays: ReplayListItem[]; nextCursor?: string }> {
+  const { environment, flags, org, project, query, timeRange } = options;
+  const shouldFillClientFilteredLimit = hasClientSideFilters(flags);
+  const requestedServerLimit = shouldFillClientFilteredLimit
+    ? API_MAX_PER_PAGE
+    : flags.limit;
+  const replays: ReplayListItem[] = [];
+  let pageCursor = options.cursor;
+  let nextCursor: string | undefined;
+
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
+    const pageResult = await listReplays(org, {
+      environment,
+      fields: [...REPLAY_LIST_FIELDS],
+      limit: requestedServerLimit,
+      query,
+      projectSlugs: project ? [project] : undefined,
+      sort: flags.sort,
+      cursor: pageCursor,
+      ...timeRangeToApiParams(timeRange),
+    });
+
+    nextCursor = pageResult.nextCursor;
+    replays.push(
+      ...pageResult.data.filter((replay) =>
+        replayMatchesClientFilters(replay, flags)
+      )
+    );
+
+    if (
+      !shouldFillClientFilteredLimit ||
+      replays.length >= flags.limit ||
+      !nextCursor
+    ) {
+      break;
+    }
+    pageCursor = nextCursor;
+  }
+
+  return { replays: replays.slice(0, flags.limit), nextCursor };
 }
 
 const REPLAY_COLUMNS: Column<ReplayListItem>[] = [
@@ -517,32 +596,22 @@ export const listCommand = buildListCommand("replay", {
       contextKey
     );
 
-    const { data: fetchedReplays, nextCursor } = await withProgress(
+    const { replays, nextCursor } = await withProgress(
       {
         message: `Fetching replays (up to ${flags.limit})...`,
         json: flags.json,
       },
       () =>
-        listReplays(resolved.org, {
-          environment,
-          fields: [...REPLAY_LIST_FIELDS],
-          limit: flags.limit,
-          query,
-          projectSlugs: resolved.project ? [resolved.project] : undefined,
-          sort: flags.sort,
+        fetchReplayListForCommand({
           cursor,
-          ...timeRangeToApiParams(timeRange),
+          environment,
+          flags,
+          org: resolved.org,
+          project: resolved.project,
+          query,
+          timeRange,
         })
     );
-    const replays = fetchedReplays.filter((replay) => {
-      if (!replayMatchesRouteFilters(replay, flags)) {
-        return false;
-      }
-      if (flags["problem-only"]) {
-        return hasErrorOrWarningSignals(replay);
-      }
-      return flags.friction ? hasFrictionSignals(replay) : true;
-    });
 
     advancePaginationState(PAGINATION_KEY, contextKey, direction, nextCursor);
     const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
