@@ -2,6 +2,8 @@
 
 ## Project
 - Sentry CLI is a Bun + Stricli command-line client for Sentry.
+- Product goals: zero-config project detection, `gh`-style UX, reliable JSON for agents, fast bundled binaries, and Seer-powered debugging flows.
+- Major surfaces include DSN/project auto-detection, multi-region Sentry APIs, SQLite-backed auth/cache/defaults, OAuth device auth, command docs/skill generation, and the npm/node distribution.
 - Keep agent-facing docs concise. Put durable details in `policies/`, repeatable workflows in `playbooks/`, and design plans in `specs/`.
 - Prefer editing existing policy/playbook/spec files over expanding this file.
 
@@ -51,6 +53,7 @@ Co-Authored-By: OpenAI Codex <codex@openai.com>
 | Tests | `policies/testing.md` |
 | Generated docs or skills | `policies/generated-artifacts.md` |
 | Local CLI smoke testing | `playbooks/local-cli-testing.md` |
+| SDK patching or dependency runtime changes | `policies/runtime-and-deps.md`, `package.json` `patchedDependencies` |
 
 ## Policy Index
 | File | Purpose |
@@ -64,6 +67,13 @@ Co-Authored-By: OpenAI Codex <codex@openai.com>
 | `policies/pagination.md` | Cursor-stack pagination and list command expectations |
 | `policies/testing.md` | Bun tests, property/model-based tests, config isolation |
 | `policies/generated-artifacts.md` | Generated command docs, skills, fragments, schemas |
+
+## Playbook And Spec Index
+| File | Purpose |
+|------|---------|
+| `playbooks/README.md` | When to create repeatable workflow docs |
+| `playbooks/local-cli-testing.md` | Local CLI smoke testing commands and checks |
+| `specs/README.md` | When to create design notes and migration plans |
 
 ## Critical Rules
 - Import `buildCommand` from `src/lib/command.ts`, never from `@stricli/core`.
@@ -79,6 +89,10 @@ Co-Authored-By: OpenAI Codex <codex@openai.com>
 - Local ESM imports use `.js` extensions and type-only imports use `import type`.
 - Use `@sentry/api` response types when available instead of duplicating API schemas.
 - Keep comments brief and intent-focused. Follow `policies/code-comments.md`.
+- Config/auth helpers are async; always await them.
+- Use shared validators in `src/lib/hex-id.ts` and `src/lib/trace-id.ts` for trace, span, event, and log IDs.
+- Use `upsert()` / `runUpsert()` from `src/lib/db/utils.ts` for SQLite UPSERTs.
+- For project filtering, verify the endpoint contract first; Discover uses query text, replay uses `projectSlugs`, and issue endpoints vary by mode.
 
 ## File Locations
 | Work | Location |
@@ -99,6 +113,35 @@ Co-Authored-By: OpenAI Codex <codex@openai.com>
 | Test helpers | `test/helpers.ts`, `test/model-based/helpers.ts` |
 | Command doc fragments | `docs/src/fragments/commands/` |
 | Generated plugin skill | `plugins/sentry-cli/skills/sentry-cli/` |
+| Build scripts | `script/` |
+
+## Long-Term Concerns
+| Area | Concern |
+|------|---------|
+| Issue resolution | `issue resolve --in` accepts versions, `@next`, `@commit`, and `@commit:<repo>@<sha>`; split explicit commit specs on the last `@` and send `{commit, repository}` to the API. |
+| Issue merge | Dedupe by resolved numeric issue IDs, reject unresolved orgs in cross-org checks, and treat `--into` as a preference because the API may pick the parent by event count. |
+| Repository lookup | `repo_cache` backs offline Sentry repo matching for `@commit`; use paginated `listAllRepositories()` and tolerate read-only cache writes. |
+| Response cache | Cached synthetic `Response` objects carry no marker; `authenticatedFetch()` owns `lastCacheHitAgeMs`, and `buildCommand()` appends cache hints only when a command returns a `CommandReturn`. |
+| JSON stability | `collapse=organization` can drop nested org fields; `jsonTransform` must rehydrate needed fields, apply `filterFields()`, and handle exclusions itself. |
+| Markdown output | Tests run non-TTY and usually assert raw CommonMark; render explicitly and strip ANSI only when testing terminal styling. |
+| API SDK fetch | `@sentry/api` may pass a `Request` without `init`; preserve request headers, use `unwrapPaginatedResult()` when headers matter, and guard empty responses with `Array.isArray()`. |
+| API tests | Tests that mock `globalThis.fetch` need `useTestConfigDir()` plus `setAuthToken()` so the disk response cache does not bypass mocks. |
+| Command tests | Test command `func` bodies via `await cmd.loader()` and `.call(mockContext, flags, ...args)`; keep `mock.module()` pollution in isolated test files. |
+| Multi-region orgs | In `listOrganizationsUncached()`, track any fulfilled region separately from result count so empty 200s are not treated as all-region 403 failures. |
+| Seer trial prompt | `bin.ts` layers auth outside Seer trial prompting; trial start uses the server-provided category and treats self-hosted 404s gracefully. |
+| Init wizard | `MastraClient` has no dispose API; pass and abort an `AbortController`, and preserve `init.signal` in custom fetch wrappers. |
+| TTY init | macOS Bun TTY reopening uses `/dev/tty` plus `tty.ReadStream`; keep the explicit exit safety net and skip it under `NODE_ENV=test`. |
+| Upgrade/build | Windows upgrade verification polls file visibility before spawn; patched Bun cross-compile omits `compile.target` and requires `SENTRY_CLIENT_ID`. |
+| npm/node distribution | `dist/bin.cjs` requires Node.js >= 22 because the SQLite polyfill uses `node:sqlite`; double-escape newline continuations in esbuild banner template strings. |
+| SDK tree-shaking | Sentry SDK patches come from `bun patch`; import `@sentry/node-core/light` subpaths and regenerate patches instead of hand-editing diffs. |
+| Lint traps | Use named imports instead of namespace imports, define top-level `noop()` helpers instead of empty arrows, and run `bun run lint` after `lint:fix`. |
+| Coverage traps | Bun `--isolate --parallel` coverage may count comments, type lines, and braces; move verbose rationale out of function bodies when coverage drops without missing statements. |
+| Hidden globals | Hidden `--org` / `--project` compatibility flags are merged in `buildCommand()` and applied before auth; no short aliases because `-p` conflicts. |
+| Error reporting | Preserve `ApiError` status when rethrowing so 4xx API errors stay silenced; pass `field` to `ValidationError` for useful fingerprints. |
+| Telemetry | Graceful fallbacks should use `withTracingSpan()` plus named `captureException` imports at warning level; user-visible fallbacks use `log.warn()`. |
+| Dashboard widgets | Normalize dataset aliases once, pass normalized flags through replacement builders, and use grouped-widget limit auto-defaulting only when the user omitted `--limit`. |
+| Fuzzy project lookup | On exact project slug misses, `findProjectsByPattern()` is the failure-path suggestion mechanism and may list projects across orgs. |
+| Bot review triage | When bot feedback conflicts with mirrored upstream SDK behavior, verify against the SDK source and explain the precedent instead of diverging silently. |
 
 ## Specs And Playbooks
 - Add specs under `specs/` for material design changes, migrations, and unresolved tradeoffs.
