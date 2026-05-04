@@ -371,6 +371,100 @@ describe("listCommand.func", () => {
     expect(parsed.nextCursor).toBe("0:200:0");
   });
 
+  test("stores a mid-page cursor when client filters fill before page end", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    listReplaysSpy.mockResolvedValueOnce({
+      data: [
+        {
+          ...sampleReplays[0]!,
+          id: "11111111111111111111111111111111",
+          urls: ["https://example.com/signup/one"],
+        },
+        {
+          ...sampleReplays[0]!,
+          id: "22222222222222222222222222222222",
+          urls: ["https://example.com/signup/two"],
+        },
+      ],
+      nextCursor: "0:100:0",
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      {
+        limit: 1,
+        json: true,
+        path: "/signup",
+        period: parsePeriod("7d"),
+        sort: "-started_at",
+      },
+      "test-org/cli"
+    );
+
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed.data).toHaveLength(1);
+    expect(parsed.data[0].id).toBe("11111111111111111111111111111111");
+    expect(parsed.nextCursor).toBe("|11111111111111111111111111111111");
+  });
+
+  test("resumes from a mid-page cursor for client-filtered replays", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    resolveCursorSpy.mockReturnValueOnce({
+      cursor: "|11111111111111111111111111111111",
+      direction: "next" as const,
+    });
+    listReplaysSpy.mockResolvedValueOnce({
+      data: [
+        {
+          ...sampleReplays[0]!,
+          id: "11111111111111111111111111111111",
+          urls: ["https://example.com/signup/one"],
+        },
+        {
+          ...sampleReplays[0]!,
+          id: "22222222222222222222222222222222",
+          urls: ["https://example.com/signup/two"],
+        },
+      ],
+      nextCursor: "0:100:0",
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      {
+        cursor: "next",
+        limit: 1,
+        json: true,
+        path: "/signup",
+        period: parsePeriod("7d"),
+        sort: "-started_at",
+      },
+      "test-org/cli"
+    );
+
+    expect(listReplaysSpy).toHaveBeenCalledWith("test-org", {
+      environment: undefined,
+      fields: [...REPLAY_LIST_FIELDS],
+      limit: apiClient.API_MAX_PER_PAGE,
+      projectSlugs: ["cli"],
+      query: "url:*/signup*",
+      sort: "-started_at",
+      cursor: undefined,
+      statsPeriod: "7d",
+    });
+
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed.data).toHaveLength(1);
+    expect(parsed.data[0].id).toBe("22222222222222222222222222222222");
+    expect(parsed.nextCursor).toBe("0:100:0");
+  });
+
   test("uses one server URL prefilter for positional path filters", async () => {
     resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
     listReplaysSpy.mockResolvedValue({ data: sampleReplays });

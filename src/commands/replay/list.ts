@@ -128,6 +128,37 @@ const PAGINATION_KEY = "replay-list";
 const COMMAND_NAME = "replay list";
 const SIMPLE_SEARCH_VALUE_RE = /^[^\s:"]+$/;
 
+function encodeReplayCursor(
+  serverCursor: string | undefined,
+  afterReplayId?: string
+): string | undefined {
+  if (afterReplayId) {
+    return `${serverCursor ?? ""}|${afterReplayId}`;
+  }
+  return serverCursor;
+}
+
+function decodeReplayCursor(cursor: string | undefined): {
+  serverCursor: string | undefined;
+  afterReplayId: string | undefined;
+} {
+  if (!cursor) {
+    return { serverCursor: undefined, afterReplayId: undefined };
+  }
+
+  const pipeIndex = cursor.lastIndexOf("|");
+  if (pipeIndex === -1) {
+    return { serverCursor: cursor, afterReplayId: undefined };
+  }
+
+  const serverCursor = cursor.slice(0, pipeIndex);
+  const afterReplayId = cursor.slice(pipeIndex + 1);
+  return {
+    serverCursor: serverCursor || undefined,
+    afterReplayId: afterReplayId || undefined,
+  };
+}
+
 function parseLimit(value: string): number {
   return validateLimit(value, LIST_MIN_LIMIT, LIST_MAX_LIMIT);
 }
@@ -265,6 +296,57 @@ type FetchReplayListOptions = {
   timeRange: TimeRange;
 };
 
+type FilteredPageResult = {
+  filled: boolean;
+  cursorToStore: string | undefined;
+};
+
+function replayStartIndex(
+  replays: ReplayListItem[],
+  afterReplayId: string | undefined
+): number {
+  if (!afterReplayId) {
+    return 0;
+  }
+
+  const afterIndex = replays.findIndex((replay) => replay.id === afterReplayId);
+  return afterIndex === -1 ? 0 : afterIndex + 1;
+}
+
+function processFilteredReplayPage(
+  pageReplays: ReplayListItem[],
+  results: ReplayListItem[],
+  flags: ListFlags,
+  options: {
+    serverCursor: string | undefined;
+    afterReplayId: string | undefined;
+    nextCursor: string | undefined;
+  }
+): FilteredPageResult {
+  const startIndex = replayStartIndex(pageReplays, options.afterReplayId);
+
+  for (let index = startIndex; index < pageReplays.length; index += 1) {
+    const replay = pageReplays[index] as ReplayListItem;
+    if (!replayMatchesClientFilters(replay, flags)) {
+      continue;
+    }
+
+    results.push(replay);
+    if (results.length >= flags.limit) {
+      let cursorToStore = encodeReplayCursor(options.serverCursor, replay.id);
+      if (
+        cursorToStore ===
+        encodeReplayCursor(options.serverCursor, pageReplays.at(-1)?.id)
+      ) {
+        cursorToStore = options.nextCursor;
+      }
+      return { filled: true, cursorToStore };
+    }
+  }
+
+  return { filled: false, cursorToStore: undefined };
+}
+
 async function fetchReplayListForCommand(
   options: FetchReplayListOptions
 ): Promise<{ replays: ReplayListItem[]; nextCursor?: string }> {
@@ -274,8 +356,10 @@ async function fetchReplayListForCommand(
     ? API_MAX_PER_PAGE
     : flags.limit;
   const replays: ReplayListItem[] = [];
-  let pageCursor = options.cursor;
-  let nextCursor: string | undefined;
+  const decodedCursor = decodeReplayCursor(options.cursor);
+  let pageCursor = decodedCursor.serverCursor;
+  let afterReplayId = decodedCursor.afterReplayId;
+  let cursorToStore: string | undefined;
 
   for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
     const pageResult = await listReplays(org, {
@@ -289,24 +373,37 @@ async function fetchReplayListForCommand(
       ...timeRangeToApiParams(timeRange),
     });
 
-    nextCursor = pageResult.nextCursor;
-    replays.push(
-      ...pageResult.data.filter((replay) =>
-        replayMatchesClientFilters(replay, flags)
-      )
-    );
+    if (!shouldFillClientFilteredLimit) {
+      return {
+        replays: pageResult.data.slice(0, flags.limit),
+        nextCursor: pageResult.nextCursor,
+      };
+    }
 
-    if (
-      !shouldFillClientFilteredLimit ||
-      replays.length >= flags.limit ||
-      !nextCursor
-    ) {
+    const processed = processFilteredReplayPage(
+      pageResult.data,
+      replays,
+      flags,
+      {
+        serverCursor: pageCursor,
+        afterReplayId,
+        nextCursor: pageResult.nextCursor,
+      }
+    );
+    afterReplayId = undefined;
+
+    if (processed.filled) {
+      return { replays, nextCursor: processed.cursorToStore };
+    }
+
+    cursorToStore = pageResult.nextCursor;
+    if (!pageResult.nextCursor) {
       break;
     }
-    pageCursor = nextCursor;
+    pageCursor = pageResult.nextCursor;
   }
 
-  return { replays: replays.slice(0, flags.limit), nextCursor };
+  return { replays, nextCursor: cursorToStore };
 }
 
 const REPLAY_COLUMNS: Column<ReplayListItem>[] = [
