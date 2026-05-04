@@ -402,6 +402,48 @@ describe("listCommand.func", () => {
     });
   });
 
+  test("does not duplicate server URL filters when --url and --path combine", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    listReplaysSpy.mockResolvedValue({
+      data: [
+        {
+          ...sampleReplays[0]!,
+          urls: ["https://example.com/signup/direct"],
+        },
+      ],
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      {
+        limit: 25,
+        json: true,
+        path: "/signup",
+        period: parsePeriod("7d"),
+        sort: "-started_at",
+        url: "example.com",
+      },
+      "test-org/cli"
+    );
+
+    expect(listReplaysSpy).toHaveBeenCalledWith("test-org", {
+      environment: undefined,
+      fields: [...REPLAY_LIST_FIELDS],
+      limit: apiClient.API_MAX_PER_PAGE,
+      projectSlugs: ["cli"],
+      query: "url:*example.com*",
+      sort: "-started_at",
+      cursor: undefined,
+      statsPeriod: "7d",
+    });
+
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed.data).toHaveLength(1);
+  });
+
   test("renders human output with a replay hint", async () => {
     resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
     listReplaysSpy.mockResolvedValue({ data: sampleReplays });
