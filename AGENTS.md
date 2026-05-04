@@ -3,8 +3,8 @@
 ## Project
 - Sentry CLI is a Bun + Stricli command-line client for Sentry.
 - Product goals: zero-config project detection, `gh`-style UX, reliable JSON for agents, fast bundled binaries, and Seer-powered debugging flows.
-- Major surfaces include DSN/project auto-detection, multi-region Sentry APIs, SQLite-backed auth/cache/defaults, OAuth device auth, command docs/skill generation, and the npm/node distribution.
-- Keep agent-facing docs concise. Put durable details in `policies/`, repeatable workflows in `playbooks/`, and design plans in `specs/`.
+- Major surfaces: DSN/project auto-detection, multi-region Sentry APIs, SQLite-backed auth/cache/defaults, OAuth device auth, generated command docs/skills, and the npm/node distribution.
+- Keep this file concise. Put durable details in `policies/`, repeatable workflows in `playbooks/`, and design plans in `specs/`.
 - Prefer editing existing policy/playbook/spec files over expanding this file.
 
 ## Package Manager
@@ -12,48 +12,30 @@
 - Add packages with `bun add -d <package>` only; this repo does not use runtime `dependencies`.
 
 ## Commit Attribution
-- AI commits MUST include:
+AI commits MUST include:
 
 ```text
 Co-Authored-By: OpenAI Codex <codex@openai.com>
 ```
 
-## Common Commands
-| Task | Command |
-|------|---------|
-| Install | `bun install` |
-| Run CLI in dev | `bun run dev -- <args>` |
-| Run CLI with env | `bun run --env-file=.env.local src/bin.ts <args>` |
-| Build current platform | `bun run build` |
-| Build all platforms | `bun run build:all` |
-| Typecheck | `bun run typecheck` |
-| Lint | `bun run lint` |
-| Fix lint/format | `bun run lint:fix` |
-| Unit tests | `bun run test:unit` |
-| E2E tests | `bun run test:e2e` |
-
-## File-Scoped Commands
-| Task | Command |
-|------|---------|
-| Test file | `bun test path/to/file.test.ts --timeout 15000 --isolate` |
-| Changed tests | `bun run test:changed` |
-| Format/lint changed code | `bun run lint:fix` |
-| Validate fragments | `bun run check:fragments` |
-| Validate errors | `bun run check:errors` |
-| Validate deps | `bun run check:deps` |
+## Commands
+- Setup/dev: `bun install`; `bun run dev -- <args>`; `bun run --env-file=.env.local src/bin.ts <args>`
+- Build: `bun run build`; `bun run build:all`
+- Check code: `bun run typecheck`; `bun run lint`; `bun run lint:fix`
+- Test: `bun run test:unit`; `bun run test:e2e`; `bun run test:changed`
+- Test one file: `bun test path/to/file.test.ts --timeout 15000 --isolate`
+- Validate repo metadata: `bun run check:fragments`; `bun run check:errors`; `bun run check:deps`
 
 ## Read First
-| Work | Read |
-|------|------|
-| Any code change | `policies/code-comments.md` |
-| Runtime APIs or packages | `policies/runtime-and-deps.md` |
-| Commands or routes | `policies/cli-command-design.md` |
-| Human/JSON output or errors | `policies/output-and-errors.md` |
-| List commands | `policies/pagination.md` |
-| Tests | `policies/testing.md` |
-| Generated docs or skills | `policies/generated-artifacts.md` |
-| Local CLI smoke testing | `playbooks/local-cli-testing.md` |
-| SDK patching or dependency runtime changes | `policies/runtime-and-deps.md`, `package.json` `patchedDependencies` |
+- Any code change: `policies/code-comments.md`
+- Runtime APIs or packages: `policies/runtime-and-deps.md`
+- Commands or routes: `policies/cli-command-design.md`
+- Human/JSON output or errors: `policies/output-and-errors.md`
+- List commands: `policies/pagination.md`
+- Tests: `policies/testing.md`
+- Generated docs or skills: `policies/generated-artifacts.md`
+- Local CLI smoke testing: `playbooks/local-cli-testing.md`
+- SDK patching or dependency runtime changes: `policies/runtime-and-deps.md`, `package.json` `patchedDependencies`
 
 ## Critical Rules
 - Import `buildCommand` from `src/lib/command.ts`, never from `@stricli/core`.
@@ -75,53 +57,41 @@ Co-Authored-By: OpenAI Codex <codex@openai.com>
 - For project filtering, verify the endpoint contract first; Discover uses query text, replay uses `projectSlugs`, and issue endpoints vary by mode.
 
 ## File Locations
-| Work | Location |
-|------|----------|
-| Commands | `src/commands/<domain>/` |
-| Command routes | `src/commands/<domain>/index.ts` |
-| API modules | `src/lib/api/` |
-| Formatters | `src/lib/formatters/` |
-| Shared command helpers | `src/lib/command.ts`, `src/lib/list-command.ts`, `src/lib/mutate-command.ts` |
-| Org/project resolution | `src/lib/resolve-target.ts`, `src/lib/org-list.ts` |
-| DSN detection | `src/lib/dsn/` |
-| SQLite/cache code | `src/lib/db/` |
-| Types and schemas | `src/types/` |
-| Unit tests | `test/` mirroring `src/` |
-| Property tests | `test/lib/*.property.test.ts` |
-| Model-based tests | `test/lib/**/*.model-based.test.ts` |
-| E2E tests | `test/e2e/` |
-| Test helpers | `test/helpers.ts`, `test/model-based/helpers.ts` |
-| Command doc fragments | `docs/src/fragments/commands/` |
-| Generated plugin skill | `plugins/sentry-cli/skills/sentry-cli/` |
-| Build scripts | `script/` |
+- Commands: `src/commands/<domain>/`
+- Command routes: `src/commands/<domain>/index.ts`
+- API modules: `src/lib/api/`
+- Formatters: `src/lib/formatters/`
+- Shared command helpers: `src/lib/command.ts`, `src/lib/list-command.ts`, `src/lib/mutate-command.ts`
+- Org/project resolution: `src/lib/resolve-target.ts`, `src/lib/org-list.ts`
+- DSN detection: `src/lib/dsn/`
+- SQLite/cache code: `src/lib/db/`
+- Types and schemas: `src/types/`
+- Unit tests: `test/` mirroring `src/`
+- Property tests: `test/lib/*.property.test.ts`
+- Model-based tests: `test/lib/**/*.model-based.test.ts`
+- E2E tests: `test/e2e/`
+- Test helpers: `test/helpers.ts`, `test/model-based/helpers.ts`
+- Command doc fragments: `docs/src/fragments/commands/`
+- Generated plugin skill: `plugins/sentry-cli/skills/sentry-cli/`
+- Build scripts: `script/`
 
 ## Long-Term Concerns
-| Area | Concern |
-|------|---------|
-| Issue resolution | `issue resolve --in` accepts versions, `@next`, `@commit`, and `@commit:<repo>@<sha>`; split explicit commit specs on the last `@` and send `{commit, repository}` to the API. |
-| Issue merge | Dedupe by resolved numeric issue IDs, reject unresolved orgs in cross-org checks, and treat `--into` as a preference because the API may pick the parent by event count. |
-| Repository lookup | `repo_cache` backs offline Sentry repo matching for `@commit`; use paginated `listAllRepositories()` and tolerate read-only cache writes. |
-| Response cache | Cached synthetic `Response` objects carry no marker; `authenticatedFetch()` owns `lastCacheHitAgeMs`, and `buildCommand()` appends cache hints only when a command returns a `CommandReturn`. |
-| JSON stability | `collapse=organization` can drop nested org fields; `jsonTransform` must rehydrate needed fields, apply `filterFields()`, and handle exclusions itself. |
-| Markdown output | Tests run non-TTY and usually assert raw CommonMark; render explicitly and strip ANSI only when testing terminal styling. |
-| API SDK fetch | `@sentry/api` may pass a `Request` without `init`; preserve request headers, use `unwrapPaginatedResult()` when headers matter, and guard empty responses with `Array.isArray()`. |
-| API tests | Tests that mock `globalThis.fetch` need `useTestConfigDir()` plus `setAuthToken()` so the disk response cache does not bypass mocks. |
-| Command tests | Test command `func` bodies via `await cmd.loader()` and `.call(mockContext, flags, ...args)`; keep `mock.module()` pollution in isolated test files. |
-| Multi-region orgs | In `listOrganizationsUncached()`, track any fulfilled region separately from result count so empty 200s are not treated as all-region 403 failures. |
-| Seer trial prompt | `bin.ts` layers auth outside Seer trial prompting; trial start uses the server-provided category and treats self-hosted 404s gracefully. |
-| Init wizard | `MastraClient` has no dispose API; pass and abort an `AbortController`, and preserve `init.signal` in custom fetch wrappers. |
-| TTY init | macOS Bun TTY reopening uses `/dev/tty` plus `tty.ReadStream`; keep the explicit exit safety net and skip it under `NODE_ENV=test`. |
-| Upgrade/build | Windows upgrade verification polls file visibility before spawn; patched Bun cross-compile omits `compile.target` and requires `SENTRY_CLIENT_ID`. |
-| npm/node distribution | `dist/bin.cjs` requires Node.js >= 22 because the SQLite polyfill uses `node:sqlite`; double-escape newline continuations in esbuild banner template strings. |
-| SDK tree-shaking | Sentry SDK patches come from `bun patch`; import `@sentry/node-core/light` subpaths and regenerate patches instead of hand-editing diffs. |
-| Lint traps | Use named imports instead of namespace imports, define top-level `noop()` helpers instead of empty arrows, and run `bun run lint` after `lint:fix`. |
-| Coverage traps | Bun `--isolate --parallel` coverage may count comments, type lines, and braces; move verbose rationale out of function bodies when coverage drops without missing statements. |
-| Hidden globals | Hidden `--org` / `--project` compatibility flags are merged in `buildCommand()` and applied before auth; no short aliases because `-p` conflicts. |
-| Error reporting | Preserve `ApiError` status when rethrowing so 4xx API errors stay silenced; pass `field` to `ValidationError` for useful fingerprints. |
-| Telemetry | Graceful fallbacks should use `withTracingSpan()` plus named `captureException` imports at warning level; user-visible fallbacks use `log.warn()`. |
-| Dashboard widgets | Normalize dataset aliases once, pass normalized flags through replacement builders, and use grouped-widget limit auto-defaulting only when the user omitted `--limit`. |
-| Fuzzy project lookup | On exact project slug misses, `findProjectsByPattern()` is the failure-path suggestion mechanism and may list projects across orgs. |
-| Bot review triage | When bot feedback conflicts with mirrored upstream SDK behavior, verify against the SDK source and explain the precedent instead of diverging silently. |
+- Issue flows: `issue resolve --in` accepts versions, `@next`, `@commit`, and `@commit:<repo>@<sha>`; split explicit commit specs on the last `@` and send `{commit, repository}` to the API. For issue merge, dedupe by resolved numeric IDs, reject unresolved orgs in cross-org checks, and treat `--into` as a preference.
+- Repository lookup: `repo_cache` backs offline Sentry repo matching for `@commit`; use paginated `listAllRepositories()` and tolerate read-only cache writes.
+- Response cache: cached synthetic `Response` objects carry no marker; `authenticatedFetch()` owns `lastCacheHitAgeMs`, and `buildCommand()` appends cache hints only when a command returns a `CommandReturn`.
+- JSON and markdown output: `collapse=organization` can drop nested org fields, so `jsonTransform` must rehydrate needed fields, apply `filterFields()`, and handle exclusions itself. Tests run non-TTY and usually assert raw CommonMark.
+- API SDK fetch: `@sentry/api` may pass a `Request` without `init`; preserve request headers, use `unwrapPaginatedResult()` when headers matter, and guard empty responses with `Array.isArray()`.
+- API and command tests: API tests that mock `globalThis.fetch` need `useTestConfigDir()` plus `setAuthToken()`. Test command `func` bodies via `await cmd.loader()` and `.call(mockContext, flags, ...args)`; keep `mock.module()` pollution in isolated test files.
+- Multi-region orgs: in `listOrganizationsUncached()`, track any fulfilled region separately from result count so empty 200s are not treated as all-region 403 failures.
+- Seer and init: `bin.ts` layers auth outside Seer trial prompting; trial start uses the server-provided category and treats self-hosted 404s gracefully. `MastraClient` has no dispose API; pass and abort an `AbortController`, and preserve `init.signal` in custom fetch wrappers.
+- TTY and upgrade/build: macOS Bun TTY reopening uses `/dev/tty` plus `tty.ReadStream`; keep the explicit exit safety net and skip it under `NODE_ENV=test`. Windows upgrade verification polls file visibility before spawn. Patched Bun cross-compile omits `compile.target` and requires `SENTRY_CLIENT_ID`.
+- npm/node distribution: `dist/bin.cjs` requires Node.js >= 22 because the SQLite polyfill uses `node:sqlite`; double-escape newline continuations in esbuild banner template strings.
+- SDK tree-shaking: Sentry SDK patches come from `bun patch`; import `@sentry/node-core/light` subpaths and regenerate patches instead of hand-editing diffs.
+- Lint and coverage traps: use named imports instead of namespace imports, define top-level `noop()` helpers instead of empty arrows, and run `bun run lint` after `lint:fix`. Bun `--isolate --parallel` coverage may count comments, type lines, and braces.
+- Hidden globals: hidden `--org` / `--project` compatibility flags are merged in `buildCommand()` and applied before auth; no short aliases because `-p` conflicts.
+- Error reporting and telemetry: preserve `ApiError` status when rethrowing so 4xx API errors stay silenced; pass `field` to `ValidationError`. Graceful fallbacks should use `withTracingSpan()` plus named `captureException` imports at warning level; user-visible fallbacks use `log.warn()`.
+- Dashboard and project lookup: normalize dashboard dataset aliases once, pass normalized flags through replacement builders, and use grouped-widget limit auto-defaulting only when the user omitted `--limit`. On exact project slug misses, `findProjectsByPattern()` is the failure-path suggestion mechanism.
+- Bot review triage: when bot feedback conflicts with mirrored upstream SDK behavior, verify against the SDK source and explain the precedent instead of diverging silently.
 
 ## Specs And Playbooks
 - Add specs under `specs/` for material design changes, migrations, and unresolved tradeoffs.
