@@ -1,102 +1,100 @@
 /**
  * Educational Content Sequence
  *
- * Content blocks shown in the sidebar while the wizard runs. Each
- * block reveals line by line on a timer, transforming dead wait time
- * into product education. After all blocks complete, the panel falls
- * back to the rotating tip cards.
+ * Content blocks shown in the sidebar while the wizard runs,
+ * transforming dead wait time into product education. After all
+ * blocks complete, the panel falls back to rotating tip cards.
+ *
+ * All blocks MUST have exactly `BLOCK_LINE_COUNT` content lines
+ * (pad with empty strings) so the panel height stays fixed and
+ * doesn't jump when blocks rotate.
  */
 
 export type ContentBlock = {
   title: string;
   lines: string[];
-  /** Dwell time (ms) after all lines are revealed before advancing. */
-  pauseMs: number;
 };
+
+/** Fixed line count per block — keeps panel height stable. */
+export const BLOCK_LINE_COUNT = 8;
 
 export const LEARN_SEQUENCE: ContentBlock[] = [
   {
     title: "How Sentry Works",
     lines: [
-      "Your App  →  SDK  →  Sentry",
+      "App → SDK → Sentry → Alert",
       "",
-      "The SDK captures errors, traces,",
-      "and performance data from your",
-      "running application and sends",
-      "them to Sentry for analysis.",
+      "The SDK captures errors and",
+      "performance data, then sends",
+      "them to Sentry for grouping,",
+      "alerting, and root-cause",
+      "analysis.",
+      "",
     ],
-    pauseMs: 4000,
   },
   {
     title: "Error Tracking",
     lines: [
       "Every crash is captured with:",
-      "  • Stack trace",
-      "  • Breadcrumbs (user actions)",
-      "  • Device/browser context",
+      "",
+      "  • Full stack trace",
+      "  • Breadcrumbs & context",
       "  • Release & commit info",
       "",
       "Errors are grouped into issues",
-      "so you fix root causes, not",
-      "individual reports.",
+      "so you fix causes, not symptoms.",
     ],
-    pauseMs: 4000,
   },
   {
-    title: "Performance Monitoring",
+    title: "Performance Tracing",
     lines: [
       "Traces show the full journey:",
       "",
-      "  Request ─┬─ DB Query (120ms)",
-      "           ├─ API Call (340ms)",
-      "           └─ Render  (80ms)",
+      "  Request ─┬─ DB    (120ms)",
+      "           ├─ API   (340ms)",
+      "           └─ Render (80ms)",
       "",
       "Find the slow piece without",
       "adding manual timers.",
     ],
-    pauseMs: 4000,
   },
   {
     title: "Session Replay",
     lines: [
-      "See exactly what the user saw:",
-      "  DOM mutations, clicks,",
-      "  network calls, and console",
-      "  logs — all synced with your",
-      "  error timeline.",
+      "See what the user saw: DOM",
+      "mutations, clicks, network",
+      "calls, and console logs —",
+      "all synced to the error.",
       "",
       "Debug by scrubbing a video,",
-      "not guessing from a stack trace.",
+      "not reading a stack trace.",
+      "",
     ],
-    pauseMs: 4000,
   },
   {
     title: "Alerts & Integrations",
     lines: [
       "Get notified when it matters:",
-      "  • Spike in error frequency",
-      "  • New issue after deploy",
+      "",
+      "  • Error spike after deploy",
       "  • Slow transaction p95",
+      "  • New regression detected",
       "",
       "Routes to Slack, PagerDuty,",
-      "Jira, or email automatically.",
+      "or email automatically.",
     ],
-    pauseMs: 4000,
   },
   {
     title: "What's Next?",
     lines: [
-      "After this wizard finishes:",
+      "After setup finishes, try:",
       "",
-      "  sentry issue list",
-      "    → see your first errors",
-      "",
-      "  sentry issue explain <id>",
-      "    → AI root-cause analysis",
-      "",
-      "  sentry trace list",
-      "    → explore performance data",
+      " sentry issue list",
+      "   → see your first errors",
+      " sentry issue explain <id>",
+      "   → AI root-cause analysis",
+      " sentry trace list",
+      "   → explore performance",
     ],
-    pauseMs: 5000,
   },
 ];

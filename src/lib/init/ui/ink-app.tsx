@@ -40,7 +40,7 @@ import {
   type FileTreeRow,
   flattenTree,
 } from "./file-tree.js";
-import { LEARN_SEQUENCE } from "./learn-content.js";
+import { BLOCK_LINE_COUNT, LEARN_SEQUENCE } from "./learn-content.js";
 import { SENTRY_TIPS, type SentryTip } from "./sentry-tips.js";
 import type { WizardSummary } from "./types.js";
 import type {
@@ -680,7 +680,9 @@ function LearnPanel({
   if (!block) {
     return null;
   }
-  const visibleLines = block.lines;
+  // Pad short blocks to BLOCK_LINE_COUNT so height stays fixed.
+  const lines = block.lines.slice(0, BLOCK_LINE_COUNT);
+  const padding = Math.max(0, BLOCK_LINE_COUNT - lines.length);
   return (
     <Box
       borderColor={MUTED_DIM}
@@ -689,22 +691,23 @@ function LearnPanel({
       flexShrink={0}
       paddingX={1}
     >
-      <Text bold color={ACCENT}>
-        {block.title}
-      </Text>
-      <Box height={1} />
-      {visibleLines.map((line, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: positional content lines
-        <Text key={i} wrap="wrap">
-          {line || " "}
+      <Box justifyContent="space-between">
+        <Text bold color={ACCENT}>
+          {block.title}
         </Text>
-      ))}
-      <Box height={1} />
-      <Box justifyContent="flex-end">
         <Text color={MUTED_DIM}>
           {learnState.blockIndex + 1}/{LEARN_SEQUENCE.length}
         </Text>
       </Box>
+      <Box height={1} />
+      {lines.map((line, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: positional content lines
+        <Text key={i}>{line || " "}</Text>
+      ))}
+      {Array.from({ length: padding }, (_, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: positional filler
+        <Text key={`p${i}`}> </Text>
+      ))}
     </Box>
   );
 }
