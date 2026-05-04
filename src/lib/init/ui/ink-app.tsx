@@ -174,7 +174,7 @@ export function App({ store }: AppProps): React.ReactNode {
 
   const inner = (
     <Box flexDirection="column" height={rows} width={width}>
-      <Box flexDirection="column" flexGrow={1} paddingTop={1} paddingX={1}>
+      <Box flexDirection="column" flexGrow={1} paddingTop={1}>
         <Box flexDirection="column" height={contentHeight}>
           <Box
             flexDirection="column"
