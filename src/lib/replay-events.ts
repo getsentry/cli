@@ -306,12 +306,13 @@ function normalizeIncrementalFrame(
       });
     case "Log": {
       const level = firstString(data.level);
+      const normalizedLevel = level?.toLowerCase();
       const message = Array.isArray(data.payload)
         ? data.payload.map(String).join(" ")
         : firstString(data.payload, data.message);
       return buildBaseEvent({
         ...location,
-        kind: level === "error" ? "error" : "console",
+        kind: normalizedLevel === "error" ? "error" : "console",
         category: "console",
         label: level ?? "console",
         message,

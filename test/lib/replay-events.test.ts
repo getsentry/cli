@@ -114,6 +114,34 @@ describe("extractNormalizedReplayEvents", () => {
     expect(filtered[0]?.message).toBe("boom");
   });
 
+  test("normalizes mixed-case log levels as errors", () => {
+    const segments: ReplayRecordingSegments = [
+      [
+        {
+          type: 4,
+          timestamp: Date.parse("2025-01-01T00:00:01.000Z"),
+          data: { href: "/signup" },
+        },
+        {
+          type: 3,
+          timestamp: Date.parse("2025-01-01T00:00:02.000Z"),
+          data: {
+            source: 11,
+            level: "Error",
+            payload: ["boom"],
+          },
+        },
+      ],
+    ];
+
+    const events = extractNormalizedReplayEvents(replay(), segments);
+    const errors = filterNormalizedReplayEvents(events, { kinds: ["error"] });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.kind).toBe("error");
+    expect(errors[0]?.message).toBe("boom");
+  });
+
   test("filters by parsed path without matching query text", () => {
     const segments: ReplayRecordingSegments = [
       [
