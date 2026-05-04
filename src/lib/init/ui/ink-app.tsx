@@ -172,8 +172,15 @@ export function App({ store }: AppProps): React.ReactNode {
     snapshot.filesRead.length,
   ]);
 
+  const marginLeft = Math.max(0, Math.floor((columns - width) / 2));
+
   const inner = (
-    <Box flexDirection="column" height={rows} width={width}>
+    <Box
+      flexDirection="column"
+      height={rows}
+      marginLeft={marginLeft}
+      width={width}
+    >
       <Box flexDirection="column" flexGrow={1} paddingTop={1}>
         <Box flexDirection="column" height={contentHeight}>
           <Box
