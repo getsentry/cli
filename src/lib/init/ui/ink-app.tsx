@@ -193,7 +193,7 @@ export function App({ store }: AppProps): React.ReactNode {
                 summary={snapshot.summary}
                 terminalRows={rows}
                 tipIndex={snapshot.tipIndex}
-                width={width - 2}
+                width={width}
               />
             ) : (
               <FilesScreen
