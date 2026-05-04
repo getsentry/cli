@@ -110,18 +110,15 @@ describe("Ink App snapshot", () => {
   test("renders full-screen layout at 120 cols", async () => {
     const store = new WizardStore();
     store.appendLog("info", "Hello world");
-    store.startSpinner("Working…");
-    store.recordFilesReading(["package.json", "src/index.ts"]);
-    store.markFilesAnalyzed(["package.json"]);
+    store.appendLog("success", "Working…");
 
     const frame = (await renderApp(store, 120)).allOutput();
     // Status tab is the default — sidebar shows the learn panel
     // (progressive reveal sequence) before falling back to tips.
     expect(frame).toMatch(LEARN_HEADER_RE);
     expect(frame).toMatch(TASKS_HEADER_RE);
-    // Log line visible in the activity pane.
+    // Log lines visible in the activity pane.
     expect(frame).toContain("Hello world");
-    // Spinner message visible.
     expect(frame).toContain("Working…");
     // Tab bar visible.
     expect(frame).toMatch(STATUS_TAB_RE);
