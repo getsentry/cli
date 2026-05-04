@@ -344,7 +344,7 @@ export class InkUI implements WizardUI {
   private readonly freshStdin: ReadStream | null;
   private tipTimer: ReturnType<typeof setInterval> | undefined;
   private learnTimer: ReturnType<typeof setInterval> | undefined;
-  private learnPauseTimer: ReturnType<typeof setTimeout> | undefined;
+
   private tipIndex = 0;
   private activePromptCancel: (() => void) | undefined;
   private cancelHandler: (() => void) | undefined;
@@ -842,51 +842,28 @@ export class InkUI implements WizardUI {
 
   private startLearnSequence(): void {
     const store = this.store;
-    const advanceLine = () => {
+    this.learnTimer = setInterval(() => {
       const { learnState } = store.getSnapshot();
       if (learnState.complete) {
         this.stopLearnSequence();
         this.startTipRotation();
         return;
       }
-      const block = LEARN_SEQUENCE[learnState.blockIndex];
-      if (!block) {
+      const next = learnState.blockIndex + 1;
+      if (next >= LEARN_SEQUENCE.length) {
         store.setLearnComplete();
         this.stopLearnSequence();
         this.startTipRotation();
-        return;
+      } else {
+        store.advanceLearnBlock();
       }
-      if (learnState.lineIndex >= block.lines.length - 1) {
-        // All lines revealed — pause then advance block
-        if (this.learnTimer) {
-          clearInterval(this.learnTimer);
-          this.learnTimer = undefined;
-        }
-        this.learnPauseTimer = setTimeout(() => {
-          const next = learnState.blockIndex + 1;
-          if (next >= LEARN_SEQUENCE.length) {
-            store.setLearnComplete();
-            this.startTipRotation();
-          } else {
-            store.advanceLearnBlock();
-            this.learnTimer = setInterval(advanceLine, 600);
-          }
-        }, block.pauseMs);
-        return;
-      }
-      store.advanceLearnLine();
-    };
-    this.learnTimer = setInterval(advanceLine, 600);
+    }, TIP_ROTATE_INTERVAL_MS);
   }
 
   private stopLearnSequence(): void {
     if (this.learnTimer) {
       clearInterval(this.learnTimer);
       this.learnTimer = undefined;
-    }
-    if (this.learnPauseTimer) {
-      clearTimeout(this.learnPauseTimer);
-      this.learnPauseTimer = undefined;
     }
   }
 

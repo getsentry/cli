@@ -680,7 +680,7 @@ function LearnPanel({
   if (!block) {
     return null;
   }
-  const visibleLines = block.lines.slice(0, learnState.lineIndex + 1);
+  const visibleLines = block.lines;
   return (
     <Box
       borderColor={MUTED_DIM}
