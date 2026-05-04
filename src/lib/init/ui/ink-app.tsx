@@ -4,30 +4,25 @@
  * Renders the wizard in alternate-screen mode using Ink. The layout
  * fills the terminal:
  *
- *   ┌─ ◆ Sentry Init Wizard v0.x ─────────────── sentry.io ─┐
+ *   ┌─ ◆ Sentry Init Wizard ──────────────────── sentry.io ─┐
  *   │                                                         │
- *   │  ╭ Did you know? ────╮  │  ● Discovering project...    │
- *   │  │ <tip>             │  │  ● Checking dependencies     │
- *   │  ╰───────────────────╯  │                               │
- *   │                         │  ╭ Files analyzed  3/8 ──────╮│
- *   │  ╭ Tasks ────── 2/9 ─╮  │  │  ◐ src/index.ts          ││
- *   │  │ ◼ Discover ctx    │  │  │  ✓ package.json           ││
- *   │  │ ▶ Install deps    │  │  ╰───────────────────────────╯│
- *   │  │ ◻ Apply codemods  │  │                               │
- *   │  ╰───────────────────╯  │  ⠋ Running setup...          │
- *   │                         │                               │
+ *   │  ╔═══╗                    │  ╭ Did you know? ─────────╮ │
+ *   │  ║ S ║  Sentry banner     │  │ <tip>                  │ │
+ *   │  ╚═══╝                    │  ╰────────────────────────╯ │
+ *   │  ● log line               │                             │
+ *   │  ▲ log line               │  ╭ Tasks ────── 2/9 ──────╮ │
+ *   │  ◐ spinner...             │  │ ◼ Discover ctx         │ │
+ *   │  [PromptArea]             │  │ ▶ Install deps         │ │
+ *   │                           │  │ ◻ Apply codemods       │ │
+ *   │                           │  ╰────────────────────────╯ │
  *   │  ──────────────────────────────────────────────────────  │
  *   │  ◆ Reading package.json                                 │
- *   │  ┊ Analyzing project...                                 │
- *   │                                                         │
- *   │  ● Status   Logs                                        │
+ *   │  ● Status   Files                                       │
  *   │  ←→ switch tab  s toggle status                         │
  *   └─────────────────────────────────────────────────────────┘
  *
- * The component subscribes to a `WizardStore` via
- * `useSyncExternalStore` so imperative `WizardUI` method calls
- * trigger React re-renders without React state being the source of
- * truth.
+ * Tab 1 (Status): Banner + logs + spinner + prompts + summary
+ * Tab 2 (Files): Scrollable file read tree
  */
 
 import { Box, Text, useInput, useStdout } from "ink";
@@ -108,11 +103,6 @@ export type AppProps = {
   store: WizardStore;
 };
 
-/**
- * Root component. Fills the full terminal via `alternateScreen: true`
- * in the Ink render call. Layout: TitleBar, content area (tabbed),
- * status bar, tab bar, keyboard hints.
- */
 export function App({ store }: AppProps): React.ReactNode {
   const snapshot = useSyncExternalStore(
     store.subscribe,
@@ -152,7 +142,7 @@ export function App({ store }: AppProps): React.ReactNode {
   const tabs = useMemo(
     () => [
       { id: "status", label: "Status" },
-      { id: "logs", label: "Logs" },
+      { id: "files", label: "Files" },
     ],
     []
   );
@@ -183,19 +173,21 @@ export function App({ store }: AppProps): React.ReactNode {
           >
             {activeTab === 0 ? (
               <StatusScreen
-                filesRead={snapshot.filesRead}
-                hasActivePrompt={snapshot.prompt !== null}
+                bannerRows={snapshot.bannerRows}
                 logs={snapshot.logs}
                 prompt={snapshot.prompt}
                 spinner={snapshot.spinner}
                 steps={snapshot.steps}
                 summary={snapshot.summary}
-                terminalRows={rows}
                 tipIndex={snapshot.tipIndex}
                 width={width - 2}
               />
             ) : (
-              <LogScreen logs={snapshot.logs} />
+              <FilesScreen
+                filesRead={snapshot.filesRead}
+                hasActivePrompt={snapshot.prompt !== null}
+                terminalRows={rows}
+              />
             )}
           </Box>
 
@@ -357,26 +349,22 @@ function KeyboardHintsBar({ hints }: { hints: KeyHint[] }): React.ReactNode {
 // ─────────────────────────── Status Screen ────────────────────────────
 
 function StatusScreen({
+  bannerRows,
   steps,
   tipIndex,
   spinner,
   logs,
   prompt,
   summary,
-  filesRead,
-  terminalRows,
-  hasActivePrompt,
   width,
 }: {
+  bannerRows: { content: string; color: string }[];
   steps: StepEntry[];
   tipIndex: number;
   spinner: SpinnerState;
   logs: LogEntry[];
   prompt: ActivePrompt | null;
   summary: WizardSummary | null;
-  filesRead: FileReadEntry[];
-  terminalRows: number;
-  hasActivePrompt: boolean;
   width: number;
 }): React.ReactNode {
   const isWide = width >= 80;
@@ -387,13 +375,11 @@ function StatusScreen({
         <ProgressPanel steps={steps} />
         <Box height={1} />
         <ActivityPane
-          filesRead={filesRead}
-          hasActivePrompt={hasActivePrompt}
+          bannerRows={bannerRows}
           logs={logs}
           prompt={prompt}
           spinner={spinner}
           summary={summary}
-          terminalRows={terminalRows}
         />
       </Box>
     );
@@ -408,13 +394,11 @@ function StatusScreen({
         paddingRight={1}
       >
         <ActivityPane
-          filesRead={filesRead}
-          hasActivePrompt={hasActivePrompt}
+          bannerRows={bannerRows}
           logs={logs}
           prompt={prompt}
           spinner={spinner}
           summary={summary}
-          terminalRows={terminalRows}
         />
       </Box>
       <VerticalSeparator />
@@ -440,29 +424,34 @@ function VerticalSeparator(): React.ReactNode {
 // ─────────────────────────── Activity Pane ────────────────────────────
 
 function ActivityPane({
+  bannerRows,
   logs,
   spinner,
   prompt,
   summary,
-  filesRead,
-  terminalRows,
-  hasActivePrompt,
 }: {
+  bannerRows: { content: string; color: string }[];
   logs: LogEntry[];
   spinner: SpinnerState;
   prompt: ActivePrompt | null;
   summary: WizardSummary | null;
-  filesRead: FileReadEntry[];
-  terminalRows: number;
-  hasActivePrompt: boolean;
 }): React.ReactNode {
-  const showFileStatus = !summary && filesRead.length > 0;
   const hasContent =
     logs.length > 0 || spinner.active || prompt !== null || summary !== null;
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {hasContent || showFileStatus ? null : (
+      {bannerRows.length > 0 ? (
+        <Box flexDirection="column" flexShrink={0} marginBottom={1}>
+          {bannerRows.map((row, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: positional banner rows
+            <Text color={row.color} key={i}>
+              {row.content}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
+      {!hasContent && bannerRows.length === 0 ? (
         <Box flexDirection="column" paddingTop={1}>
           <Box gap={1}>
             <Text color={PRIMARY}>
@@ -471,20 +460,13 @@ function ActivityPane({
             <Text dimColor>Initializing wizard...</Text>
           </Box>
         </Box>
-      )}
+      ) : null}
       {logs.length > 0 ? (
         <Box flexDirection="column">
           {logs.map((log) => (
             <LogLine entry={log} key={log.id} />
           ))}
         </Box>
-      ) : null}
-      {showFileStatus ? (
-        <FilesPanel
-          filesRead={filesRead}
-          hasActivePrompt={hasActivePrompt}
-          maxRows={Math.min(14, Math.max(4, terminalRows - 20))}
-        />
       ) : null}
       {spinner.active ? <SpinnerRow state={spinner} /> : null}
       {summary ? <SummaryPanel summary={summary} /> : null}
@@ -493,21 +475,32 @@ function ActivityPane({
   );
 }
 
-// ─────────────────────────── Log Screen ──────────────────────────────
+// ─────────────────────────── Files Screen ─────────────────────────────
 
-function LogScreen({ logs }: { logs: LogEntry[] }): React.ReactNode {
-  if (logs.length === 0) {
+function FilesScreen({
+  filesRead,
+  hasActivePrompt,
+  terminalRows,
+}: {
+  filesRead: FileReadEntry[];
+  hasActivePrompt: boolean;
+  terminalRows: number;
+}): React.ReactNode {
+  if (filesRead.length === 0) {
     return (
       <Box flexDirection="column" flexGrow={1} paddingTop={1} paddingX={1}>
-        <Text dimColor>No log entries yet...</Text>
+        <Text dimColor>No files read yet...</Text>
       </Box>
     );
   }
+
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={1}>
-      {logs.map((log) => (
-        <LogLine entry={log} key={log.id} />
-      ))}
+      <FilesPanel
+        filesRead={filesRead}
+        hasActivePrompt={hasActivePrompt}
+        maxRows={Math.max(4, terminalRows - 10)}
+      />
     </Box>
   );
 }
@@ -578,6 +571,7 @@ function ProgressPanel({ steps }: { steps: StepEntry[] }): React.ReactNode {
     (entry) => entry.status === "completed"
   ).length;
   const totalCount = steps.length;
+
   const headerRight = totalCount > 0 ? `${completedCount}/${totalCount}` : "";
   const badgeColor = completedCount === totalCount ? COLOR_SUCCESS : MUTED_DIM;
 
@@ -754,7 +748,7 @@ function FilesPanel({
         setOffset(maxOffset);
         return;
       }
-      if (key.end) {
+      if (key.end || key.escape) {
         setPinnedToBottom(true);
         setOffset(0);
       }
@@ -772,8 +766,8 @@ function FilesPanel({
   const padding = Math.max(0, viewport - visible.length);
 
   return (
-    <Box flexDirection="column" flexShrink={0} marginTop={1}>
-      <Box justifyContent="space-between" paddingX={1}>
+    <Box flexDirection="column" flexShrink={0}>
+      <Box justifyContent="space-between">
         <Text bold color={MUTED}>
           Files analyzed
         </Text>
@@ -782,6 +776,7 @@ function FilesPanel({
           {analyzedCount}/{filesRead.length}
         </Text>
       </Box>
+      <Box height={1} />
       <Box flexDirection="row">
         <Box flexDirection="column" flexGrow={1}>
           {visible.map((row, i) => (

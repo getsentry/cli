@@ -24,7 +24,7 @@ const TITLE_BAR_RE = /Sentry Init Wizard/;
 const TIP_HEADER_RE = /Did you know\?/;
 const TASKS_HEADER_RE = /Tasks\b/;
 const STATUS_TAB_RE = /Status/;
-const LOGS_TAB_RE = /Logs/;
+const FILES_TAB_RE = /Files/;
 const FILES_HEADER_PINNED_RE = /Files analyzed\s+\d+\/\d+/;
 const FILES_HEADER_UNPINNED_RE = /Files analyzed\s+↑\s+\d+\/\d+/;
 const KEYBOARD_HINT_RE = /switch tab/;
@@ -127,7 +127,7 @@ describe("Ink App snapshot", () => {
     expect(frame).toContain("Working…");
     // Tab bar visible.
     expect(frame).toMatch(STATUS_TAB_RE);
-    expect(frame).toMatch(LOGS_TAB_RE);
+    expect(frame).toMatch(FILES_TAB_RE);
     // Keyboard hints visible.
     expect(frame).toMatch(KEYBOARD_HINT_RE);
   });
@@ -154,25 +154,18 @@ describe("Ink App snapshot", () => {
     expect(frame).toContain("Reading package.json");
   });
 
-  test("FilesPanel renders scrollbar when content exceeds viewport", async () => {
-    const fewStore = new WizardStore();
-    fewStore.recordFilesReading(["package.json", "src/index.ts"]);
-    const fewFrame = (await renderApp(fewStore, 120)).allOutput();
-    const baselineThumbs = (fewFrame.match(/█/g) ?? []).length;
+  test("Status screen shows logs and banner, not file tree", async () => {
+    const store = new WizardStore();
+    store.appendLog("info", "Checking project...");
+    store.recordFilesReading(["package.json", "src/index.ts"]);
+    store.markFilesAnalyzed(["package.json"]);
 
-    const manyStore = new WizardStore();
-    const paths: string[] = [];
-    for (let i = 0; i < 30; i++) {
-      paths.push(`src/dir${Math.floor(i / 5)}/file${i}.ts`);
-    }
-    manyStore.recordFilesReading(paths);
-    manyStore.markFilesAnalyzed(paths.slice(0, 18));
-    const manyFrame = (await renderApp(manyStore, 120)).allOutput();
-    const scrollingThumbs = (manyFrame.match(/█/g) ?? []).length;
-
-    expect(scrollingThumbs).toBeGreaterThan(baselineThumbs);
-    expect(manyFrame).toMatch(FILES_HEADER_PINNED_RE);
-    expect(manyFrame).not.toMatch(FILES_HEADER_UNPINNED_RE);
+    const frame = (await renderApp(store, 120)).allOutput();
+    // Status tab (default) shows logs but NOT the file tree —
+    // files are on the Files tab.
+    expect(frame).toContain("Checking project...");
+    expect(frame).not.toMatch(FILES_HEADER_PINNED_RE);
+    expect(frame).not.toMatch(FILES_HEADER_UNPINNED_RE);
   });
 
   test("Ctrl+C path uses requestCancel via store, never bare process.exit", () => {

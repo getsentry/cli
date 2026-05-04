@@ -72,6 +72,42 @@ const REPORT_SUCCESS = "#83da90";
 const REPORT_ERROR = "#fe4144";
 const REPORT_WARN = "#FDB81B";
 
+/** Splits error detail strings on `: ` for multi-line formatting. */
+const ERROR_DETAIL_SPLIT_RE = /:\s+/;
+
+/**
+ * Build the chalk-formatted failure report shown after alternate
+ * screen exit. Includes up to 5 recent error log entries with
+ * structured detail splitting for readability.
+ */
+function formatFailureReport(
+  message: string,
+  logs: readonly { severity: string; text: string }[]
+): string {
+  const icon = chalk.hex(REPORT_ERROR)("\u2716");
+  const lines: string[] = [
+    `\n${icon}  ${chalk.hex(REPORT_ERROR).bold(message)}`,
+  ];
+  const errorLogs = logs.filter(
+    (entry) => entry.severity === "error" && entry.text !== message
+  );
+  if (errorLogs.length > 0) {
+    lines.push("");
+  }
+  for (const entry of errorLogs.slice(-5)) {
+    const parts = entry.text.split(ERROR_DETAIL_SPLIT_RE);
+    if (parts.length > 1) {
+      lines.push(`   ${chalk.hex(REPORT_ERROR).bold(parts[0] ?? "")}`);
+      for (const part of parts.slice(1)) {
+        lines.push(`   ${chalk.hex(REPORT_MUTED)(part)}`);
+      }
+    } else {
+      lines.push(`   ${chalk.hex(REPORT_ERROR)(entry.text)}`);
+    }
+  }
+  return lines.join("\n");
+}
+
 /** Tip rotation cadence in the sidebar — slow enough to read each tip. */
 const TIP_ROTATE_INTERVAL_MS = 8000;
 
@@ -667,23 +703,10 @@ export class InkUI implements WizardUI {
    */
   private buildPostDisposeReport(): string | undefined {
     if (this.failureMessage) {
-      const icon = chalk.hex(REPORT_ERROR)("✖");
-      const lines: string[] = [
-        `\n${icon}  ${chalk.hex(REPORT_ERROR).bold(this.failureMessage)}`,
-      ];
-      // Include recent error log entries so the real cause is visible
-      // after the alternate screen buffer exits — without this, the
-      // user only sees the generic "Setup failed" message.
-      const errorLogs = this.store
-        .getSnapshot()
-        .logs.filter(
-          (entry) =>
-            entry.severity === "error" && entry.text !== this.failureMessage
-        );
-      for (const entry of errorLogs.slice(-5)) {
-        lines.push(`   ${chalk.hex(REPORT_ERROR)(entry.text)}`);
-      }
-      return lines.join("\n");
+      return formatFailureReport(
+        this.failureMessage,
+        this.store.getSnapshot().logs
+      );
     }
     if (!this.outroMessage) {
       return;
