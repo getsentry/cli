@@ -102,7 +102,11 @@ async function renderApp(
   });
   await new Promise((r) => setTimeout(r, FRAME_SETTLE_MS));
   unmount();
-  await waitUntilExit().catch(ignore);
+  // waitUntilExit() can hang in CI when Ink's internal reconciler
+  // or ink-spinner's setInterval keeps the event loop alive after
+  // unmount. Race it against a timeout so the test doesn't block.
+  const exitTimeout = new Promise((r) => setTimeout(r, 500));
+  await Promise.race([waitUntilExit().catch(ignore), exitTimeout]);
   return out;
 }
 
