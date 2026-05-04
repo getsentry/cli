@@ -21,6 +21,7 @@ import {
   CHECKLIST_VISIBLE_STEPS,
   shortStepLabel,
 } from "../clack-utils.js";
+import type { ColorScheme } from "./theme.js";
 import type { SpinnerExitCode, WizardSummary } from "./types.js";
 
 export type LogSeverity = "info" | "warn" | "error" | "success" | "message";
@@ -107,7 +108,34 @@ export type ActivePrompt =
       initialSelected: string[];
       required: boolean;
       resolve: (values: string[] | null) => void;
+    }
+  | {
+      kind: "confirm";
+      message: string;
+      initialValue: boolean;
+      resolve: (value: boolean | null) => void;
     };
+
+/** Non-blocking overlay shown on top of the normal content. */
+export type Overlay = {
+  kind: "health";
+  message: string;
+  retryCount: number;
+} | null;
+
+/** Outro screen state — overrides normal tab content when set. */
+export type OutroState =
+  | { kind: "success"; message: string }
+  | { kind: "error"; message: string; errors: string[] }
+  | { kind: "cancel"; message: string }
+  | null;
+
+/** Learn card progressive reveal state. */
+export type LearnState = {
+  blockIndex: number;
+  lineIndex: number;
+  complete: boolean;
+};
 
 export type WizardSnapshot = {
   bannerRows: { content: string; color: string }[];
@@ -158,6 +186,14 @@ export type WizardSnapshot = {
   statusMessages: string[];
   /** Whether the status bar is expanded (shows more history). */
   statusExpanded: boolean;
+  /** Non-blocking overlay rendered on top of tab content. */
+  overlay: Overlay;
+  /** When set, overrides the normal tab content with an outro screen. */
+  outroState: OutroState;
+  /** Terminal color scheme for adaptive palette. */
+  theme: ColorScheme;
+  /** Learn sequence progressive reveal state. */
+  learnState: LearnState;
 };
 
 export type Listener = () => void;
@@ -190,6 +226,14 @@ export class WizardStore {
       requestCancel: initial.requestCancel,
       statusMessages: initial.statusMessages ?? [],
       statusExpanded: initial.statusExpanded ?? false,
+      overlay: initial.overlay ?? null,
+      outroState: initial.outroState ?? null,
+      theme: initial.theme ?? "dark",
+      learnState: initial.learnState ?? {
+        blockIndex: 0,
+        lineIndex: 0,
+        complete: false,
+      },
     };
   }
 
@@ -374,6 +418,61 @@ export class WizardStore {
 
   toggleStatusExpanded(): void {
     this.update({ statusExpanded: !this.snapshot.statusExpanded });
+  }
+
+  setOverlay(overlay: Overlay): void {
+    this.update({ overlay });
+  }
+
+  clearOverlay(): void {
+    if (this.snapshot.overlay === null) {
+      return;
+    }
+    this.update({ overlay: null });
+  }
+
+  setOutro(state: OutroState): void {
+    this.update({ outroState: state });
+  }
+
+  setTheme(theme: ColorScheme): void {
+    if (this.snapshot.theme === theme) {
+      return;
+    }
+    this.update({ theme });
+  }
+
+  advanceLearnLine(): void {
+    const { learnState } = this.snapshot;
+    if (learnState.complete) {
+      return;
+    }
+    this.update({
+      learnState: { ...learnState, lineIndex: learnState.lineIndex + 1 },
+    });
+  }
+
+  advanceLearnBlock(): void {
+    const { learnState } = this.snapshot;
+    if (learnState.complete) {
+      return;
+    }
+    this.update({
+      learnState: {
+        blockIndex: learnState.blockIndex + 1,
+        lineIndex: 0,
+        complete: false,
+      },
+    });
+  }
+
+  setLearnComplete(): void {
+    if (this.snapshot.learnState.complete) {
+      return;
+    }
+    this.update({
+      learnState: { ...this.snapshot.learnState, complete: true },
+    });
   }
 
   // ── Internal ──────────────────────────────────────────────────────

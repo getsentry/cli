@@ -40,13 +40,16 @@ import {
   type FileTreeRow,
   flattenTree,
 } from "./file-tree.js";
+import { LEARN_SEQUENCE } from "./learn-content.js";
 import { SENTRY_TIPS, type SentryTip } from "./sentry-tips.js";
 import type { WizardSummary } from "./types.js";
 import type {
   ActivePrompt,
   FileReadEntry,
+  LearnState,
   LogEntry,
   LogSeverity,
+  OutroState,
   SpinnerState,
   StepEntry,
   WizardStore,
@@ -114,6 +117,10 @@ export function App({ store }: AppProps): React.ReactNode {
   const contentHeight = Math.max(5, rows - 3);
 
   useInput((input, key) => {
+    if (snapshot.outroState) {
+      snapshot.requestCancel?.();
+      return;
+    }
     if (key.ctrl && input === "c" && !snapshot.prompt) {
       snapshot.requestCancel?.();
       return;
@@ -146,17 +153,33 @@ export function App({ store }: AppProps): React.ReactNode {
   );
 
   const hints: KeyHint[] = useMemo(() => {
+    if (snapshot.outroState) {
+      return [{ label: "any key", action: "exit" }];
+    }
     const h: KeyHint[] = [{ label: "\u2190\u2192", action: "switch tab" }];
     if (statusMessages.length > STATUS_COLLAPSED_COUNT) {
       h.push({ label: "s", action: "toggle status" });
     }
+    if (activeTab === 1 && snapshot.filesRead.length > 0) {
+      h.push({ label: "\u2191\u2193", action: "scroll" });
+    }
     if (snapshot.prompt) {
-      h.push({ label: "\u2191\u2193", action: "navigate" });
-      h.push({ label: "enter", action: "confirm" });
-      h.push({ label: "esc", action: "cancel" });
+      if (snapshot.prompt.kind === "confirm") {
+        h.push({ label: "y/n", action: "answer" });
+      } else {
+        h.push({ label: "\u2191\u2193", action: "navigate" });
+        h.push({ label: "enter", action: "confirm" });
+        h.push({ label: "esc", action: "cancel" });
+      }
     }
     return h;
-  }, [statusMessages.length, snapshot.prompt]);
+  }, [
+    statusMessages.length,
+    snapshot.prompt,
+    snapshot.outroState,
+    activeTab,
+    snapshot.filesRead.length,
+  ]);
 
   const inner = (
     <Box flexDirection="column" height={rows} width={width}>
@@ -168,25 +191,38 @@ export function App({ store }: AppProps): React.ReactNode {
             flexShrink={1}
             overflow="hidden"
           >
-            {activeTab === 0 ? (
+            {snapshot.outroState ? (
+              <OutroScreen
+                outro={snapshot.outroState}
+                summary={snapshot.summary}
+              />
+            ) : null}
+            {!snapshot.outroState && activeTab === 0 ? (
               <StatusScreen
                 bannerRows={snapshot.bannerRows}
+                learnState={snapshot.learnState}
                 logs={snapshot.logs}
                 prompt={snapshot.prompt}
                 spinner={snapshot.spinner}
                 steps={snapshot.steps}
                 summary={snapshot.summary}
+                terminalRows={rows}
                 tipIndex={snapshot.tipIndex}
                 width={width - 2}
               />
-            ) : (
+            ) : null}
+            {!snapshot.outroState && activeTab !== 0 ? (
               <FilesScreen
                 filesRead={snapshot.filesRead}
                 hasActivePrompt={snapshot.prompt !== null}
                 terminalRows={rows}
               />
-            )}
+            ) : null}
           </Box>
+
+          {snapshot.overlay ? (
+            <OverlayPanel overlay={snapshot.overlay} />
+          ) : null}
 
           {visibleMessages.length > 0 ? (
             <StatusBar messages={visibleMessages} />
@@ -334,7 +370,9 @@ function StatusScreen({
   logs,
   prompt,
   summary,
+  terminalRows,
   width,
+  learnState,
 }: {
   bannerRows: { content: string; color: string }[];
   steps: StepEntry[];
@@ -343,7 +381,9 @@ function StatusScreen({
   logs: LogEntry[];
   prompt: ActivePrompt | null;
   summary: WizardSummary | null;
+  terminalRows: number;
   width: number;
+  learnState: LearnState;
 }): React.ReactNode {
   const isWide = width >= 80;
 
@@ -363,6 +403,8 @@ function StatusScreen({
     );
   }
 
+  const showTips = terminalRows >= 24;
+
   return (
     <Box flexDirection="row" flexGrow={1} flexShrink={1}>
       <Box
@@ -380,8 +422,16 @@ function StatusScreen({
         />
       </Box>
       <Box flexDirection="column" overflow="hidden" width="40%">
-        <TipPanel tipIndex={tipIndex} />
-        <Box height={1} />
+        {showTips ? (
+          <>
+            {learnState.complete ? (
+              <TipPanel tipIndex={tipIndex} />
+            ) : (
+              <LearnPanel learnState={learnState} />
+            )}
+            <Box height={1} />
+          </>
+        ) : null}
         <ProgressPanel steps={steps} />
       </Box>
     </Box>
@@ -472,6 +522,94 @@ function FilesScreen({
   );
 }
 
+// ──────────────────────────── Outro Screen ────────────────────────────
+
+function OutroScreen({
+  outro,
+  summary,
+}: {
+  outro: NonNullable<OutroState>;
+  summary: WizardSummary | null;
+}): React.ReactNode {
+  const isSuccess = outro.kind === "success";
+  const isError = outro.kind === "error";
+
+  let icon: string;
+  let iconColor: string;
+  if (isSuccess) {
+    icon = "✔";
+    iconColor = COLOR_SUCCESS;
+  } else if (isError) {
+    icon = "✖";
+    iconColor = COLOR_ERROR;
+  } else {
+    icon = "■";
+    iconColor = COLOR_WARN;
+  }
+
+  const showErrors = isError && "errors" in outro && outro.errors.length > 0;
+  const showSummary = isSuccess && summary !== null;
+
+  return (
+    <Box flexDirection="column" flexGrow={1} paddingTop={1} paddingX={1}>
+      <Box gap={1}>
+        <Text bold color={iconColor}>
+          {icon}
+        </Text>
+        <Text bold>{outro.message}</Text>
+      </Box>
+      {showErrors ? (
+        <Box flexDirection="column" marginTop={1} paddingLeft={3}>
+          {"errors" in outro
+            ? outro.errors.map((err, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: positional error lines
+                <Text color={COLOR_ERROR} key={i}>
+                  {err}
+                </Text>
+              ))
+            : null}
+        </Box>
+      ) : null}
+      {showSummary ? (
+        <Box flexDirection="column" marginTop={1}>
+          <SummaryPanel summary={summary} />
+        </Box>
+      ) : null}
+      <Box marginTop={1}>
+        <Text dimColor>Press any key to exit</Text>
+      </Box>
+    </Box>
+  );
+}
+
+// ──────────────────────────── Overlay ─────────────────────────────────
+
+function OverlayPanel({
+  overlay,
+}: {
+  overlay: NonNullable<import("./wizard-store.js").Overlay>;
+}): React.ReactNode {
+  return (
+    <Box
+      borderColor={COLOR_WARN}
+      borderStyle="round"
+      flexDirection="column"
+      paddingX={2}
+      paddingY={1}
+    >
+      <Box gap={1}>
+        <Text color={COLOR_WARN}>▲</Text>
+        <Text bold>{overlay.message}</Text>
+      </Box>
+      {overlay.retryCount > 0 ? (
+        <Box paddingLeft={3}>
+          <Text dimColor>Retry {overlay.retryCount}...</Text>
+        </Box>
+      ) : null}
+    </Box>
+  );
+}
+
 // ──────────────────────────── Components ──────────────────────────────
 
 function LogLine({ entry }: { entry: LogEntry }): React.ReactNode {
@@ -525,6 +663,46 @@ function TipPanel({ tipIndex }: { tipIndex: number }): React.ReactNode {
       <Box justifyContent="flex-end">
         <Text color={MUTED_DIM}>
           {oneIndexed}/{total}
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
+// ─────────────────────────── Learn Panel ──────────────────────────────
+
+function LearnPanel({
+  learnState,
+}: {
+  learnState: LearnState;
+}): React.ReactNode {
+  const block = LEARN_SEQUENCE[learnState.blockIndex];
+  if (!block) {
+    return null;
+  }
+  const visibleLines = block.lines.slice(0, learnState.lineIndex + 1);
+  return (
+    <Box
+      borderColor={MUTED_DIM}
+      borderStyle="round"
+      flexDirection="column"
+      flexShrink={0}
+      paddingX={1}
+    >
+      <Text bold color={ACCENT}>
+        {block.title}
+      </Text>
+      <Box height={1} />
+      {visibleLines.map((line, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: positional content lines
+        <Text key={i} wrap="wrap">
+          {line || " "}
+        </Text>
+      ))}
+      <Box height={1} />
+      <Box justifyContent="flex-end">
+        <Text color={MUTED_DIM}>
+          {learnState.blockIndex + 1}/{LEARN_SEQUENCE.length}
         </Text>
       </Box>
     </Box>
@@ -919,6 +1097,9 @@ function PromptArea({ prompt }: { prompt: ActivePrompt }): React.ReactNode {
   if (prompt.kind === "select") {
     return <SelectPrompt prompt={prompt} />;
   }
+  if (prompt.kind === "confirm") {
+    return <ConfirmPrompt prompt={prompt} />;
+  }
   return <MultiSelectPrompt prompt={prompt} />;
 }
 
@@ -987,6 +1168,47 @@ function SelectPrompt({
   );
 }
 
+function ConfirmPrompt({
+  prompt,
+}: {
+  prompt: Extract<ActivePrompt, { kind: "confirm" }>;
+}): React.ReactNode {
+  useInput((input, key) => {
+    if (input === "y" || input === "Y") {
+      prompt.resolve(true);
+      return;
+    }
+    if (input === "n" || input === "N") {
+      prompt.resolve(false);
+      return;
+    }
+    if (key.return) {
+      prompt.resolve(prompt.initialValue);
+      return;
+    }
+    if (key.escape || (key.ctrl && input === "c")) {
+      prompt.resolve(null);
+    }
+  });
+
+  const yLabel = prompt.initialValue ? "Y" : "y";
+  const nLabel = prompt.initialValue ? "n" : "N";
+
+  return (
+    <Box flexDirection="column" flexShrink={0} marginTop={1}>
+      <Box gap={1}>
+        <Text bold color={ACCENT}>
+          {ICONS.diamondOpen}
+        </Text>
+        <Text bold>{prompt.message}</Text>
+        <Text color={MUTED_DIM}>
+          ({yLabel}/{nLabel})
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
 function MultiSelectPrompt({
   prompt,
 }: {
@@ -1041,6 +1263,15 @@ function MultiSelectPrompt({
       toggleAt(highlighted);
       return;
     }
+    if (input === "a") {
+      setSelected((prev) => {
+        if (prev.size === totalCount) {
+          return new Set<string>();
+        }
+        return new Set(prompt.options.map((o) => o.value));
+      });
+      return;
+    }
     if (key.return) {
       commit();
     }
@@ -1056,7 +1287,8 @@ function MultiSelectPrompt({
       </Box>
       <Box marginBottom={1} paddingLeft={3}>
         <Text color={MUTED_DIM}>
-          space toggle {ICONS.bullet} enter confirm {ICONS.bullet} esc cancel
+          space toggle {ICONS.bullet} a all {ICONS.bullet} enter confirm{" "}
+          {ICONS.bullet} esc cancel
         </Text>
         <Text color={ACCENT}>
           {"  "}

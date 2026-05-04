@@ -20,7 +20,7 @@ import { App } from "../../../../src/lib/init/ui/ink-app.js";
 import { WizardStore } from "../../../../src/lib/init/ui/wizard-store.js";
 
 // Top-level regex literals (biome `useTopLevelRegex`).
-const TIP_HEADER_RE = /Did you know\?/;
+const LEARN_HEADER_RE = /How Sentry Works/;
 const TASKS_HEADER_RE = /Tasks\b/;
 const STATUS_TAB_RE = /Status/;
 const FILES_TAB_RE = /Files/;
@@ -115,8 +115,9 @@ describe("Ink App snapshot", () => {
     store.markFilesAnalyzed(["package.json"]);
 
     const frame = (await renderApp(store, 120)).allOutput();
-    // Status tab is the default, so we see the tips + tasks panels.
-    expect(frame).toMatch(TIP_HEADER_RE);
+    // Status tab is the default — sidebar shows the learn panel
+    // (progressive reveal sequence) before falling back to tips.
+    expect(frame).toMatch(LEARN_HEADER_RE);
     expect(frame).toMatch(TASKS_HEADER_RE);
     // Log line visible in the activity pane.
     expect(frame).toContain("Hello world");

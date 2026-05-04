@@ -49,7 +49,9 @@ import { ReadStream } from "node:tty";
 import chalk from "chalk";
 import { stripAnsi } from "../../formatters/plain-detect.js";
 import { buildFileTree, flattenTree } from "./file-tree.js";
+import { LEARN_SEQUENCE } from "./learn-content.js";
 import { SENTRY_TIPS } from "./sentry-tips.js";
+import { detectColorScheme } from "./theme.js";
 import {
   CANCELLED,
   type Cancelled,
@@ -246,6 +248,8 @@ export async function createInkUI(): Promise<InkUI> {
     })),
   });
 
+  store.setTheme(detectColorScheme());
+
   // Open a fresh /dev/tty so Ink's `readable` event listener
   // actually fires — see the module docstring for the Bun bug
   // details. We hold onto the stream so we can close it on dispose
@@ -339,6 +343,8 @@ export class InkUI implements WizardUI {
    */
   private readonly freshStdin: ReadStream | null;
   private tipTimer: ReturnType<typeof setInterval> | undefined;
+  private learnTimer: ReturnType<typeof setInterval> | undefined;
+  private learnPauseTimer: ReturnType<typeof setTimeout> | undefined;
   private tipIndex = 0;
   private activePromptCancel: (() => void) | undefined;
   private cancelHandler: (() => void) | undefined;
@@ -378,7 +384,7 @@ export class InkUI implements WizardUI {
     this.instance = instance;
     this.store = store;
     this.freshStdin = freshStdin;
-    this.startTipRotation();
+    this.startLearnSequence();
     this.installCancelHandler();
     // Hand the App a reference to `requestCancel` via the store so
     // the top-level `useInput` Ctrl+C catcher in `ink-app.tsx` can
@@ -405,12 +411,19 @@ export class InkUI implements WizardUI {
   outro(message: string): void {
     const clean = stripAnsi(message);
     this.appendLog("success", clean);
+    this.store.setOutro({ kind: "success", message: clean });
     this.outroMessage = clean;
   }
 
   cancel(message: string): void {
     const clean = stripAnsi(message);
     this.appendLog("error", clean);
+    const errors = this.store
+      .getSnapshot()
+      .logs.filter((e) => e.severity === "error" && e.text !== clean)
+      .slice(-5)
+      .map((e) => e.text);
+    this.store.setOutro({ kind: "error", message: clean, errors });
     this.failureMessage = clean;
   }
 
@@ -431,6 +444,22 @@ export class InkUI implements WizardUI {
     status: "in_progress" | "completed" | "failed" | "skipped"
   ): void {
     this.store.setStepStatus(stepId, status);
+  }
+
+  setOverlay(overlay: {
+    kind: string;
+    message: string;
+    retryCount: number;
+  }): void {
+    this.store.setOverlay({
+      kind: "health",
+      message: overlay.message,
+      retryCount: overlay.retryCount,
+    });
+  }
+
+  clearOverlay(): void {
+    this.store.clearOverlay();
   }
 
   // ── Logging ───────────────────────────────────────────────────────
@@ -547,19 +576,22 @@ export class InkUI implements WizardUI {
     });
   }
 
-  async confirm(opts: ConfirmOptions): Promise<boolean | Cancelled> {
-    const result = await this.select<"yes" | "no">({
-      message: opts.message,
-      options: [
-        { value: "yes", label: "Yes" },
-        { value: "no", label: "No" },
-      ],
-      initialValue: (opts.initialValue ?? true) ? "yes" : "no",
+  confirm(opts: ConfirmOptions): Promise<boolean | Cancelled> {
+    return new Promise<boolean | Cancelled>((resolve) => {
+      this.store.setPrompt({
+        kind: "confirm",
+        message: stripAnsi(opts.message),
+        initialValue: opts.initialValue ?? true,
+        resolve: (value) => {
+          this.store.setPrompt(null);
+          if (value === null) {
+            resolve(CANCELLED);
+          } else {
+            resolve(value);
+          }
+        },
+      });
     });
-    if (result === CANCELLED) {
-      return CANCELLED;
-    }
-    return result === "yes";
   }
 
   // ── Disposal ──────────────────────────────────────────────────────
@@ -602,6 +634,7 @@ export class InkUI implements WizardUI {
       clearInterval(this.tipTimer);
       this.tipTimer = undefined;
     }
+    this.stopLearnSequence();
     if (this.cancelHandler) {
       process.removeListener("SIGINT", this.cancelHandler);
       this.cancelHandler = undefined;
@@ -771,6 +804,56 @@ export class InkUI implements WizardUI {
       this.tipIndex = (this.tipIndex + 1) % SENTRY_TIPS.length;
       this.store.setTipIndex(this.tipIndex);
     }, TIP_ROTATE_INTERVAL_MS);
+  }
+
+  private startLearnSequence(): void {
+    const store = this.store;
+    const advanceLine = () => {
+      const { learnState } = store.getSnapshot();
+      if (learnState.complete) {
+        this.stopLearnSequence();
+        this.startTipRotation();
+        return;
+      }
+      const block = LEARN_SEQUENCE[learnState.blockIndex];
+      if (!block) {
+        store.setLearnComplete();
+        this.stopLearnSequence();
+        this.startTipRotation();
+        return;
+      }
+      if (learnState.lineIndex >= block.lines.length - 1) {
+        // All lines revealed — pause then advance block
+        if (this.learnTimer) {
+          clearInterval(this.learnTimer);
+          this.learnTimer = undefined;
+        }
+        this.learnPauseTimer = setTimeout(() => {
+          const next = learnState.blockIndex + 1;
+          if (next >= LEARN_SEQUENCE.length) {
+            store.setLearnComplete();
+            this.startTipRotation();
+          } else {
+            store.advanceLearnBlock();
+            this.learnTimer = setInterval(advanceLine, 600);
+          }
+        }, block.pauseMs);
+        return;
+      }
+      store.advanceLearnLine();
+    };
+    this.learnTimer = setInterval(advanceLine, 600);
+  }
+
+  private stopLearnSequence(): void {
+    if (this.learnTimer) {
+      clearInterval(this.learnTimer);
+      this.learnTimer = undefined;
+    }
+    if (this.learnPauseTimer) {
+      clearTimeout(this.learnPauseTimer);
+      this.learnPauseTimer = undefined;
+    }
   }
 
   /**

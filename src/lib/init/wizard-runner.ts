@@ -25,6 +25,7 @@ import {
 } from "../formatters/markdown.js";
 import {
   abortIfCancelled,
+  STEP_ACTIVE_LABELS,
   STEP_LABELS,
   WizardCancelledError,
 } from "./clack-utils.js";
@@ -39,6 +40,7 @@ import { formatError, formatResult } from "./formatters.js";
 import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
 import { resolveInitContext } from "./preflight.js";
+import { checkReadiness } from "./readiness.js";
 
 import { describeTool, executeTool } from "./tools/registry.js";
 import type {
@@ -384,6 +386,55 @@ async function preamble(
   return true;
 }
 
+const MAX_RESUME_RETRIES = 3;
+const RETRY_BACKOFF_MS = [2000, 4000, 8000];
+
+type ResumeRetryArgs = {
+  run: { resumeAsync: (args: Record<string, unknown>) => Promise<unknown> };
+  stepId: string;
+  resumeData: Record<string, unknown>;
+  tracingOptions: Record<string, unknown>;
+  ui: WizardUI;
+};
+
+async function resumeWithRetry(
+  args: ResumeRetryArgs
+): Promise<WorkflowRunResult> {
+  const { run, stepId, resumeData, tracingOptions, ui } = args;
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= MAX_RESUME_RETRIES; attempt++) {
+    try {
+      if (attempt > 0) {
+        ui.setOverlay?.({
+          kind: "health",
+          message: "Connection interrupted, retrying...",
+          retryCount: attempt,
+        });
+        await new Promise((r) =>
+          setTimeout(r, RETRY_BACKOFF_MS[attempt - 1] ?? 8000)
+        );
+      }
+      const raw = await withTimeout(
+        run.resumeAsync({ step: stepId, resumeData, tracingOptions }),
+        API_TIMEOUT_MS,
+        "Workflow resume"
+      );
+      if (attempt > 0) {
+        ui.clearOverlay?.();
+      }
+      return assertWorkflowResult(raw);
+    } catch (err) {
+      lastError = err;
+      if (attempt === MAX_RESUME_RETRIES) {
+        ui.clearOverlay?.();
+        throw err;
+      }
+    }
+  }
+  ui.clearOverlay?.();
+  throw lastError;
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard orchestration with error handling branches
 export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   // Note: a previous `forwardFreshTtyToStdin()` call lived here as a
@@ -422,6 +473,8 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     "This wizard uses AI to analyze your project and configure Sentry." +
       `\nFor manual setup: ${terminalLink(SENTRY_DOCS_URL)}`
   );
+
+  await checkReadiness(ui);
 
   const effectiveOptions = dryRun
     ? { ...initialOptions, yes: true }
@@ -570,6 +623,10 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       }
       activeStepId = extracted.stepId;
       ui.setStep?.(extracted.stepId, "in_progress");
+      const activeLabel = STEP_ACTIVE_LABELS[extracted.stepId];
+      if (activeLabel && spinState.running) {
+        spin.message(activeLabel);
+      }
 
       const resumeData = await handleSuspendedStep(
         {
@@ -584,17 +641,13 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
         stepHistory
       );
 
-      result = assertWorkflowResult(
-        await withTimeout(
-          run.resumeAsync({
-            step: extracted.stepId,
-            resumeData,
-            tracingOptions,
-          }),
-          API_TIMEOUT_MS,
-          "Workflow resume"
-        )
-      );
+      result = await resumeWithRetry({
+        run,
+        stepId: extracted.stepId,
+        resumeData,
+        tracingOptions,
+        ui,
+      });
     }
   } catch (err) {
     // A running spinner owns a live interval, so stop it before any early

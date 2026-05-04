@@ -177,6 +177,25 @@ export const CHECKLIST_VISIBLE_STEPS: readonly string[] = [
 ];
 
 /**
+ * Active-voice step descriptions shown as spinner messages while
+ * each step runs. More descriptive than the sidebar labels.
+ */
+export const STEP_ACTIVE_LABELS: Record<string, string> = {
+  "discover-context": "Scanning project structure...",
+  "select-target-app": "Selecting target application...",
+  "resolve-dir": "Resolving project directory...",
+  "check-existing-sentry": "Checking for existing Sentry setup...",
+  "detect-platform": "Detecting framework and platform...",
+  "ensure-sentry-project": "Configuring Sentry project...",
+  "select-features": "Preparing feature selection...",
+  "install-deps": "Installing Sentry SDK and dependencies...",
+  "plan-codemods": "Planning code changes...",
+  "apply-codemods": "Applying code modifications...",
+  "verify-changes": "Verifying setup...",
+  "open-sentry-ui": "Finishing up...",
+};
+
+/**
  * Sidebar-friendly abbreviations of {@link STEP_LABELS}. The full
  * labels stay the source-of-truth for the spinner message in the main
  * column; only the 36-col sidebar checklist uses these.

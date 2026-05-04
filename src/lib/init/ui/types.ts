@@ -213,6 +213,19 @@ export type WizardUI = AsyncDisposable & {
     status: "in_progress" | "completed" | "failed" | "skipped"
   ): void;
 
+  /**
+   * Show a non-blocking overlay (e.g. health/retry status).
+   * Optional — `LoggingUI` leaves this undefined.
+   */
+  setOverlay?(overlay: {
+    kind: string;
+    message: string;
+    retryCount: number;
+  }): void;
+
+  /** Clear the active overlay. */
+  clearOverlay?(): void;
+
   // ── Logging ───────────────────────────────────────────────────────
 
   log: WizardLog;
