@@ -59,16 +59,19 @@ import type {
 
 // ──────────────────────────── Visual constants ────────────────────────
 
-const ACCENT = "#DC9300";
-const ACCENT_DIM = "#3D2800";
+/** Sentry blurple — primary brand accent. */
+const ACCENT = "#7553FF";
+/** Light lavender — readable text on blurple backgrounds. */
+const ACCENT_DIM = "#E8E1FF";
 const MUTED = "gray";
 const MUTED_DIM = "#555555";
-const PRIMARY = "cyan";
+/** Sentry purple — spinners, in-progress states. */
+const PRIMARY = "#8B6AC8";
 
-const COLOR_INFO = "cyan";
-const COLOR_WARN = "yellow";
-const COLOR_ERROR = "red";
-const COLOR_SUCCESS = "green";
+const COLOR_INFO = "#9C84D4";
+const COLOR_WARN = "#FDB81B";
+const COLOR_ERROR = "#fe4144";
+const COLOR_SUCCESS = "#83da90";
 
 const MIN_WIDTH = 80;
 const MAX_WIDTH = 120;
@@ -751,7 +754,7 @@ function FilesPanel({
         setOffset(maxOffset);
         return;
       }
-      if (key.end || key.escape) {
+      if (key.end) {
         setPinnedToBottom(true);
         setOffset(0);
       }
