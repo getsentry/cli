@@ -23,3 +23,4 @@ Use a policy when the repo needs a durable "how we do this here" rule without a 
 | `pagination.md` | Cursor-stack pagination for list commands |
 | `testing.md` | Test style, isolation, property/model-based tests |
 | `generated-artifacts.md` | Generated docs, skills, fragments, schemas |
+| `implementation-notes.md` | Conditional edge-case notes for specific domains |
