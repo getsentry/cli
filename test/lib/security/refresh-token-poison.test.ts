@@ -10,6 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { DEVELOPMENT_SENTRY_CLIENT_ID } from "../../../src/lib/constants.js";
 import {
   captureEnvTokenHost,
   resetEnvTokenHostForTesting,
@@ -42,6 +43,58 @@ describe("CVE defense-in-depth: refresh token", () => {
   afterEach(() => {
     resetEnvTokenHostForTesting();
     globalThis.fetch = originalFetch;
+  });
+
+  test("refreshAccessToken uses bundled development client ID when env is unset", async () => {
+    delete process.env.SENTRY_CLIENT_ID;
+    let capturedClientId: string | null = null;
+
+    globalThis.fetch = (async (
+      _input: RequestInfo | URL,
+      init?: RequestInit
+    ) => {
+      const body = init?.body;
+      expect(body).toBeInstanceOf(URLSearchParams);
+      capturedClientId = (body as URLSearchParams).get("client_id");
+      return new Response(
+        JSON.stringify({
+          access_token: "refreshed-token",
+          token_type: "Bearer",
+          expires_in: 3600,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await refreshAccessToken("fake-refresh-token");
+
+    expect(capturedClientId).toBe(DEVELOPMENT_SENTRY_CLIENT_ID);
+  });
+
+  test("refreshAccessToken prefers SENTRY_CLIENT_ID over bundled development client ID", async () => {
+    process.env.SENTRY_CLIENT_ID = "custom-client-id";
+    let capturedClientId: string | null = null;
+
+    globalThis.fetch = (async (
+      _input: RequestInfo | URL,
+      init?: RequestInit
+    ) => {
+      const body = init?.body;
+      expect(body).toBeInstanceOf(URLSearchParams);
+      capturedClientId = (body as URLSearchParams).get("client_id");
+      return new Response(
+        JSON.stringify({
+          access_token: "refreshed-token",
+          token_type: "Bearer",
+          expires_in: 3600,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await refreshAccessToken("fake-refresh-token");
+
+    expect(capturedClientId).toBe("custom-client-id");
   });
 
   test("refreshAccessToken throws before fetch when env.SENTRY_URL is poisoned after boot", async () => {

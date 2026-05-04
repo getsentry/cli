@@ -40,6 +40,7 @@ import { $ } from "bun";
 import { build as esbuild } from "esbuild";
 import pkg from "../package.json";
 import { uploadSourcemaps } from "../src/lib/api/sourcemaps.js";
+import { DEVELOPMENT_SENTRY_CLIENT_ID } from "../src/lib/constants.js";
 import { injectDebugId, PLACEHOLDER_DEBUG_ID } from "./debug-id.js";
 import { textImportPlugin } from "./text-import-plugin.js";
 
@@ -48,7 +49,8 @@ const gzipAsync = promisify(gzip);
 const VERSION = pkg.version;
 
 /** Build-time constants injected into the binary */
-const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
+const explicitSentryClientId = process.env.SENTRY_CLIENT_ID?.trim() ?? "";
+const SENTRY_CLIENT_ID = explicitSentryClientId || DEVELOPMENT_SENTRY_CLIENT_ID;
 
 /** Build targets configuration */
 type BuildTarget = {
@@ -388,6 +390,26 @@ function parseTarget(targetStr: string): BuildTarget | null {
   return target ?? null;
 }
 
+function ensureSentryClientIdConfigured(): void {
+  if (explicitSentryClientId) {
+    return;
+  }
+
+  if (process.env.RELEASE_BUILD) {
+    console.error(
+      "\nError: SENTRY_CLIENT_ID environment variable is required for release builds."
+    );
+    console.error(
+      "   The CLI requires an explicit production OAuth client ID."
+    );
+    console.error("   Set it via: SENTRY_CLIENT_ID=xxx bun run build\n");
+    process.exit(1);
+  }
+
+  console.log("\nUsing bundled development SENTRY_CLIENT_ID");
+  console.log("Set SENTRY_CLIENT_ID to override it for production builds.");
+}
+
 /** Main build function */
 async function build(): Promise<void> {
   const args = process.argv.slice(2);
@@ -398,14 +420,7 @@ async function build(): Promise<void> {
   console.log(`\nSentry CLI Build v${VERSION}`);
   console.log("=".repeat(40));
 
-  if (!SENTRY_CLIENT_ID) {
-    console.error(
-      "\nError: SENTRY_CLIENT_ID environment variable is required."
-    );
-    console.error("   The CLI requires OAuth to function.");
-    console.error("   Set it via: SENTRY_CLIENT_ID=xxx bun run build\n");
-    process.exit(1);
-  }
+  ensureSentryClientIdConfigured();
 
   // Determine targets
   let targets: BuildTarget[];

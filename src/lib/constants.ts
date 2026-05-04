@@ -25,6 +25,17 @@ export const DEFAULT_SENTRY_HOST = "sentry.io";
 export const DEFAULT_SENTRY_URL = `https://${DEFAULT_SENTRY_HOST}`;
 
 /**
+ * Public OAuth client ID for local development against sentry.io.
+ *
+ * OAuth device flow uses a public client and does not require a client secret,
+ * so this is safe to commit. Release and npm packaging still inject
+ * SENTRY_CLIENT_ID_BUILD from SENTRY_CLIENT_ID so production distributions can
+ * use a distinct OAuth application without changing runtime code.
+ */
+export const DEVELOPMENT_SENTRY_CLIENT_ID =
+  "4eeddcc5aded79ea085a30198d647ff053d7716e9b51a343d8b8d6000f474391";
+
+/**
  * Name of the JavaScript package directory — used as both a skip target
  * when walking project trees (DSN scanner, sourcemap discovery, init
  * wizard) and as a path segment when detecting how the CLI itself was

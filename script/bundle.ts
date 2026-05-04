@@ -7,14 +7,16 @@ import { injectDebugId, PLACEHOLDER_DEBUG_ID } from "./debug-id.js";
 import { textImportPlugin } from "./text-import-plugin.js";
 
 const VERSION = pkg.version;
-const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
+const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID?.trim() ?? "";
 
 console.log(`\nBundling sentry v${VERSION} for npm`);
 console.log("=".repeat(40));
 
 if (!SENTRY_CLIENT_ID) {
   console.error("\nError: SENTRY_CLIENT_ID environment variable is required.");
-  console.error("   The CLI requires OAuth to function.");
+  console.error(
+    "   The npm bundle must inject an explicit production OAuth client ID."
+  );
   console.error("   Set it via: SENTRY_CLIENT_ID=xxx bun run bundle\n");
   process.exit(1);
 }

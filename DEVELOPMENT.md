@@ -3,7 +3,6 @@
 ## Prerequisites
 
 - [Bun](https://bun.sh/) installed
-- A Sentry OAuth application (create one at https://sentry.io/settings/account/api/applications/)
 
 ## Setup
 
@@ -13,20 +12,20 @@
 bun install
 ```
 
-2. Create a `.env.local` file in the project root:
+2. Optional: create a `.env.local` file in the project root to override the bundled development OAuth client ID:
 
 ```
 SENTRY_CLIENT_ID=your-sentry-oauth-client-id
 ```
 
-Get the client ID from your Sentry OAuth application settings.
+Get the client ID from your Sentry OAuth application settings if you need a custom app or self-hosted instance.
 
 **Note:** No client secret is needed - the CLI uses OAuth 2.0 Device Authorization Grant (RFC 8628) which is designed for public clients.
 
 ## Running Locally
 
 ```bash
-bun run --env-file=.env.local src/bin.ts auth login
+bun run dev auth login
 ```
 
 ## Testing the Device Flow
@@ -34,7 +33,7 @@ bun run --env-file=.env.local src/bin.ts auth login
 1. Run the CLI login command:
 
 ```bash
-bun run --env-file=.env.local src/bin.ts auth login
+bun run dev auth login
 ```
 
 2. You'll see output like:
@@ -55,7 +54,7 @@ Waiting for authorization...
 
 ## Sentry OAuth App Configuration
 
-When creating your Sentry OAuth application:
+You only need to create a Sentry OAuth application when overriding the bundled development client ID or testing against self-hosted Sentry. When creating your OAuth application:
 
 - **Redirect URI**: Not required for device flow
 - **Scopes**: The CLI requests these scopes:
@@ -78,7 +77,7 @@ The table below lists the most common development variables. For the complete re
 | `SENTRY_FORCE_ENV_TOKEN` | Force env token to take priority over stored OAuth token | — |
 | `SENTRY_HOST` | Sentry instance URL (for self-hosted, takes precedence) | `https://sentry.io` |
 | `SENTRY_URL` | Alias for `SENTRY_HOST` | `https://sentry.io` |
-| `SENTRY_CLIENT_ID` | Sentry OAuth app client ID | (required for build) |
+| `SENTRY_CLIENT_ID` | Sentry OAuth app client ID | bundled development client ID |
 | `SENTRY_CONFIG_DIR` | Override credentials/cache directory | `~/.sentry/` |
 | `SENTRY_LOG_LEVEL` | Diagnostic log level (`error`, `warn`, `log`, `info`, `debug`, `trace`) | `info` |
 | `SENTRY_CLI_NO_TELEMETRY` | Disable CLI telemetry (error tracking) | — |

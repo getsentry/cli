@@ -11,7 +11,11 @@ import {
   TokenErrorResponseSchema,
   TokenResponseSchema,
 } from "../types/index.js";
-import { DEFAULT_SENTRY_URL, getConfiguredSentryUrl } from "./constants.js";
+import {
+  DEFAULT_SENTRY_URL,
+  DEVELOPMENT_SENTRY_CLIENT_ID,
+  getConfiguredSentryUrl,
+} from "./constants.js";
 import {
   buildTlsErrorDetail,
   getCustomTlsOptions,
@@ -48,6 +52,7 @@ function getSentryUrl(): string {
  *
  * Build-time: Injected via esbuild define: { SENTRY_CLIENT_ID_BUILD: "..." }
  * Runtime: Can be overridden via SENTRY_CLIENT_ID env var (for self-hosted)
+ * Development: Falls back to a committed public client ID for sentry.io
  *
  * Read at call time (not module load time) so tests can override SENTRY_CLIENT_ID
  * after module initialization.
@@ -56,12 +61,19 @@ function getSentryUrl(): string {
  */
 declare const SENTRY_CLIENT_ID_BUILD: string | undefined;
 function getClientId(): string {
-  return (
-    getEnv().SENTRY_CLIENT_ID ??
-    (typeof SENTRY_CLIENT_ID_BUILD !== "undefined"
-      ? SENTRY_CLIENT_ID_BUILD
-      : "")
-  );
+  const envClientId = getEnv().SENTRY_CLIENT_ID?.trim();
+  if (envClientId) {
+    return envClientId;
+  }
+
+  if (typeof SENTRY_CLIENT_ID_BUILD !== "undefined") {
+    const buildClientId = SENTRY_CLIENT_ID_BUILD.trim();
+    if (buildClientId) {
+      return buildClientId;
+    }
+  }
+
+  return DEVELOPMENT_SENTRY_CLIENT_ID;
 }
 
 /** OAuth scopes requested by the CLI. Exported for doc generation. */

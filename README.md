@@ -135,7 +135,7 @@ bun install
 # Run CLI in development mode
 bun run dev --help
 
-# With environment variables
+# With optional environment overrides
 bun run --env-file=.env.local src/bin.ts --help
 ```
 

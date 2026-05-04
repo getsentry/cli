@@ -138,8 +138,11 @@ await Bun.build({
   },
   define: {
     CLI_VERSION: JSON.stringify(version),
-    // Inject secrets at build time for npm distribution
-    SENTRY_CLIENT_ID_BUILD: JSON.stringify(process.env.SENTRY_CLIENT_ID ?? ""),
+    // Inject the production OAuth client ID at build time. Local builds
+    // may fall back to the repo's committed development client ID.
+    SENTRY_CLIENT_ID_BUILD: JSON.stringify(
+      process.env.SENTRY_CLIENT_ID ?? DEVELOPMENT_SENTRY_CLIENT_ID
+    ),
   },
   sourcemap: "external",
 });
@@ -151,19 +154,24 @@ For values that need to be baked into the binary (like OAuth client IDs):
 
 1. Read from env in build script: `process.env.SENTRY_CLIENT_ID`
 2. Inject via `define`: `SENTRY_CLIENT_ID_BUILD: JSON.stringify(value)`
-3. Use in code with runtime override support:
+3. Use in code with runtime override support and the committed development fallback:
 
 ```typescript
 // Declare the build-time constant
 declare const SENTRY_CLIENT_ID_BUILD: string | undefined;
 
-// Allow runtime override (for self-hosted), fall back to build-time value
+const DEVELOPMENT_SENTRY_CLIENT_ID = "...";
+
+// Allow runtime override (for self-hosted), fall back to build-time value,
+// then use the development client ID for local unbundled runs.
 const CLIENT_ID =
   process.env.SENTRY_CLIENT_ID ??
-  (typeof SENTRY_CLIENT_ID_BUILD !== "undefined" ? SENTRY_CLIENT_ID_BUILD : "");
+  (typeof SENTRY_CLIENT_ID_BUILD !== "undefined" && SENTRY_CLIENT_ID_BUILD
+    ? SENTRY_CLIENT_ID_BUILD
+    : DEVELOPMENT_SENTRY_CLIENT_ID);
 ```
 
-**Build command with secrets:**
+**Release build command with production value:**
 ```bash
 SENTRY_CLIENT_ID=xxx bun run build:all
 ```
