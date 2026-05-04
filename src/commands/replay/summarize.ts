@@ -95,14 +95,14 @@ const SIGNAL_COLUMNS: Column<ReplayFrictionSignal>[] = [
 
 const ROUTE_COLUMNS: Column<ReplayRouteSummary>[] = [
   {
-    header: "FIRST",
-    value: (route) => formatOffset(route.firstOffsetMs),
+    header: "ENTER",
+    value: (route) => formatOffset(route.enteredAtOffsetMs),
     minWidth: 8,
     shrinkable: false,
   },
   {
-    header: "LAST",
-    value: (route) => formatOffset(route.lastOffsetMs),
+    header: "DURATION",
+    value: (route) => formatOffset(route.durationMs),
     minWidth: 8,
     shrinkable: false,
   },
@@ -113,12 +113,62 @@ const ROUTE_COLUMNS: Column<ReplayRouteSummary>[] = [
     minWidth: 6,
   },
   {
+    header: "INTERACTIONS",
+    value: (route) => formatRouteInteractions(route),
+    minWidth: 12,
+    truncate: true,
+  },
+  {
     header: "PATH",
     value: (route) => escapeMarkdownCell(route.path),
     minWidth: 24,
     truncate: true,
   },
+  {
+    header: "NEXT",
+    value: (route) => escapeMarkdownCell(route.nextPath ?? "-"),
+    minWidth: 16,
+    truncate: true,
+  },
 ];
+
+function formatCount(count: number, singular: string, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function formatNonZeroCount(
+  count: number,
+  singular: string,
+  plural = `${singular}s`
+): string | undefined {
+  return count > 0 ? formatCount(count, singular, plural) : undefined;
+}
+
+function formatRouteInteractions(route: ReplayRouteSummary): string {
+  const parts = [
+    formatNonZeroCount(route.counts.clicks, "click"),
+    formatNonZeroCount(route.counts.taps, "tap"),
+    formatNonZeroCount(route.counts.inputs, "input"),
+    formatNonZeroCount(route.counts.scrolls, "scroll"),
+    formatNonZeroCount(route.counts.focuses, "focus", "focuses"),
+    formatNonZeroCount(route.counts.blurs, "blur"),
+  ].filter((part): part is string => Boolean(part));
+  return parts.length > 0 ? parts.join(", ") : "-";
+}
+
+function formatEventCounts(summary: ReplaySummaryOutput): string {
+  return [
+    formatCount(summary.counts.total, "event"),
+    formatCount(summary.counts.clicks, "click"),
+    formatCount(summary.counts.taps, "tap"),
+    formatCount(summary.counts.inputs, "input"),
+    formatCount(summary.counts.scrolls, "scroll"),
+    formatCount(summary.counts.focuses, "focus", "focuses"),
+    formatCount(summary.counts.blurs, "blur"),
+    formatCount(summary.counts.network, "network event"),
+    formatCount(summary.counts.errors, "error"),
+  ].join(", ");
+}
 
 function jsonTransformSummary(
   summary: ReplaySummaryOutput,
@@ -134,7 +184,7 @@ function formatSummaryHuman(summary: ReplaySummaryOutput): string {
     `Entry: ${summary.entryUrl ?? "-"}`,
     `Exit: ${summary.exitUrl ?? "-"}`,
     `Duration: ${formatDurationSeconds(summary.durationSeconds)}`,
-    `Events: ${summary.counts.total} total, ${summary.counts.clicks} clicks, ${summary.counts.inputs} inputs, ${summary.counts.network} network, ${summary.counts.errors} errors`,
+    `Events: ${formatEventCounts(summary)}`,
   ];
 
   if (summary.focusPath) {

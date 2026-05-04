@@ -42,7 +42,6 @@ const SLOW_RESOURCE_MS = 3000;
 const ROUTE_CHURN_WINDOW_MS = 15_000;
 const ROUTE_CHURN_COUNT = 3;
 
-const INPUT_KINDS = new Set(["input", "focus", "blur"]);
 const NOTABLE_EVENT_KINDS = new Set([
   "navigation",
   "click",
@@ -79,66 +78,155 @@ function routeKey(event: ReplayEvent): string | undefined {
   return event.urlPath ?? undefined;
 }
 
-function countEvents(events: ReplayEvent[]): ReplayEventCounts {
+function emptyEventCounts(): ReplayEventCounts {
   return {
-    total: events.length,
-    navigations: events.filter((event) => event.kind === "navigation").length,
-    clicks: events.filter(
-      (event) => event.kind === "click" || event.kind === "tap"
-    ).length,
-    inputs: events.filter((event) => INPUT_KINDS.has(event.kind)).length,
-    network: events.filter((event) => event.kind === "network").length,
-    console: events.filter((event) => event.kind === "console").length,
-    errors: events.filter((event) => event.kind === "error").length,
-    spans: events.filter((event) => event.kind === "span").length,
+    total: 0,
+    navigations: 0,
+    clicks: 0,
+    taps: 0,
+    inputs: 0,
+    focuses: 0,
+    blurs: 0,
+    scrolls: 0,
+    network: 0,
+    console: 0,
+    errors: 0,
+    spans: 0,
   };
 }
 
-function buildRouteSummaries(events: ReplayEvent[]): ReplayRouteSummary[] {
-  const routes = new Map<string, ReplayRouteSummary>();
+function countEvents(events: ReplayEvent[]): ReplayEventCounts {
+  const counts = emptyEventCounts();
+  counts.total = events.length;
 
   for (const event of events) {
-    const path = routeKey(event);
-    if (!path) {
-      continue;
-    }
-
-    const existing = routes.get(path);
-    if (!existing) {
-      routes.set(path, {
-        path,
-        url: event.url ?? null,
-        firstOffsetMs: event.offsetMs,
-        lastOffsetMs: event.offsetMs,
-        eventCount: 1,
-      });
-      continue;
-    }
-
-    existing.eventCount += 1;
-    if (event.offsetMs !== null) {
-      existing.lastOffsetMs = event.offsetMs;
-      if (
-        existing.firstOffsetMs === null ||
-        event.offsetMs < existing.firstOffsetMs
-      ) {
-        existing.firstOffsetMs = event.offsetMs;
-      }
+    switch (event.kind) {
+      case "navigation":
+        counts.navigations += 1;
+        break;
+      case "click":
+        counts.clicks += 1;
+        break;
+      case "tap":
+        counts.taps += 1;
+        break;
+      case "input":
+        counts.inputs += 1;
+        break;
+      case "focus":
+        counts.focuses += 1;
+        break;
+      case "blur":
+        counts.blurs += 1;
+        break;
+      case "scroll":
+        counts.scrolls += 1;
+        break;
+      case "network":
+        counts.network += 1;
+        break;
+      case "console":
+        counts.console += 1;
+        break;
+      case "error":
+        counts.errors += 1;
+        break;
+      case "span":
+        counts.spans += 1;
+        break;
+      default:
+        break;
     }
   }
 
-  return [...routes.values()].sort((a, b) => {
-    if (a.firstOffsetMs === null && b.firstOffsetMs === null) {
-      return 0;
+  return counts;
+}
+
+function hadUserInteraction(counts: ReplayEventCounts): boolean {
+  return (
+    counts.clicks > 0 ||
+    counts.taps > 0 ||
+    counts.inputs > 0 ||
+    counts.scrolls > 0
+  );
+}
+
+type RouteVisitDraft = {
+  path: string;
+  url: string | null;
+  enteredAtOffsetMs: number | null;
+  events: ReplayEvent[];
+};
+
+function durationBetween(
+  startMs: number | null,
+  endMs: number | null
+): number | null {
+  if (startMs === null || endMs === null || endMs < startMs) {
+    return null;
+  }
+  return endMs - startMs;
+}
+
+function finalizeRouteVisit(
+  visit: RouteVisitDraft,
+  leftAtOffsetMs: number | null,
+  nextPath: string | null
+): ReplayRouteSummary {
+  const eventOffsets = visit.events
+    .map((event) => event.offsetMs)
+    .filter((offset): offset is number => offset !== null);
+  const counts = countEvents(visit.events);
+  return {
+    path: visit.path,
+    url: visit.url,
+    enteredAtOffsetMs: visit.enteredAtOffsetMs,
+    leftAtOffsetMs,
+    durationMs: durationBetween(visit.enteredAtOffsetMs, leftAtOffsetMs),
+    nextPath,
+    firstOffsetMs: eventOffsets.length > 0 ? Math.min(...eventOffsets) : null,
+    lastOffsetMs: eventOffsets.length > 0 ? Math.max(...eventOffsets) : null,
+    eventCount: visit.events.length,
+    counts,
+    hadUserInteraction: hadUserInteraction(counts),
+  };
+}
+
+function buildRouteSummaries(
+  events: ReplayEvent[],
+  replayDuration: number | null
+): ReplayRouteSummary[] {
+  const routes: ReplayRouteSummary[] = [];
+  let current: RouteVisitDraft | undefined;
+
+  for (const event of events) {
+    const navigationPath =
+      event.kind === "navigation" ? routeKey(event) : undefined;
+    if (navigationPath && (!current || current.path !== navigationPath)) {
+      if (current) {
+        routes.push(
+          finalizeRouteVisit(current, event.offsetMs, navigationPath)
+        );
+      }
+      current = {
+        path: navigationPath,
+        url: event.url ?? null,
+        enteredAtOffsetMs: event.offsetMs,
+        events: [event],
+      };
+      continue;
     }
-    if (a.firstOffsetMs === null) {
-      return 1;
+
+    if (current) {
+      current.events.push(event);
     }
-    if (b.firstOffsetMs === null) {
-      return -1;
-    }
-    return a.firstOffsetMs - b.firstOffsetMs;
-  });
+  }
+
+  if (current) {
+    routes.push(finalizeRouteVisit(current, replayDuration, null));
+  }
+
+  return routes;
 }
 
 function firstOffsetForSpan(
@@ -553,7 +641,9 @@ function detectSessionShapeSignals(
     typeof replay.duration === "number" &&
     replay.duration <= QUICK_BOUNCE_SECONDS &&
     counts.clicks === 0 &&
-    counts.inputs === 0
+    counts.taps === 0 &&
+    counts.inputs === 0 &&
+    counts.scrolls === 0
   ) {
     pushSignal(
       signals,
@@ -563,7 +653,7 @@ function detectSessionShapeSignals(
         offsetMs: events[0]?.offsetMs ?? null,
         url: events[0]?.url ?? null,
         urlPath: events[0]?.urlPath ?? null,
-        message: "Replay ended quickly without clicks or inputs.",
+        message: "Replay ended quickly without user interactions.",
         evidence: events.slice(0, 5),
       },
       maxSignals
@@ -633,15 +723,29 @@ function focusEvents(events: ReplayEvent[], focusPath?: string): ReplayEvent[] {
   return events.filter((event) => replayUrlPathMatches(event.url, focusPath));
 }
 
+function routeMatchesFocus(
+  route: ReplayRouteSummary,
+  focusPath?: string
+): boolean {
+  if (!focusPath) {
+    return true;
+  }
+  return replayUrlPathMatches(route.url ?? route.path, focusPath);
+}
+
 export function summarizeReplay(
   replay: ReplayDetails,
   events: ReplayEvent[],
   options: SummaryOptions
 ): ReplaySummaryOutput {
   const focusedEvents = focusEvents(events, options.focusPath);
+  const replayDuration = replayDurationMs(replay);
   const maxSignals = options.maxSignals ?? DEFAULT_MAX_SIGNALS;
   const maxNotableEvents =
     options.maxNotableEvents ?? DEFAULT_MAX_NOTABLE_EVENTS;
+  const routes = buildRouteSummaries(events, replayDuration).filter((route) =>
+    routeMatchesFocus(route, options.focusPath)
+  );
 
   return {
     replayId: replay.id,
@@ -654,7 +758,7 @@ export function summarizeReplay(
     focusPath: options.focusPath ?? null,
     counts: countEvents(focusedEvents),
     timings: timingSummary(focusedEvents),
-    routes: buildRouteSummaries(focusedEvents),
+    routes,
     signals: detectFrictionSignals(replay, focusedEvents, maxSignals),
     notableEvents: notableEvents(focusedEvents, maxNotableEvents),
   };

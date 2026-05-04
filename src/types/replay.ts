@@ -418,34 +418,65 @@ export const REPLAY_FRICTION_SIGNAL_KINDS = [
   "route_churn",
 ] as const;
 
-export const ReplayRouteSummarySchema = z
-  .object({
-    path: z.string().describe("Route pathname"),
-    url: z.string().nullable().describe("Representative URL for the route"),
-    firstOffsetMs: z
-      .number()
-      .nullable()
-      .describe("First observed offset for this route"),
-    lastOffsetMs: z
-      .number()
-      .nullable()
-      .describe("Last observed offset for this route"),
-    eventCount: z.number().describe("Number of normalized events on the route"),
-  })
-  .describe("Replay route summary");
-
 export const ReplayEventCountsSchema = z
   .object({
     total: z.number().describe("Total normalized event count"),
     navigations: z.number().describe("Navigation event count"),
-    clicks: z.number().describe("Click/tap event count"),
-    inputs: z.number().describe("Input/focus/blur event count"),
+    clicks: z.number().describe("Click event count"),
+    taps: z.number().describe("Tap event count"),
+    inputs: z.number().describe("Input event count"),
+    focuses: z.number().describe("Focus event count"),
+    blurs: z.number().describe("Blur event count"),
+    scrolls: z.number().describe("Scroll event count"),
     network: z.number().describe("Network event count"),
     console: z.number().describe("Console event count"),
     errors: z.number().describe("Error event count"),
     spans: z.number().describe("Performance span event count"),
   })
   .describe("Replay event counts");
+
+export const ReplayRouteSummarySchema = z
+  .object({
+    path: z.string().describe("Route pathname"),
+    url: z
+      .string()
+      .nullable()
+      .describe("Representative URL for this route visit"),
+    enteredAtOffsetMs: z
+      .number()
+      .nullable()
+      .describe("Offset where this route visit started"),
+    leftAtOffsetMs: z
+      .number()
+      .nullable()
+      .describe("Offset where this route visit ended"),
+    durationMs: z
+      .number()
+      .nullable()
+      .describe("Duration of this route visit when bounded"),
+    nextPath: z
+      .string()
+      .nullable()
+      .describe("Next route pathname after this visit"),
+    firstOffsetMs: z
+      .number()
+      .nullable()
+      .describe("First observed event offset for this route visit"),
+    lastOffsetMs: z
+      .number()
+      .nullable()
+      .describe("Last observed event offset for this route visit"),
+    eventCount: z
+      .number()
+      .describe("Number of normalized events in this route visit"),
+    counts: ReplayEventCountsSchema.describe(
+      "Normalized event counts within this route visit"
+    ),
+    hadUserInteraction: z
+      .boolean()
+      .describe("Whether this route visit had click, tap, input, or scroll"),
+  })
+  .describe("Replay route visit summary");
 
 export const ReplayTimingSummarySchema = z
   .object({
