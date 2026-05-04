@@ -23,6 +23,8 @@ type SummaryOptions = {
   focusPath?: string;
   maxSignals?: number;
   maxNotableEvents?: number;
+  recordingFrameCount?: number | null;
+  recordingSegmentCount?: number | null;
 };
 
 type ClickPoint = {
@@ -733,6 +735,16 @@ function routeMatchesFocus(
   return replayUrlPathMatches(route.url ?? route.path, focusPath);
 }
 
+function recordingSegmentCount(
+  replay: ReplayDetails,
+  options: SummaryOptions
+): number | null {
+  if (options.recordingSegmentCount !== undefined) {
+    return options.recordingSegmentCount;
+  }
+  return replay.count_segments ?? null;
+}
+
 export function summarizeReplay(
   replay: ReplayDetails,
   events: ReplayEvent[],
@@ -751,12 +763,22 @@ export function summarizeReplay(
     replayId: replay.id,
     org: options.org,
     project: options.project ?? null,
+    platform: replay.platform ?? null,
+    sdkName: replay.sdk?.name ?? null,
+    sdkVersion: replay.sdk?.version ?? null,
+    replayType: replay.replay_type ?? null,
     startedAt: replay.started_at ?? null,
     durationSeconds: replay.duration ?? null,
     entryUrl: replay.urls[0] ?? null,
     exitUrl: replay.urls.at(-1) ?? null,
     focusPath: options.focusPath ?? null,
     counts: countEvents(focusedEvents),
+    recording: {
+      segmentCount: recordingSegmentCount(replay, options),
+      frameCount: options.recordingFrameCount ?? null,
+      normalizedEventCount: events.length,
+      focusedEventCount: options.focusPath ? focusedEvents.length : null,
+    },
     timings: timingSummary(focusedEvents),
     routes,
     signals: detectFrictionSignals(replay, focusedEvents, maxSignals),

@@ -123,6 +123,12 @@ describe("replay summarize", () => {
     expect(parsed.replayId).toBe(REPLAY_ID);
     expect(parsed.focusPath).toBe("/signup");
     expect(parsed.counts.clicks).toBe(1);
+    expect(parsed.recording).toMatchObject({
+      segmentCount: 1,
+      frameCount: 2,
+      normalizedEventCount: 2,
+      focusedEventCount: 2,
+    });
     expect(parsed.routes[0].path).toBe("/signup");
     expect(parsed.signals[0].kind).toBe("dead_click");
   });

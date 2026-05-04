@@ -80,6 +80,12 @@ describe("summarizeReplay", () => {
 
     expect(summary.routes.map((route) => route.path)).toEqual(["/signup"]);
     expect(summary.routes[0]?.counts.network).toBe(1);
+    expect(summary.recording).toEqual({
+      segmentCount: 1,
+      frameCount: null,
+      normalizedEventCount: 5,
+      focusedEventCount: null,
+    });
     expect(summary.counts.clicks).toBe(2);
     expect(summary.timings.navigationDurationMs).toBe(3500);
     expect(summary.signals.map((signal) => signal.kind)).toEqual(
@@ -163,6 +169,7 @@ describe("summarizeReplay", () => {
       "/signup",
       "/signup",
     ]);
+    expect(focusedSummary.recording.focusedEventCount).toBe(4);
     expect(focusedSummary.counts.inputs).toBe(0);
     expect(focusedSummary.counts.scrolls).toBe(1);
   });

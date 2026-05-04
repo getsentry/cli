@@ -496,6 +496,26 @@ export const ReplayTimingSummarySchema = z
   })
   .describe("Replay timing summary");
 
+export const ReplayRecordingStatsSchema = z
+  .object({
+    segmentCount: z
+      .number()
+      .nullable()
+      .describe("Downloaded recording segment count when available"),
+    frameCount: z
+      .number()
+      .nullable()
+      .describe("Downloaded raw recording frame count when available"),
+    normalizedEventCount: z
+      .number()
+      .describe("Normalized event count extracted from the recording"),
+    focusedEventCount: z
+      .number()
+      .nullable()
+      .describe("Normalized event count after the optional focus path"),
+  })
+  .describe("Replay recording parser stats");
+
 export const ReplayFrictionSignalSchema = z
   .object({
     kind: z
@@ -524,6 +544,10 @@ export const ReplaySummaryOutputSchema = z
     replayId: z.string().describe("Replay ID"),
     org: z.string().describe("Organization slug"),
     project: z.string().nullable().optional().describe("Project slug"),
+    platform: z.string().nullable().optional().describe("Replay platform"),
+    sdkName: z.string().nullable().optional().describe("Replay SDK name"),
+    sdkVersion: z.string().nullable().optional().describe("Replay SDK version"),
+    replayType: z.string().nullable().optional().describe("Replay type"),
     startedAt: z.string().nullable().optional().describe("Replay start time"),
     durationSeconds: z
       .number()
@@ -538,6 +562,9 @@ export const ReplaySummaryOutputSchema = z
       .optional()
       .describe("Optional route path used to focus the summary"),
     counts: ReplayEventCountsSchema.describe("Normalized event counts"),
+    recording: ReplayRecordingStatsSchema.describe(
+      "Downloaded recording and parser stats"
+    ),
     timings: ReplayTimingSummarySchema.describe("Key timing observations"),
     routes: z.array(ReplayRouteSummarySchema).describe("Route timeline"),
     signals: z
@@ -619,6 +646,7 @@ export type ReplayFrictionSignalKind =
   (typeof REPLAY_FRICTION_SIGNAL_KINDS)[number];
 export type ReplayRouteSummary = z.infer<typeof ReplayRouteSummarySchema>;
 export type ReplayEventCounts = z.infer<typeof ReplayEventCountsSchema>;
+export type ReplayRecordingStats = z.infer<typeof ReplayRecordingStatsSchema>;
 export type ReplayTimingSummary = z.infer<typeof ReplayTimingSummarySchema>;
 export type ReplayFrictionSignal = z.infer<typeof ReplayFrictionSignalSchema>;
 export type ReplaySummaryOutput = z.infer<typeof ReplaySummaryOutputSchema>;

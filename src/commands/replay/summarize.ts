@@ -156,6 +156,23 @@ function formatRouteInteractions(route: ReplayRouteSummary): string {
   return parts.length > 0 ? parts.join(", ") : "-";
 }
 
+function formatRecordingStats(summary: ReplaySummaryOutput): string {
+  return [
+    summary.recording.segmentCount !== null
+      ? formatCount(summary.recording.segmentCount, "segment")
+      : undefined,
+    summary.recording.frameCount !== null
+      ? formatCount(summary.recording.frameCount, "raw frame")
+      : undefined,
+    formatCount(summary.recording.normalizedEventCount, "normalized event"),
+    summary.recording.focusedEventCount !== null
+      ? formatCount(summary.recording.focusedEventCount, "focused event")
+      : undefined,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(", ");
+}
+
 function formatEventCounts(summary: ReplaySummaryOutput): string {
   return [
     formatCount(summary.counts.total, "event"),
@@ -181,9 +198,13 @@ function formatSummaryHuman(summary: ReplaySummaryOutput): string {
   const lines = [
     `Replay summary for ${summary.org}/${summary.replayId.slice(0, 8)}`,
     "",
+    `Platform: ${summary.platform ?? "-"}`,
+    `SDK: ${[summary.sdkName, summary.sdkVersion].filter(Boolean).join(" ") || "-"}`,
+    `Replay type: ${summary.replayType ?? "-"}`,
     `Entry: ${summary.entryUrl ?? "-"}`,
     `Exit: ${summary.exitUrl ?? "-"}`,
     `Duration: ${formatDurationSeconds(summary.durationSeconds)}`,
+    `Recording: ${formatRecordingStats(summary)}`,
     `Events: ${formatEventCounts(summary)}`,
   ];
 
@@ -215,6 +236,7 @@ export const summarizeCommand = buildCommand({
     fullDescription:
       "Summarize a Session Replay into route flow, event counts, timing facts, and deterministic friction signals.\n\n" +
       "This command does not use AI. It returns factual evidence that an agent can use for analysis.\n\n" +
+      "Recording parsing is best-effort. Summary metadata includes platform, SDK, replay type, and raw recording counts so agents can tell when a replay fetched successfully but produced sparse normalized events.\n\n" +
       "Examples:\n" +
       "  sentry replay summarize sentry/346789a703f6454384f1de473b8b9fcc --json\n" +
       "  sentry replay summarize sentry/346789a703f6454384f1de473b8b9fcc --path /signup --json\n" +
@@ -298,12 +320,18 @@ export const summarizeCommand = buildCommand({
     });
 
     const events = extractNormalizedReplayEvents(replay, segments);
+    const recordingFrameCount = segments.reduce(
+      (count, segment) => count + segment.length,
+      0
+    );
     const summary = summarizeReplay(replay, events, {
       org: resolved.org,
       project: resolved.project,
       focusPath: flags.path,
       maxSignals: flags["limit-signals"],
       maxNotableEvents: flags["limit-events"],
+      recordingFrameCount,
+      recordingSegmentCount: segments.length,
     });
 
     yield new CommandOutput(summary);
