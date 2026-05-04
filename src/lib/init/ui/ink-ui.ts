@@ -578,12 +578,18 @@ export class InkUI implements WizardUI {
 
   confirm(opts: ConfirmOptions): Promise<boolean | Cancelled> {
     return new Promise<boolean | Cancelled>((resolve) => {
+      this.activePromptCancel = () => {
+        this.store.setPrompt(null);
+        this.activePromptCancel = undefined;
+        resolve(CANCELLED);
+      };
       this.store.setPrompt({
         kind: "confirm",
         message: stripAnsi(opts.message),
         initialValue: opts.initialValue ?? true,
         resolve: (value) => {
           this.store.setPrompt(null);
+          this.activePromptCancel = undefined;
           if (value === null) {
             resolve(CANCELLED);
           } else {
