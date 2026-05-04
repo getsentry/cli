@@ -72,13 +72,13 @@ const REPORT_SUCCESS = "#83da90";
 const REPORT_ERROR = "#fe4144";
 const REPORT_WARN = "#FDB81B";
 
-/** Splits error detail strings on `: ` for multi-line formatting. */
-const ERROR_DETAIL_SPLIT_RE = /:\s+/;
+/** Splits on `: ` to separate error label from detail. */
+const ERROR_SPLIT_RE = /:\s+/;
 
 /**
  * Build the chalk-formatted failure report shown after alternate
  * screen exit. Includes up to 5 recent error log entries with
- * structured detail splitting for readability.
+ * structured formatting for readability.
  */
 function formatFailureReport(
   message: string,
@@ -89,23 +89,42 @@ function formatFailureReport(
     `\n${icon}  ${chalk.hex(REPORT_ERROR).bold(message)}`,
   ];
   const errorLogs = logs.filter(
-    (entry) => entry.severity === "error" && entry.text !== message
+    (entry) =>
+      entry.severity === "error" &&
+      entry.text !== message &&
+      entry.text !== "Failed"
   );
   if (errorLogs.length > 0) {
     lines.push("");
   }
   for (const entry of errorLogs.slice(-5)) {
-    const parts = entry.text.split(ERROR_DETAIL_SPLIT_RE);
-    if (parts.length > 1) {
-      lines.push(`   ${chalk.hex(REPORT_ERROR).bold(parts[0] ?? "")}`);
-      for (const part of parts.slice(1)) {
-        lines.push(`   ${chalk.hex(REPORT_MUTED)(part)}`);
-      }
-    } else {
-      lines.push(`   ${chalk.hex(REPORT_ERROR)(entry.text)}`);
-    }
+    formatErrorEntry(entry.text, lines);
   }
   return lines.join("\n");
+}
+
+/**
+ * Format a single error log entry into indented report lines.
+ * Splits on newlines first, then separates the first segment
+ * (bold red) from subsequent detail (muted) on each line.
+ */
+function formatErrorEntry(text: string, out: string[]): void {
+  const rawLines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (rawLines.length === 0) {
+    return;
+  }
+  const first = rawLines[0] ?? "";
+  const parts = first.split(ERROR_SPLIT_RE);
+  out.push(`   ${chalk.hex(REPORT_ERROR).bold(parts[0] ?? "")}`);
+  for (const part of parts.slice(1)) {
+    out.push(`   ${chalk.hex(REPORT_MUTED)(part)}`);
+  }
+  for (const line of rawLines.slice(1)) {
+    out.push(`   ${chalk.hex(REPORT_MUTED)(line)}`);
+  }
 }
 
 /** Tip rotation cadence in the sidebar — slow enough to read each tip. */

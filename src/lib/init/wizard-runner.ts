@@ -12,7 +12,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { basename } from "node:path";
+
 import { MastraClient } from "@mastra/client-js";
 import { captureException, getTraceData } from "@sentry/node-core/light";
 import { formatBanner } from "../banner.js";
@@ -20,9 +20,7 @@ import { CLI_VERSION } from "../constants.js";
 import { WizardError } from "../errors.js";
 import { terminalLink } from "../formatters/colors.js";
 import {
-  colorTag,
   renderInlineMarkdown,
-  safeCodeSpan,
   stripColorTags,
 } from "../formatters/markdown.js";
 import {
@@ -109,42 +107,14 @@ type ReadFilesDisplay = {
 
 function formatReadFilesSummary(progress: ReadFilesDisplay): string {
   const { paths, phase } = progress;
-  if (paths.length === 0) {
+  const count = paths.length;
+  if (count === 0) {
     return phase === "analyzing" ? "Analyzing files..." : "Reading files...";
   }
-
-  let header: string;
   if (phase === "analyzing") {
-    header = paths.length === 1 ? "Analyzing file..." : "Analyzing files...";
-  } else {
-    header = paths.length === 1 ? "Reading file..." : "Reading files...";
+    return count === 1 ? "Analyzing 1 file..." : `Analyzing ${count} files...`;
   }
-
-  const icon = readFilesStatusIcon(phase);
-  const displayPaths = compactDisplayPaths(paths);
-  const items = displayPaths.map((filePath, index) => {
-    const branch = index === paths.length - 1 ? "└─" : "├─";
-    return `${branch} ${icon} ${safeCodeSpan(filePath)}`;
-  });
-  return `${header}\n${items.join("\n")}`;
-}
-
-function readFilesStatusIcon(phase: ReadFilesDisplay["phase"]): string {
-  return phase === "analyzing"
-    ? colorTag("green", "✓")
-    : colorTag("yellow", "●");
-}
-
-function compactDisplayPaths(paths: string[]): string[] {
-  const basenameCounts = new Map<string, number>();
-  for (const filePath of paths) {
-    const name = basename(filePath);
-    basenameCounts.set(name, (basenameCounts.get(name) ?? 0) + 1);
-  }
-  return paths.map((filePath) => {
-    const name = basename(filePath);
-    return basenameCounts.get(name) === 1 ? name : filePath;
-  });
+  return count === 1 ? "Reading 1 file..." : `Reading ${count} files...`;
 }
 
 /**
