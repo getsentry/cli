@@ -66,7 +66,7 @@ List recent Session Replays
 - `--entry-path <value> - Filter by first visited URL pathname`
 - `--exit-path <value> - Filter by last visited URL pathname`
 - `--friction - Only show replays with indexed friction signals (errors, warnings, rage clicks, or dead clicks)`
-- `--problem-only - Only show replays with errors, warnings, rage clicks, or dead clicks`
+- `--problem-only - Only show replays with indexed errors or warnings`
 - `-e, --environment <value>... - Filter by environment (repeatable, comma-separated)`
 - `-s, --sort <value> - Sort by: date, oldest, duration, errors, warnings, rage, dead, activity, or a raw replay sort field - (default: "date")`
 - `-t, --period <value> - Time range: "7d", "2026-04-01..2026-05-01", ">=2026-04-01" - (default: "7d")`

@@ -126,4 +126,25 @@ describe("replay summarize", () => {
     expect(parsed.routes[0].path).toBe("/signup");
     expect(parsed.signals[0].kind).toBe("dead_click");
   });
+
+  test("renders missing human duration without seconds suffix", async () => {
+    getReplaySpy.mockResolvedValue(sampleReplay({ duration: null }));
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await summarizeCommand.loader();
+    await func.call(
+      context,
+      {
+        fresh: false,
+        json: false,
+        "limit-events": 5,
+        "limit-signals": 5,
+      },
+      `test-org/web/${REPLAY_ID}`
+    );
+
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    expect(output).toContain("Duration: -");
+    expect(output).not.toContain("Duration: -s");
+  });
 });

@@ -166,7 +166,7 @@ describe("listCommand.func", () => {
     });
   });
 
-  test("combines URL sugar with query and filters problem-only rows", async () => {
+  test("combines URL sugar with query and filters friction rows", async () => {
     resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
     listReplaysSpy.mockResolvedValue({
       data: [
@@ -190,7 +190,7 @@ describe("listCommand.func", () => {
     await func.call(
       context,
       {
-        "problem-only": true,
+        friction: true,
         limit: 25,
         json: true,
         period: parsePeriod("7d"),
@@ -211,6 +211,45 @@ describe("listCommand.func", () => {
       cursor: undefined,
       statsPeriod: "7d",
     });
+
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed.data).toHaveLength(1);
+    expect(parsed.data[0].id).toBe(sampleReplays[0]?.id);
+  });
+
+  test("problem-only filters to errors and warnings, not click friction", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    listReplaysSpy.mockResolvedValue({
+      data: [
+        sampleReplays[0]!,
+        {
+          ...sampleReplays[0]!,
+          id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          count_errors: 0,
+          count_dead_clicks: 3,
+          count_rage_clicks: 0,
+          count_warnings: 0,
+          error_ids: [],
+          warning_ids: [],
+        },
+      ],
+      nextCursor: undefined,
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      {
+        "problem-only": true,
+        limit: 25,
+        json: true,
+        period: parsePeriod("7d"),
+        sort: "-started_at",
+      },
+      "test-org/cli"
+    );
 
     const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
     const parsed = JSON.parse(output);

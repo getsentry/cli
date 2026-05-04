@@ -64,6 +64,10 @@ function formatOffset(offsetMs: number | null | undefined): string {
     : formatDurationCompactMs(offsetMs);
 }
 
+function formatDurationSeconds(seconds: number | null | undefined): string {
+  return seconds === null || seconds === undefined ? "-" : `${seconds}s`;
+}
+
 const SIGNAL_COLUMNS: Column<ReplayFrictionSignal>[] = [
   {
     header: "OFFSET",
@@ -129,7 +133,7 @@ function formatSummaryHuman(summary: ReplaySummaryOutput): string {
     "",
     `Entry: ${summary.entryUrl ?? "-"}`,
     `Exit: ${summary.exitUrl ?? "-"}`,
-    `Duration: ${summary.durationSeconds ?? "-"}s`,
+    `Duration: ${formatDurationSeconds(summary.durationSeconds)}`,
     `Events: ${summary.counts.total} total, ${summary.counts.clicks} clicks, ${summary.counts.inputs} inputs, ${summary.counts.network} network, ${summary.counts.errors} errors`,
   ];
 

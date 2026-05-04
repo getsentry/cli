@@ -192,14 +192,20 @@ function buildReplaySearchQuery(filters: {
   return parts.length > 0 ? parts.join(" ") : undefined;
 }
 
-function hasProblemSignals(replay: ReplayListItem): boolean {
+function hasErrorOrWarningSignals(replay: ReplayListItem): boolean {
   return (
     (replay.count_errors ?? 0) > 0 ||
     (replay.count_warnings ?? 0) > 0 ||
-    (replay.count_rage_clicks ?? 0) > 0 ||
-    (replay.count_dead_clicks ?? 0) > 0 ||
     replay.error_ids.length > 0 ||
     replay.warning_ids.length > 0
+  );
+}
+
+function hasFrictionSignals(replay: ReplayListItem): boolean {
+  return (
+    hasErrorOrWarningSignals(replay) ||
+    (replay.count_rage_clicks ?? 0) > 0 ||
+    (replay.count_dead_clicks ?? 0) > 0
   );
 }
 
@@ -445,8 +451,7 @@ export const listCommand = buildListCommand("replay", {
       },
       "problem-only": {
         kind: "boolean",
-        brief:
-          "Only show replays with errors, warnings, rage clicks, or dead clicks",
+        brief: "Only show replays with indexed errors or warnings",
         default: false,
       },
       environment: {
@@ -534,9 +539,10 @@ export const listCommand = buildListCommand("replay", {
       if (!replayMatchesRouteFilters(replay, flags)) {
         return false;
       }
-      return flags["problem-only"] || flags.friction
-        ? hasProblemSignals(replay)
-        : true;
+      if (flags["problem-only"]) {
+        return hasErrorOrWarningSignals(replay);
+      }
+      return flags.friction ? hasFrictionSignals(replay) : true;
     });
 
     advancePaginationState(PAGINATION_KEY, contextKey, direction, nextCursor);
