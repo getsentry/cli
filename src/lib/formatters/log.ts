@@ -287,12 +287,14 @@ function formatSeverityLabel(severity: string | null | undefined): string {
  *
  * @param log - The detailed log entry to format
  * @param orgSlug - Organization slug for building trace URLs
+ * @param extraFields - Custom fields requested via --fields, shown in Custom Attributes section
  * @returns Rendered terminal string
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: log detail formatting requires multiple conditional sections
 export function formatLogDetails(
   log: DetailedSentryLog,
-  orgSlug: string
+  orgSlug: string,
+  extraFields?: string[]
 ): string {
   const logId = log["sentry.item_id"];
   const lines: string[] = [];
@@ -392,6 +394,17 @@ export function formatLogDetails(
     }
     lines.push("");
     lines.push(mdKvTable(otelRows, "OpenTelemetry"));
+  }
+
+  // Custom Attributes — fields explicitly requested via --fields
+  if (extraFields?.length) {
+    const customRows: [string, string][] = extraFields
+      .filter((f) => log[f] !== null && log[f] !== undefined)
+      .map((f) => [f, String(log[f])]);
+    if (customRows.length > 0) {
+      lines.push("");
+      lines.push(mdKvTable(customRows, "Custom Attributes"));
+    }
   }
 
   return renderMarkdown(lines.join("\n"));

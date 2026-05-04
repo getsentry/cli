@@ -193,7 +193,12 @@ describe("viewCommand.func", () => {
       );
 
       // getLogs should have been called with both IDs
-      expect(getLogsSpy).toHaveBeenCalledWith("my-org", "proj", [ID1, ID2]);
+      expect(getLogsSpy).toHaveBeenCalledWith(
+        "my-org",
+        "proj",
+        [ID1, ID2],
+        undefined
+      );
 
       const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
       const parsed = JSON.parse(output);
@@ -295,9 +300,12 @@ describe("viewCommand.func", () => {
       await func.call(context, { json: true, web: false }, "my-project", ID1);
 
       expect(resolveProjectBySlugSpy).toHaveBeenCalled();
-      expect(getLogsSpy).toHaveBeenCalledWith("resolved-org", "resolved-proj", [
-        ID1,
-      ]);
+      expect(getLogsSpy).toHaveBeenCalledWith(
+        "resolved-org",
+        "resolved-proj",
+        [ID1],
+        undefined
+      );
     });
 
     test("org/ target (org-all) throws ContextError", async () => {
@@ -327,9 +335,12 @@ describe("viewCommand.func", () => {
       await func.call(context, { json: false, web: false }, ID1);
 
       expect(resolveOrgAndProjectSpy).toHaveBeenCalled();
-      expect(getLogsSpy).toHaveBeenCalledWith("detected-org", "detected-proj", [
-        ID1,
-      ]);
+      expect(getLogsSpy).toHaveBeenCalledWith(
+        "detected-org",
+        "detected-proj",
+        [ID1],
+        undefined
+      );
 
       // Human output should include the detected-from hint
       const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");

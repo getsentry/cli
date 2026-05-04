@@ -162,16 +162,24 @@ async function getLogsBatch(
   orgSlug: string,
   projectSlug: string,
   batchIds: string[],
-  config: Awaited<ReturnType<typeof getOrgSdkConfig>>
+  config: Awaited<ReturnType<typeof getOrgSdkConfig>>,
+  extraFields?: string[]
 ): Promise<DetailedSentryLog[]> {
   const query = `project:${projectSlug} sentry.item_id:[${batchIds.join(",")}]`;
+
+  const fields = extraFields?.length
+    ? [
+        ...DETAILED_LOG_FIELDS,
+        ...extraFields.filter((f) => !DETAILED_LOG_FIELDS.includes(f)),
+      ]
+    : DETAILED_LOG_FIELDS;
 
   const result = await queryExploreEventsInTableFormat({
     ...config,
     path: { organization_id_or_slug: orgSlug },
     query: {
       dataset: "logs",
-      field: DETAILED_LOG_FIELDS,
+      field: fields,
       query,
       per_page: batchIds.length,
       statsPeriod: LOG_RETENTION_PERIOD,
@@ -199,13 +207,14 @@ async function getLogsBatch(
 export async function getLogs(
   orgSlug: string,
   projectSlug: string,
-  logIds: string[]
+  logIds: string[],
+  extraFields?: string[]
 ): Promise<DetailedSentryLog[]> {
   const config = await getOrgSdkConfig(orgSlug);
 
   // Single batch — no splitting needed
   if (logIds.length <= API_MAX_PER_PAGE) {
-    return getLogsBatch(orgSlug, projectSlug, logIds, config);
+    return getLogsBatch(orgSlug, projectSlug, logIds, config, extraFields);
   }
 
   // Split into batches of API_MAX_PER_PAGE and fetch in parallel
@@ -215,7 +224,9 @@ export async function getLogs(
   }
 
   const results = await Promise.all(
-    batches.map((batch) => getLogsBatch(orgSlug, projectSlug, batch, config))
+    batches.map((batch) =>
+      getLogsBatch(orgSlug, projectSlug, batch, config, extraFields)
+    )
   );
 
   return results.flat();

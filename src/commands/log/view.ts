@@ -399,6 +399,8 @@ type LogViewData = {
   logs: DetailedSentryLog[];
   /** Org slug — needed by human formatter for trace URLs, also useful context in JSON */
   orgSlug: string;
+  /** Custom fields requested via --fields, passed to the detail formatter */
+  extraFields?: string[];
 };
 
 /**
@@ -416,7 +418,7 @@ function formatLogViewHuman(data: LogViewData): string {
     if (parts.length > 0) {
       parts.push("\n---\n");
     }
-    parts.push(formatLogDetails(entry, data.orgSlug));
+    parts.push(formatLogDetails(entry, data.orgSlug, data.extraFields));
   }
   return parts.join("\n");
 }
@@ -496,7 +498,12 @@ export const viewCommand = buildCommand({
     }
 
     // Fetch all requested log entries
-    const logs = await getLogs(target.org, target.project, logIds);
+    const logs = await getLogs(
+      target.org,
+      target.project,
+      logIds,
+      flags.fields
+    );
 
     if (logs.length === 0) {
       throwNotFoundError(logIds, target.org, target.project);
@@ -508,7 +515,11 @@ export const viewCommand = buildCommand({
       ? `Detected from ${target.detectedFrom}`
       : undefined;
 
-    yield new CommandOutput({ logs, orgSlug: target.org });
+    yield new CommandOutput({
+      logs,
+      orgSlug: target.org,
+      extraFields: flags.fields,
+    });
     return { hint };
   },
 });
