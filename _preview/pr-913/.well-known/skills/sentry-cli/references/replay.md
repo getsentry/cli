@@ -152,12 +152,17 @@ Summarize Session Replay behavior
 | `replayId` | string | Replay ID |
 | `org` | string | Organization slug |
 | `project` | string \| null | Project slug |
+| `platform` | string \| null | Replay platform |
+| `sdkName` | string \| null | Replay SDK name |
+| `sdkVersion` | string \| null | Replay SDK version |
+| `replayType` | string \| null | Replay type |
 | `startedAt` | string \| null | Replay start time |
 | `durationSeconds` | number \| null | Replay duration in seconds |
 | `entryUrl` | string \| null | First replay URL |
 | `exitUrl` | string \| null | Last replay URL |
 | `focusPath` | string \| null | Optional route path used to focus the summary |
 | `counts` | object | Normalized event counts |
+| `recording` | object | Downloaded recording and parser stats |
 | `timings` | object | Key timing observations |
 | `routes` | array | Route timeline |
 | `signals` | array | Detected non-error and error friction signals |
