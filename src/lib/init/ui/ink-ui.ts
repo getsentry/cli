@@ -67,10 +67,10 @@ import { WizardStore } from "./wizard-store.js";
 // Brand palette mirrored from `ink-app.tsx` so the post-dispose
 // success/failure echo (rendered via chalk after Ink unmounts) feels
 // like a continuation of the live screen.
-const REPORT_MUTED = "#6E6C7E";
-const REPORT_SUCCESS = "#86EFAC";
-const REPORT_ERROR = "#F87171";
-const REPORT_WARN = "#FBBF24";
+const REPORT_MUTED = "#898294";
+const REPORT_SUCCESS = "#83da90";
+const REPORT_ERROR = "#fe4144";
+const REPORT_WARN = "#FDB81B";
 
 /** Tip rotation cadence in the sidebar — slow enough to read each tip. */
 const TIP_ROTATE_INTERVAL_MS = 8000;
