@@ -398,17 +398,11 @@ function StatusScreen({
 
   return (
     <Box flexDirection="row" flexGrow={1} flexShrink={1}>
-      <Box flexDirection="column" overflow="hidden" width="40%">
-        <TipPanel tipIndex={tipIndex} />
-        <Box height={1} />
-        <ProgressPanel steps={steps} />
-      </Box>
-      <VerticalSeparator />
       <Box
         flexDirection="column"
         flexGrow={1}
         overflow="hidden"
-        paddingLeft={1}
+        paddingRight={1}
       >
         <ActivityPane
           filesRead={filesRead}
@@ -419,6 +413,12 @@ function StatusScreen({
           summary={summary}
           terminalRows={terminalRows}
         />
+      </Box>
+      <VerticalSeparator />
+      <Box flexDirection="column" overflow="hidden" width="40%">
+        <TipPanel tipIndex={tipIndex} />
+        <Box height={1} />
+        <ProgressPanel steps={steps} />
       </Box>
     </Box>
   );
@@ -604,18 +604,6 @@ function ProgressPanel({ steps }: { steps: StepEntry[] }): React.ReactNode {
       {steps.map((entry) => (
         <ProgressRow entry={entry} key={entry.id} />
       ))}
-      {totalCount > 0 ? (
-        <Box gap={1} marginTop={1}>
-          <Text color={PRIMARY}>
-            <Spinner type="dots" />
-          </Text>
-          <Text dimColor>
-            {completedCount < totalCount
-              ? `Progress: ${completedCount}/${totalCount}`
-              : "Cleaning up..."}
-          </Text>
-        </Box>
-      ) : null}
     </Box>
   );
 }
@@ -781,15 +769,8 @@ function FilesPanel({
   const padding = Math.max(0, viewport - visible.length);
 
   return (
-    <Box
-      borderColor={MUTED_DIM}
-      borderStyle="round"
-      flexDirection="column"
-      flexShrink={0}
-      marginTop={1}
-      paddingX={1}
-    >
-      <Box justifyContent="space-between">
+    <Box flexDirection="column" flexShrink={0} marginTop={1}>
+      <Box justifyContent="space-between" paddingX={1}>
         <Text bold color={MUTED}>
           Files analyzed
         </Text>

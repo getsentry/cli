@@ -668,7 +668,22 @@ export class InkUI implements WizardUI {
   private buildPostDisposeReport(): string | undefined {
     if (this.failureMessage) {
       const icon = chalk.hex(REPORT_ERROR)("✖");
-      return `\n${icon}  ${chalk.hex(REPORT_ERROR).bold(this.failureMessage)}`;
+      const lines: string[] = [
+        `\n${icon}  ${chalk.hex(REPORT_ERROR).bold(this.failureMessage)}`,
+      ];
+      // Include recent error log entries so the real cause is visible
+      // after the alternate screen buffer exits — without this, the
+      // user only sees the generic "Setup failed" message.
+      const errorLogs = this.store
+        .getSnapshot()
+        .logs.filter(
+          (entry) =>
+            entry.severity === "error" && entry.text !== this.failureMessage
+        );
+      for (const entry of errorLogs.slice(-5)) {
+        lines.push(`   ${chalk.hex(REPORT_ERROR)(entry.text)}`);
+      }
+      return lines.join("\n");
     }
     if (!this.outroMessage) {
       return;
