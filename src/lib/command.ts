@@ -556,6 +556,7 @@ export function buildCommand<
     renderCommandOutput(stdout, value.data, outputConfig, renderer, {
       json: Boolean(flags.json),
       fields: flags.fields as string[] | undefined,
+      jsonCompact: Boolean(flags.jsonl),
       clearPrefix: pendingClear ? "\x1b[H\x1b[J" : undefined,
     });
     pendingClear = false;

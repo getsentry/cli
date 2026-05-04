@@ -212,6 +212,8 @@ type RenderContext = {
   json: boolean;
   /** Pre-parsed `--fields` value */
   fields?: string[];
+  /** Emit compact JSON instead of pretty JSON, useful for JSONL streams. */
+  jsonCompact?: boolean;
   /** ANSI prefix to prepend to the output (e.g., clear-screen escape) */
   clearPrefix?: string;
 };
@@ -257,12 +259,17 @@ function applyJsonExclude(
  * is handed off directly without serialization. Otherwise it is
  * JSON-stringified and written as a single line.
  */
-function emitJsonObject(stdout: Writer, obj: unknown): void {
+function emitJsonObject(
+  stdout: Writer,
+  obj: unknown,
+  options: { compact?: boolean } = {}
+): void {
   if (stdout.captureObject) {
     stdout.captureObject(obj);
     return;
   }
-  stdout.write(`${formatJson(obj)}\n`);
+  const json = options.compact ? JSON.stringify(obj) : formatJson(obj);
+  stdout.write(`${json}\n`);
 }
 
 /**
@@ -297,7 +304,7 @@ export function renderCommandOutput(
       if (transformed === undefined) {
         return;
       }
-      emitJsonObject(stdout, transformed);
+      emitJsonObject(stdout, transformed, { compact: ctx.jsonCompact });
       return;
     }
 
@@ -306,7 +313,7 @@ export function renderCommandOutput(
       ctx.fields && ctx.fields.length > 0
         ? filterFields(excluded, ctx.fields)
         : excluded;
-    emitJsonObject(stdout, final);
+    emitJsonObject(stdout, final, { compact: ctx.jsonCompact });
     return;
   }
 

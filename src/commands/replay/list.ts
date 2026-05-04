@@ -42,6 +42,7 @@ import { withProgress } from "../../lib/polling.js";
 import {
   getReplayUserLabel,
   parseReplayEnvironmentFilter,
+  replayMatchesPath,
 } from "../../lib/replay-search.js";
 import { resolveOrgOptionalProjectFromArg } from "../../lib/resolve-target.js";
 import { sanitizeQuery } from "../../lib/search-query.js";
@@ -60,6 +61,11 @@ import {
 type ListFlags = {
   readonly environment?: readonly string[];
   readonly limit: number;
+  readonly "problem-only": boolean;
+  readonly friction: boolean;
+  readonly "entry-path"?: string;
+  readonly "exit-path"?: string;
+  readonly path?: string;
   readonly query?: string;
   readonly sort: ReplaySortValue;
   readonly period: TimeRange;
@@ -67,6 +73,7 @@ type ListFlags = {
   readonly cursor?: string;
   readonly fresh: boolean;
   readonly fields?: string[];
+  readonly url?: string;
 };
 
 type ReplayListResult = {
@@ -78,20 +85,46 @@ type ReplayListResult = {
   project?: string;
 };
 
-type ReplaySortKey = "date" | "oldest" | "duration" | "errors" | "activity";
+type ReplaySortKey =
+  | "activity"
+  | "date"
+  | "dead"
+  | "duration"
+  | "errors"
+  | "oldest"
+  | "rage"
+  | "warnings";
+
+type ReplayListHintFlags = Pick<
+  ListFlags,
+  | "entry-path"
+  | "environment"
+  | "exit-path"
+  | "friction"
+  | "path"
+  | "problem-only"
+  | "query"
+  | "sort"
+  | "period"
+  | "url"
+>;
 
 const SORT_MAP: Record<ReplaySortKey, ReplaySortValue> = {
+  activity: "-activity",
   date: "-started_at",
-  oldest: "started_at",
+  dead: "-count_dead_clicks",
   duration: "-duration",
   errors: "-count_errors",
-  activity: "-activity",
+  oldest: "started_at",
+  rage: "-count_rage_clicks",
+  warnings: "-count_warnings",
 };
 
 const DEFAULT_PERIOD = LIST_PERIOD_FLAG.default;
 const DEFAULT_SORT: ReplaySortValue = SORT_MAP.date;
 const PAGINATION_KEY = "replay-list";
 const COMMAND_NAME = "replay list";
+const SIMPLE_SEARCH_VALUE_RE = /^[^\s:"]+$/;
 
 function parseLimit(value: string): number {
   return validateLimit(value, LIST_MIN_LIMIT, LIST_MAX_LIMIT);
@@ -123,6 +156,73 @@ function formatCount(value: number | null | undefined): string {
 
 function replayUserLabel(replay: ReplayListItem): string {
   return getReplayUserLabel(replay) ?? "—";
+}
+
+function quoteSearchValue(value: string): string {
+  return SIMPLE_SEARCH_VALUE_RE.test(value) ? value : JSON.stringify(value);
+}
+
+function wildcardSearchValue(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.includes("*")) {
+    return trimmed;
+  }
+  return `*${trimmed}*`;
+}
+
+function buildReplaySearchQuery(filters: {
+  query?: string;
+  url?: string;
+  path?: string;
+  entryPath?: string;
+  exitPath?: string;
+}): string | undefined {
+  const { entryPath, exitPath, path, query, url } = filters;
+  const parts = [
+    query,
+    url ? `url:${quoteSearchValue(wildcardSearchValue(url))}` : undefined,
+    path ? `url:${quoteSearchValue(wildcardSearchValue(path))}` : undefined,
+    entryPath
+      ? `url:${quoteSearchValue(wildcardSearchValue(entryPath))}`
+      : undefined,
+    exitPath
+      ? `url:${quoteSearchValue(wildcardSearchValue(exitPath))}`
+      : undefined,
+  ].filter((part): part is string => Boolean(part));
+  return parts.length > 0 ? parts.join(" ") : undefined;
+}
+
+function hasProblemSignals(replay: ReplayListItem): boolean {
+  return (
+    (replay.count_errors ?? 0) > 0 ||
+    (replay.count_warnings ?? 0) > 0 ||
+    (replay.count_rage_clicks ?? 0) > 0 ||
+    (replay.count_dead_clicks ?? 0) > 0 ||
+    replay.error_ids.length > 0 ||
+    replay.warning_ids.length > 0
+  );
+}
+
+function replayMatchesRouteFilters(
+  replay: ReplayListItem,
+  flags: ListFlags
+): boolean {
+  if (flags.path && !replayMatchesPath(replay, flags.path)) {
+    return false;
+  }
+  if (
+    flags["entry-path"] &&
+    !replayMatchesPath(replay, flags["entry-path"], "entry")
+  ) {
+    return false;
+  }
+  if (
+    flags["exit-path"] &&
+    !replayMatchesPath(replay, flags["exit-path"], "exit")
+  ) {
+    return false;
+  }
+  return true;
 }
 
 const REPLAY_COLUMNS: Column<ReplayListItem>[] = [
@@ -174,13 +274,28 @@ function formatScope(org: string, project?: string): string {
   return project ? `${org}/${project}` : `${org}/`;
 }
 
-function appendReplayFlags(
-  base: string,
-  flags: Pick<ListFlags, "environment" | "query" | "sort" | "period">
-): string {
+function appendReplayFlags(base: string, flags: ReplayListHintFlags): string {
   const parts: string[] = [];
   appendQueryHint(parts, flags.query);
   appendSortHint(parts, flags.sort, DEFAULT_SORT);
+  if (flags.url) {
+    parts.push(`--url "${flags.url}"`);
+  }
+  if (flags.path) {
+    parts.push(`--path "${flags.path}"`);
+  }
+  if (flags["entry-path"]) {
+    parts.push(`--entry-path "${flags["entry-path"]}"`);
+  }
+  if (flags["exit-path"]) {
+    parts.push(`--exit-path "${flags["exit-path"]}"`);
+  }
+  if (flags.friction) {
+    parts.push("--friction");
+  }
+  if (flags["problem-only"]) {
+    parts.push("--problem-only");
+  }
   if (flags.environment && flags.environment.length > 0) {
     for (const environment of flags.environment) {
       parts.push(`-e "${environment}"`);
@@ -193,7 +308,7 @@ function appendReplayFlags(
 function nextPageHint(
   org: string,
   project: string | undefined,
-  flags: Pick<ListFlags, "environment" | "query" | "sort" | "period">
+  flags: ReplayListHintFlags
 ): string {
   return appendReplayFlags(
     `sentry replay list ${formatScope(org, project)} -c next`,
@@ -204,7 +319,7 @@ function nextPageHint(
 function prevPageHint(
   org: string,
   project: string | undefined,
-  flags: Pick<ListFlags, "environment" | "query" | "sort" | "period">
+  flags: ReplayListHintFlags
 ): string {
   return appendReplayFlags(
     `sentry replay list ${formatScope(org, project)} -c prev`,
@@ -262,6 +377,7 @@ export const listCommand = buildListCommand("replay", {
       "  sentry replay list sentry/\n" +
       "  sentry replay list sentry/cli --limit 50\n" +
       "  sentry replay list sentry/cli --sort duration\n" +
+      "  sentry replay list sentry/cli --path /signup --friction\n" +
       '  sentry replay list sentry/cli -q "user.email:foo@example.com"\n' +
       "  sentry replay list sentry/cli -e production -e canary\n" +
       "  sentry replay list sentry/cli --period 24h\n\n" +
@@ -297,6 +413,42 @@ export const listCommand = buildListCommand("replay", {
         brief: "Search query (Sentry replay search syntax)",
         optional: true,
       },
+      url: {
+        kind: "parsed",
+        parse: String,
+        brief: "Filter by visited URL text using replay search",
+        optional: true,
+      },
+      path: {
+        kind: "parsed",
+        parse: String,
+        brief: "Filter by actual visited URL pathname",
+        optional: true,
+      },
+      "entry-path": {
+        kind: "parsed",
+        parse: String,
+        brief: "Filter by first visited URL pathname",
+        optional: true,
+      },
+      "exit-path": {
+        kind: "parsed",
+        parse: String,
+        brief: "Filter by last visited URL pathname",
+        optional: true,
+      },
+      friction: {
+        kind: "boolean",
+        brief:
+          "Only show replays with indexed friction signals (errors, warnings, rage clicks, or dead clicks)",
+        default: false,
+      },
+      "problem-only": {
+        kind: "boolean",
+        brief:
+          "Only show replays with errors, warnings, rage clicks, or dead clicks",
+        default: false,
+      },
       environment: {
         kind: "parsed",
         parse: String,
@@ -308,7 +460,7 @@ export const listCommand = buildListCommand("replay", {
         kind: "parsed",
         parse: parseSort,
         brief:
-          "Sort by: date, oldest, duration, errors, activity, or a raw replay sort field",
+          "Sort by: date, oldest, duration, errors, warnings, rage, dead, activity, or a raw replay sort field",
         default: "date",
       },
       period: LIST_PERIOD_FLAG,
@@ -319,13 +471,20 @@ export const listCommand = buildListCommand("replay", {
       n: "limit",
       q: "query",
       s: "sort",
+      u: "url",
     },
   },
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
     const { cwd } = this;
     const timeRange = flags.period;
     const environment = parseReplayEnvironmentFilter(flags.environment);
-    const { query } = flags;
+    const query = buildReplaySearchQuery({
+      query: flags.query,
+      url: flags.url,
+      path: flags.path,
+      entryPath: flags["entry-path"],
+      exitPath: flags["exit-path"],
+    });
 
     const resolved = await resolveOrgOptionalProjectFromArg(
       target,
@@ -338,6 +497,11 @@ export const listCommand = buildListCommand("replay", {
       formatScope(resolved.org, resolved.project),
       {
         env: environment?.join(","),
+        entryPath: flags["entry-path"],
+        exitPath: flags["exit-path"],
+        friction: flags.friction ? "1" : undefined,
+        path: flags.path,
+        problem: flags["problem-only"] ? "1" : undefined,
         sort: flags.sort,
         q: query,
         period: serializeTimeRange(timeRange),
@@ -349,7 +513,7 @@ export const listCommand = buildListCommand("replay", {
       contextKey
     );
 
-    const { data: replays, nextCursor } = await withProgress(
+    const { data: fetchedReplays, nextCursor } = await withProgress(
       {
         message: `Fetching replays (up to ${flags.limit})...`,
         json: flags.json,
@@ -366,6 +530,14 @@ export const listCommand = buildListCommand("replay", {
           ...timeRangeToApiParams(timeRange),
         })
     );
+    const replays = fetchedReplays.filter((replay) => {
+      if (!replayMatchesRouteFilters(replay, flags)) {
+        return false;
+      }
+      return flags["problem-only"] || flags.friction
+        ? hasProblemSignals(replay)
+        : true;
+    });
 
     advancePaginationState(PAGINATION_KEY, contextKey, direction, nextCursor);
     const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);

@@ -166,6 +166,106 @@ describe("listCommand.func", () => {
     });
   });
 
+  test("combines URL sugar with query and filters problem-only rows", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    listReplaysSpy.mockResolvedValue({
+      data: [
+        sampleReplays[0]!,
+        {
+          ...sampleReplays[0]!,
+          id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          count_errors: 0,
+          count_dead_clicks: 0,
+          count_rage_clicks: 0,
+          count_warnings: 0,
+          error_ids: [],
+          warning_ids: [],
+        },
+      ],
+      nextCursor: undefined,
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      {
+        "problem-only": true,
+        limit: 25,
+        json: true,
+        period: parsePeriod("7d"),
+        query: "environment:production",
+        sort: "-started_at",
+        url: "/signup",
+      },
+      "test-org/cli"
+    );
+
+    expect(listReplaysSpy).toHaveBeenCalledWith("test-org", {
+      environment: undefined,
+      fields: [...REPLAY_LIST_FIELDS],
+      limit: 25,
+      projectSlugs: ["cli"],
+      query: "environment:production url:*/signup*",
+      sort: "-started_at",
+      cursor: undefined,
+      statsPeriod: "7d",
+    });
+
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed.data).toHaveLength(1);
+    expect(parsed.data[0].id).toBe(sampleReplays[0]?.id);
+  });
+
+  test("filters --path by actual replay URL pathname", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    listReplaysSpy.mockResolvedValue({
+      data: [
+        {
+          ...sampleReplays[0]!,
+          urls: ["https://example.com/signup/direct"],
+        },
+        {
+          ...sampleReplays[0]!,
+          id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          urls: ["https://example.com/replays/?query=/signup"],
+        },
+      ],
+      nextCursor: undefined,
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      {
+        limit: 25,
+        json: true,
+        path: "/signup",
+        period: parsePeriod("7d"),
+        sort: "-started_at",
+      },
+      "test-org/cli"
+    );
+
+    expect(listReplaysSpy).toHaveBeenCalledWith("test-org", {
+      environment: undefined,
+      fields: [...REPLAY_LIST_FIELDS],
+      limit: 25,
+      projectSlugs: ["cli"],
+      query: "url:*/signup*",
+      sort: "-started_at",
+      cursor: undefined,
+      statsPeriod: "7d",
+    });
+
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed.data).toHaveLength(1);
+    expect(parsed.data[0].urls[0]).toBe("https://example.com/signup/direct");
+  });
+
   test("renders human output with a replay hint", async () => {
     resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
     listReplaysSpy.mockResolvedValue({ data: sampleReplays });

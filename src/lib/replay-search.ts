@@ -11,9 +11,13 @@ import type {
   SentryEvent,
 } from "../types/index.js";
 import { tryNormalizeHexId } from "./hex-id.js";
+import { logger } from "./logger.js";
 
 type ReplayLike = ReplayListItem | ReplayDetails;
 type ReplayFieldResolver = (replay: ReplayLike) => unknown;
+
+const REPLAY_URL_PARSE_BASE = "https://replay.local";
+const log = logger.withTag("replay-search");
 
 /** Maps user-facing field aliases to canonical replay API field names. */
 const REPLAY_FIELD_ALIASES = {
@@ -76,6 +80,80 @@ export function getReplayUserLabel(replay: ReplayLike): string | undefined {
     user.ip ??
     undefined
   );
+}
+
+export type ReplayUrlParts = {
+  path: string;
+  query: string;
+};
+
+/** Parse a replay URL or relative URL into stable path/query parts. */
+export function getReplayUrlParts(
+  value: string | null | undefined
+): ReplayUrlParts | undefined {
+  if (!value) {
+    return;
+  }
+
+  try {
+    const parsed = new URL(value, REPLAY_URL_PARSE_BASE);
+    return { path: parsed.pathname, query: parsed.search };
+  } catch (error) {
+    log.debug("Failed to parse replay URL", { value, error });
+    return;
+  }
+}
+
+function normalizePathFilter(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed) {
+    return "/";
+  }
+
+  const withSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  return withSlash.length > 1 && withSlash.endsWith("/")
+    ? withSlash.slice(0, -1)
+    : withSlash;
+}
+
+/** Match a route path exactly or by child path, avoiding raw query matches. */
+export function replayUrlPathMatches(
+  url: string | null | undefined,
+  path: string
+): boolean {
+  const parts = getReplayUrlParts(url);
+  if (!parts) {
+    return false;
+  }
+
+  const normalizedFilter = normalizePathFilter(path);
+  const normalizedPath = normalizePathFilter(parts.path);
+  return (
+    normalizedPath === normalizedFilter ||
+    normalizedPath.startsWith(`${normalizedFilter}/`)
+  );
+}
+
+export type ReplayPathMatchMode = "any" | "entry" | "exit";
+
+/** Match replay URL arrays by route path in any, first, or last position. */
+export function replayMatchesPath(
+  replay: Pick<ReplayLike, "urls">,
+  path: string,
+  mode: ReplayPathMatchMode = "any"
+): boolean {
+  const urls = replay.urls ?? [];
+  if (urls.length === 0) {
+    return false;
+  }
+
+  if (mode === "entry") {
+    return replayUrlPathMatches(urls[0], path);
+  }
+  if (mode === "exit") {
+    return replayUrlPathMatches(urls.at(-1), path);
+  }
+  return urls.some((url) => replayUrlPathMatches(url, path));
 }
 
 const REPLAY_FIELD_RESOLVERS: Record<string, ReplayFieldResolver> = {
