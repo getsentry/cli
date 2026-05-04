@@ -45,7 +45,7 @@ Co-Authored-By: OpenAI Codex <codex@openai.com>
 ## Read First
 | Work | Read |
 |------|------|
-| Any code change | `policies/README.md`, `policies/code-comments.md` |
+| Any code change | `policies/code-comments.md` |
 | Runtime APIs or packages | `policies/runtime-and-deps.md` |
 | Commands or routes | `policies/cli-command-design.md` |
 | Human/JSON output or errors | `policies/output-and-errors.md` |
@@ -54,26 +54,6 @@ Co-Authored-By: OpenAI Codex <codex@openai.com>
 | Generated docs or skills | `policies/generated-artifacts.md` |
 | Local CLI smoke testing | `playbooks/local-cli-testing.md` |
 | SDK patching or dependency runtime changes | `policies/runtime-and-deps.md`, `package.json` `patchedDependencies` |
-
-## Policy Index
-| File | Purpose |
-|------|---------|
-| `policies/README.md` | How to write and size repo policies |
-| `policies/TEMPLATE.md` | Template for new concise policy docs |
-| `policies/code-comments.md` | Comment, docstring, and JSDoc defaults |
-| `policies/runtime-and-deps.md` | Bun APIs, dependency rules, Node distribution exceptions |
-| `policies/cli-command-design.md` | Stricli wrappers, command shape, mutation helpers |
-| `policies/output-and-errors.md` | Markdown output, JSON output, error classes, logging |
-| `policies/pagination.md` | Cursor-stack pagination and list command expectations |
-| `policies/testing.md` | Bun tests, property/model-based tests, config isolation |
-| `policies/generated-artifacts.md` | Generated command docs, skills, fragments, schemas |
-
-## Playbook And Spec Index
-| File | Purpose |
-|------|---------|
-| `playbooks/README.md` | When to create repeatable workflow docs |
-| `playbooks/local-cli-testing.md` | Local CLI smoke testing commands and checks |
-| `specs/README.md` | When to create design notes and migration plans |
 
 ## Critical Rules
 - Import `buildCommand` from `src/lib/command.ts`, never from `@stricli/core`.
