@@ -4,20 +4,25 @@
  * Renders the wizard in alternate-screen mode using Ink. The layout
  * fills the terminal:
  *
- *   ┌─ TitleBar (accent background) ────────────────────────────────┐
- *   │                                                                │
- *   │  ┌─────────────────────────────────────────────────────────┐   │
- *   │  │  Active tab content (Status / Logs)                     │   │
- *   │  │                                                         │   │
- *   │  │  [SplitView when wide]                                  │   │
- *   │  │  Left: Tips / Progress      Right: Logs + Files         │   │
- *   │  │                                                         │   │
- *   │  └─────────────────────────────────────────────────────────┘   │
- *   │                                                                │
- *   │  ─── Status bar (collapsible) ──────────────────────────────   │
- *   │  [Status]  [Logs]                                              │
- *   │  ─ KeyboardHintsBar ─────────────────────────────────────────  │
- *   └───────────────────────────────────────────────────────────────┘
+ *   ┌─ ◆ Sentry Init Wizard v0.x ─────────────── sentry.io ─┐
+ *   │                                                         │
+ *   │  ╭ Did you know? ────╮  │  ● Discovering project...    │
+ *   │  │ <tip>             │  │  ● Checking dependencies     │
+ *   │  ╰───────────────────╯  │                               │
+ *   │                         │  ╭ Files analyzed  3/8 ──────╮│
+ *   │  ╭ Tasks ────── 2/9 ─╮  │  │  ◐ src/index.ts          ││
+ *   │  │ ◼ Discover ctx    │  │  │  ✓ package.json           ││
+ *   │  │ ▶ Install deps    │  │  ╰───────────────────────────╯│
+ *   │  │ ◻ Apply codemods  │  │                               │
+ *   │  ╰───────────────────╯  │  ⠋ Running setup...          │
+ *   │                         │                               │
+ *   │  ──────────────────────────────────────────────────────  │
+ *   │  ◆ Reading package.json                                 │
+ *   │  ┊ Analyzing project...                                 │
+ *   │                                                         │
+ *   │  ● Status   Logs                                        │
+ *   │  ←→ switch tab  s toggle status                         │
+ *   └─────────────────────────────────────────────────────────┘
  *
  * The component subscribes to a `WizardStore` via
  * `useSyncExternalStore` so imperative `WizardUI` method calls
@@ -57,6 +62,7 @@ import type {
 const ACCENT = "#DC9300";
 const ACCENT_DIM = "#3D2800";
 const MUTED = "gray";
+const MUTED_DIM = "#555555";
 const PRIMARY = "cyan";
 
 const COLOR_INFO = "cyan";
@@ -83,10 +89,14 @@ const ICON_BY_SEVERITY: Record<LogSeverity, { glyph: string; color: string }> =
 
 const ICONS = {
   diamond: "\u25C6",
+  diamondOpen: "\u25C7",
   separator: "\u250A",
+  verticalLine: "\u2502",
   squareFilled: "\u25FC",
   squareOpen: "\u25FB",
   triangleRight: "\u25B6",
+  triangleSmallRight: "\u25B8",
+  bullet: "\u2022",
 } as const;
 
 // ────────────────────────────── App entry ─────────────────────────────
@@ -160,7 +170,6 @@ export function App({ store }: AppProps): React.ReactNode {
   const inner = (
     <Box flexDirection="column" height={rows} width={width}>
       <TitleBar width={width} />
-      <Box height={1} />
       <Box flexDirection="column" flexGrow={1} paddingX={1}>
         <Box flexDirection="column" height={contentHeight}>
           <Box
@@ -191,9 +200,7 @@ export function App({ store }: AppProps): React.ReactNode {
             <StatusBar messages={visibleMessages} />
           ) : null}
 
-          <Box height={1} />
           <TabBar activeTab={activeTab} tabs={tabs} />
-          <Box height={1} />
           <KeyboardHintsBar hints={hints} />
         </Box>
       </Box>
@@ -249,9 +256,9 @@ function useTerminalSize(): { columns: number; rows: number } {
 // ──────────────────────────── Title Bar ──────────────────────────────
 
 function TitleBar({ width }: { width: number }): React.ReactNode {
-  const title = " Sentry Init Wizard";
-  const versionTag = " sentry.io ";
-  const gap = Math.max(0, width - title.length - versionTag.length);
+  const title = ` ${ICONS.diamond} Sentry Init Wizard`;
+  const right = " sentry.io ";
+  const gap = Math.max(0, width - title.length - right.length);
   const padding = " ".repeat(gap);
 
   return (
@@ -259,7 +266,7 @@ function TitleBar({ width }: { width: number }): React.ReactNode {
       <Text backgroundColor={ACCENT} bold color={ACCENT_DIM}>
         {title}
         {padding}
-        {versionTag}
+        {right}
       </Text>
     </Box>
   );
@@ -271,7 +278,7 @@ function StatusBar({ messages }: { messages: string[] }): React.ReactNode {
   return (
     <Box
       borderBottom={false}
-      borderColor={MUTED}
+      borderColor={MUTED_DIM}
       borderLeft={false}
       borderRight={false}
       borderStyle="single"
@@ -282,9 +289,11 @@ function StatusBar({ messages }: { messages: string[] }): React.ReactNode {
     >
       {messages.map((msg, i, arr) => {
         const isCurrent = i === arr.length - 1;
+        // biome-ignore lint/nursery/noLeakedRender: variable assignment, not JSX expression
+        const msgColor = isCurrent ? MUTED : MUTED_DIM;
         return (
           // biome-ignore lint/suspicious/noArrayIndexKey: positional status messages
-          <Text color={MUTED} dimColor={!isCurrent} key={i}>
+          <Text color={msgColor} key={i}>
             {isCurrent ? ICONS.diamond : ICONS.separator} {msg}
           </Text>
         );
@@ -303,20 +312,17 @@ function TabBar({
   activeTab: number;
 }): React.ReactNode {
   return (
-    <Box gap={1} paddingX={1}>
+    <Box gap={1} height={1} paddingX={1}>
       {tabs.map((tab, i) => {
         const isActive = i === activeTab;
         // biome-ignore lint/nursery/noLeakedRender: variable assignment, not JSX expression
-        const tabColor = isActive ? ACCENT : MUTED;
+        const tabColor = isActive ? ACCENT : MUTED_DIM;
         return (
-          <Text
-            bold={isActive}
-            color={tabColor}
-            inverse={isActive}
-            key={tab.id}
-          >
-            {` ${tab.label} `}
-          </Text>
+          <Box key={tab.id}>
+            <Text bold={isActive} color={tabColor}>
+              {isActive ? ICONS.bullet : " "} {tab.label}
+            </Text>
+          </Box>
         );
       })}
     </Box>
@@ -335,10 +341,10 @@ function KeyboardHintsBar({ hints }: { hints: KeyHint[] }): React.ReactNode {
           key={`${hint.label}-${hint.action}`}
           marginRight={i < hints.length - 1 ? 2 : 0}
         >
-          <Text bold color={MUTED}>
+          <Text bold color={MUTED_DIM}>
             {hint.label}
           </Text>
-          <Text dimColor> {hint.action}</Text>
+          <Text color={MUTED_DIM}> {hint.action}</Text>
         </Box>
       ))}
     </Box>
@@ -347,11 +353,6 @@ function KeyboardHintsBar({ hints }: { hints: KeyHint[] }): React.ReactNode {
 
 // ─────────────────────────── Status Screen ────────────────────────────
 
-/**
- * The main "Status" tab: SplitView with progress/tips on the left
- * and logs + files on the right. On narrow terminals, collapses to
- * a single column.
- */
 function StatusScreen({
   steps,
   tipIndex,
@@ -396,15 +397,19 @@ function StatusScreen({
   }
 
   return (
-    <SplitView
-      left={
-        <Box flexDirection="column">
-          <TipPanel tipIndex={tipIndex} />
-          <Box height={1} />
-          <ProgressPanel steps={steps} />
-        </Box>
-      }
-      right={
+    <Box flexDirection="row" flexGrow={1} flexShrink={1}>
+      <Box flexDirection="column" overflow="hidden" width="40%">
+        <TipPanel tipIndex={tipIndex} />
+        <Box height={1} />
+        <ProgressPanel steps={steps} />
+      </Box>
+      <VerticalSeparator />
+      <Box
+        flexDirection="column"
+        flexGrow={1}
+        overflow="hidden"
+        paddingLeft={1}
+      >
         <ActivityPane
           filesRead={filesRead}
           hasActivePrompt={hasActivePrompt}
@@ -414,40 +419,23 @@ function StatusScreen({
           summary={summary}
           terminalRows={terminalRows}
         />
-      }
-    />
+      </Box>
+    </Box>
   );
 }
 
-// ──────────────────────────── Split View ──────────────────────────────
+// ────────────────────── Vertical Separator ───────────────────────────
 
-function SplitView({
-  left,
-  right,
-  gap = 2,
-}: {
-  left: React.ReactNode;
-  right: React.ReactNode;
-  gap?: number;
-}): React.ReactNode {
+function VerticalSeparator(): React.ReactNode {
   return (
-    <Box flexDirection="row" flexGrow={1} flexShrink={1} gap={gap}>
-      <Box flexDirection="column" overflow="hidden" width="50%">
-        {left}
-      </Box>
-      <Box flexDirection="column" overflow="hidden" width="50%">
-        {right}
-      </Box>
+    <Box flexDirection="column" flexShrink={0} width={1}>
+      <Text color={MUTED_DIM}>{ICONS.verticalLine}</Text>
     </Box>
   );
 }
 
 // ─────────────────────────── Activity Pane ────────────────────────────
 
-/**
- * Right-hand side of the status tab: log lines, spinner, file status,
- * summary, and prompts. Essentially what used to be the MainColumn.
- */
 function ActivityPane({
   logs,
   spinner,
@@ -466,13 +454,28 @@ function ActivityPane({
   hasActivePrompt: boolean;
 }): React.ReactNode {
   const showFileStatus = !summary && filesRead.length > 0;
+  const hasContent =
+    logs.length > 0 || spinner.active || prompt !== null || summary !== null;
+
   return (
     <Box flexDirection="column" flexGrow={1}>
-      <Box flexDirection="column">
-        {logs.map((log) => (
-          <LogLine entry={log} key={log.id} />
-        ))}
-      </Box>
+      {hasContent || showFileStatus ? null : (
+        <Box flexDirection="column" paddingTop={1}>
+          <Box gap={1}>
+            <Text color={PRIMARY}>
+              <Spinner type="dots" />
+            </Text>
+            <Text dimColor>Initializing wizard...</Text>
+          </Box>
+        </Box>
+      )}
+      {logs.length > 0 ? (
+        <Box flexDirection="column">
+          {logs.map((log) => (
+            <LogLine entry={log} key={log.id} />
+          ))}
+        </Box>
+      ) : null}
       {showFileStatus ? (
         <FilesPanel
           filesRead={filesRead}
@@ -492,7 +495,7 @@ function ActivityPane({
 function LogScreen({ logs }: { logs: LogEntry[] }): React.ReactNode {
   if (logs.length === 0) {
     return (
-      <Box flexDirection="column" flexGrow={1} paddingX={1}>
+      <Box flexDirection="column" flexGrow={1} paddingTop={1} paddingX={1}>
         <Text dimColor>No log entries yet...</Text>
       </Box>
     );
@@ -512,10 +515,10 @@ function LogLine({ entry }: { entry: LogEntry }): React.ReactNode {
   const { glyph, color } = ICON_BY_SEVERITY[entry.severity];
   return (
     <Box flexDirection="row" flexShrink={0}>
-      <Box width={3}>
+      <Box flexShrink={0} width={3}>
         <Text color={color}>{glyph}</Text>
       </Box>
-      <Text>{entry.text}</Text>
+      <Text wrap="truncate">{entry.text}</Text>
     </Box>
   );
 }
@@ -523,7 +526,7 @@ function LogLine({ entry }: { entry: LogEntry }): React.ReactNode {
 function SpinnerRow({ state }: { state: SpinnerState }): React.ReactNode {
   return (
     <Box flexDirection="row" flexShrink={0} marginTop={1}>
-      <Box width={3}>
+      <Box flexShrink={0} width={3}>
         <Text color={PRIMARY}>
           <Spinner type="dots" />
         </Text>
@@ -541,22 +544,24 @@ function TipPanel({ tipIndex }: { tipIndex: number }): React.ReactNode {
   const oneIndexed = (tipIndex % total) + 1;
   return (
     <Box
-      borderColor={MUTED}
+      borderColor={MUTED_DIM}
       borderStyle="round"
       flexDirection="column"
       flexShrink={0}
       paddingX={1}
     >
       <Text bold color={MUTED}>
-        Did you know?
+        {ICONS.diamondOpen} Did you know?
       </Text>
+      <Box height={1} />
       <Text bold color={ACCENT}>
         {tip.title}
       </Text>
-      <Text>{tip.body}</Text>
+      <Text wrap="wrap">{tip.body}</Text>
+      <Box height={1} />
       <Box justifyContent="flex-end">
-        <Text color={MUTED}>
-          Tip {oneIndexed} of {total}
+        <Text color={MUTED_DIM}>
+          {oneIndexed}/{total}
         </Text>
       </Box>
     </Box>
@@ -570,14 +575,29 @@ function ProgressPanel({ steps }: { steps: StepEntry[] }): React.ReactNode {
     (entry) => entry.status === "completed"
   ).length;
   const totalCount = steps.length;
+  const headerRight = totalCount > 0 ? `${completedCount}/${totalCount}` : "";
+  const badgeColor = completedCount === totalCount ? COLOR_SUCCESS : MUTED_DIM;
 
   return (
-    <Box flexDirection="column" flexShrink={0}>
-      <Text bold>Tasks</Text>
-      <Text> </Text>
+    <Box
+      borderColor={MUTED_DIM}
+      borderStyle="round"
+      flexDirection="column"
+      flexShrink={0}
+      paddingX={1}
+    >
+      <Box justifyContent="space-between">
+        <Text bold color={MUTED}>
+          {ICONS.diamondOpen} Tasks
+        </Text>
+        {headerRight ? <Text color={badgeColor}>{headerRight}</Text> : null}
+      </Box>
+      <Box height={1} />
       {steps.length === 0 ? (
         <Box gap={1}>
-          <Spinner type="dots" />
+          <Text color={PRIMARY}>
+            <Spinner type="dots" />
+          </Text>
           <Text dimColor>Analyzing project...</Text>
         </Box>
       ) : null}
@@ -586,10 +606,12 @@ function ProgressPanel({ steps }: { steps: StepEntry[] }): React.ReactNode {
       ))}
       {totalCount > 0 ? (
         <Box gap={1} marginTop={1}>
-          <Spinner type="dots" />
+          <Text color={PRIMARY}>
+            <Spinner type="dots" />
+          </Text>
           <Text dimColor>
             {completedCount < totalCount
-              ? `Progress: ${completedCount}/${totalCount} completed`
+              ? `Progress: ${completedCount}/${totalCount}`
               : "Cleaning up..."}
           </Text>
         </Box>
@@ -599,13 +621,15 @@ function ProgressPanel({ steps }: { steps: StepEntry[] }): React.ReactNode {
 }
 
 function ProgressRow({ entry }: { entry: StepEntry }): React.ReactNode {
-  const { glyph, glyphColor, labelColor } = progressStyle(entry);
+  const { glyph, glyphColor, labelColor, dimLabel } = progressStyle(entry);
   return (
     <Box flexDirection="row" flexShrink={0}>
-      <Box width={3}>
+      <Box flexShrink={0} width={3}>
         <Text color={glyphColor}>{glyph}</Text>
       </Box>
-      <Text color={labelColor}>{entry.label}</Text>
+      <Text color={labelColor} dimColor={dimLabel}>
+        {entry.label}
+      </Text>
     </Box>
   );
 }
@@ -614,12 +638,14 @@ function progressStyle(entry: StepEntry): {
   glyph: string;
   glyphColor: string;
   labelColor: string;
+  dimLabel: boolean;
 } {
   if (entry.status === "in_progress") {
     return {
       glyph: ICONS.triangleRight,
       glyphColor: PRIMARY,
       labelColor: "white",
+      dimLabel: false,
     };
   }
   if (entry.status === "completed") {
@@ -627,6 +653,7 @@ function progressStyle(entry: StepEntry): {
       glyph: ICONS.squareFilled,
       glyphColor: COLOR_SUCCESS,
       labelColor: MUTED,
+      dimLabel: false,
     };
   }
   if (entry.status === "failed") {
@@ -634,12 +661,23 @@ function progressStyle(entry: StepEntry): {
       glyph: "\u2716",
       glyphColor: COLOR_ERROR,
       labelColor: COLOR_ERROR,
+      dimLabel: false,
     };
   }
   if (entry.status === "skipped") {
-    return { glyph: "\u25CC", glyphColor: MUTED, labelColor: MUTED };
+    return {
+      glyph: "\u25CC",
+      glyphColor: MUTED_DIM,
+      labelColor: MUTED_DIM,
+      dimLabel: true,
+    };
   }
-  return { glyph: ICONS.squareOpen, glyphColor: MUTED, labelColor: MUTED };
+  return {
+    glyph: ICONS.squareOpen,
+    glyphColor: MUTED_DIM,
+    labelColor: MUTED,
+    dimLabel: true,
+  };
 }
 
 // ─────────────────────────── Files Panel ──────────────────────────────
@@ -744,7 +782,7 @@ function FilesPanel({
 
   return (
     <Box
-      borderColor={MUTED}
+      borderColor={MUTED_DIM}
       borderStyle="round"
       flexDirection="column"
       flexShrink={0}
@@ -755,7 +793,7 @@ function FilesPanel({
         <Text bold color={MUTED}>
           Files analyzed
         </Text>
-        <Text color={MUTED}>
+        <Text color={MUTED_DIM}>
           {pinnedToBottom ? "" : "\u2191 "}
           {analyzedCount}/{filesRead.length}
         </Text>
@@ -798,13 +836,13 @@ function Scrollbar({
   const thumbStart = Math.round(((maxOff - offset) / maxOff) * trackSpan);
   const cells = Array.from({ length: viewport }, (_v, i) => {
     const inThumb = i >= thumbStart && i < thumbStart + thumbSize;
-    return inThumb ? "\u2588" : "\u2502";
+    return inThumb ? "\u2588" : ICONS.verticalLine;
   });
   return (
     <Box flexDirection="column" flexShrink={0} marginLeft={1}>
       {cells.map((cell, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: positional scrollbar
-        <Text color={MUTED} key={i}>
+        <Text color={MUTED_DIM} key={i}>
           {cell}
         </Text>
       ))}
@@ -816,7 +854,7 @@ function ReadTreeLine({ row }: { row: FileTreeRow }): React.ReactNode {
   if (row.kind === "directory") {
     return (
       <Box flexDirection="row" flexShrink={0}>
-        <Text color={MUTED}>{`${row.prefix}${row.branch} `}</Text>
+        <Text color={MUTED_DIM}>{`${row.prefix}${row.branch} `}</Text>
         <Text>{row.label}</Text>
       </Box>
     );
@@ -824,7 +862,7 @@ function ReadTreeLine({ row }: { row: FileTreeRow }): React.ReactNode {
   const { glyph, glyphColor, labelColor } = readStatusStyle(row.status);
   return (
     <Box flexDirection="row" flexShrink={0}>
-      <Text color={MUTED}>{`${row.prefix}${row.branch} `}</Text>
+      <Text color={MUTED_DIM}>{`${row.prefix}${row.branch} `}</Text>
       <Text color={glyphColor}>{`${glyph} `}</Text>
       <Text color={labelColor}>{row.label}</Text>
     </Box>
@@ -852,7 +890,7 @@ function SummaryPanel({
   return (
     <Box
       borderBottom={false}
-      borderColor={MUTED}
+      borderColor={MUTED_DIM}
       borderLeft={false}
       borderRight={false}
       borderStyle="single"
@@ -865,10 +903,10 @@ function SummaryPanel({
         <Box flexDirection="column" flexShrink={0}>
           {summary.fields.map((field) => (
             <Box flexDirection="row" flexShrink={0} key={field.label}>
-              <Box width={12}>
+              <Box flexShrink={0} width={14}>
                 <Text color={MUTED}>{field.label}</Text>
               </Box>
-              <Text>{field.value}</Text>
+              <Text bold>{field.value}</Text>
             </Box>
           ))}
         </Box>
@@ -889,7 +927,9 @@ function ChangedFilesTree({
   const treeRows = flattenTree(tree);
   return (
     <Box flexDirection="column" flexShrink={0} marginTop={1}>
-      <Text color={MUTED}>Changed files</Text>
+      <Text bold color={MUTED}>
+        Changed files
+      </Text>
       {treeRows.map((row, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: positional tree rows
         <FileTreeLine key={i} row={row} />
@@ -902,7 +942,7 @@ function FileTreeLine({ row }: { row: FileTreeRow }): React.ReactNode {
   if (row.kind === "directory") {
     return (
       <Box flexDirection="row" flexShrink={0}>
-        <Text color={MUTED}>{`${row.prefix}${row.branch} `}</Text>
+        <Text color={MUTED_DIM}>{`${row.prefix}${row.branch} `}</Text>
         <Text>{row.label}</Text>
       </Box>
     );
@@ -910,7 +950,7 @@ function FileTreeLine({ row }: { row: FileTreeRow }): React.ReactNode {
   const { glyph, color } = changedFileStyle(row.action ?? "modify");
   return (
     <Box flexDirection="row" flexShrink={0}>
-      <Text color={MUTED}>{`${row.prefix}${row.branch} `}</Text>
+      <Text color={MUTED_DIM}>{`${row.prefix}${row.branch} `}</Text>
       <Text color={color}>{`${glyph} `}</Text>
       <Text>{row.label}</Text>
     </Box>
@@ -968,8 +1008,13 @@ function SelectPrompt({
   });
 
   return (
-    <Box flexDirection="column" flexShrink={0} gap={1} marginTop={1}>
-      <Text>{prompt.message}</Text>
+    <Box flexDirection="column" flexShrink={0} marginTop={1}>
+      <Box gap={1} marginBottom={1}>
+        <Text bold color={ACCENT}>
+          {ICONS.diamondOpen}
+        </Text>
+        <Text bold>{prompt.message}</Text>
+      </Box>
       <Box flexDirection="column">
         {prompt.options.map((option, idx) => {
           const isCursor = idx === highlighted;
@@ -977,12 +1022,16 @@ function SelectPrompt({
           const labelColor = isCursor ? "white" : MUTED;
           return (
             <Box flexDirection="row" key={option.value}>
-              <Box width={3}>
-                <Text color={ACCENT}>{isCursor ? "\u25B8" : " "}</Text>
+              <Box flexShrink={0} width={3}>
+                <Text color={ACCENT}>
+                  {isCursor ? ICONS.triangleSmallRight : " "}
+                </Text>
               </Box>
-              <Text color={labelColor}>{option.label}</Text>
+              <Text bold={isCursor} color={labelColor}>
+                {option.label}
+              </Text>
               {option.hint !== undefined && option.hint !== "" ? (
-                <Text color={MUTED}> {option.hint}</Text>
+                <Text color={MUTED_DIM}> {option.hint}</Text>
               ) : null}
             </Box>
           );
@@ -1052,14 +1101,20 @@ function MultiSelectPrompt({
   });
 
   return (
-    <Box flexDirection="column" flexShrink={0} gap={1} marginTop={1}>
-      <Text>{prompt.message}</Text>
-      <Box flexDirection="row" gap={2}>
-        <Text color={MUTED}>
-          space toggle \u00B7 enter confirm \u00B7 esc cancel
+    <Box flexDirection="column" flexShrink={0} marginTop={1}>
+      <Box gap={1} marginBottom={1}>
+        <Text bold color={ACCENT}>
+          {ICONS.diamondOpen}
+        </Text>
+        <Text bold>{prompt.message}</Text>
+      </Box>
+      <Box marginBottom={1} paddingLeft={3}>
+        <Text color={MUTED_DIM}>
+          space toggle {ICONS.bullet} enter confirm {ICONS.bullet} esc cancel
         </Text>
         <Text color={ACCENT}>
-          {selected.size}/{totalCount} selected
+          {"  "}
+          {selected.size}/{totalCount}
         </Text>
       </Box>
       <Box flexDirection="column">
@@ -1068,16 +1123,18 @@ function MultiSelectPrompt({
           const isCursor = idx === highlighted;
           const marker = isSelected ? ICONS.squareFilled : ICONS.squareOpen;
           // biome-ignore lint/nursery/noLeakedRender: variable assignment, not JSX expression
-          const markerColor = isSelected ? COLOR_SUCCESS : MUTED;
+          const markerColor = isSelected ? COLOR_SUCCESS : MUTED_DIM;
           return (
             <Box flexDirection="row" key={option.value}>
-              <Box width={3}>
-                <Text color={ACCENT}>{isCursor ? "\u25B8" : " "}</Text>
+              <Box flexShrink={0} width={3}>
+                <Text color={ACCENT}>
+                  {isCursor ? ICONS.triangleSmallRight : " "}
+                </Text>
               </Box>
-              <Text color={markerColor}>{marker}</Text>
-              <Text> {option.label}</Text>
+              <Text color={markerColor}>{marker} </Text>
+              <Text bold={isCursor}>{option.label}</Text>
               {option.hint !== undefined && option.hint !== "" ? (
-                <Text color={MUTED}> {option.hint}</Text>
+                <Text color={MUTED_DIM}> {option.hint}</Text>
               ) : null}
             </Box>
           );
