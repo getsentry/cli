@@ -188,8 +188,17 @@ export function unwrapPaginatedResult<T>(
 ): PaginatedResponse<T> {
   const response = (result as { response?: Response }).response;
   const data = unwrapResult(result, context);
-  const { nextCursor } = parseLinkHeader(response?.headers.get("link") ?? null);
-  return { data, nextCursor };
+  const { nextCursor, prevCursor } = parseLinkHeader(
+    response?.headers.get("link") ?? null
+  );
+  const out: PaginatedResponse<T> = { data };
+  if (nextCursor !== undefined) {
+    out.nextCursor = nextCursor;
+  }
+  if (prevCursor !== undefined) {
+    out.prevCursor = prevCursor;
+  }
+  return out;
 }
 
 /**
@@ -270,6 +279,8 @@ export type PaginatedResponse<T> = {
   data: T;
   /** Cursor for fetching the next page (undefined if no more pages) */
   nextCursor?: string;
+  /** Cursor for the previous page (undefined on the first page) */
+  prevCursor?: string;
 };
 
 /**
