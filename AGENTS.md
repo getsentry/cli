@@ -116,11 +116,12 @@ cli/
 │   │   ├── cli/            # defaults, feedback, fix, setup, upgrade
 │   │   ├── dashboard/      # list, view, create, widget (add, edit, delete)
 │   │   ├── event/          # list, view
-│   │   ├── issue/          # list, view, events, explain, plan, resolve, unresolve, merge
+│   │   ├── issue/          # list, view, events, explain, plan, resolve, unresolve, archive, merge
 │   │   ├── log/            # list, view
 │   │   ├── org/            # list, view
 │   │   ├── project/        # list, view, create, delete
 │   │   ├── release/        # list, view, create, finalize, delete, deploy, deploys, set-commits, propose-version
+│   │   ├── replay/         # list, view
 │   │   ├── repo/           # list
 │   │   ├── sourcemap/      # inject, upload
 │   │   ├── span/           # list, view
@@ -128,6 +129,7 @@ cli/
 │   │   ├── trace/          # list, view, logs
 │   │   ├── trial/          # list, start
 │   │   ├── api.ts          # Direct API access command
+│   │   ├── explore.ts      # Query aggregate event data (Explore)
 │   │   ├── help.ts         # Help command
 │   │   ├── init.ts         # Initialize Sentry in your project (experimental)
 │   │   └── schema.ts       # Browse the Sentry API schema

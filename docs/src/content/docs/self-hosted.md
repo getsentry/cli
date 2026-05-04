@@ -24,7 +24,13 @@ The OAuth device flow requires **Sentry 26.1.0 or later** and a public OAuth app
 
 #### 2. Log In
 
-Pass your instance URL and the client ID:
+Use the `--url` flag to authenticate against your instance (recommended — this registers the host as trusted):
+
+```bash
+SENTRY_CLIENT_ID=your-client-id sentry auth login --url https://sentry.example.com
+```
+
+Or pass the instance URL via environment variable:
 
 ```bash
 SENTRY_HOST=https://sentry.example.com SENTRY_CLIENT_ID=your-client-id sentry auth login
@@ -37,6 +43,10 @@ You can export both variables in your shell profile so every CLI invocation pick
 export SENTRY_HOST=https://sentry.example.com
 export SENTRY_CLIENT_ID=your-client-id
 ```
+:::
+
+:::note
+The `--url` flag is the most secure way to authenticate with a new host. It registers a trust anchor that prevents credential leaks to untrusted hosts. Environment variables work too, but `--url` provides an explicit confirmation that you trust the target host.
 :::
 
 ### With an API Token
@@ -64,6 +74,20 @@ sentry org list
 ```
 
 If you pass a self-hosted Sentry URL as a command argument (e.g., an issue or event URL), the CLI detects the instance automatically.
+
+## TLS / Corporate Proxies
+
+If your self-hosted instance uses a private CA certificate (common with corporate TLS-intercepting proxies like Zscaler or Netskope), point `NODE_EXTRA_CA_CERTS` at your CA bundle:
+
+```bash
+export NODE_EXTRA_CA_CERTS=/path/to/corporate-ca.pem
+```
+
+You can also persist this setting so you don't need the env var on every invocation:
+
+```bash
+sentry cli defaults ca-cert /path/to/corporate-ca.pem
+```
 
 ## Relevant Environment Variables
 
