@@ -81,19 +81,13 @@ function makeStdin(): Readable {
   return s;
 }
 
-/** Empty-then-no-throw promise resolver for Ink's `waitUntilExit`. */
-function ignore(): void {
-  // Ink rejects waitUntilExit when unmount happens before render
-  // completes; tests don't care about that.
-}
-
 /** Render the App with mocked I/O and return the captured stream. */
 async function renderApp(
   store: WizardStore,
   columns: number
 ): Promise<CaptureStream> {
   const out = new CaptureStream(columns, 40);
-  const { unmount, waitUntilExit } = render(createElement(App, { store }), {
+  const { unmount } = render(createElement(App, { store }), {
     stdout: out as unknown as NodeJS.WriteStream,
     stderr: out as unknown as NodeJS.WriteStream,
     stdin: makeStdin() as unknown as NodeJS.ReadStream,
@@ -102,15 +96,9 @@ async function renderApp(
   });
   await new Promise((r) => setTimeout(r, FRAME_SETTLE_MS));
   unmount();
-  // waitUntilExit() hangs in CI when Ink's internal reconciler keeps
-  // the event loop alive in non-TTY environments. Race against a
-  // short timeout so the test doesn't block the entire suite.
-  await Promise.race([
-    waitUntilExit().catch(ignore),
-    new Promise<void>((r) => {
-      setTimeout(r, 200).unref();
-    }),
-  ]);
+  // Skip waitUntilExit() entirely — it hangs in CI because Ink's
+  // reconciler keeps the event loop alive after unmount in non-TTY
+  // environments. The frames are already captured by this point.
   return out;
 }
 
