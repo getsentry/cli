@@ -148,6 +148,16 @@ export type WizardSnapshot = {
    * the App doesn't have to thread a callback through every layer.
    */
   requestCancel: (() => void) | undefined;
+  /**
+   * Rolling status messages displayed in the collapsible status bar.
+   * The most recent message is shown with a diamond icon; older
+   * messages show as history with a thin separator. The bridge
+   * appends to this list whenever the spinner message changes to
+   * keep a visible trail of what the wizard is doing.
+   */
+  statusMessages: string[];
+  /** Whether the status bar is expanded (shows more history). */
+  statusExpanded: boolean;
 };
 
 export type Listener = () => void;
@@ -178,6 +188,8 @@ export class WizardStore {
           status: "pending" as StepStatus,
         })),
       requestCancel: initial.requestCancel,
+      statusMessages: initial.statusMessages ?? [],
+      statusExpanded: initial.statusExpanded ?? false,
     };
   }
 
@@ -349,6 +361,19 @@ export class WizardStore {
       byPath.set(path, { path, status: "analyzed" });
     }
     this.update({ filesRead: [...byPath.values()] });
+  }
+
+  appendStatus(message: string): void {
+    if (!message) {
+      return;
+    }
+    this.update({
+      statusMessages: [...this.snapshot.statusMessages, message],
+    });
+  }
+
+  toggleStatusExpanded(): void {
+    this.update({ statusExpanded: !this.snapshot.statusExpanded });
   }
 
   // ── Internal ──────────────────────────────────────────────────────

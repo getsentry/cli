@@ -223,6 +223,9 @@ export async function createInkUI(): Promise<InkUI> {
   if (freshStdin) {
     renderOptions.stdin = freshStdin;
   }
+  // Enter the alternate screen buffer so the wizard occupies the full
+  // terminal. On exit, Ink restores the original scrollback.
+  process.stdout.write("\x1b[?1049h");
   const instance = ink.render(
     react.createElement(app.App, { store }),
     renderOptions
@@ -385,10 +388,17 @@ export class InkUI implements WizardUI {
       start: (message?: string) => {
         const clean = stripAnsi(message ?? "");
         this.store.startSpinner(clean);
+        if (clean) {
+          this.store.appendStatus(clean);
+        }
       },
       message: (message?: string) => {
         if (message !== undefined) {
-          this.store.setSpinnerMessage(stripAnsi(message));
+          const clean = stripAnsi(message);
+          this.store.setSpinnerMessage(clean);
+          if (clean) {
+            this.store.appendStatus(clean);
+          }
         }
       },
       stop: (message?: string, code: SpinnerExitCode = 0) => {
@@ -546,6 +556,13 @@ export class InkUI implements WizardUI {
       this.instance.unmount();
     } catch {
       // best-effort
+    }
+    // Leave the alternate screen buffer so the user's original
+    // scrollback is restored.
+    try {
+      process.stdout.write("\x1b[?1049l");
+    } catch {
+      // best-effort — stdout may already be destroyed
     }
     if (this.freshStdin) {
       try {

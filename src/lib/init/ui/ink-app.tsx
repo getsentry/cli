@@ -1,54 +1,39 @@
 /**
- * InkUI React App
+ * InkUI React App — Full-Screen Wizard
  *
- * Renders the wizard layout using Ink (React for CLIs). The component
- * subscribes to a `WizardStore` (see `wizard-store.ts`) via
+ * Renders the wizard in alternate-screen mode using Ink. The layout
+ * fills the terminal:
+ *
+ *   ┌─ TitleBar (accent background) ────────────────────────────────┐
+ *   │                                                                │
+ *   │  ┌─────────────────────────────────────────────────────────┐   │
+ *   │  │  Active tab content (Status / Logs)                     │   │
+ *   │  │                                                         │   │
+ *   │  │  [SplitView when wide]                                  │   │
+ *   │  │  Left: Tips / Progress      Right: Logs + Files         │   │
+ *   │  │                                                         │   │
+ *   │  └─────────────────────────────────────────────────────────┘   │
+ *   │                                                                │
+ *   │  ─── Status bar (collapsible) ──────────────────────────────   │
+ *   │  [Status]  [Logs]                                              │
+ *   │  ─ KeyboardHintsBar ─────────────────────────────────────────  │
+ *   └───────────────────────────────────────────────────────────────┘
+ *
+ * The component subscribes to a `WizardStore` via
  * `useSyncExternalStore` so imperative `WizardUI` method calls
- * (`log.info`, `spinner.start`, etc.) trigger React re-renders without
- * React state being the source of truth.
- *
- * Layout (left-aligned columns from outer chrome inwards):
- *
- *   ┌─ sentry init ──────────────────────────────────────────────────┐
- *   │  banner (ASCII)                ╭ Did you know? ─────────╮       │
- *   │  ────────────                  │ <tip title>            │       │
- *   │  ●  log line                   │ <tip body>             │       │
- *   │  ▲  log line                   │ Tip 3 of 12            │       │
- *   │  ◐  spinner...                 ╰────────────────────────╯       │
- *   │                                ╭ Progress (n/m) ────────╮       │
- *   │                                │ ✓ Analyzing project    │       │
- *   │                                │ ▶ Setting up project   │       │
- *   │                                ╰────────────────────────╯       │
- *   │                                ╭ Files analyzed (n/m) ──╮       │
- *   │                                │ ◐ src/                 │       │
- *   │                                │ ✓ package.json         │       │
- *   │                                ╰────────────────────────╯       │
- *   │  <prompt area>                                                  │
- *   └─────────────────────────────────────────────────────────────────┘
- *
- * Why an external store rather than React state owned by the App?
- * The `WizardUI` interface is imperative (the wizard runner calls
- * `ui.log.info(...)` from a generator). Threading those calls through
- * React's state setters from outside React would require keeping a
- * mutable reference to a setter that gets bound on first render —
- * fragile, especially with concurrent mode. An external store keeps
- * the imperative side decoupled from React's lifecycle.
- *
- * Differences from the previous OpenTUI implementation:
- *   - Ink renders to stdout incrementally (no alternate-screen
- *     buffer), so log lines naturally accumulate and get committed to
- *     scrollback as the wizard runs. No post-dispose stderr replay
- *     needed.
- *   - No `<scrollbox>` primitive — the files-read panel windows the
- *     last N rows that fit. Tail-`f` UX comes for free since the
- *     panel re-renders to the bottom of the most-recent reads.
- *   - Multi-select uses Ink's `useInput` directly (no third-party
- *     multi-select component). Single-select uses `ink-select-input`.
+ * trigger React re-renders without React state being the source of
+ * truth.
  */
 
 import { Box, Text, useInput, useStdout } from "ink";
 import Spinner from "ink-spinner";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   buildFileTree,
   buildReadTree,
@@ -69,18 +54,23 @@ import type {
 
 // ──────────────────────────── Visual constants ────────────────────────
 
-const ACCENT = "magenta";
+const ACCENT = "#DC9300";
+const ACCENT_DIM = "#3D2800";
 const MUTED = "gray";
+const PRIMARY = "cyan";
 
 const COLOR_INFO = "cyan";
 const COLOR_WARN = "yellow";
 const COLOR_ERROR = "red";
 const COLOR_SUCCESS = "green";
 
-/** Splits a path on either Unix or Windows separators. Pre-compiled
- *  to satisfy biome's `useTopLevelRegex` lint rule.
- */
-const PATH_SEPARATOR_RE = /[\\/]/;
+const MIN_WIDTH = 80;
+const MAX_WIDTH = 120;
+
+/** Number of collapsed status-bar lines visible. */
+const STATUS_COLLAPSED_COUNT = 2;
+/** Number of expanded status-bar lines visible. */
+const STATUS_EXPANDED_COUNT = 10;
 
 const ICON_BY_SEVERITY: Record<LogSeverity, { glyph: string; color: string }> =
   {
@@ -91,6 +81,14 @@ const ICON_BY_SEVERITY: Record<LogSeverity, { glyph: string; color: string }> =
     message: { glyph: " ", color: "white" },
   };
 
+const ICONS = {
+  diamond: "\u25C6",
+  separator: "\u250A",
+  squareFilled: "\u25FC",
+  squareOpen: "\u25FB",
+  triangleRight: "\u25B6",
+} as const;
+
 // ────────────────────────────── App entry ─────────────────────────────
 
 export type AppProps = {
@@ -98,50 +96,9 @@ export type AppProps = {
 };
 
 /**
- * Width of the sidebar's outer box. Used both as `width` on the box
- * and as part of the minimum-terminal-width threshold below which we
- * hide the sidebar.
- */
-const SIDEBAR_WIDTH = 36;
-
-/**
- * Minimum terminal columns required to show the sidebar alongside the
- * main column. Below this we drop the sidebar entirely so the banner,
- * log lines, and prompts get the full row width.
- *
- * Reasoning: the banner is ~55 chars, the outer chrome eats 4 cols
- * (border + padding), the inner column gap is 2, plus 36 cols for
- * the sidebar → 97. We round up to 100 for breathing room.
- */
-const SIDEBAR_BREAKPOINT = 100;
-
-/**
- * Maximum number of files-read rows shown in the sidebar at once.
- * Falls back to a windowed tail when the tree has more entries —
- * Ink doesn't have a built-in scrollbox, but the tail-f UX (last N
- * rows visible) is what the panel needs for an active read sequence.
- *
- * Sized to leave room for the tip card + progress checklist on a
- * 24-row terminal:
- *
- *   24 rows total
- *   - 7 rows  banner + divider
- *   - 12 rows tip card (fixed)
- *   - 9 rows  progress (max visible steps)
- *   - 4 rows  border + padding for the files panel itself
- *   = 8 rows available for file rows. We allow 12 on taller
- *     terminals via the dynamic resize hook below.
- */
-const MIN_FILE_ROWS = 4;
-const MAX_FILE_ROWS = 14;
-
-/**
- * Root component. Subscribes to the store once at the top, then drills
- * the snapshot fields into individual presentational components.
- *
- * The sidebar auto-hides on narrow terminals (see `SIDEBAR_BREAKPOINT`)
- * — `useStdout()` exposes the live `columns` value so resizing flips
- * the layout on the next render.
+ * Root component. Fills the full terminal via `alternateScreen: true`
+ * in the Ink render call. Layout: TitleBar, content area (tabbed),
+ * status bar, tab bar, keyboard hints.
  */
 export function App({ store }: AppProps): React.ReactNode {
   const snapshot = useSyncExternalStore(
@@ -150,77 +107,121 @@ export function App({ store }: AppProps): React.ReactNode {
     store.getSnapshot
   );
   const { columns, rows } = useTerminalSize();
-  const showSidebar = columns >= SIDEBAR_BREAKPOINT;
+  const [activeTab, setActiveTab] = useState(0);
 
-  // Global Ctrl+C catcher. In raw mode Node doesn't emit SIGINT for
-  // `\x03` — Ink delivers it as `input === "c"` with `key.ctrl` set
-  // when a `useInput` listener is mounted. Each prompt's own
-  // `useInput` already handles cancellation, but during a spinner
-  // (no prompt) there's no input listener at all, so Ctrl+C would
-  // otherwise be silently dropped. This top-level listener fills
-  // that gap by routing through `store.requestCancel` — the bridge
-  // (`InkUI`) registers a callback that performs the full teardown
-  // sequence (clear → unmount → restore termios → destroy stdin →
-  // emit summary) before `process.exit(130)`. Calling
-  // `process.exit` directly here would skip that cleanup and leave
-  // the user's terminal in raw mode (#885 review).
-  //
-  // When a prompt IS active, `snapshot.prompt` is non-null and the
-  // prompt's own `useInput` already handles Ctrl+C via its
-  // resolve(null) cancellation path; we explicitly skip in that
-  // case so we don't double-fire.
+  const width = getContentWidth(columns);
+  const contentHeight = Math.max(5, rows - 3);
+
   useInput((input, key) => {
     if (key.ctrl && input === "c" && !snapshot.prompt) {
       snapshot.requestCancel?.();
+      return;
+    }
+    if (key.leftArrow && !snapshot.prompt) {
+      setActiveTab((prev) => Math.max(0, prev - 1));
+      return;
+    }
+    if (key.rightArrow && !snapshot.prompt) {
+      setActiveTab((prev) => Math.min(1, prev + 1));
+      return;
+    }
+    if (input === "s" && !snapshot.prompt) {
+      store.toggleStatusExpanded();
     }
   });
 
+  const statusMessages = snapshot.statusMessages;
+  const visibleCount = snapshot.statusExpanded
+    ? STATUS_EXPANDED_COUNT
+    : STATUS_COLLAPSED_COUNT;
+  const visibleMessages = statusMessages.slice(-visibleCount);
+
+  const tabs = useMemo(
+    () => [
+      { id: "status", label: "Status" },
+      { id: "logs", label: "Logs" },
+    ],
+    []
+  );
+
+  const hints: KeyHint[] = useMemo(() => {
+    const h: KeyHint[] = [{ label: "\u2190\u2192", action: "switch tab" }];
+    if (statusMessages.length > STATUS_COLLAPSED_COUNT) {
+      h.push({ label: "s", action: "toggle status" });
+    }
+    if (snapshot.prompt) {
+      h.push({ label: "\u2191\u2193", action: "navigate" });
+      h.push({ label: "enter", action: "confirm" });
+      h.push({ label: "esc", action: "cancel" });
+    }
+    return h;
+  }, [statusMessages.length, snapshot.prompt]);
+
+  const inner = (
+    <Box flexDirection="column" height={rows} width={width}>
+      <TitleBar width={width} />
+      <Box height={1} />
+      <Box flexDirection="column" flexGrow={1} paddingX={1}>
+        <Box flexDirection="column" height={contentHeight}>
+          <Box
+            flexDirection="column"
+            flexGrow={1}
+            flexShrink={1}
+            overflow="hidden"
+          >
+            {activeTab === 0 ? (
+              <StatusScreen
+                filesRead={snapshot.filesRead}
+                hasActivePrompt={snapshot.prompt !== null}
+                logs={snapshot.logs}
+                prompt={snapshot.prompt}
+                spinner={snapshot.spinner}
+                steps={snapshot.steps}
+                summary={snapshot.summary}
+                terminalRows={rows}
+                tipIndex={snapshot.tipIndex}
+                width={width - 2}
+              />
+            ) : (
+              <LogScreen logs={snapshot.logs} />
+            )}
+          </Box>
+
+          {visibleMessages.length > 0 ? (
+            <StatusBar messages={visibleMessages} />
+          ) : null}
+
+          <Box height={1} />
+          <TabBar activeTab={activeTab} tabs={tabs} />
+          <Box height={1} />
+          <KeyboardHintsBar hints={hints} />
+        </Box>
+      </Box>
+    </Box>
+  );
+
   return (
     <Box
-      borderColor={MUTED}
-      borderStyle="round"
+      alignItems="center"
       flexDirection="column"
-      paddingX={1}
+      height={rows}
+      justifyContent="flex-start"
+      width={columns}
     >
-      <Box flexDirection="row" gap={showSidebar ? 2 : 0}>
-        <MainColumn
-          bannerRows={snapshot.bannerRows}
-          filesRead={snapshot.filesRead}
-          logs={snapshot.logs}
-          mainColumnWidth={
-            // 4 cols outer chrome (border + paddingX=1 each side);
-            // when the sidebar is visible, also subtract its width
-            // plus the row gap of 2 cols.
-            showSidebar ? columns - 4 - SIDEBAR_WIDTH - 2 : columns - 4
-          }
-          prompt={snapshot.prompt}
-          showFileReadInline={!showSidebar}
-          spinner={snapshot.spinner}
-          summary={snapshot.summary}
-        />
-        {showSidebar ? (
-          <Sidebar
-            filesRead={snapshot.filesRead}
-            hasActivePrompt={snapshot.prompt !== null}
-            steps={snapshot.steps}
-            terminalRows={rows}
-            tipIndex={snapshot.tipIndex}
-          />
-        ) : null}
-      </Box>
+      {inner}
     </Box>
   );
 }
 
-/**
- * Reactive accessor for terminal dimensions. Ink exposes the current
- * stdout via `useStdout()` and emits `resize` on the wrapped stream;
- * we read `columns`/`rows` once and then update on resize.
- *
- * Defaults to 80x24 if Ink couldn't infer dimensions (e.g. when piped
- * through a non-TTY for a test) — those numbers keep the sidebar
- * hidden, which is the safer fallback.
- */
+// ────────────────────────────── Layout helpers ────────────────────────
+
+function getContentWidth(terminalColumns: number): number {
+  if (terminalColumns < MIN_WIDTH) {
+    return terminalColumns;
+  }
+  return Math.min(MAX_WIDTH, terminalColumns);
+}
+
 function useTerminalSize(): { columns: number; rows: number } {
   const { stdout } = useStdout();
   const [size, setSize] = useState(() => ({
@@ -245,50 +246,240 @@ function useTerminalSize(): { columns: number; rows: number } {
   return size;
 }
 
-// ──────────────────────────── Main column ─────────────────────────────
+// ──────────────────────────── Title Bar ──────────────────────────────
 
-type MainColumnProps = {
-  bannerRows: { content: string; color: string }[];
-  filesRead: FileReadEntry[];
-  logs: LogEntry[];
+function TitleBar({ width }: { width: number }): React.ReactNode {
+  const title = " Sentry Init Wizard";
+  const versionTag = " sentry.io ";
+  const gap = Math.max(0, width - title.length - versionTag.length);
+  const padding = " ".repeat(gap);
+
+  return (
+    <Box overflow="hidden" width={width}>
+      <Text backgroundColor={ACCENT} bold color={ACCENT_DIM}>
+        {title}
+        {padding}
+        {versionTag}
+      </Text>
+    </Box>
+  );
+}
+
+// ──────────────────────────── Status Bar ──────────────────────────────
+
+function StatusBar({ messages }: { messages: string[] }): React.ReactNode {
+  return (
+    <Box
+      borderBottom={false}
+      borderColor={MUTED}
+      borderLeft={false}
+      borderRight={false}
+      borderStyle="single"
+      borderTop
+      flexDirection="column"
+      overflow="hidden"
+      paddingX={1}
+    >
+      {messages.map((msg, i, arr) => {
+        const isCurrent = i === arr.length - 1;
+        return (
+          // biome-ignore lint/suspicious/noArrayIndexKey: positional status messages
+          <Text color={MUTED} dimColor={!isCurrent} key={i}>
+            {isCurrent ? ICONS.diamond : ICONS.separator} {msg}
+          </Text>
+        );
+      })}
+    </Box>
+  );
+}
+
+// ──────────────────────────── Tab Bar ─────────────────────────────────
+
+function TabBar({
+  tabs,
+  activeTab,
+}: {
+  tabs: { id: string; label: string }[];
+  activeTab: number;
+}): React.ReactNode {
+  return (
+    <Box gap={1} paddingX={1}>
+      {tabs.map((tab, i) => {
+        const isActive = i === activeTab;
+        // biome-ignore lint/nursery/noLeakedRender: variable assignment, not JSX expression
+        const tabColor = isActive ? ACCENT : MUTED;
+        return (
+          <Text
+            bold={isActive}
+            color={tabColor}
+            inverse={isActive}
+            key={tab.id}
+          >
+            {` ${tab.label} `}
+          </Text>
+        );
+      })}
+    </Box>
+  );
+}
+
+// ────────────────────────── Keyboard Hints ────────────────────────────
+
+type KeyHint = { label: string; action: string };
+
+function KeyboardHintsBar({ hints }: { hints: KeyHint[] }): React.ReactNode {
+  return (
+    <Box height={1} paddingX={1}>
+      {hints.map((hint, i) => (
+        <Box
+          key={`${hint.label}-${hint.action}`}
+          marginRight={i < hints.length - 1 ? 2 : 0}
+        >
+          <Text bold color={MUTED}>
+            {hint.label}
+          </Text>
+          <Text dimColor> {hint.action}</Text>
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
+// ─────────────────────────── Status Screen ────────────────────────────
+
+/**
+ * The main "Status" tab: SplitView with progress/tips on the left
+ * and logs + files on the right. On narrow terminals, collapses to
+ * a single column.
+ */
+function StatusScreen({
+  steps,
+  tipIndex,
+  spinner,
+  logs,
+  prompt,
+  summary,
+  filesRead,
+  terminalRows,
+  hasActivePrompt,
+  width,
+}: {
+  steps: StepEntry[];
+  tipIndex: number;
   spinner: SpinnerState;
+  logs: LogEntry[];
   prompt: ActivePrompt | null;
   summary: WizardSummary | null;
-  /** Available width inside the main column, used by the divider. */
-  mainColumnWidth: number;
-  /**
-   * Whether to render the inline file-read status row above the
-   * spinner. We only show this when the sidebar is hidden (narrow
-   * terminals); otherwise the sidebar's `FilesPanel` gives a richer
-   * tree view and the inline row would be a noisy duplicate.
-   */
-  showFileReadInline: boolean;
-};
+  filesRead: FileReadEntry[];
+  terminalRows: number;
+  hasActivePrompt: boolean;
+  width: number;
+}): React.ReactNode {
+  const isWide = width >= 80;
 
-function MainColumn({
-  bannerRows,
-  filesRead,
+  if (!isWide) {
+    return (
+      <Box flexDirection="column" flexGrow={1}>
+        <ProgressPanel steps={steps} />
+        <Box height={1} />
+        <ActivityPane
+          filesRead={filesRead}
+          hasActivePrompt={hasActivePrompt}
+          logs={logs}
+          prompt={prompt}
+          spinner={spinner}
+          summary={summary}
+          terminalRows={terminalRows}
+        />
+      </Box>
+    );
+  }
+
+  return (
+    <SplitView
+      left={
+        <Box flexDirection="column">
+          <TipPanel tipIndex={tipIndex} />
+          <Box height={1} />
+          <ProgressPanel steps={steps} />
+        </Box>
+      }
+      right={
+        <ActivityPane
+          filesRead={filesRead}
+          hasActivePrompt={hasActivePrompt}
+          logs={logs}
+          prompt={prompt}
+          spinner={spinner}
+          summary={summary}
+          terminalRows={terminalRows}
+        />
+      }
+    />
+  );
+}
+
+// ──────────────────────────── Split View ──────────────────────────────
+
+function SplitView({
+  left,
+  right,
+  gap = 2,
+}: {
+  left: React.ReactNode;
+  right: React.ReactNode;
+  gap?: number;
+}): React.ReactNode {
+  return (
+    <Box flexDirection="row" flexGrow={1} flexShrink={1} gap={gap}>
+      <Box flexDirection="column" overflow="hidden" width="50%">
+        {left}
+      </Box>
+      <Box flexDirection="column" overflow="hidden" width="50%">
+        {right}
+      </Box>
+    </Box>
+  );
+}
+
+// ─────────────────────────── Activity Pane ────────────────────────────
+
+/**
+ * Right-hand side of the status tab: log lines, spinner, file status,
+ * summary, and prompts. Essentially what used to be the MainColumn.
+ */
+function ActivityPane({
   logs,
   spinner,
   prompt,
   summary,
-  mainColumnWidth,
-  showFileReadInline,
-}: MainColumnProps): React.ReactNode {
-  // Hide the file-read status once the wizard finishes — the summary
-  // panel is the canonical "what happened" surface at that point, and
-  // a stale "47 files analyzed" line below it would just be noise.
-  const showFileStatus = showFileReadInline && !summary && filesRead.length > 0;
+  filesRead,
+  terminalRows,
+  hasActivePrompt,
+}: {
+  logs: LogEntry[];
+  spinner: SpinnerState;
+  prompt: ActivePrompt | null;
+  summary: WizardSummary | null;
+  filesRead: FileReadEntry[];
+  terminalRows: number;
+  hasActivePrompt: boolean;
+}): React.ReactNode {
+  const showFileStatus = !summary && filesRead.length > 0;
   return (
     <Box flexDirection="column" flexGrow={1}>
-      <Header bannerRows={bannerRows} />
-      <Divider mainColumnWidth={mainColumnWidth} />
       <Box flexDirection="column">
         {logs.map((log) => (
           <LogLine entry={log} key={log.id} />
         ))}
       </Box>
-      {showFileStatus ? <FileReadStatus filesRead={filesRead} /> : null}
+      {showFileStatus ? (
+        <FilesPanel
+          filesRead={filesRead}
+          hasActivePrompt={hasActivePrompt}
+          maxRows={Math.min(14, Math.max(4, terminalRows - 20))}
+        />
+      ) : null}
       {spinner.active ? <SpinnerRow state={spinner} /> : null}
       {summary ? <SummaryPanel summary={summary} /> : null}
       {prompt ? <PromptArea prompt={prompt} /> : null}
@@ -296,51 +487,26 @@ function MainColumn({
   );
 }
 
-function Header({
-  bannerRows,
-}: {
-  bannerRows: { content: string; color: string }[];
-}): React.ReactNode {
+// ─────────────────────────── Log Screen ──────────────────────────────
+
+function LogScreen({ logs }: { logs: LogEntry[] }): React.ReactNode {
+  if (logs.length === 0) {
+    return (
+      <Box flexDirection="column" flexGrow={1} paddingX={1}>
+        <Text dimColor>No log entries yet...</Text>
+      </Box>
+    );
+  }
   return (
-    <Box flexDirection="column" flexShrink={0}>
-      {bannerRows.map((row, i) => (
-        // ASCII banner rows are positional, stable, and never re-ordered —
-        // the index key is correct here.
-        // biome-ignore lint/suspicious/noArrayIndexKey: positional banner rows
-        <Text color={row.color} key={i}>
-          {row.content}
-        </Text>
+    <Box flexDirection="column" flexGrow={1} paddingX={1}>
+      {logs.map((log) => (
+        <LogLine entry={log} key={log.id} />
       ))}
     </Box>
   );
 }
 
-/**
- * Horizontal rule used to separate the banner from the log/spinner
- * area. Width tracks the available main-column width so the rule
- * doesn't truncate when the sidebar is visible (~36 cols + gap)
- * nor look stubby when the main column has the full terminal.
- *
- * Width budget:
- *   - 4 cols outer chrome (1 border + 1 padding on each side)
- *   - 38 cols sidebar + gap when visible (`SIDEBAR_WIDTH + 2`)
- *   - 2 cols safety so the line never bleeds into the right border
- *
- * Capped at 56 so a ridiculously wide terminal still looks balanced
- * (matches the banner row width of 55 chars).
- */
-function Divider({
-  mainColumnWidth,
-}: {
-  mainColumnWidth: number;
-}): React.ReactNode {
-  const width = Math.max(20, Math.min(mainColumnWidth - 2, 56));
-  return (
-    <Box marginBottom={1} marginTop={1}>
-      <Text color={MUTED}>{"─".repeat(width)}</Text>
-    </Box>
-  );
-}
+// ──────────────────────────── Components ──────────────────────────────
 
 function LogLine({ entry }: { entry: LogEntry }): React.ReactNode {
   const { glyph, color } = ICON_BY_SEVERITY[entry.severity];
@@ -358,7 +524,7 @@ function SpinnerRow({ state }: { state: SpinnerState }): React.ReactNode {
   return (
     <Box flexDirection="row" flexShrink={0} marginTop={1}>
       <Box width={3}>
-        <Text color={ACCENT}>
+        <Text color={PRIMARY}>
           <Spinner type="dots" />
         </Text>
       </Box>
@@ -367,427 +533,12 @@ function SpinnerRow({ state }: { state: SpinnerState }): React.ReactNode {
   );
 }
 
-/**
- * Single-line file-read status, shown above the spinner ONLY when the
- * sidebar is hidden (narrow terminals). The richer tree view in the
- * sidebar's `FilesPanel` supersedes this when there's room.
- *
- * Rendering rules:
- *   - If any file is currently `reading`: show a yellow ● glyph plus
- *     up to two recent basenames and the running counter.
- *   - Otherwise: collapse to a green ✔ recap.
- */
-function FileReadStatus({
-  filesRead,
-}: {
-  filesRead: FileReadEntry[];
-}): React.ReactNode {
-  const reading = filesRead.filter((entry) => entry.status === "reading");
-  const analyzed = filesRead.length - reading.length;
-
-  if (reading.length > 0) {
-    const recent = reading
-      .slice(-2)
-      .map((entry) => entry.path.split(PATH_SEPARATOR_RE).at(-1) ?? entry.path);
-    const overflow = reading.length - recent.length;
-    const namesPart =
-      overflow > 0
-        ? `${recent.join(", ")} + ${overflow} more`
-        : recent.join(", ");
-    return (
-      <Box flexDirection="row" flexShrink={0} marginTop={1}>
-        <Box width={3}>
-          <Text color={COLOR_WARN}>●</Text>
-        </Box>
-        <Box flexGrow={1}>
-          <Text>Reading {namesPart}</Text>
-        </Box>
-        <Text color={MUTED}>
-          {analyzed}/{filesRead.length} analyzed
-        </Text>
-      </Box>
-    );
-  }
-
-  return (
-    <Box flexDirection="row" flexShrink={0} marginTop={1}>
-      <Box width={3}>
-        <Text color={COLOR_SUCCESS}>✔</Text>
-      </Box>
-      <Text color={MUTED}>
-        Analyzed {analyzed} {analyzed === 1 ? "file" : "files"}
-      </Text>
-    </Box>
-  );
-}
-
-// ────────────────────────────── Summary ───────────────────────────────
-
-/**
- * Compact summary panel rendered after the workflow finishes. Each
- * field is a single row: small dim label cell followed by the value.
- * Changed-files render as a tree below the field list.
- */
-function SummaryPanel({
-  summary,
-}: {
-  summary: WizardSummary;
-}): React.ReactNode {
-  return (
-    <Box
-      borderBottom={false}
-      borderColor={MUTED}
-      borderLeft={false}
-      borderRight={false}
-      borderStyle="single"
-      flexDirection="column"
-      flexShrink={0}
-      marginTop={1}
-      paddingTop={1}
-    >
-      {summary.fields.length > 0 ? (
-        <Box flexDirection="column" flexShrink={0}>
-          {summary.fields.map((field) => (
-            <Box flexDirection="row" flexShrink={0} key={field.label}>
-              <Box width={12}>
-                <Text color={MUTED}>{field.label}</Text>
-              </Box>
-              <Text>{field.value}</Text>
-            </Box>
-          ))}
-        </Box>
-      ) : null}
-      {summary.changedFiles !== undefined && summary.changedFiles.length > 0 ? (
-        <ChangedFilesTree files={summary.changedFiles} />
-      ) : null}
-    </Box>
-  );
-}
-
-/**
- * Render the changed-files list as a nested directory tree.
- * Tree-shape computation lives in `file-tree.ts`; this component is
- * purely presentational.
- */
-function ChangedFilesTree({
-  files,
-}: {
-  files: { action: string; path: string }[];
-}): React.ReactNode {
-  const tree = buildFileTree(files);
-  const rows = flattenTree(tree);
-  return (
-    <Box flexDirection="column" flexShrink={0} marginTop={1}>
-      <Text color={MUTED}>Changed files</Text>
-      {rows.map((row, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: positional tree rows
-        <FileTreeLine key={i} row={row} />
-      ))}
-    </Box>
-  );
-}
-
-function FileTreeLine({ row }: { row: FileTreeRow }): React.ReactNode {
-  if (row.kind === "directory") {
-    return (
-      <Box flexDirection="row" flexShrink={0}>
-        <Text color={MUTED}>{`${row.prefix}${row.branch} `}</Text>
-        <Text>{row.label}</Text>
-      </Box>
-    );
-  }
-  const { glyph, color } = changedFileStyle(row.action ?? "modify");
-  return (
-    <Box flexDirection="row" flexShrink={0}>
-      <Text color={MUTED}>{`${row.prefix}${row.branch} `}</Text>
-      <Text color={color}>{`${glyph} `}</Text>
-      <Text>{row.label}</Text>
-    </Box>
-  );
-}
-
-function changedFileStyle(action: string): { glyph: string; color: string } {
-  if (action === "create") {
-    return { glyph: "+", color: COLOR_SUCCESS };
-  }
-  if (action === "delete") {
-    return { glyph: "−", color: COLOR_ERROR };
-  }
-  return { glyph: "~", color: COLOR_WARN };
-}
-
-// ─────────────────────────────── Prompts ──────────────────────────────
-
-function PromptArea({ prompt }: { prompt: ActivePrompt }): React.ReactNode {
-  if (prompt.kind === "select") {
-    return <SelectPrompt prompt={prompt} />;
-  }
-  return <MultiSelectPrompt prompt={prompt} />;
-}
-
-/**
- * Single-select prompt rendered via Ink's `useInput` directly
- * (rather than through `ink-select-input`).
- *
- * Why hand-rolled?
- *   - `ink-select-input`'s items array is recreated on every parent
- *     render, which races with its internal `useEffect` that resets
- *     `selectedIndex` on items-change. Under our store-driven
- *     re-render cadence (tip rotation, log lines, file-read
- *     updates) the cursor would never settle and arrow keys felt
- *     unresponsive.
- *   - Sharing the rendering pattern with {@link MultiSelectPrompt}
- *     keeps the visual styling consistent: same cursor glyph,
- *     same accent color, same hint placement.
- *
- * Keyboard:
- *   - up/down  → move the cursor (wraps top↔bottom)
- *   - enter    → commit the highlighted option
- */
-function SelectPrompt({
-  prompt,
-}: {
-  prompt: Extract<ActivePrompt, { kind: "select" }>;
-}): React.ReactNode {
-  const totalCount = prompt.options.length;
-  const [highlighted, setHighlighted] = useState<number>(() =>
-    Math.min(Math.max(prompt.initialIndex, 0), Math.max(0, totalCount - 1))
-  );
-
-  useInput((input, key) => {
-    if (key.upArrow) {
-      setHighlighted((idx) => (idx === 0 ? totalCount - 1 : idx - 1));
-      return;
-    }
-    if (key.downArrow) {
-      setHighlighted((idx) => (idx + 1) % totalCount);
-      return;
-    }
-    if (key.escape || (key.ctrl && input === "c")) {
-      // Cooperative cancel — Esc, or Ctrl+C in raw mode where Node
-      // doesn't deliver SIGINT. Resolves the prompt with `null`,
-      // which the bridge translates to `CANCELLED` and the wizard
-      // runner unwinds via `WizardCancelledError`.
-      prompt.resolve(null);
-      return;
-    }
-    if (key.return) {
-      const current = prompt.options[highlighted];
-      if (current) {
-        prompt.resolve(current.value);
-      }
-    }
-  });
-
-  return (
-    <Box flexDirection="column" flexShrink={0} gap={1} marginTop={1}>
-      <Text>{prompt.message}</Text>
-      <Box flexDirection="column">
-        {prompt.options.map((option, idx) => {
-          const isCursor = idx === highlighted;
-          let cursor = " ";
-          let labelColor = MUTED;
-          if (isCursor) {
-            cursor = "›";
-            labelColor = "white";
-          }
-          return (
-            <Box flexDirection="row" key={option.value}>
-              <Box width={2}>
-                <Text color={ACCENT}>{cursor}</Text>
-              </Box>
-              <Text color={labelColor}>{option.label}</Text>
-              {option.hint !== undefined && option.hint !== "" ? (
-                <Text color={MUTED}> {option.hint}</Text>
-              ) : null}
-            </Box>
-          );
-        })}
-      </Box>
-    </Box>
-  );
-}
-
-/**
- * Multi-select uses local state to track the toggled values plus the
- * currently-highlighted row. On every keystroke `useInput` runs:
- *   - up/down → move the cursor
- *   - space   → flip the highlighted option in the selection set
- *   - enter   → commit the current selection
- *
- * We render the list manually rather than reusing `ink-select-input`
- * because that component doesn't expose a way to draw bracketed
- * `[✔]` markers for selected items in addition to the cursor.
- */
-function MultiSelectPrompt({
-  prompt,
-}: {
-  prompt: Extract<ActivePrompt, { kind: "multiselect" }>;
-}): React.ReactNode {
-  const [selected, setSelected] = useState<Set<string>>(
-    () => new Set(prompt.initialSelected)
-  );
-  const [highlighted, setHighlighted] = useState<number>(0);
-  const totalCount = prompt.options.length;
-
-  const toggleAt = (idx: number) => {
-    const current = prompt.options[idx];
-    if (!current) {
-      return;
-    }
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(current.value)) {
-        next.delete(current.value);
-      } else {
-        next.add(current.value);
-      }
-      return next;
-    });
-  };
-
-  const commit = () => {
-    if (prompt.required && selected.size === 0) {
-      return;
-    }
-    // Preserve source option order in the returned array.
-    const ordered = prompt.options
-      .map((option) => option.value)
-      .filter((value) => selected.has(value));
-    prompt.resolve(ordered);
-  };
-
-  useInput((input, key) => {
-    if (key.upArrow) {
-      setHighlighted((idx) => (idx === 0 ? totalCount - 1 : idx - 1));
-      return;
-    }
-    if (key.downArrow) {
-      setHighlighted((idx) => (idx + 1) % totalCount);
-      return;
-    }
-    if (key.escape || (key.ctrl && input === "c")) {
-      // Cooperative cancel — Esc, or Ctrl+C in raw mode where Node
-      // doesn't deliver SIGINT. Resolves with `null`, which the
-      // bridge translates to `CANCELLED`.
-      prompt.resolve(null);
-      return;
-    }
-    if (input === " ") {
-      toggleAt(highlighted);
-      return;
-    }
-    if (key.return) {
-      commit();
-    }
-  });
-
-  return (
-    <Box flexDirection="column" flexShrink={0} gap={1} marginTop={1}>
-      <Text>{prompt.message}</Text>
-      <Box flexDirection="row" gap={2}>
-        <Text color={MUTED}>space toggle · enter confirm · esc cancel</Text>
-        <Text color={ACCENT}>
-          {selected.size}/{totalCount} selected
-        </Text>
-      </Box>
-      <Box flexDirection="column">
-        {prompt.options.map((option, idx) => {
-          const isSelected = selected.has(option.value);
-          const isCursor = idx === highlighted;
-          let marker = "[ ]";
-          let markerColor = MUTED;
-          if (isSelected) {
-            marker = "[✔]";
-            markerColor = COLOR_SUCCESS;
-          }
-          let cursor = " ";
-          if (isCursor) {
-            cursor = "›";
-          }
-          return (
-            <Box flexDirection="row" key={option.value}>
-              <Box width={2}>
-                <Text color={ACCENT}>{cursor}</Text>
-              </Box>
-              <Text color={markerColor}>{marker}</Text>
-              <Text> {option.label}</Text>
-              {option.hint !== undefined && option.hint !== "" ? (
-                <Text color={MUTED}> {option.hint}</Text>
-              ) : null}
-            </Box>
-          );
-        })}
-      </Box>
-    </Box>
-  );
-}
-
-// ────────────────────────────── Sidebar ───────────────────────────────
-
-/**
- * The sidebar stacks three panels top-to-bottom:
- *
- *   1. {@link TipPanel}      — fixed height, pinned. Can never be
- *      squashed by the panels below.
- *   2. {@link ProgressPanel} — auto height, one row per visible step.
- *   3. {@link FilesPanel}    — windowed tail of the read-files tree.
- *
- * On narrow terminals (`columns < SIDEBAR_BREAKPOINT`) the parent
- * App hides the whole sidebar; the inline `FileReadStatus` line in
- * `MainColumn` takes over the file-read indicator role.
- */
-function Sidebar({
-  tipIndex,
-  steps,
-  filesRead,
-  terminalRows,
-  hasActivePrompt,
-}: {
-  tipIndex: number;
-  steps: StepEntry[];
-  filesRead: FileReadEntry[];
-  terminalRows: number;
-  hasActivePrompt: boolean;
-}): React.ReactNode {
-  // Reserve space for the tip card (~9 rows including its border)
-  // and the progress checklist (steps + 3 rows of border + title).
-  // Whatever remains, clamped between MIN/MAX_FILE_ROWS, goes to
-  // the files panel as its viewport.
-  const tipReserved = 9;
-  const progressReserved = steps.length + 3;
-  const fileBudget = Math.max(
-    MIN_FILE_ROWS,
-    Math.min(MAX_FILE_ROWS, terminalRows - tipReserved - progressReserved - 2)
-  );
-  // No `gap` between panels — the rounded borders touch edge-to-edge,
-  // which reads as a single chrome region rather than three floating
-  // cards with empty rows between them.
-  return (
-    <Box flexDirection="column" flexShrink={0} width={SIDEBAR_WIDTH}>
-      <TipPanel tipIndex={tipIndex} />
-      <ProgressPanel steps={steps} />
-      <FilesPanel
-        filesRead={filesRead}
-        hasActivePrompt={hasActivePrompt}
-        maxRows={fileBudget}
-      />
-    </Box>
-  );
-}
+// ──────────────────────────── Tip Panel ──────────────────────────────
 
 function TipPanel({ tipIndex }: { tipIndex: number }): React.ReactNode {
   const tip = SENTRY_TIPS[tipIndex % SENTRY_TIPS.length] as SentryTip;
   const total = SENTRY_TIPS.length;
   const oneIndexed = (tipIndex % total) + 1;
-  // Three-row layout:
-  //   1. Section header (faint, eyebrow-style) — anchors the panel's
-  //      identity without consuming the border real estate Ink
-  //      can't draw a title onto.
-  //   2. Tip title (bold, accent) — the highlight row.
-  //   3. Tip body, then a right-aligned "Tip n of N" counter at the
-  //      bottom so the counter doesn't compete with the title for
-  //      the eye.
   return (
     <Box
       borderColor={MUTED}
@@ -812,56 +563,49 @@ function TipPanel({ tipIndex }: { tipIndex: number }): React.ReactNode {
   );
 }
 
-/**
- * Static checklist of workflow steps. Each row reflects a
- * `StepEntry.status`:
- *
- *   - `pending`     — muted ◯
- *   - `in_progress` — accent ▶
- *   - `completed`   — success ✓
- *   - `skipped`     — muted ◌ (lighter than pending)
- *   - `failed`      — error ✖
- */
+// ────────────────────────── Progress Panel ────────────────────────────
+
 function ProgressPanel({ steps }: { steps: StepEntry[] }): React.ReactNode {
   const completedCount = steps.filter(
     (entry) => entry.status === "completed"
   ).length;
   const totalCount = steps.length;
-  // Eyebrow header on the left, completion ratio right-aligned so
-  // the eye can scan one column for "where am I" and the other for
-  // "how far along". Matches the layout pattern used in TipPanel
-  // and FilesPanel.
+
   return (
-    <Box
-      borderColor={MUTED}
-      borderStyle="round"
-      flexDirection="column"
-      flexShrink={0}
-      paddingX={1}
-    >
-      <Box justifyContent="space-between">
-        <Text bold color={MUTED}>
-          Progress
-        </Text>
-        <Text color={MUTED}>
-          {completedCount}/{totalCount}
-        </Text>
-      </Box>
+    <Box flexDirection="column" flexShrink={0}>
+      <Text bold>Tasks</Text>
+      <Text> </Text>
+      {steps.length === 0 ? (
+        <Box gap={1}>
+          <Spinner type="dots" />
+          <Text dimColor>Analyzing project...</Text>
+        </Box>
+      ) : null}
       {steps.map((entry) => (
         <ProgressRow entry={entry} key={entry.id} />
       ))}
+      {totalCount > 0 ? (
+        <Box gap={1} marginTop={1}>
+          <Spinner type="dots" />
+          <Text dimColor>
+            {completedCount < totalCount
+              ? `Progress: ${completedCount}/${totalCount} completed`
+              : "Cleaning up..."}
+          </Text>
+        </Box>
+      ) : null}
     </Box>
   );
 }
 
 function ProgressRow({ entry }: { entry: StepEntry }): React.ReactNode {
-  const { glyph, glyphColor, label } = progressStyle(entry);
+  const { glyph, glyphColor, labelColor } = progressStyle(entry);
   return (
     <Box flexDirection="row" flexShrink={0}>
-      <Box width={2}>
+      <Box width={3}>
         <Text color={glyphColor}>{glyph}</Text>
       </Box>
-      <Text color={label}>{entry.label}</Text>
+      <Text color={labelColor}>{entry.label}</Text>
     </Box>
   );
 }
@@ -869,59 +613,37 @@ function ProgressRow({ entry }: { entry: StepEntry }): React.ReactNode {
 function progressStyle(entry: StepEntry): {
   glyph: string;
   glyphColor: string;
-  label: string;
+  labelColor: string;
 } {
   if (entry.status === "in_progress") {
-    return { glyph: "▶", glyphColor: ACCENT, label: "white" };
+    return {
+      glyph: ICONS.triangleRight,
+      glyphColor: PRIMARY,
+      labelColor: "white",
+    };
   }
   if (entry.status === "completed") {
-    return { glyph: "✓", glyphColor: COLOR_SUCCESS, label: MUTED };
+    return {
+      glyph: ICONS.squareFilled,
+      glyphColor: COLOR_SUCCESS,
+      labelColor: MUTED,
+    };
   }
   if (entry.status === "failed") {
-    return { glyph: "✖", glyphColor: COLOR_ERROR, label: COLOR_ERROR };
+    return {
+      glyph: "\u2716",
+      glyphColor: COLOR_ERROR,
+      labelColor: COLOR_ERROR,
+    };
   }
   if (entry.status === "skipped") {
-    return { glyph: "◌", glyphColor: MUTED, label: MUTED };
+    return { glyph: "\u25CC", glyphColor: MUTED, labelColor: MUTED };
   }
-  // pending
-  return { glyph: "◯", glyphColor: MUTED, label: MUTED };
+  return { glyph: ICONS.squareOpen, glyphColor: MUTED, labelColor: MUTED };
 }
 
-/**
- * Read-files tree, rendered inside a fixed-height viewport with a
- * visual scrollbar on the right edge and keyboard-driven scroll-back.
- *
- * Auto-follow ("pinned to bottom") mode is the default — newly-read
- * files always come into view, like `tail -f`. The user can scroll
- * back through history with arrow keys / PgUp / PgDn / Home; pressing
- * End or Esc re-pins to the bottom. While unpinned, new file reads
- * don't snap the viewport; the user keeps their place in the
- * scrollback.
- *
- * Keyboard:
- *   - ↑ / ↓     — scroll one row
- *   - PgUp / PgDn — scroll one viewport
- *   - Home      — jump to oldest entry
- *   - End / Esc — re-pin to latest (bottom)
- *
- * The keyboard handler is gated on `!hasActivePrompt` so it doesn't
- * fight the active select/multi-select prompt's own `useInput`. When
- * a prompt is up, the panel still renders correctly — the user just
- * can't scroll until the prompt resolves.
- *
- * Visual rules:
- *   - Directories: muted gray box-drawing branches + name with `/`.
- *   - Active reads (`status === "reading"`): magenta `◐` glyph,
- *     normal-color filename. The eye picks these out instantly.
- *   - Analyzed (`status === "analyzed"`): green `✓` glyph, dimmed
- *     filename. Done work recedes; in-flight work pops.
- *   - Right-edge scrollbar: full-height `│` track with a `█` thumb
- *     showing the visible window's position relative to total rows.
- *     Hidden when content fits the viewport.
- *
- * Hidden until at least one file has been recorded — the empty box
- * would just be visual noise during the auth/discover phase.
- */
+// ─────────────────────────── Files Panel ──────────────────────────────
+
 function FilesPanel({
   filesRead,
   maxRows,
@@ -931,12 +653,6 @@ function FilesPanel({
   maxRows: number;
   hasActivePrompt: boolean;
 }): React.ReactNode {
-  // Scroll state: `pinnedToBottom` true means viewport tracks the
-  // newest rows automatically as files arrive. `offset` is the
-  // number of rows scrolled UP from the bottom — only meaningful
-  // when not pinned. Both are pure UI state, owned by this
-  // component (not the wizard store) — they're "what the user is
-  // looking at", not "what the wizard is doing".
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
   const [offset, setOffset] = useState(0);
 
@@ -944,35 +660,16 @@ function FilesPanel({
   const rows = flattenTree(tree);
   const totalRows = rows.length;
 
-  // Header takes 1 row of the vertical budget; reserve it. The
-  // remainder is the viewport for file rows.
   const viewport = Math.max(1, maxRows - 1);
   const canScroll = totalRows > viewport;
 
-  // Clamp offset to valid range — protects against shrinking the
-  // tree (e.g. a re-scan with fewer files) leaving a stale offset
-  // beyond the new totalRows.
   const maxOffset = Math.max(0, totalRows - viewport);
   const effectiveOffset = pinnedToBottom ? 0 : Math.min(offset, maxOffset);
 
-  // Visible window: when pinned, the last `viewport` rows. When
-  // scrolled up by `effectiveOffset`, slide the window up by that
-  // many rows from the bottom.
   const sliceEnd = totalRows - effectiveOffset;
   const sliceStart = Math.max(0, sliceEnd - viewport);
   const visible = rows.slice(sliceStart, sliceEnd);
 
-  // Track the previous totalRows so we can detect "new files
-  // arrived while the user was scrolled up" — in that case we keep
-  // the user's place by bumping `offset` to compensate. Without
-  // this, new arrivals would shift the user's view by the number
-  // of new rows.
-  //
-  // Also clamps `offset` to the new `maxOffset` when the tree
-  // shrinks (e.g. a re-scan with fewer files): without the clamp,
-  // a stale offset beyond the new maxOffset would still display
-  // correctly via `effectiveOffset`, but the underlying state
-  // would be wrong and one PgDn would feel inert.
   const prevTotalRef = useRef(totalRows);
   useEffect(() => {
     const prev = prevTotalRef.current;
@@ -1023,10 +720,6 @@ function FilesPanel({
         });
         return;
       }
-      // Home → jump to oldest (top of scrollback). End / Esc →
-      // re-pin to latest (bottom). Esc doubles as "stop scrolling"
-      // because users reach for it instinctively to undo a
-      // navigation mistake.
       if (key.home) {
         setPinnedToBottom(false);
         setOffset(maxOffset);
@@ -1040,9 +733,6 @@ function FilesPanel({
     { isActive: !hasActivePrompt }
   );
 
-  // The store's `filesRead` array is mutated by the bridge — guard
-  // against rendering an empty panel during the brief window
-  // before the first `recordFilesReading` call.
   if (filesRead.length === 0) {
     return null;
   }
@@ -1050,10 +740,6 @@ function FilesPanel({
   const analyzedCount = filesRead.filter(
     (entry) => entry.status === "analyzed"
   ).length;
-  // Pad out the visible window so the panel stays a consistent
-  // height even when totalRows < viewport. Without this, the
-  // scrollbar column on the right would render shorter than the
-  // content column, leaving a ragged right edge.
   const padding = Math.max(0, viewport - visible.length);
 
   return (
@@ -1062,6 +748,7 @@ function FilesPanel({
       borderStyle="round"
       flexDirection="column"
       flexShrink={0}
+      marginTop={1}
       paddingX={1}
     >
       <Box justifyContent="space-between">
@@ -1069,23 +756,17 @@ function FilesPanel({
           Files analyzed
         </Text>
         <Text color={MUTED}>
-          {pinnedToBottom ? "" : "↑ "}
+          {pinnedToBottom ? "" : "\u2191 "}
           {analyzedCount}/{filesRead.length}
         </Text>
       </Box>
       <Box flexDirection="row">
         <Box flexDirection="column" flexGrow={1}>
           {visible.map((row, i) => (
-            // Tree rows are positionally stable for a given
-            // filesRead snapshot — `buildReadTree` walks
-            // `filesRead` in insertion order and never reorders,
-            // so the index makes a fine key.
             // biome-ignore lint/suspicious/noArrayIndexKey: positional read-tree rows
             <ReadTreeLine key={`r${i}`} row={row} />
           ))}
           {Array.from({ length: padding }, (_, i) => (
-            // Empty filler rows — keep the panel a consistent
-            // height when content underflows the viewport.
             // biome-ignore lint/suspicious/noArrayIndexKey: positional filler
             <Text key={`p${i}`}> </Text>
           ))}
@@ -1102,16 +783,6 @@ function FilesPanel({
   );
 }
 
-/**
- * Vertical scrollbar drawn as a 1-column track of `│` characters
- * with a `█` thumb showing the visible window's position. The
- * thumb size scales with the ratio of `viewport / totalRows`,
- * minimum 1 row so it never disappears entirely.
- *
- * `offset` is the number of rows scrolled UP from the bottom (0 =
- * pinned to bottom). The thumb's vertical position grows as
- * `offset` grows, with offset `maxOffset` putting it at the top.
- */
 function Scrollbar({
   offset,
   totalRows,
@@ -1121,22 +792,17 @@ function Scrollbar({
   totalRows: number;
   viewport: number;
 }): React.ReactNode {
-  const maxOffset = Math.max(1, totalRows - viewport);
+  const maxOff = Math.max(1, totalRows - viewport);
   const thumbSize = Math.max(1, Math.floor((viewport * viewport) / totalRows));
   const trackSpan = Math.max(1, viewport - thumbSize);
-  // Bottom of viewport corresponds to offset=0 (thumb at bottom).
-  // Top of viewport corresponds to offset=maxOffset (thumb at top).
-  // Linearly interpolate between the two.
-  const thumbStart = Math.round(((maxOffset - offset) / maxOffset) * trackSpan);
+  const thumbStart = Math.round(((maxOff - offset) / maxOff) * trackSpan);
   const cells = Array.from({ length: viewport }, (_v, i) => {
     const inThumb = i >= thumbStart && i < thumbStart + thumbSize;
-    return inThumb ? "█" : "│";
+    return inThumb ? "\u2588" : "\u2502";
   });
   return (
     <Box flexDirection="column" flexShrink={0} marginLeft={1}>
       {cells.map((cell, i) => (
-        // Scrollbar cells are positional, stable, and never
-        // reordered — the index key is correct here.
         // biome-ignore lint/suspicious/noArrayIndexKey: positional scrollbar
         <Text color={MUTED} key={i}>
           {cell}
@@ -1171,7 +837,252 @@ function readStatusStyle(status: FileTreeRow["status"]): {
   labelColor: string;
 } {
   if (status === "reading") {
-    return { glyph: "◐", glyphColor: ACCENT, labelColor: "white" };
+    return { glyph: "\u25D0", glyphColor: PRIMARY, labelColor: "white" };
   }
-  return { glyph: "✓", glyphColor: COLOR_SUCCESS, labelColor: MUTED };
+  return { glyph: "\u2713", glyphColor: COLOR_SUCCESS, labelColor: MUTED };
+}
+
+// ────────────────────────────── Summary ───────────────────────────────
+
+function SummaryPanel({
+  summary,
+}: {
+  summary: WizardSummary;
+}): React.ReactNode {
+  return (
+    <Box
+      borderBottom={false}
+      borderColor={MUTED}
+      borderLeft={false}
+      borderRight={false}
+      borderStyle="single"
+      flexDirection="column"
+      flexShrink={0}
+      marginTop={1}
+      paddingTop={1}
+    >
+      {summary.fields.length > 0 ? (
+        <Box flexDirection="column" flexShrink={0}>
+          {summary.fields.map((field) => (
+            <Box flexDirection="row" flexShrink={0} key={field.label}>
+              <Box width={12}>
+                <Text color={MUTED}>{field.label}</Text>
+              </Box>
+              <Text>{field.value}</Text>
+            </Box>
+          ))}
+        </Box>
+      ) : null}
+      {summary.changedFiles !== undefined && summary.changedFiles.length > 0 ? (
+        <ChangedFilesTree files={summary.changedFiles} />
+      ) : null}
+    </Box>
+  );
+}
+
+function ChangedFilesTree({
+  files,
+}: {
+  files: { action: string; path: string }[];
+}): React.ReactNode {
+  const tree = buildFileTree(files);
+  const treeRows = flattenTree(tree);
+  return (
+    <Box flexDirection="column" flexShrink={0} marginTop={1}>
+      <Text color={MUTED}>Changed files</Text>
+      {treeRows.map((row, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: positional tree rows
+        <FileTreeLine key={i} row={row} />
+      ))}
+    </Box>
+  );
+}
+
+function FileTreeLine({ row }: { row: FileTreeRow }): React.ReactNode {
+  if (row.kind === "directory") {
+    return (
+      <Box flexDirection="row" flexShrink={0}>
+        <Text color={MUTED}>{`${row.prefix}${row.branch} `}</Text>
+        <Text>{row.label}</Text>
+      </Box>
+    );
+  }
+  const { glyph, color } = changedFileStyle(row.action ?? "modify");
+  return (
+    <Box flexDirection="row" flexShrink={0}>
+      <Text color={MUTED}>{`${row.prefix}${row.branch} `}</Text>
+      <Text color={color}>{`${glyph} `}</Text>
+      <Text>{row.label}</Text>
+    </Box>
+  );
+}
+
+function changedFileStyle(action: string): { glyph: string; color: string } {
+  if (action === "create") {
+    return { glyph: "+", color: COLOR_SUCCESS };
+  }
+  if (action === "delete") {
+    return { glyph: "\u2212", color: COLOR_ERROR };
+  }
+  return { glyph: "~", color: COLOR_WARN };
+}
+
+// ─────────────────────────────── Prompts ──────────────────────────────
+
+function PromptArea({ prompt }: { prompt: ActivePrompt }): React.ReactNode {
+  if (prompt.kind === "select") {
+    return <SelectPrompt prompt={prompt} />;
+  }
+  return <MultiSelectPrompt prompt={prompt} />;
+}
+
+function SelectPrompt({
+  prompt,
+}: {
+  prompt: Extract<ActivePrompt, { kind: "select" }>;
+}): React.ReactNode {
+  const totalCount = prompt.options.length;
+  const [highlighted, setHighlighted] = useState<number>(() =>
+    Math.min(Math.max(prompt.initialIndex, 0), Math.max(0, totalCount - 1))
+  );
+
+  useInput((input, key) => {
+    if (key.upArrow) {
+      setHighlighted((idx) => (idx === 0 ? totalCount - 1 : idx - 1));
+      return;
+    }
+    if (key.downArrow) {
+      setHighlighted((idx) => (idx + 1) % totalCount);
+      return;
+    }
+    if (key.escape || (key.ctrl && input === "c")) {
+      prompt.resolve(null);
+      return;
+    }
+    if (key.return) {
+      const current = prompt.options[highlighted];
+      if (current) {
+        prompt.resolve(current.value);
+      }
+    }
+  });
+
+  return (
+    <Box flexDirection="column" flexShrink={0} gap={1} marginTop={1}>
+      <Text>{prompt.message}</Text>
+      <Box flexDirection="column">
+        {prompt.options.map((option, idx) => {
+          const isCursor = idx === highlighted;
+          // biome-ignore lint/nursery/noLeakedRender: variable assignment, not JSX expression
+          const labelColor = isCursor ? "white" : MUTED;
+          return (
+            <Box flexDirection="row" key={option.value}>
+              <Box width={3}>
+                <Text color={ACCENT}>{isCursor ? "\u25B8" : " "}</Text>
+              </Box>
+              <Text color={labelColor}>{option.label}</Text>
+              {option.hint !== undefined && option.hint !== "" ? (
+                <Text color={MUTED}> {option.hint}</Text>
+              ) : null}
+            </Box>
+          );
+        })}
+      </Box>
+    </Box>
+  );
+}
+
+function MultiSelectPrompt({
+  prompt,
+}: {
+  prompt: Extract<ActivePrompt, { kind: "multiselect" }>;
+}): React.ReactNode {
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(prompt.initialSelected)
+  );
+  const [highlighted, setHighlighted] = useState<number>(0);
+  const totalCount = prompt.options.length;
+
+  const toggleAt = (idx: number) => {
+    const current = prompt.options[idx];
+    if (!current) {
+      return;
+    }
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(current.value)) {
+        next.delete(current.value);
+      } else {
+        next.add(current.value);
+      }
+      return next;
+    });
+  };
+
+  const commit = () => {
+    if (prompt.required && selected.size === 0) {
+      return;
+    }
+    const ordered = prompt.options
+      .map((option) => option.value)
+      .filter((value) => selected.has(value));
+    prompt.resolve(ordered);
+  };
+
+  useInput((input, key) => {
+    if (key.upArrow) {
+      setHighlighted((idx) => (idx === 0 ? totalCount - 1 : idx - 1));
+      return;
+    }
+    if (key.downArrow) {
+      setHighlighted((idx) => (idx + 1) % totalCount);
+      return;
+    }
+    if (key.escape || (key.ctrl && input === "c")) {
+      prompt.resolve(null);
+      return;
+    }
+    if (input === " ") {
+      toggleAt(highlighted);
+      return;
+    }
+    if (key.return) {
+      commit();
+    }
+  });
+
+  return (
+    <Box flexDirection="column" flexShrink={0} gap={1} marginTop={1}>
+      <Text>{prompt.message}</Text>
+      <Box flexDirection="row" gap={2}>
+        <Text color={MUTED}>
+          space toggle \u00B7 enter confirm \u00B7 esc cancel
+        </Text>
+        <Text color={ACCENT}>
+          {selected.size}/{totalCount} selected
+        </Text>
+      </Box>
+      <Box flexDirection="column">
+        {prompt.options.map((option, idx) => {
+          const isSelected = selected.has(option.value);
+          const isCursor = idx === highlighted;
+          const marker = isSelected ? ICONS.squareFilled : ICONS.squareOpen;
+          // biome-ignore lint/nursery/noLeakedRender: variable assignment, not JSX expression
+          const markerColor = isSelected ? COLOR_SUCCESS : MUTED;
+          return (
+            <Box flexDirection="row" key={option.value}>
+              <Box width={3}>
+                <Text color={ACCENT}>{isCursor ? "\u25B8" : " "}</Text>
+              </Box>
+              <Text color={markerColor}>{marker}</Text>
+              <Text> {option.label}</Text>
+              {option.hint !== undefined && option.hint !== "" ? (
+                <Text color={MUTED}> {option.hint}</Text>
+              ) : null}
+            </Box>
+          );
+        })}
+      </Box>
+    </Box>
+  );
 }

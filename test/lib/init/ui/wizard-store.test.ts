@@ -158,6 +158,39 @@ describe("WizardStore step progress", () => {
  * construction and clears it on teardown so a stale Ink dispatch
  * after unmount can't re-enter cancellation.
  */
+describe("WizardStore status messages", () => {
+  test("starts with empty status messages", () => {
+    const store = new WizardStore();
+    expect(store.getSnapshot().statusMessages).toEqual([]);
+    expect(store.getSnapshot().statusExpanded).toBe(false);
+  });
+
+  test("appendStatus adds messages", () => {
+    const store = new WizardStore();
+    store.appendStatus("Analyzing project...");
+    store.appendStatus("Reading files...");
+    expect(store.getSnapshot().statusMessages).toEqual([
+      "Analyzing project...",
+      "Reading files...",
+    ]);
+  });
+
+  test("appendStatus ignores empty strings", () => {
+    const store = new WizardStore();
+    store.appendStatus("");
+    expect(store.getSnapshot().statusMessages).toEqual([]);
+  });
+
+  test("toggleStatusExpanded flips the flag", () => {
+    const store = new WizardStore();
+    expect(store.getSnapshot().statusExpanded).toBe(false);
+    store.toggleStatusExpanded();
+    expect(store.getSnapshot().statusExpanded).toBe(true);
+    store.toggleStatusExpanded();
+    expect(store.getSnapshot().statusExpanded).toBe(false);
+  });
+});
+
 describe("WizardStore.setRequestCancel", () => {
   test("starts undefined so an early Ctrl+C is a no-op", () => {
     const store = new WizardStore();
