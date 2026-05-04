@@ -779,7 +779,7 @@ function FilesPanel({
         setOffset(maxOffset);
         return;
       }
-      if (key.end || key.escape) {
+      if (key.end) {
         setPinnedToBottom(true);
         setOffset(0);
       }

@@ -861,7 +861,7 @@ export class InkUI implements WizardUI {
       this.requestCancel();
     };
     this.cancelHandler = handler;
-    process.once("SIGINT", handler);
+    process.on("SIGINT", handler);
   }
 }
 

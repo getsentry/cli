@@ -465,6 +465,8 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     forceLegacy: forceLegacyUi,
   });
 
+  await checkReadiness(ui);
+
   if (!(await preamble(directory, yes, dryRun, ui))) {
     return;
   }
@@ -473,8 +475,6 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     "This wizard uses AI to analyze your project and configure Sentry." +
       `\nFor manual setup: ${terminalLink(SENTRY_DOCS_URL)}`
   );
-
-  await checkReadiness(ui);
 
   const effectiveOptions = dryRun
     ? { ...initialOptions, yes: true }
