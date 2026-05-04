@@ -375,6 +375,14 @@ export class InkUI implements WizardUI {
    */
   private outroMessage: string | undefined;
   private failureMessage: string | undefined;
+  /**
+   * Resolved when the user presses any key on the outro screen.
+   * `[Symbol.asyncDispose]` awaits this so the `using` block keeps the
+   * UI alive until the user has seen and acknowledged the final screen.
+   */
+  private outroDismissed:
+    | { promise: Promise<void>; resolve: () => void }
+    | undefined;
 
   constructor(
     instance: InkInstance,
@@ -413,6 +421,7 @@ export class InkUI implements WizardUI {
     this.appendLog("success", clean);
     this.store.setOutro({ kind: "success", message: clean });
     this.outroMessage = clean;
+    this.createOutroDismissed();
   }
 
   cancel(message: string): void {
@@ -425,6 +434,7 @@ export class InkUI implements WizardUI {
       .map((e) => e.text);
     this.store.setOutro({ kind: "error", message: clean, errors });
     this.failureMessage = clean;
+    this.createOutroDismissed();
   }
 
   summary(summary: WizardSummary): void {
@@ -603,6 +613,9 @@ export class InkUI implements WizardUI {
   // ── Disposal ──────────────────────────────────────────────────────
 
   [Symbol.asyncDispose](): Promise<void> {
+    if (this.outroDismissed) {
+      return this.outroDismissed.promise.then(() => this.tearDown());
+    }
     this.tearDown();
     return Promise.resolve();
   }
@@ -720,6 +733,13 @@ export class InkUI implements WizardUI {
    * no-op (the `cancelRequested` flag short-circuits).
    */
   requestCancel(): void {
+    // Outro path — the user pressed a key on the final screen.
+    // Resolve the dismiss promise so `[Symbol.asyncDispose]` can
+    // proceed with teardown through the normal `using` exit path.
+    if (this.outroDismissed) {
+      this.outroDismissed.resolve();
+      return;
+    }
     const promptCancel = this.activePromptCancel;
     if (promptCancel) {
       // Prompt path — let the runner unwind via WizardCancelledError.
@@ -742,6 +762,14 @@ export class InkUI implements WizardUI {
     // stdout writes from tearDown (alternate-screen escape +
     // cancellation report) before the process terminates.
     setImmediate(() => process.exit(130));
+  }
+
+  private createOutroDismissed(): void {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => {
+      resolve = r;
+    });
+    this.outroDismissed = { promise, resolve };
   }
 
   /**
