@@ -49,7 +49,6 @@ import type {
   LearnState,
   LogEntry,
   LogSeverity,
-  OutroState,
   SpinnerState,
   StepEntry,
   WizardStore,
@@ -117,10 +116,6 @@ export function App({ store }: AppProps): React.ReactNode {
   const contentHeight = Math.max(5, rows - 3);
 
   useInput((input, key) => {
-    if (snapshot.outroState) {
-      snapshot.requestCancel?.();
-      return;
-    }
     if (key.ctrl && input === "c" && !snapshot.prompt) {
       snapshot.requestCancel?.();
       return;
@@ -153,9 +148,6 @@ export function App({ store }: AppProps): React.ReactNode {
   );
 
   const hints: KeyHint[] = useMemo(() => {
-    if (snapshot.outroState) {
-      return [{ label: "any key", action: "exit" }];
-    }
     const h: KeyHint[] = [{ label: "\u2190\u2192", action: "switch tab" }];
     if (statusMessages.length > STATUS_COLLAPSED_COUNT) {
       h.push({ label: "s", action: "toggle status" });
@@ -176,7 +168,6 @@ export function App({ store }: AppProps): React.ReactNode {
   }, [
     statusMessages.length,
     snapshot.prompt,
-    snapshot.outroState,
     activeTab,
     snapshot.filesRead.length,
   ]);
@@ -191,13 +182,7 @@ export function App({ store }: AppProps): React.ReactNode {
             flexShrink={1}
             overflow="hidden"
           >
-            {snapshot.outroState ? (
-              <OutroScreen
-                outro={snapshot.outroState}
-                summary={snapshot.summary}
-              />
-            ) : null}
-            {!snapshot.outroState && activeTab === 0 ? (
+            {activeTab === 0 ? (
               <StatusScreen
                 bannerRows={snapshot.bannerRows}
                 learnState={snapshot.learnState}
@@ -210,14 +195,13 @@ export function App({ store }: AppProps): React.ReactNode {
                 tipIndex={snapshot.tipIndex}
                 width={width - 2}
               />
-            ) : null}
-            {!snapshot.outroState && activeTab !== 0 ? (
+            ) : (
               <FilesScreen
                 filesRead={snapshot.filesRead}
                 hasActivePrompt={snapshot.prompt !== null}
                 terminalRows={rows}
               />
-            ) : null}
+            )}
           </Box>
 
           {snapshot.overlay ? (
@@ -523,64 +507,6 @@ function FilesScreen({
 }
 
 // ──────────────────────────── Outro Screen ────────────────────────────
-
-function OutroScreen({
-  outro,
-  summary,
-}: {
-  outro: NonNullable<OutroState>;
-  summary: WizardSummary | null;
-}): React.ReactNode {
-  const isSuccess = outro.kind === "success";
-  const isError = outro.kind === "error";
-
-  let icon: string;
-  let iconColor: string;
-  if (isSuccess) {
-    icon = "✔";
-    iconColor = COLOR_SUCCESS;
-  } else if (isError) {
-    icon = "✖";
-    iconColor = COLOR_ERROR;
-  } else {
-    icon = "■";
-    iconColor = COLOR_WARN;
-  }
-
-  const showErrors = isError && "errors" in outro && outro.errors.length > 0;
-  const showSummary = isSuccess && summary !== null;
-
-  return (
-    <Box flexDirection="column" flexGrow={1} paddingTop={1} paddingX={1}>
-      <Box gap={1}>
-        <Text bold color={iconColor}>
-          {icon}
-        </Text>
-        <Text bold>{outro.message}</Text>
-      </Box>
-      {showErrors ? (
-        <Box flexDirection="column" marginTop={1} paddingLeft={3}>
-          {"errors" in outro
-            ? outro.errors.map((err, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: positional error lines
-                <Text color={COLOR_ERROR} key={i}>
-                  {err}
-                </Text>
-              ))
-            : null}
-        </Box>
-      ) : null}
-      {showSummary ? (
-        <Box flexDirection="column" marginTop={1}>
-          <SummaryPanel summary={summary} />
-        </Box>
-      ) : null}
-      <Box marginTop={1}>
-        <Text dimColor>Press any key to exit</Text>
-      </Box>
-    </Box>
-  );
-}
 
 // ──────────────────────────── Overlay ─────────────────────────────────
 
