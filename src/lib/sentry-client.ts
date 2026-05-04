@@ -187,8 +187,8 @@ async function handleUnauthorized(headers: Headers): Promise<boolean> {
       headers.set(RETRY_MARKER_HEADER, "1");
       return true;
     }
-  } catch {
-    // Token refresh failed
+  } catch (error) {
+    log.debug("Token refresh failed after 401", error);
   }
   return false;
 }
@@ -419,8 +419,8 @@ function cacheResponse(
     fullUrl,
     requestHeaders,
     response.clone() as Response
-  ).catch(() => {
-    // Non-fatal: cache write failures don't affect the response
+  ).catch((error) => {
+    log.debug("Response cache write failed", error);
   });
 }
 
@@ -447,8 +447,8 @@ async function invalidateAfterMutation(
     await Promise.all(
       prefixes.map((prefix) => invalidateCachedResponsesMatching(prefix))
     );
-  } catch {
-    /* best-effort: mutation already succeeded upstream */
+  } catch (error) {
+    log.debug("Post-mutation cache invalidation failed", error);
   }
 }
 
