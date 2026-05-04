@@ -20,15 +20,17 @@
 - One test file: `bun test path/to/file.test.ts --timeout 15000 --isolate`
 - Metadata checks: `bun run check:fragments`; `bun run check:errors`; `bun run check:deps`
 
-## Task References
+## Policies
 - Runtime APIs, packages, Node distribution: `policies/runtime-and-deps.md`
 - Commands, routes, mutations: `policies/cli-command-design.md`
 - Human output, JSON output, errors: `policies/output-and-errors.md`
 - Cursor pagination for list commands: `policies/pagination.md`
 - Test style and isolation: `policies/testing.md`
 - Generated docs, skills, schemas: `policies/generated-artifacts.md`
-- Local CLI smoke testing: `playbooks/local-cli-testing.md`
 - Edge-case implementation notes: `policies/implementation-notes.md`
+
+## Playbooks
+- Local CLI smoke testing: `playbooks/local-cli-testing.md`
 
 ## Key Conventions
 - Command code uses repo wrappers: `buildCommand`, `buildListCommand`, `buildDeleteCommand`, and `buildRouteMap`.
