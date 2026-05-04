@@ -178,15 +178,14 @@ function buildReplaySearchQuery(filters: {
   exitPath?: string;
 }): string | undefined {
   const { entryPath, exitPath, path, query, url } = filters;
+  // Replay search only has a generic visited-URL field. Use one broad server
+  // prefilter, then apply entry/exit position checks against the URL list below.
+  const routePathPrefilter = path ?? entryPath ?? exitPath;
   const parts = [
     query,
     url ? `url:${quoteSearchValue(wildcardSearchValue(url))}` : undefined,
-    path ? `url:${quoteSearchValue(wildcardSearchValue(path))}` : undefined,
-    entryPath
-      ? `url:${quoteSearchValue(wildcardSearchValue(entryPath))}`
-      : undefined,
-    exitPath
-      ? `url:${quoteSearchValue(wildcardSearchValue(exitPath))}`
+    routePathPrefilter
+      ? `url:${quoteSearchValue(wildcardSearchValue(routePathPrefilter))}`
       : undefined,
   ].filter((part): part is string => Boolean(part));
   return parts.length > 0 ? parts.join(" ") : undefined;

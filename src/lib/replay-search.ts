@@ -128,6 +128,9 @@ export function replayUrlPathMatches(
 
   const normalizedFilter = normalizePathFilter(path);
   const normalizedPath = normalizePathFilter(parts.path);
+  if (normalizedFilter === "/") {
+    return normalizedPath.startsWith("/");
+  }
   return (
     normalizedPath === normalizedFilter ||
     normalizedPath.startsWith(`${normalizedFilter}/`)

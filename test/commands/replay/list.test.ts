@@ -305,6 +305,37 @@ describe("listCommand.func", () => {
     expect(parsed.data[0].urls[0]).toBe("https://example.com/signup/direct");
   });
 
+  test("uses one server URL prefilter for positional path filters", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    listReplaysSpy.mockResolvedValue({ data: sampleReplays });
+
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      {
+        "entry-path": "/home",
+        limit: 25,
+        json: true,
+        path: "/signup",
+        period: parsePeriod("7d"),
+        sort: "-started_at",
+      },
+      "test-org/cli"
+    );
+
+    expect(listReplaysSpy).toHaveBeenCalledWith("test-org", {
+      environment: undefined,
+      fields: [...REPLAY_LIST_FIELDS],
+      limit: 25,
+      projectSlugs: ["cli"],
+      query: "url:*/signup*",
+      sort: "-started_at",
+      cursor: undefined,
+      statsPeriod: "7d",
+    });
+  });
+
   test("renders human output with a replay hint", async () => {
     resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
     listReplaysSpy.mockResolvedValue({ data: sampleReplays });
