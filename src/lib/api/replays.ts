@@ -116,10 +116,14 @@ type FetchReplayRecordingSegmentsPageOptions = {
 /** Options for {@link getReplayRecordingSegments}. */
 export type GetReplayRecordingSegmentsOptions = {
   /**
-   * Total segment count from replay metadata.
+   * Soft stop hint: total segment count from replay metadata.
    *
-   * When available, this lets the client stop once all expected segments are
-   * downloaded even if the API advertises another cursor.
+   * Pagination stops as soon as this many segments have been fetched, even if
+   * the API advertises another cursor. Because metadata can be slightly stale,
+   * the result is NOT trimmed to this value — callers may receive more segments
+   * than expected if the final page overshoots.
+   *
+   * Omit (or pass null/undefined) to fetch all pages up to MAX_PAGINATION_PAGES.
    */
   expectedSegments?: number | null;
 };
@@ -234,6 +238,10 @@ export async function getReplay(
  * Uses the project-scoped replay endpoint because recording segments are
  * partitioned by project. `download=true` matches the frontend contract and
  * returns the parsed segment payload directly.
+ *
+ * Uses a manual pagination loop rather than {@link autoPaginate} because
+ * `autoPaginate` trims results to `limit`, but `expectedSegments` is a soft
+ * hint — trimming could silently drop real segments if metadata is stale.
  */
 export async function getReplayRecordingSegments(
   orgSlug: string,
