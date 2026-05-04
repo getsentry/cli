@@ -208,6 +208,12 @@ describe("viewCommand.func", () => {
     expect(parsed.relatedIssues[0]?.shortId).toBe("CLI-123");
     expect(parsed.relatedTraces[0]?.spanCount).toBe(8);
     expect(parsed.trace_ids[0]).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    expect(getReplayRecordingSegmentsSpy).toHaveBeenCalledWith(
+      "test-org",
+      "42",
+      REPLAY_ID,
+      { expectedSegments: 5 }
+    );
     expect(listIssuesPaginatedSpy).toHaveBeenCalledWith(
       "test-org",
       "",

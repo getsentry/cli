@@ -121,7 +121,6 @@ export const REPLAY_LIST_FIELDS = [
   "info_ids",
   "is_archived",
   "os",
-  "ota_updates",
   "platform",
   "project_id",
   "releases",

@@ -25,7 +25,7 @@ cd cli
 bun install
 
 # Run CLI in development mode
-bun run --env-file=.env.local src/bin.ts --help
+bun run --env-file=.env.local cli --help
 
 # Run tests
 bun test

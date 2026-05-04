@@ -232,7 +232,8 @@ async function fetchReplayActivity(
     const segments = await getReplayRecordingSegments(
       org,
       String(replay.project_id),
-      replay.id
+      replay.id,
+      { expectedSegments: replay.count_segments }
     );
     return extractReplayActivityEvents(segments, MAX_ACTIVITY_EVENTS);
   } catch (error) {
