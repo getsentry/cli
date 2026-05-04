@@ -24,6 +24,7 @@ import {
   API_MAX_PER_PAGE,
   apiRequestToRegion,
   autoPaginate,
+  MAX_PAGINATION_PAGES,
   type PaginatedResponse,
   parseLinkHeader,
 } from "./infrastructure.js";
@@ -102,6 +103,25 @@ type FetchReplayPageOptions = {
   options: ListReplaysOptions;
   perPage: number;
   cursor?: string;
+};
+
+type FetchReplayRecordingSegmentsPageOptions = {
+  regionUrl: string;
+  orgSlug: string;
+  projectSlugOrId: string;
+  replayId: string;
+  cursor?: string;
+};
+
+/** Options for {@link getReplayRecordingSegments}. */
+export type GetReplayRecordingSegmentsOptions = {
+  /**
+   * Total segment count from replay metadata.
+   *
+   * When available, this lets the client stop once all expected segments are
+   * downloaded even if the API advertises another cursor.
+   */
+  expectedSegments?: number | null;
 };
 
 /**
@@ -218,18 +238,54 @@ export async function getReplay(
 export async function getReplayRecordingSegments(
   orgSlug: string,
   projectSlugOrId: string,
-  replayId: string
+  replayId: string,
+  options: GetReplayRecordingSegmentsOptions = {}
 ): Promise<ReplayRecordingSegments> {
   const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data } = await apiRequestToRegion<ReplayRecordingSegments>(
+  const expectedSegments = options.expectedSegments ?? Number.POSITIVE_INFINITY;
+  const segments: ReplayRecordingSegments = [];
+  let cursor: string | undefined;
+
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
+    const { data, nextCursor } = await fetchReplayRecordingSegmentsPage({
+      regionUrl,
+      orgSlug,
+      projectSlugOrId,
+      replayId,
+      cursor,
+    });
+
+    segments.push(...data);
+
+    if (segments.length >= expectedSegments || !nextCursor) {
+      return segments;
+    }
+
+    cursor = nextCursor;
+  }
+
+  return segments;
+}
+
+async function fetchReplayRecordingSegmentsPage(
+  options: FetchReplayRecordingSegmentsPageOptions
+): Promise<PaginatedResponse<ReplayRecordingSegments>> {
+  const { cursor, orgSlug, projectSlugOrId, regionUrl, replayId } = options;
+  const { data, headers } = await apiRequestToRegion<ReplayRecordingSegments>(
     regionUrl,
     `/projects/${orgSlug}/${projectSlugOrId}/replays/${replayId}/recording-segments/`,
     {
-      params: { download: true },
+      params: {
+        cursor,
+        download: true,
+        per_page: API_MAX_PER_PAGE,
+      },
       schema: ReplayRecordingSegmentsSchema,
     }
   );
-  return data;
+
+  const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
+  return { data, nextCursor };
 }
 
 /**

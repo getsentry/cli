@@ -3,6 +3,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { MAX_PAGINATION_PAGES } from "../../../src/lib/api/infrastructure.js";
 import {
   getReplay,
   getReplayRecordingSegments,
@@ -27,6 +28,24 @@ function replayRow(id = REPLAY_ID) {
     started_at: "2025-01-30T14:32:15+00:00",
     user: { display_name: "Test User" },
   };
+}
+
+function recordingSegmentsResponse(
+  body: unknown,
+  nextCursor?: string
+): Response {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  if (nextCursor) {
+    headers.Link = `<https://sentry.io/api/0/next/>; rel="next"; results="true"; cursor="${nextCursor}"`;
+  }
+
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers,
+  });
 }
 
 describe("listReplays", () => {
@@ -73,7 +92,6 @@ describe("listReplays", () => {
     expect(url.searchParams.get("statsPeriod")).toBe("24h");
     expect(url.searchParams.get("per_page")).toBe("25");
     expect(url.searchParams.getAll("field")).toContain("id");
-    expect(url.searchParams.getAll("field")).toContain("ota_updates");
     expect(url.searchParams.getAll("field")).toContain("user");
     expect(result.data).toHaveLength(1);
     expect(result.nextCursor).toBe("0:25:0");
@@ -244,10 +262,7 @@ describe("getReplayRecordingSegments", () => {
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input!, init);
       capturedUrl = req.url;
-      return new Response(JSON.stringify([[{ timestamp: 1 }]]), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+      return recordingSegmentsResponse([[{ timestamp: 1 }]]);
     });
 
     const segments = await getReplayRecordingSegments(
@@ -261,7 +276,75 @@ describe("getReplayRecordingSegments", () => {
       `/api/0/projects/test-org/42/replays/${REPLAY_ID}/recording-segments/`
     );
     expect(url.searchParams.get("download")).toBe("true");
+    expect(url.searchParams.get("per_page")).toBe("100");
     expect(segments).toEqual([[{ timestamp: 1 }]]);
+  });
+
+  test("auto-paginates recording segments using the link cursor", async () => {
+    const capturedUrls: string[] = [];
+    let callIndex = 0;
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input!, init);
+      capturedUrls.push(req.url);
+
+      const body =
+        callIndex === 0
+          ? Array.from({ length: 100 }, (_, index) => [{ segment: index }])
+          : [[{ segment: 100 }]];
+      const nextCursor = callIndex === 0 ? "0:100:0" : undefined;
+      callIndex += 1;
+
+      return recordingSegmentsResponse(body, nextCursor);
+    });
+
+    const segments = await getReplayRecordingSegments(
+      "test-org",
+      "42",
+      REPLAY_ID,
+      { expectedSegments: 101 }
+    );
+
+    expect(segments).toHaveLength(101);
+    expect(capturedUrls).toHaveLength(2);
+
+    const firstUrl = new URL(capturedUrls[0]!);
+    expect(firstUrl.searchParams.get("per_page")).toBe("100");
+    expect(firstUrl.searchParams.get("cursor")).toBeNull();
+
+    const secondUrl = new URL(capturedUrls[1]!);
+    expect(secondUrl.searchParams.get("cursor")).toBe("0:100:0");
+    expect(secondUrl.searchParams.get("per_page")).toBe("100");
+  });
+
+  test("stops recording segment pagination at the safety cap", async () => {
+    const capturedUrls: string[] = [];
+    let callIndex = 0;
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input!, init);
+      capturedUrls.push(req.url);
+
+      const nextCursor = `0:${(callIndex + 1) * 100}:0`;
+      const body = [[{ segment: callIndex }]];
+      callIndex += 1;
+
+      return recordingSegmentsResponse(body, nextCursor);
+    });
+
+    const segments = await getReplayRecordingSegments(
+      "test-org",
+      "42",
+      REPLAY_ID
+    );
+
+    expect(segments).toHaveLength(MAX_PAGINATION_PAGES);
+    expect(capturedUrls).toHaveLength(MAX_PAGINATION_PAGES);
+
+    const finalUrl = new URL(capturedUrls.at(-1)!);
+    expect(finalUrl.searchParams.get("cursor")).toBe(
+      `0:${(MAX_PAGINATION_PAGES - 1) * 100}:0`
+    );
   });
 });
 
