@@ -816,6 +816,9 @@ export class InkUI implements WizardUI {
   private startLearnSequence(): void {
     const store = this.store;
     this.learnTimer = setInterval(() => {
+      if (this.torndown) {
+        return;
+      }
       const { learnState } = store.getSnapshot();
       if (learnState.complete) {
         this.stopLearnSequence();
