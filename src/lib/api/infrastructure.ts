@@ -15,6 +15,7 @@ import { extractRequiredScopes } from "../api-scope.js";
 import { getActiveEnvVarName, isEnvTokenActive } from "../db/auth.js";
 import { getEnv } from "../env.js";
 import { ApiError, AuthError, stringifyUnknown } from "../errors.js";
+import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
 import {
   getApiBaseUrl,
@@ -327,7 +328,11 @@ export async function autoPaginate<T>(
     cursor = result.nextCursor;
   }
 
-  // Safety limit reached — return what we have, no nextCursor
+  // Safety limit reached — warn and return what we have, no nextCursor
+  logger.warn(
+    `Pagination limit reached (${MAX_PAGINATION_PAGES} pages, ${allRows.length} items). ` +
+      "Results may be incomplete."
+  );
   return { data: allRows.slice(0, limit) };
 }
 
