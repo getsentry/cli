@@ -21,7 +21,6 @@ import {
   CHECKLIST_VISIBLE_STEPS,
   shortStepLabel,
 } from "../clack-utils.js";
-import type { ColorScheme } from "./theme.js";
 import type { SpinnerExitCode, WizardSummary } from "./types.js";
 
 export type LogSeverity = "info" | "warn" | "error" | "success" | "message";
@@ -190,8 +189,6 @@ export type WizardSnapshot = {
   overlay: Overlay;
   /** When set, overrides the normal tab content with an outro screen. */
   outroState: OutroState;
-  /** Terminal color scheme for adaptive palette. */
-  theme: ColorScheme;
   /** Learn sequence progressive reveal state. */
   learnState: LearnState;
 };
@@ -228,7 +225,6 @@ export class WizardStore {
       statusExpanded: initial.statusExpanded ?? false,
       overlay: initial.overlay ?? null,
       outroState: initial.outroState ?? null,
-      theme: initial.theme ?? "dark",
       learnState: initial.learnState ?? {
         blockIndex: 0,
         lineIndex: 0,
@@ -433,13 +429,6 @@ export class WizardStore {
 
   setOutro(state: OutroState): void {
     this.update({ outroState: state });
-  }
-
-  setTheme(theme: ColorScheme): void {
-    if (this.snapshot.theme === theme) {
-      return;
-    }
-    this.update({ theme });
   }
 
   advanceLearnLine(): void {

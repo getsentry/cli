@@ -10,8 +10,8 @@
 # Interactive setup
 sentry init
 
-# Non-interactive with auto-yes
-sentry init -y
+# Non-interactive agent/CI setup
+sentry init --yes --features errors,tracing,replay
 
 # Dry run to preview changes
 sentry init --dry-run

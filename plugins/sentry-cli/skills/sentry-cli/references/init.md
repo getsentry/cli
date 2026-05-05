@@ -16,9 +16,9 @@ Initialize Sentry in your project (experimental)
 Initialize Sentry in your project (experimental)
 
 **Flags:**
-- `-y, --yes - Non-interactive mode (accept defaults)`
+- `-y, --yes - Accept non-interactive defaults (requires --features outside a TTY)`
 - `-n, --dry-run - Show what would happen without making changes`
-- `--features <value>... - Features to enable: errors,tracing,logs,replay,profiling,ai-monitoring,user-feedback`
+- `--features <value>... - Features to enable: errors,tracing,logs,replay,metrics,profiling,sourcemaps,crons,ai-monitoring,user-feedback`
 - `-t, --team <value> - Team slug to create the project under`
 - `--tui - Use the Ink-based interactive UI (default on the Bun binary). Pass --no-tui to fall back to plain log output.`
 
@@ -28,8 +28,8 @@ Initialize Sentry in your project (experimental)
 # Interactive setup
 sentry init
 
-# Non-interactive with auto-yes
-sentry init -y
+# Non-interactive agent/CI setup
+sentry init --yes --features errors,tracing,replay
 
 # Dry run to preview changes
 sentry init --dry-run

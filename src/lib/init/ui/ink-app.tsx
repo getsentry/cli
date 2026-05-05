@@ -76,13 +76,13 @@ const STATUS_COLLAPSED_COUNT = 2;
 /** Number of expanded status-bar lines visible. */
 const STATUS_EXPANDED_COUNT = 10;
 
-const ICON_BY_SEVERITY: Record<LogSeverity, { glyph: string; color: string }> =
+const ICON_BY_SEVERITY: Record<LogSeverity, { glyph: string; color?: string }> =
   {
     info: { glyph: "●", color: COLOR_INFO },
     warn: { glyph: "▲", color: COLOR_WARN },
     error: { glyph: "✖", color: COLOR_ERROR },
     success: { glyph: "✔", color: COLOR_SUCCESS },
-    message: { glyph: " ", color: "white" },
+    message: { glyph: " " },
   };
 
 const ICONS = {
@@ -653,14 +653,13 @@ function ProgressRow({ entry }: { entry: StepEntry }): React.ReactNode {
 function progressStyle(entry: StepEntry): {
   glyph: string;
   glyphColor: string;
-  labelColor: string;
+  labelColor?: string;
   dimLabel: boolean;
 } {
   if (entry.status === "in_progress") {
     return {
       glyph: ICONS.triangleRight,
       glyphColor: PRIMARY,
-      labelColor: "white",
       dimLabel: false,
     };
   }
@@ -882,10 +881,10 @@ function ReadTreeLine({ row }: { row: FileTreeRow }): React.ReactNode {
 function readStatusStyle(status: FileTreeRow["status"]): {
   glyph: string;
   glyphColor: string;
-  labelColor: string;
+  labelColor?: string;
 } {
   if (status === "reading") {
-    return { glyph: "\u25D0", glyphColor: PRIMARY, labelColor: "white" };
+    return { glyph: "\u25D0", glyphColor: PRIMARY };
   }
   return { glyph: "\u2713", glyphColor: COLOR_SUCCESS, labelColor: MUTED };
 }
@@ -1032,7 +1031,7 @@ function SelectPrompt({
         {prompt.options.map((option, idx) => {
           const isCursor = idx === highlighted;
           // biome-ignore lint/nursery/noLeakedRender: variable assignment, not JSX expression
-          const labelColor = isCursor ? "white" : MUTED;
+          const labelColor = isCursor ? undefined : MUTED;
           return (
             <Box flexDirection="row" key={option.value}>
               <Box flexShrink={0} width={3}>

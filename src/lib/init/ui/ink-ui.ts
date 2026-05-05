@@ -51,7 +51,6 @@ import { stripAnsi } from "../../formatters/plain-detect.js";
 import { buildFileTree, flattenTree } from "./file-tree.js";
 import { LEARN_SEQUENCE } from "./learn-content.js";
 import { SENTRY_TIPS } from "./sentry-tips.js";
-import { detectColorScheme } from "./theme.js";
 import {
   CANCELLED,
   type Cancelled,
@@ -247,8 +246,6 @@ export async function createInkUI(): Promise<InkUI> {
       color: BANNER_GRADIENT[i] ?? BANNER_GRADIENT[0] ?? "#FFFFFF",
     })),
   });
-
-  store.setTheme(detectColorScheme());
 
   // Open a fresh /dev/tty so Ink's `readable` event listener
   // actually fires — see the module docstring for the Bun bug

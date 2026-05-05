@@ -22,6 +22,7 @@ const FILES_TAB_RE = /Files/;
 const FILES_HEADER_PINNED_RE = /Files analyzed\s+\d+\/\d+/;
 const FILES_HEADER_UNPINNED_RE = /Files analyzed\s+\u2191\s+\d+\/\d+/;
 const KEYBOARD_HINT_RE = /switch tab/;
+const ANSI_ESCAPE_PREFIX = "\u001B[";
 
 const FRAME_SETTLE_MS = 80;
 
@@ -97,6 +98,18 @@ async function renderApp(
   return out;
 }
 
+function hasForcedWhiteForeground(output: string): boolean {
+  return (
+    output.includes(`${ANSI_ESCAPE_PREFIX}37m`) ||
+    output.includes(`${ANSI_ESCAPE_PREFIX}97m`) ||
+    output.includes(`${ANSI_ESCAPE_PREFIX}38;2;255;255;255m`)
+  );
+}
+
+function ignorePromptResolution(): void {
+  // Snapshot tests render the prompt but never submit it.
+}
+
 describe("Ink App snapshot", () => {
   test("renders full-screen layout at 120 cols", async () => {
     const store = new WizardStore();
@@ -129,6 +142,25 @@ describe("Ink App snapshot", () => {
 
     const frame = (await renderApp(store, 120)).allOutput();
     expect(frame).toContain("Reading package.json");
+  });
+
+  test("focused prompt text inherits terminal foreground", async () => {
+    const store = new WizardStore({ bannerRows: [] });
+    store.setPrompt({
+      kind: "select",
+      message: "Choose a feature",
+      options: [
+        { value: "errors", label: "Error Monitoring" },
+        { value: "tracing", label: "Tracing" },
+      ],
+      initialIndex: 0,
+      resolve: ignorePromptResolution,
+    });
+
+    const frame = (await renderApp(store, 120)).allOutput();
+    expect(frame).toContain("Choose a feature");
+    expect(frame).toContain("Error Monitoring");
+    expect(hasForcedWhiteForeground(frame)).toBe(false);
   });
 
   test("Status screen shows logs and banner, not file tree", async () => {
