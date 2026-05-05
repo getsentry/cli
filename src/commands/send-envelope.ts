@@ -96,13 +96,34 @@ sentry send-envelope ./a.envelope ./b.envelope
     for (const file of files) {
       let body: string | Uint8Array;
 
+      let fileBytes: ArrayBuffer;
+      try {
+        fileBytes = await Bun.file(file).arrayBuffer();
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") {
+          throw new ValidationError(`File not found: ${file}`, "path");
+        }
+        throw new ValidationError(
+          `Cannot read file ${file}: ${(err as Error).message}`,
+          "path"
+        );
+      }
+
       if (flags.raw) {
-        body = new Uint8Array(await Bun.file(file).arrayBuffer());
+        body = new Uint8Array(fileBytes);
       } else {
-        const text = await Bun.file(file).text();
+        const text = new TextDecoder().decode(fileBytes);
         // Parse to validate, then re-serialize to normalize
-        const envelope = parseEnvelope(text);
-        body = serializeEnvelope(envelope);
+        try {
+          const envelope = parseEnvelope(text);
+          body = serializeEnvelope(envelope);
+        } catch (err) {
+          throw new ValidationError(
+            `Failed to parse envelope from ${file}: ${(err as Error).message}`,
+            "path"
+          );
+        }
       }
 
       await sendEnvelopeRequest(dsn, body);

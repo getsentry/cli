@@ -123,4 +123,24 @@ describe("sendEventCommand.func()", () => {
     expect(parsed).toHaveProperty("eventId");
     expect(parsed.eventId).toMatch(/^[0-9a-f]{32}$/);
   });
+
+  test("nonexistent file throws ValidationError (not raw stack trace)", async () => {
+    const { ctx } = makeContext();
+    const { ValidationError } = await import("../../src/lib/errors.js");
+    await expect(
+      func.call(
+        ctx,
+        { dsn: SAAS_DSN, "no-environ": true },
+        "/nonexistent/missing.json"
+      )
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  test("--raw requires file arguments", async () => {
+    const { ctx } = makeContext();
+    const { ValidationError } = await import("../../src/lib/errors.js");
+    await expect(
+      func.call(ctx, { dsn: SAAS_DSN, raw: true, "no-environ": true })
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
 });
