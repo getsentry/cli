@@ -70,7 +70,19 @@ describe("mergeCommand.func()", () => {
     mergeSpy.mockRestore();
   });
 
-  test("rejects when fewer than 2 issues are provided", async () => {
+  test("rejects when fewer than 2 issues are provided (0 positionals, no --into)", async () => {
+    const { context } = createMockContext();
+    const func = await mergeCommand.loader();
+    const err = await func
+      .call(context, { json: false })
+      .catch((e: Error) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain("needs at least 2 issue IDs");
+    expect(mergeSpy).not.toHaveBeenCalled();
+  });
+
+  test("rejects when 1 positional is given without --into (shows --into hint)", async () => {
     const { context } = createMockContext();
     const func = await mergeCommand.loader();
     const err = await func
@@ -79,6 +91,65 @@ describe("mergeCommand.func()", () => {
 
     expect(err).toBeInstanceOf(Error);
     expect(err.message).toContain("needs at least 2 issue IDs");
+    expect(err.message).toContain("--into");
+    expect(mergeSpy).not.toHaveBeenCalled();
+  });
+
+  test("rejects when 0 positionals + --into (still needs at least 1 positional)", async () => {
+    const { context } = createMockContext();
+    const func = await mergeCommand.loader();
+    const err = await func
+      .call(context, { json: false, into: "CLI-B" })
+      .catch((e: Error) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain("needs at least 2 issue IDs");
+    expect(mergeSpy).not.toHaveBeenCalled();
+  });
+
+  test("accepts 1 positional + --into as a valid 2-issue merge (CLI-1AE fix)", async () => {
+    resolveIssueSpy.mockImplementation(({ issueArg }: { issueArg: string }) =>
+      Promise.resolve({
+        org: "test-org",
+        issue: makeMockIssue({
+          shortId: issueArg,
+          id: issueArg.replace("CLI-", "10"),
+        }),
+      })
+    );
+    // Sentry honors the --into preference in this case
+    mergeSpy.mockResolvedValue({ parent: "10B", children: ["10A"] });
+
+    const { context } = createMockContext();
+    const func = await mergeCommand.loader();
+    // The user's actual pattern that triggered CLI-1AE:
+    //   sentry issue merge CLI-A --into CLI-B
+    await func.call(context, { json: false, into: "CLI-B" }, "CLI-A");
+
+    expect(mergeSpy).toHaveBeenCalledTimes(1);
+    const callArgs = mergeSpy.mock.calls[0] as [string, string[]];
+    expect(callArgs[0]).toBe("test-org");
+    // CLI-B (--into target) moved to front as preferred parent
+    expect(callArgs[1][0]).toBe("10B");
+    expect(new Set(callArgs[1])).toEqual(new Set(["10A", "10B"]));
+  });
+
+  test("1 positional + --into same issue triggers dedupe guard", async () => {
+    // sentry issue merge CLI-A --into CLI-A — both resolve to the same group
+    resolveIssueSpy.mockImplementation(() =>
+      Promise.resolve({
+        org: "test-org",
+        issue: makeMockIssue({ shortId: "CLI-A", id: "100" }),
+      })
+    );
+
+    const { context } = createMockContext();
+    const func = await mergeCommand.loader();
+    const err = await func
+      .call(context, { json: false, into: "CLI-A" }, "CLI-A")
+      .catch((e: Error) => e);
+
+    expect(err.message).toContain("at least 2 distinct issues");
     expect(mergeSpy).not.toHaveBeenCalled();
   });
 
