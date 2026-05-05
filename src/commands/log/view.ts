@@ -6,6 +6,8 @@
 
 import { isatty } from "node:tty";
 
+import pLimit from "p-limit";
+
 import type { SentryContext } from "../../context.js";
 import { getLogItemDetail, getLogs } from "../../lib/api-client.js";
 import {
@@ -47,6 +49,9 @@ import { isAllDigits } from "../../lib/utils.js";
 import type { DetailedSentryLog, TraceItemDetail } from "../../types/index.js";
 
 const log = logger.withTag("log-view");
+
+/** Matches SPAN_DETAIL_CONCURRENCY in traces.ts */
+const LOG_DETAIL_CONCURRENCY = 15;
 
 type ViewFlags = {
   readonly json: boolean;
@@ -521,19 +526,24 @@ export const viewCommand = buildCommand({
 
     warnMissingIds(logIds, logs);
 
-    // Fetch full attribute sets in parallel for logs that have a trace ID.
+    // Fetch full attribute sets with bounded concurrency (mirrors fetchMultiSpanDetails).
     // Graceful degradation: if the endpoint is unavailable the detail is undefined
     // and the formatter falls back to showing only the standard fields + --fields.
+    const detailLimit = pLimit(LOG_DETAIL_CONCURRENCY);
     const details = await Promise.all(
       logs.map((entry) =>
         entry.trace
-          ? getLogItemDetail(
-              target.org,
-              target.project,
-              entry["sentry.item_id"],
-              entry.trace
-            ).catch(() => {
-              return;
+          ? detailLimit(() => {
+              // entry.trace is narrowed to string by the outer ternary
+              const traceId = entry.trace as string;
+              return getLogItemDetail(
+                target.org,
+                target.project,
+                entry["sentry.item_id"],
+                traceId
+              ).catch(() => {
+                return;
+              });
             })
           : Promise.resolve(undefined)
       )

@@ -855,6 +855,12 @@ export const TraceItemAttributeSchema = z.discriminatedUnion("type", [
   z.object({ name: z.string(), type: z.literal("int"), value: z.number() }),
   z.object({ name: z.string(), type: z.literal("float"), value: z.number() }),
   z.object({ name: z.string(), type: z.literal("bool"), value: z.boolean() }),
+  // "array" is gated by organizations:trace-item-details-array-fields in Sentry backend
+  z.object({
+    name: z.string(),
+    type: z.literal("array"),
+    value: z.array(z.unknown()),
+  }),
 ]);
 export type TraceItemAttribute = z.infer<typeof TraceItemAttributeSchema>;
 
