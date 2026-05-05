@@ -10,7 +10,6 @@ import {
   type SpanListItem,
   type SpansResponse,
   SpansResponseSchema,
-  type TraceItemAttribute,
   type TraceItemDetail,
   TraceItemDetailSchema,
   type TraceMeta,
@@ -20,6 +19,9 @@ import {
   type TransactionsResponse,
   TransactionsResponseSchema,
 } from "../../types/index.js";
+
+// Re-export so existing callers (api-client.ts, formatters/trace.ts) don't need to change.
+export type { TraceItemAttribute, TraceItemDetail } from "../../types/index.js";
 
 import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
@@ -81,9 +83,8 @@ export const REDUNDANT_DETAIL_ATTRS = new Set([
 
 // TraceItemAttribute and TraceItemDetail are defined with Zod schemas in
 // src/types/sentry.ts and re-exported via the types barrel (src/types/index.ts).
-// Imported above alongside the other canonical types, and re-exported here so
-// existing callers (api-client.ts, formatters/trace.ts) don't need to change.
-export type { TraceItemAttribute, TraceItemDetail };
+// They are also re-exported from this module (see top of file) for callers
+// that already import from traces.ts.
 
 /** Options for {@link getDetailedTrace}. */
 type GetDetailedTraceOptions = {

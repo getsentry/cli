@@ -532,7 +532,9 @@ export const viewCommand = buildCommand({
               target.project,
               entry["sentry.item_id"],
               entry.trace
-            ).catch(() => {})
+            ).catch(() => {
+              return;
+            })
           : Promise.resolve(undefined)
       )
     );
