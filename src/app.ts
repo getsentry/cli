@@ -33,6 +33,7 @@ import { listCommand as repoListCommand } from "./commands/repo/list.js";
 import { schemaCommand } from "./commands/schema.js";
 import { sendEnvelopeCommand } from "./commands/send-envelope.js";
 import { sendEventCommand } from "./commands/send-event.js";
+import { sendRoute } from "./commands/send/index.js";
 import { sourcemapRoute } from "./commands/sourcemap/index.js";
 import { spanRoute } from "./commands/span/index.js";
 import { listCommand as spanListCommand } from "./commands/span/list.js";
@@ -107,6 +108,8 @@ export const routes = buildRouteMap({
     init: initCommand,
     api: apiCommand,
     schema: schemaCommand,
+    send: sendRoute,
+    // Backward-compat aliases for old sentry-cli — hidden from help
     "send-event": sendEventCommand,
     "send-envelope": sendEnvelopeCommand,
     dashboards: dashboardListCommand,
@@ -145,6 +148,8 @@ export const routes = buildRouteMap({
       trials: true,
       sourcemaps: true,
       whoami: true,
+      "send-event": true,
+      "send-envelope": true,
     },
   },
 });
