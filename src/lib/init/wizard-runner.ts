@@ -54,6 +54,7 @@ import type {
   WorkflowRunResult,
 } from "./types.js";
 import { getUIAsync } from "./ui/factory.js";
+import { LoggingUIPromptError } from "./ui/logging-ui.js";
 import type { SpinnerHandle, WizardUI } from "./ui/types.js";
 import {
   precomputeDirListing,
@@ -361,6 +362,12 @@ async function preamble(
       captureException(err);
       process.exitCode = 0;
       return false;
+    }
+    if (err instanceof LoggingUIPromptError) {
+      throw new WizardError(
+        "The interactive UI failed to load. Run with --yes for non-interactive mode.",
+        { rendered: false }
+      );
     }
     throw err;
   }
