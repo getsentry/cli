@@ -36,6 +36,7 @@ import {
   apiRequestToRegion,
   autoPaginate,
   getOrgSdkConfig,
+  MAX_PAGINATION_PAGES,
   ORG_FANOUT_CONCURRENCY,
   type PaginatedResponse,
   unwrapPaginatedResult,
@@ -69,7 +70,7 @@ export async function listProjects(orgSlug: string): Promise<SentryProject[]> {
         | { data: undefined; error: unknown },
       "Failed to list projects"
     );
-  }, Number.MAX_SAFE_INTEGER);
+  }, MAX_PAGINATION_PAGES * API_MAX_PER_PAGE);
 
   // Populate project cache for shell completions (best-effort).
   // Mirrors how listOrganizations() calls setOrgRegions().

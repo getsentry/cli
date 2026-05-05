@@ -14,6 +14,7 @@ import {
   API_MAX_PER_PAGE,
   autoPaginate,
   getOrgSdkConfig,
+  MAX_PAGINATION_PAGES,
   type PaginatedResponse,
   unwrapPaginatedResult,
   unwrapResult,
@@ -92,7 +93,7 @@ export async function listAllRepositories(
         cursor,
         perPage: API_MAX_PER_PAGE,
       }),
-    Number.MAX_SAFE_INTEGER
+    MAX_PAGINATION_PAGES * API_MAX_PER_PAGE
   );
   return data;
 }
