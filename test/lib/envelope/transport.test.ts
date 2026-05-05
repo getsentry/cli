@@ -41,6 +41,14 @@ describe("buildEnvelopeUrl", () => {
   test("invalid DSN → throws ValidationError", () => {
     expect(() => buildEnvelopeUrl("not-a-dsn")).toThrow(ValidationError);
   });
+
+  test("sentry_client does not have doubled version suffix", () => {
+    // SENTRY_CLIENT must be the bare name ('sentry-cli'), not 'sentry-cli/dev',
+    // because getEnvelopeEndpointWithUrlEncodedAuth appends /<version> internally.
+    const url = buildEnvelopeUrl(SAAS_DSN);
+    expect(url).not.toContain("sentry-cli%2Fdev%2Fdev");
+    expect(decodeURIComponent(url)).toContain("sentry_client=sentry-cli/");
+  });
 });
 
 // ── resolveDsn ────────────────────────────────────────────────────

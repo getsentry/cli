@@ -14,7 +14,8 @@
 import { getEnvelopeEndpointWithUrlEncodedAuth, makeDsn } from "@sentry/core";
 import { ApiError, ConfigError, ValidationError } from "../errors.js";
 
-const SENTRY_CLIENT = "sentry-cli/dev";
+/** Client name passed to getEnvelopeEndpointWithUrlEncodedAuth, which appends /<version> internally. */
+const SENTRY_CLIENT = "sentry-cli";
 
 /** Flags subset relevant to DSN resolution. */
 export type DsnFlags = {
