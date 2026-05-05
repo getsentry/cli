@@ -4,7 +4,11 @@
  * Provides formatting utilities for displaying Sentry logs in the CLI.
  */
 
-import type { DetailedSentryLog, SentryLog } from "../../types/index.js";
+import type {
+  DetailedSentryLog,
+  SentryLog,
+  TraceItemAttribute,
+} from "../../types/index.js";
 import { buildTraceUrl } from "../sentry-urls.js";
 import {
   colorTag,
@@ -282,18 +286,63 @@ function formatSeverityLabel(severity: string | null | undefined): string {
 }
 
 /**
+ * Attribute names rendered by the fixed sections in formatLogDetails.
+ * Used to deduplicate against the trace-items detail response so we don't show
+ * attributes in Custom Attributes that are already displayed above.
+ * Also includes internal/noisy fields mirroring Sentry UI's HiddenLogDetailFields.
+ */
+const SHOWN_IN_STANDARD_SECTIONS = new Set([
+  // Core section
+  "sentry.item_id",
+  "id",
+  "timestamp",
+  "timestamp_precise",
+  "message",
+  "severity",
+  // Context section
+  "trace",
+  "project",
+  "environment",
+  "release",
+  // SDK section
+  "sdk.name",
+  "sdk.version",
+  // Trace section
+  "span_id",
+  // Source location section
+  "code.function",
+  "code.file.path",
+  "code.line.number",
+  // OTel section
+  "sentry.otel.kind",
+  "sentry.otel.status_code",
+  "sentry.otel.instrumentation_scope.name",
+  // Internal / always-hidden noise (mirrors Sentry UI HiddenLogDetailFields)
+  "severity_number",
+  "item_type",
+  "organization_id",
+  "project.id",
+  "project_id",
+  "sentry.timestamp_nanos",
+  "sentry.observed_timestamp_nanos",
+  "tags[sentry.trace_flags,number]",
+]);
+
+/**
  * Format detailed log entry for display as rendered markdown.
  * Shows all available fields in a structured format.
  *
  * @param log - The detailed log entry to format
  * @param orgSlug - Organization slug for building trace URLs
- * @param extraFields - Custom fields requested via --fields, shown in Custom Attributes section
+ * @param allAttributes - All attributes from the trace-items detail endpoint (shows custom attrs)
+ * @param extraFields - Optional --fields filter: limits which custom attributes are shown
  * @returns Rendered terminal string
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: log detail formatting requires multiple conditional sections
 export function formatLogDetails(
   log: DetailedSentryLog,
   orgSlug: string,
+  allAttributes?: TraceItemAttribute[],
   extraFields?: string[]
 ): string {
   const logId = log["sentry.item_id"];
@@ -396,8 +445,26 @@ export function formatLogDetails(
     lines.push(mdKvTable(otelRows, "OpenTelemetry"));
   }
 
-  // Custom Attributes — fields explicitly requested via --fields
-  if (extraFields?.length) {
+  // Custom Attributes — from trace-items detail endpoint (all non-standard attributes)
+  if (allAttributes?.length) {
+    let customAttrs = allAttributes.filter(
+      (a) => !SHOWN_IN_STANDARD_SECTIONS.has(a.name)
+    );
+    if (extraFields?.length) {
+      const wanted = new Set(extraFields);
+      customAttrs = customAttrs.filter((a) => wanted.has(a.name));
+    }
+    if (customAttrs.length > 0) {
+      lines.push("");
+      lines.push(
+        mdKvTable(
+          customAttrs.map((a) => [a.name, String(a.value)]),
+          "Custom Attributes"
+        )
+      );
+    }
+  } else if (extraFields?.length) {
+    // Fallback: no trace-items detail available, show only explicitly requested fields
     const customRows: [string, string][] = extraFields
       .filter((f) => log[f] !== null && log[f] !== undefined)
       .map((f) => [f, String(log[f])]);

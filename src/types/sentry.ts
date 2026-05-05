@@ -840,6 +840,32 @@ export const DetailedLogsResponseSchema = z.object({
 
 export type DetailedLogsResponse = z.infer<typeof DetailedLogsResponseSchema>;
 
+// Trace-item detail types (from /projects/{org}/{project}/trace-items/{itemId}/ endpoint)
+
+/**
+ * A single attribute on a trace item (log, span, etc.).
+ *
+ * Mirrors Sentry's TraceItemResponseAttribute:
+ * https://github.com/getsentry/sentry/blob/8a4f150b21b/static/app/views/explore/hooks/useTraceItemDetails.tsx#L85-L89
+ *
+ * The endpoint is EXPERIMENTAL and not yet in @sentry/api (getsentry/sentry-api-schema).
+ */
+export const TraceItemAttributeSchema = z.discriminatedUnion("type", [
+  z.object({ name: z.string(), type: z.literal("str"), value: z.string() }),
+  z.object({ name: z.string(), type: z.literal("int"), value: z.number() }),
+  z.object({ name: z.string(), type: z.literal("float"), value: z.number() }),
+  z.object({ name: z.string(), type: z.literal("bool"), value: z.boolean() }),
+]);
+export type TraceItemAttribute = z.infer<typeof TraceItemAttributeSchema>;
+
+/** Response from GET /projects/{org}/{project}/trace-items/{itemId}/?item_type=logs */
+export const TraceItemDetailSchema = z.object({
+  itemId: z.string(),
+  timestamp: z.string(),
+  attributes: z.array(TraceItemAttributeSchema),
+});
+export type TraceItemDetail = z.infer<typeof TraceItemDetailSchema>;
+
 // Trace-log types (from /organizations/{org}/trace-logs/ endpoint)
 
 /**

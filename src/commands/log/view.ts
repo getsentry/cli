@@ -7,7 +7,7 @@
 import { isatty } from "node:tty";
 
 import type { SentryContext } from "../../context.js";
-import { getLogs } from "../../lib/api-client.js";
+import { getLogItemDetail, getLogs } from "../../lib/api-client.js";
 import {
   detectSwappedViewArgs,
   looksLikeIssueShortId,
@@ -44,7 +44,7 @@ import { RETENTION_DAYS } from "../../lib/retention.js";
 import { buildLogsUrl } from "../../lib/sentry-urls.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import { isAllDigits } from "../../lib/utils.js";
-import type { DetailedSentryLog } from "../../types/index.js";
+import type { DetailedSentryLog, TraceItemDetail } from "../../types/index.js";
 
 const log = logger.withTag("log-view");
 
@@ -399,7 +399,9 @@ type LogViewData = {
   logs: DetailedSentryLog[];
   /** Org slug — needed by human formatter for trace URLs, also useful context in JSON */
   orgSlug: string;
-  /** Custom fields requested via --fields, passed to the detail formatter */
+  /** Full attribute sets from the trace-items detail endpoint (index matches logs) */
+  details?: (TraceItemDetail | undefined)[];
+  /** --fields filter: limits which custom attributes are shown in human output */
   extraFields?: string[];
 };
 
@@ -414,11 +416,19 @@ type LogViewData = {
  */
 function formatLogViewHuman(data: LogViewData): string {
   const parts: string[] = [];
-  for (const entry of data.logs) {
+  for (let i = 0; i < data.logs.length; i++) {
     if (parts.length > 0) {
       parts.push("\n---\n");
     }
-    parts.push(formatLogDetails(entry, data.orgSlug, data.extraFields));
+    parts.push(
+      formatLogDetails(
+        // biome-ignore lint/style/noNonNullAssertion: index is bounded by data.logs.length
+        data.logs[i]!,
+        data.orgSlug,
+        data.details?.[i]?.attributes,
+        data.extraFields
+      )
+    );
   }
   return parts.join("\n");
 }
@@ -511,6 +521,22 @@ export const viewCommand = buildCommand({
 
     warnMissingIds(logIds, logs);
 
+    // Fetch full attribute sets in parallel for logs that have a trace ID.
+    // Graceful degradation: if the endpoint is unavailable the detail is undefined
+    // and the formatter falls back to showing only the standard fields + --fields.
+    const details = await Promise.all(
+      logs.map((entry) =>
+        entry.trace
+          ? getLogItemDetail(
+              target.org,
+              target.project,
+              entry["sentry.item_id"],
+              entry.trace
+            ).catch(() => {})
+          : Promise.resolve(undefined)
+      )
+    );
+
     const hint = target.detectedFrom
       ? `Detected from ${target.detectedFrom}`
       : undefined;
@@ -518,6 +544,7 @@ export const viewCommand = buildCommand({
     yield new CommandOutput({
       logs,
       orgSlug: target.org,
+      details,
       extraFields: flags.fields,
     });
     return { hint };

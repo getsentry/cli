@@ -12,6 +12,8 @@ import {
   type DetailedSentryLog,
   LogsResponseSchema,
   type SentryLog,
+  type TraceItemDetail,
+  TraceItemDetailSchema,
   type TraceLog,
   TraceLogsResponseSchema,
 } from "../../types/index.js";
@@ -295,4 +297,37 @@ export async function listTraceLogs(
   );
 
   return response.data;
+}
+
+/**
+ * Fetch all attributes for a single log entry via the trace-items detail endpoint.
+ *
+ * Returns every attribute on the log — standard and custom alike — without needing
+ * to enumerate field names. This is the same endpoint the Sentry UI uses when
+ * expanding a log row to show its full attribute set.
+ *
+ * The endpoint is EXPERIMENTAL and not yet in @sentry/api; called directly via
+ * apiRequestToRegion following the same pattern as listTraceLogs.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @param logId - The sentry.item_id of the log entry
+ * @param traceId - The trace ID (required by the endpoint)
+ */
+export async function getLogItemDetail(
+  orgSlug: string,
+  projectSlug: string,
+  logId: string,
+  traceId: string
+): Promise<TraceItemDetail> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<TraceItemDetail>(
+    regionUrl,
+    `/projects/${orgSlug}/${projectSlug}/trace-items/${logId}/`,
+    {
+      params: { item_type: "logs", trace_id: traceId },
+      schema: TraceItemDetailSchema,
+    }
+  );
+  return data;
 }

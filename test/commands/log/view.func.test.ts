@@ -66,12 +66,19 @@ function createMockContext() {
 
 describe("viewCommand.func", () => {
   let getLogsSpy: ReturnType<typeof spyOn>;
+  let getLogItemDetailSpy: ReturnType<typeof spyOn>;
   let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
   let resolveProjectBySlugSpy: ReturnType<typeof spyOn>;
   let openInBrowserSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     getLogsSpy = spyOn(apiClient, "getLogs");
+    getLogItemDetailSpy = spyOn(apiClient, "getLogItemDetail");
+    getLogItemDetailSpy.mockResolvedValue({
+      itemId: "",
+      timestamp: "",
+      attributes: [],
+    });
     resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
     resolveProjectBySlugSpy = spyOn(resolveTarget, "resolveProjectBySlug");
     openInBrowserSpy = spyOn(browser, "openInBrowser");
@@ -79,6 +86,7 @@ describe("viewCommand.func", () => {
 
   afterEach(() => {
     getLogsSpy.mockRestore();
+    getLogItemDetailSpy.mockRestore();
     resolveOrgAndProjectSpy.mockRestore();
     resolveProjectBySlugSpy.mockRestore();
     openInBrowserSpy.mockRestore();
