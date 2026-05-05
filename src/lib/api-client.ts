@@ -74,6 +74,7 @@ export {
   updateIssueStatus,
 } from "./api/issues.js";
 export {
+  getLogItemDetail,
   getLogs,
   type LogSortDirection,
   listLogs,

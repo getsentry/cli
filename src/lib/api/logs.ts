@@ -12,20 +12,20 @@ import {
   type DetailedSentryLog,
   LogsResponseSchema,
   type SentryLog,
+  type TraceItemDetail,
   type TraceLog,
   TraceLogsResponseSchema,
 } from "../../types/index.js";
-
 import { resolveOrgRegion } from "../region.js";
 import { LOG_RETENTION_PERIOD } from "../retention.js";
 import { isAllDigits } from "../utils.js";
-
 import {
   API_MAX_PER_PAGE,
   apiRequestToRegion,
   getOrgSdkConfig,
   unwrapResult,
 } from "./infrastructure.js";
+import { getTraceItemDetail } from "./traces.js";
 
 /** Sort direction for log queries: newest-first or oldest-first. */
 export type LogSortDirection = "newest" | "oldest";
@@ -158,20 +158,32 @@ const DETAILED_LOG_FIELDS = [
  * Fetch a single batch of log entries by their item IDs.
  * Batch size must not exceed {@link API_MAX_PER_PAGE}.
  */
+type GetLogsBatchOptions = {
+  config: Awaited<ReturnType<typeof getOrgSdkConfig>>;
+  extraFields?: string[];
+};
+
 async function getLogsBatch(
   orgSlug: string,
   projectSlug: string,
   batchIds: string[],
-  config: Awaited<ReturnType<typeof getOrgSdkConfig>>
+  { config, extraFields }: GetLogsBatchOptions
 ): Promise<DetailedSentryLog[]> {
   const query = `project:${projectSlug} sentry.item_id:[${batchIds.join(",")}]`;
+
+  const fields = extraFields?.length
+    ? [
+        ...DETAILED_LOG_FIELDS,
+        ...extraFields.filter((f) => !DETAILED_LOG_FIELDS.includes(f)),
+      ]
+    : DETAILED_LOG_FIELDS;
 
   const result = await queryExploreEventsInTableFormat({
     ...config,
     path: { organization_id_or_slug: orgSlug },
     query: {
       dataset: "logs",
-      field: DETAILED_LOG_FIELDS,
+      field: fields,
       query,
       per_page: batchIds.length,
       statsPeriod: LOG_RETENTION_PERIOD,
@@ -199,13 +211,14 @@ async function getLogsBatch(
 export async function getLogs(
   orgSlug: string,
   projectSlug: string,
-  logIds: string[]
+  logIds: string[],
+  extraFields?: string[]
 ): Promise<DetailedSentryLog[]> {
   const config = await getOrgSdkConfig(orgSlug);
 
   // Single batch — no splitting needed
   if (logIds.length <= API_MAX_PER_PAGE) {
-    return getLogsBatch(orgSlug, projectSlug, logIds, config);
+    return getLogsBatch(orgSlug, projectSlug, logIds, { config, extraFields });
   }
 
   // Split into batches of API_MAX_PER_PAGE and fetch in parallel
@@ -215,7 +228,9 @@ export async function getLogs(
   }
 
   const results = await Promise.all(
-    batches.map((batch) => getLogsBatch(orgSlug, projectSlug, batch, config))
+    batches.map((batch) =>
+      getLogsBatch(orgSlug, projectSlug, batch, { config, extraFields })
+    )
   );
 
   return results.flat();
@@ -284,4 +299,35 @@ export async function listTraceLogs(
   );
 
   return response.data;
+}
+
+/**
+ * Fetch all attributes for a single log entry via the trace-items detail endpoint.
+ *
+ * Returns every attribute on the log — standard and custom alike — without needing
+ * to enumerate field names. This is the same endpoint the Sentry UI uses when
+ * expanding a log row to show its full attribute set.
+ *
+ * The endpoint is EXPERIMENTAL and not yet in @sentry/api; called directly via
+ * apiRequestToRegion following the same pattern as listTraceLogs.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @param logId - The sentry.item_id of the log entry
+ * @param traceId - The trace ID (required by the endpoint)
+ *
+ * Uses the experimental /projects/{org}/{project}/trace-items/ endpoint directly via
+ * apiRequestToRegion — it is not yet available in @sentry/api (generated from
+ * getsentry/sentry-api-schema) because the endpoint is marked EXPERIMENTAL in Sentry.
+ */
+export function getLogItemDetail(
+  orgSlug: string,
+  projectSlug: string,
+  logId: string,
+  traceId: string
+): Promise<TraceItemDetail> {
+  return getTraceItemDetail(orgSlug, projectSlug, logId, {
+    traceId,
+    itemType: "logs",
+  });
 }

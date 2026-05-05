@@ -6,7 +6,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { listSpans, listTransactions } from "../../../src/lib/api/traces.js";
+import {
+  getSpanDetails,
+  listSpans,
+  listTransactions,
+} from "../../../src/lib/api/traces.js";
 import { mockFetch, useTestConfigDir } from "../../helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -632,5 +636,82 @@ describe("listSpans", () => {
     const result = await listSpans("my-org", "my-project");
 
     expect(result.nextCursor).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getSpanDetails
+// ---------------------------------------------------------------------------
+
+describe("getSpanDetails", () => {
+  useTestConfigDir("traces-span-details-test-");
+
+  let originalFetch: typeof globalThis.fetch;
+  let capturedUrl = "";
+  let capturedParams: Record<string, string> = {};
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    capturedUrl = "";
+    capturedParams = {};
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function mockOk(body: unknown) {
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input!, init);
+      capturedUrl = req.url;
+      const url = new URL(capturedUrl);
+      url.searchParams.forEach((v, k) => {
+        capturedParams[k] = v;
+      });
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+  }
+
+  const DETAIL_RESPONSE = {
+    itemId: "abc123",
+    timestamp: "2026-01-01T00:00:00Z",
+    attributes: [
+      { name: "span.op", type: "str", value: "db.query" },
+      { name: "user.id", type: "str", value: "u_42" },
+    ],
+  };
+
+  test("calls trace-items endpoint with item_type=spans", async () => {
+    mockOk(DETAIL_RESPONSE);
+
+    await getSpanDetails("my-org", "my-project", "span-id-abc", "trace-id-xyz");
+
+    expect(capturedUrl).toContain(
+      "/projects/my-org/my-project/trace-items/span-id-abc/"
+    );
+    expect(capturedParams.item_type).toBe("spans");
+    expect(capturedParams.trace_id).toBe("trace-id-xyz");
+  });
+
+  test("returns parsed attributes", async () => {
+    mockOk(DETAIL_RESPONSE);
+
+    const result = await getSpanDetails(
+      "my-org",
+      "my-project",
+      "span-id-abc",
+      "trace-id-xyz"
+    );
+
+    expect(result.itemId).toBe("abc123");
+    expect(result.attributes).toHaveLength(2);
+    expect(result.attributes[0]).toEqual({
+      name: "span.op",
+      type: "str",
+      value: "db.query",
+    });
   });
 });

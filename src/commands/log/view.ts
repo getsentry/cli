@@ -6,8 +6,10 @@
 
 import { isatty } from "node:tty";
 
+import pLimit from "p-limit";
+
 import type { SentryContext } from "../../context.js";
-import { getLogs } from "../../lib/api-client.js";
+import { getLogItemDetail, getLogs } from "../../lib/api-client.js";
 import {
   detectSwappedViewArgs,
   looksLikeIssueShortId,
@@ -44,9 +46,12 @@ import { RETENTION_DAYS } from "../../lib/retention.js";
 import { buildLogsUrl } from "../../lib/sentry-urls.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import { isAllDigits } from "../../lib/utils.js";
-import type { DetailedSentryLog } from "../../types/index.js";
+import type { DetailedSentryLog, TraceItemDetail } from "../../types/index.js";
 
 const log = logger.withTag("log-view");
+
+/** Matches SPAN_DETAIL_CONCURRENCY in traces.ts */
+const LOG_DETAIL_CONCURRENCY = 15;
 
 type ViewFlags = {
   readonly json: boolean;
@@ -399,6 +404,10 @@ type LogViewData = {
   logs: DetailedSentryLog[];
   /** Org slug — needed by human formatter for trace URLs, also useful context in JSON */
   orgSlug: string;
+  /** Full attribute sets from the trace-items detail endpoint (index matches logs) */
+  details?: (TraceItemDetail | undefined)[];
+  /** --fields filter: limits which custom attributes are shown in human output */
+  extraFields?: string[];
 };
 
 /**
@@ -412,11 +421,19 @@ type LogViewData = {
  */
 function formatLogViewHuman(data: LogViewData): string {
   const parts: string[] = [];
-  for (const entry of data.logs) {
+  for (let i = 0; i < data.logs.length; i++) {
     if (parts.length > 0) {
       parts.push("\n---\n");
     }
-    parts.push(formatLogDetails(entry, data.orgSlug));
+    parts.push(
+      formatLogDetails(
+        // biome-ignore lint/style/noNonNullAssertion: index is bounded by data.logs.length
+        data.logs[i]!,
+        data.orgSlug,
+        data.details?.[i]?.attributes,
+        data.extraFields
+      )
+    );
   }
   return parts.join("\n");
 }
@@ -496,7 +513,12 @@ export const viewCommand = buildCommand({
     }
 
     // Fetch all requested log entries
-    const logs = await getLogs(target.org, target.project, logIds);
+    const logs = await getLogs(
+      target.org,
+      target.project,
+      logIds,
+      flags.fields
+    );
 
     if (logs.length === 0) {
       throwNotFoundError(logIds, target.org, target.project);
@@ -504,11 +526,38 @@ export const viewCommand = buildCommand({
 
     warnMissingIds(logIds, logs);
 
+    // Skip detail fetching in JSON mode — jsonTransform only uses data.logs,
+    // not data.details, so the extra round-trips would be wasted.
+    // Mirrors the shouldFetchDetails pattern in trace/view.ts.
+    const detailLimit = pLimit(LOG_DETAIL_CONCURRENCY);
+    const details = flags.json
+      ? undefined
+      : await detailLimit.map(logs, async (entry) => {
+          if (!entry.trace) {
+            return;
+          }
+          try {
+            return await getLogItemDetail(
+              target.org,
+              target.project,
+              entry["sentry.item_id"],
+              entry.trace
+            );
+          } catch {
+            return;
+          }
+        });
+
     const hint = target.detectedFrom
       ? `Detected from ${target.detectedFrom}`
       : undefined;
 
-    yield new CommandOutput({ logs, orgSlug: target.org });
+    yield new CommandOutput({
+      logs,
+      orgSlug: target.org,
+      details,
+      extraFields: flags.fields,
+    });
     return { hint };
   },
 });

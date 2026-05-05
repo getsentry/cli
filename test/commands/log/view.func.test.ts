@@ -66,12 +66,19 @@ function createMockContext() {
 
 describe("viewCommand.func", () => {
   let getLogsSpy: ReturnType<typeof spyOn>;
+  let getLogItemDetailSpy: ReturnType<typeof spyOn>;
   let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
   let resolveProjectBySlugSpy: ReturnType<typeof spyOn>;
   let openInBrowserSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     getLogsSpy = spyOn(apiClient, "getLogs");
+    getLogItemDetailSpy = spyOn(apiClient, "getLogItemDetail");
+    getLogItemDetailSpy.mockResolvedValue({
+      itemId: "",
+      timestamp: "",
+      attributes: [],
+    });
     resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
     resolveProjectBySlugSpy = spyOn(resolveTarget, "resolveProjectBySlug");
     openInBrowserSpy = spyOn(browser, "openInBrowser");
@@ -79,6 +86,7 @@ describe("viewCommand.func", () => {
 
   afterEach(() => {
     getLogsSpy.mockRestore();
+    getLogItemDetailSpy.mockRestore();
     resolveOrgAndProjectSpy.mockRestore();
     resolveProjectBySlugSpy.mockRestore();
     openInBrowserSpy.mockRestore();
@@ -193,7 +201,12 @@ describe("viewCommand.func", () => {
       );
 
       // getLogs should have been called with both IDs
-      expect(getLogsSpy).toHaveBeenCalledWith("my-org", "proj", [ID1, ID2]);
+      expect(getLogsSpy).toHaveBeenCalledWith(
+        "my-org",
+        "proj",
+        [ID1, ID2],
+        undefined
+      );
 
       const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
       const parsed = JSON.parse(output);
@@ -295,9 +308,12 @@ describe("viewCommand.func", () => {
       await func.call(context, { json: true, web: false }, "my-project", ID1);
 
       expect(resolveProjectBySlugSpy).toHaveBeenCalled();
-      expect(getLogsSpy).toHaveBeenCalledWith("resolved-org", "resolved-proj", [
-        ID1,
-      ]);
+      expect(getLogsSpy).toHaveBeenCalledWith(
+        "resolved-org",
+        "resolved-proj",
+        [ID1],
+        undefined
+      );
     });
 
     test("org/ target (org-all) throws ContextError", async () => {
@@ -327,9 +343,12 @@ describe("viewCommand.func", () => {
       await func.call(context, { json: false, web: false }, ID1);
 
       expect(resolveOrgAndProjectSpy).toHaveBeenCalled();
-      expect(getLogsSpy).toHaveBeenCalledWith("detected-org", "detected-proj", [
-        ID1,
-      ]);
+      expect(getLogsSpy).toHaveBeenCalledWith(
+        "detected-org",
+        "detected-proj",
+        [ID1],
+        undefined
+      );
 
       // Human output should include the detected-from hint
       const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
@@ -351,6 +370,85 @@ describe("viewCommand.func", () => {
           "organization and project"
         );
       }
+    });
+  });
+
+  describe("detail attribute fetching", () => {
+    test("calls getLogItemDetail for logs that have a trace", async () => {
+      const log = makeSampleLog(ID1); // makeSampleLog sets trace: "abc123..."
+      getLogsSpy.mockResolvedValue([log]);
+
+      const { context } = createMockContext();
+      const func = await viewCommand.loader();
+      await func.call(context, { json: false, web: false }, "my-org/proj", ID1);
+
+      expect(getLogItemDetailSpy).toHaveBeenCalledWith(
+        "my-org",
+        "proj",
+        ID1,
+        log.trace
+      );
+    });
+
+    test("does not call getLogItemDetail for logs without a trace", async () => {
+      const log = makeSampleLog(ID1, "no trace log");
+      log.trace = null;
+      getLogsSpy.mockResolvedValue([log]);
+
+      const { context } = createMockContext();
+      const func = await viewCommand.loader();
+      await func.call(context, { json: false, web: false }, "my-org/proj", ID1);
+
+      expect(getLogItemDetailSpy).not.toHaveBeenCalled();
+    });
+
+    test("still renders output when getLogItemDetail fails", async () => {
+      const log = makeSampleLog(ID1);
+      getLogsSpy.mockResolvedValue([log]);
+      getLogItemDetailSpy.mockRejectedValue(new Error("network error"));
+
+      const { context, stdoutWrite } = createMockContext();
+      const func = await viewCommand.loader();
+      await func.call(context, { json: false, web: false }, "my-org/proj", ID1);
+
+      // Should still render the log with standard fields despite detail failure
+      const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+      expect(output).toContain(ID1);
+    });
+
+    test("does not call getLogItemDetail in JSON mode", async () => {
+      const log = makeSampleLog(ID1);
+      getLogsSpy.mockResolvedValue([log]);
+
+      const { context } = createMockContext();
+      const func = await viewCommand.loader();
+      await func.call(context, { json: true, web: false }, "my-org/proj", ID1);
+
+      expect(getLogItemDetailSpy).not.toHaveBeenCalled();
+    });
+
+    test("renders custom attributes in human output when detail available", async () => {
+      const log = makeSampleLog(ID1);
+      getLogsSpy.mockResolvedValue([log]);
+      getLogItemDetailSpy.mockResolvedValue({
+        itemId: ID1,
+        timestamp: log.timestamp,
+        attributes: [
+          { name: "user.id", type: "str", value: "u_42" },
+          { name: "order.status", type: "str", value: "shipped" },
+        ],
+      });
+
+      const { context, stdoutWrite } = createMockContext();
+      const func = await viewCommand.loader();
+      await func.call(context, { json: false, web: false }, "my-org/proj", ID1);
+
+      const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+      expect(output).toContain("Custom Attributes");
+      expect(output).toContain("user.id");
+      expect(output).toContain("u_42");
+      expect(output).toContain("order.status");
+      expect(output).toContain("shipped");
     });
   });
 });

@@ -10,6 +10,8 @@ import {
   type SpanListItem,
   type SpansResponse,
   SpansResponseSchema,
+  type TraceItemDetail,
+  TraceItemDetailSchema,
   type TraceMeta,
   TraceMetaSchema,
   type TraceSpan,
@@ -17,6 +19,9 @@ import {
   type TransactionsResponse,
   TransactionsResponseSchema,
 } from "../../types/index.js";
+
+// Re-export so existing callers (api-client.ts, formatters/trace.ts) don't need to change.
+export type { TraceItemAttribute, TraceItemDetail } from "../../types/index.js";
 
 import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
@@ -76,21 +81,10 @@ export const REDUNDANT_DETAIL_ATTRS = new Set([
   "environment",
 ]);
 
-/** A single attribute returned by the trace-items detail endpoint */
-export type TraceItemAttribute = {
-  name: string;
-  type: "str" | "int" | "float" | "bool";
-  value: string | number | boolean;
-};
-
-/** Response from GET /projects/{org}/{project}/trace-items/{itemId}/ */
-export type TraceItemDetail = {
-  itemId: string;
-  timestamp: string;
-  attributes: TraceItemAttribute[];
-  meta: Record<string, unknown>;
-  links: unknown;
-};
+// TraceItemAttribute and TraceItemDetail are defined with Zod schemas in
+// src/types/sentry.ts and re-exported via the types barrel (src/types/index.ts).
+// They are also re-exported from this module (see top of file) for callers
+// that already import from traces.ts.
 
 /** Options for {@link getDetailedTrace}. */
 type GetDetailedTraceOptions = {
@@ -137,38 +131,59 @@ export async function getDetailedTrace(
   return data.map(normalizeTraceSpan);
 }
 
+type GetTraceItemDetailOptions = {
+  traceId: string;
+  itemType: "spans" | "logs";
+};
+
+/**
+ * Fetch full attribute details for a single trace item via the experimental
+ * /projects/{org}/{project}/trace-items/{itemId}/ endpoint.
+ *
+ * This endpoint is not yet in @sentry/api (getsentry/sentry-api-schema) because
+ * it is marked EXPERIMENTAL in Sentry. Both span and log detail views use it.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @param itemId - The item ID (span ID or log sentry.item_id)
+ * @param options - traceId (required by endpoint) and itemType ("spans" | "logs")
+ */
+export async function getTraceItemDetail(
+  orgSlug: string,
+  projectSlug: string,
+  itemId: string,
+  { traceId, itemType }: GetTraceItemDetailOptions
+): Promise<TraceItemDetail> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<TraceItemDetail>(
+    regionUrl,
+    `/projects/${orgSlug}/${projectSlug}/trace-items/${itemId}/`,
+    {
+      params: { trace_id: traceId, item_type: itemType },
+      schema: TraceItemDetailSchema,
+    }
+  );
+  return data;
+}
+
 /**
  * Fetch full attribute details for a single span.
- *
- * Uses the trace-items detail endpoint which returns ALL span attributes
- * without requiring the caller to enumerate them. This is the same endpoint
- * the Sentry frontend uses in the span detail sidebar.
  *
  * @param orgSlug - Organization slug
  * @param projectSlug - Project slug
  * @param spanId - The 16-char hex span ID
  * @param traceId - The parent trace ID (required for lookup)
- * @returns Full span detail with all attributes
  */
-export async function getSpanDetails(
+export function getSpanDetails(
   orgSlug: string,
   projectSlug: string,
   spanId: string,
   traceId: string
 ): Promise<TraceItemDetail> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-
-  const { data } = await apiRequestToRegion<TraceItemDetail>(
-    regionUrl,
-    `/projects/${orgSlug}/${projectSlug}/trace-items/${spanId}/`,
-    {
-      params: {
-        trace_id: traceId,
-        item_type: "spans",
-      },
-    }
-  );
-  return data;
+  return getTraceItemDetail(orgSlug, projectSlug, spanId, {
+    traceId,
+    itemType: "spans",
+  });
 }
 
 /**
