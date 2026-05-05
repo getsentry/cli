@@ -46,14 +46,12 @@ async function buildFilePayload(
 ): Promise<{ body: string | Uint8Array; eventId: string }> {
   if (raw) {
     const bytes = new Uint8Array(await Bun.file(file).arrayBuffer());
-    // Best-effort: extract event_id from the first line (envelope header JSON)
+    // Best-effort: extract event_id from the first line (envelope header JSON).
+    // Decode the already-read bytes instead of re-reading the file.
     let eventId = "";
     try {
-      const text = await Bun.file(file).text();
-      const header = JSON.parse(text.split("\n")[0] ?? "{}") as Record<
-        string,
-        unknown
-      >;
+      const firstLine = new TextDecoder().decode(bytes).split("\n")[0] ?? "{}";
+      const header = JSON.parse(firstLine) as Record<string, unknown>;
       eventId = (header.event_id as string) ?? "";
     } catch {
       // Non-critical — event_id is informational only
@@ -88,7 +86,7 @@ The JSON file must be a valid serialized Sentry Event object:
 sentry send-event ./event.json
 \`\`\`
 
-Use --raw to skip JSON parsing and send the file contents as-is inside an envelope.
+Use --raw to skip JSON parsing and send the file bytes directly to the ingest endpoint.
 
 ## Common flags
 
@@ -258,6 +256,12 @@ Use --raw to skip JSON parsing and send the file contents as-is inside an envelo
         yield new CommandOutput<SendEventResult>({ eventId, file });
       }
     } else {
+      if (flags.raw) {
+        throw new ValidationError(
+          "--raw requires a file argument (raw bytes cannot be built from inline flags)",
+          "raw"
+        );
+      }
       if (!flags.message?.length) {
         throw new ConfigError(
           "Provide a message via -m/--message or a JSON event file as a positional argument.",

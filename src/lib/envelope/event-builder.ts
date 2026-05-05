@@ -84,6 +84,7 @@ export function parseUserFields(pairs: string[]): User {
  *
  * Accepts: Unix integer/float, ISO 8601, RFC 2822.
  * Returns undefined for falsy input (caller uses Date.now()).
+ * Throws ValidationError for non-empty strings that cannot be parsed.
  */
 function parseTimestamp(ts: string | undefined): number | undefined {
   if (!ts) {
@@ -99,7 +100,10 @@ function parseTimestamp(ts: string | undefined): number | undefined {
   if (!Number.isNaN(parsed)) {
     return parsed / 1000;
   }
-  return;
+  throw new ValidationError(
+    `Invalid --timestamp value: '${ts}'. Use a Unix epoch number, ISO 8601, or RFC 2822 date.`,
+    "timestamp"
+  );
 }
 
 /**
@@ -110,9 +114,10 @@ function parseTimestamp(ts: string | undefined): number | undefined {
  */
 export function buildEventFromFlags(flags: SendEventFlags): Event {
   const tags = parseKeyValuePairs(flags.tag);
+  // environ goes first so explicit --extra environ:val overrides it
   const extra: Record<string, unknown> = {
-    ...parseKeyValuePairs(flags.extra),
     ...(flags["no-environ"] ? {} : { environ: process.env }),
+    ...parseKeyValuePairs(flags.extra),
   };
 
   return {
