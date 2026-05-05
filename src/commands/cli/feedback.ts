@@ -8,6 +8,7 @@
  * @example sentry cli feedback the issue view is confusing
  */
 
+import { isatty } from "node:tty";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
 import type { SentryContext } from "../../context.js";
@@ -15,6 +16,7 @@ import { buildCommand } from "../../lib/command.js";
 import { ConfigError, ValidationError } from "../../lib/errors.js";
 import { formatFeedbackResult } from "../../lib/formatters/human.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
+import { logger } from "../../lib/logger.js";
 
 /** Structured result of the feedback submission */
 export type FeedbackResult = {
@@ -50,10 +52,20 @@ export const feedbackCommand = buildCommand({
     _flags: {},
     ...messageParts: string[]
   ) {
-    const message = messageParts.join(" ");
+    let message = messageParts.join(" ").trim();
 
-    if (!message.trim()) {
-      throw new ValidationError("Please provide a feedback message.");
+    if (!message) {
+      if (!isatty(0)) {
+        throw new ValidationError("Please provide a feedback message.");
+      }
+      const response = await logger.prompt("Enter your feedback message:", {
+        type: "text",
+        placeholder: "e.g. I love this tool!",
+      });
+      if (typeof response !== "string" || !response.trim()) {
+        throw new ValidationError("Please provide a feedback message.");
+      }
+      message = response.trim();
     }
 
     if (!Sentry.isEnabled()) {
