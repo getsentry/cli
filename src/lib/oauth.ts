@@ -24,7 +24,6 @@ import { getEnv } from "./env.js";
 import {
   ApiError,
   AuthError,
-  ConfigError,
   DeviceFlowError,
   HostScopeError,
 } from "./errors.js";
@@ -174,13 +173,6 @@ function assertRefreshHostTrusted(): void {
 /** Request a device code from Sentry's device authorization endpoint */
 function requestDeviceCode() {
   const clientId = getClientId();
-  if (!clientId) {
-    throw new ConfigError(
-      "SENTRY_CLIENT_ID is required for authentication",
-      "Set SENTRY_CLIENT_ID environment variable or use a pre-built binary"
-    );
-  }
-
   return withHttpSpan("POST", "/oauth/device/code/", async () => {
     const response = await fetchWithConnectionError(
       `${getSentryUrl()}/oauth/device/code/`,
@@ -313,7 +305,6 @@ async function attemptPoll(deviceCode: string): Promise<PollResult> {
  * @param callbacks - Callbacks for UI updates during the flow
  * @param timeout - Maximum time to wait for authorization in ms (default: 10 minutes)
  * @returns The token response containing access_token and metadata
- * @throws {ConfigError} When SENTRY_CLIENT_ID is not configured
  * @throws {ApiError} When unable to connect to Sentry or API returns an error
  * @throws {DeviceFlowError} When authorization fails, is denied, or times out
  */
@@ -405,13 +396,6 @@ export function refreshAccessToken(
   refreshToken: string
 ): Promise<TokenResponse> {
   const clientId = getClientId();
-  if (!clientId) {
-    throw new ConfigError(
-      "SENTRY_CLIENT_ID is required for token refresh",
-      "Set SENTRY_CLIENT_ID environment variable or use a pre-built binary"
-    );
-  }
-
   assertRefreshHostTrusted();
 
   return withHttpSpan("POST", "/oauth/token/", async () => {
