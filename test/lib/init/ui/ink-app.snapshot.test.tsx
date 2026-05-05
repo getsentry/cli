@@ -1,16 +1,12 @@
 /**
  * Smoke-test the Ink App by mounting it with mocked stdin/stdout
- * inside `bun test`. Verifies the full-screen layout (TitleBar,
- * tabbed content, status bar, keyboard hints) without needing a
- * real TTY.
+ * inside `bun test`. Verifies the full-screen layout (tabbed
+ * content, status bar, keyboard hints) without needing a real TTY.
  *
- * What this test cannot exercise:
- *   - The real Ctrl+C path through `useInput` (no raw-mode TTY).
- *     Covered indirectly by `WizardStore.setRequestCancel` tests
- *     in `wizard-store.test.ts` plus the `requestCancel` smoke
- *     test below.
- *   - Tab switching via arrow keys (requires `useInput` delivery).
- *   - Alternate screen buffer enter/exit (handled by ink-ui.ts).
+ * Note: The first Ink render() in a bun test CI worker can hang
+ * indefinitely (Ink's internal reconciler keeps the event loop
+ * alive in non-TTY). Tests that call renderApp() rely on a 500ms
+ * timeout race to prevent blocking.
  */
 import { describe, expect, test } from "bun:test";
 import { Readable, Writable } from "node:stream";
@@ -19,24 +15,16 @@ import { createElement } from "react";
 import { App } from "../../../../src/lib/init/ui/ink-app.js";
 import { WizardStore } from "../../../../src/lib/init/ui/wizard-store.js";
 
-// Top-level regex literals (biome `useTopLevelRegex`).
 const LEARN_HEADER_RE = /How Sentry Works/;
 const TASKS_HEADER_RE = /Tasks\b/;
 const STATUS_TAB_RE = /Status/;
 const FILES_TAB_RE = /Files/;
 const FILES_HEADER_PINNED_RE = /Files analyzed\s+\d+\/\d+/;
-const FILES_HEADER_UNPINNED_RE = /Files analyzed\s+↑\s+\d+\/\d+/;
+const FILES_HEADER_UNPINNED_RE = /Files analyzed\s+\u2191\s+\d+\/\d+/;
 const KEYBOARD_HINT_RE = /switch tab/;
 
 const FRAME_SETTLE_MS = 80;
 
-/**
- * Writable that captures every chunk Ink emits. Ink splits a render
- * across several writes (cursor moves → sync flag → content → sync
- * unflag) so `lastFrame()` alone is usually a control sequence —
- * `allOutput()` joins them so assertions can match against the
- * full visible rendering.
- */
 class CaptureStream extends Writable {
   frames: string[] = [];
   columns: number;
@@ -56,12 +44,11 @@ class CaptureStream extends Writable {
   }
 }
 
-/** Minimal `Readable` that satisfies Ink's stdin-shape expectations. */
 function makeStdin(): Readable {
   const s = new Readable({
     read() {
-      // No-op — tests don't drive keystrokes, they assert on
-      // initial frames after mount.
+      // No keystrokes in tests — Ink reads from this stream but
+      // we never push data.
     },
   });
   const shim = s as Readable & {
@@ -81,7 +68,6 @@ function makeStdin(): Readable {
   return s;
 }
 
-/** Render the App with mocked I/O and return the captured stream. */
 async function renderApp(
   store: WizardStore,
   columns: number
@@ -94,63 +80,46 @@ async function renderApp(
     patchConsole: false,
     exitOnCtrlC: false,
   });
-  // Settle: let Ink render one frame. Use unref so this timer
-  // doesn't keep the event loop alive on its own.
-  await new Promise<void>((r) => {
-    const t = setTimeout(r, FRAME_SETTLE_MS);
-    if (typeof t === "object" && "unref" in t) {
-      t.unref();
-    }
-  });
+  await Bun.sleep(FRAME_SETTLE_MS);
   instance.unmount();
-  // waitUntilExit() hangs in CI — Ink keeps internal timers alive
-  // in non-TTY. Race against an unref'd timeout so bun test can
-  // exit the worker even if Ink's promise never resolves.
-  const exitRace = new Promise<void>((r) => {
-    const t = setTimeout(r, 500);
-    if (typeof t === "object" && "unref" in t) {
-      t.unref();
-    }
-  });
+  // waitUntilExit() hangs in CI — race with a short unref'd timeout.
   await Promise.race([
     instance.waitUntilExit().catch(() => {
       // Ink may reject on unmount — ignore.
     }),
-    exitRace,
+    new Promise<void>((r) => {
+      const t = setTimeout(r, 500);
+      if (typeof t === "object" && "unref" in t) {
+        t.unref();
+      }
+    }),
   ]);
   return out;
 }
 
 describe("Ink App snapshot", () => {
+  test("renders full-screen layout at 120 cols", async () => {
+    const store = new WizardStore();
+    store.appendLog("info", "Hello world");
+    store.appendLog("success", "Working\u2026");
+
+    const frame = (await renderApp(store, 120)).allOutput();
+    expect(frame).toMatch(LEARN_HEADER_RE);
+    expect(frame).toMatch(TASKS_HEADER_RE);
+    expect(frame).toContain("Hello world");
+    expect(frame).toContain("Working\u2026");
+    expect(frame).toMatch(STATUS_TAB_RE);
+    expect(frame).toMatch(FILES_TAB_RE);
+    expect(frame).toMatch(KEYBOARD_HINT_RE);
+  });
+
   test("renders single-column layout at narrow width", async () => {
     const store = new WizardStore();
     store.appendLog("info", "Narrow terminal");
 
     const frame = (await renderApp(store, 60)).allOutput();
     expect(frame).toContain("Narrow terminal");
-    // At < 80 cols the sidebar is hidden — only the main content
-    // area renders in single-column mode.
     expect(frame).toMatch(STATUS_TAB_RE);
-  });
-
-  test("renders full-screen layout at 120 cols", async () => {
-    const store = new WizardStore();
-    store.appendLog("info", "Hello world");
-    store.appendLog("success", "Working…");
-
-    const frame = (await renderApp(store, 120)).allOutput();
-    // Status tab is the default — sidebar shows the learn panel
-    // (progressive reveal sequence) before falling back to tips.
-    expect(frame).toMatch(LEARN_HEADER_RE);
-    expect(frame).toMatch(TASKS_HEADER_RE);
-    // Log lines visible in the activity pane.
-    expect(frame).toContain("Hello world");
-    expect(frame).toContain("Working…");
-    // Tab bar visible.
-    expect(frame).toMatch(STATUS_TAB_RE);
-    expect(frame).toMatch(FILES_TAB_RE);
-    // Keyboard hints visible.
-    expect(frame).toMatch(KEYBOARD_HINT_RE);
   });
 
   test("status bar shows messages", async () => {
@@ -159,7 +128,6 @@ describe("Ink App snapshot", () => {
     store.appendStatus("Reading package.json");
 
     const frame = (await renderApp(store, 120)).allOutput();
-    // The most recent status message should be visible.
     expect(frame).toContain("Reading package.json");
   });
 
@@ -170,8 +138,6 @@ describe("Ink App snapshot", () => {
     store.markFilesAnalyzed(["package.json"]);
 
     const frame = (await renderApp(store, 120)).allOutput();
-    // Status tab (default) shows logs but NOT the file tree —
-    // files are on the Files tab.
     expect(frame).toContain("Checking project...");
     expect(frame).not.toMatch(FILES_HEADER_PINNED_RE);
     expect(frame).not.toMatch(FILES_HEADER_UNPINNED_RE);

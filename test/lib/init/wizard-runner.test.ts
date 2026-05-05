@@ -21,6 +21,8 @@ import * as inter from "../../../src/lib/init/interactive.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as preflight from "../../../src/lib/init/preflight.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as readiness from "../../../src/lib/init/readiness.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as registry from "../../../src/lib/init/tools/registry.js";
 import type {
   ResolvedInitContext,
@@ -141,6 +143,7 @@ beforeEach(() => {
   };
   getUISpy = spyOn(uiFactory, "getUIAsync").mockResolvedValue(wrapped);
 
+  spyOn(readiness, "checkReadiness").mockResolvedValue(undefined);
   formatBannerSpy = spyOn(banner, "formatBanner").mockReturnValue("BANNER");
   formatResultSpy = spyOn(fmt, "formatResult").mockImplementation(noop);
   formatErrorSpy = spyOn(fmt, "formatError").mockImplementation(noop);
@@ -481,7 +484,7 @@ describe("runWizard", () => {
     expect(spinnerMock.stop).toHaveBeenCalledWith("Error", 1);
   });
 
-  test("shows a multiline tree while reading files and then analyzing them", async () => {
+  test("shows count-based messages while reading and analyzing files", async () => {
     mockStartResult = {
       status: "suspended",
       suspended: [["detect-platform"]],
@@ -502,23 +505,11 @@ describe("runWizard", () => {
 
     await runWizard(makeOptions());
 
-    const messages = spinnerMock.message.mock.calls.map((call: string[]) =>
-      call[0]
-        ?.replace(
-          // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escape sequences
-          /\x1b\[[^m]*m/g,
-          ""
-        )
-        // Normalize whitespace left behind by code span padding
-        .replace(/[ \t]+$/gm, "")
-        .replace(/ {2,}/g, " ")
+    const messages = spinnerMock.message.mock.calls.map(
+      (call: string[]) => call[0]
     );
-    expect(messages).toContain(
-      "Reading files...\n├─ ● settings.py\n└─ ● urls.py"
-    );
-    expect(messages).toContain(
-      "Analyzing files...\n├─ ✓ settings.py\n└─ ✓ urls.py"
-    );
+    expect(messages).toContain("Reading 2 files...");
+    expect(messages).toContain("Analyzing 2 files...");
   });
 
   test("passes precomputed dirListing/fileCache/existingSentry via initialState, not inputData", async () => {
