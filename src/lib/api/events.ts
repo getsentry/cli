@@ -237,9 +237,7 @@ export async function listIssueEvents(
     });
 
     const paginated = unwrapPaginatedResult(
-      result as
-        | { data: IssueEvent[]; error: undefined }
-        | { data: undefined; error: unknown },
+      result,
       "Failed to list issue events"
     );
 

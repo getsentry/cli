@@ -12,6 +12,7 @@ import { logger } from "../logger.js";
 
 import {
   API_MAX_PER_PAGE,
+  autoPaginate,
   getOrgSdkConfig,
   MAX_PAGINATION_PAGES,
   type PaginatedResponse,
@@ -59,12 +60,10 @@ export async function listRepositoriesPaginated(
   const result = await listAnOrganization_sRepositories({
     ...config,
     path: { organization_id_or_slug: orgSlug },
-    // per_page is supported by Sentry's pagination framework at runtime
-    // but not yet in the OpenAPI spec
     query: {
       cursor: options.cursor,
       per_page: options.perPage ?? 25,
-    } as { cursor?: string },
+    } as { cursor?: string; per_page?: number },
   });
 
   return unwrapPaginatedResult<SentryRepository[]>(
@@ -79,8 +78,8 @@ export async function listRepositoriesPaginated(
  * List **all** repositories in an organization by walking every page.
  *
  * Used by the offline repo cache and anywhere else we need the complete
- * set (not just the first page). Stops at {@link MAX_PAGINATION_PAGES}
- * as a safety net for pathological cases.
+ * set (not just the first page). Bounded by `autoPaginate`'s
+ * {@link MAX_PAGINATION_PAGES} safety limit.
  *
  * @param orgSlug - Organization slug
  * @returns All Sentry-registered repositories across all pages
@@ -88,24 +87,15 @@ export async function listRepositoriesPaginated(
 export async function listAllRepositories(
   orgSlug: string
 ): Promise<SentryRepository[]> {
-  const all: SentryRepository[] = [];
-  let cursor: string | undefined;
-  for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
-    const { data, nextCursor } = await listRepositoriesPaginated(orgSlug, {
-      cursor,
-      perPage: API_MAX_PER_PAGE,
-    });
-    all.push(...data);
-    if (!nextCursor) {
-      return all;
-    }
-    cursor = nextCursor;
-  }
-  log.warn(
-    `Stopped paginating repositories for '${orgSlug}' after ${MAX_PAGINATION_PAGES} pages — ` +
-      "some repos may be missing from the cache."
+  const { data } = await autoPaginate(
+    (cursor) =>
+      listRepositoriesPaginated(orgSlug, {
+        cursor,
+        perPage: API_MAX_PER_PAGE,
+      }),
+    MAX_PAGINATION_PAGES * API_MAX_PER_PAGE
   );
-  return all;
+  return data;
 }
 
 /**
