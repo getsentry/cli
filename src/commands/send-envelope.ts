@@ -14,6 +14,7 @@ import { parseEnvelope, serializeEnvelope } from "@sentry/core";
 import type { SentryContext } from "../context.js";
 import { buildCommand } from "../lib/command.js";
 import {
+  buildEnvelopeUrl,
   readFileBytes,
   requireDsn,
   sendEnvelopeRequest,
@@ -96,6 +97,8 @@ sentry send-envelope ./a.envelope ./b.envelope
     }
 
     const dsn = requireDsn(flags, this.cwd);
+    // Validate the DSN fully before doing any file I/O
+    buildEnvelopeUrl(dsn);
 
     for (const file of files) {
       let body: string | Uint8Array;
