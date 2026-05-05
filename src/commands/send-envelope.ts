@@ -14,6 +14,7 @@ import { parseEnvelope, serializeEnvelope } from "@sentry/core";
 import type { SentryContext } from "../context.js";
 import { buildCommand } from "../lib/command.js";
 import { requireDsn, sendEnvelopeRequest } from "../lib/envelope/transport.js";
+import { ValidationError } from "../lib/errors.js";
 import { CommandOutput } from "../lib/formatters/output.js";
 
 type SendEnvelopeResult = {
@@ -83,6 +84,13 @@ sentry send-envelope ./a.envelope ./b.envelope
     flags: { dsn?: string; raw?: boolean },
     ...files: string[]
   ) {
+    if (files.length === 0) {
+      throw new ValidationError(
+        "At least one envelope file path is required.",
+        "path"
+      );
+    }
+
     const dsn = requireDsn(flags, this.cwd);
 
     for (const file of files) {
