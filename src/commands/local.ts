@@ -39,7 +39,6 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import type { SentryContext } from "../context.js";
-import { openOrShowUrl } from "../lib/browser.js";
 import { buildCommand, numberParser } from "../lib/command.js";
 import { ValidationError } from "../lib/errors.js";
 import {
@@ -86,7 +85,6 @@ function parseFilter(value: string): FilterValue {
 type LocalFlags = {
   readonly port: number;
   readonly host: string;
-  readonly open: boolean;
   readonly quiet: boolean;
   readonly filter: FilterValue[];
 };
@@ -644,11 +642,6 @@ export const localCommand = buildCommand({
         brief: "Hostname to bind to (default localhost)",
         default: "localhost",
       },
-      open: {
-        kind: "boolean",
-        brief: "Open the sidecar SSE URL in a browser",
-        default: false,
-      },
       quiet: {
         kind: "boolean",
         brief: "Suppress per-envelope tail output",
@@ -666,7 +659,6 @@ export const localCommand = buildCommand({
     aliases: {
       p: "port",
       H: "host",
-      o: "open",
       q: "quiet",
       f: "filter",
     },
@@ -717,11 +709,6 @@ export const localCommand = buildCommand({
       log.info(`Filtering: ${[...activeFilters].join(", ")}`);
     }
     log.info("Press Ctrl-C to stop.");
-
-    if (flags.open) {
-      // Best-effort — never blocks shutdown.
-      await openOrShowUrl(`${url}/stream`);
-    }
 
     // Block until the user interrupts. We don't yield any CommandOutput
     // because there's no structured payload — this command is a server.

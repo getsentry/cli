@@ -16,8 +16,8 @@ sentry local --port 9000 --host 0.0.0.0
 # Run quietly (suppress per-envelope tail output)
 sentry local --quiet
 
-# Open the SSE endpoint in a browser on startup
-sentry local --open
+# Only show errors and logs (filter out transactions)
+sentry local -f error -f log
 ```
 
 ## Endpoints
@@ -41,10 +41,20 @@ Or configure your SDK's transport explicitly to send envelopes to `http://localh
 
 ## Tail output
 
-By default, every envelope received is logged as a single line:
+By default, incoming envelopes are pretty-printed to the terminal:
 
 ```
-14:32:01.456 • event+attachment
+14:32:01  error  server   TypeError: x is not a function [app.ts:42:5] [handleRequest]
+14:32:02  trace  browser  [http.client] GET /api/users [245ms] [3 spans]
+14:32:03  info   server   User logged in [user_id=1234]
 ```
 
-The label is the joined list of envelope item types (`event`, `transaction`, `log`, `attachment`, etc.). Use `--quiet` to suppress this output if you only need the SSE stream for the Spotlight overlay.
+Errors show the exception type, message, and top stack frame. Transactions show the operation, duration, and span count. Logs show the severity level, message, and custom attributes.
+
+Use `--filter` / `-f` to narrow the output to specific event types (repeatable):
+
+```bash
+sentry local -f error -f log    # only errors and logs
+```
+
+Use `--quiet` to suppress tail output entirely if you only need the SSE stream for the Spotlight overlay.
