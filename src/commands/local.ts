@@ -61,11 +61,8 @@ const DEFAULT_PORT = 8969;
 /** Buffer size: how many recent envelopes to retain for late subscribers. */
 const BUFFER_SIZE = 500;
 
-/** SSE event payload — what we send to GET /stream subscribers. */
-type EventPayload = {
-  contentType: string;
-  data: string; // base64-encoded raw envelope bytes
-};
+/** Canonical content type for Sentry envelopes. */
+const SENTRY_CONTENT_TYPE = "application/x-sentry-envelope";
 
 /** Envelope item categories that can be filtered via `--filter`. */
 const FILTER_VALUES = ["error", "transaction", "log"] as const;
@@ -150,12 +147,22 @@ function buildSidecarApp(
     req: {
       arrayBuffer: () => Promise<ArrayBuffer>;
       header: (name: string) => string | undefined;
+      query: (name: string) => string | undefined;
     };
     body: (data: null, status: number) => Response;
   }) => {
     const arrayBuf = await c.req.arrayBuffer();
     const body = Buffer.from(arrayBuf);
-    const contentType = c.req.header("content-type") ?? "";
+    // Browser SDKs using sendBeacon() set Content-Type to text/plain to
+    // avoid CORS preflight. Detect this via the sentry_client query param
+    // and override to the canonical Sentry envelope content type.
+    let contentType = c.req.header("content-type") ?? "";
+    if (
+      c.req.query("sentry_client")?.startsWith("sentry.javascript.browser") &&
+      c.req.header("origin")
+    ) {
+      contentType = SENTRY_CONTENT_TYPE;
+    }
     const contentEncoding = c.req.header("content-encoding") as
       | "gzip"
       | "deflate"
@@ -189,22 +196,26 @@ function buildSidecarApp(
 
   /**
    * SSE stream — Spotlight overlay / UI clients connect here to receive a
-   * live feed of envelopes. Each event is emitted as a JSON object with
-   * the content type and base64-encoded body.
+   * live feed of envelopes. The event format matches Spotlight's protocol:
+   *   - `event` is the content type (e.g., "application/x-sentry-envelope")
+   *   - `id` is the Spotlight-assigned envelope UUID (enables reconnection)
+   *   - `data` is the parsed envelope JSON ([header, items])
    */
   app.get("/stream", (c) =>
     streamSSE(c, async (stream) => {
-      // Tie the subscriber lifetime to the response stream. We unsubscribe
-      // when the client disconnects so the buffer doesn't leak readers.
+      const lastEventId = c.req.header("Last-Event-ID");
       const readerId = spotlightBuffer.subscribe((container) => {
-        const payload: EventPayload = {
-          contentType: container.getContentType(),
-          data: container.getData().toString("base64"),
-        };
+        const parsed = container.getParsedEnvelope();
+        if (!parsed) {
+          return;
+        }
+        const header = parsed.envelope[0] as Record<string, unknown>;
+        const envelopeId = header.__spotlight_envelope_id;
         stream
           .writeSSE({
-            event: "envelope",
-            data: JSON.stringify(payload),
+            id: envelopeId ? String(envelopeId) : undefined,
+            event: container.getContentType(),
+            data: JSON.stringify(parsed.envelope),
           })
           .catch((err: unknown) => {
             log.debug(
@@ -213,7 +224,7 @@ function buildSidecarApp(
               }`
             );
           });
-      });
+      }, lastEventId);
 
       stream.onAbort(() => {
         spotlightBuffer.unsubscribe(readerId);
@@ -594,8 +605,8 @@ function waitForShutdown(server: Server): Promise<void> {
       }
     };
 
-    process.once("SIGINT", () => shutdown("SIGINT"));
-    process.once("SIGTERM", () => shutdown("SIGTERM"));
+    process.on("SIGINT", () => shutdown("SIGINT"));
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
   });
 }
 
