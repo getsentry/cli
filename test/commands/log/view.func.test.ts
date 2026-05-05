@@ -416,6 +416,17 @@ describe("viewCommand.func", () => {
       expect(output).toContain(ID1);
     });
 
+    test("does not call getLogItemDetail in JSON mode", async () => {
+      const log = makeSampleLog(ID1);
+      getLogsSpy.mockResolvedValue([log]);
+
+      const { context } = createMockContext();
+      const func = await viewCommand.loader();
+      await func.call(context, { json: true, web: false }, "my-org/proj", ID1);
+
+      expect(getLogItemDetailSpy).not.toHaveBeenCalled();
+    });
+
     test("renders custom attributes in human output when detail available", async () => {
       const log = makeSampleLog(ID1);
       getLogsSpy.mockResolvedValue([log]);

@@ -526,25 +526,27 @@ export const viewCommand = buildCommand({
 
     warnMissingIds(logIds, logs);
 
-    // Fetch full attribute sets with bounded concurrency (mirrors fetchMultiSpanDetails).
-    // Graceful degradation: if the endpoint is unavailable the detail is undefined
-    // and the formatter falls back to showing only the standard fields + --fields.
+    // Skip detail fetching in JSON mode — jsonTransform only uses data.logs,
+    // not data.details, so the extra round-trips would be wasted.
+    // Mirrors the shouldFetchDetails pattern in trace/view.ts.
     const detailLimit = pLimit(LOG_DETAIL_CONCURRENCY);
-    const details = await detailLimit.map(logs, async (entry) => {
-      if (!entry.trace) {
-        return;
-      }
-      try {
-        return await getLogItemDetail(
-          target.org,
-          target.project,
-          entry["sentry.item_id"],
-          entry.trace
-        );
-      } catch {
-        return;
-      }
-    });
+    const details = flags.json
+      ? undefined
+      : await detailLimit.map(logs, async (entry) => {
+          if (!entry.trace) {
+            return;
+          }
+          try {
+            return await getLogItemDetail(
+              target.org,
+              target.project,
+              entry["sentry.item_id"],
+              entry.trace
+            );
+          } catch {
+            return;
+          }
+        });
 
     const hint = target.detectedFrom
       ? `Detected from ${target.detectedFrom}`

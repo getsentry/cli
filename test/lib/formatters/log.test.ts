@@ -520,6 +520,19 @@ describe("formatLogDetails", () => {
       expect(result).toContain("u_99");
     });
 
+    test("renders array attributes with JSON.stringify instead of [object Object]", () => {
+      const attrsWithArray: TraceItemAttribute[] = [
+        { name: "tags", type: "array", value: ["prod", "web"] },
+        { name: "ids", type: "array", value: [1, 2, 3] },
+      ];
+      const log = createDetailedTestLog();
+      const result = stripAnsi(formatLogDetails(log, "test-org", attrsWithArray));
+
+      expect(result).toContain('["prod","web"]');
+      expect(result).toContain("[1,2,3]");
+      expect(result).not.toContain("[object Object]");
+    });
+
     test("no Custom Attributes section when allAttributes is empty array", () => {
       const log = createDetailedTestLog();
       const result = stripAnsi(formatLogDetails(log, "test-org", []));

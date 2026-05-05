@@ -458,7 +458,10 @@ export function formatLogDetails(
       lines.push("");
       lines.push(
         mdKvTable(
-          customAttrs.map((a) => [a.name, String(a.value)]),
+          customAttrs.map((a) => [
+            a.name,
+            a.type === "array" ? JSON.stringify(a.value) : String(a.value),
+          ]),
           "Custom Attributes"
         )
       );
