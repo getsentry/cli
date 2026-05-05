@@ -67,7 +67,7 @@ export function requireDsn(flags: DsnFlags, cwd: string): string {
     return dsn;
   }
   throw new ConfigError(
-    "No DSN found. Provide one via --dsn, SENTRY_DSN env var, or ensure your project has a Sentry DSN configured.",
+    "No DSN found. Provide one via --dsn <dsn> or set the SENTRY_DSN environment variable.",
     "sentry send-event --dsn <your-dsn>"
   );
 }

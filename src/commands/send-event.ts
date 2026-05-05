@@ -5,7 +5,6 @@
  * so no `sentry auth login` is required. The DSN can be provided via:
  *   1. --dsn flag
  *   2. SENTRY_DSN environment variable
- *   3. Auto-detected from project source files / .env
  */
 
 import type { DsnComponents, Event } from "@sentry/core";
