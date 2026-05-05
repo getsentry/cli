@@ -99,14 +99,7 @@ const SUGGESTIONS: ReadonlyMap<string, CommandSuggestion> = new Map([
 
   // --- old sentry-cli commands (~5 events) ---
   ["cli/info", { command: "sentry auth status" }],
-  [
-    "cli/send-event",
-    {
-      command:
-        "sentry api /api/0/projects/{org}/{project}/store/ --method POST",
-      explanation: "Use the API to send test events",
-    },
-  ],
+  ["cli/send-event", { command: "sentry send-event" }],
   ["cli/issues", { command: "sentry issue list" }],
   ["cli/logs", { command: "sentry log list" }],
 

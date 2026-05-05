@@ -71,7 +71,9 @@ cli/
 │   │   ├── explore.ts   # Query aggregate event data (Explore)
 │   │   ├── help.ts      # Help command
 │   │   ├── init.ts      # Initialize Sentry in your project (experimental)
-│   │   └── schema.ts    # Browse the Sentry API schema
+│   │   ├── schema.ts    # Browse the Sentry API schema
+│   │   ├── send-envelope.ts# Send a Sentry envelope file
+│   │   └── send-event.ts# Send a Sentry event
 │   ├── lib/            # Shared utilities
 │   └── types/          # TypeScript types and Zod schemas
 ├── test/               # Test files (mirrors src/ structure)

@@ -474,6 +474,22 @@ Browse the Sentry API schema
 
 → Full flags and examples: `references/schema.md`
 
+### Send-event
+
+Send a Sentry event
+
+- `sentry send-event <args...>` — Send a Sentry event
+
+→ Full flags and examples: `references/send-event.md`
+
+### Send-envelope
+
+Send a Sentry envelope file
+
+- `sentry send-envelope <path...>` — Send a Sentry envelope file
+
+→ Full flags and examples: `references/send-envelope.md`
+
 ## Global Options
 
 All commands support the following global options:
