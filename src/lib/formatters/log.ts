@@ -286,12 +286,12 @@ function formatSeverityLabel(severity: string | null | undefined): string {
 }
 
 /**
- * Attribute names rendered by the fixed sections in formatLogDetails.
- * Used to deduplicate against the trace-items detail response so we don't show
- * attributes in Custom Attributes that are already displayed above.
- * Also includes internal/noisy fields mirroring Sentry UI's HiddenLogDetailFields.
+ * Attribute names to exclude from the Custom Attributes section in formatLogDetails.
+ * Mirrors REDUNDANT_DETAIL_ATTRS in traces.ts (the span equivalent).
+ * Covers attributes already shown in the fixed sections above, plus internal/noisy
+ * fields that mirror Sentry UI's HiddenLogDetailFields.
  */
-const SHOWN_IN_STANDARD_SECTIONS = new Set([
+const REDUNDANT_LOG_DETAIL_ATTRS = new Set([
   // Core section
   "sentry.item_id",
   "id",
@@ -448,7 +448,7 @@ export function formatLogDetails(
   // Custom Attributes — from trace-items detail endpoint (all non-standard attributes)
   if (allAttributes?.length) {
     let customAttrs = allAttributes.filter(
-      (a) => !SHOWN_IN_STANDARD_SECTIONS.has(a.name)
+      (a) => !REDUNDANT_LOG_DETAIL_ATTRS.has(a.name)
     );
     if (extraFields?.length) {
       const wanted = new Set(extraFields);

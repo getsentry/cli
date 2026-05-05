@@ -10,6 +10,9 @@ import {
   type SpanListItem,
   type SpansResponse,
   SpansResponseSchema,
+  type TraceItemAttribute,
+  type TraceItemDetail,
+  TraceItemDetailSchema,
   type TraceMeta,
   TraceMetaSchema,
   type TraceSpan,
@@ -76,21 +79,11 @@ export const REDUNDANT_DETAIL_ATTRS = new Set([
   "environment",
 ]);
 
-/** A single attribute returned by the trace-items detail endpoint */
-export type TraceItemAttribute = {
-  name: string;
-  type: "str" | "int" | "float" | "bool";
-  value: string | number | boolean;
-};
-
-/** Response from GET /projects/{org}/{project}/trace-items/{itemId}/ */
-export type TraceItemDetail = {
-  itemId: string;
-  timestamp: string;
-  attributes: TraceItemAttribute[];
-  meta: Record<string, unknown>;
-  links: unknown;
-};
+// TraceItemAttribute and TraceItemDetail are defined with Zod schemas in
+// src/types/sentry.ts and re-exported via the types barrel (src/types/index.ts).
+// Imported above alongside the other canonical types, and re-exported here so
+// existing callers (api-client.ts, formatters/trace.ts) don't need to change.
+export type { TraceItemAttribute, TraceItemDetail };
 
 /** Options for {@link getDetailedTrace}. */
 type GetDetailedTraceOptions = {
@@ -166,6 +159,7 @@ export async function getSpanDetails(
         trace_id: traceId,
         item_type: "spans",
       },
+      schema: TraceItemDetailSchema,
     }
   );
   return data;

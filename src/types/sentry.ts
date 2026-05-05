@@ -858,12 +858,14 @@ export const TraceItemAttributeSchema = z.discriminatedUnion("type", [
 ]);
 export type TraceItemAttribute = z.infer<typeof TraceItemAttributeSchema>;
 
-/** Response from GET /projects/{org}/{project}/trace-items/{itemId}/?item_type=logs */
-export const TraceItemDetailSchema = z.object({
-  itemId: z.string(),
-  timestamp: z.string(),
-  attributes: z.array(TraceItemAttributeSchema),
-});
+/** Response from GET /projects/{org}/{project}/trace-items/{itemId}/ (logs and spans) */
+export const TraceItemDetailSchema = z
+  .object({
+    itemId: z.string(),
+    timestamp: z.string(),
+    attributes: z.array(TraceItemAttributeSchema),
+  })
+  .passthrough(); // preserves meta, links, and any future fields returned by the endpoint
 export type TraceItemDetail = z.infer<typeof TraceItemDetailSchema>;
 
 // Trace-log types (from /organizations/{org}/trace-logs/ endpoint)
