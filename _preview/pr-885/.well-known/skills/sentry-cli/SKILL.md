@@ -1,6 +1,6 @@
 ---
 name: sentry-cli
-version: 0.30.0-dev.0
+version: 0.32.0-dev.0
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 requires:
   bins: ["sentry"]
@@ -45,6 +45,22 @@ The `sentry` CLI follows conventions from well-known tools — if you're familia
 - For mutations, verify the org/project context looks correct in the command output before proceeding with further changes
 - Never store or log authentication tokens — the CLI manages credentials automatically
 - If the CLI reports the wrong org/project, override with explicit `<org>/<project>` arguments
+
+### Exit Codes
+
+The CLI uses semantic exit codes. Key ranges for agents:
+
+| Range | Meaning | Agent Action |
+|-------|---------|-------------|
+| 0 | Success | Proceed normally |
+| 10–19 | Auth error | Prompt user to run `sentry auth login` |
+| 20–29 | Input error | Check command arguments and retry |
+| 30–39 | API error | Retry or report to user |
+| 40–49 | Feature unavailable | Inform user about plan/settings |
+| 50–59 | Operation error | Report to user |
+| 60–69 | Command-specific | Check stderr for details |
+
+See [Exit Codes](/exit-codes/) for the complete reference.
 
 ### Workflow Patterns
 
@@ -265,7 +281,7 @@ Authenticate with Sentry
 - `sentry auth refresh` — Refresh your authentication token
 - `sentry auth status` — View authentication status
 - `sentry auth token` — Print the stored authentication token
-- `sentry auth whoami` — Show the currently authenticated user
+- `sentry auth whoami` — Show the currently authenticated identity
 
 → Full flags and examples: `references/auth.md`
 
@@ -300,6 +316,7 @@ Manage Sentry issues
 - `sentry issue view <issue>` — View details of a specific issue
 - `sentry issue resolve <issue>` — Mark an issue as resolved
 - `sentry issue unresolve <issue>` — Reopen a resolved issue
+- `sentry issue archive <issue>` — Archive (ignore) an issue
 - `sentry issue merge <issue...>` — Merge 2+ issues into a single canonical group
 
 → Full flags and examples: `references/issue.md`
@@ -308,7 +325,7 @@ Manage Sentry issues
 
 View and list Sentry events
 
-- `sentry event view <org/project/event-id...>` — View details of a specific event
+- `sentry event view <org/project/event-id...>` — View details of one or more events
 - `sentry event list <issue>` — List events for an issue
 
 → Full flags and examples: `references/event.md`
@@ -345,6 +362,15 @@ Manage Sentry dashboards
 - `sentry dashboard widget delete <org/project/dashboard...>` — Delete a widget from a dashboard
 
 → Full flags and examples: `references/dashboard.md`
+
+### Replay
+
+Search and inspect Session Replays
+
+- `sentry replay list <org/project>` — List recent Session Replays
+- `sentry replay view <replay-id-or-url...>` — View a Session Replay
+
+→ Full flags and examples: `references/replay.md`
 
 ### Release
 
