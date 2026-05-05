@@ -44,10 +44,22 @@ function getSentryUrl(): string {
 }
 
 /**
+ * Public OAuth client ID for sentry.io.
+ *
+ * Device Authorization Grant (RFC 8628) is a public-client flow — no client
+ * secret is involved, so this value is safe to commit. It is equivalent to the
+ * `SENTRY_CLIENT_ID` repo variable used by CI.
+ *
+ * Self-hosted instances must override this via the `SENTRY_CLIENT_ID` env var
+ * or the `SENTRY_CLIENT_ID_BUILD` build-time define.
+ */
+const DEFAULT_OAUTH_CLIENT_ID =
+  "1d673b81d60ef84c951359c36296972ca6fd41bd8f45acd2d3a783a3b3c28e41";
+
+/**
  * OAuth client ID
  *
- * Build-time: Injected via esbuild define: { SENTRY_CLIENT_ID_BUILD: "..." }
- * Runtime: Can be overridden via SENTRY_CLIENT_ID env var (for self-hosted)
+ * Priority: SENTRY_CLIENT_ID env var → SENTRY_CLIENT_ID_BUILD (build-time) → committed default
  *
  * Read at call time (not module load time) so tests can override SENTRY_CLIENT_ID
  * after module initialization.
@@ -60,7 +72,7 @@ function getClientId(): string {
     getEnv().SENTRY_CLIENT_ID ??
     (typeof SENTRY_CLIENT_ID_BUILD !== "undefined"
       ? SENTRY_CLIENT_ID_BUILD
-      : "")
+      : DEFAULT_OAUTH_CLIENT_ID)
   );
 }
 
