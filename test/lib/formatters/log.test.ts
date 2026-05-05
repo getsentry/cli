@@ -526,7 +526,9 @@ describe("formatLogDetails", () => {
         { name: "ids", type: "array", value: [1, 2, 3] },
       ];
       const log = createDetailedTestLog();
-      const result = stripAnsi(formatLogDetails(log, "test-org", attrsWithArray));
+      const result = stripAnsi(
+        formatLogDetails(log, "test-org", attrsWithArray)
+      );
 
       expect(result).toContain('["prod","web"]');
       expect(result).toContain("[1,2,3]");
