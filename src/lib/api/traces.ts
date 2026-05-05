@@ -131,39 +131,59 @@ export async function getDetailedTrace(
   return data.map(normalizeTraceSpan);
 }
 
+type GetTraceItemDetailOptions = {
+  traceId: string;
+  itemType: "spans" | "logs";
+};
+
+/**
+ * Fetch full attribute details for a single trace item via the experimental
+ * /projects/{org}/{project}/trace-items/{itemId}/ endpoint.
+ *
+ * This endpoint is not yet in @sentry/api (getsentry/sentry-api-schema) because
+ * it is marked EXPERIMENTAL in Sentry. Both span and log detail views use it.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @param itemId - The item ID (span ID or log sentry.item_id)
+ * @param options - traceId (required by endpoint) and itemType ("spans" | "logs")
+ */
+export async function getTraceItemDetail(
+  orgSlug: string,
+  projectSlug: string,
+  itemId: string,
+  { traceId, itemType }: GetTraceItemDetailOptions
+): Promise<TraceItemDetail> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<TraceItemDetail>(
+    regionUrl,
+    `/projects/${orgSlug}/${projectSlug}/trace-items/${itemId}/`,
+    {
+      params: { trace_id: traceId, item_type: itemType },
+      schema: TraceItemDetailSchema,
+    }
+  );
+  return data;
+}
+
 /**
  * Fetch full attribute details for a single span.
- *
- * Uses the trace-items detail endpoint which returns ALL span attributes
- * without requiring the caller to enumerate them. This is the same endpoint
- * the Sentry frontend uses in the span detail sidebar.
  *
  * @param orgSlug - Organization slug
  * @param projectSlug - Project slug
  * @param spanId - The 16-char hex span ID
  * @param traceId - The parent trace ID (required for lookup)
- * @returns Full span detail with all attributes
  */
-export async function getSpanDetails(
+export function getSpanDetails(
   orgSlug: string,
   projectSlug: string,
   spanId: string,
   traceId: string
 ): Promise<TraceItemDetail> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-
-  const { data } = await apiRequestToRegion<TraceItemDetail>(
-    regionUrl,
-    `/projects/${orgSlug}/${projectSlug}/trace-items/${spanId}/`,
-    {
-      params: {
-        trace_id: traceId,
-        item_type: "spans",
-      },
-      schema: TraceItemDetailSchema,
-    }
-  );
-  return data;
+  return getTraceItemDetail(orgSlug, projectSlug, spanId, {
+    traceId,
+    itemType: "spans",
+  });
 }
 
 /**

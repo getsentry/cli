@@ -530,24 +530,21 @@ export const viewCommand = buildCommand({
     // Graceful degradation: if the endpoint is unavailable the detail is undefined
     // and the formatter falls back to showing only the standard fields + --fields.
     const detailLimit = pLimit(LOG_DETAIL_CONCURRENCY);
-    const details = await Promise.all(
-      logs.map((entry) =>
-        entry.trace
-          ? detailLimit(() => {
-              // entry.trace is narrowed to string by the outer ternary
-              const traceId = entry.trace as string;
-              return getLogItemDetail(
-                target.org,
-                target.project,
-                entry["sentry.item_id"],
-                traceId
-              ).catch(() => {
-                return;
-              });
-            })
-          : Promise.resolve(undefined)
-      )
-    );
+    const details = await detailLimit.map(logs, async (entry) => {
+      if (!entry.trace) {
+        return;
+      }
+      try {
+        return await getLogItemDetail(
+          target.org,
+          target.project,
+          entry["sentry.item_id"],
+          entry.trace
+        );
+      } catch {
+        return;
+      }
+    });
 
     const hint = target.detectedFrom
       ? `Detected from ${target.detectedFrom}`

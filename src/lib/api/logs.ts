@@ -13,21 +13,19 @@ import {
   LogsResponseSchema,
   type SentryLog,
   type TraceItemDetail,
-  TraceItemDetailSchema,
   type TraceLog,
   TraceLogsResponseSchema,
 } from "../../types/index.js";
-
 import { resolveOrgRegion } from "../region.js";
 import { LOG_RETENTION_PERIOD } from "../retention.js";
 import { isAllDigits } from "../utils.js";
-
 import {
   API_MAX_PER_PAGE,
   apiRequestToRegion,
   getOrgSdkConfig,
   unwrapResult,
 } from "./infrastructure.js";
+import { getTraceItemDetail } from "./traces.js";
 
 /** Sort direction for log queries: newest-first or oldest-first. */
 export type LogSortDirection = "newest" | "oldest";
@@ -322,20 +320,14 @@ export async function listTraceLogs(
  * apiRequestToRegion — it is not yet available in @sentry/api (generated from
  * getsentry/sentry-api-schema) because the endpoint is marked EXPERIMENTAL in Sentry.
  */
-export async function getLogItemDetail(
+export function getLogItemDetail(
   orgSlug: string,
   projectSlug: string,
   logId: string,
   traceId: string
 ): Promise<TraceItemDetail> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data } = await apiRequestToRegion<TraceItemDetail>(
-    regionUrl,
-    `/projects/${orgSlug}/${projectSlug}/trace-items/${logId}/`,
-    {
-      params: { item_type: "logs", trace_id: traceId },
-      schema: TraceItemDetailSchema,
-    }
-  );
-  return data;
+  return getTraceItemDetail(orgSlug, projectSlug, logId, {
+    traceId,
+    itemType: "logs",
+  });
 }
