@@ -162,7 +162,9 @@ export async function listIssuesPaginated(
   });
 
   return unwrapPaginatedResult<SentryIssue[]>(
-    result as { data: SentryIssue[]; error: undefined } | { data: undefined; error: unknown },
+    result as
+      | { data: SentryIssue[]; error: undefined }
+      | { data: undefined; error: unknown },
     "Failed to list issues"
   );
 }

@@ -98,7 +98,9 @@ export async function listReleasesPaginated(
   });
 
   return unwrapPaginatedResult<SentryRelease[]>(
-    result as { data: SentryRelease[]; error: undefined } | { data: undefined; error: unknown },
+    result as
+      | { data: SentryRelease[]; error: undefined }
+      | { data: undefined; error: unknown },
     "Failed to list releases"
   );
 }

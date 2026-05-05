@@ -54,23 +54,22 @@ import { getUserRegions, listOrganizations } from "./organizations.js";
 export async function listProjects(orgSlug: string): Promise<SentryProject[]> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const { data: allResults } = await autoPaginate(
-    async (cursor) => {
-      const result = await listAnOrganization_sProjects({
-        ...config,
-        path: { organization_id_or_slug: orgSlug },
-        query: { cursor, per_page: API_MAX_PER_PAGE } as {
-          cursor?: string;
-          per_page?: number;
-        },
-      });
-      return unwrapPaginatedResult<SentryProject[]>(
-        result as { data: SentryProject[]; error: undefined } | { data: undefined; error: unknown },
-        "Failed to list projects"
-      );
-    },
-    Number.MAX_SAFE_INTEGER
-  );
+  const { data: allResults } = await autoPaginate(async (cursor) => {
+    const result = await listAnOrganization_sProjects({
+      ...config,
+      path: { organization_id_or_slug: orgSlug },
+      query: { cursor, per_page: API_MAX_PER_PAGE } as {
+        cursor?: string;
+        per_page?: number;
+      },
+    });
+    return unwrapPaginatedResult<SentryProject[]>(
+      result as
+        | { data: SentryProject[]; error: undefined }
+        | { data: undefined; error: unknown },
+      "Failed to list projects"
+    );
+  }, Number.MAX_SAFE_INTEGER);
 
   // Populate project cache for shell completions (best-effort).
   // Mirrors how listOrganizations() calls setOrgRegions().
@@ -110,7 +109,9 @@ export async function listProjectsPaginated(
   });
 
   return unwrapPaginatedResult<SentryProject[]>(
-    result as { data: SentryProject[]; error: undefined } | { data: undefined; error: unknown },
+    result as
+      | { data: SentryProject[]; error: undefined }
+      | { data: undefined; error: unknown },
     "Failed to list projects"
   );
 }

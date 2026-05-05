@@ -66,7 +66,9 @@ export async function listRepositoriesPaginated(
   });
 
   return unwrapPaginatedResult<SentryRepository[]>(
-    result as { data: SentryRepository[]; error: undefined } | { data: undefined; error: unknown },
+    result as
+      | { data: SentryRepository[]; error: undefined }
+      | { data: undefined; error: unknown },
     "Failed to list repositories"
   );
 }
