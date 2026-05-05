@@ -92,7 +92,7 @@ function parseTimestamp(ts: string | undefined): number | undefined {
   }
   // Unix numeric
   const num = Number(ts);
-  if (Number.isFinite(num) && num > 0) {
+  if (Number.isFinite(num)) {
     return num;
   }
   // ISO / RFC 2822

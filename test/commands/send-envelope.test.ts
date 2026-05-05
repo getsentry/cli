@@ -125,4 +125,22 @@ describe("sendEnvelopeCommand.func()", () => {
 
     expect(sendSpy).toHaveBeenCalledTimes(2);
   });
+
+  test("nonexistent file throws ValidationError (not raw stack trace)", async () => {
+    const { ctx } = makeContext();
+    const { ValidationError } = await import("../../src/lib/errors.js");
+    await expect(
+      func.call(ctx, { dsn: SAAS_DSN }, "/nonexistent/missing.envelope")
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  test("no files throws ValidationError", async () => {
+    const { ctx } = makeContext();
+    const { ValidationError } = await import("../../src/lib/errors.js");
+    await expect(func.call(ctx, { dsn: SAAS_DSN })).rejects.toBeInstanceOf(
+      ValidationError
+    );
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
 });

@@ -46,11 +46,11 @@ export function buildEnvelopeUrl(dsn: string): string {
  */
 export function resolveDsn(flags: DsnFlags, _cwd: string): string | undefined {
   if (flags.dsn) {
-    return flags.dsn;
+    return flags.dsn.trim();
   }
   const envDsn = process.env.SENTRY_DSN;
   if (envDsn) {
-    return envDsn;
+    return envDsn.trim();
   }
   return;
 }

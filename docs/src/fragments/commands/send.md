@@ -53,7 +53,6 @@ The DSN is resolved in priority order:
 
 1. `--dsn <value>` flag (explicit)
 2. `SENTRY_DSN` environment variable
-3. Auto-detected from `.env` files and project source code
 
 ```bash
 # Explicit DSN

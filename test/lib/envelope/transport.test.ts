@@ -15,7 +15,7 @@ import {
   resolveDsn,
   sendEnvelopeRequest,
 } from "../../../src/lib/envelope/transport.js";
-import { ApiError } from "../../../src/lib/errors.js";
+import { ApiError, ValidationError } from "../../../src/lib/errors.js";
 
 const SAAS_DSN = "https://abc123@o1169445.ingest.us.sentry.io/4505229541441536";
 const SELF_HOSTED_DSN = "https://pubkey99@sentry.mycompany.com/7";
@@ -39,7 +39,7 @@ describe("buildEnvelopeUrl", () => {
   });
 
   test("invalid DSN → throws ValidationError", () => {
-    expect(() => buildEnvelopeUrl("not-a-dsn")).toThrow();
+    expect(() => buildEnvelopeUrl("not-a-dsn")).toThrow(ValidationError);
   });
 });
 
@@ -72,6 +72,17 @@ describe("resolveDsn", () => {
     delete process.env.SENTRY_DSN;
     const result = resolveDsn({ dsn: undefined }, "/tmp");
     expect(result).toBeUndefined();
+  });
+
+  test("trims whitespace from --dsn flag", () => {
+    const result = resolveDsn({ dsn: `  ${SAAS_DSN}  ` }, "/tmp");
+    expect(result).toBe(SAAS_DSN);
+  });
+
+  test("trims whitespace from SENTRY_DSN env var", () => {
+    process.env.SENTRY_DSN = `\n${SAAS_DSN}\n`;
+    const result = resolveDsn({ dsn: undefined }, "/tmp");
+    expect(result).toBe(SAAS_DSN);
   });
 });
 

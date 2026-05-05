@@ -43,8 +43,22 @@ async function buildFilePayload(
   raw: boolean,
   dsnComponents: DsnComponents
 ): Promise<{ body: string | Uint8Array; eventId: string }> {
+  let fileBytes: ArrayBuffer;
+  try {
+    fileBytes = await Bun.file(file).arrayBuffer();
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      throw new ValidationError(`File not found: ${file}`, "path");
+    }
+    throw new ValidationError(
+      `Cannot read file ${file}: ${(err as Error).message}`,
+      "path"
+    );
+  }
+
   if (raw) {
-    const bytes = new Uint8Array(await Bun.file(file).arrayBuffer());
+    const bytes = new Uint8Array(fileBytes);
     // Best-effort: extract event_id from the first line (envelope header JSON).
     // Decode the already-read bytes instead of re-reading the file.
     let eventId = "";
@@ -58,7 +72,15 @@ async function buildFilePayload(
     return { body: bytes, eventId };
   }
 
-  const event = (await Bun.file(file).json()) as Event;
+  let event: Event;
+  try {
+    event = JSON.parse(new TextDecoder().decode(fileBytes)) as Event;
+  } catch (err) {
+    throw new ValidationError(
+      `Failed to parse JSON from ${file}: ${(err as Error).message}`,
+      "path"
+    );
+  }
   const envelope = createEventEnvelope(event, dsnComponents);
   return { body: serializeEnvelope(envelope), eventId: event.event_id ?? "" };
 }
@@ -86,6 +108,9 @@ sentry send-event ./event.json
 \`\`\`
 
 Use --raw to skip JSON parsing and send the file bytes directly to the ingest endpoint.
+
+When file arguments are provided, flags like -m/--message are ignored — the event is
+built entirely from the file contents.
 
 ## Common flags
 
