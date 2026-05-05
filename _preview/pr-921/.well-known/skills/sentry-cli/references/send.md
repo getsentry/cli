@@ -1,17 +1,17 @@
 ---
-name: sentry-cli-send-event
+name: sentry-cli-send
 version: 0.32.0-dev.0
-description: Send a Sentry event
+description: Send events and envelopes to Sentry via DSN
 requires:
   bins: ["sentry"]
   auth: true
 ---
 
-# Send-event Commands
+# Send Commands
 
-Send a Sentry event
+Send events and envelopes to Sentry via DSN
 
-### `sentry send-event <args...>`
+### `sentry send event <args...>`
 
 Send a Sentry event
 
@@ -31,5 +31,13 @@ Send a Sentry event
 - `--timestamp <value> - Event timestamp (Unix epoch, ISO 8601, or RFC 2822)`
 - `--no-environ - Do not include environment variables in the event`
 - `--raw - Send file contents as-is without parsing`
+
+### `sentry send envelope <path...>`
+
+Send a Sentry envelope file
+
+**Flags:**
+- `--dsn <value> - DSN to send envelopes to (overrides SENTRY_DSN env var)`
+- `--raw - Send file bytes without parsing or validating the envelope`
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

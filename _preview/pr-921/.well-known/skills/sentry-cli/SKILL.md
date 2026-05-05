@@ -474,21 +474,14 @@ Browse the Sentry API schema
 
 → Full flags and examples: `references/schema.md`
 
-### Send-event
+### Send
 
-Send a Sentry event
+Send events and envelopes to Sentry via DSN
 
-- `sentry send-event <args...>` — Send a Sentry event
+- `sentry send event <args...>` — Send a Sentry event
+- `sentry send envelope <path...>` — Send a Sentry envelope file
 
-→ Full flags and examples: `references/send-event.md`
-
-### Send-envelope
-
-Send a Sentry envelope file
-
-- `sentry send-envelope <path...>` — Send a Sentry envelope file
-
-→ Full flags and examples: `references/send-envelope.md`
+→ Full flags and examples: `references/send.md`
 
 ## Global Options
 
