@@ -13,7 +13,11 @@
 import { parseEnvelope, serializeEnvelope } from "@sentry/core";
 import type { SentryContext } from "../context.js";
 import { buildCommand } from "../lib/command.js";
-import { requireDsn, sendEnvelopeRequest } from "../lib/envelope/transport.js";
+import {
+  readFileBytes,
+  requireDsn,
+  sendEnvelopeRequest,
+} from "../lib/envelope/transport.js";
 import { ValidationError } from "../lib/errors.js";
 import { CommandOutput } from "../lib/formatters/output.js";
 
@@ -96,24 +100,12 @@ sentry send-envelope ./a.envelope ./b.envelope
     for (const file of files) {
       let body: string | Uint8Array;
 
-      let fileBytes: ArrayBuffer;
-      try {
-        fileBytes = await Bun.file(file).arrayBuffer();
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code === "ENOENT") {
-          throw new ValidationError(`File not found: ${file}`, "path");
-        }
-        throw new ValidationError(
-          `Cannot read file ${file}: ${(err as Error).message}`,
-          "path"
-        );
-      }
+      const bytes = await readFileBytes(file);
 
       if (flags.raw) {
-        body = new Uint8Array(fileBytes);
+        body = bytes;
       } else {
-        const text = new TextDecoder().decode(fileBytes);
+        const text = new TextDecoder().decode(bytes);
         // Parse to validate, then re-serialize to normalize
         try {
           const envelope = parseEnvelope(text);

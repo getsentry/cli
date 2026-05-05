@@ -73,6 +73,27 @@ export function requireDsn(flags: DsnFlags, cwd: string): string {
 }
 
 /**
+ * Read a file's bytes, throwing a clean ValidationError on ENOENT or I/O errors.
+ *
+ * Centralises the duplicated error-handling pattern used by both
+ * `send-event` and `send-envelope`.
+ */
+export async function readFileBytes(file: string): Promise<Uint8Array> {
+  try {
+    return new Uint8Array(await Bun.file(file).arrayBuffer());
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      throw new ValidationError(`File not found: ${file}`, "path");
+    }
+    throw new ValidationError(
+      `Cannot read file ${file}: ${(err as Error).message}`,
+      "path"
+    );
+  }
+}
+
+/**
  * POST a serialized envelope to Sentry's ingest endpoint using DSN auth.
  *
  * No Bearer token is required — the DSN public key serves as authentication.
