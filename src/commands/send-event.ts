@@ -15,7 +15,11 @@ import {
   buildEventFromFlags,
   type SendEventFlags,
 } from "../lib/envelope/event-builder.js";
-import { requireDsn, sendEnvelopeRequest } from "../lib/envelope/transport.js";
+import {
+  readFileBytes,
+  requireDsn,
+  sendEnvelopeRequest,
+} from "../lib/envelope/transport.js";
 import { ConfigError, ValidationError } from "../lib/errors.js";
 import { CommandOutput } from "../lib/formatters/output.js";
 
@@ -43,24 +47,10 @@ async function buildFilePayload(
   raw: boolean,
   dsnComponents: DsnComponents
 ): Promise<{ body: string | Uint8Array; eventId: string }> {
-  let fileBytes: ArrayBuffer;
-  try {
-    fileBytes = await Bun.file(file).arrayBuffer();
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") {
-      throw new ValidationError(`File not found: ${file}`, "path");
-    }
-    throw new ValidationError(
-      `Cannot read file ${file}: ${(err as Error).message}`,
-      "path"
-    );
-  }
+  const bytes = await readFileBytes(file);
 
   if (raw) {
-    const bytes = new Uint8Array(fileBytes);
     // Best-effort: extract event_id from the first line (envelope header JSON).
-    // Decode the already-read bytes instead of re-reading the file.
     let eventId = "";
     try {
       const firstLine = new TextDecoder().decode(bytes).split("\n")[0] ?? "{}";
@@ -74,15 +64,25 @@ async function buildFilePayload(
 
   let event: Event;
   try {
-    event = JSON.parse(new TextDecoder().decode(fileBytes)) as Event;
+    event = JSON.parse(new TextDecoder().decode(bytes)) as Event;
   } catch (err) {
     throw new ValidationError(
       `Failed to parse JSON from ${file}: ${(err as Error).message}`,
       "path"
     );
   }
-  const envelope = createEventEnvelope(event, dsnComponents);
-  return { body: serializeEnvelope(envelope), eventId: event.event_id ?? "" };
+
+  let body: string | Uint8Array;
+  try {
+    const envelope = createEventEnvelope(event, dsnComponents);
+    body = serializeEnvelope(envelope);
+  } catch (err) {
+    throw new ValidationError(
+      `Failed to create envelope from ${file}: ${(err as Error).message}`,
+      "path"
+    );
+  }
+  return { body, eventId: event.event_id ?? "" };
 }
 
 export const sendEventCommand = buildCommand({
@@ -264,7 +264,12 @@ built entirely from the file contents.
     ...files: string[]
   ) {
     const dsn = requireDsn(flags, this.cwd);
-    const dsnComponents = makeDsn(dsn);
+    let dsnComponents: ReturnType<typeof makeDsn>;
+    try {
+      dsnComponents = makeDsn(dsn);
+    } catch {
+      dsnComponents = undefined;
+    }
     if (!dsnComponents) {
       throw new ValidationError(`Invalid DSN: ${dsn}`, "dsn");
     }
