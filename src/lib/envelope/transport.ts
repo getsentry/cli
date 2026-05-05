@@ -29,7 +29,7 @@ export type DsnFlags = {
  * Throws ValidationError on an unparseable DSN.
  */
 export function buildEnvelopeUrl(dsn: string): string {
-  let dsnComponents;
+  let dsnComponents: ReturnType<typeof makeDsn>;
   try {
     dsnComponents = makeDsn(dsn);
   } catch {
