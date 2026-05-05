@@ -6,9 +6,11 @@
  * between <!-- GENERATED:START name --> and <!-- GENERATED:END name --> markers.
  *
  * Sections:
- *   - contributing.md:  project structure tree (from route tree + filesystem)
- *   - DEVELOPMENT.md:   OAuth scopes bullet list (from oauth.ts)
- *   - self-hosted.md:   OAuth scopes inline list (from oauth.ts)
+ *   - contributing.md:  project structure tree, dev prerequisites
+ *   - DEVELOPMENT.md:   OAuth scopes, env var table
+ *   - self-hosted.md:   OAuth scopes, env var table
+ *   - README.md:        dev prerequisites, library prerequisites, dev scripts
+ *   - getting-started.mdx: platform support table
  *
  * Unlike generate-command-docs.ts (which produces gitignored files from scratch),
  * this script edits committed files in-place between marker pairs.
@@ -29,17 +31,43 @@ if (!(await Bun.file(SKILL_CONTENT_PATH).exists())) {
   await Bun.write(SKILL_CONTENT_PATH, SKILL_CONTENT_STUB);
 }
 
+import type { EnvVarEntry } from "../src/lib/env-registry.js";
 import type { RouteInfo, RouteMap } from "../src/lib/introspect.js";
 
 const { routes } = await import("../src/app.js");
 const { extractAllRoutes } = await import("../src/lib/introspect.js");
 const { OAUTH_SCOPES } = await import("../src/lib/oauth.js");
+const { ENV_VAR_REGISTRY } = await import("../src/lib/env-registry.js");
+const pkg = await Bun.file("package.json").json();
 
 const isCheck = process.argv.includes("--check");
 
 // ---------------------------------------------------------------------------
 // Marker Replacement
 // ---------------------------------------------------------------------------
+
+/**
+ * Supported marker comment styles.
+ * HTML: `&lt;!-- GENERATED:START name --&gt;` (for .md files)
+ * MDX:  JSX comment `GENERATED:START name` (for .mdx files)
+ */
+type MarkerStyle = "html" | "mdx";
+
+function markerTags(
+  sectionName: string,
+  style: MarkerStyle
+): { startTag: string; endTag: string } {
+  if (style === "mdx") {
+    return {
+      startTag: `{/* GENERATED:START ${sectionName} */}`,
+      endTag: `{/* GENERATED:END ${sectionName} */}`,
+    };
+  }
+  return {
+    startTag: `<!-- GENERATED:START ${sectionName} -->`,
+    endTag: `<!-- GENERATED:END ${sectionName} -->`,
+  };
+}
 
 /**
  * Replace content between named marker pairs in a string.
@@ -55,10 +83,10 @@ const isCheck = process.argv.includes("--check");
 function replaceMarkerSection(
   content: string,
   sectionName: string,
-  generated: string
+  generated: string,
+  style: MarkerStyle = "html"
 ): string {
-  const startTag = `<!-- GENERATED:START ${sectionName} -->`;
-  const endTag = `<!-- GENERATED:END ${sectionName} -->`;
+  const { startTag, endTag } = markerTags(sectionName, style);
 
   const startIdx = content.indexOf(startTag);
   const endIdx = content.indexOf(endTag);
@@ -225,6 +253,189 @@ function generateScopesInline(scopes: readonly string[]): string {
 }
 
 // ---------------------------------------------------------------------------
+// Section: Prerequisites (README.md, contributing.md)
+// ---------------------------------------------------------------------------
+
+const BUN_VERSION_RE = /bun@(\d+\.\d+)/;
+const SEMVER_RE = /(\d+\.\d+)/;
+
+/**
+ * Extract the Bun major.minor version from the `packageManager` field.
+ * `bun@1.3.13` → `1.3`
+ */
+function extractBunVersion(): string {
+  const pm: string = pkg.packageManager ?? "";
+  const match = pm.match(BUN_VERSION_RE);
+  return match ? match[1] : "1.3";
+}
+
+/** Extract the Node.js minimum version from `engines.node` (e.g., `>=22.12` → `22.12`). */
+function extractNodeVersion(): string {
+  const constraint: string = pkg.engines?.node ?? ">=22.12";
+  const match = constraint.match(SEMVER_RE);
+  return match ? match[1] : "22.12";
+}
+
+/** Generate dev prerequisite line for README.md and contributing.md. */
+function generateDevPrereq(): string {
+  return `- [Bun](https://bun.sh) v${extractBunVersion()}+`;
+}
+
+/** Also used by contributing.md (same content, different phrasing). */
+function generateDevPrereqContributing(): string {
+  return `- [Bun](https://bun.sh) runtime (v${extractBunVersion()} or later)`;
+}
+
+/** Generate the library-usage prerequisite line for README.md. */
+function generateLibraryPrereq(): string {
+  return `Use Sentry CLI programmatically in Node.js (≥${extractNodeVersion()}) or Bun without spawning a subprocess:`;
+}
+
+// ---------------------------------------------------------------------------
+// Section: Dev Scripts (README.md)
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate the development scripts block for README.md.
+ *
+ * These are a curated subset of package.json scripts — not all scripts
+ * are user-facing. The list is hardcoded because script descriptions
+ * aren't machine-readable from package.json.
+ */
+function generateDevScripts(): string {
+  const scripts: [string, string][] = [
+    ["bun run build", "Build for current platform"],
+    ["bun run typecheck", "Type checking"],
+    ["bun run lint", "Check for issues"],
+    ["bun run lint:fix", "Auto-fix issues"],
+    ["bun run test:unit", "Run unit tests"],
+    ["bun run test:e2e", "Run end-to-end tests"],
+    ["bun run generate:docs", "Regenerate command docs and skills"],
+  ];
+  const maxCmd = Math.max(...scripts.map(([cmd]) => cmd.length));
+  const lines = scripts.map(([cmd, desc]) => `${cmd.padEnd(maxCmd)} # ${desc}`);
+  return `\`\`\`bash\n${lines.join("\n")}\n\`\`\``;
+}
+
+// ---------------------------------------------------------------------------
+// Section: Env Var Tables (DEVELOPMENT.md, self-hosted.md)
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate the DEVELOPMENT.md env var table from registry entries
+ * tagged with `devGuide`.
+ */
+function generateDevEnvVarsTable(): string {
+  const entries = ENV_VAR_REGISTRY.filter(
+    (e: EnvVarEntry) => e.devGuide !== undefined
+  );
+  const lines: string[] = [
+    "| Variable | Description | Default |",
+    "|----------|-------------|---------|",
+  ];
+  for (const entry of entries) {
+    const name = `\`${entry.name}\``;
+    const desc = entry.devGuide ?? "";
+    let defaultCol = "—";
+    if (entry.name === "SENTRY_CLIENT_ID") {
+      defaultCol = "(required for build)";
+    } else if (entry.defaultValue) {
+      defaultCol = `\`${entry.defaultValue}\``;
+    }
+    lines.push(`| ${name} | ${desc} | ${defaultCol} |`);
+  }
+  return lines.join("\n");
+}
+
+/** Short descriptions for the self-hosted env var table, ordered for self-hosted context. */
+const SELF_HOSTED_TABLE_ENTRIES: readonly [string, string][] = [
+  [
+    "SENTRY_HOST",
+    "Base URL of your Sentry instance (takes precedence over `SENTRY_URL`)",
+  ],
+  ["SENTRY_URL", "Alias for `SENTRY_HOST`"],
+  ["SENTRY_CLIENT_ID", "Client ID of your public OAuth application"],
+  [
+    "SENTRY_CUSTOM_HEADERS",
+    "Custom HTTP headers for proxy/IAP (semicolon-separated `Name: Value` pairs)",
+  ],
+  ["SENTRY_FORCE_ENV_TOKEN", "Force env token over stored OAuth token"],
+  ["SENTRY_ORG", "Default organization slug"],
+  ["SENTRY_PROJECT", "Default project slug (supports `org/project` format)"],
+  [
+    "NODE_EXTRA_CA_CERTS",
+    "Path to PEM file with additional CA certificates (for corporate proxies)",
+  ],
+];
+
+/**
+ * Generate the self-hosted.md env var table.
+ *
+ * Uses a curated order (URL vars first) rather than registry order,
+ * but validates at generation time that every entry in the table
+ * has `selfHosted: true` in the registry.
+ */
+function generateSelfHostedEnvVarsTable(): string {
+  const selfHostedNames = new Set(
+    ENV_VAR_REGISTRY.filter((e: EnvVarEntry) => e.selfHosted === true).map(
+      (e: EnvVarEntry) => e.name
+    )
+  );
+  for (const [name] of SELF_HOSTED_TABLE_ENTRIES) {
+    if (!selfHostedNames.has(name)) {
+      throw new Error(
+        `Self-hosted table entry "${name}" is not tagged selfHosted in env-registry.ts`
+      );
+    }
+  }
+  if (selfHostedNames.size !== SELF_HOSTED_TABLE_ENTRIES.length) {
+    const missing = [...selfHostedNames].filter(
+      (n) => !SELF_HOSTED_TABLE_ENTRIES.some(([name]) => name === n)
+    );
+    throw new Error(
+      `Registry entries tagged selfHosted but missing from self-hosted table: ${missing.join(", ")}`
+    );
+  }
+
+  const lines: string[] = [
+    "| Variable | Description |",
+    "|----------|-------------|",
+  ];
+  for (const [name, desc] of SELF_HOSTED_TABLE_ENTRIES) {
+    lines.push(`| \`${name}\` | ${desc} |`);
+  }
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Section: Platform Support (getting-started.mdx)
+// ---------------------------------------------------------------------------
+
+/**
+ * Platform support table rows.
+ *
+ * Derived from ALL_TARGETS in script/build.ts. Update this when
+ * adding or removing build targets.
+ */
+const PLATFORM_ROWS: readonly [string, string, string][] = [
+  ["macOS", "x64, arm64 (Apple Silicon)", ""],
+  ["Linux", "x64, arm64", "glibc and musl (Alpine)"],
+  ["Windows", "x64", "Via Git Bash, MSYS2, or WSL"],
+];
+
+/** Generate the platform support table for getting-started.mdx. */
+function generatePlatformSupport(): string {
+  const lines: string[] = [
+    "| OS | Architectures | Notes |",
+    "|----|---------------|-------|",
+  ];
+  for (const [os, archs, notes] of PLATFORM_ROWS) {
+    lines.push(`| **${os}** | ${archs} | ${notes} |`);
+  }
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Section Definitions
 // ---------------------------------------------------------------------------
 
@@ -232,6 +443,8 @@ type SectionDef = {
   filePath: string;
   sectionName: string;
   generate: () => string;
+  /** Marker comment style. Defaults to `"html"`. */
+  markerStyle?: MarkerStyle;
 };
 
 // ---------------------------------------------------------------------------
@@ -242,6 +455,7 @@ const routeMap = routes as unknown as RouteMap;
 const routeInfos = extractAllRoutes(routeMap);
 
 const sections: SectionDef[] = [
+  // -- Existing sections --
   {
     filePath: "docs/src/content/docs/contributing.md",
     sectionName: "project-structure",
@@ -257,6 +471,46 @@ const sections: SectionDef[] = [
     sectionName: "oauth-scopes",
     generate: () => generateScopesInline(OAUTH_SCOPES),
   },
+  // -- Prerequisites (version numbers from package.json) --
+  {
+    filePath: "README.md",
+    sectionName: "dev-prereq",
+    generate: generateDevPrereq,
+  },
+  {
+    filePath: "README.md",
+    sectionName: "library-prereq",
+    generate: generateLibraryPrereq,
+  },
+  {
+    filePath: "docs/src/content/docs/contributing.md",
+    sectionName: "dev-prereq",
+    generate: generateDevPrereqContributing,
+  },
+  // -- Dev scripts (README.md) --
+  {
+    filePath: "README.md",
+    sectionName: "dev-scripts",
+    generate: generateDevScripts,
+  },
+  // -- Env var tables --
+  {
+    filePath: "DEVELOPMENT.md",
+    sectionName: "dev-env-vars",
+    generate: generateDevEnvVarsTable,
+  },
+  {
+    filePath: "docs/src/content/docs/self-hosted.md",
+    sectionName: "self-hosted-env-vars",
+    generate: generateSelfHostedEnvVarsTable,
+  },
+  // -- Platform support (getting-started.mdx) --
+  {
+    filePath: "docs/src/content/docs/getting-started.mdx",
+    sectionName: "platform-support",
+    generate: generatePlatformSupport,
+    markerStyle: "mdx",
+  },
 ];
 
 let staleCount = 0;
@@ -267,7 +521,8 @@ for (const section of sections) {
   const updated = replaceMarkerSection(
     original,
     section.sectionName,
-    generated
+    generated,
+    section.markerStyle ?? "html"
   );
 
   if (updated !== original) {

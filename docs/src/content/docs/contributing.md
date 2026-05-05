@@ -9,7 +9,9 @@ We welcome contributions to the Sentry CLI! This guide will help you get started
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) runtime (v1.0 or later)
+<!-- GENERATED:START dev-prereq -->
+- [Bun](https://bun.sh) runtime (v1.3 or later)
+<!-- GENERATED:END dev-prereq -->
 - Git
 
 ### Getting Started
@@ -23,7 +25,7 @@ cd cli
 bun install
 
 # Run CLI in development mode
-bun run --env-file=.env.local src/bin.ts --help
+bun run --env-file=.env.local cli --help
 
 # Run tests
 bun test
@@ -53,11 +55,12 @@ cli/
 │   │   ├── cli/         # defaults, feedback, fix, setup, upgrade
 │   │   ├── dashboard/   # list, view, create, add, edit, delete
 │   │   ├── event/       # view, list
-│   │   ├── issue/       # list, events, explain, plan, view, resolve, unresolve, merge
+│   │   ├── issue/       # list, events, explain, plan, view, resolve, unresolve, archive, merge
 │   │   ├── log/         # list, view
 │   │   ├── org/         # list, view
 │   │   ├── project/     # create, delete, list, view
 │   │   ├── release/     # list, view, create, finalize, delete, deploy, deploys, set-commits, propose-version
+│   │   ├── replay/      # list, view
 │   │   ├── repo/        # list
 │   │   ├── sourcemap/   # inject, upload
 │   │   ├── span/        # list, view

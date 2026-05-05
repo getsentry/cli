@@ -76,6 +76,39 @@ describe("parseDashboardPositionalArgs", () => {
     expect(result.dashboardRef).toBe("12345");
     expect(result.targetArg).toBe("my-org/my-project");
   });
+
+  // -- URL auto-recovery --
+
+  test("extracts dashboard ID and org from SaaS subdomain URL", () => {
+    const result = parseDashboardPositionalArgs([
+      "https://sentry-sdks.sentry.io/dashboard/4326879/",
+    ]);
+    expect(result.dashboardRef).toBe("4326879");
+    expect(result.targetArg).toBe("sentry-sdks/");
+  });
+
+  test("extracts dashboard ID and org from organizations-path URL", () => {
+    const result = parseDashboardPositionalArgs([
+      "https://sentry.io/organizations/my-org/dashboard/12345/",
+    ]);
+    expect(result.dashboardRef).toBe("12345");
+    expect(result.targetArg).toBe("my-org/");
+  });
+
+  test("URL with org but no dashboard ID + second arg uses second arg as ref", () => {
+    const result = parseDashboardPositionalArgs([
+      "https://my-org.sentry.io/",
+      "My Dashboard",
+    ]);
+    expect(result.dashboardRef).toBe("My Dashboard");
+    expect(result.targetArg).toBe("my-org/");
+  });
+
+  test("URL with org but no dashboard ID and no second arg throws", () => {
+    expect(() =>
+      parseDashboardPositionalArgs(["https://my-org.sentry.io/"])
+    ).toThrow(ValidationError);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -183,6 +216,41 @@ describe("parseDashboardListArgs", () => {
     const result = parseDashboardListArgs(["my-org/my-project/"]);
     expect(result.targetArg).toBe("my-org/my-project/");
     expect(result.titleFilter).toBeUndefined();
+  });
+
+  // -- URL handling --
+
+  test("dashboard URL throws ValidationError suggesting view command", () => {
+    expect(() =>
+      parseDashboardListArgs([
+        "https://sentry-sdks.sentry.io/dashboard/4326879/",
+      ])
+    ).toThrow(ValidationError);
+    try {
+      parseDashboardListArgs([
+        "https://sentry-sdks.sentry.io/dashboard/4326879/",
+      ]);
+    } catch (error) {
+      const msg = (error as ValidationError).message;
+      expect(msg).toContain("sentry dashboard view");
+      expect(msg).toContain("4326879");
+      expect(msg).toContain("sentry-sdks");
+    }
+  });
+
+  test("org-only URL extracts org as target", () => {
+    const result = parseDashboardListArgs(["https://my-org.sentry.io/"]);
+    expect(result.targetArg).toBe("my-org/");
+    expect(result.titleFilter).toBeUndefined();
+  });
+
+  test("org-only URL with second arg uses it as title filter", () => {
+    const result = parseDashboardListArgs([
+      "https://my-org.sentry.io/",
+      "Error*",
+    ]);
+    expect(result.targetArg).toBe("my-org/");
+    expect(result.titleFilter).toBe("Error*");
   });
 });
 
@@ -407,20 +475,23 @@ describe("resolveOrgFromTarget", () => {
 // ---------------------------------------------------------------------------
 
 describe("enrichDashboardError", () => {
-  test("re-throws non-ApiError unchanged", () => {
+  test("re-throws non-ApiError unchanged", async () => {
     const original = new Error("network failure");
-    expect(() =>
+    await expect(
       enrichDashboardError(original, { orgSlug: "my-org", operation: "list" })
-    ).toThrow(original);
+    ).rejects.toThrow(original);
   });
 
-  test("re-throws ApiError with unhandled status unchanged", () => {
+  test("re-throws ApiError with unhandled status unchanged", async () => {
     const original = new ApiError("rate limited", 429, "Too many requests");
-    expect(() =>
+    await expect(
       enrichDashboardError(original, { orgSlug: "my-org", operation: "list" })
-    ).toThrow(ApiError);
+    ).rejects.toThrow(ApiError);
     try {
-      enrichDashboardError(original, { orgSlug: "my-org", operation: "list" });
+      await enrichDashboardError(original, {
+        orgSlug: "my-org",
+        operation: "list",
+      });
     } catch (error) {
       expect(error).toBe(original);
     }
@@ -428,10 +499,13 @@ describe("enrichDashboardError", () => {
 
   // -- 404 errors --
 
-  test("404 on list throws ResolutionError mentioning org", () => {
+  test("404 on list throws ResolutionError mentioning org", async () => {
     const apiErr = new ApiError("Not Found", 404);
     try {
-      enrichDashboardError(apiErr, { orgSlug: "my-org", operation: "list" });
+      await enrichDashboardError(apiErr, {
+        orgSlug: "my-org",
+        operation: "list",
+      });
       expect.unreachable("Should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(ResolutionError);
@@ -443,10 +517,35 @@ describe("enrichDashboardError", () => {
     }
   });
 
-  test("404 on view with dashboardId throws ResolutionError for dashboard", () => {
+  test("404 on view with dashboardId throws ResolutionError for dashboard", async () => {
     const apiErr = new ApiError("Not Found", 404);
+    // Mock listDashboardsPaginated to return suggestions
+    const listSpy = spyOn(
+      apiClient,
+      "listDashboardsPaginated"
+    ).mockResolvedValue({
+      data: [
+        {
+          id: "100",
+          title: "Error Overview",
+          dateCreated: "",
+          createdBy: { id: 0, name: "", email: "" },
+          widgets: [],
+          projects: [],
+        },
+        {
+          id: "200",
+          title: "Performance",
+          dateCreated: "",
+          createdBy: { id: 0, name: "", email: "" },
+          widgets: [],
+          projects: [],
+        },
+      ],
+      nextCursor: undefined,
+    });
     try {
-      enrichDashboardError(apiErr, {
+      await enrichDashboardError(apiErr, {
         orgSlug: "my-org",
         dashboardId: "12345",
         operation: "view",
@@ -459,13 +558,47 @@ describe("enrichDashboardError", () => {
       expect(msg).toContain("'my-org'");
       expect(msg).toContain("not found");
       expect(msg).toContain("sentry dashboard list");
+      // Should include suggestions from the API
+      expect(msg).toContain("Available dashboards");
+      expect(msg).toContain("Error Overview");
+      expect(msg).toContain("Performance");
+    } finally {
+      listSpy.mockRestore();
     }
   });
 
-  test("404 on create without dashboardId throws ResolutionError for org", () => {
+  test("404 on view still works when suggestion fetch fails", async () => {
+    const apiErr = new ApiError("Not Found", 404);
+    const listSpy = spyOn(
+      apiClient,
+      "listDashboardsPaginated"
+    ).mockRejectedValue(new Error("network error"));
+    try {
+      await enrichDashboardError(apiErr, {
+        orgSlug: "my-org",
+        dashboardId: "99999",
+        operation: "view",
+      });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      expect(msg).toContain("Dashboard 99999");
+      expect(msg).toContain("not found");
+      // Should NOT contain suggestions since fetch failed
+      expect(msg).not.toContain("Available dashboards");
+    } finally {
+      listSpy.mockRestore();
+    }
+  });
+
+  test("404 on create without dashboardId throws ResolutionError for org", async () => {
     const apiErr = new ApiError("Not Found", 404);
     try {
-      enrichDashboardError(apiErr, { orgSlug: "bad-org", operation: "create" });
+      await enrichDashboardError(apiErr, {
+        orgSlug: "bad-org",
+        operation: "create",
+      });
       expect.unreachable("Should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(ResolutionError);
@@ -477,10 +610,10 @@ describe("enrichDashboardError", () => {
 
   // -- 403 errors --
 
-  test("403 with dashboardId throws ResolutionError for dashboard access", () => {
+  test("403 with dashboardId throws ResolutionError for dashboard access", async () => {
     const apiErr = new ApiError("Forbidden", 403, "No permission");
     try {
-      enrichDashboardError(apiErr, {
+      await enrichDashboardError(apiErr, {
         orgSlug: "my-org",
         dashboardId: "99",
         operation: "view",
@@ -495,10 +628,13 @@ describe("enrichDashboardError", () => {
     }
   });
 
-  test("403 without dashboardId throws ResolutionError for org dashboards", () => {
+  test("403 without dashboardId throws ResolutionError for org dashboards", async () => {
     const apiErr = new ApiError("Forbidden", 403);
     try {
-      enrichDashboardError(apiErr, { orgSlug: "my-org", operation: "list" });
+      await enrichDashboardError(apiErr, {
+        orgSlug: "my-org",
+        operation: "list",
+      });
       expect.unreachable("Should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(ResolutionError);
@@ -508,10 +644,13 @@ describe("enrichDashboardError", () => {
     }
   });
 
-  test("403 includes default detail when API provides none", () => {
+  test("403 includes default detail when API provides none", async () => {
     const apiErr = new ApiError("Forbidden", 403);
     try {
-      enrichDashboardError(apiErr, { orgSlug: "my-org", operation: "list" });
+      await enrichDashboardError(apiErr, {
+        orgSlug: "my-org",
+        operation: "list",
+      });
       expect.unreachable("Should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(ResolutionError);
@@ -522,10 +661,10 @@ describe("enrichDashboardError", () => {
 
   // -- 400 errors --
 
-  test("400 on update throws enriched ApiError with dashboard context", () => {
+  test("400 on update throws enriched ApiError with dashboard context", async () => {
     const apiErr = new ApiError("Bad Request", 400, "Invalid widget config");
     try {
-      enrichDashboardError(apiErr, {
+      await enrichDashboardError(apiErr, {
         orgSlug: "my-org",
         dashboardId: "42",
         operation: "update",
@@ -540,11 +679,34 @@ describe("enrichDashboardError", () => {
     }
   });
 
-  test("400 on non-update operation re-throws unchanged", () => {
+  test("400 on create throws enriched ApiError with plan limit detail", async () => {
+    const apiErr = new ApiError(
+      "Bad Request",
+      400,
+      "You may not exceed 10 dashboards on your current plan."
+    );
+    try {
+      await enrichDashboardError(apiErr, {
+        orgSlug: "my-org",
+        operation: "create",
+      });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      const msg = (error as ApiError).message;
+      expect(msg).toContain("Dashboard create failed");
+      expect(msg).toContain("'my-org'");
+      expect((error as ApiError).detail).toContain(
+        "You may not exceed 10 dashboards"
+      );
+    }
+  });
+
+  test("400 on non-create/update operation re-throws unchanged", async () => {
     const apiErr = new ApiError("Bad Request", 400, "some detail");
-    expect(() =>
+    await expect(
       enrichDashboardError(apiErr, { orgSlug: "my-org", operation: "list" })
-    ).toThrow(apiErr);
+    ).rejects.toThrow(apiErr);
   });
 });
 

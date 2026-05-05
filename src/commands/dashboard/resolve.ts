@@ -21,6 +21,10 @@ import { fuzzyMatch } from "../../lib/fuzzy.js";
 import { logger } from "../../lib/logger.js";
 import { resolveEffectiveOrg } from "../../lib/region.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
+import {
+  applySentryUrlContext,
+  parseSentryUrl,
+} from "../../lib/sentry-url-parser.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import { isAllDigits } from "../../lib/utils.js";
 import {
@@ -87,12 +91,63 @@ export async function resolveOrgFromTarget(
   }
 }
 
+/** Result of URL-based dashboard arg extraction */
+type DashboardArgResult = {
+  dashboardRef: string;
+  targetArg: string | undefined;
+};
+
+/**
+ * Try to extract dashboard ref + org from a Sentry URL.
+ *
+ * Calls `applySentryUrlContext` for host-scoping trust checks on non-SaaS URLs.
+ * Returns null if the input isn't a recognized Sentry URL.
+ */
+function tryExtractDashboardUrl(
+  first: string,
+  args: string[]
+): DashboardArgResult | null {
+  const urlParsed = parseSentryUrl(first);
+  if (!urlParsed) {
+    return null;
+  }
+  applySentryUrlContext(urlParsed.baseUrl);
+  if (urlParsed.dashboardId) {
+    log.warn(
+      `Extracted dashboard ID ${urlParsed.dashboardId} from URL` +
+        (urlParsed.org ? ` (org: ${urlParsed.org})` : "")
+    );
+    return {
+      dashboardRef: urlParsed.dashboardId,
+      targetArg: urlParsed.org ? `${urlParsed.org}/` : undefined,
+    };
+  }
+  // URL recognized but no dashboardId — use org context if available
+  if (urlParsed.org) {
+    log.warn(`Extracted org '${urlParsed.org}' from URL`);
+    if (args.length >= 2) {
+      return {
+        dashboardRef: args[1] as string,
+        targetArg: `${urlParsed.org}/`,
+      };
+    }
+    throw new ValidationError(
+      "Dashboard ID or title is required.\n\n" +
+        "The URL provided contains an org but no dashboard ID.\n" +
+        `Try: sentry dashboard <command> ${urlParsed.org}/ <id-or-title>`,
+      "dashboard"
+    );
+  }
+  return null;
+}
+
 /**
  * Parse a dashboard reference and optional target from array positional args.
  *
  * Handles:
  * - `<id-or-title>` — single arg (auto-detect org)
  * - `<target> <id-or-title>` — explicit target + dashboard ref
+ * - Full Sentry dashboard URL — extracts org + dashboard ID
  *
  * When two args are provided and the first is a bare slug (no `/`), it is
  * normalized to `slug/` so `parseOrgProjectArg` treats it as an org-all
@@ -101,25 +156,32 @@ export async function resolveOrgFromTarget(
  * @param args - Raw positional arguments
  * @returns Dashboard reference string and optional target arg
  */
-export function parseDashboardPositionalArgs(args: string[]): {
-  dashboardRef: string;
-  targetArg: string | undefined;
-} {
+export function parseDashboardPositionalArgs(
+  args: string[]
+): DashboardArgResult {
   if (args.length === 0) {
     throw new ValidationError(
       "Dashboard ID or title is required.",
       "dashboard"
     );
   }
+
+  const first = args[0] as string;
+
+  // URL detection — extract org + dashboard ID from pasted Sentry URLs
+  const urlResult = tryExtractDashboardUrl(first, args);
+  if (urlResult) {
+    return urlResult;
+  }
+
   if (args.length === 1) {
     return {
-      dashboardRef: args[0] as string,
+      dashboardRef: first,
       targetArg: undefined,
     };
   }
   // Normalize bare org slug → org/ (dashboards are org-scoped)
-  const raw = args[0] as string;
-  const target = raw.includes("/") ? raw : `${raw}/`;
+  const target = first.includes("/") ? first : `${first}/`;
   return {
     dashboardRef: args[1] as string,
     targetArg: target,
@@ -146,10 +208,49 @@ export function parseDashboardPositionalArgs(args: string[]): {
  * @param args - Raw positional arguments
  * @returns Target arg for org resolution and optional title filter glob
  */
-export function parseDashboardListArgs(args: string[]): {
+/** Result of URL-based list arg extraction */
+type ListArgResult = {
   targetArg: string | undefined;
   titleFilter: string | undefined;
-} {
+};
+
+/**
+ * Try to extract org context from a Sentry URL in dashboard list args.
+ *
+ * When the URL contains a dashboard ID, throws a helpful error suggesting
+ * `sentry dashboard view` instead. When only an org is present, extracts
+ * it as the target.
+ */
+function tryExtractListUrl(
+  first: string,
+  remaining: string[]
+): ListArgResult | null {
+  const urlParsed = parseSentryUrl(first);
+  if (!urlParsed) {
+    return null;
+  }
+  applySentryUrlContext(urlParsed.baseUrl);
+  if (urlParsed.dashboardId) {
+    const orgPrefix = urlParsed.org ? `${urlParsed.org}/ ` : "";
+    const orgSuffix = urlParsed.org ? ` ${urlParsed.org}/` : "";
+    const orgNote = urlParsed.org ? ` in '${urlParsed.org}'` : "";
+    throw new ValidationError(
+      "This looks like a dashboard URL. To view a specific dashboard:\n\n" +
+        `  sentry dashboard view ${orgPrefix}${urlParsed.dashboardId}\n\n` +
+        `To list dashboards${orgNote}:\n\n` +
+        `  sentry dashboard list${orgSuffix}`,
+      "dashboard"
+    );
+  }
+  if (urlParsed.org) {
+    log.warn(`Extracted org '${urlParsed.org}' from URL`);
+    const titleFilter = remaining.length > 0 ? remaining.join(" ") : undefined;
+    return { targetArg: `${urlParsed.org}/`, titleFilter };
+  }
+  return null;
+}
+
+export function parseDashboardListArgs(args: string[]): ListArgResult {
   // buildListCommand's interceptSubcommand may replace args[0] with undefined
   // when the first positional matches a subcommand name (e.g. "view", "create").
   // Filter those out so we don't crash on .includes("/").
@@ -159,6 +260,13 @@ export function parseDashboardListArgs(args: string[]): {
   if (filtered.length === 0) {
     return { targetArg: undefined, titleFilter: undefined };
   }
+
+  // URL detection — extract org or suggest `view` for dashboard-specific URLs
+  const urlResult = tryExtractListUrl(filtered[0] as string, filtered.slice(1));
+  if (urlResult) {
+    return urlResult;
+  }
+
   if (filtered.length >= 2) {
     // First arg is the target, remaining args are joined as the filter.
     // This handles unquoted multi-word titles: `my-org/ CLI Health` arrives
@@ -239,7 +347,7 @@ export async function resolveDashboardId(
     const { data, nextCursor } = await listDashboardsPaginated(orgSlug, {
       perPage: API_MAX_PER_PAGE,
       cursor,
-    }).catch((error: unknown) =>
+    }).catch(async (error: unknown) =>
       enrichDashboardError(error, { orgSlug, operation: "list" })
     );
     // Match by ID/slug first (e.g. "default-overview"), then fall back to title
@@ -554,8 +662,20 @@ export type DashboardErrorContext = {
   operation: "list" | "view" | "create" | "update";
 };
 
-/** Build an enriched error for a 404 response on a dashboard API call */
-function build404Error(ctx: DashboardErrorContext, org: string): never {
+/** Maximum number of dashboard suggestions to show in 404 errors */
+const MAX_404_SUGGESTIONS = 5;
+
+/**
+ * Build an enriched error for a 404 response on a dashboard API call.
+ *
+ * When a numeric dashboard ID is not found, fetches available dashboards
+ * from the org and includes up to {@link MAX_404_SUGGESTIONS} as suggestions
+ * so the user (or AI agent) can see what's actually available.
+ */
+async function build404Error(
+  ctx: DashboardErrorContext,
+  org: string
+): Promise<never> {
   if (ctx.operation === "list") {
     throw new ResolutionError(
       `Organization ${org}`,
@@ -569,14 +689,29 @@ function build404Error(ctx: DashboardErrorContext, org: string): never {
   }
   const listHint = `sentry dashboard list ${ctx.orgSlug ?? "<org>"}/`;
   if (ctx.dashboardId) {
+    // Fetch available dashboards to suggest alternatives
+    const alternatives = [
+      "The dashboard may have been deleted",
+      "Check the dashboard ID or title with: sentry dashboard list",
+    ];
+    if (ctx.orgSlug) {
+      try {
+        const { data } = await listDashboardsPaginated(ctx.orgSlug, {
+          perPage: MAX_404_SUGGESTIONS,
+        });
+        if (data.length > 0) {
+          const lines = data.map((d) => `    ${d.id}  ${d.title}`);
+          alternatives.push(`Available dashboards:\n${lines.join("\n")}`);
+        }
+      } catch {
+        // Suggestion fetch failed — don't mask the original error
+      }
+    }
     throw new ResolutionError(
       `Dashboard ${ctx.dashboardId} in ${org}`,
       "not found",
       listHint,
-      [
-        "The dashboard may have been deleted",
-        "Check the dashboard ID or title with: sentry dashboard list",
-      ]
+      alternatives
     );
   }
   // Generic 404 for create or other operations
@@ -621,10 +756,10 @@ function build403Error(
  * @param error - The caught error
  * @param ctx - Context about the operation for building error messages
  */
-export function enrichDashboardError(
+export async function enrichDashboardError(
   error: unknown,
   ctx: DashboardErrorContext
-): never {
+): Promise<never> {
   if (!(error instanceof ApiError)) {
     throw error;
   }
@@ -632,17 +767,30 @@ export function enrichDashboardError(
   const org = ctx.orgSlug ? `'${ctx.orgSlug}'` : "this organization";
 
   if (error.status === 404) {
-    build404Error(ctx, org);
+    // Awaited explicitly so the linter doesn't flag a missing `await` in this
+    // async function, and so a future non-throwing codepath in build404Error
+    // wouldn't silently fall through.
+    return await build404Error(ctx, org);
   }
 
   if (error.status === 403) {
-    build403Error(ctx, org, error.detail);
+    // Centralized 403 enrichment (infrastructure.ts) already added
+    // scope/token hints. Re-throw the enriched ApiError directly —
+    // passing the multi-line enriched detail into build403Error would
+    // nest it as a single messy bullet in a ResolutionError.
+    if (error.enriched403) {
+      throw error;
+    }
+    return build403Error(ctx, org, error.detail);
   }
 
-  // 400 on update — likely invalid widget config; preserve API detail
-  if (error.status === 400 && ctx.operation === "update") {
+  // 400 on create/update — preserve API detail (plan limits, invalid config)
+  if (
+    error.status === 400 &&
+    (ctx.operation === "create" || ctx.operation === "update")
+  ) {
     throw new ApiError(
-      `Dashboard update failed in ${org}`,
+      `Dashboard ${ctx.operation} failed in ${org}`,
       error.status,
       error.detail ??
         "The API rejected the request. Check widget configuration.",

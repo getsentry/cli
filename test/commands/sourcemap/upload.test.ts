@@ -29,7 +29,14 @@ type InjectFuncArgs = {
 };
 type UploadFuncArgs = {
   release?: string;
+  dist?: string;
   "url-prefix"?: string;
+  ext?: string;
+  ignore?: string;
+  "ignore-file"?: string;
+  "strip-prefix"?: string;
+  "strip-common-prefix"?: boolean;
+  "no-rewrite"?: boolean;
   "allow-empty"?: boolean;
 };
 type CmdFunc<A> = (this: unknown, flags: A, dir: string) => Promise<unknown>;
@@ -172,6 +179,54 @@ describe("sourcemap inject command — --allow-empty behavior", () => {
       func.call(ctx, { "dry-run": true, "allow-empty": true }, dir)
     ).resolves.toBeUndefined();
   });
+
+  test("sourceMappingURL: follows external map reference when convention fails", async () => {
+    // JS file with sourceMappingURL pointing to a differently-named map
+    writeFileSync(
+      join(dir, "bundle.js"),
+      "console.log(1)\n//# sourceMappingURL=bundle.abc123.js.map\n"
+    );
+    // Map file with non-convention name (no bundle.js.map exists)
+    writeFileSync(
+      join(dir, "bundle.abc123.js.map"),
+      JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
+    );
+    const ctx = makeContext();
+    await expect(func.call(ctx, {}, dir)).resolves.toBeUndefined();
+  });
+
+  test("sourceMappingURL: prefers convention naming over directive", async () => {
+    // JS file with sourceMappingURL pointing to a different file
+    writeFileSync(
+      join(dir, "app.js"),
+      "console.log(1)\n//# sourceMappingURL=other.js.map\n"
+    );
+    // Convention map exists — should be used
+    writeFileSync(
+      join(dir, "app.js.map"),
+      JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
+    );
+    // The directive target also exists
+    writeFileSync(
+      join(dir, "other.js.map"),
+      JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
+    );
+    const ctx = makeContext();
+    // Should succeed (convention-based match found first)
+    await expect(func.call(ctx, {}, dir)).resolves.toBeUndefined();
+  });
+
+  test("sourceMappingURL: skips data: URLs gracefully", async () => {
+    writeFileSync(
+      join(dir, "inline.js"),
+      "console.log(1)\n//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozfQ==\n"
+    );
+    // No convention map either — should fail with zero pairs
+    const ctx = makeContext();
+    await expect(func.call(ctx, {}, dir)).rejects.toBeInstanceOf(
+      ValidationError
+    );
+  });
 });
 
 describe("sourcemap upload command — --allow-empty behavior", () => {
@@ -306,6 +361,305 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
       const types = callArgs?.files.map((f) => f.type);
       expect(types).toContain("minified_source");
       expect(types).toContain("source_map");
+    } finally {
+      uploadSpy.mockRestore();
+    }
+  });
+
+  test("--dist flag: passes dist to uploadSourcemaps", async () => {
+    mkdirSync(join(dir, "_astro"));
+    writeFileSync(join(dir, "_astro", "app.js"), "console.log(1)\n");
+    writeFileSync(
+      join(dir, "_astro", "app.js.map"),
+      JSON.stringify({
+        version: 3,
+        sources: ["app.ts"],
+        names: [],
+        mappings: "",
+      })
+    );
+
+    const uploadSpy = spyOn(
+      sourcemapsApi,
+      "uploadSourcemaps"
+    ).mockResolvedValue(undefined);
+    try {
+      const ctx = makeContext();
+      await func.call(ctx, { release: "1.0.0", dist: "12345" }, dir);
+      expect(uploadSpy).toHaveBeenCalledTimes(1);
+      const callArgs = uploadSpy.mock.calls[0]?.[0];
+      expect(callArgs?.dist).toBe("12345");
+      expect(callArgs?.release).toBe("1.0.0");
+    } finally {
+      uploadSpy.mockRestore();
+    }
+  });
+
+  test("--no-rewrite: uploads without injecting debug IDs", async () => {
+    mkdirSync(join(dir, "_astro"));
+    const jsPath = join(dir, "_astro", "app.js");
+    const mapPath = join(dir, "_astro", "app.js.map");
+    const originalJs = "console.log(1)\n";
+    writeFileSync(jsPath, originalJs);
+    writeFileSync(
+      mapPath,
+      JSON.stringify({
+        version: 3,
+        sources: ["app.ts"],
+        names: [],
+        mappings: "",
+      })
+    );
+
+    const uploadSpy = spyOn(
+      sourcemapsApi,
+      "uploadSourcemaps"
+    ).mockResolvedValue(undefined);
+    try {
+      const ctx = makeContext();
+      await func.call(ctx, { "no-rewrite": true }, dir);
+      expect(uploadSpy).toHaveBeenCalledTimes(1);
+      const callArgs = uploadSpy.mock.calls[0]?.[0];
+      // Files should have no debugId when --no-rewrite is used
+      for (const file of callArgs?.files ?? []) {
+        expect(file.debugId).toBeUndefined();
+      }
+      // JS file should not have been modified
+      const afterJs = await Bun.file(jsPath).text();
+      expect(afterJs).toBe(originalJs);
+      expect(afterJs).not.toContain("_sentryDebugIds");
+    } finally {
+      uploadSpy.mockRestore();
+    }
+  });
+
+  test("--ext: discovers files with custom extensions", async () => {
+    writeFileSync(join(dir, "app.ts"), "console.log(1)\n");
+    writeFileSync(
+      join(dir, "app.ts.map"),
+      JSON.stringify({
+        version: 3,
+        sources: ["app.ts"],
+        names: [],
+        mappings: "",
+      })
+    );
+    // A .js file that should NOT be discovered when --ext is .ts
+    writeFileSync(join(dir, "other.js"), "console.log(2)\n");
+
+    const uploadSpy = spyOn(
+      sourcemapsApi,
+      "uploadSourcemaps"
+    ).mockResolvedValue(undefined);
+    try {
+      const ctx = makeContext();
+      await func.call(ctx, { ext: ".ts" }, dir);
+      expect(uploadSpy).toHaveBeenCalledTimes(1);
+      const callArgs = uploadSpy.mock.calls[0]?.[0];
+      expect(callArgs?.files).toHaveLength(2);
+      const urls = callArgs?.files.map((f) => f.url);
+      expect(urls?.some((u) => u?.includes("app.ts"))).toBe(true);
+      expect(urls?.some((u) => u?.includes("other.js"))).toBe(false);
+    } finally {
+      uploadSpy.mockRestore();
+    }
+  });
+
+  test("--ignore: excludes matching files from upload", async () => {
+    mkdirSync(join(dir, "vendor"));
+    // File that should be excluded
+    writeFileSync(join(dir, "vendor", "lib.js"), "console.log(1)\n");
+    writeFileSync(
+      join(dir, "vendor", "lib.js.map"),
+      JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
+    );
+    // File that should be included
+    writeFileSync(join(dir, "app.js"), "console.log(2)\n");
+    writeFileSync(
+      join(dir, "app.js.map"),
+      JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
+    );
+
+    const uploadSpy = spyOn(
+      sourcemapsApi,
+      "uploadSourcemaps"
+    ).mockResolvedValue(undefined);
+    try {
+      const ctx = makeContext();
+      await func.call(ctx, { ignore: "vendor/**" }, dir);
+      expect(uploadSpy).toHaveBeenCalledTimes(1);
+      const callArgs = uploadSpy.mock.calls[0]?.[0];
+      // Only app.js pair should be uploaded (2 files: .js + .map)
+      expect(callArgs?.files).toHaveLength(2);
+      const urls = callArgs?.files.map((f) => f.url);
+      expect(urls?.some((u) => u?.includes("app.js"))).toBe(true);
+      expect(urls?.some((u) => u?.includes("vendor"))).toBe(false);
+    } finally {
+      uploadSpy.mockRestore();
+    }
+  });
+
+  test("--ignore-file: reads patterns from a file", async () => {
+    mkdirSync(join(dir, "vendor"));
+    writeFileSync(join(dir, "vendor", "lib.js"), "console.log(1)\n");
+    writeFileSync(
+      join(dir, "vendor", "lib.js.map"),
+      JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
+    );
+    writeFileSync(join(dir, "app.js"), "console.log(2)\n");
+    writeFileSync(
+      join(dir, "app.js.map"),
+      JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
+    );
+    // Write an ignore file
+    const ignoreFilePath = join(dir, ".sourcemapignore");
+    writeFileSync(ignoreFilePath, "vendor/\n");
+
+    const uploadSpy = spyOn(
+      sourcemapsApi,
+      "uploadSourcemaps"
+    ).mockResolvedValue(undefined);
+    try {
+      const ctx = makeContext();
+      await func.call(ctx, { "ignore-file": ignoreFilePath }, dir);
+      expect(uploadSpy).toHaveBeenCalledTimes(1);
+      const callArgs = uploadSpy.mock.calls[0]?.[0];
+      expect(callArgs?.files).toHaveLength(2);
+      const urls = callArgs?.files.map((f) => f.url);
+      expect(urls?.some((u) => u?.includes("app.js"))).toBe(true);
+      expect(urls?.some((u) => u?.includes("vendor"))).toBe(false);
+    } finally {
+      uploadSpy.mockRestore();
+    }
+  });
+
+  test("--ignore-file with non-existent file: throws ValidationError", async () => {
+    writeFileSync(join(dir, "app.js"), "console.log(1)\n");
+    writeFileSync(
+      join(dir, "app.js.map"),
+      JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
+    );
+    const ctx = makeContext();
+    try {
+      await func.call(ctx, { "ignore-file": join(dir, "nonexistent") }, dir);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ValidationError);
+      expect((err as Error).message).toContain("does not exist");
+    }
+  });
+
+  test("--strip-prefix: removes explicit prefix from uploaded URLs", async () => {
+    mkdirSync(join(dir, "static", "js"), { recursive: true });
+    writeFileSync(join(dir, "static", "js", "app.js"), "console.log(1)\n");
+    writeFileSync(
+      join(dir, "static", "js", "app.js.map"),
+      JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
+    );
+
+    const uploadSpy = spyOn(
+      sourcemapsApi,
+      "uploadSourcemaps"
+    ).mockResolvedValue(undefined);
+    try {
+      const ctx = makeContext();
+      await func.call(ctx, { "strip-prefix": "static/js/" }, dir);
+      expect(uploadSpy).toHaveBeenCalledTimes(1);
+      const callArgs = uploadSpy.mock.calls[0]?.[0];
+      const urls = callArgs?.files.map((f) => f.url);
+      // Prefix stripped: "~/app.js" instead of "~/static/js/app.js"
+      expect(urls).toContain("~/app.js");
+      expect(urls).toContain("~/app.js.map");
+    } finally {
+      uploadSpy.mockRestore();
+    }
+  });
+
+  test("--strip-common-prefix: auto-strips shared directory prefix", async () => {
+    mkdirSync(join(dir, "build", "output"), { recursive: true });
+    writeFileSync(join(dir, "build", "output", "main.js"), "console.log(1)\n");
+    writeFileSync(
+      join(dir, "build", "output", "main.js.map"),
+      JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
+    );
+    writeFileSync(
+      join(dir, "build", "output", "vendor.js"),
+      "console.log(2)\n"
+    );
+    writeFileSync(
+      join(dir, "build", "output", "vendor.js.map"),
+      JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
+    );
+
+    const uploadSpy = spyOn(
+      sourcemapsApi,
+      "uploadSourcemaps"
+    ).mockResolvedValue(undefined);
+    try {
+      const ctx = makeContext();
+      await func.call(ctx, { "strip-common-prefix": true }, dir);
+      expect(uploadSpy).toHaveBeenCalledTimes(1);
+      const callArgs = uploadSpy.mock.calls[0]?.[0];
+      const urls = callArgs?.files.map((f) => f.url);
+      // Common prefix "build/output/" stripped: "~/main.js", "~/vendor.js"
+      expect(urls).toContain("~/main.js");
+      expect(urls).toContain("~/vendor.js");
+      expect(urls?.some((u) => u?.includes("build"))).toBe(false);
+    } finally {
+      uploadSpy.mockRestore();
+    }
+  });
+
+  test("--strip-prefix + --strip-common-prefix: mutually exclusive", async () => {
+    writeFileSync(join(dir, "app.js"), "console.log(1)\n");
+    writeFileSync(
+      join(dir, "app.js.map"),
+      JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
+    );
+    const ctx = makeContext();
+    await expect(
+      func.call(
+        ctx,
+        { "strip-prefix": "foo/", "strip-common-prefix": true },
+        dir
+      )
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  test("sourceMappingURL: last directive wins over earlier ones", async () => {
+    // Simulates a concatenated bundle with two directives in the tail.
+    // No convention map (concat.js.map) exists, so discovery falls back
+    // to sourceMappingURL. The last directive should win.
+    writeFileSync(
+      join(dir, "concat.js"),
+      "console.log(1)\n" +
+        "//# sourceMappingURL=wrong.js.map\n" +
+        "console.log(2)\n" +
+        "//# sourceMappingURL=correct.js.map\n"
+    );
+    writeFileSync(
+      join(dir, "correct.js.map"),
+      JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
+    );
+    // wrong.js.map also exists — but the last directive should win
+    writeFileSync(
+      join(dir, "wrong.js.map"),
+      JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
+    );
+
+    const uploadSpy = spyOn(
+      sourcemapsApi,
+      "uploadSourcemaps"
+    ).mockResolvedValue(undefined);
+    try {
+      const ctx = makeContext();
+      await func.call(ctx, {}, dir);
+      expect(uploadSpy).toHaveBeenCalledTimes(1);
+      const callArgs = uploadSpy.mock.calls[0]?.[0];
+      // Should have paired concat.js with correct.js.map (last directive)
+      const urls = callArgs?.files.map((f) => f.url);
+      expect(urls?.some((u) => u?.includes("correct.js.map"))).toBe(true);
+      expect(urls?.some((u) => u?.includes("wrong.js.map"))).toBe(false);
     } finally {
       uploadSpy.mockRestore();
     }

@@ -270,24 +270,35 @@ describe("timeRangeToApiParams", () => {
     expect(params.end).toBe("2024-02-01T23:59:59Z");
   });
 
-  test("absolute start-only → start, no end", () => {
+  test("absolute start-only → start + auto-filled end (now)", () => {
+    const before = new Date();
     const params = timeRangeToApiParams({
       type: "absolute",
       start: "2024-01-01T00:00:00Z",
     });
+    const after = new Date();
     expect(params.start).toBe("2024-01-01T00:00:00Z");
-    expect(params.end).toBeUndefined();
     expect(params.statsPeriod).toBeUndefined();
+    // end should be filled with "now"
+    expect(params.end).toBeDefined();
+    const endDate = new Date(params.end!);
+    expect(endDate.getTime()).toBeGreaterThanOrEqual(before.getTime());
+    expect(endDate.getTime()).toBeLessThanOrEqual(after.getTime());
   });
 
-  test("absolute end-only → end, no start", () => {
+  test("absolute end-only → end + auto-filled start (90 days before end)", () => {
     const params = timeRangeToApiParams({
       type: "absolute",
       end: "2024-02-01T23:59:59Z",
     });
     expect(params.end).toBe("2024-02-01T23:59:59Z");
-    expect(params.start).toBeUndefined();
     expect(params.statsPeriod).toBeUndefined();
+    // start should be filled with 90 days before end
+    expect(params.start).toBeDefined();
+    const startDate = new Date(params.start!);
+    const expectedStart = new Date("2024-02-01T23:59:59Z");
+    expectedStart.setUTCDate(expectedStart.getUTCDate() - 90);
+    expect(startDate.toISOString()).toBe(expectedStart.toISOString());
   });
 });
 

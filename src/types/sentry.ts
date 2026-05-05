@@ -256,6 +256,7 @@ export type SentryEvent = Omit<
     browser?: BrowserContext;
     os?: OsContext;
     device?: DeviceContext;
+    replay?: ReplayContext;
     [key: string]: unknown;
   } | null;
   /** Date the event was created (not in OpenAPI spec) */
@@ -467,6 +468,38 @@ export type DeviceContext = {
   type?: "device";
   [key: string]: unknown;
 };
+
+/** Replay context from event.contexts.replay */
+export type ReplayContext = {
+  replay_id?: string;
+  [key: string]: unknown;
+};
+
+/** High-level metadata returned by the organization trace-meta endpoint. */
+export const TraceMetaSchema = z
+  .object({
+    logs: z.number().describe("Log entry count"),
+    errors: z.number().describe("Error count"),
+    performance_issues: z.number().describe("Performance issue count"),
+    span_count: z.number().describe("Span count"),
+    transaction_child_count_map: z
+      .array(
+        z.object({
+          "transaction.event_id": z
+            .string()
+            .nullable()
+            .describe("Transaction event ID"),
+          "count()": z.number().describe("Transaction child count"),
+        })
+      )
+      .describe("Per-transaction child counts"),
+    span_count_map: z
+      .record(z.string(), z.number())
+      .describe("Span counts grouped by operation"),
+  })
+  .describe("Trace metadata");
+
+export type TraceMeta = z.infer<typeof TraceMetaSchema>;
 
 export const ISSUE_PRIORITIES = ["high", "medium", "low"] as const;
 export type IssuePriority = (typeof ISSUE_PRIORITIES)[number];

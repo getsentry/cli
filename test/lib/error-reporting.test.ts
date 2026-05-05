@@ -58,6 +58,29 @@ describe("extractResourceKind", () => {
     );
   });
 
+  test("strips small numeric IDs", () => {
+    expect(extractResourceKind("Issue 19 not found.")).toBe("Issue not found.");
+    expect(extractResourceKind("Issue 11 not found.")).toBe("Issue not found.");
+  });
+
+  test("strips org/project paths after 'in'", () => {
+    expect(extractResourceKind("not found in neurio/installer-app")).toBe(
+      "not found"
+    );
+    expect(extractResourceKind("not found in olli-inc/olli-app")).toBe(
+      "not found"
+    );
+    expect(extractResourceKind("access denied in sentry-sdks/cli")).toBe(
+      "access denied"
+    );
+  });
+
+  test("does not strip 'in' without org/project path", () => {
+    expect(extractResourceKind("not found in organization")).toBe(
+      "not found in organization"
+    );
+  });
+
   test("handles empty input", () => {
     expect(extractResourceKind("")).toBe("");
   });

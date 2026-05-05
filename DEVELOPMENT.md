@@ -26,7 +26,7 @@ Get the client ID from your Sentry OAuth application settings.
 ## Running Locally
 
 ```bash
-bun run --env-file=.env.local src/bin.ts auth login
+bun run --env-file=.env.local cli auth login
 ```
 
 ## Testing the Device Flow
@@ -34,7 +34,7 @@ bun run --env-file=.env.local src/bin.ts auth login
 1. Run the CLI login command:
 
 ```bash
-bun run --env-file=.env.local src/bin.ts auth login
+bun run --env-file=.env.local cli auth login
 ```
 
 2. You'll see output like:
@@ -69,15 +69,20 @@ When creating your Sentry OAuth application:
 
 ## Environment Variables
 
-| Variable                | Description                                                      | Default              |
-| ----------------------- | ---------------------------------------------------------------- | -------------------- |
-| `SENTRY_CLIENT_ID`      | Sentry OAuth app client ID                                       | (required for build) |
-| `SENTRY_HOST`           | Sentry instance URL (for self-hosted, takes precedence)          | `https://sentry.io`  |
-| `SENTRY_URL`            | Alias for `SENTRY_HOST`                                          | `https://sentry.io`  |
-| `SENTRY_AUTH_TOKEN`     | API token for non-interactive use (lower priority than stored OAuth by default) | —     |
-| `SENTRY_FORCE_ENV_TOKEN`| Force env token to take priority over stored OAuth token         | —                    |
-| `SENTRY_CLI_NO_TELEMETRY`| Disable CLI telemetry (error tracking)                          | —                    |
-| `SENTRY_LOG_LEVEL`      | Diagnostic log level (`error`, `warn`, `log`, `info`, `debug`, `trace`) | `info`        |
+The table below lists the most common development variables. For the complete reference, see the generated [Configuration](https://cli.sentry.dev/configuration/) page.
+
+<!-- GENERATED:START dev-env-vars -->
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SENTRY_AUTH_TOKEN` | API token for non-interactive use (lower priority than stored OAuth by default) | — |
+| `SENTRY_FORCE_ENV_TOKEN` | Force env token to take priority over stored OAuth token | — |
+| `SENTRY_HOST` | Sentry instance URL (for self-hosted, takes precedence) | `https://sentry.io` |
+| `SENTRY_URL` | Alias for `SENTRY_HOST` | `https://sentry.io` |
+| `SENTRY_CLIENT_ID` | Sentry OAuth app client ID | (required for build) |
+| `SENTRY_CONFIG_DIR` | Override credentials/cache directory | `~/.sentry/` |
+| `SENTRY_LOG_LEVEL` | Diagnostic log level (`error`, `warn`, `log`, `info`, `debug`, `trace`) | `info` |
+| `SENTRY_CLI_NO_TELEMETRY` | Disable CLI telemetry (error tracking) | — |
+<!-- GENERATED:END dev-env-vars -->
 
 ## Building
 

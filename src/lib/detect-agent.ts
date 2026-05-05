@@ -19,6 +19,98 @@ import { basename } from "node:path";
 
 import { getEnv } from "./env.js";
 
+/** Structured agent identity returned by detection functions. */
+export type AgentInfo = {
+  /** Canonical agent family name (e.g. "claude", "cursor", "unknown"). */
+  name: string;
+  /** Semver-ish version extracted from compound values (e.g. "2.1.123"). */
+  version?: string;
+  /** Role/variant extracted from compound values (e.g. "agent"). */
+  role?: string;
+};
+
+/**
+ * Canonical name aliases — maps alternative agent identifiers to their
+ * canonical family name. Checked after lowercasing.
+ */
+export const AGENT_ALIASES = new Map<string, string>([
+  ["claude-code", "claude"],
+  ["claudecode", "claude"],
+]);
+
+/** Truthy boolean-ish values — signal "an agent is present" but don't name it. */
+const TRUTHY_GARBAGE_RE = /^(1|true|yes|on)$/;
+
+/** Falsy boolean-ish values — signal "no agent" / explicit opt-out. */
+const FALSY_GARBAGE_RE = /^(0|false|no|off)$/;
+
+/** Semver-ish: one or more dot-separated digit groups, optional leading `v`. */
+const VERSION_RE = /^v?\d+(\.\d+)*$/;
+
+/** Matches a leading `v` prefix on version strings. */
+const VERSION_V_PREFIX_RE = /^v/;
+
+/**
+ * Normalize a raw agent string into structured {@link AgentInfo}.
+ *
+ * Handles compound slash-separated values (e.g. `"claude-code/2.1.123/agent"`),
+ * alias resolution, and garbage detection.
+ *
+ * Boolean-ish values are split into two classes:
+ * - **Falsy** (`false`, `no`, `0`, `off`) → `undefined` — explicit opt-out,
+ *   treated as "no agent present."
+ * - **Truthy** (`1`, `true`, `yes`, `on`) → `{ name: "unknown" }` — an agent
+ *   is active but didn't identify itself.
+ *
+ * When a truthy/falsy name appears in a compound value (e.g. `"true/1.0.0/agent"`),
+ * version and role segments are discarded — the name alone determines the outcome.
+ *
+ * Empty strings, whitespace-only strings, and leading-slash inputs (where the
+ * first segment is empty) also return `undefined`.
+ */
+export function normalizeAgent(raw: string): AgentInfo | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return;
+  }
+
+  const segments = trimmed.split("/");
+  const rawName = (segments[0] ?? "").toLowerCase();
+
+  // Resolve aliases
+  const name = AGENT_ALIASES.get(rawName) ?? rawName;
+
+  // Falsy opt-out — "no agent" signal, treat as not detected
+  if (!name || FALSY_GARBAGE_RE.test(name)) {
+    return;
+  }
+
+  // Truthy garbage — agent is present but unnamed
+  if (TRUTHY_GARBAGE_RE.test(name)) {
+    return { name: "unknown" };
+  }
+
+  const result: AgentInfo = { name };
+
+  // Extract version from second segment if it looks semver-ish
+  const rawVersion = segments[1]?.trim();
+  if (rawVersion && VERSION_RE.test(rawVersion)) {
+    result.version = rawVersion.replace(VERSION_V_PREFIX_RE, "");
+  }
+
+  // Extract role from third segment if present and non-empty
+  const rawRole = segments[2]?.trim().toLowerCase();
+  if (
+    rawRole &&
+    !TRUTHY_GARBAGE_RE.test(rawRole) &&
+    !FALSY_GARBAGE_RE.test(rawRole)
+  ) {
+    result.role = rawRole;
+  }
+
+  return result;
+}
+
 /**
  * Env var → agent name. Checked in insertion order — first match wins.
  * Each env var maps directly to the agent that sets it.
@@ -114,32 +206,44 @@ export function setProcessInfoProvider(provider: ProcessInfoProvider): void {
  * 3. Claude Code with Cowork variant (conditional, can't be in the map)
  * 4. `AGENT` env var — generic fallback set by Goose, Amp, and others
  *
- * Returns the agent name string, or `undefined` if no agent is detected.
+ * Returns structured {@link AgentInfo}, or `undefined` if no agent is detected.
+ * All return paths go through {@link normalizeAgent} for consistent output.
  * For process tree fallback, use {@link detectAgentFromProcessTree} separately.
  */
-export function detectAgent(): string | undefined {
+export function detectAgent(): AgentInfo | undefined {
   const env = getEnv();
 
-  // 1. Highest priority: explicit override — any agent can self-identify
+  // 1. Highest priority: explicit override — any agent can self-identify.
+  //    normalizeAgent returns undefined for falsy opt-outs ("false", "0"),
+  //    which should fall through to the next detection level.
   const aiAgent = env.AI_AGENT?.trim();
   if (aiAgent) {
-    return aiAgent;
+    const normalized = normalizeAgent(aiAgent);
+    if (normalized) {
+      return normalized;
+    }
   }
 
-  // 2. Table-driven env var check (Map iteration preserves insertion order)
+  // 2. Table-driven env var check (Map iteration preserves insertion order).
+  //    These values are our own clean strings — normalizeAgent won't return undefined.
   for (const [envVar, agent] of ENV_VAR_AGENTS) {
     if (env[envVar]) {
-      return agent;
+      return normalizeAgent(agent);
     }
   }
 
   // 3. Claude Code / Cowork — requires branching logic, so not in the map
   if (env.CLAUDECODE || env.CLAUDE_CODE) {
-    return env.CLAUDE_CODE_IS_COWORK ? "cowork" : "claude";
+    return normalizeAgent(env.CLAUDE_CODE_IS_COWORK ? "cowork" : "claude");
   }
 
   // 4. Lowest priority: generic AGENT fallback
-  return env.AGENT?.trim() || undefined;
+  const agentValue = env.AGENT?.trim();
+  if (agentValue) {
+    return normalizeAgent(agentValue);
+  }
+
+  return;
 }
 
 /**
@@ -154,7 +258,7 @@ export function detectAgent(): string | undefined {
  * - **Windows**: not supported (env var detection still works).
  */
 export async function detectAgentFromProcessTree(): Promise<
-  string | undefined
+  AgentInfo | undefined
 > {
   let pid = process.ppid;
 
@@ -166,7 +270,7 @@ export async function detectAgentFromProcessTree(): Promise<
 
     const agent = PROCESS_NAME_AGENTS.get(info.name.toLowerCase());
     if (agent) {
-      return agent;
+      return normalizeAgent(agent);
     }
 
     pid = info.ppid;

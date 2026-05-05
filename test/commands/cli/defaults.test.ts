@@ -116,6 +116,7 @@ describe("defaults storage", () => {
       telemetry: "off",
       url: "https://sentry.example.com",
       headers: null,
+      "ca-cert": null,
     });
   });
 
@@ -127,6 +128,7 @@ describe("defaults storage", () => {
       telemetry: null,
       url: null,
       headers: null,
+      "ca-cert": null,
     });
   });
 

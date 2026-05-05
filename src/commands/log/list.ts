@@ -25,6 +25,7 @@ import {
   ValidationError,
 } from "../../lib/errors.js";
 import {
+  type LogLike as BaseLogLike,
   buildLogRowCells,
   createLogStreamingTable,
   formatLogRow,
@@ -89,6 +90,8 @@ type LogListResult = {
   traceId?: string;
   /** Whether more results are available beyond the limit */
   hasMore: boolean;
+  /** Extra field names requested via `--fields`, used to render additional columns in human mode. */
+  extraFields?: string[];
 };
 
 /** Output yielded by log list: either a batch (single-fetch) or an individual item (follow). */
@@ -128,21 +131,13 @@ function parseFollow(value: string): number {
 }
 
 /**
- * Shape shared by both SentryLog and TraceLog — the minimum fields
- * needed for table rendering and follow-mode dedup tracking.
+ * Extends the base {@link BaseLogLike} from formatters with the
+ * `timestamp_precise` field needed for follow-mode dedup tracking.
  */
-type LogLike = {
-  /** Unique log entry ID — used for dedup in trace follow mode.
-   * TraceLog uses `id`, SentryLog uses `sentry.item_id` (via passthrough).
-   * Present on TraceLog which is the only type used in follow mode dedup. */
-  id?: string;
-  timestamp: string;
+type LogLike = BaseLogLike & {
   /** Nanosecond-precision timestamp used for dedup in follow mode.
    * Optional because TraceLog may omit it when the API response doesn't include it. */
   timestamp_precise?: number;
-  severity?: string | null;
-  message?: string | null;
-  trace?: string | null;
 };
 
 /** Result from a single fetch: logs to yield + hint for the footer. */
@@ -184,6 +179,7 @@ async function executeSingleFetch(
     limit: flags.limit,
     ...timeRangeToApiParams(timeRange),
     sort: flags.sort,
+    extraFields: flags.fields,
   });
 
   const periodLabel =
@@ -191,9 +187,11 @@ async function executeSingleFetch(
       ? `in the last ${timeRange.period}`
       : "in the specified range";
 
+  const extraFields = flags.fields?.length ? flags.fields : undefined;
+
   if (logs.length === 0) {
     return {
-      result: { logs: [], hasMore: false },
+      result: { logs: [], hasMore: false, extraFields },
       hint: `No logs found ${periodLabel}.`,
     };
   }
@@ -203,7 +201,7 @@ async function executeSingleFetch(
   const tip = hasMore ? " Use --limit to show more, or -f to follow." : "";
 
   return {
-    result: { logs, hasMore },
+    result: { logs, hasMore, extraFields },
     hint: `${countText}${tip}`,
   };
 }
@@ -288,20 +286,28 @@ function maxTimestamp(logs: LogLike[]): number | undefined {
  *
  * When a StreamingTable is provided (TTY mode), renders rows through the
  * bordered table. Otherwise falls back to plain markdown rows.
+ *
+ * @param logs - Log entries to render
+ * @param includeTrace - Whether to append trace-ID suffix to messages
+ * @param table - Optional streaming table for TTY mode
+ * @param extraFields - Additional field names to render as extra columns
  */
 function renderLogRows(
   logs: LogLike[],
   includeTrace: boolean,
-  table?: StreamingTable
+  table?: StreamingTable,
+  extraFields?: string[]
 ): string {
   let text = "";
   for (const log of logs) {
     if (table) {
       text += table.row(
-        buildLogRowCells(log, true, includeTrace).map(renderInlineMarkdown)
+        buildLogRowCells(log, true, includeTrace, extraFields).map(
+          renderInlineMarkdown
+        )
       );
     } else {
-      text += formatLogRow(log, includeTrace);
+      text += formatLogRow(log, includeTrace, extraFields);
     }
   }
   return text;
@@ -392,20 +398,30 @@ async function* generateFollowLogs<T extends LogLike>(
 }
 
 /**
- * Consume a follow-mode generator, yielding each log individually.
+ * Consume a project-scoped follow-mode generator, yielding items individually.
  *
- * In JSON mode each yield becomes one JSONL line. In human mode the
- * stateful renderer accumulates rows into the streaming table.
- *
- * The generator returns when SIGINT fires — the wrapper's `finalize()`
- * callback handles closing the streaming table.
+ * When `extraFields` is provided, the first non-empty batch is yielded as a
+ * {@link LogListResult} so the human renderer can discover the extra columns
+ * and create a table with the right headers. Subsequent items are yielded
+ * bare for proper JSONL streaming.
  */
 async function* yieldFollowItems<T extends LogLike>(
-  generator: AsyncGenerator<T[], void, undefined>
-): AsyncGenerator<CommandOutput<T>, void, undefined> {
+  generator: AsyncGenerator<T[], void, undefined>,
+  extraFields?: string[]
+): AsyncGenerator<CommandOutput<LogOutput>, void, undefined> {
+  let contextSent = !extraFields?.length;
   for await (const batch of generator) {
-    for (const item of batch) {
-      yield new CommandOutput(item);
+    if (!contextSent && batch.length > 0) {
+      yield new CommandOutput<LogOutput>({
+        logs: batch,
+        hasMore: false,
+        extraFields,
+      });
+      contextSent = true;
+    } else {
+      for (const item of batch) {
+        yield new CommandOutput<LogOutput>(item);
+      }
     }
   }
 }
@@ -541,53 +557,86 @@ function writeFollowBanner(
  * Discriminates between {@link LogListResult} (single-fetch or first trace
  * follow batch) and bare {@link LogLike} items (follow mode).
  */
+/** Shared discriminator for log output type. */
+function isLogListResult(data: LogOutput): data is LogListResult {
+  return "logs" in data && Array.isArray((data as LogListResult).logs);
+}
+
+/** Mutable state for the log renderer, extracted to reduce cognitive complexity. */
+type LogRendererState = {
+  table: StreamingTable | undefined;
+  includeTrace: boolean;
+  headerEmitted: boolean;
+  extraFields: string[] | undefined;
+};
+
+/** Initialize table and column settings on the first non-empty render. */
+function initFirstRender(
+  state: LogRendererState,
+  data: LogOutput,
+  plain: boolean
+): void {
+  if (isLogListResult(data)) {
+    if (data.traceId) {
+      state.includeTrace = false;
+    }
+    state.extraFields = data.extraFields;
+  }
+  state.table = plain
+    ? undefined
+    : createLogStreamingTable({}, state.extraFields);
+  state.headerEmitted = true;
+}
+
 function createLogRenderer(): HumanRenderer<LogOutput> {
   const plain = isPlainOutput();
-  const table: StreamingTable | undefined = plain
-    ? undefined
-    : createLogStreamingTable();
-  let includeTrace = true; // default: show trace column
-  let headerEmitted = false;
-
-  function isBatch(data: LogOutput): data is LogListResult {
-    return "logs" in data && Array.isArray((data as LogListResult).logs);
-  }
+  const state: LogRendererState = {
+    table: undefined,
+    includeTrace: true,
+    headerEmitted: false,
+    extraFields: undefined,
+  };
 
   return {
     render(data: LogOutput): string {
-      const logs: LogLike[] = isBatch(data) ? data.logs : [data];
+      const logs: LogLike[] = isLogListResult(data) ? data.logs : [data];
       if (logs.length === 0) {
         return "";
       }
 
-      // First non-empty call: determine includeTrace and emit header
-      if (!headerEmitted) {
-        if (isBatch(data) && data.traceId) {
-          includeTrace = false;
-        }
-        headerEmitted = true;
-        let text = table ? table.header() : formatLogsHeader();
-        text += renderLogRows(logs, includeTrace, table);
+      if (!state.headerEmitted) {
+        initFirstRender(state, data, plain);
+        let text = state.table
+          ? state.table.header()
+          : formatLogsHeader(state.extraFields);
+        text += renderLogRows(
+          logs,
+          state.includeTrace,
+          state.table,
+          state.extraFields
+        );
         return text.trimEnd();
       }
 
-      return renderLogRows(logs, includeTrace, table).trimEnd();
+      return renderLogRows(
+        logs,
+        state.includeTrace,
+        state.table,
+        state.extraFields
+      ).trimEnd();
     },
 
     finalize(hint?: string): string {
       let text = "";
 
-      // Close the streaming table if header was emitted
-      if (headerEmitted && table) {
-        text += table.footer();
+      if (state.headerEmitted && state.table) {
+        text += state.table.footer();
       }
 
       if (hint) {
-        if (headerEmitted) {
-          // Logs were rendered — show hint as a muted footer
+        if (state.headerEmitted) {
           text += `${text ? "\n" : ""}${formatFooter(hint)}`;
         } else {
-          // No logs rendered — show hint as primary output (e.g., "No logs found.")
           text += `${hint}\n`;
         }
       }
@@ -605,9 +654,9 @@ function createLogRenderer(): HumanRenderer<LogOutput> {
  * with `data` and `hasMore`; follow mode yields one JSON object per line (JSONL).
  */
 function jsonTransformLogOutput(data: LogOutput, fields?: string[]): unknown {
-  if ("logs" in data && Array.isArray((data as LogListResult).logs)) {
+  if (isLogListResult(data)) {
     // Batch (single-fetch): return envelope with data + hasMore
-    const logList = data as LogListResult;
+    const logList = data;
     const items =
       fields && fields.length > 0
         ? logList.logs.map((log) => filterFields(log, fields))
@@ -616,6 +665,16 @@ function jsonTransformLogOutput(data: LogOutput, fields?: string[]): unknown {
   }
   // Single item (follow mode): return bare object for JSONL
   return fields && fields.length > 0 ? filterFields(data, fields) : data;
+}
+
+/** Validate flag combinations that are invalid regardless of mode. */
+function validateFollowFlags(flags: ListFlags): void {
+  if (flags.follow && flags.sort === "oldest") {
+    throw new ValidationError(
+      '--sort "oldest" cannot be used with --follow. Follow mode streams new logs as they arrive.',
+      "sort"
+    );
+  }
 }
 
 export const listCommand = buildListCommand(
@@ -700,12 +759,7 @@ export const listCommand = buildListCommand(
       },
     },
     async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {
-      if (flags.follow && flags.sort === "oldest") {
-        throw new ValidationError(
-          '--sort "oldest" cannot be used with --follow. Follow mode streams new logs as they arrive.',
-          "sort"
-        );
-      }
+      validateFollowFlags(flags);
 
       const { cwd } = this;
 
@@ -734,6 +788,14 @@ export const listCommand = buildListCommand(
           cwd,
           TRACE_USAGE_HINT
         );
+
+        // Warn if --fields was passed — the trace-logs endpoint has a fixed
+        // field set and doesn't support arbitrary extra fields.
+        if (flags.fields?.length) {
+          logger.warn(
+            "--fields is not supported for trace-scoped log queries. Use project-scoped mode instead."
+          );
+        }
 
         // Capture explicit project for API-level filtering
         const projectFilter =
@@ -833,11 +895,12 @@ export const listCommand = buildListCommand(
                 limit: flags.limit,
                 statsPeriod,
                 afterTimestamp,
+                extraFields: flags.fields,
               }),
             extractNew: (logs) => logs,
           });
 
-          yield* yieldFollowItems(generator);
+          yield* yieldFollowItems(generator, flags.fields);
           return;
         }
 

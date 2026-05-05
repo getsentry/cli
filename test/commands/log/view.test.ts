@@ -242,17 +242,15 @@ describe("parsePositionalArgs", () => {
   });
 
   describe("suggestions and error handling", () => {
-    test("swapped args (hex ID first, org/project second) returns raw IDs", () => {
-      // Validation is deferred: parsePositionalArgs now treats the first arg
-      // as the target and the second as a raw log ID. The command-level
-      // validateAndRecoverLogId catches the non-hex and either recovers or
-      // throws at that point.
+    test("auto-swaps args when hex ID is first and org/project is second", () => {
       const result = parsePositionalArgs([
         "968c763c740cfda8b6728f27fb9e9b01",
         "my-org/my-project",
       ]);
-      expect(result.targetArg).toBe("968c763c740cfda8b6728f27fb9e9b01");
-      expect(result.rawLogIds).toEqual(["my-org/my-project"]);
+      // Auto-swap: org/project becomes target, hex ID becomes the log ID
+      expect(result.targetArg).toBe("my-org/my-project");
+      expect(result.rawLogIds).toEqual(["968c763c740cfda8b6728f27fb9e9b01"]);
+      expect(result.suggestion).toContain("reversed");
     });
 
     test("returns suggestion when first arg looks like issue short ID", () => {
@@ -495,24 +493,24 @@ describe("viewCommand.func", () => {
     openInBrowserSpy.mockRestore();
   });
 
-  test("swapped args are handled downstream (validation deferred)", async () => {
-    // With validation deferred, `parsePositionalArgs` no longer throws on
-    // non-hex log IDs. The command now treats the first arg as the target
-    // and tries to resolve it as a project. Since the first arg is a hex
-    // string (looks like a project-search slug), `findProjectsBySlug` is
-    // called and returns empty → ResolutionError. The key behavior is that
-    // the invocation fails — the exact error class depends on the resolver.
-    findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
+  test("swapped args are auto-corrected and command succeeds", async () => {
+    // When hex ID is first and org/project is second, parsePositionalArgs
+    // auto-swaps them. The command then resolves "test-org/test-proj" as
+    // the target and uses the hex ID as the log ID.
+    getLogsSpy.mockResolvedValue([sampleLog]);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+
     const { context } = createMockContext();
     const func = await viewCommand.loader();
-    await expect(
-      func.call(
-        context,
-        { json: true, web: false },
-        "968c763c740cfda8b6728f27fb9e9b01",
-        "test-org/test-proj"
-      )
-    ).rejects.toThrow();
+    await func.call(
+      context,
+      { json: true, web: false },
+      "968c763c740cfda8b6728f27fb9e9b01",
+      "test-org/test-proj"
+    );
+
+    // Should resolve correctly despite swapped args
+    expect(getLogsSpy).toHaveBeenCalled();
   });
 
   test("resolves project-search target via resolveProjectBySlug", async () => {
@@ -583,8 +581,8 @@ describe("viewCommand.func", () => {
       );
       expect.unreachable("Should have thrown");
     } catch (err) {
-      expect(err).toBeInstanceOf(ValidationError);
-      const msg = (err as ValidationError).message;
+      expect(err).toBeInstanceOf(ResolutionError);
+      const msg = (err as ResolutionError).message;
       // Retention-aware wording replaces the generic "was sent within 90 days"
       expect(msg).toContain("past the 90-day log retention");
       expect(msg).not.toContain("was sent within the last 90 days");

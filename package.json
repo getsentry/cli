@@ -1,6 +1,6 @@
 {
   "name": "sentry",
-  "version": "0.30.0-dev.0",
+  "version": "0.32.0-dev.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/getsentry/cli.git"
@@ -76,6 +76,7 @@
     "@sentry/core@10.50.0": "patches/@sentry%2Fcore@10.50.0.patch"
   },
   "scripts": {
+    "cli": "bun run src/bin.ts",
     "dev": "bun run generate:schema && bun run generate:docs && bun run generate:sdk && bun run src/bin.ts",
     "build": "bun run generate:schema && bun run generate:docs && bun run generate:sdk && bun run script/build.ts --single",
     "build:all": "bun run generate:schema && bun run generate:docs && bun run generate:sdk && bun run script/build.ts",

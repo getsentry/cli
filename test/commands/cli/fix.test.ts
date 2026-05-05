@@ -21,7 +21,7 @@ import {
   generatePreMigrationTableDDL,
   initSchema,
 } from "../../../src/lib/db/schema.js";
-import { OutputError } from "../../../src/lib/errors.js";
+import { EXIT, OutputError } from "../../../src/lib/errors.js";
 import { useTestConfigDir } from "../../helpers.js";
 
 /**
@@ -346,7 +346,7 @@ describe("sentry cli fix", () => {
     // Schema failure is rendered as an issue with repair details
     expect(output).toContain("Schema");
     expect(output).toContain("Try deleting the database");
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(EXIT.OUTPUT_ERROR);
     // Should NOT say "No issues found"
     expect(output).not.toContain("No issues found");
   });
@@ -363,7 +363,7 @@ describe("sentry cli fix", () => {
 
     expect(output).toContain("Schema");
     expect(output).toContain("Try deleting the database");
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(EXIT.OUTPUT_ERROR);
   });
 
   test("schema check failure with permission issues does not print schema error", async () => {
@@ -520,7 +520,7 @@ describe("sentry cli fix — ownership detection", () => {
     // Not uid 0, so we can't chown — expect instructions
     expect(output).toContain("sudo chown");
     expect(output).toContain("sudo sentry cli fix");
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(EXIT.OUTPUT_ERROR);
   });
 
   test("dry-run reports ownership issues with chown instructions", async () => {
@@ -614,7 +614,7 @@ describe("sentry cli fix — ownership detection", () => {
     chmodSync(join(getOwnershipTestDir(), "cli.db"), 0o600);
 
     const { exitCode: code } = await runFixWithUid(false, () => 9999);
-    expect(code).toBe(1);
+    expect(code).toBe(EXIT.OUTPUT_ERROR);
   });
 
   test("skips permission check when ownership repair fails", async () => {
@@ -662,7 +662,7 @@ describe("sentry cli fix — ownership detection", () => {
 
     try {
       const { output, exitCode } = await runFixWithUid(false, () => 0);
-      expect(exitCode).toBe(1);
+      expect(exitCode).toBe(EXIT.OUTPUT_ERROR);
       // The instructions mention the inability to determine UID
       expect(output).toContain("Could not determine a non-root UID");
     } finally {

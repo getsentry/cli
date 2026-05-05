@@ -20,7 +20,7 @@ import { viewCommand } from "../../../src/commands/log/view.js";
 import * as apiClient from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as browser from "../../../src/lib/browser.js";
-import { ContextError, ValidationError } from "../../../src/lib/errors.js";
+import { ContextError, ResolutionError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { DetailedSentryLog } from "../../../src/types/sentry.js";
@@ -111,7 +111,7 @@ describe("viewCommand.func", () => {
       expect(output).toContain(ID1);
     });
 
-    test("throws ValidationError when log not found", async () => {
+    test("throws ResolutionError when log not found", async () => {
       getLogsSpy.mockResolvedValue([]);
 
       const { context } = createMockContext();
@@ -126,9 +126,11 @@ describe("viewCommand.func", () => {
         );
         expect.unreachable("Should have thrown");
       } catch (error) {
-        expect(error).toBeInstanceOf(ValidationError);
-        expect((error as ValidationError).message).toContain(ID1);
-        expect((error as ValidationError).message).toContain("No log found");
+        expect(error).toBeInstanceOf(ResolutionError);
+        expect((error as ResolutionError).message).toContain(ID1);
+        expect((error as ResolutionError).message).toContain(
+          "not found in my-org/proj"
+        );
       }
     });
   });
@@ -221,7 +223,7 @@ describe("viewCommand.func", () => {
       expect(parsed[0]["sentry.item_id"]).toBe(ID1);
     });
 
-    test("throws ValidationError when no logs found for multiple IDs", async () => {
+    test("throws ResolutionError when no logs found for multiple IDs", async () => {
       getLogsSpy.mockResolvedValue([]);
 
       const { context } = createMockContext();
@@ -237,12 +239,12 @@ describe("viewCommand.func", () => {
         );
         expect.unreachable("Should have thrown");
       } catch (error) {
-        expect(error).toBeInstanceOf(ValidationError);
-        const msg = (error as ValidationError).message;
-        expect(msg).toContain("No logs found");
-        // Each ID should appear in a markdown list item
-        expect(msg).toContain(` - \`${ID1}\``);
-        expect(msg).toContain(` - \`${ID2}\``);
+        expect(error).toBeInstanceOf(ResolutionError);
+        const msg = (error as ResolutionError).message;
+        expect(msg).toContain("not found in my-org/proj");
+        // Each ID should appear in the suggestions
+        expect(msg).toContain(ID1);
+        expect(msg).toContain(ID2);
       }
     });
   });

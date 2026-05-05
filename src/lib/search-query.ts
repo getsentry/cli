@@ -341,33 +341,25 @@ export function sanitizeQuery(query: string | undefined): string | undefined {
     return query;
   }
 
-  // Track whether we auto-repaired the query so we return the repaired
-  // version (not the original) if no further rewriting is needed.
-  let effectiveQuery = query;
+  // --- Layer 1: Pre-parse text normalization ---
+  // Run cheap text transforms on every query BEFORE PEG parsing.
+  // These fix common patterns that agents/users produce, regardless of
+  // whether the PEG parser would accept them.
+  const normalized = normalizeQuery(query);
+
   let nodes: SearchNode[];
   try {
-    nodes = parse(query);
+    nodes = parse(normalized);
   } catch {
-    // Malformed query — attempt common repairs before passing through.
-    // AI agents frequently produce slightly malformed search syntax that
-    // has clear intent (e.g., trailing commas in in-list filters).
-    const repaired = tryRepairQuery(query);
-    if (repaired !== query) {
-      effectiveQuery = repaired;
-      // Re-parse the repaired query — if it still fails, pass through
-      // to the API which returns a proper 400 with details.
-      try {
-        nodes = parse(repaired);
-      } catch {
-        return repaired;
-      }
-      // Log only after confirming the repair produced valid syntax
-      log.warn(
-        `Auto-repaired search query syntax. Running query: "${repaired}"`
-      );
-    } else {
-      return query;
-    }
+    // PEG parse still failed after normalization — pass through to the
+    // API which returns a proper 400 with actionable details.
+    return normalized;
+  }
+
+  if (normalized !== query) {
+    log.warn(
+      `Auto-repaired search query syntax. Running query: "${normalized}"`
+    );
   }
 
   // Check for OR inside paren groups first — these are opaque and can't
@@ -401,7 +393,7 @@ export function sanitizeQuery(query: string | undefined): string | undefined {
     return sanitized;
   }
 
-  return effectiveQuery;
+  return normalized;
 }
 
 /**
@@ -499,41 +491,127 @@ export const SEARCH_SYNTAX_REFERENCE = {
 };
 
 // ---------------------------------------------------------------------------
-// Query repair
+// Query normalization pipeline
 // ---------------------------------------------------------------------------
 
 /**
- * Pattern matching in-list filters with trailing comma before the closing
- * bracket, e.g., `key:[val1,val2,]` → `key:[val1,val2]`.
- * Also catches wrong closing delimiter: `key:[val1,val2,)` → `key:[val1,val2]`.
+ * In-list filter with wrong closing delimiter `)`.
+ * Matches `key:[a,b,)` — captures the inner values. Does NOT match `[a,b,]`
+ * (handled separately by {@link stripTrailingListCommas} via balanced brackets).
  */
-const TRAILING_COMMA_IN_LIST_RE = /\[([^[\]]*),\s*[\])](?=\s|$)/g;
+const MALFORMED_IN_LIST_RE = /\[([^[\]]*),\s*\)(?=\s|$)/g;
 
 /** Trailing comma at end of captured group content */
 const TRAILING_COMMA_RE = /,\s*$/;
 
+/** Balanced `[...]` block — used to skip well-formed in-list filters */
+const BALANCED_BRACKET_RE = /\[[^\]]*\]/g;
+
+/** Trailing comma before closing bracket: `,]` */
+const TRAILING_LIST_COMMA_RE = /,\s*\]$/;
+
 /**
- * Attempt common repairs on a malformed search query.
+ * Pattern that splits a query into alternating unquoted / quoted segments.
  *
- * AI agents and users frequently produce queries with minor syntax errors
- * that have clear intent. Rather than failing with a cryptic 400, we repair
- * what we can and warn. Current repairs:
+ * Matches double-quoted strings (including escaped quotes inside them).
+ * Between matches is unquoted text that can be safely normalized.
+ */
+const QUOTED_SEGMENT_RE = /"(?:[^"\\]|\\.)*"/g;
+
+/**
+ * Normalize a search query by applying a pipeline of text repairs.
  *
- * 1. Trailing commas in in-list filters: `key:[a,b,]` → `key:[a,b]`
- * 2. Wrong closing delimiter: `key:[a,b,)` → `key:[a,b]`
+ * Runs on every query BEFORE PEG parsing. Each pass is a small, focused
+ * transform that fixes a common agent/user mistake. The pipeline is ordered
+ * from most common to least common pattern.
+ *
+ * Quoted regions (`"..."`) are preserved verbatim — only unquoted text is
+ * normalized. This prevents `message:"error [500,] found"` from being
+ * corrupted.
  *
  * Returns the original query unchanged if no repairs were applicable.
  */
-function tryRepairQuery(query: string): string {
-  let repaired = query;
+function normalizeQuery(query: string): string {
+  return transformUnquoted(query, (segment) => {
+    let q = segment;
 
-  // Fix trailing commas and wrong closing delimiters in in-list filters
-  repaired = repaired.replace(
-    TRAILING_COMMA_IN_LIST_RE,
+    // 1. Fix mismatched closing delimiters: `[a,b,)` → `[a,b]`
+    //    The `)` is a common typo/autocomplete artifact.
+    q = fixMismatchedBrackets(q);
+
+    // 2. Strip trailing commas in in-list: `[a,b,]` → `[a,b]`
+    q = stripTrailingListCommas(q);
+
+    // Future passes can be added here (e.g., date normalization)
+
+    return q;
+  });
+}
+
+/**
+ * Apply a transform function only to the unquoted segments of a query.
+ *
+ * Splits the query at double-quoted boundaries, applies `fn` to each
+ * unquoted segment, and re-assembles with the quoted segments untouched.
+ */
+function transformUnquoted(
+  query: string,
+  fn: (unquoted: string) => string
+): string {
+  // Fast path: no quotes → transform the whole string
+  if (!query.includes('"')) {
+    return fn(query);
+  }
+
+  const parts: string[] = [];
+  let lastIndex = 0;
+
+  // Reset the regex state for each call (global regex)
+  QUOTED_SEGMENT_RE.lastIndex = 0;
+  let match = QUOTED_SEGMENT_RE.exec(query);
+
+  while (match !== null) {
+    // Unquoted segment before this quoted match
+    if (match.index > lastIndex) {
+      parts.push(fn(query.slice(lastIndex, match.index)));
+    }
+    // Quoted segment — preserved as-is
+    parts.push(match[0]);
+    lastIndex = match.index + match[0].length;
+    match = QUOTED_SEGMENT_RE.exec(query);
+  }
+
+  // Trailing unquoted segment after last quote
+  if (lastIndex < query.length) {
+    parts.push(fn(query.slice(lastIndex)));
+  }
+
+  return parts.join("");
+}
+
+/**
+ * Fix mismatched closing delimiters in in-list filters.
+ *
+ * `key:[a,b,)` → `key:[a,b]` — the `)` after `[` is clearly meant to be `]`.
+ * Only replaces `)` that follows a `[...` opener without an intervening `]`.
+ */
+function fixMismatchedBrackets(query: string): string {
+  return query.replace(
+    MALFORMED_IN_LIST_RE,
     (_match, inner: string) => `[${inner.replace(TRAILING_COMMA_RE, "")}]`
   );
+}
 
-  return repaired;
+/**
+ * Strip trailing commas inside in-list filters.
+ *
+ * `key:[a,b,]` → `key:[a,b]` — valid PEG syntax but some APIs reject it.
+ * Only operates on balanced `[...]` blocks to avoid cross-filter corruption.
+ */
+function stripTrailingListCommas(query: string): string {
+  return query.replace(BALANCED_BRACKET_RE, (match) =>
+    match.replace(TRAILING_LIST_COMMA_RE, "]")
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -549,5 +627,6 @@ export const __testing = {
   tryRewriteOr,
   serializeNode,
   serializeNodes,
-  tryRepairQuery,
+  normalizeQuery,
+  transformUnquoted,
 };

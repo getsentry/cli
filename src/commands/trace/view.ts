@@ -21,7 +21,11 @@ import {
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError, ValidationError } from "../../lib/errors.js";
+import {
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "../../lib/errors.js";
 import {
   computeTraceSummary,
   formatSimpleSpanTree,
@@ -558,10 +562,14 @@ export const viewCommand = buildCommand({
     });
 
     if (spans.length === 0) {
-      throw new ValidationError(
-        `No trace found with ID "${traceId}".\n\n` +
-          "The ID format is valid but no matching trace exists in this project. " +
-          "Check that you are querying the right org/project, or the trace may be past your plan's retention window."
+      throw new ResolutionError(
+        `Trace '${traceId}'`,
+        "not found",
+        `sentry trace view ${org}/${project ?? "<project>"}/${traceId}`,
+        [
+          "Check that you are querying the right org/project",
+          "The trace may be past your plan's retention window",
+        ]
       );
     }
 

@@ -11,6 +11,7 @@
 import { opendir } from "node:fs/promises";
 import { join } from "node:path";
 import { withTracingSpan } from "../telemetry.js";
+import { FRAMEWORK_ENV_PREFIXES } from "./env.js";
 import { createDetectedDsn } from "./parser.js";
 import { scanSpecificFiles } from "./scanner.js";
 import type { DetectedDsn } from "./types.js";
@@ -44,11 +45,22 @@ export const ENV_FILES = [
 ] as const;
 
 /**
- * Pattern to match SENTRY_DSN in .env files.
- * Handles: SENTRY_DSN=value, SENTRY_DSN="value", SENTRY_DSN='value'
- * Also handles trailing comments: SENTRY_DSN=value # comment
+ * Pattern to match Sentry DSN variables in .env files.
+ * Matches the canonical `SENTRY_DSN` plus framework-prefixed variants
+ * from the shared {@link FRAMEWORK_ENV_PREFIXES} allowlist:
+ *   NEXT_PUBLIC_SENTRY_DSN, REACT_APP_SENTRY_DSN, VITE_SENTRY_DSN,
+ *   EXPO_PUBLIC_SENTRY_DSN, NUXT_PUBLIC_SENTRY_DSN.
+ *
+ * Handles: VAR=value, VAR="value", VAR='value'
+ * Also handles trailing comments: VAR=value # comment
  */
-const ENV_DSN_PATTERN = /^SENTRY_DSN\s*=\s*(['"]?)(.+?)\1\s*(?:#.*)?$/;
+const TRAILING_UNDERSCORE = /_$/;
+const ENV_DSN_PREFIXES = FRAMEWORK_ENV_PREFIXES.map((p) =>
+  p.replace(TRAILING_UNDERSCORE, "")
+).join("|");
+const ENV_DSN_PATTERN = new RegExp(
+  `^(?:(?:${ENV_DSN_PREFIXES})_)?SENTRY_DSN\\s*=\\s*(['"]?)(.+?)\\1\\s*(?:#.*)?$`
+);
 
 /**
  * Extract SENTRY_DSN value from .env file content.

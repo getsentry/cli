@@ -17,7 +17,8 @@ import { MastraClient } from "@mastra/client-js";
 import { captureException, getTraceData } from "@sentry/node-core/light";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
-import { WizardError } from "../errors.js";
+import { detectAgent } from "../detect-agent.js";
+import { EXIT, WizardError } from "../errors.js";
 import { terminalLink } from "../formatters/colors.js";
 import {
   renderInlineMarkdown,
@@ -31,6 +32,9 @@ import {
 } from "./clack-utils.js";
 import {
   API_TIMEOUT_MS,
+  EXIT_DEPENDENCY_INSTALL_FAILED,
+  EXIT_PLATFORM_NOT_DETECTED,
+  EXIT_VERIFICATION_FAILED,
   MASTRA_API_URL,
   SENTRY_DOCS_URL,
   VERIFY_CHANGES_STEP,
@@ -339,16 +343,14 @@ async function preamble(
     );
   }
 
-  // Banner rendering is delegated to the UI implementation:
-  //   - `InkUI` paints the banner from a pre-loaded gradient at the
-  //     top of its layout and treats this call as a no-op (the
-  //     layout already includes it).
-  //   - `LoggingUI` writes a plain ANSI version to stderr.
-  // Calling it on `ui` directly avoids the previous bug where a raw
-  // `process.stderr.write` was hidden behind OpenTUI's alternate-
-  // screen takeover (no longer applicable post-Ink, but `ui.banner`
-  // remains the canonical entry point).
-  ui.banner(formatBanner());
+  // Suppress the ASCII art banner for agent-driven runs — it wastes
+  // tokens and adds noise to structured output without value to the
+  // agent. For interactive runs, the UI implementation handles
+  // rendering: InkUI paints from a pre-loaded gradient, LoggingUI
+  // writes plain ANSI to stderr.
+  if (!detectAgent()) {
+    ui.banner(formatBanner());
+  }
   ui.intro("sentry init");
 
   let confirmed: boolean;
@@ -706,7 +708,11 @@ function handleFinalResult(
       spinState.running = false;
     }
     formatError(result, ui);
-    throw new WizardError("Workflow returned an error");
+
+    // Map workflow-internal exit codes to semantic EXIT.* constants
+    const workflowCode = result.result?.exitCode;
+    const exitCode = mapWorkflowExitCode(workflowCode);
+    throw new WizardError("Workflow returned an error", { exitCode });
   }
 
   if (spinState.running) {
@@ -714,6 +720,31 @@ function handleFinalResult(
     spinState.running = false;
   }
   formatResult(result, ui);
+}
+
+/**
+ * Map a workflow-internal exit code to a semantic EXIT.* constant.
+ *
+ * The remote workflow uses its own code scheme (20=platform not detected,
+ * 30=deps failed, 40/41=codemod failed, 50=verification). We translate
+ * these into the CLI's decade-based exit codes so scripts can distinguish
+ * wizard failure categories.
+ */
+function mapWorkflowExitCode(workflowCode: number | undefined): number {
+  switch (workflowCode) {
+    case EXIT_PLATFORM_NOT_DETECTED:
+      return EXIT.CONFIG;
+    case EXIT_DEPENDENCY_INSTALL_FAILED:
+      return EXIT.WIZARD_DEPS;
+    // 40/41 are server-side only (codemod plan/apply) — not in constants.ts
+    case 40:
+    case 41:
+      return EXIT.WIZARD_CODEMOD;
+    case EXIT_VERIFICATION_FAILED:
+      return EXIT.WIZARD_VERIFY;
+    default:
+      return EXIT.WIZARD;
+  }
 }
 
 function extractSuspendPayload(

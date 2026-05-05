@@ -460,7 +460,7 @@ export const listCommand = buildListCommand("dashboard", {
           afterId,
           glob,
         })
-    ).catch((error: unknown) =>
+    ).catch(async (error: unknown) =>
       enrichDashboardError(error, { orgSlug, operation: "list" })
     );
 

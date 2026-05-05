@@ -11,6 +11,8 @@ import { parseSentryLinkHeader } from "@sentry/api";
 import * as Sentry from "@sentry/node-core/light";
 import type { z } from "zod";
 
+import { extractRequiredScopes } from "../api-scope.js";
+import { getActiveEnvVarName, isEnvTokenActive } from "../db/auth.js";
 import { getEnv } from "../env.js";
 import { ApiError, AuthError, stringifyUnknown } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
@@ -19,6 +21,47 @@ import {
   getDefaultSdkConfig,
   getSdkConfig,
 } from "../sentry-client.js";
+
+/**
+ * Enrich a 403 Forbidden error detail with actionable guidance.
+ *
+ * For env-var tokens (SENTRY_AUTH_TOKEN / SENTRY_TOKEN): extracts the specific
+ * missing scope from the API response when available, otherwise suggests
+ * checking token scopes. Includes a link to the token settings page.
+ *
+ * For OAuth tokens: suggests the user may lack access and should re-authenticate.
+ *
+ * @param rawDetail - The original detail string from the API 403 response
+ * @returns Enriched detail string with actionable suggestions
+ */
+function enrich403Detail(rawDetail: string | undefined): string {
+  const lines: string[] = [];
+  if (rawDetail) {
+    lines.push(rawDetail, "");
+  }
+
+  if (isEnvTokenActive()) {
+    const scopes = extractRequiredScopes(rawDetail);
+    if (scopes.length > 0) {
+      lines.push(
+        `Your ${getActiveEnvVarName()} token is missing the required scope(s) '${scopes.join("', '")}'.`
+      );
+    } else {
+      lines.push(
+        `Your ${getActiveEnvVarName()} token may lack the required scope for this operation.`
+      );
+    }
+    lines.push(
+      "Check token scopes at: https://sentry.io/settings/auth-tokens/"
+    );
+  } else {
+    lines.push(
+      "You may not have access to this resource.",
+      "Re-authenticate with: sentry auth login"
+    );
+  }
+  return lines.join("\n  ");
+}
 
 /**
  * Parse Sentry's RFC 5988 Link response header to extract pagination cursors.
@@ -67,15 +110,26 @@ export function throwApiError(
   }
 
   const status = response.status;
-  const detail =
+  const rawDetail =
     error && typeof error === "object" && "detail" in error
-      ? stringifyUnknown((error as { detail: unknown }).detail)
-      : stringifyUnknown(error);
+      ? (error as { detail: unknown }).detail
+      : undefined;
+  const hasUsableDetail = rawDetail !== null && rawDetail !== undefined;
+  // When the API returns `{ detail: null }` or `{ detail: undefined }`,
+  // fall back to stringifying the whole error object for non-403 errors
+  // (useful for debugging). For 403s, pass undefined to enrich403Detail
+  // so the enrichment stands alone without a noisy `{}` prefix.
+  const detail = hasUsableDetail
+    ? stringifyUnknown(rawDetail)
+    : stringifyUnknown(error);
 
+  const is403 = status === 403;
   throw new ApiError(
     `${context}: ${status} ${response.statusText ?? "Unknown"}`,
     status,
-    detail
+    is403 ? enrich403Detail(hasUsableDetail ? detail : undefined) : detail,
+    undefined,
+    is403
   );
 }
 
@@ -219,6 +273,54 @@ export type PaginatedResponse<T> = {
 };
 
 /**
+ * Auto-paginate across multiple API pages, accumulating results up to `limit`.
+ *
+ * Calls `fetchPage` repeatedly until enough rows are collected or pages are
+ * exhausted. Caps at {@link MAX_PAGINATION_PAGES} to prevent runaway loops.
+ *
+ * The caller is responsible for baking `perPage` into the `fetchPage` closure
+ * (typically `Math.min(limit, API_MAX_PER_PAGE)`). This helper only manages
+ * cursor chaining and row accumulation.
+ *
+ * @param fetchPage - Async function that fetches a single page given a cursor
+ * @param limit - Total number of items to collect
+ * @param initialCursor - Optional starting cursor
+ * @returns Accumulated items with optional nextCursor from the last page
+ */
+export async function autoPaginate<T>(
+  fetchPage: (cursor: string | undefined) => Promise<PaginatedResponse<T[]>>,
+  limit: number,
+  initialCursor?: string
+): Promise<PaginatedResponse<T[]>> {
+  // Fast path: single-page fetch when limit fits in one API page
+  if (limit <= API_MAX_PER_PAGE) {
+    return fetchPage(initialCursor);
+  }
+
+  // Multi-page: accumulate rows across pages up to the requested limit
+  const allRows: T[] = [];
+  let cursor: string | undefined = initialCursor;
+
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
+    const result = await fetchPage(cursor);
+    allRows.push(...result.data);
+
+    if (allRows.length >= limit || !result.nextCursor) {
+      // Overshot — trim and drop nextCursor (cursor would skip items)
+      if (allRows.length > limit) {
+        return { data: allRows.slice(0, limit) };
+      }
+      return { data: allRows, nextCursor: result.nextCursor };
+    }
+
+    cursor = result.nextCursor;
+  }
+
+  // Safety limit reached — return what we have, no nextCursor
+  return { data: allRows.slice(0, limit) };
+}
+
+/**
  * Make an authenticated request to a specific Sentry region.
  * Returns both parsed response data and raw headers for pagination support.
  * Used for internal endpoints not covered by @sentry/api SDK functions.
@@ -255,38 +357,7 @@ export async function apiRequestToRegion<T>(
   });
 
   if (!response.ok) {
-    let detail: string | undefined;
-    try {
-      const text = await response.text();
-      try {
-        const parsed = JSON.parse(text) as { detail?: string };
-        detail = parsed.detail ?? JSON.stringify(parsed);
-      } catch {
-        detail = text;
-      }
-    } catch {
-      detail = response.statusText;
-    }
-    // Attach a small allowlisted subset of response headers to the Sentry
-    // event as context. This lets us distinguish Sentry-app 4xx/5xx (which
-    // ship a `{"detail": "..."}` JSON body and `content-type: application/json`)
-    // from CDN / WAF / edge 4xx (Cloudflare / proxy) that return empty or HTML
-    // bodies — a gap that previously made empty-`detail` events like CLI-1AZ
-    // impossible to triage without user-side repro.
-    Sentry.setContext("api_response_headers", {
-      "content-type": response.headers.get("content-type"),
-      "content-length": response.headers.get("content-length"),
-      server: response.headers.get("server"),
-      "cf-ray": response.headers.get("cf-ray"),
-      "x-sentry-error": response.headers.get("x-sentry-error"),
-      "www-authenticate": response.headers.get("www-authenticate"),
-    });
-    throw new ApiError(
-      `API request failed: ${response.status} ${response.statusText}`,
-      response.status,
-      detail,
-      endpoint
-    );
+    await throwRawApiError(response, endpoint);
   }
 
   // 204 No Content / 205 Reset Content have no body by spec — calling
@@ -327,6 +398,61 @@ export async function apiRequestToRegion<T>(
   }
 
   return { data: data as T, headers: response.headers };
+}
+
+/**
+ * Extract error detail from a failed HTTP response, attach diagnostic
+ * headers to the Sentry scope, and throw an enriched {@link ApiError}.
+ *
+ * Extracted from `apiRequestToRegion` to keep the main function's
+ * cognitive complexity under the lint threshold.
+ */
+async function throwRawApiError(
+  response: Response,
+  endpoint: string
+): Promise<never> {
+  let detail: string | undefined;
+  try {
+    const text = await response.text();
+    try {
+      const parsed = JSON.parse(text) as { detail?: string };
+      // Prefer the explicit `detail` field; fall back to the full JSON
+      // for non-403 errors (useful for debugging). For 403s, pass
+      // undefined so enrich403Detail stands alone without a noisy
+      // `{"detail":null}` prefix.
+      if (typeof parsed.detail === "string") {
+        detail = parsed.detail;
+      } else if (response.status !== 403) {
+        detail = JSON.stringify(parsed);
+      }
+    } catch {
+      detail = text || undefined;
+    }
+  } catch {
+    detail = response.statusText;
+  }
+  // Attach a small allowlisted subset of response headers to the Sentry
+  // event as context. This lets us distinguish Sentry-app 4xx/5xx (which
+  // ship a `{"detail": "..."}` JSON body and `content-type: application/json`)
+  // from CDN / WAF / edge 4xx (Cloudflare / proxy) that return empty or HTML
+  // bodies — a gap that previously made empty-`detail` events like CLI-1AZ
+  // impossible to triage without user-side repro.
+  Sentry.setContext("api_response_headers", {
+    "content-type": response.headers.get("content-type"),
+    "content-length": response.headers.get("content-length"),
+    server: response.headers.get("server"),
+    "cf-ray": response.headers.get("cf-ray"),
+    "x-sentry-error": response.headers.get("x-sentry-error"),
+    "www-authenticate": response.headers.get("www-authenticate"),
+  });
+  const is403 = response.status === 403;
+  throw new ApiError(
+    `API request failed: ${response.status} ${response.statusText}`,
+    response.status,
+    is403 ? enrich403Detail(detail) : detail,
+    endpoint,
+    is403
+  );
 }
 
 /**

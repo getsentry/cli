@@ -27,6 +27,7 @@ describe("parseSntrysClaim", () => {
     expect(parseSntrysClaim(token)).toEqual({
       url: "https://sentry.acme.com",
       regionUrl: "https://us.sentry.acme.com",
+      org: "acme",
     });
   });
 
@@ -39,6 +40,7 @@ describe("parseSntrysClaim", () => {
     expect(parseSntrysClaim(token)).toEqual({
       url: "https://sentry.acme.com",
       regionUrl: undefined,
+      org: "acme",
     });
   });
 
@@ -153,6 +155,32 @@ describe("parseSntrysClaim", () => {
     expect(parseSntrysClaim(token)?.regionUrl).toBeUndefined();
   });
 
+  test("returns org as undefined when org field is missing from payload", () => {
+    const token = mintSntrysToken({
+      iat: 1_700_000_000,
+      url: "https://sentry.io",
+    });
+    expect(parseSntrysClaim(token)?.org).toBeUndefined();
+  });
+
+  test("ignores non-string org (treats as absent)", () => {
+    const token = mintSntrysToken({
+      iat: 1_700_000_000,
+      url: "https://sentry.io",
+      org: 42,
+    });
+    expect(parseSntrysClaim(token)?.org).toBeUndefined();
+  });
+
+  test("ignores empty-string org (treats as absent)", () => {
+    const token = mintSntrysToken({
+      iat: 1_700_000_000,
+      url: "https://sentry.io",
+      org: "",
+    });
+    expect(parseSntrysClaim(token)?.org).toBeUndefined();
+  });
+
   test("does NOT throw on adversarial inputs", () => {
     // Catch-all: any input must either return undefined or a valid
     // claim object — never throw.
@@ -184,6 +212,7 @@ describe("parseSntrysClaim", () => {
     expect(parseSntrysClaim(forged)).toEqual({
       url: "https://evil.com",
       regionUrl: undefined,
+      org: "victim",
     });
   });
 });

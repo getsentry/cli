@@ -16,6 +16,7 @@ import { parseSentryUrl } from "../../src/lib/sentry-url-parser.js";
 import {
   buildOrgUrl,
   buildProjectUrl,
+  buildReplayUrl,
   buildTraceUrl,
 } from "../../src/lib/sentry-urls.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
@@ -38,6 +39,9 @@ const projectSlugArb = stringMatching(/^[a-z][a-z0-9-]{1,20}[a-z0-9]$/).filter(
 
 /** Generates valid 32-character hex trace IDs */
 const traceIdArb = stringMatching(/^[0-9a-f]{32}$/);
+
+/** Generates valid 32-character hex replay IDs */
+const replayIdArb = stringMatching(/^[0-9a-f]{32}$/);
 
 /** Generates numeric issue IDs */
 const numericIdArb = stringMatching(/^[1-9][0-9]{0,10}$/);
@@ -86,6 +90,21 @@ describe("parseSentryUrl round-trip properties", () => {
         expect(parsed).not.toBeNull();
         expect(parsed?.org).toBe(org);
         expect(parsed?.traceId).toBe(traceId);
+        expect(parsed?.issueId).toBeUndefined();
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("buildReplayUrl → parseSentryUrl extracts org and replayId", async () => {
+    await fcAssert(
+      property(tuple(orgSlugArb, replayIdArb), ([org, replayId]) => {
+        const url = buildReplayUrl(org, replayId);
+        const parsed = parseSentryUrl(url);
+
+        expect(parsed).not.toBeNull();
+        expect(parsed?.org).toBe(org);
+        expect(parsed?.replayId).toBe(replayId);
         expect(parsed?.issueId).toBeUndefined();
       }),
       { numRuns: DEFAULT_NUM_RUNS }

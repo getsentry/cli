@@ -387,6 +387,23 @@ describe("DSN Detector (New Module)", () => {
       );
     });
 
+    test("describes env source with framework-prefixed var name", () => {
+      const dsn = {
+        raw: "https://key@o1.ingest.sentry.io/1",
+        source: "env" as const,
+        sourcePath: "NEXT_PUBLIC_SENTRY_DSN",
+        protocol: "https",
+        publicKey: "key",
+        host: "o1.ingest.sentry.io",
+        projectId: "1",
+        orgId: "1",
+      };
+
+      expect(getDsnSourceDescription(dsn)).toBe(
+        "NEXT_PUBLIC_SENTRY_DSN environment variable"
+      );
+    });
+
     test("describes env_file source with path", () => {
       const dsn = {
         raw: "https://key@o1.ingest.sentry.io/1",
