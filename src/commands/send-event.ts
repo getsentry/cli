@@ -298,8 +298,17 @@ built entirely from the file contents.
         );
       }
       const event = buildEventFromFlags(flags);
-      const envelope = createEventEnvelope(event, dsnComponents);
-      await sendEnvelopeRequest(dsn, serializeEnvelope(envelope));
+      let body: string | Uint8Array;
+      try {
+        const envelope = createEventEnvelope(event, dsnComponents);
+        body = serializeEnvelope(envelope);
+      } catch (err) {
+        throw new ValidationError(
+          `Failed to create event envelope: ${(err as Error).message}`,
+          "event"
+        );
+      }
+      await sendEnvelopeRequest(dsn, body);
       yield new CommandOutput<SendEventResult>({
         eventId: event.event_id ?? "",
       });
