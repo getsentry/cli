@@ -817,19 +817,24 @@ export class InkUI implements WizardUI {
     const store = this.store;
     this.learnTimer = setInterval(() => {
       if (this.torndown) {
+        this.stopLearnSequence();
         return;
       }
       const { learnState } = store.getSnapshot();
       if (learnState.complete) {
         this.stopLearnSequence();
-        this.startTipRotation();
+        if (!this.torndown) {
+          this.startTipRotation();
+        }
         return;
       }
       const next = learnState.blockIndex + 1;
       if (next >= LEARN_SEQUENCE.length) {
         store.setLearnComplete();
         this.stopLearnSequence();
-        this.startTipRotation();
+        if (!this.torndown) {
+          this.startTipRotation();
+        }
       } else {
         store.advanceLearnBlock();
       }
