@@ -714,8 +714,9 @@ export class InkUI implements WizardUI {
    * fully restored before exit so the user's shell prompt comes
    * back cleanly.
    *
-   * Idempotent: a second Ctrl+C while teardown is in progress is a
-   * no-op (the `cancelRequested` flag short-circuits).
+   * A second Ctrl+C while teardown is in progress force-exits via
+   * `process.exit(130)` so the user is never trapped by a stuck
+   * teardown.
    */
   requestCancel(): void {
     const promptCancel = this.activePromptCancel;
@@ -727,7 +728,9 @@ export class InkUI implements WizardUI {
       return;
     }
     if (this.cancelRequested) {
-      return;
+      // Safety valve: teardown already started but hasn't finished
+      // (or something is stuck). Force-exit so the user isn't trapped.
+      process.exit(130);
     }
     this.cancelRequested = true;
     this.failureMessage = "Setup cancelled.";
@@ -851,9 +854,10 @@ export class InkUI implements WizardUI {
    *
    * Both this handler and the App's `useInput` Ctrl+C path funnel
    * into `requestCancel()` so the cancellation flow has a single
-   * implementation. `process.once` rather than `process.on` so a
-   * second SIGINT arriving while teardown runs falls through to
-   * Node's default handler (immediate exit) — protects against a
+   * implementation. Uses `process.on` so the handler survives a
+   * prompt-delegation Ctrl+C (where `requestCancel` returns early
+   * without setting `cancelRequested`). If teardown is already in
+   * progress, `requestCancel` force-exits — protects against a
    * stuck teardown holding the user hostage.
    */
   private installCancelHandler(): void {
