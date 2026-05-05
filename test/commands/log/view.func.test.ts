@@ -372,4 +372,72 @@ describe("viewCommand.func", () => {
       }
     });
   });
+
+  describe("detail attribute fetching", () => {
+    test("calls getLogItemDetail for logs that have a trace", async () => {
+      const log = makeSampleLog(ID1); // makeSampleLog sets trace: "abc123..."
+      getLogsSpy.mockResolvedValue([log]);
+
+      const { context } = createMockContext();
+      const func = await viewCommand.loader();
+      await func.call(context, { json: false, web: false }, "my-org/proj", ID1);
+
+      expect(getLogItemDetailSpy).toHaveBeenCalledWith(
+        "my-org",
+        "proj",
+        ID1,
+        log.trace
+      );
+    });
+
+    test("does not call getLogItemDetail for logs without a trace", async () => {
+      const log = makeSampleLog(ID1, "no trace log");
+      log.trace = null;
+      getLogsSpy.mockResolvedValue([log]);
+
+      const { context } = createMockContext();
+      const func = await viewCommand.loader();
+      await func.call(context, { json: false, web: false }, "my-org/proj", ID1);
+
+      expect(getLogItemDetailSpy).not.toHaveBeenCalled();
+    });
+
+    test("still renders output when getLogItemDetail fails", async () => {
+      const log = makeSampleLog(ID1);
+      getLogsSpy.mockResolvedValue([log]);
+      getLogItemDetailSpy.mockRejectedValue(new Error("network error"));
+
+      const { context, stdoutWrite } = createMockContext();
+      const func = await viewCommand.loader();
+      await func.call(context, { json: false, web: false }, "my-org/proj", ID1);
+
+      // Should still render the log with standard fields despite detail failure
+      const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+      expect(output).toContain(ID1);
+    });
+
+    test("renders custom attributes in human output when detail available", async () => {
+      const log = makeSampleLog(ID1);
+      getLogsSpy.mockResolvedValue([log]);
+      getLogItemDetailSpy.mockResolvedValue({
+        itemId: ID1,
+        timestamp: log.timestamp,
+        attributes: [
+          { name: "user.id", type: "str", value: "u_42" },
+          { name: "order.status", type: "str", value: "shipped" },
+        ],
+      });
+
+      const { context, stdoutWrite } = createMockContext();
+      const func = await viewCommand.loader();
+      await func.call(context, { json: false, web: false }, "my-org/proj", ID1);
+
+      const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+      expect(output).toContain("Custom Attributes");
+      expect(output).toContain("user.id");
+      expect(output).toContain("u_42");
+      expect(output).toContain("order.status");
+      expect(output).toContain("shipped");
+    });
+  });
 });

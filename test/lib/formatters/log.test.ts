@@ -12,7 +12,11 @@ import {
   formatLogTable,
   getLogId,
 } from "../../../src/lib/formatters/log.js";
-import type { DetailedSentryLog, SentryLog } from "../../../src/types/index.js";
+import type {
+  DetailedSentryLog,
+  SentryLog,
+  TraceItemAttribute,
+} from "../../../src/types/index.js";
 
 /** Force rendered (TTY) mode for a describe block */
 function useRenderedMode() {
@@ -440,6 +444,88 @@ describe("formatLogDetails", () => {
     expect(result).not.toContain("Context");
     expect(result).not.toContain("SDK");
     expect(result).not.toContain("Trace");
+  });
+
+  describe("Custom Attributes section", () => {
+    const customAttrs: TraceItemAttribute[] = [
+      { name: "user.id", type: "str", value: "u_42" },
+      { name: "order.total", type: "float", value: 99.9 },
+      { name: "retry.count", type: "int", value: 3 },
+      { name: "is_premium", type: "bool", value: true },
+    ];
+
+    test("renders custom attributes when allAttributes provided", () => {
+      const log = createDetailedTestLog();
+      const result = stripAnsi(formatLogDetails(log, "test-org", customAttrs));
+
+      expect(result).toContain("Custom Attributes");
+      expect(result).toContain("user.id");
+      expect(result).toContain("u_42");
+      expect(result).toContain("order.total");
+      expect(result).toContain("99.9");
+      expect(result).toContain("retry.count");
+      expect(result).toContain("3");
+      expect(result).toContain("is_premium");
+      expect(result).toContain("true");
+    });
+
+    test("filters out REDUNDANT_LOG_DETAIL_ATTRS from custom attributes", () => {
+      const attrsWithRedundant: TraceItemAttribute[] = [
+        { name: "user.id", type: "str", value: "u_42" },
+        // these are in REDUNDANT_LOG_DETAIL_ATTRS and should be suppressed
+        { name: "severity_number", type: "int", value: 9 },
+        { name: "project.id", type: "str", value: "123" },
+      ];
+      const log = createDetailedTestLog();
+      const result = stripAnsi(
+        formatLogDetails(log, "test-org", attrsWithRedundant)
+      );
+
+      expect(result).toContain("user.id");
+      expect(result).not.toContain("severity_number");
+      expect(result).not.toContain("project.id");
+    });
+
+    test("extraFields limits which custom attributes are shown", () => {
+      const log = createDetailedTestLog();
+      const result = stripAnsi(
+        formatLogDetails(log, "test-org", customAttrs, ["user.id"])
+      );
+
+      expect(result).toContain("Custom Attributes");
+      expect(result).toContain("user.id");
+      expect(result).not.toContain("order.total");
+      expect(result).not.toContain("retry.count");
+    });
+
+    test("shows no Custom Attributes section when all are filtered by extraFields", () => {
+      const log = createDetailedTestLog();
+      const result = stripAnsi(
+        formatLogDetails(log, "test-org", customAttrs, ["nonexistent.field"])
+      );
+
+      expect(result).not.toContain("Custom Attributes");
+    });
+
+    test("fallback: shows extraFields from log when allAttributes absent", () => {
+      const log = createDetailedTestLog({
+        "user.id": "u_99",
+      } as DetailedSentryLog);
+      const result = stripAnsi(
+        formatLogDetails(log, "test-org", undefined, ["user.id"])
+      );
+
+      expect(result).toContain("Custom Attributes");
+      expect(result).toContain("user.id");
+      expect(result).toContain("u_99");
+    });
+
+    test("no Custom Attributes section when allAttributes is empty array", () => {
+      const log = createDetailedTestLog();
+      const result = stripAnsi(formatLogDetails(log, "test-org", []));
+
+      expect(result).not.toContain("Custom Attributes");
+    });
   });
 });
 
