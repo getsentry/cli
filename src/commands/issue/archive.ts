@@ -53,6 +53,7 @@ const NUMERIC_WORD_RE = /^(\d+)\s*([a-z]+)$/i;
 
 /** Parsed result of a --until value. */
 export type UntilSpec =
+  | { kind: "forever" }
   | { kind: "escalating" }
   | { kind: "duration"; minutes: number }
   | { kind: "count"; count: number; windowMinutes?: number }
@@ -217,6 +218,7 @@ function throwUnrecognizedUntil(raw: string): never {
   throw new ValidationError(
     `invalid --until value: '${raw}'\n\n` +
       "Expected one of:\n" +
+      "  forever           Archive forever (same as omitting --until)\n" +
       "  auto             Archive until Sentry detects a spike\n" +
       "  30m, 1h, 7d      Archive for a duration\n" +
       "  2026-05-15        Archive until a date\n" +
@@ -240,6 +242,10 @@ function throwUnrecognizedUntil(raw: string): never {
 export function parseUntilSpec(raw: string): UntilSpec {
   const trimmed = raw.trim();
   const lower = trimmed.toLowerCase();
+
+  if (lower === "forever") {
+    return { kind: "forever" };
+  }
 
   if (lower === "auto" || lower === "escalating") {
     return { kind: "escalating" };
@@ -281,6 +287,8 @@ function specToApiOptions(spec: UntilSpec): {
   statusDetails?: IgnoreStatusDetails;
 } {
   switch (spec.kind) {
+    case "forever":
+      return { substatus: "archived_forever" };
     case "escalating":
       return { substatus: "archived_until_escalating" };
     case "duration":
@@ -355,7 +363,8 @@ export const archiveCommand = buildCommand({
       until: {
         kind: "parsed",
         parse: String,
-        brief: "Condition for unarchival: auto, 30m, 10x, 10u, 10x/5m, etc.",
+        brief:
+          "Condition for unarchival: forever, auto, 30m, 10x, 10u, 10x/5m, etc.",
         optional: true,
       },
     },

@@ -58,6 +58,14 @@ function createMockContext() {
 // ── parseUntilSpec unit tests ──────────────────────────────────────
 
 describe("parseUntilSpec", () => {
+  test("'forever' → forever", () => {
+    expect(parseUntilSpec("forever")).toEqual({ kind: "forever" });
+  });
+
+  test("'Forever' (case-insensitive) → forever", () => {
+    expect(parseUntilSpec("Forever")).toEqual({ kind: "forever" });
+  });
+
   test("'auto' → escalating", () => {
     expect(parseUntilSpec("auto")).toEqual({ kind: "escalating" });
   });
@@ -222,6 +230,23 @@ describe("archiveCommand.func()", () => {
 
     const { context } = createMockContext();
     await func.call(context, { json: false }, "CLI-G5");
+
+    expect(updateSpy).toHaveBeenCalledWith("123456789", "ignored", {
+      statusDetails: undefined,
+      substatus: "archived_forever",
+      orgSlug: "test-org",
+    });
+  });
+
+  test("--until forever → archives forever (same as no --until)", async () => {
+    resolveIssueSpy.mockResolvedValue({
+      org: "test-org",
+      issue: makeMockIssue({ status: "unresolved" }),
+    });
+    updateSpy.mockResolvedValue(makeMockIssue());
+
+    const { context } = createMockContext();
+    await func.call(context, { json: false, until: "forever" }, "CLI-G5");
 
     expect(updateSpy).toHaveBeenCalledWith("123456789", "ignored", {
       statusDetails: undefined,
