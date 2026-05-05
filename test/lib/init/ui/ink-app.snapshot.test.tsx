@@ -122,6 +122,17 @@ async function renderApp(
 }
 
 describe("Ink App snapshot", () => {
+  test("renders single-column layout at narrow width", async () => {
+    const store = new WizardStore();
+    store.appendLog("info", "Narrow terminal");
+
+    const frame = (await renderApp(store, 60)).allOutput();
+    expect(frame).toContain("Narrow terminal");
+    // At < 80 cols the sidebar is hidden — only the main content
+    // area renders in single-column mode.
+    expect(frame).toMatch(STATUS_TAB_RE);
+  });
+
   test("renders full-screen layout at 120 cols", async () => {
     const store = new WizardStore();
     store.appendLog("info", "Hello world");
@@ -140,17 +151,6 @@ describe("Ink App snapshot", () => {
     expect(frame).toMatch(FILES_TAB_RE);
     // Keyboard hints visible.
     expect(frame).toMatch(KEYBOARD_HINT_RE);
-  });
-
-  test("renders single-column layout at narrow width", async () => {
-    const store = new WizardStore();
-    store.appendLog("info", "Narrow terminal");
-
-    const frame = (await renderApp(store, 60)).allOutput();
-    expect(frame).toContain("Narrow terminal");
-    // At < 80 cols the sidebar is hidden — only the main content
-    // area renders in single-column mode.
-    expect(frame).toMatch(STATUS_TAB_RE);
   });
 
   test("status bar shows messages", async () => {
