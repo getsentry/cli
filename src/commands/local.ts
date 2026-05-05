@@ -42,7 +42,15 @@ import type { SentryContext } from "../context.js";
 import { openOrShowUrl } from "../lib/browser.js";
 import { buildCommand, numberParser } from "../lib/command.js";
 import { ValidationError } from "../lib/errors.js";
-import { bold, cyan, muted } from "../lib/formatters/colors.js";
+import {
+  bold,
+  cyan,
+  green,
+  magenta,
+  muted,
+  red,
+  yellow,
+} from "../lib/formatters/colors.js";
 import { logger } from "../lib/logger.js";
 
 const log = logger.withTag("local");
@@ -202,35 +210,287 @@ function buildSidecarApp(
   return app;
 }
 
+/** Format a local timestamp as HH:MM:SS from a Sentry timestamp. */
+function formatTime(timestamp?: number | string): string {
+  let date: Date;
+  if (!timestamp) {
+    date = new Date();
+  } else if (typeof timestamp === "string") {
+    date = new Date(timestamp);
+  } else {
+    date = new Date(timestamp * 1000);
+  }
+  if (Number.isNaN(date.getTime())) {
+    return "??:??:??";
+  }
+  return date.toLocaleTimeString("en-US", { hour12: false });
+}
+
+/** Level → color map for tail output. */
+const LEVEL_COLORS: Record<string, (s: string) => string> = {
+  error: (s) => red(bold(s)),
+  fatal: (s) => red(bold(s)),
+  warning: yellow,
+  info: cyan,
+  trace: green,
+  debug: muted,
+};
+
+/** Colorize a log/event level label. */
+function colorLevel(level: string): string {
+  const colorFn = LEVEL_COLORS[level];
+  return colorFn ? colorFn(level) : level;
+}
+
+/** Mobile SDK name substrings. */
+const MOBILE_MARKERS = ["cocoa", "android", "react-native", "flutter"];
+
+/** Server-side JS SDK name substrings — exclude from browser detection. */
+const SERVER_JS_MARKERS = [
+  "node",
+  "bun",
+  "deno",
+  "nextjs",
+  "remix",
+  "astro",
+  "nuxt",
+  "sveltekit",
+];
+
 /**
- * Resolve the human label for an envelope.
- *
- * - When the envelope parses cleanly, we use the joined item types
- *   (e.g. `event+attachment`).
- * - Otherwise we fall back to the content type, with a friendly alias
- *   for the canonical Sentry envelope mime type.
+ * Infer the source platform from the envelope header's `sdk.name` field.
+ * Returns a short colored label like "server", "browser", or "mobile".
  */
-function describeEnvelope(contentType: string, eventTypes: string[]): string {
-  if (eventTypes.length > 0) {
-    return eventTypes.join("+");
+function inferSource(header: Record<string, unknown>): string {
+  const sdk = header.sdk as { name?: string } | undefined;
+  const name = sdk?.name ?? "";
+  if (MOBILE_MARKERS.some((m) => name.includes(m))) {
+    return magenta("mobile");
   }
-  if (contentType === "application/x-sentry-envelope") {
-    return "envelope";
+  if (
+    name.startsWith("sentry.javascript.") &&
+    !SERVER_JS_MARKERS.some((m) => name.includes(m))
+  ) {
+    return yellow("browser");
   }
-  return contentType;
+  return cyan("server");
+}
+
+/** Shape of a single stack frame in the exception value. */
+type StackFrame = {
+  filename?: string;
+  lineno?: number;
+  colno?: number;
+  function?: string;
+  in_app?: boolean;
+};
+
+/** Build the `[file:line:col] [func]` suffix for the best stack frame. */
+function formatFrameHint(frames: StackFrame[]): string {
+  const frame = frames.find((f) => f.in_app) ?? frames.at(-1);
+  if (!frame) {
+    return "";
+  }
+  let hint = "";
+  if (frame.filename && frame.lineno) {
+    const loc = frame.colno
+      ? `${frame.filename}:${frame.lineno}:${frame.colno}`
+      : `${frame.filename}:${frame.lineno}`;
+    hint += ` ${muted(`[${loc}]`)}`;
+  }
+  if (frame.function) {
+    hint += ` ${muted(`[${frame.function}]`)}`;
+  }
+  return hint;
+}
+
+/**
+ * Format an error event item into a colored one-liner.
+ *
+ * Output: `HH:MM:SS  error  server  TypeError: x is not a function [file.ts:42:5] [handleRequest]`
+ */
+function formatErrorItem(
+  event: Record<string, unknown>,
+  header: Record<string, unknown>
+): string {
+  const exception = event.exception as
+    | {
+        values?: {
+          type?: string;
+          value?: string;
+          stacktrace?: { frames?: StackFrame[] };
+        }[];
+      }
+    | undefined;
+  const first = exception?.values?.[0];
+  const errorType = first?.type ?? "Error";
+  const errorValue =
+    first?.value ?? (event.message as string | undefined) ?? "Unknown error";
+
+  let msg = `${errorType}: ${errorValue}`;
+
+  const frames = first?.stacktrace?.frames;
+  if (frames?.length) {
+    msg += formatFrameHint(frames);
+  }
+
+  const ts = formatTime(event.timestamp as number | undefined);
+  return `${muted(ts)}  ${colorLevel("error")}  ${inferSource(header)}  ${msg}`;
+}
+
+/**
+ * Format a transaction event item into a colored one-liner.
+ *
+ * Output: `HH:MM:SS  trace  browser  [http.client] GET /api/users [245ms] [3 spans]`
+ */
+function formatTransactionItem(
+  event: Record<string, unknown>,
+  header: Record<string, unknown>
+): string {
+  const trace = (event.contexts as Record<string, unknown> | undefined)
+    ?.trace as
+    | { op?: string; status?: string; description?: string }
+    | undefined;
+  let msg =
+    (event.transaction as string) ?? trace?.description ?? "Transaction";
+
+  const op = trace?.op;
+  if (op && op !== "default" && op !== "unknown") {
+    msg = `[${op}] ${msg}`;
+  }
+
+  const start = event.start_timestamp as number | undefined;
+  const end = event.timestamp as number | undefined;
+  if (start !== undefined && end !== undefined) {
+    const durationMs = Math.round((end - start) * 1000);
+    msg += ` ${muted(`[${durationMs}ms]`)}`;
+  }
+
+  const status = trace?.status;
+  if (status && status !== "ok") {
+    msg += ` ${muted(`[${status}]`)}`;
+  }
+
+  const spans = event.spans as unknown[] | undefined;
+  if (spans?.length) {
+    msg += ` ${muted(`[${spans.length} span${spans.length === 1 ? "" : "s"}]`)}`;
+  }
+
+  const ts = formatTime(event.timestamp as number | undefined);
+  return `${muted(ts)}  ${colorLevel("trace")}  ${inferSource(header)}  ${msg}`;
+}
+
+/** Shape of a single log entry inside a log envelope item. */
+type LogEntry = {
+  level?: string;
+  body?: string;
+  timestamp?: number;
+  attributes?: Record<string, { value?: unknown }>;
+};
+
+/** Format one log entry into a colored tail line. */
+function formatSingleLog(logEntry: LogEntry, source: string): string {
+  const level = logEntry.level ?? "log";
+  let msg = logEntry.body ?? "";
+
+  if (logEntry.attributes) {
+    const attrs = Object.entries(logEntry.attributes)
+      .filter(
+        ([k, v]) =>
+          !k.startsWith("sentry.") && v.value !== null && v.value !== undefined
+      )
+      .map(([k, v]) => `${k}=${v.value}`);
+    if (attrs.length > 0) {
+      msg += ` ${muted(`[${attrs.join(", ")}]`)}`;
+    }
+  }
+
+  const ts = formatTime(logEntry.timestamp);
+  return `${muted(ts)}  ${colorLevel(level)}  ${source}  ${msg}`;
+}
+
+/**
+ * Format a log event item. A log envelope item contains an `items` array
+ * of individual log entries; each gets its own line.
+ *
+ * Output: `HH:MM:SS  info  server  User logged in [user_id=1234]`
+ */
+function formatLogItem(
+  event: Record<string, unknown>,
+  header: Record<string, unknown>
+): string[] {
+  const items = event.items as LogEntry[] | undefined;
+  if (!items?.length) {
+    return [];
+  }
+
+  const source = inferSource(header);
+  return items.map((logEntry) => formatSingleLog(logEntry, source));
+}
+
+/** Item types that map to the error formatter. */
+const ERROR_TYPES = new Set(["event", "error"]);
+
+/** Produce a fallback one-liner for unparseable or unsupported items. */
+function formatFallbackLine(label: string): string {
+  const ts = new Date().toISOString().slice(11, 23);
+  return `${muted(ts)} ${cyan("•")} ${bold(label)}`;
+}
+
+/** Resolve a human label for a completely unparseable envelope. */
+function resolveUnparseableLabel(container: {
+  getContentType: () => string;
+  getEventTypes: () => string[] | null;
+}): string {
+  const types = container.getEventTypes();
+  if (types && types.length > 0) {
+    return types.join("+");
+  }
+  const ct = container.getContentType();
+  return ct === "application/x-sentry-envelope" ? "envelope" : ct;
 }
 
 /**
  * Format a freshly received envelope for terminal output.
  *
- * Keeps the formatting deliberately minimal — this is a tail, not a UI.
- * If users want rich rendering, they can point the Spotlight overlay at
- * `http://localhost:<port>/stream` instead.
+ * For recognized item types (errors, transactions, logs), produces richly
+ * colored one-liners with context (stack location, span count, duration,
+ * log attributes, etc.). Items without a dedicated formatter (attachments,
+ * profiles, sessions, check-ins) fall back to a minimal timestamp + type line.
  */
-function formatTailLine(contentType: string, eventTypes: string[]): string {
-  const ts = new Date().toISOString().slice(11, 23); // HH:MM:SS.sss
-  const label = describeEnvelope(contentType, eventTypes);
-  return `${muted(ts)} ${cyan("•")} ${bold(label)}`;
+function formatEnvelopeLines(container: {
+  getParsedEnvelope: () => {
+    envelope: [Record<string, unknown>, [{ type?: string }, unknown][]];
+  } | null;
+  getContentType: () => string;
+  getEventTypes: () => string[] | null;
+}): string[] {
+  const parsed = container.getParsedEnvelope();
+  if (!parsed) {
+    return [formatFallbackLine(resolveUnparseableLabel(container))];
+  }
+
+  const [header, items] = parsed.envelope;
+  const lines: string[] = [];
+  for (const [itemHeader, itemPayload] of items) {
+    const itemType = itemHeader.type;
+    const payload = itemPayload as Record<string, unknown>;
+
+    if (itemType && ERROR_TYPES.has(itemType)) {
+      lines.push(formatErrorItem(payload, header));
+    } else if (itemType === "transaction") {
+      lines.push(formatTransactionItem(payload, header));
+    } else if (itemType === "log") {
+      lines.push(...formatLogItem(payload, header));
+    } else {
+      lines.push(formatFallbackLine(itemType ?? container.getContentType()));
+    }
+  }
+
+  if (lines.length > 0) {
+    return lines;
+  }
+  return [formatFallbackLine(resolveUnparseableLabel(container))];
 }
 
 /**
@@ -320,15 +580,16 @@ export const localCommand = buildCommand({
   async *func(this: SentryContext, flags: LocalFlags) {
     const buffer = createSpotlightBuffer(BUFFER_SIZE);
 
-    // Tail subscriber: prints a one-line summary for each envelope. We
-    // route through the logger (stderr) rather than stdout so the tail
-    // doesn't pollute pipelines that consume the CLI's stdout, and so it
+    // Tail subscriber: pretty-prints each envelope item using Spotlight's
+    // human formatters. Routes through the logger (stderr) so the tail
+    // doesn't pollute pipelines that consume the CLI's stdout, and
     // honors `--log-level` / `SENTRY_LOG_LEVEL` like the rest of the CLI.
     // Skipped entirely when `--quiet` is set.
     if (!flags.quiet) {
       buffer.subscribe((container) => {
-        const types = container.getEventTypes() ?? [];
-        log.info(formatTailLine(container.getContentType(), types));
+        for (const line of formatEnvelopeLines(container)) {
+          log.info(line);
+        }
       });
     }
 
