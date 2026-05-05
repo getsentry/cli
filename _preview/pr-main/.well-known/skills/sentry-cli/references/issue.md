@@ -210,7 +210,7 @@ Reopen a resolved issue
 Archive (ignore) an issue
 
 **Flags:**
-- `-u, --until <value> - Condition for unarchival: auto, 30m, 10x, 10u, 10x/5m, etc.`
+- `-u, --until <value> - Condition for unarchival: forever, auto, 30m, 10x, 10u, 10x/5m, etc.`
 
 **Examples:**
 
