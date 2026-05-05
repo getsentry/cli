@@ -64,6 +64,7 @@ cli/
 │   │   ├── release/     # list, view, create, finalize, delete, deploy, deploys, set-commits, propose-version
 │   │   ├── replay/      # list, view
 │   │   ├── repo/        # list
+│   │   ├── send/        # event, envelope
 │   │   ├── sourcemap/   # inject, upload
 │   │   ├── span/        # list, view
 │   │   ├── team/        # list
@@ -73,9 +74,7 @@ cli/
 │   │   ├── explore.ts   # Query aggregate event data (Explore)
 │   │   ├── help.ts      # Help command
 │   │   ├── init.ts      # Initialize Sentry in your project (experimental)
-│   │   ├── schema.ts    # Browse the Sentry API schema
-│   │   ├── send-envelope.ts# Send a Sentry envelope file
-│   │   └── send-event.ts# Send a Sentry event
+│   │   └── schema.ts    # Browse the Sentry API schema
 │   ├── lib/            # Shared utilities
 │   └── types/          # TypeScript types and Zod schemas
 ├── test/               # Test files (mirrors src/ structure)
