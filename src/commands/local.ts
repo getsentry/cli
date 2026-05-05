@@ -67,11 +67,31 @@ type EventPayload = {
   data: string; // base64-encoded raw envelope bytes
 };
 
+/** Envelope item categories that can be filtered via `--filter`. */
+const FILTER_VALUES = ["error", "transaction", "log"] as const;
+type FilterValue = (typeof FILTER_VALUES)[number];
+
+/**
+ * Parse and validate a `--filter` value.
+ * Accepts the canonical names: error, transaction, log.
+ */
+function parseFilter(value: string): FilterValue {
+  const lower = value.toLowerCase();
+  if (!FILTER_VALUES.includes(lower as FilterValue)) {
+    throw new ValidationError(
+      `Invalid filter "${value}". Valid values: ${FILTER_VALUES.join(", ")}`,
+      "filter"
+    );
+  }
+  return lower as FilterValue;
+}
+
 type LocalFlags = {
   readonly port: number;
   readonly host: string;
   readonly open: boolean;
   readonly quiet: boolean;
+  readonly filter: FilterValue[];
 };
 
 /**
@@ -431,6 +451,24 @@ function formatLogItem(
 /** Item types that map to the error formatter. */
 const ERROR_TYPES = new Set(["event", "error"]);
 
+/**
+ * Map envelope item `type` to the corresponding `FilterValue`.
+ * Returns undefined for item types that don't map to a filter category.
+ */
+function itemTypeToFilterCategory(
+  itemType: string | undefined
+): FilterValue | undefined {
+  if (!itemType) {
+    return;
+  }
+  if (ERROR_TYPES.has(itemType)) {
+    return "error";
+  }
+  if (itemType === "transaction" || itemType === "log") {
+    return itemType;
+  }
+}
+
 /** Produce a fallback one-liner for unparseable or unsupported items. */
 function formatFallbackLine(label: string): string {
   const ts = new Date().toISOString().slice(11, 23);
@@ -450,45 +488,83 @@ function resolveUnparseableLabel(container: {
   return ct === "application/x-sentry-envelope" ? "envelope" : ct;
 }
 
+/** Format a single envelope item into one or more output lines. */
+function formatItem(
+  itemType: string | undefined,
+  payload: Record<string, unknown>,
+  header: Record<string, unknown>,
+  fallbackLabel: string
+): string[] {
+  if (itemType && ERROR_TYPES.has(itemType)) {
+    return [formatErrorItem(payload, header)];
+  }
+  if (itemType === "transaction") {
+    return [formatTransactionItem(payload, header)];
+  }
+  if (itemType === "log") {
+    return formatLogItem(payload, header);
+  }
+  return [formatFallbackLine(fallbackLabel)];
+}
+
+/** Check whether an item should be shown given active filters. */
+function isItemIncluded(
+  itemType: string | undefined,
+  activeFilters: ReadonlySet<FilterValue>
+): boolean {
+  if (activeFilters.size === 0) {
+    return true;
+  }
+  const category = itemTypeToFilterCategory(itemType);
+  return category !== undefined && activeFilters.has(category);
+}
+
 /**
  * Format a freshly received envelope for terminal output.
  *
- * For recognized item types (errors, transactions, logs), produces richly
- * colored one-liners with context (stack location, span count, duration,
- * log attributes, etc.). Items without a dedicated formatter (attachments,
- * profiles, sessions, check-ins) fall back to a minimal timestamp + type line.
+ * When `activeFilters` is non-empty, only items whose category matches
+ * one of the filter values are rendered; non-matching items are silently
+ * dropped. When empty, all items are shown.
  */
-function formatEnvelopeLines(container: {
-  getParsedEnvelope: () => {
-    envelope: [Record<string, unknown>, [{ type?: string }, unknown][]];
-  } | null;
-  getContentType: () => string;
-  getEventTypes: () => string[] | null;
-}): string[] {
+function formatEnvelopeLines(
+  container: {
+    getParsedEnvelope: () => {
+      envelope: [Record<string, unknown>, [{ type?: string }, unknown][]];
+    } | null;
+    getContentType: () => string;
+    getEventTypes: () => string[] | null;
+  },
+  activeFilters: ReadonlySet<FilterValue>
+): string[] {
   const parsed = container.getParsedEnvelope();
   if (!parsed) {
+    if (activeFilters.size > 0) {
+      return [];
+    }
     return [formatFallbackLine(resolveUnparseableLabel(container))];
   }
 
   const [header, items] = parsed.envelope;
   const lines: string[] = [];
   for (const [itemHeader, itemPayload] of items) {
-    const itemType = itemHeader.type;
-    const payload = itemPayload as Record<string, unknown>;
-
-    if (itemType && ERROR_TYPES.has(itemType)) {
-      lines.push(formatErrorItem(payload, header));
-    } else if (itemType === "transaction") {
-      lines.push(formatTransactionItem(payload, header));
-    } else if (itemType === "log") {
-      lines.push(...formatLogItem(payload, header));
-    } else {
-      lines.push(formatFallbackLine(itemType ?? container.getContentType()));
+    if (!isItemIncluded(itemHeader.type, activeFilters)) {
+      continue;
     }
+    lines.push(
+      ...formatItem(
+        itemHeader.type,
+        itemPayload as Record<string, unknown>,
+        header,
+        itemHeader.type ?? container.getContentType()
+      )
+    );
   }
 
   if (lines.length > 0) {
     return lines;
+  }
+  if (activeFilters.size > 0) {
+    return [];
   }
   return [formatFallbackLine(resolveUnparseableLabel(container))];
 }
@@ -567,12 +643,21 @@ export const localCommand = buildCommand({
         brief: "Suppress per-envelope tail output",
         default: false,
       },
+      filter: {
+        kind: "parsed",
+        parse: parseFilter,
+        brief:
+          "Only show items of this type (repeatable: error, transaction, log)",
+        variadic: true,
+        optional: true,
+      },
     },
     aliases: {
       p: "port",
       H: "host",
       o: "open",
       q: "quiet",
+      f: "filter",
     },
   },
   // No auth required — this is a local-only dev server.
@@ -580,14 +665,16 @@ export const localCommand = buildCommand({
   async *func(this: SentryContext, flags: LocalFlags) {
     const buffer = createSpotlightBuffer(BUFFER_SIZE);
 
-    // Tail subscriber: pretty-prints each envelope item using Spotlight's
-    // human formatters. Routes through the logger (stderr) so the tail
-    // doesn't pollute pipelines that consume the CLI's stdout, and
-    // honors `--log-level` / `SENTRY_LOG_LEVEL` like the rest of the CLI.
-    // Skipped entirely when `--quiet` is set.
+    // Build the active filter set once — empty set means "show everything".
+    const activeFilters: ReadonlySet<FilterValue> = new Set(flags.filter);
+
+    // Tail subscriber: pretty-prints each envelope item. Routes through
+    // the logger (stderr) so the tail doesn't pollute pipelines that
+    // consume the CLI's stdout, and honors `--log-level` / `SENTRY_LOG_LEVEL`
+    // like the rest of the CLI. Skipped entirely when `--quiet` is set.
     if (!flags.quiet) {
       buffer.subscribe((container) => {
-        for (const line of formatEnvelopeLines(container)) {
+        for (const line of formatEnvelopeLines(container, activeFilters)) {
           log.info(line);
         }
       });
@@ -615,6 +702,9 @@ export const localCommand = buildCommand({
     log.info(
       `  ${muted(`SENTRY_DSN=${url.replace("http://", "http://public@")}/1`)}`
     );
+    if (activeFilters.size > 0) {
+      log.info(`Filtering: ${[...activeFilters].join(", ")}`);
+    }
     log.info("Press Ctrl-C to stop.");
 
     if (flags.open) {

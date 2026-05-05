@@ -20,6 +20,7 @@ Run a local Spotlight sidecar to capture dev SDK events
 - `-H, --host <value> - Hostname to bind to (default localhost) - (default: "localhost")`
 - `-o, --open - Open the sidecar SSE URL in a browser`
 - `-q, --quiet - Suppress per-envelope tail output`
+- `-f, --filter <value>... - Only show items of this type (repeatable: error, transaction, log)`
 
 **Examples:**
 
