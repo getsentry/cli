@@ -29,7 +29,13 @@ export type DsnFlags = {
  * Throws ValidationError on an unparseable DSN.
  */
 export function buildEnvelopeUrl(dsn: string): string {
-  const dsnComponents = makeDsn(dsn);
+  let dsnComponents;
+  try {
+    dsnComponents = makeDsn(dsn);
+  } catch {
+    // makeDsn may throw a SentryError on malformed input
+    dsnComponents = undefined;
+  }
   if (!dsnComponents) {
     throw new ValidationError(`Invalid DSN: ${dsn}`, "dsn");
   }
@@ -69,7 +75,7 @@ export function requireDsn(flags: DsnFlags, cwd: string): string {
   }
   throw new ConfigError(
     "No DSN found. Provide one via --dsn <dsn> or set the SENTRY_DSN environment variable.",
-    "sentry send-event --dsn <your-dsn>"
+    "sentry send event --dsn <your-dsn>"
   );
 }
 
