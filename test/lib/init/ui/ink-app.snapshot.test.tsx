@@ -87,18 +87,37 @@ async function renderApp(
   columns: number
 ): Promise<CaptureStream> {
   const out = new CaptureStream(columns, 40);
-  const { unmount } = render(createElement(App, { store }), {
+  const instance = render(createElement(App, { store }), {
     stdout: out as unknown as NodeJS.WriteStream,
     stderr: out as unknown as NodeJS.WriteStream,
     stdin: makeStdin() as unknown as NodeJS.ReadStream,
     patchConsole: false,
     exitOnCtrlC: false,
   });
-  await new Promise((r) => setTimeout(r, FRAME_SETTLE_MS));
-  unmount();
-  // Skip waitUntilExit() entirely — it hangs in CI because Ink's
-  // reconciler keeps the event loop alive after unmount in non-TTY
-  // environments. The frames are already captured by this point.
+  // Settle: let Ink render one frame. Use unref so this timer
+  // doesn't keep the event loop alive on its own.
+  await new Promise<void>((r) => {
+    const t = setTimeout(r, FRAME_SETTLE_MS);
+    if (typeof t === "object" && "unref" in t) {
+      t.unref();
+    }
+  });
+  instance.unmount();
+  // waitUntilExit() hangs in CI — Ink keeps internal timers alive
+  // in non-TTY. Race against an unref'd timeout so bun test can
+  // exit the worker even if Ink's promise never resolves.
+  const exitRace = new Promise<void>((r) => {
+    const t = setTimeout(r, 500);
+    if (typeof t === "object" && "unref" in t) {
+      t.unref();
+    }
+  });
+  await Promise.race([
+    instance.waitUntilExit().catch(() => {
+      // Ink may reject on unmount — ignore.
+    }),
+    exitRace,
+  ]);
   return out;
 }
 
