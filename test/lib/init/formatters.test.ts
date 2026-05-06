@@ -82,7 +82,7 @@ describe("formatResult", () => {
       { label: "Directory", value: "/app" },
       {
         label: "Features",
-        value: "Error Monitoring, Performance Monitoring (Tracing)",
+        value: "Error Monitoring, Tracing",
       },
       { label: "Commands", value: "npm install @sentry/nextjs" },
       { label: "Project", value: "https://sentry.io/project" },

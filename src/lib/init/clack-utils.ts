@@ -40,8 +40,8 @@ const FEATURE_INFO: Record<string, { label: string; hint: string }> = {
     hint: "Error and crash reporting",
   },
   performanceMonitoring: {
-    label: "Performance Monitoring (Tracing)",
-    hint: "Transaction and span tracing",
+    label: "Tracing",
+    hint: "Capture request timing and flow",
   },
   sessionReplay: {
     label: "Session Replay",

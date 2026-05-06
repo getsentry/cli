@@ -46,9 +46,7 @@ describe("abortIfCancelled", () => {
 describe("featureLabel", () => {
   test("returns label for known feature", () => {
     expect(featureLabel("errorMonitoring")).toBe("Error Monitoring");
-    expect(featureLabel("performanceMonitoring")).toBe(
-      "Performance Monitoring (Tracing)"
-    );
+    expect(featureLabel("performanceMonitoring")).toBe("Tracing");
     expect(featureLabel("logs")).toBe("Logging");
     expect(featureLabel("crons")).toBe("Crons");
     expect(featureLabel("aiMonitoring")).toBe("AI Monitoring");
@@ -63,6 +61,9 @@ describe("featureLabel", () => {
 describe("featureHint", () => {
   test("returns hint for known feature", () => {
     expect(featureHint("errorMonitoring")).toBe("Error and crash reporting");
+    expect(featureHint("performanceMonitoring")).toBe(
+      "Capture request timing and flow"
+    );
     expect(featureHint("sessionReplay")).toBe("Visual replay of user sessions");
     expect(featureHint("crons")).toBe("Monitor scheduled and recurring jobs");
     expect(featureHint("aiMonitoring")).toBe(

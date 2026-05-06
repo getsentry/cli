@@ -352,7 +352,11 @@ describe("Ink App snapshot", () => {
       message: "Select features",
       options: [
         { value: "sessionReplay", label: "Session Replay" },
-        { value: "performanceMonitoring", label: "Performance Monitoring" },
+        {
+          value: "performanceMonitoring",
+          label: "Tracing",
+          hint: "Capture request timing and flow",
+        },
         { value: "sourceMaps", label: "Source Maps" },
       ],
       initialSelected: [],
@@ -362,7 +366,8 @@ describe("Ink App snapshot", () => {
 
     const frame = (await renderApp(store, 120)).allOutput();
     expect(frame).toContain("Session Replay");
-    expect(frame).toContain("Performance Monitoring");
+    expect(frame).toContain("Tracing");
+    expect(frame).toContain("Capture request timing and flow");
     expect(frame).toContain("Source Maps");
     expect(frame).not.toContain("Recommended setup");
     expect(frame).not.toContain("Apply recommended setup");
