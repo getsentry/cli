@@ -367,7 +367,7 @@ Manage Sentry dashboards
 
 Search and inspect Session Replays
 
-- `sentry replay event list <replay-id-or-url...>` — List normalized events from a Session Replay
+- `sentry replay event list <replay-target...>` — List normalized events from a Session Replay
 - `sentry replay list <org/project>` — List recent Session Replays
 - `sentry replay summarize <replay-id-or-url...>` — Summarize Session Replay behavior
 - `sentry replay view <replay-id-or-url...>` — View a Session Replay
