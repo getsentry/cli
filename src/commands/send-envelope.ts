@@ -17,6 +17,7 @@ export const sendEnvelopeCommand = buildCommand({
       "Use `sentry event send --raw ./captured.envelope` instead.",
   },
   auth: false,
+  skipRcUrlCheck: true,
   output: {
     human: () => "",
   },
