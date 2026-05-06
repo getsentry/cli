@@ -83,7 +83,7 @@ describe("getCommandSuggestion", () => {
 
   test("suggests send-event for 'cli/send-event'", () => {
     expect(getCommandSuggestion("cli", "send-event")?.command).toContain(
-      "sentry send-event"
+      "sentry event send"
     );
   });
 
