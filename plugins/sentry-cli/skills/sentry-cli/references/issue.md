@@ -31,19 +31,19 @@ List issues in a project
 | `id` | string | Numeric issue ID |
 | `shortId` | string | Human-readable short ID (e.g. PROJ-ABC) |
 | `title` | string | Issue title |
-| `culprit` | string | Culprit string |
-| `count` | string | Total event count |
-| `userCount` | number | Number of affected users |
-| `firstSeen` | string \| null | First occurrence (ISO 8601) |
-| `lastSeen` | string \| null | Most recent occurrence (ISO 8601) |
-| `level` | string | Severity level |
-| `status` | string | Issue status |
+| `culprit` | string |  |
+| `count` | string |  |
+| `userCount` | number |  |
+| `firstSeen` | string |  |
+| `lastSeen` | string |  |
+| `level` | string |  |
+| `status` | string |  |
+| `permalink` | string |  |
+| `project` | object |  |
+| `metadata` | unknown |  |
+| `assignedTo` | unknown |  |
 | `priority` | string | Triage priority |
 | `platform` | string | Platform |
-| `permalink` | string | URL to the issue in Sentry |
-| `project` | object | Project info |
-| `metadata` | object | Issue metadata |
-| `assignedTo` | unknown \| null | Assigned user or team |
 | `substatus` | string \| null | Issue substatus |
 | `isUnhandled` | boolean | Whether the issue is unhandled |
 | `seerFixabilityScore` | number \| null | Seer AI fixability score (0-1) |
@@ -97,19 +97,19 @@ List events for a specific issue
 |-------|------|-------------|
 | `id` | string | Internal event ID |
 | `event.type` | string | Event type (error, default, transaction) |
-| `groupID` | string \| null | Group (issue) ID |
+| `groupID` | unknown |  |
 | `eventID` | string | UUID-format event ID |
-| `projectID` | string | Project ID |
-| `message` | string | Event message |
-| `title` | string | Event title |
-| `location` | string \| null | Source location (file:line) |
-| `culprit` | string \| null | Culprit function/module |
-| `user` | object \| null | User context |
-| `tags` | array | Event tags |
-| `platform` | string \| null | Platform (python, javascript, etc.) |
-| `dateCreated` | string | ISO 8601 creation timestamp |
-| `crashFile` | string \| null | Crash file URL |
-| `metadata` | unknown \| null | Event metadata |
+| `projectID` | string |  |
+| `message` | string |  |
+| `title` | string |  |
+| `location` | unknown |  |
+| `culprit` | unknown |  |
+| `user` | unknown |  |
+| `tags` | array |  |
+| `platform` | unknown |  |
+| `dateCreated` | string |  |
+| `crashFile` | unknown |  |
+| `metadata` | unknown |  |
 
 ### `sentry issue explain <issue>`
 
