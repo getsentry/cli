@@ -1,128 +1,60 @@
 /**
- * `sentry send-envelope` — Send a pre-built Sentry envelope file.
+ * `sentry send-envelope` — Deprecated. Suggests `sentry event send --raw`.
  *
- * Reads one or more envelope files from disk and POSTs them to the Sentry
- * ingest endpoint via DSN-based authentication.
- *
- * Envelope files use the Sentry envelope format:
- *   https://develop.sentry.dev/sdk/envelopes/
- *
- * No `sentry auth login` required — provide a DSN via --dsn or SENTRY_DSN.
+ * Kept as a hidden backward-compat alias that prints a deprecation notice
+ * and forwards to `sentry event send --raw`.
  */
 
-import { parseEnvelope, serializeEnvelope } from "@sentry/core";
 import type { SentryContext } from "../context.js";
 import { buildCommand } from "../lib/command.js";
-import {
-  buildEnvelopeUrl,
-  readFileBytes,
-  requireDsn,
-  sendEnvelopeRequest,
-} from "../lib/envelope/transport.js";
-import { ValidationError } from "../lib/errors.js";
-import { CommandOutput } from "../lib/formatters/output.js";
-
-type SendEnvelopeResult = {
-  file: string;
-};
-
-function formatSendEnvelopeHuman(result: SendEnvelopeResult): string {
-  return `Envelope from ${result.file} dispatched`;
-}
+import { CliError } from "../lib/errors.js";
 
 export const sendEnvelopeCommand = buildCommand({
   docs: {
-    brief: "Send a Sentry envelope file",
-    fullDescription: `\
-Send a pre-built Sentry envelope file to the ingest pipeline.
-
-No login required — provide a DSN via --dsn or the SENTRY_DSN environment variable.
-
-Envelope files follow the Sentry envelope format (newline-delimited JSON headers
-followed by item payloads). These are typically produced by Sentry SDKs in
-offline/buffered mode, or captured for debugging purposes.
-
-## Examples
-
-\`\`\`
-# Send a single envelope file
-sentry send-envelope ./captured.envelope
-
-# Send without parsing (useful for binary envelopes or debugging)
-sentry send-envelope --raw ./captured.envelope
-
-# Send multiple envelope files
-sentry send-envelope ./a.envelope ./b.envelope
-\`\`\`
-`,
+    brief: "Send a Sentry envelope file (deprecated)",
+    fullDescription:
+      "This command has been replaced by `sentry event send --raw <file>`.\n\n" +
+      "Use `sentry event send --raw ./captured.envelope` instead.",
   },
-  auth: "dsn",
+  auth: false,
   output: {
-    human: formatSendEnvelopeHuman,
+    human: () => "",
   },
   parameters: {
     positional: {
       kind: "array",
       parameter: {
-        brief: "Path(s) to envelope file(s) to send",
+        brief: "Path(s) to envelope file(s)",
         parse: String,
-        placeholder: "path",
+        optional: true,
       },
     },
     flags: {
       dsn: {
         kind: "parsed",
         parse: String,
-        brief: "DSN to send envelopes to (overrides SENTRY_DSN env var)",
+        brief: "DSN",
         optional: true,
       },
       raw: {
         kind: "boolean",
-        brief: "Send file bytes without parsing or validating the envelope",
+        brief: "Raw mode",
         default: false,
         optional: true,
       },
     },
   },
+  // biome-ignore lint/correctness/useYield lint/suspicious/useAwait: deprecation shim — throws before yielding
   async *func(
     this: SentryContext,
-    flags: { dsn?: string; raw?: boolean },
+    _flags: { dsn?: string; raw?: boolean },
     ...files: string[]
   ) {
-    if (files.length === 0) {
-      throw new ValidationError(
-        "At least one envelope file path is required.",
-        "path"
-      );
-    }
-
-    const dsn = requireDsn(flags, this.cwd);
-    // Validate the DSN fully before doing any file I/O
-    buildEnvelopeUrl(dsn);
-
-    for (const file of files) {
-      let body: string | Uint8Array;
-
-      const bytes = await readFileBytes(file);
-
-      if (flags.raw) {
-        body = bytes;
-      } else {
-        const text = new TextDecoder().decode(bytes);
-        // Parse to validate, then re-serialize to normalize
-        try {
-          const envelope = parseEnvelope(text);
-          body = serializeEnvelope(envelope);
-        } catch (err) {
-          throw new ValidationError(
-            `Failed to parse envelope from ${file}: ${(err as Error).message}`,
-            "path"
-          );
-        }
-      }
-
-      await sendEnvelopeRequest(dsn, body);
-      yield new CommandOutput<SendEnvelopeResult>({ file });
-    }
+    const fileArgs = files.length > 0 ? ` ${files.join(" ")}` : " <file>";
+    throw new CliError(
+      "`sentry send-envelope` has been removed.\n" +
+        `Use: sentry event send --raw${fileArgs}`,
+      1
+    );
   },
 });

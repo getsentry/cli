@@ -32,7 +32,6 @@ import { listCommand as replayListCommand } from "./commands/replay/list.js";
 import { repoRoute } from "./commands/repo/index.js";
 import { listCommand as repoListCommand } from "./commands/repo/list.js";
 import { schemaCommand } from "./commands/schema.js";
-import { sendRoute } from "./commands/send/index.js";
 import { sendEnvelopeCommand } from "./commands/send-envelope.js";
 import { sendEventCommand } from "./commands/send-event.js";
 import { sourcemapRoute } from "./commands/sourcemap/index.js";
@@ -110,7 +109,6 @@ export const routes = buildRouteMap({
     local: localRoute,
     api: apiCommand,
     schema: schemaCommand,
-    send: sendRoute,
     // Backward-compat aliases for old sentry-cli — hidden from help
     "send-event": sendEventCommand,
     "send-envelope": sendEnvelopeCommand,

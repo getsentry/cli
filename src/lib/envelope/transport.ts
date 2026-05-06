@@ -75,15 +75,15 @@ export function requireDsn(flags: DsnFlags, cwd: string): string {
   }
   throw new ConfigError(
     "No DSN found. Provide one via --dsn <dsn> or set the SENTRY_DSN environment variable.",
-    "sentry send event --dsn <your-dsn>"
+    "sentry event send --dsn <your-dsn>"
   );
 }
 
 /**
  * Read a file's bytes, throwing a clean ValidationError on ENOENT or I/O errors.
  *
- * Centralises the duplicated error-handling pattern used by both
- * `send-event` and `send-envelope`.
+ * Centralises the file-reading error-handling pattern used by
+ * `event send` (and previously by `send-envelope`).
  */
 export async function readFileBytes(file: string): Promise<Uint8Array> {
   try {
