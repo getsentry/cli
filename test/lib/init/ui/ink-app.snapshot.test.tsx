@@ -1,7 +1,7 @@
 /**
  * Smoke-test the Ink App by mounting it with mocked stdin/stdout
  * inside `bun test`. Verifies the full-screen layout (tabbed
- * content, status bar, keyboard hints) without needing a real TTY.
+ * content and keyboard hints) without needing a real TTY.
  *
  * Note: The first Ink render() in a bun test CI worker can hang
  * indefinitely (Ink's internal reconciler keeps the event loop
@@ -29,6 +29,8 @@ const ANSI_CSI_RE = /\u001B\[[0-9;?]*[ -/]*[@-~]/g;
 const ANSI_OSC_RE = /\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g;
 const LINE_SPLIT_RE = /\r?\n/;
 const RIGHT_ARROW = "\u001B[C";
+const FEEDBACK_BANNER_TEXT =
+  'For feedback run: sentry cli feedback "what worked or broke"';
 
 const FRAME_SETTLE_MS = 80;
 const TEST_BANNER_ROWS = [
@@ -122,6 +124,13 @@ function hasForcedWhiteForeground(output: string): boolean {
   );
 }
 
+function withoutFeedbackBanner(output: string): string {
+  return output
+    .split(LINE_SPLIT_RE)
+    .filter((line) => !line.includes(FEEDBACK_BANNER_TEXT))
+    .join("\n");
+}
+
 function stripAnsi(output: string): string {
   return output.replace(ANSI_CSI_RE, "").replace(ANSI_OSC_RE, "");
 }
@@ -146,48 +155,6 @@ function setWelcomePrompt(store: WizardStore): void {
         "You'll choose the setup before local files change.",
       ],
       punchline: "Continue to let Sentry use AI for setup.",
-    },
-    resolve: ignorePromptResolution,
-  });
-}
-
-function setFeaturePlanPrompt(store: WizardStore): void {
-  store.setPrompt({
-    kind: "featurePlan",
-    options: {
-      message: "Setup",
-      rows: [
-        {
-          id: "errorMonitoring",
-          label: "Error monitoring",
-          detail: "See exceptions with stack traces and release context",
-          recommended: true,
-        },
-        {
-          id: "performanceMonitoring",
-          label: "Performance tracing",
-          detail: "Connect slow pages to backend requests",
-          recommended: true,
-        },
-        {
-          id: "sourceMaps",
-          label: "Source maps",
-          detail: "Turn minified production stacks into readable code",
-          recommended: true,
-        },
-        {
-          id: "sessionReplay",
-          label: "Session Replay",
-          detail: "See what users did before an error",
-          recommended: false,
-        },
-      ],
-      recommendedFeatureIds: [
-        "errorMonitoring",
-        "performanceMonitoring",
-        "sourceMaps",
-      ],
-      version: "2.4.1",
     },
     resolve: ignorePromptResolution,
   });
@@ -225,33 +192,28 @@ describe("Ink App snapshot", () => {
     expect(frame).toMatch(STATUS_TAB_RE);
   });
 
-  test("status bar shows messages", async () => {
+  test("workflow screen does not repeat status messages in the footer", async () => {
     const store = new WizardStore();
     store.appendStatus("Analyzing project...");
     store.appendStatus("Reading package.json");
 
     const frame = (await renderApp(store, 120)).allOutput();
-    expect(frame).toContain("Reading package.json");
+    expect(frame).not.toContain("Analyzing project...");
+    expect(frame).not.toContain("Reading package.json");
   });
 
-  test("status toggle shortcut appears only for expandable history", async () => {
-    const shortHistory = new WizardStore();
-    shortHistory.appendStatus("Analyzing project...");
+  test("status history shortcut is not shown", async () => {
+    const store = new WizardStore();
+    store.appendStatus("Analyzing project...");
+    store.appendStatus("Reading package.json");
+    store.appendStatus("Installing SDK");
 
-    const shortFrame = (await renderApp(shortHistory, 120)).allOutput();
-    expect(shortFrame).not.toContain("toggle status");
-
-    const longHistory = new WizardStore();
-    longHistory.appendStatus("Analyzing project...");
-    longHistory.appendStatus("Reading package.json");
-    longHistory.appendStatus("Installing SDK");
-
-    const longFrame = (await renderApp(longHistory, 120)).allOutput();
-    expect(longFrame).toContain("toggle status");
+    const frame = (await renderApp(store, 120)).allOutput();
+    expect(frame).not.toContain("toggle status");
   });
 
   test("focused prompt text inherits terminal foreground", async () => {
-    const store = new WizardStore({ bannerRows: [] });
+    const store = new WizardStore({ bannerRows: [], layout: "intro" });
     store.setPrompt({
       kind: "select",
       message: "Choose a feature",
@@ -266,7 +228,26 @@ describe("Ink App snapshot", () => {
     const frame = (await renderApp(store, 120)).allOutput();
     expect(frame).toContain("Choose a feature");
     expect(frame).toContain("Error Monitoring");
-    expect(hasForcedWhiteForeground(frame)).toBe(false);
+    expect(hasForcedWhiteForeground(withoutFeedbackBanner(frame))).toBe(false);
+  });
+
+  test("workflow screen hides logo and shows feedback banner", async () => {
+    const store = new WizardStore({ bannerRows: TEST_BANNER_ROWS });
+    store.appendLog("info", "Checking project...");
+
+    const frame = (await renderApp(store, 120)).allOutput();
+    expect(frame).not.toContain("███████╗███████╗");
+    expect(frame).toContain(FEEDBACK_BANNER_TEXT);
+    expect(frame).toContain("Sentry");
+
+    const plainFrame = stripAnsi(frame);
+    const bannerLine = plainFrame
+      .split(LINE_SPLIT_RE)
+      .find((line) => line.includes("Sentry") && line.includes("feedback"));
+    expect(bannerLine).toBeDefined();
+    expect(bannerLine?.indexOf("Sentry")).toBeLessThan(
+      bannerLine?.indexOf("For feedback run") ?? 0
+    );
   });
 
   test("welcome screen is centered and standalone", async () => {
@@ -284,7 +265,8 @@ describe("Ink App snapshot", () => {
     expect(frame).not.toMatch(TASKS_HEADER_RE);
     expect(frame).not.toMatch(STATUS_TAB_RE);
     expect(frame).not.toMatch(FILES_TAB_RE);
-    expect(hasForcedWhiteForeground(frame)).toBe(false);
+    expect(frame).toContain(FEEDBACK_BANNER_TEXT);
+    expect(hasForcedWhiteForeground(withoutFeedbackBanner(frame))).toBe(false);
   });
 
   test("intro preflight prompts stay centered and standalone", async () => {
@@ -315,7 +297,8 @@ describe("Ink App snapshot", () => {
     expect(frame).not.toMatch(STATUS_TAB_RE);
     expect(frame).not.toMatch(FILES_TAB_RE);
     expect(frame).not.toContain("switch tab");
-    expect(hasForcedWhiteForeground(frame)).toBe(false);
+    expect(frame).toContain(FEEDBACK_BANNER_TEXT);
+    expect(hasForcedWhiteForeground(withoutFeedbackBanner(frame))).toBe(false);
   });
 
   test("intro logo row stays fixed across prompt heights", async () => {
@@ -362,20 +345,27 @@ describe("Ink App snapshot", () => {
     expect(longLogoLine).toBe(shortLogoLine);
   });
 
-  test("feature plan screen shows recommended and optional setup", async () => {
+  test("feature multiselect shows available features directly", async () => {
     const store = new WizardStore({ bannerRows: [] });
-    setFeaturePlanPrompt(store);
+    store.setPrompt({
+      kind: "multiselect",
+      message: "Select features",
+      options: [
+        { value: "sessionReplay", label: "Session Replay" },
+        { value: "performanceMonitoring", label: "Performance Monitoring" },
+        { value: "sourceMaps", label: "Source Maps" },
+      ],
+      initialSelected: [],
+      required: false,
+      resolve: ignorePromptResolution,
+    });
 
     const frame = (await renderApp(store, 120)).allOutput();
-    expect(frame).toContain("Recommended setup");
-    expect(frame).toContain("Error monitoring");
-    expect(frame).toContain("Performance tracing");
-    expect(frame).toContain("Source maps");
-    expect(frame).toContain("Optional");
     expect(frame).toContain("Session Replay");
-    expect(frame).toContain("Apply recommended setup");
-    expect(frame).toContain("Issue → Context → Fix");
-    expect(hasForcedWhiteForeground(frame)).toBe(false);
+    expect(frame).toContain("Performance Monitoring");
+    expect(frame).toContain("Source Maps");
+    expect(frame).not.toContain("Recommended setup");
+    expect(frame).not.toContain("Apply recommended setup");
   });
 
   test("prompt shortcuts replace app shortcuts while prompt is active", async () => {

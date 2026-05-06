@@ -55,8 +55,6 @@ import {
   CANCELLED,
   type Cancelled,
   type ConfirmOptions,
-  type FeaturePlanOptions,
-  type FeaturePlanResult,
   type MultiSelectOptions,
   type SelectOptions,
   type SpinnerExitCode,
@@ -694,39 +692,6 @@ export class InkUI implements WizardUI {
       this.store.setPrompt({
         kind: "welcome",
         options: sanitizeWelcomeOptions(opts),
-        resolve: (value) => {
-          this.store.setPrompt(null);
-          this.activePromptCancel = undefined;
-          if (value === null) {
-            resolve(CANCELLED);
-          } else {
-            resolve(value);
-          }
-        },
-      });
-    });
-  }
-
-  featurePlan(
-    opts: FeaturePlanOptions
-  ): Promise<FeaturePlanResult | Cancelled> {
-    return new Promise<FeaturePlanResult | Cancelled>((resolve) => {
-      this.activePromptCancel = () => {
-        this.store.setPrompt(null);
-        this.activePromptCancel = undefined;
-        resolve(CANCELLED);
-      };
-      this.store.setPrompt({
-        kind: "featurePlan",
-        options: {
-          ...opts,
-          message: stripAnsi(opts.message),
-          rows: opts.rows.map((row) => ({
-            ...row,
-            label: stripAnsi(row.label),
-            detail: stripAnsi(row.detail),
-          })),
-        },
         resolve: (value) => {
           this.store.setPrompt(null);
           this.activePromptCancel = undefined;

@@ -121,27 +121,6 @@ export type WelcomeOptions = {
   punchline: string;
 };
 
-/** Feature row rendered on the richer Ink-only setup screen. */
-export type FeaturePlanRow = {
-  id: string;
-  label: string;
-  detail: string;
-  recommended: boolean;
-};
-
-/** Args for the richer Ink-only setup recommendation screen. */
-export type FeaturePlanOptions = {
-  message: string;
-  rows: FeaturePlanRow[];
-  recommendedFeatureIds: string[];
-  version?: string;
-};
-
-/** Result returned by the richer setup recommendation screen. */
-export type FeaturePlanResult =
-  | { action: "apply"; features: string[] }
-  | { action: "customize" };
-
 /**
  * Structured completion summary handed to `WizardUI.summary()`.
  *
@@ -301,12 +280,4 @@ export type WizardUI = AsyncDisposable & {
    * callers fall back to `select()`.
    */
   welcome?(opts: WelcomeOptions): Promise<"continue" | Cancelled>;
-
-  /**
-   * Richer Ink-only recommended setup screen. Plain UIs leave this
-   * undefined and callers fall back to `multiselect()`.
-   */
-  featurePlan?(
-    opts: FeaturePlanOptions
-  ): Promise<FeaturePlanResult | Cancelled>;
 };

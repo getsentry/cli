@@ -22,8 +22,6 @@ import {
   shortStepLabel,
 } from "../clack-utils.js";
 import type {
-  FeaturePlanOptions,
-  FeaturePlanResult,
   SpinnerExitCode,
   WelcomeOptions,
   WizardSummary,
@@ -124,11 +122,6 @@ export type ActivePrompt =
       kind: "welcome";
       options: WelcomeOptions;
       resolve: (value: "continue" | null) => void;
-    }
-  | {
-      kind: "featurePlan";
-      options: FeaturePlanOptions;
-      resolve: (value: FeaturePlanResult | null) => void;
     };
 
 /** Non-blocking overlay shown on top of the normal content. */

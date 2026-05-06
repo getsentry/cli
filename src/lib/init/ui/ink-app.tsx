@@ -15,10 +15,9 @@
  *   │  [PromptArea]             │  │ ▶ Install deps         │ │
  *   │                           │  │ ◻ Apply codemods       │ │
  *   │                           │  ╰────────────────────────╯ │
- *   │  ──────────────────────────────────────────────────────  │
- *   │  ◆ Reading package.json                                 │
  *   │  ● Status   Files                                       │
- *   │  ←→ switch tab  s toggle status                         │
+ *   │  ←→ switch tab                                          │
+ *   │  Sentry                         For feedback run: ...   │
  *   └─────────────────────────────────────────────────────────┘
  *
  * Tab 1 (Status): Banner + logs + spinner + prompts + summary
@@ -47,7 +46,6 @@ import {
   getInkFrameWidth,
   InitRenderBoundary,
   ShortcutFooter,
-  StatusHistory,
   TabFooter,
   useInkFrameSize,
 } from "./ink-frame.js";
@@ -58,10 +56,7 @@ import {
 } from "./ink-shortcuts.js";
 import { BLOCK_LINE_COUNT, LEARN_SEQUENCE } from "./learn-content.js";
 import { SENTRY_TIPS, type SentryTip } from "./sentry-tips.js";
-import type {
-  FeaturePlanRow as FeaturePlanRowData,
-  WizardSummary,
-} from "./types.js";
+import type { WizardSummary } from "./types.js";
 import type {
   ActivePrompt,
   FileReadEntry,
@@ -86,11 +81,6 @@ const COLOR_INFO = "#9C84D4";
 const COLOR_WARN = "#FDB81B";
 const COLOR_ERROR = "#fe4144";
 const COLOR_SUCCESS = "#83da90";
-
-/** Number of collapsed status-bar lines visible. */
-const STATUS_COLLAPSED_COUNT = 2;
-/** Number of expanded status-bar lines visible. */
-const STATUS_EXPANDED_COUNT = 10;
 
 const ICON_BY_SEVERITY: Record<LogSeverity, { glyph: string; color?: string }> =
   {
@@ -121,9 +111,39 @@ const DEFAULT_WELCOME_OPTIONS = {
   ],
   punchline: "Continue to let Sentry use AI for setup.",
 };
+const FEEDBACK_BANNER_TEXT =
+  'For feedback run: sentry cli feedback "what worked or broke"';
+const FEEDBACK_BANNER_FG = "#FFFFFF";
 
 function getIntroTopPadding(rows: number): number {
   return Math.min(6, Math.max(1, Math.floor(rows * 0.18)));
+}
+
+function truncateForBanner(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+  if (maxLength <= 3) {
+    return text.slice(0, maxLength);
+  }
+  return `${text.slice(0, maxLength - 3)}...`;
+}
+
+function formatFeedbackBanner(width: number): string {
+  const brand = "Sentry";
+  const left = ` ${brand}`;
+  if (width <= left.length) {
+    return left.slice(0, Math.max(0, width));
+  }
+
+  const maxRight = Math.max(0, width - left.length - 1);
+  const clippedRight = truncateForBanner(FEEDBACK_BANNER_TEXT, maxRight);
+  if (clippedRight.length === 0) {
+    return left.padEnd(width, " ");
+  }
+
+  const spacerWidth = Math.max(1, width - left.length - clippedRight.length);
+  return `${left}${" ".repeat(spacerWidth)}${clippedRight}`;
 }
 
 // ────────────────────────────── App entry ─────────────────────────────
@@ -150,15 +170,8 @@ function AppBody({ store }: AppProps): React.ReactNode {
   const [activeTab, setActiveTab] = useState(0);
 
   const width = getInkFrameWidth(columns);
-  const contentHeight = Math.max(5, rows - 3);
+  const contentHeight = Math.max(5, rows - 4);
   const isWide = width >= 80;
-
-  const statusMessages = snapshot.statusMessages;
-  const canToggleStatus = statusMessages.length > STATUS_COLLAPSED_COUNT;
-  const visibleCount = snapshot.statusExpanded
-    ? STATUS_EXPANDED_COUNT
-    : STATUS_COLLAPSED_COUNT;
-  const visibleMessages = statusMessages.slice(-visibleCount);
 
   const tabs = useMemo<FrameTab[]>(
     () => [
@@ -193,17 +206,8 @@ function AppBody({ store }: AppProps): React.ReactNode {
         },
       },
     ];
-    if (canToggleStatus) {
-      bindings.push({
-        key: "s",
-        action: "toggle status",
-        priority: 20,
-        match: (input) => input === "s",
-        run: () => store.toggleStatusExpanded(),
-      });
-    }
     return bindings;
-  }, [canToggleStatus, snapshot.requestCancel, store, tabs.length]);
+  }, [snapshot.requestCancel, tabs.length]);
   useInkShortcuts("init-app", appShortcuts, {
     isActive: snapshot.layout === "workflow" && snapshot.prompt === null,
   });
@@ -211,20 +215,26 @@ function AppBody({ store }: AppProps): React.ReactNode {
   if (snapshot.layout === "intro" || snapshot.prompt?.kind === "welcome") {
     const inner = (
       <Box
-        alignItems="center"
         flexDirection="column"
         height={rows}
         marginLeft={getInkFrameMargin(columns, width)}
-        paddingTop={getIntroTopPadding(rows)}
         width={width}
       >
-        <IntroScreen
-          bannerRows={snapshot.bannerRows}
-          logs={snapshot.logs}
-          prompt={snapshot.prompt}
-          spinner={snapshot.spinner}
-          width={width}
-        />
+        <Box
+          alignItems="center"
+          flexDirection="column"
+          flexGrow={1}
+          paddingTop={getIntroTopPadding(rows)}
+        >
+          <IntroScreen
+            bannerRows={snapshot.bannerRows}
+            logs={snapshot.logs}
+            prompt={snapshot.prompt}
+            spinner={snapshot.spinner}
+            width={width}
+          />
+        </Box>
+        <FeedbackBanner width={width} />
       </Box>
     );
     return (
@@ -251,7 +261,6 @@ function AppBody({ store }: AppProps): React.ReactNode {
             <Box flexDirection="column" flexGrow={1} overflow="hidden">
               {activeTab === 0 ? (
                 <ActivityPane
-                  bannerRows={snapshot.bannerRows}
                   logs={snapshot.logs}
                   prompt={snapshot.prompt}
                   spinner={snapshot.spinner}
@@ -279,17 +288,6 @@ function AppBody({ store }: AppProps): React.ReactNode {
             <OverlayPanel overlay={snapshot.overlay} />
           ) : null}
 
-          {visibleMessages.length > 0 ? (
-            <StatusHistory
-              borderColor={MUTED_DIM}
-              currentColor={MUTED}
-              currentGlyph={ICONS.diamond}
-              historyColor={MUTED_DIM}
-              historyGlyph={ICONS.separator}
-              messages={visibleMessages}
-            />
-          ) : null}
-
           <TabFooter
             activeColor={ACCENT}
             activeGlyph={ICONS.bullet}
@@ -298,6 +296,7 @@ function AppBody({ store }: AppProps): React.ReactNode {
             tabs={tabs}
           />
           <ShortcutFooter color={MUTED_DIM} />
+          <FeedbackBanner width={width} />
         </Box>
       </Box>
     </Box>
@@ -342,38 +341,22 @@ function Sidebar({
 // ─────────────────────────── Activity Pane ────────────────────────────
 
 function ActivityPane({
-  bannerRows,
   logs,
   spinner,
   prompt,
   summary,
 }: {
-  bannerRows: { content: string; color: string }[];
   logs: LogEntry[];
   spinner: SpinnerState;
   prompt: ActivePrompt | null;
   summary: WizardSummary | null;
 }): React.ReactNode {
-  if (prompt?.kind === "featurePlan") {
-    return <FeaturePlanScreen prompt={prompt} />;
-  }
-
   const hasContent =
     logs.length > 0 || spinner.active || prompt !== null || summary !== null;
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {bannerRows.length > 0 ? (
-        <Box flexDirection="column" flexShrink={0} marginBottom={1}>
-          {bannerRows.map((row, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: positional banner rows
-            <Text color={row.color} key={i}>
-              {row.content}
-            </Text>
-          ))}
-        </Box>
-      ) : null}
-      {!hasContent && bannerRows.length === 0 ? (
+      {hasContent ? null : (
         <Box flexDirection="column" paddingTop={1}>
           <Box gap={1}>
             <Text color={PRIMARY}>
@@ -382,7 +365,7 @@ function ActivityPane({
             <Text dimColor>Initializing wizard...</Text>
           </Box>
         </Box>
-      ) : null}
+      )}
       {logs.length > 0 ? (
         <Box flexDirection="column">
           {logs.map((log) => (
@@ -575,17 +558,12 @@ function ActionList<T extends string>({
   );
 }
 
-function VersionLine({
-  version,
-}: {
-  version: string | undefined;
-}): React.ReactNode {
-  if (!version) {
-    return null;
-  }
+function FeedbackBanner({ width }: { width: number }): React.ReactNode {
   return (
-    <Box marginTop={1}>
-      <Text color={MUTED_DIM}>sentry v{version}</Text>
+    <Box flexShrink={0} height={1}>
+      <Text backgroundColor={ACCENT} color={FEEDBACK_BANNER_FG}>
+        {formatFeedbackBanner(width)}
+      </Text>
     </Box>
   );
 }
@@ -698,16 +676,11 @@ function IntroPreflightContent({
     return null;
   }
 
-  let promptContent: React.ReactNode = null;
-  if (prompt?.kind === "featurePlan") {
-    promptContent = <FeaturePlanScreen prompt={prompt} />;
-  } else if (prompt) {
-    promptContent = (
-      <Box alignItems="center" width="100%">
-        <PromptArea alignment="center" prompt={prompt} />
-      </Box>
-    );
-  }
+  const promptContent = prompt ? (
+    <Box alignItems="center" width="100%">
+      <PromptArea alignment="center" prompt={prompt} />
+    </Box>
+  ) : null;
 
   return (
     <Box flexDirection="column" flexShrink={0} marginTop={1} width="100%">
@@ -724,129 +697,6 @@ function IntroPreflightContent({
         </Box>
       ) : null}
       {promptContent}
-    </Box>
-  );
-}
-
-// ───────────────────────── Feature Plan Screen ───────────────────────
-
-function FeaturePlanScreen({
-  prompt,
-}: {
-  prompt: Extract<ActivePrompt, { kind: "featurePlan" }>;
-}): React.ReactNode {
-  const { options } = prompt;
-  const choices = useMemo<ChoiceRow<"apply" | "customize" | "cancel">[]>(
-    () => [
-      { value: "apply", label: "Apply recommended setup" },
-      { value: "customize", label: "Customize features" },
-      { value: "cancel", label: "Cancel" },
-    ],
-    []
-  );
-  const onChoose = useCallback(
-    (value: "apply" | "customize" | "cancel") => {
-      if (value === "apply") {
-        prompt.resolve({
-          action: "apply",
-          features: options.recommendedFeatureIds,
-        });
-        return;
-      }
-      if (value === "customize") {
-        prompt.resolve({ action: "customize" });
-        return;
-      }
-      prompt.resolve(null);
-    },
-    [options.recommendedFeatureIds, prompt]
-  );
-  const highlighted = useChoiceNavigation({
-    choices,
-    onChoose,
-    onCancel: () => prompt.resolve(null),
-    scope: "feature-plan-screen",
-  });
-
-  const recommended = options.rows.filter((row) => row.recommended);
-  const optional = options.rows.filter((row) => !row.recommended);
-
-  return (
-    <Box flexDirection="column" flexGrow={1} paddingTop={1} paddingX={2}>
-      <Box justifyContent="space-between" marginBottom={1}>
-        <Text bold>Sentry Init</Text>
-        <Text color={MUTED}>{options.message}</Text>
-      </Box>
-      <FeatureGroup rows={recommended} title="Recommended setup" />
-      {optional.length > 0 ? (
-        <>
-          <Box height={1} />
-          <FeatureGroup rows={optional} title="Optional" />
-        </>
-      ) : null}
-      <Box
-        borderBottom={false}
-        borderColor={MUTED_DIM}
-        borderLeft={false}
-        borderRight={false}
-        borderStyle="single"
-        flexDirection="column"
-        marginTop={1}
-        paddingTop={1}
-      >
-        <Text bold color={MUTED}>
-          Why this setup
-        </Text>
-        <Text>
-          This gives Sentry enough context to connect Issue → Context → Fix.
-        </Text>
-      </Box>
-      <Box marginTop={1} paddingLeft={6}>
-        <ActionList choices={choices} highlighted={highlighted} />
-      </Box>
-      <Box flexGrow={1} />
-      <VersionLine version={options.version} />
-    </Box>
-  );
-}
-
-function FeatureGroup({
-  rows,
-  title,
-}: {
-  rows: FeaturePlanRowData[];
-  title: string;
-}): React.ReactNode {
-  if (rows.length === 0) {
-    return null;
-  }
-  return (
-    <Box flexDirection="column">
-      <Text bold color={MUTED}>
-        {title}
-      </Text>
-      <Box height={1} />
-      {rows.map((row) => (
-        <FeatureRow key={row.id} row={row} />
-      ))}
-    </Box>
-  );
-}
-
-function FeatureRow({ row }: { row: FeaturePlanRowData }): React.ReactNode {
-  const glyph = row.recommended ? "✓" : "○";
-  const glyphColor = row.recommended ? COLOR_SUCCESS : MUTED_DIM;
-  return (
-    <Box flexDirection="column" flexShrink={0}>
-      <Box flexDirection="row">
-        <Box flexShrink={0} width={3}>
-          <Text color={glyphColor}>{glyph}</Text>
-        </Box>
-        <Text bold={row.recommended}>{row.label}</Text>
-      </Box>
-      <Box paddingLeft={3}>
-        <Text color={MUTED_DIM}>{row.detail}</Text>
-      </Box>
     </Box>
   );
 }

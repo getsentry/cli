@@ -15,8 +15,6 @@ import {
   CANCELLED,
   type Cancelled,
   type ConfirmOptions,
-  type FeaturePlanOptions,
-  type FeaturePlanResult,
   type MultiSelectOptions,
   type SelectOptions,
   type SpinnerExitCode,
@@ -43,7 +41,6 @@ export type MockCall =
   | { kind: "spinner.stop"; message?: string; code?: SpinnerExitCode }
   | { kind: "select"; message: string; options: string[] }
   | { kind: "welcome"; options: WelcomeOptions }
-  | { kind: "featurePlan"; options: FeaturePlanOptions }
   | {
       kind: "multiselect";
       message: string;
@@ -67,14 +64,12 @@ export type MockCall =
  */
 export type MockResponse =
   | { kind: "welcome"; value: "continue" | Cancelled }
-  | { kind: "featurePlan"; value: FeaturePlanResult | Cancelled }
   | { kind: "select"; value: string | Cancelled }
   | { kind: "multiselect"; value: string[] | Cancelled }
   | { kind: "confirm"; value: boolean | Cancelled };
 
 type MockUIOptions = {
   welcome?: boolean;
-  featurePlan?: boolean;
 };
 
 /**
@@ -88,7 +83,6 @@ export function createMockUI(options: MockUIOptions = {}): {
   calls: MockCall[];
   respond: {
     welcome(value: "continue" | Cancelled): void;
-    featurePlan(value: FeaturePlanResult | Cancelled): void;
     select(value: string | Cancelled): void;
     multiselect(value: string[] | Cancelled): void;
     confirm(value: boolean | Cancelled): void;
@@ -181,19 +175,11 @@ export function createMockUI(options: MockUIOptions = {}): {
     };
   }
 
-  if (options.featurePlan) {
-    ui.featurePlan = (opts: FeaturePlanOptions) => {
-      calls.push({ kind: "featurePlan", options: opts });
-      return Promise.resolve(takeResponse("featurePlan"));
-    };
-  }
-
   return {
     ui,
     calls,
     respond: {
       welcome: (value) => responses.push({ kind: "welcome", value }),
-      featurePlan: (value) => responses.push({ kind: "featurePlan", value }),
       select: (value) => responses.push({ kind: "select", value }),
       multiselect: (value) => responses.push({ kind: "multiselect", value }),
       confirm: (value) => responses.push({ kind: "confirm", value }),

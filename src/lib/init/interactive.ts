@@ -11,7 +11,6 @@
  */
 
 import chalk from "chalk";
-import { CLI_VERSION } from "../constants.js";
 import {
   abortIfCancelled,
   featureHint,
@@ -26,110 +25,7 @@ import type {
   MultiSelectPayload,
   SelectPayload,
 } from "./types.js";
-import type {
-  FeaturePlanOptions,
-  FeaturePlanRow,
-  WizardUI,
-} from "./ui/types.js";
-
-const RECOMMENDED_FEATURES = [
-  "errorMonitoring",
-  "performanceMonitoring",
-  "sourceMaps",
-] as const;
-
-const FEATURE_PLAN_ORDER = [
-  "errorMonitoring",
-  "performanceMonitoring",
-  "sourceMaps",
-  "sessionReplay",
-  "profiling",
-  "logs",
-  "metrics",
-  "crons",
-  "aiMonitoring",
-  "userFeedback",
-  "reactFeatures",
-] as const;
-
-const FEATURE_PLAN_COPY: Record<string, { label: string; detail: string }> = {
-  errorMonitoring: {
-    label: "Error monitoring",
-    detail: "See exceptions with stack traces and release context",
-  },
-  performanceMonitoring: {
-    label: "Performance tracing",
-    detail: "Connect slow pages to backend requests",
-  },
-  sourceMaps: {
-    label: "Source maps",
-    detail: "Turn minified production stacks into readable code",
-  },
-  sessionReplay: {
-    label: "Session Replay",
-    detail: "See what users did before an error",
-  },
-  profiling: {
-    label: "Profiling",
-    detail: "Find CPU-heavy functions in production",
-  },
-};
-
-function featurePlanRank(feature: string): number {
-  const index = FEATURE_PLAN_ORDER.indexOf(
-    feature as (typeof FEATURE_PLAN_ORDER)[number]
-  );
-  return index === -1 ? Number.MAX_SAFE_INTEGER : index;
-}
-
-function sortFeaturePlanFeatures(features: string[]): string[] {
-  return features.slice().sort((a, b) => {
-    const rankDelta = featurePlanRank(a) - featurePlanRank(b);
-    if (rankDelta !== 0) {
-      return rankDelta;
-    }
-    return a.localeCompare(b);
-  });
-}
-
-function isRecommendedFeature(feature: string): boolean {
-  return RECOMMENDED_FEATURES.includes(
-    feature as (typeof RECOMMENDED_FEATURES)[number]
-  );
-}
-
-function featurePlanCopy(feature: string): { label: string; detail: string } {
-  const copy = FEATURE_PLAN_COPY[feature];
-  if (copy) {
-    return copy;
-  }
-  return {
-    label: featureLabel(feature),
-    detail: featureHint(feature) ?? "Configure this Sentry capability",
-  };
-}
-
-function buildFeaturePlanOptions(available: string[]): FeaturePlanOptions {
-  const rows: FeaturePlanRow[] = sortFeaturePlanFeatures(available).map(
-    (feature) => {
-      const copy = featurePlanCopy(feature);
-      return {
-        id: feature,
-        label: copy.label,
-        detail: copy.detail,
-        recommended: isRecommendedFeature(feature),
-      };
-    }
-  );
-  return {
-    message: "Setup",
-    rows,
-    recommendedFeatureIds: rows
-      .filter((row) => row.recommended)
-      .map((row) => row.id),
-    version: CLI_VERSION,
-  };
-}
+import type { WizardUI } from "./ui/types.js";
 
 function prependRequiredFeature(
   features: string[],
@@ -227,21 +123,6 @@ async function handleMultiSelect(
     return { features: hasRequired ? [REQUIRED_FEATURE] : [] };
   }
 
-  const featurePlanOptions = buildFeaturePlanOptions(available);
-  if (ui.featurePlan && featurePlanOptions.recommendedFeatureIds.length > 0) {
-    const planResult = abortIfCancelled(
-      await ui.featurePlan(featurePlanOptions)
-    );
-    if (planResult.action === "apply") {
-      return {
-        features: prependRequiredFeature(
-          Array.from(new Set(planResult.features)),
-          hasRequired
-        ),
-      };
-    }
-  }
-
   const hints: string[] = [];
   // Use clack's vertical bar character so hint lines align with the option lines below
   const bar = chalk.gray("\u2502");
@@ -262,7 +143,6 @@ async function handleMultiSelect(
         ...(hint ? { hint } : {}),
       };
     }),
-    initialValues: optional.filter(isRecommendedFeature),
     required: false,
   });
 
