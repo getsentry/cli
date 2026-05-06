@@ -361,7 +361,10 @@ const ZOD_TYPE_MAP: Record<string, string> = {
  * Used by auto-generated `@sentry/api/zod` schemas that represent nullable
  * fields as `z.union([z.string(), z.null()])` instead of `z.string().nullable()`.
  */
-function resolveZodUnion(options: ZodType[]): { type: string; optional: boolean } {
+function resolveZodUnion(options: ZodType[]): {
+  type: string;
+  optional: boolean;
+} {
   let optional = false;
   const parts: string[] = [];
   for (const opt of options) {
