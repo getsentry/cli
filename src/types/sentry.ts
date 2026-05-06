@@ -23,6 +23,11 @@ import type {
   OrgReleaseResponse as SdkReleaseResponse,
   BaseTeam as SdkTeam,
 } from "@sentry/api";
+import {
+  zBaseTeam,
+  zGroupEventsResponseDict,
+  zRetrieveAnIssueResponse,
+} from "@sentry/api/zod";
 import { z } from "zod";
 
 // SDK-derived types
@@ -175,51 +180,39 @@ export type SentryIssue = Omit<Partial<SdkIssueDetail>, "metadata"> & {
  * SDK-derived fields not listed here. Fields listed as optional may still be
  * present in most responses; optionality reflects the TypeScript type.
  */
-export const SentryIssueSchema = z
-  .object({
+/**
+ * Derived from the auto-generated `zRetrieveAnIssueResponse` schema.
+ *
+ * The generated schema makes all API-documented fields required. We widen it
+ * with `.partial()` so only the core identifiers (id, shortId, title) are
+ * required — matching how the CLI uses partial API responses and test mocks.
+ * Extra fields not in the OpenAPI spec (substatus, priority, isUnhandled,
+ * seerFixabilityScore) are added via `.extend()`.
+ */
+export const SentryIssueSchema = zRetrieveAnIssueResponse
+  .pick({
+    id: true,
+    shortId: true,
+    title: true,
+    culprit: true,
+    count: true,
+    userCount: true,
+    firstSeen: true,
+    lastSeen: true,
+    level: true,
+    status: true,
+    permalink: true,
+    project: true,
+    metadata: true,
+    assignedTo: true,
+  })
+  .partial()
+  .extend({
     id: z.string().describe("Numeric issue ID"),
     shortId: z.string().describe("Human-readable short ID (e.g. PROJ-ABC)"),
     title: z.string().describe("Issue title"),
-    culprit: z.string().optional().describe("Culprit string"),
-    count: z.string().optional().describe("Total event count"),
-    userCount: z.number().optional().describe("Number of affected users"),
-    firstSeen: z
-      .string()
-      .nullable()
-      .optional()
-      .describe("First occurrence (ISO 8601)"),
-    lastSeen: z
-      .string()
-      .nullable()
-      .optional()
-      .describe("Most recent occurrence (ISO 8601)"),
-    level: z.string().optional().describe("Severity level"),
-    status: z.string().optional().describe("Issue status"),
     priority: z.string().optional().describe("Triage priority"),
     platform: z.string().optional().describe("Platform"),
-    permalink: z.string().optional().describe("URL to the issue in Sentry"),
-    project: z
-      .object({
-        id: z.string(),
-        name: z.string(),
-        slug: z.string(),
-      })
-      .optional()
-      .describe("Project info"),
-    metadata: z
-      .object({
-        type: z.string().optional(),
-        value: z.string().optional(),
-        filename: z.string().optional(),
-        function: z.string().optional(),
-      })
-      .optional()
-      .describe("Issue metadata"),
-    assignedTo: z
-      .unknown()
-      .nullable()
-      .optional()
-      .describe("Assigned user or team"),
     substatus: z.string().nullable().optional().describe("Issue substatus"),
     isUnhandled: z
       .boolean()
@@ -231,6 +224,7 @@ export const SentryIssueSchema = z
       .optional()
       .describe("Seer AI fixability score (0-1)"),
   })
+  .passthrough()
   .describe("Sentry issue");
 
 // Event
@@ -333,41 +327,22 @@ export type IssueEvent = {
 
 /**
  * Zod schema for {@link IssueEvent} — used for `--fields` documentation in `--help`.
+ *
+ * Derived from the auto-generated `zGroupEventsResponseDict` element schema.
+ * All generated fields are widened to optional via `.partial()`, then the core
+ * identifiers (id, event.type, eventID) are re-required via `.extend()`.
  */
-export const IssueEventSchema = z
-  .object({
+const _IssueEventElement = zGroupEventsResponseDict.element;
+export const IssueEventSchema = _IssueEventElement
+  .partial()
+  .extend({
     id: z.string().describe("Internal event ID"),
     "event.type": z
       .string()
       .describe("Event type (error, default, transaction)"),
-    groupID: z.string().nullable().describe("Group (issue) ID"),
     eventID: z.string().describe("UUID-format event ID"),
-    projectID: z.string().describe("Project ID"),
-    message: z.string().describe("Event message"),
-    title: z.string().describe("Event title"),
-    location: z.string().nullable().describe("Source location (file:line)"),
-    culprit: z.string().nullable().describe("Culprit function/module"),
-    user: z
-      .object({
-        id: z.string().nullish().describe("User ID"),
-        email: z.string().nullish().describe("User email"),
-        username: z.string().nullish().describe("Username"),
-        ip_address: z.string().nullish().describe("IP address"),
-        name: z.string().nullish().describe("User display name"),
-      })
-      .nullable()
-      .describe("User context"),
-    tags: z
-      .array(z.object({ key: z.string(), value: z.string() }))
-      .describe("Event tags"),
-    platform: z
-      .string()
-      .nullable()
-      .describe("Platform (python, javascript, etc.)"),
-    dateCreated: z.string().describe("ISO 8601 creation timestamp"),
-    crashFile: z.string().nullable().describe("Crash file URL"),
-    metadata: z.record(z.unknown()).nullable().describe("Event metadata"),
   })
+  .passthrough()
   .describe("Issue event (list endpoint)");
 
 // Project Keys (DSN)
@@ -1040,22 +1015,28 @@ export type SentryRepository = z.infer<typeof SentryRepositorySchema>;
 
 // Team
 
-/** A team in a Sentry organization */
-export const SentryTeamSchema = z
-  .object({
-    // Core identifiers (required)
+/**
+ * A team in a Sentry organization.
+ *
+ * Derived from the auto-generated `zBaseTeam` schema, picking only the
+ * fields used in CLI output. All picked fields are widened to optional via
+ * `.partial()`, then core identifiers (id, slug, name) are re-required.
+ */
+export const SentryTeamSchema = zBaseTeam
+  .pick({
+    id: true,
+    slug: true,
+    name: true,
+    dateCreated: true,
+    isMember: true,
+    teamRole: true,
+    memberCount: true,
+  })
+  .partial()
+  .extend({
     id: z.string().describe("Team ID"),
     slug: z.string().describe("Team slug"),
     name: z.string().describe("Team name"),
-    // Optional metadata
-    dateCreated: z.string().optional().describe("Creation date (ISO 8601)"),
-    isMember: z.boolean().optional().describe("Whether you are a member"),
-    teamRole: z
-      .string()
-      .nullable()
-      .optional()
-      .describe("Your role in the team"),
-    memberCount: z.number().optional().describe("Number of members"),
   })
   .passthrough();
 
