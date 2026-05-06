@@ -44,9 +44,21 @@ sentry explore my-org/cli -F span.op -F "count()" \
 
 ### Metrics
 
+Metrics aggregates use the tracemetrics format: `aggregation(value,metric_name,metric_type,unit)`.
+
 ```bash
-# Custom metric aggregations
-sentry explore my-org/cli -F transaction -F "avg(measurements.fcp)" \
+# Sum a custom metric (e.g., LLM token usage) across an org
+sentry explore my-org/ -F "sum(value,llm.token_usage,distribution,none)" \
+  --dataset metrics --period 7d
+
+# Break down by a tag column (e.g., model name)
+sentry explore my-org/seer -F gen_ai.request.model \
+  -F "sum(value,llm.token_usage,distribution,none)" \
+  --dataset metrics --period 7d
+
+# Average a distribution metric
+sentry explore my-org/cli -F transaction \
+  -F "avg(value,http.response_time,distribution,millisecond)" \
   --dataset metrics --period 24h
 ```
 

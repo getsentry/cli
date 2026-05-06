@@ -356,6 +356,53 @@ function findFirstAggregate(fieldList: string[]): string | undefined {
   return fieldList.find((f) => f.includes("(") && f.includes(")"));
 }
 
+/** True when the field looks like an aggregate call: `fn(...)`. */
+function isAggregate(field: string): boolean {
+  return field.includes("(") && field.endsWith(")");
+}
+
+/**
+ * True when the aggregate uses the tracemetrics comma-separated format:
+ * `aggregation(value,metric_name,metric_type,unit)`.
+ */
+function isTracemetricsAggregate(aggregate: string): boolean {
+  const parenIdx = aggregate.indexOf("(");
+  if (parenIdx < 0) {
+    return false;
+  }
+  const inner = aggregate.slice(parenIdx + 1, -1);
+  return inner.startsWith("value,") && inner.split(",").length === 4;
+}
+
+/**
+ * Validate that aggregate fields use the tracemetrics format when querying
+ * the `metricsEnhanced` dataset. Standard aggregates like `count()` or
+ * `avg(measurements.fcp)` are invalid — the API requires the four-part
+ * comma-separated format: `aggregation(value,metric_name,metric_type,unit)`.
+ */
+function validateMetricsFields(fieldList: string[]): void {
+  const badAggs = fieldList.filter(
+    (f) => isAggregate(f) && !isTracemetricsAggregate(f)
+  );
+  if (badAggs.length === 0) {
+    return;
+  }
+
+  throw new ValidationError(
+    `Invalid metrics aggregate${badAggs.length > 1 ? "s" : ""}: ${badAggs.join(", ")}\n\n` +
+      "The metrics dataset requires the format: aggregation(value,metric_name,metric_type,unit)\n\n" +
+      "Examples:\n" +
+      '  sentry explore my-org/ -F "sum(value,llm.token_usage,distribution,none)" --dataset metrics\n' +
+      '  sentry explore my-org/ -F gen_ai.request.model -F "avg(value,cache.hit_rate,distribution,none)" --dataset metrics\n\n' +
+      "Parameters:\n" +
+      '  - value: literal string "value"\n' +
+      "  - metric_name: the metric name emitted by the SDK (e.g., llm.token_usage)\n" +
+      "  - metric_type: distribution, gauge, counter, or set\n" +
+      "  - unit: none, byte, second, millisecond, etc.",
+    "field"
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Dataset configuration
 // ---------------------------------------------------------------------------
@@ -508,7 +555,7 @@ export const exploreCommand = buildListCommand("explore", {
       "Datasets:\n" +
       "  errors   Error events (default)\n" +
       "  spans    Span data\n" +
-      "  metrics  Custom metrics\n" +
+      "  metrics  Custom metrics (tracemetrics format)\n" +
       "  logs     Log entries\n" +
       "  replays  Session replay search\n\n" +
       "Targets:\n" +
@@ -523,7 +570,11 @@ export const exploreCommand = buildListCommand("explore", {
       "--dataset spans\n" +
       "  sentry explore my-org/cli --dataset replays -F id -F user.email -F count_errors\n" +
       '  sentry explore -F span.op -F "count()" --dataset spans --period 1h\n' +
-      "  sentry explore --json",
+      "  sentry explore --json\n\n" +
+      "Metrics format:\n" +
+      "  Metrics aggregates use: aggregation(value,metric_name,metric_type,unit)\n" +
+      '  sentry explore my-org/ -F "sum(value,llm.token_usage,distribution,none)" --dataset metrics\n' +
+      '  sentry explore my-org/seer -F gen_ai.request.model -F "sum(value,llm.token_usage,distribution,none)" --dataset metrics --period 7d',
   },
   output: {
     human: formatExploreHuman,
@@ -615,6 +666,10 @@ export const exploreCommand = buildListCommand("explore", {
     }
     const timeRange = flags.period;
     const environment = parseReplayEnvironmentFilter(flags.environment);
+
+    if (dataset === "metricsEnhanced") {
+      validateMetricsFields(fieldList);
+    }
 
     const config = resolveDatasetConfig({
       dataset,
