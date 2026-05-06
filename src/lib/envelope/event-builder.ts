@@ -1,7 +1,7 @@
 /**
- * Constructs a Sentry Event from `sentry send-event` CLI flags.
+ * Constructs a Sentry Event from `sentry event send` CLI flags.
  *
- * Mirrors the behaviour of the old Rust sentry-cli `send-event` command:
+ * Mirrors the behaviour of the old Rust sentry-cli `send-event` command
  * tags/extras as KEY:VALUE pairs, user fields with known routing
  * (id, email, ip_address, username → top-level; everything else → user.data),
  * environment variables optionally included as `extra.environ`.
@@ -11,7 +11,7 @@ import type { Event, SeverityLevel, User } from "@sentry/core";
 import { uuid4 } from "@sentry/core";
 import { ValidationError } from "../errors.js";
 
-/** CLI flags accepted by `sentry send-event`. */
+/** CLI flags accepted by `sentry event send`. */
 export type SendEventFlags = {
   message?: string[];
   "message-arg"?: string[];

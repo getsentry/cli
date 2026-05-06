@@ -168,7 +168,7 @@ type LocalCommandBuilderArguments<
    * (e.g. `auth login`, `auth logout`, `auth status`, `help`, `cli upgrade`).
    *
    * Set to `"dsn"` for commands that authenticate via a Sentry DSN instead of
-   * a Bearer token (e.g. `send-event`, `send-envelope`). These commands skip
+   * a Bearer token (e.g. `event send`). These commands skip
    * the token guard and the `.sentryclirc` URL trust check entirely, since
    * DSN auth is fully independent of the user's logged-in session.
    */

@@ -54,7 +54,7 @@ cli/
 │   │   ├── auth/        # login, logout, refresh, status, token, whoami
 │   │   ├── cli/         # defaults, feedback, fix, setup, upgrade
 │   │   ├── dashboard/   # list, view, create, add, edit, delete
-│   │   ├── event/       # view, list
+│   │   ├── event/       # view, list, send
 │   │   ├── issue/       # list, events, explain, plan, view, resolve, unresolve, archive, merge
 │   │   ├── log/         # list, view
 │   │   ├── org/         # list, view
@@ -62,7 +62,6 @@ cli/
 │   │   ├── release/     # list, view, create, finalize, delete, deploy, deploys, set-commits, propose-version
 │   │   ├── replay/      # list, view
 │   │   ├── repo/        # list
-│   │   ├── send/        # event, envelope
 │   │   ├── sourcemap/   # inject, upload
 │   │   ├── span/        # list, view
 │   │   ├── team/        # list
