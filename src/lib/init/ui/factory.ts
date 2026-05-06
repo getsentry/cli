@@ -34,7 +34,7 @@
  */
 
 import { LoggingUI } from "./logging-ui.js";
-import type { WizardUI } from "./types.js";
+import type { WelcomeOptions, WizardUI } from "./types.js";
 
 /**
  * Inputs that affect UI selection. Mirrors the relevant subset of
@@ -43,6 +43,12 @@ import type { WizardUI } from "./types.js";
 export type UIFactoryOptions = {
   /** True when `--yes` (or `--dry-run`, which implies non-interactive) is set. */
   yes: boolean;
+  /**
+   * Optional first Ink prompt to seed before `ink.render()` is called.
+   * This keeps the first painted frame from flashing the normal wizard
+   * shell before the welcome screen is ready.
+   */
+  initialWelcome?: WelcomeOptions;
   /**
    * True when the user explicitly opted out of the new TUI via
    * `--no-tui`. Forces `LoggingUI`.
@@ -118,7 +124,7 @@ export async function getUIAsync(opts: UIFactoryOptions): Promise<WizardUI> {
   }
   try {
     const { createInkUI } = await import("./ink-ui.js");
-    return await createInkUI();
+    return await createInkUI({ initialWelcome: opts.initialWelcome });
   } catch {
     // Fall through to LoggingUI so a missing/broken Ink install
     // doesn't take down the wizard. This branch should be

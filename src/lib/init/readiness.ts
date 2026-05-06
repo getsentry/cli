@@ -47,7 +47,7 @@ export async function checkReadiness(ui: WizardUI): Promise<void> {
   }
 
   if (apiOk) {
-    spin.stop("Prerequisites OK");
+    spin.stop("");
   } else {
     spin.stop("Warning", 2);
     ui.log.warn(

@@ -266,6 +266,159 @@ describe("handleMultiSelect", () => {
     expect(multiselectCall?.options).not.toContain("errorMonitoring");
     expect(multiselectCall?.options).toContain("performanceMonitoring");
   });
+
+  test("applies recommended setup from rich feature plan", async () => {
+    const { ui, calls, respond } = createMockUI({ featurePlan: true });
+    respond.featurePlan({
+      action: "apply",
+      features: ["errorMonitoring", "performanceMonitoring", "sourceMaps"],
+    });
+
+    const result = await handleInteractive(
+      {
+        type: "interactive",
+        prompt: "Select features",
+        kind: "multi-select",
+        availableFeatures: [
+          "errorMonitoring",
+          "performanceMonitoring",
+          "sourceMaps",
+          "sessionReplay",
+        ],
+      },
+      makeOptions({ yes: false }),
+      ui
+    );
+
+    expect(result.features).toEqual([
+      "errorMonitoring",
+      "performanceMonitoring",
+      "sourceMaps",
+    ]);
+
+    const featurePlanCall = calls.find((c) => c.kind === "featurePlan");
+    expect(featurePlanCall).toBeDefined();
+    if (featurePlanCall?.kind !== "featurePlan") {
+      throw new Error("expected feature plan call");
+    }
+    expect(featurePlanCall.options.recommendedFeatureIds).toEqual([
+      "errorMonitoring",
+      "performanceMonitoring",
+      "sourceMaps",
+    ]);
+    expect(
+      featurePlanCall.options.rows.find((row) => row.id === "sessionReplay")
+        ?.recommended
+    ).toBe(false);
+  });
+
+  test("falls back to multiselect when rich feature plan is customized", async () => {
+    const { ui, calls, respond } = createMockUI({ featurePlan: true });
+    respond.featurePlan({ action: "customize" });
+    respond.multiselect(["sessionReplay"]);
+
+    const result = await handleInteractive(
+      {
+        type: "interactive",
+        prompt: "Select features",
+        kind: "multi-select",
+        availableFeatures: [
+          "errorMonitoring",
+          "performanceMonitoring",
+          "sourceMaps",
+          "sessionReplay",
+        ],
+      },
+      makeOptions({ yes: false }),
+      ui
+    );
+
+    expect(result.features).toEqual(["errorMonitoring", "sessionReplay"]);
+
+    const multiselectCall = calls.find((c) => c.kind === "multiselect") as
+      | Extract<(typeof calls)[number], { kind: "multiselect" }>
+      | undefined;
+    expect(multiselectCall?.initialValues).toEqual([
+      "performanceMonitoring",
+      "sourceMaps",
+    ]);
+  });
+
+  test("throws WizardCancelledError when user cancels rich feature plan", async () => {
+    const { ui, respond } = createMockUI({ featurePlan: true });
+    respond.featurePlan(CANCELLED);
+
+    await expect(
+      handleInteractive(
+        {
+          type: "interactive",
+          prompt: "Select features",
+          kind: "multi-select",
+          availableFeatures: [
+            "errorMonitoring",
+            "performanceMonitoring",
+            "sessionReplay",
+          ],
+        },
+        makeOptions({ yes: false }),
+        ui
+      )
+    ).rejects.toThrow("Setup cancelled");
+  });
+
+  test("omits unavailable recommendations from rich feature plan", async () => {
+    const { ui, calls, respond } = createMockUI({ featurePlan: true });
+    respond.featurePlan({
+      action: "apply",
+      features: ["errorMonitoring"],
+    });
+
+    const result = await handleInteractive(
+      {
+        type: "interactive",
+        prompt: "Select features",
+        kind: "multi-select",
+        availableFeatures: ["errorMonitoring", "sessionReplay", "profiling"],
+      },
+      makeOptions({ yes: false }),
+      ui
+    );
+
+    expect(result.features).toEqual(["errorMonitoring"]);
+
+    const featurePlanCall = calls.find((c) => c.kind === "featurePlan");
+    expect(featurePlanCall).toBeDefined();
+    if (featurePlanCall?.kind !== "featurePlan") {
+      throw new Error("expected feature plan call");
+    }
+    expect(featurePlanCall.options.recommendedFeatureIds).toEqual([
+      "errorMonitoring",
+    ]);
+    expect(
+      featurePlanCall.options.rows.some(
+        (row) => row.id === "performanceMonitoring" || row.id === "sourceMaps"
+      )
+    ).toBe(false);
+  });
+
+  test("falls back to multiselect when no recommended features are available", async () => {
+    const { ui, calls, respond } = createMockUI({ featurePlan: true });
+    respond.multiselect(["logs"]);
+
+    const result = await handleInteractive(
+      {
+        type: "interactive",
+        prompt: "Select features",
+        kind: "multi-select",
+        availableFeatures: ["logs", "metrics"],
+      },
+      makeOptions({ yes: false }),
+      ui
+    );
+
+    expect(result.features).toEqual(["logs"]);
+    expect(calls.some((c) => c.kind === "featurePlan")).toBe(false);
+  });
 });
 
 describe("handleConfirm", () => {

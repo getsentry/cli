@@ -55,15 +55,28 @@ import {
   CANCELLED,
   type Cancelled,
   type ConfirmOptions,
+  type FeaturePlanOptions,
+  type FeaturePlanResult,
   type MultiSelectOptions,
   type SelectOptions,
   type SpinnerExitCode,
   type SpinnerHandle,
+  type WelcomeOptions,
   type WizardLog,
   type WizardSummary,
   type WizardUI,
 } from "./types.js";
 import { WizardStore } from "./wizard-store.js";
+
+type CreateInkUIOptions = {
+  initialWelcome?: WelcomeOptions;
+};
+
+type PendingWelcome = {
+  promise: Promise<"continue" | Cancelled>;
+  resolve: (value: "continue" | Cancelled) => void;
+  settled: boolean;
+};
 
 // Brand palette mirrored from `ink-app.tsx` so the post-dispose
 // success/failure echo (rendered via chalk after Ink unmounts) feels
@@ -150,6 +163,48 @@ const BANNER_ROWS = [
   "  ╚══════╝╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝   ╚═╝   ",
 ];
 
+function sanitizeWelcomeOptions(opts: WelcomeOptions): WelcomeOptions {
+  return {
+    title: stripAnsi(opts.title),
+    body: opts.body.map(stripAnsi),
+    punchline: stripAnsi(opts.punchline),
+  };
+}
+
+function createPendingWelcome(): PendingWelcome {
+  let resolve!: (value: "continue" | Cancelled) => void;
+  const pending: PendingWelcome = {
+    promise: new Promise<"continue" | Cancelled>((r) => {
+      resolve = r;
+    }),
+    resolve: (value) => {
+      if (pending.settled) {
+        return;
+      }
+      pending.settled = true;
+      resolve(value);
+    },
+    settled: false,
+  };
+  return pending;
+}
+
+function seedWelcomePrompt(
+  store: WizardStore,
+  opts: WelcomeOptions,
+  pending: PendingWelcome
+): void {
+  store.setLayout("intro");
+  store.setPrompt({
+    kind: "welcome",
+    options: sanitizeWelcomeOptions(opts),
+    resolve: (value) => {
+      store.setPrompt(null);
+      pending.resolve(value === null ? CANCELLED : value);
+    },
+  });
+}
+
 /**
  * Log severities recognised by InkUI. Mirrors the keys of
  * `ICON_BY_SEVERITY` in `ink-app.tsx`.
@@ -223,7 +278,9 @@ function openFreshTtyForInk(): ReadStream | null {
  * bridge instance. Throws if Ink can't be loaded (e.g. missing peer
  * deps).
  */
-export async function createInkUI(): Promise<InkUI> {
+export async function createInkUI(
+  opts: CreateInkUIOptions = {}
+): Promise<InkUI> {
   const ink = await import("ink");
   const react = await import("react");
   // The `?bridge=1` query string is load-bearing. Without it Bun's
@@ -246,6 +303,12 @@ export async function createInkUI(): Promise<InkUI> {
       color: BANNER_GRADIENT[i] ?? BANNER_GRADIENT[0] ?? "#FFFFFF",
     })),
   });
+  const initialWelcome = opts.initialWelcome
+    ? createPendingWelcome()
+    : undefined;
+  if (opts.initialWelcome && initialWelcome) {
+    seedWelcomePrompt(store, opts.initialWelcome, initialWelcome);
+  }
 
   // Open a fresh /dev/tty so Ink's `readable` event listener
   // actually fires — see the module docstring for the Bun bug
@@ -280,15 +343,16 @@ export async function createInkUI(): Promise<InkUI> {
     renderOptions.stdin = freshStdin;
   }
   // Enter the alternate screen buffer so the wizard occupies the full
-  // terminal. On exit, Ink restores the original scrollback.
-  process.stdout.write("\x1b[?1049h");
+  // terminal. Clear and home the cursor before Ink's first frame so
+  // startup never shows stale layout from a prior render.
+  process.stdout.write("\x1b[?1049h\x1b[2J\x1b[H");
   try {
     const instance = ink.render(
       react.createElement(app.App, { store }),
       renderOptions
     );
 
-    return new InkUI(instance, store, freshStdin);
+    return new InkUI(instance, store, freshStdin, initialWelcome);
   } catch (error) {
     // Restore the terminal if Ink rendering or UI init fails,
     // otherwise the user is stuck in the alternate screen buffer.
@@ -372,6 +436,7 @@ export class InkUI implements WizardUI {
    */
   private outroMessage: string | undefined;
   private failureMessage: string | undefined;
+  private initialWelcome: PendingWelcome | undefined;
   /**
    * Resolved when the user presses any key on the outro screen.
    * `[Symbol.asyncDispose]` awaits this so the `using` block keeps the
@@ -381,11 +446,20 @@ export class InkUI implements WizardUI {
   constructor(
     instance: InkInstance,
     store: WizardStore,
-    freshStdin: ReadStream | null
+    freshStdin: ReadStream | null,
+    initialWelcome?: PendingWelcome
   ) {
     this.instance = instance;
     this.store = store;
     this.freshStdin = freshStdin;
+    this.initialWelcome = initialWelcome;
+    if (initialWelcome && !initialWelcome.settled) {
+      this.activePromptCancel = () => {
+        this.store.setPrompt(null);
+        this.activePromptCancel = undefined;
+        initialWelcome.resolve(CANCELLED);
+      };
+    }
     this.startLearnSequence();
     this.installCancelHandler();
     // Hand the App a reference to `requestCancel` via the store so
@@ -457,6 +531,10 @@ export class InkUI implements WizardUI {
     this.store.clearOverlay();
   }
 
+  setIntroMode(enabled: boolean): void {
+    this.store.setLayout(enabled ? "intro" : "workflow");
+  }
+
   // ── Logging ───────────────────────────────────────────────────────
 
   log: WizardLog = {
@@ -488,9 +566,10 @@ export class InkUI implements WizardUI {
         }
       },
       stop: (message?: string, code: SpinnerExitCode = 0) => {
-        const finalMessage = message
-          ? stripAnsi(message)
-          : this.store.getSnapshot().spinner.message;
+        const finalMessage =
+          message !== undefined
+            ? stripAnsi(message)
+            : this.store.getSnapshot().spinner.message;
         this.store.stopSpinner();
         if (finalMessage) {
           this.appendLog(severityForStopCode(code), finalMessage);
@@ -582,6 +661,72 @@ export class InkUI implements WizardUI {
         kind: "confirm",
         message: stripAnsi(opts.message),
         initialValue: opts.initialValue ?? true,
+        resolve: (value) => {
+          this.store.setPrompt(null);
+          this.activePromptCancel = undefined;
+          if (value === null) {
+            resolve(CANCELLED);
+          } else {
+            resolve(value);
+          }
+        },
+      });
+    });
+  }
+
+  welcome(opts: WelcomeOptions): Promise<"continue" | Cancelled> {
+    this.store.setLayout("intro");
+    if (this.initialWelcome) {
+      if (!this.initialWelcome.settled) {
+        seedWelcomePrompt(this.store, opts, this.initialWelcome);
+      }
+      return this.initialWelcome.promise.finally(() => {
+        this.activePromptCancel = undefined;
+        this.initialWelcome = undefined;
+      });
+    }
+    return new Promise<"continue" | Cancelled>((resolve) => {
+      this.activePromptCancel = () => {
+        this.store.setPrompt(null);
+        this.activePromptCancel = undefined;
+        resolve(CANCELLED);
+      };
+      this.store.setPrompt({
+        kind: "welcome",
+        options: sanitizeWelcomeOptions(opts),
+        resolve: (value) => {
+          this.store.setPrompt(null);
+          this.activePromptCancel = undefined;
+          if (value === null) {
+            resolve(CANCELLED);
+          } else {
+            resolve(value);
+          }
+        },
+      });
+    });
+  }
+
+  featurePlan(
+    opts: FeaturePlanOptions
+  ): Promise<FeaturePlanResult | Cancelled> {
+    return new Promise<FeaturePlanResult | Cancelled>((resolve) => {
+      this.activePromptCancel = () => {
+        this.store.setPrompt(null);
+        this.activePromptCancel = undefined;
+        resolve(CANCELLED);
+      };
+      this.store.setPrompt({
+        kind: "featurePlan",
+        options: {
+          ...opts,
+          message: stripAnsi(opts.message),
+          rows: opts.rows.map((row) => ({
+            ...row,
+            label: stripAnsi(row.label),
+            detail: stripAnsi(row.detail),
+          })),
+        },
         resolve: (value) => {
           this.store.setPrompt(null);
           this.activePromptCancel = undefined;

@@ -23,8 +23,18 @@ const FILES_HEADER_PINNED_RE = /Files analyzed\s+\d+\/\d+/;
 const FILES_HEADER_UNPINNED_RE = /Files analyzed\s+\u2191\s+\d+\/\d+/;
 const KEYBOARD_HINT_RE = /switch tab/;
 const ANSI_ESCAPE_PREFIX = "\u001B[";
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape sequences in captured Ink output
+const ANSI_CSI_RE = /\u001B\[[0-9;?]*[ -/]*[@-~]/g;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape sequences in captured Ink output
+const ANSI_OSC_RE = /\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g;
+const LINE_SPLIT_RE = /\r?\n/;
+const RIGHT_ARROW = "\u001B[C";
 
 const FRAME_SETTLE_MS = 80;
+const TEST_BANNER_ROWS = [
+  { content: "  ███████╗███████╗███╗   ██╗", color: "#B4A4DE" },
+  { content: "  ╚══════╝╚══════╝╚═╝  ╚═══╝", color: "#432B8A" },
+];
 
 class CaptureStream extends Writable {
   frames: string[] = [];
@@ -71,16 +81,22 @@ function makeStdin(): Readable {
 
 async function renderApp(
   store: WizardStore,
-  columns: number
+  columns: number,
+  options: { rows?: number; input?: string[] } = {}
 ): Promise<CaptureStream> {
-  const out = new CaptureStream(columns, 40);
+  const out = new CaptureStream(columns, options.rows ?? 40);
+  const stdin = makeStdin();
   const instance = render(createElement(App, { store }), {
     stdout: out as unknown as NodeJS.WriteStream,
     stderr: out as unknown as NodeJS.WriteStream,
-    stdin: makeStdin() as unknown as NodeJS.ReadStream,
+    stdin: stdin as unknown as NodeJS.ReadStream,
     patchConsole: false,
     exitOnCtrlC: false,
   });
+  for (const input of options.input ?? []) {
+    stdin.push(input);
+    await Bun.sleep(20);
+  }
   await Bun.sleep(FRAME_SETTLE_MS);
   instance.unmount();
   // waitUntilExit() hangs in CI — race with a short unref'd timeout.
@@ -106,8 +122,82 @@ function hasForcedWhiteForeground(output: string): boolean {
   );
 }
 
+function stripAnsi(output: string): string {
+  return output.replace(ANSI_CSI_RE, "").replace(ANSI_OSC_RE, "");
+}
+
+function firstLogoLineIndex(output: string): number {
+  return stripAnsi(output)
+    .split(LINE_SPLIT_RE)
+    .findIndex((line) => line.includes("███████╗███████╗"));
+}
+
 function ignorePromptResolution(): void {
   // Snapshot tests render the prompt but never submit it.
+}
+
+function setWelcomePrompt(store: WizardStore): void {
+  store.setPrompt({
+    kind: "welcome",
+    options: {
+      title: "Sentry Init",
+      body: [
+        "We'll use AI to inspect this project and configure Sentry.",
+        "You'll choose the setup before local files change.",
+      ],
+      punchline: "Continue to let Sentry use AI for setup.",
+    },
+    resolve: ignorePromptResolution,
+  });
+}
+
+function setFeaturePlanPrompt(store: WizardStore): void {
+  store.setPrompt({
+    kind: "featurePlan",
+    options: {
+      message: "Setup",
+      rows: [
+        {
+          id: "errorMonitoring",
+          label: "Error monitoring",
+          detail: "See exceptions with stack traces and release context",
+          recommended: true,
+        },
+        {
+          id: "performanceMonitoring",
+          label: "Performance tracing",
+          detail: "Connect slow pages to backend requests",
+          recommended: true,
+        },
+        {
+          id: "sourceMaps",
+          label: "Source maps",
+          detail: "Turn minified production stacks into readable code",
+          recommended: true,
+        },
+        {
+          id: "sessionReplay",
+          label: "Session Replay",
+          detail: "See what users did before an error",
+          recommended: false,
+        },
+      ],
+      recommendedFeatureIds: [
+        "errorMonitoring",
+        "performanceMonitoring",
+        "sourceMaps",
+      ],
+      version: "2.4.1",
+    },
+    resolve: ignorePromptResolution,
+  });
+}
+
+function makeReadFiles(count: number): string[] {
+  return Array.from(
+    { length: count },
+    (_value, index) => `src/file-${String(index + 1).padStart(2, "0")}.ts`
+  );
 }
 
 describe("Ink App snapshot", () => {
@@ -144,6 +234,22 @@ describe("Ink App snapshot", () => {
     expect(frame).toContain("Reading package.json");
   });
 
+  test("status toggle shortcut appears only for expandable history", async () => {
+    const shortHistory = new WizardStore();
+    shortHistory.appendStatus("Analyzing project...");
+
+    const shortFrame = (await renderApp(shortHistory, 120)).allOutput();
+    expect(shortFrame).not.toContain("toggle status");
+
+    const longHistory = new WizardStore();
+    longHistory.appendStatus("Analyzing project...");
+    longHistory.appendStatus("Reading package.json");
+    longHistory.appendStatus("Installing SDK");
+
+    const longFrame = (await renderApp(longHistory, 120)).allOutput();
+    expect(longFrame).toContain("toggle status");
+  });
+
   test("focused prompt text inherits terminal foreground", async () => {
     const store = new WizardStore({ bannerRows: [] });
     store.setPrompt({
@@ -161,6 +267,164 @@ describe("Ink App snapshot", () => {
     expect(frame).toContain("Choose a feature");
     expect(frame).toContain("Error Monitoring");
     expect(hasForcedWhiteForeground(frame)).toBe(false);
+  });
+
+  test("welcome screen is centered and standalone", async () => {
+    const store = new WizardStore({ bannerRows: TEST_BANNER_ROWS });
+    setWelcomePrompt(store);
+
+    const frame = (await renderApp(store, 120)).allOutput();
+    expect(frame).toContain("███████╗███████╗");
+    expect(frame).not.toContain("Sentry Init");
+    expect(frame).toContain("We'll use AI to inspect this project");
+    expect(frame).toContain("Continue to let Sentry use AI for setup.");
+    expect(frame).toContain("Continue");
+    expect(frame).toContain("Cancel");
+    expect(frame).not.toMatch(LEARN_HEADER_RE);
+    expect(frame).not.toMatch(TASKS_HEADER_RE);
+    expect(frame).not.toMatch(STATUS_TAB_RE);
+    expect(frame).not.toMatch(FILES_TAB_RE);
+    expect(hasForcedWhiteForeground(frame)).toBe(false);
+  });
+
+  test("intro preflight prompts stay centered and standalone", async () => {
+    const store = new WizardStore({
+      bannerRows: TEST_BANNER_ROWS,
+      layout: "intro",
+    });
+    store.appendLog("warn", "You have uncommitted or untracked files.");
+    store.appendLog("success", "Prerequisites OK");
+    store.setPrompt({
+      kind: "confirm",
+      message: "Continue with uncommitted changes?",
+      initialValue: true,
+      resolve: ignorePromptResolution,
+    });
+
+    const frame = (await renderApp(store, 120)).allOutput();
+    expect(frame).toContain("███████╗███████╗");
+    expect(frame).not.toContain("Sentry Init");
+    expect(frame).not.toContain("uncommitted or untracked files");
+    expect(frame).not.toContain("Prerequisites OK");
+    expect(frame).toContain("Continue with uncommitted changes?");
+    expect(frame).not.toContain("We'll use AI to inspect this project");
+    expect(frame).not.toContain("Continue to let Sentry use AI for setup.");
+    expect(frame).not.toContain("◇ Continue with uncommitted changes?");
+    expect(frame).not.toMatch(LEARN_HEADER_RE);
+    expect(frame).not.toMatch(TASKS_HEADER_RE);
+    expect(frame).not.toMatch(STATUS_TAB_RE);
+    expect(frame).not.toMatch(FILES_TAB_RE);
+    expect(frame).not.toContain("switch tab");
+    expect(hasForcedWhiteForeground(frame)).toBe(false);
+  });
+
+  test("intro logo row stays fixed across prompt heights", async () => {
+    const shortPrompt = new WizardStore({
+      bannerRows: TEST_BANNER_ROWS,
+      layout: "intro",
+    });
+    shortPrompt.setPrompt({
+      kind: "confirm",
+      message: "Continue with setup?",
+      initialValue: true,
+      resolve: ignorePromptResolution,
+    });
+
+    const longPrompt = new WizardStore({
+      bannerRows: TEST_BANNER_ROWS,
+      layout: "intro",
+    });
+    longPrompt.setPrompt({
+      kind: "select",
+      message:
+        "Choose the Sentry project and team context to use for this initialization before setup continues.",
+      options: [
+        { value: "recommended", label: "Use the detected project" },
+        { value: "existing", label: "Choose an existing project" },
+        { value: "create", label: "Create a new project" },
+        { value: "team", label: "Change team first" },
+        { value: "cancel", label: "Cancel setup" },
+      ],
+      initialIndex: 0,
+      resolve: ignorePromptResolution,
+    });
+
+    const shortFrame = (
+      await renderApp(shortPrompt, 120, { rows: 24 })
+    ).allOutput();
+    const longFrame = (
+      await renderApp(longPrompt, 120, { rows: 24 })
+    ).allOutput();
+
+    const shortLogoLine = firstLogoLineIndex(shortFrame);
+    const longLogoLine = firstLogoLineIndex(longFrame);
+    expect(shortLogoLine).toBeGreaterThanOrEqual(0);
+    expect(longLogoLine).toBe(shortLogoLine);
+  });
+
+  test("feature plan screen shows recommended and optional setup", async () => {
+    const store = new WizardStore({ bannerRows: [] });
+    setFeaturePlanPrompt(store);
+
+    const frame = (await renderApp(store, 120)).allOutput();
+    expect(frame).toContain("Recommended setup");
+    expect(frame).toContain("Error monitoring");
+    expect(frame).toContain("Performance tracing");
+    expect(frame).toContain("Source maps");
+    expect(frame).toContain("Optional");
+    expect(frame).toContain("Session Replay");
+    expect(frame).toContain("Apply recommended setup");
+    expect(frame).toContain("Issue → Context → Fix");
+    expect(hasForcedWhiteForeground(frame)).toBe(false);
+  });
+
+  test("prompt shortcuts replace app shortcuts while prompt is active", async () => {
+    const store = new WizardStore({ bannerRows: [] });
+    store.setPrompt({
+      kind: "select",
+      message: "Choose a feature",
+      options: [
+        { value: "errors", label: "Error Monitoring" },
+        { value: "tracing", label: "Tracing" },
+      ],
+      initialIndex: 0,
+      resolve: ignorePromptResolution,
+    });
+
+    const frame = (await renderApp(store, 120)).allOutput();
+    expect(frame).toContain("navigate");
+    expect(frame).toContain("confirm");
+    expect(frame).toContain("cancel");
+    expect(frame).not.toContain("switch tab");
+  });
+
+  test("file scroll shortcut appears only when the file tree overflows", async () => {
+    const shortTree = new WizardStore({ bannerRows: [] });
+    shortTree.recordFilesReading(["src/app.ts"]);
+    shortTree.markFilesAnalyzed(["src/app.ts"]);
+
+    const shortFrame = (
+      await renderApp(shortTree, 120, {
+        input: [RIGHT_ARROW],
+        rows: 16,
+      })
+    ).allOutput();
+    expect(shortFrame).toMatch(FILES_HEADER_PINNED_RE);
+    expect(shortFrame).not.toContain("scroll");
+
+    const tallTree = new WizardStore({ bannerRows: [] });
+    const readFiles = makeReadFiles(12);
+    tallTree.recordFilesReading(readFiles);
+    tallTree.markFilesAnalyzed(readFiles);
+
+    const tallFrame = (
+      await renderApp(tallTree, 120, {
+        input: [RIGHT_ARROW],
+        rows: 16,
+      })
+    ).allOutput();
+    expect(tallFrame).toMatch(FILES_HEADER_PINNED_RE);
+    expect(tallFrame).toContain("scroll");
   });
 
   test("Status screen shows logs and banner, not file tree", async () => {

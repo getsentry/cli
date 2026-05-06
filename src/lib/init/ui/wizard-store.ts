@@ -21,7 +21,13 @@ import {
   CHECKLIST_VISIBLE_STEPS,
   shortStepLabel,
 } from "../clack-utils.js";
-import type { SpinnerExitCode, WizardSummary } from "./types.js";
+import type {
+  FeaturePlanOptions,
+  FeaturePlanResult,
+  SpinnerExitCode,
+  WelcomeOptions,
+  WizardSummary,
+} from "./types.js";
 
 export type LogSeverity = "info" | "warn" | "error" | "success" | "message";
 
@@ -113,6 +119,16 @@ export type ActivePrompt =
       message: string;
       initialValue: boolean;
       resolve: (value: boolean | null) => void;
+    }
+  | {
+      kind: "welcome";
+      options: WelcomeOptions;
+      resolve: (value: "continue" | null) => void;
+    }
+  | {
+      kind: "featurePlan";
+      options: FeaturePlanOptions;
+      resolve: (value: FeaturePlanResult | null) => void;
     };
 
 /** Non-blocking overlay shown on top of the normal content. */
@@ -136,7 +152,11 @@ export type LearnState = {
   complete: boolean;
 };
 
+export type WizardLayout = "intro" | "workflow";
+
 export type WizardSnapshot = {
+  /** Top-level layout: centered intro/preflight or full workflow shell. */
+  layout: WizardLayout;
   bannerRows: { content: string; color: string }[];
   logs: LogEntry[];
   spinner: SpinnerState;
@@ -206,6 +226,7 @@ export class WizardStore {
 
   constructor(initial: Partial<WizardSnapshot> = {}) {
     this.snapshot = {
+      layout: initial.layout ?? "workflow",
       bannerRows: initial.bannerRows ?? [],
       logs: initial.logs ?? [],
       spinner: initial.spinner ?? { active: false, frame: 0, message: "" },
@@ -244,6 +265,13 @@ export class WizardStore {
 
   setBanner(rows: { content: string; color: string }[]): void {
     this.update({ bannerRows: rows });
+  }
+
+  setLayout(layout: WizardLayout): void {
+    if (this.snapshot.layout === layout) {
+      return;
+    }
+    this.update({ layout });
   }
 
   appendLog(severity: LogSeverity, text: string): LogEntry {
