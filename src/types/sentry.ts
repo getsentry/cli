@@ -211,6 +211,39 @@ export const SentryIssueSchema = zRetrieveAnIssueResponse
     id: z.string().describe("Numeric issue ID"),
     shortId: z.string().describe("Human-readable short ID (e.g. PROJ-ABC)"),
     title: z.string().describe("Issue title"),
+    culprit: zRetrieveAnIssueResponse.shape.culprit
+      .optional()
+      .describe("Culprit string"),
+    count: zRetrieveAnIssueResponse.shape.count
+      .optional()
+      .describe("Total event count"),
+    userCount: zRetrieveAnIssueResponse.shape.userCount
+      .optional()
+      .describe("Number of affected users"),
+    firstSeen: zRetrieveAnIssueResponse.shape.firstSeen
+      .optional()
+      .describe("First occurrence (ISO 8601)"),
+    lastSeen: zRetrieveAnIssueResponse.shape.lastSeen
+      .optional()
+      .describe("Most recent occurrence (ISO 8601)"),
+    level: zRetrieveAnIssueResponse.shape.level
+      .optional()
+      .describe("Severity level"),
+    status: zRetrieveAnIssueResponse.shape.status
+      .optional()
+      .describe("Issue status"),
+    permalink: zRetrieveAnIssueResponse.shape.permalink
+      .optional()
+      .describe("URL to the issue in Sentry"),
+    project: zRetrieveAnIssueResponse.shape.project
+      .optional()
+      .describe("Project info"),
+    metadata: zRetrieveAnIssueResponse.shape.metadata
+      .optional()
+      .describe("Issue metadata"),
+    assignedTo: zRetrieveAnIssueResponse.shape.assignedTo
+      .optional()
+      .describe("Assigned user or team"),
     priority: z.string().optional().describe("Triage priority"),
     platform: z.string().optional().describe("Platform"),
     substatus: z.string().nullable().optional().describe("Issue substatus"),
@@ -340,7 +373,37 @@ export const IssueEventSchema = _IssueEventElement
     "event.type": z
       .string()
       .describe("Event type (error, default, transaction)"),
+    groupID: _IssueEventElement.shape.groupID
+      .optional()
+      .describe("Group (issue) ID"),
     eventID: z.string().describe("UUID-format event ID"),
+    projectID: _IssueEventElement.shape.projectID
+      .optional()
+      .describe("Project ID"),
+    message: _IssueEventElement.shape.message
+      .optional()
+      .describe("Event message"),
+    title: _IssueEventElement.shape.title.optional().describe("Event title"),
+    location: _IssueEventElement.shape.location
+      .optional()
+      .describe("Source location (file:line)"),
+    culprit: _IssueEventElement.shape.culprit
+      .optional()
+      .describe("Culprit function/module"),
+    user: _IssueEventElement.shape.user.optional().describe("User context"),
+    tags: _IssueEventElement.shape.tags.optional().describe("Event tags"),
+    platform: _IssueEventElement.shape.platform
+      .optional()
+      .describe("Platform (python, javascript, etc.)"),
+    dateCreated: _IssueEventElement.shape.dateCreated
+      .optional()
+      .describe("ISO 8601 creation timestamp"),
+    crashFile: _IssueEventElement.shape.crashFile
+      .optional()
+      .describe("Crash file URL"),
+    metadata: _IssueEventElement.shape.metadata
+      .optional()
+      .describe("Event metadata"),
   })
   .passthrough()
   .describe("Issue event (list endpoint)");
@@ -1037,6 +1100,18 @@ export const SentryTeamSchema = zBaseTeam
     id: z.string().describe("Team ID"),
     slug: z.string().describe("Team slug"),
     name: z.string().describe("Team name"),
+    dateCreated: zBaseTeam.shape.dateCreated
+      .optional()
+      .describe("Creation date (ISO 8601)"),
+    isMember: zBaseTeam.shape.isMember
+      .optional()
+      .describe("Whether you are a member"),
+    teamRole: zBaseTeam.shape.teamRole
+      .optional()
+      .describe("Your role in the team"),
+    memberCount: zBaseTeam.shape.memberCount
+      .optional()
+      .describe("Number of members"),
   })
   .passthrough();
 

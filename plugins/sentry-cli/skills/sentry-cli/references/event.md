@@ -47,19 +47,19 @@ List events for an issue
 |-------|------|-------------|
 | `id` | string | Internal event ID |
 | `event.type` | string | Event type (error, default, transaction) |
-| `groupID` | unknown |  |
+| `groupID` | string \| null | Group (issue) ID |
 | `eventID` | string | UUID-format event ID |
-| `projectID` | string |  |
-| `message` | string |  |
-| `title` | string |  |
-| `location` | unknown |  |
-| `culprit` | unknown |  |
-| `user` | unknown |  |
-| `tags` | array |  |
-| `platform` | unknown |  |
-| `dateCreated` | string |  |
-| `crashFile` | unknown |  |
-| `metadata` | unknown |  |
+| `projectID` | string | Project ID |
+| `message` | string | Event message |
+| `title` | string | Event title |
+| `location` | string \| null | Source location (file:line) |
+| `culprit` | string \| null | Culprit function/module |
+| `user` | object \| null | User context |
+| `tags` | array | Event tags |
+| `platform` | string \| null | Platform (python, javascript, etc.) |
+| `dateCreated` | string | ISO 8601 creation timestamp |
+| `crashFile` | string \| null | Crash file URL |
+| `metadata` | object \| null | Event metadata |
 
 **Examples:**
 

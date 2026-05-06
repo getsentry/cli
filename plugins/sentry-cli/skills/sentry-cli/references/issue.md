@@ -31,17 +31,17 @@ List issues in a project
 | `id` | string | Numeric issue ID |
 | `shortId` | string | Human-readable short ID (e.g. PROJ-ABC) |
 | `title` | string | Issue title |
-| `culprit` | string |  |
-| `count` | string |  |
-| `userCount` | number |  |
-| `firstSeen` | string |  |
-| `lastSeen` | string |  |
-| `level` | string |  |
-| `status` | string |  |
-| `permalink` | string |  |
-| `project` | object |  |
-| `metadata` | unknown |  |
-| `assignedTo` | unknown |  |
+| `culprit` | string | Culprit string |
+| `count` | string | Total event count |
+| `userCount` | number | Number of affected users |
+| `firstSeen` | string | First occurrence (ISO 8601) |
+| `lastSeen` | string | Most recent occurrence (ISO 8601) |
+| `level` | string | Severity level |
+| `status` | string | Issue status |
+| `permalink` | string | URL to the issue in Sentry |
+| `project` | object | Project info |
+| `metadata` | object | Issue metadata |
+| `assignedTo` | object \| null | Assigned user or team |
 | `priority` | string | Triage priority |
 | `platform` | string | Platform |
 | `substatus` | string \| null | Issue substatus |
@@ -97,19 +97,19 @@ List events for a specific issue
 |-------|------|-------------|
 | `id` | string | Internal event ID |
 | `event.type` | string | Event type (error, default, transaction) |
-| `groupID` | unknown |  |
+| `groupID` | string \| null | Group (issue) ID |
 | `eventID` | string | UUID-format event ID |
-| `projectID` | string |  |
-| `message` | string |  |
-| `title` | string |  |
-| `location` | unknown |  |
-| `culprit` | unknown |  |
-| `user` | unknown |  |
-| `tags` | array |  |
-| `platform` | unknown |  |
-| `dateCreated` | string |  |
-| `crashFile` | unknown |  |
-| `metadata` | unknown |  |
+| `projectID` | string | Project ID |
+| `message` | string | Event message |
+| `title` | string | Event title |
+| `location` | string \| null | Source location (file:line) |
+| `culprit` | string \| null | Culprit function/module |
+| `user` | object \| null | User context |
+| `tags` | array | Event tags |
+| `platform` | string \| null | Platform (python, javascript, etc.) |
+| `dateCreated` | string | ISO 8601 creation timestamp |
+| `crashFile` | string \| null | Crash file URL |
+| `metadata` | object \| null | Event metadata |
 
 ### `sentry issue explain <issue>`
 

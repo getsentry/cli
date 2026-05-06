@@ -340,11 +340,48 @@ export type SchemaFieldInfo = {
   optional: boolean;
 };
 
+/** Leaf-type name mapping for {@link zodTypeToString} */
+const ZOD_TYPE_MAP: Record<string, string> = {
+  ZodString: "string",
+  ZodNumber: "number",
+  ZodBoolean: "boolean",
+  ZodObject: "object",
+  ZodArray: "array",
+  ZodRecord: "object",
+  ZodNull: "null",
+  ZodUnknown: "unknown",
+  ZodAny: "any",
+  ZodEnum: "string",
+  ZodLiteral: "string",
+};
+
+/**
+ * Resolve a `ZodUnion` into a deduplicated `" | "`-joined type string.
+ *
+ * Used by auto-generated `@sentry/api/zod` schemas that represent nullable
+ * fields as `z.union([z.string(), z.null()])` instead of `z.string().nullable()`.
+ */
+function resolveZodUnion(options: ZodType[]): { type: string; optional: boolean } {
+  let optional = false;
+  const parts: string[] = [];
+  for (const opt of options) {
+    const resolved = zodTypeToString(opt);
+    if (resolved.optional) {
+      optional = true;
+    }
+    if (!parts.includes(resolved.type)) {
+      parts.push(resolved.type);
+    }
+  }
+  return { type: parts.join(" | "), optional };
+}
+
 /**
  * Map a Zod type's internal `typeName` to a human-readable string.
  *
  * Unwraps wrapper types (Optional, Nullable, Default) and builds a
  * composite type string (e.g. "string | null" for ZodNullable<ZodString>).
+ * Delegates ZodUnion handling to {@link resolveZodUnion}.
  */
 function zodTypeToString(schema: ZodType): { type: string; optional: boolean } {
   const def = (schema as { _def?: { typeName?: string; innerType?: ZodType } })
@@ -368,19 +405,14 @@ function zodTypeToString(schema: ZodType): { type: string; optional: boolean } {
   if (def.typeName === "ZodDefault" && def.innerType) {
     return zodTypeToString(def.innerType);
   }
+  if (def.typeName === "ZodUnion") {
+    const options = (def as { options?: ZodType[] }).options;
+    if (options?.length) {
+      return resolveZodUnion(options);
+    }
+  }
 
-  const TYPE_MAP: Record<string, string> = {
-    ZodString: "string",
-    ZodNumber: "number",
-    ZodBoolean: "boolean",
-    ZodObject: "object",
-    ZodArray: "array",
-    ZodUnknown: "unknown",
-    ZodAny: "any",
-    ZodEnum: "string",
-  };
-
-  return { type: TYPE_MAP[def.typeName] ?? "unknown", optional: false };
+  return { type: ZOD_TYPE_MAP[def.typeName] ?? "unknown", optional: false };
 }
 
 /**
