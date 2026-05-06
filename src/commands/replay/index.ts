@@ -24,8 +24,8 @@ export const replayRoute = buildRouteMap({
     fullDescription:
       "Search and inspect Session Replays from your Sentry organization.\n\n" +
       "Commands:\n" +
-      "  event    Inspect normalized events from a replay (alias: events)\n" +
-      "  list     List recent replays in an org or project\n" +
+      "  list     Search replay sessions in an org or project\n" +
+      "  event    Expand one replay into a normalized event timeline (alias: events)\n" +
       "  summarize Summarize replay behavior and friction signals\n" +
       "  view     View details of a specific replay\n\n" +
       "Alias: `sentry replays` → `sentry replay list`",

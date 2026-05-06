@@ -145,6 +145,14 @@ export type OutputConfig<T> = {
    * - `generate-skill.ts`: SKILL.md field tables for AI agents
    */
   schema?: ZodType;
+  /**
+   * Emit compact one-line JSON for each yielded value.
+   *
+   * Use this for commands that intentionally yield a stream of records in
+   * `--json` mode so the output is newline-delimited JSON without a separate
+   * command-specific flag.
+   */
+  jsonLines?: boolean;
 };
 
 /**

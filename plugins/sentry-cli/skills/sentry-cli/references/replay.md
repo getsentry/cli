@@ -11,24 +11,17 @@ requires:
 
 Search and inspect Session Replays
 
-### `sentry replay event list <replay-id-or-url...>`
+### `sentry replay event list <replay-target...>`
 
 List normalized events from a Session Replay
 
 **Flags:**
 - `-k, --kind <value>... - Event kind filter (navigation, click, tap, input, focus, blur, scroll, viewport, mutation, dom-snapshot, breadcrumb, network, console, error, span, web-vital, memory, video, mobile, unknown)`
-- `-u, --url <value> - Filter events by current or target URL substring`
 - `--path <value> - Filter events by parsed URL pathname`
-- `-q, --contains <value> - Filter events by text in labels, messages, URLs, selectors, or data`
-- `--selector <value> - Filter events by selector substring`
-- `--from <value> - Start offset (seconds, 90s, 01:23, or 1:02:03)`
-- `--to <value> - End offset (seconds, 90s, 01:23, or 1:02:03)`
-- `--around <value> - Center an evidence window around this offset`
-- `--before <value> - Window before --around (default: 10s)`
-- `--after <value> - Window after --around (default: 30s)`
+- `-q, --search <value> - Filter events by text in labels, messages, URLs, selectors, or data`
+- `--around <value> - Show an evidence window around this replay offset`
 - `-n, --limit <value> - Number of events (1-1000) - (default: "200")`
 - `--raw - Include raw source frame payloads in JSON output`
-- `--jsonl - Emit one JSON object per event (requires --json)`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
 **JSON Fields** (use `--json --fields` to select specific fields):
@@ -60,13 +53,7 @@ List recent Session Replays
 
 **Flags:**
 - `-n, --limit <value> - Number of replays (1-1000) - (default: "25")`
-- `-q, --query <value> - Search query (Sentry replay search syntax)`
-- `-u, --url <value> - Filter by visited URL text using replay search`
-- `--path <value> - Filter by actual visited URL pathname`
-- `--entry-path <value> - Filter by first visited URL pathname`
-- `--exit-path <value> - Filter by last visited URL pathname`
-- `--friction - Only show replays with indexed friction signals (errors, warnings, rage clicks, or dead clicks)`
-- `--problem-only - Only show replays with indexed errors or warnings`
+- `-q, --search <value> - Search query (Sentry replay search syntax)`
 - `-e, --environment <value>... - Filter by environment (repeatable, comma-separated)`
 - `-s, --sort <value> - Sort by: date, oldest, duration, errors, warnings, rage, dead, activity, or a raw replay sort field - (default: "date")`
 - `-t, --period <value> - Time range: "7d", "2026-04-01..2026-05-01", ">=2026-04-01" - (default: "7d")`
@@ -116,16 +103,14 @@ List recent Session Replays
 sentry replay list my-org/frontend
 
 # Search across all projects in an org
-sentry replay list my-org/ --query "environment:production"
+sentry replay list my-org/ --search "environment:production"
 
 # Change the time window and sort
 sentry replay list my-org/frontend --period 24h --sort errors
 
-# Find recent sessions that actually visited a route path
-sentry replay list my-org/frontend --path /signup --json
-
-# Find recent sessions with indexed friction signals
-sentry replay list my-org/frontend --path /signup --friction --json
+# Find recent sessions with replay search syntax
+sentry replay list my-org/frontend \
+  --search "url:*signup* count_errors:>0" --json
 
 # Paginate through results
 sentry replay list my-org/frontend -c next

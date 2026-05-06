@@ -13,7 +13,11 @@ import {
   formatTable,
 } from "../../../lib/formatters/index.js";
 import { filterFields } from "../../../lib/formatters/json.js";
-import { CommandOutput } from "../../../lib/formatters/output.js";
+import {
+  CommandOutput,
+  formatFooter,
+  type HumanRenderer,
+} from "../../../lib/formatters/output.js";
 import type { Column } from "../../../lib/formatters/table.js";
 import { formatDurationCompactMs } from "../../../lib/formatters/time-utils.js";
 import { validateHexId } from "../../../lib/hex-id.js";
@@ -45,38 +49,20 @@ import {
 import { parseReplayTargetArgs } from "../target.js";
 
 type EventListFlags = {
-  readonly after?: number;
   readonly around?: number;
-  readonly before?: number;
-  readonly contains?: string;
   readonly fields?: string[];
   readonly fresh: boolean;
-  readonly from?: number;
   readonly json: boolean;
-  readonly jsonl: boolean;
   readonly kind?: readonly string[];
   readonly limit: number;
   readonly path?: string;
   readonly raw: boolean;
-  readonly selector?: string;
-  readonly to?: number;
-  readonly url?: string;
+  readonly search?: string;
 };
-
-type EventListResult = {
-  events: ReplayEvent[];
-  total: number;
-  truncated: boolean;
-  replayId: string;
-  org: string;
-  project?: string;
-};
-
-type ReplayEventOutput = EventListResult | ReplayEvent;
 
 const COMMAND_NAME = "replay event list";
 const USAGE_HINT =
-  "sentry replay event list [<org>/<project>/]<replay-id> | <replay-url>";
+  "sentry replay event list [<org>/<project>/]<replay-id> [path] | <replay-url> [path]";
 const DEFAULT_LIMIT = 200;
 const DEFAULT_BEFORE_MS = 10_000;
 const DEFAULT_AFTER_MS = 30_000;
@@ -117,32 +103,32 @@ function resolveWindow(flags: EventListFlags): {
   fromMs?: number;
   toMs?: number;
 } {
-  if (
-    flags.around !== undefined &&
-    (flags.from !== undefined || flags.to !== undefined)
-  ) {
-    throw new ValidationError(
-      "--around cannot be combined with --from or --to",
-      "around"
-    );
+  if (flags.around === undefined) {
+    return {};
   }
 
-  if (flags.around === undefined) {
-    if (flags.before !== undefined || flags.after !== undefined) {
+  return {
+    fromMs: Math.max(0, flags.around - DEFAULT_BEFORE_MS),
+    toMs: flags.around + DEFAULT_AFTER_MS,
+  };
+}
+
+function splitTargetAndPathArgs(
+  args: string[],
+  flagPath: string | undefined
+): { targetArgs: string[]; path?: string } {
+  const lastArg = args.at(-1);
+  if (args.length > 1 && lastArg?.startsWith("/")) {
+    if (flagPath) {
       throw new ValidationError(
-        "--before and --after require --around",
-        flags.before !== undefined ? "before" : "after"
+        "Path provided both positionally and with --path",
+        "path"
       );
     }
-    return { fromMs: flags.from, toMs: flags.to };
+    return { targetArgs: args.slice(0, -1), path: lastArg };
   }
 
-  const before = flags.before ?? DEFAULT_BEFORE_MS;
-  const after = flags.after ?? DEFAULT_AFTER_MS;
-  return {
-    fromMs: Math.max(0, flags.around - before),
-    toMs: flags.around + after,
-  };
+  return { targetArgs: args, path: flagPath };
 }
 
 function eventLabel(event: ReplayEvent): string {
@@ -187,50 +173,33 @@ const EVENT_COLUMNS: Column<ReplayEvent>[] = [
   },
 ];
 
-function formatEventListHuman(result: EventListResult): string {
-  if (result.events.length === 0) {
-    return "No replay events matched the filters.";
-  }
-
-  const scope = result.project
-    ? `${result.org}/${result.project}`
-    : `${result.org}`;
-  return (
-    `Replay events for ${scope}/${result.replayId.slice(0, 8)}:\n\n` +
-    formatTable(result.events, EVENT_COLUMNS, { truncate: true })
-  );
-}
-
-function isEventListResult(data: ReplayEventOutput): data is EventListResult {
-  return "events" in data;
-}
-
-function jsonTransformEventOutput(
-  data: ReplayEventOutput,
-  fields?: string[]
-): unknown {
-  if (!isEventListResult(data)) {
-    return fields && fields.length > 0 ? filterFields(data, fields) : data;
-  }
-
-  const items =
-    fields && fields.length > 0
-      ? data.events.map((event) => filterFields(event, fields))
-      : data.events;
+function createEventListHumanRenderer(): HumanRenderer<ReplayEvent> {
+  const events: ReplayEvent[] = [];
   return {
-    data: items,
-    total: data.total,
-    truncated: data.truncated,
-    replayId: data.replayId,
-    org: data.org,
-    project: data.project,
+    render(event) {
+      events.push(event);
+      return "";
+    },
+    finalize(hint) {
+      if (events.length === 0) {
+        return `No replay events matched the filters.${hint ? formatFooter(hint) : "\n"}`;
+      }
+
+      const replayId = events[0]?.replayId;
+      const title = replayId
+        ? `Replay events for ${replayId.slice(0, 8)}:`
+        : "Replay events:";
+      const output = `${title}\n\n${formatTable(events, EVENT_COLUMNS, { truncate: true })}`;
+      return hint ? `${output}${formatFooter(hint)}` : `${output}\n`;
+    },
   };
 }
 
-function validateJsonlMode(flags: EventListFlags): void {
-  if (flags.jsonl && !flags.json) {
-    throw new ValidationError("--jsonl requires --json", "jsonl");
-  }
+function jsonTransformReplayEvent(
+  event: ReplayEvent,
+  fields?: string[]
+): unknown {
+  return fields && fields.length > 0 ? filterFields(event, fields) : event;
 }
 
 export const listCommand = buildCommand({
@@ -243,24 +212,25 @@ export const listCommand = buildCommand({
       "  <org>/<replay-id>        - explicit organization\n" +
       "  <org>/<project>/<id>     - explicit org/project context\n" +
       "  <replay-url>             - parse org and replay ID from a Sentry URL\n\n" +
+      "Add a trailing /path argument to focus the timeline on one route.\n\n" +
       "Examples:\n" +
       "  sentry replay events sentry/346789a703f6454384f1de473b8b9fcc --json\n" +
-      "  sentry replay event list sentry/cli/346789a703f6454384f1de473b8b9fcc --kind click,network,error\n" +
-      "  sentry replay events sentry/346789a703f6454384f1de473b8b9fcc --path /signup --json\n" +
-      "  sentry replay events sentry/346789a703f6454384f1de473b8b9fcc --around 01:23 --json\n" +
-      "  sentry replay events sentry/346789a703f6454384f1de473b8b9fcc --json --jsonl",
+      "  sentry replay events sentry/cli/346789a703f6454384f1de473b8b9fcc --kind click,network,error --json\n" +
+      '  sentry replay events sentry/346789a703f6454384f1de473b8b9fcc /signup -q "button[type=submit]" --json\n' +
+      "  sentry replay events sentry/346789a703f6454384f1de473b8b9fcc --around 01:23 --json",
   },
   output: {
-    human: formatEventListHuman,
-    jsonTransform: jsonTransformEventOutput,
+    human: createEventListHumanRenderer,
+    jsonTransform: jsonTransformReplayEvent,
+    jsonLines: true,
     schema: ReplayEventSchema,
   },
   parameters: {
     positional: {
       kind: "array",
       parameter: {
-        placeholder: "replay-id-or-url",
-        brief: "[<org>/<project>] <replay-id> or <replay-url>",
+        placeholder: "replay-target",
+        brief: "[<org>/<project>] <replay-id> [path] or <replay-url> [path]",
         parse: String,
       },
     },
@@ -272,59 +242,23 @@ export const listCommand = buildCommand({
         variadic: true,
         optional: true,
       },
-      url: {
-        kind: "parsed",
-        parse: String,
-        brief: "Filter events by current or target URL substring",
-        optional: true,
-      },
       path: {
         kind: "parsed",
         parse: String,
         brief: "Filter events by parsed URL pathname",
         optional: true,
       },
-      contains: {
+      search: {
         kind: "parsed",
         parse: String,
         brief:
           "Filter events by text in labels, messages, URLs, selectors, or data",
         optional: true,
       },
-      selector: {
-        kind: "parsed",
-        parse: String,
-        brief: "Filter events by selector substring",
-        optional: true,
-      },
-      from: {
-        kind: "parsed",
-        parse: parseOffsetFlag,
-        brief: "Start offset (seconds, 90s, 01:23, or 1:02:03)",
-        optional: true,
-      },
-      to: {
-        kind: "parsed",
-        parse: parseOffsetFlag,
-        brief: "End offset (seconds, 90s, 01:23, or 1:02:03)",
-        optional: true,
-      },
       around: {
         kind: "parsed",
         parse: parseOffsetFlag,
-        brief: "Center an evidence window around this offset",
-        optional: true,
-      },
-      before: {
-        kind: "parsed",
-        parse: parseOffsetFlag,
-        brief: "Window before --around (default: 10s)",
-        optional: true,
-      },
-      after: {
-        kind: "parsed",
-        parse: parseOffsetFlag,
-        brief: "Window after --around (default: 30s)",
+        brief: "Show an evidence window around this replay offset",
         optional: true,
       },
       limit: {
@@ -338,28 +272,22 @@ export const listCommand = buildCommand({
         brief: "Include raw source frame payloads in JSON output",
         default: false,
       },
-      jsonl: {
-        kind: "boolean",
-        brief: "Emit one JSON object per event (requires --json)",
-        default: false,
-      },
       fresh: FRESH_FLAG,
     },
     aliases: {
       ...FRESH_ALIASES,
       k: "kind",
       n: "limit",
-      q: "contains",
-      u: "url",
+      q: "search",
     },
   },
   async *func(this: SentryContext, flags: EventListFlags, ...args: string[]) {
-    validateJsonlMode(flags);
     applyFreshFlag(flags);
     const kinds = parseEventKinds(flags.kind);
     const window = resolveWindow(flags);
+    const { path, targetArgs } = splitTargetAndPathArgs(args, flags.path);
 
-    const parsedArgs = parseReplayTargetArgs(args, USAGE_HINT);
+    const parsedArgs = parseReplayTargetArgs(targetArgs, USAGE_HINT);
     const replayId = validateHexId(parsedArgs.replayId, "replay ID");
     const resolved = await resolveOrgOptionalProjectFromArg(
       parsedArgs.targetArg,
@@ -399,30 +327,16 @@ export const listCommand = buildCommand({
     });
     const filtered = filterNormalizedReplayEvents(allEvents, {
       kinds,
-      url: flags.url,
-      path: flags.path,
-      contains: flags.contains,
-      selector: flags.selector,
+      path,
+      contains: flags.search,
       ...window,
     });
     const events = filtered.slice(0, flags.limit);
     const truncated = filtered.length > events.length;
 
-    if (flags.jsonl) {
-      for (const event of events) {
-        yield new CommandOutput<ReplayEventOutput>(event);
-      }
-      return;
+    for (const event of events) {
+      yield new CommandOutput(event);
     }
-
-    yield new CommandOutput<ReplayEventOutput>({
-      events,
-      total: filtered.length,
-      truncated,
-      replayId,
-      org: resolved.org,
-      project: resolved.project,
-    });
 
     const countText = `Showing ${events.length} of ${filtered.length} replay event${filtered.length === 1 ? "" : "s"}.`;
     const truncationHint = truncated

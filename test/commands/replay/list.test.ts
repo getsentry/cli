@@ -30,6 +30,7 @@ describe("parseSort", () => {
     expect(parseSort("date")).toBe("-started_at");
     expect(parseSort("duration")).toBe("-duration");
     expect(parseSort("errors")).toBe("-count_errors");
+    expect(parseSort("rage")).toBe("-count_rage_clicks");
     expect(parseSort("-count_rage_clicks")).toBe("-count_rage_clicks");
   });
 
@@ -62,19 +63,6 @@ describe("listCommand.func", () => {
       warning_ids: [],
     },
   ];
-
-  function replayWithIndex(index: number): ReplayListItem {
-    return {
-      ...sampleReplays[0]!,
-      id: index.toString(16).padStart(32, "0"),
-    };
-  }
-
-  function replayPage(start: number, count: number): ReplayListItem[] {
-    return Array.from({ length: count }, (_, offset) =>
-      replayWithIndex(start + offset)
-    );
-  }
 
   function createMockContext() {
     const stdoutWrite = mock(() => true);
@@ -179,22 +167,10 @@ describe("listCommand.func", () => {
     });
   });
 
-  test("combines URL sugar with query and filters friction rows", async () => {
+  test("passes one search query through Sentry search syntax", async () => {
     resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
     listReplaysSpy.mockResolvedValue({
-      data: [
-        sampleReplays[0]!,
-        {
-          ...sampleReplays[0]!,
-          id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          count_errors: 0,
-          count_dead_clicks: 0,
-          count_rage_clicks: 0,
-          count_warnings: 0,
-          error_ids: [],
-          warning_ids: [],
-        },
-      ],
+      data: sampleReplays,
       nextCursor: undefined,
     });
 
@@ -203,13 +179,11 @@ describe("listCommand.func", () => {
     await func.call(
       context,
       {
-        friction: true,
         limit: 25,
         json: true,
         period: parsePeriod("7d"),
-        query: "environment:production",
+        search: "environment:production url:*signup* count_errors:>0",
         sort: "-started_at",
-        url: "/signup",
       },
       "test-org/cli"
     );
@@ -217,9 +191,9 @@ describe("listCommand.func", () => {
     expect(listReplaysSpy).toHaveBeenCalledWith("test-org", {
       environment: undefined,
       fields: [...REPLAY_LIST_FIELDS],
-      limit: apiClient.API_MAX_PER_PAGE,
+      limit: 25,
       projectSlugs: ["cli"],
-      query: "environment:production url:*/signup*",
+      query: "environment:production url:*signup* count_errors:>0",
       sort: "-started_at",
       cursor: undefined,
       statsPeriod: "7d",
@@ -231,270 +205,14 @@ describe("listCommand.func", () => {
     expect(parsed.data[0].id).toBe(sampleReplays[0]?.id);
   });
 
-  test("problem-only filters to errors and warnings, not click friction", async () => {
+  test("passes large limits to the API layer for auto-pagination", async () => {
     resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
     listReplaysSpy.mockResolvedValue({
-      data: [
-        sampleReplays[0]!,
-        {
-          ...sampleReplays[0]!,
-          id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          count_errors: 0,
-          count_dead_clicks: 3,
-          count_rage_clicks: 0,
-          count_warnings: 0,
-          error_ids: [],
-          warning_ids: [],
-        },
-      ],
+      data: sampleReplays,
       nextCursor: undefined,
     });
 
-    const { context, stdoutWrite } = createMockContext();
-    const func = await listCommand.loader();
-    await func.call(
-      context,
-      {
-        "problem-only": true,
-        limit: 25,
-        json: true,
-        period: parsePeriod("7d"),
-        sort: "-started_at",
-      },
-      "test-org/cli"
-    );
-
-    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
-    const parsed = JSON.parse(output);
-    expect(parsed.data).toHaveLength(1);
-    expect(parsed.data[0].id).toBe(sampleReplays[0]?.id);
-  });
-
-  test("filters --path by actual replay URL pathname", async () => {
-    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
-    listReplaysSpy.mockResolvedValue({
-      data: [
-        {
-          ...sampleReplays[0]!,
-          urls: ["https://example.com/signup/direct"],
-        },
-        {
-          ...sampleReplays[0]!,
-          id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          urls: ["https://example.com/replays/?query=/signup"],
-        },
-      ],
-      nextCursor: undefined,
-    });
-
-    const { context, stdoutWrite } = createMockContext();
-    const func = await listCommand.loader();
-    await func.call(
-      context,
-      {
-        limit: 25,
-        json: true,
-        path: "/signup",
-        period: parsePeriod("7d"),
-        sort: "-started_at",
-      },
-      "test-org/cli"
-    );
-
-    expect(listReplaysSpy).toHaveBeenCalledWith("test-org", {
-      environment: undefined,
-      fields: [...REPLAY_LIST_FIELDS],
-      limit: apiClient.API_MAX_PER_PAGE,
-      projectSlugs: ["cli"],
-      query: "url:*/signup*",
-      sort: "-started_at",
-      cursor: undefined,
-      statsPeriod: "7d",
-    });
-
-    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
-    const parsed = JSON.parse(output);
-    expect(parsed.data).toHaveLength(1);
-    expect(parsed.data[0].urls[0]).toBe("https://example.com/signup/direct");
-  });
-
-  test("fills the requested limit across client-filtered replay pages", async () => {
-    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
-    listReplaysSpy
-      .mockResolvedValueOnce({
-        data: [
-          {
-            ...sampleReplays[0]!,
-            urls: ["https://example.com/replays/?query=/signup"],
-          },
-        ],
-        nextCursor: "0:100:0",
-      })
-      .mockResolvedValueOnce({
-        data: [
-          {
-            ...sampleReplays[0]!,
-            id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            urls: ["https://example.com/signup/direct"],
-          },
-        ],
-        nextCursor: "0:200:0",
-      });
-
-    const { context, stdoutWrite } = createMockContext();
-    const func = await listCommand.loader();
-    await func.call(
-      context,
-      {
-        limit: 1,
-        json: true,
-        path: "/signup",
-        period: parsePeriod("7d"),
-        sort: "-started_at",
-      },
-      "test-org/cli"
-    );
-
-    expect(listReplaysSpy).toHaveBeenCalledTimes(2);
-    expect(listReplaysSpy).toHaveBeenNthCalledWith(1, "test-org", {
-      environment: undefined,
-      fields: [...REPLAY_LIST_FIELDS],
-      limit: apiClient.API_MAX_PER_PAGE,
-      projectSlugs: ["cli"],
-      query: "url:*/signup*",
-      sort: "-started_at",
-      cursor: undefined,
-      statsPeriod: "7d",
-    });
-    expect(listReplaysSpy).toHaveBeenNthCalledWith(2, "test-org", {
-      environment: undefined,
-      fields: [...REPLAY_LIST_FIELDS],
-      limit: apiClient.API_MAX_PER_PAGE,
-      projectSlugs: ["cli"],
-      query: "url:*/signup*",
-      sort: "-started_at",
-      cursor: "0:100:0",
-      statsPeriod: "7d",
-    });
-
-    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
-    const parsed = JSON.parse(output);
-    expect(parsed.data).toHaveLength(1);
-    expect(parsed.data[0].id).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-    expect(parsed.nextCursor).toBe("0:200:0");
-  });
-
-  test("stores a mid-page cursor when client filters fill before page end", async () => {
-    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
-    listReplaysSpy.mockResolvedValueOnce({
-      data: [
-        {
-          ...sampleReplays[0]!,
-          id: "11111111111111111111111111111111",
-          urls: ["https://example.com/signup/one"],
-        },
-        {
-          ...sampleReplays[0]!,
-          id: "22222222222222222222222222222222",
-          urls: ["https://example.com/signup/two"],
-        },
-      ],
-      nextCursor: "0:100:0",
-    });
-
-    const { context, stdoutWrite } = createMockContext();
-    const func = await listCommand.loader();
-    await func.call(
-      context,
-      {
-        limit: 1,
-        json: true,
-        path: "/signup",
-        period: parsePeriod("7d"),
-        sort: "-started_at",
-      },
-      "test-org/cli"
-    );
-
-    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
-    const parsed = JSON.parse(output);
-    expect(parsed.data).toHaveLength(1);
-    expect(parsed.data[0].id).toBe("11111111111111111111111111111111");
-    expect(parsed.nextCursor).toBe("|11111111111111111111111111111111");
-  });
-
-  test("resumes from a mid-page cursor for client-filtered replays", async () => {
-    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
-    resolveCursorSpy.mockReturnValueOnce({
-      cursor: "|11111111111111111111111111111111",
-      direction: "next" as const,
-    });
-    listReplaysSpy.mockResolvedValueOnce({
-      data: [
-        {
-          ...sampleReplays[0]!,
-          id: "11111111111111111111111111111111",
-          urls: ["https://example.com/signup/one"],
-        },
-        {
-          ...sampleReplays[0]!,
-          id: "22222222222222222222222222222222",
-          urls: ["https://example.com/signup/two"],
-        },
-      ],
-      nextCursor: "0:100:0",
-    });
-
-    const { context, stdoutWrite } = createMockContext();
-    const func = await listCommand.loader();
-    await func.call(
-      context,
-      {
-        cursor: "next",
-        limit: 1,
-        json: true,
-        path: "/signup",
-        period: parsePeriod("7d"),
-        sort: "-started_at",
-      },
-      "test-org/cli"
-    );
-
-    expect(listReplaysSpy).toHaveBeenCalledWith("test-org", {
-      environment: undefined,
-      fields: [...REPLAY_LIST_FIELDS],
-      limit: apiClient.API_MAX_PER_PAGE,
-      projectSlugs: ["cli"],
-      query: "url:*/signup*",
-      sort: "-started_at",
-      cursor: undefined,
-      statsPeriod: "7d",
-    });
-
-    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
-    const parsed = JSON.parse(output);
-    expect(parsed.data).toHaveLength(1);
-    expect(parsed.data[0].id).toBe("22222222222222222222222222222222");
-    expect(parsed.nextCursor).toBe("0:100:0");
-  });
-
-  test("caps unfiltered replay API page size when filling large limits", async () => {
-    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
-    listReplaysSpy
-      .mockResolvedValueOnce({
-        data: replayPage(0, apiClient.API_MAX_PER_PAGE),
-        nextCursor: "0:100:0",
-      })
-      .mockResolvedValueOnce({
-        data: replayPage(100, apiClient.API_MAX_PER_PAGE),
-        nextCursor: "0:200:0",
-      })
-      .mockResolvedValueOnce({
-        data: replayPage(200, apiClient.API_MAX_PER_PAGE),
-        nextCursor: "0:300:0",
-      });
-
-    const { context, stdoutWrite } = createMockContext();
+    const { context } = createMockContext();
     const func = await listCommand.loader();
     await func.call(
       context,
@@ -507,152 +225,10 @@ describe("listCommand.func", () => {
       "test-org/cli"
     );
 
-    expect(listReplaysSpy).toHaveBeenCalledTimes(3);
-    for (const [callIndex, cursor] of [
-      undefined,
-      "0:100:0",
-      "0:200:0",
-    ].entries()) {
-      expect(listReplaysSpy).toHaveBeenNthCalledWith(
-        callIndex + 1,
-        "test-org",
-        {
-          environment: undefined,
-          fields: [...REPLAY_LIST_FIELDS],
-          limit: apiClient.API_MAX_PER_PAGE,
-          projectSlugs: ["cli"],
-          query: undefined,
-          sort: "-started_at",
-          cursor,
-          statsPeriod: "7d",
-        }
-      );
-    }
-
-    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
-    const parsed = JSON.parse(output);
-    const lastReplay = replayWithIndex(249);
-    expect(parsed.data).toHaveLength(250);
-    expect(parsed.data[249].id).toBe(lastReplay.id);
-    expect(parsed.nextCursor).toBe(`0:200:0|${lastReplay.id}`);
-  });
-
-  test("resumes from a mid-page cursor for unfiltered replays", async () => {
-    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
-    resolveCursorSpy.mockReturnValueOnce({
-      cursor: `0:200:0|${replayWithIndex(249).id}`,
-      direction: "next" as const,
-    });
-    listReplaysSpy.mockResolvedValueOnce({
-      data: replayPage(200, apiClient.API_MAX_PER_PAGE),
-      nextCursor: "0:300:0",
-    });
-
-    const { context, stdoutWrite } = createMockContext();
-    const func = await listCommand.loader();
-    await func.call(
-      context,
-      {
-        cursor: "next",
-        limit: 25,
-        json: true,
-        period: parsePeriod("7d"),
-        sort: "-started_at",
-      },
-      "test-org/cli"
+    expect(listReplaysSpy).toHaveBeenCalledWith(
+      "test-org",
+      expect.objectContaining({ limit: 250 })
     );
-
-    expect(listReplaysSpy).toHaveBeenCalledWith("test-org", {
-      environment: undefined,
-      fields: [...REPLAY_LIST_FIELDS],
-      limit: apiClient.API_MAX_PER_PAGE,
-      projectSlugs: ["cli"],
-      query: undefined,
-      sort: "-started_at",
-      cursor: "0:200:0",
-      statsPeriod: "7d",
-    });
-
-    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
-    const parsed = JSON.parse(output);
-    const lastReplay = replayWithIndex(274);
-    expect(parsed.data).toHaveLength(25);
-    expect(parsed.data[0].id).toBe(replayWithIndex(250).id);
-    expect(parsed.data[24].id).toBe(lastReplay.id);
-    expect(parsed.nextCursor).toBe(`0:200:0|${lastReplay.id}`);
-  });
-
-  test("uses one server URL prefilter for positional path filters", async () => {
-    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
-    listReplaysSpy.mockResolvedValue({ data: sampleReplays });
-
-    const { context } = createMockContext();
-    const func = await listCommand.loader();
-    await func.call(
-      context,
-      {
-        "entry-path": "/home",
-        limit: 25,
-        json: true,
-        path: "/signup",
-        period: parsePeriod("7d"),
-        sort: "-started_at",
-      },
-      "test-org/cli"
-    );
-
-    expect(listReplaysSpy).toHaveBeenCalledWith("test-org", {
-      environment: undefined,
-      fields: [...REPLAY_LIST_FIELDS],
-      limit: apiClient.API_MAX_PER_PAGE,
-      projectSlugs: ["cli"],
-      query: "url:*/signup*",
-      sort: "-started_at",
-      cursor: undefined,
-      statsPeriod: "7d",
-    });
-  });
-
-  test("does not duplicate server URL filters when --url and --path combine", async () => {
-    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
-    listReplaysSpy.mockResolvedValue({
-      data: [
-        {
-          ...sampleReplays[0]!,
-          urls: ["https://example.com/signup/direct"],
-        },
-      ],
-    });
-
-    const { context, stdoutWrite } = createMockContext();
-    const func = await listCommand.loader();
-    await func.call(
-      context,
-      {
-        limit: 25,
-        json: true,
-        path: "/signup",
-        period: parsePeriod("7d"),
-        sort: "-started_at",
-        url: "example.com",
-      },
-      "test-org/cli"
-    );
-
-    expect(listReplaysSpy).toHaveBeenCalledWith("test-org", {
-      environment: undefined,
-      fields: [...REPLAY_LIST_FIELDS],
-      limit: apiClient.API_MAX_PER_PAGE,
-      projectSlugs: ["cli"],
-      query: "url:*example.com*",
-      sort: "-started_at",
-      cursor: undefined,
-      statsPeriod: "7d",
-    });
-
-    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
-    const parsed = JSON.parse(output);
-    expect(parsed.data).toHaveLength(1);
   });
 
   test("renders human output with a replay hint", async () => {

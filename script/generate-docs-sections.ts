@@ -132,15 +132,15 @@ function isStandaloneCommand(route: RouteInfo): boolean {
  */
 function getSubcommandNames(route: RouteInfo): string[] {
   const prefix = `sentry ${route.name} `;
-  return [
-    ...new Set(
+  return Array.from(
+    new Set(
       route.commands.map((cmd) =>
         cmd.path.startsWith(prefix)
           ? cmd.path.slice(prefix.length)
           : (cmd.path.split(" ").at(-1) ?? route.name)
       )
-    ),
-  ];
+    )
+  );
 }
 
 /**

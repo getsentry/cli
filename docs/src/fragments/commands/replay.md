@@ -8,16 +8,14 @@
 sentry replay list my-org/frontend
 
 # Search across all projects in an org
-sentry replay list my-org/ --query "environment:production"
+sentry replay list my-org/ --search "environment:production"
 
 # Change the time window and sort
 sentry replay list my-org/frontend --period 24h --sort errors
 
-# Find recent sessions that actually visited a route path
-sentry replay list my-org/frontend --path /signup --json
-
-# Find recent sessions with indexed friction signals
-sentry replay list my-org/frontend --path /signup --friction --json
+# Find recent sessions with replay search syntax
+sentry replay list my-org/frontend \
+  --search "url:*signup* count_errors:>0" --json
 
 # Paginate through results
 sentry replay list my-org/frontend -c next
@@ -62,12 +60,9 @@ sentry replay events my-org/346789a703f6454384f1de473b8b9fcc --json
 
 # Focus on user actions and failures on a page
 sentry replay events my-org/346789a703f6454384f1de473b8b9fcc \
-  --path /signup --kind click,network,console,error --json
+  /signup --kind click,network,console,error --json
 
 # Pull an evidence window around a timestamp
 sentry replay events my-org/346789a703f6454384f1de473b8b9fcc \
   --around 01:23 --json
-
-# Emit newline-delimited JSON for large timelines
-sentry replay events my-org/346789a703f6454384f1de473b8b9fcc --json --jsonl
 ```

@@ -115,7 +115,7 @@ describe("replay event list", () => {
     resolveTargetSpy.mockRestore();
   });
 
-  test("renders filtered JSON event envelope", async () => {
+  test("streams filtered JSON events with --json", async () => {
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
     await func.call(
@@ -123,11 +123,9 @@ describe("replay event list", () => {
       {
         fresh: false,
         json: true,
-        jsonl: false,
         kind: ["click,network"],
         limit: 10,
         raw: false,
-        url: "/signup",
       },
       `test-org/cli/${REPLAY_ID}`
     );
@@ -139,17 +137,20 @@ describe("replay event list", () => {
       { expectedSegments: 1 }
     );
 
-    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
-    const parsed = JSON.parse(output);
-    expect(parsed.data).toHaveLength(2);
-    expect(parsed.data[0].kind).toBe("click");
-    expect(parsed.data[0].selector).toBe("button[type=submit]");
-    expect(parsed.data[1].kind).toBe("network");
-    expect(parsed.total).toBe(2);
-    expect(parsed.truncated).toBe(false);
+    const lines = stdoutWrite.mock.calls
+      .map((call) => call[0])
+      .join("")
+      .trim()
+      .split("\n");
+    expect(lines).toHaveLength(2);
+    const first = JSON.parse(lines[0]!);
+    const second = JSON.parse(lines[1]!);
+    expect(first.kind).toBe("click");
+    expect(first.selector).toBe("button[type=submit]");
+    expect(second.kind).toBe("network");
   });
 
-  test("emits JSONL when requested", async () => {
+  test("uses -q search text for normalized event fields", async () => {
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
     await func.call(
@@ -157,9 +158,9 @@ describe("replay event list", () => {
       {
         fresh: false,
         json: true,
-        jsonl: true,
-        limit: 2,
+        limit: 10,
         raw: false,
+        search: "button[type=submit]",
       },
       `test-org/${REPLAY_ID}`
     );
@@ -169,31 +170,53 @@ describe("replay event list", () => {
       .join("")
       .trim()
       .split("\n");
-    expect(lines).toHaveLength(2);
-    expect(JSON.parse(lines[0]!).kind).toBe("navigation");
-    expect(JSON.parse(lines[1]!).kind).toBe("click");
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]!).kind).toBe("click");
   });
 
-  test("rejects before or after windows without around", async () => {
-    const { context } = createMockContext();
+  test("accepts a trailing positional path filter", async () => {
+    const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
+    await func.call(
+      context,
+      {
+        fresh: false,
+        json: true,
+        kind: ["click,network"],
+        limit: 10,
+        raw: false,
+      },
+      `test-org/${REPLAY_ID}`,
+      "/signup"
+    );
 
-    await expect(
-      func.call(
-        context,
-        {
-          before: 5000,
-          fresh: false,
-          json: true,
-          jsonl: false,
-          limit: 10,
-          raw: false,
-        },
-        `test-org/cli/${REPLAY_ID}`
-      )
-    ).rejects.toThrow("--before and --after require --around");
+    const lines = stdoutWrite.mock.calls
+      .map((call) => call[0])
+      .join("")
+      .trim()
+      .split("\n");
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]!).kind).toBe("click");
+  });
 
-    expect(getReplaySpy).not.toHaveBeenCalled();
-    expect(getReplayRecordingSegmentsSpy).not.toHaveBeenCalled();
+  test("renders a human table from streamed events", async () => {
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      {
+        fresh: false,
+        json: false,
+        kind: ["click"],
+        limit: 10,
+        raw: false,
+      },
+      `test-org/${REPLAY_ID}`
+    );
+
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    expect(output).toContain("Replay events for 346789a7:");
+    expect(output).toContain("Sign up");
+    expect(output).toContain("Showing 1 of 1 replay event.");
   });
 });

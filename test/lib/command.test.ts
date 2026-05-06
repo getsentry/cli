@@ -872,6 +872,30 @@ describe("buildCommand output config", () => {
     expect(receivedFlags!.fields).toBeUndefined();
   });
 
+  test("jsonLines emits compact JSON records without a command-specific flag", async () => {
+    const command = buildCommand<{ json: boolean }, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      output: { human: () => "unused", jsonLines: true },
+      parameters: {},
+      async *func(this: TestContext, _flags: { json: boolean }) {
+        yield new CommandOutput({ id: 1 });
+        yield new CommandOutput({ id: 2 });
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    await run(app, ["test", "--json"], ctx as TestContext);
+
+    expect(ctx.output.join("")).toBe('{"id":1}\n{"id":2}\n');
+  });
+
   test("does not inject --json/--fields without output: 'json'", async () => {
     let funcCalled = false;
 

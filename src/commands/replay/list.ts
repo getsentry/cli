@@ -5,9 +5,7 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { MAX_PAGINATION_PAGES } from "../../lib/api/infrastructure.js";
 import {
-  API_MAX_PER_PAGE,
   isReplaySortValue,
   listReplays,
   type ReplaySortValue,
@@ -44,7 +42,6 @@ import { withProgress } from "../../lib/polling.js";
 import {
   getReplayUserLabel,
   parseReplayEnvironmentFilter,
-  replayMatchesPath,
 } from "../../lib/replay-search.js";
 import { resolveOrgOptionalProjectFromArg } from "../../lib/resolve-target.js";
 import { sanitizeQuery } from "../../lib/search-query.js";
@@ -63,19 +60,13 @@ import {
 type ListFlags = {
   readonly environment?: readonly string[];
   readonly limit: number;
-  readonly "problem-only": boolean;
-  readonly friction: boolean;
-  readonly "entry-path"?: string;
-  readonly "exit-path"?: string;
-  readonly path?: string;
-  readonly query?: string;
+  readonly search?: string;
   readonly sort: ReplaySortValue;
   readonly period: TimeRange;
   readonly json: boolean;
   readonly cursor?: string;
   readonly fresh: boolean;
   readonly fields?: string[];
-  readonly url?: string;
 };
 
 type ReplayListResult = {
@@ -97,20 +88,6 @@ type ReplaySortKey =
   | "rage"
   | "warnings";
 
-type ReplayListHintFlags = Pick<
-  ListFlags,
-  | "entry-path"
-  | "environment"
-  | "exit-path"
-  | "friction"
-  | "path"
-  | "problem-only"
-  | "query"
-  | "sort"
-  | "period"
-  | "url"
->;
-
 const SORT_MAP: Record<ReplaySortKey, ReplaySortValue> = {
   activity: "-activity",
   date: "-started_at",
@@ -126,38 +103,6 @@ const DEFAULT_PERIOD = LIST_PERIOD_FLAG.default;
 const DEFAULT_SORT: ReplaySortValue = SORT_MAP.date;
 const PAGINATION_KEY = "replay-list";
 const COMMAND_NAME = "replay list";
-const SIMPLE_SEARCH_VALUE_RE = /^[^\s:"]+$/;
-
-function encodeReplayCursor(
-  serverCursor: string | undefined,
-  afterReplayId?: string
-): string | undefined {
-  if (afterReplayId) {
-    return `${serverCursor ?? ""}|${afterReplayId}`;
-  }
-  return serverCursor;
-}
-
-function decodeReplayCursor(cursor: string | undefined): {
-  serverCursor: string | undefined;
-  afterReplayId: string | undefined;
-} {
-  if (!cursor) {
-    return { serverCursor: undefined, afterReplayId: undefined };
-  }
-
-  const pipeIndex = cursor.lastIndexOf("|");
-  if (pipeIndex === -1) {
-    return { serverCursor: cursor, afterReplayId: undefined };
-  }
-
-  const serverCursor = cursor.slice(0, pipeIndex);
-  const afterReplayId = cursor.slice(pipeIndex + 1);
-  return {
-    serverCursor: serverCursor || undefined,
-    afterReplayId: afterReplayId || undefined,
-  };
-}
 
 function parseLimit(value: string): number {
   return validateLimit(value, LIST_MIN_LIMIT, LIST_MAX_LIMIT);
@@ -189,219 +134,6 @@ function formatCount(value: number | null | undefined): string {
 
 function replayUserLabel(replay: ReplayListItem): string {
   return getReplayUserLabel(replay) ?? "—";
-}
-
-function quoteSearchValue(value: string): string {
-  return SIMPLE_SEARCH_VALUE_RE.test(value) ? value : JSON.stringify(value);
-}
-
-function wildcardSearchValue(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.includes("*")) {
-    return trimmed;
-  }
-  return `*${trimmed}*`;
-}
-
-function buildReplaySearchQuery(filters: {
-  query?: string;
-  url?: string;
-  path?: string;
-  entryPath?: string;
-  exitPath?: string;
-}): string | undefined {
-  const { entryPath, exitPath, path, query, url } = filters;
-  // Replay search only has a generic visited-URL field. Use at most one broad
-  // server prefilter, then apply path and position checks against the URL list.
-  const routePathPrefilter = url ? undefined : (path ?? entryPath ?? exitPath);
-  const parts = [
-    query,
-    url ? `url:${quoteSearchValue(wildcardSearchValue(url))}` : undefined,
-    routePathPrefilter
-      ? `url:${quoteSearchValue(wildcardSearchValue(routePathPrefilter))}`
-      : undefined,
-  ].filter((part): part is string => Boolean(part));
-  return parts.length > 0 ? parts.join(" ") : undefined;
-}
-
-function hasErrorOrWarningSignals(replay: ReplayListItem): boolean {
-  return (
-    (replay.count_errors ?? 0) > 0 ||
-    (replay.count_warnings ?? 0) > 0 ||
-    replay.error_ids.length > 0 ||
-    replay.warning_ids.length > 0
-  );
-}
-
-function hasFrictionSignals(replay: ReplayListItem): boolean {
-  return (
-    hasErrorOrWarningSignals(replay) ||
-    (replay.count_rage_clicks ?? 0) > 0 ||
-    (replay.count_dead_clicks ?? 0) > 0
-  );
-}
-
-function replayMatchesRouteFilters(
-  replay: ReplayListItem,
-  flags: ListFlags
-): boolean {
-  if (flags.path && !replayMatchesPath(replay, flags.path)) {
-    return false;
-  }
-  if (
-    flags["entry-path"] &&
-    !replayMatchesPath(replay, flags["entry-path"], "entry")
-  ) {
-    return false;
-  }
-  if (
-    flags["exit-path"] &&
-    !replayMatchesPath(replay, flags["exit-path"], "exit")
-  ) {
-    return false;
-  }
-  return true;
-}
-
-function hasClientSideFilters(flags: ListFlags): boolean {
-  return Boolean(
-    flags.path ||
-      flags["entry-path"] ||
-      flags["exit-path"] ||
-      flags.friction ||
-      flags["problem-only"]
-  );
-}
-
-function replayMatchesClientFilters(
-  replay: ReplayListItem,
-  flags: ListFlags
-): boolean {
-  if (!replayMatchesRouteFilters(replay, flags)) {
-    return false;
-  }
-  if (flags["problem-only"]) {
-    return hasErrorOrWarningSignals(replay);
-  }
-  return flags.friction ? hasFrictionSignals(replay) : true;
-}
-
-type FetchReplayListOptions = {
-  cursor?: string;
-  environment?: string[];
-  flags: ListFlags;
-  org: string;
-  project?: string;
-  query?: string;
-  timeRange: TimeRange;
-};
-
-type ReplayPageResult = {
-  filled: boolean;
-  cursorToStore: string | undefined;
-};
-
-function replayStartIndex(
-  replays: ReplayListItem[],
-  afterReplayId: string | undefined
-): number {
-  if (!afterReplayId) {
-    return 0;
-  }
-
-  const afterIndex = replays.findIndex((replay) => replay.id === afterReplayId);
-  return afterIndex === -1 ? 0 : afterIndex + 1;
-}
-
-function processReplayPage(
-  pageReplays: ReplayListItem[],
-  results: ReplayListItem[],
-  flags: ListFlags,
-  options: {
-    serverCursor: string | undefined;
-    afterReplayId: string | undefined;
-    nextCursor: string | undefined;
-  }
-): ReplayPageResult {
-  const startIndex = replayStartIndex(pageReplays, options.afterReplayId);
-
-  for (const replay of pageReplays.slice(startIndex)) {
-    if (!replayMatchesClientFilters(replay, flags)) {
-      continue;
-    }
-
-    results.push(replay);
-    if (results.length >= flags.limit) {
-      let cursorToStore = encodeReplayCursor(options.serverCursor, replay.id);
-      if (
-        cursorToStore ===
-        encodeReplayCursor(options.serverCursor, pageReplays.at(-1)?.id)
-      ) {
-        cursorToStore = options.nextCursor;
-      }
-      return { filled: true, cursorToStore };
-    }
-  }
-
-  return { filled: false, cursorToStore: undefined };
-}
-
-async function fetchReplayListForCommand(
-  options: FetchReplayListOptions
-): Promise<{ replays: ReplayListItem[]; nextCursor?: string }> {
-  const { environment, flags, org, project, query, timeRange } = options;
-  const decodedCursor = decodeReplayCursor(options.cursor);
-  const hasClientFilters = hasClientSideFilters(flags);
-  const needsFullPageScan =
-    hasClientFilters || Boolean(decodedCursor.afterReplayId);
-  const shouldFetchMultiplePages =
-    needsFullPageScan || flags.limit > API_MAX_PER_PAGE;
-  const requestedServerLimit = needsFullPageScan
-    ? API_MAX_PER_PAGE
-    : Math.min(flags.limit, API_MAX_PER_PAGE);
-  const replays: ReplayListItem[] = [];
-  let pageCursor = decodedCursor.serverCursor;
-  let afterReplayId = decodedCursor.afterReplayId;
-  let cursorToStore: string | undefined;
-
-  for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
-    const pageResult = await listReplays(org, {
-      environment,
-      fields: [...REPLAY_LIST_FIELDS],
-      limit: requestedServerLimit,
-      query,
-      projectSlugs: project ? [project] : undefined,
-      sort: flags.sort,
-      cursor: pageCursor,
-      ...timeRangeToApiParams(timeRange),
-    });
-
-    if (!shouldFetchMultiplePages) {
-      return {
-        replays: pageResult.data.slice(0, flags.limit),
-        nextCursor: pageResult.nextCursor,
-      };
-    }
-
-    const processed = processReplayPage(pageResult.data, replays, flags, {
-      serverCursor: pageCursor,
-      afterReplayId,
-      nextCursor: pageResult.nextCursor,
-    });
-    afterReplayId = undefined;
-
-    if (processed.filled) {
-      return { replays, nextCursor: processed.cursorToStore };
-    }
-
-    cursorToStore = pageResult.nextCursor;
-    if (!pageResult.nextCursor) {
-      break;
-    }
-    pageCursor = pageResult.nextCursor;
-  }
-
-  return { replays, nextCursor: cursorToStore };
 }
 
 const REPLAY_COLUMNS: Column<ReplayListItem>[] = [
@@ -453,28 +185,13 @@ function formatScope(org: string, project?: string): string {
   return project ? `${org}/${project}` : `${org}/`;
 }
 
-function appendReplayFlags(base: string, flags: ReplayListHintFlags): string {
+function appendReplayFlags(
+  base: string,
+  flags: Pick<ListFlags, "environment" | "search" | "sort" | "period">
+): string {
   const parts: string[] = [];
-  appendQueryHint(parts, flags.query);
+  appendQueryHint(parts, flags.search);
   appendSortHint(parts, flags.sort, DEFAULT_SORT);
-  if (flags.url) {
-    parts.push(`--url "${flags.url}"`);
-  }
-  if (flags.path) {
-    parts.push(`--path "${flags.path}"`);
-  }
-  if (flags["entry-path"]) {
-    parts.push(`--entry-path "${flags["entry-path"]}"`);
-  }
-  if (flags["exit-path"]) {
-    parts.push(`--exit-path "${flags["exit-path"]}"`);
-  }
-  if (flags.friction) {
-    parts.push("--friction");
-  }
-  if (flags["problem-only"]) {
-    parts.push("--problem-only");
-  }
   if (flags.environment && flags.environment.length > 0) {
     for (const environment of flags.environment) {
       parts.push(`-e "${environment}"`);
@@ -487,7 +204,7 @@ function appendReplayFlags(base: string, flags: ReplayListHintFlags): string {
 function nextPageHint(
   org: string,
   project: string | undefined,
-  flags: ReplayListHintFlags
+  flags: Pick<ListFlags, "environment" | "search" | "sort" | "period">
 ): string {
   return appendReplayFlags(
     `sentry replay list ${formatScope(org, project)} -c next`,
@@ -498,7 +215,7 @@ function nextPageHint(
 function prevPageHint(
   org: string,
   project: string | undefined,
-  flags: ReplayListHintFlags
+  flags: Pick<ListFlags, "environment" | "search" | "sort" | "period">
 ): string {
   return appendReplayFlags(
     `sentry replay list ${formatScope(org, project)} -c prev`,
@@ -556,7 +273,6 @@ export const listCommand = buildListCommand("replay", {
       "  sentry replay list sentry/\n" +
       "  sentry replay list sentry/cli --limit 50\n" +
       "  sentry replay list sentry/cli --sort duration\n" +
-      "  sentry replay list sentry/cli --path /signup --friction\n" +
       '  sentry replay list sentry/cli -q "user.email:foo@example.com"\n' +
       "  sentry replay list sentry/cli -e production -e canary\n" +
       "  sentry replay list sentry/cli --period 24h\n\n" +
@@ -586,46 +302,11 @@ export const listCommand = buildListCommand("replay", {
         brief: `Number of replays (${LIST_MIN_LIMIT}-${LIST_MAX_LIMIT})`,
         default: String(LIST_DEFAULT_LIMIT),
       },
-      query: {
+      search: {
         kind: "parsed",
         parse: sanitizeQuery,
         brief: "Search query (Sentry replay search syntax)",
         optional: true,
-      },
-      url: {
-        kind: "parsed",
-        parse: String,
-        brief: "Filter by visited URL text using replay search",
-        optional: true,
-      },
-      path: {
-        kind: "parsed",
-        parse: String,
-        brief: "Filter by actual visited URL pathname",
-        optional: true,
-      },
-      "entry-path": {
-        kind: "parsed",
-        parse: String,
-        brief: "Filter by first visited URL pathname",
-        optional: true,
-      },
-      "exit-path": {
-        kind: "parsed",
-        parse: String,
-        brief: "Filter by last visited URL pathname",
-        optional: true,
-      },
-      friction: {
-        kind: "boolean",
-        brief:
-          "Only show replays with indexed friction signals (errors, warnings, rage clicks, or dead clicks)",
-        default: false,
-      },
-      "problem-only": {
-        kind: "boolean",
-        brief: "Only show replays with indexed errors or warnings",
-        default: false,
       },
       environment: {
         kind: "parsed",
@@ -647,22 +328,15 @@ export const listCommand = buildListCommand("replay", {
       ...PERIOD_ALIASES,
       e: "environment",
       n: "limit",
-      q: "query",
+      q: "search",
       s: "sort",
-      u: "url",
     },
   },
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
     const { cwd } = this;
     const timeRange = flags.period;
     const environment = parseReplayEnvironmentFilter(flags.environment);
-    const query = buildReplaySearchQuery({
-      query: flags.query,
-      url: flags.url,
-      path: flags.path,
-      entryPath: flags["entry-path"],
-      exitPath: flags["exit-path"],
-    });
+    const { search } = flags;
 
     const resolved = await resolveOrgOptionalProjectFromArg(
       target,
@@ -675,13 +349,8 @@ export const listCommand = buildListCommand("replay", {
       formatScope(resolved.org, resolved.project),
       {
         env: environment?.join(","),
-        entryPath: flags["entry-path"],
-        exitPath: flags["exit-path"],
-        friction: flags.friction ? "1" : undefined,
-        path: flags.path,
-        problem: flags["problem-only"] ? "1" : undefined,
         sort: flags.sort,
-        q: query,
+        q: search,
         period: serializeTimeRange(timeRange),
       }
     );
@@ -691,20 +360,21 @@ export const listCommand = buildListCommand("replay", {
       contextKey
     );
 
-    const { replays, nextCursor } = await withProgress(
+    const { data: replays, nextCursor } = await withProgress(
       {
         message: `Fetching replays (up to ${flags.limit})...`,
         json: flags.json,
       },
       () =>
-        fetchReplayListForCommand({
-          cursor,
+        listReplays(resolved.org, {
           environment,
-          flags,
-          org: resolved.org,
-          project: resolved.project,
-          query,
-          timeRange,
+          fields: [...REPLAY_LIST_FIELDS],
+          limit: flags.limit,
+          query: search,
+          projectSlugs: resolved.project ? [resolved.project] : undefined,
+          sort: flags.sort,
+          cursor,
+          ...timeRangeToApiParams(timeRange),
         })
     );
 
