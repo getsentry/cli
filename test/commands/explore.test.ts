@@ -491,6 +491,80 @@ describe("sentry explore", () => {
     });
   });
 
+  describe("metrics dataset validation", () => {
+    test("rejects standard aggregates on metrics dataset", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      const promise = func.call(
+        context,
+        {
+          ...DEFAULT_FLAGS,
+          dataset: "metricsEnhanced",
+          field: ["title", "count()"],
+        },
+        "test-org/"
+      );
+
+      await expect(promise).rejects.toThrow(ValidationError);
+      await expect(promise).rejects.toThrow(/Invalid metrics aggregate/);
+    });
+
+    test("accepts valid tracemetrics aggregate format", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      await func.call(
+        context,
+        {
+          ...DEFAULT_FLAGS,
+          dataset: "metricsEnhanced",
+          field: [
+            "gen_ai.request.model",
+            "sum(value,llm.token_usage,distribution,none)",
+          ],
+        },
+        "test-org/"
+      );
+
+      expect(queryEventsSpy).toHaveBeenCalledWith(
+        "test-org",
+        expect.objectContaining({ dataset: "metricsEnhanced" })
+      );
+    });
+
+    test("requires explicit --field flags for metrics dataset", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      const promise = func.call(
+        context,
+        { ...DEFAULT_FLAGS, dataset: "metricsEnhanced" },
+        "test-org/"
+      );
+
+      await expect(promise).rejects.toThrow(ValidationError);
+      await expect(promise).rejects.toThrow(/requires explicit --field flags/);
+    });
+
+    test("allows non-aggregate fields without tracemetrics format", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      await func.call(
+        context,
+        {
+          ...DEFAULT_FLAGS,
+          dataset: "metricsEnhanced",
+          field: ["gen_ai.request.model"],
+        },
+        "test-org/"
+      );
+
+      expect(queryEventsSpy).toHaveBeenCalled();
+    });
+  });
+
   describe("output", () => {
     test("renders human-readable table with results", async () => {
       resolveTargetSpy.mockResolvedValue({ org: "test-org" });

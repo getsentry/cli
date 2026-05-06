@@ -660,14 +660,24 @@ export const exploreCommand = buildListCommand("explore", {
     );
 
     const dataset = flags.dataset;
+    const userSuppliedFields = flags.field && flags.field.length > 0;
     let fieldList = [...defaultFieldsForDataset(dataset)];
-    if (flags.field && flags.field.length > 0) {
+    if (userSuppliedFields) {
       fieldList = flags.field;
     }
     const timeRange = flags.period;
     const environment = parseReplayEnvironmentFilter(flags.environment);
 
     if (dataset === "metricsEnhanced") {
+      if (!userSuppliedFields) {
+        throw new ValidationError(
+          "The metrics dataset requires explicit --field flags with tracemetrics format.\n\n" +
+            "Format: aggregation(value,metric_name,metric_type,unit)\n\n" +
+            "Example:\n" +
+            '  sentry explore my-org/ -F "sum(value,llm.token_usage,distribution,none)" --dataset metrics',
+          "field"
+        );
+      }
       validateMetricsFields(fieldList);
     }
 
