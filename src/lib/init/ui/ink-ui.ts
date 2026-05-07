@@ -831,7 +831,7 @@ export class InkUI implements WizardUI {
     }
     return formatSuccessReport(
       this.outroMessage,
-      this.store.getSnapshot().summary,
+      this.store.getSnapshot().summary ?? undefined,
       this.feedbackHint
     );
   }

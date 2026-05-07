@@ -9,13 +9,13 @@ const FEEDBACK_COMMANDS: Record<InitFeedbackOutcome, string> = {
 const FEEDBACK_COPY: Record<InitFeedbackOutcome, string[]> = {
   success: [
     "Nice, setup made it through.",
-    "Tell us what felt great or rough:\n",
+    "Tell us what felt great or rough:",
   ],
   cancelled: [
     "Sad to see setup stop. Was something going sideways?",
-    "Tell us so we can fix it:\n",
+    "Tell us so we can fix it:",
   ],
-  failed: ["Setup hit a wall.", "Tell us what happened so we can fix it:\n"],
+  failed: ["Setup hit a wall.", "Tell us what happened so we can fix it:"],
 };
 
 export function formatFeedbackHint(outcome: InitFeedbackOutcome): string {
