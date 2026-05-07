@@ -54,7 +54,7 @@ List recent Session Replays
 | `releases` | array | Associated releases |
 | `sdk` | object \| null | SDK metadata |
 | `started_at` | string \| null | Replay start timestamp |
-| `tags` | unknown | Replay tags |
+| `tags` | object | Replay tags |
 | `trace_ids` | array | Linked trace IDs |
 | `urls` | array | Visited URLs |
 | `user` | object \| null | User metadata |
@@ -118,7 +118,7 @@ View a Session Replay
 | `releases` | array | Associated releases |
 | `sdk` | object \| null | SDK metadata |
 | `started_at` | string \| null | Replay start timestamp |
-| `tags` | unknown | Replay tags |
+| `tags` | object | Replay tags |
 | `trace_ids` | array | Linked trace IDs |
 | `urls` | array | Visited URLs |
 | `user` | object \| null | User metadata |
