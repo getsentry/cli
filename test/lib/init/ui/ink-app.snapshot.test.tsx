@@ -22,6 +22,11 @@ const FILES_TAB_RE = /Files/;
 const FILES_HEADER_PINNED_RE = /Files analyzed\s+\d+\/\d+/;
 const FILES_HEADER_UNPINNED_RE = /Files analyzed\s+\u2191\s+\d+\/\d+/;
 const KEYBOARD_HINT_RE = /switch tab/;
+const SPACE_TOGGLE_HINT_RE = /space\s+toggle/;
+const A_ALL_HINT_RE = /a\s+all/;
+const ENTER_CONFIRM_HINT_RE = /enter\s+confirm/;
+const ESC_CANCEL_HINT_RE = /esc\s+cancel/;
+const COMPLETED_SELECTING_FEATURES_RE = /✔\s+Selecting features/;
 const ANSI_ESCAPE_PREFIX = "\u001B[";
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape sequences in captured Ink output
 const ANSI_CSI_RE = /\u001B\[[0-9;?]*[ -/]*[@-~]/g;
@@ -232,20 +237,23 @@ describe("Ink App snapshot", () => {
   });
 
   test("workflow screen hides logo and shows feedback banner", async () => {
-    const store = new WizardStore({ bannerRows: TEST_BANNER_ROWS });
+    const store = new WizardStore({
+      bannerRows: TEST_BANNER_ROWS,
+      cliVersion: "0.32.0-test.0",
+    });
     store.appendLog("info", "Checking project...");
 
     const frame = (await renderApp(store, 120)).allOutput();
     expect(frame).not.toContain("███████╗███████╗");
     expect(frame).toContain(FEEDBACK_BANNER_TEXT);
-    expect(frame).toContain("Sentry");
+    expect(frame).toContain("Sentry v0.32.0-test.0");
 
     const plainFrame = stripAnsi(frame);
     const bannerLine = plainFrame
       .split(LINE_SPLIT_RE)
-      .find((line) => line.includes("Sentry") && line.includes("feedback"));
+      .find((line) => line.includes("Sentry v") && line.includes("feedback"));
     expect(bannerLine).toBeDefined();
-    expect(bannerLine?.indexOf("Sentry")).toBeLessThan(
+    expect(bannerLine?.indexOf("Sentry v0.32.0-test.0")).toBeLessThan(
       bannerLine?.indexOf("For feedback run") ?? 0
     );
   });
@@ -365,12 +373,56 @@ describe("Ink App snapshot", () => {
     });
 
     const frame = (await renderApp(store, 120)).allOutput();
+    const plainFrame = stripAnsi(frame);
     expect(frame).toContain("Session Replay");
     expect(frame).toContain("Tracing");
     expect(frame).toContain("Capture request timing and flow");
     expect(frame).toContain("Source Maps");
+    expect(plainFrame).toContain("0/3");
+    expect(plainFrame).not.toContain(
+      "space toggle • a all • enter confirm • esc cancel"
+    );
+    expect(plainFrame).toMatch(SPACE_TOGGLE_HINT_RE);
+    expect(plainFrame).toMatch(A_ALL_HINT_RE);
+    expect(plainFrame).toMatch(ENTER_CONFIRM_HINT_RE);
+    expect(plainFrame).toMatch(ESC_CANCEL_HINT_RE);
     expect(frame).not.toContain("Recommended setup");
     expect(frame).not.toContain("Apply recommended setup");
+  });
+
+  test("workflow prompts hide routine logs but keep warnings and tasks", async () => {
+    const store = new WizardStore({ bannerRows: [] });
+    store.appendLog(
+      "success",
+      'Using existing project "nextjs-sentry-test" in bete-dev'
+    );
+    store.appendLog("success", "Selecting features");
+    store.appendLog("info", "Routine context loaded");
+    store.appendLog("message", "Internal progress detail");
+    store.appendLog("warn", "Heads up before choosing features");
+    store.appendLog("error", "Something needs attention");
+    store.setPrompt({
+      kind: "multiselect",
+      message: "Select features",
+      options: [
+        { value: "sessionReplay", label: "Session Replay" },
+        { value: "profiling", label: "Profiling" },
+      ],
+      initialSelected: [],
+      required: false,
+      resolve: ignorePromptResolution,
+    });
+
+    const frame = (await renderApp(store, 120)).allOutput();
+    const plainFrame = stripAnsi(frame);
+    expect(frame).not.toContain("Using existing project");
+    expect(plainFrame).not.toMatch(COMPLETED_SELECTING_FEATURES_RE);
+    expect(frame).not.toContain("Routine context loaded");
+    expect(frame).not.toContain("Internal progress detail");
+    expect(frame).toContain("Heads up before choosing features");
+    expect(frame).toContain("Something needs attention");
+    expect(frame).toContain("Select features");
+    expect(frame).toMatch(TASKS_HEADER_RE);
   });
 
   test("prompt shortcuts replace app shortcuts while prompt is active", async () => {

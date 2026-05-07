@@ -129,8 +129,15 @@ function truncateForBanner(text: string, maxLength: number): string {
   return `${text.slice(0, maxLength - 3)}...`;
 }
 
-function formatFeedbackBanner(width: number): string {
-  const brand = "Sentry";
+function formatBannerBrand(cliVersion: string | null): string {
+  return cliVersion ? `Sentry v${cliVersion}` : "Sentry";
+}
+
+function formatFeedbackBanner(
+  width: number,
+  cliVersion: string | null
+): string {
+  const brand = formatBannerBrand(cliVersion);
   const left = ` ${brand}`;
   if (width <= left.length) {
     return left.slice(0, Math.max(0, width));
@@ -234,7 +241,7 @@ function AppBody({ store }: AppProps): React.ReactNode {
             width={width}
           />
         </Box>
-        <FeedbackBanner width={width} />
+        <FeedbackBanner cliVersion={snapshot.cliVersion} width={width} />
       </Box>
     );
     return (
@@ -296,7 +303,7 @@ function AppBody({ store }: AppProps): React.ReactNode {
             tabs={tabs}
           />
           <ShortcutFooter color={MUTED_DIM} />
-          <FeedbackBanner width={width} />
+          <FeedbackBanner cliVersion={snapshot.cliVersion} width={width} />
         </Box>
       </Box>
     </Box>
@@ -351,8 +358,17 @@ function ActivityPane({
   prompt: ActivePrompt | null;
   summary: WizardSummary | null;
 }): React.ReactNode {
+  const visibleLogs =
+    prompt === null
+      ? logs
+      : logs.filter(
+          (log) => log.severity === "warn" || log.severity === "error"
+        );
   const hasContent =
-    logs.length > 0 || spinner.active || prompt !== null || summary !== null;
+    visibleLogs.length > 0 ||
+    spinner.active ||
+    prompt !== null ||
+    summary !== null;
 
   return (
     <Box flexDirection="column" flexGrow={1}>
@@ -366,9 +382,9 @@ function ActivityPane({
           </Box>
         </Box>
       )}
-      {logs.length > 0 ? (
+      {visibleLogs.length > 0 ? (
         <Box flexDirection="column">
-          {logs.map((log) => (
+          {visibleLogs.map((log) => (
             <LogLine entry={log} key={log.id} />
           ))}
         </Box>
@@ -558,11 +574,17 @@ function ActionList<T extends string>({
   );
 }
 
-function FeedbackBanner({ width }: { width: number }): React.ReactNode {
+function FeedbackBanner({
+  cliVersion,
+  width,
+}: {
+  cliVersion: string | null;
+  width: number;
+}): React.ReactNode {
   return (
     <Box flexShrink={0} height={1}>
       <Text backgroundColor={ACCENT} color={FEEDBACK_BANNER_FG}>
-        {formatFeedbackBanner(width)}
+        {formatFeedbackBanner(width, cliVersion)}
       </Text>
     </Box>
   );
@@ -1533,6 +1555,7 @@ function MultiSelectPrompt({
   );
   useInkShortcuts("multiselect-prompt", shortcuts);
   const shortcutText = `space toggle ${ICONS.bullet} a all ${ICONS.bullet} enter confirm ${ICONS.bullet} esc cancel`;
+  const selectedCount = `${selected.size}/${totalCount}`;
 
   return (
     <Box
@@ -1546,11 +1569,14 @@ function MultiSelectPrompt({
           <Text bold>{prompt.message}</Text>
         </Box>
       ) : (
-        <Box gap={1} marginBottom={1}>
-          <Text bold color={ACCENT}>
-            {ICONS.diamondOpen}
-          </Text>
-          <Text bold>{prompt.message}</Text>
+        <Box justifyContent="space-between" marginBottom={1}>
+          <Box gap={1}>
+            <Text bold color={ACCENT}>
+              {ICONS.diamondOpen}
+            </Text>
+            <Text bold>{prompt.message}</Text>
+          </Box>
+          <Text color={ACCENT}>{selectedCount}</Text>
         </Box>
       )}
       {isCentered ? (
@@ -1561,19 +1587,9 @@ function MultiSelectPrompt({
           width="100%"
         >
           <Text color={MUTED_DIM}>{shortcutText}</Text>
-          <Text color={ACCENT}>
-            {selected.size}/{totalCount}
-          </Text>
+          <Text color={ACCENT}>{selectedCount}</Text>
         </Box>
-      ) : (
-        <Box marginBottom={1} paddingLeft={3}>
-          <Text color={MUTED_DIM}>{shortcutText}</Text>
-          <Text color={ACCENT}>
-            {"  "}
-            {selected.size}/{totalCount}
-          </Text>
-        </Box>
-      )}
+      ) : null}
       <Box flexDirection="column" width={promptWidth}>
         {prompt.options.map((option, idx) => {
           const isSelected = selected.has(option.value);

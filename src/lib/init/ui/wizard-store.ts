@@ -150,6 +150,8 @@ export type WizardLayout = "intro" | "workflow";
 export type WizardSnapshot = {
   /** Top-level layout: centered intro/preflight or full workflow shell. */
   layout: WizardLayout;
+  /** CLI version displayed in the persistent Ink footer banner. */
+  cliVersion: string | null;
   bannerRows: { content: string; color: string }[];
   logs: LogEntry[];
   spinner: SpinnerState;
@@ -220,6 +222,7 @@ export class WizardStore {
   constructor(initial: Partial<WizardSnapshot> = {}) {
     this.snapshot = {
       layout: initial.layout ?? "workflow",
+      cliVersion: initial.cliVersion ?? null,
       bannerRows: initial.bannerRows ?? [],
       logs: initial.logs ?? [],
       spinner: initial.spinner ?? { active: false, frame: 0, message: "" },

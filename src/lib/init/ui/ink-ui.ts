@@ -46,6 +46,7 @@
 
 import { openSync } from "node:fs";
 import { ReadStream } from "node:tty";
+import { CLI_VERSION } from "../../constants.js";
 import { stripAnsi } from "../../formatters/plain-detect.js";
 import { formatFeedbackHint, type InitFeedbackOutcome } from "../feedback.js";
 import { formatFailureReport, formatSuccessReport } from "./ink-report.js";
@@ -233,6 +234,7 @@ export async function createInkUI(
   )) as typeof import("./ink-app.js");
 
   const store = new WizardStore({
+    cliVersion: CLI_VERSION,
     bannerRows: BANNER_ROWS.map((content, i) => ({
       content,
       color: BANNER_GRADIENT[i] ?? BANNER_GRADIENT[0] ?? "#FFFFFF",
@@ -396,7 +398,6 @@ export class InkUI implements WizardUI {
         initialWelcome.resolve(CANCELLED);
       };
     }
-    this.startLearnSequence();
     this.installCancelHandler();
     // Hand the App a reference to `requestCancel` via the store so
     // the top-level `useInput` Ctrl+C catcher in `ink-app.tsx` can
@@ -472,7 +473,13 @@ export class InkUI implements WizardUI {
   }
 
   setIntroMode(enabled: boolean): void {
-    this.store.setLayout(enabled ? "intro" : "workflow");
+    if (enabled) {
+      this.store.setLayout("intro");
+      this.pauseSidebarTimers();
+      return;
+    }
+    this.store.setLayout("workflow");
+    this.startSidebarTimers();
   }
 
   // ── Logging ───────────────────────────────────────────────────────
@@ -616,6 +623,7 @@ export class InkUI implements WizardUI {
 
   welcome(opts: WelcomeOptions): Promise<"continue" | Cancelled> {
     this.store.setLayout("intro");
+    this.pauseSidebarTimers();
     if (this.initialWelcome) {
       if (!this.initialWelcome.settled) {
         seedWelcomePrompt(this.store, opts, this.initialWelcome);
@@ -845,6 +853,9 @@ export class InkUI implements WizardUI {
   }
 
   private startLearnSequence(): void {
+    if (this.learnTimer) {
+      return;
+    }
     const store = this.store;
     this.learnTimer = setInterval(() => {
       if (this.torndown) {
@@ -877,6 +888,25 @@ export class InkUI implements WizardUI {
       clearInterval(this.learnTimer);
       this.learnTimer = undefined;
     }
+  }
+
+  private startSidebarTimers(): void {
+    if (this.torndown) {
+      return;
+    }
+    if (this.store.getSnapshot().learnState.complete) {
+      this.startTipRotation();
+      return;
+    }
+    this.startLearnSequence();
+  }
+
+  private pauseSidebarTimers(): void {
+    if (this.tipTimer) {
+      clearInterval(this.tipTimer);
+      this.tipTimer = undefined;
+    }
+    this.stopLearnSequence();
   }
 
   /**
