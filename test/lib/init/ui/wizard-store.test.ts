@@ -191,6 +191,294 @@ describe("WizardStore status messages", () => {
   });
 });
 
+describe("WizardStore log mutations", () => {
+  test("appendLog assigns monotonically-increasing ids", () => {
+    const store = new WizardStore();
+    const a = store.appendLog("info", "first");
+    const b = store.appendLog("warn", "second");
+    const c = store.appendLog("error", "third");
+    expect(b.id).toBeGreaterThan(a.id);
+    expect(c.id).toBeGreaterThan(b.id);
+  });
+
+  test("appendLog stores severity and text on the entry", () => {
+    const store = new WizardStore();
+    const entry = store.appendLog("success", "all good");
+    expect(entry.severity).toBe("success");
+    expect(entry.text).toBe("all good");
+  });
+
+  test("appendLog appends to the snapshot logs array", () => {
+    const store = new WizardStore();
+    store.appendLog("info", "one");
+    store.appendLog("error", "two");
+    const { logs } = store.getSnapshot();
+    expect(logs.length).toBe(2);
+    expect(logs[0]?.text).toBe("one");
+    expect(logs[1]?.text).toBe("two");
+  });
+
+  test("appendLog notifies subscribers", () => {
+    const store = new WizardStore();
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+    store.appendLog("info", "msg");
+    unsubscribe();
+    expect(notifications).toBe(1);
+  });
+});
+
+describe("WizardStore spinner lifecycle", () => {
+  test("startSpinner activates the spinner, resets frame, stores message", () => {
+    const store = new WizardStore();
+    store.startSpinner("Loading…");
+    const { spinner } = store.getSnapshot();
+    expect(spinner.active).toBe(true);
+    expect(spinner.frame).toBe(0);
+    expect(spinner.message).toBe("Loading…");
+  });
+
+  test("tickSpinner increments frame when active", () => {
+    const store = new WizardStore();
+    store.startSpinner("Working");
+    store.tickSpinner();
+    store.tickSpinner();
+    expect(store.getSnapshot().spinner.frame).toBe(2);
+  });
+
+  test("tickSpinner is a no-op when spinner is inactive", () => {
+    const store = new WizardStore();
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+    store.tickSpinner();
+    unsubscribe();
+    expect(notifications).toBe(0);
+    expect(store.getSnapshot().spinner.frame).toBe(0);
+  });
+
+  test("setSpinnerMessage updates message when active", () => {
+    const store = new WizardStore();
+    store.startSpinner("first");
+    store.setSpinnerMessage("second");
+    expect(store.getSnapshot().spinner.message).toBe("second");
+  });
+
+  test("setSpinnerMessage is a no-op when spinner is inactive", () => {
+    const store = new WizardStore();
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+    store.setSpinnerMessage("ignored");
+    unsubscribe();
+    expect(notifications).toBe(0);
+  });
+
+  test("stopSpinner deactivates and clears message and frame", () => {
+    const store = new WizardStore();
+    store.startSpinner("busy");
+    store.tickSpinner();
+    store.stopSpinner();
+    const { spinner } = store.getSnapshot();
+    expect(spinner.active).toBe(false);
+    expect(spinner.message).toBe("");
+    expect(spinner.frame).toBe(0);
+  });
+});
+
+describe("WizardStore file read state machine", () => {
+  test("new paths land as reading", () => {
+    const store = new WizardStore();
+    store.recordFilesReading(["src/index.ts", "package.json"]);
+    const { filesRead } = store.getSnapshot();
+    expect(filesRead.every((e) => e.status === "reading")).toBe(true);
+    expect(filesRead.map((e) => e.path)).toEqual([
+      "src/index.ts",
+      "package.json",
+    ]);
+  });
+
+  test("recordFilesReading does not downgrade an already-analyzed entry", () => {
+    const store = new WizardStore();
+    store.recordFilesReading(["src/index.ts"]);
+    store.markFilesAnalyzed(["src/index.ts"]);
+    store.recordFilesReading(["src/index.ts"]);
+    const entry = store
+      .getSnapshot()
+      .filesRead.find((e) => e.path === "src/index.ts");
+    expect(entry?.status).toBe("analyzed");
+  });
+
+  test("markFilesAnalyzed flips reading entries to analyzed", () => {
+    const store = new WizardStore();
+    store.recordFilesReading(["a.ts", "b.ts"]);
+    store.markFilesAnalyzed(["a.ts"]);
+    const snap = store.getSnapshot();
+    expect(snap.filesRead.find((e) => e.path === "a.ts")?.status).toBe(
+      "analyzed"
+    );
+    expect(snap.filesRead.find((e) => e.path === "b.ts")?.status).toBe(
+      "reading"
+    );
+  });
+
+  test("markFilesAnalyzed adds unknown paths as pre-analyzed", () => {
+    const store = new WizardStore();
+    store.markFilesAnalyzed(["never-recorded.ts"]);
+    const entry = store
+      .getSnapshot()
+      .filesRead.find((e) => e.path === "never-recorded.ts");
+    expect(entry?.status).toBe("analyzed");
+  });
+
+  test("empty arrays are no-ops and do not notify", () => {
+    const store = new WizardStore();
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+    store.recordFilesReading([]);
+    store.markFilesAnalyzed([]);
+    unsubscribe();
+    expect(notifications).toBe(0);
+  });
+});
+
+describe("WizardStore idempotent guards", () => {
+  test("setLayout does not notify when the layout is unchanged", () => {
+    const store = new WizardStore({ layout: "intro" });
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+    store.setLayout("intro");
+    unsubscribe();
+    expect(notifications).toBe(0);
+  });
+
+  test("setTipIndex does not notify when the index is unchanged", () => {
+    const store = new WizardStore({ tipIndex: 3 });
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+    store.setTipIndex(3);
+    unsubscribe();
+    expect(notifications).toBe(0);
+  });
+
+  test("clearOverlay does not notify when overlay is already null", () => {
+    const store = new WizardStore();
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+    store.clearOverlay();
+    unsubscribe();
+    expect(notifications).toBe(0);
+  });
+
+  test("setLearnComplete does not notify when already complete", () => {
+    const store = new WizardStore({
+      learnState: { blockIndex: 6, lineIndex: 7, complete: true },
+    });
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+    store.setLearnComplete();
+    unsubscribe();
+    expect(notifications).toBe(0);
+  });
+});
+
+describe("WizardStore overlay lifecycle", () => {
+  test("setOverlay stores the overlay and notifies", () => {
+    const store = new WizardStore();
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+    store.setOverlay({ kind: "health", message: "Retrying…", retryCount: 1 });
+    unsubscribe();
+    expect(notifications).toBe(1);
+    expect(store.getSnapshot().overlay).toEqual({
+      kind: "health",
+      message: "Retrying…",
+      retryCount: 1,
+    });
+  });
+
+  test("clearOverlay nulls the overlay and notifies", () => {
+    const store = new WizardStore();
+    store.setOverlay({ kind: "health", message: "x", retryCount: 0 });
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+    store.clearOverlay();
+    unsubscribe();
+    expect(notifications).toBe(1);
+    expect(store.getSnapshot().overlay).toBeNull();
+  });
+});
+
+describe("WizardStore learn state progression", () => {
+  test("advanceLearnLine increments lineIndex, leaves blockIndex unchanged", () => {
+    const store = new WizardStore();
+    store.advanceLearnLine();
+    store.advanceLearnLine();
+    const { learnState } = store.getSnapshot();
+    expect(learnState.lineIndex).toBe(2);
+    expect(learnState.blockIndex).toBe(0);
+    expect(learnState.complete).toBe(false);
+  });
+
+  test("advanceLearnBlock increments blockIndex and resets lineIndex to 0", () => {
+    const store = new WizardStore({
+      learnState: { blockIndex: 1, lineIndex: 5, complete: false },
+    });
+    store.advanceLearnBlock();
+    const { learnState } = store.getSnapshot();
+    expect(learnState.blockIndex).toBe(2);
+    expect(learnState.lineIndex).toBe(0);
+  });
+
+  test("advance methods are no-ops once complete", () => {
+    const store = new WizardStore({
+      learnState: { blockIndex: 6, lineIndex: 7, complete: true },
+    });
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+    store.advanceLearnLine();
+    store.advanceLearnBlock();
+    store.setLearnComplete();
+    unsubscribe();
+    expect(notifications).toBe(0);
+    expect(store.getSnapshot().learnState).toEqual({
+      blockIndex: 6,
+      lineIndex: 7,
+      complete: true,
+    });
+  });
+});
+
+describe("WizardStore.prefixFor", () => {
+  test("maps each LogSeverity to the correct glyph", () => {
+    expect(WizardStore.prefixFor("info")).toBe("●");
+    expect(WizardStore.prefixFor("warn")).toBe("▲");
+    expect(WizardStore.prefixFor("error")).toBe("✖");
+    expect(WizardStore.prefixFor("success")).toBe("✔");
+    expect(WizardStore.prefixFor("message")).toBe(" ");
+  });
+});
+
 describe("WizardStore.setRequestCancel", () => {
   test("starts undefined so an early Ctrl+C is a no-op", () => {
     const store = new WizardStore();
