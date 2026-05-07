@@ -46,12 +46,12 @@
 
 import { openSync } from "node:fs";
 import { ReadStream } from "node:tty";
-import chalk from "chalk";
+import { CLI_VERSION } from "../../constants.js";
 import { stripAnsi } from "../../formatters/plain-detect.js";
-import { buildFileTree, flattenTree } from "./file-tree.js";
+import { formatFeedbackHint, type InitFeedbackOutcome } from "../feedback.js";
+import { formatFailureReport, formatSuccessReport } from "./ink-report.js";
 import { LEARN_SEQUENCE } from "./learn-content.js";
 import { SENTRY_TIPS } from "./sentry-tips.js";
-import { detectColorScheme } from "./theme.js";
 import {
   CANCELLED,
   type Cancelled,
@@ -60,77 +60,25 @@ import {
   type SelectOptions,
   type SpinnerExitCode,
   type SpinnerHandle,
+  type WelcomeOptions,
   type WizardLog,
   type WizardSummary,
   type WizardUI,
 } from "./types.js";
 import { WizardStore } from "./wizard-store.js";
 
-// Brand palette mirrored from `ink-app.tsx` so the post-dispose
-// success/failure echo (rendered via chalk after Ink unmounts) feels
-// like a continuation of the live screen.
-const REPORT_MUTED = "#898294";
-const REPORT_SUCCESS = "#83da90";
-const REPORT_ERROR = "#fe4144";
-const REPORT_WARN = "#FDB81B";
+type CreateInkUIOptions = {
+  initialWelcome?: WelcomeOptions;
+};
 
-/** Splits on `: ` to separate error label from detail. */
-const ERROR_SPLIT_RE = /:\s+/;
-
-/**
- * Build the chalk-formatted failure report shown after alternate
- * screen exit. Includes up to 5 recent error log entries with
- * structured formatting for readability.
- */
-function formatFailureReport(
-  message: string,
-  logs: readonly { severity: string; text: string }[]
-): string {
-  const icon = chalk.hex(REPORT_ERROR)("\u2716");
-  const lines: string[] = [
-    `\n${icon}  ${chalk.hex(REPORT_ERROR).bold(message)}`,
-  ];
-  const errorLogs = logs.filter(
-    (entry) =>
-      entry.severity === "error" &&
-      entry.text !== message &&
-      entry.text !== "Failed"
-  );
-  if (errorLogs.length > 0) {
-    lines.push("");
-  }
-  for (const entry of errorLogs.slice(-5)) {
-    formatErrorEntry(entry.text, lines);
-  }
-  return lines.join("\n");
-}
-
-/**
- * Format a single error log entry into indented report lines.
- * Splits on newlines first, then separates the first segment
- * (bold red) from subsequent detail (muted) on each line.
- */
-function formatErrorEntry(text: string, out: string[]): void {
-  const rawLines = text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-  if (rawLines.length === 0) {
-    return;
-  }
-  const first = rawLines[0] ?? "";
-  const parts = first.split(ERROR_SPLIT_RE);
-  out.push(`   ${chalk.hex(REPORT_ERROR).bold(parts[0] ?? "")}`);
-  for (const part of parts.slice(1)) {
-    out.push(`   ${chalk.hex(REPORT_MUTED)(part)}`);
-  }
-  for (const line of rawLines.slice(1)) {
-    out.push(`   ${chalk.hex(REPORT_MUTED)(line)}`);
-  }
-}
+type PendingWelcome = {
+  promise: Promise<"continue" | Cancelled>;
+  resolve: (value: "continue" | Cancelled) => void;
+  settled: boolean;
+};
 
 /** Tip rotation cadence in the sidebar — slow enough to read each tip. */
-const TIP_ROTATE_INTERVAL_MS = 8000;
+const TIP_ROTATE_INTERVAL_MS = 15_000;
 
 /** Sentry brand purple — matches `src/lib/banner.ts`. */
 const BANNER_GRADIENT = [
@@ -150,6 +98,48 @@ const BANNER_ROWS = [
   "  ███████║███████╗██║ ╚████║   ██║   ██║  ██║   ██║   ",
   "  ╚══════╝╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝   ╚═╝   ",
 ];
+
+function sanitizeWelcomeOptions(opts: WelcomeOptions): WelcomeOptions {
+  return {
+    title: stripAnsi(opts.title),
+    body: opts.body.map(stripAnsi),
+    punchline: stripAnsi(opts.punchline),
+  };
+}
+
+function createPendingWelcome(): PendingWelcome {
+  let resolve!: (value: "continue" | Cancelled) => void;
+  const pending: PendingWelcome = {
+    promise: new Promise<"continue" | Cancelled>((r) => {
+      resolve = r;
+    }),
+    resolve: (value) => {
+      if (pending.settled) {
+        return;
+      }
+      pending.settled = true;
+      resolve(value);
+    },
+    settled: false,
+  };
+  return pending;
+}
+
+function seedWelcomePrompt(
+  store: WizardStore,
+  opts: WelcomeOptions,
+  pending: PendingWelcome
+): void {
+  store.setLayout("intro");
+  store.setPrompt({
+    kind: "welcome",
+    options: sanitizeWelcomeOptions(opts),
+    resolve: (value) => {
+      store.setPrompt(null);
+      pending.resolve(value === null ? CANCELLED : value);
+    },
+  });
+}
 
 /**
  * Log severities recognised by InkUI. Mirrors the keys of
@@ -224,7 +214,9 @@ function openFreshTtyForInk(): ReadStream | null {
  * bridge instance. Throws if Ink can't be loaded (e.g. missing peer
  * deps).
  */
-export async function createInkUI(): Promise<InkUI> {
+export async function createInkUI(
+  opts: CreateInkUIOptions = {}
+): Promise<InkUI> {
   const ink = await import("ink");
   const react = await import("react");
   // The `?bridge=1` query string is load-bearing. Without it Bun's
@@ -242,13 +234,18 @@ export async function createInkUI(): Promise<InkUI> {
   )) as typeof import("./ink-app.js");
 
   const store = new WizardStore({
+    cliVersion: CLI_VERSION,
     bannerRows: BANNER_ROWS.map((content, i) => ({
       content,
       color: BANNER_GRADIENT[i] ?? BANNER_GRADIENT[0] ?? "#FFFFFF",
     })),
   });
-
-  store.setTheme(detectColorScheme());
+  const initialWelcome = opts.initialWelcome
+    ? createPendingWelcome()
+    : undefined;
+  if (opts.initialWelcome && initialWelcome) {
+    seedWelcomePrompt(store, opts.initialWelcome, initialWelcome);
+  }
 
   // Open a fresh /dev/tty so Ink's `readable` event listener
   // actually fires — see the module docstring for the Bun bug
@@ -283,15 +280,16 @@ export async function createInkUI(): Promise<InkUI> {
     renderOptions.stdin = freshStdin;
   }
   // Enter the alternate screen buffer so the wizard occupies the full
-  // terminal. On exit, Ink restores the original scrollback.
-  process.stdout.write("\x1b[?1049h");
+  // terminal. Clear and home the cursor before Ink's first frame so
+  // startup never shows stale layout from a prior render.
+  process.stdout.write("\x1b[?1049h\x1b[2J\x1b[H");
   try {
     const instance = ink.render(
       react.createElement(app.App, { store }),
       renderOptions
     );
 
-    return new InkUI(instance, store, freshStdin);
+    return new InkUI(instance, store, freshStdin, initialWelcome);
   } catch (error) {
     // Restore the terminal if Ink rendering or UI init fails,
     // otherwise the user is stuck in the alternate screen buffer.
@@ -375,6 +373,8 @@ export class InkUI implements WizardUI {
    */
   private outroMessage: string | undefined;
   private failureMessage: string | undefined;
+  private feedbackHint: string | undefined;
+  private initialWelcome: PendingWelcome | undefined;
   /**
    * Resolved when the user presses any key on the outro screen.
    * `[Symbol.asyncDispose]` awaits this so the `using` block keeps the
@@ -384,12 +384,20 @@ export class InkUI implements WizardUI {
   constructor(
     instance: InkInstance,
     store: WizardStore,
-    freshStdin: ReadStream | null
+    freshStdin: ReadStream | null,
+    initialWelcome?: PendingWelcome
   ) {
     this.instance = instance;
     this.store = store;
     this.freshStdin = freshStdin;
-    this.startLearnSequence();
+    this.initialWelcome = initialWelcome;
+    if (initialWelcome && !initialWelcome.settled) {
+      this.activePromptCancel = () => {
+        this.store.setPrompt(null);
+        this.activePromptCancel = undefined;
+        initialWelcome.resolve(CANCELLED);
+      };
+    }
     this.installCancelHandler();
     // Hand the App a reference to `requestCancel` via the store so
     // the top-level `useInput` Ctrl+C catcher in `ink-app.tsx` can
@@ -423,6 +431,10 @@ export class InkUI implements WizardUI {
     const clean = stripAnsi(message);
     this.appendLog("error", clean);
     this.failureMessage = clean;
+  }
+
+  feedback(outcome: InitFeedbackOutcome): void {
+    this.feedbackHint = formatFeedbackHint(outcome);
   }
 
   summary(summary: WizardSummary): void {
@@ -460,6 +472,16 @@ export class InkUI implements WizardUI {
     this.store.clearOverlay();
   }
 
+  setIntroMode(enabled: boolean): void {
+    if (enabled) {
+      this.store.setLayout("intro");
+      this.pauseSidebarTimers();
+      return;
+    }
+    this.store.setLayout("workflow");
+    this.startSidebarTimers();
+  }
+
   // ── Logging ───────────────────────────────────────────────────────
 
   log: WizardLog = {
@@ -491,9 +513,10 @@ export class InkUI implements WizardUI {
         }
       },
       stop: (message?: string, code: SpinnerExitCode = 0) => {
-        const finalMessage = message
-          ? stripAnsi(message)
-          : this.store.getSnapshot().spinner.message;
+        const finalMessage =
+          message !== undefined
+            ? stripAnsi(message)
+            : this.store.getSnapshot().spinner.message;
         this.store.stopSpinner();
         if (finalMessage) {
           this.appendLog(severityForStopCode(code), finalMessage);
@@ -585,6 +608,40 @@ export class InkUI implements WizardUI {
         kind: "confirm",
         message: stripAnsi(opts.message),
         initialValue: opts.initialValue ?? true,
+        resolve: (value) => {
+          this.store.setPrompt(null);
+          this.activePromptCancel = undefined;
+          if (value === null) {
+            resolve(CANCELLED);
+          } else {
+            resolve(value);
+          }
+        },
+      });
+    });
+  }
+
+  welcome(opts: WelcomeOptions): Promise<"continue" | Cancelled> {
+    this.store.setLayout("intro");
+    this.pauseSidebarTimers();
+    if (this.initialWelcome) {
+      if (!this.initialWelcome.settled) {
+        seedWelcomePrompt(this.store, opts, this.initialWelcome);
+      }
+      return this.initialWelcome.promise.finally(() => {
+        this.activePromptCancel = undefined;
+        this.initialWelcome = undefined;
+      });
+    }
+    return new Promise<"continue" | Cancelled>((resolve) => {
+      this.activePromptCancel = () => {
+        this.store.setPrompt(null);
+        this.activePromptCancel = undefined;
+        resolve(CANCELLED);
+      };
+      this.store.setPrompt({
+        kind: "welcome",
+        options: sanitizeWelcomeOptions(opts),
         resolve: (value) => {
           this.store.setPrompt(null);
           this.activePromptCancel = undefined;
@@ -734,6 +791,7 @@ export class InkUI implements WizardUI {
     }
     this.cancelRequested = true;
     this.failureMessage = "Setup cancelled.";
+    this.feedback("cancelled");
     this.tearDown();
     // Match the SIGINT convention so shells (and CI) see a
     // distinguishable exit. The runner's `await using` won't get a
@@ -746,7 +804,7 @@ export class InkUI implements WizardUI {
   }
 
   /**
-   * Build a compact final summary echoed to stderr after Ink
+   * Build a compact final summary echoed to stdout after Ink
    * unmounts. Ink's inline rendering means the run's log lines are
    * already in the user's scrollback; this report just emphasises
    * the outcome so it's the last thing on screen.
@@ -764,37 +822,18 @@ export class InkUI implements WizardUI {
     if (this.failureMessage) {
       return formatFailureReport(
         this.failureMessage,
-        this.store.getSnapshot().logs
+        this.store.getSnapshot().logs,
+        this.feedbackHint
       );
     }
     if (!this.outroMessage) {
       return;
     }
-    const successIcon = chalk.hex(REPORT_SUCCESS)("✔");
-    const lines: string[] = [
-      "",
-      `${successIcon}  ${chalk.bold(this.outroMessage)}`,
-    ];
-    const summary = this.store.getSnapshot().summary;
-    if (summary && summary.fields.length > 0) {
-      lines.push("");
-      const labelWidth = Math.max(
-        ...summary.fields.map((field) => field.label.length)
-      );
-      for (const field of summary.fields) {
-        const label = chalk.hex(REPORT_MUTED)(field.label.padEnd(labelWidth));
-        lines.push(`   ${label}  ${field.value}`);
-      }
-    }
-    if (summary?.changedFiles && summary.changedFiles.length > 0) {
-      lines.push("");
-      lines.push(`   ${chalk.hex(REPORT_MUTED).bold("Changed files")}`);
-      const tree = buildFileTree(summary.changedFiles);
-      for (const row of flattenTree(tree)) {
-        lines.push(formatTreeRowChalk(row));
-      }
-    }
-    return lines.join("\n");
+    return formatSuccessReport(
+      this.outroMessage,
+      this.store.getSnapshot().summary ?? undefined,
+      this.feedbackHint
+    );
   }
 
   // ── Internal helpers ──────────────────────────────────────────────
@@ -814,6 +853,9 @@ export class InkUI implements WizardUI {
   }
 
   private startLearnSequence(): void {
+    if (this.learnTimer) {
+      return;
+    }
     const store = this.store;
     this.learnTimer = setInterval(() => {
       if (this.torndown) {
@@ -848,6 +890,25 @@ export class InkUI implements WizardUI {
     }
   }
 
+  private startSidebarTimers(): void {
+    if (this.torndown) {
+      return;
+    }
+    if (this.store.getSnapshot().learnState.complete) {
+      this.startTipRotation();
+      return;
+    }
+    this.startLearnSequence();
+  }
+
+  private pauseSidebarTimers(): void {
+    if (this.tipTimer) {
+      clearInterval(this.tipTimer);
+      this.tipTimer = undefined;
+    }
+    this.stopLearnSequence();
+  }
+
   /**
    * Fallback SIGINT handler for the (rare) windows where raw mode
    * is OFF and Node's terminal layer DOES deliver SIGINT for
@@ -875,39 +936,4 @@ export class InkUI implements WizardUI {
     this.cancelHandler = handler;
     process.on("SIGINT", handler);
   }
-}
-
-/**
- * Colored glyph for a changed-files row in the post-dispose report.
- * The plain ASCII variant lives in `logging-ui.ts` for the
- * non-interactive CI path.
- */
-function changedFileGlyphColored(action: string): string {
-  if (action === "create") {
-    return chalk.hex(REPORT_SUCCESS)("+");
-  }
-  if (action === "delete") {
-    return chalk.hex(REPORT_ERROR)("−");
-  }
-  return chalk.hex(REPORT_WARN)("~");
-}
-
-/**
- * Render a single `FileTreeRow` for the post-dispose stderr report.
- * Directories show only the box-drawing branch + label; files add
- * the action glyph (colored).
- */
-function formatTreeRowChalk(row: {
-  prefix: string;
-  branch: string;
-  kind: "file" | "directory";
-  label: string;
-  action?: string;
-}): string {
-  const branch = chalk.hex(REPORT_MUTED)(`${row.prefix}${row.branch}`);
-  if (row.kind === "directory") {
-    return `     ${branch} ${row.label}`;
-  }
-  const glyph = changedFileGlyphColored(row.action ?? "modify");
-  return `     ${branch} ${glyph} ${row.label}`;
 }

@@ -34,9 +34,10 @@ import type {
 } from "../../../src/lib/init/types.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as uiFactory from "../../../src/lib/init/ui/factory.js";
-import type {
-  SpinnerHandle,
-  WizardUI,
+import {
+  CANCELLED,
+  type SpinnerHandle,
+  type WizardUI,
 } from "../../../src/lib/init/ui/types.js";
 import { runWizard } from "../../../src/lib/init/wizard-runner.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
@@ -114,6 +115,33 @@ let stderrSpy: ReturnType<typeof spyOn>;
 let capturedClientOptions: { abortSignal?: AbortSignal }[] = [];
 
 let savedPlainOutput: string | undefined;
+
+function forceStdinTty<T>(action: () => Promise<T>): Promise<T> {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(
+    process.stdin,
+    "isTTY"
+  );
+  Object.defineProperty(process.stdin, "isTTY", {
+    value: true,
+    configurable: true,
+    writable: true,
+  });
+  return action().finally(() => {
+    if (originalDescriptor) {
+      Object.defineProperty(process.stdin, "isTTY", originalDescriptor);
+    } else {
+      delete (process.stdin as { isTTY?: boolean }).isTTY;
+    }
+  });
+}
+
+function useMockUI(ui: WizardUI, calls: MockCall[]): void {
+  mockUICalls = calls;
+  getUISpy.mockResolvedValue({
+    ...ui,
+    spinner: () => spinnerMock,
+  });
+}
 
 beforeEach(() => {
   // Force rich output so clack-plain.ts delegates to real clack (spied below)
@@ -249,6 +277,16 @@ function lastCancelMessage(): string | undefined {
   return;
 }
 
+function lastFeedbackOutcome(): string | undefined {
+  for (let i = mockUICalls.length - 1; i >= 0; i--) {
+    const call = mockUICalls[i];
+    if (call?.kind === "feedback") {
+      return call.outcome;
+    }
+  }
+  return;
+}
+
 function lastWarn(): string | undefined {
   for (let i = mockUICalls.length - 1; i >= 0; i--) {
     const call = mockUICalls[i];
@@ -269,20 +307,27 @@ describe("runWizard", () => {
   });
 
   test("throws when stdin is not a TTY without --yes", async () => {
-    const originalIsTTY = process.stdin.isTTY;
+    const originalDescriptor = Object.getOwnPropertyDescriptor(
+      process.stdin,
+      "isTTY"
+    );
     Object.defineProperty(process.stdin, "isTTY", {
       value: false,
       configurable: true,
+      writable: true,
     });
 
-    await expect(runWizard(makeOptions({ yes: false }))).rejects.toThrow(
-      WizardError
-    );
-
-    Object.defineProperty(process.stdin, "isTTY", {
-      value: originalIsTTY,
-      configurable: true,
-    });
+    try {
+      await expect(runWizard(makeOptions({ yes: false }))).rejects.toThrow(
+        WizardError
+      );
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(process.stdin, "isTTY", originalDescriptor);
+      } else {
+        delete (process.stdin as { isTTY?: boolean }).isTTY;
+      }
+    }
   });
 
   test("passes dry-run as non-interactive into preflight", async () => {
@@ -293,6 +338,112 @@ describe("runWizard", () => {
       expect.anything()
     );
     expect(lastWarn()).toContain("Dry-run");
+  });
+
+  test("uses rich welcome screen when available", async () => {
+    const { ui, calls, respond } = createMockUI({ welcome: true });
+    respond.welcome("continue");
+    useMockUI(ui, calls);
+
+    await forceStdinTty(() =>
+      runWizard(
+        makeOptions({
+          yes: false,
+          features: ["errorMonitoring", "performanceMonitoring"],
+          org: "bete-dev",
+          project: "nextjs",
+        })
+      )
+    );
+
+    const welcome = calls.find((call) => call.kind === "welcome");
+    expect(welcome).toBeDefined();
+    if (welcome?.kind !== "welcome") {
+      throw new Error("expected welcome call");
+    }
+    expect(welcome.options.title).toBe("Sentry Init");
+    expect(welcome.options.body).toContain(
+      "We'll use AI to inspect this project and configure Sentry."
+    );
+    expect(welcome.options.punchline).toContain("use AI for setup");
+    expect(getUISpy.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        initialWelcome: expect.objectContaining({
+          title: "Sentry Init",
+        }),
+      })
+    );
+    expect(
+      calls.some((call) => call.kind === "select" || call.kind === "confirm")
+    ).toBe(false);
+    const introOn = calls.findIndex(
+      (call) => call.kind === "setIntroMode" && call.enabled
+    );
+    const introOff = calls.findIndex(
+      (call) => call.kind === "setIntroMode" && !call.enabled
+    );
+    expect(introOn).toBeGreaterThanOrEqual(0);
+    expect(introOff).toBeGreaterThanOrEqual(0);
+    expect(spinnerMock.message.mock.calls).toContainEqual([
+      "Connecting to wizard...",
+    ]);
+    expect(formatResultSpy).toHaveBeenCalled();
+  });
+
+  test("does not log a second AI disclaimer after welcome", async () => {
+    const { ui, calls, respond } = createMockUI({ welcome: true });
+    respond.welcome("continue");
+    useMockUI(ui, calls);
+
+    await forceStdinTty(() =>
+      runWizard(
+        makeOptions({
+          yes: false,
+          features: ["errorMonitoring"],
+          org: "bete-dev",
+          project: "nextjs",
+        })
+      )
+    );
+
+    const infoMessages = calls
+      .filter((call) => call.kind === "log.info")
+      .map((call) => call.message);
+    expect(
+      infoMessages.some((message) => message.includes("This wizard uses AI"))
+    ).toBe(false);
+    expect(
+      infoMessages.some((message) => message.includes("For manual setup"))
+    ).toBe(false);
+  });
+
+  test("cancels cleanly from rich welcome screen", async () => {
+    const { ui, calls, respond } = createMockUI({ welcome: true });
+    respond.welcome(CANCELLED);
+    useMockUI(ui, calls);
+
+    await forceStdinTty(() => runWizard(makeOptions({ yes: false })));
+
+    expect(process.exitCode).toBe(0);
+    expect(lastCancelMessage()).toBe("Setup cancelled.");
+    expect(lastFeedbackOutcome()).toBe("cancelled");
+    expect(getWorkflowSpy).not.toHaveBeenCalled();
+  });
+
+  test("falls back to generic continue prompt without rich welcome", async () => {
+    const { ui, calls, respond } = createMockUI();
+    respond.select("continue");
+    useMockUI(ui, calls);
+
+    await forceStdinTty(() => runWizard(makeOptions({ yes: false })));
+
+    const select = calls.find((call) => call.kind === "select");
+    expect(select).toBeDefined();
+    if (select?.kind !== "select") {
+      throw new Error("expected select call");
+    }
+    expect(select.message).toContain("experimental");
+    expect(formatResultSpy).toHaveBeenCalled();
   });
 
   test("stops before workflow creation when preflight returns null", async () => {
@@ -310,6 +461,7 @@ describe("runWizard", () => {
     await runWizard(makeOptions());
 
     expect(lastCancelMessage()).toBe("Setup cancelled.");
+    expect(lastFeedbackOutcome()).toBe("cancelled");
     expect(getWorkflowSpy).not.toHaveBeenCalled();
   });
 
@@ -476,6 +628,7 @@ describe("runWizard", () => {
 
     expect(spinnerMock.stop).toHaveBeenCalledWith("Error", 1);
     expect(lastCancelMessage()).toBe("Setup failed");
+    expect(lastFeedbackOutcome()).toBe("failed");
   });
 
   test("tears down forwarding and stops the spinner on cancellation", async () => {
@@ -498,6 +651,8 @@ describe("runWizard", () => {
 
     expect(process.exitCode).toBe(0);
     expect(spinnerMock.stop).toHaveBeenCalledWith("Cancelled", 0);
+    expect(lastCancelMessage()).toBe("Setup cancelled.");
+    expect(lastFeedbackOutcome()).toBe("cancelled");
   });
 
   test("tears down forwarding when a WizardError is rethrown from a tool", async () => {
@@ -525,6 +680,8 @@ describe("runWizard", () => {
     await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
     expect(spinnerMock.stop).toHaveBeenCalledWith("Error", 1);
+    expect(lastCancelMessage()).toBe("Setup failed");
+    expect(lastFeedbackOutcome()).toBe("failed");
   });
 
   test("shows count-based messages while reading and analyzing files", async () => {

@@ -266,6 +266,39 @@ describe("handleMultiSelect", () => {
     expect(multiselectCall?.options).not.toContain("errorMonitoring");
     expect(multiselectCall?.options).toContain("performanceMonitoring");
   });
+
+  test("shows available optional features without client-side recommendations", async () => {
+    const { ui, calls, respond } = createMockUI();
+    respond.multiselect(["sessionReplay"]);
+
+    const result = await handleInteractive(
+      {
+        type: "interactive",
+        prompt: "Select features",
+        kind: "multi-select",
+        availableFeatures: [
+          "errorMonitoring",
+          "performanceMonitoring",
+          "sourceMaps",
+          "sessionReplay",
+        ],
+      },
+      makeOptions({ yes: false }),
+      ui
+    );
+
+    expect(result.features).toEqual(["errorMonitoring", "sessionReplay"]);
+
+    const multiselectCall = calls.find((c) => c.kind === "multiselect") as
+      | Extract<(typeof calls)[number], { kind: "multiselect" }>
+      | undefined;
+    expect(multiselectCall?.options).toEqual([
+      "sessionReplay",
+      "performanceMonitoring",
+      "sourceMaps",
+    ]);
+    expect(multiselectCall?.initialValues).toBeUndefined();
+  });
 });
 
 describe("handleConfirm", () => {

@@ -46,6 +46,14 @@ function infoMessages(calls: MockCall[]): string[] {
     .map((c) => c.message);
 }
 
+function feedbackOutcomes(calls: MockCall[]): string[] {
+  return calls
+    .filter(
+      (c): c is Extract<MockCall, { kind: "feedback" }> => c.kind === "feedback"
+    )
+    .map((c) => c.outcome);
+}
+
 describe("formatResult", () => {
   test("emits a structured summary with all fields and the changed-files list", () => {
     const { ui, calls } = createMockUI();
@@ -82,7 +90,7 @@ describe("formatResult", () => {
       { label: "Directory", value: "/app" },
       {
         label: "Features",
-        value: "Error Monitoring, Performance Monitoring (Tracing)",
+        value: "Error Monitoring, Tracing",
       },
       { label: "Commands", value: "npm install @sentry/nextjs" },
       { label: "Project", value: "https://sentry.io/project" },
@@ -94,6 +102,12 @@ describe("formatResult", () => {
       { action: "modify", path: "src/app/layout.tsx" },
       { action: "delete", path: "src/old-sentry.js" },
     ]);
+    expect(feedbackOutcomes(calls)).toEqual(["success"]);
+    expect(
+      infoMessages(calls).some((message) =>
+        message.includes("one of the first")
+      )
+    ).toBe(false);
   });
 
   test("skips the summary call when result has no summary-worthy fields", () => {
@@ -178,6 +192,7 @@ describe("formatError", () => {
     expect(errorMessages(calls)).toContain("Connection timed out");
     const cancel = calls.find((c) => c.kind === "cancel");
     expect(cancel?.kind === "cancel" && cancel.message).toBe("Setup failed");
+    expect(feedbackOutcomes(calls)).toEqual(["failed"]);
   });
 
   test("extracts message from nested result.message", () => {

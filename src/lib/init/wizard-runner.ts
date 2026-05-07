@@ -19,7 +19,6 @@ import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { detectAgent } from "../detect-agent.js";
 import { EXIT, WizardError } from "../errors.js";
-import { terminalLink } from "../formatters/colors.js";
 import {
   renderInlineMarkdown,
   stripColorTags,
@@ -36,7 +35,6 @@ import {
   EXIT_PLATFORM_NOT_DETECTED,
   EXIT_VERIFICATION_FAILED,
   MASTRA_API_URL,
-  SENTRY_DOCS_URL,
   VERIFY_CHANGES_STEP,
   WORKFLOW_ID,
 } from "./constants.js";
@@ -55,7 +53,7 @@ import type {
 } from "./types.js";
 import { getUIAsync } from "./ui/factory.js";
 import { LoggingUIPromptError } from "./ui/logging-ui.js";
-import type { SpinnerHandle, WizardUI } from "./ui/types.js";
+import type { SpinnerHandle, WelcomeOptions, WizardUI } from "./ui/types.js";
 import {
   precomputeDirListing,
   precomputeSentryDetection,
@@ -234,15 +232,23 @@ async function handleSuspendedStep(
 
   spin.stop("Error", 1);
   spinState.running = false;
-  ui.log.error(
-    `Unknown suspend payload type "${(payload as { type: string }).type}"`
-  );
-  ui.cancel("Setup failed");
-  throw new WizardCancelledError();
+  const message = `Unknown suspend payload type "${(payload as { type: string }).type}"`;
+  ui.log.error(message);
+  throw new WizardError(message);
 }
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function showCancelledFeedback(ui: WizardUI): void {
+  ui.cancel("Setup cancelled.");
+  ui.feedback("cancelled");
+}
+
+function showFailedFeedback(ui: WizardUI, message = "Setup failed"): void {
+  ui.cancel(message);
+  ui.feedback("failed");
 }
 
 function assertWorkflowResult(raw: unknown): WorkflowRunResult {
@@ -296,12 +302,27 @@ function withTimeout<T>(
   });
 }
 
+function buildWelcomeOptions(): WelcomeOptions {
+  return {
+    title: "Sentry Init",
+    body: [
+      "We'll use AI to inspect this project and configure Sentry.",
+      "You'll choose the setup before local files change.",
+    ],
+    punchline: "Continue to let Sentry use AI for setup.",
+  };
+}
+
 async function confirmExperimental(
-  yes: boolean,
+  options: WizardOptions,
   ui: WizardUI
 ): Promise<boolean> {
-  if (yes) {
+  if (options.yes || options.dryRun) {
     return true;
+  }
+  if (ui.welcome) {
+    const choice = await ui.welcome(buildWelcomeOptions());
+    return abortIfCancelled(choice) === "continue";
   }
   // The wizard modifies files on disk. We use `select` rather than
   // `confirm` so the cancel path can carry a muted, explicit hint
@@ -332,12 +353,10 @@ async function confirmExperimental(
 }
 
 async function preamble(
-  directory: string,
-  yes: boolean,
-  dryRun: boolean,
+  options: WizardOptions,
   ui: WizardUI
 ): Promise<boolean> {
-  if (!(yes || dryRun || process.stdin.isTTY)) {
+  if (!(options.yes || options.dryRun || process.stdin.isTTY)) {
     throw new WizardError(
       "Interactive mode requires a terminal. Use --yes for non-interactive mode.",
       { rendered: false }
@@ -356,10 +375,11 @@ async function preamble(
 
   let confirmed: boolean;
   try {
-    confirmed = await confirmExperimental(yes || dryRun, ui);
+    confirmed = await confirmExperimental(options, ui);
   } catch (err) {
     if (err instanceof WizardCancelledError) {
       captureException(err);
+      showCancelledFeedback(ui);
       process.exitCode = 0;
       return false;
     }
@@ -372,22 +392,22 @@ async function preamble(
     throw err;
   }
   if (!confirmed) {
-    ui.cancel("Setup cancelled.");
+    showCancelledFeedback(ui);
     process.exitCode = 0;
     return false;
   }
 
-  if (dryRun) {
+  if (options.dryRun) {
     ui.log.warn("Dry-run mode: no files will be modified.");
   }
 
   const gitOk = await checkGitStatus({
-    cwd: directory,
-    yes: yes || dryRun,
+    cwd: options.directory,
+    yes: options.yes || options.dryRun,
     ui,
   });
   if (!gitOk) {
-    ui.cancel("Setup cancelled.");
+    showCancelledFeedback(ui);
     process.exitCode = 0;
     return false;
   }
@@ -469,21 +489,19 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   // path via `await using`. The factory picks `InkUI` for interactive
   // runs on the Bun binary and `LoggingUI` everywhere else (CI,
   // `--yes`, `--no-tui`, npm/Node distribution).
+  const initialWelcome = yes || dryRun ? undefined : buildWelcomeOptions();
   await using ui = await getUIAsync({
     yes,
     forceLegacy: forceLegacyUi,
+    ...(initialWelcome ? { initialWelcome } : {}),
   });
+  ui.setIntroMode?.(!yes);
 
-  await checkReadiness(ui);
-
-  if (!(await preamble(directory, yes, dryRun, ui))) {
+  if (!(await preamble(initialOptions, ui))) {
     return;
   }
 
-  ui.log.info(
-    "This wizard uses AI to analyze your project and configure Sentry." +
-      `\nFor manual setup: ${terminalLink(SENTRY_DOCS_URL)}`
-  );
+  await checkReadiness(ui);
 
   const effectiveOptions = dryRun
     ? { ...initialOptions, yes: true }
@@ -558,6 +576,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       precomputeSentryDetection(directory).catch(() => null),
     ]);
     const fileCache = await preReadCommonFiles(directory, dirListing);
+    ui.setIntroMode?.(false);
     spin.message("Connecting to wizard...");
     run = await workflow.createRun();
     // Large shared context (dirListing, fileCache, existingSentry)
@@ -591,7 +610,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     spin.stop("Connection failed", 1);
     spinState.running = false;
     ui.log.error(errorMessage(err));
-    ui.cancel("Setup failed");
+    showFailedFeedback(ui);
     throw new WizardError(errorMessage(err));
   }
 
@@ -619,7 +638,6 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
           ui.setStep?.(activeStepId, "failed");
         }
         ui.log.error(`No suspend payload found for step "${stepId}"`);
-        ui.cancel("Setup failed");
         throw new WizardError(`No suspend payload found for step "${stepId}"`);
       }
 
@@ -675,6 +693,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       // failed; the post-dispose report shows the cancel message
       // instead.
       captureException(err);
+      showCancelledFeedback(ui);
       process.exitCode = 0;
       return;
     }
@@ -682,10 +701,11 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       ui.setStep?.(activeStepId, "failed");
     }
     if (err instanceof WizardError) {
+      showFailedFeedback(ui);
       throw err;
     }
     ui.log.error(errorMessage(err));
-    ui.cancel("Setup failed");
+    showFailedFeedback(ui);
     throw new WizardError(errorMessage(err));
   }
 

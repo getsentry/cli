@@ -27,6 +27,16 @@ import type {
 } from "./types.js";
 import type { WizardUI } from "./ui/types.js";
 
+function prependRequiredFeature(
+  features: string[],
+  hasRequired: boolean
+): string[] {
+  if (!(hasRequired && !features.includes(REQUIRED_FEATURE))) {
+    return features;
+  }
+  return [REQUIRED_FEATURE, ...features];
+}
+
 export async function handleInteractive(
   payload: InteractivePayload,
   options: InteractiveContext,
@@ -133,16 +143,11 @@ async function handleMultiSelect(
         ...(hint ? { hint } : {}),
       };
     }),
-    initialValues: optional.filter((f) => f === "performanceMonitoring"),
     required: false,
   });
 
   const chosen = abortIfCancelled(selected);
-  if (hasRequired && !chosen.includes(REQUIRED_FEATURE)) {
-    chosen.unshift(REQUIRED_FEATURE);
-  }
-
-  return { features: chosen };
+  return { features: prependRequiredFeature(chosen, hasRequired) };
 }
 
 async function handleConfirm(

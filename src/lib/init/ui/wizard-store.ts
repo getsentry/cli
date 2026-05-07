@@ -21,8 +21,11 @@ import {
   CHECKLIST_VISIBLE_STEPS,
   shortStepLabel,
 } from "../clack-utils.js";
-import type { ColorScheme } from "./theme.js";
-import type { SpinnerExitCode, WizardSummary } from "./types.js";
+import type {
+  SpinnerExitCode,
+  WelcomeOptions,
+  WizardSummary,
+} from "./types.js";
 
 export type LogSeverity = "info" | "warn" | "error" | "success" | "message";
 
@@ -114,6 +117,11 @@ export type ActivePrompt =
       message: string;
       initialValue: boolean;
       resolve: (value: boolean | null) => void;
+    }
+  | {
+      kind: "welcome";
+      options: WelcomeOptions;
+      resolve: (value: "continue" | null) => void;
     };
 
 /** Non-blocking overlay shown on top of the normal content. */
@@ -137,7 +145,13 @@ export type LearnState = {
   complete: boolean;
 };
 
+export type WizardLayout = "intro" | "workflow";
+
 export type WizardSnapshot = {
+  /** Top-level layout: centered intro/preflight or full workflow shell. */
+  layout: WizardLayout;
+  /** CLI version displayed in the persistent Ink footer banner. */
+  cliVersion: string | null;
   bannerRows: { content: string; color: string }[];
   logs: LogEntry[];
   spinner: SpinnerState;
@@ -190,8 +204,6 @@ export type WizardSnapshot = {
   overlay: Overlay;
   /** When set, overrides the normal tab content with an outro screen. */
   outroState: OutroState;
-  /** Terminal color scheme for adaptive palette. */
-  theme: ColorScheme;
   /** Learn sequence progressive reveal state. */
   learnState: LearnState;
 };
@@ -209,6 +221,8 @@ export class WizardStore {
 
   constructor(initial: Partial<WizardSnapshot> = {}) {
     this.snapshot = {
+      layout: initial.layout ?? "workflow",
+      cliVersion: initial.cliVersion ?? null,
       bannerRows: initial.bannerRows ?? [],
       logs: initial.logs ?? [],
       spinner: initial.spinner ?? { active: false, frame: 0, message: "" },
@@ -228,7 +242,6 @@ export class WizardStore {
       statusExpanded: initial.statusExpanded ?? false,
       overlay: initial.overlay ?? null,
       outroState: initial.outroState ?? null,
-      theme: initial.theme ?? "dark",
       learnState: initial.learnState ?? {
         blockIndex: 0,
         lineIndex: 0,
@@ -248,6 +261,13 @@ export class WizardStore {
 
   setBanner(rows: { content: string; color: string }[]): void {
     this.update({ bannerRows: rows });
+  }
+
+  setLayout(layout: WizardLayout): void {
+    if (this.snapshot.layout === layout) {
+      return;
+    }
+    this.update({ layout });
   }
 
   appendLog(severity: LogSeverity, text: string): LogEntry {
@@ -433,13 +453,6 @@ export class WizardStore {
 
   setOutro(state: OutroState): void {
     this.update({ outroState: state });
-  }
-
-  setTheme(theme: ColorScheme): void {
-    if (this.snapshot.theme === theme) {
-      return;
-    }
-    this.update({ theme });
   }
 
   advanceLearnLine(): void {

@@ -22,6 +22,7 @@ import {
   renderInlineMarkdown,
   renderMarkdown,
 } from "../../formatters/markdown.js";
+import { formatFeedbackHint, type InitFeedbackOutcome } from "../feedback.js";
 import { buildFileTree, flattenTree } from "./file-tree.js";
 import type {
   ConfirmOptions,
@@ -126,6 +127,11 @@ export class LoggingUI implements WizardUI {
 
   cancel(message: string): void {
     this.writeLine(this.stderr, message);
+  }
+
+  feedback(outcome: InitFeedbackOutcome): void {
+    this.writeLine(this.stdout, formatFeedbackHint(outcome));
+    this.writeLine(this.stdout, "");
   }
 
   // ── Logging ───────────────────────────────────────────────────────

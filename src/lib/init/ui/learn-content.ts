@@ -22,14 +22,27 @@ export const LEARN_SEQUENCE: ContentBlock[] = [
   {
     title: "How Sentry Works",
     lines: [
-      "App → SDK → Sentry → Alert",
+      "App → SDK → Sentry → Issue",
       "",
-      "The SDK captures errors and",
-      "performance data, then sends",
-      "them to Sentry for grouping,",
-      "alerting, and root-cause",
-      "analysis.",
+      "The SDK runs in your app.",
+      "It sends errors, traces, and",
+      "context from production to",
+      "Sentry, where related events",
+      "become issues with the clues",
+      "you need to fix them faster.",
+    ],
+  },
+  {
+    title: "Debug With Context",
+    lines: [
+      "Issue → Trace → Replay → Fix",
       "",
+      "Start with the grouped issue.",
+      "Traces show the request path.",
+      "Replay shows the user session.",
+      "Logs show what happened nearby.",
+      "Releases show what changed.",
+      "That context points to the fix.",
     ],
   },
   {

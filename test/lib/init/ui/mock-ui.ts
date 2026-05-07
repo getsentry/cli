@@ -11,6 +11,7 @@
  * test-only helper — it should not be bundled into the CLI.
  */
 
+import type { InitFeedbackOutcome } from "../../../../src/lib/init/feedback.js";
 import {
   CANCELLED,
   type Cancelled,
@@ -19,6 +20,7 @@ import {
   type SelectOptions,
   type SpinnerExitCode,
   type SpinnerHandle,
+  type WelcomeOptions,
   type WizardLog,
   type WizardSummary,
   type WizardUI,
@@ -30,6 +32,7 @@ export type MockCall =
   | { kind: "summary"; summary: WizardSummary }
   | { kind: "outro"; message: string }
   | { kind: "cancel"; message: string }
+  | { kind: "feedback"; outcome: InitFeedbackOutcome }
   | { kind: "log.info"; message: string }
   | { kind: "log.warn"; message: string }
   | { kind: "log.error"; message: string }
@@ -39,6 +42,7 @@ export type MockCall =
   | { kind: "spinner.message"; message?: string }
   | { kind: "spinner.stop"; message?: string; code?: SpinnerExitCode }
   | { kind: "select"; message: string; options: string[] }
+  | { kind: "welcome"; options: WelcomeOptions }
   | {
       kind: "multiselect";
       message: string;
@@ -46,6 +50,7 @@ export type MockCall =
       initialValues?: string[];
     }
   | { kind: "confirm"; message: string; initialValue?: boolean }
+  | { kind: "setIntroMode"; enabled: boolean }
   | { kind: "recordFilesReading"; paths: string[] }
   | { kind: "markFilesAnalyzed"; paths: string[] }
   | {
@@ -60,9 +65,14 @@ export type MockCall =
  * user abort).
  */
 export type MockResponse =
+  | { kind: "welcome"; value: "continue" | Cancelled }
   | { kind: "select"; value: string | Cancelled }
   | { kind: "multiselect"; value: string[] | Cancelled }
   | { kind: "confirm"; value: boolean | Cancelled };
+
+type MockUIOptions = {
+  welcome?: boolean;
+};
 
 /**
  * Build a mock `WizardUI` plus its observable state.
@@ -70,10 +80,11 @@ export type MockResponse =
  * Returns the impl, the call trace, and a `respond()` helper for
  * pushing canned responses onto the prompt queue.
  */
-export function createMockUI(): {
+export function createMockUI(options: MockUIOptions = {}): {
   ui: WizardUI;
   calls: MockCall[];
   respond: {
+    welcome(value: "continue" | Cancelled): void;
     select(value: string | Cancelled): void;
     multiselect(value: string[] | Cancelled): void;
     confirm(value: boolean | Cancelled): void;
@@ -120,12 +131,14 @@ export function createMockUI(): {
     summary: (summary) => calls.push({ kind: "summary", summary }),
     outro: (message) => calls.push({ kind: "outro", message }),
     cancel: (message) => calls.push({ kind: "cancel", message }),
+    feedback: (outcome) => calls.push({ kind: "feedback", outcome }),
     recordFilesReading: (paths) =>
       calls.push({ kind: "recordFilesReading", paths }),
     markFilesAnalyzed: (paths) =>
       calls.push({ kind: "markFilesAnalyzed", paths }),
     setStep: (stepId, status) =>
       calls.push({ kind: "setStep", stepId, status }),
+    setIntroMode: (enabled) => calls.push({ kind: "setIntroMode", enabled }),
     log,
     spinner,
     select: (opts: SelectOptions<string>) => {
@@ -158,10 +171,18 @@ export function createMockUI(): {
     [Symbol.asyncDispose]: () => Promise.resolve(),
   };
 
+  if (options.welcome) {
+    ui.welcome = (opts: WelcomeOptions) => {
+      calls.push({ kind: "welcome", options: opts });
+      return Promise.resolve(takeResponse("welcome"));
+    };
+  }
+
   return {
     ui,
     calls,
     respond: {
+      welcome: (value) => responses.push({ kind: "welcome", value }),
       select: (value) => responses.push({ kind: "select", value }),
       multiselect: (value) => responses.push({ kind: "multiselect", value }),
       confirm: (value) => responses.push({ kind: "confirm", value }),

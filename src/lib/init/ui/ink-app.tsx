@@ -15,19 +15,19 @@
  *   │  [PromptArea]             │  │ ▶ Install deps         │ │
  *   │                           │  │ ◻ Apply codemods       │ │
  *   │                           │  ╰────────────────────────╯ │
- *   │  ──────────────────────────────────────────────────────  │
- *   │  ◆ Reading package.json                                 │
  *   │  ● Status   Files                                       │
- *   │  ←→ switch tab  s toggle status                         │
+ *   │  ←→ switch tab                                          │
+ *   │  Sentry                         For feedback run: ...   │
  *   └─────────────────────────────────────────────────────────┘
  *
  * Tab 1 (Status): Banner + logs + spinner + prompts + summary
  * Tab 2 (Files): Scrollable file read tree
  */
 
-import { Box, Text, useInput, useStdout } from "ink";
+import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -40,6 +40,20 @@ import {
   type FileTreeRow,
   flattenTree,
 } from "./file-tree.js";
+import {
+  type FrameTab,
+  getInkFrameMargin,
+  getInkFrameWidth,
+  InitRenderBoundary,
+  ShortcutFooter,
+  TabFooter,
+  useInkFrameSize,
+} from "./ink-frame.js";
+import {
+  type ShortcutBinding,
+  ShortcutHintProvider,
+  useInkShortcuts,
+} from "./ink-shortcuts.js";
 import { BLOCK_LINE_COUNT, LEARN_SEQUENCE } from "./learn-content.js";
 import { SENTRY_TIPS, type SentryTip } from "./sentry-tips.js";
 import type { WizardSummary } from "./types.js";
@@ -68,21 +82,13 @@ const COLOR_WARN = "#FDB81B";
 const COLOR_ERROR = "#fe4144";
 const COLOR_SUCCESS = "#83da90";
 
-const MIN_WIDTH = 80;
-const MAX_WIDTH = 120;
-
-/** Number of collapsed status-bar lines visible. */
-const STATUS_COLLAPSED_COUNT = 2;
-/** Number of expanded status-bar lines visible. */
-const STATUS_EXPANDED_COUNT = 10;
-
-const ICON_BY_SEVERITY: Record<LogSeverity, { glyph: string; color: string }> =
+const ICON_BY_SEVERITY: Record<LogSeverity, { glyph: string; color?: string }> =
   {
     info: { glyph: "●", color: COLOR_INFO },
     warn: { glyph: "▲", color: COLOR_WARN },
     error: { glyph: "✖", color: COLOR_ERROR },
     success: { glyph: "✔", color: COLOR_SUCCESS },
-    message: { glyph: " ", color: "white" },
+    message: { glyph: " " },
   };
 
 const ICONS = {
@@ -97,6 +103,56 @@ const ICONS = {
   bullet: "\u2022",
 } as const;
 
+const DEFAULT_WELCOME_OPTIONS = {
+  title: "Sentry Init",
+  body: [
+    "We'll use AI to inspect this project and configure Sentry.",
+    "You'll choose the setup before local files change.",
+  ],
+  punchline: "Continue to let Sentry use AI for setup.",
+};
+const FEEDBACK_BANNER_TEXT =
+  'For feedback run: sentry cli feedback "what worked or broke"';
+const FEEDBACK_BANNER_FG = "#FFFFFF";
+
+function getIntroTopPadding(rows: number): number {
+  return Math.min(6, Math.max(1, Math.floor(rows * 0.18)));
+}
+
+function truncateForBanner(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+  if (maxLength <= 3) {
+    return text.slice(0, maxLength);
+  }
+  return `${text.slice(0, maxLength - 3)}...`;
+}
+
+function formatBannerBrand(cliVersion: string | null): string {
+  return cliVersion ? `Sentry v${cliVersion}` : "Sentry";
+}
+
+function formatFeedbackBanner(
+  width: number,
+  cliVersion: string | null
+): string {
+  const brand = formatBannerBrand(cliVersion);
+  const left = ` ${brand}`;
+  if (width <= left.length) {
+    return left.slice(0, Math.max(0, width));
+  }
+
+  const maxRight = Math.max(0, width - left.length - 1);
+  const clippedRight = truncateForBanner(FEEDBACK_BANNER_TEXT, maxRight);
+  if (clippedRight.length === 0) {
+    return left.padEnd(width, " ");
+  }
+
+  const spacerWidth = Math.max(1, width - left.length - clippedRight.length);
+  return `${left}${" ".repeat(spacerWidth)}${clippedRight}`;
+}
+
 // ────────────────────────────── App entry ─────────────────────────────
 
 export type AppProps = {
@@ -104,43 +160,27 @@ export type AppProps = {
 };
 
 export function App({ store }: AppProps): React.ReactNode {
+  return (
+    <ShortcutHintProvider>
+      <AppBody store={store} />
+    </ShortcutHintProvider>
+  );
+}
+
+function AppBody({ store }: AppProps): React.ReactNode {
   const snapshot = useSyncExternalStore(
     store.subscribe,
     store.getSnapshot,
     store.getSnapshot
   );
-  const { columns, rows } = useTerminalSize();
+  const { columns, rows } = useInkFrameSize();
   const [activeTab, setActiveTab] = useState(0);
 
-  const width = getContentWidth(columns);
-  const contentHeight = Math.max(5, rows - 3);
+  const width = getInkFrameWidth(columns);
+  const contentHeight = Math.max(5, rows - 4);
   const isWide = width >= 80;
 
-  useInput((input, key) => {
-    if (key.ctrl && input === "c" && !snapshot.prompt) {
-      snapshot.requestCancel?.();
-      return;
-    }
-    if (key.leftArrow && !snapshot.prompt) {
-      setActiveTab((prev) => Math.max(0, prev - 1));
-      return;
-    }
-    if (key.rightArrow && !snapshot.prompt) {
-      setActiveTab((prev) => Math.min(1, prev + 1));
-      return;
-    }
-    if (input === "s" && !snapshot.prompt) {
-      store.toggleStatusExpanded();
-    }
-  });
-
-  const statusMessages = snapshot.statusMessages;
-  const visibleCount = snapshot.statusExpanded
-    ? STATUS_EXPANDED_COUNT
-    : STATUS_COLLAPSED_COUNT;
-  const visibleMessages = statusMessages.slice(-visibleCount);
-
-  const tabs = useMemo(
+  const tabs = useMemo<FrameTab[]>(
     () => [
       { id: "status", label: "Status" },
       { id: "files", label: "Files" },
@@ -148,38 +188,72 @@ export function App({ store }: AppProps): React.ReactNode {
     []
   );
 
-  const hints: KeyHint[] = useMemo(() => {
-    const h: KeyHint[] = [{ label: "\u2190\u2192", action: "switch tab" }];
-    if (statusMessages.length > STATUS_COLLAPSED_COUNT) {
-      h.push({ label: "s", action: "toggle status" });
-    }
-    if (activeTab === 1 && snapshot.filesRead.length > 0) {
-      h.push({ label: "\u2191\u2193", action: "scroll" });
-    }
-    if (snapshot.prompt) {
-      if (snapshot.prompt.kind === "confirm") {
-        h.push({ label: "y/n", action: "answer" });
-      } else {
-        h.push({ label: "\u2191\u2193", action: "navigate" });
-        h.push({ label: "enter", action: "confirm" });
-        h.push({ label: "esc", action: "cancel" });
-      }
-    }
-    return h;
-  }, [
-    statusMessages.length,
-    snapshot.prompt,
-    activeTab,
-    snapshot.filesRead.length,
-  ]);
+  const appShortcuts = useMemo<ShortcutBinding[]>(() => {
+    const bindings: ShortcutBinding[] = [
+      {
+        key: "ctrl+c",
+        action: "cancel",
+        priority: 0,
+        showInFooter: false,
+        match: (input, key) => key.ctrl && input === "c",
+        run: () => snapshot.requestCancel?.(),
+      },
+      {
+        key: "\u2190\u2192",
+        action: "switch tab",
+        priority: 10,
+        match: (_input, key) => key.leftArrow || key.rightArrow,
+        run: (_input, key) => {
+          if (key.leftArrow) {
+            setActiveTab((prev) => Math.max(0, prev - 1));
+          }
+          if (key.rightArrow) {
+            setActiveTab((prev) => Math.min(tabs.length - 1, prev + 1));
+          }
+        },
+      },
+    ];
+    return bindings;
+  }, [snapshot.requestCancel, tabs.length]);
+  useInkShortcuts("init-app", appShortcuts, {
+    isActive: snapshot.layout === "workflow" && snapshot.prompt === null,
+  });
 
-  const marginLeft = Math.max(0, Math.floor((columns - width) / 2));
+  if (snapshot.layout === "intro" || snapshot.prompt?.kind === "welcome") {
+    const inner = (
+      <Box
+        flexDirection="column"
+        height={rows}
+        marginLeft={getInkFrameMargin(columns, width)}
+        width={width}
+      >
+        <Box
+          alignItems="center"
+          flexDirection="column"
+          flexGrow={1}
+          paddingTop={getIntroTopPadding(rows)}
+        >
+          <IntroScreen
+            bannerRows={snapshot.bannerRows}
+            logs={snapshot.logs}
+            prompt={snapshot.prompt}
+            spinner={snapshot.spinner}
+            width={width}
+          />
+        </Box>
+        <FeedbackBanner cliVersion={snapshot.cliVersion} width={width} />
+      </Box>
+    );
+    return (
+      <InitRenderBoundary errorColor={COLOR_ERROR}>{inner}</InitRenderBoundary>
+    );
+  }
 
   const inner = (
     <Box
       flexDirection="column"
       height={rows}
-      marginLeft={marginLeft}
+      marginLeft={getInkFrameMargin(columns, width)}
       width={width}
     >
       <Box flexDirection="column" flexGrow={1} paddingTop={1}>
@@ -194,7 +268,6 @@ export function App({ store }: AppProps): React.ReactNode {
             <Box flexDirection="column" flexGrow={1} overflow="hidden">
               {activeTab === 0 ? (
                 <ActivityPane
-                  bannerRows={snapshot.bannerRows}
                   logs={snapshot.logs}
                   prompt={snapshot.prompt}
                   spinner={snapshot.spinner}
@@ -222,129 +295,22 @@ export function App({ store }: AppProps): React.ReactNode {
             <OverlayPanel overlay={snapshot.overlay} />
           ) : null}
 
-          {visibleMessages.length > 0 ? (
-            <StatusBar messages={visibleMessages} />
-          ) : null}
-
-          <TabBar activeTab={activeTab} tabs={tabs} />
-          <KeyboardHintsBar hints={hints} />
+          <TabFooter
+            activeColor={ACCENT}
+            activeGlyph={ICONS.bullet}
+            activeTab={activeTab}
+            inactiveColor={MUTED_DIM}
+            tabs={tabs}
+          />
+          <ShortcutFooter color={MUTED_DIM} />
+          <FeedbackBanner cliVersion={snapshot.cliVersion} width={width} />
         </Box>
       </Box>
     </Box>
   );
 
-  return inner;
-}
-
-// ────────────────────────────── Layout helpers ────────────────────────
-
-function getContentWidth(terminalColumns: number): number {
-  if (terminalColumns < MIN_WIDTH) {
-    return terminalColumns;
-  }
-  return Math.min(MAX_WIDTH, terminalColumns);
-}
-
-function useTerminalSize(): { columns: number; rows: number } {
-  const { stdout } = useStdout();
-  const [size, setSize] = useState(() => ({
-    columns: stdout?.columns ?? 80,
-    rows: stdout?.rows ?? 24,
-  }));
-  useEffect(() => {
-    if (!stdout) {
-      return;
-    }
-    const onResize = () => {
-      setSize({
-        columns: stdout.columns ?? 80,
-        rows: stdout.rows ?? 24,
-      });
-    };
-    stdout.on("resize", onResize);
-    return () => {
-      stdout.off("resize", onResize);
-    };
-  }, [stdout]);
-  return size;
-}
-
-// ──────────────────────────── Status Bar ──────────────────────────────
-
-function StatusBar({ messages }: { messages: string[] }): React.ReactNode {
   return (
-    <Box
-      borderBottom={false}
-      borderColor={MUTED_DIM}
-      borderLeft={false}
-      borderRight={false}
-      borderStyle="single"
-      borderTop
-      flexDirection="column"
-      overflow="hidden"
-      paddingX={1}
-    >
-      {messages.map((msg, i, arr) => {
-        const isCurrent = i === arr.length - 1;
-        // biome-ignore lint/nursery/noLeakedRender: variable assignment, not JSX expression
-        const msgColor = isCurrent ? MUTED : MUTED_DIM;
-        return (
-          // biome-ignore lint/suspicious/noArrayIndexKey: positional status messages
-          <Text color={msgColor} key={i}>
-            {isCurrent ? ICONS.diamond : ICONS.separator} {msg}
-          </Text>
-        );
-      })}
-    </Box>
-  );
-}
-
-// ──────────────────────────── Tab Bar ─────────────────────────────────
-
-function TabBar({
-  tabs,
-  activeTab,
-}: {
-  tabs: { id: string; label: string }[];
-  activeTab: number;
-}): React.ReactNode {
-  return (
-    <Box gap={1} height={1} paddingX={1}>
-      {tabs.map((tab, i) => {
-        const isActive = i === activeTab;
-        // biome-ignore lint/nursery/noLeakedRender: variable assignment, not JSX expression
-        const tabColor = isActive ? ACCENT : MUTED_DIM;
-        return (
-          <Box key={tab.id}>
-            <Text bold={isActive} color={tabColor}>
-              {isActive ? ICONS.bullet : " "} {tab.label}
-            </Text>
-          </Box>
-        );
-      })}
-    </Box>
-  );
-}
-
-// ────────────────────────── Keyboard Hints ────────────────────────────
-
-type KeyHint = { label: string; action: string };
-
-function KeyboardHintsBar({ hints }: { hints: KeyHint[] }): React.ReactNode {
-  return (
-    <Box height={1} paddingX={1}>
-      {hints.map((hint, i) => (
-        <Box
-          key={`${hint.label}-${hint.action}`}
-          marginRight={i < hints.length - 1 ? 2 : 0}
-        >
-          <Text bold color={MUTED_DIM}>
-            {hint.label}
-          </Text>
-          <Text color={MUTED_DIM}> {hint.action}</Text>
-        </Box>
-      ))}
-    </Box>
+    <InitRenderBoundary errorColor={COLOR_ERROR}>{inner}</InitRenderBoundary>
   );
 }
 
@@ -382,34 +348,31 @@ function Sidebar({
 // ─────────────────────────── Activity Pane ────────────────────────────
 
 function ActivityPane({
-  bannerRows,
   logs,
   spinner,
   prompt,
   summary,
 }: {
-  bannerRows: { content: string; color: string }[];
   logs: LogEntry[];
   spinner: SpinnerState;
   prompt: ActivePrompt | null;
   summary: WizardSummary | null;
 }): React.ReactNode {
+  const visibleLogs =
+    prompt === null
+      ? logs
+      : logs.filter(
+          (log) => log.severity === "warn" || log.severity === "error"
+        );
   const hasContent =
-    logs.length > 0 || spinner.active || prompt !== null || summary !== null;
+    visibleLogs.length > 0 ||
+    spinner.active ||
+    prompt !== null ||
+    summary !== null;
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {bannerRows.length > 0 ? (
-        <Box flexDirection="column" flexShrink={0} marginBottom={1}>
-          {bannerRows.map((row, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: positional banner rows
-            <Text color={row.color} key={i}>
-              {row.content}
-            </Text>
-          ))}
-        </Box>
-      ) : null}
-      {!hasContent && bannerRows.length === 0 ? (
+      {hasContent ? null : (
         <Box flexDirection="column" paddingTop={1}>
           <Box gap={1}>
             <Text color={PRIMARY}>
@@ -418,10 +381,10 @@ function ActivityPane({
             <Text dimColor>Initializing wizard...</Text>
           </Box>
         </Box>
-      ) : null}
-      {logs.length > 0 ? (
+      )}
+      {visibleLogs.length > 0 ? (
         <Box flexDirection="column">
-          {logs.map((log) => (
+          {visibleLogs.map((log) => (
             <LogLine entry={log} key={log.id} />
           ))}
         </Box>
@@ -494,6 +457,271 @@ function OverlayPanel({
 }
 
 // ──────────────────────────── Components ──────────────────────────────
+
+type ChoiceRow<T extends string> = {
+  value: T;
+  label: string;
+  hint?: string;
+};
+
+function useChoiceNavigation<T extends string>({
+  choices,
+  onChoose,
+  onCancel,
+  scope,
+}: {
+  choices: ChoiceRow<T>[];
+  onChoose: (value: T) => void;
+  onCancel: () => void;
+  scope: string;
+}): number {
+  const [highlighted, setHighlighted] = useState(0);
+  const totalCount = choices.length;
+
+  const shortcuts = useMemo<ShortcutBinding[]>(
+    () => [
+      {
+        key: "\u2191\u2193",
+        action: "navigate",
+        priority: 40,
+        match: (_input, key) => key.upArrow || key.downArrow,
+        run: (_input, key) => {
+          if (key.upArrow) {
+            setHighlighted((idx) => (idx === 0 ? totalCount - 1 : idx - 1));
+            return;
+          }
+          setHighlighted((idx) => (idx + 1) % totalCount);
+        },
+      },
+      {
+        key: "enter",
+        action: "select",
+        priority: 41,
+        match: (_input, key) => key.return,
+        run: () => {
+          const current = choices[highlighted];
+          if (current) {
+            onChoose(current.value);
+          }
+        },
+      },
+      {
+        key: "esc",
+        action: "cancel",
+        priority: 42,
+        match: (input, key) => key.escape || (key.ctrl && input === "c"),
+        run: onCancel,
+      },
+    ],
+    [choices, highlighted, onCancel, onChoose, totalCount]
+  );
+  useInkShortcuts(scope, shortcuts);
+
+  return highlighted;
+}
+
+function ActionList<T extends string>({
+  centered = false,
+  choices,
+  highlighted,
+}: {
+  centered?: boolean;
+  choices: ChoiceRow<T>[];
+  highlighted: number;
+}): React.ReactNode {
+  const listWidth = centered ? "100%" : undefined;
+  return (
+    <Box flexDirection="column" width={listWidth}>
+      {choices.map((choice, index) => {
+        const isCursor = index === highlighted;
+        // biome-ignore lint/nursery/noLeakedRender: variable assignment, not JSX expression
+        const labelColor = isCursor ? undefined : MUTED;
+        if (centered) {
+          return (
+            <Box
+              flexDirection="row"
+              justifyContent="center"
+              key={choice.value}
+              width="100%"
+            >
+              <Text color={ACCENT}>
+                {isCursor ? `${ICONS.triangleSmallRight} ` : "  "}
+              </Text>
+              <Text bold={isCursor} color={labelColor}>
+                {choice.label}
+              </Text>
+              {choice.hint ? (
+                <Text color={MUTED_DIM}> {choice.hint}</Text>
+              ) : null}
+            </Box>
+          );
+        }
+        return (
+          <Box flexDirection="row" key={choice.value}>
+            <Box flexShrink={0} width={4}>
+              <Text color={ACCENT}>
+                {isCursor ? ICONS.triangleSmallRight : " "}
+              </Text>
+            </Box>
+            <Text bold={isCursor} color={labelColor}>
+              {choice.label}
+            </Text>
+            {choice.hint ? <Text color={MUTED_DIM}> {choice.hint}</Text> : null}
+          </Box>
+        );
+      })}
+    </Box>
+  );
+}
+
+function FeedbackBanner({
+  cliVersion,
+  width,
+}: {
+  cliVersion: string | null;
+  width: number;
+}): React.ReactNode {
+  return (
+    <Box flexShrink={0} height={1}>
+      <Text backgroundColor={ACCENT} color={FEEDBACK_BANNER_FG}>
+        {formatFeedbackBanner(width, cliVersion)}
+      </Text>
+    </Box>
+  );
+}
+
+// ─────────────────────────── Intro Screen ────────────────────────────
+
+function IntroScreen({
+  bannerRows,
+  logs,
+  prompt,
+  spinner,
+  width,
+}: {
+  bannerRows: { content: string; color: string }[];
+  logs: LogEntry[];
+  prompt: ActivePrompt | null;
+  spinner: SpinnerState;
+  width: number;
+}): React.ReactNode {
+  const welcomePrompt = prompt?.kind === "welcome" ? prompt : null;
+  const options = welcomePrompt?.options ?? DEFAULT_WELCOME_OPTIONS;
+  const bodyWidth = Math.min(width, 84);
+
+  return (
+    <Box alignItems="center" flexDirection="column" width={bodyWidth}>
+      <Box
+        alignItems="center"
+        flexDirection="column"
+        marginBottom={welcomePrompt ? 2 : 1}
+      >
+        {bannerRows.map((row, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: positional banner rows
+          <Text color={row.color} key={i}>
+            {row.content}
+          </Text>
+        ))}
+      </Box>
+      {welcomePrompt ? (
+        <Box alignItems="center" flexDirection="column" marginBottom={1}>
+          {options.body.map((line) => (
+            <Text key={line}>{line}</Text>
+          ))}
+        </Box>
+      ) : null}
+      {welcomePrompt ? (
+        <>
+          <Box marginBottom={2}>
+            <Text bold>{options.punchline}</Text>
+          </Box>
+          <WelcomeActions prompt={welcomePrompt} />
+        </>
+      ) : null}
+      {welcomePrompt ? null : (
+        <IntroPreflightContent logs={logs} prompt={prompt} spinner={spinner} />
+      )}
+    </Box>
+  );
+}
+
+function WelcomeActions({
+  prompt,
+}: {
+  prompt: Extract<ActivePrompt, { kind: "welcome" }>;
+}): React.ReactNode {
+  const choices = useMemo<ChoiceRow<"continue" | "cancel">[]>(
+    () => [
+      { value: "continue", label: "Continue" },
+      { value: "cancel", label: "Cancel" },
+    ],
+    []
+  );
+  const onChoose = useCallback(
+    (value: "continue" | "cancel") => {
+      if (value === "cancel") {
+        prompt.resolve(null);
+        return;
+      }
+      prompt.resolve("continue");
+    },
+    [prompt]
+  );
+  const highlighted = useChoiceNavigation({
+    choices,
+    onChoose,
+    onCancel: () => prompt.resolve(null),
+    scope: "welcome-screen",
+  });
+
+  return (
+    <Box>
+      <ActionList centered choices={choices} highlighted={highlighted} />
+    </Box>
+  );
+}
+
+function IntroPreflightContent({
+  logs,
+  prompt,
+  spinner,
+}: {
+  logs: LogEntry[];
+  prompt: ActivePrompt | null;
+  spinner: SpinnerState;
+}): React.ReactNode {
+  const visibleLogs = prompt ? [] : logs.slice(-5);
+  const hasContent =
+    visibleLogs.length > 0 || spinner.active || prompt !== null;
+
+  if (!hasContent) {
+    return null;
+  }
+
+  const promptContent = prompt ? (
+    <Box alignItems="center" width="100%">
+      <PromptArea alignment="center" prompt={prompt} />
+    </Box>
+  ) : null;
+
+  return (
+    <Box flexDirection="column" flexShrink={0} marginTop={1} width="100%">
+      {visibleLogs.length > 0 ? (
+        <Box alignItems="center" flexDirection="column">
+          {visibleLogs.map((log) => (
+            <LogLine entry={log} key={log.id} />
+          ))}
+        </Box>
+      ) : null}
+      {spinner.active ? (
+        <Box justifyContent="center">
+          <SpinnerRow state={spinner} />
+        </Box>
+      ) : null}
+      {promptContent}
+    </Box>
+  );
+}
 
 function LogLine({ entry }: { entry: LogEntry }): React.ReactNode {
   const { glyph, color } = ICON_BY_SEVERITY[entry.severity];
@@ -653,14 +881,13 @@ function ProgressRow({ entry }: { entry: StepEntry }): React.ReactNode {
 function progressStyle(entry: StepEntry): {
   glyph: string;
   glyphColor: string;
-  labelColor: string;
+  labelColor?: string;
   dimLabel: boolean;
 } {
   if (entry.status === "in_progress") {
     return {
       glyph: ICONS.triangleRight,
       glyphColor: PRIMARY,
-      labelColor: "white",
       dimLabel: false,
     };
   }
@@ -739,53 +966,73 @@ function FilesPanel({
     }
   }, [totalRows, viewport, pinnedToBottom]);
 
-  useInput(
-    (_input, key) => {
-      if (!canScroll) {
-        return;
-      }
-      if (key.upArrow) {
-        setPinnedToBottom(false);
-        setOffset((current) => Math.min(maxOffset, current + 1));
-        return;
-      }
-      if (key.downArrow) {
-        setOffset((current) => {
-          const next = Math.max(0, current - 1);
-          if (next === 0) {
-            setPinnedToBottom(true);
+  const fileShortcuts = useMemo<ShortcutBinding[]>(() => {
+    if (!canScroll) {
+      return [];
+    }
+    return [
+      {
+        key: "\u2191\u2193",
+        action: "scroll",
+        priority: 30,
+        match: (_input, key) => key.upArrow || key.downArrow,
+        run: (_input, key) => {
+          if (key.upArrow) {
+            setPinnedToBottom(false);
+            setOffset((current) => Math.min(maxOffset, current + 1));
+            return;
           }
-          return next;
-        });
-        return;
-      }
-      if (key.pageUp) {
-        setPinnedToBottom(false);
-        setOffset((current) => Math.min(maxOffset, current + viewport));
-        return;
-      }
-      if (key.pageDown) {
-        setOffset((current) => {
-          const next = Math.max(0, current - viewport);
-          if (next === 0) {
-            setPinnedToBottom(true);
+          setOffset((current) => {
+            const next = Math.max(0, current - 1);
+            if (next === 0) {
+              setPinnedToBottom(true);
+            }
+            return next;
+          });
+        },
+      },
+      {
+        key: "page",
+        action: "scroll",
+        priority: 31,
+        showInFooter: false,
+        match: (_input, key) => key.pageUp || key.pageDown,
+        run: (_input, key) => {
+          if (key.pageUp) {
+            setPinnedToBottom(false);
+            setOffset((current) => Math.min(maxOffset, current + viewport));
+            return;
           }
-          return next;
-        });
-        return;
-      }
-      if (key.home) {
-        setPinnedToBottom(false);
-        setOffset(maxOffset);
-        return;
-      }
-      if (key.end) {
-        setPinnedToBottom(true);
-        setOffset(0);
-      }
-    },
-    { isActive: !hasActivePrompt }
-  );
+          setOffset((current) => {
+            const next = Math.max(0, current - viewport);
+            if (next === 0) {
+              setPinnedToBottom(true);
+            }
+            return next;
+          });
+        },
+      },
+      {
+        key: "home/end",
+        action: "jump",
+        priority: 32,
+        showInFooter: false,
+        match: (_input, key) => key.home || key.end,
+        run: (_input, key) => {
+          if (key.home) {
+            setPinnedToBottom(false);
+            setOffset(maxOffset);
+            return;
+          }
+          setPinnedToBottom(true);
+          setOffset(0);
+        },
+      },
+    ];
+  }, [canScroll, maxOffset, viewport]);
+  useInkShortcuts("files-panel", fileShortcuts, {
+    isActive: !hasActivePrompt && canScroll,
+  });
 
   if (filesRead.length === 0) {
     return null;
@@ -882,10 +1129,10 @@ function ReadTreeLine({ row }: { row: FileTreeRow }): React.ReactNode {
 function readStatusStyle(status: FileTreeRow["status"]): {
   glyph: string;
   glyphColor: string;
-  labelColor: string;
+  labelColor?: string;
 } {
   if (status === "reading") {
-    return { glyph: "\u25D0", glyphColor: PRIMARY, labelColor: "white" };
+    return { glyph: "\u25D0", glyphColor: PRIMARY };
   }
   return { glyph: "\u2713", glyphColor: COLOR_SUCCESS, labelColor: MUTED };
 }
@@ -979,74 +1226,117 @@ function changedFileStyle(action: string): { glyph: string; color: string } {
 
 // ─────────────────────────────── Prompts ──────────────────────────────
 
-function PromptArea({ prompt }: { prompt: ActivePrompt }): React.ReactNode {
+type PromptAlignment = "start" | "center";
+type SelectPromptOptionData = Extract<
+  ActivePrompt,
+  { kind: "select" }
+>["options"][number];
+type MultiSelectPromptOptionData = Extract<
+  ActivePrompt,
+  { kind: "multiselect" }
+>["options"][number];
+
+function PromptArea({
+  alignment = "start",
+  prompt,
+}: {
+  alignment?: PromptAlignment;
+  prompt: ActivePrompt;
+}): React.ReactNode {
   if (prompt.kind === "select") {
-    return <SelectPrompt prompt={prompt} />;
+    return <SelectPrompt alignment={alignment} prompt={prompt} />;
   }
   if (prompt.kind === "confirm") {
-    return <ConfirmPrompt prompt={prompt} />;
+    return <ConfirmPrompt alignment={alignment} prompt={prompt} />;
   }
-  return <MultiSelectPrompt prompt={prompt} />;
+  if (prompt.kind === "multiselect") {
+    return <MultiSelectPrompt alignment={alignment} prompt={prompt} />;
+  }
+  return null;
 }
 
 function SelectPrompt({
+  alignment,
   prompt,
 }: {
+  alignment: PromptAlignment;
   prompt: Extract<ActivePrompt, { kind: "select" }>;
 }): React.ReactNode {
+  const isCentered = alignment === "center";
+  const promptWidth = isCentered ? "100%" : undefined;
   const totalCount = prompt.options.length;
   const [highlighted, setHighlighted] = useState<number>(() =>
     Math.min(Math.max(prompt.initialIndex, 0), Math.max(0, totalCount - 1))
   );
 
-  useInput((input, key) => {
-    if (key.upArrow) {
-      setHighlighted((idx) => (idx === 0 ? totalCount - 1 : idx - 1));
-      return;
-    }
-    if (key.downArrow) {
-      setHighlighted((idx) => (idx + 1) % totalCount);
-      return;
-    }
-    if (key.escape || (key.ctrl && input === "c")) {
-      prompt.resolve(null);
-      return;
-    }
-    if (key.return) {
-      const current = prompt.options[highlighted];
-      if (current) {
-        prompt.resolve(current.value);
-      }
-    }
-  });
+  const shortcuts = useMemo<ShortcutBinding[]>(
+    () => [
+      {
+        key: "\u2191\u2193",
+        action: "navigate",
+        priority: 40,
+        match: (_input, key) => key.upArrow || key.downArrow,
+        run: (_input, key) => {
+          if (key.upArrow) {
+            setHighlighted((idx) => (idx === 0 ? totalCount - 1 : idx - 1));
+            return;
+          }
+          setHighlighted((idx) => (idx + 1) % totalCount);
+        },
+      },
+      {
+        key: "enter",
+        action: "confirm",
+        priority: 41,
+        match: (_input, key) => key.return,
+        run: () => {
+          const current = prompt.options[highlighted];
+          if (current) {
+            prompt.resolve(current.value);
+          }
+        },
+      },
+      {
+        key: "esc",
+        action: "cancel",
+        priority: 42,
+        match: (input, key) => key.escape || (key.ctrl && input === "c"),
+        run: () => prompt.resolve(null),
+      },
+    ],
+    [highlighted, prompt, totalCount]
+  );
+  useInkShortcuts("select-prompt", shortcuts);
 
   return (
-    <Box flexDirection="column" flexShrink={0} marginTop={1}>
-      <Box gap={1} marginBottom={1}>
-        <Text bold color={ACCENT}>
-          {ICONS.diamondOpen}
-        </Text>
-        <Text bold>{prompt.message}</Text>
-      </Box>
-      <Box flexDirection="column">
+    <Box
+      flexDirection="column"
+      flexShrink={0}
+      marginTop={1}
+      width={promptWidth}
+    >
+      {isCentered ? (
+        <Box justifyContent="center" marginBottom={1} width="100%">
+          <Text bold>{prompt.message}</Text>
+        </Box>
+      ) : (
+        <Box gap={1} marginBottom={1}>
+          <Text bold color={ACCENT}>
+            {ICONS.diamondOpen}
+          </Text>
+          <Text bold>{prompt.message}</Text>
+        </Box>
+      )}
+      <Box flexDirection="column" width={promptWidth}>
         {prompt.options.map((option, idx) => {
           const isCursor = idx === highlighted;
-          // biome-ignore lint/nursery/noLeakedRender: variable assignment, not JSX expression
-          const labelColor = isCursor ? "white" : MUTED;
           return (
-            <Box flexDirection="row" key={option.value}>
-              <Box flexShrink={0} width={3}>
-                <Text color={ACCENT}>
-                  {isCursor ? ICONS.triangleSmallRight : " "}
-                </Text>
-              </Box>
-              <Text bold={isCursor} color={labelColor}>
-                {option.label}
-              </Text>
-              {option.hint !== undefined && option.hint !== "" ? (
-                <Text color={MUTED_DIM}> {option.hint}</Text>
-              ) : null}
-            </Box>
+            <SelectPromptOptionRow
+              centered={isCentered}
+              isCursor={isCursor}
+              key={option.value}
+              option={option}
+            />
           );
         })}
       </Box>
@@ -1054,75 +1344,153 @@ function SelectPrompt({
   );
 }
 
+function SelectPromptOptionRow({
+  centered,
+  isCursor,
+  option,
+}: {
+  centered: boolean;
+  isCursor: boolean;
+  option: SelectPromptOptionData;
+}): React.ReactNode {
+  const labelColor = isCursor ? undefined : MUTED;
+  if (centered) {
+    return (
+      <Box flexDirection="row" justifyContent="center" width="100%">
+        <Text color={ACCENT}>
+          {isCursor ? `${ICONS.triangleSmallRight} ` : "  "}
+        </Text>
+        <Text bold={isCursor} color={labelColor}>
+          {option.label}
+        </Text>
+        {option.hint !== undefined && option.hint !== "" ? (
+          <Text color={MUTED_DIM}> {option.hint}</Text>
+        ) : null}
+      </Box>
+    );
+  }
+  return (
+    <Box flexDirection="row">
+      <Box flexShrink={0} width={3}>
+        <Text color={ACCENT}>{isCursor ? ICONS.triangleSmallRight : " "}</Text>
+      </Box>
+      <Text bold={isCursor} color={labelColor}>
+        {option.label}
+      </Text>
+      {option.hint !== undefined && option.hint !== "" ? (
+        <Text color={MUTED_DIM}> {option.hint}</Text>
+      ) : null}
+    </Box>
+  );
+}
+
 function ConfirmPrompt({
+  alignment,
   prompt,
 }: {
+  alignment: PromptAlignment;
   prompt: Extract<ActivePrompt, { kind: "confirm" }>;
 }): React.ReactNode {
-  useInput((input, key) => {
-    if (input === "y" || input === "Y") {
-      prompt.resolve(true);
-      return;
-    }
-    if (input === "n" || input === "N") {
-      prompt.resolve(false);
-      return;
-    }
-    if (key.return) {
-      prompt.resolve(prompt.initialValue);
-      return;
-    }
-    if (key.escape || (key.ctrl && input === "c")) {
-      prompt.resolve(null);
-    }
-  });
+  const isCentered = alignment === "center";
+  const promptWidth = isCentered ? "100%" : undefined;
+  const shortcuts = useMemo<ShortcutBinding[]>(
+    () => [
+      {
+        key: "y/n",
+        action: "answer",
+        priority: 40,
+        match: (input) =>
+          input === "y" || input === "Y" || input === "n" || input === "N",
+        run: (input) => prompt.resolve(input === "y" || input === "Y"),
+      },
+      {
+        key: "enter",
+        action: "default",
+        priority: 41,
+        showInFooter: false,
+        match: (_input, key) => key.return,
+        run: () => prompt.resolve(prompt.initialValue),
+      },
+      {
+        key: "esc",
+        action: "cancel",
+        priority: 42,
+        showInFooter: false,
+        match: (input, key) => key.escape || (key.ctrl && input === "c"),
+        run: () => prompt.resolve(null),
+      },
+    ],
+    [prompt]
+  );
+  useInkShortcuts("confirm-prompt", shortcuts);
 
   const yLabel = prompt.initialValue ? "Y" : "y";
   const nLabel = prompt.initialValue ? "n" : "N";
 
   return (
-    <Box flexDirection="column" flexShrink={0} marginTop={1}>
-      <Box gap={1}>
-        <Text bold color={ACCENT}>
-          {ICONS.diamondOpen}
-        </Text>
-        <Text bold>{prompt.message}</Text>
-        <Text color={MUTED_DIM}>
-          ({yLabel}/{nLabel})
-        </Text>
-      </Box>
+    <Box
+      flexDirection="column"
+      flexShrink={0}
+      marginTop={1}
+      width={promptWidth}
+    >
+      {isCentered ? (
+        <Box gap={1} justifyContent="center" width="100%">
+          <Text bold>{prompt.message}</Text>
+          <Text color={MUTED_DIM}>
+            ({yLabel}/{nLabel})
+          </Text>
+        </Box>
+      ) : (
+        <Box gap={1}>
+          <Text bold color={ACCENT}>
+            {ICONS.diamondOpen}
+          </Text>
+          <Text bold>{prompt.message}</Text>
+          <Text color={MUTED_DIM}>
+            ({yLabel}/{nLabel})
+          </Text>
+        </Box>
+      )}
     </Box>
   );
 }
 
 function MultiSelectPrompt({
+  alignment,
   prompt,
 }: {
+  alignment: PromptAlignment;
   prompt: Extract<ActivePrompt, { kind: "multiselect" }>;
 }): React.ReactNode {
+  const isCentered = alignment === "center";
+  const promptWidth = isCentered ? "100%" : undefined;
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(prompt.initialSelected)
   );
   const [highlighted, setHighlighted] = useState<number>(0);
   const totalCount = prompt.options.length;
 
-  const toggleAt = (idx: number) => {
-    const current = prompt.options[idx];
-    if (!current) {
-      return;
-    }
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(current.value)) {
-        next.delete(current.value);
-      } else {
-        next.add(current.value);
+  const toggleAt = useCallback(
+    (idx: number) => {
+      const current = prompt.options[idx];
+      if (!current) {
+        return;
       }
-      return next;
-    });
-  };
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(current.value)) {
+          next.delete(current.value);
+        } else {
+          next.add(current.value);
+        }
+        return next;
+      });
+    },
+    [prompt.options]
+  );
 
-  const commit = () => {
+  const commit = useCallback(() => {
     if (prompt.required && selected.size === 0) {
       return;
     }
@@ -1130,80 +1498,154 @@ function MultiSelectPrompt({
       .map((option) => option.value)
       .filter((value) => selected.has(value));
     prompt.resolve(ordered);
-  };
+  }, [prompt, selected]);
 
-  useInput((input, key) => {
-    if (key.upArrow) {
-      setHighlighted((idx) => (idx === 0 ? totalCount - 1 : idx - 1));
-      return;
-    }
-    if (key.downArrow) {
-      setHighlighted((idx) => (idx + 1) % totalCount);
-      return;
-    }
-    if (key.escape || (key.ctrl && input === "c")) {
-      prompt.resolve(null);
-      return;
-    }
-    if (input === " ") {
-      toggleAt(highlighted);
-      return;
-    }
-    if (input === "a") {
-      setSelected((prev) => {
-        if (prev.size === totalCount) {
-          return new Set<string>();
-        }
-        return new Set(prompt.options.map((o) => o.value));
-      });
-      return;
-    }
-    if (key.return) {
-      commit();
-    }
-  });
+  const shortcuts = useMemo<ShortcutBinding[]>(
+    () => [
+      {
+        key: "\u2191\u2193",
+        action: "navigate",
+        priority: 40,
+        match: (_input, key) => key.upArrow || key.downArrow,
+        run: (_input, key) => {
+          if (key.upArrow) {
+            setHighlighted((idx) => (idx === 0 ? totalCount - 1 : idx - 1));
+            return;
+          }
+          setHighlighted((idx) => (idx + 1) % totalCount);
+        },
+      },
+      {
+        key: "space",
+        action: "toggle",
+        priority: 41,
+        match: (input) => input === " ",
+        run: () => toggleAt(highlighted),
+      },
+      {
+        key: "a",
+        action: "all",
+        priority: 42,
+        match: (input) => input === "a",
+        run: () => {
+          setSelected((prev) => {
+            if (prev.size === totalCount) {
+              return new Set<string>();
+            }
+            return new Set(prompt.options.map((option) => option.value));
+          });
+        },
+      },
+      {
+        key: "enter",
+        action: "confirm",
+        priority: 43,
+        match: (_input, key) => key.return,
+        run: commit,
+      },
+      {
+        key: "esc",
+        action: "cancel",
+        priority: 44,
+        match: (input, key) => key.escape || (key.ctrl && input === "c"),
+        run: () => prompt.resolve(null),
+      },
+    ],
+    [commit, highlighted, prompt, toggleAt, totalCount]
+  );
+  useInkShortcuts("multiselect-prompt", shortcuts);
+  const shortcutText = `space toggle ${ICONS.bullet} a all ${ICONS.bullet} enter confirm ${ICONS.bullet} esc cancel`;
+  const selectedCount = `${selected.size}/${totalCount}`;
 
   return (
-    <Box flexDirection="column" flexShrink={0} marginTop={1}>
-      <Box gap={1} marginBottom={1}>
-        <Text bold color={ACCENT}>
-          {ICONS.diamondOpen}
-        </Text>
-        <Text bold>{prompt.message}</Text>
-      </Box>
-      <Box marginBottom={1} paddingLeft={3}>
-        <Text color={MUTED_DIM}>
-          space toggle {ICONS.bullet} a all {ICONS.bullet} enter confirm{" "}
-          {ICONS.bullet} esc cancel
-        </Text>
-        <Text color={ACCENT}>
-          {"  "}
-          {selected.size}/{totalCount}
-        </Text>
-      </Box>
-      <Box flexDirection="column">
+    <Box
+      flexDirection="column"
+      flexShrink={0}
+      marginTop={1}
+      width={promptWidth}
+    >
+      {isCentered ? (
+        <Box justifyContent="center" marginBottom={1} width="100%">
+          <Text bold>{prompt.message}</Text>
+        </Box>
+      ) : (
+        <Box justifyContent="space-between" marginBottom={1}>
+          <Box gap={1}>
+            <Text bold color={ACCENT}>
+              {ICONS.diamondOpen}
+            </Text>
+            <Text bold>{prompt.message}</Text>
+          </Box>
+          <Text color={ACCENT}>{selectedCount}</Text>
+        </Box>
+      )}
+      {isCentered ? (
+        <Box
+          alignItems="center"
+          flexDirection="column"
+          marginBottom={1}
+          width="100%"
+        >
+          <Text color={MUTED_DIM}>{shortcutText}</Text>
+          <Text color={ACCENT}>{selectedCount}</Text>
+        </Box>
+      ) : null}
+      <Box flexDirection="column" width={promptWidth}>
         {prompt.options.map((option, idx) => {
           const isSelected = selected.has(option.value);
           const isCursor = idx === highlighted;
-          const marker = isSelected ? ICONS.squareFilled : ICONS.squareOpen;
-          // biome-ignore lint/nursery/noLeakedRender: variable assignment, not JSX expression
-          const markerColor = isSelected ? COLOR_SUCCESS : MUTED_DIM;
           return (
-            <Box flexDirection="row" key={option.value}>
-              <Box flexShrink={0} width={3}>
-                <Text color={ACCENT}>
-                  {isCursor ? ICONS.triangleSmallRight : " "}
-                </Text>
-              </Box>
-              <Text color={markerColor}>{marker} </Text>
-              <Text bold={isCursor}>{option.label}</Text>
-              {option.hint !== undefined && option.hint !== "" ? (
-                <Text color={MUTED_DIM}> {option.hint}</Text>
-              ) : null}
-            </Box>
+            <MultiSelectPromptOptionRow
+              centered={isCentered}
+              isCursor={isCursor}
+              isSelected={isSelected}
+              key={option.value}
+              option={option}
+            />
           );
         })}
       </Box>
+    </Box>
+  );
+}
+
+function MultiSelectPromptOptionRow({
+  centered,
+  isCursor,
+  isSelected,
+  option,
+}: {
+  centered: boolean;
+  isCursor: boolean;
+  isSelected: boolean;
+  option: MultiSelectPromptOptionData;
+}): React.ReactNode {
+  const marker = isSelected ? ICONS.squareFilled : ICONS.squareOpen;
+  const markerColor = isSelected ? COLOR_SUCCESS : MUTED_DIM;
+  if (centered) {
+    return (
+      <Box flexDirection="row" justifyContent="center" width="100%">
+        <Text color={ACCENT}>
+          {isCursor ? `${ICONS.triangleSmallRight} ` : "  "}
+        </Text>
+        <Text color={markerColor}>{marker} </Text>
+        <Text bold={isCursor}>{option.label}</Text>
+        {option.hint !== undefined && option.hint !== "" ? (
+          <Text color={MUTED_DIM}> {option.hint}</Text>
+        ) : null}
+      </Box>
+    );
+  }
+  return (
+    <Box flexDirection="row">
+      <Box flexShrink={0} width={3}>
+        <Text color={ACCENT}>{isCursor ? ICONS.triangleSmallRight : " "}</Text>
+      </Box>
+      <Text color={markerColor}>{marker} </Text>
+      <Text bold={isCursor}>{option.label}</Text>
+      {option.hint !== undefined && option.hint !== "" ? (
+        <Text color={MUTED_DIM}> {option.hint}</Text>
+      ) : null}
     </Box>
   );
 }

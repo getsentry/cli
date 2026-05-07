@@ -31,11 +31,11 @@ export const SENTRY_TIPS: SentryTip[] = [
   },
   {
     title: "Session Replay shows the user's view",
-    body: "Replay captures DOM mutations, network calls, and console logs alongside your error. Reproducing a bug becomes scrubbing a timeline instead of guessing from a stack trace.",
+    body: "Replay keeps UI changes, clicks, network calls, and console logs next to the related error. When the stack trace says what broke, replay shows what the user did before it.",
   },
   {
     title: "Tracing finds the slow piece",
-    body: "Performance Monitoring surfaces the spans inside a transaction so you can see whether the database, an HTTP call, or your own code is the bottleneck — without adding manual timers.",
+    body: "Tracing connects the slow or failed request to its spans, so you can see whether the database, an HTTP call, rendering, or your own code caused the wait.",
   },
   {
     title: "Alerts on real signals",
@@ -47,7 +47,7 @@ export const SENTRY_TIPS: SentryTip[] = [
   },
   {
     title: "Source maps make stack traces readable",
-    body: "Upload source maps with each release (the wizard can set this up for you) and your minified production stack traces resolve back to original TypeScript/JSX line numbers.",
+    body: "Source maps connect minified production frames back to the code you wrote. Upload them with the release so an issue opens on the useful TypeScript or JSX line.",
   },
   {
     title: "Cron monitoring catches missed jobs",
@@ -59,7 +59,7 @@ export const SENTRY_TIPS: SentryTip[] = [
   },
   {
     title: "Profiling for hot code paths",
-    body: "Continuous profiling samples your production code and shows which functions burn the most CPU. Pair with tracing to see exactly which transaction a slow function ran inside.",
+    body: "Profiling adds function-level cost to the same debugging story. Pair it with a trace to see which code path burned CPU during a slow transaction.",
   },
   {
     title: "AI Monitoring for LLM apps",
@@ -67,10 +67,10 @@ export const SENTRY_TIPS: SentryTip[] = [
   },
   {
     title: "Seer: AI-powered debugging",
-    body: "Run `sentry issue explain <issue-id>` after this wizard finishes to get an AI root-cause analysis of any error, with a suggested fix and the lines of code most likely responsible.",
+    body: "After setup, run `sentry issue explain <issue-id>`. Seer uses the issue, stack trace, and nearby context to summarize the likely cause and point at a fix.",
   },
   {
     title: "Self-hosted is a flag away",
-    body: "Sentry SaaS and self-hosted share the same SDK, the same wire protocol, and the same CLI. Set `SENTRY_URL` to point at your own instance — everything else just works.",
+    body: "Using self-hosted Sentry? Point the CLI at your instance with `SENTRY_URL`. Your SDK setup and debugging workflow stay the same.",
   },
 ];

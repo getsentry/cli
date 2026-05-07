@@ -28,6 +28,8 @@
  *      check overlays.
  */
 
+import type { InitFeedbackOutcome } from "../feedback.js";
+
 /** Sentinel symbol returned by prompt methods when the user cancels. */
 export const CANCELLED: unique symbol = Symbol.for(
   "sentry-cli:wizard-ui:cancelled"
@@ -114,6 +116,13 @@ export type ConfirmOptions = {
   initialValue?: boolean;
 };
 
+/** Args for the richer Ink-only welcome screen. */
+export type WelcomeOptions = {
+  title: string;
+  body: string[];
+  punchline: string;
+};
+
 /**
  * Structured completion summary handed to `WizardUI.summary()`.
  *
@@ -174,6 +183,9 @@ export type WizardUI = AsyncDisposable & {
    */
   cancel(message: string): void;
 
+  /** Display an outcome-specific feedback prompt after a terminal outcome. */
+  feedback(outcome: InitFeedbackOutcome): void;
+
   /**
    * Notify the UI that the wizard is reading the listed files from
    * disk. Optional — implementations that don't track reads (e.g.
@@ -226,6 +238,13 @@ export type WizardUI = AsyncDisposable & {
   /** Clear the active overlay. */
   clearOverlay?(): void;
 
+  /**
+   * Keep rendering the lightweight intro layout while local preflight
+   * prompts/checks run. Ink uses this to keep git/org/project/team prompts
+   * centered with the opening copy until the remote workflow starts.
+   */
+  setIntroMode?(enabled: boolean): void;
+
   // ── Logging ───────────────────────────────────────────────────────
 
   log: WizardLog;
@@ -260,4 +279,10 @@ export type WizardUI = AsyncDisposable & {
    * the user aborted.
    */
   confirm(opts: ConfirmOptions): Promise<boolean | Cancelled>;
+
+  /**
+   * Richer Ink-only opening screen. Plain UIs leave this undefined and
+   * callers fall back to `select()`.
+   */
+  welcome?(opts: WelcomeOptions): Promise<"continue" | Cancelled>;
 };
