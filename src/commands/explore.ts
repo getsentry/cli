@@ -310,6 +310,39 @@ function defaultFieldsForDataset(dataset: string): readonly string[] {
   return dataset === "replays" ? DEFAULT_REPLAY_EXPLORE_FIELDS : DEFAULT_FIELDS;
 }
 
+/** Append --metric / --agg flags to hint parts */
+function appendMetricHints(
+  parts: string[],
+  metric: string | undefined,
+  agg: string
+): void {
+  if (metric) {
+    parts.push(`-m "${metric}"`);
+    if (agg !== "sum") {
+      parts.push(`--agg ${agg}`);
+    }
+  }
+}
+
+/** Append non-default --field flags to hint parts */
+function appendFieldHints(
+  parts: string[],
+  rawFields: string[] | undefined,
+  dataset: string,
+  metricActive: boolean
+): void {
+  const fields = rawFields ?? [];
+  const fieldList = metricActive
+    ? fields.filter((f) => !isAggregate(f))
+    : fields;
+  const defaults = defaultFieldsForDataset(dataset).join(",");
+  if (fieldList.join(",") !== defaults && fieldList.length > 0) {
+    for (const f of fieldList) {
+      parts.push(`-F "${f}"`);
+    }
+  }
+}
+
 /** Append active non-default flags to a base command string */
 function appendFlagHints(
   base: string,
@@ -335,29 +368,10 @@ function appendFlagHints(
       API_TO_USER_DATASET.get(flags.dataset) ?? flags.dataset;
     parts.push(`--dataset ${displayDataset}`);
   }
-  if (flags.metric) {
-    parts.push(`-m "${flags.metric}"`);
-    if (flags.agg !== "sum") {
-      parts.push(`--agg ${flags.agg}`);
-    }
-  }
+  appendMetricHints(parts, flags.metric, flags.agg);
   appendSortHint(parts, flags.sort, defaultSort);
   appendQueryHint(parts, flags.query);
-  // Include --field flags when non-default.
-  // When --metric is active, aggregates are dropped from the query — mirror that here.
-  const rawFields = flags.field ?? [];
-  const fieldList = flags.metric
-    ? rawFields.filter((f) => !isAggregate(f))
-    : rawFields;
-  const currentFieldStr = fieldList.join(",");
-  if (
-    currentFieldStr !== defaultFieldsForDataset(flags.dataset).join(",") &&
-    fieldList.length > 0
-  ) {
-    for (const f of fieldList) {
-      parts.push(`-F "${f}"`);
-    }
-  }
+  appendFieldHints(parts, flags.field, flags.dataset, !!flags.metric);
   if (flags.limit !== DEFAULT_LIMIT) {
     parts.push(`--limit ${flags.limit}`);
   }

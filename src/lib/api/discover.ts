@@ -139,7 +139,9 @@ export async function queryMetricsMeta(
 
     allRows.push(...result.data.data);
 
-    if (!result.nextCursor) break;
+    if (!result.nextCursor) {
+      break;
+    }
     cursor = result.nextCursor;
   }
 
