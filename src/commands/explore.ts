@@ -315,7 +315,15 @@ function appendFlagHints(
   base: string,
   flags: Pick<
     ExploreFlags,
-    "dataset" | "environment" | "sort" | "query" | "period" | "field" | "limit"
+    | "dataset"
+    | "environment"
+    | "sort"
+    | "query"
+    | "period"
+    | "field"
+    | "limit"
+    | "metric"
+    | "agg"
   >
 ): string {
   const parts: string[] = [];
@@ -326,6 +334,12 @@ function appendFlagHints(
     const displayDataset =
       API_TO_USER_DATASET.get(flags.dataset) ?? flags.dataset;
     parts.push(`--dataset ${displayDataset}`);
+  }
+  if (flags.metric) {
+    parts.push(`-m "${flags.metric}"`);
+    if (flags.agg !== "sum") {
+      parts.push(`--agg ${flags.agg}`);
+    }
   }
   appendSortHint(parts, flags.sort, defaultSort);
   appendQueryHint(parts, flags.query);
