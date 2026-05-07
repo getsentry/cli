@@ -343,8 +343,12 @@ function appendFlagHints(
   }
   appendSortHint(parts, flags.sort, defaultSort);
   appendQueryHint(parts, flags.query);
-  // Include --field flags when non-default
-  const fieldList = flags.field ?? [];
+  // Include --field flags when non-default.
+  // When --metric is active, aggregates are dropped from the query — mirror that here.
+  const rawFields = flags.field ?? [];
+  const fieldList = flags.metric
+    ? rawFields.filter((f) => !isAggregate(f))
+    : rawFields;
   const currentFieldStr = fieldList.join(",");
   if (
     currentFieldStr !== defaultFieldsForDataset(flags.dataset).join(",") &&
