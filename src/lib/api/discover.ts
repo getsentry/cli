@@ -98,6 +98,9 @@ export type MetricMeta = {
  *
  * Queries `dataset=metricsEnhanced` with meta-fields (`metric.name`, etc.)
  * — the same technique the Sentry Explore Metrics UI uses.
+ *
+ * Auto-paginates to collect all available metrics (bounded by
+ * {@link MAX_PAGINATION_PAGES} to prevent runaway loops).
  */
 export async function queryMetricsMeta(
   orgSlug: string,
@@ -111,25 +114,36 @@ export async function queryMetricsMeta(
   const regionUrl = await resolveOrgRegion(orgSlug);
   const query = options?.project ? `project:${options.project}` : undefined;
 
-  const { data } = await fetchEventsPage(
-    regionUrl,
-    orgSlug,
-    {
-      fields: ["metric.name", "metric.type", "metric.unit"],
-      dataset: "metricsEnhanced",
-      query,
-      statsPeriod:
-        options?.start || options?.end
-          ? undefined
-          : (options?.statsPeriod ?? "7d"),
-      start: options?.start,
-      end: options?.end,
-      limit: 100,
-    },
-    100
-  );
+  const baseOptions: ExploreQueryOptions = {
+    fields: ["metric.name", "metric.type", "metric.unit"],
+    dataset: "metricsEnhanced",
+    query,
+    statsPeriod:
+      options?.start || options?.end
+        ? undefined
+        : (options?.statsPeriod ?? "7d"),
+    start: options?.start,
+    end: options?.end,
+  };
 
-  return data.data.map((row) => ({
+  const allRows: Record<string, unknown>[] = [];
+  let cursor: string | undefined;
+
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
+    const result = await fetchEventsPage(
+      regionUrl,
+      orgSlug,
+      { ...baseOptions, cursor },
+      API_MAX_PER_PAGE
+    );
+
+    allRows.push(...result.data.data);
+
+    if (!result.nextCursor) break;
+    cursor = result.nextCursor;
+  }
+
+  return allRows.map((row) => ({
     name: String(row["metric.name"] ?? ""),
     type: String(row["metric.type"] ?? "distribution"),
     unit: String(row["metric.unit"] ?? "none"),
