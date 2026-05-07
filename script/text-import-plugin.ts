@@ -6,32 +6,98 @@
  * - `text` — intercepts the import, reads the file, and default-
  *   exports its contents as a string. Runtime behavior matches Bun's
  *   native handling.
- * - `file` — copies the source file into the esbuild output
- *   directory, then marks the import external so the original
- *   `import path from "./foo" with { type: "file" }` clause
- *   survives in the bundled JS. Bun.compile downstream understands
- *   the attribute natively, embeds the file as a binary asset, and
- *   resolves the import to a virtual-filesystem path string at
- *   runtime.
+ * - `file` — pre-bundles the source file (TypeScript/TSX → JS) into
+ *   a self-contained module and writes it into the esbuild output
+ *   directory, then marks the import external so the
+ *   `with { type: "file" }` clause survives in the bundled JS.
+ *   Bun.compile downstream understands the attribute natively,
+ *   embeds the file as a binary asset, and resolves the import to a
+ *   virtual-filesystem path string at runtime.
+ *
+ *   The pre-bundle step is critical for two reasons:
+ *
+ *   1. Bun's `/$bunfs/` virtual filesystem parses embedded files
+ *      with its JavaScript parser, not its TypeScript parser, so
+ *      raw `.tsx` files fail with `SyntaxError` on
+ *      `import { type Foo }` and similar TS-only syntax.
+ *   2. The embedded file runs from `/$bunfs/root/` at runtime,
+ *      where neither `node_modules` nor sibling source files
+ *      exist. Bundling inlines ALL dependencies (local modules
+ *      like `ink-frame.tsx` and third-party packages like `ink`,
+ *      `react`) so the file is fully self-contained.
+ *
+ *   Some of the inlined packages (e.g. `signal-exit`, used by Ink)
+ *   are CJS modules that call `require("assert")` etc. esbuild
+ *   wraps these in `__require` shims that throw "Dynamic require
+ *   is not supported" at runtime. The banner injects a real
+ *   `require` function via `createRequire` so CJS dependencies
+ *   resolve Node builtins correctly inside the ESM bundle.
+ *
+ *   Non-TypeScript files (plain `.js`) are copied verbatim.
  *
  * Used by `script/build.ts` (single-file executable) and
- * `script/bundle.ts` (CJS library bundle) so the grep-worker source
- * in `src/lib/scan/worker-pool.ts` loads correctly in both dev and
- * compiled builds (`text` branch). The `file` branch is kept for
- * future use; today no source file goes through it.
+ * `script/bundle.ts` (CJS library bundle). The `text` branch
+ * handles `with { type: "text" }` imports (e.g. worker source).
+ * The `file` branch handles the Ink app component embedded via
+ * `with { type: "file" }` in `src/lib/init/ui/ink-ui.ts`.
  */
 
 import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
-import { basename, dirname, resolve as resolvePath } from "node:path";
-import type { Plugin } from "esbuild";
+import { basename, dirname, extname, resolve as resolvePath } from "node:path";
+import { build as esbuildBuild, type Plugin } from "esbuild";
 
 const TEXT_IMPORT_NS = "text-import";
 const ANY_FILTER = /.*/;
 
+/** Extensions that need TypeScript/JSX transpilation before embedding. */
+const TS_EXTENSIONS = new Set([".ts", ".tsx", ".jsx"]);
+
+/**
+ * Banner injected into the pre-bundled sidecar JS. Provides a real
+ * `require` function so esbuild's CJS-wrapping `__require` shims
+ * can resolve Node.js builtins (`assert`, `events`, etc.) at runtime.
+ * Without this, `signal-exit` and other CJS deps of Ink throw
+ * "Dynamic require of 'assert' is not supported".
+ */
+const REQUIRE_BANNER =
+  'import { createRequire as ___cr } from "node:module";' +
+  " var require = ___cr(import.meta.url);";
+
+/**
+ * Pre-bundle a TypeScript/TSX source file into self-contained JS.
+ * All dependencies (local modules AND npm packages) are inlined;
+ * only `node:*` builtins are external since Bun resolves them
+ * natively inside `/$bunfs/`.
+ */
+async function prebundleTs(sourcePath: string, outPath: string): Promise<void> {
+  await esbuildBuild({
+    entryPoints: [sourcePath],
+    bundle: true,
+    outfile: outPath,
+    platform: "node",
+    target: "esnext",
+    format: "esm",
+    jsx: "automatic",
+    external: ["node:*"],
+    banner: { js: REQUIRE_BANNER },
+    minify: false,
+    write: true,
+  });
+}
+
+/** Resolve the output directory from the parent esbuild config. */
+function resolveOutdir(build: {
+  initialOptions: { outdir?: string; outfile?: string };
+}): string {
+  return build.initialOptions.outdir
+    ? resolvePath(build.initialOptions.outdir)
+    : dirname(resolvePath(build.initialOptions.outfile ?? "."));
+}
+
 export const textImportPlugin: Plugin = {
   name: "text-import",
   setup(build) {
-    build.onResolve({ filter: ANY_FILTER }, (args) => {
+    build.onResolve({ filter: ANY_FILTER }, async (args) => {
       if (args.with?.type === "text") {
         return {
           path: resolvePath(args.resolveDir, args.path),
@@ -39,39 +105,29 @@ export const textImportPlugin: Plugin = {
         };
       }
       if (args.with?.type === "file") {
-        // Copy the source into the bundle's output directory and
-        // rewrite the import path so it sits next to the bundle.
-        // esbuild keeps the import external (preserving the
-        // `with { type: "file" }` clause) so Bun.compile can pick
-        // it up from the new location. The copy is needed because
-        // Bun.compile resolves imports relative to the bundle file's
-        // directory at compile time, not the original source.
-        //
-        // `mkdirSync` guards against the bundle's `outdir` not yet
-        // existing when the plugin fires — esbuild creates the
-        // outdir lazily on first write.
         const sourcePath = resolvePath(args.resolveDir, args.path);
-        const outdir = build.initialOptions.outdir
-          ? resolvePath(build.initialOptions.outdir)
-          : dirname(resolvePath(build.initialOptions.outfile ?? "."));
-        const filename = basename(sourcePath);
-        const copyPath = resolvePath(outdir, filename);
+        const outdir = resolveOutdir(build);
+        mkdirSync(outdir, { recursive: true });
+
+        const ext = extname(sourcePath);
+        const outFilename = `${basename(sourcePath, ext)}.js`;
+        const outPath = resolvePath(outdir, outFilename);
+
         try {
-          mkdirSync(outdir, { recursive: true });
-          copyFileSync(sourcePath, copyPath);
+          if (TS_EXTENSIONS.has(ext)) {
+            await prebundleTs(sourcePath, outPath);
+          } else {
+            copyFileSync(sourcePath, outPath);
+          }
         } catch (err) {
-          // Surface the failure so the build fails visibly rather
-          // than producing a binary that crashes at startup.
           throw new Error(
-            `text-import-plugin: failed to copy ${sourcePath} → ${copyPath}: ${
+            `text-import-plugin: failed to process ${sourcePath} → ${outPath}: ${
               err instanceof Error ? err.message : String(err)
             }`
           );
         }
-        return {
-          path: `./${filename}`,
-          external: true,
-        };
+
+        return { path: `./${outFilename}`, external: true };
       }
       return null;
     });

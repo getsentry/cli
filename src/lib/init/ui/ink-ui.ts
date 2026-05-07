@@ -162,25 +162,21 @@ function severityForStopCode(code: SpinnerExitCode): LogSeverity {
 }
 
 /**
- * Embed `ink-app.tsx` as a Bun-compile file resource.
+ * Embed the Ink App sidecar as a Bun-compile file resource.
  *
- * `with { type: "file" }` tells Bun.compile to copy the raw .tsx
- * bytes into the binary's virtual filesystem and replace the import
- * specifier with the embedded path string at runtime. The
- * `text-import-plugin.ts` polyfill in `script/build.ts` mirrors this
- * for the esbuild step (copies the file alongside the bundle and
- * leaves the import external).
+ * `with { type: "file" }` tells Bun.compile to embed the file into
+ * the binary's virtual filesystem (`/$bunfs/root/`) and replace the
+ * import with the embedded path string at runtime. The
+ * `text-import-plugin` in `script/build.ts` intercepts this during
+ * esbuild: it pre-bundles the .tsx source into self-contained JS
+ * (stripping TypeScript, inlining local deps and npm packages,
+ * injecting a `createRequire` banner for CJS deps), then marks the
+ * import external so Bun.compile picks up the resulting .js file.
  *
- * Why this indirection? `ink-app.tsx` statically imports `ink`,
- * `ink-spinner`, and `react`. When Bun.compile bundles those
- * packages through its CJS-wrapping path the output mangles their
- * dev-build IIFEs (it injects `__promiseAll` runtime
- * helpers in positions the wrappers don't tolerate, producing a
- * `SyntaxError: Unexpected identifier '__promiseAll'` at startup
- * inside e.g. `react/cjs/react-jsx-runtime.development.js` or
- * `ink/build/parse-keypress.js`). Embedding the .tsx as raw bytes
- * pushes resolution to Bun's runtime — which doesn't have the bug
- * — at the cost of a small first-invocation parse overhead.
+ * Why pre-bundle? Bun's `/$bunfs/` virtual FS uses a JavaScript
+ * parser, not TypeScript — raw .tsx fails on `import { type Foo }`.
+ * The `/$bunfs/` environment also has no `node_modules`, so all
+ * deps (ink, react, local modules) must be inlined.
  *
  * The npm/Node distribution never reaches `createInkUI()` (the
  * factory routes there only on the Bun binary because Ink uses
@@ -217,21 +213,22 @@ function openFreshTtyForInk(): ReadStream | null {
 export async function createInkUI(
   opts: CreateInkUIOptions = {}
 ): Promise<InkUI> {
-  const ink = await import("ink");
-  const react = await import("react");
-  // The `?bridge=1` query string is load-bearing. Without it Bun's
-  // module loader hits a cache entry created by the static
-  // `with { type: "file" }` import above (same absolute path) and
-  // returns a synthetic `{ __esModule, default: undefined }` shape
-  // instead of evaluating the .tsx as a module — `app.App`
-  // becomes `undefined` and React throws "Element type is invalid".
-  // The query string forces a distinct cache key while resolving to
-  // the same on-disk file, so the .tsx is parsed and exports
-  // populate normally. Confirmed on Bun 1.3.13 (dev) and inside
-  // Bun-compiled binaries (the `/$bunfs/…` runtime path).
-  const app = (await import(
-    `${inkAppPath}?bridge=1`
-  )) as typeof import("./ink-app.js");
+  // Import the Ink App sidecar from the embedded file. The
+  // `with { type: "file" }` import above gives us the virtual path
+  // (e.g. `/$bunfs/root/ink-app-xxx.js`). The text-import-plugin
+  // pre-bundles the .tsx source into self-contained JS at build
+  // time, so the embedded file includes ink, react, and all local
+  // deps — no external resolution needed at runtime.
+  //
+  // NOTE: Do NOT append a query string (e.g. `?bridge=1`) to the
+  // path. Bun's `/$bunfs/` virtual filesystem does not support
+  // query strings — the path lookup fails with ENOENT.
+  //
+  // `mountApp()` lives inside the sidecar so it uses the same
+  // ink/react instances as the App's hooks. Importing ink/react
+  // separately in this module would create a second copy of React,
+  // causing "Invalid hook call" errors at runtime.
+  const app = (await import(inkAppPath)) as typeof import("./ink-app.js");
 
   const store = new WizardStore({
     cliVersion: CLI_VERSION,
@@ -254,20 +251,12 @@ export async function createInkUI(
   // exit cleanly).
   const freshStdin = openFreshTtyForInk();
 
-  // Ink's render returns a handle with `unmount()` and
-  // `waitUntilExit()`. We don't await `waitUntilExit` here because
-  // the wizard drives lifecycle imperatively from the runner; the
-  // dispose path calls `unmount()` directly when the workflow
-  // finishes (success or failure).
-  //
-  // `exitOnCtrlC: false` lets us route Ctrl+C through the prompt
-  // cancellation path (the SelectPrompt / MultiSelectPrompt
-  // `useInput` handlers detect `\x03` and resolve with `null`)
-  // instead of yanking the process down mid-spinner.
-  //
-  // `patchConsole: false` keeps `console.*` calls flowing to the
-  // real stdout — Sentry SDK breadcrumbs, debug logs, etc. would
-  // otherwise be swallowed by Ink's render loop.
+  // Build render options for Ink:
+  // - `exitOnCtrlC: false` lets us route Ctrl+C through the prompt
+  //   cancellation path instead of yanking the process down.
+  // - `patchConsole: false` keeps `console.*` calls flowing to the
+  //   real stdout — Sentry SDK breadcrumbs, debug logs, etc. would
+  //   otherwise be swallowed by Ink's render loop.
   const renderOptions: {
     exitOnCtrlC: boolean;
     patchConsole: boolean;
@@ -284,10 +273,7 @@ export async function createInkUI(
   // startup never shows stale layout from a prior render.
   process.stdout.write("\x1b[?1049h\x1b[2J\x1b[H");
   try {
-    const instance = ink.render(
-      react.createElement(app.App, { store }),
-      renderOptions
-    );
+    const instance = app.mountApp(store, renderOptions);
 
     return new InkUI(instance, store, freshStdin, initialWelcome);
   } catch (error) {

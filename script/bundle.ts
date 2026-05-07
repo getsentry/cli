@@ -300,16 +300,15 @@ await Bun.write("./dist/index.d.cts", TYPE_DECLARATIONS);
 console.log("  -> dist/bin.cjs (CLI wrapper)");
 console.log("  -> dist/index.d.cts (type declarations)");
 
-// Clean up the `ink-app.tsx` sidecar that the text-import-plugin
-// drops into `dist/` when it sees the `with { type: "file" }` import
-// in `src/lib/init/ui/ink-ui.ts`. The npm distribution doesn't run
-// the InkUI factory at all (it's gated to the Bun binary because
-// Ink uses top-level await that we can't bundle into CJS), so the
-// sidecar is unused — and it's not in `package.json#files` either,
-// so it wouldn't ship even without this cleanup. Removing it just
-// keeps the local `dist/` directory tidy.
+// Clean up the `ink-app.js` sidecar that the text-import-plugin
+// drops into `dist/` when it pre-bundles the `with { type: "file" }`
+// import in `src/lib/init/ui/ink-ui.ts`. The npm distribution
+// doesn't run the InkUI factory at all (it's gated to the Bun
+// binary because Ink uses top-level await that we can't bundle
+// into CJS), so the sidecar is unused — removing it just keeps the
+// local `dist/` directory tidy.
 try {
-  await unlink("./dist/ink-app.tsx");
+  await unlink("./dist/ink-app.js");
 } catch {
   // Sidecar may not exist (e.g. plugin path not exercised) — fine.
 }

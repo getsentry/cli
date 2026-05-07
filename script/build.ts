@@ -132,10 +132,12 @@ async function bundleJs(): Promise<boolean> {
       // consumers) external lets Bun's runtime resolve them fresh at
       // first invocation, outside the buggy bundler path.
       //
-      // The npm bundle (`script/bundle.ts`) externalizes the same
-      // packages for the same reason — bundling Ink's React tree
-      // through esbuild produces a CJS wrapper that hits a TDZ at
-      // runtime when React is first touched.
+      // Note: the `with { type: "file" }` sidecar (ink-app.tsx) is
+      // handled separately by the text-import-plugin, which pre-
+      // bundles it into a self-contained JS file with ink/react
+      // inlined. That sidecar runs from `/$bunfs/root/` at runtime
+      // where `node_modules` is not available, so it MUST be
+      // self-contained.
       external: [
         "bun:*",
         "ink",
@@ -520,11 +522,11 @@ async function build(): Promise<void> {
   await uploadSourcemapToSentry();
 
   // Clean up intermediate bundle (only the binaries are artifacts).
-  // The `ink-app.tsx` copy comes from the text-import-plugin's
-  // `with { type: "file" }` handling — it gets embedded into the
-  // compiled binary, so the sidecar copy is no longer needed once
-  // every target has compiled.
-  await $`rm -f ${BUNDLE_JS} ${SOURCEMAP_FILE} dist-bin/ink-app.tsx`;
+  // The `ink-app.js` sidecar comes from the text-import-plugin's
+  // pre-bundle of the `with { type: "file" }` import — it gets
+  // embedded into the compiled binary, so the copy is no longer
+  // needed once every target has compiled.
+  await $`rm -f ${BUNDLE_JS} ${SOURCEMAP_FILE} dist-bin/ink-app.js`;
 
   // Summary
   console.log(`\n${"=".repeat(40)}`);

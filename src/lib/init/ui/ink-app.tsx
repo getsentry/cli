@@ -24,9 +24,10 @@
  * Tab 2 (Files): Scrollable file read tree
  */
 
-import { Box, Text } from "ink";
+import { Box, render as inkRender, Text } from "ink";
 import Spinner from "ink-spinner";
 import {
+  createElement,
   useCallback,
   useEffect,
   useMemo,
@@ -1648,4 +1649,30 @@ function MultiSelectPromptOptionRow({
       ) : null}
     </Box>
   );
+}
+
+/**
+ * Mount the wizard App component via Ink and return the Ink instance.
+ *
+ * This function must live inside the sidecar so it uses the same
+ * `react` and `ink` copies as the App's hooks. Importing ink/react
+ * separately in the main bundle and calling `ink.render()` from
+ * there would create a second React instance, causing "Invalid hook
+ * call" errors at runtime. By centralising the mount call here,
+ * only one copy of ink + react exists.
+ */
+export function mountApp(
+  store: WizardStore,
+  options: {
+    exitOnCtrlC: boolean;
+    patchConsole: boolean;
+    stdin?: import("node:tty").ReadStream;
+  }
+): {
+  unmount: () => void;
+  waitUntilExit: () => Promise<unknown>;
+  rerender: (node: React.ReactNode) => void;
+  clear: () => void;
+} {
+  return inkRender(createElement(App, { store }), options);
 }
