@@ -1,6 +1,9 @@
+/**
+ * Tests for `checkGitStatus`. Stubs the low-level git probes from
+ * `src/lib/git.ts` and uses `MockUI` to record/replay all UI traffic.
+ */
+
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as clack from "@clack/prompts";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as gitLib from "../../../src/lib/git.js";
 import {
@@ -8,45 +11,31 @@ import {
   getUncommittedOrUntrackedFiles,
   isInsideGitWorkTree,
 } from "../../../src/lib/init/git.js";
-
-const noop = () => {
-  /* suppress output */
-};
+import { CANCELLED } from "../../../src/lib/init/ui/types.js";
+import { createMockUI, type MockCall } from "./ui/mock-ui.js";
 
 let isInsideWorkTreeSpy: ReturnType<typeof spyOn>;
 let getUncommittedFilesSpy: ReturnType<typeof spyOn>;
-let confirmSpy: ReturnType<typeof spyOn>;
-let isCancelSpy: ReturnType<typeof spyOn>;
-let logWarnSpy: ReturnType<typeof spyOn>;
-let savedPlainOutput: string | undefined;
 
 beforeEach(() => {
-  // Force rich output so clack-plain.ts delegates to real clack (spied below)
-  savedPlainOutput = process.env.SENTRY_PLAIN_OUTPUT;
-  process.env.SENTRY_PLAIN_OUTPUT = "0";
-
   isInsideWorkTreeSpy = spyOn(gitLib, "isInsideGitWorkTree");
   getUncommittedFilesSpy = spyOn(gitLib, "getUncommittedFiles");
-  confirmSpy = spyOn(clack, "confirm").mockResolvedValue(true);
-  isCancelSpy = spyOn(clack, "isCancel").mockImplementation(
-    (v: unknown) => v === Symbol.for("cancel")
-  );
-  logWarnSpy = spyOn(clack.log, "warn").mockImplementation(noop);
 });
 
 afterEach(() => {
   isInsideWorkTreeSpy.mockRestore();
   getUncommittedFilesSpy.mockRestore();
-  confirmSpy.mockRestore();
-  isCancelSpy.mockRestore();
-  logWarnSpy.mockRestore();
-
-  if (savedPlainOutput === undefined) {
-    delete process.env.SENTRY_PLAIN_OUTPUT;
-  } else {
-    process.env.SENTRY_PLAIN_OUTPUT = savedPlainOutput;
-  }
 });
+
+function lastWarn(calls: MockCall[]): string | undefined {
+  for (let i = calls.length - 1; i >= 0; i--) {
+    const call = calls[i];
+    if (call?.kind === "log.warn") {
+      return call.message;
+    }
+  }
+  return;
+}
 
 describe("isInsideGitWorkTree", () => {
   test("returns true when inside git work tree", () => {
@@ -88,81 +77,82 @@ describe("checkGitStatus", () => {
     isInsideWorkTreeSpy.mockReturnValue(true);
     getUncommittedFilesSpy.mockReturnValue([]);
 
-    const result = await checkGitStatus({ cwd: "/tmp", yes: false });
+    const { ui, calls } = createMockUI();
+    const result = await checkGitStatus({ cwd: "/tmp", yes: false, ui });
 
     expect(result).toBe(true);
-    expect(confirmSpy).not.toHaveBeenCalled();
-    expect(logWarnSpy).not.toHaveBeenCalled();
+    expect(calls.some((c) => c.kind === "confirm")).toBe(false);
+    expect(calls.some((c) => c.kind === "log.warn")).toBe(false);
   });
 
   test("prompts when not in git repo (interactive) and returns true on confirm", async () => {
     isInsideWorkTreeSpy.mockReturnValue(false);
-    confirmSpy.mockResolvedValue(true);
+    const { ui, calls, respond } = createMockUI();
+    respond.confirm(true);
 
-    const result = await checkGitStatus({ cwd: "/tmp", yes: false });
+    const result = await checkGitStatus({ cwd: "/tmp", yes: false, ui });
 
     expect(result).toBe(true);
-    expect(confirmSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: expect.stringContaining("not inside a git repository"),
-      })
+    const confirmCall = calls.find((c) => c.kind === "confirm");
+    expect(confirmCall?.kind === "confirm" && confirmCall.message).toContain(
+      "not inside a git repository"
     );
   });
 
   test("prompts when not in git repo (interactive) and returns false on decline", async () => {
     isInsideWorkTreeSpy.mockReturnValue(false);
-    confirmSpy.mockResolvedValue(false);
+    const { ui, respond } = createMockUI();
+    respond.confirm(false);
 
-    const result = await checkGitStatus({ cwd: "/tmp", yes: false });
+    const result = await checkGitStatus({ cwd: "/tmp", yes: false, ui });
 
     expect(result).toBe(false);
   });
 
   test("returns false without throwing when user cancels not-in-git-repo prompt", async () => {
     isInsideWorkTreeSpy.mockReturnValue(false);
-    confirmSpy.mockResolvedValue(Symbol.for("cancel"));
+    const { ui, respond } = createMockUI();
+    respond.confirm(CANCELLED);
 
-    const result = await checkGitStatus({ cwd: "/tmp", yes: false });
+    const result = await checkGitStatus({ cwd: "/tmp", yes: false, ui });
 
     expect(result).toBe(false);
   });
 
   test("warns and auto-continues when not in git repo with --yes", async () => {
     isInsideWorkTreeSpy.mockReturnValue(false);
+    const { ui, calls } = createMockUI();
 
-    const result = await checkGitStatus({ cwd: "/tmp", yes: true });
+    const result = await checkGitStatus({ cwd: "/tmp", yes: true, ui });
 
     expect(result).toBe(true);
-    expect(logWarnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("not inside a git repository")
-    );
-    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(lastWarn(calls)).toContain("not inside a git repository");
+    expect(calls.some((c) => c.kind === "confirm")).toBe(false);
   });
 
   test("shows files and prompts for dirty tree (interactive), returns true on confirm", async () => {
     isInsideWorkTreeSpy.mockReturnValue(true);
     getUncommittedFilesSpy.mockReturnValue(["-  M dirty.ts"]);
-    confirmSpy.mockResolvedValue(true);
+    const { ui, calls, respond } = createMockUI();
+    respond.confirm(true);
 
-    const result = await checkGitStatus({ cwd: "/tmp", yes: false });
+    const result = await checkGitStatus({ cwd: "/tmp", yes: false, ui });
 
     expect(result).toBe(true);
-    expect(logWarnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("uncommitted")
-    );
-    expect(confirmSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: expect.stringContaining("uncommitted changes"),
-      })
+    expect(lastWarn(calls)).toContain("uncommitted");
+    const confirmCall = calls.find((c) => c.kind === "confirm");
+    expect(confirmCall?.kind === "confirm" && confirmCall.message).toContain(
+      "uncommitted changes"
     );
   });
 
   test("shows files and prompts for dirty tree (interactive), returns false on decline", async () => {
     isInsideWorkTreeSpy.mockReturnValue(true);
     getUncommittedFilesSpy.mockReturnValue(["-  M dirty.ts"]);
-    confirmSpy.mockResolvedValue(false);
+    const { ui, respond } = createMockUI();
+    respond.confirm(false);
 
-    const result = await checkGitStatus({ cwd: "/tmp", yes: false });
+    const result = await checkGitStatus({ cwd: "/tmp", yes: false, ui });
 
     expect(result).toBe(false);
   });
@@ -170,9 +160,10 @@ describe("checkGitStatus", () => {
   test("returns false without throwing when user cancels dirty-tree prompt", async () => {
     isInsideWorkTreeSpy.mockReturnValue(true);
     getUncommittedFilesSpy.mockReturnValue(["-  M dirty.ts"]);
-    confirmSpy.mockResolvedValue(Symbol.for("cancel"));
+    const { ui, respond } = createMockUI();
+    respond.confirm(CANCELLED);
 
-    const result = await checkGitStatus({ cwd: "/tmp", yes: false });
+    const result = await checkGitStatus({ cwd: "/tmp", yes: false, ui });
 
     expect(result).toBe(false);
   });
@@ -180,14 +171,15 @@ describe("checkGitStatus", () => {
   test("warns with file list and auto-continues for dirty tree with --yes", async () => {
     isInsideWorkTreeSpy.mockReturnValue(true);
     getUncommittedFilesSpy.mockReturnValue(["-  M dirty.ts", "- ?? new.ts"]);
+    const { ui, calls } = createMockUI();
 
-    const result = await checkGitStatus({ cwd: "/tmp", yes: true });
+    const result = await checkGitStatus({ cwd: "/tmp", yes: true, ui });
 
     expect(result).toBe(true);
-    expect(logWarnSpy).toHaveBeenCalled();
-    const warnMsg: string = logWarnSpy.mock.calls[0][0];
-    expect(warnMsg).toContain("uncommitted");
-    expect(warnMsg).toContain("M dirty.ts");
-    expect(confirmSpy).not.toHaveBeenCalled();
+    const warn = lastWarn(calls);
+    expect(warn).toBeDefined();
+    expect(warn).toContain("uncommitted");
+    expect(warn).toContain("M dirty.ts");
+    expect(calls.some((c) => c.kind === "confirm")).toBe(false);
   });
 });

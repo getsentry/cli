@@ -215,8 +215,30 @@ const result = await build({
     // Replace import.meta.url with the injected shim variable for CJS
     "import.meta.url": "import_meta_url",
   },
-  // Only externalize Node.js built-ins - bundle all npm packages
-  external: ["node:*"],
+  // Externalize Node.js built-ins, plus Ink + React + companions.
+  // Ink uses top-level await (in `node_modules/ink/build/reconciler.js`
+  // and `yoga-layout/dist/src/index.js`) which esbuild can't emit in
+  // a CJS bundle, so the packages must stay external for the
+  // npm/Node distribution. The factory in `factory.ts` lazy-imports
+  // the Ink path via `with { type: "file" }` and falls back to
+  // `LoggingUI` on import failure, so a Node user without Ink
+  // installed simply gets the non-TUI flow without a crash.
+  //
+  // The Bun compile (`script/build.ts`) embeds `ink-app.tsx` as a
+  // file resource — at runtime Bun's loader resolves Ink + React
+  // fresh, sidestepping the same CJS-wrapping bug that'd hit if
+  // these were bundled into the binary's pre-compiled JS.
+  external: [
+    "node:*",
+    "ink",
+    "ink-spinner",
+    "react",
+    "react/*",
+    "react-reconciler",
+    "react-reconciler/*",
+    "react-devtools-core",
+    "yoga-layout",
+  ],
   metafile: true,
   plugins,
 });
@@ -277,6 +299,19 @@ await Bun.write("./dist/index.d.cts", TYPE_DECLARATIONS);
 
 console.log("  -> dist/bin.cjs (CLI wrapper)");
 console.log("  -> dist/index.d.cts (type declarations)");
+
+// Clean up the `ink-app.js` sidecar that the text-import-plugin
+// drops into `dist/` when it pre-bundles the `with { type: "file" }`
+// import in `src/lib/init/ui/ink-ui.ts`. The npm distribution
+// doesn't run the InkUI factory at all (it's gated to the Bun
+// binary because Ink uses top-level await that we can't bundle
+// into CJS), so the sidecar is unused — removing it just keeps the
+// local `dist/` directory tidy.
+try {
+  await unlink("./dist/ink-app.js");
+} catch {
+  // Sidecar may not exist (e.g. plugin path not exercised) — fine.
+}
 
 // Calculate bundle size (only the main bundle, not source maps)
 const bundleOutput = result.metafile?.outputs["dist/index.cjs"];
