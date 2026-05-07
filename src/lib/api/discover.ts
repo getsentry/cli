@@ -86,6 +86,49 @@ async function fetchEventsPage(
   return { data, nextCursor };
 }
 
+/** Metric metadata returned by {@link queryMetricsMeta}. */
+export type MetricMeta = {
+  name: string;
+  type: string;
+  unit: string;
+};
+
+/**
+ * Discover available metrics for an org via the Events API.
+ *
+ * Queries `dataset=metricsEnhanced` with meta-fields (`metric.name`, etc.)
+ * — the same technique the Sentry Explore Metrics UI uses.
+ */
+export async function queryMetricsMeta(
+  orgSlug: string,
+  options?: {
+    statsPeriod?: string;
+    project?: string;
+  }
+): Promise<MetricMeta[]> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const query = options?.project ? `project:${options.project}` : undefined;
+
+  const { data } = await fetchEventsPage(
+    regionUrl,
+    orgSlug,
+    {
+      fields: ["metric.name", "metric.type", "metric.unit"],
+      dataset: "metricsEnhanced",
+      query,
+      statsPeriod: options?.statsPeriod ?? "7d",
+      limit: 100,
+    },
+    100
+  );
+
+  return data.data.map((row) => ({
+    name: String(row["metric.name"] ?? ""),
+    type: String(row["metric.type"] ?? "distribution"),
+    unit: String(row["metric.unit"] ?? "none"),
+  }));
+}
+
 /**
  * Query the Explore/Events endpoint for aggregate or tabular event data.
  *

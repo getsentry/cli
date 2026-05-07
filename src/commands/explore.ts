@@ -11,6 +11,7 @@ import {
   isReplaySortValue,
   listReplays,
   queryEvents,
+  queryMetricsMeta,
 } from "../lib/api-client.js";
 import { buildProjectQuery, validateLimit } from "../lib/arg-parsing.js";
 import {
@@ -33,6 +34,7 @@ import {
   paginationHint,
 } from "../lib/list-command.js";
 import { logger } from "../lib/logger.js";
+import { resolveMetricField } from "../lib/metrics-transform.js";
 import { withProgress } from "../lib/polling.js";
 import {
   DEFAULT_REPLAY_EXPLORE_FIELDS,
@@ -123,6 +125,8 @@ const API_TO_USER_DATASET = new Map(
 
 type ExploreFlags = {
   readonly field?: string[];
+  readonly metric?: string;
+  readonly agg: string;
   readonly dataset: string;
   readonly environment?: readonly string[];
   readonly query?: string;
@@ -571,10 +575,10 @@ export const exploreCommand = buildListCommand("explore", {
       "  sentry explore my-org/cli --dataset replays -F id -F user.email -F count_errors\n" +
       '  sentry explore -F span.op -F "count()" --dataset spans --period 1h\n' +
       "  sentry explore --json\n\n" +
-      "Metrics format:\n" +
-      "  Metrics aggregates use: aggregation(value,metric_name,metric_type,unit)\n" +
-      '  sentry explore my-org/ -F "sum(value,llm.token_usage,distribution,none)" --dataset metrics\n' +
-      '  sentry explore my-org/seer -F gen_ai.request.model -F "sum(value,llm.token_usage,distribution,none)" --dataset metrics --period 7d',
+      "Metrics (auto mode — resolves type/unit automatically):\n" +
+      "  sentry explore my-org/ -m llm.token_usage --dataset metrics\n" +
+      "  sentry explore my-org/seer -F gen_ai.request.model -m llm.token_usage --dataset metrics --period 7d\n" +
+      "  sentry explore my-org/ -m cache.hit_rate --agg avg --dataset metrics",
   },
   output: {
     human: formatExploreHuman,
@@ -601,6 +605,19 @@ export const exploreCommand = buildListCommand("explore", {
           'API field or aggregate (repeatable). E.g., title, "count()", "p50(transaction.duration)"',
         variadic: true,
         optional: true,
+      },
+      metric: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "Metric name for --dataset metrics. Auto-resolves type/unit via API.",
+        optional: true,
+      },
+      agg: {
+        kind: "parsed",
+        parse: String,
+        brief: "Aggregation for --metric (sum, avg, count, p50, p95, etc.)",
+        default: "sum",
       },
       dataset: {
         kind: "parsed",
@@ -645,6 +662,7 @@ export const exploreCommand = buildListCommand("explore", {
       ...PERIOD_ALIASES,
       e: "environment",
       F: "field",
+      m: "metric",
       d: "dataset",
       q: "query",
       s: "sort",
@@ -668,12 +686,38 @@ export const exploreCommand = buildListCommand("explore", {
     const timeRange = flags.period;
     const environment = parseReplayEnvironmentFilter(flags.environment);
 
-    if (dataset === "metricsEnhanced") {
+    // --metric auto mode: resolve metric name → tracemetrics aggregate
+    if (flags.metric) {
+      if (dataset !== "metricsEnhanced") {
+        log.warn("--metric implies --dataset metrics; switching dataset.");
+      }
+
+      const metrics = await withProgress(
+        {
+          message: `Discovering metric '${flags.metric}'...`,
+          json: flags.json,
+        },
+        () =>
+          queryMetricsMeta(org, {
+            statsPeriod: "7d",
+            project,
+          })
+      );
+
+      const aggField = resolveMetricField(flags.metric, flags.agg, metrics);
+      // Prepend any user-supplied grouping fields, then the resolved aggregate
+      const groupByFields = userSuppliedFields
+        ? fieldList.filter((f) => !isAggregate(f))
+        : [];
+      fieldList = [...groupByFields, aggField];
+    } else if (dataset === "metricsEnhanced") {
       if (!userSuppliedFields) {
         throw new ValidationError(
-          "The metrics dataset requires explicit --field flags with tracemetrics format.\n\n" +
-            "Format: aggregation(value,metric_name,metric_type,unit)\n\n" +
-            "Example:\n" +
+          "The metrics dataset requires --metric or explicit --field flags.\n\n" +
+            "Auto mode (recommended):\n" +
+            "  sentry explore my-org/ -m llm.token_usage --dataset metrics\n" +
+            "  sentry explore my-org/ -m llm.token_usage --agg avg --dataset metrics\n\n" +
+            "Manual mode (tracemetrics format):\n" +
             '  sentry explore my-org/ -F "sum(value,llm.token_usage,distribution,none)" --dataset metrics',
           "field"
         );
