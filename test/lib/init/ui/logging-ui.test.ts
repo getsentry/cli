@@ -71,6 +71,21 @@ describe("LoggingUI lifecycle messages", () => {
     expect(stdout()).toBe("");
     expect(stderr()).toBe("Aborted by user\n");
   });
+
+  test("feedback writes the copy-paste command to stdout", () => {
+    const { ui, stdout, stderr } = createUI();
+    ui.feedback("cancelled");
+    expect(stdout()).toBe(
+      [
+        "Sad to see setup stop. Was something going sideways?",
+        "Tell us so we can fix it:",
+        '$ sentry cli feedback "sentry init was cancelled"',
+        "",
+        "",
+      ].join("\n")
+    );
+    expect(stderr()).toBe("");
+  });
 });
 
 describe("LoggingUI log API", () => {

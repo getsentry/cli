@@ -72,6 +72,7 @@ async function withPreflightHandling(
   } catch (error) {
     if (error instanceof WizardCancelledError) {
       ui.cancel("Setup cancelled.");
+      ui.feedback("cancelled");
       process.exitCode = 0;
       return null;
     }
@@ -79,6 +80,7 @@ async function withPreflightHandling(
     const message = error instanceof Error ? error.message : String(error);
     ui.log.error(message);
     ui.cancel("Setup failed.");
+    ui.feedback("failed");
     throw error instanceof WizardError ? error : new WizardError(message);
   }
 }

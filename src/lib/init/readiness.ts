@@ -35,6 +35,7 @@ export async function checkReadiness(ui: WizardUI): Promise<void> {
     ui.log.info("Run `sentry auth login` to authenticate.");
     ui.log.info("Check your network connection and try again.");
     ui.cancel("Setup failed");
+    ui.feedback("failed");
     throw new WizardError("Pre-flight checks failed");
   }
 
@@ -43,6 +44,7 @@ export async function checkReadiness(ui: WizardUI): Promise<void> {
     ui.log.error("No authentication token found.");
     ui.log.info("Run `sentry auth login` to authenticate, then try again.");
     ui.cancel("Setup failed");
+    ui.feedback("failed");
     throw new WizardError("Not authenticated");
   }
 

@@ -232,15 +232,23 @@ async function handleSuspendedStep(
 
   spin.stop("Error", 1);
   spinState.running = false;
-  ui.log.error(
-    `Unknown suspend payload type "${(payload as { type: string }).type}"`
-  );
-  ui.cancel("Setup failed");
-  throw new WizardCancelledError();
+  const message = `Unknown suspend payload type "${(payload as { type: string }).type}"`;
+  ui.log.error(message);
+  throw new WizardError(message);
 }
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function showCancelledFeedback(ui: WizardUI): void {
+  ui.cancel("Setup cancelled.");
+  ui.feedback("cancelled");
+}
+
+function showFailedFeedback(ui: WizardUI, message = "Setup failed"): void {
+  ui.cancel(message);
+  ui.feedback("failed");
 }
 
 function assertWorkflowResult(raw: unknown): WorkflowRunResult {
@@ -371,6 +379,7 @@ async function preamble(
   } catch (err) {
     if (err instanceof WizardCancelledError) {
       captureException(err);
+      showCancelledFeedback(ui);
       process.exitCode = 0;
       return false;
     }
@@ -383,7 +392,7 @@ async function preamble(
     throw err;
   }
   if (!confirmed) {
-    ui.cancel("Setup cancelled.");
+    showCancelledFeedback(ui);
     process.exitCode = 0;
     return false;
   }
@@ -398,7 +407,7 @@ async function preamble(
     ui,
   });
   if (!gitOk) {
-    ui.cancel("Setup cancelled.");
+    showCancelledFeedback(ui);
     process.exitCode = 0;
     return false;
   }
@@ -601,7 +610,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     spin.stop("Connection failed", 1);
     spinState.running = false;
     ui.log.error(errorMessage(err));
-    ui.cancel("Setup failed");
+    showFailedFeedback(ui);
     throw new WizardError(errorMessage(err));
   }
 
@@ -629,7 +638,6 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
           ui.setStep?.(activeStepId, "failed");
         }
         ui.log.error(`No suspend payload found for step "${stepId}"`);
-        ui.cancel("Setup failed");
         throw new WizardError(`No suspend payload found for step "${stepId}"`);
       }
 
@@ -685,6 +693,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       // failed; the post-dispose report shows the cancel message
       // instead.
       captureException(err);
+      showCancelledFeedback(ui);
       process.exitCode = 0;
       return;
     }
@@ -692,10 +701,11 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       ui.setStep?.(activeStepId, "failed");
     }
     if (err instanceof WizardError) {
+      showFailedFeedback(ui);
       throw err;
     }
     ui.log.error(errorMessage(err));
-    ui.cancel("Setup failed");
+    showFailedFeedback(ui);
     throw new WizardError(errorMessage(err));
   }
 

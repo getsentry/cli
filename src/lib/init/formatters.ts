@@ -87,11 +87,9 @@ export function formatResult(result: WorkflowRunResult, ui: WizardUI): void {
   }
 
   ui.log.info("Please review the changes above before committing.");
-  ui.log.info(
-    "You're one of the first to try the new setup wizard! Run `sentry cli feedback` to let us know how it went."
-  );
 
   ui.outro("Sentry SDK installed successfully!");
+  ui.feedback("success");
 }
 
 export function formatError(result: WorkflowRunResult, ui: WizardUI): void {
@@ -125,4 +123,5 @@ export function formatError(result: WorkflowRunResult, ui: WizardUI): void {
   }
 
   ui.cancel("Setup failed");
+  ui.feedback("failed");
 }

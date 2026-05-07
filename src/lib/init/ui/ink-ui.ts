@@ -46,9 +46,9 @@
 
 import { openSync } from "node:fs";
 import { ReadStream } from "node:tty";
-import chalk from "chalk";
 import { stripAnsi } from "../../formatters/plain-detect.js";
-import { buildFileTree, flattenTree } from "./file-tree.js";
+import { formatFeedbackHint, type InitFeedbackOutcome } from "../feedback.js";
+import { formatFailureReport, formatSuccessReport } from "./ink-report.js";
 import { LEARN_SEQUENCE } from "./learn-content.js";
 import { SENTRY_TIPS } from "./sentry-tips.js";
 import {
@@ -75,69 +75,6 @@ type PendingWelcome = {
   resolve: (value: "continue" | Cancelled) => void;
   settled: boolean;
 };
-
-// Brand palette mirrored from `ink-app.tsx` so the post-dispose
-// success/failure echo (rendered via chalk after Ink unmounts) feels
-// like a continuation of the live screen.
-const REPORT_MUTED = "#898294";
-const REPORT_SUCCESS = "#83da90";
-const REPORT_ERROR = "#fe4144";
-const REPORT_WARN = "#FDB81B";
-
-/** Splits on `: ` to separate error label from detail. */
-const ERROR_SPLIT_RE = /:\s+/;
-
-/**
- * Build the chalk-formatted failure report shown after alternate
- * screen exit. Includes up to 5 recent error log entries with
- * structured formatting for readability.
- */
-function formatFailureReport(
-  message: string,
-  logs: readonly { severity: string; text: string }[]
-): string {
-  const icon = chalk.hex(REPORT_ERROR)("\u2716");
-  const lines: string[] = [
-    `\n${icon}  ${chalk.hex(REPORT_ERROR).bold(message)}`,
-  ];
-  const errorLogs = logs.filter(
-    (entry) =>
-      entry.severity === "error" &&
-      entry.text !== message &&
-      entry.text !== "Failed"
-  );
-  if (errorLogs.length > 0) {
-    lines.push("");
-  }
-  for (const entry of errorLogs.slice(-5)) {
-    formatErrorEntry(entry.text, lines);
-  }
-  return lines.join("\n");
-}
-
-/**
- * Format a single error log entry into indented report lines.
- * Splits on newlines first, then separates the first segment
- * (bold red) from subsequent detail (muted) on each line.
- */
-function formatErrorEntry(text: string, out: string[]): void {
-  const rawLines = text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-  if (rawLines.length === 0) {
-    return;
-  }
-  const first = rawLines[0] ?? "";
-  const parts = first.split(ERROR_SPLIT_RE);
-  out.push(`   ${chalk.hex(REPORT_ERROR).bold(parts[0] ?? "")}`);
-  for (const part of parts.slice(1)) {
-    out.push(`   ${chalk.hex(REPORT_MUTED)(part)}`);
-  }
-  for (const line of rawLines.slice(1)) {
-    out.push(`   ${chalk.hex(REPORT_MUTED)(line)}`);
-  }
-}
 
 /** Tip rotation cadence in the sidebar — slow enough to read each tip. */
 const TIP_ROTATE_INTERVAL_MS = 8000;
@@ -434,6 +371,7 @@ export class InkUI implements WizardUI {
    */
   private outroMessage: string | undefined;
   private failureMessage: string | undefined;
+  private feedbackHint: string | undefined;
   private initialWelcome: PendingWelcome | undefined;
   /**
    * Resolved when the user presses any key on the outro screen.
@@ -492,6 +430,10 @@ export class InkUI implements WizardUI {
     const clean = stripAnsi(message);
     this.appendLog("error", clean);
     this.failureMessage = clean;
+  }
+
+  feedback(outcome: InitFeedbackOutcome): void {
+    this.feedbackHint = formatFeedbackHint(outcome);
   }
 
   summary(summary: WizardSummary): void {
@@ -841,6 +783,7 @@ export class InkUI implements WizardUI {
     }
     this.cancelRequested = true;
     this.failureMessage = "Setup cancelled.";
+    this.feedback("cancelled");
     this.tearDown();
     // Match the SIGINT convention so shells (and CI) see a
     // distinguishable exit. The runner's `await using` won't get a
@@ -853,7 +796,7 @@ export class InkUI implements WizardUI {
   }
 
   /**
-   * Build a compact final summary echoed to stderr after Ink
+   * Build a compact final summary echoed to stdout after Ink
    * unmounts. Ink's inline rendering means the run's log lines are
    * already in the user's scrollback; this report just emphasises
    * the outcome so it's the last thing on screen.
@@ -871,37 +814,18 @@ export class InkUI implements WizardUI {
     if (this.failureMessage) {
       return formatFailureReport(
         this.failureMessage,
-        this.store.getSnapshot().logs
+        this.store.getSnapshot().logs,
+        this.feedbackHint
       );
     }
     if (!this.outroMessage) {
       return;
     }
-    const successIcon = chalk.hex(REPORT_SUCCESS)("✔");
-    const lines: string[] = [
-      "",
-      `${successIcon}  ${chalk.bold(this.outroMessage)}`,
-    ];
-    const summary = this.store.getSnapshot().summary;
-    if (summary && summary.fields.length > 0) {
-      lines.push("");
-      const labelWidth = Math.max(
-        ...summary.fields.map((field) => field.label.length)
-      );
-      for (const field of summary.fields) {
-        const label = chalk.hex(REPORT_MUTED)(field.label.padEnd(labelWidth));
-        lines.push(`   ${label}  ${field.value}`);
-      }
-    }
-    if (summary?.changedFiles && summary.changedFiles.length > 0) {
-      lines.push("");
-      lines.push(`   ${chalk.hex(REPORT_MUTED).bold("Changed files")}`);
-      const tree = buildFileTree(summary.changedFiles);
-      for (const row of flattenTree(tree)) {
-        lines.push(formatTreeRowChalk(row));
-      }
-    }
-    return lines.join("\n");
+    return formatSuccessReport(
+      this.outroMessage,
+      this.store.getSnapshot().summary,
+      this.feedbackHint
+    );
   }
 
   // ── Internal helpers ──────────────────────────────────────────────
@@ -982,39 +906,4 @@ export class InkUI implements WizardUI {
     this.cancelHandler = handler;
     process.on("SIGINT", handler);
   }
-}
-
-/**
- * Colored glyph for a changed-files row in the post-dispose report.
- * The plain ASCII variant lives in `logging-ui.ts` for the
- * non-interactive CI path.
- */
-function changedFileGlyphColored(action: string): string {
-  if (action === "create") {
-    return chalk.hex(REPORT_SUCCESS)("+");
-  }
-  if (action === "delete") {
-    return chalk.hex(REPORT_ERROR)("−");
-  }
-  return chalk.hex(REPORT_WARN)("~");
-}
-
-/**
- * Render a single `FileTreeRow` for the post-dispose stderr report.
- * Directories show only the box-drawing branch + label; files add
- * the action glyph (colored).
- */
-function formatTreeRowChalk(row: {
-  prefix: string;
-  branch: string;
-  kind: "file" | "directory";
-  label: string;
-  action?: string;
-}): string {
-  const branch = chalk.hex(REPORT_MUTED)(`${row.prefix}${row.branch}`);
-  if (row.kind === "directory") {
-    return `     ${branch} ${row.label}`;
-  }
-  const glyph = changedFileGlyphColored(row.action ?? "modify");
-  return `     ${branch} ${glyph} ${row.label}`;
 }

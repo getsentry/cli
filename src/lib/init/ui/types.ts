@@ -28,6 +28,8 @@
  *      check overlays.
  */
 
+import type { InitFeedbackOutcome } from "../feedback.js";
+
 /** Sentinel symbol returned by prompt methods when the user cancels. */
 export const CANCELLED: unique symbol = Symbol.for(
   "sentry-cli:wizard-ui:cancelled"
@@ -180,6 +182,9 @@ export type WizardUI = AsyncDisposable & {
    * runs (analogous to clack's `cancel()`).
    */
   cancel(message: string): void;
+
+  /** Display an outcome-specific feedback prompt after a terminal outcome. */
+  feedback(outcome: InitFeedbackOutcome): void;
 
   /**
    * Notify the UI that the wizard is reading the listed files from

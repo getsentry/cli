@@ -20,7 +20,7 @@ import { CANCELLED } from "../../../src/lib/init/ui/types.js";
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as resolveTeam from "../../../src/lib/resolve-team.js";
-import { createMockUI } from "./ui/mock-ui.js";
+import { createMockUI, type MockCall } from "./ui/mock-ui.js";
 
 function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
   return {
@@ -29,6 +29,14 @@ function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
     dryRun: false,
     ...overrides,
   };
+}
+
+function feedbackOutcomes(calls: MockCall[]): string[] {
+  return calls
+    .filter(
+      (c): c is Extract<MockCall, { kind: "feedback" }> => c.kind === "feedback"
+    )
+    .map((c) => c.outcome);
 }
 
 let resolveOrgPrefetchedSpy: ReturnType<typeof spyOn>;
@@ -306,6 +314,7 @@ describe("resolveInitContext", () => {
     expect(cancelCall?.kind === "cancel" && cancelCall.message).toBe(
       "Setup cancelled."
     );
+    expect(feedbackOutcomes(calls)).toEqual(["cancelled"]);
   });
 
   test("includes the auth token in the resolved context", async () => {

@@ -277,6 +277,16 @@ function lastCancelMessage(): string | undefined {
   return;
 }
 
+function lastFeedbackOutcome(): string | undefined {
+  for (let i = mockUICalls.length - 1; i >= 0; i--) {
+    const call = mockUICalls[i];
+    if (call?.kind === "feedback") {
+      return call.outcome;
+    }
+  }
+  return;
+}
+
 function lastWarn(): string | undefined {
   for (let i = mockUICalls.length - 1; i >= 0; i--) {
     const call = mockUICalls[i];
@@ -415,7 +425,8 @@ describe("runWizard", () => {
     await forceStdinTty(() => runWizard(makeOptions({ yes: false })));
 
     expect(process.exitCode).toBe(0);
-    expect(lastCancelMessage()).toBeUndefined();
+    expect(lastCancelMessage()).toBe("Setup cancelled.");
+    expect(lastFeedbackOutcome()).toBe("cancelled");
     expect(getWorkflowSpy).not.toHaveBeenCalled();
   });
 
@@ -450,6 +461,7 @@ describe("runWizard", () => {
     await runWizard(makeOptions());
 
     expect(lastCancelMessage()).toBe("Setup cancelled.");
+    expect(lastFeedbackOutcome()).toBe("cancelled");
     expect(getWorkflowSpy).not.toHaveBeenCalled();
   });
 
@@ -616,6 +628,7 @@ describe("runWizard", () => {
 
     expect(spinnerMock.stop).toHaveBeenCalledWith("Error", 1);
     expect(lastCancelMessage()).toBe("Setup failed");
+    expect(lastFeedbackOutcome()).toBe("failed");
   });
 
   test("tears down forwarding and stops the spinner on cancellation", async () => {
@@ -638,6 +651,8 @@ describe("runWizard", () => {
 
     expect(process.exitCode).toBe(0);
     expect(spinnerMock.stop).toHaveBeenCalledWith("Cancelled", 0);
+    expect(lastCancelMessage()).toBe("Setup cancelled.");
+    expect(lastFeedbackOutcome()).toBe("cancelled");
   });
 
   test("tears down forwarding when a WizardError is rethrown from a tool", async () => {
@@ -665,6 +680,8 @@ describe("runWizard", () => {
     await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
     expect(spinnerMock.stop).toHaveBeenCalledWith("Error", 1);
+    expect(lastCancelMessage()).toBe("Setup failed");
+    expect(lastFeedbackOutcome()).toBe("failed");
   });
 
   test("shows count-based messages while reading and analyzing files", async () => {

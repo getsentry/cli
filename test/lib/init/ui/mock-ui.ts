@@ -11,6 +11,7 @@
  * test-only helper — it should not be bundled into the CLI.
  */
 
+import type { InitFeedbackOutcome } from "../../../../src/lib/init/feedback.js";
 import {
   CANCELLED,
   type Cancelled,
@@ -31,6 +32,7 @@ export type MockCall =
   | { kind: "summary"; summary: WizardSummary }
   | { kind: "outro"; message: string }
   | { kind: "cancel"; message: string }
+  | { kind: "feedback"; outcome: InitFeedbackOutcome }
   | { kind: "log.info"; message: string }
   | { kind: "log.warn"; message: string }
   | { kind: "log.error"; message: string }
@@ -129,6 +131,7 @@ export function createMockUI(options: MockUIOptions = {}): {
     summary: (summary) => calls.push({ kind: "summary", summary }),
     outro: (message) => calls.push({ kind: "outro", message }),
     cancel: (message) => calls.push({ kind: "cancel", message }),
+    feedback: (outcome) => calls.push({ kind: "feedback", outcome }),
     recordFilesReading: (paths) =>
       calls.push({ kind: "recordFilesReading", paths }),
     markFilesAnalyzed: (paths) =>
