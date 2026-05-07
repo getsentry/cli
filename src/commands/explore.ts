@@ -702,7 +702,7 @@ export const exploreCommand = buildListCommand("explore", {
         },
         () =>
           queryMetricsMeta(org, {
-            statsPeriod: metaParams.statsPeriod,
+            ...metaParams,
             project,
           })
       );

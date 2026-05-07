@@ -103,6 +103,8 @@ export async function queryMetricsMeta(
   orgSlug: string,
   options?: {
     statsPeriod?: string;
+    start?: string;
+    end?: string;
     project?: string;
   }
 ): Promise<MetricMeta[]> {
@@ -116,7 +118,12 @@ export async function queryMetricsMeta(
       fields: ["metric.name", "metric.type", "metric.unit"],
       dataset: "metricsEnhanced",
       query,
-      statsPeriod: options?.statsPeriod ?? "7d",
+      statsPeriod:
+        options?.start || options?.end
+          ? undefined
+          : (options?.statsPeriod ?? "7d"),
+      start: options?.start,
+      end: options?.end,
       limit: 100,
     },
     100
