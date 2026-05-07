@@ -143,6 +143,7 @@ async function handleMultiSelect(
         ...(hint ? { hint } : {}),
       };
     }),
+    initialValues: optional.filter((f) => f === "performanceMonitoring"),
     required: false,
   });
 

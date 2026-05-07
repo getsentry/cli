@@ -297,7 +297,7 @@ describe("handleMultiSelect", () => {
       "performanceMonitoring",
       "sourceMaps",
     ]);
-    expect(multiselectCall?.initialValues).toBeUndefined();
+    expect(multiselectCall?.initialValues).toEqual(["performanceMonitoring"]);
   });
 });
 
