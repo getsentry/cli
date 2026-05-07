@@ -591,7 +591,7 @@ describe("sentry explore", () => {
       );
 
       expect(queryMetricsMetaSpy).toHaveBeenCalledWith("test-org", {
-        statsPeriod: "7d",
+        statsPeriod: "24h",
         project: undefined,
       });
       expect(queryEventsSpy).toHaveBeenCalledWith(
@@ -648,6 +648,29 @@ describe("sentry explore", () => {
         "test-org",
         expect.objectContaining({
           fields: ["avg(value,cache.hit_rate,distribution,none)"],
+        })
+      );
+    });
+
+    test("--metric without --dataset metrics auto-switches to metricsEnhanced", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      await func.call(
+        context,
+        {
+          ...DEFAULT_FLAGS,
+          dataset: "errors",
+          metric: "llm.token_usage",
+        },
+        "test-org/"
+      );
+
+      expect(queryEventsSpy).toHaveBeenCalledWith(
+        "test-org",
+        expect.objectContaining({
+          dataset: "metricsEnhanced",
+          fields: ["sum(value,llm.token_usage,distribution,none)"],
         })
       );
     });

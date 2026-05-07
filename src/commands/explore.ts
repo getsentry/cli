@@ -677,7 +677,7 @@ export const exploreCommand = buildListCommand("explore", {
       "explore"
     );
 
-    const dataset = flags.dataset;
+    let dataset = flags.dataset;
     const userSuppliedFields = flags.field && flags.field.length > 0;
     let fieldList = [...defaultFieldsForDataset(dataset)];
     if (userSuppliedFields) {
@@ -690,8 +690,11 @@ export const exploreCommand = buildListCommand("explore", {
     if (flags.metric) {
       if (dataset !== "metricsEnhanced") {
         log.warn("--metric implies --dataset metrics; switching dataset.");
+        dataset = "metricsEnhanced";
       }
 
+      // Use the user's --period for metadata discovery so older metrics are found
+      const metaParams = timeRangeToApiParams(timeRange);
       const metrics = await withProgress(
         {
           message: `Discovering metric '${flags.metric}'...`,
@@ -699,7 +702,7 @@ export const exploreCommand = buildListCommand("explore", {
         },
         () =>
           queryMetricsMeta(org, {
-            statsPeriod: "7d",
+            statsPeriod: metaParams.statsPeriod,
             project,
           })
       );
