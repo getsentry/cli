@@ -10,9 +10,9 @@
  * - The createRequire banner is injected for CJS compatibility
  */
 
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { build } from "esbuild";
 import { textImportPlugin } from "../../script/text-import-plugin.js";
 
