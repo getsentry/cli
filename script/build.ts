@@ -124,7 +124,27 @@ async function bundleJs(): Promise<boolean> {
       platform: "node",
       target: "esnext",
       format: "esm",
-      external: ["bun:*"],
+      // Externalize the Ink + React stack from the esbuild bundling
+      // step. `react`'s CJS jsx-runtime, when pulled into esbuild's
+      // `__commonJS` wrappers and re-bundled by Bun.compile, produces
+      // malformed output containing a TDZ `init_react` symbol
+      // embedded in the wrong scope. Keeping React (and its
+      // consumers) external lets Bun's runtime resolve them fresh at
+      // first invocation, outside the buggy bundler path.
+      //
+      // The npm bundle (`script/bundle.ts`) externalizes the same
+      // packages for the same reason — bundling Ink's React tree
+      // through esbuild produces a CJS wrapper that hits a TDZ at
+      // runtime when React is first touched.
+      external: [
+        "bun:*",
+        "ink",
+        "ink-spinner",
+        "react",
+        "react/*",
+        "react-reconciler",
+        "react-reconciler/*",
+      ],
       sourcemap: "linked",
       // Minify syntax and whitespace but NOT identifiers. Bun.build
       minify: true,
@@ -295,6 +315,25 @@ async function compileTarget(target: BuildTarget): Promise<boolean> {
   try {
     const result = await Bun.build({
       entrypoints: [BUNDLE_JS],
+      // Force React to load its production builds. React's CJS
+      // entry switches at runtime via
+      //   `if (process.env.NODE_ENV === "production")`
+      // — leaving NODE_ENV unset would drag in the development
+      // builds, whose CJS wrappers Bun.compile can't bundle cleanly
+      // (it injects `__promiseAll` runtime helpers in positions the
+      // dev-build's IIFE doesn't tolerate, causing a SyntaxError at
+      // startup). Production builds parse fine.
+      //
+      // `react-devtools-core` is gated behind `process.env.DEV ===
+      // "true"` inside Ink's reconciler — never reached in our
+      // production binary. We still install it as a devDep so
+      // Bun.compile can resolve the static `import devtools from
+      // "react-devtools-core"` reference; without it the build
+      // fails with "Could not resolve". The inlined module gets
+      // dead-code-eliminated by the DEV gate at runtime.
+      define: {
+        "process.env.NODE_ENV": JSON.stringify("production"),
+      },
       compile: {
         target: getBunTarget(target) as
           | "bun-darwin-arm64"
@@ -480,8 +519,12 @@ async function build(): Promise<void> {
   // Step 3: Upload the composed sourcemap to Sentry (after compilation)
   await uploadSourcemapToSentry();
 
-  // Clean up intermediate bundle (only the binaries are artifacts)
-  await $`rm -f ${BUNDLE_JS} ${SOURCEMAP_FILE}`;
+  // Clean up intermediate bundle (only the binaries are artifacts).
+  // The `ink-app.tsx` copy comes from the text-import-plugin's
+  // `with { type: "file" }` handling — it gets embedded into the
+  // compiled binary, so the sidecar copy is no longer needed once
+  // every target has compiled.
+  await $`rm -f ${BUNDLE_JS} ${SOURCEMAP_FILE} dist-bin/ink-app.tsx`;
 
   // Summary
   console.log(`\n${"=".repeat(40)}`);

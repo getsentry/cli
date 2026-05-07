@@ -34,21 +34,24 @@ let warmSpy: ReturnType<typeof spyOn>;
 const func = (await initCommand.loader()) as unknown as (
   this: {
     cwd: string;
-    stdout: { write: () => boolean };
+    stdout: { write: () => boolean; isTTY?: boolean };
     stderr: { write: () => boolean };
-    stdin: typeof process.stdin;
+    stdin: { isTTY?: boolean };
   },
   flags: Record<string, unknown>,
   first?: string,
   second?: string
 ) => Promise<void>;
 
-function makeContext(cwd = "/projects/app") {
+function makeContext(
+  cwd = "/projects/app",
+  tty: { stdinTTY?: boolean; stdoutTTY?: boolean } = {}
+) {
   return {
     cwd,
-    stdout: { write: () => true },
+    stdout: { write: () => true, isTTY: tty.stdoutTTY ?? true },
     stderr: { write: () => true },
-    stdin: process.stdin,
+    stdin: { isTTY: tty.stdinTTY ?? true },
   };
 }
 
@@ -95,7 +98,11 @@ describe("init command func", () => {
         ...DEFAULT_FLAGS,
         features: ["errors,tracing,logs"],
       });
-      expect(capturedArgs?.features).toEqual(["errors", "tracing", "logs"]);
+      expect(capturedArgs?.features).toEqual([
+        "errorMonitoring",
+        "performanceMonitoring",
+        "logs",
+      ]);
     });
 
     test("splits plus-separated features", async () => {
@@ -104,7 +111,11 @@ describe("init command func", () => {
         ...DEFAULT_FLAGS,
         features: ["errors+tracing+logs"],
       });
-      expect(capturedArgs?.features).toEqual(["errors", "tracing", "logs"]);
+      expect(capturedArgs?.features).toEqual([
+        "errorMonitoring",
+        "performanceMonitoring",
+        "logs",
+      ]);
     });
 
     test("splits space-separated features", async () => {
@@ -113,7 +124,11 @@ describe("init command func", () => {
         ...DEFAULT_FLAGS,
         features: ["errors tracing logs"],
       });
-      expect(capturedArgs?.features).toEqual(["errors", "tracing", "logs"]);
+      expect(capturedArgs?.features).toEqual([
+        "errorMonitoring",
+        "performanceMonitoring",
+        "logs",
+      ]);
     });
 
     test("merges multiple --features flags", async () => {
@@ -122,7 +137,11 @@ describe("init command func", () => {
         ...DEFAULT_FLAGS,
         features: ["errors,tracing", "logs"],
       });
-      expect(capturedArgs?.features).toEqual(["errors", "tracing", "logs"]);
+      expect(capturedArgs?.features).toEqual([
+        "errorMonitoring",
+        "performanceMonitoring",
+        "logs",
+      ]);
     });
 
     test("trims whitespace from features", async () => {
@@ -131,7 +150,10 @@ describe("init command func", () => {
         ...DEFAULT_FLAGS,
         features: [" errors , tracing "],
       });
-      expect(capturedArgs?.features).toEqual(["errors", "tracing"]);
+      expect(capturedArgs?.features).toEqual([
+        "errorMonitoring",
+        "performanceMonitoring",
+      ]);
     });
 
     test("filters empty segments", async () => {
@@ -140,13 +162,108 @@ describe("init command func", () => {
         ...DEFAULT_FLAGS,
         features: ["errors,,tracing,"],
       });
-      expect(capturedArgs?.features).toEqual(["errors", "tracing"]);
+      expect(capturedArgs?.features).toEqual([
+        "errorMonitoring",
+        "performanceMonitoring",
+      ]);
+    });
+
+    test("normalizes public aliases to wizard feature ids", async () => {
+      const ctx = makeContext();
+      await func.call(ctx, {
+        ...DEFAULT_FLAGS,
+        features: ["errors,tracing,replay,sourcemaps"],
+      });
+      expect(capturedArgs?.features).toEqual([
+        "errorMonitoring",
+        "performanceMonitoring",
+        "sessionReplay",
+        "sourceMaps",
+      ]);
+    });
+
+    test("accepts canonical wizard feature ids", async () => {
+      const ctx = makeContext();
+      await func.call(ctx, {
+        ...DEFAULT_FLAGS,
+        features: [
+          "errorMonitoring,performanceMonitoring,sessionReplay,sourceMaps",
+        ],
+      });
+      expect(capturedArgs?.features).toEqual([
+        "errorMonitoring",
+        "performanceMonitoring",
+        "sessionReplay",
+        "sourceMaps",
+      ]);
+    });
+
+    test("throws ValidationError for unknown features", async () => {
+      const ctx = makeContext();
+      const promise = func.call(ctx, {
+        ...DEFAULT_FLAGS,
+        features: ["errors,unknownFeature"],
+      });
+      await expect(promise).rejects.toThrow(ValidationError);
+      await expect(promise).rejects.toThrow(
+        "Supported features: errors, tracing, logs, replay, metrics, profiling, sourcemaps, crons, ai-monitoring, user-feedback"
+      );
+      expect(runWizardSpy).not.toHaveBeenCalled();
+      expect(findProjectsSpy).not.toHaveBeenCalled();
+      expect(warmSpy).not.toHaveBeenCalled();
     });
 
     test("passes undefined when features not provided", async () => {
       const ctx = makeContext();
       await func.call(ctx, DEFAULT_FLAGS);
       expect(capturedArgs?.features).toBeUndefined();
+    });
+  });
+
+  // ── Non-TTY validation ───────────────────────────────────────────────
+
+  describe("non-TTY validation", () => {
+    test("requires --yes before project lookup or wizard startup", async () => {
+      const ctx = makeContext("/projects/app", { stdinTTY: false });
+      await expect(
+        func.call(ctx, { yes: false, "dry-run": false }, "my-app")
+      ).rejects.toThrow(ContextError);
+      expect(findProjectsSpy).not.toHaveBeenCalled();
+      expect(warmSpy).not.toHaveBeenCalled();
+      expect(runWizardSpy).not.toHaveBeenCalled();
+    });
+
+    test("requires explicit features with --yes", async () => {
+      const ctx = makeContext("/projects/app", { stdoutTTY: false });
+      const promise = func.call(ctx, DEFAULT_FLAGS);
+      await expect(promise).rejects.toThrow(ContextError);
+      await expect(promise).rejects.toThrow(
+        "sentry init --yes --features errors,tracing,replay [target] [directory]"
+      );
+      expect(warmSpy).not.toHaveBeenCalled();
+      expect(runWizardSpy).not.toHaveBeenCalled();
+    });
+
+    test("runs when --yes and --features are both provided", async () => {
+      const ctx = makeContext("/projects/app", { stdinTTY: false });
+      await func.call(ctx, {
+        ...DEFAULT_FLAGS,
+        features: ["errors,tracing,replay"],
+      });
+      expect(capturedArgs?.features).toEqual([
+        "errorMonitoring",
+        "performanceMonitoring",
+        "sessionReplay",
+      ]);
+      expect(capturedArgs?.yes).toBe(true);
+      expect(runWizardSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test("--dry-run bypasses non-TTY validation without --yes or --features", async () => {
+      const ctx = makeContext("/projects/app", { stdinTTY: false });
+      await func.call(ctx, { yes: false, "dry-run": true });
+      expect(capturedArgs?.dryRun).toBe(true);
+      expect(runWizardSpy).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -337,16 +454,16 @@ describe("init command func", () => {
   describe("error cases", () => {
     test("two paths throws ContextError", async () => {
       const ctx = makeContext();
-      expect(func.call(ctx, DEFAULT_FLAGS, "./dir1", "./dir2")).rejects.toThrow(
-        ContextError
-      );
+      await expect(
+        func.call(ctx, DEFAULT_FLAGS, "./dir1", "./dir2")
+      ).rejects.toThrow(ContextError);
     });
 
     test("two targets throws ContextError", async () => {
       const ctx = makeContext();
-      expect(func.call(ctx, DEFAULT_FLAGS, "acme/", "other/")).rejects.toThrow(
-        ContextError
-      );
+      await expect(
+        func.call(ctx, DEFAULT_FLAGS, "acme/", "other/")
+      ).rejects.toThrow(ContextError);
     });
 
     test("org slug with whitespace is rejected by validateResourceId", async () => {

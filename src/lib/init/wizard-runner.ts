@@ -4,26 +4,28 @@
  * Main suspend/resume loop that drives the remote Mastra workflow.
  * Each iteration: check status → if suspended, perform tool or
  * interactive prompt → resume with result → repeat.
+ *
+ * All UI I/O — banners, spinners, logs, prompts, outro — flows through
+ * a single `WizardUI` instance constructed by `getUI()`. The runner
+ * itself is implementation-agnostic: it works the same against
+ * `LoggingUI` (CI / npm) and `InkUI` (interactive Bun binary).
  */
 
 import { randomBytes } from "node:crypto";
-import { basename } from "node:path";
+
 import { MastraClient } from "@mastra/client-js";
 import { captureException, getTraceData } from "@sentry/node-core/light";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { detectAgent } from "../detect-agent.js";
 import { EXIT, WizardError } from "../errors.js";
-import { terminalLink } from "../formatters/colors.js";
 import {
-  colorTag,
   renderInlineMarkdown,
-  safeCodeSpan,
   stripColorTags,
 } from "../formatters/markdown.js";
-import { cancel, confirm, intro, log } from "./clack-plain.js";
 import {
   abortIfCancelled,
+  STEP_ACTIVE_LABELS,
   STEP_LABELS,
   WizardCancelledError,
 } from "./clack-utils.js";
@@ -33,7 +35,6 @@ import {
   EXIT_PLATFORM_NOT_DETECTED,
   EXIT_VERIFICATION_FAILED,
   MASTRA_API_URL,
-  SENTRY_DOCS_URL,
   VERIFY_CHANGES_STEP,
   WORKFLOW_ID,
 } from "./constants.js";
@@ -41,8 +42,8 @@ import { formatError, formatResult } from "./formatters.js";
 import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
 import { resolveInitContext } from "./preflight.js";
-import { createWizardSpinner } from "./spinner.js";
-import { forwardFreshTtyToStdin } from "./stdin-reopen.js";
+import { checkReadiness } from "./readiness.js";
+
 import { describeTool, executeTool } from "./tools/registry.js";
 import type {
   ResolvedInitContext,
@@ -50,22 +51,24 @@ import type {
   WizardOptions,
   WorkflowRunResult,
 } from "./types.js";
+import { getUIAsync } from "./ui/factory.js";
+import { LoggingUIPromptError } from "./ui/logging-ui.js";
+import type { SpinnerHandle, WelcomeOptions, WizardUI } from "./ui/types.js";
 import {
   precomputeDirListing,
   precomputeSentryDetection,
   preReadCommonFiles,
 } from "./workflow-inputs.js";
 
-type Spinner = ReturnType<typeof createWizardSpinner>;
-
 type SpinState = { running: boolean };
 
 type StepContext = {
   payload: SuspendPayload;
   stepId: string;
-  spin: Spinner;
+  spin: SpinnerHandle;
   spinState: SpinState;
   context: ResolvedInitContext;
+  ui: WizardUI;
 };
 
 function nextPhase(
@@ -109,42 +112,14 @@ type ReadFilesDisplay = {
 
 function formatReadFilesSummary(progress: ReadFilesDisplay): string {
   const { paths, phase } = progress;
-  if (paths.length === 0) {
+  const count = paths.length;
+  if (count === 0) {
     return phase === "analyzing" ? "Analyzing files..." : "Reading files...";
   }
-
-  let header: string;
   if (phase === "analyzing") {
-    header = paths.length === 1 ? "Analyzing file..." : "Analyzing files...";
-  } else {
-    header = paths.length === 1 ? "Reading file..." : "Reading files...";
+    return count === 1 ? "Analyzing 1 file..." : `Analyzing ${count} files...`;
   }
-
-  const icon = readFilesStatusIcon(phase);
-  const displayPaths = compactDisplayPaths(paths);
-  const items = displayPaths.map((filePath, index) => {
-    const branch = index === paths.length - 1 ? "└─" : "├─";
-    return `${branch} ${icon} ${safeCodeSpan(filePath)}`;
-  });
-  return `${header}\n${items.join("\n")}`;
-}
-
-function readFilesStatusIcon(phase: ReadFilesDisplay["phase"]): string {
-  return phase === "analyzing"
-    ? colorTag("green", "✓")
-    : colorTag("yellow", "●");
-}
-
-function compactDisplayPaths(paths: string[]): string[] {
-  const basenameCounts = new Map<string, number>();
-  for (const filePath of paths) {
-    const name = basename(filePath);
-    basenameCounts.set(name, (basenameCounts.get(name) ?? 0) + 1);
-  }
-  return paths.map((filePath) => {
-    const name = basename(filePath);
-    return basenameCounts.get(name) === 1 ? name : filePath;
-  });
+  return count === 1 ? "Reading 1 file..." : `Reading ${count} files...`;
 }
 
 /**
@@ -177,7 +152,7 @@ async function handleSuspendedStep(
   stepPhases: Map<string, number>,
   stepHistory: Map<string, Record<string, unknown>[]>
 ): Promise<Record<string, unknown>> {
-  const { payload, stepId, spin, spinState, context } = ctx;
+  const { payload, stepId, spin, spinState, context, ui } = ctx;
   const label = STEP_LABELS[stepId] ?? stepId;
 
   if (payload.type === "tool") {
@@ -193,6 +168,16 @@ async function handleSuspendedStep(
         : describeTool(payload));
     spin.message(renderInlineMarkdown(truncateForTerminal(message)));
 
+    // Inline / sidebar file-read status (`InkUI` only — `LoggingUI`
+    // leaves these methods undefined). The previous flow showed a
+    // half-second tree of files in the spinner before the next tool
+    // overwrote it; users couldn't see what context the wizard
+    // looked at. We feed the read paths into the status indicator
+    // before the tool runs, then mark them analyzed afterwards.
+    if (payload.operation === "read-files") {
+      ui.recordFilesReading?.(payload.params.paths);
+    }
+
     const toolResult = await executeTool(payload, context);
 
     if (toolResult.message) {
@@ -206,6 +191,10 @@ async function handleSuspendedStep(
           renderInlineMarkdown(truncateForTerminal(followUpMessage))
         );
       }
+    }
+
+    if (payload.operation === "read-files" && toolResult.ok !== false) {
+      ui.markFilesAnalyzed?.(payload.params.paths);
     }
 
     const history = stepHistory.get(stepId) ?? [];
@@ -230,7 +219,7 @@ async function handleSuspendedStep(
     spin.stop(label);
     spinState.running = false;
 
-    const interactiveResult = await handleInteractive(payload, context);
+    const interactiveResult = await handleInteractive(payload, context, ui);
 
     spin.start("Processing...");
     spinState.running = true;
@@ -243,15 +232,23 @@ async function handleSuspendedStep(
 
   spin.stop("Error", 1);
   spinState.running = false;
-  log.error(
-    `Unknown suspend payload type "${(payload as { type: string }).type}"`
-  );
-  cancel("Setup failed");
-  throw new WizardCancelledError();
+  const message = `Unknown suspend payload type "${(payload as { type: string }).type}"`;
+  ui.log.error(message);
+  throw new WizardError(message);
 }
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function showCancelledFeedback(ui: WizardUI): void {
+  ui.cancel("Setup cancelled.");
+  ui.feedback("cancelled");
+}
+
+function showFailedFeedback(ui: WizardUI, message = "Setup failed"): void {
+  ui.cancel(message);
+  ui.feedback("failed");
 }
 
 function assertWorkflowResult(raw: unknown): WorkflowRunResult {
@@ -305,61 +302,112 @@ function withTimeout<T>(
   });
 }
 
-async function confirmExperimental(yes: boolean): Promise<boolean> {
-  if (yes) {
+function buildWelcomeOptions(): WelcomeOptions {
+  return {
+    title: "Sentry Init",
+    body: [
+      "We'll use AI to inspect this project and configure Sentry.",
+      "You'll choose the setup before local files change.",
+    ],
+    punchline: "Continue to let Sentry use AI for setup.",
+  };
+}
+
+async function confirmExperimental(
+  options: WizardOptions,
+  ui: WizardUI
+): Promise<boolean> {
+  if (options.yes || options.dryRun) {
     return true;
   }
-  const proceed = await confirm({
+  if (ui.welcome) {
+    const choice = await ui.welcome(buildWelcomeOptions());
+    return abortIfCancelled(choice) === "continue";
+  }
+  // The wizard modifies files on disk. We use `select` rather than
+  // `confirm` so the cancel path can carry a muted, explicit hint
+  // ("exits without changes") — the previous binary yes/no felt
+  // ambiguous about what "no" did. The earlier wording used an
+  // all-caps "EXPERIMENTAL:" prefix which read like a warning the
+  // user had to dismiss; this version frames the question as a
+  // sanity check before the wizard does work.
+  const choice = await ui.select<"continue" | "exit">({
     message:
-      "EXPERIMENTAL: This feature is experimental and may modify your code. Continue?",
+      "This is experimental and will modify files in this directory. Continue?",
+    options: [
+      {
+        value: "continue",
+        label: "Yes, continue",
+        hint: "wizard will detect your stack and apply changes",
+      },
+      {
+        value: "exit",
+        label: "No, exit",
+        hint: "exits without making any changes",
+      },
+    ],
+    initialValue: "continue",
   });
-  abortIfCancelled(proceed);
-  return !!proceed;
+  const resolved = abortIfCancelled(choice);
+  return resolved === "continue";
 }
 
 async function preamble(
-  directory: string,
-  yes: boolean,
-  dryRun: boolean
+  options: WizardOptions,
+  ui: WizardUI
 ): Promise<boolean> {
-  if (!(yes || dryRun || process.stdin.isTTY)) {
+  if (!(options.yes || options.dryRun || process.stdin.isTTY)) {
     throw new WizardError(
       "Interactive mode requires a terminal. Use --yes for non-interactive mode.",
       { rendered: false }
     );
   }
 
-  // Suppress the ASCII art banner for agent-driven runs — it wastes tokens
-  // and adds noise to structured output without providing value to the agent.
+  // Suppress the ASCII art banner for agent-driven runs — it wastes
+  // tokens and adds noise to structured output without value to the
+  // agent. For interactive runs, the UI implementation handles
+  // rendering: InkUI paints from a pre-loaded gradient, LoggingUI
+  // writes plain ANSI to stderr.
   if (!detectAgent()) {
-    process.stderr.write(`\n${formatBanner()}\n\n`);
+    ui.banner(formatBanner());
   }
-  intro("sentry init");
+  ui.intro("sentry init");
 
   let confirmed: boolean;
   try {
-    confirmed = await confirmExperimental(yes || dryRun);
+    confirmed = await confirmExperimental(options, ui);
   } catch (err) {
     if (err instanceof WizardCancelledError) {
       captureException(err);
+      showCancelledFeedback(ui);
       process.exitCode = 0;
       return false;
+    }
+    if (err instanceof LoggingUIPromptError) {
+      throw new WizardError(
+        "The interactive UI failed to load. Run with --yes for non-interactive mode.",
+        { rendered: false }
+      );
     }
     throw err;
   }
   if (!confirmed) {
-    cancel("Setup cancelled.");
+    showCancelledFeedback(ui);
     process.exitCode = 0;
     return false;
   }
 
-  if (dryRun) {
-    log.warn("Dry-run mode: no files will be modified.");
+  if (options.dryRun) {
+    ui.log.warn("Dry-run mode: no files will be modified.");
   }
 
-  const gitOk = await checkGitStatus({ cwd: directory, yes: yes || dryRun });
+  const gitOk = await checkGitStatus({
+    cwd: options.directory,
+    yes: options.yes || options.dryRun,
+    ui,
+  });
   if (!gitOk) {
-    cancel("Setup cancelled.");
+    showCancelledFeedback(ui);
     process.exitCode = 0;
     return false;
   }
@@ -367,46 +415,98 @@ async function preamble(
   return true;
 }
 
+const MAX_RESUME_RETRIES = 3;
+const RETRY_BACKOFF_MS = [2000, 4000, 8000];
+
+type ResumeRetryArgs = {
+  run: { resumeAsync: (args: Record<string, unknown>) => Promise<unknown> };
+  stepId: string;
+  resumeData: Record<string, unknown>;
+  tracingOptions: Record<string, unknown>;
+  ui: WizardUI;
+};
+
+async function resumeWithRetry(
+  args: ResumeRetryArgs
+): Promise<WorkflowRunResult> {
+  const { run, stepId, resumeData, tracingOptions, ui } = args;
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= MAX_RESUME_RETRIES; attempt++) {
+    try {
+      if (attempt > 0) {
+        ui.setOverlay?.({
+          kind: "health",
+          message: "Connection interrupted, retrying...",
+          retryCount: attempt,
+        });
+        await new Promise((r) =>
+          setTimeout(r, RETRY_BACKOFF_MS[attempt - 1] ?? 8000)
+        );
+      }
+      const raw = await withTimeout(
+        run.resumeAsync({ step: stepId, resumeData, tracingOptions }),
+        API_TIMEOUT_MS,
+        "Workflow resume"
+      );
+      if (attempt > 0) {
+        ui.clearOverlay?.();
+      }
+      return assertWorkflowResult(raw);
+    } catch (err) {
+      lastError = err;
+      if (attempt === MAX_RESUME_RETRIES) {
+        ui.clearOverlay?.();
+        throw err;
+      }
+    }
+  }
+  ui.clearOverlay?.();
+  throw lastError;
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard orchestration with error handling branches
 export async function runWizard(initialOptions: WizardOptions): Promise<void> {
-  // macOS-only: Bun's compiled binaries on Darwin don't deliver keystrokes
-  // through TTY fds inherited via shell redirection (`curl | bash` →
-  // `exec sentry init </dev/tty` in install.sh), so clack prompts hang
-  // forever at the first question. The workaround in stdin-reopen.ts opens
-  // a fresh `/dev/tty` and forwards its data events onto process.stdin.
+  // Note: a previous `forwardFreshTtyToStdin()` call lived here as a
+  // macOS-only workaround for clack reading from a broken inherited
+  // stdin fd (PRs #824/#831/#833/#835). It's gone now because:
   //
-  // The bug is fixed on Linux (verified via PTY harness in PR #835) — we
-  // skip the workaround there because it has a side cost: a libuv handle
-  // leak that requires `initCommand.func`'s `setTimeout().unref()` safety
-  // net to force-exit cleanly. Keep the install narrow.
+  //   1. `LoggingUI` doesn't read from stdin at all (its prompts
+  //      throw without `--yes`).
+  //   2. `InkUI` opens its own fresh `/dev/tty` ReadStream and
+  //      passes it directly to Ink's `stdin` option, sidestepping
+  //      both the macOS clack bug and a separate Bun/Ink stdin bug
+  //      (oven-sh/bun#6862, vadimdemedes/ink#636) where Bun's
+  //      `process.stdin` accepts `setRawMode(true)` but never
+  //      delivers `readable` events.
   //
-  // The `using` declaration guarantees teardown on every exit path via the
-  // Disposable returned by forwardFreshTtyToStdin(). On non-Darwin, the
-  // disposable is a no-op (install short-circuits on platform check).
-  using _tty =
-    process.platform === "darwin"
-      ? forwardFreshTtyToStdin()
-      : {
-          [Symbol.dispose]: (): void => {
-            // intentionally empty — workaround not installed on this platform
-          },
-        };
+  // The `forwardFreshTtyToStdin` function is preserved in
+  // `stdin-reopen.ts` for future callers (and its tests) but no
+  // longer wired into the wizard.
 
-  const { directory, yes, dryRun, features } = initialOptions;
+  const { directory, yes, dryRun, features, forceLegacyUi } = initialOptions;
 
-  if (!(await preamble(directory, yes, dryRun))) {
+  // Construct the UI once for the entire run; tear down on every exit
+  // path via `await using`. The factory picks `InkUI` for interactive
+  // runs on the Bun binary and `LoggingUI` everywhere else (CI,
+  // `--yes`, `--no-tui`, npm/Node distribution).
+  const initialWelcome = yes || dryRun ? undefined : buildWelcomeOptions();
+  await using ui = await getUIAsync({
+    yes,
+    forceLegacy: forceLegacyUi,
+    ...(initialWelcome ? { initialWelcome } : {}),
+  });
+  ui.setIntroMode?.(!yes);
+
+  if (!(await preamble(initialOptions, ui))) {
     return;
   }
 
-  log.info(
-    "This wizard uses AI to analyze your project and configure Sentry." +
-      `\nFor manual setup: ${terminalLink(SENTRY_DOCS_URL)}`
-  );
+  await checkReadiness(ui);
 
   const effectiveOptions = dryRun
     ? { ...initialOptions, yes: true }
     : initialOptions;
-  const context = await resolveInitContext(effectiveOptions);
+  const context = await resolveInitContext(effectiveOptions, ui);
   if (!context) {
     return;
   }
@@ -462,7 +562,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   });
   const workflow = client.getWorkflow(WORKFLOW_ID);
 
-  const spin = createWizardSpinner();
+  const spin = ui.spinner();
   const spinState: SpinState = { running: false };
 
   spin.start("Scanning project...");
@@ -476,6 +576,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       precomputeSentryDetection(directory).catch(() => null),
     ]);
     const fileCache = await preReadCommonFiles(directory, dirListing);
+    ui.setIntroMode?.(false);
     spin.message("Connecting to wizard...");
     run = await workflow.createRun();
     // Large shared context (dirListing, fileCache, existingSentry)
@@ -508,13 +609,21 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   } catch (err) {
     spin.stop("Connection failed", 1);
     spinState.running = false;
-    log.error(errorMessage(err));
-    cancel("Setup failed");
+    ui.log.error(errorMessage(err));
+    showFailedFeedback(ui);
     throw new WizardError(errorMessage(err));
   }
 
   const stepPhases = new Map<string, number>();
   const stepHistory = new Map<string, Record<string, unknown>[]>();
+
+  // Track which step the runner is currently suspended on so the
+  // sidebar checklist can flip rows as the workflow advances. A
+  // single step can suspend multiple times (read-files → analyze →
+  // done); `setStep("...", "in_progress")` is idempotent in the
+  // store, and we only fire the `completed` transition when the
+  // active step changes.
+  let activeStepId: string | undefined;
 
   try {
     while (result.status === "suspended") {
@@ -525,9 +634,25 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       if (!extracted) {
         spin.stop("Error", 1);
         spinState.running = false;
-        log.error(`No suspend payload found for step "${stepId}"`);
-        cancel("Setup failed");
+        if (activeStepId) {
+          ui.setStep?.(activeStepId, "failed");
+        }
+        ui.log.error(`No suspend payload found for step "${stepId}"`);
         throw new WizardError(`No suspend payload found for step "${stepId}"`);
+      }
+
+      // Step transition: if the active step just changed, mark the
+      // previous one completed before flipping this one to
+      // in_progress. The store back-fills any earlier `pending`
+      // entries as `skipped` on the in_progress transition.
+      if (activeStepId && activeStepId !== extracted.stepId) {
+        ui.setStep?.(activeStepId, "completed");
+      }
+      activeStepId = extracted.stepId;
+      ui.setStep?.(extracted.stepId, "in_progress");
+      const activeLabel = STEP_ACTIVE_LABELS[extracted.stepId];
+      if (activeLabel && spinState.running) {
+        spin.message(activeLabel);
       }
 
       const resumeData = await handleSuspendedStep(
@@ -537,22 +662,19 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
           spin,
           spinState,
           context,
+          ui,
         },
         stepPhases,
         stepHistory
       );
 
-      result = assertWorkflowResult(
-        await withTimeout(
-          run.resumeAsync({
-            step: extracted.stepId,
-            resumeData,
-            tracingOptions,
-          }),
-          API_TIMEOUT_MS,
-          "Workflow resume"
-        )
-      );
+      result = await resumeWithRetry({
+        run,
+        stepId: extracted.stepId,
+        resumeData,
+        tracingOptions,
+        ui,
+      });
     }
   } catch (err) {
     // A running spinner owns a live interval, so stop it before any early
@@ -566,25 +688,44 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       spinState.running = false;
     }
     if (err instanceof WizardCancelledError) {
+      // Cancellation is a clean exit, not a failure — leave the
+      // active step as `in_progress` rather than flipping it to
+      // failed; the post-dispose report shows the cancel message
+      // instead.
       captureException(err);
+      showCancelledFeedback(ui);
       process.exitCode = 0;
       return;
     }
+    if (activeStepId) {
+      ui.setStep?.(activeStepId, "failed");
+    }
     if (err instanceof WizardError) {
+      showFailedFeedback(ui);
       throw err;
     }
-    log.error(errorMessage(err));
-    cancel("Setup failed");
+    ui.log.error(errorMessage(err));
+    showFailedFeedback(ui);
     throw new WizardError(errorMessage(err));
   }
 
-  handleFinalResult(result, spin, spinState);
+  // Workflow exited the suspend loop successfully — mark the last
+  // active step (if any) as completed before the final-result handler
+  // emits its outcome line. Status === "success" implies the final
+  // step finished; failure paths run through the catch above and
+  // already marked the step `failed`.
+  if (activeStepId && result.status === "success") {
+    ui.setStep?.(activeStepId, "completed");
+  }
+
+  handleFinalResult(result, spin, spinState, ui);
 }
 
 function handleFinalResult(
   result: WorkflowRunResult,
-  spin: Spinner,
-  spinState: SpinState
+  spin: SpinnerHandle,
+  spinState: SpinState,
+  ui: WizardUI
 ): void {
   const hasError = result.status !== "success" || result.result?.exitCode;
 
@@ -593,7 +734,7 @@ function handleFinalResult(
       spin.stop("Failed", 1);
       spinState.running = false;
     }
-    formatError(result);
+    formatError(result, ui);
 
     // Map workflow-internal exit codes to semantic EXIT.* constants
     const workflowCode = result.result?.exitCode;
@@ -605,7 +746,7 @@ function handleFinalResult(
     spin.stop("Done");
     spinState.running = false;
   }
-  formatResult(result);
+  formatResult(result, ui);
 }
 
 /**

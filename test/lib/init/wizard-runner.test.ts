@@ -7,8 +7,6 @@ import {
   spyOn,
   test,
 } from "bun:test";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as clack from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as banner from "../../../src/lib/banner.js";
@@ -25,7 +23,7 @@ import * as inter from "../../../src/lib/init/interactive.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as preflight from "../../../src/lib/init/preflight.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as initSpinner from "../../../src/lib/init/spinner.js";
+import * as readiness from "../../../src/lib/init/readiness.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as registry from "../../../src/lib/init/tools/registry.js";
 import type {
@@ -34,19 +32,38 @@ import type {
   WizardOptions,
   WorkflowRunResult,
 } from "../../../src/lib/init/types.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as uiFactory from "../../../src/lib/init/ui/factory.js";
+import {
+  CANCELLED,
+  type SpinnerHandle,
+  type WizardUI,
+} from "../../../src/lib/init/ui/types.js";
 import { runWizard } from "../../../src/lib/init/wizard-runner.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as workflowInputs from "../../../src/lib/init/workflow-inputs.js";
+import { createMockUI, type MockCall } from "./ui/mock-ui.js";
 
 const noop = () => {
   /* suppress output */
 };
 
-const spinnerMock = {
+/**
+ * Per-test reference to the spinner mock. The wizard-runner calls
+ * `ui.spinner()` exactly once and reuses the handle for the entire run,
+ * so we expose a singleton with mock fns the test cases can assert on.
+ */
+const spinnerMock: SpinnerHandle & {
+  start: ReturnType<typeof mock>;
+  stop: ReturnType<typeof mock>;
+  message: ReturnType<typeof mock>;
+} = {
   start: mock(),
   stop: mock(),
   message: mock(),
 };
+
+let mockUICalls: MockCall[];
 
 function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
   return {
@@ -76,14 +93,7 @@ let mockResumeResults: WorkflowRunResult[];
 let resumeCallCount = 0;
 let startAsyncMock: ReturnType<typeof mock>;
 
-let introSpy: ReturnType<typeof spyOn>;
-let confirmSpy: ReturnType<typeof spyOn>;
-let cancelSpy: ReturnType<typeof spyOn>;
-let logInfoSpy: ReturnType<typeof spyOn>;
-let logWarnSpy: ReturnType<typeof spyOn>;
-let logErrorSpy: ReturnType<typeof spyOn>;
-let spinnerSpy: ReturnType<typeof spyOn>;
-
+let getUISpy: ReturnType<typeof spyOn>;
 let formatBannerSpy: ReturnType<typeof spyOn>;
 let formatResultSpy: ReturnType<typeof spyOn>;
 let formatErrorSpy: ReturnType<typeof spyOn>;
@@ -106,6 +116,33 @@ let capturedClientOptions: { abortSignal?: AbortSignal }[] = [];
 
 let savedPlainOutput: string | undefined;
 
+function forceStdinTty<T>(action: () => Promise<T>): Promise<T> {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(
+    process.stdin,
+    "isTTY"
+  );
+  Object.defineProperty(process.stdin, "isTTY", {
+    value: true,
+    configurable: true,
+    writable: true,
+  });
+  return action().finally(() => {
+    if (originalDescriptor) {
+      Object.defineProperty(process.stdin, "isTTY", originalDescriptor);
+    } else {
+      delete (process.stdin as { isTTY?: boolean }).isTTY;
+    }
+  });
+}
+
+function useMockUI(ui: WizardUI, calls: MockCall[]): void {
+  mockUICalls = calls;
+  getUISpy.mockResolvedValue({
+    ...ui,
+    spinner: () => spinnerMock,
+  });
+}
+
 beforeEach(() => {
   // Force rich output so clack-plain.ts delegates to real clack (spied below)
   savedPlainOutput = process.env.SENTRY_PLAIN_OUTPUT;
@@ -116,20 +153,27 @@ beforeEach(() => {
   resumeCallCount = 0;
   process.exitCode = 0;
 
-  introSpy = spyOn(clack, "intro").mockImplementation(noop);
-  confirmSpy = spyOn(clack, "confirm").mockResolvedValue(true);
-  cancelSpy = spyOn(clack, "cancel").mockImplementation(noop);
-  logInfoSpy = spyOn(clack.log, "info").mockImplementation(noop);
-  logWarnSpy = spyOn(clack.log, "warn").mockImplementation(noop);
-  logErrorSpy = spyOn(clack.log, "error").mockImplementation(noop);
-  spinnerSpy = spyOn(initSpinner, "createWizardSpinner").mockReturnValue(
-    spinnerMock as any
-  );
-
   spinnerMock.start.mockClear();
   spinnerMock.stop.mockClear();
   spinnerMock.message.mockClear();
 
+  // The wizard runner constructs a UI via `getUI()`. Replace it with a
+  // MockUI whose spinner() returns the shared `spinnerMock` so tests can
+  // assert on lifecycle calls.
+  const { ui, calls, respond } = createMockUI();
+  mockUICalls = calls;
+  // Pre-load a confirm response so the experimental confirm prompt
+  // resolves to "true" by default — the legacy default before MockUI.
+  // Tests that exercise `--yes` skip this prompt entirely; the response
+  // sits unused on the queue and is harmless.
+  respond.confirm(true);
+  const wrapped: WizardUI = {
+    ...ui,
+    spinner: () => spinnerMock,
+  };
+  getUISpy = spyOn(uiFactory, "getUIAsync").mockResolvedValue(wrapped);
+
+  spyOn(readiness, "checkReadiness").mockResolvedValue(undefined);
   formatBannerSpy = spyOn(banner, "formatBanner").mockReturnValue("BANNER");
   formatResultSpy = spyOn(fmt, "formatResult").mockImplementation(noop);
   formatErrorSpy = spyOn(fmt, "formatError").mockImplementation(noop);
@@ -196,14 +240,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  introSpy.mockRestore();
-  confirmSpy.mockRestore();
-  cancelSpy.mockRestore();
-  logInfoSpy.mockRestore();
-  logWarnSpy.mockRestore();
-  logErrorSpy.mockRestore();
-  spinnerSpy.mockRestore();
-
+  getUISpy.mockRestore();
   formatBannerSpy.mockRestore();
   formatResultSpy.mockRestore();
   formatErrorSpy.mockRestore();
@@ -230,6 +267,36 @@ afterEach(() => {
   setEnv(process.env);
 });
 
+function lastCancelMessage(): string | undefined {
+  for (let i = mockUICalls.length - 1; i >= 0; i--) {
+    const call = mockUICalls[i];
+    if (call?.kind === "cancel") {
+      return call.message;
+    }
+  }
+  return;
+}
+
+function lastFeedbackOutcome(): string | undefined {
+  for (let i = mockUICalls.length - 1; i >= 0; i--) {
+    const call = mockUICalls[i];
+    if (call?.kind === "feedback") {
+      return call.outcome;
+    }
+  }
+  return;
+}
+
+function lastWarn(): string | undefined {
+  for (let i = mockUICalls.length - 1; i >= 0; i--) {
+    const call = mockUICalls[i];
+    if (call?.kind === "log.warn") {
+      return call.message;
+    }
+  }
+  return;
+}
+
 describe("runWizard", () => {
   test("formats successful results", async () => {
     await runWizard(makeOptions());
@@ -240,29 +307,143 @@ describe("runWizard", () => {
   });
 
   test("throws when stdin is not a TTY without --yes", async () => {
-    const originalIsTTY = process.stdin.isTTY;
+    const originalDescriptor = Object.getOwnPropertyDescriptor(
+      process.stdin,
+      "isTTY"
+    );
     Object.defineProperty(process.stdin, "isTTY", {
       value: false,
       configurable: true,
+      writable: true,
     });
 
-    await expect(runWizard(makeOptions({ yes: false }))).rejects.toThrow(
-      WizardError
-    );
-
-    Object.defineProperty(process.stdin, "isTTY", {
-      value: originalIsTTY,
-      configurable: true,
-    });
+    try {
+      await expect(runWizard(makeOptions({ yes: false }))).rejects.toThrow(
+        WizardError
+      );
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(process.stdin, "isTTY", originalDescriptor);
+      } else {
+        delete (process.stdin as { isTTY?: boolean }).isTTY;
+      }
+    }
   });
 
   test("passes dry-run as non-interactive into preflight", async () => {
     await runWizard(makeOptions({ dryRun: true, yes: false }));
 
     expect(resolveInitContextSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ dryRun: true, yes: true })
+      expect.objectContaining({ dryRun: true, yes: true }),
+      expect.anything()
     );
-    expect(logWarnSpy).toHaveBeenCalled();
+    expect(lastWarn()).toContain("Dry-run");
+  });
+
+  test("uses rich welcome screen when available", async () => {
+    const { ui, calls, respond } = createMockUI({ welcome: true });
+    respond.welcome("continue");
+    useMockUI(ui, calls);
+
+    await forceStdinTty(() =>
+      runWizard(
+        makeOptions({
+          yes: false,
+          features: ["errorMonitoring", "performanceMonitoring"],
+          org: "bete-dev",
+          project: "nextjs",
+        })
+      )
+    );
+
+    const welcome = calls.find((call) => call.kind === "welcome");
+    expect(welcome).toBeDefined();
+    if (welcome?.kind !== "welcome") {
+      throw new Error("expected welcome call");
+    }
+    expect(welcome.options.title).toBe("Sentry Init");
+    expect(welcome.options.body).toContain(
+      "We'll use AI to inspect this project and configure Sentry."
+    );
+    expect(welcome.options.punchline).toContain("use AI for setup");
+    expect(getUISpy.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        initialWelcome: expect.objectContaining({
+          title: "Sentry Init",
+        }),
+      })
+    );
+    expect(
+      calls.some((call) => call.kind === "select" || call.kind === "confirm")
+    ).toBe(false);
+    const introOn = calls.findIndex(
+      (call) => call.kind === "setIntroMode" && call.enabled
+    );
+    const introOff = calls.findIndex(
+      (call) => call.kind === "setIntroMode" && !call.enabled
+    );
+    expect(introOn).toBeGreaterThanOrEqual(0);
+    expect(introOff).toBeGreaterThanOrEqual(0);
+    expect(spinnerMock.message.mock.calls).toContainEqual([
+      "Connecting to wizard...",
+    ]);
+    expect(formatResultSpy).toHaveBeenCalled();
+  });
+
+  test("does not log a second AI disclaimer after welcome", async () => {
+    const { ui, calls, respond } = createMockUI({ welcome: true });
+    respond.welcome("continue");
+    useMockUI(ui, calls);
+
+    await forceStdinTty(() =>
+      runWizard(
+        makeOptions({
+          yes: false,
+          features: ["errorMonitoring"],
+          org: "bete-dev",
+          project: "nextjs",
+        })
+      )
+    );
+
+    const infoMessages = calls
+      .filter((call) => call.kind === "log.info")
+      .map((call) => call.message);
+    expect(
+      infoMessages.some((message) => message.includes("This wizard uses AI"))
+    ).toBe(false);
+    expect(
+      infoMessages.some((message) => message.includes("For manual setup"))
+    ).toBe(false);
+  });
+
+  test("cancels cleanly from rich welcome screen", async () => {
+    const { ui, calls, respond } = createMockUI({ welcome: true });
+    respond.welcome(CANCELLED);
+    useMockUI(ui, calls);
+
+    await forceStdinTty(() => runWizard(makeOptions({ yes: false })));
+
+    expect(process.exitCode).toBe(0);
+    expect(lastCancelMessage()).toBe("Setup cancelled.");
+    expect(lastFeedbackOutcome()).toBe("cancelled");
+    expect(getWorkflowSpy).not.toHaveBeenCalled();
+  });
+
+  test("falls back to generic continue prompt without rich welcome", async () => {
+    const { ui, calls, respond } = createMockUI();
+    respond.select("continue");
+    useMockUI(ui, calls);
+
+    await forceStdinTty(() => runWizard(makeOptions({ yes: false })));
+
+    const select = calls.find((call) => call.kind === "select");
+    expect(select).toBeDefined();
+    if (select?.kind !== "select") {
+      throw new Error("expected select call");
+    }
+    expect(select.message).toContain("experimental");
+    expect(formatResultSpy).toHaveBeenCalled();
   });
 
   test("stops before workflow creation when preflight returns null", async () => {
@@ -279,7 +460,8 @@ describe("runWizard", () => {
 
     await runWizard(makeOptions());
 
-    expect(cancelSpy).toHaveBeenCalledWith("Setup cancelled.");
+    expect(lastCancelMessage()).toBe("Setup cancelled.");
+    expect(lastFeedbackOutcome()).toBe("cancelled");
     expect(getWorkflowSpy).not.toHaveBeenCalled();
   });
 
@@ -318,7 +500,7 @@ describe("runWizard", () => {
     }
 
     expect(formatBannerSpy).toHaveBeenCalled();
-    expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining("BANNER"));
+    expect(mockUICalls).toContainEqual({ kind: "banner", art: "BANNER" });
   });
 
   test("dispatches tool payloads through the registry", async () => {
@@ -368,7 +550,8 @@ describe("runWizard", () => {
         kind: "confirm",
         prompt: "Continue?",
       },
-      makeContext()
+      makeContext(),
+      expect.anything()
     );
   });
 
@@ -444,7 +627,8 @@ describe("runWizard", () => {
     await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
     expect(spinnerMock.stop).toHaveBeenCalledWith("Error", 1);
-    expect(cancelSpy).toHaveBeenCalledWith("Setup failed");
+    expect(lastCancelMessage()).toBe("Setup failed");
+    expect(lastFeedbackOutcome()).toBe("failed");
   });
 
   test("tears down forwarding and stops the spinner on cancellation", async () => {
@@ -467,6 +651,8 @@ describe("runWizard", () => {
 
     expect(process.exitCode).toBe(0);
     expect(spinnerMock.stop).toHaveBeenCalledWith("Cancelled", 0);
+    expect(lastCancelMessage()).toBe("Setup cancelled.");
+    expect(lastFeedbackOutcome()).toBe("cancelled");
   });
 
   test("tears down forwarding when a WizardError is rethrown from a tool", async () => {
@@ -494,9 +680,11 @@ describe("runWizard", () => {
     await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
     expect(spinnerMock.stop).toHaveBeenCalledWith("Error", 1);
+    expect(lastCancelMessage()).toBe("Setup failed");
+    expect(lastFeedbackOutcome()).toBe("failed");
   });
 
-  test("shows a multiline tree while reading files and then analyzing them", async () => {
+  test("shows count-based messages while reading and analyzing files", async () => {
     mockStartResult = {
       status: "suspended",
       suspended: [["detect-platform"]],
@@ -517,23 +705,11 @@ describe("runWizard", () => {
 
     await runWizard(makeOptions());
 
-    const messages = spinnerMock.message.mock.calls.map((call: string[]) =>
-      call[0]
-        ?.replace(
-          // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escape sequences
-          /\x1b\[[^m]*m/g,
-          ""
-        )
-        // Normalize whitespace left behind by code span padding
-        .replace(/[ \t]+$/gm, "")
-        .replace(/ {2,}/g, " ")
+    const messages = spinnerMock.message.mock.calls.map(
+      (call: string[]) => call[0]
     );
-    expect(messages).toContain(
-      "Reading files...\n├─ ● settings.py\n└─ ● urls.py"
-    );
-    expect(messages).toContain(
-      "Analyzing files...\n├─ ✓ settings.py\n└─ ✓ urls.py"
-    );
+    expect(messages).toContain("Reading 2 files...");
+    expect(messages).toContain("Analyzing 2 files...");
   });
 
   test("passes precomputed dirListing/fileCache/existingSentry via initialState, not inputData", async () => {
