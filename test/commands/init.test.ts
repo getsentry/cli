@@ -258,6 +258,13 @@ describe("init command func", () => {
       expect(capturedArgs?.yes).toBe(true);
       expect(runWizardSpy).toHaveBeenCalledTimes(1);
     });
+
+    test("--dry-run bypasses non-TTY validation without --yes or --features", async () => {
+      const ctx = makeContext("/projects/app", { stdinTTY: false });
+      await func.call(ctx, { yes: false, "dry-run": true });
+      expect(capturedArgs?.dryRun).toBe(true);
+      expect(runWizardSpy).toHaveBeenCalledTimes(1);
+    });
   });
 
   // ── No arguments ──────────────────────────────────────────────────────

@@ -188,6 +188,12 @@ function validateNonInteractiveInit(
     return;
   }
 
+  // --dry-run implies non-interactive mode and forces yes=true in the
+  // wizard runner, so it doesn't need explicit --yes or --features.
+  if (flags["dry-run"]) {
+    return;
+  }
+
   if (flags.yes && features && features.length > 0) {
     return;
   }
