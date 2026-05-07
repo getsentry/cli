@@ -17,6 +17,8 @@ Query aggregate event data (Explore)
 
 **Flags:**
 - `-F, --field <value>... - API field or aggregate (repeatable). E.g., title, "count()", "p50(transaction.duration)"`
+- `-m, --metric <value> - Metric name for --dataset metrics. Auto-resolves type/unit via API.`
+- `--agg <value> - Aggregation for --metric (sum, avg, count, p50, p95, etc.) - (default: "sum")`
 - `-d, --dataset <value> - Dataset to query (errors, spans, metrics, logs, replays) - (default: "errors")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-s, --sort <value> - Sort field (prefix with - for desc, e.g., "-count()")`
@@ -58,18 +60,18 @@ sentry explore my-org/cli -F span.op -F "count()" \
   --dataset spans --sort "-count()"
 
 # Sum a custom metric (e.g., LLM token usage) across an org
-sentry explore my-org/ -F "sum(value,llm.token_usage,distribution,none)" \
-  --dataset metrics --period 7d
+sentry explore my-org/ -m llm.token_usage --dataset metrics --period 7d
 
 # Break down by a tag column (e.g., model name)
 sentry explore my-org/seer -F gen_ai.request.model \
+  -m llm.token_usage --dataset metrics --period 7d
+
+# Use a different aggregation (default is sum)
+sentry explore my-org/ -m cache.hit_rate --agg avg --dataset metrics
+
+sentry explore my-org/ \
   -F "sum(value,llm.token_usage,distribution,none)" \
   --dataset metrics --period 7d
-
-# Average a distribution metric
-sentry explore my-org/cli -F transaction \
-  -F "avg(value,http.response_time,distribution,millisecond)" \
-  --dataset metrics --period 24h
 
 # Log severity counts in the last hour
 sentry explore my-org/cli -F severity -F "count()" \
