@@ -1651,8 +1651,6 @@ function MultiSelectPromptOptionRow({
   );
 }
 
-// ── Mount helper ────────────────────────────────────────────────
-
 /**
  * Mount the wizard App component via Ink and return the Ink instance.
  *

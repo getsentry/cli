@@ -162,25 +162,21 @@ function severityForStopCode(code: SpinnerExitCode): LogSeverity {
 }
 
 /**
- * Embed `ink-app.tsx` as a Bun-compile file resource.
+ * Embed the Ink App sidecar as a Bun-compile file resource.
  *
- * `with { type: "file" }` tells Bun.compile to copy the raw .tsx
- * bytes into the binary's virtual filesystem and replace the import
- * specifier with the embedded path string at runtime. The
- * `text-import-plugin.ts` polyfill in `script/build.ts` mirrors this
- * for the esbuild step (copies the file alongside the bundle and
- * leaves the import external).
+ * `with { type: "file" }` tells Bun.compile to embed the file into
+ * the binary's virtual filesystem (`/$bunfs/root/`) and replace the
+ * import with the embedded path string at runtime. The
+ * `text-import-plugin` in `script/build.ts` intercepts this during
+ * esbuild: it pre-bundles the .tsx source into self-contained JS
+ * (stripping TypeScript, inlining local deps and npm packages,
+ * injecting a `createRequire` banner for CJS deps), then marks the
+ * import external so Bun.compile picks up the resulting .js file.
  *
- * Why this indirection? `ink-app.tsx` statically imports `ink`,
- * `ink-spinner`, and `react`. When Bun.compile bundles those
- * packages through its CJS-wrapping path the output mangles their
- * dev-build IIFEs (it injects `__promiseAll` runtime
- * helpers in positions the wrappers don't tolerate, producing a
- * `SyntaxError: Unexpected identifier '__promiseAll'` at startup
- * inside e.g. `react/cjs/react-jsx-runtime.development.js` or
- * `ink/build/parse-keypress.js`). Embedding the .tsx as raw bytes
- * pushes resolution to Bun's runtime — which doesn't have the bug
- * — at the cost of a small first-invocation parse overhead.
+ * Why pre-bundle? Bun's `/$bunfs/` virtual FS uses a JavaScript
+ * parser, not TypeScript — raw .tsx fails on `import { type Foo }`.
+ * The `/$bunfs/` environment also has no `node_modules`, so all
+ * deps (ink, react, local modules) must be inlined.
  *
  * The npm/Node distribution never reaches `createInkUI()` (the
  * factory routes there only on the Bun binary because Ink uses
