@@ -786,11 +786,18 @@ export const exploreCommand = buildListCommand("explore", {
     const hasMore = !!nextCursor;
 
     const baseTarget = project ? `${org}/${project}` : `${org}/`;
+    const hintFlags = { ...flags, dataset };
     const nav = paginationHint({
       hasPrev,
       hasMore,
-      prevHint: appendFlagHints(`sentry explore ${baseTarget} -c prev`, flags),
-      nextHint: appendFlagHints(`sentry explore ${baseTarget} -c next`, flags),
+      prevHint: appendFlagHints(
+        `sentry explore ${baseTarget} -c prev`,
+        hintFlags
+      ),
+      nextHint: appendFlagHints(
+        `sentry explore ${baseTarget} -c next`,
+        hintFlags
+      ),
     });
 
     const hint = buildResultHint(response.data.length, nav);
