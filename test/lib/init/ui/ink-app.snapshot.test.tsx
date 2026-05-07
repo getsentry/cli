@@ -180,12 +180,29 @@ describe("Ink App snapshot", () => {
 
     const frame = (await renderApp(store, 120)).allOutput();
     expect(frame).toMatch(LEARN_HEADER_RE);
+    expect(frame).toContain("App → SDK → Sentry → Issue");
+    expect(frame).toContain("The SDK runs in your app.");
+    expect(frame).toContain("become issues with the clues");
+    expect(frame).toContain("1/7");
     expect(frame).toMatch(TASKS_HEADER_RE);
     expect(frame).toContain("Hello world");
     expect(frame).toContain("Working\u2026");
     expect(frame).toMatch(STATUS_TAB_RE);
     expect(frame).toMatch(FILES_TAB_RE);
     expect(frame).toMatch(KEYBOARD_HINT_RE);
+  });
+
+  test("renders the second learn card about debugging context", async () => {
+    const store = new WizardStore({
+      learnState: { blockIndex: 1, lineIndex: 0, complete: false },
+    });
+    store.appendLog("info", "Reading project context");
+
+    const frame = (await renderApp(store, 120)).allOutput();
+    expect(frame).toContain("Debug With Context");
+    expect(frame).toContain("Issue → Trace → Replay → Fix");
+    expect(frame).toContain("That context points to the fix.");
+    expect(frame).toContain("2/7");
   });
 
   test("renders single-column layout at narrow width", async () => {
@@ -363,7 +380,7 @@ describe("Ink App snapshot", () => {
         {
           value: "performanceMonitoring",
           label: "Tracing",
-          hint: "Capture request timing and flow",
+          hint: "See request paths, spans, and bottlenecks",
         },
         { value: "sourceMaps", label: "Source Maps" },
       ],
@@ -376,7 +393,7 @@ describe("Ink App snapshot", () => {
     const plainFrame = stripAnsi(frame);
     expect(frame).toContain("Session Replay");
     expect(frame).toContain("Tracing");
-    expect(frame).toContain("Capture request timing and flow");
+    expect(frame).toContain("See request paths, spans, and bottlenecks");
     expect(frame).toContain("Source Maps");
     expect(plainFrame).toContain("0/3");
     expect(plainFrame).not.toContain(

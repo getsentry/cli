@@ -60,17 +60,34 @@ describe("featureLabel", () => {
 
 describe("featureHint", () => {
   test("returns hint for known feature", () => {
-    expect(featureHint("errorMonitoring")).toBe("Error and crash reporting");
-    expect(featureHint("performanceMonitoring")).toBe(
-      "Capture request timing and flow"
+    expect(featureHint("errorMonitoring")).toBe(
+      "Group exceptions into issues with context"
     );
-    expect(featureHint("sessionReplay")).toBe("Visual replay of user sessions");
-    expect(featureHint("crons")).toBe("Monitor scheduled and recurring jobs");
+    expect(featureHint("performanceMonitoring")).toBe(
+      "See request paths, spans, and bottlenecks"
+    );
+    expect(featureHint("sessionReplay")).toBe(
+      "Replay sessions linked to errors"
+    );
+    expect(featureHint("profiling")).toBe(
+      "Find CPU-heavy functions in production"
+    );
+    expect(featureHint("logs")).toBe("Search logs beside errors and traces");
+    expect(featureHint("metrics")).toBe("Track custom measurements over time");
+    expect(featureHint("sourceMaps")).toBe(
+      "Turn minified stacks into your source"
+    );
+    expect(featureHint("crons")).toBe(
+      "Alert on failed or missed scheduled jobs"
+    );
     expect(featureHint("aiMonitoring")).toBe(
-      "Track AI model calls, latency, and failures"
+      "Track AI calls, latency, cost, and failures"
     );
     expect(featureHint("userFeedback")).toBe(
-      "Collect in-app user feedback and reports"
+      "Collect user reports with issue context"
+    );
+    expect(featureHint("reactFeatures")).toBe(
+      "Add React-specific context and integrations"
     );
   });
 

@@ -78,7 +78,7 @@ type PendingWelcome = {
 };
 
 /** Tip rotation cadence in the sidebar — slow enough to read each tip. */
-const TIP_ROTATE_INTERVAL_MS = 8000;
+const TIP_ROTATE_INTERVAL_MS = 15_000;
 
 /** Sentry brand purple — matches `src/lib/banner.ts`. */
 const BANNER_GRADIENT = [

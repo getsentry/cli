@@ -37,41 +37,41 @@ export function abortIfCancelled<T>(value: T): Exclude<T, symbol> {
 const FEATURE_INFO: Record<string, { label: string; hint: string }> = {
   errorMonitoring: {
     label: "Error Monitoring",
-    hint: "Error and crash reporting",
+    hint: "Group exceptions into issues with context",
   },
   performanceMonitoring: {
     label: "Tracing",
-    hint: "Capture request timing and flow",
+    hint: "See request paths, spans, and bottlenecks",
   },
   sessionReplay: {
     label: "Session Replay",
-    hint: "Visual replay of user sessions",
+    hint: "Replay sessions linked to errors",
   },
   profiling: {
     label: "Profiling",
-    hint: "Code-level performance insights",
+    hint: "Find CPU-heavy functions in production",
   },
-  logs: { label: "Logging", hint: "Structured log ingestion" },
-  metrics: { label: "Metrics", hint: "Track business metrics" },
+  logs: { label: "Logging", hint: "Search logs beside errors and traces" },
+  metrics: { label: "Metrics", hint: "Track custom measurements over time" },
   sourceMaps: {
     label: "Source Maps",
-    hint: "See original source code in production errors",
+    hint: "Turn minified stacks into your source",
   },
   crons: {
     label: "Crons",
-    hint: "Monitor scheduled and recurring jobs",
+    hint: "Alert on failed or missed scheduled jobs",
   },
   aiMonitoring: {
     label: "AI Monitoring",
-    hint: "Track AI model calls, latency, and failures",
+    hint: "Track AI calls, latency, cost, and failures",
   },
   userFeedback: {
     label: "User Feedback",
-    hint: "Collect in-app user feedback and reports",
+    hint: "Collect user reports with issue context",
   },
   reactFeatures: {
     label: "React Features",
-    hint: "Redux, component tracking, source maps, and integrations",
+    hint: "Add React-specific context and integrations",
   },
 };
 
