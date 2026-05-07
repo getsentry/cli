@@ -217,21 +217,22 @@ function openFreshTtyForInk(): ReadStream | null {
 export async function createInkUI(
   opts: CreateInkUIOptions = {}
 ): Promise<InkUI> {
-  const ink = await import("ink");
-  const react = await import("react");
-  // The `?bridge=1` query string is load-bearing. Without it Bun's
-  // module loader hits a cache entry created by the static
-  // `with { type: "file" }` import above (same absolute path) and
-  // returns a synthetic `{ __esModule, default: undefined }` shape
-  // instead of evaluating the .tsx as a module — `app.App`
-  // becomes `undefined` and React throws "Element type is invalid".
-  // The query string forces a distinct cache key while resolving to
-  // the same on-disk file, so the .tsx is parsed and exports
-  // populate normally. Confirmed on Bun 1.3.13 (dev) and inside
-  // Bun-compiled binaries (the `/$bunfs/…` runtime path).
-  const app = (await import(
-    `${inkAppPath}?bridge=1`
-  )) as typeof import("./ink-app.js");
+  // Import the Ink App sidecar from the embedded file. The
+  // `with { type: "file" }` import above gives us the virtual path
+  // (e.g. `/$bunfs/root/ink-app-xxx.js`). The text-import-plugin
+  // pre-bundles the .tsx source into self-contained JS at build
+  // time, so the embedded file includes ink, react, and all local
+  // deps — no external resolution needed at runtime.
+  //
+  // NOTE: Do NOT append a query string (e.g. `?bridge=1`) to the
+  // path. Bun's `/$bunfs/` virtual filesystem does not support
+  // query strings — the path lookup fails with ENOENT.
+  //
+  // `mountApp()` lives inside the sidecar so it uses the same
+  // ink/react instances as the App's hooks. Importing ink/react
+  // separately in this module would create a second copy of React,
+  // causing "Invalid hook call" errors at runtime.
+  const app = (await import(inkAppPath)) as typeof import("./ink-app.js");
 
   const store = new WizardStore({
     cliVersion: CLI_VERSION,
@@ -254,20 +255,12 @@ export async function createInkUI(
   // exit cleanly).
   const freshStdin = openFreshTtyForInk();
 
-  // Ink's render returns a handle with `unmount()` and
-  // `waitUntilExit()`. We don't await `waitUntilExit` here because
-  // the wizard drives lifecycle imperatively from the runner; the
-  // dispose path calls `unmount()` directly when the workflow
-  // finishes (success or failure).
-  //
-  // `exitOnCtrlC: false` lets us route Ctrl+C through the prompt
-  // cancellation path (the SelectPrompt / MultiSelectPrompt
-  // `useInput` handlers detect `\x03` and resolve with `null`)
-  // instead of yanking the process down mid-spinner.
-  //
-  // `patchConsole: false` keeps `console.*` calls flowing to the
-  // real stdout — Sentry SDK breadcrumbs, debug logs, etc. would
-  // otherwise be swallowed by Ink's render loop.
+  // Build render options for Ink:
+  // - `exitOnCtrlC: false` lets us route Ctrl+C through the prompt
+  //   cancellation path instead of yanking the process down.
+  // - `patchConsole: false` keeps `console.*` calls flowing to the
+  //   real stdout — Sentry SDK breadcrumbs, debug logs, etc. would
+  //   otherwise be swallowed by Ink's render loop.
   const renderOptions: {
     exitOnCtrlC: boolean;
     patchConsole: boolean;
@@ -284,10 +277,7 @@ export async function createInkUI(
   // startup never shows stale layout from a prior render.
   process.stdout.write("\x1b[?1049h\x1b[2J\x1b[H");
   try {
-    const instance = ink.render(
-      react.createElement(app.App, { store }),
-      renderOptions
-    );
+    const instance = app.mountApp(store, renderOptions);
 
     return new InkUI(instance, store, freshStdin, initialWelcome);
   } catch (error) {
