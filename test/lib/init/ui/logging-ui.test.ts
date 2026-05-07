@@ -246,3 +246,74 @@ describe("LoggingUI disposal", () => {
     );
   });
 });
+
+describe("LoggingUI banner", () => {
+  test("writes art to stderr wrapped in newlines", () => {
+    const { ui, stdout, stderr } = createUI();
+    ui.banner("  ███ SENTRY ███");
+    expect(stdout()).toBe("");
+    expect(stderr()).toBe("\n  ███ SENTRY ███\n\n");
+  });
+});
+
+describe("LoggingUI summary", () => {
+  test("empty summary (no fields, no changedFiles) is a no-op", () => {
+    const { ui, stdout, stderr } = createUI();
+    ui.summary({ fields: [] });
+    expect(stdout()).toBe("");
+    expect(stderr()).toBe("");
+  });
+
+  test("fields are written as aligned key/value pairs to stdout", () => {
+    const { ui, stdout } = createUI();
+    ui.summary({
+      fields: [
+        { label: "Project", value: "my-app" },
+        { label: "Org", value: "acme" },
+        { label: "LongerLabel", value: "val" },
+      ],
+    });
+    const out = stdout();
+    expect(out).toContain("Project");
+    expect(out).toContain("my-app");
+    expect(out).toContain("LongerLabel");
+    expect(out).toContain("val");
+    // Labels padded to longest: "Project    my-app"
+    const lines = out.split("\n").filter((l) => l.trim().length > 0);
+    const projectLine = lines.find((l) => l.includes("my-app")) ?? "";
+    const longerLine = lines.find((l) => l.includes("val")) ?? "";
+    expect(projectLine.indexOf("my-app")).toBe(longerLine.indexOf("val"));
+  });
+
+  test("changedFiles section shows heading and tree", () => {
+    const { ui, stdout } = createUI();
+    ui.summary({
+      fields: [],
+      changedFiles: [
+        { path: "src/index.ts", action: "modify" },
+        { path: "sentry.config.ts", action: "create" },
+      ],
+    });
+    const out = stdout();
+    expect(out).toContain("Changed files:");
+    expect(out).toContain("index.ts");
+    expect(out).toContain("sentry.config.ts");
+  });
+
+  test("create action uses + glyph, delete uses −, modify/other uses ~", () => {
+    const { ui, stdout } = createUI();
+    ui.summary({
+      fields: [],
+      changedFiles: [
+        { path: "a.ts", action: "create" },
+        { path: "b.ts", action: "delete" },
+        { path: "c.ts", action: "modify" },
+      ],
+    });
+    const out = stdout();
+    const lines = out.split("\n").filter(Boolean);
+    expect(lines.some((l) => l.includes("+") && l.includes("a.ts"))).toBe(true);
+    expect(lines.some((l) => l.includes("−") && l.includes("b.ts"))).toBe(true);
+    expect(lines.some((l) => l.includes("~") && l.includes("c.ts"))).toBe(true);
+  });
+});

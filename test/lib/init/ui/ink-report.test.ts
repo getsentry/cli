@@ -30,7 +30,9 @@ describe("formatSuccessReport with summary fields", () => {
         ],
       })
     );
-    const lines = output.split("\n").filter((l) => l.includes("  x") || l.includes("  y"));
+    const lines = output
+      .split("\n")
+      .filter((l) => l.includes("  x") || l.includes("  y"));
     // Both lines should start with the same indentation + label block
     const shortLine = lines.find((l) => l.includes("x"));
     const longLine = lines.find((l) => l.includes("y"));
@@ -121,7 +123,10 @@ describe("formatFailureReport with error log entries", () => {
         { severity: "error", text: "Network error: connection refused" },
       ])
     );
-    const lines = output.split("\n").map((l) => l.trim()).filter(Boolean);
+    const lines = output
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
     const labelLine = lines.find((l) => l === "Network error");
     const detailLine = lines.find((l) => l === "connection refused");
     expect(labelLine).toBeDefined();
