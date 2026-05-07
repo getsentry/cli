@@ -144,10 +144,7 @@ describe("text-import-plugin file handler", () => {
     const srcDir = join(TEST_DIR, "src");
     mkdirSync(srcDir, { recursive: true });
 
-    writeFileSync(
-      join(srcDir, "helper.ts"),
-      "export const MAGIC = 999;\n"
-    );
+    writeFileSync(join(srcDir, "helper.ts"), "export const MAGIC = 999;\n");
     writeFileSync(
       join(srcDir, "mod.ts"),
       'import { MAGIC } from "./helper.js";\nexport function getMagic() { return MAGIC; }\n'
