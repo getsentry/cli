@@ -1,0 +1,6 @@
+file($name, $body) where {
+  $name <: r".*src/commands/.*/delete\.ts$",
+  $body <: contains `buildCommand($args)` as $match,
+  $body <: not contains `buildDeleteCommand($deleteArgs)`,
+  register_diagnostic(span=$match, message="Delete command files must use buildDeleteCommand() from src/lib/mutate-command.ts.")
+}

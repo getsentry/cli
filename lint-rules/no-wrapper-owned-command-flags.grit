@@ -1,0 +1,10 @@
+file($name, $body) where {
+  $name <: r".*src/commands/.*",
+  $body <: contains or {
+    `json: { kind: $kind, $rest }` as $match,
+    `fields: { kind: $kind, $rest }` as $match,
+    `"json": { kind: $kind, $rest }` as $match,
+    `"fields": { kind: $kind, $rest }` as $match
+  },
+  register_diagnostic(span=$match, message="Do not define --json or --fields in command flags. The command wrappers inject them.")
+}
