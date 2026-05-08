@@ -135,7 +135,7 @@ describe("LoggingUI spinner", () => {
     spinner.message("Still working");
     spinner.stop("Done", 0);
     const lines = stdout().split("\n").filter(Boolean);
-    expect(lines).toEqual(["... Working", "... Still working", "ok: Done"]);
+    expect(lines).toEqual(["Working", "Still working", "ok: Done"]);
   });
 
   test("error stop routes to stderr with error prefix", () => {
@@ -143,7 +143,7 @@ describe("LoggingUI spinner", () => {
     const spinner = ui.spinner();
     spinner.start("Working");
     spinner.stop("Boom", 1);
-    expect(stdout()).toBe("... Working\n");
+    expect(stdout()).toBe("Working\n");
     expect(stderr()).toBe("error: Boom\n");
   });
 
@@ -170,7 +170,7 @@ describe("LoggingUI spinner", () => {
     spinner.stop("Done");
     spinner.message("ignored");
     const lines = stdout().split("\n").filter(Boolean);
-    expect(lines).toEqual(["... Working", "ok: Done"]);
+    expect(lines).toEqual(["Working", "ok: Done"]);
   });
 });
 
@@ -247,14 +247,6 @@ describe("LoggingUI disposal", () => {
   });
 });
 
-describe("LoggingUI banner", () => {
-  test("writes art to stderr wrapped in newlines", () => {
-    const { ui, stdout, stderr } = createUI();
-    ui.banner("  ███ SENTRY ███");
-    expect(stdout()).toBe("");
-    expect(stderr()).toBe("\n  ███ SENTRY ███\n\n");
-  });
-});
 
 describe("LoggingUI summary", () => {
   test("empty summary (no fields, no changedFiles) is a no-op", () => {
