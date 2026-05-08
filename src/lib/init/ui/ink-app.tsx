@@ -17,7 +17,7 @@
  *   │                           │  ╰────────────────────────╯ │
  *   │  ● Status   Files                                       │
  *   │  ←→ switch tab                                          │
- *   │  Sentry                         For feedback run: ...   │
+ *   │  Sentry                         $ sentry cli feedback... │
  *   └─────────────────────────────────────────────────────────┘
  *
  * Tab 1 (Status): Banner + logs + spinner + prompts + summary
@@ -112,8 +112,7 @@ const DEFAULT_WELCOME_OPTIONS = {
   ],
   punchline: "Continue to let Sentry use AI for setup.",
 };
-const FEEDBACK_BANNER_TEXT =
-  'For feedback run: sentry cli feedback "what worked or broke"';
+const FEEDBACK_BANNER_TEXT = '$ sentry cli feedback "what worked or broke"';
 const FEEDBACK_BANNER_FG = "#FFFFFF";
 
 function getIntroTopPadding(rows: number): number {
@@ -134,7 +133,8 @@ function formatBannerBrand(cliVersion: string | null): string {
   return cliVersion ? `Sentry v${cliVersion}` : "Sentry";
 }
 
-function formatFeedbackBanner(
+/** @internal Exported for testing. */
+export function formatFeedbackBanner(
   width: number,
   cliVersion: string | null
 ): string {
@@ -144,14 +144,18 @@ function formatFeedbackBanner(
     return left.slice(0, Math.max(0, width));
   }
 
-  const maxRight = Math.max(0, width - left.length - 1);
+  const rightPadding = 1;
+  const maxRight = Math.max(0, width - left.length - rightPadding - 1);
   const clippedRight = truncateForBanner(FEEDBACK_BANNER_TEXT, maxRight);
   if (clippedRight.length === 0) {
     return left.padEnd(width, " ");
   }
 
-  const spacerWidth = Math.max(1, width - left.length - clippedRight.length);
-  return `${left}${" ".repeat(spacerWidth)}${clippedRight}`;
+  const spacerWidth = Math.max(
+    1,
+    width - left.length - clippedRight.length - rightPadding
+  );
+  return `${left}${" ".repeat(spacerWidth)}${clippedRight}${" ".repeat(rightPadding)}`;
 }
 
 // ────────────────────────────── App entry ─────────────────────────────
