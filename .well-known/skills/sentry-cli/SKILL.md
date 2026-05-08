@@ -1,6 +1,6 @@
 ---
 name: sentry-cli
-version: 0.31.0
+version: 0.32.0
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 requires:
   bins: ["sentry"]
@@ -281,7 +281,7 @@ Authenticate with Sentry
 - `sentry auth refresh` — Refresh your authentication token
 - `sentry auth status` — View authentication status
 - `sentry auth token` — Print the stored authentication token
-- `sentry auth whoami` — Show the currently authenticated user
+- `sentry auth whoami` — Show the currently authenticated identity
 
 → Full flags and examples: `references/auth.md`
 
@@ -325,7 +325,7 @@ Manage Sentry issues
 
 View and list Sentry events
 
-- `sentry event view <org/project/event-id...>` — View details of a specific event
+- `sentry event view <org/project/event-id...>` — View details of one or more events
 - `sentry event list <issue>` — List events for an issue
 
 → Full flags and examples: `references/event.md`
@@ -362,6 +362,15 @@ Manage Sentry dashboards
 - `sentry dashboard widget delete <org/project/dashboard...>` — Delete a widget from a dashboard
 
 → Full flags and examples: `references/dashboard.md`
+
+### Replay
+
+Search and inspect Session Replays
+
+- `sentry replay list <org/project>` — List recent Session Replays
+- `sentry replay view <replay-id-or-url...>` — View a Session Replay
+
+→ Full flags and examples: `references/replay.md`
 
 ### Release
 

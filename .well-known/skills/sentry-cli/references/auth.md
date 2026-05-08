@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-auth
-version: 0.31.0
+version: 0.32.0
 description: Authenticate with Sentry
 requires:
   bins: ["sentry"]
@@ -88,7 +88,7 @@ sentry auth token
 
 ### `sentry auth whoami`
 
-Show the currently authenticated user
+Show the currently authenticated identity
 
 **Flags:**
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
