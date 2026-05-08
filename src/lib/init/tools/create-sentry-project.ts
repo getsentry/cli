@@ -1,4 +1,5 @@
 import { createProjectWithDsn } from "../../api-client.js";
+import { ApiError } from "../../errors.js";
 import { resolveOrCreateTeam } from "../../resolve-team.js";
 import { slugify } from "../../utils.js";
 import { tryGetExistingProjectData } from "../existing-project.js";
@@ -72,15 +73,30 @@ export async function createSentryProject(
       };
     }
 
-    const { project, dsn, url } = await createProjectWithDsn(
-      context.org,
-      teamSlug,
-      {
+    let createdProject: Awaited<ReturnType<typeof createProjectWithDsn>>;
+    try {
+      createdProject = await createProjectWithDsn(context.org, teamSlug, {
         name,
         platform: payload.params.platform,
+      });
+    } catch (error) {
+      // Platform slug rejected by the API — retry without it. The platform
+      // label is cosmetic: the wizard installs the correct SDK and generates
+      // the right code regardless of the project's platform tag.
+      if (
+        error instanceof ApiError &&
+        error.status === 400 &&
+        error.detail?.includes('"platform"')
+      ) {
+        createdProject = await createProjectWithDsn(context.org, teamSlug, {
+          name,
+        });
+      } else {
+        throw error;
       }
-    );
+    }
 
+    const { project, dsn, url } = createdProject;
     return {
       ok: true,
       data: {

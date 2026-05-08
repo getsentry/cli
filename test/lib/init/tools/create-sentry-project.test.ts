@@ -193,6 +193,45 @@ describe("createSentryProject", () => {
     expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
   });
 
+  test("retries without platform when API rejects the platform slug", async () => {
+    getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
+    createProjectWithDsnSpy
+      .mockRejectedValueOnce(
+        new ApiError(
+          "Failed to create project: 400 Bad Request",
+          400,
+          '{"platform":["Invalid platform"]}'
+        )
+      )
+      .mockResolvedValueOnce({
+        project: { id: "42", slug: "my-app", name: "my-app" } as any,
+        dsn: "https://abc@o1.ingest.sentry.io/42",
+        url: "https://sentry.io/settings/acme/projects/my-app/",
+      });
+
+    const result = await createSentryProject(
+      makePayload({ platform: "javascript-hono" }),
+      { dryRun: false, org: "acme", team: "platform", project: undefined }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(createProjectWithDsnSpy).toHaveBeenCalledTimes(2);
+    // First call with the original (rejected) platform
+    expect(createProjectWithDsnSpy).toHaveBeenNthCalledWith(
+      1,
+      "acme",
+      "platform",
+      expect.objectContaining({ platform: "javascript-hono" })
+    );
+    // Retry without platform
+    expect(createProjectWithDsnSpy).toHaveBeenNthCalledWith(
+      2,
+      "acme",
+      "platform",
+      expect.not.objectContaining({ platform: expect.anything() })
+    );
+  });
+
   test("resolves the team at project creation time when preflight deferred it", async () => {
     getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
 
