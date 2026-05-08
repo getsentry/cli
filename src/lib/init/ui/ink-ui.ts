@@ -213,22 +213,25 @@ function openFreshTtyForInk(): ReadStream | null {
 export async function createInkUI(
   opts: CreateInkUIOptions = {}
 ): Promise<InkUI> {
-  // Import the Ink App sidecar from the embedded file. The
-  // `with { type: "file" }` import above gives us the virtual path
-  // (e.g. `/$bunfs/root/ink-app-xxx.js`). The text-import-plugin
-  // pre-bundles the .tsx source into self-contained JS at build
-  // time, so the embedded file includes ink, react, and all local
-  // deps — no external resolution needed at runtime.
+  // Import the Ink App sidecar. In compiled binaries the path
+  // points to `/$bunfs/root/ink-app-xxx.js` (pre-bundled by
+  // text-import-plugin). In dev mode it's the raw filesystem path
+  // to `ink-app.tsx`.
   //
-  // NOTE: Do NOT append a query string (e.g. `?bridge=1`) to the
-  // path. Bun's `/$bunfs/` virtual filesystem does not support
-  // query strings — the path lookup fails with ENOENT.
+  // Query-string cache-bust: Bun's module loader caches the
+  // `with { type: "file" }` import result (a path string) under
+  // the same specifier key. A bare `await import(inkAppPath)` in
+  // dev mode returns `{ default: "/abs/path" }` instead of the
+  // module's actual exports. Appending `?bridge=1` forces a
+  // distinct cache key so the .tsx is evaluated as a module.
   //
-  // `mountApp()` lives inside the sidecar so it uses the same
-  // ink/react instances as the App's hooks. Importing ink/react
-  // separately in this module would create a second copy of React,
-  // causing "Invalid hook call" errors at runtime.
-  const app = (await import(inkAppPath)) as typeof import("./ink-app.js");
+  // In compiled binaries the path lives under `/$bunfs/` which
+  // does NOT support query strings (ENOENT). There the cache
+  // collision doesn't occur because Bun.compile resolves the
+  // `with { type: "file" }` import differently.
+  const isEmbedded = inkAppPath.startsWith("/$bunfs/");
+  const importPath = isEmbedded ? inkAppPath : `${inkAppPath}?bridge=1`;
+  const app = (await import(importPath)) as typeof import("./ink-app.js");
 
   const store = new WizardStore({
     cliVersion: CLI_VERSION,
