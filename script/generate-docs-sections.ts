@@ -127,13 +127,20 @@ function isStandaloneCommand(route: RouteInfo): boolean {
 
 /**
  * Get subcommand names for a route group (e.g., "list, view, create").
- * Extracts the last path segment from each command's path.
+ * Preserves nested subcommands as "parent child" so route groups do not
+ * collapse multiple commands to the same final segment.
  */
 function getSubcommandNames(route: RouteInfo): string[] {
-  return route.commands.map((cmd) => {
-    const parts = cmd.path.split(" ");
-    return parts.at(-1) ?? route.name;
-  });
+  const prefix = `sentry ${route.name} `;
+  return Array.from(
+    new Set(
+      route.commands.map((cmd) =>
+        cmd.path.startsWith(prefix)
+          ? cmd.path.slice(prefix.length)
+          : (cmd.path.split(" ").at(-1) ?? route.name)
+      )
+    )
+  );
 }
 
 /**

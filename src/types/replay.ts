@@ -323,6 +323,259 @@ export const ReplayActivityEventSchema = z
   })
   .describe("Summarized replay activity event");
 
+export const REPLAY_EVENT_KINDS = [
+  "navigation",
+  "click",
+  "tap",
+  "input",
+  "focus",
+  "blur",
+  "scroll",
+  "viewport",
+  "mutation",
+  "dom-snapshot",
+  "breadcrumb",
+  "network",
+  "console",
+  "error",
+  "span",
+  "web-vital",
+  "memory",
+  "video",
+  "mobile",
+  "unknown",
+] as const;
+
+/** Normalized replay event extracted from rrweb or Sentry custom frames. */
+export const ReplayEventSchema = z
+  .object({
+    replayId: z.string().describe("Replay ID"),
+    segmentIndex: z.number().describe("Zero-based recording segment index"),
+    frameIndex: z.number().describe("Zero-based frame index within segment"),
+    offsetMs: z
+      .number()
+      .nullable()
+      .describe("Milliseconds from replay start to the event"),
+    timestamp: z
+      .string()
+      .nullable()
+      .describe("Event timestamp as ISO 8601 when available"),
+    kind: z.enum(REPLAY_EVENT_KINDS).describe("Normalized event kind"),
+    category: z.string().describe("Broad event category"),
+    label: z.string().nullable().optional().describe("Short event label"),
+    message: z.string().nullable().optional().describe("Message or summary"),
+    url: z.string().nullable().optional().describe("Current or target URL"),
+    urlPath: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Parsed URL pathname when available"),
+    urlQuery: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Parsed URL query string when available"),
+    selector: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("CSS selector or target selector when available"),
+    nodeId: z
+      .union([z.string(), z.number()])
+      .nullable()
+      .optional()
+      .describe("rrweb node ID when available"),
+    rawType: z.string().nullable().optional().describe("Source frame type"),
+    rawSource: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Source frame subtype"),
+    data: z
+      .record(z.unknown())
+      .optional()
+      .describe("Kind-specific normalized fields"),
+    raw: z
+      .unknown()
+      .optional()
+      .describe("Raw source frame, only present when requested"),
+  })
+  .describe("Normalized replay event");
+
+export const REPLAY_FRICTION_SIGNAL_KINDS = [
+  "indexed_error",
+  "indexed_warning",
+  "rage_click",
+  "dead_click",
+  "repeated_click",
+  "long_wait_after_click",
+  "quick_bounce",
+  "slow_navigation",
+  "slow_resource",
+  "network_error",
+  "console_error",
+  "error_event",
+  "route_churn",
+] as const;
+
+export const ReplayEventCountsSchema = z
+  .object({
+    total: z.number().describe("Total normalized event count"),
+    navigations: z.number().describe("Navigation event count"),
+    clicks: z.number().describe("Click event count"),
+    taps: z.number().describe("Tap event count"),
+    inputs: z.number().describe("Input event count"),
+    focuses: z.number().describe("Focus event count"),
+    blurs: z.number().describe("Blur event count"),
+    scrolls: z.number().describe("Scroll event count"),
+    network: z.number().describe("Network event count"),
+    console: z.number().describe("Console event count"),
+    errors: z.number().describe("Error event count"),
+    spans: z.number().describe("Performance span event count"),
+  })
+  .describe("Replay event counts");
+
+export const ReplayRouteSummarySchema = z
+  .object({
+    path: z.string().describe("Route pathname"),
+    url: z
+      .string()
+      .nullable()
+      .describe("Representative URL for this route visit"),
+    enteredAtOffsetMs: z
+      .number()
+      .nullable()
+      .describe("Offset where this route visit started"),
+    leftAtOffsetMs: z
+      .number()
+      .nullable()
+      .describe("Offset where this route visit ended"),
+    durationMs: z
+      .number()
+      .nullable()
+      .describe("Duration of this route visit when bounded"),
+    nextPath: z
+      .string()
+      .nullable()
+      .describe("Next route pathname after this visit"),
+    firstOffsetMs: z
+      .number()
+      .nullable()
+      .describe("First observed event offset for this route visit"),
+    lastOffsetMs: z
+      .number()
+      .nullable()
+      .describe("Last observed event offset for this route visit"),
+    eventCount: z
+      .number()
+      .describe("Number of normalized events in this route visit"),
+    counts: ReplayEventCountsSchema.describe(
+      "Normalized event counts within this route visit"
+    ),
+    hadUserInteraction: z
+      .boolean()
+      .describe("Whether this route visit had click, tap, input, or scroll"),
+  })
+  .describe("Replay route visit summary");
+
+export const ReplayTimingSummarySchema = z
+  .object({
+    firstPaintMs: z.number().nullable().describe("First paint offset"),
+    firstContentfulPaintMs: z
+      .number()
+      .nullable()
+      .describe("First contentful paint offset"),
+    largestContentfulPaintMs: z
+      .number()
+      .nullable()
+      .describe("Largest contentful paint offset"),
+    navigationDurationMs: z
+      .number()
+      .nullable()
+      .describe("Navigation span duration when available"),
+  })
+  .describe("Replay timing summary");
+
+export const ReplayRecordingStatsSchema = z
+  .object({
+    segmentCount: z
+      .number()
+      .nullable()
+      .describe("Downloaded recording segment count when available"),
+    frameCount: z
+      .number()
+      .nullable()
+      .describe("Downloaded raw recording frame count when available"),
+    normalizedEventCount: z
+      .number()
+      .describe("Normalized event count extracted from the recording"),
+    focusedEventCount: z
+      .number()
+      .nullable()
+      .describe("Normalized event count after the optional focus path"),
+  })
+  .describe("Replay recording parser stats");
+
+export const ReplayFrictionSignalSchema = z
+  .object({
+    kind: z
+      .enum(REPLAY_FRICTION_SIGNAL_KINDS)
+      .describe("Detected friction signal kind"),
+    severity: z.enum(["low", "medium", "high"]).describe("Heuristic severity"),
+    offsetMs: z
+      .number()
+      .nullable()
+      .describe("Primary signal offset when available"),
+    url: z.string().nullable().optional().describe("URL at the signal"),
+    urlPath: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Route path at the signal"),
+    message: z.string().describe("Human-readable signal summary"),
+    evidence: z
+      .array(ReplayEventSchema)
+      .describe("Nearby normalized events supporting the signal"),
+  })
+  .describe("Replay friction signal");
+
+export const ReplaySummaryOutputSchema = z
+  .object({
+    replayId: z.string().describe("Replay ID"),
+    org: z.string().describe("Organization slug"),
+    project: z.string().nullable().optional().describe("Project slug"),
+    platform: z.string().nullable().optional().describe("Replay platform"),
+    sdkName: z.string().nullable().optional().describe("Replay SDK name"),
+    sdkVersion: z.string().nullable().optional().describe("Replay SDK version"),
+    replayType: z.string().nullable().optional().describe("Replay type"),
+    startedAt: z.string().nullable().optional().describe("Replay start time"),
+    durationSeconds: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Replay duration in seconds"),
+    entryUrl: z.string().nullable().describe("First replay URL"),
+    exitUrl: z.string().nullable().describe("Last replay URL"),
+    focusPath: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Optional route path used to focus the summary"),
+    counts: ReplayEventCountsSchema.describe("Normalized event counts"),
+    recording: ReplayRecordingStatsSchema.describe(
+      "Downloaded recording and parser stats"
+    ),
+    timings: ReplayTimingSummarySchema.describe("Key timing observations"),
+    routes: z.array(ReplayRouteSummarySchema).describe("Route timeline"),
+    signals: z
+      .array(ReplayFrictionSignalSchema)
+      .describe("Detected non-error and error friction signals"),
+    notableEvents: z
+      .array(ReplayEventSchema)
+      .describe("Representative events useful for agent narrative"),
+  })
+  .describe("Replay behavior summary");
+
 /** Related issue metadata extracted from replay-linked event IDs. */
 export const ReplayRelatedIssueSchema = z
   .object({
@@ -387,5 +640,15 @@ export type ReplayListResponse = z.infer<typeof ReplayListResponseSchema>;
 export type ReplayDetailsResponse = z.infer<typeof ReplayDetailsResponseSchema>;
 export type ReplayIdsByResource = z.infer<typeof ReplayIdsByResourceSchema>;
 export type ReplayActivityEvent = z.infer<typeof ReplayActivityEventSchema>;
+export type ReplayEventKind = (typeof REPLAY_EVENT_KINDS)[number];
+export type ReplayEvent = z.infer<typeof ReplayEventSchema>;
+export type ReplayFrictionSignalKind =
+  (typeof REPLAY_FRICTION_SIGNAL_KINDS)[number];
+export type ReplayRouteSummary = z.infer<typeof ReplayRouteSummarySchema>;
+export type ReplayEventCounts = z.infer<typeof ReplayEventCountsSchema>;
+export type ReplayRecordingStats = z.infer<typeof ReplayRecordingStatsSchema>;
+export type ReplayTimingSummary = z.infer<typeof ReplayTimingSummarySchema>;
+export type ReplayFrictionSignal = z.infer<typeof ReplayFrictionSignalSchema>;
+export type ReplaySummaryOutput = z.infer<typeof ReplaySummaryOutputSchema>;
 export type ReplayRelatedIssue = z.infer<typeof ReplayRelatedIssueSchema>;
 export type ReplayRelatedTrace = z.infer<typeof ReplayRelatedTraceSchema>;

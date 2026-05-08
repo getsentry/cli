@@ -30,6 +30,7 @@ describe("parseSort", () => {
     expect(parseSort("date")).toBe("-started_at");
     expect(parseSort("duration")).toBe("-duration");
     expect(parseSort("errors")).toBe("-count_errors");
+    expect(parseSort("rage")).toBe("-count_rage_clicks");
     expect(parseSort("-count_rage_clicks")).toBe("-count_rage_clicks");
   });
 
@@ -164,6 +165,70 @@ describe("listCommand.func", () => {
       cursor: undefined,
       statsPeriod: "7d",
     });
+  });
+
+  test("passes one search query through Sentry search syntax", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    listReplaysSpy.mockResolvedValue({
+      data: sampleReplays,
+      nextCursor: undefined,
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      {
+        limit: 25,
+        json: true,
+        period: parsePeriod("7d"),
+        search: "environment:production url:*signup* count_errors:>0",
+        sort: "-started_at",
+      },
+      "test-org/cli"
+    );
+
+    expect(listReplaysSpy).toHaveBeenCalledWith("test-org", {
+      environment: undefined,
+      fields: [...REPLAY_LIST_FIELDS],
+      limit: 25,
+      projectSlugs: ["cli"],
+      query: "environment:production url:*signup* count_errors:>0",
+      sort: "-started_at",
+      cursor: undefined,
+      statsPeriod: "7d",
+    });
+
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed.data).toHaveLength(1);
+    expect(parsed.data[0].id).toBe(sampleReplays[0]?.id);
+  });
+
+  test("passes large limits to the API layer for auto-pagination", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    listReplaysSpy.mockResolvedValue({
+      data: sampleReplays,
+      nextCursor: undefined,
+    });
+
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      {
+        limit: 250,
+        json: true,
+        period: parsePeriod("7d"),
+        sort: "-started_at",
+      },
+      "test-org/cli"
+    );
+
+    expect(listReplaysSpy).toHaveBeenCalledWith(
+      "test-org",
+      expect.objectContaining({ limit: 250 })
+    );
   });
 
   test("renders human output with a replay hint", async () => {

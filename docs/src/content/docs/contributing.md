@@ -53,14 +53,14 @@ cli/
 │   ├── commands/       # CLI commands
 │   │   ├── auth/        # login, logout, refresh, status, token, whoami
 │   │   ├── cli/         # defaults, feedback, fix, setup, upgrade
-│   │   ├── dashboard/   # list, view, create, add, edit, delete
+│   │   ├── dashboard/   # list, view, create, widget add, widget edit, widget delete
 │   │   ├── event/       # view, list
 │   │   ├── issue/       # list, events, explain, plan, view, resolve, unresolve, archive, merge
 │   │   ├── log/         # list, view
 │   │   ├── org/         # list, view
 │   │   ├── project/     # create, delete, list, view
 │   │   ├── release/     # list, view, create, finalize, delete, deploy, deploys, set-commits, propose-version
-│   │   ├── replay/      # list, view
+│   │   ├── replay/      # event list, list, summarize, view
 │   │   ├── repo/        # list
 │   │   ├── sourcemap/   # inject, upload
 │   │   ├── span/        # list, view

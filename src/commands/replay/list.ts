@@ -60,7 +60,7 @@ import {
 type ListFlags = {
   readonly environment?: readonly string[];
   readonly limit: number;
-  readonly query?: string;
+  readonly search?: string;
   readonly sort: ReplaySortValue;
   readonly period: TimeRange;
   readonly json: boolean;
@@ -78,14 +78,25 @@ type ReplayListResult = {
   project?: string;
 };
 
-type ReplaySortKey = "date" | "oldest" | "duration" | "errors" | "activity";
+type ReplaySortKey =
+  | "activity"
+  | "date"
+  | "dead"
+  | "duration"
+  | "errors"
+  | "oldest"
+  | "rage"
+  | "warnings";
 
 const SORT_MAP: Record<ReplaySortKey, ReplaySortValue> = {
+  activity: "-activity",
   date: "-started_at",
-  oldest: "started_at",
+  dead: "-count_dead_clicks",
   duration: "-duration",
   errors: "-count_errors",
-  activity: "-activity",
+  oldest: "started_at",
+  rage: "-count_rage_clicks",
+  warnings: "-count_warnings",
 };
 
 const DEFAULT_PERIOD = LIST_PERIOD_FLAG.default;
@@ -176,10 +187,10 @@ function formatScope(org: string, project?: string): string {
 
 function appendReplayFlags(
   base: string,
-  flags: Pick<ListFlags, "environment" | "query" | "sort" | "period">
+  flags: Pick<ListFlags, "environment" | "search" | "sort" | "period">
 ): string {
   const parts: string[] = [];
-  appendQueryHint(parts, flags.query);
+  appendQueryHint(parts, flags.search);
   appendSortHint(parts, flags.sort, DEFAULT_SORT);
   if (flags.environment && flags.environment.length > 0) {
     for (const environment of flags.environment) {
@@ -193,7 +204,7 @@ function appendReplayFlags(
 function nextPageHint(
   org: string,
   project: string | undefined,
-  flags: Pick<ListFlags, "environment" | "query" | "sort" | "period">
+  flags: Pick<ListFlags, "environment" | "search" | "sort" | "period">
 ): string {
   return appendReplayFlags(
     `sentry replay list ${formatScope(org, project)} -c next`,
@@ -204,7 +215,7 @@ function nextPageHint(
 function prevPageHint(
   org: string,
   project: string | undefined,
-  flags: Pick<ListFlags, "environment" | "query" | "sort" | "period">
+  flags: Pick<ListFlags, "environment" | "search" | "sort" | "period">
 ): string {
   return appendReplayFlags(
     `sentry replay list ${formatScope(org, project)} -c prev`,
@@ -291,7 +302,7 @@ export const listCommand = buildListCommand("replay", {
         brief: `Number of replays (${LIST_MIN_LIMIT}-${LIST_MAX_LIMIT})`,
         default: String(LIST_DEFAULT_LIMIT),
       },
-      query: {
+      search: {
         kind: "parsed",
         parse: sanitizeQuery,
         brief: "Search query (Sentry replay search syntax)",
@@ -308,7 +319,7 @@ export const listCommand = buildListCommand("replay", {
         kind: "parsed",
         parse: parseSort,
         brief:
-          "Sort by: date, oldest, duration, errors, activity, or a raw replay sort field",
+          "Sort by: date, oldest, duration, errors, warnings, rage, dead, activity, or a raw replay sort field",
         default: "date",
       },
       period: LIST_PERIOD_FLAG,
@@ -317,7 +328,7 @@ export const listCommand = buildListCommand("replay", {
       ...PERIOD_ALIASES,
       e: "environment",
       n: "limit",
-      q: "query",
+      q: "search",
       s: "sort",
     },
   },
@@ -325,7 +336,7 @@ export const listCommand = buildListCommand("replay", {
     const { cwd } = this;
     const timeRange = flags.period;
     const environment = parseReplayEnvironmentFilter(flags.environment);
-    const { query } = flags;
+    const { search } = flags;
 
     const resolved = await resolveOrgOptionalProjectFromArg(
       target,
@@ -339,7 +350,7 @@ export const listCommand = buildListCommand("replay", {
       {
         env: environment?.join(","),
         sort: flags.sort,
-        q: query,
+        q: search,
         period: serializeTimeRange(timeRange),
       }
     );
@@ -359,7 +370,7 @@ export const listCommand = buildListCommand("replay", {
           environment,
           fields: [...REPLAY_LIST_FIELDS],
           limit: flags.limit,
-          query,
+          query: search,
           projectSlugs: resolved.project ? [resolved.project] : undefined,
           sort: flags.sort,
           cursor,
