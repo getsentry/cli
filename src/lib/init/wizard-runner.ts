@@ -8,7 +8,7 @@
  * All UI I/O — banners, spinners, logs, prompts, outro — flows through
  * a single `WizardUI` instance constructed by `getUI()`. The runner
  * itself is implementation-agnostic: it works the same against
- * `LoggingUI` (CI / npm) and `InkUI` (interactive Bun binary).
+ * `LoggingUI` (CI / `--yes`) and `InkUI` (interactive terminal).
  */
 
 import { randomBytes } from "node:crypto";
@@ -487,8 +487,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
 
   // Construct the UI once for the entire run; tear down on every exit
   // path via `await using`. The factory picks `InkUI` for interactive
-  // runs on the Bun binary and `LoggingUI` everywhere else (CI,
-  // `--yes`, `--no-tui`, npm/Node distribution).
+  // runs and `LoggingUI` for CI / `--yes` / `--no-tui`.
   const initialWelcome = yes || dryRun ? undefined : buildWelcomeOptions();
   await using ui = await getUIAsync({
     yes,
