@@ -89,7 +89,7 @@ function makeStdin(): Readable {
 async function renderApp(
   store: WizardStore,
   columns: number,
-  options: { rows?: number; input?: string[] } = {}
+  options: { rows?: number; input?: string[]; settleMs?: number } = {}
 ): Promise<CaptureStream> {
   const out = new CaptureStream(columns, options.rows ?? 40);
   const stdin = makeStdin();
@@ -104,7 +104,7 @@ async function renderApp(
     stdin.push(input);
     await Bun.sleep(20);
   }
-  await Bun.sleep(FRAME_SETTLE_MS);
+  await Bun.sleep(options.settleMs ?? FRAME_SETTLE_MS);
   instance.unmount();
   // waitUntilExit() hangs in CI — race with a short unref'd timeout.
   await Promise.race([
@@ -389,7 +389,9 @@ describe("Ink App snapshot", () => {
       resolve: ignorePromptResolution,
     });
 
-    const frame = (await renderApp(store, 120)).allOutput();
+    // Prompts use a 150ms input grace period before activating shortcuts,
+    // so we need to wait longer than the default settle time.
+    const frame = (await renderApp(store, 120, { settleMs: 200 })).allOutput();
     const plainFrame = stripAnsi(frame);
     expect(frame).toContain("Session Replay");
     expect(frame).toContain("Tracing");
@@ -455,7 +457,9 @@ describe("Ink App snapshot", () => {
       resolve: ignorePromptResolution,
     });
 
-    const frame = (await renderApp(store, 120)).allOutput();
+    // Prompts use a 150ms input grace period before activating shortcuts,
+    // so we need to wait longer than the default settle time.
+    const frame = (await renderApp(store, 120, { settleMs: 200 })).allOutput();
     expect(frame).toContain("navigate");
     expect(frame).toContain("confirm");
     expect(frame).toContain("cancel");

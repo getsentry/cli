@@ -459,6 +459,24 @@ function OverlayPanel({
 
 // ──────────────────────────── Components ──────────────────────────────
 
+/**
+ * Delay activating keyboard shortcuts for a brief window after a prompt
+ * mounts. Terminal input buffered during a spinner (arrow keys, enter)
+ * arrives as a burst when the prompt appears — without this grace period
+ * those stale keystrokes can accidentally select an option or navigate
+ * the list before the user even sees the prompt.
+ */
+const INPUT_GRACE_MS = 150;
+
+function useInputGracePeriod(): boolean {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setReady(true), INPUT_GRACE_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  return ready;
+}
+
 type ChoiceRow<T extends string> = {
   value: T;
   label: string;
@@ -478,6 +496,7 @@ function useChoiceNavigation<T extends string>({
 }): number {
   const [highlighted, setHighlighted] = useState(0);
   const totalCount = choices.length;
+  const ready = useInputGracePeriod();
 
   const shortcuts = useMemo<ShortcutBinding[]>(
     () => [
@@ -516,7 +535,7 @@ function useChoiceNavigation<T extends string>({
     ],
     [choices, highlighted, onCancel, onChoose, totalCount]
   );
-  useInkShortcuts(scope, shortcuts);
+  useInkShortcuts(scope, shortcuts, { isActive: ready });
 
   return highlighted;
 }
@@ -1266,6 +1285,7 @@ function SelectPrompt({
   const isCentered = alignment === "center";
   const promptWidth = isCentered ? "100%" : undefined;
   const totalCount = prompt.options.length;
+  const ready = useInputGracePeriod();
   const [highlighted, setHighlighted] = useState<number>(() =>
     Math.min(Math.max(prompt.initialIndex, 0), Math.max(0, totalCount - 1))
   );
@@ -1307,7 +1327,7 @@ function SelectPrompt({
     ],
     [highlighted, prompt, totalCount]
   );
-  useInkShortcuts("select-prompt", shortcuts);
+  useInkShortcuts("select-prompt", shortcuts, { isActive: ready });
 
   return (
     <Box
@@ -1394,6 +1414,7 @@ function ConfirmPrompt({
 }): React.ReactNode {
   const isCentered = alignment === "center";
   const promptWidth = isCentered ? "100%" : undefined;
+  const ready = useInputGracePeriod();
   const shortcuts = useMemo<ShortcutBinding[]>(
     () => [
       {
@@ -1423,7 +1444,7 @@ function ConfirmPrompt({
     ],
     [prompt]
   );
-  useInkShortcuts("confirm-prompt", shortcuts);
+  useInkShortcuts("confirm-prompt", shortcuts, { isActive: ready });
 
   const yLabel = prompt.initialValue ? "Y" : "y";
   const nLabel = prompt.initialValue ? "n" : "N";
@@ -1471,6 +1492,7 @@ function MultiSelectPrompt({
   );
   const [highlighted, setHighlighted] = useState<number>(0);
   const totalCount = prompt.options.length;
+  const ready = useInputGracePeriod();
 
   const toggleAt = useCallback(
     (idx: number) => {
@@ -1554,7 +1576,7 @@ function MultiSelectPrompt({
     ],
     [commit, highlighted, prompt, toggleAt, totalCount]
   );
-  useInkShortcuts("multiselect-prompt", shortcuts);
+  useInkShortcuts("multiselect-prompt", shortcuts, { isActive: ready });
   const shortcutText = `space toggle ${ICONS.bullet} a all ${ICONS.bullet} enter confirm ${ICONS.bullet} esc cancel`;
   const selectedCount = `${selected.size}/${totalCount}`;
 
