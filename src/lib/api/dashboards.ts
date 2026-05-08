@@ -17,6 +17,7 @@ import * as Sentry from "@sentry/node-core/light";
 import {
   type DashboardDetail,
   type DashboardListItem,
+  type DashboardRevision,
   type DashboardWidget,
   type ErrorResult,
   type EventsStatsSeries,
@@ -33,11 +34,14 @@ import {
 } from "../../types/dashboard.js";
 import { stringifyUnknown } from "../errors.js";
 
+import { resolveOrgRegion } from "../region.js";
+
 import {
   apiRequestToRegion,
   getOrgSdkConfig,
   ORG_FANOUT_CONCURRENCY,
   type PaginatedResponse,
+  parseLinkHeader,
   unwrapPaginatedResult,
   unwrapResult,
 } from "./infrastructure.js";
@@ -158,6 +162,70 @@ export async function updateDashboard(
     `Failed to update dashboard '${dashboardId}'`
   );
   return data as unknown as DashboardDetail;
+}
+
+// ---------------------------------------------------------------------------
+// Revision history
+// ---------------------------------------------------------------------------
+
+/**
+ * List revisions for a dashboard with cursor-based pagination.
+ *
+ * @param orgSlug - Organization slug
+ * @param dashboardId - Dashboard ID
+ * @param options - Pagination parameters (perPage, cursor)
+ * @returns Paginated response with dashboard revisions
+ */
+export async function listDashboardRevisionsPaginated(
+  orgSlug: string,
+  dashboardId: string,
+  options: { perPage?: number; cursor?: string } = {}
+): Promise<PaginatedResponse<DashboardRevision[]>> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const params: Record<string, string | number | undefined> = {
+    per_page: options.perPage,
+    cursor: options.cursor,
+  };
+
+  const { data, headers } = await apiRequestToRegion<DashboardRevision[]>(
+    regionUrl,
+    `/organizations/${orgSlug}/dashboards/${dashboardId}/revisions/`,
+    { params }
+  );
+
+  const { nextCursor, prevCursor } = parseLinkHeader(
+    headers.get("link") ?? null
+  );
+  const out: PaginatedResponse<DashboardRevision[]> = { data };
+  if (nextCursor !== undefined) {
+    out.nextCursor = nextCursor;
+  }
+  if (prevCursor !== undefined) {
+    out.prevCursor = prevCursor;
+  }
+  return out;
+}
+
+/**
+ * Restore a dashboard to a specific revision.
+ *
+ * @param orgSlug - Organization slug
+ * @param dashboardId - Dashboard ID
+ * @param revisionId - Revision ID to restore
+ * @returns The restored dashboard detail
+ */
+export async function restoreDashboardRevision(
+  orgSlug: string,
+  dashboardId: string,
+  revisionId: number
+): Promise<DashboardDetail> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<DashboardDetail>(
+    regionUrl,
+    `/organizations/${orgSlug}/dashboards/${dashboardId}/revisions/${revisionId}/`,
+    { method: "POST" }
+  );
+  return data;
 }
 
 // ---------------------------------------------------------------------------

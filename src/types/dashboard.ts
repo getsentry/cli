@@ -1031,3 +1031,19 @@ export const TIMESERIES_DISPLAY_TYPES = new Set([
 
 /** Display types that use tabular data (events endpoint) */
 export const TABLE_DISPLAY_TYPES = new Set(["table", "top_n"]);
+
+// ---------------------------------------------------------------------------
+// Dashboard revision types
+// ---------------------------------------------------------------------------
+
+/** Schema for a dashboard revision (from GET /dashboards/{id}/revisions/) */
+export const DashboardRevisionSchema = z
+  .object({
+    id: z.number(),
+    version: z.number(),
+    dateCreated: z.string(),
+    dashboardId: z.number(),
+  })
+  .passthrough();
+
+export type DashboardRevision = z.infer<typeof DashboardRevisionSchema>;
