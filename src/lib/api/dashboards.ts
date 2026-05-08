@@ -14,10 +14,14 @@ import {
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
 
+import { z } from "zod";
+
 import {
   type DashboardDetail,
+  DashboardDetailSchema,
   type DashboardListItem,
   type DashboardRevision,
+  DashboardRevisionSchema,
   type DashboardWidget,
   type ErrorResult,
   type EventsStatsSeries,
@@ -190,7 +194,7 @@ export async function listDashboardRevisionsPaginated(
   const { data, headers } = await apiRequestToRegion<DashboardRevision[]>(
     regionUrl,
     `/organizations/${orgSlug}/dashboards/${dashboardId}/revisions/`,
-    { params }
+    { params, schema: z.array(DashboardRevisionSchema) }
   );
 
   const { nextCursor, prevCursor } = parseLinkHeader(
@@ -223,7 +227,7 @@ export async function restoreDashboardRevision(
   const { data } = await apiRequestToRegion<DashboardDetail>(
     regionUrl,
     `/organizations/${orgSlug}/dashboards/${dashboardId}/revisions/${revisionId}/`,
-    { method: "POST" }
+    { method: "POST", schema: DashboardDetailSchema }
   );
   return data;
 }
