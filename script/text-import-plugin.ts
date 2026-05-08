@@ -37,7 +37,7 @@
 
 import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, dirname, extname, resolve as resolvePath } from "node:path";
-import type { Plugin } from "esbuild";
+import { build as esbuildBuild, type Plugin } from "esbuild";
 
 const TEXT_IMPORT_NS = "text-import";
 const ANY_FILTER = /.*/;
@@ -46,34 +46,36 @@ const ANY_FILTER = /.*/;
 const TS_EXTENSIONS = new Set([".ts", ".tsx", ".jsx"]);
 
 /**
- * Pre-bundle a TypeScript/TSX source file into a self-contained JS module
- * using Bun.build. All dependencies (local modules AND npm packages) are
- * inlined; Bun handles node:* builtins natively.
- *
- * Using Bun.build (rather than esbuild) is critical. esbuild wraps CJS
- * packages (e.g. `signal-exit`, `parse-keypress`) in `__commonJS` helpers.
- * When Bun.compile later embeds the esbuild output as a `with { type: "file"
- * }` asset, it injects `__promiseAll` helpers at wrong positions inside those
- * wrappers, causing `SyntaxError: Unexpected identifier '__promiseAll'` at
- * runtime on all platforms. Bun.build produces output that Bun.compile
- * recognises natively and handles without mis-injecting the helper.
+ * Banner injected into the pre-bundled sidecar JS. Provides a real
+ * `require` function so esbuild's CJS-wrapping `__require` shims can
+ * resolve Node.js builtins (`assert`, `events`, etc.) at runtime.
+ */
+const REQUIRE_BANNER =
+  'import { createRequire as ___cr } from "node:module";' +
+  " var require = ___cr(import.meta.url);";
+
+/**
+ * Pre-bundle a TypeScript/TSX source file into a self-contained JS module.
+ * All dependencies (local modules AND npm packages) are inlined;
+ * only `node:*` builtins are external since Bun resolves them natively.
  */
 async function prebundleTs(sourcePath: string, outPath: string): Promise<void> {
-  const result = await Bun.build({
-    entrypoints: [sourcePath],
-    target: "bun",
-    outdir: dirname(outPath),
-    naming: "[name].js",
+  await esbuildBuild({
+    entryPoints: [sourcePath],
+    bundle: true,
+    outfile: outPath,
+    platform: "node",
+    target: "esnext",
+    format: "esm",
+    jsx: "automatic",
+    external: ["node:*"],
+    banner: { js: REQUIRE_BANNER },
     define: {
       "process.env.NODE_ENV": JSON.stringify("production"),
     },
     minify: false,
+    write: true,
   });
-  if (!result.success) {
-    throw new Error(
-      result.logs.map((l) => String(l)).join("\n") || "unknown error"
-    );
-  }
 }
 
 /** Resolve the output directory from the parent esbuild config. */

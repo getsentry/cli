@@ -186,16 +186,22 @@ function openFreshTtyForInk(): ReadStream | null {
 export async function createInkUI(
   opts: CreateInkUIOptions = {}
 ): Promise<InkUI> {
-  // The `with { type: "file" }` static import in ink-ui-sidecar.ts
-  // poisons Bun's module cache for ink-app.tsx in dev mode — any
-  // import() of that path returns the path string instead of the
-  // module. The sidecar is ONLY dynamically imported in the compiled
-  // binary (detected via /$bunfs/ in import.meta.url), so the cache
-  // is never poisoned in dev mode and `import("./ink-app.js")` works.
+  // In the compiled binary: sidecar holds the `with { type: "file" }`
+  // import; detected via /$bunfs/ in import.meta.url.
+  //
+  // In dev mode: use a variable import path so esbuild cannot statically
+  // analyse it and bundle ink-app.tsx into bin.js. A literal
+  // `import("./ink-app.js")` would cause esbuild to inline ink-app.tsx
+  // — pulling in ink's CJS modules — and Bun.compile then injects
+  // __promiseAll at wrong positions inside those modules. The variable
+  // breaks esbuild's static analysis while still resolving correctly at
+  // dev-mode runtime. The sidecar is never loaded in dev mode so Bun's
+  // module cache for ink-app.tsx is never poisoned.
+  const devPath = /* @__PURE__ */ (() => "./ink-app.js")();
   const app = (
     import.meta.url.includes("/$bunfs/")
       ? await (await import("./ink-ui-sidecar.js")).loadInkApp()
-      : ((await import("./ink-app.js")) as typeof import("./ink-app.js"))
+      : ((await import(devPath)) as typeof import("./ink-app.js"))
   ) as typeof import("./ink-app.js");
 
   const store = new WizardStore({
