@@ -26,13 +26,6 @@
  *      like `ink-frame.tsx` and third-party packages like `ink`,
  *      `react`) so the file is fully self-contained.
  *
- *   Some of the inlined packages (e.g. `signal-exit`, used by Ink)
- *   are CJS modules that call `require("assert")` etc. esbuild
- *   wraps these in `__require` shims that throw "Dynamic require
- *   is not supported" at runtime. The banner injects a real
- *   `require` function via `createRequire` so CJS dependencies
- *   resolve Node builtins correctly inside the ESM bundle.
- *
  *   Non-TypeScript files (plain `.js`) are copied verbatim.
  *
  * Used by `script/build.ts` (single-file executable) and
@@ -44,7 +37,7 @@
 
 import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, dirname, extname, resolve as resolvePath } from "node:path";
-import { build as esbuildBuild, type Plugin } from "esbuild";
+import type { Plugin } from "esbuild";
 
 const TEXT_IMPORT_NS = "text-import";
 const ANY_FILTER = /.*/;
@@ -53,36 +46,34 @@ const ANY_FILTER = /.*/;
 const TS_EXTENSIONS = new Set([".ts", ".tsx", ".jsx"]);
 
 /**
- * Banner injected into the pre-bundled sidecar JS. Provides a real
- * `require` function so esbuild's CJS-wrapping `__require` shims
- * can resolve Node.js builtins (`assert`, `events`, etc.) at runtime.
- * Without this, `signal-exit` and other CJS deps of Ink throw
- * "Dynamic require of 'assert' is not supported".
- */
-const REQUIRE_BANNER =
-  'import { createRequire as ___cr } from "node:module";' +
-  " var require = ___cr(import.meta.url);";
-
-/**
- * Pre-bundle a TypeScript/TSX source file into self-contained JS.
- * All dependencies (local modules AND npm packages) are inlined;
- * only `node:*` builtins are external since Bun resolves them
- * natively inside `/$bunfs/`.
+ * Pre-bundle a TypeScript/TSX source file into a self-contained JS module
+ * using Bun.build. All dependencies (local modules AND npm packages) are
+ * inlined; Bun handles node:* builtins natively.
+ *
+ * Using Bun.build (rather than esbuild) is critical. esbuild wraps CJS
+ * packages (e.g. `signal-exit`, `parse-keypress`) in `__commonJS` helpers.
+ * When Bun.compile later embeds the esbuild output as a `with { type: "file"
+ * }` asset, it injects `__promiseAll` helpers at wrong positions inside those
+ * wrappers, causing `SyntaxError: Unexpected identifier '__promiseAll'` at
+ * runtime on all platforms. Bun.build produces output that Bun.compile
+ * recognises natively and handles without mis-injecting the helper.
  */
 async function prebundleTs(sourcePath: string, outPath: string): Promise<void> {
-  await esbuildBuild({
-    entryPoints: [sourcePath],
-    bundle: true,
-    outfile: outPath,
-    platform: "node",
-    target: "esnext",
-    format: "esm",
-    jsx: "automatic",
-    external: ["node:*"],
-    banner: { js: REQUIRE_BANNER },
+  const result = await Bun.build({
+    entrypoints: [sourcePath],
+    target: "bun",
+    outdir: dirname(outPath),
+    naming: "[name].js",
+    define: {
+      "process.env.NODE_ENV": JSON.stringify("production"),
+    },
     minify: false,
-    write: true,
   });
+  if (!result.success) {
+    throw new Error(
+      result.logs.map((l) => String(l)).join("\n") || "unknown error"
+    );
+  }
 }
 
 /** Resolve the output directory from the parent esbuild config. */

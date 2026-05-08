@@ -162,33 +162,6 @@ function severityForStopCode(code: SpinnerExitCode): LogSeverity {
 }
 
 /**
- * Embed the Ink App sidecar as a Bun-compile file resource.
- *
- * `with { type: "file" }` tells Bun.compile to embed the file into
- * the binary's virtual filesystem (`/$bunfs/root/`) and replace the
- * import with the embedded path string at runtime. The
- * `text-import-plugin` in `script/build.ts` intercepts this during
- * esbuild: it pre-bundles the .tsx source into self-contained JS
- * (stripping TypeScript, inlining local deps and npm packages,
- * injecting a `createRequire` banner for CJS deps), then marks the
- * import external so Bun.compile picks up the resulting .js file.
- *
- * Why pre-bundle? Bun's `/$bunfs/` virtual FS uses a JavaScript
- * parser, not TypeScript — raw .tsx fails on `import { type Foo }`.
- * The `/$bunfs/` environment also has no `node_modules`, so all
- * deps (ink, react, local modules) must be inlined.
- *
- * The npm/Node distribution never reaches `createInkUI()` (the
- * factory routes there only on the Bun binary because Ink uses
- * top-level await that esbuild can't emit in our CJS bundle), so
- * the embedded file is unused on Node. We still produce it because
- * the static import is unconditional; the bundle.ts cleanup step
- * `unlink`s the unused sidecar after bundling.
- */
-// @ts-expect-error: `with { type: "file" }` is Bun-specific and not yet typed in @types/bun
-import inkAppPath from "./ink-app.tsx" with { type: "file" };
-
-/**
  * Open a fresh `/dev/tty` `ReadStream` for Ink to consume. Returns
  * `null` when `/dev/tty` isn't available (non-TTY environment, or
  * platforms that don't expose it — Windows). The caller falls back
@@ -213,21 +186,17 @@ function openFreshTtyForInk(): ReadStream | null {
 export async function createInkUI(
   opts: CreateInkUIOptions = {}
 ): Promise<InkUI> {
-  // `with { type: "file" }` above gives us the virtual path in the
-  // compiled binary (e.g. `/$bunfs/root/ink-app-xxx.js`). In dev
-  // mode (`bun run src/bin.ts`) inkAppPath is the source file path,
-  // and Bun's module cache already holds it as a path-string from the
-  // static import — a plain `import(inkAppPath)` would return the
-  // cached string rather than the module. Importing via the absolute
-  // file:// URL uses a distinct cache key, bypassing the poison.
-  //
-  // NOTE: Do NOT append a query string to the /$bunfs/ path — Bun's
-  // virtual filesystem does not support query strings (ENOENT).
-  const isCompiledBinary = String(inkAppPath).includes("/$bunfs/");
-  const inkModulePath = isCompiledBinary
-    ? String(inkAppPath)
-    : new URL("./ink-app.tsx", import.meta.url).href;
-  const app = (await import(inkModulePath)) as typeof import("./ink-app.js");
+  // The `with { type: "file" }` static import in ink-ui-sidecar.ts
+  // poisons Bun's module cache for ink-app.tsx in dev mode — any
+  // import() of that path returns the path string instead of the
+  // module. The sidecar is ONLY dynamically imported in the compiled
+  // binary (detected via /$bunfs/ in import.meta.url), so the cache
+  // is never poisoned in dev mode and `import("./ink-app.js")` works.
+  const app = (
+    import.meta.url.includes("/$bunfs/")
+      ? await (await import("./ink-ui-sidecar.js")).loadInkApp()
+      : ((await import("./ink-app.js")) as typeof import("./ink-app.js"))
+  ) as typeof import("./ink-app.js");
 
   const store = new WizardStore({
     cliVersion: CLI_VERSION,
