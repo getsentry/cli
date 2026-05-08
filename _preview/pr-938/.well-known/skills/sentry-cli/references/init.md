@@ -20,7 +20,7 @@ Initialize Sentry in your project (experimental)
 - `-n, --dry-run - Show what would happen without making changes`
 - `--features <value>... - Features to enable: errors,tracing,logs,replay,metrics,profiling,sourcemaps,crons,ai-monitoring,user-feedback`
 - `-t, --team <value> - Team slug to create the project under`
-- `--tui - Use the Ink-based interactive UI (default on the Bun binary). Pass --no-tui to fall back to plain log output.`
+- `--tui - Use the Ink-based interactive UI (default). Pass --no-tui to fall back to plain log output.`
 
 **Examples:**
 
