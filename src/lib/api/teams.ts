@@ -57,20 +57,13 @@ export async function listTeamsPaginated(
   const result = await listAnOrganization_sTeams({
     ...config,
     path: { organization_id_or_slug: orgSlug },
-    // per_page is supported by Sentry's pagination framework at runtime
-    // but not yet in the OpenAPI spec
     query: {
       cursor: options.cursor,
       per_page: options.perPage ?? 25,
-    } as { cursor?: string },
+    } as { cursor?: string; per_page?: number },
   });
 
-  return unwrapPaginatedResult<SentryTeam[]>(
-    result as
-      | { data: SentryTeam[]; error: undefined }
-      | { data: undefined; error: unknown },
-    "Failed to list teams"
-  );
+  return unwrapPaginatedResult<SentryTeam[]>(result, "Failed to list teams");
 }
 
 /**

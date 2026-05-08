@@ -84,7 +84,17 @@ export async function listReleasesPaginated(
       environment: options.environment,
       statsPeriod: options.statsPeriod,
       status: options.status,
-    } as { cursor?: string },
+    } as {
+      cursor?: string;
+      per_page?: number;
+      query?: string;
+      sort?: string;
+      health?: number;
+      project?: number[];
+      environment?: string[];
+      statsPeriod?: string;
+      status?: string;
+    },
   });
 
   return unwrapPaginatedResult<SentryRelease[]>(

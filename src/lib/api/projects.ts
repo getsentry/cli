@@ -27,7 +27,6 @@ import {
 } from "../db/project-cache.js";
 import { getCachedOrganizations } from "../db/regions.js";
 import { type AuthGuardSuccess, withAuthGuard } from "../errors.js";
-import { logger } from "../logger.js";
 import { getApiBaseUrl } from "../sentry-client.js";
 import { buildProjectUrl } from "../sentry-urls.js";
 import { isAllDigits } from "../utils.js";
@@ -35,6 +34,7 @@ import { isAllDigits } from "../utils.js";
 import {
   API_MAX_PER_PAGE,
   apiRequestToRegion,
+  autoPaginate,
   getOrgSdkConfig,
   MAX_PAGINATION_PAGES,
   ORG_FANOUT_CONCURRENCY,
@@ -54,38 +54,23 @@ import { getUserRegions, listOrganizations } from "./organizations.js";
  */
 export async function listProjects(orgSlug: string): Promise<SentryProject[]> {
   const config = await getOrgSdkConfig(orgSlug);
-  const allResults: SentryProject[] = [];
-  let cursor: string | undefined;
 
-  for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
+  const { data: allResults } = await autoPaginate(async (cursor) => {
     const result = await listAnOrganization_sProjects({
       ...config,
       path: { organization_id_or_slug: orgSlug },
-      // per_page is supported by Sentry's pagination framework at runtime
-      // but not yet in the OpenAPI spec
-      query: { cursor, per_page: API_MAX_PER_PAGE } as { cursor?: string },
+      query: { cursor, per_page: API_MAX_PER_PAGE } as {
+        cursor?: string;
+        per_page?: number;
+      },
     });
-
-    const { data, nextCursor } = unwrapPaginatedResult<SentryProject[]>(
+    return unwrapPaginatedResult<SentryProject[]>(
       result as
         | { data: SentryProject[]; error: undefined }
         | { data: undefined; error: unknown },
       "Failed to list projects"
     );
-    allResults.push(...data);
-
-    if (!nextCursor) {
-      break;
-    }
-    cursor = nextCursor;
-
-    if (page === MAX_PAGINATION_PAGES - 1) {
-      logger.warn(
-        `Pagination limit reached (${MAX_PAGINATION_PAGES} pages, ${allResults.length} items). ` +
-          "Results may be incomplete for this organization."
-      );
-    }
-  }
+  }, MAX_PAGINATION_PAGES * API_MAX_PER_PAGE);
 
   // Populate project cache for shell completions (best-effort).
   // Mirrors how listOrganizations() calls setOrgRegions().
@@ -121,7 +106,7 @@ export async function listProjectsPaginated(
     query: {
       cursor: options.cursor,
       per_page: options.perPage ?? API_MAX_PER_PAGE,
-    } as { cursor?: string },
+    } as { cursor?: string; per_page?: number },
   });
 
   return unwrapPaginatedResult<SentryProject[]>(

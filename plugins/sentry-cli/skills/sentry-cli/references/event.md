@@ -59,7 +59,7 @@ List events for an issue
 | `platform` | string \| null | Platform (python, javascript, etc.) |
 | `dateCreated` | string | ISO 8601 creation timestamp |
 | `crashFile` | string \| null | Crash file URL |
-| `metadata` | unknown \| null | Event metadata |
+| `metadata` | object \| null | Event metadata |
 
 **Examples:**
 
