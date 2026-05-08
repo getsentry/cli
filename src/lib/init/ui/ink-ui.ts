@@ -161,36 +161,8 @@ function severityForStopCode(code: SpinnerExitCode): LogSeverity {
   return "success";
 }
 
-/**
- * Embed `ink-app.tsx` as a Bun-compile file resource.
- *
- * `with { type: "file" }` tells Bun.compile to copy the raw .tsx
- * bytes into the binary's virtual filesystem and replace the import
- * specifier with the embedded path string at runtime. The
- * `text-import-plugin.ts` polyfill in `script/build.ts` mirrors this
- * for the esbuild step (copies the file alongside the bundle and
- * leaves the import external).
- *
- * Why this indirection? `ink-app.tsx` statically imports `ink`,
- * `ink-spinner`, and `react`. When Bun.compile bundles those
- * packages through its CJS-wrapping path the output mangles their
- * dev-build IIFEs (it injects `__promiseAll` runtime
- * helpers in positions the wrappers don't tolerate, producing a
- * `SyntaxError: Unexpected identifier '__promiseAll'` at startup
- * inside e.g. `react/cjs/react-jsx-runtime.development.js` or
- * `ink/build/parse-keypress.js`). Embedding the .tsx as raw bytes
- * pushes resolution to Bun's runtime — which doesn't have the bug
- * — at the cost of a small first-invocation parse overhead.
- *
- * The npm/Node distribution never reaches `createInkUI()` (the
- * factory routes there only on the Bun binary because Ink uses
- * top-level await that esbuild can't emit in our CJS bundle), so
- * the embedded file is unused on Node. We still produce it because
- * the static import is unconditional; the bundle.ts cleanup step
- * `unlink`s the unused sidecar after bundling.
- */
 // @ts-expect-error: `with { type: "file" }` is Bun-specific and not yet typed in @types/bun
-import inkAppPath from "./ink-app.tsx" with { type: "file" };
+import inkBundlePath from "./ink-app-bundle.js" with { type: "file" };
 
 /**
  * Open a fresh `/dev/tty` `ReadStream` for Ink to consume. Returns
@@ -217,21 +189,10 @@ function openFreshTtyForInk(): ReadStream | null {
 export async function createInkUI(
   opts: CreateInkUIOptions = {}
 ): Promise<InkUI> {
-  const ink = await import("ink");
-  const react = await import("react");
-  // The `?bridge=1` query string is load-bearing. Without it Bun's
-  // module loader hits a cache entry created by the static
-  // `with { type: "file" }` import above (same absolute path) and
-  // returns a synthetic `{ __esModule, default: undefined }` shape
-  // instead of evaluating the .tsx as a module — `app.App`
-  // becomes `undefined` and React throws "Element type is invalid".
-  // The query string forces a distinct cache key while resolving to
-  // the same on-disk file, so the .tsx is parsed and exports
-  // populate normally. Confirmed on Bun 1.3.13 (dev) and inside
-  // Bun-compiled binaries (the `/$bunfs/…` runtime path).
-  const app = (await import(
-    `${inkAppPath}?bridge=1`
-  )) as typeof import("./ink-app.js");
+  const { render, createElement, App } = (await import(
+    inkBundlePath as string
+  )) as { render: typeof import("ink").render } & typeof import("react") &
+    typeof import("./ink-app.js");
 
   const store = new WizardStore({
     cliVersion: CLI_VERSION,
@@ -284,10 +245,7 @@ export async function createInkUI(
   // startup never shows stale layout from a prior render.
   process.stdout.write("\x1b[?1049h\x1b[2J\x1b[H");
   try {
-    const instance = ink.render(
-      react.createElement(app.App, { store }),
-      renderOptions
-    );
+    const instance = render(createElement(App, { store }), renderOptions);
 
     return new InkUI(instance, store, freshStdin, initialWelcome);
   } catch (error) {

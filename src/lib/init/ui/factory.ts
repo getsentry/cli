@@ -125,12 +125,11 @@ export async function getUIAsync(opts: UIFactoryOptions): Promise<WizardUI> {
   try {
     const { createInkUI } = await import("./ink-ui.js");
     return await createInkUI({ initialWelcome: opts.initialWelcome });
-  } catch {
-    // Fall through to LoggingUI so a missing/broken Ink install
-    // doesn't take down the wizard. This branch should be
-    // unreachable on a correctly built Bun binary — it exists as
-    // a safety net for unusual runtime environments where the
-    // import fails.
+  } catch (error) {
+    process.stderr.write(
+      `\n[sentry] Failed to start interactive UI: ${error instanceof Error ? error.message : String(error)}\n` +
+        `         Set SENTRY_INIT_TUI=0 or pass --no-tui to use plain text mode.\n\n`
+    );
     return new LoggingUI();
   }
 }

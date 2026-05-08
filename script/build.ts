@@ -490,6 +490,34 @@ async function build(): Promise<void> {
 
   console.log("");
 
+  // Step 0: Pre-bundle the Ink app + all its React/Ink dependencies into a
+  // self-contained ESM file. This is embedded into the binary via
+  // `with { type: "file" }` in ink-ui.ts, keeping Ink's CJS modules out of
+  // Bun.compile's static bundle graph (which would inject `__promiseAll`
+  // helpers into ink's parse-keypress.js at positions that cause a
+  // SyntaxError at startup).
+  console.log("  Step 0: Pre-bundling Ink app...");
+  const inkBundleResult = await Bun.build({
+    entrypoints: ["./src/lib/init/ui/ink-app-entry.ts"],
+    target: "bun",
+    outdir: "./src/lib/init/ui",
+    define: {
+      "process.env.NODE_ENV": JSON.stringify("production"),
+      SENTRY_CLI_VERSION: JSON.stringify(VERSION),
+      SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
+    },
+    naming: "ink-app-bundle.js",
+    minify: true,
+  });
+  if (!inkBundleResult.success) {
+    console.error("  Failed to pre-bundle Ink app:");
+    for (const log of inkBundleResult.logs) {
+      console.error(`    ${log}`);
+    }
+    process.exit(1);
+  }
+  console.log("    -> src/lib/init/ui/ink-app-bundle.js");
+
   // Step 1: Bundle TS → JS + sourcemap (shared by all targets)
   const bundled = await bundleJs();
   if (!bundled) {
@@ -519,12 +547,8 @@ async function build(): Promise<void> {
   // Step 3: Upload the composed sourcemap to Sentry (after compilation)
   await uploadSourcemapToSentry();
 
-  // Clean up intermediate bundle (only the binaries are artifacts).
-  // The `ink-app.tsx` copy comes from the text-import-plugin's
-  // `with { type: "file" }` handling — it gets embedded into the
-  // compiled binary, so the sidecar copy is no longer needed once
-  // every target has compiled.
-  await $`rm -f ${BUNDLE_JS} ${SOURCEMAP_FILE} dist-bin/ink-app.tsx`;
+  // Clean up intermediate files (only the binaries are artifacts).
+  await $`rm -f ${BUNDLE_JS} ${SOURCEMAP_FILE} src/lib/init/ui/ink-app-bundle.js`;
 
   // Summary
   console.log(`\n${"=".repeat(40)}`);

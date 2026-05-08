@@ -71,3 +71,5 @@ docs/public/.well-known/skills/index.json
 # OpenCode
 .opencode/
 opencode.json*
+src/lib/init/ui/ink-app-bundle.js
+src/lib/init/ui/ink-app-bundle.js
