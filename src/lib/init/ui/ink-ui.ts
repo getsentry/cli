@@ -185,8 +185,6 @@ function severityForStopCode(code: SpinnerExitCode): LogSeverity {
  * the static import is unconditional; the bundle.ts cleanup step
  * `unlink`s the unused sidecar after bundling.
  */
-// @ts-expect-error: `with { type: "file" }` is Bun-specific and not yet typed in @types/bun
-import inkAppPath from "./ink-app.tsx" with { type: "file" };
 
 /**
  * Open a fresh `/dev/tty` `ReadStream` for Ink to consume. Returns
@@ -213,22 +211,16 @@ function openFreshTtyForInk(): ReadStream | null {
 export async function createInkUI(
   opts: CreateInkUIOptions = {}
 ): Promise<InkUI> {
-  // Import the Ink App sidecar from the embedded file. The
-  // `with { type: "file" }` import above gives us the virtual path
-  // (e.g. `/$bunfs/root/ink-app-xxx.js`). The text-import-plugin
-  // pre-bundles the .tsx source into self-contained JS at build
-  // time, so the embedded file includes ink, react, and all local
-  // deps — no external resolution needed at runtime.
-  //
-  // NOTE: Do NOT append a query string (e.g. `?bridge=1`) to the
-  // path. Bun's `/$bunfs/` virtual filesystem does not support
-  // query strings — the path lookup fails with ENOENT.
-  //
-  // `mountApp()` lives inside the sidecar so it uses the same
-  // ink/react instances as the App's hooks. Importing ink/react
-  // separately in this module would create a second copy of React,
-  // causing "Invalid hook call" errors at runtime.
-  const app = (await import(inkAppPath)) as typeof import("./ink-app.js");
+  // In the compiled binary, modules live at `file:///$bunfs/root/…`.
+  // The `with { type: "file" }` static import in ink-ui-sidecar.ts
+  // poisons Bun's module cache for ink-app.tsx: any import() that
+  // resolves to the same path returns the path string instead of the
+  // module. To avoid this in dev mode (`bun run src/bin.ts`), the
+  // sidecar is ONLY loaded when running inside a compiled binary.
+  const isCompiledBinary = import.meta.url.includes("/$bunfs/");
+  const app = isCompiledBinary
+    ? await (await import("./ink-ui-sidecar.js")).loadInkApp()
+    : ((await import("./ink-app.js")) as typeof import("./ink-app.js"));
 
   const store = new WizardStore({
     cliVersion: CLI_VERSION,
