@@ -14,6 +14,6 @@
 // @ts-expect-error: `with { type: "file" }` is Bun-specific and not yet typed in @types/bun
 import inkAppPath from "./ink-app.tsx" with { type: "file" };
 
-export async function loadInkApp(): Promise<typeof import("./ink-app.js")> {
+export function loadInkApp(): Promise<typeof import("./ink-app.js")> {
   return import(inkAppPath as string) as Promise<typeof import("./ink-app.js")>;
 }
