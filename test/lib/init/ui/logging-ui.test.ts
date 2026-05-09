@@ -247,7 +247,6 @@ describe("LoggingUI disposal", () => {
   });
 });
 
-
 describe("LoggingUI summary", () => {
   test("empty summary (no fields, no changedFiles) is a no-op", () => {
     const { ui, stdout, stderr } = createUI();
