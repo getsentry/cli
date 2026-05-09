@@ -53,18 +53,6 @@ export type UIFactoryOptions = {
 };
 
 /**
- * Detect whether the CLI is running inside the Bun-compiled binary
- * vs. the npm/Node distribution. The `Bun` global only exists in
- * the Bun runtime.
- */
-export function isBunRuntime(): boolean {
-  return (
-    typeof globalThis.Bun !== "undefined" &&
-    typeof process.versions.bun === "string"
-  );
-}
-
-/**
  * Detect whether the current process can run an interactive prompt.
  * Both stdin (read keystrokes) and stdout (render the prompt) must be
  * TTYs. Piped input or output disqualifies us.

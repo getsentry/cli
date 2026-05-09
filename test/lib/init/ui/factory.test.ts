@@ -12,13 +12,10 @@
  *     bundle into our CJS npm distribution).
  *
  * We patch the env and `process.stdin.isTTY` / `process.stdout.isTTY`
- * around each test so the assertions are deterministic. The
- * Bun-runtime branch is exercised by leaving `isBunRuntime()` to its
- * real return value — the test runner is invoked via `bun test` so
- * the Bun global is present and `getUIAsync` can attempt the Ink
- * path. To keep tests fast and TTY-independent we use the
- * `forceLegacy` / non-TTY / `--yes` paths to assert `LoggingUI` is
- * returned without ever spinning up a real renderer.
+ * around each test so the assertions are deterministic. To keep tests
+ * fast and TTY-independent we use the `forceLegacy` / non-TTY / `--yes`
+ * paths to assert `LoggingUI` is returned without ever spinning up a
+ * real renderer.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
