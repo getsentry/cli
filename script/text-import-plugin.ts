@@ -47,6 +47,7 @@ import { basename, dirname, extname, resolve as resolvePath } from "node:path";
 import { build as esbuildBuild, type Plugin } from "esbuild";
 
 const TEXT_IMPORT_NS = "text-import";
+const FILE_PATH_NS = "file-path-import";
 const ANY_FILTER = /.*/;
 
 /** Extensions that need TypeScript/JSX transpilation before embedding. */
@@ -127,10 +128,24 @@ export const textImportPlugin: Plugin = {
           );
         }
 
+        // For CJS bundles (npm distribution), emit a virtual module that
+        // exports the sidecar filename as a string. The consumer resolves
+        // the full path at runtime using import.meta.url. For ESM bundles
+        // (Bun binary build), mark external so Bun.compile embeds the file.
+        if (build.initialOptions.format === "cjs") {
+          return {
+            path: outFilename,
+            namespace: FILE_PATH_NS,
+          };
+        }
         return { path: `./${outFilename}`, external: true };
       }
       return null;
     });
+    build.onLoad({ filter: ANY_FILTER, namespace: FILE_PATH_NS }, (args) => ({
+      contents: `export default ${JSON.stringify(`./${args.path}`)};`,
+      loader: "js",
+    }));
     build.onLoad({ filter: ANY_FILTER, namespace: TEXT_IMPORT_NS }, (args) => {
       const content = readFileSync(args.path, "utf-8");
       return {

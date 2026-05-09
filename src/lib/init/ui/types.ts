@@ -5,14 +5,14 @@
  * provide the actual rendering:
  *
  * - `InkUI`       — Ink-based React UI. Default for interactive runs on
- *                   the Bun-compiled binary. Ink is pure JS but uses
- *                   top-level await internally, which esbuild can't emit
- *                   in our CJS npm bundle — so the npm/Node distribution
- *                   falls back to `LoggingUI` instead.
+ *                   both the Bun binary and the npm/Node distribution.
+ *                   The Bun binary embeds Ink via `with { type: "file" }`;
+ *                   the npm package ships a self-contained ESM sidecar
+ *                   (`dist/ink-app.js`) loaded via dynamic `import()`.
  * - `LoggingUI`   — plain stdout/stderr writes for CI, `--yes`, non-TTY
- *                   environments, the npm/Node distribution, and the
- *                   `--no-tui` escape hatch. Prompts throw —
- *                   non-interactive callers must supply defaults.
+ *                   environments, and the `--no-tui` escape hatch.
+ *                   Prompts throw — non-interactive callers must supply
+ *                   defaults.
  *
  * The factory in `factory.ts` picks an implementation per run.
  *

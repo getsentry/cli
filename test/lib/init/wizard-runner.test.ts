@@ -775,6 +775,29 @@ describe("runWizard", () => {
 
     expect(spinnerMock.stop).toHaveBeenCalledWith("Using existing project");
   });
+
+  test("shows --yes hint when LoggingUI prompt fails", async () => {
+    const { LoggingUIPromptError } = await import(
+      "../../../src/lib/init/ui/logging-ui.js"
+    );
+    const { ui } = createMockUI();
+    const failingUI: WizardUI = {
+      ...ui,
+      spinner: () => spinnerMock,
+      select: () =>
+        Promise.reject(
+          new LoggingUIPromptError(
+            "select",
+            "This is experimental and will modify files"
+          )
+        ),
+    };
+    getUISpy.mockResolvedValue(failingUI);
+
+    await expect(
+      forceStdinTty(() => runWizard(makeOptions({ yes: false })))
+    ).rejects.toThrow("Run with --yes for non-interactive mode.");
+  });
 });
 
 describe("runWizard — MastraClient lifecycle", () => {
