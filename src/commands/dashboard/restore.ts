@@ -71,7 +71,7 @@ export const restoreCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
-        placeholder: "org/project/dashboard",
+        placeholder: "org/dashboard",
         brief: "[<org/project>] <dashboard-id-or-title>",
         parse: String,
       },

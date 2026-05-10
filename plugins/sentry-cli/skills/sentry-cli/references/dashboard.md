@@ -167,7 +167,7 @@ sentry dashboard widget delete 'My Dashboard' --title 'Error Count'
 sentry dashboard widget delete 12345 --index 2
 ```
 
-### `sentry dashboard revisions <org/project/dashboard...>`
+### `sentry dashboard revisions <org/dashboard...>`
 
 List dashboard revisions
 
@@ -175,7 +175,7 @@ List dashboard revisions
 - `-n, --limit <value> - Maximum number of revisions to list - (default: "25")`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
-### `sentry dashboard restore <org/project/dashboard...>`
+### `sentry dashboard restore <org/dashboard...>`
 
 Restore a dashboard revision
 
