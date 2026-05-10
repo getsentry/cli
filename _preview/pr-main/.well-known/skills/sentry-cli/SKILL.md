@@ -360,6 +360,8 @@ Manage Sentry dashboards
 - `sentry dashboard widget add <org/project/dashboard/title...>` — Add a widget to a dashboard
 - `sentry dashboard widget edit <org/project/dashboard...>` — Edit a widget in a dashboard
 - `sentry dashboard widget delete <org/project/dashboard...>` — Delete a widget from a dashboard
+- `sentry dashboard revisions <org/dashboard...>` — List dashboard revisions
+- `sentry dashboard restore <org/dashboard...>` — Restore a dashboard revision
 
 → Full flags and examples: `references/dashboard.md`
 
