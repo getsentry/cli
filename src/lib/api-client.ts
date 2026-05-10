@@ -23,8 +23,10 @@
 export {
   createDashboard,
   getDashboard,
+  listDashboardRevisionsPaginated,
   listDashboardsPaginated,
   queryAllWidgets,
+  restoreDashboardRevision,
   updateDashboard,
 } from "./api/dashboards.js";
 export { queryEvents } from "./api/discover.js";

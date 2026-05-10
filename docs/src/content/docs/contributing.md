@@ -53,7 +53,7 @@ cli/
 │   ├── commands/       # CLI commands
 │   │   ├── auth/        # login, logout, refresh, status, token, whoami
 │   │   ├── cli/         # defaults, feedback, fix, setup, upgrade
-│   │   ├── dashboard/   # list, view, create, add, edit, delete
+│   │   ├── dashboard/   # list, view, create, add, edit, delete, revisions, restore
 │   │   ├── event/       # view, list
 │   │   ├── issue/       # list, events, explain, plan, view, resolve, unresolve, archive, merge
 │   │   ├── log/         # list, view

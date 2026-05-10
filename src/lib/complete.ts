@@ -115,6 +115,8 @@ export const ORG_PROJECT_COMMANDS = new Set([
   "dashboard list",
   "dashboard view",
   "dashboard create",
+  "dashboard revisions",
+  "dashboard restore",
 ]);
 
 /**
