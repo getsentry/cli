@@ -299,7 +299,7 @@ function findNoSolutionReason(artifacts: ArtifactEntry[]): string | undefined {
       return artifact.reason;
     }
   }
-  return undefined;
+  return;
 }
 
 /**
@@ -316,7 +316,7 @@ function searchContainersForNoSolutionReason(
       }
     }
   }
-  return undefined;
+  return;
 }
 
 /**
@@ -401,7 +401,7 @@ export function extractNoSolutionReason(
     }
   }
 
-  return undefined;
+  return;
 }
 
 /**

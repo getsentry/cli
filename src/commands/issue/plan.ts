@@ -168,6 +168,36 @@ function formatPlanOutput(data: PlanData): string {
 }
 
 /**
+ * Gather context about why Seer produced no solution.
+ *
+ * Returns undefined when there's nothing useful to report.
+ */
+function buildNoSolutionContext(
+  state: AutofixState,
+  selectedCause?: RootCause
+): NoSolutionContext | undefined {
+  const reason = extractNoSolutionReason(state);
+  const cause = selectedCause ?? extractRootCauses(state)[0];
+  const files = cause ? extractExaminedFiles([cause]) : [];
+
+  if (!(reason || cause?.description) && files.length === 0) {
+    return;
+  }
+
+  const ctx: NoSolutionContext = {};
+  if (reason) {
+    ctx.reason = reason;
+  }
+  if (cause?.description) {
+    ctx.root_cause = cause.description;
+  }
+  if (files.length > 0) {
+    ctx.files_examined = files;
+  }
+  return ctx;
+}
+
+/**
  * Build the plan data object from autofix state.
  *
  * Stores `solution.data` (not the full artifact) to keep the JSON shape flat —
@@ -189,17 +219,7 @@ function buildPlanData(
   };
 
   if (!solution) {
-    const reason = extractNoSolutionReason(state);
-    const cause = selectedCause ?? extractRootCauses(state)[0];
-    const files = cause ? extractExaminedFiles([cause]) : [];
-
-    if (reason || cause?.description || files.length > 0) {
-      data.no_solution_context = {
-        ...(reason ? { reason } : {}),
-        ...(cause?.description ? { root_cause: cause.description } : {}),
-        ...(files.length > 0 ? { files_examined: files } : {}),
-      };
-    }
+    data.no_solution_context = buildNoSolutionContext(state, selectedCause);
   }
 
   return data;

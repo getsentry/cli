@@ -155,7 +155,8 @@ describe("extractNoSolutionReason", () => {
             {
               key: "solution",
               data: null,
-              reason: "Root cause is infrastructure-level, no code fix identified",
+              reason:
+                "Root cause is infrastructure-level, no code fix identified",
             },
           ],
         },
@@ -291,9 +292,7 @@ describe("extractExaminedFiles", () => {
   });
 
   test("returns empty array when no reproduction steps", () => {
-    const causes: RootCause[] = [
-      { id: 0, description: "Bug" },
-    ];
+    const causes: RootCause[] = [{ id: 0, description: "Bug" }];
 
     expect(extractExaminedFiles(causes)).toEqual([]);
   });
