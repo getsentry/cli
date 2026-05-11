@@ -1,6 +1,67 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.33.0
+
+### New Features ✨
+
+- (dashboard) Add revision history and restore commands by @MathurAditya724 in [#936](https://github.com/getsentry/cli/pull/936)
+
+### Bug Fixes 🐛
+
+#### Init
+
+- Simplify LoggingUI output for non-TTY consumers by @MathurAditya724 in [#941](https://github.com/getsentry/cli/pull/941)
+- Enable interactive Ink UI for npx/Node via ESM sidecar by @MathurAditya724 in [#938](https://github.com/getsentry/cli/pull/938)
+
+### Internal Changes 🔧
+
+- Remove dead isBunRuntime() export by @MathurAditya724 in [#943](https://github.com/getsentry/cli/pull/943)
+- Regenerate docs by @github-actions[bot] in [a4da8bd1](https://github.com/getsentry/cli/commit/a4da8bd1daa609aa520088c9fcaaa9036e285657)
+
+## 0.32.0
+
+### New Features ✨
+
+#### Replay
+
+- Paginate replay segment downloads by @dcramer in [#910](https://github.com/getsentry/cli/pull/910)
+- Add first-class replay querying and inspection by @dcramer in [#904](https://github.com/getsentry/cli/pull/904)
+
+#### Other
+
+- (event) Support multi-event view with newline-separated IDs (CLI-1HT) by @BYK in [#903](https://github.com/getsentry/cli/pull/903)
+- (init) Replace OpenTUI with Ink for the wizard UI by @MathurAditya724 in [#885](https://github.com/getsentry/cli/pull/885)
+- (log) Show custom attributes in log view by @betegon in [#914](https://github.com/getsentry/cli/pull/914)
+- Update @sentry/api to 0.133.0 and adopt pagination improvements by @MathurAditya724 in [#915](https://github.com/getsentry/cli/pull/915)
+- Show org identity for sntrys_ tokens in whoami (CLI-1KG) by @BYK in [#905](https://github.com/getsentry/cli/pull/905)
+
+### Bug Fixes 🐛
+
+#### Init
+
+- Restore ?bridge=1 cache-bust for dev mode by @MathurAditya724 in [#934](https://github.com/getsentry/cli/pull/934)
+- Tighten feedback banner copy by @betegon in [#933](https://github.com/getsentry/cli/pull/933)
+- Extend workflow API timeout by @betegon in [#932](https://github.com/getsentry/cli/pull/932)
+- Pre-bundle Ink sidecar so it loads from $bunfs by @MathurAditya724 in [#929](https://github.com/getsentry/cli/pull/929)
+- Suppress ASCII banner for agent-driven invocations by @MathurAditya724 in [#894](https://github.com/getsentry/cli/pull/894)
+
+#### Other
+
+- (archive) Accept 'forever' as a valid --until value by @BYK in [#918](https://github.com/getsentry/cli/pull/918)
+- (auth) Bake public OAuth client ID as fallback in getClientId() by @BYK in [#916](https://github.com/getsentry/cli/pull/916)
+- (dsn) Detect framework-prefixed DSN env vars in .env files and process.env by @cursor in [#852](https://github.com/getsentry/cli/pull/852)
+- (feedback) Prompt interactively when message is missing in TTY by @MathurAditya724 in [#923](https://github.com/getsentry/cli/pull/923)
+- (install) Pass through no-agent-skills flag by @elucid in [#919](https://github.com/getsentry/cli/pull/919)
+- (issue) Accept 1 positional + --into as valid merge (CLI-1AE) by @BYK in [#920](https://github.com/getsentry/cli/pull/920)
+
+### Internal Changes 🔧
+
+- Update @sentry/api to ^0.141.0 by @MathurAditya724 in [#924](https://github.com/getsentry/cli/pull/924)
+- Add warden.toml to enable Warden analysis on PRs by @MathurAditya724 in [#926](https://github.com/getsentry/cli/pull/926)
+- Add stderr.write lint rule and document repo standards gaps by @BYK in [#906](https://github.com/getsentry/cli/pull/906)
+- Regenerate docs by @github-actions[bot] in [c450b3e3](https://github.com/getsentry/cli/commit/c450b3e30481f50b08ba32fc76395b831ed7dac9)
+
 ## 0.31.0
 
 ### New Features ✨

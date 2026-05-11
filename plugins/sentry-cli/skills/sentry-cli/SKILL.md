@@ -1,6 +1,6 @@
 ---
 name: sentry-cli
-version: 0.32.0-dev.0
+version: 0.34.0-dev.0
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 requires:
   bins: ["sentry"]
@@ -361,6 +361,8 @@ Manage Sentry dashboards
 - `sentry dashboard widget add <org/project/dashboard/title...>` — Add a widget to a dashboard
 - `sentry dashboard widget edit <org/project/dashboard...>` — Edit a widget in a dashboard
 - `sentry dashboard widget delete <org/project/dashboard...>` — Delete a widget from a dashboard
+- `sentry dashboard revisions <org/dashboard...>` — List dashboard revisions
+- `sentry dashboard restore <org/dashboard...>` — Restore a dashboard revision
 
 → Full flags and examples: `references/dashboard.md`
 

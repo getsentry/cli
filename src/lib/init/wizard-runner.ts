@@ -8,13 +8,17 @@
  * All UI I/O — banners, spinners, logs, prompts, outro — flows through
  * a single `WizardUI` instance constructed by `getUI()`. The runner
  * itself is implementation-agnostic: it works the same against
- * `LoggingUI` (CI / npm) and `InkUI` (interactive Bun binary).
+ * `LoggingUI` (CI / `--yes`) and `InkUI` (interactive terminal).
  */
 
 import { randomBytes } from "node:crypto";
 
 import { MastraClient } from "@mastra/client-js";
-import { captureException, getTraceData } from "@sentry/node-core/light";
+import {
+  captureException,
+  getTraceData,
+  setTag,
+} from "@sentry/node-core/light";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { detectAgent } from "../detect-agent.js";
@@ -487,8 +491,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
 
   // Construct the UI once for the entire run; tear down on every exit
   // path via `await using`. The factory picks `InkUI` for interactive
-  // runs on the Bun binary and `LoggingUI` everywhere else (CI,
-  // `--yes`, `--no-tui`, npm/Node distribution).
+  // runs and `LoggingUI` for CI / `--yes` / `--no-tui`.
   const initialWelcome = yes || dryRun ? undefined : buildWelcomeOptions();
   await using ui = await getUIAsync({
     yes,
@@ -599,6 +602,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
             dirListing,
             fileCache,
             existingSentry: existingSentry?.data,
+            knownPlatform: context.existingProject?.platform,
           },
           tracingOptions,
         }),
@@ -650,7 +654,13 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       }
       activeStepId = extracted.stepId;
       ui.setStep?.(extracted.stepId, "in_progress");
-      const activeLabel = STEP_ACTIVE_LABELS[extracted.stepId];
+      let activeLabel = STEP_ACTIVE_LABELS[extracted.stepId];
+      if (
+        extracted.stepId === "detect-platform" &&
+        context.existingProject?.platform
+      ) {
+        activeLabel = `Analyzing project (existing Sentry platform: ${context.existingProject.platform})...`;
+      }
       if (activeLabel && spinState.running) {
         spin.message(activeLabel);
       }
@@ -693,6 +703,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       // failed; the post-dispose report shows the cancel message
       // instead.
       captureException(err);
+      setTag("wizard.outcome", "bailed");
       showCancelledFeedback(ui);
       process.exitCode = 0;
       return;
@@ -702,10 +713,12 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     }
     if (err instanceof WizardError) {
       showFailedFeedback(ui);
+      setTag("wizard.outcome", "errored");
       throw err;
     }
     ui.log.error(errorMessage(err));
     showFailedFeedback(ui);
+    setTag("wizard.outcome", "errored");
     throw new WizardError(errorMessage(err));
   }
 
@@ -719,6 +732,19 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   }
 
   handleFinalResult(result, spin, spinState, ui);
+  setTag("wizard.outcome", "completed");
+  if (result.result?.platform) {
+    setTag("wizard.platform", String(result.result.platform));
+  }
+  if (result.result?.features) {
+    const resultFeatures = result.result.features;
+    setTag(
+      "wizard.features",
+      Array.isArray(resultFeatures)
+        ? resultFeatures.join(",")
+        : String(resultFeatures)
+    );
+  }
 }
 
 function handleFinalResult(
@@ -739,6 +765,7 @@ function handleFinalResult(
     // Map workflow-internal exit codes to semantic EXIT.* constants
     const workflowCode = result.result?.exitCode;
     const exitCode = mapWorkflowExitCode(workflowCode);
+    setTag("wizard.outcome", "errored");
     throw new WizardError("Workflow returned an error", { exitCode });
   }
 

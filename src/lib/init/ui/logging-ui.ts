@@ -83,10 +83,10 @@ export class LoggingUI implements WizardUI {
 
   // ── Lifecycle ─────────────────────────────────────────────────────
 
-  banner(art: string): void {
-    // Plain stderr write, no markdown rendering — the banner already
-    // contains its own ANSI styling and shouldn't be re-processed.
-    this.stderr.write(`\n${art}\n\n`);
+  banner(_art: string): void {
+    // No-op — LoggingUI is used in non-TTY / CI contexts where the
+    // large ASCII banner wastes vertical space and adds noise for
+    // programmatic consumers (agents, scripts, piped output).
   }
 
   intro(title: string): void {
@@ -157,12 +157,12 @@ export class LoggingUI implements WizardUI {
       start: (message?: string) => {
         active = true;
         if (message) {
-          this.writeLine(this.stdout, `... ${this.renderInline(message)}`);
+          this.writeLine(this.stdout, this.renderInline(message));
         }
       },
       message: (message?: string) => {
         if (active && message) {
-          this.writeLine(this.stdout, `... ${this.renderInline(message)}`);
+          this.writeLine(this.stdout, this.renderInline(message));
         }
       },
       stop: (message?: string, code: SpinnerExitCode = 0) => {

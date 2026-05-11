@@ -37,11 +37,13 @@
  * process. We close the stream on dispose to release the libuv
  * handle.
  *
- * **Lazy import.** `ink`, `ink-spinner`, and `react` are all
- * dynamically imported by `createInkUI()` so the npm bundle (which
- * excludes them from the bundle graph) never sees the imports at
- * module-load time. This keeps the `LoggingUI` path cheap to
- * instantiate when interactive UI is not needed.
+ * **Lazy import.** The Ink app sidecar (`ink-app.js`) is a
+ * self-contained ESM bundle with all deps (ink, react, yoga-layout)
+ * inlined. It's loaded lazily by `createInkUI()` via dynamic
+ * `import()` so the `LoggingUI` path stays cheap to instantiate
+ * when interactive UI is not needed. On the Bun binary the sidecar
+ * is embedded in `/$bunfs/`; on the npm/Node distribution it ships
+ * as `dist/ink-app.js` alongside the CJS bundle.
  */
 
 import { openSync } from "node:fs";
@@ -170,20 +172,19 @@ function severityForStopCode(code: SpinnerExitCode): LogSeverity {
  * `text-import-plugin` in `script/build.ts` intercepts this during
  * esbuild: it pre-bundles the .tsx source into self-contained JS
  * (stripping TypeScript, inlining local deps and npm packages,
- * injecting a `createRequire` banner for CJS deps), then marks the
- * import external so Bun.compile picks up the resulting .js file.
+ * injecting a `createRequire` banner for CJS deps).
  *
  * Why pre-bundle? Bun's `/$bunfs/` virtual FS uses a JavaScript
  * parser, not TypeScript — raw .tsx fails on `import { type Foo }`.
  * The `/$bunfs/` environment also has no `node_modules`, so all
  * deps (ink, react, local modules) must be inlined.
  *
- * The npm/Node distribution never reaches `createInkUI()` (the
- * factory routes there only on the Bun binary because Ink uses
- * top-level await that esbuild can't emit in our CJS bundle), so
- * the embedded file is unused on Node. We still produce it because
- * the static import is unconditional; the bundle.ts cleanup step
- * `unlink`s the unused sidecar after bundling.
+ * For the Bun binary build (ESM), the import is marked external so
+ * Bun.compile embeds the file. For the npm CJS bundle, the plugin
+ * emits a virtual module that exports the sidecar filename as a
+ * string — `createInkUI` then resolves it relative to the bundle
+ * and loads it via dynamic `import()`. The sidecar ships as
+ * `dist/ink-app.js` in the npm package.
  */
 // @ts-expect-error: `with { type: "file" }` is Bun-specific and not yet typed in @types/bun
 import inkAppPath from "./ink-app.tsx" with { type: "file" };
@@ -213,22 +214,33 @@ function openFreshTtyForInk(): ReadStream | null {
 export async function createInkUI(
   opts: CreateInkUIOptions = {}
 ): Promise<InkUI> {
-  // Import the Ink App sidecar from the embedded file. The
-  // `with { type: "file" }` import above gives us the virtual path
-  // (e.g. `/$bunfs/root/ink-app-xxx.js`). The text-import-plugin
-  // pre-bundles the .tsx source into self-contained JS at build
-  // time, so the embedded file includes ink, react, and all local
-  // deps — no external resolution needed at runtime.
+  // Import the Ink App sidecar. Three runtime contexts:
   //
-  // NOTE: Do NOT append a query string (e.g. `?bridge=1`) to the
-  // path. Bun's `/$bunfs/` virtual filesystem does not support
-  // query strings — the path lookup fails with ENOENT.
+  // 1. Bun binary: inkAppPath is "/$bunfs/root/ink-app-xxx.js"
+  //    (embedded by Bun.compile). Import directly — no query string
+  //    (/$bunfs/ doesn't support them).
   //
-  // `mountApp()` lives inside the sidecar so it uses the same
-  // ink/react instances as the App's hooks. Importing ink/react
-  // separately in this module would create a second copy of React,
-  // causing "Invalid hook call" errors at runtime.
-  const app = (await import(inkAppPath)) as typeof import("./ink-app.js");
+  // 2. Dev mode (bun run src/bin.ts): inkAppPath is the absolute
+  //    filesystem path to ink-app.tsx. Append ?bridge=1 to bust
+  //    Bun's module cache (otherwise the import returns the path
+  //    string instead of the module's exports).
+  //
+  // 3. Node/npm (npx sentry@latest): inkAppPath is a relative path
+  //    like "./ink-app.js" (emitted by text-import-plugin as a
+  //    string literal). Resolve it to an absolute file:// URL using
+  //    import.meta.url so Node's dynamic import() can load the
+  //    self-contained ESM sidecar from the dist/ directory.
+  let importPath: string;
+  if (inkAppPath.startsWith("/$bunfs/")) {
+    importPath = inkAppPath;
+  } else if (inkAppPath.startsWith("./")) {
+    // Node/npm bundle — resolve relative to the bundle location
+    importPath = new URL(inkAppPath, import.meta.url).href;
+  } else {
+    // Dev mode — absolute filesystem path, cache-bust for Bun
+    importPath = `${inkAppPath}?bridge=1`;
+  }
+  const app = (await import(importPath)) as typeof import("./ink-app.js");
 
   const store = new WizardStore({
     cliVersion: CLI_VERSION,

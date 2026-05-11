@@ -12,7 +12,10 @@ import { describe, expect, test } from "bun:test";
 import { Readable, Writable } from "node:stream";
 import { render } from "ink";
 import { createElement } from "react";
-import { App } from "../../../../src/lib/init/ui/ink-app.js";
+import {
+  App,
+  formatFeedbackBanner,
+} from "../../../../src/lib/init/ui/ink-app.js";
 import { WizardStore } from "../../../../src/lib/init/ui/wizard-store.js";
 
 const LEARN_HEADER_RE = /How Sentry Works/;
@@ -34,8 +37,7 @@ const ANSI_CSI_RE = /\u001B\[[0-9;?]*[ -/]*[@-~]/g;
 const ANSI_OSC_RE = /\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g;
 const LINE_SPLIT_RE = /\r?\n/;
 const RIGHT_ARROW = "\u001B[C";
-const FEEDBACK_BANNER_TEXT =
-  'For feedback run: sentry cli feedback "what worked or broke"';
+const FEEDBACK_BANNER_TEXT = '$ sentry cli feedback "what worked or broke"';
 
 const FRAME_SETTLE_MS = 80;
 const TEST_BANNER_ROWS = [
@@ -173,6 +175,15 @@ function makeReadFiles(count: number): string[] {
 }
 
 describe("Ink App snapshot", () => {
+  test("feedback banner reserves padding on both edges", () => {
+    const banner = formatFeedbackBanner(120, "0.32.0-test.0");
+
+    expect(banner.length).toBe(120);
+    expect(banner.startsWith(" Sentry v0.32.0-test.0")).toBe(true);
+    expect(banner).toContain(FEEDBACK_BANNER_TEXT);
+    expect(banner.endsWith(" ")).toBe(true);
+  });
+
   test("renders full-screen layout at 120 cols", async () => {
     const store = new WizardStore();
     store.appendLog("info", "Hello world");
@@ -271,7 +282,7 @@ describe("Ink App snapshot", () => {
       .find((line) => line.includes("Sentry v") && line.includes("feedback"));
     expect(bannerLine).toBeDefined();
     expect(bannerLine?.indexOf("Sentry v0.32.0-test.0")).toBeLessThan(
-      bannerLine?.indexOf("For feedback run") ?? 0
+      bannerLine?.indexOf("$ sentry cli feedback") ?? 0
     );
   });
 

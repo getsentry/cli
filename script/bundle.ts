@@ -216,18 +216,14 @@ const result = await build({
     "import.meta.url": "import_meta_url",
   },
   // Externalize Node.js built-ins, plus Ink + React + companions.
-  // Ink uses top-level await (in `node_modules/ink/build/reconciler.js`
-  // and `yoga-layout/dist/src/index.js`) which esbuild can't emit in
-  // a CJS bundle, so the packages must stay external for the
-  // npm/Node distribution. The factory in `factory.ts` lazy-imports
-  // the Ink path via `with { type: "file" }` and falls back to
-  // `LoggingUI` on import failure, so a Node user without Ink
-  // installed simply gets the non-TUI flow without a crash.
-  //
-  // The Bun compile (`script/build.ts`) embeds `ink-app.tsx` as a
-  // file resource — at runtime Bun's loader resolves Ink + React
-  // fresh, sidestepping the same CJS-wrapping bug that'd hit if
-  // these were bundled into the binary's pre-compiled JS.
+  // These packages are NOT bundled into the main CJS output because
+  // they use top-level await (esbuild can't emit that in CJS).
+  // Instead, the Ink UI lives in a separate self-contained ESM
+  // sidecar (`dist/ink-app.js`) that the text-import-plugin
+  // pre-bundles with all deps inlined. The main bundle references
+  // the sidecar via a path string and loads it lazily via dynamic
+  // `import()` at runtime. The external list here prevents esbuild
+  // from trying to resolve these packages in the main bundle graph.
   external: [
     "node:*",
     "ink",
@@ -300,18 +296,11 @@ await Bun.write("./dist/index.d.cts", TYPE_DECLARATIONS);
 console.log("  -> dist/bin.cjs (CLI wrapper)");
 console.log("  -> dist/index.d.cts (type declarations)");
 
-// Clean up the `ink-app.js` sidecar that the text-import-plugin
-// drops into `dist/` when it pre-bundles the `with { type: "file" }`
-// import in `src/lib/init/ui/ink-ui.ts`. The npm distribution
-// doesn't run the InkUI factory at all (it's gated to the Bun
-// binary because Ink uses top-level await that we can't bundle
-// into CJS), so the sidecar is unused — removing it just keeps the
-// local `dist/` directory tidy.
-try {
-  await unlink("./dist/ink-app.js");
-} catch {
-  // Sidecar may not exist (e.g. plugin path not exercised) — fine.
-}
+// The `ink-app.js` sidecar (pre-bundled by text-import-plugin) ships
+// with the npm package so `npx sentry@latest init` can load the
+// interactive Ink UI on Node via dynamic import(). The sidecar is
+// self-contained ESM with all deps inlined — no runtime dependencies
+// needed.
 
 // Calculate bundle size (only the main bundle, not source maps)
 const bundleOutput = result.metafile?.outputs["dist/index.cjs"];

@@ -1,6 +1,6 @@
 {
   "name": "sentry",
-  "version": "0.32.0-dev.0",
+  "version": "0.34.0-dev.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/getsentry/cli.git"
@@ -66,7 +66,8 @@
   "files": [
     "dist/bin.cjs",
     "dist/index.cjs",
-    "dist/index.d.cts"
+    "dist/index.d.cts",
+    "dist/ink-app.js"
   ],
   "license": "FSL-1.1-Apache-2.0",
   "packageManager": "bun@1.3.13",
