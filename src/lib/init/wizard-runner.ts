@@ -14,7 +14,11 @@
 import { randomBytes } from "node:crypto";
 
 import { MastraClient } from "@mastra/client-js";
-import { captureException, getTraceData } from "@sentry/node-core/light";
+import {
+  captureException,
+  getTraceData,
+  setTag,
+} from "@sentry/node-core/light";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { detectAgent } from "../detect-agent.js";
@@ -699,6 +703,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       // failed; the post-dispose report shows the cancel message
       // instead.
       captureException(err);
+      setTag("wizard.outcome", "bailed");
       showCancelledFeedback(ui);
       process.exitCode = 0;
       return;
@@ -708,10 +713,12 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     }
     if (err instanceof WizardError) {
       showFailedFeedback(ui);
+      setTag("wizard.outcome", "errored");
       throw err;
     }
     ui.log.error(errorMessage(err));
     showFailedFeedback(ui);
+    setTag("wizard.outcome", "errored");
     throw new WizardError(errorMessage(err));
   }
 
@@ -725,6 +732,19 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   }
 
   handleFinalResult(result, spin, spinState, ui);
+  setTag("wizard.outcome", "completed");
+  if (result.result?.platform) {
+    setTag("wizard.platform", String(result.result.platform));
+  }
+  if (result.result?.features) {
+    const resultFeatures = result.result.features;
+    setTag(
+      "wizard.features",
+      Array.isArray(resultFeatures)
+        ? resultFeatures.join(",")
+        : String(resultFeatures)
+    );
+  }
 }
 
 function handleFinalResult(
@@ -745,6 +765,7 @@ function handleFinalResult(
     // Map workflow-internal exit codes to semantic EXIT.* constants
     const workflowCode = result.result?.exitCode;
     const exitCode = mapWorkflowExitCode(workflowCode);
+    setTag("wizard.outcome", "errored");
     throw new WizardError("Workflow returned an error", { exitCode });
   }
 
