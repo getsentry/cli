@@ -423,17 +423,54 @@ const MAX_RESUME_RETRIES = 3;
 const RETRY_BACKOFF_MS = [2000, 4000, 8000];
 
 type ResumeRetryArgs = {
-  run: { resumeAsync: (args: Record<string, unknown>) => Promise<unknown> };
+  run: {
+    resumeAsync: (args: Record<string, unknown>) => Promise<unknown>;
+    readonly runId: string;
+  };
+  workflow: {
+    runById: (runId: string, opts?: { fields?: string[] }) => Promise<unknown>;
+  };
   stepId: string;
   resumeData: Record<string, unknown>;
   tracingOptions: Record<string, unknown>;
   ui: WizardUI;
 };
 
+/**
+ * Detect Mastra's "step not suspended" 500 — means the server already
+ * processed this step (our previous request succeeded but the response was
+ * dropped before we received it). The MastraClientError message embeds the
+ * server body, e.g.:
+ *   "HTTP error! status: 500 - {"error":"This workflow step 'X' was not suspended..."}"
+ */
+function isStepAlreadyAdvancedError(err: unknown): boolean {
+  return err instanceof Error && err.message.includes("not suspended");
+}
+
+/**
+ * Recover from a stale-step retry by fetching the current run state.
+ * If the workflow has already advanced (e.g. plan-codemods is now suspended),
+ * the returned WorkflowRunResult lets the main loop continue from the right step.
+ */
+async function tryRecoverCurrentRunState(
+  workflow: ResumeRetryArgs["workflow"],
+  runId: string
+): Promise<WorkflowRunResult | null> {
+  try {
+    const state = await workflow.runById(runId, {
+      fields: ["steps", "activeStepsPath"],
+    });
+    return assertWorkflowResult(state);
+  } catch {
+    return null;
+  }
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: retry loop branches across transient errors, stale-step recovery, and backoff
 async function resumeWithRetry(
   args: ResumeRetryArgs
 ): Promise<WorkflowRunResult> {
-  const { run, stepId, resumeData, tracingOptions, ui } = args;
+  const { run, workflow, stepId, resumeData, tracingOptions, ui } = args;
   let lastError: unknown;
   for (let attempt = 0; attempt <= MAX_RESUME_RETRIES; attempt++) {
     try {
@@ -458,6 +495,18 @@ async function resumeWithRetry(
       return assertWorkflowResult(raw);
     } catch (err) {
       lastError = err;
+      // "Step not suspended" means the server processed our step but the
+      // response was dropped (network blip, CF response timeout, etc.).
+      // Retrying the same step will always 500. Fetch the current run state
+      // so the main loop can continue from whichever step is actually suspended.
+      if (isStepAlreadyAdvancedError(err)) {
+        ui.clearOverlay?.();
+        const recovered = await tryRecoverCurrentRunState(workflow, run.runId);
+        if (recovered) {
+          return recovered;
+        }
+        // Recovery failed — fall through to normal retry.
+      }
       if (attempt === MAX_RESUME_RETRIES) {
         ui.clearOverlay?.();
         throw err;
@@ -546,6 +595,10 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     baseUrl: MASTRA_API_URL,
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     abortSignal: abortController.signal,
+    // Disable Mastra's built-in retries — resumeWithRetry is the sole retry
+    // layer. Without this, each CLI retry attempt triggers 4 Mastra-internal
+    // attempts, producing up to 12 Sentry events per single wizard failure.
+    retries: 0,
     fetch: ((url, init) => {
       const traceData = getTraceData();
       // Preserve `init.signal` via the spread — MastraClient may pass its
@@ -680,6 +733,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
 
       result = await resumeWithRetry({
         run,
+        workflow,
         stepId: extracted.stepId,
         resumeData,
         tracingOptions,
