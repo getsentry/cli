@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-dashboard
-version: 0.32.0
+version: 0.33.0
 description: Manage Sentry dashboards
 requires:
   bins: ["sentry"]
@@ -166,5 +166,20 @@ sentry dashboard widget delete 'My Dashboard' --title 'Error Count'
 # Delete by index
 sentry dashboard widget delete 12345 --index 2
 ```
+
+### `sentry dashboard revisions <org/dashboard...>`
+
+List dashboard revisions
+
+**Flags:**
+- `-n, --limit <value> - Maximum number of revisions to list - (default: "25")`
+- `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
+
+### `sentry dashboard restore <org/dashboard...>`
+
+Restore a dashboard revision
+
+**Flags:**
+- `-r, --revision <value> - Revision ID to restore`
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
