@@ -10,6 +10,7 @@ export type ExistingProjectData = {
   projectId: string;
   dsn: string;
   url: string;
+  platform?: string;
 };
 
 export type WizardOptions = {
