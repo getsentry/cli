@@ -22,6 +22,8 @@ import {
 import { logger } from "../../lib/logger.js";
 import {
   type AutofixState,
+  extractExaminedFiles,
+  extractNoSolutionReason,
   extractRootCauses,
   extractSolution,
   type RootCause,
@@ -107,24 +109,62 @@ function validateCauseSelection(
   return causeId;
 }
 
+/** Context about why no solution was produced */
+type NoSolutionContext = {
+  /** Seer's reason for not producing a solution (from the artifact) */
+  reason?: string;
+  /** Root cause description that was analyzed */
+  root_cause?: string;
+  /** Files Seer examined during analysis */
+  files_examined?: string[];
+};
+
 /** Return type for issue plan — includes state metadata and solution data */
 type PlanData = {
   run_id: number;
   status: string;
   /** The solution data (without the artifact wrapper). Null when no solution is available. */
   solution: SolutionArtifact["data"] | null;
+  /** Context about why no solution was produced. Only present when solution is null. */
+  no_solution_context?: NoSolutionContext;
 };
 
 /**
  * Format solution plan data for human-readable terminal output.
  *
- * Returns the formatted solution or a "no solution" message.
+ * Returns the formatted solution, or a contextual message explaining
+ * why no solution was produced.
  */
 function formatPlanOutput(data: PlanData): string {
   if (data.solution) {
     return formatSolution({ key: "solution", data: data.solution });
   }
-  return "No solution found. Check the Sentry web UI for details.";
+
+  const lines: string[] = [];
+  const ctx = data.no_solution_context;
+
+  if (ctx?.reason) {
+    lines.push(`No solution found: ${ctx.reason}`);
+  } else {
+    lines.push(
+      "No solution found. Seer completed analysis but could not identify a code fix."
+    );
+  }
+
+  if (ctx?.root_cause) {
+    lines.push("");
+    lines.push(`Root cause analyzed: ${ctx.root_cause}`);
+  }
+
+  if (ctx?.files_examined && ctx.files_examined.length > 0) {
+    lines.push("");
+    lines.push("Files examined:");
+    for (const file of ctx.files_examined) {
+      lines.push(`  ${file}`);
+    }
+  }
+
+  return lines.join("\n");
 }
 
 /**
@@ -132,14 +172,37 @@ function formatPlanOutput(data: PlanData): string {
  *
  * Stores `solution.data` (not the full artifact) to keep the JSON shape flat —
  * consumers get `{ run_id, status, solution: { one_line_summary, steps, ... } }`.
+ *
+ * When no solution is available, includes context about why (reason from the
+ * API, root cause description, and files examined) so the user isn't left
+ * with a bare "no solution found" message.
  */
-function buildPlanData(state: AutofixState): PlanData {
+function buildPlanData(
+  state: AutofixState,
+  selectedCause?: RootCause
+): PlanData {
   const solution = extractSolution(state);
-  return {
+  const data: PlanData = {
     run_id: state.run_id,
     status: state.status,
     solution: solution?.data ?? null,
   };
+
+  if (!solution) {
+    const reason = extractNoSolutionReason(state);
+    const cause = selectedCause ?? extractRootCauses(state)[0];
+    const files = cause ? extractExaminedFiles([cause]) : [];
+
+    if (reason || cause?.description || files.length > 0) {
+      data.no_solution_context = {
+        ...(reason ? { reason } : {}),
+        ...(cause?.description ? { root_cause: cause.description } : {}),
+        ...(files.length > 0 ? { files_examined: files } : {}),
+      };
+    }
+  }
+
+  return data;
 }
 
 export const planCommand = buildCommand({
@@ -225,7 +288,7 @@ export const planCommand = buildCommand({
       if (!flags.force) {
         const existingSolution = extractSolution(state);
         if (existingSolution) {
-          return yield new CommandOutput(buildPlanData(state));
+          return yield new CommandOutput(buildPlanData(state, selectedCause));
         }
       }
 
@@ -263,7 +326,7 @@ export const planCommand = buildCommand({
         throw new Error("Plan creation was cancelled.");
       }
 
-      return yield new CommandOutput(buildPlanData(finalState));
+      return yield new CommandOutput(buildPlanData(finalState, selectedCause));
     } catch (error) {
       // Handle API errors with friendly messages
       if (error instanceof ApiError) {

@@ -286,6 +286,40 @@ function findSolutionInArtifacts(
 }
 
 /**
+ * Search artifacts for a solution-keyed entry and return its reason string.
+ *
+ * When Seer completes but cannot produce a code fix, the API may return
+ * `{ key: "solution", data: null, reason: "..." }`. The full artifact
+ * fails `SolutionArtifactSchema` validation (data is required), but the
+ * `reason` field still carries useful context for the user.
+ */
+function findNoSolutionReason(artifacts: ArtifactEntry[]): string | undefined {
+  for (const artifact of artifacts) {
+    if (artifact.key === "solution" && artifact.reason) {
+      return artifact.reason;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Search containers (blocks or steps) for a no-solution reason.
+ */
+function searchContainersForNoSolutionReason(
+  containers: WithArtifacts[]
+): string | undefined {
+  for (const container of containers) {
+    if (container.artifacts) {
+      const reason = findNoSolutionReason(container.artifacts);
+      if (reason) {
+        return reason;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
  * Search an array of containers (blocks or steps) for a solution artifact.
  */
 function searchContainersForSolution(
@@ -333,4 +367,61 @@ export function extractSolution(state: AutofixState): SolutionArtifact | null {
   }
 
   return null;
+}
+
+/**
+ * Extract the reason why no solution was produced.
+ *
+ * When Seer completes analysis but cannot produce a code fix, the API
+ * returns a solution artifact with `data: null` and a `reason` string.
+ * This function searches blocks and steps for that reason.
+ *
+ * @param state - Autofix state (may contain blocks or steps with artifacts)
+ * @returns Reason string if found, undefined otherwise
+ */
+export function extractNoSolutionReason(
+  state: AutofixState
+): string | undefined {
+  const stateWithExtras = state as AutofixState & {
+    blocks?: WithArtifacts[];
+    steps?: WithArtifacts[];
+  };
+
+  if (stateWithExtras.blocks) {
+    const reason = searchContainersForNoSolutionReason(stateWithExtras.blocks);
+    if (reason) {
+      return reason;
+    }
+  }
+
+  if (stateWithExtras.steps) {
+    const reason = searchContainersForNoSolutionReason(stateWithExtras.steps);
+    if (reason) {
+      return reason;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Extract file paths examined during root cause analysis.
+ *
+ * Collects file paths from reproduction steps across all root causes.
+ *
+ * @param causes - Array of root causes from the autofix state
+ * @returns Deduplicated array of file paths, or empty array if none found
+ */
+export function extractExaminedFiles(causes: RootCause[]): string[] {
+  const files = new Set<string>();
+  for (const cause of causes) {
+    if (cause.root_cause_reproduction) {
+      for (const step of cause.root_cause_reproduction) {
+        if (step.relevant_code_file?.file_path) {
+          files.add(step.relevant_code_file.file_path);
+        }
+      }
+    }
+  }
+  return [...files];
 }
