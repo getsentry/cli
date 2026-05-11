@@ -63,19 +63,18 @@ export function formatProgressLine(message: string, tick: number): string {
 /**
  * Extract the latest progress message from autofix state.
  *
+ * Only returns progress from the most recent (last) step to avoid showing
+ * stale messages from earlier phases (e.g. RCA progress during solution polling).
+ *
  * @param state - Current autofix state
  * @returns Latest progress message or default
  */
 export function getProgressMessage(state: AutofixState): string {
-  if (!state.steps) {
-    return "Processing...";
-  }
-
-  // Find the most recent progress message
-  for (let i = state.steps.length - 1; i >= 0; i--) {
-    const step = state.steps[i];
-    if (step?.progress && step.progress.length > 0) {
-      const lastProgress = step.progress.at(-1);
+  if (state.steps && state.steps.length > 0) {
+    // Only look at the last step — earlier steps belong to previous phases
+    const currentStep = state.steps.at(-1);
+    if (currentStep?.progress && currentStep.progress.length > 0) {
+      const lastProgress = currentStep.progress.at(-1);
       if (lastProgress?.message) {
         return lastProgress.message;
       }
