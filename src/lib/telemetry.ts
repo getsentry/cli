@@ -205,7 +205,7 @@ export async function withTelemetry<T>(
   }
 
   try {
-    return await Sentry.startSpanManual(
+    return await Sentry.startSpan(
       { name: "cli.command", op: "cli.command", forceTransaction: true },
       async (span) => {
         try {
@@ -219,8 +219,6 @@ export async function withTelemetry<T>(
             recordApiErrorOnSpan(span, e as ApiError);
           }
           throw e;
-        } finally {
-          span.end();
         }
       }
     );
