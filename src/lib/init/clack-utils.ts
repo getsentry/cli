@@ -145,9 +145,9 @@ export const CANONICAL_STEP_ORDER: readonly string[] = [
   "detect-platform",
   "ensure-sentry-project",
   "select-features",
-  "install-deps",
   "plan-codemods",
   "apply-codemods",
+  "install-deps",
   "verify-changes",
   "open-sentry-ui",
 ];
@@ -169,9 +169,9 @@ export const CHECKLIST_VISIBLE_STEPS: readonly string[] = [
   "detect-platform",
   "ensure-sentry-project",
   "select-features",
-  "install-deps",
   "plan-codemods",
   "apply-codemods",
+  "install-deps",
   "verify-changes",
   "open-sentry-ui",
 ];
