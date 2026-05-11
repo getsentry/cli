@@ -175,11 +175,31 @@ List dashboard revisions
 - `-n, --limit <value> - Maximum number of revisions to list - (default: "25")`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
+**Examples:**
+
+```bash
+# List revisions for a dashboard
+sentry dashboard revisions 'Frontend Performance'
+
+# With explicit org
+sentry dashboard revisions my-org/ 12345
+```
+
 ### `sentry dashboard restore <org/dashboard...>`
 
 Restore a dashboard revision
 
 **Flags:**
 - `-r, --revision <value> - Revision ID to restore`
+
+**Examples:**
+
+```bash
+# Restore a specific revision
+sentry dashboard restore 'Frontend Performance' --revision 3
+
+# With explicit org/dashboard ID
+sentry dashboard restore my-org/ 12345 --revision 1
+```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
