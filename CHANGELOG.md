@@ -1,6 +1,24 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.33.0
+
+### New Features ✨
+
+- (dashboard) Add revision history and restore commands by @MathurAditya724 in [#936](https://github.com/getsentry/cli/pull/936)
+
+### Bug Fixes 🐛
+
+#### Init
+
+- Simplify LoggingUI output for non-TTY consumers by @MathurAditya724 in [#941](https://github.com/getsentry/cli/pull/941)
+- Enable interactive Ink UI for npx/Node via ESM sidecar by @MathurAditya724 in [#938](https://github.com/getsentry/cli/pull/938)
+
+### Internal Changes 🔧
+
+- Remove dead isBunRuntime() export by @MathurAditya724 in [#943](https://github.com/getsentry/cli/pull/943)
+- Regenerate docs by @github-actions[bot] in [a4da8bd1](https://github.com/getsentry/cli/commit/a4da8bd1daa609aa520088c9fcaaa9036e285657)
+
 ## 0.32.0
 
 ### New Features ✨
