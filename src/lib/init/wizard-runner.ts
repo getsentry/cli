@@ -733,13 +733,16 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
 
   handleFinalResult(result, spin, spinState, ui);
   setTag("wizard.outcome", "completed");
-  if (result.result?.platform)
+  if (result.result?.platform) {
     setTag("wizard.platform", String(result.result.platform));
+  }
   if (result.result?.features) {
-    const features = result.result.features;
+    const resultFeatures = result.result.features;
     setTag(
       "wizard.features",
-      Array.isArray(features) ? features.join(",") : String(features)
+      Array.isArray(resultFeatures)
+        ? resultFeatures.join(",")
+        : String(resultFeatures)
     );
   }
 }
