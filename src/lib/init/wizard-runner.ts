@@ -598,6 +598,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
             dirListing,
             fileCache,
             existingSentry: existingSentry?.data,
+            knownPlatform: context.existingProject?.platform,
           },
           tracingOptions,
         }),
@@ -649,7 +650,13 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       }
       activeStepId = extracted.stepId;
       ui.setStep?.(extracted.stepId, "in_progress");
-      const activeLabel = STEP_ACTIVE_LABELS[extracted.stepId];
+      let activeLabel = STEP_ACTIVE_LABELS[extracted.stepId];
+      if (
+        extracted.stepId === "detect-platform" &&
+        context.existingProject?.platform
+      ) {
+        activeLabel = `Analyzing project (existing Sentry platform: ${context.existingProject.platform})...`;
+      }
       if (activeLabel && spinState.running) {
         spin.message(activeLabel);
       }
