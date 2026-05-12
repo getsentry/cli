@@ -18,6 +18,7 @@
  */
 
 import path from "node:path";
+import { setTag } from "@sentry/node-core/light";
 import type { SentryContext } from "../context.js";
 import { findProjectsBySlug } from "../lib/api/projects.js";
 import { looksLikePath, parseOrgProjectArg } from "../lib/arg-parsing.js";
@@ -369,7 +370,12 @@ export const initCommand = buildCommand<
     // Non-TTY callers (CI/agents) must provide every interactive choice
     // needed to start setup. Fail before project lookup, org prefetch, or
     // UI creation so the error is deterministic and actionable.
-    validateNonInteractiveInit(this, flags, featuresList);
+    try {
+      validateNonInteractiveInit(this, flags, featuresList);
+    } catch (err) {
+      setTag("wizard.outcome", "context_error");
+      throw err;
+    }
 
     // 4. Resolve target → org + project
     //    Validation of user-provided slugs happens inside resolveTarget.
