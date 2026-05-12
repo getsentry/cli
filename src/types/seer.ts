@@ -242,20 +242,47 @@ export function isTerminalStatus(status: string): boolean {
   return TERMINAL_STATUSES.includes(status as AutofixStatus);
 }
 
+/** Container that may hold root cause analysis data */
+type WithCauses = { key: string; causes?: RootCause[] };
+
 /**
- * Extract root causes from autofix state steps.
+ * Search an array of containers (blocks or steps) for root causes.
+ */
+function searchContainersForRootCauses(
+  containers: WithCauses[]
+): RootCause[] | null {
+  for (const container of containers) {
+    if (container.key === "root_cause_analysis" && container.causes) {
+      return container.causes;
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract root causes from autofix state.
+ * Searches through both blocks and steps for root cause analysis data.
  *
  * @param state - The autofix state containing analysis steps
  * @returns Array of root causes, or empty array if none found
  */
 export function extractRootCauses(state: AutofixState): RootCause[] {
-  if (!state.steps) {
-    return [];
+  const stateWithExtras = state as AutofixState & {
+    blocks?: WithCauses[];
+    steps?: WithCauses[];
+  };
+
+  if (stateWithExtras.blocks) {
+    const causes = searchContainersForRootCauses(stateWithExtras.blocks);
+    if (causes) {
+      return causes;
+    }
   }
 
-  for (const step of state.steps) {
-    if (step.key === "root_cause_analysis" && step.causes) {
-      return step.causes;
+  if (stateWithExtras.steps) {
+    const causes = searchContainersForRootCauses(stateWithExtras.steps);
+    if (causes) {
+      return causes;
     }
   }
 

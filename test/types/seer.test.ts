@@ -138,6 +138,61 @@ describe("extractRootCauses", () => {
 
     expect(extractRootCauses(state)).toEqual([]);
   });
+
+  test("extracts causes from root_cause_analysis in blocks", () => {
+    const state = {
+      run_id: 456,
+      status: "COMPLETED",
+      blocks: [
+        {
+          key: "other_block",
+          status: "COMPLETED",
+        },
+        {
+          key: "root_cause_analysis",
+          status: "COMPLETED",
+          causes: [
+            {
+              id: 0,
+              description: "Null pointer in request handler",
+              relevant_repos: ["org/backend"],
+            },
+          ],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    const causes = extractRootCauses(state);
+    expect(causes).toHaveLength(1);
+    expect(causes[0]?.description).toBe("Null pointer in request handler");
+  });
+
+  test("prefers blocks over steps when both contain root causes", () => {
+    const state = {
+      run_id: 789,
+      status: "COMPLETED",
+      blocks: [
+        {
+          key: "root_cause_analysis",
+          status: "COMPLETED",
+          causes: [{ id: 0, description: "From blocks" }],
+        },
+      ],
+      steps: [
+        {
+          id: "step-1",
+          key: "root_cause_analysis",
+          status: "COMPLETED",
+          title: "Root Cause Analysis",
+          causes: [{ id: 0, description: "From steps" }],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    const causes = extractRootCauses(state);
+    expect(causes).toHaveLength(1);
+    expect(causes[0]?.description).toBe("From blocks");
+  });
 });
 
 describe("extractNoSolutionReason", () => {
