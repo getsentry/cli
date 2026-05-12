@@ -764,8 +764,12 @@ export function getExitCode(error: unknown): number {
  */
 export function isUserError(error: unknown): boolean {
   if (error instanceof ApiError) {
-    // 400 usually means the CLI constructed a bad request. Other 4xx statuses
-    // are user/account/API-state problems: no access, missing entity, etc.
+    // Status 0 = network-level failure (DNS, ECONNREFUSED) — user environment,
+    // not a CLI bug. 400 usually means the CLI constructed a bad request.
+    // Other 4xx statuses are user/account/API-state problems.
+    if (error.status === 0) {
+      return true;
+    }
     return error.status > 400 && error.status < 500;
   }
 

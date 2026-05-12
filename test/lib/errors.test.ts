@@ -497,6 +497,7 @@ describe("isUserError", () => {
     ["DeviceFlowError", new DeviceFlowError("slow_down"), true],
     ["SeerError", new SeerError("not_enabled"), true],
     ["WizardError", new WizardError("wizard failed"), true],
+    ["ApiError 0 (network)", new ApiError("network error", 0), true],
     ["ApiError 400", new ApiError("bad request", 400), false],
     ["ApiError 401", new ApiError("unauthorized", 401), true],
     ["ApiError 418", new ApiError("teapot", 418), true],
