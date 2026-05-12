@@ -176,7 +176,7 @@ describe("getAutofixState", () => {
 });
 
 describe("triggerSolutionPlanning", () => {
-  test("sends POST request to autofix endpoint", async () => {
+  test("sends POST request to autofix update endpoint", async () => {
     let capturedRequest: Request | undefined;
     let capturedBody: unknown;
 
@@ -190,15 +190,19 @@ describe("triggerSolutionPlanning", () => {
       });
     };
 
-    await triggerSolutionPlanning("test-org", "123456789", 12_345);
+    await triggerSolutionPlanning("test-org", "123456789", 12_345, 99);
 
     expect(capturedRequest?.method).toBe("POST");
     expect(capturedRequest?.url).toContain(
-      "/organizations/test-org/issues/123456789/autofix/"
+      "/organizations/test-org/issues/123456789/autofix/update/"
     );
     expect(capturedBody).toEqual({
       run_id: 12_345,
-      step: "solution",
+      payload: {
+        type: "select_root_cause",
+        cause_id: 99,
+        stopping_point: "solution",
+      },
     });
   });
 });

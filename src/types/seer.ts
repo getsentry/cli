@@ -242,20 +242,47 @@ export function isTerminalStatus(status: string): boolean {
   return TERMINAL_STATUSES.includes(status as AutofixStatus);
 }
 
+/** Container that may hold root cause analysis data */
+type WithCauses = { key: string; causes?: RootCause[] };
+
 /**
- * Extract root causes from autofix state steps.
+ * Search an array of containers (blocks or steps) for root causes.
+ */
+function searchContainersForRootCauses(
+  containers: WithCauses[]
+): RootCause[] | null {
+  for (const container of containers) {
+    if (container.key === "root_cause_analysis" && container.causes) {
+      return container.causes;
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract root causes from autofix state.
+ * Searches through both blocks and steps for root cause analysis data.
  *
  * @param state - The autofix state containing analysis steps
  * @returns Array of root causes, or empty array if none found
  */
 export function extractRootCauses(state: AutofixState): RootCause[] {
-  if (!state.steps) {
-    return [];
+  const stateWithExtras = state as AutofixState & {
+    blocks?: WithCauses[];
+    steps?: WithCauses[];
+  };
+
+  if (stateWithExtras.blocks) {
+    const causes = searchContainersForRootCauses(stateWithExtras.blocks);
+    if (causes) {
+      return causes;
+    }
   }
 
-  for (const step of state.steps) {
-    if (step.key === "root_cause_analysis" && step.causes) {
-      return step.causes;
+  if (stateWithExtras.steps) {
+    const causes = searchContainersForRootCauses(stateWithExtras.steps);
+    if (causes) {
+      return causes;
     }
   }
 
@@ -286,6 +313,40 @@ function findSolutionInArtifacts(
 }
 
 /**
+ * Search artifacts for a solution-keyed entry and return its reason string.
+ *
+ * When Seer completes but cannot produce a code fix, the API may return
+ * `{ key: "solution", data: null, reason: "..." }`. The full artifact
+ * fails `SolutionArtifactSchema` validation (data is required), but the
+ * `reason` field still carries useful context for the user.
+ */
+function findNoSolutionReason(artifacts: ArtifactEntry[]): string | undefined {
+  for (const artifact of artifacts) {
+    if (artifact.key === "solution" && artifact.reason) {
+      return artifact.reason;
+    }
+  }
+  return;
+}
+
+/**
+ * Search containers (blocks or steps) for a no-solution reason.
+ */
+function searchContainersForNoSolutionReason(
+  containers: WithArtifacts[]
+): string | undefined {
+  for (const container of containers) {
+    if (container.artifacts) {
+      const reason = findNoSolutionReason(container.artifacts);
+      if (reason) {
+        return reason;
+      }
+    }
+  }
+  return;
+}
+
+/**
  * Search an array of containers (blocks or steps) for a solution artifact.
  */
 function searchContainersForSolution(
@@ -302,35 +363,157 @@ function searchContainersForSolution(
   return null;
 }
 
+/** Step-level solution item returned by the Seer API */
+type StepSolutionItem = {
+  title: string;
+  code_snippet_and_analysis?: string;
+  relevant_code_file?: { file_path: string | null; repo_name: string };
+};
+
+/** Step shape with passthrough fields for solution data */
+type StepWithSolution = {
+  key: string;
+  description?: string;
+  solution?: StepSolutionItem[];
+};
+
+/**
+ * Search containers for step-level solution data.
+ *
+ * The Seer API returns solution data directly on steps with `key === "solution"`
+ * rather than inside the `artifacts` array. This function finds such steps and
+ * maps the data to the existing {@link SolutionArtifact} shape so downstream
+ * formatters and commands don't need changes.
+ */
+function searchContainersForStepLevelSolution(
+  containers: StepWithSolution[]
+): SolutionArtifact | null {
+  for (const container of containers) {
+    if (
+      container.key === "solution" &&
+      container.solution &&
+      container.solution.length > 0
+    ) {
+      return {
+        key: "solution",
+        data: {
+          one_line_summary: container.description ?? "",
+          steps: container.solution.map((item) => ({
+            title: item.title,
+            description: item.code_snippet_and_analysis ?? "",
+          })),
+        },
+      };
+    }
+  }
+  return null;
+}
+
 /**
  * Extract solution artifact from autofix state.
- * Searches through both blocks and steps for the solution artifact.
  *
- * @param state - Autofix state (may contain blocks or steps with artifacts)
+ * Searches through blocks and steps for solution data. The Seer API may
+ * return solution data in two formats:
+ * 1. Step-level: `step.solution[]` array with `step.description` (current API)
+ * 2. Artifact-level: `step.artifacts[]` with `key === "solution"` (legacy/fallback)
+ *
+ * Step-level data is checked first since it matches the current API response shape.
+ *
+ * @param state - Autofix state (may contain blocks or steps with solution data)
  * @returns SolutionArtifact if found, null otherwise
  */
 export function extractSolution(state: AutofixState): SolutionArtifact | null {
   // Access blocks and steps from passthrough fields
   const stateWithExtras = state as AutofixState & {
-    blocks?: WithArtifacts[];
-    steps?: WithArtifacts[];
+    blocks?: (WithArtifacts & StepWithSolution)[];
+    steps?: (WithArtifacts & StepWithSolution)[];
   };
 
-  // Search in blocks first (explorer mode / newer API)
+  // Search blocks first (explorer mode / newer API)
   if (stateWithExtras.blocks) {
-    const solution = searchContainersForSolution(stateWithExtras.blocks);
-    if (solution) {
-      return solution;
+    const stepLevel = searchContainersForStepLevelSolution(
+      stateWithExtras.blocks
+    );
+    if (stepLevel) {
+      return stepLevel;
+    }
+    const artifactLevel = searchContainersForSolution(stateWithExtras.blocks);
+    if (artifactLevel) {
+      return artifactLevel;
     }
   }
 
-  // Search in steps (regular autofix API)
+  // Search steps (regular autofix API)
   if (stateWithExtras.steps) {
-    const solution = searchContainersForSolution(stateWithExtras.steps);
-    if (solution) {
-      return solution;
+    const stepLevel = searchContainersForStepLevelSolution(
+      stateWithExtras.steps
+    );
+    if (stepLevel) {
+      return stepLevel;
+    }
+    const artifactLevel = searchContainersForSolution(stateWithExtras.steps);
+    if (artifactLevel) {
+      return artifactLevel;
     }
   }
 
   return null;
+}
+
+/**
+ * Extract the reason why no solution was produced.
+ *
+ * When Seer completes analysis but cannot produce a code fix, the API
+ * returns a solution artifact with `data: null` and a `reason` string.
+ * This function searches blocks and steps for that reason.
+ *
+ * @param state - Autofix state (may contain blocks or steps with artifacts)
+ * @returns Reason string if found, undefined otherwise
+ */
+export function extractNoSolutionReason(
+  state: AutofixState
+): string | undefined {
+  const stateWithExtras = state as AutofixState & {
+    blocks?: WithArtifacts[];
+    steps?: WithArtifacts[];
+  };
+
+  if (stateWithExtras.blocks) {
+    const reason = searchContainersForNoSolutionReason(stateWithExtras.blocks);
+    if (reason) {
+      return reason;
+    }
+  }
+
+  if (stateWithExtras.steps) {
+    const reason = searchContainersForNoSolutionReason(stateWithExtras.steps);
+    if (reason) {
+      return reason;
+    }
+  }
+
+  return;
+}
+
+/**
+ * Extract file paths examined during root cause analysis.
+ *
+ * Collects file paths from reproduction steps across all root causes.
+ *
+ * @param causes - Array of root causes from the autofix state
+ * @returns Deduplicated array of file paths, or empty array if none found
+ */
+export function extractExaminedFiles(causes: RootCause[]): string[] {
+  const files = new Set<string>();
+  for (const cause of causes) {
+    if (cause.root_cause_reproduction) {
+      for (const step of cause.root_cause_reproduction) {
+        const path = step.relevant_code_file?.file_path;
+        if (path && path !== "N/A") {
+          files.add(path);
+        }
+      }
+    }
+  }
+  return [...files];
 }

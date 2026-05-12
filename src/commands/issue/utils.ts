@@ -927,8 +927,13 @@ export async function ensureRootCauseAnalysis(
 /**
  * Check if polling should stop based on current state.
  *
+ * Terminal statuses (COMPLETED, ERROR, CANCELLED) always stop polling.
+ * When `stopOnWaitingForUser` is true, also stops on interactive statuses:
+ * - `WAITING_FOR_USER_RESPONSE` — root cause analysis needs user input
+ * - `NEED_MORE_INFORMATION` — solution step completed, awaiting user decision
+ *
  * @param state - Current autofix state
- * @param stopOnWaitingForUser - Whether to stop on WAITING_FOR_USER_RESPONSE status
+ * @param stopOnWaitingForUser - Whether to stop on interactive statuses
  * @returns True if polling should stop
  */
 function shouldStopPolling(
@@ -938,7 +943,11 @@ function shouldStopPolling(
   if (isTerminalStatus(state.status)) {
     return true;
   }
-  if (stopOnWaitingForUser && state.status === "WAITING_FOR_USER_RESPONSE") {
+  if (
+    stopOnWaitingForUser &&
+    (state.status === "WAITING_FOR_USER_RESPONSE" ||
+      state.status === "NEED_MORE_INFORMATION")
+  ) {
     return true;
   }
   return false;
