@@ -21,6 +21,7 @@ import {
   prefetchStablePatches,
 } from "./delta-upgrade.js";
 import { getEnv } from "./env.js";
+import { isUserError } from "./errors.js";
 import { cyan, muted } from "./formatters/colors.js";
 import { cleanupPatchCache } from "./patch-cache.js";
 import { fetchLatestFromGitHub, fetchLatestNightlyVersion } from "./upgrade.js";
@@ -63,6 +64,8 @@ const SUPPRESSED_CLI_SUBCOMMANDS = new Set(["setup", "fix"]);
 
 /** AbortController for pending version check fetch */
 let pendingAbortController: AbortController | null = null;
+
+type UpdateNotificationCopy = "standard" | "error";
 
 /**
  * Determine if we should check for updates based on time since last check.
@@ -239,6 +242,21 @@ function canNotifyAgain(lastNotified: number | null): boolean {
   return Date.now() - lastNotified >= NOTIFICATION_INTERVAL_MS;
 }
 
+function formatUpdateNotification(
+  latestVersion: string,
+  copy: UpdateNotificationCopy
+): string {
+  const channel = getReleaseChannel();
+  const label =
+    channel === "nightly" ? "New nightly available:" : "Update available:";
+  const action =
+    copy === "error"
+      ? `Upgrading may resolve this: ${cyan('"sentry cli upgrade"')}.`
+      : `Run ${cyan('"sentry cli upgrade"')} to update.`;
+
+  return `\n${muted(label)} ${cyan(CLI_VERSION)} -> ${cyan(latestVersion)}  ${action}\n`;
+}
+
 /**
  * Get the update notification message if a new version is available.
  * Returns null if up-to-date, no cached version info, rate-limited, on a
@@ -249,7 +267,9 @@ function canNotifyAgain(lastNotified: number | null): boolean {
  * persists `last_notified = now` via {@link markUpdateNotified} so
  * subsequent invocations within the rate-limit window return null.
  */
-function getUpdateNotificationImpl(): string | null {
+function getUpdateNotificationImpl(
+  copy: UpdateNotificationCopy = "standard"
+): string | null {
   // Gate 1: non-TTY stderr (scripts, CI, pipes).
   if (!isStderrTTY()) {
     return null;
@@ -278,9 +298,7 @@ function getUpdateNotificationImpl(): string | null {
       return null;
     }
 
-    const channel = getReleaseChannel();
-    const label =
-      channel === "nightly" ? "New nightly available:" : "Update available:";
+    const notification = formatUpdateNotification(latestVersion, copy);
 
     // Record that we're about to print the banner so repeat invocations
     // within the rate-limit window stay silent. Failures here are
@@ -293,7 +311,7 @@ function getUpdateNotificationImpl(): string | null {
     }
     notifiedThisProcess = true;
 
-    return `\n${muted(label)} ${cyan(CLI_VERSION)} -> ${cyan(latestVersion)}  Run ${cyan('"sentry cli upgrade"')} to update.\n`;
+    return notification;
   } catch (error) {
     // DB access failed - report to Sentry but don't crash CLI
     Sentry.captureException(error);
@@ -342,4 +360,20 @@ export function getUpdateNotification(): string | null {
     return null;
   }
   return getUpdateNotificationImpl();
+}
+
+/**
+ * Get the update notification for an escaped error path.
+ *
+ * User-actionable errors keep the normal update banner. Unexpected failures
+ * use contextual copy that frames upgrading as a possible fix.
+ */
+export function getErrorUpdateNotification(
+  error: unknown,
+  args: string[]
+): string | null {
+  if (isUpdateCheckDisabled() || shouldSuppressNotification(args)) {
+    return null;
+  }
+  return getUpdateNotificationImpl(isUserError(error) ? "standard" : "error");
 }

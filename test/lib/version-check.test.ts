@@ -8,8 +8,10 @@ import {
   getVersionCheckInfo,
   setVersionCheckInfo,
 } from "../../src/lib/db/version-check.js";
+import { ApiError, ContextError } from "../../src/lib/errors.js";
 import {
   abortPendingVersionCheck,
+  getErrorUpdateNotification,
   getUpdateNotification,
   maybeCheckForUpdateInBackground,
   resetUpdateNotificationState,
@@ -40,6 +42,11 @@ describe("shouldSuppressNotification", () => {
   test("suppresses for upgrade command", () => {
     expect(shouldSuppressNotification(["upgrade"])).toBe(true);
     expect(shouldSuppressNotification(["upgrade", "--check"])).toBe(true);
+  });
+
+  test("suppresses for init command", () => {
+    expect(shouldSuppressNotification(["init"])).toBe(true);
+    expect(shouldSuppressNotification(["init", "--wizard"])).toBe(true);
   });
 
   test("suppresses for cli management commands", () => {
@@ -206,6 +213,126 @@ describe("getUpdateNotification", () => {
 
     // Still within the 24h window → no banner.
     const second = getUpdateNotification();
+    expect(second).toBeNull();
+  });
+
+  test("returns standard update copy for user errors", () => {
+    setVersionCheckInfo("99.0.0");
+
+    const notification = getErrorUpdateNotification(
+      new ContextError("Organization", "sentry org list"),
+      ["org", "list"]
+    );
+
+    expect(notification).not.toBeNull();
+    expect(notification).toContain("Update available:");
+    expect(notification).toContain("Run");
+    expect(notification).toContain("sentry cli upgrade");
+    expect(notification).not.toContain("Upgrading may resolve this");
+  });
+
+  test("returns standard update copy for network ApiError status 0", () => {
+    setVersionCheckInfo("99.0.0");
+
+    const notification = getErrorUpdateNotification(
+      new ApiError(
+        "Failed to list issues: Network error",
+        0,
+        "Unable to reach Sentry API. Check your internet connection."
+      ),
+      ["issue", "list"]
+    );
+
+    expect(notification).not.toBeNull();
+    expect(notification).toContain("Update available:");
+    expect(notification).toContain("Run");
+    expect(notification).toContain("sentry cli upgrade");
+    expect(notification).not.toContain("Upgrading may resolve this");
+  });
+
+  test.each([
+    400, 500, 503,
+  ])("returns contextual update copy for ApiError status %i", (status) => {
+    setVersionCheckInfo("99.0.0");
+
+    const notification = getErrorUpdateNotification(
+      new ApiError("API failed", status),
+      ["issue", "list"]
+    );
+
+    expect(notification).not.toBeNull();
+    expect(notification).toContain("Update available:");
+    expect(notification).toContain("Upgrading may resolve this");
+    expect(notification).toContain("sentry cli upgrade");
+  });
+
+  test("returns contextual update copy for generic exceptions", () => {
+    setVersionCheckInfo("99.0.0");
+
+    const notification = getErrorUpdateNotification(new Error("boom"), [
+      "issue",
+      "list",
+    ]);
+
+    expect(notification).not.toBeNull();
+    expect(notification).toContain("Update available:");
+    expect(notification).toContain("Upgrading may resolve this");
+  });
+
+  test.each([
+    ["--json", ["issue", "list", "--json"]],
+    ["init", ["init"]],
+    ["upgrade", ["upgrade"]],
+    ["cli setup", ["cli", "setup"]],
+  ])("suppresses error update notification for %s", (_name, args) => {
+    setVersionCheckInfo("99.0.0");
+
+    const notification = getErrorUpdateNotification(new Error("boom"), args);
+
+    expect(notification).toBeNull();
+  });
+
+  test("honors TTY gate for error update notifications", () => {
+    restoreTTY?.();
+    restoreTTY = withStderrTTY(false);
+    setVersionCheckInfo("99.0.0");
+
+    const notification = getErrorUpdateNotification(new Error("boom"), [
+      "issue",
+      "list",
+    ]);
+
+    expect(notification).toBeNull();
+  });
+
+  test("shares once-per-process latch with standard notifications", () => {
+    setVersionCheckInfo("99.0.0");
+
+    const first = getErrorUpdateNotification(new Error("boom"), [
+      "issue",
+      "list",
+    ]);
+    const second = getUpdateNotification();
+
+    expect(first).not.toBeNull();
+    expect(second).toBeNull();
+  });
+
+  test("shares rate limit across error notification invocations", () => {
+    setVersionCheckInfo("99.0.0");
+
+    const first = getErrorUpdateNotification(new Error("boom"), [
+      "issue",
+      "list",
+    ]);
+    expect(first).not.toBeNull();
+
+    resetUpdateNotificationState();
+
+    const second = getErrorUpdateNotification(new Error("boom"), [
+      "issue",
+      "list",
+    ]);
     expect(second).toBeNull();
   });
 });

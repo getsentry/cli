@@ -698,6 +698,50 @@ export class AbortError extends Error {
 }
 
 /**
+ * Classify errors that already point to user-actionable remediation.
+ *
+ * The upgrade nudge uses this to avoid implying that a newer CLI is likely
+ * to fix expected input, auth, account-state, or local connectivity failures.
+ */
+export function isUserError(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    // Status 0 is our synthetic "no HTTP response" network failure. The
+    // error already tells the user to check connectivity, so avoid the
+    // contextual upgrade nudge. HTTP 400 usually means the CLI constructed a
+    // bad request; other 4xx statuses are user/account/API-state problems:
+    // no access, missing entity, rate limiting, etc.
+    return error.status === 0 || (error.status > 400 && error.status < 500);
+  }
+
+  if (
+    error instanceof AbortError ||
+    error instanceof TimeoutError ||
+    error instanceof UpgradeError
+  ) {
+    return false;
+  }
+
+  if (
+    error instanceof AuthError ||
+    error instanceof HostScopeError ||
+    error instanceof ConfigError ||
+    error instanceof ContextError ||
+    error instanceof ResolutionError ||
+    error instanceof ValidationError ||
+    error instanceof DeviceFlowError ||
+    error instanceof SeerError ||
+    error instanceof OutputError ||
+    error instanceof WizardError
+  ) {
+    return true;
+  }
+
+  // Generic CliError is user-facing by default unless explicitly excluded
+  // above. Generic exceptions and unknown thrown values remain non-user.
+  return error instanceof CliError;
+}
+
+/**
  * Convert an unknown value to a human-readable string.
  *
  * Handles Error instances (`.message`), plain objects (`JSON.stringify`),

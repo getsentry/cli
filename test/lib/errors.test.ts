@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  AbortError,
   ApiError,
   AuthError,
   CliError,
@@ -10,6 +11,7 @@ import {
   formatError,
   getExitCode,
   HostScopeError,
+  isUserError,
   OutputError,
   ResolutionError,
   SeerError,
@@ -475,6 +477,53 @@ describe("getExitCode", () => {
   test("returns 1 for non-errors", () => {
     expect(getExitCode("string")).toBe(1);
     expect(getExitCode(null)).toBe(1);
+  });
+});
+
+describe("isUserError", () => {
+  test.each<[number, boolean]>([
+    [0, true],
+    [400, false],
+    [401, true],
+    [403, true],
+    [404, true],
+    [429, true],
+    [499, true],
+    [500, false],
+    [503, false],
+  ])("classifies ApiError status %i as user error: %p", (status, expected) => {
+    expect(isUserError(new ApiError("API failed", status))).toBe(expected);
+  });
+
+  test.each<[string, unknown]>([
+    ["AuthError", new AuthError("not_authenticated")],
+    ["HostScopeError", new HostScopeError("Blocked")],
+    ["ConfigError", new ConfigError("Bad config")],
+    ["ContextError", new ContextError("Organization", "sentry org list")],
+    [
+      "ResolutionError",
+      new ResolutionError("Project 'cli'", "not found", "sentry project list"),
+    ],
+    ["ValidationError", new ValidationError("Bad input")],
+    ["DeviceFlowError", new DeviceFlowError("slow_down")],
+    ["SeerError", new SeerError("not_enabled")],
+    ["OutputError", new OutputError({ items: [] })],
+    ["WizardError", new WizardError("Wizard stopped")],
+    ["generic CliError", new CliError("User-facing failure")],
+  ])("treats %s as user-facing", (_name, thrown) => {
+    expect(isUserError(thrown)).toBe(true);
+  });
+
+  test.each<[string, unknown]>([
+    ["generic Error", new Error("boom")],
+    ["AbortError", new AbortError()],
+    ["TimeoutError", new TimeoutError("timed out")],
+    ["UpgradeError", new UpgradeError("network_error")],
+    ["string throw", "boom"],
+    ["null", null],
+    ["undefined", undefined],
+  ])("treats %s as non-user", (_name, thrown) => {
+    expect(isUserError(thrown)).toBe(false);
   });
 });
 
