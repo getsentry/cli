@@ -361,7 +361,8 @@ describe("extractSolution", () => {
           solution: [
             {
               title: "Handle missing fields gracefully",
-              code_snippet_and_analysis: "Add default values for optional fields",
+              code_snippet_and_analysis:
+                "Add default values for optional fields",
             },
           ],
         },
