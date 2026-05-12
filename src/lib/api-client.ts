@@ -29,7 +29,8 @@ export {
   restoreDashboardRevision,
   updateDashboard,
 } from "./api/dashboards.js";
-export { queryEvents } from "./api/discover.js";
+export type { MetricMeta } from "./api/discover.js";
+export { queryEvents, queryMetricsMeta } from "./api/discover.js";
 export {
   findEventAcrossOrgs,
   getEvent,

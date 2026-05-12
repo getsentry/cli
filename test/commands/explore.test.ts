@@ -91,11 +91,17 @@ const MOCK_REPLAYS_RESPONSE = [
 ];
 
 let queryEventsSpy: ReturnType<typeof spyOn>;
+let queryMetricsMetaSpy: ReturnType<typeof spyOn>;
 let listReplaysSpy: ReturnType<typeof spyOn>;
 let resolveTargetSpy: ReturnType<typeof spyOn>;
 let resolveCursorSpy: ReturnType<typeof spyOn>;
 let advancePaginationStateSpy: ReturnType<typeof spyOn>;
 let hasPreviousPageSpy: ReturnType<typeof spyOn>;
+
+const MOCK_METRICS_META = [
+  { name: "llm.token_usage", type: "distribution", unit: "none" },
+  { name: "cache.hit_rate", type: "distribution", unit: "none" },
+];
 
 beforeEach(async () => {
   func = (await exploreCommand.loader()) as unknown as ExploreFunc;
@@ -105,6 +111,8 @@ beforeEach(async () => {
     data: MOCK_EVENTS_RESPONSE,
     nextCursor: undefined,
   });
+  queryMetricsMetaSpy = spyOn(apiClient, "queryMetricsMeta");
+  queryMetricsMetaSpy.mockResolvedValue(MOCK_METRICS_META);
   listReplaysSpy = spyOn(apiClient, "listReplays");
   listReplaysSpy.mockResolvedValue({
     data: MOCK_REPLAYS_RESPONSE,
@@ -130,6 +138,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   queryEventsSpy.mockRestore();
+  queryMetricsMetaSpy.mockRestore();
   listReplaysSpy.mockRestore();
   resolveTargetSpy.mockRestore();
   resolveCursorSpy.mockRestore();
@@ -139,6 +148,7 @@ afterEach(() => {
 
 const DEFAULT_FLAGS = {
   limit: 25,
+  agg: "sum",
   dataset: "errors",
   period: parsePeriod("24h"),
   json: false,
@@ -486,6 +496,181 @@ describe("sentry explore", () => {
             "urls",
             "user",
           ],
+        })
+      );
+    });
+  });
+
+  describe("metrics dataset validation", () => {
+    test("rejects standard aggregates on metrics dataset", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      const promise = func.call(
+        context,
+        {
+          ...DEFAULT_FLAGS,
+          dataset: "metricsEnhanced",
+          field: ["title", "count()"],
+        },
+        "test-org/"
+      );
+
+      await expect(promise).rejects.toThrow(ValidationError);
+      await expect(promise).rejects.toThrow(/Invalid metrics aggregate/);
+    });
+
+    test("accepts valid tracemetrics aggregate format", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      await func.call(
+        context,
+        {
+          ...DEFAULT_FLAGS,
+          dataset: "metricsEnhanced",
+          field: [
+            "gen_ai.request.model",
+            "sum(value,llm.token_usage,distribution,none)",
+          ],
+        },
+        "test-org/"
+      );
+
+      expect(queryEventsSpy).toHaveBeenCalledWith(
+        "test-org",
+        expect.objectContaining({ dataset: "metricsEnhanced" })
+      );
+    });
+
+    test("requires --metric or --field for metrics dataset", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      const promise = func.call(
+        context,
+        { ...DEFAULT_FLAGS, dataset: "metricsEnhanced" },
+        "test-org/"
+      );
+
+      await expect(promise).rejects.toThrow(ValidationError);
+      await expect(promise).rejects.toThrow(
+        /requires --metric or explicit --field/
+      );
+    });
+
+    test("allows non-aggregate fields without tracemetrics format", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      await func.call(
+        context,
+        {
+          ...DEFAULT_FLAGS,
+          dataset: "metricsEnhanced",
+          field: ["gen_ai.request.model"],
+        },
+        "test-org/"
+      );
+
+      expect(queryEventsSpy).toHaveBeenCalled();
+    });
+
+    test("--metric auto-resolves metric type and unit", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      await func.call(
+        context,
+        {
+          ...DEFAULT_FLAGS,
+          dataset: "metricsEnhanced",
+          metric: "llm.token_usage",
+        },
+        "test-org/"
+      );
+
+      expect(queryMetricsMetaSpy).toHaveBeenCalledWith("test-org", {
+        statsPeriod: "24h",
+        project: undefined,
+      });
+      expect(queryEventsSpy).toHaveBeenCalledWith(
+        "test-org",
+        expect.objectContaining({
+          fields: ["sum(value,llm.token_usage,distribution,none)"],
+          dataset: "metricsEnhanced",
+        })
+      );
+    });
+
+    test("--metric with -F preserves grouping fields", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      await func.call(
+        context,
+        {
+          ...DEFAULT_FLAGS,
+          dataset: "metricsEnhanced",
+          metric: "llm.token_usage",
+          field: ["gen_ai.request.model"],
+        },
+        "test-org/"
+      );
+
+      expect(queryEventsSpy).toHaveBeenCalledWith(
+        "test-org",
+        expect.objectContaining({
+          fields: [
+            "gen_ai.request.model",
+            "sum(value,llm.token_usage,distribution,none)",
+          ],
+        })
+      );
+    });
+
+    test("--metric with --agg uses specified aggregation", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      await func.call(
+        context,
+        {
+          ...DEFAULT_FLAGS,
+          dataset: "metricsEnhanced",
+          metric: "cache.hit_rate",
+          agg: "avg",
+        },
+        "test-org/"
+      );
+
+      expect(queryEventsSpy).toHaveBeenCalledWith(
+        "test-org",
+        expect.objectContaining({
+          fields: ["avg(value,cache.hit_rate,distribution,none)"],
+        })
+      );
+    });
+
+    test("--metric without --dataset metrics auto-switches to metricsEnhanced", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      await func.call(
+        context,
+        {
+          ...DEFAULT_FLAGS,
+          dataset: "errors",
+          metric: "llm.token_usage",
+        },
+        "test-org/"
+      );
+
+      expect(queryEventsSpy).toHaveBeenCalledWith(
+        "test-org",
+        expect.objectContaining({
+          dataset: "metricsEnhanced",
+          fields: ["sum(value,llm.token_usage,distribution,none)"],
         })
       );
     });
