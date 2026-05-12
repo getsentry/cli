@@ -754,6 +754,51 @@ export function getExitCode(error: unknown): number {
   return 1;
 }
 
+/**
+ * Classify errors caused by user input, configuration, auth state, or account
+ * settings. These errors already tell the user what to fix, so upgrade nudges
+ * should use the neutral update banner instead of implying a CLI bug fix.
+ *
+ * Generic {@link CliError} instances are treated as user-facing by default.
+ * Explicit non-user subclasses must be checked before that fallback.
+ */
+export function isUserError(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    // Status 0 = network-level failure (DNS, ECONNREFUSED) — user environment,
+    // not a CLI bug. 400 usually means the CLI constructed a bad request.
+    // Other 4xx statuses are user/account/API-state problems.
+    if (error.status === 0) {
+      return true;
+    }
+    return error.status > 400 && error.status < 500;
+  }
+
+  if (
+    error instanceof AbortError ||
+    error instanceof TimeoutError ||
+    error instanceof UpgradeError
+  ) {
+    return false;
+  }
+
+  if (
+    error instanceof AuthError ||
+    error instanceof HostScopeError ||
+    error instanceof ConfigError ||
+    error instanceof ContextError ||
+    error instanceof ResolutionError ||
+    error instanceof ValidationError ||
+    error instanceof DeviceFlowError ||
+    error instanceof SeerError ||
+    error instanceof OutputError ||
+    error instanceof WizardError
+  ) {
+    return true;
+  }
+
+  return error instanceof CliError;
+}
+
 /** Result when the guarded operation succeeded */
 export type AuthGuardSuccess<T> = { ok: true; value: T };
 

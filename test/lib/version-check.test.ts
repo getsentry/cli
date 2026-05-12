@@ -9,7 +9,13 @@ import {
   setVersionCheckInfo,
 } from "../../src/lib/db/version-check.js";
 import {
+  ApiError,
+  ContextError,
+  ValidationError,
+} from "../../src/lib/errors.js";
+import {
   abortPendingVersionCheck,
+  getErrorUpdateNotification,
   getUpdateNotification,
   maybeCheckForUpdateInBackground,
   resetUpdateNotificationState,
@@ -206,6 +212,147 @@ describe("getUpdateNotification", () => {
 
     // Still within the 24h window → no banner.
     const second = getUpdateNotification();
+    expect(second).toBeNull();
+  });
+});
+
+describe("getErrorUpdateNotification", () => {
+  useTestConfigDir("test-version-error-notif-");
+  const defaultArgs = ["issue", "list"];
+  let savedNoUpdateCheck: string | undefined;
+  let restoreTTY: (() => void) | undefined;
+
+  beforeEach(() => {
+    savedNoUpdateCheck = process.env.SENTRY_CLI_NO_UPDATE_CHECK;
+    delete process.env.SENTRY_CLI_NO_UPDATE_CHECK;
+    resetUpdateNotificationState();
+    restoreTTY = withStderrTTY(true);
+  });
+
+  afterEach(() => {
+    if (savedNoUpdateCheck !== undefined) {
+      process.env.SENTRY_CLI_NO_UPDATE_CHECK = savedNoUpdateCheck;
+    }
+    restoreTTY?.();
+    restoreTTY = undefined;
+  });
+
+  test("returns null when no version info is cached", () => {
+    expect(
+      getErrorUpdateNotification(new Error("boom"), defaultArgs)
+    ).toBeNull();
+  });
+
+  test("returns null when cached version is same as current", () => {
+    setVersionCheckInfo("0.0.0-dev");
+    expect(
+      getErrorUpdateNotification(new Error("boom"), defaultArgs)
+    ).toBeNull();
+  });
+
+  test("returns contextual message for unexpected errors when newer version is available", () => {
+    setVersionCheckInfo("99.0.0");
+    const notification = getErrorUpdateNotification(
+      new Error("boom"),
+      defaultArgs
+    );
+
+    expect(notification).not.toBeNull();
+    expect(notification).toContain("99.0.0");
+    expect(notification).toContain("Upgrading may resolve this");
+    expect(notification).toContain("sentry cli upgrade");
+  });
+
+  test("does not contain standard 'Update available:' label", () => {
+    setVersionCheckInfo("99.0.0");
+    const notification = getErrorUpdateNotification(
+      new Error("boom"),
+      defaultArgs
+    );
+
+    expect(notification).not.toBeNull();
+    expect(notification).not.toContain("Update available:");
+  });
+
+  test.each([
+    ["ContextError", new ContextError("Organization", "sentry org list")],
+    ["ValidationError", new ValidationError("bad input")],
+    ["ApiError 404", new ApiError("not found", 404)],
+  ])("returns standard update copy for user error %s", (_label, errorValue) => {
+    setVersionCheckInfo("99.0.0");
+    const notification = getErrorUpdateNotification(errorValue, defaultArgs);
+
+    expect(notification).not.toBeNull();
+    expect(notification).toContain("Update available:");
+    expect(notification).not.toContain("Upgrading may resolve this");
+  });
+
+  test.each([
+    ["ApiError 400", new ApiError("bad request", 400)],
+    ["ApiError 500", new ApiError("server error", 500)],
+    ["generic Error", new Error("boom")],
+  ])("returns contextual update copy for non-user error %s", (_label, errorValue) => {
+    setVersionCheckInfo("99.0.0");
+    const notification = getErrorUpdateNotification(errorValue, defaultArgs);
+
+    expect(notification).not.toBeNull();
+    expect(notification).toContain("Upgrading may resolve this");
+    expect(notification).not.toContain("Update available:");
+  });
+
+  test.each([
+    ["json flag", ["issue", "list", "--json"]],
+    ["init", ["init"]],
+    ["upgrade", ["upgrade"]],
+    ["cli setup", ["cli", "setup"]],
+  ])("returns null for suppressed args: %s", (_label, args) => {
+    setVersionCheckInfo("99.0.0");
+    expect(getErrorUpdateNotification(new Error("boom"), args)).toBeNull();
+  });
+
+  test("returns null when stderr is not a TTY", () => {
+    restoreTTY?.();
+    restoreTTY = withStderrTTY(false);
+
+    setVersionCheckInfo("99.0.0");
+    expect(
+      getErrorUpdateNotification(new Error("boom"), defaultArgs)
+    ).toBeNull();
+  });
+
+  test("shares once-per-process latch with getUpdateNotification", () => {
+    setVersionCheckInfo("99.0.0");
+
+    // Error notification fires first
+    const first = getErrorUpdateNotification(new Error("boom"), defaultArgs);
+    expect(first).not.toBeNull();
+
+    // Standard notification is suppressed (same latch)
+    const second = getUpdateNotification();
+    expect(second).toBeNull();
+  });
+
+  test("standard notification suppresses error notification too", () => {
+    setVersionCheckInfo("99.0.0");
+
+    const first = getUpdateNotification();
+    expect(first).not.toBeNull();
+
+    const second = getErrorUpdateNotification(new Error("boom"), defaultArgs);
+    expect(second).toBeNull();
+  });
+
+  test("rate-limits across CLI invocations", () => {
+    setVersionCheckInfo("99.0.0");
+
+    const first = getErrorUpdateNotification(new Error("boom"), defaultArgs);
+    expect(first).not.toBeNull();
+
+    // Simulate fresh invocation
+    resetUpdateNotificationState();
+
+    // Still within 24h window
+    const second = getErrorUpdateNotification(new Error("boom"), defaultArgs);
     expect(second).toBeNull();
   });
 });
