@@ -26,16 +26,27 @@ import {
 /**
  * Enrich a 403 Forbidden error detail with actionable guidance.
  *
- * For env-var tokens (SENTRY_AUTH_TOKEN / SENTRY_TOKEN): extracts the specific
- * missing scope from the API response when available, otherwise suggests
- * checking token scopes. Includes a link to the token settings page.
+ * "Your organization has disabled this feature for members" is an org-level
+ * policy (Organization.flags.disable_member_project_creation), not a token
+ * scope or auth problem. We return targeted guidance and skip the generic
+ * scope/re-auth enrichment entirely — suggesting re-authentication for this
+ * error would be actively wrong and has caused user confusion (CLI-SERVER-E).
  *
- * For OAuth tokens: suggests the user may lack access and should re-authenticate.
- *
- * @param rawDetail - The original detail string from the API 403 response
- * @returns Enriched detail string with actionable suggestions
+ * All other 403s fall through to the existing logic:
+ * - env-var tokens → suggest checking token scopes
+ * - OAuth tokens → suggest re-authentication
  */
 function enrich403Detail(rawDetail: string | undefined): string {
+  // Org-level policy — re-auth and token scope advice do not apply here.
+  if (rawDetail?.includes("disabled this feature")) {
+    return [
+      rawDetail,
+      "",
+      "This is an org-level policy setting, not an auth issue.",
+      "You need org:admin/manager/owner role, or team:admin role on the team.",
+    ].join("\n  ");
+  }
+
   const lines: string[] = [];
   if (rawDetail) {
     lines.push(rawDetail, "");

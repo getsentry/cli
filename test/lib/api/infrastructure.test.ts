@@ -122,6 +122,29 @@ describe("throwApiError", () => {
     // Test preload sets SENTRY_AUTH_TOKEN, so isEnvTokenActive() returns true
     // by default in these tests.
 
+    test("does not suggest token scopes for org-policy disabled-feature 403s", () => {
+      const mockResponse = new Response("", {
+        status: 403,
+        statusText: "Forbidden",
+      });
+
+      try {
+        throwApiError(
+          {
+            detail: "Your organization has disabled this feature for members.",
+          },
+          mockResponse,
+          "Failed to create project"
+        );
+      } catch (error) {
+        const apiError = error as ApiError;
+        expect(apiError.enriched403).toBe(true);
+        expect(apiError.detail).toContain("disabled this feature");
+        expect(apiError.detail).toContain("org-level policy");
+        expect(apiError.detail).not.toContain("SENTRY_AUTH_TOKEN");
+      }
+    });
+
     test("enriches 403 with env-var token hints", () => {
       const mockResponse = new Response("", {
         status: 403,
@@ -258,6 +281,31 @@ describe("throwApiError", () => {
           process.env.SENTRY_TOKEN = savedToken;
         } else {
           delete process.env.SENTRY_TOKEN;
+        }
+      });
+
+      test("does not suggest re-authentication for org-policy disabled-feature 403s", () => {
+        const mockResponse = new Response("", {
+          status: 403,
+          statusText: "Forbidden",
+        });
+
+        try {
+          throwApiError(
+            {
+              detail:
+                "Your organization has disabled this feature for members.",
+            },
+            mockResponse,
+            "Failed to create project"
+          );
+        } catch (error) {
+          const apiError = error as ApiError;
+          expect(apiError.enriched403).toBe(true);
+          expect(apiError.detail).toContain("disabled this feature");
+          expect(apiError.detail).toContain("org-level policy");
+          expect(apiError.detail).not.toContain("Re-authenticate");
+          expect(apiError.detail).not.toContain("sentry auth login");
         }
       });
 
