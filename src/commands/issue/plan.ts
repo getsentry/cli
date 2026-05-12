@@ -299,9 +299,14 @@ export const planCommand = buildCommand({
       // Validate we have root causes
       const causes = validateRootCauses(state);
 
-      // Validate cause selection
-      const causeId = validateCauseSelection(causes, flags.cause, issueArg);
-      const selectedCause = causes[causeId];
+      // Validate cause selection (always returns a valid index into causes)
+      const causeIndex = validateCauseSelection(causes, flags.cause, issueArg);
+      const selectedCause = causes.at(causeIndex);
+      if (!selectedCause) {
+        throw new ValidationError(
+          `Invalid cause index: ${causeIndex}. Valid range is 0-${causes.length - 1}.`
+        );
+      }
 
       // Check if solution already exists (skip if --force)
       if (!flags.force) {
@@ -314,19 +319,23 @@ export const planCommand = buildCommand({
       // No solution exists, trigger planning
       if (!flags.json) {
         const log = logger.withTag("issue.plan");
-        log.info(`Creating plan for cause #${causeId}...`);
-        if (selectedCause) {
-          log.info(`"${selectedCause.description}"`);
-        }
+        log.info(`Creating plan for cause #${causeIndex}...`);
+        log.info(`"${selectedCause.description}"`);
       }
 
-      await triggerSolutionPlanning(org, numericId, state.run_id);
+      await triggerSolutionPlanning(
+        org,
+        numericId,
+        state.run_id,
+        selectedCause.id
+      );
 
-      // Poll until PR is created
+      // Poll until solution is ready (NEED_MORE_INFORMATION) or terminal
       const finalState = await pollAutofixState({
         orgSlug: org,
         issueId: numericId,
         json: flags.json,
+        stopOnWaitingForUser: true,
         timeoutMessage:
           "Plan creation timed out after 6 minutes. Try again or check the issue in Sentry web UI.",
         timeoutHint:

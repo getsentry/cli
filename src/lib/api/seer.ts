@@ -76,28 +76,37 @@ export async function getAutofixState(
 
 /**
  * Trigger solution planning for an existing autofix run.
- * Uses region-aware routing for multi-region support.
+ *
+ * Sends a `select_root_cause` update with `stopping_point: "solution"` to the
+ * autofix update endpoint. This tells Seer to proceed from root cause analysis
+ * to generating a solution plan.
  *
  * @param orgSlug - The organization slug
  * @param issueId - The numeric Sentry issue ID
  * @param runId - The autofix run ID
+ * @param causeId - The root cause ID to plan a solution for
  * @returns The response from the API
  */
 export async function triggerSolutionPlanning(
   orgSlug: string,
   issueId: string,
-  runId: number
+  runId: number,
+  causeId: number
 ): Promise<unknown> {
   const regionUrl = await resolveOrgRegion(orgSlug);
 
   const { data } = await apiRequestToRegion(
     regionUrl,
-    `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
+    `/organizations/${orgSlug}/issues/${issueId}/autofix/update/`,
     {
       method: "POST",
       body: {
         run_id: runId,
-        step: "solution",
+        payload: {
+          type: "select_root_cause",
+          cause_id: causeId,
+          stopping_point: "solution",
+        },
       },
     }
   );

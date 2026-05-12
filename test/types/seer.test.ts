@@ -10,6 +10,7 @@ import {
   extractExaminedFiles,
   extractNoSolutionReason,
   extractRootCauses,
+  extractSolution,
   isTerminalStatus,
   type RootCause,
   TERMINAL_STATUSES,
@@ -283,6 +284,260 @@ describe("extractNoSolutionReason", () => {
   test("returns undefined when no steps or blocks", () => {
     const state: AutofixState = { run_id: 1, status: "COMPLETED" };
     expect(extractNoSolutionReason(state)).toBeUndefined();
+  });
+});
+
+describe("extractSolution", () => {
+  test("extracts solution from step-level data in steps", () => {
+    const state = {
+      run_id: 1,
+      status: "NEED_MORE_INFORMATION",
+      steps: [
+        {
+          id: "s1",
+          key: "root_cause_analysis",
+          status: "COMPLETED",
+          title: "Root Cause",
+        },
+        {
+          id: "s2",
+          key: "solution",
+          type: "solution",
+          status: "COMPLETED",
+          title: "Solution",
+          description: "Fix the null pointer dereference in handler",
+          solution: [
+            {
+              title: "Add null check before accessing property",
+              code_snippet_and_analysis:
+                "Check if `request.user` is defined before accessing `.id`",
+              relevant_code_file: {
+                file_path: "src/handler.ts",
+                repo_name: "org/repo",
+              },
+            },
+            {
+              title: "Add fallback error response",
+              code_snippet_and_analysis:
+                "Return 401 when user is not authenticated",
+              relevant_code_file: {
+                file_path: null,
+                repo_name: "org/repo",
+              },
+            },
+          ],
+          artifacts: [],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    const result = extractSolution(state);
+    expect(result).not.toBeNull();
+    expect(result!.key).toBe("solution");
+    expect(result!.data.one_line_summary).toBe(
+      "Fix the null pointer dereference in handler"
+    );
+    expect(result!.data.steps).toHaveLength(2);
+    expect(result!.data.steps[0]?.title).toBe(
+      "Add null check before accessing property"
+    );
+    expect(result!.data.steps[0]?.description).toBe(
+      "Check if `request.user` is defined before accessing `.id`"
+    );
+    expect(result!.data.steps[1]?.title).toBe("Add fallback error response");
+    expect(result!.data.steps[1]?.description).toBe(
+      "Return 401 when user is not authenticated"
+    );
+  });
+
+  test("extracts solution from step-level data in blocks", () => {
+    const state = {
+      run_id: 2,
+      status: "NEED_MORE_INFORMATION",
+      blocks: [
+        {
+          key: "solution",
+          description: "Update the config parser",
+          solution: [
+            {
+              title: "Handle missing fields gracefully",
+              code_snippet_and_analysis: "Add default values for optional fields",
+            },
+          ],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    const result = extractSolution(state);
+    expect(result).not.toBeNull();
+    expect(result!.data.one_line_summary).toBe("Update the config parser");
+    expect(result!.data.steps).toHaveLength(1);
+    expect(result!.data.steps[0]?.title).toBe(
+      "Handle missing fields gracefully"
+    );
+  });
+
+  test("falls back to artifact-level solution when no step-level data", () => {
+    const state = {
+      run_id: 3,
+      status: "COMPLETED",
+      steps: [
+        {
+          id: "s1",
+          key: "plan",
+          status: "COMPLETED",
+          title: "Plan",
+          artifacts: [
+            {
+              key: "solution",
+              data: {
+                one_line_summary: "Fix from artifact",
+                steps: [{ title: "Step A", description: "Do A" }],
+              },
+            },
+          ],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    const result = extractSolution(state);
+    expect(result).not.toBeNull();
+    expect(result!.data.one_line_summary).toBe("Fix from artifact");
+    expect(result!.data.steps).toHaveLength(1);
+  });
+
+  test("prefers step-level data over artifact-level in same container list", () => {
+    const state = {
+      run_id: 4,
+      status: "NEED_MORE_INFORMATION",
+      steps: [
+        {
+          id: "s1",
+          key: "plan",
+          status: "COMPLETED",
+          title: "Plan",
+          artifacts: [
+            {
+              key: "solution",
+              data: {
+                one_line_summary: "From artifact",
+                steps: [{ title: "Artifact step", description: "..." }],
+              },
+            },
+          ],
+        },
+        {
+          id: "s2",
+          key: "solution",
+          status: "COMPLETED",
+          title: "Solution",
+          description: "From step-level",
+          solution: [
+            {
+              title: "Step-level fix",
+              code_snippet_and_analysis: "Do the fix",
+            },
+          ],
+          artifacts: [],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    const result = extractSolution(state);
+    expect(result).not.toBeNull();
+    expect(result!.data.one_line_summary).toBe("From step-level");
+  });
+
+  test("returns null when no solution data exists", () => {
+    const state: AutofixState = {
+      run_id: 5,
+      status: "PROCESSING",
+      steps: [
+        {
+          id: "s1",
+          key: "root_cause_analysis",
+          status: "COMPLETED",
+          title: "Root Cause",
+        },
+      ],
+    };
+
+    expect(extractSolution(state)).toBeNull();
+  });
+
+  test("returns null when no steps or blocks", () => {
+    const state: AutofixState = { run_id: 6, status: "PROCESSING" };
+    expect(extractSolution(state)).toBeNull();
+  });
+
+  test("handles step-level solution with empty solution array", () => {
+    const state = {
+      run_id: 7,
+      status: "NEED_MORE_INFORMATION",
+      steps: [
+        {
+          id: "s1",
+          key: "solution",
+          status: "COMPLETED",
+          title: "Solution",
+          description: "Summary",
+          solution: [],
+          artifacts: [],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    // Empty solution array should not match — no actionable steps
+    expect(extractSolution(state)).toBeNull();
+  });
+
+  test("handles step-level solution without description", () => {
+    const state = {
+      run_id: 8,
+      status: "NEED_MORE_INFORMATION",
+      steps: [
+        {
+          id: "s1",
+          key: "solution",
+          status: "COMPLETED",
+          title: "Solution",
+          solution: [
+            {
+              title: "Quick fix",
+              code_snippet_and_analysis: "Apply patch",
+            },
+          ],
+          artifacts: [],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    const result = extractSolution(state);
+    expect(result).not.toBeNull();
+    expect(result!.data.one_line_summary).toBe("");
+    expect(result!.data.steps[0]?.title).toBe("Quick fix");
+  });
+
+  test("handles solution item without code_snippet_and_analysis", () => {
+    const state = {
+      run_id: 9,
+      status: "NEED_MORE_INFORMATION",
+      steps: [
+        {
+          id: "s1",
+          key: "solution",
+          status: "COMPLETED",
+          title: "Solution",
+          description: "Summary",
+          solution: [{ title: "Title only" }],
+          artifacts: [],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    const result = extractSolution(state);
+    expect(result).not.toBeNull();
+    expect(result!.data.steps[0]?.description).toBe("");
   });
 });
 

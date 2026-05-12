@@ -363,33 +363,97 @@ function searchContainersForSolution(
   return null;
 }
 
+/** Step-level solution item returned by the Seer API */
+type StepSolutionItem = {
+  title: string;
+  code_snippet_and_analysis?: string;
+  relevant_code_file?: { file_path: string | null; repo_name: string };
+};
+
+/** Step shape with passthrough fields for solution data */
+type StepWithSolution = {
+  key: string;
+  description?: string;
+  solution?: StepSolutionItem[];
+};
+
+/**
+ * Search containers for step-level solution data.
+ *
+ * The Seer API returns solution data directly on steps with `key === "solution"`
+ * rather than inside the `artifacts` array. This function finds such steps and
+ * maps the data to the existing {@link SolutionArtifact} shape so downstream
+ * formatters and commands don't need changes.
+ */
+function searchContainersForStepLevelSolution(
+  containers: StepWithSolution[]
+): SolutionArtifact | null {
+  for (const container of containers) {
+    if (
+      container.key === "solution" &&
+      container.solution &&
+      container.solution.length > 0
+    ) {
+      return {
+        key: "solution",
+        data: {
+          one_line_summary: container.description ?? "",
+          steps: container.solution.map((item) => ({
+            title: item.title,
+            description: item.code_snippet_and_analysis ?? "",
+          })),
+        },
+      };
+    }
+  }
+  return null;
+}
+
 /**
  * Extract solution artifact from autofix state.
- * Searches through both blocks and steps for the solution artifact.
  *
- * @param state - Autofix state (may contain blocks or steps with artifacts)
+ * Searches through blocks and steps for solution data. The Seer API may
+ * return solution data in two formats:
+ * 1. Step-level: `step.solution[]` array with `step.description` (current API)
+ * 2. Artifact-level: `step.artifacts[]` with `key === "solution"` (legacy/fallback)
+ *
+ * Step-level data is checked first since it matches the current API response shape.
+ *
+ * @param state - Autofix state (may contain blocks or steps with solution data)
  * @returns SolutionArtifact if found, null otherwise
  */
 export function extractSolution(state: AutofixState): SolutionArtifact | null {
   // Access blocks and steps from passthrough fields
   const stateWithExtras = state as AutofixState & {
-    blocks?: WithArtifacts[];
-    steps?: WithArtifacts[];
+    blocks?: (WithArtifacts & StepWithSolution)[];
+    steps?: (WithArtifacts & StepWithSolution)[];
   };
 
-  // Search in blocks first (explorer mode / newer API)
+  // Search blocks first (explorer mode / newer API)
   if (stateWithExtras.blocks) {
-    const solution = searchContainersForSolution(stateWithExtras.blocks);
-    if (solution) {
-      return solution;
+    const stepLevel = searchContainersForStepLevelSolution(
+      stateWithExtras.blocks
+    );
+    if (stepLevel) {
+      return stepLevel;
+    }
+    const artifactLevel = searchContainersForSolution(stateWithExtras.blocks);
+    if (artifactLevel) {
+      return artifactLevel;
     }
   }
 
-  // Search in steps (regular autofix API)
+  // Search steps (regular autofix API)
   if (stateWithExtras.steps) {
-    const solution = searchContainersForSolution(stateWithExtras.steps);
-    if (solution) {
-      return solution;
+    const stepLevel = searchContainersForStepLevelSolution(
+      stateWithExtras.steps
+    );
+    if (stepLevel) {
+      return stepLevel;
+    }
+    const artifactLevel = searchContainersForSolution(stateWithExtras.steps);
+    if (artifactLevel) {
+      return artifactLevel;
     }
   }
 
