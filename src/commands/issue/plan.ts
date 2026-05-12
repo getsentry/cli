@@ -149,11 +149,10 @@ function formatPlanOutput(data: PlanData): string {
     lines.push(
       "No solution found. Seer completed analysis but could not identify a code fix."
     );
-  }
-
-  if (ctx?.root_cause) {
-    lines.push("");
-    lines.push(`Root cause analyzed: ${ctx.root_cause}`);
+    if (ctx?.root_cause) {
+      lines.push("");
+      lines.push(`Root cause analyzed: ${ctx.root_cause}`);
+    }
   }
 
   if (ctx?.files_examined && ctx.files_examined.length > 0) {
