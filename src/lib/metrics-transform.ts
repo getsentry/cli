@@ -8,6 +8,7 @@
 
 import type { MetricMeta } from "./api/discover.js";
 import { ResolutionError } from "./errors.js";
+import { fuzzyMatch } from "./fuzzy.js";
 
 /** Valid tracemetrics aggregation functions. */
 const VALID_AGGS = new Set([
@@ -55,10 +56,12 @@ export function resolveMetricField(
 
   const match = metrics.find((m) => m.name === metricName);
   if (!match) {
-    const suggestions = metrics
-      .filter((m) => m.name.includes(metricName) || metricName.includes(m.name))
-      .slice(0, 5)
-      .map((m) => m.name);
+    const candidateNames = metrics
+      .map((m) => m.name)
+      .filter((n) => n.length > 0);
+    const suggestions = fuzzyMatch(metricName, candidateNames, {
+      maxResults: 5,
+    });
 
     throw new ResolutionError(
       `Metric '${metricName}'`,
