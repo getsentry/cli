@@ -160,9 +160,16 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   const { app } = await import("./app.js");
   const { hoistGlobalFlags } = await import("./lib/argv-hoist.js");
   const { buildContext } = await import("./context.js");
-  const { AuthError, OutputError, formatError, getExitCode } = await import(
-    "./lib/errors.js"
-  );
+  const {
+    AuthError,
+    ContextError,
+    ConfigError,
+    OutputError,
+    ResolutionError,
+    ValidationError,
+    formatError,
+    getExitCode,
+  } = await import("./lib/errors.js");
   const { error, warning } = await import("./lib/formatters/colors.js");
   const { runInteractiveLogin } = await import("./lib/interactive-login.js");
   const { getEnvLogLevel, setLogLevel } = await import("./lib/logger.js");
@@ -173,10 +180,39 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   const { startCleanupOldBinary } = await import("./lib/upgrade.js");
   const {
     abortPendingVersionCheck,
+    getErrorUpdateNotification,
     getUpdateNotification,
     maybeCheckForUpdateInBackground,
     shouldSuppressNotification,
   } = await import("./lib/version-check.js");
+
+  /**
+   * Write an update notification to stderr after a command failure.
+   *
+   * User-input errors (missing context, bad config, validation) get the
+   * standard "update available" banner — upgrading won't fix those.
+   * Unexpected errors (bugs, API failures) get a contextual nudge
+   * suggesting the upgrade may resolve the issue.
+   */
+  function maybeWriteErrorNotification(
+    err: unknown,
+    suppressed: boolean
+  ): void {
+    if (suppressed) {
+      return;
+    }
+    const isUserError =
+      err instanceof ContextError ||
+      err instanceof ConfigError ||
+      err instanceof ValidationError ||
+      err instanceof ResolutionError;
+    const notification = isUserError
+      ? getUpdateNotification()
+      : getErrorUpdateNotification();
+    if (notification) {
+      process.stderr.write(notification);
+    }
+  }
 
   // Move global flags (--verbose, -v, --log-level, --json, --fields) from any
   // position to the end of argv, where Stricli's leaf-command parser can
@@ -439,6 +475,7 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     }
     process.stderr.write(`${error("Error:")} ${formatError(err)}\n`);
     process.exitCode = getExitCode(err);
+    maybeWriteErrorNotification(err, suppressNotification);
     return;
   } finally {
     // Abort any pending version check to allow clean exit

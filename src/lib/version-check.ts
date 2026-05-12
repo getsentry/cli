@@ -343,3 +343,71 @@ export function getUpdateNotification(): string | null {
   }
   return getUpdateNotificationImpl();
 }
+
+/**
+ * Get a contextual upgrade nudge for the error path.
+ *
+ * Shown when a command fails with an unexpected error and a newer CLI version
+ * exists. The copy suggests upgrading may resolve the issue, which is more
+ * actionable than the standard "update available" banner.
+ *
+ * Shares the same gates as {@link getUpdateNotification} (TTY, rate-limit,
+ * once-per-process) so the two never double-emit.
+ *
+ * Returns null when no nudge should be shown (disabled, up-to-date, non-TTY,
+ * rate-limited, or on error).
+ */
+export function getErrorUpdateNotification(): string | null {
+  if (isUpdateCheckDisabled()) {
+    return null;
+  }
+  return getErrorUpdateNotificationImpl();
+}
+
+/**
+ * Build the contextual upgrade nudge shown after unexpected command failures.
+ *
+ * Same gating logic as {@link getUpdateNotificationImpl} (TTY, once-per-process,
+ * daily rate limit) but with copy that frames the upgrade as a potential fix.
+ */
+function getErrorUpdateNotificationImpl(): string | null {
+  if (!isStderrTTY()) {
+    return null;
+  }
+
+  if (notifiedThisProcess) {
+    return null;
+  }
+
+  try {
+    const { latestVersion, lastNotified } = getVersionCheckInfo();
+
+    if (!latestVersion) {
+      return null;
+    }
+
+    if (Bun.semver.order(latestVersion, CLI_VERSION) !== 1) {
+      return null;
+    }
+
+    if (!canNotifyAgain(lastNotified)) {
+      return null;
+    }
+
+    try {
+      markUpdateNotified();
+    } catch (error) {
+      Sentry.captureException(error);
+    }
+    notifiedThisProcess = true;
+
+    return (
+      `\n${muted("A new version of sentry-cli is available")} (${cyan(latestVersion)})${muted(".")} ` +
+      `${muted("Upgrading may resolve this — we fix a lot of bugs in every release.")} ` +
+      `${muted("Run")} ${cyan('"sentry cli upgrade"')} ${muted("to update.")}\n`
+    );
+  } catch (error) {
+    Sentry.captureException(error);
+    return null;
+  }
+}
