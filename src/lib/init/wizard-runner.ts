@@ -476,7 +476,6 @@ async function resumeWithRetry(
 ): Promise<WorkflowRunResult> {
   const { run, workflow, stepId, resumeData, tracingOptions, ui } = args;
   let lastError: unknown;
-  let recoveryAttempted = false;
   for (let attempt = 0; attempt <= MAX_RESUME_RETRIES; attempt++) {
     try {
       if (attempt > 0) {
@@ -504,15 +503,15 @@ async function resumeWithRetry(
       // response was dropped (network blip, CF response timeout, etc.).
       // Retrying the same step will always 500. Fetch the current run state
       // so the main loop can continue from whichever step is actually suspended.
-      // Only attempt recovery once — if it fails, fall through to normal retries.
-      if (isStepAlreadyAdvancedError(err) && !recoveryAttempted) {
-        recoveryAttempted = true;
+      if (isStepAlreadyAdvancedError(err)) {
         ui.clearOverlay?.();
         const recovered = await tryRecoverCurrentRunState(workflow, run.runId);
         if (recovered) {
           return recovered;
         }
-        // Recovery failed — fall through to normal retry.
+        // Recovery failed — the step is confirmed not suspended and retrying
+        // it will always 500. Throw immediately instead of wasting 14s.
+        throw err;
       }
       if (attempt === MAX_RESUME_RETRIES) {
         ui.clearOverlay?.();

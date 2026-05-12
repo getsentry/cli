@@ -995,36 +995,30 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     expect(resumeCount).toBe(1);
   });
 
-  test("falls through to normal retry when runById fails", async () => {
+  test("throws immediately when stale-step error occurs and runById fails", async () => {
     mockStartResult = {
       status: "suspended",
       suspended: [["tool-step"]],
       steps: { "tool-step": { suspendPayload: toolPayload } },
     };
-    // runById is unreachable — recovery fails, retry path takes over.
+    // runById is unreachable — recovery fails, wizard throws without retrying.
     mockRunByIdResult = new Error("runById network error");
 
     let resumeCount = 0;
     makeStaleStepRun(() => {
       resumeCount += 1;
-      if (resumeCount === 1) {
-        return Promise.reject(staleStepError());
-      }
-      return Promise.resolve({ status: "success" });
+      return Promise.reject(staleStepError());
     });
 
-    await runWizard(makeOptions());
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
-    expect(formatResultSpy).toHaveBeenCalled();
-    // Recovery attempted once, then normal retry kicked in.
+    // Threw immediately after recovery failed — no futile retries of the stale step.
+    expect(resumeCount).toBe(1);
     expect(runByIdMock).toHaveBeenCalledTimes(1);
-    expect(resumeCount).toBe(2);
   });
 
   // Attempts 0 and 1 both get "not suspended"; attempt 2 succeeds.
-  // The recoveryAttempted guard means runById is only called once (on attempt 0),
-  // not twice. Total backoff: 2s + 4s = 6s, so we use a 10s timeout.
-  test("recovery is attempted only once across multiple stale-step retries", async () => {
+  test("throws immediately after failed recovery without further retries", async () => {
     mockStartResult = {
       status: "suspended",
       suspended: [["tool-step"]],
@@ -1035,18 +1029,15 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     let resumeCount = 0;
     makeStaleStepRun(() => {
       resumeCount += 1;
-      if (resumeCount <= 2) {
-        return Promise.reject(staleStepError());
-      }
-      return Promise.resolve({ status: "success" });
+      return Promise.reject(staleStepError());
     });
 
-    await runWizard(makeOptions());
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
-    expect(formatResultSpy).toHaveBeenCalled();
-    // Despite two "not suspended" failures, runById was only called once.
+    // Threw immediately — runById tried once, resumeAsync tried once.
+    expect(resumeCount).toBe(1);
     expect(runByIdMock).toHaveBeenCalledTimes(1);
-  }, 10_000);
+  });
 });
 
 describe("runWizard — additional coverage", () => {
