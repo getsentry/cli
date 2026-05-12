@@ -433,6 +433,7 @@ type ResumeRetryArgs = {
   stepId: string;
   resumeData: Record<string, unknown>;
   tracingOptions: Record<string, unknown>;
+  spin: SpinnerHandle;
   ui: WizardUI;
 };
 
@@ -444,7 +445,7 @@ type ResumeRetryArgs = {
  *   "HTTP error! status: 500 - {"error":"This workflow step 'X' was not suspended..."}"
  */
 function isStepAlreadyAdvancedError(err: unknown): boolean {
-  return err instanceof Error && err.message.includes("not suspended");
+  return err instanceof Error && err.message.includes("was not suspended");
 }
 
 /**
@@ -474,7 +475,7 @@ async function tryRecoverCurrentRunState(
 async function resumeWithRetry(
   args: ResumeRetryArgs
 ): Promise<WorkflowRunResult> {
-  const { run, workflow, stepId, resumeData, tracingOptions, ui } = args;
+  const { run, workflow, stepId, resumeData, tracingOptions, spin, ui } = args;
   let lastError: unknown;
   for (let attempt = 0; attempt <= MAX_RESUME_RETRIES; attempt++) {
     try {
@@ -505,6 +506,7 @@ async function resumeWithRetry(
       // so the main loop can continue from whichever step is actually suspended.
       if (isStepAlreadyAdvancedError(err)) {
         ui.clearOverlay?.();
+        spin.message("Reconnecting...");
         const recovered = await tryRecoverCurrentRunState(workflow, run.runId);
         if (recovered) {
           return recovered;
@@ -739,6 +741,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
         stepId: extracted.stepId,
         resumeData,
         tracingOptions,
+        spin,
         ui,
       });
     }
