@@ -25,7 +25,6 @@ import { type MergeIssuesResult, mergeIssues } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
 import {
   ApiError,
-  CliError,
   ResolutionError,
   ValidationError,
 } from "../../lib/errors.js";
@@ -126,7 +125,7 @@ async function resolveAllIssues(
   if (!org) {
     // Unreachable — resolved.length >= 1 (callers guard for <2) and we
     // just asserted every entry has a non-empty org.
-    throw new CliError("Internal error: resolved issue missing org slug.");
+    throw new Error("Internal error: resolved issue missing org slug.");
   }
 
   // Dedupe on resolved numeric ID: a user may pass the same issue in

@@ -21,6 +21,7 @@ import {
   prefetchStablePatches,
 } from "./delta-upgrade.js";
 import { getEnv } from "./env.js";
+import { isUserError } from "./errors.js";
 import { cyan, muted } from "./formatters/colors.js";
 import { cleanupPatchCache } from "./patch-cache.js";
 import { fetchLatestFromGitHub, fetchLatestNightlyVersion } from "./upgrade.js";
@@ -240,7 +241,7 @@ function canNotifyAgain(lastNotified: number | null): boolean {
 }
 
 /**
- * Get the update notification message if a new version is available.
+ * Build an update notification when a newer version is available.
  * Returns null if up-to-date, no cached version info, rate-limited, on a
  * non-TTY stderr, or on error. Never throws — errors are caught and
  * reported to Sentry.
@@ -249,7 +250,9 @@ function canNotifyAgain(lastNotified: number | null): boolean {
  * persists `last_notified = now` via {@link markUpdateNotified} so
  * subsequent invocations within the rate-limit window return null.
  */
-function getUpdateNotificationImpl(): string | null {
+function getUpdateNotificationWithCopy(
+  formatNotification: (latestVersion: string) => string
+): string | null {
   // Gate 1: non-TTY stderr (scripts, CI, pipes).
   if (!isStderrTTY()) {
     return null;
@@ -278,9 +281,7 @@ function getUpdateNotificationImpl(): string | null {
       return null;
     }
 
-    const channel = getReleaseChannel();
-    const label =
-      channel === "nightly" ? "New nightly available:" : "Update available:";
+    const notification = formatNotification(latestVersion);
 
     // Record that we're about to print the banner so repeat invocations
     // within the rate-limit window stay silent. Failures here are
@@ -293,12 +294,28 @@ function getUpdateNotificationImpl(): string | null {
     }
     notifiedThisProcess = true;
 
-    return `\n${muted(label)} ${cyan(CLI_VERSION)} -> ${cyan(latestVersion)}  Run ${cyan('"sentry cli upgrade"')} to update.\n`;
+    return notification;
   } catch (error) {
     // DB access failed - report to Sentry but don't crash CLI
     Sentry.captureException(error);
     return null;
   }
+}
+
+function formatStandardUpdateNotification(latestVersion: string): string {
+  const channel = getReleaseChannel();
+  const label =
+    channel === "nightly" ? "New nightly available:" : "Update available:";
+
+  return `\n${muted(label)} ${cyan(CLI_VERSION)} -> ${cyan(latestVersion)}  Run ${cyan('"sentry cli upgrade"')} to update.\n`;
+}
+
+function formatContextualUpdateNotification(latestVersion: string): string {
+  return (
+    `\n${muted("A new version of sentry-cli is available")} (${cyan(latestVersion)})${muted(".")} ` +
+    `${muted("Upgrading may resolve this — we fix a lot of bugs in every release.")} ` +
+    `${muted("Run")} ${cyan('"sentry cli upgrade"')} ${muted("to update.")}\n`
+  );
 }
 
 /**
@@ -341,73 +358,35 @@ export function getUpdateNotification(): string | null {
   if (isUpdateCheckDisabled()) {
     return null;
   }
-  return getUpdateNotificationImpl();
+  return getUpdateNotificationWithCopy(formatStandardUpdateNotification);
 }
 
 /**
- * Get a contextual upgrade nudge for the error path.
+ * Get an update notification for the error path.
  *
- * Shown when a command fails with an unexpected error and a newer CLI version
- * exists. The copy suggests upgrading may resolve the issue, which is more
- * actionable than the standard "update available" banner.
+ * User errors get the standard neutral banner. Non-user errors get a
+ * contextual nudge suggesting an upgrade may resolve the failure.
  *
  * Shares the same gates as {@link getUpdateNotification} (TTY, rate-limit,
  * once-per-process) so the two never double-emit.
  *
- * Returns null when no nudge should be shown (disabled, up-to-date, non-TTY,
- * rate-limited, or on error).
+ * Returns null when no notification should be shown (suppressed command,
+ * disabled, up-to-date, non-TTY, rate-limited, or on error).
  */
-export function getErrorUpdateNotification(): string | null {
+export function getErrorUpdateNotification(
+  error: unknown,
+  args: string[]
+): string | null {
+  if (shouldSuppressNotification(args)) {
+    return null;
+  }
+
+  if (isUserError(error)) {
+    return getUpdateNotification();
+  }
+
   if (isUpdateCheckDisabled()) {
     return null;
   }
-  return getErrorUpdateNotificationImpl();
-}
-
-/**
- * Build the contextual upgrade nudge shown after unexpected command failures.
- *
- * Same gating logic as {@link getUpdateNotificationImpl} (TTY, once-per-process,
- * daily rate limit) but with copy that frames the upgrade as a potential fix.
- */
-function getErrorUpdateNotificationImpl(): string | null {
-  if (!isStderrTTY()) {
-    return null;
-  }
-
-  if (notifiedThisProcess) {
-    return null;
-  }
-
-  try {
-    const { latestVersion, lastNotified } = getVersionCheckInfo();
-
-    if (!latestVersion) {
-      return null;
-    }
-
-    if (Bun.semver.order(latestVersion, CLI_VERSION) !== 1) {
-      return null;
-    }
-
-    if (!canNotifyAgain(lastNotified)) {
-      return null;
-    }
-
-    try {
-      markUpdateNotified();
-    } catch (error) {
-      Sentry.captureException(error);
-    }
-    notifiedThisProcess = true;
-
-    return (
-      `\n${muted("A new version of sentry-cli is available")} (${cyan(latestVersion)})${muted(".")} ` +
-      `${muted("Upgrading may resolve this — we fix a lot of bugs in every release.")} ` +
-      `${muted("Run")} ${cyan('"sentry cli upgrade"')} ${muted("to update.")}\n`
-    );
-  } catch (error) {
-    Sentry.captureException(error);
-    return null;
-  }
+  return getUpdateNotificationWithCopy(formatContextualUpdateNotification);
 }

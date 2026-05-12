@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  AbortError,
   ApiError,
   AuthError,
   CliError,
@@ -10,6 +11,7 @@ import {
   formatError,
   getExitCode,
   HostScopeError,
+  isUserError,
   OutputError,
   ResolutionError,
   SeerError,
@@ -475,6 +477,39 @@ describe("getExitCode", () => {
   test("returns 1 for non-errors", () => {
     expect(getExitCode("string")).toBe(1);
     expect(getExitCode(null)).toBe(1);
+  });
+});
+
+describe("isUserError", () => {
+  test.each([
+    ["generic CliError", new CliError("message"), true],
+    ["HostScopeError", new HostScopeError("blocked"), true],
+    ["AuthError", new AuthError("invalid"), true],
+    ["ConfigError", new ConfigError("bad config"), true],
+    ["OutputError", new OutputError({ error: "not found" }), true],
+    ["ContextError", new ContextError("Organization", "sentry org list"), true],
+    [
+      "ResolutionError",
+      new ResolutionError("Project 'x'", "not found", "sentry project list"),
+      true,
+    ],
+    ["ValidationError", new ValidationError("bad input"), true],
+    ["DeviceFlowError", new DeviceFlowError("slow_down"), true],
+    ["SeerError", new SeerError("not_enabled"), true],
+    ["WizardError", new WizardError("wizard failed"), true],
+    ["ApiError 400", new ApiError("bad request", 400), false],
+    ["ApiError 401", new ApiError("unauthorized", 401), true],
+    ["ApiError 418", new ApiError("teapot", 418), true],
+    ["ApiError 499", new ApiError("client closed", 499), true],
+    ["ApiError 500", new ApiError("server error", 500), false],
+    ["TimeoutError", new TimeoutError("timed out"), false],
+    ["UpgradeError", new UpgradeError("network_error"), false],
+    ["AbortError", new AbortError(), false],
+    ["standard Error", new Error("boom"), false],
+    ["string throw", "boom", false],
+    ["null", null, false],
+  ])("classifies %s", (_label, errorValue, expected) => {
+    expect(isUserError(errorValue)).toBe(expected);
   });
 });
 
