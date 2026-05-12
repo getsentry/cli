@@ -457,9 +457,13 @@ async function tryRecoverCurrentRunState(
   runId: string
 ): Promise<WorkflowRunResult | null> {
   try {
-    const state = await workflow.runById(runId, {
-      fields: ["steps", "activeStepsPath"],
-    });
+    const state = await withTimeout(
+      workflow.runById(runId, {
+        fields: ["steps", "activeStepsPath", "result"],
+      }),
+      API_TIMEOUT_MS,
+      "Run state recovery"
+    );
     return assertWorkflowResult(state);
   } catch {
     return null;
@@ -598,10 +602,6 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     baseUrl: MASTRA_API_URL,
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     abortSignal: abortController.signal,
-    // Disable Mastra's built-in retries — resumeWithRetry is the sole retry
-    // layer. Without this, each CLI retry attempt triggers 4 Mastra-internal
-    // attempts, producing up to 12 Sentry events per single wizard failure.
-    retries: 0,
     fetch: ((url, init) => {
       const traceData = getTraceData();
       // Preserve `init.signal` via the spread — MastraClient may pass its
