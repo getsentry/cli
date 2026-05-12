@@ -164,8 +164,10 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     AuthError,
     ContextError,
     ConfigError,
+    HostScopeError,
     OutputError,
     ResolutionError,
+    SeerError,
     ValidationError,
     formatError,
     getExitCode,
@@ -189,8 +191,9 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   /**
    * Write an update notification to stderr after a command failure.
    *
-   * User-input errors (missing context, bad config, validation) get the
-   * standard "update available" banner — upgrading won't fix those.
+   * User-input errors (missing context, bad config, validation, auth,
+   * host scope, Seer billing) get the standard "update available" banner
+   * — upgrading won't fix those.
    * Unexpected errors (bugs, API failures) get a contextual nudge
    * suggesting the upgrade may resolve the issue.
    */
@@ -205,7 +208,10 @@ export async function runCli(cliArgs: string[]): Promise<void> {
       err instanceof ContextError ||
       err instanceof ConfigError ||
       err instanceof ValidationError ||
-      err instanceof ResolutionError;
+      err instanceof ResolutionError ||
+      err instanceof AuthError ||
+      err instanceof HostScopeError ||
+      err instanceof SeerError;
     const notification = isUserError
       ? getUpdateNotification()
       : getErrorUpdateNotification();
