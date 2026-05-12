@@ -417,8 +417,9 @@ export function extractExaminedFiles(causes: RootCause[]): string[] {
   for (const cause of causes) {
     if (cause.root_cause_reproduction) {
       for (const step of cause.root_cause_reproduction) {
-        if (step.relevant_code_file?.file_path) {
-          files.add(step.relevant_code_file.file_path);
+        const path = step.relevant_code_file?.file_path;
+        if (path && path !== "N/A") {
+          files.add(path);
         }
       }
     }

@@ -325,4 +325,41 @@ describe("extractExaminedFiles", () => {
 
     expect(extractExaminedFiles(causes)).toEqual(["src/app.ts"]);
   });
+
+  test("filters out N/A sentinel values from file paths", () => {
+    const causes: RootCause[] = [
+      {
+        id: 0,
+        description: "Infrastructure issue",
+        root_cause_reproduction: [
+          {
+            title: "Code step",
+            code_snippet_and_analysis: "...",
+            relevant_code_file: {
+              file_path: "app/layout.tsx",
+              repo_name: "getsentry/sentry-docs",
+            },
+          },
+          {
+            title: "External system step",
+            code_snippet_and_analysis: "...",
+            relevant_code_file: {
+              file_path: "N/A",
+              repo_name: "N/A",
+            },
+          },
+          {
+            title: "Another external step",
+            code_snippet_and_analysis: "...",
+            relevant_code_file: {
+              file_path: "N/A",
+              repo_name: "N/A",
+            },
+          },
+        ],
+      },
+    ];
+
+    expect(extractExaminedFiles(causes)).toEqual(["app/layout.tsx"]);
+  });
 });
