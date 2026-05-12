@@ -40,11 +40,21 @@ import { z } from "zod";
  * Based on the `@sentry/api` list-organizations response type.
  * Core identifiers are required; other SDK fields are available but optional,
  * allowing test mocks and list-endpoint responses to omit them.
+ *
+ * `allowMemberProjectCreation` and `orgRole` are present in detail responses
+ * (GET /api/0/organizations/{slug}/) but absent from list responses, hence
+ * optional. `allowMemberProjectCreation` being false means
+ * Organization.flags.disable_member_project_creation is set — project creation
+ * requires org:write scope or team:admin on the target team.
  */
 export type SentryOrganization = Partial<SdkOrganizationList[number]> & {
   id: string;
   slug: string;
   name: string;
+  /** False when org admins have restricted project creation to owners/managers/team-admins. Default for new orgs. */
+  allowMemberProjectCreation?: boolean;
+  /** The authenticated user's role in this org ("member", "admin", "manager", "owner"). */
+  orgRole?: string;
 };
 
 // Project

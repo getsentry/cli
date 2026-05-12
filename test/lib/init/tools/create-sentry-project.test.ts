@@ -39,6 +39,7 @@ let createProjectWithDsnSpy: ReturnType<typeof spyOn>;
 let getProjectSpy: ReturnType<typeof spyOn>;
 let tryGetPrimaryDsnSpy: ReturnType<typeof spyOn>;
 let resolveOrCreateTeamSpy: ReturnType<typeof spyOn>;
+let listTeamsSpy: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
   createProjectWithDsnSpy = spyOn(
@@ -72,6 +73,7 @@ beforeEach(() => {
     slug: "generated-team",
     source: "auto-created",
   } as any);
+  listTeamsSpy = spyOn(apiClient, "listTeams").mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -79,6 +81,7 @@ afterEach(() => {
   getProjectSpy.mockRestore();
   tryGetPrimaryDsnSpy.mockRestore();
   resolveOrCreateTeamSpy.mockRestore();
+  listTeamsSpy.mockRestore();
 });
 
 describe("createSentryProject", () => {
@@ -220,6 +223,109 @@ describe("createSentryProject", () => {
         platform: "javascript-react",
       })
     );
+  });
+
+  test("retries project creation with a team:admin team when org disables member creation", async () => {
+    getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
+    createProjectWithDsnSpy
+      .mockRejectedValueOnce(
+        new ApiError(
+          "Failed to create project: 403 Forbidden",
+          403,
+          "Your organization has disabled this feature for members.",
+          undefined,
+          true
+        )
+      )
+      .mockResolvedValueOnce({
+        project: {
+          id: "99",
+          slug: "my-app",
+          name: "my-app",
+          platform: "javascript-react",
+          dateCreated: "2026-01-01T00:00:00Z",
+        } as any,
+        dsn: "https://xyz@o1.ingest.sentry.io/99",
+        url: "https://sentry.io/settings/acme/projects/my-app/",
+      });
+    listTeamsSpy.mockResolvedValue([
+      {
+        slug: "contributor-team",
+        isMember: true,
+        teamRole: "contributor",
+      } as any,
+      { slug: "admin-team", isMember: true, teamRole: "admin" } as any,
+    ]);
+
+    const result = await createSentryProject(makePayload(), {
+      dryRun: false,
+      org: "acme",
+      team: undefined,
+      project: undefined,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(createProjectWithDsnSpy).toHaveBeenCalledTimes(2);
+    expect(createProjectWithDsnSpy).toHaveBeenLastCalledWith(
+      "acme",
+      "admin-team",
+      expect.anything()
+    );
+  });
+
+  test("returns actionable error when org disables member creation and no admin team exists", async () => {
+    getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
+    createProjectWithDsnSpy.mockRejectedValueOnce(
+      new ApiError(
+        "Failed to create project: 403 Forbidden",
+        403,
+        "Your organization has disabled this feature for members.",
+        undefined,
+        true
+      )
+    );
+    listTeamsSpy.mockResolvedValue([
+      {
+        slug: "contributor-team",
+        isMember: true,
+        teamRole: "contributor",
+      } as any,
+    ]);
+
+    const result = await createSentryProject(makePayload(), {
+      dryRun: false,
+      org: "acme",
+      team: undefined,
+      project: undefined,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("disabled for members");
+    expect(result.error).toContain("org:admin");
+    expect(result.error).not.toContain("Re-authenticate");
+  });
+
+  test("does not retry when --team was specified explicitly", async () => {
+    getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
+    createProjectWithDsnSpy.mockRejectedValueOnce(
+      new ApiError(
+        "Failed to create project: 403 Forbidden",
+        403,
+        "Your organization has disabled this feature for members.",
+        undefined,
+        true
+      )
+    );
+
+    const result = await createSentryProject(makePayload(), {
+      dryRun: false,
+      org: "acme",
+      team: "explicit-team",
+      project: undefined,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(listTeamsSpy).not.toHaveBeenCalled();
   });
 
   test("uses the final project slug for deferred team resolution in dry-run mode", async () => {
