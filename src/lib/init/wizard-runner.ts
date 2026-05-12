@@ -15,6 +15,7 @@ import { randomBytes } from "node:crypto";
 
 import { MastraClient } from "@mastra/client-js";
 import {
+  addBreadcrumb,
   captureException,
   getTraceData,
   setTag,
@@ -509,10 +510,24 @@ async function resumeWithRetry(
         spin.message("Reconnecting...");
         const recovered = await tryRecoverCurrentRunState(workflow, run.runId);
         if (recovered) {
+          addBreadcrumb({
+            category: "wizard",
+            message: `stale-step recovery succeeded for ${stepId}`,
+            level: "info",
+            data: { stepId, runId: run.runId },
+          });
           return recovered;
         }
         // Recovery failed — the step is confirmed not suspended and retrying
         // it will always 500. Throw immediately instead of wasting 14s.
+        captureException(err, {
+          level: "warning",
+          tags: {
+            "wizard.stale_step_recovery": "failed",
+            "wizard.resume_step": stepId,
+          },
+          extra: { runId: run.runId },
+        });
         throw err;
       }
       if (attempt === MAX_RESUME_RETRIES) {
