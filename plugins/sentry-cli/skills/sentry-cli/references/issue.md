@@ -143,7 +143,6 @@ sentry issue plan 123456789 --cause 0
 Generate a solution plan using Seer AI
 
 **Flags:**
-- `--cause <value> - Root cause ID to plan (required if multiple causes exist)`
 - `--force - Force new plan even if one exists`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
