@@ -197,6 +197,15 @@ export default defineConfig({
             href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap",
           },
         },
+        // Plausible analytics — defer keeps it off the critical path
+        {
+          tag: "script",
+          attrs: {
+            defer: true,
+            "data-domain": "cli.sentry.dev",
+            src: "https://plausible.io/js/script.js",
+          },
+        },
         // Open Graph images for social sharing
         {
           tag: "meta",
