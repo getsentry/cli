@@ -459,13 +459,26 @@ async function tryRecoverCurrentRunState(
   runId: string
 ): Promise<WorkflowRunResult | null> {
   try {
-    const state = await withTimeout(
+    const raw = await withTimeout(
       workflow.runById(runId, {
         fields: ["steps", "activeStepsPath", "result"],
       }),
       API_TIMEOUT_MS,
       "Run state recovery"
     );
+    // runById returns activeStepsPath (Record<stepId, executionPath>) but
+    // not suspended (string[][]). The main loop reads result.suspended to
+    // find the active step; without it, stepId falls back to "unknown" and
+    // extractSuspendPayload iterates all steps — picking the first with any
+    // suspendPayload, which could be a completed step with stale D1 data.
+    // Derive suspended from the activeStepsPath keys so the lookup is
+    // deterministic: those keys are exactly the currently-active step IDs.
+    const state = raw as Record<string, unknown>;
+    if (!state.suspended && state.activeStepsPath) {
+      state.suspended = Object.keys(
+        state.activeStepsPath as Record<string, unknown>
+      ).map((id) => [id]);
+    }
     return assertWorkflowResult(state);
   } catch {
     return null;

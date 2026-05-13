@@ -1016,7 +1016,6 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     expect(resumeCount).toBe(1);
     expect(runByIdMock).toHaveBeenCalledTimes(1);
   });
-
 });
 
 describe("runWizard — additional coverage", () => {
