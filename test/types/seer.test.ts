@@ -194,6 +194,66 @@ describe("extractRootCauses", () => {
     expect(causes).toHaveLength(1);
     expect(causes[0]?.description).toBe("From blocks");
   });
+
+  test("extracts root cause from agent artifact format", () => {
+    const state = {
+      run_id: 100,
+      status: "COMPLETED",
+      blocks: [
+        {
+          id: "block-1",
+          message: { role: "assistant", content: "Analyzing..." },
+          timestamp: "2025-01-01T00:00:00Z",
+          artifacts: [
+            {
+              key: "root_cause",
+              data: {
+                one_line_description: "Null pointer in request handler",
+                five_whys: ["Missing null check", "No input validation"],
+                reproduction_steps: ["Send request without auth"],
+                relevant_repo: "org/backend",
+              },
+              reason: "",
+            },
+          ],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    const causes = extractRootCauses(state);
+    expect(causes).toHaveLength(1);
+    expect(causes[0]?.description).toBe("Null pointer in request handler");
+    expect(causes[0]?.relevant_repos).toEqual(["org/backend"]);
+  });
+
+  test("extracts root cause from agent artifact without relevant_repo", () => {
+    const state = {
+      run_id: 101,
+      status: "COMPLETED",
+      blocks: [
+        {
+          id: "block-1",
+          message: { role: "assistant", content: "Done" },
+          timestamp: "2025-01-01T00:00:00Z",
+          artifacts: [
+            {
+              key: "root_cause",
+              data: {
+                one_line_description: "Configuration error",
+                five_whys: ["Wrong default value"],
+              },
+              reason: "",
+            },
+          ],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    const causes = extractRootCauses(state);
+    expect(causes).toHaveLength(1);
+    expect(causes[0]?.description).toBe("Configuration error");
+    expect(causes[0]?.relevant_repos).toBeUndefined();
+  });
 });
 
 describe("extractNoSolutionReason", () => {
@@ -539,6 +599,47 @@ describe("extractSolution", () => {
     const result = extractSolution(state);
     expect(result).not.toBeNull();
     expect(result!.data.steps[0]?.description).toBe("");
+  });
+
+  test("extracts solution from agent artifact format in blocks", () => {
+    const state = {
+      run_id: 10,
+      status: "COMPLETED",
+      blocks: [
+        {
+          id: "block-1",
+          message: { role: "assistant", content: "Here is the solution" },
+          timestamp: "2025-01-01T00:00:00Z",
+          artifacts: [
+            {
+              key: "solution",
+              data: {
+                one_line_summary: "Add null check before property access",
+                steps: [
+                  {
+                    title: "Add guard clause",
+                    description: "Check if user is defined before accessing id",
+                  },
+                  {
+                    title: "Add error response",
+                    description: "Return 401 for unauthenticated requests",
+                  },
+                ],
+              },
+              reason: "",
+            },
+          ],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    const result = extractSolution(state);
+    expect(result).not.toBeNull();
+    expect(result!.data.one_line_summary).toBe(
+      "Add null check before property access"
+    );
+    expect(result!.data.steps).toHaveLength(2);
+    expect(result!.data.steps[0]?.title).toBe("Add guard clause");
   });
 });
 

@@ -242,11 +242,12 @@ export function isTerminalStatus(status: string): boolean {
   return TERMINAL_STATUSES.includes(status as AutofixStatus);
 }
 
-/** Container that may hold root cause analysis data */
+/** Container that may hold root cause analysis data (legacy format) */
 type WithCauses = { key: string; causes?: RootCause[] };
 
 /**
- * Search an array of containers (blocks or steps) for root causes.
+ * Search an array of containers (blocks or steps) for root causes
+ * in the legacy format where causes are stored directly on the container.
  */
 function searchContainersForRootCauses(
   containers: WithCauses[]
@@ -259,23 +260,72 @@ function searchContainersForRootCauses(
   return null;
 }
 
+/** Agent root cause artifact data from the explorer endpoint */
+type AgentRootCauseData = {
+  one_line_description: string;
+  five_whys?: string[];
+  reproduction_steps?: string[];
+  relevant_repo?: string | null;
+};
+
+/**
+ * Search blocks for root cause artifacts in the agent format.
+ *
+ * The agent endpoint stores root causes as artifacts with `key: "root_cause"`
+ * and data `{ one_line_description, five_whys, reproduction_steps, relevant_repo }`.
+ * Maps to the existing {@link RootCause} shape for downstream compatibility.
+ */
+function searchBlocksForAgentRootCause(
+  blocks: WithArtifacts[]
+): RootCause[] | null {
+  for (const block of blocks) {
+    if (!block.artifacts) {
+      continue;
+    }
+    for (const artifact of block.artifacts) {
+      if (artifact.key === "root_cause" && artifact.data) {
+        const agentData = artifact.data as AgentRootCauseData;
+        const cause: RootCause = {
+          id: 0,
+          description: agentData.one_line_description,
+          relevant_repos: agentData.relevant_repo
+            ? [agentData.relevant_repo]
+            : undefined,
+        };
+        return [cause];
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Extract root causes from autofix state.
- * Searches through both blocks and steps for root cause analysis data.
  *
- * @param state - The autofix state containing analysis steps
+ * Searches through blocks and steps for root cause data in multiple formats:
+ * 1. Legacy step/block format: containers with `key: "root_cause_analysis"` and `causes[]`
+ * 2. Agent artifact format: blocks with artifacts `key: "root_cause"` containing
+ *    `{ one_line_description, five_whys, reproduction_steps, relevant_repo }`
+ *
+ * @param state - The autofix state containing analysis data
  * @returns Array of root causes, or empty array if none found
  */
 export function extractRootCauses(state: AutofixState): RootCause[] {
   const stateWithExtras = state as AutofixState & {
-    blocks?: WithCauses[];
+    blocks?: (WithCauses & WithArtifacts)[];
     steps?: WithCauses[];
   };
 
   if (stateWithExtras.blocks) {
+    // Try legacy format first (containers with causes[])
     const causes = searchContainersForRootCauses(stateWithExtras.blocks);
     if (causes) {
       return causes;
+    }
+    // Try agent artifact format (artifacts with key: "root_cause")
+    const agentCauses = searchBlocksForAgentRootCause(stateWithExtras.blocks);
+    if (agentCauses) {
+      return agentCauses;
     }
   }
 
