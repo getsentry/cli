@@ -1,7 +1,7 @@
 import type { SentryTeam } from "../../types/index.js";
 import { listOrganizations } from "../api-client.js";
 import { getAuthToken } from "../db/auth.js";
-import { WizardError } from "../errors.js";
+import { ApiError, WizardError } from "../errors.js";
 import { resolveOrCreateTeam } from "../resolve-team.js";
 import { slugify } from "../utils.js";
 import { WizardCancelledError } from "./clack-utils.js";
@@ -352,7 +352,23 @@ async function resolveOrgSlug(
     return resolved.org;
   }
 
-  const orgs = await listOrganizations();
+  let orgs: Awaited<ReturnType<typeof listOrganizations>>;
+  try {
+    orgs = await listOrganizations();
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 403) {
+      const lines: string[] = ["Could not list organizations (403 Forbidden)."];
+      if (error.detail) {
+        lines.push(error.detail, "");
+      }
+      lines.push(
+        "Specify the org on the command line:  sentry init <org-slug>/",
+        "Or set an environment variable:       SENTRY_ORG=<org-slug> sentry init"
+      );
+      return { ok: false, error: lines.join("\n  ") };
+    }
+    throw error;
+  }
   if (orgs.length === 0) {
     return {
       ok: false,
