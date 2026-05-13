@@ -12,7 +12,7 @@ import { MastraClient } from "@mastra/client-js";
 import * as banner from "../../../src/lib/banner.js";
 import { ENV_VAR_AGENTS } from "../../../src/lib/detect-agent.js";
 import { setEnv } from "../../../src/lib/env.js";
-import { WizardError } from "../../../src/lib/errors.js";
+import { EXIT, WizardError } from "../../../src/lib/errors.js";
 import { WizardCancelledError } from "../../../src/lib/init/clack-utils.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as fmt from "../../../src/lib/init/formatters.js";
@@ -92,6 +92,8 @@ let mockStartResult: WorkflowRunResult;
 let mockResumeResults: WorkflowRunResult[];
 let resumeCallCount = 0;
 let startAsyncMock: ReturnType<typeof mock>;
+let mockRunByIdResult: WorkflowRunResult | Error;
+let runByIdMock: ReturnType<typeof mock>;
 
 let getUISpy: ReturnType<typeof spyOn>;
 let formatBannerSpy: ReturnType<typeof spyOn>;
@@ -151,6 +153,7 @@ beforeEach(() => {
   mockStartResult = { status: "success", result: { platform: "React" } };
   mockResumeResults = [];
   resumeCallCount = 0;
+  mockRunByIdResult = new Error("runById not configured");
   process.exitCode = 0;
 
   spinnerMock.start.mockClear();
@@ -212,7 +215,13 @@ beforeEach(() => {
   );
 
   startAsyncMock = mock(() => Promise.resolve(mockStartResult));
+  runByIdMock = mock(() =>
+    mockRunByIdResult instanceof Error
+      ? Promise.reject(mockRunByIdResult)
+      : Promise.resolve(mockRunByIdResult)
+  );
   const run = {
+    runId: "test-run-id",
     startAsync: startAsyncMock,
     resumeAsync: mock(() => {
       const result = mockResumeResults[resumeCallCount] ?? {
@@ -224,6 +233,7 @@ beforeEach(() => {
   };
   const workflow = {
     createRun: mock(() => Promise.resolve(run)),
+    runById: runByIdMock,
   };
   capturedClientOptions = [];
   getWorkflowSpy = spyOn(
@@ -888,5 +898,271 @@ describe("runWizard — MastraClient lifecycle", () => {
     expect(abortedAtConstruction).toBe(false);
     // And teardown aborted it by the time the wizard returned.
     expect(capturedClientOptions[0]?.abortSignal?.aborted).toBe(true);
+  });
+});
+
+// ─── Additional coverage tests ───────────────────────────────────────────────
+
+describe("runWizard — workflow exit codes", () => {
+  // handleFinalResult calls mapWorkflowExitCode when the workflow result
+  // carries a non-zero exitCode. Each case maps a server-internal code to
+  // the CLI's semantic EXIT constant.
+  test.each([
+    [20, EXIT.CONFIG],
+    [30, EXIT.WIZARD_DEPS],
+    [40, EXIT.WIZARD_CODEMOD],
+    [41, EXIT.WIZARD_CODEMOD],
+    [50, EXIT.WIZARD_VERIFY],
+    // 999 is an unknown code; also exercises the default branch of mapWorkflowExitCode
+    [999, EXIT.WIZARD],
+  ])("maps workflow exit code %s to the expected EXIT constant", async (workflowCode, expectedExitCode) => {
+    mockStartResult = {
+      status: "success",
+      result: { exitCode: workflowCode },
+    };
+
+    const err = await runWizard(makeOptions()).catch((e) => e);
+
+    expect(err).toBeInstanceOf(WizardError);
+    expect((err as WizardError).exitCode).toBe(expectedExitCode);
+  });
+});
+
+describe("runWizard — resumeWithRetry stale-step recovery", () => {
+  const toolPayload: ToolPayload = {
+    type: "tool",
+    operation: "run-commands",
+    cwd: "/tmp/test",
+    params: { commands: ["npm install"] },
+  };
+
+  function makeStaleStepRun(resumeAsyncImpl: () => Promise<WorkflowRunResult>) {
+    let runByIdRef: ReturnType<typeof mock>;
+    getWorkflowSpy.mockImplementation(function (this: MastraClient) {
+      capturedClientOptions.push(
+        (this as unknown as { options: { abortSignal?: AbortSignal } }).options
+      );
+      runByIdRef = runByIdMock;
+      return {
+        createRun: mock(() =>
+          Promise.resolve({
+            runId: "test-run-id",
+            startAsync: startAsyncMock,
+            resumeAsync: mock(resumeAsyncImpl),
+          })
+        ),
+        runById: runByIdRef,
+      } as any;
+    });
+  }
+
+  function staleStepError(): Error {
+    return new Error(
+      "HTTP error! status: 500 - " +
+        JSON.stringify({
+          error:
+            "This workflow step 'tool-step' was not suspended. Available suspended steps: [next-step]",
+        })
+    );
+  }
+
+  test("recovers when server has already advanced to the next step", async () => {
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["tool-step"]],
+      steps: { "tool-step": { suspendPayload: toolPayload } },
+    };
+    // runById returns a finished workflow — the wizard should complete cleanly.
+    mockRunByIdResult = { status: "success" };
+
+    let resumeCount = 0;
+    makeStaleStepRun(() => {
+      resumeCount += 1;
+      if (resumeCount === 1) {
+        return Promise.reject(staleStepError());
+      }
+      return Promise.resolve({ status: "success" });
+    });
+
+    await runWizard(makeOptions());
+
+    expect(formatResultSpy).toHaveBeenCalled();
+    expect(runByIdMock).toHaveBeenCalledWith(
+      "test-run-id",
+      expect.objectContaining({ fields: expect.any(Array) })
+    );
+    // Recovery succeeded on the first attempt — resumeAsync was not called again.
+    expect(resumeCount).toBe(1);
+  });
+
+  test("throws immediately when stale-step error occurs and runById fails", async () => {
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["tool-step"]],
+      steps: { "tool-step": { suspendPayload: toolPayload } },
+    };
+    // runById is unreachable — recovery fails, wizard throws without retrying.
+    mockRunByIdResult = new Error("runById network error");
+
+    let resumeCount = 0;
+    makeStaleStepRun(() => {
+      resumeCount += 1;
+      return Promise.reject(staleStepError());
+    });
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+
+    // Threw immediately after recovery failed — no futile retries of the stale step.
+    expect(resumeCount).toBe(1);
+    expect(runByIdMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("runWizard — additional coverage", () => {
+  test("throws WizardError and stops spinner when workflow start fails", async () => {
+    startAsyncMock.mockRejectedValue(new Error("connection refused"));
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+
+    expect(spinnerMock.stop).toHaveBeenCalledWith("Connection failed", 1);
+    expect(lastCancelMessage()).toBe("Setup failed");
+  });
+
+  test("throws when the workflow response has an unrecognised status", async () => {
+    startAsyncMock.mockResolvedValue({ status: "bailed" });
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(
+      /Unexpected workflow status/
+    );
+  });
+
+  test("throws when a suspend payload is a non-object truthy value", async () => {
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["detect-platform"]],
+      steps: {
+        "detect-platform": {
+          // 42 is truthy, so extractSuspendPayload passes it to
+          // assertSuspendPayload, which rejects non-objects.
+          suspendPayload: 42,
+        },
+      },
+    };
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+  });
+
+  test("finds suspend payload via fallback loop when primary step has none", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["echo hi"] },
+    };
+    // `suspended` points to "step-a", but its payload is missing.
+    // extractSuspendPayload falls back to iterating all steps and finds
+    // the payload in "step-b".
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["step-a"]],
+      steps: {
+        "step-a": {},
+        "step-b": { suspendPayload: payload },
+      },
+    };
+    mockResumeResults = [{ status: "success" }];
+
+    await runWizard(makeOptions());
+
+    expect(executeToolSpy).toHaveBeenCalledWith(payload, makeContext());
+  });
+
+  test("marks the previous step completed when the workflow advances", async () => {
+    const payloadA: ToolPayload = {
+      type: "tool",
+      operation: "list-dir",
+      cwd: "/tmp/test",
+      params: { path: "." },
+    };
+    const payloadB: ToolPayload = {
+      type: "tool",
+      operation: "read-files",
+      cwd: "/tmp/test",
+      params: { paths: ["package.json"] },
+    };
+
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["discover-context"]],
+      steps: { "discover-context": { suspendPayload: payloadA } },
+    };
+    mockResumeResults = [
+      {
+        status: "suspended",
+        suspended: [["detect-platform"]],
+        steps: { "detect-platform": { suspendPayload: payloadB } },
+      },
+      { status: "success" },
+    ];
+
+    await runWizard(makeOptions());
+
+    const stepCalls = mockUICalls.filter((c) => c.kind === "setStep");
+    expect(stepCalls).toContainEqual({
+      kind: "setStep",
+      stepId: "discover-context",
+      status: "in_progress",
+    });
+    expect(stepCalls).toContainEqual({
+      kind: "setStep",
+      stepId: "discover-context",
+      status: "completed",
+    });
+    expect(stepCalls).toContainEqual({
+      kind: "setStep",
+      stepId: "detect-platform",
+      status: "in_progress",
+    });
+    const inProgressIdx = stepCalls.findIndex(
+      (c) =>
+        c.kind === "setStep" &&
+        c.stepId === "discover-context" &&
+        c.status === "in_progress"
+    );
+    const completedIdx = stepCalls.findIndex(
+      (c) =>
+        c.kind === "setStep" &&
+        c.stepId === "discover-context" &&
+        c.status === "completed"
+    );
+    expect(inProgressIdx).toBeLessThan(completedIdx);
+  });
+
+  test("uses existing platform name in detect-platform spinner label", async () => {
+    resolveInitContextSpy.mockResolvedValue(
+      makeContext({ existingProject: { platform: "javascript-nextjs" } })
+    );
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["detect-platform"]],
+      steps: {
+        "detect-platform": {
+          suspendPayload: {
+            type: "tool",
+            operation: "list-dir",
+            cwd: "/tmp/test",
+            params: { path: "." },
+          },
+        },
+      },
+    };
+    mockResumeResults = [{ status: "success" }];
+
+    await runWizard(makeOptions());
+
+    const messages = spinnerMock.message.mock.calls.map(
+      (c: unknown[]) => c[0] as string
+    );
+    expect(messages.some((m) => m.includes("javascript-nextjs"))).toBe(true);
   });
 });
