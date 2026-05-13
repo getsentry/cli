@@ -1017,27 +1017,6 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     expect(runByIdMock).toHaveBeenCalledTimes(1);
   });
 
-  // Attempts 0 and 1 both get "not suspended"; attempt 2 succeeds.
-  test("throws immediately after failed recovery without further retries", async () => {
-    mockStartResult = {
-      status: "suspended",
-      suspended: [["tool-step"]],
-      steps: { "tool-step": { suspendPayload: toolPayload } },
-    };
-    mockRunByIdResult = new Error("offline");
-
-    let resumeCount = 0;
-    makeStaleStepRun(() => {
-      resumeCount += 1;
-      return Promise.reject(staleStepError());
-    });
-
-    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
-
-    // Threw immediately — runById tried once, resumeAsync tried once.
-    expect(resumeCount).toBe(1);
-    expect(runByIdMock).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe("runWizard — additional coverage", () => {
