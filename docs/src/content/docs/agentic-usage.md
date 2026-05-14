@@ -13,13 +13,28 @@ To skip automatic skill installation, pass `--no-agent-skills` to `sentry cli se
 
 ## Manual Installation
 
-Add the Sentry CLI skill to your agent manually:
+### Claude Code Plugin Marketplace
+
+If you use Claude Code, you can install via the plugin marketplace:
+
+```bash
+claude plugin marketplace add getsentry/cli
+claude plugin install sentry/cli
+```
+
+### Skills Protocol
+
+Add the Sentry CLI skill to any agent that supports the skills protocol:
 
 ```bash
 npx skills add https://cli.sentry.dev
 ```
 
 This registers the Sentry CLI as a skill that your agent can invoke when needed.
+
+### Cursor
+
+Skills are automatically available in `.cursor/skills/` for Cursor users when the CLI is installed. No additional setup is needed.
 
 ## Capabilities
 

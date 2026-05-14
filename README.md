@@ -30,9 +30,12 @@ brew install getsentry/tools/sentry
 
 ### Package Managers
 
+Requires **Node.js 22.12+** for npm/pnpm/yarn installs.
+
 ```bash
 npm install -g sentry
 pnpm add -g sentry
+yarn global add sentry
 bun add -g sentry
 ```
 
