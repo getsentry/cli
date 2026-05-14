@@ -1,6 +1,56 @@
 
 
+
 ## Examples
+
+### Sending Events
+
+```bash
+# Send an error event (default level)
+sentry event send -m "Something went wrong"
+
+# Specify level, release, and environment
+sentry event send -m "Deploy check" -l info -r 1.0.0 -E production
+
+# Add tags and extra data
+sentry event send -m "Payment failed" --tag env:prod --tag region:us-east --extra amount:99.99
+
+# Set user context
+sentry event send -m "Login error" --user id:42 --user email:alice@example.com
+
+# Custom fingerprint to group related events together
+sentry event send -m "DB timeout" --fingerprint db-timeout --fingerprint {{ default }}
+```
+
+### Send from a JSON file
+
+```bash
+# Send a serialized Sentry Event object
+sentry event send ./crash.json
+
+# Send without re-parsing (raw mode — also supports pre-built envelopes)
+sentry event send --raw ./crash.json
+sentry event send --raw ./captured.envelope
+```
+
+### DSN authentication
+
+`sentry event send` authenticates via a **DSN** rather than a user token.
+No `sentry auth login` is required.
+
+The DSN is resolved in priority order:
+
+1. `--dsn <value>` flag (explicit)
+2. `SENTRY_DSN` environment variable
+
+```bash
+# Explicit DSN
+sentry event send -m "Test" --dsn "https://key@o123.ingest.us.sentry.io/456"
+
+# Via environment variable
+export SENTRY_DSN="https://key@o123.ingest.us.sentry.io/456"
+sentry event send -m "Test"
+```
 
 ### Listing Events
 
@@ -68,3 +118,11 @@ Event IDs can be found:
 1. In the Sentry UI when viewing an issue's events
 2. In the output of `sentry issue view` commands
 3. In error reports sent to Sentry (as `event_id`)
+
+## Backward compatibility
+
+The old sentry-cli top-level command is available as a hidden alias:
+
+```bash
+sentry send-event    # same as: sentry event send
+```
