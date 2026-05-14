@@ -68,6 +68,8 @@ sentry cli defaults org my-org           # Set default organization
 sentry cli defaults project my-project   # Set default project
 sentry cli defaults url https://...      # Set Sentry URL (self-hosted)
 sentry cli defaults telemetry off        # Disable telemetry
+sentry cli defaults headers "X-IAP: token"  # Set custom HTTP headers (self-hosted)
+sentry cli defaults ca-cert /path/to.pem # Set custom CA certificate (self-hosted)
 sentry cli defaults                      # Show all current defaults
 sentry cli defaults org --clear          # Clear a specific default
 ```

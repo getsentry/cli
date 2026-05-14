@@ -251,6 +251,13 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
     example: "10",
     defaultValue: "50",
   },
+  // -- Init wizard --
+  {
+    name: "SENTRY_INIT_TUI",
+    description:
+      "Control the TUI (terminal user interface) for `sentry init`. Set to `0` to disable the interactive TUI and use plain text logging output instead. Useful in CI/CD pipelines or environments without full terminal support.",
+    example: "0",
+  },
   // -- Database --
   {
     name: "SENTRY_CLI_NO_AUTO_REPAIR",

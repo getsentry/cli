@@ -114,13 +114,14 @@ cli/
 │   ├── commands/           # CLI commands
 │   │   ├── auth/           # login, logout, refresh, status, token, whoami
 │   │   ├── cli/            # defaults, feedback, fix, setup, upgrade
-│   │   ├── dashboard/      # list, view, create, widget (add, edit, delete)
+│   │   ├── dashboard/      # list, view, create, revisions, restore, widget (add, edit, delete)
 │   │   ├── event/          # list, view
-│   │   ├── issue/          # list, view, events, explain, plan, resolve, unresolve, merge
+│   │   ├── issue/          # list, view, events, explain, plan, resolve, unresolve, archive, merge
 │   │   ├── log/            # list, view
 │   │   ├── org/            # list, view
 │   │   ├── project/        # list, view, create, delete
 │   │   ├── release/        # list, view, create, finalize, delete, deploy, deploys, set-commits, propose-version
+│   │   ├── replay/         # list, view
 │   │   ├── repo/           # list
 │   │   ├── sourcemap/      # inject, upload
 │   │   ├── span/           # list, view
@@ -128,6 +129,7 @@ cli/
 │   │   ├── trace/          # list, view, logs
 │   │   ├── trial/          # list, start
 │   │   ├── api.ts          # Direct API access command
+│   │   ├── explore.ts      # Query aggregate event data (Explore)
 │   │   ├── help.ts         # Help command
 │   │   ├── init.ts         # Initialize Sentry in your project (experimental)
 │   │   └── schema.ts       # Browse the Sentry API schema
@@ -136,14 +138,22 @@ cli/
 │   │   ├── api-client.ts   # Barrel re-export for API modules
 │   │   ├── api/            # Domain API modules
 │   │   │   ├── infrastructure.ts # Shared helpers, types, raw requests
+│   │   │   ├── dashboards.ts
+│   │   │   ├── discover.ts
+│   │   │   ├── events.ts
+│   │   │   ├── issues.ts
+│   │   │   ├── logs.ts
 │   │   │   ├── organizations.ts
 │   │   │   ├── projects.ts
-│   │   │   ├── issues.ts
-│   │   │   ├── events.ts
-│   │   │   ├── traces.ts      # Trace + span listing
-│   │   │   ├── logs.ts
+│   │   │   ├── releases.ts
+│   │   │   ├── replays.ts
+│   │   │   ├── repositories.ts
 │   │   │   ├── seer.ts
-│   │   │   └── trials.ts
+│   │   │   ├── sourcemaps.ts
+│   │   │   ├── teams.ts
+│   │   │   ├── traces.ts      # Trace + span listing
+│   │   │   ├── trials.ts
+│   │   │   └── users.ts
 │   │   ├── region.ts       # Multi-region resolution
 │   │   ├── telemetry.ts    # Sentry SDK instrumentation
 │   │   ├── sentry-urls.ts  # URL builders for Sentry
