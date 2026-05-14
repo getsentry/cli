@@ -14,9 +14,12 @@
 
 import { ValidationError } from "../errors.js";
 import { CURSOR_KEYWORDS } from "../list-command.js";
+import { logger } from "../logger.js";
 import { getApiBaseUrl } from "../sentry-client.js";
 import { getDatabase } from "./index.js";
 import { runUpsert } from "./utils.js";
+
+const log = logger.withTag("pagination");
 
 /** Default TTL for stored cursors: 5 minutes */
 const CURSOR_TTL_MS = 5 * 60 * 1000;
@@ -84,7 +87,16 @@ export function getPaginationState(
     return;
   }
 
-  const stack = JSON.parse(row.cursor_stack) as string[];
+  let stack: string[];
+  try {
+    stack = JSON.parse(row.cursor_stack) as string[];
+  } catch {
+    log.debug("Corrupt cursor_stack in pagination DB, clearing state");
+    db.query(
+      "DELETE FROM pagination_cursors WHERE command_key = ? AND context = ?"
+    ).run(commandKey, contextKey);
+    return;
+  }
   return { stack, index: row.page_index };
 }
 
