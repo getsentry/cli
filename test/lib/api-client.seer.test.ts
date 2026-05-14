@@ -71,7 +71,6 @@ describe("triggerRootCauseAnalysis", () => {
 
     expect(capturedBody).toEqual({
       step: "root_cause",
-      stopping_point: "root_cause",
     });
   });
 
@@ -228,7 +227,6 @@ describe("triggerSolutionPlanning", () => {
     expect(capturedRequest?.url).toContain("mode=explorer");
     expect(capturedBody).toEqual({
       step: "solution",
-      stopping_point: "solution",
       run_id: 12_345,
     });
   });

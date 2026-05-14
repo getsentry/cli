@@ -60,7 +60,6 @@ export async function triggerRootCauseAnalysis(
       params: EXPLORER_MODE_PARAMS,
       body: {
         step: "root_cause",
-        stopping_point: "root_cause",
       },
     }
   );
@@ -125,7 +124,6 @@ export async function triggerSolutionPlanning(
       params: EXPLORER_MODE_PARAMS,
       body: {
         step: "solution",
-        stopping_point: "solution",
         run_id: runId,
       },
     }
