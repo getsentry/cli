@@ -60,18 +60,45 @@ export function formatProgressLine(message: string, tick: number): string {
   return `${spinner} ${message}`;
 }
 
+/** Agent block with optional message content */
+type BlockWithMessage = { message?: { content?: string | null } };
+
+/**
+ * Extract the first line of the latest block's message content.
+ * Returns undefined if no block message is available.
+ */
+function getBlockProgressMessage(
+  blocks: BlockWithMessage[]
+): string | undefined {
+  const lastBlock = blocks.at(-1);
+  if (!lastBlock?.message?.content) {
+    return;
+  }
+  return lastBlock.message.content.split("\n")[0] || undefined;
+}
+
 /**
  * Extract the latest progress message from autofix state.
  *
- * Only returns progress from the most recent (last) step to avoid showing
- * stale messages from earlier phases (e.g. RCA progress during solution polling).
+ * Handles both response formats:
+ * - Agent: message content from the last block's `message.content`
+ * - Legacy: progress messages from the last step's `progress[]` array
  *
  * @param state - Current autofix state
  * @returns Latest progress message or default
  */
 export function getProgressMessage(state: AutofixState): string {
+  const stateWithBlocks = state as AutofixState & {
+    blocks?: BlockWithMessage[];
+  };
+  if (stateWithBlocks.blocks && stateWithBlocks.blocks.length > 0) {
+    const msg = getBlockProgressMessage(stateWithBlocks.blocks);
+    if (msg) {
+      return msg;
+    }
+  }
+
   if (state.steps && state.steps.length > 0) {
-    // Only look at the last step — earlier steps belong to previous phases
     const currentStep = state.steps.at(-1);
     if (currentStep?.progress && currentStep.progress.length > 0) {
       const lastProgress = currentStep.progress.at(-1);
@@ -81,7 +108,6 @@ export function getProgressMessage(state: AutofixState): string {
     }
   }
 
-  // Fallback based on status
   switch (state.status) {
     case "PROCESSING":
       return "Analyzing issue...";
