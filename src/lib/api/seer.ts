@@ -60,6 +60,7 @@ export async function triggerRootCauseAnalysis(
       params: EXPLORER_MODE_PARAMS,
       body: {
         step: "root_cause",
+        referrer: "api.cli",
       },
     }
   );
@@ -125,6 +126,7 @@ export async function triggerSolutionPlanning(
       body: {
         step: "solution",
         run_id: runId,
+        referrer: "api.cli",
       },
     }
   );

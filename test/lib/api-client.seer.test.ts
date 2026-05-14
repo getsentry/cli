@@ -71,6 +71,7 @@ describe("triggerRootCauseAnalysis", () => {
 
     expect(capturedBody).toEqual({
       step: "root_cause",
+      referrer: "api.cli",
     });
   });
 
@@ -228,6 +229,7 @@ describe("triggerSolutionPlanning", () => {
     expect(capturedBody).toEqual({
       step: "solution",
       run_id: 12_345,
+      referrer: "api.cli",
     });
   });
 });
