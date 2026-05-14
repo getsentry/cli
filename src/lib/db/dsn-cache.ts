@@ -362,31 +362,32 @@ export async function getCachedDetection(
     return;
   }
 
-  // Parse source mtimes and validate
-  const sourceMtimes = JSON.parse(row.source_mtimes_json) as Record<
-    string,
-    number
-  >;
+  let sourceMtimes: Record<string, number>;
+  let dirMtimes: Record<string, number>;
+  let allDsns: DetectedDsn[];
+  try {
+    sourceMtimes = JSON.parse(row.source_mtimes_json) as Record<string, number>;
+    dirMtimes = row.dir_mtimes_json
+      ? (JSON.parse(row.dir_mtimes_json) as Record<string, number>)
+      : {};
+    allDsns = JSON.parse(row.all_dsns_json) as DetectedDsn[];
+  } catch {
+    recordCacheHit("dsn-detection", false);
+    return;
+  }
+
   if (!(await validateSourceMtimes(projectRoot, sourceMtimes))) {
     recordCacheHit("dsn-detection", false);
     return;
   }
 
-  // Parse directory mtimes and validate (if present)
-  const dirMtimes = row.dir_mtimes_json
-    ? (JSON.parse(row.dir_mtimes_json) as Record<string, number>)
-    : {};
   if (!(await validateDirMtimes(projectRoot, dirMtimes))) {
     recordCacheHit("dsn-detection", false);
     return;
   }
 
   recordCacheHit("dsn-detection", true);
-  // Cache is valid - update last access time
   touchCacheEntry("dsn_cache", "directory", projectRoot);
-
-  // Parse and return cached detection
-  const allDsns = JSON.parse(row.all_dsns_json) as DetectedDsn[];
 
   return {
     fingerprint: row.fingerprint,
