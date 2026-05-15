@@ -19,6 +19,7 @@ import {
   getConfiguredSentryUrl,
   SENTRY_CLI_DSN,
 } from "./constants.js";
+import { getCustomCaCerts } from "./custom-ca.js";
 import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
 import {
   type AgentInfo,
@@ -540,6 +541,10 @@ export function initSentry(
     // Automatic gzip fallback when running on Node < 22.15 without the
     // `Bun.zstdCompress` polyfill (see script/node-polyfills.ts).
     transport: makeCompressedTransport,
+    // Pass custom CA certificates to the transport for corporate TLS proxies.
+    // The zstd-transport reads `caCerts` and passes it as `ca:` to
+    // `http.request()`, and the SDK's fallback `makeNodeTransport` does the same.
+    transportOptions: { caCerts: getCustomCaCerts() },
     // Keep default integrations but filter out ones that add overhead without benefit.
     // Important: Don't use defaultIntegrations: false as it may break debug ID support.
     // NodeSystemError is excluded on runtimes missing util.getSystemErrorMap (Bun) — CLI-K1.

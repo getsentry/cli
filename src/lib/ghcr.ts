@@ -18,6 +18,7 @@
  */
 
 import { getUserAgent } from "./constants.js";
+import { customFetch } from "./custom-ca.js";
 import { UpgradeError } from "./errors.js";
 
 /** Default timeout for GHCR HTTP requests (10 seconds) */
@@ -105,7 +106,7 @@ async function fetchWithRetry(
 
   for (let attempt = 0; attempt <= GHCR_MAX_RETRIES; attempt++) {
     try {
-      const response = await fetch(url, {
+      const response = await customFetch(url, {
         ...init,
         signal: buildSignal(timeout, externalSignal),
       });
@@ -339,7 +340,7 @@ export async function downloadNightlyBlob(
   // ghcr.io returns 307 → Azure Blob Storage signed URL.
   let blobResponse: Response;
   try {
-    blobResponse = await fetch(blobUrl, {
+    blobResponse = await customFetch(blobUrl, {
       headers: {
         Authorization: `Bearer ${token}`,
         "User-Agent": getUserAgent(),
@@ -384,7 +385,7 @@ export async function downloadNightlyBlob(
     // Azure Blob Storage has reliable latency characteristics.
     let redirectResponse: Response;
     try {
-      redirectResponse = await fetch(redirectUrl, {
+      redirectResponse = await customFetch(redirectUrl, {
         headers: { "User-Agent": getUserAgent() },
         signal,
       });

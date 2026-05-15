@@ -281,6 +281,38 @@ export function buildTlsErrorDetail(error: Error): string {
 }
 
 /**
+ * Get the combined CA certificate PEM string for Node.js `http.request()`.
+ * Returns undefined when no custom CAs are configured.
+ *
+ * Unlike {@link getCustomTlsOptions} (which returns Bun's `{ tls: { ca } }` shape),
+ * this returns the raw PEM string suitable for Node's `https.RequestOptions.ca`
+ * and the Sentry SDK's `NodeTransportOptions.caCerts`.
+ */
+export function getCustomCaCerts(): string | undefined {
+  resolve();
+  return resolved?.tls.ca;
+}
+
+/**
+ * Drop-in replacement for `fetch()` that injects custom CA certificates
+ * when configured. All non-authenticated fetch call sites should use this
+ * instead of bare `fetch()`.
+ *
+ * Authenticated API calls go through `fetchWithTimeout()` in sentry-client.ts
+ * which already applies TLS options directly alongside the SaaS warning.
+ */
+export function customFetch(
+  input: string | URL | Request,
+  init?: RequestInit
+): Promise<Response> {
+  const tlsOpts = getCustomTlsOptions();
+  if (!tlsOpts) {
+    return fetch(input, init);
+  }
+  return fetch(input, { ...init, ...tlsOpts });
+}
+
+/**
  * Reset all cached state. Exported for test isolation only.
  * @internal
  */
