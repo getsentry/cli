@@ -1,7 +1,7 @@
 ---
 name: sentry-cli-local
 version: 0.34.0-dev.0
-description: Run a local Spotlight sidecar to capture dev SDK events
+description: Run a local Spotlight server to capture dev SDK events
 requires:
   bins: ["sentry"]
   auth: true
@@ -9,11 +9,11 @@ requires:
 
 # Local Commands
 
-Run a local Spotlight sidecar to capture dev SDK events
+Run a local Spotlight server to capture dev SDK events
 
 ### `sentry local`
 
-Run a local Spotlight sidecar to capture dev SDK events
+Run a local Spotlight server to capture dev SDK events
 
 **Flags:**
 - `-p, --port <value> - Port to listen on (default 8969) - (default: "8969")`
@@ -24,7 +24,7 @@ Run a local Spotlight sidecar to capture dev SDK events
 **Examples:**
 
 ```bash
-# Start the sidecar on the default port (8969)
+# Start the server on the default port (8969)
 sentry local
 
 # Use a custom port and bind to all interfaces
@@ -35,8 +35,6 @@ sentry local --quiet
 
 # Only show errors and logs (filter out transactions)
 sentry local -f error -f log
-
-SENTRY_DSN=http://public@localhost:8969/1
 
 sentry local -f error -f log    # only errors and logs
 ```

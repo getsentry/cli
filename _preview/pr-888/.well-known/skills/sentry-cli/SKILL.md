@@ -470,9 +470,9 @@ Initialize Sentry in your project (experimental)
 
 ### Local
 
-Run a local Spotlight sidecar to capture dev SDK events
+Run a local Spotlight server to capture dev SDK events
 
-- `sentry local` — Run a local Spotlight sidecar to capture dev SDK events
+- `sentry local` — Run a local Spotlight server to capture dev SDK events
 
 → Full flags and examples: `references/local.md`
 
