@@ -113,8 +113,7 @@ function buildApp(
   app.use(
     "*",
     cors({
-      origin: (origin) =>
-        LOCALHOST_ORIGIN_RE.test(origin) ? origin : null,
+      origin: (origin) => (LOCALHOST_ORIGIN_RE.test(origin) ? origin : null),
       allowMethods: ["GET", "POST", "OPTIONS"],
       allowHeaders: ["Content-Type", "Content-Encoding", "User-Agent"],
     })
