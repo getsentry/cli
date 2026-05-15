@@ -2,7 +2,7 @@
  * Tests for database schema repair functions.
  */
 
-import { Database } from "bun:sqlite";
+import { Database } from "../../../src/lib/db/sqlite.js";
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import {
