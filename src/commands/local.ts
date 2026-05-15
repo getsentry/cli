@@ -357,7 +357,8 @@ function formatErrorItem(
         }[];
       }
     | undefined;
-  const first = exception?.values?.[0];
+  // values is ordered oldest→newest; show the outermost (last) exception
+  const first = exception?.values?.at(-1);
   const errorType = stripAnsi(first?.type ?? "Error");
   const errorValue = stripAnsi(
     first?.value ?? (event.message as string | undefined) ?? "Unknown error"
